@@ -36,6 +36,102 @@ import type { IChatModel } from '../../common/model/chatModel.js';
 import { getChatSessionType } from '../../common/model/chatUri.js';
 import { BACKBOARD_WORKSPACE_SURFACE_ID } from './backboardWorkspaceConstants.js';
 
+type BackboardWorkspaceViewStateId = 'activeAgents' | 'mixedStatus' | 'completed' | 'chatClosed' | 'chatOpen' | 'chatRunning' | 'chatReview';
+type BackboardWorkspaceTone = 'live' | 'queued' | 'done' | 'warning' | 'failed';
+
+interface IBackboardWorkspacePlaceholderActivity {
+	readonly icon: string;
+	readonly text: string;
+	readonly tone: BackboardWorkspaceTone;
+}
+
+interface IBackboardWorkspacePlaceholderAgent {
+	readonly title: string;
+	readonly status: string;
+	readonly tone: BackboardWorkspaceTone;
+	readonly command: string;
+	readonly description: string;
+	readonly activities: readonly IBackboardWorkspacePlaceholderActivity[];
+	readonly files: readonly string[];
+	readonly model: string;
+}
+
+interface IBackboardWorkspaceViewState {
+	readonly id: BackboardWorkspaceViewStateId;
+	readonly count: string;
+	readonly agents: readonly IBackboardWorkspacePlaceholderAgent[];
+}
+
+const basePlaceholderAgents: readonly IBackboardWorkspacePlaceholderAgent[] = [
+	{
+		title: 'refactor-api',
+		status: 'LIVE',
+		tone: 'live',
+		command: '$ build',
+		description: 'Refactor the legacy API layer from callback-heavy request handlers into typed async/await flows',
+		activities: [
+			{ icon: 'codicon-loading codicon-modifier-spin', text: 'write_file src/api/client.ts', tone: 'live' },
+			{ icon: 'codicon-loading codicon-modifier-spin', text: 'write_file src/api/client.ts', tone: 'live' },
+			{ icon: 'codicon-loading codicon-modifier-spin', text: 'converting fetch wrapper to async/await while preserving...', tone: 'queued' },
+			{ icon: 'codicon-loading codicon-modifier-spin', text: 'write_file src/api/client.ts', tone: 'live' },
+			{ icon: 'codicon-check', text: 'auth.ts imports normalized and ApiError interface reused', tone: 'done' },
+		],
+		files: ['api.ts', 'auth.ts', 'helpers.ts'],
+		model: 'Haiku 4.5',
+	},
+	{
+		title: 'generate-tests',
+		status: 'LIVE',
+		tone: 'live',
+		command: '$ test',
+		description: 'Generate coverage for API transforms and edge-case error handling',
+		activities: [
+			{ icon: 'codicon-loading codicon-modifier-spin', text: 'scan test fixtures', tone: 'live' },
+			{ icon: 'codicon-loading codicon-modifier-spin', text: 'write_file test/api/client.test.ts', tone: 'live' },
+			{ icon: 'codicon-loading codicon-modifier-spin', text: 'checking async error propagation...', tone: 'queued' },
+			{ icon: 'codicon-check', text: 'request factory coverage added', tone: 'done' },
+		],
+		files: ['api.test.ts', 'client.test.ts', 'helpers.ts'],
+		model: 'Haiku 4.5',
+	},
+	{
+		title: 'lint-fix',
+		status: 'LIVE',
+		tone: 'live',
+		command: '$ lint',
+		description: 'Normalize imports, formatting, and unreachable branches after the refactor',
+		activities: [
+			{ icon: 'codicon-loading codicon-modifier-spin', text: 'write_file src/api/client.ts', tone: 'live' },
+			{ icon: 'codicon-loading codicon-modifier-spin', text: 'fixing eslint no-floating-promises...', tone: 'queued' },
+			{ icon: 'codicon-check', text: 'unused request helpers removed', tone: 'done' },
+		],
+		files: ['api.ts', 'auth.ts', 'helpers.ts'],
+		model: 'Haiku 4.5',
+	},
+];
+
+const WORKSPACE_VIEW_STATES: Record<BackboardWorkspaceViewStateId, IBackboardWorkspaceViewState> = {
+	activeAgents: { id: 'activeAgents', count: '3 agents', agents: basePlaceholderAgents },
+	mixedStatus: {
+		id: 'mixedStatus',
+		count: '3 agents',
+		agents: [
+			basePlaceholderAgents[0],
+			{ ...basePlaceholderAgents[1], status: 'QUEUED', tone: 'queued' },
+			{ ...basePlaceholderAgents[2], status: 'REVIEW', tone: 'warning' },
+		],
+	},
+	completed: {
+		id: 'completed',
+		count: '3 completed',
+		agents: basePlaceholderAgents.map(agent => ({ ...agent, status: 'DONE', tone: 'done' })),
+	},
+	chatClosed: { id: 'chatClosed', count: '2 agents', agents: basePlaceholderAgents.slice(0, 2) },
+	chatOpen: { id: 'chatOpen', count: '2 agents', agents: basePlaceholderAgents.slice(0, 2) },
+	chatRunning: { id: 'chatRunning', count: '2 agents', agents: basePlaceholderAgents.slice(0, 2) },
+	chatReview: { id: 'chatReview', count: '2 agents', agents: basePlaceholderAgents.slice(0, 2).map(agent => ({ ...agent, status: 'REVIEW', tone: 'warning' })) },
+};
+
 export class BackboardWorkspacePage extends Disposable {
 
 	static readonly ID = BACKBOARD_WORKSPACE_SURFACE_ID;
@@ -56,10 +152,14 @@ export class BackboardWorkspacePage extends Disposable {
 	private detailToggleButton: HTMLButtonElement | undefined;
 	private detailExpandButton: HTMLButtonElement | undefined;
 	private detailWidth = 420;
+	private readonly minDetailWidth = 320;
+	private readonly maxDetailWidth = 720;
+	private readonly minMainWidth = 420;
 	private dimension = new Dimension(0, 0);
 	private selectedSessionResource: URI | undefined;
 	private targetWorkspaceUri: URI | undefined;
 	private defaultWorkspacePromise: Promise<URI> | undefined;
+	private viewState: BackboardWorkspaceViewStateId = 'activeAgents';
 
 	private readonly cardDisposables = this._register(new DisposableStore());
 	private readonly modelRef = this._register(new MutableDisposable<IChatModelReference>());
@@ -107,7 +207,7 @@ export class BackboardWorkspacePage extends Disposable {
 		this.container = append(parent, $('.backboard-workspace-editor'));
 		this.container.tabIndex = 0;
 
-		// Single unified header spanning full width
+		// Workspace row below the native titlebar.
 		const header = append(this.container, $('.backboard-workspace-header'));
 		const headerLeft = append(header, $('.backboard-workspace-header-left'));
 
@@ -125,15 +225,12 @@ export class BackboardWorkspacePage extends Disposable {
 			this.showWorkspaceSwitcherMenu(this.workspaceSwitcherButton!);
 		}));
 
-		const titleRow = append(headerLeft, $('.backboard-workspace-title-row'));
-		append(titleRow, $('h1')).textContent = localize('backboardWorkspaceTitle', "Agent Workspace");
+		const titleRow = append(header, $('.backboard-workspace-title-row'));
+		append(titleRow, $('h1')).textContent = localize('backboardWorkspaceTitle', "Advanced");
 		this.countElement = append(titleRow, $('.backboard-workspace-count'));
 
-		// Header right: detail title + New + refresh + collapse/expand
+		// Header right: global workspace actions
 		const headerRight = append(header, $('.backboard-workspace-header-right'));
-
-		// Detail title (shows the active session name)
-		this.detailTitleElement = append(headerRight, $('h2.backboard-workspace-detail-title'));
 
 		// Refresh button
 		this.createToolbarButton(headerRight, 'codicon-refresh', localize('backboardWorkspaceRefresh', "Refresh"), () => {
@@ -150,17 +247,6 @@ export class BackboardWorkspacePage extends Disposable {
 		this.detailNewButton.setAttribute('aria-label', this.detailNewButton.title);
 		this._register(addDisposableListener(this.detailNewButton, EventType.CLICK, () => {
 			void this.openNewAgentSession();
-		}));
-
-		// Collapse/expand toggle
-		this.detailToggleButton = append(headerRight, $('button.backboard-workspace-detail-toggle')) as HTMLButtonElement;
-		this.detailToggleButton.type = 'button';
-		const toggleIcon = append(this.detailToggleButton, $('span.codicon.codicon-chevron-right'));
-		toggleIcon.setAttribute('aria-hidden', 'true');
-		this.detailToggleButton.title = localize('backboardWorkspaceCollapsePanel', "Collapse panel");
-		this.detailToggleButton.setAttribute('aria-label', this.detailToggleButton.title);
-		this._register(addDisposableListener(this.detailToggleButton, EventType.CLICK, () => {
-			this.toggleDetailCollapsed();
 		}));
 
 		// Floating "expand panel" button — visible only when detail is collapsed
@@ -188,31 +274,76 @@ export class BackboardWorkspacePage extends Disposable {
 		sash.setAttribute('role', 'separator');
 		sash.setAttribute('aria-orientation', 'vertical');
 		sash.setAttribute('aria-label', localize('backboardWorkspaceResizePanel', "Resize chat panel"));
+		sash.tabIndex = 0;
+		sash.setAttribute('aria-valuemin', String(this.minDetailWidth));
+		sash.setAttribute('aria-valuemax', String(this.maxDetailWidth));
+		sash.setAttribute('aria-valuenow', String(this.detailWidth));
 		this._register(addDisposableListener(sash, EventType.POINTER_DOWN, (event: PointerEvent) => {
 			event.preventDefault();
 			sash.setPointerCapture(event.pointerId);
 			sash.classList.add('dragging');
+			page.classList.add('resizing-detail');
 			const startX = event.clientX;
 			const startWidth = this.detailWidth;
 			const doc = this.container?.ownerDocument;
 			const onMove = (e: PointerEvent) => {
 				const delta = startX - e.clientX;
-				const next = Math.max(320, Math.min(720, startWidth + delta));
+				const next = this.clampDetailWidth(startWidth + delta);
 				this.detailWidth = next;
+				sash.setAttribute('aria-valuenow', String(this.detailWidth));
 				this.applyDetailWidth();
 			};
 			const onUp = (e: PointerEvent) => {
-				sash.releasePointerCapture(e.pointerId);
+				if (sash.hasPointerCapture(e.pointerId)) {
+					sash.releasePointerCapture(e.pointerId);
+				}
 				sash.classList.remove('dragging');
+				page.classList.remove('resizing-detail');
 				doc?.removeEventListener('pointermove', onMove);
 				doc?.removeEventListener('pointerup', onUp);
+				doc?.removeEventListener('pointercancel', onUp);
 			};
 			doc?.addEventListener('pointermove', onMove);
 			doc?.addEventListener('pointerup', onUp);
+			doc?.addEventListener('pointercancel', onUp);
+		}));
+		this._register(addDisposableListener(sash, EventType.KEY_DOWN, (event: KeyboardEvent) => {
+			let delta = 0;
+			if (event.key === 'ArrowLeft') {
+				delta = 24;
+			} else if (event.key === 'ArrowRight') {
+				delta = -24;
+			} else if (event.key === 'Home') {
+				this.detailWidth = this.minDetailWidth;
+			} else if (event.key === 'End') {
+				this.detailWidth = this.clampDetailWidth(this.maxDetailWidth);
+			} else {
+				return;
+			}
+
+			EventHelper.stop(event, true);
+			if (delta) {
+				this.detailWidth = this.clampDetailWidth(this.detailWidth + delta);
+			}
+			sash.setAttribute('aria-valuenow', String(this.detailWidth));
+			this.applyDetailWidth();
 		}));
 
 		const detail = append(page, $('.backboard-workspace-detail'));
 		this.detailElement = detail;
+
+		const detailHeader = append(detail, $('.backboard-workspace-detail-header'));
+		this.detailTitleElement = append(detailHeader, $('h2.backboard-workspace-detail-title'));
+
+		this.detailToggleButton = append(detailHeader, $('button.backboard-workspace-detail-toggle')) as HTMLButtonElement;
+		this.detailToggleButton.type = 'button';
+		const toggleIcon = append(this.detailToggleButton, $('span.codicon.codicon-chevron-right'));
+		toggleIcon.setAttribute('aria-hidden', 'true');
+		this.detailToggleButton.title = localize('backboardWorkspaceCollapsePanel', "Collapse panel");
+		this.detailToggleButton.setAttribute('aria-label', this.detailToggleButton.title);
+		this._register(addDisposableListener(this.detailToggleButton, EventType.CLICK, () => {
+			this.toggleDetailCollapsed();
+		}));
 
 		this.chatContainer = append(detail, $('.backboard-workspace-detail-chat'));
 
@@ -252,8 +383,6 @@ export class BackboardWorkspacePage extends Disposable {
 
 	layout(dimension: Dimension): void {
 		this.dimension = dimension;
-		this.container?.style.setProperty('width', `${dimension.width}px`);
-		this.container?.style.setProperty('height', `${dimension.height}px`);
 		this.layoutChatWidget();
 	}
 
@@ -274,6 +403,7 @@ export class BackboardWorkspacePage extends Disposable {
 			{
 				autoScroll: mode => mode !== ChatModeKind.Ask,
 				renderFollowups: true,
+				renderInputToolbarBelowInput: false,
 				supportsFileReferences: true,
 				rendererOptions: {
 					referencesExpandedWhenEmptyResponse: false,
@@ -282,6 +412,7 @@ export class BackboardWorkspacePage extends Disposable {
 				enableImplicitContext: true,
 				enableWorkingSet: 'explicit',
 				supportsChangingModes: true,
+				isSessionsWindow: true,
 				dndContainer: detailElement,
 			},
 			{
@@ -336,7 +467,13 @@ export class BackboardWorkspacePage extends Disposable {
 		}
 
 		if (!sessions.length) {
-			this.renderEmptyState(this.cardsContainer);
+			const state = WORKSPACE_VIEW_STATES[this.viewState];
+			if (this.countElement) {
+				this.countElement.textContent = state.count;
+			}
+			for (const agent of state.agents) {
+				this.renderPlaceholderAgentCard(this.cardsContainer, agent);
+			}
 			return;
 		}
 
@@ -356,17 +493,69 @@ export class BackboardWorkspacePage extends Disposable {
 		this.cardsContainer.scrollTop = previousScrollTop;
 	}
 
-	private renderEmptyState(parent: HTMLElement): void {
-		const empty = append(parent, $('.backboard-workspace-empty'));
-		const mark = append(empty, $('.codicon.codicon-backboard-logo'));
-		mark.setAttribute('aria-hidden', 'true');
-		append(empty, $('h2')).textContent = localize('backboardWorkspaceEmptyTitle', "No agent sessions yet");
-		append(empty, $('p')).textContent = localize('backboardWorkspaceEmptyDescription', "Start a Backboard agent and it will show up here.");
-		const button = append(empty, $('button.backboard-workspace-primary-button')) as HTMLButtonElement;
-		button.type = 'button';
-		button.textContent = localize('backboardWorkspaceEmptyNewAgent', "New Agent");
-		this.cardDisposables.add(addDisposableListener(button, EventType.CLICK, () => {
+	private renderPlaceholderAgentCard(parent: HTMLElement, agent: IBackboardWorkspacePlaceholderAgent): void {
+		const card = append(parent, $('article.backboard-workspace-card.backboard-workspace-placeholder-card')) as HTMLDivElement;
+		card.dataset.tone = agent.tone;
+		card.tabIndex = 0;
+		card.setAttribute('role', 'button');
+		card.setAttribute('aria-label', localize('backboardWorkspacePlaceholderAgentLabel', "Start from agent card {0}", agent.title));
+
+		const header = append(card, $('.backboard-workspace-card-header'));
+		const title = append(header, $('.backboard-workspace-card-title'));
+		append(title, $(`span.backboard-workspace-status-dot.${agent.tone}`));
+		append(title, $('span.backboard-workspace-card-name')).textContent = agent.title;
+		const headerActions = append(header, $('.backboard-workspace-card-actions'));
+		append(headerActions, $(`span.backboard-workspace-status-pill.${agent.tone}`)).textContent = agent.status;
+		const overflow = append(headerActions, $('button.backboard-workspace-card-menu')) as HTMLButtonElement;
+		overflow.type = 'button';
+		overflow.title = localize('backboardWorkspaceAgentActions', "Agent actions");
+		overflow.setAttribute('aria-label', overflow.title);
+		append(overflow, $('span.codicon.codicon-kebab-vertical')).setAttribute('aria-hidden', 'true');
+
+		const command = append(card, $('.backboard-workspace-command-row'));
+		append(command, $('span.backboard-workspace-command-label')).textContent = agent.command;
+		append(command, $('span.backboard-workspace-command-description')).textContent = agent.description;
+
+		const activity = append(card, $('.backboard-workspace-card-activity'));
+		for (const item of agent.activities) {
+			const row = append(activity, $('.backboard-workspace-activity-row'));
+			row.dataset.tone = item.tone;
+			const icon = append(row, $('span.codicon'));
+			for (const className of item.icon.split(' ')) {
+				icon.classList.add(className);
+			}
+			icon.setAttribute('aria-hidden', 'true');
+			append(row, $('span.backboard-workspace-activity-label')).textContent = item.text;
+		}
+
+		const files = append(card, $('.backboard-workspace-card-files'));
+		for (const file of agent.files) {
+			const chip = append(files, $('span.backboard-workspace-file-chip'));
+			append(chip, $('span.backboard-workspace-file-dot')).setAttribute('aria-hidden', 'true');
+			append(chip, $('span')).textContent = file;
+		}
+
+		const footer = append(card, $('.backboard-workspace-card-footer'));
+		const stop = append(footer, $('button.backboard-workspace-card-footer-action')) as HTMLButtonElement;
+		stop.type = 'button';
+		stop.title = localize('backboardWorkspaceStopAgent', "Stop agent");
+		stop.setAttribute('aria-label', stop.title);
+		append(stop, $('span.codicon.codicon-debug-stop')).setAttribute('aria-hidden', 'true');
+		append(footer, $('.backboard-workspace-card-footer-spacer'));
+		append(footer, $('span.backboard-workspace-card-model-pill')).textContent = agent.model;
+		append(footer, $('span.codicon.codicon-link-external')).setAttribute('aria-hidden', 'true');
+
+		this.cardDisposables.add(addDisposableListener(card, EventType.CLICK, event => {
+			if ((event.target as HTMLElement).closest('button')) {
+				return;
+			}
 			void this.openNewAgentSession();
+		}));
+		this.cardDisposables.add(addDisposableListener(card, EventType.KEY_DOWN, event => {
+			if (event.key === 'Enter' || event.key === ' ') {
+				EventHelper.stop(event, true);
+				void this.openNewAgentSession();
+			}
 		}));
 	}
 
@@ -528,10 +717,17 @@ export class BackboardWorkspacePage extends Disposable {
 	}
 
 	private applyDetailWidth(): void {
+		this.detailWidth = this.clampDetailWidth(this.detailWidth);
 		if (this.pageElement) {
 			this.pageElement.style.setProperty('--detail-width', `${this.detailWidth}px`);
 		}
 		this.layoutChatWidget();
+	}
+
+	private clampDetailWidth(width: number): number {
+		const pageWidth = this.pageElement?.clientWidth ?? this.dimension.width;
+		const availableMax = pageWidth > 0 ? Math.max(this.minDetailWidth, pageWidth - this.minMainWidth) : this.maxDetailWidth;
+		return Math.round(Math.max(this.minDetailWidth, Math.min(this.maxDetailWidth, availableMax, width)));
 	}
 
 	private updateWorkspaceDetailState(): void {
@@ -765,7 +961,9 @@ export class BackboardWorkspacePage extends Disposable {
 			return;
 		}
 
-		const menu = append(doc.body, $('.monaco-workspace-switcher-menu'));
+		const menuHost = this.container ?? doc.body;
+		const menu = append(menuHost, $('.monaco-workspace-switcher-menu'));
+		menu.setAttribute('role', 'listbox');
 		const disposables = new DisposableStore();
 
 		// "All Workspaces" option
@@ -805,8 +1003,11 @@ export class BackboardWorkspacePage extends Disposable {
 
 		// Position the menu below the anchor
 		const rect = anchor.getBoundingClientRect();
+		const menuWidth = Math.max(260, rect.width);
+		const left = Math.min(rect.left, Math.max(8, doc.defaultView?.innerWidth ?? rect.left) - menuWidth - 8);
 		menu.style.top = `${rect.bottom + 4}px`;
-		menu.style.left = `${rect.left}px`;
+		menu.style.left = `${Math.max(8, left)}px`;
+		menu.style.minWidth = `${menuWidth}px`;
 
 		// Dismiss on outside click
 		disposables.add(addDisposableListener(doc, EventType.CLICK, (e: MouseEvent) => {

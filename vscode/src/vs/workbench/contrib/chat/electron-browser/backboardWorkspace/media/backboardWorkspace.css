@@ -5,36 +5,47 @@
 
 .monaco-workbench .backboard-workspace-surface {
 	--backboard-workspace-bg: var(--vscode-editor-background);
-	--backboard-workspace-card-bg: color-mix(in srgb, var(--vscode-sideBar-background) 78%, var(--vscode-editor-background));
+	--backboard-workspace-card-bg: var(--vscode-sideBar-background, var(--vscode-editorWidget-background));
 	--backboard-workspace-card-hover-bg: color-mix(in srgb, var(--vscode-list-hoverBackground, var(--vscode-focusBorder)) 20%, var(--backboard-workspace-card-bg));
-	--backboard-workspace-inset-bg: color-mix(in srgb, var(--vscode-sideBar-background) 88%, var(--vscode-editor-background));
-	--backboard-workspace-border: color-mix(in srgb, var(--vscode-panel-border) 86%, transparent);
-	--backboard-workspace-border-subtle: color-mix(in srgb, var(--vscode-panel-border) 58%, transparent);
-	--backboard-workspace-muted: var(--vscode-descriptionForeground);
+	--backboard-workspace-inset-bg: var(--vscode-input-background, var(--vscode-editorWidget-background));
+	--backboard-workspace-border: var(--vscode-panel-border, var(--vscode-widget-border, rgb(128 128 128 / 35%)));
+	--backboard-workspace-border-subtle: color-mix(in srgb, var(--backboard-workspace-border) 62%, transparent);
+	--backboard-workspace-muted: var(--vscode-descriptionForeground, rgb(128 128 128));
 	--backboard-workspace-success: var(--vscode-testing-iconPassed, #6fcf97);
 	--backboard-workspace-danger: var(--vscode-testing-iconFailed, #f48771);
-	--backboard-workspace-active: var(--vscode-focusBorder);
+	--backboard-workspace-warning: var(--vscode-testing-iconQueued, var(--vscode-editorWarning-foreground, #cca700));
+	--backboard-workspace-active: var(--vscode-focusBorder, var(--vscode-button-background));
+	--backboard-workspace-accent-soft: color-mix(in srgb, var(--backboard-workspace-active) 14%, transparent);
 	position: absolute;
 	inset: 0;
 	z-index: 35;
 	overflow: hidden;
 	background: var(--backboard-workspace-bg);
 	color: var(--vscode-editor-foreground);
+	contain: layout paint size;
+	opacity: 1;
+	visibility: visible;
+	pointer-events: auto;
+	transition: opacity 80ms ease, visibility 80ms ease;
 }
 
-.monaco-workbench .backboard-workspace-surface.hidden { display: none; }
-
-.monaco-workbench.backboard-workspace-visible > .part.titlebar > .titlebar-container > .titlebar-right > .window-controls-container,
-.monaco-workbench.backboard-workspace-visible > .part.titlebar > .titlebar-container > .titlebar-right > .action-toolbar-container,
-.monaco-workbench.backboard-workspace-visible > .part.titlebar > .titlebar-container > .titlebar-center > .center-adjacent-toolbar-container {
-	display: none !important;
+.monaco-workbench .backboard-workspace-surface.hidden {
+	opacity: 0;
+	visibility: hidden;
+	pointer-events: none;
 }
 
 .monaco-workbench .backboard-workspace-editor {
-	width: 100%; height: 100%; overflow: hidden;
-	display: flex; flex-direction: column;
+	box-sizing: border-box;
+	width: 100%;
+	height: 100%;
+	overflow: hidden;
+	display: flex;
+	flex-direction: column;
+	padding-top: env(titlebar-area-height, 35px);
 	background: var(--backboard-workspace-bg);
 	color: var(--vscode-editor-foreground);
+	contain: layout paint;
 }
 
 .monaco-workbench .backboard-workspace-editor:focus { outline: none; }
@@ -44,8 +55,13 @@
 .monaco-workbench .backboard-workspace-page {
 	box-sizing: border-box;
 	display: grid;
-	grid-template-columns: minmax(0, 1fr) 1px var(--detail-width, 420px);
-	flex: 1; min-height: 0; width: 100%; overflow: hidden;
+	grid-template-columns: minmax(0, 1fr) 10px clamp(320px, var(--detail-width, 420px), 720px);
+	flex: 1 1 auto;
+	min-height: 0;
+	width: 100%;
+	overflow: hidden;
+	border-top: 1px solid var(--backboard-workspace-border);
+	border-bottom: 1px solid var(--backboard-workspace-border);
 }
 
 .monaco-workbench .backboard-workspace-page.no-detail {
@@ -59,15 +75,49 @@
 /* === Sash === */
 
 .monaco-workbench .backboard-workspace-sash {
-	width: 1px; cursor: col-resize; flex-shrink: 0;
-	background: var(--backboard-workspace-border);
+	position: relative;
+	width: 10px;
+	cursor: col-resize;
+	flex-shrink: 0;
+	background: transparent;
 	z-index: 10;
 	transition: background 0.15s;
+	touch-action: none;
+	-webkit-app-region: no-drag;
+}
+
+.monaco-workbench .backboard-workspace-sash::before {
+	content: "";
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: 50%;
+	width: 1px;
+	transform: translateX(-50%);
+	background: var(--backboard-workspace-border);
+	transition: background 0.15s, width 0.15s;
 }
 
 .monaco-workbench .backboard-workspace-sash:hover,
 .monaco-workbench .backboard-workspace-sash.dragging {
+	background: color-mix(in srgb, var(--vscode-sash-hoverBorder, var(--backboard-workspace-active)) 12%, transparent);
+}
+
+.monaco-workbench .backboard-workspace-sash:hover::before,
+.monaco-workbench .backboard-workspace-sash.dragging::before {
+	width: 2px;
 	background: var(--vscode-sash-hoverBorder, var(--backboard-workspace-active));
+}
+
+.monaco-workbench .backboard-workspace-sash:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.monaco-workbench .backboard-workspace-page.resizing-detail,
+.monaco-workbench .backboard-workspace-page.resizing-detail * {
+	cursor: col-resize !important;
+	user-select: none;
 }
 
 .monaco-workbench .backboard-workspace-main {
@@ -77,28 +127,38 @@
 	background: var(--backboard-workspace-bg);
 }
 
-/* === Unified header === */
+/* === Workspace header row === */
 
 .monaco-workbench .backboard-workspace-header {
-	box-sizing: border-box; flex: none;
-	display: grid; align-items: center;
-	grid-template-columns: minmax(150px, 1fr) auto minmax(220px, 1fr);
-	min-height: 44px; gap: 14px; padding: 0 14px 0 18px;
+	box-sizing: border-box;
+	flex: 0 0 36px;
+	display: grid;
+	align-items: center;
+	grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+	min-height: 36px;
+	gap: 8px;
+	padding: 0 12px;
 	border-bottom: 1px solid var(--backboard-workspace-border);
 	overflow: hidden;
 	-webkit-app-region: drag;
+	background: var(--vscode-titleBar-activeBackground, var(--backboard-workspace-bg));
 }
 
 .monaco-workbench.mac:not(.fullscreen) .backboard-workspace-header {
-	padding-left: 218px;
+	padding-left: 12px;
 }
 
 .monaco-workbench.mac.fullscreen .backboard-workspace-header {
-	padding-left: 20px;
+	padding-left: 12px;
 }
 
 .monaco-workbench .backboard-workspace-header-left {
-	display: contents;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+	-webkit-app-region: no-drag;
+	grid-column: 1;
 }
 
 .monaco-workbench .backboard-workspace-header-right {
@@ -106,12 +166,13 @@
 	min-width: 0;
 	overflow: hidden;
 	-webkit-app-region: no-drag;
+	grid-column: 3;
 }
 
 .monaco-workbench .backboard-workspace-detail-title {
 	margin: 0; font-size: 12px; font-weight: 600;
 	white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-	max-width: 180px; flex: 0 1 auto;
+	min-width: 0; flex: 1 1 auto;
 	color: var(--backboard-workspace-muted);
 }
 
@@ -123,15 +184,16 @@
 
 .monaco-workbench .backboard-workspace-title-row {
 	display: flex; align-items: baseline; gap: 10px; min-width: 0;
-	justify-self: center;
 	max-width: 100%;
 	overflow: hidden;
 	-webkit-app-region: no-drag;
+	justify-self: center;
+	grid-column: 2;
 }
 
 .monaco-workbench .backboard-workspace-title-row h1 {
-	margin: 0; font-size: 16px; font-weight: 650; white-space: nowrap;
-	line-height: 22px;
+	margin: 0; font-size: 13px; font-weight: 650; white-space: nowrap;
+	line-height: 18px;
 	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -146,12 +208,13 @@
 
 .monaco-workbench .backboard-workspace-switcher {
 	display: inline-flex; align-items: center; gap: 6px;
-	flex: 0 1 172px;
-	max-width: 172px;
+	flex: 0 1 160px;
+	max-width: 160px;
 	min-width: 34px;
-	padding: 3px 6px;
+	height: 24px;
+	padding: 0 6px;
 	border: 1px solid transparent;
-	border-radius: 6px;
+	border-radius: 4px;
 	background: transparent;
 	color: var(--backboard-workspace-muted);
 	font-size: 12px; cursor: pointer; white-space: nowrap;
@@ -176,24 +239,35 @@
 }
 
 .monaco-workspace-switcher-menu {
-	position: fixed; z-index: 100; min-width: 220px; max-height: 340px; overflow-y: auto;
-	border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+	box-sizing: border-box;
+	position: fixed;
+	z-index: 1000;
+	min-width: 260px;
+	max-width: min(420px, calc(100vw - 16px));
+	max-height: min(340px, calc(100vh - 80px));
+	overflow-y: auto;
+	padding: 6px;
+	border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border, var(--backboard-workspace-border)));
 	border-radius: 8px;
-	background: var(--vscode-menu-background, var(--vscode-editorWidget-background));
-	box-shadow: 0 4px 14px rgba(0,0,0,0.25); padding: 4px;
+	background: var(--vscode-menu-background, var(--vscode-editorWidget-background, var(--backboard-workspace-card-bg)));
+	box-shadow: 0 12px 28px rgb(0 0 0 / 45%);
+	color: var(--vscode-menu-foreground, var(--vscode-foreground));
+	-webkit-app-region: no-drag;
+	contain: layout paint;
 }
 
 .monaco-workspace-switcher-menu-item {
 	display: flex; align-items: center; gap: 8px;
 	padding: 8px 10px; border-radius: 6px;
-	font-size: 12px; cursor: pointer; color: var(--vscode-foreground);
+	font-size: 12px; cursor: pointer; color: var(--vscode-menu-foreground, var(--vscode-foreground));
+	user-select: none;
 }
 
-.monaco-workspace-switcher-menu-item:hover { background: var(--vscode-list-hoverBackground); }
+.monaco-workspace-switcher-menu-item:hover { background: var(--vscode-menu-selectionBackground, var(--vscode-list-hoverBackground)); }
 
 .monaco-workspace-switcher-menu-item.active {
-	background: var(--vscode-list-activeSelectionBackground);
-	color: var(--vscode-list-activeSelectionForeground);
+	background: var(--vscode-menu-selectionBackground, var(--vscode-list-activeSelectionBackground));
+	color: var(--vscode-menu-selectionForeground, var(--vscode-list-activeSelectionForeground));
 }
 
 .monaco-workspace-switcher-menu-item .codicon { font-size: 14px; flex-shrink: 0; }
@@ -206,7 +280,7 @@
 	margin-left: auto; font-size: 10px; color: var(--vscode-descriptionForeground); flex-shrink: 0;
 }
 
-.monaco-workspace-switcher-menu-separator { height: 1px; margin: 4px 0; background: var(--vscode-panel-border); }
+.monaco-workspace-switcher-menu-separator { height: 1px; margin: 4px 0; background: var(--vscode-menu-separatorBackground, var(--vscode-panel-border)); }
 
 /* === Actions === */
 
@@ -239,10 +313,11 @@
 	flex: 1; min-height: 0; overflow-y: auto;
 	padding: 16px;
 	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(430px, 1fr));
-	grid-auto-rows: minmax(320px, calc((100% - 16px) / 2));
+	grid-template-columns: repeat(auto-fit, minmax(320px, 360px));
+	grid-auto-rows: 430px;
 	gap: 16px;
 	align-content: start;
+	align-items: start;
 }
 
 .monaco-workbench .backboard-workspace-cards::-webkit-scrollbar { width: 10px; }
@@ -487,6 +562,18 @@
 
 .monaco-workbench .backboard-workspace-detail.hidden { display: none; }
 
+.monaco-workbench .backboard-workspace-detail-header {
+	box-sizing: border-box;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex: 0 0 36px;
+	min-height: 36px;
+	padding: 0 8px 0 12px;
+	border-bottom: 1px solid var(--backboard-workspace-border);
+	background: var(--backboard-workspace-bg);
+}
+
 .monaco-workbench .backboard-workspace-detail-new-button {
 	display: inline-flex; align-items: center; gap: 4px;
 	height: 28px; padding: 0 10px;
@@ -547,6 +634,7 @@
 	box-sizing: border-box;
 	padding: 0 16px 16px;
 	background: transparent;
+	overflow: hidden;
 }
 
 .monaco-workbench .backboard-workspace-detail-chat .chat-input-container {
@@ -561,7 +649,51 @@
 }
 
 .monaco-workbench .backboard-workspace-detail-chat .chat-input-toolbars {
+	flex: 0 0 30px;
 	min-height: 30px;
+	max-height: 30px;
+	display: flex;
+	align-items: center;
+	overflow: hidden;
+	flex-wrap: nowrap;
+}
+
+.monaco-workbench .backboard-workspace-detail-chat .chat-input-toolbar,
+.monaco-workbench .backboard-workspace-detail-chat .chat-input-toolbars .monaco-action-bar,
+.monaco-workbench .backboard-workspace-detail-chat .chat-input-toolbars .actions-container {
+	min-width: 0;
+	flex-wrap: nowrap;
+}
+
+.monaco-workbench .backboard-workspace-detail-chat .chat-input-toolbar {
+	flex: 1 1 auto;
+	max-width: 100%;
+}
+
+.monaco-workbench .backboard-workspace-detail-chat .chat-input-toolbar .chat-input-picker-item {
+	min-width: 0;
+	max-width: min(260px, 44vw);
+}
+
+.monaco-workbench .backboard-workspace-detail-chat .chat-input-toolbar .chat-input-picker-item .action-label {
+	min-width: 0;
+	max-width: 100%;
+	overflow: hidden;
+}
+
+.monaco-workbench .backboard-workspace-detail-chat .chat-input-toolbar .chat-input-picker-label {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.monaco-workbench .backboard-workspace-detail-chat .chat-secondary-toolbar {
+	display: none !important;
+}
+
+.monaco-workbench .backboard-workspace-detail-chat .chat-secondary-toolbar:empty {
+	display: none;
 }
 
 @keyframes workspace-pulse {
@@ -572,7 +704,7 @@
 @media (max-width: 900px) {
 	.monaco-workbench .backboard-workspace-switcher > span:not(.codicon) { display: none; }
 	.monaco-workbench .backboard-workspace-switcher .codicon { margin: 0; }
-	.monaco-workbench .backboard-workspace-header { grid-template-columns: auto minmax(0, 1fr) auto; }
+	.monaco-workbench .backboard-workspace-header { grid-template-columns: minmax(34px, 1fr) auto minmax(0, 1fr); }
 	.monaco-workbench .backboard-workspace-detail-title { display: none; }
 }
 
@@ -581,5 +713,137 @@
 	.monaco-workbench .backboard-workspace-detail { display: none; }
 	.monaco-workbench .backboard-workspace-sash { display: none; }
 	.monaco-workbench .backboard-workspace-cards { grid-template-columns: minmax(0, 1fr); }
-	.monaco-workbench.mac:not(.fullscreen) .backboard-workspace-header { padding-left: 90px; }
+	.monaco-workbench.mac:not(.fullscreen) .backboard-workspace-header { padding-left: 12px; }
+}
+
+/* === Figma workspace pass === */
+
+.monaco-workbench .backboard-workspace-card {
+	height: 100%;
+	border-radius: 10px;
+}
+
+.monaco-workbench .backboard-workspace-card-header {
+	gap: 8px;
+	padding: 0 8px 0 12px;
+}
+
+.monaco-workbench .backboard-workspace-status-dot.live {
+	background: var(--backboard-workspace-active);
+}
+
+.monaco-workbench .backboard-workspace-status-dot.warning,
+.monaco-workbench .backboard-workspace-status-dot.queued,
+.monaco-workbench .backboard-workspace-status-dot.needs-input {
+	background: var(--backboard-workspace-warning);
+}
+
+.monaco-workbench .backboard-workspace-status-pill {
+	min-height: 22px;
+	padding: 0 8px;
+	border-radius: 4px;
+}
+
+.monaco-workbench .backboard-workspace-status-pill.warning,
+.monaco-workbench .backboard-workspace-status-pill.queued,
+.monaco-workbench .backboard-workspace-status-pill.needs-input {
+	border-color: color-mix(in srgb, var(--backboard-workspace-warning) 55%, transparent);
+	background: color-mix(in srgb, var(--backboard-workspace-warning) 16%, transparent);
+	color: var(--backboard-workspace-warning);
+}
+
+.monaco-workbench .backboard-workspace-command-row {
+	box-sizing: border-box;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 10px 12px;
+	border-top: 1px solid var(--backboard-workspace-border);
+	border-bottom: 1px solid var(--backboard-workspace-border);
+	background: var(--backboard-workspace-inset-bg);
+}
+
+.monaco-workbench .backboard-workspace-command-label {
+	color: var(--backboard-workspace-muted);
+	font-size: 11px;
+	line-height: 14px;
+	white-space: nowrap;
+}
+
+.monaco-workbench .backboard-workspace-command-description {
+	display: -webkit-box;
+	overflow: hidden;
+	color: var(--vscode-editor-foreground);
+	font-size: 12px;
+	line-height: 16px;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+}
+
+.monaco-workbench .backboard-workspace-card-activity {
+	padding: 8px 12px 0;
+	overflow: hidden;
+}
+
+.monaco-workbench .backboard-workspace-activity-row {
+	font-size: 12px;
+	line-height: 16px;
+}
+
+.monaco-workbench .backboard-workspace-activity-row[data-tone="done"] .codicon,
+.monaco-workbench .backboard-workspace-activity-row[data-tone="done"] .backboard-workspace-activity-label {
+	color: var(--backboard-workspace-success);
+}
+
+.monaco-workbench .backboard-workspace-activity-row[data-tone="queued"] .codicon,
+.monaco-workbench .backboard-workspace-activity-row[data-tone="warning"] .codicon {
+	color: var(--backboard-workspace-warning);
+}
+
+.monaco-workbench .backboard-workspace-card-files {
+	min-height: 34px;
+	padding: 8px 12px;
+}
+
+.monaco-workbench .backboard-workspace-file-chip {
+	gap: 6px;
+	border-radius: 6px;
+}
+
+.monaco-workbench .backboard-workspace-file-dot {
+	flex: 0 0 auto;
+	width: 12px;
+	height: 12px;
+	border-radius: 999px;
+	background: var(--backboard-workspace-active);
+}
+
+.monaco-workbench .backboard-workspace-card-footer {
+	min-height: 44px;
+	padding: 0 8px 0 12px;
+	background: var(--backboard-workspace-card-bg);
+}
+
+.monaco-workbench .backboard-workspace-card-footer-spacer {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.monaco-workbench .backboard-workspace-card-footer-action {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 24px;
+	height: 24px;
+	padding: 0;
+	border: 0;
+	border-radius: 4px;
+	background: transparent;
+	color: var(--backboard-workspace-muted);
+	cursor: pointer;
+}
+
+.monaco-workbench .backboard-workspace-card-footer-action:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+	color: var(--vscode-icon-foreground);
 }

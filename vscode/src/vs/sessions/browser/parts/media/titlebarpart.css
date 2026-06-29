@@ -5,6 +5,53 @@
 
 .monaco-workbench .part.titlebar > .sessions-titlebar-container {
 	justify-content: initial;
+	position: relative;
+}
+
+.agent-sessions-workbench.monaco-workbench .part.titlebar,
+.agent-sessions-workbench.monaco-workbench .part.titlebar > .content,
+.agent-sessions-workbench.monaco-workbench .part.titlebar > .titlebar-container,
+.agent-sessions-workbench.monaco-workbench .part.titlebar > .sessions-titlebar-container,
+.agent-sessions-workbench.monaco-workbench .part.titlebar > .sessions-titlebar-container > .titlebar-left,
+.agent-sessions-workbench.monaco-workbench .part.titlebar > .sessions-titlebar-container > .titlebar-center,
+.agent-sessions-workbench.monaco-workbench .part.titlebar > .sessions-titlebar-container > .titlebar-right {
+	background: transparent !important;
+	background-color: transparent !important;
+}
+
+.agent-sessions-workbench.monaco-workbench > .part.titlebar {
+	position: absolute !important;
+	top: 0;
+	left: 0;
+	right: 0;
+	height: 38px !important;
+	z-index: 100;
+	pointer-events: none;
+}
+
+.agent-sessions-workbench.monaco-workbench > .part.titlebar > .sessions-titlebar-container {
+	pointer-events: auto;
+}
+
+.agent-sessions-workbench.monaco-workbench .part.titlebar > .sessions-titlebar-container > .sessions-titlebar-panel-chrome {
+	position: absolute;
+	inset: 0;
+	z-index: 1;
+	pointer-events: none;
+}
+
+.agent-sessions-workbench.monaco-workbench .part.titlebar > .sessions-titlebar-container > .sessions-titlebar-panel-chrome > .sessions-titlebar-panel-section {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+}
+
+.agent-sessions-workbench.monaco-workbench .part.titlebar > .sessions-titlebar-container > .sessions-titlebar-panel-chrome > .sessions-titlebar-panel-divider {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	width: 1px;
+	background: var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 18%, transparent));
 }
 
 .monaco-workbench .part.titlebar > .sessions-titlebar-container > .titlebar-left {
@@ -16,6 +63,8 @@
 	flex-shrink: 0;
 	width: auto;
 	justify-content: flex-start;
+	position: relative;
+	z-index: 2;
 }
 
 .monaco-workbench .part.titlebar > .sessions-titlebar-container.has-center > .titlebar-center {
@@ -26,6 +75,8 @@
 	min-width: 0px;
 	margin: 0;
 	justify-content: flex-start;
+	position: relative;
+	z-index: 2;
 }
 
 .agent-sessions-workbench.monaco-workbench .part.titlebar > .sessions-titlebar-container > .titlebar-left {
@@ -54,6 +105,8 @@
 	justify-content: flex-end;
 	padding-right: 12px;
 	box-sizing: border-box;
+	position: relative;
+	z-index: 2;
 }
 
 /* Center navigation / actions toolbars that flank the command center box. */

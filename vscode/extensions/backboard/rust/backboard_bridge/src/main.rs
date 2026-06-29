@@ -12,7 +12,8 @@ use std::{
 
 use anyhow::{Context as _, Result, anyhow};
 use backboard::{
-    AudioAttachment, BackboardClient, BackboardConfig, BackboardModel, ImageAttachment,
+    AudioAttachment, BackboardClient, BackboardConfig, BackboardModel, FileAttachment,
+    ImageAttachment,
     RecentUsageQuery, SendMessageRequest, SubmitToolOutputsRequest, UsageSummaryQuery,
     message_request_log_json,
 };
@@ -33,6 +34,7 @@ const DEFAULT_TTS_MODEL: &str = "gpt-4o-mini-tts";
 const DEFAULT_TTS_VOICE: &str = "alloy";
 const DEFAULT_TTS_FORMAT: &str = "mp3";
 const DEFAULT_STT_PROVIDER: &str = "openai";
+const SERVER_INTERNAL_TOOL_NAMES: &[&str] = &["search_documents", "search_web", "generate_image"];
 const DEFAULT_STT_MODEL: &str = "gpt-4o-mini-transcribe";
 const DEFAULT_STT_LANGUAGE: &str = "en";
 const WEB_FETCH_TIMEOUT_SECS: u64 = 15;
@@ -183,7 +185,7 @@ struct SendPromptParams {
     #[serde(default)]
     image_file: Option<ImageFileParams>,
     #[serde(default)]
-    image_file: Option<ImageFileParams>,
+    files: Vec<FileAttachmentParams>,
     #[serde(default)]
     tools: Option<Vec<Value>>,
     #[serde(default)]
@@ -214,7 +216,7 @@ struct ImageFileParams {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ImageFileParams {
+struct FileAttachmentParams {
     data: Vec<u8>,
     file_name: String,
     mime_type: String,
@@ -288,6 +290,7 @@ struct BridgeModel {
     display_name: Option<String>,
     context_limit: Option<u64>,
     supports_thinking: Option<bool>,
+    supports_vision: Option<bool>,
     #[serde(rename = "inputPricePerMillion")]
     input_price_per_million: Option<f64>,
     #[serde(rename = "outputPricePerMillion")]
@@ -854,11 +857,15 @@ async fn send_prompt(state: BridgeState, request: BridgeRequest) -> Result<()> {
         file_name: img.file_name,
         mime_type: img.mime_type,
     });
-    let image_file = params.image_file.map(|img| ImageAttachment {
-        data: img.data,
-        file_name: img.file_name,
-        mime_type: img.mime_type,
-    });
+    let files = params
+        .files
+        .into_iter()
+        .map(|file| FileAttachment {
+            data: file.data,
+            file_name: file.file_name,
+            mime_type: file.mime_type,
+        })
+        .collect();
     let cancel_flag = session_cancel_flag(&state, &session_id);
     cancel_flag.store(false, Ordering::SeqCst);
 
@@ -929,6 +936,7 @@ async fn send_prompt(state: BridgeState, request: BridgeRequest) -> Result<()> {
         max_tokens: params.max_tokens,
         audio_file,
         image_file,
+        files,
     };
     for attempt in 0..=MAX_UPSTREAM_IDLE_RECOVERY_ATTEMPTS {
         log_backboard_request(&send_request, params.workspace.as_ref(), &mode)?;
@@ -980,6 +988,7 @@ async fn send_prompt(state: BridgeState, request: BridgeRequest) -> Result<()> {
                 send_request.voice = None;
                 send_request.audio_file = None;
                 send_request.image_file = None;
+                send_request.files.clear();
                 send_request.send_to_llm = Some(true);
             }
             StreamOutcome::UpstreamIdleTimeout { message } => {
@@ -1131,6 +1140,7 @@ async fn submit_tool_result(state: BridgeState, request: BridgeRequest) -> Resul
                 max_tokens: params.max_tokens,
                 audio_file: None,
                 image_file: None,
+                files: Vec::new(),
             };
             emit_trace(
                 &state,
@@ -1323,6 +1333,13 @@ async fn consume_stream(
         let streaming_tool_call_updates = streaming_tool_calls.push_chunk(&chunk);
         let saw_streaming_tool_call = streaming_tool_call_updates.saw_tool_delta;
         for update in streaming_tool_call_updates.updates {
+            if is_server_internal_tool_name(&update.name)
+                || ignored_tool_call_names
+                    .iter()
+                    .any(|ignored| update.name.eq_ignore_ascii_case(ignored))
+            {
+                continue;
+            }
             state.writer.emit(base_event(
                 "toolCallStreaming",
                 request_id,
@@ -2277,6 +2294,7 @@ fn to_bridge_model(model: BackboardModel) -> BridgeModel {
         display_name: model.display_name,
         context_limit: model.context_limit,
         supports_thinking: model.supports_thinking,
+        supports_vision: model.supports_vision,
         input_price_per_million: model.input_cost_per_1m_tokens,
         output_price_per_million: model.output_cost_per_1m_tokens,
     }
@@ -2342,14 +2360,12 @@ fn filter_ignored_tool_calls(
     tool_calls: Vec<Value>,
     ignored_tool_call_names: &[&str],
 ) -> Option<Vec<Value>> {
-    if ignored_tool_call_names.is_empty() {
-        return Some(tool_calls);
-    }
     let filtered = tool_calls
         .into_iter()
         .filter(|tool_call| {
             tool_call_name(tool_call).is_none_or(|name| {
-                !ignored_tool_call_names
+                !is_server_internal_tool_name(name)
+                    && !ignored_tool_call_names
                     .iter()
                     .any(|ignored| name.eq_ignore_ascii_case(ignored))
             })
@@ -2357,6 +2373,12 @@ fn filter_ignored_tool_calls(
         .collect::<Vec<_>>();
 
     (!filtered.is_empty()).then_some(filtered)
+}
+
+fn is_server_internal_tool_name(name: &str) -> bool {
+    SERVER_INTERNAL_TOOL_NAMES
+        .iter()
+        .any(|internal| name.eq_ignore_ascii_case(internal))
 }
 
 fn tool_call_name(tool_call: &Value) -> Option<&str> {
@@ -3554,6 +3576,19 @@ mod tests {
     }
 
     #[test]
+    fn internal_document_search_tool_calls_are_not_submitted_as_local_tool_requests() {
+        let calls = vec![json!({
+            "id": "call_docs",
+            "function": {
+                "name": "search_documents",
+                "arguments": "{\"query\":\"screenshot contents\"}"
+            }
+        })];
+
+        assert!(filter_ignored_tool_calls(calls, &[]).is_none());
+    }
+
+    #[test]
     fn mixed_tool_calls_keep_non_ignored_tools() {
         let calls = vec![
             json!({
@@ -3561,6 +3596,13 @@ mod tests {
                 "function": {
                     "name": "generate_image",
                     "arguments": "{\"prompt\":\"dog\"}"
+                }
+            }),
+            json!({
+                "id": "call_docs",
+                "function": {
+                    "name": "search_documents",
+                    "arguments": "{\"query\":\"screenshot contents\"}"
                 }
             }),
             json!({

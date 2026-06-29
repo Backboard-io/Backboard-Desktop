@@ -26,6 +26,7 @@ import { createAgentModelPricingMeta } from '../../common/agentModelPricing.js';
 import { PendingRequestRegistry } from '../../common/pendingRequestRegistry.js';
 import { ActionType, type ChatAction, type SessionAction } from '../../common/state/sessionActions.js';
 import type { ResolveSessionConfigResult, SessionConfigCompletionsResult } from '../../common/state/protocol/commands.js';
+import { MessageAttachmentKind } from '../../common/state/protocol/channels-chat/state.js';
 import type { ModelSelection, ProtectedResourceMetadata, ToolDefinition } from '../../common/state/protocol/state.js';
 import { getToolOutputText, MessageKind, ResponsePartKind, SessionStatus, ToolCallConfirmationReason, ToolCallContributorKind, ToolCallStatus, ToolResultContentType, TurnState, type ClientPluginCustomization, type MessageAttachment, type PendingMessage, type SessionInputAnswer, type SessionInputResponseKind, type ToolCallResult, type Turn } from '../../common/state/sessionState.js';
 import type { ISyncedCustomization } from '../../common/agentPluginManager.js';
@@ -290,6 +291,12 @@ export interface BackboardTurnSettings {
 	readonly config: Record<string, unknown>;
 }
 
+interface BackboardFileAttachment {
+	readonly data: number[];
+	readonly fileName: string;
+	readonly mimeType: string;
+}
+
 export class BackboardAgent extends Disposable implements IAgent {
 	readonly id = 'backboard';
 
@@ -388,11 +395,15 @@ export class BackboardAgent extends Disposable implements IAgent {
 		return { items: [] };
 	}
 
-	async sendMessage(sessionUri: URI, prompt: string, _attachments?: readonly MessageAttachment[], turnId?: string): Promise<void> {
+	async sendMessage(sessionUri: URI, prompt: string, attachments?: readonly MessageAttachment[], turnId?: string): Promise<void> {
 		const session = await this._session(sessionUri);
 		const turnStartedAt = Date.now();
 		const effectiveTurnId = turnId ?? generateUuid();
 		await this._materialize(session);
+		const preparedAttachments = await this._prepareAttachments(attachments);
+		const promptWithAttachments = preparedAttachments.promptContext
+			? `${prompt}\n\n${preparedAttachments.promptContext}`
+			: prompt;
 
 		const partId = generateUuid();
 		const responseState: BackboardResponseState = { didCreatePart: false, pendingText: '', assistantText: '', toolOutputs: [] };
@@ -441,13 +452,13 @@ export class BackboardAgent extends Disposable implements IAgent {
 					.then(tools => mergeBackboardTools(tools, session.clientTools))
 					.catch(() => mergeBackboardTools(undefined, session.clientTools));
 				const mergedTools = await submitToolsPromise;
-				const submitTools = trimBackboardToolsForRequest(mergedTools, prompt, settings.webSearch, settings.imageGeneration);
+				const submitTools = trimBackboardToolsForRequest(mergedTools, promptWithAttachments, settings.webSearch, settings.imageGeneration);
 				this._logService.info(`[Backboard latency] list_tools_done elapsedMs=${Date.now() - listToolsStartedAt} totalElapsedMs=${Date.now() - turnStartedAt} toolCount=${submitTools?.length ?? 0}`);
-				this._logService.info(`[Backboard progress] Sending prompt to Backboard with ${submitTools?.length ?? 0} tools.`);
+				this._logService.info(`[Backboard progress] Sending prompt to Backboard with ${submitTools?.length ?? 0} tools and ${preparedAttachments.files.length} attachment(s).`);
 				setHeartbeat(localize('backboard.progress.heartbeat.response', "Waiting for Backboard response"));
 				const sendPromptStartedAt = Date.now();
 				const handle = this._bridge.send('sendPrompt', bridgeSessionId, {
-					content: prompt,
+					content: promptWithAttachments,
 					workspace: session.workingDirectory?.fsPath,
 					provider: settings.provider,
 					model: settings.model,
@@ -455,6 +466,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 					intensity: settings.intensity,
 					webSearch: settings.webSearch,
 					imageGeneration: settings.imageGeneration === 'auto' ? 'auto' : undefined,
+					files: preparedAttachments.files,
 					tools: submitTools,
 					config: settings.config,
 				}, event => this._handleBridgeEvent(session, effectiveTurnId, partId, responseState, firstToolRequests, seenToolRequests, event));
@@ -477,7 +489,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 					this._logService.info(`[Backboard progress] Submitting ${toolOutputs.length} Backboard tool result(s).`);
 					setHeartbeat(localize('backboard.progress.heartbeat.submitTools', "Still submitting Backboard tool results"));
 					const continuationSettings = this._turnSettings(session);
-					const continuationTools = trimBackboardToolsForRequest(mergedTools, prompt, continuationSettings.webSearch, continuationSettings.imageGeneration);
+					const continuationTools = trimBackboardToolsForRequest(mergedTools, promptWithAttachments, continuationSettings.webSearch, continuationSettings.imageGeneration);
 					const continuation = this._bridge.send('submitToolResult', bridgeSessionId, {
 						threadId: nextToolRequest.threadId,
 						runId: nextToolRequest.runId,
@@ -653,6 +665,45 @@ export class BackboardAgent extends Disposable implements IAgent {
 			workingDirectory: session.workingDirectory,
 			project: session.workingDirectory ? { uri: session.workingDirectory, displayName: path.basename(session.workingDirectory.fsPath) } : undefined,
 		});
+	}
+
+	private async _prepareAttachments(attachments: readonly MessageAttachment[] | undefined): Promise<{ files: BackboardFileAttachment[]; promptContext?: string }> {
+		const files: BackboardFileAttachment[] = [];
+		const promptParts: string[] = [];
+		for (const attachment of attachments ?? []) {
+			try {
+				if (attachment.type === MessageAttachmentKind.EmbeddedResource) {
+					const bytes = Buffer.from(attachment.data, 'base64');
+					const mimeType = attachment.contentType || mimeTypeForAttachmentLabel(attachment.label);
+					files.push({
+						data: Array.from(bytes),
+						fileName: fileNameForAttachment(attachment.label || 'attachment', mimeType),
+						mimeType,
+					});
+				} else if (attachment.type === MessageAttachmentKind.Resource) {
+					const uri = URI.parse(attachment.uri);
+					if (uri.scheme !== 'file') {
+						this._logService.warn(`[Backboard attachments] skipped unsupported attachment URI scheme: ${uri.scheme}`);
+						continue;
+					}
+					const bytes = await fs.promises.readFile(uri.fsPath);
+					const mimeType = mimeTypeForAttachmentLabel(path.extname(attachment.label || '') ? attachment.label : uri.fsPath);
+					files.push({
+						data: Array.from(bytes),
+						fileName: fileNameForAttachment(attachment.label || path.basename(uri.fsPath) || 'attachment', mimeType, uri.fsPath),
+						mimeType,
+					});
+				} else if (attachment.type === MessageAttachmentKind.Simple && attachment.modelRepresentation) {
+					promptParts.push(`Attached ${attachment.label}:\n${attachment.modelRepresentation}`);
+				}
+			} catch (error) {
+				this._logService.warn(`[Backboard attachments] failed to read ${attachment.label}: ${error instanceof Error ? error.message : String(error)}`);
+			}
+		}
+		return {
+			files,
+			promptContext: promptParts.length ? promptParts.join('\n\n') : undefined,
+		};
 	}
 
 	private async _session(sessionUri: URI): Promise<BackboardSession> {
@@ -1007,7 +1058,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 				const output = toolCallResultOutput(result);
 				this._appendBackboardProgress(session, turnId, responseState, result.success ? localize('backboard.progress.clientToolComplete', "{0} finished.", display.displayName) : localize('backboard.progress.clientToolFailed', "{0} returned an error.", display.displayName));
 				responseState.toolOutputs.push({ id: call.id, name: display.displayName, input: toolInput, success: result.success, output });
-				return toolOutput(call.id, { success: result.success, content: output });
+				return result.success ? successfulToolOutput(call.id, output) : toolOutput(call.id, { success: false, content: output });
 			} catch (error) {
 				const message = error instanceof CancellationError ? localize('backboard.tool.cancelled', "{0} was cancelled.", display.displayName) : (error instanceof Error ? error.message : String(error));
 				this._fire(session.sessionUri, {
@@ -1085,7 +1136,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 				},
 			});
 			responseState.toolOutputs.push({ id: call.id, name: display.displayName, input: toolInput, success: true, output: result ?? '' });
-			return toolOutput(call.id, { success: true, content: result });
+			return successfulToolOutput(call.id, result);
 		} catch (error) {
 			reportContent.flush();
 			const message = error instanceof Error ? error.message : String(error);
@@ -1539,6 +1590,92 @@ function panelThreadHtml(prompt: string, assistantText: string, errorMessage: st
 function panelHistoryTitle(prompt: string): string {
 	const words = prompt.trim().split(/\s+/).filter(Boolean);
 	return words.slice(0, 8).join(' ') || 'Untitled chat';
+}
+
+function fileNameForAttachment(label: string, mimeType: string, fallbackPath?: string): string {
+	if (path.extname(label)) {
+		return label;
+	}
+	if (fallbackPath) {
+		const fallbackName = path.basename(fallbackPath);
+		if (path.extname(fallbackName)) {
+			return fallbackName;
+		}
+	}
+	const extension = extensionForMimeType(mimeType);
+	return extension ? `${label}${extension}` : label;
+}
+
+function extensionForMimeType(mimeType: string): string | undefined {
+	switch (mimeType.toLowerCase()) {
+		case 'application/json':
+			return '.json';
+		case 'application/pdf':
+			return '.pdf';
+		case 'image/png':
+			return '.png';
+		case 'image/jpeg':
+		case 'image/jpg':
+			return '.jpg';
+		case 'image/gif':
+			return '.gif';
+		case 'image/webp':
+			return '.webp';
+		case 'text/csv':
+			return '.csv';
+		case 'text/markdown':
+			return '.md';
+		case 'text/plain':
+			return '.txt';
+		default:
+			return undefined;
+	}
+}
+
+function mimeTypeForAttachmentLabel(label: string | undefined): string {
+	const extension = path.extname(label || '').toLowerCase();
+	switch (extension) {
+		case '.json':
+			return 'application/json';
+		case '.pdf':
+			return 'application/pdf';
+		case '.png':
+			return 'image/png';
+		case '.jpg':
+		case '.jpeg':
+			return 'image/jpeg';
+		case '.gif':
+			return 'image/gif';
+		case '.webp':
+			return 'image/webp';
+		case '.csv':
+			return 'text/csv';
+		case '.md':
+			return 'text/markdown';
+		case '.txt':
+		case '.ts':
+		case '.tsx':
+		case '.js':
+		case '.jsx':
+		case '.py':
+		case '.rs':
+		case '.go':
+		case '.java':
+		case '.c':
+		case '.cc':
+		case '.cpp':
+		case '.h':
+		case '.hpp':
+		case '.html':
+		case '.css':
+		case '.xml':
+		case '.yaml':
+		case '.yml':
+		case '.toml':
+			return 'text/plain';
+		default:
+			return 'application/octet-stream';
+	}
 }
 
 function escapePanelHtml(text: string): string {
@@ -3513,6 +3650,46 @@ function inferBackboardToolKind(name: string): string {
 
 function toolOutput(toolCallId: string, output: unknown): unknown {
 	return { tool_call_id: toolCallId, toolCallId, output: JSON.stringify(output) };
+}
+
+function successfulToolOutput(toolCallId: string, content: unknown): unknown {
+	return toolOutput(toolCallId, multimodalToolOutputContent(content) ?? { success: true, content });
+}
+
+const maxBackboardToolImageBytes = 5 * 1024 * 1024;
+
+function multimodalToolOutputContent(content: unknown): unknown | undefined {
+	const parsed = typeof content === 'string' ? parseJsonObject(content) : content;
+	if (!isObjectRecord(parsed)) {
+		return undefined;
+	}
+	const imageBase64 = stringValueFromRecord(parsed.__image_base64);
+	const mediaType = stringValueFromRecord(parsed.__image_media_type);
+	if (!imageBase64 || !mediaType) {
+		return undefined;
+	}
+	if (!mediaType.toLowerCase().startsWith('image/')) {
+		throw new Error(`Unsupported image media type in tool output: ${mediaType}`);
+	}
+	if (estimatedBase64DecodedBytes(imageBase64) > maxBackboardToolImageBytes) {
+		throw new Error('Image tool output exceeds the 5 MB Backboard limit.');
+	}
+	return parsed;
+}
+
+function parseJsonObject(value: string): Record<string, unknown> | undefined {
+	try {
+		const parsed: unknown = JSON.parse(value);
+		return isObjectRecord(parsed) ? parsed : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+function estimatedBase64DecodedBytes(value: string): number {
+	const normalized = value.replace(/\s/g, '');
+	const padding = normalized.endsWith('==') ? 2 : normalized.endsWith('=') ? 1 : 0;
+	return Math.max(0, Math.floor(normalized.length * 3 / 4) - padding);
 }
 
 function toolInputPreview(call: ParsedToolCall): string {

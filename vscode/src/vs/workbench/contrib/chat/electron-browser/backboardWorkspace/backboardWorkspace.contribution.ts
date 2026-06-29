@@ -11,7 +11,7 @@ import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { Extensions as WorkbenchExtensions, IWorkbenchContribution, IWorkbenchContributionsRegistry } from '../../../../common/contributions.js';
 import { LifecyclePhase } from '../../../../services/lifecycle/common/lifecycle.js';
 import { CHAT_CATEGORY } from '../../browser/actions/chatActions.js';
-import { OPEN_BACKBOARD_WORKSPACE_COMMAND_ID } from './backboardWorkspaceConstants.js';
+import { CLOSE_BACKBOARD_WORKSPACE_COMMAND_ID, OPEN_BACKBOARD_WORKSPACE_COMMAND_ID } from './backboardWorkspaceConstants.js';
 import { IBackboardWorkspaceService } from './backboardWorkspaceService.js';
 
 registerAction2(class OpenBackboardWorkspaceAction extends Action2 {
@@ -26,6 +26,21 @@ registerAction2(class OpenBackboardWorkspaceAction extends Action2 {
 
 	run(accessor: ServicesAccessor): void {
 		accessor.get(IBackboardWorkspaceService).show();
+	}
+});
+
+registerAction2(class CloseBackboardWorkspaceAction extends Action2 {
+	constructor() {
+		super({
+			id: CLOSE_BACKBOARD_WORKSPACE_COMMAND_ID,
+			title: localize2('closeBackboardWorkspace', "Close Advanced"),
+			category: CHAT_CATEGORY,
+			f1: false,
+		});
+	}
+
+	run(accessor: ServicesAccessor): void {
+		accessor.get(IBackboardWorkspaceService).hide();
 	}
 });
 

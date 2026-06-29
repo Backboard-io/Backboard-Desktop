@@ -17,23 +17,27 @@ body.jarvis-standalone .jarvis-root,
 }
 
 .jarvis-root {
-	--jarvis-bg: #f6d6cc;
-	--jarvis-glass: rgba(248, 242, 234, .82);
-	--jarvis-card: rgba(51, 43, 62, .82);
-	--jarvis-card-solid: rgba(248, 242, 234, .9);
-	--jarvis-border: rgba(255, 120, 92, .76);
-	--jarvis-border-strong: rgba(255, 120, 92, .92);
-	--jarvis-focus: #ff755f;
+	--jarvis-bg: #111827;
+	--jarvis-glass: rgba(8, 12, 18, .62);
+	--jarvis-panel: rgba(8, 12, 18, .64);
+	--jarvis-panel-light: rgba(255, 248, 238, .86);
+	--jarvis-card: rgba(7, 10, 16, .74);
+	--jarvis-card-solid: rgba(255, 248, 238, .9);
+	--jarvis-border: rgba(255, 248, 238, .34);
+	--jarvis-border-strong: rgba(255, 132, 96, .9);
+	--jarvis-focus: #ff865f;
 	--jarvis-text: var(--vscode-foreground, #f9f4ef);
-	--jarvis-muted: rgba(255, 232, 225, .68);
-	--jarvis-control-text: #463934;
-	--jarvis-button-bg: #ff7e67;
+	--jarvis-muted: rgba(255, 239, 232, .72);
+	--jarvis-control-text: #f8efe8;
+	--jarvis-dark-text: #302927;
+	--jarvis-button-bg: #ff755f;
 	--jarvis-button-fg: var(--vscode-button-foreground, #ffffff);
-	--jarvis-button-hover: #ff684d;
+	--jarvis-button-hover: #ff5f46;
 	--jarvis-success: var(--vscode-testing-iconPassed, #41c76d);
 	--jarvis-danger: var(--vscode-errorForeground, #ff6480);
-	--jarvis-terminal: rgba(39, 36, 53, .42);
-	--jarvis-shadow: rgba(39, 23, 34, .32);
+	--jarvis-terminal: rgba(2, 4, 8, .5);
+	--jarvis-shadow: rgba(0, 0, 0, .22);
+	--jarvis-mono: var(--vscode-editor-font-family, "SFMono-Regular", Menlo, Monaco, Consolas, monospace);
 }
 
 .jarvis-root * {
@@ -61,7 +65,7 @@ body.jarvis-standalone .jarvis-root,
 	inset: 0;
 	z-index: 0;
 	overflow: hidden;
-	background: #f6d6cc;
+	background: #101827;
 }
 
 .jarvis-background::after {
@@ -69,17 +73,37 @@ body.jarvis-standalone .jarvis-root,
 	position: absolute;
 	inset: 0;
 	background:
-		radial-gradient(circle at 82% 8%, rgba(255, 255, 255, .46), transparent 24%),
-		radial-gradient(circle at 18% 18%, rgba(255, 174, 187, .28), transparent 26%),
-		linear-gradient(180deg, rgba(255, 242, 231, .2), rgba(22, 20, 39, .08));
+		linear-gradient(180deg, rgba(3, 6, 12, .08), rgba(3, 6, 12, .3) 70%, rgba(3, 6, 12, .68));
 	pointer-events: none;
 }
 
+.jarvis-background-static,
 .jarvis-background-video {
+	position: absolute;
+	inset: 0;
 	width: 100%;
 	height: 100%;
+}
+
+.jarvis-background-static {
+	background:
+		radial-gradient(circle at 30% 18%, rgba(255, 153, 124, .36), transparent 28%),
+		radial-gradient(circle at 78% 34%, rgba(83, 160, 255, .22), transparent 26%),
+		linear-gradient(135deg, #121826, #2d2535 52%, #472f2d);
+	background-position: center;
+	background-size: cover;
+}
+
+.jarvis-background-video {
 	object-fit: cover;
-	filter: saturate(1.18) contrast(1.04) brightness(1.16);
+	filter: saturate(1.12) contrast(1.02) brightness(.92);
+}
+
+.jarvis-shell[data-background="studio"] .jarvis-background::after {
+	background:
+		radial-gradient(circle at 18% 82%, rgba(255, 117, 95, .28), transparent 24%),
+		radial-gradient(circle at 78% 16%, rgba(132, 201, 255, .18), transparent 25%),
+		linear-gradient(180deg, rgba(4, 8, 15, .1), rgba(4, 8, 15, .66));
 }
 
 .jarvis-header,
@@ -92,19 +116,20 @@ body.jarvis-standalone .jarvis-root,
 }
 
 .jarvis-header {
-	top: 14px;
+	top: 16px;
 	left: 50%;
 	display: grid;
-	grid-template-columns: auto auto auto auto;
+	grid-template-columns: auto auto auto auto minmax(120px, 1fr);
 	align-items: center;
-	gap: 12px;
-	min-height: 48px;
-	padding: 8px 12px;
-	border: 1px solid rgba(255, 255, 255, .62);
-	border-radius: 18px;
-	background: var(--jarvis-glass);
-	box-shadow: 0 16px 34px var(--jarvis-shadow);
-	backdrop-filter: blur(22px) saturate(1.25);
+	gap: 8px;
+	min-height: 38px;
+	width: min(780px, calc(100vw - 160px));
+	padding: 0;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+	backdrop-filter: none;
 	transform: translateX(-50%);
 	-webkit-app-region: drag;
 }
@@ -114,30 +139,38 @@ body.jarvis-standalone .jarvis-root,
 	-webkit-app-region: no-drag;
 }
 
-.jarvis-mode-select {
-	min-width: 104px;
-	height: 32px;
+.jarvis-mode-select,
+.jarvis-background-select {
+	min-width: 112px;
+	height: 34px;
 	padding: 0 28px 0 12px;
-	border: 0;
-	border-radius: 13px;
-	background: rgba(255, 255, 255, .38);
+	border: 1px solid var(--jarvis-border);
+	border-radius: 2px;
+	background:
+		url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23f8efe8' fill-opacity='.72'/%3E%3C/svg%3E") right 10px center no-repeat,
+		rgba(6, 8, 12, .74);
 	color: var(--jarvis-control-text);
-	font-size: 13px;
+	font-family: var(--jarvis-mono);
+	font-size: 12px;
 	font-weight: 700;
+	appearance: none;
+	-webkit-appearance: none;
 	outline: none;
+	cursor: pointer;
 }
 
 .jarvis-workspace-select {
-	max-width: 180px;
-	height: 32px;
+	max-width: 160px;
+	height: 34px;
 	overflow: hidden;
-	padding: 0 13px;
-	border: 1px solid rgba(255, 126, 103, .22);
-	border-radius: 13px;
-	background: rgba(255, 255, 255, .42);
+	padding: 0 14px;
+	border: 1px solid var(--jarvis-border);
+	border-radius: 2px;
+	background: rgba(6, 8, 12, .74);
 	color: var(--jarvis-control-text);
 	cursor: pointer;
-	font-size: 13px;
+	font-family: var(--jarvis-mono);
+	font-size: 12px;
 	font-weight: 700;
 	outline: none;
 	text-overflow: ellipsis;
@@ -155,8 +188,9 @@ body.jarvis-standalone .jarvis-root,
 .jarvis-brand h1 {
 	margin: 0;
 	color: var(--jarvis-control-text);
-	font-size: 13px;
-	font-weight: 700;
+	font-family: var(--jarvis-mono);
+	font-size: 12px;
+	font-weight: 800;
 	letter-spacing: 0;
 }
 
@@ -165,9 +199,10 @@ body.jarvis-standalone .jarvis-root,
 }
 
 .jarvis-status-line {
-	max-width: 240px;
+	min-width: 0;
 	overflow: hidden;
-	color: color-mix(in srgb, var(--jarvis-control-text) 72%, transparent);
+	color: rgba(255, 239, 232, .72);
+	font-family: var(--jarvis-mono);
 	font-size: 11px;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -177,14 +212,14 @@ body.jarvis-standalone .jarvis-root,
 	top: 50%;
 	left: 24px;
 	display: grid;
-	gap: 9px;
-	width: 58px;
-	padding: 12px 9px;
-	border: 1px solid rgba(255, 255, 255, .64);
-	border-radius: 22px;
-	background: rgba(248, 242, 234, .88);
-	box-shadow: 0 16px 38px rgba(64, 35, 47, .22);
-	backdrop-filter: blur(22px) saturate(1.18);
+	gap: 6px;
+	width: 44px;
+	padding: 0;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+	backdrop-filter: none;
 	transform: translateY(-50%);
 }
 
@@ -192,48 +227,40 @@ body.jarvis-standalone .jarvis-root,
 	display: grid;
 	place-items: center;
 	width: 40px;
-	height: 38px;
+	height: 34px;
 	padding: 0;
-	border: 0;
-	border-radius: 12px;
-	background: transparent;
-	color: rgba(78, 67, 62, .72);
+	border: 1px solid var(--jarvis-border);
+	border-radius: 2px;
+	background: rgba(6, 8, 12, .64);
+	color: rgba(255, 239, 232, .82);
 	cursor: pointer;
-	font-size: 13px;
+	font-family: var(--jarvis-mono);
+	font-size: 12px;
+	font-weight: 800;
 }
 
 .jarvis-side-rail button:hover,
 .jarvis-side-rail button:focus {
-	background: rgba(255, 126, 103, .2);
-	color: #f0523e;
+	background: var(--jarvis-button-bg);
+	color: #fff;
 	outline: none;
 }
 
 .jarvis-command-bar {
 	left: 50%;
-	bottom: 24px;
+	bottom: 28px;
 	display: grid;
 	grid-template-columns: minmax(220px, 1fr) auto;
 	align-items: center;
-	gap: 12px;
-	width: min(760px, calc(100vw - 180px));
-	padding: 10px 12px 10px 18px;
-	border: 1px solid color-mix(in srgb, var(--jarvis-border) 62%, transparent);
-	border-radius: 22px;
-	background: color-mix(in srgb, var(--jarvis-card-solid) 88%, transparent);
-	box-shadow: 0 16px 38px rgba(64, 35, 47, .2), inset 0 1px 0 rgba(255, 255, 255, .44);
-	backdrop-filter: blur(24px) saturate(1.18);
+	gap: 10px;
+	width: min(680px, calc(100vw - 188px));
+	padding: 10px 10px 10px 14px;
+	border: 1px solid var(--jarvis-border);
+	border-radius: 2px;
+	background: rgba(6, 8, 12, .74);
+	box-shadow: 0 10px 24px rgba(0, 0, 0, .2);
+	backdrop-filter: none;
 	transform: translateX(-50%);
-}
-
-.jarvis-terminal-command input {
-	min-width: 0;
-	height: 38px;
-	border: 1px solid rgba(255, 126, 103, .18);
-	border-radius: 12px;
-	background: rgba(255, 255, 255, .5);
-	color: var(--jarvis-control-text);
-	outline: none;
 }
 
 .jarvis-prompt-input {
@@ -242,8 +269,9 @@ body.jarvis-standalone .jarvis-root,
 	padding: 0;
 	border: 0;
 	background: transparent;
-	color: var(--jarvis-control-text);
-	font-size: 15px;
+	color: rgba(255, 249, 244, .92);
+	font-family: var(--jarvis-mono);
+	font-size: 16px;
 	font-weight: 600;
 	line-height: 42px;
 	outline: none;
@@ -252,12 +280,13 @@ body.jarvis-standalone .jarvis-root,
 
 .jarvis-prompt-input::placeholder,
 .jarvis-terminal-command input::placeholder {
-	color: color-mix(in srgb, var(--jarvis-control-text) 54%, transparent);
+	color: rgba(255, 239, 232, .48);
 }
 
 .jarvis-prompt-input:focus,
 .jarvis-terminal-command input:focus,
 .jarvis-mode-select:focus,
+.jarvis-background-select:focus,
 .jarvis-workspace-select:focus,
 .jarvis-button:focus,
 .jarvis-icon-button:focus {
@@ -271,9 +300,9 @@ body.jarvis-standalone .jarvis-root,
 
 .jarvis-button,
 .jarvis-icon-button {
-	border: 1px solid rgba(255, 126, 103, .32);
-	border-radius: 13px;
-	background: rgba(255, 255, 255, .42);
+	border: 1px solid var(--jarvis-border);
+	border-radius: 2px;
+	background: rgba(6, 8, 12, .72);
 	color: var(--jarvis-control-text);
 	cursor: pointer;
 }
@@ -282,7 +311,8 @@ body.jarvis-standalone .jarvis-root,
 	min-width: 72px;
 	height: 38px;
 	padding: 0 16px;
-	border-radius: 12px;
+	border-radius: 2px;
+	font-family: var(--jarvis-mono);
 	font-size: 13px;
 	font-weight: 700;
 }
@@ -292,34 +322,34 @@ body.jarvis-standalone .jarvis-root,
 	display: grid;
 	place-items: center;
 	min-width: 0;
-	width: 58px;
-	height: 58px;
+	width: 54px;
+	height: 54px;
 	padding: 0;
-	border: 1px solid color-mix(in srgb, var(--jarvis-border-strong) 84%, transparent);
-	border-radius: 50%;
+	border: 2px solid var(--jarvis-border-strong);
+	border-radius: 2px;
 	background: var(--jarvis-button-bg);
 	color: var(--jarvis-button-fg);
-	box-shadow: 0 12px 28px rgba(255, 104, 77, .28);
+	box-shadow: 4px 4px 0 rgba(0, 0, 0, .28);
 }
 
 .jarvis-mic-button::before {
 	content: "";
 	width: 16px;
 	height: 23px;
-	border: 3px solid currentColor;
-	border-radius: 11px;
+	border: 2px solid currentColor;
+	border-radius: 2px;
 }
 
 .jarvis-mic-button::after {
 	content: "";
 	position: absolute;
 	left: 50%;
-	top: 31px;
-	width: 24px;
+	top: 29px;
+	width: 22px;
 	height: 16px;
-	border: 3px solid currentColor;
+	border: 2px solid currentColor;
 	border-top: 0;
-	border-radius: 0 0 14px 14px;
+	border-radius: 0;
 	transform: translateX(-50%);
 }
 
@@ -336,11 +366,11 @@ body.jarvis-standalone .jarvis-root,
 @keyframes jarvis-mic-pulse {
 	0%,
 	100% {
-		box-shadow: 0 12px 28px rgba(255, 104, 77, .28), 0 0 0 0 rgba(255, 126, 103, .28);
+		box-shadow: 4px 4px 0 rgba(0, 0, 0, .28), 0 0 0 0 rgba(255, 126, 103, .28);
 	}
 
 	50% {
-		box-shadow: 0 12px 28px rgba(255, 104, 77, .28), 0 0 0 8px rgba(255, 126, 103, 0);
+		box-shadow: 4px 4px 0 rgba(0, 0, 0, .28), 0 0 0 6px rgba(255, 126, 103, 0);
 	}
 }
 
@@ -352,6 +382,7 @@ body.jarvis-standalone .jarvis-root,
 }
 
 .jarvis-button:hover,
+.jarvis-background-select:hover,
 .jarvis-workspace-select:hover,
 .jarvis-icon-button:hover {
 	background: var(--jarvis-button-hover);
@@ -366,56 +397,203 @@ body.jarvis-standalone .jarvis-root,
 }
 
 .jarvis-grid {
-	inset: 76px 74px 92px 74px;
-	display: grid;
-	grid-template-columns: repeat(2, minmax(360px, 1fr));
-	grid-template-rows: repeat(2, minmax(280px, 1fr));
+	inset: 88px 74px 108px 74px;
+	display: flex;
+	align-content: flex-start;
+	align-items: flex-start;
+	flex-flow: row nowrap;
 	gap: clamp(18px, 1.8vw, 30px);
 	min-width: 0;
 	min-height: 0;
-	pointer-events: none;
+	overflow: auto;
+	padding: 18px;
+	cursor: grab;
+	pointer-events: auto;
+	scrollbar-color: rgba(255, 255, 255, .34) rgba(255, 255, 255, .08);
+	scrollbar-width: thin;
+	touch-action: none;
+}
+
+.jarvis-grid::-webkit-scrollbar {
+	width: 12px;
+	height: 12px;
+}
+
+.jarvis-grid::-webkit-scrollbar-track {
+	background: rgba(255, 255, 255, .08);
+	border-radius: 0;
+}
+
+.jarvis-grid::-webkit-scrollbar-thumb {
+	border: 3px solid transparent;
+	border-radius: 0;
+	background: rgba(255, 255, 255, .34);
+	background-clip: padding-box;
+}
+
+.jarvis-grid.panning {
+	cursor: grabbing;
+	user-select: none;
+}
+
+.jarvis-grid:not(.empty)::after {
+	content: "";
+	flex: 0 0 80px;
+	align-self: stretch;
 }
 
 .jarvis-grid.empty {
-	display: block;
+	display: grid;
+	place-items: center;
+	pointer-events: auto;
+	touch-action: auto;
 }
 
-.jarvis-grid.count-1 {
-	grid-template-columns: minmax(0, 1fr);
-	grid-template-rows: minmax(0, 1fr);
-	padding-inline: max(48px, 6vw);
+.jarvis-empty-state {
+	display: grid;
+	gap: 16px;
+	width: min(680px, calc(100vw - 188px));
+	padding: 0;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+	backdrop-filter: none;
+	color: rgba(255, 249, 244, .92);
 }
 
-.jarvis-grid.count-2 {
-	grid-template-columns: repeat(2, minmax(360px, 1fr));
-	grid-template-rows: minmax(0, 1fr);
-	padding-inline: clamp(18px, 3vw, 48px);
+.jarvis-empty-eyebrow {
+	color: rgba(255, 188, 166, .86);
+	font-family: var(--jarvis-mono);
+	font-size: 11px;
+	font-weight: 800;
+	letter-spacing: .08em;
+	text-transform: uppercase;
 }
 
-.jarvis-grid.count-3 {
-	grid-template-rows: repeat(2, minmax(280px, 1fr));
+.jarvis-empty-state h2 {
+	margin: 0;
+	font-size: clamp(24px, 3vw, 38px);
+	font-weight: 800;
+	letter-spacing: 0;
 }
 
-.jarvis-grid.count-3 .jarvis-card:first-child {
-	grid-row: span 2;
+.jarvis-empty-state p {
+	max-width: 520px;
+	margin: 0;
+	color: rgba(255, 239, 232, .68);
+	font-size: 14px;
+	line-height: 1.45;
+	font-family: var(--jarvis-mono);
+}
+
+.jarvis-empty-launch-grid {
+	display: grid;
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+	gap: 10px;
+}
+
+.jarvis-empty-launch {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr);
+	align-items: center;
+	gap: 10px;
+	min-width: 0;
+	min-height: 64px;
+	padding: 10px;
+	border: 1px solid var(--jarvis-border);
+	border-radius: 2px;
+	background: rgba(6, 8, 12, .62);
+	color: rgba(255, 249, 244, .94);
+	cursor: pointer;
+	text-align: left;
+}
+
+.jarvis-empty-launch:hover,
+.jarvis-empty-launch:focus {
+	border-color: rgba(255, 137, 105, .7);
+	background: rgba(255, 117, 95, .18);
+	outline: none;
+}
+
+.jarvis-empty-launch-initial {
+	display: grid;
+	place-items: center;
+	width: 36px;
+	height: 36px;
+	border-radius: 2px;
+	background: rgba(255, 117, 95, .22);
+	color: #fff;
+	font-size: 14px;
+	font-weight: 900;
+}
+
+.jarvis-empty-launch-copy {
+	display: grid;
+	gap: 3px;
+	min-width: 0;
+}
+
+.jarvis-empty-launch-copy strong,
+.jarvis-empty-launch-copy span {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.jarvis-empty-launch-copy strong {
+	font-family: var(--jarvis-mono);
+	font-size: 13px;
+}
+
+.jarvis-empty-launch-copy span {
+	color: rgba(255, 239, 232, .58);
+	font-size: 11px;
+}
+
+.jarvis-empty-hints {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+
+.jarvis-empty-hints span {
+	max-width: 100%;
+	overflow: hidden;
+	padding: 6px 8px;
+	border: 1px solid var(--jarvis-border);
+	border-radius: 2px;
+	background: rgba(6, 8, 12, .48);
+	color: rgba(255, 239, 232, .66);
+	font-size: 12px;
+	font-family: var(--jarvis-mono);
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .jarvis-card {
 	display: grid;
 	grid-template-rows: auto auto minmax(0, 1fr) auto;
-	min-width: 0;
-	min-height: 280px;
-	overflow: hidden;
-	border: 2px solid var(--jarvis-border);
-	border-radius: 14px;
+	flex: 0 0 clamp(540px, 42vw, 760px);
+	width: clamp(540px, 42vw, 760px);
+	height: min(680px, calc(100% - 8px));
+	min-width: 440px;
+	min-height: 360px;
+	max-width: none;
+	max-height: none;
+	overflow: clip;
+	resize: both;
+	border: 1px solid var(--jarvis-border);
+	border-radius: 2px;
 	background: var(--jarvis-card);
-	box-shadow: 0 24px 56px var(--jarvis-shadow), inset 0 1px 0 rgba(255, 255, 255, .08);
-	backdrop-filter: blur(18px) saturate(1.1);
+	box-shadow: 6px 6px 0 rgba(0, 0, 0, .22);
+	backdrop-filter: none;
 	pointer-events: auto;
+	cursor: default;
 }
 
 .jarvis-card.running {
-	border-color: var(--jarvis-border-strong);
+	border-color: rgba(255, 137, 105, .72);
 }
 
 .jarvis-card.error {
@@ -428,9 +606,9 @@ body.jarvis-standalone .jarvis-root,
 	justify-content: space-between;
 	gap: 8px;
 	min-height: 46px;
-	padding: 8px 14px;
-	border-bottom: 1px solid rgba(255, 126, 103, .22);
-	background: rgba(70, 31, 45, .36);
+	padding: 8px 10px 8px 14px;
+	border-bottom: 1px solid var(--jarvis-border);
+	background: rgba(6, 8, 12, .62);
 }
 
 .jarvis-card-identity {
@@ -443,13 +621,65 @@ body.jarvis-standalone .jarvis-root,
 .jarvis-card-dot {
 	width: 10px;
 	height: 10px;
-	border-radius: 50%;
+	border-radius: 2px;
 	background: var(--jarvis-muted);
+}
+
+.jarvis-card-actions {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.jarvis-card-close {
+	width: 12px;
+	height: 12px;
+	padding: 0;
+	border: 1px solid rgba(255, 93, 78, .84);
+	border-radius: 50%;
+	background: #ff5d4e;
+	color: transparent;
+	cursor: pointer;
+	outline: none;
+	flex-shrink: 0;
+	transition: background .15s;
+}
+
+.jarvis-card-close:hover,
+.jarvis-card-close:focus {
+	background: #ff3725;
+	border-color: #ff3725;
+}
+
+.jarvis-card-actions {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.jarvis-card-close {
+	width: 12px;
+	height: 12px;
+	padding: 0;
+	border: 1px solid rgba(255, 93, 78, .84);
+	border-radius: 50%;
+	background: #ff5d4e;
+	color: transparent;
+	cursor: pointer;
+	outline: none;
+	flex-shrink: 0;
+	transition: background .15s;
+}
+
+.jarvis-card-close:hover,
+.jarvis-card-close:focus {
+	background: #ff3725;
+	border-color: #ff3725;
 }
 
 .jarvis-card.running .jarvis-card-dot {
 	background: #ff6e49;
-	box-shadow: 0 0 0 4px rgba(255, 110, 73, .14);
+	box-shadow: none;
 }
 
 .jarvis-card.opening .jarvis-card-dot {
@@ -463,7 +693,7 @@ body.jarvis-standalone .jarvis-root,
 .jarvis-card h2 {
 	margin: 0;
 	overflow: hidden;
-	color: #fff8f4;
+	color: rgba(255, 249, 244, .94);
 	font-size: 14px;
 	font-weight: 700;
 	text-overflow: ellipsis;
@@ -484,7 +714,7 @@ body.jarvis-standalone .jarvis-root,
 .jarvis-card-meta {
 	overflow: hidden;
 	padding: 5px 10px;
-	color: var(--jarvis-muted);
+	color: rgba(255, 239, 232, .62);
 	font-size: 12px;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -496,8 +726,8 @@ body.jarvis-standalone .jarvis-root,
 	margin: 0 14px 10px;
 	padding: 12px;
 	overflow: hidden;
-	border: 1px solid rgba(255, 126, 103, .18);
-	border-radius: 10px;
+	border: 1px solid rgba(255, 248, 238, .18);
+	border-radius: 2px;
 	background: var(--jarvis-terminal);
 	color: var(--jarvis-text);
 	font-family: var(--vscode-editor-font-family, monospace);
@@ -531,43 +761,24 @@ body.jarvis-standalone .jarvis-root,
 }
 
 .jarvis-terminal-command input {
+	min-width: 0;
+	height: 38px;
 	padding: 0 9px;
-	background: rgba(255, 255, 255, .1);
-	color: #fff8f4;
-}
-
-.jarvis-terminal-command input::placeholder {
-	color: rgba(255, 232, 225, .54);
+	border: 1px solid var(--jarvis-border);
+	border-radius: 2px;
+	background: rgba(6, 8, 12, .7);
+	color: var(--jarvis-control-text);
+	font-family: var(--jarvis-mono);
+	outline: none;
 }
 
 @media (max-width: 1120px) {
 	.jarvis-grid {
-		grid-template-columns: minmax(0, 1fr);
-		grid-template-rows: repeat(4, minmax(300px, 1fr));
 		inset-inline: 64px 24px;
-		overflow: auto;
 	}
 
 	.jarvis-status-line {
 		display: none;
-	}
-
-	.jarvis-grid.count-1,
-	.jarvis-grid.count-2,
-	.jarvis-grid.count-3,
-	.jarvis-grid.count-4 {
-		grid-template-columns: minmax(0, 1fr);
-		grid-template-rows: repeat(var(--jarvis-active-count, 4), minmax(300px, 1fr));
-		padding-inline: 0;
-	}
-
-	.jarvis-grid.count-1 { --jarvis-active-count: 1; }
-	.jarvis-grid.count-2 { --jarvis-active-count: 2; }
-	.jarvis-grid.count-3 { --jarvis-active-count: 3; }
-	.jarvis-grid.count-4 { --jarvis-active-count: 4; }
-
-	.jarvis-grid.count-3 .jarvis-card:first-child {
-		grid-row: auto;
 	}
 }
 
@@ -575,8 +786,22 @@ body.jarvis-standalone .jarvis-root,
 	.jarvis-header {
 		left: 12px;
 		right: 12px;
-		grid-template-columns: auto minmax(0, 1fr) auto;
+		width: auto;
+		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 		transform: none;
+	}
+
+	.jarvis-brand,
+	.jarvis-status-line {
+		display: none;
+	}
+
+	.jarvis-mode-select,
+	.jarvis-workspace-select,
+	.jarvis-background-select {
+		width: 100%;
+		max-width: none;
+		min-width: 0;
 	}
 
 	.jarvis-workspace-select {
@@ -588,19 +813,8 @@ body.jarvis-standalone .jarvis-root,
 	}
 
 	.jarvis-grid {
-		inset: 70px 12px 86px;
-		grid-template-columns: minmax(0, 1fr);
-		grid-template-rows: repeat(4, minmax(300px, 1fr));
-		overflow: auto;
-	}
-
-	.jarvis-grid.count-1,
-	.jarvis-grid.count-2,
-	.jarvis-grid.count-3,
-	.jarvis-grid.count-4 {
-		grid-template-columns: minmax(0, 1fr);
-		grid-template-rows: repeat(var(--jarvis-active-count, 4), minmax(300px, 1fr));
-		padding-inline: 0;
+		inset: 118px 12px 92px;
+		padding: 12px;
 	}
 
 	.jarvis-command-bar {
@@ -611,6 +825,21 @@ body.jarvis-standalone .jarvis-root,
 	.jarvis-button:not(.jarvis-mic-button) {
 		min-width: 62px;
 		padding-inline: 12px;
+	}
+
+	.jarvis-empty-state {
+		width: 100%;
+		padding: 18px;
+	}
+
+	.jarvis-empty-launch-grid {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+
+	.jarvis-card {
+		flex-basis: min(560px, calc(100vw - 48px));
+		width: min(560px, calc(100vw - 48px));
+		min-width: min(420px, calc(100vw - 48px));
 	}
 }
 
@@ -624,6 +853,14 @@ body.jarvis-standalone .jarvis-root,
 		width: 52px;
 		height: 52px;
 	}
+
+	.jarvis-empty-state h2 {
+		font-size: 24px;
+	}
+
+	.jarvis-empty-launch-grid {
+		grid-template-columns: minmax(0, 1fr);
+	}
 }
 
 @media (max-height: 620px) {
@@ -634,7 +871,7 @@ body.jarvis-standalone .jarvis-root,
 	}
 
 	.jarvis-grid {
-		inset-block: 54px 70px;
+		inset-block: 64px 78px;
 	}
 
 	.jarvis-command-bar {

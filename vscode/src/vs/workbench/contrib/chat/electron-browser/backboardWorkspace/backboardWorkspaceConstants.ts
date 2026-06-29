@@ -5,4 +5,5 @@
 
 export const BACKBOARD_WORKSPACE_SURFACE_ID = 'workbench.backboardWorkspace';
 export const OPEN_BACKBOARD_WORKSPACE_COMMAND_ID = 'workbench.action.openBackboardWorkspace';
+export const CLOSE_BACKBOARD_WORKSPACE_COMMAND_ID = 'workbench.action.closeBackboardWorkspace';
 export const BACKBOARD_WORKSPACE_OPEN_ON_STARTUP_STORAGE_KEY = 'backboard.workspace.openOnStartup';

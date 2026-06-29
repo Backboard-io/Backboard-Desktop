@@ -105,8 +105,6 @@ export class BackboardWorkspaceService extends Disposable implements IBackboardW
 			return;
 		}
 
-		this.container.style.width = `${dimension.width}px`;
-		this.container.style.height = `${dimension.height}px`;
 		this.page.value?.layout(dimension);
 	}
 }

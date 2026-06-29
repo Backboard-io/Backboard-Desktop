@@ -31,6 +31,14 @@ export interface IJarvisWorkspaceSelectionResult {
 	readonly error?: string;
 }
 
+export interface IJarvisBackgroundSelectionResult {
+	readonly accepted?: boolean;
+	readonly path?: string;
+	readonly uri?: string;
+	readonly mediaKind?: 'image' | 'video';
+	readonly error?: string;
+}
+
 export interface IJarvisVoiceToolCall {
 	readonly callId?: string;
 	readonly name: string;
@@ -56,8 +64,10 @@ export interface IJarvisBridge {
 	readonly onTerminalExit: (listener: (event: IJarvisTerminalExitEvent) => void) => { dispose(): void };
 	openTerminal(slotId: string, terminalName: string, cwd?: string): Promise<void>;
 	writeTerminal(slotId: string, data: string): Promise<void>;
+	resizeTerminal(slotId: string, cols: number, rows: number): Promise<void>;
 	disposeTerminal(slotId: string): Promise<void>;
 	selectWorkspaceFolder(currentPath?: string): Promise<IJarvisWorkspaceSelectionResult>;
+	selectBackgroundFile(currentPath?: string): Promise<IJarvisBackgroundSelectionResult>;
 	transcribeVoice(audio: Uint8Array, mimeType: string, systemPrompt: string, tools: readonly unknown[]): Promise<IJarvisVoiceTranscriptionResult>;
 	interpretCommand(text: string, systemPrompt: string, tools: readonly unknown[]): Promise<IJarvisCommandInterpretationResult>;
 	openEditor(): Promise<void>;
