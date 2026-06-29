@@ -344,11 +344,8 @@ export class SessionsView extends ViewPane {
 		button.type = 'button';
 		button.title = label;
 		button.setAttribute('aria-label', label);
-		const iconSelector = iconClass ? `span.agent-sessions-sidebar-action-icon.${iconClass}` : 'span.agent-sessions-sidebar-action-icon';
-		const iconElement = DOM.append(button, $(iconSelector));
-		if (icon) {
-			iconElement.appendChild(renderIcon(icon));
-		}
+		const iconElement = DOM.append(button, $('span.agent-sessions-sidebar-action-icon'));
+		iconElement.appendChild(renderIcon(icon));
 		DOM.append(button, $('span.agent-sessions-sidebar-action-label', undefined, label));
 		this._register(DOM.addDisposableListener(button, DOM.EventType.CLICK, e => {
 			e.preventDefault();

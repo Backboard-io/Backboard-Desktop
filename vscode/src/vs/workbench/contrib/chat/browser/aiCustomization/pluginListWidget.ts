@@ -558,8 +558,7 @@ export class PluginListWidget extends Disposable {
 		const browseButtonContainer = DOM.append(this.buttonContainer, $('.list-add-button-container'));
 		const browseMarketplaceLabel = localize('browseMarketplace', "Browse Marketplace");
 		this.browseButton = this._register(new Button(browseButtonContainer, { ...defaultButtonStyles, secondary: true, supportIcons: true, title: browseMarketplaceLabel, ariaLabel: browseMarketplaceLabel }));
-		this.browseButton.element.classList.add('list-add-button', 'marketplace-store-button');
-		this.browseButton.label = `$(${Codicon.extensions.id}) ${browseMarketplaceLabel}`;
+		this.browseButton.element.classList.add('list-add-button');
 		this._register(this.browseButton.onDidClick(() => this.runPrimaryButtonAction()));
 
 		this.addButtonContainer = DOM.append(this.buttonContainer, $('.list-add-button-container'));
@@ -788,7 +787,7 @@ export class PluginListWidget extends Disposable {
 		}
 
 		this.browseButton.element.parentElement!.style.display = this.browseMode ? 'none' : '';
-		this.browseButton.label = `$(${Codicon.extensions.id}) ${localize('browseMarketplace', "Browse Marketplace")}`;
+		this.browseButton.label = `$(${Codicon.library.id}) ${localize('browseMarketplace', "Browse Marketplace")}`;
 		this.browseButton.enabled = browseMarketplaceAvailable;
 		const browseTitle = browseMarketplaceAvailable
 			? localize('browseMarketplace', "Browse Marketplace")

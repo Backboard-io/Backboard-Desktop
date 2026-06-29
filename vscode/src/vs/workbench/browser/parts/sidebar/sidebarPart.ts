@@ -137,12 +137,11 @@ export class SidebarPart extends AbstractPaneCompositePart {
 
 		const navigation = $('.sidebar-activity-navigation-header');
 		this.setHeaderArea(navigation);
-		const entries: readonly { label: string; icon?: string; iconClass?: string; command: string }[] = [
+		const entries: readonly { label: string; icon: string; command: string }[] = [
 			{ label: localize('sidebarActivityExplorer', "Explorer"), icon: Codicon.folderOpened.id, command: 'workbench.view.explorer' },
 			{ label: localize('sidebarActivitySearch', "Search"), icon: Codicon.searchSparkle.id, command: 'workbench.view.search' },
 			{ label: localize('sidebarActivitySourceControl', "Source Control"), icon: Codicon.gitPullRequest.id, command: 'workbench.view.scm' },
 			{ label: localize('sidebarActivityExtensions', "Extensions"), icon: Codicon.package.id, command: 'workbench.view.extensions' },
-			{ label: localize('sidebarActivityMarketplace', "Marketplace"), iconClass: 'sidebar-activity-navigation-marketplace-icon', command: 'workbench.view.backboardMarketplace' },
 		];
 
 		for (const entry of entries) {
@@ -150,9 +149,7 @@ export class SidebarPart extends AbstractPaneCompositePart {
 			button.type = 'button';
 			button.title = entry.label;
 			button.setAttribute('aria-label', entry.label);
-			const icon = entry.iconClass
-				? append(button, $(`span.${entry.iconClass}`))
-				: append(button, $(`span.codicon.codicon-${entry.icon}`));
+			const icon = append(button, $(`span.codicon.codicon-${entry.icon}`));
 			icon.setAttribute('aria-hidden', 'true');
 			this._register(addDisposableListener(button, EventType.CLICK, () => this.commandService.executeCommand(entry.command)));
 		}
