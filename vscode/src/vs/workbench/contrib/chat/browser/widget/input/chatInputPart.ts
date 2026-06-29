@@ -1254,9 +1254,9 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		if (!authHeaders) {
 			return {
 				title: localize('backboardRecentUsage.noCredentialsTitle', "Recent Usage"),
-				description: localize('backboardRecentUsage.noCredentialsDescription', "No Backboard API key or OAuth token was found on this machine."),
+				description: localize('backboardRecentUsage.noCredentialsDescription', "No Backboard API key or OAuth token was found in Backboard settings or on this machine."),
 				rows: [
-					{ label: localize('backboardRecentUsage.configPath', "Config"), value: '~/.backboard_ide/config.json' },
+					{ label: localize('backboardRecentUsage.configPath', "Sources"), value: 'Backboard settings, ~/.backboard_ide/config.json' },
 					{ label: localize('backboardRecentUsage.endpoint', "Endpoint"), value: 'GET /billing/usage/recent' },
 				],
 			};
@@ -1362,7 +1362,8 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	}
 
 	private _backboardConfigApiKey(config: Record<string, unknown>): string | undefined {
-		const apiKey = this._stringFromBackboardRecord(config.api_key)
+		const apiKey = this.configurationService.getValue<string>('backboard.apiKey')?.trim()
+			?? this._stringFromBackboardRecord(config.api_key)
 			?? this._stringFromBackboardRecord(config.apiKey)
 			?? this._stringFromBackboardRecord(config.backboard_api_key)
 			?? this._stringFromBackboardRecord(config.personal_api_key);

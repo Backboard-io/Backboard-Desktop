@@ -25,10 +25,11 @@ suite('Backboard onboarding types', () => {
 		]);
 	});
 
-	test('experience options include simple and developer modes with previews', () => {
+	test('experience options include clean, editor, and advanced modes with previews', () => {
 		assert.deepStrictEqual(ONBOARDING_EXPERIENCE_OPTIONS.map(option => option.id), [
 			OnboardingExperience.Simple,
-			OnboardingExperience.Developer,
+			OnboardingExperience.Editor,
+			OnboardingExperience.Advanced,
 		]);
 
 		for (const option of ONBOARDING_EXPERIENCE_OPTIONS) {

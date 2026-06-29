@@ -211,7 +211,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 	private _isShowing = false;
 	private postOnboardingSignInPromptShown = false;
 	private selectedThemeId = 'dark-2026';
-	private selectedExperience = OnboardingExperience.Developer;
+	private selectedExperience = OnboardingExperience.Editor;
 	private hasConfirmedBackboardSignIn = false;
 	private hasImportedApiKey = false;
 	private hasPlayedWelcomeSplash = false;
@@ -354,7 +354,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		}
 
 		this.currentStepIndex = 0;
-		this.selectedExperience = OnboardingExperience.Developer;
+		this.selectedExperience = OnboardingExperience.Editor;
 		this.hasConfirmedBackboardSignIn = false;
 		this.hasImportedApiKey = false;
 		this._syncSelectedThemeWithCurrentTheme();
@@ -1711,6 +1711,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		const envKeys = getBackboardEnvKeys(config);
 		envKeys[env] = apiKey;
 
+		await this.configurationService.updateValue('backboard.apiKey', apiKey);
 		await this.fileService.createFolder(configDir);
 		await this.fileService.writeFile(configResource, VSBuffer.fromString(`${JSON.stringify({
 			...config,

@@ -621,9 +621,9 @@ async function transcribeBackboardComposerAudio(
 	notificationService: INotificationService,
 ): Promise<void> {
 	const config = await readBackboardComposerConfig(fileService, pathService);
-	const authHeaders = backboardComposerAuthHeaders(config);
+	const authHeaders = backboardComposerAuthHeaders(config, configurationService);
 	if (!authHeaders) {
-		throw new Error(localize('interactive.backboardMicrophone.noCredentials', "No Backboard API key or OAuth token found in ~/.backboard_ide/config.json."));
+		throw new Error(localize('interactive.backboardMicrophone.noCredentials', "No Backboard API key or OAuth token found in Backboard settings or ~/.backboard_ide/config.json."));
 	}
 
 	const blob = new Blob(state.chunks, { type: mimeType });
@@ -681,8 +681,8 @@ function backboardComposerApiUrl(config: IBackboardConfigJson, configurationServ
 	return (configured || 'https://app.backboard.io/api').replace(/\/+$/, '');
 }
 
-function backboardComposerAuthHeaders(config: IBackboardConfigJson): Record<string, string> | undefined {
-	const apiKey = backboardComposerApiKey(config);
+function backboardComposerAuthHeaders(config: IBackboardConfigJson, configurationService: IConfigurationService): Record<string, string> | undefined {
+	const apiKey = backboardComposerApiKey(config, configurationService);
 	if (apiKey) {
 		return { 'X-API-Key': apiKey };
 	}
@@ -690,8 +690,9 @@ function backboardComposerAuthHeaders(config: IBackboardConfigJson): Record<stri
 	return accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined;
 }
 
-function backboardComposerApiKey(config: IBackboardConfigJson): string | undefined {
-	const apiKey = stringFromBackboardRecord(config.api_key)
+function backboardComposerApiKey(config: IBackboardConfigJson, configurationService: IConfigurationService): string | undefined {
+	const apiKey = configurationService.getValue<string>('backboard.apiKey')?.trim()
+		?? stringFromBackboardRecord(config.api_key)
 		?? stringFromBackboardRecord(config.apiKey)
 		?? stringFromBackboardRecord(config.backboard_api_key)
 		?? stringFromBackboardRecord(config.personal_api_key);

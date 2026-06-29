@@ -1532,36 +1532,57 @@
 	border-right-color: var(--vscode-settings-headerBorder);
 }
 
-/* Final sidebar polish. */
+/* Final Backboard settings layout and visual refresh. */
+.settings-editor {
+	--backboard-settings-card-background: color-mix(in srgb, var(--backboard-settings-input-background) 84%, var(--backboard-settings-background));
+	--backboard-settings-card-border: color-mix(in srgb, var(--backboard-settings-border) 78%, transparent);
+}
+
 .settings-editor > .settings-body .settings-toc-container {
+	display: flex;
+	flex-direction: column;
 	background: var(--backboard-settings-sidebar-background);
 	border-right: 0;
 }
 
 .settings-sidebar-header {
+	flex: 0 0 auto;
 	padding: 18px 16px 12px;
-	border-bottom: 0;
+	border-bottom: 1px solid var(--backboard-settings-border);
 }
 
 .settings-account {
-	gap: 12px;
-	margin-bottom: 16px;
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin-bottom: 12px;
 }
 
 .settings-account-avatar {
-	width: 27px;
-	height: 37px;
+	width: 22px;
+	height: 22px;
+	border-radius: 7px;
+	background: color-mix(in srgb, var(--backboard-settings-foreground) 8%, transparent);
+	color: var(--backboard-settings-muted-foreground);
+	font-size: 11px;
+	font-weight: 700;
+	line-height: 22px;
+	text-align: center;
 }
 
 .settings-account-name {
-	font-size: 16px;
-	font-weight: 650;
-	letter-spacing: 0;
+	font-size: 14px;
+	font-weight: 620;
+	letter-spacing: -0.01em;
+}
+
+.settings-account-name::after {
+	content: none;
 }
 
 .settings-sidebar-header > .search-container {
 	position: relative;
-	margin-bottom: 10px;
+	margin: 0 0 10px;
 	width: 100%;
 	max-width: 100%;
 	min-width: 0;
@@ -1573,9 +1594,9 @@
 	width: 100%;
 	max-width: 100%;
 	box-sizing: border-box;
-	height: 38px;
-	border-color: var(--backboard-settings-input-border) !important;
-	border-radius: 8px;
+	height: 34px;
+	border: 1px solid var(--backboard-settings-input-border) !important;
+	border-radius: 10px;
 	background: var(--backboard-settings-input-background);
 	color: var(--backboard-settings-input-foreground);
 	box-shadow: none;
@@ -1588,271 +1609,36 @@
 }
 
 .settings-sidebar-header > .search-container input {
-	padding-right: 54px;
+	padding-right: 56px;
 }
 
 .settings-sidebar-header > .search-container > .search-container-widgets {
 	position: absolute;
-	top: 7px;
+	top: 5px;
 	right: 8px;
-	height: 24px;
+	height: 22px;
 	display: flex;
 	align-items: center;
-	gap: 2px;
+	gap: 4px;
+	width: auto;
+	min-width: 48px;
+	justify-content: flex-end;
 }
 
 .settings-sidebar-header > .search-container > .search-container-widgets .action-label {
-	width: 22px;
-	height: 22px;
-	border-radius: 5px;
+	width: 20px;
+	height: 20px;
+	border-radius: 6px;
 	color: var(--backboard-settings-muted-foreground);
 }
 
-.settings-sidebar-header > .settings-header-controls {
-	margin-top: 2px;
-}
-
-.settings-sidebar-header > .settings-header-controls .settings-tabs-widget > .monaco-action-bar .actions-container {
-	gap: 6px;
-}
-
-.settings-sidebar-header > .settings-header-controls .settings-tabs-widget > .monaco-action-bar .action-item .action-label {
-	height: 25px;
-	padding: 5px 9px;
-	color: var(--backboard-settings-muted-foreground);
-}
-
-.settings-sidebar-header > .settings-header-controls .settings-tabs-widget .action-label.checked {
-	background: var(--backboard-settings-selection-background);
-	color: var(--backboard-settings-selection-foreground);
-}
-
-.settings-editor > .settings-body .settings-toc-wrapper {
-	padding: 10px 12px 18px;
-}
-
-.settings-editor > .settings-body .settings-toc-container .monaco-list-row,
-.settings-editor > .settings-body .settings-toc-container .monaco-list-row.focused {
-	outline: none !important;
-	border: 0 !important;
-	box-shadow: none !important;
-}
-
-.settings-editor > .settings-body .settings-toc-container .monaco-list-row.selected {
-	background: var(--backboard-settings-selection-background);
-	color: var(--backboard-settings-selection-foreground);
-}
-
-.settings-editor > .settings-body .settings-toc-container .monaco-list-row:not(.selected):hover {
+.settings-sidebar-header > .search-container > .search-container-widgets .action-label:hover {
 	background: var(--backboard-settings-hover-background);
 	color: var(--backboard-settings-hover-foreground);
 }
 
-.settings-editor > .settings-body .settings-tree-container {
-	box-shadow: -1px 0 0 var(--backboard-settings-border);
-}
-
-/* Right pane rhythm. */
-.settings-editor > .settings-body .settings-tree-container .monaco-list-row .monaco-tl-contents,
-.settings-editor > .settings-body .settings-tree-container .monaco-list-row .monaco-tl-contents.group-title {
-	max-width: 1040px;
-	padding-left: 48px;
-	padding-right: 48px;
-}
-
-.settings-editor > .settings-body .settings-tree-container .settings-group-title-label {
-	padding: 22px 0 10px;
-	margin: 0;
-	border-bottom: 1px solid var(--backboard-settings-border);
-	font-size: 15px;
-	font-weight: 650;
-	line-height: 20px;
-	height: 64px;
-	overflow: visible;
-}
-
-.settings-editor > .settings-body .settings-tree-container .settings-group-title-label.settings-group-level-1 {
-	font-size: 16px;
-	line-height: 22px;
-}
-
-.settings-editor > .settings-body .settings-tree-container .setting-item-contents {
-	padding-top: 10px;
-	padding-bottom: 22px;
-}
-
-.settings-editor > .settings-body .settings-tree-container .setting-toolbar-container {
+.settings-sidebar-header > .search-container > .search-container-widgets > .settings-count-widget {
 	display: none !important;
-}
-
-.settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-markdown a,
-.settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-markdown a:hover,
-.settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-markdown a:active,
-.settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-markdown code,
-.settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-markdown a > code,
-.settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-markdown a:hover > code,
-.settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-markdown a:active > code {
-	color: var(--backboard-settings-muted-foreground);
-	font-family: inherit;
-	text-decoration: none;
-	background: transparent;
-	border: 0;
-	padding: 0;
-	pointer-events: none;
-	cursor: default;
-}
-
-.settings-editor > .settings-body .settings-tree-container .monaco-list:focus-within .monaco-list-row.focused .settings-group-title-label,
-.settings-editor > .settings-body .settings-tree-container .monaco-list-row.focused .settings-group-title-label {
-	outline: none;
-	background: transparent;
-}
-
-/* Neutralize the default blue focus treatment inside Backboard Settings. */
-.settings-editor > .settings-body .settings-tree-container .monaco-list-row.focused .settings-row-inner-container {
-	background-color: transparent !important;
-}
-
-.settings-editor > .settings-body .settings-tree-container .monaco-list:focus-within .monaco-list-row.focused .setting-item-contents {
-	outline: none !important;
-	background: transparent !important;
-}
-
-.settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-markdown a:focus,
-.settings-editor > .settings-body .settings-tree-container .setting-item-contents .edit-in-settings-button:focus,
-.settings-editor > .settings-body .settings-tree-container .setting-item-control input:focus,
-.settings-editor > .settings-body .settings-tree-container .setting-item-control textarea:focus {
-	outline-color: var(--backboard-settings-focus-border) !important;
-	box-shadow: 0 0 0 1px var(--backboard-settings-focus-border) !important;
-}
-
-.settings-editor .monaco-inputbox.synthetic-focus,
-.settings-editor .monaco-inputbox:focus-within,
-.settings-editor .monaco-select-box.synthetic-focus,
-.settings-editor .monaco-select-box:focus-within {
-	outline-color: var(--backboard-settings-focus-border) !important;
-	border-color: var(--backboard-settings-focus-border) !important;
-	box-shadow: 0 0 0 1px var(--backboard-settings-focus-border) !important;
-}
-
-.settings-account-name::after {
-	content: "Settings";
-	display: block;
-	margin-top: 1px;
-	color: var(--backboard-settings-muted-foreground);
-	font-size: 12px;
-	font-weight: 500;
-	line-height: 16px;
-}
-
-/* Expanded sidebar navigation. */
-.settings-editor > .settings-body .settings-toc-wrapper {
-	padding: 14px 16px 24px;
-	background: var(--backboard-settings-sidebar-background);
-}
-
-.settings-editor > .settings-body .settings-toc-container .monaco-list,
-.settings-editor > .settings-body .settings-toc-container .monaco-list-rows,
-.settings-editor > .settings-body .settings-toc-container .monaco-scrollable-element {
-	background: transparent !important;
-}
-
-.settings-editor > .settings-body .settings-toc-container .monaco-list-row {
-	border-radius: 8px;
-	color: var(--backboard-settings-muted-foreground);
-}
-
-.settings-editor > .settings-body .settings-toc-container .monaco-list-row .monaco-tl-contents {
-	height: 32px;
-	align-items: center;
-	padding-right: 8px;
-}
-
-.settings-editor > .settings-body .settings-toc-container .monaco-list-row .monaco-tl-twistie {
-	width: 24px !important;
-	height: 32px;
-	margin-left: 2px;
-	line-height: 32px;
-	color: var(--backboard-settings-muted-foreground);
-}
-
-.settings-editor > .settings-body .settings-toc-container .monaco-list-row .settings-toc-entry {
-	line-height: 32px;
-	font-size: 13px;
-	font-weight: 560;
-	color: var(--backboard-settings-muted-foreground);
-}
-
-.settings-editor > .settings-body .settings-toc-container .monaco-list-row.selected {
-	background: var(--backboard-settings-selection-background);
-	color: var(--backboard-settings-selection-foreground);
-}
-
-.settings-editor > .settings-body .settings-toc-container .monaco-list-row.selected .settings-toc-entry {
-	color: var(--backboard-settings-selection-foreground);
-	font-weight: 650;
-}
-
-.settings-editor > .settings-body .settings-toc-container .monaco-list-row:not(.selected):hover {
-	background: var(--backboard-settings-hover-background);
-	color: var(--backboard-settings-hover-foreground);
-}
-
-/* Keep right-pane section headers and focused rows neutral. */
-.settings-editor > .settings-body .settings-tree-container .monaco-list-row,
-.settings-editor > .settings-body .settings-tree-container .monaco-list-row.focused,
-.settings-editor > .settings-body .settings-tree-container .monaco-list-row.selected,
-.settings-editor > .settings-body .settings-tree-container .monaco-list-row:hover {
-	background: transparent !important;
-}
-
-.settings-editor > .settings-body .settings-tree-container .monaco-list-row .settings-row-inner-container,
-.settings-editor > .settings-body .settings-tree-container .monaco-list-row .monaco-tl-contents.group-title,
-.settings-editor > .settings-body .settings-tree-container .monaco-list-row .settings-group-title-label {
-	background: transparent !important;
-	background-color: transparent !important;
-}
-
-/* Backboard Settings keeps the product layout while inheriting the active theme. */
-.monaco-workbench.vs-dark .settings-editor,
-.monaco-workbench.hc-black .settings-editor,
-.monaco-workbench.vs-dark .settings-editor > .settings-body,
-.monaco-workbench.hc-black .settings-editor > .settings-body,
-.monaco-workbench.vs-dark .settings-editor > .settings-body > .monaco-split-view2,
-.monaco-workbench.hc-black .settings-editor > .settings-body > .monaco-split-view2,
-.monaco-workbench.vs-dark .settings-editor > .settings-body .settings-tree-container,
-.monaco-workbench.hc-black .settings-editor > .settings-body .settings-tree-container {
-	background: var(--backboard-settings-background);
-	color: var(--backboard-settings-foreground);
-}
-
-.monaco-workbench.vs-dark .settings-editor > .settings-body .settings-toc-container,
-.monaco-workbench.hc-black .settings-editor > .settings-body .settings-toc-container,
-.monaco-workbench.vs-dark .settings-editor > .settings-body .settings-toc-wrapper,
-.monaco-workbench.hc-black .settings-editor > .settings-body .settings-toc-wrapper {
-	background: var(--backboard-settings-sidebar-background) !important;
-	color: var(--backboard-settings-muted-foreground);
-}
-
-.monaco-workbench.vs-dark .settings-account-avatar,
-.monaco-workbench.hc-black .settings-account-avatar {
-	background: var(--backboard-settings-foreground);
-}
-
-.monaco-workbench.vs-dark .settings-account-name,
-.monaco-workbench.hc-black .settings-account-name,
-.monaco-workbench.vs-dark .settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-label,
-.monaco-workbench.hc-black .settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-label,
-.monaco-workbench.vs-dark .settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-category,
-.monaco-workbench.hc-black .settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-category {
-	color: var(--backboard-settings-foreground);
-}
-
-.monaco-workbench.vs-dark .settings-account-name::after,
-.monaco-workbench.hc-black .settings-account-name::after,
-.monaco-workbench.vs-dark .settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-description,
-.monaco-workbench.hc-black .settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-description {
-	color: var(--backboard-settings-muted-foreground);
 }
 
 .settings-sidebar-header > .settings-search-count-container {
@@ -1881,17 +1667,271 @@
 
 .settings-sidebar-header > .settings-search-count-container > .settings-count-widget:not(:empty) {
 	display: block;
-	margin: 6px 0 8px;
+	margin: 4px 0 10px;
 }
 
-.settings-sidebar-header > .search-container > .search-container-widgets {
-	width: auto;
-	min-width: 48px;
+.settings-sidebar-header > .settings-header-controls {
+	margin-top: 2px;
+}
+
+.settings-sidebar-header > .settings-header-controls .settings-tabs-widget > .monaco-action-bar .actions-container {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+}
+
+.settings-sidebar-header > .settings-header-controls .settings-tabs-widget > .monaco-action-bar .action-item .action-label {
+	height: 26px;
+	padding: 5px 9px;
+	border-radius: 8px;
+	color: var(--backboard-settings-muted-foreground);
+	font-size: 11px;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+}
+
+.settings-sidebar-header > .settings-header-controls .settings-tabs-widget .action-label.checked {
+	background: var(--backboard-settings-selection-background);
+	color: var(--backboard-settings-selection-foreground);
+}
+
+.settings-editor > .settings-body .settings-toc-wrapper {
+	position: relative;
+	flex: 1 1 auto;
+	min-height: 0;
+	height: 0;
+	margin: 0;
+	padding: 12px 14px 22px;
+	overflow: hidden;
+	background: var(--backboard-settings-sidebar-background);
+}
+
+.settings-editor > .settings-body .settings-toc-container .monaco-list,
+.settings-editor > .settings-body .settings-toc-container .monaco-list-rows,
+.settings-editor > .settings-body .settings-toc-container .monaco-scrollable-element {
+	background: transparent !important;
+	min-height: 0;
+}
+
+.settings-editor > .settings-body .settings-toc-container .monaco-scrollable-element {
+	height: 100% !important;
+}
+
+.settings-editor > .settings-body .settings-toc-container .monaco-list-row,
+.settings-editor > .settings-body .settings-toc-container .monaco-list-row.focused {
+	outline: none !important;
+	border: 0 !important;
+	box-shadow: none !important;
+	border-radius: 12px;
+	color: var(--backboard-settings-muted-foreground);
+}
+
+.settings-editor > .settings-body .settings-toc-container .monaco-list-row .monaco-tl-contents {
+	height: 36px;
+	align-items: center;
+	padding-right: 10px;
+}
+
+.settings-editor > .settings-body .settings-toc-container .monaco-list-row .monaco-tl-twistie {
+	width: 24px !important;
+	height: 36px;
+	margin-left: 4px;
+	line-height: 36px;
+	color: var(--backboard-settings-muted-foreground);
+}
+
+.settings-editor > .settings-body .settings-toc-container .monaco-list-row .settings-toc-entry {
+	line-height: 36px;
+	font-size: 13px;
+	font-weight: 560;
+	color: var(--backboard-settings-muted-foreground);
+}
+
+.settings-editor > .settings-body .settings-toc-container .monaco-list-row.selected {
+	background: var(--backboard-settings-selection-background);
+	color: var(--backboard-settings-selection-foreground);
+}
+
+.settings-editor > .settings-body .settings-toc-container .monaco-list-row.selected .settings-toc-entry {
+	color: var(--backboard-settings-selection-foreground);
+	font-weight: 650;
+}
+
+.settings-editor > .settings-body .settings-toc-container .monaco-list-row:not(.selected):hover {
+	background: var(--backboard-settings-hover-background);
+	color: var(--backboard-settings-hover-foreground);
+}
+
+.settings-editor > .settings-body .settings-tree-container {
+	box-shadow: -1px 0 0 var(--backboard-settings-border);
+}
+
+.settings-editor > .settings-body .settings-tree-container .monaco-list-row,
+.settings-editor > .settings-body .settings-tree-container .monaco-list-row.focused,
+.settings-editor > .settings-body .settings-tree-container .monaco-list-row.selected,
+.settings-editor > .settings-body .settings-tree-container .monaco-list-row:hover {
+	background: transparent !important;
+}
+
+.settings-editor > .settings-body .settings-tree-container .monaco-list-row .settings-row-inner-container,
+.settings-editor > .settings-body .settings-tree-container .monaco-list-row .monaco-tl-contents.group-title,
+.settings-editor > .settings-body .settings-tree-container .monaco-list-row .settings-group-title-label {
+	background: transparent !important;
+	background-color: transparent !important;
+}
+
+.settings-editor > .settings-body .settings-tree-container .monaco-list-row .monaco-tl-contents,
+.settings-editor > .settings-body .settings-tree-container .monaco-list-row .monaco-tl-contents.group-title {
+	max-width: 1080px;
+	padding-left: 56px;
+	padding-right: 56px;
+}
+
+.settings-editor > .settings-body .settings-tree-container .settings-group-title-label {
+	padding: 28px 0 12px;
+	margin: 0;
+	border-bottom: 1px solid var(--backboard-settings-border);
+	font-size: 18px;
+	font-weight: 650;
+	line-height: 24px;
+	height: 72px;
+	overflow: visible;
+	letter-spacing: -0.01em;
+}
+
+.settings-editor > .settings-body .settings-tree-container .settings-group-title-label.settings-group-level-1 {
+	font-size: 18px;
+	line-height: 24px;
+}
+
+.settings-editor > .settings-body .settings-tree-container .setting-item-contents {
+	grid-template-columns: minmax(0, 1fr) minmax(160px, 280px);
+	column-gap: 36px;
+	margin: 0 0 14px;
+	padding: 18px 20px;
+	border: 1px solid var(--backboard-settings-card-border);
+	border-radius: 18px;
+	background: var(--backboard-settings-card-background);
+	box-shadow: none;
+}
+
+.settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-title {
+	padding-bottom: 4px;
+}
+
+.settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-label,
+.settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-category {
+	font-size: 15px;
+	font-weight: 640;
+	letter-spacing: -0.01em;
+}
+
+.settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-description {
+	margin-top: 6px;
+	color: var(--backboard-settings-muted-foreground);
+	font-size: 13px;
+	line-height: 20px;
+}
+
+.settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-value {
 	justify-content: flex-end;
+	align-items: center;
 }
 
-.settings-sidebar-header > .search-container > .search-container-widgets > .settings-count-widget {
+.settings-editor > .settings-body .settings-tree-container .setting-toolbar-container {
 	display: none !important;
+}
+
+.settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-markdown a,
+.settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-markdown a > code,
+.settings-editor > .settings-body .settings-tree-container .setting-item-contents .edit-in-settings-button {
+	color: var(--vscode-textLink-foreground);
+	text-decoration: none;
+	pointer-events: auto;
+	cursor: pointer;
+}
+
+.settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-markdown a:hover,
+.settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-markdown a:active,
+.settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-markdown a:hover > code,
+.settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-markdown a:active > code,
+.settings-editor > .settings-body .settings-tree-container .setting-item-contents .edit-in-settings-button:hover {
+	color: var(--vscode-textLink-activeForeground);
+	text-decoration: underline;
+}
+
+.settings-editor > .settings-body .settings-tree-container .monaco-list:focus-within .monaco-list-row.focused .settings-group-title-label,
+.settings-editor > .settings-body .settings-tree-container .monaco-list-row.focused .settings-group-title-label {
+	outline: none;
+	background: transparent;
+}
+
+.settings-editor > .settings-body .settings-tree-container .monaco-list-row.focused .settings-row-inner-container {
+	background-color: transparent !important;
+}
+
+.settings-editor > .settings-body .settings-tree-container .monaco-list:focus-within .monaco-list-row.focused .setting-item-contents {
+	outline: none !important;
+	background: var(--backboard-settings-card-background) !important;
+}
+
+.settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-markdown a:focus,
+.settings-editor > .settings-body .settings-tree-container .setting-item-contents .edit-in-settings-button:focus,
+.settings-editor > .settings-body .settings-tree-container .setting-item-control input:focus,
+.settings-editor > .settings-body .settings-tree-container .setting-item-control textarea:focus {
+	outline-color: var(--backboard-settings-focus-border) !important;
+	box-shadow: 0 0 0 1px var(--backboard-settings-focus-border) !important;
+}
+
+.settings-editor .monaco-inputbox.synthetic-focus,
+.settings-editor .monaco-inputbox:focus-within,
+.settings-editor .monaco-select-box.synthetic-focus,
+.settings-editor .monaco-select-box:focus-within {
+	outline-color: var(--backboard-settings-focus-border) !important;
+	border-color: var(--backboard-settings-focus-border) !important;
+	box-shadow: 0 0 0 1px var(--backboard-settings-focus-border) !important;
+}
+
+.monaco-workbench.vs-dark .settings-editor,
+.monaco-workbench.hc-black .settings-editor,
+.monaco-workbench.vs-dark .settings-editor > .settings-body,
+.monaco-workbench.hc-black .settings-editor > .settings-body,
+.monaco-workbench.vs-dark .settings-editor > .settings-body > .monaco-split-view2,
+.monaco-workbench.hc-black .settings-editor > .settings-body > .monaco-split-view2,
+.monaco-workbench.vs-dark .settings-editor > .settings-body .settings-tree-container,
+.monaco-workbench.hc-black .settings-editor > .settings-body .settings-tree-container {
+	background: var(--backboard-settings-background);
+	color: var(--backboard-settings-foreground);
+}
+
+.monaco-workbench.vs-dark .settings-editor > .settings-body .settings-toc-container,
+.monaco-workbench.hc-black .settings-editor > .settings-body .settings-toc-container,
+.monaco-workbench.vs-dark .settings-editor > .settings-body .settings-toc-wrapper,
+.monaco-workbench.hc-black .settings-editor > .settings-body .settings-toc-wrapper {
+	background: var(--backboard-settings-sidebar-background) !important;
+	color: var(--backboard-settings-muted-foreground);
+}
+
+.monaco-workbench.vs-dark .settings-account-avatar,
+.monaco-workbench.hc-black .settings-account-avatar {
+	background: color-mix(in srgb, var(--backboard-settings-foreground) 12%, transparent);
+}
+
+.monaco-workbench.vs-dark .settings-account-name,
+.monaco-workbench.hc-black .settings-account-name,
+.monaco-workbench.vs-dark .settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-label,
+.monaco-workbench.hc-black .settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-label,
+.monaco-workbench.vs-dark .settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-category,
+.monaco-workbench.hc-black .settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-category {
+	color: var(--backboard-settings-foreground);
+}
+
+.monaco-workbench.vs-dark .settings-account-name::after,
+.monaco-workbench.hc-black .settings-account-name::after,
+.monaco-workbench.vs-dark .settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-description,
+.monaco-workbench.hc-black .settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-description {
+	color: var(--backboard-settings-muted-foreground);
 }
 
 .settings-sidebar-header > .search-container .monaco-editor,
@@ -1914,12 +1954,6 @@
 	border-color: var(--backboard-settings-input-border);
 }
 
-/* Backboard settings controls: keep compact controls readable and intentional. */
-.settings-editor > .settings-body .settings-tree-container .setting-item-contents {
-	grid-template-columns: minmax(0, 1fr) minmax(128px, max-content);
-	column-gap: 32px;
-}
-
 .settings-editor > .settings-body .settings-tree-container .setting-item.setting-item-text .setting-item-value > .setting-item-control,
 .settings-editor > .settings-body .settings-tree-container .setting-item.setting-item-number .setting-item-value > .setting-item-control {
 	width: min(420px, 100%);
@@ -1927,16 +1961,16 @@
 }
 
 .settings-editor > .settings-body .settings-tree-container .setting-item.setting-item-enum .setting-item-value > .setting-item-control {
-	width: min(180px, 100%);
-	min-width: 132px;
-	max-width: 220px;
+	width: min(260px, 100%);
+	min-width: 180px;
+	max-width: 260px;
 }
 
 .settings-editor > .settings-body .settings-tree-container .setting-item.setting-item-enum .setting-item-value > .setting-item-control > .select-container,
 .settings-editor > .settings-body .settings-tree-container .setting-item.setting-item-enum .setting-item-value > .setting-item-control > select,
 .settings-editor > .settings-body .settings-tree-container .setting-item-contents .monaco-select-box {
 	width: 100% !important;
-	min-width: 132px;
+	min-width: 180px;
 }
 
 .settings-editor > .settings-body .settings-tree-container .setting-item-contents .monaco-select-box,
@@ -1944,9 +1978,9 @@
 .settings-editor > .settings-body .settings-tree-container .setting-item-control textarea,
 .settings-editor > .settings-body .settings-tree-container .setting-item-contents .edit-in-settings-button,
 .settings-editor > .settings-body .settings-tree-container .setting-list-widget .setting-list-object-list-row.select-container {
-	min-height: 34px;
+	min-height: 40px;
 	border: 1px solid var(--backboard-settings-input-border);
-	border-radius: 9px;
+	border-radius: 12px;
 	background-color: var(--backboard-settings-input-background);
 	color: var(--backboard-settings-input-foreground);
 	box-shadow: none;
@@ -1957,21 +1991,21 @@
 .settings-editor > .settings-body .settings-tree-container .setting-item-contents .monaco-select-box,
 .settings-editor > .settings-body .settings-tree-container .setting-item-control input,
 .settings-editor > .settings-body .settings-tree-container .setting-item-control textarea {
-	padding-inline: 12px;
+	padding-inline: 14px;
 }
 
 .settings-editor > .settings-body .settings-tree-container .setting-item-contents .monaco-select-box {
-	padding-right: 34px;
-	line-height: 32px;
+	padding-right: 36px;
+	line-height: 38px;
 }
 
 .settings-editor > .settings-body .settings-tree-container .setting-item-control .monaco-inputbox {
 	width: 100%;
-	border-radius: 9px;
+	border-radius: 12px;
 }
 
 .settings-editor > .settings-body .settings-tree-container .setting-item-control .monaco-inputbox .action-bar {
-	padding-right: 6px;
+	padding-right: 8px;
 }
 
 .settings-editor > .settings-body .settings-tree-container .setting-item-control .monaco-inputbox .action-label {
@@ -1988,7 +2022,7 @@
 
 .settings-editor > .settings-body .settings-tree-container .setting-item-contents .edit-in-settings-button {
 	padding: 0 14px;
-	line-height: 32px;
+	line-height: 38px;
 }
 
 .settings-editor > .settings-body .settings-tree-container .setting-item-contents .monaco-select-box:hover,
@@ -2011,15 +2045,15 @@
 
 .monaco-select-box-dropdown-container {
 	border: 1px solid var(--vscode-dropdown-border, var(--vscode-input-border, var(--vscode-focusBorder))) !important;
-	border-radius: 10px !important;
+	border-radius: 14px !important;
 	background: var(--vscode-dropdown-background, var(--vscode-input-background)) !important;
-	box-shadow: 0 10px 24px var(--vscode-widget-shadow, transparent) !important;
+	box-shadow: 0 16px 32px var(--vscode-widget-shadow, transparent) !important;
 	overflow: hidden;
 }
 
 .monaco-select-box-dropdown-container > .select-box-dropdown-list-container .monaco-list .monaco-list-row {
 	font-size: 13px;
-	line-height: 28px;
+	line-height: 32px;
 }
 
 .monaco-select-box-dropdown-container > .select-box-dropdown-list-container .monaco-list .monaco-list-row.focused {

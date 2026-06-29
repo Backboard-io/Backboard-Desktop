@@ -176,6 +176,13 @@ export class NodeAgentHostStarter extends Disposable implements IAgentHostStarte
 		if (resolvedApiUrl) {
 			env.VSCODE_BACKBOARD_API_URL = resolvedApiUrl;
 		}
+
+		const configuredApiKey = this._configurationService.getValue<string>('backboard.apiKey')?.trim();
+		const parentApiKey = parentEnv.BACKBOARD_API_KEY || parentEnv.VSCODE_BACKBOARD_API_KEY;
+		const resolvedApiKey = parentApiKey || configuredApiKey;
+		if (resolvedApiKey) {
+			env.VSCODE_BACKBOARD_API_KEY = resolvedApiKey;
+		}
 		return env;
 	}
 }

@@ -71,9 +71,39 @@ export const tocData: ITOCEntry<string> = {
 	label: 'root',
 	children: [
 		{
+			id: 'account',
+			label: localize('account', "Account"),
+			children: [
+				{
+					id: 'account/backboard',
+					label: localize('settings', "Settings"),
+					settings: [
+						'backboard.apiKey',
+						'backboard.defaultModel',
+						'backboard.workspaceRoot'
+					]
+				}
+			]
+		},
+		{
+			id: 'simple',
+			label: localize('backboardSimple', "Simple Mode"),
+			settings: [
+				'backboard.mode',
+				'backboard.intensity',
+				'backboard.webSearch',
+				'backboard.imageGeneration',
+				'backboard.voiceMode'
+			]
+		},
+		{
 			id: 'editor',
-			label: localize('textEditor', "Text Editor"),
-			settings: ['editor.*'],
+			label: localize('editor', "Editor Mode"),
+			settings: [
+				'editor.*',
+				'backboard.enable',
+				'backboard.nextEditSuggestions.*'
+			],
 			children: [
 				{
 					id: 'editor/cursor',
@@ -119,7 +149,28 @@ export const tocData: ITOCEntry<string> = {
 					id: 'editor/files',
 					label: localize('files', "Files"),
 					settings: ['files.*']
+				},
+				{
+					id: 'editor/backboard',
+					label: localize('editorBackboard', "Backboard"),
+					settings: [
+						'backboard.enable',
+						'backboard.nextEditSuggestions.*'
+					]
 				}
+			]
+		},
+		{
+			id: 'advanced',
+			label: localize('backboardAdvanced', "Advanced Mode"),
+			settings: [
+				'backboard.advanced',
+				'backboard.mcp*',
+				'backboard.env',
+				'backboard.apiUrl',
+				'backboard.oauthRedirectUri',
+				'backboard.bridgePath',
+				'backboard.updates.*'
 			]
 		},
 		{

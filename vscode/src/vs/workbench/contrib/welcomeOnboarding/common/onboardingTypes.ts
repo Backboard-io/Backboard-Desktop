@@ -22,8 +22,9 @@ export const enum OnboardingStepId {
  * Backboard workspace entry points ported from the Zed onboarding flow.
  */
 export const enum OnboardingExperience {
-	Simple = 'beginner',
-	Developer = 'developer',
+	Simple = 'simple',
+	Editor = 'editor',
+	Advanced = 'advanced',
 }
 
 export interface IOnboardingExperienceOption {
@@ -38,17 +39,25 @@ export interface IOnboardingExperienceOption {
 export const ONBOARDING_EXPERIENCE_OPTIONS: readonly IOnboardingExperienceOption[] = [
 	{
 		id: OnboardingExperience.Simple,
-		label: localize('onboarding.backboard.experience.simple', "Simple"),
-		eyebrow: localize('onboarding.backboard.experience.simple.eyebrow', "Chat First"),
-		description: localize('onboarding.backboard.experience.simple.description', "A streamlined workspace for prompting, previewing, and iterating."),
+		label: localize('onboarding.backboard.experience.simple', "Clean"),
+		eyebrow: localize('onboarding.backboard.experience.simple.eyebrow', "Prompt First"),
+		description: localize('onboarding.backboard.experience.simple.description', "I don't want to see code, I just want to build things."),
 		lightPreview: 'onboarding-simple.png',
 		darkPreview: 'onboarding-simple-dark.png',
 	},
 	{
-		id: OnboardingExperience.Developer,
-		label: localize('onboarding.backboard.experience.developer', "Developer"),
-		eyebrow: localize('onboarding.backboard.experience.developer.eyebrow', "Editor First"),
-		description: localize('onboarding.backboard.experience.developer.description', "The full workspace with files, terminal, editor, and agents visible."),
+		id: OnboardingExperience.Editor,
+		label: localize('onboarding.backboard.experience.editor', "Editor"),
+		eyebrow: localize('onboarding.backboard.experience.editor.eyebrow', "Code First"),
+		description: localize('onboarding.backboard.experience.editor.description', "I want to see and edit code, with Backboard close by."),
+		lightPreview: 'onboarding-dev.png',
+		darkPreview: 'onboarding-dev-dark.png',
+	},
+	{
+		id: OnboardingExperience.Advanced,
+		label: localize('onboarding.backboard.experience.advanced', "Advanced"),
+		eyebrow: localize('onboarding.backboard.experience.advanced.eyebrow', "Orchestrate Everything"),
+		description: localize('onboarding.backboard.experience.advanced.description', "I want one unified workspace to orchestrate all my agents."),
 		lightPreview: 'onboarding-dev.png',
 		darkPreview: 'onboarding-dev-dark.png',
 	},
