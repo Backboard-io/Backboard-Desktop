@@ -8,8 +8,8 @@ import { CancellationToken } from '../../../base/common/cancellation.js';
 import { URI } from '../../../base/common/uri.js';
 import { ISharedWebContentExtractorService } from '../common/webContentExtractor.js';
 
-const TEXT_FETCH_TIMEOUT_MS = 10_000;
-const TEXT_FETCH_MAX_BYTES = 2 * 1024 * 1024;
+const TEXT_FETCH_TIMEOUT_MS = 30_000;
+const TEXT_FETCH_MAX_BYTES = 16 * 1024 * 1024;
 const PRIVATE_HOST_PATTERNS = [
 	/^localhost$/i,
 	/^127\./,
@@ -57,10 +57,15 @@ export class SharedWebContentExtractorService implements ISharedWebContentExtrac
 			}
 			const response = await fetch(uri.toString(true), {
 				headers,
-				redirect: 'manual',
+				redirect: 'follow',
 				signal: controller.signal,
 			});
 			if (!response.ok) {
+				return undefined;
+			}
+			// Validate the final URL after redirects is still a safe remote URI.
+			const finalUri = URI.parse(response.url);
+			if (!this.isSafeRemoteTextUri(finalUri)) {
 				return undefined;
 			}
 			const contentType = response.headers.get('content-type')?.toLowerCase();
