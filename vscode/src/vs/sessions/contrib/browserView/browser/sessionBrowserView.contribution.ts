@@ -15,13 +15,11 @@ import { Registry } from '../../../../platform/registry/common/platform.js';
 import { registerIcon } from '../../../../platform/theme/common/iconRegistry.js';
 import { ViewPaneContainer } from '../../../../workbench/browser/parts/views/viewPaneContainer.js';
 import { registerWorkbenchContribution2, WorkbenchPhase } from '../../../../workbench/common/contributions.js';
-import { IsAuxiliaryWindowContext } from '../../../../workbench/common/contextkeys.js';
 import { Extensions as ViewContainerExtensions, IViewContainersRegistry, IViewsRegistry, ViewContainerLocation, WindowEnablement } from '../../../../workbench/common/views.js';
 import { BrowserEditorInput } from '../../../../workbench/contrib/browserView/common/browserEditorInput.js';
 import { IBrowserViewWorkbenchService } from '../../../../workbench/contrib/browserView/common/browserView.js';
 import { IEditorService } from '../../../../workbench/services/editor/common/editorService.js';
-import { Menus } from '../../../browser/menus.js';
-import { IsPhoneLayoutContext, SessionsWelcomeVisibleContext } from '../../../common/contextkeys.js';
+import { IsPhoneLayoutContext } from '../../../common/contextkeys.js';
 import { SESSIONS_BROWSER_VIEW_CONTAINER_ID, SESSIONS_BROWSER_VIEW_ID, SessionsBrowserViewPane } from './sessionBrowserPanel.js';
 import { SessionBrowserViewController } from './sessionBrowserView.js';
 
@@ -65,17 +63,7 @@ class AddBrowserAreaScreenshotToChatFromSessionAction extends Action2 {
 			id: AddBrowserAreaScreenshotToChatFromSessionAction.ID,
 			title: localize2('sessions.browser.addAreaScreenshotToChat', "Add Area Screenshot to Chat"),
 			icon: Codicon.screenFull,
-			precondition: BrowserEditorOpenContext,
-			menu: {
-				id: Menus.TitleBarRightLayout,
-				group: 'navigation',
-				order: -1,
-				when: ContextKeyExpr.and(
-					IsAuxiliaryWindowContext.toNegated(),
-					SessionsWelcomeVisibleContext.toNegated(),
-					IsPhoneLayoutContext.negate()
-				),
-			}
+			precondition: BrowserEditorOpenContext
 		});
 	}
 

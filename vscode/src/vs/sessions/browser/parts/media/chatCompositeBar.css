@@ -281,6 +281,21 @@
 	border-bottom: none;
 	background: transparent;
 	container-type: unset;
+	z-index: 40;
+	pointer-events: auto;
+	-webkit-app-region: no-drag;
+}
+
+.chat-composite-bar.chat-composite-bar-toolbar-floating,
+.chat-composite-bar.chat-composite-bar-toolbar-floating .chat-composite-bar-toolbar,
+.chat-composite-bar.chat-composite-bar-toolbar-floating .monaco-toolbar,
+.chat-composite-bar.chat-composite-bar-toolbar-floating .monaco-action-bar,
+.chat-composite-bar.chat-composite-bar-toolbar-floating .actions-container,
+.chat-composite-bar.chat-composite-bar-toolbar-floating .action-item,
+.chat-composite-bar.chat-composite-bar-toolbar-floating .action-label,
+.chat-composite-bar.chat-composite-bar-toolbar-floating button {
+	pointer-events: auto;
+	-webkit-app-region: no-drag;
 }
 
 /* Base tab: preserve chat title casing while keeping the same pill treatment */

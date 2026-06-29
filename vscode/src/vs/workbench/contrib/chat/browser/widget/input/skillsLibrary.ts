@@ -20,6 +20,7 @@ import { ActionListItemKind, IActionListItem } from '../../../../../../platform/
 import { IActionWidgetDropdownAction } from '../../../../../../platform/actionWidget/browser/actionWidgetDropdown.js';
 import { ICommandService } from '../../../../../../platform/commands/common/commands.js';
 import { IDialogService } from '../../../../../../platform/dialogs/common/dialogs.js';
+import { IContextMenuService } from '../../../../../../platform/contextview/browser/contextView.js';
 import { FileSystemProviderCapabilities, IFileService } from '../../../../../../platform/files/common/files.js';
 import { ILogService } from '../../../../../../platform/log/common/log.js';
 import { GalleryMcpServerStatus, IGalleryMcpServer, IGalleryMcpServerConfiguration, ILocalMcpServer, IMcpGalleryService, RegistryType, TransportType } from '../../../../../../platform/mcp/common/mcpManagement.js';
@@ -37,7 +38,7 @@ import { IWorkbenchLocalMcpServer, IWorkbenchMcpManagementService, LocalMcpServe
 import { getSkillFolderName, SKILL_FILENAME } from '../../../common/promptSyntax/config/promptFileLocations.js';
 import { IPromptsService, PromptsStorage } from '../../../common/promptSyntax/service/promptsService.js';
 
-const BASE_URL = 'https://skills.sh';
+const BASE_URL = 'https://www.skills.sh';
 const MASTRA_REGISTRY_URL = 'https://raw.githubusercontent.com/mastra-ai/skills-api/main/src/registry/scraped-skills.json';
 const PUBLIC_OFFICIAL_PATH = '/official';
 const FAVORITES_STORAGE_KEY = 'chat.skillsLibrary.favorites';
@@ -144,6 +145,17 @@ const MCP_MARKETPLACE_CATEGORIES: readonly { readonly id: McpMarketplaceCategory
 	{ id: 'core-utilities', label: localize('chat.skillsLibrary.mcpCategory.coreUtilities', "Utilities") },
 	{ id: 'developer-tools', label: localize('chat.skillsLibrary.mcpCategory.developerTools', "Developer") },
 	{ id: 'all', label: localize('chat.skillsLibrary.mcpCategory.all', "All MCPs"), gapBefore: true },
+];
+
+const EMBEDDED_MCP_MARKETPLACE_CATEGORIES: readonly { readonly id: McpMarketplaceCategory; readonly label: string }[] = [
+	{ id: 'pinned', label: localize('chat.skillsLibrary.mcpCategory.pinned', "Pinned") },
+	{ id: 'installed', label: localize('chat.skillsLibrary.mcpCategory.installed', "Installed") },
+	{ id: 'all', label: localize('chat.skillsLibrary.mcpCategory.all', "All MCPs") },
+	{ id: 'communication-design-pm', label: localize('chat.skillsLibrary.mcpCategory.communication', "Productivity") },
+	{ id: 'cloud-infrastructure', label: localize('chat.skillsLibrary.mcpCategory.cloud', "Infrastructure") },
+	{ id: 'observability', label: localize('chat.skillsLibrary.mcpCategory.observability', "Observability") },
+	{ id: 'core-utilities', label: localize('chat.skillsLibrary.mcpCategory.coreUtilities', "Utilities") },
+	{ id: 'developer-tools', label: localize('chat.skillsLibrary.mcpCategory.developerTools', "Developer") },
 ];
 
 const MCP_MARKETPLACE_CATALOG: readonly IMcpMarketplaceCatalogEntry[] = [
@@ -448,7 +460,11 @@ async function fetchSkillsShDirectory(webContentExtractorService: ISharedWebCont
 	try {
 		return await fetchSkillsShApiDirectory(webContentExtractorService, token);
 	} catch {
-		return fetchSkillsShPublicDirectory(webContentExtractorService, token);
+		try {
+			return await fetchSkillsShPublicDirectory(webContentExtractorService, token);
+		} catch {
+			return fetchSkillsShOpenSourceDirectory(webContentExtractorService, token);
+		}
 	}
 }
 
@@ -515,7 +531,11 @@ async function fetchSkillsShSearch(webContentExtractorService: ISharedWebContent
 		}
 		return dedupeItems(parsed.data.map(item => mapSkillsShApiSkill(item)).filter((item): item is ISkillsShListItem => !!item));
 	} catch {
-		return fetchSkillsShLegacySearch(webContentExtractorService, query, token);
+		try {
+			return await fetchSkillsShLegacySearch(webContentExtractorService, query, token);
+		} catch {
+			return searchOpenSourceSkillsDirectory(webContentExtractorService, query, token);
+		}
 	}
 }
 
@@ -539,6 +559,34 @@ async function fetchMastraSkillsDirectory(webContentExtractorService: ISharedWeb
 		return [];
 	}
 	return dedupeItems(parsed.skills.map(parseMastraSkillItem).filter((item): item is ISkillsShListItem => !!item));
+}
+
+async function fetchSkillsShOpenSourceDirectory(webContentExtractorService: ISharedWebContentExtractorService, token?: CancellationToken): Promise<SkillsShDirectory> {
+	const items = (await listMastraSkillsDirectory(webContentExtractorService, token))
+		.map(item => ({ ...item, isOfficial: true }));
+	const officialOwners = createOfficialOwnersFromSkills(items);
+	return {
+		// When both skills.sh endpoints are unavailable, keep the marketplace usable by
+		// surfacing the open-source registry in the same catalog slot.
+		all: items,
+		byCategory: { official: items },
+		officialOwners,
+		total: items.length,
+	};
+}
+
+async function searchOpenSourceSkillsDirectory(webContentExtractorService: ISharedWebContentExtractorService, query: string, token?: CancellationToken): Promise<ISkillsShListItem[]> {
+	const normalizedQuery = query.trim().toLowerCase();
+	if (!normalizedQuery) {
+		return [];
+	}
+	const items = await listMastraSkillsDirectory(webContentExtractorService, token);
+	return dedupeItems(items.filter(item =>
+		item.name.toLowerCase().includes(normalizedQuery)
+		|| item.source.toLowerCase().includes(normalizedQuery)
+		|| item.id.toLowerCase().includes(normalizedQuery)
+		|| item.slug.toLowerCase().includes(normalizedQuery)
+	));
 }
 
 function parseMastraSkillItem(value: unknown): ISkillsShListItem | undefined {
@@ -767,6 +815,12 @@ function decodeSkillsShDataString(value: string): string {
 		.trim();
 }
 
+function formatSkillsLibraryError(error: string): string {
+	return error
+		.replace(/https?:\/\/skills\.sh\/\S*/gi, 'Marketplace')
+		.replace(/skills\.sh/gi, 'Skills');
+}
+
 export function splitSkillsShId(id: string): { source: string; slug: string } {
 	const parts = id.split('/').filter(Boolean);
 	if (parts.length < 2) {
@@ -802,7 +856,7 @@ export function buildSkillsLibraryItems(
 	}
 
 	if (state.error) {
-		items.push(createStatusItem('skills.error', localize('chat.skillsLibrary.error', "Unable to load skills.sh"), Codicon.error, true, state.error));
+		items.push(createStatusItem('skills.error', localize('chat.skillsLibrary.error', "Unable to load skills"), Codicon.error, true, formatSkillsLibraryError(state.error)));
 	}
 
 	const favoriteRemote = state.remote.filter(item => favoriteSet.has(item.id) && matchesRemote(item));
@@ -964,7 +1018,7 @@ export function buildMcpMarketplaceItems(
 	state: IMcpMarketplaceState,
 	options: IMcpMarketplaceBuildOptions = {},
 ): McpMarketplaceModalItem[] {
-	const category = options.category ?? 'all';
+	const category = options.category ?? 'communication-design-pm';
 	const query = (options.query ?? '').trim().toLowerCase();
 	const recentlyRemovedSet = new Set(options.recentlyRemovedIds ?? []);
 	const installed = state.installed.filter(server => !recentlyRemovedSet.has(getMcpServerKey(server)));
@@ -1449,6 +1503,7 @@ export class SkillsLibraryController {
 
 	constructor(
 		@ICommandService private readonly _commandService: ICommandService,
+		@IContextMenuService private readonly _contextMenuService: IContextMenuService,
 		@IDialogService private readonly _dialogService: IDialogService,
 		@IFileService private readonly _fileService: IFileService,
 		@ILogService private readonly _logService: ILogService,
@@ -1460,10 +1515,19 @@ export class SkillsLibraryController {
 		@IPromptsService private readonly _promptsService: IPromptsService,
 		@IProgressService private readonly _progressService: IProgressService,
 		@ISharedWebContentExtractorService private readonly _sharedWebContentExtractorService: ISharedWebContentExtractorService,
-		@IStorageService private readonly _storageService: IStorageService,
-		@ITerminalService private readonly _terminalService: ITerminalService,
-		@IWorkspaceContextService private readonly _workspaceService: IWorkspaceContextService,
+	@IStorageService private readonly _storageService: IStorageService,
+	@ITerminalService private readonly _terminalService: ITerminalService,
+	@IWorkspaceContextService private readonly _workspaceService: IWorkspaceContextService,
 	) { }
+
+	renderEmbeddedMarketplace(container: HTMLElement): DisposableStore {
+		dom.clearNode(container);
+		return this.createMarketplaceSession({
+			host: container,
+			ownerDocument: container.ownerDocument,
+			embedded: true,
+		});
+	}
 
 	showMarketplace(anchor?: HTMLElement): void {
 		const ownerDocument = anchor?.ownerDocument ?? dom.getActiveWindow().document;
@@ -1475,10 +1539,22 @@ export class SkillsLibraryController {
 			}
 			return;
 		}
+
+		const workbenchContainer = ownerDocument.querySelector('.monaco-workbench');
+		const overlayParent = dom.isHTMLElement(workbenchContainer) ? workbenchContainer : ownerDocument.body;
+		this.createMarketplaceSession({
+			host: overlayParent,
+			ownerDocument,
+			embedded: false,
+		});
+	}
+
+	private createMarketplaceSession(options: { readonly host: HTMLElement; readonly ownerDocument: Document; readonly embedded: boolean }): DisposableStore {
+		const { embedded, host, ownerDocument } = options;
 		const store = new DisposableStore();
 		let activeMarketplacePage: SkillsMarketplacePage = 'skills';
 		let activeCategory: SkillsLibraryCategory = 'official';
-		let activeMcpCategory: McpMarketplaceCategory = 'all';
+		let activeMcpCategory: McpMarketplaceCategory = 'communication-design-pm';
 		let installedFilter: InstalledSkillFilter = 'all';
 		let recentlyRemovedInstalled: IRecentlyRemovedSkill[] = [];
 		let recentlyRemovedMcps: IRecentlyRemovedMcp[] = [];
@@ -1506,11 +1582,12 @@ export class SkillsLibraryController {
 			loading: true,
 		};
 
-		const workbenchContainer = ownerDocument.querySelector('.monaco-workbench');
-		const overlayParent = dom.isHTMLElement(workbenchContainer) ? workbenchContainer : ownerDocument.body;
-		const overlay = dom.append(overlayParent, dom.$('.skills-library-overlay'));
-		const modal = dom.append(overlay, dom.$('.skills-library-modal'));
+		const root = embedded
+			? dom.append(host, dom.$('.skills-library-embedded'))
+			: dom.append(host, dom.$('.skills-library-overlay'));
+		const modal = dom.append(root, dom.$(embedded ? '.skills-library-modal.skills-library-modal-embedded' : '.skills-library-modal'));
 		const header = dom.append(modal, dom.$('.skills-library-header'));
+		header.classList.toggle('skills-library-header-embedded', embedded);
 		const pageTabs = dom.append(header, dom.$('.skills-library-page-tabs'));
 		const titleBlock = dom.append(header, dom.$('.skills-library-title-block'));
 		const title = dom.append(titleBlock, dom.$('h2'));
@@ -1523,8 +1600,9 @@ export class SkillsLibraryController {
 			placeholder: localize('chat.skillsLibrary.searchPlaceholder', "Search Marketplace"),
 			'aria-label': localize('chat.skillsLibrary.searchAria', "Search Marketplace"),
 		})) as HTMLInputElement;
-		const closeButton = dom.append(header, dom.$('button.skills-library-close', { type: 'button', 'aria-label': localize('chat.skillsLibrary.close', "Close") }, renderIcon(Codicon.close)));
+		const closeButton = embedded ? undefined : dom.append(header, dom.$('button.skills-library-close', { type: 'button', 'aria-label': localize('chat.skillsLibrary.close', "Close") }, renderIcon(Codicon.close)));
 		const body = dom.append(modal, dom.$('.skills-library-body'));
+		body.classList.toggle('skills-library-body-embedded', embedded);
 		const sidebar = dom.append(body, dom.$('.skills-library-sidebar'));
 		const content = dom.append(body, dom.$('.skills-library-content'));
 
@@ -1671,18 +1749,22 @@ export class SkillsLibraryController {
 			resetSkillsShDirectoryCache();
 			store.dispose();
 		};
-		store.add(toDisposable(() => overlay.remove()));
-		store.add(dom.addDisposableListener(closeButton, dom.EventType.CLICK, close));
-		store.add(dom.addDisposableListener(overlay, dom.EventType.MOUSE_DOWN, e => {
-			if (e.target === overlay) {
-				close();
-			}
-		}));
-		store.add(dom.addDisposableListener(ownerDocument, dom.EventType.KEY_DOWN, e => {
-			if (e.key === 'Escape') {
-				close();
-			}
-		}));
+		store.add(toDisposable(() => root.remove()));
+		if (closeButton) {
+			store.add(dom.addDisposableListener(closeButton, dom.EventType.CLICK, close));
+		}
+		if (!embedded) {
+			store.add(dom.addDisposableListener(root, dom.EventType.MOUSE_DOWN, e => {
+				if (e.target === root) {
+					close();
+				}
+			}));
+			store.add(dom.addDisposableListener(ownerDocument, dom.EventType.KEY_DOWN, e => {
+				if (e.key === 'Escape') {
+					close();
+				}
+			}));
+		}
 		store.add(dom.addDisposableListener(search, dom.EventType.INPUT, () => {
 			query = search.value;
 			void refreshActiveView();
@@ -1724,8 +1806,61 @@ export class SkillsLibraryController {
 			}
 		};
 
+		const renderEmbeddedCategorySelect = <TCategory extends string>(
+			options: readonly { readonly id: TCategory; readonly label: string }[],
+			value: TCategory,
+			labelText: string,
+			onChange: (value: TCategory) => void,
+		): void => {
+			const group = dom.append(sidebar, dom.$('.skills-library-embedded-filter-group'));
+			dom.append(group, dom.$('label.skills-library-embedded-filter-label', undefined, labelText));
+			const currentLabel = options.find(option => option.id === value)?.label ?? labelText;
+			const button = dom.append(group, dom.$('button.skills-library-embedded-filter-button', {
+				type: 'button',
+				'aria-haspopup': 'menu',
+				'aria-label': labelText,
+			}));
+			dom.append(button, dom.$('span.skills-library-embedded-filter-button-label', undefined, currentLabel));
+			dom.append(button, dom.$('span.skills-library-embedded-filter-button-icon', undefined, renderIcon(Codicon.chevronDown)));
+			store.add(dom.addDisposableListener(button, dom.EventType.CLICK, e => {
+				e.preventDefault();
+				e.stopPropagation();
+				this._contextMenuService.showContextMenu({
+					getAnchor: () => button,
+					getActions: () => options.map(option => toAction({
+						id: `skillsLibrary.embeddedFilter.${String(option.id)}`,
+						label: option.label,
+						checked: option.id === value,
+						run: () => onChange(option.id),
+					})),
+				});
+			}));
+		};
+
 		const renderSidebar = (): void => {
 			dom.clearNode(sidebar);
+			sidebar.classList.toggle('skills-library-sidebar-embedded', embedded);
+			if (embedded) {
+				if (activeMarketplacePage === 'mcp') {
+					renderEmbeddedCategorySelect(EMBEDDED_MCP_MARKETPLACE_CATEGORIES, activeMcpCategory, localize('chat.skillsLibrary.mcpFilterLabel', "MCP category"), value => {
+						activeMcpCategory = value;
+						if (activeMcpCategory !== 'installed') {
+							clearRecentlyRemovedMcps();
+						}
+						void refreshActiveView();
+					});
+					return;
+				}
+				renderEmbeddedCategorySelect(SKILLS_LIBRARY_CATEGORIES, activeCategory, localize('chat.skillsLibrary.skillsFilterLabel', "Skill category"), value => {
+					activeCategory = value;
+					if (activeCategory !== 'installed') {
+						clearRecentlyRemovedInstalled();
+					}
+					activeOfficialOwner = undefined;
+					void refreshActiveView();
+				});
+				return;
+			}
 			if (activeMarketplacePage === 'mcp') {
 				for (const category of MCP_MARKETPLACE_CATEGORIES) {
 					const button = dom.append(sidebar, dom.$('button.skills-library-filter', {
@@ -1788,11 +1923,11 @@ export class SkillsLibraryController {
 			}
 			content.classList.remove('skills-library-content-centered');
 			if (state.error && activeCategory !== 'installed') {
-				dom.append(content, dom.$('.skills-library-error', undefined, localize('chat.skillsLibrary.errorDetail', "Unable to load skills.sh: {0}", state.error)));
+				dom.append(content, dom.$('.skills-library-error', undefined, localize('chat.skillsLibrary.errorDetail', "Unable to load skills: {0}", formatSkillsLibraryError(state.error))));
 			}
 			const normalizedQuery = query.trim();
 			if (state.searchError) {
-				dom.append(content, dom.$('.skills-library-error', undefined, localize('chat.skillsLibrary.searchErrorDetail', "Unable to search skills.sh: {0}", state.searchError)));
+				dom.append(content, dom.$('.skills-library-error', undefined, localize('chat.skillsLibrary.searchErrorDetail', "Unable to search skills: {0}", formatSkillsLibraryError(state.searchError))));
 			}
 			if (state.searchLoading) {
 				content.classList.add('skills-library-content-centered');
@@ -1836,10 +1971,14 @@ export class SkillsLibraryController {
 			if (activeMarketplacePage === 'mcp') {
 				title.textContent = localize('chat.skillsLibrary.mcpTitle', "MCP");
 				subtitle.textContent = localize('chat.skillsLibrary.mcpSubtitle', "Browse and install MCP servers.");
+				search.placeholder = localize('chat.skillsLibrary.searchMcpPlaceholder', "Search MCPs");
+				search.setAttribute('aria-label', localize('chat.skillsLibrary.searchMcpAria', "Search MCPs"));
 				return;
 			}
 			title.textContent = localize('chat.skillsLibrary.skillsTitle', "Skills");
 			subtitle.textContent = localize('chat.skillsLibrary.skillsSubtitle', "Browse, pin, and install reusable skills.");
+			search.placeholder = localize('chat.skillsLibrary.searchSkillsPlaceholder', "Search skills");
+			search.setAttribute('aria-label', localize('chat.skillsLibrary.searchSkillsAria', "Search skills"));
 		};
 
 		const renderMcpContent = (): void => {
@@ -1867,7 +2006,18 @@ export class SkillsLibraryController {
 		const renderMcpItems = (items: readonly McpMarketplaceModalItem[]): void => {
 			if (!items.length) {
 				content.classList.add('skills-library-content-centered');
-				dom.append(content, dom.$('.skills-library-status', undefined, localize('chat.skillsLibrary.noMcpResults', "More MCP servers are coming soon")));
+				const normalizedQuery = query.trim();
+				let emptyMessage: string;
+				if (normalizedQuery) {
+					emptyMessage = localize('chat.skillsLibrary.noMcpSearchResults', "No MCP servers found");
+				} else if (activeMcpCategory === 'pinned') {
+					emptyMessage = localize('chat.skillsLibrary.noPinnedMcps', "You don't have any pinned MCP servers yet. Explore MCPs and pin the ones you want quick access to.");
+				} else if (activeMcpCategory === 'installed') {
+					emptyMessage = localize('chat.skillsLibrary.noInstalledMcps', "You don't have any installed MCP servers yet. Explore MCPs to add one.");
+				} else {
+					emptyMessage = localize('chat.skillsLibrary.noMcpResults', "More MCP servers are coming soon");
+				}
+				dom.append(content, dom.$('.skills-library-status', undefined, emptyMessage));
 				return;
 			}
 			content.classList.remove('skills-library-content-centered');
@@ -2462,7 +2612,13 @@ export class SkillsLibraryController {
 				allPage = 0;
 				state = { ...state, allRemote, allLoading: false };
 			} catch (err) {
-				state = { ...state, allRemote: state.allRemote ?? [], allLoading: false, allError: err?.message ?? String(err) };
+				try {
+					const remote = await listSkillsShDirectory(this._sharedWebContentExtractorService, CancellationToken.None);
+					allPage = 0;
+					state = { ...state, allRemote: remote.all, allLoading: false, allError: undefined };
+				} catch {
+					state = { ...state, allRemote: state.allRemote ?? [], allLoading: false, allError: err?.message ?? String(err) };
+				}
 			}
 			render();
 		};
@@ -2515,7 +2671,7 @@ export class SkillsLibraryController {
 				};
 			}
 			if (activeMcpCategory === 'pinned' && !buildMcpMarketplaceItems(mcpState, { category: 'pinned' }).length) {
-				activeMcpCategory = 'all';
+				activeMcpCategory = 'communication-design-pm';
 			}
 			render();
 		};
@@ -2537,12 +2693,7 @@ export class SkillsLibraryController {
 			} catch (err) {
 				const installed = await this.getInstalledSkills(CancellationToken.None).catch(() => []);
 				state = {
-					// Keep previously-fetched remote skills instead of wiping them,
-					// so the marketplace remains usable when a re-fetch fails.
-					remote: state.remote,
-					remoteByCategory: state.remoteByCategory,
-					remoteTotal: state.remoteTotal,
-					officialOwners: state.officialOwners,
+					remote: [],
 					installed: filterLocallyRemovedInstalled(installed),
 					favoriteIds: this.getFavoriteIds(),
 					error: err?.message ?? String(err),
@@ -2557,6 +2708,7 @@ export class SkillsLibraryController {
 		render();
 		search.focus();
 		void refresh();
+		return store;
 	}
 
 	getMcpFavoriteIds(): string[] {

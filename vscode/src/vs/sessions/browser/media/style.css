@@ -476,6 +476,10 @@
 	margin-left: 0;
 }
 
+.agent-sessions-workbench:not(.phone-layout):not(.nosidebar) .monaco-grid-view .split-view-view:has(> .part.sessionspart) {
+	border-left: 1px solid var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 18%, transparent)) !important;
+}
+
 .agent-sessions-workbench .part.sessionspart > .title {
 	min-height: 38px !important;
 	height: 38px !important;

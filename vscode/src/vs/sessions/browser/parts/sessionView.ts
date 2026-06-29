@@ -69,6 +69,7 @@ export class SessionView extends Disposable implements ISerializableView {
 	private readonly _floatingToolbar: SessionViewFloatingToolbar;
 	private readonly _centeredContentContainer: HTMLElement;
 	private readonly _contentContainer: HTMLElement;
+	private readonly _scopedInstantiationService: IInstantiationService;
 	private readonly _backboardAuthEnabledKey: IContextKey<boolean>;
 	private readonly _backboardSignedInKey: IContextKey<boolean>;
 	private _backboardAuthGateOverlay: HTMLElement | undefined;
@@ -123,7 +124,7 @@ export class SessionView extends Disposable implements ISerializableView {
 
 		// Scoped service exposing this view's session so toolbars and contributed
 		// action view items (e.g. the changes diff stats in the header) can read it.
-		const scopedInstantiationService = this._register(instantiationService.createChild(new ServiceCollection(
+		this._scopedInstantiationService = this._register(instantiationService.createChild(new ServiceCollection(
 			[IContextKeyService, scopedContextKeyService],
 			[ISessionContext, new SessionContext(this._sessionObs)],
 		)));
@@ -142,16 +143,16 @@ export class SessionView extends Disposable implements ISerializableView {
 		this._centeredContentContainer = $('.session-view-centered-content');
 		this.element.appendChild(this._centeredContentContainer);
 
-		this._header = this._register(scopedInstantiationService.createInstance(SessionHeader));
+		this._header = this._register(this._scopedInstantiationService.createInstance(SessionHeader));
 		this._centeredContentContainer.appendChild(this._header.element);
 
-		this._compositeBar = this._register(scopedInstantiationService.createInstance(ChatCompositeBar));
+		this._compositeBar = this._register(this._scopedInstantiationService.createInstance(ChatCompositeBar));
 		this._centeredContentContainer.appendChild(this._compositeBar.element);
 
 		this._contentContainer = $('.session-view-content');
 		this.element.appendChild(this._contentContainer);
 
-		this._floatingToolbar = this._register(scopedInstantiationService.createInstance(SessionViewFloatingToolbar));
+		this._floatingToolbar = this._register(this._scopedInstantiationService.createInstance(SessionViewFloatingToolbar));
 		this.element.appendChild(this._floatingToolbar.element);
 		this._createBackboardAuthGate();
 		this._updateBackboardAuthGate();
@@ -198,8 +199,8 @@ export class SessionView extends Disposable implements ISerializableView {
 
 			if (!view || view.kind !== desiredKind) {
 				view = desiredKind === 'chat'
-					? this.chatViewFactory.createChatView()
-					: this.chatViewFactory.createNewChatView(desiredKind === 'newChatInSession', options);
+					? this.chatViewFactory.createChatView(this._scopedInstantiationService)
+					: this.chatViewFactory.createNewChatView(desiredKind === 'newChatInSession', options, this._scopedInstantiationService);
 				this._contentContainer.replaceChildren(view.element);
 				this._currentView.value = view;
 				view.setActive(this._isActive);
