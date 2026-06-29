@@ -27,6 +27,24 @@
 	box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
 }
 
+.skills-library-embedded {
+	width: 100%;
+	height: 100%;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+}
+
+.skills-library-modal.skills-library-modal-embedded {
+	width: 100%;
+	height: 100%;
+	min-height: 0;
+	border: 0;
+	border-radius: 0;
+	box-shadow: none;
+	background: var(--vscode-sideBar-background, var(--vscode-editorWidget-background, #1f1f1f));
+}
+
 .skills-library-header {
 	display: flex;
 	align-items: center;
@@ -34,6 +52,12 @@
 	gap: 12px;
 	padding: 12px 18px;
 	background: inherit;
+}
+
+.skills-library-header.skills-library-header-embedded {
+	flex-wrap: nowrap;
+	padding: 10px 16px;
+	gap: 10px;
 }
 
 .skills-library-title-block {
@@ -79,7 +103,7 @@
 	display: flex;
 	align-items: center;
 	gap: 12px;
-	min-width: 180px;
+	min-width: 0;
 	flex: 1;
 	padding: 0;
 }
@@ -94,7 +118,7 @@
 	padding: 0 11px;
 	color: var(--vscode-descriptionForeground, #9d9d9d);
 	background: var(--vscode-input-background, #2b2b2b);
-	border: 1px solid transparent;
+	border: 1px solid var(--vscode-widget-border, #454545);
 	border-radius: 999px;
 }
 
@@ -128,6 +152,7 @@
 	gap: 6px;
 	flex: 0 0 auto;
 	padding: 0;
+	white-space: nowrap;
 }
 
 .skills-library-page-tab {
@@ -159,6 +184,10 @@
 	border-top: 1px solid var(--vscode-widget-border, #333333);
 }
 
+.skills-library-body.skills-library-body-embedded {
+	flex-direction: column;
+}
+
 .skills-library-sidebar {
 	width: 190px;
 	flex: 0 0 190px;
@@ -168,6 +197,90 @@
 	overflow-y: auto;
 	scrollbar-color: var(--vscode-scrollbarSlider-background, rgba(121, 121, 121, 0.4)) transparent;
 	scrollbar-width: thin;
+}
+
+.skills-library-body.skills-library-body-embedded .skills-library-sidebar {
+	width: 100%;
+	flex: 0 0 auto;
+	max-height: none;
+	box-sizing: border-box;
+	padding: 10px 20px 12px;
+	border-right: 0;
+	border-bottom: 1px solid var(--vscode-widget-border, #454545);
+}
+
+.skills-library-sidebar.skills-library-sidebar-embedded {
+	overflow: hidden;
+}
+
+.skills-library-embedded-filter-group {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	width: 100%;
+	max-width: 100%;
+	box-sizing: border-box;
+	padding-inline: 0;
+}
+
+.skills-library-embedded-filter-label {
+	color: var(--vscode-descriptionForeground, #9d9d9d);
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: 0;
+	text-transform: uppercase;
+}
+
+.skills-library-embedded-filter-button {
+	box-sizing: border-box;
+	display: flex;
+	width: 100%;
+	min-width: 0;
+	max-width: 100%;
+	height: 32px;
+	padding: 0 16px 0 12px;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	color: var(--vscode-input-foreground, #cccccc);
+	background: var(--vscode-dropdown-background, var(--vscode-input-background, #2b2b2b));
+	border: 1px solid var(--vscode-dropdown-border, var(--vscode-widget-border, #454545));
+	border-radius: 8px;
+	cursor: pointer;
+	font-size: 12px;
+}
+
+.skills-library-sidebar.skills-library-sidebar-embedded .skills-library-embedded-filter-button {
+	width: 100%;
+	max-width: 100%;
+	align-self: stretch;
+	margin-inline-end: 0;
+}
+
+.skills-library-embedded-filter-button:hover {
+	background: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+}
+
+.skills-library-embedded-filter-button:focus-visible {
+	border-color: var(--vscode-focusBorder, #007fd4);
+	outline: 1px solid var(--vscode-focusBorder, #007fd4);
+	outline-offset: -1px;
+}
+
+.skills-library-embedded-filter-button-label {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	text-align: left;
+}
+
+.skills-library-embedded-filter-button-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 auto;
+	color: var(--vscode-descriptionForeground, #9d9d9d);
 }
 
 .skills-library-filter {
@@ -218,6 +331,42 @@
 	overflow-y: auto;
 	scrollbar-color: var(--vscode-scrollbarSlider-background, rgba(121, 121, 121, 0.4)) transparent;
 	scrollbar-width: thin;
+}
+
+.skills-library-body.skills-library-body-embedded .skills-library-content {
+	padding: 12px;
+}
+
+.skills-library-body.skills-library-body-embedded .skills-library-grid {
+	grid-template-columns: minmax(0, 1fr);
+}
+
+.skills-library-body.skills-library-body-embedded .skills-library-card {
+	min-width: 0;
+}
+
+.skills-library-body.skills-library-body-embedded .skills-library-mcp-card {
+	grid-template-columns: 32px minmax(0, 1fr);
+	grid-template-areas:
+		"logo header"
+		"logo detail"
+		"meta meta"
+		"footer footer";
+	row-gap: 6px;
+}
+
+.skills-library-body.skills-library-body-embedded .skills-library-card-detail,
+.skills-library-body.skills-library-body-embedded .skills-library-card-meta {
+	white-space: normal;
+}
+
+.skills-library-body.skills-library-body-embedded .skills-library-mcp-card .skills-library-card-meta {
+	flex-wrap: wrap;
+}
+
+.skills-library-body.skills-library-body-embedded .skills-library-card-footer {
+	flex-wrap: wrap;
+	justify-content: flex-start;
 }
 
 .skills-library-sidebar::-webkit-scrollbar,
@@ -467,7 +616,12 @@
 .skills-library-official-table {
 	display: flex;
 	flex-direction: column;
+	width: 100%;
 	min-width: 560px;
+}
+
+.skills-library-body.skills-library-body-embedded .skills-library-official-table {
+	min-width: 0;
 }
 
 .skills-library-official-row {
@@ -483,6 +637,11 @@
 	border-bottom: 1px solid var(--vscode-widget-border, #333333);
 	font: inherit;
 	text-align: left;
+}
+
+.skills-library-body.skills-library-body-embedded .skills-library-official-row {
+	grid-template-columns: minmax(0, 1fr) 64px 64px;
+	gap: 10px;
 }
 
 button.skills-library-official-row {
@@ -502,11 +661,21 @@ button.skills-library-official-row:hover {
 	letter-spacing: 0;
 }
 
+.skills-library-official-header > span:nth-child(2),
+.skills-library-official-header > span:nth-child(3) {
+	text-align: right;
+}
+
 .skills-library-official-creator {
 	min-width: 0;
 	display: flex;
 	align-items: baseline;
 	gap: 12px;
+}
+
+.skills-library-body.skills-library-body-embedded .skills-library-official-creator {
+	flex-wrap: wrap;
+	gap: 4px 10px;
 }
 
 .skills-library-official-name {
@@ -531,6 +700,7 @@ button.skills-library-official-row:hover {
 .skills-library-official-count {
 	color: var(--vscode-descriptionForeground, #9d9d9d);
 	font-family: var(--monaco-monospace-font, monospace);
+	justify-self: end;
 	text-align: right;
 }
 

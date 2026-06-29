@@ -43,6 +43,7 @@ import { ChatContextKeys } from '../common/actions/chatContextKeys.js';
 import { IChatService } from '../common/chatService/chatService.js';
 import { ChatModeKind } from '../common/constants.js';
 import { IPluginGitService } from '../common/plugins/pluginGitService.js';
+import '../browser/editorMarketplaceView.js';
 import { registerChatDeveloperActions } from './actions/chatDeveloperActions.js';
 import { registerChatExportZipAction } from './actions/chatExportZip.js';
 import { BackboardCredentialsContribution, registerBackboardSsoActions } from './actions/backboardSsoActions.js';

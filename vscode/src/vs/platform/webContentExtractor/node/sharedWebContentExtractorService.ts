@@ -9,7 +9,8 @@ import { URI } from '../../../base/common/uri.js';
 import { ISharedWebContentExtractorService } from '../common/webContentExtractor.js';
 
 const TEXT_FETCH_TIMEOUT_MS = 10_000;
-const TEXT_FETCH_MAX_BYTES = 2 * 1024 * 1024;
+const DEFAULT_TEXT_FETCH_MAX_BYTES = 2 * 1024 * 1024;
+const SKILLS_REGISTRY_FETCH_MAX_BYTES = 16 * 1024 * 1024;
 const PRIVATE_HOST_PATTERNS = [
 	/^localhost$/i,
 	/^127\./,
@@ -36,6 +37,7 @@ export class SharedWebContentExtractorService implements ISharedWebContentExtrac
 		}
 
 		const controller = new AbortController();
+		const maxBytes = this.getMaxTextFetchBytes(uri);
 		const timeout = setTimeout(() => controller.abort(), TEXT_FETCH_TIMEOUT_MS);
 		const cancellation = token.onCancellationRequested(() => controller.abort());
 		try {
@@ -61,10 +63,10 @@ export class SharedWebContentExtractorService implements ISharedWebContentExtrac
 				return undefined;
 			}
 			const contentLength = Number(response.headers.get('content-length'));
-			if (Number.isFinite(contentLength) && contentLength > TEXT_FETCH_MAX_BYTES) {
+			if (Number.isFinite(contentLength) && contentLength > maxBytes) {
 				return undefined;
 			}
-			return await this.readResponseText(response, TEXT_FETCH_MAX_BYTES);
+			return await this.readResponseText(response, maxBytes);
 		} catch (err) {
 			console.error(err);
 			return undefined;
@@ -100,11 +102,20 @@ export class SharedWebContentExtractorService implements ISharedWebContentExtrac
 	}
 
 	private getSkillsShApiToken(uri: URI): string | undefined {
-		if (uri.scheme !== 'https' || uri.authority !== 'skills.sh' || !uri.path.startsWith('/api/v1/')) {
+		if (uri.scheme !== 'https' || (uri.authority !== 'skills.sh' && uri.authority !== 'www.skills.sh') || !uri.path.startsWith('/api/v1/')) {
 			return undefined;
 		}
 		const token = process.env.VERCEL_OIDC_TOKEN ?? process.env.SKILLS_SH_OIDC_TOKEN;
 		return token?.trim() || undefined;
+	}
+
+	private getMaxTextFetchBytes(uri: URI): number {
+		if (uri.scheme === 'https'
+			&& uri.authority === 'raw.githubusercontent.com'
+			&& uri.path === '/mastra-ai/skills-api/main/src/registry/scraped-skills.json') {
+			return SKILLS_REGISTRY_FETCH_MAX_BYTES;
+		}
+		return DEFAULT_TEXT_FETCH_MAX_BYTES;
 	}
 
 	private isSafeRemoteTextUri(uri: URI): boolean {

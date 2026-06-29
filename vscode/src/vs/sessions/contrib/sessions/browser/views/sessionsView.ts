@@ -207,9 +207,9 @@ export class SessionsView extends ViewPane {
 				logSessionsInteraction(this.telemetryService, 'newSession');
 				this.sessionsService.openNewSession({ forceNew: true });
 			});
-			this.createSidebarAction(primaryActions, Codicon.extensions, localize('marketplace', "Marketplace"), anchor => {
+			this.createSidebarAction(primaryActions, undefined, localize('marketplace', "Marketplace"), anchor => {
 				this.instantiationService.createInstance(SkillsLibraryController).showMarketplace(anchor);
-			});
+			}, 'agent-sessions-sidebar-action-marketplace-icon');
 
 			const workspacesHeader = this.workspacesHeader = DOM.append(sessionsContent, $('.agent-sessions-workspaces-header'));
 			DOM.append(workspacesHeader, $('span.agent-sessions-workspaces-title', undefined, localize('projectsHeader', "Projects")));
@@ -341,13 +341,16 @@ export class SessionsView extends ViewPane {
 		}
 	}
 
-	private createSidebarAction(container: HTMLElement, icon: ThemeIcon, label: string, run: (anchor: HTMLElement) => void): void {
+	private createSidebarAction(container: HTMLElement, icon: ThemeIcon | undefined, label: string, run: (anchor: HTMLElement) => void, iconClass?: string): void {
 		const button = DOM.append(container, $('button.agent-sessions-sidebar-action')) as HTMLButtonElement;
 		button.type = 'button';
 		button.title = label;
 		button.setAttribute('aria-label', label);
-		const iconElement = DOM.append(button, $('span.agent-sessions-sidebar-action-icon'));
-		iconElement.appendChild(renderIcon(icon));
+		const iconSelector = iconClass ? `span.agent-sessions-sidebar-action-icon.${iconClass}` : 'span.agent-sessions-sidebar-action-icon';
+		const iconElement = DOM.append(button, $(iconSelector));
+		if (icon) {
+			iconElement.appendChild(renderIcon(icon));
+		}
 		DOM.append(button, $('span.agent-sessions-sidebar-action-label', undefined, label));
 		this._register(DOM.addDisposableListener(button, DOM.EventType.CLICK, e => {
 			e.preventDefault();

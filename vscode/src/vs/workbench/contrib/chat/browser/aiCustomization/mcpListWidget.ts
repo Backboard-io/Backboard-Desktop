@@ -501,8 +501,8 @@ export class McpListWidget extends Disposable {
 		// Browse Marketplace button
 		const browseButtonContainer = DOM.append(buttonContainer, $('.list-add-button-container'));
 		this.browseButton = this._register(new Button(browseButtonContainer, { ...defaultButtonStyles, secondary: true, supportIcons: true }));
-		this.browseButton.label = `$(${Codicon.library.id}) ${localize('browseMarketplace', "Browse Marketplace")}`;
-		this.browseButton.element.classList.add('list-add-button');
+		this.browseButton.label = `$(${Codicon.extensions.id}) ${localize('browseMarketplace', "Browse Marketplace")}`;
+		this.browseButton.element.classList.add('list-add-button', 'marketplace-store-button');
 		this._register(this.browseButton.onDidClick(() => {
 			this.toggleBrowseMode(!this.browseMode);
 		}));
