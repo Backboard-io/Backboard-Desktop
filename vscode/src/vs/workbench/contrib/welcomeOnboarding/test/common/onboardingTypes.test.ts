@@ -20,23 +20,21 @@ suite('Backboard onboarding types', () => {
 	test('steps are ordered to match the Backboard onboarding flow', () => {
 		assert.deepStrictEqual([...ONBOARDING_STEPS], [
 			OnboardingStepId.Welcome,
-			OnboardingStepId.ImportSettings,
-			OnboardingStepId.Theme,
+			OnboardingStepId.Experience,
 		]);
 	});
 
-	test('experience options include simple and developer modes with previews', () => {
+	test('experience options include clean, editor, and advanced modes', () => {
 		assert.deepStrictEqual(ONBOARDING_EXPERIENCE_OPTIONS.map(option => option.id), [
 			OnboardingExperience.Simple,
 			OnboardingExperience.Developer,
+			OnboardingExperience.Advanced,
 		]);
 
 		for (const option of ONBOARDING_EXPERIENCE_OPTIONS) {
 			assert.ok(option.label);
 			assert.ok(option.eyebrow);
 			assert.ok(option.description);
-			assert.ok(option.lightPreview.endsWith('.png'));
-			assert.ok(option.darkPreview.endsWith('.png'));
 		}
 	});
 

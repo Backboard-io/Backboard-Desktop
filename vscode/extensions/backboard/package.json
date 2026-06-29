@@ -103,6 +103,24 @@
         }
       ]
     },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "backboard",
+          "title": "\u200b",
+          "icon": "media/blank.svg"
+        }
+      ]
+    },
+    "views": {
+      "backboard": [
+        {
+          "id": "backboard.panel",
+          "type": "webview",
+          "name": "\u200b"
+        }
+      ]
+    },
     "configuration": [
       {
         "title": "Backboard",
@@ -255,9 +273,10 @@
     ]
   },
   "scripts": {
+    "prepare-bridge": "sh -c 'if command -v cargo >/dev/null 2>&1; then npm run package-bridge; else echo \"Skipping Backboard bridge build: cargo not found.\"; fi'",
     "build-bridge": "cargo build --manifest-path ./rust/Cargo.toml -p backboard_bridge",
     "package-bridge": "npm run build-bridge && mkdir -p ./bin && cp ./rust/target/debug/backboard-bridge ./bin/backboard-bridge && chmod 755 ./bin/backboard-bridge",
-    "compile": "tsgo --project ./tsconfig.json",
+    "compile": "npm run prepare-bridge && tsgo --project ./tsconfig.json",
     "watch": "tsgo --project ./tsconfig.json --watch",
     "typecheck": "tsgo --project ./tsconfig.json --noEmit"
   },

@@ -5,7 +5,7 @@
 
 import { localize } from '../../nls.js';
 import { Disposable } from '../../base/common/lifecycle.js';
-import { IJarvisBridge, IJarvisTerminalSlot, IJarvisVoiceToolCall } from '../common/jarvisTypes.js';
+import { IJarvisBackgroundSelectionResult, IJarvisBridge, IJarvisTerminalSlot, IJarvisVoiceToolCall } from '../common/jarvisTypes.js';
 import type { Terminal as XtermTerminal, IDisposable as IXtermDisposable, ITheme } from '@xterm/xterm';
 
 const terminalSlots: readonly IJarvisTerminalSlot[] = [
@@ -17,6 +17,15 @@ const terminalSlots: readonly IJarvisTerminalSlot[] = [
 
 type JarvisSlotStatus = 'idle' | 'opening' | 'running' | 'closed' | 'error';
 type JarvisCliKind = 'backboard' | 'codex';
+type JarvisBackgroundKind = 'video' | 'image' | 'gradient';
+
+interface IJarvisBackgroundOption {
+	readonly id: string;
+	readonly label: string;
+	readonly kind: JarvisBackgroundKind;
+	readonly src?: string;
+	readonly path?: string;
+}
 
 interface IJarvisSlotState {
 	readonly id: string;
@@ -25,6 +34,8 @@ interface IJarvisSlotState {
 	output: string;
 	commandDraft: string;
 	cli: JarvisCliKind;
+	cardWidth?: number;
+	cardHeight?: number;
 	terminal?: XtermTerminal;
 	terminalInputDisposable?: IXtermDisposable;
 	lastPrompt?: string;
@@ -89,6 +100,13 @@ const JARVIS_VOICE_TOOLS = [
 	}
 ];
 
+const JARVIS_BACKGROUND_STORAGE_KEY = 'jarvis.background';
+const jarvisBuiltInBackgrounds: readonly IJarvisBackgroundOption[] = [
+	{ id: 'sky-island', label: 'Sky Island', kind: 'video', src: '../browser/media/jarvis-background.mp4' },
+	{ id: 'cloud-drift', label: 'Cloud Drift', kind: 'video', src: '../browser/media/jarvis-background-clouds.mp4' },
+	{ id: 'studio', label: 'Studio Glow', kind: 'gradient' }
+];
+
 export class JarvisApp extends Disposable {
 
 	private readonly slots = new Map<string, IJarvisSlotState>();
@@ -98,6 +116,13 @@ export class JarvisApp extends Disposable {
 	private promptInput!: HTMLInputElement;
 	private voiceButton!: HTMLButtonElement;
 	private workspaceButton!: HTMLButtonElement;
+	private backgroundVideo!: HTMLVideoElement;
+	private backgroundStatic!: HTMLElement;
+	private backgroundSelect!: HTMLSelectElement;
+	private customBackgroundPath: string | undefined;
+	private currentBackgroundId = jarvisBuiltInBackgrounds[0].id;
+	private readonly cardResizeObservers = new Map<string, ResizeObserver>();
+	private readonly terminalResizeObservers = new Map<string, ResizeObserver>();
 	private selectedWorkspacePath: string | undefined;
 	private xtermCtor: typeof XtermTerminal | undefined;
 	private mediaRecorder: MediaRecorder | undefined;
@@ -163,8 +188,10 @@ export class JarvisApp extends Disposable {
 		this.grid = document.createElement('section');
 		this.grid.className = 'jarvis-grid';
 		this.shell.appendChild(this.grid);
+		this.installCanvasPanning();
 
 		this.container.appendChild(this.shell);
+		this.applyInitialBackground();
 		this.installBackboardVoice();
 		this.renderGrid();
 		this.updateStatus(localize('jarvis.ready', "Ready. Say or type: Hey Backboard, open a terminal."));
@@ -174,14 +201,17 @@ export class JarvisApp extends Disposable {
 		const background = document.createElement('div');
 		background.className = 'jarvis-background';
 
-		const video = document.createElement('video');
-		video.className = 'jarvis-background-video';
-		video.src = '../browser/media/jarvis-background.mp4';
-		video.autoplay = true;
-		video.loop = true;
-		video.muted = true;
-		video.playsInline = true;
-		background.appendChild(video);
+		this.backgroundStatic = document.createElement('div');
+		this.backgroundStatic.className = 'jarvis-background-static';
+		background.appendChild(this.backgroundStatic);
+
+		this.backgroundVideo = document.createElement('video');
+		this.backgroundVideo.className = 'jarvis-background-video';
+		this.backgroundVideo.autoplay = true;
+		this.backgroundVideo.loop = true;
+		this.backgroundVideo.muted = true;
+		this.backgroundVideo.playsInline = true;
+		background.appendChild(this.backgroundVideo);
 
 		return background;
 	}
@@ -220,6 +250,17 @@ export class JarvisApp extends Disposable {
 		this.workspaceButton.addEventListener('click', () => this.selectWorkspaceFolder());
 		header.appendChild(this.workspaceButton);
 
+		this.backgroundSelect = document.createElement('select');
+		this.backgroundSelect.className = 'jarvis-background-select';
+		this.backgroundSelect.title = localize('jarvis.background.selectTitle', "Change Jarvis background");
+		this.backgroundSelect.setAttribute('aria-label', this.backgroundSelect.title);
+		for (const background of jarvisBuiltInBackgrounds) {
+			this.backgroundSelect.appendChild(modeOption(background.id, background.label));
+		}
+		this.backgroundSelect.appendChild(modeOption('custom', localize('jarvis.background.custom', "Custom...")));
+		this.backgroundSelect.addEventListener('change', () => this.selectBackground(this.backgroundSelect.value));
+		header.appendChild(this.backgroundSelect);
+
 		const brand = document.createElement('div');
 		brand.className = 'jarvis-brand';
 		const title = document.createElement('h1');
@@ -235,6 +276,73 @@ export class JarvisApp extends Disposable {
 		header.appendChild(this.statusLine);
 
 		return header;
+	}
+
+	private applyInitialBackground(): void {
+		const saved = readSavedBackground();
+		this.customBackgroundPath = saved?.path;
+		const option = saved ?? jarvisBuiltInBackgrounds[0];
+		this.applyBackground(option);
+		if (this.backgroundSelect) {
+			this.backgroundSelect.value = jarvisBuiltInBackgrounds.some(background => background.id === option.id) ? option.id : 'custom';
+		}
+	}
+
+	private selectBackground(id: string): void {
+		if (id === 'custom') {
+			this.selectCustomBackground().catch(error => this.updateStatus(errorMessage(error)));
+			return;
+		}
+		const option = jarvisBuiltInBackgrounds.find(background => background.id === id) ?? jarvisBuiltInBackgrounds[0];
+		this.applyBackground(option);
+		saveBackground(option);
+		this.updateStatus(localize('jarvis.background.changed', "Background set to {0}.", option.label));
+	}
+
+	private async selectCustomBackground(): Promise<void> {
+		const result = await this.bridge.selectBackgroundFile(this.customBackgroundPath);
+		if (!result.accepted) {
+			this.backgroundSelect.value = this.currentBackgroundId;
+			if (result.error) {
+				this.updateStatus(result.error);
+			}
+			return;
+		}
+		const option = backgroundFromSelection(result);
+		this.customBackgroundPath = option.path;
+		this.applyBackground(option);
+		saveBackground(option);
+		this.backgroundSelect.value = 'custom';
+		this.updateStatus(localize('jarvis.background.customChanged', "Background set to {0}.", option.label));
+	}
+
+	private applyBackground(option: IJarvisBackgroundOption): void {
+		this.currentBackgroundId = jarvisBuiltInBackgrounds.some(background => background.id === option.id) ? option.id : 'custom';
+		this.shell.dataset.background = option.id;
+		this.backgroundStatic.style.backgroundImage = '';
+		this.backgroundVideo.pause();
+		this.backgroundVideo.removeAttribute('src');
+		this.backgroundVideo.load();
+
+		if (option.kind === 'video' && option.src) {
+			this.backgroundVideo.src = option.src;
+			this.backgroundVideo.hidden = false;
+			this.backgroundStatic.hidden = true;
+			this.backgroundVideo.play().catch(() => {
+				// Autoplay can be temporarily blocked while the window is inactive.
+			});
+			return;
+		}
+
+		if (option.kind === 'image' && option.src) {
+			this.backgroundStatic.style.backgroundImage = `url("${cssString(option.src)}")`;
+			this.backgroundStatic.hidden = false;
+			this.backgroundVideo.hidden = true;
+			return;
+		}
+
+		this.backgroundStatic.hidden = false;
+		this.backgroundVideo.hidden = true;
 	}
 
 	private async selectWorkspaceFolder(): Promise<void> {
@@ -282,12 +390,14 @@ export class JarvisApp extends Disposable {
 	private renderSideRail(): HTMLElement {
 		const rail = document.createElement('nav');
 		rail.className = 'jarvis-side-rail';
-		rail.setAttribute('aria-label', localize('jarvis.sideRail.aria', "Jarvis tools"));
-		for (const item of ['↖', '◉', '▢', '◇', '○', '↗', '/', '~', 'AI']) {
+		rail.setAttribute('aria-label', localize('jarvis.sideRail.aria', "Jarvis quick terminals"));
+		for (const slot of terminalSlots) {
 			const button = document.createElement('button');
 			button.type = 'button';
-			button.textContent = item;
-			button.title = localize('jarvis.sideRail.tool', "Jarvis tool");
+			button.textContent = slot.name.slice(0, 1);
+			button.title = localize('jarvis.sideRail.openSlot', "Open {0}", slot.name);
+			button.setAttribute('aria-label', button.title);
+			button.addEventListener('click', () => this.openTerminal(slot.id, 'backboard'));
 			rail.appendChild(button);
 		}
 		return rail;
@@ -319,6 +429,68 @@ export class JarvisApp extends Disposable {
 		return commandBar;
 	}
 
+	private installCanvasPanning(): void {
+		let dragState: { readonly pointerId: number; readonly startX: number; readonly startY: number; readonly scrollLeft: number; readonly scrollTop: number } | undefined;
+
+		const onPointerDown = (event: PointerEvent) => {
+			if (event.button !== 0 || isCanvasInteractiveTarget(event.target)) {
+				return;
+			}
+			dragState = {
+				pointerId: event.pointerId,
+				startX: event.clientX,
+				startY: event.clientY,
+				scrollLeft: this.grid.scrollLeft,
+				scrollTop: this.grid.scrollTop
+			};
+			this.grid.classList.add('panning');
+			this.grid.setPointerCapture(event.pointerId);
+			event.preventDefault();
+		};
+
+		const onPointerMove = (event: PointerEvent) => {
+			if (!dragState || event.pointerId !== dragState.pointerId) {
+				return;
+			}
+			this.grid.scrollLeft = dragState.scrollLeft - (event.clientX - dragState.startX);
+			this.grid.scrollTop = dragState.scrollTop - (event.clientY - dragState.startY);
+		};
+
+		const endPan = (event: PointerEvent) => {
+			if (!dragState || event.pointerId !== dragState.pointerId) {
+				return;
+			}
+			dragState = undefined;
+			this.grid.classList.remove('panning');
+			if (this.grid.hasPointerCapture(event.pointerId)) {
+				this.grid.releasePointerCapture(event.pointerId);
+			}
+		};
+
+		const onWheel = (event: WheelEvent) => {
+			if (!event.shiftKey || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) {
+				return;
+			}
+			this.grid.scrollLeft += event.deltaY;
+			event.preventDefault();
+		};
+
+		this.grid.addEventListener('pointerdown', onPointerDown);
+		this.grid.addEventListener('pointermove', onPointerMove);
+		this.grid.addEventListener('pointerup', endPan);
+		this.grid.addEventListener('pointercancel', endPan);
+		this.grid.addEventListener('wheel', onWheel, { passive: false });
+		this._register({
+			dispose: () => {
+				this.grid.removeEventListener('pointerdown', onPointerDown);
+				this.grid.removeEventListener('pointermove', onPointerMove);
+				this.grid.removeEventListener('pointerup', endPan);
+				this.grid.removeEventListener('pointercancel', endPan);
+				this.grid.removeEventListener('wheel', onWheel);
+			}
+		});
+	}
+
 	private renderGrid(): void {
 		const activeSlots = terminalSlots
 			.map(slot => this.slots.get(slot.id)!)
@@ -327,12 +499,80 @@ export class JarvisApp extends Disposable {
 		for (let count = 1; count <= terminalSlots.length; count++) {
 			this.grid.classList.toggle(`count-${count}`, activeSlots.length === count);
 		}
-		this.grid.replaceChildren(...activeSlots.map(slot => this.renderCard(slot)));
+		this.grid.replaceChildren(...(activeSlots.length ? activeSlots.map(slot => this.renderCard(slot)) : [this.renderEmptyState()]));
+	}
+
+	private renderEmptyState(): HTMLElement {
+		const empty = document.createElement('section');
+		empty.className = 'jarvis-empty-state';
+
+		const eyebrow = document.createElement('div');
+		eyebrow.className = 'jarvis-empty-eyebrow';
+		eyebrow.textContent = localize('jarvis.empty.eyebrow', "Voice terminal canvas");
+		empty.appendChild(eyebrow);
+
+		const title = document.createElement('h2');
+		title.textContent = localize('jarvis.empty.title', "Tell Jarvis what to open.");
+		empty.appendChild(title);
+
+		const subtitle = document.createElement('p');
+		subtitle.textContent = localize('jarvis.empty.subtitle', "Start with a named terminal, a count, or a direct task for one person.");
+		empty.appendChild(subtitle);
+
+		const launchGrid = document.createElement('div');
+		launchGrid.className = 'jarvis-empty-launch-grid';
+		for (const slot of terminalSlots) {
+			const button = document.createElement('button');
+			button.type = 'button';
+			button.className = 'jarvis-empty-launch';
+			button.addEventListener('click', () => this.openTerminal(slot.id, 'backboard'));
+
+			const initial = document.createElement('span');
+			initial.className = 'jarvis-empty-launch-initial';
+			initial.textContent = slot.name.slice(0, 1);
+			button.appendChild(initial);
+
+			const copy = document.createElement('span');
+			copy.className = 'jarvis-empty-launch-copy';
+			const name = document.createElement('strong');
+			name.textContent = slot.name;
+			const detail = document.createElement('span');
+			detail.textContent = localize('jarvis.empty.launchDetail', "Open Backboard CLI");
+			copy.appendChild(name);
+			copy.appendChild(detail);
+			button.appendChild(copy);
+
+			launchGrid.appendChild(button);
+		}
+		empty.appendChild(launchGrid);
+
+		const hints = document.createElement('div');
+		hints.className = 'jarvis-empty-hints';
+		for (const hintText of [
+			localize('jarvis.empty.hintOpen', "Hey Backboard, open 2 terminals"),
+			localize('jarvis.empty.hintNamed', "Make Erin explain this repo"),
+			localize('jarvis.empty.hintCodex', "Open Codex CLI")
+		]) {
+			const hint = document.createElement('span');
+			hint.textContent = hintText;
+			hints.appendChild(hint);
+		}
+		empty.appendChild(hints);
+
+		return empty;
 	}
 
 	private renderCard(slot: IJarvisSlotState): HTMLElement {
 		const card = document.createElement('article');
 		card.className = `jarvis-card ${slot.status}`;
+		if (slot.cardWidth) {
+			card.style.width = `${slot.cardWidth}px`;
+			card.style.flexBasis = `${slot.cardWidth}px`;
+		}
+		if (slot.cardHeight) {
+			card.style.height = `${slot.cardHeight}px`;
+		}
+		this.installCardResizeObserver(slot, card);
 
 		const header = document.createElement('header');
 		header.className = 'jarvis-card-header';
@@ -354,7 +594,20 @@ export class JarvisApp extends Disposable {
 		openButton.textContent = '+';
 		openButton.disabled = slot.status === 'opening' || slot.status === 'running';
 		openButton.addEventListener('click', () => this.openTerminal(slot.id, 'backboard'));
-		header.appendChild(openButton);
+
+		const actions = document.createElement('div');
+		actions.className = 'jarvis-card-actions';
+
+		const closeBtn = document.createElement('button');
+		closeBtn.type = 'button';
+		closeBtn.className = 'jarvis-card-close';
+		closeBtn.title = localize('jarvis.closeTerminal', "Close terminal");
+		closeBtn.setAttribute('aria-label', closeBtn.title);
+		closeBtn.addEventListener('click', () => this.disposeTerminal(slot.id));
+		actions.appendChild(closeBtn);
+
+		actions.appendChild(openButton);
+		header.appendChild(actions);
 		card.appendChild(header);
 
 		const meta = document.createElement('div');
@@ -369,11 +622,15 @@ export class JarvisApp extends Disposable {
 
 		const commandForm = document.createElement('form');
 		commandForm.className = 'jarvis-terminal-command';
-		commandForm.addEventListener('submit', event => {
+		commandForm.addEventListener('submit', async event => {
 			event.preventDefault();
 			const value = input.value;
 			input.value = '';
-			this.sendTerminalInput(slot.id, value);
+			try {
+				await this.sendTerminalInput(slot.id, value);
+			} catch (error) {
+				this.updateStatus(errorMessage(error));
+			}
 		});
 
 		const input = document.createElement('input');
@@ -410,6 +667,7 @@ export class JarvisApp extends Disposable {
 	}
 
 	private attachTerminal(slot: IJarvisSlotState, container: HTMLElement): void {
+		this.installTerminalResizeObserver(slot, container);
 		if (!slot.terminal) {
 			if (!this.xtermCtor) {
 				throw new Error('Jarvis terminal renderer is not loaded.');
@@ -462,7 +720,34 @@ export class JarvisApp extends Disposable {
 		const rows = Math.max(18, Math.floor(container.clientHeight / Math.max(12, fontSize * 1.24)));
 		if (slot.terminal.cols !== cols || slot.terminal.rows !== rows) {
 			slot.terminal.resize(cols, rows);
+			if (slot.status === 'running') {
+				this.bridge.resizeTerminal(slot.id, cols, rows).catch(error => this.updateStatus(errorMessage(error)));
+			}
 		}
+	}
+
+	private installTerminalResizeObserver(slot: IJarvisSlotState, container: HTMLElement): void {
+		this.terminalResizeObservers.get(slot.id)?.disconnect();
+		const observer = new ResizeObserver(() => {
+			this.resizeTerminalToContainer(slot, container);
+		});
+		observer.observe(container);
+		this.terminalResizeObservers.set(slot.id, observer);
+	}
+
+	private installCardResizeObserver(slot: IJarvisSlotState, card: HTMLElement): void {
+		this.cardResizeObservers.get(slot.id)?.disconnect();
+		const observer = new ResizeObserver(entries => {
+			const entry = entries[0];
+			if (!entry) {
+				return;
+			}
+			const { width, height } = entry.contentRect;
+			slot.cardWidth = Math.round(width);
+			slot.cardHeight = Math.round(height);
+		});
+		observer.observe(card);
+		this.cardResizeObservers.set(slot.id, observer);
 	}
 
 	private terminalTheme(): ITheme {
@@ -854,6 +1139,10 @@ export class JarvisApp extends Disposable {
 	}
 
 	private disposeSlotTerminal(slot: IJarvisSlotState): void {
+		this.cardResizeObservers.get(slot.id)?.disconnect();
+		this.cardResizeObservers.delete(slot.id);
+		this.terminalResizeObservers.get(slot.id)?.disconnect();
+		this.terminalResizeObservers.delete(slot.id);
 		slot.terminalInputDisposable?.dispose();
 		slot.terminalInputDisposable = undefined;
 		slot.terminal?.dispose();
@@ -866,6 +1155,64 @@ function modeOption(value: string, label: string): HTMLOptionElement {
 	option.value = value;
 	option.textContent = label;
 	return option;
+}
+
+function isCanvasInteractiveTarget(target: EventTarget | null): boolean {
+	if (!(target instanceof HTMLElement)) {
+		return false;
+	}
+	return !!target.closest('button, input, select, textarea, a, .jarvis-card, .jarvis-empty-state, .jarvis-command-bar, .jarvis-header, .jarvis-side-rail');
+}
+
+function readSavedBackground(): IJarvisBackgroundOption | undefined {
+	try {
+		const raw = localStorage.getItem(JARVIS_BACKGROUND_STORAGE_KEY);
+		if (!raw) {
+			return undefined;
+		}
+		const parsed = JSON.parse(raw) as Partial<IJarvisBackgroundOption>;
+		if (typeof parsed.id !== 'string' || typeof parsed.label !== 'string' || (parsed.kind !== 'video' && parsed.kind !== 'image' && parsed.kind !== 'gradient')) {
+			return undefined;
+		}
+		const builtIn = jarvisBuiltInBackgrounds.find(background => background.id === parsed.id);
+		if (builtIn) {
+			return builtIn;
+		}
+		if ((parsed.kind === 'video' || parsed.kind === 'image') && typeof parsed.src === 'string') {
+			return {
+				id: parsed.id,
+				label: parsed.label,
+				kind: parsed.kind,
+				src: parsed.src,
+				path: typeof parsed.path === 'string' ? parsed.path : undefined
+			};
+		}
+	} catch {
+		// Ignore invalid local preference data.
+	}
+	return undefined;
+}
+
+function saveBackground(option: IJarvisBackgroundOption): void {
+	try {
+		localStorage.setItem(JARVIS_BACKGROUND_STORAGE_KEY, JSON.stringify(option));
+	} catch {
+		// Preference persistence is best effort.
+	}
+}
+
+function backgroundFromSelection(result: IJarvisBackgroundSelectionResult): IJarvisBackgroundOption {
+	return {
+		id: 'custom',
+		label: result.path ? workspaceLabel(result.path) : localize('jarvis.background.customLabel', "Custom"),
+		kind: result.mediaKind === 'image' ? 'image' : 'video',
+		src: result.uri,
+		path: result.path
+	};
+}
+
+function cssString(value: string): string {
+	return value.replace(/["\\\n\r\f]/g, character => `\\${character}`);
 }
 
 function numberFromCommand(command: string): number | undefined {

@@ -48,7 +48,9 @@ async function openRightWorkbenchMode(accessor: ServicesAccessor, request: Right
 	layoutService.setPartHidden(false, Parts.AUXILIARYBAR_PART);
 	layoutService.setPartHidden(true, Parts.EDITOR_PART);
 	layoutService.setPartHidden(true, Parts.PANEL_PART);
-	await accessor.get(IViewsService).openViewContainer(SESSIONS_RIGHT_WORKBENCH_CONTAINER_ID, true);
+	const viewsService = accessor.get(IViewsService);
+	await viewsService.openViewContainer(SESSIONS_RIGHT_WORKBENCH_CONTAINER_ID, true);
+	await viewsService.openView(SESSIONS_RIGHT_WORKBENCH_LAUNCHER_VIEW_ID, true);
 	onDidRequestModeEmitter.fire(modeRequest);
 	setPendingModeRequest(undefined);
 }
@@ -104,9 +106,10 @@ registerAction2(class OpenRightWorkbenchBrowserAction extends Action2 {
 		});
 	}
 
-	override async run(accessor: ServicesAccessor, urlOrOptions?: string | { url?: string }): Promise<void> {
-		const browserUrl = typeof urlOrOptions === 'string' ? urlOrOptions : urlOrOptions?.url;
-		await openRightWorkbenchMode(accessor, { mode: 'browser', browserUrl });
+	override async run(accessor: ServicesAccessor, urlOrOptions?: string | { url?: string; browserUrl?: string; browserViewId?: string; viewId?: string }): Promise<void> {
+		const browserUrl = typeof urlOrOptions === 'string' ? urlOrOptions : urlOrOptions?.url ?? urlOrOptions?.browserUrl;
+		const browserViewId = typeof urlOrOptions === 'string' ? undefined : urlOrOptions?.browserViewId ?? urlOrOptions?.viewId;
+		await openRightWorkbenchMode(accessor, { mode: 'browser', browserUrl, browserViewId });
 	}
 });
 

@@ -24,6 +24,7 @@ export const enum OnboardingStepId {
 export const enum OnboardingExperience {
 	Simple = 'beginner',
 	Developer = 'developer',
+	Advanced = 'advanced',
 }
 
 export interface IOnboardingExperienceOption {
@@ -31,26 +32,26 @@ export interface IOnboardingExperienceOption {
 	readonly label: string;
 	readonly eyebrow: string;
 	readonly description: string;
-	readonly lightPreview: string;
-	readonly darkPreview: string;
 }
 
 export const ONBOARDING_EXPERIENCE_OPTIONS: readonly IOnboardingExperienceOption[] = [
 	{
 		id: OnboardingExperience.Simple,
-		label: localize('onboarding.backboard.experience.simple', "Simple"),
-		eyebrow: localize('onboarding.backboard.experience.simple.eyebrow', "Chat First"),
-		description: localize('onboarding.backboard.experience.simple.description', "A streamlined workspace for prompting, previewing, and iterating."),
-		lightPreview: 'onboarding-simple.png',
-		darkPreview: 'onboarding-simple-dark.png',
+		label: localize('onboarding.backboard.experience.clean', "Clean"),
+		eyebrow: localize('onboarding.backboard.experience.clean.eyebrow', "Clean"),
+		description: localize('onboarding.backboard.experience.clean.description', "I don't want to see code, I just want to build things"),
 	},
 	{
 		id: OnboardingExperience.Developer,
-		label: localize('onboarding.backboard.experience.developer', "Developer"),
-		eyebrow: localize('onboarding.backboard.experience.developer.eyebrow', "Editor First"),
-		description: localize('onboarding.backboard.experience.developer.description', "The full workspace with files, terminal, editor, and agents visible."),
-		lightPreview: 'onboarding-dev.png',
-		darkPreview: 'onboarding-dev-dark.png',
+		label: localize('onboarding.backboard.experience.editor', "Editor"),
+		eyebrow: localize('onboarding.backboard.experience.editor.eyebrow', "Editor"),
+		description: localize('onboarding.backboard.experience.editor.description', "I want to see and edit code, show me the editor layout I know and love."),
+	},
+	{
+		id: OnboardingExperience.Advanced,
+		label: localize('onboarding.backboard.experience.advanced', "Advanced"),
+		eyebrow: localize('onboarding.backboard.experience.advanced.eyebrow', "Advanced"),
+		description: localize('onboarding.backboard.experience.advanced.description', "I want one unified workspace to orchestrate all my agents"),
 	},
 ];
 
@@ -60,9 +61,9 @@ export const ONBOARDING_EXPERIENCE_OPTIONS: readonly IOnboardingExperienceOption
 export function getOnboardingStepTitle(stepId: OnboardingStepId): string {
 	switch (stepId) {
 		case OnboardingStepId.Welcome:
-			return localize('onboarding.backboard.step.welcome', "Welcome to Backboard Studio");
+			return localize('onboarding.backboard.step.welcome', "Welcome to\nBackboard Studio");
 		case OnboardingStepId.Experience:
-			return localize('onboarding.backboard.step.experience', "Choose Your Front Door");
+			return localize('onboarding.backboard.step.experience', "Your Workspace. Your way.");
 		case OnboardingStepId.Theme:
 			return localize('onboarding.backboard.step.theme', "Choose Your Theme");
 		case OnboardingStepId.ImportSettings:
@@ -80,9 +81,9 @@ export function getOnboardingStepTitle(stepId: OnboardingStepId): string {
 export function getOnboardingStepSubtitle(stepId: OnboardingStepId): string {
 	switch (stepId) {
 		case OnboardingStepId.Welcome:
-			return localize('onboarding.backboard.step.welcome.subtitle', "Let's get your workspace set up.");
+			return localize('onboarding.backboard.step.welcome.subtitle', "Set up a focused workspace for designing, coding, and shipping AI-assisted interfaces.");
 		case OnboardingStepId.Experience:
-			return localize('onboarding.backboard.step.experience.subtitle', "Start where you feel most at home. You can switch modes any time.");
+			return localize('onboarding.backboard.step.experience.subtitle', "Choose a view built around how you like to work.\nYou can change this later as your project grows.");
 		case OnboardingStepId.Theme:
 			return localize('onboarding.backboard.step.theme.subtitle', "Start with a look you like. You can change it anytime.");
 		case OnboardingStepId.ImportSettings:
@@ -99,8 +100,7 @@ export function getOnboardingStepSubtitle(stepId: OnboardingStepId): string {
  */
 export const ONBOARDING_STEPS: readonly OnboardingStepId[] = [
 	OnboardingStepId.Welcome,
-	OnboardingStepId.ImportSettings,
-	OnboardingStepId.Theme,
+	OnboardingStepId.Experience,
 ];
 
 /**

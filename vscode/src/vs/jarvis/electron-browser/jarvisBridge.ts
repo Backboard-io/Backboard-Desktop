@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { ipcRenderer } from '../../base/parts/sandbox/electron-browser/globals.js';
-import { IJarvisBridge, IJarvisCommandInterpretationResult, IJarvisCommandResult, IJarvisTerminalDataEvent, IJarvisTerminalExitEvent, IJarvisVoiceTranscriptionResult, IJarvisWorkspaceSelectionResult } from '../common/jarvisTypes.js';
+import { IJarvisBackgroundSelectionResult, IJarvisBridge, IJarvisCommandInterpretationResult, IJarvisCommandResult, IJarvisTerminalDataEvent, IJarvisTerminalExitEvent, IJarvisVoiceTranscriptionResult, IJarvisWorkspaceSelectionResult } from '../common/jarvisTypes.js';
 
 export class ElectronJarvisBridge implements IJarvisBridge {
 
@@ -38,12 +38,24 @@ export class ElectronJarvisBridge implements IJarvisBridge {
 		await this.sendTerminalCommand({ type: 'writeTerminal', slotId, data });
 	}
 
+	async resizeTerminal(slotId: string, cols: number, rows: number): Promise<void> {
+		await this.sendTerminalCommand({ type: 'resizeTerminal', slotId, cols, rows });
+	}
+
 	async disposeTerminal(slotId: string): Promise<void> {
 		await this.sendTerminalCommand({ type: 'disposeTerminal', slotId });
 	}
 
 	async selectWorkspaceFolder(currentPath?: string): Promise<IJarvisWorkspaceSelectionResult> {
 		const result = await ipcRenderer.invoke('vscode:jarvisSelectWorkspaceFolder', currentPath) as IJarvisWorkspaceSelectionResult | undefined;
+		if (!result?.accepted) {
+			return { accepted: false, error: result?.error };
+		}
+		return result;
+	}
+
+	async selectBackgroundFile(currentPath?: string): Promise<IJarvisBackgroundSelectionResult> {
+		const result = await ipcRenderer.invoke('vscode:jarvisSelectBackgroundFile', currentPath) as IJarvisBackgroundSelectionResult | undefined;
 		if (!result?.accepted) {
 			return { accepted: false, error: result?.error };
 		}

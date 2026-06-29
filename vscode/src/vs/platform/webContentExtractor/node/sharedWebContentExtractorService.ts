@@ -8,9 +8,8 @@ import { CancellationToken } from '../../../base/common/cancellation.js';
 import { URI } from '../../../base/common/uri.js';
 import { ISharedWebContentExtractorService } from '../common/webContentExtractor.js';
 
-const TEXT_FETCH_TIMEOUT_MS = 10_000;
-const DEFAULT_TEXT_FETCH_MAX_BYTES = 2 * 1024 * 1024;
-const SKILLS_REGISTRY_FETCH_MAX_BYTES = 16 * 1024 * 1024;
+const TEXT_FETCH_TIMEOUT_MS = 30_000;
+const TEXT_FETCH_MAX_BYTES = 16 * 1024 * 1024;
 const PRIVATE_HOST_PATTERNS = [
 	/^localhost$/i,
 	/^127\./,
@@ -29,7 +28,12 @@ export class SharedWebContentExtractorService implements ISharedWebContentExtrac
 	_serviceBrand: undefined;
 
 	async readText(uri: URI, token: CancellationToken): Promise<string | undefined> {
-		if (token.isCancellationRequested) {
+		// The CancellationToken may have been marshalled across IPC, in which case
+		// `onCancellationRequested` is no longer a function (ProxyChannel does not
+		// support CancellationToken — see ipc.ts). Guard against this so we don't
+		// throw "token.onCancellationRequested is not a function" and fail the fetch.
+		const isCancellationRequested = token?.isCancellationRequested === true;
+		if (isCancellationRequested) {
 			return undefined;
 		}
 		if (!this.isSafeRemoteTextUri(uri)) {
@@ -37,9 +41,10 @@ export class SharedWebContentExtractorService implements ISharedWebContentExtrac
 		}
 
 		const controller = new AbortController();
-		const maxBytes = this.getMaxTextFetchBytes(uri);
 		const timeout = setTimeout(() => controller.abort(), TEXT_FETCH_TIMEOUT_MS);
-		const cancellation = token.onCancellationRequested(() => controller.abort());
+		const cancellation = typeof token?.onCancellationRequested === 'function'
+			? token.onCancellationRequested(() => controller.abort())
+			: { dispose(): void { /* no-op — token was marshalled across IPC */ } };
 		try {
 			const headers: Record<string, string> = {
 				'Accept': 'text/html,application/xhtml+xml,application/xml,application/json;q=0.9,*/*;q=0.8',
@@ -52,10 +57,15 @@ export class SharedWebContentExtractorService implements ISharedWebContentExtrac
 			}
 			const response = await fetch(uri.toString(true), {
 				headers,
-				redirect: 'manual',
+				redirect: 'follow',
 				signal: controller.signal,
 			});
 			if (!response.ok) {
+				return undefined;
+			}
+			// Validate the final URL after redirects is still a safe remote URI.
+			const finalUri = URI.parse(response.url);
+			if (!this.isSafeRemoteTextUri(finalUri)) {
 				return undefined;
 			}
 			const contentType = response.headers.get('content-type')?.toLowerCase();
@@ -63,10 +73,10 @@ export class SharedWebContentExtractorService implements ISharedWebContentExtrac
 				return undefined;
 			}
 			const contentLength = Number(response.headers.get('content-length'));
-			if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+			if (Number.isFinite(contentLength) && contentLength > TEXT_FETCH_MAX_BYTES) {
 				return undefined;
 			}
-			return await this.readResponseText(response, maxBytes);
+			return await this.readResponseText(response, TEXT_FETCH_MAX_BYTES);
 		} catch (err) {
 			console.error(err);
 			return undefined;
@@ -102,20 +112,11 @@ export class SharedWebContentExtractorService implements ISharedWebContentExtrac
 	}
 
 	private getSkillsShApiToken(uri: URI): string | undefined {
-		if (uri.scheme !== 'https' || (uri.authority !== 'skills.sh' && uri.authority !== 'www.skills.sh') || !uri.path.startsWith('/api/v1/')) {
+		if (uri.scheme !== 'https' || uri.authority !== 'skills.sh' || !uri.path.startsWith('/api/v1/')) {
 			return undefined;
 		}
 		const token = process.env.VERCEL_OIDC_TOKEN ?? process.env.SKILLS_SH_OIDC_TOKEN;
 		return token?.trim() || undefined;
-	}
-
-	private getMaxTextFetchBytes(uri: URI): number {
-		if (uri.scheme === 'https'
-			&& uri.authority === 'raw.githubusercontent.com'
-			&& uri.path === '/mastra-ai/skills-api/main/src/registry/scraped-skills.json') {
-			return SKILLS_REGISTRY_FETCH_MAX_BYTES;
-		}
-		return DEFAULT_TEXT_FETCH_MAX_BYTES;
 	}
 
 	private isSafeRemoteTextUri(uri: URI): boolean {

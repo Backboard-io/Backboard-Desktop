@@ -26,6 +26,7 @@ import { createAgentModelPricingMeta } from '../../common/agentModelPricing.js';
 import { PendingRequestRegistry } from '../../common/pendingRequestRegistry.js';
 import { ActionType, type ChatAction, type SessionAction } from '../../common/state/sessionActions.js';
 import type { ResolveSessionConfigResult, SessionConfigCompletionsResult } from '../../common/state/protocol/commands.js';
+import { MessageAttachmentKind } from '../../common/state/protocol/channels-chat/state.js';
 import type { ModelSelection, ProtectedResourceMetadata, ToolDefinition } from '../../common/state/protocol/state.js';
 import { getToolOutputText, MessageKind, ResponsePartKind, SessionStatus, ToolCallConfirmationReason, ToolCallContributorKind, ToolCallStatus, ToolResultContentType, TurnState, type ClientPluginCustomization, type MessageAttachment, type PendingMessage, type SessionInputAnswer, type SessionInputResponseKind, type ToolCallResult, type Turn } from '../../common/state/sessionState.js';
 import type { ISyncedCustomization } from '../../common/agentPluginManager.js';
@@ -60,6 +61,8 @@ const BACKBOARD_ACCESS_MANUAL = 'manual';
 const BACKBOARD_ACCESS_FULL = 'fullAccess';
 const IGNORED_DIRECTORIES = new Set(['.git', 'node_modules', 'out', 'dist', 'target', '.next', '.turbo']);
 const BACKBOARD_TOOL_CACHE_TTL_MS = 10 * 60 * 1000;
+const BACKBOARD_DOCUMENT_INDEX_TIMEOUT_MS = 90_000;
+const BACKBOARD_DOCUMENT_POLL_INTERVAL_MS = 1_000;
 
 interface BridgeEvent {
 	readonly type: string;
@@ -173,6 +176,7 @@ interface BackboardSession {
 	model?: ModelSelection;
 	config?: Record<string, unknown>;
 	title?: string;
+	threadId?: string;
 	modifiedAt: number;
 	materialized: boolean;
 	clientTools?: readonly ToolDefinition[];
@@ -227,6 +231,7 @@ interface BackboardPanelHistoryEntry {
 	readonly toolOutputs?: unknown[];
 	readonly messages?: unknown[];
 	readonly currentWorkspace?: string;
+	readonly backboardThreadId?: string;
 }
 
 interface BackboardResponseState {
@@ -290,6 +295,12 @@ export interface BackboardTurnSettings {
 	readonly config: Record<string, unknown>;
 }
 
+export interface BackboardFileAttachment {
+	readonly data: number[];
+	readonly fileName: string;
+	readonly mimeType: string;
+}
+
 export class BackboardAgent extends Disposable implements IAgent {
 	readonly id = 'backboard';
 
@@ -349,6 +360,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 				model: normalizeBackboardModelSelection(config.model),
 				config: normalizeBackboardConfig(config.config),
 				title: restoredEntry.title,
+				threadId: restoredEntry.backboardThreadId,
 				materialized: true,
 				pendingClientToolCalls: new PendingRequestRegistry<ToolCallResult>(),
 				pendingToolApprovals: new PendingRequestRegistry<boolean>(),
@@ -388,11 +400,26 @@ export class BackboardAgent extends Disposable implements IAgent {
 		return { items: [] };
 	}
 
-	async sendMessage(sessionUri: URI, prompt: string, _attachments?: readonly MessageAttachment[], turnId?: string): Promise<void> {
+	async sendMessage(sessionUri: URI, prompt: string, attachments?: readonly MessageAttachment[], turnId?: string): Promise<void> {
 		const session = await this._session(sessionUri);
 		const turnStartedAt = Date.now();
 		const effectiveTurnId = turnId ?? generateUuid();
 		await this._materialize(session);
+		const preparedAttachments = await this._prepareAttachments(attachments);
+		const promptWithContext = preparedAttachments.promptContext
+			? `${prompt}\n\n${preparedAttachments.promptContext}`
+			: prompt;
+		const imageAttachments = preparedAttachments.files.filter(isBackboardImageAttachment);
+		const documentAttachments = preparedAttachments.files.filter(attachment => !isBackboardImageAttachment(attachment));
+		let boundThreadId = session.threadId;
+		if (documentAttachments.length) {
+			boundThreadId = await this._uploadDocuments(session, documentAttachments);
+			session.threadId = boundThreadId;
+		}
+		const promptWithAttachments = promptWithBackboardImages(
+			promptWithBackboardDocuments(promptWithContext, documentAttachments),
+			imageAttachments,
+		);
 
 		const partId = generateUuid();
 		const responseState: BackboardResponseState = { didCreatePart: false, pendingText: '', assistantText: '', toolOutputs: [] };
@@ -441,13 +468,17 @@ export class BackboardAgent extends Disposable implements IAgent {
 					.then(tools => mergeBackboardTools(tools, session.clientTools))
 					.catch(() => mergeBackboardTools(undefined, session.clientTools));
 				const mergedTools = await submitToolsPromise;
-				const submitTools = trimBackboardToolsForRequest(mergedTools, prompt, settings.webSearch, settings.imageGeneration);
+				const submitTools = ensureBackboardAttachmentTool(
+					trimBackboardToolsForRequest(mergedTools, promptWithAttachments, settings.webSearch, settings.imageGeneration),
+					imageAttachments.length > 0,
+				);
 				this._logService.info(`[Backboard latency] list_tools_done elapsedMs=${Date.now() - listToolsStartedAt} totalElapsedMs=${Date.now() - turnStartedAt} toolCount=${submitTools?.length ?? 0}`);
-				this._logService.info(`[Backboard progress] Sending prompt to Backboard with ${submitTools?.length ?? 0} tools.`);
+				this._logService.info(`[Backboard progress] Sending prompt to Backboard with ${submitTools?.length ?? 0} tools, ${imageAttachments.length} image attachment(s), and ${documentAttachments.length} document attachment(s).`);
 				setHeartbeat(localize('backboard.progress.heartbeat.response', "Waiting for Backboard response"));
 				const sendPromptStartedAt = Date.now();
 				const handle = this._bridge.send('sendPrompt', bridgeSessionId, {
-					content: prompt,
+					content: promptWithAttachments,
+					threadId: boundThreadId,
 					workspace: session.workingDirectory?.fsPath,
 					provider: settings.provider,
 					model: settings.model,
@@ -469,7 +500,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 					const toolExecutionStartedAt = Date.now();
 					this._logService.info(`[Backboard progress] Running ${nextToolRequest.toolCalls.length} Backboard tool call(s).`);
 					setHeartbeat(localize('backboard.progress.heartbeat.localTools', "Still running Backboard tools"));
-					const toolOutputs = await this._executeToolCalls(session, effectiveTurnId, nextToolRequest.toolCalls, responseState);
+					const toolOutputs = await this._executeToolCalls(session, effectiveTurnId, nextToolRequest.toolCalls, responseState, preparedAttachments.files);
 					clearHeartbeat();
 					this._logService.info(`[Backboard latency] local_tools_done elapsedMs=${Date.now() - toolExecutionStartedAt} totalElapsedMs=${Date.now() - turnStartedAt} toolCount=${nextToolRequest.toolCalls.length}`);
 					const continuationToolRequests: ToolResultRequest[] = [];
@@ -477,7 +508,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 					this._logService.info(`[Backboard progress] Submitting ${toolOutputs.length} Backboard tool result(s).`);
 					setHeartbeat(localize('backboard.progress.heartbeat.submitTools', "Still submitting Backboard tool results"));
 					const continuationSettings = this._turnSettings(session);
-					const continuationTools = trimBackboardToolsForRequest(mergedTools, prompt, continuationSettings.webSearch, continuationSettings.imageGeneration);
+					const continuationTools = trimBackboardToolsForRequest(mergedTools, promptWithAttachments, continuationSettings.webSearch, continuationSettings.imageGeneration);
 					const continuation = this._bridge.send('submitToolResult', bridgeSessionId, {
 						threadId: nextToolRequest.threadId,
 						runId: nextToolRequest.runId,
@@ -655,6 +686,157 @@ export class BackboardAgent extends Disposable implements IAgent {
 		});
 	}
 
+	private async _prepareAttachments(attachments: readonly MessageAttachment[] | undefined): Promise<{ files: BackboardFileAttachment[]; promptContext?: string }> {
+		const files: BackboardFileAttachment[] = [];
+		const promptParts: string[] = [];
+		for (const attachment of attachments ?? []) {
+			try {
+				if (attachment.type === MessageAttachmentKind.EmbeddedResource) {
+					const bytes = Buffer.from(attachment.data, 'base64');
+					const mimeType = attachment.contentType || mimeTypeForAttachmentLabel(attachment.label);
+					files.push({
+						data: Array.from(bytes),
+						fileName: fileNameForAttachment(attachment.label || 'attachment', mimeType),
+						mimeType,
+					});
+				} else if (attachment.type === MessageAttachmentKind.Resource) {
+					const uri = URI.parse(attachment.uri);
+					if (uri.scheme !== 'file') {
+						this._logService.warn(`[Backboard attachments] skipped unsupported attachment URI scheme: ${uri.scheme}`);
+						continue;
+					}
+					const bytes = await fs.promises.readFile(uri.fsPath);
+					const mimeType = mimeTypeForAttachmentLabel(path.extname(attachment.label || '') ? attachment.label : uri.fsPath);
+					files.push({
+						data: Array.from(bytes),
+						fileName: fileNameForAttachment(attachment.label || path.basename(uri.fsPath) || 'attachment', mimeType, uri.fsPath),
+						mimeType,
+					});
+				} else if (attachment.type === MessageAttachmentKind.Simple && attachment.modelRepresentation) {
+					if (isBackboardDocumentLikeAttachment(attachment)) {
+						this._logService.info(`[Backboard attachments] ignored simple attachment modelRepresentation for document-flow label=${attachment.label} displayKind=${attachment.displayKind ?? '(none)'}`);
+						continue;
+					}
+					promptParts.push(`Attached ${attachment.label}:\n${attachment.modelRepresentation}`);
+				}
+			} catch (error) {
+				this._logService.warn(`[Backboard attachments] failed to read ${attachment.label}: ${error instanceof Error ? error.message : String(error)}`);
+			}
+		}
+		return {
+			files,
+			promptContext: promptParts.length ? promptParts.join('\n\n') : undefined,
+		};
+	}
+
+	private async _uploadDocuments(session: BackboardSession, attachments: readonly BackboardFileAttachment[]): Promise<string> {
+		const settings = this._turnSettings(session);
+		this._logService.info(`[Backboard document-flow] upload_start ${safeStringifyForLog({
+			sessionId: session.sessionId,
+			existingThreadId: session.threadId,
+			panelStatePath: sharedBackboardPanelStatePath(),
+			threadsDir: sharedBackboardThreadsDir(),
+			attachmentCount: attachments.length,
+			attachments: attachments.map(attachment => ({
+				fileName: attachment.fileName,
+				mimeType: attachment.mimeType,
+				bytes: attachment.data.length,
+			})),
+		})}`);
+		const threadId = await this._ensureDocumentThreadId(session, settings);
+		this._logService.info(`[Backboard document-flow] upload_thread_ready ${safeStringifyForLog({ sessionId: session.sessionId, threadId })}`);
+		for (const attachment of attachments) {
+			await withBackboardTempFile(attachment, async filePath => {
+				this._logService.info(`[Backboard document-flow] document_upload_request ${safeStringifyForLog({
+					sessionId: session.sessionId,
+					threadId,
+					filePath,
+					fileName: attachment.fileName,
+					mimeType: attachment.mimeType,
+					bytes: attachment.data.length,
+				})}`);
+				const uploadResponse = await this._bridge.callApi('uploadThreadDocument', {
+					threadId,
+					filePath,
+					config: settings.config,
+				});
+				const documentId = backboardDocumentIdFromValue(uploadResponse);
+				this._logService.info(`[Backboard document-flow] document_upload_response ${safeStringifyForLog({
+					sessionId: session.sessionId,
+					threadId,
+					fileName: attachment.fileName,
+					documentId,
+					response: uploadResponse,
+				})}`);
+				if (!documentId) {
+					throw new Error(localize('backboard.documents.uploadMissingId', "Backboard did not return a document ID for {0}.", attachment.fileName));
+				}
+				await this._waitForDocumentIndexed(documentId, attachment.fileName, settings.config);
+			});
+		}
+		this._logService.info(`[Backboard document-flow] upload_complete ${safeStringifyForLog({ sessionId: session.sessionId, threadId })}`);
+		return threadId;
+	}
+
+	private async _ensureDocumentThreadId(session: BackboardSession, settings: BackboardTurnSettings): Promise<string> {
+		if (session.threadId) {
+			this._logService.info(`[Backboard document-flow] thread_reuse ${safeStringifyForLog({ sessionId: session.sessionId, threadId: session.threadId })}`);
+			return session.threadId;
+		}
+		this._logService.info(`[Backboard document-flow] thread_bootstrap_start ${safeStringifyForLog({
+			sessionId: session.sessionId,
+			provider: settings.provider,
+			model: settings.model,
+			webSearch: settings.webSearch,
+			panelStatePath: sharedBackboardPanelStatePath(),
+			threadsDir: sharedBackboardThreadsDir(),
+		})}`);
+		const response = await this._bridge.callApi('sendMessage', {
+			body: {
+				content: 'Attachment upload bootstrap.',
+				llm_provider: settings.provider,
+				model_name: settings.model,
+				memory: 'off',
+				web_search: settings.webSearch,
+				send_to_llm: false,
+			},
+			config: settings.config,
+		});
+		const threadId = backboardThreadIdFromValue(response);
+		this._logService.info(`[Backboard document-flow] thread_bootstrap_response ${safeStringifyForLog({ sessionId: session.sessionId, threadId, response })}`);
+		if (!threadId) {
+			throw new Error(localize('backboard.documents.threadMissing', "Backboard did not return a thread ID while preparing document upload."));
+		}
+		session.threadId = threadId;
+		return threadId;
+	}
+
+	private async _waitForDocumentIndexed(documentId: string, fileName: string, config?: Record<string, unknown>): Promise<void> {
+		const deadline = Date.now() + BACKBOARD_DOCUMENT_INDEX_TIMEOUT_MS;
+		let attempt = 0;
+		while (Date.now() < deadline) {
+			attempt++;
+			const response = await this._bridge.callApi('getDocumentStatus', { documentId, config });
+			const status = backboardDocumentStatusFromValue(response);
+			this._logService.info(`[Backboard document-flow] document_status_poll ${safeStringifyForLog({
+				documentId,
+				fileName,
+				attempt,
+				status,
+				remainingMs: Math.max(0, deadline - Date.now()),
+				response,
+			})}`);
+			if (status === 'indexed' || status === 'ready' || status === 'completed' || status === 'complete') {
+				return;
+			}
+			if (status === 'failed' || status === 'error' || status === 'cancelled') {
+				throw new Error(localize('backboard.documents.indexFailed', "Backboard could not index {0} (status: {1}).", fileName, status));
+			}
+			await waitForBackboardDelay(BACKBOARD_DOCUMENT_POLL_INTERVAL_MS);
+		}
+		throw new Error(localize('backboard.documents.indexTimeout', "Backboard did not finish indexing {0} within {1} seconds.", fileName, Math.round(BACKBOARD_DOCUMENT_INDEX_TIMEOUT_MS / 1000)));
+	}
+
 	private async _session(sessionUri: URI): Promise<BackboardSession> {
 		const sessionId = AgentSession.id(sessionUri);
 		const session = this._sessions.get(sessionId);
@@ -680,6 +862,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 			modifiedAt: restoredEntry?.updatedAt ?? restoredEntry?.startedAt ?? Date.now(),
 			workingDirectory: restoredEntry ? panelEntryWorkspace(restoredEntry) : undefined,
 			title: restoredEntry?.title,
+			threadId: restoredEntry?.backboardThreadId,
 			materialized: !!restoredEntry,
 			pendingClientToolCalls: new PendingRequestRegistry<ToolCallResult>(),
 			pendingToolApprovals: new PendingRequestRegistry<boolean>(),
@@ -706,6 +889,11 @@ export class BackboardAgent extends Disposable implements IAgent {
 		event: BridgeEvent,
 	): void {
 		switch (event.type) {
+			case 'sessionBinding':
+				if (event.threadId) {
+					session.threadId = event.threadId;
+				}
+				return;
 			case 'trace':
 				this._logService.info(`[Backboard latency] bridge_stage=${event.stage ?? '(unknown)'} elapsedMs=${event.elapsedMs ?? '(unknown)'} details=${safeStringifyForLog(event.details)}`);
 				{
@@ -862,18 +1050,18 @@ export class BackboardAgent extends Disposable implements IAgent {
 		});
 	}
 
-	private async _executeToolCalls(session: BackboardSession, turnId: string, toolCalls: readonly unknown[], responseState: BackboardResponseState): Promise<unknown[]> {
+	private async _executeToolCalls(session: BackboardSession, turnId: string, toolCalls: readonly unknown[], responseState: BackboardResponseState, attachments: readonly BackboardFileAttachment[] = []): Promise<unknown[]> {
 		const preparedCalls = toolCalls.map(rawCall => this._prepareToolCall(session, rawCall));
 		const accessMode = this._turnSettings(session).accessMode;
 		if (preparedCalls.length > 1 && preparedCalls.every(prepared => this._canExecuteToolCallInParallel(prepared, accessMode))) {
 			this._logService.info(`[Backboard latency] running_parallel_read_tools count=${preparedCalls.length} accessMode=${accessMode}`);
-			return Promise.all(preparedCalls.map(prepared => this._executePreparedToolCall(session, turnId, prepared, accessMode, responseState)));
+			return Promise.all(preparedCalls.map(prepared => this._executePreparedToolCall(session, turnId, prepared, accessMode, responseState, attachments)));
 		}
 		const outputs: unknown[] = [];
 		for (const prepared of preparedCalls) {
 			const currentAccessMode = this._turnSettings(session).accessMode;
 			this._logService.info(`[Backboard progress] Running ${prepared.display.displayName} with accessMode=${currentAccessMode}.`);
-			outputs.push(await this._executePreparedToolCall(session, turnId, prepared, currentAccessMode, responseState));
+			outputs.push(await this._executePreparedToolCall(session, turnId, prepared, currentAccessMode, responseState, attachments));
 		}
 		return outputs;
 	}
@@ -925,7 +1113,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 		}
 	}
 
-	private async _executePreparedToolCall(session: BackboardSession, turnId: string, prepared: PreparedBackboardToolCall, accessMode: string, responseState: BackboardResponseState): Promise<unknown> {
+	private async _executePreparedToolCall(session: BackboardSession, turnId: string, prepared: PreparedBackboardToolCall, accessMode: string, responseState: BackboardResponseState, attachments: readonly BackboardFileAttachment[] = []): Promise<unknown> {
 		const { call, toolInput, clientTool, display } = prepared;
 		this._appendBackboardProgress(session, turnId, responseState, localize('backboard.progress.toolStart', "Starting {0}.", display.displayName));
 		const alreadyStreaming = responseState.streamingToolCalls?.has(call.id) ?? false;
@@ -1007,9 +1195,43 @@ export class BackboardAgent extends Disposable implements IAgent {
 				const output = toolCallResultOutput(result);
 				this._appendBackboardProgress(session, turnId, responseState, result.success ? localize('backboard.progress.clientToolComplete', "{0} finished.", display.displayName) : localize('backboard.progress.clientToolFailed', "{0} returned an error.", display.displayName));
 				responseState.toolOutputs.push({ id: call.id, name: display.displayName, input: toolInput, success: result.success, output });
-				return toolOutput(call.id, { success: result.success, content: output });
+				return result.success ? successfulToolOutput(call.id, output) : toolOutput(call.id, { success: false, content: output });
 			} catch (error) {
 				const message = error instanceof CancellationError ? localize('backboard.tool.cancelled', "{0} was cancelled.", display.displayName) : (error instanceof Error ? error.message : String(error));
+				this._fire(session.sessionUri, {
+					type: ActionType.ChatToolCallComplete,
+					turnId,
+					toolCallId: call.id,
+					result: {
+						success: false,
+						pastTenseMessage: display.failedMessage,
+						content: [{ type: ToolResultContentType.Text, text: message }],
+						error: { message },
+					},
+				});
+				responseState.toolOutputs.push({ id: call.id, name: display.displayName, input: toolInput, success: false, output: message });
+				return toolOutput(call.id, { success: false, content: message });
+			}
+		}
+
+		if (isBackboardAttachmentTool(call.name)) {
+			try {
+				const result = backboardAttachmentToolResult(attachments, call.args);
+				this._appendBackboardProgress(session, turnId, responseState, localize('backboard.progress.toolComplete', "{0} finished.", display.displayName));
+				this._fire(session.sessionUri, {
+					type: ActionType.ChatToolCallComplete,
+					turnId,
+					toolCallId: call.id,
+					result: {
+						success: true,
+						pastTenseMessage: display.completedMessage,
+						content: [{ type: ToolResultContentType.Text, text: compactJson(result) }],
+					},
+				});
+				responseState.toolOutputs.push({ id: call.id, name: display.displayName, input: toolInput, success: true, output: compactJson(result) });
+				return successfulToolOutput(call.id, result);
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
 				this._fire(session.sessionUri, {
 					type: ActionType.ChatToolCallComplete,
 					turnId,
@@ -1085,7 +1307,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 				},
 			});
 			responseState.toolOutputs.push({ id: call.id, name: display.displayName, input: toolInput, success: true, output: result ?? '' });
-			return toolOutput(call.id, { success: true, content: result });
+			return successfulToolOutput(call.id, result);
 		} catch (error) {
 			reportContent.flush();
 			const message = error instanceof Error ? error.message : String(error);
@@ -1333,6 +1555,7 @@ function normalizePanelHistoryEntry(value: unknown, currentWorkspace: string | u
 		toolOutputs: Array.isArray(value.toolOutputs) ? value.toolOutputs : undefined,
 		messages: Array.isArray(value.messages) ? value.messages : undefined,
 		currentWorkspace: workspace,
+		backboardThreadId: typeof value.backboardThreadId === 'string' ? value.backboardThreadId : undefined,
 	};
 }
 
@@ -1445,6 +1668,7 @@ async function writeSharedBackboardThread(session: BackboardSession, prompt: str
 		const entry = {
 			id: session.sessionId,
 			title,
+			backboardThreadId: session.threadId,
 			prompt,
 			startedAt: session.createdAt,
 			updatedAt: now,
@@ -1462,12 +1686,21 @@ async function writeSharedBackboardThread(session: BackboardSession, prompt: str
 		};
 		await fs.promises.mkdir(sharedBackboardThreadsDir(), { recursive: true });
 		const threadPath = sharedBackboardThreadPath(workspace, session.sessionId);
+		logService.info(`[Backboard document-flow] thread_snapshot_write ${safeStringifyForLog({
+			sessionId: session.sessionId,
+			status,
+			threadPath,
+			panelStatePath: sharedBackboardPanelStatePath(),
+			backboardThreadId: session.threadId,
+			workspace,
+		})}`);
 		await fs.promises.mkdir(path.dirname(threadPath), { recursive: true });
 		await writeJsonFileAtomic(threadPath, {
 			version: 1,
 			source: 'sandbox',
 			workspace,
 			threadId: session.sessionId,
+			backboardThreadId: session.threadId,
 			savedAt: now,
 			entry,
 		});
@@ -1539,6 +1772,92 @@ function panelThreadHtml(prompt: string, assistantText: string, errorMessage: st
 function panelHistoryTitle(prompt: string): string {
 	const words = prompt.trim().split(/\s+/).filter(Boolean);
 	return words.slice(0, 8).join(' ') || 'Untitled chat';
+}
+
+function fileNameForAttachment(label: string, mimeType: string, fallbackPath?: string): string {
+	if (path.extname(label)) {
+		return label;
+	}
+	if (fallbackPath) {
+		const fallbackName = path.basename(fallbackPath);
+		if (path.extname(fallbackName)) {
+			return fallbackName;
+		}
+	}
+	const extension = extensionForMimeType(mimeType);
+	return extension ? `${label}${extension}` : label;
+}
+
+function extensionForMimeType(mimeType: string): string | undefined {
+	switch (mimeType.toLowerCase()) {
+		case 'application/json':
+			return '.json';
+		case 'application/pdf':
+			return '.pdf';
+		case 'image/png':
+			return '.png';
+		case 'image/jpeg':
+		case 'image/jpg':
+			return '.jpg';
+		case 'image/gif':
+			return '.gif';
+		case 'image/webp':
+			return '.webp';
+		case 'text/csv':
+			return '.csv';
+		case 'text/markdown':
+			return '.md';
+		case 'text/plain':
+			return '.txt';
+		default:
+			return undefined;
+	}
+}
+
+function mimeTypeForAttachmentLabel(label: string | undefined): string {
+	const extension = path.extname(label || '').toLowerCase();
+	switch (extension) {
+		case '.json':
+			return 'application/json';
+		case '.pdf':
+			return 'application/pdf';
+		case '.png':
+			return 'image/png';
+		case '.jpg':
+		case '.jpeg':
+			return 'image/jpeg';
+		case '.gif':
+			return 'image/gif';
+		case '.webp':
+			return 'image/webp';
+		case '.csv':
+			return 'text/csv';
+		case '.md':
+			return 'text/markdown';
+		case '.txt':
+		case '.ts':
+		case '.tsx':
+		case '.js':
+		case '.jsx':
+		case '.py':
+		case '.rs':
+		case '.go':
+		case '.java':
+		case '.c':
+		case '.cc':
+		case '.cpp':
+		case '.h':
+		case '.hpp':
+		case '.html':
+		case '.css':
+		case '.xml':
+		case '.yaml':
+		case '.yml':
+		case '.toml':
+			return 'text/plain';
+		default:
+			return 'application/octet-stream';
+	}
 }
 
 function escapePanelHtml(text: string): string {
@@ -1656,6 +1975,15 @@ class BackboardBridgeProcess extends Disposable {
 		return result?.output ?? { success: false, error: `Rust tool ${name} did not return output.` };
 	}
 
+	async callApi(command: string, params: Record<string, unknown>): Promise<unknown> {
+		const request = { ...params, config: params.config ?? bridgeConfig() };
+		this._logService.info(`[Backboard document-flow] bridge_call_api_start ${safeStringifyForLog({ command, params: request })}`);
+		const events = await this.send(command, undefined, request, undefined).promise;
+		const response = events.find(event => event.type === 'apiResponse')?.data;
+		this._logService.info(`[Backboard document-flow] bridge_call_api_response ${safeStringifyForLog({ command, response, eventTypes: events.map(event => event.type) })}`);
+		return response;
+	}
+
 	async listTools(mode: string, config?: Record<string, unknown>): Promise<unknown[] | undefined> {
 		const effectiveConfig = config ?? bridgeConfig();
 		const cacheKey = backboardToolCacheKey(mode, effectiveConfig);
@@ -1689,7 +2017,7 @@ class BackboardBridgeProcess extends Disposable {
 		}
 		const bridgePath = this._resolveBridgePath();
 		if (!fs.existsSync(bridgePath)) {
-			throw new Error(`Backboard bridge binary not found at ${bridgePath}. Build it with: npm --prefix extensions/backboard run build-bridge`);
+			throw new Error(`Backboard bridge binary not found at ${bridgePath}. This Backboard build needs a packaged Rust bridge. If cargo is installed, run: npm --prefix extensions/backboard run build-bridge.`);
 		}
 		const cwd = os.homedir();
 		this._logService.info(`[Backboard] Starting bridge at ${bridgePath} cwd=${cwd} session=${sessionId ?? '(none)'}`);
@@ -1836,10 +2164,26 @@ function backboardDisplayErrorMessage(message: string): string {
 
 function safeStringifyForLog(value: unknown): string {
 	try {
-		return JSON.stringify(value);
+		return JSON.stringify(redactBackboardLogValue(value));
 	} catch {
 		return String(value);
 	}
+}
+
+function redactBackboardLogValue(value: unknown): unknown {
+	if (Array.isArray(value)) {
+		return value.map(redactBackboardLogValue);
+	}
+	if (!isObjectRecord(value)) {
+		return value;
+	}
+	const redacted: Record<string, unknown> = {};
+	for (const [key, item] of Object.entries(value)) {
+		redacted[key] = key === '__image_base64'
+			? `<redacted image base64, ${typeof item === 'string' ? item.length : 0} chars>`
+			: redactBackboardLogValue(item);
+	}
+	return redacted;
 }
 
 function backboardTraceProgressMessage(event: BridgeEvent): string | undefined {
@@ -1943,7 +2287,7 @@ function toAgentModelInfo(model: BridgeModel): IAgentModelInfo {
 		id,
 		name: model.displayName || model.name,
 		maxContextWindow: typeof model.contextLimit === 'number' ? model.contextLimit : undefined,
-		supportsVision: model.supportsVision ?? false,
+		supportsVision: model.supportsVision ?? inferBackboardModelSupportsVision(model),
 		_meta: {
 			upstreamProvider: normalizeProviderKey(model.provider),
 			upstreamProviderLabel: providerLabel(model.provider),
@@ -1951,6 +2295,20 @@ function toAgentModelInfo(model: BridgeModel): IAgentModelInfo {
 			...(pricingMeta ?? {}),
 		},
 	};
+}
+
+function inferBackboardModelSupportsVision(model: BridgeModel): boolean {
+	const id = `${normalizeProviderKey(model.provider)}/${model.name}`.toLowerCase();
+	return id.includes('gpt-4o')
+		|| id.includes('gpt-5')
+		|| id.includes('claude-3')
+		|| id.includes('claude-sonnet-4')
+		|| id.includes('claude-opus-4')
+		|| id.includes('claude-haiku-4')
+		|| id.includes('gemini')
+		|| id.includes('grok-4')
+		|| id.includes('mistral-medium-3')
+		|| id.includes('pixtral');
 }
 
 function numericBridgeModelValue(model: BridgeModel, keys: readonly (keyof BridgeModel)[]): number | undefined {
@@ -2495,6 +2853,39 @@ function mergeBackboardTools(bridgeTools: unknown[] | undefined, clientTools: re
 		merged.push(toBackboardFunctionTool(tool));
 	}
 	return merged.length ? merged : undefined;
+}
+
+export function ensureBackboardAttachmentTool(tools: unknown[] | undefined, needed: boolean): unknown[] | undefined {
+	if (!needed) {
+		return tools;
+	}
+	const existing = tools ?? [];
+	if (existing.some(tool => backboardFunctionToolName(tool) === backboardAttachmentToolName)) {
+		return tools;
+	}
+	return [
+		...existing,
+		{
+			type: 'function',
+			function: {
+				name: backboardAttachmentToolName,
+				description: 'Read an attachment from the current user turn. Use this for image attachments when the user asks what an image shows, what text it contains, or for any visual inspection.',
+				parameters: {
+					type: 'object',
+					properties: {
+						index: {
+							type: 'number',
+							description: '1-based attachment index. Omit when there is only one attachment.',
+						},
+						file_name: {
+							type: 'string',
+							description: 'Exact attachment filename, if known.',
+						},
+					},
+				},
+			},
+		},
+	];
 }
 
 function isBackboardClientToolAllowed(tool: ToolDefinition): boolean {
@@ -3239,11 +3630,11 @@ function stringValueFromRecord(value: unknown): string | undefined {
 }
 
 function isReadOnlyTool(name: string): boolean {
-	return ['read_file', 'list_dir', 'glob', 'grep', 'codebase_search', 'web_search', 'web_fetch'].includes(name);
+	return ['read_file', 'list_dir', 'glob', 'grep', 'codebase_search', 'web_search', 'web_fetch', backboardAttachmentToolName].includes(name);
 }
 
 function isParallelSafeBackboardTool(name: string): boolean {
-	return ['read_file', 'list_dir', 'glob', 'grep', 'codebase_search'].includes(name);
+	return ['read_file', 'list_dir', 'glob', 'grep', 'codebase_search', backboardAttachmentToolName].includes(name);
 }
 
 function rawDisplayToolName(name: string): string {
@@ -3289,6 +3680,13 @@ function backboardToolDisplay(call: ParsedToolCall, clientTool?: ToolDefinition)
 				localize('backboard.tool.readFile.displayName', "Backboard Read File"),
 				focus ? localize('backboard.tool.readFile.invocationWithFile', "Reading {0}", focus) : localize('backboard.tool.readFile.invocation', "Reading file with Backboard"),
 				localize('backboard.tool.readFile.completed', "Read file with Backboard"),
+				'file',
+			);
+		case backboardAttachmentToolName:
+			return backboardToolMessages(
+				localize('backboard.tool.attachment.displayName', "Backboard Attachment"),
+				localize('backboard.tool.attachment.invocation', "Reading attached file"),
+				localize('backboard.tool.attachment.completed', "Read attached file"),
 				'file',
 			);
 		case 'list_dir':
@@ -3513,6 +3911,221 @@ function inferBackboardToolKind(name: string): string {
 
 function toolOutput(toolCallId: string, output: unknown): unknown {
 	return { tool_call_id: toolCallId, toolCallId, output: JSON.stringify(output) };
+}
+
+function successfulToolOutput(toolCallId: string, content: unknown): unknown {
+	return toolOutput(toolCallId, multimodalToolOutputContent(content) ?? { success: true, content });
+}
+
+const backboardAttachmentToolName = 'backboard_read_attachment';
+const maxBackboardToolImageBytes = 5 * 1024 * 1024;
+
+function promptWithBackboardDocuments(prompt: string, attachments: readonly BackboardFileAttachment[]): string {
+	if (!attachments.length) {
+		return prompt;
+	}
+	const list = attachments.map((attachment, index) => `${index + 1}. ${attachment.fileName}`).join('\n');
+	return `${prompt}\n\nThe user attached the following file(s) to this Backboard thread as indexed documents:\n${list}\n\nThese files were uploaded to Backboard thread documents and must be handled through Backboard document retrieval, not as inline attachments. Do not claim to directly view, OCR, or visually inspect the raw files. Use the indexed Backboard thread documents when answering. If a file's indexed content is unavailable, say that Backboard document retrieval did not return usable content for that file.`;
+}
+
+export function promptWithBackboardImages(prompt: string, attachments: readonly BackboardFileAttachment[]): string {
+	if (!attachments.length) {
+		return prompt;
+	}
+	const list = attachments.map((attachment, index) => `${index + 1}. ${attachment.fileName}`).join('\n');
+	return `${prompt}\n\nThe user attached the following image file(s) to this turn:\n${list}\n\nFor image understanding, call the ${backboardAttachmentToolName} tool before answering. Do not rely on Backboard document search, OCR retrieval, or indexed document descriptions for these images. Inspect the image input returned by the tool directly.`;
+}
+
+export function isBackboardImageAttachment(attachment: BackboardFileAttachment): boolean {
+	return /^image\/(?:png|jpe?g|webp|gif|bmp|tiff?)$/i.test(attachment.mimeType);
+}
+
+function isBackboardAttachmentTool(name: string): boolean {
+	return name === backboardAttachmentToolName;
+}
+
+export function backboardAttachmentToolResult(attachments: readonly BackboardFileAttachment[], args: Record<string, unknown>): unknown {
+	if (!attachments.length) {
+		throw new Error('No user attachments are available for this turn.');
+	}
+	const attachment = selectBackboardAttachment(attachments, args);
+	const buffer = Buffer.from(attachment.data);
+	if (attachment.mimeType.toLowerCase().startsWith('image/')) {
+		return {
+			success: true,
+			content: `Attached image: ${attachment.fileName}. The continuation turn receives this image as visual input. Inspect the image directly and answer the user. Do not mention base64 or attempt to decode it with tools.`,
+			file_name: attachment.fileName,
+			mime_type: attachment.mimeType,
+			__image_base64: buffer.toString('base64'),
+			__image_media_type: attachment.mimeType,
+		};
+	}
+	const text = decodeAttachmentText(buffer, attachment);
+	return {
+		success: true,
+		content: text ?? `Attached file ${attachment.fileName} is ${attachment.data.length} bytes of ${attachment.mimeType} data and is not a supported text or image attachment.`,
+		file_name: attachment.fileName,
+		mime_type: attachment.mimeType,
+		bytes: attachment.data.length,
+	};
+}
+
+function selectBackboardAttachment(attachments: readonly BackboardFileAttachment[], args: Record<string, unknown>): BackboardFileAttachment {
+	const byIndex = numberArg(args, 'index', 'attachment_index', 'attachmentIndex');
+	if (typeof byIndex === 'number') {
+		const attachment = attachments[Math.max(1, Math.trunc(byIndex)) - 1];
+		if (attachment) {
+			return attachment;
+		}
+	}
+	const requestedName = stringArg(args, 'file_name', 'fileName', 'filename', 'name');
+	if (requestedName) {
+		const attachment = attachments.find(item => item.fileName === requestedName);
+		if (attachment) {
+			return attachment;
+		}
+	}
+	if (attachments.length === 1) {
+		return attachments[0];
+	}
+	throw new Error(`Attachment not found. Available attachments: ${attachments.map((item, index) => `${index + 1}: ${item.fileName}`).join(', ')}`);
+}
+
+function decodeAttachmentText(buffer: Buffer, attachment: BackboardFileAttachment): string | undefined {
+	const mimeType = attachment.mimeType.toLowerCase();
+	const extension = path.extname(attachment.fileName).toLowerCase();
+	if (!mimeType.startsWith('text/')
+		&& !['application/json', 'application/xml', 'application/javascript', 'application/typescript'].includes(mimeType)
+		&& !['.txt', '.md', '.markdown', '.json', '.jsonl', '.xml', '.csv', '.ts', '.tsx', '.js', '.jsx', '.css', '.html', '.rs', '.py'].includes(extension)) {
+		return undefined;
+	}
+	const maxChars = 256 * 1024;
+	const text = buffer.toString('utf8');
+	return text.length > maxChars ? `${text.slice(0, maxChars)}\n[Attachment truncated]\n` : text;
+}
+
+function isBackboardDocumentLikeAttachment(attachment: MessageAttachment): boolean {
+	return attachment.displayKind === 'document' || attachment.displayKind === 'image';
+}
+
+function stringAtBackboardPath(value: unknown, path: readonly string[]): string | undefined {
+	let current: unknown = value;
+	for (const segment of path) {
+		if (!isObjectRecord(current)) {
+			return undefined;
+		}
+		current = current[segment];
+	}
+	return typeof current === 'string' && current.trim() ? current : undefined;
+}
+
+function backboardThreadIdFromValue(value: unknown): string | undefined {
+	for (const candidate of [
+		['thread_id'],
+		['threadId'],
+		['thread', 'id'],
+		['thread', 'thread_id'],
+		['data', 'thread_id'],
+		['data', 'threadId'],
+		['data', 'thread', 'id'],
+		['message', 'thread_id'],
+		['message', 'threadId'],
+		['run', 'thread_id'],
+		['run', 'threadId'],
+	] as const) {
+		const resolved = stringAtBackboardPath(value, candidate);
+		if (resolved) {
+			return resolved;
+		}
+	}
+	return undefined;
+}
+
+function backboardDocumentIdFromValue(value: unknown): string | undefined {
+	for (const candidate of [
+		['id'],
+		['document_id'],
+		['documentId'],
+		['document', 'id'],
+		['data', 'id'],
+		['data', 'document_id'],
+		['data', 'documentId'],
+		['data', 'document', 'id'],
+	] as const) {
+		const resolved = stringAtBackboardPath(value, candidate);
+		if (resolved) {
+			return resolved;
+		}
+	}
+	return undefined;
+}
+
+function backboardDocumentStatusFromValue(value: unknown): string | undefined {
+	for (const candidate of [
+		['status'],
+		['document_status'],
+		['documentStatus'],
+		['document', 'status'],
+		['data', 'status'],
+		['data', 'document_status'],
+		['data', 'documentStatus'],
+		['data', 'document', 'status'],
+	] as const) {
+		const resolved = stringAtBackboardPath(value, candidate);
+		if (resolved) {
+			return resolved.toLowerCase();
+		}
+	}
+	return undefined;
+}
+
+async function waitForBackboardDelay(ms: number): Promise<void> {
+	await new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function withBackboardTempFile<T>(attachment: BackboardFileAttachment, callback: (filePath: string) => Promise<T>): Promise<T> {
+	const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'backboard-document-'));
+	const filePath = path.join(tempDir, fileNameForAttachment(attachment.fileName, attachment.mimeType));
+	try {
+		await fs.promises.writeFile(filePath, Buffer.from(attachment.data));
+		return await callback(filePath);
+	} finally {
+		await fs.promises.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+	}
+}
+
+function multimodalToolOutputContent(content: unknown): unknown | undefined {
+	const parsed = typeof content === 'string' ? parseJsonObject(content) : content;
+	if (!isObjectRecord(parsed)) {
+		return undefined;
+	}
+	const imageBase64 = stringValueFromRecord(parsed.__image_base64);
+	const mediaType = stringValueFromRecord(parsed.__image_media_type);
+	if (!imageBase64 || !mediaType) {
+		return undefined;
+	}
+	if (!mediaType.toLowerCase().startsWith('image/')) {
+		throw new Error(`Unsupported image media type in tool output: ${mediaType}`);
+	}
+	if (estimatedBase64DecodedBytes(imageBase64) > maxBackboardToolImageBytes) {
+		throw new Error('Image tool output exceeds the 5 MB Backboard limit.');
+	}
+	return parsed;
+}
+
+function parseJsonObject(value: string): Record<string, unknown> | undefined {
+	try {
+		const parsed: unknown = JSON.parse(value);
+		return isObjectRecord(parsed) ? parsed : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+function estimatedBase64DecodedBytes(value: string): number {
+	const normalized = value.replace(/\s/g, '');
+	const padding = normalized.endsWith('==') ? 2 : normalized.endsWith('=') ? 1 : 0;
+	return Math.max(0, Math.floor(normalized.length * 3 / 4) - padding);
 }
 
 function toolInputPreview(call: ParsedToolCall): string {

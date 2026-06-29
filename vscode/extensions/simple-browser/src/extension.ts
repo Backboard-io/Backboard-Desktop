@@ -14,6 +14,7 @@ declare class URL {
 
 const openApiCommand = 'simpleBrowser.api.open';
 const showCommand = 'simpleBrowser.show';
+const sessionsRightWorkbenchBrowserCommand = 'workbench.action.sessions.rightWorkbench.openBrowser';
 const integratedBrowserCommand = 'workbench.action.browser.open';
 
 const enabledHosts = new Set<string>([
@@ -33,18 +34,24 @@ const enabledHosts = new Set<string>([
 const openerId = 'simpleBrowser.open';
 
 /**
- * Checks if the integrated browser should be used instead of the simple browser
+ * Gets the best available integrated browser command instead of the simple browser.
  */
-async function shouldUseIntegratedBrowser(): Promise<boolean> {
+async function getIntegratedBrowserCommand(): Promise<string | undefined> {
 	const commands = await vscode.commands.getCommands(true);
-	return commands.includes(integratedBrowserCommand);
+	if (commands.includes(sessionsRightWorkbenchBrowserCommand)) {
+		return sessionsRightWorkbenchBrowserCommand;
+	}
+	if (commands.includes(integratedBrowserCommand)) {
+		return integratedBrowserCommand;
+	}
+	return undefined;
 }
 
 /**
  * Opens a URL in the integrated browser
  */
-async function openInIntegratedBrowser(url?: string): Promise<void> {
-	await vscode.commands.executeCommand(integratedBrowserCommand, url);
+async function openInIntegratedBrowser(command: string, url?: string): Promise<void> {
+	await vscode.commands.executeCommand(command, url);
 }
 
 export function activate(context: vscode.ExtensionContext) {
@@ -59,8 +66,9 @@ export function activate(context: vscode.ExtensionContext) {
 	}));
 
 	context.subscriptions.push(vscode.commands.registerCommand(showCommand, async (url?: string) => {
-		if (await shouldUseIntegratedBrowser()) {
-			return openInIntegratedBrowser(url);
+		const command = await getIntegratedBrowserCommand();
+		if (command) {
+			return openInIntegratedBrowser(command, url);
 		}
 
 		if (!url) {
@@ -79,8 +87,9 @@ export function activate(context: vscode.ExtensionContext) {
 		preserveFocus?: boolean;
 		viewColumn: vscode.ViewColumn;
 	}) => {
-		if (await shouldUseIntegratedBrowser()) {
-			await openInIntegratedBrowser(url.toString(true));
+		const command = await getIntegratedBrowserCommand();
+		if (command) {
+			await openInIntegratedBrowser(command, url.toString(true));
 		} else {
 			manager.show(url, showOptions);
 		}
@@ -99,8 +108,9 @@ export function activate(context: vscode.ExtensionContext) {
 			return vscode.ExternalUriOpenerPriority.None;
 		},
 		async openExternalUri(resolveUri: vscode.Uri) {
-			if (await shouldUseIntegratedBrowser()) {
-				await openInIntegratedBrowser(resolveUri.toString(true));
+			const command = await getIntegratedBrowserCommand();
+			if (command) {
+				await openInIntegratedBrowser(command, resolveUri.toString(true));
 			} else {
 				return manager.show(resolveUri, {
 					viewColumn: vscode.window.activeTextEditor ? vscode.ViewColumn.Beside : vscode.ViewColumn.Active

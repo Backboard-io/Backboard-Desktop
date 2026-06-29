@@ -57,7 +57,7 @@ export class OpenAgentsWindowAction extends Action2 {
 	constructor() {
 		super({
 			id: OPEN_AGENTS_WINDOW_COMMAND_ID,
-			title: localize2('openAgentsWindow', "Open Agents"),
+			title: localize2('openAgentsWindow', "Open Simple"),
 			category: CHAT_CATEGORY,
 			precondition: OPEN_AGENTS_WINDOW_PRECONDITION,
 			f1: true,

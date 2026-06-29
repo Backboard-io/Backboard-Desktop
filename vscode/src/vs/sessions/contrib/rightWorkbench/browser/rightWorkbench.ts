@@ -25,6 +25,7 @@ export const orderedTabModes: readonly RightWorkbenchMode[] = ['review', 'browse
 export interface IRightWorkbenchModeRequest {
 	readonly mode: RightWorkbenchMode;
 	readonly browserUrl?: string;
+	readonly browserViewId?: string;
 }
 
 export interface IRightWorkbenchModeEntry {

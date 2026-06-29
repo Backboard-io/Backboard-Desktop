@@ -603,7 +603,7 @@ const configuration: IConfigurationNode = {
 			...signalFeatureBase,
 			'description': localize('accessibility.signals.chatRequestSent', "Plays a signal - sound (audio cue) and/or announcement (alert) - when a chat request is made."),
 			'default': {
-				'sound': 'on',
+				'sound': 'off',
 				'announcement': 'auto'
 			},
 			'properties': {
@@ -621,7 +621,7 @@ const configuration: IConfigurationNode = {
 			...defaultNoAnnouncement,
 			'description': localize('accessibility.signals.chatResponseReceived', "Plays a sound / audio cue when the response has been received."),
 			'default': {
-				'sound': 'on',
+				'sound': 'off',
 			},
 			'properties': {
 				'sound': {
@@ -634,7 +634,7 @@ const configuration: IConfigurationNode = {
 			...signalFeatureBase,
 			'description': localize('accessibility.signals.notificationReceived', "Plays a signal - sound (audio cue) and/or announcement (alert) - when a notification is received."),
 			'default': {
-				'sound': 'on',
+				'sound': 'off',
 				'announcement': 'auto'
 			},
 			'properties': {

@@ -1,0 +1,9 @@
+rust/**
+src/**
+tsconfig.json
+tsconfig.tsbuildinfo
+*.map
+*.tsbuildinfo
+node_modules/**
+npm-debug.log
+yarn-error.log

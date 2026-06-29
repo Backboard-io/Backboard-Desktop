@@ -13,7 +13,6 @@ import { Codicon } from '../../../../../base/common/codicons.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { ContextKeyExpr, IContextKey, IContextKeyService, RawContextKey } from '../../../../../platform/contextkey/common/contextkey.js';
 import { IsAuxiliaryWindowContext, IsSessionsWindowContext } from '../../../../../workbench/common/contextkeys.js';
-import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { IContextMenuService } from '../../../../../platform/contextview/browser/contextView.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { IKeybindingService } from '../../../../../platform/keybinding/common/keybinding.js';
@@ -99,7 +98,6 @@ export class SessionsView extends ViewPane {
 		@IViewDescriptorService viewDescriptorService: IViewDescriptorService,
 		@IInstantiationService instantiationService: IInstantiationService,
 		@IOpenerService openerService: IOpenerService,
-		@ICommandService private readonly commandService: ICommandService,
 		@IThemeService themeService: IThemeService,
 		@IHoverService hoverService: IHoverService,
 		@ISessionsManagementService private readonly sessionsManagementService: ISessionsManagementService,
@@ -207,9 +205,9 @@ export class SessionsView extends ViewPane {
 				logSessionsInteraction(this.telemetryService, 'newSession');
 				this.sessionsService.openNewSession({ forceNew: true });
 			});
-			this.createSidebarAction(primaryActions, undefined, localize('marketplace', "Marketplace"), anchor => {
+			this.createSidebarAction(primaryActions, Codicon.extensions, localize('marketplace', "Marketplace"), anchor => {
 				this.instantiationService.createInstance(SkillsLibraryController).showMarketplace(anchor);
-			}, 'agent-sessions-sidebar-action-marketplace-icon');
+			});
 
 			const workspacesHeader = this.workspacesHeader = DOM.append(sessionsContent, $('.agent-sessions-workspaces-header'));
 			DOM.append(workspacesHeader, $('span.agent-sessions-workspaces-title', undefined, localize('projectsHeader', "Projects")));
@@ -341,7 +339,7 @@ export class SessionsView extends ViewPane {
 		}
 	}
 
-	private createSidebarAction(container: HTMLElement, icon: ThemeIcon | undefined, label: string, run: (anchor: HTMLElement) => void, iconClass?: string): void {
+	private createSidebarAction(container: HTMLElement, icon: ThemeIcon, label: string, run: (anchor: HTMLElement) => void): void {
 		const button = DOM.append(container, $('button.agent-sessions-sidebar-action')) as HTMLButtonElement;
 		button.type = 'button';
 		button.title = label;

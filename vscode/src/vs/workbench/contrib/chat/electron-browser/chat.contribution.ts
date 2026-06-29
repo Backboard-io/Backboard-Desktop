@@ -48,6 +48,7 @@ import { registerChatDeveloperActions } from './actions/chatDeveloperActions.js'
 import { registerChatExportZipAction } from './actions/chatExportZip.js';
 import { BackboardCredentialsContribution, registerBackboardSsoActions } from './actions/backboardSsoActions.js';
 import { registerExportAgentTracesDbAction } from './actions/exportAgentTracesDb.js';
+import './backboardWorkspace/backboardWorkspace.contribution.js';
 import { BackboardModeSwitcherAction, BackboardModeSwitcherContribution, ToggleBackboardModeSwitcherTitleBarAction } from './backboardModeSwitcher/backboardModeSwitcherActions.js';
 import { shouldWarnForSessionShutdown } from './chatLifecycle.js';
 import { HoldToVoiceChatInChatViewAction, InlineVoiceChatAction, KeywordActivationContribution, QuickVoiceChatAction, ReadChatResponseAloud, StartVoiceChatAction, StopListeningAction, StopListeningAndSubmitAction, StopReadAloud, StopReadChatItemAloud, VoiceChatInChatViewAction } from './actions/voiceChatActions.js';

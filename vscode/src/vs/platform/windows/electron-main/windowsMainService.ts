@@ -318,7 +318,7 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 			? this.getWindowById(openConfig.contextWindowId)
 			: this.getFocusedWindow() ?? this.getLastActiveWindow();
 
-		if (targetWindow && !openConfig.initialStartup) {
+		if (targetWindow && !openConfig.initialStartup && openConfig.forceReuseWindow) {
 			await this.openInBrowserWindow({
 				cli: openConfig.cli,
 				initialStartup: openConfig.initialStartup,

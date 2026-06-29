@@ -153,7 +153,8 @@
 	inset: 0;
 	z-index: 30;
 	pointer-events: none;
-	border: 1px solid var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 18%, transparent));
+	border-left: 1px solid var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 18%, transparent));
+	border-right: 1px solid var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 18%, transparent));
 	border-radius: 0;
 	box-sizing: border-box;
 }
@@ -195,6 +196,38 @@
 	border: none !important;
 	border-radius: 0;
 	box-sizing: border-box;
+	position: relative;
+}
+
+.agent-sessions-workbench .part.sessionspart::before {
+	content: '';
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	height: 38px;
+	-webkit-app-region: drag;
+	z-index: 1;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title,
+.agent-sessions-workbench .part.editor:not(.modal-editor-part) .editor-group-container > .title {
+	-webkit-app-region: drag;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container,
+.agent-sessions-workbench .part.auxiliarybar > .title .title-actions,
+.agent-sessions-workbench .part.auxiliarybar > .title .monaco-action-bar,
+.agent-sessions-workbench .part.auxiliarybar > .title .action-item,
+.agent-sessions-workbench .part.auxiliarybar > .title .action-label,
+.agent-sessions-workbench .part.editor:not(.modal-editor-part) .editor-group-container > .title > .tabs-and-actions-container,
+.agent-sessions-workbench .part.editor:not(.modal-editor-part) .editor-group-container > .title .tabs-container,
+.agent-sessions-workbench .part.editor:not(.modal-editor-part) .editor-group-container > .title .tab,
+.agent-sessions-workbench .part.editor:not(.modal-editor-part) .editor-group-container > .title .editor-actions,
+.agent-sessions-workbench .part.editor:not(.modal-editor-part) .editor-group-container > .title .monaco-action-bar,
+.agent-sessions-workbench .part.editor:not(.modal-editor-part) .editor-group-container > .title .action-item,
+.agent-sessions-workbench .part.editor:not(.modal-editor-part) .editor-group-container > .title .action-label {
+	-webkit-app-region: no-drag;
 }
 
 .agent-sessions-workbench.nopanel .part.sessionspart {
@@ -245,17 +278,16 @@
 
 .agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.sessionspart) {
 	border: none !important;
-	border-top: 1px solid color-mix(in srgb, var(--vscode-foreground) 9%, transparent) !important;
 }
 
 .agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.editor:not(.modal-editor-part)) {
 	border: none !important;
-	border-top: 1px solid color-mix(in srgb, var(--vscode-foreground) 9%, transparent) !important;
+	border-left: 1px solid color-mix(in srgb, var(--vscode-foreground) 14%, transparent) !important;
 }
 
 .agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.auxiliarybar) {
 	border: none !important;
-	border-top: 1px solid color-mix(in srgb, var(--vscode-foreground) 9%, transparent) !important;
+	border-left: 1px solid color-mix(in srgb, var(--vscode-foreground) 14%, transparent) !important;
 }
 
 .agent-sessions-workbench.noauxiliarybar .monaco-grid-view .split-view-view:has(> .part.editor:not(.modal-editor-part)) {
@@ -467,7 +499,6 @@
 .agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.editor:not(.modal-editor-part)),
 .agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.auxiliarybar) {
 	border: none !important;
-	border-top: 1px solid color-mix(in srgb, var(--vscode-foreground) 9%, transparent) !important;
 	background: var(--vscode-editor-background) !important;
 }
 
@@ -479,12 +510,6 @@
 	background-color: var(--vscode-editor-background) !important;
 	border-bottom: 1px solid color-mix(in srgb, var(--vscode-foreground) 8%, transparent) !important;
 	box-sizing: border-box;
-}
-
-.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.sessionspart),
-.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.editor:not(.modal-editor-part)),
-.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.auxiliarybar) {
-	border-top: 1px solid var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 18%, transparent)) !important;
 }
 
 .agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.editor:not(.modal-editor-part)),

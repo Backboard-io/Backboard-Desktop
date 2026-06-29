@@ -1272,9 +1272,8 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 			? Math.max(0, Math.min(this._savedPartSizes.sessions, rightSectionWidth - effectiveRightWorkColumnWidth))
 			: Math.max(0, rightSectionWidth - effectiveRightWorkColumnWidth);
 
-		const contentHeight = Math.max(0, height - titleBarHeight);
 		const visiblePanelSize = this.partVisibility.panel ? panelSize : 0;
-		const topRightHeight = Math.max(0, contentHeight - visiblePanelSize);
+		const topRightHeight = Math.max(0, height - visiblePanelSize);
 		const minimumAuxiliaryBarWidth = this.partVisibility.editor
 			? Math.min(180, Math.max(120, Math.floor(rightWorkColumnWidth * 0.22)))
 			: rightWorkColumnWidth;
@@ -1335,6 +1334,13 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 			visible: this.partVisibility.panel
 		};
 
+		// Left section: Titlebar | Sidebar (vertical)
+		const leftSection: ISerializedNode = {
+			type: 'branch',
+			data: [titleBarNode, sideBarNode],
+			size: effectiveSideBarWidth
+		};
+
 		// Top right section: Chat Bar | Right workbench (Editor + Files/Browser/Changes)
 		const topRightSection: ISerializedNode = {
 			type: 'branch',
@@ -1349,23 +1355,16 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 			size: rightSectionWidth
 		};
 
-		// Content section: Sidebar | Right section (horizontal)
+		// Root section: Left column | Right section (horizontal)
 		const contentSection: ISerializedNode = {
 			type: 'branch',
-			data: [sideBarNode, rightSection],
-			size: contentHeight
+			data: [leftSection, rightSection],
+			size: height
 		};
 
 		const result: ISerializedGrid = {
-			root: {
-				type: 'branch',
-				size: width,
-				data: [
-					titleBarNode,
-					contentSection
-				]
-			},
-			orientation: Orientation.VERTICAL,
+			root: contentSection,
+			orientation: Orientation.HORIZONTAL,
 			width,
 			height
 		};

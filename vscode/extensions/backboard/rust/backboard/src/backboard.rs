@@ -616,6 +616,20 @@ pub struct AudioAttachment {
     pub mime_type: String,
 }
 
+#[derive(Clone, Debug)]
+pub struct ImageAttachment {
+    pub data: Vec<u8>,
+    pub file_name: String,
+    pub mime_type: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct FileAttachment {
+    pub data: Vec<u8>,
+    pub file_name: String,
+    pub mime_type: String,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct SendMessageRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -653,6 +667,10 @@ pub struct SendMessageRequest {
     pub max_tokens: Option<u32>,
     #[serde(skip_serializing)]
     pub audio_file: Option<AudioAttachment>,
+    #[serde(skip_serializing)]
+    pub image_file: Option<ImageAttachment>,
+    #[serde(skip_serializing)]
+    pub files: Vec<FileAttachment>,
 }
 
 fn default_web_search() -> String {
@@ -680,6 +698,8 @@ impl Default for SendMessageRequest {
             mcp_calls: None,
             max_tokens: None,
             audio_file: None,
+            image_file: None,
+            files: Vec::new(),
         }
     }
 }
@@ -740,6 +760,8 @@ pub struct BackboardModel {
     pub context_limit: Option<u64>,
     #[serde(default)]
     pub supports_thinking: Option<bool>,
+    #[serde(default, alias = "supportsVision")]
+    pub supports_vision: Option<bool>,
     #[serde(default)]
     pub input_cost_per_1m_tokens: Option<f64>,
     #[serde(default)]
@@ -1405,6 +1427,10 @@ impl SendMessageRequest {
         }
         self
     }
+
+    fn has_multipart_attachments(&self) -> bool {
+        self.audio_file.is_some() || self.image_file.is_some() || !self.files.is_empty()
+    }
 }
 
 pub fn message_thread_binding(value: &Value) -> MessageThreadBinding {
@@ -1608,6 +1634,26 @@ pub fn message_request_log_json(request: &SendMessageRequest, stream: bool) -> V
             );
         }
     }
+    let mut files = Vec::new();
+    if let Some(image) = request.image_file.as_ref() {
+        files.push(json!({
+                "file_name": image.file_name.clone(),
+                "mime_type": image.mime_type.clone(),
+                "bytes": image.data.len()
+        }));
+    }
+    files.extend(request.files.iter().map(|file| {
+        json!({
+            "file_name": file.file_name.clone(),
+            "mime_type": file.mime_type.clone(),
+            "bytes": file.data.len()
+        })
+    }));
+    if !files.is_empty()
+        && let Some(map) = body.as_object_mut()
+    {
+        map.insert("files".to_string(), Value::Array(files));
+    }
     body
 }
 
@@ -1622,6 +1668,18 @@ fn message_multipart_form(request: SendMessageRequest, stream: bool) -> Result<F
             .mime_str(&audio.mime_type)?;
         form = form.part("audio_file", part);
     }
+    if let Some(image) = request.image_file {
+        let part = Part::bytes(image.data)
+            .file_name(image.file_name)
+            .mime_str(&image.mime_type)?;
+        form = form.part("files", part);
+    }
+    for file in request.files {
+        let part = Part::bytes(file.data)
+            .file_name(file.file_name)
+            .mime_str(&file.mime_type)?;
+        form = form.part("files", part);
+    }
     Ok(form)
 }
 
@@ -1633,7 +1691,7 @@ fn message_request_builder(
     stream: bool,
 ) -> RequestBuilder {
     let builder = auth.apply(client.post(url));
-    if request.audio_file.is_some() {
+    if request.has_multipart_attachments() {
         builder.multipart(message_multipart_form(request, stream).unwrap_or_else(|_| Form::new()))
     } else {
         builder
@@ -1643,7 +1701,7 @@ fn message_request_builder(
 }
 
 fn validate_message_request(request: &SendMessageRequest, stream: bool) -> Result<()> {
-    if request.audio_file.is_some() {
+    if request.has_multipart_attachments() {
         message_multipart_form(request.clone(), stream).map(|_| ())
     } else {
         message_json(request, stream);
@@ -2383,6 +2441,60 @@ mod tests {
         };
 
         message_multipart_form(request, true).expect("multipart form should build");
+    }
+
+    #[test]
+    fn message_request_log_uses_files_for_image_attachment() {
+        let request = SendMessageRequest {
+            content: "what does this image say".to_string(),
+            image_file: Some(ImageAttachment {
+                data: vec![1, 2, 3],
+                file_name: "image.png".to_string(),
+                mime_type: "image/png".to_string(),
+            }),
+            ..SendMessageRequest::default()
+        };
+
+        let body = message_request_log_json(&request, true);
+
+        assert!(body.get("image_file").is_none());
+        assert_eq!(body["files"][0]["file_name"], "image.png");
+        assert_eq!(body["files"][0]["mime_type"], "image/png");
+        assert_eq!(body["files"][0]["bytes"], 3);
+    }
+
+    #[test]
+    fn multipart_message_accepts_generic_files() {
+        let request = SendMessageRequest {
+            content: "what is in this json".to_string(),
+            files: vec![FileAttachment {
+                data: br#"{"arch":"x86_64"}"#.to_vec(),
+                file_name: "macos-x86_64.json".to_string(),
+                mime_type: "application/json".to_string(),
+            }],
+            ..SendMessageRequest::default()
+        };
+
+        message_multipart_form(request, true).expect("multipart form should build");
+    }
+
+    #[test]
+    fn message_request_log_uses_files_for_generic_attachment() {
+        let request = SendMessageRequest {
+            content: "what is in this json".to_string(),
+            files: vec![FileAttachment {
+                data: vec![1, 2, 3, 4],
+                file_name: "macos-x86_64.json".to_string(),
+                mime_type: "application/json".to_string(),
+            }],
+            ..SendMessageRequest::default()
+        };
+
+        let body = message_request_log_json(&request, true);
+
+        assert_eq!(body["files"][0]["file_name"], "macos-x86_64.json");
+        assert_eq!(body["files"][0]["mime_type"], "application/json");
+        assert_eq!(body["files"][0]["bytes"], 4);
     }
 
     #[test]

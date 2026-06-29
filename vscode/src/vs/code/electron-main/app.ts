@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { app, BrowserWindow, desktopCapturer, Details, dialog, GPUFeatureStatus, powerMonitor, protocol, screen as electronScreen, session, Session, systemPreferences, WebContents, WebFrameMain } from 'electron';
+import { app, BrowserWindow, desktopCapturer, Details, dialog, GPUFeatureStatus, OpenDialogOptions, powerMonitor, protocol, screen as electronScreen, session, Session, systemPreferences, WebContents, WebFrameMain } from 'electron';
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'fs';
 import { addUNCHostToAllowlist, disableUNCAccessRestrictions } from '../../base/node/unc.js';
 import { validatedIpcMain } from '../../base/parts/ipc/electron-main/ipcMain.js';
@@ -604,6 +604,7 @@ export class CodeApplication extends Disposable {
 		validatedIpcMain.handle('vscode:jarvisVoiceTranscribe', async (_event, request: unknown) => transcribeJarvisVoice(request));
 		validatedIpcMain.handle('vscode:jarvisInterpretCommand', async (_event, request: unknown) => interpretJarvisCommand(request));
 		validatedIpcMain.handle('vscode:jarvisSelectWorkspaceFolder', async (event, currentPath: unknown) => selectJarvisWorkspaceFolder(event.sender, currentPath));
+		validatedIpcMain.handle('vscode:jarvisSelectBackgroundFile', async (event, currentPath: unknown) => selectJarvisBackgroundFile(event.sender, currentPath));
 		validatedIpcMain.handle('vscode:jarvisTerminalCommand', async (event, command: unknown) => handleJarvisTerminalCommand(event.sender, command));
 		validatedIpcMain.handle('vscode:jarvisSwitchWindowKind', async (event, target: unknown) => {
 			const windowsMainService = this.windowsMainService;
@@ -1977,7 +1978,7 @@ interface IOptimusDevHotRefreshState {
 	readonly error?: string;
 }
 
-type JarvisTerminalCommandType = 'openTerminal' | 'writeTerminal' | 'disposeTerminal';
+type JarvisTerminalCommandType = 'openTerminal' | 'writeTerminal' | 'resizeTerminal' | 'disposeTerminal';
 
 interface IJarvisTerminalCommand {
 	readonly type: JarvisTerminalCommandType;
@@ -1985,6 +1986,8 @@ interface IJarvisTerminalCommand {
 	readonly terminalName?: string;
 	readonly data?: string;
 	readonly cwd?: string;
+	readonly cols?: number;
+	readonly rows?: number;
 }
 
 interface IJarvisTerminalProcess {
@@ -2339,6 +2342,9 @@ async function handleJarvisTerminalCommand(sender: WebContents, value: unknown):
 			case 'writeTerminal':
 				writeJarvisTerminal(command);
 				return { accepted: true, slotId: command.slotId };
+			case 'resizeTerminal':
+				resizeJarvisTerminal(command);
+				return { accepted: true, slotId: command.slotId };
 			case 'disposeTerminal':
 				disposeJarvisTerminal(command.slotId);
 				return { accepted: true, slotId: command.slotId };
@@ -2368,13 +2374,45 @@ async function selectJarvisWorkspaceFolder(sender: WebContents, currentPath: unk
 	return { accepted: true, path: result.filePaths[0] };
 }
 
+async function selectJarvisBackgroundFile(sender: WebContents, currentPath: unknown): Promise<{ readonly accepted: boolean; readonly path?: string; readonly uri?: string; readonly mediaKind?: 'image' | 'video'; readonly error?: string }> {
+	const defaultPath = typeof currentPath === 'string' && currentPath ? currentPath : homedir();
+	const ownerWindow = BrowserWindow.fromWebContents(sender) ?? undefined;
+	const options: OpenDialogOptions = {
+		title: 'Select Jarvis background',
+		defaultPath,
+		properties: ['openFile'],
+		filters: [
+			{ name: 'Images and videos', extensions: ['apng', 'avif', 'gif', 'jpg', 'jpeg', 'mov', 'mp4', 'png', 'webm', 'webp'] },
+			{ name: 'Images', extensions: ['apng', 'avif', 'gif', 'jpg', 'jpeg', 'png', 'webp'] },
+			{ name: 'Videos', extensions: ['mov', 'mp4', 'webm'] }
+		]
+	};
+	const result = await (ownerWindow
+		? dialog.showOpenDialog(ownerWindow, options)
+		: dialog.showOpenDialog(options));
+	if (result.canceled || result.filePaths.length === 0) {
+		return { accepted: false };
+	}
+	const path = result.filePaths[0];
+	return {
+		accepted: true,
+		path,
+		uri: URI.file(path).with({ scheme: Schemas.vscodeFileResource, authority: VSCODE_AUTHORITY, query: null, fragment: null }).toString(true),
+		mediaKind: jarvisBackgroundMediaKind(path)
+	};
+}
+
+function jarvisBackgroundMediaKind(path: string): 'image' | 'video' {
+	return /\.(?:mov|mp4|webm)$/i.test(path) ? 'video' : 'image';
+}
+
 function parseJarvisTerminalCommand(value: unknown): IJarvisTerminalCommand | undefined {
 	if (!isOptimusObjectRecord(value)) {
 		return undefined;
 	}
 	const type = value.type;
 	const slotId = value.slotId;
-	if ((type !== 'openTerminal' && type !== 'writeTerminal' && type !== 'disposeTerminal') || typeof slotId !== 'string' || !slotId) {
+	if ((type !== 'openTerminal' && type !== 'writeTerminal' && type !== 'resizeTerminal' && type !== 'disposeTerminal') || typeof slotId !== 'string' || !slotId) {
 		return undefined;
 	}
 	return {
@@ -2382,7 +2420,9 @@ function parseJarvisTerminalCommand(value: unknown): IJarvisTerminalCommand | un
 		slotId,
 		terminalName: typeof value.terminalName === 'string' ? value.terminalName : undefined,
 		data: typeof value.data === 'string' ? value.data : undefined,
-		cwd: typeof value.cwd === 'string' ? value.cwd : undefined
+		cwd: typeof value.cwd === 'string' ? value.cwd : undefined,
+		cols: typeof value.cols === 'number' ? value.cols : undefined,
+		rows: typeof value.rows === 'number' ? value.rows : undefined
 	};
 }
 
@@ -2452,6 +2492,17 @@ function writeJarvisTerminal(command: IJarvisTerminalCommand): void {
 		throw new Error(`Jarvis terminal ${command.slotId} is not running.`);
 	}
 	terminal.pty.write(command.data ?? '');
+}
+
+function resizeJarvisTerminal(command: IJarvisTerminalCommand): void {
+	const terminal = jarvisTerminals.get(command.slotId);
+	if (!terminal || !command.cols || !command.rows) {
+		return;
+	}
+	terminal.pty.resize(
+		Math.max(20, Math.min(240, Math.trunc(command.cols))),
+		Math.max(6, Math.min(80, Math.trunc(command.rows)))
+	);
 }
 
 function disposeJarvisTerminal(slotId: string): void {
