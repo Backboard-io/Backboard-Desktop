@@ -2303,62 +2303,7 @@
         "contents": "%github.copilot.viewsWelcome.debug%"
       }
     ],
-    "chatViewsWelcome": [
-      {
-        "icon": "$(chat-sparkle)",
-        "title": "%copilot.title%",
-        "content": "%github.copilot.viewsWelcome.individual.expired%",
-        "when": "github.copilot.interactiveSession.individual.expired && !github.copilot.hasByokModels"
-      },
-      {
-        "icon": "$(chat-sparkle)",
-        "title": "%copilot.title%",
-        "content": "%github.copilot.viewsWelcome.enterprise%",
-        "when": "github.copilot.interactiveSession.enterprise.disabled && !github.copilot.hasByokModels"
-      },
-      {
-        "icon": "$(chat-sparkle)",
-        "title": "%copilot.title%",
-        "content": "%github.copilot.viewsWelcome.offline%",
-        "when": "github.copilot.offline && !github.copilot.hasByokModels"
-      },
-      {
-        "icon": "$(chat-sparkle)",
-        "title": "%copilot.title%",
-        "content": "%github.copilot.viewsWelcome.invalidToken%",
-        "when": "github.copilot.interactiveSession.invalidToken && !github.copilot.hasByokModels"
-      },
-      {
-        "icon": "$(chat-sparkle)",
-        "title": "%copilot.title%",
-        "content": "%github.copilot.viewsWelcome.rateLimited%",
-        "when": "github.copilot.interactiveSession.rateLimited && !github.copilot.hasByokModels"
-      },
-      {
-        "icon": "$(chat-sparkle)",
-        "title": "%copilot.title%",
-        "content": "%github.copilot.viewsWelcome.gitHubLoginFailed%",
-        "when": "github.copilot.interactiveSession.gitHubLoginFailed && !github.copilot.hasByokModels"
-      },
-      {
-        "icon": "$(chat-sparkle)",
-        "title": "%copilot.title%",
-        "content": "%github.copilot.viewsWelcome.contactSupport%",
-        "when": "github.copilot.interactiveSession.contactSupport && !github.copilot.hasByokModels"
-      },
-      {
-        "icon": "$(chat-sparkle)",
-        "title": "%copilot.title%",
-        "content": "%github.copilot.viewsWelcome.chatDisabled%",
-        "when": "github.copilot.interactiveSession.chatDisabled && !github.copilot.hasByokModels"
-      },
-      {
-        "icon": "$(chat-sparkle)",
-        "title": "%copilot.title%",
-        "content": "%github.copilot.viewsWelcome.switchToReleaseChannel%",
-        "when": "github.copilot.interactiveSession.switchToReleaseChannel"
-      }
-    ],
+    "chatViewsWelcome": [],
     "commands": [
       {
         "command": "github.copilot.chat.triggerPermissiveSignIn",
