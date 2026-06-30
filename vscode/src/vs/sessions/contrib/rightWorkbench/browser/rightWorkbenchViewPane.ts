@@ -43,9 +43,7 @@ import { IEditorService } from '../../../../workbench/services/editor/common/edi
 import { IWorkbenchLayoutService, Parts } from '../../../../workbench/services/layout/browser/layoutService.js';
 import { ISCMResource, ISCMService } from '../../../../workbench/contrib/scm/common/scm.js';
 import { GitChange, GitDiffChange, IGitRepository, IGitService } from '../../../../workbench/contrib/git/common/gitService.js';
-import { ITerminalGroupService, ITerminalInstance, ITerminalService } from '../../../../workbench/contrib/terminal/browser/terminal.js';
-import { TerminalTabbedView } from '../../../../workbench/contrib/terminal/browser/terminalTabbedView.js';
-import { TerminalLocation } from '../../../../platform/terminal/common/terminal.js';
+import { ITerminalEditorService, ITerminalInstance, ITerminalService } from '../../../../workbench/contrib/terminal/browser/terminal.js';
 import { CHANGES_VIEW_ID } from '../../changes/common/changes.js';
 import { ChangesViewPane } from '../../changes/browser/changesView.js';
 import { ISessionsService } from '../../../services/sessions/browser/sessionsService.js';
@@ -101,8 +99,6 @@ export class RightWorkbenchViewPane extends ViewPane {
 	private browserRefreshButton: HTMLButtonElement | undefined;
 	private readonly browserInputStore = this._register(new DisposableStore());
 	private terminalInstance: ITerminalInstance | undefined;
-	private terminalTabbedView: TerminalTabbedView | undefined;
-	private terminalTabbedViewContainer: HTMLElement | undefined;
 	private readonly pendingGitReviewRefreshKeys = new Set<string>();
 	private readonly pendingGitReviewStatsKeys = new Set<string>();
 	private readonly loadedGitReviewStatsKeys = new Set<string>();
@@ -123,7 +119,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 		@ISCMService private readonly scmService: ISCMService,
 		@IGitService private readonly gitService: IGitService,
 		@ITerminalService private readonly terminalService: ITerminalService,
-		@ITerminalGroupService private readonly terminalGroupService: ITerminalGroupService,
+		@ITerminalEditorService private readonly terminalEditorService: ITerminalEditorService,
 		@IBrowserViewWorkbenchService private readonly browserViewWorkbenchService: IBrowserViewWorkbenchService,
 		@ISessionsService private readonly sessionsService: ISessionsService,
 		@IConfigurationService configurationService: IConfigurationService,
@@ -175,7 +171,6 @@ export class RightWorkbenchViewPane extends ViewPane {
 		}
 		this.layoutFilesExplorer();
 		this.layoutReviewPane();
-		this.layoutTerminalView();
 		this.layoutEmbeddedEditorPart();
 	}
 
@@ -260,8 +255,6 @@ export class RightWorkbenchViewPane extends ViewPane {
 		this.filesExplorerContainer = undefined;
 		this.reviewPane = undefined;
 		this.reviewPaneContainer = undefined;
-		this.terminalTabbedView = undefined;
-		this.terminalTabbedViewContainer = undefined;
 		this.reviewEmptyElement = undefined;
 		this.filePathElement = undefined;
 		this.fileEmptyElement = undefined;
@@ -667,15 +660,9 @@ export class RightWorkbenchViewPane extends ViewPane {
 
 	private renderTerminal(container: HTMLElement): void {
 		const terminal = append(container, $('.sessions-right-workbench-terminal'));
-		this.terminalTabbedViewContainer = append(terminal, $('.sessions-right-workbench-terminal-view'));
-		this.renderTerminalTabbedView(this.terminalTabbedViewContainer);
-	}
-
-	private renderTerminalTabbedView(container: HTMLElement): void {
-		this.terminalTabbedView = this.domStore.add(this.instantiationService.createInstance(TerminalTabbedView, container));
-		this.layoutTerminalView();
-		this.observeElementResize(container, () => this.layoutTerminalView());
-		void this.ensureTerminalInstance();
+		this.embeddedEditorHost = append(terminal, $('.sessions-right-workbench-embedded-editor-host'));
+		this.observeElementResize(this.embeddedEditorHost, () => this.layoutEmbeddedEditorPart());
+		void this.ensureTerminalEditor();
 	}
 
 	private renderFilesExplorer(container: HTMLElement): void {
@@ -1154,19 +1141,6 @@ export class RightWorkbenchViewPane extends ViewPane {
 		reviewPane.layout(container.clientHeight);
 	}
 
-	private layoutTerminalView(): void {
-		const terminalTabbedView = this.terminalTabbedView;
-		const container = this.terminalTabbedViewContainer;
-		if (!terminalTabbedView || !container) {
-			return;
-		}
-		const width = container.clientWidth;
-		const height = container.clientHeight;
-		if (width > 0 && height > 0) {
-			terminalTabbedView.layout(width, height);
-		}
-	}
-
 	private layoutEmbeddedEditorPart(): void {
 		const embeddedHost = this.embeddedEditorHost;
 		const activeModalPart = this.editorGroupsService.activeModalEditorPart;
@@ -1343,25 +1317,30 @@ export class RightWorkbenchViewPane extends ViewPane {
 		return activeModalPart.close();
 	}
 
-	private async ensureTerminalInstance(): Promise<void> {
-		if (!this.terminalTabbedViewContainer) {
+	private async ensureTerminalEditor(): Promise<void> {
+		const embeddedHost = this.embeddedEditorHost;
+		if (!embeddedHost) {
 			return;
 		}
-		await this.terminalService.whenConnected;
+		await this.ensureEmbeddedEditorPart();
 		if (!this.terminalInstance || this.terminalInstance.isDisposed) {
-			const activeInstance = this.terminalGroupService.activeInstance;
-			this.terminalInstance = activeInstance && !activeInstance.isDisposed
-				? activeInstance
-				: await this.terminalService.createTerminal({ location: TerminalLocation.Panel });
+			this.terminalInstance = await this.terminalService.createTerminal({
+				location: {
+					viewColumn: MODAL_GROUP,
+					modal: { embeddedHost }
+				},
+			});
 			this.domStore.add(this.terminalInstance.onDisposed(() => {
 				this.terminalInstance = undefined;
 			}));
 		}
-		const terminalGroup = this.terminalGroupService.getGroupForInstance(this.terminalInstance);
-		terminalGroup?.setVisible(true);
-		this.layoutTerminalView();
+		await this.terminalEditorService.openEditor(this.terminalInstance, {
+			viewColumn: MODAL_GROUP,
+			modal: { embeddedHost, maximized: true }
+		});
+		this.layoutEmbeddedEditorPart();
+		this.terminalInstance.setVisible(true);
 		await this.terminalInstance.focusWhenReady(true);
-		this.terminalTabbedView?.focus();
 	}
 
 	private bindBrowserInput(input: BrowserEditorInput): void {

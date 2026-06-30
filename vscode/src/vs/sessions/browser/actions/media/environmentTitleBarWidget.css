@@ -12,6 +12,10 @@
 	-webkit-app-region: no-drag;
 }
 
+.monaco-workbench .sessions-environment-titlebar-widget > .action-label {
+	display: none !important;
+}
+
 .monaco-workbench .monaco-action-bar:not(.vertical) .action-item.sessions-environment-titlebar-widget.active,
 .monaco-workbench .monaco-action-bar:not(.vertical) .action-item.sessions-environment-titlebar-widget:hover,
 .monaco-workbench .monaco-action-bar:not(.vertical) .action-item.sessions-environment-titlebar-widget:focus {

@@ -35,7 +35,7 @@
 }
 
 .sessions-right-workbench-shell {
-	--rwb-bg: #101011;
+	--rwb-bg: var(--vscode-agentsPanel-background, var(--vscode-sideBar-background, var(--vscode-editor-background)));
 	--rwb-bg-muted: #131314;
 	--rwb-chrome: #151516;
 	--rwb-chrome-soft: #181819;
@@ -1197,6 +1197,44 @@
 	color: var(--rwb-muted);
 	font-size: 12px;
 	font-weight: 500;
+}
+
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .monaco-modal-editor-block.embedded,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .modal-editor-resizable,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .modal-editor-shadow,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .content,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .grid-view-container,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .monaco-grid-view,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .monaco-grid-branch-node,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .monaco-split-view2,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .monaco-scrollable-element,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .split-view-container,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .split-view-view,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .editor-group-container,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .editor-container,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .editor-instance,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .terminal-overflow-guard.terminal-editor,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .terminal-wrapper,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .xterm,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .xterm-viewport,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .xterm-screen {
+	background: var(--rwb-bg) !important;
+	background-color: var(--rwb-bg) !important;
+}
+
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host {
+	--vscode-terminal-background: var(--rwb-bg);
+	--vscode-editor-background: var(--rwb-bg);
+	--vscode-editorPane-background: var(--rwb-bg);
+}
+
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .modal-editor-shadow,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .terminal-wrapper {
+	border: 0 !important;
+	border-radius: 0 !important;
+	box-shadow: none !important;
 }
 
 .sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .modal-editor-action-container,
