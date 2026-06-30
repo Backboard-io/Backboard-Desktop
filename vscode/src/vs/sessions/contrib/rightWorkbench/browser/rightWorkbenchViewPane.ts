@@ -31,7 +31,7 @@ import { IOpenerService } from '../../../../platform/opener/common/opener.js';
 import { IThemeService } from '../../../../platform/theme/common/themeService.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { ViewPane, IViewPaneOptions, ViewPaneShowActions } from '../../../../workbench/browser/parts/views/viewPane.js';
-import { IEditorPane, IResourceDiffEditorInput, IUntypedEditorInput } from '../../../../workbench/common/editor.js';
+import { DEFAULT_EDITOR_ASSOCIATION, IEditorPane, IResourceDiffEditorInput, IUntypedEditorInput } from '../../../../workbench/common/editor.js';
 import { EditorInput } from '../../../../workbench/common/editor/editorInput.js';
 import { BrowserEditorInput } from '../../../../workbench/contrib/browserView/common/browserEditorInput.js';
 import { IBrowserViewModel, IBrowserViewWorkbenchService } from '../../../../workbench/contrib/browserView/common/browserView.js';
@@ -1029,7 +1029,13 @@ export class RightWorkbenchViewPane extends ViewPane {
 	}
 
 	private async openSelectedFile(resource: URI): Promise<void> {
-		await this.openEditorInRightWorkbench({ resource, options: { pinned: true } });
+		await this.openEditorInRightWorkbench({
+			resource,
+			options: {
+				pinned: true,
+				override: DEFAULT_EDITOR_ASSOCIATION.id
+			}
+		});
 	}
 
 	private async openEditorInEmbeddedHost(editor: IUntypedEditorInput, group?: PreferredGroup): Promise<IEditorPane | undefined>;
@@ -1104,6 +1110,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 			options: {
 				...editor.options,
 				pinned: editor.options?.pinned ?? true,
+				override: editor.options?.override ?? DEFAULT_EDITOR_ASSOCIATION.id,
 				modal: { ...editor.options?.modal, embeddedHost, maximized: true }
 			}
 		}, MODAL_GROUP);

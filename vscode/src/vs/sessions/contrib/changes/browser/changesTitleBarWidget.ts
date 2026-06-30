@@ -115,7 +115,7 @@ registerAction2(class extends Action2 {
 		const isVisible = !layoutService.isVisible(Parts.AUXILIARYBAR_PART);
 
 		if (isVisible) {
-			void commandService.executeCommand(RightWorkbenchCommandId.OpenReview);
+			void commandService.executeCommand(RightWorkbenchCommandId.OpenLauncherMode);
 		} else {
 			layoutService.setPartHidden(true, Parts.AUXILIARYBAR_PART);
 		}

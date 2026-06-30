@@ -1034,7 +1034,7 @@ export class SessionsList extends Disposable implements ISessionsList {
 						if (isSessionShowMore(element)) {
 							return element.sectionLabel;
 						}
-						return element.title.get();
+						return getSessionSearchLabel(element);
 					}
 				},
 				overrideStyles: this.options.overrideStyles,
@@ -1442,6 +1442,7 @@ export class SessionsList extends Disposable implements ISessionsList {
 	}
 
 	openFind(): void {
+		this.tree.findMode = TreeFindMode.Filter;
 		this.tree.openFind();
 	}
 
@@ -1766,6 +1767,27 @@ function sessionMatchesFolder(session: ISession, folder: URI): boolean {
 		}
 	}
 	return false;
+}
+
+function getSessionSearchLabel(session: ISession): string {
+	const parts = [session.title.get()];
+	const workspace = session.workspace.get();
+	if (!workspace) {
+		return parts.join(' ');
+	}
+
+	if (workspace.label) {
+		parts.push(workspace.label);
+	}
+
+	for (const folder of workspace.folders) {
+		if (folder.workingDirectory) {
+			parts.push(folder.workingDirectory.path);
+		}
+		parts.push(folder.root.path);
+	}
+
+	return parts.join(' ');
 }
 
 //#endregion
