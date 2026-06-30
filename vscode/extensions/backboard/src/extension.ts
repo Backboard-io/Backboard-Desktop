@@ -191,9 +191,6 @@ interface OptimusPanelCommand {
 
 type BackboardSettings = ReturnType<typeof readSettings>;
 const hiddenModelProviders = new Set(['featherless', 'elevenlabs', 'eleven-labs', 'speechmatics']);
-const defaultBackboardModelProvider = 'openrouter';
-const defaultBackboardModelName = 'deepseek/deepseek-v4-flash';
-const backboardModelSettingSeparator = '::';
 const defaultUpdateManifestBaseUrl = 'https://ide-bucket-059623506914-ca-central-1-an.s3.ca-central-1.amazonaws.com/ide-releases';
 const stableUpdateChannel = 'stable';
 const sandboxUpdateChannel = 'sandbox';
@@ -236,7 +233,6 @@ export function activate(context: vscode.ExtensionContext): void {
 		handleUri: uri => handleBackboardOAuthCallback(uri)
 	}));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.refreshModels', () => bridge.refreshModels()));
-	context.subscriptions.push(vscode.commands.registerCommand('backboard.pickDefaultModel', () => pickDefaultBackboardModel(bridge)));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.checkForUpdates', () => checkBackboardUpdates(true)));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.installAvailableUpdate', () => installAvailableBackboardUpdate()));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.openRightPanel', () => openBackboardView()));
@@ -250,13 +246,6 @@ export function activate(context: vscode.ExtensionContext): void {
 		await panelProvider.postUiCommand('showHistory');
 	}));
 	void updateBackboardAuthContext();
-	context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => {
-		if (event.affectsConfiguration('backboard.apiKey') || event.affectsConfiguration('backboard.env')) {
-			void updateBackboardAuthContext();
-			void writeCachedOptimusMetadata(bridge);
-			panelProvider.refreshState();
-		}
-	}));
 	void writeCachedOptimusMetadata(bridge);
 	const configWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(path.dirname(backboardConfigPath()), path.basename(backboardConfigPath())));
 	const refreshBackboardState = () => {
@@ -312,7 +301,7 @@ async function setApiKey(): Promise<boolean> {
 		title: 'Backboard API Key',
 		password: true,
 		ignoreFocusOut: true,
-		prompt: 'Used for Backboard requests and mirrored to ~/.backboard_ide/config.json.'
+		prompt: 'Stored in ~/.backboard_ide/config.json.'
 	});
 	if (value !== undefined) {
 		const apiKey = value.trim();
@@ -2026,69 +2015,6 @@ function currentBackboardEnv(): string {
 	return normalizeBackboardEnv(config.get<string>('env'));
 }
 
-function defaultBackboardModelSelection(): { provider: string; model: string } {
-	return { provider: defaultBackboardModelProvider, model: defaultBackboardModelName };
-}
-
-function parseBackboardDefaultModelSetting(value: string | undefined, fallbackProvider: string | undefined): { provider: string; model: string } {
-	const trimmed = value?.trim();
-	if (trimmed && trimmed.includes(backboardModelSettingSeparator)) {
-		const [providerPart, ...modelParts] = trimmed.split(backboardModelSettingSeparator);
-		const provider = providerPart.trim();
-		const model = modelParts.join(backboardModelSettingSeparator).trim();
-		if (provider && model) {
-			return { provider, model };
-		}
-	}
-	if (trimmed) {
-		return {
-			provider: fallbackProvider?.trim() || defaultBackboardModelProvider,
-			model: trimmed,
-		};
-	}
-	return defaultBackboardModelSelection();
-}
-
-function serializeBackboardDefaultModelSetting(provider: string | undefined, model: string | undefined): string {
-	const nextProvider = provider?.trim() || defaultBackboardModelProvider;
-	const nextModel = model?.trim() || defaultBackboardModelName;
-	return `${nextProvider}${backboardModelSettingSeparator}${nextModel}`;
-}
-
-function backboardProviderDisplayName(provider: string): string {
-	switch (bridgeProviderKey(provider)) {
-		case 'anthropic':
-			return 'Anthropic';
-		case 'aws-bedrock':
-		case 'bedrock':
-			return 'AWS Bedrock';
-		case 'deepseek':
-			return 'DeepSeek';
-		case 'gemini':
-		case 'google':
-		case 'google-ai':
-			return 'Google';
-		case 'lm-studio':
-			return 'LM Studio';
-		case 'mistral':
-			return 'Mistral';
-		case 'ollama':
-			return 'Ollama';
-		case 'openai':
-			return 'OpenAI';
-		case 'openai-compatible':
-			return 'OpenAI Compatible';
-		case 'openrouter':
-			return 'OpenRouter';
-		case 'vercel':
-			return 'Vercel';
-		case 'xai':
-			return 'xAI';
-		default:
-			return provider;
-	}
-}
-
 function readBackboardConfigJsonSync(): BackboardConfigJson {
 	try {
 		const parsed: unknown = JSON.parse(fs.readFileSync(backboardConfigPath(), 'utf8'));
@@ -2128,9 +2054,7 @@ function backboardConfigEnvKeys(config: BackboardConfigJson): Record<string, str
 }
 
 function backboardConfigApiKey(config: BackboardConfigJson): string | undefined {
-	const apiKey = configuredBackboardApiKey()
-		?? stringValueFromRecord(config.api_key)
-		?? stringValueFromRecord(config.apiKey);
+	const apiKey = stringValueFromRecord(config.api_key);
 	if (apiKey) {
 		return apiKey;
 	}
@@ -2147,13 +2071,9 @@ function configuredBackboardAccessToken(): string | undefined {
 	return backboardConfigAccessToken(readBackboardConfigJsonSync());
 }
 
-function configuredBackboardApiKey(): string | undefined {
-	return vscode.workspace.getConfiguration('backboard').get<string>('apiKey')?.trim() || undefined;
-}
-
 function hasBackboardCredentials(): boolean {
 	const config = readBackboardConfigJsonSync();
-	return Boolean(configuredBackboardApiKey() || backboardConfigApiKey(config) || backboardConfigAccessToken(config));
+	return Boolean(backboardConfigApiKey(config) || backboardConfigAccessToken(config));
 }
 
 async function updateBackboardAuthContext(): Promise<void> {
@@ -2175,7 +2095,6 @@ async function writeBackboardConfigJson(config: BackboardConfigJson): Promise<vo
 }
 
 async function saveBackboardConfigApiKey(apiKey: string): Promise<void> {
-	await vscode.workspace.getConfiguration('backboard').update('apiKey', apiKey, vscode.ConfigurationTarget.Global);
 	const config = await readBackboardConfigJson();
 	const env = normalizeBackboardEnv(stringValueFromRecord(config.env) || currentBackboardEnv());
 	const envKeys = backboardConfigEnvKeys(config);
@@ -2230,7 +2149,6 @@ async function saveBackboardOAuthTokens(tokens: BackboardOAuthTokens): Promise<B
 }
 
 async function clearBackboardConfigApiKey(): Promise<void> {
-	await vscode.workspace.getConfiguration('backboard').update('apiKey', '', vscode.ConfigurationTarget.Global);
 	const config = await readBackboardConfigJson();
 	const env = normalizeBackboardEnv(stringValueFromRecord(config.env) || currentBackboardEnv());
 	const envKeys = backboardConfigEnvKeys(config);
@@ -7683,16 +7601,14 @@ function readSettings(): {
 	readonly mcpFigma: boolean;
 	readonly mcpNotion: boolean;
 	readonly mcpGoogle: boolean;
-	readonly config: { readonly env: string; readonly apiUrl?: string; readonly apiKey?: string; readonly accessToken?: string };
+	readonly config: { readonly env: string; readonly apiUrl?: string; readonly accessToken?: string };
 } {
 	const config = vscode.workspace.getConfiguration('backboard');
 	const apiUrl = config.get<string>('apiUrl')?.trim() || undefined;
-	const apiKey = config.get<string>('apiKey')?.trim() || backboardConfigApiKey(readBackboardConfigJsonSync()) || undefined;
 	const accessToken = configuredBackboardAccessToken();
-	const defaultSelection = parseBackboardDefaultModelSetting(config.get<string>('defaultModel'), config.get<string>('defaultProvider'));
 	return {
-		defaultProvider: defaultSelection.provider,
-		defaultModel: defaultSelection.model,
+		defaultProvider: config.get<string>('defaultProvider') || 'openrouter',
+		defaultModel: config.get<string>('defaultModel') || 'deepseek/deepseek-v4-flash',
 		mode: config.get<string>('mode') || 'free',
 		intensity: config.get<string>('intensity') || 'fast',
 		webSearch: config.get<string>('webSearch') || 'off',
@@ -7704,7 +7620,6 @@ function readSettings(): {
 		config: {
 			env: config.get<string>('env') || 'prod',
 			apiUrl,
-			apiKey,
 			accessToken
 		}
 	};
@@ -7767,12 +7682,9 @@ function asPanelOptions(value: unknown): PanelOptions {
 
 async function savePanelOptions(options: PanelOptions): Promise<void> {
 	const config = vscode.workspace.getConfiguration('backboard');
-	const combinedDefaultModel = options.provider || options.model
-		? serializeBackboardDefaultModelSetting(options.provider, options.model)
-		: undefined;
 	const updates: [string, string | boolean | undefined][] = [
 		['defaultProvider', options.provider],
-		['defaultModel', combinedDefaultModel],
+		['defaultModel', options.model],
 		['mode', options.mode],
 		['intensity', options.intensity],
 		['webSearch', options.webSearch],
@@ -7785,44 +7697,6 @@ async function savePanelOptions(options: PanelOptions): Promise<void> {
 	await Promise.all(updates
 		.filter(([, value]) => value !== undefined)
 		.map(([key, value]) => config.update(key, value, vscode.ConfigurationTarget.Global)));
-}
-
-async function pickDefaultBackboardModel(bridge: BackboardBridge): Promise<void> {
-	const source = await bridge.cachedModels() ?? await bridge.listModels(new vscode.CancellationTokenSource().token, true);
-	const models = source.filter(isVisibleBridgeModel);
-	if (!models.length) {
-		vscode.window.showWarningMessage('No Backboard models are available yet. Refresh models or sign in with SSO and try again.');
-		return;
-	}
-
-	const current = readSettings();
-	const selected = await vscode.window.showQuickPick(
-		models.map(model => ({
-			label: model.displayName || model.name,
-			description: backboardProviderDisplayName(model.provider),
-			detail: model.name,
-			model,
-		})),
-		{
-			matchOnDescription: true,
-			matchOnDetail: true,
-			placeHolder: 'Select the default Backboard model',
-		}
-	);
-
-	if (!selected) {
-		return;
-	}
-
-	const config = vscode.workspace.getConfiguration('backboard');
-	await Promise.all([
-		config.update('defaultProvider', selected.model.provider, vscode.ConfigurationTarget.Global),
-		config.update('defaultModel', serializeBackboardDefaultModelSetting(selected.model.provider, selected.model.name), vscode.ConfigurationTarget.Global),
-	]);
-
-	if (current.defaultProvider !== selected.model.provider || current.defaultModel !== selected.model.name) {
-		vscode.window.showInformationMessage(`Default Backboard model set to ${backboardProviderDisplayName(selected.model.provider)} / ${selected.model.displayName || selected.model.name}.`);
-	}
 }
 
 async function postPanelState(bridge: BackboardBridge, webview: vscode.Webview, forceModelRefresh = false): Promise<void> {

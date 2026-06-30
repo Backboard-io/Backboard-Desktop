@@ -913,7 +913,7 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 		}
 
 		BackboardAuthContextKeys.enabled.bindTo(this.contextKeyService).set(true);
-		const signedIn = await hasBackboardCredentials(this.fileService, await backboardConfigResource(this.pathService), this.configurationService);
+		const signedIn = await hasBackboardCredentials(this.fileService, await backboardConfigResource(this.pathService));
 		BackboardAuthContextKeys.signedIn.bindTo(this.contextKeyService).set(signedIn);
 		this.updateBackboardChatAuthGate();
 	}

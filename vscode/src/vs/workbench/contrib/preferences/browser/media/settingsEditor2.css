@@ -1532,57 +1532,36 @@
 	border-right-color: var(--vscode-settings-headerBorder);
 }
 
-/* Final Backboard settings layout and visual refresh. */
-.settings-editor {
-	--backboard-settings-card-background: color-mix(in srgb, var(--backboard-settings-input-background) 84%, var(--backboard-settings-background));
-	--backboard-settings-card-border: color-mix(in srgb, var(--backboard-settings-border) 78%, transparent);
-}
-
+/* Final sidebar polish. */
 .settings-editor > .settings-body .settings-toc-container {
-	display: flex;
-	flex-direction: column;
 	background: var(--backboard-settings-sidebar-background);
 	border-right: 0;
 }
 
 .settings-sidebar-header {
-	flex: 0 0 auto;
 	padding: 18px 16px 12px;
-	border-bottom: 1px solid var(--backboard-settings-border);
+	border-bottom: 0;
 }
 
 .settings-account {
-	display: flex;
-	align-items: center;
-	gap: 10px;
-	margin-bottom: 12px;
+	gap: 12px;
+	margin-bottom: 16px;
 }
 
 .settings-account-avatar {
-	width: 22px;
-	height: 22px;
-	border-radius: 7px;
-	background: color-mix(in srgb, var(--backboard-settings-foreground) 8%, transparent);
-	color: var(--backboard-settings-muted-foreground);
-	font-size: 11px;
-	font-weight: 700;
-	line-height: 22px;
-	text-align: center;
+	width: 27px;
+	height: 37px;
 }
 
 .settings-account-name {
-	font-size: 14px;
-	font-weight: 620;
-	letter-spacing: -0.01em;
-}
-
-.settings-account-name::after {
-	content: none;
+	font-size: 16px;
+	font-weight: 650;
+	letter-spacing: 0;
 }
 
 .settings-sidebar-header > .search-container {
 	position: relative;
-	margin: 0 0 10px;
+	margin-bottom: 10px;
 	width: 100%;
 	max-width: 100%;
 	min-width: 0;
@@ -1594,9 +1573,9 @@
 	width: 100%;
 	max-width: 100%;
 	box-sizing: border-box;
-	height: 34px;
-	border: 1px solid var(--backboard-settings-input-border) !important;
-	border-radius: 10px;
+	height: 38px;
+	border-color: var(--backboard-settings-input-border) !important;
+	border-radius: 8px;
 	background: var(--backboard-settings-input-background);
 	color: var(--backboard-settings-input-foreground);
 	box-shadow: none;
@@ -1609,65 +1588,24 @@
 }
 
 .settings-sidebar-header > .search-container input {
-	padding-right: 56px;
+	padding-right: 54px;
 }
 
 .settings-sidebar-header > .search-container > .search-container-widgets {
 	position: absolute;
-	top: 5px;
+	top: 7px;
 	right: 8px;
-	height: 22px;
+	height: 24px;
 	display: flex;
 	align-items: center;
-	gap: 4px;
-	width: auto;
-	min-width: 48px;
-	justify-content: flex-end;
+	gap: 2px;
 }
 
 .settings-sidebar-header > .search-container > .search-container-widgets .action-label {
-	width: 20px;
-	height: 20px;
-	border-radius: 6px;
+	width: 22px;
+	height: 22px;
+	border-radius: 5px;
 	color: var(--backboard-settings-muted-foreground);
-}
-
-.settings-sidebar-header > .search-container > .search-container-widgets .action-label:hover {
-	background: var(--backboard-settings-hover-background);
-	color: var(--backboard-settings-hover-foreground);
-}
-
-.settings-sidebar-header > .search-container > .search-container-widgets > .settings-count-widget {
-	display: none !important;
-}
-
-.settings-sidebar-header > .settings-search-count-container {
-	min-height: 0;
-	margin: 0;
-}
-
-.settings-sidebar-header > .settings-search-count-container > .settings-count-widget {
-	position: static;
-	display: none;
-	width: auto;
-	min-width: 0;
-	height: auto;
-	margin: 0;
-	padding: 0;
-	border: 0;
-	border-radius: 0;
-	background: transparent;
-	color: var(--backboard-settings-muted-foreground);
-	font-size: 11px;
-	font-weight: 500;
-	line-height: 16px;
-	text-align: left;
-	white-space: nowrap;
-}
-
-.settings-sidebar-header > .settings-search-count-container > .settings-count-widget:not(:empty) {
-	display: block;
-	margin: 4px 0 10px;
 }
 
 .settings-sidebar-header > .settings-header-controls {
@@ -1675,20 +1613,13 @@
 }
 
 .settings-sidebar-header > .settings-header-controls .settings-tabs-widget > .monaco-action-bar .actions-container {
-	display: flex;
-	gap: 8px;
-	align-items: center;
+	gap: 6px;
 }
 
 .settings-sidebar-header > .settings-header-controls .settings-tabs-widget > .monaco-action-bar .action-item .action-label {
-	height: 26px;
+	height: 25px;
 	padding: 5px 9px;
-	border-radius: 8px;
 	color: var(--backboard-settings-muted-foreground);
-	font-size: 11px;
-	font-weight: 700;
-	text-transform: uppercase;
-	letter-spacing: 0.03em;
 }
 
 .settings-sidebar-header > .settings-header-controls .settings-tabs-widget .action-label.checked {
@@ -1697,25 +1628,7 @@
 }
 
 .settings-editor > .settings-body .settings-toc-wrapper {
-	position: relative;
-	flex: 1 1 auto;
-	min-height: 0;
-	height: 0;
-	margin: 0;
-	padding: 12px 14px 22px;
-	overflow: hidden;
-	background: var(--backboard-settings-sidebar-background);
-}
-
-.settings-editor > .settings-body .settings-toc-container .monaco-list,
-.settings-editor > .settings-body .settings-toc-container .monaco-list-rows,
-.settings-editor > .settings-body .settings-toc-container .monaco-scrollable-element {
-	background: transparent !important;
-	min-height: 0;
-}
-
-.settings-editor > .settings-body .settings-toc-container .monaco-scrollable-element {
-	height: 100% !important;
+	padding: 10px 12px 18px;
 }
 
 .settings-editor > .settings-body .settings-toc-container .monaco-list-row,
@@ -1723,39 +1636,11 @@
 	outline: none !important;
 	border: 0 !important;
 	box-shadow: none !important;
-	border-radius: 12px;
-	color: var(--backboard-settings-muted-foreground);
-}
-
-.settings-editor > .settings-body .settings-toc-container .monaco-list-row .monaco-tl-contents {
-	height: 36px;
-	align-items: center;
-	padding-right: 10px;
-}
-
-.settings-editor > .settings-body .settings-toc-container .monaco-list-row .monaco-tl-twistie {
-	width: 24px !important;
-	height: 36px;
-	margin-left: 4px;
-	line-height: 36px;
-	color: var(--backboard-settings-muted-foreground);
-}
-
-.settings-editor > .settings-body .settings-toc-container .monaco-list-row .settings-toc-entry {
-	line-height: 36px;
-	font-size: 13px;
-	font-weight: 560;
-	color: var(--backboard-settings-muted-foreground);
 }
 
 .settings-editor > .settings-body .settings-toc-container .monaco-list-row.selected {
 	background: var(--backboard-settings-selection-background);
 	color: var(--backboard-settings-selection-foreground);
-}
-
-.settings-editor > .settings-body .settings-toc-container .monaco-list-row.selected .settings-toc-entry {
-	color: var(--backboard-settings-selection-foreground);
-	font-weight: 650;
 }
 
 .settings-editor > .settings-body .settings-toc-container .monaco-list-row:not(.selected):hover {
@@ -1767,76 +1652,33 @@
 	box-shadow: -1px 0 0 var(--backboard-settings-border);
 }
 
-.settings-editor > .settings-body .settings-tree-container .monaco-list-row,
-.settings-editor > .settings-body .settings-tree-container .monaco-list-row.focused,
-.settings-editor > .settings-body .settings-tree-container .monaco-list-row.selected,
-.settings-editor > .settings-body .settings-tree-container .monaco-list-row:hover {
-	background: transparent !important;
-}
-
-.settings-editor > .settings-body .settings-tree-container .monaco-list-row .settings-row-inner-container,
-.settings-editor > .settings-body .settings-tree-container .monaco-list-row .monaco-tl-contents.group-title,
-.settings-editor > .settings-body .settings-tree-container .monaco-list-row .settings-group-title-label {
-	background: transparent !important;
-	background-color: transparent !important;
-}
-
+/* Right pane rhythm. */
 .settings-editor > .settings-body .settings-tree-container .monaco-list-row .monaco-tl-contents,
 .settings-editor > .settings-body .settings-tree-container .monaco-list-row .monaco-tl-contents.group-title {
-	max-width: 1080px;
-	padding-left: 56px;
-	padding-right: 56px;
+	max-width: 1040px;
+	padding-left: 48px;
+	padding-right: 48px;
 }
 
 .settings-editor > .settings-body .settings-tree-container .settings-group-title-label {
-	padding: 28px 0 12px;
+	padding: 22px 0 10px;
 	margin: 0;
 	border-bottom: 1px solid var(--backboard-settings-border);
-	font-size: 18px;
+	font-size: 15px;
 	font-weight: 650;
-	line-height: 24px;
-	height: 72px;
+	line-height: 20px;
+	height: 64px;
 	overflow: visible;
-	letter-spacing: -0.01em;
 }
 
 .settings-editor > .settings-body .settings-tree-container .settings-group-title-label.settings-group-level-1 {
-	font-size: 18px;
-	line-height: 24px;
+	font-size: 16px;
+	line-height: 22px;
 }
 
 .settings-editor > .settings-body .settings-tree-container .setting-item-contents {
-	grid-template-columns: minmax(0, 1fr) minmax(160px, 280px);
-	column-gap: 36px;
-	margin: 0 0 14px;
-	padding: 18px 20px;
-	border: 1px solid var(--backboard-settings-card-border);
-	border-radius: 18px;
-	background: var(--backboard-settings-card-background);
-	box-shadow: none;
-}
-
-.settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-title {
-	padding-bottom: 4px;
-}
-
-.settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-label,
-.settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-category {
-	font-size: 15px;
-	font-weight: 640;
-	letter-spacing: -0.01em;
-}
-
-.settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-description {
-	margin-top: 6px;
-	color: var(--backboard-settings-muted-foreground);
-	font-size: 13px;
-	line-height: 20px;
-}
-
-.settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-value {
-	justify-content: flex-end;
-	align-items: center;
+	padding-top: 10px;
+	padding-bottom: 22px;
 }
 
 .settings-editor > .settings-body .settings-tree-container .setting-toolbar-container {
@@ -1844,21 +1686,20 @@
 }
 
 .settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-markdown a,
-.settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-markdown a > code,
-.settings-editor > .settings-body .settings-tree-container .setting-item-contents .edit-in-settings-button {
-	color: var(--vscode-textLink-foreground);
-	text-decoration: none;
-	pointer-events: auto;
-	cursor: pointer;
-}
-
 .settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-markdown a:hover,
 .settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-markdown a:active,
+.settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-markdown code,
+.settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-markdown a > code,
 .settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-markdown a:hover > code,
-.settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-markdown a:active > code,
-.settings-editor > .settings-body .settings-tree-container .setting-item-contents .edit-in-settings-button:hover {
-	color: var(--vscode-textLink-activeForeground);
-	text-decoration: underline;
+.settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-markdown a:active > code {
+	color: var(--backboard-settings-muted-foreground);
+	font-family: inherit;
+	text-decoration: none;
+	background: transparent;
+	border: 0;
+	padding: 0;
+	pointer-events: none;
+	cursor: default;
 }
 
 .settings-editor > .settings-body .settings-tree-container .monaco-list:focus-within .monaco-list-row.focused .settings-group-title-label,
@@ -1867,13 +1708,14 @@
 	background: transparent;
 }
 
+/* Neutralize the default blue focus treatment inside Backboard Settings. */
 .settings-editor > .settings-body .settings-tree-container .monaco-list-row.focused .settings-row-inner-container {
 	background-color: transparent !important;
 }
 
 .settings-editor > .settings-body .settings-tree-container .monaco-list:focus-within .monaco-list-row.focused .setting-item-contents {
 	outline: none !important;
-	background: var(--backboard-settings-card-background) !important;
+	background: transparent !important;
 }
 
 .settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-markdown a:focus,
@@ -2004,7 +1846,7 @@
 
 .monaco-workbench.vs-dark .settings-account-avatar,
 .monaco-workbench.hc-black .settings-account-avatar {
-	background: color-mix(in srgb, var(--backboard-settings-foreground) 12%, transparent);
+	background: var(--backboard-settings-foreground);
 }
 
 .monaco-workbench.vs-dark .settings-account-name,
@@ -2021,6 +1863,45 @@
 .monaco-workbench.vs-dark .settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-description,
 .monaco-workbench.hc-black .settings-editor > .settings-body .settings-tree-container .setting-item-contents .setting-item-description {
 	color: var(--backboard-settings-muted-foreground);
+}
+
+.settings-sidebar-header > .settings-search-count-container {
+	min-height: 0;
+	margin: 0;
+}
+
+.settings-sidebar-header > .settings-search-count-container > .settings-count-widget {
+	position: static;
+	display: none;
+	width: auto;
+	min-width: 0;
+	height: auto;
+	margin: 0;
+	padding: 0;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	color: var(--backboard-settings-muted-foreground);
+	font-size: 11px;
+	font-weight: 500;
+	line-height: 16px;
+	text-align: left;
+	white-space: nowrap;
+}
+
+.settings-sidebar-header > .settings-search-count-container > .settings-count-widget:not(:empty) {
+	display: block;
+	margin: 6px 0 8px;
+}
+
+.settings-sidebar-header > .search-container > .search-container-widgets {
+	width: auto;
+	min-width: 48px;
+	justify-content: flex-end;
+}
+
+.settings-sidebar-header > .search-container > .search-container-widgets > .settings-count-widget {
+	display: none !important;
 }
 
 .settings-sidebar-header > .search-container .monaco-editor,
@@ -2043,6 +1924,12 @@
 	border-color: var(--backboard-settings-input-border);
 }
 
+/* Backboard settings controls: keep compact controls readable and intentional. */
+.settings-editor > .settings-body .settings-tree-container .setting-item-contents {
+	grid-template-columns: minmax(0, 1fr) minmax(128px, max-content);
+	column-gap: 32px;
+}
+
 .settings-editor > .settings-body .settings-tree-container .setting-item.setting-item-text .setting-item-value > .setting-item-control,
 .settings-editor > .settings-body .settings-tree-container .setting-item.setting-item-number .setting-item-value > .setting-item-control {
 	width: min(420px, 100%);
@@ -2050,16 +1937,16 @@
 }
 
 .settings-editor > .settings-body .settings-tree-container .setting-item.setting-item-enum .setting-item-value > .setting-item-control {
-	width: min(260px, 100%);
-	min-width: 180px;
-	max-width: 260px;
+	width: min(180px, 100%);
+	min-width: 132px;
+	max-width: 220px;
 }
 
 .settings-editor > .settings-body .settings-tree-container .setting-item.setting-item-enum .setting-item-value > .setting-item-control > .select-container,
 .settings-editor > .settings-body .settings-tree-container .setting-item.setting-item-enum .setting-item-value > .setting-item-control > select,
 .settings-editor > .settings-body .settings-tree-container .setting-item-contents .monaco-select-box {
 	width: 100% !important;
-	min-width: 180px;
+	min-width: 132px;
 }
 
 .settings-editor > .settings-body .settings-tree-container .setting-item-contents .monaco-select-box,
@@ -2067,9 +1954,9 @@
 .settings-editor > .settings-body .settings-tree-container .setting-item-control textarea,
 .settings-editor > .settings-body .settings-tree-container .setting-item-contents .edit-in-settings-button,
 .settings-editor > .settings-body .settings-tree-container .setting-list-widget .setting-list-object-list-row.select-container {
-	min-height: 40px;
+	min-height: 34px;
 	border: 1px solid var(--backboard-settings-input-border);
-	border-radius: 12px;
+	border-radius: 9px;
 	background-color: var(--backboard-settings-input-background);
 	color: var(--backboard-settings-input-foreground);
 	box-shadow: none;
@@ -2080,21 +1967,21 @@
 .settings-editor > .settings-body .settings-tree-container .setting-item-contents .monaco-select-box,
 .settings-editor > .settings-body .settings-tree-container .setting-item-control input,
 .settings-editor > .settings-body .settings-tree-container .setting-item-control textarea {
-	padding-inline: 14px;
+	padding-inline: 12px;
 }
 
 .settings-editor > .settings-body .settings-tree-container .setting-item-contents .monaco-select-box {
-	padding-right: 36px;
-	line-height: 38px;
+	padding-right: 34px;
+	line-height: 32px;
 }
 
 .settings-editor > .settings-body .settings-tree-container .setting-item-control .monaco-inputbox {
 	width: 100%;
-	border-radius: 12px;
+	border-radius: 9px;
 }
 
 .settings-editor > .settings-body .settings-tree-container .setting-item-control .monaco-inputbox .action-bar {
-	padding-right: 8px;
+	padding-right: 6px;
 }
 
 .settings-editor > .settings-body .settings-tree-container .setting-item-control .monaco-inputbox .action-label {
@@ -2111,7 +1998,7 @@
 
 .settings-editor > .settings-body .settings-tree-container .setting-item-contents .edit-in-settings-button {
 	padding: 0 14px;
-	line-height: 38px;
+	line-height: 32px;
 }
 
 .settings-editor > .settings-body .settings-tree-container .setting-item-contents .monaco-select-box:hover,
@@ -2134,15 +2021,15 @@
 
 .monaco-select-box-dropdown-container {
 	border: 1px solid var(--vscode-dropdown-border, var(--vscode-input-border, var(--vscode-focusBorder))) !important;
-	border-radius: 14px !important;
+	border-radius: 10px !important;
 	background: var(--vscode-dropdown-background, var(--vscode-input-background)) !important;
-	box-shadow: 0 16px 32px var(--vscode-widget-shadow, transparent) !important;
+	box-shadow: 0 10px 24px var(--vscode-widget-shadow, transparent) !important;
 	overflow: hidden;
 }
 
 .monaco-select-box-dropdown-container > .select-box-dropdown-list-container .monaco-list .monaco-list-row {
 	font-size: 13px;
-	line-height: 32px;
+	line-height: 28px;
 }
 
 .monaco-select-box-dropdown-container > .select-box-dropdown-list-container .monaco-list .monaco-list-row.focused {

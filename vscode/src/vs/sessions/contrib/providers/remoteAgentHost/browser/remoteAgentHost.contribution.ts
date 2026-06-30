@@ -1010,7 +1010,6 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 			description: nls.localize('chat.remoteAgentHosts.enabled', "Enable connecting to remote agent hosts."),
 			default: true,
 			scope: ConfigurationScope.APPLICATION,
-			included: false,
 			tags: ['experimental', 'advanced'],
 		},
 		[RemoteAgentHostAutoConnectSettingId]: {
@@ -1018,7 +1017,6 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 			description: nls.localize('chat.remoteAgentHosts.autoConnect', "Automatically connect to online dev tunnel and SSH-configured remote agent hosts on startup. When disabled, cached sessions are still shown but connections are established only on demand."),
 			default: true,
 			scope: ConfigurationScope.APPLICATION,
-			included: false,
 			tags: ['experimental', 'advanced'],
 		},
 		'chat.sshRemoteAgentHostCommand': {
@@ -1026,7 +1024,6 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 			description: nls.localize('chat.sshRemoteAgentHostCommand', "For development: Override the command used to start the remote agent host over SSH. When set, skips automatic CLI installation and runs this command instead. The command must print a WebSocket URL matching ws://127.0.0.1:PORT (optionally with ?tkn=TOKEN) to stdout or stderr./"),
 			default: '',
 			scope: ConfigurationScope.APPLICATION,
-			included: false,
 			tags: ['experimental', 'advanced'],
 		},
 		'chat.agentHost.forwardSSHAgent': {
@@ -1034,7 +1031,6 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 			description: nls.localize('chat.agentHost.forwardSSHAgent', "When enabled, forwards the local SSH agent to the remote machine during SSH agent host connections to hosts whose SSH config has `ForwardAgent yes`. Only enable this for trusted hosts. The remote agent host process must be restarted for this setting to take effect."),
 			default: false,
 			scope: ConfigurationScope.APPLICATION,
-			included: false,
 			tags: ['experimental', 'advanced'],
 		},
 		[RemoteAgentHostsSettingId]: {
@@ -1051,7 +1047,6 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 			description: nls.localize('chat.remoteAgentHosts', "A list of WebSocket remote agent host addresses to connect to (e.g. \"localhost:3000\"). SSH remote agent host details are managed by Backboard IDE."),
 			default: [],
 			scope: ConfigurationScope.APPLICATION,
-			included: false,
 			tags: ['experimental', 'advanced'],
 		},
 		[TunnelAgentHostsSettingId]: {
@@ -1060,7 +1055,6 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 			description: nls.localize('chat.remoteAgentTunnels', "Additional dev tunnel names to look for when connecting to remote agent hosts. These are looked up in addition to tunnels automatically enumerated from your account."),
 			default: [],
 			scope: ConfigurationScope.APPLICATION,
-			included: false,
 			tags: ['experimental', 'advanced'],
 		},
 		[AgentHostLocalFilePermissionsSettingId]: {

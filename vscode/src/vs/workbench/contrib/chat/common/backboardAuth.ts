@@ -5,7 +5,6 @@
 
 import { localize } from '../../../../nls.js';
 import { RawContextKey } from '../../../../platform/contextkey/common/contextkey.js';
-import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { FileOperationResult, IFileService, toFileOperationResult } from '../../../../platform/files/common/files.js';
 import product from '../../../../platform/product/common/product.js';
 import { URI } from '../../../../base/common/uri.js';
@@ -43,9 +42,9 @@ export async function backboardConfigResource(pathService: IPathService): Promis
 	return URI.joinPath(await pathService.userHome({ preferLocal: true }), '.backboard_ide', 'config.json');
 }
 
-export async function hasBackboardCredentials(fileService: IFileService, configResource: URI, configurationService?: IConfigurationService): Promise<boolean> {
+export async function hasBackboardCredentials(fileService: IFileService, configResource: URI): Promise<boolean> {
 	const config = await readBackboardConfigJson(fileService, configResource);
-	return Boolean(configuredBackboardApiKey(configurationService) || backboardConfigApiKey(config) || backboardConfigAccessToken(config));
+	return Boolean(backboardConfigApiKey(config) || backboardConfigAccessToken(config));
 }
 
 async function readBackboardConfigJson(fileService: IFileService, configResource: URI): Promise<BackboardConfigJson> {
@@ -61,7 +60,7 @@ async function readBackboardConfigJson(fileService: IFileService, configResource
 }
 
 function backboardConfigApiKey(config: BackboardConfigJson): string | undefined {
-	const apiKey = stringValueFromRecord(config.api_key) ?? stringValueFromRecord(config.apiKey);
+	const apiKey = stringValueFromRecord(config.api_key);
 	if (apiKey) {
 		return apiKey;
 	}
@@ -102,10 +101,6 @@ function normalizeBackboardEnv(env: string | undefined): string {
 
 function stringValueFromRecord(value: unknown): string | undefined {
 	return typeof value === 'string' ? value.trim() || undefined : undefined;
-}
-
-function configuredBackboardApiKey(configurationService?: IConfigurationService): string | undefined {
-	return configurationService?.getValue<string>('backboard.apiKey')?.trim() || undefined;
 }
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {

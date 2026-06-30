@@ -38,7 +38,6 @@ import { HoverPosition } from '../../../../../base/browser/ui/hover/hoverWidget.
 import { URI } from '../../../../../base/common/uri.js';
 import { ISessionOpenOptions, openSession } from './agentSessionsOpener.js';
 import { IEditorService } from '../../../../services/editor/common/editorService.js';
-import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { ChatEditorInput } from '../widgetHosts/editor/chatEditorInput.js';
 import { IMouseEvent } from '../../../../../base/browser/mouseEvent.js';
 import { IChatWidget } from '../chat.js';
@@ -128,7 +127,6 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 		@IAccessibilityService private readonly accessibilityService: IAccessibilityService,
 		@IFileService private readonly fileService: IFileService,
 		@IPathService private readonly pathService: IPathService,
-		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@ILogService private readonly logService: ILogService,
 	) {
 		super();
@@ -248,7 +246,7 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 		}
 
 		BackboardAuthContextKeys.enabled.bindTo(this.contextKeyService).set(true);
-		const signedIn = await hasBackboardCredentials(this.fileService, await backboardConfigResource(this.pathService), this.configurationService);
+		const signedIn = await hasBackboardCredentials(this.fileService, await backboardConfigResource(this.pathService));
 		BackboardAuthContextKeys.signedIn.bindTo(this.contextKeyService).set(signedIn);
 		this.updateBackboardAuthGate();
 	}

@@ -1711,7 +1711,6 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		const envKeys = getBackboardEnvKeys(config);
 		envKeys[env] = apiKey;
 
-		await this.configurationService.updateValue('backboard.apiKey', apiKey);
 		await this.fileService.createFolder(configDir);
 		await this.fileService.writeFile(configResource, VSBuffer.fromString(`${JSON.stringify({
 			...config,

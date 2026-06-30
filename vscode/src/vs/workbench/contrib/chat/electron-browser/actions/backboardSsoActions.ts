@@ -17,7 +17,7 @@ import { IActionViewItemService } from '../../../../../platform/actions/browser/
 import { Action2, MenuId, MenuRegistry, registerAction2 } from '../../../../../platform/actions/common/actions.js';
 import { IClipboardService } from '../../../../../platform/clipboard/common/clipboardService.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
-import { ConfigurationTarget, IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
+import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { ContextKeyExpr, IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
 import { FileOperationResult, IFileService, toFileOperationResult } from '../../../../../platform/files/common/files.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
@@ -85,26 +85,7 @@ export function registerBackboardSsoActions(): void {
 		}
 
 		override async run(accessor: ServicesAccessor): Promise<boolean> {
-			const success = Boolean(await accessor.get(ICommandService).executeCommand<boolean>('backboard.extension.signIn'));
-			if (success) {
-				await accessor.get(IInstantiationService).createInstance(BackboardSsoFlow).syncAccountState();
-			}
-			return success;
-		}
-	});
-
-	registerAction2(class BackboardSignOutAction extends Action2 {
-		constructor() {
-			super({
-				id: 'backboard.signOut',
-				title: localize2('backboard.signOut', "Backboard: Sign Out"),
-				category: backboardCategory,
-				f1: true,
-			});
-		}
-
-		override async run(accessor: ServicesAccessor): Promise<void> {
-			await accessor.get(IInstantiationService).createInstance(BackboardSsoFlow).signOut();
+			return Boolean(await accessor.get(ICommandService).executeCommand<boolean>('backboard.extension.signIn'));
 		}
 	});
 
@@ -161,18 +142,12 @@ export class BackboardCredentialsContribution extends Disposable implements IWor
 		@IActionViewItemService actionViewItemService: IActionViewItemService,
 		@IChatEntitlementService private readonly chatEntitlementService: IChatEntitlementService,
 		@IContextKeyService private readonly contextKeyService: IContextKeyService,
-		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@IFileService private readonly fileService: IFileService,
 		@IPathService private readonly pathService: IPathService,
 		@ILogService private readonly logService: ILogService,
 	) {
 		super();
 		this._register(actionViewItemService.register(MenuId.TitleBar, 'backboard.signIn', (action, options) => new BackboardSignInTitleBarEntry(action, options)));
-		this._register(this.configurationService.onDidChangeConfiguration(event => {
-			if (event.affectsConfiguration('backboard.apiKey')) {
-				void this.checkBackboardCredentials();
-			}
-		}));
 
 		if (isBackboardProduct()) {
 			BackboardAuthContextKeys.enabled.bindTo(this.contextKeyService).set(true);
@@ -186,11 +161,9 @@ export class BackboardCredentialsContribution extends Disposable implements IWor
 
 	private async checkBackboardCredentials(): Promise<void> {
 		const configResource = await backboardConfigResource(this.pathService);
-		if (await hasBackboardCredentials(this.fileService, configResource, this.configurationService)) {
+		if (await hasBackboardCredentials(this.fileService, configResource)) {
 			markBackboardChatReady(this.chatEntitlementService, this.contextKeyService);
 			this.logService.info(`[Backboard] Existing credentials found in ${configResource.fsPath}; chat setup marked ready.`);
-		} else {
-			markBackboardChatSignedOut(this.contextKeyService);
 		}
 	}
 }
@@ -255,7 +228,7 @@ class BackboardSsoFlow {
 
 		try {
 			const configResource = await backboardConfigResource(this.pathService);
-			if (await hasBackboardCredentials(this.fileService, configResource, this.configurationService)) {
+			if (await hasBackboardCredentials(this.fileService, configResource)) {
 				markBackboardChatReady(this.chatEntitlementService, this.contextKeyService);
 				this.logService.info(`[Backboard OAuth] Existing credentials found in ${configResource.fsPath}; asking whether to sign in again.`);
 				const shouldSignInAgain = await this.confirmSignInAgain(configResource.fsPath);
@@ -303,37 +276,6 @@ class BackboardSsoFlow {
 			return false;
 		} finally {
 			callbackServer?.dispose();
-		}
-	}
-
-	async signOut(): Promise<void> {
-		const configResource = await backboardConfigResource(this.pathService);
-		const config = await readBackboardConfigJson(this.fileService, configResource);
-		const env = normalizeBackboardEnv(stringValueFromRecord(config.env) || currentBackboardEnv(this.configurationService));
-		const envKeys = backboardConfigEnvKeys(config);
-		delete envKeys[env];
-
-		const nextConfig: Record<string, unknown> = {
-			...config,
-			env,
-			env_keys: envKeys,
-		};
-		delete nextConfig.api_key;
-		delete nextConfig.oauth;
-
-		await this.configurationService.updateValue('backboard.apiKey', '', ConfigurationTarget.USER);
-		await writeBackboardConfigJson(this.fileService, configResource, nextConfig);
-		await this.syncAccountState();
-		markBackboardChatSignedOut(this.contextKeyService);
-		this.notificationService.info(localize('backboard.signOut.complete', "Signed out of Backboard."));
-	}
-
-	async syncAccountState(): Promise<void> {
-		const configResource = await backboardConfigResource(this.pathService);
-		if (await hasBackboardCredentials(this.fileService, configResource, this.configurationService)) {
-			markBackboardChatReady(this.chatEntitlementService, this.contextKeyService);
-		} else {
-			markBackboardChatSignedOut(this.contextKeyService);
 		}
 	}
 
@@ -505,7 +447,6 @@ async function saveBackboardOAuthTokens(tokens: BackboardOAuthTokens, configurat
 	const env = normalizeBackboardEnv(stringValueFromRecord(config.env) || currentBackboardEnv(configurationService));
 	const envKeys = backboardConfigEnvKeys(config);
 	if (usableApiKey) {
-		await configurationService.updateValue('backboard.apiKey', usableApiKey);
 		envKeys[env] = usableApiKey;
 	}
 
@@ -563,13 +504,13 @@ function backboardConfigEnvKeys(config: BackboardConfigJson): Record<string, str
 	return result;
 }
 
-async function hasBackboardCredentials(fileService: IFileService, configResource: URI, configurationService: IConfigurationService): Promise<boolean> {
+async function hasBackboardCredentials(fileService: IFileService, configResource: URI): Promise<boolean> {
 	const config = await readBackboardConfigJson(fileService, configResource);
-	return Boolean(configuredBackboardApiKey(configurationService) || backboardConfigApiKey(config) || backboardConfigAccessToken(config));
+	return Boolean(backboardConfigApiKey(config) || backboardConfigAccessToken(config));
 }
 
 function backboardConfigApiKey(config: BackboardConfigJson): string | undefined {
-	const apiKey = stringValueFromRecord(config.api_key) ?? stringValueFromRecord(config.apiKey);
+	const apiKey = stringValueFromRecord(config.api_key);
 	if (apiKey) {
 		return apiKey;
 	}
@@ -580,10 +521,6 @@ function backboardConfigApiKey(config: BackboardConfigJson): string | undefined 
 function backboardConfigAccessToken(config: BackboardConfigJson): string | undefined {
 	const oauth = isObjectRecord(config.oauth) ? config.oauth : undefined;
 	return stringValueFromRecord(oauth?.access_token);
-}
-
-function configuredBackboardApiKey(configurationService: IConfigurationService): string | undefined {
-	return configurationService.getValue<string>('backboard.apiKey')?.trim() || undefined;
 }
 
 function markBackboardChatReady(chatEntitlementService: IChatEntitlementService, contextKeyService: IContextKeyService): void {
@@ -609,12 +546,6 @@ function markBackboardChatReady(chatEntitlementService: IChatEntitlementService,
 	ChatEntitlementContextKeys.Entitlement.planBusiness.bindTo(contextKeyService).set(true);
 	ChatEntitlementContextKeys.Entitlement.organisations.bindTo(contextKeyService).set(['backboard']);
 	ChatEntitlementContextKeys.Entitlement.sku.bindTo(contextKeyService).set('backboard');
-}
-
-function markBackboardChatSignedOut(contextKeyService: IContextKeyService): void {
-	BackboardAuthContextKeys.enabled.bindTo(contextKeyService).set(true);
-	BackboardAuthContextKeys.signedIn.bindTo(contextKeyService).set(false);
-	ChatEntitlementContextKeys.Entitlement.signedOut.bindTo(contextKeyService).set(true);
 }
 
 function isBackboardProduct(): boolean {
