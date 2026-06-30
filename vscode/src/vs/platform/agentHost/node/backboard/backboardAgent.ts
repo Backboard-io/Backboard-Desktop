@@ -1559,6 +1559,52 @@ function normalizePanelHistoryEntry(value: unknown, currentWorkspace: string | u
 	};
 }
 
+function normalizePanelMessages(value: unknown): { role: string; content: string }[] {
+	if (!Array.isArray(value)) {
+		return [];
+	}
+	return value
+		.filter(isObjectRecord)
+		.map(message => ({
+			role: typeof message.role === 'string' ? message.role : 'assistant',
+			content: typeof message.content === 'string' ? message.content : '',
+		}))
+		.filter(message => !!message.content.trim());
+}
+
+function mergePanelMessagesForTurn(existing: readonly { role: string; content: string }[], prompt: string, response: string, responseRole: 'assistant' | 'error'): { role: string; content: string }[] {
+	const merged = existing
+		.map(message => ({ role: message.role, content: message.content }))
+		.filter(message => message.content.trim());
+	for (let index = merged.length - 1; index >= 0; index--) {
+		const message = merged[index];
+		if (message.role !== 'user') {
+			continue;
+		}
+		if (message.content !== prompt) {
+			break;
+		}
+		merged.splice(index + 1);
+		if (response.trim()) {
+			merged.push({ role: responseRole, content: response });
+		}
+		return merged;
+	}
+	merged.push({ role: 'user', content: prompt });
+	if (response.trim()) {
+		merged.push({ role: responseRole, content: response });
+	}
+	return merged;
+}
+
+function panelThreadHtmlFromMessages(messages: readonly { role: string; content: string }[]): string {
+	return messages.map(message => {
+		const role = message.role === 'user' ? 'user' : message.role === 'error' ? 'error' : 'assistant';
+		const klass = role === 'error' ? 'messageCard error' : `messageCard ${role}`;
+		return `<div class="${klass}"><div class="messageText">${escapePanelHtml(message.content).replace(/\n/g, '<br>')}</div></div>`;
+	}).join('');
+}
+
 function panelHistoryEntryTimestamp(entry: BackboardPanelHistoryEntry | undefined): number {
 	if (!entry) {
 		return 0;
@@ -1663,24 +1709,34 @@ async function writeSharedBackboardThread(session: BackboardSession, prompt: str
 	try {
 		const now = Date.now();
 		const workspace = session.workingDirectory?.fsPath;
+		const existingEntry = readBackboardPanelStates(logService)
+			.flatMap(state => {
+				const currentWorkspace = typeof state.currentWorkspace === 'string' ? state.currentWorkspace : undefined;
+				return (state.historyEntries ?? []).map(entry => normalizePanelHistoryEntry(entry, currentWorkspace));
+			})
+			.filter((entry): entry is BackboardPanelHistoryEntry => !!entry)
+			.find(entry => entry.id === session.sessionId);
 		const title = session.title || panelHistoryTitle(prompt);
 		const response = errorMessage ? `${assistantText}\n\n${errorMessage}`.trim() : assistantText.trim();
+		const messages = mergePanelMessagesForTurn(
+			normalizePanelMessages(existingEntry?.messages),
+			prompt,
+			response,
+			errorMessage ? 'error' : 'assistant',
+		);
 		const entry = {
 			id: session.sessionId,
 			title,
 			backboardThreadId: session.threadId,
-			prompt,
-			startedAt: session.createdAt,
+			prompt: existingEntry?.prompt || prompt,
+			startedAt: existingEntry?.startedAt ?? session.createdAt,
 			updatedAt: now,
 			status,
 			currentWorkspace: workspace,
 			outputText: response,
-			messages: [
-				{ role: 'user', content: prompt },
-				...(response ? [{ role: errorMessage ? 'error' : 'assistant', content: response }] : []),
-			],
+			messages,
 			toolOutputs: responseState.toolOutputs,
-			html: panelThreadHtml(prompt, response, errorMessage),
+			html: panelThreadHtmlFromMessages(messages),
 			promptQueue: [],
 			fileChanges: [],
 		};

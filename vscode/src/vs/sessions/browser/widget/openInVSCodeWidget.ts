@@ -12,7 +12,6 @@ import { localize } from '../../../nls.js';
 import { IHoverService } from '../../../platform/hover/browser/hover.js';
 import { IKeybindingService } from '../../../platform/keybinding/common/keybinding.js';
 import { IContextMenuService } from '../../../platform/contextview/browser/contextView.js';
-import { ICommandService } from '../../../platform/commands/common/commands.js';
 
 /**
  * Renders a stable mode titlebar switcher in the sessions workbench.
@@ -23,11 +22,9 @@ export class OpenInVSCodeTitleBarWidget extends BaseActionViewItem {
 		action: IAction,
 		options: IBaseActionViewItemOptions | undefined,
 		private readonly keybindingCommandId: string,
-		private readonly workspaceCommandId: string | undefined,
 		@IHoverService private readonly hoverService: IHoverService,
 		@IKeybindingService private readonly keybindingService: IKeybindingService,
 		@IContextMenuService private readonly contextMenuService: IContextMenuService,
-		@ICommandService private readonly commandService: ICommandService,
 	) {
 		super(undefined, action, options);
 	}
@@ -51,7 +48,6 @@ export class OpenInVSCodeTitleBarWidget extends BaseActionViewItem {
 		chevron.setAttribute('aria-hidden', 'true');
 
 		const showMenu = () => {
-			const workspaceCommandId = this.workspaceCommandId;
 			const actions = [
 				toAction({
 					id: 'agents.action.mode.editor',
@@ -59,14 +55,6 @@ export class OpenInVSCodeTitleBarWidget extends BaseActionViewItem {
 					run: () => this.action.run(),
 				}),
 			];
-
-			if (workspaceCommandId) {
-				actions.push(toAction({
-					id: 'agents.action.mode.workspace',
-					label: localize('openInVSCodeSwitcher.workspace', "Advanced"),
-					run: () => this.commandService.executeCommand(workspaceCommandId),
-				}));
-			}
 
 			actions.push(toAction({
 					id: 'agents.action.mode.agents',

@@ -263,18 +263,16 @@ export class ClaudeSdkPipeline extends Disposable {
 	 * `applyFlagSettings({ effortLevel })`. Same mid-turn safety as
 	 * {@link setModel}.
 	 *
-	 * `undefined` means "clear the effort the SDK is currently applying" —
-	 * issued as `applyFlagSettings({ effortLevel: null })` (sdk.d.ts:2263:
-	 * passing `null` clears a key from the flag layer). This is what makes a
-	 * switch to a model that does not support reasoning effort (e.g. Haiku)
-	 * drop a `'high'` left over from a prior effort-capable model instead of
-	 * replaying it onto a model the API will 400 on.
+	 * `undefined` means "clear the effort the SDK is currently applying".
+	 * The current SDK typing no longer accepts `null` here, so we omit the
+	 * property entirely when clearing. This still prevents effort values from
+	 * being replayed onto models that do not support them.
 	 */
 	async setEffort(effort: ClaudeRuntimeEffortLevel | undefined): Promise<void> {
 		this._currentEffort = effort;
 		if (this._query && effort !== this._appliedEffort) {
 			try {
-				await this._query.applyFlagSettings({ effortLevel: effort ?? null });
+				await this._query.applyFlagSettings(effort === undefined ? {} : { effortLevel: effort });
 				this._appliedEffort = effort;
 			} catch (err) {
 				this._logService.warn(`[ClaudeSdkPipeline:${this.sessionId}] setEffort failed: ${err}`);

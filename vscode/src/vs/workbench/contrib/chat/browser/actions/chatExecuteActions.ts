@@ -600,7 +600,7 @@ export class BackboardUsageMetricsAction extends Action2 {
 		super({
 			id: BackboardUsageMetricsAction.ID,
 			title: localize2('interactive.backboardUsageMetrics.label', "Backboard Usage"),
-			tooltip: localize('interactive.backboardUsageMetrics.tooltip', "Show model, token, cost, and speed metrics"),
+			tooltip: localize('interactive.backboardUsageMetrics.tooltip', "Show model, token, and speed metrics"),
 			category: CHAT_CATEGORY,
 			icon: Codicon.dashboard,
 			f1: false

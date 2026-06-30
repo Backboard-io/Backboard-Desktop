@@ -1575,15 +1575,44 @@ function enrichPanelThreadEntry(entry: Record<string, unknown>): Record<string, 
 	const prompt = typeof entry.prompt === 'string' ? entry.prompt : typeof entry.title === 'string' ? entry.title : '';
 	const outputText = typeof entry.outputText === 'string' ? entry.outputText : extractPanelAssistantText(html);
 	const toolOutputs = Array.isArray(entry.toolOutputs) ? entry.toolOutputs : extractPanelToolOutputs(html);
+	const messages = normalizePanelMessages(entry.messages);
+	const extractedMessages = messages.length ? messages : extractPanelMessages(html);
 	return {
 		...entry,
 		outputText,
-		messages: [
+		messages: extractedMessages.length ? extractedMessages : [
 			{ role: 'user', content: prompt },
 			...(outputText ? [{ role: 'assistant', content: outputText }] : []),
 		],
 		toolOutputs,
 	};
+}
+
+function normalizePanelMessages(value: unknown): { role: string; content: string }[] {
+	if (!Array.isArray(value)) {
+		return [];
+	}
+	return value
+		.filter(isObjectRecord)
+		.map(message => ({
+			role: typeof message.role === 'string' ? message.role : 'assistant',
+			content: typeof message.content === 'string' ? message.content : '',
+		}))
+		.filter(message => message.content);
+}
+
+function extractPanelMessages(html: string): { role: string; content: string }[] {
+	const messages: { role: string; content: string }[] = [];
+	const pattern = /<div class="messageCard (user|assistant)"[\s\S]*?<div class="messageText">([\s\S]*?)<\/div><\/div>/g;
+	let match: RegExpExecArray | null;
+	while ((match = pattern.exec(html))) {
+		const content = stripPanelHtml(match[2]);
+		if (!content) {
+			continue;
+		}
+		messages.push({ role: match[1], content });
+	}
+	return messages;
 }
 
 function extractPanelAssistantText(html: string): string {
@@ -1736,6 +1765,18 @@ function panelThreadEntryTimestamp(value: unknown): number {
 		typeof value.startedAt === 'number' ? value.startedAt : 0,
 		typeof value.savedAt === 'number' ? value.savedAt : 0,
 	);
+}
+
+function readPanelHistoryEntry(workspace: string | undefined, id: string | undefined): Record<string, unknown> | undefined {
+	if (!id) {
+		return undefined;
+	}
+	const entries = readSharedPanelState(workspace)?.historyEntries;
+	if (!Array.isArray(entries)) {
+		return undefined;
+	}
+	const entry = entries.find(candidate => isObjectRecord(candidate) && candidate.id === id);
+	return isObjectRecord(entry) ? entry : undefined;
 }
 
 async function writeSharedPanelThreads(state: PanelPersistedState): Promise<void> {
@@ -2459,20 +2500,9 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 		const effectiveChatId = chatId && (!chatWorkspace || !effectiveWorkspace || chatWorkspace === effectiveWorkspace) ? chatId : undefined;
 		const liveChatId = effectiveChatId ?? `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 		const sessionId = `optimus:${effectiveWorkspace ?? 'default'}:${effectiveChatId || liveChatId}`;
-		const existingState = effectiveChatId ? readSharedPanelState(effectiveWorkspace) : undefined;
-		const existingEntry = Array.isArray(existingState?.historyEntries)
-			? existingState.historyEntries.find(entry => isObjectRecord(entry) && entry.id === effectiveChatId)
-			: undefined;
+		const existingEntry = effectiveChatId ? readPanelHistoryEntry(effectiveWorkspace, effectiveChatId) : undefined;
 		let boundThreadId = readBackboardThreadId(existingEntry);
-		const existingMessages = isObjectRecord(existingEntry) && Array.isArray(existingEntry.messages)
-			? existingEntry.messages
-				.filter(isObjectRecord)
-				.map(message => ({
-					role: typeof message.role === 'string' ? message.role : 'assistant',
-					content: typeof message.content === 'string' ? message.content : ''
-				}))
-				.filter(message => message.content)
-			: [];
+		const existingMessages = normalizePanelMessages(existingEntry?.messages);
 		const liveStartedAt = Date.now();
 		const liveMessages: { role: string; content: string }[] = [...existingMessages, { role: 'user', content }];
 		let fatalErrorMessage: string | undefined;
@@ -2503,7 +2533,9 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 		};
 		const saveHistory = async (status: string) => {
 			const now = Date.now();
-			const previousEntry = isObjectRecord(existingEntry) ? existingEntry : {};
+			const latestState = readSharedPanelState(effectiveWorkspace);
+			const latestEntry = readPanelHistoryEntry(effectiveWorkspace, liveChatId);
+			const previousEntry = latestEntry ?? existingEntry ?? {};
 			const nextEntry = {
 				...previousEntry,
 				id: liveChatId,
@@ -2515,10 +2547,10 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 				updatedAt: now,
 				status,
 				fileChanges: Array.isArray(previousEntry.fileChanges) ? previousEntry.fileChanges : [],
-				messages: liveMessages,
+				messages: liveMessages.map(message => ({ ...message })),
 				outputText: liveMessages.filter(message => message.role === 'assistant').map(message => message.content).join('\n\n'),
 			};
-			const existingEntries = Array.isArray(existingState?.historyEntries) ? existingState.historyEntries : [];
+			const existingEntries = Array.isArray(latestState?.historyEntries) ? latestState.historyEntries : [];
 			// Update entry in-place instead of moving it to the front
 			const existingIdx = existingEntries.findIndex(entry => isObjectRecord(entry) && entry.id === liveChatId);
 			let historyEntries;
@@ -2724,10 +2756,7 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 		}
 		const liveChatId = effectiveChatId ?? `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 		const sessionId = `panel:${effectiveWorkspace ?? 'default'}:${effectiveChatId || 'default'}`;
-		const existingState = effectiveChatId ? readSharedPanelState(effectiveWorkspace) : undefined;
-		const existingEntry = Array.isArray(existingState?.historyEntries)
-			? existingState.historyEntries.find(entry => isObjectRecord(entry) && entry.id === effectiveChatId)
-			: undefined;
+		const existingEntry = effectiveChatId ? readPanelHistoryEntry(effectiveWorkspace, effectiveChatId) : undefined;
 		const sink = this.panelSink(view);
 		const content = prompt.trim() || 'Please transcribe this audio and respond.';
 		const attachments = backboardAttachments(image, files);
@@ -2735,7 +2764,8 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 		const modelContent = promptWithBackboardDocuments(content, attachments);
 		const imageGeneration = imageGenerationForPrompt(modelContent, settings.imageGeneration);
 		const liveStartedAt = Date.now();
-		const liveMessages: { role: string; content: string }[] = [{ role: 'user', content }];
+		const existingMessages = normalizePanelMessages(existingEntry?.messages);
+		const liveMessages: { role: string; content: string }[] = [...existingMessages, { role: 'user', content }];
 		const appendLiveAssistantText = (text: string) => {
 			const last = liveMessages[liveMessages.length - 1];
 			if (last?.role === 'assistant') {
@@ -2766,7 +2796,9 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 		await view.webview.postMessage({ type: 'status', text: 'Sending to Backboard.' });
 		const saveHistory = async (status: string) => {
 			const now = Date.now();
-			const previousEntry = isObjectRecord(existingEntry) ? existingEntry : {};
+			const latestState = readSharedPanelState(effectiveWorkspace);
+			const latestEntry = readPanelHistoryEntry(effectiveWorkspace, liveChatId);
+			const previousEntry = latestEntry ?? existingEntry ?? {};
 			const nextEntry = {
 				...previousEntry,
 				id: liveChatId,
@@ -2778,10 +2810,10 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 				updatedAt: now,
 				status,
 				fileChanges: Array.isArray(previousEntry.fileChanges) ? previousEntry.fileChanges : [],
-				messages: liveMessages,
+				messages: liveMessages.map(message => ({ ...message })),
 				outputText: liveMessages.filter(message => message.role === 'assistant').map(message => message.content).join('\n\n'),
 			};
-			const existingEntries = Array.isArray(existingState?.historyEntries) ? existingState.historyEntries : [];
+			const existingEntries = Array.isArray(latestState?.historyEntries) ? latestState.historyEntries : [];
 			// Update entry in-place instead of moving it to the front
 			const existingIdx = existingEntries.findIndex(entry => isObjectRecord(entry) && entry.id === liveChatId);
 			let historyEntries;
@@ -3718,6 +3750,36 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			const node = ensureEmptyState();
 			return [...log.children].some(child => child !== node);
 		}
+		function extractMessagesFromLog() {
+			return Array.from(log.querySelectorAll('.messageCard')).map(card => {
+				const role = card.classList.contains('user')
+					? 'user'
+					: card.classList.contains('assistant')
+						? 'assistant'
+						: card.classList.contains('error')
+							? 'error'
+							: 'assistant';
+				const content = card.querySelector('.messageText')?.textContent?.trim() || '';
+				return { role, content };
+			}).filter(message => message.content);
+		}
+		function rebuildConversationFromMessages(messages) {
+			log.textContent = '';
+			log.appendChild(ensureEmptyState());
+			currentAssistantCard = undefined;
+			activeToolRows = [];
+			activeToolGroup = undefined;
+			for (const message of Array.isArray(messages) ? messages : []) {
+				if (!message || typeof message.content !== 'string' || !message.content.trim()) {
+					continue;
+				}
+				appendMessage(message.role === 'user' ? 'user' : 'assistant', message.content);
+			}
+			currentAssistantCard = undefined;
+			activeToolRows = [];
+			activeToolGroup = undefined;
+			syncEmptyState();
+		}
 		function syncRootHeight() {
 			if (root instanceof HTMLElement) {
 				const viewportHeight = window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight;
@@ -3820,6 +3882,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				return;
 			}
 			entry.html = log.innerHTML;
+			entry.messages = extractMessagesFromLog();
 				entry.fileChanges = fileChanges.slice(0);
 				entry.promptQueue = promptQueue.slice(0);
 				entry.currentWorkspace = currentWorkspace;
@@ -4018,7 +4081,12 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			}
 			saveActiveHistory();
 			restoringHistory = true;
-			log.innerHTML = checkpoint.html || '';
+			const checkpointMessages = Array.isArray(checkpoint.messages) ? checkpoint.messages : [];
+			if (checkpointMessages.length) {
+				rebuildConversationFromMessages(checkpointMessages);
+			} else {
+				log.innerHTML = checkpoint.html || '';
+			}
 			removeLegacyChangeArtifacts();
 			spreadLegacyToolGroups();
 			currentAssistantCard = undefined;
@@ -4027,6 +4095,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			fileChanges = Array.isArray(checkpoint.fileChanges) ? checkpoint.fileChanges.slice(0) : [];
 			promptQueue = Array.isArray(checkpoint.promptQueue) ? checkpoint.promptQueue.slice(0) : [];
 			entry.html = log.innerHTML;
+			entry.messages = extractMessagesFromLog();
 			entry.fileChanges = fileChanges.slice(0);
 			entry.promptQueue = promptQueue.slice(0);
 			entry.status = 'Restored';
@@ -4054,7 +4123,12 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			}
 			saveActiveHistory();
 			restoringHistory = true;
-			log.innerHTML = entry.html || '';
+			const entryMessages = Array.isArray(entry.messages) ? entry.messages : [];
+			if (entryMessages.length) {
+				rebuildConversationFromMessages(entryMessages);
+			} else {
+				log.innerHTML = entry.html || '';
+			}
 			removeLegacyChangeArtifacts();
 			spreadLegacyToolGroups();
 			currentAssistantCard = undefined;
@@ -4127,7 +4201,12 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			const entry = activeHistoryEntry();
 			restoringHistory = true;
 			if (entry) {
-				log.innerHTML = entry.html || '';
+				const entryMessages = Array.isArray(entry.messages) ? entry.messages : [];
+				if (entryMessages.length) {
+					rebuildConversationFromMessages(entryMessages);
+				} else {
+					log.innerHTML = entry.html || '';
+				}
 				removeLegacyChangeArtifacts();
 				spreadLegacyToolGroups();
 				fileChanges = Array.isArray(entry.fileChanges) ? entry.fileChanges.slice(0) : [];
@@ -4381,9 +4460,6 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			}
 			return undefined;
 		}
-		function formatModelPrice(value) {
-			return '$' + value.toFixed(2) + '/M';
-		}
 		function modelPricePair(model) {
 			const explicitInput = numericModelValue(model, ['inputPricePerMillion', 'inputCostPer1mTokens', 'input_cost_per_1m_tokens', 'inputPrice', 'promptPrice', 'promptPricePerMillion']);
 			const explicitOutput = numericModelValue(model, ['outputPricePerMillion', 'outputCostPer1mTokens', 'output_cost_per_1m_tokens', 'outputPrice', 'completionPrice', 'completionPricePerMillion']);
@@ -4405,20 +4481,12 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			}
 			return undefined;
 		}
-		function modelPriceLabel(model) {
-			if (typeof model?.pricing === 'string' && model.pricing.trim() !== '') {
-				return model.pricing;
-			}
-			const pair = modelPricePair(model);
-			return pair ? formatModelPrice(pair[0]) + ' in, ' + formatModelPrice(pair[1]) + ' out' : 'Pricing unavailable';
-		}
 		function choice(action, value, label, meta, selected, disabled, extraAttrs, icon) {
 			const iconHtml = icon ? '<span class="choiceIcon"><span class="codicon codicon-' + attr(icon) + '"></span></span>' : '';
 			return '<button class="choiceRow' + (selected ? ' selected' : '') + (disabled ? ' disabled' : '') + '" type="button" data-action="' + attr(action) + '" data-value="' + attr(value) + '" ' + (disabled ? 'disabled' : '') + ' ' + (extraAttrs || '') + '>' + iconHtml + '<span class="choiceMain"><span class="choiceLabel">' + escapeHtml(label) + '</span>' + (meta ? '<span class="choiceMeta">' + escapeHtml(meta) + '</span>' : '') + '</span>' + (selected ? '<span class="codicon codicon-check"></span>' : '') + '</button>';
 		}
 		function modelChoice(model, provider, selected) {
-			const price = modelPriceLabel(model);
-			return '<button class="choiceRow modelChoice' + (selected ? ' selected' : '') + '" type="button" data-action="chooseModel" data-value="' + attr(model.name) + '" data-provider="' + attr(provider) + '" data-model="' + attr(model.name) + '">' + providerIconHtml(provider, 'choiceIcon') + '<span class="choiceMain"><span class="choiceLabel">' + escapeHtml(model.displayName || model.name) + '</span><span class="choiceMeta">' + escapeHtml(model.name) + '</span></span><span class="modelChoiceMeta">' + escapeHtml(price) + '</span>' + (selected ? '<span class="codicon codicon-check"></span>' : '<span class="modelChoiceCheckSpacer"></span>') + '</button>';
+			return '<button class="choiceRow modelChoice' + (selected ? ' selected' : '') + '" type="button" data-action="chooseModel" data-value="' + attr(model.name) + '" data-provider="' + attr(provider) + '" data-model="' + attr(model.name) + '">' + providerIconHtml(provider, 'choiceIcon') + '<span class="choiceMain"><span class="choiceLabel">' + escapeHtml(model.displayName || model.name) + '</span><span class="choiceMeta">' + escapeHtml(model.name) + '</span></span>' + (selected ? '<span class="codicon codicon-check"></span>' : '<span class="modelChoiceCheckSpacer"></span>') + '</button>';
 		}
 		function actionButton(action, label, icon) {
 			return '<button class="drawerButton" type="button" data-action="' + attr(action) + '">' + (icon ? '<span class="codicon codicon-' + attr(icon) + '"></span> ' : '') + escapeHtml(label) + '</button>';
@@ -4618,7 +4686,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				const option = document.createElement('option');
 				option.value = model.name;
 				option.textContent = [providerDisplayName(provider), model.displayName || model.name].filter(Boolean).join(' / ');
-				option.title = [providerDisplayName(provider), model.name, model.contextLimit ? model.contextLimit + ' tokens' : '', model.supportsThinking ? 'thinking' : '', modelPriceLabel(model)].filter(Boolean).join(' / ');
+				option.title = [providerDisplayName(provider), model.name, model.contextLimit ? model.contextLimit + ' tokens' : '', model.supportsThinking ? 'thinking' : ''].filter(Boolean).join(' / ');
 				controls.model.appendChild(option);
 			}
 			setSelect(controls.model, settings.model || '');

@@ -230,21 +230,38 @@ export class SessionCustomizationDiscovery extends Disposable {
 		throwIfCancelled(token);
 
 		const p: AgentsDiscoverRequest = { projectPaths: [this._workingDirectory.fsPath] };
+		const rpc = client.rpc as unknown as {
+			agents?: { discover?: (params: AgentsDiscoverRequest) => Promise<{ agents: Array<{ id: string; name?: string; displayName?: string; description: string; path?: string; userInvocable?: boolean }> }> };
+			agent?: { list?: () => Promise<{ agents: Array<{ id: string; name?: string; displayName?: string; description: string; path?: string; userInvocable?: boolean }> }> };
+			instructions?: {
+				discover?: (params: AgentsDiscoverRequest) => Promise<{ sources: Array<{ id: string; label: string; description?: string; sourcePath: string; applyTo?: string[] }> }>;
+				getSources?: () => Promise<{ sources: Array<{ id: string; label: string; description?: string; sourcePath: string; applyTo?: string[] }> }>;
+			};
+			skills?: { discover?: (params: AgentsDiscoverRequest) => Promise<{ skills: Array<{ path?: string; name: string; description: string }> }> };
+		};
 
 		try {
 			const agents: AgentCustomization[] = [];
 
-			const agentDiscovery = await client.rpc.agents.discover(p);
+			const agentDiscovery = rpc.agents?.discover
+				? await rpc.agents.discover(p)
+				: rpc.agent?.list
+					? await rpc.agent.list()
+					: { agents: [] };
 			for (const agent of agentDiscovery.agents) {
 				if (agent.path) {
 					const uri = URI.file(agent.path);
-					agents.push({ type: CustomizationType.Agent, uri: uri.toString(), id: agent.id, name: agent.name, description: agent.description, _meta: { userInvocable: agent.userInvocable } });
+					agents.push({ type: CustomizationType.Agent, uri: uri.toString(), id: agent.id, name: agent.name ?? agent.displayName ?? agent.id, description: agent.description, _meta: { userInvocable: agent.userInvocable } });
 				}
 			}
 
 			const rules: RuleCustomization[] = [];
 
-			const instructionDiscovery = await client.rpc.instructions.discover(p);
+			const instructionDiscovery = rpc.instructions?.discover
+				? await rpc.instructions.discover(p)
+				: rpc.instructions?.getSources
+					? await rpc.instructions.getSources()
+					: { sources: [] };
 			for (const instruction of instructionDiscovery.sources) {
 				let uri: URI;
 				if (isAbsolute(instruction.sourcePath)) {
@@ -257,7 +274,7 @@ export class SessionCustomizationDiscovery extends Disposable {
 
 			const skills: SkillCustomization[] = [];
 
-			const skillDiscovery = await client.rpc.skills.discover(p);
+			const skillDiscovery = rpc.skills?.discover ? await rpc.skills.discover(p) : { skills: [] };
 			for (const skill of skillDiscovery.skills) {
 				if (skill.path) {
 					const uri = URI.file(skill.path);
@@ -554,5 +571,4 @@ export const _internal = {
 	searchRoots,
 	agentInstructions,
 };
-
 

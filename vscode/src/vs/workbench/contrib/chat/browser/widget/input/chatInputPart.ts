@@ -1193,8 +1193,6 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		const latestTokens = typeof promptTokens === 'number' && typeof completionTokens === 'number'
 			? promptTokens + completionTokens
 			: completionTokens;
-		const estimatedCost = this._formatEstimatedCost(promptTokens, completionTokens, metadata);
-		const estimatedSessionCost = this._formatEstimatedCost(sessionUsage.promptTokens, sessionUsage.completionTokens, metadata);
 		const speed = streamStats && streamStats.impliedWordLoadRate > 0
 			? localize('backboardUsageMetrics.speedWords', "{0}/sec", `${streamStats.impliedWordLoadRate.toFixed(1)} words`)
 			: latestResponse && !latestResponse.isComplete
@@ -1214,7 +1212,6 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 				{ label: localize('backboardUsageMetrics.promptTokens', "Session Input"), value: sessionUsage.hasPromptUsage ? this._formatNumber(sessionUsage.promptTokens) : localize('backboardUsageMetrics.pending', "Waiting for usage data") },
 				{ label: localize('backboardUsageMetrics.completionTokens', "Session Output"), value: sessionUsage.hasCompletionUsage ? this._formatNumber(sessionUsage.completionTokens) : localize('backboardUsageMetrics.pending', "Waiting for usage data") },
 				{ label: localize('backboardUsageMetrics.latestTokens', "Latest Response"), value: typeof latestTokens === 'number' ? this._formatNumber(latestTokens) : localize('backboardUsageMetrics.pending', "Waiting for usage data") },
-				{ label: localize('backboardUsageMetrics.cost', "Session Cost"), value: estimatedSessionCost ?? estimatedCost ?? metadata?.pricing ?? metadata?.priceCategory ?? localize('backboardUsageMetrics.pending', "Waiting for usage data") },
 				{ label: localize('backboardUsageMetrics.speed', "Speed"), value: speed },
 				{ label: localize('backboardUsageMetrics.time', "Time"), value: this._formatElapsed(Date.now() - this._usageMetricsStartedAt) },
 				{ label: localize('backboardUsageMetrics.responses', "Responses"), value: this._formatNumber(responses.length) },
@@ -1284,11 +1281,6 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		const events = data
 			.filter(this._isBackboardRecord)
 			.map((event, index) => this._parseBackboardUsageEvent(event, index));
-		const totalCredits = data
-			.filter(this._isBackboardRecord)
-			.map(event => this._numberFromBackboardRecord(event.credits) ?? this._numberFromBackboardRecord(event.credit_amount) ?? this._numberFromBackboardRecord(event.cost) ?? this._numberFromBackboardRecord(event.total_cost) ?? this._numberFromBackboardRecord(event.amount))
-			.filter((value): value is number => typeof value === 'number')
-			.reduce((sum, value) => sum + value, 0);
 		const pagination = this._isBackboardRecord(record.pagination) ? record.pagination : undefined;
 		const page = this._numberFromBackboardRecord(pagination?.page) ?? this._numberFromBackboardRecord(pagination?.current_page);
 		const total = this._numberFromBackboardRecord(pagination?.total) ?? this._numberFromBackboardRecord(pagination?.total_items) ?? this._numberFromBackboardRecord(pagination?.count);
@@ -1299,7 +1291,6 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			rows: [
 				{ label: localize('backboardRecentUsage.endpoint', "Endpoint"), value: 'GET /billing/usage/recent' },
 				{ label: localize('backboardRecentUsage.events', "Events"), value: this._formatNumber(events.length) },
-				...(totalCredits > 0 ? [{ label: localize('backboardRecentUsage.credits', "Credits"), value: this._formatCredits(totalCredits) }] : []),
 				...(typeof page === 'number' ? [{ label: localize('backboardRecentUsage.page', "Page"), value: this._formatNumber(page) }] : []),
 				...(typeof total === 'number' ? [{ label: localize('backboardRecentUsage.total', "Total"), value: this._formatNumber(total) }] : []),
 			],
@@ -1316,7 +1307,6 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		const outputTokens = this._numberFromBackboardRecord(event.output_tokens) ?? this._numberFromBackboardRecord(event.completion_tokens);
 		const totalTokens = this._numberFromBackboardRecord(event.total_tokens)
 			?? (typeof inputTokens === 'number' || typeof outputTokens === 'number' ? (inputTokens ?? 0) + (outputTokens ?? 0) : undefined);
-		const credits = this._numberFromBackboardRecord(event.credits) ?? this._numberFromBackboardRecord(event.credit_amount) ?? this._numberFromBackboardRecord(event.cost) ?? this._numberFromBackboardRecord(event.total_cost) ?? this._numberFromBackboardRecord(event.amount);
 		const status = this._stringFromBackboardRecord(event.status);
 		const thread = this._stringFromBackboardRecord(event.thread_id) ?? this._stringFromBackboardRecord(event.threadId);
 
@@ -1324,7 +1314,6 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			title: model ?? creditType ?? localize('backboardRecentUsage.eventTitle', "Usage Event {0}", index + 1),
 			subtitle: [provider, creditType, createdAt ? this._formatBackboardUsageDate(createdAt) : undefined].filter(isDefined).join(' · '),
 			rows: [
-				...(typeof credits === 'number' ? [{ label: localize('backboardRecentUsage.eventCredits', "Credits"), value: this._formatCredits(credits) }] : []),
 				...(typeof inputTokens === 'number' ? [{ label: localize('backboardRecentUsage.eventInput', "Input"), value: this._formatNumber(inputTokens) }] : []),
 				...(typeof outputTokens === 'number' ? [{ label: localize('backboardRecentUsage.eventOutput', "Output"), value: this._formatNumber(outputTokens) }] : []),
 				...(typeof totalTokens === 'number' ? [{ label: localize('backboardRecentUsage.eventTotalTokens', "Total"), value: this._formatNumber(totalTokens) }] : []),
@@ -1389,10 +1378,6 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 	}
 
-	private _formatCredits(value: number): string {
-		return value < 0.01 ? '<0.01 credits' : `${value.toFixed(2)} credits`;
-	}
-
 	private _stringFromBackboardRecord(value: unknown): string | undefined {
 		return typeof value === 'string' ? value.trim() || undefined : undefined;
 	}
@@ -1446,21 +1431,6 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			hasCompletionUsage,
 			hasUsage: hasPromptUsage || hasCompletionUsage,
 		};
-	}
-
-	private _formatEstimatedCost(promptTokens: number | undefined, completionTokens: number | undefined, metadata: ILanguageModelChatMetadata | undefined): string | undefined {
-		if (typeof promptTokens !== 'number' || typeof completionTokens !== 'number' || !metadata) {
-			return undefined;
-		}
-		const inputCost = metadata.inputCost;
-		const outputCost = metadata.outputCost;
-		if (typeof inputCost !== 'number' || typeof outputCost !== 'number') {
-			return undefined;
-		}
-		const credits = ((promptTokens * inputCost) + (completionTokens * outputCost)) / 1_000_000;
-		return credits < 0.01
-			? localize('backboardUsageMetrics.costTiny', "<0.01 credits")
-			: localize('backboardUsageMetrics.costCredits', "{0} credits", credits.toFixed(2));
 	}
 
 	private _formatNumber(value: number): string {

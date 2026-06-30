@@ -47,12 +47,6 @@ export const ONBOARDING_EXPERIENCE_OPTIONS: readonly IOnboardingExperienceOption
 		eyebrow: localize('onboarding.backboard.experience.editor.eyebrow', "Editor"),
 		description: localize('onboarding.backboard.experience.editor.description', "I want to see and edit code, show me the editor layout I know and love."),
 	},
-	{
-		id: OnboardingExperience.Advanced,
-		label: localize('onboarding.backboard.experience.advanced', "Advanced"),
-		eyebrow: localize('onboarding.backboard.experience.advanced.eyebrow', "Advanced"),
-		description: localize('onboarding.backboard.experience.advanced.description', "I want one unified workspace to orchestrate all my agents"),
-	},
 ];
 
 /**

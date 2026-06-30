@@ -27,7 +27,6 @@ import { IWorkbenchLayoutService, Parts } from '../../../../services/layout/brow
 import { IPaneCompositePartService } from '../../../../services/panecomposite/browser/panecomposite.js';
 import { CHAT_CATEGORY } from '../../browser/actions/chatActions.js';
 import { BACKBOARD_MODE_SWITCHER_COMMAND_ID, ChatConfiguration, OPEN_AGENTS_WINDOW_COMMAND_ID, OPEN_AGENTS_WINDOW_PRECONDITION } from '../../common/constants.js';
-import { OPEN_BACKBOARD_WORKSPACE_COMMAND_ID } from '../backboardWorkspace/backboardWorkspaceConstants.js';
 import { IBackboardWorkspaceService } from '../backboardWorkspace/backboardWorkspaceService.js';
 
 const CLOSE_ACTIVE_EDITOR_COMMAND_ID = 'workbench.action.closeActiveEditor';
@@ -166,7 +165,6 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 		}
 
 		const agentsActive = this.isAgentsActive();
-		const workspaceActive = this.isWorkspaceActive();
 		this.triggerButton.setAttribute('aria-expanded', 'true');
 		this.contextMenuService.showContextMenu({
 			getAnchor: () => this.triggerButton!,
@@ -174,14 +172,8 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 				toAction({
 					id: 'workbench.action.mode.editor',
 					label: localize('backboardModeSwitcher.editor', "Editor"),
-					checked: !agentsActive && !workspaceActive,
+					checked: !agentsActive,
 					run: () => this.openEditor(),
-				}),
-				toAction({
-					id: 'workbench.action.mode.workspace',
-					label: localize('backboardModeSwitcher.workspace', "Advanced"),
-					checked: workspaceActive,
-					run: () => this.openWorkspace(),
 				}),
 				toAction({
 					id: 'workbench.action.mode.agents',
@@ -197,10 +189,6 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 	private openAgents(): void {
 		this.workspaceService.hide();
 		void this.commandService.executeCommand(OPEN_AGENTS_WINDOW_COMMAND_ID);
-	}
-
-	private openWorkspace(): void {
-		void this.commandService.executeCommand(OPEN_BACKBOARD_WORKSPACE_COMMAND_ID);
 	}
 
 	private openEditor(): void {
@@ -248,15 +236,12 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 
 	private updateState(): void {
 		const agentsActive = this.isAgentsActive();
-		const workspaceActive = this.isWorkspaceActive();
-		this.currentIcon?.classList.toggle('codicon-window', !agentsActive && !workspaceActive);
-		this.currentIcon?.classList.toggle('codicon-layout', workspaceActive);
+		this.currentIcon?.classList.toggle('codicon-window', !agentsActive);
+		this.currentIcon?.classList.toggle('codicon-layout', false);
 		this.currentIcon?.classList.toggle('codicon-robot', agentsActive);
-		const label = workspaceActive
-			? localize('backboardModeSwitcher.workspace', "Advanced")
-			: agentsActive
-				? localize('backboardModeSwitcher.agents', "Simple")
-				: localize('backboardModeSwitcher.editor', "Editor");
+		const label = agentsActive
+			? localize('backboardModeSwitcher.agents', "Simple")
+			: localize('backboardModeSwitcher.editor', "Editor");
 		this.currentLabel?.replaceChildren(label);
 	}
 }

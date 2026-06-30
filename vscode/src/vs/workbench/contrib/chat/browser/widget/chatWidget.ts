@@ -1225,12 +1225,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		if (this.isLockedToCodingAgent) {
 			return {
 				title: localize('backboardWelcomeTitle', "New Agent"),
-				message: new MarkdownString([
-					localize('backboardWelcomeSubtitle', "Start with a task."),
-					localize('backboardWelcomeExampleTypeScript', "Fix TypeScript errors"),
-					localize('backboardWelcomeExampleRefactor', "Refactor this component"),
-					localize('backboardWelcomeExampleDarkMode', "Add dark mode support"),
-				].join('\n\n')),
+				message: new MarkdownString(localize('backboardWelcomeSubtitle', "Start with a task.")),
 				styleVariant: 'backboard',
 			};
 		}

@@ -2905,7 +2905,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 						: localize('agentHost.responseDetails.credits', "{0} credits", formatted);
 					return [model.name, creditDetails].join(' • ');
 				}
-				return [model.name, model.pricing].filter(Boolean).join(' · ');
+				return model.name;
 			},
 		};
 	}
