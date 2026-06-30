@@ -52,6 +52,7 @@ export class ChatCompositeBar extends Disposable {
 	private readonly _tabsContainer: HTMLElement;
 	private readonly _tabsScrollbar: ScrollableElement;
 	private readonly _tabs: IChatTab[] = [];
+	private _tabOrder: string[] = [];
 	private readonly _tabDisposables = this._register(new DisposableStore());
 
 	private readonly _sessionDisposables = this._register(new MutableDisposable<DisposableStore>());
@@ -145,6 +146,7 @@ export class ChatCompositeBar extends Disposable {
 			return;
 		}
 		this._session = session;
+		this._tabOrder = [];
 
 		const store = new DisposableStore();
 		this._sessionDisposables.value = store;
@@ -172,7 +174,22 @@ export class ChatCompositeBar extends Disposable {
 		this._tabs.length = 0;
 		reset(this._tabsContainer);
 
+		const chatsById = new Map(chats.map(chat => [chat.resource.toString(), chat]));
+		this._tabOrder = this._tabOrder.filter(id => chatsById.has(id));
+		const knownIds = new Set(this._tabOrder);
 		for (const chat of chats) {
+			const id = chat.resource.toString();
+			if (!knownIds.has(id)) {
+				this._tabOrder.push(id);
+				knownIds.add(id);
+			}
+		}
+
+		for (const id of this._tabOrder) {
+			const chat = chatsById.get(id);
+			if (!chat) {
+				continue;
+			}
 			this._createTab(chat, chat.resource.toString() === mainChatId);
 		}
 

@@ -122,7 +122,11 @@ export class ChatEditorInput extends EditorInput implements IEditorCloseHandler 
 			return false;
 		}
 
-		return isEqual(this.sessionResource, otherInput.sessionResource);
+		if (this.sessionResource && otherInput.sessionResource) {
+			return isEqual(this.sessionResource, otherInput.sessionResource);
+		}
+
+		return isEqual(this.resource, otherInput.resource);
 	}
 
 	override get typeId(): string {

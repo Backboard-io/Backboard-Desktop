@@ -1816,6 +1816,36 @@ body.optimus-sash-dragging .optimus-sidebar-sash {
 	border-radius: 6px;
 }
 
+/* Suggestion (empty starter) tiles — mirror the prompt-tile look with real content */
+.optimus-starter-card.is-suggestion {
+	border-style: dashed;
+}
+
+.optimus-starter-card.is-suggestion:hover,
+.optimus-starter-card.is-suggestion:focus,
+.optimus-starter-card.is-suggestion.selected {
+	border-style: solid;
+}
+
+.optimus-starter-suggestion-description {
+	color: var(--optimus-muted);
+	font-size: 11px;
+	line-height: 15px;
+}
+
+.optimus-starter-preview-row.suggestion-step {
+	background: color-mix(in srgb, var(--optimus-focus) 14%, var(--optimus-card));
+}
+
+.optimus-starter-preview-row.suggestion-step.active {
+	background: color-mix(in srgb, var(--optimus-focus) 24%, var(--optimus-card));
+}
+
+.optimus-starter-suggestion-hint {
+	color: var(--optimus-muted);
+	font-size: 11px;
+}
+
 .optimus-task-input {
 	display: grid;
 	grid-template-rows: 1fr auto;

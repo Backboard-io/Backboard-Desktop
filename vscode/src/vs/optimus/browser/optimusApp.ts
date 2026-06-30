@@ -27,6 +27,53 @@ const starterTasks: readonly IOptimusStarterTask[] = [
 	{ id: 'slot-6', provider: OptimusProvider.Backboard }
 ];
 
+interface IOptimusStarterSuggestion {
+	readonly title: string;
+	readonly description: string;
+	readonly prompt: string;
+	readonly steps: readonly string[];
+}
+
+interface IOptimusStarterSuggestion {
+	readonly title: string;
+	readonly description: string;
+	readonly prompt: string;
+	readonly steps: readonly string[];
+}
+
+const starterSuggestions: readonly IOptimusStarterSuggestion[] = [
+	{
+		title: localize('optimus.suggestion.typescript.title', "Fix TypeScript errors"),
+		description: localize('optimus.suggestion.typescript.description', "Resolve type errors across the workspace"),
+		prompt: localize('optimus.suggestion.typescript.prompt', "Fix all TypeScript compilation errors in this workspace and explain each fix."),
+		steps: [
+			localize('optimus.suggestion.typescript.step1', "Scan for type errors"),
+			localize('optimus.suggestion.typescript.step2', "Apply targeted fixes"),
+			localize('optimus.suggestion.typescript.step3', "Verify the build passes")
+		]
+	},
+	{
+		title: localize('optimus.suggestion.refactor.title', "Refactor this component"),
+		description: localize('optimus.suggestion.refactor.description', "Simplify and clean up a component"),
+		prompt: localize('optimus.suggestion.refactor.prompt', "Refactor the selected component to reduce complexity and improve readability."),
+		steps: [
+			localize('optimus.suggestion.refactor.step1', "Analyze current structure"),
+			localize('optimus.suggestion.refactor.step2', "Extract reusable pieces"),
+			localize('optimus.suggestion.refactor.step3', "Preserve existing behavior")
+		]
+	},
+	{
+		title: localize('optimus.suggestion.darkMode.title', "Add dark mode support"),
+		description: localize('optimus.suggestion.darkMode.description', "Theme the UI for dark color schemes"),
+		prompt: localize('optimus.suggestion.darkMode.prompt', "Add dark mode support across the UI using the existing theme token system."),
+		steps: [
+			localize('optimus.suggestion.darkMode.step1', "Audit color usage"),
+			localize('optimus.suggestion.darkMode.step2', "Map to theme tokens"),
+			localize('optimus.suggestion.darkMode.step3', "Test both light and dark")
+		]
+	}
+];
+
 export class OptimusApp extends Disposable {
 
 	private content!: HTMLElement;
@@ -334,9 +381,10 @@ export class OptimusApp extends Disposable {
 
 	private renderStarterTask(slot: number, historyEntry?: IOptimusHistoryEntry): HTMLElement {
 		const starter = starterTasks[slot];
+		const suggestion = starterSuggestions[slot % starterSuggestions.length];
 		const button = document.createElement('button');
 		button.type = 'button';
-		button.className = `optimus-starter-card${historyEntry ? ` has-prompt ${historyStatusClass(historyEntry)}` : ''}${this.selectedStarter?.id === starter.id ? ' selected' : ''}`;
+		button.className = `optimus-starter-card${historyEntry ? ` has-prompt ${historyStatusClass(historyEntry)}` : ' is-suggestion'}${this.selectedStarter?.id === starter.id ? ' selected' : ''}`;
 		button.setAttribute('aria-label', historyEntry
 			? localize('optimus.slot.openPrompt', "Open Backboard prompt {0}", promptTileTitle(historyEntry))
 			: localize('optimus.slot.newPrompt', "Start a new Advanced prompt in slot {0}", slot + 1));
@@ -345,15 +393,16 @@ export class OptimusApp extends Disposable {
 			if (historyEntry) {
 				this.openHistoryEntry(historyEntry);
 			} else {
+				this.draftPrompt = suggestion.prompt;
 				this.startDraftTask(slot);
 			}
 		});
 
 		button.append(
 			this.renderStarterHeaderSkeleton(historyEntry),
-			historyEntry ? this.renderStarterPromptTitle(historyEntry) : this.renderStarterTitleSkeleton(),
-			historyEntry ? this.renderStarterPromptRows(historyEntry) : this.renderStarterRowsSkeleton(),
-			historyEntry ? this.renderStarterPromptFooter(historyEntry) : this.renderStarterFooterSkeleton(),
+			historyEntry ? this.renderStarterPromptTitle(historyEntry) : this.renderStarterSuggestionTitle(suggestion),
+			historyEntry ? this.renderStarterPromptRows(historyEntry) : this.renderStarterSuggestionRows(suggestion),
+			historyEntry ? this.renderStarterPromptFooter(historyEntry) : this.renderStarterSuggestionFooter(),
 			this.renderStarterComposerSkeleton()
 		);
 		return button;
@@ -374,8 +423,15 @@ export class OptimusApp extends Disposable {
 			badge.textContent = historyStatusLabel(historyEntry);
 			header.appendChild(badge);
 		} else {
-			header.setAttribute('aria-hidden', 'true');
-			header.appendChild(skeletonBar('medium'));
+			const label = document.createElement('span');
+			label.className = 'optimus-starter-workspace';
+			label.textContent = localize('optimus.suggestion.label', "New prompt");
+			header.appendChild(label);
+
+			const badge = document.createElement('span');
+			badge.className = 'optimus-starter-status status-live';
+			badge.textContent = localize('optimus.suggestion.badge', "Ready");
+			header.appendChild(badge);
 		}
 
 		const action = document.createElement('span');
@@ -384,30 +440,6 @@ export class OptimusApp extends Disposable {
 		header.appendChild(action);
 
 		return header;
-	}
-
-	private renderStarterTitleSkeleton(): HTMLElement {
-		const title = document.createElement('span');
-		title.className = 'optimus-starter-preview-title';
-		title.setAttribute('aria-hidden', 'true');
-		title.appendChild(skeletonBar('short'));
-		title.appendChild(skeletonBar('small'));
-		return title;
-	}
-
-	private renderStarterRowsSkeleton(): HTMLElement {
-		const rows = document.createElement('span');
-		rows.className = 'optimus-starter-preview-rows';
-		rows.setAttribute('aria-hidden', 'true');
-		const rowWidths = ['wide', 'mid', 'full', 'wide', 'short'];
-		for (let index = 0; index < rowWidths.length; index++) {
-			const row = document.createElement('span');
-			row.className = `optimus-starter-preview-row${index === 1 || index === 3 ? ' active' : ''}`;
-			row.appendChild(skeletonDot());
-			row.appendChild(skeletonBar(rowWidths[index]));
-			rows.appendChild(row);
-		}
-		return rows;
 	}
 
 	private renderStarterPromptTitle(entry: IOptimusHistoryEntry): HTMLElement {
@@ -440,16 +472,6 @@ export class OptimusApp extends Disposable {
 		return rows;
 	}
 
-	private renderStarterFooterSkeleton(): HTMLElement {
-		const footer = document.createElement('span');
-		footer.className = 'optimus-starter-preview-footer';
-		footer.setAttribute('aria-hidden', 'true');
-		footer.appendChild(skeletonBar('small'));
-		footer.appendChild(skeletonBar('tiny'));
-		footer.appendChild(skeletonBar('short'));
-		return footer;
-	}
-
 	private renderStarterPromptFooter(entry: IOptimusHistoryEntry): HTMLElement {
 		const footer = document.createElement('span');
 		footer.className = 'optimus-starter-preview-footer';
@@ -472,6 +494,48 @@ export class OptimusApp extends Disposable {
 		composer.appendChild(skeletonBar('icon'));
 		composer.appendChild(skeletonBar('medium'));
 		return composer;
+	}
+
+	private renderStarterSuggestionTitle(suggestion: IOptimusStarterSuggestion): HTMLElement {
+		const title = document.createElement('span');
+		title.className = 'optimus-starter-preview-title';
+		const meta = document.createElement('span');
+		meta.className = 'optimus-starter-prompt-meta';
+		meta.textContent = `$ ${localize('optimus.history.command.backboard', "backboard")}`;
+		const heading = document.createElement('strong');
+		heading.className = 'optimus-starter-prompt-title';
+		heading.textContent = suggestion.title;
+		const description = document.createElement('span');
+		description.className = 'optimus-starter-suggestion-description';
+		description.textContent = suggestion.description;
+		title.append(meta, heading, description);
+		return title;
+	}
+
+	private renderStarterSuggestionRows(suggestion: IOptimusStarterSuggestion): HTMLElement {
+		const rows = document.createElement('span');
+		rows.className = 'optimus-starter-preview-rows';
+		for (let index = 0; index < suggestion.steps.length; index++) {
+			const row = document.createElement('span');
+			row.className = `optimus-starter-preview-row suggestion-step${index === 0 ? ' active' : ''}`;
+			row.appendChild(skeletonDot());
+			const text = document.createElement('span');
+			text.className = 'optimus-starter-prompt-line';
+			text.textContent = suggestion.steps[index];
+			row.appendChild(text);
+			rows.appendChild(row);
+		}
+		return rows;
+	}
+
+	private renderStarterSuggestionFooter(): HTMLElement {
+		const footer = document.createElement('span');
+		footer.className = 'optimus-starter-preview-footer';
+		const hint = document.createElement('span');
+		hint.className = 'optimus-starter-prompt-meta optimus-starter-suggestion-hint';
+		hint.textContent = localize('optimus.suggestion.hint', "Click to start");
+		footer.appendChild(hint);
+		return footer;
 	}
 
 	private startDraftTask(slot: number): void {

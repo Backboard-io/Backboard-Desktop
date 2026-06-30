@@ -1508,7 +1508,7 @@ function newerPanelState(...states: (PanelPersistedState | undefined)[]): PanelP
 		if (!hasPanelStateContent(state)) {
 			continue;
 		}
-		if (!best || panelStateTimestamp(state) >= panelStateTimestamp(best)) {
+		if (!best || panelStateTimestamp(state) > panelStateTimestamp(best)) {
 			best = state;
 		}
 	}
@@ -2519,10 +2519,14 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 				outputText: liveMessages.filter(message => message.role === 'assistant').map(message => message.content).join('\n\n'),
 			};
 			const existingEntries = Array.isArray(existingState?.historyEntries) ? existingState.historyEntries : [];
-			const historyEntries = [
-				nextEntry,
-				...existingEntries.filter(entry => !isObjectRecord(entry) || entry.id !== liveChatId)
-			];
+			// Update entry in-place instead of moving it to the front
+			const existingIdx = existingEntries.findIndex(entry => isObjectRecord(entry) && entry.id === liveChatId);
+			let historyEntries;
+			if (existingIdx >= 0) {
+				historyEntries = [...existingEntries.slice(0, existingIdx), nextEntry, ...existingEntries.slice(existingIdx + 1)];
+			} else {
+				historyEntries = [nextEntry, ...existingEntries];
+			}
 			await writeSharedPanelState({
 				activeView: 'chat',
 				activeHistoryId: liveChatId,
@@ -2778,10 +2782,14 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 				outputText: liveMessages.filter(message => message.role === 'assistant').map(message => message.content).join('\n\n'),
 			};
 			const existingEntries = Array.isArray(existingState?.historyEntries) ? existingState.historyEntries : [];
-			const historyEntries = [
-				nextEntry,
-				...existingEntries.filter(entry => !isObjectRecord(entry) || entry.id !== liveChatId)
-			];
+			// Update entry in-place instead of moving it to the front
+			const existingIdx = existingEntries.findIndex(entry => isObjectRecord(entry) && entry.id === liveChatId);
+			let historyEntries;
+			if (existingIdx >= 0) {
+				historyEntries = [...existingEntries.slice(0, existingIdx), nextEntry, ...existingEntries.slice(existingIdx + 1)];
+			} else {
+				historyEntries = [nextEntry, ...existingEntries];
+			}
 			await writeSharedPanelState({
 				activeView: 'chat',
 				activeHistoryId: liveChatId,
@@ -3748,6 +3756,35 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		function hasPanelSnapshotContent(state) {
 			return !!state && typeof state === 'object' && (!!state.activeHistoryId || !!state.promptQueue?.length || !!state.historyEntries?.length);
 		}
+		function mergeHistoryEntriesPreservingOrder(currentEntries, nextEntries) {
+			const nextById = new Map();
+			const nextIds = [];
+			for (const entry of nextEntries) {
+				const id = typeof entry?.id === 'string' ? entry.id : undefined;
+				if (!id) {
+					continue;
+				}
+				if (!nextById.has(id)) {
+					nextIds.push(id);
+				}
+				nextById.set(id, entry);
+			}
+			const merged = [];
+			const seen = new Set();
+			for (const entry of currentEntries) {
+				const id = typeof entry?.id === 'string' ? entry.id : undefined;
+				if (id && nextById.has(id) && !seen.has(id)) {
+					merged.push(nextById.get(id));
+					seen.add(id);
+				}
+			}
+			for (const id of nextIds) {
+				if (!seen.has(id)) {
+					merged.push(nextById.get(id));
+				}
+			}
+			return merged;
+		}
 			function activeHistoryEntry() {
 				return historyEntries.find(item => item.id === activeHistoryId);
 			}
@@ -3938,7 +3975,13 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				entry.currentWorkspace = currentWorkspace;
 				entry.status = 'Running';
 			addCheckpoint(entry, promptText);
-			historyEntries = [entry, ...historyEntries.filter(item => item.id !== entry.id)].slice(0, 40);
+			// Update entry in-place instead of moving it to the front
+			const existingIndex = historyEntries.findIndex(item => item.id === entry.id);
+			if (existingIndex >= 0) {
+				historyEntries = [...historyEntries.slice(0, existingIndex), entry, ...historyEntries.slice(existingIndex + 1)].slice(0, 40);
+			} else {
+				historyEntries = [entry, ...historyEntries].slice(0, 40);
+			}
 			activeHistoryId = entry.id;
 			renderHistory();
 			renderRecentTabs();
@@ -4076,7 +4119,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			const nextActiveHistoryId = typeof state.activeHistoryId === 'string' ? state.activeHistoryId : undefined;
 			const nextPromptQueue = Array.isArray(state.promptQueue) ? state.promptQueue : [];
 			const nextActiveView = state.activeView === 'history' ? 'history' : 'chat';
-			historyEntries = nextHistoryEntries;
+			historyEntries = mergeHistoryEntriesPreservingOrder(historyEntries, nextHistoryEntries);
 			activeHistoryId = nextActiveHistoryId;
 			promptQueue = nextPromptQueue;
 			currentWorkspace = typeof state.currentWorkspace === 'string' ? state.currentWorkspace : currentWorkspace;
