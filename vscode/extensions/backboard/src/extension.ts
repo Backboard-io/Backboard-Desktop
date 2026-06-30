@@ -204,8 +204,10 @@ const defaultBackboardOAuthRedirectUri = 'http://127.0.0.1:49321/auth/callback';
 const backboardOAuthScope = 'openid email profile';
 let backboardToolOutput: vscode.OutputChannel | undefined;
 let backboardUpdateInstallInProgress = false;
+let backboardUpdateCheckInProgress = false;
 let availableBackboardUpdate: UpdateManifest | undefined;
 let backboardUpdateStatusItem: vscode.StatusBarItem | undefined;
+let backboardUpdateCheckStatusItem: vscode.StatusBarItem | undefined;
 let pendingBackboardOAuth: BackboardOAuthPending | undefined;
 let lastOptimusPanelCommandId: string | undefined;
 let pendingOptimusLiveState: OptimusLiveState | undefined;
@@ -221,6 +223,10 @@ export function activate(context: vscode.ExtensionContext): void {
 	backboardUpdateStatusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
 	backboardUpdateStatusItem.command = 'backboard.installAvailableUpdate';
 	context.subscriptions.push(backboardUpdateStatusItem);
+	backboardUpdateCheckStatusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 99);
+	backboardUpdateCheckStatusItem.command = 'backboard.checkForUpdates';
+	context.subscriptions.push(backboardUpdateCheckStatusItem);
+	updateBackboardUpdateCheckStatusItem(false);
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.setApiKey', async () => {
 		if (await setApiKey()) {
 			bridge.restart();
@@ -677,6 +683,15 @@ function startBackboardUpdateChecks(context: vscode.ExtensionContext): void {
 }
 
 async function checkBackboardUpdates(manual: boolean): Promise<void> {
+	if (backboardUpdateCheckInProgress) {
+		if (manual) {
+			await vscode.window.showInformationMessage('Backboard Studio update check is already running.');
+		}
+		return;
+	}
+
+	backboardUpdateCheckInProgress = true;
+	updateBackboardUpdateCheckStatusItem(manual);
 	try {
 		const manifestUrl = getBackboardUpdateManifestUrl();
 		if (!manifestUrl) {
@@ -724,7 +739,24 @@ async function checkBackboardUpdates(manual: boolean): Promise<void> {
 		if (manual) {
 			await vscode.window.showWarningMessage(`Could not check for Backboard Studio updates: ${message}`);
 		}
+	} finally {
+		backboardUpdateCheckInProgress = false;
+		updateBackboardUpdateCheckStatusItem(false);
 	}
+}
+
+function updateBackboardUpdateCheckStatusItem(checking: boolean): void {
+	if (!backboardUpdateCheckStatusItem) {
+		return;
+	}
+	if (checking) {
+		backboardUpdateCheckStatusItem.text = '$(sync~spin) Checking Updates';
+		backboardUpdateCheckStatusItem.tooltip = 'Checking the Backboard Studio S3 update manifest';
+	} else {
+		backboardUpdateCheckStatusItem.text = '$(sync) Check Updates';
+		backboardUpdateCheckStatusItem.tooltip = 'Check S3 for a Backboard Studio update';
+	}
+	backboardUpdateCheckStatusItem.show();
 }
 
 async function setAvailableBackboardUpdate(manifest: UpdateManifest | undefined): Promise<void> {
