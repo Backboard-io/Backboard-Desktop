@@ -5,7 +5,7 @@
 
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import * as nls from '../../../../nls.js';
-import { Extensions as ConfigurationExtensions, IConfigurationNode, IConfigurationRegistry } from '../../../../platform/configuration/common/configurationRegistry.js';
+import { Extensions as ConfigurationExtensions, IConfigurationNode, IConfigurationPropertySchema, IConfigurationRegistry } from '../../../../platform/configuration/common/configurationRegistry.js';
 import { FileOperationResult, IFileService, toFileOperationResult } from '../../../../platform/files/common/files.js';
 import { Registry } from '../../../../platform/registry/common/platform.js';
 import { URI } from '../../../../base/common/uri.js';
@@ -35,8 +35,8 @@ interface BackboardMetadataFile {
 	readonly models?: readonly BackboardMetadataModel[];
 }
 
-function createBackboardModelProperty(models?: readonly BackboardMetadataModel[]): IConfigurationNode['properties'][string] {
-	const property: IConfigurationNode['properties'][string] = {
+function createBackboardModelProperty(models?: readonly BackboardMetadataModel[]): IConfigurationPropertySchema {
+	const property: IConfigurationPropertySchema = {
 		type: 'string',
 		default: defaultBackboardModelSetting,
 		description: nls.localize('backboard.defaultModel', "Default Backboard model used for new chats."),
@@ -74,7 +74,7 @@ function createBackboardModelProperty(models?: readonly BackboardMetadataModel[]
 	return property;
 }
 
-function createBackboardRootNode(modelProperty: IConfigurationNode['properties'][string]): IConfigurationNode {
+function createBackboardRootNode(modelProperty: IConfigurationPropertySchema): IConfigurationNode {
 	return {
 		id: 'backboard',
 		order: 2,
