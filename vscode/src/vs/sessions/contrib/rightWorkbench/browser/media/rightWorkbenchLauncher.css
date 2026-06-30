@@ -279,19 +279,19 @@
 	box-sizing: border-box;
 	border: 0;
 	border-radius: 7px;
-	color: #ffffff;
-	background: #141415;
+	color: var(--rwb-foreground);
+	background: color-mix(in srgb, var(--rwb-foreground) 4%, var(--rwb-bg));
 	text-align: left;
 	cursor: pointer;
 }
 
 .sessions-right-workbench-launcher-row:hover {
-	background: #1b1b1d;
+	background: var(--rwb-hover);
 }
 
 .sessions-right-workbench-launcher-row .codicon {
 	font-size: 15px;
-	color: #d0d0d3;
+	color: var(--vscode-icon-foreground, var(--rwb-muted));
 }
 
 .sessions-right-workbench-launcher-label {
@@ -310,8 +310,8 @@
 	height: 18px;
 	padding: 0 6px;
 	border-radius: 999px;
-	color: #dedee0;
-	background: #242426;
+	color: var(--rwb-muted);
+	background: var(--rwb-bg-muted);
 	font-size: 11px;
 	line-height: 1;
 	white-space: nowrap;

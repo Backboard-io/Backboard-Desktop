@@ -4,14 +4,14 @@
  *--------------------------------------------------------------------------------------------*/
 
 .agent-sessions-viewpane {
-	--agent-sidebar-bg: var(--vscode-editor-background, #121314);
-	--agent-sidebar-raised-bg: color-mix(in srgb, var(--vscode-sideBar-foreground, #f2f2f2) 7%, var(--agent-sidebar-bg));
-	--agent-sidebar-hover-bg: color-mix(in srgb, var(--vscode-sideBar-foreground, #f2f2f2) 6%, transparent);
-	--agent-sidebar-active-bg: color-mix(in srgb, var(--vscode-sideBar-foreground, #f2f2f2) 9%, transparent);
-	--agent-sidebar-border: var(--vscode-sideBar-border, #2f2f2f);
-	--agent-sidebar-primary: var(--vscode-sideBar-foreground, #f2f2f2);
-	--agent-sidebar-secondary: color-mix(in srgb, var(--vscode-sideBar-foreground, #f2f2f2) 84%, transparent);
-	--agent-sidebar-muted: var(--vscode-descriptionForeground, #939393);
+	--agent-sidebar-bg: var(--vscode-sideBar-background, var(--vscode-editor-background));
+	--agent-sidebar-primary: var(--vscode-sideBar-foreground, var(--vscode-foreground));
+	--agent-sidebar-raised-bg: color-mix(in srgb, var(--agent-sidebar-primary) 7%, var(--agent-sidebar-bg));
+	--agent-sidebar-hover-bg: color-mix(in srgb, var(--agent-sidebar-primary) 6%, transparent);
+	--agent-sidebar-active-bg: color-mix(in srgb, var(--agent-sidebar-primary) 9%, transparent);
+	--agent-sidebar-border: var(--vscode-sideBar-border, var(--vscode-panel-border, transparent));
+	--agent-sidebar-secondary: color-mix(in srgb, var(--agent-sidebar-primary) 84%, transparent);
+	--agent-sidebar-muted: var(--vscode-descriptionForeground, var(--vscode-input-placeholderForeground, var(--agent-sidebar-secondary)));
 	background: var(--agent-sidebar-bg);
 
 	.agent-sessions-container {
@@ -255,7 +255,7 @@
 		border: 1px solid var(--agent-sidebar-border);
 		border-radius: 8px;
 		background: var(--agent-sidebar-raised-bg);
-		box-shadow: 0 8px 8px rgb(0 0 0 / 22%);
+		box-shadow: 0 8px 8px var(--vscode-widget-shadow);
 	}
 
 	.agent-sessions-filter-popover-section {
@@ -465,14 +465,14 @@
 }
 
 .agent-sessions-workbench.shell-gradient-background .agent-sessions-viewpane {
-	background: var(--vscode-editor-background, #121314) !important;
+	background: var(--vscode-sideBar-background, var(--vscode-editor-background)) !important;
 }
 
 .agent-sessions-workbench.shell-gradient-background .part.sidebar > .content .pane-body,
 .agent-sessions-workbench.shell-gradient-background .part.sidebar > .content .monaco-scrollable-element,
 .agent-sessions-workbench.shell-gradient-background .part.sidebar > .content .monaco-list,
 .agent-sessions-workbench.shell-gradient-background .part.sidebar > .content .monaco-list-rows {
-	background: var(--vscode-editor-background, #121314) !important;
+	background: var(--vscode-sideBar-background, var(--vscode-editor-background)) !important;
 }
 
 /* Sessions-app-specific overrides for the agent sessions viewer.

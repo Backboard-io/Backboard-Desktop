@@ -19,6 +19,13 @@
 	background-color: transparent !important;
 }
 
+.agent-sessions-workbench.monaco-workbench .part.titlebar {
+	background: color-mix(in srgb, var(--vscode-sideBar-background, var(--vscode-editor-background)) 78%, transparent) !important;
+	background-color: color-mix(in srgb, var(--vscode-sideBar-background, var(--vscode-editor-background)) 78%, transparent) !important;
+	-webkit-backdrop-filter: blur(20px);
+	backdrop-filter: blur(20px);
+}
+
 .agent-sessions-workbench.monaco-workbench > .part.titlebar {
 	height: 38px !important;
 	pointer-events: auto;

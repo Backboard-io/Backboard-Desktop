@@ -399,6 +399,12 @@ export class TitlebarPart extends Part implements ITitlebarPart {
 		if (style.backgroundColor && style.backgroundColor !== 'rgba(0, 0, 0, 0)' && style.backgroundColor !== 'transparent') {
 			return style.backgroundColor;
 		}
+		if (part.classList.contains('sidebar')) {
+			return 'var(--vscode-sideBar-background)';
+		}
+		if (part.classList.contains('auxiliarybar')) {
+			return 'var(--vscode-agentsPanel-background, var(--vscode-sideBar-background))';
+		}
 		return 'var(--vscode-editor-background)';
 	}
 
