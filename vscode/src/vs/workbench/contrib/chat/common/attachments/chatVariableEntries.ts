@@ -61,6 +61,32 @@ export const ChatPasteAttachmentMetadata = {
 	PastedLines: 'vscode.chat.attachment.pastedLines',
 } as const;
 
+export const ChatPromptTextAttachmentMetadata = {
+	Kind: 'vscode.chat.attachment.promptText',
+	AutomaticallyAdded: 'vscode.chat.attachment.promptText.automaticallyAdded',
+} as const;
+
+export interface IRestorablePromptTextAttachment {
+	readonly label: string;
+	readonly modelRepresentation?: string;
+	readonly _meta?: Record<string, unknown>;
+}
+
+export function restorePromptTextVariableEntryFromAttachment(attachment: IRestorablePromptTextAttachment): IPromptTextVariableEntry | undefined {
+	if (attachment._meta?.[ChatPromptTextAttachmentMetadata.Kind] !== 'promptText') {
+		return undefined;
+	}
+	const value = typeof attachment.modelRepresentation === 'string' ? attachment.modelRepresentation : '';
+	return {
+		id: PromptTextVariableKind.CustomizationsIndex,
+		name: attachment.label,
+		value,
+		kind: 'promptText',
+		modelDescription: 'Chat customizations index',
+		automaticallyAdded: attachment._meta?.[ChatPromptTextAttachmentMetadata.AutomaticallyAdded] === true,
+	};
+}
+
 export interface IRestorablePasteAttachment {
 	readonly label: string;
 	readonly displayKind?: string;

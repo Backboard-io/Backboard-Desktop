@@ -57,7 +57,7 @@ import { ChatQuestionCarouselData } from '../../common/model/chatProgressTypes/c
 import { localChatSessionType } from '../../common/chatSessionsService.js';
 import { getChatSessionType } from '../../common/model/chatUri.js';
 import { getExplicitFileOrImageAttachmentSummary, IChatRequestVariableEntry, isExplicitFileOrImageVariableEntry } from '../../common/attachments/chatVariableEntries.js';
-import { IChatChangesSummaryPart, IChatCodeCitations, IChatErrorDetailsPart, IChatReferences, IChatRendererContent, IChatRequestViewModel, IChatResponseViewModel, IChatViewModel, IChatWorkingProgress, isRequestVM, isResponseVM, IChatPendingDividerViewModel, isPendingDividerVM } from '../../common/model/chatViewModel.js';
+import { IChatChangesSummaryPart, IChatCodeCitations, IChatErrorDetailsPart, IChatReferences, IChatRendererContent, IChatRequestViewModel, IChatResponseViewModel, IChatViewModel, IChatWorkingProgress, isRequestVM, isResponseVM, IChatPendingDividerViewModel, isPendingDividerVM, IChatTurnEditedFilesSummaryPart } from '../../common/model/chatViewModel.js';
 import { getNWords } from '../../common/model/chatWordCounter.js';
 import { ChatAgentLocation, ChatConfiguration, ChatModeKind, CollapsedToolsDisplayMode, ThinkingDisplayMode } from '../../common/constants.js';
 import { ClickAnimation } from '../../../../../base/browser/ui/animations/animations.js';
@@ -95,6 +95,7 @@ import { ChatSubagentContentPart } from './chatContentParts/chatSubagentContentP
 import { ChatTreeContentPart, TreePool } from './chatContentParts/chatTreeContentPart.js';
 import { ChatWorkspaceEditContentPart } from './chatContentParts/chatWorkspaceEditContentPart.js';
 import { ChatExternalEditContentPart } from './chatContentParts/chatExternalEditContentPart.js';
+import { ChatTurnEditedFilesContentPart } from './chatContentParts/chatTurnEditedFilesContentPart.js';
 import { ChatToolInvocationPart } from './chatContentParts/toolInvocationParts/chatToolInvocationPart.js';
 import { ChatMarkdownDecorationsRenderer } from './chatContentParts/chatMarkdownDecorationsRenderer.js';
 import { ChatEditorOptions } from './chatOptions.js';
@@ -1072,6 +1073,11 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			content.push(fileChangesSummaryPart);
 		}
 
+		const turnEditedFilesSummaryPart = this.getTurnEditedFilesSummaryPart(element);
+		if (turnEditedFilesSummaryPart) {
+			content.push(turnEditedFilesSummaryPart);
+		}
+
 		const workingProgress = this.shouldShowWorkingProgress(element, content, false, templateData);
 		if (workingProgress) {
 			content.push(workingProgress);
@@ -1390,11 +1396,12 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		if (!this.shouldShowFileChangesSummary(element)) {
 			return undefined;
 		}
-		// Only chat editing sessions surface diff data via the editing
-		// session; agent host responses emit `externalEdit` parts that
-		// already render the per-file change counts inline, so the
-		// aggregate summary is skipped intentionally here.
-		if (!element.model.entireResponse.value.some(part => part.kind === 'textEditGroup' || part.kind === 'notebookEditGroup')) {
+		// Show the summary for both chat editing sessions (textEditGroup/notebookEditGroup)
+		// and agent host sessions (externalEdit parts tracked via AgentHostSnapshotController).
+		const hasEdits = element.model.entireResponse.value.some(part =>
+			part.kind === 'textEditGroup' || part.kind === 'notebookEditGroup' || part.kind === 'externalEdit'
+		);
+		if (!hasEdits) {
 			return undefined;
 		}
 
@@ -1905,6 +1912,11 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			partsToRender.push(fileChangesSummaryPart);
 		}
 
+		const turnEditedFilesSummaryPart = this.getTurnEditedFilesSummaryPart(element);
+		if (turnEditedFilesSummaryPart) {
+			partsToRender.push(turnEditedFilesSummaryPart);
+		}
+
 		return { content: partsToRender, moreContentAvailable };
 	}
 
@@ -2355,6 +2367,8 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 				return this.renderPlanReview(context, content, templateData);
 			} else if (content.kind === 'changesSummary') {
 				return this.renderChangesSummary(content, context, templateData);
+			} else if (content.kind === 'turnEditedFilesSummary') {
+				return this.renderTurnEditedFilesSummary(content);
 			} else if (content.kind === 'mcpServersStarting') {
 				return this.renderMcpServersInteractionRequired(content, context, templateData);
 			} else if (content.kind === 'disabledClaudeHooks') {
@@ -3187,6 +3201,31 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 	private renderChangesSummary(content: IChatChangesSummaryPart, context: IChatContentPartRenderContext, templateData: IChatListItemTemplate): IChatContentPart {
 		const part = this.instantiationService.createInstance(ChatCheckpointFileChangesSummaryContentPart, content, context);
 		return part;
+	}
+
+	private renderTurnEditedFilesSummary(content: IChatTurnEditedFilesSummaryPart): IChatContentPart {
+		return this.instantiationService.createInstance(ChatTurnEditedFilesContentPart, content);
+	}
+
+	private getTurnEditedFilesSummaryPart(element: IChatResponseViewModel): IChatTurnEditedFilesSummaryPart | undefined {
+		if (!element.isComplete) {
+			return undefined;
+		}
+		const seen = new Set<string>();
+		const uniqueUris: URI[] = [];
+		for (const part of element.model.entireResponse.value) {
+			if (part.kind === 'externalEdit') {
+				const key = part.uri.toString();
+				if (!seen.has(key)) {
+					seen.add(key);
+					uniqueUris.push(part.uri);
+				}
+			}
+		}
+		if (uniqueUris.length === 0) {
+			return undefined;
+		}
+		return { kind: 'turnEditedFilesSummary', editedUris: uniqueUris };
 	}
 
 	private renderAttachments(variables: readonly IChatRequestVariableEntry[], contentReferences: ReadonlyArray<IChatContentReference> | undefined, modelId: string | undefined, templateData: IChatListItemTemplate) {

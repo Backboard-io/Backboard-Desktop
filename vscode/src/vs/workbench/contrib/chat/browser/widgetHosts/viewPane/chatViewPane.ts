@@ -825,7 +825,7 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 					renderTextEditsAsSummary: (uri) => {
 						return true;
 					},
-					referencesExpandedWhenEmptyResponse: false,
+referencesExpandedWhenEmptyResponse: false,
 					progressMessageAtBottomOfResponse: mode => mode !== ChatModeKind.Ask,
 				},
 				editorOverflowWidgetsDomNode,

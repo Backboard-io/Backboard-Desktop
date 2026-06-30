@@ -19,7 +19,7 @@ import { type ChatExternalEditKind, type ChatMcpAppData, type IChatAgentFeedback
 import { type IChatSessionHistoryItem } from '../../../common/chatSessionsService.js';
 import { ChatToolInvocation } from '../../../common/model/chatProgressTypes/chatToolInvocation.js';
 import { type IChatRequestVariableData } from '../../../common/model/chatModel.js';
-import { AgentHostCompletionReferenceKind, restorePasteVariableEntryFromAttachment, toAgentHostCompletionVariableEntryFromMetadata, type IChatRequestVariableEntry } from '../../../common/attachments/chatVariableEntries.js';
+import { AgentHostCompletionReferenceKind, restorePasteVariableEntryFromAttachment, restorePromptTextVariableEntryFromAttachment, toAgentHostCompletionVariableEntryFromMetadata, type IChatRequestVariableEntry } from '../../../common/attachments/chatVariableEntries.js';
 import { type IToolConfirmationMessages, type IToolData, type IToolResult, type IToolResultInputOutputDetails, ToolDataSource, ToolInvocationPresentation } from '../../../common/tools/languageModelToolsService.js';
 import { MCP } from '../../../../mcp/common/modelContextProtocol.js';
 import { basename, isEqual } from '../../../../../../base/common/resources.js';
@@ -383,6 +383,14 @@ function messageAttachmentToVariableEntry(attachment: MessageAttachment, connect
 	});
 	if (pasteEntry) {
 		return pasteEntry;
+	}
+	const promptTextEntry = restorePromptTextVariableEntryFromAttachment({
+		label: attachment.label,
+		modelRepresentation,
+		_meta: attachment._meta,
+	});
+	if (promptTextEntry) {
+		return promptTextEntry;
 	}
 	return {
 		kind: 'generic',

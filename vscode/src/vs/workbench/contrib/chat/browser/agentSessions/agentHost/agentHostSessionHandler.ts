@@ -30,6 +30,7 @@ import { AHP_AUTH_REQUIRED, ProtocolError } from '../../../../../../platform/age
 import { buildSubagentSessionUri, getToolSubagentContent, MessageAttachmentKind, MessageKind, PendingMessageKind, ResponsePartKind, ChatInputAnswerState, ChatInputAnswerValueKind, ChatInputQuestionKind, ChatInputResponseKind, StateComponents, ToolCallCancellationReason, ToolCallConfirmationReason, ToolCallStatus, TurnState, buildDefaultChatUri, mergeSessionWithDefaultChat, type ChatState, type ISessionWithDefaultChat, type ClientPluginCustomization, type ICompletedToolCall, type MarkdownResponsePart, type Message, type MessageAttachment, type ModelSelection, type ReasoningResponsePart, type RootState, type ChatInputAnswer, type ChatInputRequest, type SessionState, type ToolCallResponsePart, type ToolCallState, type Turn, type UsageInfo } from '../../../../../../platform/agentHost/common/state/sessionState.js';
 import { ExtensionIdentifier } from '../../../../../../platform/extensions/common/extensions.js';
 import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
+import { FileChangeType, IFileService } from '../../../../../../platform/files/common/files.js';
 import { ILogService } from '../../../../../../platform/log/common/log.js';
 import { IOpenerService } from '../../../../../../platform/opener/common/opener.js';
 import { IWorkspaceContextService } from '../../../../../../platform/workspace/common/workspace.js';
@@ -37,6 +38,7 @@ import { IAgentHostTerminalService } from '../../../../terminal/browser/agentHos
 import { ITerminalChatService } from '../../../../terminal/browser/terminal.js';
 import {
 	AgentHostCompletionReferenceKind,
+	ChatPromptTextAttachmentMetadata,
 	getAgentHostCompletionReferenceKind,
 	isImageVariableEntry,
 	type IChatRequestVariableEntry,
@@ -60,6 +62,7 @@ import { IChatWidgetService } from '../../chat.js';
 import { IAgentHostActiveClientService } from './agentHostActiveClientService.js';
 import { IAgentHostSessionWorkingDirectoryResolver } from './agentHostSessionWorkingDirectoryResolver.js';
 import { IAgentHostNewSessionFolderService } from './agentHostNewSessionFolderService.js';
+import { fromAgentHostUri } from '../../../../../../platform/agentHost/common/agentHostUri.js';
 import { AgentHostSnapshotController } from './agentHostSnapshotController.js';
 import { toolDataToDefinition } from './agentHostToolUtils.js';
 import { IAgentHostUntitledProvisionalSessionService } from './agentHostUntitledProvisionalSessionService.js';
@@ -455,6 +458,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 		@IOpenerService private readonly _openerService: IOpenerService,
 		@IAgentHostActiveClientService private readonly _activeClientService: IAgentHostActiveClientService,
 		@IChatEntitlementService private readonly _chatEntitlementService: IChatEntitlementService,
+		@IFileService private readonly _fileService: IFileService,
 	) {
 		super();
 		this._config = config;
@@ -1337,8 +1341,52 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 		// sink and resolves the promise from `onTurnEnded`. Cancellation is
 		// surfaced through the same path: the observer disposes itself when
 		// `cancellationToken` fires, then calls `onTurnEnded(undefined)`.
+		// Track workspace file changes that happen during this turn via the
+		// file service, so we can surface an "edited files" card even for edits
+		// that don't come through the tool-call FileEdit protocol (e.g. MCP
+		// tools, shell commands, or any other out-of-band writes).
+		// Workspace folders may use agenthost:// URIs; unwrap them to their
+		// underlying file:// paths so we can match against onDidFilesChange events,
+		// which always carry the real file:// URI.
+		const workspaceFileUris = this._workspaceContextService.getWorkspace().folders
+			.map(f => fromAgentHostUri(f.uri))
+			.filter(u => u.scheme === 'file');
+		const fsChangedUris = new ResourceMap<FileChangeType>();
+		const toolCallCoveredUris = new ResourceMap<true>();
+		this._logService.info(`[AgentHost][FsWatch] Turn ${turnId}: watching ${workspaceFileUris.length} workspace folder(s): ${workspaceFileUris.map(u => u.toString()).join(', ')}`);
+		// Register recursive watchers on each workspace folder so VS Code's file
+		// service picks up changes made by any tool (MCP, shell, etc.) during
+		// this turn.
+		const watcherDisposables = workspaceFileUris.map(root =>
+			this._fileService.watch(root, { recursive: true, excludes: [] })
+		);
+		const fsWatchSub = this._fileService.onDidFilesChange(e => {
+			const recordChange = (uri: URI, type: FileChangeType) => {
+				const inWorkspace = workspaceFileUris.some(root =>
+					uri.toString().startsWith(root.toString())
+				);
+				this._logService.info(`[AgentHost][FsWatch] Change detected: ${uri.toString()} type=${type} inWorkspace=${inWorkspace}`);
+				if (!inWorkspace) {
+					return;
+				}
+				const prev = fsChangedUris.get(uri);
+				if (prev === undefined) {
+					fsChangedUris.set(uri, type);
+				} else if (type === FileChangeType.DELETED) {
+					fsChangedUris.set(uri, FileChangeType.DELETED);
+				} else if (prev !== FileChangeType.ADDED) {
+					fsChangedUris.set(uri, type);
+				}
+			};
+			for (const uri of e.rawAdded) { recordChange(uri, FileChangeType.ADDED); }
+			for (const uri of e.rawUpdated) { recordChange(uri, FileChangeType.UPDATED); }
+			for (const uri of e.rawDeleted) { recordChange(uri, FileChangeType.DELETED); }
+		});
+
 		return new Promise<Turn | undefined>(resolve => {
 			const store = new DisposableStore();
+			store.add(fsWatchSub);
+			for (const w of watcherDisposables) { store.add(w); }
 			const cancelSub = store.add(cancellationToken.onCancellationRequested(() => {
 				cancelSub.dispose();
 				this._logService.info(`[AgentHost] Cancellation requested for ${session.toString()}, dispatching turnCancelled`);
@@ -1356,12 +1404,47 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 				cancellationToken,
 				suppressErrorMarkdown: true,
 				onTurnEnded: (lastTurn) => {
+					// Emit externalEdit parts for any workspace files that changed
+					// during the turn but weren't already reported via tool-call edits.
+					this._logService.info(`[AgentHost][FsWatch] Turn ${turnId} ended: fsChangedUris=${fsChangedUris.size} toolCallCoveredUris=${toolCallCoveredUris.size}`);
+					const extraEdits: IChatProgress[] = [];
+					for (const [uri, changeType] of fsChangedUris) {
+						if (toolCallCoveredUris.has(uri)) {
+							this._logService.info(`[AgentHost][FsWatch] Skipping ${uri.toString()} (covered by tool call)`);
+							continue;
+						}
+						let editKind: 'create' | 'edit' | 'delete';
+						if (changeType === FileChangeType.ADDED) {
+							editKind = 'create';
+						} else if (changeType === FileChangeType.DELETED) {
+							editKind = 'delete';
+						} else {
+							editKind = 'edit';
+						}
+						extraEdits.push({
+							kind: 'externalEdit',
+							uri,
+							editKind,
+						});
+					}
+					if (extraEdits.length > 0) {
+						progress(extraEdits);
+					}
+
 					store.dispose();
 					this._clientDispatchedTurnIds.delete(turnId);
 					this._activeSessions.get(request.sessionResource)?.isCompleteObs.set(true, undefined);
 					resolve(lastTurn);
 				},
-				onFileEdits: (tc) => {
+				onFileEdits: (tc, fileEdits) => {
+					// Record the raw file:// URIs before they get wrapped in
+					// agenthost:// so the fs-watcher deduplication check matches.
+					for (const edit of fileEdits) {
+						toolCallCoveredUris.set(edit.resource, true);
+						if (edit.originalResource) {
+							toolCallCoveredUris.set(edit.originalResource, true);
+						}
+					}
 					const editParts = this._hydrateFileEdits(request.sessionResource, request.requestId, tc);
 					if (editParts.length > 0) {
 						progress(editParts);
@@ -2969,7 +3052,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 			return this._toSimpleAttachment(v.name, v.code, v._meta, undefined, referenceRange);
 		}
 		if (v.kind === 'promptText') {
-			return this._toSimpleAttachment(v.name, v.value, v._meta, undefined, referenceRange);
+			return this._toSimpleAttachment(v.name, v.value, { ...v._meta, [ChatPromptTextAttachmentMetadata.Kind]: 'promptText', [ChatPromptTextAttachmentMetadata.AutomaticallyAdded]: v.automaticallyAdded }, undefined, referenceRange);
 		}
 		if (v.kind === 'string' && typeof v.value === 'string') {
 			return this._toSimpleAttachment(v.name, v.value, v._meta, undefined, referenceRange);

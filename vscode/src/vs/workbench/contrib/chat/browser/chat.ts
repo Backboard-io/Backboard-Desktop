@@ -239,6 +239,7 @@ export interface IChatListItemRendererOptions {
 	readonly supportsFork?: boolean;
 	readonly editable?: boolean;
 	readonly renderTextEditsAsSummary?: (uri: URI) => boolean;
+	readonly renderEditedFilesSummary?: boolean;
 	readonly referencesExpandedWhenEmptyResponse?: boolean | ((mode: ChatModeKind) => boolean);
 	readonly progressMessageAtBottomOfResponse?: boolean | ((mode: ChatModeKind) => boolean);
 }

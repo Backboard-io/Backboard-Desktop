@@ -1,0 +1,104 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.chat-turn-edited-files {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-top: 8px;
+	padding: 6px 8px;
+	border: 1px solid var(--vscode-chat-requestBorder, var(--vscode-input-background, transparent));
+	border-radius: 6px;
+	font-size: var(--vscode-chat-font-size-body-s, 12px);
+	color: var(--vscode-descriptionForeground);
+	background: transparent;
+	user-select: none;
+}
+
+.chat-turn-edited-files-label {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	flex: 1;
+	min-width: 0;
+	cursor: pointer;
+	color: var(--vscode-foreground);
+}
+
+.chat-turn-edited-files-label .codicon {
+	flex-shrink: 0;
+	color: var(--vscode-icon-foreground);
+}
+
+.chat-turn-edited-files-label .chat-turn-edited-files-toggle {
+	flex-shrink: 0;
+	color: var(--vscode-descriptionForeground);
+}
+
+.chat-turn-edited-files-summary-text {
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.chat-turn-edited-files-list {
+	display: none;
+	flex-direction: column;
+	gap: 2px;
+	padding: 4px 0 2px 20px;
+	width: 100%;
+}
+
+.chat-turn-edited-files.expanded .chat-turn-edited-files-list {
+	display: flex;
+}
+
+.chat-turn-edited-files.expanded .chat-turn-edited-files-toggle {
+	transform: rotate(90deg);
+}
+
+.chat-turn-edited-files-list-item {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	font-size: var(--vscode-chat-font-size-body-s, 12px);
+	color: var(--vscode-descriptionForeground);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.chat-turn-edited-files-list-item .file-icon {
+	flex-shrink: 0;
+}
+
+.chat-turn-edited-files-actions {
+	display: flex;
+	align-items: center;
+	flex-shrink: 0;
+	margin-left: auto;
+}
+
+.chat-turn-edited-files-review-btn {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	padding: 2px 8px;
+	border: 1px solid var(--vscode-button-border, transparent);
+	border-radius: 3px;
+	background: var(--vscode-button-secondaryBackground);
+	color: var(--vscode-button-secondaryForeground);
+	font-size: var(--vscode-chat-font-size-body-s, 12px);
+	cursor: pointer;
+	white-space: nowrap;
+}
+
+.chat-turn-edited-files-review-btn:hover {
+	background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.chat-turn-edited-files-review-btn .codicon {
+	font-size: 11px;
+}

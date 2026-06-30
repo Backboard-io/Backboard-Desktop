@@ -200,10 +200,15 @@ export interface IChatChangesSummaryPart {
 	readonly sessionResource: URI;
 }
 
+export interface IChatTurnEditedFilesSummaryPart {
+	readonly kind: 'turnEditedFilesSummary';
+	readonly editedUris: URI[];
+}
+
 /**
  * Type for content parts rendered by IChatListRenderer (not necessarily in the model)
  */
-export type IChatRendererContent = IChatProgressRenderableResponseContent | IChatReferences | IChatCodeCitations | IChatErrorDetailsPart | IChatChangesSummaryPart | IChatWorkingProgress | IChatMcpServersStarting | IChatQuestionCarousel | IChatPlanReview | IChatDisabledClaudeHooksPart;
+export type IChatRendererContent = IChatProgressRenderableResponseContent | IChatReferences | IChatCodeCitations | IChatErrorDetailsPart | IChatChangesSummaryPart | IChatTurnEditedFilesSummaryPart | IChatWorkingProgress | IChatMcpServersStarting | IChatQuestionCarousel | IChatPlanReview | IChatDisabledClaudeHooksPart;
 
 export interface IChatResponseViewModel {
 	readonly model: IChatResponseModel;
