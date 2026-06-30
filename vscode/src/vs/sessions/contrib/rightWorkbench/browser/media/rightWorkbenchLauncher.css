@@ -6,8 +6,8 @@
 .agent-sessions-workbench .part.auxiliarybar {
 	height: 100% !important;
 	min-height: 0 !important;
-	background: #0f0f10;
-	border-left: 1px solid #262626;
+	background: var(--vscode-sideBar-background);
+	border-left: 1px solid var(--vscode-sideBar-border, var(--vscode-panel-border));
 }
 
 .agent-sessions-workbench .part.auxiliarybar > .title,
@@ -21,8 +21,8 @@
 
 .agent-sessions-workbench .part.auxiliarybar > .content {
 	height: 100% !important;
-	background: #101011 !important;
-	background-color: #101011 !important;
+	background: var(--vscode-sideBar-background) !important;
+	background-color: var(--vscode-sideBar-background) !important;
 }
 
 .agent-sessions-workbench .part.auxiliarybar .pane-header {
@@ -36,16 +36,16 @@
 
 .sessions-right-workbench-shell {
 	--rwb-bg: var(--vscode-agentsPanel-background, var(--vscode-sideBar-background, var(--vscode-editor-background)));
-	--rwb-bg-muted: #131314;
-	--rwb-chrome: #151516;
-	--rwb-chrome-soft: #181819;
-	--rwb-border: #202023;
-	--rwb-border-strong: #2b2b2f;
-	--rwb-hover: #1d1d1f;
-	--rwb-selection: #1a2a31;
-	--rwb-selection-border: #3b7d91;
-	--rwb-foreground: #f4f4f4;
-	--rwb-muted: #9a9aa0;
+	--rwb-bg-muted: var(--vscode-sideBarSectionHeader-background, var(--rwb-bg));
+	--rwb-chrome: var(--vscode-editorGroupHeader-tabsBackground, var(--rwb-bg-muted));
+	--rwb-chrome-soft: var(--vscode-sideBar-background, var(--rwb-bg));
+	--rwb-border: var(--vscode-sideBar-border, var(--vscode-panel-border, transparent));
+	--rwb-border-strong: var(--vscode-input-border, var(--rwb-border));
+	--rwb-hover: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground, var(--rwb-bg-muted)));
+	--rwb-selection: var(--vscode-list-activeSelectionBackground, var(--rwb-hover));
+	--rwb-selection-border: var(--vscode-list-activeSelectionOutline, var(--vscode-focusBorder, transparent));
+	--rwb-foreground: var(--vscode-foreground, var(--vscode-editor-foreground));
+	--rwb-muted: var(--vscode-descriptionForeground, var(--vscode-input-placeholderForeground, var(--rwb-foreground)));
 	position: relative;
 	display: flex;
 	flex-direction: column;
@@ -83,7 +83,7 @@
 .sessions-right-workbench-tab-add,
 .sessions-right-workbench-icon-button {
 	border: 0;
-	color: #a9a9ad;
+	color: var(--rwb-muted);
 	background: transparent;
 	cursor: pointer;
 }
@@ -108,7 +108,7 @@
 }
 
 .sessions-right-workbench-tab.active {
-	color: #ffffff;
+	color: var(--rwb-foreground);
 	background: var(--rwb-hover);
 }
 
@@ -124,12 +124,12 @@
 	height: 18px;
 	margin-left: 1px;
 	border-radius: 5px;
-	color: #8f8f92;
+	color: var(--rwb-muted);
 }
 
 .sessions-right-workbench-tab-close:hover {
-	color: #ffffff;
-	background: #2a2a2d;
+	color: var(--rwb-foreground);
+	background: var(--rwb-hover);
 }
 
 .sessions-right-workbench-tab-close .codicon {
@@ -170,7 +170,12 @@
 .sessions-right-workbench-tab:hover,
 .sessions-right-workbench-tab-add:hover {
 	background: var(--rwb-hover);
-	color: #ffffff;
+	color: var(--rwb-foreground);
+}
+
+.sessions-right-workbench-icon-button.active {
+	background: var(--rwb-hover);
+	color: var(--rwb-foreground);
 }
 
 .sessions-right-workbench-icon-button .codicon {
@@ -825,6 +830,10 @@
 	min-height: 0;
 }
 
+.sessions-right-workbench-files-tree-hidden .sessions-right-workbench-files {
+	grid-template-columns: minmax(0, 1fr) 0;
+}
+
 .sessions-right-workbench-file-editor {
 	display: flex;
 	flex-direction: column;
@@ -838,7 +847,7 @@
 	height: 34px;
 	padding: 9px 12px 0;
 	box-sizing: border-box;
-	color: #ffffff;
+	color: var(--rwb-foreground);
 	font-size: 14px;
 	font-weight: 500;
 	line-height: 18px;
@@ -876,7 +885,7 @@
 
 .sessions-right-workbench-file-empty .codicon {
 	margin-bottom: 10px;
-	color: #9d9da1;
+	color: var(--rwb-muted);
 	font-size: 28px;
 }
 
@@ -890,6 +899,14 @@
 	background: var(--rwb-bg);
 }
 
+.sessions-right-workbench-files-tree-hidden .sessions-right-workbench-file-tree {
+	overflow: hidden;
+	padding: 0;
+	border: 0;
+	opacity: 0;
+	pointer-events: none;
+}
+
 .sessions-right-workbench-file-filter {
 	display: grid;
 	grid-template-columns: 16px minmax(0, 1fr);
@@ -901,7 +918,7 @@
 	border: 1px solid var(--rwb-border-strong);
 	border-radius: 8px;
 	color: var(--rwb-muted);
-	background: #0f0f10;
+	background: var(--vscode-input-background, var(--rwb-chrome));
 }
 
 .sessions-right-workbench-file-filter .codicon {
@@ -911,13 +928,27 @@
 .sessions-right-workbench-file-filter input {
 	border: 0;
 	outline: 0;
-	color: #ffffff;
+	width: 100%;
+	min-width: 0;
+	color: var(--vscode-input-foreground, var(--rwb-foreground));
+	-webkit-text-fill-color: var(--vscode-input-foreground, var(--rwb-foreground));
+	caret-color: var(--vscode-input-foreground, var(--rwb-foreground));
 	background: transparent;
 	font-size: 13px;
 }
 
+.sessions-right-workbench-file-filter input:focus {
+	color: var(--vscode-input-foreground, var(--rwb-foreground));
+	-webkit-text-fill-color: var(--vscode-input-foreground, var(--rwb-foreground));
+	caret-color: var(--vscode-input-foreground, var(--rwb-foreground));
+}
+
+.sessions-right-workbench-file-filter input::selection {
+	background: color-mix(in srgb, var(--vscode-focusBorder) 55%, transparent);
+}
+
 .sessions-right-workbench-file-filter input::placeholder {
-	color: #8f8f92;
+	color: var(--vscode-input-placeholderForeground, var(--rwb-muted));
 }
 
 .sessions-right-workbench-file-explorer-host {
@@ -1339,6 +1370,17 @@
 .agent-sessions-workbench .part.auxiliarybar .sessions-right-workbench-file-explorer-host .monaco-scrollable-element {
 	background: transparent !important;
 	background-color: transparent !important;
+}
+
+.agent-sessions-workbench .part.auxiliarybar .sessions-right-workbench-file-explorer-host .monaco-tree-type-filter {
+	position: absolute !important;
+	width: 1px !important;
+	height: 1px !important;
+	margin: 0 !important;
+	padding: 0 !important;
+	overflow: hidden !important;
+	opacity: 0 !important;
+	pointer-events: none !important;
 }
 
 .agent-sessions-workbench .part.auxiliarybar .sessions-right-workbench-shell,

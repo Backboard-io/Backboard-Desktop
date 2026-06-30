@@ -25,6 +25,25 @@ if ! command -v npm >/dev/null 2>&1; then
 	exit 1
 fi
 
+verify_launch_output() {
+	local missing=0
+	local required_files=(
+		"$ROOT/out/main.js"
+		"$ROOT/out/vs/code/electron-main/main.js"
+		"$ROOT/out/vs/platform/environment/node/userDataPath.js"
+		"$ROOT/out/vs/platform/update/common/update.config.contribution.js"
+	)
+
+	for required_file in "${required_files[@]}"; do
+		if [[ ! -f "$required_file" ]]; then
+			echo "Missing generated launch file: $required_file" >&2
+			missing=1
+		fi
+	done
+
+	return "$missing"
+}
+
 echo "Preparing Electron..."
 npm run electron
 
@@ -33,6 +52,16 @@ npm run compile
 
 echo "Regenerating launch output..."
 npm run transpile-client
+
+if ! verify_launch_output; then
+	echo "Generated output was incomplete. Rebuilding it once more..."
+	npm run transpile-client
+fi
+
+if ! verify_launch_output; then
+	echo "Generated output is still incomplete. Fix the build errors above, then run this again." >&2
+	exit 1
+fi
 
 RUN_STAMP="$(date +%s)"
 LOG_FILE="/tmp/backboard-studio-dev-$RUN_STAMP.launch.log"

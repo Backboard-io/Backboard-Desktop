@@ -23,6 +23,7 @@ import { IContextKeyService, IContextKey, ContextKeyExpr } from '../../../../../
 import { ResourceContextKey } from '../../../../common/contextkeys.js';
 import { IDecorationsService } from '../../../../services/decorations/common/decorations.js';
 import { WorkbenchCompressibleAsyncDataTree } from '../../../../../platform/list/browser/listService.js';
+import { TreeFindMode } from '../../../../../base/browser/ui/tree/abstractTree.js';
 import { DelayedDragHandler } from '../../../../../base/browser/dnd.js';
 import { IEditorService, SIDE_GROUP, ACTIVE_GROUP } from '../../../../services/editor/common/editorService.js';
 import { IViewPaneOptions, ViewPane } from '../../../../browser/parts/views/viewPane.js';
@@ -483,6 +484,7 @@ export class ExplorerView extends ViewPane implements IExplorerView {
 				}
 			},
 			multipleSelectionSupport: true,
+			defaultFindMode: TreeFindMode.Filter,
 			filter: this.filter,
 			sorter: this.instantiationService.createInstance(FileSorter),
 			dnd: this.instantiationService.createInstance(FileDragAndDrop, (item) => this.isItemCollapsed(item)),
@@ -735,6 +737,34 @@ export class ExplorerView extends ViewPane implements IExplorerView {
 			return this.tree.getRelativeTop(element);
 		} catch {
 			return null;
+		}
+	}
+
+	public setFindPattern(pattern: string): void {
+		if (!this.tree) {
+			return;
+		}
+
+		this.tree.findMode = TreeFindMode.Filter;
+		if (!pattern) {
+			this.tree.closeFind();
+			return;
+		}
+
+		this.tree.openFind();
+		const findInput = this.tree.getHTMLElement().querySelector('.monaco-tree-type-filter input') as HTMLInputElement | null;
+		if (!findInput) {
+			return;
+		}
+
+		if (findInput.value !== pattern) {
+			findInput.value = pattern;
+			const EventCtor = findInput.ownerDocument.defaultView?.Event;
+			if (!EventCtor) {
+				return;
+			}
+			const inputEvent = new EventCtor('input', { bubbles: true, cancelable: true });
+			findInput.dispatchEvent(inputEvent);
 		}
 	}
 

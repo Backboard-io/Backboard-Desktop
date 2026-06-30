@@ -219,7 +219,7 @@ interface BackboardConfigJson {
 	readonly oauth?: unknown;
 }
 
-interface BackboardPanelHistoryEntry {
+export interface BackboardPanelHistoryEntry {
 	readonly id: string;
 	readonly title?: string;
 	readonly prompt?: string;
@@ -553,7 +553,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 
 	async getSessionMessages(_session: URI): Promise<readonly Turn[]> {
 		const entry = await this._panelHistoryEntry(AgentSession.id(_session));
-		return entry ? [panelHistoryEntryToTurn(entry)] : [];
+		return entry ? panelHistoryEntryToTurns(entry) : [];
 	}
 
 	async disposeSession(sessionUri: URI): Promise<void> {
@@ -1414,7 +1414,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 			for (const rawEntry of Array.isArray(state.historyEntries) ? state.historyEntries : []) {
 				const entry = normalizePanelHistoryEntry(rawEntry, workspace);
 				if (entry) {
-					entries.set(entry.id, entry);
+					entries.set(entry.id, preferredPanelHistoryEntry(entries.get(entry.id), entry));
 				}
 			}
 		}
@@ -1559,19 +1559,6 @@ function normalizePanelHistoryEntry(value: unknown, currentWorkspace: string | u
 	};
 }
 
-function normalizePanelMessages(value: unknown): { role: string; content: string }[] {
-	if (!Array.isArray(value)) {
-		return [];
-	}
-	return value
-		.filter(isObjectRecord)
-		.map(message => ({
-			role: typeof message.role === 'string' ? message.role : 'assistant',
-			content: typeof message.content === 'string' ? message.content : '',
-		}))
-		.filter(message => !!message.content.trim());
-}
-
 function mergePanelMessagesForTurn(existing: readonly { role: string; content: string }[], prompt: string, response: string, responseRole: 'assistant' | 'error'): { role: string; content: string }[] {
 	const merged = existing
 		.map(message => ({ role: message.role, content: message.content }))
@@ -1616,6 +1603,42 @@ function panelEntryWorkspace(entry: BackboardPanelHistoryEntry): URI | undefined
 	return entry.currentWorkspace ? URI.file(entry.currentWorkspace) : undefined;
 }
 
+function panelHistoryEntryToTurns(entry: BackboardPanelHistoryEntry): Turn[] {
+	const messages = normalizedPanelMessages(entry);
+	const turns: Turn[] = [];
+	for (let index = 0; index < messages.length; index++) {
+		const message = messages[index];
+		if (message.role !== 'user') {
+			continue;
+		}
+		const next = messages[index + 1];
+		const responseParts: Turn['responseParts'] = next && (next.role === 'assistant' || next.role === 'error')
+			? [{
+				kind: ResponsePartKind.Markdown,
+				id: `${entry.id}-response-${turns.length}`,
+				content: next.content,
+			}]
+			: [];
+		if (responseParts.length) {
+			index++;
+		}
+		turns.push({
+			id: `${entry.id}-${turns.length}`,
+			message: {
+				text: message.content,
+				origin: { kind: MessageKind.User },
+			},
+			responseParts,
+			usage: undefined,
+			state: next?.role === 'error' || /fail/i.test(entry.status ?? '') ? TurnState.Error : TurnState.Complete,
+		});
+	}
+	if (turns.length) {
+		return turns;
+	}
+	return [panelHistoryEntryToTurn(entry)];
+}
+
 function panelHistoryEntryToTurn(entry: BackboardPanelHistoryEntry): Turn {
 	const responseText = entry.outputText || assistantTextFromPanelHtml(entry.html) || stripHtml(entry.html ?? '');
 	return {
@@ -1632,6 +1655,51 @@ function panelHistoryEntryToTurn(entry: BackboardPanelHistoryEntry): Turn {
 		usage: undefined,
 		state: /fail/i.test(entry.status ?? '') ? TurnState.Error : TurnState.Complete,
 	};
+}
+
+function preferredPanelHistoryEntry(current: BackboardPanelHistoryEntry | undefined, next: BackboardPanelHistoryEntry): BackboardPanelHistoryEntry {
+	if (!current) {
+		return next;
+	}
+	const currentWorkspace = Boolean(current.currentWorkspace);
+	const nextWorkspace = Boolean(next.currentWorkspace);
+	if (nextWorkspace && !currentWorkspace) {
+		return next;
+	}
+	if (!nextWorkspace && currentWorkspace) {
+		return current;
+	}
+	const currentMessageCount = normalizedPanelMessages(current).length;
+	const nextMessageCount = normalizedPanelMessages(next).length;
+	if (nextMessageCount !== currentMessageCount) {
+		return nextMessageCount > currentMessageCount ? next : current;
+	}
+	return panelHistoryEntryTimestamp(next) >= panelHistoryEntryTimestamp(current) ? next : current;
+}
+
+export function backboardTestPreferredPanelHistoryEntry(current: BackboardPanelHistoryEntry | undefined, next: BackboardPanelHistoryEntry): BackboardPanelHistoryEntry {
+	return preferredPanelHistoryEntry(current, next);
+}
+
+export function backboardTestPanelHistoryEntryToTurns(entry: BackboardPanelHistoryEntry): Turn[] {
+	return panelHistoryEntryToTurns(entry);
+}
+
+function normalizedPanelMessages(entry: BackboardPanelHistoryEntry): { role: string; content: string }[] {
+	const stored = Array.isArray(entry.messages)
+		? entry.messages
+			.filter(isObjectRecord)
+			.map(message => ({
+				role: typeof message.role === 'string' ? message.role : 'assistant',
+				content: typeof message.content === 'string' ? message.content : '',
+			}))
+			.filter(message => message.content.trim())
+		: [];
+	const htmlMessages = panelMessagesFromHtml(entry.html);
+	if (htmlMessages.length > stored.length) {
+		return htmlMessages;
+	}
+	return stored.length ? stored : htmlMessages;
 }
 
 function panelEntryStatus(entry: BackboardPanelHistoryEntry): SessionStatus {
@@ -1683,6 +1751,22 @@ function assistantTextFromPanelHtml(html: string | undefined): string {
 	return parts.join('\n\n');
 }
 
+function panelMessagesFromHtml(html: string | undefined): { role: string; content: string }[] {
+	if (!html) {
+		return [];
+	}
+	const messages: { role: string; content: string }[] = [];
+	const pattern = /<div class="messageCard (user|assistant)"[\s\S]*?<div class="messageText">([\s\S]*?)<\/div>[\s\S]*?<\/div>/g;
+	let match: RegExpExecArray | null;
+	while ((match = pattern.exec(html))) {
+		const content = stripHtml(match[2]);
+		if (content) {
+			messages.push({ role: match[1], content });
+		}
+	}
+	return messages;
+}
+
 function stripHtml(html: string): string {
 	return decodeHtmlEntities(html)
 		.replace(/<script[\s\S]*?<\/script>/gi, '')
@@ -1708,18 +1792,16 @@ function decodeHtmlEntities(text: string): string {
 async function writeSharedBackboardThread(session: BackboardSession, prompt: string, assistantText: string, errorMessage: string | undefined, responseState: BackboardResponseState, logService: ILogService, status: 'running' | 'complete' | 'error'): Promise<void> {
 	try {
 		const now = Date.now();
-		const workspace = session.workingDirectory?.fsPath;
-		const existingEntry = readBackboardPanelStates(logService)
-			.flatMap(state => {
-				const currentWorkspace = typeof state.currentWorkspace === 'string' ? state.currentWorkspace : undefined;
-				return (state.historyEntries ?? []).map(entry => normalizePanelHistoryEntry(entry, currentWorkspace));
-			})
-			.filter((entry): entry is BackboardPanelHistoryEntry => !!entry)
-			.find(entry => entry.id === session.sessionId);
+		const previousEntry = readSharedBackboardHistoryEntry(session.sessionId, logService);
+		const workspace = session.workingDirectory?.fsPath ?? previousEntry?.currentWorkspace;
+		if (!session.workingDirectory && workspace) {
+			session.workingDirectory = URI.file(workspace);
+		}
 		const title = session.title || panelHistoryTitle(prompt);
 		const response = errorMessage ? `${assistantText}\n\n${errorMessage}`.trim() : assistantText.trim();
+		const previousMessages = previousEntry ? normalizedPanelMessages(previousEntry) : [];
 		const messages = mergePanelMessagesForTurn(
-			normalizePanelMessages(existingEntry?.messages),
+			previousMessages,
 			prompt,
 			response,
 			errorMessage ? 'error' : 'assistant',
@@ -1727,9 +1809,9 @@ async function writeSharedBackboardThread(session: BackboardSession, prompt: str
 		const entry = {
 			id: session.sessionId,
 			title,
-			backboardThreadId: session.threadId,
-			prompt: existingEntry?.prompt || prompt,
-			startedAt: existingEntry?.startedAt ?? session.createdAt,
+			backboardThreadId: session.threadId ?? previousEntry?.backboardThreadId,
+			prompt: firstUserPrompt(messages) ?? prompt,
+			startedAt: previousEntry?.startedAt ?? session.createdAt,
 			updatedAt: now,
 			status,
 			currentWorkspace: workspace,
@@ -1767,6 +1849,24 @@ async function writeSharedBackboardThread(session: BackboardSession, prompt: str
 	} catch (error) {
 		logService.warn(`[Backboard] Failed to write shared sandbox thread: ${error instanceof Error ? error.message : String(error)}`);
 	}
+}
+
+function readSharedBackboardHistoryEntry(id: string, logService: ILogService): BackboardPanelHistoryEntry | undefined {
+	let found: BackboardPanelHistoryEntry | undefined;
+	for (const state of readBackboardPanelStates(logService)) {
+		const workspace = typeof state.currentWorkspace === 'string' ? state.currentWorkspace : undefined;
+		for (const rawEntry of Array.isArray(state.historyEntries) ? state.historyEntries : []) {
+			const entry = normalizePanelHistoryEntry(rawEntry, workspace);
+			if (entry?.id === id) {
+				found = preferredPanelHistoryEntry(found, entry);
+			}
+		}
+	}
+	return found;
+}
+
+function firstUserPrompt(messages: readonly { role: string; content: string }[]): string | undefined {
+	return messages.find(message => message.role === 'user')?.content;
 }
 
 async function updateSharedBackboardPanelState(entry: Record<string, unknown>, workspace: string | undefined, savedAt: number): Promise<void> {
@@ -1816,13 +1916,6 @@ function readSharedBackboardPanelStateStore(): BackboardPanelStateStore {
 	} catch {
 		return {};
 	}
-}
-
-function panelThreadHtml(prompt: string, assistantText: string, errorMessage: string | undefined): string {
-	const user = `<div class="messageCard user"><div class="messageText">${escapePanelHtml(prompt)}</div></div>`;
-	const assistantClass = errorMessage ? 'messageCard error' : 'messageCard assistant';
-	const assistant = assistantText ? `<div class="${assistantClass}"><div class="messageText">${escapePanelHtml(assistantText).replace(/\n/g, '<br>')}</div></div>` : '';
-	return `${user}${assistant}`;
 }
 
 function panelHistoryTitle(prompt: string): string {

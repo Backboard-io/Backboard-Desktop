@@ -2636,9 +2636,27 @@ function readOptimusBackboardHistory(): IOptimusBackboardHistoryEntry[] {
 		if (!isOptimusBackboardOwnedHistoryEntry(entry)) {
 			continue;
 		}
-		entries.set(entry.id, entry);
+		entries.set(entry.id, preferredOptimusHistoryEntry(entries.get(entry.id), entry));
 	}
 	return [...entries.values()].sort((left, right) => optimusHistoryTimestamp(right) - optimusHistoryTimestamp(left));
+}
+
+function preferredOptimusHistoryEntry(current: IOptimusBackboardHistoryEntry | undefined, next: IOptimusBackboardHistoryEntry): IOptimusBackboardHistoryEntry {
+	if (!current) {
+		return next;
+	}
+	const currentWorkspace = Boolean(current.currentWorkspace);
+	const nextWorkspace = Boolean(next.currentWorkspace);
+	if (nextWorkspace && !currentWorkspace) {
+		return next;
+	}
+	if (!nextWorkspace && currentWorkspace) {
+		return current;
+	}
+	if (next.messages.length !== current.messages.length) {
+		return next.messages.length > current.messages.length ? next : current;
+	}
+	return optimusHistoryTimestamp(next) >= optimusHistoryTimestamp(current) ? next : current;
 }
 
 function readOptimusBackboardLiveState(): IOptimusBackboardLiveState | undefined {

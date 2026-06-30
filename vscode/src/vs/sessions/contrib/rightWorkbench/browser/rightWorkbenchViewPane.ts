@@ -44,6 +44,7 @@ import { IWorkbenchLayoutService, Parts } from '../../../../workbench/services/l
 import { ISCMResource, ISCMService } from '../../../../workbench/contrib/scm/common/scm.js';
 import { GitChange, GitDiffChange, IGitRepository, IGitService } from '../../../../workbench/contrib/git/common/gitService.js';
 import { ITerminalEditorService, ITerminalInstance, ITerminalService } from '../../../../workbench/contrib/terminal/browser/terminal.js';
+import { IAgentHostCustomizationService } from '../../../../workbench/contrib/chat/browser/agentSessions/agentHost/agentHostCustomizationService.js';
 import { CHANGES_VIEW_ID } from '../../changes/common/changes.js';
 import { ChangesViewPane } from '../../changes/browser/changesView.js';
 import { ISessionsService } from '../../../services/sessions/browser/sessionsService.js';
@@ -88,6 +89,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 	private fileEmptyElement: HTMLElement | undefined;
 	private activeMode: RightWorkbenchMode = 'launcher';
 	private readonly openTabs = new Set<RightWorkbenchMode>();
+	private isFilesTreeVisible = true;
 	private selectedFile: URI | undefined;
 	private browserUrl: string | undefined;
 	private browserViewId: string | undefined;
@@ -130,6 +132,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 		@IThemeService themeService: IThemeService,
 		@IHoverService hoverService: IHoverService,
 		@ICommandService private readonly commandService: ICommandService,
+		@IAgentHostCustomizationService private readonly agentHostCustomizationService: IAgentHostCustomizationService,
 	) {
 		super(options, keybindingService, contextMenuService, configurationService, contextKeyService, viewDescriptorService, instantiationService, openerService, themeService, hoverService);
 		this._register(onDidRequestModeEmitter.event(request => { void this.openMode(request); }));
@@ -264,6 +267,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 		this.browserRefreshButton = undefined;
 		this.root.className = `sessions-right-workbench-shell sessions-right-workbench-mode-${this.activeMode}`;
 		this.root.classList.toggle('sessions-right-workbench-has-file', this.activeMode === 'files' && !!this.selectedFile);
+		this.root.classList.toggle('sessions-right-workbench-files-tree-hidden', this.activeMode === 'files' && !this.isFilesTreeVisible);
 
 		if (this.activeMode === 'launcher') {
 			this.renderLauncher(this.root);
@@ -303,6 +307,22 @@ export class RightWorkbenchViewPane extends ViewPane {
 		add.setAttribute('aria-expanded', 'false');
 		add.appendChild(renderIcon(Codicon.add));
 		this.domStore.add(addDisposableListener(add, EventType.CLICK, () => this.toggleModePicker(add)));
+
+		const controls = append(header, $('.sessions-right-workbench-frame-controls'));
+		const filesToggleLabel = this.activeMode === 'files' && this.isFilesTreeVisible
+			? localize('rightWorkbench.closeFiles', "Close Files")
+			: localize('rightWorkbench.openFiles', "Open Files");
+		const filesToggle = this.renderIconButton(controls, Codicon.folderOpened, filesToggleLabel);
+		filesToggle.classList.toggle('active', this.activeMode === 'files' && this.isFilesTreeVisible);
+		this.domStore.add(addDisposableListener(filesToggle, EventType.CLICK, () => {
+			if (this.activeMode === 'files') {
+				this.isFilesTreeVisible = !this.isFilesTreeVisible;
+				this.renderShell();
+				return;
+			}
+			this.isFilesTreeVisible = true;
+			void this.openMode('files');
+		}));
 	}
 
 	private renderTab(container: HTMLElement, mode: RightWorkbenchMode, icon: ThemeIcon, label: string): void {
@@ -656,6 +676,13 @@ export class RightWorkbenchViewPane extends ViewPane {
 		input.type = 'text';
 		const explorerHost = append(tree, $('.sessions-right-workbench-file-explorer-host'));
 		this.renderFilesExplorer(explorerHost);
+		this.domStore.add(addDisposableListener(input, EventType.INPUT, () => {
+			const explorer = this.filesExplorer;
+			if (explorer instanceof SessionsExplorerView) {
+				explorer.setFindPattern(input.value.trim());
+				input.focus();
+			}
+		}));
 	}
 
 	private renderTerminal(container: HTMLElement): void {
@@ -726,7 +753,12 @@ export class RightWorkbenchViewPane extends ViewPane {
 
 	private getReviewCandidateDirectories(activeSession: IActiveSession | undefined): URI[] {
 		const workspaceFolder = activeSession?.workspace.get()?.folders[0];
+		const providerWorkingDirectory = activeSession
+			? this.agentHostCustomizationService.getWorkingDirectory(activeSession.resource)
+			: undefined;
+		const providerWorkingDirectoryUri = providerWorkingDirectory ? URI.file(providerWorkingDirectory) : undefined;
 		return [
+			providerWorkingDirectoryUri,
 			workspaceFolder?.workingDirectory,
 			workspaceFolder?.root,
 			...this.workspaceContextService.getWorkspace().folders.map(folder => folder.uri),

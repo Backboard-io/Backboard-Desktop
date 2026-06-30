@@ -285,7 +285,7 @@ export class CopilotSessionLauncher implements ICopilotSessionLauncher {
 			return;
 		}
 		try {
-			await session.rpc.options.update({ sandboxConfig: sandboxConfig as unknown as { [k: string]: unknown } });
+			await session.rpc.options.update({ sandboxConfig });
 			this._logService.info(`[Copilot:${sessionId}] Applied SDK sandboxConfig via session.options.update`);
 		} catch (err) {
 			this._logService.warn(`[Copilot:${sessionId}] Failed to apply SDK sandboxConfig`, err);

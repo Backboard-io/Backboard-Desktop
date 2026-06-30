@@ -1502,17 +1502,100 @@ function panelStateTimestamp(state: PanelPersistedState | undefined): number {
 	}, 0);
 }
 
-function newerPanelState(...states: (PanelPersistedState | undefined)[]): PanelPersistedState | undefined {
-	let best: PanelPersistedState | undefined;
-	for (const state of states) {
-		if (!hasPanelStateContent(state)) {
-			continue;
-		}
-		if (!best || panelStateTimestamp(state) > panelStateTimestamp(best)) {
+function mergePanelStates(...states: (PanelPersistedState | undefined)[]): PanelPersistedState | undefined {
+	const candidates = states.filter((state): state is PanelPersistedState => hasPanelStateContent(state));
+	if (!candidates.length) {
+		return undefined;
+	}
+	let best = candidates[0];
+	for (const state of candidates.slice(1)) {
+		if (panelStateTimestamp(state) > panelStateTimestamp(best)) {
 			best = state;
 		}
 	}
-	return best;
+	const historyEntries = mergePanelStateEntries(best, candidates);
+	const activeHistoryId = typeof best.activeHistoryId === 'string'
+		? best.activeHistoryId
+		: panelHistoryEntryId(historyEntries[0]);
+	const currentWorkspace = panelStateWorkspace({
+		...best,
+		activeHistoryId,
+		historyEntries,
+	});
+	return {
+		...best,
+		activeHistoryId,
+		currentWorkspace,
+		historyEntries,
+		savedAt: candidates.reduce((max, state) => Math.max(max, panelStateTimestamp(state)), 0),
+	};
+}
+
+function mergePanelStateEntries(best: PanelPersistedState, states: readonly PanelPersistedState[]): unknown[] {
+	const merged = new Map<string, unknown>();
+	const order: string[] = [];
+	const appendEntries = (entries: unknown[] | undefined) => {
+		for (const entry of entries ?? []) {
+			if (!isObjectRecord(entry) || typeof entry.id !== 'string') {
+				continue;
+			}
+			if (!merged.has(entry.id)) {
+				order.push(entry.id);
+				merged.set(entry.id, entry);
+				continue;
+			}
+			const current = merged.get(entry.id);
+			const currentTimestamp = isObjectRecord(current)
+				? Math.max(typeof current.updatedAt === 'number' ? current.updatedAt : 0, typeof current.startedAt === 'number' ? current.startedAt : 0)
+				: 0;
+			const nextTimestamp = Math.max(typeof entry.updatedAt === 'number' ? entry.updatedAt : 0, typeof entry.startedAt === 'number' ? entry.startedAt : 0);
+			if (nextTimestamp >= currentTimestamp) {
+				merged.set(entry.id, entry);
+			}
+		}
+	};
+	appendEntries(Array.isArray(best.historyEntries) ? best.historyEntries : []);
+	for (const state of states) {
+		if (state === best) {
+			continue;
+		}
+		appendEntries(Array.isArray(state.historyEntries) ? state.historyEntries : []);
+	}
+	return order.map(id => merged.get(id)).filter((entry): entry is unknown => entry !== undefined);
+}
+
+function panelHistoryEntryId(entry: unknown): string | undefined {
+	return isObjectRecord(entry) && typeof entry.id === 'string' ? entry.id : undefined;
+}
+
+function panelEntryWorkspace(entry: unknown): string | undefined {
+	return isObjectRecord(entry) && typeof entry.currentWorkspace === 'string' && entry.currentWorkspace.trim()
+		? entry.currentWorkspace
+		: undefined;
+}
+
+function panelStateWorkspace(state: PanelPersistedState | undefined): string | undefined {
+	if (!state) {
+		return undefined;
+	}
+	if (typeof state.currentWorkspace === 'string' && state.currentWorkspace.trim()) {
+		return state.currentWorkspace;
+	}
+	const entries = Array.isArray(state.historyEntries) ? state.historyEntries : [];
+	if (typeof state.activeHistoryId === 'string') {
+		const activeEntry = entries.find(entry => isObjectRecord(entry) && entry.id === state.activeHistoryId);
+		const activeWorkspace = panelEntryWorkspace(activeEntry);
+		if (activeWorkspace) {
+			return activeWorkspace;
+		}
+	}
+	for (const entry of entries) {
+		const workspace = panelEntryWorkspace(entry);
+		if (workspace) {
+			return workspace;
+		}
+	}
+	return undefined;
 }
 
 function readSharedPanelStateStore(): PanelStateStore {
@@ -1530,13 +1613,16 @@ function readSharedPanelState(workspace?: string): PanelPersistedState | undefin
 	const scoped = workspace ? store.byWorkspace?.[panelStateStorageKey(workspace)] : undefined;
 	const threaded = readSharedPanelThreadsState(workspace);
 	if (workspace) {
-		return newerPanelState(scoped, threaded);
+		return mergePanelStates(scoped, threaded);
 	}
-	return newerPanelState(store.latest, threaded);
+	return mergePanelStates(store.latest, threaded);
 }
 
 async function writeSharedPanelState(state: PanelPersistedState): Promise<void> {
-	const persistedState = enrichPanelPersistedState(state);
+	const persistedState = enrichPanelPersistedState({
+		...state,
+		currentWorkspace: panelStateWorkspace(state),
+	});
 	const existing = readSharedPanelStateStore();
 	const key = panelStateStorageKey(persistedState.currentWorkspace);
 	const byWorkspace = { ...(existing.byWorkspace ?? {}), [key]: persistedState };
@@ -1575,15 +1661,12 @@ function enrichPanelThreadEntry(entry: Record<string, unknown>): Record<string, 
 	const prompt = typeof entry.prompt === 'string' ? entry.prompt : typeof entry.title === 'string' ? entry.title : '';
 	const outputText = typeof entry.outputText === 'string' ? entry.outputText : extractPanelAssistantText(html);
 	const toolOutputs = Array.isArray(entry.toolOutputs) ? entry.toolOutputs : extractPanelToolOutputs(html);
-	const messages = normalizePanelMessages(entry.messages);
-	const extractedMessages = messages.length ? messages : extractPanelMessages(html);
+	const messages = normalizePanelThreadMessages(entry, prompt, outputText);
 	return {
 		...entry,
+		html: normalizePanelThreadHtml(html, messages, toolOutputs),
 		outputText,
-		messages: extractedMessages.length ? extractedMessages : [
-			{ role: 'user', content: prompt },
-			...(outputText ? [{ role: 'assistant', content: outputText }] : []),
-		],
+		messages,
 		toolOutputs,
 	};
 }
@@ -1598,21 +1681,100 @@ function normalizePanelMessages(value: unknown): { role: string; content: string
 			role: typeof message.role === 'string' ? message.role : 'assistant',
 			content: typeof message.content === 'string' ? message.content : '',
 		}))
-		.filter(message => message.content);
+		.filter(message => message.content.trim().length > 0);
 }
 
-function extractPanelMessages(html: string): { role: string; content: string }[] {
-	const messages: { role: string; content: string }[] = [];
-	const pattern = /<div class="messageCard (user|assistant)"[\s\S]*?<div class="messageText">([\s\S]*?)<\/div><\/div>/g;
-	let match: RegExpExecArray | null;
-	while ((match = pattern.exec(html))) {
-		const content = stripPanelHtml(match[2]);
-		if (!content) {
+function normalizePanelThreadMessages(entry: Record<string, unknown>, prompt: string, outputText: string): { role: string; content: string }[] {
+	const existingMessages = Array.isArray(entry.messages)
+		? entry.messages
+			.filter(isObjectRecord)
+			.map(message => ({
+				role: typeof message.role === 'string' ? message.role : 'assistant',
+				content: typeof message.content === 'string' ? message.content : '',
+			}))
+			.filter(message => message.content.trim().length > 0)
+		: [];
+	const htmlMessages = typeof entry.html === 'string'
+		? extractPanelMessages(entry.html)
+		: [];
+	if (htmlMessages.length > existingMessages.length) {
+		return htmlMessages;
+	}
+	if (existingMessages.length) {
+		return existingMessages;
+	}
+	if (htmlMessages.length) {
+		return htmlMessages;
+	}
+	return [
+		...(prompt ? [{ role: 'user', content: prompt }] : []),
+		...(outputText ? [{ role: 'assistant', content: outputText }] : []),
+	];
+}
+
+function normalizePanelThreadHtml(
+	html: string,
+	messages: readonly { role: string; content: string }[],
+	toolOutputs: readonly unknown[],
+): string {
+	const trimmedHtml = html.trim();
+	const assistantText = extractPanelAssistantText(trimmedHtml);
+	const renderedAssistantText = messages
+		.filter(message => message.role === 'assistant')
+		.map(message => message.content.trim())
+		.filter(Boolean)
+		.join('\n\n');
+	const existingToolOutputCount = extractPanelToolOutputs(trimmedHtml).length;
+	const needsAssistantSnapshot = Boolean(renderedAssistantText) && assistantText.trim() !== renderedAssistantText;
+	const needsToolSnapshot = toolOutputs.length > 0 && existingToolOutputCount < toolOutputs.length;
+	if (trimmedHtml && !needsAssistantSnapshot && !needsToolSnapshot) {
+		return html;
+	}
+	return renderPanelThreadHtml(messages, toolOutputs);
+}
+
+function renderPanelThreadHtml(messages: readonly { role: string; content: string }[], toolOutputs: readonly unknown[]): string {
+	const parts: string[] = [];
+	for (const message of messages) {
+		if (!message.content) {
 			continue;
 		}
-		messages.push({ role: match[1], content });
+		const role = message.role === 'user' ? 'user' : 'assistant';
+		parts.push(`<div class="messageCard ${role}"><div class="messageText">${escapePanelHtml(message.content)}</div></div>`);
 	}
-	return messages;
+	for (const output of toolOutputs) {
+		if (!isObjectRecord(output)) {
+			continue;
+		}
+		const status = typeof output.status === 'string' && output.status ? output.status : 'finished';
+		const id = typeof output.id === 'string' && output.id ? output.id : `tool-${parts.length}`;
+		const label = typeof output.label === 'string' && output.label ? output.label : 'Backboard tool';
+		const text = typeof output.text === 'string' && output.text ? output.text : 'No details reported.';
+		parts.push(
+			`<div class="toolCard ${escapePanelAttribute(status)}" data-tool-key="${escapePanelAttribute(id)}">` +
+				`<div class="toolHead"><span class="toolMain"><span class="toolLabel">${escapePanelHtml(label)}</span></span></div>` +
+				`<pre class="toolDetails">${escapePanelHtml(text)}</pre></div>`
+		);
+	}
+	return parts.join('');
+}
+
+function escapePanelHtml(value: string): string {
+	return value
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;')
+		.replace(/'/g, '&#39;')
+		.replace(/\r?\n/g, '<br>');
+}
+
+function escapePanelAttribute(value: string): string {
+	return value
+		.replace(/&/g, '&amp;')
+		.replace(/"/g, '&quot;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;');
 }
 
 function extractPanelAssistantText(html: string): string {
@@ -1626,6 +1788,20 @@ function extractPanelAssistantText(html: string): string {
 		}
 	}
 	return parts.join('\n\n');
+}
+
+function extractPanelMessages(html: string): { role: string; content: string }[] {
+	const messages: { role: string; content: string }[] = [];
+	const pattern = /<div class="messageCard (user|assistant)"[\s\S]*?<div class="messageText">([\s\S]*?)<\/div>[\s\S]*?<\/div>/g;
+	let match: RegExpExecArray | null;
+	while ((match = pattern.exec(html))) {
+		const content = stripPanelHtml(match[2]);
+		if (!content) {
+			continue;
+		}
+		messages.push({ role: match[1], content });
+	}
+	return messages;
 }
 
 function extractPanelToolOutputs(html: string): Record<string, string>[] {
@@ -1689,10 +1865,11 @@ function readSharedPanelThreadsState(workspace: string | undefined): PanelPersis
 	}
 	const active = entries[0];
 	const activeId = isObjectRecord(active) && typeof active.id === 'string' ? active.id : undefined;
+	const currentWorkspace = workspace ?? panelEntryWorkspace(active) ?? panelEntryWorkspace(entries[0]);
 	return {
 		activeView: 'chat',
 		activeHistoryId: activeId,
-		currentWorkspace: workspace,
+		currentWorkspace,
 		historyEntries: entries,
 		promptQueue: [],
 		savedAt,
@@ -1783,19 +1960,20 @@ async function writeSharedPanelThreads(state: PanelPersistedState): Promise<void
 	const entries = Array.isArray(state.historyEntries) ? state.historyEntries : [];
 	const threadsDir = backboardThreadsDir();
 	await fs.promises.mkdir(threadsDir, { recursive: true });
-	const workspace = typeof state.currentWorkspace === 'string' ? state.currentWorkspace : undefined;
+	const workspace = panelStateWorkspace(state);
 	const currentIds = new Set<string>();
 	for (const entry of entries) {
 		if (!isObjectRecord(entry) || typeof entry.id !== 'string' || !entry.id) {
 			continue;
 		}
 		currentIds.add(entry.id);
-		const threadPath = panelThreadPath(workspace, entry.id);
+		const entryWorkspace = panelEntryWorkspace(entry) ?? workspace;
+		const threadPath = panelThreadPath(entryWorkspace, entry.id);
 		await fs.promises.mkdir(path.dirname(threadPath), { recursive: true });
 		await writeJsonFileAtomic(threadPath, {
 			version: 1,
 			source: 'panel',
-			workspace,
+			workspace: entryWorkspace,
 			threadId: entry.id,
 			savedAt: typeof state.savedAt === 'number' ? state.savedAt : Date.now(),
 			entry,
@@ -2630,6 +2808,7 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 
 			await this.bridge.send('sendPrompt', sessionId, {
 				content,
+				threadId: boundThreadId,
 				workspace: effectiveWorkspace,
 				provider: settings.defaultProvider,
 				model: settings.defaultModel,
@@ -3623,12 +3802,19 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		function renderToolCount() {
 			toolCount.textContent = tools.length ? tools.length + ' tools enabled' : 'Tools loading';
 		}
+		function historyEntryWorkspace(entry) {
+			return typeof entry?.currentWorkspace === 'string' && entry.currentWorkspace ? entry.currentWorkspace : '';
+		}
+		function resolvedCurrentWorkspace() {
+			return currentWorkspace || historyEntryWorkspace(activeHistoryEntry()) || historyEntryWorkspace(historyEntries[0]) || '';
+		}
 		function workspaceLabel() {
-			if (!currentWorkspace) {
+			const workspace = resolvedCurrentWorkspace();
+			if (!workspace) {
 				return '';
 			}
-			const parts = currentWorkspace.split(/[\\/]+/).filter(Boolean);
-			return parts[parts.length - 1] || currentWorkspace;
+			const parts = workspace.split(/[\\/]+/).filter(Boolean);
+			return parts[parts.length - 1] || workspace;
 		}
 		function formatElapsed(ms) {
 			const totalSeconds = Math.max(0, Math.floor(ms / 1000));
@@ -3682,8 +3868,9 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		}
 		function updateStatus(text) {
 			const value = text || 'Ready.';
-			status.textContent = value === 'Ready.' && currentWorkspace ? 'Ready in ' + workspaceLabel() + '.' : value;
-			status.title = currentWorkspace || value;
+			const workspace = resolvedCurrentWorkspace();
+			status.textContent = value === 'Ready.' && workspace ? 'Ready in ' + workspaceLabel() + '.' : value;
+			status.title = workspace || value;
 		}
 			function refreshWorkspaceStatus() {
 				const value = status.textContent || 'Ready.';
@@ -3795,11 +3982,12 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 		}
 		function persistPanelState() {
 			panelStateSavedAt = Date.now();
+			const persistedWorkspace = resolvedCurrentWorkspace();
 			const state = {
 				activeView,
 				activeHistoryId,
 				promptQueue,
-				currentWorkspace,
+				currentWorkspace: persistedWorkspace || undefined,
 					historyEntries: historyEntries.slice(0, 40),
 					savedAt: panelStateSavedAt
 				};
@@ -3851,7 +4039,8 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				return historyEntries.find(item => item.id === activeHistoryId);
 			}
 			function historyEntryMatchesWorkspace(entry) {
-				return !entry || !entry.currentWorkspace || !currentWorkspace || entry.currentWorkspace === currentWorkspace;
+				const workspace = resolvedCurrentWorkspace();
+				return !entry || !entry.currentWorkspace || !workspace || entry.currentWorkspace === workspace;
 			}
 			function detachActiveHistoryIfWorkspaceChanged() {
 				const entry = activeHistoryEntry();
@@ -3876,20 +4065,20 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			function saveActiveHistory(status) {
 				if (restoringHistory || !activeHistoryId || (!hasConversationContent() && !promptQueue.length && !fileChanges.length)) {
 					return;
-			}
-			const entry = activeHistoryEntry();
-			if (!entry) {
-				return;
-			}
-			entry.html = log.innerHTML;
-			entry.messages = extractMessagesFromLog();
+				}
+				const entry = activeHistoryEntry();
+				if (!entry) {
+					return;
+				}
+				entry.html = log.innerHTML;
+				entry.messages = extractMessagesFromLog();
 				entry.fileChanges = fileChanges.slice(0);
 				entry.promptQueue = promptQueue.slice(0);
-				entry.currentWorkspace = currentWorkspace;
+				entry.currentWorkspace = resolvedCurrentWorkspace() || entry.currentWorkspace;
 				entry.updatedAt = Date.now();
-			if (status) {
-				entry.status = status;
-			}
+				if (status) {
+					entry.status = status;
+				}
 			persistPanelState();
 			renderRecentTabs();
 			renderCheckpoints();
@@ -4015,28 +4204,28 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 					activeHistoryId = undefined;
 					entry = undefined;
 				}
-				if (!entry) {
-					entry = {
-						id: typeof suggestedId === 'string' && suggestedId ? suggestedId : 'chat-' + now + '-' + Math.random().toString(36).slice(2, 8),
-						title: historyTitle(promptText),
-						prompt: promptText || '',
-						currentWorkspace,
-						startedAt: now,
-					updatedAt: now,
-					status: 'Running',
-					html: '',
+					if (!entry) {
+						entry = {
+							id: typeof suggestedId === 'string' && suggestedId ? suggestedId : 'chat-' + now + '-' + Math.random().toString(36).slice(2, 8),
+							title: historyTitle(promptText),
+							prompt: promptText || '',
+							currentWorkspace: resolvedCurrentWorkspace() || undefined,
+							startedAt: now,
+						updatedAt: now,
+						status: 'Running',
+						html: '',
 					fileChanges: [],
 					checkpoints: [],
 					promptQueue: []
 				};
-			}
-			if (!entry.prompt) {
-				entry.prompt = promptText || '';
-				entry.title = entry.title || historyTitle(promptText);
-			}
-				entry.updatedAt = now;
-				entry.currentWorkspace = currentWorkspace;
-				entry.status = 'Running';
+				}
+				if (!entry.prompt) {
+					entry.prompt = promptText || '';
+					entry.title = entry.title || historyTitle(promptText);
+				}
+					entry.updatedAt = now;
+					entry.currentWorkspace = resolvedCurrentWorkspace() || entry.currentWorkspace;
+					entry.status = 'Running';
 			addCheckpoint(entry, promptText);
 			// Update entry in-place instead of moving it to the front
 			const existingIndex = historyEntries.findIndex(item => item.id === entry.id);
@@ -4196,9 +4385,10 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 			historyEntries = mergeHistoryEntriesPreservingOrder(historyEntries, nextHistoryEntries);
 			activeHistoryId = nextActiveHistoryId;
 			promptQueue = nextPromptQueue;
-			currentWorkspace = typeof state.currentWorkspace === 'string' ? state.currentWorkspace : currentWorkspace;
+			currentWorkspace = typeof state.currentWorkspace === 'string' && state.currentWorkspace ? state.currentWorkspace : currentWorkspace;
 			panelStateSavedAt = snapshotSavedAt || Date.now();
 			const entry = activeHistoryEntry();
+			currentWorkspace = currentWorkspace || historyEntryWorkspace(entry) || historyEntryWorkspace(historyEntries[0]) || currentWorkspace;
 			restoringHistory = true;
 			if (entry) {
 				const entryMessages = Array.isArray(entry.messages) ? entry.messages : [];
@@ -5231,7 +5421,7 @@ function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Uri, icon
 				pendingImageFile = undefined;
 			startRunTimer(Date.now());
 			renderQueue();
-				vscode.postMessage({ type: 'send', chatId, prompt: text, workspace: currentWorkspace, options: queuedOptions || options(), imageFile });
+					vscode.postMessage({ type: 'send', chatId, prompt: text, workspace: resolvedCurrentWorkspace() || undefined, options: queuedOptions || options(), imageFile });
 			}
 		function drainPromptQueue() {
 			if (runInProgress || !promptQueue.length) {
@@ -7940,7 +8130,8 @@ function workspaceFolderUri(): vscode.Uri | undefined {
 	}
 	const folders = vscode.workspace.workspaceFolders;
 	if (!folders?.length) {
-		return undefined;
+		const rememberedRoot = rememberedWorkspaceRoot();
+		return rememberedRoot ? vscode.Uri.file(rememberedRoot) : undefined;
 	}
 	const activeEditorFolder = vscode.window.activeTextEditor
 		? vscode.workspace.getWorkspaceFolder(vscode.window.activeTextEditor.document.uri)
@@ -7955,6 +8146,35 @@ function workspaceFolderUri(): vscode.Uri | undefined {
 		}
 	}
 	return folders[0].uri;
+}
+
+function rememberedWorkspaceRoot(): string | undefined {
+	const store = readSharedPanelStateStore();
+	const candidates: PanelPersistedState[] = [];
+	if (isPanelPersistedState(store.latest)) {
+		candidates.push(store.latest);
+	}
+	if (isObjectRecord(store.byWorkspace)) {
+		for (const value of Object.values(store.byWorkspace)) {
+			if (isPanelPersistedState(value)) {
+				candidates.push(value);
+			}
+		}
+	}
+	let bestWorkspace: string | undefined;
+	let bestTimestamp = 0;
+	for (const candidate of candidates) {
+		const workspace = panelStateWorkspace(candidate);
+		if (!workspace) {
+			continue;
+		}
+		const timestamp = panelStateTimestamp(candidate);
+		if (!bestWorkspace || timestamp >= bestTimestamp) {
+			bestWorkspace = workspace;
+			bestTimestamp = timestamp;
+		}
+	}
+	return bestWorkspace;
 }
 
 function configuredWorkspaceRoot(): string | undefined {

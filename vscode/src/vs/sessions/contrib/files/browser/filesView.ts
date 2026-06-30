@@ -33,6 +33,10 @@ export class SessionsExplorerView extends ExplorerView {
 		return ['1_files'];
 	}
 
+	public override setFindPattern(pattern: string): void {
+		super.setFindPattern(pattern);
+	}
+
 	protected override getLocationBasedColors(): IViewPaneLocationColors {
 		const colors = super.getLocationBasedColors();
 		return {
