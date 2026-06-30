@@ -10,10 +10,12 @@ import { Separator, toAction } from '../../../../base/common/actions.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { DisposableStore } from '../../../../base/common/lifecycle.js';
 import { autorun } from '../../../../base/common/observable.js';
-import { basename } from '../../../../base/common/resources.js';
+import { basename, relativePath } from '../../../../base/common/resources.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
 import { URI } from '../../../../base/common/uri.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
+import { isDiffEditor } from '../../../../editor/browser/editorBrowser.js';
+import { IDiffEditorOptions } from '../../../../editor/common/config/editorOptions.js';
 import { localize } from '../../../../nls.js';
 import { BrowserViewCommandId, BrowserViewStorageScope } from '../../../../platform/browserView/common/browserView.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
@@ -29,7 +31,7 @@ import { IOpenerService } from '../../../../platform/opener/common/opener.js';
 import { IThemeService } from '../../../../platform/theme/common/themeService.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { ViewPane, IViewPaneOptions, ViewPaneShowActions } from '../../../../workbench/browser/parts/views/viewPane.js';
-import { IEditorPane, IUntypedEditorInput } from '../../../../workbench/common/editor.js';
+import { IEditorPane, IResourceDiffEditorInput, IUntypedEditorInput } from '../../../../workbench/common/editor.js';
 import { EditorInput } from '../../../../workbench/common/editor/editorInput.js';
 import { BrowserEditorInput } from '../../../../workbench/contrib/browserView/common/browserEditorInput.js';
 import { IBrowserViewModel, IBrowserViewWorkbenchService } from '../../../../workbench/contrib/browserView/common/browserView.js';
@@ -39,10 +41,13 @@ import { MODAL_GROUP, PreferredGroup } from '../../../../workbench/services/edit
 import { IEditorGroupsService } from '../../../../workbench/services/editor/common/editorGroupsService.js';
 import { IEditorService } from '../../../../workbench/services/editor/common/editorService.js';
 import { IWorkbenchLayoutService, Parts } from '../../../../workbench/services/layout/browser/layoutService.js';
+import { ISCMResource, ISCMService } from '../../../../workbench/contrib/scm/common/scm.js';
+import { GitChange, GitDiffChange, IGitRepository, IGitService } from '../../../../workbench/contrib/git/common/gitService.js';
 import { ITerminalEditorService, ITerminalInstance, ITerminalService } from '../../../../workbench/contrib/terminal/browser/terminal.js';
 import { CHANGES_VIEW_ID } from '../../changes/common/changes.js';
 import { ChangesViewPane } from '../../changes/browser/changesView.js';
 import { ISessionsService } from '../../../services/sessions/browser/sessionsService.js';
+import { IActiveSession } from '../../../services/sessions/common/sessionsManagement.js';
 import { SESSIONS_FILES_EMPTY_VIEW_ID, SESSIONS_FILES_VIEW_ID, SessionsExplorerEmptyView, SessionsExplorerView } from '../../files/browser/filesView.js';
 import { onDidRequestModeEmitter, pendingModeRequest, setPendingModeRequest, type RightWorkbenchMode, type IRightWorkbenchModeRequest, type IRightWorkbenchModeEntry, orderedTabModes } from './rightWorkbench.js';
 
@@ -55,6 +60,17 @@ const enum RightWorkbenchBrowserCommandId {
 	SetUserAgent = 'workbench.action.browser.setUserAgent',
 	ToggleMobileEmulation = 'workbench.action.browser.toggleMobileEmulation',
 	ResetEmulation = 'workbench.action.browser.resetEmulation',
+}
+
+const REVIEW_DIFF_SIDE_BY_SIDE_MIN_WIDTH = 720;
+
+interface IReviewResource {
+	readonly key: string;
+	readonly sourceUri: URI;
+	readonly status: string;
+	readonly additions?: number;
+	readonly deletions?: number;
+	open(): Promise<void>;
 }
 
 export class RightWorkbenchViewPane extends ViewPane {
@@ -74,6 +90,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 	private readonly openTabs = new Set<RightWorkbenchMode>();
 	private selectedFile: URI | undefined;
 	private browserUrl: string | undefined;
+	private browserViewId: string | undefined;
 	private browserInput: BrowserEditorInput | undefined;
 	private browserEditorPane: BrowserEditor | undefined;
 	private browserUrlInput: HTMLInputElement | undefined;
@@ -82,6 +99,12 @@ export class RightWorkbenchViewPane extends ViewPane {
 	private browserRefreshButton: HTMLButtonElement | undefined;
 	private readonly browserInputStore = this._register(new DisposableStore());
 	private terminalInstance: ITerminalInstance | undefined;
+	private readonly pendingGitReviewRefreshKeys = new Set<string>();
+	private readonly pendingGitReviewStatsKeys = new Set<string>();
+	private readonly loadedGitReviewStatsKeys = new Set<string>();
+	private readonly gitReviewStats = new Map<string, { additions: number; deletions: number }>();
+	private selectedReviewResourceKey: string | undefined;
+	private openedReviewResourceKey: string | undefined;
 	private modePicker: HTMLElement | undefined;
 	private isRightWorkbenchVisible = false;
 
@@ -93,6 +116,8 @@ export class RightWorkbenchViewPane extends ViewPane {
 		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
 		@IEditorService private readonly editorService: IEditorService,
 		@IEditorGroupsService private readonly editorGroupsService: IEditorGroupsService,
+		@ISCMService private readonly scmService: ISCMService,
+		@IGitService private readonly gitService: IGitService,
 		@ITerminalService private readonly terminalService: ITerminalService,
 		@ITerminalEditorService private readonly terminalEditorService: ITerminalEditorService,
 		@IBrowserViewWorkbenchService private readonly browserViewWorkbenchService: IBrowserViewWorkbenchService,
@@ -206,6 +231,14 @@ export class RightWorkbenchViewPane extends ViewPane {
 		}
 		if (request.browserUrl) {
 			this.browserUrl = this.normalizeBrowserUrl(request.browserUrl);
+		}
+		if (request.browserViewId) {
+			this.browserViewId = request.browserViewId;
+			if (this.browserInput?.id !== request.browserViewId) {
+				this.browserInput = undefined;
+				this.browserEditorPane = undefined;
+				this.browserInputStore.clear();
+			}
 		}
 	}
 
@@ -501,10 +534,10 @@ export class RightWorkbenchViewPane extends ViewPane {
 		const content = append(container, $('.sessions-right-workbench-browser-content'));
 		this.embeddedEditorHost = append(content, $('.sessions-right-workbench-embedded-editor-host'));
 		this.observeElementResize(this.embeddedEditorHost, () => this.layoutEmbeddedEditorPart());
-		const currentUrl = this.browserInput?.url ?? this.browserUrl;
-		if (currentUrl) {
+		const currentUrl = this.browserUrl ?? this.browserInput?.url;
+		if (currentUrl || this.browserViewId) {
 			this.browserUrl = currentUrl;
-			url.value = currentUrl;
+			url.value = currentUrl ?? '';
 			void this.openBrowserEditor(currentUrl);
 		} else {
 			const empty = append(content, $('.sessions-right-workbench-browser-empty'));
@@ -520,9 +553,13 @@ export class RightWorkbenchViewPane extends ViewPane {
 		const editor = append(review, $('.sessions-right-workbench-review-main'));
 		const reviewBody = append(editor, $('.sessions-right-workbench-review-editor'));
 		this.embeddedEditorHost = append(reviewBody, $('.sessions-right-workbench-embedded-editor-host'));
+		this.openedReviewResourceKey = undefined;
+		const scmFallback = append(reviewBody, $('.sessions-right-workbench-review-scm-fallback'));
 
 		const rail = append(review, $('.sessions-right-workbench-review-rail'));
 		this.renderReviewPane(rail);
+		const scmRailFallback = append(rail, $('.sessions-right-workbench-review-scm-rail'));
+		this.registerScmReviewRefresh();
 
 		this.domStore.add(autorun(reader => {
 			if (this.activeMode !== 'review') {
@@ -533,13 +570,66 @@ export class RightWorkbenchViewPane extends ViewPane {
 			const selectedChangeset = changesets.find(changeset => changeset.isDefault.read(reader) && changeset.isEnabled.read(reader))
 				?? changesets.find(changeset => changeset.isEnabled.read(reader));
 			const changes = selectedChangeset?.changes.read(reader) ?? activeSession?.changes.read(reader) ?? [];
-			if (!activeSession || changes.length === 0) {
+			const scmResources = this.getScmReviewResources(activeSession);
+			if (scmResources.length > 0) {
+				for (const repository of this.getGitReviewRepositories(activeSession)) {
+					this.requestGitReviewStats(repository);
+				}
+			}
+			const reviewResources = scmResources.length > 0 ? this.toScmReviewResources(scmResources) : this.getGitReviewResources(activeSession);
+			if (reviewResources.length === 0) {
+				this.requestGitReviewRefresh(activeSession);
+			}
+			if (changes.length === 0 && reviewResources.length === 0) {
+				review.classList.add('sessions-right-workbench-review-empty-state');
+				scmFallback.style.display = 'none';
+				scmRailFallback.style.display = 'none';
+				rail.classList.remove('sessions-right-workbench-review-rail-scm');
+				clearNode(scmFallback);
+				clearNode(scmRailFallback);
 				this.showReviewEmptyState(reviewBody);
 				return;
 			}
+			review.classList.remove('sessions-right-workbench-review-empty-state');
 			this.reviewEmptyElement?.remove();
 			this.reviewEmptyElement = undefined;
+			if (reviewResources.length > 0) {
+				scmFallback.style.display = 'none';
+				clearNode(scmFallback);
+				const selectedReviewResource = this.getSelectedReviewResource(reviewResources);
+				this.renderReviewResources(scmRailFallback, reviewResources, localize('rightWorkbench.changedFiles', "Changed Files"), selectedReviewResource.key);
+				this.openSelectedReviewResource(selectedReviewResource);
+				rail.classList.add('sessions-right-workbench-review-rail-scm');
+			} else {
+				scmFallback.style.display = 'none';
+				scmRailFallback.style.display = 'none';
+				rail.classList.remove('sessions-right-workbench-review-rail-scm');
+				clearNode(scmFallback);
+				clearNode(scmRailFallback);
+			}
 		}));
+	}
+
+	private registerScmReviewRefresh(): void {
+		const refresh = () => {
+			this.loadedGitReviewStatsKeys.clear();
+			this.gitReviewStats.clear();
+			if (this.activeMode === 'review') {
+				this.renderShell();
+			}
+		};
+		this.domStore.add(this.scmService.onDidAddRepository(repository => {
+			this.domStore.add(repository.provider.onDidChangeResources(refresh));
+			refresh();
+		}));
+		this.domStore.add(this.scmService.onDidRemoveRepository(refresh));
+		for (const repository of this.scmService.repositories) {
+			this.domStore.add(repository.provider.onDidChangeResources(refresh));
+			this.domStore.add(repository.provider.onDidChangeResourceGroups(refresh));
+			for (const group of repository.provider.groups) {
+				this.domStore.add(group.onDidChangeResources(refresh));
+			}
+		}
 	}
 
 	private renderFiles(container: HTMLElement): void {
@@ -571,6 +661,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 	private renderTerminal(container: HTMLElement): void {
 		const terminal = append(container, $('.sessions-right-workbench-terminal'));
 		this.embeddedEditorHost = append(terminal, $('.sessions-right-workbench-embedded-editor-host'));
+		this.observeElementResize(this.embeddedEditorHost, () => this.layoutEmbeddedEditorPart());
 		void this.ensureTerminalEditor();
 	}
 
@@ -631,6 +722,259 @@ export class RightWorkbenchViewPane extends ViewPane {
 		this.reviewPane = reviewPane;
 		this.layoutReviewPane();
 		this.observeElementResize(container, () => this.layoutReviewPane());
+	}
+
+	private getReviewCandidateDirectories(activeSession: IActiveSession | undefined): URI[] {
+		const workspaceFolder = activeSession?.workspace.get()?.folders[0];
+		return [
+			workspaceFolder?.workingDirectory,
+			workspaceFolder?.root,
+			...this.workspaceContextService.getWorkspace().folders.map(folder => folder.uri),
+		].filter((uri): uri is URI => !!uri);
+	}
+
+	private getScmReviewResources(activeSession: IActiveSession | undefined): ISCMResource[] {
+		const candidates = this.getReviewCandidateDirectories(activeSession);
+
+		const repositories = Array.from(this.scmService.repositories);
+		const matchedRepositories = repositories.filter(repository => {
+			const rootUri = repository.provider.rootUri;
+			if (!rootUri) {
+				return false;
+			}
+			return candidates.length === 0 || candidates.some(candidate =>
+				this.workspaceContextService.getWorkspaceFolder(candidate)?.uri.toString() === rootUri.toString() ||
+				candidate.toString() === rootUri.toString() ||
+				this.isEqualOrParentPath(candidate.fsPath, rootUri.fsPath) ||
+				this.isEqualOrParentPath(rootUri.fsPath, candidate.fsPath)
+			);
+		});
+
+		const reviewRepositories = matchedRepositories.length > 0 ? matchedRepositories : repositories;
+		const resources = new Map<string, ISCMResource>();
+		for (const repository of reviewRepositories) {
+			for (const group of repository.provider.groups) {
+				for (const resource of group.resources) {
+					resources.set(resource.sourceUri.toString(), resource);
+				}
+			}
+		}
+		return Array.from(resources.values()).sort((a, b) => a.sourceUri.fsPath.localeCompare(b.sourceUri.fsPath));
+	}
+
+	private getGitReviewResources(activeSession: IActiveSession | undefined): IReviewResource[] {
+		const repositories = this.getGitReviewRepositories(activeSession);
+		const resources = new Map<string, IReviewResource>();
+		for (const repository of repositories) {
+			this.requestGitReviewStats(repository);
+			const state = repository.state.get();
+			for (const change of state.mergeChanges) {
+				resources.set(this.getGitReviewResourceKey(change, 'merge'), this.toGitReviewResource(change, 'merge', localize('rightWorkbench.gitMergeChange', "Merge")));
+			}
+			for (const change of state.indexChanges) {
+				resources.set(this.getGitReviewResourceKey(change, 'staged'), this.toGitReviewResource(change, 'staged', localize('rightWorkbench.gitStagedChange', "Staged")));
+			}
+			for (const change of state.workingTreeChanges) {
+				resources.set(this.getGitReviewResourceKey(change, 'modified'), this.toGitReviewResource(change, 'modified', localize('rightWorkbench.gitModifiedChange', "Modified")));
+			}
+			for (const change of state.untrackedChanges) {
+				resources.set(this.getGitReviewResourceKey(change, 'untracked'), this.toGitReviewResource(change, 'untracked', localize('rightWorkbench.gitUntrackedChange', "Untracked")));
+			}
+		}
+		return Array.from(resources.values()).sort((a, b) => a.sourceUri.fsPath.localeCompare(b.sourceUri.fsPath));
+	}
+
+	private getGitReviewRepositories(activeSession: IActiveSession | undefined): IGitRepository[] {
+		const candidates = this.getReviewCandidateDirectories(activeSession);
+		const repositories = Array.from(this.gitService.repositories);
+		const matchedRepositories = repositories.filter(repository => {
+			return candidates.length === 0 || candidates.some(candidate =>
+				this.isEqualOrParentPath(candidate.fsPath, repository.rootUri.fsPath) ||
+				this.isEqualOrParentPath(repository.rootUri.fsPath, candidate.fsPath)
+			);
+		});
+		return matchedRepositories.length > 0 ? matchedRepositories : repositories;
+	}
+
+	private requestGitReviewRefresh(activeSession: IActiveSession | undefined): void {
+		for (const directory of this.getReviewCandidateDirectories(activeSession)) {
+			const key = directory.toString();
+			if (this.pendingGitReviewRefreshKeys.has(key)) {
+				continue;
+			}
+			this.pendingGitReviewRefreshKeys.add(key);
+			void this.gitService.openRepository(directory).then(repository => {
+				this.pendingGitReviewRefreshKeys.delete(key);
+				if (repository && this.activeMode === 'review') {
+					this.renderShell();
+				}
+			}, () => {
+				this.pendingGitReviewRefreshKeys.delete(key);
+			});
+		}
+	}
+
+	private toScmReviewResources(resources: readonly ISCMResource[]): IReviewResource[] {
+		return resources.map(resource => ({
+			key: this.getScmReviewResourceKey(resource),
+			sourceUri: resource.sourceUri,
+			status: resource.decorations.tooltip ?? resource.resourceGroup.label,
+			additions: this.gitReviewStats.get(resource.sourceUri.toString())?.additions,
+			deletions: this.gitReviewStats.get(resource.sourceUri.toString())?.deletions,
+			open: () => this.openScmReviewResource(resource),
+		}));
+	}
+
+	private toGitReviewResource(change: GitChange, group: string, status: string): IReviewResource {
+		const stats = this.gitReviewStats.get(change.uri.toString());
+		return {
+			key: this.getGitReviewResourceKey(change, group),
+			sourceUri: change.uri,
+			status,
+			additions: stats?.additions,
+			deletions: stats?.deletions,
+			open: () => this.openGitReviewResource(change),
+		};
+	}
+
+	private getSelectedReviewResource(resources: readonly IReviewResource[]): IReviewResource {
+		const selectedReviewResource = resources.find(resource => resource.key === this.selectedReviewResourceKey) ?? resources[0];
+		this.selectedReviewResourceKey = selectedReviewResource.key;
+		return selectedReviewResource;
+	}
+
+	private openSelectedReviewResource(resource: IReviewResource): void {
+		if (this.openedReviewResourceKey === resource.key) {
+			return;
+		}
+		this.openedReviewResourceKey = resource.key;
+		void resource.open();
+	}
+
+	private async openScmReviewResource(resource: ISCMResource): Promise<void> {
+		if (resource.multiDiffEditorOriginalUri && resource.multiDiffEditorModifiedUri) {
+			const input: IResourceDiffEditorInput = {
+				original: { resource: resource.multiDiffEditorOriginalUri },
+				modified: { resource: resource.multiDiffEditorModifiedUri },
+				label: basename(resource.sourceUri),
+				options: { pinned: true }
+			};
+			await this.openEditorInEmbeddedHost(input);
+			return;
+		}
+		await this.openEditorInEmbeddedHost({
+			resource: resource.multiDiffEditorModifiedUri ?? resource.sourceUri,
+			options: { pinned: true }
+		});
+	}
+
+	private async openGitReviewResource(change: GitChange): Promise<void> {
+		if (change.originalUri && change.modifiedUri) {
+			const input: IResourceDiffEditorInput = {
+				original: { resource: change.originalUri },
+				modified: { resource: change.modifiedUri },
+				label: basename(change.uri),
+				options: { pinned: true }
+			};
+			await this.openEditorInEmbeddedHost(input);
+			return;
+		}
+		await this.openEditorInEmbeddedHost({
+			resource: change.modifiedUri ?? change.uri,
+			options: { pinned: true }
+		});
+	}
+
+	private getGitReviewResourceKey(change: GitChange, group: string): string {
+		return `${group}:${change.uri.toString()}:${change.originalUri?.toString() ?? ''}:${change.modifiedUri?.toString() ?? ''}`;
+	}
+
+	private getScmReviewResourceKey(resource: ISCMResource): string {
+		return `${resource.resourceGroup.provider.id}:${resource.resourceGroup.id}:${resource.sourceUri.toString()}:${resource.multiDiffEditorOriginalUri?.toString() ?? ''}:${resource.multiDiffEditorModifiedUri?.toString() ?? ''}`;
+	}
+
+	private requestGitReviewStats(repository: IGitRepository): void {
+		const key = repository.rootUri.toString();
+		if (this.pendingGitReviewStatsKeys.has(key) || this.loadedGitReviewStatsKeys.has(key)) {
+			return;
+		}
+		this.pendingGitReviewStatsKeys.add(key);
+		void repository.diffBetweenWithStats2('HEAD').then(changes => {
+			this.pendingGitReviewStatsKeys.delete(key);
+			this.loadedGitReviewStatsKeys.add(key);
+			for (const change of changes) {
+				this.gitReviewStats.set(change.uri.toString(), this.toReviewStats(change));
+			}
+			if (this.activeMode === 'review') {
+				this.renderShell();
+			}
+		}, () => {
+			this.pendingGitReviewStatsKeys.delete(key);
+		});
+	}
+
+	private toReviewStats(change: GitDiffChange): { additions: number; deletions: number } {
+		return { additions: change.insertions, deletions: change.deletions };
+	}
+
+	private isEqualOrParentPath(childPath: string, parentPath: string): boolean {
+		if (!childPath || !parentPath) {
+			return false;
+		}
+		if (childPath === parentPath) {
+			return true;
+		}
+		const normalizedParent = parentPath.endsWith('/') ? parentPath : `${parentPath}/`;
+		return childPath.startsWith(normalizedParent);
+	}
+
+	private renderReviewResources(container: HTMLElement, resources: readonly IReviewResource[], title = localize('rightWorkbench.scmChanges', "Source Control Changes"), selectedKey?: string): void {
+		container.style.display = '';
+		clearNode(container);
+
+		const header = append(container, $('.sessions-right-workbench-review-scm-header'));
+		append(header, $('span', {}, title));
+		append(header, $('span.sessions-right-workbench-review-scm-count', {}, String(resources.length)));
+
+		const list = append(container, $('.sessions-right-workbench-review-scm-list'));
+		for (const resource of resources) {
+			this.renderReviewResource(list, resource, selectedKey);
+		}
+	}
+
+	private renderReviewResource(container: HTMLElement, resource: IReviewResource, selectedKey?: string): void {
+		const row = append(container, $('button.sessions-right-workbench-review-scm-row')) as HTMLButtonElement;
+		row.type = 'button';
+		row.title = resource.sourceUri.fsPath;
+		row.classList.toggle('selected', resource.key === selectedKey);
+		row.appendChild(renderIcon(Codicon.file));
+		const text = append(row, $('.sessions-right-workbench-review-scm-text'));
+		append(text, $('span.sessions-right-workbench-review-scm-name', {}, basename(resource.sourceUri)));
+		append(text, $('span.sessions-right-workbench-review-scm-path', {}, this.getReviewResourceDescription(resource.sourceUri)));
+		if (resource.additions !== undefined || resource.deletions !== undefined) {
+			const stats = append(row, $('span.sessions-right-workbench-review-scm-stats'));
+			append(stats, $('span.sessions-right-workbench-review-scm-additions', {}, `+${resource.additions ?? 0}`));
+			append(stats, $('span.sessions-right-workbench-review-scm-deletions', {}, `-${resource.deletions ?? 0}`));
+		}
+		append(row, $('span.sessions-right-workbench-review-scm-status', {}, resource.status));
+		this.domStore.add(addDisposableListener(row, EventType.CLICK, () => {
+			this.selectedReviewResourceKey = resource.key;
+			this.openedReviewResourceKey = undefined;
+			this.renderShell();
+		}));
+	}
+
+	private getReviewResourceDescription(resource: URI): string {
+		const workspaceFolder = this.workspaceContextService.getWorkspaceFolder(resource);
+		if (!workspaceFolder) {
+			return resource.fsPath;
+		}
+		const path = relativePath(workspaceFolder.uri, resource);
+		if (!path) {
+			return workspaceFolder.name;
+		}
+		const lastSeparator = path.lastIndexOf('/');
+		return lastSeparator === -1 ? workspaceFolder.name : path.slice(0, lastSeparator);
 	}
 
 	private showReviewEmptyState(container: HTMLElement): void {
@@ -699,7 +1043,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 		await this.ensureEmbeddedEditorPart();
 		if (editor instanceof EditorInput) {
 			const options = this.isEditorOptions(optionsOrGroup) ? optionsOrGroup : undefined;
-			return this.editorService.openEditor(editor, {
+			const editorPane = await this.editorService.openEditor(editor, {
 				...options,
 				modal: {
 					...options?.modal,
@@ -707,9 +1051,11 @@ export class RightWorkbenchViewPane extends ViewPane {
 					maximized: true
 				}
 			}, MODAL_GROUP);
+			this.applyReviewDiffEditorOptions();
+			return editorPane;
 		}
 
-		return this.editorService.openEditor({
+		const editorPane = await this.editorService.openEditor({
 			...editor,
 			options: {
 				...editor.options,
@@ -721,6 +1067,8 @@ export class RightWorkbenchViewPane extends ViewPane {
 				}
 			}
 		}, MODAL_GROUP);
+		this.applyReviewDiffEditorOptions();
+		return editorPane;
 	}
 
 	private async openEditorInRightWorkbench(editor: IUntypedEditorInput, group?: PreferredGroup): Promise<IEditorPane | undefined>;
@@ -812,7 +1160,30 @@ export class RightWorkbenchViewPane extends ViewPane {
 		if (width > 0 && height > 0) {
 			const layoutableModalPart = activeModalPart as unknown as { layout(width: number, height: number, top: number, left: number): void };
 			layoutableModalPart.layout(width, height, 0, 0);
+			this.applyReviewDiffEditorOptions();
 		}
+	}
+
+	private applyReviewDiffEditorOptions(): void {
+		if (this.activeMode !== 'review') {
+			return;
+		}
+		const embeddedHost = this.embeddedEditorHost;
+		const control = this.editorGroupsService.activeModalEditorPart?.activeGroup.activeEditorPane?.getControl();
+		if (!embeddedHost || !isDiffEditor(control)) {
+			return;
+		}
+		const renderSideBySide = embeddedHost.clientWidth >= REVIEW_DIFF_SIDE_BY_SIDE_MIN_WIDTH;
+		const options: IDiffEditorOptions = {
+			renderSideBySide,
+			useInlineViewWhenSpaceIsLimited: true,
+			renderSideBySideInlineBreakpoint: REVIEW_DIFF_SIDE_BY_SIDE_MIN_WIDTH,
+			compactMode: !renderSideBySide,
+			enableSplitViewResizing: renderSideBySide,
+			lineNumbersMinChars: renderSideBySide ? 3 : 2,
+			scrollBeyondLastLine: false
+		};
+		control.updateOptions(options);
 	}
 
 	private observeElementResize(element: HTMLElement, callback: () => void): void {
@@ -820,9 +1191,31 @@ export class RightWorkbenchViewPane extends ViewPane {
 		if (!ResizeObserverCtor) {
 			return;
 		}
-		const observer = new ResizeObserverCtor(callback);
+		let animationFrame = 0;
+		const targetWindow = element.ownerDocument.defaultView;
+		const scheduleCallback = () => {
+			if (!targetWindow) {
+				callback();
+				return;
+			}
+			if (animationFrame) {
+				targetWindow.cancelAnimationFrame(animationFrame);
+			}
+			animationFrame = targetWindow.requestAnimationFrame(() => {
+				animationFrame = 0;
+				callback();
+			});
+		};
+		const observer = new ResizeObserverCtor(scheduleCallback);
 		observer.observe(element);
-		this.domStore.add({ dispose: () => observer.disconnect() });
+		this.domStore.add({
+			dispose: () => {
+				if (animationFrame && targetWindow) {
+					targetWindow.cancelAnimationFrame(animationFrame);
+				}
+				observer.disconnect();
+			}
+		});
 	}
 
 	private async setBrowserUrl(value: string): Promise<void> {
@@ -838,16 +1231,16 @@ export class RightWorkbenchViewPane extends ViewPane {
 		await this.openBrowserEditor(url);
 	}
 
-	private async openBrowserEditor(url: string): Promise<void> {
+	private async openBrowserEditor(url: string | undefined): Promise<void> {
 		const embeddedHost = this.embeddedEditorHost;
 		if (!embeddedHost) {
 			return;
 		}
 		await this.ensureEmbeddedEditorPart();
 		if (!this.browserInput) {
-			this.browserInput = this.browserViewWorkbenchService.getOrCreateLazy(generateUuid(), { url });
+			this.browserInput = this.browserViewWorkbenchService.getOrCreateLazy(this.browserViewId ?? generateUuid(), url ? { url } : undefined);
 			this.bindBrowserInput(this.browserInput);
-		} else if (this.browserInput.url !== url) {
+		} else if (url && this.browserInput.url !== url) {
 			this.browserInput.navigate(url, { source: 'urlInput' });
 		}
 		this.hideOtherBrowserViews();
@@ -930,23 +1323,24 @@ export class RightWorkbenchViewPane extends ViewPane {
 			return;
 		}
 		await this.ensureEmbeddedEditorPart();
-		if (this.terminalInstance) {
-			await this.terminalEditorService.openEditor(this.terminalInstance, {
-				viewColumn: MODAL_GROUP,
-				modal: { embeddedHost, maximized: true }
+		if (!this.terminalInstance || this.terminalInstance.isDisposed) {
+			this.terminalInstance = await this.terminalService.createTerminal({
+				location: {
+					viewColumn: MODAL_GROUP,
+					modal: { embeddedHost }
+				},
 			});
-			return;
+			this.domStore.add(this.terminalInstance.onDisposed(() => {
+				this.terminalInstance = undefined;
+			}));
 		}
-		this.terminalInstance = await this.terminalService.createTerminal({
-			location: {
-				viewColumn: MODAL_GROUP,
-				modal: { embeddedHost }
-			},
-		});
 		await this.terminalEditorService.openEditor(this.terminalInstance, {
 			viewColumn: MODAL_GROUP,
 			modal: { embeddedHost, maximized: true }
 		});
+		this.layoutEmbeddedEditorPart();
+		this.terminalInstance.setVisible(true);
+		await this.terminalInstance.focusWhenReady(true);
 	}
 
 	private bindBrowserInput(input: BrowserEditorInput): void {

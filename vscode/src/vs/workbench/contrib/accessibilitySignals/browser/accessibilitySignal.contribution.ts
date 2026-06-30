@@ -8,7 +8,7 @@ import { registerAction2 } from '../../../../platform/actions/common/actions.js'
 import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
 import { registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
 import { AccessibilitySignalLineDebuggerContribution } from './accessibilitySignalDebuggerContribution.js';
-import { ShowAccessibilityAnnouncementHelp, ShowSignalSoundHelp } from './commands.js';
+import { EnableBackboardSounds, ShowAccessibilityAnnouncementHelp, ShowSignalSoundHelp } from './commands.js';
 import { EditorTextPropertySignalsContribution } from './editorTextPropertySignalsContribution.js';
 import { wrapInReloadableClass0 } from '../../../../platform/observable/common/wrapInReloadableClass.js';
 
@@ -19,4 +19,4 @@ registerWorkbenchContribution2('AccessibilitySignalLineDebuggerContribution', Ac
 
 registerAction2(ShowSignalSoundHelp);
 registerAction2(ShowAccessibilityAnnouncementHelp);
-
+registerAction2(EnableBackboardSounds);

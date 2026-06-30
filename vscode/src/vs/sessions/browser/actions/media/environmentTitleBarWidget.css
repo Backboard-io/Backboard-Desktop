@@ -1,0 +1,169 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.monaco-workbench .sessions-environment-titlebar-widget {
+	display: inline-flex;
+	align-items: center;
+	height: 24px;
+	padding: 0;
+	margin: 0 4px 0 0;
+	-webkit-app-region: no-drag;
+}
+
+.monaco-workbench .sessions-environment-titlebar-widget > .action-label {
+	display: none !important;
+}
+
+.monaco-workbench .monaco-action-bar:not(.vertical) .action-item.sessions-environment-titlebar-widget.active,
+.monaco-workbench .monaco-action-bar:not(.vertical) .action-item.sessions-environment-titlebar-widget:hover,
+.monaco-workbench .monaco-action-bar:not(.vertical) .action-item.sessions-environment-titlebar-widget:focus {
+	background: transparent !important;
+	outline: none !important;
+}
+
+.monaco-workbench .sessions-environment-titlebar-widget-trigger {
+	all: unset;
+	box-sizing: border-box;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 30px;
+	height: 24px;
+	border-radius: 8px;
+	color: var(--vscode-icon-foreground);
+	background: var(--vscode-toolbar-hoverBackground);
+	cursor: pointer;
+}
+
+.monaco-workbench .sessions-environment-titlebar-widget-trigger:hover,
+.monaco-workbench .sessions-environment-titlebar-widget-trigger[aria-expanded="true"] {
+	background: var(--vscode-toolbar-activeBackground);
+	color: var(--vscode-commandCenter-activeForeground, var(--vscode-titleBar-activeForeground));
+}
+
+.monaco-workbench .sessions-environment-titlebar-widget-trigger:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: 2px;
+}
+
+.sessions-environment-popup {
+	width: 300px;
+	padding: 14px;
+	border: 1px solid var(--vscode-widget-border);
+	border-radius: 14px;
+	background: var(--vscode-menu-background);
+	color: var(--vscode-menu-foreground);
+	box-shadow: 0 10px 26px var(--vscode-widget-shadow);
+	box-sizing: border-box;
+}
+
+.sessions-environment-popup-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: 10px;
+}
+
+.sessions-environment-popup-title,
+.sessions-environment-popup-section {
+	color: var(--vscode-descriptionForeground);
+	font-size: 12px;
+	font-weight: 500;
+}
+
+.sessions-environment-popup-add {
+	all: unset;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 24px;
+	height: 24px;
+	border-radius: 6px;
+	color: var(--vscode-icon-foreground);
+	cursor: pointer;
+}
+
+.sessions-environment-popup-add:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+}
+
+.sessions-environment-popup-row,
+.sessions-environment-popup-source {
+	all: unset;
+	display: grid;
+	grid-template-columns: 22px minmax(0, 1fr) auto;
+	align-items: center;
+	width: 100%;
+	min-height: 34px;
+	gap: 8px;
+	padding: 0 4px;
+	border-radius: 7px;
+	color: var(--vscode-menu-foreground);
+	box-sizing: border-box;
+}
+
+.sessions-environment-popup-row:not(:disabled) {
+	cursor: pointer;
+}
+
+.sessions-environment-popup-row:not(:disabled):hover {
+	background: var(--vscode-menu-selectionBackground);
+	color: var(--vscode-menu-selectionForeground);
+}
+
+.sessions-environment-popup-row.muted,
+.sessions-environment-popup-row:disabled {
+	color: var(--vscode-descriptionForeground);
+}
+
+.sessions-environment-popup-row > .codicon,
+.sessions-environment-popup-source > .codicon {
+	font-size: 16px;
+	justify-self: center;
+	color: var(--vscode-icon-foreground);
+	opacity: 0.9;
+}
+
+.sessions-environment-popup-row-label,
+.sessions-environment-popup-source-label {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 13px;
+	font-weight: 500;
+}
+
+.sessions-environment-popup-row-value,
+.sessions-environment-popup-source-value {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--vscode-descriptionForeground);
+	font-size: 11px;
+}
+
+.sessions-environment-popup-source {
+	grid-template-columns: 22px minmax(0, 1fr);
+	grid-template-rows: 20px 18px;
+	column-gap: 10px;
+	min-height: 38px;
+}
+
+.sessions-environment-popup-source > .codicon {
+	grid-row: 1 / 3;
+}
+
+.sessions-environment-popup-source-value {
+	grid-column: 2;
+}
+
+.sessions-environment-popup-separator {
+	height: 1px;
+	margin: 10px 0;
+	background: var(--vscode-widget-border);
+	opacity: 0.7;
+}

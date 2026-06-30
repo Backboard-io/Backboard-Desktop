@@ -283,6 +283,7 @@ export class AgentHostSessionListController extends Disposable implements IChatS
 				modifiedAt: s.modifiedTime,
 				changes: s.changes,
 				workingDirectory: s.workingDirectory?.toString(),
+				model: s.model,
 			});
 			return this._makeItem(rawId, {
 				title: s.summary,
@@ -292,6 +293,7 @@ export class AgentHostSessionListController extends Disposable implements IChatS
 				createdAt: s.startTime,
 				modifiedAt: s.modifiedTime,
 				changesSummary: s.changes,
+				model: s.model,
 			});
 		});
 		this._cacheValid = true;
@@ -335,6 +337,7 @@ export class AgentHostSessionListController extends Disposable implements IChatS
 			workingDirectory: workingDir,
 			createdAt: summary.createdAt,
 			modifiedAt: summary.modifiedAt,
+			model: summary.model,
 		});
 	}
 
@@ -346,6 +349,7 @@ export class AgentHostSessionListController extends Disposable implements IChatS
 		createdAt: number;
 		modifiedAt: number;
 		changesSummary?: ChangesSummary;
+		model?: SessionSummary['model'];
 	}): IChatSessionItem {
 		const inProgress = opts.status !== undefined && (opts.status & SessionStatus.InProgress) !== 0;
 		const description = inProgress && opts.activity ? opts.activity : this._description;
@@ -356,7 +360,7 @@ export class AgentHostSessionListController extends Disposable implements IChatS
 			iconPath: agentHostSessionIcon(this._provider),
 			status: mapSessionStatus(opts.status),
 			archived: opts.status !== undefined && (opts.status & SessionStatus.IsArchived) === SessionStatus.IsArchived,
-			metadata: this._buildMetadata(opts.workingDirectory),
+			metadata: this._buildMetadata(opts.workingDirectory, opts.model),
 			timing: {
 				created: opts.createdAt,
 				lastRequestStarted: opts.modifiedAt,
@@ -372,8 +376,8 @@ export class AgentHostSessionListController extends Disposable implements IChatS
 		};
 	}
 
-	private _buildMetadata(workingDirectory: URI | undefined): { readonly [key: string]: unknown } | undefined {
-		if (!this._description && !workingDirectory) {
+	private _buildMetadata(workingDirectory: URI | undefined, model: SessionSummary['model'] | undefined): { readonly [key: string]: unknown } | undefined {
+		if (!this._description && !workingDirectory && !model) {
 			return undefined;
 		}
 		const result: { [key: string]: unknown } = {};
@@ -382,6 +386,9 @@ export class AgentHostSessionListController extends Disposable implements IChatS
 		}
 		if (workingDirectory) {
 			result.workingDirectoryPath = workingDirectory.fsPath;
+		}
+		if (model) {
+			result.modelId = model.id;
 		}
 		return Object.keys(result).length > 0 ? result : undefined;
 	}

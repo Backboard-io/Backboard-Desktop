@@ -148,6 +148,10 @@
 	margin-left: auto;
 }
 
+.chat-composite-bar-title-actions:empty {
+	display: none;
+}
+
 /* Meta row: workspace · diff stats */
 .chat-composite-bar-meta-row {
 	display: flex;
@@ -272,15 +276,30 @@
 /* Floating variant: a lightweight, absolutely positioned toolbar with no header chrome */
 .chat-composite-bar.chat-composite-bar-toolbar-floating {
 	position: absolute;
-	top: 0px;
-	right: 0px;
+	top: 6px;
+	right: 10px;
 	height: 35px;
 	flex-direction: row;
 	align-items: center;
-	padding: 0 4px;
+	padding: 0;
 	border-bottom: none;
 	background: transparent;
 	container-type: unset;
+	z-index: 45;
+	pointer-events: auto;
+	-webkit-app-region: no-drag;
+}
+
+.chat-composite-bar.chat-composite-bar-toolbar-floating,
+.chat-composite-bar.chat-composite-bar-toolbar-floating .chat-composite-bar-toolbar,
+.chat-composite-bar.chat-composite-bar-toolbar-floating .monaco-toolbar,
+.chat-composite-bar.chat-composite-bar-toolbar-floating .monaco-action-bar,
+.chat-composite-bar.chat-composite-bar-toolbar-floating .actions-container,
+.chat-composite-bar.chat-composite-bar-toolbar-floating .action-item,
+.chat-composite-bar.chat-composite-bar-toolbar-floating .action-label,
+.chat-composite-bar.chat-composite-bar-toolbar-floating button {
+	pointer-events: auto;
+	-webkit-app-region: no-drag;
 }
 
 /* Base tab: preserve chat title casing while keeping the same pill treatment */

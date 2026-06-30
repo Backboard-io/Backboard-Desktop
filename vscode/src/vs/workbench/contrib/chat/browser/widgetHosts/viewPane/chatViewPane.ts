@@ -1566,9 +1566,10 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 		const noPersistedSessions = !this.chatService.hasSessions();
 		const hasCoreAgent = this.chatAgentService.getAgents().some(agent => agent.isCore && agent.locations.includes(ChatAgentLocation.Chat));
 		const hasDefaultAgent = this.chatAgentService.getDefaultAgent(ChatAgentLocation.Chat) !== undefined; // only false when Hide AI Features has run and unregistered the setup agents
-		const shouldShow = !hasCoreAgent && (!hasDefaultAgent || !this._widget?.viewModel && noPersistedSessions);
+		const hasActiveSession = !!this._widget?.viewModel;
+		const shouldShow = !hasCoreAgent && !hasActiveSession && (!hasDefaultAgent || noPersistedSessions);
 
-		this.logService.trace(`ChatViewPane#shouldShowWelcome() = ${shouldShow}: hasCoreAgent=${hasCoreAgent} hasDefaultAgent=${hasDefaultAgent} || noViewModel=${!this._widget?.viewModel} && noPersistedSessions=${noPersistedSessions}`);
+		this.logService.trace(`ChatViewPane#shouldShowWelcome() = ${shouldShow}: hasCoreAgent=${hasCoreAgent} hasDefaultAgent=${hasDefaultAgent} hasActiveSession=${hasActiveSession} noPersistedSessions=${noPersistedSessions}`);
 
 		return !!shouldShow;
 	}

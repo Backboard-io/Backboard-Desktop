@@ -35,7 +35,7 @@
 }
 
 .sessions-right-workbench-shell {
-	--rwb-bg: #101011;
+	--rwb-bg: var(--vscode-agentsPanel-background, var(--vscode-sideBar-background, var(--vscode-editor-background)));
 	--rwb-bg-muted: #131314;
 	--rwb-chrome: #151516;
 	--rwb-chrome-soft: #181819;
@@ -58,6 +58,7 @@
 	color: var(--rwb-foreground);
 	background: var(--rwb-bg);
 	font-size: 13px;
+	container-type: inline-size;
 }
 
 .sessions-right-workbench-header {
@@ -431,10 +432,14 @@
 
 .sessions-right-workbench-review {
 	display: grid;
-	grid-template-columns: minmax(0, 1fr) minmax(220px, 30%);
+	grid-template-columns: minmax(0, 1fr) clamp(230px, 27%, 330px);
 	height: 100%;
 	min-height: 0;
 	background: var(--rwb-bg);
+}
+
+.sessions-right-workbench-review.sessions-right-workbench-review-empty-state {
+	grid-template-columns: minmax(0, 1fr);
 }
 
 .sessions-right-workbench-review-main {
@@ -444,11 +449,24 @@
 	background: var(--rwb-bg);
 }
 
+.sessions-right-workbench-review.sessions-right-workbench-review-empty-state .sessions-right-workbench-review-main {
+	border-right: 0;
+}
+
 .sessions-right-workbench-review-rail {
+	position: relative;
 	min-width: 0;
 	min-height: 0;
 	overflow: hidden;
-	background: var(--rwb-bg);
+	background: #0d0d0e;
+}
+
+.sessions-right-workbench-review.sessions-right-workbench-review-empty-state .sessions-right-workbench-review-rail {
+	display: none;
+}
+
+.sessions-right-workbench-review-rail-scm > .pane {
+	display: none !important;
 }
 
 .sessions-right-workbench-review-rail > .pane {
@@ -594,6 +612,182 @@
 	height: 100%;
 	min-height: 0;
 	overflow: hidden;
+}
+
+.sessions-right-workbench-review-scm-fallback,
+.sessions-right-workbench-review-scm-rail {
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+	background: #0d0d0e;
+}
+
+.sessions-right-workbench-review-scm-fallback {
+	position: absolute;
+	inset: 0;
+}
+
+.sessions-right-workbench-review-scm-rail {
+	position: absolute;
+	inset: 0;
+	padding: 12px 10px;
+	box-sizing: border-box;
+}
+
+.sessions-right-workbench-review-scm-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	min-height: 30px;
+	padding: 0 10px;
+	box-sizing: border-box;
+	border-bottom: 1px solid var(--rwb-border);
+	color: #ffffff;
+	font-size: 12px;
+	font-weight: 600;
+}
+
+.sessions-right-workbench-review-scm-rail .sessions-right-workbench-review-scm-header {
+	padding: 0 3px 9px;
+	border-bottom: 0;
+}
+
+.sessions-right-workbench-review-scm-count {
+	color: #16d86f;
+	font-size: 12px;
+	font-weight: 600;
+}
+
+.sessions-right-workbench-review-scm-list {
+	flex: 1;
+	min-height: 0;
+	overflow: auto;
+	padding: 6px;
+	box-sizing: border-box;
+}
+
+.sessions-right-workbench-review-scm-rail .sessions-right-workbench-review-scm-list {
+	padding: 0;
+}
+
+.sessions-right-workbench-review-scm-row {
+	display: grid;
+	grid-template-columns: 14px minmax(0, 1fr) auto auto;
+	align-items: center;
+	column-gap: 7px;
+	width: 100%;
+	height: 38px;
+	padding: 3px 7px;
+	box-sizing: border-box;
+	border: 0;
+	border-radius: 7px;
+	color: #e8e8e8;
+	background: transparent;
+	text-align: left;
+	cursor: pointer;
+}
+
+@container (max-width: 760px) {
+	.sessions-right-workbench-review {
+		grid-template-columns: minmax(0, 1fr) 220px;
+	}
+
+	.sessions-right-workbench-review-scm-rail {
+		padding: 10px 8px;
+	}
+
+	.sessions-right-workbench-review-scm-row {
+		grid-template-columns: 14px minmax(0, 1fr) auto;
+		height: 34px;
+		padding: 2px 6px;
+	}
+
+	.sessions-right-workbench-review-scm-path,
+	.sessions-right-workbench-review-scm-status {
+		display: none;
+	}
+}
+
+@container (max-width: 620px) {
+	.sessions-right-workbench-review {
+		grid-template-columns: minmax(0, 1fr) 176px;
+	}
+
+	.sessions-right-workbench-review-scm-header {
+		font-size: 11px;
+	}
+
+	.sessions-right-workbench-review-scm-stats {
+		display: none;
+	}
+}
+
+.sessions-right-workbench-review-scm-row:hover {
+	background: #171718;
+}
+
+.sessions-right-workbench-review-scm-row.selected {
+	outline: 1px solid rgba(61, 126, 145, 0.85);
+	outline-offset: -1px;
+	background: #132029;
+}
+
+.sessions-right-workbench-review-scm-row .codicon {
+	color: #85858b;
+	font-size: 12px;
+}
+
+.sessions-right-workbench-review-scm-text {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	min-width: 0;
+}
+
+.sessions-right-workbench-review-scm-name,
+.sessions-right-workbench-review-scm-path {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sessions-right-workbench-review-scm-name {
+	color: #f2f2f2;
+	font-size: 12px;
+	font-weight: 600;
+	line-height: 15px;
+}
+
+.sessions-right-workbench-review-scm-path {
+	color: #85858b;
+	font-size: 10px;
+	line-height: 13px;
+}
+
+.sessions-right-workbench-review-scm-status {
+	max-width: 68px;
+	overflow: hidden;
+	color: #9a9aa0;
+	font-size: 10px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sessions-right-workbench-review-scm-stats {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	font-size: 10px;
+	font-weight: 600;
+	white-space: nowrap;
+}
+
+.sessions-right-workbench-review-scm-additions {
+	color: #18d672;
+}
+
+.sessions-right-workbench-review-scm-deletions {
+	color: #ff4d62;
 }
 
 .sessions-right-workbench-review-empty {
@@ -774,6 +968,22 @@
 	font-size: 13px;
 }
 
+.sessions-right-workbench-terminal-view {
+	position: absolute;
+	inset: 0;
+	min-width: 0;
+	min-height: 0;
+	overflow: hidden;
+	background: var(--rwb-bg);
+}
+
+.sessions-right-workbench-terminal-view .terminal-outer-container,
+.sessions-right-workbench-terminal-view .terminal-groups-container {
+	width: 100%;
+	height: 100%;
+	background: var(--rwb-bg);
+}
+
 .sessions-right-workbench-terminal pre {
 	margin: 0;
 }
@@ -783,7 +993,8 @@
 }
 
 .sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .modal-editor-header,
-.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .modal-editor-header {
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .modal-editor-header,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .modal-editor-header {
 	display: none !important;
 	height: 0 !important;
 	min-height: 0 !important;
@@ -791,12 +1002,14 @@
 }
 
 .sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part,
-.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part {
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part {
 	grid-template-rows: 1fr !important;
 }
 
 .sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part > .content,
-.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part > .content {
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part > .content,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part > .content {
 	grid-row: 1 !important;
 	grid-column: 1 !important;
 }
@@ -984,6 +1197,44 @@
 	color: var(--rwb-muted);
 	font-size: 12px;
 	font-weight: 500;
+}
+
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .monaco-modal-editor-block.embedded,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .modal-editor-resizable,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .modal-editor-shadow,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .content,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .grid-view-container,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .monaco-grid-view,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .monaco-grid-branch-node,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .monaco-split-view2,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .monaco-scrollable-element,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .split-view-container,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .split-view-view,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .editor-group-container,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .editor-container,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .editor-instance,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .terminal-overflow-guard.terminal-editor,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .terminal-wrapper,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .xterm,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .xterm-viewport,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .xterm-screen {
+	background: var(--rwb-bg) !important;
+	background-color: var(--rwb-bg) !important;
+}
+
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host {
+	--vscode-terminal-background: var(--rwb-bg);
+	--vscode-editor-background: var(--rwb-bg);
+	--vscode-editorPane-background: var(--rwb-bg);
+}
+
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .modal-editor-shadow,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .terminal-wrapper {
+	border: 0 !important;
+	border-radius: 0 !important;
+	box-shadow: none !important;
 }
 
 .sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .modal-editor-action-container,

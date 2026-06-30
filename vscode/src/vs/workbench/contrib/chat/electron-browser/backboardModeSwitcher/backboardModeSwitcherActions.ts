@@ -17,14 +17,20 @@ import { IContextMenuService } from '../../../../../platform/contextview/browser
 import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { IKeybindingService } from '../../../../../platform/keybinding/common/keybinding.js';
+import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
 import { ToggleTitleBarConfigAction } from '../../../../browser/parts/titlebar/titlebarActions.js';
+import { ViewContainerLocation } from '../../../../common/views.js';
 import { IWorkbenchContribution } from '../../../../common/contributions.js';
+import { TERMINAL_VIEW_ID } from '../../../terminal/common/terminal.js';
 import { IEditorService } from '../../../../services/editor/common/editorService.js';
+import { IWorkbenchLayoutService, Parts } from '../../../../services/layout/browser/layoutService.js';
+import { IPaneCompositePartService } from '../../../../services/panecomposite/browser/panecomposite.js';
 import { CHAT_CATEGORY } from '../../browser/actions/chatActions.js';
 import { BACKBOARD_MODE_SWITCHER_COMMAND_ID, ChatConfiguration, OPEN_AGENTS_WINDOW_COMMAND_ID, OPEN_AGENTS_WINDOW_PRECONDITION } from '../../common/constants.js';
+import { OPEN_BACKBOARD_WORKSPACE_COMMAND_ID } from '../backboardWorkspace/backboardWorkspaceConstants.js';
+import { IBackboardWorkspaceService } from '../backboardWorkspace/backboardWorkspaceService.js';
 
 const CLOSE_ACTIVE_EDITOR_COMMAND_ID = 'workbench.action.closeActiveEditor';
-const OPEN_ADVANCED_WINDOW_COMMAND_ID = 'workbench.action.openOptimusWindow';
 const AGENT_SESSIONS_WELCOME_PAGE_ID = 'agentSessionsWelcomePage';
 
 export class BackboardModeSwitcherAction extends Action2 {
@@ -64,10 +70,14 @@ export class ToggleBackboardModeSwitcherTitleBarAction extends ToggleTitleBarCon
 
 class BackboardModeTitleBarWidget extends BaseActionViewItem {
 
+	private static readonly STORAGE_PREFIX = 'backboard.editorMode.panelClosed.';
+	private static readonly PANEL_PARTS = [Parts.SIDEBAR_PART, Parts.PANEL_PART, Parts.AUXILIARYBAR_PART] as const;
+
 	private triggerButton: HTMLButtonElement | undefined;
 	private currentIcon: HTMLElement | undefined;
 	private currentLabel: HTMLElement | undefined;
-	private preserveFocusOnMenuHide = false;
+
+	private suppressVisibilityTracking = false;
 
 	constructor(
 		action: IAction,
@@ -76,7 +86,11 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 		@IKeybindingService private readonly keybindingService: IKeybindingService,
 		@ICommandService private readonly commandService: ICommandService,
 		@IEditorService private readonly editorService: IEditorService,
+		@IBackboardWorkspaceService private readonly workspaceService: IBackboardWorkspaceService,
 		@IContextMenuService private readonly contextMenuService: IContextMenuService,
+		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
+		@IStorageService private readonly storageService: IStorageService,
+		@IPaneCompositePartService private readonly paneCompositeService: IPaneCompositePartService,
 	) {
 		super(undefined, action, options);
 	}
@@ -101,28 +115,58 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 
 		this._register(addDisposableListener(this.triggerButton, EventType.CLICK, e => {
 			EventHelper.stop(e, true);
-			this.showMenu(false);
+			this.showMenu();
 		}));
 		this._register(addDisposableListener(this.triggerButton, EventType.KEY_DOWN, e => this.handleKeyDown(e)));
 		this._register(this.editorService.onDidActiveEditorChange(() => this.updateState()));
+		this._register(this.workspaceService.onDidChangeVisibility(() => this.updateState()));
+		this._register(this.layoutService.onDidChangePartVisibility(e => this.handlePartVisibilityChange(e)));
 
 		this.updateState();
+	}
+
+	private handlePartVisibilityChange(e: { readonly partId: string; readonly visible: boolean }): void {
+		// Only record explicit user changes while in Editor mode and not while
+		// we are programmatically restoring panel visibility on mode entry.
+		if (this.suppressVisibilityTracking) {
+			return;
+		}
+		if (!this.isEditorModeActive()) {
+			return;
+		}
+		if (!BackboardModeTitleBarWidget.PANEL_PARTS.some(p => p === e.partId)) {
+			return;
+		}
+		this.storageService.store(
+			BackboardModeTitleBarWidget.STORAGE_PREFIX + e.partId,
+			e.visible ? '0' : '1',
+			StorageScope.PROFILE,
+			StorageTarget.USER,
+		);
+	}
+
+	private isEditorModeActive(): boolean {
+		return !this.isAgentsActive() && !this.isWorkspaceActive();
+	}
+
+	private isPanelClosedByUser(part: string): boolean {
+		return this.storageService.get(BackboardModeTitleBarWidget.STORAGE_PREFIX + part, StorageScope.PROFILE, '0') === '1';
 	}
 
 	private handleKeyDown(event: KeyboardEvent): void {
 		if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown') {
 			EventHelper.stop(event, true);
-			this.showMenu(true);
+			this.showMenu();
 		}
 	}
 
-	private showMenu(preserveFocusOnHide: boolean): void {
+	private showMenu(): void {
 		if (!this.triggerButton) {
 			return;
 		}
 
 		const agentsActive = this.isAgentsActive();
-		this.preserveFocusOnMenuHide = preserveFocusOnHide;
+		const workspaceActive = this.isWorkspaceActive();
 		this.triggerButton.setAttribute('aria-expanded', 'true');
 		this.contextMenuService.showContextMenu({
 			getAnchor: () => this.triggerButton!,
@@ -130,8 +174,14 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 				toAction({
 					id: 'workbench.action.mode.editor',
 					label: localize('backboardModeSwitcher.editor', "Editor"),
-					checked: !agentsActive,
+					checked: !agentsActive && !workspaceActive,
 					run: () => this.openEditor(),
+				}),
+				toAction({
+					id: 'workbench.action.mode.workspace',
+					label: localize('backboardModeSwitcher.workspace', "Advanced"),
+					checked: workspaceActive,
+					run: () => this.openWorkspace(),
 				}),
 				toAction({
 					id: 'workbench.action.mode.agents',
@@ -139,59 +189,75 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 					checked: agentsActive,
 					run: () => this.openAgents(),
 				}),
-				toAction({
-					id: 'workbench.action.mode.advanced',
-					label: localize('backboardModeSwitcher.advanced', "Advanced"),
-					run: () => this.openAdvanced(),
-				}),
 			],
-			onHide: () => {
-				this.triggerButton?.setAttribute('aria-expanded', 'false');
-				if (!this.preserveFocusOnMenuHide) {
-					this.clearPointerFocus();
-				}
-				this.preserveFocusOnMenuHide = false;
-			},
+			onHide: () => this.triggerButton?.setAttribute('aria-expanded', 'false'),
 		});
 	}
 
 	private openAgents(): void {
-		this.clearPointerFocus();
-		this.commandService.executeCommand(OPEN_AGENTS_WINDOW_COMMAND_ID);
+		this.workspaceService.hide();
+		void this.commandService.executeCommand(OPEN_AGENTS_WINDOW_COMMAND_ID);
 	}
 
-	private openAdvanced(): void {
-		this.clearPointerFocus();
-		this.commandService.executeCommand(OPEN_ADVANCED_WINDOW_COMMAND_ID);
+	private openWorkspace(): void {
+		void this.commandService.executeCommand(OPEN_BACKBOARD_WORKSPACE_COMMAND_ID);
 	}
 
 	private openEditor(): void {
-		this.clearPointerFocus();
-		if (this.editorService.activeEditorPane?.getId() === AGENT_SESSIONS_WELCOME_PAGE_ID) {
-			this.commandService.executeCommand(CLOSE_ACTIVE_EDITOR_COMMAND_ID);
-		}
-	}
-
-	private clearPointerFocus(): void {
-		if (this.preserveFocusOnMenuHide) {
+		if (this.isWorkspaceActive()) {
+			this.workspaceService.hide();
 			return;
 		}
 
-		this.triggerButton?.blur();
-		this.element?.classList.remove('active', 'focused');
+		if (this.isAgentsActive()) {
+			void this.commandService.executeCommand(CLOSE_ACTIVE_EDITOR_COMMAND_ID);
+		}
+
+		// Entering Editor mode: ensure the left, bottom, and right panels are
+		// visible, unless the user previously closed them while in Editor mode.
+		// Suppress tracking so our own restore calls are not recorded as user
+		// intent.
+		this.suppressVisibilityTracking = true;
+		try {
+			for (const part of BackboardModeTitleBarWidget.PANEL_PARTS) {
+				if (this.isPanelClosedByUser(part)) {
+					continue;
+				}
+				if (!this.layoutService.isVisible(part)) {
+					this.layoutService.setPartHidden(false, part);
+				}
+			}
+		} finally {
+			this.suppressVisibilityTracking = false;
+		}
+
+		// When the bottom panel (terminal) is being shown, make sure the
+		// Terminal view is the active composite rather than Problems/Output.
+		if (!this.isPanelClosedByUser(Parts.PANEL_PART) && this.layoutService.isVisible(Parts.PANEL_PART)) {
+			void this.paneCompositeService.openPaneComposite(TERMINAL_VIEW_ID, ViewContainerLocation.Panel, false);
+		}
 	}
 
 	private isAgentsActive(): boolean {
 		return this.editorService.activeEditorPane?.getId() === AGENT_SESSIONS_WELCOME_PAGE_ID;
 	}
 
+	private isWorkspaceActive(): boolean {
+		return this.workspaceService.visible;
+	}
+
 	private updateState(): void {
 		const agentsActive = this.isAgentsActive();
-		this.currentIcon?.classList.toggle('codicon-window', !agentsActive);
+		const workspaceActive = this.isWorkspaceActive();
+		this.currentIcon?.classList.toggle('codicon-window', !agentsActive && !workspaceActive);
+		this.currentIcon?.classList.toggle('codicon-layout', workspaceActive);
 		this.currentIcon?.classList.toggle('codicon-robot', agentsActive);
-		this.currentLabel?.replaceChildren(agentsActive
-			? localize('backboardModeSwitcher.agents', "Simple")
-			: localize('backboardModeSwitcher.editor', "Editor"));
+		const label = workspaceActive
+			? localize('backboardModeSwitcher.workspace', "Advanced")
+			: agentsActive
+				? localize('backboardModeSwitcher.agents', "Simple")
+				: localize('backboardModeSwitcher.editor', "Editor");
+		this.currentLabel?.replaceChildren(label);
 	}
 }
 

@@ -282,11 +282,11 @@ export class ChatViewFactory implements IChatViewFactory {
 		@IInstantiationService private readonly instantiationService: IInstantiationService
 	) { }
 
-	createNewChatView(isNewChatInSession: boolean, options: IChatViewOptions): AbstractChatView {
-		return this.instantiationService.createInstance(NewChatView, isNewChatInSession, options);
+	createNewChatView(isNewChatInSession: boolean, options: IChatViewOptions, instantiationService?: IInstantiationService): AbstractChatView {
+		return (instantiationService ?? this.instantiationService).createInstance(NewChatView, isNewChatInSession, options);
 	}
 
-	createChatView(): AbstractChatView {
-		return this.instantiationService.createInstance(ChatView);
+	createChatView(instantiationService?: IInstantiationService): AbstractChatView {
+		return (instantiationService ?? this.instantiationService).createInstance(ChatView);
 	}
 }

@@ -1604,8 +1604,8 @@
 
 .settings-sidebar-header > .search-container:focus-within > .suggest-input-container,
 .settings-sidebar-header > .search-container > .suggest-input-container.synthetic-focus {
-	border-color: var(--backboard-settings-focus-border) !important;
-	box-shadow: 0 0 0 1px var(--backboard-settings-focus-border) !important;
+	border-color: var(--backboard-settings-input-border) !important;
+	box-shadow: none !important;
 }
 
 .settings-sidebar-header > .search-container input {
@@ -1893,6 +1893,95 @@
 	box-shadow: 0 0 0 1px var(--backboard-settings-focus-border) !important;
 }
 
+.settings-sidebar-header > .search-container .monaco-inputbox.synthetic-focus,
+.settings-sidebar-header > .search-container .monaco-inputbox:focus-within,
+.settings-sidebar-header > .search-container > .suggest-input-container.synthetic-focus,
+.settings-sidebar-header > .search-container:focus-within > .suggest-input-container,
+.settings-sidebar-header > .search-container input:focus {
+	outline: none !important;
+	border-color: var(--backboard-settings-input-border) !important;
+	box-shadow: none !important;
+}
+
+.settings-account-name::after {
+	content: "Settings";
+	display: block;
+	margin-top: 1px;
+	color: var(--backboard-settings-muted-foreground);
+	font-size: 12px;
+	font-weight: 500;
+	line-height: 16px;
+}
+
+/* Expanded sidebar navigation. */
+.settings-editor > .settings-body .settings-toc-wrapper {
+	padding: 14px 16px 24px;
+	background: var(--backboard-settings-sidebar-background);
+}
+
+.settings-editor > .settings-body .settings-toc-container .monaco-list,
+.settings-editor > .settings-body .settings-toc-container .monaco-list-rows,
+.settings-editor > .settings-body .settings-toc-container .monaco-scrollable-element {
+	background: transparent !important;
+}
+
+.settings-editor > .settings-body .settings-toc-container .monaco-list-row {
+	border-radius: 8px;
+	color: var(--backboard-settings-muted-foreground);
+}
+
+.settings-editor > .settings-body .settings-toc-container .monaco-list-row .monaco-tl-contents {
+	height: 32px;
+	align-items: center;
+	padding-right: 8px;
+}
+
+.settings-editor > .settings-body .settings-toc-container .monaco-list-row .monaco-tl-twistie {
+	width: 24px !important;
+	height: 32px;
+	margin-left: 2px;
+	line-height: 32px;
+	color: var(--backboard-settings-muted-foreground);
+}
+
+.settings-editor > .settings-body .settings-toc-container .monaco-list-row .settings-toc-entry {
+	line-height: 32px;
+	font-size: 13px;
+	font-weight: 560;
+	color: var(--backboard-settings-muted-foreground);
+}
+
+.settings-editor > .settings-body .settings-toc-container .monaco-list-row.selected {
+	background: var(--backboard-settings-selection-background);
+	color: var(--backboard-settings-selection-foreground);
+}
+
+.settings-editor > .settings-body .settings-toc-container .monaco-list-row.selected .settings-toc-entry {
+	color: var(--backboard-settings-selection-foreground);
+	font-weight: 650;
+}
+
+.settings-editor > .settings-body .settings-toc-container .monaco-list-row:not(.selected):hover {
+	background: var(--backboard-settings-hover-background);
+	color: var(--backboard-settings-hover-foreground);
+}
+
+/* Keep right-pane section headers and focused rows neutral. */
+.settings-editor > .settings-body .settings-tree-container .monaco-list-row,
+.settings-editor > .settings-body .settings-tree-container .monaco-list-row.focused,
+.settings-editor > .settings-body .settings-tree-container .monaco-list-row.selected,
+.settings-editor > .settings-body .settings-tree-container .monaco-list-row:hover {
+	background: transparent !important;
+}
+
+.settings-editor > .settings-body .settings-tree-container .monaco-list-row .settings-row-inner-container,
+.settings-editor > .settings-body .settings-tree-container .monaco-list-row .monaco-tl-contents.group-title,
+.settings-editor > .settings-body .settings-tree-container .monaco-list-row .settings-group-title-label {
+	background: transparent !important;
+	background-color: transparent !important;
+}
+
+/* Backboard Settings keeps the product layout while inheriting the active theme. */
 .monaco-workbench.vs-dark .settings-editor,
 .monaco-workbench.hc-black .settings-editor,
 .monaco-workbench.vs-dark .settings-editor > .settings-body,

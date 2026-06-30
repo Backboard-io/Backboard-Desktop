@@ -39,6 +39,15 @@ export class OptimusRunStore extends Disposable {
 		this._onDidChange.fire();
 	}
 
+	updateRun(runId: string, updates: Partial<IOptimusRun>): void {
+		const existing = this._runs.get(runId);
+		if (!existing) {
+			return;
+		}
+		this._runs.set(runId, { ...existing, ...updates });
+		this._onDidChange.fire();
+	}
+
 	async createRun(request: IOptimusRunRequest): Promise<void> {
 		const run = await this.chatBridge.createRun(request);
 		this._runs.set(run.id, run);

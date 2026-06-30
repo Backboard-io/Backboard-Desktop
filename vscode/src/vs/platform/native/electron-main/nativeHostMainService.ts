@@ -404,6 +404,16 @@ export class NativeHostMainService extends Disposable implements INativeHostMain
 		}
 	}
 
+	async isWindowResizable(windowId: number | undefined, options?: INativeHostOptions): Promise<boolean> {
+		const window = this.windowById(options?.targetWindowId, windowId);
+		return window?.win?.isResizable() ?? true;
+	}
+
+	async setWindowResizable(windowId: number | undefined, resizable: boolean, options?: INativeHostOptions): Promise<void> {
+		const window = this.windowById(options?.targetWindowId, windowId);
+		window?.win?.setResizable(resizable);
+	}
+
 	async updateWindowControls(windowId: number | undefined, options: INativeHostOptions & { height?: number; backgroundColor?: string; foregroundColor?: string; dimmed?: boolean }): Promise<void> {
 		const window = this.windowById(options?.targetWindowId, windowId);
 		window?.updateWindowControls(options);

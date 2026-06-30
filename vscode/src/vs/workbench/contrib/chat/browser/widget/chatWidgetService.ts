@@ -213,7 +213,7 @@ export class ChatWidgetService extends Disposable implements IChatWidgetService 
 	private findExistingChatEditorByUri(sessionUri: URI): { editor: ChatEditorInput; group: IEditorGroup } | undefined {
 		for (const group of this.editorGroupsService.groups) {
 			for (const editor of group.editors) {
-				if (editor instanceof ChatEditorInput && isEqual(editor.sessionResource, sessionUri)) {
+				if (editor instanceof ChatEditorInput && (isEqual(editor.sessionResource, sessionUri) || isEqual(editor.resource, sessionUri))) {
 					return { editor, group };
 				}
 			}

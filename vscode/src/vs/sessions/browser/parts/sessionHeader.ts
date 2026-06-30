@@ -78,7 +78,6 @@ export class SessionHeader extends Disposable {
 	private readonly _metaRow: HTMLElement;
 	private readonly _metaWorkspaceEl: HTMLElement;
 	private readonly _metaSeparatorEl: HTMLElement;
-	private readonly _toolbar: MenuWorkbenchToolBar;
 	private readonly _metaToolbar: MenuWorkbenchToolBar;
 	private readonly _titleActionsEl: HTMLElement;
 
@@ -165,17 +164,6 @@ export class SessionHeader extends Disposable {
 		const titleActions = $('.chat-composite-bar-title-actions');
 		titleRow.appendChild(titleActions);
 		this._titleActionsEl = titleActions;
-
-		const toolbarContainer = $('.chat-composite-bar-toolbar');
-		titleActions.appendChild(toolbarContainer);
-		this._toolbar = this._register(instantiationService.createInstance(MenuWorkbenchToolBar, toolbarContainer, Menus.SessionBarToolbar, {
-			hiddenItemStrategy: HiddenItemStrategy.Ignore,
-			menuOptions: { shouldForwardArgs: true },
-			highlightToggledItems: true,
-			// Render every group in the primary slot with a separator between groups
-			// so the New Chat action sits visually separated from the pin/maximize/close cluster.
-			toolbarOptions: { primaryGroup: () => true, useSeparatorsInPrimaryActions: true },
-		}));
 
 		this._metaRow = $('.chat-composite-bar-meta-row');
 		main.appendChild(this._metaRow);
@@ -306,7 +294,6 @@ export class SessionHeader extends Disposable {
 		// Cancel any in-flight rename when switching sessions.
 		this._cancelTitleEditing();
 		this._session = session;
-		this._toolbar.context = session;
 		this._metaToolbar.context = session;
 		this._statusIcon.reset();
 
@@ -535,7 +522,10 @@ export class SessionHeader extends Disposable {
  * {@link SessionHeader}, this toolbar is absolutely positioned at the top-right of
  * the session view and does not allocate any vertical space.
  *
- * It is shown only when the hosted session exists but has not yet been created.
+ * It is shown only once the hosted session exists and has been created.
+ * The pre-created/new-session screen already renders `Menus.NewSessionToolbar`
+ * in its own top-right slot, so showing this overlay there would duplicate
+ * those actions.
  */
 export class SessionViewFloatingToolbar extends Disposable {
 
@@ -543,12 +533,14 @@ export class SessionViewFloatingToolbar extends Disposable {
 	private readonly _toolbar: MenuWorkbenchToolBar;
 	private _session: IActiveSession | undefined;
 	private readonly _sessionDisposables = this._register(new MutableDisposable<DisposableStore>());
+	private readonly _actionRunner: SessionActivatingActionRunner;
 
 	get element(): HTMLElement {
 		return this._container;
 	}
 
 	constructor(
+		@ISessionsService sessionsService: ISessionsService,
 		@IInstantiationService instantiationService: IInstantiationService,
 	) {
 		super();
@@ -556,11 +548,13 @@ export class SessionViewFloatingToolbar extends Disposable {
 		this._container = $('.chat-composite-bar.chat-composite-bar-toolbar-floating');
 		const toolbar = $('.chat-composite-bar-toolbar');
 		this._container.appendChild(toolbar);
+		this._actionRunner = this._register(new SessionActivatingActionRunner(() => this._session, sessionsService));
 
 		this._toolbar = this._register(instantiationService.createInstance(MenuWorkbenchToolBar, toolbar, Menus.SessionBarToolbar, {
 			hiddenItemStrategy: HiddenItemStrategy.Ignore,
 			menuOptions: { shouldForwardArgs: true },
 			highlightToggledItems: true,
+			actionRunner: this._actionRunner,
 			toolbarOptions: { primaryGroup: () => true, useSeparatorsInPrimaryActions: true },
 		}));
 
@@ -583,7 +577,7 @@ export class SessionViewFloatingToolbar extends Disposable {
 		}
 
 		store.add(autorun(reader => {
-			this._setVisible(!session.isCreated.read(reader));
+			this._setVisible(session.isCreated.read(reader));
 		}));
 	}
 

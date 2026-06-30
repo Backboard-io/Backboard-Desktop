@@ -40,6 +40,8 @@ import { ChatAgentLocation, ChatModeKind } from '../../../../workbench/contrib/c
 import { EDITOR_DRAG_AND_DROP_BACKGROUND } from '../../../../workbench/common/theme.js';
 import { activeSessionViewBackground, activeSessionViewForeground, agentsPanelBackground } from '../../../common/theme.js';
 import { IPathService } from '../../../../workbench/services/path/common/pathService.js';
+import { HiddenItemStrategy, MenuWorkbenchToolBar } from '../../../../platform/actions/browser/toolbar.js';
+import { Menus } from '../../../browser/menus.js';
 
 // #region --- New Chat Widget ---
 
@@ -300,6 +302,11 @@ export class NewChatWidget extends Disposable {
 	}
 
 	private _renderMiddleSection(container: HTMLElement): void {
+		const actions = dom.append(container, dom.$('.new-chat-middle-toolbar'));
+		this._register(this.instantiationService.createInstance(MenuWorkbenchToolBar, actions, Menus.NewSessionToolbar, {
+			hiddenItemStrategy: HiddenItemStrategy.Ignore,
+			toolbarOptions: { primaryGroup: () => true },
+		}));
 		const middle = dom.append(container, dom.$('.new-chat-middle-section'));
 
 		const title = dom.append(middle, dom.$('h2.new-chat-middle-title'));
