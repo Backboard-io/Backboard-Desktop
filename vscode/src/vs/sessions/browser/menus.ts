@@ -19,6 +19,7 @@ export const Menus = {
 	TitleBarSessionTitle: new MenuId('SessionsTitleBarSessionTitle'),
 	TitleBarSessionMenu: new MenuId('SessionsTitleBarSessionMenu'),
 	TitleBarRightLayout: new MenuId('SessionsTitleBarRightLayout'),
+	TitleBarRightPanel: new MenuId('SessionsTitleBarRightPanel'),
 	MobileTitleBarCenter: new MenuId('SessionsMobileTitleBarCenter'),
 	PanelTitle: new MenuId('SessionsPanelTitle'),
 	SidebarTitle: new MenuId('SessionsSidebarTitle'),

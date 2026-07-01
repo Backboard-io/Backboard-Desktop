@@ -491,16 +491,6 @@
 		opacity 140ms ease-out;
 }
 
-.agent-sessions-workbench {
-	--sessions-collapsed-nav-left: 8px;
-	--sessions-collapsed-title-offset: 124px;
-}
-
-.agent-sessions-workbench.mac {
-	--sessions-collapsed-nav-left: 108px;
-	--sessions-collapsed-title-offset: 172px;
-}
-
 .agent-sessions-workbench .part.sessionspart > .title {
 	min-height: 38px !important;
 	height: 38px !important;
@@ -509,10 +499,6 @@
 	border-bottom: 1px solid color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
 	box-sizing: border-box;
 	transition: padding-left 180ms ease-out, background-color 180ms ease-out;
-}
-
-.agent-sessions-workbench.nosidebar:not(.phone-layout) .part.sessionspart > .title {
-	padding-left: var(--sessions-collapsed-title-offset);
 }
 
 .agent-sessions-workbench .part.sessionspart > .title > *,
@@ -526,41 +512,8 @@
 	position: relative;
 }
 
-.agent-sessions-workbench .part.sessionspart .sessions-collapsed-sidebar-nav {
-	position: absolute;
-	top: 1px;
-	left: var(--sessions-collapsed-nav-left);
-	height: 36px;
-	display: flex;
-	align-items: center;
-	padding-right: 14px;
-	box-sizing: border-box;
-	z-index: 20;
-	opacity: 0;
-	pointer-events: none;
-	transform: translateX(-8px);
-	transition:
-		opacity 160ms ease-out,
-		transform 180ms ease-out,
-		left 180ms ease-out;
-}
-
-.agent-sessions-workbench.nosidebar:not(.phone-layout) .part.sessionspart .sessions-collapsed-sidebar-nav {
-	opacity: 1;
-	pointer-events: auto;
-	transform: translateX(0);
-}
-
-.agent-sessions-workbench .part.sessionspart .sessions-collapsed-sidebar-nav .monaco-toolbar .actions-container {
-	gap: 1px;
-}
-
 .agent-sessions-workbench:not(.phone-layout) .part.sessionspart .session-view.is-active .chat-composite-bar.session-header-bar {
 	transition: padding-left 180ms ease-out;
-}
-
-.agent-sessions-workbench.nosidebar:not(.phone-layout) .part.sessionspart .session-view.is-active .chat-composite-bar.session-header-bar {
-	padding-left: var(--sessions-collapsed-title-offset);
 }
 
 .agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.sessionspart),
@@ -730,7 +683,23 @@
 	padding-left: 2px;
 }
 
+.agent-sessions-workbench .part.auxiliarybar > .title.has-composite-bar > .global-actions {
+	flex: 0 0 auto;
+	margin-left: auto;
+	padding-left: 2px;
+}
+
 .agent-sessions-workbench .part.auxiliarybar > .title.has-composite-bar > .title-actions .monaco-action-bar .action-item {
+	width: 24px;
+	height: 26px;
+	margin-right: 0;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title.has-composite-bar > .global-actions .monaco-action-bar .actions-container {
+	gap: 0;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title.has-composite-bar > .global-actions .monaco-action-bar .action-item {
 	width: 24px;
 	height: 26px;
 	margin-right: 0;
@@ -742,6 +711,16 @@
 }
 
 .agent-sessions-workbench .part.auxiliarybar > .title.has-composite-bar > .title-actions .monaco-action-bar .action-item .action-label {
+	width: 24px;
+	height: 26px;
+	padding: 0;
+	border-radius: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title.has-composite-bar > .global-actions .monaco-action-bar .action-item .action-label {
 	width: 24px;
 	height: 26px;
 	padding: 0;

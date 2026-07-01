@@ -20,10 +20,8 @@
 }
 
 .agent-sessions-workbench.monaco-workbench .part.titlebar {
-	background: color-mix(in srgb, var(--vscode-sideBar-background, var(--vscode-editor-background)) 78%, transparent) !important;
-	background-color: color-mix(in srgb, var(--vscode-sideBar-background, var(--vscode-editor-background)) 78%, transparent) !important;
-	-webkit-backdrop-filter: blur(20px);
-	backdrop-filter: blur(20px);
+	background: var(--vscode-agentsPanel-background) !important;
+	background-color: var(--vscode-agentsPanel-background) !important;
 }
 
 .agent-sessions-workbench.monaco-workbench > .part.titlebar {
@@ -50,6 +48,27 @@
 	bottom: 0;
 	width: 1px;
 	background: var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 18%, transparent));
+}
+
+.agent-sessions-workbench.monaco-workbench .part.titlebar > .sessions-titlebar-container > .sessions-titlebar-right-panel-toolbar {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	z-index: 3;
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	padding-right: 12px;
+	box-sizing: border-box;
+	-webkit-app-region: no-drag;
+}
+
+.agent-sessions-workbench.monaco-workbench .part.titlebar > .sessions-titlebar-container > .sessions-titlebar-right-panel-toolbar .monaco-toolbar .actions-container {
+	gap: 1px;
+}
+
+.agent-sessions-workbench.monaco-workbench .part.titlebar > .sessions-titlebar-container > .sessions-titlebar-right-panel-toolbar .action-item {
+	display: flex;
 }
 
 .monaco-workbench .part.titlebar > .sessions-titlebar-container > .titlebar-left {

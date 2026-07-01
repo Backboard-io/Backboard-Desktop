@@ -32,12 +32,9 @@ import { Separator } from '../../../base/common/actions.js';
 import { IHoverService } from '../../../platform/hover/browser/hover.js';
 import { Extensions } from '../../../workbench/browser/panecomposite.js';
 import { Menus } from '../menus.js';
-import { $, append, getWindow, getWindowId, prepend } from '../../../base/browser/dom.js';
+import { $, append, prepend } from '../../../base/browser/dom.js';
 import { HiddenItemStrategy, MenuWorkbenchToolBar } from '../../../platform/actions/browser/toolbar.js';
-import { isFullscreen, onDidChangeFullscreen } from '../../../base/browser/browser.js';
-import { IConfigurationService } from '../../../platform/configuration/common/configuration.js';
-import { hasNativeTitlebar, getTitleBarStyle } from '../../../platform/window/common/window.js';
-import { isMacintosh, isNative, isWeb } from '../../../base/common/platform.js';
+import { isWeb } from '../../../base/common/platform.js';
 
 /**
  * Sidebar part specifically for agent sessions workbench.
@@ -108,7 +105,6 @@ export class SidebarPart extends AbstractPaneCompositePart {
 		@IContextKeyService contextKeyService: IContextKeyService,
 		@IExtensionService extensionService: IExtensionService,
 		@IMenuService menuService: IMenuService,
-		@IConfigurationService private readonly configurationService: IConfigurationService,
 	) {
 		super(
 			Parts.SIDEBAR_PART,
@@ -151,31 +147,6 @@ export class SidebarPart extends AbstractPaneCompositePart {
 			// Add a drag region so the sidebar title area can be used to move the window,
 			// matching the titlebar's drag behavior.
 			prepend(titleArea, $('div.titlebar-drag-region'));
-		}
-
-		// macOS native: the sidebar spans full height and the traffic lights
-		// overlay the top-left corner. Add a fixed-width spacer inside the
-		// title area to push content horizontally past the traffic lights.
-		if (titleArea && isMacintosh && isNative && !hasNativeTitlebar(this.configurationService, getTitleBarStyle(this.configurationService))) {
-			const spacer = $('div.mac-window-controls-spacer');
-			spacer.style.height = '100%';
-			spacer.style.flexShrink = '0';
-			spacer.style.order = '-1'; // match global-actions-left order so DOM order is respected
-			prepend(titleArea, spacer);
-
-			// Hide spacer in fullscreen (traffic lights are not shown)
-			const updateSpacerVisibility = () => {
-				const targetWindow = getWindow(titleArea);
-				const fullscreen = isFullscreen(targetWindow);
-				spacer.style.display = fullscreen ? 'none' : '';
-				spacer.style.width = fullscreen ? '0' : '70px';
-			};
-			updateSpacerVisibility();
-			this._register(onDidChangeFullscreen(windowId => {
-				if (windowId === getWindowId(getWindow(titleArea))) {
-					updateSpacerVisibility();
-				}
-			}));
 		}
 
 		return titleArea;

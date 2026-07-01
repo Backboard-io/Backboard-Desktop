@@ -14,7 +14,7 @@ import { StandardMouseEvent } from '../../../base/browser/mouseEvent.js';
 import { IConfigurationService } from '../../../platform/configuration/common/configuration.js';
 import { DisposableStore } from '../../../base/common/lifecycle.js';
 import { IThemeService } from '../../../platform/theme/common/themeService.js';
-import { agentsPanelForeground } from '../../common/theme.js';
+import { agentsPanelBackground, agentsPanelForeground } from '../../common/theme.js';
 import { isMacintosh, isWeb, isNative, platformLocale } from '../../../base/common/platform.js';
 import { EventType, EventHelper, append, $, addDisposableListener, prepend, getWindow, getWindowId, clearNode, scheduleAtNextAnimationFrame } from '../../../base/browser/dom.js';
 import { IInstantiationService } from '../../../platform/instantiation/common/instantiation.js';
@@ -84,12 +84,11 @@ export class TitlebarPart extends Part implements ITitlebarPart {
 	private rightContent!: HTMLElement;
 	private rightToolbarContainer!: HTMLElement;
 	private sessionActionsContainer!: HTMLElement;
+	private rightPanelToolbarContainer!: HTMLElement;
 
 	get leftContainer(): HTMLElement { return this.leftContent; }
 	get rightContainer(): HTMLElement { return this.rightContent; }
 	get rightWindowControlsContainer(): HTMLElement | undefined { return this.windowControlsContainer; }
-
-	private leftSpacerWidth: number = 0;
 
 	private readonly titleBarStyle: TitlebarStyle;
 	private isInactive: boolean = false;
@@ -164,6 +163,14 @@ export class TitlebarPart extends Part implements ITitlebarPart {
 		this.leftContent = append(this.rootContainer, $('.titlebar-left'));
 		this.centerContent = append(this.rootContainer, $('.titlebar-center'));
 		this.rightContent = append(this.rootContainer, $('.titlebar-right'));
+		this.rightPanelToolbarContainer = append(this.rootContainer, $('div.sessions-titlebar-right-panel-toolbar'));
+		this.rightPanelToolbarContainer.style.display = 'none';
+		this._register(this.instantiationService.createInstance(MenuWorkbenchToolBar, this.rightPanelToolbarContainer, Menus.TitleBarRightPanel, {
+			contextMenu: Menus.TitleBarContext,
+			hiddenItemStrategy: HiddenItemStrategy.NoHide,
+			telemetrySource: 'titlePart.rightPanel',
+			toolbarOptions: { primaryGroup: () => true },
+		}));
 
 		// Window Controls Container (must be before left toolbar for correct ordering)
 		if (!hasNativeTitlebar(this.configurationService, this.titleBarStyle)) {
@@ -178,7 +185,7 @@ export class TitlebarPart extends Part implements ITitlebarPart {
 
 			if (isMacintosh && isNative && primaryWindowControlsLocation === 'left') {
 				// macOS native: traffic lights are rendered by the OS at the top-left corner.
-				// Add a fixed-width spacer to push content past the traffic lights.
+				// Add a fixed-width spacer to push titlebar content past the traffic lights.
 				const spacer = append(this.leftContent, $('div.mac-window-controls-spacer'));
 
 				// Hide spacer in fullscreen (traffic lights are not shown)
@@ -186,8 +193,7 @@ export class TitlebarPart extends Part implements ITitlebarPart {
 					const targetWindow = getWindow(parent);
 					const fullscreen = isFullscreen(targetWindow);
 					spacer.style.display = fullscreen ? 'none' : '';
-					this.leftSpacerWidth = fullscreen ? 0 : 70;
-					spacer.style.width = `${this.leftSpacerWidth}px`;
+					spacer.style.width = fullscreen ? '0' : '70px';
 				};
 				updateSpacerVisibility();
 				spacer.style.flexShrink = '0';
@@ -266,7 +272,7 @@ export class TitlebarPart extends Part implements ITitlebarPart {
 		if (this.element) {
 			this.element.classList.toggle('inactive', this.isInactive);
 
-			this.element.style.backgroundColor = 'transparent';
+			this.element.style.backgroundColor = this.getColor(agentsPanelBackground) || '';
 
 			const titleForeground = this.getColor(agentsPanelForeground);
 			this.element.style.color = titleForeground || '';
@@ -345,6 +351,7 @@ export class TitlebarPart extends Part implements ITitlebarPart {
 		const selector = '.part.sidebar, .part.sessionspart, .part.editor:not(.modal-editor-part), .part.auxiliarybar';
 		const positions = new Set<number>();
 		let sectionCount = 0;
+		let foundAuxiliaryBar = false;
 
 		for (const part of Array.from(targetWindow.document.querySelectorAll<HTMLElement>(selector))) {
 			const bounds = part.getBoundingClientRect();
@@ -352,6 +359,10 @@ export class TitlebarPart extends Part implements ITitlebarPart {
 			const width = Math.round(bounds.width);
 			if (width <= 0 || left >= Math.round(titlebarBounds.width) || left + width <= 0) {
 				continue;
+			}
+			if (part.classList.contains('auxiliarybar')) {
+				foundAuxiliaryBar = true;
+				this.layoutRightPanelToolbar(left, width, Math.round(titlebarBounds.width));
 			}
 			const section = append(this.panelChromeContainer, $('div.sessions-titlebar-panel-section'));
 			section.style.left = `${Math.max(0, left)}px`;
@@ -362,12 +373,41 @@ export class TitlebarPart extends Part implements ITitlebarPart {
 				positions.add(left);
 			}
 		}
+		if (!foundAuxiliaryBar) {
+			this.layoutRightPanelToolbarAtPageEdge(Math.round(titlebarBounds.width));
+		}
 
 		for (const left of Array.from(positions).sort((a, b) => a - b)) {
 			const divider = append(this.panelChromeContainer, $('div.sessions-titlebar-panel-divider'));
 			divider.style.left = `${left}px`;
 		}
 		return sectionCount > 0;
+	}
+
+	private layoutRightPanelToolbar(left: number, width: number, titlebarWidth: number): void {
+		if (!this.rightPanelToolbarContainer) {
+			return;
+		}
+		const toolbarLeft = Math.max(0, left);
+		const toolbarWidth = Math.min(width, titlebarWidth - toolbarLeft);
+		if (toolbarWidth <= 0) {
+			this.layoutRightPanelToolbarAtPageEdge(titlebarWidth);
+			return;
+		}
+		this.rightPanelToolbarContainer.style.display = '';
+		this.rightPanelToolbarContainer.style.left = `${toolbarLeft}px`;
+		this.rightPanelToolbarContainer.style.right = '';
+		this.rightPanelToolbarContainer.style.width = `${toolbarWidth}px`;
+	}
+
+	private layoutRightPanelToolbarAtPageEdge(titlebarWidth: number): void {
+		if (this.rightPanelToolbarContainer) {
+			const toolbarWidth = Math.min(104, titlebarWidth);
+			this.rightPanelToolbarContainer.style.display = '';
+			this.rightPanelToolbarContainer.style.left = '';
+			this.rightPanelToolbarContainer.style.right = '0';
+			this.rightPanelToolbarContainer.style.width = `${toolbarWidth}px`;
+		}
 	}
 
 	private updatePanelDividerResizeObservers(): void {
@@ -394,18 +434,8 @@ export class TitlebarPart extends Part implements ITitlebarPart {
 		}
 	}
 
-	private getPartBackground(part: HTMLElement): string {
-		const style = getWindow(part).getComputedStyle(part);
-		if (style.backgroundColor && style.backgroundColor !== 'rgba(0, 0, 0, 0)' && style.backgroundColor !== 'transparent') {
-			return style.backgroundColor;
-		}
-		if (part.classList.contains('sidebar')) {
-			return 'var(--vscode-sideBar-background)';
-		}
-		if (part.classList.contains('auxiliarybar')) {
-			return 'var(--vscode-agentsPanel-background, var(--vscode-sideBar-background))';
-		}
-		return 'var(--vscode-editor-background)';
+	private getPartBackground(_part: HTMLElement): string {
+		return 'var(--vscode-agentsPanel-background)';
 	}
 
 	focus(): void {

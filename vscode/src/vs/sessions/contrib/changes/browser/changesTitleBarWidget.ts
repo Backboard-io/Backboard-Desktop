@@ -40,23 +40,6 @@ export class ChangesTitleBarContribution extends Disposable implements IWorkbenc
 	constructor() {
 		super();
 
-		this._register(MenuRegistry.appendMenuItem(Menus.NewSessionToolbar, {
-			command: {
-				id: TOGGLE_CHANGES_VIEW_ID,
-				title: localize2('showRightPanel', "Show Right Panel"),
-				tooltip: TOGGLE_SECONDARY_SIDEBAR_TOOLTIP,
-				icon: secondarySidebarToggleClosedIcon,
-				toggled: {
-					condition: AuxiliaryBarVisibleContext,
-					icon: secondarySidebarToggleOpenIcon,
-					title: localize('hideRightPanel', "Hide Right Panel"),
-					tooltip: TOGGLE_SECONDARY_SIDEBAR_TOOLTIP,
-				},
-			},
-			group: 'navigation',
-			order: 11, // After Environment (9) and Open Terminal (10)
-			when: IsAuxiliaryWindowContext.toNegated(),
-		}));
 		this._register(MenuRegistry.appendMenuItem(Menus.SessionBarToolbar, {
 			command: {
 				id: TOGGLE_CHANGES_VIEW_ID,
@@ -72,7 +55,7 @@ export class ChangesTitleBarContribution extends Disposable implements IWorkbenc
 			},
 			group: 'navigation',
 			order: 11, // After Environment (9) and Open Terminal (10)
-			when: ContextKeyExpr.and(IsAuxiliaryWindowContext.toNegated(), SessionsWelcomeVisibleContext.toNegated()),
+			when: ContextKeyExpr.and(IsAuxiliaryWindowContext.toNegated(), SessionsWelcomeVisibleContext.toNegated(), AuxiliaryBarVisibleContext.negate()),
 		}));
 
 		this._register(MenuRegistry.appendMenuItem(Menus.AuxiliaryBarTitle, {

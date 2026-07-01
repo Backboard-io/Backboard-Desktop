@@ -1221,13 +1221,14 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 	/**
 	 * Creates the grid descriptor for the Agent Sessions layout.
 	 *
-	 * Structure (horizontal orientation):
-	 * - Sidebar (left, spans full height from top to bottom)
-	 * - Right section (vertical):
-	 *   - Titlebar (top of right section)
-	 *   - Top right (horizontal): Chat Bar | Right workbench
-	 *     - Right workbench: Editor | Changes/Files/Browser
-	 *   - Panel (below chat and right workbench)
+	 * Structure (vertical orientation):
+	 * - Titlebar (full-width top row)
+	 * - Content section (horizontal):
+	 *   - Sidebar
+	 *   - Right section (vertical):
+	 *     - Top right (horizontal): Chat Bar | Right workbench
+	 *       - Right workbench: Editor | Changes/Files/Browser
+	 *     - Panel (below chat and right workbench)
 	 */
 	private createGridDescriptor(): ISerializedGrid {
 		const { width, height } = this._mainContainerDimension;
@@ -1253,6 +1254,8 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 			?? (this.partVisibility.panel ? sizes.panelSize : Math.max(sizes.panelSize, 250));
 		const titleBarHeight = this.titleBarPartView?.minimumHeight ?? 30;
 		const isPhone = this.layoutPolicy.viewportClass.get() === 'phone';
+		const visibleTitleBarHeight = !isPhone ? titleBarHeight : 0;
+		const contentHeight = Math.max(0, height - visibleTitleBarHeight);
 
 		// Calculate right section width — when sidebar is hidden it takes no space.
 		const effectiveSideBarWidth = this.partVisibility.sidebar ? sideBarSize : 0;
@@ -1274,7 +1277,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 			: Math.max(0, rightSectionWidth - effectiveRightWorkColumnWidth);
 
 		const visiblePanelSize = this.partVisibility.panel ? panelSize : 0;
-		const topRightHeight = Math.max(0, height - visiblePanelSize);
+		const topRightHeight = Math.max(0, contentHeight - visiblePanelSize);
 		const minimumAuxiliaryBarWidth = this.partVisibility.editor
 			? Math.min(180, Math.max(120, Math.floor(rightWorkColumnWidth * 0.22)))
 			: rightWorkColumnWidth;
@@ -1295,7 +1298,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 			type: 'leaf',
 			data: { type: Parts.TITLEBAR_PART },
 			size: titleBarHeight,
-			visible: !isPhone && this.partVisibility.sidebar
+			visible: !isPhone
 		};
 
 		const sideBarNode: ISerializedLeafNode = {
@@ -1333,13 +1336,6 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 			visible: this.partVisibility.panel
 		};
 
-		// Left section: Titlebar | Sidebar (vertical)
-		const leftSection: ISerializedNode = {
-			type: 'branch',
-			data: [titleBarNode, sideBarNode],
-			size: effectiveSideBarWidth
-		};
-
 		// Top right section: Chat Bar | Right workbench (Editor + Files/Browser/Changes)
 		const topRightSection: ISerializedNode = {
 			type: 'branch',
@@ -1357,13 +1353,17 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		// Root section: Left column | Right section (horizontal)
 		const contentSection: ISerializedNode = {
 			type: 'branch',
-			data: [leftSection, rightSection],
-			size: height
+			data: [sideBarNode, rightSection],
+			size: contentHeight
 		};
 
 		const result: ISerializedGrid = {
-			root: contentSection,
-			orientation: Orientation.HORIZONTAL,
+			root: {
+				type: 'branch',
+				data: [titleBarNode, contentSection],
+				size: height
+			},
+			orientation: Orientation.VERTICAL,
 			width,
 			height
 		};
@@ -1678,7 +1678,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		const isPhone = this.layoutPolicy.viewportClass.get() === 'phone';
 		this.workbenchGrid.setViewVisible(
 			this.titleBarPartView,
-			!isPhone && !hidden,
+			!isPhone,
 		);
 
 		this.rebalanceSessionsAfterSidebarToggle(hidden, sidebarSizeBeforeToggle, sessionsSizeBeforeToggle);

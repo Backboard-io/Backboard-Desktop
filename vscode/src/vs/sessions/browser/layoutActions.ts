@@ -14,7 +14,7 @@ import { Menus } from './menus.js';
 import { ServicesAccessor } from '../../platform/instantiation/common/instantiation.js';
 import { KeybindingWeight } from '../../platform/keybinding/common/keybindingsRegistry.js';
 import { registerIcon } from '../../platform/theme/common/iconRegistry.js';
-import { IsAuxiliaryWindowContext, IsWindowAlwaysOnTopContext, SideBarVisibleContext } from '../../workbench/common/contextkeys.js';
+import { AuxiliaryBarVisibleContext, IsAuxiliaryWindowContext, IsWindowAlwaysOnTopContext, SideBarVisibleContext } from '../../workbench/common/contextkeys.js';
 import { IWorkbenchLayoutService, Parts } from '../../workbench/services/layout/browser/layoutService.js';
 import { SessionsWelcomeVisibleContext } from '../common/contextkeys.js';
 import { mainWindow } from '../../base/browser/window.js';
@@ -23,6 +23,8 @@ import { mainWindow } from '../../base/browser/window.js';
 const panelCloseIcon = registerIcon('agent-panel-close', Codicon.close, localize('agentPanelCloseIcon', "Icon to close the panel."));
 const sidebarToggleClosedIcon = registerIcon('agent-sidebar-toggle-closed', Codicon.layoutSidebarLeftOff, localize('agentSidebarToggleClosedIcon', "Icon for the sessions sidebar when closed."));
 const sidebarToggleOpenIcon = registerIcon('agent-sidebar-toggle-open', Codicon.layoutSidebarLeft, localize('agentSidebarToggleOpenIcon', "Icon for the sessions sidebar when open."));
+const secondarySidebarToggleClosedIcon = registerIcon('agent-secondary-sidebar-toggle-closed', Codicon.layoutSidebarRightOff, localize('agentSecondarySidebarToggleClosedIcon', "Icon for the sessions secondary sidebar when closed."));
+const secondarySidebarToggleOpenIcon = registerIcon('agent-secondary-sidebar-toggle-open', Codicon.layoutSidebarRight, localize('agentSecondarySidebarToggleOpenIcon', "Icon for the sessions secondary sidebar when open."));
 
 class ToggleSidebarVisibilityAction extends Action2 {
 
@@ -79,12 +81,25 @@ class ToggleSecondarySidebarVisibilityAction extends Action2 {
 		super({
 			id: ToggleSecondarySidebarVisibilityAction.ID,
 			title: localize2('toggleSecondarySidebar', 'Toggle Secondary Side Bar Visibility'),
-			icon: panelCloseIcon,
+			icon: secondarySidebarToggleClosedIcon,
+			toggled: {
+				condition: AuxiliaryBarVisibleContext,
+				icon: secondarySidebarToggleOpenIcon,
+			},
 			metadata: {
 				description: localize('openAndCloseSecondarySidebar', 'Open/Show and Close/Hide Secondary Side Bar'),
 			},
 			category: Categories.View,
-			f1: true
+			f1: true,
+			menu: {
+				id: Menus.TitleBarRightPanel,
+				group: 'navigation',
+				order: 100,
+				when: ContextKeyExpr.and(
+					IsAuxiliaryWindowContext.toNegated(),
+					SessionsWelcomeVisibleContext.toNegated()
+				),
+			},
 		});
 	}
 
