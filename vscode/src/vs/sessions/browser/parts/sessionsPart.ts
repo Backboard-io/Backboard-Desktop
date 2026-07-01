@@ -29,6 +29,8 @@ import { IProgressIndicator } from '../../../platform/progress/common/progress.j
 import { AbstractProgressScope, ScopedProgressIndicator } from '../../../workbench/services/progress/browser/progressIndicator.js';
 import { observableValue } from '../../../base/common/observable.js';
 import { IWorkbenchAssignmentService } from '../../../workbench/services/assignment/common/assignmentService.js';
+import { HiddenItemStrategy, MenuWorkbenchToolBar } from '../../../platform/actions/browser/toolbar.js';
+import { Menus } from '../menus.js';
 
 /**
  * ExP treatment that, when enabled, moves the session type ("harness") picker
@@ -164,6 +166,15 @@ export class SessionsPart extends Part {
 	protected override createContentArea(parent: HTMLElement): HTMLElement {
 		const contentArea = $('.content');
 		parent.appendChild(contentArea);
+
+		const collapsedSidebarNav = $('.sessions-collapsed-sidebar-nav');
+		contentArea.appendChild(collapsedSidebarNav);
+		this._register(this.instantiationService.createInstance(MenuWorkbenchToolBar, collapsedSidebarNav, Menus.TitleBarLeftLayout, {
+			contextMenu: Menus.TitleBarContext,
+			telemetrySource: 'sessionsPart.collapsedSidebarNav',
+			hiddenItemStrategy: HiddenItemStrategy.NoHide,
+			toolbarOptions: { primaryGroup: () => true },
+		}));
 
 		// Track keyboard focus within the sessions content so the `sessionsFocus`
 		// context key reflects whether a session (its chat view) currently has focus.

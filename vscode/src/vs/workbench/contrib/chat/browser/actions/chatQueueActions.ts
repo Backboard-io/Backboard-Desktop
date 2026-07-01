@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Codicon } from '../../../../../base/common/codicons.js';
-import { KeyCode, KeyMod } from '../../../../../base/common/keyCodes.js';
+import { KeyCode } from '../../../../../base/common/keyCodes.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { ServicesAccessor } from '../../../../../editor/browser/editorExtensions.js';
 import { localize, localize2 } from '../../../../../nls.js';
@@ -25,20 +25,6 @@ const editingQueueOrSteer = ContextKeyExpr.or(editingQueue, editingSteer)!;
 const queuingActionsPresent = ContextKeyExpr.and(
 	ContextKeyExpr.or(ChatContextKeys.requestInProgress, editingQueueOrSteer),
 	ChatContextKeys.editingRequestType.notEqualsTo(ChatContextKeys.EditingRequestType.Sent),
-);
-
-const steerIsDefault = ContextKeyExpr.equals(`config.${ChatConfiguration.RequestQueueingDefaultAction}`, 'steer');
-const queueIsDefault = steerIsDefault.negate();
-
-// The effective default respects the editing context: when editing a queued/steer
-// message, the default matches that message type regardless of the config setting.
-const effectiveDefaultIsQueue = ContextKeyExpr.or(
-	ContextKeyExpr.and(queueIsDefault, editingQueueOrSteer.negate()),
-	editingQueue
-);
-const effectiveDefaultIsSteer = ContextKeyExpr.or(
-	ContextKeyExpr.and(steerIsDefault, editingQueueOrSteer.negate()),
-	editingSteer
 );
 
 export interface IChatRemovePendingRequestContext {
@@ -71,15 +57,7 @@ export class ChatQueueMessageAction extends Action2 {
 			keybinding: [{
 				when: ContextKeyExpr.and(
 					ChatContextKeys.inChatInput,
-					effectiveDefaultIsSteer,
-				),
-				primary: KeyMod.Alt | KeyCode.Enter,
-				weight: KeybindingWeight.EditorContrib + 1
-			}, {
-				when: ContextKeyExpr.and(
-					ChatContextKeys.inChatInput,
 					queuingActionsPresent,
-					effectiveDefaultIsQueue,
 				),
 				primary: KeyCode.Enter,
 				weight: KeybindingWeight.EditorContrib + 1
@@ -115,28 +93,12 @@ export class ChatSteerWithMessageAction extends Action2 {
 	constructor() {
 		super({
 			id: ChatSteerWithMessageAction.ID,
-			title: localize2('chat.steerWithMessage', "Steer with Message"),
-			tooltip: localize('chat.steerWithMessage.tooltip', "Send this message at the next opportunity, signaling the current request to yield"),
-			icon: Codicon.newLine,
+			title: localize2('chat.steerWithMessage', "Add to Queue"),
+			tooltip: localize('chat.steerWithMessage.tooltip', "Queue this message to send after the current request completes"),
+			icon: Codicon.add,
 			f1: false,
 			category: CHAT_CATEGORY,
 			precondition: ChatContextKeys.inputHasText,
-			keybinding: [{
-				when: ContextKeyExpr.and(
-					ChatContextKeys.inChatInput,
-					queuingActionsPresent,
-					effectiveDefaultIsSteer,
-				),
-				primary: KeyCode.Enter,
-				weight: KeybindingWeight.EditorContrib + 1
-			}, {
-				when: ContextKeyExpr.and(
-					ChatContextKeys.inChatInput,
-					effectiveDefaultIsQueue,
-				),
-				primary: KeyMod.Alt | KeyCode.Enter,
-				weight: KeybindingWeight.EditorContrib + 1
-			}],
 		});
 	}
 
@@ -152,13 +114,13 @@ export class ChatSteerWithMessageAction extends Action2 {
 			return;
 		}
 
-		// If no request is in progress, send as a normal message instead of steering
+		// If no request is in progress, send as a normal message instead of queuing.
 		if (!widget.viewModel.model.requestInProgress.get()) {
 			widget.acceptInput();
 			return;
 		}
 
-		widget.acceptInput(undefined, { queue: ChatRequestQueueKind.Steering });
+		widget.acceptInput(undefined, { queue: ChatRequestQueueKind.Queued });
 	}
 }
 
@@ -349,12 +311,6 @@ export function registerChatQueueActions(): void {
 		group: 'navigation',
 		order: 1,
 	});
-	MenuRegistry.appendMenuItem(MenuId.ChatExecuteQueue, {
-		command: { id: ChatSteerWithMessageAction.ID, title: localize2('chat.steerWithMessage', "Steer with Message"), icon: Codicon.newLine },
-		group: 'navigation',
-		order: 2,
-	});
-
 	MenuRegistry.appendMenuItem(MenuId.ChatExecute, {
 		submenu: MenuId.ChatExecuteQueue,
 		title: localize2('chat.queueSubmenu', "Queue"),

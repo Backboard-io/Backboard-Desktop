@@ -322,9 +322,10 @@ export class SessionsManagementService extends Disposable implements ISessionsMa
 			this.logService.warn(`[SessionsManagement] createNewChatInSession: provider '${session.providerId}' not found`);
 			return undefined;
 		}
-		// Reuse an existing untitled chat if one exists, otherwise create a new one.
-		const existingUntitled = session.chats.get().find(c => c.status.get() === SessionStatus.Untitled);
-		return existingUntitled ?? await provider.createNewChat(session.sessionId);
+		// The tab bar supports multiple pending drafts, so each explicit "new chat"
+		// action should create a distinct untitled tab instead of reusing an
+		// existing draft.
+		return provider.createNewChat(session.sessionId);
 	}
 
 	async sendNewChatRequest(session: ISession, options: ISendRequestOptions): Promise<void> {

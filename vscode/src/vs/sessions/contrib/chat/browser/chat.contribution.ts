@@ -65,11 +65,20 @@ class NewChatInSessionsWindowAction extends Action2 {
 		});
 	}
 
-	override run(accessor: ServicesAccessor): void {
+	override async run(accessor: ServicesAccessor): Promise<void> {
 		const sessionsService = accessor.get(ISessionsService);
 		// Inherit the active session's provider and session type so the new
 		// session defaults to the same kind the user is currently working in.
 		const activeSession = sessionsService.activeSession.get();
+		if (
+			activeSession?.isCreated.get() &&
+			activeSession.capabilities.supportsMultipleChats &&
+			!activeSession.isArchived.get()
+		) {
+			await sessionsService.openNewChatInSession(activeSession);
+			return;
+		}
+
 		sessionsService.openNewSession({
 			folderUri: activeSession?.workspace.get()?.uri,
 			providerId: activeSession?.providerId,

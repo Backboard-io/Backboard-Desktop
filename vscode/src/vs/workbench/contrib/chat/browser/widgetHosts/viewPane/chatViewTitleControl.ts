@@ -12,7 +12,6 @@ import { Emitter } from '../../../../../../base/common/event.js';
 import { MarkdownString } from '../../../../../../base/common/htmlContent.js';
 import { Disposable, DisposableStore, MutableDisposable } from '../../../../../../base/common/lifecycle.js';
 import { MarshalledId } from '../../../../../../base/common/marshallingIds.js';
-import { isEqual } from '../../../../../../base/common/resources.js';
 import { localize } from '../../../../../../nls.js';
 import { HiddenItemStrategy, MenuWorkbenchToolBar } from '../../../../../../platform/actions/browser/toolbar.js';
 import { Action2, MenuId, registerAction2 } from '../../../../../../platform/actions/common/actions.js';
@@ -28,6 +27,7 @@ import { openSession } from '../../agentSessions/agentSessionsOpener.js';
 
 export interface IChatViewTitleDelegate {
 	focusChat(): void;
+	openChatSession(sessionResource: IChatModel['sessionResource']): Promise<void>;
 }
 
 export class ChatViewTitleControl extends Disposable {
@@ -54,6 +54,8 @@ export class ChatViewTitleControl extends Disposable {
 	private tabsContainer: HTMLElement | undefined;
 	private tabDisposables = this._register(new DisposableStore());
 	private readonly closedSessionTabs = new Set<string>();
+	private readonly openSessionTabs = new Map<string, { resource: IChatModel['sessionResource']; label: string }>();
+	private tabOrder: string[] = [];
 	private lastRenderedCurrentSessionResource: string | undefined;
 
 	private lastKnownHeight = 0;
@@ -235,46 +237,62 @@ export class ChatViewTitleControl extends Disposable {
 		const currentSessionResourceKey = currentSessionResource?.toString();
 		const shouldRevealCurrentTab = this.lastRenderedCurrentSessionResource !== currentSessionResourceKey;
 		this.lastRenderedCurrentSessionResource = currentSessionResourceKey;
+		if (currentSessionResource && currentSessionResourceKey && !this.closedSessionTabs.has(currentSessionResourceKey)) {
+			this.openSessionTabs.set(currentSessionResourceKey, { resource: currentSessionResource, label: currentTitle });
+		}
 
-		const currentSession = currentSessionResource
-			? this.agentSessionsService.model.sessions.find(session => isEqual(session.resource, currentSessionResource))
-			: undefined;
-		this.addTab({
-			label: currentTitle,
-			active: true,
-			isCurrent: true,
-			session: currentSession,
-		});
-
-		const sessions = this.getHistoryTabSessions(currentSessionResource);
-
+		const sessions = this.getHistoryTabSessions();
 		for (const session of sessions) {
+			const resourceKey = session.resource.toString();
+			if (!this.tabOrder.includes(resourceKey)) {
+				this.tabOrder.push(resourceKey);
+			}
+		}
+
+		const sessionsByResource = new Map(sessions.map(session => [session.resource.toString(), session]));
+		const knownSessionResources = new Set(this.agentSessionsService.model.sessions.map(session => session.resource.toString()));
+		this.tabOrder = this.tabOrder.filter(resourceKey => {
+			return !this.closedSessionTabs.has(resourceKey)
+				&& (
+					sessionsByResource.has(resourceKey) ||
+					(this.openSessionTabs.has(resourceKey) && !knownSessionResources.has(resourceKey))
+				);
+		});
+		if (currentSessionResourceKey && !this.tabOrder.includes(currentSessionResourceKey)) {
+			this.tabOrder.unshift(currentSessionResourceKey);
+		}
+
+		for (const resourceKey of this.tabOrder.slice(0, ChatViewTitleControl.MAX_HISTORY_TABS)) {
+			const session = sessionsByResource.get(resourceKey);
+			const tab = this.openSessionTabs.get(resourceKey);
+			if (!session && !tab) {
+				continue;
+			}
 			this.addTab({
-				label: session.label,
-				active: false,
+				label: resourceKey === currentSessionResourceKey ? currentTitle : (session?.label ?? tab?.label ?? ChatViewTitleControl.DEFAULT_TITLE),
+				active: resourceKey === currentSessionResourceKey,
+				isCurrent: resourceKey === currentSessionResourceKey,
 				session,
+				sessionResource: session ? undefined : tab?.resource,
 			});
 		}
 
 		this.tabsContainer.scrollLeft = shouldRevealCurrentTab ? 0 : previousScrollLeft;
 	}
 
-	private getHistoryTabSessions(currentSessionResource: IChatModel['sessionResource'] | undefined): IAgentSession[] {
+	private getHistoryTabSessions(): IAgentSession[] {
 		return this.agentSessionsService.model.sessions
 			.filter(session => !session.isArchived())
-			.filter(session => {
-				const isCurrentSession = !!currentSessionResource && isEqual(session.resource, currentSessionResource);
-				return !isCurrentSession && !this.closedSessionTabs.has(session.resource.toString());
-			})
+			.filter(session => !this.closedSessionTabs.has(session.resource.toString()))
 			.sort((a, b) => this.getHistoryTabTime(b) - this.getHistoryTabTime(a) || a.label.localeCompare(b.label))
-			.slice(0, ChatViewTitleControl.MAX_HISTORY_TABS - 1);
+			.slice(0, ChatViewTitleControl.MAX_HISTORY_TABS);
 	}
 
 	private getHistoryTabTime(session: IAgentSession): number {
 		return session.timing.lastRequestEnded ?? session.timing.lastRequestStarted ?? session.timing.created;
 	}
 
-	private addTab(options: { label: string; active: boolean; isCurrent?: boolean; session?: IAgentSession }): void {
+	private addTab(options: { label: string; active: boolean; isCurrent?: boolean; session?: IAgentSession; sessionResource?: IChatModel['sessionResource'] }): void {
 		if (!this.tabsContainer) {
 			return;
 		}
@@ -298,6 +316,8 @@ export class ChatViewTitleControl extends Disposable {
 			e.stopPropagation();
 			if (options.session) {
 				void this.instantiationService.invokeFunction(openSession, options.session);
+			} else if (options.sessionResource) {
+				void this.delegate.openChatSession(options.sessionResource);
 			} else {
 				this.delegate.focusChat();
 			}
@@ -308,6 +328,10 @@ export class ChatViewTitleControl extends Disposable {
 			e.stopPropagation();
 			if (options.session) {
 				this.closedSessionTabs.add(options.session.resource.toString());
+			} else if (options.sessionResource) {
+				const resourceKey = options.sessionResource.toString();
+				this.closedSessionTabs.add(resourceKey);
+				this.openSessionTabs.delete(resourceKey);
 			}
 			this.updateTabs(this.getResolvedTitle());
 		}));

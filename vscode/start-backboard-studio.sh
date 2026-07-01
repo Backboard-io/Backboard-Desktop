@@ -28,6 +28,7 @@ fi
 verify_launch_output() {
 	local missing=0
 	local required_files=(
+		"$ROOT/out/bootstrap-esm.js"
 		"$ROOT/out/main.js"
 		"$ROOT/out/vs/code/electron-main/main.js"
 		"$ROOT/out/vs/platform/environment/node/userDataPath.js"

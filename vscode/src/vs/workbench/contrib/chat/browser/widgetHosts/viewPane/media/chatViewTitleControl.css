@@ -9,7 +9,7 @@
 		display: none;
 		cursor: pointer;
 		flex-shrink: 0;
-		height: 26px;
+		height: 38px;
 		border-bottom: 1px solid var(--vscode-panel-border);
 		background: var(--vscode-sideBar-background, var(--vscode-editor-background));
 
@@ -26,13 +26,13 @@
 		.chat-view-title-tabs {
 			display: flex;
 			align-items: center;
-			gap: 0;
+			gap: 4px;
 			min-width: 0;
 			flex: 1 1 auto;
 			overflow-x: auto;
 			overflow-y: hidden;
 			height: 100%;
-			padding-left: 0;
+			padding: 5px 10px;
 			overscroll-behavior-x: contain;
 			scroll-behavior: smooth;
 			scrollbar-width: none;
@@ -47,23 +47,22 @@
 		.chat-view-title-tab {
 			display: flex;
 			align-items: center;
-			gap: 5px;
-			height: 100%;
-			width: 108px;
-			min-width: 108px;
-			max-width: 108px;
-			padding: 0 5px 0 8px;
-			border: 0;
-			border-right: 1px solid color-mix(in srgb, var(--vscode-panel-border) 72%, transparent);
-			border-radius: 0;
+			gap: 8px;
+			height: 28px;
+			width: 160px;
+			min-width: 136px;
+			max-width: 184px;
+			padding: 0 7px 0 12px;
+			border: 1px solid transparent;
+			border-radius: 5px;
 			color: var(--vscode-tab-inactiveForeground, var(--vscode-descriptionForeground));
-			background: color-mix(in srgb, var(--vscode-tab-inactiveBackground, transparent) 72%, transparent);
+			background: transparent;
 			cursor: pointer;
 			font: inherit;
 			box-sizing: border-box;
-			flex: 0 0 108px;
+			flex: 0 0 160px;
 			position: relative;
-			transition: background-color 80ms linear, color 80ms linear;
+			transition: background-color 80ms linear, border-color 80ms linear, color 80ms linear, box-shadow 80ms linear;
 		}
 
 		.chat-view-title-tab + .chat-view-title-tab {
@@ -72,22 +71,15 @@
 
 		.chat-view-title-tab:hover {
 			color: var(--vscode-tab-hoverForeground, var(--vscode-foreground));
-			background: color-mix(in srgb, var(--vscode-toolbar-hoverBackground) 70%, transparent);
+			border-color: color-mix(in srgb, var(--vscode-panel-border) 52%, transparent);
+			background: color-mix(in srgb, var(--vscode-toolbar-hoverBackground) 62%, transparent);
 		}
 
 		.chat-view-title-tab-active {
 			color: var(--vscode-tab-activeForeground, var(--vscode-foreground));
-			background: color-mix(in srgb, var(--vscode-focusBorder) 8%, var(--vscode-tab-activeBackground, var(--vscode-sideBar-background, var(--vscode-editor-background))));
-		}
-
-		.chat-view-title-tab-active::after {
-			content: "";
-			position: absolute;
-			left: 0;
-			right: 0;
-			bottom: 0;
-			height: 2px;
-			background: var(--vscode-focusBorder);
+			border-color: var(--vscode-focusBorder);
+			background: var(--vscode-tab-activeBackground, var(--vscode-sideBar-background, var(--vscode-editor-background)));
+			box-shadow: none;
 		}
 
 		.chat-view-title-tab-label {
@@ -95,9 +87,9 @@
 			white-space: nowrap;
 			text-overflow: ellipsis;
 			min-width: 0;
-			font-size: 11px;
+			font-size: 12px;
 			font-weight: 500;
-			line-height: 13px;
+			line-height: 16px;
 			letter-spacing: 0;
 		}
 
@@ -105,14 +97,14 @@
 			display: flex;
 			align-items: center;
 			justify-content: center;
-			width: 12px;
-			height: 12px;
+			width: 18px;
+			height: 18px;
 			margin-left: auto;
-			border-radius: 3px;
+			border-radius: 4px;
 			color: var(--vscode-descriptionForeground);
-			font-size: 8px;
+			font-size: 10px;
 			flex: 0 0 auto;
-			opacity: 0.38;
+			opacity: 0.48;
 		}
 
 		.chat-view-title-tab:hover .chat-view-title-tab-close,

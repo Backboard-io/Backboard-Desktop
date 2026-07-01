@@ -1252,8 +1252,9 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		const panelSize = this._savedPartSizes.panel
 			?? (this.partVisibility.panel ? sizes.panelSize : Math.max(sizes.panelSize, 250));
 		const titleBarHeight = this.titleBarPartView?.minimumHeight ?? 30;
+		const isPhone = this.layoutPolicy.viewportClass.get() === 'phone';
 
-		// Calculate right section width — when sidebar is hidden it takes no space
+		// Calculate right section width — when sidebar is hidden it takes no space.
 		const effectiveSideBarWidth = this.partVisibility.sidebar ? sideBarSize : 0;
 		const rightSectionWidth = Math.max(0, width - effectiveSideBarWidth);
 		const preferredRightWorkColumnWidth = this._savedPartSizes.sessions !== undefined
@@ -1290,13 +1291,11 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 			? Math.max(0, rightWorkColumnWidth - (this.partVisibility.auxiliaryBar ? auxiliaryBarSize : 0))
 			: 0;
 
-		const isPhone = this.layoutPolicy.viewportClass.get() === 'phone';
-
 		const titleBarNode: ISerializedLeafNode = {
 			type: 'leaf',
 			data: { type: Parts.TITLEBAR_PART },
 			size: titleBarHeight,
-			visible: !isPhone
+			visible: !isPhone && this.partVisibility.sidebar
 		};
 
 		const sideBarNode: ISerializedLeafNode = {
@@ -1665,6 +1664,9 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 			return;
 		}
 
+		const sidebarSizeBeforeToggle = this.sideBarPartView ? this.workbenchGrid.getViewSize(this.sideBarPartView) : undefined;
+		const sessionsSizeBeforeToggle = this.sessionsPartView ? this.workbenchGrid.getViewSize(this.sessionsPartView) : undefined;
+
 		this.partVisibility.sidebar = !hidden;
 		this.mainContainer.classList.toggle(LayoutClasses.SIDEBAR_HIDDEN, hidden);
 
@@ -1673,6 +1675,13 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 			this.sideBarPartView,
 			!hidden,
 		);
+		const isPhone = this.layoutPolicy.viewportClass.get() === 'phone';
+		this.workbenchGrid.setViewVisible(
+			this.titleBarPartView,
+			!isPhone && !hidden,
+		);
+
+		this.rebalanceSessionsAfterSidebarToggle(hidden, sidebarSizeBeforeToggle, sessionsSizeBeforeToggle);
 
 		// If sidebar becomes hidden, also hide the current active pane composite
 		if (hidden && this.paneCompositeService.getActivePaneComposite(ViewContainerLocation.Sidebar)) {
@@ -1688,8 +1697,27 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 			}
 		}
 
+		this.layout();
 		this.layoutMobileSidebar();
 		this._savePartVisibility();
+	}
+
+	private rebalanceSessionsAfterSidebarToggle(hidden: boolean, sidebarSizeBeforeToggle: IViewSize | undefined, sessionsSizeBeforeToggle: IViewSize | undefined): void {
+		if (!this.sessionsPartView || !sidebarSizeBeforeToggle || !sessionsSizeBeforeToggle) {
+			return;
+		}
+
+		const currentSessionsSize = this.workbenchGrid.getViewSize(this.sessionsPartView);
+		const cachedSidebarWidth = this.workbenchGrid.getViewCachedVisibleSize(this.sideBarPartView);
+		const sidebarWidth = Math.max(0, hidden ? sidebarSizeBeforeToggle.width : cachedSidebarWidth ?? sidebarSizeBeforeToggle.width);
+		const targetSessionsWidth = hidden
+			? Math.max(currentSessionsSize.width, sessionsSizeBeforeToggle.width + sidebarWidth)
+			: Math.max(sessionsSizeBeforeToggle.width - sidebarWidth, 280);
+
+		this.workbenchGrid.resizeView(this.sessionsPartView, {
+			width: Math.min(this._mainContainerDimension.width, targetSessionsWidth),
+			height: currentSessionsSize.height
+		});
 	}
 
 	private setAuxiliaryBarHidden(hidden: boolean): void {
@@ -1946,7 +1974,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 			(this.partVisibility.auxiliaryBar ? this.workbenchGrid.getViewSize(this.auxiliaryBarPartView).width : 0) +
 			(this.partVisibility.editor ? this.workbenchGrid.getViewSize(this.editorPartView).width : 0);
 		const panelHeight = this.partVisibility.panel ? this.workbenchGrid.getViewSize(this.panelPartView).height : 0;
-		const titleBarHeight = this.workbenchGrid.getViewSize(this.titleBarPartView).height;
+		const titleBarHeight = this.partVisibility.sidebar ? this.workbenchGrid.getViewSize(this.titleBarPartView).height : 0;
 
 		return new Dimension(
 			this._mainContainerDimension.width - sidebarWidth - rightWorkColumnWidth,

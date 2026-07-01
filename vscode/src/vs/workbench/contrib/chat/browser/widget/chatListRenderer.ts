@@ -973,8 +973,8 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 				label.textContent = localize('systemNotificationDivider', "System Notification");
 				label.title = localize('systemNotificationDividerTooltip', "System notification will be sent after the next tool call happens");
 			} else {
-				label.textContent = localize('steeringDivider', "Steering");
-				label.title = localize('steeringDividerTooltip', "Steering message will be sent after the next tool call happens");
+				label.textContent = localize('steeringDivider', "Queued");
+				label.title = localize('steeringDividerTooltip', "Queued message will be sent after the current request completes");
 			}
 		} else {
 			label.textContent = localize('queuedDivider', "Queued");

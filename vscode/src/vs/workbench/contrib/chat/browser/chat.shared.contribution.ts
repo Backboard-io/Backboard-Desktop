@@ -1236,13 +1236,12 @@ configurationRegistry.registerConfiguration({
 		},
 		[ChatConfiguration.RequestQueueingDefaultAction]: {
 			type: 'string',
-			enum: ['queue', 'steer'],
+			enum: ['queue'],
 			enumDescriptions: [
 				nls.localize('chat.requestQueuing.defaultAction.queue', "Queue the message to send after the current request completes."),
-				nls.localize('chat.requestQueuing.defaultAction.steer', "Steer the current request by sending the message immediately, signaling the current request to yield."),
 			],
 			description: nls.localize('chat.requestQueuing.defaultAction.description', "Controls which action is the default for the queue button when a request is in progress."),
-			default: 'steer',
+			default: 'queue',
 		},
 		[ChatConfiguration.EditModeHidden]: {
 			type: 'boolean',

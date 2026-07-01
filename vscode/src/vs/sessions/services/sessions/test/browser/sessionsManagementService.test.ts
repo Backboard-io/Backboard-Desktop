@@ -777,6 +777,36 @@ suite('SessionsManagementService', () => {
 		assert.deepStrictEqual(events, [false, true]);
 	});
 
+	test('createNewChatInSession creates a fresh untitled chat when one already exists', async () => {
+		const existingUntitledChat: IChat = { ...stubChat, resource: URI.parse('test:///untitled-chat-1'), status: constObservable(SessionStatus.Untitled) };
+		const freshUntitledChat: IChat = { ...stubChat, resource: URI.parse('test:///untitled-chat-2'), status: constObservable(SessionStatus.Untitled) };
+		const chats = observableValue<readonly IChat[]>('chats', [existingUntitledChat]);
+		const session = stubSession({
+			sessionId: 's1',
+			providerId: 'test',
+			chats,
+			mainChat: constObservable(existingUntitledChat),
+		});
+		let createNewChatCount = 0;
+		const provider = new class extends TestSessionsProvider {
+			override async createNewChat(): Promise<IChat> {
+				createNewChatCount++;
+				chats.set([...chats.get(), freshUntitledChat], undefined);
+				return freshUntitledChat;
+			}
+		}(session);
+		const { service } = createSessionsManagementService(session, disposables, provider);
+
+		const chat = await service.createNewChatInSession(session);
+
+		assert.strictEqual(chat, freshUntitledChat);
+		assert.strictEqual(createNewChatCount, 1);
+		assert.deepStrictEqual(chats.get().map(chat => chat.resource.toString()), [
+			existingUntitledChat.resource.toString(),
+			freshUntitledChat.resource.toString(),
+		]);
+	});
+
 	test('createAndSendNewChatRequest sends without changing the active view', async () => {
 		const chat: IChat = { ...stubChat, resource: URI.parse('test:///chat') };
 		const session = stubSession({

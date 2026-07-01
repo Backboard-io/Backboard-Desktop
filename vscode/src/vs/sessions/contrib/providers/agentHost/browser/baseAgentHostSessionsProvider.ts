@@ -159,7 +159,7 @@ export class AgentHostSessionAdapter implements ISession {
 
 	readonly mainChat: IObservable<IChat>;
 	readonly chats: IObservable<readonly IChat[]>;
-	readonly capabilities = { supportsMultipleChats: false };
+	readonly capabilities = { supportsMultipleChats: true };
 
 	readonly agentProvider: string;
 
@@ -176,6 +176,7 @@ export class AgentHostSessionAdapter implements ISession {
 	 */
 	private readonly _metaObs: ISettableObservable<SessionMeta | undefined>;
 	private _activity: ISettableObservable<string | undefined>;
+	private readonly _additionalChats = observableValue<readonly IChat[]>(this, []);
 
 	private readonly _changesSummary = observableValueOpts<ISessionChangesSummary | undefined>({ equalsFn: structuralEquals }, undefined);
 	readonly changesSummary: IObservable<ISessionChangesSummary | undefined>;
@@ -354,7 +355,37 @@ export class AgentHostSessionAdapter implements ISession {
 			lastTurnEnd: this.lastTurnEnd,
 		};
 		this.mainChat = observableValue<IChat>(this, mainChat);
-		this.chats = this.mainChat.map(c => [c]);
+		this.chats = derived(this, reader => [this.mainChat.read(reader), ...this._additionalChats.read(reader)]);
+	}
+
+	addChat(chat: IChat): void {
+		const current = this._additionalChats.get();
+		if (current.some(existing => isEqual(existing.resource, chat.resource))) {
+			return;
+		}
+		this._additionalChats.set([...current, chat], undefined);
+	}
+
+	removeChat(resource: URI): boolean {
+		const current = this._additionalChats.get();
+		const next = current.filter(chat => !isEqual(chat.resource, resource));
+		if (next.length === current.length) {
+			return false;
+		}
+		this._additionalChats.set(next, undefined);
+		return true;
+	}
+
+	replaceChat(resource: URI, chat: IChat): void {
+		const current = this._additionalChats.get();
+		const index = current.findIndex(existing => isEqual(existing.resource, resource));
+		if (index === -1) {
+			this.addChat(chat);
+			return;
+		}
+		const next = [...current];
+		next[index] = chat;
+		this._additionalChats.set(next, undefined);
 	}
 
 	private _createChangesObs(sessionUri: URI): {
@@ -1155,6 +1186,7 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 	 * the provider itself is disposed.
 	 */
 	private readonly _newSessions = this._register(new DisposableMap<string, NewSession>());
+	private readonly _draftChatParents = new Map<string, string>();
 
 	/** The in-flight new session with the given id, if any. */
 	protected _getNewSession(sessionId: string): NewSession | undefined {
@@ -1167,12 +1199,29 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 	 * connection drops and the composed-but-unsent drafts can no longer commit.
 	 */
 	protected _disposeAllNewSessions(): void {
+		this._draftChatParents.clear();
 		this._newSessions.clearAndDisposeAll();
 	}
 
 	deleteNewSession(sessionId: string): void {
 		if (this._newSessions.has(sessionId)) {
+			this._removeDraftChatFromParent(sessionId);
 			this._newSessions.deleteAndDispose(sessionId);
+		}
+	}
+
+	private _removeDraftChatFromParent(sessionId: string): void {
+		const parentSessionId = this._draftChatParents.get(sessionId);
+		if (!parentSessionId) {
+			return;
+		}
+		this._draftChatParents.delete(sessionId);
+
+		const draft = this._newSessions.get(sessionId);
+		const parentRawId = this._rawIdFromChatId(parentSessionId);
+		const parent = parentRawId ? this._sessionCache.get(parentRawId) : undefined;
+		if (draft && parent?.removeChat(draft.session.resource)) {
+			this._onDidChangeSessions.fire({ added: [], removed: [], changed: [parent] });
 		}
 	}
 
@@ -1471,24 +1520,7 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 		// new session is tracked independently in `_newSessions` so several can
 		// be in flight at once (e.g. one sending in the background while the
 		// composer re-seeds a fresh draft).
-		const connection = this.connection;
-		const newSession = new NewSession({
-			workspace,
-			sessionType,
-			providerId: this.id,
-			icon: sessionType.icon,
-			resourceScheme: this.resourceSchemeForProvider(sessionType.id),
-			authenticationPending: this.authenticationPending,
-			logService: this._logService,
-			initialConfigValues: this._initialNewSessionConfig(),
-			instantiationService: this._instantiationService,
-			onSessionState: (id, state) => state === undefined
-				? this._handleNewSessionStateGone(id)
-				: this._handleNewSessionStateUpdate(id, state),
-			activeClient: connection
-				? this._activeClientService.getActiveClient(this.resourceSchemeForProvider(sessionType.id), connection.clientId)
-				: undefined,
-		});
+		const newSession = this._createNewSession(workspace, sessionType);
 		this._newSessions.set(newSession.sessionId, newSession);
 		this._onDidChangeSessionConfig.fire(newSession.sessionId);
 
@@ -1497,6 +1529,7 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 		// providers such as Codex reject both paths with AuthRequired; the
 		// subclass calls _resumeNewSessionAfterAuthenticationSettles when the
 		// first auth pass completes.
+		const connection = this.connection;
 		if (connection) {
 			if (!this.authenticationPending.get()) {
 				this._startNewSessionBackend(newSession, connection);
@@ -1505,6 +1538,27 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 			newSession.setLoading(false);
 		}
 		return newSession.session;
+	}
+
+	private _createNewSession(workspace: ISessionWorkspace, sessionType: ISessionType, initialConfigValues: Record<string, unknown> | undefined = this._initialNewSessionConfig()): NewSession {
+		const connection = this.connection;
+		return new NewSession({
+			workspace,
+			sessionType,
+			providerId: this.id,
+			icon: sessionType.icon,
+			resourceScheme: this.resourceSchemeForProvider(sessionType.id),
+			authenticationPending: this.authenticationPending,
+			logService: this._logService,
+			initialConfigValues,
+			instantiationService: this._instantiationService,
+			onSessionState: (id, state) => state === undefined
+				? this._handleNewSessionStateGone(id)
+				: this._handleNewSessionStateUpdate(id, state),
+			activeClient: connection
+				? this._activeClientService.getActiveClient(this.resourceSchemeForProvider(sessionType.id), connection.clientId)
+				: undefined,
+		});
 	}
 
 	protected _resumeNewSessionAfterAuthenticationSettles(): void {
@@ -1782,6 +1836,7 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 
 	clearSessionConfig(sessionId: string): void {
 		if (this._newSessions.has(sessionId)) {
+			this._removeDraftChatFromParent(sessionId);
 			this._newSessions.deleteAndDispose(sessionId);
 		}
 	}
@@ -2069,8 +2124,18 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 		}
 	}
 
-	async deleteChat(_sessionId: string, _chatUri: URI): Promise<void> {
-		// Agent host sessions don't support deleting individual chats
+	async deleteChat(sessionId: string, chatUri: URI): Promise<void> {
+		const draftSessionId = toSessionId(this.id, chatUri);
+		if (this._getNewSession(draftSessionId)) {
+			this.deleteNewSession(draftSessionId);
+			return;
+		}
+
+		const rawId = this._rawIdFromChatId(sessionId);
+		const cached = rawId ? this._sessionCache.get(rawId) : undefined;
+		if (cached?.removeChat(chatUri)) {
+			this._onDidChangeSessions.fire({ added: [], removed: [], changed: [cached] });
+		}
 	}
 
 	async createNewChat(chatId: string): Promise<IChat> {
@@ -2080,20 +2145,53 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 		}
 
 		const newSession = this._getNewSession(chatId);
-		if (!newSession) {
-			throw new Error(`Session '${chatId}' not found or not a new session`);
+		if (newSession) {
+			// Create the chat session model so the management service can open the widget
+			await this._chatSessionsService.getOrCreateChatSession(newSession.session.resource, CancellationToken.None);
+			return newSession.session.mainChat.get();
 		}
 
-		// Create the chat session model so the management service can open the widget
-		await this._chatSessionsService.getOrCreateChatSession(newSession.session.resource, CancellationToken.None);
-		return newSession.session.mainChat.get();
+		const rawId = this._rawIdFromChatId(chatId);
+		const cached = rawId ? this._sessionCache.get(rawId) : undefined;
+		const workspace = cached?.workspace.get();
+		const sessionType = cached ? this.sessionTypes.find(type => type.id === cached.sessionType) : undefined;
+		if (!cached || !workspace || !sessionType) {
+			throw new Error(`Session '${chatId}' not found or does not support creating a new chat`);
+		}
+
+		const initialConfigValues = this._runningSessionConfigs.get(cached.sessionId)?.values ?? this._initialNewSessionConfig();
+		const draft = this._createNewSession(workspace, sessionType, initialConfigValues ? { ...initialConfigValues } : undefined);
+		draft.setTitle(localize('newChat', "New Chat"));
+		if (cached.modelId.get()) {
+			draft.setSelectedModelId(cached.modelId.get()!);
+		}
+		const currentAgent = cached.mode.get();
+		if (currentAgent?.kind === AGENT_MODE_KIND) {
+			const agentName = this.getCustomAgents(cached.sessionId).find(agent => agent.uri === currentAgent.id)?.name ?? '';
+			draft.setSelectedAgent({ uri: currentAgent.id, name: agentName });
+		}
+
+		this._newSessions.set(draft.sessionId, draft);
+		this._draftChatParents.set(draft.sessionId, cached.sessionId);
+		this._onDidChangeSessionConfig.fire(draft.sessionId);
+
+		cached.addChat(draft.session.mainChat.get());
+		this._onDidChangeSessions.fire({ added: [], removed: [], changed: [cached] });
+
+		this._startNewSessionBackend(draft, connection);
+		await this._chatSessionsService.getOrCreateChatSession(draft.session.resource, CancellationToken.None);
+		return draft.session.mainChat.get();
 	}
 
 	async sendRequest(chatId: string, chatResource: URI, options: ISendRequestOptions): Promise<ISession> {
-		const newSession = this._getNewSession(chatId);
+		let newSession = this._getNewSession(chatId);
+		if (!newSession) {
+			newSession = this._getNewSession(toSessionId(this.id, chatResource));
+		}
 		if (!newSession) {
 			throw new Error(`Session '${chatId}' not found or not a new session`);
 		}
+		const parentSessionId = this._draftChatParents.get(newSession.sessionId);
 
 		const connection = this.connection;
 		if (!connection) {
@@ -2187,6 +2285,29 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 		// by the committed AgentHostSession once it arrives.
 		newSession.setTitle(query.split('\n')[0].substring(0, 100) || localize('new session', "New Session"));
 		const skeleton = newSession.session;
+
+		if (parentSessionId) {
+			const parentRawId = this._rawIdFromChatId(parentSessionId);
+			const parent = parentRawId ? this._sessionCache.get(parentRawId) : undefined;
+			try {
+				const committedSession = await this._waitForNewSession(existingKeys);
+				if (committedSession && parent) {
+					this._preserveNewSessionConfig(newSession, committedSession.sessionId);
+					parent.replaceChat(skeleton.resource, committedSession.mainChat.get());
+					this._onDidChangeSessions.fire({ added: [], removed: [], changed: [parent] });
+					newSession.graduate();
+					if (this._newSessions.get(newSession.sessionId) === newSession) {
+						this._newSessions.deleteAndDispose(newSession.sessionId);
+					}
+					this._draftChatParents.delete(newSession.sessionId);
+					return parent;
+				}
+			} catch {
+				// Connection lost or timeout — leave the draft tab in place.
+			}
+			return parent ?? skeleton;
+		}
+
 		this._pendingSession = skeleton;
 		this._onDidChangeSessions.fire({ added: [skeleton], removed: [], changed: [] });
 

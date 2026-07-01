@@ -922,7 +922,10 @@ referencesExpandedWhenEmptyResponse: false,
 		this.titleControl = this._register(this.instantiationService.createInstance(ChatViewTitleControl,
 			parent,
 			{
-				focusChat: () => this._widget.focusInput()
+				focusChat: () => this._widget.focusInput(),
+				openChatSession: async sessionResource => {
+					await this.loadSession(sessionResource);
+				}
 			}
 		));
 

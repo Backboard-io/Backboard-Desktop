@@ -1785,6 +1785,39 @@ suite('LocalAgentHostSessionsProvider', () => {
 		assert.strictEqual(session.title.get(), 'Session abcdef12');
 	}));
 
+	test('session adapter supports multiple chat tabs for existing sessions', async () => {
+		agentHost.addSession(createSession('backboard-session', {
+			summary: 'Backboard',
+			project: { uri: URI.parse('file:///home/user/project'), displayName: 'project' },
+			workingDirectory: URI.parse('file:///home/user/project'),
+		}));
+		const provider = createProvider(disposables, agentHost);
+		provider.getSessions();
+		await timeout(0);
+
+		const session = provider.getSessions().find(session => session.title.get() === 'Backboard');
+		assert.ok(session);
+		assert.strictEqual(session.capabilities.supportsMultipleChats, true);
+
+		const first = await provider.createNewChat(session.sessionId);
+		const second = await provider.createNewChat(session.sessionId);
+		await timeout(0);
+
+		assert.notStrictEqual(first.resource.toString(), second.resource.toString());
+		assert.deepStrictEqual(
+			session.chats.get().map(chat => chat.resource.toString()),
+			[session.resource.toString(), first.resource.toString(), second.resource.toString()],
+		);
+		assert.strictEqual(agentHost.createdSessionUris.length, 2);
+
+		await provider.deleteChat(session.sessionId, first.resource);
+
+		assert.deepStrictEqual(
+			session.chats.get().map(chat => chat.resource.toString()),
+			[session.resource.toString(), second.resource.toString()],
+		);
+	});
+
 	test('new session stays loading when required config is missing', async () => {
 		agentHost.resolveSessionConfigResult = {
 			schema: { type: 'object', required: ['branch'], properties: { branch: { type: 'string', title: 'Branch', enum: ['main'] } } },
