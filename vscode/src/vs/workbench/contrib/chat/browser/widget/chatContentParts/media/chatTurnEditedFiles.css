@@ -43,6 +43,22 @@
 	text-overflow: ellipsis;
 }
 
+.chat-turn-edited-files-diff {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	margin-left: 6px;
+	font-variant-numeric: tabular-nums;
+}
+
+.chat-turn-edited-files-added {
+	color: var(--vscode-scmGraph-historyItemRefColorGreen, var(--vscode-gitDecoration-addedResourceForeground));
+}
+
+.chat-turn-edited-files-removed {
+	color: var(--vscode-scmGraph-historyItemRefColorRed, var(--vscode-gitDecoration-deletedResourceForeground));
+}
+
 .chat-turn-edited-files-list {
 	display: none;
 	flex-direction: column;

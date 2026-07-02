@@ -15,6 +15,8 @@ import { IOpenBrowserToolParams, OpenBrowserToolData } from './openBrowserTool.j
 import { MarkdownString } from '../../../../../base/common/htmlContent.js';
 import { createBrowserPageLink, findExistingPagesByHost, getExistingPagesResult } from './browserToolHelpers.js';
 import { IBrowserViewWorkbenchService } from '../../common/browserView.js';
+import { ICommandService } from '../../../../../platform/commands/common/commands.js';
+import { RightWorkbenchCommandId } from '../../../../../sessions/contrib/rightWorkbench/browser/rightWorkbench.js';
 
 export const OpenBrowserToolNonAgenticData: IToolData = {
 	...OpenBrowserToolData,
@@ -31,6 +33,7 @@ export class OpenBrowserToolNonAgentic implements IToolImpl {
 		@ITelemetryService private readonly telemetryService: ITelemetryService,
 		@IEditorService private readonly editorService: IEditorService,
 		@IBrowserViewWorkbenchService private readonly browserViewService: IBrowserViewWorkbenchService,
+		@ICommandService private readonly commandService: ICommandService,
 	) { }
 
 	async prepareToolInvocation(context: IToolInvocationPreparationContext, _token: CancellationToken): Promise<IPreparedToolInvocation | undefined> {
@@ -69,7 +72,10 @@ export class OpenBrowserToolNonAgentic implements IToolImpl {
 		logBrowserOpen(this.telemetryService, 'chatTool');
 
 		const browserUri = BrowserViewUri.forId(generateUuid());
-		await this.editorService.openEditor({ resource: browserUri, options: { pinned: true, preserveFocus: true, viewState: { url: params.url } } });
+		await this.commandService.executeCommand(RightWorkbenchCommandId.OpenBrowser, {
+			url: params.url,
+			browserViewId: BrowserViewUri.getId(browserUri),
+		});
 
 		return {
 			content: [{

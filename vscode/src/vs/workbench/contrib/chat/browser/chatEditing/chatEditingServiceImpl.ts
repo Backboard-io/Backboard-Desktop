@@ -235,8 +235,8 @@ export class ChatEditingService extends Disposable implements IChatEditingServic
 		// that are edit groups, and then this tracks the edit application for
 		// each of them. Note that text edit groups can be updated
 		// multiple times during the process of response streaming.
-		const enum K { Stream, Workspace }
-		const editsSeen: ({ kind: K.Stream; seen: number; stream: IStreamingEdits } | { kind: K.Workspace })[] = [];
+		const enum K { Stream, Workspace, External }
+		const editsSeen: ({ kind: K.Stream; seen: number; stream: IStreamingEdits } | { kind: K.Workspace } | { kind: K.External })[] = [];
 
 		const initialActiveEditor = this._editorService.activeEditorPane?.input;
 		const editorOpenPromises = new ResourceMap<Promise<void>>();
@@ -291,6 +291,16 @@ export class ChatEditingService extends Disposable implements IChatEditingServic
 					if (!editsSeen[i]) {
 						editsSeen[i] = { kind: K.Workspace };
 						session.applyWorkspaceEdit(part, responseModel, undoStop ?? responseModel.requestId);
+					}
+					continue;
+				}
+
+				if (part.kind === 'externalEdit') {
+					if (!editsSeen[i]) {
+						editsSeen[i] = { kind: K.External };
+						void session.hydrateExternalEdit(responseModel, part).catch(err => {
+							this._logService.error('Failed to hydrate external edit into chat editing session', err);
+						});
 					}
 					continue;
 				}

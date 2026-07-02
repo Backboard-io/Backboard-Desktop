@@ -92,7 +92,7 @@ import { ChatMode, getModeNameForTelemetry, IChatMode, IChatModes, IChatModeServ
 import { IChatFollowup, IChatPlanReview, IChatQuestionCarousel, IChatToolInvocation } from '../../../common/chatService/chatService.js';
 import { IChatSessionProviderOptionGroup, IChatSessionProviderOptionItem, IChatSessionsService, isAgentHostTarget, isIChatSessionFileChange2, localChatSessionType, SessionType } from '../../../common/chatSessionsService.js';
 import { ChatAgentLocation, ChatConfiguration, ChatModeKind, ChatPermissionLevel, isChatPermissionLevel } from '../../../common/constants.js';
-import { IChatEditingSession, IModifiedFileEntry, ModifiedFileEntryState } from '../../../common/editing/chatEditingService.js';
+import { IChatEditingSession, IEditSessionEntryDiff, IModifiedFileEntry, ModifiedFileEntryState } from '../../../common/editing/chatEditingService.js';
 import { ILanguageModelChatMetadata, ILanguageModelChatMetadataAndIdentifier, ILanguageModelsService } from '../../../common/languageModels.js';
 import { ChatModelConfigurationStore } from './chatModelConfigurationStore.js';
 import { IChatModelInputState, IChatRequestModeInfo, IInputModel, logChangesToStateModel } from '../../../common/model/chatModel.js';
@@ -4159,6 +4159,12 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 				}
 			}
 
+			if (entries.length === 0 && chatEditingSession) {
+				for (const diff of chatEditingSession.getDiffsForFilesInSession().read(reader)) {
+					this.pushDiffEntry(entries, seenEntries, diff);
+				}
+			}
+
 			entries.sort((a, b) => {
 				if (a.kind === 'reference' && b.kind === 'reference') {
 					if (a.state === b.state || a.state === undefined || b.state === undefined) {
@@ -4216,6 +4222,25 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 				dom.clearNode(this.chatEditingSessionWidgetContainer);
 				this._chatEditsDisposables.clear();
 				this._chatEditList = undefined;
+			}
+		});
+	}
+
+	private pushDiffEntry(entries: IChatCollapsibleListItem[], seenEntries: ResourceSet, diff: IEditSessionEntryDiff): void {
+		if (seenEntries.has(diff.modifiedURI)) {
+			return;
+		}
+
+		seenEntries.add(diff.modifiedURI);
+		entries.push({
+			reference: diff.modifiedURI,
+			state: ModifiedFileEntryState.Modified,
+			kind: 'reference',
+			options: {
+				status: undefined,
+				diffMeta: { added: diff.added, removed: diff.removed },
+				isDeletion: false,
+				originalUri: diff.originalURI,
 			}
 		});
 	}

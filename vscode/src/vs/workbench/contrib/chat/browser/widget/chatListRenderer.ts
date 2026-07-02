@@ -1396,12 +1396,12 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		if (!this.shouldShowFileChangesSummary(element)) {
 			return undefined;
 		}
-		// Show the summary for both chat editing sessions (textEditGroup/notebookEditGroup)
-		// and agent host sessions (externalEdit parts tracked via AgentHostSnapshotController).
-		const hasEdits = element.model.entireResponse.value.some(part =>
+		const hasExplicitEditParts = element.model.entireResponse.value.some(part =>
 			part.kind === 'textEditGroup' || part.kind === 'notebookEditGroup' || part.kind === 'externalEdit'
 		);
-		if (!hasEdits) {
+		const chatModel = Iterable.find(this.chatService.chatModels.get(), m => isEqual(m.sessionResource, element.sessionResource));
+		const hasRequestDiffs = (chatModel?.editingSession?.getDiffsForFilesInRequest(element.requestId).get().length ?? 0) > 0;
+		if (!hasExplicitEditParts && !hasRequestDiffs) {
 			return undefined;
 		}
 
@@ -3211,21 +3211,17 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		if (!element.isComplete) {
 			return undefined;
 		}
-		const seen = new Set<string>();
-		const uniqueUris: URI[] = [];
-		for (const part of element.model.entireResponse.value) {
-			if (part.kind === 'externalEdit') {
-				const key = part.uri.toString();
-				if (!seen.has(key)) {
-					seen.add(key);
-					uniqueUris.push(part.uri);
-				}
-			}
-		}
-		if (uniqueUris.length === 0) {
+
+		const chatModel = Iterable.find(this.chatService.chatModels.get(), m => isEqual(m.sessionResource, element.sessionResource));
+		if (!chatModel?.editingSession) {
 			return undefined;
 		}
-		return { kind: 'turnEditedFilesSummary', editedUris: uniqueUris };
+
+		return {
+			kind: 'turnEditedFilesSummary',
+			requestId: element.requestId,
+			sessionResource: element.sessionResource
+		};
 	}
 
 	private renderAttachments(variables: readonly IChatRequestVariableEntry[], contentReferences: ReadonlyArray<IChatContentReference> | undefined, modelId: string | undefined, templateData: IChatListItemTemplate) {

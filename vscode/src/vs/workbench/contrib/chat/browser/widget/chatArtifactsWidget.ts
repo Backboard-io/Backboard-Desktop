@@ -28,6 +28,8 @@ import { ChatMemoryFileResource } from '../../common/chatArtifactExtraction.js';
 import { IChatArtifact, IChatArtifactsService, IArtifactSourceGroup, ArtifactSource } from '../../common/tools/chatArtifactsService.js';
 import { IChatImageCarouselService } from '../chatImageCarouselService.js';
 import { getEditorOverrideForChatResource } from './chatContentParts/chatInlineAnchorWidget.js';
+import { RightWorkbenchCommandId } from '../../../../../sessions/contrib/rightWorkbench/browser/rightWorkbench.js';
+import { Schemas } from '../../../../../base/common/network.js';
 
 const ARTIFACT_TYPE_ICONS: Record<string, ThemeIcon> = {
 	devServer: Codicon.globe,
@@ -224,6 +226,8 @@ export class ChatArtifactsWidget extends Disposable {
 			const uri = URI.parse(artifact.uri);
 			if (ChatMemoryFileResource.isChatMemoryFileUri(uri)) {
 				this._openMemoryFileArtifact(uri);
+			} else if (this._shouldOpenInBrowser(artifact, uri)) {
+				void this._commandService.executeCommand(RightWorkbenchCommandId.OpenBrowser, artifact.uri);
 			} else {
 				const editorOverride = getEditorOverrideForChatResource(uri, this._configurationService);
 				this._openerService.open(uri, {
@@ -232,6 +236,22 @@ export class ChatArtifactsWidget extends Disposable {
 				});
 			}
 		}
+	}
+
+	private _shouldOpenInBrowser(artifact: IChatArtifact, uri: URI): boolean {
+		if (artifact.type === 'devServer') {
+			return true;
+		}
+
+		if (uri.scheme === Schemas.http || uri.scheme === Schemas.https) {
+			return true;
+		}
+
+		if (uri.scheme === Schemas.file) {
+			return /\.html?$/i.test(uri.path);
+		}
+
+		return false;
 	}
 
 	private async _openScreenshotInCarousel(clicked: IChatArtifact): Promise<void> {

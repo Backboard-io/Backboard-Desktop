@@ -120,6 +120,24 @@ suite('AgentHostSnapshotController', () => {
 		assert.strictEqual(controller.canRedo.get(), false);
 	});
 
+	test('getDiffsForFilesInRequest exposes request file diffs', () => {
+		const controller = createController(store, new Map());
+		controller.addToolCallEdits('req-1', makeToolCall({
+			toolCallId: 'tc-1',
+			filePath: '/file.ts',
+			beforeURI: 'agenthost-content:///snap/before',
+			afterURI: 'agenthost-content:///snap/after',
+			added: 7,
+			removed: 1,
+		}));
+
+		const diffs = controller.getDiffsForFilesInRequest('req-1').get();
+		assert.strictEqual(diffs.length, 1);
+		assert.strictEqual(diffs[0].added, 7);
+		assert.strictEqual(diffs[0].removed, 1);
+		assert.ok(diffs[0].modifiedURI.toString().includes('/snap/after'));
+	});
+
 	test('addToolCallEdits is idempotent on toolCallId', () => {
 		const controller = createController(store, new Map());
 		const tc = makeToolCall({

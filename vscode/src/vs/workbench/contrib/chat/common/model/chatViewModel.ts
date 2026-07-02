@@ -202,7 +202,8 @@ export interface IChatChangesSummaryPart {
 
 export interface IChatTurnEditedFilesSummaryPart {
 	readonly kind: 'turnEditedFilesSummary';
-	readonly editedUris: URI[];
+	readonly requestId: string;
+	readonly sessionResource: URI;
 }
 
 /**

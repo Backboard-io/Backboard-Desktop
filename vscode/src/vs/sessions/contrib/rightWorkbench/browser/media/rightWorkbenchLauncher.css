@@ -318,6 +318,8 @@
 }
 
 .sessions-right-workbench-browser-chrome {
+	position: relative;
+	z-index: 2;
 	min-height: 42px;
 	border-bottom: 1px solid var(--rwb-border);
 	background: var(--rwb-bg);
@@ -351,6 +353,7 @@
 
 .sessions-right-workbench-browser-content {
 	position: relative;
+	z-index: 1;
 	height: calc(100% - 42px);
 	min-height: 0;
 	overflow: hidden;
