@@ -103,7 +103,7 @@ async function checkBackboardUpdates(manual: boolean): Promise<void> {
 		}
 
 		const canInstall = canInstallBackboardUpdate();
-		const message = `Backboard Studio ${manifest.version} is available from S3. Current version: ${currentVersion}.`;
+		const message = `Backboard Studio ${manifest.version} is available. Current version: ${currentVersion}.`;
 		const actions = canInstall ? ['Install and Restart', 'Download DMG', 'Copy Link', 'Later'] : ['Download DMG', 'Copy Link', 'Later'];
 		const choice = await vscode.window.showInformationMessage(message, ...actions);
 		if (choice === 'Install and Restart') {

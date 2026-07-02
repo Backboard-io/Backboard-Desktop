@@ -72,6 +72,7 @@ import {
 import { SessionsLayoutPolicy } from './layoutPolicy.js';
 import { MobileNavigationStack } from './mobileNavigationStack.js';
 import { MobileTitlebarPart } from './parts/mobile/mobileTitlebarPart.js';
+import { SessionsIntegratedChromePart } from './parts/integratedChromePart.js';
 import { IMobileVisualViewport } from './parts/mobile/mobileVisualViewport.js';
 import { autorun } from '../../base/common/observable.js';
 import { ISessionsService } from '../services/sessions/browser/sessionsService.js';
@@ -266,7 +267,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		let quickPickTop = 0;
 
 		if (this.isVisible(Parts.TITLEBAR_PART, mainWindow)) {
-			top = this.getPart(Parts.TITLEBAR_PART).maximumHeight;
+			top = this.getDesktopChromeHeight();
 			quickPickTop = top;
 		} else if (this.mobileTopBarElement) {
 			// On phone layout the MobileTitlebarPart replaces the titlebar
@@ -306,6 +307,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 	private readonly mobileNavStack = this._register(new MobileNavigationStack());
 	private mobileTopBarElement: HTMLElement | undefined;
 	private readonly mobileTopBarDisposables = this._register(new DisposableStore());
+	private integratedChromePart: SessionsIntegratedChromePart | undefined;
 
 	private _editorMaximized = false;
 	private _editorLastNonMaximizedVisibility: IPartVisibilityState | undefined;
@@ -761,6 +763,8 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		// Warm up font cache information before building up too many dom elements
 		this.restoreFontInfo(storageService, configurationService);
 
+		this.integratedChromePart = this._register(instantiationService.createInstance(SessionsIntegratedChromePart, this.mainContainer));
+
 		// Create Parts (editor starts hidden and is shown when an editor opens)
 		for (const { id, role, classes } of [
 			{ id: Parts.TITLEBAR_PART, role: 'none', classes: ['titlebar'] },
@@ -1164,7 +1168,11 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 			{ proportionalLayout: false }
 		);
 
-		this.mainContainer.prepend(workbenchGrid.element);
+		if (this.integratedChromePart) {
+			this.mainContainer.insertBefore(workbenchGrid.element, this.integratedChromePart.element.nextSibling);
+		} else {
+			this.mainContainer.prepend(workbenchGrid.element);
+		}
 		this.mainContainer.setAttribute('role', 'application');
 		this.workbenchGrid = workbenchGrid;
 		this.workbenchGrid.edgeSnapping = this.mainWindowFullscreen;
@@ -1231,7 +1239,8 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 	 *     - Panel (below chat and right workbench)
 	 */
 	private createGridDescriptor(): ISerializedGrid {
-		const { width, height } = this._mainContainerDimension;
+		const { width } = this._mainContainerDimension;
+		const height = Math.max(0, this._mainContainerDimension.height - this.getDesktopChromeHeight());
 
 		return this.createDesktopGridDescriptor(width, height);
 	}
@@ -1252,10 +1261,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 			?? (this.partVisibility.sidebar ? sizes.sideBarSize : Math.max(sizes.sideBarSize, 250));
 		const panelSize = this._savedPartSizes.panel
 			?? (this.partVisibility.panel ? sizes.panelSize : Math.max(sizes.panelSize, 250));
-		const titleBarHeight = this.titleBarPartView?.minimumHeight ?? 30;
-		const isPhone = this.layoutPolicy.viewportClass.get() === 'phone';
-		const visibleTitleBarHeight = !isPhone ? titleBarHeight : 0;
-		const contentHeight = Math.max(0, height - visibleTitleBarHeight);
+		const contentHeight = Math.max(0, height);
 
 		// Calculate right section width — when sidebar is hidden it takes no space.
 		const effectiveSideBarWidth = this.partVisibility.sidebar ? sideBarSize : 0;
@@ -1293,13 +1299,6 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		const editorSize = this.partVisibility.editor
 			? Math.max(0, rightWorkColumnWidth - (this.partVisibility.auxiliaryBar ? auxiliaryBarSize : 0))
 			: 0;
-
-		const titleBarNode: ISerializedLeafNode = {
-			type: 'leaf',
-			data: { type: Parts.TITLEBAR_PART },
-			size: titleBarHeight,
-			visible: !isPhone
-		};
 
 		const sideBarNode: ISerializedLeafNode = {
 			type: 'leaf',
@@ -1359,11 +1358,10 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 
 		const result: ISerializedGrid = {
 			root: {
-				type: 'branch',
-				data: [titleBarNode, contentSection],
+				...contentSection,
 				size: height
 			},
-			orientation: Orientation.VERTICAL,
+			orientation: Orientation.HORIZONTAL,
 			width,
 			height
 		};
@@ -1393,8 +1391,6 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		if (previousClass !== undefined && previousClass !== currentClass) {
 			if (currentClass === 'phone' && !this.mobileTopBarElement) {
 				this.createMobileTitlebar();
-				// Hide titlebar in grid on phone (replaced by MobileTitlebarPart)
-				this.workbenchGrid.setViewVisible(this.titleBarPartView, false);
 				// On phone, only chat is visible — hide everything else first
 				const defaults = this.layoutPolicy.getPartVisibilityDefaults();
 				if (this.partVisibility.sidebar !== defaults.sidebar) {
@@ -1410,8 +1406,6 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 				// Remove mobile components when leaving phone layout
 				this.mobileTopBarDisposables.clear();
 				this.mobileTopBarElement = undefined;
-				// Restore titlebar in grid
-				this.workbenchGrid.setViewVisible(this.titleBarPartView, true);
 				// Restore desktop part visibility
 				const defaults = this.layoutPolicy.getPartVisibilityDefaults();
 				if (this.partVisibility.sidebar !== defaults.sidebar) {
@@ -1443,19 +1437,33 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 
 		// On phone, subtract the mobile top bar height from the grid
 		const mobileTopBarHeight = this.mobileTopBarElement?.offsetHeight ?? 0;
+		const desktopChromeHeight = this.getDesktopChromeHeight();
+		this.integratedChromePart?.layout(this._mainContainerDimension.width, desktopChromeHeight);
 
 		// Keep the desktop grid flush with the window edges. Individual parts own
 		// their internal borders; the workbench itself must not reserve an outer
 		// gutter or the center chat and right details pane stop short of the edge.
 		const gridWidth = this._mainContainerDimension.width;
-		const gridHeight = this._mainContainerDimension.height - mobileTopBarHeight;
+		const gridHeight = Math.max(0, this._mainContainerDimension.height - mobileTopBarHeight - desktopChromeHeight);
 
 		// Layout the grid widget
 		this.workbenchGrid.layout(gridWidth, gridHeight);
+		this.updateIntegratedChromeBoundaries();
 		this.layoutMobileSidebar();
 
 		// Emit as event
 		this.handleContainerDidLayout(this.mainContainer, this._mainContainerDimension);
+	}
+
+	private getDesktopChromeHeight(): number {
+		return this.layoutPolicy.viewportClass.get() === 'phone' ? 0 : SessionsIntegratedChromePart.HEIGHT;
+	}
+
+	private updateIntegratedChromeBoundaries(): void {
+		this.integratedChromePart?.updatePanelBoundaries(
+			this.partVisibility.sidebar ? this.getContainer(mainWindow, Parts.SIDEBAR_PART) : undefined,
+			this.partVisibility.auxiliaryBar ? this.getContainer(mainWindow, Parts.AUXILIARYBAR_PART) : undefined
+		);
 	}
 
 	private layoutMobileSidebar(): void {
@@ -1675,11 +1683,6 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 			this.sideBarPartView,
 			!hidden,
 		);
-		const isPhone = this.layoutPolicy.viewportClass.get() === 'phone';
-		this.workbenchGrid.setViewVisible(
-			this.titleBarPartView,
-			!isPhone,
-		);
 
 		this.rebalanceSessionsAfterSidebarToggle(hidden, sidebarSizeBeforeToggle, sessionsSizeBeforeToggle);
 
@@ -1741,6 +1744,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 			this.auxiliaryBarPartView,
 			!hidden,
 		);
+		this.updateIntegratedChromeBoundaries();
 
 		// If auxiliary bar becomes hidden, also hide the current active pane composite
 		if (hidden && this.paneCompositeService.getActivePaneComposite(ViewContainerLocation.AuxiliaryBar)) {
@@ -1790,6 +1794,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 			const shouldApplyInitialEditorSize = !hidden && !this._hasAppliedInitialEditorSplit;
 
 			this.workbenchGrid.setViewVisible(this.editorPartView, !hidden);
+			this.updateIntegratedChromeBoundaries();
 
 			if (hidden && this.partVisibility.auxiliaryBar && auxiliaryBarSizeBeforeHide) {
 				this.workbenchGrid.resizeView(this.auxiliaryBarPartView, {
@@ -1974,11 +1979,10 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 			(this.partVisibility.auxiliaryBar ? this.workbenchGrid.getViewSize(this.auxiliaryBarPartView).width : 0) +
 			(this.partVisibility.editor ? this.workbenchGrid.getViewSize(this.editorPartView).width : 0);
 		const panelHeight = this.partVisibility.panel ? this.workbenchGrid.getViewSize(this.panelPartView).height : 0;
-		const titleBarHeight = this.partVisibility.sidebar ? this.workbenchGrid.getViewSize(this.titleBarPartView).height : 0;
 
 		return new Dimension(
 			this._mainContainerDimension.width - sidebarWidth - rightWorkColumnWidth,
-			this._mainContainerDimension.height - titleBarHeight - panelHeight
+			this._mainContainerDimension.height - this.getDesktopChromeHeight() - panelHeight
 		);
 	}
 
@@ -1994,7 +1998,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		if (this.isPanelMaximized()) {
 			this.workbenchGrid.exitMaximizedView();
 		} else {
-			this.workbenchGrid.maximizeView(this.panelPartView, [this.titleBarPartView, this.sideBarPartView]);
+			this.workbenchGrid.maximizeView(this.panelPartView, [this.sideBarPartView]);
 		}
 	}
 
@@ -2134,9 +2138,6 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 
 		const neighborView = neighbor[0];
 
-		if (neighborView === this.titleBarPartView) {
-			return Parts.TITLEBAR_PART;
-		}
 		if (neighborView === this.sideBarPartView) {
 			return Parts.SIDEBAR_PART;
 		}

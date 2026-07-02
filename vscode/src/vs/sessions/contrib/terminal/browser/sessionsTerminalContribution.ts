@@ -31,10 +31,10 @@ import { ContextKeyExpr, IContextKeyService, RawContextKey } from '../../../../p
 import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry.js';
 import { logSessionsInteraction } from '../../../common/sessionsTelemetry.js';
 import { IViewsService } from '../../../../workbench/services/views/common/viewsService.js';
-import { ITerminalProfileService, TERMINAL_VIEW_ID } from '../../../../workbench/contrib/terminal/common/terminal.js';
+import { ITerminalProfileService, TERMINAL_VIEW_ID, TerminalCommandId } from '../../../../workbench/contrib/terminal/common/terminal.js';
 import { ISessionTaskRunnerRegistry } from '../../chat/browser/sessionTaskRunner.js';
 import { AgentHostSessionTaskRunner } from './agentHostSessionTaskRunner.js';
-import { RightWorkbenchCommandId } from '../../rightWorkbench/browser/rightWorkbench.js';
+import { IWorkbenchLayoutService, Parts } from '../../../../workbench/services/layout/browser/layoutService.js';
 
 const SessionsTerminalViewVisibleContext = new RawContextKey<boolean>('sessionsTerminalViewVisible', false);
 
@@ -689,7 +689,8 @@ class OpenSessionInTerminalAction extends Action2 {
 		const telemetryService = _accessor.get(ITelemetryService);
 		logSessionsInteraction(telemetryService, 'openTerminal');
 
-		await _accessor.get(ICommandService).executeCommand(RightWorkbenchCommandId.OpenTerminal);
+		_accessor.get(IWorkbenchLayoutService).setPartHidden(false, Parts.PANEL_PART);
+		await _accessor.get(ICommandService).executeCommand(TerminalCommandId.Focus);
 	}
 }
 

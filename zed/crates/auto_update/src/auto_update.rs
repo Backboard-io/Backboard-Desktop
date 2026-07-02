@@ -612,7 +612,7 @@ impl AutoUpdater {
         if let Some(manifest_url) =
             bbide_update_manifest_url(release_channel, version.as_ref(), asset, os, arch)
         {
-            log::info!("Auto Update: fetching BBIDE update manifest from S3");
+            log::info!("Auto Update: fetching BBIDE update manifest");
             return fetch_release_asset_url(http_client, &manifest_url).await;
         }
 

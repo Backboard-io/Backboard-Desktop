@@ -280,6 +280,9 @@ export class TitlebarPart extends Part implements ITitlebarPart {
 	}
 
 	private updateWelcomeToolbarVisibility(): void {
+		if (!this.rightToolbarContainer || !this.sessionActionsContainer) {
+			return;
+		}
 		const hideRightTitlebarActions = !!SessionsWelcomeVisibleContext.getValue(this.contextKeyService);
 		this.rightToolbarContainer.classList.toggle('hidden-for-welcome', hideRightTitlebarActions);
 		this.sessionActionsContainer.classList.toggle('hidden-for-welcome', hideRightTitlebarActions);
@@ -462,6 +465,12 @@ export class MainTitlebarPart extends TitlebarPart {
 
 	override get minimumHeight(): number { return 0; }
 	override get maximumHeight(): number { return 0; }
+
+	protected override createContentArea(parent: HTMLElement): HTMLElement {
+		this.element = parent;
+		this.rootContainer = append(parent, $('.sessions-titlebar-compatibility-shell'));
+		return this.element;
+	}
 
 	constructor(
 		@IContextMenuService contextMenuService: IContextMenuService,

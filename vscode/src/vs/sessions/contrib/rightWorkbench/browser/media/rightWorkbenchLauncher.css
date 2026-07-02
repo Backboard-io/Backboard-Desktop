@@ -6,8 +6,8 @@
 .agent-sessions-workbench .part.auxiliarybar {
 	height: 100% !important;
 	min-height: 0 !important;
-	background: var(--vscode-sideBar-background);
-	border-left: 1px solid var(--vscode-sideBar-border, var(--vscode-panel-border));
+	background: var(--sessions-main-region-background, var(--vscode-agents-background, var(--vscode-editor-background)));
+	border-left: none !important;
 }
 
 .agent-sessions-workbench .part.auxiliarybar > .title,
@@ -21,8 +21,8 @@
 
 .agent-sessions-workbench .part.auxiliarybar > .content {
 	height: 100% !important;
-	background: var(--vscode-sideBar-background) !important;
-	background-color: var(--vscode-sideBar-background) !important;
+	background: var(--sessions-main-region-background, var(--vscode-agents-background, var(--vscode-editor-background))) !important;
+	background-color: var(--sessions-main-region-background, var(--vscode-agents-background, var(--vscode-editor-background))) !important;
 }
 
 .agent-sessions-workbench .part.auxiliarybar .pane-header {
@@ -35,7 +35,7 @@
 }
 
 .sessions-right-workbench-shell {
-	--rwb-bg: var(--vscode-agentsPanel-background, var(--vscode-sideBar-background, var(--vscode-editor-background)));
+	--rwb-bg: var(--sessions-main-region-background, var(--vscode-agents-background, var(--vscode-editor-background)));
 	--rwb-bg-muted: var(--vscode-sideBarSectionHeader-background, var(--rwb-bg));
 	--rwb-chrome: var(--vscode-editorGroupHeader-tabsBackground, var(--rwb-bg-muted));
 	--rwb-chrome-soft: var(--vscode-sideBar-background, var(--rwb-bg));
@@ -67,7 +67,7 @@
 	min-height: 44px;
 	padding: 6px 10px;
 	box-sizing: border-box;
-	border-bottom: 1px solid var(--rwb-border);
+	border-bottom: 0;
 	background: var(--rwb-bg);
 }
 

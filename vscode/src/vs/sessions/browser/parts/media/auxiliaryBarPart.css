@@ -6,21 +6,20 @@
 /* ===== Modern action label styling for sessions auxiliary bar ===== */
 
 .agent-sessions-workbench .monaco-grid-view .part.auxiliarybar {
-	background: var(--vscode-agentsPanel-background, var(--vscode-sideBar-background));
-	border: 1px solid color-mix(in srgb, var(--vscode-agentsPanel-border, var(--vscode-sideBar-border, var(--vscode-widget-border, transparent))) 72%, transparent);
-	border-right: none;
+	background: var(--sessions-main-region-background, var(--vscode-agents-background, var(--vscode-editor-background)));
+	border: none;
 	border-radius: 8px 0 0 8px;
 	box-sizing: border-box;
 	overflow: hidden;
 }
 
 .agent-sessions-workbench.nomaineditorarea .monaco-grid-view .part.auxiliarybar {
-	border-right: 1px solid color-mix(in srgb, var(--vscode-agentsPanel-border, var(--vscode-sideBar-border, var(--vscode-widget-border, transparent))) 72%, transparent);
+	border-right: none;
 	border-radius: 8px;
 }
 
 .agent-sessions-workbench .part.auxiliarybar > .content {
-	background: var(--vscode-agentsPanel-background, var(--vscode-sideBar-background));
+	background: var(--sessions-main-region-background, var(--vscode-agents-background, var(--vscode-editor-background)));
 }
 
 /* Base label: lowercase text + heavier weight + pill padding */
@@ -49,8 +48,8 @@
 	min-height: 48px;
 	padding-left: 14px;
 	padding-right: 10px;
-	background-color: color-mix(in srgb, var(--vscode-agentsPanel-background, var(--vscode-sideBar-background)) 94%, var(--vscode-editor-background));
-	border-bottom: 1px solid color-mix(in srgb, var(--vscode-agentsPanel-border, var(--vscode-sideBar-border, var(--vscode-widget-border, transparent))) 48%, transparent);
+	background-color: var(--sessions-main-region-background, var(--vscode-agents-background, var(--vscode-editor-background)));
+	border-bottom: 0;
 	box-sizing: border-box;
 }
 
@@ -80,5 +79,5 @@
 .agent-sessions-workbench .part.auxiliarybar > .content .monaco-editor,
 .agent-sessions-workbench .part.auxiliarybar > .content .monaco-editor .margin,
 .agent-sessions-workbench .part.auxiliarybar > .content .monaco-editor .monaco-editor-background {
-	background-color: var(--vscode-agentsPanel-background);
+	background-color: var(--sessions-main-region-background, var(--vscode-agents-background, var(--vscode-editor-background)));
 }

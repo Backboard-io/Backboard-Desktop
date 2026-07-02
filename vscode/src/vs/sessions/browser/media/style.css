@@ -18,20 +18,30 @@
 
 /* ---- Sidebar & Auxiliary Bar Card Appearance ---- */
 
+.agent-sessions-workbench {
+	--sessions-sidebar-region-background: color-mix(in srgb, var(--vscode-sideBar-background, var(--vscode-editor-background)) 78%, transparent);
+	--sessions-main-region-background: var(--vscode-agents-background, var(--vscode-editor-background));
+}
+
+.monaco-workbench.vs.agent-sessions-workbench {
+	--sessions-sidebar-region-background: var(--vscode-sideBar-background, color-mix(in srgb, var(--vscode-editor-background) 94%, var(--vscode-foreground) 6%));
+	--sessions-main-region-background: var(--vscode-agents-background, color-mix(in srgb, var(--vscode-editor-background) 96%, var(--vscode-foreground) 4%));
+}
+
 .agent-sessions-workbench .part.sidebar {
-	background: color-mix(in srgb, var(--vscode-sideBar-background, var(--vscode-editor-background)) 78%, transparent);
+	background: var(--sessions-sidebar-region-background);
 	-webkit-backdrop-filter: blur(20px);
 	backdrop-filter: blur(20px);
 }
 
 .agent-sessions-workbench > .monaco-grid-view {
-	background-color: var(--vscode-agents-background);
+	background-color: var(--sessions-main-region-background);
 }
 
 .agent-sessions-workbench.shell-gradient-background {
 	position: relative;
 	isolation: isolate;
-	background: var(--vscode-agents-background);
+	background: var(--sessions-main-region-background);
 }
 
 .agent-sessions-workbench.shell-gradient-background::before {
@@ -40,7 +50,7 @@
 	inset: 0;
 	z-index: 0;
 	pointer-events: none;
-	background: var(--vscode-agents-background);
+	background: var(--sessions-main-region-background);
 }
 
 @supports (background: color-mix(in srgb, black 0%, white)) {
@@ -80,7 +90,7 @@
 
 .monaco-workbench.agent-sessions-workbench.shell-gradient-background,
 .monaco-workbench.agent-sessions-workbench.shell-gradient-background::before {
-	background: var(--vscode-editor-background) !important;
+	background: var(--sessions-main-region-background) !important;
 }
 
 .monaco-workbench.agent-sessions-workbench > .notifications-center {
@@ -141,7 +151,7 @@
 .agent-sessions-workbench.shell-gradient-background > .monaco-grid-view {
 	position: relative;
 	z-index: 1;
-	background: var(--vscode-editor-background) !important;
+	background: var(--sessions-main-region-background) !important;
 }
 
 /**
@@ -194,7 +204,7 @@
 
 .agent-sessions-workbench .part.sessionspart {
 	margin: 0;
-	background: var(--vscode-editor-background) !important;
+	background: var(--sessions-main-region-background) !important;
 	border: none !important;
 	border-radius: 0;
 	box-sizing: border-box;
@@ -250,7 +260,7 @@
 	 * container and also receive `agent-sessions-workbench` via `trackAttributes`.
 	 */
 	margin: 0;
-	background: var(--vscode-editor-background) !important;
+	background: var(--sessions-main-region-background) !important;
 	border: none;
 	border-radius: 0;
 	box-sizing: border-box;
@@ -273,7 +283,7 @@
 .agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.sessionspart),
 .agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.editor:not(.modal-editor-part)),
 .agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.auxiliarybar) {
-	background: var(--vscode-editor-background) !important;
+	background: var(--sessions-main-region-background) !important;
 	border-radius: 0 !important;
 	box-sizing: border-box;
 }
@@ -486,8 +496,6 @@
 .agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sidebar),
 .agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view:has(> .monaco-grid-branch-node .part.sidebar) {
 	transition:
-		left 180ms ease-out,
-		width 180ms ease-out,
 		opacity 140ms ease-out;
 }
 
@@ -495,7 +503,7 @@
 	min-height: 38px !important;
 	height: 38px !important;
 	padding: 0 8px;
-	background-color: var(--vscode-editor-background) !important;
+	background-color: var(--sessions-main-region-background) !important;
 	border-bottom: 1px solid color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
 	box-sizing: border-box;
 	transition: padding-left 180ms ease-out, background-color 180ms ease-out;
@@ -508,7 +516,7 @@
 }
 
 .agent-sessions-workbench .part.sessionspart > .content {
-	background-color: var(--vscode-editor-background) !important;
+	background-color: var(--sessions-main-region-background) !important;
 	position: relative;
 }
 
@@ -520,16 +528,23 @@
 .agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.editor:not(.modal-editor-part)),
 .agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.auxiliarybar) {
 	border: none !important;
-	background: var(--vscode-editor-background) !important;
+	background: var(--sessions-main-region-background) !important;
 }
 
 .agent-sessions-workbench .part.sessionspart > .title,
-.agent-sessions-workbench .part.editor .title.tabs,
+.agent-sessions-workbench .part.editor .title.tabs {
+	min-height: 38px !important;
+	height: 38px !important;
+	background-color: var(--sessions-main-region-background) !important;
+	border-bottom: 1px solid color-mix(in srgb, var(--vscode-foreground) 8%, transparent) !important;
+	box-sizing: border-box;
+}
+
 .agent-sessions-workbench .part.auxiliarybar > .composite.title.has-composite-bar {
 	min-height: 38px !important;
 	height: 38px !important;
-	background-color: var(--vscode-editor-background) !important;
-	border-bottom: 1px solid color-mix(in srgb, var(--vscode-foreground) 8%, transparent) !important;
+	background-color: var(--sessions-main-region-background) !important;
+	border-bottom: 0 !important;
 	box-sizing: border-box;
 }
 
@@ -544,9 +559,12 @@
 }
 
 .agent-sessions-workbench .part.sessionspart > .title,
-.agent-sessions-workbench .part.editor .title.tabs,
-.agent-sessions-workbench .part.auxiliarybar > .composite.title.has-composite-bar {
+.agent-sessions-workbench .part.editor .title.tabs {
 	border-bottom: 1px solid var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 14%, transparent)) !important;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .composite.title.has-composite-bar {
+	border-bottom: 0 !important;
 }
 
 .agent-sessions-workbench .part.auxiliarybar {
@@ -556,7 +574,7 @@
 	*/
 	margin: 0;
 	padding-left: 0;
-	background: var(--vscode-editor-background) !important;
+	background: var(--sessions-main-region-background) !important;
 	border: none;
 	border-radius: 0;
 	box-sizing: border-box;
@@ -577,7 +595,7 @@
 .agent-sessions-workbench .part.auxiliarybar > .title,
 .agent-sessions-workbench .part.auxiliarybar > .content,
 .agent-sessions-workbench .part.auxiliarybar > .content .pane-body {
-	background-color: var(--vscode-editor-background) !important;
+	background-color: var(--sessions-main-region-background) !important;
 }
 
 .agent-sessions-workbench .part.auxiliarybar .pane-composite-part,
@@ -589,7 +607,7 @@
 .agent-sessions-workbench .part.auxiliarybar .monaco-tree,
 .agent-sessions-workbench .part.auxiliarybar .monaco-tree-rows,
 .agent-sessions-workbench .part.auxiliarybar .monaco-scrollable-element {
-	background-color: var(--vscode-editor-background) !important;
+	background-color: var(--sessions-main-region-background) !important;
 	border-radius: 0 !important;
 }
 
@@ -598,8 +616,8 @@
 	min-height: 34px;
 	padding: 0 6px 0 4px;
 	box-sizing: border-box;
-	background-color: var(--vscode-editor-background) !important;
-	border-bottom: 1px solid color-mix(in srgb, var(--vscode-foreground) 8%, transparent) !important;
+	background-color: var(--sessions-main-region-background) !important;
+	border-bottom: 0 !important;
 	border-radius: 0;
 }
 
@@ -840,6 +858,10 @@
 
 .agent-sessions-workbench .monaco-sash:before {
 	border-radius: calc(var(--vscode-sash-hover-size) / 2);
+}
+
+.agent-sessions-workbench .monaco-sash.vertical:before {
+	left: calc(50% - (var(--vscode-sash-hover-size) / 2) - (var(--vscode-sash-size) / 2));
 }
 
 .agent-sessions-workbench .monaco-sash:not(.disabled) > .orthogonal-drag-handle {
