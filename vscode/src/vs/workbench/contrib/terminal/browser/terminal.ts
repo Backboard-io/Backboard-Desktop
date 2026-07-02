@@ -728,6 +728,11 @@ export interface ICreateTerminalOptions {
 	location?: ITerminalLocationOptions;
 
 	/**
+	 * Overrides the xterm color provider for terminals embedded in custom surfaces.
+	 */
+	colorProvider?: IXtermColorProvider;
+
+	/**
 	 * This terminal will not wait for contributed profiles to resolve which means it will proceed
 	 * when the workbench is not yet loaded.
 	 */

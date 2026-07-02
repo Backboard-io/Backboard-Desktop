@@ -291,13 +291,6 @@ export class ModePicker extends Disposable {
 		}
 
 		// Configure Custom Agents action
-		items.push({ kind: ActionListItemKind.Separator, label: '' });
-		items.push({
-			kind: ActionListItemKind.Action,
-			label: localize('configureCustomAgents', "Configure Custom Agents..."),
-			group: { title: '', icon: Codicon.blank },
-			item: { kind: 'configure' },
-		});
 
 		return items;
 	}

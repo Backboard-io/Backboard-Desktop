@@ -164,7 +164,7 @@ export const agentsUnreadBadgeForeground = registerColor(
 );
 
 export const activeSessionViewBackground = registerColor(
-	'activeSessionView.background', agentsPanelBackground,
+	'activeSessionView.background', agentsBackground,
 	localize('activeSessionView.background', 'Background color of an active session view in the agent sessions window.')
 );
 

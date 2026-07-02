@@ -43,7 +43,6 @@
 	--sessions-sidebar-hover-left: 0px;
 	--sessions-auxiliary-divider-left: -1px;
 	--sessions-auxiliary-hover-left: -1px;
-	--sessions-integrated-sidebar-background: var(--sessions-sidebar-region-background, color-mix(in srgb, var(--vscode-sideBar-background, var(--vscode-editor-background)) 78%, transparent));
 	--sessions-integrated-main-background: var(--sessions-main-region-background, var(--vscode-agents-background, var(--vscode-editor-background)));
 	position: relative;
 	display: flex;

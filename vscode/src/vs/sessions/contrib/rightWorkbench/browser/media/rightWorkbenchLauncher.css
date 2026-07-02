@@ -46,6 +46,10 @@
 	--rwb-selection-border: var(--vscode-list-activeSelectionOutline, var(--vscode-focusBorder, transparent));
 	--rwb-foreground: var(--vscode-foreground, var(--vscode-editor-foreground));
 	--rwb-muted: var(--vscode-descriptionForeground, var(--vscode-input-placeholderForeground, var(--rwb-foreground)));
+	--rwb-success: var(--vscode-gitDecoration-addedResourceForeground, var(--vscode-testing-iconPassed, var(--rwb-foreground)));
+	--rwb-danger: var(--vscode-gitDecoration-deletedResourceForeground, var(--vscode-errorForeground, var(--rwb-foreground)));
+	--rwb-warning: var(--vscode-gitDecoration-modifiedResourceForeground, var(--vscode-editorWarning-foreground, var(--rwb-foreground)));
+	--rwb-inserted-line-background: var(--vscode-diffEditor-insertedLineBackground, color-mix(in srgb, var(--rwb-success) 22%, transparent));
 	position: relative;
 	display: flex;
 	flex-direction: column;
@@ -146,6 +150,7 @@
 }
 
 .sessions-right-workbench-tab-add .codicon {
+	color: currentColor;
 	font-size: 15px;
 }
 
@@ -198,7 +203,7 @@
 	border: 1px solid var(--rwb-border-strong);
 	border-radius: 8px;
 	background: var(--rwb-chrome-soft);
-	box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+	box-shadow: 0 10px 28px var(--vscode-widget-shadow, transparent);
 }
 
 .sessions-right-workbench-mode-picker-row {
@@ -212,7 +217,7 @@
 	box-sizing: border-box;
 	border: 0;
 	border-radius: 6px;
-	color: #ededee;
+	color: var(--rwb-foreground);
 	background: transparent;
 	text-align: left;
 	cursor: pointer;
@@ -220,12 +225,12 @@
 
 .sessions-right-workbench-mode-picker-row:hover,
 .sessions-right-workbench-mode-picker-row.active {
-	background: #242426;
-	color: #ffffff;
+	background: var(--rwb-hover);
+	color: var(--rwb-foreground);
 }
 
 .sessions-right-workbench-mode-picker-row .codicon {
-	color: #c5c5c8;
+	color: var(--vscode-icon-foreground, var(--rwb-muted));
 	font-size: 13px;
 }
 
@@ -238,7 +243,7 @@
 }
 
 .sessions-right-workbench-mode-picker-shortcut {
-	color: #a7a7aa;
+	color: var(--rwb-muted);
 	font-size: 11px;
 	line-height: 16px;
 	white-space: nowrap;
@@ -340,14 +345,14 @@
 	height: 28px;
 	border: 0;
 	outline: 0;
-	color: #f2f2f2;
+	color: var(--vscode-input-foreground, var(--rwb-foreground));
 	background: transparent;
 	text-align: center;
 	font-size: 13px;
 }
 
 .sessions-right-workbench-browser-url::placeholder {
-	color: #858589;
+	color: var(--vscode-input-placeholderForeground, var(--rwb-muted));
 	opacity: 1;
 }
 
@@ -371,14 +376,14 @@
 
 .sessions-right-workbench-browser-empty .codicon {
 	margin-bottom: 12px;
-	color: #8f8f92;
+	color: var(--rwb-muted);
 	font-size: 36px;
 }
 
 .sessions-right-workbench-browser-empty h2,
 .sessions-right-workbench-file-empty h2 {
 	margin: 0;
-	color: #ffffff;
+	color: var(--rwb-foreground);
 	font-size: 16px;
 	font-weight: 600;
 	line-height: 22px;
@@ -387,7 +392,7 @@
 .sessions-right-workbench-browser-empty p,
 .sessions-right-workbench-file-empty p {
 	margin: 8px 0 0;
-	color: #8f8f92;
+	color: var(--rwb-muted);
 	font-size: 13px;
 	line-height: 18px;
 }
@@ -408,7 +413,7 @@
 	height: 28px;
 	border: 1px solid var(--rwb-border-strong);
 	border-radius: 8px;
-	color: #ffffff;
+	color: var(--rwb-foreground);
 	background: transparent;
 	font-size: 13px;
 }
@@ -427,11 +432,11 @@
 }
 
 .sessions-right-workbench-review-additions {
-	color: #11d66f;
+	color: var(--rwb-success);
 }
 
 .sessions-right-workbench-review-deletions {
-	color: #ff404d;
+	color: var(--rwb-danger);
 }
 
 .sessions-right-workbench-review-spacer {
@@ -466,7 +471,7 @@
 	min-width: 0;
 	min-height: 0;
 	overflow: hidden;
-	background: #0d0d0e;
+	background: var(--rwb-bg);
 }
 
 .sessions-right-workbench-review.sessions-right-workbench-review-empty-state .sessions-right-workbench-review-rail {
@@ -542,7 +547,7 @@
 .sessions-right-workbench-review-rail .monaco-list.last-focused .monaco-list-row.focused {
 	outline: 1px solid var(--rwb-selection-border) !important;
 	outline-offset: -1px;
-	color: #ffffff;
+	color: var(--rwb-foreground);
 	background: var(--rwb-selection) !important;
 }
 
@@ -555,7 +560,7 @@
 	padding: 0 10px;
 	box-sizing: border-box;
 	border-bottom: 1px solid var(--rwb-border);
-	color: #f7f7f7;
+	color: var(--rwb-foreground);
 	font-size: 13px;
 	background: var(--rwb-chrome);
 }
@@ -567,7 +572,7 @@
 }
 
 .sessions-right-workbench-review-file-count {
-	color: #16d86f;
+	color: var(--rwb-success);
 }
 
 .sessions-right-workbench-review-diff {
@@ -583,7 +588,7 @@
 	height: 28px;
 	padding-left: 56px;
 	border-radius: 6px;
-	color: #a9a9ad;
+	color: var(--rwb-muted);
 	background: var(--rwb-chrome-soft);
 	line-height: 28px;
 }
@@ -591,28 +596,28 @@
 .sessions-right-workbench-diff-line {
 	display: grid;
 	grid-template-columns: 44px minmax(0, 1fr);
-	color: #f0b26a;
+	color: var(--rwb-warning);
 }
 
 .sessions-right-workbench-diff-line.added {
-	background: rgba(15, 122, 57, 0.28);
+	background: var(--rwb-inserted-line-background);
 }
 
 .sessions-right-workbench-diff-number {
 	padding-right: 10px;
-	color: #a2a2a5;
+	color: var(--rwb-muted);
 	text-align: right;
 }
 
 .sessions-right-workbench-diff-line.added .sessions-right-workbench-diff-number {
-	color: #18d672;
+	color: var(--rwb-success);
 }
 
 .sessions-right-workbench-diff-line code {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: pre;
-	color: #ff9f5f;
+	color: var(--rwb-warning);
 }
 
 .sessions-right-workbench-review-editor {
@@ -627,7 +632,7 @@
 	display: flex;
 	flex-direction: column;
 	min-height: 0;
-	background: #0d0d0e;
+	background: var(--rwb-bg);
 }
 
 .sessions-right-workbench-review-scm-fallback {
@@ -650,7 +655,7 @@
 	padding: 0 10px;
 	box-sizing: border-box;
 	border-bottom: 1px solid var(--rwb-border);
-	color: #ffffff;
+	color: var(--rwb-foreground);
 	font-size: 12px;
 	font-weight: 600;
 }
@@ -661,7 +666,7 @@
 }
 
 .sessions-right-workbench-review-scm-count {
-	color: #16d86f;
+	color: var(--rwb-success);
 	font-size: 12px;
 	font-weight: 600;
 }
@@ -689,7 +694,7 @@
 	box-sizing: border-box;
 	border: 0;
 	border-radius: 7px;
-	color: #e8e8e8;
+	color: var(--rwb-foreground);
 	background: transparent;
 	text-align: left;
 	cursor: pointer;
@@ -731,17 +736,17 @@
 }
 
 .sessions-right-workbench-review-scm-row:hover {
-	background: #171718;
+	background: var(--rwb-hover);
 }
 
 .sessions-right-workbench-review-scm-row.selected {
-	outline: 1px solid rgba(61, 126, 145, 0.85);
+	outline: 1px solid var(--rwb-selection-border);
 	outline-offset: -1px;
-	background: #132029;
+	background: var(--rwb-selection);
 }
 
 .sessions-right-workbench-review-scm-row .codicon {
-	color: #85858b;
+	color: var(--vscode-icon-foreground, var(--rwb-muted));
 	font-size: 12px;
 }
 
@@ -760,14 +765,14 @@
 }
 
 .sessions-right-workbench-review-scm-name {
-	color: #f2f2f2;
+	color: var(--rwb-foreground);
 	font-size: 12px;
 	font-weight: 600;
 	line-height: 15px;
 }
 
 .sessions-right-workbench-review-scm-path {
-	color: #85858b;
+	color: var(--rwb-muted);
 	font-size: 10px;
 	line-height: 13px;
 }
@@ -775,7 +780,7 @@
 .sessions-right-workbench-review-scm-status {
 	max-width: 68px;
 	overflow: hidden;
-	color: #9a9aa0;
+	color: var(--rwb-muted);
 	font-size: 10px;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -791,11 +796,11 @@
 }
 
 .sessions-right-workbench-review-scm-additions {
-	color: #18d672;
+	color: var(--rwb-success);
 }
 
 .sessions-right-workbench-review-scm-deletions {
-	color: #ff4d62;
+	color: var(--rwb-danger);
 }
 
 .sessions-right-workbench-review-empty {
@@ -805,7 +810,7 @@
 	flex-direction: column;
 	align-items: center;
 	justify-content: center;
-	color: #8f8f92;
+	color: var(--rwb-muted);
 	text-align: center;
 }
 
@@ -816,7 +821,7 @@
 
 .sessions-right-workbench-review-empty h2 {
 	margin: 0;
-	color: #ffffff;
+	color: var(--rwb-foreground);
 	font-size: 16px;
 	font-weight: 600;
 }
@@ -997,7 +1002,7 @@
 	height: 100%;
 	box-sizing: border-box;
 	background: var(--rwb-bg);
-	color: #f1f1f1;
+	color: var(--rwb-foreground);
 	font-family: Menlo, Monaco, Consolas, monospace;
 	font-size: 13px;
 }
@@ -1130,7 +1135,7 @@
 
 .sessions-right-workbench-mode-browser .sessions-right-workbench-browser-url {
 	border-radius: 7px;
-	background: #141415;
+	background: var(--vscode-input-background, var(--rwb-chrome));
 }
 
 .sessions-right-workbench-mode-browser .sessions-right-workbench-icon-button:disabled {
@@ -1292,12 +1297,12 @@
 }
 
 .sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .modal-editor-action-container .action-label:hover {
-	color: #ffffff;
+	color: var(--rwb-foreground);
 	background: var(--rwb-hover) !important;
 }
 
 .sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .modal-editor-action-container .action-label.checked {
-	color: #d8d8dc;
+	color: var(--rwb-foreground);
 	background: transparent !important;
 	outline: 1px solid var(--rwb-border-strong);
 	outline-offset: -1px;
@@ -1318,18 +1323,18 @@
 
 .sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .scrollbar .slider {
 	border-radius: 999px;
-	background: #2a2a2e !important;
+	background: var(--vscode-scrollbarSlider-background, var(--rwb-border-strong)) !important;
 }
 
 .sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .monaco-editor .current-line,
 .sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .monaco-editor .view-overlays .current-line {
 	border-color: transparent !important;
-	background: rgba(255, 255, 255, 0.025) !important;
+	background: var(--vscode-editor-lineHighlightBackground, transparent) !important;
 }
 
 .sessions-right-workbench-file-explorer-host .monaco-list-row {
 	border-radius: 0;
-	color: #e8e8ea;
+	color: var(--rwb-foreground);
 	background: transparent !important;
 }
 
@@ -1346,7 +1351,7 @@
 .sessions-right-workbench-file-explorer-host .monaco-list.last-focused .monaco-list-row.focused {
 	outline: 1px solid var(--rwb-selection-border) !important;
 	outline-offset: -1px;
-	color: #ffffff;
+	color: var(--rwb-foreground);
 	background: var(--rwb-selection) !important;
 }
 
@@ -1357,7 +1362,7 @@
 }
 
 .sessions-right-workbench-file-explorer-host .monaco-tl-indent > .indent-guide {
-	border-color: #2a2a2d !important;
+	border-color: var(--vscode-tree-indentGuidesStroke, var(--rwb-border)) !important;
 }
 
 .agent-sessions-workbench .part.auxiliarybar .sessions-right-workbench-file-explorer-host > .pane,

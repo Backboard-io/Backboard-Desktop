@@ -9,6 +9,7 @@
 	height: 100%;
 	width: 100%;
 	position: relative;
+	background: var(--session-view-background, var(--sessions-main-region-background, var(--vscode-agents-background, var(--vscode-editor-background))));
 }
 
 .sessions-chat-widget > .agents-aquarium-toggle {
@@ -25,7 +26,7 @@
 	box-sizing: border-box;
 	overflow: hidden;
 	padding: 0;
-	background: var(--vscode-editor-background);
+	background: var(--session-view-background, var(--sessions-main-region-background, var(--vscode-agents-background, var(--vscode-editor-background))));
 	/* Establishes a size container so the @container (max-width: 330px) query below
 	 * can collapse picker labels to icon-only when the new-chat area is narrow. */
 	container-type: size;
@@ -86,8 +87,8 @@
 	box-sizing: border-box;
 	overflow: hidden;
 	flex: 1 1 auto;
-	background: var(--vscode-editor-background);
-	border-right: 1px solid color-mix(in srgb, var(--vscode-editorWidget-border, var(--vscode-contrastBorder)) 48%, transparent);
+	background: var(--session-view-background, var(--sessions-main-region-background, var(--vscode-agents-background, var(--vscode-editor-background))));
+	border-right: 0;
 	position: relative;
 }
 
@@ -99,7 +100,7 @@
 	padding: 0 18px;
 	box-sizing: border-box;
 	border-bottom: 1px solid color-mix(in srgb, var(--vscode-editorWidget-border, var(--vscode-contrastBorder)) 36%, transparent);
-	background: var(--vscode-editor-background);
+	background: var(--session-view-background, var(--sessions-main-region-background, var(--vscode-agents-background, var(--vscode-editor-background))));
 	color: var(--vscode-foreground);
 	overflow: hidden;
 }
