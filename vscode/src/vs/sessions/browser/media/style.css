@@ -19,7 +19,8 @@
 /* ---- Sidebar & Auxiliary Bar Card Appearance ---- */
 
 .agent-sessions-workbench {
-	--sessions-sidebar-region-background: color-mix(in srgb, var(--vscode-sideBar-background, var(--vscode-editor-background)) 78%, transparent);
+	--sessions-sidebar-region-background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+	--sessions-integrated-sidebar-background: var(--sessions-sidebar-region-background);
 	--sessions-main-region-background: var(--vscode-agents-background, var(--vscode-editor-background));
 }
 
@@ -203,8 +204,9 @@
 }
 
 .agent-sessions-workbench .part.sessionspart {
+	--session-view-background: #ffffff;
 	margin: 0;
-	background: var(--sessions-main-region-background) !important;
+	background: #ffffff !important;
 	border: none !important;
 	border-radius: 0;
 	box-sizing: border-box;
@@ -503,7 +505,7 @@
 	min-height: 38px !important;
 	height: 38px !important;
 	padding: 0 8px;
-	background-color: var(--sessions-main-region-background) !important;
+	background-color: #ffffff !important;
 	border-bottom: 1px solid color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
 	box-sizing: border-box;
 	transition: padding-left 180ms ease-out, background-color 180ms ease-out;
@@ -516,7 +518,7 @@
 }
 
 .agent-sessions-workbench .part.sessionspart > .content {
-	background-color: var(--sessions-main-region-background) !important;
+	background-color: #ffffff !important;
 	position: relative;
 }
 
@@ -535,7 +537,7 @@
 .agent-sessions-workbench .part.editor .title.tabs {
 	min-height: 38px !important;
 	height: 38px !important;
-	background-color: var(--sessions-main-region-background) !important;
+	background-color: #ffffff !important;
 	border-bottom: 1px solid color-mix(in srgb, var(--vscode-foreground) 8%, transparent) !important;
 	box-sizing: border-box;
 }
@@ -1044,6 +1046,9 @@
 
 .agent-sessions-workbench .action-widget {
 	background-color: var(--vscode-agentsPanel-background);
+	border: 1px solid var(--vscode-widget-border, var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 18%, transparent)));
+	box-shadow: 0 8px 24px var(--vscode-widget-shadow, transparent);
+	box-sizing: border-box;
 }
 
 .agent-sessions-workbench .action-widget .action-widget-action-bar,
@@ -1066,6 +1071,11 @@
 	background-color: var(--vscode-agentsPanel-background) !important;
 }
 
+.agent-sessions-workbench .quick-input-widget {
+	border: 1px solid var(--vscode-widget-border, var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 18%, transparent))) !important;
+	box-sizing: border-box;
+}
+
 .agent-sessions-workbench .quick-input-header,
 .agent-sessions-workbench .quick-input-html-widget,
 .agent-sessions-workbench .quick-input-list .monaco-scrollable-element > .monaco-list-rows,
@@ -1083,6 +1093,12 @@
 .agent-sessions-workbench .context-view.monaco-menu-container .monaco-menu,
 .agent-sessions-workbench .context-view.monaco-menu-container .monaco-scrollable-element {
 	background-color: var(--vscode-agentsPanel-background) !important;
+}
+
+.agent-sessions-workbench .context-view.monaco-menu-container {
+	border: 1px solid var(--vscode-widget-border, var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 18%, transparent))) !important;
+	box-shadow: 0 8px 24px var(--vscode-widget-shadow, transparent);
+	box-sizing: border-box;
 }
 
 /* Keep code block backgrounds stable across themes; add separation in older light themes via border only */

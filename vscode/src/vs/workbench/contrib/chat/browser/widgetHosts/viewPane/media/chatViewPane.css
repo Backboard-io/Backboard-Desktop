@@ -172,7 +172,7 @@
 }
 
 .chat-viewpane.has-sessions-control .agent-sessions-container.backboard-side-chat-sessions {
-	--backboard-side-chat-bg: var(--vscode-panel-background, var(--vscode-editor-background, #181818));
+	--backboard-side-chat-bg: var(--sessions-integrated-sidebar-background);
 	--backboard-side-chat-raised: color-mix(in srgb, var(--vscode-sideBar-foreground, #f2f2f2) 7%, var(--backboard-side-chat-bg));
 	--backboard-side-chat-active: color-mix(in srgb, var(--vscode-sideBar-foreground, #f2f2f2) 8%, transparent);
 	--backboard-side-chat-border: var(--vscode-sideBar-border, #2f2f2f);

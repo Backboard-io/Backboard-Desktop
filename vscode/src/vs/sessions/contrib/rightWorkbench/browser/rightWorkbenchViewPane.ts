@@ -7,6 +7,7 @@ import './media/rightWorkbenchLauncher.css';
 import { $, addDisposableListener, append, clearNode, EventType } from '../../../../base/browser/dom.js';
 import { renderIcon } from '../../../../base/browser/ui/iconLabel/iconLabels.js';
 import { Separator, toAction } from '../../../../base/common/actions.js';
+import { Color } from '../../../../base/common/color.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { DisposableStore } from '../../../../base/common/lifecycle.js';
 import { autorun } from '../../../../base/common/observable.js';
@@ -43,10 +44,11 @@ import { IEditorService } from '../../../../workbench/services/editor/common/edi
 import { IWorkbenchLayoutService, Parts } from '../../../../workbench/services/layout/browser/layoutService.js';
 import { ISCMResource, ISCMService } from '../../../../workbench/contrib/scm/common/scm.js';
 import { GitChange, GitDiffChange, IGitRepository, IGitService } from '../../../../workbench/contrib/git/common/gitService.js';
-import { ITerminalEditorService, ITerminalInstance, ITerminalService } from '../../../../workbench/contrib/terminal/browser/terminal.js';
+import { ITerminalEditorService, ITerminalInstance, ITerminalService, IXtermColorProvider } from '../../../../workbench/contrib/terminal/browser/terminal.js';
 import { IAgentHostCustomizationService } from '../../../../workbench/contrib/chat/browser/agentSessions/agentHost/agentHostCustomizationService.js';
 import { CHANGES_VIEW_ID } from '../../changes/common/changes.js';
 import { ChangesViewPane } from '../../changes/browser/changesView.js';
+import { agentsPanelBackground } from '../../../common/theme.js';
 import { ISessionsService } from '../../../services/sessions/browser/sessionsService.js';
 import { IActiveSession } from '../../../services/sessions/common/sessionsManagement.js';
 import { SESSIONS_FILES_EMPTY_VIEW_ID, SESSIONS_FILES_VIEW_ID, SessionsExplorerEmptyView, SessionsExplorerView } from '../../files/browser/filesView.js';
@@ -101,6 +103,9 @@ export class RightWorkbenchViewPane extends ViewPane {
 	private browserRefreshButton: HTMLButtonElement | undefined;
 	private readonly browserInputStore = this._register(new DisposableStore());
 	private terminalInstance: ITerminalInstance | undefined;
+	private readonly terminalColorProvider: IXtermColorProvider = {
+		getBackgroundColor: theme => this.getTerminalBackgroundColor(theme),
+	};
 	private readonly pendingGitReviewRefreshKeys = new Set<string>();
 	private readonly pendingGitReviewStatsKeys = new Set<string>();
 	private readonly loadedGitReviewStatsKeys = new Set<string>();
@@ -690,6 +695,14 @@ export class RightWorkbenchViewPane extends ViewPane {
 		this.embeddedEditorHost = append(terminal, $('.sessions-right-workbench-embedded-editor-host'));
 		this.observeElementResize(this.embeddedEditorHost, () => this.layoutEmbeddedEditorPart());
 		void this.ensureTerminalEditor();
+	}
+
+	private getTerminalBackgroundColor(theme = this.themeService.getColorTheme()): Color | undefined {
+		const embeddedHost = this.embeddedEditorHost;
+		if (!embeddedHost) {
+			return theme.getColor(agentsPanelBackground);
+		}
+		return Color.Format.CSS.parse(getComputedStyle(embeddedHost).backgroundColor) ?? theme.getColor(agentsPanelBackground);
 	}
 
 	private renderFilesExplorer(container: HTMLElement): void {
@@ -1368,6 +1381,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 					viewColumn: MODAL_GROUP,
 					modal: { embeddedHost }
 				},
+				colorProvider: this.terminalColorProvider,
 			});
 			this.domStore.add(this.terminalInstance.onDisposed(() => {
 				this.terminalInstance = undefined;
