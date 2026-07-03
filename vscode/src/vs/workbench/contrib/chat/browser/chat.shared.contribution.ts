@@ -1638,7 +1638,7 @@ configurationRegistry.registerConfiguration({
 		},
 		[ChatConfiguration.ThinkingStyle]: {
 			type: 'string',
-			default: 'fixedScrolling',
+			default: 'streamThenCollapse',
 			enum: ['collapsed', 'collapsedPreview', 'fixedScrolling', 'streamThenCollapse'],
 			enumDescriptions: [
 				nls.localize('chat.agent.thinkingMode.collapsed', "Thinking parts will be collapsed by default."),
@@ -1648,7 +1648,6 @@ configurationRegistry.registerConfiguration({
 			],
 			description: nls.localize('chat.agent.thinkingStyle', "Controls how thinking is rendered."),
 			tags: ['experimental'],
-			agentsWindow: { default: 'streamThenCollapse' },
 		},
 		[ChatConfiguration.ThinkingGenerateTitles]: {
 			type: 'boolean',

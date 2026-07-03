@@ -29,9 +29,45 @@
 		align-items: center;
 		line-height: 1.5em;
 		font-size: 13px;
+		min-width: 0;
 
+		/* Keep the header a single line: the detail segment ellipsizes while
+		   the shimmer prefix and trailing elapsed/steps/diff stay visible. */
 		.monaco-button-mdlabel {
 			font-size: var(--vscode-chat-font-size-body-s);
+			display: flex;
+			align-items: baseline;
+			min-width: 0;
+			overflow: hidden;
+
+			.chat-thinking-title-shimmer {
+				flex: none;
+				white-space: pre;
+			}
+
+			.rendered-markdown.chat-thinking-title-detail {
+				flex: 0 1 auto;
+				min-width: 0;
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+			}
+
+			/* Finalized titles split into verb + detail spans; `pre` keeps the
+			   separating space that flex layout would otherwise collapse. */
+			.chat-thinking-title-detail-text {
+				flex: 0 1 auto;
+				min-width: 0;
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: pre;
+			}
+
+			.chat-thinking-title-elapsed,
+			.chat-thinking-title-meta,
+			.chat-thinking-title-diff {
+				flex: none;
+			}
 		}
 
 		.codicon {
@@ -207,7 +243,7 @@
 		}
 
 		.chat-thinking-item.markdown-content {
-			padding: 6px 12px 6px 24px;
+			padding: 5px 12px 5px 24px;
 			position: relative;
 			font-size: var(--vscode-chat-font-size-body-s);
 
@@ -321,12 +357,75 @@
 		}
 
 		.chat-thinking-spinner-item {
-			padding: 6px 12px 6px 24px;
+			padding: 5px 12px 5px 24px;
 			font-size: var(--vscode-chat-font-size-body-s);
 
 			.chat-thinking-spinner-label {
 				color: var(--vscode-descriptionForeground);
 			}
+		}
+
+		/*
+		 * Codex-style activity groups: consecutive same-category tool rows sit
+		 * inside .chat-thinking-group-body behind a summary header. While the
+		 * group is live the header is hidden and raw rows stream in; once the
+		 * run moves on, the header shows ("Read 3 files") and the body folds.
+		 */
+		.chat-thinking-group-header {
+			position: relative;
+			display: flex;
+			align-items: center;
+			gap: 4px;
+			padding: 4px 12px 4px 24px;
+			font-size: var(--vscode-chat-font-size-body-s);
+			color: var(--vscode-descriptionForeground);
+			cursor: pointer;
+			border-radius: 4px;
+
+			> .chat-thinking-icon {
+				position: absolute;
+				left: 5px;
+				top: 8px;
+				width: 12px;
+				height: 12px;
+				font-size: 12px;
+				line-height: 12px;
+				text-align: center;
+				color: var(--vscode-descriptionForeground);
+			}
+
+			.chat-thinking-group-chevron {
+				font-size: 12px;
+				opacity: 0;
+			}
+
+			&:hover {
+				background-color: var(--vscode-toolbar-hoverBackground);
+				color: var(--vscode-foreground);
+
+				.chat-thinking-group-chevron {
+					opacity: 1;
+				}
+			}
+
+			&:focus-visible {
+				outline: 1px solid var(--vscode-focusBorder);
+				outline-offset: -1px;
+			}
+		}
+
+		.chat-thinking-group-live > .chat-thinking-group-header {
+			display: none;
+		}
+
+		.chat-thinking-group-collapsed > .chat-thinking-group-body {
+			display: none;
+		}
+
+		/* While streaming, focus falls on the newest row: previous rows stay
+		   muted, the row currently being appended reads slightly brighter. */
+		&.chat-thinking-streaming .chat-thinking-tool-wrapper:has(~ .chat-thinking-tool-wrapper) {
+			opacity: 0.85;
 		}
 	}
 
@@ -354,6 +453,28 @@
 		}
 	}
 
+	/* Muted metadata at the end of the header: "· 8s", "· 24s · 6 steps". */
+	.chat-thinking-title-elapsed,
+	.chat-thinking-title-meta {
+		opacity: 0.6;
+		white-space: pre;
+	}
+
+	/* Completed pill: quiet success check + hover affordance for re-expanding. */
+	&.chat-used-context-collapsed > .chat-used-context-label .monaco-button.monaco-icon-button {
+		border-radius: 6px;
+		cursor: pointer;
+
+		&:hover {
+			background-color: var(--vscode-toolbar-hoverBackground);
+		}
+
+		.codicon.codicon-check {
+			color: var(--vscode-charts-green);
+			opacity: 0.85;
+		}
+	}
+
 	/*
 	 * streamThenCollapse: while `chat-thinking-collapsing` is set, the wrapper's
 	 * inline max-height animates from its measured height to 0 before the part
@@ -364,10 +485,31 @@
 		transition: max-height 280ms ease-out, opacity 280ms ease-out;
 	}
 
+	/* After the collapse lands, ease the summary pill in so the handoff doesn't pop. */
+	&.chat-thinking-just-collapsed > .chat-used-context-label {
+		animation: chat-thinking-pill-appear 120ms ease-out;
+	}
+
 	@media (prefers-reduced-motion: reduce) {
 		&.chat-thinking-collapsing .chat-used-context-list.chat-thinking-collapsible {
 			transition: none;
 		}
+
+		&.chat-thinking-just-collapsed > .chat-used-context-label {
+			animation: none;
+		}
+	}
+}
+
+@keyframes chat-thinking-pill-appear {
+	from {
+		opacity: 0.4;
+		transform: translateY(2px);
+	}
+
+	to {
+		opacity: 1;
+		transform: translateY(0);
 	}
 }
 

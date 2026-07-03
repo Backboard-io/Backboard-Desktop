@@ -14,7 +14,8 @@ import { workbenchInstantiationService } from '../../../../../../test/browser/wo
 import { IConfigurationService } from '../../../../../../../platform/configuration/common/configuration.js';
 import { TestConfigurationService } from '../../../../../../../platform/configuration/test/common/testConfigurationService.js';
 import { ChatThinkingContentPart, maybePickFunWorkingMessage } from '../../../../browser/widget/chatContentParts/chatThinkingContentPart.js';
-import { IChatMarkdownContent, IChatThinkingPart, IChatToolInvocation, IChatToolInvocationSerialized } from '../../../../common/chatService/chatService.js';
+import { ChatExternalEditContentPart } from '../../../../browser/widget/chatContentParts/chatExternalEditContentPart.js';
+import { IChatExternalEdit, IChatMarkdownContent, IChatThinkingPart, IChatToolInvocation, IChatToolInvocationSerialized } from '../../../../common/chatService/chatService.js';
 import { IChatContentPartRenderContext, InlineTextModelCollection } from '../../../../browser/widget/chatContentParts/chatContentParts.js';
 import { IChatRendererContent, IChatResponseViewModel } from '../../../../common/model/chatViewModel.js';
 import { IEditSessionDiffStats } from '../../../../common/editing/chatEditingService.js';
@@ -412,6 +413,192 @@ suite('ChatThinkingContentPart', () => {
 
 			assert.strictEqual(part.domNode.classList.contains('chat-used-context-collapsed'), true,
 				'Should be collapsed when streamingCompleted is true, even if element.isComplete is false');
+		});
+	});
+
+	suite('Activity polish (spinner labels, summary pill, groups)', () => {
+		setup(() => {
+			mockConfigurationService.setUserConfiguration('chat.agent.thinkingStyle', ThinkingDisplayMode.StreamThenCollapse);
+		});
+
+		function createLivePart(thinkingText: string, isCanceled = false): ChatThinkingContentPart {
+			const context = createMockRenderContext(false);
+			if (isCanceled) {
+				Object.assign(context.element, { isCanceled: true });
+			}
+			const part = store.add(instantiationService.createInstance(
+				ChatThinkingContentPart,
+				createThinkingPart(thinkingText),
+				context,
+				mockMarkdownRenderer,
+				false
+			));
+			mainWindow.document.body.appendChild(part.domNode);
+			disposables.add(toDisposable(() => part.domNode.remove()));
+			return part;
+		}
+
+		function createCompletedToolInvocation(toolId: string, invocationMessage: string, toolCallId: string, toolSpecificDataKind?: 'terminal' | 'search'): IChatToolInvocationSerialized {
+			return {
+				kind: 'toolInvocationSerialized',
+				toolId,
+				toolCallId,
+				invocationMessage,
+				originMessage: undefined,
+				pastTenseMessage: undefined,
+				presentation: undefined,
+				resultDetails: undefined,
+				toolSpecificData: toolSpecificDataKind === 'terminal'
+					? { kind: 'terminal', commandLine: { original: 'echo hi' }, language: 'sh' } as IChatToolInvocationSerialized['toolSpecificData']
+					: undefined,
+				isConfirmed: { type: 0 },
+				isComplete: true,
+				source: ToolDataSource.Internal,
+				generatedTitle: undefined,
+				isAttachedToThinking: false,
+			} as IChatToolInvocationSerialized;
+		}
+
+		function createRunningToolInvocation(toolId: string, invocationMessage: string, toolCallId: string): IChatToolInvocation {
+			return {
+				kind: 'toolInvocation',
+				toolId,
+				toolCallId,
+				invocationMessage,
+				originMessage: undefined,
+				pastTenseMessage: undefined,
+				presentation: undefined,
+				source: ToolDataSource.Internal,
+				isAttachedToThinking: false,
+				generatedTitle: undefined,
+				state: observableValue('state', {
+					type: IChatToolInvocation.StateKind.Executing,
+					confirmed: { type: 0 },
+					progress: observableValue('progress', { progress: 0 }),
+					parameters: {},
+					confirmationMessages: undefined,
+				}),
+				toolSpecificDataKind: observableValue('test', undefined),
+				toJSON: () => ({} as IChatToolInvocationSerialized),
+			} as IChatToolInvocation;
+		}
+
+		function appendTool(part: ChatThinkingContentPart, tool: IChatToolInvocation | IChatToolInvocationSerialized): void {
+			part.appendItem(
+				() => ({ domNode: $('div', {}, tool.invocationMessage as string) }),
+				tool.toolId,
+				tool
+			);
+		}
+
+		test('working spinner prefers the running tool label over the random pool', () => {
+			const part = createLivePart('plain reasoning without a bold title');
+			appendTool(part, createRunningToolInvocation('read_file', 'Reading package.json', 'call-1'));
+
+			const spinnerLabel = part.domNode.querySelector('.chat-thinking-spinner-label');
+			assert.strictEqual(spinnerLabel?.textContent, 'Reading package.json', 'Spinner should show the running tool label');
+		});
+
+		test('completed pill shows elapsed time and step count meta', () => {
+			mockConfigurationService.setUserConfiguration(ChatConfiguration.ThinkingGenerateTitles, false);
+			const part = createLivePart('**Analyzing**\nreasoning body');
+			appendTool(part, createCompletedToolInvocation('read_file', 'Read a.ts', 'call-1'));
+			appendTool(part, createCompletedToolInvocation('read_file', 'Read b.ts', 'call-2'));
+
+			part.finalizeTitleIfDefault();
+
+			const meta = part.domNode.querySelector('.chat-thinking-title-meta');
+			assert.ok(meta, 'Completed pill should render the meta span');
+			assert.ok(/ · \d+s · 3 steps$/.test(meta.textContent ?? ''), `Meta should read "· <n>s · 3 steps" but was "${meta.textContent}"`);
+		});
+
+		test('cancelled run finalizes to "Stopped after Ns" with a circle-slash icon', () => {
+			const part = createLivePart('plain reasoning without a bold title', true);
+			appendTool(part, createCompletedToolInvocation('read_file', 'Read a.ts', 'call-1'));
+			appendTool(part, createCompletedToolInvocation('search_code', 'Searched for foo', 'call-2'));
+
+			part.finalizeTitleIfDefault();
+
+			const label = part.domNode.querySelector('.chat-used-context-label');
+			assert.deepStrictEqual({
+				stopped: /^Stopped after \d+s/.test(label?.textContent ?? ''),
+				slashIcon: !!part.domNode.querySelector('.chat-used-context-label .codicon-circle-slash'),
+			}, {
+				stopped: true,
+				slashIcon: true,
+			}, `Cancelled pill should read "Stopped after Ns" with circle-slash (was "${label?.textContent}")`);
+		});
+
+		test('grouped activity pills: consecutive reads summarize as "Read N files"', () => {
+			const part = createLivePart('**Analyzing**\nreasoning body');
+			appendTool(part, createCompletedToolInvocation('read_file', 'Read a.ts', 'call-1'));
+			appendTool(part, createCompletedToolInvocation('read_file', 'Read b.ts', 'call-2'));
+			appendTool(part, createCompletedToolInvocation('read_file', 'Read c.ts', 'call-3'));
+
+			part.finalizeTitleIfDefault();
+
+			const group = part.domNode.querySelector('.chat-thinking-group');
+			assert.deepStrictEqual({
+				groupCount: part.domNode.querySelectorAll('.chat-thinking-group').length,
+				label: group?.querySelector('.chat-thinking-group-label')?.textContent,
+				collapsed: group?.classList.contains('chat-thinking-group-collapsed'),
+				rowCount: group?.querySelectorAll('.chat-thinking-tool-wrapper').length,
+			}, {
+				groupCount: 1,
+				label: 'Read 3 files',
+				collapsed: true,
+				rowCount: 3,
+			});
+		});
+
+		test('grouped activity pills: mixed read + search summarizes as "Read a file and searched code"', () => {
+			const part = createLivePart('**Analyzing**\nreasoning body');
+			appendTool(part, createCompletedToolInvocation('read_file', 'Read a.ts', 'call-1'));
+			appendTool(part, createCompletedToolInvocation('search_code', 'Searched for z-index', 'call-2'));
+
+			part.finalizeTitleIfDefault();
+
+			const label = part.domNode.querySelector('.chat-thinking-group-label');
+			assert.strictEqual(label?.textContent, 'Read a file and searched code');
+		});
+
+		test('grouped activity pills: a single item keeps its own label and category changes split groups', () => {
+			const part = createLivePart('**Analyzing**\nreasoning body');
+			appendTool(part, createCompletedToolInvocation('read_file', 'Read titlebarpart.css', 'call-1'));
+			appendTool(part, createCompletedToolInvocation('run_in_terminal', 'Ran npm test', 'call-2', 'terminal'));
+
+			part.finalizeTitleIfDefault();
+
+			const labels = Array.from(part.domNode.querySelectorAll('.chat-thinking-group-label')).map(el => el.textContent);
+			assert.deepStrictEqual(labels, ['Read titlebarpart.css', 'Ran npm test']);
+		});
+
+		test('external edit diff card renders header controls and +/- counts', () => {
+			const edit: IChatExternalEdit = {
+				kind: 'externalEdit',
+				uri: URI.file('/project/src/titlebarpart.css'),
+				editKind: 'edit',
+				diff: { added: 5, removed: 2 },
+				beforeContentUri: URI.parse('chat-edit://before/titlebarpart.css'),
+				afterContentUri: URI.parse('chat-edit://after/titlebarpart.css'),
+			};
+			const part = store.add(instantiationService.createInstance(ChatExternalEditContentPart, edit, createMockRenderContext(true)));
+			mainWindow.document.body.appendChild(part.domNode);
+			disposables.add(toDisposable(() => part.domNode.remove()));
+
+			assert.deepStrictEqual({
+				isCard: part.domNode.classList.contains('chat-external-edit-card'),
+				hasChevron: !!part.domNode.querySelector('.chat-external-edit-expand'),
+				hasCopy: !!part.domNode.querySelector('.chat-external-edit-copy'),
+				added: part.domNode.querySelector('.label-added')?.textContent,
+				removed: part.domNode.querySelector('.label-removed')?.textContent,
+			}, {
+				isCard: true,
+				hasChevron: true,
+				hasCopy: true,
+				added: '+5',
+				removed: '-2',
+			});
 		});
 	});
 

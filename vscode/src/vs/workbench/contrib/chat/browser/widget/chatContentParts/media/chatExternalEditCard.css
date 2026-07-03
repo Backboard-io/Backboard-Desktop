@@ -1,0 +1,108 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/*
+ * Codex-style inline diff card for external (agent host) file edits.
+ * The pill row becomes a card header with a chevron + copy button; the body
+ * expands to a line-numbered unified diff.
+ */
+
+.chat-codeblock-pill-container.chat-external-edit-card {
+	flex-wrap: wrap;
+	row-gap: 0;
+
+	.chat-external-edit-expand,
+	.chat-external-edit-copy {
+		font-size: 12px;
+		padding: 2px;
+		border-radius: 4px;
+		cursor: pointer;
+		color: var(--vscode-descriptionForeground);
+
+		&:hover {
+			background-color: var(--vscode-toolbar-hoverBackground);
+			color: var(--vscode-foreground);
+		}
+
+		&:focus-visible {
+			outline: 1px solid var(--vscode-focusBorder);
+			outline-offset: -1px;
+		}
+	}
+
+	.chat-external-edit-copy {
+		margin-left: auto;
+		opacity: 0;
+	}
+
+	&:hover .chat-external-edit-copy,
+	&.chat-external-edit-expanded .chat-external-edit-copy,
+	.chat-external-edit-copy:focus-visible {
+		opacity: 1;
+	}
+
+	.chat-external-edit-diff-body {
+		display: none;
+		width: 100%;
+		margin-top: 4px;
+		border: 1px solid var(--vscode-chat-requestBorder);
+		border-radius: 6px;
+		max-height: 360px;
+		overflow-y: auto;
+		overflow-x: auto;
+		font-family: var(--monaco-monospace-font);
+		font-size: 11px;
+		line-height: 1.5;
+	}
+
+	&.chat-external-edit-expanded .chat-external-edit-diff-body {
+		display: block;
+	}
+
+	.chat-external-edit-diff-row {
+		display: flex;
+		align-items: stretch;
+		white-space: pre;
+
+		.chat-external-edit-diff-gutter {
+			flex: none;
+			width: 40px;
+			padding: 0 8px 0 4px;
+			text-align: right;
+			color: var(--vscode-editorLineNumber-foreground);
+			user-select: none;
+		}
+
+		.chat-external-edit-diff-text {
+			flex: 1;
+			padding-right: 8px;
+		}
+
+		&.removed {
+			background-color: var(--vscode-diffEditor-removedTextBackground);
+			box-shadow: inset 2px 0 0 var(--vscode-chat-linesRemovedForeground);
+		}
+
+		&.added {
+			background-color: var(--vscode-diffEditor-insertedTextBackground);
+			box-shadow: inset 2px 0 0 var(--vscode-chat-linesAddedForeground);
+		}
+
+		&.context {
+			color: var(--vscode-descriptionForeground);
+		}
+	}
+
+	.chat-external-edit-diff-gap {
+		height: 8px;
+		border-bottom: 1px dashed var(--vscode-chat-requestBorder);
+		margin-bottom: 8px;
+	}
+
+	.chat-external-edit-diff-note {
+		padding: 6px 8px;
+		color: var(--vscode-descriptionForeground);
+	}
+}

@@ -11,7 +11,7 @@ import * as path from 'path';
 import * as readline from 'readline';
 import { CancellationError } from '../../../../base/common/errors.js';
 import { Emitter } from '../../../../base/common/event.js';
-import { Disposable } from '../../../../base/common/lifecycle.js';
+import { Disposable, IReference } from '../../../../base/common/lifecycle.js';
 import { FileAccess } from '../../../../base/common/network.js';
 import { dirname, join } from '../../../../base/common/path.js';
 import { type IObservable, observableValue } from '../../../../base/common/observable.js';
@@ -28,8 +28,11 @@ import { ActionType, type ChatAction, type SessionAction } from '../../common/st
 import type { ResolveSessionConfigResult, SessionConfigCompletionsResult } from '../../common/state/protocol/commands.js';
 import { MessageAttachmentKind } from '../../common/state/protocol/channels-chat/state.js';
 import type { ModelSelection, ProtectedResourceMetadata, ToolDefinition } from '../../common/state/protocol/state.js';
-import { getToolOutputText, MessageKind, ResponsePartKind, SessionStatus, ToolCallConfirmationReason, ToolCallContributorKind, ToolCallStatus, ToolResultContentType, TurnState, type ClientPluginCustomization, type MessageAttachment, type PendingMessage, type SessionInputAnswer, type SessionInputResponseKind, type ToolCallResult, type Turn } from '../../common/state/sessionState.js';
+import { getToolOutputText, MessageKind, ResponsePartKind, SessionStatus, ToolCallConfirmationReason, ToolCallContributorKind, ToolCallStatus, ToolResultContentType, TurnState, type ClientPluginCustomization, type MessageAttachment, type PendingMessage, type SessionInputAnswer, type SessionInputResponseKind, type ToolCallResult, type ToolResultContent, type ToolResultFileEditContent, type Turn } from '../../common/state/sessionState.js';
 import type { ISyncedCustomization } from '../../common/agentPluginManager.js';
+import { IInstantiationService } from '../../../instantiation/common/instantiation.js';
+import { ISessionDatabase, ISessionDataService } from '../../common/sessionDataService.js';
+import { FileEditTracker } from '../shared/fileEditTracker.js';
 import { IAgentConfigurationService } from '../agentConfigurationService.js';
 
 const DEFAULT_PROVIDER = 'openrouter';
@@ -185,6 +188,7 @@ interface BackboardSession {
 	readonly pendingToolApprovals: PendingRequestRegistry<boolean>;
 	currentRequestId?: string;
 	disposed: boolean;
+	fileEdits?: { readonly tracker: FileEditTracker; readonly dbRef: IReference<ISessionDatabase> };
 }
 
 interface BackboardPanelPersistedState {
@@ -320,10 +324,33 @@ export class BackboardAgent extends Disposable implements IAgent {
 		@ILogService private readonly _logService: ILogService,
 		@IAgentConfigurationService private readonly _configurationService: IAgentConfigurationService,
 		@INativeEnvironmentService private readonly _environmentService: INativeEnvironmentService,
+		@IInstantiationService private readonly _instantiationService: IInstantiationService,
+		@ISessionDataService private readonly _sessionDataService: ISessionDataService,
 	) {
 		super();
 		this._bridge = this._register(new BackboardBridgeProcess(_logService));
 		this._refreshModels(true);
+	}
+
+	/**
+	 * Lazily opens the session database and creates the {@link FileEditTracker}
+	 * used to snapshot before/after content of file-edit tools so the UI can
+	 * render diff pills. Returns `undefined` when the database can't be opened
+	 * (tracking is best-effort; the tool still runs).
+	 */
+	private _fileEditTracker(session: BackboardSession): FileEditTracker | undefined {
+		if (session.fileEdits) {
+			return session.fileEdits.tracker;
+		}
+		try {
+			const dbRef = this._sessionDataService.openDatabase(session.sessionUri);
+			const tracker = this._instantiationService.createInstance(FileEditTracker, session.sessionUri.toString(), dbRef.object);
+			session.fileEdits = { tracker, dbRef };
+			return tracker;
+		} catch (error) {
+			this._logService.warn(`[Backboard] Failed to open session database for file edit tracking: ${error instanceof Error ? error.message : String(error)}`);
+			return undefined;
+		}
 	}
 
 	getDescriptor(): IAgentDescriptor {
@@ -566,6 +593,8 @@ export class BackboardAgent extends Disposable implements IAgent {
 			session.disposed = true;
 			session.pendingClientToolCalls.rejectAll(new CancellationError());
 			session.pendingToolApprovals.rejectAll(new CancellationError());
+			session.fileEdits?.dbRef.dispose();
+			session.fileEdits = undefined;
 		}
 		this._sessions.delete(sessionId);
 	}
@@ -1292,9 +1321,41 @@ export class BackboardAgent extends Disposable implements IAgent {
 			toolCallId: call.id,
 			content: [{ type: ToolResultContentType.Text, text: content }],
 		}));
+		// Snapshot before-content for file-edit tools so the completion can
+		// carry a FileEdit diff (rendered as an edit pill + inline diff card).
+		let editTracking: { readonly tracker: FileEditTracker; readonly filePath: string } | undefined;
+		if (isFileEditTool(call.name)) {
+			try {
+				const filePath = resolveWorkspacePath(session.workingDirectory?.fsPath, filePathArg(call.args));
+				const tracker = this._fileEditTracker(session);
+				if (tracker) {
+					await tracker.trackEditStart(filePath);
+					editTracking = { tracker, filePath };
+				}
+			} catch (error) {
+				this._logService.trace(`[Backboard] Skipping file edit tracking: ${error instanceof Error ? error.message : String(error)}`);
+			}
+		}
+
 		try {
 			const result = await executeBackboardTool(this._bridge, session.workingDirectory?.fsPath, call, reportContent.report);
 			reportContent.flush();
+
+			let fileEdit: ToolResultFileEditContent | undefined;
+			if (editTracking) {
+				try {
+					await editTracking.tracker.completeEdit(editTracking.filePath);
+					fileEdit = await editTracking.tracker.takeCompletedEdit(turnId, call.id, editTracking.filePath, call.name, call.args, session.model?.id);
+				} catch (error) {
+					this._logService.warn(`[Backboard] File edit tracking failed for ${editTracking.filePath}: ${error instanceof Error ? error.message : String(error)}`);
+				}
+			}
+
+			const completionContent: ToolResultContent[] = result ? [{ type: ToolResultContentType.Text, text: result }] : [];
+			if (fileEdit) {
+				completionContent.push(fileEdit);
+			}
+
 			this._appendBackboardProgress(session, turnId, responseState, localize('backboard.progress.toolComplete', "{0} finished.", display.displayName));
 			this._fire(session.sessionUri, {
 				type: ActionType.ChatToolCallComplete,
@@ -1303,7 +1364,7 @@ export class BackboardAgent extends Disposable implements IAgent {
 				result: {
 					success: true,
 					pastTenseMessage: display.completedMessage,
-					content: result ? [{ type: ToolResultContentType.Text, text: result }] : undefined,
+					content: completionContent.length > 0 ? completionContent : undefined,
 				},
 			});
 			responseState.toolOutputs.push({ id: call.id, name: display.displayName, input: toolInput, success: true, output: result ?? '' });
@@ -3782,6 +3843,11 @@ function isReadOnlyTool(name: string): boolean {
 	return ['read_file', 'list_dir', 'glob', 'grep', 'codebase_search', 'web_search', 'web_fetch', backboardAttachmentToolName].includes(name);
 }
 
+/** Tools that modify a single file whose before/after content should be snapshotted for diff pills. */
+function isFileEditTool(name: string): boolean {
+	return ['write', 'write_file', 'create_file', 'overwrite_file', 'append_file', 'edit', 'edit_file', 'search_replace', 'delete_file'].includes(name);
+}
+
 function isParallelSafeBackboardTool(name: string): boolean {
 	return ['read_file', 'list_dir', 'glob', 'grep', 'codebase_search', backboardAttachmentToolName].includes(name);
 }
@@ -3820,7 +3886,7 @@ function backboardToolDisplay(call: ParsedToolCall, clientTool?: ToolDefinition)
 		case 'run_terminal_cmd':
 			return backboardToolMessages(
 				localize('backboard.tool.terminal.displayName', "Backboard Terminal"),
-				focus ? localize('backboard.tool.terminal.invocationWithCommand', "Running Backboard terminal command: {0}", focus) : localize('backboard.tool.terminal.invocation', "Running Backboard terminal command"),
+				focus ? localize('backboard.tool.terminal.invocationWithCommand', "Running {0}", focus) : localize('backboard.tool.terminal.invocation', "Running a terminal command"),
 				localize('backboard.tool.terminal.completed', "Ran Backboard terminal command"),
 				'terminal',
 			);

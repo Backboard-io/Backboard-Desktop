@@ -3,8 +3,9 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { $, addDisposableListener, clearNode, DisposableResizeObserver, getWindow, hide, scheduleAtNextAnimationFrame } from '../../../../../../base/browser/dom.js';
+import { $, addDisposableListener, clearNode, DisposableResizeObserver, disposableWindowInterval, getWindow, hide, scheduleAtNextAnimationFrame } from '../../../../../../base/browser/dom.js';
 import { alert } from '../../../../../../base/browser/ui/aria/aria.js';
+import { HoverStyle } from '../../../../../../base/browser/ui/hover/hover.js';
 import { DomScrollableElement } from '../../../../../../base/browser/ui/scrollbar/scrollableElement.js';
 import { ScrollbarVisibility } from '../../../../../../base/common/scrollable.js';
 import { IChatExternalEdit, IChatMarkdownContent, IChatTerminalToolInvocationData, IChatThinkingPart, IChatToolInvocation, IChatToolInvocationSerialized } from '../../../common/chatService/chatService.js';
@@ -139,6 +140,125 @@ export function createThinkingIcon(icon: ThemeIcon): HTMLElement {
 	return iconElement;
 }
 
+/**
+ * Sub-kind of a tool invocation used to group consecutive activity rows into
+ * a single Codex-style summary pill ("Read 3 files", "Ran 2 commands").
+ */
+type ToolActivitySubkind = 'read' | 'search' | 'edit' | 'terminal' | 'other';
+
+/**
+ * Grouping category. Reads and searches share a group so mixed exploration
+ * summarizes as "Read a file and searched code".
+ */
+const enum ToolActivityCategory {
+	Explore = 'explore',
+	Edit = 'edit',
+	Terminal = 'terminal',
+	Other = 'other',
+}
+
+export function getToolActivitySubkind(toolInvocationId: string | undefined, metadata: ChatThinkingItemMetadata | undefined): ToolActivitySubkind {
+	if (metadata?.kind === 'markdownContent' || metadata?.kind === 'externalEdit') {
+		return 'edit';
+	}
+	const isToolInvocation = metadata && (metadata.kind === 'toolInvocation' || metadata.kind === 'toolInvocationSerialized');
+	if (isToolInvocation && metadata.toolSpecificData?.kind === 'terminal') {
+		return 'terminal';
+	}
+	if (isToolInvocation && metadata.toolSpecificData?.kind === 'search') {
+		return 'search';
+	}
+	const lowerToolId = (toolInvocationId ?? (isToolInvocation ? metadata.toolId : undefined) ?? '').toLowerCase();
+	if (isEditToolId(lowerToolId)) {
+		return 'edit';
+	}
+	if (lowerToolId.includes('terminal') || lowerToolId.includes('bash') || lowerToolId.includes('run_in')) {
+		return 'terminal';
+	}
+	if (
+		lowerToolId.includes('search') ||
+		lowerToolId.includes('grep') ||
+		lowerToolId.includes('find') ||
+		lowerToolId.includes('list') ||
+		lowerToolId.includes('semantic') ||
+		lowerToolId.includes('codebase') ||
+		lowerToolId.includes('glob')
+	) {
+		return 'search';
+	}
+	if (lowerToolId.includes('read') || lowerToolId.includes('get_file') || lowerToolId.includes('fetch') || lowerToolId.includes('problems')) {
+		return 'read';
+	}
+	return 'other';
+}
+
+function toolActivityCategoryOf(subkind: ToolActivitySubkind): ToolActivityCategory {
+	switch (subkind) {
+		case 'read':
+		case 'search':
+			return ToolActivityCategory.Explore;
+		case 'edit':
+			return ToolActivityCategory.Edit;
+		case 'terminal':
+			return ToolActivityCategory.Terminal;
+		default:
+			return ToolActivityCategory.Other;
+	}
+}
+
+function toolActivityCategoryIcon(category: ToolActivityCategory): ThemeIcon {
+	switch (category) {
+		case ToolActivityCategory.Explore:
+			return Codicon.search;
+		case ToolActivityCategory.Edit:
+			return Codicon.pencil;
+		case ToolActivityCategory.Terminal:
+			return Codicon.terminal;
+		default:
+			return Codicon.tools;
+	}
+}
+
+/** Middle-truncates so both the head and tail of long labels stay readable. */
+export function middleTruncate(value: string, maxLength = 64): string {
+	if (value.length <= maxLength) {
+		return value;
+	}
+	const headLength = Math.ceil((maxLength - 1) * 0.6);
+	const tailLength = (maxLength - 1) - headLength;
+	return `${value.slice(0, headLength)}…${value.slice(value.length - tailLength)}`;
+}
+
+/** Formats a duration for the working header / completed pill, e.g. "8s", "1m 12s". */
+export function formatThinkingElapsed(elapsedMs: number): string {
+	const totalSeconds = Math.max(1, Math.round(elapsedMs / 1000));
+	if (totalSeconds < 60) {
+		return localize('chat.thinking.elapsed.seconds', "{0}s", totalSeconds);
+	}
+	const minutes = Math.floor(totalSeconds / 60);
+	const seconds = totalSeconds % 60;
+	if (seconds === 0) {
+		return localize('chat.thinking.elapsed.minutes', "{0}m", minutes);
+	}
+	return localize('chat.thinking.elapsed.minutesSeconds', "{0}m {1}s", minutes, seconds);
+}
+
+/**
+ * One Codex-style activity group: consecutive same-category tool rows wrapped
+ * under a collapsible summary header. Hidden while the group is live (raw rows
+ * stream in), summarized + collapsed once the run moves on.
+ */
+interface IToolActivityGroup {
+	readonly category: ToolActivityCategory;
+	readonly container: HTMLElement;
+	readonly header: HTMLElement;
+	readonly headerLabel: HTMLElement;
+	readonly chevron: HTMLElement;
+	readonly body: HTMLElement;
+	readonly items: { toolCallId?: string; subkind: ToolActivitySubkind; fallbackLabel?: string }[];
+	readonly hover: MutableDisposable<IDisposable>;
+}
+
 function extractTitleFromThinkingContent(content: string): string | undefined {
 	const headerMatch = content.match(/^\*\*([^*]+)\*\*/);
 	return headerMatch ? headerMatch[1] : undefined;
@@ -186,26 +306,26 @@ const enum WorkingMessageCategory {
 }
 
 export const defaultThinkingMessages = [
-	localize('chat.thinking.thinking.1', 'Thinking'),
+	localize('chat.thinking.thinking.1', 'Thinking it through'),
 	localize('chat.thinking.thinking.2', 'Reasoning'),
-	localize('chat.thinking.thinking.3', 'Considering'),
-	localize('chat.thinking.thinking.4', 'Analyzing'),
-	localize('chat.thinking.thinking.5', 'Evaluating'),
-	localize('chat.thinking.thinking.6', 'Working'),
+	localize('chat.thinking.thinking.3', 'Connecting the dots'),
+	localize('chat.thinking.thinking.4', 'Mapping the approach'),
+	localize('chat.thinking.thinking.5', 'Weighing the options'),
+	localize('chat.thinking.thinking.6', 'Working it out'),
 ];
 
 const terminalMessages = [
-	localize('chat.thinking.terminal.1', 'Executing'),
-	localize('chat.thinking.terminal.2', 'Running'),
-	localize('chat.thinking.terminal.3', 'Processing'),
+	localize('chat.thinking.terminal.1', 'Running the command'),
+	localize('chat.thinking.terminal.2', 'Watching the output'),
+	localize('chat.thinking.terminal.3', 'Waiting on the terminal'),
 ];
 
 const toolMessages = [
-	localize('chat.thinking.tool.1', 'Processing'),
-	localize('chat.thinking.tool.2', 'Preparing'),
-	localize('chat.thinking.tool.3', 'Loading'),
-	localize('chat.thinking.tool.4', 'Analyzing'),
-	localize('chat.thinking.tool.5', 'Evaluating'),
+	localize('chat.thinking.tool.1', 'Gathering context'),
+	localize('chat.thinking.tool.2', 'Lining things up'),
+	localize('chat.thinking.tool.3', 'Pulling the pieces together'),
+	localize('chat.thinking.tool.4', 'Checking the details'),
+	localize('chat.thinking.tool.5', 'Sizing up the task'),
 ];
 
 /** Easter-egg loading messages, used ~1 in {@link FUN_WORKING_MESSAGE_RATE} picks. */
@@ -295,6 +415,12 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 	private streamThenCollapseMode: boolean = false;
 	private readonly wasStreamingLive: boolean;
 	private readonly _collapseAnimation = this._register(new MutableDisposable<DisposableStore>());
+	private readonly startTimeMs: number;
+	private elapsedAtCompletionMs: number | undefined;
+	private readonly _elapsedTimer = this._register(new MutableDisposable<IDisposable>());
+	private titleElapsedSpan: HTMLElement | undefined;
+	private readonly activityGroups: IToolActivityGroup[] = [];
+	private activeActivityGroup: IToolActivityGroup | undefined;
 	private autoScrollEnabled: boolean = true;
 	private scrollableElement: DomScrollableElement | undefined;
 	private lastExtractedTitle: string | undefined;
@@ -396,6 +522,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		this.fixedScrollingMode = configuredMode === ThinkingDisplayMode.FixedScrolling;
 		this.streamThenCollapseMode = configuredMode === ThinkingDisplayMode.StreamThenCollapse;
 		this.wasStreamingLive = !this.streamingCompleted && !this.element.isComplete;
+		this.startTimeMs = Date.now();
 
 		this.currentTitle = extractedTitle;
 		if (extractedTitle !== this.defaultTitle) {
@@ -426,6 +553,17 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 
 		const node = this.domNode;
 		node.classList.add('chat-thinking-box');
+
+		// Tick a subtle elapsed indicator in the header while streaming live.
+		if (this.wasStreamingLive) {
+			this._elapsedTimer.value = disposableWindowInterval(getWindow(node), () => {
+				if (this.streamingCompleted || this.element.isComplete) {
+					this._elapsedTimer.clear();
+					return;
+				}
+				this.updateElapsedIndicator();
+			}, 1000);
+		}
 
 		this._externalResourceWidget = this._register(this.instantiationService.createInstance(ChatThinkingExternalResourceWidget));
 		this._register(this._externalResourceWidget.onDidChangeHeight(() => this._onDidChangeHeight.fire()));
@@ -465,7 +603,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			const isExpanded = this.expanded.read(r);
 			if (this._collapseButton) {
 				if (this.streamingCompleted || this.element.isComplete) {
-					this._collapseButton.icon = Codicon.check;
+					this._collapseButton.icon = this.isCanceledResponse() ? Codicon.circleSlash : Codicon.check;
 				} else if (!this.fixedScrollingMode) {
 					if (isExpanded) {
 						this._collapseButton.icon = Codicon.chevronDown;
@@ -824,6 +962,8 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			return;
 		}
 
+		this.removeElapsedIndicator();
+
 		const labelElement = this._collapseButton.labelElement;
 		labelElement.textContent = '';
 
@@ -844,6 +984,24 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			labelElement.appendChild(restSpan);
 		}
 
+		let ariaLabel = title;
+
+		// Summarize the work: elapsed time (live runs only) and step count.
+		// Skipped for cancelled runs whose title already carries the duration.
+		const metaFragments: string[] = [];
+		if (this.wasStreamingLive && !this.isCanceledResponse()) {
+			metaFragments.push(formatThinkingElapsed(this.getElapsedMs()));
+		}
+		if (this.appendedItemCount > 1) {
+			metaFragments.push(localize('chat.thinking.steps', "{0} steps", this.appendedItemCount));
+		}
+		if (metaFragments.length > 0) {
+			const metaSpan = $('span.chat-thinking-title-meta');
+			metaSpan.textContent = metaFragments.map(fragment => ` · ${fragment}`).join('');
+			labelElement.appendChild(metaSpan);
+			ariaLabel = `${title}, ${metaFragments.join(', ')}`;
+		}
+
 		// Show aggregated diff stats from edit pills (only when there are actual changes)
 		if (this.diffStatsByPartId.size > 0) {
 			const { added, removed } = this._aggregatedDiff;
@@ -855,13 +1013,18 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 
 				const insertionsFragment = added === 1 ? localize('chat.thinking.insertions.one', "1 insertion") : localize('chat.thinking.insertions', "{0} insertions", added);
 				const deletionsFragment = removed === 1 ? localize('chat.thinking.deletions.one', "1 deletion") : localize('chat.thinking.deletions', "{0} deletions", removed);
-				this._collapseButton.element.ariaLabel = localize('chat.thinking.titleWithDiff', "{0}, {1}, {2}", title, insertionsFragment, deletionsFragment);
+				this._collapseButton.element.ariaLabel = localize('chat.thinking.titleWithDiff', "{0}, {1}, {2}", ariaLabel, insertionsFragment, deletionsFragment);
 			} else {
-				this._collapseButton.element.ariaLabel = title;
+				this._collapseButton.element.ariaLabel = ariaLabel;
 			}
 		} else {
-			this._collapseButton.element.ariaLabel = title;
+			this._collapseButton.element.ariaLabel = ariaLabel;
 		}
+	}
+
+	/** Whether the owning response was cancelled by the user. */
+	private isCanceledResponse(): boolean {
+		return 'isCanceled' in this.element && this.element.isCanceled === true;
 	}
 
 	private setDropdownClickable(clickable: boolean): void {
@@ -1020,7 +1183,247 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			wrapper.style.maxHeight = '';
 			wrapper.style.opacity = '';
 			this.domNode.classList.remove('chat-thinking-collapsing');
+			this.domNode.classList.add('chat-thinking-just-collapsed');
 		}));
+	}
+
+	/** Elapsed time to display: frozen at completion, live otherwise. */
+	private getElapsedMs(): number {
+		return this.elapsedAtCompletionMs ?? (Date.now() - this.startTimeMs);
+	}
+
+	/**
+	 * Keeps a subtle "· 8s" indicator at the end of the header label while
+	 * streaming. The label element is rewritten by title updates, so this
+	 * re-appends the span whenever it got detached.
+	 */
+	private updateElapsedIndicator(): void {
+		if (!this._collapseButton || this.streamingCompleted || !this.wasStreamingLive) {
+			return;
+		}
+		if (!this.titleElapsedSpan) {
+			this.titleElapsedSpan = $('span.chat-thinking-title-elapsed');
+		}
+		const labelElement = this._collapseButton.labelElement;
+		if (this.titleElapsedSpan.parentElement !== labelElement) {
+			labelElement.appendChild(this.titleElapsedSpan);
+		}
+		this.titleElapsedSpan.textContent = ` · ${formatThinkingElapsed(this.getElapsedMs())}`;
+	}
+
+	private removeElapsedIndicator(): void {
+		this._elapsedTimer.clear();
+		this.titleElapsedSpan?.remove();
+		this.titleElapsedSpan = undefined;
+	}
+
+	/** Label of the most recent tool invocation that is still running, if any. */
+	private getActiveToolLabel(): string | undefined {
+		for (let i = this.toolInvocations.length - 1; i >= 0; i--) {
+			const toolInvocation = this.toolInvocations[i];
+			if (toolInvocation.kind === 'toolInvocation' && !IChatToolInvocation.isComplete(toolInvocation)) {
+				const label = this.toolLabelsByCallId.get(toolInvocation.toolCallId);
+				if (label) {
+					return label;
+				}
+			}
+		}
+		return undefined;
+	}
+
+	/**
+	 * Sets the working spinner label, preferring the running tool's own label
+	 * ("Reading package.json") over a random phrase from the pool.
+	 */
+	private setWorkingSpinnerMessage(category: WorkingMessageCategory): void {
+		if (!this.workingSpinnerLabel) {
+			return;
+		}
+		this.workingSpinnerLabel.textContent = this.getActiveToolLabel() ?? this.getRandomWorkingMessage(category);
+	}
+
+	// --- Codex-style activity groups -------------------------------------------------
+
+	/**
+	 * Routes a rendered tool row into the current activity group, starting a
+	 * new group when the category changes. Disabled in fixed-scrolling mode,
+	 * which has its own pinned-viewport presentation.
+	 */
+	private appendToActivityGroup(itemWrapper: HTMLElement, subkind: ToolActivitySubkind, toolCallId: string | undefined, fallbackLabel: string | undefined): void {
+		if (this.fixedScrollingMode) {
+			this.appendToWrapper(itemWrapper);
+			return;
+		}
+		const category = toolActivityCategoryOf(subkind);
+		let group = this.activeActivityGroup;
+		if (!group || group.category !== category || !group.container.isConnected) {
+			this.finishActiveActivityGroup();
+			group = this.createActivityGroup(category);
+			this.activeActivityGroup = group;
+			this.activityGroups.push(group);
+			this.appendToWrapper(group.container);
+		}
+		group.items.push({ toolCallId, subkind, fallbackLabel });
+		group.body.appendChild(itemWrapper);
+		this.updateActivityGroupHeader(group);
+	}
+
+	private createActivityGroup(category: ToolActivityCategory): IToolActivityGroup {
+		const container = $('.chat-thinking-group.chat-thinking-group-live');
+		const header = $('.chat-thinking-group-header');
+		header.tabIndex = 0;
+		header.role = 'button';
+		const iconElement = createThinkingIcon(toolActivityCategoryIcon(category));
+		const headerLabel = $('span.chat-thinking-group-label');
+		const chevron = $('span.codicon.codicon-chevron-right.chat-thinking-group-chevron', { 'aria-hidden': 'true' });
+		header.append(iconElement, headerLabel, chevron);
+		const body = $('.chat-thinking-group-body');
+		container.append(header, body);
+
+		const toggle = () => {
+			const collapsed = container.classList.toggle('chat-thinking-group-collapsed');
+			chevron.classList.toggle('codicon-chevron-right', collapsed);
+			chevron.classList.toggle('codicon-chevron-down', !collapsed);
+			header.ariaExpanded = String(!collapsed);
+			this._onDidChangeHeight.fire();
+		};
+		this._register(addDisposableListener(header, 'click', toggle));
+		this._register(addDisposableListener(header, 'keydown', e => {
+			if (e.key === 'Enter' || e.key === ' ') {
+				e.preventDefault();
+				toggle();
+			}
+		}));
+
+		const hover = new MutableDisposable<IDisposable>();
+		this._register(hover);
+		return { category, container, header, headerLabel, chevron, body, items: [], hover };
+	}
+
+	/**
+	 * Marks the active group as finished: reveals the summary header and
+	 * collapses the raw rows behind it.
+	 */
+	private finishActiveActivityGroup(): void {
+		const group = this.activeActivityGroup;
+		this.activeActivityGroup = undefined;
+		if (!group) {
+			return;
+		}
+		if (group.items.length === 0 || group.body.childElementCount === 0) {
+			this.removeActivityGroup(group);
+			return;
+		}
+		this.updateActivityGroupHeader(group);
+		group.container.classList.remove('chat-thinking-group-live');
+		group.container.classList.add('chat-thinking-group-collapsed');
+		group.chevron.classList.add('codicon-chevron-right');
+		group.chevron.classList.remove('codicon-chevron-down');
+		group.header.ariaExpanded = 'false';
+		this._onDidChangeHeight.fire();
+	}
+
+	/** Folds every activity group into its summary pill (run finished/cancelled). */
+	private collapseAllActivityGroups(): void {
+		this.finishActiveActivityGroup();
+		for (const group of this.activityGroups) {
+			if (!group.container.classList.contains('chat-thinking-group-live')) {
+				this.updateActivityGroupHeader(group);
+			}
+		}
+	}
+
+	private updateActivityGroupHeader(group: IToolActivityGroup): void {
+		const label = this.buildActivityGroupLabel(group);
+		const truncated = middleTruncate(label);
+		group.headerLabel.textContent = truncated;
+		group.header.ariaLabel = label;
+		if (truncated !== label) {
+			group.hover.value = this.hoverService.setupDelayedHover(group.headerLabel, { content: label, style: HoverStyle.Pointer });
+		} else {
+			group.hover.clear();
+		}
+	}
+
+	private buildActivityGroupLabel(group: IToolActivityGroup): string {
+		if (group.items.length === 1) {
+			const item = group.items[0];
+			const itemLabel = (item.toolCallId ? this.toolLabelsByCallId.get(item.toolCallId) : undefined) ?? item.fallbackLabel;
+			if (itemLabel) {
+				return itemLabel;
+			}
+		}
+		const total = group.items.length;
+		switch (group.category) {
+			case ToolActivityCategory.Explore: {
+				const reads = group.items.filter(item => item.subkind === 'read').length;
+				const searches = total - reads;
+				if (reads > 0 && searches > 0) {
+					return reads === 1
+						? localize('chat.thinking.group.readAndSearched.one', "Read a file and searched code")
+						: localize('chat.thinking.group.readAndSearched', "Read {0} files and searched code", reads);
+				}
+				if (searches > 0) {
+					return searches === 1
+						? localize('chat.thinking.group.searched.one', "Searched code")
+						: localize('chat.thinking.group.searched', "Searched code {0} times", searches);
+				}
+				return reads === 1
+					? localize('chat.thinking.group.read.one', "Read a file")
+					: localize('chat.thinking.group.read', "Read {0} files", reads);
+			}
+			case ToolActivityCategory.Edit:
+				return total === 1
+					? localize('chat.thinking.group.edited.one', "Edited a file")
+					: localize('chat.thinking.group.edited', "Edited {0} files", total);
+			case ToolActivityCategory.Terminal:
+				return total === 1
+					? localize('chat.thinking.group.ran.one', "Ran a command")
+					: localize('chat.thinking.group.ran', "Ran {0} commands", total);
+			default:
+				return total === 1
+					? localize('chat.thinking.group.tool.one', "Ran a tool")
+					: localize('chat.thinking.group.tool', "Ran {0} tools", total);
+		}
+	}
+
+	/** Refreshes the group header that owns the given tool (labels stream in late). */
+	private refreshActivityGroupForTool(toolCallId: string): void {
+		for (const group of this.activityGroups) {
+			if (group.items.some(item => item.toolCallId === toolCallId)) {
+				this.updateActivityGroupHeader(group);
+				return;
+			}
+		}
+	}
+
+	/** Drops a removed tool from its group, pruning the group when it empties. */
+	private removeFromActivityGroups(toolCallId: string): void {
+		for (const group of this.activityGroups) {
+			const index = group.items.findIndex(item => item.toolCallId === toolCallId);
+			if (index === -1) {
+				continue;
+			}
+			group.items.splice(index, 1);
+			if (group.items.length === 0 || group.body.childElementCount === 0) {
+				this.removeActivityGroup(group);
+			} else {
+				this.updateActivityGroupHeader(group);
+			}
+			return;
+		}
+	}
+
+	private removeActivityGroup(group: IToolActivityGroup): void {
+		group.hover.clear();
+		group.container.remove();
+		const index = this.activityGroups.indexOf(group);
+		if (index !== -1) {
+			this.activityGroups.splice(index, 1);
+		}
+		if (this.activeActivityGroup === group) {
+			this.activeActivityGroup = undefined;
+		}
 	}
 
 	public updateThinking(content: IChatThinkingPart): void {
@@ -1104,6 +1507,8 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		this.domNode.classList.remove('chat-thinking-active');
 		this.domNode.classList.remove('chat-thinking-fade-top', 'chat-thinking-fade-bottom');
 		this.processPendingRemovals();
+		this.collapseAllActivityGroups();
+		this.removeElapsedIndicator();
 		if (this.workingSpinnerElement) {
 			this.workingSpinnerElement.remove();
 			this.workingSpinnerElement = undefined;
@@ -1127,6 +1532,9 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		this.domNode.classList.remove('chat-thinking-persistent-streaming');
 		this.domNode.classList.remove('chat-thinking-fade-top', 'chat-thinking-fade-bottom');
 		this.streamingCompleted = true;
+		this.elapsedAtCompletionMs ??= Date.now() - this.startTimeMs;
+		this.removeElapsedIndicator();
+		this.collapseAllActivityGroups();
 
 		// Now that streaming is complete, render any aggregated images that were
 		// deferred while scrolling was pinned in fixed scrolling mode.
@@ -1144,7 +1552,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		}
 
 		if (this._collapseButton) {
-			this._collapseButton.icon = Codicon.check;
+			this._collapseButton.icon = this.isCanceledResponse() ? Codicon.circleSlash : Codicon.check;
 		}
 
 		// Update scroll dimensions now that streaming is complete
@@ -1168,6 +1576,16 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			this.content.generatedTitle = existingTitle;
 			this.setGeneratedTitleOnAllParts(existingTitle);
 			this.setFinalizedTitle(existingTitle);
+			return;
+		}
+
+		// Cancelled runs get a static "Stopped after Ns" title — no LLM call.
+		if (this.isCanceledResponse()) {
+			const title = this.wasStreamingLive
+				? localize('chat.thinking.stoppedAfter', "Stopped after {0}", formatThinkingElapsed(this.getElapsedMs()))
+				: localize('chat.thinking.stopped', "Stopped");
+			this.currentTitle = title;
+			this.setFinalizedTitle(title);
 			return;
 		}
 
@@ -1523,11 +1941,9 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 	}
 
 	private setFallbackTitle(): void {
-		const finalLabel = this.appendedItemCount > 0
-			? this.appendedItemCount === 1
-				? localize('chat.thinking.finished.withStepsSingular', 'Finished with 1 step')
-				: localize('chat.thinking.finished.withStepsPlural', 'Finished with {0} steps', this.appendedItemCount)
-			: localize('chat.thinking.finished', 'Finished Working');
+		// The step count is shown in the title meta ("· 12s · 6 steps"), so the
+		// fallback label stays plain to avoid repeating it.
+		const finalLabel = localize('chat.thinking.finished', 'Finished Working');
 
 		this.currentTitle = finalLabel;
 		// With lazy rendering, wrapper may not be created yet if content hasn't been expanded
@@ -1537,12 +1953,15 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 		this.domNode.classList.remove('chat-thinking-active');
 		this.domNode.classList.remove('chat-thinking-persistent-streaming');
 		this.streamingCompleted = true;
+		this.elapsedAtCompletionMs ??= Date.now() - this.startTimeMs;
+		this.removeElapsedIndicator();
+		this.collapseAllActivityGroups();
 
 		// Render any aggregated images that were deferred during fixed scrolling streaming.
 		this.flushPendingExternalResources();
 
 		if (this._collapseButton) {
-			this._collapseButton.icon = Codicon.check;
+			this._collapseButton.icon = this.isCanceledResponse() ? Codicon.circleSlash : Codicon.check;
 			this.setFinalizedTitle(finalLabel);
 		}
 
@@ -1591,11 +2010,10 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 			this._register(eagerDisposable);
 		}
 
-		// get random message based on tool type
+		// Prefer the running tool's own label; fall back to a themed random message.
 		if (this.workingSpinnerLabel) {
 			const isTerminalTool = toolInvocationOrMarkdown && (toolInvocationOrMarkdown.kind === 'toolInvocation' || toolInvocationOrMarkdown.kind === 'toolInvocationSerialized') && toolInvocationOrMarkdown.toolSpecificData?.kind === 'terminal';
-			const category = isTerminalTool ? WorkingMessageCategory.Terminal : WorkingMessageCategory.Tool;
-			this.workingSpinnerLabel.textContent = this.getRandomWorkingMessage(category);
+			this.setWorkingSpinnerMessage(isTerminalTool ? WorkingMessageCategory.Terminal : WorkingMessageCategory.Tool);
 		}
 
 		// If expanded or has been expanded once, render immediately
@@ -1635,6 +2053,7 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 			this.toolWrappersByCallId.delete(toolCallId);
 			this.toolIconsByCallId.delete(toolCallId);
 		}
+		this.removeFromActivityGroups(toolCallId);
 
 		this.appendedItemCount = Math.max(0, this.appendedItemCount - 1);
 		this.toolInvocationCount = Math.max(0, this.toolInvocationCount - 1);
@@ -1782,6 +2201,7 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 			this.toolWrappersByCallId.delete(toolCallId);
 			this.toolIconsByCallId.delete(toolCallId);
 		}
+		this.removeFromActivityGroups(toolCallId);
 
 		// make sure to remove any lazy item as well
 		const lazyIndex = this.lazyItems.findIndex(item =>
@@ -1899,6 +2319,16 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 						currentToolLabel = updatedMessage;
 						this.toolLabelsByCallId.set(toolCallId, updatedMessage);
 						this.lastExtractedTitle = updatedMessage;
+
+						// Keep the spinner row and any single-item group header in
+						// sync with the tool's streaming label.
+						if (this.workingSpinnerLabel) {
+							const activeLabel = this.getActiveToolLabel();
+							if (activeLabel) {
+								this.workingSpinnerLabel.textContent = activeLabel;
+							}
+						}
+						this.refreshActivityGroupForTool(toolCallId);
 
 						// make sure not to set title if expanded (except in stream-then-collapse
 						// mode, where the header keeps updating while streaming expanded)
@@ -2131,7 +2561,17 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 			this.toolIconsByCallId.set(toolInvocationOrMarkdown.toolCallId, iconElement);
 		}
 
-		this.appendToWrapper(itemWrapper);
+		// Group consecutive same-category tool rows behind a Codex-style summary
+		// header. Hooks (no metadata) keep their own dedicated row.
+		if (toolInvocationOrMarkdown) {
+			const subkind = getToolActivitySubkind(toolInvocationId, toolInvocationOrMarkdown);
+			const toolCallId = isToolInvocation ? toolInvocationOrMarkdown.toolCallId : undefined;
+			const fallbackLabel = toolCallId ? undefined : content.textContent?.trim() || undefined;
+			this.appendToActivityGroup(itemWrapper, subkind, toolCallId, fallbackLabel);
+		} else {
+			this.finishActiveActivityGroup();
+			this.appendToWrapper(itemWrapper);
+		}
 
 		if (this.fixedScrollingMode && this.scrollableElement) {
 			// Observe the child wrapper for resizes (e.g. terminal expanding)
@@ -2184,8 +2624,7 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 
 		if (this.workingSpinnerLabel) {
 			const isTerminalTool = item.toolInvocationOrMarkdown && (item.toolInvocationOrMarkdown.kind === 'toolInvocation' || item.toolInvocationOrMarkdown.kind === 'toolInvocationSerialized') && item.toolInvocationOrMarkdown.toolSpecificData?.kind === 'terminal';
-			const category = isTerminalTool ? WorkingMessageCategory.Terminal : WorkingMessageCategory.Tool;
-			this.workingSpinnerLabel.textContent = this.getRandomWorkingMessage(category);
+			this.setWorkingSpinnerMessage(isTerminalTool ? WorkingMessageCategory.Terminal : WorkingMessageCategory.Tool);
 		}
 
 		// Handle tool items
@@ -2220,6 +2659,9 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 		}
 		this.appendedItemCount++;
 		this.allThinkingParts.push(content);
+		// A new reasoning section breaks the current activity group so later
+		// tools don't get appended above this text.
+		this.finishActiveActivityGroup();
 		this.textContainer = $('.chat-thinking-item.markdown-content');
 		// Observe the new textContainer for child resizes in fixed scrolling mode
 		if (this.childResizeObserver && this.fixedScrollingMode && !this.streamingCompleted) {
@@ -2247,7 +2689,7 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 			}
 
 			if (this.workingSpinnerLabel) {
-				this.workingSpinnerLabel.textContent = this.getRandomWorkingMessage(WorkingMessageCategory.Thinking);
+				this.setWorkingSpinnerMessage(WorkingMessageCategory.Thinking);
 			}
 		}
 		this.updateDropdownClickability();
@@ -2272,6 +2714,7 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 			this._titleDetailRendered.clear();
 			this._titleFileWidgetStore.clear();
 			this.currentTitle = title;
+			this.updateElapsedIndicator();
 			return;
 		}
 
@@ -2297,7 +2740,9 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 		this._titleDetailRendered.clear();
 		this._titleFileWidgetStore.clear();
 
-		const result = this.chatContentMarkdownRenderer.render(new MarkdownString(title));
+		// Long details (e.g. full terminal commands) are middle-truncated so
+		// the header stays a single readable line; CSS ellipsizes any rest.
+		const result = this.chatContentMarkdownRenderer.render(new MarkdownString(middleTruncate(title, 96)));
 		result.element.classList.add('collapsible-title-content', 'chat-thinking-title-detail');
 		renderFileWidgets(result.element, this.instantiationService, this.chatMarkdownAnchorService, this._titleFileWidgetStore);
 		this._titleDetailRendered.value = result;
@@ -2312,6 +2757,9 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 
 		this._collapseButton.element.ariaLabel = thinkingLabel;
 		this._collapseButton.element.ariaExpanded = String(this.isExpanded());
+
+		// Title updates rebuild the label; keep the elapsed tick at the end.
+		this.updateElapsedIndicator();
 	}
 
 	hasSameContent(other: IChatRendererContent, _followingContent: IChatRendererContent[], _element: ChatTreeItem): boolean {
