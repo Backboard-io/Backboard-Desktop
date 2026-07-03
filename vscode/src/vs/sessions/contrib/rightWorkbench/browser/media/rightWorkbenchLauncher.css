@@ -100,14 +100,16 @@
 	height: 30px;
 	padding: 0 10px;
 	border-radius: 8px;
-	font-size: 14px;
+	font-size: 13px;
 	font-weight: 500;
 	line-height: 1;
 	white-space: nowrap;
+	min-width: 0;
 }
 
 .sessions-right-workbench-tab-label {
 	min-width: 0;
+	max-width: 140px;
 	overflow: hidden;
 	text-overflow: ellipsis;
 }
@@ -130,6 +132,12 @@
 	margin-left: 1px;
 	border-radius: 5px;
 	color: var(--rwb-muted);
+	visibility: hidden;
+}
+
+.sessions-right-workbench-tab:hover .sessions-right-workbench-tab-close,
+.sessions-right-workbench-tab.active .sessions-right-workbench-tab-close {
+	visibility: visible;
 }
 
 .sessions-right-workbench-tab-close:hover {
@@ -250,13 +258,6 @@
 	white-space: nowrap;
 }
 
-.sessions-right-workbench-launcher-toolbar {
-	position: absolute;
-	top: 8px;
-	right: 8px;
-	z-index: 1;
-}
-
 .sessions-right-workbench-launcher-center {
 	display: flex;
 	align-items: center;
@@ -362,24 +363,32 @@
 	overflow: hidden;
 }
 
-.sessions-right-workbench-browser-empty {
+/* Shared empty-state pattern for the browser, files, and review pages. */
+.sessions-right-workbench-browser-empty,
+.sessions-right-workbench-file-empty,
+.sessions-right-workbench-review-empty {
 	display: flex;
 	flex-direction: column;
 	align-items: center;
 	justify-content: center;
 	position: absolute;
 	inset: 0;
+	padding: 16px;
+	box-sizing: border-box;
 	text-align: center;
 }
 
-.sessions-right-workbench-browser-empty .codicon {
-	margin-bottom: 12px;
+.sessions-right-workbench-browser-empty .codicon,
+.sessions-right-workbench-file-empty .codicon,
+.sessions-right-workbench-review-empty .codicon {
+	margin-bottom: 10px;
 	color: var(--rwb-muted);
-	font-size: 36px;
+	font-size: 32px;
 }
 
 .sessions-right-workbench-browser-empty h2,
-.sessions-right-workbench-file-empty h2 {
+.sessions-right-workbench-file-empty h2,
+.sessions-right-workbench-review-empty h2 {
 	margin: 0;
 	color: var(--rwb-foreground);
 	font-size: 16px;
@@ -388,8 +397,9 @@
 }
 
 .sessions-right-workbench-browser-empty p,
-.sessions-right-workbench-file-empty p {
-	margin: 8px 0 0;
+.sessions-right-workbench-file-empty p,
+.sessions-right-workbench-review-empty p {
+	margin: 6px 0 0;
 	color: var(--rwb-muted);
 	font-size: 13px;
 	line-height: 18px;
@@ -438,53 +448,8 @@
 	display: none;
 }
 
-.sessions-right-workbench-review-rail-scm > .pane {
-	display: none !important;
-}
-
-.sessions-right-workbench-review-rail > .pane {
-	height: 100%;
-	background: transparent !important;
-}
-
-.sessions-right-workbench-review-rail > .pane > .pane-header {
-	display: none !important;
-}
-
-.sessions-right-workbench-review-rail > .pane > .pane-body {
-	height: 100% !important;
-	padding: 0 !important;
-	background: transparent !important;
-}
-
-.sessions-right-workbench-review-rail .changes-view-body {
-	height: 100%;
-	padding: 10px 9px;
-	box-sizing: border-box;
-	background: var(--rwb-bg);
-}
-
-.sessions-right-workbench-review-rail .chat-editing-session-actions.outside-card {
-	margin: 0 0 8px;
-}
-
-.sessions-right-workbench-review-rail .changes-splitview-container,
-.sessions-right-workbench-review-rail .chat-editing-session-container {
-	background: transparent !important;
-	border: 0 !important;
-	box-shadow: none !important;
-}
-
-.sessions-right-workbench-review-rail .changes-files-header {
-	min-height: 30px;
-	background: transparent !important;
-	border: 0 !important;
-}
-
 .sessions-right-workbench-review-rail .monaco-list,
 .sessions-right-workbench-review-rail .monaco-list-rows,
-.sessions-right-workbench-review-rail .monaco-tree,
-.sessions-right-workbench-review-rail .monaco-tree-rows,
 .sessions-right-workbench-review-rail .monaco-scrollable-element {
 	background: transparent !important;
 }
@@ -518,24 +483,15 @@
 	overflow: hidden;
 }
 
-.sessions-right-workbench-review-scm-fallback,
 .sessions-right-workbench-review-scm-rail {
 	display: flex;
 	flex-direction: column;
+	position: absolute;
+	inset: 0;
 	min-height: 0;
-	background: var(--rwb-bg);
-}
-
-.sessions-right-workbench-review-scm-fallback {
-	position: absolute;
-	inset: 0;
-}
-
-.sessions-right-workbench-review-scm-rail {
-	position: absolute;
-	inset: 0;
 	padding: 8px 9px;
 	box-sizing: border-box;
+	background: var(--rwb-bg);
 }
 
 .sessions-right-workbench-review-scm-header {
@@ -635,34 +591,6 @@
 	color: var(--rwb-danger);
 }
 
-.sessions-right-workbench-review-empty {
-	position: absolute;
-	inset: 0;
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	justify-content: center;
-	color: var(--rwb-muted);
-	text-align: center;
-}
-
-.sessions-right-workbench-review-empty .codicon {
-	margin-bottom: 10px;
-	font-size: 28px;
-}
-
-.sessions-right-workbench-review-empty h2 {
-	margin: 0;
-	color: var(--rwb-foreground);
-	font-size: 16px;
-	font-weight: 600;
-}
-
-.sessions-right-workbench-review-empty p {
-	margin: 5px 0 0;
-	font-size: 13px;
-}
-
 .sessions-right-workbench-files {
 	display: grid;
 	grid-template-columns: minmax(0, 1fr) minmax(220px, 32%);
@@ -738,22 +666,6 @@
 
 .sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .monaco-scrollable-element > .scrollbar.vertical {
 	width: 8px !important;
-}
-
-.sessions-right-workbench-file-empty {
-	position: absolute;
-	inset: 0;
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	justify-content: center;
-	text-align: center;
-}
-
-.sessions-right-workbench-file-empty .codicon {
-	margin-bottom: 10px;
-	color: var(--rwb-muted);
-	font-size: 28px;
 }
 
 .sessions-right-workbench-file-tree {
@@ -864,22 +776,6 @@
 	color: var(--rwb-foreground);
 	font-family: Menlo, Monaco, Consolas, monospace;
 	font-size: 13px;
-}
-
-.sessions-right-workbench-terminal-view {
-	position: absolute;
-	inset: 0;
-	min-width: 0;
-	min-height: 0;
-	overflow: hidden;
-	background: var(--rwb-bg);
-}
-
-.sessions-right-workbench-terminal-view .terminal-outer-container,
-.sessions-right-workbench-terminal-view .terminal-groups-container {
-	width: 100%;
-	height: 100%;
-	background: var(--rwb-bg);
 }
 
 .sessions-right-workbench-terminal pre {

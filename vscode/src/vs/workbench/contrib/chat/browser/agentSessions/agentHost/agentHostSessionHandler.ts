@@ -62,7 +62,9 @@ import { IChatWidgetService } from '../../chat.js';
 import { IAgentHostActiveClientService } from './agentHostActiveClientService.js';
 import { IAgentHostSessionWorkingDirectoryResolver } from './agentHostSessionWorkingDirectoryResolver.js';
 import { IAgentHostNewSessionFolderService } from './agentHostNewSessionFolderService.js';
-import { fromAgentHostUri } from '../../../../../../platform/agentHost/common/agentHostUri.js';
+import { fromAgentHostUri, toAgentHostUri } from '../../../../../../platform/agentHost/common/agentHostUri.js';
+import { AGENT_IGNORED_DIRECTORIES, isIgnoredAgentPath } from '../../../../../../platform/agentHost/common/agentIgnoredPaths.js';
+import { hydrateUncoveredTurnEdit, resolveTurnRepoInfo, type ITurnRepoInfo, type ReadTextFn } from './agentHostTurnFsEdits.js';
 import { AgentHostSnapshotController } from './agentHostSnapshotController.js';
 import { toolDataToDefinition } from './agentHostToolUtils.js';
 import { IAgentHostUntitledProvisionalSessionService } from './agentHostUntitledProvisionalSessionService.js';
@@ -1353,22 +1355,37 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 			.filter(u => u.scheme === 'file');
 		const fsChangedUris = new ResourceMap<FileChangeType>();
 		const toolCallCoveredUris = new ResourceMap<true>();
+		let ignoredChangeCount = 0;
 		this._logService.info(`[AgentHost][FsWatch] Turn ${turnId}: watching ${workspaceFileUris.length} workspace folder(s): ${workspaceFileUris.map(u => u.toString()).join(', ')}`);
 		// Register recursive watchers on each workspace folder so VS Code's file
 		// service picks up changes made by any tool (MCP, shell, etc.) during
-		// this turn.
+		// this turn. VCS internals and build output are excluded — a git
+		// commit/worktree operation during the turn writes loose objects and
+		// temp files under `.git/**` that must never surface as file edits.
+		const watcherExcludes = AGENT_IGNORED_DIRECTORIES.map(directory => `**/${directory}/**`);
 		const watcherDisposables = workspaceFileUris.map(root =>
-			this._fileService.watch(root, { recursive: true, excludes: [] })
+			this._fileService.watch(root, { recursive: true, excludes: watcherExcludes })
 		);
+		// Pin the repository HEAD sha now, before any writes land, so
+		// out-of-band edits can diff against turn-start content via git-blob
+		// URIs (see agentHostTurnFsEdits.ts). Best-effort: absent repo info
+		// just means diff-less pills.
+		const turnRepoInfoPromise = this._resolveTurnRepoInfos(workspaceFileUris);
 		const fsWatchSub = this._fileService.onDidFilesChange(e => {
 			const recordChange = (uri: URI, type: FileChangeType) => {
 				const inWorkspace = workspaceFileUris.some(root =>
 					uri.toString().startsWith(root.toString())
 				);
-				this._logService.info(`[AgentHost][FsWatch] Change detected: ${uri.toString()} type=${type} inWorkspace=${inWorkspace}`);
 				if (!inWorkspace) {
 					return;
 				}
+				// Defense-in-depth against watchers that don't fully honor
+				// excludes: never track VCS-internal / build-output paths.
+				if (isIgnoredAgentPath(uri.path)) {
+					ignoredChangeCount++;
+					return;
+				}
+				this._logService.info(`[AgentHost][FsWatch] Change detected: ${uri.toString()} type=${type}`);
 				const prev = fsChangedUris.get(uri);
 				if (prev === undefined) {
 					fsChangedUris.set(uri, type);
@@ -1403,29 +1420,29 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 				sink: progress,
 				cancellationToken,
 				suppressErrorMarkdown: true,
-				onTurnEnded: (lastTurn) => {
+				onTurnEnded: async (lastTurn) => {
 					// Emit externalEdit parts for any workspace files that changed
-					// during the turn but weren't already reported via tool-call edits.
-					this._logService.info(`[AgentHost][FsWatch] Turn ${turnId} ended: fsChangedUris=${fsChangedUris.size} toolCallCoveredUris=${toolCallCoveredUris.size}`);
+					// during the turn but weren't already reported via tool-call
+					// edits. These are hydrated with before/after content (before
+					// = git-blob at the turn-start sha, after = working tree) so
+					// they render the same diff pill/card as tool-declared edits.
+					this._logService.info(`[AgentHost][FsWatch] Turn ${turnId} ended: fsChangedUris=${fsChangedUris.size} toolCallCoveredUris=${toolCallCoveredUris.size} ignored=${ignoredChangeCount}`);
+					const repoInfos = await turnRepoInfoPromise;
 					const extraEdits: IChatProgress[] = [];
 					for (const [uri, changeType] of fsChangedUris) {
 						if (toolCallCoveredUris.has(uri)) {
 							this._logService.info(`[AgentHost][FsWatch] Skipping ${uri.toString()} (covered by tool call)`);
 							continue;
 						}
-						let editKind: 'create' | 'edit' | 'delete';
-						if (changeType === FileChangeType.ADDED) {
-							editKind = 'create';
-						} else if (changeType === FileChangeType.DELETED) {
-							editKind = 'delete';
-						} else {
-							editKind = 'edit';
-						}
-						extraEdits.push({
-							kind: 'externalEdit',
+						const repo = repoInfos.find(info => uri.path.startsWith(`${info.rootPath}/`));
+						extraEdits.push(hydrateUncoveredTurnEdit({
 							uri,
-							editKind,
-						});
+							changeType,
+							repo,
+							backendSessionUri: session.toString(),
+							connectionAuthority: this._config.connectionAuthority,
+							undoStopId: turnId,
+						}));
 					}
 					if (extraEdits.length > 0) {
 						progress(extraEdits);
@@ -1452,6 +1469,36 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 				},
 			}));
 		});
+	}
+
+	/**
+	 * Resolves git repository info (root + HEAD sha) for each workspace
+	 * folder at turn start, reading `.git` metadata through the agent host
+	 * file system so remote sessions work too. Best-effort: folders without
+	 * a resolvable repository are simply omitted.
+	 */
+	private async _resolveTurnRepoInfos(workspaceFileUris: readonly URI[]): Promise<ITurnRepoInfo[]> {
+		const authority = this._config.connectionAuthority;
+		const readText: ReadTextFn = async absolutePath => {
+			try {
+				const content = await this._fileService.readFile(toAgentHostUri(URI.file(absolutePath), authority));
+				return content.value.toString();
+			} catch {
+				return undefined;
+			}
+		};
+		const infos: ITurnRepoInfo[] = [];
+		for (const root of workspaceFileUris) {
+			try {
+				const info = await resolveTurnRepoInfo(readText, root.path);
+				if (info && !infos.some(existing => existing.rootPath === info.rootPath)) {
+					infos.push(info);
+				}
+			} catch (err) {
+				this._logService.warn(`[AgentHost][FsWatch] Failed to resolve repo info for ${root.toString()}`, err);
+			}
+		}
+		return infos;
 	}
 
 	// ---- Tool confirmation --------------------------------------------------

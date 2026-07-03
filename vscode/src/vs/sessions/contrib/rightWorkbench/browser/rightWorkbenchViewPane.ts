@@ -11,7 +11,8 @@ import { Color } from '../../../../base/common/color.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { DisposableMap, DisposableStore } from '../../../../base/common/lifecycle.js';
 import { autorun, IReader } from '../../../../base/common/observable.js';
-import { basename } from '../../../../base/common/resources.js';
+import { basename, dirname } from '../../../../base/common/resources.js';
+import { Schemas } from '../../../../base/common/network.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
 import { URI } from '../../../../base/common/uri.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
@@ -47,16 +48,16 @@ import { ISCMRepository, ISCMResource, ISCMService } from '../../../../workbench
 import { GitChange, GitDiffChange, IGitRepository, IGitService } from '../../../../workbench/contrib/git/common/gitService.js';
 import { ITerminalEditorService, ITerminalInstance, ITerminalService, IXtermColorProvider } from '../../../../workbench/contrib/terminal/browser/terminal.js';
 import { IAgentHostCustomizationService } from '../../../../workbench/contrib/chat/browser/agentSessions/agentHost/agentHostCustomizationService.js';
-import { CHANGES_VIEW_ID } from '../../changes/common/changes.js';
-import { ChangesViewPane } from '../../changes/browser/changesView.js';
+import { isIChatSessionFileChange2 } from '../../../../workbench/contrib/chat/common/chatSessionsService.js';
 import { agentsPanelBackground } from '../../../common/theme.js';
 import { ISessionsService } from '../../../services/sessions/browser/sessionsService.js';
 import { IActiveSession } from '../../../services/sessions/common/sessionsManagement.js';
+import { ISessionFileChange } from '../../../services/sessions/common/session.js';
 import { SESSIONS_FILES_EMPTY_VIEW_ID, SESSIONS_FILES_VIEW_ID, SessionsExplorerEmptyView, SessionsExplorerView } from '../../files/browser/filesView.js';
 import { createFileIconThemableTreeContainerScope } from '../../../../workbench/contrib/files/browser/views/explorerView.js';
 import { WorkbenchCompressibleObjectTree } from '../../../../platform/list/browser/listService.js';
 import { buildReviewTreeChildren, IReviewResource, isReviewResource, ReviewTreeDelegate, ReviewTreeElement, ReviewTreeRenderer, ReviewTreeSorter } from './reviewTree.js';
-import { onDidRequestModeEmitter, pendingModeRequest, setPendingModeRequest, type RightWorkbenchMode, type IRightWorkbenchModeRequest, type IRightWorkbenchModeEntry, orderedTabModes } from './rightWorkbench.js';
+import { onDidRequestModeEmitter, pendingModeRequest, setPendingModeRequest, type RightWorkbenchMode, type IRightWorkbenchModeRequest, type IRightWorkbenchModeEntry } from './rightWorkbench.js';
 
 const enum RightWorkbenchBrowserCommandId {
 	ZoomIn = 'workbench.action.browser.zoomIn',
@@ -71,6 +72,22 @@ const enum RightWorkbenchBrowserCommandId {
 
 const REVIEW_DIFF_SIDE_BY_SIDE_MIN_WIDTH = 1040;
 
+/**
+ * State for a single tab instance in the right workbench. Multiple tabs of the
+ * same mode may exist at once (e.g. two terminals); each carries its own
+ * mode-specific state so switching tabs restores the right content.
+ */
+interface IRightWorkbenchTabState {
+	readonly id: string;
+	readonly mode: Exclude<RightWorkbenchMode, 'launcher'>;
+	terminalInstance?: ITerminalInstance;
+	browserUrl?: string;
+	browserViewId?: string;
+	browserInput?: BrowserEditorInput;
+	selectedFile?: URI;
+	selectedReviewResourceKey?: string;
+}
+
 export class RightWorkbenchViewPane extends ViewPane {
 
 	private readonly domStore = this._register(new DisposableStore());
@@ -79,44 +96,47 @@ export class RightWorkbenchViewPane extends ViewPane {
 	private embeddedEditorHost: HTMLElement | undefined;
 	private filesExplorer: ViewPane | undefined;
 	private filesExplorerContainer: HTMLElement | undefined;
-	private reviewPane: ChangesViewPane | undefined;
-	private reviewPaneContainer: HTMLElement | undefined;
 	private reviewEmptyElement: HTMLElement | undefined;
 	private filePathElement: HTMLElement | undefined;
 	private fileEmptyElement: HTMLElement | undefined;
-	private activeMode: RightWorkbenchMode = 'launcher';
-	private readonly openTabs = new Set<RightWorkbenchMode>();
+	private readonly tabs: IRightWorkbenchTabState[] = [];
+	private activeTabId: string | undefined;
+	private readonly tabStores = this._register(new DisposableMap<string, DisposableStore>());
+	private readonly tabLabelElements = new Map<string, HTMLElement>();
 	private isFilesTreeVisible = true;
-	private selectedFile: URI | undefined;
-	private browserUrl: string | undefined;
-	private browserViewId: string | undefined;
-	private browserInput: BrowserEditorInput | undefined;
 	private browserEditorPane: BrowserEditor | undefined;
 	private browserUrlInput: HTMLInputElement | undefined;
 	private browserBackButton: HTMLButtonElement | undefined;
 	private browserForwardButton: HTMLButtonElement | undefined;
 	private browserRefreshButton: HTMLButtonElement | undefined;
 	private embeddedEditorLayoutFrame = 0;
-	private readonly browserInputStore = this._register(new DisposableStore());
-	private terminalInstance: ITerminalInstance | undefined;
 	private readonly terminalColorProvider: IXtermColorProvider = {
 		getBackgroundColor: theme => this.getTerminalBackgroundColor(theme),
 	};
 	private readonly pendingGitReviewRefreshKeys = new Set<string>();
+	private initialGitProbeSettled = false;
+	private isSessionChangesLoading = false;
+	private reviewEmptyIsLoading = false;
+	private lastProbedSessionKey: string | undefined;
 	private readonly pendingGitReviewStatsKeys = new Set<string>();
 	private readonly loadedGitReviewStatsKeys = new Set<string>();
 	private readonly gitReviewStats = new Map<string, { additions: number; deletions: number }>();
 	private reviewTree: WorkbenchCompressibleObjectTree<ReviewTreeElement> | undefined;
 	private reviewTreeCountElement: HTMLElement | undefined;
 	private reviewContainer: HTMLElement | undefined;
-	private reviewRailElement: HTMLElement | undefined;
 	private reviewBodyElement: HTMLElement | undefined;
-	private reviewScmFallbackElement: HTMLElement | undefined;
 	private reviewScmRailElement: HTMLElement | undefined;
-	private selectedReviewResourceKey: string | undefined;
 	private openedReviewResourceKey: string | undefined;
 	private modePicker: HTMLElement | undefined;
 	private isRightWorkbenchVisible = false;
+
+	private get activeTab(): IRightWorkbenchTabState | undefined {
+		return this.tabs.find(tab => tab.id === this.activeTabId);
+	}
+
+	private get activeMode(): RightWorkbenchMode {
+		return this.activeTab?.mode ?? 'launcher';
+	}
 
 	constructor(
 		options: IViewPaneOptions,
@@ -148,6 +168,30 @@ export class RightWorkbenchViewPane extends ViewPane {
 			if ((e.partId === Parts.EDITOR_PART || e.partId === Parts.PANEL_PART) && e.visible) {
 				this.enforceSingleSurfaceLayout();
 			}
+		}));
+		// Kick off git repository discovery as soon as a session is active (not
+		// only when the Review tab is opened) so the review rail is populated
+		// instantly when the user gets there. Also re-probe when the session's
+		// edited files change — they pinpoint repositories nested below the
+		// session root.
+		this._register(autorun(reader => {
+			const activeSession = this.sessionsService.activeSession.read(reader);
+			if (!activeSession) {
+				return;
+			}
+			activeSession.changes.read(reader);
+			const sessionKey = activeSession.resource.toString();
+			if (this.lastProbedSessionKey !== sessionKey) {
+				this.lastProbedSessionKey = sessionKey;
+				this.initialGitProbeSettled = false;
+			}
+			this.requestGitReviewRefresh(activeSession);
+		}));
+		// The session's working directory may resolve after activation — probe
+		// again when customizations change so late-arriving directories are
+		// still discovered.
+		this._register(this.agentHostCustomizationService.onDidChangeCustomizations(() => {
+			this.requestGitReviewRefresh(this.sessionsService.activeSession.read(undefined));
 		}));
 	}
 
@@ -181,7 +225,6 @@ export class RightWorkbenchViewPane extends ViewPane {
 			this.root.style.width = `${targetWidth}px`;
 		}
 		this.layoutFilesExplorer();
-		this.layoutReviewPane();
 		this.layoutEmbeddedEditorPart();
 	}
 
@@ -220,37 +263,92 @@ export class RightWorkbenchViewPane extends ViewPane {
 
 	private async openMode(request: RightWorkbenchMode | IRightWorkbenchModeRequest): Promise<void> {
 		const modeRequest = typeof request === 'string' ? { mode: request } : request;
-		const previousMode = this.activeMode;
 		this.activateSingleSurface();
-		if (this.activeMode !== modeRequest.mode) {
+		const existing = modeRequest.mode === 'launcher' ? undefined : this.findTabForRequest(modeRequest);
+		const willChangeTab = modeRequest.mode === 'launcher'
+			? this.activeTabId !== undefined
+			: existing?.id !== this.activeTabId;
+		if (willChangeTab) {
 			const closed = await this.closeEmbeddedEditorPart();
 			if (!closed) {
 				return;
 			}
 		}
-		if (previousMode === 'launcher' && modeRequest.mode === 'browser' && !modeRequest.browserUrl) {
-			this.browserUrl = undefined;
-		}
 		this.applyModeRequest(modeRequest);
 		this.renderShell();
 	}
 
+	private async openNewTab(mode: Exclude<RightWorkbenchMode, 'launcher'>): Promise<void> {
+		this.activateSingleSurface();
+		const closed = await this.closeEmbeddedEditorPart();
+		if (!closed) {
+			return;
+		}
+		const tab = this.createTab(mode);
+		this.activeTabId = tab.id;
+		this.renderShell();
+	}
+
+	private async openTab(tabId: string): Promise<void> {
+		if (tabId === this.activeTabId || !this.tabs.some(tab => tab.id === tabId)) {
+			return;
+		}
+		this.activateSingleSurface();
+		const closed = await this.closeEmbeddedEditorPart();
+		if (!closed) {
+			return;
+		}
+		this.activeTabId = tabId;
+		this.renderShell();
+	}
+
 	private applyModeRequest(request: IRightWorkbenchModeRequest): void {
-		this.activeMode = request.mode;
-		if (request.mode !== 'launcher') {
-			this.openTabs.add(request.mode);
+		if (request.mode === 'launcher') {
+			this.activeTabId = undefined;
+			return;
 		}
+		const tab = this.findTabForRequest(request) ?? this.createTab(request.mode);
 		if (request.browserUrl) {
-			this.browserUrl = this.normalizeBrowserUrl(request.browserUrl);
+			tab.browserUrl = this.normalizeBrowserUrl(request.browserUrl);
 		}
-		if (request.browserViewId) {
-			this.browserViewId = request.browserViewId;
-			if (this.browserInput?.id !== request.browserViewId) {
-				this.browserInput = undefined;
+		if (request.browserViewId && tab.browserViewId !== request.browserViewId) {
+			tab.browserViewId = request.browserViewId;
+			if (tab.browserInput?.id !== request.browserViewId) {
+				tab.browserInput = undefined;
 				this.browserEditorPane = undefined;
-				this.browserInputStore.clear();
+				this.tabStores.get(tab.id)?.clear();
 			}
 		}
+		this.activeTabId = tab.id;
+	}
+
+	/**
+	 * Resolves which existing tab should handle an external mode request:
+	 * a browser tab already showing the requested view wins, then the active
+	 * tab if it has the right mode, then the first tab of that mode.
+	 */
+	private findTabForRequest(request: IRightWorkbenchModeRequest): IRightWorkbenchTabState | undefined {
+		if (request.mode === 'launcher') {
+			return undefined;
+		}
+		if (request.browserViewId) {
+			const byViewId = this.tabs.find(tab => tab.mode === 'browser' && (tab.browserViewId === request.browserViewId || tab.browserInput?.id === request.browserViewId));
+			if (byViewId) {
+				return byViewId;
+			}
+		}
+		const activeTab = this.activeTab;
+		if (activeTab?.mode === request.mode) {
+			return activeTab;
+		}
+		return this.tabs.find(tab => tab.mode === request.mode);
+	}
+
+	private createTab(mode: Exclude<RightWorkbenchMode, 'launcher'>): IRightWorkbenchTabState {
+		const tab: IRightWorkbenchTabState = { id: generateUuid(), mode };
+		this.tabs.push(tab);
+		this.tabStores.set(tab.id, new DisposableStore());
+		return tab;
 	}
 
 	private renderShell(): void {
@@ -261,16 +359,13 @@ export class RightWorkbenchViewPane extends ViewPane {
 		this.closeModePicker();
 		this.domStore.clear();
 		clearNode(this.root);
+		this.tabLabelElements.clear();
 		this.embeddedEditorHost = undefined;
 		this.filesExplorer = undefined;
 		this.filesExplorerContainer = undefined;
-		this.reviewPane = undefined;
-		this.reviewPaneContainer = undefined;
 		this.reviewEmptyElement = undefined;
 		this.reviewContainer = undefined;
-		this.reviewRailElement = undefined;
 		this.reviewBodyElement = undefined;
-		this.reviewScmFallbackElement = undefined;
 		this.reviewScmRailElement = undefined;
 		this.reviewTree = undefined;
 		this.reviewTreeCountElement = undefined;
@@ -281,7 +376,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 		this.browserForwardButton = undefined;
 		this.browserRefreshButton = undefined;
 		this.root.className = `sessions-right-workbench-shell sessions-right-workbench-mode-${this.activeMode}`;
-		this.root.classList.toggle('sessions-right-workbench-has-file', this.activeMode === 'files' && !!this.selectedFile);
+		this.root.classList.toggle('sessions-right-workbench-has-file', this.activeMode === 'files' && !!this.activeTab?.selectedFile);
 		this.root.classList.toggle('sessions-right-workbench-files-tree-hidden', this.activeMode === 'files' && !this.isFilesTreeVisible);
 
 		if (this.activeMode === 'launcher') {
@@ -310,10 +405,9 @@ export class RightWorkbenchViewPane extends ViewPane {
 	private renderModeHeader(container: HTMLElement): void {
 		const header = append(container, $('.sessions-right-workbench-header'));
 		const tabs = append(header, $('.sessions-right-workbench-tabs'));
-		for (const mode of orderedTabModes) {
-			if (this.openTabs.has(mode)) {
-				this.renderTab(tabs, mode, this.getModeIcon(mode), this.getTabLabel(mode));
-			}
+		this.tabLabelElements.clear();
+		for (const tab of this.tabs) {
+			this.renderTab(tabs, tab);
 		}
 		const add = append(tabs, $('button.sessions-right-workbench-tab-add')) as HTMLButtonElement;
 		add.type = 'button';
@@ -323,38 +417,71 @@ export class RightWorkbenchViewPane extends ViewPane {
 		add.appendChild(renderIcon(Codicon.add));
 		this.domStore.add(addDisposableListener(add, EventType.CLICK, () => this.toggleModePicker(add)));
 
-		const controls = append(header, $('.sessions-right-workbench-frame-controls'));
-		const filesToggleLabel = this.activeMode === 'files' && this.isFilesTreeVisible
-			? localize('rightWorkbench.closeFiles', "Close Files")
-			: localize('rightWorkbench.openFiles', "Open Files");
-		const filesToggle = this.renderIconButton(controls, Codicon.folderOpened, filesToggleLabel);
-		filesToggle.classList.toggle('active', this.activeMode === 'files' && this.isFilesTreeVisible);
-		this.domStore.add(addDisposableListener(filesToggle, EventType.CLICK, () => {
-			if (this.activeMode === 'files') {
+		if (this.activeMode === 'files') {
+			const controls = append(header, $('.sessions-right-workbench-frame-controls'));
+			const filesToggleLabel = this.isFilesTreeVisible
+				? localize('rightWorkbench.closeFiles', "Close Files")
+				: localize('rightWorkbench.openFiles', "Open Files");
+			const filesToggle = this.renderIconButton(controls, Codicon.folderOpened, filesToggleLabel);
+			filesToggle.classList.toggle('active', this.isFilesTreeVisible);
+			this.domStore.add(addDisposableListener(filesToggle, EventType.CLICK, () => {
 				this.isFilesTreeVisible = !this.isFilesTreeVisible;
 				this.renderShell();
-				return;
-			}
-			this.isFilesTreeVisible = true;
-			void this.openMode('files');
-		}));
+			}));
+		}
 	}
 
-	private renderTab(container: HTMLElement, mode: RightWorkbenchMode, icon: ThemeIcon, label: string): void {
-		const tab = append(container, $('button.sessions-right-workbench-tab')) as HTMLButtonElement;
-		tab.type = 'button';
-		tab.classList.toggle('active', this.activeMode === mode);
-		tab.appendChild(renderIcon(icon));
-		append(tab, $('span.sessions-right-workbench-tab-label', {}, label));
-		const close = append(tab, $('span.sessions-right-workbench-tab-close')) as HTMLElement;
+	private renderTab(container: HTMLElement, tab: IRightWorkbenchTabState): void {
+		const element = append(container, $('button.sessions-right-workbench-tab')) as HTMLButtonElement;
+		element.type = 'button';
+		element.classList.toggle('active', this.activeTabId === tab.id);
+		element.appendChild(renderIcon(this.getModeIcon(tab.mode)));
+		const label = append(element, $('span.sessions-right-workbench-tab-label', {}, this.getTabInstanceLabel(tab)));
+		this.tabLabelElements.set(tab.id, label);
+		const close = append(element, $('span.sessions-right-workbench-tab-close')) as HTMLElement;
 		close.title = localize('rightWorkbench.closeTab', "Close");
 		close.ariaLabel = localize('rightWorkbench.closeTab', "Close");
 		close.appendChild(renderIcon(Codicon.close));
 		this.domStore.add(addDisposableListener(close, EventType.CLICK, event => {
 			event.stopPropagation();
-			void this.closeTab(mode);
+			void this.closeTab(tab.id);
 		}));
-		this.domStore.add(addDisposableListener(tab, EventType.CLICK, () => { void this.openMode(mode); }));
+		this.domStore.add(addDisposableListener(element, EventType.CLICK, () => { void this.openTab(tab.id); }));
+	}
+
+	private refreshTabLabels(): void {
+		for (const tab of this.tabs) {
+			const label = this.tabLabelElements.get(tab.id);
+			if (label) {
+				label.textContent = this.getTabInstanceLabel(tab);
+			}
+		}
+	}
+
+	private getTabInstanceLabel(tab: IRightWorkbenchTabState): string {
+		const detail = this.getTabDetailLabel(tab);
+		if (detail) {
+			return detail;
+		}
+		const base = this.getTabLabel(tab.mode);
+		const sameModeTabs = this.tabs.filter(other => other.mode === tab.mode);
+		if (sameModeTabs.length > 1) {
+			return `${base} ${sameModeTabs.indexOf(tab) + 1}`;
+		}
+		return base;
+	}
+
+	private getTabDetailLabel(tab: IRightWorkbenchTabState): string | undefined {
+		switch (tab.mode) {
+			case 'browser':
+				return tab.browserInput?.getName() || undefined;
+			case 'terminal':
+				return tab.terminalInstance?.title || undefined;
+			case 'files':
+				return tab.selectedFile ? basename(tab.selectedFile) : undefined;
+			default:
+				return undefined;
+		}
 	}
 
 	private renderIconButton(container: HTMLElement, icon: ThemeIcon, label: string): HTMLButtonElement {
@@ -445,7 +572,9 @@ export class RightWorkbenchViewPane extends ViewPane {
 		}
 		this.modePickerStore.add(addDisposableListener(button, EventType.CLICK, () => {
 			this.closeModePicker();
-			void this.openMode(entry.mode);
+			if (entry.mode !== 'launcher') {
+				void this.openNewTab(entry.mode);
+			}
 		}));
 	}
 
@@ -459,7 +588,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 		if (this.activeMode !== 'browser') {
 			return undefined;
 		}
-		const model = this.browserInput?.model;
+		const model = this.activeTab?.browserInput?.model;
 		if (!model) {
 			return undefined;
 		}
@@ -467,7 +596,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 		void model.setVisible(false);
 		return {
 			dispose: () => {
-				if (this.activeMode === 'browser' && this.browserInput?.model === model) {
+				if (this.activeMode === 'browser' && this.activeTab?.browserInput?.model === model) {
 					void model.setVisible(true);
 					this.layoutEmbeddedEditorPart();
 				}
@@ -514,36 +643,40 @@ export class RightWorkbenchViewPane extends ViewPane {
 		}
 	}
 
-	private async closeTab(mode: RightWorkbenchMode): Promise<void> {
-		if (!this.openTabs.has(mode)) {
+	private async closeTab(tabId: string): Promise<void> {
+		const index = this.tabs.findIndex(tab => tab.id === tabId);
+		if (index === -1) {
 			return;
 		}
-
-		this.openTabs.delete(mode);
-		if (mode === 'terminal') {
-			this.terminalInstance = undefined;
-		}
-		if (this.activeMode === mode) {
+		if (this.activeTabId === tabId) {
 			const closed = await this.closeEmbeddedEditorPart();
 			if (!closed) {
-				this.openTabs.add(mode);
 				return;
 			}
-			this.activeMode = this.getNextActiveMode(mode);
+		}
+		const [tab] = this.tabs.splice(index, 1);
+		this.disposeTabResources(tab);
+		if (this.activeTabId === tabId) {
+			const nextTab = this.tabs[index] ?? this.tabs[index - 1];
+			this.activeTabId = nextTab?.id;
 		}
 		this.renderShell();
 	}
 
-	private getNextActiveMode(closedMode: RightWorkbenchMode): RightWorkbenchMode {
-		for (const mode of orderedTabModes) {
-			if (mode !== closedMode && this.openTabs.has(mode)) {
-				return mode;
-			}
-		}
-		return 'launcher';
+	private disposeTabResources(tab: IRightWorkbenchTabState): void {
+		this.tabStores.deleteAndDispose(tab.id);
+		this.tabLabelElements.delete(tab.id);
+		tab.terminalInstance?.dispose();
+		tab.terminalInstance = undefined;
+		tab.browserInput?.dispose();
+		tab.browserInput = undefined;
 	}
 
 	private renderBrowser(container: HTMLElement): void {
+		const tab = this.activeTab;
+		if (!tab || tab.mode !== 'browser') {
+			return;
+		}
 		const chrome = append(container, $('.sessions-right-workbench-browser-chrome'));
 		const nav = append(chrome, $('.sessions-right-workbench-browser-nav'));
 		this.browserBackButton = this.renderIconButton(nav, Codicon.arrowLeft, localize('rightWorkbench.browserBack', "Back"));
@@ -554,13 +687,13 @@ export class RightWorkbenchViewPane extends ViewPane {
 		url.placeholder = localize('rightWorkbench.browserUrlPlaceholder', "Enter a URL");
 		url.type = 'text';
 		url.spellcheck = false;
-		url.value = this.browserInput?.url ?? this.browserUrl ?? '';
-		this.domStore.add(addDisposableListener(this.browserBackButton, EventType.CLICK, () => { void this.browserInput?.model?.goBack(); }));
-		this.domStore.add(addDisposableListener(this.browserForwardButton, EventType.CLICK, () => { void this.browserInput?.model?.goForward(); }));
-		this.domStore.add(addDisposableListener(this.browserRefreshButton, EventType.CLICK, () => { void this.browserInput?.model?.reload(); }));
+		url.value = tab.browserInput?.url ?? tab.browserUrl ?? '';
+		this.domStore.add(addDisposableListener(this.browserBackButton, EventType.CLICK, () => { void tab.browserInput?.model?.goBack(); }));
+		this.domStore.add(addDisposableListener(this.browserForwardButton, EventType.CLICK, () => { void tab.browserInput?.model?.goForward(); }));
+		this.domStore.add(addDisposableListener(this.browserRefreshButton, EventType.CLICK, () => { void tab.browserInput?.model?.reload(); }));
 		this.domStore.add(addDisposableListener(url, EventType.KEY_DOWN, event => {
 			if (event.key === 'Enter') {
-				void this.setBrowserUrl(url.value);
+				void this.setBrowserUrl(tab, url.value);
 			}
 		}));
 		const browserMoreButton = this.renderIconButton(nav, Codicon.kebabVertical, localize('rightWorkbench.browserMore', "More Actions"));
@@ -569,11 +702,11 @@ export class RightWorkbenchViewPane extends ViewPane {
 		const content = append(container, $('.sessions-right-workbench-browser-content'));
 		this.embeddedEditorHost = append(content, $('.sessions-right-workbench-embedded-editor-host'));
 		this.observeElementResize(this.embeddedEditorHost, () => this.layoutEmbeddedEditorPart());
-		const currentUrl = this.browserUrl ?? this.browserInput?.url;
-		if (currentUrl || this.browserViewId) {
-			this.browserUrl = currentUrl;
+		const currentUrl = tab.browserUrl ?? tab.browserInput?.url;
+		if (currentUrl || tab.browserViewId) {
+			tab.browserUrl = currentUrl;
 			url.value = currentUrl ?? '';
-			void this.openBrowserEditor(currentUrl);
+			void this.openBrowserEditor(tab, currentUrl);
 		} else {
 			const empty = append(content, $('.sessions-right-workbench-browser-empty'));
 			empty.appendChild(renderIcon(Codicon.globe));
@@ -590,19 +723,15 @@ export class RightWorkbenchViewPane extends ViewPane {
 		this.embeddedEditorHost = append(reviewBody, $('.sessions-right-workbench-embedded-editor-host'));
 		this.observeElementResize(this.embeddedEditorHost, () => this.layoutEmbeddedEditorPart());
 		this.openedReviewResourceKey = undefined;
-		const scmFallback = append(reviewBody, $('.sessions-right-workbench-review-scm-fallback'));
 
 		const rail = append(review, $('.sessions-right-workbench-review-rail'));
-		this.renderReviewPane(rail);
-		const scmRailFallback = append(rail, $('.sessions-right-workbench-review-scm-rail'));
-		this.domStore.add(createFileIconThemableTreeContainerScope(scmRailFallback, this.themeService));
-		this.setupReviewTree(scmRailFallback);
+		const scmRail = append(rail, $('.sessions-right-workbench-review-scm-rail'));
+		this.domStore.add(createFileIconThemableTreeContainerScope(scmRail, this.themeService));
+		this.setupReviewTree(scmRail);
 
 		this.reviewContainer = review;
-		this.reviewRailElement = rail;
 		this.reviewBodyElement = reviewBody;
-		this.reviewScmFallbackElement = scmFallback;
-		this.reviewScmRailElement = scmRailFallback;
+		this.reviewScmRailElement = scmRail;
 
 		this.registerScmReviewRefresh();
 		this.domStore.add(autorun(reader => this.refreshReviewRail(reader)));
@@ -642,7 +771,10 @@ export class RightWorkbenchViewPane extends ViewPane {
 			if (!e.element || !isReviewResource(e.element)) {
 				return;
 			}
-			this.selectedReviewResourceKey = e.element.key;
+			const activeTab = this.activeTab;
+			if (activeTab?.mode === 'review') {
+				activeTab.selectedReviewResourceKey = e.element.key;
+			}
 			this.openedReviewResourceKey = undefined;
 			this.openSelectedReviewResource(e.element);
 		}));
@@ -670,7 +802,20 @@ export class RightWorkbenchViewPane extends ViewPane {
 	}
 
 	/**
-	 * Re-derives the review rail's resources and re-renders just the rail/fallback
+	 * Returns the active session's changed files, preferring the enabled
+	 * default changeset (as the changes view does) and falling back to the
+	 * session-level change list.
+	 */
+	private getSessionReviewChanges(activeSession: IActiveSession | undefined, reader: IReader | undefined): readonly ISessionFileChange[] {
+		const changesets = activeSession?.changesets.read(reader) ?? [];
+		const selectedChangeset = changesets.find(changeset => changeset.isDefault.read(reader) && changeset.isEnabled.read(reader))
+			?? changesets.find(changeset => changeset.isEnabled.read(reader));
+		this.isSessionChangesLoading = selectedChangeset?.isLoadingChanges.read(reader) ?? false;
+		return selectedChangeset?.changes.read(reader) ?? activeSession?.changes.read(reader) ?? [];
+	}
+
+	/**
+	 * Re-derives the review rail's resources and re-renders just the rail
 	 * elements. Called reactively from the autorun in {@link renderReview} (with a
 	 * real `reader`) and imperatively from SCM/git change listeners (with `undefined`,
 	 * which makes `IObservable#read` behave like a plain `get()`) so those listeners
@@ -678,30 +823,25 @@ export class RightWorkbenchViewPane extends ViewPane {
 	 */
 	private refreshReviewRail(reader: IReader | undefined): void {
 		const review = this.reviewContainer;
-		const rail = this.reviewRailElement;
 		const reviewBody = this.reviewBodyElement;
-		const scmFallback = this.reviewScmFallbackElement;
-		const scmRailFallback = this.reviewScmRailElement;
-		if (!review || !rail || !reviewBody || !scmFallback || !scmRailFallback || this.activeMode !== 'review') {
+		const scmRail = this.reviewScmRailElement;
+		if (!review || !reviewBody || !scmRail || this.activeMode !== 'review') {
 			return;
 		}
 
 		const activeSession = this.sessionsService.activeSession.read(reader);
-		const changesets = activeSession?.changesets.read(reader) ?? [];
-		const selectedChangeset = changesets.find(changeset => changeset.isDefault.read(reader) && changeset.isEnabled.read(reader))
-			?? changesets.find(changeset => changeset.isEnabled.read(reader));
-		const changes = selectedChangeset?.changes.read(reader) ?? activeSession?.changes.read(reader) ?? [];
+		const changes = this.getSessionReviewChanges(activeSession, reader);
+		// One tree, three data sources in priority order: SCM resources (richest
+		// decorations), raw git state, then the session's own changesets (works
+		// even when no repository is reachable from this window).
 		const scmResources = this.getScmReviewResources(activeSession);
-		const reviewResources = scmResources.length > 0 ? this.toScmReviewResources(scmResources) : this.getGitReviewResources(activeSession, reader);
+		let reviewResources = scmResources.length > 0 ? this.toScmReviewResources(scmResources) : this.getGitReviewResources(activeSession, reader);
 		if (reviewResources.length === 0) {
 			this.requestGitReviewRefresh(activeSession);
+			reviewResources = this.toSessionReviewResources(changes);
 		}
-		if (changes.length === 0 && reviewResources.length === 0) {
+		if (reviewResources.length === 0) {
 			review.classList.add('sessions-right-workbench-review-empty-state');
-			scmFallback.style.display = 'none';
-			scmRailFallback.style.display = 'none';
-			rail.classList.remove('sessions-right-workbench-review-rail-scm');
-			clearNode(scmFallback);
 			this.clearReviewTree();
 			this.showReviewEmptyState(reviewBody);
 			return;
@@ -709,23 +849,44 @@ export class RightWorkbenchViewPane extends ViewPane {
 		review.classList.remove('sessions-right-workbench-review-empty-state');
 		this.reviewEmptyElement?.remove();
 		this.reviewEmptyElement = undefined;
-		if (reviewResources.length > 0) {
-			scmFallback.style.display = 'none';
-			clearNode(scmFallback);
-			const selectedReviewResource = this.getSelectedReviewResource(reviewResources);
-			this.updateReviewTree(reviewResources, selectedReviewResource.key);
-			for (const repository of this.getGitReviewRepositories(activeSession)) {
-				this.requestGitReviewStats(repository);
-			}
-			this.openSelectedReviewResource(selectedReviewResource);
-			rail.classList.add('sessions-right-workbench-review-rail-scm');
-		} else {
-			scmFallback.style.display = 'none';
-			scmRailFallback.style.display = 'none';
-			rail.classList.remove('sessions-right-workbench-review-rail-scm');
-			clearNode(scmFallback);
-			this.clearReviewTree();
+		const selectedReviewResource = this.getSelectedReviewResource(reviewResources);
+		this.updateReviewTree(reviewResources, selectedReviewResource.key);
+		for (const repository of this.getGitReviewRepositories(activeSession)) {
+			this.requestGitReviewStats(repository);
 		}
+		this.openSelectedReviewResource(selectedReviewResource);
+	}
+
+	private toSessionReviewResources(changes: readonly ISessionFileChange[]): IReviewResource[] {
+		const resources = new Map<string, IReviewResource>();
+		for (const change of changes) {
+			const uri = isIChatSessionFileChange2(change) ? change.uri : change.modifiedUri;
+			resources.set(uri.toString(), {
+				key: `session:${uri.toString()}:${change.originalUri?.toString() ?? ''}`,
+				sourceUri: uri,
+				status: localize('rightWorkbench.sessionChange', "Edited"),
+				additions: change.insertions,
+				deletions: change.deletions,
+				open: async () => {
+					const modifiedUri = isIChatSessionFileChange2(change) ? change.modifiedUri ?? change.uri : change.modifiedUri;
+					if (change.originalUri && modifiedUri) {
+						const input: IResourceDiffEditorInput = {
+							original: { resource: change.originalUri },
+							modified: { resource: modifiedUri },
+							label: basename(uri),
+							options: { pinned: true }
+						};
+						return !!await this.openEditorInEmbeddedHost(input);
+					}
+					const pane = await this.openEditorInEmbeddedHost({
+						resource: modifiedUri ?? change.originalUri ?? uri,
+						options: { pinned: true, override: DEFAULT_EDITOR_ASSOCIATION.id }
+					});
+					return !!pane;
+				},
+			});
+		}
+		return Array.from(resources.values()).sort((a, b) => a.sourceUri.fsPath.localeCompare(b.sourceUri.fsPath));
 	}
 
 	private registerScmReviewRefresh(): void {
@@ -766,19 +927,20 @@ export class RightWorkbenchViewPane extends ViewPane {
 	}
 
 	private renderFiles(container: HTMLElement): void {
+		const selectedFile = this.activeTab?.selectedFile;
 		const files = append(container, $('.sessions-right-workbench-files'));
 		const editor = append(files, $('.sessions-right-workbench-file-editor'));
-		this.filePathElement = append(editor, $('.sessions-right-workbench-file-path', {}, this.selectedFile ? basename(this.selectedFile) : '/'));
+		this.filePathElement = append(editor, $('.sessions-right-workbench-file-path', {}, selectedFile ? basename(selectedFile) : '/'));
 		const editorBody = append(editor, $('.sessions-right-workbench-file-editor-body'));
 		this.embeddedEditorHost = append(editorBody, $('.sessions-right-workbench-embedded-editor-host'));
-		if (!this.selectedFile) {
+		if (!selectedFile) {
 			const empty = append(editorBody, $('.sessions-right-workbench-file-empty'));
 			this.fileEmptyElement = empty;
 			empty.appendChild(renderIcon(Codicon.folderOpened));
 			append(empty, $('h2', {}, localize('rightWorkbench.openFile', "Open file")));
 			append(empty, $('p', {}, localize('rightWorkbench.selectFileFromTree', "Select a file from the workspace tree")));
 		} else {
-			void this.openSelectedFile(this.selectedFile);
+			void this.openSelectedFile(selectedFile);
 		}
 
 		const tree = append(files, $('.sessions-right-workbench-file-tree'));
@@ -806,11 +968,18 @@ export class RightWorkbenchViewPane extends ViewPane {
 	}
 
 	private getTerminalBackgroundColor(theme = this.themeService.getColorTheme()): Color | undefined {
-		const embeddedHost = this.embeddedEditorHost;
-		if (!embeddedHost) {
-			return theme.getColor(agentsPanelBackground);
+		// Walk up from the embedded host to the first ancestor with an opaque
+		// background so the xterm canvas matches the surrounding panel exactly
+		// (the host itself is usually transparent).
+		let element: HTMLElement | null = this.embeddedEditorHost ?? null;
+		while (element) {
+			const parsed = Color.Format.CSS.parse(getComputedStyle(element).backgroundColor);
+			if (parsed && !parsed.isTransparent()) {
+				return parsed;
+			}
+			element = element.parentElement;
 		}
-		return Color.Format.CSS.parse(getComputedStyle(embeddedHost).backgroundColor) ?? theme.getColor(agentsPanelBackground);
+		return theme.getColor(agentsPanelBackground);
 	}
 
 	private renderFilesExplorer(container: HTMLElement): void {
@@ -849,37 +1018,25 @@ export class RightWorkbenchViewPane extends ViewPane {
 		this.observeElementResize(container, () => this.layoutFilesExplorer());
 	}
 
-	private renderReviewPane(container: HTMLElement): void {
-		this.reviewPaneContainer = container;
-		const store = this.domStore.add(new DisposableStore());
-		const scopedInstantiationService = this.instantiationService.createChild(
-			new ServiceCollection([IEditorService, this.createEmbeddedEditorService()]),
-			store
-		);
-		const reviewPane = store.add(scopedInstantiationService.createInstance(ChangesViewPane, {
-			id: CHANGES_VIEW_ID,
-			title: localize('rightWorkbench.review', "Review"),
-			minimumBodySize: 0,
-			maximumBodySize: Number.POSITIVE_INFINITY,
-			showActions: ViewPaneShowActions.Always,
-		}));
-		reviewPane.headerVisible = false;
-		reviewPane.render();
-		container.appendChild(reviewPane.element);
-		reviewPane.setVisible(true);
-		this.reviewPane = reviewPane;
-		this.layoutReviewPane();
-		this.observeElementResize(container, () => this.layoutReviewPane());
-	}
-
 	private getReviewCandidateDirectories(activeSession: IActiveSession | undefined): URI[] {
 		const workspaceFolder = activeSession?.workspace.get()?.folders[0];
 		const providerWorkingDirectory = activeSession
 			? this.agentHostCustomizationService.getWorkingDirectory(activeSession.resource)
 			: undefined;
 		const providerWorkingDirectoryUri = providerWorkingDirectory ? URI.file(providerWorkingDirectory) : undefined;
+		// The session's edited files pinpoint the repository even when it is
+		// nested below the session root (opening a repository walks up from
+		// any path inside it).
+		const changeDirectories: URI[] = [];
+		for (const change of this.getSessionReviewChanges(activeSession, undefined).slice(0, 3)) {
+			const uri = isIChatSessionFileChange2(change) ? change.uri : change.modifiedUri;
+			if (uri?.scheme === Schemas.file) {
+				changeDirectories.push(dirname(uri));
+			}
+		}
 		return [
 			providerWorkingDirectoryUri,
+			...changeDirectories,
 			workspaceFolder?.workingDirectory,
 			workspaceFolder?.root,
 			...this.workspaceContextService.getWorkspace().folders.map(folder => folder.uri),
@@ -953,7 +1110,12 @@ export class RightWorkbenchViewPane extends ViewPane {
 	}
 
 	private requestGitReviewRefresh(activeSession: IActiveSession | undefined): void {
-		for (const directory of this.getReviewCandidateDirectories(activeSession)) {
+		const candidates = this.getReviewCandidateDirectories(activeSession);
+		if (candidates.length === 0) {
+			this.settleGitProbeIfIdle();
+			return;
+		}
+		for (const directory of candidates) {
 			const key = directory.toString();
 			if (this.pendingGitReviewRefreshKeys.has(key)) {
 				continue;
@@ -961,13 +1123,29 @@ export class RightWorkbenchViewPane extends ViewPane {
 			this.pendingGitReviewRefreshKeys.add(key);
 			void this.gitService.openRepository(directory).then(repository => {
 				this.pendingGitReviewRefreshKeys.delete(key);
+				this.settleGitProbeIfIdle();
 				if (repository) {
 					this.refreshReviewRail(undefined);
 				}
 			}, () => {
 				this.pendingGitReviewRefreshKeys.delete(key);
+				this.settleGitProbeIfIdle();
 			});
 		}
+		this.settleGitProbeIfIdle();
+	}
+
+	/**
+	 * Marks the initial git repository probe as settled once no candidate
+	 * lookups are in flight, and re-renders the rail so the loading empty
+	 * state can flip to the definitive "no changes" one.
+	 */
+	private settleGitProbeIfIdle(): void {
+		if (this.initialGitProbeSettled || this.pendingGitReviewRefreshKeys.size > 0) {
+			return;
+		}
+		this.initialGitProbeSettled = true;
+		this.refreshReviewRail(undefined);
 	}
 
 	private toScmReviewResources(resources: readonly ISCMResource[]): IReviewResource[] {
@@ -994,8 +1172,12 @@ export class RightWorkbenchViewPane extends ViewPane {
 	}
 
 	private getSelectedReviewResource(resources: readonly IReviewResource[]): IReviewResource {
-		const selectedReviewResource = resources.find(resource => resource.key === this.selectedReviewResourceKey) ?? resources[0];
-		this.selectedReviewResourceKey = selectedReviewResource.key;
+		const activeTab = this.activeTab;
+		const selectedKey = activeTab?.mode === 'review' ? activeTab.selectedReviewResourceKey : undefined;
+		const selectedReviewResource = resources.find(resource => resource.key === selectedKey) ?? resources[0];
+		if (activeTab?.mode === 'review') {
+			activeTab.selectedReviewResourceKey = selectedReviewResource.key;
+		}
 		return selectedReviewResource;
 	}
 
@@ -1003,11 +1185,19 @@ export class RightWorkbenchViewPane extends ViewPane {
 		if (this.openedReviewResourceKey === resource.key) {
 			return;
 		}
+		// Latch the key optimistically so concurrent refreshes don't re-open,
+		// but release it when the open fails or shows nothing (e.g. the git
+		// content provider was not ready yet) so the next refresh retries.
 		this.openedReviewResourceKey = resource.key;
-		void resource.open();
+		const releaseOnFailure = (opened: boolean) => {
+			if (!opened && this.openedReviewResourceKey === resource.key) {
+				this.openedReviewResourceKey = undefined;
+			}
+		};
+		resource.open().then(releaseOnFailure, () => releaseOnFailure(false));
 	}
 
-	private async openScmReviewResource(resource: ISCMResource): Promise<void> {
+	private async openScmReviewResource(resource: ISCMResource): Promise<boolean> {
 		if (resource.multiDiffEditorOriginalUri && resource.multiDiffEditorModifiedUri) {
 			const input: IResourceDiffEditorInput = {
 				original: { resource: resource.multiDiffEditorOriginalUri },
@@ -1015,16 +1205,18 @@ export class RightWorkbenchViewPane extends ViewPane {
 				label: basename(resource.sourceUri),
 				options: { pinned: true }
 			};
-			await this.openEditorInEmbeddedHost(input);
-			return;
+			return !!await this.openEditorInEmbeddedHost(input);
 		}
-		await this.openEditorInEmbeddedHost({
-			resource: resource.multiDiffEditorModifiedUri ?? resource.sourceUri,
-			options: { pinned: true }
+		// Additions have no original, deletions have no modified side: show
+		// whichever side exists instead of a URI that no longer resolves.
+		const pane = await this.openEditorInEmbeddedHost({
+			resource: resource.multiDiffEditorModifiedUri ?? resource.multiDiffEditorOriginalUri ?? resource.sourceUri,
+			options: { pinned: true, override: DEFAULT_EDITOR_ASSOCIATION.id }
 		});
+		return !!pane;
 	}
 
-	private async openGitReviewResource(change: GitChange): Promise<void> {
+	private async openGitReviewResource(change: GitChange): Promise<boolean> {
 		if (change.originalUri && change.modifiedUri) {
 			const input: IResourceDiffEditorInput = {
 				original: { resource: change.originalUri },
@@ -1032,13 +1224,13 @@ export class RightWorkbenchViewPane extends ViewPane {
 				label: basename(change.uri),
 				options: { pinned: true }
 			};
-			await this.openEditorInEmbeddedHost(input);
-			return;
+			return !!await this.openEditorInEmbeddedHost(input);
 		}
-		await this.openEditorInEmbeddedHost({
-			resource: change.modifiedUri ?? change.uri,
-			options: { pinned: true }
+		const pane = await this.openEditorInEmbeddedHost({
+			resource: change.modifiedUri ?? change.originalUri ?? change.uri,
+			options: { pinned: true, override: DEFAULT_EDITOR_ASSOCIATION.id }
 		});
+		return !!pane;
 	}
 
 	private getGitReviewResourceKey(change: GitChange, group: string): string {
@@ -1083,34 +1275,19 @@ export class RightWorkbenchViewPane extends ViewPane {
 	}
 
 	private showReviewEmptyState(container: HTMLElement): void {
-		if (this.reviewEmptyElement) {
+		const isLoading = !this.initialGitProbeSettled || this.isSessionChangesLoading;
+		if (this.reviewEmptyElement && this.reviewEmptyIsLoading === isLoading) {
 			return;
 		}
+		this.reviewEmptyElement?.remove();
+		this.reviewEmptyIsLoading = isLoading;
 		const empty = append(container, $('.sessions-right-workbench-review-empty'));
 		this.reviewEmptyElement = empty;
-		empty.appendChild(renderIcon(Codicon.diffMultiple));
+		empty.appendChild(renderIcon(isLoading ? ThemeIcon.modify(Codicon.loading, 'spin') : Codicon.diffMultiple));
 		append(empty, $('h2', {}, localize('rightWorkbench.review', "Review")));
-		append(empty, $('p', {}, localize('rightWorkbench.noChanges', "No changes to review.")));
-	}
-
-	private createEmbeddedEditorService(): IEditorService {
-		return new Proxy(this.editorService, {
-			get: (target, property, receiver) => {
-				if (property === 'openEditor') {
-					return (editor: IUntypedEditorInput | EditorInput, optionsOrGroup?: IEditorOptions | PreferredGroup, group?: PreferredGroup) => {
-						if (editor instanceof EditorInput) {
-							return this.openEditorInEmbeddedHost(editor, this.isEditorOptions(optionsOrGroup) ? optionsOrGroup : undefined, group);
-						}
-						return this.openEditorInEmbeddedHost(editor, optionsOrGroup as PreferredGroup | undefined);
-					};
-				}
-				const value = Reflect.get(target, property, receiver);
-				if (typeof value === 'function') {
-					return value.bind(target);
-				}
-				return value;
-			}
-		});
+		append(empty, $('p', {}, isLoading
+			? localize('rightWorkbench.loadingChanges', "Looking for changes...")
+			: localize('rightWorkbench.noChanges', "No changes to review.")));
 	}
 
 	private createFilesEditorService(): IEditorService {
@@ -1194,7 +1371,11 @@ export class RightWorkbenchViewPane extends ViewPane {
 
 		const resource = this.getEditorResource(editor);
 		if (resource) {
-			this.selectedFile = resource;
+			const activeTab = this.activeTab;
+			if (activeTab?.mode === 'files') {
+				activeTab.selectedFile = resource;
+				this.refreshTabLabels();
+			}
 			this.root?.classList.toggle('sessions-right-workbench-has-file', this.activeMode === 'files');
 			if (this.filePathElement) {
 				this.filePathElement.textContent = basename(resource);
@@ -1243,16 +1424,6 @@ export class RightWorkbenchViewPane extends ViewPane {
 		}
 		explorer.orthogonalSize = container.clientWidth;
 		explorer.layout(container.clientHeight);
-	}
-
-	private layoutReviewPane(): void {
-		const reviewPane = this.reviewPane;
-		const container = this.reviewPaneContainer;
-		if (!reviewPane || !container) {
-			return;
-		}
-		reviewPane.orthogonalSize = container.clientWidth;
-		reviewPane.layout(container.clientHeight);
 	}
 
 	private layoutEmbeddedEditorPart(): void {
@@ -1368,33 +1539,34 @@ export class RightWorkbenchViewPane extends ViewPane {
 		});
 	}
 
-	private async setBrowserUrl(value: string): Promise<void> {
+	private async setBrowserUrl(tab: IRightWorkbenchTabState, value: string): Promise<void> {
 		const url = this.normalizeBrowserUrl(value);
 		if (!url) {
 			return;
 		}
-		this.browserUrl = url;
-		if (!this.browserInput) {
+		tab.browserUrl = url;
+		if (!tab.browserInput) {
 			this.renderShell();
 			return;
 		}
-		await this.openBrowserEditor(url);
+		await this.openBrowserEditor(tab, url);
 	}
 
-	private async openBrowserEditor(url: string | undefined): Promise<void> {
+	private async openBrowserEditor(tab: IRightWorkbenchTabState, url: string | undefined): Promise<void> {
 		const embeddedHost = this.embeddedEditorHost;
 		if (!embeddedHost) {
 			return;
 		}
 		await this.ensureEmbeddedEditorPart();
-		if (!this.browserInput) {
-			this.browserInput = this.browserViewWorkbenchService.getOrCreateLazy(this.browserViewId ?? generateUuid(), url ? { url } : undefined);
-			this.bindBrowserInput(this.browserInput);
-		} else if (url && this.browserInput.url !== url) {
-			this.browserInput.navigate(url, { source: 'urlInput' });
+		if (!tab.browserInput) {
+			tab.browserViewId = tab.browserViewId ?? generateUuid();
+			tab.browserInput = this.browserViewWorkbenchService.getOrCreateLazy(tab.browserViewId, url ? { url } : undefined);
+			this.bindBrowserInput(tab, tab.browserInput);
+		} else if (url && tab.browserInput.url !== url) {
+			tab.browserInput.navigate(url, { source: 'urlInput' });
 		}
 		this.hideOtherBrowserViews();
-		const pane = await this.editorService.openEditor(this.browserInput, {
+		const pane = await this.editorService.openEditor(tab.browserInput, {
 			pinned: true,
 			modal: { embeddedHost, maximized: true }
 		}, MODAL_GROUP);
@@ -1404,7 +1576,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 	}
 
 	private hideOtherBrowserViews(): void {
-		const activeBrowserInput = this.browserInput;
+		const activeBrowserInput = this.activeTab?.browserInput;
 		for (const input of this.browserViewWorkbenchService.getKnownBrowserViews().values()) {
 			if (input !== activeBrowserInput) {
 				void input.model?.setVisible(false);
@@ -1468,60 +1640,78 @@ export class RightWorkbenchViewPane extends ViewPane {
 	}
 
 	private async ensureTerminalEditor(): Promise<void> {
+		const tab = this.activeTab;
 		const embeddedHost = this.embeddedEditorHost;
-		if (!embeddedHost) {
+		if (!tab || tab.mode !== 'terminal' || !embeddedHost) {
 			return;
 		}
 		await this.ensureEmbeddedEditorPart();
-		if (!this.terminalInstance || this.terminalInstance.isDisposed) {
-			this.terminalInstance = await this.terminalService.createTerminal({
+		if (!tab.terminalInstance || tab.terminalInstance.isDisposed) {
+			const terminalInstance = await this.terminalService.createTerminal({
 				location: {
 					viewColumn: MODAL_GROUP,
 					modal: { embeddedHost }
 				},
 				colorProvider: this.terminalColorProvider,
 			});
-			this.domStore.add(this.terminalInstance.onDisposed(() => {
-				this.terminalInstance = undefined;
+			tab.terminalInstance = terminalInstance;
+			const store = this.tabStores.get(tab.id);
+			store?.add(terminalInstance.onDisposed(() => {
+				if (tab.terminalInstance === terminalInstance) {
+					tab.terminalInstance = undefined;
+				}
+				this.refreshTabLabels();
 			}));
+			store?.add(terminalInstance.onTitleChanged(() => this.refreshTabLabels()));
+			this.refreshTabLabels();
 		}
-		await this.terminalEditorService.openEditor(this.terminalInstance, {
+		await this.terminalEditorService.openEditor(tab.terminalInstance, {
 			viewColumn: MODAL_GROUP,
 			modal: { embeddedHost, maximized: true }
 		});
 		this.layoutEmbeddedEditorPart();
-		this.terminalInstance.setVisible(true);
-		await this.terminalInstance.focusWhenReady(true);
+		tab.terminalInstance.setVisible(true);
+		await tab.terminalInstance.focusWhenReady(true);
 	}
 
-	private bindBrowserInput(input: BrowserEditorInput): void {
-		this.browserInputStore.clear();
-		this.browserInputStore.add(input.onWillDispose(() => {
-			if (this.browserInput === input) {
-				this.browserInput = undefined;
+	private bindBrowserInput(tab: IRightWorkbenchTabState, input: BrowserEditorInput): void {
+		const store = this.tabStores.get(tab.id);
+		if (!store) {
+			return;
+		}
+		store.clear();
+		store.add(input.onWillDispose(() => {
+			if (tab.browserInput === input) {
+				tab.browserInput = undefined;
 			}
-			this.browserInputStore.clear();
+			this.tabStores.get(tab.id)?.clear();
 			this.refreshBrowserControls();
 		}));
-		this.browserInputStore.add(input.onceModelResolves(model => this.bindBrowserModel(model)));
+		store.add(input.onceModelResolves(model => this.bindBrowserModel(tab, model)));
 	}
 
-	private bindBrowserModel(model: IBrowserViewModel): void {
+	private bindBrowserModel(tab: IRightWorkbenchTabState, model: IBrowserViewModel): void {
+		const store = this.tabStores.get(tab.id);
+		if (!store) {
+			return;
+		}
 		if (model.device) {
 			void model.setDevice(undefined);
 		}
-		this.browserInputStore.add(model.onDidNavigate(() => {
-			this.browserUrl = model.url;
+		store.add(model.onDidNavigate(() => {
+			tab.browserUrl = model.url;
 			this.refreshBrowserControls();
 		}));
-		this.browserInputStore.add(model.onDidChangeLoadingState(() => this.refreshBrowserControls()));
-		this.browserInputStore.add(model.onDidChangeFocus(() => this.refreshBrowserControls()));
+		store.add(model.onDidChangeLoadingState(() => this.refreshBrowserControls()));
+		store.add(model.onDidChangeFocus(() => this.refreshBrowserControls()));
 		this.refreshBrowserControls();
 	}
 
 	private refreshBrowserControls(): void {
-		const model = this.browserInput?.model;
-		const url = model?.url ?? this.browserInput?.url ?? this.browserUrl ?? '';
+		const tab = this.activeTab;
+		const browserInput = tab?.mode === 'browser' ? tab.browserInput : undefined;
+		const model = browserInput?.model;
+		const url = model?.url ?? browserInput?.url ?? (tab?.mode === 'browser' ? tab.browserUrl : undefined) ?? '';
 		if (this.browserUrlInput && this.browserUrlInput.ownerDocument.activeElement !== this.browserUrlInput) {
 			this.browserUrlInput.value = url;
 		}
@@ -1534,12 +1724,15 @@ export class RightWorkbenchViewPane extends ViewPane {
 		if (this.browserRefreshButton) {
 			this.browserRefreshButton.disabled = !model && !url;
 		}
+		this.refreshTabLabels();
 	}
 
 	private showBrowserActionsMenu(anchor: HTMLElement): void {
+		const activeTab = this.activeTab;
+		const browserInput = activeTab?.mode === 'browser' ? activeTab.browserInput : undefined;
 		const hasBrowser = !!this.browserEditorPane;
-		const model = this.browserInput?.model;
-		const hasUrl = !!(model?.url ?? this.browserInput?.url ?? this.browserUrl);
+		const model = browserInput?.model;
+		const hasUrl = !!(model?.url ?? browserInput?.url ?? (activeTab?.mode === 'browser' ? activeTab.browserUrl : undefined));
 		const storageScope = model?.storageScope;
 		const restoreBrowserView = this.hideActiveBrowserViewForOverlay();
 		this.contextMenuService.showContextMenu({

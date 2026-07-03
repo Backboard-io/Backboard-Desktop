@@ -8,8 +8,10 @@ import { Emitter } from '../../../../base/common/event.js';
 import { IWorkbenchContribution } from '../../../../workbench/common/contributions.js';
 import { IBrowserViewWorkbenchService } from '../../../../workbench/contrib/browserView/common/browserView.js';
 import { BrowserEditorInput } from '../../../../workbench/contrib/browserView/common/browserEditorInput.js';
+import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { IEditorService } from '../../../../workbench/services/editor/common/editorService.js';
 import { IEditorGroupsService } from '../../../../workbench/services/editor/common/editorGroupsService.js';
+import { RightWorkbenchCommandId } from '../../rightWorkbench/browser/rightWorkbench.js';
 import { ISessionsManagementService } from '../../../services/sessions/common/sessionsManagement.js';
 import { ISessionsService } from '../../../services/sessions/browser/sessionsService.js';
 import { ISession } from '../../../services/sessions/common/session.js';
@@ -31,6 +33,7 @@ export class SessionBrowserViewController extends Disposable implements IWorkben
 		@IBrowserViewWorkbenchService private readonly _browserViewService: IBrowserViewWorkbenchService,
 		@IEditorService private readonly _editorService: IEditorService,
 		@IEditorGroupsService private readonly _editorGroupsService: IEditorGroupsService,
+		@ICommandService private readonly _commandService: ICommandService,
 	) {
 		super();
 
@@ -72,14 +75,17 @@ export class SessionBrowserViewController extends Disposable implements IWorkben
 			onDidChange: onDidChangeActiveSession.event,
 		}));
 
-		// Only open a browser tab automatically when its owning session is the active session.
+		// Only surface a browser view automatically when its owning session is
+		// the active session — and route it into the right workbench's Browser
+		// tab instead of the (hidden) editor part of the sessions window.
 		this._register(this._browserViewService.registerOpenHandler({
-			shouldOpenEditor: (_input, owner) => {
-				if (!owner.sessionId) {
-					return true; // no owning session known; open in the active session
-				}
+			shouldOpenEditor: (input, owner) => {
 				const activeSessionResource = this._sessionsService.activeSession.read(undefined)?.resource.toString();
-				return owner.sessionId === activeSessionResource;
+				if (owner.sessionId && owner.sessionId !== activeSessionResource) {
+					return false; // belongs to another session; do not surface it here
+				}
+				void this._commandService.executeCommand(RightWorkbenchCommandId.OpenBrowser, { browserViewId: input.id });
+				return false; // the right workbench adopts the view; suppress the editor
 			},
 		}));
 

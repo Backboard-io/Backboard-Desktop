@@ -8,6 +8,14 @@ This workspace contains the Backboard editor shell, Backboard chat wiring, agent
 
 Use the existing repository scripts and docs for building, running, testing, and packaging this editor. The product-facing name in this fork is Backboard IDE.
 
+## Author
+
+**Erin Tomorri** -- AI software engineer and Backboard developer. Erin builds tooling and infrastructure for AI-assisted development environments, with a focus on IDE integrations, agentic coding systems, and runtime orchestration.
+
+## Author
+
+**Erin Tomorri** -- AI software engineer and Backboard developer. Erin builds tooling and infrastructure for AI-assisted development environments, with a focus on IDE integrations, agentic coding systems, and runtime orchestration.
+
 ## License
 
 Licensed under the [MIT](LICENSE.txt) license.

@@ -23,7 +23,8 @@ export interface IReviewResource {
 	readonly status: string;
 	readonly additions?: number;
 	readonly deletions?: number;
-	open(): Promise<void>;
+	/** Opens the resource in the review editor; resolves to false if nothing was shown. */
+	open(): Promise<boolean>;
 }
 
 export type ReviewTreeElement = IReviewResource | IResourceNode<IReviewResource, void>;
