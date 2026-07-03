@@ -1,118 +1,138 @@
 # What Remains of Copilot in the Right Panel & Agents
 
-**Bottom line:** the right panel is NOT built on the Copilot extension. What survives is
-(1) naming — `github.copilot.*` command IDs and setting keys owned by Backboard code,
-(2) a Backboard-owned provider with a vestigial "Copilot" name, and
-(3) a few genuinely Copilot-dependent session flows (CLI / cloud / Claude) that still need the
-bundled extension. The repo's own audit at
-`bb-docs/backboard-agent-bridge/copilot-right-panel-dependency-audit.md` reaches the same
-conclusion.
+**Bottom line (re-verified):** the right panel is NOT built on the Copilot extension. What survives
+is (1) **naming** — `github.copilot.*` command IDs, setting keys, and a URI scheme owned by Backboard
+code; (2) a Backboard-owned provider with a vestigial "Copilot" name; and (3) a few genuinely
+Copilot-dependent flows (CLI / cloud / Claude, plus the commit/sync command handlers) that still need
+the bundled extension. **No source file under `src/vs/sessions` imports `extensions/copilot`** — every
+`github.copilot.*` reference is a string resolved dynamically at runtime.
 
 ## Ownership map
 
 ```
-┌─ Right panel (auxiliary bar) ────────────────────────────────────────────────┐
-│  shell + tabs: Launcher / Review / Files / Browser / Terminal                │
-│  contrib/rightWorkbench/*, browser/parts/auxiliaryBarPart.ts                 │
-│  ██ 100% Backboard core — zero imports from extensions/copilot ██            │
-└──────────────────────────────────────────────────────────────────────────────┘
-
-┌─ Chat widget ────────────────────────────────────────────────────────────────┐
-│  vs/workbench/contrib/chat (Microsoft upstream, generic — not Copilot)       │
-│  wrapped by Backboard composers (doc 06)                                     │
-└──────────────────────────────────────────────────────────────────────────────┘
-
-┌─ Session providers ──────────────────────────────────────────────────────────┐
-│                                                                              │
-│  LocalAgentHostSessionsProvider          ██ Backboard ██                     │
-│    'agent-host-backboard' → Rust bridge → Backboard API                      │
-│                                                                              │
-│  CopilotChatSessionsProvider (id 'default-copilot')                          │
-│    ░░ Backboard CODE, Copilot NAME ░░                                        │
-│    ├─ CopilotCLISession      ▓▓ needs Copilot ext (@github/copilot/sdk) ▓▓   │
-│    ├─ RemoteNewSession       ▓▓ needs Copilot ext (cloud agents) ▓▓          │
-│    ├─ ClaudeCodeNewSession   ▓▓ needs Copilot ext ▓▓                         │
-│    └─ AgentSessionAdapter    ░░ adapts chat-layer IAgentSession ░░           │
-│                                                                              │
-│  ██ = Backboard-owned   ░░ = Backboard code, legacy naming   ▓▓ = Copilot dep│
-└──────────────────────────────────────────────────────────────────────────────┘
+   RIGHT PANEL + AGENTS UI  (all core workbench/sessions — NOT extensions/copilot)
+ ┌───────────────────────────────────────────────────────────────────────────────────┐
+ │ Right-panel shell → src/vs/sessions/contrib/rightWorkbench/*   (no copilot import)  │
+ │   ██ 100% Backboard core (see doc 08) ██                                            │
+ │ Chat widget     → vs/workbench/contrib/chat (MS upstream, generic — not Copilot)    │
+ │ Sessions provider → CopilotChatSessionsProvider  (misleading NAME; core code)       │
+ └────────────────────────────────┬────────────────────────────────────────────────────┘
+   github.copilot.* strings are ONE of three kinds — NONE import extensions/copilot:
+     (1) COMMAND IDs   → commandService.executeCommand('github.copilot.…')  ── late-bound
+     (2) SETTING KEYS  → configurationService.getValue('github.copilot.…')  ── plain strings
+     (3) URI SCHEME    → Schemas.copilotPr = 'copilot-pr'  (base/common/network.ts:166 — CORE)
+                              │  resolved at runtime by whatever extension registers them
+                              ▼
+   ┌──────────────────────────────────────────────────────────────────────────────┐
+   │ extensions/copilot (bundled)  — GENUINELY still needed for:                    │
+   │   • the command HANDLERS behind github.copilot.* (CLI/cloud PR, commit, sync) │
+   │   • Copilot CLI / background agent (@github/copilot/sdk)                       │
+   │   • cloud coding-agent auth/session flows                                     │
+   │   • default chat participant + languageModelTools contributions              │
+   └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## 1. Naming remnants (Backboard-owned, Copilot-branded)
 
-These `github.copilot.*` identifiers are **registered and handled by Backboard sessions code**,
-kept only for backward compatibility — they are not calls into the Copilot extension:
+`github.copilot.*` occurrences in `src/vs/sessions` fall into exactly three categories — **all
+strings, none imports**:
 
-| Identifier | Where | Kind |
-|---|---|---|
-| `github.copilot.sessions.commit` | `contrib/changes/browser/changesView.ts:26-30` | command |
-| `github.copilot.claude.sessions.sync` / `.rename` | `changesView.ts:26-30` | commands |
-| `github.copilot.chat.cloudSessions.openRepository` | `contrib/chat/browser/repoPicker.ts:6` | command |
-| `github.copilot.cli.sessions.setTitle`, `agents.github.copilot.cli.deleteSessions` | `copilotChatSessionsProvider.ts:142` | commands |
-| `github.copilot.chat.claudeAgent.allowAutoPermissions` | `claudePermissionModePicker.ts:13` | setting |
-| `github.copilot.chat.claudeAgent.allowDangerouslySkipPermissions` | `claudePermissionModePicker.ts:14` | setting |
-| `github.copilot.chat.cli.isolationOption.enabled` | `isolationPicker.ts:47,56` | setting |
-| `github.copilot.chat.claudeCode.enabled` | `contrib/configuration/browser/configuration.contribution.ts:5` | setting |
-| `sessions.github.copilot.multiChatSessions` | `copilotChatSessions.contribution.ts:19` | setting |
-| `Schemas.copilotPr` | `changesView.ts` | URI scheme for PR tree roots |
+**(1) Command IDs** — passed to `executeCommand`, resolved by whatever extension registers the
+handler (late-bound):
 
-A grep for `github\.copilot` in `src/vs/sessions` yields ~50 hits — essentially all command
-IDs, setting keys, or config inspection; **none are imports of or API calls into the Copilot
-extension**.
+| Identifier | Where |
+|---|---|
+| `github.copilot.chat.cloudSessions.openRepository` | copilotChatSessionsProvider.ts:142, repoPicker.ts:17 |
+| `github.copilot.cli.sessions.setTitle` | copilotChatSessionsProvider.ts:1822 |
+| `github.copilot.claude.sessions.rename` | copilotChatSessionsProvider.ts:1826 |
+| `agents.github.copilot.cli.deleteSessions` | copilotChatSessionsProvider.ts:1907 |
+| `github.copilot.cli.sessions.commitToRepository` / `commitToWorktree` | aiCustomizationWorkspaceService.ts:186,208 |
+| `github.copilot.sessions.commit` / `commitAndSync` | changesView.ts:151,165 (referenced; handler in the extension) |
 
-## 2. The misleadingly named `CopilotChatSessionsProvider`
+**(2) Setting keys** — plain config strings:
 
-`contrib/providers/copilotChatSessions/browser/copilotChatSessionsProvider.ts` (3011 lines) is
-Backboard code implementing Backboard's `ISessionsProvider` interface:
+| Key | Where |
+|---|---|
+| `sessions.github.copilot.multiChatSessions` | copilotChatSessionsProvider.ts:148 |
+| `github.copilot.chat.claudeCode.enabled` | configuration.contribution.ts:42 |
+| `github.copilot.chat.cli.isolationOption.enabled` | isolationPicker.ts:58 |
+| `github.copilot.chat.claudeAgent.allowAutoPermissions` | claudePermissionModePicker.ts:26 |
+| `github.copilot.chat.claudeAgent.allowDangerouslySkipPermissions` | claudePermissionModePicker.ts:27 |
 
-- Registered as a **core workbench contribution**
-  (`copilotChatSessions.contribution.ts:48-62`, imported from
-  `sessions.common.main.ts:15`) — no extension activation involved.
-- Provider ID `COPILOT_PROVIDER_ID = 'default-copilot'` (`:145`).
-- Session facades: `CopilotCLISession` (`:194-508`), `RemoteNewSession` (`:527-765`),
-  `ClaudeCodeNewSession` (`:774-901`), `AgentSessionAdapter` (`:922-1252`).
+**(3) URI scheme** — `Schemas.copilotPr = 'copilot-pr'` defined in **core**
+`base/common/network.ts:166`, used at `changesView.ts` for PR-tree roots. This is a workbench-core
+scheme, not an extension export. (Related routing strings `agent-host-copilot`, `copilotcli`,
+`copilot-cloud-agent` are core agent-host session-type identifiers.)
 
-The name is vestigial; the provider exists so legacy CLI/cloud/Claude session types keep
-working while Backboard's agent-host provider takes over as the default.
+## 2. The misleadingly-named `CopilotChatSessionsProvider`
 
-## 3. What still genuinely requires the bundled Copilot extension
+`src/vs/sessions/contrib/providers/copilotChatSessions/browser/copilotChatSessionsProvider.ts`
+(~3011 lines) is Backboard code implementing Backboard's `ISessionsProvider` interface — a **core
+workbench contribution**, not an extension activation:
 
-From the dependency audit (`copilot-right-panel-dependency-audit.md:114-147`):
+- Registered via `registerWorkbenchContribution2(..., WorkbenchPhase.AfterRestored)` in
+  `copilotChatSessions.contribution.ts` — `DefaultSessionsProviderContribution` (`:47`)
+  `createInstance(CopilotChatSessionsProvider)` (`:57`) then `registerProvider` (`:58`). No
+  `activationEvents`, no extension manifest.
+- Provider ID `COPILOT_PROVIDER_ID = 'default-copilot'` (`:145`) — the name is vestigial branding.
+- Session facades (all defined **in-file**, all implement `ICopilotChatSession`):
+  - `CopilotCLISession` (`:194`) — local background/CLI agent; worktree/branch/isolation config.
+  - `RemoteNewSession` (`:527`, exported) — cloud agent session; reactive option groups.
+  - `ClaudeCodeNewSession` (`:774`) — Claude local agent; no-op isolation/branch (Claude manages its
+    own worktrees).
+  - `AgentSessionAdapter` (`:922`) — adapts an existing chat-layer `IAgentSession` into the facade;
+    extracts GitHub PR metadata.
+- Session types declared here: `ClaudeCodeSessionType` (`claude-code`, `Codicon.claude`, `:56`),
+  `CopilotCloudSessionType` (`copilot-cloud-agent`, `:63`), plus imported `CopilotCLISessionType`.
+
+The provider coexists with the local agent-host provider; they list disjoint session sets. Its name
+is vestigial and it reaches the bundled extension only indirectly — by executing `github.copilot.*`
+commands when the extension is present.
+
+## 3. What genuinely still requires the bundled Copilot extension
+
+The extension is needed wherever the provider **delegates to command handlers or SDKs it does not
+implement itself**:
 
 | Feature | Needs Copilot ext? |
 |---|---|
-| Right-panel shell, tabs, Review/Files/Browser/Terminal | **No** |
-| Backboard agent-host provider + Rust bridge | **No** |
+| Right-panel shell, Review/Files/Browser/Terminal tabs (doc 08) | **No** |
+| Backboard agent-host provider + Rust bridge (docs 01, 04) | **No** |
 | Backboard extension webview (`extensions/backboard`) | **No** |
-| Copilot CLI / background sessions (`@github/copilot/sdk`) | **Yes** |
+| Command handlers behind `github.copilot.*` (openRepository, setTitle/rename, deleteSessions, commit/commitAndSync, commitTo*) | **Yes** |
+| Copilot CLI / background agent (`@github/copilot/sdk`) | **Yes** |
 | GitHub Copilot cloud / coding-agent flows | **Yes** |
 | Copilot-contributed chat participants (`extensions/copilot/package.json`) | **Yes** |
-| Copilot-contributed language-model tools | **Yes** |
+| Copilot-contributed `languageModelTools` | **Yes** |
 
-Audit's guidance: keep Copilot bundled until every default chat/session entry point provably
-routes to the Backboard agent-host; then it can become an optional download.
+Concretely: the commit buttons in the Changes view invoke `github.copilot.sessions.commit`, whose
+handler lives in
+`extensions/copilot/src/extension/chatSessions/vscode-node/copilotCLIChatSessions.ts` (parses the
+session id → `commit(sessionId, false)`; `commitAndSync` passes `true` to also pull/push). Absent the
+extension, those `executeCommand` calls no-op/fail.
+
+Guidance from the repo's audit
+(`bb-docs/backboard-agent-bridge/copilot-right-panel-dependency-audit.md`): keep Copilot bundled
+until every default chat/session entry point provably routes to the Backboard agent-host and the
+commit/sync handlers are reimplemented Backboard-side; then it can become an optional download.
 
 ## 4. Customization spec lineage
 
-`src/vs/sessions/copilot-customizations-spec.md` (357 lines) documents customization discovery
-(instructions, skills, commands, agents, MCP servers, hooks, plugins). It was derived from
-`github/copilot-agent-runtime` (2026-02-25 snapshot) but is now **Backboard's spec**; discovery
-paths mix all three ecosystems:
+`src/vs/sessions/copilot-customizations-spec.md` is a **reference doc** (not code) titled "Copilot
+Agent Runtime — Customization Surface Spec", sourced from `github/copilot-agent-runtime`
+(2026-02-25). Its instruction-file table is already **provider-agnostic** — it lists
+`.github/copilot-instructions.md`, `AGENTS.md`, `CLAUDE.md`, `.claude/CLAUDE.md`, `GEMINI.md` — i.e.
+it spans Copilot/Codex/Claude/Gemini conventions, matching Backboard's multi-agent posture. It is
+lineage/design documentation, not a runtime dependency.
 
-```
- skills      .github/skills/  .agents/skills/  .claude/skills/
- commands    .claude/commands/
- agents      .github/agents/  .claude/agents/
- MCP         ~/.copilot/mcp-config.json  .mcp.json  .vscode/mcp.json  plugins
-```
+Backboard's own skills live in `src/vs/sessions/skills/` (12 dirs: act-on-feedback, code-review,
+commit, create-draft-pr, create-pr, fix-ci, generate-run-commands, merge, sync, sync-upstream,
+update-pr, update-skills) — Backboard-authored, independent of `extensions/copilot`.
 
-Backboard's own skills live in `src/vs/sessions/skills/` (code-review, commit, create-pr,
-fix-ci, merge, sync, …) — not Copilot's.
+## 5. Removal checklist (per the audit)
 
-## 5. Removal checklist (per the audit, :268-296)
-
-Would keep working without Copilot: right panel, review/files/browser/terminal tabs,
-agent-host sessions, Backboard webview. Needs migration first: CLI/background flows, cloud
-agent flows, Copilot chat participants and LM tools, and any "new session" defaults that still
-route to Copilot session types. Validation: confirm model pickers default to Backboard models
-and new-session flows create `agent-host-backboard` sessions.
+Would keep working without Copilot: the right-panel shell, Review/Files/Browser/Terminal tabs,
+agent-host sessions, the Backboard webview. Needs migration first: CLI/background flows, cloud-agent
+flows, the commit/sync command handlers, Copilot chat participants and LM tools, and any "new
+session" defaults that still route to Copilot session types. Validation: confirm model pickers
+default to Backboard models and new-session flows create `agent-host-backboard` sessions.

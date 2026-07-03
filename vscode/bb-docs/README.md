@@ -30,6 +30,13 @@ The current `bb-docs` audit covers:
 
 Additional root indexes:
 
+- `deep-dive/` is a cross-verified architecture deep-dive (July 2026) tracing the Backboard IDE end
+  to end: right-panel send path, Simple-mode agents, the FastAPI backend, the Rust/TypeScript bridge,
+  tool calls, chat-UI generation, Copilot remnants, the right-workbench tabs, and the streaming/SSE
+  protocol. Start at `deep-dive/00-overview.md`.
+- `cli-ts-migration/` is the plan + prompt for replacing the Backboard Rust agent bridge with the
+  vendored `cli-ts` (`ide/vscode/cli-ts/`) TypeScript agent runtime. Start at
+  `cli-ts-migration/README.md`.
 - `source-crosswalk.md` maps source directories and built-in extensions to feature folders.
 - `source-file-index.md` lists resolved absolute source paths per feature.
 - `deep-documentation-matrix.md` counts source paths, candidate files, and docs per feature.

@@ -2277,6 +2277,8 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 
 class BackboardBridge implements vscode.Disposable {
 	private static readonly modelCacheTtl = 24 * 60 * 60 * 1000;
+	private activeTurnRequestId: string | undefined;
+	private currentCwd: string | undefined;
 	private static readonly modelCacheVersion = 2;
 	private static readonly toolCacheTtl = 24 * 60 * 60 * 1000;
 	private static readonly toolCacheVersion = 1;
@@ -2474,7 +2476,17 @@ class BackboardBridge implements vscode.Disposable {
 
 	async send(command: string, sessionId: string | undefined, params: unknown, onEvent: ((event: BridgeEvent) => void | Promise<void>) | undefined, token: vscode.CancellationToken): Promise<BridgeEvent[]> {
 		const requestId = newId();
-		const child = this.ensureProcess();
+		// Commands without a cli-ts serve equivalent resolve synthetically:
+		// tool execution moved into cli-ts (no submitToolResult/runTool round
+		// trips) and the legacy document CRUD proxy was already non-functional.
+		const immediate = immediateServeEvents(command, requestId, sessionId);
+		if (immediate) {
+			for (const event of immediate) {
+				void onEvent?.(event);
+			}
+			return immediate;
+		}
+		const child = this.ensureProcess(command === 'sendPrompt' ? serveWorkspaceFromParams(params) : undefined);
 		this.logBridgeRequest(requestId, command, sessionId, params);
 		const timeoutMs = bridgeInactivityTimeoutMs(command);
 		let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
@@ -2503,7 +2515,7 @@ class BackboardBridge implements vscode.Disposable {
 		};
 		const cancelRequest = () => {
 			clearTimeoutHandle();
-			this.write({ requestId: newId(), command: 'cancel', sessionId, params: { requestId } });
+			this.write({ op: 'cancel' });
 			const pending = this.pending.get(requestId);
 			if (!pending) {
 				return;
@@ -2536,28 +2548,39 @@ class BackboardBridge implements vscode.Disposable {
 			}
 		});
 		if (!token.isCancellationRequested) {
-			child.stdin.write(`${JSON.stringify({ requestId, command, sessionId, params })}\n`);
+			if (command === 'sendPrompt') {
+				this.activeTurnRequestId = requestId;
+			}
+			child.stdin.write(`${JSON.stringify(buildServeOp(command, requestId, params))}\n`);
 		}
 		return promise;
 	}
 
-	private ensureProcess(): cp.ChildProcessWithoutNullStreams {
-		if (this.child && !this.child.killed) {
+	private ensureProcess(workspaceOverride?: string): cp.ChildProcessWithoutNullStreams {
+		const cwd = workspaceOverride ?? workspacePath() ?? os.homedir();
+		if (this.child && !this.child.killed && this.currentCwd === cwd) {
 			return this.child;
 		}
-		const bridgePath = this.resolveBridgePath();
-		if (!fs.existsSync(bridgePath)) {
-			throw new Error(`Backboard bridge binary not found at ${bridgePath}. This Backboard build needs a packaged Rust bridge. If cargo is installed, run: npm --prefix extensions/backboard run build-bridge. Otherwise set backboard.bridgePath to a prebuilt backboard-bridge binary.`);
+		if (this.child && !this.child.killed) {
+			// The serve process binds its working directory at spawn; a
+			// workspace change needs a fresh process.
+			this.output.appendLine(`[${new Date().toISOString()}] Restarting Backboard agent for new workspace ${cwd}`);
+			this.child.kill();
+			this.child = undefined;
 		}
-		const cwd = workspacePath() ?? os.homedir();
-		this.output.appendLine(`[${new Date().toISOString()}] Starting Backboard bridge`);
-		this.output.appendLine(`  bridgePath: ${bridgePath}`);
-		this.output.appendLine(`  bridgeDirectory: ${path.dirname(bridgePath)}`);
+		const cliPath = this.resolveCliPath();
+		if (!fs.existsSync(cliPath)) {
+			throw new Error(`Backboard agent binary not found at ${cliPath}. Build it with: npm --prefix extensions/backboard run package-cli-ts. Or set backboard.cliPath to a prebuilt backboard-cli-ts binary.`);
+		}
+		this.output.appendLine(`[${new Date().toISOString()}] Starting Backboard agent (cli-ts serve)`);
+		this.output.appendLine(`  cliPath: ${cliPath}`);
 		this.output.appendLine(`  cwd: ${cwd}`);
 		this.output.appendLine(`  workspaceRoot: ${workspacePath() ?? '<none>'}`);
 		this.output.appendLine(`  configuredWorkspaceRoot: ${configuredWorkspaceRoot() ?? '<none>'}`);
-		const child = cp.spawn(bridgePath, [], {
+		this.currentCwd = cwd;
+		const child = cp.spawn(cliPath, ['--serve', '--cwd', cwd], {
 			cwd,
+			env: { ...process.env, ...serveCredentialEnv() },
 			stdio: ['pipe', 'pipe', 'pipe']
 		});
 		this.child = child;
@@ -2586,31 +2609,12 @@ class BackboardBridge implements vscode.Disposable {
 		return child;
 	}
 
-	private resolveBridgePath(): string {
-		const configured = vscode.workspace.getConfiguration('backboard').get<string>('bridgePath')?.trim();
+	private resolveCliPath(): string {
+		const configured = vscode.workspace.getConfiguration('backboard').get<string>('cliPath')?.trim();
 		if (configured) {
 			return configured;
 		}
-		const development = this.resolveDevelopmentBridgePath();
-		if (development) {
-			return development;
-		}
-		const packaged = path.join(this.context.extensionPath, 'bin', process.platform === 'win32' ? 'backboard-bridge.exe' : 'backboard-bridge');
-		if (fs.existsSync(packaged)) {
-			return packaged;
-		}
-		return path.join(this.context.extensionPath, 'rust', 'target', 'debug', process.platform === 'win32' ? 'backboard-bridge.exe' : 'backboard-bridge');
-	}
-
-	private resolveDevelopmentBridgePath(): string | undefined {
-		const binaryName = process.platform === 'win32' ? 'backboard-bridge.exe' : 'backboard-bridge';
-		for (const profile of ['debug', 'release']) {
-			const candidate = path.join(this.context.extensionPath, 'rust', 'target', profile, binaryName);
-			if (fs.existsSync(candidate)) {
-				return candidate;
-			}
-		}
-		return undefined;
+		return path.join(this.context.extensionPath, 'bin', process.platform === 'win32' ? 'backboard-cli-ts.exe' : 'backboard-cli-ts');
 	}
 
 	private write(payload: unknown): void {
@@ -2644,13 +2648,113 @@ class BackboardBridge implements vscode.Disposable {
 	}
 
 	private handleLine(line: string): void {
-		let event: BridgeEvent;
+		let record: ServeStdoutRecord;
 		try {
-			event = JSON.parse(line) as BridgeEvent;
+			record = JSON.parse(line) as ServeStdoutRecord;
 		} catch {
 			this.output.appendLine(line);
 			return;
 		}
+		if (record.source === 'serve') {
+			this.handleServeRecord(record);
+			return;
+		}
+		if (record.source === 'client') {
+			this.handleAgentEvent(record.payload as ServeAgentEvent | undefined);
+			return;
+		}
+		this.output.appendLine(line);
+	}
+
+	private handleServeRecord(record: ServeStdoutRecord): void {
+		const requestId = record.requestId;
+		if (!requestId) {
+			if (record.type === 'serve:error') {
+				this.output.appendLine(`[cli-ts] serve error: ${JSON.stringify(record.payload)}`);
+			}
+			return;
+		}
+		const payload = isObjectRecord(record.payload) ? record.payload : {};
+		switch (record.type) {
+			case 'serve:turn':
+				this.deliver({ type: 'done', requestId, stopReason: typeof payload.status === 'string' ? payload.status : 'end_turn' });
+				return;
+			case 'serve:models':
+				this.deliver({ type: 'models', requestId, models: Array.isArray(payload.models) ? payload.models as BridgeModel[] : [] });
+				this.deliver({ type: 'done', requestId, stopReason: 'end_turn' });
+				return;
+			case 'serve:tools':
+				this.deliver({ type: 'tools', requestId, tools: Array.isArray(payload.tools) ? payload.tools : [] });
+				this.deliver({ type: 'done', requestId, stopReason: 'end_turn' });
+				return;
+			case 'serve:error':
+				this.deliver({ type: 'error', requestId, message: typeof payload.error === 'string' ? payload.error : 'Backboard agent request failed.' });
+				this.deliver({ type: 'done', requestId, stopReason: 'error' });
+				return;
+			default:
+				return;
+		}
+	}
+
+	/** Translates streamed cli-ts agent events into the legacy event shapes the panel renders. */
+	private handleAgentEvent(event: ServeAgentEvent | undefined): void {
+		const requestId = this.activeTurnRequestId;
+		if (!event || typeof event.type !== 'string' || !requestId) {
+			return;
+		}
+		switch (event.type) {
+			case 'assistant:delta':
+				if (event.text) {
+					this.deliver({ type: 'assistantTextDelta', requestId, text: event.text });
+				}
+				return;
+			case 'session:created':
+				if (event.threadId) {
+					this.deliver({ type: 'sessionBinding', requestId, threadId: event.threadId });
+				}
+				return;
+			case 'usage':
+				this.deliver({ type: 'usage', requestId, usage: event.usage });
+				return;
+			case 'system:warning':
+				if (event.message) {
+					this.deliver({ type: 'progress', requestId, message: event.message });
+				}
+				return;
+			case 'run:error':
+				this.deliver({ type: 'error', requestId, message: event.error ?? 'Backboard request failed.' });
+				return;
+			case 'tool:pending':
+				this.deliver({ type: 'progress', requestId, message: `Starting ${event.name ?? 'tool'}.` });
+				return;
+			case 'tool:start':
+				this.deliver({ type: 'progress', requestId, message: `${event.name ?? 'Tool'}: ${event.inputSummary ?? ''}` });
+				return;
+			case 'tool:result':
+				this.deliver({ type: 'progress', requestId, message: `${event.name ?? 'Tool'} finished${event.title ? `: ${event.title}` : '.'}` });
+				return;
+			case 'tool:error':
+				this.deliver({ type: 'progress', requestId, message: `${event.name ?? 'Tool'} failed: ${event.error ?? 'unknown error'}` });
+				return;
+			case 'permission:request':
+				// The panel has no approval UI; it always submits with the
+				// auto-approve policy, so this is a belt-and-braces answer.
+				if (event.request?.id) {
+					this.write({ op: 'respondPermission', id: event.request.id, decision: 'approve' });
+				}
+				return;
+			case 'input:request':
+				if (event.request?.id) {
+					this.write({ op: 'respondInput', id: event.request.id, answer: '' });
+					this.deliver({ type: 'progress', requestId, message: 'Skipped an agent question (not supported in this panel).' });
+				}
+				return;
+			default:
+				return;
+		}
+	}
+
+	private deliver(event: BridgeEvent): void {
 		const pending = this.pending.get(event.requestId);
 		if (!pending) {
 			return;
@@ -2660,8 +2764,121 @@ class BackboardBridge implements vscode.Disposable {
 		void pending.onEvent?.(event);
 		if (event.type === 'done') {
 			this.pending.delete(event.requestId);
+			if (this.activeTurnRequestId === event.requestId) {
+				this.activeTurnRequestId = undefined;
+			}
 			pending.resolve(pending.events);
 		}
+	}
+}
+
+interface ServeStdoutRecord {
+	readonly source?: string;
+	readonly type?: string;
+	readonly requestId?: string;
+	readonly payload?: unknown;
+}
+
+interface ServeAgentEvent {
+	readonly type: string;
+	readonly text?: string;
+	readonly threadId?: string | null;
+	readonly message?: string;
+	readonly error?: string;
+	readonly name?: string;
+	readonly inputSummary?: string;
+	readonly title?: string;
+	readonly usage?: unknown;
+	readonly request?: { readonly id?: string };
+}
+
+/** Serve ops for commands that still cross the wire; the rest resolve synthetically. */
+function buildServeOp(command: string, requestId: string, params: unknown): Record<string, unknown> {
+	if (command === 'sendPrompt') {
+		const record = isObjectRecord(params) ? params : {};
+		const provider = typeof record.provider === 'string' ? record.provider : 'openrouter';
+		const model = typeof record.model === 'string' ? record.model : 'deepseek/deepseek-v4-flash';
+		const mode = typeof record.mode === 'string' ? record.mode : 'free';
+		const intensity = typeof record.intensity === 'string' ? record.intensity : undefined;
+		// No approval or question UI exists in this panel: run auto-approved,
+		// hide AskUser, and in manual/ask modes hide write tools entirely
+		// (parity with the old bridge's manual-mode denials).
+		const excludedTools = mode === 'manual' || mode === 'ask'
+			? ['AskUser', 'Write', 'Edit', 'ApplyPatch', 'Execute']
+			: ['AskUser'];
+		const thinking = intensity === 'balanced' ? 'medium' : intensity === 'deep' ? 'high' : intensity === 'fast' ? 'low' : undefined;
+		return {
+			op: 'submit',
+			requestId,
+			prompt: typeof record.content === 'string' ? record.content : '',
+			model: `${provider}/${model}`,
+			permission: 'autoApprove',
+			excludedTools,
+			...(thinking ? { thinking } : {}),
+		};
+	}
+	if (command === 'listModels') {
+		return { op: 'listModels', requestId };
+	}
+	if (command === 'listTools') {
+		return { op: 'listTools', requestId };
+	}
+	return { op: command, requestId };
+}
+
+/** Terminal events for commands with no serve equivalent. */
+function immediateServeEvents(command: string, requestId: string, sessionId: string | undefined): BridgeEvent[] | undefined {
+	switch (command) {
+		case 'sendPrompt':
+		case 'listModels':
+		case 'listTools':
+			return undefined;
+		case 'submitToolResult':
+			// cli-ts executes tools itself; the panel's tool loop never runs.
+			return [{ type: 'done', requestId, sessionId, stopReason: 'end_turn' }];
+		default:
+			// Legacy runTool / document CRUD proxy commands. The old bridge
+			// already returned no data for the CRUD commands; callers treat an
+			// absent payload as "unsupported".
+			return [{ type: 'done', requestId, sessionId, stopReason: 'end_turn' }];
+	}
+}
+
+function serveWorkspaceFromParams(params: unknown): string | undefined {
+	return isObjectRecord(params) && typeof params.workspace === 'string' && params.workspace ? params.workspace : undefined;
+}
+
+/** Maps the extension's persisted credentials onto the env vars cli-ts reads. */
+function serveCredentialEnv(): Record<string, string> {
+	const out: Record<string, string> = {
+		// Keep cli-ts session logs out of the user's workspace.
+		BACKBOARD_SESSION_ROOT: path.join(os.homedir(), '.backboard_ide', 'cli-ts-sessions'),
+	};
+	const settings = readSettings().config;
+	const configured = vscode.workspace.getConfiguration('backboard').get<string>('apiKey')?.trim();
+	const persisted = readBackboardIdeConfigApiKey(settings.env);
+	const apiKey = configured || persisted;
+	if (apiKey) {
+		out['BACKBOARD_API_KEY'] = apiKey;
+	}
+	if (settings.apiUrl) {
+		out['BACKBOARD_API_URL'] = settings.apiUrl;
+	}
+	return out;
+}
+
+function readBackboardIdeConfigApiKey(env: string): string | undefined {
+	try {
+		const parsed: unknown = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.backboard_ide', 'config.json'), 'utf8'));
+		if (!isObjectRecord(parsed)) {
+			return undefined;
+		}
+		const direct = typeof parsed.api_key === 'string' && parsed.api_key ? parsed.api_key : undefined;
+		const envKeys = isObjectRecord(parsed.env_keys) ? parsed.env_keys : undefined;
+		const byEnv = envKeys && typeof envKeys[env] === 'string' ? envKeys[env] as string : undefined;
+		return direct ?? byEnv;
+	} catch {
+		return undefined;
 	}
 }
 

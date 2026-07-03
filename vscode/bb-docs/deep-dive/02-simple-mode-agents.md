@@ -2,18 +2,29 @@
 
 ## What "Simple mode" actually is
 
-Simple mode is **the Agents/Sessions window** — a dedicated workbench layer
-(`src/vs/sessions/`) that replaces the classic editor chrome with a chat-first UI. It is
-toggled from the title bar against "Editor" mode.
+Simple mode is **the Agents/Sessions window** — a dedicated workbench layer (`src/vs/sessions/`)
+that replaces the classic editor chrome with a chat-first UI. It is toggled from the title bar
+against "Editor" mode. The display label is **"Simple"**, but the code internally calls it
+**"agents"**.
 
-- Switcher implementation:
-  `src/vs/workbench/contrib/chat/electron-browser/backboardModeSwitcher/backboardModeSwitcherActions.ts`
-  - `BackboardModeSwitcherAction` (lines 35-56) — the command
-  - `BackboardModeTitleBarWidget` (lines 70-247) — the title-bar widget
-  - Labels/icons: **"Simple"** (`codicon-robot`) vs **"Editor"** (`codicon-window`)
-- Visibility gated by `config.${ChatConfiguration.TitleBarOpenInAgentsWindowEnabled}` (line 49)
-- Remembers which panels the user closed in Editor mode under the storage key prefix
-  `backboard.editorMode.panelClosed.{PART}` (line 72, `StorageScope.PROFILE`)
+Switcher: `src/vs/workbench/contrib/chat/electron-browser/backboardModeSwitcher/backboardModeSwitcherActions.ts`
+
+| Element | Value | Line |
+|---|---|---|
+| Command id | `workbench.action.backboardModeSwitcher` | :38 |
+| Menu placement | `MenuId.TitleBarLeft`, group `navigation`, order 0 | :44-51 |
+| Gating config | `config.${ChatConfiguration.TitleBarOpenInAgentsWindowEnabled}` (`chat.titleBar.openInAgentsWindow.enabled`) | :49 |
+| Widget class | `BackboardModeTitleBarWidget` | :70 |
+| panelClosed storage prefix | `backboard.editorMode.panelClosed.` + partId, `StorageScope.PROFILE` (`'1'`=closed) | :72, :139-144 |
+| Tracked parts | `PANEL_PARTS = [SIDEBAR_PART, PANEL_PART, AUXILIARYBAR_PART]` | :73 |
+
+Menu items (`showMenu`, `:169-186`): `workbench.action.mode.editor` labelled **"Editor"** and
+`workbench.action.mode.agents` labelled **"Simple"**. `openAgents()` (`:189`) executes
+`workbench.action.openAgentsWindow`; `openEditor()` (`:194`) restores SIDEBAR/PANEL/AUXILIARYBAR
+visibility unless the user previously closed them (tracked via the `panelClosed` keys) and focuses
+the Terminal view. `isAgentsActive()` (`:229`) is true when the active editor pane id ===
+`agentSessionsWelcomePage`. `updateState()` (`:237`) swaps icon `codicon-window` (Editor) ↔
+`codicon-robot` (Simple).
 
 ```
 ┌─ Title bar ──────────────────────────────────────────────┐
@@ -24,116 +35,204 @@ toggled from the title bar against "Editor" mode.
 │ src/vs/sessions workbench    │   │ classic VS Code workbench  │
 │ ┌────────┬─────────┬───────┐ │   │ explorer / editor / panel  │
 │ │sessions│  chat   │ right │ │   └────────────────────────────┘
-│ │  list  │composer │ panel │ │
-│ │(sidebar)│(center)│(files,│ │
-│ │        │         │browser│ │
-│ │        │         │review)│ │
+│ │  list  │composer │workb. │ │
+│ │(sidebar)│(SESSIONS│(Review│ │
+│ │        │  _PART) │Files, │ │
+│ │        │         │Browser│ │
 │ └────────┴─────────┴───────┘ │
 └──────────────────────────────┘
 ```
 
-Layout is driven by `src/vs/sessions/browser/workbench.ts` (~2161 lines,
-`IAgentWorkbenchLayoutService`), which persists:
+## The layout service
 
-| Storage key | Scope | Purpose |
-|---|---|---|
-| `workbench.sessions.partVisibility` | WORKSPACE | which parts are visible (`workbench.ts:329`) |
-| `workbench.sessions.partSizes` | WORKSPACE | grid sizes across reloads (`workbench.ts:330`) |
+`src/vs/sessions/browser/workbench.ts` — the `Workbench` class *is* `IAgentWorkbenchLayoutService`
+(a refinement of `IWorkbenchLayoutService`, `:135`). It is the layout engine for the Agents window,
+separate from the regular workbench.
 
-CSS layout classes (LayoutClasses enum, `workbench.ts:98-111`): `nosidebar`, `nopanel`,
-`noauxiliarybar`, `nosessionspart`, `sessions-auxiliary-files-active`,
-`sessions-auxiliary-browser-active`; root class `agent-sessions-workbench` (`:749`).
-Phone layouts (`IsPhoneLayoutContext`) collapse the sidebar into a drawer and use
-`MobileTitlebarPart` (`workbench.ts:795`).
+`LayoutClasses` enum (`:98-111`): `nosidebar`, `nomaineditorarea`, `nopanel`, `noauxiliarybar`,
+`nosessionspart`, `nostatusbar`, `shell-gradient-background`, `fullscreen`, `maximized`,
+`phone-layout`, `sessions-auxiliary-files-active`, `sessions-auxiliary-browser-active`.
 
-## The agents: session providers & session types
-
-Everything the user can chat with in Simple mode is a **session type** supplied by a
-**sessions provider** registered with `ISessionsProvidersService`
-(`src/vs/sessions/services/sessions/browser/sessionsProvidersService.ts`).
-
-```
-                    ISessionsProvidersService
-                              │
-      ┌───────────────┬───────┴────────┬──────────────────┐
-      ▼               ▼                ▼                  ▼
-┌────────────┐ ┌──────────────┐ ┌─────────────┐ ┌──────────────────┐
-│ local-     │ │ agenthost-*  │ │ default-    │ │ local-chat       │
-│ agent-host │ │ (remote:     │ │ copilot     │ │                  │
-│            │ │ tunnel/WSL/  │ │ (vestigial  │ │ in-process chat, │
-│ in-process │ │ SSH hosts)   │ │ name — see  │ │ no background    │
-│ IAgentHost │ │              │ │ doc 07)     │ │ agent            │
-│ Service    │ │              │ │             │ │                  │
-└─────┬──────┘ └──────┬───────┘ └──────┬──────┘ └──────┬───────────┘
-      │               │                │               │
-      ▼               ▼                ▼               ▼
- 'copilotcli'    dynamic types   CLI / cloud /    'local'
- "Background     from remote     Claude Code      "Local" (vm icon)
-  Agent" (✨)    host            session types
- + 'agent-host-backboard'
-```
-
-| Provider | ID | File | Session types |
+| Storage key | Scope | Purpose | Line |
 |---|---|---|---|
-| Local Agent Host | `local-agent-host` | `contrib/providers/agentHost/browser/localAgentHostSessionsProvider.ts:27-244` | `copilotcli` "Background Agent" (`Codicon.sparkle`, `baseAgentHostSessionsProvider.ts:87-91`), `agent-host-backboard` |
-| Remote Agent Host | `agenthost-*` | `contrib/providers/remoteAgentHost/browser/remoteAgentHostSessionsProvider.ts` | dynamic, from the remote host |
-| Copilot Chat Sessions | `default-copilot` | `contrib/providers/copilotChatSessions/browser/copilotChatSessionsProvider.ts` | `copilot-cli`, cloud, `claude-code` |
-| Local Chat | `local-chat` | `contrib/providers/localChatSessions/browser/localChatSessionsProvider.ts:36-84` | `local` "Local" (`Codicon.vm`) |
+| `workbench.sessions.partVisibility` | WORKSPACE / MACHINE | `{editor, auxiliaryBar, sidebar}` visibility | :329, :665-675 |
+| `workbench.sessions.partSizes` | WORKSPACE | `{sidebar, auxiliaryBar, sessions, editor, panel}` grid sizes | :330, :690-715 |
 
-The user's choice is made in `sessionTypePicker.ts`
-(`src/vs/sessions/contrib/chat/browser/sessionTypePicker.ts`) and remembered under
-`sessions.userSelectedSessionType` (`:29`, PROFILE scope). Local chat history persists under
-`sessions.localChat.sessions` (`localChatSessionsProvider.ts:47`).
+Default visibility (`:297-303`): sidebar/auxiliaryBar/sessions default `true`, editor/panel default
+`false`. The dedicated **`SESSIONS_PART`** (the chat bar) is unique to this window.
 
-## Agent modes (per session, distinct from Simple mode)
+**Phone layout** is driven by `SessionsLayoutPolicy` (`:307`): when `viewportClass === 'phone'`,
+part-visibility persistence is skipped (`:649`), a `MobileTitlebarPart` is prepended (`:793`), a
+hamburger toggles a full-width sidebar drawer (`:813-848`), and a `MobileNavigationStack` (`:308`)
+pops open parts. Context key `IsPhoneLayoutContext` bound at `:474`.
 
-Inside an agent-host session, "mode" is a session-config property — how autonomously the agent
-acts:
+## The agents: providers → session types
 
-- Picker: `contrib/providers/agentHost/browser/agentHostModePicker.ts:286-311`
-  (property `SessionConfigKey.Mode`)
-- Well-known values (lines 35-37):
-
-```
- interactive  💬 Codicon.comment    — ask/answer, confirm as it goes
- plan         ☑  Codicon.checklist — produce a plan first
- autopilot    🚀 Codicon.rocket    — iterate autonomously to completion
-```
-
-Read via `provider.getSessionConfig(sessionId)`; written via
-`provider.setSessionConfigValue(sessionId, SessionConfigKey.Mode, value)` (`:260`).
-(The Rust bridge separately has its own tool-access "mode": `free` / `ask` / `manual` — see doc 04.)
-
-## Agent lifecycle
+Everything the user can chat with is a **session type** supplied by a **sessions provider**
+registered with `ISessionsProvidersService`
+(`src/vs/sessions/services/sessions/browser/sessionsProvidersService.ts:19`). `getProviders()`
+returns providers sorted by `order` (lower first, stable).
 
 ```
- user picks session type + workspace
-        │
-        ▼
- provider.createSession(options)
-        │            localAgentHostSessionsProvider.ts connects to the
-        │            in-process IAgentHostService and wires listeners
-        │            (_attachConnectionListeners, :95)
-        ▼
- SessionState → SessionStatus mapping (baseAgentHostSessionsProvider.ts:303-326)
-   Untitled → InProgress → NeedsInput → Completed
-        │
-        ▼
- sendRequest(sessionId, options)  ← per message (see doc 01)
-        │
-        ▼
- streaming responses mutate the chat model observables → UI updates
+ISessionsProvidersService (registry, sorted by order)
+│
+├── CopilotChatSessionsProvider           id = 'default-copilot'
+│     transport: in-process ext-host chat + optional cloud agents
+│     ├── CopilotCloudSessionType   id='copilot-cloud-agent'  label="Cloud"   icon=Codicon.cloud
+│     └── ClaudeCodeSessionType     id='claude-code'          label="Claude"  icon=Codicon.claude
+│            (Claude type conditionally pushed — copilotChatSessionsProvider.ts:1375)
+│
+├── LocalChatSessionsProvider             id = 'local-chat'
+│     transport: in-process IChatService only (no agent host, no worktree)
+│     └── LocalSessionType          id='local'  label="Local"  icon=Codicon.vm
+│
+├── LocalAgentHostSessionsProvider        id = 'local-agent-host'   order = -1 | 1*
+│     transport: in-process IAgentHostService (IAgentConnection), always present
+│     └── types synced dynamically from the local agent host rootState
+│           e.g. CopilotCLISessionType id='copilotcli' "Background Agent" (Codicon.sparkle)
+│           + 'agent-host-backboard' (the Backboard-native agent)
+│
+└── RemoteAgentHostSessionsProvider(s)    id = `agenthost-${authority}`  (one per remote)
+      transport: remote agent-host connection (tunnel/WSL/web), IAgentConnection
+      └── types discovered from remote rootState
+```
+`*` LocalAgentHost `order` is `-1` (sorts first) when `LocalAgentHostDefaultProviderSettingId` is
+enabled, else `1` (`localAgentHostSessionsProvider.ts:67`).
+
+| Provider (const → value) | Session type: id / label / icon | Transport | File:line |
+|---|---|---|---|
+| `COPILOT_PROVIDER_ID` = `default-copilot` | `copilot-cloud-agent` / "Cloud" / `Codicon.cloud` | ext-host + cloud | copilotChatSessionsProvider.ts:145, :63 |
+| " | `claude-code` / "Claude" / `Codicon.claude` | ext-host | copilotChatSessionsProvider.ts:56, :1377 |
+| `LOCAL_PROVIDER_ID` = `local-chat` | `local` / "Local" / `Codicon.vm` | in-proc IChatService | localChatSessionsProvider.ts:46, :37 |
+| `LOCAL_AGENT_HOST_PROVIDER_ID` = `local-agent-host` | `copilotcli` / "Background Agent" / `Codicon.sparkle`; `agent-host-backboard` | in-proc agent host | localAgentHostSessionsProvider.ts:47; baseAgentHostSessionsProvider.ts:87 |
+| `agenthost-${authority}` (prefix `REMOTE_AGENT_HOST_PROVIDER_PREFIX` = `agenthost-`) | dynamic from remote rootState | remote tunnel | remoteAgentHostSessionsProvider.ts:~229 |
+
+`CopilotCLISessionType` (verbatim, `baseAgentHostSessionsProvider.ts:87-91`):
+
+```ts
+export const CopilotCLISessionType: ISessionType = {
+    id: 'copilotcli',
+    label: localize('copilotCLI', "Background Agent"),
+    icon: Codicon.sparkle,
+};
 ```
 
-## Customization & feedback services
+Type guard (`agentHostSessionsProvider.ts:208`):
+`isAgentHostProviderId(id)` ⇔ `id === LOCAL_AGENT_HOST_PROVIDER_ID || id.startsWith('agenthost-')`.
+
+**Session-type picker** (`sessionTypePicker.ts`): the user's choice is stored under
+`sessions.userSelectedSessionType` (`:29`, PROFILE) as JSON `{providerId?, sessionTypeId}` (legacy
+raw-string tolerated, `:377`). Picking the *preferred* (default) type **clears** the stored pick
+(`:365`); any other pick is stored.
+
+## Three orthogonal "mode" axes (do not confuse)
+
+```
+ (A) WINDOW mode        Editor ⟷ Simple(Agents)      backboardModeSwitcherActions.ts
+       │  which workbench you are in; tracked by active editor pane + panelClosed keys
+       │
+ (B) SESSION mode       interactive | plan | autopilot    agentHostModePicker.ts
+       │  a per-session config value (SessionConfigKey.Mode) chosen in the composer
+       │  controls how autonomously the agent acts
+       ▼
+ (C) BRIDGE tool-access free | manual              backboardAgent.ts (derived from B)
+          coarse backend setting the Rust bridge actually sees
+```
+
+### (B) Per-session execution mode — `agentHostModePicker.ts`
+
+`AgentHostModePicker` (`:286`) renders whatever enum the session schema advertises for `mode` and
+writes `provider.setSessionConfigValue(id, SessionConfigKey.Mode, value)` (`:260`). Icons
+(`getModeIcon`, `:33-40`): `interactive` → `Codicon.comment`, `plan` → `Codicon.checklist`,
+`autopilot` → `Codicon.rocket`.
+
+`SessionConfigKey` (verbatim, `sessionConfigKeys.ts:18-29`):
+
+```ts
+export const enum SessionConfigKey {
+    AutoApprove  = 'autoApprove',
+    Permissions  = 'permissions',
+    Isolation    = 'isolation',
+    Branch       = 'branch',
+    Mode         = 'mode',
+}
+```
+
+A parallel **Claude** picker (`agentHostClaudePermissionModePicker.ts`) drives
+`ClaudeSessionConfigKey.PermissionMode` with `default`/`acceptEdits`/`plan`/`auto`/`bypassPermissions`
+(see doc 05).
+
+### (C) Bridge tool-access mode — `backboardAgent.ts`
+
+The UI `mode` (B) is **normalized** in the Backboard agent before it reaches the Rust bridge:
+
+`normalizeBackboardMode` (`:2825-2836`):
+
+| UI `mode` | → access mode |
+|---|---|
+| `interactive` / `agent` | `default` (`BACKBOARD_ACCESS_DEFAULT`) |
+| `plan` / `ask` | `manual` (`BACKBOARD_ACCESS_MANUAL`) |
+| `free` | `fullAccess` (`BACKBOARD_ACCESS_FULL`) |
+
+`bridgeModeFromAccessMode` (`:2854`): `manual` → `'manual'`, everything else → `'free'`. So the Rust
+bridge only ever sees **two** tool-access modes, while the UI exposes a richer enum that funnels into
+them. (The `ChatPermissionLevel` axis — `default`/`autoApprove`/`autopilot` — feeds
+`SessionConfigKey.AutoApprove`; see doc 05.)
+
+## Session lifecycle & status mapping
+
+`baseAgentHostSessionsProvider.ts`. New sessions live as `NewSession` skeletons (status `Untitled`)
+until the first `sendRequest` graduates them into an `AgentHostSessionAdapter`:
+
+```
+createNewSession(workspace, sessionTypeId)                         :1501
+  └─ _createNewSession → new NewSession({...})  status=Untitled    :716,:791
+  └─ _startNewSessionBackend(newSession, connection)               :1574
+        └─ NewSession.eagerCreate(connection)                      :985
+              └─ connection.createSession({provider, session, workingDirectory, config, agent?})
+                 (must createSession BEFORE subscribing to avoid AHP_SESSION_NOT_FOUND, :966)
+
+sendRequest(chatId, chatResource, options)                        :2186   (see doc 01)
+  ├─ newSession.graduate()  (release sub WITHOUT disposeSession)   :2298
+  └─ backend reports session in list → _onDidReplaceSession fires (skeleton → real adapter)
+```
+
+`graduate()` (`:1053`) hands off cleanly on success; `dispose()` (`:1067`) fires
+`connection.disposeSession` on abandonment. In-flight new sessions live in a `DisposableMap`
+`_newSessions` (`:1188`). Both local and remote committed sessions are the **same** class,
+`AgentHostSessionAdapter` (`:131`); the only variation is `IAgentHostAdapterOptions` (`:99`).
+
+**Status mapping** — the protocol status is a bitset; the UI status is a small enum:
+
+```
+ PROTOCOL SessionStatus (bitflags, channels-session/state.ts:37)
+   Idle=1  Error=1<<1  InProgress=1<<3  InputNeeded=(1<<3)|(1<<4)  IsRead=1<<5  IsArchived=1<<6
+                                │  mapProtocolStatus (agentHostDiffs.ts:17, priority order)
+                                ▼
+ UI SessionStatus (session.ts:38):  Untitled=0  InProgress=1  NeedsInput=2  Completed=3  Error=4
+
+   (protocol & InputNeeded)==InputNeeded ──► NeedsInput (2)
+    protocol & InProgress                ──► InProgress (1)
+    protocol & Error                     ──► Error (4)
+    else                                 ──► Completed (3)
+   [pre-send skeleton, set directly]     ──► Untitled (0)
+```
+
+Applied in the adapter constructor (`:233`) and on every `update()` (`:498-504`).
+
+## Customization / delegation / completion services
 
 | Service | File | Purpose |
 |---|---|---|
-| `IAgentHostCustomizationService` | `services/agentHost/browser/agentHostCustomizationService.ts` | customization bundles (skills, instructions) for agents |
-| AI customization tree | `contrib/aiCustomizationTreeView/browser/aiCustomizationTreeView.ts` | browse customizations in the UI |
-| Agent delegation | `contrib/chat/browser/agentHostDelegation.ts` | delegation between agents |
-| Input completions | `contrib/chat/browser/agentHostInputCompletions.ts` | slash/@ completions in the composer |
+| `IAgentHostCustomizationService` | `services/agentHost/browser/agentHostCustomizationService.ts:20` | bridges active session → provider for `getCustomAgents`/`getCustomizations`/`getWorkingDirectory`/`getMcpServers` |
+| Agent delegation | `contrib/chat/browser/agentHostDelegation.ts:22` | "Continue in…" — command `CHAT_DELEGATE_TO_AGENT_HOST_SESSION_COMMAND_ID`; creates a new session and forwards the transcript |
+| Input completions | `contrib/chat/browser/agentHostInputCompletions.ts:99` | slash/@ completions in the composer, bridged to the agent host's `completions` command |
+| AI customization tree | `contrib/aiCustomizationTreeView/browser/*` | unified tree of agents / skills / instructions / prompts / MCP servers / plugins (`workbench.view.aiCustomization`) |
 
-Backboard also ships its own skill set under `src/vs/sessions/skills/` (act-on-feedback,
-code-review, commit, create-pr, fix-ci, merge, sync, …) which are loaded through the
-customization system — these are Backboard skills, not Copilot's.
+## Backboard's own skills
+
+`src/vs/sessions/skills/` — each a directory with a `SKILL.md`, loaded through the customization
+system (these are **Backboard** skills, not Copilot's):
+
+`act-on-feedback`, `code-review`, `commit`, `create-draft-pr`, `create-pr`, `fix-ci`,
+`generate-run-commands`, `merge`, `sync`, `sync-upstream`, `update-pr`, `update-skills`.

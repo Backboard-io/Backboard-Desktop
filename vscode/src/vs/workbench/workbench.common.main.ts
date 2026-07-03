@@ -471,4 +471,7 @@ import './contrib/editTelemetry/browser/editTelemetry.contribution.js';
 // Opener
 import './contrib/opener/browser/opener.contribution.js';
 
+// Backboard Layout
+import './contrib/backboardLayout/browser/backboardLayout.contribution.js';
+
 //#endregion

@@ -1,0 +1,942 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { Emitter } from '../../../../base/common/event.js';
+import { Disposable } from '../../../../base/common/lifecycle.js';
+import { type IObservable, observableValue } from '../../../../base/common/observable.js';
+import { URI } from '../../../../base/common/uri.js';
+import { generateUuid } from '../../../../base/common/uuid.js';
+import { localize } from '../../../../nls.js';
+import { ILogService } from '../../../log/common/log.js';
+import { AgentSession, AgentSignal, IAgent, IAgentCreateSessionConfig, IAgentCreateSessionResult, IAgentDescriptor, IAgentMaterializeSessionEvent, IAgentModelInfo, IAgentResolveSessionConfigParams, IAgentSessionConfigCompletionsParams, IAgentSessionMetadata } from '../../common/agentService.js';
+import { ActionType, type ChatAction, type SessionAction } from '../../common/state/sessionActions.js';
+import type { ResolveSessionConfigResult, SessionConfigCompletionsResult } from '../../common/state/protocol/commands.js';
+import type { ModelSelection, ProtectedResourceMetadata, ToolDefinition } from '../../common/state/protocol/state.js';
+import { ChatInputAnswerValueKind, ChatInputQuestionKind, ChatInputResponseKind, MessageAttachmentKind, MessageKind, ResponsePartKind, SessionStatus, ToolCallConfirmationReason, ToolCallStatus, ToolResultContentType, TurnState, type ChatInputAnswer, type ChatInputQuestion, type ClientPluginCustomization, type MessageAttachment, type PendingMessage, type SessionInputAnswer, type SessionInputResponseKind, type ToolCallResult, type Turn } from '../../common/state/sessionState.js';
+import type { ISyncedCustomization } from '../../common/agentPluginManager.js';
+import { IAgentConfigurationService } from '../agentConfigurationService.js';
+import { BACKBOARD_ACCESS_MANUAL, BACKBOARD_MODE_PLAN, BUNDLED_BACKBOARD_MODELS, backboardModelInfos, createBackboardTurnSettings, fallbackModel, isBridgeModel, resolveBackboardSessionConfig } from './backboardRuntimeShared.js';
+import { rgDiskPath } from '../../../../base/node/ripgrep.js';
+import { CliTsServeProcess } from './cliTsProcess.js';
+import type { CliTsAgentEvent, CliTsFileAttachment, CliTsPermissionPolicy, CliTsTurnStatus } from './cliTsProtocol.js';
+
+const CLI_TS_STORE_VERSION = 1;
+
+interface CliTsStoredTurn {
+	readonly prompt: string;
+	readonly response: string;
+	readonly failed?: boolean;
+	/** Compact per-tool summaries ("Read — Read 2 lines") for history restore. */
+	readonly tools?: readonly string[];
+}
+
+interface CliTsStoredSession {
+	readonly id: string;
+	readonly title?: string;
+	readonly cwd?: string;
+	readonly createdAt: number;
+	readonly modifiedAt: number;
+	readonly threadId?: string;
+	readonly turns: CliTsStoredTurn[];
+}
+
+interface CliTsTurnState {
+	readonly turnId: string;
+	/** Markdown part id per cli-ts messageId, created lazily on first delta. */
+	readonly messageParts: Map<string, string>;
+	/** Accumulated streamed text per cli-ts messageId (finalization dedupe). */
+	readonly streamedText: Map<string, string>;
+	/** Tool calls already announced via ChatToolCallStart. */
+	readonly startedToolCalls: Set<string>;
+	/** Tool calls that went through an interactive permission request. */
+	readonly confirmedToolCalls: Set<string>;
+	/** Child-tool activity lines per parent `Agent` tool call (sub-agent nesting). */
+	readonly childToolLines: Map<string, Map<string, string>>;
+	/** Compact tool summaries recorded for history restore. */
+	readonly toolSummaries: string[];
+	reasoningPartId?: string;
+	didCreateReasoningPart?: boolean;
+	didCreateStatusPart?: boolean;
+	lastProgressMessage?: string;
+	responseText: string;
+	failed?: boolean;
+}
+
+interface CliTsSession {
+	readonly sessionUri: URI;
+	readonly sessionId: string;
+	readonly createdAt: number;
+	modifiedAt: number;
+	workingDirectory?: URI;
+	model?: ModelSelection;
+	config?: Record<string, unknown>;
+	title?: string;
+	threadId?: string;
+	materialized: boolean;
+	disposed: boolean;
+	proc?: CliTsServeProcess;
+	turn?: CliTsTurnState;
+	/** cli-ts permission id per pending toolCallId (answered via respondToPermissionRequest). */
+	readonly pendingPermissions: Map<string, string>;
+	/** Pending cli-ts AskUser request ids (answered via respondToUserInputRequest). */
+	readonly pendingInputs: Set<string>;
+	readonly storedTurns: CliTsStoredTurn[];
+}
+
+/**
+ * Backboard provider backed by the cli-ts serve process (`backboard-cli-ts
+ * --serve`) instead of the legacy Rust bridge. cli-ts owns the agent loop and
+ * executes its own tools in the session's working directory; this class is a
+ * translator: control ops out (submit/cancel/respond*), `AgentEvent` records
+ * in, protocol actions/signals up to the {@link IAgentService}.
+ *
+ * Registered under the same provider id as the Rust bridge agent so session
+ * URIs stay stable across the `chat.agentHost.backboardRuntime` switch; the
+ * two are never registered together.
+ */
+export class CliTsAgent extends Disposable implements IAgent {
+	readonly id = 'backboard';
+
+	private readonly _onDidSessionProgress = this._register(new Emitter<AgentSignal>());
+	readonly onDidSessionProgress = this._onDidSessionProgress.event;
+
+	private readonly _onDidMaterializeSession = this._register(new Emitter<IAgentMaterializeSessionEvent>());
+	readonly onDidMaterializeSession = this._onDidMaterializeSession.event;
+
+	private readonly _models = observableValue<readonly IAgentModelInfo[]>('cliTsModels', backboardModelInfos(BUNDLED_BACKBOARD_MODELS));
+	readonly models: IObservable<readonly IAgentModelInfo[]> = this._models;
+
+	private readonly _sessions = new Map<string, CliTsSession>();
+	private _modelsRefreshed = false;
+	private _rgDir: Promise<string | undefined> | undefined;
+
+	constructor(
+		@ILogService private readonly _logService: ILogService,
+		@IAgentConfigurationService private readonly _configurationService: IAgentConfigurationService,
+	) {
+		super();
+	}
+
+	getDescriptor(): IAgentDescriptor {
+		return {
+			provider: this.id,
+			displayName: localize('cliTsAgent.displayName', "Backboard"),
+			description: localize('cliTsAgent.description', "Backboard agent backed by the cli-ts runtime"),
+		};
+	}
+
+	async createSession(config: IAgentCreateSessionConfig = {}): Promise<IAgentCreateSessionResult> {
+		if (config.fork) {
+			throw new Error('Backboard sessions do not support forking yet');
+		}
+		const sessionId = config.session ? AgentSession.id(config.session) : generateUuid();
+		const sessionUri = config.session ?? AgentSession.uri(this.id, sessionId);
+		const existing = this._sessions.get(sessionId);
+		if (existing) {
+			existing.workingDirectory = config.workingDirectory ?? existing.workingDirectory;
+			existing.model = config.model ?? existing.model;
+			existing.config = { ...(existing.config ?? {}), ...(config.config ?? {}) };
+			return { session: sessionUri, workingDirectory: existing.workingDirectory, provisional: !existing.materialized };
+		}
+		const restored = config.session ? this._readStore().find(entry => entry.id === sessionId) : undefined;
+		const session = this._createSessionEntry(sessionUri, restored);
+		session.workingDirectory = config.workingDirectory ?? session.workingDirectory;
+		session.model = config.model ?? session.model;
+		session.config = config.config ?? session.config;
+		this._sessions.set(sessionId, session);
+		return {
+			session: sessionUri,
+			workingDirectory: session.workingDirectory,
+			project: session.workingDirectory ? { uri: session.workingDirectory, displayName: path.basename(session.workingDirectory.fsPath) } : undefined,
+			provisional: !session.materialized,
+		};
+	}
+
+	async resolveSessionConfig(params: IAgentResolveSessionConfigParams): Promise<ResolveSessionConfigResult> {
+		return resolveBackboardSessionConfig(params.config);
+	}
+
+	async sessionConfigCompletions(_params: IAgentSessionConfigCompletionsParams): Promise<SessionConfigCompletionsResult> {
+		return { items: [] };
+	}
+
+	async sendMessage(sessionUri: URI, prompt: string, attachments?: readonly MessageAttachment[], turnId?: string): Promise<void> {
+		const session = this._session(sessionUri);
+		const effectiveTurnId = turnId ?? generateUuid();
+		this._materialize(session);
+		session.modifiedAt = Date.now();
+		session.title ??= firstPromptLine(prompt);
+		const prepared = prepareSubmitAttachments(prompt, attachments);
+
+		const rgDir = await this._resolveRgDir();
+		const proc = this._ensureProcess(session, rgDir);
+		const storedConfig = this._configurationService.getSessionConfigValues(session.sessionUri.toString());
+		const settings = createBackboardTurnSettings(storedConfig, session.config, session.model);
+		const permission: CliTsPermissionPolicy = settings.accessMode === BACKBOARD_ACCESS_MANUAL ? 'default' : 'autoApprove';
+		// Plan mode: hide write-class tools from the model entirely, on top of gating.
+		const excludedTools = settings.rawMode === BACKBOARD_MODE_PLAN
+			? ['Write', 'Edit', 'ApplyPatch', 'Execute']
+			: undefined;
+		const thinking = cliTsThinkingLevel(settings.intensity);
+		const turn: CliTsTurnState = {
+			turnId: effectiveTurnId,
+			messageParts: new Map(),
+			streamedText: new Map(),
+			startedToolCalls: new Set(),
+			confirmedToolCalls: new Set(),
+			childToolLines: new Map(),
+			toolSummaries: [],
+			responseText: '',
+		};
+		session.turn = turn;
+		this._logService.info(`[cli-ts] turn_start session=${session.sessionId} model=${settings.provider}/${settings.model} permission=${permission} cwd=${session.workingDirectory?.fsPath ?? '(missing)'}`);
+
+		try {
+			const record = await proc.request({
+				op: 'submit',
+				requestId: proc.nextRequestId(),
+				prompt: prepared.prompt,
+				model: `${settings.provider}/${settings.model}`,
+				permission,
+				...(thinking ? { thinking } : {}),
+				...(settings.memory !== 'off' ? { memory: settings.memory } : {}),
+				...(excludedTools ? { excludedTools } : {}),
+				...(prepared.files.length ? { files: prepared.files } : {}),
+			});
+			const status = (record.payload as { status?: CliTsTurnStatus } | undefined)?.status;
+			if (status === 'failed' && !turn.failed) {
+				turn.failed = true;
+				this._fire(session.sessionUri, {
+					type: ActionType.ChatError,
+					turnId: effectiveTurnId,
+					error: { errorType: 'BackboardSendFailed', message: localize('cliTsAgent.turnFailed', "The Backboard agent reported a failed turn.") },
+				});
+			}
+			this._refreshModelsOnce(session);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			turn.failed = true;
+			this._fire(session.sessionUri, {
+				type: ActionType.ChatError,
+				turnId: effectiveTurnId,
+				error: { errorType: 'BackboardSendFailed', message },
+			});
+		} finally {
+			session.storedTurns.push({
+				prompt,
+				response: turn.responseText,
+				failed: turn.failed,
+				...(turn.toolSummaries.length ? { tools: turn.toolSummaries } : {}),
+			});
+			session.modifiedAt = Date.now();
+			this._writeStore();
+			session.turn = undefined;
+			session.pendingPermissions.clear();
+			session.pendingInputs.clear();
+			this._fire(session.sessionUri, { type: ActionType.ChatTurnComplete, turnId: effectiveTurnId });
+		}
+	}
+
+	async getSessionMessages(sessionUri: URI): Promise<readonly Turn[]> {
+		const sessionId = AgentSession.id(sessionUri);
+		const session = this._sessions.get(sessionId);
+		const turns = session?.storedTurns ?? this._readStore().find(entry => entry.id === sessionId)?.turns ?? [];
+		return turns.map((turn, index) => storedTurnToProtocolTurn(sessionId, index, turn));
+	}
+
+	async disposeSession(sessionUri: URI): Promise<void> {
+		const sessionId = AgentSession.id(sessionUri);
+		const session = this._sessions.get(sessionId);
+		if (session) {
+			session.disposed = true;
+			session.proc?.dispose();
+			session.proc = undefined;
+		}
+		this._sessions.delete(sessionId);
+	}
+
+	async abortSession(sessionUri: URI): Promise<void> {
+		const session = this._sessions.get(AgentSession.id(sessionUri));
+		if (!session) {
+			return;
+		}
+		session.proc?.notify({ op: 'cancel' });
+		session.pendingPermissions.clear();
+		session.pendingInputs.clear();
+	}
+
+	setPendingMessages(sessionUri: URI, steeringMessage: PendingMessage | undefined, _queuedMessages: readonly PendingMessage[]): void {
+		if (!steeringMessage?.message.text) {
+			return;
+		}
+		const session = this._sessions.get(AgentSession.id(sessionUri));
+		if (!session?.proc?.isRunning) {
+			return;
+		}
+		// Forward the steering message; cli-ts interrupts the active turn and
+		// front-queues it. Signal consumption so the host clears the pending slot.
+		session.proc.notify({ op: 'steer', prompt: steeringMessage.message.text });
+		this._onDidSessionProgress.fire({
+			kind: 'steering_consumed',
+			session: sessionUri,
+			id: steeringMessage.id,
+		});
+	}
+
+	async changeModel(sessionUri: URI, model: ModelSelection): Promise<void> {
+		const session = this._session(sessionUri);
+		session.model = model;
+		if (session.proc?.isRunning && model.id) {
+			session.proc.notify({ op: 'setModel', model: model.id });
+		}
+	}
+
+	respondToPermissionRequest(requestId: string, approved: boolean): void {
+		for (const session of this._sessions.values()) {
+			const permissionId = session.pendingPermissions.get(requestId);
+			if (permissionId) {
+				session.pendingPermissions.delete(requestId);
+				if (approved) {
+					session.turn?.confirmedToolCalls.add(requestId);
+				}
+				session.proc?.notify({ op: 'respondPermission', id: permissionId, decision: approved ? 'approve' : 'deny' });
+				return;
+			}
+		}
+		this._logService.warn(`[cli-ts] No pending tool approval found for ${requestId}`);
+	}
+
+	respondToUserInputRequest(requestId: string, response: SessionInputResponseKind, answers?: Record<string, SessionInputAnswer>): void {
+		for (const session of this._sessions.values()) {
+			if (session.pendingInputs.delete(requestId)) {
+				const answer = response === ChatInputResponseKind.Accept ? inputAnswerText(answers) : '';
+				session.proc?.notify({ op: 'respondInput', id: requestId, answer });
+				return;
+			}
+		}
+		this._logService.warn(`[cli-ts] No pending input request found for ${requestId}`);
+	}
+
+	getProtectedResources(): ProtectedResourceMetadata[] {
+		return [];
+	}
+
+	async listSessions(): Promise<IAgentSessionMetadata[]> {
+		const inMemory = [...this._sessions.values()]
+			.filter(session => session.materialized && !session.disposed)
+			.map(session => ({
+				session: session.sessionUri,
+				startTime: session.createdAt,
+				modifiedTime: session.modifiedAt,
+				summary: session.title,
+				status: session.turn ? SessionStatus.InProgress : SessionStatus.Idle,
+				model: session.model,
+				workingDirectory: session.workingDirectory,
+				project: session.workingDirectory ? { uri: session.workingDirectory, displayName: path.basename(session.workingDirectory.fsPath) } : undefined,
+			}));
+		const seen = new Set(inMemory.map(entry => AgentSession.id(entry.session)));
+		const restored = this._readStore()
+			.filter(entry => !seen.has(entry.id))
+			.map(entry => {
+				const workingDirectory = entry.cwd ? URI.file(entry.cwd) : undefined;
+				return {
+					session: AgentSession.uri(this.id, entry.id),
+					startTime: entry.createdAt,
+					modifiedTime: entry.modifiedAt,
+					summary: entry.title,
+					status: SessionStatus.Idle,
+					workingDirectory,
+					project: workingDirectory ? { uri: workingDirectory, displayName: path.basename(workingDirectory.fsPath) } : undefined,
+				};
+			});
+		return [...inMemory, ...restored].sort((left, right) => right.modifiedTime - left.modifiedTime);
+	}
+
+	async authenticate(_resource: string, _token: string): Promise<boolean> {
+		return true;
+	}
+
+	async setClientCustomizations(_session: URI, _clientId: string, _customizations: ClientPluginCustomization[]): Promise<ISyncedCustomization[]> {
+		return [];
+	}
+
+	setClientTools(_session: URI, _clientId: string | undefined, tools: ToolDefinition[]): void {
+		// cli-ts owns tool execution; client-contributed tools are not routed
+		// through this provider. Log so mismatched expectations are visible.
+		if (tools.length > 0) {
+			this._logService.info(`[cli-ts] Ignoring ${tools.length} client tool(s); the cli-ts runtime executes its own tools.`);
+		}
+	}
+
+	onClientToolCallComplete(_session: URI, _toolCallId: string, _result: ToolCallResult): void {
+		// No client tools are dispatched by this provider (see setClientTools).
+	}
+
+	setCustomizationEnabled(_id: string, _enabled: boolean): void {
+	}
+
+	async shutdown(): Promise<void> {
+		for (const session of this._sessions.values()) {
+			session.proc?.dispose();
+			session.proc = undefined;
+		}
+		this._sessions.clear();
+	}
+
+	override dispose(): void {
+		for (const session of this._sessions.values()) {
+			session.proc?.dispose();
+		}
+		this._sessions.clear();
+		super.dispose();
+	}
+
+	// ---- session plumbing ---------------------------------------------------
+
+	private _session(sessionUri: URI): CliTsSession {
+		const sessionId = AgentSession.id(sessionUri);
+		const session = this._sessions.get(sessionId);
+		if (session && !session.disposed) {
+			return session;
+		}
+		if (session?.disposed) {
+			throw new Error(`Backboard session was disposed: ${sessionUri.toString()}`);
+		}
+		const restored = this._readStore().find(entry => entry.id === sessionId);
+		const recreated = this._createSessionEntry(sessionUri, restored);
+		this._sessions.set(sessionId, recreated);
+		this._logService.warn(`[cli-ts] Recreated missing session from URI ${sessionUri.toString()}`);
+		return recreated;
+	}
+
+	private _createSessionEntry(sessionUri: URI, restored?: CliTsStoredSession): CliTsSession {
+		return {
+			sessionUri,
+			sessionId: AgentSession.id(sessionUri),
+			createdAt: restored?.createdAt ?? Date.now(),
+			modifiedAt: restored?.modifiedAt ?? Date.now(),
+			workingDirectory: restored?.cwd ? URI.file(restored.cwd) : undefined,
+			title: restored?.title,
+			threadId: restored?.threadId,
+			materialized: !!restored,
+			disposed: false,
+			pendingPermissions: new Map(),
+			pendingInputs: new Set(),
+			storedTurns: [...(restored?.turns ?? [])],
+		};
+	}
+
+	private _materialize(session: CliTsSession): void {
+		if (session.materialized) {
+			return;
+		}
+		session.materialized = true;
+		this._onDidMaterializeSession.fire({
+			session: session.sessionUri,
+			workingDirectory: session.workingDirectory,
+			project: session.workingDirectory ? { uri: session.workingDirectory, displayName: path.basename(session.workingDirectory.fsPath) } : undefined,
+		});
+	}
+
+	private _ensureProcess(session: CliTsSession, rgDir?: string): CliTsServeProcess {
+		if (session.proc?.isRunning) {
+			return session.proc;
+		}
+		session.proc?.dispose();
+		const proc = new CliTsServeProcess(this._logService, {
+			workingDirectory: session.workingDirectory?.fsPath,
+			extraPathDirs: rgDir ? [rgDir] : undefined,
+			onEvent: event => this._handleAgentEvent(session, event),
+			onExit: () => {
+				session.pendingPermissions.clear();
+				session.pendingInputs.clear();
+			},
+		});
+		session.proc = proc;
+		return proc;
+	}
+
+	/**
+	 * Resolves the directory of VS Code's bundled ripgrep once, so cli-ts's
+	 * Grep/Glob tools find `rg` even when it is not on the user's PATH.
+	 */
+	private async _resolveRgDir(): Promise<string | undefined> {
+		this._rgDir ??= rgDiskPath().then(rgPath => path.dirname(rgPath), error => {
+			this._logService.warn(`[cli-ts] Could not resolve bundled ripgrep: ${error instanceof Error ? error.message : String(error)}`);
+			return undefined;
+		});
+		return this._rgDir;
+	}
+
+	private _refreshModelsOnce(session: CliTsSession): void {
+		if (this._modelsRefreshed || !session.proc?.isRunning) {
+			return;
+		}
+		this._modelsRefreshed = true;
+		const proc = session.proc;
+		proc.request({ op: 'listModels', requestId: proc.nextRequestId() }).then(record => {
+			const payload = record.payload as { models?: unknown[] } | undefined;
+			const models = (payload?.models ?? []).filter(isBridgeModel);
+			if (models.length) {
+				const infos = backboardModelInfos(models);
+				this._models.set(infos.length ? infos : [fallbackModel()], undefined);
+			}
+		}).catch(error => {
+			this._modelsRefreshed = false;
+			this._logService.warn(`[cli-ts] Failed to load models: ${error instanceof Error ? error.message : String(error)}`);
+		});
+	}
+
+	// ---- event translation ---------------------------------------------------
+
+	private _fire(session: URI, action: SessionAction | ChatAction): void {
+		this._onDidSessionProgress.fire({ kind: 'action', session, action });
+	}
+
+	private _handleAgentEvent(session: CliTsSession, event: CliTsAgentEvent): void {
+		const turn = session.turn;
+		if (!turn) {
+			return;
+		}
+		const turnId = turn.turnId;
+		switch (event.type) {
+			case 'session:created':
+				if (event.threadId) {
+					session.threadId = event.threadId;
+				}
+				return;
+			case 'assistant:delta': {
+				if (!event.text || !event.messageId) {
+					return;
+				}
+				const partId = this._ensureMarkdownPart(session, turn, event.messageId);
+				turn.streamedText.set(event.messageId, (turn.streamedText.get(event.messageId) ?? '') + event.text);
+				turn.responseText += event.text;
+				this._fire(session.sessionUri, { type: ActionType.ChatDelta, turnId, partId, content: event.text });
+				return;
+			}
+			case 'assistant:message': {
+				if (!event.messageId || event.text === undefined) {
+					return;
+				}
+				const streamed = turn.streamedText.get(event.messageId) ?? '';
+				if (event.text === streamed) {
+					return;
+				}
+				const partId = this._ensureMarkdownPart(session, turn, event.messageId);
+				const remainder = event.text.startsWith(streamed) ? event.text.slice(streamed.length) : event.text;
+				if (remainder) {
+					turn.streamedText.set(event.messageId, streamed + remainder);
+					turn.responseText += remainder;
+					this._fire(session.sessionUri, { type: ActionType.ChatDelta, turnId, partId, content: remainder });
+				}
+				return;
+			}
+			case 'tool:requested':
+				return; // per-call events follow (tool:pending / tool:start)
+			case 'tool:pending': {
+				if (!event.toolCallId || !event.name) {
+					return;
+				}
+				this._ensureToolCallStart(session, turn, event.toolCallId, event.name, event.inputSummary);
+				return;
+			}
+			case 'tool:start': {
+				if (!event.toolCallId || !event.name) {
+					return;
+				}
+				this._ensureToolCallStart(session, turn, event.toolCallId, event.name, event.inputSummary);
+				this._fire(session.sessionUri, {
+					type: ActionType.ChatToolCallReady,
+					turnId,
+					toolCallId: event.toolCallId,
+					invocationMessage: toolInvocationMessage(event.name, event.inputSummary),
+					toolInput: event.inputSummary,
+					confirmed: turn.confirmedToolCalls.has(event.toolCallId) ? ToolCallConfirmationReason.UserAction : ToolCallConfirmationReason.NotNeeded,
+					_meta: { source: 'cli-ts' },
+				});
+				return;
+			}
+			case 'tool:progress': {
+				if (!event.toolCallId || event.data === undefined) {
+					return;
+				}
+				const text = typeof event.data === 'string' ? event.data : JSON.stringify(event.data);
+				this._fire(session.sessionUri, {
+					type: ActionType.ChatToolCallContentChanged,
+					turnId,
+					toolCallId: event.toolCallId,
+					content: [{ type: ToolResultContentType.Text, text }],
+				});
+				return;
+			}
+			case 'agent:child_tool_start':
+			case 'agent:child_tool_result': {
+				// Sub-agent nesting: stream compact child-tool activity into the
+				// parent `Agent` tool call's live content.
+				const parentId = event.agentToolCallId;
+				if (!parentId) {
+					return;
+				}
+				let lines = turn.childToolLines.get(parentId);
+				if (!lines) {
+					lines = new Map();
+					turn.childToolLines.set(parentId, lines);
+				}
+				if (event.type === 'agent:child_tool_start' && event.call) {
+					lines.set(event.call.id, `↳ ${toolDisplayName(event.call.name)} ${event.call.inputSummary} — running`);
+				} else if (event.type === 'agent:child_tool_result' && event.childToolCallId) {
+					const existing = lines.get(event.childToolCallId);
+					if (existing) {
+						lines.set(event.childToolCallId, existing.replace(/ — (running|done|error)$/, ` — ${event.status === 'error' ? 'error' : 'done'}`));
+					}
+				}
+				this._fire(session.sessionUri, {
+					type: ActionType.ChatToolCallContentChanged,
+					turnId,
+					toolCallId: parentId,
+					content: [{ type: ToolResultContentType.Text, text: [...lines.values()].join('\n') }],
+				});
+				return;
+			}
+			case 'todos:updated':
+				// The TodoWrite tool's own tool:result already renders the list in
+				// its tool part; a separate response part per update would only
+				// append duplicates (parts are append-only). Intentionally ignored.
+				return;
+			case 'tool:result': {
+				if (!event.toolCallId || !event.name) {
+					return;
+				}
+				this._ensureToolCallStart(session, turn, event.toolCallId, event.name, event.inputSummary);
+				turn.toolSummaries.push(`${toolDisplayName(event.name)}${event.title ? ` — ${event.title}` : ''}`);
+				const text = [event.title, event.detail].filter(part => !!part).join('\n');
+				this._fire(session.sessionUri, {
+					type: ActionType.ChatToolCallComplete,
+					turnId,
+					toolCallId: event.toolCallId,
+					result: {
+						success: true,
+						pastTenseMessage: event.title ?? localize('cliTsAgent.toolFinished', "{0} finished", toolDisplayName(event.name)),
+						content: text ? [{ type: ToolResultContentType.Text, text }] : undefined,
+					},
+				});
+				return;
+			}
+			case 'tool:error': {
+				if (!event.toolCallId || !event.name) {
+					return;
+				}
+				this._ensureToolCallStart(session, turn, event.toolCallId, event.name, event.inputSummary);
+				const message = event.error ?? localize('cliTsAgent.toolFailedNoDetail', "The tool call failed.");
+				this._fire(session.sessionUri, {
+					type: ActionType.ChatToolCallComplete,
+					turnId,
+					toolCallId: event.toolCallId,
+					result: {
+						success: false,
+						pastTenseMessage: localize('cliTsAgent.toolFailed', "{0} failed", toolDisplayName(event.name)),
+						content: [{ type: ToolResultContentType.Text, text: message }],
+						error: { message },
+					},
+				});
+				return;
+			}
+			case 'permission:request': {
+				const request = event.request;
+				if (!request?.id || !request.toolCallId || !request.name) {
+					return;
+				}
+				this._ensureToolCallStart(session, turn, request.toolCallId, request.name, request.inputSummary);
+				session.pendingPermissions.set(request.toolCallId, request.id);
+				this._onDidSessionProgress.fire({
+					kind: 'pending_confirmation',
+					session: session.sessionUri,
+					permissionKind: 'write',
+					state: {
+						status: ToolCallStatus.PendingConfirmation,
+						toolCallId: request.toolCallId,
+						toolName: request.name,
+						displayName: toolDisplayName(request.name),
+						invocationMessage: toolInvocationMessage(request.name, request.inputSummary),
+						toolInput: request.inputSummary,
+						confirmationTitle: localize('cliTsAgent.confirmationTitle', "Allow Backboard to use {0}?", toolDisplayName(request.name)),
+						_meta: { source: 'cli-ts' },
+					},
+				});
+				return;
+			}
+			case 'input:request': {
+				const request = event.request;
+				if (!request?.id || !request.question) {
+					return;
+				}
+				session.pendingInputs.add(request.id);
+				const options = request.options ?? [];
+				const question: ChatInputQuestion = options.length
+					? {
+						id: 'answer',
+						kind: ChatInputQuestionKind.SingleSelect,
+						message: request.question,
+						required: true,
+						options: options.map(option => ({ id: option, label: option })),
+						allowFreeformInput: true,
+					}
+					: {
+						id: 'answer',
+						kind: ChatInputQuestionKind.Text,
+						message: request.question,
+						required: true,
+					};
+				this._fire(session.sessionUri, {
+					type: ActionType.ChatInputRequested,
+					request: { id: request.id, message: request.question, questions: [question] },
+				});
+				return;
+			}
+			case 'usage': {
+				const usage = event.usage;
+				if (!usage) {
+					return;
+				}
+				this._fire(session.sessionUri, {
+					type: ActionType.ChatUsage,
+					turnId,
+					usage: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, model: usage.model },
+				});
+				return;
+			}
+			case 'system:warning': {
+				if (!event.message || turn.lastProgressMessage === event.message) {
+					return;
+				}
+				turn.lastProgressMessage = event.message;
+				this._logService.info(`[cli-ts progress] ${event.message}`);
+				if (turn.didCreateStatusPart) {
+					return;
+				}
+				turn.didCreateStatusPart = true;
+				this._fire(session.sessionUri, {
+					type: ActionType.ChatResponsePart,
+					turnId,
+					part: { kind: ResponsePartKind.SystemNotification, content: localize('cliTsAgent.warning', "Backboard: {0}", event.message) },
+				});
+				return;
+			}
+			case 'run:error': {
+				turn.failed = true;
+				this._fire(session.sessionUri, {
+					type: ActionType.ChatError,
+					turnId,
+					error: { errorType: 'BackboardError', message: event.error ?? localize('cliTsAgent.requestFailed', "Backboard request failed.") },
+				});
+				return;
+			}
+			default:
+				return;
+		}
+	}
+
+	private _ensureMarkdownPart(session: CliTsSession, turn: CliTsTurnState, messageId: string): string {
+		const existing = turn.messageParts.get(messageId);
+		if (existing) {
+			return existing;
+		}
+		const partId = generateUuid();
+		turn.messageParts.set(messageId, partId);
+		this._fire(session.sessionUri, {
+			type: ActionType.ChatResponsePart,
+			turnId: turn.turnId,
+			part: { kind: ResponsePartKind.Markdown, id: partId, content: '' },
+		});
+		return partId;
+	}
+
+	private _ensureToolCallStart(session: CliTsSession, turn: CliTsTurnState, toolCallId: string, toolName: string, inputSummary?: string): void {
+		if (turn.startedToolCalls.has(toolCallId)) {
+			return;
+		}
+		turn.startedToolCalls.add(toolCallId);
+		this._fire(session.sessionUri, {
+			type: ActionType.ChatToolCallStart,
+			turnId: turn.turnId,
+			toolCallId,
+			toolName,
+			displayName: toolDisplayName(toolName),
+			_meta: { source: 'cli-ts' },
+		});
+		this._fire(session.sessionUri, {
+			type: ActionType.ChatToolCallDelta,
+			turnId: turn.turnId,
+			toolCallId,
+			content: inputSummary ?? '',
+		});
+	}
+
+	// ---- persistence ----------------------------------------------------------
+
+	private _storePath(): string {
+		return path.join(os.homedir(), '.backboard_ide', 'cli-ts-sessions.json');
+	}
+
+	private _readStore(): CliTsStoredSession[] {
+		try {
+			const parsed: unknown = JSON.parse(fs.readFileSync(this._storePath(), 'utf8'));
+			if (!parsed || typeof parsed !== 'object' || (parsed as { version?: number }).version !== CLI_TS_STORE_VERSION) {
+				return [];
+			}
+			const sessions = (parsed as { sessions?: unknown }).sessions;
+			return Array.isArray(sessions) ? sessions as CliTsStoredSession[] : [];
+		} catch {
+			return [];
+		}
+	}
+
+	private _writeStore(): void {
+		try {
+			const persisted = this._readStore().filter(entry => !this._sessions.has(entry.id));
+			const inMemory: CliTsStoredSession[] = [...this._sessions.values()]
+				.filter(session => session.materialized)
+				.map(session => ({
+					id: session.sessionId,
+					title: session.title,
+					cwd: session.workingDirectory?.fsPath,
+					createdAt: session.createdAt,
+					modifiedAt: session.modifiedAt,
+					threadId: session.threadId,
+					turns: session.storedTurns,
+				}));
+			const storePath = this._storePath();
+			fs.mkdirSync(path.dirname(storePath), { recursive: true });
+			fs.writeFileSync(storePath, `${JSON.stringify({ version: CLI_TS_STORE_VERSION, sessions: [...inMemory, ...persisted] }, undefined, '\t')}\n`, 'utf8');
+		} catch (error) {
+			this._logService.warn(`[cli-ts] Failed to persist session store: ${error instanceof Error ? error.message : String(error)}`);
+		}
+	}
+}
+
+// ---- helpers -----------------------------------------------------------------
+
+/** Maps the session's reasoning intensity onto cli-ts thinking levels. */
+function cliTsThinkingLevel(intensity: string): string | undefined {
+	switch (intensity) {
+		case 'fast': return 'low';
+		case 'balanced': return 'medium';
+		case 'deep': return 'high';
+		default: return undefined;
+	}
+}
+
+function firstPromptLine(prompt: string): string {
+	const line = prompt.split('\n', 1)[0]?.trim() ?? '';
+	return line.length > 80 ? `${line.slice(0, 77)}...` : line;
+}
+
+/** `apply_patch` → `Apply Patch`, `mcp__linear__create_issue` → `linear: create issue`. */
+function toolDisplayName(toolName: string): string {
+	if (toolName.startsWith('mcp__')) {
+		const [, server, ...rest] = toolName.split('__');
+		return `${server}: ${rest.join(' ').replaceAll('_', ' ')}`;
+	}
+	return toolName.split('_').map(word => word ? word[0].toUpperCase() + word.slice(1) : word).join(' ');
+}
+
+function toolInvocationMessage(toolName: string, inputSummary?: string): string {
+	const displayName = toolDisplayName(toolName);
+	return inputSummary ? `${displayName}: ${inputSummary}` : displayName;
+}
+
+interface PreparedSubmitAttachments {
+	readonly prompt: string;
+	readonly files: CliTsFileAttachment[];
+}
+
+/**
+ * Splits IDE message attachments into inline prompt context (text snippets and
+ * on-disk file pointers) and binary payloads forwarded on the submit op, which
+ * serve persists under the session's attachments dir and points the agent at.
+ */
+function prepareSubmitAttachments(prompt: string, attachments?: readonly MessageAttachment[]): PreparedSubmitAttachments {
+	if (!attachments?.length) {
+		return { prompt, files: [] };
+	}
+	const parts: string[] = [];
+	const files: CliTsFileAttachment[] = [];
+	for (const attachment of attachments) {
+		if (attachment.type === MessageAttachmentKind.Simple && attachment.modelRepresentation) {
+			parts.push(`Attached ${attachment.label}:\n${attachment.modelRepresentation}`);
+		} else if (attachment.type === MessageAttachmentKind.Resource) {
+			try {
+				const uri = URI.parse(attachment.uri);
+				if (uri.scheme === 'file') {
+					parts.push(`Attached file (read it with the Read tool): ${uri.fsPath}`);
+				}
+			} catch {
+				// Ignore unparseable attachment URIs.
+			}
+		} else if (attachment.type === MessageAttachmentKind.EmbeddedResource) {
+			files.push({
+				fileName: attachment.label || 'attachment',
+				mimeType: attachment.contentType,
+				dataBase64: attachment.data,
+			});
+		}
+	}
+	return {
+		prompt: parts.length ? `${prompt}\n\n${parts.join('\n\n')}` : prompt,
+		files,
+	};
+}
+
+function inputAnswerText(answers?: Record<string, SessionInputAnswer>): string {
+	const answer: ChatInputAnswer | undefined = answers?.['answer'] ?? (answers ? Object.values(answers)[0] : undefined);
+	if (!answer || !('value' in answer) || answer.value === undefined) {
+		return '';
+	}
+	const value = answer.value;
+	switch (value.kind) {
+		case ChatInputAnswerValueKind.Text:
+			return value.value;
+		case ChatInputAnswerValueKind.Selected:
+			return value.freeformValues?.[0] ?? value.value;
+		case ChatInputAnswerValueKind.Number:
+			return String(value.value);
+		case ChatInputAnswerValueKind.Boolean:
+			return value.value ? 'yes' : 'no';
+		default:
+			return '';
+	}
+}
+
+function storedTurnToProtocolTurn(sessionId: string, index: number, turn: CliTsStoredTurn): Turn {
+	const responseParts: Turn['responseParts'] = [];
+	if (turn.tools?.length) {
+		responseParts.push({
+			kind: ResponsePartKind.Markdown,
+			id: `${sessionId}-${index}-tools`,
+			content: turn.tools.map(tool => `- ${tool}`).join('\n'),
+		});
+	}
+	if (turn.response) {
+		responseParts.push({
+			kind: ResponsePartKind.Markdown,
+			id: `${sessionId}-${index}-response`,
+			content: turn.response,
+		});
+	}
+	return {
+		id: `${sessionId}-${index}`,
+		message: {
+			text: turn.prompt,
+			origin: { kind: MessageKind.User },
+		},
+		responseParts,
+		usage: undefined,
+		state: turn.failed ? TurnState.Error : TurnState.Complete,
+	};
+}

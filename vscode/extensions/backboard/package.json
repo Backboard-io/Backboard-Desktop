@@ -104,7 +104,7 @@
       ]
     },
     "viewsContainers": {
-      "activitybar": [
+      "secondarySidebar": [
         {
           "id": "backboard",
           "title": "\u200b",
@@ -227,10 +227,10 @@
             "default": "off",
             "description": "Backboard voice mode for REST turns. TTS synthesizes assistant audio; STT and conversation require audio attachment support."
           },
-          "backboard.bridgePath": {
+          "backboard.cliPath": {
             "type": "string",
             "default": "",
-            "description": "Path to the local backboard-bridge binary. Leave empty for the built-in development/package lookup."
+            "description": "Path to the local backboard-cli-ts binary. Leave empty for the packaged binary."
           },
           "backboard.workspaceRoot": {
             "type": "string",
@@ -273,10 +273,10 @@
     ]
   },
   "scripts": {
-    "prepare-bridge": "sh -c 'if command -v cargo >/dev/null 2>&1; then npm run package-bridge; else echo \"Skipping Backboard bridge build: cargo not found.\"; fi'",
-    "build-bridge": "cargo build --manifest-path ./rust/Cargo.toml -p backboard_bridge",
-    "package-bridge": "npm run build-bridge && mkdir -p ./bin && cp ./rust/target/debug/backboard-bridge ./bin/backboard-bridge && chmod 755 ./bin/backboard-bridge",
-    "compile": "npm run prepare-bridge && tsgo --project ./tsconfig.json",
+    "prepare-cli-ts": "sh -c 'if command -v bun >/dev/null 2>&1; then npm run package-cli-ts; else echo \"Skipping Backboard cli-ts build: bun not found.\"; fi'",
+    "build-cli-ts": "cd ../../cli-ts && bun install && bun run build",
+    "package-cli-ts": "npm run build-cli-ts && mkdir -p ./bin && cp ../../cli-ts/backboard ./bin/backboard-cli-ts && chmod 755 ./bin/backboard-cli-ts",
+    "compile": "npm run prepare-cli-ts && tsgo --project ./tsconfig.json",
     "watch": "tsgo --project ./tsconfig.json --watch",
     "typecheck": "tsgo --project ./tsconfig.json --noEmit"
   },

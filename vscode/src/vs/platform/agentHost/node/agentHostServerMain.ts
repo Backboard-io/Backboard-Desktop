@@ -33,7 +33,7 @@ import { IProductService } from '../../product/common/productService.js';
 import { InstantiationService } from '../../instantiation/common/instantiationService.js';
 import { ServiceCollection } from '../../instantiation/common/serviceCollection.js';
 import { registerAgentHostNetworkServices } from './agentHostBootstrap.js';
-import { BackboardAgent } from './backboard/backboardAgent.js';
+import { CliTsAgent } from './cliTs/cliTsAgent.js';
 import { CopilotApiService, ICopilotApiService } from './shared/copilotApiService.js';
 import { ClaudeAgent } from './claude/claudeAgent.js';
 import { ClaudeAgentSdkService, ClaudeSdkPackage, IClaudeAgentSdkService } from './claude/claudeAgentSdkService.js';
@@ -280,9 +280,12 @@ async function main(): Promise<void> {
 		diServices.set(ICodexProxyService, codexProxyService);
 		const agentHostOTelService = disposables.add(instantiationService.createInstance(AgentHostOTelService));
 		diServices.set(IAgentHostOTelService, agentHostOTelService);
-		const backboardAgent = disposables.add(instantiationService.createInstance(BackboardAgent));
-		agentService.registerProvider(backboardAgent);
-		log('BackboardAgent registered');
+		// The Backboard provider is backed by the cli-ts serve process
+		// (`backboard-cli-ts --serve`), which owns the agent loop and executes
+		// its own tools. It replaced the legacy Rust `backboard-bridge` agent.
+		const cliTsAgent = disposables.add(instantiationService.createInstance(CliTsAgent));
+		agentService.registerProvider(cliTsAgent);
+		log('CliTsAgent registered');
 		// Claude and Codex providers are gated on two things:
 		//  1. The user-facing enable toggle (`chat.agentHost.<x>Agent.enabled`,
 		//     forwarded as an env var by the renderer-side starters; the remote

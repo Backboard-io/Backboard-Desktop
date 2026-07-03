@@ -20,7 +20,7 @@ import { AgentService } from './agentService.js';
 import { IAgentConfigurationService } from './agentConfigurationService.js';
 import { IAgentHostCompletions } from './agentHostCompletions.js';
 import { IAgentHostTerminalManager } from './agentHostTerminalManager.js';
-import { BackboardAgent } from './backboard/backboardAgent.js';
+import { CliTsAgent } from './cliTs/cliTsAgent.js';
 import { CopilotApiService, ICopilotApiService } from './shared/copilotApiService.js';
 import { ClaudeAgent } from './claude/claudeAgent.js';
 import { ClaudeAgentSdkService, ClaudeSdkPackage, IClaudeAgentSdkService } from './claude/claudeAgentSdkService.js';
@@ -182,7 +182,10 @@ async function startAgentHost(): Promise<void> {
 		diServices.set(IAgentHostTerminalManager, agentService.terminalManager);
 		diServices.set(IAgentConfigurationService, agentService.configurationService);
 		diServices.set(IAgentHostCompletions, agentService.completionsService);
-		agentService.registerProvider(instantiationService.createInstance(BackboardAgent));
+		// The Backboard provider is backed by the cli-ts serve process
+		// (`backboard-cli-ts --serve`), which owns the agent loop and executes
+		// its own tools. It replaced the legacy Rust `backboard-bridge` agent.
+		agentService.registerProvider(instantiationService.createInstance(CliTsAgent));
 		// Claude and Codex providers are gated on two things:
 		//  1. The user-facing enable toggle (`chat.agentHost.<x>Agent.enabled`,
 		//     forwarded as an env var by the starters). Claude defaults to on,

@@ -71,9 +71,25 @@
 	align-items: center;
 	min-height: 44px;
 	padding: 6px 10px;
+	/* Reserve room on the right so tab/frame content never renders under the
+	 * persistent terminal/close controls (see .sessions-right-workbench-persistent-controls). */
+	padding-right: 84px;
 	box-sizing: border-box;
 	border-bottom: 0;
 	background: var(--rwb-bg);
+}
+
+/* Terminal toggle + close-panel controls: fixed to the shell's top-right
+ * corner so they stay in the same spot across every mode (launcher, terminal,
+ * files, browser, review) and are unaffected by tab count or header content. */
+.sessions-right-workbench-persistent-controls {
+	position: absolute;
+	top: 8px;
+	right: 10px;
+	z-index: 5;
+	display: flex;
+	align-items: center;
+	gap: 4px;
 }
 
 .sessions-right-workbench-tabs {

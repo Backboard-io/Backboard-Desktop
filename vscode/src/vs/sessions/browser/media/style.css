@@ -231,7 +231,25 @@
 	pointer-events: none;
 	border-left: 1px solid var(--sessions-panel-divider-color);
 	border-right: 1px solid var(--sessions-panel-divider-color);
-	border-radius: 0;
+	border-radius: var(--vscode-cornerRadius-small);
+	box-sizing: border-box;
+}
+
+/**
+ * Sidebar/agents-panel separator, keyed directly off the sidebar part's own
+ * grid wrapper rather than a fixed branch depth: the grid nests sidebar vs.
+ * panel differently depending on whether the bottom panel spans the full
+ * window width or only the content column, so this matches regardless of
+ * that arrangement (the wrapper above only covers one of the two).
+ */
+.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sidebar)::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+	z-index: 30;
+	pointer-events: none;
+	border-right: 1px solid var(--sessions-panel-divider-color);
+	border-radius: var(--vscode-cornerRadius-small);
 	box-sizing: border-box;
 }
 
