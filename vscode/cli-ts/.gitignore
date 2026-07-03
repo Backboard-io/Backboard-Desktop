@@ -8,3 +8,7 @@ q
 /skills-lock.json
 /skills/
 /prompt-dumps/
+# Build artifacts (compiled binary + bun incremental build cache).
+# These are large binaries; tracking them makes `git status` hang.
+backboard
+*.bun-build
