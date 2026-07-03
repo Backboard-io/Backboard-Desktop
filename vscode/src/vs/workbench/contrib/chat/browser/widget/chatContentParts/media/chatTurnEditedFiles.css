@@ -5,85 +5,43 @@
 
 .chat-turn-edited-files {
 	display: flex;
-	align-items: center;
+	flex-direction: column;
 	gap: 6px;
 	margin-top: 8px;
-	padding: 6px 8px;
+	padding: 8px;
 	border: 1px solid var(--vscode-chat-requestBorder, var(--vscode-input-background, transparent));
 	border-radius: 6px;
 	font-size: var(--vscode-chat-font-size-body-s, 12px);
-	color: var(--vscode-descriptionForeground);
 	background: transparent;
-	user-select: none;
 }
 
-.chat-turn-edited-files-label {
+.chat-turn-edited-files-header {
 	display: flex;
 	align-items: center;
-	gap: 4px;
-	flex: 1;
+	gap: 6px;
 	min-width: 0;
-	cursor: pointer;
-	color: var(--vscode-foreground);
+	color: var(--vscode-descriptionForeground);
 }
 
-.chat-turn-edited-files-label .codicon {
-	flex-shrink: 0;
+.chat-turn-edited-files-header > .codicon:first-child {
+	flex: none;
 	color: var(--vscode-icon-foreground);
 }
 
-.chat-turn-edited-files-label .chat-turn-edited-files-toggle {
-	flex-shrink: 0;
-	color: var(--vscode-descriptionForeground);
-}
-
 .chat-turn-edited-files-summary-text {
+	flex: 1 1 auto;
+	min-width: 0;
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
-}
-
-.chat-turn-edited-files-list {
-	display: none;
-	flex-direction: column;
-	gap: 2px;
-	padding: 4px 0 2px 20px;
-	width: 100%;
-}
-
-.chat-turn-edited-files.expanded .chat-turn-edited-files-list {
-	display: flex;
-}
-
-.chat-turn-edited-files.expanded .chat-turn-edited-files-toggle {
-	transform: rotate(90deg);
-}
-
-.chat-turn-edited-files-list-item {
-	display: flex;
-	align-items: center;
-	gap: 4px;
-	font-size: var(--vscode-chat-font-size-body-s, 12px);
-	color: var(--vscode-descriptionForeground);
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
-}
-
-.chat-turn-edited-files-list-item .file-icon {
-	flex-shrink: 0;
-}
-
-.chat-turn-edited-files-actions {
-	display: flex;
-	align-items: center;
-	flex-shrink: 0;
-	margin-left: auto;
+	color: var(--vscode-foreground);
+	font-weight: 600;
 }
 
 .chat-turn-edited-files-review-btn {
 	display: flex;
 	align-items: center;
+	flex: none;
 	gap: 4px;
 	padding: 2px 8px;
 	border: 1px solid var(--vscode-button-border, transparent);
@@ -101,4 +59,19 @@
 
 .chat-turn-edited-files-review-btn .codicon {
 	font-size: 11px;
+}
+
+/*
+ * Recap list: one row per file, each rendered by ChatExternalEditContentPart
+ * (see chatExternalEditCard.css) — the same pill + expandable diff card shown
+ * inline while the turn streamed. No extra chrome here beyond spacing.
+ */
+.chat-turn-edited-files-list {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.chat-turn-edited-files-list:empty {
+	display: none;
 }

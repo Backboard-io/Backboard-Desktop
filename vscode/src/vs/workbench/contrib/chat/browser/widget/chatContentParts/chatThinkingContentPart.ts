@@ -2562,8 +2562,13 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 		}
 
 		// Group consecutive same-category tool rows behind a Codex-style summary
-		// header. Hooks (no metadata) keep their own dedicated row.
-		if (toolInvocationOrMarkdown) {
+		// header. Skipped for hooks (no metadata) and for edit pills
+		// (isMarkdownEdit/isExternalEdit): those already render their own
+		// icon + filename + diff counts via ChatEditPillElement, so wrapping
+		// them in a second summary header would just repeat the same
+		// information (and worse, without the spacing the pill's own layout
+		// provides — see the concatenated "Editedfoo.ts+2-1" bug).
+		if (toolInvocationOrMarkdown && !isMarkdownEdit && !isExternalEdit) {
 			const subkind = getToolActivitySubkind(toolInvocationId, toolInvocationOrMarkdown);
 			const toolCallId = isToolInvocation ? toolInvocationOrMarkdown.toolCallId : undefined;
 			const fallbackLabel = toolCallId ? undefined : content.textContent?.trim() || undefined;

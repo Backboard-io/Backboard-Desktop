@@ -125,7 +125,11 @@
 }
 
 .monaco-workbench.vs.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light) {
-	--sessions-sidebar-region-background: color-mix(in srgb, var(--vscode-sideBar-background, color-mix(in srgb, var(--vscode-editor-background) 94%, var(--vscode-foreground) 6%)) 62%, transparent);
+	/* Light-appearance vibrancy renders naturally lighter/whiter than dark
+	 * (same macOS material, different visual weight per appearance), so the
+	 * same tint percentage as dark reads far more opaque here — needs a
+	 * lower value to actually show the desktop through it. */
+	--sessions-sidebar-region-background: color-mix(in srgb, var(--vscode-sideBar-background, color-mix(in srgb, var(--vscode-editor-background) 94%, var(--vscode-foreground) 6%)) 32%, transparent);
 }
 
 .monaco-workbench.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light)::before {

@@ -2373,7 +2373,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			} else if (content.kind === 'changesSummary') {
 				return this.renderChangesSummary(content, context, templateData);
 			} else if (content.kind === 'turnEditedFilesSummary') {
-				return this.renderTurnEditedFilesSummary(content);
+				return this.renderTurnEditedFilesSummary(content, context);
 			} else if (content.kind === 'mcpServersStarting') {
 				return this.renderMcpServersInteractionRequired(content, context, templateData);
 			} else if (content.kind === 'disabledClaudeHooks') {
@@ -3208,29 +3208,46 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		return part;
 	}
 
-	private renderTurnEditedFilesSummary(content: IChatTurnEditedFilesSummaryPart): IChatContentPart {
-		return this.instantiationService.createInstance(ChatTurnEditedFilesContentPart, content);
+	private renderTurnEditedFilesSummary(content: IChatTurnEditedFilesSummaryPart, context: IChatContentPartRenderContext): IChatContentPart {
+		return this.instantiationService.createInstance(ChatTurnEditedFilesContentPart, content, context);
 	}
 
 	private getTurnEditedFilesSummaryPart(element: IChatResponseViewModel): IChatTurnEditedFilesSummaryPart | undefined {
 		if (!element.isComplete) {
 			return undefined;
 		}
-		const seen = new Set<string>();
-		const uniqueUris: URI[] = [];
+		// Aggregate every externalEdit in the turn into one entry per file:
+		// the first edit's `before`, the last edit's `after`/editKind, and
+		// diff counts summed across all edits to that file. This lets the
+		// summary recap render the exact same pill + diff card as the
+		// inline edits it's recapping, instead of a bare file name.
+		const aggregated = new Map<string, IChatExternalEdit>();
 		for (const part of element.model.entireResponse.value) {
-			if (part.kind === 'externalEdit') {
-				const key = part.uri.toString();
-				if (!seen.has(key)) {
-					seen.add(key);
-					uniqueUris.push(part.uri);
-				}
+			if (part.kind !== 'externalEdit') {
+				continue;
 			}
+			const key = part.uri.toString();
+			const existing = aggregated.get(key);
+			if (!existing) {
+				aggregated.set(key, part);
+				continue;
+			}
+			aggregated.set(key, {
+				...part,
+				// A file created earlier in the turn stays "created" even if
+				// later edited — `before` never existed, which is what
+				// `beforeContentUri: undefined` (inherited below) conveys.
+				editKind: existing.editKind === 'create' ? 'create' : part.editKind,
+				beforeContentUri: existing.beforeContentUri,
+				diff: (existing.diff || part.diff)
+					? { added: (existing.diff?.added ?? 0) + (part.diff?.added ?? 0), removed: (existing.diff?.removed ?? 0) + (part.diff?.removed ?? 0) }
+					: undefined,
+			});
 		}
-		if (uniqueUris.length === 0) {
+		if (aggregated.size === 0) {
 			return undefined;
 		}
-		return { kind: 'turnEditedFilesSummary', editedUris: uniqueUris };
+		return { kind: 'turnEditedFilesSummary', editedFiles: Array.from(aggregated.values()) };
 	}
 
 	private renderAttachments(variables: readonly IChatRequestVariableEntry[], contentReferences: ReadonlyArray<IChatContentReference> | undefined, modelId: string | undefined, templateData: IChatListItemTemplate) {

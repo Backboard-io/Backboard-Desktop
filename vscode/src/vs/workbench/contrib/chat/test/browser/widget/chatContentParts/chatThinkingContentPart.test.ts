@@ -600,6 +600,36 @@ suite('ChatThinkingContentPart', () => {
 				removed: '-2',
 			});
 		});
+
+		test('edit pills are not wrapped in a redundant group summary header', () => {
+			// Regression test: edit pills (markdownContent/externalEdit) already
+			// render their own icon + filename + diff via ChatEditPillElement.
+			// Wrapping them in an activity-group header duplicated that text
+			// and, because the fallback label read the pill's raw textContent,
+			// concatenated it without spacing (e.g. "Editedfoo.ts+2-1").
+			const part = createLivePart('**Analyzing**\nreasoning body');
+			const edit: IChatExternalEdit = {
+				kind: 'externalEdit',
+				uri: URI.file('/project/tsconfig.node.json'),
+				editKind: 'edit',
+				diff: { added: 2, removed: 1 },
+			};
+			part.appendItem(
+				() => ({ domNode: $('div', {}, 'Edited', $('span.file-icon', {}, 'tsconfig.node.json'), $('span.label-added', {}, '+2'), $('span.label-removed', {}, '-1')) }),
+				undefined,
+				edit
+			);
+
+			part.finalizeTitleIfDefault();
+
+			assert.deepStrictEqual({
+				groupCount: part.domNode.querySelectorAll('.chat-thinking-group').length,
+				editRowCount: part.domNode.querySelectorAll('.chat-thinking-tool-wrapper').length,
+			}, {
+				groupCount: 0,
+				editRowCount: 1,
+			}, 'Edit pill should render as its own row with no wrapping group header');
+		});
 	});
 
 	suite('ThinkingDisplayMode.FixedScrolling', () => {

@@ -13,7 +13,7 @@ import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { IChatRequestVariableEntry } from '../attachments/chatVariableEntries.js';
-import { ChatAgentVoteDirection, ChatRequestQueueKind, IChatCodeCitation, IChatContentReference, IChatDisabledClaudeHooksPart, IChatFollowup, IChatMcpServersStarting, IChatPlanReview, IChatProgressMessage, IChatQuestionCarousel, IChatResponseErrorDetails, IChatTask, IChatUsage, IChatUsedContext } from '../chatService/chatService.js';
+import { ChatAgentVoteDirection, ChatRequestQueueKind, IChatCodeCitation, IChatContentReference, IChatDisabledClaudeHooksPart, IChatExternalEdit, IChatFollowup, IChatMcpServersStarting, IChatPlanReview, IChatProgressMessage, IChatQuestionCarousel, IChatResponseErrorDetails, IChatTask, IChatUsage, IChatUsedContext } from '../chatService/chatService.js';
 import { getFullyQualifiedId, IChatAgentCommand, IChatAgentData, IChatAgentNameService, IChatAgentResult } from '../participants/chatAgents.js';
 import { IParsedChatRequest } from '../requestParser/chatParserTypes.js';
 import { IChatModel, IChatProgressRenderableResponseContent, IChatRequestDisablement, IChatRequestModel, IChatResponseModel, IChatTextEditGroup, IResponse } from './chatModel.js';
@@ -202,7 +202,14 @@ export interface IChatChangesSummaryPart {
 
 export interface IChatTurnEditedFilesSummaryPart {
 	readonly kind: 'turnEditedFilesSummary';
-	readonly editedUris: URI[];
+	/**
+	 * One aggregated {@link IChatExternalEdit} per file touched during the
+	 * turn — `before` from the first edit, `after`/diff from the last, diff
+	 * counts summed across every edit to that file. Lets the summary render
+	 * the same pill + diff card as the inline edits it recaps, instead of a
+	 * bare file name.
+	 */
+	readonly editedFiles: readonly IChatExternalEdit[];
 }
 
 /**
