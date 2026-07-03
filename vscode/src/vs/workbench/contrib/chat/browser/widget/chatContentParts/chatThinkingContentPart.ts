@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { $, clearNode, DisposableResizeObserver, getWindow, hide, scheduleAtNextAnimationFrame } from '../../../../../../base/browser/dom.js';
+import { $, addDisposableListener, clearNode, DisposableResizeObserver, getWindow, hide, scheduleAtNextAnimationFrame } from '../../../../../../base/browser/dom.js';
 import { alert } from '../../../../../../base/browser/ui/aria/aria.js';
 import { DomScrollableElement } from '../../../../../../base/browser/ui/scrollbar/scrollableElement.js';
 import { ScrollbarVisibility } from '../../../../../../base/common/scrollable.js';
@@ -29,6 +29,7 @@ import { Codicon } from '../../../../../../base/common/codicons.js';
 import { ThemeIcon } from '../../../../../../base/common/themables.js';
 import { Lazy } from '../../../../../../base/common/lazy.js';
 import { Emitter, Event } from '../../../../../../base/common/event.js';
+import { disposableTimeout } from '../../../../../../base/common/async.js';
 import { DisposableMap, DisposableStore, IDisposable, MutableDisposable, toDisposable } from '../../../../../../base/common/lifecycle.js';
 import { autorun, IReader } from '../../../../../../base/common/observable.js';
 import { CancellationTokenSource } from '../../../../../../base/common/cancellation.js';
@@ -291,6 +292,9 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 	private readonly _markdownResult = this._register(new MutableDisposable<IRenderedMarkdown>());
 	private wrapper!: HTMLElement;
 	private fixedScrollingMode: boolean = false;
+	private streamThenCollapseMode: boolean = false;
+	private readonly wasStreamingLive: boolean;
+	private readonly _collapseAnimation = this._register(new MutableDisposable<DisposableStore>());
 	private autoScrollEnabled: boolean = true;
 	private scrollableElement: DomScrollableElement | undefined;
 	private lastExtractedTitle: string | undefined;
@@ -373,7 +377,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		@ILanguageModelsService private readonly languageModelsService: ILanguageModelsService,
 		@IHoverService hoverService: IHoverService,
 		@IStorageService private readonly storageService: IStorageService,
-		@IAccessibilityService accessibilityService: IAccessibilityService,
+		@IAccessibilityService private readonly accessibilityService: IAccessibilityService,
 		@IContextKeyService contextKeyService: IContextKeyService,
 	) {
 		const initialText = extractTextFromPart(content);
@@ -390,6 +394,8 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		const configuredMode = getEffectiveThinkingDisplayMode(this.configurationService, contextKeyService);
 
 		this.fixedScrollingMode = configuredMode === ThinkingDisplayMode.FixedScrolling;
+		this.streamThenCollapseMode = configuredMode === ThinkingDisplayMode.StreamThenCollapse;
+		this.wasStreamingLive = !this.streamingCompleted && !this.element.isComplete;
 
 		this.currentTitle = extractedTitle;
 		if (extractedTitle !== this.defaultTitle) {
@@ -409,7 +415,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 
 		if (configuredMode === ThinkingDisplayMode.Collapsed) {
 			this.setExpanded(false);
-		} else if (configuredMode === ThinkingDisplayMode.CollapsedPreview) {
+		} else if (configuredMode === ThinkingDisplayMode.CollapsedPreview || configuredMode === ThinkingDisplayMode.StreamThenCollapse) {
 			// Start expanded if still in progress.
 			// streamingCompleted is true when look-ahead finds subsequent non-pinnable
 			// parts, meaning this thinking part won't receive more content.
@@ -496,7 +502,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		}));
 
 		const label = this.lastExtractedTitle ?? '';
-		if (!this.fixedScrollingMode && !this._isExpanded.get()) {
+		if (!this.fixedScrollingMode && (!this._isExpanded.get() || this.streamThenCollapseMode)) {
 			this.setTitle(label);
 		}
 
@@ -958,6 +964,65 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		this.setExpanded(false);
 	}
 
+	/**
+	 * Collapses the part with a smooth height/opacity transition. Used by
+	 * {@link ThinkingDisplayMode.StreamThenCollapse} when a live stream completes.
+	 * Falls back to an instant collapse when the part was not streamed live in
+	 * this render (e.g. history re-renders), when reduced motion is preferred,
+	 * or when there is nothing to animate.
+	 */
+	public collapseContentAnimated(): void {
+		if (this._store.isDisposed || this._collapseAnimation.value) {
+			return;
+		}
+		if (!this.isExpanded()) {
+			return;
+		}
+		const wrapper = this.wrapper;
+		if (!wrapper || !this.wasStreamingLive || this.accessibilityService.isMotionReduced()) {
+			this.setExpanded(false);
+			return;
+		}
+		const startHeight = wrapper.scrollHeight;
+		if (startHeight <= 0) {
+			this.setExpanded(false);
+			return;
+		}
+
+		const store = new DisposableStore();
+		this._collapseAnimation.value = store;
+
+		const finish = () => {
+			if (!this._collapseAnimation.value) {
+				return;
+			}
+			this._collapseAnimation.clear(); // store cleanup resets styles and removes the class
+			this.setExpanded(false);
+			this._onDidChangeHeight.fire();
+		};
+
+		// Freeze the current height, then transition to 0 via the
+		// `chat-thinking-collapsing` class (see chatThinkingContent.css).
+		wrapper.style.maxHeight = `${startHeight}px`;
+		wrapper.getBoundingClientRect(); // force layout so the transition starts from the frozen height
+		this.domNode.classList.add('chat-thinking-collapsing');
+		wrapper.style.maxHeight = '0px';
+		wrapper.style.opacity = '0';
+
+		store.add(addDisposableListener(wrapper, 'transitionend', e => {
+			if (e.target === wrapper && e.propertyName === 'max-height') {
+				finish();
+			}
+		}));
+		// Fallback in case the transition never fires (e.g. detached node).
+		disposableTimeout(finish, 400, store);
+		store.add(toDisposable(() => {
+			wrapper.style.maxHeight = '';
+			wrapper.style.opacity = '';
+			this.domNode.classList.remove('chat-thinking-collapsing');
+		}));
+	}
+
 	public updateThinking(content: IChatThinkingPart): void {
 		// If disposed, ignore late updates coming from renderer diffing
 		if (this._store.isDisposed) {
@@ -1002,7 +1067,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		}
 
 		const label = this.lastExtractedTitle ?? '';
-		if (!this.fixedScrollingMode && !this._isExpanded.get()) {
+		if (!this.fixedScrollingMode && (!this._isExpanded.get() || this.streamThenCollapseMode)) {
 			this.setTitle(label);
 		}
 
@@ -1835,8 +1900,9 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 						this.toolLabelsByCallId.set(toolCallId, updatedMessage);
 						this.lastExtractedTitle = updatedMessage;
 
-						// make sure not to set title if expanded
-						if (!this.fixedScrollingMode && !this._isExpanded.read(undefined)) {
+						// make sure not to set title if expanded (except in stream-then-collapse
+						// mode, where the header keeps updating while streaming expanded)
+						if (!this.fixedScrollingMode && (!this._isExpanded.read(undefined) || this.streamThenCollapseMode)) {
 							this.setTitle(updatedMessage);
 						}
 					}
@@ -1961,7 +2027,7 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 
 		this.lastExtractedTitle = toolCallLabel;
 
-		if (!this.fixedScrollingMode && !this._isExpanded.get()) {
+		if (!this.fixedScrollingMode && (!this._isExpanded.get() || this.streamThenCollapseMode)) {
 			this.setTitle(toolCallLabel);
 		}
 	}

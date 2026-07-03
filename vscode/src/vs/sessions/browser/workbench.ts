@@ -71,8 +71,8 @@ import {
 } from '../../workbench/common/notifications.js';
 import { SessionsLayoutPolicy } from './layoutPolicy.js';
 import { MobileNavigationStack } from './mobileNavigationStack.js';
+import { SessionsPanelHeader } from './parts/panelHeader.js';
 import { MobileTitlebarPart } from './parts/mobile/mobileTitlebarPart.js';
-import { SessionsIntegratedChromePart } from './parts/integratedChromePart.js';
 import { IMobileVisualViewport } from './parts/mobile/mobileVisualViewport.js';
 import { autorun } from '../../base/common/observable.js';
 import { ISessionsService } from '../services/sessions/browser/sessionsService.js';
@@ -266,12 +266,13 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		let top = 0;
 		let quickPickTop = 0;
 
-		if (this.isVisible(Parts.TITLEBAR_PART, mainWindow)) {
-			top = this.getDesktopChromeHeight();
-			quickPickTop = top;
-		} else if (this.mobileTopBarElement) {
-			// On phone layout the MobileTitlebarPart replaces the titlebar
+		if (this.mobileTopBarElement) {
+			// On phone layout the MobileTitlebarPart is the only top bar
 			top = this.mobileTopBarElement.offsetHeight;
+			quickPickTop = top;
+		} else if (this.layoutPolicy.viewportClass.get() !== 'phone') {
+			// Keep dialogs and quick picks clear of the per-panel header strips
+			top = SessionsPanelHeader.HEIGHT;
 			quickPickTop = top;
 		}
 
@@ -307,7 +308,6 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 	private readonly mobileNavStack = this._register(new MobileNavigationStack());
 	private mobileTopBarElement: HTMLElement | undefined;
 	private readonly mobileTopBarDisposables = this._register(new DisposableStore());
-	private integratedChromePart: SessionsIntegratedChromePart | undefined;
 
 	private _editorMaximized = false;
 	private _editorLastNonMaximizedVisibility: IPartVisibilityState | undefined;
@@ -747,7 +747,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		const workbenchClasses = coalesce([
 			'monaco-workbench',
 			'agent-sessions-workbench',
-			// LayoutClasses.SHELL_GRADIENT_BACKGROUND,
+			LayoutClasses.SHELL_GRADIENT_BACKGROUND,
 			platformClass,
 			isWeb ? 'web' : undefined,
 			isChrome ? 'chromium' : isFirefox ? 'firefox' : isSafari ? 'safari' : undefined,
@@ -762,8 +762,6 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 
 		// Warm up font cache information before building up too many dom elements
 		this.restoreFontInfo(storageService, configurationService);
-
-		this.integratedChromePart = this._register(instantiationService.createInstance(SessionsIntegratedChromePart, this.mainContainer));
 
 		// Create Parts (editor starts hidden and is shown when an editor opens)
 		for (const { id, role, classes } of [
@@ -1168,11 +1166,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 			{ proportionalLayout: false }
 		);
 
-		if (this.integratedChromePart) {
-			this.mainContainer.insertBefore(workbenchGrid.element, this.integratedChromePart.element.nextSibling);
-		} else {
-			this.mainContainer.prepend(workbenchGrid.element);
-		}
+		this.mainContainer.prepend(workbenchGrid.element);
 		this.mainContainer.setAttribute('role', 'application');
 		this.workbenchGrid = workbenchGrid;
 		this.workbenchGrid.edgeSnapping = this.mainWindowFullscreen;
@@ -1239,10 +1233,9 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 	 *     - Panel (below chat and right workbench)
 	 */
 	private createGridDescriptor(): ISerializedGrid {
-		const { width } = this._mainContainerDimension;
-		const height = Math.max(0, this._mainContainerDimension.height - this.getDesktopChromeHeight());
+		const { width, height } = this._mainContainerDimension;
 
-		return this.createDesktopGridDescriptor(width, height);
+		return this.createDesktopGridDescriptor(width, Math.max(0, height));
 	}
 
 	/**
@@ -1437,33 +1430,20 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 
 		// On phone, subtract the mobile top bar height from the grid
 		const mobileTopBarHeight = this.mobileTopBarElement?.offsetHeight ?? 0;
-		const desktopChromeHeight = this.getDesktopChromeHeight();
-		this.integratedChromePart?.layout(this._mainContainerDimension.width, desktopChromeHeight);
 
 		// Keep the desktop grid flush with the window edges. Individual parts own
-		// their internal borders; the workbench itself must not reserve an outer
-		// gutter or the center chat and right details pane stop short of the edge.
+		// their internal borders and header strips; the workbench itself must not
+		// reserve an outer gutter or the center chat and right details pane stop
+		// short of the edge.
 		const gridWidth = this._mainContainerDimension.width;
-		const gridHeight = Math.max(0, this._mainContainerDimension.height - mobileTopBarHeight - desktopChromeHeight);
+		const gridHeight = Math.max(0, this._mainContainerDimension.height - mobileTopBarHeight);
 
 		// Layout the grid widget
 		this.workbenchGrid.layout(gridWidth, gridHeight);
-		this.updateIntegratedChromeBoundaries();
 		this.layoutMobileSidebar();
 
 		// Emit as event
 		this.handleContainerDidLayout(this.mainContainer, this._mainContainerDimension);
-	}
-
-	private getDesktopChromeHeight(): number {
-		return this.layoutPolicy.viewportClass.get() === 'phone' ? 0 : SessionsIntegratedChromePart.HEIGHT;
-	}
-
-	private updateIntegratedChromeBoundaries(): void {
-		this.integratedChromePart?.updatePanelBoundaries(
-			this.partVisibility.sidebar ? this.getContainer(mainWindow, Parts.SIDEBAR_PART) : undefined,
-			this.partVisibility.auxiliaryBar ? this.getContainer(mainWindow, Parts.AUXILIARYBAR_PART) : undefined
-		);
 	}
 
 	private layoutMobileSidebar(): void {
@@ -1744,7 +1724,6 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 			this.auxiliaryBarPartView,
 			!hidden,
 		);
-		this.updateIntegratedChromeBoundaries();
 
 		// If auxiliary bar becomes hidden, also hide the current active pane composite
 		if (hidden && this.paneCompositeService.getActivePaneComposite(ViewContainerLocation.AuxiliaryBar)) {
@@ -1794,7 +1773,6 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 			const shouldApplyInitialEditorSize = !hidden && !this._hasAppliedInitialEditorSplit;
 
 			this.workbenchGrid.setViewVisible(this.editorPartView, !hidden);
-			this.updateIntegratedChromeBoundaries();
 
 			if (hidden && this.partVisibility.auxiliaryBar && auxiliaryBarSizeBeforeHide) {
 				this.workbenchGrid.resizeView(this.auxiliaryBarPartView, {
@@ -1982,7 +1960,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 
 		return new Dimension(
 			this._mainContainerDimension.width - sidebarWidth - rightWorkColumnWidth,
-			this._mainContainerDimension.height - this.getDesktopChromeHeight() - panelHeight
+			this._mainContainerDimension.height - panelHeight
 		);
 	}
 

@@ -95,6 +95,7 @@ ARGS=(
 	--disable-extension=vscode.vscode-api-tests
 	--new-window
 	--disable-layout-restore
+	--agents
 )
 
 if [[ "$ISOLATED_PROFILE" == "1" ]]; then

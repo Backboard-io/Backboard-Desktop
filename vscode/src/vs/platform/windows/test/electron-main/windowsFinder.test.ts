@@ -52,6 +52,7 @@ suite('WindowsFinder', () => {
 			remoteAuthority?: string | undefined;
 			isExtensionDevelopmentHost = false;
 			isExtensionTestHost = false;
+			hasVibrancy = false;
 			lastFocusTime = options.lastFocusTime;
 			isFullScreen = false;
 			isReady = true;

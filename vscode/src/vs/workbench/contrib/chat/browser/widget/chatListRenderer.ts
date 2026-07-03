@@ -1095,6 +1095,9 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 
 		const lastThinking = this.getLastThinkingPart(templateData.renderedParts);
 		if (lastThinking?.domNode && lastThinking.getIsActive()) {
+			if (getEffectiveThinkingDisplayMode(this.configService, this.contextKeyService) === ThinkingDisplayMode.StreamThenCollapse) {
+				lastThinking.collapseContentAnimated();
+			}
 			lastThinking.finalizeTitleIfDefault();
 			lastThinking.markAsInactive();
 		}
@@ -2272,6 +2275,8 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		const style = getEffectiveThinkingDisplayMode(this.configService, this.contextKeyService);
 		if (style === ThinkingDisplayMode.CollapsedPreview) {
 			lastThinking.collapseContent();
+		} else if (style === ThinkingDisplayMode.StreamThenCollapse) {
+			lastThinking.collapseContentAnimated();
 		}
 		lastThinking.finalizeTitleIfDefault();
 		lastThinking.resetId();

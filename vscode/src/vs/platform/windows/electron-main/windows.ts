@@ -133,6 +133,12 @@ export interface IDefaultBrowserWindowOptionsOverrides {
 	notResizable?: boolean;
 	noBackgroundThrottling?: boolean;
 	backgroundColor?: string;
+	/**
+	 * macOS only: native window vibrancy material. The window background is
+	 * cleared to a fully transparent color so the material can show through
+	 * wherever the renderer paints with alpha. Ignored on other platforms.
+	 */
+	vibrancy?: electron.BrowserWindowConstructorOptions['vibrancy'];
 }
 
 export function defaultBrowserWindowOptions(accessor: ServicesAccessor, windowState: IWindowState, overrides?: IDefaultBrowserWindowOptionsOverrides, webPreferences?: electron.WebPreferences): electron.BrowserWindowConstructorOptions & { experimentalDarkMode: boolean } {
@@ -258,6 +264,12 @@ export function defaultBrowserWindowOptions(accessor: ServicesAccessor, windowSt
 	if (overrides?.transparent) {
 		options.transparent = true;
 		options.backgroundColor = undefined!; // transparent requires no background color
+	}
+
+	if (overrides?.vibrancy && isMacintosh) {
+		options.vibrancy = overrides.vibrancy;
+		options.visualEffectState = 'active';
+		options.backgroundColor = '#00000000'; // vibrancy is only visible through a fully transparent background color
 	}
 
 	if (overrides?.notResizable) {

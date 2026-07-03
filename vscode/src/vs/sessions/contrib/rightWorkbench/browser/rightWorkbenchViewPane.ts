@@ -9,9 +9,9 @@ import { renderIcon } from '../../../../base/browser/ui/iconLabel/iconLabels.js'
 import { Separator, toAction } from '../../../../base/common/actions.js';
 import { Color } from '../../../../base/common/color.js';
 import { Codicon } from '../../../../base/common/codicons.js';
-import { DisposableStore } from '../../../../base/common/lifecycle.js';
-import { autorun } from '../../../../base/common/observable.js';
-import { basename, relativePath } from '../../../../base/common/resources.js';
+import { DisposableMap, DisposableStore } from '../../../../base/common/lifecycle.js';
+import { autorun, IReader } from '../../../../base/common/observable.js';
+import { basename } from '../../../../base/common/resources.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
 import { URI } from '../../../../base/common/uri.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
@@ -42,7 +42,8 @@ import { MODAL_GROUP, PreferredGroup } from '../../../../workbench/services/edit
 import { IEditorGroupsService } from '../../../../workbench/services/editor/common/editorGroupsService.js';
 import { IEditorService } from '../../../../workbench/services/editor/common/editorService.js';
 import { IWorkbenchLayoutService, Parts } from '../../../../workbench/services/layout/browser/layoutService.js';
-import { ISCMResource, ISCMService } from '../../../../workbench/contrib/scm/common/scm.js';
+import { DEFAULT_LABELS_CONTAINER, ResourceLabels } from '../../../../workbench/browser/labels.js';
+import { ISCMRepository, ISCMResource, ISCMService } from '../../../../workbench/contrib/scm/common/scm.js';
 import { GitChange, GitDiffChange, IGitRepository, IGitService } from '../../../../workbench/contrib/git/common/gitService.js';
 import { ITerminalEditorService, ITerminalInstance, ITerminalService, IXtermColorProvider } from '../../../../workbench/contrib/terminal/browser/terminal.js';
 import { IAgentHostCustomizationService } from '../../../../workbench/contrib/chat/browser/agentSessions/agentHost/agentHostCustomizationService.js';
@@ -52,6 +53,9 @@ import { agentsPanelBackground } from '../../../common/theme.js';
 import { ISessionsService } from '../../../services/sessions/browser/sessionsService.js';
 import { IActiveSession } from '../../../services/sessions/common/sessionsManagement.js';
 import { SESSIONS_FILES_EMPTY_VIEW_ID, SESSIONS_FILES_VIEW_ID, SessionsExplorerEmptyView, SessionsExplorerView } from '../../files/browser/filesView.js';
+import { createFileIconThemableTreeContainerScope } from '../../../../workbench/contrib/files/browser/views/explorerView.js';
+import { WorkbenchCompressibleObjectTree } from '../../../../platform/list/browser/listService.js';
+import { buildReviewTreeChildren, IReviewResource, isReviewResource, ReviewTreeDelegate, ReviewTreeElement, ReviewTreeRenderer, ReviewTreeSorter } from './reviewTree.js';
 import { onDidRequestModeEmitter, pendingModeRequest, setPendingModeRequest, type RightWorkbenchMode, type IRightWorkbenchModeRequest, type IRightWorkbenchModeEntry, orderedTabModes } from './rightWorkbench.js';
 
 const enum RightWorkbenchBrowserCommandId {
@@ -65,16 +69,7 @@ const enum RightWorkbenchBrowserCommandId {
 	ResetEmulation = 'workbench.action.browser.resetEmulation',
 }
 
-const REVIEW_DIFF_SIDE_BY_SIDE_MIN_WIDTH = 720;
-
-interface IReviewResource {
-	readonly key: string;
-	readonly sourceUri: URI;
-	readonly status: string;
-	readonly additions?: number;
-	readonly deletions?: number;
-	open(): Promise<void>;
-}
+const REVIEW_DIFF_SIDE_BY_SIDE_MIN_WIDTH = 1040;
 
 export class RightWorkbenchViewPane extends ViewPane {
 
@@ -101,6 +96,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 	private browserBackButton: HTMLButtonElement | undefined;
 	private browserForwardButton: HTMLButtonElement | undefined;
 	private browserRefreshButton: HTMLButtonElement | undefined;
+	private embeddedEditorLayoutFrame = 0;
 	private readonly browserInputStore = this._register(new DisposableStore());
 	private terminalInstance: ITerminalInstance | undefined;
 	private readonly terminalColorProvider: IXtermColorProvider = {
@@ -110,6 +106,13 @@ export class RightWorkbenchViewPane extends ViewPane {
 	private readonly pendingGitReviewStatsKeys = new Set<string>();
 	private readonly loadedGitReviewStatsKeys = new Set<string>();
 	private readonly gitReviewStats = new Map<string, { additions: number; deletions: number }>();
+	private reviewTree: WorkbenchCompressibleObjectTree<ReviewTreeElement> | undefined;
+	private reviewTreeCountElement: HTMLElement | undefined;
+	private reviewContainer: HTMLElement | undefined;
+	private reviewRailElement: HTMLElement | undefined;
+	private reviewBodyElement: HTMLElement | undefined;
+	private reviewScmFallbackElement: HTMLElement | undefined;
+	private reviewScmRailElement: HTMLElement | undefined;
 	private selectedReviewResourceKey: string | undefined;
 	private openedReviewResourceKey: string | undefined;
 	private modePicker: HTMLElement | undefined;
@@ -264,6 +267,13 @@ export class RightWorkbenchViewPane extends ViewPane {
 		this.reviewPane = undefined;
 		this.reviewPaneContainer = undefined;
 		this.reviewEmptyElement = undefined;
+		this.reviewContainer = undefined;
+		this.reviewRailElement = undefined;
+		this.reviewBodyElement = undefined;
+		this.reviewScmFallbackElement = undefined;
+		this.reviewScmRailElement = undefined;
+		this.reviewTree = undefined;
+		this.reviewTreeCountElement = undefined;
 		this.filePathElement = undefined;
 		this.fileEmptyElement = undefined;
 		this.browserUrlInput = undefined;
@@ -578,82 +588,180 @@ export class RightWorkbenchViewPane extends ViewPane {
 		const editor = append(review, $('.sessions-right-workbench-review-main'));
 		const reviewBody = append(editor, $('.sessions-right-workbench-review-editor'));
 		this.embeddedEditorHost = append(reviewBody, $('.sessions-right-workbench-embedded-editor-host'));
+		this.observeElementResize(this.embeddedEditorHost, () => this.layoutEmbeddedEditorPart());
 		this.openedReviewResourceKey = undefined;
 		const scmFallback = append(reviewBody, $('.sessions-right-workbench-review-scm-fallback'));
 
 		const rail = append(review, $('.sessions-right-workbench-review-rail'));
 		this.renderReviewPane(rail);
 		const scmRailFallback = append(rail, $('.sessions-right-workbench-review-scm-rail'));
-		this.registerScmReviewRefresh();
+		this.domStore.add(createFileIconThemableTreeContainerScope(scmRailFallback, this.themeService));
+		this.setupReviewTree(scmRailFallback);
 
-		this.domStore.add(autorun(reader => {
-			if (this.activeMode !== 'review') {
+		this.reviewContainer = review;
+		this.reviewRailElement = rail;
+		this.reviewBodyElement = reviewBody;
+		this.reviewScmFallbackElement = scmFallback;
+		this.reviewScmRailElement = scmRailFallback;
+
+		this.registerScmReviewRefresh();
+		this.domStore.add(autorun(reader => this.refreshReviewRail(reader)));
+	}
+
+	private setupReviewTree(container: HTMLElement): void {
+		const header = append(container, $('.sessions-right-workbench-review-scm-header'));
+		const headerLabel = append(header, $('span.sessions-right-workbench-review-scm-header-label'));
+		headerLabel.appendChild(renderIcon(Codicon.diffMultiple));
+		append(headerLabel, $('span', {}, localize('rightWorkbench.changedFiles', "Changed Files")));
+		this.reviewTreeCountElement = append(header, $('span.sessions-right-workbench-review-scm-count'));
+
+		const listContainer = append(container, $('.sessions-right-workbench-review-scm-list'));
+		const store = this.domStore.add(new DisposableStore());
+		const resourceLabels = store.add(this.instantiationService.createInstance(ResourceLabels, DEFAULT_LABELS_CONTAINER));
+		this.reviewTree = store.add(this.instantiationService.createInstance(
+			WorkbenchCompressibleObjectTree<ReviewTreeElement>,
+			'RightWorkbenchReviewTree',
+			listContainer,
+			new ReviewTreeDelegate(),
+			[this.instantiationService.createInstance(ReviewTreeRenderer, resourceLabels)],
+			{
+				accessibilityProvider: {
+					getAriaLabel: (element: ReviewTreeElement) => isReviewResource(element) ? basename(element.sourceUri) : element.name,
+					getWidgetAriaLabel: () => localize('rightWorkbench.reviewTree', "Review Changes"),
+				},
+				identityProvider: {
+					getId: (element: ReviewTreeElement) => isReviewResource(element) ? element.key : element.uri.toString(),
+				},
+				indent: 8,
+				compressionEnabled: true,
+				sorter: new ReviewTreeSorter(),
+			}
+		));
+
+		this.domStore.add(this.reviewTree.onDidOpen(e => {
+			if (!e.element || !isReviewResource(e.element)) {
 				return;
 			}
-			const activeSession = this.sessionsService.activeSession.read(reader);
-			const changesets = activeSession?.changesets.read(reader) ?? [];
-			const selectedChangeset = changesets.find(changeset => changeset.isDefault.read(reader) && changeset.isEnabled.read(reader))
-				?? changesets.find(changeset => changeset.isEnabled.read(reader));
-			const changes = selectedChangeset?.changes.read(reader) ?? activeSession?.changes.read(reader) ?? [];
-			const scmResources = this.getScmReviewResources(activeSession);
-			if (scmResources.length > 0) {
-				for (const repository of this.getGitReviewRepositories(activeSession)) {
-					this.requestGitReviewStats(repository);
-				}
-			}
-			const reviewResources = scmResources.length > 0 ? this.toScmReviewResources(scmResources) : this.getGitReviewResources(activeSession);
-			if (reviewResources.length === 0) {
-				this.requestGitReviewRefresh(activeSession);
-			}
-			if (changes.length === 0 && reviewResources.length === 0) {
-				review.classList.add('sessions-right-workbench-review-empty-state');
-				scmFallback.style.display = 'none';
-				scmRailFallback.style.display = 'none';
-				rail.classList.remove('sessions-right-workbench-review-rail-scm');
-				clearNode(scmFallback);
-				clearNode(scmRailFallback);
-				this.showReviewEmptyState(reviewBody);
-				return;
-			}
-			review.classList.remove('sessions-right-workbench-review-empty-state');
-			this.reviewEmptyElement?.remove();
-			this.reviewEmptyElement = undefined;
-			if (reviewResources.length > 0) {
-				scmFallback.style.display = 'none';
-				clearNode(scmFallback);
-				const selectedReviewResource = this.getSelectedReviewResource(reviewResources);
-				this.renderReviewResources(scmRailFallback, reviewResources, localize('rightWorkbench.changedFiles', "Changed Files"), selectedReviewResource.key);
-				this.openSelectedReviewResource(selectedReviewResource);
-				rail.classList.add('sessions-right-workbench-review-rail-scm');
-			} else {
-				scmFallback.style.display = 'none';
-				scmRailFallback.style.display = 'none';
-				rail.classList.remove('sessions-right-workbench-review-rail-scm');
-				clearNode(scmFallback);
-				clearNode(scmRailFallback);
-			}
+			this.selectedReviewResourceKey = e.element.key;
+			this.openedReviewResourceKey = undefined;
+			this.openSelectedReviewResource(e.element);
 		}));
+	}
+
+	private updateReviewTree(resources: readonly IReviewResource[], selectedKey: string): void {
+		if (!this.reviewTree || !this.reviewTreeCountElement) {
+			return;
+		}
+		this.reviewTreeCountElement.textContent = String(resources.length);
+		this.reviewTree.setChildren(null, buildReviewTreeChildren(resources));
+		const selected = resources.find(resource => resource.key === selectedKey);
+		if (selected) {
+			this.reviewTree.setSelection([selected]);
+			this.reviewTree.setFocus([selected]);
+		}
+	}
+
+	private clearReviewTree(): void {
+		if (!this.reviewTree || !this.reviewTreeCountElement) {
+			return;
+		}
+		this.reviewTreeCountElement.textContent = '0';
+		this.reviewTree.setChildren(null, []);
+	}
+
+	/**
+	 * Re-derives the review rail's resources and re-renders just the rail/fallback
+	 * elements. Called reactively from the autorun in {@link renderReview} (with a
+	 * real `reader`) and imperatively from SCM/git change listeners (with `undefined`,
+	 * which makes `IObservable#read` behave like a plain `get()`) so those listeners
+	 * don't need to tear down and rebuild the whole panel shell.
+	 */
+	private refreshReviewRail(reader: IReader | undefined): void {
+		const review = this.reviewContainer;
+		const rail = this.reviewRailElement;
+		const reviewBody = this.reviewBodyElement;
+		const scmFallback = this.reviewScmFallbackElement;
+		const scmRailFallback = this.reviewScmRailElement;
+		if (!review || !rail || !reviewBody || !scmFallback || !scmRailFallback || this.activeMode !== 'review') {
+			return;
+		}
+
+		const activeSession = this.sessionsService.activeSession.read(reader);
+		const changesets = activeSession?.changesets.read(reader) ?? [];
+		const selectedChangeset = changesets.find(changeset => changeset.isDefault.read(reader) && changeset.isEnabled.read(reader))
+			?? changesets.find(changeset => changeset.isEnabled.read(reader));
+		const changes = selectedChangeset?.changes.read(reader) ?? activeSession?.changes.read(reader) ?? [];
+		const scmResources = this.getScmReviewResources(activeSession);
+		const reviewResources = scmResources.length > 0 ? this.toScmReviewResources(scmResources) : this.getGitReviewResources(activeSession, reader);
+		if (reviewResources.length === 0) {
+			this.requestGitReviewRefresh(activeSession);
+		}
+		if (changes.length === 0 && reviewResources.length === 0) {
+			review.classList.add('sessions-right-workbench-review-empty-state');
+			scmFallback.style.display = 'none';
+			scmRailFallback.style.display = 'none';
+			rail.classList.remove('sessions-right-workbench-review-rail-scm');
+			clearNode(scmFallback);
+			this.clearReviewTree();
+			this.showReviewEmptyState(reviewBody);
+			return;
+		}
+		review.classList.remove('sessions-right-workbench-review-empty-state');
+		this.reviewEmptyElement?.remove();
+		this.reviewEmptyElement = undefined;
+		if (reviewResources.length > 0) {
+			scmFallback.style.display = 'none';
+			clearNode(scmFallback);
+			const selectedReviewResource = this.getSelectedReviewResource(reviewResources);
+			this.updateReviewTree(reviewResources, selectedReviewResource.key);
+			for (const repository of this.getGitReviewRepositories(activeSession)) {
+				this.requestGitReviewStats(repository);
+			}
+			this.openSelectedReviewResource(selectedReviewResource);
+			rail.classList.add('sessions-right-workbench-review-rail-scm');
+		} else {
+			scmFallback.style.display = 'none';
+			scmRailFallback.style.display = 'none';
+			rail.classList.remove('sessions-right-workbench-review-rail-scm');
+			clearNode(scmFallback);
+			this.clearReviewTree();
+		}
 	}
 
 	private registerScmReviewRefresh(): void {
 		const refresh = () => {
 			this.loadedGitReviewStatsKeys.clear();
 			this.gitReviewStats.clear();
-			if (this.activeMode === 'review') {
-				this.renderShell();
-			}
+			this.refreshReviewRail(undefined);
+		};
+		const repositoryListeners = this.domStore.add(new DisposableMap<ISCMRepository>());
+		const wireRepository = (repository: ISCMRepository) => {
+			const store = new DisposableStore();
+			const groupListeners = store.add(new DisposableStore());
+			const wireGroups = () => {
+				groupListeners.clear();
+				for (const group of repository.provider.groups) {
+					groupListeners.add(group.onDidChangeResources(refresh));
+				}
+			};
+			store.add(repository.provider.onDidChangeResources(refresh));
+			store.add(repository.provider.onDidChangeResourceGroups(() => {
+				wireGroups();
+				refresh();
+			}));
+			wireGroups();
+			repositoryListeners.set(repository, store);
 		};
 		this.domStore.add(this.scmService.onDidAddRepository(repository => {
-			this.domStore.add(repository.provider.onDidChangeResources(refresh));
+			wireRepository(repository);
 			refresh();
 		}));
-		this.domStore.add(this.scmService.onDidRemoveRepository(refresh));
+		this.domStore.add(this.scmService.onDidRemoveRepository(repository => {
+			repositoryListeners.deleteAndDispose(repository);
+			refresh();
+		}));
 		for (const repository of this.scmService.repositories) {
-			this.domStore.add(repository.provider.onDidChangeResources(refresh));
-			this.domStore.add(repository.provider.onDidChangeResourceGroups(refresh));
-			for (const group of repository.provider.groups) {
-				this.domStore.add(group.onDidChangeResources(refresh));
-			}
+			wireRepository(repository);
 		}
 	}
 
@@ -807,23 +915,26 @@ export class RightWorkbenchViewPane extends ViewPane {
 		return Array.from(resources.values()).sort((a, b) => a.sourceUri.fsPath.localeCompare(b.sourceUri.fsPath));
 	}
 
-	private getGitReviewResources(activeSession: IActiveSession | undefined): IReviewResource[] {
+	private getGitReviewResources(activeSession: IActiveSession | undefined, reader: IReader | undefined): IReviewResource[] {
 		const repositories = this.getGitReviewRepositories(activeSession);
 		const resources = new Map<string, IReviewResource>();
 		for (const repository of repositories) {
-			this.requestGitReviewStats(repository);
-			const state = repository.state.get();
+			// Read through the autorun's reader so git state changes (modified,
+			// staged, untracked files) re-trigger the review rail refresh.
+			// Deduplicate by URI (a file can be both staged and modified) so the
+			// resource tree gets one node per file; later groups win.
+			const state = repository.state.read(reader);
 			for (const change of state.mergeChanges) {
-				resources.set(this.getGitReviewResourceKey(change, 'merge'), this.toGitReviewResource(change, 'merge', localize('rightWorkbench.gitMergeChange', "Merge")));
+				resources.set(change.uri.toString(), this.toGitReviewResource(change, 'merge', localize('rightWorkbench.gitMergeChange', "Merge")));
 			}
 			for (const change of state.indexChanges) {
-				resources.set(this.getGitReviewResourceKey(change, 'staged'), this.toGitReviewResource(change, 'staged', localize('rightWorkbench.gitStagedChange', "Staged")));
+				resources.set(change.uri.toString(), this.toGitReviewResource(change, 'staged', localize('rightWorkbench.gitStagedChange', "Staged")));
 			}
 			for (const change of state.workingTreeChanges) {
-				resources.set(this.getGitReviewResourceKey(change, 'modified'), this.toGitReviewResource(change, 'modified', localize('rightWorkbench.gitModifiedChange', "Modified")));
+				resources.set(change.uri.toString(), this.toGitReviewResource(change, 'modified', localize('rightWorkbench.gitModifiedChange', "Modified")));
 			}
 			for (const change of state.untrackedChanges) {
-				resources.set(this.getGitReviewResourceKey(change, 'untracked'), this.toGitReviewResource(change, 'untracked', localize('rightWorkbench.gitUntrackedChange', "Untracked")));
+				resources.set(change.uri.toString(), this.toGitReviewResource(change, 'untracked', localize('rightWorkbench.gitUntrackedChange', "Untracked")));
 			}
 		}
 		return Array.from(resources.values()).sort((a, b) => a.sourceUri.fsPath.localeCompare(b.sourceUri.fsPath));
@@ -850,8 +961,8 @@ export class RightWorkbenchViewPane extends ViewPane {
 			this.pendingGitReviewRefreshKeys.add(key);
 			void this.gitService.openRepository(directory).then(repository => {
 				this.pendingGitReviewRefreshKeys.delete(key);
-				if (repository && this.activeMode === 'review') {
-					this.renderShell();
+				if (repository) {
+					this.refreshReviewRail(undefined);
 				}
 			}, () => {
 				this.pendingGitReviewRefreshKeys.delete(key);
@@ -950,9 +1061,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 			for (const change of changes) {
 				this.gitReviewStats.set(change.uri.toString(), this.toReviewStats(change));
 			}
-			if (this.activeMode === 'review') {
-				this.renderShell();
-			}
+			this.refreshReviewRail(undefined);
 		}, () => {
 			this.pendingGitReviewStatsKeys.delete(key);
 		});
@@ -971,55 +1080,6 @@ export class RightWorkbenchViewPane extends ViewPane {
 		}
 		const normalizedParent = parentPath.endsWith('/') ? parentPath : `${parentPath}/`;
 		return childPath.startsWith(normalizedParent);
-	}
-
-	private renderReviewResources(container: HTMLElement, resources: readonly IReviewResource[], title = localize('rightWorkbench.scmChanges', "Source Control Changes"), selectedKey?: string): void {
-		container.style.display = '';
-		clearNode(container);
-
-		const header = append(container, $('.sessions-right-workbench-review-scm-header'));
-		append(header, $('span', {}, title));
-		append(header, $('span.sessions-right-workbench-review-scm-count', {}, String(resources.length)));
-
-		const list = append(container, $('.sessions-right-workbench-review-scm-list'));
-		for (const resource of resources) {
-			this.renderReviewResource(list, resource, selectedKey);
-		}
-	}
-
-	private renderReviewResource(container: HTMLElement, resource: IReviewResource, selectedKey?: string): void {
-		const row = append(container, $('button.sessions-right-workbench-review-scm-row')) as HTMLButtonElement;
-		row.type = 'button';
-		row.title = resource.sourceUri.fsPath;
-		row.classList.toggle('selected', resource.key === selectedKey);
-		row.appendChild(renderIcon(Codicon.file));
-		const text = append(row, $('.sessions-right-workbench-review-scm-text'));
-		append(text, $('span.sessions-right-workbench-review-scm-name', {}, basename(resource.sourceUri)));
-		append(text, $('span.sessions-right-workbench-review-scm-path', {}, this.getReviewResourceDescription(resource.sourceUri)));
-		if (resource.additions !== undefined || resource.deletions !== undefined) {
-			const stats = append(row, $('span.sessions-right-workbench-review-scm-stats'));
-			append(stats, $('span.sessions-right-workbench-review-scm-additions', {}, `+${resource.additions ?? 0}`));
-			append(stats, $('span.sessions-right-workbench-review-scm-deletions', {}, `-${resource.deletions ?? 0}`));
-		}
-		append(row, $('span.sessions-right-workbench-review-scm-status', {}, resource.status));
-		this.domStore.add(addDisposableListener(row, EventType.CLICK, () => {
-			this.selectedReviewResourceKey = resource.key;
-			this.openedReviewResourceKey = undefined;
-			this.renderShell();
-		}));
-	}
-
-	private getReviewResourceDescription(resource: URI): string {
-		const workspaceFolder = this.workspaceContextService.getWorkspaceFolder(resource);
-		if (!workspaceFolder) {
-			return resource.fsPath;
-		}
-		const path = relativePath(workspaceFolder.uri, resource);
-		if (!path) {
-			return workspaceFolder.name;
-		}
-		const lastSeparator = path.lastIndexOf('/');
-		return lastSeparator === -1 ? workspaceFolder.name : path.slice(0, lastSeparator);
 	}
 
 	private showReviewEmptyState(container: HTMLElement): void {
@@ -1103,6 +1163,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 				}
 			}, MODAL_GROUP);
 			this.applyReviewDiffEditorOptions();
+			this.scheduleEmbeddedEditorPartLayout();
 			return editorPane;
 		}
 
@@ -1119,6 +1180,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 			}
 		}, MODAL_GROUP);
 		this.applyReviewDiffEditorOptions();
+		this.scheduleEmbeddedEditorPartLayout();
 		return editorPane;
 	}
 
@@ -1216,6 +1278,22 @@ export class RightWorkbenchViewPane extends ViewPane {
 		}
 	}
 
+	private scheduleEmbeddedEditorPartLayout(): void {
+		const targetWindow = this.embeddedEditorHost?.ownerDocument.defaultView;
+		if (!targetWindow) {
+			this.layoutEmbeddedEditorPart();
+			return;
+		}
+		if (this.embeddedEditorLayoutFrame) {
+			targetWindow.cancelAnimationFrame(this.embeddedEditorLayoutFrame);
+		}
+		this.embeddedEditorLayoutFrame = targetWindow.requestAnimationFrame(() => {
+			this.embeddedEditorLayoutFrame = 0;
+			this.layoutEmbeddedEditorPart();
+			targetWindow.requestAnimationFrame(() => this.layoutEmbeddedEditorPart());
+		});
+	}
+
 	private applyReviewDiffEditorOptions(): void {
 		if (this.activeMode !== 'review') {
 			return;
@@ -1232,8 +1310,28 @@ export class RightWorkbenchViewPane extends ViewPane {
 			renderSideBySideInlineBreakpoint: REVIEW_DIFF_SIDE_BY_SIDE_MIN_WIDTH,
 			compactMode: !renderSideBySide,
 			enableSplitViewResizing: renderSideBySide,
-			lineNumbersMinChars: renderSideBySide ? 3 : 2,
-			scrollBeyondLastLine: false
+			lineNumbersMinChars: 2,
+			lineDecorationsWidth: 4,
+			scrollBeyondLastLine: false,
+			renderOverviewRuler: false,
+			overviewRulerLanes: 0,
+			minimap: { enabled: false },
+			glyphMargin: false,
+			folding: false,
+			renderLineHighlight: 'none',
+			roundedSelection: false,
+			padding: { top: 8, bottom: 24 },
+			diffWordWrap: 'on',
+			hideUnchangedRegions: {
+				enabled: true,
+				revealLineCount: 3,
+				minimumLineCount: 8,
+				contextLineCount: 3
+			},
+			experimental: {
+				showMoves: false,
+				useTrueInlineView: true
+			}
 		};
 		control.updateOptions(options);
 	}

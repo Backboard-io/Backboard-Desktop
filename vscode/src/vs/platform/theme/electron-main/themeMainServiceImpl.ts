@@ -219,7 +219,7 @@ export class ThemeMainService extends Disposable implements IThemeMainService {
 		}
 	}
 
-	saveWindowSplash(windowId: number | undefined, workspace: IWorkspaceIdentifier | ISingleFolderWorkspaceIdentifier | undefined, splash: IPartsSplash): void {
+	saveWindowSplash(windowId: number | undefined, workspace: IWorkspaceIdentifier | ISingleFolderWorkspaceIdentifier | undefined, splash: IPartsSplash, options?: { updateBackgroundColor?: boolean }): void {
 
 		// Update override as needed
 		const splashOverride = this.updateWindowSplashOverride(workspace, splash);
@@ -233,7 +233,7 @@ export class ThemeMainService extends Disposable implements IThemeMainService {
 		]));
 
 		// Update in opened windows
-		if (typeof windowId === 'number') {
+		if (typeof windowId === 'number' && options?.updateBackgroundColor !== false) {
 			this.updateBackgroundColor(windowId, splash);
 		}
 

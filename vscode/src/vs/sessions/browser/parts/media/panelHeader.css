@@ -1,0 +1,175 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* Per-panel header strip that replaces the former global integrated chrome.
+ * Rendered as the first row inside a part; the part offsets its content by
+ * the header height (see SessionsPanelHeader.height). */
+
+.agent-sessions-workbench .sessions-panel-header {
+	position: relative;
+	display: flex;
+	align-items: center;
+	width: 100%;
+	height: 38px;
+	flex: 0 0 38px;
+	box-sizing: border-box;
+	color: var(--vscode-agentsPanel-foreground);
+	overflow: hidden;
+	-webkit-app-region: drag;
+}
+
+/* Headers are pure desktop/tablet chrome — the phone layout has its own
+ * mobile titlebar. `height: 0` keeps SessionsPanelHeader.height at 0 so the
+ * parts do not reserve space for it. */
+.agent-sessions-workbench.phone-layout .sessions-panel-header {
+	display: none;
+	height: 0;
+	flex-basis: 0;
+}
+
+/* The sidebar header is part of the sidebar card: keep it transparent so it
+ * shares the sidebar's translucent frosted-glass surface instead of stacking
+ * a second tint on top of it. */
+.agent-sessions-workbench .sessions-panel-header.sidebar-part-header {
+	background: transparent;
+}
+
+/* Inline variant: rendered inside an existing header row (the auxiliary bar
+ * composite title) after the title actions, taking only its content width so
+ * the existing title layout keeps its space distribution. */
+.agent-sessions-workbench .sessions-panel-header.inline {
+	width: auto;
+	height: 100%;
+	flex: 0 0 auto;
+	min-width: 0;
+}
+
+.agent-sessions-workbench .sessions-panel-header.inline > .sessions-panel-header-right {
+	/* The auxiliary bar title already provides its own right padding. */
+	padding-right: 0;
+}
+
+.agent-sessions-workbench .sessions-panel-header > .titlebar-drag-region {
+	position: absolute;
+	inset: 0;
+	z-index: 0;
+	-webkit-app-region: drag;
+}
+
+.agent-sessions-workbench .sessions-panel-header > .sessions-panel-header-left,
+.agent-sessions-workbench .sessions-panel-header > .sessions-panel-header-center,
+.agent-sessions-workbench .sessions-panel-header > .sessions-panel-header-right {
+	position: relative;
+	z-index: 1;
+	display: flex;
+	align-items: center;
+	height: 100%;
+	min-width: 0;
+}
+
+.agent-sessions-workbench .sessions-panel-header > .sessions-panel-header-left {
+	justify-content: flex-start;
+	padding-left: 8px;
+	flex: 0 1 auto;
+}
+
+.agent-sessions-workbench .sessions-panel-header > .sessions-panel-header-center {
+	justify-content: center;
+	flex: 1 1 0;
+}
+
+.agent-sessions-workbench .sessions-panel-header > .sessions-panel-header-right {
+	justify-content: flex-end;
+	padding-right: 12px;
+	flex: 0 1 auto;
+	gap: 1px;
+}
+
+.agent-sessions-workbench .sessions-panel-header .panel-header-toolbar-container {
+	display: flex;
+	align-items: center;
+	height: 100%;
+}
+
+.agent-sessions-workbench .sessions-panel-header .monaco-toolbar .actions-container {
+	gap: 1px;
+}
+
+/* Interactive elements must not be part of the window drag region. */
+.agent-sessions-workbench .sessions-panel-header .panel-header-toolbar-container,
+.agent-sessions-workbench .sessions-panel-header .window-controls-container,
+.agent-sessions-workbench .sessions-panel-header .monaco-toolbar,
+.agent-sessions-workbench .sessions-panel-header .monaco-action-bar,
+.agent-sessions-workbench .sessions-panel-header .actions-container,
+.agent-sessions-workbench .sessions-panel-header .action-item,
+.agent-sessions-workbench .sessions-panel-header .action-label,
+.agent-sessions-workbench .sessions-panel-header .codicon,
+.agent-sessions-workbench .sessions-panel-header .monaco-dropdown,
+.agent-sessions-workbench .sessions-panel-header .monaco-dropdown-with-default,
+.agent-sessions-workbench .sessions-panel-header .monaco-button,
+.agent-sessions-workbench .sessions-panel-header button {
+	-webkit-app-region: no-drag;
+	pointer-events: auto;
+}
+
+.agent-sessions-workbench .sessions-panel-header .action-item {
+	display: flex;
+}
+
+.agent-sessions-workbench .sessions-panel-header .window-controls-container {
+	display: flex;
+	align-items: center;
+	flex-shrink: 0;
+	height: 100%;
+}
+
+/* With Window Controls Overlay the OS draws the buttons on top of the window;
+ * reserve their area so the header toolbars are not covered. */
+.agent-sessions-workbench .sessions-panel-header .window-controls-container.wco-enabled {
+	width: calc(100vw - env(titlebar-area-width, 100vw));
+}
+
+.agent-sessions-workbench .sessions-panel-header .panel-header-toolbar-container.hidden-for-welcome {
+	display: none;
+}
+
+/* macOS native: invisible traffic-light spacer. Hidden in fullscreen (the
+ * traffic lights auto-hide with the toolbar) and in the phone layout. */
+.agent-sessions-workbench.mac .sessions-panel-header .mac-window-controls-spacer {
+	-webkit-app-region: drag;
+	background: transparent;
+	border: 0;
+	box-shadow: none;
+	outline: 0;
+	overflow: hidden;
+	pointer-events: none;
+	visibility: hidden;
+	width: 70px;
+	flex-shrink: 0;
+	height: 100%;
+}
+
+.agent-sessions-workbench.fullscreen .sessions-panel-header .mac-window-controls-spacer {
+	display: none;
+}
+
+/* ---- Fallback sections (sessions part header only) ----
+ *
+ * The sessions header hosts stand-in controls for the window edges: when the
+ * sidebar is hidden the sessions part becomes the left-most panel and shows
+ * the traffic-light spacer plus the sidebar (reopen) toolbar; when the
+ * auxiliary bar is hidden it becomes the right-most panel and shows the
+ * right-edge toolbars. Scoped to `.sessions-part-header` so the rules never
+ * affect the sidebar's own header. */
+
+.agent-sessions-workbench:not(.nosidebar) .sessions-panel-header.sessions-part-header .panel-header-fallback-left,
+.agent-sessions-workbench:not(.nosidebar) .sessions-panel-header.sessions-part-header .mac-window-controls-spacer {
+	display: none;
+}
+
+.agent-sessions-workbench:not(.noauxiliarybar) .sessions-panel-header.sessions-part-header .panel-header-fallback-right,
+.agent-sessions-workbench:not(.noauxiliarybar) .sessions-panel-header.sessions-part-header .window-controls-container {
+	display: none;
+}

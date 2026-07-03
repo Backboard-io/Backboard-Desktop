@@ -91,7 +91,6 @@ suite('Sessions - Workbench', () => {
 				sessionsWidth: number;
 			};
 		};
-		titleBarPartView: { minimumHeight: number };
 	}
 
 	function createEditorSplitHarness(rightWorkColumnWidth: number, overrides?: Partial<Pick<IEditorSplitTestHarness, 'partVisibility' | '_hasAppliedInitialEditorSplit'>>): IEditorSplitTestHarness {
@@ -200,7 +199,6 @@ suite('Sessions - Workbench', () => {
 					sessionsWidth: width - 300,
 				}),
 			},
-			titleBarPartView: { minimumHeight: 30 },
 		};
 
 		const descriptor = createDesktopGridDescriptor.call(workbench, 1400, 900) as {
@@ -209,25 +207,20 @@ suite('Sessions - Workbench', () => {
 					unknown,
 					{
 						data: [
-							unknown,
 							{
 								data: [
-									{
-										data: [
-											{ data: { type: Parts } },
-											{ data: { type: Parts } },
-											{ data: { type: Parts } },
-										]
-									},
-									unknown
+									{ data: { type: Parts } },
+									{ data: { type: Parts } },
+									{ data: { type: Parts } },
 								]
-							}
+							},
+							unknown
 						]
 					}
 				]
 			}
 		};
-		const topRightSection = descriptor.root.data[1].data[1].data[0];
+		const topRightSection = descriptor.root.data[1].data[0];
 
 		assert.deepStrictEqual(topRightSection.data.map(node => node.data.type), [
 			Parts.SESSIONS_PART,

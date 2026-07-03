@@ -35,6 +35,7 @@ import { Menus } from '../menus.js';
 import { $, append, prepend } from '../../../base/browser/dom.js';
 import { HiddenItemStrategy, MenuWorkbenchToolBar } from '../../../platform/actions/browser/toolbar.js';
 import { isWeb } from '../../../base/common/platform.js';
+import { SessionsPanelHeader } from './panelHeader.js';
 
 /**
  * Sidebar part specifically for agent sessions workbench.
@@ -60,6 +61,7 @@ export class SidebarPart extends AbstractPaneCompositePart {
 	private footerContainer: HTMLElement | undefined;
 	private sideBarTitleArea: HTMLElement | undefined;
 	private footerToolbar: MenuWorkbenchToolBar | undefined;
+	private panelHeader: SessionsPanelHeader | undefined;
 	private previousLayoutDimensions: { width: number; height: number; top: number; left: number } | undefined;
 
 	//#region IView
@@ -136,6 +138,15 @@ export class SidebarPart extends AbstractPaneCompositePart {
 
 	override create(parent: HTMLElement): void {
 		super.create(parent);
+
+		// Header strip with the window-left controls (traffic-light spacer and
+		// the sidebar toggle), absorbed from the former integrated chrome bar.
+		this.panelHeader = this._register(this.instantiationService.createInstance(SessionsPanelHeader, parent, {
+			classes: ['sidebar-part-header'],
+			left: [{ menuId: Menus.TitleBarLeftLayout, telemetrySource: 'sidebarPanelHeader.left' }],
+			windowControls: { left: true },
+		}));
+
 		this.createFooter(parent);
 	}
 
@@ -197,7 +208,9 @@ export class SidebarPart extends AbstractPaneCompositePart {
 
 		const container = assertReturnsDefined(this.getContainer());
 
-		container.style.backgroundColor = 'transparent';
+		// Background comes from CSS (translucent frosted-glass tint); clear any
+		// inline color so the stylesheet rule applies.
+		container.style.backgroundColor = '';
 		container.style.color = this.getColor(SIDE_BAR_FOREGROUND) || '';
 		container.style.outlineColor = this.getColor(SIDE_BAR_DRAG_AND_DROP_BACKGROUND) ?? '';
 
@@ -221,11 +234,12 @@ export class SidebarPart extends AbstractPaneCompositePart {
 
 		this.updateFooterVisibility();
 		const footerHeight = Math.min(height, this.getFooterHeight());
+		const headerHeight = this.panelHeader?.height ?? 0;
 
-		// Layout content with reduced height to account for footer
+		// Layout content with reduced height to account for header and footer
 		super.layout(
 			width,
-			height - footerHeight,
+			height - headerHeight - footerHeight,
 			top, left
 		);
 

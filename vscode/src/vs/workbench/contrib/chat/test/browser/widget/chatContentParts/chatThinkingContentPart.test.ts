@@ -342,6 +342,79 @@ suite('ChatThinkingContentPart', () => {
 		});
 	});
 
+	suite('ThinkingDisplayMode.StreamThenCollapse', () => {
+		setup(() => {
+			mockConfigurationService.setUserConfiguration('chat.agent.thinkingStyle', ThinkingDisplayMode.StreamThenCollapse);
+		});
+
+		function createPart(content: string, elementIsComplete: boolean, streamingCompleted: boolean): ChatThinkingContentPart {
+			const part = store.add(instantiationService.createInstance(
+				ChatThinkingContentPart,
+				createThinkingPart(content),
+				createMockRenderContext(elementIsComplete),
+				mockMarkdownRenderer,
+				streamingCompleted
+			));
+			mainWindow.document.body.appendChild(part.domNode);
+			disposables.add(toDisposable(() => part.domNode.remove()));
+			return part;
+		}
+
+		test('streams expanded at full height, without the fixed-scrolling clamp', () => {
+			const part = createPart('**Analyzing**\nLots of streamed reasoning', false, false);
+
+			assert.deepStrictEqual({
+				collapsed: part.domNode.classList.contains('chat-used-context-collapsed'),
+				fixedMode: part.domNode.classList.contains('chat-thinking-fixed-mode'),
+				active: part.domNode.classList.contains('chat-thinking-active'),
+				hasScrollableClamp: !!part.domNode.querySelector('.monaco-scrollable-element'),
+			}, {
+				collapsed: false,
+				fixedMode: false,
+				active: true,
+				hasScrollableClamp: false,
+			}, 'Should stream expanded inline without the fixed-height scroll window');
+		});
+
+		test('collapseContentAnimated collapses a live part (instantly under reduced motion)', () => {
+			// The workbench test accessibility service reports reduced motion,
+			// so the animated collapse takes the instant path deterministically.
+			const part = createPart('**Working**\nStreaming content', false, false);
+			assert.strictEqual(part.domNode.classList.contains('chat-used-context-collapsed'), false);
+
+			part.collapseContentAnimated();
+
+			assert.deepStrictEqual({
+				collapsed: part.domNode.classList.contains('chat-used-context-collapsed'),
+				animating: part.domNode.classList.contains('chat-thinking-collapsing'),
+			}, {
+				collapsed: true,
+				animating: false,
+			}, 'Should collapse without leaving the animation class behind');
+		});
+
+		test('renders straight to collapsed with no animation for already-complete responses', () => {
+			const part = createPart('**Finished earlier**', true, true);
+
+			part.collapseContentAnimated();
+
+			assert.deepStrictEqual({
+				collapsed: part.domNode.classList.contains('chat-used-context-collapsed'),
+				animating: part.domNode.classList.contains('chat-thinking-collapsing'),
+			}, {
+				collapsed: true,
+				animating: false,
+			}, 'History renders should start collapsed and never animate');
+		});
+
+		test('collapses when look-ahead marks streaming complete even if the response is still running', () => {
+			const part = createPart('**Done with this section**', false, true);
+
+			assert.strictEqual(part.domNode.classList.contains('chat-used-context-collapsed'), true,
+				'Should be collapsed when streamingCompleted is true, even if element.isComplete is false');
+		});
+	});
+
 	suite('ThinkingDisplayMode.FixedScrolling', () => {
 		setup(() => {
 			mockConfigurationService.setUserConfiguration('chat.agent.thinkingStyle', ThinkingDisplayMode.FixedScrolling);

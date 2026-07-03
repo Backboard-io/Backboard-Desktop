@@ -56,7 +56,7 @@ suite('Sessions - Auxiliary Bar Part', () => {
 	test('keeps the default minimum width and disables sash snap when the editor part is visible', () => {
 		layoutService.setVisible(Parts.EDITOR_PART, true);
 
-		assert.strictEqual(auxiliaryBarPart.minimumWidth, 270);
+		assert.strictEqual(auxiliaryBarPart.minimumWidth, 120);
 		assert.strictEqual(auxiliaryBarPart.snap, false);
 	});
 

@@ -29,6 +29,8 @@ import { IProgressIndicator } from '../../../platform/progress/common/progress.j
 import { AbstractProgressScope, ScopedProgressIndicator } from '../../../workbench/services/progress/browser/progressIndicator.js';
 import { observableValue } from '../../../base/common/observable.js';
 import { IWorkbenchAssignmentService } from '../../../workbench/services/assignment/common/assignmentService.js';
+import { Menus } from '../menus.js';
+import { SessionsPanelHeader } from './panelHeader.js';
 
 /**
  * ExP treatment that, when enabled, moves the session type ("harness") picker
@@ -65,6 +67,9 @@ export class SessionsPart extends Part {
 
 	/** Internal grid that hosts the part's session views. */
 	protected _gridWidget: SerializableGrid<SessionView> | undefined;
+
+	/** Header strip absorbed from the former integrated chrome bar. */
+	private _panelHeader: SessionsPanelHeader | undefined;
 
 	/** Lazily-created progress bar shown at the top of the content area. */
 	private _progressBar: ProgressBar | undefined;
@@ -159,6 +164,28 @@ export class SessionsPart extends Part {
 		this._register(this._trackOptions());
 
 		super.create(parent);
+
+		// Header strip with the center actions plus fallback controls for the
+		// window edges: the sidebar toggle (and traffic-light spacer) show here
+		// when the sidebar is hidden, and the right-edge toolbars show here when
+		// the auxiliary bar is hidden. Fallback visibility is CSS-driven via the
+		// workbench-level `nosidebar`/`noauxiliarybar` classes (`panelHeader.css`).
+		this._panelHeader = this._register(this.instantiationService.createInstance(SessionsPanelHeader, parent, {
+			classes: ['sessions-part-header'],
+			left: [
+				{ menuId: Menus.TitleBarLeftLayout, telemetrySource: 'sessionsPanelHeader.left', containerClasses: ['panel-header-fallback-left'] },
+				{ menuId: Menus.TitleBarCenterLeft, telemetrySource: 'sessionsPanelHeader.centerLeft' },
+			],
+			center: [
+				{ menuId: Menus.TitleBarCenterRight, telemetrySource: 'sessionsPanelHeader.center' },
+			],
+			right: [
+				{ menuId: Menus.TitleBarSessionMenu, telemetrySource: 'sessionsPanelHeader.sessionActions', containerClasses: ['panel-header-fallback-right'], hideOnWelcome: true },
+				{ menuId: Menus.TitleBarRightLayout, telemetrySource: 'sessionsPanelHeader.rightLayout', containerClasses: ['panel-header-fallback-right'], hideOnWelcome: true },
+				{ menuId: Menus.TitleBarRightPanel, telemetrySource: 'sessionsPanelHeader.rightPanel', containerClasses: ['panel-header-fallback-right'] },
+			],
+			windowControls: { left: true, right: true },
+		}));
 	}
 
 	protected override createContentArea(parent: HTMLElement): HTMLElement {
@@ -419,16 +446,17 @@ export class SessionsPart extends Part {
 
 		this._lastLayout = { width, height, top, left };
 
-		// Compute content dimensions accounting for the border only.
+		// Compute content dimensions accounting for the border and the header.
 		const borderTotal = SessionsPart.BORDER_WIDTH * 2;
 		const marginLeft = this.layoutService.isVisible(Parts.SIDEBAR_PART) ? 0 : SessionsPart.MARGIN_LEFT;
 		const marginBottom = this.layoutService.isVisible(Parts.PANEL_PART) ? SessionsPart.MARGIN_BOTTOM : 0;
 		const marginRight = this.layoutService.isVisible(Parts.AUXILIARYBAR_PART) ? SessionsPart.MARGIN_RIGHT : 0;
+		const headerHeight = this._panelHeader?.height ?? 0;
 
 		// Size the content area with the reduced dimensions.
 		const { contentSize } = this.layoutContents(
 			width - marginLeft - marginRight - borderTotal,
-			height - SessionsPart.MARGIN_TOP - marginBottom - borderTotal
+			height - headerHeight - SessionsPart.MARGIN_TOP - marginBottom - borderTotal
 		);
 
 		// Layout the internal grid widget within the content area.

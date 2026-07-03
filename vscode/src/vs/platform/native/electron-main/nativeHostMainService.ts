@@ -480,7 +480,10 @@ export class NativeHostMainService extends Disposable implements INativeHostMain
 	async saveWindowSplash(windowId: number | undefined, splash: IPartsSplash): Promise<void> {
 		const window = this.codeWindowById(windowId);
 
-		this.themeMainService.saveWindowSplash(windowId, window?.openedWorkspace, splash);
+		// Vibrancy windows must keep their transparent native background;
+		// repainting it with the opaque splash color would permanently
+		// cover the vibrancy material.
+		this.themeMainService.saveWindowSplash(windowId, window?.openedWorkspace, splash, { updateBackgroundColor: !window?.hasVibrancy });
 	}
 
 	async setBackgroundThrottling(windowId: number | undefined, allowed: boolean): Promise<void> {

@@ -353,6 +353,22 @@
 			margin-top: 5px;
 		}
 	}
+
+	/*
+	 * streamThenCollapse: while `chat-thinking-collapsing` is set, the wrapper's
+	 * inline max-height animates from its measured height to 0 before the part
+	 * flips to the collapsed state (see ChatThinkingContentPart.collapseContentAnimated).
+	 */
+	&.chat-thinking-collapsing .chat-used-context-list.chat-thinking-collapsible {
+		overflow: hidden;
+		transition: max-height 280ms ease-out, opacity 280ms ease-out;
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		&.chat-thinking-collapsing .chat-used-context-list.chat-thinking-collapsible {
+			transition: none;
+		}
+	}
 }
 
 .interactive-session .interactive-response .value .chat-used-context.chat-terminal-thinking-collapsible {

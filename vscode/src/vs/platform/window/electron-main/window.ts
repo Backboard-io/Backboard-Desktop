@@ -64,6 +64,13 @@ export interface ICodeWindow extends IBaseWindow {
 	readonly isExtensionDevelopmentHost: boolean;
 	readonly isExtensionTestHost: boolean;
 
+	/**
+	 * Whether the window was created with a native vibrancy material
+	 * (macOS only). Such windows must keep a fully transparent native
+	 * background color, otherwise the material can never show through.
+	 */
+	readonly hasVibrancy: boolean;
+
 	readonly isReady: boolean;
 	ready(): Promise<ICodeWindow>;
 	setReady(): void;

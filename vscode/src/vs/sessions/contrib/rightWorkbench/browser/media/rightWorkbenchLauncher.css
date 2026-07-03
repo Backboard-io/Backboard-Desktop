@@ -43,6 +43,7 @@
 	--rwb-border-strong: var(--vscode-input-border, var(--rwb-border));
 	--rwb-hover: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground, var(--rwb-bg-muted)));
 	--rwb-selection: var(--vscode-list-activeSelectionBackground, var(--rwb-hover));
+	--rwb-rail-selection: var(--vscode-list-inactiveSelectionBackground, color-mix(in srgb, var(--vscode-focusBorder, var(--rwb-foreground)) 16%, transparent));
 	--rwb-selection-border: var(--vscode-list-activeSelectionOutline, var(--vscode-focusBorder, transparent));
 	--rwb-foreground: var(--vscode-foreground, var(--vscode-editor-foreground));
 	--rwb-muted: var(--vscode-descriptionForeground, var(--vscode-input-placeholderForeground, var(--rwb-foreground)));
@@ -394,55 +395,9 @@
 	line-height: 18px;
 }
 
-.sessions-right-workbench-review-toolbar {
-	display: none;
-	align-items: center;
-	gap: 7px;
-	height: 42px;
-	padding: 0 10px;
-	box-sizing: border-box;
-	border-bottom: 1px solid var(--rwb-border);
-	background: var(--rwb-bg);
-}
-
-.sessions-right-workbench-review-turn,
-.sessions-right-workbench-review-primary {
-	height: 28px;
-	border: 1px solid var(--rwb-border-strong);
-	border-radius: 8px;
-	color: var(--rwb-foreground);
-	background: transparent;
-	font-size: 13px;
-}
-
-.sessions-right-workbench-review-turn {
-	border-color: transparent;
-}
-
-.sessions-right-workbench-review-primary {
-	padding: 0 9px;
-}
-
-.sessions-right-workbench-review-additions,
-.sessions-right-workbench-review-deletions {
-	font-size: 14px;
-}
-
-.sessions-right-workbench-review-additions {
-	color: var(--rwb-success);
-}
-
-.sessions-right-workbench-review-deletions {
-	color: var(--rwb-danger);
-}
-
-.sessions-right-workbench-review-spacer {
-	flex: 1;
-}
-
 .sessions-right-workbench-review {
 	display: grid;
-	grid-template-columns: minmax(0, 1fr) clamp(230px, 27%, 330px);
+	grid-template-columns: minmax(0, 1fr) minmax(220px, 32%);
 	height: 100%;
 	min-height: 0;
 	background: var(--rwb-bg);
@@ -455,7 +410,6 @@
 .sessions-right-workbench-review-main {
 	min-width: 0;
 	min-height: 0;
-	border-right: 1px solid var(--rwb-border);
 	background: var(--rwb-bg);
 }
 
@@ -469,6 +423,15 @@
 	min-height: 0;
 	overflow: hidden;
 	background: var(--rwb-bg);
+}
+
+.sessions-right-workbench-review-rail::before {
+	content: '';
+	position: absolute;
+	inset: 10px auto 10px 0;
+	width: 1px;
+	background: var(--rwb-border);
+	opacity: 0.7;
 }
 
 .sessions-right-workbench-review.sessions-right-workbench-review-empty-state .sessions-right-workbench-review-rail {
@@ -542,79 +505,10 @@
 .sessions-right-workbench-review-rail .monaco-list:focus .monaco-list-row.selected,
 .sessions-right-workbench-review-rail .monaco-list:focus .monaco-list-row.focused,
 .sessions-right-workbench-review-rail .monaco-list.last-focused .monaco-list-row.focused {
-	outline: 1px solid var(--rwb-selection-border) !important;
+	outline: 1px solid color-mix(in srgb, var(--rwb-selection-border) 60%, transparent) !important;
 	outline-offset: -1px;
 	color: var(--rwb-foreground);
-	background: var(--rwb-selection) !important;
-}
-
-.sessions-right-workbench-review-file {
-	display: grid;
-	grid-template-columns: 18px minmax(0, 1fr) auto;
-	align-items: center;
-	gap: 7px;
-	height: 34px;
-	padding: 0 10px;
-	box-sizing: border-box;
-	border-bottom: 1px solid var(--rwb-border);
-	color: var(--rwb-foreground);
-	font-size: 13px;
-	background: var(--rwb-chrome);
-}
-
-.sessions-right-workbench-review-file > span {
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-.sessions-right-workbench-review-file-count {
-	color: var(--rwb-success);
-}
-
-.sessions-right-workbench-review-diff {
-	height: calc(100% - 76px);
-	overflow: auto;
-	background: var(--rwb-bg);
-	font-family: Menlo, Monaco, Consolas, monospace;
-	font-size: 12px;
-	line-height: 19px;
-}
-
-.sessions-right-workbench-diff-fold {
-	height: 28px;
-	padding-left: 56px;
-	border-radius: 6px;
-	color: var(--rwb-muted);
-	background: var(--rwb-chrome-soft);
-	line-height: 28px;
-}
-
-.sessions-right-workbench-diff-line {
-	display: grid;
-	grid-template-columns: 44px minmax(0, 1fr);
-	color: var(--rwb-warning);
-}
-
-.sessions-right-workbench-diff-line.added {
-	background: var(--rwb-inserted-line-background);
-}
-
-.sessions-right-workbench-diff-number {
-	padding-right: 10px;
-	color: var(--rwb-muted);
-	text-align: right;
-}
-
-.sessions-right-workbench-diff-line.added .sessions-right-workbench-diff-number {
-	color: var(--rwb-success);
-}
-
-.sessions-right-workbench-diff-line code {
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: pre;
-	color: var(--rwb-warning);
+	background: var(--rwb-rail-selection) !important;
 }
 
 .sessions-right-workbench-review-editor {
@@ -640,7 +534,7 @@
 .sessions-right-workbench-review-scm-rail {
 	position: absolute;
 	inset: 0;
-	padding: 12px 10px;
+	padding: 8px 9px;
 	box-sizing: border-box;
 }
 
@@ -648,53 +542,53 @@
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	min-height: 30px;
-	padding: 0 10px;
+	gap: 8px;
+	min-height: 24px;
+	padding: 0 5px;
 	box-sizing: border-box;
-	border-bottom: 1px solid var(--rwb-border);
+	border: 0;
+	border-radius: 0;
 	color: var(--rwb-foreground);
+	background: transparent;
 	font-size: 12px;
-	font-weight: 600;
+	font-weight: 500;
+}
+
+.sessions-right-workbench-review-scm-header-label {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sessions-right-workbench-review-scm-header-label .codicon {
+	flex: 0 0 auto;
+	color: var(--vscode-icon-foreground, var(--rwb-muted));
+	font-size: 14px;
 }
 
 .sessions-right-workbench-review-scm-rail .sessions-right-workbench-review-scm-header {
-	padding: 0 3px 9px;
+	padding: 0 5px;
 	border-bottom: 0;
 }
 
 .sessions-right-workbench-review-scm-count {
 	color: var(--rwb-success);
-	font-size: 12px;
+	font-size: 11px;
 	font-weight: 600;
 }
 
 .sessions-right-workbench-review-scm-list {
 	flex: 1;
 	min-height: 0;
-	overflow: auto;
-	padding: 6px;
-	box-sizing: border-box;
+	margin-top: 4px;
 }
 
-.sessions-right-workbench-review-scm-rail .sessions-right-workbench-review-scm-list {
-	padding: 0;
-}
-
-.sessions-right-workbench-review-scm-row {
-	display: grid;
-	grid-template-columns: 14px minmax(0, 1fr) auto auto;
-	align-items: center;
-	column-gap: 7px;
-	width: 100%;
-	height: 38px;
-	padding: 3px 7px;
-	box-sizing: border-box;
-	border: 0;
-	border-radius: 7px;
-	color: var(--rwb-foreground);
-	background: transparent;
-	text-align: left;
-	cursor: pointer;
+.sessions-right-workbench-review-scm-list .monaco-list {
+	height: 100%;
 }
 
 @container (max-width: 760px) {
@@ -704,17 +598,6 @@
 
 	.sessions-right-workbench-review-scm-rail {
 		padding: 10px 8px;
-	}
-
-	.sessions-right-workbench-review-scm-row {
-		grid-template-columns: 14px minmax(0, 1fr) auto;
-		height: 34px;
-		padding: 2px 6px;
-	}
-
-	.sessions-right-workbench-review-scm-path,
-	.sessions-right-workbench-review-scm-status {
-		display: none;
 	}
 }
 
@@ -727,69 +610,21 @@
 		font-size: 11px;
 	}
 
-	.sessions-right-workbench-review-scm-stats {
-		display: none;
-	}
-}
-
-.sessions-right-workbench-review-scm-row:hover {
-	background: var(--rwb-hover);
-}
-
-.sessions-right-workbench-review-scm-row.selected {
-	outline: 1px solid var(--rwb-selection-border);
-	outline-offset: -1px;
-	background: var(--rwb-selection);
-}
-
-.sessions-right-workbench-review-scm-row .codicon {
-	color: var(--vscode-icon-foreground, var(--rwb-muted));
-	font-size: 12px;
-}
-
-.sessions-right-workbench-review-scm-text {
-	display: flex;
-	flex-direction: column;
-	gap: 1px;
-	min-width: 0;
-}
-
-.sessions-right-workbench-review-scm-name,
-.sessions-right-workbench-review-scm-path {
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-.sessions-right-workbench-review-scm-name {
-	color: var(--rwb-foreground);
-	font-size: 12px;
-	font-weight: 600;
-	line-height: 15px;
-}
-
-.sessions-right-workbench-review-scm-path {
-	color: var(--rwb-muted);
-	font-size: 10px;
-	line-height: 13px;
-}
-
-.sessions-right-workbench-review-scm-status {
-	max-width: 68px;
-	overflow: hidden;
-	color: var(--rwb-muted);
-	font-size: 10px;
-	text-overflow: ellipsis;
-	white-space: nowrap;
 }
 
 .sessions-right-workbench-review-scm-stats {
 	display: inline-flex;
-	align-items: center;
-	gap: 5px;
+	flex: 0 0 auto;
+	align-items: baseline;
+	gap: 4px;
+	margin-left: 6px;
 	font-size: 10px;
 	font-weight: 600;
 	white-space: nowrap;
+}
+
+.sessions-right-workbench-review-scm-stats.empty {
+	display: none;
 }
 
 .sessions-right-workbench-review-scm-additions {
@@ -876,6 +711,33 @@
 	inset: 0;
 	overflow: hidden;
 	background: var(--rwb-bg);
+}
+
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .monaco-editor,
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .monaco-editor-background,
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .margin,
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .margin-view-overlays,
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .glyph-margin,
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .line-numbers,
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .current-line,
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .monaco-diff-editor,
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .monaco-diff-editor .diffOverview {
+	background: var(--rwb-bg) !important;
+	background-color: var(--rwb-bg) !important;
+}
+
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .minimap,
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .decorationsOverviewRuler,
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .diffOverview {
+	display: none !important;
+}
+
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .monaco-editor .line-numbers {
+	color: color-mix(in srgb, var(--rwb-muted) 72%, transparent);
+}
+
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .monaco-scrollable-element > .scrollbar.vertical {
+	width: 8px !important;
 }
 
 .sessions-right-workbench-file-empty {

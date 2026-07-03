@@ -153,6 +153,7 @@ export enum ThinkingDisplayMode {
 	Collapsed = 'collapsed',
 	CollapsedPreview = 'collapsedPreview',
 	FixedScrolling = 'fixedScrolling',
+	StreamThenCollapse = 'streamThenCollapse',
 }
 
 export enum CollapsedToolsDisplayMode {

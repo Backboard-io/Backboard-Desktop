@@ -464,15 +464,34 @@
 	}
 }
 
-.agent-sessions-workbench.shell-gradient-background .agent-sessions-viewpane {
-	background: var(--vscode-sideBar-background, var(--vscode-editor-background)) !important;
+/* With the shell gradient the sidebar is a frosted-glass panel: its interior
+ * must not paint any opaque surface, otherwise it covers the translucent
+ * tint on the sidebar part (and the native vibrancy behind it on macOS). */
+.agent-sessions-workbench.shell-gradient-background .agent-sessions-viewpane,
+.agent-sessions-workbench.shell-gradient-background .agent-sessions-viewpane .agent-sessions-container {
+	background: transparent !important;
+}
+
+/* On macOS vibrancy, hover/raised/active row backgrounds are computed
+ * (color-mix) from --agent-sidebar-bg further up in this file. Left at its
+ * default opaque value, every row state paints a solid block that floats
+ * disconnected from the transparent glass behind it. Re-pointing it at the
+ * same translucent tint as the sidebar part keeps row states as soft
+ * highlights on the glass instead of opaque patches. */
+.monaco-workbench.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light) .agent-sessions-viewpane {
+	--agent-sidebar-bg: var(--sessions-sidebar-region-background);
+	/* Secondary text (--agent-sidebar-secondary) is normally partially
+	 * transparent by design (84% of foreground); over an arbitrary desktop
+	 * behind the glass that compounds into low contrast. Make it nearly
+	 * solid here so timestamps and subtitles stay legible. */
+	--agent-sidebar-secondary: color-mix(in srgb, var(--agent-sidebar-primary) 96%, transparent);
 }
 
 .agent-sessions-workbench.shell-gradient-background .part.sidebar > .content .pane-body,
 .agent-sessions-workbench.shell-gradient-background .part.sidebar > .content .monaco-scrollable-element,
 .agent-sessions-workbench.shell-gradient-background .part.sidebar > .content .monaco-list,
 .agent-sessions-workbench.shell-gradient-background .part.sidebar > .content .monaco-list-rows {
-	background: var(--vscode-sideBar-background, var(--vscode-editor-background)) !important;
+	background: transparent !important;
 }
 
 /* Sessions-app-specific overrides for the agent sessions viewer.

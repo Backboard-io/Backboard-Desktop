@@ -646,6 +646,9 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 
 	get isExtensionTestHost(): boolean { return !!(this._config?.extensionTestsPath); }
 
+	private _hasVibrancy = false;
+	get hasVibrancy(): boolean { return this._hasVibrancy; }
+
 	get isExtensionDevelopmentTestFromCli(): boolean { return this.isExtensionDevelopmentHost && this.isExtensionTestHost && !this._config?.debugId; }
 
 	//#endregion
@@ -714,7 +717,14 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 				webPreferences.backgroundThrottling = false; // keep agents window responsive when in background
 			}
 
-			const options = instantiationService.invokeFunction(defaultBrowserWindowOptions, this.windowState, undefined, webPreferences);
+			// Agent sessions window: native vibrancy so the desktop shows through
+			// the translucent sidebar region (macOS only, no-op elsewhere).
+			// 'menu' is macOS's contained, low-glare material (used for context
+			// menus) — 'under-window' samples more of the window stack and reads
+			// as too bright/washed out once combined with in-app tint.
+			const overrides = config.isSessionsWindow && isMacintosh ? { vibrancy: 'menu' as const } : undefined;
+			const options = instantiationService.invokeFunction(defaultBrowserWindowOptions, this.windowState, overrides, webPreferences);
+			this._hasVibrancy = !!options.vibrancy;
 
 			// Create the browser window
 			mark('code/willCreateCodeBrowserWindow');

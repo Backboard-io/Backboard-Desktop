@@ -19,7 +19,12 @@ export interface IThemeMainService {
 
 	getBackgroundColor(): string;
 
-	saveWindowSplash(windowId: number | undefined, workspace: IWorkspaceIdentifier | ISingleFolderWorkspaceIdentifier | undefined, splash: IPartsSplash): void;
+	/**
+	 * @param options set `updateBackgroundColor: false` for windows that must
+	 * keep their native background (e.g. vibrancy windows, which need it fully
+	 * transparent); the splash is still persisted for the next launch.
+	 */
+	saveWindowSplash(windowId: number | undefined, workspace: IWorkspaceIdentifier | ISingleFolderWorkspaceIdentifier | undefined, splash: IPartsSplash, options?: { updateBackgroundColor?: boolean }): void;
 	getWindowSplash(workspace: IWorkspaceIdentifier | ISingleFolderWorkspaceIdentifier | undefined): IPartsSplash | undefined;
 
 	getColorScheme(): IColorScheme;

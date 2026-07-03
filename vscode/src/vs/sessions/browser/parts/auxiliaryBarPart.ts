@@ -36,6 +36,7 @@ import { getFlatContextMenuActions } from '../../../platform/actions/browser/men
 import { IDisposable, MutableDisposable } from '../../../base/common/lifecycle.js';
 import { Extensions } from '../../../workbench/browser/panecomposite.js';
 import { mainWindow } from '../../../base/browser/window.js';
+import { SessionsPanelHeader } from './panelHeader.js';
 
 /**
  * Auxiliary bar part specifically for agent sessions workbench.
@@ -53,6 +54,14 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 	static readonly MARGIN_BOTTOM = 0;
 	static readonly MARGIN_LEFT = 0;
 
+	/**
+	 * The composite title row is forced to 38px via CSS (`style.css`,
+	 * `.composite.title.has-composite-bar`) while the base `PartLayout`
+	 * assumes a 35px title (see `vs/workbench/browser/part.ts`). Subtract the
+	 * difference so the content area is not clipped at the bottom.
+	 */
+	private static readonly TITLE_HEIGHT_CSS_DELTA = 3;
+
 	// Action ID for run script - defined here to avoid layering issues
 	private static readonly RUN_SCRIPT_ACTION_ID = 'workbench.action.agentSessions.runScript';
 	private static readonly RUN_SCRIPT_DROPDOWN_MENU_ID = MenuId.for('AgentSessionsRunScriptDropdown');
@@ -62,6 +71,9 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 	private readonly _runScriptDropdown = this._register(new MutableDisposable<DropdownWithPrimaryActionViewItem>());
 	private readonly _runScriptMenu = this._register(new MutableDisposable<IMenu>());
 	private readonly _runScriptMenuListener = this._register(new MutableDisposable<IDisposable>());
+
+	/** Window-chrome toolbars absorbed from the former integrated chrome bar. */
+	private panelHeader: SessionsPanelHeader | undefined;
 
 	// Sessions-specific auxiliary bar dimensions (intentionally not tied to the sessions SidebarPart values)
 	override get minimumWidth(): number {
@@ -159,6 +171,35 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 		super.create(parent);
 		parent.setAttribute('role', 'complementary');
 		parent.setAttribute('aria-label', localize('auxiliaryBarAriaLabel', "Session Details"));
+	}
+
+	protected override createTitleArea(parent: HTMLElement): HTMLElement | undefined {
+		const titleArea = super.createTitleArea(parent);
+
+		if (titleArea) {
+			// Window-right controls absorbed from the former integrated chrome
+			// bar (session actions, layout actions, terminal and panel toggles,
+			// native window controls), rendered inline at the end of the
+			// existing composite title row.
+			this.panelHeader = this._register(this.instantiationService.createInstance(SessionsPanelHeader, titleArea, {
+				classes: ['auxiliarybar-part-header'],
+				inline: true,
+				right: [
+					{ menuId: Menus.TitleBarSessionMenu, telemetrySource: 'auxiliaryBarHeader.sessionActions', hideOnWelcome: true },
+					{ menuId: Menus.TitleBarRightLayout, telemetrySource: 'auxiliaryBarHeader.rightLayout', hideOnWelcome: true },
+					{ menuId: Menus.TitleBarRightPanel, telemetrySource: 'auxiliaryBarHeader.rightPanel' },
+				],
+				windowControls: { right: true },
+			}));
+		}
+
+		return titleArea;
+	}
+
+	protected override getToolbarWidth(): number {
+		// Reserve space for the absorbed window-chrome toolbars so the
+		// composite bar overflow math accounts for them.
+		return super.getToolbarWidth() + (this.panelHeader?.element.offsetWidth ?? 0);
 	}
 
 	override updateStyles(): void {
@@ -303,7 +344,7 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 
 		super.layout(
 			width - marginLeft - paddingLeft,
-			height - AuxiliaryBarPart.MARGIN_TOP - marginBottom,
+			height - AuxiliaryBarPart.MARGIN_TOP - marginBottom - AuxiliaryBarPart.TITLE_HEIGHT_CSS_DELTA,
 			top, left
 		);
 

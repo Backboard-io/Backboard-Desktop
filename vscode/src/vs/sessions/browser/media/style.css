@@ -19,24 +19,35 @@
 /* ---- Sidebar & Auxiliary Bar Card Appearance ---- */
 
 .agent-sessions-workbench {
-	--sessions-sidebar-region-background: var(--vscode-sideBar-background, var(--vscode-editor-background));
-	--sessions-integrated-sidebar-background: var(--sessions-sidebar-region-background);
+	/* Low-alpha tint: the sidebar is a frosted-glass panel. On macOS desktop
+	 * the window has native vibrancy, so the OS-blurred desktop shows through
+	 * here; elsewhere the shell gradient shows through via backdrop-filter. */
+	--sessions-sidebar-region-background: color-mix(in srgb, var(--vscode-sideBar-background, var(--vscode-editor-background)) 30%, transparent);
 	--sessions-main-region-background: var(--vscode-agents-background, var(--vscode-editor-background));
+	--sessions-panel-divider-color: var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 10%, transparent));
 }
 
 .monaco-workbench.vs.agent-sessions-workbench {
-	--sessions-sidebar-region-background: var(--vscode-sideBar-background, color-mix(in srgb, var(--vscode-editor-background) 94%, var(--vscode-foreground) 6%));
+	--sessions-sidebar-region-background: color-mix(in srgb, var(--vscode-sideBar-background, color-mix(in srgb, var(--vscode-editor-background) 94%, var(--vscode-foreground) 6%)) 40%, transparent);
 	--sessions-main-region-background: var(--vscode-agents-background, color-mix(in srgb, var(--vscode-editor-background) 96%, var(--vscode-foreground) 4%));
 }
 
+/* Blur smooths out whatever is behind the glass so text stays legible over
+ * busy or brightly colored backgrounds; the heavy desktop blur itself comes
+ * from the native vibrancy material, this only softens what leaks through.
+ * No saturation boost: a contained, mostly-solid tinted panel reads as
+ * "clean" — pushing color/brightness through it reads as glare. */
 .agent-sessions-workbench .part.sidebar {
 	background: var(--sessions-sidebar-region-background);
 	-webkit-backdrop-filter: blur(20px);
 	backdrop-filter: blur(20px);
 }
 
+/* Transparent so the shell gradient painted on the workbench root shows
+ * through behind the sidebar; the main content parts paint their own
+ * opaque backgrounds. */
 .agent-sessions-workbench > .monaco-grid-view {
-	background-color: var(--sessions-main-region-background);
+	background-color: transparent;
 }
 
 .agent-sessions-workbench.shell-gradient-background {
@@ -54,9 +65,16 @@
 	background: var(--sessions-main-region-background);
 }
 
+/* Each variant layers a second gradient lobe anchored top-left so there is
+ * real color behind the left sidebar for the glass to diffuse — the original
+ * lobe at the bottom-right corner barely reaches the sidebar region. */
 @supports (background: color-mix(in srgb, black 0%, white)) {
 	.agent-sessions-workbench.shell-gradient-background::before {
 		background:
+			radial-gradient(ellipse 110% 90% at 0% 0%,
+				color-mix(in srgb, var(--vscode-agentsGradient-tintColor) 14%, transparent) 0%,
+				color-mix(in srgb, var(--vscode-agentsGradient-tintColor) 8%, transparent) 28%,
+				transparent 55%),
 			radial-gradient(ellipse 128% 102% at 100% 100%,
 				color-mix(in srgb, var(--vscode-agentsGradient-tintColor) 9%, transparent) 0%,
 				color-mix(in srgb, var(--vscode-agentsGradient-tintColor) 7%, transparent) 16%,
@@ -67,6 +85,10 @@
 
 	.monaco-workbench.vs.agent-sessions-workbench.shell-gradient-background::before {
 		background:
+			radial-gradient(ellipse 110% 90% at 0% 0%,
+				color-mix(in srgb, var(--vscode-agentsGradient-tintColor) 14%, transparent) 0%,
+				color-mix(in srgb, var(--vscode-agentsGradient-tintColor) 8%, transparent) 28%,
+				transparent 55%),
 			radial-gradient(ellipse 128% 102% at 100% 100%,
 				color-mix(in srgb, var(--vscode-agentsGradient-tintColor) 12%, transparent) 0%,
 				color-mix(in srgb, var(--vscode-agentsGradient-tintColor) 6%, transparent) 18%,
@@ -76,7 +98,12 @@
 	}
 
 	.monaco-workbench.vs-dark.agent-sessions-workbench.shell-gradient-background::before {
-		background: radial-gradient(ellipse 128% 102% at 100% 100%,
+		background:
+			radial-gradient(ellipse 110% 90% at 0% 0%,
+				color-mix(in srgb, var(--vscode-agentsGradient-tintColor) 14%, transparent) 0%,
+				color-mix(in srgb, var(--vscode-agentsGradient-tintColor) 8%, transparent) 28%,
+				transparent 55%),
+			radial-gradient(ellipse 128% 102% at 100% 100%,
 				color-mix(in srgb, var(--vscode-agentsGradient-tintColor) 13%, var(--vscode-agents-background)) 0%,
 				color-mix(in srgb, var(--vscode-agentsGradient-tintColor) 10%, var(--vscode-agents-background)) 17%,
 				color-mix(in srgb, var(--vscode-agentsGradient-tintColor) 7%, var(--vscode-agents-background)) 31%,
@@ -84,14 +111,46 @@
 	}
 }
 
+/* macOS desktop: the sessions window is created with native vibrancy
+ * (see defaultBrowserWindowOptions), so the root stops painting opaque
+ * pixels and the OS-blurred desktop shows through wherever the page has
+ * alpha (the sidebar region). The in-app layers are kept near-invisible
+ * here: every percent of tint or gradient stacks on top of the already
+ * frosty material and reads as solid paint — in light themes the previous
+ * values (70% gradient + 40% tint) summed to a solid white panel.
+ * High contrast themes and reduced transparency stay opaque (see below). */
+.monaco-workbench.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light) {
+	--sessions-sidebar-region-background: color-mix(in srgb, var(--vscode-sideBar-background, var(--vscode-editor-background)) 68%, transparent);
+	background: transparent;
+}
+
+.monaco-workbench.vs.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light) {
+	--sessions-sidebar-region-background: color-mix(in srgb, var(--vscode-sideBar-background, color-mix(in srgb, var(--vscode-editor-background) 94%, var(--vscode-foreground) 6%)) 62%, transparent);
+}
+
+.monaco-workbench.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light)::before {
+	/* Only visible behind the translucent (sidebar) region; the panel is
+	 * mostly solid now, so keep this to a faint whisper rather than a
+	 * second light source stacking on top of it. */
+	opacity: 0.06;
+}
+
+/* Text over vibrancy sits on top of an arbitrary desktop, not a flat theme
+ * background, so contrast is unpredictable. A soft halo in the opposite
+ * tone (dark halo behind light text, light halo behind dark text) keeps
+ * labels readable without changing their color. text-shadow is inherited,
+ * so this single rule on the sidebar covers titles, timestamps, and icons. */
+.monaco-workbench.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light) .part.sidebar {
+	text-shadow: 0 1px 3px color-mix(in srgb, black 55%, transparent);
+}
+
+.monaco-workbench.vs.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light) .part.sidebar {
+	text-shadow: 0 1px 3px color-mix(in srgb, white 70%, transparent);
+}
+
 .monaco-workbench.hc-black.agent-sessions-workbench.shell-gradient-background::before,
 .monaco-workbench.hc-light.agent-sessions-workbench.shell-gradient-background::before {
 	display: none;
-}
-
-.monaco-workbench.agent-sessions-workbench.shell-gradient-background,
-.monaco-workbench.agent-sessions-workbench.shell-gradient-background::before {
-	background: var(--sessions-main-region-background) !important;
 }
 
 .monaco-workbench.agent-sessions-workbench > .notifications-center {
@@ -152,7 +211,7 @@
 .agent-sessions-workbench.shell-gradient-background > .monaco-grid-view {
 	position: relative;
 	z-index: 1;
-	background: var(--sessions-main-region-background) !important;
+	background: transparent !important;
 }
 
 /**
@@ -166,14 +225,15 @@
 	inset: 0;
 	z-index: 30;
 	pointer-events: none;
-	border-left: 1px solid var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 18%, transparent));
-	border-right: 1px solid var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 18%, transparent));
+	border-left: 1px solid var(--sessions-panel-divider-color);
+	border-right: 1px solid var(--sessions-panel-divider-color);
 	border-radius: 0;
 	box-sizing: border-box;
 }
 
+/* The sidebar part itself keeps its translucent tint (see above); only its
+ * inner surfaces are transparent so the panel reads as one glass sheet. */
 .agent-sessions-workbench.shell-gradient-background .part.titlebar,
-.agent-sessions-workbench.shell-gradient-background .part.sidebar,
 .agent-sessions-workbench.shell-gradient-background .part.titlebar > .content,
 .agent-sessions-workbench.shell-gradient-background .part.titlebar > .titlebar-container,
 .agent-sessions-workbench.shell-gradient-background .part.titlebar > .sessions-titlebar-container,
@@ -181,6 +241,33 @@
 .agent-sessions-workbench.shell-gradient-background .part.sidebar > .content,
 .agent-sessions-workbench.shell-gradient-background .part.sidebar > .sidebar-footer {
 	background: transparent !important;
+}
+
+/* Frosted-glass fallbacks: opaque sidebar and no blur when the user prefers
+ * reduced transparency or a high contrast theme is active. */
+@media (prefers-reduced-transparency: reduce) {
+	.agent-sessions-workbench .part.sidebar {
+		background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+		-webkit-backdrop-filter: none;
+		backdrop-filter: none;
+	}
+
+	/* Also paint the root opaque again so native window vibrancy (macOS)
+	 * cannot show through anywhere. */
+	.monaco-workbench.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light) {
+		background: var(--sessions-main-region-background);
+	}
+
+	.monaco-workbench.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light)::before {
+		opacity: 1;
+	}
+}
+
+.monaco-workbench.hc-black.agent-sessions-workbench .part.sidebar,
+.monaco-workbench.hc-light.agent-sessions-workbench .part.sidebar {
+	background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+	-webkit-backdrop-filter: none;
+	backdrop-filter: none;
 }
 
 .agent-sessions-workbench .monaco-grid-view .split-view-view,
@@ -201,32 +288,30 @@
 
 .agent-sessions-workbench .part.sidebar.mobile-overlay-sidebar {
 	background: var(--vscode-agents-background) !important;
+	-webkit-backdrop-filter: none;
+	backdrop-filter: none;
 }
 
 .agent-sessions-workbench .part.sessionspart {
-	--session-view-background: #ffffff;
+	--session-view-background: var(--sessions-main-region-background);
 	margin: 0;
-	background: #ffffff !important;
+	background: var(--sessions-main-region-background) !important;
 	border: none !important;
 	border-radius: 0;
 	box-sizing: border-box;
 	position: relative;
 }
 
-.agent-sessions-workbench .part.sessionspart::before {
-	content: '';
-	position: absolute;
-	top: 0;
-	left: 0;
-	right: 0;
-	height: 38px;
-	-webkit-app-region: drag;
-	z-index: 1;
-}
-
 .agent-sessions-workbench .part.auxiliarybar > .title,
 .agent-sessions-workbench .part.editor:not(.modal-editor-part) .editor-group-container > .title {
 	-webkit-app-region: drag;
+}
+
+/* When the editor is the left-most visible part (maximized editor layout with
+ * the sidebar and chat hidden), keep the first editor group's tabs clear of
+ * the macOS traffic lights — no other part hosts the spacer in this state. */
+.agent-sessions-workbench.mac.nosidebar.nosessionspart:not(.fullscreen):not(.phone-layout) .monaco-grid-view .part.editor:not(.modal-editor-part) > .content .split-view-view:first-child .editor-group-container > .title {
+	padding-left: 78px;
 }
 
 .agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container,
@@ -284,7 +369,8 @@
 
 .agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.sessionspart),
 .agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.editor:not(.modal-editor-part)),
-.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.auxiliarybar) {
+.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.auxiliarybar),
+.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .monaco-grid-branch-node .part.auxiliarybar) {
 	background: var(--sessions-main-region-background) !important;
 	border-radius: 0 !important;
 	box-sizing: border-box;
@@ -299,17 +385,15 @@
 	border-left: 1px solid color-mix(in srgb, var(--vscode-foreground) 14%, transparent) !important;
 }
 
-.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.auxiliarybar) {
+.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.auxiliarybar),
+.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .monaco-grid-branch-node .part.auxiliarybar) {
 	border: none !important;
-	border-left: 1px solid color-mix(in srgb, var(--vscode-foreground) 14%, transparent) !important;
+	border-left: 1px solid var(--sessions-panel-divider-color) !important;
 }
 
-.agent-sessions-workbench.noauxiliarybar .monaco-grid-view .split-view-view:has(> .part.editor:not(.modal-editor-part)) {
+.agent-sessions-workbench.noauxiliarybar .monaco-grid-view .split-view-view:has(> .part.editor:not(.modal-editor-part)),
+.agent-sessions-workbench.noauxiliarybar .monaco-grid-view .split-view-view:has(> .monaco-grid-branch-node .part.editor:not(.modal-editor-part)) {
 	border-right: none !important;
-}
-
-.agent-sessions-workbench.nomaineditorarea .monaco-grid-view .split-view-view:has(> .part.auxiliarybar) {
-	border-left: none !important;
 }
 
 .agent-sessions-workbench .part.editor .multiDiffEntry {
@@ -491,7 +575,7 @@
 }
 
 .agent-sessions-workbench:not(.phone-layout):not(.nosidebar) .monaco-grid-view .split-view-view:has(> .part.sessionspart) {
-	border-left: 1px solid var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 18%, transparent)) !important;
+	border-left: 1px solid var(--sessions-panel-divider-color) !important;
 }
 
 .agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sessionspart),
@@ -505,7 +589,7 @@
 	min-height: 38px !important;
 	height: 38px !important;
 	padding: 0 8px;
-	background-color: #ffffff !important;
+	background-color: var(--sessions-main-region-background) !important;
 	border-bottom: 1px solid color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
 	box-sizing: border-box;
 	transition: padding-left 180ms ease-out, background-color 180ms ease-out;
@@ -518,7 +602,7 @@
 }
 
 .agent-sessions-workbench .part.sessionspart > .content {
-	background-color: #ffffff !important;
+	background-color: var(--sessions-main-region-background) !important;
 	position: relative;
 }
 
@@ -528,7 +612,8 @@
 
 .agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.sessionspart),
 .agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.editor:not(.modal-editor-part)),
-.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.auxiliarybar) {
+.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.auxiliarybar),
+.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .monaco-grid-branch-node .part.auxiliarybar) {
 	border: none !important;
 	background: var(--sessions-main-region-background) !important;
 }
@@ -537,7 +622,7 @@
 .agent-sessions-workbench .part.editor .title.tabs {
 	min-height: 38px !important;
 	height: 38px !important;
-	background-color: #ffffff !important;
+	background-color: var(--sessions-main-region-background) !important;
 	border-bottom: 1px solid color-mix(in srgb, var(--vscode-foreground) 8%, transparent) !important;
 	box-sizing: border-box;
 }
@@ -551,8 +636,9 @@
 }
 
 .agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.editor:not(.modal-editor-part)),
-.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.auxiliarybar) {
-	border-left: 1px solid var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 18%, transparent)) !important;
+.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.auxiliarybar),
+.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .monaco-grid-branch-node .part.auxiliarybar) {
+	border-left: 1px solid var(--sessions-panel-divider-color) !important;
 }
 
 .agent-sessions-workbench .monaco-grid-view .part.editor:not(.modal-editor-part),
@@ -862,8 +948,9 @@
 	border-radius: calc(var(--vscode-sash-hover-size) / 2);
 }
 
-.agent-sessions-workbench .monaco-sash.vertical:before {
-	left: calc(50% - (var(--vscode-sash-hover-size) / 2) - (var(--vscode-sash-size) / 2));
+.agent-sessions-workbench .monaco-sash.hover:before,
+.agent-sessions-workbench .monaco-sash.active:before {
+	background: var(--vscode-sash-hoverBorder, var(--vscode-focusBorder)) !important;
 }
 
 .agent-sessions-workbench .monaco-sash:not(.disabled) > .orthogonal-drag-handle {
