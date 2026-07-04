@@ -132,6 +132,7 @@ export interface BackboardResponse {
 export type ProviderEvent =
 	| { kind: "thread"; threadId: string }
 	| { kind: "assistant_delta"; text: string }
+	| { kind: "reasoning_delta"; text: string }
 	| { kind: "requires_action"; runId: string | null; calls: ProviderToolCall[] }
 	| { kind: "usage"; usage: ProviderUsage }
 	| {
@@ -145,11 +146,16 @@ export type ProviderEvent =
 export interface StreamMappingResult {
 	events: ProviderEvent[];
 	accumulatedContent: string;
+	accumulatedReasoning: string;
+	lastContentChunk: string;
+	lastReasoningChunk: string;
 }
 
 export interface ContentDeltaResult {
 	text: string | null;
 	accumulatedContent: string;
+	/** Raw `content` field of this frame, kept for segment-cumulative recovery. */
+	lastChunk: string;
 }
 
 export interface ProviderToolCall {

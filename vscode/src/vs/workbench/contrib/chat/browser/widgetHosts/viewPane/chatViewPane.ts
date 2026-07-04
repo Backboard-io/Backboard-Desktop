@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import './media/chatViewPane.css';
+import '../../widget/media/chatPanelCursorLook.css';
 import { $, addDisposableListener, append, EventHelper, EventType, getWindow, setVisibility } from '../../../../../../base/browser/dom.js';
 import { StandardMouseEvent } from '../../../../../../base/browser/mouseEvent.js';
 import { Orientation, Sash } from '../../../../../../base/browser/ui/sash/sash.js';
@@ -932,6 +933,44 @@ referencesExpandedWhenEmptyResponse: false,
 		this._register(this.titleControl.onDidChangeHeight(() => {
 			this.relayout();
 		}));
+
+		// Lift the session-tab strip out of the pane body and into the auxiliary
+		// bar's composite title row so it shares a single line with the +/history
+		// actions (rather than sitting on its own row below them).
+		this.mergeTabsIntoTitleBar();
+		this._register(this.onDidChangeBodyVisibility(visible => {
+			if (visible) {
+				this.mergeTabsIntoTitleBar();
+			}
+		}));
+	}
+
+	/**
+	 * Once the tab strip is merged into the auxiliary bar's composite title row,
+	 * its height is already excluded from the `height` the workbench passes into
+	 * `layoutBody()` (the composite title is a sibling of the ViewPane's body,
+	 * not part of it). `doLayoutBody()` must stop subtracting
+	 * `titleControl.getHeight()` once merged — otherwise that space gets
+	 * reserved twice, leaving a gap the size of the tab row at the bottom of
+	 * the chat widget.
+	 */
+	private tabsMergedIntoTitleBar = false;
+
+	private mergeTabsIntoTitleBar(): void {
+		const tabs = this.titleControl?.element;
+		const part = this.element.closest('.part.auxiliarybar');
+		const compositeTitle = part?.querySelector<HTMLElement>(':scope > .composite.title');
+		if (!tabs || !compositeTitle) {
+			return;
+		}
+		if (tabs.parentElement === compositeTitle) {
+			this.tabsMergedIntoTitleBar = true;
+			return; // already merged
+		}
+		compositeTitle.classList.add('has-chat-tabs');
+		const anchor = compositeTitle.querySelector('.title-actions');
+		compositeTitle.insertBefore(tabs, anchor ?? null);
+		this.tabsMergedIntoTitleBar = true;
 	}
 
 	//#endregion
@@ -1356,8 +1395,12 @@ referencesExpandedWhenEmptyResponse: false,
 		// relayout whenever the content changes size).
 		remainingHeight -= this._voiceBottomArea?.offsetHeight ?? 0;
 
-		// Title Control
-		const titleHeight = this.titleControl?.getHeight() ?? 0;
+		// Title Control — only reserve space for it here while it still lives in
+		// the ViewPane's own body. Once merged into the auxiliary bar's composite
+		// title row (see `mergeTabsIntoTitleBar()`), the workbench already excludes
+		// that row from the `height` passed into this method, so subtracting it
+		// again here would double-count it and leave a gap under the chat widget.
+		const titleHeight = this.tabsMergedIntoTitleBar ? 0 : (this.titleControl?.getHeight() ?? 0);
 		remainingHeight -= titleHeight;
 
 		// Sessions Control

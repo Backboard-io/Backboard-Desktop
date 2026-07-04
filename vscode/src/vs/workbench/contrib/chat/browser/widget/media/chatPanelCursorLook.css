@@ -1,0 +1,328 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/*
+ * Clean, compact, Cursor-inspired restyle of the chat panel. Layered on top of
+ * chat.css / chatViewTitleControl.css. Selectors are deliberately at least as
+ * specific as the rules they refine so the restyle wins without !important.
+ */
+
+/* --- Session tabs merged into the composite title row -------------------- */
+
+/*
+ * The tab strip is re-parented into `.composite.title` (marked `.has-chat-tabs`)
+ * by ChatViewPane so it shares one line with the +/history actions. Hide the
+ * redundant "Chat" label and drop the divider below the header.
+ */
+.monaco-workbench .part.auxiliarybar .composite.title.has-chat-tabs .title-label {
+	display: none;
+}
+
+/* The tab strip was moved out of `.chat-viewpane`, so its original flex layout
+   no longer applies — re-establish a single horizontal, scrolling row here. */
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-container {
+	display: flex;
+	flex: 1 1 auto;
+	align-items: center;
+	min-width: 0;
+	height: 100%;
+	margin: 0;
+	padding: 0;
+	border-bottom: none;
+	background: transparent;
+	overflow: hidden;
+}
+
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-inner {
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	gap: 0;
+	height: 100%;
+	width: 100%;
+	min-width: 0;
+	padding: 0;
+}
+
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tabs {
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	flex: 1 1 auto;
+	min-width: 0;
+	height: 100%;
+	gap: 0;
+	padding: 0;
+	overflow-x: auto;
+	overflow-y: hidden;
+	scrollbar-width: none;
+}
+
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tabs::-webkit-scrollbar {
+	display: none;
+}
+
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab {
+	display: flex;
+	align-items: center;
+	box-sizing: border-box;
+	width: 176px;
+	min-width: 120px;
+	max-width: 220px;
+	flex: 0 0 auto;
+	height: 100%;
+	padding: 0 8px 0 12px;
+	gap: 6px;
+	border-radius: 0;
+	border: none;
+	/* clear, visible divider between every tab */
+	border-right: 1px solid var(--bb-tab-divider, var(--vscode-panel-border, rgba(128, 128, 128, 0.45)));
+	background: transparent;
+	color: var(--vscode-tab-inactiveForeground, var(--vscode-descriptionForeground));
+	opacity: 0.85;
+}
+
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab:first-child {
+	border-left: 1px solid var(--bb-tab-divider, var(--vscode-panel-border, rgba(128, 128, 128, 0.45)));
+}
+
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab:hover {
+	opacity: 1;
+	background: color-mix(in srgb, var(--vscode-toolbar-hoverBackground) 60%, transparent);
+}
+
+/*
+ * Active tab: filled with the panel-body surface (see --bb-panel-surface below).
+ * Left/right dividers are kept (inherited from the base rule); the bottom
+ * divider is simply never applied to the active tab (see the divider rule
+ * below, which only targets `:not(.chat-view-title-tab-active)`), so it bleeds
+ * straight into the body with no border-erasing tricks needed.
+ */
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab-active,
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab-active:hover {
+	opacity: 1;
+	color: var(--vscode-tab-activeForeground, var(--vscode-foreground));
+	background: var(--bb-panel-surface, var(--vscode-editor-background));
+}
+
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab .chat-view-title-tab-icon {
+	flex: 0 0 auto;
+	font-size: 18px;
+}
+
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab .chat-view-title-tab-label {
+	font-size: 14px;
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+/* Quiet the close ✕ until hover, Cursor-style. */
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab .chat-view-title-tab-close {
+	opacity: 0;
+	transition: opacity 0.1s ease;
+}
+
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab:hover .chat-view-title-tab-close,
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab-active .chat-view-title-tab-close {
+	opacity: 0.7;
+}
+
+/*
+ * One divider — not per-tab — exactly where the tab strip ends and the icon
+ * actions (+, history, ...) begin. `.chat-view-title-container` (the tabs)
+ * and `.title-actions` (the native +/history/... toolbar) are inserted as
+ * siblings by `mergeTabsIntoTitleBar()`, so this seam is the boundary between
+ * them. Anchored on `.title-actions` (rather than `.chat-view-title-container`,
+ * which has `overflow: hidden`) so the pseudo-element isn't clipped.
+ */
+.monaco-workbench .part.auxiliarybar .composite.title.has-chat-tabs > .title-actions {
+	position: relative;
+}
+
+/* Well before the first icon (which starts ~8px into `.title-actions`) so it
+   doesn't cut through the "+" glyph. Full height. */
+.monaco-workbench .part.auxiliarybar .composite.title.has-chat-tabs > .title-actions::after {
+	content: "";
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: 2px;
+	width: 1px;
+	background: var(--bb-tab-divider, var(--vscode-panel-border, rgba(128, 128, 128, 0.45)));
+	pointer-events: none;
+}
+
+/* --- Trim header: drop the nav toolbar (Go Back arrow + "Backboard" session
+   label) and the Sessions-sidebar toggle — the tabs already show the session. */
+
+.monaco-workbench .part.auxiliarybar .composite.title.has-chat-tabs .chat-view-title-navigation-toolbar {
+	display: none;
+}
+
+.monaco-workbench .part.auxiliarybar .composite.title.has-chat-tabs .action-item:has(.codicon-arrow-left),
+.monaco-workbench .part.auxiliarybar .composite.title.has-chat-tabs .action-item:has(.codicon-layout-sidebar-right-off),
+.monaco-workbench .part.auxiliarybar .composite.title.has-chat-tabs .action-item:has(.codicon-layout-sidebar-right) {
+	display: none;
+}
+
+/* --- Surfaces & separators ----------------------------------------------- */
+
+/*
+ * Two distinct surfaces make the "bleed" read clearly:
+ *   --bb-panel-surface : the chat body + the SELECTED tab (they merge)
+ *   --bb-header-surface : the header strip (inactive tabs + actions) — a step
+ *                          lighter so the selected tab visibly pops and flows down.
+ * Defined on `.part.auxiliarybar` so both the composite title and the pane body
+ * (which are separate DOM subtrees) can read them.
+ */
+.monaco-workbench .part.auxiliarybar {
+	--bb-panel-surface: var(--vscode-editor-background);
+	/*
+	 * Header strip + inactive tabs match the sideBar surface — the same shade as
+	 * the global titlebar row above when the window is FOCUSED, so the tab strip
+	 * reads as a continuation of that row. The active tab (--bb-panel-surface,
+	 * the editor-background shade) is what pops in contrast, not the header
+	 * itself.
+	 *
+	 * Deliberately NOT --vscode-titleBar-activeBackground: titlebarPart.ts
+	 * swaps the real titlebar's background (inline style) to
+	 * TITLE_BAR_INACTIVE_BACKGROUND when the window loses focus, but that swap
+	 * has no reflection in a plain CSS var — "activeBackground" always means
+	 * the focused-window color. Referencing it here would make our header
+	 * strip diverge from the real titlebar's color the moment the window is
+	 * unfocused. --vscode-sideBar-background has no such focus-dependent swap,
+	 * so anchoring to it keeps our own surfaces internally consistent always,
+	 * even though it only matches the titlebar's rendered color while focused.
+	 */
+	--bb-header-surface: var(--vscode-sideBar-background, var(--vscode-editor-background));
+	/* Crisp hairline between tabs — a touch lighter than the header so it stays
+	   visible against it (panel-border alone is too close to the header shade). */
+	--bb-tab-divider: color-mix(in srgb, var(--vscode-sideBar-background, var(--vscode-editor-background)) 80%, var(--vscode-foreground) 20%);
+	/* Separator between the middle editor and the right panel. Uses the same
+	   brighter --bb-tab-divider shade as the tab dividers above — plain
+	   --vscode-panel-border (rgb 42,43,44) reads as barely-there against the
+	   surrounding rgb(18-25) surfaces, so it needs the same contrast boost.
+	   !important: Part.updateStyles() sets border-left as an inline style from
+	   the theme's auxiliaryBar.border color at runtime, which otherwise always
+	   wins over any external stylesheet rule regardless of specificity. */
+	border-left: 1px solid var(--bb-tab-divider, var(--vscode-panel-border, rgba(128, 128, 128, 0.4))) !important;
+}
+
+/* Chat body + active tab share one surface → the selected tab flows into it.
+   `.chat-welcome-view-container` (the "New Agent" empty state) is included —
+   chatViewPane.css otherwise pins it to --vscode-sideBar-background, which is
+   a different shade than the panel surface and reads as a mismatched block. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-controls-container,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-list,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-welcome-view-container,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-list .monaco-list,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-list .monaco-scrollable-element,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-list .monaco-list-rows {
+	background-color: var(--bb-panel-surface);
+}
+
+/*
+ * `.monaco-list-rows` (the scrollable rows container ListView owns one level
+ * inside `.monaco-list`) carries the theme's list background — a different,
+ * lighter shade than our panel surface — and was never covered above. Since
+ * individual `.monaco-list-row` elements are transparent by default, that wrong
+ * shade showed through everywhere EXCEPT when a row happened to be
+ * `.focused`/`.selected` (see rule below, which paints the row itself opaquely
+ * and so incidentally masked it) — which is why the color only looked "fixed"
+ * after clicking into the list/row. Fixing the real layer above removes that
+ * dependency on focus state entirely.
+ *
+ * ListWidget (listWidget.ts `style()`) ALSO injects its own <style> tag at
+ * runtime with rules like `.monaco-list.monaco-list-id-N:focus
+ * .monaco-list-row.focused { background-color: ... }`, added to the document
+ * AFTER our stylesheet. That always wins on cascade order regardless of
+ * selector specificity, which is why the focused/selected row itself showed
+ * the list's focus color. !important is the only way to reliably beat a
+ * dynamically-inserted, later-in-source-order rule like this.
+ *
+ * The same injected stylesheet also adds
+ * `.monaco-list-row:hover:not(.selected):not(.focused) { background-color:
+ * listHoverBackground }` — a lighter hover tint meant for genuinely selectable
+ * lists (file trees, quick-pick), which reads as a mismatch here since chat
+ * rows aren't selectable items. Covered below, same !important reasoning.
+ */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-list .monaco-list-row.focused,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-list .monaco-list-row.selected,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-list .monaco-list-row:hover {
+	background-color: var(--bb-panel-surface, var(--vscode-editor-background)) !important;
+}
+
+/* Header strip: lighter surface. No border-bottom here — the divider is drawn
+   per-element below (inactive tabs + actions toolbar) instead of on this
+   container, because `.chat-view-title-tabs` clips overflow-y:hidden, which
+   would clip any box-shadow/border trick trying to "erase" a container-level
+   border under just the active tab. Owning the border per-child avoids that. */
+.monaco-workbench .part.auxiliarybar .composite.title.has-chat-tabs {
+	background-color: var(--bb-header-surface);
+	/* Base composite-title styles reserve left padding for the (now-hidden)
+	   title-label — drop it so the first tab sits flush against the aux-bar
+	   edge, matching the editor's own tab strip which has no left inset. */
+	padding-left: 0;
+}
+
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab:not(.chat-view-title-tab-active),
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-actions-toolbar {
+	border-bottom: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.4));
+}
+
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab:not(.chat-view-title-tab-active) {
+	background-color: var(--bb-header-surface);
+}
+
+/* --- Input box: roomy, soft, focus-aware --------------------------------- */
+
+.monaco-workbench .interactive-session .interactive-input-part:not(.compact) {
+	margin: 0 12px 12px;
+}
+
+.monaco-workbench .interactive-session .interactive-input-part .chat-input-container {
+	border-radius: 12px;
+	/* Symmetric 8px on all sides — matches the 8px gap `.chat-input-toolbars`
+	   margin-top puts between the editor and the toolbar row, so the spacing
+	   above the text, between text and toolbar, and below the toolbar all read
+	   as the same rhythm instead of the bottom edge looking tighter. */
+	padding: 8px 12px;
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.13);
+	transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.monaco-workbench .interactive-session .interactive-input-part .chat-input-container.focused,
+.monaco-workbench .interactive-session .interactive-input-part .chat-input-container:focus-within {
+	box-shadow: 0 1px 5px rgba(0, 0, 0, 0.2);
+}
+
+.monaco-workbench .interactive-session .interactive-input-part .interactive-input-editor {
+	min-height: 42px;
+	font-size: 13px;
+	line-height: 1.5;
+}
+
+/* --- Bottom toolbar: compact and calm ------------------------------------ */
+
+.monaco-workbench .interactive-session .chat-input-toolbars {
+	margin-top: 8px;
+}
+
+/* --- Message rows: lighter, cleaner rhythm ------------------------------- */
+
+.monaco-workbench .interactive-session .interactive-item-container {
+	padding-top: 10px;
+	padding-bottom: 10px;
+	border-top-color: transparent;
+}
+
+.monaco-workbench .interactive-session .interactive-item-container .value {
+	line-height: 1.55;
+}

@@ -49,6 +49,11 @@ const SANDBOX_PROVIDER_ORDER = new Map<string, number>([
 
 const BACKBOARD_INTENSITY_CONFIG_KEY = 'intensity';
 const BACKBOARD_MEMORY_CONFIG_KEY = 'memory';
+const BACKBOARD_WEB_SEARCH_CONFIG_KEY = 'webSearch';
+const BACKBOARD_COMPUTER_USE_CONFIG_KEY = 'computerUse';
+const BACKBOARD_BROWSER_USE_CONFIG_KEY = 'browserUse';
+const BACKBOARD_NOTIFICATIONS_CONFIG_KEY = 'notifications';
+const BACKBOARD_IMAGE_GENERATION_CONFIG_KEY = 'imageGeneration';
 export const BACKBOARD_MODE_PLAN = 'plan';
 
 
@@ -137,6 +142,16 @@ export interface BackboardTurnSettings {
 	readonly rawMode: string;
 	readonly intensity: string;
 	readonly memory: string;
+	/** Whether the built-in web-search tool is available this turn. */
+	readonly webSearch: boolean;
+	/** Whether computer-use tools are enabled this turn. */
+	readonly computerUse: boolean;
+	/** Whether the browser-use tool is enabled this turn. */
+	readonly browserUse: boolean;
+	/** Whether turn-completion notifications are enabled this turn. */
+	readonly notifications: boolean;
+	/** Whether image-generation intent is enabled (reserved; inert until backend support). */
+	readonly imageGeneration: boolean;
 	readonly config: Record<string, unknown>;
 }
 
@@ -454,6 +469,41 @@ export function resolveBackboardSessionConfig(rawConfig: Record<string, unknown>
 						],
 						sessionMutable: true,
 					},
+					[BACKBOARD_WEB_SEARCH_CONFIG_KEY]: {
+						type: 'boolean',
+						title: localize('backboard.config.webSearch.title', "Web Search"),
+						description: localize('backboard.config.webSearch.description', "Lets Backboard search the web to answer questions and gather up-to-date context."),
+						default: true,
+						sessionMutable: true,
+					},
+					[BACKBOARD_COMPUTER_USE_CONFIG_KEY]: {
+						type: 'boolean',
+						title: localize('backboard.config.computerUse.title', "Computer Use"),
+						description: localize('backboard.config.computerUse.description', "Lets Backboard control the desktop (screenshots, mouse, and keyboard) to complete tasks."),
+						default: false,
+						sessionMutable: true,
+					},
+					[BACKBOARD_BROWSER_USE_CONFIG_KEY]: {
+						type: 'boolean',
+						title: localize('backboard.config.browserUse.title', "Browser Use"),
+						description: localize('backboard.config.browserUse.description', "Lets Backboard drive a web browser to navigate pages and interact with sites."),
+						default: false,
+						sessionMutable: true,
+					},
+					[BACKBOARD_NOTIFICATIONS_CONFIG_KEY]: {
+						type: 'boolean',
+						title: localize('backboard.config.notifications.title', "Notifications"),
+						description: localize('backboard.config.notifications.description', "Shows a system notification when Backboard finishes a turn."),
+						default: false,
+						sessionMutable: true,
+					},
+					[BACKBOARD_IMAGE_GENERATION_CONFIG_KEY]: {
+						type: 'boolean',
+						title: localize('backboard.config.imageGeneration.title', "Image Generation"),
+						description: localize('backboard.config.imageGeneration.description', "Lets Backboard generate images. Requires backend image support; has no effect until that is available."),
+						default: false,
+						sessionMutable: true,
+					},
 				},
 			},
 		values,
@@ -466,6 +516,11 @@ function normalizeBackboardConfig(rawConfig: Record<string, unknown> | undefined
 		[SessionConfigKey.Mode]: normalizeBackboardMode(merged[SessionConfigKey.Mode]),
 		[BACKBOARD_INTENSITY_CONFIG_KEY]: oneOf(merged[BACKBOARD_INTENSITY_CONFIG_KEY], ['fast', 'balanced', 'deep'], 'fast'),
 		[BACKBOARD_MEMORY_CONFIG_KEY]: oneOf(merged[BACKBOARD_MEMORY_CONFIG_KEY], ['off', 'on', 'auto', 'readonly'], 'off'),
+		[BACKBOARD_WEB_SEARCH_CONFIG_KEY]: booleanOf(merged[BACKBOARD_WEB_SEARCH_CONFIG_KEY], true),
+		[BACKBOARD_COMPUTER_USE_CONFIG_KEY]: booleanOf(merged[BACKBOARD_COMPUTER_USE_CONFIG_KEY], false),
+		[BACKBOARD_BROWSER_USE_CONFIG_KEY]: booleanOf(merged[BACKBOARD_BROWSER_USE_CONFIG_KEY], false),
+		[BACKBOARD_NOTIFICATIONS_CONFIG_KEY]: booleanOf(merged[BACKBOARD_NOTIFICATIONS_CONFIG_KEY], false),
+		[BACKBOARD_IMAGE_GENERATION_CONFIG_KEY]: booleanOf(merged[BACKBOARD_IMAGE_GENERATION_CONFIG_KEY], false),
 	};
 }
 
@@ -484,6 +539,11 @@ export function createBackboardTurnSettings(
 		rawMode,
 		intensity: stringConfigValue(values, BACKBOARD_INTENSITY_CONFIG_KEY, 'fast'),
 		memory: stringConfigValue(values, BACKBOARD_MEMORY_CONFIG_KEY, 'off'),
+		webSearch: booleanConfigValue(values, BACKBOARD_WEB_SEARCH_CONFIG_KEY, true),
+		computerUse: booleanConfigValue(values, BACKBOARD_COMPUTER_USE_CONFIG_KEY, false),
+		browserUse: booleanConfigValue(values, BACKBOARD_BROWSER_USE_CONFIG_KEY, false),
+		notifications: booleanConfigValue(values, BACKBOARD_NOTIFICATIONS_CONFIG_KEY, false),
+		imageGeneration: booleanConfigValue(values, BACKBOARD_IMAGE_GENERATION_CONFIG_KEY, false),
 		config: bridgeConfig(),
 	};
 }
@@ -506,9 +566,27 @@ function oneOf(value: unknown, values: readonly string[], fallback: string): str
 	return typeof value === 'string' && values.includes(value) ? value : fallback;
 }
 
+/** Coerces a stored config value (boolean or `'true'`/`'false'` string) to a boolean. */
+function booleanOf(value: unknown, fallback: boolean): boolean {
+	if (typeof value === 'boolean') {
+		return value;
+	}
+	if (value === 'true') {
+		return true;
+	}
+	if (value === 'false') {
+		return false;
+	}
+	return fallback;
+}
+
 function stringConfigValue(config: Record<string, unknown>, key: string, fallback: string): string {
 	const value = config[key];
 	return typeof value === 'string' && value ? value : fallback;
+}
+
+function booleanConfigValue(config: Record<string, unknown>, key: string, fallback: boolean): boolean {
+	return booleanOf(config[key], fallback);
 }
 
 

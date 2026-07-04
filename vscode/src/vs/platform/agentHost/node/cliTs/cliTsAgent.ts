@@ -17,10 +17,17 @@ import { AgentSession, AgentSignal, IAgent, IAgentCreateSessionConfig, IAgentCre
 import { ActionType, type ChatAction, type SessionAction } from '../../common/state/sessionActions.js';
 import type { ResolveSessionConfigResult, SessionConfigCompletionsResult } from '../../common/state/protocol/commands.js';
 import type { ModelSelection, ProtectedResourceMetadata, ToolDefinition } from '../../common/state/protocol/state.js';
-import { ChatInputAnswerValueKind, ChatInputQuestionKind, ChatInputResponseKind, MessageAttachmentKind, MessageKind, ResponsePartKind, SessionStatus, ToolCallConfirmationReason, ToolCallStatus, ToolResultContentType, TurnState, type ChatInputAnswer, type ChatInputQuestion, type ClientPluginCustomization, type MessageAttachment, type PendingMessage, type SessionInputAnswer, type SessionInputResponseKind, type ToolCallResult, type Turn } from '../../common/state/sessionState.js';
+import { ChatInputAnswerValueKind, ChatInputQuestionKind, ChatInputResponseKind, MessageAttachmentKind, MessageKind, ResponsePartKind, SessionStatus, ToolCallConfirmationReason, ToolCallStatus, ToolResultContentType, TurnState, type ChatInputAnswer, type ChatInputQuestion, type ClientPluginCustomization, type MessageAttachment, type PendingMessage, type SessionInputAnswer, type SessionInputResponseKind, type ToolCallResult, type ToolResultContent, type Turn } from '../../common/state/sessionState.js';
 import type { ISyncedCustomization } from '../../common/agentPluginManager.js';
+import { IInstantiationService } from '../../../instantiation/common/instantiation.js';
+import { ISessionDatabase, ISessionDataService } from '../../common/sessionDataService.js';
+import { FileEditTracker } from '../shared/fileEditTracker.js';
+import type { IReference } from '../../../../base/common/lifecycle.js';
 import { IAgentConfigurationService } from '../agentConfigurationService.js';
 import { BACKBOARD_ACCESS_MANUAL, BACKBOARD_MODE_PLAN, BUNDLED_BACKBOARD_MODELS, backboardModelInfos, createBackboardTurnSettings, fallbackModel, isBridgeModel, resolveBackboardSessionConfig } from './backboardRuntimeShared.js';
+
+/** cli-ts tool name excluded from the turn when Web Search is toggled off. */
+const CLI_TS_WEB_SEARCH_TOOL_NAME = 'WebSearch';
 import { rgDiskPath } from '../../../../base/node/ripgrep.js';
 import { CliTsServeProcess } from './cliTsProcess.js';
 import type { CliTsAgentEvent, CliTsFileAttachment, CliTsPermissionPolicy, CliTsTurnStatus } from './cliTsProtocol.js';
@@ -59,8 +66,13 @@ interface CliTsTurnState {
 	readonly childToolLines: Map<string, Map<string, string>>;
 	/** Compact tool summaries recorded for history restore. */
 	readonly toolSummaries: string[];
+	/** Structured tool inputs captured from `tool:requested`, keyed by call id. */
+	readonly toolInputs: Map<string, { name: string; input: unknown }>;
+	/** In-flight async tool completions (file-edit diff builds), awaited before turn end. */
+	readonly pendingCompletions: Promise<void>[];
 	reasoningPartId?: string;
 	didCreateReasoningPart?: boolean;
+	reasoningText: string;
 	didCreateStatusPart?: boolean;
 	lastProgressMessage?: string;
 	responseText: string;
@@ -81,6 +93,8 @@ interface CliTsSession {
 	disposed: boolean;
 	proc?: CliTsServeProcess;
 	turn?: CliTsTurnState;
+	/** Lazily-opened file-edit tracker + its session DB reference. */
+	fileEdits?: { tracker: FileEditTracker; dbRef: IReference<ISessionDatabase> };
 	/** cli-ts permission id per pending toolCallId (answered via respondToPermissionRequest). */
 	readonly pendingPermissions: Map<string, string>;
 	/** Pending cli-ts AskUser request ids (answered via respondToUserInputRequest). */
@@ -118,8 +132,31 @@ export class CliTsAgent extends Disposable implements IAgent {
 	constructor(
 		@ILogService private readonly _logService: ILogService,
 		@IAgentConfigurationService private readonly _configurationService: IAgentConfigurationService,
+		@ISessionDataService private readonly _sessionDataService: ISessionDataService,
+		@IInstantiationService private readonly _instantiationService: IInstantiationService,
 	) {
 		super();
+	}
+
+	/**
+	 * Lazily opens the session database and creates the {@link FileEditTracker}
+	 * used to persist before/after content of file-edit tools so the UI can
+	 * render diff pills. Returns `undefined` when the database can't be opened
+	 * (tracking is best-effort; the tool result still renders as text).
+	 */
+	private _fileEditTracker(session: CliTsSession): FileEditTracker | undefined {
+		if (session.fileEdits) {
+			return session.fileEdits.tracker;
+		}
+		try {
+			const dbRef = this._sessionDataService.openDatabase(session.sessionUri);
+			const tracker = this._instantiationService.createInstance(FileEditTracker, session.sessionUri.toString(), dbRef.object);
+			session.fileEdits = { tracker, dbRef };
+			return tracker;
+		} catch (error) {
+			this._logService.warn(`[cli-ts] Failed to open session database for file edit tracking: ${error instanceof Error ? error.message : String(error)}`);
+			return undefined;
+		}
 	}
 
 	getDescriptor(): IAgentDescriptor {
@@ -149,12 +186,38 @@ export class CliTsAgent extends Disposable implements IAgent {
 		session.model = config.model ?? session.model;
 		session.config = config.config ?? session.config;
 		this._sessions.set(sessionId, session);
+		// Eagerly boot the serve process and pre-resolve the base assistant now,
+		// while the composer is open and before the user's first message, so the
+		// process spawn (~0.2s) and the first-ever assistant resolution (~1.4s)
+		// happen during think-time instead of on the critical path to first
+		// token. Best-effort and idempotent; sendMessage still ensures the
+		// process if this was skipped.
+		if (session.workingDirectory) {
+			void this._prewarm(session);
+		}
 		return {
 			session: sessionUri,
 			workingDirectory: session.workingDirectory,
 			project: session.workingDirectory ? { uri: session.workingDirectory, displayName: path.basename(session.workingDirectory.fsPath) } : undefined,
 			provisional: !session.materialized,
 		};
+	}
+
+	/**
+	 * Spawns the serve process and fires a `warmup` op so the base assistant is
+	 * resolved (and disk-cached) before the first message. Best-effort.
+	 */
+	private async _prewarm(session: CliTsSession): Promise<void> {
+		if (session.disposed || session.proc?.isRunning) {
+			return;
+		}
+		try {
+			const rgDir = await this._resolveRgDir();
+			const proc = this._ensureProcess(session, rgDir);
+			proc.notify({ op: 'warmup' });
+		} catch (error) {
+			this._logService.info(`[cli-ts] pre-warm skipped for ${session.sessionId}: ${error instanceof Error ? error.message : String(error)}`);
+		}
 	}
 
 	async resolveSessionConfig(params: IAgentResolveSessionConfigParams): Promise<ResolveSessionConfigResult> {
@@ -178,10 +241,18 @@ export class CliTsAgent extends Disposable implements IAgent {
 		const storedConfig = this._configurationService.getSessionConfigValues(session.sessionUri.toString());
 		const settings = createBackboardTurnSettings(storedConfig, session.config, session.model);
 		const permission: CliTsPermissionPolicy = settings.accessMode === BACKBOARD_ACCESS_MANUAL ? 'default' : 'autoApprove';
-		// Plan mode: hide write-class tools from the model entirely, on top of gating.
-		const excludedTools = settings.rawMode === BACKBOARD_MODE_PLAN
-			? ['Write', 'Edit', 'ApplyPatch', 'Execute']
-			: undefined;
+		// Build the per-turn tool exclusion list. Plan mode hides write-class
+		// tools from the model entirely (on top of gating); the Web Search
+		// toggle removes the built-in web search tool when disabled. The list
+		// is sent on every turn (even when empty) so the persistent serve
+		// process resets prior-turn exclusions when a toggle is turned back on.
+		const excludedTools: string[] = [];
+		if (settings.rawMode === BACKBOARD_MODE_PLAN) {
+			excludedTools.push('Write', 'Edit', 'ApplyPatch', 'Execute');
+		}
+		if (!settings.webSearch) {
+			excludedTools.push(CLI_TS_WEB_SEARCH_TOOL_NAME);
+		}
 		const thinking = cliTsThinkingLevel(settings.intensity);
 		const turn: CliTsTurnState = {
 			turnId: effectiveTurnId,
@@ -191,9 +262,27 @@ export class CliTsAgent extends Disposable implements IAgent {
 			confirmedToolCalls: new Set(),
 			childToolLines: new Map(),
 			toolSummaries: [],
+			toolInputs: new Map(),
+			pendingCompletions: [],
 			responseText: '',
+			reasoningText: '',
 		};
 		session.turn = turn;
+		// Fill the send→first-token gap with an instant, self-erasing status
+		// line so the turn feels responsive the moment the user hits send —
+		// well before the model streams its first token. The agent-host adapter
+		// renders a SystemNotification part as an ephemeral `progressMessage`
+		// (shimmering spinner) that auto-hides the instant any real content —
+		// markdown, reasoning, or a tool call — arrives, so it leaves no
+		// clutter. Fired synchronously before the submit round-trip; the active
+		// turn already exists (ChatTurnStarted was reduced before sendMessage),
+		// so the part renders on the first frame. Not gated by
+		// `didCreateStatusPart` so genuine `system:warning`s still surface.
+		this._fire(session.sessionUri, {
+			type: ActionType.ChatResponsePart,
+			turnId: effectiveTurnId,
+			part: { kind: ResponsePartKind.SystemNotification, content: localize('cliTsAgent.thinking', "Thinking…") },
+		});
 		this._logService.info(`[cli-ts] turn_start session=${session.sessionId} model=${settings.provider}/${settings.model} permission=${permission} cwd=${session.workingDirectory?.fsPath ?? '(missing)'}`);
 
 		try {
@@ -204,8 +293,14 @@ export class CliTsAgent extends Disposable implements IAgent {
 				model: `${settings.provider}/${settings.model}`,
 				permission,
 				...(thinking ? { thinking } : {}),
-				...(settings.memory !== 'off' ? { memory: settings.memory } : {}),
-				...(excludedTools ? { excludedTools } : {}),
+				// Sent unconditionally so the persistent serve process resets
+				// these when a toggle is turned back off between turns.
+				memory: settings.memory,
+				computerUse: settings.computerUse,
+				browserUse: settings.browserUse,
+				notify: settings.notifications,
+				imageGeneration: settings.imageGeneration,
+				excludedTools,
 				...(prepared.files.length ? { files: prepared.files } : {}),
 			});
 			const status = (record.payload as { status?: CliTsTurnStatus } | undefined)?.status;
@@ -227,6 +322,9 @@ export class CliTsAgent extends Disposable implements IAgent {
 				error: { errorType: 'BackboardSendFailed', message },
 			});
 		} finally {
+			// Let in-flight file-edit diff builds finish so their
+			// ChatToolCallComplete actions land before the turn is marked done.
+			await Promise.allSettled(turn.pendingCompletions);
 			session.storedTurns.push({
 				prompt,
 				response: turn.responseText,
@@ -256,6 +354,8 @@ export class CliTsAgent extends Disposable implements IAgent {
 			session.disposed = true;
 			session.proc?.dispose();
 			session.proc = undefined;
+			session.fileEdits?.dbRef.dispose();
+			session.fileEdits = undefined;
 		}
 		this._sessions.delete(sessionId);
 	}
@@ -537,8 +637,39 @@ export class CliTsAgent extends Disposable implements IAgent {
 				}
 				return;
 			}
+			case 'assistant:reasoning': {
+				if (!event.text) {
+					return;
+				}
+				if (!turn.reasoningPartId) {
+					turn.reasoningPartId = generateUuid();
+					turn.didCreateReasoningPart = true;
+					this._fire(session.sessionUri, {
+						type: ActionType.ChatResponsePart,
+						turnId,
+						part: { kind: ResponsePartKind.Reasoning, id: turn.reasoningPartId, content: '' },
+					});
+				}
+				turn.reasoningText += event.text;
+				this._fire(session.sessionUri, {
+					type: ActionType.ChatReasoning,
+					turnId,
+					partId: turn.reasoningPartId,
+					content: event.text,
+				});
+				return;
+			}
 			case 'tool:requested':
-				return; // per-call events follow (tool:pending / tool:start)
+				// A tool round ends the current thinking block; the next
+				// reasoning burst starts a fresh part so the UI shows distinct
+				// think → act → think steps instead of one merged block.
+				turn.reasoningPartId = undefined;
+				// Capture structured inputs so file-edit completions can attach
+				// diffs and edit-survival telemetry. Per-call events follow.
+				for (const call of event.calls ?? []) {
+					turn.toolInputs.set(call.id, { name: call.name, input: call.input });
+				}
+				return;
 			case 'tool:pending': {
 				if (!event.toolCallId || !event.name) {
 					return;
@@ -613,19 +744,30 @@ export class CliTsAgent extends Disposable implements IAgent {
 				if (!event.toolCallId || !event.name) {
 					return;
 				}
-				this._ensureToolCallStart(session, turn, event.toolCallId, event.name, event.inputSummary);
-				turn.toolSummaries.push(`${toolDisplayName(event.name)}${event.title ? ` — ${event.title}` : ''}`);
+				const toolCallId = event.toolCallId;
+				const name = event.name;
+				this._ensureToolCallStart(session, turn, toolCallId, name, event.inputSummary);
+				turn.toolSummaries.push(`${toolDisplayName(name)}${event.title ? ` — ${event.title}` : ''}`);
 				const text = [event.title, event.detail].filter(part => !!part).join('\n');
-				this._fire(session.sessionUri, {
-					type: ActionType.ChatToolCallComplete,
-					turnId,
-					toolCallId: event.toolCallId,
-					result: {
-						success: true,
-						pastTenseMessage: event.title ?? localize('cliTsAgent.toolFinished', "{0} finished", toolDisplayName(event.name)),
-						content: text ? [{ type: ToolResultContentType.Text, text }] : undefined,
-					},
-				});
+				const fileEdits = Array.isArray(event.fileEdits) ? event.fileEdits : [];
+				const completion = (async (): Promise<void> => {
+					const content: ToolResultContent[] = text ? [{ type: ToolResultContentType.Text, text }] : [];
+					if (fileEdits.length) {
+						const edits = await this._buildFileEditContents(session, turn, toolCallId, name, fileEdits);
+						content.push(...edits);
+					}
+					this._fire(session.sessionUri, {
+						type: ActionType.ChatToolCallComplete,
+						turnId,
+						toolCallId,
+						result: {
+							success: true,
+							pastTenseMessage: event.title ?? localize('cliTsAgent.toolFinished', "{0} finished", toolDisplayName(name)),
+							content: content.length ? content : undefined,
+						},
+					});
+				})();
+				turn.pendingCompletions.push(completion);
 				return;
 			}
 			case 'tool:error': {
@@ -776,6 +918,33 @@ export class CliTsAgent extends Disposable implements IAgent {
 			toolCallId,
 			content: inputSummary ?? '',
 		});
+	}
+
+	/**
+	 * Persists cli-ts's before/after file content and returns the resulting
+	 * {@link ToolResultFileEditContent} items so the completion carries inline
+	 * diffs (rendered as edit pills). Best-effort: a tracker/DB failure yields
+	 * no diff content but never fails the turn.
+	 */
+	private async _buildFileEditContents(session: CliTsSession, turn: CliTsTurnState, toolCallId: string, toolName: string, fileEdits: readonly { path: string; before: string; after: string }[]): Promise<ToolResultContent[]> {
+		const tracker = this._fileEditTracker(session);
+		if (!tracker) {
+			return [];
+		}
+		const toolInput = turn.toolInputs.get(toolCallId)?.input;
+		const modelId = session.model?.id;
+		const contents: ToolResultContent[] = [];
+		for (const edit of fileEdits) {
+			try {
+				const content = await tracker.recordExplicitEdit(turn.turnId, toolCallId, edit.path, edit.before, edit.after, toolName, toolInput, modelId);
+				if (content) {
+					contents.push(content);
+				}
+			} catch (error) {
+				this._logService.warn(`[cli-ts] Failed to record file edit for ${edit.path}: ${error instanceof Error ? error.message : String(error)}`);
+			}
+		}
+		return contents;
 	}
 
 	// ---- persistence ----------------------------------------------------------

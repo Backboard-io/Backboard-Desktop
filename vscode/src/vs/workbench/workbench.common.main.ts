@@ -224,6 +224,7 @@ import './contrib/speech/browser/speech.contribution.js';
 import './contrib/chat/browser/chat.shared.contribution.js';
 import './contrib/chat/browser/chat.contribution.js';
 import './contrib/chat/browser/chat.view.contribution.js';
+import './contrib/chat/browser/chatPanelResilience.js';
 import './contrib/inlineChat/browser/inlineChat.contribution.js';
 
 // Copilot Voice
@@ -470,8 +471,5 @@ import './contrib/editTelemetry/browser/editTelemetry.contribution.js';
 
 // Opener
 import './contrib/opener/browser/opener.contribution.js';
-
-// Backboard Layout
-import './contrib/backboardLayout/browser/backboardLayout.contribution.js';
 
 //#endregion

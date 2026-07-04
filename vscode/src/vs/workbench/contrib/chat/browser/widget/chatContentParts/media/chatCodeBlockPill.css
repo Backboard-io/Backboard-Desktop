@@ -49,13 +49,14 @@
 	}
 
 	.chat-codeblock-pill-widget {
-		border: 1px solid var(--vscode-chat-requestBorder, var(--vscode-input-background, transparent));
+		/* Flat: no box around the file name; hover supplies the affordance. */
+		border: 1px solid transparent;
 		border-radius: 4px;
 		text-wrap: nowrap;
 		width: fit-content;
 		font-weight: normal;
 		text-decoration: none;
-		padding: 1px 3px;
+		padding: 1px 4px;
 		cursor: pointer;
 		position: relative;
 		overflow: hidden;

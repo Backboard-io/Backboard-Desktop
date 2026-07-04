@@ -35,8 +35,17 @@ export type CliTsServeControl =
 		readonly memory?: string;
 		readonly skills?: readonly string[];
 		readonly files?: readonly CliTsFileAttachment[];
+		/** Enables cli-ts computer-use tools for this turn (default off). */
+		readonly computerUse?: boolean;
+		/** Enables the cli-ts browser-use tool for this turn (default off). */
+		readonly browserUse?: boolean;
+		/** Enables turn-completion notifications for this turn (default off). */
+		readonly notify?: boolean;
+		/** Enables image-generation intent (reserved; inert until backend support). */
+		readonly imageGeneration?: boolean;
 	}
 	| { readonly op: 'steer'; readonly requestId?: string; readonly prompt: string }
+	| { readonly op: 'warmup'; readonly requestId?: string }
 	| { readonly op: 'cancel'; readonly requestId?: string }
 	| { readonly op: 'respondInput'; readonly id: string; readonly answer: string }
 	| { readonly op: 'respondPermission'; readonly id: string; readonly decision: 'approve' | 'deny'; readonly reason?: string }
@@ -82,6 +91,7 @@ export interface CliTsAgentEvent {
 	readonly title?: string;
 	readonly detail?: string;
 	readonly detailLines?: readonly unknown[];
+	readonly fileEdits?: readonly { readonly path: string; readonly before: string; readonly after: string }[];
 	readonly error?: string;
 	readonly message?: string;
 	readonly status?: CliTsTurnStatus | 'done' | 'error';

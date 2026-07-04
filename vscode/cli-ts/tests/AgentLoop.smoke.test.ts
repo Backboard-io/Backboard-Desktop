@@ -227,7 +227,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 		expect(types[types.length - 1]).toBe("turn:end");
 	});
 
-	it("includes the startup environment prompt in assistant and turn prompts", async () => {
+	it("injects the startup environment per turn but keeps it out of the stable base assistant", async () => {
 		const client = new FakeClient(
 			[
 				{ kind: "thread", threadId: "thr_1" },
@@ -256,9 +256,13 @@ describe("AgentController loop (mocked Backboard)", () => {
 
 		await ctrl.submit("do it");
 
-		expect(client.assistantRequests[0]?.system_prompt).toContain(
+		// The volatile environment snapshot must NOT be part of the base
+		// assistant (it would make the assistant fingerprint change per
+		// day/workspace/branch and defeat the assistant cache)...
+		expect(client.assistantRequests[0]?.system_prompt).not.toContain(
 			startupEnvironmentPrompt,
 		);
+		// ...but it MUST reach the model via the per-turn system_prompt override.
 		expect(client.messageRequests[0]?.system_prompt).toContain(
 			startupEnvironmentPrompt,
 		);

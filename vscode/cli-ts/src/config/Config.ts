@@ -59,6 +59,9 @@ export class Config {
 	private computerUseEnabled = false;
 	private browserUseEnabled = false;
 	private notifyEnabled = false;
+	// Reserved for a future image-generation tool. The host can toggle this per
+	// turn today; no tool consumes it yet, so it is inert until that lands.
+	private imageGenerationEnabled = false;
 	private readonly currentMemoryProfile: MemoryProfile;
 	private currentThinking: ThinkingIntent | null | undefined;
 	private readonly currentFinalVerificationNudge: boolean;
@@ -177,12 +180,22 @@ export class Config {
 		this.computerUseEnabled = true;
 	}
 
+	/** Toggles computer-use tools on or off, e.g. per serve-mode submit. */
+	setComputerUse(enabled: boolean): void {
+		this.computerUseEnabled = enabled;
+	}
+
 	get isComputerUseEnabled(): boolean {
 		return this.computerUseEnabled;
 	}
 
 	enableBrowserUse(): void {
 		this.browserUseEnabled = true;
+	}
+
+	/** Toggles the browser-use tool on or off, e.g. per serve-mode submit. */
+	setBrowserUse(enabled: boolean): void {
+		this.browserUseEnabled = enabled;
 	}
 
 	get isBrowserUseEnabled(): boolean {
@@ -195,6 +208,19 @@ export class Config {
 
 	setNotifyEnabled(enabled: boolean): void {
 		this.notifyEnabled = enabled;
+	}
+
+	get isImageGenerationEnabled(): boolean {
+		return this.imageGenerationEnabled;
+	}
+
+	/**
+	 * Toggles image-generation intent for this session. Currently inert — no
+	 * tool reads it yet — but wired end-to-end so a future image tool can honor
+	 * it without additional host/protocol changes.
+	 */
+	setImageGeneration(enabled: boolean): void {
+		this.imageGenerationEnabled = enabled;
 	}
 
 	get memoryProfile(): MemoryProfile {

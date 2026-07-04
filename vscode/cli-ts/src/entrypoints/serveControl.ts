@@ -3,6 +3,7 @@ import type { ServeControl } from "./ServeTypes.ts";
 const KNOWN_OPS = new Set<ServeControl["op"]>([
 	"submit",
 	"steer",
+	"warmup",
 	"cancel",
 	"respondInput",
 	"respondPermission",

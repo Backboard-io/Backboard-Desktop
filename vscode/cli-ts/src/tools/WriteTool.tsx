@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { z } from "zod";
 import { Tool } from "../core/tools/Tool.ts";
@@ -44,16 +44,19 @@ export class WriteTool extends Tool<Input, Output> {
 	): Promise<ToolResult<Output>> {
 		const filePath = resolve(ctx.cwd, input.file_path);
 		return await withPathLocks([filePath], async () => {
+			const before = await readFile(filePath, "utf8").catch(() => "");
 			await ensureDir(dirname(filePath));
 			await writeFile(filePath, input.content, "utf8");
 
 			const bytes = Buffer.byteLength(input.content, "utf8");
 			const diagnostics = await collectDiagnosticsFeedback(ctx, filePath);
-			return ok(
+			const result = ok(
 				{ filePath, bytes },
 				`Wrote ${input.file_path} (${bytes} bytes)${diagnostics}`,
 				`Wrote ${input.file_path}`,
 			);
+			result.fileEdits = [{ path: filePath, before, after: input.content }];
+			return result;
 		});
 	}
 }

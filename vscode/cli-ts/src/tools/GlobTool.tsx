@@ -75,20 +75,25 @@ export class GlobTool extends Tool<Input, Output> {
 		const cwd = input.path ? resolve(ctx.cwd, input.path) : ctx.cwd;
 		const patterns = [...(input.patterns ?? [])];
 		if (input.pattern) patterns.unshift(input.pattern);
-		const files = await runRipgrepFiles(
+		const { files, truncated } = await runRipgrepFiles(
 			cwd,
 			patterns,
 			input.excludePatterns ?? [],
 			ctx,
 		);
 
-		const body = files.length ? files.join("\n") : "No files matched";
+		const body = files.length
+			? files.join("\n") +
+				(truncated
+					? "\n[results truncated — narrow the pattern or path to see the rest]"
+					: "")
+			: "No files matched";
 		return ok(
 			{ files, count: files.length },
 			body,
 			files.length === 0
 				? "No files matched"
-				: `Found ${files.length} file${files.length === 1 ? "" : "s"}`,
+				: `Found ${files.length}${truncated ? "+" : ""} file${files.length === 1 && !truncated ? "" : "s"}`,
 		);
 	}
 }
@@ -105,12 +110,14 @@ function normalizePatterns(patterns: unknown): unknown {
 	return [patterns];
 }
 
+const OUTPUT_CAP_BYTES = 80_000;
+
 function runRipgrepFiles(
 	cwd: string,
 	patterns: string[],
 	excludePatterns: string[],
 	ctx: ToolContext,
-): Promise<string[]> {
+): Promise<{ files: string[]; truncated: boolean }> {
 	return new Promise((resolvePromise, reject) => {
 		if (ctx.signal.aborted) return reject(new Error("aborted"));
 		const args = ["--files", "--color=never"];
@@ -119,22 +126,40 @@ function runRipgrepFiles(
 		const child = spawn("rg", args, { cwd, signal: ctx.signal });
 		let stdout = "";
 		let stderr = "";
+		// Stopping rg once we have more output than we can return is a
+		// truncated success — it must never surface as a tool error.
+		let stoppedForCap = false;
 		child.stdout?.on("data", (chunk) => {
 			stdout += chunk.toString();
-			if (stdout.length > 80_000) child.kill("SIGTERM");
+			if (stdout.length > OUTPUT_CAP_BYTES && !stoppedForCap) {
+				stoppedForCap = true;
+				child.kill("SIGTERM");
+			}
 		});
 		child.stderr?.on("data", (chunk) => {
 			stderr += chunk.toString();
 		});
 		child.on("error", (err) => reject(err));
-		child.on("close", (code) => {
-			if (code !== 0 && code !== 1) {
-				reject(new Error(stderr || `ripgrep failed (exit ${code ?? 1})`));
+		child.on("close", (code, signal) => {
+			// A cap-stop can cut the final path mid-line; drop the partial line.
+			let text = stdout;
+			if (stoppedForCap && text.length > 0 && !text.endsWith("\n")) {
+				text = text.slice(0, text.lastIndexOf("\n") + 1);
+			}
+			const allFiles = text.trim() ? text.trimEnd().split("\n") : [];
+			const files = allFiles.slice(0, MAX_RESULTS);
+			if (stoppedForCap) {
+				resolvePromise({ files, truncated: true });
 				return;
 			}
-			resolvePromise(
-				stdout.trim() ? stdout.trimEnd().split("\n").slice(0, MAX_RESULTS) : [],
-			);
+			// rg exit 0 = matches, 1 = no matches; anything else (or a signal
+			// death we didn't cause) is a real failure.
+			if (code !== 0 && code !== 1) {
+				const reason = signal ? `killed by ${signal}` : `exit ${code}`;
+				reject(new Error(stderr.trim() || `ripgrep failed (${reason})`));
+				return;
+			}
+			resolvePromise({ files, truncated: allFiles.length > MAX_RESULTS });
 		});
 	});
 }

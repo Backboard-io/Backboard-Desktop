@@ -1,4 +1,5 @@
 import type { AgentToolOutput } from "../tools/AgentToolOutput.ts";
+import type { FileEditPreview } from "../tools/ToolResult.ts";
 import type { ToolResultDetailLine } from "../tools/ToolResultDetail.ts";
 
 export type TurnStatus =
@@ -36,6 +37,7 @@ interface ToolResultEvent {
 	title: string;
 	detail?: string;
 	detailLines?: ToolResultDetailLine[];
+	fileEdits?: FileEditPreview[];
 	agentOutput?: AgentToolOutput;
 }
 
@@ -95,6 +97,7 @@ export type AgentEvent =
 	| { type: "user:message"; text: string }
 	| { type: "turn:start"; turnId: string }
 	| { type: "assistant:delta"; turnId: string; messageId: string; text: string }
+	| { type: "assistant:reasoning"; turnId: string; text: string }
 	| {
 			type: "assistant:message";
 			turnId: string;

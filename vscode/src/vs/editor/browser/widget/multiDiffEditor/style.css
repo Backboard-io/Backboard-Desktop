@@ -73,7 +73,7 @@
 
 			.header-content {
 				margin: 8px 0px 0px 0px;
-				padding: 4px 5px;
+				padding: 4px 8px;
 
 				border-top: 1px solid var(--vscode-multiDiffEditor-border);
 
@@ -83,8 +83,9 @@
 				color: var(--vscode-foreground);
 				background: var(--vscode-multiDiffEditor-headerBackground);
 
+				/* Flat: sticky headers separate by hairline only, no scroll shadow. */
 				&.shadow {
-					box-shadow: var(--vscode-scrollbar-shadow) 0px 6px 6px -6px;
+					box-shadow: none;
 				}
 
 				.file-path {
@@ -93,7 +94,7 @@
 					min-width: 0;
 
 					.title {
-						font-size: 14px;
+						font-size: 13px;
 						line-height: 22px;
 
 						&.original {

@@ -9,6 +9,30 @@ function kinds(events: ProviderEvent[]): string[] {
 	return events.map((e) => e.kind);
 }
 
+describe("reasoning streaming", () => {
+	it("emits reasoning deltas from accumulated_reasoning", () => {
+		const mapper = new BackboardStreamEventMapper();
+		const first = mapper.map({
+			type: "reasoning_streaming",
+			content: "Let me",
+			accumulated_reasoning: "Let me",
+		});
+		const second = mapper.map({
+			type: "reasoning_streaming",
+			content: " think",
+			accumulated_reasoning: "Let me think",
+		});
+		expect(first).toEqual([{ kind: "reasoning_delta", text: "Let me" }]);
+		expect(second).toEqual([{ kind: "reasoning_delta", text: " think" }]);
+	});
+
+	it("maps a plain reasoning_delta chunk", () => {
+		expect(
+			mapStreamPayloadToEvents({ type: "reasoning_delta", content: "hmm" }),
+		).toEqual([{ kind: "reasoning_delta", text: "hmm" }]);
+	});
+});
+
 describe("mapStreamPayloadToEvents", () => {
 	it("maps a completed stream response", () => {
 		const events = mapStreamPayloadToEvents({
@@ -213,5 +237,119 @@ describe("mapStreamPayloadToEvents", () => {
 		});
 
 		expect(events).toEqual([{ kind: "assistant_delta", text: "hello" }]);
+	});
+});
+
+/**
+ * Regression coverage for a live incident: the backend's DSML tool-call
+ * parser failed on a complex `edit` call, leaked the raw `<｜DSML｜...>`
+ * tokens into `content_streaming`, and re-sent overlapping frames — which
+ * the old normalization re-emitted wholesale on every frame, filling the
+ * transcript with dozens of copies of raw tool-call markup.
+ */
+describe("DSML tool-call leak hardening", () => {
+	it("suppresses leaked DSML markup from content deltas, keeping prior prose", () => {
+		const mapper = new BackboardStreamEventMapper();
+		const prose = mapper.map({
+			type: "content_streaming",
+			content: "I'll remove the duplicate.",
+			accumulated_content: "I'll remove the duplicate.",
+		});
+		const leak = mapper.map({
+			type: "content_streaming",
+			content: '  <｜DSML｜tool_calls> <｜DSML｜invoke name="edit">',
+			accumulated_content:
+				'I\'ll remove the duplicate.  <｜DSML｜tool_calls> <｜DSML｜invoke name="edit">',
+		});
+		const moreLeak = mapper.map({
+			type: "content_streaming",
+			content: ' <｜DSML｜parameter name="edits" string="false">[...]',
+			accumulated_content:
+				'I\'ll remove the duplicate.  <｜DSML｜tool_calls> <｜DSML｜invoke name="edit"> <｜DSML｜parameter name="edits" string="false">[...]',
+		});
+
+		expect(prose).toEqual([
+			{ kind: "assistant_delta", text: "I'll remove the duplicate." },
+		]);
+		// The gap between prose and the marker is emitted; the markup is not.
+		expect(leak).toEqual([{ kind: "assistant_delta", text: "  " }]);
+		expect(moreLeak).toEqual([]);
+	});
+
+	it("emits only the prose portion when a single frame mixes prose and DSML", () => {
+		const events = mapStreamPayloadToEvents({
+			type: "content_streaming",
+			content: "Done. <｜DSML｜tool_calls>junk",
+		});
+		expect(events).toEqual([{ kind: "assistant_delta", text: "Done. " }]);
+	});
+
+	it("drops re-sent duplicate frames instead of repeating them", () => {
+		const mapper = new BackboardStreamEventMapper();
+		const chunk = "a long chunk the backend re-sent verbatim";
+		const first = mapper.map({ type: "content_streaming", content: chunk });
+		const resent = mapper.map({ type: "content_streaming", content: chunk });
+
+		expect(first).toEqual([{ kind: "assistant_delta", text: chunk }]);
+		expect(resent).toEqual([]);
+	});
+
+	it("still emits legitimately repeated short tokens", () => {
+		const mapper = new BackboardStreamEventMapper();
+		mapper.map({ type: "content_streaming", content: "Sing: " });
+		const first = mapper.map({ type: "content_streaming", content: "la" });
+		const second = mapper.map({ type: "content_streaming", content: "la" });
+
+		expect(first).toEqual([{ kind: "assistant_delta", text: "la" }]);
+		expect(second).toEqual([{ kind: "assistant_delta", text: "la" }]);
+	});
+
+	it("recovers from segment-cumulative frames that extend the previous frame", () => {
+		const mapper = new BackboardStreamEventMapper();
+		mapper.map({ type: "content_streaming", content: "Hello " });
+		mapper.map({ type: "content_streaming", content: "world" });
+		const restart = mapper.map({
+			type: "content_streaming",
+			content: "! And then",
+		});
+		const grown = mapper.map({
+			type: "content_streaming",
+			content: "! And then some",
+		});
+
+		expect(restart).toEqual([{ kind: "assistant_delta", text: "! And then" }]);
+		expect(grown).toEqual([{ kind: "assistant_delta", text: " some" }]);
+	});
+
+	it("adopts a diverged backend accumulation without re-emitting the blob", () => {
+		const mapper = new BackboardStreamEventMapper();
+		const first = mapper.map({
+			type: "content_streaming",
+			accumulated_content: "Once upon",
+		});
+		const diverged = mapper.map({
+			type: "content_streaming",
+			accumulated_content: "Once more",
+		});
+		const resumed = mapper.map({
+			type: "content_streaming",
+			accumulated_content: "Once more!",
+		});
+
+		expect(first).toEqual([{ kind: "assistant_delta", text: "Once upon" }]);
+		expect(diverged).toEqual([{ kind: "assistant_delta", text: "more" }]);
+		expect(resumed).toEqual([{ kind: "assistant_delta", text: "!" }]);
+	});
+
+	it("strips DSML markup from finalized message text", () => {
+		const events = mapStreamPayloadToEvents({
+			type: "run_ended",
+			final_content: "Removed the duplicate. <｜DSML｜tool_calls>leftover",
+		});
+		const completed = events.find((e) => e.kind === "completed");
+		expect(completed).toBeDefined();
+		if (completed && completed.kind === "completed") {
+			expect(completed.finalText).toBe("Removed the duplicate.");
+		}
 	});
 });

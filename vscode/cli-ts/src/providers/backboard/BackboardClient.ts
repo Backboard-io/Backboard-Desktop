@@ -32,6 +32,11 @@ export class BackboardClient {
 		private readonly serverLog?: ServerEventLog,
 	) {}
 
+	/** Base API URL, used to namespace host-side caches per backend. */
+	get apiUrl(): string {
+		return this.env.apiUrl;
+	}
+
 	private headers(): Record<string, string> {
 		return {
 			"X-API-Key": this.env.apiKey,

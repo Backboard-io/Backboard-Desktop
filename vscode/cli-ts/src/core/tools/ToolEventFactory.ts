@@ -1,6 +1,7 @@
 import type { AgentEvent, ToolCallRef } from "../bus/events.ts";
 import { requireAgentToolOutput } from "./AgentToolOutputGuard.ts";
 import type { Tool } from "./Tool.ts";
+import type { FileEditPreview } from "./ToolResult.ts";
 import type { ToolResultDetailLine } from "./ToolResultDetail.ts";
 
 export function toolStartEvent(
@@ -46,6 +47,7 @@ export function toolResultEvent(
 	title: string,
 	detail?: string,
 	detailLines?: ToolResultDetailLine[],
+	fileEdits?: FileEditPreview[],
 ): AgentEvent {
 	const name = tool.displayName;
 	if (tool.agentName === "agent") {
@@ -66,6 +68,7 @@ export function toolResultEvent(
 		title,
 		...(detail ? { detail } : {}),
 		...(detailLines ? { detailLines } : {}),
+		...(fileEdits?.length ? { fileEdits } : {}),
 	};
 }
 

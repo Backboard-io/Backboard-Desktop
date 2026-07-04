@@ -27,6 +27,7 @@ import { IChatContentPart, IChatContentPartRenderContext } from './chatContentPa
 import { IChatRendererContent, isResponseVM } from '../../../common/model/chatViewModel.js';
 import { ChatTreeItem } from '../../chat.js';
 import { Codicon } from '../../../../../../base/common/codicons.js';
+import { ThemeIcon } from '../../../../../../base/common/themables.js';
 import { HoverPosition } from '../../../../../../base/browser/ui/hover/hoverWidget.js';
 import { IHoverService } from '../../../../../../platform/hover/browser/hover.js';
 import { IContextKey, IContextKeyService } from '../../../../../../platform/contextkey/common/contextkey.js';
@@ -884,8 +885,9 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 
 			this._footerRow.appendChild(leftControls);
 
-			// Right side: hint + submit
+			// Right side: dismiss hint + submit
 			const rightControls = dom.$('.chat-question-footer-right');
+			this.renderDismissHint(rightControls);
 
 			const hint = dom.$('span.chat-question-submit-hint');
 			hint.textContent = isMacintosh
@@ -896,7 +898,7 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 
 			const submitButton = interactiveStore.add(new Button(rightControls, { ...defaultButtonStyles }));
 			submitButton.element.classList.add('chat-question-submit-button');
-			submitButton.label = localize('submit', 'Submit');
+			submitButton.label = localize('chat.questionCarousel.submitLabel', 'Submit {0}', '\u23CE');
 			interactiveStore.add(submitButton.onDidClick(() => this.submit()));
 			this._submitButton = submitButton;
 
@@ -958,6 +960,7 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 			this._footerRow.appendChild(leftControls);
 
 			const rightControls = dom.$('.chat-question-footer-right');
+			this.renderDismissHint(rightControls);
 
 			const hint = dom.$('span.chat-question-submit-hint');
 			hint.textContent = isMacintosh
@@ -968,13 +971,31 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 
 			const submitButton = interactiveStore.add(new Button(rightControls, { ...defaultButtonStyles }));
 			submitButton.element.classList.add('chat-question-submit-button');
-			submitButton.label = localize('submit', 'Submit');
+			submitButton.label = localize('chat.questionCarousel.submitLabel', 'Submit {0}', '\u23CE');
 			interactiveStore.add(submitButton.onDidClick(() => this.submit()));
 			this._submitButton = submitButton;
 
 			this._footerRow.appendChild(rightControls);
 			this.domNode.append(this._footerRow);
 		}
+	}
+
+	/**
+	 * Renders the "Dismiss  ESC" hint into `container`, shown only when the
+	 * carousel can actually be dismissed with Escape (`carousel.allowSkip`).
+	 * Shared between `renderFooter()` and `renderSingleQuestionFooter()`.
+	 */
+	private renderDismissHint(container: HTMLElement): void {
+		if (!this.carousel.allowSkip) {
+			return;
+		}
+
+		const dismissHint = dom.$('span.chat-question-dismiss-hint');
+		dismissHint.textContent = localize('chat.questionCarousel.dismiss', 'Dismiss');
+		const dismissKey = dom.$('span.chat-question-dismiss-key');
+		dismissKey.textContent = localize('chat.questionCarousel.dismissKey', 'ESC');
+		dismissHint.appendChild(dismissKey);
+		container.appendChild(dismissHint);
 	}
 
 	private getLabelWithKeybinding(label: string, actionId: string): string {
@@ -1080,16 +1101,14 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 		});
 
 		const listItems: HTMLElement[] = [];
-		const indicators: HTMLElement[] = [];
 		const updateSelection = (newIndex: number) => {
-			// Update visual state
+			// Update visual state. The up/down chevrons (arrow-key navigation hint)
+			// are always present in the indicator; only the currently-selected row
+			// reveals them (via the `.selected` class in CSS).
 			listItems.forEach((item, i) => {
 				const isSelected = i === newIndex;
 				item.classList.toggle('selected', isSelected);
 				item.setAttribute('aria-selected', String(isSelected));
-				const indicator = indicators[i];
-				indicator.classList.toggle('codicon', isSelected);
-				indicator.classList.toggle('codicon-check', isSelected);
 			});
 			// Update aria-activedescendant for screen reader announcements
 			if (newIndex >= 0 && newIndex < listItems.length) {
@@ -1117,12 +1136,14 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 			number.textContent = `${index + 1}`;
 			listItem.appendChild(number);
 
-			// Selection indicator (checkmark when selected)
+			// Up/down chevrons hint that arrow keys navigate between options.
+			// Always rendered; CSS reveals them only on the selected/focused row.
 			const indicator = dom.$('.chat-question-list-indicator');
-			if (isSelected) {
-				indicator.classList.add('codicon', 'codicon-check');
-			}
-			indicators.push(indicator);
+			const upArrow = dom.$('span');
+			upArrow.classList.add(...ThemeIcon.asClassNameArray(Codicon.chevronUp));
+			const downArrow = dom.$('span');
+			downArrow.classList.add(...ThemeIcon.asClassNameArray(Codicon.chevronDown));
+			indicator.append(upArrow, downArrow);
 
 			// Label with optional description (format: "Title - Description")
 			const label = dom.$('.chat-question-list-label');
@@ -1181,7 +1202,8 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 			const freeformContainer = dom.$('.chat-question-freeform');
 
 			const freeformNumber = dom.$('.chat-question-freeform-number');
-			freeformNumber.textContent = `${orderedOptions.length + 1}`;
+			freeformNumber.classList.add(...ThemeIcon.asClassNameArray(Codicon.edit));
+			freeformNumber.setAttribute('aria-hidden', 'true');
 			freeformContainer.appendChild(freeformNumber);
 
 			freeformTextarea = dom.$<HTMLTextAreaElement>('textarea.chat-question-freeform-textarea');
@@ -1389,7 +1411,8 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 
 			// Number indicator for freeform (comes after all options)
 			const freeformNumber = dom.$('.chat-question-freeform-number');
-			freeformNumber.textContent = `${orderedOptions.length + 1}`;
+			freeformNumber.classList.add(...ThemeIcon.asClassNameArray(Codicon.edit));
+			freeformNumber.setAttribute('aria-hidden', 'true');
 			freeformContainer.appendChild(freeformNumber);
 
 			freeformTextarea = dom.$<HTMLTextAreaElement>('textarea.chat-question-freeform-textarea');

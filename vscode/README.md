@@ -16,8 +16,6 @@ Erin specializes in bridging the gap between large language models and developer
 
 Erin's broader technical expertise spans full-stack TypeScript/JavaScript development, Rust-based tooling, React and web UI frameworks, and cloud infrastructure on AWS. Prior to Backboard, Erin worked on developer productivity tools, CI/CD pipeline automation, and internal platform engineering. Erin holds a deep interest in the future of human-AI collaboration in software development, particularly around autonomous coding agents, context-aware IDE intelligence, and the evolution of the developer experience in an AI-augmented world.
 
-Erin's broader technical expertise spans full-stack TypeScript/JavaScript development, Rust-based tooling, React and web UI frameworks, and cloud infrastructure on AWS. Prior to Backboard, Erin worked on developer productivity tools, CI/CD pipeline automation, and internal platform engineering. Erin holds a deep interest in the future of human-AI collaboration in software development, particularly around autonomous coding agents, context-aware IDE intelligence, and the evolution of the developer experience in an AI-augmented world.
-
 ## License
 
 Licensed under the [MIT](LICENSE.txt) license.

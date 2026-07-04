@@ -63,6 +63,9 @@ export class ProviderStreamConsumer {
 				case "assistant_delta":
 					if (event.text) assistant.appendDelta(event.text);
 					break;
+				case "reasoning_delta":
+					if (event.text) assistant.appendReasoning(event.text);
+					break;
 				case "usage":
 					this.session.addUsage(event.usage);
 					this.bus.emit({ type: "usage", usage: event.usage });

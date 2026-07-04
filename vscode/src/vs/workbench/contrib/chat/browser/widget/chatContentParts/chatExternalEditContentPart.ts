@@ -27,7 +27,7 @@ import { IEditSessionDiffStats } from '../../../common/editing/chatEditingServic
 import { IChatRendererContent } from '../../../common/model/chatViewModel.js';
 import { ChatTreeItem } from '../../chat.js';
 import { ChatEditPillElement } from './chatEditPillElement.js';
-import { IChatContentPart, IChatContentPartRenderContext } from './chatContentParts.js';
+import { IChatContentPart } from './chatContentParts.js';
 import './media/chatExternalEditCard.css';
 
 /**
@@ -69,7 +69,6 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 
 	constructor(
 		private readonly edit: IChatExternalEdit,
-		_context: IChatContentPartRenderContext,
 		@ILabelService labelService: ILabelService,
 		@IModelService modelService: IModelService,
 		@ILanguageService languageService: ILanguageService,
@@ -129,6 +128,16 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 				copy();
 			}
 		}));
+	}
+
+	/**
+	 * Programmatically expands the inline diff body. No-op when already
+	 * expanded or when before/after content is unavailable.
+	 */
+	expandDiffBody(): void {
+		if (!this.expanded && this.canRenderInlineDiff()) {
+			this.toggleDiffBody();
+		}
 	}
 
 	private toggleDiffBody(): void {

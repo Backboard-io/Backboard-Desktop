@@ -216,6 +216,23 @@ export class AgentController {
 			turnStarted = true;
 
 			const ctx = this.buildContext(signal);
+			// Kick off the independent network pre-flight concurrently with the
+			// local pre-flight so first-token latency is the max of the two, not
+			// the sum. The base assistant inputs are computed from the STABLE
+			// base prompt/tools (no dependency on the turn's dynamic MCP tools),
+			// so resolving it does not race `syncDynamicTools`.
+			const preflight = Promise.all([
+				this.loopFactory.resolveAssistantId({
+					systemPrompt: this.baseSystemPrompt(),
+					tools: this.baseTools(),
+					signal,
+				}),
+				createRuntimeThinkingResolver(config, this.deps.client),
+			]);
+			// Attach a handler so a throw in the local pre-flight below (before we
+			// await `preflight`) can't turn it into an unhandled rejection; the
+			// real error still surfaces via the `await preflight` / outer catch.
+			preflight.catch(() => undefined);
 			await this.deps.syncDynamicTools?.(signal);
 			const skillPromptContext =
 				await this.deps.skillController.buildPromptContext(text);
@@ -239,15 +256,7 @@ export class AgentController {
 					promptHook?.additionalContext,
 				),
 			});
-			const assistantId = await this.loopFactory.resolveAssistantId({
-				systemPrompt: this.baseSystemPrompt(),
-				tools: this.baseTools(),
-				signal,
-			});
-			const thinkingResolver = await createRuntimeThinkingResolver(
-				config,
-				this.deps.client,
-			);
+			const [assistantId, thinkingResolver] = await preflight;
 
 			const loop = this.loopFactory.createLoop({
 				scheduler: this.scheduler,
@@ -344,6 +353,26 @@ export class AgentController {
 		}
 	}
 
+	/**
+	 * Pre-resolves the stable base assistant so the first real turn skips the
+	 * ~1s `GET /assistants` list scan (and populates the on-disk cache). Called
+	 * by serve mode's `warmup` op right after the process is spawned — i.e.
+	 * during user think-time, before the first message. Best-effort: any
+	 * failure is swallowed and the first turn resolves the assistant normally.
+	 */
+	async prewarmAssistant(): Promise<void> {
+		try {
+			const controller = new AbortController();
+			await this.loopFactory.resolveAssistantId({
+				systemPrompt: this.baseSystemPrompt(),
+				tools: this.baseTools(),
+				signal: controller.signal,
+			});
+		} catch {
+			// Best-effort warm-up; the first turn will resolve it if this failed.
+		}
+	}
+
 	/** Runs SessionStart once at init; SessionEnd is paired in dispose(). */
 	async start(): Promise<void> {
 		if (this.sessionHooksStarted) return;
@@ -360,10 +389,13 @@ export class AgentController {
 
 	private baseSystemPrompt(): string {
 		const enabledTools = this.baseTools().map((tool) => tool.function.name);
-		return getSystemPrompt({
-			enabledTools,
-			startupEnvironmentPrompt: this.deps.startupEnvironmentPrompt,
-		});
+		// Deliberately EXCLUDES the startup-environment prompt: that content is
+		// volatile (date, cwd, git branch, tool versions, directory listing) and
+		// would make the assistant fingerprint change every day / workspace /
+		// branch, defeating the assistant cache and creating backend assistant
+		// sprawl. The base assistant must stay stable; the live environment is
+		// injected per turn via the `systemPrompt` override in `runTurn`.
+		return getSystemPrompt({ enabledTools });
 	}
 
 	private baseTools(): OpenAITool[] {

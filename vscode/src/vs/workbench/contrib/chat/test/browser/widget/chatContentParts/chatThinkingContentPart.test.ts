@@ -582,7 +582,7 @@ suite('ChatThinkingContentPart', () => {
 				beforeContentUri: URI.parse('chat-edit://before/titlebarpart.css'),
 				afterContentUri: URI.parse('chat-edit://after/titlebarpart.css'),
 			};
-			const part = store.add(instantiationService.createInstance(ChatExternalEditContentPart, edit, createMockRenderContext(true)));
+			const part = store.add(instantiationService.createInstance(ChatExternalEditContentPart, edit));
 			mainWindow.document.body.appendChild(part.domNode);
 			disposables.add(toDisposable(() => part.domNode.remove()));
 

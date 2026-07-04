@@ -50,12 +50,16 @@
 	min-width: 0;
 }
 
-/* Title row: title + actions */
+/* Title row: title + actions.
+	Reserve space on the right for the absolutely-positioned floating session
+	toolbar (see .chat-composite-bar-toolbar-floating) so the title text
+	ellipsizes before it reaches the buttons instead of clipping underneath. */
 .chat-composite-bar-title-row {
 	display: flex;
 	align-items: center;
 	gap: 6px;
 	height: 26px;
+	padding-right: var(--chat-session-toolbar-reserve, 104px);
 }
 
 /* Status icon column — sits beside the main column, centered on the title line.
@@ -273,12 +277,15 @@
 	padding: 0 2px;
 }
 
-/* Floating variant: a lightweight, absolutely positioned toolbar with no header chrome */
+/* Floating variant: a lightweight, absolutely positioned toolbar with no header
+	chrome. Pinned to the very top-right so it sits above the title baseline and
+	clears the meta row beneath the title. The title row reserves matching
+	horizontal space (--chat-session-toolbar-reserve) so text never runs under it. */
 .chat-composite-bar.chat-composite-bar-toolbar-floating {
 	position: absolute;
-	top: 6px;
+	top: 2px;
 	right: 10px;
-	height: 35px;
+	height: 28px;
 	flex-direction: row;
 	align-items: center;
 	padding: 0;

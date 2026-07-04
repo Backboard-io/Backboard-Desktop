@@ -52,7 +52,7 @@
 	border: 1px solid var(--vscode-panel-border);
 	border-radius: 8px;
 	background: color-mix(in srgb, var(--session-view-background) 94%, var(--vscode-editor-background));
-	box-shadow: 0 18px 48px color-mix(in srgb, var(--vscode-widget-shadow) 80%, transparent);
+	box-shadow: 0 8px 24px color-mix(in srgb, var(--vscode-widget-shadow) 50%, transparent);
 	text-align: center;
 }
 

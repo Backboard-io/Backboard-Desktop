@@ -59,6 +59,9 @@ export class ChatEditPillElement extends Disposable {
 
 	private _labelAddedEl: HTMLElement | undefined;
 	private _labelRemovedEl: HTMLElement | undefined;
+	private _displayedAdded = 0;
+	private _displayedRemoved = 0;
+	private readonly _diffAnimation = this._register(new MutableDisposable());
 
 	private readonly _onDidClick = this._register(new Emitter<IOpenEditorOptions>());
 	/** Fires when the pill is activated (click / keyboard). Carries the standard open-editor options. */
@@ -161,10 +164,13 @@ export class ChatEditPillElement extends Disposable {
 	 */
 	setDiff(diff: { added: number; removed: number } | undefined): void {
 		if (!diff) {
+			this._diffAnimation.clear();
 			this._labelAddedEl?.remove();
 			this._labelRemovedEl?.remove();
 			this._labelAddedEl = undefined;
 			this._labelRemovedEl = undefined;
+			this._displayedAdded = 0;
+			this._displayedRemoved = 0;
 			return;
 		}
 		if (!this._labelAddedEl) {
@@ -173,8 +179,58 @@ export class ChatEditPillElement extends Disposable {
 		if (!this._labelRemovedEl) {
 			this._labelRemovedEl = this.pillElement.appendChild($('span.label-removed'));
 		}
-		this._labelAddedEl.textContent = `+${diff.added}`;
-		this._labelRemovedEl.textContent = `-${diff.removed}`;
+		this._animateDiff(diff.added, diff.removed);
+	}
+
+	/**
+	 * Counts the +added / -removed labels up (or down) to their new targets so
+	 * the numbers visibly tick as edits land, rather than snapping. Honors the
+	 * user's reduced-motion preference by setting the final value immediately.
+	 */
+	private _animateDiff(targetAdded: number, targetRemoved: number): void {
+		this._diffAnimation.clear();
+		const addedEl = this._labelAddedEl;
+		const removedEl = this._labelRemovedEl;
+		if (!addedEl || !removedEl) {
+			return;
+		}
+		const render = (added: number, removed: number): void => {
+			addedEl.textContent = `+${added}`;
+			removedEl.textContent = `-${removed}`;
+			this._displayedAdded = added;
+			this._displayedRemoved = removed;
+		};
+
+		const fromAdded = this._displayedAdded;
+		const fromRemoved = this._displayedRemoved;
+		const targetWindow = dom.getWindow(this.pillElement);
+		const reducedMotion = targetWindow.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+		if (reducedMotion || (fromAdded === targetAdded && fromRemoved === targetRemoved)) {
+			render(targetAdded, targetRemoved);
+			return;
+		}
+
+		// Duration scales gently with the size of the change, capped so large
+		// diffs don't crawl. Eased so the count decelerates as it lands.
+		const maxDelta = Math.max(Math.abs(targetAdded - fromAdded), Math.abs(targetRemoved - fromRemoved));
+		const durationMs = Math.min(150 + maxDelta * 18, 700);
+		const start = Date.now();
+		const easeOutCubic = (t: number): number => 1 - (1 - t) ** 3;
+		const step = (): void => {
+			const elapsed = Date.now() - start;
+			const t = Math.min(1, elapsed / durationMs);
+			const eased = easeOutCubic(t);
+			render(
+				Math.round(fromAdded + (targetAdded - fromAdded) * eased),
+				Math.round(fromRemoved + (targetRemoved - fromRemoved) * eased),
+			);
+			if (t < 1) {
+				this._diffAnimation.value = dom.scheduleAtNextAnimationFrame(targetWindow, step);
+			} else {
+				this._diffAnimation.clear();
+			}
+		};
+		this._diffAnimation.value = dom.scheduleAtNextAnimationFrame(targetWindow, step);
 	}
 
 	/**

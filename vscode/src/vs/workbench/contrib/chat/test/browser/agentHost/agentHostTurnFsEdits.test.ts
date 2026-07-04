@@ -28,14 +28,26 @@ suite('agentHostTurnFsEdits', () => {
 				gitObject: isIgnoredAgentPath('/repo/.git/objects/84/18b716db4a948a0b53c14417a85c23fbfbe1'),
 				gitTmp: isIgnoredAgentPath('/repo/.git/objects/tmp_obj_mxrwlz'),
 				nodeModules: isIgnoredAgentPath('/repo/node_modules/foo/index.js'),
+				atomicTmp: isIgnoredAgentPath('/repo/src/AgentController.ts.tmp.98222.fde4c15a7895'),
+				postfixTmp: isIgnoredAgentPath('/repo/src/AgentController.ts.98222.1720000000000.fde4c15a7895.tmp'),
+				vscTmp: isIgnoredAgentPath('/repo/src/AgentController.ts.vsctmp'),
+				bunBuildTmp: isIgnoredAgentPath('/repo/cli-ts/.18bf259f3f2fcae3-00000000.bun-build'),
+				codesignTmp: isIgnoredAgentPath('/repo/bin/backboard-cli-ts.cstemp'),
 				normalFile: isIgnoredAgentPath('/repo/src/EXTENSIONS_AND_RIGHT_PANEL.md'),
 				gitLikeName: isIgnoredAgentPath('/repo/src/gitHelpers.ts'),
+				normalTmpName: isIgnoredAgentPath('/repo/src/template.ts'),
 			}, {
 				gitObject: true,
 				gitTmp: true,
 				nodeModules: true,
+				atomicTmp: true,
+				postfixTmp: true,
+				vscTmp: true,
+				bunBuildTmp: true,
+				codesignTmp: true,
 				normalFile: false,
 				gitLikeName: false,
+				normalTmpName: false,
 			});
 		});
 	});

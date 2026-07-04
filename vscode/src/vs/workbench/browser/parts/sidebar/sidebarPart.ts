@@ -6,7 +6,6 @@
 import './media/sidebarpart.css';
 import './sidebarActions.js';
 import { $, addDisposableListener, append, EventType } from '../../../../base/browser/dom.js';
-import { Codicon } from '../../../../base/common/codicons.js';
 import { ActivityBarPosition, IWorkbenchLayoutService, LayoutSettings, Parts, Position as SideBarPosition } from '../../../services/layout/browser/layoutService.js';
 import { SidebarFocusContext, ActiveViewletContext } from '../../../common/contextkeys.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
@@ -138,10 +137,10 @@ export class SidebarPart extends AbstractPaneCompositePart {
 		const navigation = $('.sidebar-activity-navigation-header');
 		this.setHeaderArea(navigation);
 		const entries: readonly { label: string; icon?: string; iconClass?: string; command: string }[] = [
-			{ label: localize('sidebarActivityExplorer', "Explorer"), icon: Codicon.folderOpened.id, command: 'workbench.view.explorer' },
-			{ label: localize('sidebarActivitySearch', "Search"), icon: Codicon.searchSparkle.id, command: 'workbench.view.search' },
-			{ label: localize('sidebarActivitySourceControl', "Source Control"), icon: Codicon.gitPullRequest.id, command: 'workbench.view.scm' },
-			{ label: localize('sidebarActivityExtensions', "Extensions"), icon: Codicon.package.id, command: 'workbench.view.extensions' },
+			{ label: localize('sidebarActivityExplorer', "Explorer"), iconClass: 'sidebar-activity-navigation-explorer-icon', command: 'workbench.view.explorer' },
+			{ label: localize('sidebarActivitySearch', "Search"), iconClass: 'sidebar-activity-navigation-search-icon', command: 'workbench.view.search' },
+			{ label: localize('sidebarActivitySourceControl', "Source Control"), iconClass: 'sidebar-activity-navigation-scm-icon', command: 'workbench.view.scm' },
+			{ label: localize('sidebarActivityExtensions', "Extensions"), iconClass: 'sidebar-activity-navigation-extensions-icon', command: 'workbench.view.extensions' },
 			{ label: localize('sidebarActivityMarketplace', "Marketplace"), iconClass: 'sidebar-activity-navigation-marketplace-icon', command: 'workbench.view.backboardMarketplace' },
 		];
 

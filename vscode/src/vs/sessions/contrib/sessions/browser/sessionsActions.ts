@@ -18,7 +18,7 @@ import { EditorAreaFocusContext, IsAuxiliaryWindowContext, IsSessionsWindowConte
 import { IWorkbenchLayoutService, Parts } from '../../../../workbench/services/layout/browser/layoutService.js';
 import { Menus } from '../../../browser/menus.js';
 import { SessionsCategories } from '../../../common/categories.js';
-import { CanGoBackContext, CanGoForwardContext, ChatSessionProviderIdContext, MultipleSessionsVisibleContext, SessionIsArchivedContext, SessionIsCreatedContext, SessionIsMaximizedContext, SessionIsStickyContext, SessionsFocusContext, SessionSupportsMultipleChatsContext, SessionsWelcomeVisibleContext } from '../../../common/contextkeys.js';
+import { CanGoBackContext, CanGoForwardContext, ChatSessionProviderIdContext, MultipleSessionsVisibleContext, SessionIsArchivedContext, SessionIsCreatedContext, SessionIsMaximizedContext, SessionIsStickyContext, SessionsFocusContext, SessionsWelcomeVisibleContext } from '../../../common/contextkeys.js';
 import { ANY_AGENT_HOST_PROVIDER_RE } from '../../../common/agentHostSessionsProvider.js';
 import { IActiveSession } from '../../../services/sessions/common/sessionsManagement.js';
 import { ISessionsService } from '../../../services/sessions/browser/sessionsService.js';
@@ -360,12 +360,9 @@ registerAction2(class AddChatToSessionBarAction extends Action2 {
 			id: 'sessions.chatCompositeBar.addChat',
 			title: localize2('chatCompositeBar.addChat', "New Chat"),
 			icon: Codicon.add,
-			menu: {
-				id: Menus.SessionBarToolbar,
-				when: ContextKeyExpr.and(SessionIsCreatedContext, SessionSupportsMultipleChatsContext, SessionIsArchivedContext.negate()),
-				group: 'navigation',
-				order: 10,
-			},
+			// Intentionally not contributed to Menus.SessionBarToolbar: the "+"
+			// button crowded the session-title row and overlapped the title text.
+			// New chats are created from the session list / launcher instead.
 		});
 	}
 

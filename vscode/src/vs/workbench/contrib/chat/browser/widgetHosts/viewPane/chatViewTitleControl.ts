@@ -24,6 +24,8 @@ import { AgentSessionsPicker } from '../../agentSessions/agentSessionsPicker.js'
 import { IAgentSession } from '../../agentSessions/agentSessionsModel.js';
 import { IAgentSessionsService } from '../../agentSessions/agentSessionsService.js';
 import { openSession } from '../../agentSessions/agentSessionsOpener.js';
+import { Codicon } from '../../../../../../base/common/codicons.js';
+import { ThemeIcon } from '../../../../../../base/common/themables.js';
 
 export interface IChatViewTitleDelegate {
 	focusChat(): void;
@@ -32,7 +34,7 @@ export interface IChatViewTitleDelegate {
 
 export class ChatViewTitleControl extends Disposable {
 
-	private static readonly DEFAULT_TITLE = localize('chat', "Backboard");
+	private static readonly DEFAULT_TITLE = localize('chat', "New Chat");
 	private static readonly PICK_AGENT_SESSION_ACTION_ID = 'workbench.action.chat.pickAgentSession';
 	private static readonly MAX_HISTORY_TABS = 40;
 
@@ -44,6 +46,11 @@ export class ChatViewTitleControl extends Disposable {
 
 	private titleContainer: HTMLElement | undefined;
 	private titleLabel = this._register(new MutableDisposable<ChatViewTitleLabel>());
+
+	/** The root `.chat-view-title-container` element (tabs + session toolbars). */
+	get element(): HTMLElement | undefined {
+		return this.titleContainer;
+	}
 
 	private model: IChatModel | undefined;
 	private modelDisposables = this._register(new MutableDisposable());
@@ -233,10 +240,35 @@ export class ChatViewTitleControl extends Disposable {
 		const previousScrollLeft = this.tabsContainer.scrollLeft;
 		this.tabsContainer.replaceChildren();
 
+		const previousSessionResourceKey = this.lastRenderedCurrentSessionResource;
 		const currentSessionResource = this.model?.sessionResource;
 		const currentSessionResourceKey = currentSessionResource?.toString();
-		const shouldRevealCurrentTab = this.lastRenderedCurrentSessionResource !== currentSessionResourceKey;
+		const shouldRevealCurrentTab = previousSessionResourceKey !== currentSessionResourceKey;
 		this.lastRenderedCurrentSessionResource = currentSessionResourceKey;
+
+		// A session's resource can change identity while it's still "the same"
+		// tab from the user's perspective — e.g. a brand-new local draft gets
+		// promoted to a persisted resource on its first message
+		// (ChatSessionsService#onDidCommitSession). If the previous current
+		// resource was never a real, known session (just a local draft we were
+		// tracking as the open tab), treat this as a rename: swap it in place
+		// instead of leaving the stale draft entry behind and adding the new
+		// resource as an additional tab — otherwise sending the first message in
+		// a new chat looks like it created a second tab.
+		if (
+			shouldRevealCurrentTab
+			&& previousSessionResourceKey
+			&& currentSessionResourceKey
+			&& this.openSessionTabs.has(previousSessionResourceKey)
+			&& !this.agentSessionsService.model.sessions.some(session => session.resource.toString() === previousSessionResourceKey)
+		) {
+			const index = this.tabOrder.indexOf(previousSessionResourceKey);
+			if (index !== -1) {
+				this.tabOrder[index] = currentSessionResourceKey;
+			}
+			this.openSessionTabs.delete(previousSessionResourceKey);
+		}
+
 		if (currentSessionResource && currentSessionResourceKey && !this.closedSessionTabs.has(currentSessionResourceKey)) {
 			this.openSessionTabs.set(currentSessionResourceKey, { resource: currentSessionResource, label: currentTitle });
 		}
@@ -268,16 +300,32 @@ export class ChatViewTitleControl extends Disposable {
 			if (!session && !tab) {
 				continue;
 			}
+			const isCurrent = resourceKey === currentSessionResourceKey;
 			this.addTab({
-				label: resourceKey === currentSessionResourceKey ? currentTitle : (session?.label ?? tab?.label ?? ChatViewTitleControl.DEFAULT_TITLE),
-				active: resourceKey === currentSessionResourceKey,
-				isCurrent: resourceKey === currentSessionResourceKey,
+				label: isCurrent ? currentTitle : (session?.label ?? tab?.label ?? ChatViewTitleControl.DEFAULT_TITLE),
+				active: isCurrent,
+				isCurrent,
+				// The current tab shows the "new session" icon until it has a response;
+				// every other (history) tab necessarily already has one.
+				isNew: isCurrent && (!this.model || this.model.getRequests().length === 0),
 				session,
 				sessionResource: session ? undefined : tab?.resource,
 			});
 		}
 
-		this.tabsContainer.scrollLeft = shouldRevealCurrentTab ? 0 : previousScrollLeft;
+		if (shouldRevealCurrentTab) {
+			// Scroll to wherever the newly active tab actually sits — it's not
+			// necessarily near the start once there's history, and jumping to 0
+			// unconditionally would scroll it right back out of view.
+			const activeTab = this.tabsContainer.querySelector<HTMLElement>('.chat-view-title-tab-active');
+			if (activeTab) {
+				activeTab.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+			} else {
+				this.tabsContainer.scrollLeft = 0;
+			}
+		} else {
+			this.tabsContainer.scrollLeft = previousScrollLeft;
+		}
 	}
 
 	private getHistoryTabSessions(): IAgentSession[] {
@@ -292,16 +340,20 @@ export class ChatViewTitleControl extends Disposable {
 		return session.timing.lastRequestEnded ?? session.timing.lastRequestStarted ?? session.timing.created;
 	}
 
-	private addTab(options: { label: string; active: boolean; isCurrent?: boolean; session?: IAgentSession; sessionResource?: IChatModel['sessionResource'] }): void {
+	private addTab(options: { label: string; active: boolean; isCurrent?: boolean; isNew?: boolean; session?: IAgentSession; sessionResource?: IChatModel['sessionResource'] }): void {
 		if (!this.tabsContainer) {
 			return;
 		}
 
 		const label = options.label.trim() || ChatViewTitleControl.DEFAULT_TITLE;
 		const tabElements = h('div.chat-view-title-tab@root', { role: 'button', tabIndex: 0, title: label }, [
+			h('span.chat-view-title-tab-icon@icon'),
 			h('span.chat-view-title-tab-label@label'),
 			h('span.codicon.codicon-close.chat-view-title-tab-close@close', { role: 'button', title: localize('chat.closeSessionTab', "Close Tab"), ariaLabel: localize('chat.closeSessionTab', "Close Tab") }),
 		]);
+		// Not-yet-responded-to sessions show the Backboard mark; sessions with at
+		// least one response show a chat bubble.
+		tabElements.icon.classList.add(...ThemeIcon.asClassNameArray(options.isNew ? ThemeIcon.fromId('backboard-logo') : Codicon.comment));
 		tabElements.label.textContent = label;
 		const tab = tabElements.root;
 		tab.classList.toggle('chat-view-title-tab-active', options.active);

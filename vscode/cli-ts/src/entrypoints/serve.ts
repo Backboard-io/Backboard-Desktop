@@ -235,6 +235,18 @@ export async function runServe(argv: string[]): Promise<void> {
 						if (control.memory !== undefined) {
 							config.setMemory(parseMemoryMode(control.memory));
 						}
+						if (control.computerUse !== undefined) {
+							config.setComputerUse(control.computerUse);
+						}
+						if (control.browserUse !== undefined) {
+							config.setBrowserUse(control.browserUse);
+						}
+						if (control.notify !== undefined) {
+							config.setNotifyEnabled(control.notify);
+						}
+						if (control.imageGeneration !== undefined) {
+							config.setImageGeneration(control.imageGeneration);
+						}
 					},
 				});
 				writeRecord("serve:turn", requestId, { status });
@@ -246,6 +258,13 @@ export async function runServe(argv: string[]): Promise<void> {
 				});
 				if (control.requestId !== undefined) {
 					writeRecord("serve:turn", control.requestId, { status });
+				}
+				return;
+			}
+			case "warmup": {
+				await controller.prewarmAssistant();
+				if (control.requestId !== undefined) {
+					writeRecord("serve:warm", control.requestId, { ok: true });
 				}
 				return;
 			}

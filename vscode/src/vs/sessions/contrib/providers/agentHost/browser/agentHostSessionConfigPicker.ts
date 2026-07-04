@@ -100,6 +100,21 @@ export function getConfigIcon(property: string, value: unknown | undefined): The
 		}
 		return Codicon.shield;
 	}
+	if (property === 'webSearch') {
+		return Codicon.globe;
+	}
+	if (property === 'computerUse') {
+		return Codicon.deviceDesktop;
+	}
+	if (property === 'browserUse') {
+		return Codicon.window;
+	}
+	if (property === 'notifications') {
+		return Codicon.bell;
+	}
+	if (property === 'imageGeneration') {
+		return Codicon.symbolColor;
+	}
 	return undefined;
 }
 

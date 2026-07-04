@@ -2,6 +2,10 @@
 	"nameShort": "Backboard Studio",
 	"nameLong": "Backboard Studio",
 	"applicationName": "backboard-studio-dev",
+	"extensionsGallery": {
+		"serviceUrl": "https://open-vsx.org/vscode/gallery",
+		"itemUrl": "https://open-vsx.org/vscode/item"
+	},
 	"dataFolderName": ".backboard-studio-dev",
 	"sharedDataFolderName": ".backboard-studio-dev-shared",
 	"win32MutexName": "vscodeoss",

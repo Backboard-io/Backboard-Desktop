@@ -149,4 +149,32 @@ describe("parseControlLine", () => {
 			control,
 		});
 	});
+
+	it("passes through submit computerUse and browserUse toggles", () => {
+		const control = {
+			op: "submit" as const,
+			requestId: "r5",
+			prompt: "go",
+			computerUse: true,
+			browserUse: false,
+		};
+		expect(parseControlLine(JSON.stringify(control))).toEqual({
+			ok: true,
+			control,
+		});
+	});
+
+	it("passes through submit notify and imageGeneration toggles", () => {
+		const control = {
+			op: "submit" as const,
+			requestId: "r6",
+			prompt: "go",
+			notify: true,
+			imageGeneration: false,
+		};
+		expect(parseControlLine(JSON.stringify(control))).toEqual({
+			ok: true,
+			control,
+		});
+	});
 });

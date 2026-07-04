@@ -10,7 +10,7 @@ import { CancellationTokenSource } from '../../../../base/common/cancellation.js
 import { Codicon } from '../../../../base/common/codicons.js';
 import { Event } from '../../../../base/common/event.js';
 import { Disposable, DisposableStore, IDisposable, MutableDisposable } from '../../../../base/common/lifecycle.js';
-import { autorun, derivedObservableWithCache, IObservable } from '../../../../base/common/observable.js';
+import { autorun, derivedObservableWithCache, IObservable, observableValue } from '../../../../base/common/observable.js';
 import { isWeb } from '../../../../base/common/platform.js';
 import { basename, isEqual } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
@@ -22,7 +22,7 @@ import { ILogService } from '../../../../platform/log/common/log.js';
 import { ServiceCollection } from '../../../../platform/instantiation/common/serviceCollection.js';
 import { localize } from '../../../../nls.js';
 import { IActiveSession, ISendRequestOptions, ISessionsManagementService } from '../../../services/sessions/common/sessionsManagement.js';
-import { IChat, ISession, ISessionWorkspace } from '../../../services/sessions/common/session.js';
+import { IChat, ISession, ISessionFolder, ISessionWorkspace } from '../../../services/sessions/common/session.js';
 import { ISessionsService } from '../../../services/sessions/browser/sessionsService.js';
 import { IWorkspaceTrustRequestService } from '../../../../platform/workspace/common/workspaceTrust.js';
 import { WorkspacePicker } from './sessionWorkspacePicker.js';
@@ -40,6 +40,8 @@ import { ChatAgentLocation, ChatModeKind } from '../../../../workbench/contrib/c
 import { EDITOR_DRAG_AND_DROP_BACKGROUND } from '../../../../workbench/common/theme.js';
 import { activeSessionViewBackground, activeSessionViewForeground, agentsPanelBackground } from '../../../common/theme.js';
 import { IPathService } from '../../../../workbench/services/path/common/pathService.js';
+import { IGitRepository, IGitService } from '../../../../workbench/contrib/git/common/gitService.js';
+import { IUriIdentityService } from '../../../../platform/uriIdentity/common/uriIdentity.js';
 import { HiddenItemStrategy, MenuWorkbenchToolBar } from '../../../../platform/actions/browser/toolbar.js';
 import { Menus } from '../../../browser/menus.js';
 
@@ -60,6 +62,10 @@ export class NewChatWidget extends Disposable {
 	private _chatWidgetContent: HTMLElement | undefined;
 	private _composerStackElement: HTMLElement | undefined;
 	private _gitStatusElement: HTMLElement | undefined;
+	/** Bumped to re-resolve the git branch when the (non-observable) workspace picker selection changes or a repository finishes opening. */
+	private readonly _gitStatusTick = observableValue<number>('newChatGitStatusTick', 0);
+	/** Working directory we have already asked the git service to open, so we do not re-open repeatedly. */
+	private _openedGitRepositoryKey: string | undefined;
 
 	/** Recreates the draft once a better/late-registering provider can serve the folder (see {@link _createNewSession}). */
 	private readonly _pendingPreferredUpgrade = new MutableDisposable<IDisposable>();
@@ -89,6 +95,8 @@ export class NewChatWidget extends Disposable {
 		@IFileDialogService private readonly fileDialogService: IFileDialogService,
 		@IFileService private readonly fileService: IFileService,
 		@IPathService private readonly pathService: IPathService,
+		@IGitService private readonly gitService: IGitService,
+		@IUriIdentityService private readonly uriIdentityService: IUriIdentityService,
 	) {
 		super();
 		// On web (vscode.dev / insiders.vscode.dev), use {@link WebWorkspacePicker}
@@ -212,7 +220,6 @@ export class NewChatWidget extends Disposable {
 		this._composerStackElement = composerStack;
 		const workspacePickerContainer = this._renderComposerWorkspaceRow(composerStack);
 		this._widget.render(composerStack);
-		this._renderComposerSuggestions(composerStack);
 		// On web (vscode.dev / insiders.vscode.dev) the workspace picker is
 		// scoped to the currently selected agent host. When no hosts are
 		// known there is nothing for the user to pick, so swap the picker
@@ -265,14 +272,60 @@ export class NewChatWidget extends Disposable {
 
 	private _renderGitStatus(): IDisposable {
 		const store = new DisposableStore();
-		store.add(autorun(reader => this._updateGitStatus(this._session.read(reader)?.workspace.read(reader) ?? this._workspacePicker.selectedResolved?.workspace)));
-		store.add(this._workspacePicker.onDidSelectWorkspace(() => {
-			this._updateGitStatus(this._session.get()?.workspace.get() ?? this._workspacePicker.selectedResolved?.workspace);
+		// Re-render when the session workspace changes, when the resolved git
+		// repository's state changes (branch switch, etc.), or when the tick is
+		// bumped (workspace picker selection / a repository finished opening).
+		store.add(autorun(reader => {
+			this._gitStatusTick.read(reader);
+			const workspace = this._session.read(reader)?.workspace.read(reader) ?? this._workspacePicker.selectedResolved?.workspace;
+			const folder = workspace?.folders[0];
+			const repository = this._findGitRepository(folder);
+			repository?.state.read(reader);
+			this._updateGitStatus(workspace, repository);
+			if (!repository) {
+				this._ensureGitRepositoryOpened(folder);
+			}
 		}));
+		// selectedResolved is not observable, so a picker selection needs an
+		// explicit re-run of the autorun above.
+		store.add(this._workspacePicker.onDidSelectWorkspace(() => this._gitStatusTick.set(this._gitStatusTick.get() + 1, undefined)));
 		return store;
 	}
 
-	private _updateGitStatus(workspace: ISessionWorkspace | undefined): void {
+	/** Finds the live git repository whose root contains (or is contained by) the folder's working directory. */
+	private _findGitRepository(folder: ISessionFolder | undefined): IGitRepository | undefined {
+		const workingDirectory = folder?.workingDirectory ?? folder?.root;
+		if (!workingDirectory) {
+			return undefined;
+		}
+		for (const repository of this.gitService.repositories) {
+			if (this.uriIdentityService.extUri.isEqualOrParent(workingDirectory, repository.rootUri) ||
+				this.uriIdentityService.extUri.isEqualOrParent(repository.rootUri, workingDirectory)) {
+				return repository;
+			}
+		}
+		return undefined;
+	}
+
+	/** Asks the git service to open the folder's repository once so its branch can be resolved; re-renders when it resolves. */
+	private _ensureGitRepositoryOpened(folder: ISessionFolder | undefined): void {
+		const workingDirectory = folder?.workingDirectory ?? folder?.root;
+		if (!workingDirectory) {
+			return;
+		}
+		const key = workingDirectory.toString();
+		if (this._openedGitRepositoryKey === key) {
+			return;
+		}
+		this._openedGitRepositoryKey = key;
+		this.gitService.openRepository(workingDirectory).then(() => {
+			if (!this._store.isDisposed) {
+				this._gitStatusTick.set(this._gitStatusTick.get() + 1, undefined);
+			}
+		}, error => this.logService.warn('[NewChatWidget] Failed to open git repository for branch status', error));
+	}
+
+	private _updateGitStatus(workspace: ISessionWorkspace | undefined, repository: IGitRepository | undefined): void {
 		const element = this._gitStatusElement;
 		if (!element) {
 			return;
@@ -281,7 +334,11 @@ export class NewChatWidget extends Disposable {
 		const folder = workspace?.folders[0];
 		const gitRepository = folder?.gitRepository;
 		const repoName = gitRepository?.uri ? basename(gitRepository.uri) : (folder?.name ?? workspace?.label);
-		const branchName = gitRepository?.branchName?.trim();
+		// Prefer the live branch from the git service — the static snapshot on the
+		// session folder has no branch for agent-host workspaces (it would otherwise
+		// always fall back to "main").
+		const liveBranchName = repository?.state.get().HEAD?.name?.trim();
+		const branchName = liveBranchName || gitRepository?.branchName?.trim();
 		const displayBranchName = branchName || localize('newChatGitStatus.defaultBranch', "main");
 
 		dom.clearNode(element);
@@ -318,24 +375,6 @@ export class NewChatWidget extends Disposable {
 		const descriptionLineTwo = dom.append(description, dom.$('p'));
 		descriptionLineTwo.textContent = localize('newChatMiddleDescriptionTwo', "Pick a workspace, then describe the next step.");
 
-	}
-
-	private _renderComposerSuggestions(container: HTMLElement): void {
-		const suggestionsContainer = dom.append(container, dom.$('.new-chat-middle-suggestions'));
-		const suggestions = [
-			localize('newChatSuggestionLandingPage', "Build a feature"),
-			localize('newChatSuggestionPricingSection', "Fix a bug"),
-			localize('newChatSuggestionSettingsScreen', "Polish this UI"),
-		];
-		for (const suggestion of suggestions) {
-			const button = dom.append(suggestionsContainer, dom.$('button.new-chat-middle-suggestion')) as HTMLButtonElement;
-			button.type = 'button';
-			button.textContent = suggestion;
-			this._register(dom.addDisposableListener(button, dom.EventType.CLICK, () => {
-				this._widget.setInput(suggestion);
-				this._widget.focusInput();
-			}));
-		}
 	}
 
 	/**

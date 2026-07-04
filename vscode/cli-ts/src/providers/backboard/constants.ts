@@ -22,6 +22,8 @@ export const CHAT_PROVIDER_PRIORITY = [
 export const BACKBOARD_STREAM_EVENTS = {
 	userMessage: "user_message",
 	contentStreaming: "content_streaming",
+	reasoningStreaming: "reasoning_streaming",
+	reasoningDelta: "reasoning_delta",
 	toolSubmitRequired: "tool_submit_required",
 	runEnded: "run_ended",
 	messageComplete: "message_complete",

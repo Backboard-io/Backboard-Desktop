@@ -46,15 +46,17 @@
 	.chat-external-edit-diff-body {
 		display: none;
 		width: 100%;
-		margin-top: 4px;
-		border: 1px solid var(--vscode-chat-requestBorder);
+		margin-top: 6px;
+		border: 1px solid color-mix(in srgb, var(--vscode-chat-requestBorder) 70%, transparent);
 		border-radius: 6px;
+		background-color: var(--vscode-editor-background);
+		padding: 4px 0;
 		max-height: 360px;
 		overflow-y: auto;
 		overflow-x: auto;
 		font-family: var(--monaco-monospace-font);
 		font-size: 11px;
-		line-height: 1.5;
+		line-height: 1.6;
 	}
 
 	&.chat-external-edit-expanded .chat-external-edit-diff-body {
@@ -80,14 +82,21 @@
 			padding-right: 8px;
 		}
 
+		/*
+		 * Full-row fills use the subtle line-level diff tokens (not the
+		 * stronger char-level *TextBackground ones) so a freshly created file
+		 * reads as a calm tinted block instead of a saturated slab. The 2px
+		 * inset accent keeps rows scannable; inset shadow (not border) so
+		 * changed and context rows stay column-aligned.
+		 */
 		&.removed {
-			background-color: var(--vscode-diffEditor-removedTextBackground);
-			box-shadow: inset 2px 0 0 var(--vscode-chat-linesRemovedForeground);
+			background-color: var(--vscode-diffEditor-removedLineBackground, var(--vscode-diffEditor-removedTextBackground));
+			box-shadow: inset 2px 0 0 color-mix(in srgb, var(--vscode-chat-linesRemovedForeground) 75%, transparent);
 		}
 
 		&.added {
-			background-color: var(--vscode-diffEditor-insertedTextBackground);
-			box-shadow: inset 2px 0 0 var(--vscode-chat-linesAddedForeground);
+			background-color: var(--vscode-diffEditor-insertedLineBackground, var(--vscode-diffEditor-insertedTextBackground));
+			box-shadow: inset 2px 0 0 color-mix(in srgb, var(--vscode-chat-linesAddedForeground) 75%, transparent);
 		}
 
 		&.context {
@@ -96,9 +105,9 @@
 	}
 
 	.chat-external-edit-diff-gap {
-		height: 8px;
-		border-bottom: 1px dashed var(--vscode-chat-requestBorder);
-		margin-bottom: 8px;
+		height: 6px;
+		border-bottom: 1px solid color-mix(in srgb, var(--vscode-chat-requestBorder) 60%, transparent);
+		margin-bottom: 6px;
 	}
 
 	.chat-external-edit-diff-note {

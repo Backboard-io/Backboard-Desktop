@@ -3,7 +3,11 @@ import { dirname, resolve } from "node:path";
 import { z } from "zod";
 import { Tool } from "../core/tools/Tool.ts";
 import type { ToolContext } from "../core/tools/ToolContext.ts";
-import { ok, type ToolResult } from "../core/tools/ToolResult.ts";
+import {
+	type FileEditPreview,
+	ok,
+	type ToolResult,
+} from "../core/tools/ToolResult.ts";
 import type { ToolResultDetailLine } from "../core/tools/ToolResultDetail.ts";
 import type { PromptContext } from "../prompts/PromptModule.ts";
 import { getToolPrompt } from "../prompts/tools/index.tsx";
@@ -66,6 +70,7 @@ export class ApplyPatchTool extends Tool<Input, Output> {
 				| { kind: "write"; path: string; content: string }
 				| { kind: "delete"; path: string }
 			> = [];
+			const fileEdits: FileEditPreview[] = [];
 			const detailLines: ToolResultDetailLine[] = [];
 			let addedLines = 0;
 			let removedLines = 0;
@@ -81,6 +86,7 @@ export class ApplyPatchTool extends Tool<Input, Output> {
 						path: filePath,
 						content,
 					});
+					fileEdits.push({ path: filePath, before: "", after: content });
 					addedLines += operation.lines.length;
 					detailLines.push(
 						...prefixDetailLineKeys(
@@ -94,6 +100,7 @@ export class ApplyPatchTool extends Tool<Input, Output> {
 				if (operation.kind === "delete") {
 					const original = await readRegularFile(filePath, operation.path);
 					actions.push({ kind: "delete", path: filePath });
+					fileEdits.push({ path: filePath, before: original, after: "" });
 					removedLines += countContentLines(original);
 					detailLines.push(
 						...prefixDetailLineKeys(
@@ -121,8 +128,15 @@ export class ApplyPatchTool extends Tool<Input, Output> {
 					path: outputPath,
 					content,
 				});
-				if (operation.movePath)
+				fileEdits.push({
+					path: outputPath,
+					before: operation.movePath ? "" : original,
+					after: content,
+				});
+				if (operation.movePath) {
 					actions.push({ kind: "delete", path: filePath });
+					fileEdits.push({ path: filePath, before: original, after: "" });
+				}
 				for (const hunk of operation.hunks) {
 					addedLines += hunk.addedLineCount;
 					removedLines += hunk.removedLineCount;
@@ -157,7 +171,7 @@ export class ApplyPatchTool extends Tool<Input, Output> {
 				diagnostics += await collectDiagnosticsFeedback(ctx, path);
 			}
 
-			return ok(
+			const result = ok(
 				{
 					files: [...new Set(operations.flatMap(operationPaths))],
 					operations: operations.length,
@@ -167,6 +181,8 @@ export class ApplyPatchTool extends Tool<Input, Output> {
 				undefined,
 				detailLines,
 			);
+			result.fileEdits = fileEdits;
+			return result;
 		});
 	}
 }

@@ -210,57 +210,61 @@
 			border-radius: var(--vscode-cornerRadius-medium);
 			user-select: none;
 
+			/* Up/down chevron pair: hints that arrow keys move between options.
+			   Hidden by default; only the selected/focused row reveals them
+			   (replacing the old checkmark — the filled number badge already
+			   communicates "this one's chosen"). */
 			.chat-question-list-indicator {
 				width: 16px;
 				height: 16px;
 				display: flex;
+				flex-direction: column;
 				align-items: center;
 				justify-content: center;
 				flex-shrink: 0;
 				margin-left: auto;
-				align-self: flex-start;
-				margin-top: 2px;
+				gap: 0;
+				opacity: 0;
 			}
 
-			.chat-question-list-indicator.codicon-check {
-				color: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground));
+			.chat-question-list-indicator .codicon {
+				font-size: 12px;
+				height: 8px;
 			}
 
-			/* Label in list item */
+			/* Label + description on one line, truncating with an ellipsis —
+			   matches the compact "Title  description text..." row layout. */
 			.chat-question-list-label {
 				font-size: var(--vscode-agents-fontSize-body2);
-				font-weight: var(--vscode-agents-fontWeight-semiBold);
 				flex: 1;
-				word-wrap: break-word;
-				overflow-wrap: break-word;
+				min-width: 0;
 				display: flex;
-				flex-direction: column;
+				flex-direction: row;
+				align-items: baseline;
+				gap: 6px;
 			}
 
 			.chat-question-list-label-title {
 				font-weight: var(--vscode-agents-fontWeight-semiBold);
 				line-height: 1.4;
+				flex-shrink: 0;
+				white-space: nowrap;
 			}
 
 			.chat-question-list-label-desc {
 				font-weight: var(--vscode-agents-fontWeight-regular);
 				color: var(--vscode-descriptionForeground);
+				min-width: 0;
+				flex: 1;
+				overflow: hidden;
+				white-space: nowrap;
+				text-overflow: ellipsis;
 			}
 		}
 
-		.chat-question-list-item.has-description {
-			align-items: flex-start;
-
-			.chat-question-list-number {
-				line-height: 1.4;
-				font-size: var(--vscode-agents-fontSize-body2);
-				font-weight: var(--vscode-agents-fontWeight-semiBold);
-			}
-
-			.chat-question-list-checkbox {
-				/* Title line-height is ~17px (1.4 * body-s), checkbox is 16px: 1px offset */
-				margin-top: 1px;
-			}
+		.chat-question-list-item.has-description .chat-question-list-checkbox {
+			/* Title line-height is ~17px (1.4 * body-s), checkbox is 16px: 1px offset */
+			margin-top: 1px;
 		}
 
 		.chat-question-list-item:hover {
@@ -281,12 +285,15 @@
 				color: var(--vscode-list-inactiveSelectionForeground, var(--vscode-foreground));
 			}
 
-			.chat-question-list-indicator.codicon-check {
+			.chat-question-list-indicator {
+				opacity: 1;
 				color: var(--vscode-list-inactiveSelectionForeground, var(--vscode-foreground));
 			}
 
 			.chat-question-list-number {
-				color: var(--vscode-list-inactiveSelectionForeground, var(--vscode-foreground));
+				background-color: var(--vscode-list-inactiveSelectionForeground, var(--vscode-foreground));
+				border-color: var(--vscode-list-inactiveSelectionForeground, var(--vscode-foreground));
+				color: var(--vscode-list-inactiveSelectionBackground, var(--vscode-editor-background));
 			}
 		}
 
@@ -303,12 +310,14 @@
 				color: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground));
 			}
 
-			.chat-question-list-indicator.codicon-check {
+			.chat-question-list-indicator {
 				color: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground));
 			}
 
 			.chat-question-list-number {
-				color: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground));
+				background-color: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground));
+				border-color: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground));
+				color: var(--vscode-list-activeSelectionBackground, var(--vscode-editor-background));
 			}
 		}
 		.chat-question-list-item.selected:hover {
@@ -371,15 +380,34 @@
 
 	}
 
-	/* todo: change to use keybinding service so we don't have to recreate this */
-	.chat-question-list-number,
-	.chat-question-freeform-number {
-		font-size: var(--vscode-agents-fontSize-body2);
+	/* Numbered options get a circular badge (outline by default, filled solid
+	   when selected — see `.selected .chat-question-list-number` above). */
+	.chat-question-list-number {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 20px;
+		height: 20px;
+		box-sizing: border-box;
+		border: 1px solid var(--vscode-descriptionForeground);
+		border-radius: 50%;
+		font-size: 11px;
 		font-weight: var(--vscode-agents-fontWeight-semiBold);
 		color: var(--vscode-descriptionForeground);
 		flex-shrink: 0;
-		min-width: 1ch;
-		text-align: right;
+	}
+
+	/* The freeform "type your own answer" row uses a pencil icon instead of a
+	   numbered badge, since it isn't one of the enumerated options. */
+	.chat-question-freeform-number {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 20px;
+		height: 20px;
+		font-size: 14px;
+		color: var(--vscode-descriptionForeground);
+		flex-shrink: 0;
 	}
 }
 
@@ -449,6 +477,24 @@
 		color: var(--vscode-descriptionForeground);
 	}
 
+	/* "Dismiss  ESC" hint — plain text label plus a small kbd-style chip for
+	   the Escape key, shown only when the carousel can actually be dismissed. */
+	.chat-question-dismiss-hint {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		font-size: var(--vscode-agents-fontSize-body2);
+		color: var(--vscode-descriptionForeground);
+	}
+
+	.chat-question-dismiss-key {
+		padding: 1px 5px;
+		border: 1px solid var(--vscode-widget-border, var(--vscode-chat-requestBorder));
+		border-radius: var(--vscode-cornerRadius-small, 4px);
+		font-size: 10px;
+		line-height: 1.4;
+	}
+
 	.monaco-button.chat-question-submit-button {
 		background: var(--vscode-button-background) !important;
 		color: var(--vscode-button-foreground) !important;
@@ -457,6 +503,7 @@
 		flex: 0 0 auto;
 		min-width: auto;
 		padding: 0 8px;
+		border-radius: var(--vscode-cornerRadius-medium, 999px);
 	}
 
 	.monaco-button.chat-question-submit-button:hover:not(.disabled) {

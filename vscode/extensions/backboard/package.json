@@ -25,10 +25,6 @@
     "onCommand:backboard.copyOAuthRedirectUri",
     "onCommand:backboard.completeOAuthCallback",
     "onCommand:backboard.refreshModels",
-    "onCommand:backboard.openRightPanel",
-    "onCommand:backboard.openPanel",
-    "onCommand:backboard.newChat",
-    "onCommand:backboard.showHistory",
     "onUri"
   ],
   "extensionKind": [
@@ -63,22 +59,6 @@
         "title": "Backboard: Refresh Models"
       },
       {
-        "command": "backboard.openRightPanel",
-        "title": "Backboard: Open Right Panel"
-      },
-      {
-        "command": "backboard.openPanel",
-        "title": "Backboard: Open Panel"
-      },
-      {
-        "command": "backboard.newChat",
-        "title": "Backboard: New Chat"
-      },
-      {
-        "command": "backboard.showHistory",
-        "title": "Backboard: Show History"
-      },
-      {
         "command": "backboard.checkForUpdates",
         "title": "Backboard: Check for Updates"
       },
@@ -89,35 +69,10 @@
       }
     ],
     "menus": {
-      "view/title": [
-        {
-          "command": "backboard.installAvailableUpdate",
-          "when": "view == backboard.panel && backboard.updateAvailable",
-          "group": "navigation@1"
-        }
-      ],
       "commandPalette": [
         {
           "command": "backboard.installAvailableUpdate",
           "when": "backboard.updateAvailable"
-        }
-      ]
-    },
-    "viewsContainers": {
-      "secondarySidebar": [
-        {
-          "id": "backboard",
-          "title": "\u200b",
-          "icon": "media/blank.svg"
-        }
-      ]
-    },
-    "views": {
-      "backboard": [
-        {
-          "id": "backboard.panel",
-          "type": "webview",
-          "name": "\u200b"
         }
       ]
     },
@@ -275,7 +230,8 @@
   "scripts": {
     "prepare-cli-ts": "sh -c 'if command -v bun >/dev/null 2>&1; then npm run package-cli-ts; else echo \"Skipping Backboard cli-ts build: bun not found.\"; fi'",
     "build-cli-ts": "cd ../../cli-ts && bun install && bun run build",
-    "package-cli-ts": "npm run build-cli-ts && mkdir -p ./bin && cp ../../cli-ts/backboard ./bin/backboard-cli-ts && chmod 755 ./bin/backboard-cli-ts",
+    "resign-cli-ts": "sh -c 'if command -v codesign >/dev/null 2>&1; then codesign --force --sign - ./bin/backboard-cli-ts; fi'",
+    "package-cli-ts": "npm run build-cli-ts && mkdir -p ./bin && cp ../../cli-ts/backboard ./bin/backboard-cli-ts && chmod 755 ./bin/backboard-cli-ts && npm run resign-cli-ts",
     "compile": "npm run prepare-cli-ts && tsgo --project ./tsconfig.json",
     "watch": "tsgo --project ./tsconfig.json --watch",
     "typecheck": "tsgo --project ./tsconfig.json --noEmit"

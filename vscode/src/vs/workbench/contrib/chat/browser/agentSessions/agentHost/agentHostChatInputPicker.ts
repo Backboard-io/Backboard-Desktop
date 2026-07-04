@@ -50,6 +50,11 @@ interface IConfigPickerItem {
 	readonly description?: string;
 }
 
+/** Treats a config value as "off" for both boolean toggles and `'off'` enum values. */
+function isToggledOff(value: unknown | undefined): boolean {
+	return value === false || value === 'off' || value === 'false';
+}
+
 function getConfigIcon(property: string, value: unknown | undefined): ThemeIcon | undefined {
 	if (property === SessionConfigKey.Mode) {
 		switch (value) {
@@ -70,13 +75,22 @@ function getConfigIcon(property: string, value: unknown | undefined): ThemeIcon 
 		}
 	}
 	if (property === 'webSearch') {
-		return value === 'off' ? Codicon.circleSlash : Codicon.globe;
+		return isToggledOff(value) ? Codicon.circleSlash : Codicon.globe;
+	}
+	if (property === 'computerUse') {
+		return isToggledOff(value) ? Codicon.circleSlash : Codicon.deviceDesktop;
+	}
+	if (property === 'browserUse') {
+		return isToggledOff(value) ? Codicon.circleSlash : Codicon.window;
+	}
+	if (property === 'notifications') {
+		return isToggledOff(value) ? Codicon.bellSlash : Codicon.bell;
 	}
 	if (property === 'imageGeneration') {
-		return value === 'off' ? Codicon.circleSlash : Codicon.symbolColor;
+		return isToggledOff(value) ? Codicon.circleSlash : Codicon.symbolColor;
 	}
 	if (property === 'memoryMode') {
-		return value === 'off' ? Codicon.circleSlash : Codicon.database;
+		return isToggledOff(value) ? Codicon.circleSlash : Codicon.database;
 	}
 	if (property === SessionConfigKey.AutoApprove) {
 		if (value === 'autopilot') {

@@ -57,7 +57,7 @@ import { ChatQuestionCarouselData } from '../../common/model/chatProgressTypes/c
 import { localChatSessionType } from '../../common/chatSessionsService.js';
 import { getChatSessionType } from '../../common/model/chatUri.js';
 import { getExplicitFileOrImageAttachmentSummary, IChatRequestVariableEntry, isExplicitFileOrImageVariableEntry } from '../../common/attachments/chatVariableEntries.js';
-import { IChatChangesSummaryPart, IChatCodeCitations, IChatErrorDetailsPart, IChatReferences, IChatRendererContent, IChatRequestViewModel, IChatResponseViewModel, IChatViewModel, IChatWorkingProgress, isRequestVM, isResponseVM, IChatPendingDividerViewModel, isPendingDividerVM, IChatTurnEditedFilesSummaryPart } from '../../common/model/chatViewModel.js';
+import { IChatChangesSummaryPart, IChatCodeCitations, IChatErrorDetailsPart, IChatReferences, IChatRendererContent, IChatRequestViewModel, IChatResponseViewModel, IChatViewModel, IChatWorkingProgress, isRequestVM, isResponseVM, IChatPendingDividerViewModel, isPendingDividerVM } from '../../common/model/chatViewModel.js';
 import { getNWords } from '../../common/model/chatWordCounter.js';
 import { ChatAgentLocation, ChatConfiguration, ChatModeKind, CollapsedToolsDisplayMode, ThinkingDisplayMode } from '../../common/constants.js';
 import { ClickAnimation } from '../../../../../base/browser/ui/animations/animations.js';
@@ -95,7 +95,6 @@ import { ChatSubagentContentPart } from './chatContentParts/chatSubagentContentP
 import { ChatTreeContentPart, TreePool } from './chatContentParts/chatTreeContentPart.js';
 import { ChatWorkspaceEditContentPart } from './chatContentParts/chatWorkspaceEditContentPart.js';
 import { ChatExternalEditContentPart } from './chatContentParts/chatExternalEditContentPart.js';
-import { ChatTurnEditedFilesContentPart } from './chatContentParts/chatTurnEditedFilesContentPart.js';
 import { ChatToolInvocationPart } from './chatContentParts/toolInvocationParts/chatToolInvocationPart.js';
 import { ChatMarkdownDecorationsRenderer } from './chatContentParts/chatMarkdownDecorationsRenderer.js';
 import { ChatEditorOptions } from './chatOptions.js';
@@ -1073,11 +1072,6 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			content.push(fileChangesSummaryPart);
 		}
 
-		const turnEditedFilesSummaryPart = this.getTurnEditedFilesSummaryPart(element);
-		if (turnEditedFilesSummaryPart) {
-			content.push(turnEditedFilesSummaryPart);
-		}
-
 		const workingProgress = this.shouldShowWorkingProgress(element, content, false, templateData);
 		if (workingProgress) {
 			content.push(workingProgress);
@@ -1915,11 +1909,6 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			partsToRender.push(fileChangesSummaryPart);
 		}
 
-		const turnEditedFilesSummaryPart = this.getTurnEditedFilesSummaryPart(element);
-		if (turnEditedFilesSummaryPart) {
-			partsToRender.push(turnEditedFilesSummaryPart);
-		}
-
 		return { content: partsToRender, moreContentAvailable };
 	}
 
@@ -2372,8 +2361,6 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 				return this.renderPlanReview(context, content, templateData);
 			} else if (content.kind === 'changesSummary') {
 				return this.renderChangesSummary(content, context, templateData);
-			} else if (content.kind === 'turnEditedFilesSummary') {
-				return this.renderTurnEditedFilesSummary(content, context);
 			} else if (content.kind === 'mcpServersStarting') {
 				return this.renderMcpServersInteractionRequired(content, context, templateData);
 			} else if (content.kind === 'disabledClaudeHooks') {
@@ -3208,48 +3195,6 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		return part;
 	}
 
-	private renderTurnEditedFilesSummary(content: IChatTurnEditedFilesSummaryPart, context: IChatContentPartRenderContext): IChatContentPart {
-		return this.instantiationService.createInstance(ChatTurnEditedFilesContentPart, content, context);
-	}
-
-	private getTurnEditedFilesSummaryPart(element: IChatResponseViewModel): IChatTurnEditedFilesSummaryPart | undefined {
-		if (!element.isComplete) {
-			return undefined;
-		}
-		// Aggregate every externalEdit in the turn into one entry per file:
-		// the first edit's `before`, the last edit's `after`/editKind, and
-		// diff counts summed across all edits to that file. This lets the
-		// summary recap render the exact same pill + diff card as the
-		// inline edits it's recapping, instead of a bare file name.
-		const aggregated = new Map<string, IChatExternalEdit>();
-		for (const part of element.model.entireResponse.value) {
-			if (part.kind !== 'externalEdit') {
-				continue;
-			}
-			const key = part.uri.toString();
-			const existing = aggregated.get(key);
-			if (!existing) {
-				aggregated.set(key, part);
-				continue;
-			}
-			aggregated.set(key, {
-				...part,
-				// A file created earlier in the turn stays "created" even if
-				// later edited — `before` never existed, which is what
-				// `beforeContentUri: undefined` (inherited below) conveys.
-				editKind: existing.editKind === 'create' ? 'create' : part.editKind,
-				beforeContentUri: existing.beforeContentUri,
-				diff: (existing.diff || part.diff)
-					? { added: (existing.diff?.added ?? 0) + (part.diff?.added ?? 0), removed: (existing.diff?.removed ?? 0) + (part.diff?.removed ?? 0) }
-					: undefined,
-			});
-		}
-		if (aggregated.size === 0) {
-			return undefined;
-		}
-		return { kind: 'turnEditedFilesSummary', editedFiles: Array.from(aggregated.values()) };
-	}
-
 	private renderAttachments(variables: readonly IChatRequestVariableEntry[], contentReferences: ReadonlyArray<IChatContentReference> | undefined, modelId: string | undefined, templateData: IChatListItemTemplate) {
 		return this.instantiationService.createInstance(ChatAttachmentsContentPart, {
 			variables,
@@ -3265,7 +3210,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 	}
 
 	private renderExternalEdit(content: IChatExternalEdit, context: IChatContentPartRenderContext, templateData: IChatListItemTemplate): IChatContentPart {
-		const editPart = this.instantiationService.createInstance(ChatExternalEditContentPart, content, context);
+		const editPart = this.instantiationService.createInstance(ChatExternalEditContentPart, content);
 
 		// Pin the pill into the surrounding thinking part so diff stats bubble
 		// up into the thinking title. The list renderer pinning logic above

@@ -200,22 +200,49 @@ export interface IChatChangesSummaryPart {
 	readonly sessionResource: URI;
 }
 
-export interface IChatTurnEditedFilesSummaryPart {
-	readonly kind: 'turnEditedFilesSummary';
-	/**
-	 * One aggregated {@link IChatExternalEdit} per file touched during the
-	 * turn — `before` from the first edit, `after`/diff from the last, diff
-	 * counts summed across every edit to that file. Lets the summary render
-	 * the same pill + diff card as the inline edits it recaps, instead of a
-	 * bare file name.
-	 */
-	readonly editedFiles: readonly IChatExternalEdit[];
-}
-
 /**
  * Type for content parts rendered by IChatListRenderer (not necessarily in the model)
  */
-export type IChatRendererContent = IChatProgressRenderableResponseContent | IChatReferences | IChatCodeCitations | IChatErrorDetailsPart | IChatChangesSummaryPart | IChatTurnEditedFilesSummaryPart | IChatWorkingProgress | IChatMcpServersStarting | IChatQuestionCarousel | IChatPlanReview | IChatDisabledClaudeHooksPart;
+export type IChatRendererContent = IChatProgressRenderableResponseContent | IChatReferences | IChatCodeCitations | IChatErrorDetailsPart | IChatChangesSummaryPart | IChatWorkingProgress | IChatMcpServersStarting | IChatQuestionCarousel | IChatPlanReview | IChatDisabledClaudeHooksPart;
+
+/**
+ * Aggregates every `externalEdit` part in the session's latest response into
+ * one entry per file — the first edit's `before`, the last edit's
+ * `after`/editKind, and diff counts summed across every edit to that file.
+ * Returns `undefined` when the latest response is missing, still streaming,
+ * or made no file edits. Used to drive the "Edited N files" recap pinned
+ * above the composer.
+ */
+export function getLatestTurnEditedFiles(model: IChatModel): readonly IChatExternalEdit[] | undefined {
+	const lastResponse = model.getRequests().at(-1)?.response;
+	if (!lastResponse?.isComplete) {
+		return undefined;
+	}
+	const aggregated = new Map<string, IChatExternalEdit>();
+	for (const part of lastResponse.entireResponse.value) {
+		if (part.kind !== 'externalEdit') {
+			continue;
+		}
+		const key = part.uri.toString();
+		const existing = aggregated.get(key);
+		if (!existing) {
+			aggregated.set(key, part);
+			continue;
+		}
+		aggregated.set(key, {
+			...part,
+			// A file created earlier in the turn stays "created" even if
+			// later edited — `before` never existed, which is what
+			// `beforeContentUri: undefined` (inherited below) conveys.
+			editKind: existing.editKind === 'create' ? 'create' : part.editKind,
+			beforeContentUri: existing.beforeContentUri,
+			diff: (existing.diff || part.diff)
+				? { added: (existing.diff?.added ?? 0) + (part.diff?.added ?? 0), removed: (existing.diff?.removed ?? 0) + (part.diff?.removed ?? 0) }
+				: undefined,
+		});
+	}
+	return aggregated.size > 0 ? Array.from(aggregated.values()) : undefined;
+}
 
 export interface IChatResponseViewModel {
 	readonly model: IChatResponseModel;

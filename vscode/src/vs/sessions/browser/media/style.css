@@ -43,6 +43,13 @@
 	backdrop-filter: blur(20px);
 }
 
+/* Hide the Agent Host agent picker ("Agent" pill) from the composer toolbars in
+ * the Agents Window. The picker is only contributed here (its menu entries are
+ * gated on the sessions window), so scoping to the workbench is sufficient. */
+.agent-sessions-workbench .chat-agent-picker-item {
+	display: none;
+}
+
 /* Transparent so the shell gradient painted on the workbench root shows
  * through behind the sidebar; the main content parts paint their own
  * opaque backgrounds. */

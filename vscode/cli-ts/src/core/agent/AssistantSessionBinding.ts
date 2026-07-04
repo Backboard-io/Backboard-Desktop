@@ -4,6 +4,8 @@ import type { Session } from "../session/Session.ts";
 import type { OpenAITool } from "../tools/schema.ts";
 
 export class AssistantSessionBinding {
+	private inFlight: Promise<string> | null = null;
+
 	constructor(
 		private readonly client: BackboardClient,
 		private readonly session: Session,
@@ -16,14 +18,23 @@ export class AssistantSessionBinding {
 		signal?: AbortSignal;
 	}): Promise<string> {
 		if (this.session.assistantId) return this.session.assistantId;
+		// Dedupe concurrent resolves (e.g. an eager warm-up racing the first
+		// turn) so we never create two assistants for the same session.
+		if (this.inFlight) return this.inFlight;
 
-		const assistantId = await ensureAssistant(
+		this.inFlight = ensureAssistant(
 			this.client,
 			input.systemPrompt,
 			input.tools,
 			{ signal: input.signal, fresh: this.fresh },
-		);
-		this.session.assistantId = assistantId;
-		return assistantId;
+		)
+			.then((assistantId) => {
+				this.session.assistantId = assistantId;
+				return assistantId;
+			})
+			.finally(() => {
+				this.inFlight = null;
+			});
+		return this.inFlight;
 	}
 }

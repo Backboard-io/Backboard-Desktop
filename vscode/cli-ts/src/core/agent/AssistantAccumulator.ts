@@ -50,6 +50,19 @@ export class AssistantAccumulator {
 		});
 	}
 
+	/**
+	 * Streams a chunk of model reasoning/thinking. Reasoning is not part of the
+	 * assistant message segments (it is not persisted as content); it is
+	 * surfaced live so the UI shows the model thinking instead of dead air.
+	 */
+	appendReasoning(text: string): void {
+		this.bus.emit({
+			type: "assistant:reasoning",
+			turnId: this.turnId,
+			text,
+		});
+	}
+
 	finalize(toolCalls: ToolCallRef[] = [], finalText?: string): void {
 		if (!this.current && !finalText) return;
 		const segment = this.ensureSegment();

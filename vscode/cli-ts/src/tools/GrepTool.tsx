@@ -177,11 +177,27 @@ function run(
 		if (ctx.signal.aborted) return reject(new Error("aborted"));
 		const child = spawn(cmd, args, { signal: ctx.signal });
 		let stdout = "";
+		// Stopping the search once output exceeds what we can return is a
+		// truncated success, not an error (the caller slices to MAX_OUTPUT).
+		let stoppedForCap = false;
 		child.stdout?.on("data", (c) => {
 			stdout += c.toString();
-			if (stdout.length > MAX_OUTPUT * 2) child.kill("SIGTERM");
+			if (stdout.length > MAX_OUTPUT * 2 && !stoppedForCap) {
+				stoppedForCap = true;
+				child.kill("SIGTERM");
+			}
 		});
 		child.on("error", (err) => reject(err));
-		child.on("close", (code) => resolvePromise({ stdout, code: code ?? 1 }));
+		child.on("close", (code, signal) => {
+			if (stoppedForCap) {
+				resolvePromise({ stdout, code: 0 });
+				return;
+			}
+			if (code === null) {
+				reject(new Error(`${cmd} was killed by ${signal ?? "a signal"}`));
+				return;
+			}
+			resolvePromise({ stdout, code });
+		});
 	});
 }

@@ -23,8 +23,17 @@ export type ServeControl =
 			memory?: string;
 			skills?: string[];
 			files?: ServeFileAttachment[];
+			/** Enables the computer-use tools for this turn (default off). */
+			computerUse?: boolean;
+			/** Enables the browser-use tool for this turn (default off). */
+			browserUse?: boolean;
+			/** Enables turn-completion notifications for this turn (default off). */
+			notify?: boolean;
+			/** Enables image-generation intent (reserved; inert until a tool consumes it). */
+			imageGeneration?: boolean;
 	  }
 	| { op: "steer"; requestId?: string; prompt: string }
+	| { op: "warmup"; requestId?: string }
 	| { op: "cancel"; requestId?: string }
 	| { op: "respondInput"; id: string; answer: string }
 	| {
@@ -45,6 +54,7 @@ export type ServeRecordType =
 	| "serve:models"
 	| "serve:tools"
 	| "serve:skills"
+	| "serve:warm"
 	| "serve:ack"
 	| "serve:error";
 

@@ -24,7 +24,7 @@
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	height: 100%;
+	height: 35px;
 	padding: 0;
 	gap: 2px;
 	box-sizing: border-box;
@@ -69,8 +69,8 @@
 }
 
 .monaco-workbench .part.sidebar > .sidebar-activity-navigation-header > .sidebar-activity-navigation-button > .sidebar-activity-navigation-marketplace-icon {
-	width: 18px;
-	height: 18px;
+	width: 14px;
+	height: 14px;
 	display: inline-block;
 	background-color: currentColor;
 	-webkit-mask-repeat: no-repeat;
@@ -81,6 +81,44 @@
 	mask-size: contain;
 	-webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 11V20H20V11'/%3E%3Cpath d='M3 7L5 3H19L21 7V11H3V7Z'/%3E%3Cpath d='M9 20V14H15V20'/%3E%3C/svg%3E");
 	mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 11V20H20V11'/%3E%3Cpath d='M3 7L5 3H19L21 7V11H3V7Z'/%3E%3Cpath d='M9 20V14H15V20'/%3E%3C/svg%3E");
+}
+
+/* Lucide icons for the built-in view containers, painted as masks so they tint
+   with the activity foreground color like the Marketplace icon above. */
+.monaco-workbench .part.sidebar > .sidebar-activity-navigation-header > .sidebar-activity-navigation-button > .sidebar-activity-navigation-explorer-icon,
+.monaco-workbench .part.sidebar > .sidebar-activity-navigation-header > .sidebar-activity-navigation-button > .sidebar-activity-navigation-search-icon,
+.monaco-workbench .part.sidebar > .sidebar-activity-navigation-header > .sidebar-activity-navigation-button > .sidebar-activity-navigation-scm-icon,
+.monaco-workbench .part.sidebar > .sidebar-activity-navigation-header > .sidebar-activity-navigation-button > .sidebar-activity-navigation-extensions-icon {
+	width: 14px;
+	height: 14px;
+	display: inline-block;
+	background-color: currentColor;
+	-webkit-mask-repeat: no-repeat;
+	-webkit-mask-position: center;
+	-webkit-mask-size: contain;
+	mask-repeat: no-repeat;
+	mask-position: center;
+	mask-size: contain;
+}
+
+.monaco-workbench .part.sidebar > .sidebar-activity-navigation-header > .sidebar-activity-navigation-button > .sidebar-activity-navigation-explorer-icon {
+	-webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z'/%3E%3C/svg%3E");
+	mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z'/%3E%3C/svg%3E");
+}
+
+.monaco-workbench .part.sidebar > .sidebar-activity-navigation-header > .sidebar-activity-navigation-button > .sidebar-activity-navigation-search-icon {
+	-webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.3-4.3'/%3E%3C/svg%3E");
+	mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.3-4.3'/%3E%3C/svg%3E");
+}
+
+.monaco-workbench .part.sidebar > .sidebar-activity-navigation-header > .sidebar-activity-navigation-button > .sidebar-activity-navigation-scm-icon {
+	-webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='6' x2='6' y1='3' y2='15'/%3E%3Ccircle cx='18' cy='6' r='3'/%3E%3Ccircle cx='6' cy='18' r='3'/%3E%3Cpath d='M18 9a9 9 0 0 1-9 9'/%3E%3C/svg%3E");
+	mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='6' x2='6' y1='3' y2='15'/%3E%3Ccircle cx='18' cy='6' r='3'/%3E%3Ccircle cx='6' cy='18' r='3'/%3E%3Cpath d='M18 9a9 9 0 0 1-9 9'/%3E%3C/svg%3E");
+}
+
+.monaco-workbench .part.sidebar > .sidebar-activity-navigation-header > .sidebar-activity-navigation-button > .sidebar-activity-navigation-extensions-icon {
+	-webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z'/%3E%3Cpath d='m3.3 7 8.7 5 8.7-5'/%3E%3Cpath d='M12 22V12'/%3E%3C/svg%3E");
+	mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z'/%3E%3Cpath d='m3.3 7 8.7 5 8.7-5'/%3E%3Cpath d='M12 22V12'/%3E%3C/svg%3E");
 }
 
 .monaco-workbench .part.sidebar > .title > .title-label h2 {

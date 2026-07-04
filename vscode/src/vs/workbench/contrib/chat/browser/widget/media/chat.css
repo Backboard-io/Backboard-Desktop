@@ -26,6 +26,247 @@
 	--vscode-chat-font-size-body-xxl: 1.538em;
 }
 
+/* --- Empty new-chat home: centered composer + category shortcuts ---------- */
+
+/* When the chat is new and empty, center the composer (and the shortcuts row
+   beneath it) vertically instead of pinning it to the bottom. */
+.interactive-session.chat-empty-centered {
+	justify-content: center;
+}
+
+/* The (empty) welcome block would otherwise reserve the full column height and
+   push the composer back down — collapse it while centered. */
+.interactive-session.chat-empty-centered > .chat-welcome-view-container {
+	display: none !important;
+}
+
+/* Area beneath the composer: only visible in the centered empty state. */
+.interactive-session .chat-empty-below-composer {
+	display: none;
+}
+
+.interactive-session.chat-empty-centered > .chat-empty-below-composer {
+	display: flex;
+	flex-direction: column;
+	align-items: stretch;
+	margin: 4px 12px 0;
+	/* Anchor for the absolutely-positioned prompt panel. The wrapper's own height
+	   stays fixed to the button row, so opening the panel (an overlay) never
+	   reflows the centered composer above it. */
+	position: relative;
+}
+
+/* --- Category button row ------------------------------------------------- */
+
+.interactive-session .chat-empty-category-suggestions {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	align-items: center;
+	gap: 8px;
+	transition: opacity 0.16s ease;
+}
+
+/* Faded, not removed — keeps the wrapper's height so the composer stays put
+   while the panel overlay is open. */
+.interactive-session .chat-empty-category-suggestions.hidden {
+	opacity: 0;
+	pointer-events: none;
+}
+
+.interactive-session .chat-empty-category-suggestion {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	height: 30px;
+	padding: 0 12px;
+	border: 1px solid var(--vscode-panel-border, transparent);
+	border-radius: 999px;
+	background: var(--vscode-editorWidget-background, transparent);
+	color: var(--vscode-foreground);
+	font-size: 12px;
+	cursor: pointer;
+	white-space: nowrap;
+	transition: background-color 0.1s ease, border-color 0.1s ease;
+}
+
+.interactive-session .chat-empty-category-suggestion:hover {
+	background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground));
+	border-color: var(--vscode-focusBorder, var(--vscode-panel-border));
+}
+
+.interactive-session .chat-empty-category-suggestion .chat-empty-category-suggestion-icon {
+	font-size: 14px;
+	opacity: 0.85;
+}
+
+/* --- Prompt panel (replaces the button row) ------------------------------ */
+
+.interactive-session .chat-empty-category-panel {
+	/* Overlay anchored just below the composer; being out of flow means its
+	   height never shifts the composer. */
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	border: 1px solid var(--vscode-panel-border, transparent);
+	border-radius: 12px;
+	background: var(--vscode-editorWidget-background, transparent);
+	box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+	overflow: hidden;
+	opacity: 0;
+	transform: translateY(-6px) scale(0.985);
+	transform-origin: top center;
+	pointer-events: none;
+	transition: opacity 0.18s ease, transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.interactive-session .chat-empty-category-panel.visible {
+	opacity: 1;
+	transform: none;
+	pointer-events: auto;
+}
+
+/* Prompt rows reveal with a gentle stagger as the panel opens. */
+@keyframes chat-empty-prompt-in {
+	from {
+		opacity: 0;
+		transform: translateY(4px);
+	}
+
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+
+.interactive-session .chat-empty-category-panel .chat-empty-category-prompt {
+	animation: chat-empty-prompt-in 0.22s ease both;
+}
+
+.interactive-session .chat-empty-category-panel .chat-empty-category-prompt:nth-child(1) {
+	animation-delay: 0.03s;
+}
+
+.interactive-session .chat-empty-category-panel .chat-empty-category-prompt:nth-child(2) {
+	animation-delay: 0.06s;
+}
+
+.interactive-session .chat-empty-category-panel .chat-empty-category-prompt:nth-child(3) {
+	animation-delay: 0.09s;
+}
+
+.interactive-session .chat-empty-category-panel .chat-empty-category-prompt:nth-child(4) {
+	animation-delay: 0.12s;
+}
+
+.interactive-session .chat-empty-category-panel .chat-empty-category-prompt:nth-child(5) {
+	animation-delay: 0.15s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.interactive-session .chat-empty-category-suggestions,
+	.interactive-session .chat-empty-category-panel {
+		transition: none;
+	}
+
+	.interactive-session .chat-empty-category-panel .chat-empty-category-prompt {
+		animation: none;
+	}
+}
+
+.interactive-session .chat-empty-category-panel-header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 10px 12px;
+}
+
+.interactive-session .chat-empty-category-panel-icon {
+	font-size: 14px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.interactive-session .chat-empty-category-panel-title {
+	color: var(--vscode-descriptionForeground);
+	font-size: 13px;
+}
+
+.interactive-session .chat-empty-category-panel-close {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	margin-left: auto;
+	width: 22px;
+	height: 22px;
+	padding: 0;
+	border: none;
+	border-radius: 4px;
+	background: transparent;
+	color: var(--vscode-icon-foreground);
+	cursor: pointer;
+}
+
+.interactive-session .chat-empty-category-panel-close:hover {
+	background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground));
+}
+
+.interactive-session .chat-empty-category-panel-list {
+	display: flex;
+	flex-direction: column;
+	max-height: 260px;
+	overflow-y: auto;
+}
+
+.interactive-session .chat-empty-category-prompt {
+	position: relative;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	width: 100%;
+	padding: 11px 14px;
+	border: none;
+	background: transparent;
+	color: var(--vscode-foreground);
+	font-size: 13px;
+	text-align: left;
+	cursor: pointer;
+}
+
+/* Hairline divider between adjacent rows. */
+.interactive-session .chat-empty-category-prompt + .chat-empty-category-prompt::before {
+	content: '';
+	position: absolute;
+	top: 0;
+	left: 14px;
+	right: 14px;
+	border-top: 1px solid var(--vscode-panel-border, transparent);
+}
+
+.interactive-session .chat-empty-category-prompt:hover,
+.interactive-session .chat-empty-category-prompt.selected {
+	background: var(--vscode-list-hoverBackground, var(--vscode-toolbar-hoverBackground));
+}
+
+.interactive-session .chat-empty-category-prompt-label {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.interactive-session .chat-empty-category-prompt-chevron {
+	flex: 0 0 auto;
+	font-size: 14px;
+	opacity: 0;
+	color: var(--vscode-descriptionForeground);
+}
+
+.interactive-session .chat-empty-category-prompt:hover .chat-empty-category-prompt-chevron,
+.interactive-session .chat-empty-category-prompt.selected .chat-empty-category-prompt-chevron {
+	opacity: 1;
+}
+
 .interactive-session .codicon.codicon-backboard-logo {
 	display: inline-block;
 	width: 14px;
@@ -3260,6 +3501,107 @@ have to be updated for changes to the rules above, or to support more deeply nes
 
 .chat-artifacts-widget .chat-artifacts-list-actions .action-item .action-label:hover {
 	background-color: var(--vscode-toolbar-hoverBackground);
+}
+
+/*
+ * Review bar for the latest turn's edits, pinned above the composer.
+ * Collapsed: one flat summary row — "N files changed +X -Y · Review".
+ * Expanded: per-file pills with inline diffs (ChatExternalEditContentPart,
+ * see chatExternalEditCard.css) — the same cards shown inline while the
+ * turn streamed.
+ */
+.chat-edited-files-widget {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	margin-bottom: 6px;
+	padding: 4px 8px 4px 6px;
+	border-radius: 6px;
+	font-size: var(--vscode-chat-font-size-body-s, 12px);
+	background: color-mix(in srgb, var(--vscode-foreground) 4%, transparent);
+}
+
+.chat-edited-files-widget.collapsed {
+	gap: 0;
+}
+
+.chat-edited-files-header {
+	display: flex;
+	align-items: center;
+	gap: 5px;
+	min-width: 0;
+	color: var(--vscode-descriptionForeground);
+	cursor: pointer;
+	user-select: none;
+}
+
+.chat-edited-files-header:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+	border-radius: 4px;
+}
+
+.chat-edited-files-chevron {
+	flex: none;
+	font-size: 12px;
+	color: var(--vscode-icon-foreground);
+}
+
+.chat-edited-files-summary-text {
+	flex: none;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	color: var(--vscode-foreground);
+}
+
+.chat-edited-files-counts {
+	flex: 1 1 auto;
+	display: flex;
+	gap: 4px;
+	min-width: 0;
+	white-space: nowrap;
+}
+
+.chat-edited-files-added {
+	color: var(--vscode-chat-linesAddedForeground);
+}
+
+.chat-edited-files-removed {
+	color: var(--vscode-chat-linesRemovedForeground);
+}
+
+.chat-edited-files-review-btn {
+	display: flex;
+	align-items: center;
+	flex: none;
+	padding: 2px 8px;
+	border: none;
+	border-radius: 4px;
+	background: transparent;
+	color: var(--vscode-foreground);
+	font-size: var(--vscode-chat-font-size-body-s, 12px);
+	cursor: pointer;
+	white-space: nowrap;
+}
+
+.chat-edited-files-review-btn:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+}
+
+.chat-edited-files-list {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 0 2px 2px 2px;
+}
+
+.chat-edited-files-widget.collapsed .chat-edited-files-list {
+	display: none;
+}
+
+.chat-edited-files-list:empty {
+	display: none;
 }
 
 .interactive-session .checkpoint-file-changes-summary {

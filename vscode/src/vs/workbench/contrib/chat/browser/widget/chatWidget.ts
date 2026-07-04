@@ -11,6 +11,7 @@ import { status } from '../../../../../base/browser/ui/aria/aria.js';
 import { IMouseWheelEvent } from '../../../../../base/browser/mouseEvent.js';
 import { disposableTimeout, timeout } from '../../../../../base/common/async.js';
 import { CancellationToken, CancellationTokenSource } from '../../../../../base/common/cancellation.js';
+import { Codicon } from '../../../../../base/common/codicons.js';
 import { toErrorMessage } from '../../../../../base/common/errorMessage.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { hash } from '../../../../../base/common/hash.js';
@@ -24,6 +25,7 @@ import { filter } from '../../../../../base/common/objects.js';
 import { autorun, derived, observableFromEvent, observableValue } from '../../../../../base/common/observable.js';
 import { extUri, isEqual } from '../../../../../base/common/resources.js';
 import { MicrotaskDelay } from '../../../../../base/common/symbols.js';
+import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { isDefined } from '../../../../../base/common/types.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { ChatPerfMark, markChat } from '../../common/chatPerf.js';
@@ -277,6 +279,12 @@ export class ChatWidget extends Disposable implements IChatWidget {
 
 	private welcomeMessageContainer!: HTMLElement;
 	private readonly welcomePart: MutableDisposable<ChatViewWelcomePart> = this._register(new MutableDisposable());
+
+	/** Wrapper beneath the composer on a new, empty chat: holds the category button row and the prompt panel. */
+	private categorySuggestionsContainer: HTMLElement | undefined;
+	private categoryButtonsRow: HTMLElement | undefined;
+	private categoryPanel: HTMLElement | undefined;
+	private readonly categoryPanelDisposables = this._register(new DisposableStore());
 
 	private readonly _gettingStartedTipPart = this._register(new MutableDisposable<DisposableStore>());
 	private _gettingStartedTipPartRef: ChatTipContentPart | undefined;
@@ -758,6 +766,9 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			this.listContainer = dom.append(this.container, $(`.interactive-list`));
 			dom.append(this.container, this.chatSuggestNextWidget.domNode);
 			this.createInput(this.container, { renderFollowups, renderStyle, renderInputToolbarBelowInput });
+			// Category shortcut buttons sit right below the composer; kept in the DOM
+			// after the input part so the centered empty state stacks them beneath it.
+			this.createCategorySuggestions(this.container);
 		}
 
 		this.renderWelcomeViewContentIfNeeded();
@@ -999,6 +1010,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 
 		this.inputPart?.clearTodoListWidget(this.viewModel?.sessionResource, true);
 		this.inputPart?.clearArtifactsWidget();
+		this.inputPart?.clearEditedFilesWidget();
 		this.chatSuggestNextWidget.hide();
 		await this.viewOptions.clear?.();
 	}
@@ -1024,6 +1036,9 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			}
 
 			this.renderFollowups();
+			if (this.viewModel) {
+				this.inputPart?.renderEditedFilesWidget(this.viewModel.sessionResource);
+			}
 		}
 	}
 
@@ -1036,6 +1051,15 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			const numItems = this.viewModel.getItems().length;
 			dom.setVisibility(numItems === 0, this.welcomeMessageContainer);
 			dom.setVisibility(numItems !== 0, this.listContainer);
+
+			// On a new, empty coding-agent chat, center the composer and reveal the
+			// category shortcut buttons beneath it (Claude.ai-style home).
+			const showEmptyHome = !!this.categorySuggestionsContainer && this.isLockedToCodingAgent && isStandardLayout && numItems === 0;
+			this.container.classList.toggle('chat-empty-centered', showEmptyHome);
+			if (!showEmptyHome) {
+				// Collapse any open prompt panel so the next empty state starts on the button row.
+				this.resetCategoryPanel();
+			}
 
 			// Show/hide the getting-started tip container based on empty state.
 			// Only use this in the standard chat layout where the welcome view is shown.
@@ -1064,6 +1088,142 @@ export class ChatWidget extends Disposable implements IChatWidget {
 
 	isEmpty(): boolean {
 		return (this.viewModel?.getItems().length ?? 0) === 0;
+	}
+
+	/**
+	 * Builds the area beneath the composer shown on a new, empty chat: a row of
+	 * code-related category buttons. Clicking a category swaps the row for a panel
+	 * of starter prompts for that category (see {@link showCategoryPanel}).
+	 */
+	private createCategorySuggestions(parent: HTMLElement): void {
+		const wrapper = dom.append(parent, $('.chat-empty-below-composer'));
+		const buttonsRow = dom.append(wrapper, $('.chat-empty-category-suggestions'));
+		const panel = dom.append(wrapper, $('.chat-empty-category-panel'));
+
+		for (const category of this.getEmptyChatCategories()) {
+			const button = dom.append(buttonsRow, $('button.chat-empty-category-suggestion', { type: 'button' }));
+			const icon = dom.append(button, $('span.chat-empty-category-suggestion-icon'));
+			icon.classList.add(...ThemeIcon.asClassNameArray(category.icon));
+			dom.append(button, $('span.chat-empty-category-suggestion-label')).textContent = category.label;
+			this._register(dom.addDisposableListener(button, dom.EventType.CLICK, () => this.showCategoryPanel(category)));
+		}
+
+		this.categorySuggestionsContainer = wrapper;
+		this.categoryButtonsRow = buttonsRow;
+		this.categoryPanel = panel;
+	}
+
+	/**
+	 * Code-related categories for the empty-chat home. Each carries a set of
+	 * starter prompt titles; the full composer text is expanded from the title by
+	 * {@link buildCategoryPrompt}.
+	 */
+	private getEmptyChatCategories(): ReadonlyArray<{ readonly icon: ThemeIcon; readonly label: string; readonly prompts: ReadonlyArray<string> }> {
+		return [
+			{
+				icon: Codicon.book, label: localize('chat.category.documentation', "Documentation"), prompts: [
+					localize('chat.category.documentation.1', "Create API documentation"),
+					localize('chat.category.documentation.2', "Write a README for my project"),
+					localize('chat.category.documentation.3', "Document this function with JSDoc comments"),
+					localize('chat.category.documentation.4', "Generate a changelog from recent commits"),
+					localize('chat.category.documentation.5', "Write a contributing guide"),
+				]
+			},
+			{
+				icon: Codicon.code, label: localize('chat.category.code', "Code"), prompts: [
+					localize('chat.category.code.1', "Design a digital pet that grows based on my coding habits"),
+					localize('chat.category.code.2', "Create API documentation"),
+					localize('chat.category.code.3', "Tell me what programming paradigm suits my thinking style"),
+					localize('chat.category.code.4', "Develop deployment strategies"),
+					localize('chat.category.code.5', "Design scalability plans"),
+				]
+			},
+			{
+				icon: Codicon.bug, label: localize('chat.category.debug', "Debug"), prompts: [
+					localize('chat.category.debug.1', "Find the bug in my code"),
+					localize('chat.category.debug.2', "Explain this error message"),
+					localize('chat.category.debug.3', "Add logging to trace an issue"),
+					localize('chat.category.debug.4', "Reproduce a bug with a failing test"),
+					localize('chat.category.debug.5', "Analyze this stack trace"),
+				]
+			},
+			{
+				icon: Codicon.beaker, label: localize('chat.category.test', "Test"), prompts: [
+					localize('chat.category.test.1', "Write unit tests for this file"),
+					localize('chat.category.test.2', "Set up a testing framework"),
+					localize('chat.category.test.3', "Add edge-case coverage"),
+					localize('chat.category.test.4', "Mock an external dependency"),
+					localize('chat.category.test.5', "Write an integration test"),
+				]
+			},
+			{
+				icon: Codicon.rocket, label: localize('chat.category.deploy', "Deploy"), prompts: [
+					localize('chat.category.deploy.1', "Develop deployment strategies"),
+					localize('chat.category.deploy.2', "Write a Dockerfile for my app"),
+					localize('chat.category.deploy.3', "Set up a CI/CD pipeline"),
+					localize('chat.category.deploy.4', "Design scalability plans"),
+					localize('chat.category.deploy.5', "Configure environment variables"),
+				]
+			},
+		];
+	}
+
+	/**
+	 * Replaces the category button row with a panel of starter prompts for the
+	 * given category. A back button returns to the row; picking a prompt seeds the
+	 * composer with an expanded request and keeps the panel open.
+	 */
+	private showCategoryPanel(category: { readonly icon: ThemeIcon; readonly label: string; readonly prompts: ReadonlyArray<string> }): void {
+		const panel = this.categoryPanel;
+		if (!panel) {
+			return;
+		}
+		this.categoryPanelDisposables.clear();
+		dom.clearNode(panel);
+
+		const header = dom.append(panel, $('.chat-empty-category-panel-header'));
+		dom.append(header, $('span.chat-empty-category-panel-icon')).classList.add(...ThemeIcon.asClassNameArray(category.icon));
+		dom.append(header, $('span.chat-empty-category-panel-title')).textContent = category.label;
+		const backButton = dom.append(header, $('button.chat-empty-category-panel-close', { type: 'button' }));
+		backButton.classList.add(...ThemeIcon.asClassNameArray(Codicon.close));
+		backButton.setAttribute('aria-label', localize('chat.category.back', "Back"));
+		this.categoryPanelDisposables.add(dom.addDisposableListener(backButton, dom.EventType.CLICK, () => this.hideCategoryPanel()));
+
+		const list = dom.append(panel, $('.chat-empty-category-panel-list'));
+		let selectedRow: HTMLElement | undefined;
+		for (const prompt of category.prompts) {
+			const row = dom.append(list, $('button.chat-empty-category-prompt', { type: 'button' }));
+			dom.append(row, $('span.chat-empty-category-prompt-label')).textContent = prompt;
+			dom.append(row, $('span.chat-empty-category-prompt-chevron')).classList.add(...ThemeIcon.asClassNameArray(Codicon.chevronRight));
+			this.categoryPanelDisposables.add(dom.addDisposableListener(row, dom.EventType.CLICK, () => {
+				this.setInput(this.buildCategoryPrompt(prompt));
+				this.focusInput();
+				selectedRow?.classList.remove('selected');
+				row.classList.add('selected');
+				selectedRow = row;
+			}));
+		}
+
+		this.categoryButtonsRow?.classList.add('hidden');
+		panel.classList.add('visible');
+	}
+
+	/** Returns to the category button row from an open prompt panel. */
+	private hideCategoryPanel(): void {
+		this.resetCategoryPanel();
+		this.focusInput();
+	}
+
+	/** Collapses the prompt panel and restores the category button row without stealing focus. */
+	private resetCategoryPanel(): void {
+		this.categoryPanel?.classList.remove('visible');
+		this.categoryButtonsRow?.classList.remove('hidden');
+	}
+
+	/** Expands a short prompt title into a fuller request for the composer. */
+	private buildCategoryPrompt(title: string): string {
+		const request = title.charAt(0).toLowerCase() + title.slice(1);
+		return localize('chat.category.promptTemplate', "Could you {0}? If you need more information from me, ask me 1-2 key questions right away. Otherwise, make reasonable assumptions and ask clarifying questions as you go.", request);
 	}
 
 	/**
@@ -1224,8 +1384,8 @@ export class ChatWidget extends Disposable implements IChatWidget {
 	private getWelcomeViewContent(additionalMessage: string | IMarkdownString | undefined): IChatViewWelcomeContent {
 		if (this.isLockedToCodingAgent) {
 			return {
-				title: localize('backboardWelcomeTitle', "New Agent"),
-				message: new MarkdownString(localize('backboardWelcomeSubtitle', "Start with a task.")),
+				title: '',
+				message: new MarkdownString(''),
 				styleVariant: 'backboard',
 			};
 		}
@@ -2207,12 +2367,14 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			}
 			if (e.kind === 'addRequest') {
 				this.inputPart?.clearTodoListWidget(this.viewModel?.sessionResource, false);
+				this.inputPart?.clearEditedFilesWidget();
 				this._sessionIsEmptyContextKey.set(false);
 				this.chatSuggestNextWidget.hide();
 			}
 			// Hide widget on request removal
 			if (e.kind === 'removeRequest') {
 				this.inputPart?.clearTodoListWidget(this.viewModel?.sessionResource, true);
+				this.inputPart?.clearEditedFilesWidget();
 				this.chatSuggestNextWidget.hide();
 				this._sessionIsEmptyContextKey.set((this.viewModel?.model.getRequests().length ?? 0) === 0);
 			}
@@ -2243,6 +2405,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		this.updateChatInputContext();
 		this.input.renderChatTodoListWidget(this.viewModel.sessionResource);
 		this.input.renderArtifactsWidget(this.viewModel.sessionResource);
+		this.inputPart?.renderEditedFilesWidget(this.viewModel.sessionResource);
 	}
 
 	getFocus(): ChatTreeItem | undefined {

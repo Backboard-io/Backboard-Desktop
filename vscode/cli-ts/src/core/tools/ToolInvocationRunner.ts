@@ -122,6 +122,7 @@ export class ToolInvocationRunner {
 					result.title,
 					result.detail,
 					result.detailLines,
+					result.fileEdits,
 				),
 			);
 			return {

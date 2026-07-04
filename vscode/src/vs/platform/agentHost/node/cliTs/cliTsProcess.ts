@@ -41,6 +41,12 @@ export class CliTsServeProcess extends Disposable {
 	private child: ChildProcessWithoutNullStreams | null = null;
 	private readonly pending = new Map<string, PendingServeRequest>();
 	private exited = false;
+	/** Whether the process ever produced a stdout line (reached serve startup). */
+	private sawOutput = false;
+	/** Tail of recent stderr, surfaced when the process dies unexpectedly. */
+	private readonly stderrTail: string[] = [];
+	/** The binary/command that was spawned, for actionable error messages. */
+	private spawnedCommand = '';
 
 	constructor(
 		private readonly logService: ILogService,
@@ -110,7 +116,10 @@ export class CliTsServeProcess extends Disposable {
 			const sep = process.platform === 'win32' ? ';' : ':';
 			env['PATH'] = [...this.options.extraPathDirs, env['PATH'] ?? ''].join(sep);
 		}
-		this.logService.info(`[cli-ts] spawning ${invocation.command} ${args.join(' ')}`);
+		this.spawnedCommand = `${invocation.command} ${args.join(' ')}`;
+		this.sawOutput = false;
+		this.stderrTail.length = 0;
+		this.logService.info(`[cli-ts] spawning ${this.spawnedCommand}`);
 		const child = spawn(invocation.command, args, {
 			cwd: this.options.workingDirectory ?? process.cwd(),
 			env,
@@ -122,26 +131,47 @@ export class CliTsServeProcess extends Disposable {
 		child.stderr.on('data', (chunk: Buffer) => {
 			const text = chunk.toString().trim();
 			if (text) {
+				this.stderrTail.push(text);
+				if (this.stderrTail.length > 10) {
+					this.stderrTail.shift();
+				}
 				this.logService.info(`[cli-ts] ${text}`);
 			}
 		});
 		child.on('error', error => {
 			this.logService.error(`[cli-ts] process error: ${error.message}`);
 			this.exited = true;
-			this.rejectAll(new Error(`cli-ts serve process failed: ${error.message}`));
+			this.rejectAll(new Error(`cli-ts serve process failed to start: ${error.message}`));
 			this.options.onExit?.(null, null);
 		});
 		child.on('exit', (code, signal) => {
 			this.logService.warn(`[cli-ts] serve process exited code=${code} signal=${signal}`);
 			this.exited = true;
 			this.child = null;
-			this.rejectAll(new Error('cli-ts serve process exited.'));
+			this.rejectAll(new Error(this.describeUnexpectedExit(code, signal)));
 			this.options.onExit?.(code, signal);
 		});
 		return child;
 	}
 
+	/**
+	 * Builds an actionable message for an unexpected serve-process exit. The
+	 * common failure is macOS killing the packaged binary on first exec because
+	 * `bun --compile` appends the JS bundle after ad-hoc signing (invalidating
+	 * the signature) — the process dies before producing any output, usually
+	 * with SIGKILL. Re-signing during packaging fixes it.
+	 */
+	private describeUnexpectedExit(code: number | null, signal: NodeJS.Signals | null): string {
+		const where = `${this.spawnedCommand} (code=${code ?? 'null'} signal=${signal ?? 'null'})`;
+		if (!this.sawOutput) {
+			const stderr = this.stderrTail.length ? ` Last stderr: ${this.stderrTail.join(' | ')}` : '';
+			return `The Backboard agent (cli-ts) failed to start and produced no output. This usually means the packaged binary's code signature is invalid (macOS kills it on first run). Rebuild it with: npm --prefix extensions/backboard run package-cli-ts. [${where}]${stderr}`;
+		}
+		return `cli-ts serve process exited unexpectedly: ${where}`;
+	}
+
 	private handleLine(line: string): void {
+		this.sawOutput = true;
 		const trimmed = line.trim();
 		if (!trimmed) {
 			return;

@@ -174,12 +174,34 @@ export class FileEditTracker {
 			this._logService.warn(`[FileEditTracker] No modelId for completed edit: ${filePath} (turn=${turnId}, toolCall=${toolCallId}, tool=${toolName || '<unknown>'}). Edit-survival telemetry will be emitted with an empty modelId.`);
 		}
 
-		const beforeBytes = edit.beforeContent.buffer;
-		const afterBytes = edit.afterContent.buffer;
-		const beforeText = edit.beforeContent.toString();
-		const afterText = edit.afterContent.toString();
+		const beforeExisted = edit.beforeExisted;
+		return this._buildFileEdit(turnId, toolCallId, filePath, toolName, toolInput, modelId, edit.beforeContent, edit.afterContent, beforeExisted);
+	}
 
-		const isCreate = !edit.beforeExisted && afterBytes.length > 0;
+	/**
+	 * Records a file edit from explicit before/after content instead of
+	 * disk snapshots. Used when the tool executor (e.g. the cli-ts runtime)
+	 * runs the edit itself and reports before/after directly — a host
+	 * observing tool events can't snapshot "before", since the write has
+	 * already landed by the time the event arrives. Persists to the session
+	 * database and returns the {@link ToolResultFileEditContent}.
+	 */
+	async recordExplicitEdit(turnId: string, toolCallId: string, filePath: string, beforeText: string, afterText: string, toolName: string, toolInput: unknown, modelId: string | undefined): Promise<ToolResultFileEditContent | undefined> {
+		const beforeContent = VSBuffer.fromString(beforeText);
+		const afterContent = VSBuffer.fromString(afterText);
+		// A single tool call can report several edits (e.g. a multi-file
+		// patch); disambiguate the session-db content keys by file path only,
+		// which is already unique per edit within a call.
+		return this._buildFileEdit(turnId, toolCallId, filePath, toolName, toolInput, modelId, beforeContent, afterContent, beforeText.length > 0);
+	}
+
+	private async _buildFileEdit(turnId: string, toolCallId: string, filePath: string, toolName: string, toolInput: unknown, modelId: string | undefined, beforeContent: VSBuffer, afterContent: VSBuffer, beforeExisted: boolean): Promise<ToolResultFileEditContent | undefined> {
+		const beforeBytes = beforeContent.buffer;
+		const afterBytes = afterContent.buffer;
+		const beforeText = beforeContent.toString();
+		const afterText = afterContent.toString();
+
+		const isCreate = !beforeExisted && afterBytes.length > 0;
 
 		let addedLines: number | undefined;
 		let removedLines: number | undefined;

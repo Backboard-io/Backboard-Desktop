@@ -91,13 +91,15 @@ export class EditTool extends Tool<Input, Output> {
 
 			const diagnostics = await collectDiagnosticsFeedback(ctx, filePath);
 
-			return ok(
+			const result = ok(
 				{ filePath, replacements, edits: input.edits.length },
 				`Edited ${input.file_path} (${replacements} replacement(s))${diagnostics}`,
 				lineSummary(addedLines, removedLines),
 				undefined,
 				buildEditDiffDetailLines(input.file_path, original, updated),
 			);
+			result.fileEdits = [{ path: filePath, before: original, after: updated }];
+			return result;
 		});
 	}
 }

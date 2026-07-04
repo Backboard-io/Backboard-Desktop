@@ -30,11 +30,26 @@ export const AGENT_IGNORED_DIRECTORIES: readonly string[] = [
 const ignoredSegments = new Set(AGENT_IGNORED_DIRECTORIES);
 
 /**
- * Whether a slash-separated path contains a segment from
- * {@link AGENT_IGNORED_DIRECTORIES} — i.e. the path is VCS-internal or
- * build/dependency output and should not be tracked as a user-visible file
- * edit.
+ * Matches the atomic-write temp files that editors and agent tooling create
+ * while saving: the payload is written to a sibling temp path and then renamed
+ * over the target, so the filesystem watcher observes a transient create+delete
+ * of the temp file that must never surface as a user-visible edit. Covers the
+ * shapes produced across this codebase and its runtime:
+ *   - `foo.ts.tmp.98222.fde4c15a7895`  (`.tmp.<pid>.<hex>`)
+ *   - `foo.ts.98222.1720000000000.fde4c15a7895.tmp` (`.<pid>.<ts>[.<hex>].tmp`)
+ *   - `foo.ts.vsctmp` (VS Code's default write postfix)
+ *   - `.18bf259f3f2fcae3-00000000.bun-build` (bun compile scratch file)
+ *   - `binary.cstemp` (macOS `codesign` in-place signing temp)
+ */
+const TEMP_WRITE_FILE_PATTERN = /(?:\.tmp\.\d+\.[0-9a-f]+|\.\d+\.\d+(?:\.[0-9a-f]+)?\.tmp|\.vsctmp|\.bun-build|\.cstemp)$/i;
+
+/**
+ * Whether a slash-separated path should not be tracked as a user-visible file
+ * edit: it either contains a segment from {@link AGENT_IGNORED_DIRECTORIES}
+ * (VCS-internal or build/dependency output) or is an atomic-write temp file
+ * (see {@link TEMP_WRITE_FILE_PATTERN}).
  */
 export function isIgnoredAgentPath(path: string): boolean {
-	return path.split('/').some(segment => ignoredSegments.has(segment));
+	return path.split('/').some(segment => ignoredSegments.has(segment))
+		|| TEMP_WRITE_FILE_PATTERN.test(path);
 }
