@@ -614,6 +614,26 @@
 		opacity 140ms ease-out;
 }
 
+/* ---------------------------------------------------------------------------
+ * Opening the sessions side/auxiliary bar rebuilds its pane composite
+ * synchronously, which briefly blocks the main thread. Two things make an
+ * animated OPEN look bad here specifically:
+ *   1. A width-based reveal (see part.css) runs on the main thread, so it
+ *      freezes during the rebuild and reads as a janky pop.
+ *   2. These panels use a translucent (frosted-glass) background. Animating a
+ *      compositor property (transform/opacity) promotes the panel to its own
+ *      layer, whose backing store Chromium initializes opaque white before the
+ *      translucent content paints — a white flash.
+ * So on OPEN we simply SNAP the panel in (no transition, no layer promotion):
+ * no jank, no flash. CLOSE keeps the smooth width transition from part.css —
+ * it has no rebuild, so no main-thread block, and width does not promote a
+ * layer, so no flash. Scoped to open via `:not(.nosidebar)` / `:not(.noauxiliarybar)`.
+ * ------------------------------------------------------------------------- */
+.agent-sessions-workbench.parts-animating:not(.phone-layout):not(.nosidebar) .monaco-grid-view .split-view-view:has(> .part.sidebar),
+.agent-sessions-workbench.parts-animating:not(.phone-layout):not(.noauxiliarybar) .monaco-grid-view .split-view-view:has(> .part.auxiliarybar) {
+	transition: none !important;
+}
+
 .agent-sessions-workbench .part.sessionspart > .title {
 	min-height: 38px !important;
 	height: 38px !important;

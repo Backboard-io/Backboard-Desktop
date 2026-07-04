@@ -103,6 +103,13 @@ export class CliTsServeProcess extends Disposable {
 			return this.child;
 		}
 		this.exited = false;
+		// Validate the cwd up front: Node reports a missing spawn cwd as
+		// `spawn <command> ENOENT`, which reads as if the binary were missing.
+		// A session restored against a deleted/renamed folder must fail with
+		// the real reason instead.
+		if (this.options.workingDirectory && !fs.existsSync(this.options.workingDirectory)) {
+			throw new Error(`The session's working directory no longer exists: ${this.options.workingDirectory}. Start a new session from an existing folder.`);
+		}
 		const invocation = this.resolveCliTsInvocation();
 		const args = [...invocation.args, '--serve'];
 		if (this.options.workingDirectory) {

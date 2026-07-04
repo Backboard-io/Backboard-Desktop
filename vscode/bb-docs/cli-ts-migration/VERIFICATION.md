@@ -291,6 +291,52 @@ The built binaries themselves (`backboard`, `backboard-cli-ts`) remain trackable
 when the agent itself runs a build, its outputs are legitimate turn artifacts; they only
 appeared here because an external rebuild collided with the open turn.
 
+## Composer pickers: stale models + "No Backboard options" (reported by user)
+
+**Symptoms:** the model picker sometimes showed a stale/default list, and the gear menu showed
+"No Backboard options" on fresh sessions.
+
+**Causes & fixes (all IDE-side, no binary change):**
+1. `CliTsAgent` only refreshed the model list **after the first submit**
+   (`_refreshModelsOnce` was called solely from `sendMessage`), so until then the picker showed
+   the static `BUNDLED_BACKBOARD_MODELS`. Fix: `_prewarm` now fires `listModels` immediately
+   after the `warmup` op — models load in parallel with assistant warmup while the composer is
+   open.
+2. Every composer picker (mode, permissions, generic chips, …) independently called
+   `resolveSessionConfig` for the same `(provider, workingDirectory)` at mount. Fix: new
+   `resolveSessionConfigShared` helper dedupes concurrent identical calls into one in-flight
+   round-trip (results are not cached — only the in-flight promise is shared).
+3. The gear dropdown rendered the dead-end "No Backboard options" while the schema was still
+   resolving. Fix: `AgentHostGenericConfigChips.hasResolvedSchema()` distinguishes
+   loading-vs-empty; the dropdown now shows "Loading Backboard options…" until the schema
+   arrives.
+4. **Model-list disk cache** (follow-up: "models load so incredibly slow"): the backend fetch
+   itself is ~0.75s, but it cannot start until a serve process exists (prewarm needs a chosen
+   workspace; otherwise first submit). `CliTsAgent` now persists the fetched list to
+   `~/.backboard_ide/models-cache.json` (keyed by API URL) and hydrates it at construction —
+   the picker shows the real 400+ model list instantly at window start, refreshed in the
+   background whenever the next serve process spawns.
+
+## "spawn …/backboard-cli-ts ENOENT" with the binary present (reported by user)
+
+**Symptom:** `BackboardSendFailed: cli-ts serve process failed to start: spawn
+…/extensions/backboard/bin/backboard-cli-ts ENOENT` while the binary existed on disk.
+
+**Root cause (reproduced):** Node reports a **missing spawn `cwd`** as `spawn <command> ENOENT`
+— the error names the binary even though it's the working directory that's gone. This happens
+when a session is restored against a deleted/renamed folder.
+
+**Fix:** `CliTsServeProcess.ensureProcess` validates the working directory before spawning and
+throws the real reason: "The session's working directory no longer exists: <path>. Start a new
+session from an existing folder." The sendMessage catch path already routes this into a
+ChatError bubble.
+
+**Full re-verification of the packaged binary** (rebuilt + re-signed):
+`bun run validate` green (600 tests) · serve handshake `ready=True models=419 tools=14` ·
+live turn with `autoApprove`: Glob `Found 1000+ files` (truncation fix live), Execute exit 0,
+ApplyPatch create `+4/-0` and edit `+1/-1` both with `fileEdits` diff payloads, turn
+`completed`, file content correct on disk.
+
 ## Known exceptions & follow-ups
 
 1. **Todos (A4):** no todo `ResponsePart` kind exists in the agent-host protocol; per-update

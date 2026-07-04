@@ -37,6 +37,7 @@ import { IAgentHostSessionWorkingDirectoryResolver } from './agentHostSessionWor
 import { IAgentHostNewSessionFolderService } from './agentHostNewSessionFolderService.js';
 import { IAgentHostUntitledProvisionalSessionService } from './agentHostUntitledProvisionalSessionService.js';
 import { toAgentHostBackendSessionUri } from './agentHostSessionUri.js';
+import { resolveSessionConfigShared } from './agentHostSessionConfigResolveCache.js';
 import { BackboardLogoIcon } from '../agentSessions.js';
 
 const FILTER_THRESHOLD = 10;
@@ -351,7 +352,7 @@ export class AgentHostChatInputPicker extends Disposable {
 		const cts = new CancellationTokenSource();
 		this._initialResolveCts.value = cts;
 		try {
-			const result = await this._agentHostService.resolveSessionConfig({
+			const result = await resolveSessionConfigShared(this._agentHostService, {
 				provider: backendSession.scheme,
 				workingDirectory: this._readWorkingDirectory(),
 			});

@@ -24,7 +24,7 @@ import { ISessionDatabase, ISessionDataService } from '../../common/sessionDataS
 import { FileEditTracker } from '../shared/fileEditTracker.js';
 import type { IReference } from '../../../../base/common/lifecycle.js';
 import { IAgentConfigurationService } from '../agentConfigurationService.js';
-import { BACKBOARD_ACCESS_MANUAL, BACKBOARD_MODE_PLAN, BUNDLED_BACKBOARD_MODELS, backboardModelInfos, createBackboardTurnSettings, fallbackModel, isBridgeModel, resolveBackboardSessionConfig } from './backboardRuntimeShared.js';
+import { BACKBOARD_ACCESS_MANUAL, BACKBOARD_MODE_PLAN, BUNDLED_BACKBOARD_MODELS, backboardModelInfos, bridgeConfig, createBackboardTurnSettings, fallbackModel, isBridgeModel, resolveBackboardSessionConfig } from './backboardRuntimeShared.js';
 
 /** cli-ts tool name excluded from the turn when Web Search is toggled off. */
 const CLI_TS_WEB_SEARCH_TOOL_NAME = 'WebSearch';
@@ -122,6 +122,13 @@ export class CliTsAgent extends Disposable implements IAgent {
 	private readonly _onDidMaterializeSession = this._register(new Emitter<IAgentMaterializeSessionEvent>());
 	readonly onDidMaterializeSession = this._onDidMaterializeSession.event;
 
+	/**
+	 * Starts as the compiled-in bundled list, immediately overlaid with the
+	 * disk-cached list from the previous run (see constructor), and finally
+	 * replaced with the backend's live list once a serve process is up. The
+	 * picker therefore shows real models at window start instead of waiting
+	 * out a network round-trip.
+	 */
 	private readonly _models = observableValue<readonly IAgentModelInfo[]>('cliTsModels', backboardModelInfos(BUNDLED_BACKBOARD_MODELS));
 	readonly models: IObservable<readonly IAgentModelInfo[]> = this._models;
 
@@ -136,6 +143,46 @@ export class CliTsAgent extends Disposable implements IAgent {
 		@IInstantiationService private readonly _instantiationService: IInstantiationService,
 	) {
 		super();
+		this._hydrateModelsFromCache();
+	}
+
+	private _modelsCachePath(): string {
+		return path.join(os.homedir(), '.backboard_ide', 'models-cache.json');
+	}
+
+	private _currentApiUrl(): string {
+		const apiUrl = bridgeConfig().apiUrl;
+		return typeof apiUrl === 'string' ? apiUrl : '';
+	}
+
+	/**
+	 * Seeds the model observable with the list fetched on a previous run so
+	 * the picker is populated instantly at window start. The cache is keyed
+	 * by API URL — a backend switch falls back to the bundled list until the
+	 * live refresh lands.
+	 */
+	private _hydrateModelsFromCache(): void {
+		try {
+			const raw = JSON.parse(fs.readFileSync(this._modelsCachePath(), 'utf8')) as { apiUrl?: string; models?: unknown[] };
+			if ((raw.apiUrl ?? '') !== this._currentApiUrl()) {
+				return;
+			}
+			const models = (Array.isArray(raw.models) ? raw.models : []).filter(isBridgeModel);
+			if (models.length) {
+				this._models.set(backboardModelInfos(models), undefined);
+			}
+		} catch {
+			// First run or unreadable cache — the bundled fallback stays.
+		}
+	}
+
+	private _persistModelsCache(models: readonly unknown[]): void {
+		try {
+			fs.mkdirSync(path.dirname(this._modelsCachePath()), { recursive: true });
+			fs.writeFileSync(this._modelsCachePath(), `${JSON.stringify({ apiUrl: this._currentApiUrl(), models }, null, '\t')}\n`, 'utf8');
+		} catch (error) {
+			this._logService.info(`[cli-ts] could not persist models cache: ${error instanceof Error ? error.message : String(error)}`);
+		}
 	}
 
 	/**
@@ -204,8 +251,11 @@ export class CliTsAgent extends Disposable implements IAgent {
 	}
 
 	/**
-	 * Spawns the serve process and fires a `warmup` op so the base assistant is
-	 * resolved (and disk-cached) before the first message. Best-effort.
+	 * Spawns the serve process, fires a `warmup` op so the base assistant is
+	 * resolved (and disk-cached) before the first message, and kicks off the
+	 * model-list refresh in parallel — so the model picker shows the backend's
+	 * real list while the composer is still open instead of only after the
+	 * first submit. Best-effort.
 	 */
 	private async _prewarm(session: CliTsSession): Promise<void> {
 		if (session.disposed || session.proc?.isRunning) {
@@ -215,6 +265,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 			const rgDir = await this._resolveRgDir();
 			const proc = this._ensureProcess(session, rgDir);
 			proc.notify({ op: 'warmup' });
+			this._refreshModelsOnce(session);
 		} catch (error) {
 			this._logService.info(`[cli-ts] pre-warm skipped for ${session.sessionId}: ${error instanceof Error ? error.message : String(error)}`);
 		}
@@ -585,6 +636,8 @@ export class CliTsAgent extends Disposable implements IAgent {
 			if (models.length) {
 				const infos = backboardModelInfos(models);
 				this._models.set(infos.length ? infos : [fallbackModel()], undefined);
+				// Persist for instant hydration on the next window start.
+				this._persistModelsCache(models);
 			}
 		}).catch(error => {
 			this._modelsRefreshed = false;

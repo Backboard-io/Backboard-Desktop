@@ -40,7 +40,7 @@ import { DiffEditorInput } from '../common/editor/diffEditorInput.js';
 import { mark } from '../../base/common/performance.js';
 import { IExtensionService } from '../services/extensions/common/extensions.js';
 import { ILogService } from '../../platform/log/common/log.js';
-import { DeferredPromise, Promises } from '../../base/common/async.js';
+import { DeferredPromise, Promises, RunOnceScheduler } from '../../base/common/async.js';
 import { IBannerService } from '../services/banner/browser/bannerService.js';
 import { IPaneCompositePartService } from '../services/panecomposite/browser/panecomposite.js';
 import { AuxiliaryBarPart } from './parts/auxiliarybar/auxiliaryBarPart.js';
@@ -101,7 +101,8 @@ enum LayoutClasses {
 	FULLSCREEN = 'fullscreen',
 	MAXIMIZED = 'maximized',
 	WINDOW_BORDER = 'border',
-	NO_SHADOWS = 'no-shadows'
+	NO_SHADOWS = 'no-shadows',
+	PARTS_ANIMATING = 'parts-animating'
 }
 
 interface IPathToOpen extends IPath {
@@ -265,6 +266,9 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 
 	private initialized = false;
 	private workbenchGrid!: SerializableGrid<ISerializableView>;
+
+	/** Removes the transient `.parts-animating` class after a side/auxiliary bar toggle finishes animating. */
+	private readonly partsAnimationScheduler = this._register(new RunOnceScheduler(() => this.mainContainer.classList.remove(LayoutClasses.PARTS_ANIMATING), 240));
 
 	private titleBarPartView!: ISerializableView;
 	private bannerPartView!: ISerializableView;
@@ -1886,10 +1890,28 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 		]);
 	}
 
+	/**
+	 * Starts a brief geometry animation for a side/auxiliary bar toggle. Adds the
+	 * `.parts-animating` class (which enables the CSS transition and keeps the
+	 * toggling part rendered), commits the current sizes as the transition start
+	 * frame with a forced reflow, and schedules the class removal. Must be called
+	 * before the grid visibility is changed.
+	 */
+	private beginPartsAnimation(): void {
+		if (!this.initialized || !this.workbenchGrid) {
+			return; // avoid animating the initial layout / restore
+		}
+		this.mainContainer.classList.add(LayoutClasses.PARTS_ANIMATING);
+		this.workbenchGrid.element.getBoundingClientRect(); // force reflow so the pre-toggle sizes become the animation's starting frame
+		this.partsAnimationScheduler.schedule();
+	}
+
 	private setSideBarHidden(hidden: boolean): void {
 		if (!hidden && this.setAuxiliaryBarMaximized(false) && this.isVisible(Parts.SIDEBAR_PART)) {
 			return; // return: leaving maximised auxiliary bar made this part visible
 		}
+
+		this.beginPartsAnimation();
 
 		this.stateModel.setRuntimeValue(LayoutStateKeys.SIDEBAR_HIDDEN, hidden);
 
@@ -2228,6 +2250,8 @@ export abstract class Layout extends Disposable implements IWorkbenchLayoutServi
 		if (hidden && this.setAuxiliaryBarMaximized(false) && !this.isVisible(Parts.AUXILIARYBAR_PART)) {
 			return; // return: leaving maximised auxiliary bar made this part hidden
 		}
+
+		this.beginPartsAnimation();
 
 		this.stateModel.setRuntimeValue(LayoutStateKeys.AUXILIARYBAR_HIDDEN, hidden);
 

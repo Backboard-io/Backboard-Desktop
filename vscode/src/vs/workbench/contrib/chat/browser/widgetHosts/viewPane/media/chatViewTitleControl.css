@@ -9,7 +9,7 @@
 		display: none;
 		cursor: pointer;
 		flex-shrink: 0;
-		height: 38px;
+		height: 32px;
 		border-bottom: 1px solid var(--vscode-panel-border);
 		background: var(--vscode-sideBar-background, var(--vscode-editor-background));
 
@@ -32,7 +32,7 @@
 			overflow-x: auto;
 			overflow-y: hidden;
 			height: 100%;
-			padding: 5px 10px;
+			padding: 4px 8px;
 			overscroll-behavior-x: contain;
 			scroll-behavior: smooth;
 			scrollbar-width: none;
@@ -47,12 +47,12 @@
 		.chat-view-title-tab {
 			display: flex;
 			align-items: center;
-			gap: 8px;
-			height: 28px;
-			width: 160px;
-			min-width: 136px;
-			max-width: 184px;
-			padding: 0 7px 0 12px;
+			gap: 6px;
+			height: 24px;
+			width: 136px;
+			min-width: 112px;
+			max-width: 160px;
+			padding: 0 6px 0 10px;
 			border: 1px solid transparent;
 			border-radius: 5px;
 			color: var(--vscode-tab-inactiveForeground, var(--vscode-descriptionForeground));
@@ -60,7 +60,7 @@
 			cursor: pointer;
 			font: inherit;
 			box-sizing: border-box;
-			flex: 0 0 160px;
+			flex: 0 0 136px;
 			position: relative;
 			transition: background-color 80ms linear, border-color 80ms linear, color 80ms linear, box-shadow 80ms linear;
 		}
@@ -97,8 +97,8 @@
 			display: flex;
 			align-items: center;
 			justify-content: center;
-			width: 18px;
-			height: 18px;
+			width: 16px;
+			height: 16px;
 			margin-left: auto;
 			border-radius: 4px;
 			color: var(--vscode-descriptionForeground);

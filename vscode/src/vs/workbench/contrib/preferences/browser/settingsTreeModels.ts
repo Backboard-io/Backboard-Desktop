@@ -21,6 +21,7 @@ import { IWorkbenchEnvironmentService } from '../../../services/environment/comm
 import { IExtensionSetting, ISearchResult, ISetting, ISettingMatch, SettingMatchType, SettingValueType } from '../../../services/preferences/common/preferences.js';
 import { IUserDataProfileService } from '../../../services/userDataProfile/common/userDataProfile.js';
 import { AGENTS_WINDOW_SETTING_TAG, ENABLE_EXTENSION_TOGGLE_SETTINGS, ENABLE_LANGUAGE_FILTER, MODIFIED_SETTING_TAG, POLICY_SETTING_TAG, REQUIRE_TRUSTED_WORKSPACE_SETTING_TAG, compareTwoNullableNumbers, wordifyKey } from '../common/preferences.js';
+import { sanitizeSettingsText } from '../common/settingsBranding.js';
 import { SettingsTarget } from './preferencesWidgets.js';
 import { ITOCEntry, tocData } from './settingsLayout.js';
 
@@ -210,7 +211,7 @@ export class SettingsTreeSettingElement extends SettingsTreeElement {
 
 	private initLabels(): void {
 		if (this.setting.title) {
-			this._displayLabel = this.setting.title;
+			this._displayLabel = sanitizeSettingsText(this.setting.title, this.productService.nameLong);
 			this._displayCategory = this.setting.categoryLabel ?? null;
 			return;
 		}
@@ -227,6 +228,7 @@ export class SettingsTreeSettingElement extends SettingsTreeElement {
 		} else {
 			this.description = this.setting.description.join('\n');
 		}
+		this.description = sanitizeSettingsText(this.description, this.productService.nameLong);
 	}
 
 	private initSettingValueType() {

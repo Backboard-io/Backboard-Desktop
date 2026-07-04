@@ -18,6 +18,7 @@ import { type IAgentSubscription } from '../../../../../../platform/agentHost/co
 import { isUntitledChatSession } from '../../../common/model/chatUri.js';
 import type { IChatWidget } from '../../chat.js';
 import { AgentHostChatInputPicker, isClaimedByDedicatedPicker } from './agentHostChatInputPicker.js';
+import { resolveSessionConfigShared } from './agentHostSessionConfigResolveCache.js';
 import { IAgentHostSessionWorkingDirectoryResolver } from './agentHostSessionWorkingDirectoryResolver.js';
 import { IAgentHostNewSessionFolderService } from './agentHostNewSessionFolderService.js';
 import { IAgentHostUntitledProvisionalSessionService } from './agentHostUntitledProvisionalSessionService.js';
@@ -110,6 +111,15 @@ export class AgentHostGenericConfigChips extends Disposable {
 		this._sync();
 	}
 
+	/**
+	 * Whether the session-config schema has arrived. While false, an empty
+	 * {@link getOptions} result means "still loading", not "no options" —
+	 * consumers should render a loading state instead of an empty one.
+	 */
+	hasResolvedSchema(): boolean {
+		return this._readSchemaProperties() !== undefined;
+	}
+
 	getOptions(): readonly IAgentHostGenericConfigOption[] {
 		this._sync();
 		const entries = this._readSchemaProperties();
@@ -184,7 +194,7 @@ export class AgentHostGenericConfigChips extends Disposable {
 		const cts = new CancellationTokenSource();
 		this._initialResolveCts.value = cts;
 		try {
-			const result = await this._agentHostService.resolveSessionConfig({
+			const result = await resolveSessionConfigShared(this._agentHostService, {
 				provider: backendSession.scheme,
 				workingDirectory: this._readWorkingDirectory(),
 			});

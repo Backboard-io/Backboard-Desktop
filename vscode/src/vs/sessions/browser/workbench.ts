@@ -107,7 +107,8 @@ enum LayoutClasses {
 	MAXIMIZED = 'maximized',
 	PHONE_LAYOUT = 'phone-layout',
 	AUXILIARY_FILES_ACTIVE = 'sessions-auxiliary-files-active',
-	AUXILIARY_BROWSER_ACTIVE = 'sessions-auxiliary-browser-active'
+	AUXILIARY_BROWSER_ACTIVE = 'sessions-auxiliary-browser-active',
+	PARTS_ANIMATING = 'parts-animating'
 }
 
 //#endregion
@@ -285,6 +286,9 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 
 	private readonly parts = new Map<string, Part>();
 	private workbenchGrid!: SerializableGrid<ISerializableView>;
+
+	/** Removes the transient `.parts-animating` class after a side/auxiliary bar toggle finishes animating. */
+	private readonly partsAnimationScheduler = this._register(new RunOnceScheduler(() => this.mainContainer.classList.remove(LayoutClasses.PARTS_ANIMATING), 240));
 
 	private titleBarPartView!: ISerializableView;
 	private sideBarPartView!: ISerializableView;
@@ -1647,10 +1651,28 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		}
 	}
 
+	/**
+	 * Starts a brief geometry animation for a side/auxiliary bar toggle. Adds the
+	 * `.parts-animating` class (which enables the CSS transition and keeps the
+	 * toggling part rendered), commits the current sizes as the transition start
+	 * frame with a forced reflow, and schedules the class removal. Must be called
+	 * before the grid visibility is changed.
+	 */
+	private beginPartsAnimation(): void {
+		if (!this.restored || !this.workbenchGrid) {
+			return; // avoid animating the initial layout / restore
+		}
+		this.mainContainer.classList.add(LayoutClasses.PARTS_ANIMATING);
+		this.workbenchGrid.element.getBoundingClientRect(); // force reflow so the pre-toggle sizes become the animation's starting frame
+		this.partsAnimationScheduler.schedule();
+	}
+
 	private setSideBarHidden(hidden: boolean): void {
 		if (this.partVisibility.sidebar === !hidden) {
 			return;
 		}
+
+		this.beginPartsAnimation();
 
 		const sidebarSizeBeforeToggle = this.sideBarPartView ? this.workbenchGrid.getViewSize(this.sideBarPartView) : undefined;
 		const sessionsSizeBeforeToggle = this.sessionsPartView ? this.workbenchGrid.getViewSize(this.sessionsPartView) : undefined;
@@ -1707,6 +1729,8 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		if (this.partVisibility.auxiliaryBar === !hidden) {
 			return;
 		}
+
+		this.beginPartsAnimation();
 
 		if (hidden) {
 			this._restoreAttachedEditorMaximizedOnShow = false;

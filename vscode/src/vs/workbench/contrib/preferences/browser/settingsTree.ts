@@ -66,6 +66,7 @@ import { ISetting, ISettingsGroup, SETTINGS_AUTHORITY, SettingValueType } from '
 import { getInvalidTypeError } from '../../../services/preferences/common/preferencesValidation.js';
 import { IExtensionsWorkbenchService } from '../../extensions/common/extensions.js';
 import { LANGUAGE_SETTING_TAG, SETTINGS_EDITOR_COMMAND_SHOW_CONTEXT_MENU, compareTwoNullableNumbers } from '../common/preferences.js';
+import { sanitizeSettingsText } from '../common/settingsBranding.js';
 import { settingsNumberInputBackground, settingsNumberInputBorder, settingsNumberInputForeground, settingsSelectBackground, settingsSelectBorder, settingsSelectForeground, settingsSelectListBorder, settingsTextInputBackground, settingsTextInputBorder, settingsTextInputForeground } from '../common/settingsEditorColorRegistry.js';
 import { settingsMoreActionIcon } from './preferencesIcons.js';
 import { SettingsTarget } from './preferencesWidgets.js';
@@ -1055,7 +1056,7 @@ export abstract class AbstractSettingRenderer extends Disposable implements ITre
 			manualReset: false,
 			scope: element.setting.scope
 		});
-		const deprecationText = element.setting.deprecationMessage || '';
+		const deprecationText = sanitizeSettingsText(element.setting.deprecationMessage || '');
 		if (deprecationText && element.setting.deprecationMessageIsMarkdown) {
 			template.deprecationWarningElement.innerText = '';
 			template.deprecationWarningElement.appendChild(this.renderSettingMarkdown(element, template.containerElement, element.setting.deprecationMessage!, template.elementDisposables));
@@ -1970,7 +1971,7 @@ class SettingEnumRenderer extends AbstractSettingRenderer implements ITreeRender
 			.map(String)
 			.map(escapeInvisibleChars)
 			.map((data, index) => {
-				const description = (enumDescriptions[index] && (enumDescriptionsAreMarkdown ? fixSettingLinks(enumDescriptions[index], false) : enumDescriptions[index]));
+				const description = (enumDescriptions[index] && (enumDescriptionsAreMarkdown ? fixSettingLinks(enumDescriptions[index], false) : sanitizeSettingsText(enumDescriptions[index])));
 				return {
 					text: enumItemLabels[index] ? enumItemLabels[index] : data,
 					detail: enumItemLabels[index] ? data : '',
@@ -2443,6 +2444,9 @@ function cleanRenderedMarkdown(element: Node): void {
 }
 
 function fixSettingLinks(text: string, linkify = true): string {
+	// Debrand before linkifying: VS Code doc links → Backboard docs, other
+	// VS Code links unlinked, "VS Code" text → product name.
+	text = sanitizeSettingsText(text);
 	return text.replace(/`#([^#\s`]+)#`|'#([^#\s']+)#'/g, (match, backticksGroup, quotesGroup) => {
 		const settingKey: string = backticksGroup ?? quotesGroup;
 		const targetDisplayFormat = settingKeyToDisplayFormat(settingKey);

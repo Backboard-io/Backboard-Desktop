@@ -1178,6 +1178,11 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		return this.agentHostGenericConfigChips?.getOptions() ?? [];
 	}
 
+	/** Whether the Backboard session-config schema has finished resolving. */
+	public hasBackboardConfigResolved(): boolean {
+		return this.agentHostGenericConfigChips?.hasResolvedSchema() ?? false;
+	}
+
 	public getBackboardOptionsAnchor(): HTMLElement | undefined {
 		return this.backboardOptionsAnchor;
 	}
@@ -4806,12 +4811,19 @@ class BackboardComposerOptionsActionViewItem extends ActionWidgetDropdownActionV
 			});
 		}
 		if (!actions.length) {
+			// An empty option list means "still resolving" until the config
+			// schema has arrived — only then is it truly "no options".
+			const loading = !this.inputPart.hasBackboardConfigResolved();
 			actions.push({
 				id: 'backboardComposerOptions.empty',
-				label: localize('backboardComposerOptions.empty', "No Backboard options"),
+				label: loading
+					? localize('backboardComposerOptions.loading', "Loading Backboard options…")
+					: localize('backboardComposerOptions.empty', "No Backboard options"),
 				class: undefined,
-				tooltip: localize('backboardComposerOptions.emptyTooltip', "No configurable Backboard options are available for this session."),
-				icon: Codicon.info,
+				tooltip: loading
+					? localize('backboardComposerOptions.loadingTooltip', "Backboard options are still loading. Reopen this menu in a moment.")
+					: localize('backboardComposerOptions.emptyTooltip', "No configurable Backboard options are available for this session."),
+				icon: loading ? Codicon.loading : Codicon.info,
 				enabled: false,
 				run: () => undefined,
 			});
