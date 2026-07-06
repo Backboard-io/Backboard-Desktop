@@ -108,6 +108,11 @@ export type IOnboardingThemeOption = IProductOnboardingTheme;
  */
 export const ONBOARDING_STORAGE_KEY = 'welcomeOnboarding.state';
 
+/**
+ * Storage key for tracking whether the post-onboarding tour has been shown.
+ */
+export const ONBOARDING_TOUR_STORAGE_KEY = 'welcomeOnboarding.tourComplete';
+
 export type OnboardingDismissReason = 'complete' | 'skip';
 
 export interface IBackboardOnboardingState {

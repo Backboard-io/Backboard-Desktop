@@ -52,8 +52,7 @@ import './backboardWorkspace/backboardWorkspace.contribution.js';
 import { BackboardModeSwitcherAction, BackboardModeSwitcherContribution, ToggleBackboardModeSwitcherTitleBarAction } from './backboardModeSwitcher/backboardModeSwitcherActions.js';
 import { shouldWarnForSessionShutdown } from './chatLifecycle.js';
 import { HoldToVoiceChatInChatViewAction, InlineVoiceChatAction, KeywordActivationContribution, QuickVoiceChatAction, ReadChatResponseAloud, StartVoiceChatAction, StopListeningAction, StopListeningAndSubmitAction, StopReadAloud, StopReadChatItemAloud, VoiceChatInChatViewAction } from './actions/voiceChatActions.js';
-import { OpenWorkspaceInAgentsWindowAction, OpenAgentsWindowAction, OpenOptimusWindowAction, OpenJarvisWindowAction, OpenChatSessionInAgentsWindowAction, AgentsHandoffInputTipContribution } from './agentSessions/agentSessionsActions.js';
-import { OptimusSharedChatHistoryContribution } from './agentSessions/optimusSharedChatHistory.js';
+import { OpenWorkspaceInAgentsWindowAction, OpenAgentsWindowAction, OpenJarvisWindowAction, OpenOptimusWindowAction, OpenChatSessionInAgentsWindowAction, AgentsHandoffInputTipContribution } from './agentSessions/agentSessionsActions.js';
 import { NativeBuiltinToolsContribution } from './builtInTools/tools.js';
 import { NativePluginGitCommandService } from './pluginGitCommandService.js';
 
@@ -241,8 +240,8 @@ registerAction2(OpenWorkspaceInAgentsWindowAction);
 registerAction2(BackboardModeSwitcherAction);
 registerAction2(ToggleBackboardModeSwitcherTitleBarAction);
 registerAction2(OpenAgentsWindowAction);
-registerAction2(OpenOptimusWindowAction);
 registerAction2(OpenJarvisWindowAction);
+registerAction2(OpenOptimusWindowAction);
 registerAction2(OpenChatSessionInAgentsWindowAction);
 registerAction2(StartVoiceChatAction);
 
@@ -271,7 +270,6 @@ registerWorkbenchContribution2(ChatLifecycleHandler.ID, ChatLifecycleHandler, Wo
 registerWorkbenchContribution2(BackboardCredentialsContribution.ID, BackboardCredentialsContribution, WorkbenchPhase.AfterRestored);
 registerWorkbenchContribution2(AgentHostContribution.ID, AgentHostContribution, WorkbenchPhase.AfterRestored);
 registerWorkbenchContribution2(AgentHostTerminalContribution.ID, AgentHostTerminalContribution, WorkbenchPhase.AfterRestored);
-registerWorkbenchContribution2(OptimusSharedChatHistoryContribution.ID, OptimusSharedChatHistoryContribution, WorkbenchPhase.AfterRestored);
 registerWorkbenchContribution2(BackboardModeSwitcherContribution.ID, BackboardModeSwitcherContribution, WorkbenchPhase.BlockRestore);
 registerWorkbenchContribution2(AgentsHandoffInputTipContribution.ID, AgentsHandoffInputTipContribution, WorkbenchPhase.Eventually);
 

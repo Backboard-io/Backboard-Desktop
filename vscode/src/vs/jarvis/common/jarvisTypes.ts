@@ -72,6 +72,5 @@ export interface IJarvisBridge {
 	interpretCommand(text: string, systemPrompt: string, tools: readonly unknown[]): Promise<IJarvisCommandInterpretationResult>;
 	openEditor(): Promise<void>;
 	openAgents(): Promise<void>;
-	openOptimus(): Promise<void>;
 	openJarvis(): Promise<void>;
 }

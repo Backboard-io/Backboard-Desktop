@@ -5,6 +5,7 @@
 
 import { Event } from '../../../../base/common/event.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
+import { OnboardingDismissReason } from './onboardingTypes.js';
 
 export const IOnboardingService = createDecorator<IOnboardingService>('onboardingService');
 
@@ -15,6 +16,12 @@ export interface IOnboardingService {
 	 * Fires when the onboarding modal is dismissed.
 	 */
 	readonly onDidDismiss: Event<void>;
+
+	/**
+	 * Fires once the work that follows dismissal (opening the selected
+	 * experience, prompting sign-in) has settled.
+	 */
+	readonly onDidFinishOnboardingFlow: Event<OnboardingDismissReason>;
 
 	/**
 	 * Show the onboarding modal.

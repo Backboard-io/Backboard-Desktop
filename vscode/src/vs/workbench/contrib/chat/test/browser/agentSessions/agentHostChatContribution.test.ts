@@ -1376,7 +1376,7 @@ suite('AgentHostChatContribution', () => {
 		}));
 
 		test('folder picker is visible only in multi-root agent-host editor windows', () => {
-			const item = MenuRegistry.getMenuItems(MenuId.ChatInputSecondary)
+			const item = MenuRegistry.getMenuItems(MenuId.ChatInput)
 				.find((i): i is IMenuItem => isIMenuItem(i) && i.command.id === OpenAgentHostFolderPickerAction.ID);
 			assert.ok(item, 'folder picker menu item is registered');
 			const when = item.when;

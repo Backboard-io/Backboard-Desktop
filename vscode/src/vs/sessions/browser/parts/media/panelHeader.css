@@ -136,7 +136,10 @@
 }
 
 /* macOS native: invisible traffic-light spacer. Hidden in fullscreen (the
- * traffic lights auto-hide with the toolbar) and in the phone layout. */
+ * traffic lights auto-hide with the toolbar) and in the phone layout. The
+ * traffic lights are OS-drawn and do not scale with the workbench zoom, so the
+ * spacer counter-scales with `--zoom-factor` (published by `panelHeader.ts`) to
+ * keep a constant physical width and stay clear of the controls at any zoom. */
 .agent-sessions-workbench.mac .sessions-panel-header .mac-window-controls-spacer {
 	-webkit-app-region: drag;
 	background: transparent;
@@ -146,7 +149,7 @@
 	overflow: hidden;
 	pointer-events: none;
 	visibility: hidden;
-	width: 70px;
+	width: calc(70px / var(--zoom-factor, 1));
 	flex-shrink: 0;
 	height: 100%;
 }

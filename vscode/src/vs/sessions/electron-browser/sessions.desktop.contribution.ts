@@ -13,8 +13,8 @@ import { OpenSessionInVSCodeAction, OpenInVSCodeWidgetContribution, OpenJarvisWi
 	registerAction2(OpenSessionInVSCodeAction);
 	registerAction2(OpenWorkspaceInVSCodeAction);
 	registerAction2(OpenVSCodeWindowAction);
-	registerAction2(OpenOptimusWindowAction);
 	registerAction2(OpenJarvisWindowAction);
+	registerAction2(OpenOptimusWindowAction);
 })();
 
 (function registerWorkbenchContributions(): void {

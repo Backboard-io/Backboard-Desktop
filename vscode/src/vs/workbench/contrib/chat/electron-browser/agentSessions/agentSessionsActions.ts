@@ -80,24 +80,6 @@ export class OpenAgentsWindowAction extends Action2 {
 	}
 }
 
-export class OpenOptimusWindowAction extends Action2 {
-
-	static readonly ID = 'workbench.action.openOptimusWindow';
-
-	constructor() {
-		super({
-			id: OpenOptimusWindowAction.ID,
-			title: localize2('openOptimusWindow', "Open Advanced"),
-			category: localize2('optimus', "Advanced"),
-			f1: true,
-		});
-	}
-
-	async run(accessor: ServicesAccessor): Promise<void> {
-		await accessor.get(INativeHostService).openOptimusWindow();
-	}
-}
-
 export class OpenJarvisWindowAction extends Action2 {
 
 	static readonly ID = 'workbench.action.openJarvisWindow';
@@ -113,6 +95,24 @@ export class OpenJarvisWindowAction extends Action2 {
 
 	async run(accessor: ServicesAccessor): Promise<void> {
 		await accessor.get(INativeHostService).openJarvisWindow();
+	}
+}
+
+export class OpenOptimusWindowAction extends Action2 {
+
+	static readonly ID = 'workbench.action.openOptimusWindow';
+
+	constructor() {
+		super({
+			id: OpenOptimusWindowAction.ID,
+			title: localize2('openOptimusWindow', "Open Advanced"),
+			category: localize2('optimus', "Advanced"),
+			f1: true,
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		await accessor.get(INativeHostService).openOptimusWindow();
 	}
 }
 

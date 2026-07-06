@@ -148,14 +148,14 @@ export class LaunchMainService implements ILaunchMainService {
 			usedWindows = await this.windowsMainService.openAgentsWindow(baseConfig);
 		}
 
-		// Optimus
-		else if (args['optimus']) {
-			usedWindows = await this.windowsMainService.openOptimusWindow(baseConfig);
-		}
-
 		// Jarvis
 		else if (args['jarvis']) {
 			usedWindows = await this.windowsMainService.openJarvisWindow(baseConfig);
+		}
+
+		// Optimus
+		else if (args['optimus']) {
+			usedWindows = await this.windowsMainService.openOptimusWindow(baseConfig);
 		}
 
 		// Start without file/folder arguments

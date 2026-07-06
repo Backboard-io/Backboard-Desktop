@@ -337,6 +337,35 @@ live turn with `autoApprove`: Glob `Found 1000+ files` (truncation fix live), Ex
 ApplyPatch create `+4/-0` and edit `+1/-1` both with `fileEdits` diff payloads, turn
 `completed`, file content correct on disk.
 
+## Conversation amnesia after restarts — thread resume (reported by user)
+
+**Symptom:** asking "print all the questions I sent before" in an existing chat got "This is
+the first message in our session" — the agent had no memory of prior turns even though the
+transcript rendered them.
+
+**Root cause — two gaps compounding:**
+1. cli-ts only announced `session:created` at serve startup, **before** any turn, when
+   `threadId` is still `null`. The backend-assigned thread id was never surfaced to the host,
+   so the IDE's persisted sessions stored `threadId: undefined`.
+2. Even if it had been stored, the serve protocol had **no way to hand a thread back** to a
+   fresh process — no `threadId` on `submit`, and `Session.threadId` always starts `null`. So
+   any process restart (window reload, IDE restart, crash, binary update) silently began a new
+   backend thread: UI transcript intact, model memory gone.
+
+**Fix:**
+- cli-ts `ProviderStreamConsumer`: when the stream's `thread` event first binds the session,
+  re-emit `session:created` with the real `threadId` (guarded on change; `thread` arrives per
+  frame). The IDE's existing `session:created` handler captures + persists it.
+- Serve protocol: `submit` accepts `threadId?`; serve adopts it only while the session has no
+  binding of its own (`serve.ts`), and `RunMessageRequestBuilder` already forwards
+  `thread_id` to the backend.
+- IDE `CliTsAgent.sendMessage`: sends the persisted `session.threadId` on every submit.
+
+**Verified live (packaged binary):** process A planted "PLUM-FALCON-42" (thread
+`824ff013…`); a **separate process** resumed via `threadId` and recalled the exact codeword.
+Suite green (600 tests), typecheck-client clean. Caveat: sessions created before this fix have
+no stored thread id — their history can't be retroactively resumed; new conversations persist.
+
 ## Known exceptions & follow-ups
 
 1. **Todos (A4):** no todo `ResponsePart` kind exists in the agent-host protocol; per-update

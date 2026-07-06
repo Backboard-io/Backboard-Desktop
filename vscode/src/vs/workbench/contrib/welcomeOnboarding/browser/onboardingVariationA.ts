@@ -43,6 +43,7 @@ import {
 	getOnboardingStepTitle,
 	IBackboardOnboardingState,
 	IOnboardingThemeOption,
+	OnboardingDismissReason,
 	OnboardingExperience,
 	ONBOARDING_STORAGE_KEY,
 	ONBOARDING_EXPERIENCE_OPTIONS,
@@ -171,6 +172,9 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 
 	private readonly _onDidDismiss = this._register(new Emitter<void>());
 	readonly onDidDismiss: Event<void> = this._onDidDismiss.event;
+
+	private readonly _onDidFinishOnboardingFlow = this._register(new Emitter<OnboardingDismissReason>());
+	readonly onDidFinishOnboardingFlow: Event<OnboardingDismissReason> = this._onDidFinishOnboardingFlow.event;
 
 	private overlay: HTMLElement | undefined;
 	private card: HTMLElement | undefined;
@@ -372,13 +376,15 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			const postDismissWork = reason === 'complete'
 				? this._openSelectedExperienceAfterOnboarding().then(() => this._promptBackboardSsoAfterOnboarding())
 				: this._promptBackboardSsoAfterOnboarding();
-			postDismissWork.catch(error => {
-				this.notificationService.notify({
-					severity: Severity.Error,
-					message: localize('onboarding.backboard.postDismissFailed', "Could not finish Backboard onboarding setup."),
-					source: error instanceof Error ? error.message : undefined,
-				});
-			});
+			postDismissWork
+				.catch(error => {
+					this.notificationService.notify({
+						severity: Severity.Error,
+						message: localize('onboarding.backboard.postDismissFailed', "Could not finish Backboard onboarding setup."),
+						source: error instanceof Error ? error.message : undefined,
+					});
+				})
+				.finally(() => this._onDidFinishOnboardingFlow.fire(reason));
 		};
 
 		this.overlay.addEventListener('transitionend', onTransitionEnd, { once: true });

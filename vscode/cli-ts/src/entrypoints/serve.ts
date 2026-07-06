@@ -211,6 +211,12 @@ export async function runServe(argv: string[]): Promise<void> {
 		switch (control.op) {
 			case "submit": {
 				const { requestId } = control;
+				// Resume the host's persisted backend thread so a fresh serve
+				// process keeps the conversation's memory. Only adopted while
+				// this session has no thread binding of its own.
+				if (control.threadId && session.threadId === null) {
+					session.threadId = control.threadId;
+				}
 				if (control.permission !== undefined) {
 					permissionGate.setPolicy(control.permission);
 				}

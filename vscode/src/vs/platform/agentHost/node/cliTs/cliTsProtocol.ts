@@ -28,6 +28,12 @@ export type CliTsServeControl =
 		readonly op: 'submit';
 		readonly requestId: string;
 		readonly prompt: string;
+		/**
+		 * Backend thread to resume, from the persisted session. Lets a fresh
+		 * serve process continue the conversation instead of starting a new
+		 * thread with no memory of prior turns.
+		 */
+		readonly threadId?: string;
 		readonly model?: string;
 		readonly thinking?: string;
 		readonly excludedTools?: readonly string[];

@@ -637,11 +637,11 @@
 	],
 	"sessions": [
 		{
-			"name": "vs/optimus",
+			"name": "vs/jarvis",
 			"project": "vscode-sessions"
 		},
 		{
-			"name": "vs/jarvis",
+			"name": "vs/optimus",
 			"project": "vscode-sessions"
 		},
 		{

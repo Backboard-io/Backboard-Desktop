@@ -45,7 +45,9 @@ export class AgenticPaneCompositePartService extends Disposable implements IPane
 		const isPhoneLayout = width < 640;
 
 		this.registerPart(ViewContainerLocation.Panel, instantiationService.createInstance(isPhoneLayout ? MobilePanelPart : PanelPart));
-		this.registerPart(ViewContainerLocation.Sidebar, instantiationService.createInstance(isPhoneLayout ? MobileSidebarPart : SidebarPart));
+		this.registerPart(ViewContainerLocation.Sidebar, isPhoneLayout
+			? instantiationService.createInstance(MobileSidebarPart, 'workbench.agentsession')
+			: instantiationService.createInstance(SidebarPart, 'workbench.agentsession'));
 		this.registerPart(ViewContainerLocation.AuxiliaryBar, instantiationService.createInstance(isPhoneLayout ? MobileAuxiliaryBarPart : AuxiliaryBarPart));
 	}
 

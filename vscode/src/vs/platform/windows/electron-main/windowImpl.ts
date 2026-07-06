@@ -53,8 +53,8 @@ export interface IWindowCreationOptions {
 	readonly extensionDevelopmentPath?: string[];
 	readonly isExtensionTestHost?: boolean;
 	readonly isSessionsWindow?: boolean;
-	readonly isOptimusWindow?: boolean;
 	readonly isJarvisWindow?: boolean;
+	readonly isOptimusWindow?: boolean;
 }
 
 interface ITouchBarSegment extends electron.SegmentedControlSegment {
@@ -713,7 +713,7 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 				additionalArguments: [`--vscode-window-config=${this.configObjectUrl.resource.toString()}`],
 				v8CacheOptions: this.environmentMainService.useCodeCache ? 'bypassHeatCheck' : 'none'
 			};
-			if (config.isSessionsWindow || config.isOptimusWindow || config.isJarvisWindow) {
+			if (config.isSessionsWindow || config.isJarvisWindow || config.isOptimusWindow) {
 				webPreferences.backgroundThrottling = false; // keep agents window responsive when in background
 			}
 
@@ -722,7 +722,7 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 			// 'menu' is macOS's contained, low-glare material (used for context
 			// menus) — 'under-window' samples more of the window stack and reads
 			// as too bright/washed out once combined with in-app tint.
-			const overrides = config.isSessionsWindow && isMacintosh ? { vibrancy: 'menu' as const } : undefined;
+			const overrides = (config.isSessionsWindow || config.isOptimusWindow) && isMacintosh ? { vibrancy: 'menu' as const } : undefined;
 			const options = instantiationService.invokeFunction(defaultBrowserWindowOptions, this.windowState, overrides, webPreferences);
 			this._hasVibrancy = !!options.vibrancy;
 
@@ -841,6 +841,28 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 				this.pendingLoadConfig = undefined;
 			}
 		}));
+
+		// macOS: re-assert native vibrancy once the first frame is ready to show.
+		// A window created with `vibrancy` occasionally comes up with the material
+		// not attached (the transparent workbench root then reveals the opaque
+		// backing, so the translucent sidebar reads as a flat/static panel). Unlike
+		// the deferred re-apply in `load()`, `ready-to-show` fires after the initial
+		// paint is prepared — a safe point to touch the native surface — so setting
+		// it again here re-attaches the material without the mid-`loadURL`
+		// instability. Guarded and idempotent: only runs for windows that already
+		// expect vibrancy, and a failure must never take the window down with it.
+		if (isMacintosh) {
+			this._register(Event.fromNodeEventEmitter(this._win, 'ready-to-show')(() => {
+				if (!this._hasVibrancy || this._win.isDestroyed()) {
+					return;
+				}
+				try {
+					this._win.setVibrancy('menu');
+				} catch (error) {
+					this.logService.warn(`window#ready-to-show: failed to re-assert window vibrancy: ${error instanceof Error ? error.message : String(error)}`);
+				}
+			}));
+		}
 
 		// Window (Un)Maximize
 		this._register(this.onDidMaximize(() => {
@@ -1180,6 +1202,36 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 
 	load(configuration: INativeWindowConfiguration, options: ILoadOptions = Object.create(null)): void {
 		this.logService.trace(`window#load: attempt to load window (id: ${this._id})`);
+
+		// Vibrancy is normally decided at BrowserWindow construction, but a
+		// window can be REUSED across modes (e.g. the Editor→Simple titlebar
+		// switcher loads the agent-sessions workspace into the current window
+		// with `forceReuseWindow`). Re-apply it so a reused window gets the
+		// same translucent sidebar as a freshly created one — and drops it
+		// again when leaving the sessions workspace. Deferred to after the
+		// navigation settles: mutating the native surface mid-`loadURL` has
+		// destabilized the WebContents in testing. Guarded because a vibrancy
+		// miss must never take the window down with it.
+		if (isMacintosh && ((configuration.isSessionsWindow || configuration.isOptimusWindow) !== this._hasVibrancy)) {
+			const wantsVibrancy = !!(configuration.isSessionsWindow || configuration.isOptimusWindow);
+			this._win.webContents.once('did-finish-load', () => {
+				try {
+					if (this._win.isDestroyed()) {
+						return;
+					}
+					if (wantsVibrancy && !this._hasVibrancy) {
+						this._win.setBackgroundColor('#00000000');
+						this._win.setVibrancy('menu');
+						this._hasVibrancy = true;
+					} else if (!wantsVibrancy && this._hasVibrancy) {
+						this._win.setVibrancy(null);
+						this._hasVibrancy = false;
+					}
+				} catch (error) {
+					this.logService.warn(`window#load: failed to update window vibrancy: ${error instanceof Error ? error.message : String(error)}`);
+				}
+			});
+		}
 
 		// Clear Document Edited if needed
 		if (this.isDocumentEdited()) {

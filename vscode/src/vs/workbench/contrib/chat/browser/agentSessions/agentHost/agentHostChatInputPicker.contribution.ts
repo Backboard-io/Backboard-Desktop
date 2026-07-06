@@ -63,6 +63,16 @@ export class OpenAgentHostModePickerAction extends Action2 {
 	override async run(): Promise<void> { /* the action view item handles interaction */ }
 }
 
+/**
+ * Visible for locked agent-host sessions anywhere, and for ALL chats in the
+ * sessions (Simple) window — there every session is an agent-host session,
+ * including the not-yet-started composer where the lock key isn't set yet.
+ */
+const agentHostPickerVisibility = ContextKeyExpr.or(
+	ChatContextKeyExprs.isAgentHostSession,
+	IsSessionsWindowContext,
+);
+
 export class OpenAgentHostAutoApprovePickerAction extends Action2 {
 	static readonly ID = 'workbench.action.chat.openAgentHostAutoApprovePicker';
 	constructor() {
@@ -75,7 +85,7 @@ export class OpenAgentHostAutoApprovePickerAction extends Action2 {
 				id: MenuId.ChatInput,
 				group: 'navigation',
 				order: 3.2,
-				when: ChatContextKeyExprs.isAgentHostSession,
+				when: agentHostPickerVisibility,
 			}],
 		});
 	}
@@ -94,7 +104,7 @@ export class OpenAgentHostPermissionModePickerAction extends Action2 {
 				id: MenuId.ChatInput,
 				group: 'navigation',
 				order: 3.3,
-				when: ChatContextKeyExprs.isAgentHostSession,
+				when: agentHostPickerVisibility,
 			}],
 		});
 	}

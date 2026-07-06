@@ -34,12 +34,25 @@ import type { CliTsAgentEvent, CliTsFileAttachment, CliTsPermissionPolicy, CliTs
 
 const CLI_TS_STORE_VERSION = 1;
 
+/**
+ * One ordered, restorable piece of a completed turn's response. Markdown and
+ * reasoning content accumulates during the live turn (hence mutable); tool
+ * parts capture the compact completion facts needed to rebuild a real
+ * completed tool-call pill (not the full result detail, which can be huge).
+ */
+type CliTsStoredPart =
+	| { readonly kind: 'markdown'; content: string }
+	| { readonly kind: 'reasoning'; content: string }
+	| { readonly kind: 'tool'; readonly id: string; readonly name: string; readonly inputSummary?: string; readonly title?: string; readonly failed?: boolean };
+
 interface CliTsStoredTurn {
 	readonly prompt: string;
 	readonly response: string;
 	readonly failed?: boolean;
-	/** Compact per-tool summaries ("Read — Read 2 lines") for history restore. */
+	/** Legacy compact per-tool summaries; read for sessions stored before `parts`. */
 	readonly tools?: readonly string[];
+	/** Ordered rich parts for full-fidelity history restore. */
+	readonly parts?: readonly CliTsStoredPart[];
 }
 
 interface CliTsStoredSession {
@@ -66,6 +79,10 @@ interface CliTsTurnState {
 	readonly childToolLines: Map<string, Map<string, string>>;
 	/** Compact tool summaries recorded for history restore. */
 	readonly toolSummaries: string[];
+	/** Ordered rich parts recorded for full-fidelity history restore. */
+	readonly storedParts: CliTsStoredPart[];
+	/** Accumulating markdown/reasoning stored parts, keyed by protocol part id. */
+	readonly storedTextParts: Map<string, { content: string }>;
 	/** Structured tool inputs captured from `tool:requested`, keyed by call id. */
 	readonly toolInputs: Map<string, { name: string; input: unknown }>;
 	/** In-flight async tool completions (file-edit diff builds), awaited before turn end. */
@@ -313,6 +330,8 @@ export class CliTsAgent extends Disposable implements IAgent {
 			confirmedToolCalls: new Set(),
 			childToolLines: new Map(),
 			toolSummaries: [],
+			storedParts: [],
+			storedTextParts: new Map(),
 			toolInputs: new Map(),
 			pendingCompletions: [],
 			responseText: '',
@@ -341,6 +360,10 @@ export class CliTsAgent extends Disposable implements IAgent {
 				op: 'submit',
 				requestId: proc.nextRequestId(),
 				prompt: prepared.prompt,
+				// Resume the persisted backend thread so a fresh serve process
+				// (window reload, crash, binary update) keeps the conversation's
+				// memory. serve only adopts it while it has no thread binding.
+				...(session.threadId ? { threadId: session.threadId } : {}),
 				model: `${settings.provider}/${settings.model}`,
 				permission,
 				...(thinking ? { thinking } : {}),
@@ -381,6 +404,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 				response: turn.responseText,
 				failed: turn.failed,
 				...(turn.toolSummaries.length ? { tools: turn.toolSummaries } : {}),
+				...(turn.storedParts.length ? { parts: turn.storedParts } : {}),
 			});
 			session.modifiedAt = Date.now();
 			this._writeStore();
@@ -670,6 +694,10 @@ export class CliTsAgent extends Disposable implements IAgent {
 				const partId = this._ensureMarkdownPart(session, turn, event.messageId);
 				turn.streamedText.set(event.messageId, (turn.streamedText.get(event.messageId) ?? '') + event.text);
 				turn.responseText += event.text;
+				const storedDelta = turn.storedTextParts.get(partId);
+				if (storedDelta) {
+					storedDelta.content += event.text;
+				}
 				this._fire(session.sessionUri, { type: ActionType.ChatDelta, turnId, partId, content: event.text });
 				return;
 			}
@@ -686,6 +714,10 @@ export class CliTsAgent extends Disposable implements IAgent {
 				if (remainder) {
 					turn.streamedText.set(event.messageId, streamed + remainder);
 					turn.responseText += remainder;
+					const storedRemainder = turn.storedTextParts.get(partId);
+					if (storedRemainder) {
+						storedRemainder.content += remainder;
+					}
 					this._fire(session.sessionUri, { type: ActionType.ChatDelta, turnId, partId, content: remainder });
 				}
 				return;
@@ -697,6 +729,9 @@ export class CliTsAgent extends Disposable implements IAgent {
 				if (!turn.reasoningPartId) {
 					turn.reasoningPartId = generateUuid();
 					turn.didCreateReasoningPart = true;
+					const storedReasoning: CliTsStoredPart = { kind: 'reasoning', content: '' };
+					turn.storedParts.push(storedReasoning);
+					turn.storedTextParts.set(turn.reasoningPartId, storedReasoning);
 					this._fire(session.sessionUri, {
 						type: ActionType.ChatResponsePart,
 						turnId,
@@ -704,6 +739,10 @@ export class CliTsAgent extends Disposable implements IAgent {
 					});
 				}
 				turn.reasoningText += event.text;
+				const storedReasoningPart = turn.storedTextParts.get(turn.reasoningPartId);
+				if (storedReasoningPart) {
+					storedReasoningPart.content += event.text;
+				}
 				this._fire(session.sessionUri, {
 					type: ActionType.ChatReasoning,
 					turnId,
@@ -801,6 +840,13 @@ export class CliTsAgent extends Disposable implements IAgent {
 				const name = event.name;
 				this._ensureToolCallStart(session, turn, toolCallId, name, event.inputSummary);
 				turn.toolSummaries.push(`${toolDisplayName(name)}${event.title ? ` — ${event.title}` : ''}`);
+				turn.storedParts.push({
+					kind: 'tool',
+					id: toolCallId,
+					name,
+					...(event.inputSummary ? { inputSummary: event.inputSummary } : {}),
+					...(event.title ? { title: event.title } : {}),
+				});
 				const text = [event.title, event.detail].filter(part => !!part).join('\n');
 				const fileEdits = Array.isArray(event.fileEdits) ? event.fileEdits : [];
 				const completion = (async (): Promise<void> => {
@@ -828,6 +874,14 @@ export class CliTsAgent extends Disposable implements IAgent {
 					return;
 				}
 				this._ensureToolCallStart(session, turn, event.toolCallId, event.name, event.inputSummary);
+				turn.storedParts.push({
+					kind: 'tool',
+					id: event.toolCallId,
+					name: event.name,
+					failed: true,
+					...(event.inputSummary ? { inputSummary: event.inputSummary } : {}),
+					...(event.error ? { title: event.error.slice(0, 200) } : {}),
+				});
 				const message = event.error ?? localize('cliTsAgent.toolFailedNoDetail', "The tool call failed.");
 				this._fire(session.sessionUri, {
 					type: ActionType.ChatToolCallComplete,
@@ -944,6 +998,9 @@ export class CliTsAgent extends Disposable implements IAgent {
 		}
 		const partId = generateUuid();
 		turn.messageParts.set(messageId, partId);
+		const stored: CliTsStoredPart = { kind: 'markdown', content: '' };
+		turn.storedParts.push(stored);
+		turn.storedTextParts.set(partId, stored);
 		this._fire(session.sessionUri, {
 			type: ActionType.ChatResponsePart,
 			turnId: turn.turnId,
@@ -1137,19 +1194,59 @@ function inputAnswerText(answers?: Record<string, SessionInputAnswer>): string {
 
 function storedTurnToProtocolTurn(sessionId: string, index: number, turn: CliTsStoredTurn): Turn {
 	const responseParts: Turn['responseParts'] = [];
-	if (turn.tools?.length) {
-		responseParts.push({
-			kind: ResponsePartKind.Markdown,
-			id: `${sessionId}-${index}-tools`,
-			content: turn.tools.map(tool => `- ${tool}`).join('\n'),
-		});
-	}
-	if (turn.response) {
-		responseParts.push({
-			kind: ResponsePartKind.Markdown,
-			id: `${sessionId}-${index}-response`,
-			content: turn.response,
-		});
+	if (turn.parts?.length) {
+		// Rich store: rebuild the same markdown/reasoning/tool-pill sequence the
+		// live turn rendered, in original order.
+		for (let p = 0; p < turn.parts.length; p++) {
+			const part = turn.parts[p];
+			const partId = `${sessionId}-${index}-${p}`;
+			if (part.kind === 'markdown') {
+				if (part.content) {
+					responseParts.push({ kind: ResponsePartKind.Markdown, id: partId, content: part.content });
+				}
+			} else if (part.kind === 'reasoning') {
+				if (part.content) {
+					responseParts.push({ kind: ResponsePartKind.Reasoning, id: partId, content: part.content });
+				}
+			} else {
+				const displayName = toolDisplayName(part.name);
+				responseParts.push({
+					kind: ResponsePartKind.ToolCall,
+					toolCall: {
+						status: ToolCallStatus.Completed,
+						toolCallId: part.id,
+						toolName: part.name,
+						displayName,
+						invocationMessage: toolInvocationMessage(part.name, part.inputSummary),
+						toolInput: part.inputSummary,
+						confirmed: ToolCallConfirmationReason.NotNeeded,
+						success: !part.failed,
+						pastTenseMessage: part.title ?? (part.failed
+							? localize('cliTsAgent.toolFailed', "{0} failed", displayName)
+							: localize('cliTsAgent.toolFinished', "{0} finished", displayName)),
+						...(part.title ? { content: [{ type: ToolResultContentType.Text, text: part.title }] } : {}),
+						...(part.failed && part.title ? { error: { message: part.title } } : {}),
+						_meta: { source: 'cli-ts' },
+					},
+				});
+			}
+		}
+	} else {
+		// Legacy store (pre-`parts`): compact bullet summaries + response text.
+		if (turn.tools?.length) {
+			responseParts.push({
+				kind: ResponsePartKind.Markdown,
+				id: `${sessionId}-${index}-tools`,
+				content: turn.tools.map(tool => `- ${tool}`).join('\n'),
+			});
+		}
+		if (turn.response) {
+			responseParts.push({
+				kind: ResponsePartKind.Markdown,
+				id: `${sessionId}-${index}-response`,
+				content: turn.response,
+			});
+		}
 	}
 	return {
 		id: `${sessionId}-${index}`,

@@ -6,202 +6,359 @@
 /* eslint-disable no-restricted-globals */
 
 (async function () {
+
+	// Add a perf entry right from the top
 	performance.mark('code/didStartRenderer');
 
+	type ISandboxConfiguration = import('../../base/parts/sandbox/common/sandboxTypes.js').ISandboxConfiguration;
+	type ILoadResult<M, T extends ISandboxConfiguration> = import('../../platform/window/electron-browser/window.js').ILoadResult<M, T>;
+	type ILoadOptions<T extends ISandboxConfiguration> = import('../../platform/window/electron-browser/window.js').ILoadOptions<T>;
 	type INativeWindowConfiguration = import('../../platform/window/common/window.js').INativeWindowConfiguration;
 	type IMainWindowSandboxGlobals = import('../../base/parts/sandbox/electron-browser/globals.js').IMainWindowSandboxGlobals;
+	type IDesktopMain = import('../../sessions/electron-browser/sessions.main.js').IDesktopMain;
 
-	const preloadGlobals = (window as unknown as { vscode: IMainWindowSandboxGlobals }).vscode;
+	const preloadGlobals = (window as unknown as { vscode: IMainWindowSandboxGlobals }).vscode; // defined by preload.ts
 	const safeProcess = preloadGlobals.process;
-	const isDev = !!safeProcess.env['VSCODE_DEV'];
 
-	try {
-		const configuration = await preloadGlobals.context.resolveConfiguration() as INativeWindowConfiguration;
-		globalThis._VSCODE_NLS_MESSAGES = configuration.nls.messages;
-		globalThis._VSCODE_NLS_LANGUAGE = configuration.nls.language;
-		applyInitialTheme(configuration);
+	//#region Splash Screen
 
-		if (isDev) {
-			registerDeveloperKeybindings();
+	function showSplash(configuration: INativeWindowConfiguration) {
+		performance.mark('code/willShowPartsSplash');
+
+		let data = configuration.partsSplash;
+		if (data) {
+			if (configuration.autoDetectHighContrast && configuration.colorScheme.highContrast) {
+				if ((configuration.colorScheme.dark && data.baseTheme !== 'hc-black') || (!configuration.colorScheme.dark && data.baseTheme !== 'hc-light')) {
+					data = undefined; // high contrast mode has been turned by the OS -> ignore stored colors and layouts
+				}
+			} else if (configuration.autoDetectColorScheme) {
+				if ((configuration.colorScheme.dark && data.baseTheme !== 'vs-dark') || (!configuration.colorScheme.dark && data.baseTheme !== 'vs')) {
+					data = undefined; // OS color scheme is tracked and has changed
+				}
+			}
 		}
 
+		// minimal color configuration (works with or without persisted data)
+		let baseTheme = 'vs-dark';
+		let shellBackground = '#1E1E1E';
+		let shellForeground = '#CCCCCC';
+		if (data) {
+			baseTheme = data.baseTheme;
+			shellBackground = data.baseTheme === 'vs'
+				? (data.colorInfo.background ?? data.colorInfo.editorBackground)
+				: (data.colorInfo.editorBackground ?? data.colorInfo.background);
+			shellForeground = data.colorInfo.foreground ?? shellForeground;
+		} else if (configuration.autoDetectHighContrast && configuration.colorScheme.highContrast) {
+			if (configuration.colorScheme.dark) {
+				baseTheme = 'hc-black';
+				shellBackground = '#000000';
+				shellForeground = '#FFFFFF';
+			} else {
+				baseTheme = 'hc-light';
+				shellBackground = '#FFFFFF';
+				shellForeground = '#000000';
+			}
+		} else if (configuration.autoDetectColorScheme) {
+			if (configuration.colorScheme.dark) {
+				baseTheme = 'vs-dark';
+				shellBackground = '#1E1E1E';
+				shellForeground = '#CCCCCC';
+			} else {
+				baseTheme = 'vs';
+				shellBackground = '#F3F3F3';
+				shellForeground = '#000000';
+			}
+		}
+
+		// Apply base colors
+		const style = document.createElement('style');
+		style.className = 'initialShellColors';
+		window.document.head.appendChild(style);
+		style.textContent = `body { background-color: ${shellBackground}; color: ${shellForeground}; margin: 0; padding: 0; }`;
+
+		// Set zoom level from splash data if available
+		if (typeof data?.zoomLevel === 'number' && typeof preloadGlobals?.webFrame?.setZoomLevel === 'function') {
+			preloadGlobals.webFrame.setZoomLevel(data.zoomLevel);
+		}
+
+		const splash = document.createElement('div');
+		splash.id = 'monaco-parts-splash';
+		splash.className = baseTheme ?? 'vs-dark';
+
+		window.document.body.appendChild(splash);
+
+		performance.mark('code/didShowPartsSplash');
+	}
+
+	//#endregion
+
+	//#region Window Helpers
+
+	async function load<M, T extends ISandboxConfiguration>(options: ILoadOptions<T>): Promise<ILoadResult<M, T>> {
+
+		// Window Configuration from Preload Script
+		const configuration = await resolveWindowConfiguration<T>();
+
+		// Signal before import()
+		options?.beforeImport?.(configuration);
+
+		// Developer settings
+		const { enableDeveloperKeybindings, removeDeveloperKeybindingsAfterLoad, developerDeveloperKeybindingsDisposable, forceDisableShowDevtoolsOnError } = setupDeveloperKeybindings(configuration, options);
+
+		// NLS
+		setupNLS<T>(configuration);
+
+		// Compute base URL and set as global
 		const baseUrl = new URL(`${fileUriFromPath(configuration.appRoot, { isWindows: safeProcess.platform === 'win32', scheme: 'vscode-file', fallbackAuthority: 'vscode-app' })}/out/`);
 		globalThis._VSCODE_FILE_ROOT = baseUrl.toString();
 
-		let optimusUrl: string;
-		if (isDev && globalThis._VSCODE_USE_RELATIVE_IMPORTS) {
-			optimusUrl = '../optimus.desktop.main.js';
-		} else {
-			optimusUrl = new URL('vs/optimus/optimus.desktop.main.js', baseUrl).href;
-		}
+		// Dev only: CSS import map tricks
+		setupCSSImportMaps<T>(configuration, baseUrl);
 
-		await import(optimusUrl);
+		// ESM Import - load the sessions workbench main module
+		try {
+			let workbenchUrl: string;
+			if (!!safeProcess.env['VSCODE_DEV'] && globalThis._VSCODE_USE_RELATIVE_IMPORTS) {
+				workbenchUrl = '../optimus.desktop.main.js'; // for dev purposes only
+			} else {
+				workbenchUrl = new URL(`vs/optimus/optimus.desktop.main.js`, baseUrl).href;
+			}
 
-		if (isDev) {
-			installHotRefresh();
+			const result = await import(workbenchUrl);
+			if (developerDeveloperKeybindingsDisposable && removeDeveloperKeybindingsAfterLoad) {
+				developerDeveloperKeybindingsDisposable();
+			}
+
+			return { result, configuration };
+		} catch (error) {
+			onUnexpectedError(error, enableDeveloperKeybindings && !forceDisableShowDevtoolsOnError);
+
+			throw error;
 		}
-	} catch (error) {
-		onUnexpectedError(error);
-		throw error;
 	}
 
-	function applyInitialTheme(configuration: INativeWindowConfiguration): void {
-		const theme = resolveInitialTheme(configuration);
-		document.documentElement.classList.toggle('vs', theme.baseTheme === 'vs');
-		document.documentElement.classList.toggle('vs-dark', theme.baseTheme === 'vs-dark');
-		document.documentElement.classList.toggle('hc-black', theme.baseTheme === 'hc-black');
-		document.documentElement.classList.toggle('hc-light', theme.baseTheme === 'hc-light');
+	async function resolveWindowConfiguration<T extends ISandboxConfiguration>() {
+		const timeout = setTimeout(() => { console.error(`[resolve window config] Could not resolve window configuration within 10 seconds, but will continue to wait...`); }, 10000);
+		performance.mark('code/willWaitForWindowConfig');
 
-		const style = document.createElement('style');
-		style.className = 'optimus-initial-theme';
-		document.head.appendChild(style);
-		style.textContent = `:root {
-	--vscode-foreground: ${theme.foreground};
-	--vscode-editor-foreground: ${theme.foreground};
-	--vscode-editor-background: ${theme.editorBackground};
-	--vscode-titleBar-activeBackground: ${theme.titleBarBackground};
-	--vscode-titleBar-border: ${theme.titleBarBorder};
-	--vscode-sideBar-background: ${theme.sideBarBackground};
-	--vscode-sideBar-border: ${theme.sideBarBorder};
-	--vscode-editorWidget-background: ${theme.sideBarBackground};
-	--vscode-input-background: ${theme.editorBackground};
-	--vscode-widget-border: ${theme.sideBarBorder};
-	--vscode-contrastBorder: ${theme.sideBarBorder};
-}`;
+		const configuration = await preloadGlobals.context.resolveConfiguration() as T;
+		performance.mark('code/didWaitForWindowConfig');
+
+		clearTimeout(timeout);
+
+		return configuration;
 	}
 
-	function resolveInitialTheme(configuration: INativeWindowConfiguration): IOptimusInitialTheme {
-		const splash = configuration.partsSplash;
-		const baseTheme = splash?.baseTheme
-			?? (configuration.colorScheme.highContrast
-				? configuration.colorScheme.dark ? 'hc-black' : 'hc-light'
-				: (configuration.colorScheme.dark || !splash) ? 'vs-dark' : 'vs');
-		const dark = baseTheme === 'vs-dark' || baseTheme === 'hc-black' || configuration.colorScheme.dark;
-		const highContrast = baseTheme === 'hc-black' || baseTheme === 'hc-light' || configuration.colorScheme.highContrast;
-		const fallbackBackground = dark ? 'rgb(30, 30, 30)' : 'rgb(255, 255, 255)';
-		const fallbackForeground = dark ? 'rgb(204, 204, 204)' : 'rgb(0, 0, 0)';
-		const fallbackBorder = highContrast
-			? fallbackForeground
-			: dark ? 'rgb(61, 61, 61)' : 'rgb(224, 224, 224)';
-		const editorBackground = cssColor(splash?.colorInfo.editorBackground) ?? cssColor(splash?.colorInfo.background) ?? fallbackBackground;
-		const foreground = cssColor(splash?.colorInfo.foreground) ?? fallbackForeground;
-		const sideBarBackground = cssColor(splash?.colorInfo.sideBarBackground) ?? editorBackground;
+	function setupDeveloperKeybindings<T extends ISandboxConfiguration>(configuration: T, options: ILoadOptions<T>) {
+		const {
+			forceEnableDeveloperKeybindings,
+			disallowReloadKeybinding,
+			removeDeveloperKeybindingsAfterLoad,
+			forceDisableShowDevtoolsOnError
+		} = typeof options?.configureDeveloperSettings === 'function' ? options.configureDeveloperSettings(configuration) : {
+			forceEnableDeveloperKeybindings: false,
+			disallowReloadKeybinding: false,
+			removeDeveloperKeybindingsAfterLoad: false,
+			forceDisableShowDevtoolsOnError: false
+		};
+
+		const isDev = !!safeProcess.env['VSCODE_DEV'];
+		const enableDeveloperKeybindings = Boolean(isDev || forceEnableDeveloperKeybindings);
+		let developerDeveloperKeybindingsDisposable: Function | undefined = undefined;
+		if (enableDeveloperKeybindings) {
+			developerDeveloperKeybindingsDisposable = registerDeveloperKeybindings(disallowReloadKeybinding);
+		}
+
 		return {
-			baseTheme,
-			foreground,
-			editorBackground,
-			titleBarBackground: cssColor(splash?.colorInfo.titleBarBackground) ?? sideBarBackground,
-			titleBarBorder: cssColor(splash?.colorInfo.titleBarBorder) ?? cssColor(splash?.colorInfo.windowBorder) ?? fallbackBorder,
-			sideBarBackground,
-			sideBarBorder: cssColor(splash?.colorInfo.sideBarBorder) ?? fallbackBorder
+			enableDeveloperKeybindings,
+			removeDeveloperKeybindingsAfterLoad,
+			developerDeveloperKeybindingsDisposable,
+			forceDisableShowDevtoolsOnError
 		};
 	}
 
-	function cssColor(value: string | undefined): string | undefined {
-		if (!value) {
-			return undefined;
-		}
-		const trimmed = value.trim();
-		return /^#[\da-f]{3,8}$/i.test(trimmed) || /^rgba?\([\d\s.,%]+\)$/i.test(trimmed) || /^hsla?\([\d\s.,%degturnrad]+\)$/i.test(trimmed)
-			? trimmed
-			: undefined;
-	}
-
-	function registerDeveloperKeybindings(): void {
+	function registerDeveloperKeybindings(disallowReloadKeybinding: boolean | undefined): Function {
 		const ipcRenderer = preloadGlobals.ipcRenderer;
-		const toggleDevToolsKey = safeProcess.platform === 'darwin' ? 'meta-alt-73' : 'ctrl-shift-73';
-		const toggleDevToolsAltKey = '123';
-		const reloadKey = safeProcess.platform === 'darwin' ? 'meta-82' : 'ctrl-82';
 
-		window.addEventListener('keydown', event => {
-			const key = [
-				event.ctrlKey ? 'ctrl-' : '',
-				event.metaKey ? 'meta-' : '',
-				event.altKey ? 'alt-' : '',
-				event.shiftKey ? 'shift-' : '',
-				event.keyCode
-			].join('');
-			if (key === toggleDevToolsKey || key === toggleDevToolsAltKey) {
+		const extractKey =
+			function (e: KeyboardEvent) {
+				return [
+					e.ctrlKey ? 'ctrl-' : '',
+					e.metaKey ? 'meta-' : '',
+					e.altKey ? 'alt-' : '',
+					e.shiftKey ? 'shift-' : '',
+					e.keyCode
+				].join('');
+			};
+
+		// Devtools & reload support
+		const TOGGLE_DEV_TOOLS_KB = (safeProcess.platform === 'darwin' ? 'meta-alt-73' : 'ctrl-shift-73'); // mac: Cmd-Alt-I, rest: Ctrl-Shift-I
+		const TOGGLE_DEV_TOOLS_KB_ALT = '123'; // F12
+		const RELOAD_KB = (safeProcess.platform === 'darwin' ? 'meta-82' : 'ctrl-82'); // mac: Cmd-R, rest: Ctrl-R
+
+		let listener: ((e: KeyboardEvent) => void) | undefined = function (e) {
+			const key = extractKey(e);
+			if (key === TOGGLE_DEV_TOOLS_KB || key === TOGGLE_DEV_TOOLS_KB_ALT) {
 				ipcRenderer.send('vscode:toggleDevTools');
-			} else if (key === reloadKey) {
+			} else if (key === RELOAD_KB && !disallowReloadKeybinding) {
 				ipcRenderer.send('vscode:reloadWindow');
 			}
-		});
-	}
-
-	function installHotRefresh(): void {
-		let lastVersion: string | undefined;
-		let pending = false;
-		let disposed = false;
-
-		const poll = async () => {
-			if (pending || disposed) {
-				return;
-			}
-			pending = true;
-			try {
-				const state = await preloadGlobals.ipcRenderer.invoke('vscode:optimusDevHotRefreshState') as IOptimusDevHotRefreshState | undefined;
-				if (state?.enabled && state.version) {
-					if (lastVersion === undefined) {
-						lastVersion = state.version;
-					} else if (state.version !== lastVersion) {
-						preloadGlobals.ipcRenderer.send('vscode:reloadWindow');
-						disposed = true;
-					}
-				}
-			} catch (error) {
-				console.warn(`[optimus hot refresh] ${error instanceof Error ? error.message : String(error)}`);
-				disposed = true;
-			} finally {
-				pending = false;
-			}
 		};
 
-		void poll();
-		const handle = window.setInterval(() => void poll(), 1000);
-		window.addEventListener('beforeunload', () => {
-			disposed = true;
-			window.clearInterval(handle);
-		}, { once: true });
+		window.addEventListener('keydown', listener);
+
+		return function () {
+			if (listener) {
+				window.removeEventListener('keydown', listener);
+				listener = undefined;
+			}
+		};
 	}
 
-	function onUnexpectedError(error: unknown): void {
-		preloadGlobals.ipcRenderer.send('vscode:openDevTools');
+	function setupNLS<T extends ISandboxConfiguration>(configuration: T): void {
+		globalThis._VSCODE_NLS_MESSAGES = configuration.nls.messages;
+		globalThis._VSCODE_NLS_LANGUAGE = configuration.nls.language;
+
+		let language = configuration.nls.language || 'en';
+		if (language === 'zh-tw') {
+			language = 'zh-Hant';
+		} else if (language === 'zh-cn') {
+			language = 'zh-Hans';
+		}
+
+		window.document.documentElement.setAttribute('lang', language);
+	}
+
+	function onUnexpectedError(error: string | Error, showDevtoolsOnError: boolean): void {
+		if (showDevtoolsOnError) {
+			const ipcRenderer = preloadGlobals.ipcRenderer;
+			ipcRenderer.send('vscode:openDevTools');
+		}
+
 		console.error(`[uncaught exception]: ${error}`);
 
-		if (error instanceof Error && error.stack) {
+		if (error && typeof error !== 'string' && error.stack) {
 			console.error(error.stack);
 		}
 	}
 
 	function fileUriFromPath(path: string, config: { isWindows?: boolean; scheme?: string; fallbackAuthority?: string }): string {
+
+		// Since we are building a URI, we normalize any backslash
+		// to slashes and we ensure that the path begins with a '/'.
 		let pathName = path.replace(/\\/g, '/');
 		if (pathName.length > 0 && pathName.charAt(0) !== '/') {
 			pathName = `/${pathName}`;
 		}
 
 		let uri: string;
+
+		// Windows: in order to support UNC paths (which start with '//')
+		// that have their own authority, we do not use the provided authority
+		// but rather preserve it.
 		if (config.isWindows && pathName.startsWith('//')) {
 			uri = encodeURI(`${config.scheme || 'file'}:${pathName}`);
-		} else {
+		}
+
+		// Otherwise we optionally add the provided authority if specified
+		else {
 			uri = encodeURI(`${config.scheme || 'file'}://${config.fallbackAuthority || ''}${pathName}`);
 		}
 
 		return uri.replace(/#/g, '%23');
 	}
 
-	interface IOptimusDevHotRefreshState {
-		readonly enabled: boolean;
-		readonly version?: string;
+	function setupCSSImportMaps<T extends ISandboxConfiguration>(configuration: T, baseUrl: URL) {
+
+		// DEV ---------------------------------------------------------------------------------------
+		// DEV: This is for development and enables loading CSS via import-statements via import-maps.
+		// DEV: For each CSS modules that we have we defined an entry in the import map that maps to
+		// DEV: a blob URL that loads the CSS via a dynamic @import-rule.
+		// DEV ---------------------------------------------------------------------------------------
+
+		if (globalThis._VSCODE_DISABLE_CSS_IMPORT_MAP) {
+			return; // disabled in certain development setups
+		}
+
+		if (Array.isArray(configuration.cssModules) && configuration.cssModules.length > 0) {
+			performance.mark('code/willAddCssLoader');
+
+			globalThis._VSCODE_CSS_LOAD = function (url) {
+				const link = document.createElement('link');
+				link.setAttribute('rel', 'stylesheet');
+				link.setAttribute('type', 'text/css');
+				link.setAttribute('href', url);
+
+				window.document.head.appendChild(link);
+			};
+
+			const importMap: { imports: Record<string, string> } = { imports: {} };
+			for (const cssModule of configuration.cssModules) {
+				const cssUrl = new URL(cssModule, baseUrl).href;
+				const jsSrc = `globalThis._VSCODE_CSS_LOAD('${cssUrl}');\n`;
+				const blob = new Blob([jsSrc], { type: 'application/javascript' });
+				importMap.imports[cssUrl] = URL.createObjectURL(blob);
+			}
+
+			const ttp = window.trustedTypes?.createPolicy('vscode-bootstrapImportMap', { createScript(value) { return value; }, });
+			const importMapSrc = JSON.stringify(importMap, undefined, 2);
+			const importMapScript = document.createElement('script');
+			importMapScript.type = 'importmap';
+			importMapScript.setAttribute('nonce', '0c6a828f1297');
+			// @ts-expect-error
+			importMapScript.textContent = ttp?.createScript(importMapSrc) ?? importMapSrc;
+			window.document.head.appendChild(importMapScript);
+
+			performance.mark('code/didAddCssLoader');
+		}
 	}
 
-	interface IOptimusInitialTheme {
-		readonly baseTheme: 'vs' | 'vs-dark' | 'hc-black' | 'hc-light';
-		readonly foreground: string;
-		readonly editorBackground: string;
-		readonly titleBarBackground: string;
-		readonly titleBarBorder: string;
-		readonly sideBarBackground: string;
-		readonly sideBarBorder: string;
-	}
+	//#endregion
+
+	const { result, configuration } = await load<IDesktopMain, INativeWindowConfiguration>(
+		{
+			configureDeveloperSettings: function (windowConfig) {
+				return {
+					// disable automated devtools opening on error when running extension tests
+					// as this can lead to nondeterministic test execution (devtools steals focus)
+					forceDisableShowDevtoolsOnError: typeof windowConfig.extensionTestsPath === 'string' || windowConfig['enable-smoke-test-driver'] === true,
+					// enable devtools keybindings in extension development window
+					forceEnableDeveloperKeybindings: Array.isArray(windowConfig.extensionDevelopmentPath) && windowConfig.extensionDevelopmentPath.length > 0,
+					removeDeveloperKeybindingsAfterLoad: true
+				};
+			},
+			beforeImport: function (windowConfig) {
+
+				// Show our splash as early as possible
+				showSplash(windowConfig);
+
+				// Code windows have a `vscodeWindowId` property to identify them
+				Object.defineProperty(window, 'vscodeWindowId', {
+					get: () => windowConfig.windowId
+				});
+
+				// It looks like browsers only lazily enable
+				// the <canvas> element when needed. Since we
+				// leverage canvas elements in our code in many
+				// locations, we try to help the browser to
+				// initialize canvas when it is idle, right
+				// before we wait for the scripts to be loaded.
+				window.requestIdleCallback(() => {
+					const canvas = document.createElement('canvas');
+					const context = canvas.getContext('2d');
+					context?.clearRect(0, 0, canvas.width, canvas.height);
+					canvas.remove();
+				}, { timeout: 50 });
+
+				// Track import() perf
+				performance.mark('code/willLoadWorkbenchMain');
+			}
+		}
+	);
+
+	// Mark start of workbench
+	performance.mark('code/didLoadWorkbenchMain');
+
+	// Load workbench
+	result.main(configuration);
 }());

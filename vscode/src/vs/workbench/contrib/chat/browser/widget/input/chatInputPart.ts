@@ -3249,9 +3249,9 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 						|| action.id === OpenAgentHostPermissionModePickerAction.ID)
 					&& action instanceof MenuItemAction
 				) {
-					if (this.options.isSessionsWindow) {
-						return new HiddenActionViewItem(action);
-					}
+					// Rendered in the sessions (Simple) window too: its composer
+					// carries the same auto-approve/permission chips as the
+					// editor window's right panel.
 					const property = action.id === OpenAgentHostAutoApprovePickerAction.ID
 						? SessionConfigKey.AutoApprove
 						: action.id === OpenAgentHostPermissionModePickerAction.ID
@@ -3458,9 +3458,9 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 						|| action.id === OpenAgentHostPermissionModePickerAction.ID)
 					&& action instanceof MenuItemAction
 				) {
-					if (this.options.isSessionsWindow) {
-						return new HiddenActionViewItem(action);
-					}
+					// Rendered in the sessions (Simple) window too: its composer
+					// carries the same auto-approve/permission chips as the
+					// editor window's right panel.
 					const property = action.id === OpenAgentHostAutoApprovePickerAction.ID
 						? SessionConfigKey.AutoApprove
 						: action.id === OpenAgentHostPermissionModePickerAction.ID

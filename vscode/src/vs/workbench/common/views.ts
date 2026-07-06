@@ -74,6 +74,10 @@ export const enum WindowEnablement {
 	 * Visible in both editor and agent sessions windows
 	 */
 	Both = 3,
+	/**
+	 * Visible only in the Optimus window
+	 */
+	Optimus = 4,
 }
 
 /**

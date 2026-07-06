@@ -4,8 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 import './media/panelHeader.css';
-import { isWCOEnabled } from '../../../base/browser/browser.js';
-import { $, addDisposableListener, append, EventHelper, EventType, getWindow, prepend } from '../../../base/browser/dom.js';
+import { getZoomFactor, isWCOEnabled, onDidChangeZoomLevel } from '../../../base/browser/browser.js';
+import { $, addDisposableListener, append, EventHelper, EventType, getWindow, getWindowId, prepend } from '../../../base/browser/dom.js';
 import { StandardMouseEvent } from '../../../base/browser/mouseEvent.js';
 import { safeIntl } from '../../../base/common/date.js';
 import { Disposable } from '../../../base/common/lifecycle.js';
@@ -168,6 +168,7 @@ export class SessionsPanelHeader extends Disposable {
 			// Hidden in fullscreen and on phone via CSS (`panelHeader.css`).
 			if (windowControls.left) {
 				append(leftContent, $('div.mac-window-controls-spacer'));
+				this.trackWindowControlZoom();
 			}
 		} else if (getWindowControlsStyle(this.configurationService) === WindowControlsStyle.HIDDEN) {
 			return;
@@ -186,6 +187,25 @@ export class SessionsPanelHeader extends Disposable {
 				append(secondaryContent, $('div.window-controls-container'));
 			}
 		}
+	}
+
+	/**
+	 * The macOS traffic lights are drawn by the OS at a fixed physical size and
+	 * do not scale with the workbench zoom. The spacer that reserves room for
+	 * them is sized in CSS pixels, so zooming out would shrink it below the
+	 * traffic lights and let the header toolbars slide underneath them. Publish
+	 * the current zoom factor as `--zoom-factor` so the spacer can counter-scale
+	 * (see `panelHeader.css`) and keep a constant physical width.
+	 */
+	private trackWindowControlZoom(): void {
+		const targetWindow = getWindow(this.element);
+		const updateZoomFactor = () => this.element.style.setProperty('--zoom-factor', getZoomFactor(targetWindow).toString());
+		updateZoomFactor();
+		this._register(onDidChangeZoomLevel(windowId => {
+			if (windowId === getWindowId(targetWindow)) {
+				updateZoomFactor();
+			}
+		}));
 	}
 
 	private updateWelcomeToolbarVisibility(): void {

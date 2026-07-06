@@ -154,6 +154,9 @@ export class NativeWorkbenchEnvironmentService extends AbstractNativeEnvironment
 	@memoize
 	get isSessionsWindow(): boolean { return !!this.configuration.isSessionsWindow; }
 
+	@memoize
+	get isOptimusWindow(): boolean { return !!this.configuration.isOptimusWindow; }
+
 	constructor(
 		private readonly configuration: INativeWindowConfiguration,
 		productService: IProductService

@@ -43,11 +43,6 @@ import { SessionsPanelHeader } from './panelHeader.js';
  */
 export class SidebarPart extends AbstractPaneCompositePart {
 
-	static readonly activeViewletSettingsKey = 'workbench.agentsession.sidebar.activeviewletid';
-	static readonly pinnedViewContainersKey = 'workbench.agentsession.pinnedViewlets2';
-	static readonly placeholderViewContainersKey = 'workbench.agentsession.placeholderViewlets';
-	static readonly viewContainersWorkspaceStateKey = 'workbench.agentsession.viewletsWorkspaceState';
-
 	/** Visual margin values - sidebar is flush (no card appearance) */
 	static readonly MARGIN_TOP = 0;
 	static readonly MARGIN_BOTTOM = 0;
@@ -95,6 +90,10 @@ export class SidebarPart extends AbstractPaneCompositePart {
 	//#endregion
 
 	constructor(
+		// Storage-key namespace so that separate windows (e.g. the Optimus window)
+		// keep independent pinned/placeholder/active-viewlet state. Non-service
+		// parameter, so it must precede the injected services.
+		private readonly storageKeyNamespace: string = 'workbench.agentsession',
 		@INotificationService notificationService: INotificationService,
 		@IStorageService storageService: IStorageService,
 		@IContextMenuService contextMenuService: IContextMenuService,
@@ -111,7 +110,7 @@ export class SidebarPart extends AbstractPaneCompositePart {
 		super(
 			Parts.SIDEBAR_PART,
 			{ hasTitle: false, trailingSeparator: false, borderWidth: () => 0 },
-			SidebarPart.activeViewletSettingsKey,
+			`${storageKeyNamespace}.sidebar.activeviewletid`,
 			ActiveViewletContext.bindTo(contextKeyService),
 			SidebarFocusContext.bindTo(contextKeyService),
 			'sideBar',
@@ -262,9 +261,9 @@ export class SidebarPart extends AbstractPaneCompositePart {
 	protected getCompositeBarOptions(): IPaneCompositeBarOptions {
 		return {
 			partContainerClass: 'sidebar',
-			pinnedViewContainersKey: SidebarPart.pinnedViewContainersKey,
-			placeholderViewContainersKey: SidebarPart.placeholderViewContainersKey,
-			viewContainersWorkspaceStateKey: SidebarPart.viewContainersWorkspaceStateKey,
+			pinnedViewContainersKey: `${this.storageKeyNamespace}.pinnedViewlets2`,
+			placeholderViewContainersKey: `${this.storageKeyNamespace}.placeholderViewlets`,
+			viewContainersWorkspaceStateKey: `${this.storageKeyNamespace}.viewletsWorkspaceState`,
 			icon: false,
 			orientation: ActionsOrientation.HORIZONTAL,
 			recomputeSizes: true,

@@ -16,6 +16,14 @@ export type ServeControl =
 			op: "submit";
 			requestId: string;
 			prompt: string;
+			/**
+			 * Backend thread to resume. A serve process starts with no thread
+			 * binding; without this, a host restart (new process) would begin a
+			 * fresh thread and lose all conversation memory even though the host
+			 * still shows the old transcript. Adopted only while the session has
+			 * no thread yet — an established binding is never clobbered.
+			 */
+			threadId?: string;
 			model?: string;
 			thinking?: string;
 			excludedTools?: string[];

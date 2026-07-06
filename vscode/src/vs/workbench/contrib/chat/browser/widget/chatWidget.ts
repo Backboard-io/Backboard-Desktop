@@ -1236,8 +1236,13 @@ export class ChatWidget extends Disposable implements IChatWidget {
 
 		// The input part may not be rendered yet (or may have been disposed) when this is
 		// called from async flows such as `lockToCodingAgent` / `unlockFromCodingAgent` that
-		// run after `showModel` resolves. Bail out to avoid dereferencing an undefined input.
+		// run after `showModel` resolves. Bail out of building welcome content to avoid
+		// dereferencing an undefined input, but still sync view visibility: the empty-home
+		// category chips are revealed by `updateChatViewVisibility` toggling `chat-empty-centered`,
+		// which depends on the (now-changed) lock state, not on the input part. Skipping it here
+		// leaves the chips hidden until an items change that never comes on an idle empty chat.
 		if (!this.inputPartDisposable.value) {
+			this.updateChatViewVisibility();
 			return;
 		}
 

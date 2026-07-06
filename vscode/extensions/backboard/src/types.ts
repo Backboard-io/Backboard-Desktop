@@ -142,33 +142,6 @@ export interface PanelThreadFile {
 	readonly entry?: unknown;
 }
 
-export interface OptimusLiveState {
-	readonly version: 1;
-	readonly id: string;
-	readonly chatId?: string;
-	readonly prompt?: string;
-	readonly status?: string;
-	readonly statusKey?: OptimusLiveStatusKey;
-	readonly running?: boolean;
-	readonly startedAt?: number;
-	readonly updatedAt: number;
-	readonly currentWorkspace?: string;
-	readonly messages: readonly { readonly role: string; readonly content: string }[];
-	readonly fileChanges?: readonly FileChangePayload[];
-}
-
-export interface OptimusPanelCommand {
-	readonly id: string;
-	readonly type: string;
-	readonly createdAt?: number;
-	readonly prompt?: string;
-	readonly chatId?: string;
-	readonly workspace?: string;
-	readonly provider?: string;
-	readonly newChat?: boolean;
-	readonly options?: unknown;
-}
-
 export interface BackboardConfigJson {
 	readonly [key: string]: unknown;
 	readonly env?: string;
@@ -208,5 +181,3 @@ export interface ResponseSink {
 	progress(value: string): void;
 	event?(type: string, payload: unknown): void;
 }
-
-export type OptimusLiveStatusKey = 'sending' | 'streaming' | 'progress' | 'tool' | 'voice' | 'media' | 'done' | 'cancelled' | 'error';

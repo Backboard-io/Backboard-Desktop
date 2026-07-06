@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { app, BrowserWindow, desktopCapturer, Details, dialog, GPUFeatureStatus, OpenDialogOptions, powerMonitor, protocol, screen as electronScreen, session, Session, systemPreferences, WebContents, WebFrameMain } from 'electron';
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync, statSync } from 'fs';
 import { addUNCHostToAllowlist, disableUNCAccessRestrictions } from '../../base/node/unc.js';
 import { validatedIpcMain } from '../../base/parts/ipc/electron-main/ipcMain.js';
 import { hostname, homedir, release } from 'os';
@@ -594,13 +594,6 @@ export class CodeApplication extends Disposable {
 			return this.resolveShellEnvironment(args, env, false);
 		});
 
-		validatedIpcMain.handle('vscode:optimusBackboardHistory', async () => readOptimusBackboardHistory());
-		validatedIpcMain.handle('vscode:optimusBackboardLiveState', async () => readOptimusBackboardLiveState());
-		validatedIpcMain.handle('vscode:optimusBackboardWorkspaces', async () => readOptimusBackboardWorkspaces());
-			validatedIpcMain.handle('vscode:optimusBackboardMetadata', async () => readOptimusBackboardMetadata(this.environmentMainService.userDataPath));
-		validatedIpcMain.handle('vscode:optimusBackboardCommand', async (_event, command: unknown) => writeOptimusBackboardCommand(command));
-		validatedIpcMain.handle('vscode:optimusSharedChatHistorySnapshot', async (_event, snapshot: unknown) => writeOptimusSharedChatHistorySnapshot(snapshot));
-		validatedIpcMain.handle('vscode:optimusDevHotRefreshState', async () => readOptimusDevHotRefreshState(this.environmentMainService.appRoot));
 		validatedIpcMain.handle('vscode:jarvisVoiceTranscribe', async (_event, request: unknown) => transcribeJarvisVoice(request));
 		validatedIpcMain.handle('vscode:jarvisInterpretCommand', async (_event, request: unknown) => interpretJarvisCommand(request));
 		validatedIpcMain.handle('vscode:jarvisSelectWorkspaceFolder', async (event, currentPath: unknown) => selectJarvisWorkspaceFolder(event.sender, currentPath));
@@ -635,15 +628,6 @@ export class CodeApplication extends Disposable {
 				return { accepted: true };
 			}
 
-			if (target === 'optimus') {
-				await windowsMainService.openOptimusWindow({
-					context: OpenContext.API,
-					contextWindowId: window.id,
-					cli: this.environmentMainService.args
-				});
-				return { accepted: true };
-			}
-
 			if (target === 'jarvis') {
 				if (!window.config?.isJarvisWindow) {
 					await windowsMainService.openJarvisWindow({
@@ -655,37 +639,6 @@ export class CodeApplication extends Disposable {
 				return { accepted: true };
 			}
 
-			return { accepted: false, error: `Unknown window kind: ${String(target)}` };
-		});
-		validatedIpcMain.handle('vscode:optimusSwitchWindowKind', async (event, target: unknown) => {
-			const windowsMainService = this.windowsMainService;
-			if (!windowsMainService) {
-				return { accepted: false, error: 'Windows service is not ready.' };
-			}
-
-			const window = windowsMainService.getWindowByWebContents(event.sender);
-			if (!window) {
-				return { accepted: false, error: 'Could not resolve the current window.' };
-			}
-
-			if (target === 'editor') {
-				await windowsMainService.openEmptyWindow({
-					context: OpenContext.API,
-					contextWindowId: window.id
-				}, { forceReuseWindow: true });
-				return { accepted: true };
-			}
-
-			if (target === 'agents') {
-				await windowsMainService.openAgentsWindow({
-					context: OpenContext.API,
-					contextWindowId: window.id,
-					cli: this.environmentMainService.args,
-					forceReuseWindow: true
-				});
-				return { accepted: true };
-			}
-
 			if (target === 'optimus') {
 				if (!window.config?.isOptimusWindow) {
 					await windowsMainService.openOptimusWindow({
@@ -694,15 +647,6 @@ export class CodeApplication extends Disposable {
 						cli: this.environmentMainService.args
 					});
 				}
-				return { accepted: true };
-			}
-
-			if (target === 'jarvis') {
-				await windowsMainService.openJarvisWindow({
-					context: OpenContext.API,
-					contextWindowId: window.id,
-					cli: this.environmentMainService.args
-				});
 				return { accepted: true };
 			}
 
@@ -1520,16 +1464,16 @@ export class CodeApplication extends Disposable {
 			});
 		}
 
-		if (args['optimus']) {
-			return windowsMainService.openOptimusWindow({
+		if (args['jarvis']) {
+			return windowsMainService.openJarvisWindow({
 				context,
 				cli: args,
 				initialStartup: true
 			});
 		}
 
-		if (args['jarvis']) {
-			return windowsMainService.openJarvisWindow({
+		if (args['optimus']) {
+			return windowsMainService.openOptimusWindow({
 				context,
 				cli: args,
 				initialStartup: true
@@ -1908,76 +1852,6 @@ export class CodeApplication extends Disposable {
 	}
 }
 
-interface IOptimusBackboardHistoryEntry {
-	readonly id: string;
-	readonly source: 'backboard-panel' | 'backboard-thread' | 'shared-chat' | 'optimus-live';
-	readonly title?: string;
-	readonly prompt?: string;
-	readonly status?: string;
-	readonly startedAt?: number;
-	readonly updatedAt?: number;
-	readonly currentWorkspace?: string;
-	readonly messages: readonly IOptimusBackboardHistoryMessage[];
-	readonly fileChanges: readonly IOptimusBackboardFileChange[];
-}
-
-interface IOptimusBackboardHistoryMessage {
-	readonly role: string;
-	readonly content: string;
-}
-
-interface IOptimusBackboardFileChange {
-	readonly path: string;
-	readonly added?: number;
-	readonly removed?: number;
-}
-
-interface IOptimusBackboardWorkspaceEntry {
-	readonly id: string;
-	readonly label: string;
-	readonly path?: string;
-	readonly chatCount: number;
-	readonly lastActiveAt?: number;
-}
-
-interface IOptimusBackboardLiveState {
-	readonly id: string;
-	readonly chatId?: string;
-	readonly prompt?: string;
-	readonly status?: string;
-	readonly statusKey?: string;
-	readonly running?: boolean;
-	readonly startedAt?: number;
-	readonly updatedAt?: number;
-	readonly currentWorkspace?: string;
-	readonly messages: readonly IOptimusBackboardHistoryMessage[];
-	readonly fileChanges?: readonly IOptimusBackboardFileChange[];
-}
-
-interface IOptimusBackboardPanelCommand {
-	readonly id: string;
-	readonly type: string;
-	readonly createdAt: number;
-	readonly prompt?: string;
-	readonly chatId?: string;
-	readonly workspace?: string;
-	readonly provider?: string;
-	readonly newChat?: boolean;
-	readonly options?: unknown;
-}
-
-interface IOptimusBackboardMetadata {
-	readonly settings?: unknown;
-	readonly models: readonly unknown[];
-	readonly updatedAt?: number;
-}
-
-interface IOptimusDevHotRefreshState {
-	readonly enabled: boolean;
-	readonly version?: string;
-	readonly error?: string;
-}
-
 type JarvisTerminalCommandType = 'openTerminal' | 'writeTerminal' | 'resizeTerminal' | 'disposeTerminal';
 
 interface IJarvisTerminalCommand {
@@ -2026,7 +1900,7 @@ function readJarvisBackboardConfig(): Record<string, unknown> {
 			return {};
 		}
 		const parsed = JSON.parse(readFileSync(configPath, 'utf8')) as unknown;
-		return isOptimusObjectRecord(parsed) ? parsed : {};
+		return isPlainObjectRecord(parsed) ? parsed : {};
 	} catch {
 		return {};
 	}
@@ -2034,7 +1908,7 @@ function readJarvisBackboardConfig(): Record<string, unknown> {
 
 async function transcribeJarvisVoice(value: unknown): Promise<IJarvisVoiceTranscribeResult> {
 	try {
-		if (!isOptimusObjectRecord(value)) {
+		if (!isPlainObjectRecord(value)) {
 			return { accepted: false, error: 'Invalid Jarvis voice request.' };
 		}
 		const audioBytes = jarvisVoiceAudioBytes(value.audio);
@@ -2046,8 +1920,8 @@ async function transcribeJarvisVoice(value: unknown): Promise<IJarvisVoiceTransc
 		if (!apiKey) {
 			return { accepted: false, error: 'No Backboard API key found in ~/.backboard_ide/config.json.' };
 		}
-		const mimeType = stringValueFromOptimusRecord(value.mimeType) ?? 'audio/webm';
-		const systemPrompt = stringValueFromOptimusRecord(value.systemPrompt);
+		const mimeType = stringValueFromRecord(value.mimeType) ?? 'audio/webm';
+		const systemPrompt = stringValueFromRecord(value.systemPrompt);
 		const tools = Array.isArray(value.tools) ? value.tools : undefined;
 		const apiUrl = jarvisBackboardApiUrl(config);
 
@@ -2072,10 +1946,10 @@ async function transcribeJarvisVoice(value: unknown): Promise<IJarvisVoiceTransc
 
 async function interpretJarvisCommand(value: unknown): Promise<IJarvisCommandInterpretationResult> {
 	try {
-		if (!isOptimusObjectRecord(value)) {
+		if (!isPlainObjectRecord(value)) {
 			return { accepted: false, error: 'Invalid Jarvis command interpretation request.' };
 		}
-		const text = stringValueFromOptimusRecord(value.text)?.trim();
+		const text = stringValueFromRecord(value.text)?.trim();
 		if (!text) {
 			return { accepted: false, error: 'No Jarvis command text was provided.' };
 		}
@@ -2084,7 +1958,7 @@ async function interpretJarvisCommand(value: unknown): Promise<IJarvisCommandInt
 		if (!apiKey) {
 			return { accepted: false, error: 'No Backboard API key found in ~/.backboard_ide/config.json.' };
 		}
-		const systemPrompt = stringValueFromOptimusRecord(value.systemPrompt);
+		const systemPrompt = stringValueFromRecord(value.systemPrompt);
 		const tools = Array.isArray(value.tools) ? value.tools : undefined;
 		const apiUrl = jarvisBackboardApiUrl(config);
 		let response = await postJarvisTextToBackboard(apiUrl, apiKey, text, systemPrompt, tools);
@@ -2182,39 +2056,39 @@ function jarvisVoiceAudioBytes(value: unknown): Uint8Array | undefined {
 }
 
 function jarvisBackboardApiUrl(config: Record<string, unknown>): string {
-	return (stringValueFromOptimusRecord(config.api_url) || 'https://app.backboard.io/api').replace(/\/+$/, '');
+	return (stringValueFromRecord(config.api_url) || 'https://app.backboard.io/api').replace(/\/+$/, '');
 }
 
 function jarvisBackboardApiKey(config: Record<string, unknown>): string | undefined {
-	const env = stringValueFromOptimusRecord(config.env)?.trim().toLowerCase() || 'prod';
-	const envKeys = isOptimusObjectRecord(config.env_keys) ? config.env_keys : undefined;
-	return stringValueFromOptimusRecord(config.api_key)
-		?? stringValueFromOptimusRecord(config.apiKey)
-		?? stringValueFromOptimusRecord(config.backboard_api_key)
-		?? stringValueFromOptimusRecord(config.personal_api_key)
-		?? stringValueFromOptimusRecord(envKeys?.[env]);
+	const env = stringValueFromRecord(config.env)?.trim().toLowerCase() || 'prod';
+	const envKeys = isPlainObjectRecord(config.env_keys) ? config.env_keys : undefined;
+	return stringValueFromRecord(config.api_key)
+		?? stringValueFromRecord(config.apiKey)
+		?? stringValueFromRecord(config.backboard_api_key)
+		?? stringValueFromRecord(config.personal_api_key)
+		?? stringValueFromRecord(envKeys?.[env]);
 }
 
 function extractJarvisBackboardTranscript(value: unknown): string | undefined {
-	if (!isOptimusObjectRecord(value)) {
+	if (!isPlainObjectRecord(value)) {
 		return undefined;
 	}
-	const direct = stringValueFromOptimusRecord(value.transcript) ?? stringValueFromOptimusRecord(value.text);
+	const direct = stringValueFromRecord(value.transcript) ?? stringValueFromRecord(value.text);
 	if (direct) {
 		return direct;
 	}
 	const messages = Array.isArray(value.messages) ? value.messages : [value];
 	for (const message of messages) {
-		if (!isOptimusObjectRecord(message)) {
+		if (!isPlainObjectRecord(message)) {
 			continue;
 		}
-		const voiceRecords = isOptimusObjectRecord(message.voice_records) ? message.voice_records : isOptimusObjectRecord(message.voiceRecords) ? message.voiceRecords : undefined;
-		const stt = isOptimusObjectRecord(voiceRecords?.stt) ? voiceRecords.stt : undefined;
-		const transcript = stringValueFromOptimusRecord(stt?.transcript) ?? stringValueFromOptimusRecord(stt?.text) ?? stringValueFromOptimusRecord(stt?.message);
+		const voiceRecords = isPlainObjectRecord(message.voice_records) ? message.voice_records : isPlainObjectRecord(message.voiceRecords) ? message.voiceRecords : undefined;
+		const stt = isPlainObjectRecord(voiceRecords?.stt) ? voiceRecords.stt : undefined;
+		const transcript = stringValueFromRecord(stt?.transcript) ?? stringValueFromRecord(stt?.text) ?? stringValueFromRecord(stt?.message);
 		if (transcript) {
 			return transcript;
 		}
-		const content = stringValueFromOptimusRecord(message.content) ?? stringValueFromOptimusRecord(message.message);
+		const content = stringValueFromRecord(message.content) ?? stringValueFromRecord(message.message);
 		if (content) {
 			return content;
 		}
@@ -2241,7 +2115,7 @@ function collectJarvisBackboardToolCalls(value: unknown, calls: IJarvisVoiceTool
 		}
 		return;
 	}
-	if (!isOptimusObjectRecord(value)) {
+	if (!isPlainObjectRecord(value)) {
 		return;
 	}
 
@@ -2264,7 +2138,7 @@ function collectJarvisBackboardToolCalls(value: unknown, calls: IJarvisVoiceTool
 		collectJarvisBackboardToolCalls(value[key], calls, seen);
 	}
 
-	const content = stringValueFromOptimusRecord(value.content) ?? stringValueFromOptimusRecord(value.text);
+	const content = stringValueFromRecord(value.content) ?? stringValueFromRecord(value.text);
 	if (content) {
 		const parsed = parseJarvisToolCallJson(content);
 		if (parsed) {
@@ -2277,32 +2151,32 @@ function normalizeJarvisVoiceToolCall(value: Record<string, unknown>): IJarvisVo
 	if ((value.type === 'function' || value.type === 'tool') && value.parameters !== undefined && value.args === undefined && value.arguments === undefined && value.input === undefined) {
 		return undefined;
 	}
-	const functionRecord = isOptimusObjectRecord(value.function) ? value.function : undefined;
+	const functionRecord = isPlainObjectRecord(value.function) ? value.function : undefined;
 	if ((value.type === 'function' || value.type === 'tool') && functionRecord?.parameters !== undefined && functionRecord.arguments === undefined && value.args === undefined && value.arguments === undefined && value.input === undefined) {
 		return undefined;
 	}
-	const rawName = stringValueFromOptimusRecord(value.name)
-		?? stringValueFromOptimusRecord(value.tool_name)
-		?? stringValueFromOptimusRecord(value.toolName)
-		?? stringValueFromOptimusRecord(functionRecord?.name);
+	const rawName = stringValueFromRecord(value.name)
+		?? stringValueFromRecord(value.tool_name)
+		?? stringValueFromRecord(value.toolName)
+		?? stringValueFromRecord(functionRecord?.name);
 	if (!rawName || !isJarvisVoiceToolName(rawName)) {
 		return undefined;
 	}
 
 	const rawArgs = value.args ?? value.arguments ?? value.parameters ?? value.input ?? functionRecord?.arguments;
 	const args = normalizeJarvisVoiceToolArgs(rawArgs);
-	const callId = stringValueFromOptimusRecord(value.call_id) ?? stringValueFromOptimusRecord(value.callId) ?? stringValueFromOptimusRecord(value.id);
+	const callId = stringValueFromRecord(value.call_id) ?? stringValueFromRecord(value.callId) ?? stringValueFromRecord(value.id);
 	return { callId, name: rawName, args };
 }
 
 function normalizeJarvisVoiceToolArgs(value: unknown): Record<string, unknown> {
-	if (isOptimusObjectRecord(value)) {
+	if (isPlainObjectRecord(value)) {
 		return value;
 	}
 	if (typeof value === 'string') {
 		try {
 			const parsed: unknown = JSON.parse(value);
-			return isOptimusObjectRecord(parsed) ? parsed : {};
+			return isPlainObjectRecord(parsed) ? parsed : {};
 		} catch {
 			return {};
 		}
@@ -2407,7 +2281,7 @@ function jarvisBackgroundMediaKind(path: string): 'image' | 'video' {
 }
 
 function parseJarvisTerminalCommand(value: unknown): IJarvisTerminalCommand | undefined {
-	if (!isOptimusObjectRecord(value)) {
+	if (!isPlainObjectRecord(value)) {
 		return undefined;
 	}
 	const type = value.type;
@@ -2542,436 +2416,10 @@ function ensureJarvisOwnerCleanup(sender: WebContents): void {
 	});
 }
 
-function writeOptimusBackboardCommand(value: unknown): { readonly accepted: boolean; readonly id?: string; readonly error?: string } {
-	if (!isOptimusObjectRecord(value) || typeof value.type !== 'string') {
-		return { accepted: false, error: 'Invalid Optimus Backboard command.' };
-	}
-	const command: IOptimusBackboardPanelCommand = {
-		id: typeof value.id === 'string' && value.id ? value.id : generateUuid(),
-		type: value.type,
-		createdAt: Date.now(),
-		prompt: typeof value.prompt === 'string' ? value.prompt : undefined,
-		chatId: typeof value.chatId === 'string' ? value.chatId : undefined,
-		workspace: typeof value.workspace === 'string' ? value.workspace : undefined,
-		provider: typeof value.provider === 'string' ? value.provider : undefined,
-		newChat: value.newChat === true,
-		options: value.options
-	};
-	const commandPath = nodeJoin(homedir(), '.backboard_ide', 'optimus-command.json');
-	const tempPath = `${commandPath}.${process.pid}.${Date.now()}.tmp`;
-	try {
-		mkdirSync(nodeJoin(homedir(), '.backboard_ide'), { recursive: true });
-		writeFileSync(tempPath, `${JSON.stringify(command)}\n`, { mode: 0o600 });
-		renameSync(tempPath, commandPath);
-		return { accepted: true, id: command.id };
-	} catch (error) {
-		return { accepted: false, id: command.id, error: error instanceof Error ? error.message : String(error) };
-	}
-}
-
-function writeOptimusSharedChatHistorySnapshot(value: unknown): { readonly accepted: boolean; readonly error?: string } {
-	if (!isOptimusObjectRecord(value) || !Array.isArray(value.entries)) {
-		return { accepted: false, error: 'Invalid Optimus shared chat history snapshot.' };
-	}
-	const snapshot = {
-		version: 1,
-		updatedAt: typeof value.updatedAt === 'number' ? value.updatedAt : Date.now(),
-		entries: value.entries.map(entry => normalizeOptimusHistoryEntry(entry, undefined, 'shared-chat')).filter(entry => !!entry),
-	};
-	const snapshotPath = nodeJoin(homedir(), '.backboard_ide', 'optimus-shared-chat-history.json');
-	const tempPath = `${snapshotPath}.${process.pid}.${Date.now()}.tmp`;
-	try {
-		mkdirSync(nodeJoin(homedir(), '.backboard_ide'), { recursive: true });
-		writeFileSync(tempPath, `${JSON.stringify(snapshot)}\n`, { mode: 0o600 });
-		renameSync(tempPath, snapshotPath);
-		return { accepted: true };
-	} catch (error) {
-		return { accepted: false, error: error instanceof Error ? error.message : String(error) };
-	}
-}
-
-function readOptimusDevHotRefreshState(appRoot: string): IOptimusDevHotRefreshState {
-	if (!process.env['VSCODE_DEV']) {
-		return { enabled: false };
-	}
-
-	const root = nodeJoin(appRoot, 'out', 'vs', 'optimus');
-	if (!existsSync(root)) {
-		return { enabled: false, error: 'Optimus output folder does not exist.' };
-	}
-
-	try {
-		const versions: string[] = [];
-		collectOptimusDevHotRefreshVersions(root, versions);
-		if (!versions.length) {
-			return { enabled: false, error: 'No Optimus output assets were found.' };
-		}
-
-		return { enabled: true, version: versions.sort().join('|') };
-	} catch (error) {
-		return { enabled: false, error: error instanceof Error ? error.message : String(error) };
-	}
-}
-
-function collectOptimusDevHotRefreshVersions(dir: string, versions: string[]): void {
-	for (const entry of readdirSync(dir, { withFileTypes: true })) {
-		const path = nodeJoin(dir, entry.name);
-		if (entry.isDirectory()) {
-			collectOptimusDevHotRefreshVersions(path, versions);
-			continue;
-		}
-
-		if (!entry.isFile() || !/\.(?:css|html|js|json)$/i.test(entry.name)) {
-			continue;
-		}
-
-		const stat = statSync(path);
-		versions.push(`${path}:${stat.mtimeMs}:${stat.size}`);
-	}
-}
-
-function readOptimusBackboardHistory(): IOptimusBackboardHistoryEntry[] {
-	const entries = new Map<string, IOptimusBackboardHistoryEntry>();
-	for (const entry of [...readOptimusPanelStateEntries(), ...readOptimusThreadEntries(), ...readOptimusSharedChatHistoryEntries()]) {
-		if (!isOptimusBackboardOwnedHistoryEntry(entry)) {
-			continue;
-		}
-		entries.set(entry.id, preferredOptimusHistoryEntry(entries.get(entry.id), entry));
-	}
-	return [...entries.values()].sort((left, right) => optimusHistoryTimestamp(right) - optimusHistoryTimestamp(left));
-}
-
-function preferredOptimusHistoryEntry(current: IOptimusBackboardHistoryEntry | undefined, next: IOptimusBackboardHistoryEntry): IOptimusBackboardHistoryEntry {
-	if (!current) {
-		return next;
-	}
-	const currentWorkspace = Boolean(current.currentWorkspace);
-	const nextWorkspace = Boolean(next.currentWorkspace);
-	if (nextWorkspace && !currentWorkspace) {
-		return next;
-	}
-	if (!nextWorkspace && currentWorkspace) {
-		return current;
-	}
-	if (next.messages.length !== current.messages.length) {
-		return next.messages.length > current.messages.length ? next : current;
-	}
-	return optimusHistoryTimestamp(next) >= optimusHistoryTimestamp(current) ? next : current;
-}
-
-function readOptimusBackboardLiveState(): IOptimusBackboardLiveState | undefined {
-	const livePath = nodeJoin(homedir(), '.backboard_ide', 'optimus-live-state.json');
-	try {
-		const parsed: unknown = JSON.parse(readFileSync(livePath, 'utf8'));
-		if (!isOptimusObjectRecord(parsed)) {
-			return undefined;
-		}
-		const updatedAt = typeof parsed.updatedAt === 'number' ? parsed.updatedAt : undefined;
-		if (updatedAt && Date.now() - updatedAt > 10 * 60 * 1000) {
-			return undefined;
-		}
-		const id = stringValueFromOptimusRecord(parsed.id) ?? stringValueFromOptimusRecord(parsed.chatId);
-		if (!id) {
-			return undefined;
-			}
-			return {
-				id,
-				chatId: stringValueFromOptimusRecord(parsed.chatId),
-				prompt: stringValueFromOptimusRecord(parsed.prompt),
-				status: stringValueFromOptimusRecord(parsed.status),
-				statusKey: stringValueFromOptimusRecord(parsed.statusKey),
-				running: parsed.running === true,
-				startedAt: typeof parsed.startedAt === 'number' ? parsed.startedAt : undefined,
-			updatedAt,
-			currentWorkspace: stringValueFromOptimusRecord(parsed.currentWorkspace),
-			messages: normalizeOptimusHistoryMessages(parsed.messages, stringValueFromOptimusRecord(parsed.prompt), undefined, undefined),
-			fileChanges: normalizeOptimusFileChanges(parsed.fileChanges),
-		};
-	} catch {
-		return undefined;
-	}
-}
-
-function readOptimusBackboardWorkspaces(): IOptimusBackboardWorkspaceEntry[] {
-	const byWorkspace = new Map<string, { path: string; chatCount: number; lastActiveAt: number }>();
-	for (const entry of readOptimusBackboardHistory()) {
-		const path = entry.currentWorkspace || 'default';
-		const existing = byWorkspace.get(path);
-		const timestamp = optimusHistoryTimestamp(entry);
-		byWorkspace.set(path, {
-			path,
-			chatCount: (existing?.chatCount ?? 0) + 1,
-			lastActiveAt: Math.max(existing?.lastActiveAt ?? 0, timestamp)
-		});
-	}
-	return [...byWorkspace.values()]
-		.sort((left, right) => right.lastActiveAt - left.lastActiveAt)
-		.map(workspace => ({
-			id: workspace.path,
-			label: workspace.path === 'default' ? 'Default' : workspaceLabelFromPath(workspace.path),
-			path: workspace.path === 'default' ? undefined : workspace.path,
-			chatCount: workspace.chatCount,
-			lastActiveAt: workspace.lastActiveAt || undefined
-		}));
-}
-
-function readOptimusBackboardMetadata(userDataPath: string): IOptimusBackboardMetadata | undefined {
-	const metadataPath = nodeJoin(homedir(), '.backboard_ide', 'optimus-metadata.json');
-	let metadata: IOptimusBackboardMetadata | undefined;
-	try {
-		const parsed: unknown = JSON.parse(readFileSync(metadataPath, 'utf8'));
-		if (isOptimusObjectRecord(parsed) && Array.isArray(parsed.models)) {
-			const updatedAt = typeof parsed.updatedAt === 'number' ? parsed.updatedAt : undefined;
-			if (!updatedAt || Date.now() - updatedAt <= 24 * 60 * 60 * 1000) {
-				metadata = {
-					settings: isOptimusObjectRecord(parsed.settings) ? parsed.settings : undefined,
-					models: parsed.models.filter(isOptimusObjectRecord),
-					updatedAt
-				};
-			}
-		}
-	} catch {
-		metadata = undefined;
-	}
-	if (metadata?.models.length) {
-		return metadata;
-	}
-	const cachedModels = readOptimusBackboardModelCache(userDataPath);
-	if (cachedModels.length) {
-		return {
-			settings: metadata?.settings,
-			models: cachedModels,
-			updatedAt: metadata?.updatedAt
-		};
-	}
-	return metadata;
-}
-
-function readOptimusBackboardModelCache(userDataPath: string): readonly unknown[] {
-	const cachePath = nodeJoin(userDataPath, 'User', 'globalStorage', 'backboard.backboard', 'models.json');
-	try {
-		const parsed: unknown = JSON.parse(readFileSync(cachePath, 'utf8'));
-		if (!isOptimusObjectRecord(parsed) || !Array.isArray(parsed.models)) {
-			return [];
-		}
-		return parsed.models.filter(isOptimusObjectRecord);
-	} catch {
-		return [];
-	}
-}
-
-function readOptimusPanelStateEntries(): IOptimusBackboardHistoryEntry[] {
-	const statePath = nodeJoin(homedir(), '.backboard_ide', 'panel-state.json');
-	const entries: IOptimusBackboardHistoryEntry[] = [];
-	try {
-		const parsed: unknown = JSON.parse(readFileSync(statePath, 'utf8'));
-		if (!isOptimusObjectRecord(parsed)) {
-			return entries;
-		}
-		const states = [
-			isOptimusObjectRecord(parsed.latest) ? parsed.latest : undefined,
-			...Object.values(isOptimusObjectRecord(parsed.byWorkspace) ? parsed.byWorkspace : {}).filter(isOptimusObjectRecord),
-		].filter(isOptimusObjectRecord);
-		for (const state of states) {
-			const workspace = typeof state.currentWorkspace === 'string' ? state.currentWorkspace : undefined;
-			for (const rawEntry of Array.isArray(state.historyEntries) ? state.historyEntries : []) {
-				const entry = normalizeOptimusHistoryEntry(rawEntry, workspace, 'backboard-panel');
-				if (entry) {
-					entries.push(entry);
-				}
-			}
-		}
-	} catch {
-		// Missing or malformed shared state should not break Optimus startup.
-	}
-	return entries;
-}
-
-function readOptimusSharedChatHistoryEntries(): IOptimusBackboardHistoryEntry[] {
-	const snapshotPath = nodeJoin(homedir(), '.backboard_ide', 'optimus-shared-chat-history.json');
-	const entries: IOptimusBackboardHistoryEntry[] = [];
-	try {
-		const parsed: unknown = JSON.parse(readFileSync(snapshotPath, 'utf8'));
-		if (!isOptimusObjectRecord(parsed) || !Array.isArray(parsed.entries)) {
-			return entries;
-		}
-		for (const rawEntry of parsed.entries) {
-			const entry = normalizeOptimusHistoryEntry(rawEntry, undefined, 'shared-chat');
-			if (entry) {
-				entries.push(entry);
-			}
-		}
-	} catch {
-		// Missing or malformed workbench history should not break Optimus startup.
-	}
-	return entries;
-}
-
-function readOptimusThreadEntries(): IOptimusBackboardHistoryEntry[] {
-	const entries: IOptimusBackboardHistoryEntry[] = [];
-	for (const threadPath of listOptimusThreadFiles(nodeJoin(homedir(), '.backboard_ide', 'threads'))) {
-		try {
-			const parsed: unknown = JSON.parse(readFileSync(threadPath, 'utf8'));
-			if (!isOptimusObjectRecord(parsed)) {
-				continue;
-			}
-			const workspace = typeof parsed.workspace === 'string' ? parsed.workspace : undefined;
-			const entry = normalizeOptimusHistoryEntry(parsed.entry, workspace, 'backboard-thread');
-			if (entry) {
-				entries.push(entry);
-			}
-		} catch {
-			// Ignore unreadable snapshots; a single broken history file should not block the list.
-		}
-	}
-	return entries;
-}
-
-function listOptimusThreadFiles(root: string): string[] {
-	const files: string[] = [];
-	if (!existsSync(root)) {
-		return files;
-	}
-	const visit = (dir: string, depth: number) => {
-		if (depth > 4) {
-			return;
-		}
-		for (const entry of readdirSync(dir, { withFileTypes: true })) {
-			const entryPath = nodeJoin(dir, entry.name);
-			if (entry.isFile() && entry.name.endsWith('.json')) {
-				files.push(entryPath);
-			} else if (entry.isDirectory()) {
-				visit(entryPath, depth + 1);
-			}
-		}
-	};
-	try {
-		visit(root, 0);
-	} catch {
-		return [];
-	}
-	return files;
-}
-
-function normalizeOptimusHistoryEntry(value: unknown, fallbackWorkspace: string | undefined, source: IOptimusBackboardHistoryEntry['source']): IOptimusBackboardHistoryEntry | undefined {
-	if (!isOptimusObjectRecord(value) || typeof value.id !== 'string' || !value.id) {
-		return undefined;
-	}
-	const prompt = typeof value.prompt === 'string' ? value.prompt : undefined;
-	const outputText = typeof value.outputText === 'string' ? value.outputText : undefined;
-	const html = typeof value.html === 'string' ? value.html : undefined;
-	const messages = normalizeOptimusHistoryMessages(value.messages, prompt, outputText, html);
-	return {
-		id: value.id,
-		source,
-		title: typeof value.title === 'string' ? value.title : undefined,
-		prompt,
-		status: typeof value.status === 'string' ? value.status : undefined,
-		startedAt: typeof value.startedAt === 'number' ? value.startedAt : undefined,
-		updatedAt: typeof value.updatedAt === 'number' ? value.updatedAt : undefined,
-		currentWorkspace: typeof value.currentWorkspace === 'string' ? value.currentWorkspace : fallbackWorkspace,
-		messages,
-		fileChanges: normalizeOptimusFileChanges(value.fileChanges),
-	};
-}
-
-function isOptimusBackboardOwnedHistoryEntry(entry: IOptimusBackboardHistoryEntry): boolean {
-	return entry.source === 'backboard-panel' || entry.source === 'backboard-thread';
-}
-
-function normalizeOptimusHistoryMessages(rawMessages: unknown, prompt: string | undefined, outputText: string | undefined, html: string | undefined): IOptimusBackboardHistoryMessage[] {
-	const messages: IOptimusBackboardHistoryMessage[] = [];
-	if (Array.isArray(rawMessages)) {
-		for (const rawMessage of rawMessages) {
-			if (!isOptimusObjectRecord(rawMessage)) {
-				continue;
-			}
-			const role = typeof rawMessage.role === 'string' ? rawMessage.role : typeof rawMessage.author === 'string' ? rawMessage.author : undefined;
-			const content = typeof rawMessage.content === 'string' ? rawMessage.content : typeof rawMessage.text === 'string' ? rawMessage.text : undefined;
-			if (role && content) {
-				messages.push({ role, content });
-			}
-		}
-	}
-	if (messages.length) {
-		return messages;
-	}
-	if (prompt) {
-		messages.push({ role: 'user', content: prompt });
-	}
-	const assistantText = outputText || (html ? extractOptimusAssistantText(html) : undefined);
-	if (assistantText) {
-		messages.push({ role: 'assistant', content: assistantText });
-	}
-	return messages;
-}
-
-function normalizeOptimusFileChanges(rawChanges: unknown): IOptimusBackboardFileChange[] {
-	if (!Array.isArray(rawChanges)) {
-		return [];
-	}
-	const changes: IOptimusBackboardFileChange[] = [];
-	for (const rawChange of rawChanges) {
-		if (!isOptimusObjectRecord(rawChange) || typeof rawChange.path !== 'string') {
-			continue;
-		}
-		changes.push({
-			path: rawChange.path,
-			added: typeof rawChange.added === 'number' ? rawChange.added : undefined,
-			removed: typeof rawChange.removed === 'number' ? rawChange.removed : undefined,
-		});
-	}
-	return changes;
-}
-
-function extractOptimusAssistantText(html: string): string | undefined {
-	const parts: string[] = [];
-	const pattern = /<div class="messageCard assistant"[\s\S]*?<div class="messageText">([\s\S]*?)<\/div>/g;
-	let match: RegExpExecArray | null;
-	while ((match = pattern.exec(html))) {
-		const text = stripOptimusPanelHtml(match[1]);
-		if (text) {
-			parts.push(text);
-		}
-	}
-	return parts.join('\n\n') || undefined;
-}
-
-function stripOptimusPanelHtml(html: string): string {
-	return decodeOptimusHtmlEntities(html)
-		.replace(/<script[\s\S]*?<\/script>/gi, '')
-		.replace(/<style[\s\S]*?<\/style>/gi, '')
-		.replace(/<br\s*\/?>/gi, '\n')
-		.replace(/<\/(?:div|p|li|h[1-6])>/gi, '\n')
-		.replace(/<[^>]+>/g, '')
-		.replace(/[ \t]+\n/g, '\n')
-		.replace(/\n{3,}/g, '\n\n')
-		.trim();
-}
-
-function decodeOptimusHtmlEntities(text: string): string {
-	return text
-		.replace(/&nbsp;/g, ' ')
-		.replace(/&amp;/g, '&')
-		.replace(/&lt;/g, '<')
-		.replace(/&gt;/g, '>')
-		.replace(/&quot;/g, '"')
-		.replace(/&#39;/g, "'");
-}
-
-function optimusHistoryTimestamp(entry: IOptimusBackboardHistoryEntry): number {
-	return entry.updatedAt ?? entry.startedAt ?? 0;
-}
-
-function workspaceLabelFromPath(path: string): string {
-	const normalized = path.replace(/\\/g, '/').split('/').filter(Boolean);
-	return normalized[normalized.length - 1] ?? path;
-}
-
-function isOptimusObjectRecord(value: unknown): value is Record<string, unknown> {
+function isPlainObjectRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function stringValueFromOptimusRecord(value: unknown): string | undefined {
+function stringValueFromRecord(value: unknown): string | undefined {
 	return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
 }

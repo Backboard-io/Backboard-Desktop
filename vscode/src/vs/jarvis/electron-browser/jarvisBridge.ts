@@ -95,10 +95,6 @@ export class ElectronJarvisBridge implements IJarvisBridge {
 		await this.switchWindowKind('agents');
 	}
 
-	async openOptimus(): Promise<void> {
-		await this.switchWindowKind('optimus');
-	}
-
 	async openJarvis(): Promise<void> {
 		await this.switchWindowKind('jarvis');
 	}
@@ -110,7 +106,7 @@ export class ElectronJarvisBridge implements IJarvisBridge {
 		}
 	}
 
-	private async switchWindowKind(target: 'editor' | 'agents' | 'optimus' | 'jarvis'): Promise<void> {
+	private async switchWindowKind(target: 'editor' | 'agents' | 'jarvis' | 'optimus'): Promise<void> {
 		const result = await ipcRenderer.invoke('vscode:jarvisSwitchWindowKind', target) as IJarvisCommandResult | undefined;
 		if (!result?.accepted) {
 			throw new Error(result?.error ?? `Could not switch to ${target}.`);

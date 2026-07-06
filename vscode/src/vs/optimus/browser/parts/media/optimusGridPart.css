@@ -1,0 +1,240 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.part.sessionspart > .content.optimus-grid-content {
+	display: flex;
+	height: 100%;
+	width: 100%;
+
+	/* Design tokens carried over from the original Optimus window styling. */
+	--optimus-card: var(--vscode-editorWidget-background, var(--vscode-sideBar-background));
+	--optimus-border: var(--vscode-widget-border, var(--vscode-sideBar-border, var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 15%, transparent))));
+	--optimus-border-subtle: color-mix(in srgb, var(--optimus-border) 62%, transparent);
+	--optimus-muted: var(--vscode-descriptionForeground);
+	--optimus-focus: var(--vscode-focusBorder);
+	--optimus-success: var(--vscode-charts-green);
+	--optimus-danger: var(--vscode-charts-red);
+	--optimus-warning: var(--vscode-charts-yellow);
+	--optimus-shadow: color-mix(in srgb, var(--vscode-widget-shadow, #000) 28%, transparent);
+}
+
+.optimus-grid {
+	display: grid;
+	grid-template-columns: repeat(3, 1fr);
+	grid-template-rows: repeat(2, 1fr);
+	gap: 14px;
+	padding: 14px;
+	flex: 1;
+	min-height: 0;
+	min-width: 0;
+}
+
+.optimus-card {
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+	min-width: 0;
+	border: 1px solid var(--optimus-border);
+	border-radius: 8px;
+	background: var(--optimus-card);
+	box-shadow: 0 1px 2px var(--optimus-shadow);
+	cursor: pointer;
+	outline: none;
+	overflow: hidden;
+	transition: border-color .16s ease, box-shadow .16s ease, background .16s ease;
+}
+
+.optimus-card:hover,
+.optimus-card:focus-visible {
+	border-color: color-mix(in srgb, var(--optimus-focus) 40%, var(--optimus-border));
+	box-shadow: 0 4px 12px var(--optimus-shadow);
+}
+
+.optimus-card.active {
+	border-color: color-mix(in srgb, var(--optimus-focus) 66%, var(--optimus-border));
+	box-shadow: 0 0 0 1px color-mix(in srgb, var(--optimus-focus) 24%, transparent), 0 6px 16px var(--optimus-shadow);
+}
+
+.optimus-card-content {
+	display: flex;
+	flex-direction: column;
+	flex: 1;
+	min-height: 0;
+}
+
+.optimus-card-header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+	flex-shrink: 0;
+	padding: 10px 12px;
+	border-bottom: 1px solid var(--optimus-border-subtle);
+}
+
+.optimus-card-status-dot {
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	flex-shrink: 0;
+	background-color: var(--optimus-muted);
+}
+
+.optimus-card-status-dot.running {
+	background-color: var(--optimus-focus);
+	animation: optimus-pulse 1.6s ease-in-out infinite;
+}
+
+.optimus-card-status-dot.needs-input {
+	background-color: var(--optimus-warning);
+}
+
+.optimus-card-status-dot.done {
+	background-color: var(--optimus-success);
+}
+
+.optimus-card-status-dot.error {
+	background-color: var(--optimus-danger);
+}
+
+@keyframes optimus-pulse {
+	0%, 100% { opacity: 1; }
+	50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.optimus-card-status-dot.running {
+		animation: none;
+	}
+}
+
+.optimus-card-title {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 12.5px;
+	font-weight: 650;
+	line-height: 16px;
+}
+
+.optimus-card-status-label {
+	flex-shrink: 0;
+	max-width: 110px;
+	overflow: hidden;
+	padding: 2px 8px;
+	border-radius: 999px;
+	font-size: 10px;
+	font-weight: 500;
+	text-transform: uppercase;
+	letter-spacing: 0.4px;
+	white-space: nowrap;
+	color: var(--optimus-muted);
+	background: color-mix(in srgb, var(--optimus-muted) 8%, transparent);
+}
+
+.optimus-card:has(.optimus-card-status-dot.running) .optimus-card-status-label {
+	color: color-mix(in srgb, var(--optimus-focus) 70%, var(--optimus-muted));
+	background: color-mix(in srgb, var(--optimus-focus) 8%, transparent);
+}
+
+.optimus-card:has(.optimus-card-status-dot.done) .optimus-card-status-label {
+	color: color-mix(in srgb, var(--optimus-success) 78%, var(--optimus-muted));
+	background: color-mix(in srgb, var(--optimus-success) 8%, transparent);
+}
+
+.optimus-card:has(.optimus-card-status-dot.needs-input) .optimus-card-status-label {
+	color: color-mix(in srgb, var(--optimus-warning) 78%, var(--optimus-muted));
+	background: color-mix(in srgb, var(--optimus-warning) 8%, transparent);
+}
+
+.optimus-card:has(.optimus-card-status-dot.error) .optimus-card-status-label {
+	color: color-mix(in srgb, var(--optimus-danger) 78%, var(--optimus-muted));
+	background: color-mix(in srgb, var(--optimus-danger) 8%, transparent);
+}
+
+.optimus-card-feed {
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+	white-space: pre-wrap;
+	word-break: break-word;
+	font-family: var(--monaco-monospace-font);
+	font-size: 11px;
+	line-height: 1.55;
+	color: var(--optimus-muted);
+	padding: 8px 12px;
+}
+
+.optimus-card-footer {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	flex-shrink: 0;
+	padding: 8px 12px;
+	border-top: 1px solid var(--optimus-border-subtle);
+	font-size: 11px;
+	line-height: 15px;
+	color: var(--optimus-muted);
+}
+
+.optimus-card-changes,
+.optimus-card-time {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.optimus-card.empty {
+	border-style: dashed;
+	background: transparent;
+	box-shadow: none;
+}
+
+.optimus-card.empty:hover,
+.optimus-card.empty:focus-visible {
+	border-color: color-mix(in srgb, var(--optimus-focus) 40%, var(--optimus-border));
+	background: color-mix(in srgb, var(--optimus-focus) 4%, transparent);
+	box-shadow: none;
+}
+
+.optimus-card-placeholder {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	flex: 1;
+	color: var(--optimus-muted);
+}
+
+.optimus-card-placeholder-icon {
+	font-size: 22px;
+	font-weight: 300;
+	line-height: 1;
+	opacity: 0.8;
+}
+
+.optimus-card-placeholder-label {
+	font-size: 11.5px;
+}
+
+/* Right panel: empty state shown when no card is active. */
+.optimus-chat-view {
+	position: relative;
+}
+
+.optimus-chat-empty {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	height: 100%;
+	padding: 24px;
+	text-align: center;
+	font-size: 12px;
+	color: var(--vscode-descriptionForeground);
+}

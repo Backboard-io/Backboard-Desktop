@@ -58,7 +58,20 @@ export class ProviderStreamConsumer {
 		for await (const event of stream) {
 			switch (event.kind) {
 				case "thread":
-					this.session.threadId = event.threadId;
+					// Re-announce the session once the backend assigns the thread
+					// so the host can persist it and resume the conversation in a
+					// future serve process. The startup `session:created` fires
+					// before any turn and carries `threadId: null`, so without
+					// this the host never learns the real thread id. Guarded:
+					// `thread` arrives on every stream frame.
+					if (this.session.threadId !== event.threadId) {
+						this.session.threadId = event.threadId;
+						this.bus.emit({
+							type: "session:created",
+							sessionId: this.session.sessionId,
+							threadId: event.threadId,
+						});
+					}
 					break;
 				case "assistant_delta":
 					if (event.text) assistant.appendDelta(event.text);

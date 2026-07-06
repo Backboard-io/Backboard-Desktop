@@ -12,11 +12,15 @@ import { Action2, registerAction2 } from '../../../../platform/actions/common/ac
 import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
 import { ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 import { IStorageService, StorageScope } from '../../../../platform/storage/common/storage.js';
+import { registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
 import { IOnboardingService } from '../common/onboardingService.js';
-import { ONBOARDING_STORAGE_KEY } from '../common/onboardingTypes.js';
+import { ONBOARDING_STORAGE_KEY, ONBOARDING_TOUR_STORAGE_KEY } from '../common/onboardingTypes.js';
 import { OnboardingVariationA } from './onboardingVariationA.js';
+import { PostOnboardingTour } from './postOnboardingTour.js';
 
 registerSingleton(IOnboardingService, OnboardingVariationA, InstantiationType.Delayed);
+
+registerWorkbenchContribution2(PostOnboardingTour.ID, PostOnboardingTour, WorkbenchPhase.AfterRestored);
 
 registerAction2(class extends Action2 {
 	constructor() {
@@ -47,6 +51,7 @@ registerAction2(class extends Action2 {
 	run(accessor: ServicesAccessor): void {
 		const storageService = accessor.get(IStorageService);
 		storageService.remove(ONBOARDING_STORAGE_KEY, StorageScope.APPLICATION);
+		storageService.remove(ONBOARDING_TOUR_STORAGE_KEY, StorageScope.APPLICATION);
 
 		const onboardingService = accessor.get(IOnboardingService);
 		onboardingService.reset();
