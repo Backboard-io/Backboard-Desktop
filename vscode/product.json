@@ -2,6 +2,7 @@
 	"nameShort": "Backboard Studio",
 	"nameLong": "Backboard Studio",
 	"applicationName": "backboard-studio-dev",
+	"backboardVersion": "2.3.2",
 	"extensionsGallery": {
 		"serviceUrl": "https://open-vsx.org/vscode/gallery",
 		"itemUrl": "https://open-vsx.org/vscode/item",

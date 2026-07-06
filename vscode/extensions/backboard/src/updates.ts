@@ -544,12 +544,15 @@ function readCurrentAppVersion(): string {
 		return envVersion.trim();
 	}
 
-	const metadataVersion = readBackboardReleaseMetadataString('version', 'backboardStudioVersion');
+	const metadataVersion = readBackboardReleaseMetadataString('version', 'backboardStudioVersion', 'backboardVersion');
 	if (metadataVersion) {
 		return metadataVersion;
 	}
 
-	const productVersion = readBackboardProductMetadataString('backboardStudioVersion');
+	// `backboardVersion` is the canonical Backboard product version declared in
+	// product.json (decoupled from the VS Code engine version). It is the source
+	// of truth for both the About dialog and this update check.
+	const productVersion = readBackboardProductMetadataString('backboardStudioVersion', 'backboardVersion');
 	if (productVersion) {
 		return productVersion;
 	}
@@ -572,6 +575,7 @@ function readCurrentAppVersion(): string {
 				const isBuildInfoFile = path.basename(releaseMetadataPath) === 'backboard-build-info.json';
 				const value =
 					stringValueFromRecord(parsed.backboardStudioVersion) ||
+					stringValueFromRecord(parsed.backboardVersion) ||
 					(backboardBuildInfo ? stringValueFromRecord(backboardBuildInfo.version) : undefined) ||
 					(isBuildInfoFile ? stringValueFromRecord(parsed.version) : undefined);
 				if (value) {
