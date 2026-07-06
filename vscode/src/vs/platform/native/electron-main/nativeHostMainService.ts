@@ -481,9 +481,15 @@ export class NativeHostMainService extends Disposable implements INativeHostMain
 		const window = this.codeWindowById(windowId);
 
 		// Vibrancy windows must keep their transparent native background;
-		// repainting it with the opaque splash color would permanently
-		// cover the vibrancy material.
-		this.themeMainService.saveWindowSplash(windowId, window?.openedWorkspace, splash, { updateBackgroundColor: !window?.hasVibrancy });
+		// repainting it with the opaque splash color would permanently cover
+		// the vibrancy material and read as a flat/static panel. Only paint the
+		// opaque splash background when we can positively confirm the target
+		// window exists and is NOT a vibrancy window. If the window lookup
+		// misses (mid-teardown / stale sender id), fail closed and skip the
+		// paint: `!undefined` would otherwise be `true` and stomp a live
+		// vibrancy window's material.
+		const updateBackgroundColor = !!window && !window.hasVibrancy;
+		this.themeMainService.saveWindowSplash(windowId, window?.openedWorkspace, splash, { updateBackgroundColor });
 	}
 
 	async setBackgroundThrottling(windowId: number | undefined, allowed: boolean): Promise<void> {

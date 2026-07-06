@@ -41,6 +41,7 @@ import { IWorkspacesService, isRecentFolder } from '../../../../platform/workspa
 import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry.js';
 import { reportNewChatPickerClosed } from './newChatPickerTelemetry.js';
 import { Menus } from '../../../browser/menus.js';
+import { MissingFolderTracker } from '../../../browser/missingFolderTracker.js';
 
 const STORAGE_KEY_RECENT_WORKSPACES = 'sessions.recentlyPickedWorkspaces';
 const FILTER_THRESHOLD = 10;
@@ -164,6 +165,12 @@ export class WorkspacePicker extends Disposable {
 	private _vsCodeRecentFolderUris: URI[] = [];
 	private _localOnly = false;
 
+	/**
+	 * Tracks recent local folders that have been deleted from disk so they are
+	 * hidden from the picker and never restored as the current selection.
+	 */
+	private readonly _missingFolders: MissingFolderTracker;
+
 	get selectedFolderUri(): URI | undefined {
 		return this._selectedFolderUri;
 	}
@@ -203,6 +210,9 @@ export class WorkspacePicker extends Disposable {
 		@INotificationService private readonly notificationService: INotificationService,
 	) {
 		super();
+
+		this._missingFolders = this._register(this.instantiationService.createInstance(MissingFolderTracker));
+		this._register(this._missingFolders.onDidChange(() => this._onMissingFoldersChanged()));
 
 		this._tabbedWidget = this._register(this.instantiationService.createInstance(TabbedActionListWidget));
 		this._pickerGroupContext = SessionWorkspacePickerGroupContext.bindTo(this.contextKeyService);
@@ -256,6 +266,10 @@ export class WorkspacePicker extends Disposable {
 		// Load VS Code recent folders eagerly and refresh on changes
 		this._loadVSCodeRecentFolders();
 		this._register(this.workspacesService.onDidChangeRecentlyOpened(() => this._loadVSCodeRecentFolders()));
+
+		// Check whether the recent local folders still exist so deleted ones are
+		// hidden and never restored as the current selection.
+		void this._refreshMissingFolders();
 
 		// Re-arm auto-tab whenever the workspace selection changes to a new
 		// value, but only while the picker is closed. This way picking a tab
@@ -318,6 +332,9 @@ export class WorkspacePicker extends Disposable {
 		if (!this._triggerElement) {
 			return;
 		}
+		// Re-validate folder existence on open so a folder deleted while the
+		// window was open drops out of the list.
+		void this._refreshMissingFolders();
 		const alreadyVisible = this.actionWidgetService.isVisible || this._tabbedWidget.isVisible;
 		if (!force && alreadyVisible) {
 			return;
@@ -578,6 +595,35 @@ export class WorkspacePicker extends Disposable {
 	removeFromRecents(uri: URI): void {
 		if (this._selectedFolderUri && this.uriIdentityService.extUri.isEqual(this._selectedFolderUri, uri)) {
 			this.clearSelection();
+		}
+	}
+
+	/**
+	 * Re-check whether the recent local folders still exist on disk. Runs
+	 * asynchronously; the picker re-renders via the tracker's change event.
+	 */
+	private async _refreshMissingFolders(): Promise<void> {
+		const folders: URI[] = this._getStoredRecentWorkspaces().map(stored => URI.revive(stored.uri));
+		folders.push(...this._vsCodeRecentFolderUris);
+		await this._missingFolders.refresh(folders);
+	}
+
+	/**
+	 * When a recent folder is discovered to be missing, drop it from the current
+	 * selection — a deleted folder must not stay selected or be opened as an
+	 * editor window — and refresh any open picker so it disappears from the list.
+	 */
+	private _onMissingFoldersChanged(): void {
+		if (this._selectedFolderUri && this._missingFolders.isMissing(this._selectedFolderUri)) {
+			this._connectionStatusWatch.clear();
+			this._selectedFolderUri = undefined;
+			this._selectedResolved = undefined;
+			this._updateTriggerLabel();
+			this._onDidChangeSelection.fire();
+			this._onDidSelectWorkspace.fire(undefined);
+		}
+		if (this.actionWidgetService.isVisible || this._tabbedWidget.isVisible) {
+			this.showPicker(true);
 		}
 	}
 
@@ -1114,7 +1160,8 @@ export class WorkspacePicker extends Disposable {
 				const uri = URI.revive(stored.uri);
 				return this._resolveFolder(uri, stored.providerId);
 			})
-			.filter((w): w is IResolvedFolderWorkspace => w !== undefined);
+			.filter((w): w is IResolvedFolderWorkspace => w !== undefined)
+			.filter(w => !this._missingFolders.isMissing(w.workspace.folders[0]?.root));
 	}
 
 	protected _removeRecentWorkspace(folderUri: URI): void {
@@ -1168,6 +1215,7 @@ export class WorkspacePicker extends Disposable {
 			.map(f => f.folderUri)
 			.filter(uri => !this._isCopilotWorktree(uri))
 			.slice(0, 10);
+		void this._refreshMissingFolders();
 	}
 
 	/**
@@ -1196,6 +1244,9 @@ export class WorkspacePicker extends Disposable {
 
 		for (const folderUri of this._vsCodeRecentFolderUris) {
 			if (ownUris.has(folderUri.toString())) {
+				continue;
+			}
+			if (this._missingFolders.isMissing(folderUri)) {
 				continue;
 			}
 			const resolved = this._resolveFolder(folderUri);

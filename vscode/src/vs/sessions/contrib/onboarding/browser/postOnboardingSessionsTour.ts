@@ -3,62 +3,52 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import './media/postOnboardingSessionsTour.css';
-
-import { $, addDisposableListener, append, EventType, getActiveWindow, getDomNodePagePosition, getTotalHeight, getTotalWidth } from '../../../../base/browser/dom.js';
-import { StandardKeyboardEvent } from '../../../../base/browser/keyboardEvent.js';
-import { KeyCode } from '../../../../base/common/keyCodes.js';
-import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
+import { getActiveWindow, getDomNodePagePosition } from '../../../../base/browser/dom.js';
+import { Disposable } from '../../../../base/common/lifecycle.js';
 import { localize } from '../../../../nls.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { IWorkbenchContribution } from '../../../../workbench/common/contributions.js';
+import { ISpotlightTourIntro, ISpotlightTourStep, SpotlightTour, TourPlacement } from '../../../../workbench/contrib/welcomeOnboarding/browser/spotlightTour.js';
 import { IBackboardOnboardingState, OnboardingExperience, ONBOARDING_STORAGE_KEY } from '../../../../workbench/contrib/welcomeOnboarding/common/onboardingTypes.js';
 import { IWorkbenchLayoutService } from '../../../../workbench/services/layout/browser/layoutService.js';
 
 interface ISessionsTourStep {
-	/** CSS selector for the element this step spotlights. */
+	/** CSS selector for the element (panel or button) this step spotlights. */
 	readonly targetSelector: string;
-	/** Where the card sits relative to the target: 'above' points its arrow down, 'below' points its arrow up. */
-	readonly placement: 'above' | 'below';
+	/** Preferred side of the target to place the card on. */
+	readonly placement: TourPlacement;
 	readonly title: string;
 	readonly body: string;
 }
 
-interface IResolvedSessionsTourStep {
-	readonly step: ISessionsTourStep;
-	readonly anchor: HTMLElement;
-}
-
-const CARD_WIDTH = 320;
-const CARD_TARGET_GAP = 16;
-const VIEWPORT_MARGIN = 16;
 const SESSIONS_TOUR_STORAGE_KEY = 'sessions.postOnboardingTour.complete';
 
 const TOUR_STEPS: readonly ISessionsTourStep[] = [
 	{
 		targetSelector: '.interactive-input-part',
-		placement: 'above',
-		title: localize('sessions.tour.prompt.title', "Start with a Prompt"),
-		body: localize('sessions.tour.prompt.body', "Describe the next task. Backboard keeps workspace context attached."),
+		placement: TourPlacement.Top,
+		title: localize('sessions.tour.prompt.title', "Start with a prompt"),
+		body: localize('sessions.tour.prompt.body', "Describe what you want to build or change. The agent works from here."),
 	},
 	{
-		targetSelector: '.part.sessionspart.basepanel.right .sessions-panel-header-right',
-		placement: 'below',
-		title: localize('sessions.tour.panels.title', "Switch Panels"),
-		body: localize('sessions.tour.panels.body', "Use this menu to open Files, Browser, or Terminal beside the agent."),
+		targetSelector: '.part.sidebar',
+		placement: TourPlacement.Right,
+		title: localize('sessions.tour.sessions.title', "Find your sessions"),
+		body: localize('sessions.tour.sessions.body', "Every chat you start is saved here — pick one to jump back in."),
 	},
 	{
-		targetSelector: '.part.sessionspart.basepanel.right .sessions-panel-header-right',
-		placement: 'below',
-		title: localize('sessions.tour.preview.title', "Preview the Result"),
-		body: localize('sessions.tour.preview.body', "Open the browser beside chat so beginners can see changes immediately."),
+		targetSelector: '.sessions-panel-header-right',
+		placement: TourPlacement.Bottom,
+		title: localize('sessions.tour.panels.title', "Open panels beside the agent"),
+		body: localize('sessions.tour.panels.body', "Switch on Files, a Browser, or a Terminal right next to the chat."),
 	},
 ];
 
 /**
- * A lightweight, non-modal spotlight tour shown once in the Agents (sessions)
- * window after the user completes onboarding with the Clean/Simple
- * experience, pointing them at the prompt box and the panel switcher.
+ * A spotlight tour shown once in the Agents (sessions) window after the user
+ * completes onboarding with the Clean/Simple experience. It first asks for
+ * consent, then walks through the prompt box, the sessions list, and the panel
+ * switcher.
  *
  * Onboarding runs in the separate main-workbench window, so there is no
  * same-process event to subscribe to here. Instead this reads the
@@ -68,12 +58,6 @@ const TOUR_STEPS: readonly ISessionsTourStep[] = [
 export class PostOnboardingSessionsTour extends Disposable implements IWorkbenchContribution {
 
 	static readonly ID = 'workbench.contrib.postOnboardingSessionsTour';
-
-	private readonly stepDisposables = this._register(new DisposableStore());
-	private steps: readonly IResolvedSessionsTourStep[] = [];
-	private stepIndex = 0;
-	private card: HTMLElement | undefined;
-	private previouslyFocusedElement: HTMLElement | undefined;
 
 	constructor(
 		@IStorageService private readonly storageService: IStorageService,
@@ -108,119 +92,40 @@ export class PostOnboardingSessionsTour extends Disposable implements IWorkbench
 		this.storageService.store(SESSIONS_TOUR_STORAGE_KEY, true, StorageScope.APPLICATION, StorageTarget.USER);
 
 		const targetWindow = getActiveWindow();
-		this.steps = TOUR_STEPS
-			.map(step => ({ step, anchor: targetWindow.document.querySelector<HTMLElement>(step.targetSelector) }))
-			.filter((entry): entry is IResolvedSessionsTourStep => !!entry.anchor && this._isVisible(entry.anchor));
+		const steps = TOUR_STEPS
+			.map((step): ISpotlightTourStep | undefined => {
+				const anchor = targetWindow.document.querySelector<HTMLElement>(step.targetSelector);
+				if (!anchor || !this._isVisible(anchor)) {
+					return undefined;
+				}
+				return { anchor, title: step.title, body: step.body, preferredPlacement: step.placement };
+			})
+			.filter((step): step is ISpotlightTourStep => !!step);
 
-		if (!this.steps.length) {
+		if (!steps.length) {
 			return;
 		}
 
-		this.stepIndex = 0;
-		this.previouslyFocusedElement = targetWindow.document.activeElement as HTMLElement | undefined;
-		this._renderStep();
+		const intro: ISpotlightTourIntro = {
+			title: localize('sessions.tour.intro.title', "Take a quick tour?"),
+			body: localize('sessions.tour.intro.body', "Get to know your workspace — where to prompt, find sessions, and open panels."),
+			caption: localize('sessions.tour.intro.caption', "{0} quick stops", steps.length),
+			confirmLabel: localize('sessions.tour.intro.confirm', "Take the tour"),
+			dismissLabel: localize('sessions.tour.intro.dismiss', "Maybe later"),
+		};
+
+		const tour = this._register(new SpotlightTour({
+			container: this.layoutService.activeContainer,
+			window: targetWindow,
+			onLayoutChange: this.layoutService.onDidLayoutActiveContainer,
+			intro,
+			steps,
+		}));
+		tour.start();
 	}
 
 	private _isVisible(element: HTMLElement): boolean {
 		const position = getDomNodePagePosition(element);
 		return position.width > 0 && position.height > 0;
-	}
-
-	private _renderStep(): void {
-		this.stepDisposables.clear();
-		this.card?.remove();
-
-		const { step, anchor } = this.steps[this.stepIndex];
-		const isLastStep = this.stepIndex === this.steps.length - 1;
-		const targetWindow = getActiveWindow();
-
-		this.card = append(this.layoutService.activeContainer, $('.sessions-tour-card'));
-		this.card.classList.add(step.placement === 'above' ? 'sessions-tour-arrow-down' : 'sessions-tour-arrow-up');
-		this.card.setAttribute('role', 'dialog');
-		this.card.setAttribute('aria-label', step.title);
-		this.card.tabIndex = -1;
-
-		append(this.card, $('.sessions-tour-arrow'));
-
-		const body = append(this.card, $('.sessions-tour-body'));
-		append(body, $('h3.sessions-tour-title')).textContent = step.title;
-		append(body, $('p.sessions-tour-text')).textContent = step.body;
-
-		const footer = append(this.card, $('.sessions-tour-footer'));
-		const skipButton = append(footer, $<HTMLButtonElement>('button.sessions-tour-skip'));
-		skipButton.type = 'button';
-		skipButton.textContent = localize('sessions.tour.skip', "Skip");
-
-		const footerRight = append(footer, $('.sessions-tour-footer-right'));
-
-		const backButton = append(footerRight, $<HTMLButtonElement>('button.sessions-tour-btn.sessions-tour-btn-secondary'));
-		backButton.type = 'button';
-		backButton.textContent = localize('sessions.tour.back', "Back");
-		backButton.style.visibility = this.stepIndex === 0 ? 'hidden' : '';
-
-		const nextButton = append(footerRight, $<HTMLButtonElement>('button.sessions-tour-btn.sessions-tour-btn-primary'));
-		nextButton.type = 'button';
-		nextButton.textContent = localize('sessions.tour.continue', "Continue");
-
-		this.stepDisposables.add(addDisposableListener(skipButton, EventType.CLICK, () => this._finish()));
-		this.stepDisposables.add(addDisposableListener(backButton, EventType.CLICK, () => {
-			if (this.stepIndex > 0) {
-				this.stepIndex--;
-				this._renderStep();
-			}
-		}));
-		this.stepDisposables.add(addDisposableListener(nextButton, EventType.CLICK, () => {
-			if (isLastStep) {
-				this._finish();
-			} else {
-				this.stepIndex++;
-				this._renderStep();
-			}
-		}));
-		this.stepDisposables.add(addDisposableListener(this.card, EventType.KEY_DOWN, (event: KeyboardEvent) => {
-			const keyboardEvent = new StandardKeyboardEvent(event);
-			if (keyboardEvent.keyCode === KeyCode.Escape) {
-				event.preventDefault();
-				this._finish();
-			}
-		}));
-
-		const reposition = () => this._positionCard(anchor, step);
-		this.stepDisposables.add(addDisposableListener(targetWindow, EventType.RESIZE, reposition));
-
-		reposition();
-		targetWindow.requestAnimationFrame(() => {
-			this.card?.classList.add('sessions-tour-visible');
-			this.card?.focus();
-		});
-	}
-
-	private _positionCard(anchor: HTMLElement, step: ISessionsTourStep): void {
-		if (!this.card) {
-			return;
-		}
-
-		const anchorRect = getDomNodePagePosition(anchor);
-		const targetWindow = getActiveWindow();
-		const cardHeight = getTotalHeight(this.card);
-		const cardWidth = getTotalWidth(this.card) || CARD_WIDTH;
-
-		const top = step.placement === 'above'
-			? anchorRect.top - cardHeight - CARD_TARGET_GAP
-			: anchorRect.top + anchorRect.height + CARD_TARGET_GAP;
-		const maxTop = Math.max(VIEWPORT_MARGIN, targetWindow.innerHeight - cardHeight - VIEWPORT_MARGIN);
-
-		const idealLeft = anchorRect.left + (anchorRect.width / 2) - (cardWidth / 2);
-		const maxLeft = Math.max(VIEWPORT_MARGIN, targetWindow.innerWidth - cardWidth - VIEWPORT_MARGIN);
-
-		this.card.style.top = `${Math.min(Math.max(top, VIEWPORT_MARGIN), maxTop)}px`;
-		this.card.style.left = `${Math.min(Math.max(idealLeft, VIEWPORT_MARGIN), maxLeft)}px`;
-	}
-
-	private _finish(): void {
-		this.stepDisposables.clear();
-		this.card?.remove();
-		this.card = undefined;
-		this.previouslyFocusedElement?.focus();
 	}
 }

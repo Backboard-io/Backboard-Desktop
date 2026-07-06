@@ -61,6 +61,7 @@ export class NewChatWidget extends Disposable {
 	private _currentChatResource: URI | undefined;
 	private _chatWidgetContent: HTMLElement | undefined;
 	private _composerStackElement: HTMLElement | undefined;
+	private _composerWorkspaceRowElement: HTMLElement | undefined;
 	private _gitStatusElement: HTMLElement | undefined;
 	/** Bumped to re-resolve the git branch when the (non-observable) workspace picker selection changes or a repository finishes opening. */
 	private readonly _gitStatusTick = observableValue<number>('newChatGitStatusTick', 0);
@@ -220,6 +221,7 @@ export class NewChatWidget extends Disposable {
 		this._composerStackElement = composerStack;
 		const workspacePickerContainer = this._renderComposerWorkspaceRow(composerStack);
 		this._widget.render(composerStack);
+		this._placeWorkspaceRowBelowInput(composerStack);
 		// On web (vscode.dev / insiders.vscode.dev) the workspace picker is
 		// scoped to the currently selected agent host. When no hosts are
 		// known there is nothing for the user to pick, so swap the picker
@@ -264,10 +266,27 @@ export class NewChatWidget extends Disposable {
 
 	private _renderComposerWorkspaceRow(container: HTMLElement): HTMLElement {
 		const row = dom.append(container, dom.$('.new-chat-composer-workspace-row'));
+		this._composerWorkspaceRowElement = row;
 		const pickerSlot = dom.append(row, dom.$('.new-session-workspace-picker-container'));
 		this._gitStatusElement = dom.append(row, dom.$('.new-chat-git-status'));
 		this._register(this._renderGitStatus());
 		return pickerSlot;
+	}
+
+	/**
+	 * Move the workspace row so it sits directly beneath the input card (and
+	 * above the category buttons) instead of on top of the composer. The input's
+	 * category buttons live inside the chat widget's `.interactive-input-part`
+	 * sibling area, so the row has to be relocated into that flex flow — right
+	 * after the input part — for the "drawer sliding out from under the input"
+	 * layout. No-op if either element is missing.
+	 */
+	private _placeWorkspaceRowBelowInput(composerStack: HTMLElement): void {
+		const row = this._composerWorkspaceRowElement;
+		const inputPart = composerStack.querySelector('.interactive-input-part');
+		if (row && inputPart) {
+			inputPart.insertAdjacentElement('afterend', row);
+		}
 	}
 
 	private _renderGitStatus(): IDisposable {

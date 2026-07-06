@@ -509,6 +509,49 @@
 	}
 }
 
+/* High-contrast themes: row titles, timestamps and section counts are dimmed
+ * via color-mix against transparent, and hover/selection are faint tinted
+ * surfaces with no border. HC requires maximum-contrast text and a visible
+ * boundary for the active/selected row, so restore full opacity and add a
+ * contrast outline. */
+.hc-black .sessions-list-control,
+.hc-light .sessions-list-control {
+	--sessions-row-title-fg: var(--vscode-sideBar-foreground, var(--vscode-foreground));
+	--sessions-row-attention-fg: var(--vscode-strongForeground, var(--vscode-foreground));
+	--sessions-row-muted-fg: var(--vscode-sideBar-foreground, var(--vscode-foreground));
+	--sessions-row-selected-border: var(--vscode-contrastBorder);
+}
+
+.hc-black .sessions-list-control .session-details-row,
+.hc-light .sessions-list-control .session-details-row {
+	color: var(--vscode-sideBar-foreground, var(--vscode-foreground));
+}
+
+.hc-black .sessions-list-control .session-section-count,
+.hc-light .sessions-list-control .session-section-count {
+	opacity: 1;
+}
+
+.hc-black .sessions-list-control .session-icon > .codicon,
+.hc-light .sessions-list-control .session-icon > .codicon {
+	opacity: 1;
+}
+
+.hc-black .sessions-list-control .session-details-icon,
+.hc-black .sessions-list-control .session-section-folder-icon,
+.hc-light .sessions-list-control .session-details-icon,
+.hc-light .sessions-list-control .session-section-folder-icon {
+	color: var(--vscode-icon-foreground);
+}
+
+.hc-black .sessions-list-control .monaco-list-row:hover,
+.hc-black .sessions-list-control .monaco-list-row.focused,
+.hc-light .sessions-list-control .monaco-list-row:hover,
+.hc-light .sessions-list-control .monaco-list-row.focused {
+	outline: 1px dashed var(--vscode-contrastActiveBorder, var(--vscode-contrastBorder));
+	outline-offset: -1px;
+}
+
 @keyframes session-needs-input-pulse {
 
 	0%,

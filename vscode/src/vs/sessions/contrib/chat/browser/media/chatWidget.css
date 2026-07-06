@@ -78,7 +78,11 @@
 	max-width: none;
 	height: 100%;
 	display: grid;
-	grid-template-rows: 52px minmax(56px, 1fr) auto auto minmax(56px, 1fr);
+	/* Header, then the composer (row 3) centered between two equal flexible
+	 * spacers so it sits in the vertical middle of the screen. The intro title
+	 * lives in the upper spacer (bottom-aligned) so it hugs the composer without
+	 * pushing it off-center. */
+	grid-template-rows: 52px minmax(56px, 1fr) auto minmax(56px, 1fr);
 	align-items: stretch;
 	align-self: stretch;
 	gap: 0;
@@ -141,7 +145,7 @@
 }
 
 .new-chat-composer-stack {
-	grid-row: 4;
+	grid-row: 3;
 	width: min(1120px, calc(100% - 96px));
 	min-width: 0;
 	margin: 0 auto;
@@ -151,7 +155,9 @@
 	gap: 0;
 	padding: 0;
 	overflow: visible;
-	--new-chat-composer-visible-inset: 64px;
+	/* Outer corner radius of the composer card (the workspace row's rounded top
+	 * and the input's rounded bottom share it so they stay in sync). */
+	--new-chat-card-radius: 18px;
 }
 
 .new-chat-composer-stack > .interactive-session {
@@ -179,9 +185,9 @@
 	justify-content: center;
 	gap: 14px;
 	width: min(680px, calc(100% - 48px));
-	align-self: center;
+	align-self: end;
 	justify-self: center;
-	grid-row: 3;
+	grid-row: 2;
 	padding: 0 0 28px;
 	box-sizing: border-box;
 	text-align: center;
@@ -189,21 +195,33 @@
 }
 
 .new-chat-composer-workspace-row {
-	width: min(896px, calc(100% - (var(--new-chat-composer-visible-inset) * 2) - 24px));
+	/* A separate panel that slides out from behind the bottom of the input card.
+	 * newChatWidget moves this row just below the input (above the category
+	 * buttons). It shares the input's visible-box width — min(886px, 100% - 64px),
+	 * the input part caps at 950px with 32px of side padding — so their edges line
+	 * up. The negative top margin tucks its top edge behind the input, which
+	 * paints on top (higher z-index); the extra top padding keeps the chips clear
+	 * of that overlap so the panel reads as "coming out of" the input. */
+	width: min(886px, calc(100% - 64px));
 	max-width: 100%;
-	margin: 0 auto -1px;
+	margin: -20px auto 0;
 	min-width: 0;
 	box-sizing: border-box;
-	display: grid;
-	grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+	display: flex;
 	align-items: center;
-	justify-content: stretch;
+	justify-content: space-between;
 	gap: 8px;
 	overflow: hidden;
-	min-height: 42px;
-	padding: 8px 24px;
-	border-radius: 18px 18px 0 0;
-	background: color-mix(in srgb, var(--vscode-editorWidget-background) 64%, transparent);
+	min-height: 0;
+	padding: 28px 24px 10px;
+	/* A distinct recessed surface (not the editor background, which equals the
+	 * page and would make the drawer invisible) with a defined edge, so it reads
+	 * as a real panel sliding out from under the input. */
+	border: 1px solid color-mix(in srgb, var(--vscode-editorWidget-border, var(--vscode-contrastBorder)) 60%, transparent);
+	border-radius: var(--new-chat-card-radius);
+	background: var(--vscode-editorWidget-background);
+	position: relative;
+	z-index: 1;
 	box-shadow: none;
 }
 
@@ -215,7 +233,9 @@
 	margin: 0;
 	padding: 0;
 	animation: none;
-	justify-self: start;
+	/* Primary item: takes the squeeze first so the folder name ellipsizes
+	 * before the (secondary) branch does. */
+	flex: 0 1 auto;
 }
 
 .new-chat-composer-workspace-row > .new-session-workspace-picker-container .sessions-chat-picker-slot {
@@ -240,10 +260,14 @@
 	display: flex;
 	align-items: center;
 	justify-content: flex-end;
-	justify-self: end;
+	/* Secondary item: keeps its content width but never grows past half the
+	 * row and never pushes into the folder. Capping relative to the row (not
+	 * the viewport, as before) is what stops the branch overflowing/overlapping
+	 * the folder when space is tight; its label ellipsizes within this cap. */
+	flex: 0 0 auto;
 	gap: 8px;
 	min-width: 0;
-	max-width: min(420px, 45vw);
+	max-width: 50%;
 	color: var(--vscode-descriptionForeground);
 	overflow: hidden;
 }
@@ -532,12 +556,10 @@
 
 	.new-chat-composer-stack {
 		width: calc(100% - 32px);
-		--new-chat-composer-visible-inset: 64px;
 	}
 
 	.new-chat-composer-workspace-row {
 		gap: 8px;
-		grid-template-columns: minmax(0, 1fr) minmax(0, auto);
 		padding: 8px 12px;
 		border-radius: 14px 14px 0 0;
 	}
@@ -547,7 +569,7 @@
 	}
 
 	.new-chat-git-status {
-		max-width: min(48vw, 220px);
+		max-width: 50%;
 	}
 
 	.new-chat-git-status-item {
@@ -568,12 +590,6 @@
 	.new-chat-middle-description {
 		font-size: 14px;
 		line-height: 22px;
-	}
-}
-
-@container (max-width: 360px) {
-	.new-chat-composer-stack {
-		--new-chat-composer-visible-inset: 32px;
 	}
 }
 
@@ -601,13 +617,22 @@
 .new-chat-composer-stack > .interactive-session .chat-input-container {
 	min-height: 96px;
 	padding: 10px 12px 10px;
-	border-radius: 0 0 18px 18px;
 	display: flex;
 	flex-direction: column;
 	justify-content: flex-start;
 	gap: 8px;
 	overflow: hidden;
 	position: relative;
+}
+
+/* The input is the front card: a fully rounded, fully bordered box that sits on
+ * top of the workspace drawer tucked behind its lower edge. Match the drawer's
+ * corner radius (the base rule uses cornerRadius-large, ~12px). The extra
+ * `.interactive-input-part` in the selector outweighs the base rule's
+ * specificity so this wins. */
+.monaco-workbench .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container {
+	border-radius: var(--new-chat-card-radius);
+	z-index: 2;
 }
 
 .monaco-workbench .new-chat-composer-stack > .interactive-session .chat-input-container.working {

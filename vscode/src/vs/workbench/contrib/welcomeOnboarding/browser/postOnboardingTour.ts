@@ -3,69 +3,49 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import './media/postOnboardingTour.css';
-
-import { $, addDisposableListener, append, EventType, getActiveWindow, getDomNodePagePosition, getTotalHeight } from '../../../../base/browser/dom.js';
-import { StandardKeyboardEvent } from '../../../../base/browser/keyboardEvent.js';
-import { KeyCode } from '../../../../base/common/keyCodes.js';
-import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
+import { getActiveWindow, getDomNodePagePosition } from '../../../../base/browser/dom.js';
+import { Disposable } from '../../../../base/common/lifecycle.js';
 import { localize } from '../../../../nls.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { IWorkbenchContribution } from '../../../common/contributions.js';
 import { IWorkbenchLayoutService, Parts } from '../../../services/layout/browser/layoutService.js';
 import { IOnboardingService } from '../common/onboardingService.js';
-import { ONBOARDING_TOUR_STORAGE_KEY } from '../common/onboardingTypes.js';
+import { IBackboardOnboardingState, OnboardingExperience, ONBOARDING_STORAGE_KEY, ONBOARDING_TOUR_STORAGE_KEY } from '../common/onboardingTypes.js';
+import { ISpotlightTourIntro, ISpotlightTourStep, SpotlightTour, TourPlacement } from './spotlightTour.js';
 
 interface IPostOnboardingTourStep {
 	/** Workbench part this step spotlights. */
 	readonly part: Parts;
-	/** Direction the card's arrow points, i.e. which side the target part is on. */
-	readonly arrowDirection: 'left' | 'right';
-	/** Fraction (0-1) down the target part's height to align the card's vertical center with. */
-	readonly verticalAnchor: number;
+	/** Preferred side of the part to place the card on. */
+	readonly placement: TourPlacement;
 	readonly title: string;
 	readonly body: string;
 }
 
-interface IResolvedTourStep {
-	readonly step: IPostOnboardingTourStep;
-	readonly anchor: HTMLElement;
-}
-
-const CARD_WIDTH = 320;
-const CARD_TARGET_GAP = 20;
-const VIEWPORT_MARGIN = 16;
-
 const TOUR_STEPS: readonly IPostOnboardingTourStep[] = [
 	{
 		part: Parts.SIDEBAR_PART,
-		arrowDirection: 'left',
-		verticalAnchor: 0.3,
+		placement: TourPlacement.Right,
 		title: localize('onboarding.tour.editIde.title', "Edit in the IDE"),
 		body: localize('onboarding.tour.editIde.body', "Open files, read code, and preview changes without switching apps."),
 	},
 	{
 		part: Parts.AUXILIARYBAR_PART,
-		arrowDirection: 'right',
-		verticalAnchor: 0.75,
+		placement: TourPlacement.Left,
 		title: localize('onboarding.tour.chat.title', "Chat with Backboard"),
-		body: localize('onboarding.tour.chat.body', "Describe the change you want, then review the result beside your project."),
+		body: localize('onboarding.tour.chat.body', "Describe a change, then review the result beside your project."),
 	},
 ];
 
 /**
- * A lightweight, non-modal spotlight tour shown once after onboarding
- * finishes, pointing new users at the editor and the chat panel.
+ * A spotlight tour shown once after onboarding finishes in the main IDE window
+ * (Developer or Advanced experience — the Simple experience opens the Agents
+ * window, which runs its own tour). It first asks for consent, then dims the
+ * workbench and highlights the editor and chat panel in turn.
  */
 export class PostOnboardingTour extends Disposable implements IWorkbenchContribution {
 
 	static readonly ID = 'workbench.contrib.postOnboardingTour';
-
-	private readonly stepDisposables = this._register(new DisposableStore());
-	private steps: readonly IResolvedTourStep[] = [];
-	private stepIndex = 0;
-	private card: HTMLElement | undefined;
-	private previouslyFocusedElement: HTMLElement | undefined;
 
 	constructor(
 		@IOnboardingService private readonly onboardingService: IOnboardingService,
@@ -82,126 +62,68 @@ export class PostOnboardingTour extends Disposable implements IWorkbenchContribu
 			return;
 		}
 
+		// The Simple experience hands off to the Agents window, which runs its
+		// own tour there; showing this one would target the backgrounded window.
+		const experience = this._completedExperience();
+		if (experience === undefined || experience === OnboardingExperience.Simple) {
+			return;
+		}
+
 		// Let the layout the user just opened (editor, panels) settle before measuring it.
 		getActiveWindow().requestAnimationFrame(() => this._start());
+	}
+
+	private _completedExperience(): OnboardingExperience | undefined {
+		const raw = this.storageService.get(ONBOARDING_STORAGE_KEY, StorageScope.APPLICATION);
+		if (!raw) {
+			return undefined;
+		}
+		try {
+			const state: IBackboardOnboardingState = JSON.parse(raw);
+			return state.completed ? state.experience : undefined;
+		} catch {
+			return undefined;
+		}
 	}
 
 	private _start(): void {
 		this.storageService.store(ONBOARDING_TOUR_STORAGE_KEY, true, StorageScope.APPLICATION, StorageTarget.USER);
 
 		const targetWindow = getActiveWindow();
-		this.steps = TOUR_STEPS
-			.map(step => ({ step, anchor: this.layoutService.getContainer(targetWindow, step.part) }))
-			.filter((entry): entry is IResolvedTourStep => !!entry.anchor && this._isVisible(entry.anchor));
+		const steps = TOUR_STEPS
+			.map((step): ISpotlightTourStep | undefined => {
+				const anchor = this.layoutService.getContainer(targetWindow, step.part);
+				if (!anchor || !this._isVisible(anchor)) {
+					return undefined;
+				}
+				return { anchor, title: step.title, body: step.body, preferredPlacement: step.placement };
+			})
+			.filter((step): step is ISpotlightTourStep => !!step);
 
-		if (!this.steps.length) {
+		if (!steps.length) {
 			return;
 		}
 
-		this.stepIndex = 0;
-		this.previouslyFocusedElement = targetWindow.document.activeElement as HTMLElement | undefined;
-		this._renderStep();
+		const intro: ISpotlightTourIntro = {
+			title: localize('onboarding.tour.intro.title', "Take a quick tour?"),
+			body: localize('onboarding.tour.intro.body', "See where to edit code and chat with Backboard."),
+			caption: localize('onboarding.tour.intro.caption', "{0} quick stops", steps.length),
+			confirmLabel: localize('onboarding.tour.intro.confirm', "Take the tour"),
+			dismissLabel: localize('onboarding.tour.intro.dismiss', "Maybe later"),
+		};
+
+		const tour = this._register(new SpotlightTour({
+			container: this.layoutService.activeContainer,
+			window: targetWindow,
+			onLayoutChange: this.layoutService.onDidLayoutActiveContainer,
+			intro,
+			steps,
+		}));
+		tour.start();
 	}
 
 	private _isVisible(element: HTMLElement): boolean {
 		const position = getDomNodePagePosition(element);
 		return position.width > 0 && position.height > 0;
-	}
-
-	private _renderStep(): void {
-		this.stepDisposables.clear();
-		this.card?.remove();
-
-		const { step, anchor } = this.steps[this.stepIndex];
-		const isLastStep = this.stepIndex === this.steps.length - 1;
-
-		this.card = append(this.layoutService.activeContainer, $('.backboard-tour-card'));
-		this.card.classList.add(step.arrowDirection === 'left' ? 'backboard-tour-arrow-left' : 'backboard-tour-arrow-right');
-		this.card.setAttribute('role', 'dialog');
-		this.card.setAttribute('aria-label', step.title);
-		this.card.tabIndex = -1;
-
-		append(this.card, $('.backboard-tour-arrow'));
-
-		const body = append(this.card, $('.backboard-tour-body'));
-		append(body, $('h3.backboard-tour-title')).textContent = step.title;
-		append(body, $('p.backboard-tour-text')).textContent = step.body;
-
-		const footer = append(this.card, $('.backboard-tour-footer'));
-		const skipButton = append(footer, $<HTMLButtonElement>('button.backboard-tour-skip'));
-		skipButton.type = 'button';
-		skipButton.textContent = localize('onboarding.tour.skip', "Skip");
-
-		const footerRight = append(footer, $('.backboard-tour-footer-right'));
-
-		const backButton = append(footerRight, $<HTMLButtonElement>('button.backboard-tour-btn.backboard-tour-btn-secondary'));
-		backButton.type = 'button';
-		backButton.textContent = localize('onboarding.tour.back', "Back");
-		backButton.style.visibility = this.stepIndex === 0 ? 'hidden' : '';
-
-		const nextButton = append(footerRight, $<HTMLButtonElement>('button.backboard-tour-btn.backboard-tour-btn-primary'));
-		nextButton.type = 'button';
-		nextButton.textContent = localize('onboarding.tour.continue', "Continue");
-
-		this.stepDisposables.add(addDisposableListener(skipButton, EventType.CLICK, () => this._finish()));
-		this.stepDisposables.add(addDisposableListener(backButton, EventType.CLICK, () => {
-			if (this.stepIndex > 0) {
-				this.stepIndex--;
-				this._renderStep();
-			}
-		}));
-		this.stepDisposables.add(addDisposableListener(nextButton, EventType.CLICK, () => {
-			if (isLastStep) {
-				this._finish();
-			} else {
-				this.stepIndex++;
-				this._renderStep();
-			}
-		}));
-		this.stepDisposables.add(addDisposableListener(this.card, EventType.KEY_DOWN, (event: KeyboardEvent) => {
-			const keyboardEvent = new StandardKeyboardEvent(event);
-			if (keyboardEvent.keyCode === KeyCode.Escape) {
-				event.preventDefault();
-				this._finish();
-			}
-		}));
-
-		const reposition = () => this._positionCard(anchor, step);
-		this.stepDisposables.add(this.layoutService.onDidLayoutActiveContainer(reposition));
-		this.stepDisposables.add(addDisposableListener(getActiveWindow(), EventType.RESIZE, reposition));
-
-		reposition();
-		getActiveWindow().requestAnimationFrame(() => {
-			this.card?.classList.add('backboard-tour-visible');
-			this.card?.focus();
-		});
-	}
-
-	private _positionCard(anchor: HTMLElement, step: IPostOnboardingTourStep): void {
-		if (!this.card) {
-			return;
-		}
-
-		const anchorRect = getDomNodePagePosition(anchor);
-		const targetWindow = getActiveWindow();
-		const cardHeight = getTotalHeight(this.card);
-
-		const left = step.arrowDirection === 'left'
-			? anchorRect.left + anchorRect.width + CARD_TARGET_GAP
-			: anchorRect.left - CARD_WIDTH - CARD_TARGET_GAP;
-		const maxLeft = targetWindow.innerWidth - CARD_WIDTH - VIEWPORT_MARGIN;
-
-		const idealTop = anchorRect.top + (anchorRect.height * step.verticalAnchor) - (cardHeight / 2);
-		const maxTop = Math.max(VIEWPORT_MARGIN, targetWindow.innerHeight - cardHeight - VIEWPORT_MARGIN);
-
-		this.card.style.left = `${Math.min(Math.max(left, VIEWPORT_MARGIN), Math.max(VIEWPORT_MARGIN, maxLeft))}px`;
-		this.card.style.top = `${Math.min(Math.max(idealTop, VIEWPORT_MARGIN), maxTop)}px`;
-	}
-
-	private _finish(): void {
-		this.stepDisposables.clear();
-		this.card?.remove();
-		this.card = undefined;
-		this.previouslyFocusedElement?.focus();
 	}
 }

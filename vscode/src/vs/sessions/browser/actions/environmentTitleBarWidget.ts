@@ -11,6 +11,7 @@ import { renderIcon } from '../../../base/browser/ui/iconLabel/iconLabels.js';
 import { BaseActionViewItem, IBaseActionViewItemOptions } from '../../../base/browser/ui/actionbar/actionViewItems.js';
 import { Codicon } from '../../../base/common/codicons.js';
 import { Disposable, DisposableStore } from '../../../base/common/lifecycle.js';
+import { autorun, IReader, observableValue } from '../../../base/common/observable.js';
 import { basename } from '../../../base/common/resources.js';
 import { IAction } from '../../../base/common/actions.js';
 import { URI } from '../../../base/common/uri.js';
@@ -18,6 +19,7 @@ import { localize, localize2 } from '../../../nls.js';
 import { IActionViewItemService } from '../../../platform/actions/browser/actionViewItemService.js';
 import { Action2, MenuRegistry, registerAction2 } from '../../../platform/actions/common/actions.js';
 import { ICommandService } from '../../../platform/commands/common/commands.js';
+import { ILogService } from '../../../platform/log/common/log.js';
 import { ContextKeyExpr } from '../../../platform/contextkey/common/contextkey.js';
 import { IContextViewService } from '../../../platform/contextview/browser/contextView.js';
 import { IHoverService } from '../../../platform/hover/browser/hover.js';
@@ -64,7 +66,6 @@ interface IEnvironmentRow {
 }
 
 interface IResolvedGitInfo {
-	readonly key: string;
 	readonly branchName?: string;
 	readonly upstreamBranchName?: string;
 	readonly outgoingChanges?: number;
@@ -77,7 +78,12 @@ export class EnvironmentTitleBarWidget extends BaseActionViewItem {
 
 	private triggerButton: HTMLButtonElement | undefined;
 	private popupStore = this._register(new DisposableStore());
-	private resolvedGitInfo: IResolvedGitInfo | undefined;
+	private readonly contentStore = this._register(new DisposableStore());
+	private popupContainer: HTMLElement | undefined;
+	/** Bumped once a repository finishes opening so the popup re-resolves the branch. */
+	private readonly gitStatusTick = observableValue<number>('environmentGitStatusTick', 0);
+	/** Working directory already handed to the git service to open. Reset on every popup open so each open re-checks. */
+	private openedGitRepositoryKey: string | undefined;
 
 	constructor(
 		action: IAction,
@@ -90,6 +96,7 @@ export class EnvironmentTitleBarWidget extends BaseActionViewItem {
 		@ISCMService private readonly scmService: ISCMService,
 		@IUriIdentityService private readonly uriIdentityService: IUriIdentityService,
 		@ISessionsProvidersService private readonly sessionsProvidersService: ISessionsProvidersService,
+		@ILogService private readonly logService: ILogService,
 	) {
 		super(undefined, action, options);
 	}
@@ -135,6 +142,7 @@ export class EnvironmentTitleBarWidget extends BaseActionViewItem {
 			render: container => this.renderPopup(container),
 			onHide: () => {
 				this.popupStore.clear();
+				this.contentStore.clear();
 				this.triggerButton?.setAttribute('aria-expanded', 'false');
 			},
 		});
@@ -142,6 +150,23 @@ export class EnvironmentTitleBarWidget extends BaseActionViewItem {
 
 	private renderPopup(container: HTMLElement): DisposableStore {
 		this.popupStore.clear();
+		this.popupContainer = container;
+		// Re-check the repository from scratch every time the popup opens.
+		this.openedGitRepositoryKey = undefined;
+		// Render inside an autorun so the popup stays live while open: the branch
+		// updates as soon as the git repository finishes opening, the user checks
+		// out a different branch, or the active session's workspace changes.
+		this.popupStore.add(autorun(reader => this.renderPopupContent(reader)));
+		return this.popupStore;
+	}
+
+	private renderPopupContent(reader: IReader): void {
+		const container = this.popupContainer;
+		if (!container) {
+			return;
+		}
+		this.gitStatusTick.read(reader);
+		this.contentStore.clear();
 		clearNode(container);
 
 		const popup = append(container, $('.sessions-environment-popup'));
@@ -149,7 +174,7 @@ export class EnvironmentTitleBarWidget extends BaseActionViewItem {
 		append(header, $('span.sessions-environment-popup-title', undefined, localize('environmentPopupTitle', "Environment")));
 		append(header, $('button.sessions-environment-popup-add', { 'aria-label': localize('environmentPopupAdd', "Add") }, renderIcon(Codicon.add)));
 
-		const activeSession = this.sessionsService.activeSession.get();
+		const activeSession = this.sessionsService.activeSession.read(reader);
 		if (!activeSession) {
 			this.renderRow(popup, {
 				icon: Codicon.window,
@@ -157,18 +182,18 @@ export class EnvironmentTitleBarWidget extends BaseActionViewItem {
 				value: localize('environmentNoActiveSessionValue', "Start or select a session"),
 				muted: true,
 			});
-			return this.popupStore;
+			return;
 		}
 
-		const workspace = activeSession.workspace.get();
+		const workspace = activeSession.workspace.read(reader);
 		const folder = workspace?.folders[0];
 		const gitRepository = folder?.gitRepository;
 		const providerBranchName = this.getProviderBranchName(activeSession);
 		const providerWorkingDirectory = this.getProviderWorkingDirectory(activeSession);
-		const gitInfo = this.getCurrentScmInfo(folder, providerWorkingDirectory) ?? this.getCurrentGitInfo(folder, providerWorkingDirectory) ?? this.getResolvedGitInfo(folder, providerWorkingDirectory);
+		const gitInfo = this.resolveGitInfo(reader, folder, providerWorkingDirectory);
 		const branchName = gitInfo?.branchName ?? gitRepository?.branchName ?? providerBranchName;
 		const upstreamBranchName = gitInfo?.upstreamBranchName ?? gitRepository?.upstreamBranchName;
-		const changesSummary = activeSession.changesSummary?.get();
+		const changesSummary = activeSession.changesSummary?.read(reader);
 		const changesValue = changesSummary
 			? localize('environmentChangesSummary', "{0} files  +{1} -{2}", changesSummary.files, changesSummary.additions, changesSummary.deletions)
 			: this.getGitChangesLabel(gitInfo) ?? localize('environmentNoChanges', "No changes");
@@ -207,9 +232,6 @@ export class EnvironmentTitleBarWidget extends BaseActionViewItem {
 		append(popup, $('.sessions-environment-popup-separator'));
 		append(popup, $('span.sessions-environment-popup-section', undefined, localize('environmentSources', "Sources")));
 		this.renderSourceRows(popup, workspace);
-		this.resolveGitInfo(folder, providerWorkingDirectory, gitInfo);
-
-		return this.popupStore;
 	}
 
 	private getProviderBranchName(session: ISession): string | undefined {
@@ -254,7 +276,7 @@ export class EnvironmentTitleBarWidget extends BaseActionViewItem {
 		}
 
 		if (row.command) {
-			this.popupStore.add(addDisposableListener(element, EventType.CLICK, () => {
+			this.contentStore.add(addDisposableListener(element, EventType.CLICK, () => {
 				this.contextViewService.hideContextView();
 				void this.commandService.executeCommand(row.command!);
 			}));
@@ -306,39 +328,43 @@ export class EnvironmentTitleBarWidget extends BaseActionViewItem {
 			: localize('environmentNoChanges', "No changes");
 	}
 
-	private getResolvedGitInfo(folder: ISessionFolder | undefined, providerWorkingDirectory: URI | undefined): IResolvedGitInfo | undefined {
-		const key = this.getGitInfoKey(folder, providerWorkingDirectory);
-		if (!key || this.resolvedGitInfo?.key !== key) {
-			return undefined;
-		}
-		return this.resolvedGitInfo;
-	}
-
-	private getCurrentScmInfo(folder: ISessionFolder | undefined, providerWorkingDirectory: URI | undefined): IResolvedGitInfo | undefined {
+	private resolveGitInfo(reader: IReader, folder: ISessionFolder | undefined, providerWorkingDirectory: URI | undefined): IResolvedGitInfo | undefined {
 		const key = this.getGitInfoKey(folder, providerWorkingDirectory);
 		if (!key) {
 			return undefined;
 		}
+		// Prefer the live git repository. Reading its state subscribes the popup so
+		// the branch refreshes as soon as the repository loads or HEAD changes.
+		const repository = this.findGitRepository(folder, providerWorkingDirectory);
+		if (repository) {
+			repository.state.read(reader);
+			return this.toResolvedGitInfo(repository);
+		}
+		// Not open yet: fall back to the SCM provider (which may already know the
+		// branch) and ask the git service to open the repository, re-rendering via
+		// the tick once it resolves.
+		this.ensureGitRepositoryOpened(key, providerWorkingDirectory ?? folder?.workingDirectory);
+		return this.getCurrentScmInfo(reader, folder, providerWorkingDirectory);
+	}
+
+	private getCurrentScmInfo(reader: IReader, folder: ISessionFolder | undefined, providerWorkingDirectory: URI | undefined): IResolvedGitInfo | undefined {
 		const repository = this.findScmRepository(folder, providerWorkingDirectory);
 		if (!repository) {
 			return undefined;
 		}
-		const historyProvider = repository.provider.historyProvider.get();
-		const branchName = historyProvider?.historyItemRef.get()?.name ?? this.getScmStatusBarBranchName(repository);
-		const upstreamBranchName = historyProvider?.historyItemRemoteRef.get()?.name;
+		const historyProvider = repository.provider.historyProvider.read(reader);
+		const branchName = historyProvider?.historyItemRef.read(reader)?.name ?? this.getScmStatusBarBranchName(reader, repository);
+		const upstreamBranchName = historyProvider?.historyItemRemoteRef.read(reader)?.name;
 		const uncommittedChanges = repository.provider.groups.reduce((count, group) => count + group.resources.length, 0);
-		const info: IResolvedGitInfo = {
-			key,
+		return {
 			branchName,
 			upstreamBranchName,
 			uncommittedChanges,
 		};
-		this.resolvedGitInfo = info;
-		return info;
 	}
 
-	private getScmStatusBarBranchName(repository: ISCMRepository): string | undefined {
-		const commands = repository.provider.statusBarCommands.get();
+	private getScmStatusBarBranchName(reader: IReader, repository: ISCMRepository): string | undefined {
+		const commands = repository.provider.statusBarCommands.read(reader);
 		const title = commands?.[0]?.title;
 		if (typeof title !== 'string') {
 			return undefined;
@@ -347,46 +373,16 @@ export class EnvironmentTitleBarWidget extends BaseActionViewItem {
 		return branchName || undefined;
 	}
 
-	private resolveGitInfo(folder: ISessionFolder | undefined, providerWorkingDirectory: URI | undefined, currentGitInfo: IResolvedGitInfo | undefined): void {
-		if (currentGitInfo?.branchName || folder?.gitRepository?.branchName) {
+	private ensureGitRepositoryOpened(key: string, workingDirectory: URI | undefined): void {
+		if (!workingDirectory || this.openedGitRepositoryKey === key) {
 			return;
 		}
-
-		const key = this.getGitInfoKey(folder, providerWorkingDirectory);
-		if (!key) {
-			return;
-		}
-		if (this.resolvedGitInfo?.key === key) {
-			return;
-		}
-
-		const workingDirectory = providerWorkingDirectory ?? folder?.workingDirectory;
-		if (!workingDirectory) {
-			return;
-		}
-
-		void this.gitService.openRepository(workingDirectory).then(openedRepository => {
-			if (!openedRepository || this.triggerButton?.getAttribute('aria-expanded') !== 'true') {
-				return;
+		this.openedGitRepositoryKey = key;
+		this.gitService.openRepository(workingDirectory).then(() => {
+			if (!this._store.isDisposed) {
+				this.gitStatusTick.set(this.gitStatusTick.get() + 1, undefined);
 			}
-			this.resolvedGitInfo = this.toResolvedGitInfo(key, openedRepository);
-			this.contextViewService.hideContextView();
-			this.triggerButton?.setAttribute('aria-expanded', 'false');
-			this.togglePopup();
-		});
-	}
-
-	private getCurrentGitInfo(folder: ISessionFolder | undefined, providerWorkingDirectory: URI | undefined): IResolvedGitInfo | undefined {
-		const key = this.getGitInfoKey(folder, providerWorkingDirectory);
-		if (!key) {
-			return undefined;
-		}
-		const repository = this.findGitRepository(folder, providerWorkingDirectory);
-		if (!repository) {
-			return undefined;
-		}
-		this.resolvedGitInfo = this.toResolvedGitInfo(key, repository);
-		return this.resolvedGitInfo;
+		}, error => this.logService.warn('[EnvironmentTitleBar] Failed to open git repository for branch status', error));
 	}
 
 	private findScmRepository(folder: ISessionFolder | undefined, providerWorkingDirectory: URI | undefined): ISCMRepository | undefined {
@@ -429,11 +425,10 @@ export class EnvironmentTitleBarWidget extends BaseActionViewItem {
 		return undefined;
 	}
 
-	private toResolvedGitInfo(key: string, repository: IGitRepository): IResolvedGitInfo {
+	private toResolvedGitInfo(repository: IGitRepository): IResolvedGitInfo {
 		const state = repository.state.get();
 		const upstream = state.HEAD?.upstream;
 		return {
-			key,
 			branchName: state.HEAD?.name,
 			upstreamBranchName: upstream ? `${upstream.remote}/${upstream.name}` : undefined,
 			outgoingChanges: state.HEAD?.ahead,

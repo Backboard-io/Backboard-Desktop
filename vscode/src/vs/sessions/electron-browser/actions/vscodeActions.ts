@@ -5,9 +5,12 @@
 
 import { Codicon } from '../../../base/common/codicons.js';
 import { Schemas } from '../../../base/common/network.js';
+import { basename } from '../../../base/common/resources.js';
 import { URI } from '../../../base/common/uri.js';
 import { ServicesAccessor } from '../../../editor/browser/editorExtensions.js';
-import { localize2 } from '../../../nls.js';
+import { localize, localize2 } from '../../../nls.js';
+import { IFileService } from '../../../platform/files/common/files.js';
+import { INotificationService } from '../../../platform/notification/common/notification.js';
 import { Action2 } from '../../../platform/actions/common/actions.js';
 import { AGENT_HOST_SCHEME, fromAgentHostUri } from '../../../platform/agentHost/common/agentHostUri.js';
 import { IRemoteAgentHostService } from '../../../platform/agentHost/common/remoteAgentHostService.js';
@@ -63,11 +66,22 @@ async function openEditorWindowForActiveSession(accessor: ServicesAccessor): Pro
 	const sessionsProvidersService = accessor.get(ISessionsProvidersService);
 	const remoteAgentHostService = accessor.get(IRemoteAgentHostService);
 	const nativeHostService = accessor.get(INativeHostService);
+	const fileService = accessor.get(IFileService);
+	const notificationService = accessor.get(INotificationService);
 
 	const folderUri = getFolderUriToOpen(sessionsService, sessionsProvidersService, remoteAgentHostService);
 	if (!folderUri) {
 		return nativeHostService.openWindow({ forceReuseWindow: true });
 	}
+
+	// The session's folder may have been deleted from disk. Opening it would
+	// trigger a confusing "Path does not exist" dialog from the main process, so
+	// fall back to an empty editor window and tell the user why.
+	if (folderUri.scheme === Schemas.file && fileService.hasProvider(folderUri) && !await fileService.exists(folderUri)) {
+		notificationService.error(localize('sessionFolderMissing', "The folder \"{0}\" no longer exists on this computer.", basename(folderUri)));
+		return nativeHostService.openWindow({ forceReuseWindow: true });
+	}
+
 	return nativeHostService.openWindow([{ folderUri }], { forceReuseWindow: true });
 }
 

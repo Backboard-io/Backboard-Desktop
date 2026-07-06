@@ -1046,20 +1046,27 @@ export class ChatWidget extends Disposable implements IChatWidget {
 	 * Updates the DOM visibility of welcome view and chat list immediately
 	 */
 	private updateChatViewVisibility(): void {
+		const isStandardLayout = this.viewOptions.renderStyle !== 'compact' && this.viewOptions.renderStyle !== 'minimal';
+		// Default to 0 items when there is no view model. The Sessions new-session
+		// surface locks to the coding agent synchronously during render() (via
+		// ChatInputPart.render), before any model is set. Keeping the empty-home
+		// toggle out of the `if (this.viewModel)` guard below ensures the category
+		// chips are revealed at lock time and are not left hidden until a later
+		// async setModel that may be delayed or, with no draft session, never come.
+		const numItems = this.viewModel?.getItems().length ?? 0;
+
+		// On a new, empty coding-agent chat, center the composer and reveal the
+		// category shortcut buttons beneath it (Claude.ai-style home).
+		const showEmptyHome = !!this.categorySuggestionsContainer && this.isLockedToCodingAgent && isStandardLayout && numItems === 0;
+		this.container.classList.toggle('chat-empty-centered', showEmptyHome);
+		if (!showEmptyHome) {
+			// Collapse any open prompt panel so the next empty state starts on the button row.
+			this.resetCategoryPanel();
+		}
+
 		if (this.viewModel) {
-			const isStandardLayout = this.viewOptions.renderStyle !== 'compact' && this.viewOptions.renderStyle !== 'minimal';
-			const numItems = this.viewModel.getItems().length;
 			dom.setVisibility(numItems === 0, this.welcomeMessageContainer);
 			dom.setVisibility(numItems !== 0, this.listContainer);
-
-			// On a new, empty coding-agent chat, center the composer and reveal the
-			// category shortcut buttons beneath it (Claude.ai-style home).
-			const showEmptyHome = !!this.categorySuggestionsContainer && this.isLockedToCodingAgent && isStandardLayout && numItems === 0;
-			this.container.classList.toggle('chat-empty-centered', showEmptyHome);
-			if (!showEmptyHome) {
-				// Collapse any open prompt panel so the next empty state starts on the button row.
-				this.resetCategoryPanel();
-			}
 
 			// Show/hide the getting-started tip container based on empty state.
 			// Only use this in the standard chat layout where the welcome view is shown.

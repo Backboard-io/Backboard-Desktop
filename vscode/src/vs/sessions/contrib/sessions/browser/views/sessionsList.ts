@@ -45,6 +45,7 @@ import { HoverPosition } from '../../../../../base/browser/ui/hover/hoverWidget.
 import { ISessionsManagementService, IActiveSession } from '../../../../services/sessions/common/sessionsManagement.js';
 import { ISessionsService } from '../../../../services/sessions/browser/sessionsService.js';
 import { ISessionsListModelService } from '../../../../services/sessions/browser/sessionsListModelService.js';
+import { MissingFolderTracker } from '../../../../browser/missingFolderTracker.js';
 import { IWorkbenchAssignmentService } from '../../../../../workbench/services/assignment/common/assignmentService.js';
 // =============================================================================
 // TEMPORARY (tracked by https://github.com/microsoft/vscode/issues/320480)
@@ -887,6 +888,12 @@ export class SessionsList extends Disposable implements ISessionsList {
 	private readonly listContainer: HTMLElement;
 	private readonly tree: WorkbenchObjectTree<SessionListItem, FuzzyScore>;
 	private sessions: ISession[] = [];
+
+	/**
+	 * Tracks session workspace folders that have been deleted from disk so their
+	 * groups can be hidden from the list. Updated on every {@link refresh}.
+	 */
+	private readonly _missingFolderTracker: MissingFolderTracker;
 	private visible = true;
 	private readonly excludedSessionTypes: Set<string>;
 	private readonly excludedStatuses: Set<SessionStatus>;
@@ -943,6 +950,14 @@ export class SessionsList extends Disposable implements ISessionsList {
 		this._excludeArchived = this.storageService.getBoolean(SessionsList.EXCLUDE_ARCHIVED_KEY, StorageScope.PROFILE, true);
 		this._excludeRead = this.storageService.getBoolean(SessionsList.EXCLUDE_READ_KEY, StorageScope.PROFILE, false);
 		this.workspaceGroupCapped = this.storageService.getBoolean(SessionsList.WORKSPACE_GROUP_CAPPED_KEY, StorageScope.PROFILE, true);
+
+		// Re-render (dropping deleted-folder groups) once folder existence is known.
+		this._missingFolderTracker = this._register(instantiationService.createInstance(MissingFolderTracker));
+		this._register(this._missingFolderTracker.onDidChange(() => {
+			if (this.visible) {
+				this.update();
+			}
+		}));
 
 		this.listContainer = DOM.append(container, $('.sessions-list-control'));
 		this._register(DOM.addDisposableListener(this.listContainer, DOM.EventType.POINTER_DOWN, () => {
@@ -1189,7 +1204,24 @@ export class SessionsList extends Disposable implements ISessionsList {
 
 	refresh(): void {
 		this.sessions = this._sessionsManagementService.getSessions();
+		this.recheckMissingFolders();
 		this.update();
+	}
+
+	/**
+	 * Re-check whether the local folders backing the current sessions still
+	 * exist on disk. Runs asynchronously; the list re-renders via the tracker's
+	 * change event once results are in.
+	 */
+	private recheckMissingFolders(): void {
+		const folders: URI[] = [];
+		for (const session of this.sessions) {
+			const root = session.workspace.get()?.folders[0]?.root;
+			if (root) {
+				folders.push(root);
+			}
+		}
+		this._missingFolderTracker.refresh(folders);
 	}
 
 	update(expandAll?: boolean): void {
@@ -1213,6 +1245,10 @@ export class SessionsList extends Disposable implements ISessionsList {
 		if (this._excludeRead) {
 			filtered = filtered.filter(s => !this.isSessionRead(s));
 		}
+
+		// Hide sessions whose local workspace folder has been deleted from disk,
+		// so a removed folder no longer appears as a project group.
+		filtered = filtered.filter(s => !this._missingFolderTracker.isMissing(s.workspace.get()?.folders[0]?.root));
 
 		// Always include the active session even if it was filtered out,
 		// so it remains visible while selected

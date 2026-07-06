@@ -9,7 +9,7 @@
 	--agent-sidebar-raised-bg: color-mix(in srgb, var(--agent-sidebar-primary) 7%, var(--agent-sidebar-bg));
 	--agent-sidebar-hover-bg: color-mix(in srgb, var(--agent-sidebar-primary) 6%, transparent);
 	--agent-sidebar-active-bg: color-mix(in srgb, var(--agent-sidebar-primary) 9%, transparent);
-	--agent-sidebar-border: var(--vscode-sideBar-border, var(--vscode-panel-border, transparent));
+	--agent-sidebar-border: var(--vscode-sideBar-border, var(--vscode-panel-border, var(--vscode-contrastBorder, transparent)));
 	--agent-sidebar-secondary: color-mix(in srgb, var(--agent-sidebar-primary) 84%, transparent);
 	--agent-sidebar-muted: var(--vscode-descriptionForeground, var(--vscode-input-placeholderForeground, var(--agent-sidebar-secondary)));
 	background: var(--agent-sidebar-bg);
@@ -124,7 +124,7 @@
 		height: 32px;
 		padding: 0 12px;
 		box-sizing: border-box;
-		border: 1px solid transparent;
+		border: 1px solid var(--vscode-contrastBorder, transparent);
 		border-radius: 8px;
 		background: var(--agent-sidebar-raised-bg);
 		color: var(--agent-sidebar-muted);
@@ -533,4 +533,38 @@
 	.monaco-list-row:hover .agent-session-show-more:hover {
 		color: var(--vscode-foreground);
 	}
+}
+
+/* High-contrast themes: the sidebar chrome is built from low-opacity text and
+ * near-invisible raised/hover tints (color-mix against transparent). That fails
+ * the maximum-contrast requirement of HC and leaves containers with no visible
+ * boundary. Restore full-opacity text and give every interactive surface a solid
+ * contrast outline so both text and containers read clearly. */
+.hc-black .agent-sessions-viewpane,
+.hc-light .agent-sessions-viewpane {
+	--agent-sidebar-secondary: var(--agent-sidebar-primary);
+	--agent-sidebar-muted: var(--agent-sidebar-primary);
+}
+
+.hc-black .agent-sessions-viewpane .agent-sessions-sidebar-action-icon,
+.hc-light .agent-sessions-viewpane .agent-sessions-sidebar-action-icon {
+	color: var(--vscode-icon-foreground);
+}
+
+.hc-black .agent-sessions-viewpane .agent-sessions-collapse-button:hover,
+.hc-black .agent-sessions-viewpane .agent-sessions-filter-button:hover,
+.hc-black .agent-sessions-viewpane .agent-sessions-filter-button[aria-expanded="true"],
+.hc-black .agent-sessions-viewpane .agent-sessions-sidebar-action:hover,
+.hc-black .agent-sessions-viewpane .agent-sessions-filter-popover-header:hover,
+.hc-black .agent-sessions-viewpane .agent-sessions-filter-popover-option:hover,
+.hc-black .agent-sessions-viewpane .agent-sessions-filter-popover-option[aria-checked="true"],
+.hc-light .agent-sessions-viewpane .agent-sessions-collapse-button:hover,
+.hc-light .agent-sessions-viewpane .agent-sessions-filter-button:hover,
+.hc-light .agent-sessions-viewpane .agent-sessions-filter-button[aria-expanded="true"],
+.hc-light .agent-sessions-viewpane .agent-sessions-sidebar-action:hover,
+.hc-light .agent-sessions-viewpane .agent-sessions-filter-popover-header:hover,
+.hc-light .agent-sessions-viewpane .agent-sessions-filter-popover-option:hover,
+.hc-light .agent-sessions-viewpane .agent-sessions-filter-popover-option[aria-checked="true"] {
+	outline: 1px dashed var(--vscode-contrastActiveBorder, var(--vscode-contrastBorder));
+	outline-offset: -1px;
 }

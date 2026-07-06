@@ -17,8 +17,15 @@ export interface WebviewRemoteInfo {
  *
  * This is hardcoded because we never expect to actually hit it. Instead these requests
  * should always go to a service worker.
+ *
+ * MUST be a non-empty host: it is baked into `webviewGenericCspSource` below as
+ * `https://*.${webviewResourceBaseHost}`. An empty value yields the invalid CSP source
+ * `https://*.`, which matches nothing — so every webview's own stylesheet and images get
+ * blocked by `style-src`/`img-src` (scripts still run because they are nonce-authorized),
+ * leaving webviews unstyled with broken images. Kept as the upstream Microsoft-owned domain
+ * so that an accidental non-service-worker fetch still resolves to a safe host.
  */
-export const webviewResourceBaseHost = '';
+export const webviewResourceBaseHost = 'vscode-cdn.net';
 
 export const webviewRootResourceAuthority = `backboard-resource.${webviewResourceBaseHost}`;
 

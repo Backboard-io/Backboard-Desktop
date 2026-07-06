@@ -816,6 +816,26 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 		});
 	}
 
+	/**
+	 * macOS: re-attach the native vibrancy material for windows that were created
+	 * with it. macOS/Electron can non-deterministically drop the material (on
+	 * first paint, full-screen transitions and appearance changes), which lets the
+	 * transparent workbench root reveal the opaque backing and makes the
+	 * translucent sidebar read as a flat/static panel. Setting the same material
+	 * again is idempotent; guarded so it only runs for vibrancy windows and never
+	 * takes the window down on failure.
+	 */
+	private reapplyVibrancy(reason: string): void {
+		if (!isMacintosh || !this._hasVibrancy || !this._win || this._win.isDestroyed()) {
+			return;
+		}
+		try {
+			this._win.setVibrancy('menu');
+		} catch (error) {
+			this.logService.warn(`window#${reason}: failed to re-assert window vibrancy: ${error instanceof Error ? error.message : String(error)}`);
+		}
+	}
+
 	private registerListeners(): void {
 
 		// Window error conditions to handle
@@ -842,26 +862,29 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 			}
 		}));
 
-		// macOS: re-assert native vibrancy once the first frame is ready to show.
-		// A window created with `vibrancy` occasionally comes up with the material
-		// not attached (the transparent workbench root then reveals the opaque
-		// backing, so the translucent sidebar reads as a flat/static panel). Unlike
-		// the deferred re-apply in `load()`, `ready-to-show` fires after the initial
-		// paint is prepared — a safe point to touch the native surface — so setting
-		// it again here re-attaches the material without the mid-`loadURL`
-		// instability. Guarded and idempotent: only runs for windows that already
-		// expect vibrancy, and a failure must never take the window down with it.
+		// macOS: re-assert native vibrancy at the lifecycle points where the OS is
+		// known to drop the material, leaving the transparent workbench root to
+		// reveal the opaque backing (the translucent sidebar then reads as a
+		// flat/static panel). A window created with `vibrancy` occasionally comes
+		// up with the material not attached, and macOS also detaches it on
+		// full-screen transitions and appearance (color-scheme) changes. Unlike
+		// the deferred re-apply in `load()`, these all fire after the initial paint
+		// is prepared — safe points to touch the native surface — so re-attaching
+		// here avoids the mid-`loadURL` instability. Each re-assert is guarded and
+		// idempotent (only runs for windows that already expect vibrancy) and a
+		// failure must never take the window down with it.
 		if (isMacintosh) {
-			this._register(Event.fromNodeEventEmitter(this._win, 'ready-to-show')(() => {
-				if (!this._hasVibrancy || this._win.isDestroyed()) {
-					return;
-				}
-				try {
-					this._win.setVibrancy('menu');
-				} catch (error) {
-					this.logService.warn(`window#ready-to-show: failed to re-assert window vibrancy: ${error instanceof Error ? error.message : String(error)}`);
-				}
-			}));
+			this._register(Event.fromNodeEventEmitter(this._win, 'ready-to-show')(() => this.reapplyVibrancy('ready-to-show')));
+
+			// macOS drops the vibrancy material across full-screen transitions.
+			this._register(this.onDidEnterFullScreen(() => this.reapplyVibrancy('enter-full-screen')));
+			this._register(this.onDidLeaveFullScreen(() => this.reapplyVibrancy('leave-full-screen')));
+
+			// Appearance changes (e.g. system light/dark switch, or the theme
+			// main service re-assigning `nativeTheme.themeSource`) re-composite the
+			// window and can drop the vibrancy material. IThemeMainService is
+			// already a dependency, so reuse its color-scheme signal here.
+			this._register(this.themeMainService.onDidChangeColorScheme(() => this.reapplyVibrancy('color-scheme')));
 		}
 
 		// Window (Un)Maximize

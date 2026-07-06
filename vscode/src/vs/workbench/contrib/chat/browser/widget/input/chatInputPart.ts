@@ -2836,6 +2836,21 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			const initialSessionType = delegate.getActiveSessionProvider();
 			if (initialSessionType) {
 				this.updateWidgetLockStateFromSessionType(initialSessionType);
+
+				// The contribution for the delegate's session type may not be
+				// registered yet on initial load (the agent host provider connects
+				// after the workbench first renders). When it is missing, the lock
+				// evaluation above unlocks the widget, which hides the empty-home
+				// category chips. This delegate has no `onDidChangeActiveSessionProvider`,
+				// so nothing else re-locks the new-session surface. Re-run the lock
+				// evaluation whenever chat session availability changes so the widget
+				// locks — and the chips appear — once the provider registers.
+				this._register(this.chatSessionsService.onDidChangeAvailability(() => {
+					const sessionType = delegate.getActiveSessionProvider?.();
+					if (sessionType) {
+						this.updateWidgetLockStateFromSessionType(sessionType);
+					}
+				}));
 			}
 		}
 
