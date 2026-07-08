@@ -9,7 +9,7 @@ import { CancellationTokenSource } from '../../../base/common/cancellation.js';
 import { Emitter, Event } from '../../../base/common/event.js';
 import { Disposable, DisposableStore, MutableDisposable, toDisposable } from '../../../base/common/lifecycle.js';
 import { autorun } from '../../../base/common/observable.js';
-import { isEqual } from '../../../base/common/resources.js';
+import { basename, isEqual } from '../../../base/common/resources.js';
 import { URI } from '../../../base/common/uri.js';
 import { localize } from '../../../nls.js';
 import { IContextKeyService } from '../../../platform/contextkey/common/contextkey.js';
@@ -70,6 +70,7 @@ export class OptimusCard extends Disposable {
 	private readonly titleEl: HTMLElement;
 	private readonly feedEl: HTMLElement;
 	private readonly chatEl: HTMLElement;
+	private readonly folderEl: HTMLElement;
 	private readonly changesEl: HTMLElement;
 	private readonly timeEl: HTMLElement;
 	private readonly placeholderEl: HTMLElement;
@@ -121,7 +122,9 @@ export class OptimusCard extends Disposable {
 		this.chatEl.style.display = 'none';
 
 		const footer = append(this.contentEl, $('.optimus-card-footer'));
-		this.changesEl = append(footer, $('.optimus-card-changes'));
+		const footerLeft = append(footer, $('.optimus-card-footer-left'));
+		this.folderEl = append(footerLeft, $('.optimus-card-folder'));
+		this.changesEl = append(footerLeft, $('.optimus-card-changes'));
 		this.timeEl = append(footer, $('.optimus-card-time'));
 
 		this.placeholderEl = append(this.element, $('.optimus-card-placeholder'));
@@ -231,6 +234,12 @@ export class OptimusCard extends Disposable {
 			this.titleEl.title = this.titleEl.textContent;
 			this.statusText.textContent = statusLabel(status);
 			this.statusDot.className = `optimus-card-status-dot ${statusClass(status)}`;
+
+			// Folder this agent operates on, next to the diff stats.
+			const workspace = sessionModel.workspace.read(reader);
+			const folderUri = workspace?.folders[0]?.workingDirectory;
+			this.folderEl.textContent = folderUri ? basename(folderUri) : '';
+			this.folderEl.title = folderUri?.fsPath ?? '';
 
 			// Diff stats sourced the same way as the Simple window's sessions
 			// list: prefer the provider's changes summary, fall back to summing
@@ -365,7 +374,22 @@ export class OptimusCard extends Disposable {
 		this.viewModelStore.add(disposableTimeout(() => {
 			const rows = this.chatEl.querySelectorAll('.interactive-item-container').length;
 			const textLength = (this.chatEl.textContent ?? '').length;
-			this.logService.info(`[OptimusDiag] card DOM ${resourceKey}: chatEl=${this.chatEl.clientWidth}x${this.chatEl.clientHeight} contentHeight=${this.chatList?.contentHeight} renderHeight=${this.chatList?.renderHeight} scrollTop=${this.chatList?.scrollTop} rows=${rows} textLen=${textLength} text="${(this.chatEl.textContent ?? '').slice(0, 120).replace(/\s+/g, ' ')}"`);
+			// Indent probe: for every response row, where does its visible
+			// content start relative to the card, and in which wrapper?
+			const cardLeft = this.chatEl.getBoundingClientRect().left;
+			const rowInfos: string[] = [];
+			for (const row of this.chatEl.querySelectorAll('.interactive-item-container.interactive-response')) {
+				const children: string[] = [];
+				for (const child of (row.querySelector(':scope > .value') ?? row).children) {
+					const rect = child.getBoundingClientRect();
+					if (rect.width === 0 && rect.height === 0) {
+						continue;
+					}
+					children.push(`${child.className.toString().split(' ').slice(0, 2).join('.')}@${Math.round(rect.left - cardLeft)}(${Math.round(rect.width)}w,"${(child.textContent ?? '').slice(0, 25).replace(/\s+/g, ' ')}")`);
+				}
+				rowInfos.push(children.join(' | ') || '(empty)');
+			}
+			this.logService.info(`[OptimusDiag] card DOM ${resourceKey}: chatEl=${this.chatEl.clientWidth}x${this.chatEl.clientHeight} contentHeight=${this.chatList?.contentHeight} rows=${rows} textLen=${textLength} responses: ${rowInfos.join(' || ')}`);
 		}, 2000));
 	}
 

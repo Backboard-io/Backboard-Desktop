@@ -5,6 +5,7 @@
 
 .part.sessionspart > .content.optimus-grid-content {
 	display: flex;
+	flex-direction: column;
 	position: relative;
 	height: 100%;
 	width: 100%;
@@ -117,15 +118,48 @@
 
 .optimus-grid {
 	display: grid;
-	grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-	grid-auto-rows: minmax(240px, 1fr);
-	align-content: start;
+	/* Fixed 3x2 layout: six card slots per page, pagination beyond that. */
+	grid-template-columns: repeat(3, 1fr);
+	grid-template-rows: repeat(2, 1fr);
 	gap: 14px;
 	padding: 14px;
 	flex: 1;
 	min-height: 0;
 	min-width: 0;
-	overflow-y: auto;
+	overflow: hidden;
+}
+
+.optimus-grid-pager {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 10px;
+	padding: 2px 0 10px;
+	color: var(--optimus-muted);
+	font-size: 12px;
+}
+
+.optimus-grid-pager button {
+	width: 24px;
+	height: 24px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	border: 0;
+	border-radius: 5px;
+	background: transparent;
+	color: var(--vscode-icon-foreground);
+	cursor: pointer;
+	font-size: 16px;
+}
+
+.optimus-grid-pager button:hover:not(:disabled) {
+	background: var(--vscode-toolbar-hoverBackground);
+}
+
+.optimus-grid-pager button:disabled {
+	opacity: 0.4;
+	cursor: default;
 }
 
 .optimus-card {
@@ -316,6 +350,38 @@
 	display: none !important;
 }
 
+/* The chat renders in a monaco tree; the full chat hides the (unused)
+   twistie gutter via a rule scoped to its .interactive-list wrapper, which
+   the card's bare list lacks — without this, all rows indent 30px. */
+.optimus-card-chat .monaco-list .monaco-tl-twistie {
+	display: none !important;
+}
+
+/* Same conversation presentation as the full chat (see the
+   .interactive-session-scoped bubble rules in chat.css, which the bare list
+   cannot inherit without dragging in the whole chat-widget cascade): user
+   messages render as right-aligned bubbles, answers stay plain. */
+.optimus-card-chat .interactive-item-container.interactive-request {
+	align-items: flex-end;
+}
+
+.optimus-card-chat .interactive-item-container.interactive-request .value {
+	display: flex !important;
+	flex-direction: column !important;
+	align-items: flex-end !important;
+}
+
+.optimus-card-chat .interactive-item-container.interactive-request .value .rendered-markdown {
+	background-color: var(--vscode-chat-requestBubbleBackground);
+	border-radius: var(--vscode-cornerRadius-xLarge, 12px);
+	padding: 8px 12px;
+	max-width: 90%;
+	margin-left: auto;
+	width: fit-content;
+	margin-bottom: 5px;
+	position: relative;
+}
+
 /* Cards preview the conversation only: drop thinking, tool calls, progress,
    references and confirmations from answers. The right panel renders
    everything. Deny-list (not allow-list) so unknown part types — including
@@ -328,6 +394,29 @@
 .optimus-card-chat .interactive-response .value > .shimmer-progress,
 .optimus-card-chat .interactive-response .value > .chat-confirmation-widget-container {
 	display: none !important;
+}
+
+.optimus-card-footer-left {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+}
+
+.optimus-card-folder {
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	max-width: 45%;
+	flex-shrink: 0;
+	color: var(--vscode-foreground);
+	opacity: 0.85;
+}
+
+.optimus-card-folder:not(:empty)::after {
+	content: '·';
+	margin-left: 8px;
+	color: var(--optimus-muted);
 }
 
 .optimus-card-footer {
@@ -384,9 +473,10 @@
 	font-size: 11.5px;
 }
 
-/* Right panel: editor-style chat host. */
+/* Right panel: editor-style chat host with a folder row under the composer. */
 .optimus-chat-view {
 	display: flex;
+	flex-direction: column;
 	position: relative;
 	height: 100%;
 	width: 100%;
@@ -396,7 +486,14 @@
 
 .optimus-chat-editor-host {
 	flex: 1;
-	height: 100%;
 	min-height: 0;
 	min-width: 0;
+}
+
+.optimus-chat-folder-row {
+	height: 30px;
+	flex-shrink: 0;
+	display: flex;
+	align-items: center;
+	padding: 0 12px;
 }

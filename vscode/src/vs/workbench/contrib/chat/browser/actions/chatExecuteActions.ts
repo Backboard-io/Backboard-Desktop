@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Codicon } from '../../../../../base/common/codicons.js';
+import { IsOptimusWindowContext } from '../../../../common/contextkeys.js';
 import { getErrorMessage } from '../../../../../base/common/errors.js';
 import { KeyCode, KeyMod } from '../../../../../base/common/keyCodes.js';
 import { DisposableStore } from '../../../../../base/common/lifecycle.js';
@@ -910,14 +911,19 @@ export class OpenWorkspacePickerAction extends Action2 {
 			tooltip: localize('selectWorkspace', "Select Target Workspace"),
 			category: CHAT_CATEGORY,
 			f1: false,
-			precondition: ContextKeyExpr.and(ChatContextKeys.enabled, ChatContextKeys.inAgentSessionsWelcome),
+			// Also enabled in the Optimus (Advanced) window, whose composer
+			// uses this picker to choose the folder a new task runs in.
+			precondition: ContextKeyExpr.and(ChatContextKeys.enabled, ContextKeyExpr.or(ChatContextKeys.inAgentSessionsWelcome, IsOptimusWindowContext)),
 			menu: [
 				{
 					id: MenuId.ChatInputSecondary,
 					order: 0.6,
-					when: ContextKeyExpr.and(
-						ChatContextKeys.inAgentSessionsWelcome,
-						ChatContextKeys.chatSessionType.isEqualTo(localChatSessionType)
+					when: ContextKeyExpr.or(
+						ContextKeyExpr.and(
+							ChatContextKeys.inAgentSessionsWelcome,
+							ChatContextKeys.chatSessionType.isEqualTo(localChatSessionType)
+						),
+						IsOptimusWindowContext
 					),
 					group: 'navigation',
 				},

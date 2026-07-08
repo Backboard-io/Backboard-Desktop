@@ -145,6 +145,9 @@ export class SessionsManagementService extends Disposable implements ISessionsMa
 	}
 
 	private onDidChangeSessionsFromSessionsProviders(e: ISessionChangeEvent): void {
+		if (e.removed.length) {
+			this.logService.info(`[OptimusDiag] provider REMOVED sessions: ${e.removed.map(r => `${r.sessionId}(status=${r.status.get()})`).join(', ')}`);
+		}
 		// Clear stale new session if the provider removed it. The provider
 		// already disposed it, so just drop the pointer (do not dispose again).
 		if (e.removed.length) {
@@ -251,7 +254,16 @@ export class SessionsManagementService extends Disposable implements ISessionsMa
 			return;
 		}
 		this._newSession.set(undefined, undefined);
-		this._getProvider(current)?.deleteNewSession(current.sessionId);
+		// Only delete drafts that are still untitled. A draft whose first
+		// request was sent outside the composer path (e.g. the Optimus
+		// window's chat panel sends via the chat service directly) has
+		// graduated into a real session and must not be deleted with it.
+		if (current.status.get() === SessionStatus.Untitled) {
+			this.logService.info(`[OptimusDiag] discardNewSession DELETING untitled draft ${current.sessionId}`);
+			this._getProvider(current)?.deleteNewSession(current.sessionId);
+		} else {
+			this.logService.info(`[OptimusDiag] discardNewSession sparing graduated draft ${current.sessionId} (status=${current.status.get()})`);
+		}
 	}
 
 	/**
@@ -310,8 +322,14 @@ export class SessionsManagementService extends Disposable implements ISessionsMa
 		// dispose the one this composer just replaced. Use its own provider
 		// because switching workspace can switch providers. Done after a
 		// successful create so a throw above leaves the previous one intact.
-		if (previousNewSession && previousNewSession.sessionId !== session.sessionId) {
+		// Drafts that already produced content have graduated into real
+		// sessions (their first request may have been sent outside the
+		// composer path) and are kept.
+		if (previousNewSession && previousNewSession.sessionId !== session.sessionId && previousNewSession.status.get() === SessionStatus.Untitled && !options?.keepPreviousDraft) {
+			this.logService.info(`[OptimusDiag] createNewSession DELETING untitled draft ${previousNewSession.sessionId}`);
 			this._getProvider(previousNewSession)?.deleteNewSession(previousNewSession.sessionId);
+		} else if (previousNewSession && previousNewSession.sessionId !== session.sessionId) {
+			this.logService.info(`[OptimusDiag] createNewSession sparing draft ${previousNewSession.sessionId} (status=${previousNewSession.status.get()}, keepPreviousDraft=${options?.keepPreviousDraft === true})`);
 		}
 		return session;
 	}

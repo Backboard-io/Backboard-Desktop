@@ -14,7 +14,6 @@ import { toAction } from '../../base/common/actions.js';
 import { ServicesAccessor } from '../../platform/instantiation/common/instantiation.js';
 import { SyncDescriptor } from '../../platform/instantiation/common/descriptors.js';
 import { Registry } from '../../platform/registry/common/platform.js';
-import { IStorageService, StorageScope } from '../../platform/storage/common/storage.js';
 import { registerIcon } from '../../platform/theme/common/iconRegistry.js';
 import { ICommandService } from '../../platform/commands/common/commands.js';
 import { IContextMenuService } from '../../platform/contextview/browser/contextView.js';
@@ -23,15 +22,11 @@ import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase 
 import { IViewContainersRegistry, IViewDescriptor, IViewsRegistry, ViewContainer, ViewContainerLocation, Extensions as ViewContainerExtensions, WindowEnablement } from '../../workbench/common/views.js';
 import { IViewsService } from '../../workbench/services/views/common/viewsService.js';
 import { IWorkbenchLayoutService, Parts } from '../../workbench/services/layout/browser/layoutService.js';
-import { IWorkspaceContextService } from '../../platform/workspace/common/workspace.js';
 import { SessionsView, SessionsViewId } from '../../sessions/contrib/sessions/browser/views/sessionsView.js';
 import { ISessionsManagementService } from '../../sessions/services/sessions/common/sessionsManagement.js';
 import { ISessionsService } from '../../sessions/services/sessions/browser/sessionsService.js';
-import { collectOptimusFolderCandidates } from '../common/optimusSessions.js';
-import { OPTIMUS_DELETE_SESSION_COMMAND_ID, OPTIMUS_FOCUS_SESSION_COMMAND_ID, OPTIMUS_NEW_SESSION_COMMAND_ID } from '../browser/parts/optimusGridPart.js';
+import { OPTIMUS_CLOSE_SESSION_COMMAND_ID, OPTIMUS_DELETE_SESSION_COMMAND_ID, OPTIMUS_FOCUS_SESSION_COMMAND_ID, OPTIMUS_NEW_SESSION_COMMAND_ID } from '../browser/parts/optimusGridPart.js';
 import { OptimusChatViewPane, OptimusChatViewId } from './chat/browser/optimusChatViewPane.js';
-import { IPathService } from '../../workbench/services/path/common/pathService.js';
-import { SessionType } from '../../workbench/contrib/chat/common/chatSessionsService.js';
 
 // Toolbar/context-menu actions used by the reused SessionsView. In the Simple
 // window these are imported by its sessions.contribution; the Optimus manifest
@@ -41,7 +36,6 @@ import '../../sessions/contrib/sessions/browser/sessionsActions.js';
 
 const viewContainerRegistry = Registry.as<IViewContainersRegistry>(ViewContainerExtensions.ViewContainersRegistry);
 const viewsRegistry = Registry.as<IViewsRegistry>(ViewContainerExtensions.ViewsRegistry);
-const RECENT_WORKSPACES_STORAGE_KEY = 'sessions.recentlyPickedWorkspaces';
 
 //#region --- left sidebar: reused sessions list
 
@@ -86,11 +80,12 @@ const OPTIMUS_CHAT_PANEL_WIDTH = 400;
 // The sessions-window variants of the mode-switching commands (registered in
 // sessions.desktop.contribution, which is part of the Optimus manifest). The
 // editor-workbench `workbench.action.openAgentsWindow` command is gated on
-// NOT being a sessions window, so it cannot be used from here. The Optimus
-// window cannot be transformed into an editor window, so Editor mode opens
-// in a new window instead of reusing this one.
+// NOT being a sessions window, so it cannot be used from here. Both commands
+// transform the CURRENT window in place (Simple reuses the window for the
+// agents workspace; Editor opens the active session's folder in it) — mode
+// switching moves one window between modes rather than juggling windows.
 const OPEN_SIMPLE_WINDOW_COMMAND_ID = 'agents.openAgentsWindow';
-const OPEN_EDITOR_WINDOW_COMMAND_ID = 'agents.openSessionInVSCodeNewWindow';
+const OPEN_EDITOR_WINDOW_COMMAND_ID = 'agents.openSessionInVSCode';
 
 const optimusChatViewContainer: ViewContainer = viewContainerRegistry.registerViewContainer({
 	id: OptimusChatContainerId,
@@ -150,50 +145,6 @@ async function revealOptimusChatPanel(layoutService: IWorkbenchLayoutService, vi
 	return viewsService.openView(OptimusChatViewId, focus);
 }
 
-async function getPreferredOptimusFolderUri(accessor: ServicesAccessor): Promise<URI | undefined> {
-	const sessionsService = accessor.get(ISessionsService);
-	const sessionsManagementService = accessor.get(ISessionsManagementService);
-	const workspaceContextService = accessor.get(IWorkspaceContextService);
-	const storageService = accessor.get(IStorageService);
-	const pathService = accessor.get(IPathService);
-
-	const recentWorkspaces: URI[] = [];
-
-	try {
-		const rawRecentWorkspaces = storageService.get(RECENT_WORKSPACES_STORAGE_KEY, StorageScope.PROFILE);
-		if (rawRecentWorkspaces) {
-			const parsed = JSON.parse(rawRecentWorkspaces) as Array<{ readonly uri?: UriComponents }>;
-			for (const entry of parsed) {
-				if (entry.uri) {
-					recentWorkspaces.push(URI.revive(entry.uri));
-				}
-			}
-		}
-	} catch {
-		// Ignore malformed recent-workspace storage and continue with other fallbacks.
-	}
-
-	const candidates = collectOptimusFolderCandidates(
-		sessionsService.activeSession.get(),
-		workspaceContextService.getWorkspace().folders.map(folder => folder.uri),
-		recentWorkspaces,
-		sessionsManagementService.getSessions(),
-	);
-
-	for (const candidate of candidates) {
-		if (candidate && sessionsManagementService.resolveWorkspace(candidate)) {
-			return candidate;
-		}
-	}
-
-	const userHome = pathService.userHome({ preferLocal: true });
-	if (sessionsManagementService.resolveWorkspace(userHome)) {
-		return userHome;
-	}
-
-	return undefined;
-}
-
 registerAction2(class OptimusNewSessionAction extends Action2 {
 	constructor() {
 		super({
@@ -205,26 +156,16 @@ registerAction2(class OptimusNewSessionAction extends Action2 {
 
 	override async run(accessor: ServicesAccessor): Promise<void> {
 		const sessionsService = accessor.get(ISessionsService);
-		const sessionsManagementService = accessor.get(ISessionsManagementService);
 		const layoutService = accessor.get(IWorkbenchLayoutService);
 		const viewsService = accessor.get(IViewsService);
-		const folderUri = await getPreferredOptimusFolderUri(accessor);
-		if (!folderUri) {
-			throw new Error('Unable to create an Optimus task because no session provider can resolve a workspace folder.');
-		}
 
-		const backboardType = sessionsManagementService.getSessionTypesForFolder(folderUri).find(candidate =>
-			candidate.sessionType.id === 'backboard' ||
-			`agent-host-${candidate.sessionType.id}` === SessionType.AgentHostBackboard ||
-			candidate.sessionType.id === SessionType.AgentHostBackboard
-		);
-
-		sessionsService.openNewSession({
-			folderUri,
-			forceNew: true,
-			providerId: backboardType?.providerId,
-			sessionTypeId: backboardType?.sessionType.id,
-		});
+		// Do NOT create a provider draft session here. Chatting through the
+		// Optimus panel materializes a session on first send (the untitled
+		// provisional flow); a pre-created draft would stay empty forever
+		// while the conversation lands in a separate materialized session —
+		// leaking an immortal empty card per task. Clearing the active
+		// session makes the panel show the untitled composer instead.
+		sessionsService.openNewSession({ forceNew: true });
 
 		await revealOptimusChatPanel(layoutService, viewsService, true);
 	}
@@ -245,6 +186,27 @@ registerAction2(class OptimusFocusSessionAction extends Action2 {
 		const viewsService = accessor.get(IViewsService);
 		await sessionsService.openSession(URI.revive(resource), { preserveFocus: true });
 		await revealOptimusChatPanel(layoutService, viewsService, true);
+	}
+});
+
+registerAction2(class OptimusCloseSessionAction extends Action2 {
+	constructor() {
+		super({
+			id: OPTIMUS_CLOSE_SESSION_COMMAND_ID,
+			title: localize2('optimus.closeSession', "Close Optimus Session"),
+			f1: false,
+		});
+	}
+
+	override async run(accessor: ServicesAccessor, resource: URI | UriComponents): Promise<void> {
+		const sessionsService = accessor.get(ISessionsService);
+		const sessionsManagementService = accessor.get(ISessionsManagementService);
+		const session = sessionsManagementService.getSession(URI.revive(resource));
+		if (session) {
+			// Remove from the service's open set; the grid's persisted closed
+			// set (maintained by the caller) keeps the card away.
+			sessionsService.closeSession(session);
+		}
 	}
 });
 

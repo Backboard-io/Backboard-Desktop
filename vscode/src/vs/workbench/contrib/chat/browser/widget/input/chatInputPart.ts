@@ -3418,7 +3418,12 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 					}
 					return new HiddenRenderedActionViewItem(action, picker);
 				} else if (action.id === OpenWorkspacePickerAction.ID && action instanceof MenuItemAction) {
-					if (this.workspaceContextService.getWorkbenchState() === WorkbenchState.EMPTY && this.options.workspacePickerDelegate) {
+					// The Optimus (Advanced) window runs on the agent-sessions
+					// workspace, so its workbench state is never EMPTY; the
+					// picker is still wanted there to choose a new task's folder.
+					const isOptimusWindow = this.contextKeyService.getContextKeyValue('isOptimusWindow') === true;
+					this.logService.info(`[OptimusDiag] workspace picker action item: isOptimusWindow=${isOptimusWindow} workbenchState=${this.workspaceContextService.getWorkbenchState()} hasDelegate=${!!this.options.workspacePickerDelegate}`);
+					if ((this.workspaceContextService.getWorkbenchState() === WorkbenchState.EMPTY || isOptimusWindow) && this.options.workspacePickerDelegate) {
 						return new HiddenRenderedActionViewItem(action, this.instantiationService.createInstance(WorkspacePickerActionItem, action, this.options.workspacePickerDelegate, backboardOptionsPickerOptions));
 					} else {
 						return new HiddenActionViewItem(action);

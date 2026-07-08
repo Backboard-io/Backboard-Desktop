@@ -4,9 +4,11 @@
  *--------------------------------------------------------------------------------------------*/
 
 import './media/optimusGridPart.css';
-import { $, append } from '../../../base/browser/dom.js';
+import { $, addDisposableListener, append, EventType } from '../../../base/browser/dom.js';
+import { localize } from '../../../nls.js';
 import { ProgressBar } from '../../../base/browser/ui/progressbar/progressbar.js';
 import { Emitter, Event } from '../../../base/common/event.js';
+import { DisposableStore } from '../../../base/common/lifecycle.js';
 import { assertReturnsDefined } from '../../../base/common/types.js';
 import { defaultProgressBarStyles } from '../../../platform/theme/browser/defaultStyles.js';
 import { ICommandService } from '../../../platform/commands/common/commands.js';
@@ -26,6 +28,7 @@ import { OptimusCard, IOptimusCardSessionModel } from './optimusCard.js';
 export const OPTIMUS_NEW_SESSION_COMMAND_ID = 'optimus.newSession';
 export const OPTIMUS_FOCUS_SESSION_COMMAND_ID = 'optimus.focusSession';
 export const OPTIMUS_DELETE_SESSION_COMMAND_ID = 'optimus.deleteSession';
+export const OPTIMUS_CLOSE_SESSION_COMMAND_ID = 'optimus.closeSession';
 
 /**
  * Sessions the user explicitly closed from the grid. Everything else is open
@@ -34,24 +37,40 @@ export const OPTIMUS_DELETE_SESSION_COMMAND_ID = 'optimus.deleteSession';
  */
 const CLOSED_SESSIONS_STORAGE_KEY = 'optimus.closedSessions';
 
+interface ICardEntry {
+	readonly card: OptimusCard;
+	readonly store: DisposableStore;
+}
+
 /**
- * Main content part of the Optimus window: a fixed 3-column x 2-row grid of
- * six compact task cards. A passive renderer in the same sense as the Simple
- * window's SessionsPart — the sessions service drives it via
+ * Main content part of the Optimus window: a grid of compact task cards plus
+ * a start-a-task placeholder. A passive renderer in the same sense as the
+ * Simple window's SessionsPart — the sessions service drives it via
  * {@link updateVisibleSessions}, and card focus/clicks are reported back via
  * {@link onDidFocusSession}.
+ *
+ * Cards are keyed by session, NOT by grid slot: closing or adding a session
+ * must never rebind the remaining cards to different sessions, or their
+ * attached live transcripts would be torn down.
  */
 export class OptimusGridPart extends Part {
-
-	static readonly SLOT_COUNT = 6;
 
 	override readonly minimumWidth: number = 300;
 	override readonly maximumWidth: number = Number.POSITIVE_INFINITY;
 	override readonly minimumHeight: number = 0;
 	override readonly maximumHeight: number = Number.POSITIVE_INFINITY;
 
-	private readonly cards: OptimusCard[] = [];
+	/** Six card slots per page (3x2); older sessions paginate. */
+	private static readonly PAGE_SIZE = 6;
+
+	private readonly cardEntries = new Map<string, ICardEntry>();
+	private placeholderCard: OptimusCard | undefined;
 	private gridContainer: HTMLElement | undefined;
+	private pageIndex = 0;
+	private pagerElement: HTMLElement | undefined;
+	private pagerLabel: HTMLElement | undefined;
+	private pagerPrevious: HTMLButtonElement | undefined;
+	private pagerNext: HTMLButtonElement | undefined;
 	private progressBar: ProgressBar | undefined;
 	private progressIndicator: IProgressIndicator | undefined;
 	private visibleSessions: readonly (IActiveSession | undefined)[] = [];
@@ -122,7 +141,35 @@ export class OptimusGridPart extends Part {
 		this.progressBar.hide();
 
 		this.gridContainer = append(contentArea, $('.optimus-grid'));
-		this.ensureCardCount(OptimusGridPart.SLOT_COUNT);
+
+		// Persistent "start a task" placeholder, always the last grid item.
+		const placeholder = this._register(this.instantiationService.createInstance(OptimusCard, this.gridContainer));
+		this._register(placeholder.onDidAction(action => {
+			if (action.kind === 'create-session') {
+				this.commandService.executeCommand(OPTIMUS_NEW_SESSION_COMMAND_ID);
+			}
+		}));
+		this.placeholderCard = placeholder;
+
+		// Pager below the grid; hidden while everything fits on one page.
+		this.pagerElement = append(contentArea, $('.optimus-grid-pager'));
+		this.pagerPrevious = append(this.pagerElement, $('button')) as HTMLButtonElement;
+		this.pagerPrevious.textContent = '‹';
+		this.pagerPrevious.title = localize('optimus.pager.previous', "Previous page");
+		this.pagerLabel = append(this.pagerElement, $('span.optimus-grid-pager-label'));
+		this.pagerNext = append(this.pagerElement, $('button')) as HTMLButtonElement;
+		this.pagerNext.textContent = '›';
+		this.pagerNext.title = localize('optimus.pager.next', "Next page");
+		this._register(addDisposableListener(this.pagerPrevious, EventType.CLICK, () => {
+			this.pageIndex = Math.max(0, this.pageIndex - 1);
+			this.refreshCards();
+		}));
+		this._register(addDisposableListener(this.pagerNext, EventType.CLICK, () => {
+			this.pageIndex = this.pageIndex + 1;
+			this.refreshCards();
+		}));
+
+		this.refreshCards();
 
 		return contentArea;
 	}
@@ -138,64 +185,132 @@ export class OptimusGridPart extends Part {
 	}
 
 	focusSession(session: IActiveSession | undefined): void {
-		const card = session
-			? this.cards.find(c => c.session?.session.sessionId === session.sessionId)
-			: this.cards.find(c => !c.session);
-		card?.focus();
+		if (!session) {
+			this.placeholderCard?.focus();
+			return;
+		}
+		for (const entry of this.cardEntries.values()) {
+			if (entry.card.session?.session.sessionId === session.sessionId) {
+				entry.card.focus();
+				return;
+			}
+		}
 	}
 
-	private ensureCardCount(count: number): void {
+	private createCardEntry(key: string): ICardEntry {
 		const gridContainer = assertReturnsDefined(this.gridContainer);
-		while (this.cards.length < count) {
-			const card = this._register(this.instantiationService.createInstance(OptimusCard, gridContainer));
-			this._register(card.onDidAction(action => {
-				switch (action.kind) {
-					case 'create-session':
-						this.commandService.executeCommand(OPTIMUS_NEW_SESSION_COMMAND_ID);
-						break;
-					case 'close-session':
-						// Closing removes the card (and persists the choice);
-						// the session itself lives on and can be reopened from
-						// the sidebar list.
-						this.closeSession(action.card.session.resource.toString());
-						break;
-					case 'focus-session':
-						if (action.card.isVisible && action.card.activeSession) {
-							this._onDidFocusSession.fire(action.card.activeSession.sessionId);
-						} else {
-							this.commandService.executeCommand(OPTIMUS_FOCUS_SESSION_COMMAND_ID, action.card.session.resource);
-						}
-						break;
-				}
-			}));
-			this.cards.push(card);
-		}
+		const store = new DisposableStore();
+		const card = store.add(this.instantiationService.createInstance(OptimusCard, gridContainer));
+		store.add(card.onDidAction(action => {
+			switch (action.kind) {
+				case 'create-session':
+					this.commandService.executeCommand(OPTIMUS_NEW_SESSION_COMMAND_ID);
+					break;
+				case 'close-session':
+					// Close at the service level first (via command — the
+					// sessions service cannot be constructor-injected here,
+					// it depends on this part): a session that is open there
+					// (e.g. the active one in the right panel) stays in the
+					// visible set otherwise, and the visible-means-open rule
+					// would instantly un-close it, making the active card
+					// impossible to close. The session itself lives on in
+					// the sidebar list.
+					this.commandService.executeCommand(OPTIMUS_CLOSE_SESSION_COMMAND_ID, action.card.session.resource);
+					this.closeSession(action.card.session.resource.toString());
+					break;
+				case 'focus-session':
+					if (action.card.isVisible && action.card.activeSession) {
+						this._onDidFocusSession.fire(action.card.activeSession.sessionId);
+					} else {
+						this.commandService.executeCommand(OPTIMUS_FOCUS_SESSION_COMMAND_ID, action.card.session.resource);
+					}
+					break;
+			}
+		}));
+		const entry: ICardEntry = { card, store };
+		this.cardEntries.set(key, entry);
+		return entry;
+	}
+
+	private disposeCardEntry(key: string, entry: ICardEntry): void {
+		this.cardEntries.delete(key);
+		entry.card.element.remove();
+		entry.store.dispose();
 	}
 
 	private refreshCards(): void {
-		if (!this.gridContainer) {
+		const gridContainer = this.gridContainer;
+		if (!gridContainer) {
 			return;
 		}
 
-		const cards = this.buildCardModels();
-		this.ensureCardCount(cards.length);
+		// Paginate: six slots per page; the "start a task" placeholder
+		// occupies the slot right after the last session, so a full page
+		// pushes it onto the next one.
+		const allModels = this.buildCardModels();
+		const totalItems = allModels.length + 1;
+		const totalPages = Math.max(1, Math.ceil(totalItems / OptimusGridPart.PAGE_SIZE));
+		this.pageIndex = Math.min(Math.max(0, this.pageIndex), totalPages - 1);
+		const pageStart = this.pageIndex * OptimusGridPart.PAGE_SIZE;
+		const models = allModels.slice(pageStart, pageStart + OptimusGridPart.PAGE_SIZE);
+		const placeholderOnThisPage = allModels.length >= pageStart && allModels.length < pageStart + OptimusGridPart.PAGE_SIZE;
+		const modelKeys = new Set(models.map(model => model.session.resource.toString()));
 
-		for (let i = 0; i < this.cards.length; i++) {
-			const cardModel = cards[i];
-			const card = this.cards[i];
-			card.element.style.display = i < cards.length ? '' : 'none';
-			if (i < cards.length) {
-				card.bind(cardModel, !!cardModel && cardModel.session.sessionId === this.activeSession?.sessionId);
+		// Drop cards whose session left this page (closed, deleted, paged out).
+		for (const [key, entry] of [...this.cardEntries]) {
+			if (!modelKeys.has(key)) {
+				this.disposeCardEntry(key, entry);
 			}
 		}
 
+		// Bind each session to ITS card (creating on demand) and keep the DOM
+		// in model order without touching cards that are already in place —
+		// reparenting a card would disturb its live transcript.
+		let previousElement: HTMLElement | undefined;
+		for (const model of models) {
+			const key = model.session.resource.toString();
+			const entry = this.cardEntries.get(key) ?? this.createCardEntry(key);
+			entry.card.bind(model, model.session.sessionId === this.activeSession?.sessionId);
+
+			const element = entry.card.element;
+			const expectedPrevious = previousElement ?? null;
+			if (element.previousElementSibling !== expectedPrevious) {
+				gridContainer.insertBefore(element, expectedPrevious ? expectedPrevious.nextElementSibling : gridContainer.firstElementChild);
+			}
+			previousElement = element;
+		}
+
+		// The placeholder is the last grid item of the page that has room.
+		if (this.placeholderCard) {
+			this.placeholderCard.element.style.display = placeholderOnThisPage ? '' : 'none';
+			if (placeholderOnThisPage && this.placeholderCard.element.nextElementSibling) {
+				gridContainer.appendChild(this.placeholderCard.element);
+			}
+		}
+
+		this.updatePager(totalPages);
+
 		// Card sizes depend on how many grid tracks are occupied.
-		for (const card of this.cards) {
-			card.layout();
+		this.layoutCards();
+	}
+
+	private updatePager(totalPages: number): void {
+		if (!this.pagerElement || !this.pagerLabel || !this.pagerPrevious || !this.pagerNext) {
+			return;
+		}
+		this.pagerElement.style.display = totalPages > 1 ? '' : 'none';
+		this.pagerLabel.textContent = localize('optimus.pager.label', "{0} of {1}", this.pageIndex + 1, totalPages);
+		this.pagerPrevious.disabled = this.pageIndex === 0;
+		this.pagerNext.disabled = this.pageIndex >= totalPages - 1;
+	}
+
+	private layoutCards(): void {
+		for (const entry of this.cardEntries.values()) {
+			entry.card.layout();
 		}
 	}
 
-	private buildCardModels(): (IOptimusCardSessionModel | undefined)[] {
+	private buildCardModels(): IOptimusCardSessionModel[] {
 		const isCommittedSession = (session: ISession): boolean => session.status.get() !== SessionStatus.Untitled;
 		// Advanced orchestrates Backboard chats only for now: other local
 		// agent sessions (Claude Code, Codex, …) stream through per-session
@@ -212,11 +327,10 @@ export class OptimusGridPart extends Part {
 			}
 		}
 
-		// Cards are assigned to slots by index, so the model order must be
-		// stable across refreshes: visibility arriving later must not reorder
-		// sessions, or every card rebinds to a different session and cancels
-		// its in-flight chat load. Iterate the service's session list and
-		// enrich in place instead of putting visible sessions first.
+		// Keep the model order stable across refreshes (service list order,
+		// visibility enriched in place): cards are keyed by session, but a
+		// stable order avoids reparenting card DOM, which would disturb the
+		// live transcripts.
 		const models: IOptimusCardSessionModel[] = [];
 		const seen = new Set<string>();
 		for (const session of this.sessionsManagementService.getSessions()) {
@@ -245,7 +359,7 @@ export class OptimusGridPart extends Part {
 			}
 		}
 
-		return [...models, undefined];
+		return models;
 	}
 
 	getProgressIndicator(): IProgressIndicator {
@@ -278,14 +392,19 @@ export class OptimusGridPart extends Part {
 	override layout(width: number, height: number, top: number, left: number): void {
 		super.layout(width, height, top, left);
 		super.layoutContents(width, height);
-		for (const card of this.cards) {
-			card.layout();
-		}
+		this.layoutCards();
 	}
 
 	toJSON(): object {
 		return {
 			type: Parts.SESSIONS_PART
 		};
+	}
+
+	override dispose(): void {
+		for (const [key, entry] of [...this.cardEntries]) {
+			this.disposeCardEntry(key, entry);
+		}
+		super.dispose();
 	}
 }
