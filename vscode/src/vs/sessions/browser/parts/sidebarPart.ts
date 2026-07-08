@@ -35,6 +35,7 @@ import { Menus } from '../menus.js';
 import { $, append, prepend } from '../../../base/browser/dom.js';
 import { HiddenItemStrategy, MenuWorkbenchToolBar } from '../../../platform/actions/browser/toolbar.js';
 import { isWeb } from '../../../base/common/platform.js';
+import { IWorkbenchEnvironmentService } from '../../../workbench/services/environment/common/environmentService.js';
 import { SessionsPanelHeader } from './panelHeader.js';
 
 /**
@@ -106,6 +107,7 @@ export class SidebarPart extends AbstractPaneCompositePart {
 		@IContextKeyService contextKeyService: IContextKeyService,
 		@IExtensionService extensionService: IExtensionService,
 		@IMenuService menuService: IMenuService,
+		@IWorkbenchEnvironmentService private readonly environmentService: IWorkbenchEnvironmentService,
 	) {
 		super(
 			Parts.SIDEBAR_PART,
@@ -140,11 +142,16 @@ export class SidebarPart extends AbstractPaneCompositePart {
 
 		// Header strip with the window-left controls (traffic-light spacer and
 		// the sidebar toggle), absorbed from the former integrated chrome bar.
-		this.panelHeader = this._register(this.instantiationService.createInstance(SessionsPanelHeader, parent, {
-			classes: ['sidebar-part-header'],
-			left: [{ menuId: Menus.TitleBarLeftLayout, telemetrySource: 'sidebarPanelHeader.left' }],
-			windowControls: { left: true },
-		}));
+		// The Optimus window renders its own fixed chrome overlay with the mode
+		// selector and panel toggles, so its header stays empty (drag region and
+		// spacing only) to avoid mounting duplicate controls.
+		this.panelHeader = this._register(this.instantiationService.createInstance(SessionsPanelHeader, parent, this.environmentService.isOptimusWindow
+			? { classes: ['sidebar-part-header'] }
+			: {
+				classes: ['sidebar-part-header'],
+				left: [{ menuId: Menus.TitleBarLeftLayout, telemetrySource: 'sidebarPanelHeader.left' }],
+				windowControls: { left: true },
+			}));
 
 		this.createFooter(parent);
 	}

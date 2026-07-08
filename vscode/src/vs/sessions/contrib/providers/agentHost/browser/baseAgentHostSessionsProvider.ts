@@ -121,6 +121,14 @@ export interface IAgentHostAdapterOptions {
 	 * Returns the agent connection for the session, if it exists.
 	 */
 	readonly getConnection: () => IAgentConnection | undefined;
+	/**
+	 * Skip the active session's branch-changeset subscription. Subscribing
+	 * makes the host stream every changed file with full contents — for a
+	 * large branch diff that is tens of thousands of messages, enough to
+	 * starve the connection. Windows that never render a per-file changes
+	 * view (the Optimus window) opt out and rely on the metadata summary.
+	 */
+	readonly disableChangesetSubscriptions?: boolean;
 }
 
 /**
@@ -399,7 +407,7 @@ export class AgentHostSessionAdapter implements ISession {
 			}
 
 			const isActiveSession = this.isActiveSessionObs.read(reader);
-			if (!isActiveSession) {
+			if (!isActiveSession || this._options.disableChangesetSubscriptions) {
 				return constObservable(undefined);
 			}
 
@@ -1301,7 +1309,7 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 	 * the bits that are uniform across hosts (`icon`, `loading`,
 	 * `mapDiffUri`) from the corresponding hooks.
 	 */
-	protected abstract _adapterOptions(): Pick<IAgentHostAdapterOptions, 'buildWorkspace'>;
+	protected abstract _adapterOptions(): Pick<IAgentHostAdapterOptions, 'buildWorkspace' | 'disableChangesetSubscriptions'>;
 
 	/** Build an adapter for the given metadata. */
 	protected createAdapter(meta: IAgentSessionMetadata): AgentHostSessionAdapter {

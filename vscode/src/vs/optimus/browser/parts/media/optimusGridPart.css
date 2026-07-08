@@ -5,6 +5,7 @@
 
 .part.sessionspart > .content.optimus-grid-content {
 	display: flex;
+	position: relative;
 	height: 100%;
 	width: 100%;
 
@@ -20,15 +21,111 @@
 	--optimus-shadow: color-mix(in srgb, var(--vscode-widget-shadow, #000) 28%, transparent);
 }
 
+.agent-sessions-workbench .part.titlebar.optimus-titlebar .titlebar-container,
+.agent-sessions-workbench .part.titlebar.optimus-titlebar .sessions-titlebar-container {
+	display: none !important;
+}
+
+/* Fixed window chrome. Sized and styled to match the Simple window's
+   titlebar widgets (see openInVSCode.css and the panel-header toolbars) so
+   switching modes doesn't visually move or restyle the controls. */
+.optimus-window-chrome {
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	height: 38px;
+	z-index: 5000;
+	pointer-events: none;
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	padding-left: 78px;
+	padding-right: 10px;
+	box-sizing: border-box;
+	-webkit-app-region: drag;
+}
+
+.optimus-window-chrome-button,
+.optimus-window-chrome-mode {
+	pointer-events: auto;
+	-webkit-app-region: no-drag;
+	border: 0;
+	background: transparent;
+	cursor: pointer;
+}
+
+/* Panel toggles: standard toolbar action look (22px codicon buttons). */
+.optimus-window-chrome-button {
+	width: 22px;
+	height: 22px;
+	border-radius: 5px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 16px;
+	color: var(--vscode-icon-foreground);
+}
+
+.optimus-window-chrome-button:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+}
+
+/* Mode selector: identical sizing to the Editor window's mode switcher
+   (see backboardModeSwitcher.css: 28px trigger, 4px radius, 15px icon). */
+.optimus-window-chrome-mode {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	height: 28px;
+	gap: 6px;
+	padding: 0 7px;
+	margin-right: 4px;
+	border-radius: 4px;
+	font-family: inherit;
+	font-size: 13px;
+	font-weight: 400;
+	line-height: 28px;
+	color: var(--vscode-commandCenter-foreground, var(--vscode-titleBar-activeForeground));
+}
+
+.optimus-window-chrome-mode:hover {
+	background-color: var(--vscode-toolbar-hoverBackground);
+}
+
+.optimus-window-chrome-button:focus,
+.optimus-window-chrome-button:focus-visible,
+.optimus-window-chrome-mode:focus,
+.optimus-window-chrome-mode:focus-visible {
+	outline: none;
+	box-shadow: none;
+}
+
+.optimus-window-chrome-mode-icon {
+	font-size: 15px;
+	opacity: 0.7;
+}
+
+.optimus-window-chrome-mode-chevron {
+	font-size: 12px;
+	opacity: 0.72;
+}
+
+.optimus-window-chrome-secondary {
+	margin-left: auto;
+}
+
 .optimus-grid {
 	display: grid;
-	grid-template-columns: repeat(3, 1fr);
-	grid-template-rows: repeat(2, 1fr);
+	grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+	grid-auto-rows: minmax(240px, 1fr);
+	align-content: start;
 	gap: 14px;
 	padding: 14px;
 	flex: 1;
 	min-height: 0;
 	min-width: 0;
+	overflow-y: auto;
 }
 
 .optimus-card {
@@ -72,6 +169,36 @@
 	flex-shrink: 0;
 	padding: 10px 12px;
 	border-bottom: 1px solid var(--optimus-border-subtle);
+}
+
+.optimus-card-delete {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 20px;
+	height: 20px;
+	margin-left: auto;
+	border: 0;
+	border-radius: 999px;
+	background: transparent;
+	color: var(--optimus-muted);
+	cursor: pointer;
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity .16s ease, background .16s ease, color .16s ease;
+}
+
+.optimus-card:hover .optimus-card-delete,
+.optimus-card:focus-within .optimus-card-delete {
+	opacity: 1;
+	pointer-events: auto;
+}
+
+.optimus-card-delete:hover,
+.optimus-card-delete:focus-visible {
+	background: color-mix(in srgb, var(--optimus-danger) 10%, transparent);
+	color: var(--optimus-danger);
+	outline: none;
 }
 
 .optimus-card-status-dot {
@@ -169,6 +296,40 @@
 	padding: 8px 12px;
 }
 
+/* Embedded read-only chat transcript: the real chat list renderer without
+   the composer — the right panel is the only place to type. Clicks anywhere
+   on the card open the chat, so present the transcript as a passive surface. */
+.optimus-card-chat {
+	flex: 1;
+	min-height: 0;
+	min-width: 0;
+	position: relative;
+	overflow: hidden;
+	cursor: pointer;
+}
+
+/* Compact mirror: hide checkpoint affordances ("Checkpoint Restored · Redo",
+   "Start Over" / "Restore Checkpoint" strips) — meaningful in the full chat,
+   pure noise in a small card. */
+.optimus-card-chat .checkpoint-restore-container,
+.optimus-card-chat .checkpoint-container {
+	display: none !important;
+}
+
+/* Cards preview the conversation only: drop thinking, tool calls, progress,
+   references and confirmations from answers. The right panel renders
+   everything. Deny-list (not allow-list) so unknown part types — including
+   the markdown answer in whatever wrapper it uses — always stay visible. */
+.optimus-card-chat .interactive-response .value > .chat-thinking-box,
+.optimus-card-chat .interactive-response .value > .chat-tool-invocation-part,
+.optimus-card-chat .interactive-response .value > .chat-used-context,
+.optimus-card-chat .interactive-response .value > .chat-used-context-list,
+.optimus-card-chat .interactive-response .value > .progress-step,
+.optimus-card-chat .interactive-response .value > .shimmer-progress,
+.optimus-card-chat .interactive-response .value > .chat-confirmation-widget-container {
+	display: none !important;
+}
+
 .optimus-card-footer {
 	display: flex;
 	align-items: center;
@@ -223,18 +384,19 @@
 	font-size: 11.5px;
 }
 
-/* Right panel: empty state shown when no card is active. */
+/* Right panel: editor-style chat host. */
 .optimus-chat-view {
+	display: flex;
 	position: relative;
+	height: 100%;
+	width: 100%;
+	min-height: 0;
+	min-width: 0;
 }
 
-.optimus-chat-empty {
-	display: flex;
-	align-items: center;
-	justify-content: center;
+.optimus-chat-editor-host {
+	flex: 1;
 	height: 100%;
-	padding: 24px;
-	text-align: center;
-	font-size: 12px;
-	color: var(--vscode-descriptionForeground);
+	min-height: 0;
+	min-width: 0;
 }

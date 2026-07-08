@@ -21,6 +21,7 @@ import { IInstantiationService } from '../../../platform/instantiation/common/in
 import { Emitter, Event } from '../../../base/common/event.js';
 import { IStorageService } from '../../../platform/storage/common/storage.js';
 import { Parts, IWorkbenchLayoutService } from '../../../workbench/services/layout/browser/layoutService.js';
+import { IWorkbenchEnvironmentService } from '../../../workbench/services/environment/common/environmentService.js';
 
 import { IContextKeyService } from '../../../platform/contextkey/common/contextkey.js';
 import { IHostService } from '../../../workbench/services/host/browser/host.js';
@@ -107,6 +108,7 @@ export class TitlebarPart extends Part implements ITitlebarPart {
 		@IWorkbenchLayoutService layoutService: IWorkbenchLayoutService,
 		@IContextKeyService private readonly contextKeyService: IContextKeyService,
 		@IHostService private readonly hostService: IHostService,
+		@IWorkbenchEnvironmentService private readonly environmentService: IWorkbenchEnvironmentService,
 	) {
 		super(id, { hasTitle: false }, themeService, storageService, layoutService);
 
@@ -154,6 +156,17 @@ export class TitlebarPart extends Part implements ITitlebarPart {
 
 	protected override createContentArea(parent: HTMLElement): HTMLElement {
 		this.element = parent;
+		this.element.classList.toggle('optimus-titlebar', this.environmentService.isOptimusWindow);
+
+		if (this.environmentService.isOptimusWindow) {
+			// Optimus owns its persistent mode and layout chrome separately so
+			// collapsing panels cannot remove the controls. Keep the workbench
+			// titlebar structurally present, but do not mount the legacy sessions
+			// titlebar widgets that would duplicate the Optimus chrome.
+			this.rootContainer = append(parent, $('div.optimus-titlebar-placeholder'));
+			return this.element;
+		}
+
 		this.rootContainer = append(parent, $('.titlebar-container.sessions-titlebar-container.has-center'));
 
 		// Draggable region
@@ -467,6 +480,10 @@ export class MainTitlebarPart extends TitlebarPart {
 	override get maximumHeight(): number { return 0; }
 
 	protected override createContentArea(parent: HTMLElement): HTMLElement {
+		if (this.mainEnvironmentService.isOptimusWindow) {
+			return super.createContentArea(parent);
+		}
+
 		this.element = parent;
 		this.rootContainer = append(parent, $('.sessions-titlebar-compatibility-shell'));
 		return this.element;
@@ -481,8 +498,9 @@ export class MainTitlebarPart extends TitlebarPart {
 		@IWorkbenchLayoutService layoutService: IWorkbenchLayoutService,
 		@IContextKeyService contextKeyService: IContextKeyService,
 		@IHostService hostService: IHostService,
+		@IWorkbenchEnvironmentService private readonly mainEnvironmentService: IWorkbenchEnvironmentService,
 	) {
-		super(Parts.TITLEBAR_PART, mainWindow, contextMenuService, configurationService, instantiationService, themeService, storageService, layoutService, contextKeyService, hostService);
+		super(Parts.TITLEBAR_PART, mainWindow, contextMenuService, configurationService, instantiationService, themeService, storageService, layoutService, contextKeyService, hostService, mainEnvironmentService);
 	}
 }
 
@@ -506,9 +524,10 @@ export class AuxiliaryTitlebarPart extends TitlebarPart implements IAuxiliaryTit
 		@IWorkbenchLayoutService layoutService: IWorkbenchLayoutService,
 		@IContextKeyService contextKeyService: IContextKeyService,
 		@IHostService hostService: IHostService,
+		@IWorkbenchEnvironmentService environmentService: IWorkbenchEnvironmentService,
 	) {
 		const id = AuxiliaryTitlebarPart.COUNTER++;
-		super(`workbench.parts.auxiliaryTitle.${id}`, getWindow(container), contextMenuService, configurationService, instantiationService, themeService, storageService, layoutService, contextKeyService, hostService);
+		super(`workbench.parts.auxiliaryTitle.${id}`, getWindow(container), contextMenuService, configurationService, instantiationService, themeService, storageService, layoutService, contextKeyService, hostService, environmentService);
 	}
 
 	override get preventZoom(): boolean {

@@ -61,7 +61,7 @@ function getFolderUriToOpen(sessionsService: ISessionsService, sessionsProviders
 	return agentHostUri.with({ authority: remoteAuthority, scheme: Schemas.vscodeRemote });
 }
 
-async function openEditorWindowForActiveSession(accessor: ServicesAccessor): Promise<void> {
+async function openEditorWindowForActiveSession(accessor: ServicesAccessor, openInNewWindow?: boolean): Promise<void> {
 	const sessionsService = accessor.get(ISessionsService);
 	const sessionsProvidersService = accessor.get(ISessionsProvidersService);
 	const remoteAgentHostService = accessor.get(IRemoteAgentHostService);
@@ -69,20 +69,20 @@ async function openEditorWindowForActiveSession(accessor: ServicesAccessor): Pro
 	const fileService = accessor.get(IFileService);
 	const notificationService = accessor.get(INotificationService);
 
+	const windowOptions = openInNewWindow ? { forceNewWindow: true } : { forceReuseWindow: true };
 	const folderUri = getFolderUriToOpen(sessionsService, sessionsProvidersService, remoteAgentHostService);
 	if (!folderUri) {
-		return nativeHostService.openWindow({ forceReuseWindow: true });
+		return nativeHostService.openWindow(windowOptions);
 	}
-
 	// The session's folder may have been deleted from disk. Opening it would
 	// trigger a confusing "Path does not exist" dialog from the main process, so
 	// fall back to an empty editor window and tell the user why.
 	if (folderUri.scheme === Schemas.file && fileService.hasProvider(folderUri) && !await fileService.exists(folderUri)) {
 		notificationService.error(localize('sessionFolderMissing', "The folder \"{0}\" no longer exists on this computer.", basename(folderUri)));
-		return nativeHostService.openWindow({ forceReuseWindow: true });
+		return nativeHostService.openWindow(windowOptions);
 	}
 
-	return nativeHostService.openWindow([{ folderUri }], { forceReuseWindow: true });
+	return nativeHostService.openWindow([{ folderUri }], windowOptions);
 }
 
 export class OpenSessionInVSCodeAction extends Action2 {
@@ -108,6 +108,27 @@ export class OpenSessionInVSCodeAction extends Action2 {
 		logSessionsInteraction(telemetryService, 'openInVSCode');
 
 		return openEditorWindowForActiveSession(accessor);
+	}
+}
+
+/**
+ * Opens the editor window without reusing the current one. Used by the
+ * Optimus window's mode switcher: transforming the Optimus window into an
+ * editor window is not supported, so Editor mode opens alongside it.
+ */
+export class OpenSessionInVSCodeNewWindowAction extends Action2 {
+	static readonly ID = 'agents.openSessionInVSCodeNewWindow';
+
+	constructor() {
+		super({
+			id: OpenSessionInVSCodeNewWindowAction.ID,
+			title: localize2('openInVSCodeNewWindow', 'Open in Editor (New Window)'),
+			f1: false,
+		});
+	}
+
+	override async run(accessor: ServicesAccessor): Promise<void> {
+		return openEditorWindowForActiveSession(accessor, true);
 	}
 }
 
@@ -147,6 +168,23 @@ export class OpenVSCodeWindowAction extends Action2 {
 	override async run(accessor: ServicesAccessor): Promise<void> {
 		const nativeHostService = accessor.get(INativeHostService);
 		await nativeHostService.openWindow({ forceReuseWindow: true });
+	}
+}
+
+export class OpenAgentsWindowAction extends Action2 {
+	static readonly ID = 'agents.openAgentsWindow';
+
+	constructor() {
+		super({
+			id: OpenAgentsWindowAction.ID,
+			title: localize2('openAgentsWindow', 'Open Simple'),
+			f1: true,
+		});
+	}
+
+	override async run(accessor: ServicesAccessor): Promise<void> {
+		const nativeHostService = accessor.get(INativeHostService);
+		await nativeHostService.openAgentsWindow();
 	}
 }
 
@@ -194,7 +232,7 @@ export class OpenInVSCodeWidgetContribution extends Disposable implements IWorkb
 	) {
 		super();
 		this._register(actionViewItemService.register(Menus.TitleBarLeftLayout, OpenSessionInVSCodeAction.ID, (action, options) => {
-			return instantiationService.createInstance(OpenInVSCodeTitleBarWidget, action, options, OpenVSCodeWindowAction.ID);
+			return instantiationService.createInstance(OpenInVSCodeTitleBarWidget, action, options, OpenVSCodeWindowAction.ID, OpenAgentsWindowAction.ID, OpenOptimusWindowAction.ID);
 		}, undefined));
 	}
 }

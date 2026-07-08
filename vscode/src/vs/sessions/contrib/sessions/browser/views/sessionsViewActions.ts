@@ -18,6 +18,7 @@ import { KeybindingsRegistry, KeybindingWeight } from '../../../../../platform/k
 import { IViewsService } from '../../../../../workbench/services/views/common/viewsService.js';
 import { CLOSE_MOBILE_SIDEBAR_DRAWER_COMMAND_ID } from '../../../../browser/workbench.js';
 import { EditorsVisibleContext, EditorAreaFocusContext, IsSessionsWindowContext } from '../../../../../workbench/common/contextkeys.js';
+import { IWorkbenchEnvironmentService } from '../../../../../workbench/services/environment/common/environmentService.js';
 import { ANY_AGENT_HOST_PROVIDER_RE } from '../../../../common/agentHostSessionsProvider.js';
 import { SessionsCategories } from '../../../../common/categories.js';
 import { ChatSessionProviderIdContext, IsActiveSessionArchivedContext, IsNewChatSessionContext, SessionIsArchivedContext, SessionIsCreatedContext, SessionIsReadContext } from '../../../../common/contextkeys.js';
@@ -36,6 +37,7 @@ import { ISessionsService } from '../../../../services/sessions/browser/sessions
 //  Constants
 
 const ACTION_ID_NEW_SESSION = 'workbench.action.chat.newChat';
+const OPTIMUS_NEW_SESSION_COMMAND_ID = 'optimus.newSession';
 //  Keybindings
 
 KeybindingsRegistry.registerKeybindingRule({
@@ -463,6 +465,12 @@ registerAction2(class NewSessionForWorkspaceAction extends Action2 {
 		const sessionsService = accessor.get(ISessionsService);
 		const sessionsPartService = accessor.get(ISessionsPartService);
 		const commandService = accessor.get(ICommandService);
+		const environmentService = accessor.get(IWorkbenchEnvironmentService);
+
+		if (environmentService.isOptimusWindow) {
+			await commandService.executeCommand(OPTIMUS_NEW_SESSION_COMMAND_ID);
+			return;
+		}
 
 		sessionsService.openNewSession();
 

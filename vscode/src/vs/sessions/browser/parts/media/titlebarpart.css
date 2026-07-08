@@ -32,6 +32,38 @@
 	pointer-events: auto;
 }
 
+.agent-sessions-workbench.monaco-workbench > .part.titlebar.optimus-titlebar {
+	position: absolute !important;
+	top: 0 !important;
+	left: 0 !important;
+	right: 0 !important;
+	z-index: 2500;
+	height: var(--titlebar-height, 35px) !important;
+	min-height: var(--titlebar-height, 35px) !important;
+	max-height: var(--titlebar-height, 35px) !important;
+	overflow: visible;
+	pointer-events: none;
+}
+
+.agent-sessions-workbench.monaco-workbench > .part.titlebar.optimus-titlebar > .content,
+.agent-sessions-workbench.monaco-workbench > .part.titlebar.optimus-titlebar > .titlebar-container,
+.agent-sessions-workbench.monaco-workbench > .part.titlebar.optimus-titlebar > .sessions-titlebar-container {
+	height: 100%;
+	pointer-events: none;
+}
+
+.agent-sessions-workbench.monaco-workbench > .part.titlebar.optimus-titlebar .titlebar-container,
+.agent-sessions-workbench.monaco-workbench > .part.titlebar.optimus-titlebar .sessions-titlebar-container {
+	display: none !important;
+}
+
+.agent-sessions-workbench.monaco-workbench > .part.titlebar.optimus-titlebar .left-toolbar-container,
+.agent-sessions-workbench.monaco-workbench > .part.titlebar.optimus-titlebar .titlebar-actions-container,
+.agent-sessions-workbench.monaco-workbench > .part.titlebar.optimus-titlebar .sessions-titlebar-right-panel-toolbar,
+.agent-sessions-workbench.monaco-workbench > .part.titlebar.optimus-titlebar .window-controls-container {
+	pointer-events: auto;
+}
+
 .agent-sessions-workbench.monaco-workbench > .part.titlebar > .sessions-titlebar-compatibility-shell {
 	display: none;
 }

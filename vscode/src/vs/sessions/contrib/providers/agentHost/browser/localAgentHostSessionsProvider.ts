@@ -52,6 +52,7 @@ export class LocalAgentHostSessionsProvider extends BaseAgentHostSessionsProvide
 
 	/** `true` when running in the dedicated Agents window vs. a regular editor window. */
 	private readonly _isSessionsWindow: boolean;
+	private readonly _isOptimusWindow: boolean;
 
 	protected override getLogOutputChannelId(): string | undefined {
 		return AGENT_HOST_LOG_OUTPUT_CHANNEL_ID;
@@ -87,6 +88,7 @@ export class LocalAgentHostSessionsProvider extends BaseAgentHostSessionsProvide
 		super(chatSessionsService, chatService, chatWidgetService, languageModelsService, _configurationService, logService, gitHubService, instantiationService, sessionsService, activeClientService, storageService);
 
 		this._isSessionsWindow = environmentService.isSessionsWindow;
+		this._isOptimusWindow = environmentService.isOptimusWindow;
 
 		this.label = localize('localAgentHostLabel', "Local Agent Host");
 
@@ -192,6 +194,10 @@ export class LocalAgentHostSessionsProvider extends BaseAgentHostSessionsProvide
 				const branchProtectionPatterns = readBranchProtectionPatterns(this._configurationService, workingDirectory ?? project?.uri);
 				return LocalAgentHostSessionsProvider.buildWorkspace(project, workingDirectory, gitHubInfo, gitState, description, branchProtectionPatterns);
 			},
+			// The Optimus window has no per-file changes view; the branch
+			// changeset stream (full file contents per changed file) would
+			// only saturate the connection there.
+			disableChangesetSubscriptions: this._isOptimusWindow,
 		};
 	}
 

@@ -195,6 +195,8 @@ export class AgentHostContribution extends Disposable implements IWorkbenchContr
 		const allowed = rootState.agents.filter(a => this._shouldRegisterAgent(a.provider));
 		const incoming = new Set(allowed.map(a => a.provider));
 
+		this._logService.info(`[OptimusDiag] AgentHostContribution sync: isSessionsWindow=${this._isSessionsWindow} rootAgents=[${rootState.agents.map(a => `${a.provider}(${a.models?.length ?? 0} models)`).join(', ')}] allowed=[${allowed.map(a => a.provider).join(', ')}]`);
+
 		// Remove agents that are no longer present OR no longer allowed
 		for (const [provider] of this._agentRegistrations) {
 			if (!incoming.has(provider)) {
@@ -313,6 +315,7 @@ export class AgentHostContribution extends Disposable implements IWorkbenchContr
 		store.add(toDisposable(() => this._modelProviders.delete(agent.provider)));
 		store.add(this._languageModelsService.registerLanguageModelProvider(vendor, modelProvider));
 		modelProvider.updateModels(agent.models);
+		this._logService.info(`[OptimusDiag] registered agent-host provider '${agent.provider}' vendor=${vendor} models=${agent.models?.length ?? 0}`);
 
 		// Re-authenticate when credentials change
 		store.add(this._defaultAccountService.onDidChangeDefaultAccount(() => {

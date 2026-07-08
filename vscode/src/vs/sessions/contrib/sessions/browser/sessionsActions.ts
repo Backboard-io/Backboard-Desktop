@@ -10,11 +10,13 @@ import { DisposableStore } from '../../../../base/common/lifecycle.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
 import { localize, localize2 } from '../../../../nls.js';
 import { Action2, MenuRegistry, MenuId, registerAction2 } from '../../../../platform/actions/common/actions.js';
+import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { ContextKeyExpr } from '../../../../platform/contextkey/common/contextkey.js';
 import { ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 import { KeybindingWeight } from '../../../../platform/keybinding/common/keybindingsRegistry.js';
 import { IQuickInputService, IQuickPickItem, IQuickPickSeparator } from '../../../../platform/quickinput/common/quickInput.js';
 import { EditorAreaFocusContext, IsAuxiliaryWindowContext, IsSessionsWindowContext } from '../../../../workbench/common/contextkeys.js';
+import { IWorkbenchEnvironmentService } from '../../../../workbench/services/environment/common/environmentService.js';
 import { IWorkbenchLayoutService, Parts } from '../../../../workbench/services/layout/browser/layoutService.js';
 import { Menus } from '../../../browser/menus.js';
 import { SessionsCategories } from '../../../common/categories.js';
@@ -29,6 +31,7 @@ import { ISessionsListModelService } from '../../../services/sessions/browser/se
 // -- Show Sessions Picker --
 
 export const SHOW_SESSIONS_PICKER_COMMAND_ID = 'sessions.showSessionsPicker';
+const OPTIMUS_NEW_SESSION_COMMAND_ID = 'optimus.newSession';
 
 registerAction2(class ShowSessionsPickerAction extends Action2 {
 	constructor() {
@@ -51,6 +54,8 @@ registerAction2(class ShowSessionsPickerAction extends Action2 {
 		const quickInputService = accessor.get(IQuickInputService);
 		const sessionsPartService = accessor.get(ISessionsPartService);
 		const sessionsListModelService = accessor.get(ISessionsListModelService);
+		const environmentService = accessor.get(IWorkbenchEnvironmentService);
+		const commandService = accessor.get(ICommandService);
 
 		const { recent, other } = sessionsService.getRecentlyOpenedSessions();
 		const recentSessions = recent.filter(s => !s.isArchived.get());
@@ -144,6 +149,10 @@ registerAction2(class ShowSessionsPickerAction extends Action2 {
 
 		const openSelected = (selected: ISessionPickItem, inBackground: boolean, toSide: boolean): void => {
 			if (!selected.session) {
+				if (environmentService.isOptimusWindow) {
+					void commandService.executeCommand(OPTIMUS_NEW_SESSION_COMMAND_ID);
+					return;
+				}
 				sessionsService.openNewSession();
 				sessionsPartService.focusSession(sessionsService.activeSession.get());
 				return;

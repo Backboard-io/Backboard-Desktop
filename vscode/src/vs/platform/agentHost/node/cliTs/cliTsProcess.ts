@@ -240,7 +240,7 @@ export class CliTsServeProcess extends Disposable {
 	 * Resolves how to start cli-ts, in priority order:
 	 *  1. `BACKBOARD_CLI_TS_PATH` / `VSCODE_BACKBOARD_CLI_TS_PATH` env override.
 	 *  2. The packaged binary `extensions/backboard/bin/backboard-cli-ts(.exe)`.
-	 *  3. Dev fallback: `bun run <appRoot>/cli-ts/src/entrypoints/cli.tsx`.
+	 *  3. Dev fallback: `<resolved bun> run <appRoot>/cli-ts/src/entrypoints/cli.tsx`.
 	 */
 	private resolveCliTsInvocation(): { command: string; args: string[] } {
 		const envPath = process.env['BACKBOARD_CLI_TS_PATH']?.trim() || process.env['VSCODE_BACKBOARD_CLI_TS_PATH']?.trim();
@@ -260,9 +260,50 @@ export class CliTsServeProcess extends Disposable {
 		}
 		const devEntrypoint = join(appRoot, 'cli-ts', 'src', 'entrypoints', 'cli.tsx');
 		if (fs.existsSync(devEntrypoint)) {
-			return { command: 'bun', args: ['run', devEntrypoint] };
+			const bunPath = this.resolveBunCommand();
+			if (bunPath) {
+				return { command: bunPath, args: ['run', devEntrypoint] };
+			}
+
+			throw new Error(`cli-ts dev entrypoint exists at ${devEntrypoint}, but Bun is not available. Install Bun, set BACKBOARD_BUN_PATH to a Bun executable, or build the packaged cli-ts binary with: npm --prefix extensions/backboard run package-cli-ts`);
 		}
 		throw new Error(`cli-ts binary not found. Build it with: npm --prefix extensions/backboard run package-cli-ts (looked at ${candidates.join(', ')})`);
+	}
+
+	private resolveBunCommand(): string | undefined {
+		const envBunPath = process.env['BACKBOARD_BUN_PATH']?.trim() || process.env['BUN_PATH']?.trim();
+		if (envBunPath && fs.existsSync(envBunPath)) {
+			return envBunPath;
+		}
+
+		const executable = process.platform === 'win32' ? 'bun.exe' : 'bun';
+		const candidates = [
+			process.env['BUN_INSTALL'] ? join(process.env['BUN_INSTALL'], 'bin', executable) : undefined,
+			join(os.homedir(), '.bun', 'bin', executable),
+			join(process.cwd(), 'node_modules', '.bin', executable),
+			'/opt/homebrew/bin/bun',
+			'/usr/local/bin/bun',
+		].filter((candidate): candidate is string => !!candidate);
+
+		for (const candidate of candidates) {
+			if (fs.existsSync(candidate)) {
+				return candidate;
+			}
+		}
+
+		const pathValue = process.env['PATH'] ?? '';
+		const pathSeparator = process.platform === 'win32' ? ';' : ':';
+		for (const dir of pathValue.split(pathSeparator)) {
+			if (!dir) {
+				continue;
+			}
+			const candidate = join(dir, executable);
+			if (fs.existsSync(candidate)) {
+				return candidate;
+			}
+		}
+
+		return undefined;
 	}
 }
 

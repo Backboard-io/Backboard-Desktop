@@ -15,6 +15,7 @@ import { IConfigurationService } from '../../../../platform/configuration/common
 import { observableConfigValue } from '../../../../platform/observable/common/platformObservableUtils.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
+import { IWorkbenchEnvironmentService } from '../../../../workbench/services/environment/common/environmentService.js';
 import { IWorkspaceEditingService } from '../../../../workbench/services/workspaces/common/workspaceEditing.js';
 import { IChatService } from '../../../../workbench/contrib/chat/common/chatService/chatService.js';
 import { ViewContainerLocation } from '../../../../workbench/common/views.js';
@@ -62,10 +63,11 @@ export class LayoutController extends Disposable {
 
 	private readonly _pendingTurnStateByResource = new ResourceMap<IPendingTurnState>();
 	private readonly _panelVisibilityBySession = new ResourceMap<boolean>();
-	private readonly _viewStateBySession: ResourceMap<ISessionViewState>;
-	private readonly _workingSets: ResourceMap<IEditorWorkingSet>;
+	private readonly _viewStateBySession = new ResourceMap<ISessionViewState>();
+	private readonly _workingSets = new ResourceMap<IEditorWorkingSet>();
 	private readonly _workingSetSequencer = new Sequencer();
 	private readonly _useModalConfigObs;
+	private readonly _isOptimusWindow: boolean;
 	constructor(
 
 		@IAgentWorkbenchLayoutService private readonly _layoutService: IAgentWorkbenchLayoutService,
@@ -80,11 +82,12 @@ export class LayoutController extends Disposable {
 		@IEditorGroupsService private readonly _editorGroupsService: IEditorGroupsService,
 		@IWorkspaceContextService private readonly _workspaceContextService: IWorkspaceContextService,
 		@IWorkspaceEditingService private readonly _workspaceEditingService: IWorkspaceEditingService,
+		@IWorkbenchEnvironmentService environmentService: IWorkbenchEnvironmentService,
 	) {
 		super();
 
-		this._viewStateBySession = new ResourceMap<ISessionViewState>();
-		this._workingSets = new ResourceMap<IEditorWorkingSet>();
+		this._isOptimusWindow = environmentService.isOptimusWindow;
+
 		this._loadState();
 
 		this._register(this._storageService.onWillSaveState(() => this._saveState()));
@@ -340,6 +343,10 @@ export class LayoutController extends Disposable {
 	}
 
 	private _captureViewState(sessionResource: URI): void {
+		if (this._isOptimusWindow) {
+			return;
+		}
+
 		const auxiliaryBarVisible = this._layoutService.isVisible(Parts.AUXILIARYBAR_PART);
 		const activeViewContainerId = this._paneCompositePartService.getActivePaneComposite(ViewContainerLocation.AuxiliaryBar)?.getId();
 		this._viewStateBySession.set(sessionResource, {
@@ -349,6 +356,10 @@ export class LayoutController extends Disposable {
 	}
 
 	private _syncAuxiliaryBarVisibility(sessionResource: URI | undefined, hasWorkspace: boolean, isUntitled: boolean, hasChanges: boolean): void {
+		if (this._isOptimusWindow) {
+			return;
+		}
+
 		if (!sessionResource || !hasWorkspace) {
 			return;
 		}

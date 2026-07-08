@@ -18,6 +18,7 @@ import { IInstantiationService } from '../../../../../platform/instantiation/com
 import { IKeybindingService } from '../../../../../platform/keybinding/common/keybinding.js';
 import { IOpenerService } from '../../../../../platform/opener/common/opener.js';
 import { IThemeService } from '../../../../../platform/theme/common/themeService.js';
+import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { IViewPaneOptions, IViewPaneLocationColors, ViewPane } from '../../../../../workbench/browser/parts/views/viewPane.js';
 import { IViewDescriptorService } from '../../../../../workbench/common/views.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
@@ -32,6 +33,7 @@ import { IStorageService, StorageScope, StorageTarget } from '../../../../../pla
 import { ITelemetryService } from '../../../../../platform/telemetry/common/telemetry.js';
 import { IHostService } from '../../../../../workbench/services/host/browser/host.js';
 import { IWorkbenchLayoutService, Parts } from '../../../../../workbench/services/layout/browser/layoutService.js';
+import { IWorkbenchEnvironmentService } from '../../../../../workbench/services/environment/common/environmentService.js';
 import { logSessionsInteraction } from '../../../../common/sessionsTelemetry.js';
 import { ISessionsManagementService } from '../../../../services/sessions/common/sessionsManagement.js';
 import { ISessionsService } from '../../../../services/sessions/browser/sessionsService.js';
@@ -43,6 +45,7 @@ import { SkillsLibraryController } from '../../../../../workbench/contrib/chat/b
 
 const $ = DOM.$;
 export const SessionsViewId = 'sessions.workbench.view.sessionsView';
+const OPTIMUS_NEW_SESSION_COMMAND_ID = 'optimus.newSession';
 const GROUPING_STORAGE_KEY = 'sessionsViewPane.grouping.v3';
 const SORTING_STORAGE_KEY = 'sessionsViewPane.sorting.v2';
 
@@ -102,8 +105,10 @@ export class SessionsView extends ViewPane {
 		@IHoverService hoverService: IHoverService,
 		@ISessionsManagementService private readonly sessionsManagementService: ISessionsManagementService,
 		@ISessionsService private readonly sessionsService: ISessionsService,
+		@ICommandService private readonly commandService: ICommandService,
 		@IHostService private readonly hostService: IHostService,
 		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
+		@IWorkbenchEnvironmentService private readonly environmentService: IWorkbenchEnvironmentService,
 		@IStorageService private readonly storageService: IStorageService,
 		@ITelemetryService private readonly telemetryService: ITelemetryService,
 	) {
@@ -203,6 +208,10 @@ export class SessionsView extends ViewPane {
 			const primaryActions = this.primaryActions = DOM.append(sessionsContent, $('.agent-sessions-primary-actions'));
 			this.createSidebarAction(primaryActions, Codicon.edit, localize('newChat', "New chat"), () => {
 				logSessionsInteraction(this.telemetryService, 'newSession');
+				if (this.environmentService.isOptimusWindow) {
+					void this.commandService.executeCommand(OPTIMUS_NEW_SESSION_COMMAND_ID);
+					return;
+				}
 				this.sessionsService.openNewSession({ forceNew: true });
 			});
 			this.createSidebarAction(primaryActions, Codicon.extensions, localize('marketplace', "Marketplace"), anchor => {

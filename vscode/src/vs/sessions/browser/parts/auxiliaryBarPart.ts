@@ -36,6 +36,7 @@ import { getFlatContextMenuActions } from '../../../platform/actions/browser/men
 import { IDisposable, MutableDisposable } from '../../../base/common/lifecycle.js';
 import { Extensions } from '../../../workbench/browser/panecomposite.js';
 import { mainWindow } from '../../../base/browser/window.js';
+import { IWorkbenchEnvironmentService } from '../../../workbench/services/environment/common/environmentService.js';
 import { SessionsPanelHeader } from './panelHeader.js';
 
 /**
@@ -120,6 +121,7 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 		@IContextKeyService contextKeyService: IContextKeyService,
 		@IExtensionService extensionService: IExtensionService,
 		@IMenuService menuService: IMenuService,
+		@IWorkbenchEnvironmentService private readonly environmentService: IWorkbenchEnvironmentService,
 	) {
 		super(
 			Parts.AUXILIARYBAR_PART,
@@ -176,11 +178,13 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 	protected override createTitleArea(parent: HTMLElement): HTMLElement | undefined {
 		const titleArea = super.createTitleArea(parent);
 
-		if (titleArea) {
+		if (titleArea && !this.environmentService.isOptimusWindow) {
 			// Window-right controls absorbed from the former integrated chrome
 			// bar (session actions, layout actions, terminal and panel toggles,
 			// native window controls), rendered inline at the end of the
-			// existing composite title row.
+			// existing composite title row. The Optimus window renders its own
+			// fixed chrome overlay with the right-panel toggle, so these
+			// toolbars are not mounted there.
 			this.panelHeader = this._register(this.instantiationService.createInstance(SessionsPanelHeader, titleArea, {
 				classes: ['auxiliarybar-part-header'],
 				inline: true,
