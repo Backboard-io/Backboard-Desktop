@@ -292,6 +292,17 @@ export class OptimusChatViewPane extends ViewPane {
 		return this.untitledResource;
 	}
 
+	/**
+	 * Explicitly show a FRESH blank chat. The New Task action calls this
+	 * directly: it cannot rely on clearing the active session alone, because
+	 * when no session is active (e.g. right after closing chats) clearing it
+	 * again changes nothing and the panel would stay on whatever it shows.
+	 */
+	async showNewChat(): Promise<void> {
+		this.untitledResource = undefined; // mint a fresh blank chat
+		await this.showBackboardNewChat(CancellationToken.None);
+	}
+
 	private async showBackboardNewChat(token: CancellationToken): Promise<void> {
 		const resource = this.sessionsService.activeSession.get()?.activeChat.get().resource ?? this.getOrCreateUntitledResource();
 

@@ -3,12 +3,14 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-.interactive-session .interactive-response .chat-used-context-list.chat-thinking-items {
+/* .optimus-card-chat: the Advanced-window cards render transcripts without the
+   .interactive-session container class, but stream thinking with this styling. */
+:is(.interactive-session, .optimus-card-chat) .interactive-response .chat-used-context-list.chat-thinking-items {
 	color: var(--vscode-descriptionForeground);
 	padding-top: 0;
 }
 
-.interactive-session .interactive-response .value .chat-thinking-box {
+:is(.interactive-session, .optimus-card-chat) .interactive-response .value .chat-thinking-box {
 	outline: none;
 	position: relative;
 	color: var(--vscode-descriptionForeground);
@@ -513,7 +515,7 @@
 	}
 }
 
-.interactive-session .interactive-response .value .chat-used-context.chat-terminal-thinking-collapsible {
+:is(.interactive-session, .optimus-card-chat) .interactive-response .value .chat-used-context.chat-terminal-thinking-collapsible {
 	display: flex;
 	flex-direction: column;
 	width: 100%;
@@ -543,7 +545,7 @@
 	}
 }
 
-.interactive-session .interactive-response .value .chat-thinking-fixed-mode {
+:is(.interactive-session, .optimus-card-chat) .interactive-response .value .chat-thinking-fixed-mode {
 	outline: none;
 
 	/* Hide the header/collapse button while streaming — it reappears when chat-thinking-streaming is removed */
@@ -650,7 +652,7 @@
 	background: var(--vscode-editor-background);
 }
 
-.interactive-session .interactive-response .value .chat-thinking-box .chat-used-context-label code {
+:is(.interactive-session, .optimus-card-chat) .interactive-response .value .chat-thinking-box .chat-used-context-label code {
 	display: inline;
 	line-height: inherit;
 	padding: 1px 3px;

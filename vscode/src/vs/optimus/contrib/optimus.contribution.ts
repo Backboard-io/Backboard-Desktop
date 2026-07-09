@@ -163,11 +163,17 @@ registerAction2(class OptimusNewSessionAction extends Action2 {
 		// Optimus panel materializes a session on first send (the untitled
 		// provisional flow); a pre-created draft would stay empty forever
 		// while the conversation lands in a separate materialized session —
-		// leaking an immortal empty card per task. Clearing the active
-		// session makes the panel show the untitled composer instead.
+		// leaking an immortal empty card per task.
 		sessionsService.openNewSession({ forceNew: true });
 
-		await revealOptimusChatPanel(layoutService, viewsService, true);
+		const view = await revealOptimusChatPanel(layoutService, viewsService, true);
+
+		// Drive the panel explicitly: clearing the active session above only
+		// nudges it when a session WAS active — after closing chats nothing
+		// changes and the panel would keep showing the previous chat.
+		if (view instanceof OptimusChatViewPane) {
+			await view.showNewChat();
+		}
 	}
 });
 
