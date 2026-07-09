@@ -179,13 +179,14 @@ const OCTOPUS_FLIP_WAGGLE = [
  * all tentacles hanging). Both frames include the full tentacle set, so
  * frame A is hidden while they show.
  */
-const OCTOPUS_SOCCER_UP_ROW = 2;
+const OCTOPUS_SOCCER_UP_ROW = 1;
 const OCTOPUS_SOCCER_UP = [
-	'.PPP....................',
-	'PWWWP...................',
-	'PWDWP...................',
-	'PWWWP...................',
-	'.PPP....................',
+	'.PPPP...................',
+	'PDWWWP..................',
+	'PWDDWP..................',
+	'PWDDWP..................',
+	'PWWWDP..................',
+	'.PPPP...................',
 	'........................',
 	'........................',
 	'........................',
@@ -201,13 +202,14 @@ const OCTOPUS_SOCCER_UP = [
 	'....BB..BB....BB..BB....',
 ];
 
-const OCTOPUS_SOCCER_KICK_ROW = 8;
+const OCTOPUS_SOCCER_KICK_ROW = 7;
 const OCTOPUS_SOCCER_KICK = [
-	'.PPP....................',
-	'PWWWP...................',
-	'PWDWP...................',
-	'PWWWP...................',
-	'.PPP....................',
+	'.PPPP...................',
+	'PWWWDP..................',
+	'PWDDWP..................',
+	'PWDDWP..................',
+	'PDWWWP..................',
+	'.PPPP...................',
 	'..BB....................',
 	'...BB...................',
 	'....BB..................',
@@ -239,13 +241,40 @@ const OCTOPUS_LIFT_HIGH = [
 	'......BB........BB......',
 ];
 
-/** Pirate interlude: strap across the forehead, patch over the right eye. */
-const OCTOPUS_EYEPATCH_ROW = 9;
-const OCTOPUS_EYEPATCH = [
-	'.....PPPPPPPPPPPPPP.....',
-	'.............PPPPP......',
-	'.............PPPPP......',
-	'.............PPPPP......',
+/**
+ * Dozing off right before the flip-off, so it jolts awake for the fist.
+ * The closed-eye lids stay on for the whole nap while a Z is born small
+ * by the head (z1), drifts up-right growing (z2), and floats off the top
+ * corner (z3) — the three stages cycle so Z's stream up continuously.
+ */
+const OCTOPUS_SLEEP_LIDS_ROW = 10;
+const OCTOPUS_SLEEP_LIDS = [
+	'.......BBB....BBB.......',
+	'.......DDD....DDD.......',
+	'.......BBB....BBB.......',
+];
+
+const OCTOPUS_SLEEP_Z1_ROW = 7;
+const OCTOPUS_SLEEP_Z1 = [
+	'..................PPP...',
+	'...................P....',
+	'..................PPP...',
+];
+
+const OCTOPUS_SLEEP_Z2_ROW = 4;
+const OCTOPUS_SLEEP_Z2 = [
+	'...................PPPP.',
+	'.....................P..',
+	'....................P...',
+	'...................PPPP.',
+];
+
+const OCTOPUS_SLEEP_Z3_ROW = 0;
+const OCTOPUS_SLEEP_Z3 = [
+	'....................PPPP',
+	'......................P.',
+	'.....................P..',
+	'....................PPPP',
 ];
 
 /**
@@ -718,7 +747,10 @@ export class NewChatWidget extends Disposable {
 		appendFrame('octo-soccer-up', OCTOPUS_SOCCER_UP, OCTOPUS_SOCCER_UP_ROW, 0);
 		appendFrame('octo-lift-low', OCTOPUS_LIFT_LOW, OCTOPUS_LIFT_LOW_ROW, 0);
 		appendFrame('octo-lift-high', OCTOPUS_LIFT_HIGH, OCTOPUS_LIFT_HIGH_ROW, 0);
-		appendFrame('octo-eyepatch', OCTOPUS_EYEPATCH, OCTOPUS_EYEPATCH_ROW, 0);
+		appendFrame('octo-sleep-lids', OCTOPUS_SLEEP_LIDS, OCTOPUS_SLEEP_LIDS_ROW, 0);
+		appendFrame('octo-sleep-z1', OCTOPUS_SLEEP_Z1, OCTOPUS_SLEEP_Z1_ROW, 0);
+		appendFrame('octo-sleep-z2', OCTOPUS_SLEEP_Z2, OCTOPUS_SLEEP_Z2_ROW, 0);
+		appendFrame('octo-sleep-z3', OCTOPUS_SLEEP_Z3, OCTOPUS_SLEEP_Z3_ROW, 0);
 		appendFrame('octo-fist', OCTOPUS_FIST, OCTOPUS_FIST_ROW, 0);
 		appendFrame('octo-flip-up', OCTOPUS_FLIP_UP, OCTOPUS_FINGER_ROW, 0);
 		appendFrame('octo-flip-waggle', OCTOPUS_FLIP_WAGGLE, OCTOPUS_FINGER_ROW, 0);

@@ -227,7 +227,10 @@
 .new-chat-octopus .octo-soccer-up,
 .new-chat-octopus .octo-lift-low,
 .new-chat-octopus .octo-lift-high,
-.new-chat-octopus .octo-eyepatch,
+.new-chat-octopus .octo-sleep-lids,
+.new-chat-octopus .octo-sleep-z1,
+.new-chat-octopus .octo-sleep-z2,
+.new-chat-octopus .octo-sleep-z3,
 .new-chat-octopus .octo-fist,
 .new-chat-octopus .octo-flip-up,
 .new-chat-octopus .octo-flip-waggle,
@@ -259,8 +262,37 @@
 	animation: new-chat-octopus-lift-high 32s linear infinite;
 }
 
-.new-chat-octopus .octo-eyepatch {
-	animation: new-chat-octopus-eyepatch 32s linear infinite;
+.new-chat-octopus .octo-sleep-lids {
+	animation: new-chat-octopus-sleep-lids 32s linear infinite;
+}
+
+.new-chat-octopus .octo-sleep-z1 {
+	animation: new-chat-octopus-sleep-z1 32s linear infinite;
+}
+
+.new-chat-octopus .octo-sleep-z2 {
+	animation: new-chat-octopus-sleep-z2 32s linear infinite;
+}
+
+.new-chat-octopus .octo-sleep-z3 {
+	animation: new-chat-octopus-sleep-z3 32s linear infinite;
+}
+
+/* The Z's follow the theme: black on light themes, white on dark ones
+ * (a CSS fill on the rects beats their presentation attribute). */
+.new-chat-octopus .octo-sleep-z1 rect,
+.new-chat-octopus .octo-sleep-z2 rect,
+.new-chat-octopus .octo-sleep-z3 rect {
+	fill: #000000;
+}
+
+.vs-dark .new-chat-octopus .octo-sleep-z1 rect,
+.vs-dark .new-chat-octopus .octo-sleep-z2 rect,
+.vs-dark .new-chat-octopus .octo-sleep-z3 rect,
+.hc-black .new-chat-octopus .octo-sleep-z1 rect,
+.hc-black .new-chat-octopus .octo-sleep-z2 rect,
+.hc-black .new-chat-octopus .octo-sleep-z3 rect {
+	fill: #ffffff;
 }
 
 .new-chat-octopus .octo-fist {
@@ -280,11 +312,12 @@
 }
 
 /* One shared 32s idle timeline so the frames never overlap:
- *  ~4%  blink            ~26% blink           ~55% blink   ~70% blink
- *  8-10% tentacle wiggle     44-46% wiggle (in eyepatch)   60-62% wiggle
+ *  ~4%  blink            ~26% blink           ~55% blink
+ *  8-10% tentacle wiggle     44-46% wiggle   60-62% wiggle
  *  14-20% soccer keep-ups (ball high/low, kicking leg; frame A hidden)
  *  30-36% barbell press (chin level -> overhead lockout, twice)
- *  42-50% pirate eyepatch interlude
+ *  64-76% dozes off (eyes shut, Z's stream up, slow breathing) -- then
+ *  jolts awake for the
  *  78-86% flip-off: giant fist punch, finger + two waggles, closing fist. */
 @keyframes new-chat-octopus-frame-a {
 	0%, 7.9% { opacity: 1; }
@@ -362,10 +395,42 @@
 	36.1%, 100% { opacity: 0; }
 }
 
-@keyframes new-chat-octopus-eyepatch {
-	0%, 41.9% { opacity: 0; }
-	42%, 49.9% { opacity: 1; }
-	50%, 100% { opacity: 0; }
+@keyframes new-chat-octopus-sleep-lids {
+	0%, 63.9% { opacity: 0; }
+	64%, 75.9% { opacity: 1; }
+	76%, 100% { opacity: 0; }
+}
+
+/* A Z is born small (z1), drifts up growing (z2), floats off the corner
+ * (z3); the stages cycle three times so Z's stream up through the nap. */
+@keyframes new-chat-octopus-sleep-z1 {
+	0%, 63.9% { opacity: 0; }
+	64%, 65.3% { opacity: 1; }
+	65.4%, 67.9% { opacity: 0; }
+	68%, 69.3% { opacity: 1; }
+	69.4%, 71.9% { opacity: 0; }
+	72%, 73.3% { opacity: 1; }
+	73.4%, 100% { opacity: 0; }
+}
+
+@keyframes new-chat-octopus-sleep-z2 {
+	0%, 65.3% { opacity: 0; }
+	65.4%, 66.6% { opacity: 1; }
+	66.7%, 69.3% { opacity: 0; }
+	69.4%, 70.6% { opacity: 1; }
+	70.7%, 73.3% { opacity: 0; }
+	73.4%, 74.6% { opacity: 1; }
+	74.7%, 100% { opacity: 0; }
+}
+
+@keyframes new-chat-octopus-sleep-z3 {
+	0%, 66.6% { opacity: 0; }
+	66.7%, 67.9% { opacity: 1; }
+	68%, 70.6% { opacity: 0; }
+	70.7%, 71.9% { opacity: 1; }
+	72%, 74.6% { opacity: 0; }
+	74.7%, 75.9% { opacity: 1; }
+	76%, 100% { opacity: 0; }
 }
 
 @keyframes new-chat-octopus-fist {
@@ -415,6 +480,15 @@
 	45.5% { transform: translateY(-1px) rotate(0deg) scale(1); }
 	60.5% { transform: translateY(-2px) rotate(0deg) scale(1); }
 	61.5% { transform: translateY(-1px) rotate(0deg) scale(1); }
+	/* Dozing: sags and tilts, then breathes slowly (gentle 1px swell) and
+	 * snaps upright just before the flip-off. */
+	64.8% { transform: translateY(1px) rotate(2deg) scale(1); }
+	66.8% { transform: translateY(2px) rotate(2deg) scale(1); }
+	68.8% { transform: translateY(1px) rotate(2deg) scale(1); }
+	70.8% { transform: translateY(2px) rotate(2deg) scale(1); }
+	72.8% { transform: translateY(1px) rotate(2deg) scale(1); }
+	74.8% { transform: translateY(2px) rotate(2deg) scale(1); }
+	76.3% { transform: translateY(0) rotate(0deg) scale(1); }
 	78.5% { transform: translateY(-2px) rotate(-8deg) scale(2.3); }
 	79.2%, 85.2% { transform: translateY(-2px) rotate(-4deg) scale(2); }
 }
@@ -427,9 +501,7 @@
 	26%, 26.4% { opacity: 1; }
 	26.5%, 54.9% { opacity: 0; }
 	55%, 55.4% { opacity: 1; }
-	55.5%, 69.9% { opacity: 0; }
-	70%, 70.4% { opacity: 1; }
-	70.5%, 100% { opacity: 0; }
+	55.5%, 100% { opacity: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
