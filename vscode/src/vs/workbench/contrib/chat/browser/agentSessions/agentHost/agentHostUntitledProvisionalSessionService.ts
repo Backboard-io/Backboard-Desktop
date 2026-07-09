@@ -66,6 +66,7 @@ import { IWorkbenchEnvironmentService } from '../../../../../services/environmen
 import { ChatConfiguration } from '../../../common/constants.js';
 import { IChatService } from '../../../common/chatService/chatService.js';
 import { IAgentHostNewSessionFolderService } from './agentHostNewSessionFolderService.js';
+import { IAgentHostRememberedSessionConfigService } from './agentHostRememberedSessionConfig.js';
 
 export const IAgentHostUntitledProvisionalSessionService =
 	createDecorator<IAgentHostUntitledProvisionalSessionService>('agentHostUntitledProvisionalSessionService');
@@ -217,6 +218,7 @@ export class AgentHostUntitledProvisionalSessionService extends Disposable imple
 		@IConfigurationService private readonly _configurationService: IConfigurationService,
 		@IWorkbenchEnvironmentService private readonly _environmentService: IWorkbenchEnvironmentService,
 		@IAgentHostNewSessionFolderService private readonly _newSessionFolderService: IAgentHostNewSessionFolderService,
+		@IAgentHostRememberedSessionConfigService private readonly _rememberedSessionConfig: IAgentHostRememberedSessionConfigService,
 	) {
 		super();
 
@@ -604,6 +606,8 @@ export class AgentHostUntitledProvisionalSessionService extends Disposable imple
 	 * - `isolation`: workbench has no isolation picker, so always `'folder'`.
 	 * - `autoApprove`: seeded from `chat.permissions.default`, clamped to
 	 *   `'default'` when the `chat.tools.global.autoApprove` policy is off.
+	 * - `billing`: the user's last pick from the composer toggle, so
+	 *   subscription billing sticks across new sessions.
 	 *
 	 * Skipped entirely in the Agents window, where the sessions provider
 	 * supplies config via `request.agentHostSessionConfig` instead.
@@ -618,6 +622,10 @@ export class AgentHostUntitledProvisionalSessionService extends Disposable imple
 		if (typeof configured === 'string' && KNOWN_AUTO_APPROVE_VALUES.has(configured)) {
 			const policyRestricted = policyValue === false;
 			config[SessionConfigKey.AutoApprove] = policyRestricted ? 'default' : configured;
+		}
+		const rememberedBilling = this._rememberedSessionConfig.get(SessionConfigKey.Billing);
+		if (rememberedBilling) {
+			config[SessionConfigKey.Billing] = rememberedBilling;
 		}
 		return config;
 	}

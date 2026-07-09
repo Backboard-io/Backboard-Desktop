@@ -31,8 +31,9 @@ import { AgentInfo, readSessionGitState, ROOT_STATE_URI, SessionMeta, StateCompo
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
-import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
+import { IStorageService } from '../../../../../platform/storage/common/storage.js';
 import { IAgentHostActiveClientService } from '../../../../../workbench/contrib/chat/browser/agentSessions/agentHost/agentHostActiveClientService.js';
+import { IAgentHostRememberedSessionConfigService } from '../../../../../workbench/contrib/chat/browser/agentSessions/agentHost/agentHostRememberedSessionConfig.js';
 import { IChatWidgetService } from '../../../../../workbench/contrib/chat/browser/chat.js';
 import { IChatSendRequestOptions, IChatService } from '../../../../../workbench/contrib/chat/common/chatService/chatService.js';
 import { IChatSessionFileChange, IChatSessionFileChange2, IChatSessionsService } from '../../../../../workbench/contrib/chat/common/chatSessionsService.js';
@@ -49,13 +50,6 @@ import { computePullRequestIcon, GitHubCIOverallStatus, GitHubPullRequestState }
 import { CHANGESET_UPDATE_THROTTLE_MS } from './agentHostChangesetConstants.js';
 import { changesetFileToChange, mapProtocolStatus } from './agentHostDiffs.js';
 import { createChangesets } from './agentHostSessionChangesets.js';
-
-const STORAGE_KEY_REMEMBERED_SESSION_CONFIG_VALUES = 'sessions.agentHost.sessionConfigPicker.selectedValues';
-const UNSAFE_SESSION_CONFIG_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
-
-function isSafeSessionConfigKey(property: string): boolean {
-	return !UNSAFE_SESSION_CONFIG_KEYS.has(property);
-}
 
 function normalizeAutoApproveValue(value: unknown, policyRestricted: boolean): ChatPermissionLevel | undefined {
 	if (typeof value !== 'string' || !KNOWN_AUTO_APPROVE_VALUES.has(value)) {
@@ -1292,6 +1286,7 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 		@ISessionsService protected readonly _sessionsService: ISessionsService,
 		@IAgentHostActiveClientService protected readonly _activeClientService: IAgentHostActiveClientService,
 		@IStorageService protected readonly _storageService: IStorageService,
+		@IAgentHostRememberedSessionConfigService protected readonly _rememberedSessionConfig: IAgentHostRememberedSessionConfigService,
 	) {
 		super();
 	}
@@ -1636,11 +1631,8 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 		const policyRestricted = isAutoApprovePolicyRestricted(this._baseConfigurationService);
 
 		// Seed session config values from the last user picks.
-		const rememberedValues = this._storageService.getObject<Record<string, unknown>>(STORAGE_KEY_REMEMBERED_SESSION_CONFIG_VALUES, StorageScope.PROFILE, {});
-		for (const [property, value] of Object.entries(rememberedValues)) {
-			if (typeof value === 'string' && isSafeSessionConfigKey(property)) {
-				config[property] = value;
-			}
+		for (const [property, value] of Object.entries(this._rememberedSessionConfig.getAll())) {
+			config[property] = value;
 		}
 
 		const configured = this._baseConfigurationService.getValue<string>(ChatConfiguration.DefaultPermissionLevel);
@@ -1692,17 +1684,7 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 		const normalizedValue = normalizeSessionConfigValue(property, value, policyRestricted);
 
 		// Remember config picks across sessions
-		if (typeof normalizedValue === 'string' && isSafeSessionConfigKey(property)) {
-			const rememberedValues = this._storageService.getObject<Record<string, unknown>>(STORAGE_KEY_REMEMBERED_SESSION_CONFIG_VALUES, StorageScope.PROFILE, {});
-			const nextRememberedValues = Object.create(null) as Record<string, string>;
-			for (const [key, rememberedValue] of Object.entries(rememberedValues)) {
-				if (typeof rememberedValue === 'string' && isSafeSessionConfigKey(key)) {
-					nextRememberedValues[key] = rememberedValue;
-				}
-			}
-			nextRememberedValues[property] = normalizedValue;
-			this._storageService.store(STORAGE_KEY_REMEMBERED_SESSION_CONFIG_VALUES, JSON.stringify(nextRememberedValues), StorageScope.PROFILE, StorageTarget.MACHINE);
-		}
+		this._rememberedSessionConfig.set(property, normalizedValue);
 
 		// New session: re-resolve the full config schema. Flip the
 		// resolving flag and `loading` *before* firing the change event

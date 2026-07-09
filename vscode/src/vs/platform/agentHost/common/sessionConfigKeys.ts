@@ -26,6 +26,24 @@ export const enum SessionConfigKey {
 	Branch = 'branch',
 	/** `'mode'` — agent execution mode (interactive / plan). */
 	Mode = 'mode',
+	/** `'billing'` — who pays for model usage ({@link SessionBillingMode}). */
+	Billing = 'billing',
+}
+
+/**
+ * Values for the {@link SessionConfigKey.Billing} property: `'backboard'`
+ * routes model traffic through the Backboard-managed proxy, `'subscription'`
+ * lets the agent CLI/SDK use the user's own provider login (e.g. Claude
+ * Pro/Max via `~/.claude`, ChatGPT via `~/.codex/auth.json`).
+ */
+export type SessionBillingMode = 'backboard' | 'subscription';
+
+/**
+ * Narrows an untyped session-config value to a {@link SessionBillingMode},
+ * returning `undefined` for anything unrecognized.
+ */
+export function narrowSessionBillingMode(raw: unknown): SessionBillingMode | undefined {
+	return raw === 'backboard' || raw === 'subscription' ? raw : undefined;
 }
 
 /**

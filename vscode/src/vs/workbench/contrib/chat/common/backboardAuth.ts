@@ -20,14 +20,16 @@ export interface BackboardConfigJson {
 /**
  * Backboard SSO endpoints and client registration shared by the sign-in flow
  * and the user-info lookup. See https://docs.backboard.io/concepts/sso.
+ *
+ * Sign-in uses the OAuth device authorization grant (RFC 8628) via the
+ * built-in Backboard extension. The client id is the first-party PUBLIC
+ * device-code client (no secret); token refreshes must use the same client id
+ * the tokens were issued to.
  */
 export const BackboardOAuth = {
-	authorizeUrl: 'https://app.backboard.io/api/oauth/authorize',
 	tokenUrl: 'https://app.backboard.io/api/oauth/token',
 	userInfoUrl: 'https://app.backboard.io/api/oauth/userinfo',
-	clientId: 'Backboard_oauth_BGmuDtqCPmPgmIqWZ2ORvdqpl8fdKFQY',
-	scope: 'openid email profile',
-	defaultRedirectUri: 'http://127.0.0.1:49321/auth/callback',
+	clientId: 'Backboard_oauth_q_cli',
 } as const;
 
 export namespace BackboardAuthContextKeys {

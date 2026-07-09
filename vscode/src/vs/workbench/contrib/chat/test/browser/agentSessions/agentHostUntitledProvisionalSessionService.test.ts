@@ -18,10 +18,12 @@ import { IAgentCreateSessionConfig, IAgentHostService, IAgentResolveSessionConfi
 import { ActionType } from '../../../../../../platform/agentHost/common/state/protocol/actions.js';
 import type { ResolveSessionConfigResult } from '../../../../../../platform/agentHost/common/state/protocol/commands.js';
 import type { ConfigSchema } from '../../../../../../platform/agentHost/common/state/protocol/state.js';
+import { InMemoryStorageService } from '../../../../../../platform/storage/common/storage.js';
 import { IWorkbenchEnvironmentService } from '../../../../../services/environment/common/environmentService.js';
 import { IChatService } from '../../../common/chatService/chatService.js';
 import { AgentHostUntitledProvisionalSessionService, IAgentHostUntitledProvisionalSessionService } from '../../../browser/agentSessions/agentHost/agentHostUntitledProvisionalSessionService.js';
 import { AgentHostNewSessionFolderService, IAgentHostNewSessionFolderService } from '../../../browser/agentSessions/agentHost/agentHostNewSessionFolderService.js';
+import { AgentHostRememberedSessionConfigService, IAgentHostRememberedSessionConfigService } from '../../../browser/agentSessions/agentHost/agentHostRememberedSessionConfig.js';
 
 // ---- Mocks -----------------------------------------------------------------
 
@@ -124,6 +126,7 @@ suite('AgentHostUntitledProvisionalSessionService', () => {
 		insta.stub(IWorkbenchEnvironmentService, { isSessionsWindow: false } as Partial<IWorkbenchEnvironmentService>);
 		folderService = ds.add(insta.createInstance(AgentHostNewSessionFolderService));
 		insta.stub(IAgentHostNewSessionFolderService, folderService);
+		insta.stub(IAgentHostRememberedSessionConfigService, new AgentHostRememberedSessionConfigService(ds.add(new InMemoryStorageService())));
 		provisional = ds.add(insta.createInstance(AgentHostUntitledProvisionalSessionService));
 		cleanup = ds.add(new DisposableStore());
 	});

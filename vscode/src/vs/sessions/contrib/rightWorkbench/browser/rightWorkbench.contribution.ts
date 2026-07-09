@@ -47,7 +47,6 @@ async function openRightWorkbenchMode(accessor: ServicesAccessor, request: Right
 	const layoutService = accessor.get(IWorkbenchLayoutService);
 	layoutService.setPartHidden(false, Parts.AUXILIARYBAR_PART);
 	layoutService.setPartHidden(true, Parts.EDITOR_PART);
-	layoutService.setPartHidden(true, Parts.PANEL_PART);
 	const viewsService = accessor.get(IViewsService);
 	await viewsService.openViewContainer(SESSIONS_RIGHT_WORKBENCH_CONTAINER_ID, true);
 	await viewsService.openView(SESSIONS_RIGHT_WORKBENCH_LAUNCHER_VIEW_ID, true);

@@ -18,8 +18,10 @@ import { ILanguageModelChatMetadataAndIdentifier, ILanguageModelChatProvider, IL
  *
  * Today only the Copilot CLI harness exposes an Auto selection and can run
  * without an explicit model, so it shows "Auto" rather than a "No models
- * available" state when no models are listed. Other harnesses (Claude,
- * Codex, …) require an explicit model.
+ * available" state when no models are listed. Claude runs on the Claude
+ * Agent SDK's default model when none is selected — required for
+ * subscription-billed sessions, whose CAPI-sourced model list can be empty
+ * (e.g. when signed out of Backboard). Codex requires an explicit model.
  *
  * `provider` is the underlying agent provider id (e.g. `'copilotcli'`,
  * `'claude'`, `'codex'`), not the `agent-host-<provider>` session type.
@@ -29,7 +31,7 @@ import { ILanguageModelChatMetadataAndIdentifier, ILanguageModelChatProvider, IL
  * agent declares its own value instead of this allow-list living in core.
  */
 export function agentHostProviderSupportsAutoModel(provider: string): boolean {
-	return provider === 'copilotcli';
+	return provider === 'copilotcli' || provider === 'claude';
 }
 
 /**

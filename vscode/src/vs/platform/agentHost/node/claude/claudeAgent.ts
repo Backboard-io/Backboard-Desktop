@@ -22,7 +22,7 @@ import { IAgentPluginManager, ISyncedCustomization } from '../../common/agentPlu
 import { createSchema, platformSessionSchema, schemaProperty } from '../../common/agentHostSchema.js';
 import { ClaudePermissionMode, ClaudeSessionConfigKey, narrowClaudePermissionMode } from '../../common/claudeSessionConfigKeys.js';
 import { createClaudeThinkingLevelSchema, isClaudeEffortLevel } from '../../common/claudeModelConfig.js';
-import { SessionConfigKey } from '../../common/sessionConfigKeys.js';
+import { SessionConfigKey, narrowSessionBillingMode, type SessionBillingMode } from '../../common/sessionConfigKeys.js';
 import { AgentProvider, AgentSession, AgentSignal, GITHUB_COPILOT_PROTECTED_RESOURCE, IAgent, IAgentCreateSessionConfig, IAgentCreateSessionResult, IAgentDescriptor, IAgentMaterializeSessionEvent, IAgentModelInfo, IAgentResolveSessionConfigParams, IAgentSessionConfigCompletionsParams, IAgentSessionMetadata, IAgentSessionProjectInfo } from '../../common/agentService.js';
 import { ActionType } from '../../common/state/sessionActions.js';
 import type { ResolveSessionConfigResult, SessionConfigCompletionsResult } from '../../common/state/protocol/commands.js';
@@ -33,6 +33,7 @@ import { IAgentConfigurationService } from '../agentConfigurationService.js';
 import { IAgentHostGitService } from '../agentHostGitService.js';
 import { PendingRequestRegistry } from '../../common/pendingRequestRegistry.js';
 import { projectFromCopilotContext } from '../copilot/copilotGitProject.js';
+import { resolveSessionBillingMode } from '../shared/agentSessionBilling.js';
 import { ICopilotApiService } from '../shared/copilotApiService.js';
 import { IClaudeAgentSdkService } from './claudeAgentSdkService.js';
 import { mapSessionMessagesToTurns } from './claudeReplayMapper.js';
@@ -341,7 +342,12 @@ export class ClaudeAgent extends Disposable implements IAgent {
 	// #region Stubs — implemented in later phases
 
 	async createSession(config: IAgentCreateSessionConfig = {}): Promise<IAgentCreateSessionResult> {
-		this._ensureAuthenticated();
+		// Subscription-billed sessions never touch the Backboard proxy, so
+		// they may be created without a GitHub token. Backboard-billed
+		// sessions keep the fail-fast auth gate.
+		if (narrowSessionBillingMode(config.config?.[SessionConfigKey.Billing]) !== 'subscription') {
+			this._ensureAuthenticated();
+		}
 		if (config.fork) {
 			throw new Error('TODO: Phase 6.5: fork requires message-UUID lookup via sdk.getSessionMessages');
 		}
@@ -416,7 +422,8 @@ export class ClaudeAgent extends Disposable implements IAgent {
 		if (!session) {
 			throw new Error(`Cannot materialize unknown provisional session: ${sessionId}`);
 		}
-		const proxyHandle = this._ensureAuthenticated();
+		const billing = resolveSessionBillingMode(this._configurationService, session.sessionUri, session.provisionalConfig);
+		const proxyHandle = billing === 'subscription' ? undefined : this._ensureAuthenticated();
 
 		const canUseTool: NonNullable<Options['canUseTool']> = (toolName, input, options) =>
 			handleCanUseTool(
@@ -425,7 +432,7 @@ export class ClaudeAgent extends Disposable implements IAgent {
 			);
 
 		try {
-			await session.materialize({ proxyHandle, canUseTool, isResume: false, serverToolHost: this._serverToolHost });
+			await session.materialize({ proxyHandle, billing, canUseTool, isResume: false, serverToolHost: this._serverToolHost });
 		} catch (err) {
 			this._sessions.deleteAndDispose(sessionId);
 			throw err;
@@ -456,7 +463,6 @@ export class ClaudeAgent extends Disposable implements IAgent {
 	 */
 	private async _resumeSession(sessionId: string, sessionUri: URI): Promise<ClaudeAgentSession> {
 		this._logService.info(`[Claude:${sessionId}] _resumeSession — no in-memory state, rebuilding from disk`);
-		const proxyHandle = this._ensureAuthenticated();
 		const sdkInfo = await this._sdkService.getSessionInfo(sessionId);
 		if (!sdkInfo) {
 			throw new Error(`Cannot resume unknown session: ${sessionId} (not present in SDK transcript store)`);
@@ -474,6 +480,10 @@ export class ClaudeAgent extends Disposable implements IAgent {
 		const permissionMode = readClaudePermissionMode(this._configurationService, sessionUri)
 			?? overlay.permissionMode
 			?? 'default';
+		// The persisted overlay is the resume-time source of truth for who
+		// pays; the auth gate only applies to Backboard-billed sessions.
+		const billing = resolveSessionBillingMode(this._configurationService, sessionUri, undefined, overlay.billing);
+		const proxyHandle = billing === 'subscription' ? undefined : this._ensureAuthenticated();
 		let project: IAgentSessionProjectInfo | undefined;
 		try {
 			project = await projectFromCopilotContext({ cwd: workingDirectory.fsPath }, this._gitService);
@@ -506,7 +516,7 @@ export class ClaudeAgent extends Disposable implements IAgent {
 			);
 
 		try {
-			await session.materialize({ proxyHandle, canUseTool, isResume: true, serverToolHost: this._serverToolHost });
+			await session.materialize({ proxyHandle, billing, canUseTool, isResume: true, serverToolHost: this._serverToolHost });
 		} catch (err) {
 			this._sessions.deleteAndDispose(sessionId);
 			throw err;
@@ -724,10 +734,27 @@ export class ClaudeAgent extends Disposable implements IAgent {
 				sessionMutable: true,
 			}),
 			[SessionConfigKey.Permissions]: platformSessionSchema.definition[SessionConfigKey.Permissions],
+			[SessionConfigKey.Billing]: schemaProperty<SessionBillingMode>({
+				type: 'string',
+				title: localize('claude.sessionConfig.billing', "Billing"),
+				description: localize('claude.sessionConfig.billingDescription', "Who pays for model usage in this session."),
+				enum: ['backboard', 'subscription'],
+				enumLabels: [
+					localize('claude.sessionConfig.billing.backboard', "Backboard"),
+					localize('claude.sessionConfig.billing.subscription', "My Claude Subscription"),
+				],
+				enumDescriptions: [
+					localize('claude.sessionConfig.billing.backboardDescription', "Model usage is billed to your Backboard plan."),
+					localize('claude.sessionConfig.billing.subscriptionDescription', "Model usage runs on your own Claude account (Pro or Max). Requires being logged in to Claude Code. The available model list may differ."),
+				],
+				default: 'backboard',
+				sessionMutable: false,
+			}),
 		});
 
 		const values = sessionSchema.validateOrDefault(_params.config, {
 			[ClaudeSessionConfigKey.PermissionMode]: 'default' satisfies ClaudePermissionMode,
+			[SessionConfigKey.Billing]: 'backboard' satisfies SessionBillingMode,
 			// Permissions intentionally omitted from defaults — leave
 			// unset so auto-approval falls through to the host-level
 			// default, materializing on the session only once the user

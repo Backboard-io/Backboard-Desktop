@@ -3550,6 +3550,7 @@ suite('ClaudeAgentSession (Phase 7 §3.2)', () => {
 		));
 		await session.materialize({
 			proxyHandle: { baseUrl: 'http://127.0.0.1:0', nonce: 'n', dispose: () => { } },
+			billing: 'backboard',
 			canUseTool: async () => ({ behavior: 'deny', message: 'unused' }),
 			isResume: false,
 		});

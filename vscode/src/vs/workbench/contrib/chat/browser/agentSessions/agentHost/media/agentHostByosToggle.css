@@ -1,0 +1,45 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.interactive-input-part .chat-byos-toggle-row {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 6px;
+	padding: 2px 8px 0 8px;
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.interactive-input-part .chat-byos-toggle-row .chat-byos-toggle-picker .agent-host-chat-input-picker-slot {
+	display: flex;
+	align-items: center;
+}
+
+.interactive-input-part .chat-byos-toggle-row .chat-byos-started-label {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.interactive-input-part .chat-byos-toggle-row .chat-byos-login-warning {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	color: var(--vscode-notificationsWarningIcon-foreground);
+}
+
+.interactive-input-part .chat-byos-toggle-row .chat-byos-login-warning .chat-byos-login-warning-message {
+	color: var(--vscode-descriptionForeground);
+}
+
+.interactive-input-part .chat-byos-toggle-row .chat-byos-login-warning .chat-byos-login-warning-action {
+	color: var(--vscode-textLink-foreground);
+	cursor: pointer;
+}
+
+.interactive-input-part .chat-byos-toggle-row .chat-byos-login-warning .chat-byos-login-warning-action:hover {
+	text-decoration: underline;
+}

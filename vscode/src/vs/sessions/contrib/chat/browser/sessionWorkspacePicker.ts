@@ -166,6 +166,17 @@ export class WorkspacePicker extends Disposable {
 	private _localOnly = false;
 
 	/**
+	 * Resolves once the initial VS Code recent-folder load has completed, so
+	 * callers can tell "no recents" apart from "recents not loaded yet"
+	 * before applying a last-resort default (see the new-chat composer's
+	 * home-directory fallback).
+	 */
+	private _whenInitialRecentsLoaded!: Promise<void>;
+	get whenInitialRecentsLoaded(): Promise<void> {
+		return this._whenInitialRecentsLoaded;
+	}
+
+	/**
 	 * Tracks recent local folders that have been deleted from disk so they are
 	 * hidden from the picker and never restored as the current selection.
 	 */
@@ -264,7 +275,7 @@ export class WorkspacePicker extends Disposable {
 		}));
 
 		// Load VS Code recent folders eagerly and refresh on changes
-		this._loadVSCodeRecentFolders();
+		this._whenInitialRecentsLoaded = this._loadVSCodeRecentFolders().then(() => undefined, () => undefined);
 		this._register(this.workspacesService.onDidChangeRecentlyOpened(() => this._loadVSCodeRecentFolders()));
 
 		// Check whether the recent local folders still exist so deleted ones are

@@ -127,3 +127,51 @@ suite('claudeSdkOptions / buildOptions plugins projection', () => {
 		assert.strictEqual(opts.plugins, undefined);
 	});
 });
+
+suite('claudeSdkOptions / buildOptions billing env', () => {
+
+	ensureNoDisposablesAreLeakedInTestSuite();
+
+	function input() {
+		return {
+			sessionId: 's1',
+			workingDirectory: URI.file('/tmp/x'),
+			model: undefined,
+			abortController: new AbortController(),
+			permissionMode: 'default' as const,
+			canUseTool: async () => ({ behavior: 'allow' as const, updatedInput: {} }),
+			isResume: false,
+			mcpServers: undefined,
+		};
+	}
+
+	function settingsEnvOf(opts: Awaited<ReturnType<typeof buildOptions>>): Record<string, string> | undefined {
+		return typeof opts.settings === 'object' ? opts.settings?.env : undefined;
+	}
+
+	test('with a proxy handle, settings.env routes through the proxy', async () => {
+		const proxyHandle: IClaudeProxyHandle = { baseUrl: 'http://127.0.0.1:1234', nonce: 'n', dispose: () => { } };
+		const opts = await buildOptions(input(), proxyHandle, () => { }, () => { });
+		assert.deepStrictEqual({
+			baseUrl: settingsEnvOf(opts)?.ANTHROPIC_BASE_URL,
+			authToken: settingsEnvOf(opts)?.ANTHROPIC_AUTH_TOKEN,
+		}, {
+			baseUrl: 'http://127.0.0.1:1234',
+			authToken: 'n.s1',
+		});
+	});
+
+	test('without a proxy handle (subscription billing), no Anthropic endpoint or token is injected', async () => {
+		const opts = await buildOptions(input(), undefined, () => { }, () => { });
+		assert.deepStrictEqual({
+			baseUrl: settingsEnvOf(opts)?.ANTHROPIC_BASE_URL,
+			authToken: settingsEnvOf(opts)?.ANTHROPIC_AUTH_TOKEN,
+			// The SDK subprocess must still never see a raw API key.
+			apiKey: opts.env?.ANTHROPIC_API_KEY,
+		}, {
+			baseUrl: undefined,
+			authToken: undefined,
+			apiKey: undefined,
+		});
+	});
+});

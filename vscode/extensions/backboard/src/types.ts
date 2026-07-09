@@ -164,11 +164,13 @@ export interface BackboardOAuthTokens {
 	readonly selected_client_name?: string | null;
 }
 
-export interface BackboardOAuthPending {
-	readonly state: string;
-	readonly resolve: (code: string) => void;
-	readonly reject: (error: Error) => void;
-	readonly timeout: NodeJS.Timeout;
+export interface BackboardDeviceCodeResponse {
+	readonly device_code: string;
+	readonly user_code: string;
+	readonly verification_uri: string;
+	readonly verification_uri_complete: string;
+	readonly expires_in: number;
+	readonly interval: number;
 }
 
 export interface BackboardOAuthSaveResult {

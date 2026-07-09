@@ -114,6 +114,7 @@ import { IChatWidget, IChatWidgetViewModelChangeEvent, ISessionTypePickerDelegat
 import { ChatEditingShowChangesAction, ViewPreviousEditsAction } from '../../chatEditing/chatEditingActions.js';
 import { resizeImage } from '../../chatImageUtils.js';
 import { ChatSessionPickerActionItem, IChatSessionPickerDelegate } from '../../chatSessions/chatSessionPickerActionItem.js';
+import { AgentHostByosToggle } from '../../agentSessions/agentHost/agentHostByosToggle.js';
 import { AgentHostChatInputPicker, AgentHostChatInputPickerActionViewItem } from '../../agentSessions/agentHost/agentHostChatInputPicker.js';
 import { OpenAgentHostAutoApprovePickerAction, OpenAgentHostModePickerAction, OpenAgentHostPermissionModePickerAction, OpenAgentHostFolderPickerAction } from '../../agentSessions/agentHost/agentHostChatInputPicker.contribution.js';
 import { AgentHostGenericConfigChips, IAgentHostGenericConfigOption } from '../../agentSessions/agentHost/agentHostGenericConfigChips.js';
@@ -2932,6 +2933,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 					dom.h('.interactive-input-and-side-toolbar@inputAndSideToolbar', [
 						dom.h('.chat-input-container@inputContainer', [
 							dom.h('.chat-editor-container@editorContainer'),
+							dom.h('.chat-byos-toggle-container@byosToggleContainer'),
 							dom.h('.chat-input-toolbars@inputToolbars'),
 						]),
 					]),
@@ -2964,6 +2966,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 							dom.h('.chat-attached-context@attachedContextContainer'),
 						]),
 						dom.h('.chat-editor-container@editorContainer'),
+						dom.h('.chat-byos-toggle-container@byosToggleContainer'),
 						dom.h('.chat-input-toolbars@inputToolbars'),
 					]),
 				]),
@@ -3370,6 +3373,12 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		genericChipsLane.render(genericChipsContainer);
 		genericChipsContainer.style.display = 'none';
 		dom.append(toolbarsContainer, genericChipsContainer);
+
+		// "Use my subscription" billing toggle, rendered above the input
+		// toolbars. Self-hides for agents whose session-config schema does
+		// not advertise the `billing` property (Copilot, cli-ts, ...).
+		const byosToggle = this._register(this.instantiationService.createInstance(AgentHostByosToggle, widget));
+		byosToggle.render(elements.byosToggleContainer);
 
 		// Secondary toolbar (permissions) — below the input box.
 		// Most Backboard agent-host config pickers now render in the primary

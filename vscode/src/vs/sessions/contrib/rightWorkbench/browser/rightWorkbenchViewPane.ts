@@ -165,7 +165,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 		super(options, keybindingService, contextMenuService, configurationService, contextKeyService, viewDescriptorService, instantiationService, openerService, themeService, hoverService);
 		this._register(onDidRequestModeEmitter.event(request => { void this.openMode(request); }));
 		this._register(this.layoutService.onDidChangePartVisibility(e => {
-			if ((e.partId === Parts.EDITOR_PART || e.partId === Parts.PANEL_PART) && e.visible) {
+			if (e.partId === Parts.EDITOR_PART && e.visible) {
 				this.enforceSingleSurfaceLayout();
 			}
 		}));
@@ -251,7 +251,6 @@ export class RightWorkbenchViewPane extends ViewPane {
 	private activateSingleSurface(): void {
 		this.layoutService.setPartHidden(false, Parts.AUXILIARYBAR_PART);
 		this.layoutService.setPartHidden(true, Parts.EDITOR_PART);
-		this.layoutService.setPartHidden(true, Parts.PANEL_PART);
 	}
 
 	private enforceSingleSurfaceLayout(): void {

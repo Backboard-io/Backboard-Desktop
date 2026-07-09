@@ -115,6 +115,9 @@ export function getConfigIcon(property: string, value: unknown | undefined): The
 	if (property === 'imageGeneration') {
 		return Codicon.symbolColor;
 	}
+	if (property === SessionConfigKey.Billing) {
+		return value === 'subscription' ? Codicon.account : Codicon.creditCard;
+	}
 	return undefined;
 }
 
