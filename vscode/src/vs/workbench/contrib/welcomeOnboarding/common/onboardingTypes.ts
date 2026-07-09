@@ -120,6 +120,15 @@ export const ONBOARDING_TOUR_STORAGE_KEY = 'welcomeOnboarding.tourComplete';
  */
 export const ONBOARDING_SESSIONS_TOUR_STORAGE_KEY = 'sessions.postOnboardingTour.complete';
 
+/**
+ * Handoff flag set by the Agents-window tour when the user finishes it with
+ * "Open the Editor". The window then switches to the editor page (a full reload
+ * into the main workbench), and the editor-window tour reads this flag at
+ * startup to continue the walkthrough there before clearing it. APPLICATION
+ * scope so it survives the cross-window reload; the reset action clears it too.
+ */
+export const ONBOARDING_EDITOR_TOUR_PENDING_KEY = 'welcomeOnboarding.editorTourPending';
+
 export type OnboardingDismissReason = 'complete' | 'skip';
 
 export interface IBackboardOnboardingState {

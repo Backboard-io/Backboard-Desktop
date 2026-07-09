@@ -8,6 +8,7 @@ import { Categories } from '../../../../platform/action/common/actionCommonCateg
 import { Action2, registerAction2 } from '../../../../platform/actions/common/actions.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
+import { IStorageService } from '../../../../platform/storage/common/storage.js';
 import { registerWorkbenchContribution2, WorkbenchPhase } from '../../../../workbench/common/contributions.js';
 import { IWorkbenchLayoutService } from '../../../../workbench/services/layout/browser/layoutService.js';
 import { PostOnboardingSessionsTour, showSessionsOnboardingTour } from './postOnboardingSessionsTour.js';
@@ -27,6 +28,7 @@ registerAction2(class extends Action2 {
 	run(accessor: ServicesAccessor): void {
 		const layoutService = accessor.get(IWorkbenchLayoutService);
 		const commandService = accessor.get(ICommandService);
-		showSessionsOnboardingTour(layoutService, commandService);
+		const storageService = accessor.get(IStorageService);
+		showSessionsOnboardingTour(layoutService, commandService, storageService);
 	}
 });

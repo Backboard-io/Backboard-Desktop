@@ -38,6 +38,11 @@ export interface ISpotlightTourStep {
 	 * centered with no spotlight instead of dropping the step.
 	 */
 	readonly anchor: () => HTMLElement | undefined;
+	/**
+	 * Overrides the primary button label for this step (normally "Continue", or
+	 * "Done" on the last step), e.g. when finishing the tour triggers an action.
+	 */
+	readonly nextLabel?: string;
 }
 
 /** A centered consent card shown before the walkthrough, asking whether to start it. */
@@ -297,7 +302,7 @@ export class SpotlightTour extends Disposable {
 
 		const nextButton = append(footerRight, $<HTMLButtonElement>('button.spotlight-tour-btn.spotlight-tour-btn-primary'));
 		nextButton.type = 'button';
-		nextButton.textContent = isLast ? localize('spotlightTour.done', "Done") : localize('spotlightTour.continue', "Continue");
+		nextButton.textContent = step.nextLabel ?? (isLast ? localize('spotlightTour.done', "Done") : localize('spotlightTour.continue', "Continue"));
 
 		this.stepDisposables.add(addDisposableListener(skipButton, EventType.CLICK, () => void this._finish(false)));
 		this.stepDisposables.add(addDisposableListener(backButton, EventType.CLICK, () => this._go(-1)));

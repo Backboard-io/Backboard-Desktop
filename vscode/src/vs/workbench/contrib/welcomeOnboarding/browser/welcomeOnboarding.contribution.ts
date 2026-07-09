@@ -12,11 +12,16 @@ import { Action2, registerAction2 } from '../../../../platform/actions/common/ac
 import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
 import { ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 import { IStorageService, StorageScope } from '../../../../platform/storage/common/storage.js';
+import { registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
+import { IWorkbenchLayoutService } from '../../../services/layout/browser/layoutService.js';
 import { IOnboardingService } from '../common/onboardingService.js';
-import { ONBOARDING_SESSIONS_TOUR_STORAGE_KEY, ONBOARDING_STORAGE_KEY, ONBOARDING_TOUR_STORAGE_KEY } from '../common/onboardingTypes.js';
+import { ONBOARDING_EDITOR_TOUR_PENDING_KEY, ONBOARDING_SESSIONS_TOUR_STORAGE_KEY, ONBOARDING_STORAGE_KEY, ONBOARDING_TOUR_STORAGE_KEY } from '../common/onboardingTypes.js';
 import { OnboardingVariationA } from './onboardingVariationA.js';
+import { PostOnboardingEditorTour, showEditorOnboardingTour } from './postOnboardingEditorTour.js';
 
 registerSingleton(IOnboardingService, OnboardingVariationA, InstantiationType.Delayed);
+
+registerWorkbenchContribution2(PostOnboardingEditorTour.ID, PostOnboardingEditorTour, WorkbenchPhase.AfterRestored);
 
 registerAction2(class extends Action2 {
 	constructor() {
@@ -49,8 +54,24 @@ registerAction2(class extends Action2 {
 		storageService.remove(ONBOARDING_STORAGE_KEY, StorageScope.APPLICATION);
 		storageService.remove(ONBOARDING_TOUR_STORAGE_KEY, StorageScope.APPLICATION);
 		storageService.remove(ONBOARDING_SESSIONS_TOUR_STORAGE_KEY, StorageScope.APPLICATION);
+		storageService.remove(ONBOARDING_EDITOR_TOUR_PENDING_KEY, StorageScope.APPLICATION);
 
 		const onboardingService = accessor.get(IOnboardingService);
 		onboardingService.reset();
+	}
+});
+
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: 'workbench.action.showEditorWindowTour',
+			title: localize2('showEditorWindowTour', "Show Editor Window Tour"),
+			category: Categories.Developer,
+			f1: true,
+		});
+	}
+
+	run(accessor: ServicesAccessor): void {
+		showEditorOnboardingTour(accessor.get(IWorkbenchLayoutService));
 	}
 });

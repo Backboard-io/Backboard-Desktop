@@ -10,7 +10,7 @@ import { CancellationTokenSource } from '../../../../base/common/cancellation.js
 import { Codicon } from '../../../../base/common/codicons.js';
 import { Event } from '../../../../base/common/event.js';
 import { Disposable, DisposableStore, IDisposable, MutableDisposable } from '../../../../base/common/lifecycle.js';
-import { autorun, derivedObservableWithCache, IObservable, observableFromEvent } from '../../../../base/common/observable.js';
+import { autorun, derivedObservableWithCache, IObservable, observableSignalFromEvent, observableValue } from '../../../../base/common/observable.js';
 import { isWeb } from '../../../../base/common/platform.js';
 import { isEqual } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
@@ -134,6 +134,14 @@ export class NewChatWidget extends Disposable {
 	private _composerWorkspaceRowElement: HTMLElement | undefined;
 	/** Set once the composer has seeded (or confirmed) a default workspace so it never re-seeds after an explicit clear. See {@link _ensureComposerHasWorkspace}. */
 	private _defaultWorkspaceHandled = false;
+	/**
+	 * The user's home directory, resolved only after the workspace picker's
+	 * recents have loaded so it can never win a race against a real recent
+	 * workspace. Last-resort seed for {@link _ensureComposerHasWorkspace} so
+	 * the model and Backboard-options pickers render even on a fresh profile
+	 * with no workspace history.
+	 */
+	private readonly _homeFolderFallback = observableValue<URI | undefined>(this, undefined);
 	private _middleTitle: HTMLElement | undefined;
 	private _middleTitlePrefix: HTMLElement | undefined;
 	private _middleTitleSuffix: HTMLElement | undefined;
@@ -342,8 +350,22 @@ export class NewChatWidget extends Disposable {
 	 * never fights the user explicitly clearing the workspace afterwards.
 	 */
 	private _ensureComposerHasWorkspace(): void {
-		const pickerChanged = observableFromEvent(this, this._workspacePicker.onDidChangeSelection, () => undefined);
-		const sessionTypesChanged = observableFromEvent(this, this.sessionsManagementService.onDidChangeSessionTypes, () => undefined);
+		// Resolve the home-directory fallback only once the picker's recents
+		// have loaded, so a real recent workspace always wins the seed below.
+		this._workspacePicker.whenInitialRecentsLoaded
+			.then(() => this.pathService.userHome({ preferLocal: true }))
+			.then(home => {
+				if (!this._store.isDisposed) {
+					this._homeFolderFallback.set(home, undefined);
+				}
+			}, () => { /* no home available — leave the composer unseeded */ });
+
+		// Signals, not observableFromEvent(..., () => undefined): a constant
+		// mapped value is deduplicated by the equality comparator, so such an
+		// observable never fires again after the first read and the autorun
+		// would never re-run when the home fallback resolves later.
+		const pickerChanged = observableSignalFromEvent(this, this._workspacePicker.onDidChangeSelection);
+		const sessionTypesChanged = observableSignalFromEvent(this, this.sessionsManagementService.onDidChangeSessionTypes);
 		this._register(autorun(reader => {
 			if (this._defaultWorkspaceHandled) {
 				return;
@@ -376,6 +398,27 @@ export class NewChatWidget extends Disposable {
 			if (candidate) {
 				this._defaultWorkspaceHandled = true;
 				this._workspacePicker.setSelectedWorkspace(candidate);
+				return;
+			}
+
+			// Fresh profile with no recent sessions or folders anywhere: seed
+			// the user's home directory so the composer's model and
+			// Backboard-options controls still render. The draft is created
+			// without the upfront trust prompt (nothing was user-initiated
+			// yet); {@link _sendFromSharedComposer} requests folder trust before
+			// the first send instead.
+			const home = this._homeFolderFallback.read(reader);
+			if (home && this.sessionsManagementService.getSessionTypesForFolder(home).length > 0) {
+				this._defaultWorkspaceHandled = true;
+				this._workspacePicker.setSelectedWorkspace(home, { fireEvent: false });
+				// Defer draft creation out of the autorun: creating a session
+				// activates it (mutating observables this autorun reads), which
+				// must not happen mid-read.
+				queueMicrotask(() => {
+					if (!this._store.isDisposed && !this._session.get()) {
+						this._createNewSession(home);
+					}
+				});
 			}
 		}));
 	}
@@ -779,6 +822,15 @@ export class NewChatWidget extends Disposable {
 				}
 			}
 		}
+		// The seeded home-directory draft skips the trust prompt at creation
+		// time (see {@link _ensureComposerHasWorkspace}); request it here, at
+		// the first user-initiated send. No dialog is shown when the folder is
+		// already trusted (the common, explicitly-picked case).
+		if (!await this._ensureSessionWorkspaceTrust(session)) {
+			this._widget.setInput(query);
+			this._widget.focusInput();
+			return true;
+		}
 		const provider = this.sessionsProvidersService.getProvider(session.providerId);
 		if (input.currentLanguageModel) {
 			provider?.setModel(session.sessionId, input.currentLanguageModel);
@@ -1034,6 +1086,23 @@ export class NewChatWidget extends Disposable {
 		this._workspacePicker.setSelectedWorkspace(folderUri, { fireEvent: false });
 		await this._onWorkspaceSelected(folderUri);
 		return !!this._session.get();
+	}
+
+	/**
+	 * Requests workspace trust for the session's folder when its workspace
+	 * requires it. Resolves `true` without any UI when the folder is already
+	 * trusted or trust is not required, so it is safe to gate every send.
+	 */
+	private async _ensureSessionWorkspaceTrust(session: IActiveSession): Promise<boolean> {
+		const folderUri = session.workspace.get()?.folders[0]?.root;
+		if (!folderUri) {
+			return true;
+		}
+		const resolved = this.sessionsManagementService.resolveWorkspace(folderUri);
+		if (!resolved?.workspace.requiresWorkspaceTrust) {
+			return true;
+		}
+		return this._requestFolderTrust(folderUri);
 	}
 
 	private async _requestFolderTrust(folderUri: URI): Promise<boolean> {
