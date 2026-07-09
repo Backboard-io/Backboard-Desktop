@@ -196,8 +196,13 @@
 
 .new-chat-octopus {
 	position: absolute;
-	right: calc(100% + 14px);
-	top: 50%;
+	/* The canvas has 4 empty columns (8px) on its right that only fill
+	 * during the flip-off, keeping the visible idle gap to the text ~12px.
+	 * The mascot sits in the lower part of the canvas (the rows above are
+	 * headroom for the raised finger), so nudge up to center it on the
+	 * heading line. */
+	right: calc(100% + 4px);
+	top: calc(50% - 6px);
 	transform: translateY(-50%);
 	line-height: 0;
 	pointer-events: none;
@@ -205,87 +210,226 @@
 }
 
 .new-chat-octopus .octo-sprite {
-	width: 32px;
-	height: 26px;
+	/* 24x20 canvas at 2px per sprite pixel (the head is 16x9; the padding
+	 * columns and top rows host the giant flip-off fist and finger). */
+	width: 48px;
+	height: 40px;
 	shape-rendering: crispEdges;
 	image-rendering: pixelated;
-	animation: new-chat-octopus-bob 27s ease-in-out infinite;
+	/* Origin near the mascot's face so the punch lunge grows toward the
+	 * viewer and the open space, not into the heading text. */
+	transform-origin: 55% 60%;
+	animation: new-chat-octopus-bob 32s ease-in-out infinite;
 }
 
 .new-chat-octopus .octo-frame-b,
-.new-chat-octopus .octo-flip,
+.new-chat-octopus .octo-soccer-kick,
+.new-chat-octopus .octo-soccer-up,
+.new-chat-octopus .octo-lift-low,
+.new-chat-octopus .octo-lift-high,
+.new-chat-octopus .octo-eyepatch,
+.new-chat-octopus .octo-fist,
+.new-chat-octopus .octo-flip-up,
+.new-chat-octopus .octo-flip-waggle,
 .new-chat-octopus .octo-eyelids {
 	opacity: 0;
 }
 
 .new-chat-octopus .octo-frame-a {
-	animation: new-chat-octopus-frame-a 27s linear infinite;
+	animation: new-chat-octopus-frame-a 32s linear infinite;
 }
 
 .new-chat-octopus .octo-frame-b {
-	animation: new-chat-octopus-frame-b 27s linear infinite;
+	animation: new-chat-octopus-frame-b 32s linear infinite;
 }
 
-.new-chat-octopus .octo-flip {
-	animation: new-chat-octopus-flip 27s linear infinite;
+.new-chat-octopus .octo-soccer-kick {
+	animation: new-chat-octopus-soccer-kick 32s linear infinite;
+}
+
+.new-chat-octopus .octo-soccer-up {
+	animation: new-chat-octopus-soccer-up 32s linear infinite;
+}
+
+.new-chat-octopus .octo-lift-low {
+	animation: new-chat-octopus-lift-low 32s linear infinite;
+}
+
+.new-chat-octopus .octo-lift-high {
+	animation: new-chat-octopus-lift-high 32s linear infinite;
+}
+
+.new-chat-octopus .octo-eyepatch {
+	animation: new-chat-octopus-eyepatch 32s linear infinite;
+}
+
+.new-chat-octopus .octo-fist {
+	animation: new-chat-octopus-fist 32s linear infinite;
+}
+
+.new-chat-octopus .octo-flip-up {
+	animation: new-chat-octopus-flip-up 32s linear infinite;
+}
+
+.new-chat-octopus .octo-flip-waggle {
+	animation: new-chat-octopus-flip-waggle 32s linear infinite;
 }
 
 .new-chat-octopus .octo-eyelids {
-	animation: new-chat-octopus-blink 27s linear infinite;
+	animation: new-chat-octopus-blink 32s linear infinite;
 }
 
-/* One shared 27s idle timeline so the frames never overlap: tentacle
- * wiggles (A/B swaps) around 25% and 55%, blinks at 11% and 74%, and one
- * brief flip-off (frame at 84-89%, ~1.3s) once per cycle. */
+/* One shared 32s idle timeline so the frames never overlap:
+ *  ~4%  blink            ~26% blink           ~55% blink   ~70% blink
+ *  8-10% tentacle wiggle     44-46% wiggle (in eyepatch)   60-62% wiggle
+ *  14-20% soccer keep-ups (ball high/low, kicking leg; frame A hidden)
+ *  30-36% barbell press (chin level -> overhead lockout, twice)
+ *  42-50% pirate eyepatch interlude
+ *  78-86% flip-off: giant fist punch, finger + two waggles, closing fist. */
 @keyframes new-chat-octopus-frame-a {
-	0%, 24.9% { opacity: 1; }
-	25%, 26.2% { opacity: 0; }
-	26.3%, 27.5% { opacity: 1; }
-	27.6%, 28.9% { opacity: 0; }
-	29%, 54.9% { opacity: 1; }
-	55%, 56.2% { opacity: 0; }
-	56.3%, 57.5% { opacity: 1; }
-	57.6%, 58.9% { opacity: 0; }
-	59%, 83.9% { opacity: 1; }
-	84%, 88.9% { opacity: 0; }
-	89%, 100% { opacity: 1; }
+	0%, 7.9% { opacity: 1; }
+	8%, 8.6% { opacity: 0; }
+	8.7%, 9.3% { opacity: 1; }
+	9.4%, 9.9% { opacity: 0; }
+	10%, 13.9% { opacity: 1; }
+	14%, 19.9% { opacity: 0; }
+	20%, 43.9% { opacity: 1; }
+	44%, 44.6% { opacity: 0; }
+	44.7%, 45.3% { opacity: 1; }
+	45.4%, 45.9% { opacity: 0; }
+	46%, 59.9% { opacity: 1; }
+	60%, 60.6% { opacity: 0; }
+	60.7%, 61.3% { opacity: 1; }
+	61.4%, 61.9% { opacity: 0; }
+	62%, 77.9% { opacity: 1; }
+	78%, 85.9% { opacity: 0; }
+	86%, 100% { opacity: 1; }
 }
 
 @keyframes new-chat-octopus-frame-b {
-	0%, 24.9% { opacity: 0; }
-	25%, 26.2% { opacity: 1; }
-	26.3%, 27.5% { opacity: 0; }
-	27.6%, 28.9% { opacity: 1; }
-	29%, 54.9% { opacity: 0; }
-	55%, 56.2% { opacity: 1; }
-	56.3%, 57.5% { opacity: 0; }
-	57.6%, 58.9% { opacity: 1; }
-	59%, 100% { opacity: 0; }
+	0%, 7.9% { opacity: 0; }
+	8%, 8.6% { opacity: 1; }
+	8.7%, 9.3% { opacity: 0; }
+	9.4%, 9.9% { opacity: 1; }
+	10%, 43.9% { opacity: 0; }
+	44%, 44.6% { opacity: 1; }
+	44.7%, 45.3% { opacity: 0; }
+	45.4%, 45.9% { opacity: 1; }
+	46%, 59.9% { opacity: 0; }
+	60%, 60.6% { opacity: 1; }
+	60.7%, 61.3% { opacity: 0; }
+	61.4%, 61.9% { opacity: 1; }
+	62%, 100% { opacity: 0; }
 }
 
-@keyframes new-chat-octopus-flip {
-	0%, 83.9% { opacity: 0; }
-	84%, 88.9% { opacity: 1; }
-	89%, 100% { opacity: 0; }
+@keyframes new-chat-octopus-soccer-kick {
+	0%, 13.9% { opacity: 0; }
+	14%, 14.7% { opacity: 1; }
+	14.8%, 15.4% { opacity: 0; }
+	15.5%, 16.2% { opacity: 1; }
+	16.3%, 16.9% { opacity: 0; }
+	17%, 17.7% { opacity: 1; }
+	17.8%, 18.4% { opacity: 0; }
+	18.5%, 19.2% { opacity: 1; }
+	19.3%, 100% { opacity: 0; }
 }
 
-/* Small hops during the wiggle windows and a little lift for the flip. */
+@keyframes new-chat-octopus-soccer-up {
+	0%, 14.7% { opacity: 0; }
+	14.8%, 15.4% { opacity: 1; }
+	15.5%, 16.2% { opacity: 0; }
+	16.3%, 16.9% { opacity: 1; }
+	17%, 17.7% { opacity: 0; }
+	17.8%, 18.4% { opacity: 1; }
+	18.5%, 19.2% { opacity: 0; }
+	19.3%, 19.9% { opacity: 1; }
+	20%, 100% { opacity: 0; }
+}
+
+@keyframes new-chat-octopus-lift-low {
+	0%, 29.9% { opacity: 0; }
+	30%, 31.4% { opacity: 1; }
+	31.5%, 32.9% { opacity: 0; }
+	33%, 34.4% { opacity: 1; }
+	34.5%, 100% { opacity: 0; }
+}
+
+@keyframes new-chat-octopus-lift-high {
+	0%, 31.4% { opacity: 0; }
+	31.5%, 32.9% { opacity: 1; }
+	33%, 34.4% { opacity: 0; }
+	34.5%, 36% { opacity: 1; }
+	36.1%, 100% { opacity: 0; }
+}
+
+@keyframes new-chat-octopus-eyepatch {
+	0%, 41.9% { opacity: 0; }
+	42%, 49.9% { opacity: 1; }
+	50%, 100% { opacity: 0; }
+}
+
+@keyframes new-chat-octopus-fist {
+	0%, 77.9% { opacity: 0; }
+	78%, 79.9% { opacity: 1; }
+	80%, 84.3% { opacity: 0; }
+	84.4%, 85.9% { opacity: 1; }
+	86%, 100% { opacity: 0; }
+}
+
+@keyframes new-chat-octopus-flip-up {
+	0%, 79.9% { opacity: 0; }
+	80%, 80.8% { opacity: 1; }
+	80.9%, 81.7% { opacity: 0; }
+	81.8%, 82.6% { opacity: 1; }
+	82.7%, 83.5% { opacity: 0; }
+	83.6%, 84.3% { opacity: 1; }
+	84.4%, 100% { opacity: 0; }
+}
+
+@keyframes new-chat-octopus-flip-waggle {
+	0%, 80.8% { opacity: 0; }
+	80.9%, 81.7% { opacity: 1; }
+	81.8%, 82.6% { opacity: 0; }
+	82.7%, 83.5% { opacity: 1; }
+	83.6%, 100% { opacity: 0; }
+}
+
+/* Motion track: hops on the wiggles, rhythmic bounces for the keep-ups, a
+ * squat-and-press for the barbell, and the 2x punch lunge for the flip. */
 @keyframes new-chat-octopus-bob {
-	0%, 24%, 29%, 54%, 59%, 83%, 90%, 100% { transform: translateY(0); }
-	26% { transform: translateY(-2px); }
-	28% { transform: translateY(-1px); }
-	56% { transform: translateY(-2px); }
-	58% { transform: translateY(-1px); }
-	86.5% { transform: translateY(-2px); }
+	0%, 7.5%, 10.5%, 13.5%, 20.5%, 29.5%, 36.5%, 41.5%, 46.5%, 59.5%, 62.5%, 77.5%, 86.5%, 100% { transform: translateY(0) rotate(0deg) scale(1); }
+	8.5% { transform: translateY(-2px) rotate(0deg) scale(1); }
+	9.5% { transform: translateY(-1px) rotate(0deg) scale(1); }
+	14.4% { transform: translateY(-2px) rotate(0deg) scale(1); }
+	15.1% { transform: translateY(0) rotate(0deg) scale(1); }
+	16% { transform: translateY(-2px) rotate(0deg) scale(1); }
+	16.8% { transform: translateY(0) rotate(0deg) scale(1); }
+	17.6% { transform: translateY(-2px) rotate(0deg) scale(1); }
+	18.4% { transform: translateY(0) rotate(0deg) scale(1); }
+	19.2% { transform: translateY(-2px) rotate(0deg) scale(1); }
+	30.8% { transform: translateY(1px) rotate(0deg) scale(1); }
+	32.2% { transform: translateY(-2px) rotate(0deg) scale(1); }
+	33.8% { transform: translateY(1px) rotate(0deg) scale(1); }
+	35.2% { transform: translateY(-2px) rotate(0deg) scale(1); }
+	44.5% { transform: translateY(-2px) rotate(0deg) scale(1); }
+	45.5% { transform: translateY(-1px) rotate(0deg) scale(1); }
+	60.5% { transform: translateY(-2px) rotate(0deg) scale(1); }
+	61.5% { transform: translateY(-1px) rotate(0deg) scale(1); }
+	78.5% { transform: translateY(-2px) rotate(-8deg) scale(2.3); }
+	79.2%, 85.2% { transform: translateY(-2px) rotate(-4deg) scale(2); }
 }
 
-/* Two quick blinks per idle cycle. */
+/* Quick blinks sprinkled through the idle cycle. */
 @keyframes new-chat-octopus-blink {
-	0%, 10.9% { opacity: 0; }
-	11%, 11.5% { opacity: 1; }
-	11.6%, 73.9% { opacity: 0; }
-	74%, 74.5% { opacity: 1; }
-	74.6%, 100% { opacity: 0; }
+	0%, 3.9% { opacity: 0; }
+	4%, 4.4% { opacity: 1; }
+	4.5%, 25.9% { opacity: 0; }
+	26%, 26.4% { opacity: 1; }
+	26.5%, 54.9% { opacity: 0; }
+	55%, 55.4% { opacity: 1; }
+	55.5%, 69.9% { opacity: 0; }
+	70%, 70.4% { opacity: 1; }
+	70.5%, 100% { opacity: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {

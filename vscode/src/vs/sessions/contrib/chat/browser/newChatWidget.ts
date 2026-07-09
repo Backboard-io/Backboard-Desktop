@@ -9,7 +9,7 @@ import { renderIcon } from '../../../../base/browser/ui/iconLabel/iconLabels.js'
 import { CancellationTokenSource } from '../../../../base/common/cancellation.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { Event } from '../../../../base/common/event.js';
-import { Disposable, DisposableStore, IDisposable, MutableDisposable } from '../../../../base/common/lifecycle.js';
+import { Disposable, DisposableStore, IDisposable, MutableDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
 import { autorun, derivedObservableWithCache, IObservable, observableSignalFromEvent, observableValue } from '../../../../base/common/observable.js';
 import { isWeb } from '../../../../base/common/platform.js';
 import { isEqual } from '../../../../base/common/resources.js';
@@ -20,7 +20,10 @@ import { IFileService } from '../../../../platform/files/common/files.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { ServiceCollection } from '../../../../platform/instantiation/common/serviceCollection.js';
-import { localize } from '../../../../nls.js';
+import { localize, localize2 } from '../../../../nls.js';
+import { Action2, registerAction2 } from '../../../../platform/actions/common/actions.js';
+import { ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
+import { CHAT_CATEGORY } from '../../../../workbench/contrib/chat/browser/actions/chatActions.js';
 import { IActiveSession, ISendRequestOptions, ISessionsManagementService } from '../../../services/sessions/common/sessionsManagement.js';
 import { IChat, ISession } from '../../../services/sessions/common/session.js';
 import { ISessionsService } from '../../../services/sessions/browser/sessionsService.js';
@@ -99,27 +102,158 @@ const OCTOPUS_EYELIDS = [
 	'...BBB....BBB...',
 ];
 
-/** Sprite row where the flip-off frame starts (the raised tentacle tip). */
-const OCTOPUS_FLIP_ROW = 2;
+/**
+ * Empty columns reserved on each side of the head, and empty rows above it,
+ * so the giant flip-off fist and its raised finger have room. The non-flip
+ * frames are drawn shifted by these offsets.
+ */
+const OCTOPUS_CANVAS_PAD = 4;
+const OCTOPUS_ROW_PAD = 7;
 
 /**
- * Rare flip-off frame: the third tentacle rises in front of the face (dark
- * shade so it silhouettes against the body, light tip). Replaces both
- * tentacle frames for a moment once per idle cycle.
+ * Flip-off sequence, drawn on the full padded canvas: a giant comic fist
+ * (Gear-Third forced perspective — body-blue fill with a dark outline and
+ * knuckle seams so it pops in front of the body) punches toward the
+ * viewer, then the outlined middle finger extends from the second knuckle
+ * (up) and the fingertip waggles (waggle). While these frames show, the
+ * whole sprite scales up so the gesture lunges at the camera.
  */
-const OCTOPUS_TENTACLES_FLIP = [
-	'.......LL.......',
-	'.......DD.......',
-	'.......DD.......',
-	'.......DD.......',
-	'.......DD.......',
-	'.......DD.......',
-	'.......DD.......',
-	'.BB..BB......BB.',
-	'.BB..BB......BB.',
-	'BB..BB........BB',
-	'BB..BB........BB',
+const OCTOPUS_FIST_ROW = 13;
+const OCTOPUS_FIST = [
+	'.......PP.PP.PP.PP......',
+	'......PBBPBBPBBPBBP.....',
+	'......PBBBBBBBBBBBBP....',
+	'......PBBDBBDBBDBBBP....',
+	'......PBBDBBDBBDBBBP....',
+	'.......PBBBBBBBBBBP.....',
+	'........PPPPPPPPPP......',
 ];
+
+/** Sprite row where the extended-finger frames start (the fingertip). */
+const OCTOPUS_FINGER_ROW = 2;
+const OCTOPUS_FLIP_UP = [
+	'.........PPPP...........',
+	'.........PLLP...........',
+	'.........PBBP...........',
+	'.........PBBP...........',
+	'.........PBBP...........',
+	'.........PBBP...........',
+	'.........PBBP...........',
+	'.........PBBP...........',
+	'.........PBBP...........',
+	'.........PBBP...........',
+	'.........PBBP...........',
+	'.......PPPBBPPP.PP......',
+	'......PBBPBBPBBPBBP.....',
+	'......PBBBBBBBBBBBBP....',
+	'......PBBDBBDBBDBBBP....',
+	'......PBBDBBDBBDBBBP....',
+	'.......PBBBBBBBBBBP.....',
+	'........PPPPPPPPPP......',
+];
+
+const OCTOPUS_FLIP_WAGGLE = [
+	'........PPPP............',
+	'........PLLP............',
+	'.........PBBP...........',
+	'.........PBBP...........',
+	'.........PBBP...........',
+	'.........PBBP...........',
+	'.........PBBP...........',
+	'.........PBBP...........',
+	'.........PBBP...........',
+	'.........PBBP...........',
+	'.........PBBP...........',
+	'.......PPPBBPPP.PP......',
+	'......PBBPBBPBBPBBP.....',
+	'......PBBBBBBBBBBBBP....',
+	'......PBBDBBDBBDBBBP....',
+	'......PBBDBBDBBDBBBP....',
+	'.......PBBBBBBBBBBP.....',
+	'........PPPPPPPPPP......',
+];
+
+/**
+ * Soccer keep-ups: the outlined ball bounces on the left while the left
+ * outer tentacle kicks (kick = ball low + leg swung up; up = ball high +
+ * all tentacles hanging). Both frames include the full tentacle set, so
+ * frame A is hidden while they show.
+ */
+const OCTOPUS_SOCCER_UP_ROW = 2;
+const OCTOPUS_SOCCER_UP = [
+	'.PPP....................',
+	'PWWWP...................',
+	'PWDWP...................',
+	'PWWWP...................',
+	'.PPP....................',
+	'........................',
+	'........................',
+	'........................',
+	'........................',
+	'........................',
+	'........................',
+	'........................',
+	'........................',
+	'........................',
+	'.....BB..BB..BB..BB.....',
+	'.....BB..BB..BB..BB.....',
+	'....BB..BB....BB..BB....',
+	'....BB..BB....BB..BB....',
+];
+
+const OCTOPUS_SOCCER_KICK_ROW = 8;
+const OCTOPUS_SOCCER_KICK = [
+	'.PPP....................',
+	'PWWWP...................',
+	'PWDWP...................',
+	'PWWWP...................',
+	'.PPP....................',
+	'..BB....................',
+	'...BB...................',
+	'....BB..................',
+	'.........BB..BB..BB.....',
+	'.........BB..BB..BB.....',
+	'........BB....BB..BB....',
+	'........BB....BB..BB....',
+];
+
+/**
+ * Weight lifting: a barbell (dark bar and plates) pressed from chin level
+ * (low) to overhead lockout (high, with the two side tentacles extended
+ * above the head). The hanging tentacles stay in frame A throughout.
+ */
+const OCTOPUS_LIFT_LOW_ROW = 11;
+const OCTOPUS_LIFT_LOW = [
+	'.DD..................DD.',
+	'.DDDDDDDDDDDDDDDDDDDDDD.',
+	'.DD..................DD.',
+];
+
+const OCTOPUS_LIFT_HIGH_ROW = 1;
+const OCTOPUS_LIFT_HIGH = [
+	'.DD..................DD.',
+	'.DDDDDDDDDDDDDDDDDDDDDD.',
+	'.DD..................DD.',
+	'......BB........BB......',
+	'......BB........BB......',
+	'......BB........BB......',
+];
+
+/** Pirate interlude: strap across the forehead, patch over the right eye. */
+const OCTOPUS_EYEPATCH_ROW = 9;
+const OCTOPUS_EYEPATCH = [
+	'.....PPPPPPPPPPPPPP.....',
+	'.............PPPPP......',
+	'.............PPPPP......',
+	'.............PPPPP......',
+];
+
+/**
+ * The most recently constructed composer, used only by the test-only
+ * "Backboard: Reset Composer Workspace (Test)" command to reach the live
+ * instance (the composer is a widget, not a service). Cleared on dispose.
+ */
+let activeComposerForTest: NewChatWidget | undefined;
 
 export class NewChatWidget extends Disposable {
 
@@ -135,13 +269,14 @@ export class NewChatWidget extends Disposable {
 	/** Set once the composer has seeded (or confirmed) a default workspace so it never re-seeds after an explicit clear. See {@link _ensureComposerHasWorkspace}. */
 	private _defaultWorkspaceHandled = false;
 	/**
-	 * The user's home directory, resolved only after the workspace picker's
-	 * recents have loaded so it can never win a race against a real recent
-	 * workspace. Last-resort seed for {@link _ensureComposerHasWorkspace} so
-	 * the model and Backboard-options pickers render even on a fresh profile
-	 * with no workspace history.
+	 * The user's `~/Desktop` folder (or `~` if Desktop does not exist),
+	 * resolved only after the workspace picker's recents have loaded so it can
+	 * never win a race against a real recent workspace. Last-resort seed for
+	 * {@link _ensureComposerHasWorkspace} so the composer always lands on a
+	 * real folder — never the bare "workspace" placeholder — and the model and
+	 * Backboard-options pickers render even on a fresh profile with no history.
 	 */
-	private readonly _homeFolderFallback = observableValue<URI | undefined>(this, undefined);
+	private readonly _defaultFolderFallback = observableValue<URI | undefined>(this, undefined);
 	private _middleTitle: HTMLElement | undefined;
 	private _middleTitlePrefix: HTMLElement | undefined;
 	private _middleTitleSuffix: HTMLElement | undefined;
@@ -178,6 +313,13 @@ export class NewChatWidget extends Disposable {
 		@IPathService private readonly pathService: IPathService,
 	) {
 		super();
+		// Track the live instance for the test-only reset command.
+		activeComposerForTest = this;
+		this._register(toDisposable(() => {
+			if (activeComposerForTest === this) {
+				activeComposerForTest = undefined;
+			}
+		}));
 		// On web (vscode.dev / insiders.vscode.dev), use {@link WebWorkspacePicker}
 		// which scopes recents to the active host and renders as a bottom
 		// sheet on phone-layout viewports. On Electron desktop, the regular
@@ -350,13 +492,18 @@ export class NewChatWidget extends Disposable {
 	 * never fights the user explicitly clearing the workspace afterwards.
 	 */
 	private _ensureComposerHasWorkspace(): void {
-		// Resolve the home-directory fallback only once the picker's recents
-		// have loaded, so a real recent workspace always wins the seed below.
+		// Resolve the Desktop fallback only once the picker's recents have
+		// loaded, so a real recent workspace always wins the seed below. Prefer
+		// ~/Desktop; fall back to ~ only when Desktop does not exist.
 		this._workspacePicker.whenInitialRecentsLoaded
 			.then(() => this.pathService.userHome({ preferLocal: true }))
-			.then(home => {
+			.then(async home => {
+				const desktop = URI.joinPath(home, 'Desktop');
+				return (await this.fileService.exists(desktop)) ? desktop : home;
+			})
+			.then(folder => {
 				if (!this._store.isDisposed) {
-					this._homeFolderFallback.set(home, undefined);
+					this._defaultFolderFallback.set(folder, undefined);
 				}
 			}, () => { /* no home available — leave the composer unseeded */ });
 
@@ -373,54 +520,82 @@ export class NewChatWidget extends Disposable {
 			// Subscribe to everything that can make (or already has made) a
 			// workspace available so the autorun re-runs as they settle: the
 			// picker's recents, a serving provider connecting, the active draft,
-			// and the recent sessions' lazily-resolved workspaces.
+			// and the recent sessions' lazily-resolved workspaces. The decision
+			// itself lives in {@link _seedDefaultWorkspaceIfNeeded} so the test
+			// "reset" command can re-run it on demand.
 			pickerChanged.read(reader);
 			sessionTypesChanged.read(reader);
 			this._session.read(reader);
 			this.sessionsService.visibleSessions.read(reader);
+			this._defaultFolderFallback.read(reader);
 			const { recent, other } = this.sessionsService.getRecentlyOpenedSessions();
-			const sessions = [...recent, ...other];
-			for (const session of sessions) {
+			for (const session of [...recent, ...other]) {
 				session.workspace.read(reader);
 			}
-
-			if (this._session.get() || this._workspacePicker.selectedFolderUri) {
-				// A session/selection was restored or created elsewhere; nothing
-				// to seed, and we must not seed later if it is cleared.
-				this._defaultWorkspaceHandled = true;
-				return;
-			}
-
-			// Prefer the folder of the most recent servable session (continue
-			// where the user last worked, already trusted), then fall back to
-			// the picker's recent workspaces.
-			const candidate = this._recentSessionFolder(sessions) ?? this._workspacePicker.getDefaultWorkspaceCandidate();
-			if (candidate) {
-				this._defaultWorkspaceHandled = true;
-				this._workspacePicker.setSelectedWorkspace(candidate);
-				return;
-			}
-
-			// Fresh profile with no recent sessions or folders anywhere: seed
-			// the user's home directory so the composer's model and
-			// Backboard-options controls still render. The draft is created
-			// without the upfront trust prompt (nothing was user-initiated
-			// yet); {@link _sendFromSharedComposer} requests folder trust before
-			// the first send instead.
-			const home = this._homeFolderFallback.read(reader);
-			if (home && this.sessionsManagementService.getSessionTypesForFolder(home).length > 0) {
-				this._defaultWorkspaceHandled = true;
-				this._workspacePicker.setSelectedWorkspace(home, { fireEvent: false });
-				// Defer draft creation out of the autorun: creating a session
-				// activates it (mutating observables this autorun reads), which
-				// must not happen mid-read.
-				queueMicrotask(() => {
-					if (!this._store.isDisposed && !this._session.get()) {
-						this._createNewSession(home);
-					}
-				});
-			}
+			this._seedDefaultWorkspaceIfNeeded();
 		}));
+	}
+
+	/**
+	 * Seeds the composer's workspace from the best available default when none
+	 * is selected yet, so the model and Backboard-options pickers render. Order
+	 * of preference: the most recent servable session's folder, then the
+	 * workspace picker's recents, then the user's Desktop. No-op once a
+	 * session/selection exists (marks {@link _defaultWorkspaceHandled} so it is
+	 * never re-seeded from under an explicit user clear). Reads current values
+	 * synchronously; the caller (the seeding autorun) owns the reactive reads.
+	 */
+	private _seedDefaultWorkspaceIfNeeded(): void {
+		if (this._defaultWorkspaceHandled) {
+			return;
+		}
+		if (this._session.get() || this._workspacePicker.selectedFolderUri) {
+			this._defaultWorkspaceHandled = true;
+			return;
+		}
+
+		const { recent, other } = this.sessionsService.getRecentlyOpenedSessions();
+		const sessions = [...recent, ...other];
+		const candidate = this._recentSessionFolder(sessions) ?? this._workspacePicker.getDefaultWorkspaceCandidate();
+		if (candidate) {
+			this._defaultWorkspaceHandled = true;
+			this._workspacePicker.setSelectedWorkspace(candidate);
+			return;
+		}
+
+		// Fresh profile with no recent sessions or folders anywhere: seed the
+		// user's Desktop so the composer always lands on a real folder (never
+		// the bare "workspace" placeholder) and its model and Backboard-options
+		// controls still render. The draft is created without the upfront trust
+		// prompt (nothing was user-initiated yet); {@link _sendFromSharedComposer}
+		// requests folder trust before the first send instead.
+		const fallback = this._defaultFolderFallback.get();
+		if (fallback && this.sessionsManagementService.getSessionTypesForFolder(fallback).length > 0) {
+			this._defaultWorkspaceHandled = true;
+			this._workspacePicker.setSelectedWorkspace(fallback, { fireEvent: false });
+			// Defer draft creation: creating a session activates it (mutating
+			// observables the seeding autorun reads), which must not happen
+			// mid-read.
+			queueMicrotask(() => {
+				if (!this._store.isDisposed && !this._session.get()) {
+					this._createNewSession(fallback);
+				}
+			});
+		}
+	}
+
+	/**
+	 * Test affordance (Command Palette: "Backboard: Reset Composer Workspace
+	 * (Test)"): drop the current workspace selection and draft, then re-run the
+	 * default-workspace seeding so the no-workspace → seeded transition (and the
+	 * model/options pickers appearing) can be exercised without relaunching
+	 * against an empty profile.
+	 */
+	resetAndReseedWorkspaceForTest(): void {
+		this._defaultWorkspaceHandled = false;
+		this.sessionsService.unsetNewSession();
+		this._workspacePicker.clearSelection();
+		this._seedDefaultWorkspaceIfNeeded();
 	}
 
 	/**
@@ -505,12 +680,12 @@ export class NewChatWidget extends Disposable {
 		host.setAttribute('aria-hidden', 'true');
 		const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
 		svg.classList.add('octo-sprite');
-		const columns = OCTOPUS_HEAD[0].length;
-		const rows = OCTOPUS_HEAD.length + OCTOPUS_TENTACLES_A.length;
+		const columns = OCTOPUS_HEAD[0].length + 2 * OCTOPUS_CANVAS_PAD;
+		const rows = OCTOPUS_ROW_PAD + OCTOPUS_HEAD.length + OCTOPUS_TENTACLES_A.length;
 		svg.setAttribute('viewBox', `0 0 ${columns} ${rows}`);
 		svg.setAttribute('width', String(columns * 6));
 		svg.setAttribute('height', String(rows * 6));
-		const appendFrame = (className: string, frame: readonly string[], rowOffset: number) => {
+		const appendFrame = (className: string, frame: readonly string[], rowOffset: number, columnOffset: number) => {
 			const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
 			group.classList.add(className);
 			for (let y = 0; y < frame.length; y++) {
@@ -525,7 +700,7 @@ export class NewChatWidget extends Disposable {
 						runEnd++;
 					}
 					const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-					rect.setAttribute('x', String(x));
+					rect.setAttribute('x', String(x + columnOffset));
 					rect.setAttribute('y', String(y + rowOffset));
 					rect.setAttribute('width', String(runEnd - x + 1));
 					rect.setAttribute('height', '1');
@@ -536,11 +711,18 @@ export class NewChatWidget extends Disposable {
 			}
 			svg.appendChild(group);
 		};
-		appendFrame('octo-head', OCTOPUS_HEAD, 0);
-		appendFrame('octo-frame-a', OCTOPUS_TENTACLES_A, OCTOPUS_HEAD.length);
-		appendFrame('octo-frame-b', OCTOPUS_TENTACLES_B, OCTOPUS_HEAD.length);
-		appendFrame('octo-flip', OCTOPUS_TENTACLES_FLIP, OCTOPUS_FLIP_ROW);
-		appendFrame('octo-eyelids', OCTOPUS_EYELIDS, OCTOPUS_EYE_ROW);
+		appendFrame('octo-head', OCTOPUS_HEAD, OCTOPUS_ROW_PAD, OCTOPUS_CANVAS_PAD);
+		appendFrame('octo-frame-a', OCTOPUS_TENTACLES_A, OCTOPUS_ROW_PAD + OCTOPUS_HEAD.length, OCTOPUS_CANVAS_PAD);
+		appendFrame('octo-frame-b', OCTOPUS_TENTACLES_B, OCTOPUS_ROW_PAD + OCTOPUS_HEAD.length, OCTOPUS_CANVAS_PAD);
+		appendFrame('octo-soccer-kick', OCTOPUS_SOCCER_KICK, OCTOPUS_SOCCER_KICK_ROW, 0);
+		appendFrame('octo-soccer-up', OCTOPUS_SOCCER_UP, OCTOPUS_SOCCER_UP_ROW, 0);
+		appendFrame('octo-lift-low', OCTOPUS_LIFT_LOW, OCTOPUS_LIFT_LOW_ROW, 0);
+		appendFrame('octo-lift-high', OCTOPUS_LIFT_HIGH, OCTOPUS_LIFT_HIGH_ROW, 0);
+		appendFrame('octo-eyepatch', OCTOPUS_EYEPATCH, OCTOPUS_EYEPATCH_ROW, 0);
+		appendFrame('octo-fist', OCTOPUS_FIST, OCTOPUS_FIST_ROW, 0);
+		appendFrame('octo-flip-up', OCTOPUS_FLIP_UP, OCTOPUS_FINGER_ROW, 0);
+		appendFrame('octo-flip-waggle', OCTOPUS_FLIP_WAGGLE, OCTOPUS_FINGER_ROW, 0);
+		appendFrame('octo-eyelids', OCTOPUS_EYELIDS, OCTOPUS_ROW_PAD + OCTOPUS_EYE_ROW, OCTOPUS_CANVAS_PAD);
 		host.appendChild(svg);
 	}
 
@@ -1206,5 +1388,26 @@ export class NewChatWidget extends Disposable {
 		});
 	}
 }
+
+/**
+ * Test-only command: clears the composer's workspace + draft and re-runs the
+ * default-workspace seeding, so the no-workspace → seeded transition (and the
+ * model/Backboard-options pickers appearing) can be exercised in a running
+ * instance without relaunching against an empty profile.
+ */
+registerAction2(class ResetComposerWorkspaceForTestAction extends Action2 {
+	static readonly ID = 'backboard.newChat.resetComposerWorkspaceForTest';
+	constructor() {
+		super({
+			id: ResetComposerWorkspaceForTestAction.ID,
+			title: localize2('newChat.resetComposerWorkspaceForTest', "Reset Composer Workspace (Test)"),
+			category: CHAT_CATEGORY,
+			f1: true,
+		});
+	}
+	override async run(_accessor: ServicesAccessor): Promise<void> {
+		activeComposerForTest?.resetAndReseedWorkspaceForTest();
+	}
+});
 
 // #endregion
