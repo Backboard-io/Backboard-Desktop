@@ -25,7 +25,7 @@ import { IWorkspacePickerDelegate, IWorkspacePickerItem } from '../../../../work
 import { IAgentHostNewSessionFolderService } from '../../../../workbench/contrib/chat/browser/agentSessions/agentHost/agentHostNewSessionFolderService.js';
 import { ChatWidget } from '../../../../workbench/contrib/chat/browser/widget/chatWidget.js';
 import { ChatAgentLocation, ChatModeKind } from '../../../../workbench/contrib/chat/common/constants.js';
-import { isUntitledChatSession } from '../../../../workbench/contrib/chat/common/model/chatUri.js';
+import { getChatSessionType, isUntitledChatSession } from '../../../../workbench/contrib/chat/common/model/chatUri.js';
 import { WorkspacePicker } from '../../../../sessions/contrib/chat/browser/sessionWorkspacePicker.js';
 import { Event } from '../../../../base/common/event.js';
 import { assertReturnsDefined } from '../../../../base/common/types.js';
@@ -34,7 +34,6 @@ import { IChatModelReference, IChatService } from '../../../../workbench/contrib
 import { IChatAgentService } from '../../../../workbench/contrib/chat/common/participants/chatAgents.js';
 import { ILanguageModelsService } from '../../../../workbench/contrib/chat/common/languageModels.js';
 import { IChatSessionsService, localChatSessionType, SessionType } from '../../../../workbench/contrib/chat/common/chatSessionsService.js';
-import { getChatSessionType } from '../../../../workbench/contrib/chat/common/model/chatUri.js';
 import { ISessionsService } from '../../../../sessions/services/sessions/browser/sessionsService.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 
