@@ -15,12 +15,16 @@
 	height: 38px;
 	flex: 0 0 38px;
 	box-sizing: border-box;
-	/* Nudge the header controls down so they sit a little lower than the macOS
-	 * traffic lights instead of level with them. */
-	padding-top: 8px;
 	color: var(--vscode-agentsPanel-foreground);
 	overflow: hidden;
 	-webkit-app-region: drag;
+}
+
+/* macOS: nudge the header controls down so they sit a little lower than the
+ * traffic lights instead of level with them. Windows/Linux draw their window
+ * controls vertically centered, so the controls stay centered there. */
+.agent-sessions-workbench.mac .sessions-panel-header {
+	padding-top: 8px;
 }
 
 /* Headers are pure desktop/tablet chrome — the phone layout has its own
