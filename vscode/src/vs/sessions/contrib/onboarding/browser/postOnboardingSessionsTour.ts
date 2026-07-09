@@ -3,75 +3,63 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { getActiveWindow, getDomNodePagePosition } from '../../../../base/browser/dom.js';
-import { Disposable } from '../../../../base/common/lifecycle.js';
+import { getActiveWindow } from '../../../../base/browser/dom.js';
+import { Disposable, DisposableStore, IDisposable } from '../../../../base/common/lifecycle.js';
 import { localize } from '../../../../nls.js';
+import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { IWorkbenchContribution } from '../../../../workbench/common/contributions.js';
 import { ISpotlightTourIntro, ISpotlightTourStep, SpotlightTour, TourPlacement } from '../../../../workbench/contrib/welcomeOnboarding/browser/spotlightTour.js';
-import { IBackboardOnboardingState, OnboardingExperience, ONBOARDING_STORAGE_KEY } from '../../../../workbench/contrib/welcomeOnboarding/common/onboardingTypes.js';
-import { IWorkbenchLayoutService } from '../../../../workbench/services/layout/browser/layoutService.js';
-
-interface ISessionsTourStep {
-	/** CSS selector for the element (panel or button) this step spotlights. */
-	readonly targetSelector: string;
-	/** Preferred side of the target to place the card on. */
-	readonly placement: TourPlacement;
-	readonly title: string;
-	readonly body: string;
-}
-
-const SESSIONS_TOUR_STORAGE_KEY = 'sessions.postOnboardingTour.complete';
-
-const TOUR_STEPS: readonly ISessionsTourStep[] = [
-	{
-		targetSelector: '.interactive-input-part',
-		placement: TourPlacement.Top,
-		title: localize('sessions.tour.prompt.title', "Start with a prompt"),
-		body: localize('sessions.tour.prompt.body', "Describe what you want to build or change. The agent works from here."),
-	},
-	{
-		targetSelector: '.part.sidebar',
-		placement: TourPlacement.Right,
-		title: localize('sessions.tour.sessions.title', "Find your sessions"),
-		body: localize('sessions.tour.sessions.body', "Every chat you start is saved here — pick one to jump back in."),
-	},
-	{
-		targetSelector: '.sessions-panel-header-right',
-		placement: TourPlacement.Bottom,
-		title: localize('sessions.tour.panels.title', "Open panels beside the agent"),
-		body: localize('sessions.tour.panels.body', "Switch on Files, a Browser, or a Terminal right next to the chat."),
-	},
-];
+import { IBackboardOnboardingState, OnboardingExperience, ONBOARDING_SESSIONS_TOUR_STORAGE_KEY, ONBOARDING_STORAGE_KEY } from '../../../../workbench/contrib/welcomeOnboarding/common/onboardingTypes.js';
+import { IWorkbenchLayoutService, Parts } from '../../../../workbench/services/layout/browser/layoutService.js';
+import { RightWorkbenchCommandId } from '../../rightWorkbench/browser/rightWorkbench.js';
 
 /**
  * A spotlight tour shown once in the Agents (sessions) window after the user
- * completes onboarding with the Clean/Simple experience. It first asks for
- * consent, then walks through the prompt box, the sessions list, and the panel
- * switcher.
+ * completes onboarding. It first asks for consent, then walks through the
+ * prompt, the sessions list, the Simple/Editor mode switch, and each panel that
+ * can sit beside the agent — actually opening Files, Browser, and Terminal in
+ * turn — before restoring the layout.
  *
  * Onboarding runs in the separate main-workbench window, so there is no
- * same-process event to subscribe to here. Instead this reads the
- * already-persisted onboarding state once at startup: onboarding writes it
- * to APPLICATION-scope storage synchronously before this window is created.
+ * same-process event to subscribe to here. Onboarding writes its state to
+ * APPLICATION-scope storage, which this window reads at startup. Because the
+ * Agents window may already be open when onboarding finishes (the state then
+ * arrives after this contribution was created), we also watch for the state to
+ * change and start the tour when it does.
  */
 export class PostOnboardingSessionsTour extends Disposable implements IWorkbenchContribution {
 
 	static readonly ID = 'workbench.contrib.postOnboardingSessionsTour';
 
+	private started = false;
+
 	constructor(
 		@IStorageService private readonly storageService: IStorageService,
 		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
+		@ICommandService private readonly commandService: ICommandService,
 	) {
 		super();
 
-		if (this._shouldShowTour()) {
-			getActiveWindow().requestAnimationFrame(() => this._start());
+		this._maybeStart();
+		if (!this.started) {
+			// The Agents window can outlive the onboarding it hands off from, so
+			// pick up the completed state whenever it lands (including cross-window).
+			this._register(this.storageService.onDidChangeValue(StorageScope.APPLICATION, ONBOARDING_STORAGE_KEY, this._store)(() => this._maybeStart()));
 		}
 	}
 
+	private _maybeStart(): void {
+		if (this.started || !this._shouldShowTour()) {
+			return;
+		}
+
+		this.started = true;
+		getActiveWindow().requestAnimationFrame(() => this._start());
+	}
+
 	private _shouldShowTour(): boolean {
-		if (this.storageService.getBoolean(SESSIONS_TOUR_STORAGE_KEY, StorageScope.APPLICATION, false)) {
+		if (this.storageService.getBoolean(ONBOARDING_SESSIONS_TOUR_STORAGE_KEY, StorageScope.APPLICATION, false)) {
 			return false;
 		}
 
@@ -89,43 +77,125 @@ export class PostOnboardingSessionsTour extends Disposable implements IWorkbench
 	}
 
 	private _start(): void {
-		this.storageService.store(SESSIONS_TOUR_STORAGE_KEY, true, StorageScope.APPLICATION, StorageTarget.USER);
-
-		const targetWindow = getActiveWindow();
-		const steps = TOUR_STEPS
-			.map((step): ISpotlightTourStep | undefined => {
-				const anchor = targetWindow.document.querySelector<HTMLElement>(step.targetSelector);
-				if (!anchor || !this._isVisible(anchor)) {
-					return undefined;
-				}
-				return { anchor, title: step.title, body: step.body, preferredPlacement: step.placement };
-			})
-			.filter((step): step is ISpotlightTourStep => !!step);
-
-		if (!steps.length) {
-			return;
-		}
-
-		const intro: ISpotlightTourIntro = {
-			title: localize('sessions.tour.intro.title', "Take a quick tour?"),
-			body: localize('sessions.tour.intro.body', "Get to know your workspace — where to prompt, find sessions, and open panels."),
-			caption: localize('sessions.tour.intro.caption', "{0} quick stops", steps.length),
-			confirmLabel: localize('sessions.tour.intro.confirm', "Take the tour"),
-			dismissLabel: localize('sessions.tour.intro.dismiss', "Maybe later"),
-		};
-
-		const tour = this._register(new SpotlightTour({
-			container: this.layoutService.activeContainer,
-			window: targetWindow,
-			onLayoutChange: this.layoutService.onDidLayoutActiveContainer,
-			intro,
-			steps,
-		}));
-		tour.start();
+		this.storageService.store(ONBOARDING_SESSIONS_TOUR_STORAGE_KEY, true, StorageScope.APPLICATION, StorageTarget.USER);
+		this._register(showSessionsOnboardingTour(this.layoutService, this.commandService));
 	}
+}
 
-	private _isVisible(element: HTMLElement): boolean {
-		const position = getDomNodePagePosition(element);
-		return position.width > 0 && position.height > 0;
+/**
+ * Builds and starts the Agents-window tour immediately, without any of the
+ * once-only gating. Used by the contribution above after onboarding, and by the
+ * developer command that force-shows the tour for testing. Returns a disposable
+ * that tears the tour down; it also disposes itself once the tour ends.
+ */
+export function showSessionsOnboardingTour(layoutService: IWorkbenchLayoutService, commandService: ICommandService): IDisposable {
+	const store = new DisposableStore();
+	const targetWindow = getActiveWindow();
+
+	const query = (selector: string) => () => targetWindow.document.querySelector<HTMLElement>(selector) ?? undefined;
+	// The right-workbench launcher lists every panel as a row keyed by its icon.
+	const panelRow = (codicon: string) => () => targetWindow.document.querySelector<HTMLElement>(`.sessions-right-workbench-launcher-row:has(.codicon-${codicon})`) ?? undefined;
+	const openPanelMenu = () => commandService.executeCommand(RightWorkbenchCommandId.OpenLauncherMode).then(() => undefined);
+
+	const steps: ISpotlightTourStep[] = [
+		{
+			title: localize('sessions.tour.prompt.title', "Start with a prompt"),
+			body: localize('sessions.tour.prompt.body', "Describe what you want to build or change. The agent works from here."),
+			preferredPlacement: TourPlacement.Top,
+			anchor: query('.interactive-input-part'),
+		},
+		{
+			title: localize('sessions.tour.sessions.title', "Find your sessions"),
+			body: localize('sessions.tour.sessions.body', "Every chat you start is saved here — pick one to jump back in."),
+			preferredPlacement: TourPlacement.Right,
+			anchor: query('.part.sidebar'),
+		},
+		{
+			title: localize('sessions.tour.mode.title', "Simple and editor, one IDE"),
+			body: localize('sessions.tour.mode.body', "Stay in this simple view, or open the full editor to read and edit code — same project, one click away."),
+			preferredPlacement: TourPlacement.Bottom,
+			anchor: query('.open-in-vscode-titlebar-widget'),
+		},
+		{
+			// The first panel step opens the panels menu beside the agent; the
+			// next three walk the spotlight down its rows.
+			title: localize('sessions.tour.review.title', "Review changes"),
+			body: localize('sessions.tour.review.body', "See what the agent changed, side by side, right beside the chat."),
+			preferredPlacement: TourPlacement.Left,
+			setup: openPanelMenu,
+			anchor: panelRow('diff-multiple'),
+		},
+		{
+			title: localize('sessions.tour.browser.title', "Preview in a browser"),
+			body: localize('sessions.tour.browser.body', "Open a live browser to see your app as the agent builds it."),
+			preferredPlacement: TourPlacement.Left,
+			anchor: panelRow('globe'),
+		},
+		{
+			title: localize('sessions.tour.files.title', "Browse your files"),
+			body: localize('sessions.tour.files.body', "Open your project files without leaving the agent."),
+			preferredPlacement: TourPlacement.Left,
+			anchor: panelRow('files'),
+		},
+		{
+			title: localize('sessions.tour.terminal.title', "Run a terminal"),
+			body: localize('sessions.tour.terminal.body', "Run commands in a terminal right next to the chat."),
+			preferredPlacement: TourPlacement.Left,
+			anchor: panelRow('terminal'),
+		},
+	];
+
+	const intro: ISpotlightTourIntro = {
+		title: localize('sessions.tour.intro.title', "Take a quick tour?"),
+		body: localize('sessions.tour.intro.body', "Get to know your workspace — where to prompt, find sessions, and open panels beside the agent."),
+		caption: localize('sessions.tour.intro.caption', "{0} quick stops", steps.length),
+		confirmLabel: localize('sessions.tour.intro.confirm', "Take the tour"),
+		dismissLabel: localize('sessions.tour.intro.dismiss', "Maybe later"),
+	};
+
+	// Snapshot the panels the tour opens so we can put the layout back afterwards.
+	const restore = captureLayout(layoutService, targetWindow);
+
+	const tour = store.add(new SpotlightTour({
+		container: layoutService.activeContainer,
+		window: targetWindow,
+		onLayoutChange: layoutService.onDidLayoutActiveContainer,
+		intro,
+		steps,
+		// Runs however the tour ends (Done, Skip, Escape, or "Maybe later").
+		// Puts back whatever the panel steps opened; a no-op when nothing was.
+		onFinish: () => {
+			restoreLayout(layoutService, targetWindow, restore);
+			store.dispose();
+		},
+	}));
+	tour.start();
+
+	return store;
+}
+
+interface ILayoutSnapshot {
+	readonly auxiliaryBar: boolean;
+	readonly panel: boolean;
+	readonly editor: boolean;
+}
+
+function captureLayout(layoutService: IWorkbenchLayoutService, targetWindow: Window): ILayoutSnapshot {
+	return {
+		auxiliaryBar: layoutService.isVisible(Parts.AUXILIARYBAR_PART),
+		panel: layoutService.isVisible(Parts.PANEL_PART),
+		editor: layoutService.isVisible(Parts.EDITOR_PART, targetWindow),
+	};
+}
+
+function restoreLayout(layoutService: IWorkbenchLayoutService, targetWindow: Window, snapshot: ILayoutSnapshot): void {
+	if (layoutService.isVisible(Parts.AUXILIARYBAR_PART) !== snapshot.auxiliaryBar) {
+		layoutService.setPartHidden(!snapshot.auxiliaryBar, Parts.AUXILIARYBAR_PART);
+	}
+	if (layoutService.isVisible(Parts.PANEL_PART) !== snapshot.panel) {
+		layoutService.setPartHidden(!snapshot.panel, Parts.PANEL_PART);
+	}
+	if (layoutService.isVisible(Parts.EDITOR_PART, targetWindow) !== snapshot.editor) {
+		layoutService.setPartHidden(!snapshot.editor, Parts.EDITOR_PART);
 	}
 }

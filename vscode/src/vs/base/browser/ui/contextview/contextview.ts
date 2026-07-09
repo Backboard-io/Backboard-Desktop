@@ -314,7 +314,7 @@ const SHADOW_ROOT_CSS = /* css */ `
 	}
 
 	:host {
-		font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+		font-family: "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
 	}
 
 	:host-context(.mac),
@@ -322,7 +322,7 @@ const SHADOW_ROOT_CSS = /* css */ `
 	:host-context(.mac:lang(zh-Hant)),
 	:host-context(.mac:lang(ja)),
 	:host-context(.mac:lang(ko)) {
-		font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+		font-family: "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
 	}
 
 	:host-context(.windows),
@@ -330,7 +330,7 @@ const SHADOW_ROOT_CSS = /* css */ `
 	:host-context(.windows:lang(zh-Hant)),
 	:host-context(.windows:lang(ja)),
 	:host-context(.windows:lang(ko)) {
-		font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+		font-family: "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
 	}
 
 	:host-context(.linux),
@@ -338,6 +338,6 @@ const SHADOW_ROOT_CSS = /* css */ `
 	:host-context(.linux:lang(zh-Hant)),
 	:host-context(.linux:lang(ja)),
 	:host-context(.linux:lang(ko)) {
-		font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+		font-family: "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
 	}
 `;

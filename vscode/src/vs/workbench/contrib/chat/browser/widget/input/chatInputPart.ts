@@ -457,6 +457,9 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	private agentHostPermissionModeWidget: AgentHostChatInputPickerActionViewItem | undefined;
 	private agentHostFolderWidget: AgentHostFolderPickerActionItem | undefined;
 	private agentHostGenericConfigChips: AgentHostGenericConfigChips | undefined;
+	private readonly _onDidChangeBackboardOptions = this._register(new Emitter<void>());
+	/** Fires when the Backboard composer options or their active state change. */
+	readonly onDidChangeBackboardOptions: Event<void> = this._onDidChangeBackboardOptions.event;
 	private backboardOptionsAnchor: HTMLElement | undefined;
 	private readonly chatSessionPickerWidgets = this._register(new DisposableMap<string, ChatSessionPickerActionItem>());
 	private chatSessionPickerContainer: HTMLElement | undefined;
@@ -3363,6 +3366,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			widget,
 		));
 		this.agentHostGenericConfigChips = genericChipsLane;
+		this._register(genericChipsLane.onDidChangeOptions(() => this._onDidChangeBackboardOptions.fire()));
 		genericChipsLane.render(genericChipsContainer);
 		genericChipsContainer.style.display = 'none';
 		dom.append(toolbarsContainer, genericChipsContainer);
@@ -4805,6 +4809,9 @@ class BackboardComposerOptionsActionViewItem extends ActionWidgetDropdownActionV
 			showItemKeybindings: false,
 			getAnchor: () => this.getAnchorElement(pickerOptions),
 			reporter: { id: 'BackboardComposerOptions', name: 'BackboardComposerOptions', includeOptions: false },
+			// Give the menu a comfortable minimum width so short lists don't look
+			// cramped and the current value never gets clipped by the anchor.
+			listOptions: { minWidth: 240 },
 		};
 		super(action, options, actionWidgetService, keybindingService, contextKeyService, telemetryService);
 	}
@@ -4812,14 +4819,18 @@ class BackboardComposerOptionsActionViewItem extends ActionWidgetDropdownActionV
 	private getActions(): IActionWidgetDropdownAction[] {
 		const actions: IActionWidgetDropdownAction[] = [];
 		for (const option of this.inputPart.getBackboardGenericConfigOptions()) {
-			const label = option.valueLabel
+			const combined = option.valueLabel
 				? localize('backboardComposerOptions.genericWithValue', "{0}: {1}", option.label, option.valueLabel)
 				: option.label;
 			actions.push({
 				id: `backboardComposerOptions.generic.${option.id}`,
-				label,
+				// Keep the label short and show the current value as a separate
+				// dimmed segment so long values are never clipped by the title's
+				// ellipsis, and the menu reads like a settings list.
+				label: option.label,
+				description: option.valueLabel,
 				class: undefined,
-				tooltip: option.description ?? label,
+				tooltip: option.description ?? combined,
 				icon: this.getGenericOptionIcon(option.id),
 				enabled: true,
 				run: () => this.openNestedPicker(() => option.show(this.inputPart.getBackboardOptionsAnchor())),
@@ -4889,10 +4900,33 @@ class BackboardComposerOptionsActionViewItem extends ActionWidgetDropdownActionV
 		return pickerOptions.getOverflowAnchor?.() ?? this.element!;
 	}
 
+	private _activeIconsContainer: HTMLElement | undefined;
+
 	protected override renderLabel(element: HTMLElement): IDisposable | null {
 		this.inputPart.setBackboardOptionsAnchor(element);
 		element.classList.add('codicon', 'codicon-settings-gear');
-		return super.renderLabel(element);
+		const result = super.renderLabel(element);
+		// When a feature is switched on (non-default), show its icon in the
+		// composer accent (blue) next to the gear, so an active configuration is
+		// visible without opening the menu.
+		this._activeIconsContainer = dom.append(element, dom.$('.backboard-options-active-icons'));
+		this._register(this.inputPart.onDidChangeBackboardOptions(() => this.updateActiveIcons()));
+		this.updateActiveIcons();
+		return result;
+	}
+
+	private updateActiveIcons(): void {
+		if (!this.element || !this._activeIconsContainer) {
+			return;
+		}
+		const active = this.inputPart.getBackboardGenericConfigOptions().filter(option => option.active);
+		dom.clearNode(this._activeIconsContainer);
+		this.element.classList.toggle('has-active-options', active.length > 0);
+		for (const option of active) {
+			const iconEl = dom.append(this._activeIconsContainer, dom.$('span.backboard-options-active-icon'));
+			iconEl.className = `backboard-options-active-icon ${ThemeIcon.asClassName(this.getGenericOptionIcon(option.id))}`;
+			iconEl.title = option.valueLabel ? `${option.label}: ${option.valueLabel}` : option.label;
+		}
 	}
 
 	override dispose(): void {

@@ -18,7 +18,7 @@ import { IWorkbenchLayoutService, Parts } from '../../../../workbench/services/l
 import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry.js';
 import { registerIcon } from '../../../../platform/theme/common/iconRegistry.js';
 import { Menus } from '../../../browser/menus.js';
-import { SessionsWelcomeVisibleContext } from '../../../common/contextkeys.js';
+import { IsNewChatSessionContext, SessionsWelcomeVisibleContext } from '../../../common/contextkeys.js';
 import { logChangesViewToggle } from '../../../common/sessionsTelemetry.js';
 import { RightWorkbenchCommandId } from '../../rightWorkbench/browser/rightWorkbench.js';
 
@@ -55,7 +55,31 @@ export class ChangesTitleBarContribution extends Disposable implements IWorkbenc
 			},
 			group: 'navigation',
 			order: 11, // After Environment (9) and Open Terminal (10)
-			when: ContextKeyExpr.and(IsAuxiliaryWindowContext.toNegated(), SessionsWelcomeVisibleContext.toNegated(), AuxiliaryBarVisibleContext.negate()),
+			// NB: no IsAuxiliaryWindowContext gate — the floating toolbar only
+			// renders in the sessions window, and that key spuriously flips true
+			// when the right panel/editor opens, which would hide this toggle.
+			when: SessionsWelcomeVisibleContext.toNegated(),
+		}));
+
+		// Same toggle in the title bar's right layout (next to the update button)
+		// on the new-session screen, so the terminal and right-panel controls sit
+		// in the top title-bar row before a session is created.
+		this._register(MenuRegistry.appendMenuItem(Menus.TitleBarRightLayout, {
+			command: {
+				id: TOGGLE_CHANGES_VIEW_ID,
+				title: localize2('showRightPanel', "Show Right Panel"),
+				tooltip: TOGGLE_SECONDARY_SIDEBAR_TOOLTIP,
+				icon: secondarySidebarToggleClosedIcon,
+				toggled: {
+					condition: AuxiliaryBarVisibleContext,
+					icon: secondarySidebarToggleOpenIcon,
+					title: localize('hideRightPanel', "Hide Right Panel"),
+					tooltip: TOGGLE_SECONDARY_SIDEBAR_TOOLTIP,
+				},
+			},
+			group: 'navigation',
+			order: 3,
+			when: ContextKeyExpr.and(IsAuxiliaryWindowContext.toNegated(), IsNewChatSessionContext),
 		}));
 
 		this._register(MenuRegistry.appendMenuItem(Menus.AuxiliaryBarTitle, {

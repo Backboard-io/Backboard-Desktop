@@ -1282,13 +1282,13 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		const visiblePanelSize = this.partVisibility.panel ? panelSize : 0;
 		const topRightHeight = Math.max(0, contentHeight - visiblePanelSize);
 		const minimumAuxiliaryBarWidth = this.partVisibility.editor
-			? Math.min(180, Math.max(120, Math.floor(rightWorkColumnWidth * 0.22)))
+			? Math.min(400, Math.max(340, Math.floor(rightWorkColumnWidth * 0.34)))
 			: rightWorkColumnWidth;
 		const maximumAuxiliaryBarWidth = this.partVisibility.editor
-			? Math.max(minimumAuxiliaryBarWidth, Math.min(260, Math.floor(rightWorkColumnWidth * 0.32)))
+			? Math.max(minimumAuxiliaryBarWidth, Math.min(600, Math.floor(rightWorkColumnWidth * 0.52)))
 			: rightWorkColumnWidth;
 		const defaultAuxiliaryBarWidth = this.partVisibility.editor
-			? Math.min(maximumAuxiliaryBarWidth, Math.max(minimumAuxiliaryBarWidth, Math.floor(rightWorkColumnWidth * 0.24)))
+			? Math.min(maximumAuxiliaryBarWidth, Math.max(minimumAuxiliaryBarWidth, Math.floor(rightWorkColumnWidth * 0.44)))
 			: rightWorkColumnWidth;
 		const auxiliaryBarSize = this.partVisibility.auxiliaryBar
 			? Math.min(maximumAuxiliaryBarWidth, Math.max(minimumAuxiliaryBarWidth, this._savedPartSizes.auxiliaryBar ?? defaultAuxiliaryBarWidth))
@@ -1314,7 +1314,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		const sessionsNode: ISerializedLeafNode = {
 			type: 'leaf',
 			data: { type: Parts.SESSIONS_PART },
-			size: sessionsWidth,
+			size: topRightHeight,
 			visible: this.partVisibility.sessions
 		};
 
@@ -1332,24 +1332,23 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 			visible: this.partVisibility.panel
 		};
 
-		// Top right section: Chat Bar | Right workbench (Editor + Files/Browser/Changes)
-		const topRightSection: ISerializedNode = {
+		// Agents column: the chat/session view with the terminal panel stacked
+		// directly beneath it (vertical). This keeps the terminal confined to the
+		// agents page rather than spanning the full width, so it can be open at the
+		// same time as the right panel without eating into it.
+		const agentsColumn: ISerializedNode = {
 			type: 'branch',
-			data: [sessionsNode, editorNode, auxiliaryBarNode],
-			size: topRightHeight
+			data: [sessionsNode, panelNode],
+			size: sessionsWidth
 		};
 
-		// Right section: Top Right | Panel (vertical)
-		const rightSection: ISerializedNode = {
-			type: 'branch',
-			data: [topRightSection, panelNode],
-			size: rightSectionWidth
-		};
-
-		// Root section: Left column | Right section (horizontal)
+		// Root section (horizontal): Side bar | Agents column | Editor | Right panel.
+		// The editor and right panel are full-height siblings of the agents column,
+		// so the terminal (below the agents column) and the right panel no longer
+		// compete for the same space.
 		const contentSection: ISerializedNode = {
 			type: 'branch',
-			data: [sideBarNode, rightSection],
+			data: [sideBarNode, agentsColumn, editorNode, auxiliaryBarNode],
 			size: contentHeight
 		};
 
@@ -1686,6 +1685,18 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 			!hidden,
 		);
 
+		// Re-opening restores the sidebar's last visible width, which may be at (or
+		// near) the narrow minimum. Bump it up to a comfortable width on open so the
+		// header row — traffic lights, mode switcher, toggle and navigation — isn't
+		// cramped against the window controls.
+		if (!hidden && this.sideBarPartView) {
+			const restored = this.workbenchGrid.getViewSize(this.sideBarPartView);
+			const comfortableOpenWidth = 360;
+			if (restored.width > 0 && restored.width < comfortableOpenWidth) {
+				this.workbenchGrid.resizeView(this.sideBarPartView, { width: comfortableOpenWidth, height: restored.height });
+			}
+		}
+
 		this.rebalanceSessionsAfterSidebarToggle(hidden, sidebarSizeBeforeToggle, sessionsSizeBeforeToggle);
 
 		// If sidebar becomes hidden, also hide the current active pane composite
@@ -1713,8 +1724,11 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		}
 
 		const currentSessionsSize = this.workbenchGrid.getViewSize(this.sessionsPartView);
-		const cachedSidebarWidth = this.workbenchGrid.getViewCachedVisibleSize(this.sideBarPartView);
-		const sidebarWidth = Math.max(0, hidden ? sidebarSizeBeforeToggle.width : cachedSidebarWidth ?? sidebarSizeBeforeToggle.width);
+		// On show, use the sidebar's actual current width (it may have just been
+		// bumped up to the comfortable open width); on hide, the width it had before.
+		const sidebarWidth = Math.max(0, hidden
+			? sidebarSizeBeforeToggle.width
+			: (this.workbenchGrid.getViewSize(this.sideBarPartView).width || sidebarSizeBeforeToggle.width));
 		const targetSessionsWidth = hidden
 			? Math.max(currentSessionsSize.width, sessionsSizeBeforeToggle.width + sidebarWidth)
 			: Math.max(sessionsSizeBeforeToggle.width - sidebarWidth, 280);
@@ -1825,9 +1839,9 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		const currentEditorSize = this.workbenchGrid.getViewSize(this.editorPartView);
 		const auxiliaryBarSize = this.workbenchGrid.getViewSize(this.auxiliaryBarPartView);
 		const rightWorkColumnWidth = currentEditorSize.width + (this.partVisibility.auxiliaryBar ? auxiliaryBarSize.width : 0);
-		const minimumAuxiliaryBarWidth = Math.min(180, Math.max(120, Math.floor(rightWorkColumnWidth * 0.22)));
+		const minimumAuxiliaryBarWidth = Math.min(400, Math.max(340, Math.floor(rightWorkColumnWidth * 0.34)));
 		const targetAuxiliaryBarWidth = this.partVisibility.auxiliaryBar
-			? Math.min(260, Math.max(minimumAuxiliaryBarWidth, Math.floor(rightWorkColumnWidth * 0.24)))
+			? Math.min(600, Math.max(minimumAuxiliaryBarWidth, Math.floor(rightWorkColumnWidth * 0.44)))
 			: 0;
 		const targetEditorWidth = Math.max(0, rightWorkColumnWidth - targetAuxiliaryBarWidth);
 		if (this.partVisibility.auxiliaryBar) {

@@ -13,9 +13,10 @@
 import { localize } from '../../nls.js';
 import { registerColor, transparent } from '../../platform/theme/common/colorUtils.js';
 import { contrastBorder, focusBorder } from '../../platform/theme/common/colorRegistry.js';
-import { editorWidgetBorder, editorBackground, toolbarHoverBackground } from '../../platform/theme/common/colors/editorColors.js';
+import { editorWidgetBackground, editorWidgetBorder, editorBackground, toolbarHoverBackground } from '../../platform/theme/common/colors/editorColors.js';
 import { foreground } from '../../platform/theme/common/colors/baseColors.js';
-import { buttonBackground, buttonSecondaryBorder, inputBackground, inputBorder, inputForeground, inputPlaceholderForeground } from '../../platform/theme/common/colors/inputColors.js';
+import { buttonBackground, buttonSecondaryBorder, inputForeground, inputPlaceholderForeground } from '../../platform/theme/common/colors/inputColors.js';
+import { chartsBlue } from '../../platform/theme/common/colors/chartsColors.js';
 import { ACTIVITY_BAR_BADGE_BACKGROUND, ACTIVITY_BAR_BADGE_FOREGROUND, SIDE_BAR_BACKGROUND, SIDE_BAR_FOREGROUND } from '../../workbench/common/theme.js';
 
 // ============================================================================
@@ -47,6 +48,16 @@ export const agentsPanelBorder = registerColor(
 	'agentsPanel.border',
 	{ dark: transparent(foreground, 0.15), light: transparent(foreground, 0.15), hcDark: contrastBorder, hcLight: contrastBorder },
 	localize('agentsPanel.border', 'Border color of the card panels (chat, files, terminal) in the agent sessions window.')
+);
+
+// ============================================================================
+// Sidebar (glass panel)
+// ============================================================================
+
+export const agentsSidebarMaximizedBackground = registerColor(
+	'agentsSidebar.maximizedBackground',
+	{ dark: transparent(chartsBlue, 0.3), light: transparent(chartsBlue, 0.22), hcDark: SIDE_BAR_BACKGROUND, hcLight: SIDE_BAR_BACKGROUND },
+	localize('agentsSidebar.maximizedBackground', 'Background tint of the agent sessions sidebar while the window is maximized or full screen. Kept translucent so the glass effect stays visible.')
 );
 
 // ============================================================================
@@ -87,7 +98,7 @@ export const agentsUpdateButtonDownloadedBackground = registerColor(
 // ============================================================================
 
 export const agentsChatInputBackground = registerColor(
-	'agentsChatInput.background', inputBackground,
+	'agentsChatInput.background', editorWidgetBackground,
 	localize('agentsChatInput.background', 'Background color of the chat input field in the agent sessions window.')
 );
 
@@ -97,7 +108,7 @@ export const agentsChatInputForeground = registerColor(
 );
 
 export const agentsChatInputBorder = registerColor(
-	'agentsChatInput.border', inputBorder,
+	'agentsChatInput.border', editorWidgetBorder,
 	localize('agentsChatInput.border', 'Border color of the chat input field in the agent sessions window.')
 );
 
@@ -116,7 +127,7 @@ export const agentsChatInputPlaceholderForeground = registerColor(
 // ============================================================================
 
 export const agentsNewSessionButtonBackground = registerColor(
-	'agentsNewSessionButton.background', '#00000000',
+	'agentsNewSessionButton.background', transparent(foreground, 0),
 	localize('agentsNewSessionButton.background', 'Background color of the New Session button in the agent sessions sidebar.')
 );
 

@@ -8,7 +8,7 @@ import { IStringDictionary } from '../../../base/common/collections.js';
 import { Event } from '../../../base/common/event.js';
 import { IMarkdownString } from '../../../base/common/htmlContent.js';
 import { IPager } from '../../../base/common/paging.js';
-import { Platform } from '../../../base/common/platform.js';
+import { isNative, Platform } from '../../../base/common/platform.js';
 import { PolicyCategory } from '../../../base/common/policy.js';
 import { URI } from '../../../base/common/uri.js';
 import { localize, localize2 } from '../../../nls.js';
@@ -795,6 +795,18 @@ Registry.as<IConfigurationRegistry>(Extensions.Configuration)
 						],
 					}
 				}
+			},
+			[VerifyExtensionSignatureConfigKey]: {
+				type: 'boolean',
+				description: localize('extensions.verifySignature', "When enabled, extensions are verified to be signed before getting installed."),
+				// Signature verification targets Microsoft's Marketplace signing format; this product's
+				// gallery is Open VSX, which does not produce compatible signatures, so verification
+				// would fail for every extension if enabled by default. Registered here (common layer)
+				// rather than in the workbench contribution so the shared process and CLI, which perform
+				// the actual download/verify/install, see the same default.
+				default: false,
+				scope: ConfigurationScope.APPLICATION,
+				included: isNative
 			}
 		}
 	});

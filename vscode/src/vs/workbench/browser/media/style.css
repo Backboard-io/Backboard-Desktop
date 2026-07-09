@@ -8,22 +8,6 @@
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
 @font-face {
-	font-family: 'Inter';
-	src: url('./fonts/inter/Inter-VariableFont_opsz,wght.ttf') format('truetype');
-	font-weight: 100 900;
-	font-style: normal;
-	font-display: swap;
-}
-
-@font-face {
-	font-family: 'Inter';
-	src: url('./fonts/inter/Inter-Italic-VariableFont_opsz,wght.ttf') format('truetype');
-	font-weight: 100 900;
-	font-style: italic;
-	font-display: swap;
-}
-
-@font-face {
 	font-family: 'JetBrains Mono';
 	src: url('./fonts/jetbrains-mono/JetBrainsMono-VariableFont_wght.ttf') format('truetype');
 	font-weight: 100 800;
@@ -112,8 +96,8 @@
 .monaco-workbench.mac,
 .monaco-workbench.windows,
 .monaco-workbench.linux {
-	font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-	--vscode-font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+	font-family: "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+	--vscode-font-family: "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
 	--vscode-editor-font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 	--monaco-monospace-font: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
 }

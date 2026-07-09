@@ -21,14 +21,23 @@ export const enum TourPlacement {
 }
 
 export interface ISpotlightTourStep {
-	/** Element to spotlight (a whole panel or a single button) and point the card at. */
-	readonly anchor: HTMLElement;
 	readonly title: string;
 	readonly body: string;
 	/** Preferred side to place the card on; the tour falls back automatically when it does not fit. */
 	readonly preferredPlacement?: TourPlacement;
 	/** Extra breathing room (px) around the anchor inside the spotlight cutout. */
 	readonly padding?: number;
+	/**
+	 * Optional async work run before the step is shown, e.g. opening a panel so
+	 * the step can spotlight it. The previous card stays visible until it settles.
+	 */
+	readonly setup?: () => Promise<void> | void;
+	/**
+	 * Resolves the element to spotlight, called after {@link setup} and a layout
+	 * frame. Returning `undefined` (or an off-screen element) shows the card
+	 * centered with no spotlight instead of dropping the step.
+	 */
+	readonly anchor: () => HTMLElement | undefined;
 }
 
 /** A centered consent card shown before the walkthrough, asking whether to start it. */
@@ -62,6 +71,8 @@ const VIEWPORT_MARGIN = 16;
 const DEFAULT_PADDING = 6;
 /** Keep the arrow this far from the card corners so it never points into a rounded edge. */
 const ARROW_EDGE_MARGIN = 20;
+/** Frames to wait after a step's setup before measuring, so opened panels can lay out. */
+const SETTLE_FRAMES = 2;
 
 const PLACEMENT_FALLBACK_ORDER: readonly TourPlacement[] = [TourPlacement.Right, TourPlacement.Bottom, TourPlacement.Left, TourPlacement.Top];
 
@@ -72,9 +83,9 @@ function clamp(value: number, min: number, max: number): number {
 /**
  * A lightweight, spotlight-style product tour: it dims the workbench, rings the
  * target panel or button, and floats a card next to it with an arrow pointing
- * at the target. The card auto-places on whichever side has room. An optional
- * centered consent card is shown first. Callers resolve their own anchors
- * (workbench parts, DOM selectors, ...) and hand the resolved steps in.
+ * at the target. Steps may run async setup first (e.g. open a panel) and
+ * resolve their anchor lazily, so the tour can actively drive the UI. An
+ * optional centered consent card is shown first.
  */
 export class SpotlightTour extends Disposable {
 
@@ -88,6 +99,13 @@ export class SpotlightTour extends Disposable {
 
 	private stepIndex = 0;
 	private inIntro = false;
+	private transitioning = false;
+	/** Bumped on every navigation so stale async renders (slow setup) abort. */
+	private renderSeq = 0;
+	/** The most recent step setup, so finishing can wait for it before restoring. */
+	private pendingSetup: Promise<void> | undefined;
+	private currentStep: ISpotlightTourStep | undefined;
+	private currentAnchor: HTMLElement | undefined;
 	private previouslyFocusedElement: HTMLElement | undefined;
 
 	constructor(private readonly options: ISpotlightTourOptions) {
@@ -112,7 +130,7 @@ export class SpotlightTour extends Disposable {
 		card.setAttribute('aria-modal', 'true');
 		card.tabIndex = -1;
 
-		const reposition = () => this.inIntro ? this._centerCard() : this._position();
+		const reposition = () => (this.inIntro || !this.currentAnchor) ? this._centerCard() : this._position();
 		if (this.options.onLayoutChange) {
 			this.lifecycle.add(this.options.onLayoutChange(reposition));
 		}
@@ -123,7 +141,7 @@ export class SpotlightTour extends Disposable {
 			this._renderIntro(this.options.intro);
 		} else {
 			this.stepIndex = 0;
-			this._renderStep();
+			void this._renderStep();
 		}
 	}
 
@@ -131,7 +149,7 @@ export class SpotlightTour extends Disposable {
 		const event = new StandardKeyboardEvent(e);
 		if (event.keyCode === KeyCode.Escape) {
 			e.preventDefault();
-			this._finish(false);
+			void this._finish(false);
 			return;
 		}
 		// Trap focus inside the card while the tour is modal.
@@ -154,6 +172,7 @@ export class SpotlightTour extends Disposable {
 			return;
 		}
 		this.inIntro = true;
+		this.renderSeq++;
 		this.stepDisposables.clear();
 		clearNode(this.card);
 
@@ -161,6 +180,7 @@ export class SpotlightTour extends Disposable {
 		this.overlay.classList.add('spotlight-tour-dimmed');
 		this.spotlight.style.display = 'none';
 		this.arrow = undefined;
+		this.currentAnchor = undefined;
 
 		this.card.setAttribute('aria-label', intro.title);
 
@@ -179,11 +199,11 @@ export class SpotlightTour extends Disposable {
 		confirmButton.type = 'button';
 		confirmButton.textContent = intro.confirmLabel;
 
-		this.stepDisposables.add(addDisposableListener(dismissButton, EventType.CLICK, () => this._finish(false)));
+		this.stepDisposables.add(addDisposableListener(dismissButton, EventType.CLICK, () => void this._finish(false)));
 		this.stepDisposables.add(addDisposableListener(confirmButton, EventType.CLICK, () => {
 			this.inIntro = false;
 			this.stepIndex = 0;
-			this._renderStep();
+			void this._renderStep();
 		}));
 
 		this._centerCard();
@@ -193,24 +213,62 @@ export class SpotlightTour extends Disposable {
 		});
 	}
 
-	private _renderStep(): void {
+	private async _renderStep(): Promise<void> {
 		if (!this.card || !this.overlay || !this.spotlight) {
 			return;
 		}
-		this.stepDisposables.clear();
-		clearNode(this.card);
-
-		// Restore the spotlight after a (dimmed, target-less) intro card.
-		this.overlay.classList.remove('spotlight-tour-dimmed');
-		this.spotlight.style.display = '';
+		const seq = ++this.renderSeq;
+		this.transitioning = true;
 
 		const step = this.options.steps[this.stepIndex];
+
+		// Run optional setup (e.g. open a panel). The previous card stays up.
+		// Tracked so _finish can await it before the caller restores layout.
+		if (step.setup) {
+			const pending = Promise.resolve().then(() => step.setup!()).catch(() => { /* best effort */ });
+			this.pendingSetup = pending;
+			await pending;
+			if (this.pendingSetup === pending) {
+				this.pendingSetup = undefined;
+			}
+		}
+		if (seq !== this.renderSeq || !this.card || !this.overlay || !this.spotlight) {
+			return;
+		}
+
+		// Let a just-opened panel lay out before we measure it.
+		await this._afterFrames(SETTLE_FRAMES);
+		if (seq !== this.renderSeq || !this.card || !this.overlay || !this.spotlight) {
+			return;
+		}
+
+		let anchor: HTMLElement | undefined;
+		try {
+			const resolved = step.anchor();
+			anchor = resolved && this._isElementVisible(resolved) ? resolved : undefined;
+		} catch {
+			// A buggy resolver must not freeze the tour — fall back to a centered card.
+			anchor = undefined;
+		}
+		this.currentStep = step;
+		this.currentAnchor = anchor;
+
 		const isFirst = this.stepIndex === 0;
 		const isLast = this.stepIndex === this.options.steps.length - 1;
 
+		this.stepDisposables.clear();
+		clearNode(this.card);
 		this.card.setAttribute('aria-label', step.title);
 
-		this.arrow = append(this.card, $('.spotlight-tour-arrow'));
+		if (anchor) {
+			this.overlay.classList.remove('spotlight-tour-dimmed');
+			this.spotlight.style.display = '';
+			this.arrow = append(this.card, $('.spotlight-tour-arrow'));
+		} else {
+			this.overlay.classList.add('spotlight-tour-dimmed');
+			this.spotlight.style.display = 'none';
+			this.arrow = undefined;
+		}
 
 		const body = append(this.card, $('.spotlight-tour-body'));
 		append(body, $('h3.spotlight-tour-title')).textContent = step.title;
@@ -241,12 +299,17 @@ export class SpotlightTour extends Disposable {
 		nextButton.type = 'button';
 		nextButton.textContent = isLast ? localize('spotlightTour.done', "Done") : localize('spotlightTour.continue', "Continue");
 
-		this.stepDisposables.add(addDisposableListener(skipButton, EventType.CLICK, () => this._finish(false)));
+		this.stepDisposables.add(addDisposableListener(skipButton, EventType.CLICK, () => void this._finish(false)));
 		this.stepDisposables.add(addDisposableListener(backButton, EventType.CLICK, () => this._go(-1)));
-		this.stepDisposables.add(addDisposableListener(nextButton, EventType.CLICK, () => isLast ? this._finish(true) : this._go(1)));
+		this.stepDisposables.add(addDisposableListener(nextButton, EventType.CLICK, () => isLast ? void this._finish(true) : this._go(1)));
 
-		this._position();
+		if (anchor) {
+			this._position();
+		} else {
+			this._centerCard();
+		}
 
+		this.transitioning = false;
 		this.options.window.requestAnimationFrame(() => {
 			this.overlay?.classList.add('spotlight-tour-visible');
 			this.card?.focus();
@@ -254,12 +317,31 @@ export class SpotlightTour extends Disposable {
 	}
 
 	private _go(delta: number): void {
+		if (this.transitioning) {
+			return;
+		}
 		const next = this.stepIndex + delta;
 		if (next < 0 || next >= this.options.steps.length) {
 			return;
 		}
 		this.stepIndex = next;
-		this._renderStep();
+		void this._renderStep();
+	}
+
+	private _afterFrames(frames: number): Promise<void> {
+		return new Promise<void>(resolve => {
+			const win = this.options.window;
+			let remaining = Math.max(1, frames);
+			const tick = () => {
+				remaining--;
+				if (remaining <= 0) {
+					resolve();
+				} else {
+					win.requestAnimationFrame(tick);
+				}
+			};
+			win.requestAnimationFrame(tick);
+		});
 	}
 
 	private _centerCard(): void {
@@ -274,13 +356,13 @@ export class SpotlightTour extends Disposable {
 	}
 
 	private _position(): void {
-		if (!this.card || !this.spotlight || !this.arrow) {
+		if (!this.card || !this.spotlight || !this.arrow || !this.currentAnchor || !this.currentStep) {
 			return;
 		}
 
-		const step = this.options.steps[this.stepIndex];
+		const step = this.currentStep;
 		const win = this.options.window;
-		const anchor = getDomNodePagePosition(step.anchor);
+		const anchor = getDomNodePagePosition(this.currentAnchor);
 		const padding = step.padding ?? DEFAULT_PADDING;
 
 		// Spotlight cutout hugging the target.
@@ -364,11 +446,29 @@ export class SpotlightTour extends Disposable {
 		}
 	}
 
-	private _finish(completed: boolean): void {
+	private _isElementVisible(element: HTMLElement): boolean {
+		const position = getDomNodePagePosition(element);
+		return position.width > 0 && position.height > 0;
+	}
+
+	private async _finish(completed: boolean): Promise<void> {
+		// Invalidate any in-flight async render before tearing down.
+		this.renderSeq++;
+		this.transitioning = false;
 		this.stepDisposables.clear();
 		this.lifecycle.clear();
 		this.overlay = this.spotlight = this.card = this.arrow = undefined;
+		this.currentStep = this.currentAnchor = undefined;
 		this.previouslyFocusedElement?.focus();
+
+		// A panel-opening setup may still be in flight (e.g. the user skipped
+		// mid-step); let it settle before onFinish runs, so a caller that
+		// restores the layout does not race the command it opened.
+		const pending = this.pendingSetup;
+		this.pendingSetup = undefined;
+		if (pending) {
+			await pending;
+		}
 		this.options.onFinish?.(completed);
 	}
 }

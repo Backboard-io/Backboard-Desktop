@@ -10,9 +10,9 @@ import { CancellationTokenSource } from '../../../../base/common/cancellation.js
 import { Codicon } from '../../../../base/common/codicons.js';
 import { Event } from '../../../../base/common/event.js';
 import { Disposable, DisposableStore, IDisposable, MutableDisposable } from '../../../../base/common/lifecycle.js';
-import { autorun, derivedObservableWithCache, IObservable, observableValue } from '../../../../base/common/observable.js';
+import { autorun, derivedObservableWithCache, IObservable, observableFromEvent } from '../../../../base/common/observable.js';
 import { isWeb } from '../../../../base/common/platform.js';
-import { basename, isEqual } from '../../../../base/common/resources.js';
+import { isEqual } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
 import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
 import { IDialogService, IFileDialogService } from '../../../../platform/dialogs/common/dialogs.js';
@@ -22,7 +22,7 @@ import { ILogService } from '../../../../platform/log/common/log.js';
 import { ServiceCollection } from '../../../../platform/instantiation/common/serviceCollection.js';
 import { localize } from '../../../../nls.js';
 import { IActiveSession, ISendRequestOptions, ISessionsManagementService } from '../../../services/sessions/common/sessionsManagement.js';
-import { IChat, ISession, ISessionFolder, ISessionWorkspace } from '../../../services/sessions/common/session.js';
+import { IChat, ISession } from '../../../services/sessions/common/session.js';
 import { ISessionsService } from '../../../services/sessions/browser/sessionsService.js';
 import { IWorkspaceTrustRequestService } from '../../../../platform/workspace/common/workspaceTrust.js';
 import { WorkspacePicker } from './sessionWorkspacePicker.js';
@@ -40,8 +40,6 @@ import { ChatAgentLocation, ChatModeKind } from '../../../../workbench/contrib/c
 import { EDITOR_DRAG_AND_DROP_BACKGROUND } from '../../../../workbench/common/theme.js';
 import { activeSessionViewBackground, activeSessionViewForeground, agentsPanelBackground } from '../../../common/theme.js';
 import { IPathService } from '../../../../workbench/services/path/common/pathService.js';
-import { IGitRepository, IGitService } from '../../../../workbench/contrib/git/common/gitService.js';
-import { IUriIdentityService } from '../../../../platform/uriIdentity/common/uriIdentity.js';
 import { HiddenItemStrategy, MenuWorkbenchToolBar } from '../../../../platform/actions/browser/toolbar.js';
 import { Menus } from '../../../browser/menus.js';
 
@@ -50,6 +48,78 @@ import { Menus } from '../../../browser/menus.js';
 const NEW_CHAT_COMPOSER_LAYOUT_HEIGHT = 180;
 const NEW_CHAT_COMPOSER_INPUT_MAX_HEIGHT = 260;
 type FirstSendWorkspaceChoice = 'selectFolder' | 'createFolder' | undefined;
+
+/**
+ * 8-bit octopus mascot shown above the composer. The sprite is drawn from
+ * character maps ('.' = transparent) so it is easy to tweak pixels or colors.
+ */
+const OCTOPUS_PALETTE: { [pixel: string]: string } = {
+	B: '#3b82f6',	// body
+	D: '#2257c4',	// dark shade (mouth, closed eyes)
+	L: '#8ab8ff',	// highlight
+	W: '#ffffff',	// eye
+	P: '#0f172a',	// pupil
+};
+
+const OCTOPUS_HEAD = [
+	'....BBBBBBBB....',
+	'..BBLLBBBBBBBB..',
+	'.BBLBBBBBBBBBBB.',
+	'.BBWWWBBBBWWWBB.',
+	'BBBWPWBBBBWPWBBB',
+	'BBBWWWBBBBWWWBBB',
+	'BBBBBBBDDBBBBBBB',
+	'BBBBBBBBBBBBBBBB',
+	'.BBBBBBBBBBBBBB.',
+];
+
+/** Row of {@link OCTOPUS_HEAD} where the eyes start; the blink overlay is anchored here. */
+const OCTOPUS_EYE_ROW = 3;
+
+/** Resting tentacle frame (rows continue below {@link OCTOPUS_HEAD}). */
+const OCTOPUS_TENTACLES_A = [
+	'.BB..BB..BB..BB.',
+	'.BB..BB..BB..BB.',
+	'BB..BB....BB..BB',
+	'BB..BB....BB..BB',
+];
+
+/** Wiggle tentacle frame, alternated with frame A during the idle animation. */
+const OCTOPUS_TENTACLES_B = [
+	'.BB..BB..BB..BB.',
+	'.BB..BB..BB..BB.',
+	'..BB..BBBB..BB..',
+	'..BB..BBBB..BB..',
+];
+
+/** Closed-eye overlay flashed briefly for the occasional blink. */
+const OCTOPUS_EYELIDS = [
+	'...BBB....BBB...',
+	'...DDD....DDD...',
+	'...BBB....BBB...',
+];
+
+/** Sprite row where the flip-off frame starts (the raised tentacle tip). */
+const OCTOPUS_FLIP_ROW = 2;
+
+/**
+ * Rare flip-off frame: the third tentacle rises in front of the face (dark
+ * shade so it silhouettes against the body, light tip). Replaces both
+ * tentacle frames for a moment once per idle cycle.
+ */
+const OCTOPUS_TENTACLES_FLIP = [
+	'.......LL.......',
+	'.......DD.......',
+	'.......DD.......',
+	'.......DD.......',
+	'.......DD.......',
+	'.......DD.......',
+	'.......DD.......',
+	'.BB..BB......BB.',
+	'.BB..BB......BB.',
+	'BB..BB........BB',
+	'BB..BB........BB',
+];
 
 export class NewChatWidget extends Disposable {
 
@@ -62,11 +132,13 @@ export class NewChatWidget extends Disposable {
 	private _chatWidgetContent: HTMLElement | undefined;
 	private _composerStackElement: HTMLElement | undefined;
 	private _composerWorkspaceRowElement: HTMLElement | undefined;
-	private _gitStatusElement: HTMLElement | undefined;
-	/** Bumped to re-resolve the git branch when the (non-observable) workspace picker selection changes or a repository finishes opening. */
-	private readonly _gitStatusTick = observableValue<number>('newChatGitStatusTick', 0);
-	/** Working directory we have already asked the git service to open, so we do not re-open repeatedly. */
-	private _openedGitRepositoryKey: string | undefined;
+	/** Set once the composer has seeded (or confirmed) a default workspace so it never re-seeds after an explicit clear. See {@link _ensureComposerHasWorkspace}. */
+	private _defaultWorkspaceHandled = false;
+	private _middleTitle: HTMLElement | undefined;
+	private _middleTitlePrefix: HTMLElement | undefined;
+	private _middleTitleSuffix: HTMLElement | undefined;
+	/** Slot inside the middle heading that hosts the workspace picker trigger. */
+	private _middleTitlePickerSlot: HTMLElement | undefined;
 
 	/** Recreates the draft once a better/late-registering provider can serve the folder (see {@link _createNewSession}). */
 	private readonly _pendingPreferredUpgrade = new MutableDisposable<IDisposable>();
@@ -96,8 +168,6 @@ export class NewChatWidget extends Disposable {
 		@IFileDialogService private readonly fileDialogService: IFileDialogService,
 		@IFileService private readonly fileService: IFileService,
 		@IPathService private readonly pathService: IPathService,
-		@IGitService private readonly gitService: IGitService,
-		@IUriIdentityService private readonly uriIdentityService: IUriIdentityService,
 	) {
 		super();
 		// On web (vscode.dev / insiders.vscode.dev), use {@link WebWorkspacePicker}
@@ -219,7 +289,10 @@ export class NewChatWidget extends Disposable {
 		this._renderMiddleSection(chatWidgetContent);
 		const composerStack = dom.append(chatWidgetContent, dom.$('.new-chat-composer-stack'));
 		this._composerStackElement = composerStack;
-		const workspacePickerContainer = this._renderComposerWorkspaceRow(composerStack);
+		// The workspace picker trigger lives inside the middle heading (the
+		// heading is the dropdown), so the composer workspace row is only needed
+		// on web as a host for the no-agent-host empty state.
+		const emptyStateContainer = isWeb ? this._renderComposerWorkspaceRow(composerStack) : undefined;
 		this._widget.render(composerStack);
 		this._placeWorkspaceRowBelowInput(composerStack);
 		// On web (vscode.dev / insiders.vscode.dev) the workspace picker is
@@ -228,9 +301,11 @@ export class NewChatWidget extends Disposable {
 		// out for the no-agent-host empty state. On Electron desktop the
 		// regular picker is always functional (the local Copilot provider
 		// is always available) so this branch is web-only.
-		this._register(isWeb
-			? this._renderEmptyStateGate(workspacePickerContainer, chatWidgetContent)
-			: this._renderWorkspacePicker(workspacePickerContainer));
+		if (emptyStateContainer) {
+			this._register(this._renderEmptyStateGate(emptyStateContainer, chatWidgetContent));
+		} else {
+			this._mountTitleWorkspacePicker();
+		}
 
 		this._widget.setVisible(true);
 		this._widget.setInputPartMaxHeightOverride(NEW_CHAT_COMPOSER_INPUT_MAX_HEIGHT);
@@ -247,7 +322,76 @@ export class NewChatWidget extends Disposable {
 			this._createNewSession(restoredFolderUri);
 		}
 
+		this._ensureComposerHasWorkspace();
+
 		chatWidgetContainer.classList.add('revealed');
+	}
+
+	/**
+	 * The composer's model and Backboard-options controls bind to the active
+	 * session, and a session requires a workspace. When the composer opens with
+	 * no workspace restored or selected, those controls would otherwise render
+	 * hidden or stuck "loading". Seed the most recent available workspace so the
+	 * controls are functional immediately; the user can still switch workspaces
+	 * from the picker.
+	 *
+	 * A usable default can appear asynchronously — recent-session workspaces
+	 * resolve lazily, a serving provider can connect after construction, and VS
+	 * Code recent folders load after construction — so this runs in an autorun
+	 * that re-evaluates when any of those change. It seeds at most once, so it
+	 * never fights the user explicitly clearing the workspace afterwards.
+	 */
+	private _ensureComposerHasWorkspace(): void {
+		const pickerChanged = observableFromEvent(this, this._workspacePicker.onDidChangeSelection, () => undefined);
+		const sessionTypesChanged = observableFromEvent(this, this.sessionsManagementService.onDidChangeSessionTypes, () => undefined);
+		this._register(autorun(reader => {
+			if (this._defaultWorkspaceHandled) {
+				return;
+			}
+			// Subscribe to everything that can make (or already has made) a
+			// workspace available so the autorun re-runs as they settle: the
+			// picker's recents, a serving provider connecting, the active draft,
+			// and the recent sessions' lazily-resolved workspaces.
+			pickerChanged.read(reader);
+			sessionTypesChanged.read(reader);
+			this._session.read(reader);
+			this.sessionsService.visibleSessions.read(reader);
+			const { recent, other } = this.sessionsService.getRecentlyOpenedSessions();
+			const sessions = [...recent, ...other];
+			for (const session of sessions) {
+				session.workspace.read(reader);
+			}
+
+			if (this._session.get() || this._workspacePicker.selectedFolderUri) {
+				// A session/selection was restored or created elsewhere; nothing
+				// to seed, and we must not seed later if it is cleared.
+				this._defaultWorkspaceHandled = true;
+				return;
+			}
+
+			// Prefer the folder of the most recent servable session (continue
+			// where the user last worked, already trusted), then fall back to
+			// the picker's recent workspaces.
+			const candidate = this._recentSessionFolder(sessions) ?? this._workspacePicker.getDefaultWorkspaceCandidate();
+			if (candidate) {
+				this._defaultWorkspaceHandled = true;
+				this._workspacePicker.setSelectedWorkspace(candidate);
+			}
+		}));
+	}
+
+	/**
+	 * The workspace folder of the most recently opened session that can still
+	 * be served by a registered provider, or `undefined` when there is none.
+	 */
+	private _recentSessionFolder(sessions: readonly ISession[]): URI | undefined {
+		for (const session of sessions) {
+			const root = session.workspace.get()?.folders[0]?.root;
+			if (root && this.sessionsManagementService.getSessionTypesForFolder(root).length > 0) {
+				return root;
+			}
+		}
+		return undefined;
 	}
 
 	private _makeComposerEasyToFocus(): void {
@@ -268,8 +412,6 @@ export class NewChatWidget extends Disposable {
 		const row = dom.append(container, dom.$('.new-chat-composer-workspace-row'));
 		this._composerWorkspaceRowElement = row;
 		const pickerSlot = dom.append(row, dom.$('.new-session-workspace-picker-container'));
-		this._gitStatusElement = dom.append(row, dom.$('.new-chat-git-status'));
-		this._register(this._renderGitStatus());
 		return pickerSlot;
 	}
 
@@ -289,94 +431,6 @@ export class NewChatWidget extends Disposable {
 		}
 	}
 
-	private _renderGitStatus(): IDisposable {
-		const store = new DisposableStore();
-		// Re-render when the session workspace changes, when the resolved git
-		// repository's state changes (branch switch, etc.), or when the tick is
-		// bumped (workspace picker selection / a repository finished opening).
-		store.add(autorun(reader => {
-			this._gitStatusTick.read(reader);
-			const workspace = this._session.read(reader)?.workspace.read(reader) ?? this._workspacePicker.selectedResolved?.workspace;
-			const folder = workspace?.folders[0];
-			const repository = this._findGitRepository(folder);
-			repository?.state.read(reader);
-			this._updateGitStatus(workspace, repository);
-			if (!repository) {
-				this._ensureGitRepositoryOpened(folder);
-			}
-		}));
-		// selectedResolved is not observable, so a picker selection needs an
-		// explicit re-run of the autorun above.
-		store.add(this._workspacePicker.onDidSelectWorkspace(() => this._gitStatusTick.set(this._gitStatusTick.get() + 1, undefined)));
-		return store;
-	}
-
-	/** Finds the live git repository whose root contains (or is contained by) the folder's working directory. */
-	private _findGitRepository(folder: ISessionFolder | undefined): IGitRepository | undefined {
-		const workingDirectory = folder?.workingDirectory ?? folder?.root;
-		if (!workingDirectory) {
-			return undefined;
-		}
-		for (const repository of this.gitService.repositories) {
-			if (this.uriIdentityService.extUri.isEqualOrParent(workingDirectory, repository.rootUri) ||
-				this.uriIdentityService.extUri.isEqualOrParent(repository.rootUri, workingDirectory)) {
-				return repository;
-			}
-		}
-		return undefined;
-	}
-
-	/** Asks the git service to open the folder's repository once so its branch can be resolved; re-renders when it resolves. */
-	private _ensureGitRepositoryOpened(folder: ISessionFolder | undefined): void {
-		const workingDirectory = folder?.workingDirectory ?? folder?.root;
-		if (!workingDirectory) {
-			return;
-		}
-		const key = workingDirectory.toString();
-		if (this._openedGitRepositoryKey === key) {
-			return;
-		}
-		this._openedGitRepositoryKey = key;
-		this.gitService.openRepository(workingDirectory).then(() => {
-			if (!this._store.isDisposed) {
-				this._gitStatusTick.set(this._gitStatusTick.get() + 1, undefined);
-			}
-		}, error => this.logService.warn('[NewChatWidget] Failed to open git repository for branch status', error));
-	}
-
-	private _updateGitStatus(workspace: ISessionWorkspace | undefined, repository: IGitRepository | undefined): void {
-		const element = this._gitStatusElement;
-		if (!element) {
-			return;
-		}
-
-		const folder = workspace?.folders[0];
-		const gitRepository = folder?.gitRepository;
-		const repoName = gitRepository?.uri ? basename(gitRepository.uri) : (folder?.name ?? workspace?.label);
-		// Prefer the live branch from the git service — the static snapshot on the
-		// session folder has no branch for agent-host workspaces (it would otherwise
-		// always fall back to "main").
-		const liveBranchName = repository?.state.get().HEAD?.name?.trim();
-		const branchName = liveBranchName || gitRepository?.branchName?.trim();
-		const displayBranchName = branchName || localize('newChatGitStatus.defaultBranch', "main");
-
-		dom.clearNode(element);
-		element.classList.toggle('empty', !repoName);
-		if (!repoName) {
-			return;
-		}
-
-		const branchChip = dom.append(element, dom.$('span.new-chat-git-status-item.branch'));
-		dom.append(branchChip, renderIcon(Codicon.gitBranch));
-		const branchLabel = dom.append(branchChip, dom.$('span.sessions-chat-dropdown-label'));
-		branchLabel.textContent = displayBranchName;
-		branchChip.classList.remove('pending');
-
-		const title = localize('newChatGitStatus.titleWithBranch', "Repository: {0}, Branch: {1}", repoName, displayBranchName);
-		element.title = title;
-		element.setAttribute('aria-label', title);
-	}
-
 	private _renderMiddleSection(container: HTMLElement): void {
 		const actions = dom.append(container, dom.$('.new-chat-middle-toolbar'));
 		this._register(this.instantiationService.createInstance(MenuWorkbenchToolBar, actions, Menus.NewSessionToolbar, {
@@ -385,15 +439,93 @@ export class NewChatWidget extends Disposable {
 		}));
 		const middle = dom.append(container, dom.$('.new-chat-middle-section'));
 
-		const title = dom.append(middle, dom.$('h2.new-chat-middle-title'));
-		title.textContent = localize('newChatMiddleTitle', "What should Backboard do?");
+		// The heading embeds the workspace picker trigger mid-sentence: "What
+		// should we build in [workspace ▾]?". The prefix/suffix spans carry the
+		// localized sentence around the picker slot; the picker itself renders
+		// and maintains the workspace name.
+		this._middleTitle = dom.append(middle, dom.$('h2.new-chat-middle-title'));
+		this._middleTitlePrefix = dom.append(this._middleTitle, dom.$('span.new-chat-middle-title-text'));
+		this._middleTitlePickerSlot = dom.append(this._middleTitle, dom.$('span.new-chat-middle-title-picker'));
+		this._middleTitleSuffix = dom.append(this._middleTitle, dom.$('span.new-chat-middle-title-text'));
+		this._updateMiddleTitle();
+		this._renderPixelOctopus(this._middleTitle);
+	}
 
-		const description = dom.append(middle, dom.$('.new-chat-middle-description'));
-		const descriptionLineOne = dom.append(description, dom.$('p'));
-		descriptionLineOne.textContent = localize('newChatMiddleDescriptionOne', "Ask for a code change, file edit, bug fix, or UI update.");
-		const descriptionLineTwo = dom.append(description, dom.$('p'));
-		descriptionLineTwo.textContent = localize('newChatMiddleDescriptionTwo', "Pick a workspace, then describe the next step.");
+	/**
+	 * Renders the 8-bit octopus mascot just left of the heading text
+	 * (absolutely positioned, so it takes no layout row). Pixel rows are
+	 * merged into horizontal run rects to keep the node count low and
+	 * avoid hairline seams when the sprite scales.
+	 */
+	private _renderPixelOctopus(container: HTMLElement): void {
+		const host = dom.append(container, dom.$('.new-chat-octopus'));
+		host.setAttribute('aria-hidden', 'true');
+		const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+		svg.classList.add('octo-sprite');
+		const columns = OCTOPUS_HEAD[0].length;
+		const rows = OCTOPUS_HEAD.length + OCTOPUS_TENTACLES_A.length;
+		svg.setAttribute('viewBox', `0 0 ${columns} ${rows}`);
+		svg.setAttribute('width', String(columns * 6));
+		svg.setAttribute('height', String(rows * 6));
+		const appendFrame = (className: string, frame: readonly string[], rowOffset: number) => {
+			const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+			group.classList.add(className);
+			for (let y = 0; y < frame.length; y++) {
+				const row = frame[y];
+				for (let x = 0; x < row.length; x++) {
+					const color = OCTOPUS_PALETTE[row[x]];
+					if (!color) {
+						continue;
+					}
+					let runEnd = x;
+					while (runEnd + 1 < row.length && row[runEnd + 1] === row[x]) {
+						runEnd++;
+					}
+					const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+					rect.setAttribute('x', String(x));
+					rect.setAttribute('y', String(y + rowOffset));
+					rect.setAttribute('width', String(runEnd - x + 1));
+					rect.setAttribute('height', '1');
+					rect.setAttribute('fill', color);
+					group.appendChild(rect);
+					x = runEnd;
+				}
+			}
+			svg.appendChild(group);
+		};
+		appendFrame('octo-head', OCTOPUS_HEAD, 0);
+		appendFrame('octo-frame-a', OCTOPUS_TENTACLES_A, OCTOPUS_HEAD.length);
+		appendFrame('octo-frame-b', OCTOPUS_TENTACLES_B, OCTOPUS_HEAD.length);
+		appendFrame('octo-flip', OCTOPUS_TENTACLES_FLIP, OCTOPUS_FLIP_ROW);
+		appendFrame('octo-eyelids', OCTOPUS_EYELIDS, OCTOPUS_EYE_ROW);
+		host.appendChild(svg);
+	}
 
+	/**
+	 * Fills the heading's text around the embedded workspace picker. The
+	 * localized template is split on its placeholder so translations can move
+	 * the picker anywhere in the sentence.
+	 */
+	private _updateMiddleTitle(): void {
+		if (!this._middleTitlePrefix || !this._middleTitleSuffix) {
+			return;
+		}
+		const marker = '\u0000';
+		const [prefix, suffix] = localize('newChatMiddleTitleInFolder', "What should we build in {0}?", marker).split(marker);
+		this._middleTitlePrefix.textContent = prefix;
+		this._middleTitleSuffix.textContent = suffix ?? '';
+	}
+
+	/**
+	 * Mounts the workspace picker trigger inside the middle heading so the
+	 * heading itself is the workspace dropdown. The picker owns the trigger's
+	 * label, click/keyboard handling, and dropdown anchoring, so it keeps
+	 * working (and stays in sync with the selection) wherever it is mounted.
+	 */
+	private _mountTitleWorkspacePicker(): void {
+		if (this._middleTitlePickerSlot) {
+			this._workspacePicker.render(this._middleTitlePickerSlot);
+		}
 	}
 
 	/**
@@ -493,23 +625,6 @@ export class NewChatWidget extends Disposable {
 		this._pendingPreferredUpgrade.value = store;
 	}
 
-	private _renderWorkspacePicker(container: HTMLElement): IDisposable {
-		const pickersRow = dom.append(container, dom.$('.session-workspace-picker'));
-		const pickersLabel = dom.append(pickersRow, dom.$('.session-workspace-picker-label'));
-		pickersLabel.textContent = this._workspacePicker.selectedFolderUri
-			? localize('newSessionIn', "New session in")
-			: localize('newSessionChooseWorkspace', "Start by picking a");
-
-		this._workspacePicker.render(pickersRow);
-
-		return this._workspacePicker.onDidSelectWorkspace(() => {
-			const folderUri = this._workspacePicker.selectedFolderUri;
-			pickersLabel.textContent = folderUri
-				? localize('newSessionIn', "New session in")
-				: localize('newSessionChooseWorkspace', "Start by picking a");
-		});
-	}
-
 	private _renderEmptyState(container: HTMLElement): IDisposable {
 		const emptyState = this.instantiationService.createInstance(NoAgentHostEmptyState);
 		emptyState.render(container);
@@ -541,11 +656,18 @@ export class NewChatWidget extends Disposable {
 		const showPicker = () => {
 			chatWidgetContent.classList.remove('no-agent-host');
 			dom.clearNode(pickerSlot);
-			stateDisposables.value = this._renderWorkspacePicker(pickerSlot);
+			stateDisposables.value = undefined;
+			this._mountTitleWorkspacePicker();
 		};
 
 		const showEmptyState = () => {
 			chatWidgetContent.classList.add('no-agent-host');
+			// The middle section (and the picker trigger inside its heading) is
+			// hidden via the `no-agent-host` class; clear the slot so a stale
+			// trigger is not left behind when the picker later remounts.
+			if (this._middleTitlePickerSlot) {
+				dom.clearNode(this._middleTitlePickerSlot);
+			}
 			dom.clearNode(pickerSlot);
 			stateDisposables.value = this._renderEmptyState(pickerSlot);
 		};

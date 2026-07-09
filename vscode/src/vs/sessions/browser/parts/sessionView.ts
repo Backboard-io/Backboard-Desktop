@@ -9,6 +9,7 @@ import { ISerializableView, IViewSize } from '../../../base/browser/ui/grid/grid
 import { Emitter, Event } from '../../../base/common/event.js';
 import { Disposable, DisposableStore, IDisposable, MutableDisposable } from '../../../base/common/lifecycle.js';
 import { URI } from '../../../base/common/uri.js';
+import { IAccessibilityService } from '../../../platform/accessibility/common/accessibility.js';
 import { ICommandService } from '../../../platform/commands/common/commands.js';
 import { IInstantiationService } from '../../../platform/instantiation/common/instantiation.js';
 import { ServiceCollection } from '../../../platform/instantiation/common/serviceCollection.js';
@@ -104,6 +105,7 @@ export class SessionView extends Disposable implements ISerializableView {
 		@IFileService private readonly fileService: IFileService,
 		@IPathService private readonly pathService: IPathService,
 		@ILogService private readonly logService: ILogService,
+		@IAccessibilityService private readonly accessibilityService: IAccessibilityService,
 	) {
 		super();
 
@@ -185,6 +187,10 @@ export class SessionView extends Disposable implements ISerializableView {
 
 		this._openSessionDisposables.add(this._handleContextKeys(session));
 
+		// Distinguishes a draft graduating into a real chat (the user sent the
+		// first prompt while this autorun was live) from the initial view
+		// created when a session is opened, which must not animate.
+		let isFirstRun = true;
 		this._openSessionDisposables.add(autorun(reader => {
 			let desiredKind: ChatViewKind;
 			if (session === undefined || session.isCreated.read(reader) === false) {
@@ -196,8 +202,14 @@ export class SessionView extends Disposable implements ISerializableView {
 			}
 
 			let view = this._currentView.value;
+			let animateGraduation = false;
+			let composerInputRect: DOMRect | undefined;
 
 			if (!view || view.kind !== desiredKind) {
+				if (view && !isFirstRun && desiredKind === 'chat') {
+					animateGraduation = true;
+					composerInputRect = view.element.querySelector('.interactive-input-part')?.getBoundingClientRect();
+				}
 				view = desiredKind === 'chat'
 					? this.chatViewFactory.createChatView(this._scopedInstantiationService)
 					: this.chatViewFactory.createNewChatView(desiredKind === 'newChatInSession', options, this._scopedInstantiationService);
@@ -205,6 +217,7 @@ export class SessionView extends Disposable implements ISerializableView {
 				this._currentView.value = view;
 				view.setActive(this._isActive);
 			}
+			isFirstRun = false;
 
 			if (session) {
 				view.setChat(session.activeChat.read(reader), session.sessionId);
@@ -214,7 +227,68 @@ export class SessionView extends Disposable implements ISerializableView {
 			this._compositeBar.setSession(session);
 			this._floatingToolbar.setSession(session);
 			this._layoutChildren();
+
+			if (animateGraduation) {
+				this._animateSessionGraduation(composerInputRect);
+			}
 		}));
+	}
+
+	/**
+	 * Animates the freshly mounted chat view's components into place after a
+	 * new-session composer graduates into a real chat (the user sent the first
+	 * prompt): the input glides from where the composer sat down to its docked
+	 * position, the transcript fades in drifting up into the vacated space,
+	 * and the header/tabs slide in from the top edge. Runs after layout so all
+	 * measurements are against final positions; animations end at the elements'
+	 * natural styles, so an interrupted or skipped run leaves no residue.
+	 *
+	 * @param composerInputRect The outgoing composer input's rect, measured
+	 * before the view swap; when missing, the input glide is skipped and only
+	 * the fades run.
+	 */
+	private _animateSessionGraduation(composerInputRect: DOMRect | undefined): void {
+		if (this.accessibilityService.isMotionReduced()) {
+			return;
+		}
+		const view = this._currentView.value;
+		if (!view) {
+			return;
+		}
+
+		const easing = 'cubic-bezier(0.2, 0, 0, 1)';
+
+		// The input is the one component both views share: glide it from the
+		// composer's centered position to its docked spot. Centers are aligned
+		// rather than top edges because the two inputs differ in height, and
+		// center-to-center reads as one element moving instead of snapping.
+		const inputPart = view.element.querySelector<HTMLElement>('.interactive-input-part');
+		if (inputPart && composerInputRect && composerInputRect.height > 0) {
+			const inputRect = inputPart.getBoundingClientRect();
+			const deltaX = (composerInputRect.left + composerInputRect.width / 2) - (inputRect.left + inputRect.width / 2);
+			const deltaY = (composerInputRect.top + composerInputRect.height / 2) - (inputRect.top + inputRect.height / 2);
+			if (inputRect.height > 0 && (Math.abs(deltaX) >= 1 || Math.abs(deltaY) >= 1)) {
+				inputPart.animate([
+					{ transform: `translate(${deltaX}px, ${deltaY}px)` },
+					{ transform: 'none' },
+				], { duration: 420, easing });
+			}
+		}
+
+		// The transcript (leading with the just-sent prompt) settles upward
+		// into the space the composer vacated, opposite to the input's
+		// downward glide, so the two read as the view opening apart.
+		view.element.querySelector<HTMLElement>('.interactive-list')?.animate([
+			{ opacity: 0, transform: 'translateY(24px)' },
+			{ opacity: 1, transform: 'none' },
+		], { duration: 420, easing });
+
+		// The header and tabs were hidden while the composer was up; slide
+		// them in from the top edge once the input is already on its way.
+		this._centeredContentContainer.animate([
+			{ opacity: 0, transform: 'translateY(-10px)' },
+			{ opacity: 1, transform: 'none' },
+		], { duration: 320, delay: 100, easing, fill: 'backwards' });
 	}
 
 	private _handleContextKeys(session: IActiveSession | undefined): IDisposable {

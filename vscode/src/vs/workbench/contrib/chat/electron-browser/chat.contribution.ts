@@ -46,8 +46,8 @@ import { IPluginGitService } from '../common/plugins/pluginGitService.js';
 import '../browser/editorMarketplaceView.js';
 import { registerChatDeveloperActions } from './actions/chatDeveloperActions.js';
 import { registerChatExportZipAction } from './actions/chatExportZip.js';
-import { BackboardCredentialsContribution, registerBackboardSsoActions } from './actions/backboardSsoActions.js';
 import { registerExportAgentTracesDbAction } from './actions/exportAgentTracesDb.js';
+import './backboardSso.contribution.js';
 import './backboardWorkspace/backboardWorkspace.contribution.js';
 import { BackboardModeSwitcherAction, BackboardModeSwitcherContribution, ToggleBackboardModeSwitcherTitleBarAction } from './backboardModeSwitcher/backboardModeSwitcherActions.js';
 import { shouldWarnForSessionShutdown } from './chatLifecycle.js';
@@ -259,7 +259,6 @@ registerAction2(StopReadAloud);
 
 registerChatDeveloperActions();
 registerChatExportZipAction();
-registerBackboardSsoActions();
 registerExportAgentTracesDbAction();
 
 registerWorkbenchContribution2(KeywordActivationContribution.ID, KeywordActivationContribution, WorkbenchPhase.AfterRestored);
@@ -267,7 +266,6 @@ registerWorkbenchContribution2(NativeBuiltinToolsContribution.ID, NativeBuiltinT
 registerWorkbenchContribution2(ChatCommandLineHandler.ID, ChatCommandLineHandler, WorkbenchPhase.BlockRestore);
 registerWorkbenchContribution2(ChatSuspendThrottlingHandler.ID, ChatSuspendThrottlingHandler, WorkbenchPhase.AfterRestored);
 registerWorkbenchContribution2(ChatLifecycleHandler.ID, ChatLifecycleHandler, WorkbenchPhase.AfterRestored);
-registerWorkbenchContribution2(BackboardCredentialsContribution.ID, BackboardCredentialsContribution, WorkbenchPhase.AfterRestored);
 registerWorkbenchContribution2(AgentHostContribution.ID, AgentHostContribution, WorkbenchPhase.AfterRestored);
 registerWorkbenchContribution2(AgentHostTerminalContribution.ID, AgentHostTerminalContribution, WorkbenchPhase.AfterRestored);
 registerWorkbenchContribution2(BackboardModeSwitcherContribution.ID, BackboardModeSwitcherContribution, WorkbenchPhase.BlockRestore);

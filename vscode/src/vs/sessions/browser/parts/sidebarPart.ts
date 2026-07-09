@@ -61,10 +61,12 @@ export class SidebarPart extends AbstractPaneCompositePart {
 
 	//#region IView
 
-	// On web the titlebar hosts an additional host filter combo alongside the
-	// sidebar toggle; use a wider minimum so those controls always fit within
-	// the sidebar's rendered area (below this the sidebar snaps closed).
-	readonly minimumWidth: number = isWeb ? 270 : 170;
+	// The header row (traffic-light spacer ~70px, the "Simple" mode switcher, the
+	// sidebar toggle, and the back/forward navigation ≈ 260px total) must always
+	// fit within the sidebar's rendered area so the forward arrow never clips on
+	// resize; below this the sidebar snaps closed. Web also hosts an additional
+	// host filter combo, so it needs a touch more room.
+	readonly minimumWidth: number = isWeb ? 300 : 290;
 	readonly maximumWidth: number = Number.POSITIVE_INFINITY;
 	readonly minimumHeight: number = 0;
 	readonly maximumHeight: number = Number.POSITIVE_INFINITY;
@@ -142,7 +144,10 @@ export class SidebarPart extends AbstractPaneCompositePart {
 		// the sidebar toggle), absorbed from the former integrated chrome bar.
 		this.panelHeader = this._register(this.instantiationService.createInstance(SessionsPanelHeader, parent, {
 			classes: ['sidebar-part-header'],
-			left: [{ menuId: Menus.TitleBarLeftLayout, telemetrySource: 'sidebarPanelHeader.left' }],
+			right: [
+				{ menuId: Menus.TitleBarLeftLayout, telemetrySource: 'sidebarPanelHeader.left' },
+				{ menuId: Menus.TitleBarCenterLeft, telemetrySource: 'sidebarPanelHeader.centerLeft' },
+			],
 			windowControls: { left: true },
 		}));
 

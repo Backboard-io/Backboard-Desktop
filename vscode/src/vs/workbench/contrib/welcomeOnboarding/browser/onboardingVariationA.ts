@@ -118,7 +118,7 @@ const BACKBOARD_API_KEY_PATTERN = /^espr_[A-Za-z0-9_-]{43}$/;
 const LOCAL_AGENT_HOST_PROVIDER_ID = 'local-agent-host';
 const ONBOARDING_WINDOW_WIDTH = 920;
 const ONBOARDING_WINDOW_HEIGHT = 600;
-const OPEN_BACKBOARD_WORKSPACE_COMMAND_ID = 'workbench.action.openBackboardWorkspace';
+const ONBOARDING_WELCOME_VIDEO_PLAYBACK_RATE = 1.75;
 const SOURCE_SETTINGS_RESOURCE_NAMES = ['settings.json', 'keybindings.json'] as const;
 const DEFAULT_SETTINGS_IMPORT_SELECTION: ISettingsImportSelection = {
 	settings: true,
@@ -442,22 +442,16 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 	}
 
 	private async _openSelectedExperienceAfterOnboarding(): Promise<void> {
-		switch (this.selectedExperience) {
-			case OnboardingExperience.Simple:
-				await this.commandService.executeCommand(OPEN_AGENTS_WINDOW_COMMAND_ID, {
-					preferredSessionType: {
-						providerId: LOCAL_AGENT_HOST_PROVIDER_ID,
-						sessionTypeId: SessionType.CopilotCLI,
-					}
-				});
-				break;
-			case OnboardingExperience.Developer:
-				await this.commandService.executeCommand('backboard.openPanel');
-				break;
-			case OnboardingExperience.Advanced:
-				await this.commandService.executeCommand(OPEN_BACKBOARD_WORKSPACE_COMMAND_ID);
-				break;
-		}
+		// Onboarding no longer forks into separate Simple and Editor experiences.
+		// Everyone lands in the unified Simple workspace (the Agents window); the
+		// full editor is a click away from there, and the post-onboarding tour
+		// walks through the whole IDE.
+		await this.commandService.executeCommand(OPEN_AGENTS_WINDOW_COMMAND_ID, {
+			preferredSessionType: {
+				providerId: LOCAL_AGENT_HOST_PROVIDER_ID,
+				sessionTypeId: SessionType.CopilotCLI,
+			}
+		});
 	}
 
 	private async _promptBackboardSsoAfterOnboarding(): Promise<void> {
@@ -557,6 +551,22 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 
 		this.currentStepIndex = nextStepIndex;
 		this._renderStepFrame();
+	}
+
+	/**
+	 * Advances to the next visible step, or completes the onboarding when the
+	 * current step is the last one. Used by terminal actions (such as the
+	 * Welcome step's sign-in and skip controls) so the flow finishes cleanly
+	 * regardless of how many steps follow.
+	 */
+	private _advanceOrComplete(): void {
+		if (this._isLastStep()) {
+			this._logAction('complete');
+			this._dismiss('complete');
+			return;
+		}
+
+		this._nextStep();
 	}
 
 	private _prevStep(): void {
@@ -750,7 +760,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 					source: error instanceof Error ? error.message : undefined,
 				});
 			});
-			this._nextStep();
+			this._advanceOrComplete();
 		}));
 
 		const skipArea = append(welcomeContent, $('.onboarding-backboard-skip-area'));
@@ -759,7 +769,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		skipButton.textContent = localize('onboarding.backboard.skipStep', "Skip this step");
 		this.stepDisposables.add(addDisposableListener(skipButton, EventType.CLICK, () => {
 			this._logAction('skipWelcomeSignIn');
-			this._nextStep();
+			this._advanceOrComplete();
 		}));
 
 		const visual = append(body, $('.onboarding-backboard-welcome-visual'));
@@ -776,6 +786,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		video.preload = 'auto';
 		video.src = this._mediaUri('onboarding-welcome-animation.mp4');
 		this.stepDisposables.add(addDisposableListener(video, 'canplay', () => {
+			video.playbackRate = ONBOARDING_WELCOME_VIDEO_PLAYBACK_RATE;
 			video.classList.add('loaded');
 		}));
 

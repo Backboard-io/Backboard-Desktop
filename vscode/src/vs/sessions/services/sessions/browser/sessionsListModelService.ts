@@ -206,6 +206,8 @@ export class SessionsListModelService extends Disposable implements ISessionsLis
 				return { ...Codicon.sessionInProgress, color: themeColorFromId('textLink.foreground') };
 			case SessionStatus.NeedsInput:
 				return { ...Codicon.circleFilled, color: themeColorFromId('list.warningForeground') };
+			case SessionStatus.Completed:
+				return { ...Codicon.circleFilled, color: themeColorFromId('charts.blue') };
 			case SessionStatus.Error:
 				return { ...Codicon.error, color: themeColorFromId('errorForeground') };
 			default:

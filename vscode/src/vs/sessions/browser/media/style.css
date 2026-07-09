@@ -19,28 +19,31 @@
 /* ---- Sidebar & Auxiliary Bar Card Appearance ---- */
 
 .agent-sessions-workbench {
-	/* Low-alpha tint: the sidebar is a frosted-glass panel. On macOS desktop
-	 * the window has native vibrancy, so the OS-blurred desktop shows through
-	 * here; elsewhere the shell gradient shows through via backdrop-filter. */
+	/* Translucent tint, NO blur: the sidebar stays see-through (the shell
+	 * gradient shows through it here; the OS desktop via native vibrancy on
+	 * macOS, see the .mac rules below) but the in-app frosted-glass
+	 * backdrop-filter is removed per user request — do NOT re-add
+	 * backdrop-filter to the sidebar (removed in 4cd4d7808, re-added later,
+	 * removed again 2026-07-08). */
 	--sessions-sidebar-region-background: color-mix(in srgb, var(--vscode-sideBar-background, var(--vscode-editor-background)) 30%, transparent);
 	--sessions-main-region-background: var(--vscode-agents-background, var(--vscode-editor-background));
+	--sessions-codex-surface-background: var(--vscode-agentsChatInput-background, var(--vscode-editorWidget-background));
+	--sessions-codex-surface-border: color-mix(in srgb, var(--vscode-agentsChatInput-border, var(--vscode-editorWidget-border)) 72%, transparent);
+	--sessions-codex-muted-foreground: color-mix(in srgb, var(--vscode-foreground) 62%, transparent);
 	--sessions-panel-divider-color: var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 10%, transparent));
+	/* A deliberately strong divider for the boundary between the agents panel
+	 * and the right (auxiliary) panel. Foreground-based so it always contrasts
+	 * with the panel background — clearly visible in light, dark, and high
+	 * contrast themes alike. */
+	--sessions-right-panel-divider-color: var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 32%, transparent));
 }
 
 .monaco-workbench.vs.agent-sessions-workbench {
-	--sessions-sidebar-region-background: color-mix(in srgb, var(--vscode-sideBar-background, color-mix(in srgb, var(--vscode-editor-background) 94%, var(--vscode-foreground) 6%)) 40%, transparent);
 	--sessions-main-region-background: var(--vscode-agents-background, color-mix(in srgb, var(--vscode-editor-background) 96%, var(--vscode-foreground) 4%));
 }
 
-/* Blur smooths out whatever is behind the glass so text stays legible over
- * busy or brightly colored backgrounds; the heavy desktop blur itself comes
- * from the native vibrancy material, this only softens what leaks through.
- * No saturation boost: a contained, mostly-solid tinted panel reads as
- * "clean" — pushing color/brightness through it reads as glare. */
 .agent-sessions-workbench .part.sidebar {
 	background: var(--sessions-sidebar-region-background);
-	-webkit-backdrop-filter: blur(20px);
-	backdrop-filter: blur(20px);
 }
 
 /* Hide the Agent Host agent picker ("Agent" pill) from the composer toolbars in
@@ -118,16 +121,22 @@
 	}
 }
 
-/* macOS desktop: the sessions window is created with native vibrancy
- * (see defaultBrowserWindowOptions), so the root stops painting opaque
- * pixels and the OS-blurred desktop shows through wherever the page has
- * alpha (the sidebar region). The in-app layers are kept near-invisible
- * here: every percent of tint or gradient stacks on top of the already
- * frosty material and reads as solid paint — in light themes the previous
- * values (70% gradient + 40% tint) summed to a solid white panel.
- * High contrast themes and reduced transparency stay opaque (see below). */
+.monaco-workbench.hc-black.agent-sessions-workbench.shell-gradient-background::before,
+.monaco-workbench.hc-light.agent-sessions-workbench.shell-gradient-background::before {
+	display: none;
+}
+
+/* macOS desktop: the sessions window is created with native vibrancy (see
+ * defaultBrowserWindowOptions), so the workbench root stops painting opaque
+ * pixels and the OS desktop shows through wherever the page has alpha — the
+ * sidebar region. See-through comes from the vibrancy material alone: there
+ * is deliberately NO in-app backdrop-filter blur here (frosted glass removed
+ * per user request). High contrast stays opaque via the rules above/below,
+ * and reduced transparency via the media query below. */
 .monaco-workbench.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light) {
-	--sessions-sidebar-region-background: color-mix(in srgb, var(--vscode-sideBar-background, var(--vscode-editor-background)) 68%, transparent);
+	/* Tint balance point: 42% washed out over bright desktops, 62% read as
+	 * not see-through enough (both user-rejected) — keep at 52%. */
+	--sessions-sidebar-region-background: color-mix(in srgb, var(--vscode-sideBar-background, var(--vscode-editor-background)) 52%, transparent);
 	background: transparent;
 }
 
@@ -136,32 +145,27 @@
 	 * (same macOS material, different visual weight per appearance), so the
 	 * same tint percentage as dark reads far more opaque here — needs a
 	 * lower value to actually show the desktop through it. */
-	--sessions-sidebar-region-background: color-mix(in srgb, var(--vscode-sideBar-background, color-mix(in srgb, var(--vscode-editor-background) 94%, var(--vscode-foreground) 6%)) 32%, transparent);
+	--sessions-sidebar-region-background: color-mix(in srgb, color-mix(in srgb, var(--vscode-sideBar-background, color-mix(in srgb, var(--vscode-editor-background) 94%, var(--vscode-foreground) 6%)) 56%, var(--vscode-foreground) 44%) 32%, transparent);
 }
 
 .monaco-workbench.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light)::before {
 	/* Only visible behind the translucent (sidebar) region; the panel is
-	 * mostly solid now, so keep this to a faint whisper rather than a
-	 * second light source stacking on top of it. */
-	opacity: 0.06;
+	 * already backed by native vibrancy, so keep this to a faint whisper
+	 * rather than a second light source stacking on top of it. */
+	opacity: 0.03;
 }
 
-/* Text over vibrancy sits on top of an arbitrary desktop, not a flat theme
- * background, so contrast is unpredictable. A soft halo in the opposite
- * tone (dark halo behind light text, light halo behind dark text) keeps
- * labels readable without changing their color. text-shadow is inherited,
- * so this single rule on the sidebar covers titles, timestamps, and icons. */
-.monaco-workbench.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light) .part.sidebar {
-	text-shadow: 0 1px 3px color-mix(in srgb, black 55%, transparent);
-}
+/* Reduced transparency: opaque sidebar and opaque root — no desktop
+ * show-through at all. */
+@media (prefers-reduced-transparency: reduce) {
+	.monaco-workbench.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light) {
+		--sessions-sidebar-region-background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+		background: var(--sessions-main-region-background);
+	}
 
-.monaco-workbench.vs.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light) .part.sidebar {
-	text-shadow: 0 1px 3px color-mix(in srgb, white 70%, transparent);
-}
-
-.monaco-workbench.hc-black.agent-sessions-workbench.shell-gradient-background::before,
-.monaco-workbench.hc-light.agent-sessions-workbench.shell-gradient-background::before {
-	display: none;
+	.monaco-workbench.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light)::before {
+		opacity: 1;
+	}
 }
 
 .monaco-workbench.agent-sessions-workbench > .notifications-center {
@@ -238,7 +242,7 @@
 	pointer-events: none;
 	border-left: 1px solid var(--sessions-panel-divider-color);
 	border-right: 1px solid var(--sessions-panel-divider-color);
-	border-radius: var(--vscode-cornerRadius-small);
+	border-radius: 0;
 	box-sizing: border-box;
 }
 
@@ -256,12 +260,12 @@
 	z-index: 30;
 	pointer-events: none;
 	border-right: 1px solid var(--sessions-panel-divider-color);
-	border-radius: var(--vscode-cornerRadius-small);
+	border-radius: 0;
 	box-sizing: border-box;
 }
 
-/* The sidebar part itself keeps its translucent tint (see above); only its
- * inner surfaces are transparent so the panel reads as one glass sheet. */
+/* The sidebar part itself paints the translucent sidebar surface (see above);
+ * its inner surfaces stay transparent so the panel reads as one sheet. */
 .agent-sessions-workbench.shell-gradient-background .part.titlebar,
 .agent-sessions-workbench.shell-gradient-background .part.titlebar > .content,
 .agent-sessions-workbench.shell-gradient-background .part.titlebar > .titlebar-container,
@@ -272,31 +276,9 @@
 	background: transparent !important;
 }
 
-/* Frosted-glass fallbacks: opaque sidebar and no blur when the user prefers
- * reduced transparency or a high contrast theme is active. */
-@media (prefers-reduced-transparency: reduce) {
-	.agent-sessions-workbench .part.sidebar {
-		background: var(--vscode-sideBar-background, var(--vscode-editor-background));
-		-webkit-backdrop-filter: none;
-		backdrop-filter: none;
-	}
-
-	/* Also paint the root opaque again so native window vibrancy (macOS)
-	 * cannot show through anywhere. */
-	.monaco-workbench.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light) {
-		background: var(--sessions-main-region-background);
-	}
-
-	.monaco-workbench.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light)::before {
-		opacity: 1;
-	}
-}
-
 .monaco-workbench.hc-black.agent-sessions-workbench .part.sidebar,
 .monaco-workbench.hc-light.agent-sessions-workbench .part.sidebar {
 	background: var(--vscode-sideBar-background, var(--vscode-editor-background));
-	-webkit-backdrop-filter: none;
-	backdrop-filter: none;
 }
 
 .agent-sessions-workbench .monaco-grid-view .split-view-view,
@@ -317,8 +299,6 @@
 
 .agent-sessions-workbench .part.sidebar.mobile-overlay-sidebar {
 	background: var(--vscode-agents-background) !important;
-	-webkit-backdrop-filter: none;
-	backdrop-filter: none;
 }
 
 .agent-sessions-workbench .part.sessionspart {
@@ -409,15 +389,10 @@
 	border: none !important;
 }
 
-.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.editor:not(.modal-editor-part)) {
-	border: none !important;
-	border-left: 1px solid color-mix(in srgb, var(--vscode-foreground) 14%, transparent) !important;
-}
-
+.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.editor:not(.modal-editor-part)),
 .agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.auxiliarybar),
 .agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .monaco-grid-branch-node .part.auxiliarybar) {
 	border: none !important;
-	border-left: 1px solid var(--sessions-panel-divider-color) !important;
 }
 
 .agent-sessions-workbench.noauxiliarybar .monaco-grid-view .split-view-view:has(> .part.editor:not(.modal-editor-part)),
@@ -603,8 +578,15 @@
 	margin-left: 0;
 }
 
+/* Dividers are painted with an inset box-shadow instead of a real border:
+ * split-view-view boxes are absolutely positioned by the grid using the full
+ * allocated width, so a real border (box-sizing: border-box) shrinks the
+ * content box while nested split-views are still laid out at the full size —
+ * each nesting level then drifts 1px further right, pushing the auxiliary
+ * bar past the window edge. Box-shadow paints without affecting layout. */
 .agent-sessions-workbench:not(.phone-layout):not(.nosidebar) .monaco-grid-view .split-view-view:has(> .part.sessionspart) {
-	border-left: 1px solid var(--sessions-panel-divider-color) !important;
+	border-left: none !important;
+	box-shadow: inset 1px 0 0 var(--sessions-panel-divider-color);
 }
 
 .agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sessionspart),
@@ -684,10 +666,28 @@
 	box-sizing: border-box;
 }
 
+/* See the sessionspart divider above: box-shadow, not border, so the grid
+ * layout is not distorted. */
 .agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.editor:not(.modal-editor-part)),
 .agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.auxiliarybar),
 .agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .monaco-grid-branch-node .part.auxiliarybar) {
-	border-left: 1px solid var(--sessions-panel-divider-color) !important;
+	border-left: none !important;
+	box-shadow: inset 1px 0 0 var(--sessions-panel-divider-color);
+}
+
+/* Clear, always-visible separator between the agents panel and the right
+ * (auxiliary) panel. A box-shadow/border on the grid wrapper gets painted over
+ * by the panel's own opaque content, so — like the sidebar separator above —
+ * paint it as an overlay pseudo-element with a high z-index on the auxiliary
+ * bar's left edge. Foreground-based color keeps it visible in every theme. */
+.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.auxiliarybar)::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+	z-index: 30;
+	pointer-events: none;
+	border-left: 1px solid var(--sessions-right-panel-divider-color);
+	box-sizing: border-box;
 }
 
 .agent-sessions-workbench .monaco-grid-view .part.editor:not(.modal-editor-part),
@@ -911,7 +911,7 @@
 
 .agent-sessions-workbench .part.editor:has(.browser-root) .tabs-container > .tab {
 	height: 30px !important;
-	border-radius: 8px !important;
+	border-radius: var(--vscode-cornerRadius-large) !important;
 	padding: 0 6px 0 8px !important;
 }
 
@@ -923,7 +923,7 @@
 .agent-sessions-workbench .part.editor .browser-root .browser-actions-toolbar .action-label {
 	width: 30px !important;
 	height: 30px !important;
-	border-radius: 8px !important;
+	border-radius: var(--vscode-cornerRadius-large) !important;
 	color: color-mix(in srgb, var(--vscode-foreground) 76%, transparent) !important;
 }
 
@@ -936,7 +936,7 @@
 .agent-sessions-workbench .part.editor .browser-root .browser-url-container {
 	min-height: 34px;
 	border: none;
-	border-radius: 8px;
+	border-radius: var(--vscode-cornerRadius-large);
 	background-color: color-mix(in srgb, var(--vscode-input-background) 72%, var(--vscode-editor-background));
 }
 
@@ -965,7 +965,7 @@
 
 .agent-sessions-workbench .part.editor:has(.terminal-overflow-guard.terminal-editor) .tabs-container > .tab {
 	height: 30px !important;
-	border-radius: 8px !important;
+	border-radius: var(--vscode-cornerRadius-large) !important;
 	padding: 0 6px 0 8px !important;
 }
 
@@ -1069,11 +1069,42 @@
 .agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-item-container,
 .agent-sessions-workbench .part.sessionspart .interactive-session > .chat-suggest-next-widget,
 .agent-sessions-workbench .chat-editor-relative .interactive-session > .chat-suggest-next-widget {
-	max-width: 950px;
+	max-width: 760px;
 	margin: 0 auto;
-	padding-left: 32px;
-	padding-right: 32px;
+	padding-left: 20px;
+	padding-right: 20px;
 	box-sizing: border-box;
+}
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container.interactive-request,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-item-container.interactive-request {
+	align-items: flex-start;
+}
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container.interactive-request .value,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-item-container.interactive-request .value {
+	align-items: flex-start !important;
+}
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown {
+	width: auto;
+	max-width: 100%;
+	margin: 0 0 8px;
+	padding: 0;
+	border: 0;
+	border-radius: 0;
+	background-color: transparent !important;
+}
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown.clickable:hover,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown.clickable:hover {
+	background-color: transparent !important;
+}
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container.interactive-request .value > .rendered-markdown p,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-item-container.interactive-request .value > .rendered-markdown p {
+	width: auto;
 }
 
 /* Let request bubbles that contain a code block grow to fit the code editor. */
@@ -1102,14 +1133,15 @@
 /* ---- Chat Input ---- */
 
 .agent-sessions-workbench .interactive-session .chat-input-container {
-	border-radius: var(--vscode-cornerRadius-large);
-	border-color: var(--vscode-agentsChatInput-border) !important;
-	background-color: var(--vscode-agentsChatInput-background);
+	border-radius: 18px;
+	border-color: var(--sessions-codex-surface-border) !important;
+	background-color: var(--sessions-codex-surface-background);
 	color: var(--vscode-agentsChatInput-foreground);
 }
 
 .agent-sessions-workbench .interactive-session .chat-input-container.focused {
-	border-color: var(--vscode-agentsChatInput-focusBorder, var(--vscode-focusBorder)) !important;
+	border-color: color-mix(in srgb, var(--vscode-agentsChatInput-focusBorder, var(--vscode-focusBorder)) 48%, var(--vscode-agentsChatInput-border)) !important;
+	box-shadow: 0 0 0 2px color-mix(in srgb, var(--vscode-agentsChatInput-focusBorder, var(--vscode-focusBorder)) 20%, transparent);
 }
 
 /* While the developer-joy animated border is active, keep a faint
@@ -1146,7 +1178,7 @@
  * corners render as blocky squares. Paint it with the same color the chat input
  * container uses so the editor still visually matches its surroundings. */
 .agent-sessions-workbench .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background {
-	background-color: var(--vscode-agentsChatInput-background) !important;
+	background-color: var(--sessions-codex-surface-background) !important;
 }
 .agent-sessions-workbench .interactive-session .chat-edit-input-container .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background {
 	background-color: transparent !important;
@@ -1158,10 +1190,10 @@
 .agent-sessions-workbench .part.sessionspart .interactive-session .interactive-input-part,
 .agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-input-part {
 	width: 100%;
-	max-width: 950px;
+	max-width: 760px;
 	margin: 0 auto;
 	display: inherit;
-	padding: 4px 32px;
+	padding: 4px 20px;
 	box-sizing: border-box;
 }
 
@@ -1240,12 +1272,14 @@
 /* Keep code block backgrounds stable across themes; add separation in older light themes via border only */
 .agent-sessions-workbench .interactive-session .interactive-response .interactive-result-code-block {
 	border-color: var(--vscode-editorWidget-border, var(--vscode-widget-border));
+	border-radius: var(--vscode-cornerRadius-large);
+	background-color: color-mix(in srgb, var(--vscode-editorWidget-background) 86%, var(--vscode-editor-background));
 }
 
 /* ---- Modal Editor Block ---- */
 
 .agent-sessions-workbench .monaco-modal-editor-block {
-	background: rgba(0, 0, 0, 0.5);
+	background: color-mix(in srgb, var(--vscode-editor-background) 50%, transparent);
 }
 
 .agent-sessions-workbench .monaco-modal-editor-block .modal-editor-sidebar .monaco-tl-twistie.force-no-twistie {
@@ -1545,7 +1579,7 @@
 
 /* Make the modal backdrop fully cover the screen on phone */
 .agent-sessions-workbench.phone-layout .monaco-modal-editor-block {
-	background: rgba(0, 0, 0, 0.7);
+	background: color-mix(in srgb, var(--vscode-editor-background) 70%, transparent);
 }
 
 /* Safe area padding for editor titlebar on phone */

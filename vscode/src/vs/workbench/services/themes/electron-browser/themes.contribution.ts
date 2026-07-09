@@ -23,7 +23,12 @@ configurationRegistry.registerConfiguration({
 				localize('window.systemColorTheme.dark', "Use dark native widget colors."),
 			],
 			markdownDescription: localize({ key: 'window.systemColorTheme', comment: ['{0} and {1} will become links to other settings.'] }, "Set the color mode for native UI elements such as native dialogs, menus and title bar. Even if your OS is configured in light color mode, you can select a dark system color theme for the window. You can also configure to automatically adjust based on the {0} setting.\n\nNote: This setting is ignored when {1} is enabled.", formatSettingAsLink(ThemeSettings.COLOR_THEME), formatSettingAsLink(ThemeSettings.DETECT_COLOR_SCHEME)),
-			default: 'default',
+			// 'auto' so native widgets and the agent-sessions vibrancy material
+			// follow the app theme rather than the OS appearance (a dark theme on
+			// a light-mode OS must not get a light material behind its glass
+			// surfaces). Keep in sync with the main-process fallback default in
+			// themeMainServiceImpl.ts.
+			default: 'auto',
 			included: !isLinux,
 			scope: ConfigurationScope.APPLICATION,
 			tags: [COLOR_THEME_CONFIGURATION_SETTINGS_TAG],

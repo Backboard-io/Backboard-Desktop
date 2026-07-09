@@ -7,7 +7,7 @@ import { mainWindow } from './window.js';
 import type { IJSONSchemaSnippet } from '../common/jsonSchema.js';
 import { isElectron } from '../common/platform.js';
 
-export const DEFAULT_FONT_FAMILY = '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+export const DEFAULT_FONT_FAMILY = '"SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, system-ui, sans-serif';
 
 interface FontData {
 	readonly family: string;

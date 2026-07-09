@@ -121,12 +121,49 @@ function isSessionShowMore(item: SessionListItem): item is ISessionShowMore {
 const SHOW_MORE_FOLDERS_LABEL = '__more_folders__';
 const FOUR_DAYS_MS = 4 * 24 * 60 * 60 * 1000;
 
+const MINUTE_MS = 60 * 1000;
+const HOUR_MS = 60 * MINUTE_MS;
+const DAY_MS = 24 * HOUR_MS;
+const WEEK_MS = 7 * DAY_MS;
+const MONTH_MS = 30 * DAY_MS;
+const YEAR_MS = 365 * DAY_MS;
+
+/**
+ * Formats an elapsed time as a compact, single-unit relative age such as
+ * `now`, `5m`, `2h`, `3d`, `2w`, `5mo` or `1y`. Unlike {@link fromNow}, units
+ * are floored rather than rounded so the label reflects the largest whole unit
+ * that has elapsed (a session touched 3.5 days ago reads `3d`, not `4d`) and
+ * therefore stays consistent with the descending time sort.
+ */
+export function formatCompactAge(date: Date, now: number = Date.now()): string {
+	const elapsed = Math.max(0, now - date.getTime());
+	if (elapsed < MINUTE_MS) {
+		return localize('compactAge.now', "now");
+	}
+	if (elapsed < HOUR_MS) {
+		return localize('compactAge.minutes', "{0}m", Math.floor(elapsed / MINUTE_MS));
+	}
+	if (elapsed < DAY_MS) {
+		return localize('compactAge.hours', "{0}h", Math.floor(elapsed / HOUR_MS));
+	}
+	if (elapsed < WEEK_MS) {
+		return localize('compactAge.days', "{0}d", Math.floor(elapsed / DAY_MS));
+	}
+	if (elapsed < MONTH_MS) {
+		return localize('compactAge.weeks', "{0}w", Math.floor(elapsed / WEEK_MS));
+	}
+	if (elapsed < YEAR_MS) {
+		return localize('compactAge.months', "{0}mo", Math.floor(elapsed / MONTH_MS));
+	}
+	return localize('compactAge.years', "{0}y", Math.floor(elapsed / YEAR_MS));
+}
+
 //#endregion
 
 //#region Tree Delegate
 
 class SessionsTreeDelegate implements IListVirtualDelegate<SessionListItem> {
-	private static readonly ITEM_HEIGHT = 26;
+	private static readonly ITEM_HEIGHT = 30;
 	/**
 	 * Phone layout uses a taller row so the inline action toolbar can
 	 * meet the 44px minimum touch target without overflowing. Sized to
@@ -135,7 +172,13 @@ class SessionsTreeDelegate implements IListVirtualDelegate<SessionListItem> {
 	 * `sessionsList.css`.
 	 */
 	private static readonly ITEM_HEIGHT_PHONE = 56;
-	private static readonly SECTION_HEIGHT = 30;
+	/**
+	 * Folder headers are taller than session rows and carry their extra height
+	 * as space ABOVE the label (see `.session-section` in `sessionsList.css`),
+	 * which separates each project group from the one before it — the airy
+	 * grouping rhythm the sidebar is modeled on.
+	 */
+	private static readonly SECTION_HEIGHT = 36;
 	private static readonly SHOW_MORE_HEIGHT = 24;
 
 	constructor(
@@ -353,6 +396,7 @@ class SessionItemRenderer implements ITreeRenderer<SessionListItem, FuzzyScore, 
 			// Row recycling re-feeds the widget, which cross-fades to the new session's icon.
 			template.statusIcon.setStatus(sessionStatus, isRead, isArchived, gitHubInfo?.pullRequest?.icon);
 			template.container.classList.toggle('in-progress', sessionStatus === SessionStatus.InProgress);
+			template.container.classList.toggle('completed', sessionStatus === SessionStatus.Completed);
 			template.container.classList.toggle('needs-input', sessionStatus === SessionStatus.NeedsInput);
 			template.container.classList.toggle('unread', !isRead && !isArchived);
 		}));
@@ -483,10 +527,7 @@ class SessionItemRenderer implements ITreeRenderer<SessionListItem, FuzzyScore, 
 				}
 				const timeEl = DOM.append(template.detailsRow, $('span.session-time'));
 				const definiteTimeDate = timeDate;
-				const formatTime = () => {
-					const seconds = Math.round((Date.now() - definiteTimeDate.getTime()) / 1000);
-					return seconds < 60 ? localize('secondsDuration', "now") : fromNow(definiteTimeDate, true);
-				};
+				const formatTime = () => formatCompactAge(definiteTimeDate);
 				timeEl.textContent = formatTime();
 				const targetWindow = DOM.getWindow(timeEl);
 				const interval = targetWindow.setInterval(() => {
@@ -886,6 +927,7 @@ export class SessionsList extends Disposable implements ISessionsList {
 	private static readonly WORKSPACE_GROUP_LIMIT_TREATMENT = 'sessions.workspaceGroupLimit';
 
 	private readonly listContainer: HTMLElement;
+	private lastLayoutWidth: number | undefined;
 	private readonly tree: WorkbenchObjectTree<SessionListItem, FuzzyScore>;
 	private sessions: ISession[] = [];
 
@@ -1029,6 +1071,11 @@ export class SessionsList extends Disposable implements ISessionsList {
 					}
 				},
 				horizontalScrolling: false,
+				// The tree is laid out to its full content height and never
+				// scrolls internally; the surrounding sidebar column owns the
+				// scroll. Let wheel events bubble so hovering the list scrolls
+				// that column instead of being swallowed here.
+				alwaysConsumeMouseWheel: false,
 				multipleSelectionSupport: true,
 				indent: 0,
 				findWidgetEnabled: true,
@@ -1057,6 +1104,20 @@ export class SessionsList extends Disposable implements ISessionsList {
 				twistieAdditionalCssClass: () => 'force-no-twistie',
 			}
 		));
+
+		// Sticky scroll must stay off for this tree: it is laid out to its full
+		// content height (the sidebar column owns the scroll), so a sticky
+		// section header is never useful — but any transient internal scroll
+		// offset (reveal, layout lag during expand/collapse) makes the widget
+		// paint its opaque background over the translucent sidebar. The
+		// workbench options factory overwrites `enableStickyScroll` with the
+		// `workbench.tree.enableStickyScroll` setting, so it cannot be passed
+		// via the constructor options above; disable it explicitly instead.
+		this.tree.updateOptions({ enableStickyScroll: false });
+
+		// Keep the container and render viewport in sync with the tree's content
+		// as sections expand/collapse and sessions come and go.
+		this._register(this.tree.onDidChangeContentHeight(() => this.layoutTreeToContentHeight()));
 
 		this._register(this.tree.onDidOpen(e => {
 			const element = e.element;
@@ -1466,7 +1527,20 @@ export class SessionsList extends Disposable implements ISessionsList {
 	}
 
 	layout(height: number, width: number): void {
-		this.tree.layout(height, width);
+		this.lastLayoutWidth = width;
+		this.layoutTreeToContentHeight();
+	}
+
+	/**
+	 * Lays the tree out at its full content height so it never scrolls
+	 * internally: the surrounding sidebar column owns the scroll (keeping the
+	 * pinned search/New-chat items static above it), and the tree's opaque
+	 * sticky-scroll header can never appear over the translucent sidebar.
+	 */
+	private layoutTreeToContentHeight(): void {
+		const contentHeight = this.tree.contentHeight;
+		this.listContainer.style.height = `${contentHeight}px`;
+		this.tree.layout(contentHeight, this.lastLayoutWidth);
 	}
 
 	focus(): void {
@@ -1831,11 +1905,24 @@ function getSessionSearchLabel(session: ISession): string {
 //#region Sorting & Grouping Helpers
 
 export function sortSessions(sessions: ISession[], sorting: SessionsSorting): ISession[] {
+	const primary = (session: ISession): number => sorting === SessionsSorting.Updated
+		? session.updatedAt.get().getTime()
+		: session.createdAt.getTime();
+
 	return [...sessions].sort((a, b) => {
-		if (sorting === SessionsSorting.Updated) {
-			return b.updatedAt.get().getTime() - a.updatedAt.get().getTime();
+		// Most recent first by the active time field.
+		const byPrimary = primary(b) - primary(a);
+		if (byPrimary !== 0) {
+			return byPrimary;
 		}
-		return b.createdAt.getTime() - a.createdAt.getTime();
+		// Stable tiebreakers so equal timestamps keep a deterministic order
+		// (avoids rows shuffling on re-render): fall back to creation time,
+		// then to the session id.
+		const byCreated = b.createdAt.getTime() - a.createdAt.getTime();
+		if (byCreated !== 0) {
+			return byCreated;
+		}
+		return a.sessionId.localeCompare(b.sessionId);
 	});
 }
 

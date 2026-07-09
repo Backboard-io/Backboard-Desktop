@@ -834,8 +834,8 @@
 	filter: blur(14px) saturate(1.22);
 	opacity: calc(0.42 + (var(--liquid-index) * 0.08));
 	transform: translate3d(calc(var(--liquid-index) * -7%), calc(var(--liquid-index) * 4%), 0) rotate(calc(-28deg + (var(--liquid-index) * 9deg))) scale(calc(1 + (var(--liquid-index) * 0.08)));
-	animation: onboarding-backboard-liquid-flow 7s cubic-bezier(0.65, 0, 0.35, 1) infinite alternate;
-	animation-delay: calc(var(--liquid-index) * -1.35s);
+	animation: onboarding-backboard-liquid-flow 4s cubic-bezier(0.65, 0, 0.35, 1) infinite alternate;
+	animation-delay: calc(var(--liquid-index) * -0.75s);
 }
 
 .onboarding-backboard-liquid-layer:nth-child(even) {
@@ -850,7 +850,7 @@
 	background: linear-gradient(78deg, transparent 0 34%, color-mix(in srgb, var(--vscode-editor-foreground) 18%, transparent) 49%, transparent 62% 100%);
 	mix-blend-mode: screen;
 	opacity: 0.5;
-	animation: onboarding-backboard-liquid-shine 6.5s ease-in-out infinite alternate;
+	animation: onboarding-backboard-liquid-shine 3.7s ease-in-out infinite alternate;
 }
 
 .onboarding-backboard-liquid-noise {

@@ -5,14 +5,27 @@
 
 .agent-sessions-viewpane {
 	--agent-sidebar-bg: var(--vscode-sideBar-background, var(--vscode-editor-background));
-	--agent-sidebar-primary: var(--vscode-sideBar-foreground, var(--vscode-foreground));
-	--agent-sidebar-raised-bg: color-mix(in srgb, var(--agent-sidebar-primary) 7%, var(--agent-sidebar-bg));
-	--agent-sidebar-hover-bg: color-mix(in srgb, var(--agent-sidebar-primary) 6%, transparent);
-	--agent-sidebar-active-bg: color-mix(in srgb, var(--agent-sidebar-primary) 9%, transparent);
+		/* Strong (near-white) text base for the dark glass sidebar; the theme's
+		 * sideBar.foreground is a mid grey that dims into the glass, so primary
+		 * text uses the strong tier and secondary/muted derive from it via
+		 * alpha to keep hierarchy. Light themes reset this below. */
+	--agent-sidebar-primary: var(--vscode-strongForeground, var(--vscode-sideBar-foreground, var(--vscode-foreground)));
+	/* Low-alpha white overlays — on the glass anything brighter reads as an
+	 * opaque light-grey block instead of a soft highlight (user-rejected). */
+	--agent-sidebar-raised-bg: color-mix(in srgb, var(--agent-sidebar-primary) 5%, var(--agent-sidebar-bg));
+	--agent-sidebar-hover-bg: color-mix(in srgb, var(--agent-sidebar-primary) 4%, transparent);
+	--agent-sidebar-active-bg: color-mix(in srgb, var(--agent-sidebar-primary) 7%, transparent);
 	--agent-sidebar-border: var(--vscode-sideBar-border, var(--vscode-panel-border, var(--vscode-contrastBorder, transparent)));
 	--agent-sidebar-secondary: color-mix(in srgb, var(--agent-sidebar-primary) 84%, transparent);
-	--agent-sidebar-muted: var(--vscode-descriptionForeground, var(--vscode-input-placeholderForeground, var(--agent-sidebar-secondary)));
-	background: var(--agent-sidebar-bg);
+	--agent-sidebar-muted: color-mix(in srgb, var(--agent-sidebar-primary) 62%, transparent);
+	/* Apple system font stack for the sidebar — the sidebar reads as its own
+	 * comfortable, roomy surface rather than the dense workbench chrome. */
+	--agent-sidebar-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "Inter", sans-serif;
+	/* NO background here: the sidebar Part paints the single opaque sidebar
+	 * surface (see sessions/browser/media/style.css); painting another one on
+	 * this pane risks desyncing from it. */
+	background: transparent;
+	font-family: var(--agent-sidebar-font);
 
 	.agent-sessions-container {
 		display: flex;
@@ -20,8 +33,12 @@
 		height: 100%;
 		overflow: hidden;
 		box-sizing: border-box;
-		padding: 18px 16px;
-		background: var(--agent-sidebar-bg);
+		/* One horizontal inset for the whole column (walls). The native macOS
+		 * overlay scrollbar does not reserve space, so left and right stay
+		 * symmetric without a scroll gutter, and the pinned block / content /
+		 * footer all share this same left edge. */
+		padding: 16px 10px 12px;
+		background: transparent;
 		color: var(--agent-sidebar-primary);
 	}
 
@@ -35,13 +52,48 @@
 		margin: 0;
 	}
 
+	/* Pinned top block: New chat / Search / Marketplace stay static while the
+	 * content column below owns the scroll. No horizontal padding — it shares
+	 * the container's inset so its rows line up with the list below. */
+	.agent-sessions-pinned {
+		display: flex;
+		flex-direction: column;
+		flex: 0 0 auto;
+		gap: 1px;
+		margin-bottom: 8px;
+		min-width: 0;
+	}
+
 	.agent-sessions-content {
 		display: flex;
 		flex-direction: column;
 		flex: 1;
-		overflow: hidden;
-		gap: 14px;
+		/* Marketplace's twin lives up in the pinned block; here the Projects
+		 * header and the sessions list scroll away as one column. */
+		overflow-y: auto;
+		overflow-x: hidden;
+		/* Hide the scrollbar entirely. The native macOS overlay scrollbar paints
+		 * a bright white thumb over the translucent glass sidebar while scrolling
+		 * (the scrollbar-width webkit trap); hiding it kills that flash, keeps the
+		 * walls symmetric (no reserved gutter), and the column still scrolls via
+		 * wheel/trackpad. Do NOT add scrollbar-color / ::-webkit-scrollbar-thumb
+		 * styling — with scrollbar-width set, Chromium ignores it and reverts to
+		 * the bright native thumb. */
+		scrollbar-width: none;
+		/* Breathing room so the last row never sits flush against the floor. */
+		padding-bottom: 12px;
+		gap: 4px;
 		min-width: 0;
+
+		&::-webkit-scrollbar {
+			display: none;
+		}
+	}
+
+	/* The Projects header must never be squished by the flex column when the
+	 * list below it overflows — it scrolls out of view, not shrinks. */
+	.agent-sessions-content > .agent-sessions-workspaces-header {
+		flex: 0 0 auto;
 	}
 
 	.agent-sessions-content.collapsed {
@@ -95,7 +147,7 @@
 		flex: 0 0 28px;
 		padding: 0;
 		border: none;
-		border-radius: 8px;
+		border-radius: var(--vscode-cornerRadius-large);
 		background: transparent;
 		color: var(--agent-sidebar-secondary);
 		cursor: pointer;
@@ -116,70 +168,26 @@
 		outline-offset: -1px;
 	}
 
-	.agent-sessions-search-button {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		width: 100%;
-		height: 32px;
-		padding: 0 12px;
-		box-sizing: border-box;
-		border: 1px solid var(--vscode-contrastBorder, transparent);
-		border-radius: 8px;
-		background: var(--agent-sidebar-raised-bg);
-		color: var(--agent-sidebar-muted);
-		font-family: inherit;
-		font-size: 13px;
-		line-height: 18px;
-		text-align: left;
-		cursor: pointer;
-	}
-
-	.agent-sessions-search-button:hover,
-	.agent-sessions-search-button:focus-visible {
-		border-color: color-mix(in srgb, var(--vscode-focusBorder) 55%, transparent);
-		color: var(--agent-sidebar-secondary);
-	}
-
-	.agent-sessions-search-button:focus-visible {
-		outline: 1px solid var(--vscode-focusBorder);
-		outline-offset: 2px;
-	}
-
-	.agent-sessions-search-icon {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		width: 16px;
-		height: 16px;
-		flex: 0 0 16px;
-	}
-
-	.agent-sessions-search-label {
-		min-width: 0;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
 	.agent-sessions-primary-actions {
 		display: flex;
 		flex-direction: column;
 		align-items: stretch;
-		gap: 2px;
+		gap: 1px;
 	}
 
 	.agent-sessions-sidebar-action {
 		display: flex;
 		align-items: center;
-		gap: 10px;
+		/* 8px gap keeps the label on the shared 42px text column (icon rail 18
+		 * + 16px icon box + 8px = 42), matching the folder names / session titles. */
+		gap: 8px;
 		width: 100%;
-		height: 28px;
-		padding: 0 6px 0 0;
+		height: 30px;
+		padding: 0 8px;
 		border: none;
-		border-radius: 7px;
+		border-radius: var(--vscode-cornerRadius-large);
 		background: transparent;
-		color: var(--agent-sidebar-secondary);
+		color: var(--agent-sidebar-primary);
 		font-family: inherit;
 		font-size: 13px;
 		font-weight: 500;
@@ -206,7 +214,7 @@
 		width: 16px;
 		height: 16px;
 		flex: 0 0 16px;
-		color: color-mix(in srgb, var(--vscode-icon-foreground) 74%, transparent);
+		color: color-mix(in srgb, var(--agent-sidebar-primary) 78%, transparent);
 	}
 
 	.agent-sessions-sidebar-action-icon .codicon {
@@ -225,20 +233,25 @@
 		align-items: center;
 		justify-content: space-between;
 		gap: 12px;
-		height: 32px;
-		flex: 0 0 32px;
-		margin-top: 2px;
+		height: 24px;
+		flex: 0 0 24px;
+		/* Align the "Projects" label with the folder-icon rail (matches the
+		 * pinned action icons / avatar below). */
+		padding-left: 8px;
+		margin-top: 12px;
 	}
 
+	/* De-emphasized section label (Codex-style): the content below is the
+	 * bright layer, the header just quietly groups it. */
 	.agent-sessions-workspaces-title {
 		min-width: 0;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
-		color: var(--agent-sidebar-primary);
-		font-size: 14px;
-		font-weight: var(--vscode-agents-fontWeight-semiBold, 600);
-		line-height: 20px;
+		color: var(--agent-sidebar-muted);
+		font-size: 11px;
+		font-weight: var(--vscode-agents-fontWeight-medium, 500);
+		line-height: 16px;
 	}
 
 	.agent-sessions-filter-popover {
@@ -248,20 +261,29 @@
 		z-index: 50;
 		display: flex;
 		flex-direction: column;
-		gap: 4px;
+		gap: 2px;
 		width: min(258px, calc(100vw - 48px));
 		padding: 6px;
 		box-sizing: border-box;
-		border: 1px solid var(--agent-sidebar-border);
-		border-radius: 8px;
-		background: var(--agent-sidebar-raised-bg);
-		box-shadow: 0 8px 8px var(--vscode-widget-shadow);
+		border: 1px solid var(--vscode-menu-border, var(--vscode-editorWidget-border, var(--agent-sidebar-border)));
+		border-radius: var(--vscode-cornerRadius-large);
+		/* Opaque surface: the sidebar background is translucent under native vibrancy,
+		   so a floating menu must use a solid widget/menu color to avoid showing content behind it. */
+		background: var(--vscode-menu-background, var(--vscode-editorWidget-background, var(--vscode-editor-background)));
+		color: var(--vscode-menu-foreground, var(--agent-sidebar-primary));
+		box-shadow: 0 8px 24px var(--vscode-widget-shadow);
 	}
 
 	.agent-sessions-filter-popover-section {
 		display: flex;
 		flex-direction: column;
 		gap: 2px;
+	}
+
+	.agent-sessions-filter-popover-section + .agent-sessions-filter-popover-section {
+		margin-top: 4px;
+		padding-top: 6px;
+		border-top: 1px solid var(--vscode-menu-separatorBackground, var(--agent-sidebar-border));
 	}
 
 	.agent-sessions-filter-popover-section.collapsed .agent-sessions-filter-popover-options {
@@ -277,7 +299,7 @@
 		height: 32px;
 		box-sizing: border-box;
 		border: none;
-		border-radius: 4px;
+		border-radius: var(--vscode-cornerRadius-small);
 		background: transparent;
 		color: var(--agent-sidebar-secondary);
 		font-family: inherit;
@@ -297,8 +319,11 @@
 	}
 
 	.agent-sessions-filter-popover-header:hover,
+	.agent-sessions-filter-popover-option:hover {
+		background: var(--agent-sidebar-hover-bg);
+	}
+
 	.agent-sessions-filter-popover-header:focus-visible,
-	.agent-sessions-filter-popover-option:hover,
 	.agent-sessions-filter-popover-option:focus-visible,
 	.agent-sessions-filter-popover-option[aria-checked="true"] {
 		background: var(--agent-sidebar-active-bg);
@@ -398,7 +423,7 @@
 		align-items: center;
 		min-height: 32px;
 		box-sizing: border-box;
-		border-radius: 10px;
+		border-radius: var(--vscode-cornerRadius-large);
 		background: var(--agent-sidebar-raised-bg);
 	}
 
@@ -418,7 +443,7 @@
 		height: 24px;
 		box-sizing: border-box;
 		border: 1px solid transparent;
-		border-radius: 6px;
+		border-radius: var(--vscode-cornerRadius-medium);
 		background: transparent;
 		color: var(--agent-sidebar-secondary);
 	}
@@ -451,40 +476,164 @@
 
 	.agent-sessions-find-widget-container > .monaco-tree-type-filter > .monaco-tree-type-filter-actionbar .monaco-action-bar .action-label:hover,
 	.agent-sessions-find-widget-container > .monaco-tree-type-filter > .monaco-tree-type-filter-actionbar .monaco-action-bar .action-label:focus-visible {
-		border-radius: 6px;
+		border-radius: var(--vscode-cornerRadius-medium);
 		background: var(--agent-sidebar-hover-bg);
 		color: var(--agent-sidebar-primary);
 	}
 
 	.agent-sessions-control-container {
-		flex: 1;
-		overflow: hidden;
+		/* Grows to the tree's full content height (kept in sync by
+		 * SessionsList.layoutTreeToContentHeight); the parent column owns the
+		 * scroll, so the list flows together with the Marketplace/Projects
+		 * items above it. Negative top margin cancels the first folder header's
+		 * group-gap (its 16px margin-top) so it doesn't stack on top of the
+		 * Projects header's own spacing (inter-group gaps further down are
+		 * unaffected). */
+		flex: 0 0 auto;
+		overflow: visible;
 		min-height: 0;
-		margin-top: -8px;
+		margin-top: -14px;
+	}
+
+	/* Bottom-pinned footer: the signed-in user identity row (avatar + name),
+	 * with a small update icon on its right edge when an update is staged. Sits
+	 * below the scrolling content and shares the container's left inset so the
+	 * avatar lines up on the icon rail with the rows above. */
+	.agent-sessions-footer {
+		display: flex;
+		flex-direction: column;
+		flex: 0 0 auto;
+		gap: 6px;
+		padding: 10px 0 2px;
+		margin-top: 6px;
+		min-width: 0;
+		border-top: 1px solid color-mix(in srgb, var(--agent-sidebar-primary) 8%, transparent);
+	}
+
+	/* Update affordance = a small accent icon on the right edge of the identity
+	 * row (not a bar). Hidden unless the footer is flagged `.has-update`.
+	 * Accent = charts-blue so it tracks the theme and quietly signals the update. */
+	--agent-update-accent: var(--vscode-charts-blue, var(--vscode-textLink-foreground));
+
+	.agent-sessions-update-icon {
+		display: none;
+		align-items: center;
+		justify-content: center;
+		flex: 0 0 auto;
+		width: 26px;
+		height: 26px;
+		padding: 0;
+		border: none;
+		border-radius: var(--vscode-cornerRadius-large);
+		background: transparent;
+		color: var(--agent-update-accent);
+		cursor: pointer;
+		transition: background 120ms ease, color 120ms ease;
+	}
+
+	.agent-sessions-footer.has-update .agent-sessions-update-icon {
+		display: inline-flex;
+	}
+
+	.agent-sessions-update-icon:hover,
+	.agent-sessions-update-icon:focus-visible {
+		background: color-mix(in srgb, var(--agent-update-accent) 16%, transparent);
+	}
+
+	.agent-sessions-update-icon:focus-visible {
+		outline: 1px solid var(--vscode-focusBorder);
+		outline-offset: 1px;
+	}
+
+	.agent-sessions-update-icon .codicon {
+		font-size: 16px;
+	}
+
+	/* User identity card: avatar initials + name + plan/email. Fades in once the
+	 * signed-in user resolves; the avatar aligns with the folder icons above. */
+	.agent-sessions-user {
+		display: flex;
+		align-items: center;
+		gap: 9px;
+		width: 100%;
+		/* border-box so width:100% + the 8px side padding stays inside the
+		 * container; without it the card is 16px too wide and its right edge —
+		 * where the update icon sits — spills past the container's overflow:hidden
+		 * clip and the icon gets cut off ("invisible wall"). */
+		box-sizing: border-box;
+		min-width: 0;
+		/* Left pad puts the avatar on the shared icon rail (action icons / folder
+		 * icons / update icon); vertical pad gives the row breathing room. */
+		padding: 5px 8px;
+		opacity: 0;
+		transition: opacity 160ms ease-out;
+	}
+
+	.agent-sessions-user.visible {
+		opacity: 1;
+	}
+
+	.agent-sessions-user-avatar {
+		flex: 0 0 auto;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 26px;
+		height: 26px;
+		border-radius: 50%;
+		background: var(--vscode-profileBadge-background);
+		color: var(--vscode-profileBadge-foreground);
+		font-size: 11px;
+		font-weight: 600;
+		letter-spacing: 0.02em;
+		-webkit-user-select: none;
+		user-select: none;
+	}
+
+	.agent-sessions-user-text {
+		display: flex;
+		flex-direction: column;
+		justify-content: center;
+		/* Fill the row so the update icon is pushed to the right edge; the name
+		 * ellipsizes within this column rather than shoving the icon off. */
+		flex: 1 1 auto;
+		min-width: 0;
+		gap: 1px;
+	}
+
+	.agent-sessions-user-name {
+		font-size: 13px;
+		font-weight: 600;
+		line-height: 16px;
+		color: var(--agent-sidebar-primary);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.agent-sessions-user-subtitle {
+		font-size: 11px;
+		line-height: 14px;
+		color: var(--agent-sidebar-muted);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 }
 
-/* With the shell gradient the sidebar is a frosted-glass panel: its interior
- * must not paint any opaque surface, otherwise it covers the translucent
- * tint on the sidebar part (and the native vibrancy behind it on macOS). */
+/* Light themes: the pure-white text base is designed for the dark glass;
+ * fall back to the theme foreground so the sidebar stays readable. */
+.vs .agent-sessions-viewpane {
+	--agent-sidebar-primary: var(--vscode-sideBar-foreground, var(--vscode-foreground));
+}
+
+/* The interior must not paint any opaque surface of its own: the sidebar
+ * Part paints the single sidebar background, and every layer above it stays
+ * transparent so the panel reads as one solid sheet (an inner opaque layer
+ * here historically desynced from the part's surface). */
 .agent-sessions-workbench.shell-gradient-background .agent-sessions-viewpane,
 .agent-sessions-workbench.shell-gradient-background .agent-sessions-viewpane .agent-sessions-container {
 	background: transparent !important;
-}
-
-/* On macOS vibrancy, hover/raised/active row backgrounds are computed
- * (color-mix) from --agent-sidebar-bg further up in this file. Left at its
- * default opaque value, every row state paints a solid block that floats
- * disconnected from the transparent glass behind it. Re-pointing it at the
- * same translucent tint as the sidebar part keeps row states as soft
- * highlights on the glass instead of opaque patches. */
-.monaco-workbench.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light) .agent-sessions-viewpane {
-	--agent-sidebar-bg: var(--sessions-sidebar-region-background);
-	/* Secondary text (--agent-sidebar-secondary) is normally partially
-	 * transparent by design (84% of foreground); over an arbitrary desktop
-	 * behind the glass that compounds into low contrast. Make it nearly
-	 * solid here so timestamps and subtitles stay legible. */
-	--agent-sidebar-secondary: color-mix(in srgb, var(--agent-sidebar-primary) 96%, transparent);
 }
 
 .agent-sessions-workbench.shell-gradient-background .part.sidebar > .content .pane-body,
@@ -510,7 +659,7 @@
 		align-items: center;
 		padding: 0 6px;
 		font-size: var(--vscode-agents-fontSize-label2, 11px);
-		color: var(--vscode-descriptionForeground);
+		color: var(--agent-sidebar-muted, var(--vscode-descriptionForeground));
 		min-height: 26px;
 
 		.agent-session-show-more-label {
@@ -531,7 +680,7 @@
 
 	/* Brighter text on direct hover */
 	.monaco-list-row:hover .agent-session-show-more:hover {
-		color: var(--vscode-foreground);
+		color: var(--agent-sidebar-primary);
 	}
 }
 

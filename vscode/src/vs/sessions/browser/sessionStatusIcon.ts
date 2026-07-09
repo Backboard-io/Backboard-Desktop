@@ -5,6 +5,7 @@
 
 import * as DOM from '../../base/browser/dom.js';
 import { disposableTimeout } from '../../base/common/async.js';
+import { Codicon } from '../../base/common/codicons.js';
 import { Disposable, DisposableStore } from '../../base/common/lifecycle.js';
 import { ThemeIcon } from '../../base/common/themables.js';
 import { createPixelSpinner } from '../../base/browser/ui/pixelSpinner/pixelSpinner.js';
@@ -22,11 +23,9 @@ const ICON_SWAP_FADE_MS = 180;
 // follow-up swap (before the previous fade finishes) skip re-processing it.
 const ICON_FADING_OUT_ATTR = 'iconFadingOut';
 
-// Sentinel cache keys used when the icon container holds an animated pixel
-// spinner (vs. a codicon). Distinct per variant so transitions between variants
-// rebuild the DOM, while same-variant re-renders only update color and avoid
+// Sentinel cache key used when the icon container holds an animated pixel
+// spinner (vs. a codicon). Same-variant re-renders only update color and avoid
 // restarting the CSS animation.
-const PIXEL_SPINNER_GRID_KEY = '__pixel_spinner_grid__';
 const PIXEL_SPINNER_RING_KEY = '__pixel_spinner_ring__';
 
 interface ISessionStatusInputs {
@@ -38,9 +37,9 @@ interface ISessionStatusInputs {
 
 /**
  * Renders a session's status indicator into a host-provided container and keeps it
- * up to date. In-progress / needs-input sessions get the animated pixel spinner
- * (grid variant for in-progress, ring for needs-input) when motion is allowed;
- * other states render the codicon from {@link ISessionsListModelService.getStatusIcon}.
+ * up to date. In-progress sessions get the standard spinning loading wheel when
+ * motion is allowed; needs-input sessions get the animated pixel ring; other
+ * states render the codicon from {@link ISessionsListModelService.getStatusIcon}.
  *
  * The widget owns all rendering concerns so every surface (sessions list, session
  * header, …) stays in sync by simply hosting it:
@@ -67,11 +66,6 @@ export class SessionStatusIcon extends Disposable {
 		@ISessionsListModelService private readonly _sessionsListModelService: ISessionsListModelService,
 	) {
 		super();
-
-		// Anchor for outgoing icons during a cross-fade swap (absolutely positioned).
-		if (!this._container.style.position) {
-			this._container.style.position = 'relative';
-		}
 
 		this._register(this._accessibilityService.onDidChangeReducedMotion(() => {
 			if (this._lastInputs) {
@@ -103,17 +97,28 @@ export class SessionStatusIcon extends Disposable {
 
 	private _render(inputs: ISessionStatusInputs): void {
 		const { status, isRead, isArchived, pullRequestIcon } = inputs;
-		const isSpinner = (status === SessionStatus.InProgress || status === SessionStatus.NeedsInput) && !this._accessibilityService.isMotionReduced();
+		const isMotionReduced = this._accessibilityService.isMotionReduced();
+		const isNeedsInputSpinner = status === SessionStatus.NeedsInput && !isMotionReduced;
 
 		let cacheKey: string;
 		let color: string;
 		let createIcon: () => HTMLElement;
-		if (isSpinner) {
-			const isNeedsInput = status === SessionStatus.NeedsInput;
-			const variant: 'grid' | 'ring' = isNeedsInput ? 'ring' : 'grid';
-			cacheKey = isNeedsInput ? PIXEL_SPINNER_RING_KEY : PIXEL_SPINNER_GRID_KEY;
-			color = isNeedsInput ? asCssVariable('list.warningForeground') : asCssVariable('textLink.foreground');
-			createIcon = () => createPixelSpinner(undefined, { variant });
+		if (status === SessionStatus.InProgress) {
+			const icon = isMotionReduced ? this._sessionsListModelService.getStatusIcon(status, isRead, isArchived, pullRequestIcon) : ThemeIcon.modify(Codicon.loading, 'spin');
+			cacheKey = ThemeIcon.asCSSSelector(icon);
+			color = '#FFFFFF';
+			createIcon = () => $(`span${cacheKey}`);
+		} else if (status === SessionStatus.Completed) {
+			const icon = Codicon.circleFilled;
+			cacheKey = ThemeIcon.asCSSSelector(icon);
+			// Blue calls attention to completed sessions the user has not opened
+			// yet; once read the dot settles to a muted grey.
+			color = isRead ? 'var(--vscode-descriptionForeground)' : 'var(--vscode-charts-blue, #2F81F7)';
+			createIcon = () => $(`span${cacheKey}`);
+		} else if (isNeedsInputSpinner) {
+			cacheKey = PIXEL_SPINNER_RING_KEY;
+			color = asCssVariable('list.warningForeground');
+			createIcon = () => createPixelSpinner(undefined, { variant: 'ring' });
 		} else {
 			const icon = this._sessionsListModelService.getStatusIcon(status, isRead, isArchived, pullRequestIcon);
 			cacheKey = ThemeIcon.asCSSSelector(icon);
@@ -121,6 +126,11 @@ export class SessionStatusIcon extends Disposable {
 			createIcon = () => $(`span${cacheKey}`);
 		}
 
+		this._container.classList.toggle('session-icon-in-progress', status === SessionStatus.InProgress);
+		this._container.classList.toggle('session-icon-completed', status === SessionStatus.Completed);
+		this._container.classList.toggle('session-icon-read', isRead);
+		this._container.classList.toggle('session-icon-needs-input', status === SessionStatus.NeedsInput);
+		this._container.classList.toggle('session-icon-error', status === SessionStatus.Error);
 		// Reduced-motion fallback for needs-input pulses the codicon; harmless when a spinner is shown.
 		this._container.classList.toggle('session-icon-pulse', status === SessionStatus.NeedsInput);
 
@@ -157,6 +167,13 @@ export class SessionStatusIcon extends Disposable {
 			DOM.clearNode(this._container);
 			this._container.appendChild(newChild);
 			return;
+		}
+		// Anchor for outgoing icons during the cross-fade: only force a position
+		// when the container is not already positioned by its host's CSS (e.g. the
+		// sessions list seats this icon with `position: absolute` inside the row —
+		// an unconditional inline `relative` would override that and unseat it).
+		if (DOM.getWindow(this._container).getComputedStyle(this._container).position === 'static') {
+			this._container.style.position = 'relative';
 		}
 		for (const existing of Array.from(this._container.children) as HTMLElement[]) {
 			if (existing.dataset[ICON_FADING_OUT_ATTR] === '1') {

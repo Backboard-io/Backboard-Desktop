@@ -8,14 +8,14 @@
 .agent-sessions-workbench .monaco-grid-view .part.auxiliarybar {
 	background: var(--sessions-main-region-background, var(--vscode-agents-background, var(--vscode-editor-background)));
 	border: none;
-	border-radius: 8px 0 0 8px;
+	border-radius: var(--vscode-cornerRadius-large) 0 0 var(--vscode-cornerRadius-large);
 	box-sizing: border-box;
 	overflow: hidden;
 }
 
 .agent-sessions-workbench.nomaineditorarea .monaco-grid-view .part.auxiliarybar {
 	border-right: none;
-	border-radius: 8px;
+	border-radius: var(--vscode-cornerRadius-large);
 }
 
 .agent-sessions-workbench .part.auxiliarybar > .content {
@@ -26,7 +26,7 @@
 .agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(.icon) .action-label {
 	text-transform: capitalize;
 	font-weight: var(--vscode-agents-fontWeight-semiBold);
-	border-radius: 6px;
+	border-radius: var(--vscode-cornerRadius-medium);
 	padding: 0 10px;
 	font-size: 13px;
 	line-height: 28px;
@@ -58,7 +58,7 @@
 }
 
 .agent-sessions-workbench .part.auxiliarybar > .title .action-label.codicon {
-	border-radius: 6px;
+	border-radius: var(--vscode-cornerRadius-medium);
 }
 
 /* Hide the underline indicator for non-focused items, but keep it for keyboard focus */
@@ -72,7 +72,7 @@
 /* Active/checked state: background container instead of underline */
 .agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.checked {
 	background-color: color-mix(in srgb, var(--vscode-agentsPanel-foreground, var(--vscode-foreground)) 10%, transparent) !important;
-	border-radius: 6px;
+	border-radius: var(--vscode-cornerRadius-medium);
 }
 
 /* Override base workbench monaco editor background in auxiliary bar content */

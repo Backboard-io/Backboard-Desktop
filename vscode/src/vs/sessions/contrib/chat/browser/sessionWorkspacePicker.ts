@@ -561,6 +561,30 @@ export class WorkspacePicker extends Disposable {
 	}
 
 	/**
+	 * The best workspace to fall back to when the composer opens with no
+	 * explicit selection: the most recent still-present, currently-servable
+	 * workspace (the picker's own recents first, then VS Code recents).
+	 * Returns `undefined` when nothing is available yet (e.g. VS Code recents
+	 * have not finished loading). Used to keep the composer's model and
+	 * Backboard-options controls functional before the user has picked a
+	 * workspace, since those controls require an active session.
+	 */
+	getDefaultWorkspaceCandidate(): URI | undefined {
+		for (const stored of this._getStoredRecentWorkspaces()) {
+			const uri = URI.revive(stored.uri);
+			if (!this._missingFolders.isMissing(uri) && this._resolveFolder(uri, stored.providerId)) {
+				return uri;
+			}
+		}
+		for (const uri of this._vsCodeRecentFolderUris) {
+			if (!this._missingFolders.isMissing(uri) && this._resolveFolder(uri)) {
+				return uri;
+			}
+		}
+		return undefined;
+	}
+
+	/**
 	 * Hides whichever popup variant is currently visible — the shared
 	 * action-widget-service flat picker or our own context-view-driven
 	 * tabbed picker.
@@ -625,6 +649,11 @@ export class WorkspacePicker extends Disposable {
 		if (this.actionWidgetService.isVisible || this._tabbedWidget.isVisible) {
 			this.showPicker(true);
 		}
+		// The set of available (present) workspaces just changed — recents may
+		// have finished loading or a folder may have (re)appeared. Notify so
+		// consumers that derive from the available list (e.g. the composer's
+		// default-workspace fallback) can re-evaluate.
+		this._onDidChangeSelection.fire();
 	}
 
 	private _selectFolder(folderUri: URI, fireEvent = true, providerIdHint?: string): void {

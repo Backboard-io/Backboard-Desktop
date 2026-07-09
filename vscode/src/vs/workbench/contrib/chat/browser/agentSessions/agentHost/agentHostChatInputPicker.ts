@@ -581,6 +581,20 @@ export class AgentHostChatInputPicker extends Disposable {
 		return ctx ? this._labelFor(ctx.schema, ctx.value) : undefined;
 	}
 
+	/**
+	 * Whether the current value differs from the schema default — i.e. the
+	 * user has actively moved this option away from its default state. Used to
+	 * surface an "options enabled" indicator on the composer gear so an active
+	 * configuration is visible without opening the menu.
+	 */
+	isActive(): boolean {
+		const ctx = this._readContext();
+		if (!ctx || ctx.value === undefined || ctx.value === null || typeof ctx.value === 'object') {
+			return false;
+		}
+		return ctx.value !== normalizeConfigValueForSchema(ctx.schema, ctx.schema.default);
+	}
+
 	private async _getItems(schema: SessionConfigPropertySchema, query?: string): Promise<readonly IConfigPickerItem[]> {
 		if (schema.type === 'boolean') {
 			return [

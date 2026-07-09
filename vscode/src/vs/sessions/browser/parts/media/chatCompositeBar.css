@@ -34,18 +34,17 @@
 	Mirrors the sessions list so the meta row aligns under the title. */
 .chat-composite-bar-header {
 	display: flex;
-	flex-direction: row;
-	align-items: flex-start;
+	flex-direction: column;
 	gap: 6px;
-	padding-bottom: 6px;
-	border-bottom: 1px solid color-mix(in srgb, var(--session-view-foreground) 12%, transparent);
+	padding-bottom: 10px;
+	border-bottom: 1px solid color-mix(in srgb, var(--session-view-foreground) 6%, transparent);
 }
 
 /* Main column stacks the title row and the meta row */
 .chat-composite-bar-header-main {
 	display: flex;
 	flex-direction: column;
-	gap: 2px;
+	gap: 4px;
 	flex: 1 1 auto;
 	min-width: 0;
 }
@@ -59,20 +58,7 @@
 	align-items: center;
 	gap: 6px;
 	height: 26px;
-	padding-right: var(--chat-session-toolbar-reserve, 104px);
-}
-
-/* Status icon column — sits beside the main column, centered on the title line.
-	The compound selector (with .session-header-bar) raises specificity above the
-	base `.codicon { display: inline-block }` rule so the flex centering wins. */
-.session-header-bar .chat-composite-bar-session-icon {
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	flex-shrink: 0;
-	height: 26px;
-	font-size: var(--vscode-codiconFontSize, 16px);
-	color: var(--session-view-foreground);
+	padding-right: var(--chat-session-toolbar-reserve, 210px);
 }
 
 .chat-composite-bar-session-title {
@@ -283,8 +269,8 @@
 	horizontal space (--chat-session-toolbar-reserve) so text never runs under it. */
 .chat-composite-bar.chat-composite-bar-toolbar-floating {
 	position: absolute;
-	top: 2px;
-	right: 10px;
+	top: 6px;
+	right: 12px;
 	height: 28px;
 	flex-direction: row;
 	align-items: center;
@@ -295,6 +281,23 @@
 	z-index: 45;
 	pointer-events: auto;
 	-webkit-app-region: no-drag;
+}
+
+/* Flat icon buttons — no container, just the glyph with a light hover, so the
+	toolbar reads as part of the page rather than a floating chip. */
+.chat-composite-bar-toolbar-floating .monaco-action-bar .action-item .action-label {
+	width: 24px;
+	height: 24px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 6px;
+	color: color-mix(in srgb, var(--session-view-foreground) 65%, transparent);
+}
+
+.chat-composite-bar-toolbar-floating .monaco-action-bar .action-item .action-label:hover {
+	background: color-mix(in srgb, var(--session-view-foreground) 9%, transparent);
+	color: var(--session-view-foreground);
 }
 
 .chat-composite-bar.chat-composite-bar-toolbar-floating,

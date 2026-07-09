@@ -16,7 +16,7 @@ html, body {
 	min-height: 100%;
 	padding: 0;
 	margin: 0;
-	font-family: var(--vscode-font-family, "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+	font-family: var(--vscode-font-family, "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, system-ui, sans-serif);
 }
 
 body {
@@ -30,7 +30,7 @@ textarea {
 	width: 100%;
 	border: none;
 	margin-right: 0.3em;
-	font-family: var(--vscode-font-family, "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+	font-family: var(--vscode-font-family, "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, system-ui, sans-serif);
 	padding: var(--input-padding-vertical) var(--input-padding-horizontal);
 	color: var(--vscode-input-foreground);
 	outline-color: var(--vscode-input-border);
@@ -109,7 +109,7 @@ iframe {
 	border-radius: 4px;
 
 	font-size: 8px;
-	font-family: var(--vscode-font-family, "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+	font-family: var(--vscode-font-family, "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, system-ui, sans-serif);
 	user-select: none;
 	pointer-events: none;
 }

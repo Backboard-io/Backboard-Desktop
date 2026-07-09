@@ -1,0 +1,7 @@
+[launch.sh] slim copy: /Users/erintomorri/.vscode-oss-dev -> /tmp/code-oss-dev/20260707-114026-6537/user-data
+[launch.sh] ensured files.simpleDialog.enable=true in /tmp/code-oss-dev/20260707-114026-6537/user-data/User/settings.json
+[launch.sh] launching: /Users/erintomorri/Desktop/Backboard/IDE/Espri-API/ide/vscode/scripts/code.sh --agents --user-data-dir=/tmp/code-oss-dev/20260707-114026-6537/user-data --extensions-dir=/tmp/code-oss-dev/20260707-114026-6537/user-data/extensions --shared-data-dir=/tmp/code-oss-dev/20260707-114026-6537/shared-data --remote-debugging-port=65123 --inspect-extensions=65124 --inspect=65125 --inspect-agenthost=65126
+[launch.sh] logs: /tmp/code-oss-dev/20260707-114026-6537/code.log
+[launch.sh] running pre-launch (ensures electron + compiled output + built-ins)...
+[launch.sh] waiting for CDP on port 65123 (timeout 90s)...
+[launch.sh] CDP ready after 4s

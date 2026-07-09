@@ -25,6 +25,7 @@ const hiddenModelProviders = new Set(['featherless', 'elevenlabs', 'eleven-labs'
 const panelStateStorageKeyPrefix = 'backboard.panel.state.';
 const backboardOAuthAuthorizeUrl = 'https://app.backboard.io/api/oauth/authorize';
 const backboardOAuthTokenUrl = 'https://app.backboard.io/api/oauth/token';
+const backboardOAuthUserInfoUrl = 'https://app.backboard.io/api/oauth/userinfo';
 const backboardOAuthClientId = 'Backboard_oauth_BGmuDtqCPmPgmIqWZ2ORvdqpl8fdKFQY';
 const defaultBackboardOAuthRedirectUri = 'http://127.0.0.1:49321/auth/callback';
 const backboardOAuthScope = 'openid email profile';
@@ -154,6 +155,7 @@ async function signInBackboard(bridge: BackboardBridge): Promise<boolean> {
 		backboardToolOutput?.appendLine('[oauth] Received Backboard authorization code; exchanging for tokens.');
 		const tokens = await exchangeBackboardOAuthCode(code, redirectUri, codeVerifier);
 		const saveResult = await saveBackboardOAuthTokens(tokens);
+		await cacheBackboardUserName(stringValueFromRecord(tokens.access_token));
 		bridge.restart();
 		if (saveResult.apiKeySaved) {
 			backboardToolOutput?.appendLine(`[oauth] Backboard SSO complete. API key saved to ${backboardConfigPath()}.`);
@@ -301,7 +303,7 @@ body {
 	padding: 32px;
 	background: var(--bg);
 	color: var(--text);
-	font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+	font-family: "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
 }
 main {
 	width: min(520px, 100%);
@@ -429,6 +431,57 @@ async function exchangeBackboardOAuthCode(code: string, redirectUri: string, cod
 		throw new Error('Backboard token response did not include an access token.');
 	}
 	return tokens;
+}
+
+/**
+ * Fetches the signed-in user's display name from the OAuth userinfo endpoint
+ * (`profile` scope) and caches it as `oauth.user_name` in the config file so
+ * the IDE welcome greeting can show it without a network round-trip. Failures
+ * are non-fatal — the greeting simply stays hidden.
+ */
+async function cacheBackboardUserName(accessToken: string | undefined): Promise<void> {
+	if (!accessToken) {
+		return;
+	}
+	try {
+		const payload: unknown = JSON.parse(await getJson(backboardOAuthUserInfoUrl, accessToken, 'Backboard userinfo request'));
+		if (!isObjectRecord(payload)) {
+			return;
+		}
+		const name = stringValueFromRecord(payload.name)
+			?? [stringValueFromRecord(payload.given_name), stringValueFromRecord(payload.family_name)].filter(Boolean).join(' ').trim();
+		if (!name) {
+			return;
+		}
+		const config = await readBackboardConfigJson();
+		const oauth = isObjectRecord(config.oauth) ? config.oauth : {};
+		await writeBackboardConfigJson({ ...config, oauth: { ...oauth, user_name: name } });
+		backboardToolOutput?.appendLine('[oauth] Cached signed-in user name for the welcome greeting.');
+	} catch (error) {
+		backboardToolOutput?.appendLine(`[oauth] Failed to cache user name: ${error instanceof Error ? error.message : String(error)}`);
+	}
+}
+
+function getJson(urlString: string, bearerToken: string, label: string): Promise<string> {
+	return new Promise<string>((resolve, reject) => {
+		const request = https.request(new URL(urlString), {
+			method: 'GET',
+			headers: { 'Authorization': `Bearer ${bearerToken}` }
+		}, response => {
+			const chunks: Buffer[] = [];
+			response.on('data', chunk => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+			response.on('end', () => {
+				const responseText = Buffer.concat(chunks).toString('utf8');
+				if (!response.statusCode || response.statusCode < 200 || response.statusCode >= 300) {
+					reject(new Error(`${label} returned HTTP ${response.statusCode}: ${responseText}`));
+				} else {
+					resolve(responseText);
+				}
+			});
+		});
+		request.on('error', reject);
+		request.end();
+	});
 }
 
 function postForm(urlString: string, body: URLSearchParams, label: string): Promise<string> {

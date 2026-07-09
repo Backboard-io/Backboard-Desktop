@@ -5,6 +5,7 @@
 
 import * as dom from '../../../../../../base/browser/dom.js';
 import { CancellationTokenSource } from '../../../../../../base/common/cancellation.js';
+import { Emitter, Event } from '../../../../../../base/common/event.js';
 import { Disposable, DisposableMap, IDisposable, MutableDisposable } from '../../../../../../base/common/lifecycle.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { localize } from '../../../../../../nls.js';
@@ -30,6 +31,8 @@ export interface IAgentHostGenericConfigOption {
 	readonly label: string;
 	readonly valueLabel?: string;
 	readonly description?: string;
+	/** Whether this option is currently set to a non-default (active) value. */
+	readonly active: boolean;
 	show(anchor?: HTMLElement): void;
 }
 
@@ -71,6 +74,10 @@ export class AgentHostGenericConfigChips extends Disposable {
 
 	private _container: HTMLElement | undefined;
 
+	private readonly _onDidChangeOptions = this._register(new Emitter<void>());
+	/** Fires when the set of options or any option's active state may have changed. */
+	readonly onDidChangeOptions: Event<void> = this._onDidChangeOptions.event;
+
 	private readonly _chips = this._register(new DisposableMap<string, IAgentHostGenericConfigChipEntry>());
 
 	/**
@@ -96,11 +103,15 @@ export class AgentHostGenericConfigChips extends Disposable {
 		@IAgentHostNewSessionFolderService private readonly _newSessionFolderService: IAgentHostNewSessionFolderService,
 	) {
 		super();
-		this._register(this._widget.onDidChangeViewModel(() => this._reattach()));
+		this._register(this._widget.onDidChangeViewModel(() => {
+			this._reattach();
+			this._onDidChangeOptions.fire();
+		}));
 		this._register(this._provisional.onDidChange((sessionResource: URI) => {
 			const current = this._widget.viewModel?.sessionResource;
 			if (current && current.toString() === sessionResource.toString()) {
 				this._reattach();
+				this._onDidChangeOptions.fire();
 			}
 		}));
 		this._reattach();
@@ -141,6 +152,7 @@ export class AgentHostGenericConfigChips extends Disposable {
 				label: getVisibleGenericConfigLabel(property, schema),
 				valueLabel: chip.getCurrentLabel(),
 				description: schema.description,
+				active: chip.isActive(),
 				show: (anchor?: HTMLElement) => chip.show(anchor),
 			});
 		}
@@ -175,7 +187,10 @@ export class AgentHostGenericConfigChips extends Disposable {
 		this._cancelInitialResolve();
 		const ref = this._agentHostService.getSubscription(StateComponents.Session, backendSession, 'AgentHostGenericConfigChips');
 		const sub = ref.object;
-		const listener = sub.onDidChange(() => this._sync());
+		const listener = sub.onDidChange(() => {
+			this._sync();
+			this._onDidChangeOptions.fire();
+		});
 		this._subRef.value = {
 			sub,
 			backendSession,
@@ -203,6 +218,7 @@ export class AgentHostGenericConfigChips extends Disposable {
 			}
 			this._initialResolved = { sessionResource, result };
 			this._sync();
+			this._onDidChangeOptions.fire();
 		} catch {
 			// Best-effort.
 		}

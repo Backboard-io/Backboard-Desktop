@@ -29,11 +29,11 @@
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	width: 30px;
+	width: 28px;
 	height: 24px;
-	border-radius: 8px;
+	border-radius: 5px;
 	color: var(--vscode-icon-foreground);
-	background: var(--vscode-toolbar-hoverBackground);
+	background: transparent;
 	cursor: pointer;
 }
 

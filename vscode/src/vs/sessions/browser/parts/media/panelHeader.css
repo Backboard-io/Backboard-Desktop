@@ -15,6 +15,9 @@
 	height: 38px;
 	flex: 0 0 38px;
 	box-sizing: border-box;
+	/* Nudge the header controls down so they sit a little lower than the macOS
+	 * traffic lights instead of level with them. */
+	padding-top: 8px;
 	color: var(--vscode-agentsPanel-foreground);
 	overflow: hidden;
 	-webkit-app-region: drag;
@@ -44,6 +47,9 @@
 	height: 100%;
 	flex: 0 0 auto;
 	min-width: 0;
+	/* The auxiliary bar composite title owns the inline header's vertical
+	 * alignment, so keep the global down-nudge out of it. */
+	padding-top: 0;
 }
 
 .agent-sessions-workbench .sessions-panel-header.inline > .sessions-panel-header-right {

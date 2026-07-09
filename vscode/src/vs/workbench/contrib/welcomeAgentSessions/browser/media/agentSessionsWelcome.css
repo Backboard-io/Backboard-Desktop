@@ -784,10 +784,20 @@
 	--simple-mode-hover-background: var(--vscode-list-hoverBackground, color-mix(in srgb, var(--vscode-foreground) 6%, transparent));
 	--simple-mode-accent: var(--vscode-button-background);
 	--simple-mode-accent-foreground: var(--vscode-button-foreground);
+	--simple-mode-composer-background: var(--vscode-agentsChatInput-background, #0E0E0E);
+	--simple-mode-composer-border: var(--vscode-agentsChatInput-border, #4A4A4A);
+	--simple-mode-composer-focus-border: var(--vscode-agentsChatInput-focusBorder, #7A7A7A);
+	--simple-mode-composer-foreground: var(--vscode-agentsChatInput-foreground, var(--vscode-foreground));
+	--simple-mode-composer-muted: var(--vscode-agentsChatInput-placeholderForeground, var(--vscode-descriptionForeground));
+	--simple-mode-chip-background: var(--vscode-button-secondaryBackground, #121212);
+	--simple-mode-chip-hover-background: var(--vscode-button-secondaryHoverBackground, #242424);
+	--simple-mode-chip-border: var(--vscode-button-secondaryBorder, #3A3A3A);
+	--simple-mode-chip-foreground: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+	--simple-mode-chip-icon: var(--vscode-icon-foreground, var(--simple-mode-chip-foreground));
 	position: relative;
 	background: var(--vscode-editor-background);
 	color: var(--vscode-foreground);
-	font-family: var(--vscode-font-family, "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+	font-family: var(--vscode-font-family, "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, system-ui, sans-serif);
 	overflow: hidden;
 }
 
@@ -1114,7 +1124,7 @@
 	overflow: hidden;
 	border: 0;
 	border-radius: 0;
-	background: var(--vscode-editor-background);
+	background: transparent;
 	box-shadow: none;
 }
 
@@ -1123,9 +1133,83 @@
 }
 
 .agentSessionsWelcome-chatWidget .interactive-session .chat-input-container {
-	border-color: transparent !important;
-	background: transparent !important;
-	box-shadow: none !important;
+	border: 1px solid var(--simple-mode-composer-border) !important;
+	border-radius: 28px !important;
+	background: var(--simple-mode-composer-background) !important;
+	color: var(--simple-mode-composer-foreground);
+	box-shadow:
+		inset 0 0 0 1px color-mix(in srgb, var(--vscode-foreground) 4%, transparent),
+		0 18px 36px rgba(0, 0, 0, 0.28) !important;
+}
+
+.agentSessionsWelcome-chatWidget .interactive-session .chat-input-container.focused,
+.agentSessionsWelcome-chatWidget .interactive-session .chat-input-container:focus-within {
+	border-color: var(--simple-mode-composer-focus-border) !important;
+	box-shadow:
+		inset 0 0 0 1px color-mix(in srgb, var(--vscode-foreground) 9%, transparent),
+		0 18px 36px rgba(0, 0, 0, 0.32) !important;
+}
+
+.agentSessionsWelcome-chatWidget .chat-editor-container .monaco-editor .mtk1 {
+	color: var(--simple-mode-composer-foreground);
+}
+
+.agentSessionsWelcome-chatWidget .interactive-input-part:not(.compact) .chat-editor-container .monaco-editor [class^="ced-chat-session-detail"] {
+	color: var(--simple-mode-composer-muted);
+}
+
+.agentSessionsWelcome-chatWidget .interactive-session .chat-input-toolbar .action-label,
+.agentSessionsWelcome-chatWidget .interactive-session .chat-execute-toolbar .action-label,
+.agentSessionsWelcome-chatWidget .interactive-session .chat-input-toolbar .action-label .codicon,
+.agentSessionsWelcome-chatWidget .interactive-session .chat-execute-toolbar .action-label .codicon {
+	color: var(--simple-mode-composer-foreground) !important;
+}
+
+.agentSessionsWelcome-chatWidget .interactive-session .chat-input-toolbar .action-label:hover,
+.agentSessionsWelcome-chatWidget .interactive-session .chat-execute-toolbar .action-label:hover,
+.agentSessionsWelcome-chatWidget .interactive-session .chat-input-toolbar .action-label[aria-expanded="true"],
+.agentSessionsWelcome-chatWidget .interactive-session .chat-execute-toolbar .action-label[aria-expanded="true"] {
+	background: var(--simple-mode-chip-hover-background) !important;
+	color: var(--vscode-foreground) !important;
+}
+
+.agentSessionsWelcome-chatWidget .interactive-session .chat-input-toolbar .monaco-action-bar .actions-container > .action-item + .action-item::before,
+.agentSessionsWelcome-chatWidget .interactive-session .chat-secondary-input-toolbar .monaco-action-bar .actions-container > .action-item + .action-item::before {
+	background-color: var(--simple-mode-chip-border);
+}
+
+.agentSessionsWelcome-chatWidget .interactive-session .chat-secondary-toolbar {
+	justify-content: center;
+	padding: 10px 4px 0;
+}
+
+.agentSessionsWelcome-chatWidget .interactive-session .chat-input-toolbar .chat-sessionPicker-item .action-label,
+.agentSessionsWelcome-chatWidget .interactive-session .chat-secondary-toolbar .chat-input-picker-item .action-label,
+.agentSessionsWelcome-chatWidget .interactive-session .chat-secondary-toolbar .chat-sessionPicker-item .action-label {
+	height: 30px;
+	padding: 0 14px;
+	border: 1px solid var(--simple-mode-chip-border);
+	border-radius: 999px;
+	background: var(--simple-mode-chip-background);
+	color: var(--simple-mode-chip-foreground);
+	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vscode-foreground) 3%, transparent);
+}
+
+.agentSessionsWelcome-chatWidget .interactive-session .chat-input-toolbar .chat-sessionPicker-item .action-label .codicon,
+.agentSessionsWelcome-chatWidget .interactive-session .chat-secondary-toolbar .chat-input-picker-item .action-label .codicon,
+.agentSessionsWelcome-chatWidget .interactive-session .chat-secondary-toolbar .chat-sessionPicker-item .action-label .codicon {
+	color: var(--simple-mode-chip-icon) !important;
+}
+
+.agentSessionsWelcome-chatWidget .interactive-session .chat-input-toolbar .chat-sessionPicker-item .action-label:hover,
+.agentSessionsWelcome-chatWidget .interactive-session .chat-secondary-toolbar .chat-input-picker-item .action-label:hover,
+.agentSessionsWelcome-chatWidget .interactive-session .chat-secondary-toolbar .chat-sessionPicker-item .action-label:hover,
+.agentSessionsWelcome-chatWidget .interactive-session .chat-input-toolbar .chat-sessionPicker-item .action-label[aria-expanded="true"],
+.agentSessionsWelcome-chatWidget .interactive-session .chat-secondary-toolbar .chat-input-picker-item .action-label[aria-expanded="true"],
+.agentSessionsWelcome-chatWidget .interactive-session .chat-secondary-toolbar .chat-sessionPicker-item .action-label[aria-expanded="true"] {
+	border-color: color-mix(in srgb, var(--simple-mode-chip-border) 70%, var(--vscode-foreground) 30%);
+	background: var(--simple-mode-chip-hover-background) !important;
+	color: var(--vscode-foreground) !important;
 }
 
 .agentSessionsWelcome-rightPanel {

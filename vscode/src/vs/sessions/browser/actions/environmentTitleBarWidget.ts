@@ -5,7 +5,7 @@
 
 import './media/environmentTitleBarWidget.css';
 
-import { $, addDisposableListener, append, clearNode, EventHelper, EventType } from '../../../base/browser/dom.js';
+import { $, addDisposableListener, append, clearNode, EventHelper, EventType, getWindow } from '../../../base/browser/dom.js';
 import { getDefaultHoverDelegate } from '../../../base/browser/ui/hover/hoverDelegateFactory.js';
 import { renderIcon } from '../../../base/browser/ui/iconLabel/iconLabels.js';
 import { BaseActionViewItem, IBaseActionViewItemOptions } from '../../../base/browser/ui/actionbar/actionViewItems.js';
@@ -34,7 +34,7 @@ import { IWorkbenchContribution } from '../../../workbench/common/contributions.
 import { IsAuxiliaryWindowContext } from '../../../workbench/common/contextkeys.js';
 import { Menus } from '../menus.js';
 import { isAgentHostProvider } from '../../common/agentHostSessionsProvider.js';
-import { IsPhoneLayoutContext, SessionsWelcomeVisibleContext } from '../../common/contextkeys.js';
+import { IsNewChatSessionContext, IsPhoneLayoutContext, SessionsWelcomeVisibleContext } from '../../common/contextkeys.js';
 import { ISessionsService } from '../../services/sessions/browser/sessionsService.js';
 import { ISession, ISessionFolder, ISessionWorkspace } from '../../services/sessions/common/session.js';
 import { ISessionsProvidersService } from '../../services/sessions/browser/sessionsProvidersService.js';
@@ -48,7 +48,7 @@ export class ShowEnvironmentPopupAction extends Action2 {
 			id: ShowEnvironmentPopupAction.ID,
 			title: localize2('showEnvironmentPopup', "Show Environment"),
 			icon: Codicon.settings,
-			precondition: ContextKeyExpr.and(IsAuxiliaryWindowContext.toNegated(), SessionsWelcomeVisibleContext.toNegated(), IsPhoneLayoutContext.negate()),
+			precondition: ContextKeyExpr.and(IsAuxiliaryWindowContext.toNegated(), IsPhoneLayoutContext.negate()),
 		});
 	}
 
@@ -146,6 +146,20 @@ export class EnvironmentTitleBarWidget extends BaseActionViewItem {
 				this.triggerButton?.setAttribute('aria-expanded', 'false');
 			},
 		});
+
+		// Dismiss the popup when the user clicks anywhere outside of it. The
+		// context view's built-in outside-click handling only fires for clicks
+		// outside the whole workbench container, so it never closes for clicks
+		// elsewhere in the window; register our own pointer listener instead.
+		// Added after showContextView (whose synchronous render clears the popup
+		// store) so the listener survives until the popup hides.
+		this.popupStore.add(addDisposableListener(getWindow(this.triggerButton), EventType.MOUSE_DOWN, event => {
+			const target = event.target as HTMLElement | null;
+			if (target && (this.popupContainer?.contains(target) || this.triggerButton?.contains(target))) {
+				return;
+			}
+			this.contextViewService.hideContextView();
+		}, true));
 	}
 
 	private renderPopup(container: HTMLElement): DisposableStore {
@@ -452,32 +466,38 @@ export class EnvironmentTitleBarContribution extends Disposable implements IWork
 		@IInstantiationService instantiationService: IInstantiationService,
 	) {
 		super();
-		this._register(MenuRegistry.appendMenuItem(Menus.NewSessionToolbar, {
-			command: {
-				id: ShowEnvironmentPopupAction.ID,
-				title: localize2('showEnvironmentPopupMenu', "Environment"),
-				icon: Codicon.settings,
-			},
-			group: 'navigation',
-			order: 9,
-			when: ContextKeyExpr.and(IsAuxiliaryWindowContext.toNegated(), IsPhoneLayoutContext.negate()),
-		}));
+		// The Environment button sits inline with the terminal and right-panel
+		// controls in the single floating session toolbar (top-right of the
+		// session view), so the whole set stays on one row regardless of whether
+		// the auxiliary bar is open or closed.
+		const environmentMenuCommand = {
+			id: ShowEnvironmentPopupAction.ID,
+			title: localize2('showEnvironmentPopupMenu', "Environment"),
+			icon: Codicon.settings,
+		};
 		this._register(MenuRegistry.appendMenuItem(Menus.SessionBarToolbar, {
-			command: {
-				id: ShowEnvironmentPopupAction.ID,
-				title: localize2('showEnvironmentPopupMenu', "Environment"),
-				icon: Codicon.settings,
-			},
+			command: environmentMenuCommand,
 			group: 'navigation',
-			order: 9,
-			when: ContextKeyExpr.and(IsAuxiliaryWindowContext.toNegated(), SessionsWelcomeVisibleContext.toNegated(), IsPhoneLayoutContext.negate()),
+			order: 8,
+			// NB: no IsAuxiliaryWindowContext gate — the floating toolbar only
+			// renders in the sessions window, and that key spuriously flips true
+			// when the right panel/editor opens, which would hide this button.
+			when: ContextKeyExpr.and(SessionsWelcomeVisibleContext.toNegated(), IsPhoneLayoutContext.negate()),
 		}));
-		this._register(actionViewItemService.register(Menus.NewSessionToolbar, ShowEnvironmentPopupAction.ID, (action, options) => {
+		// Mirror it in the title bar's right layout on the new-session screen so the
+		// workspace controls (environment, terminal, right panel) sit in the top
+		// title-bar row before a session is created too.
+		this._register(MenuRegistry.appendMenuItem(Menus.TitleBarRightLayout, {
+			command: environmentMenuCommand,
+			group: 'navigation',
+			order: 1,
+			when: ContextKeyExpr.and(IsAuxiliaryWindowContext.toNegated(), IsNewChatSessionContext, IsPhoneLayoutContext.negate()),
+		}));
+		const registerEnvironmentWidget = (menuId: typeof Menus.SessionBarToolbar) => this._register(actionViewItemService.register(menuId, ShowEnvironmentPopupAction.ID, (action, options) => {
 			return instantiationService.createInstance(EnvironmentTitleBarWidget, action, options);
 		}, undefined));
-		this._register(actionViewItemService.register(Menus.SessionBarToolbar, ShowEnvironmentPopupAction.ID, (action, options) => {
-			return instantiationService.createInstance(EnvironmentTitleBarWidget, action, options);
-		}, undefined));
+		registerEnvironmentWidget(Menus.SessionBarToolbar);
+		registerEnvironmentWidget(Menus.TitleBarRightLayout);
 	}
 }
 

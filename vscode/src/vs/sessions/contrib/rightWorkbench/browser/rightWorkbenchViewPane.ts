@@ -379,13 +379,6 @@ export class RightWorkbenchViewPane extends ViewPane {
 		this.root.classList.toggle('sessions-right-workbench-has-file', this.activeMode === 'files' && !!this.activeTab?.selectedFile);
 		this.root.classList.toggle('sessions-right-workbench-files-tree-hidden', this.activeMode === 'files' && !this.isFilesTreeVisible);
 
-		// Rendered before the mode-specific content (launcher vs. tabs/body) so
-		// these two controls sit at the exact same pixel position regardless of
-		// which mode is active. The auxiliary bar's native composite title is
-		// unconditionally hidden in this workbench (`rightWorkbenchLauncher.css`),
-		// so this is their only stable home.
-		this.renderPersistentControls(this.root);
-
 		if (this.activeMode === 'launcher') {
 			this.renderLauncher(this.root);
 			return;
@@ -489,23 +482,6 @@ export class RightWorkbenchViewPane extends ViewPane {
 			default:
 				return undefined;
 		}
-	}
-
-	/**
-	 * Terminal toggle and close-panel controls, fixed to the top-right corner
-	 * of the shell so they never move as the mode-specific content below them
-	 * (tabs, launcher rows) changes shape or count.
-	 */
-	private renderPersistentControls(container: HTMLElement): void {
-		const controls = append(container, $('.sessions-right-workbench-persistent-controls'));
-		const terminalButton = this.renderIconButton(controls, Codicon.terminal, localize('rightWorkbench.toggleTerminal', "Open Terminal"));
-		this.domStore.add(addDisposableListener(terminalButton, EventType.CLICK, () => {
-			void this.commandService.executeCommand('agentSession.openInTerminal');
-		}));
-		const closeButton = this.renderIconButton(controls, Codicon.close, localize('rightWorkbench.closePanel', "Close Panel"));
-		this.domStore.add(addDisposableListener(closeButton, EventType.CLICK, () => {
-			void this.commandService.executeCommand('workbench.action.agentToggleSecondarySidebarVisibility');
-		}));
 	}
 
 	private renderIconButton(container: HTMLElement, icon: ThemeIcon, label: string): HTMLButtonElement {

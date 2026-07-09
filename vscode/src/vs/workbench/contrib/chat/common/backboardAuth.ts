@@ -17,6 +17,19 @@ export interface BackboardConfigJson {
 	readonly env_keys?: Record<string, string>;
 }
 
+/**
+ * Backboard SSO endpoints and client registration shared by the sign-in flow
+ * and the user-info lookup. See https://docs.backboard.io/concepts/sso.
+ */
+export const BackboardOAuth = {
+	authorizeUrl: 'https://app.backboard.io/api/oauth/authorize',
+	tokenUrl: 'https://app.backboard.io/api/oauth/token',
+	userInfoUrl: 'https://app.backboard.io/api/oauth/userinfo',
+	clientId: 'Backboard_oauth_BGmuDtqCPmPgmIqWZ2ORvdqpl8fdKFQY',
+	scope: 'openid email profile',
+	defaultRedirectUri: 'http://127.0.0.1:49321/auth/callback',
+} as const;
+
 export namespace BackboardAuthContextKeys {
 	export const enabled = new RawContextKey<boolean>('backboard.authGateEnabled', false, {
 		type: 'boolean',
@@ -47,7 +60,7 @@ export async function hasBackboardCredentials(fileService: IFileService, configR
 	return Boolean(backboardConfigApiKey(config) || backboardConfigAccessToken(config));
 }
 
-async function readBackboardConfigJson(fileService: IFileService, configResource: URI): Promise<BackboardConfigJson> {
+export async function readBackboardConfigJson(fileService: IFileService, configResource: URI): Promise<BackboardConfigJson> {
 	try {
 		const parsed: unknown = JSON.parse((await fileService.readFile(configResource)).value.toString());
 		return isObjectRecord(parsed) ? parsed : {};

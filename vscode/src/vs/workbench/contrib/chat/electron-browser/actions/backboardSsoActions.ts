@@ -28,13 +28,13 @@ import product from '../../../../../platform/product/common/product.js';
 import { IWorkbenchContribution } from '../../../../common/contributions.js';
 import { ChatEntitlementContextKeys, IChatEntitlementService } from '../../../../services/chat/common/chatEntitlementService.js';
 import { IPathService } from '../../../../services/path/common/pathService.js';
-import { BackboardAuthContextKeys } from '../../common/backboardAuth.js';
+import { BackboardAuthContextKeys, BackboardOAuth } from '../../common/backboardAuth.js';
 
-const backboardOAuthAuthorizeUrl = 'https://app.backboard.io/api/oauth/authorize';
-const backboardOAuthTokenUrl = 'https://app.backboard.io/api/oauth/token';
-const backboardOAuthClientId = 'Backboard_oauth_BGmuDtqCPmPgmIqWZ2ORvdqpl8fdKFQY';
-const defaultBackboardOAuthRedirectUri = 'http://127.0.0.1:49321/auth/callback';
-const backboardOAuthScope = 'openid email profile';
+const backboardOAuthAuthorizeUrl = BackboardOAuth.authorizeUrl;
+const backboardOAuthTokenUrl = BackboardOAuth.tokenUrl;
+const backboardOAuthClientId = BackboardOAuth.clientId;
+const defaultBackboardOAuthRedirectUri = BackboardOAuth.defaultRedirectUri;
+const backboardOAuthScope = BackboardOAuth.scope;
 const backboardCategory = localize2('backboard.category', "Backboard");
 
 interface BackboardOAuthPending {

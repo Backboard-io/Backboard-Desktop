@@ -26,6 +26,12 @@
         "path": "./themes/2026-dark.json"
       },
       {
+        "id": "Backboard Obsidian",
+        "label": "%backboardObsidianThemeLabel%",
+        "uiTheme": "vs-dark",
+        "path": "./themes/backboard-obsidian.json"
+      },
+      {
         "id": "Dark+",
         "label": "%darkPlusColorThemeLabel%",
         "uiTheme": "vs-dark",

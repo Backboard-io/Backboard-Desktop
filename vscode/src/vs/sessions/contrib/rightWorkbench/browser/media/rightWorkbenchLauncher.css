@@ -115,7 +115,7 @@
 	gap: 6px;
 	height: 30px;
 	padding: 0 10px;
-	border-radius: 8px;
+	border-radius: var(--vscode-cornerRadius-large);
 	font-size: 13px;
 	font-weight: 500;
 	line-height: 1;
@@ -146,7 +146,7 @@
 	width: 18px;
 	height: 18px;
 	margin-left: 1px;
-	border-radius: 5px;
+	border-radius: var(--vscode-cornerRadius-small);
 	color: var(--rwb-muted);
 	visibility: hidden;
 }
@@ -171,7 +171,7 @@
 	justify-content: center;
 	width: 28px;
 	height: 28px;
-	border-radius: 7px;
+	border-radius: var(--vscode-cornerRadius-large);
 }
 
 .sessions-right-workbench-tab-add .codicon {
@@ -193,7 +193,7 @@
 	justify-content: center;
 	width: 28px;
 	height: 28px;
-	border-radius: 7px;
+	border-radius: var(--vscode-cornerRadius-large);
 }
 
 .sessions-right-workbench-icon-button:hover,
@@ -226,7 +226,7 @@
 	padding: 5px;
 	box-sizing: border-box;
 	border: 1px solid var(--rwb-border-strong);
-	border-radius: 8px;
+	border-radius: var(--vscode-cornerRadius-large);
 	background: var(--rwb-chrome-soft);
 	box-shadow: 0 10px 28px var(--vscode-widget-shadow, transparent);
 }
@@ -241,7 +241,7 @@
 	padding: 0 8px;
 	box-sizing: border-box;
 	border: 0;
-	border-radius: 6px;
+	border-radius: var(--vscode-cornerRadius-medium);
 	color: var(--rwb-foreground);
 	background: transparent;
 	text-align: left;
@@ -301,7 +301,7 @@
 	padding: 0 12px;
 	box-sizing: border-box;
 	border: 0;
-	border-radius: 7px;
+	border-radius: var(--vscode-cornerRadius-large);
 	color: var(--rwb-foreground);
 	background: color-mix(in srgb, var(--rwb-foreground) 4%, var(--rwb-bg));
 	text-align: left;
@@ -332,7 +332,7 @@
 	min-width: 34px;
 	height: 18px;
 	padding: 0 6px;
-	border-radius: 999px;
+	border-radius: var(--vscode-cornerRadius-circle);
 	color: var(--rwb-muted);
 	background: var(--rwb-bg-muted);
 	font-size: 11px;
@@ -711,7 +711,7 @@
 	padding: 0 8px;
 	box-sizing: border-box;
 	border: 1px solid var(--rwb-border-strong);
-	border-radius: 8px;
+	border-radius: var(--vscode-cornerRadius-large);
 	color: var(--rwb-muted);
 	background: var(--vscode-input-background, var(--rwb-chrome));
 }
@@ -905,7 +905,7 @@
 }
 
 .sessions-right-workbench-mode-browser .sessions-right-workbench-browser-url {
-	border-radius: 7px;
+	border-radius: var(--vscode-cornerRadius-large);
 	background: var(--vscode-input-background, var(--rwb-chrome));
 }
 
@@ -1062,7 +1062,7 @@
 .sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .modal-editor-action-container .action-label {
 	width: 24px;
 	height: 24px;
-	border-radius: 6px;
+	border-radius: var(--vscode-cornerRadius-medium);
 	color: var(--rwb-muted);
 	background: transparent !important;
 }
@@ -1093,7 +1093,7 @@
 }
 
 .sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .scrollbar .slider {
-	border-radius: 999px;
+	border-radius: var(--vscode-cornerRadius-circle);
 	background: var(--vscode-scrollbarSlider-background, var(--rwb-border-strong)) !important;
 }
 

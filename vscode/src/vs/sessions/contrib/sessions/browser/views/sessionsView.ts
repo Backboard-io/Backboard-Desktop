@@ -40,6 +40,13 @@ import { IMobileSortGroupSheetItem, showMobileSortGroupSheet } from '../../../..
 import { isPhoneLayout } from '../../../../browser/parts/mobile/mobileLayout.js';
 import { IsPhoneLayoutContext } from '../../../../common/contextkeys.js';
 import { SkillsLibraryController } from '../../../../../workbench/contrib/chat/browser/widget/input/skillsLibrary.js';
+import { ICommandService } from '../../../../../platform/commands/common/commands.js';
+import { IFileService } from '../../../../../platform/files/common/files.js';
+import { ILogService } from '../../../../../platform/log/common/log.js';
+import { IRequestService } from '../../../../../platform/request/common/request.js';
+import { IPathService } from '../../../../../workbench/services/path/common/pathService.js';
+import { resolveBackboardUserInfo } from '../../../../../workbench/contrib/chat/browser/backboardUserInfo.js';
+import { isBackboardProduct } from '../../../../../workbench/contrib/chat/common/backboardAuth.js';
 
 const $ = DOM.$;
 export const SessionsViewId = 'sessions.workbench.view.sessionsView';
@@ -59,6 +66,22 @@ export async function openSessionToTheSide(sessionsService: ISessionsService, se
 		sessionsService.insertAt(session, lastVisible.sessionId, 'right');
 	}
 	await sessionsService.openSession(session.resource, options);
+}
+
+/**
+ * Two-letter avatar initials from a display name: first letter of the first and
+ * last whitespace-separated parts (e.g. "Erin Tomorri" → "ET"), or the first two
+ * letters when there is only one part.
+ */
+function initialsFromName(name: string): string {
+	const parts = name.trim().split(/\s+/).filter(Boolean);
+	if (parts.length === 0) {
+		return '?';
+	}
+	if (parts.length === 1) {
+		return parts[0].slice(0, 2).toUpperCase();
+	}
+	return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
 export const SessionsViewFilterSubMenu = new MenuId('SessionsViewPaneFilterSubMenu');
@@ -106,6 +129,11 @@ export class SessionsView extends ViewPane {
 		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
 		@IStorageService private readonly storageService: IStorageService,
 		@ITelemetryService private readonly telemetryService: ITelemetryService,
+		@ICommandService private readonly commandService: ICommandService,
+		@IFileService private readonly fileService: IFileService,
+		@IPathService private readonly pathService: IPathService,
+		@IRequestService private readonly requestService: IRequestService,
+		@ILogService private readonly logService: ILogService,
 	) {
 		super(options, keybindingService, contextMenuService, configurationService, contextKeyService, viewDescriptorService, instantiationService, openerService, themeService, hoverService);
 
@@ -159,11 +187,15 @@ export class SessionsView extends ViewPane {
 		// Sessions section (top, fills available space)
 		const sessionsSection = DOM.append(sessionsContainer, $('.agent-sessions-section'));
 
-		// Sessions content container
+		// Pinned (non-scrolling) top block: header/find row, search and New chat
+		// stay put while the rest of the sidebar content scrolls below.
+		const pinnedHeader = DOM.append(sessionsSection, $('.agent-sessions-pinned'));
+
+		// Sessions content container (owns the scroll)
 		const sessionsContent = DOM.append(sessionsSection, $('.agent-sessions-content'));
 
 		// Header row: brand label (left) + compact collapse button (right)
-		const headerRow = this.headerRow = DOM.append(sessionsContent, $('.agent-sessions-header-row'));
+		const headerRow = this.headerRow = DOM.append(pinnedHeader, $('.agent-sessions-header-row'));
 		headerRow.classList.add('agent-sessions-header-hidden');
 		const headerLabel = this.headerLabel = DOM.append(headerRow, $('.agent-sessions-header-label'));
 
@@ -188,23 +220,28 @@ export class SessionsView extends ViewPane {
 				this.layoutService.setPartHidden(true, Parts.SIDEBAR_PART);
 			}));
 
-			this.searchButton = DOM.append(sessionsContent, $('button.agent-sessions-search-button')) as HTMLButtonElement;
+			// New chat, Search and Marketplace are all pinned flat action rows that
+			// stay static above the scrolling projects list.
+			const primaryActions = this.primaryActions = DOM.append(pinnedHeader, $('.agent-sessions-primary-actions'));
+			this.createSidebarAction(primaryActions, Codicon.edit, localize('newChat', "New chat"), () => {
+				logSessionsInteraction(this.telemetryService, 'newSession');
+				this.sessionsService.openNewSession({ forceNew: true });
+			});
+
+			// Search opens the inline find widget, which replaces the pinned block's
+			// rows while active.
+			this.searchButton = DOM.append(primaryActions, $('button.agent-sessions-sidebar-action.agent-sessions-search-button')) as HTMLButtonElement;
 			this.searchButton.type = 'button';
 			const searchLabel = localize('searchProjects', "Search projects");
 			this.searchButton.title = searchLabel;
 			this.searchButton.setAttribute('aria-label', searchLabel);
-			DOM.append(this.searchButton, $('span.agent-sessions-search-icon')).appendChild(renderIcon(Codicon.search));
-			DOM.append(this.searchButton, $('span.agent-sessions-search-label', undefined, searchLabel));
+			DOM.append(this.searchButton, $('span.agent-sessions-sidebar-action-icon')).appendChild(renderIcon(Codicon.search));
+			DOM.append(this.searchButton, $('span.agent-sessions-sidebar-action-label', undefined, localize('search', "Search")));
 			this._register(DOM.addDisposableListener(this.searchButton, DOM.EventType.CLICK, e => {
 				e.preventDefault();
 				this.openFind();
 			}));
 
-			const primaryActions = this.primaryActions = DOM.append(sessionsContent, $('.agent-sessions-primary-actions'));
-			this.createSidebarAction(primaryActions, Codicon.edit, localize('newChat', "New chat"), () => {
-				logSessionsInteraction(this.telemetryService, 'newSession');
-				this.sessionsService.openNewSession({ forceNew: true });
-			});
 			this.createSidebarAction(primaryActions, Codicon.extensions, localize('marketplace', "Marketplace"), anchor => {
 				this.instantiationService.createInstance(SkillsLibraryController).showMarketplace(anchor);
 			});
@@ -251,6 +288,9 @@ export class SessionsView extends ViewPane {
 			},
 		}));
 		this._register(this.onDidChangeBodyVisibility(visible => sessionsControl.setVisible(visible)));
+
+		// Bottom-pinned footer: update button (above) + signed-in user identity.
+		this.createFooter(sessionsSection);
 
 		// Toggle header label/actions visibility when find widget opens/closes
 		this._register(sessionsControl.onDidChangeFindOpenState(open => {
@@ -337,6 +377,71 @@ export class SessionsView extends ViewPane {
 				},
 			}));
 		}
+	}
+
+	/**
+	 * Bottom-pinned footer for the sidebar: an "Update available" button (shown
+	 * only while the Backboard update context key is set) sitting directly above
+	 * the signed-in user's identity card (avatar + name + plan/email). Both are
+	 * Backboard-only, so the whole footer is skipped for non-Backboard builds and
+	 * on phone layouts (which use their own chrome).
+	 */
+	private createFooter(container: HTMLElement): void {
+		if (!isBackboardProduct() || isPhoneLayout(this.layoutService)) {
+			return;
+		}
+
+		const footer = DOM.append(container, $('.agent-sessions-footer'));
+
+		// Signed-in user identity card.
+		const user = DOM.append(footer, $('.agent-sessions-user'));
+		const avatar = DOM.append(user, $('span.agent-sessions-user-avatar'));
+		const text = DOM.append(user, $('.agent-sessions-user-text'));
+		const nameEl = DOM.append(text, $('span.agent-sessions-user-name'));
+		const subtitleEl = DOM.append(text, $('span.agent-sessions-user-subtitle'));
+
+		// Update affordance: a small icon pinned to the right of the identity row,
+		// shown only while `backboard.updateAvailable` is set by the Backboard
+		// extension; clicking it installs the staged update.
+		const updateButton = DOM.append(user, $('button.agent-sessions-update-icon')) as HTMLButtonElement;
+		updateButton.type = 'button';
+		const updateLabel = localize('backboardUpdateAvailable', "Update available");
+		updateButton.title = updateLabel;
+		updateButton.setAttribute('aria-label', updateLabel);
+		updateButton.appendChild(renderIcon(Codicon.cloudDownload));
+		this._register(DOM.addDisposableListener(updateButton, DOM.EventType.CLICK, e => {
+			e.preventDefault();
+			e.stopPropagation();
+			this.commandService.executeCommand('backboard.installAvailableUpdate').catch(onUnexpectedError);
+		}));
+
+		const UPDATE_CONTEXT_KEY = 'backboard.updateAvailable';
+		const syncUpdateButton = () => {
+			const available = this.scopedContextKeyService.getContextKeyValue<boolean>(UPDATE_CONTEXT_KEY) === true;
+			footer.classList.toggle('has-update', available);
+		};
+		syncUpdateButton();
+		this._register(this.scopedContextKeyService.onDidChangeContext(e => {
+			if (e.affectsSome(new Set([UPDATE_CONTEXT_KEY]))) {
+				syncUpdateButton();
+			}
+		}));
+		resolveBackboardUserInfo(this.fileService, this.pathService, this.requestService, this.logService).then(info => {
+			if (!info.name || !user.isConnected) {
+				return;
+			}
+			nameEl.textContent = info.name;
+			avatar.textContent = initialsFromName(info.name);
+			const subtitle = info.plan ?? info.email;
+			if (subtitle) {
+				subtitleEl.textContent = subtitle;
+			} else {
+				subtitleEl.remove();
+			}
+			user.classList.add('visible');
+		}).catch(error => {
+			this.logService.warn(`[Backboard] Failed to resolve user info for the sidebar footer: ${error instanceof Error ? error.message : String(error)}`);
+		});
 	}
 
 	private createSidebarAction(container: HTMLElement, icon: ThemeIcon, label: string, run: (anchor: HTMLElement) => void): void {
@@ -678,9 +783,8 @@ export class SessionsView extends ViewPane {
 			this.headerRow.classList.remove('agent-sessions-header-hidden');
 			this.headerLabel.style.display = 'none';
 			this.headerActions.style.display = 'none';
-			if (this.searchButton) {
-				this.searchButton.style.display = 'none';
-			}
+			// The search row lives inside the primary actions block, so hiding the
+			// block hides New chat / Search / Marketplace together while find is open.
 			if (this.primaryActions) {
 				this.primaryActions.style.display = 'none';
 			}
@@ -690,9 +794,6 @@ export class SessionsView extends ViewPane {
 		this.headerRow.classList.add('agent-sessions-header-hidden');
 		this.headerLabel.style.display = 'none';
 		this.headerActions.style.display = 'none';
-		if (this.searchButton) {
-			this.searchButton.style.display = '';
-		}
 		if (this.primaryActions) {
 			this.primaryActions.style.display = '';
 		}

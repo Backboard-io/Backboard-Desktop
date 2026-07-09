@@ -146,7 +146,7 @@
 
 .new-chat-composer-stack {
 	grid-row: 3;
-	width: min(1120px, calc(100% - 96px));
+	width: min(760px, calc(100% - 40px));
 	min-width: 0;
 	margin: 0 auto;
 	box-sizing: border-box;
@@ -155,8 +155,6 @@
 	gap: 0;
 	padding: 0;
 	overflow: visible;
-	/* Outer corner radius of the composer card (the workspace row's rounded top
-	 * and the input's rounded bottom share it so they stay in sync). */
 	--new-chat-card-radius: 18px;
 }
 
@@ -194,17 +192,113 @@
 	min-height: 0;
 }
 
+/* --- 8-bit octopus mascot just left of the heading text --- */
+
+.new-chat-octopus {
+	position: absolute;
+	right: calc(100% + 14px);
+	top: 50%;
+	transform: translateY(-50%);
+	line-height: 0;
+	pointer-events: none;
+	z-index: 1;
+}
+
+.new-chat-octopus .octo-sprite {
+	width: 32px;
+	height: 26px;
+	shape-rendering: crispEdges;
+	image-rendering: pixelated;
+	animation: new-chat-octopus-bob 27s ease-in-out infinite;
+}
+
+.new-chat-octopus .octo-frame-b,
+.new-chat-octopus .octo-flip,
+.new-chat-octopus .octo-eyelids {
+	opacity: 0;
+}
+
+.new-chat-octopus .octo-frame-a {
+	animation: new-chat-octopus-frame-a 27s linear infinite;
+}
+
+.new-chat-octopus .octo-frame-b {
+	animation: new-chat-octopus-frame-b 27s linear infinite;
+}
+
+.new-chat-octopus .octo-flip {
+	animation: new-chat-octopus-flip 27s linear infinite;
+}
+
+.new-chat-octopus .octo-eyelids {
+	animation: new-chat-octopus-blink 27s linear infinite;
+}
+
+/* One shared 27s idle timeline so the frames never overlap: tentacle
+ * wiggles (A/B swaps) around 25% and 55%, blinks at 11% and 74%, and one
+ * brief flip-off (frame at 84-89%, ~1.3s) once per cycle. */
+@keyframes new-chat-octopus-frame-a {
+	0%, 24.9% { opacity: 1; }
+	25%, 26.2% { opacity: 0; }
+	26.3%, 27.5% { opacity: 1; }
+	27.6%, 28.9% { opacity: 0; }
+	29%, 54.9% { opacity: 1; }
+	55%, 56.2% { opacity: 0; }
+	56.3%, 57.5% { opacity: 1; }
+	57.6%, 58.9% { opacity: 0; }
+	59%, 83.9% { opacity: 1; }
+	84%, 88.9% { opacity: 0; }
+	89%, 100% { opacity: 1; }
+}
+
+@keyframes new-chat-octopus-frame-b {
+	0%, 24.9% { opacity: 0; }
+	25%, 26.2% { opacity: 1; }
+	26.3%, 27.5% { opacity: 0; }
+	27.6%, 28.9% { opacity: 1; }
+	29%, 54.9% { opacity: 0; }
+	55%, 56.2% { opacity: 1; }
+	56.3%, 57.5% { opacity: 0; }
+	57.6%, 58.9% { opacity: 1; }
+	59%, 100% { opacity: 0; }
+}
+
+@keyframes new-chat-octopus-flip {
+	0%, 83.9% { opacity: 0; }
+	84%, 88.9% { opacity: 1; }
+	89%, 100% { opacity: 0; }
+}
+
+/* Small hops during the wiggle windows and a little lift for the flip. */
+@keyframes new-chat-octopus-bob {
+	0%, 24%, 29%, 54%, 59%, 83%, 90%, 100% { transform: translateY(0); }
+	26% { transform: translateY(-2px); }
+	28% { transform: translateY(-1px); }
+	56% { transform: translateY(-2px); }
+	58% { transform: translateY(-1px); }
+	86.5% { transform: translateY(-2px); }
+}
+
+/* Two quick blinks per idle cycle. */
+@keyframes new-chat-octopus-blink {
+	0%, 10.9% { opacity: 0; }
+	11%, 11.5% { opacity: 1; }
+	11.6%, 73.9% { opacity: 0; }
+	74%, 74.5% { opacity: 1; }
+	74.6%, 100% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.new-chat-octopus .octo-sprite,
+	.new-chat-octopus .octo-sprite g {
+		animation: none;
+	}
+}
+
 .new-chat-composer-workspace-row {
-	/* A separate panel that slides out from behind the bottom of the input card.
-	 * newChatWidget moves this row just below the input (above the category
-	 * buttons). It shares the input's visible-box width — min(886px, 100% - 64px),
-	 * the input part caps at 950px with 32px of side padding — so their edges line
-	 * up. The negative top margin tucks its top edge behind the input, which
-	 * paints on top (higher z-index); the extra top padding keeps the chips clear
-	 * of that overlap so the panel reads as "coming out of" the input. */
-	width: min(886px, calc(100% - 64px));
+	width: min(760px, calc(100% - 40px));
 	max-width: 100%;
-	margin: -20px auto 0;
+	margin: 8px auto 0;
 	min-width: 0;
 	box-sizing: border-box;
 	display: flex;
@@ -213,13 +307,10 @@
 	gap: 8px;
 	overflow: hidden;
 	min-height: 0;
-	padding: 28px 24px 10px;
-	/* A distinct recessed surface (not the editor background, which equals the
-	 * page and would make the drawer invisible) with a defined edge, so it reads
-	 * as a real panel sliding out from under the input. */
-	border: 1px solid color-mix(in srgb, var(--vscode-editorWidget-border, var(--vscode-contrastBorder)) 60%, transparent);
-	border-radius: var(--new-chat-card-radius);
-	background: var(--vscode-editorWidget-background);
+	padding: 0 18px;
+	border: none;
+	border-radius: 0;
+	background: transparent;
 	position: relative;
 	z-index: 1;
 	box-shadow: none;
@@ -320,9 +411,74 @@
 .new-chat-middle-title {
 	margin: 0;
 	color: var(--vscode-foreground);
-	font-size: 24px;
-	font-weight: 600;
-	line-height: 32px;
+	font-size: 30px;
+	font-weight: 400;
+	line-height: 1.2;
+	/* Anchor for the absolutely positioned octopus mascot. */
+	position: relative;
+}
+
+/* The heading embeds the workspace picker trigger so the workspace name in
+	"What should we build in <workspace>?" is itself the dropdown. Scale the
+	trigger to the heading's type; the affordance is the chevron plus a soft
+	hover fill. The picker's leading folder icon is hidden in this context.
+	Selectors repeat the picker-slot classes so they beat the generic chip-size
+	picker rules further down this file. */
+.new-chat-middle-title .new-chat-middle-title-picker,
+.new-chat-middle-title .new-chat-middle-title-picker .sessions-chat-picker-slot.sessions-chat-workspace-picker {
+	display: inline-flex;
+	align-items: center;
+	vertical-align: bottom;
+	max-width: 100%;
+	min-width: 0;
+}
+
+.new-chat-middle-title .new-chat-middle-title-picker .sessions-chat-picker-slot.sessions-chat-workspace-picker .action-label {
+	display: inline-flex;
+	align-items: baseline;
+	gap: 2px;
+	height: auto;
+	font: inherit;
+	line-height: inherit;
+	color: inherit;
+	cursor: pointer;
+	/* No vertical padding: the slot is bottom-aligned against the heading's
+	 * line box, so any bottom padding lifts the workspace name off the
+	 * sentence baseline. */
+	padding: 0 8px;
+	margin: 0 -4px;
+	border-radius: var(--vscode-cornerRadius-medium, 10px);
+	max-width: 100%;
+	min-width: 0;
+}
+
+.new-chat-middle-title .new-chat-middle-title-picker .sessions-chat-picker-slot.sessions-chat-workspace-picker .action-label:hover,
+.new-chat-middle-title .new-chat-middle-title-picker .sessions-chat-picker-slot.sessions-chat-workspace-picker .action-label:focus-visible {
+	background-color: var(--vscode-toolbar-hoverBackground);
+	color: inherit;
+}
+
+.new-chat-middle-title .new-chat-middle-title-picker .sessions-chat-picker-slot.sessions-chat-workspace-picker .action-label > .codicon:not(.sessions-chat-dropdown-chevron) {
+	display: none;
+}
+
+.new-chat-middle-title .new-chat-middle-title-picker .sessions-chat-picker-slot.sessions-chat-workspace-picker .action-label .sessions-chat-dropdown-label {
+	font: inherit;
+	margin-left: 0;
+	min-width: 0;
+	max-width: 18ch;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.new-chat-middle-title .new-chat-middle-title-picker .sessions-chat-picker-slot.sessions-chat-workspace-picker .action-label .sessions-chat-dropdown-chevron {
+	font-size: 18px;
+	margin-left: 2px;
+	color: var(--vscode-descriptionForeground);
+	flex-shrink: 0;
+	align-self: center;
+	transform: translateY(2px);
 }
 
 .new-chat-middle-description {
@@ -383,9 +539,9 @@
 	box-sizing: border-box;
 	padding: 22px;
 	border: 1px solid color-mix(in srgb, var(--vscode-editorWidget-border, var(--vscode-contrastBorder)) 68%, transparent);
-	border-radius: 8px;
+	border-radius: var(--vscode-cornerRadius-large);
 	background: color-mix(in srgb, var(--vscode-editorWidget-background) 94%, var(--vscode-editor-background));
-	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+	box-shadow: 0 8px 24px var(--vscode-widget-shadow);
 	color: var(--vscode-foreground);
 }
 
@@ -400,7 +556,7 @@
 	height: 28px;
 	padding: 0;
 	border: 0;
-	border-radius: 6px;
+	border-radius: var(--vscode-cornerRadius-medium);
 	background: transparent;
 	color: var(--vscode-icon-foreground);
 	cursor: pointer;
@@ -460,7 +616,7 @@
 	box-sizing: border-box;
 	padding: 6px 9px;
 	border: 1px solid var(--vscode-input-border, transparent);
-	border-radius: 6px;
+	border-radius: var(--vscode-cornerRadius-medium);
 	background: var(--vscode-input-background);
 	color: var(--vscode-input-foreground);
 	font-family: inherit;
@@ -495,7 +651,7 @@
 	height: 32px;
 	box-sizing: border-box;
 	padding: 0 13px;
-	border-radius: 6px;
+	border-radius: var(--vscode-cornerRadius-medium);
 	font-family: inherit;
 	font-size: 13px;
 	font-weight: 500;
@@ -560,8 +716,8 @@
 
 	.new-chat-composer-workspace-row {
 		gap: 8px;
-		padding: 8px 12px;
-		border-radius: 14px 14px 0 0;
+		padding: 0 10px;
+		width: calc(100% - 32px);
 	}
 
 	.new-chat-composer-workspace-row > .new-session-workspace-picker-container {
@@ -615,8 +771,8 @@
 }
 
 .new-chat-composer-stack > .interactive-session .chat-input-container {
-	min-height: 96px;
-	padding: 10px 12px 10px;
+	min-height: 98px;
+	padding: 12px 14px 12px;
 	display: flex;
 	flex-direction: column;
 	justify-content: flex-start;
@@ -633,6 +789,7 @@
 .monaco-workbench .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container {
 	border-radius: var(--new-chat-card-radius);
 	z-index: 2;
+	box-shadow: none;
 }
 
 .monaco-workbench .new-chat-composer-stack > .interactive-session .chat-input-container.working {

@@ -703,7 +703,7 @@ const registry = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Con
 			'workbench.fontAliasing': {
 				'type': 'string',
 				'enum': ['default', 'antialiased', 'none', 'auto'],
-				'default': 'default',
+				'default': 'antialiased',
 				'description':
 					localize('fontAliasing', "Controls font aliasing method in the workbench."),
 				'enumDescriptions': [

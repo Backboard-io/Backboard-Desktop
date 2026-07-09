@@ -91,15 +91,6 @@ class ToggleSecondarySidebarVisibilityAction extends Action2 {
 			},
 			category: Categories.View,
 			f1: true,
-			menu: {
-				id: Menus.TitleBarRightPanel,
-				group: 'navigation',
-				order: 100,
-				when: ContextKeyExpr.and(
-					IsAuxiliaryWindowContext.toNegated(),
-					SessionsWelcomeVisibleContext.toNegated()
-				),
-			},
 		});
 	}
 
@@ -163,13 +154,3 @@ MenuRegistry.appendMenuItem(Menus.TitleBarRightLayout, {
 	order: 0
 });
 
-MenuRegistry.appendMenuItem(Menus.TitleBarRightLayout, {
-	command: {
-		id: 'backboard.installAvailableUpdate',
-		title: localize('installBackboardUpdate', "Install Backboard Studio Update"),
-		icon: Codicon.cloudDownload,
-	},
-	when: ContextKeyExpr.has('backboard.updateAvailable'),
-	group: 'navigation',
-	order: -10
-});

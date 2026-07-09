@@ -61,6 +61,17 @@ interface ITouchBarSegment extends electron.SegmentedControlSegment {
 	readonly id: string;
 }
 
+/**
+ * macOS vibrancy material for the agent-sessions style windows (Simple and
+ * Optimus). 'sidebar' is the canonical translucent material for app side
+ * panels (Finder, Notes): the blurred desktop clearly shows through, which
+ * the glass sidebar design depends on. The previously used 'menu' material is
+ * nearly opaque in dark appearance and made the sidebar read as a static
+ * colour even while correctly attached; 'under-window' reads as too
+ * bright/washed out once combined with the in-app tint.
+ */
+const AGENTS_WINDOW_VIBRANCY = 'sidebar' as const;
+
 interface ILoadOptions {
 	readonly isReload?: boolean;
 	readonly disableExtensions?: boolean;
@@ -457,7 +468,11 @@ export abstract class BaseWindow extends Disposable implements IBaseWindow {
 			if (!offset) {
 				win.setWindowButtonPosition(null);
 			} else {
-				win.setWindowButtonPosition({ x: offset + 1, y: offset });
+				// The sessions header row is 38px (SessionsPanelHeader.HEIGHT) while the
+				// startup control height is the 35px DEFAULT_CUSTOM_TITLEBAR_HEIGHT, so
+				// the traffic lights would sit ~2px above the header content's centre.
+				// Nudge them down to vertically centre with the header row.
+				win.setWindowButtonPosition({ x: offset + 1, y: offset + 2 });
 			}
 		}
 	}
@@ -719,10 +734,7 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 
 			// Agent sessions window: native vibrancy so the desktop shows through
 			// the translucent sidebar region (macOS only, no-op elsewhere).
-			// 'menu' is macOS's contained, low-glare material (used for context
-			// menus) — 'under-window' samples more of the window stack and reads
-			// as too bright/washed out once combined with in-app tint.
-			const overrides = (config.isSessionsWindow || config.isOptimusWindow) && isMacintosh ? { vibrancy: 'menu' as const } : undefined;
+			const overrides = (config.isSessionsWindow || config.isOptimusWindow) && isMacintosh ? { vibrancy: AGENTS_WINDOW_VIBRANCY } : undefined;
 			const options = instantiationService.invokeFunction(defaultBrowserWindowOptions, this.windowState, overrides, webPreferences);
 			this._hasVibrancy = !!options.vibrancy;
 
@@ -830,7 +842,8 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 			return;
 		}
 		try {
-			this._win.setVibrancy('menu');
+			this._win.setBackgroundColor('#00000000');
+			this._win.setVibrancy(AGENTS_WINDOW_VIBRANCY ?? null);
 		} catch (error) {
 			this.logService.warn(`window#${reason}: failed to re-assert window vibrancy: ${error instanceof Error ? error.message : String(error)}`);
 		}
@@ -879,6 +892,11 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 			// macOS drops the vibrancy material across full-screen transitions.
 			this._register(this.onDidEnterFullScreen(() => this.reapplyVibrancy('enter-full-screen')));
 			this._register(this.onDidLeaveFullScreen(() => this.reapplyVibrancy('leave-full-screen')));
+
+			// Zoom (maximize/unmaximize) transitions re-composite the window the
+			// same way and can equally drop the material.
+			this._register(this.onDidMaximize(() => this.reapplyVibrancy('maximize')));
+			this._register(this.onDidUnmaximize(() => this.reapplyVibrancy('unmaximize')));
 
 			// Appearance changes (e.g. system light/dark switch, or the theme
 			// main service re-assigning `nativeTheme.themeSource`) re-composite the
@@ -1244,10 +1262,11 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 					}
 					if (wantsVibrancy && !this._hasVibrancy) {
 						this._win.setBackgroundColor('#00000000');
-						this._win.setVibrancy('menu');
+						this._win.setVibrancy(AGENTS_WINDOW_VIBRANCY ?? null);
 						this._hasVibrancy = true;
 					} else if (!wantsVibrancy && this._hasVibrancy) {
 						this._win.setVibrancy(null);
+						this._win.setBackgroundColor(this.themeMainService.getBackgroundColor());
 						this._hasVibrancy = false;
 					}
 				} catch (error) {

@@ -80,10 +80,10 @@
 	gap: 6px;
 	height: 30px;
 	padding: 0 12px;
-	border: 1px solid var(--vscode-panel-border, transparent);
+	border: 1px solid var(--vscode-button-secondaryBorder, var(--vscode-panel-border, transparent));
 	border-radius: 999px;
-	background: var(--vscode-editorWidget-background, transparent);
-	color: var(--vscode-foreground);
+	background: var(--vscode-button-secondaryBackground, var(--vscode-editorWidget-background, transparent));
+	color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
 	font-size: 12px;
 	cursor: pointer;
 	white-space: nowrap;
@@ -91,8 +91,9 @@
 }
 
 .interactive-session .chat-empty-category-suggestion:hover {
-	background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground));
-	border-color: var(--vscode-focusBorder, var(--vscode-panel-border));
+	background: var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground)));
+	border-color: color-mix(in srgb, var(--vscode-button-secondaryBorder, var(--vscode-panel-border)) 72%, var(--vscode-foreground) 28%);
+	color: var(--vscode-foreground);
 }
 
 .interactive-session .chat-empty-category-suggestion .chat-empty-category-suggestion-icon {
@@ -109,9 +110,9 @@
 	top: 0;
 	left: 0;
 	right: 0;
-	border: 1px solid var(--vscode-panel-border, transparent);
+	border: 1px solid var(--vscode-button-secondaryBorder, var(--vscode-panel-border, transparent));
 	border-radius: 12px;
-	background: var(--vscode-editorWidget-background, transparent);
+	background: var(--vscode-button-secondaryBackground, var(--vscode-editorWidget-background, transparent));
 	box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
 	overflow: hidden;
 	opacity: 0;
@@ -208,7 +209,7 @@
 }
 
 .interactive-session .chat-empty-category-panel-close:hover {
-	background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground));
+	background: var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground)));
 }
 
 .interactive-session .chat-empty-category-panel-list {
@@ -246,7 +247,7 @@
 
 .interactive-session .chat-empty-category-prompt:hover,
 .interactive-session .chat-empty-category-prompt.selected {
-	background: var(--vscode-list-hoverBackground, var(--vscode-toolbar-hoverBackground));
+	background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground, var(--vscode-toolbar-hoverBackground)));
 }
 
 .interactive-session .chat-empty-category-prompt-label {
@@ -1260,8 +1261,9 @@ have to be updated for changes to the rules above, or to support more deeply nes
 .monaco-workbench .interactive-session .chat-input-container {
 	box-sizing: border-box;
 	cursor: text;
-	background-color: var(--vscode-input-background);
-	border: 1px solid var(--vscode-input-border, transparent);
+	background-color: var(--vscode-agentsChatInput-background, var(--vscode-input-background));
+	border: 1px solid var(--vscode-agentsChatInput-border, var(--vscode-input-border, transparent));
+	color: var(--vscode-agentsChatInput-foreground, var(--vscode-input-foreground));
 	border-radius: var(--vscode-cornerRadius-large);
 	padding: 0 6px 6px 6px;
 	/* top padding is inside the editor widget */
@@ -2270,7 +2272,7 @@ have to be updated for changes to the rules above, or to support more deeply nes
 }
 
 .interactive-session .chat-input-container.focused {
-	border-color: var(--vscode-focusBorder);
+	border-color: var(--vscode-agentsChatInput-focusBorder, var(--vscode-focusBorder));
 }
 
 .chat-editor-container {
@@ -2293,7 +2295,7 @@ have to be updated for changes to the rules above, or to support more deeply nes
 }
 
 .chat-editor-container .monaco-editor .mtk1 {
-	color: var(--vscode-input-foreground);
+	color: var(--vscode-agentsChatInput-foreground, var(--vscode-input-foreground));
 }
 
 /* Truncate the chat input placeholder with an ellipsis in narrow views
@@ -2313,7 +2315,7 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	text-overflow: ellipsis;
 	white-space: nowrap;
 	vertical-align: bottom;
-	color: var(--vscode-input-placeholderForeground);
+	color: var(--vscode-agentsChatInput-placeholderForeground, var(--vscode-input-placeholderForeground));
 }
 
 .interactive-session .chat-editor-container .monaco-editor .chat-prompt-spinner {
@@ -2323,7 +2325,7 @@ have to be updated for changes to the rules above, or to support more deeply nes
 
 .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor,
 .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background {
-	background-color: var(--vscode-input-background);
+	background-color: var(--vscode-agentsChatInput-background, var(--vscode-input-background));
 }
 
 .interactive-session .interactive-input-part.editing .chat-input-container .chat-editor-container .monaco-editor,
@@ -2567,6 +2569,34 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	color: var(--vscode-icon-foreground);
 }
 
+.interactive-session .chat-input-toolbar .chat-sessionPicker-item .action-label,
+.interactive-session .chat-secondary-toolbar .chat-input-picker-item .action-label:not(.warning):not(.info),
+.interactive-session .chat-secondary-input-toolbar .chat-sessionPicker-item .action-label {
+	height: 28px;
+	padding: 0 12px;
+	border: 1px solid var(--vscode-button-secondaryBorder, var(--vscode-editorWidget-border));
+	border-radius: 999px;
+	background: var(--vscode-button-secondaryBackground, transparent);
+	color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+}
+
+.interactive-session .chat-input-toolbar .chat-sessionPicker-item .action-label:hover,
+.interactive-session .chat-secondary-toolbar .chat-input-picker-item .action-label:not(.warning):not(.info):hover,
+.interactive-session .chat-secondary-input-toolbar .chat-sessionPicker-item .action-label:hover,
+.interactive-session .chat-input-toolbar .chat-sessionPicker-item .action-label[aria-expanded="true"],
+.interactive-session .chat-secondary-toolbar .chat-input-picker-item .action-label:not(.warning):not(.info)[aria-expanded="true"],
+.interactive-session .chat-secondary-input-toolbar .chat-sessionPicker-item .action-label[aria-expanded="true"] {
+	border-color: color-mix(in srgb, var(--vscode-button-secondaryBorder, var(--vscode-editorWidget-border)) 72%, var(--vscode-foreground) 28%);
+	background: var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground)) !important;
+	color: var(--vscode-foreground) !important;
+}
+
+.interactive-session .chat-input-toolbar .chat-sessionPicker-item .action-label .codicon,
+.interactive-session .chat-secondary-toolbar .chat-input-picker-item .action-label:not(.warning):not(.info) .codicon,
+.interactive-session .chat-secondary-input-toolbar .chat-sessionPicker-item .action-label .codicon {
+	color: inherit !important;
+}
+
 /* Split model picker layout */
 .chat-input-picker-item:has(.model-picker-split) {
 	min-width: 0;
@@ -2693,21 +2723,60 @@ have to be updated for changes to the rules above, or to support more deeply nes
 		height: 20px;
 		padding: 0;
 	}
+
+	/* When enabled-feature icons are shown, the gear grows to fit them even in
+	 * the narrow composer. */
+	.interactive-session .chat-input-toolbar .monaco-action-bar .actions-container > .action-item:has(.codicon-settings-gear) .action-label.has-active-options {
+		width: auto;
+		min-width: 20px;
+		padding: 0 6px;
+	}
 }
 
 .interactive-session .chat-secondary-input-toolbar .chat-sessionPicker-item .action-label {
-	height: 16px;
-	padding: 3px 8px;
-	border-radius: 4px;
+	height: 28px;
+	padding: 0 12px;
+	border-radius: 999px;
 	display: flex;
 	align-items: center;
-	color: var(--vscode-icon-foreground);
+	color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
 }
 
 /* Keep hover background while picker dropdown is open */
 .interactive-session .chat-input-toolbar .action-label[aria-expanded="true"],
 .interactive-session .chat-secondary-toolbar .action-label[aria-expanded="true"] {
 	background-color: var(--vscode-toolbar-hoverBackground);
+}
+
+/* Backboard composer options gear: show enabled features' icons (in the accent
+ * blue) next to the gear so an active configuration is visible at a glance. */
+.interactive-session .chat-input-toolbar .action-label.codicon-settings-gear {
+	position: relative;
+}
+
+.interactive-session .chat-input-toolbar .action-label.codicon-settings-gear.has-active-options {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	width: auto;
+	min-width: 0;
+	padding: 0 6px;
+}
+
+.interactive-session .chat-input-toolbar .action-label.codicon-settings-gear .backboard-options-active-icons {
+	display: none;
+	align-items: center;
+	gap: 3px;
+}
+
+.interactive-session .chat-input-toolbar .action-label.codicon-settings-gear.has-active-options .backboard-options-active-icons {
+	display: inline-flex;
+}
+
+.interactive-session .chat-input-toolbar .action-label.codicon-settings-gear .backboard-options-active-icon {
+	color: var(--vscode-charts-blue, var(--vscode-focusBorder));
+	font-size: 14px;
+	line-height: 1;
 }
 
 /* When chevrons are hidden and only showing an icon (no label), size to 22x22 with centered icon */

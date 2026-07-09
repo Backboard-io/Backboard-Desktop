@@ -34,8 +34,6 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 	const nonce = newId();
 	const csp = `default-src 'none'; img-src ${webview.cspSource} https: data: blob:; media-src ${webview.cspSource} https: data: blob:; font-src ${webview.cspSource}; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';`;
 	const backboardLogo = `${iconBase.toString()}/backboard_logo.svg`;
-	const interFont = `${fontBase.toString()}/inter/Inter-VariableFont_opsz,wght.ttf`;
-	const interItalicFont = `${fontBase.toString()}/inter/Inter-Italic-VariableFont_opsz,wght.ttf`;
 	const jetBrainsMonoFont = `${fontBase.toString()}/jetbrains-mono/JetBrainsMono-VariableFont_wght.ttf`;
 	const jetBrainsMonoItalicFont = `${fontBase.toString()}/jetbrains-mono/JetBrainsMono-Italic-VariableFont_wght.ttf`;
 	const rootRows = `${options.showHeader ? '42px ' : ''}35px 24px minmax(0, 1fr) auto`;
@@ -53,8 +51,6 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 		<link href="${codiconsStylesheet}" rel="stylesheet">
 		<style>
-			@font-face { font-family: 'Inter'; src: url('${interFont}') format('truetype'); font-weight: 100 900; font-style: normal; font-display: swap; }
-			@font-face { font-family: 'Inter'; src: url('${interItalicFont}') format('truetype'); font-weight: 100 900; font-style: italic; font-display: swap; }
 			@font-face { font-family: 'JetBrains Mono'; src: url('${jetBrainsMonoFont}') format('truetype'); font-weight: 100 800; font-style: normal; font-display: swap; }
 			@font-face { font-family: 'JetBrains Mono'; src: url('${jetBrainsMonoItalicFont}') format('truetype'); font-weight: 100 800; font-style: italic; font-display: swap; }
 			:root {
@@ -76,7 +72,7 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 		}
 		* { box-sizing: border-box; }
 		html, body { width: 100%; height: 100%; min-width: 0; overflow: hidden; }
-			body { padding: 0; margin: 0; color: var(--bb-text); background: var(--bb-bg); font-family: var(--vscode-font-family, "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); font-size: var(--vscode-font-size); }
+			body { padding: 0; margin: 0; color: var(--bb-text); background: var(--bb-bg); font-family: var(--vscode-font-family, "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, system-ui, sans-serif); font-size: var(--vscode-font-size); }
 			.root { position: relative; display: grid; grid-template-rows: ${rootRows}; height: 100vh; height: 100dvh; min-height: 0; overflow: hidden; background: var(--bb-bg); }
 			.root > :not(.authOverlay) { transition: filter .18s ease, opacity .18s ease; }
 			.root.authRequired > :not(.authOverlay) { filter: blur(4px); opacity: .48; pointer-events: none; user-select: none; }
@@ -304,7 +300,7 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 		.barLeft, .barRight { display: flex; align-items: center; min-width: 0; }
 		.barLeft { flex: 1 1 auto; gap: 8px; overflow: hidden; }
 		.barRight { flex: 0 0 auto; justify-content: flex-end; gap: 11px; overflow: hidden; }
-		button { border: 0; cursor: pointer; font-family: var(--vscode-font-family, "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); }
+		button { border: 0; cursor: pointer; font-family: var(--vscode-font-family, "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, system-ui, sans-serif); }
 		.iconButton { width: 20px; height: 22px; min-width: 20px; display: inline-grid; place-items: center; padding: 0; border-radius: 0; color: var(--bb-muted); background: transparent; line-height: 1; flex: 0 0 auto; }
 		.iconButton .codicon { font-size: 16px; }
 		.iconButton:hover { color: var(--bb-text); background: transparent; }

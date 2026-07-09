@@ -43,7 +43,13 @@ class Setting<T> {
 namespace Setting {
 	export const DETECT_COLOR_SCHEME = new Setting<boolean>('window.autoDetectColorScheme', false);
 	export const DETECT_HC = new Setting<boolean>('window.autoDetectHighContrast', true);
-	export const SYSTEM_COLOR_THEME = new Setting<'default' | 'auto' | 'light' | 'dark'>('window.systemColorTheme', 'default');
+	// 'auto' (not upstream's 'default'): native surfaces must follow the app
+	// theme, not the OS appearance. The agent-sessions window's translucent
+	// sidebar is backed by a native vibrancy material whose appearance comes
+	// from `nativeTheme.themeSource` — with 'default' on a light-mode macOS a
+	// dark app theme gets a LIGHT material behind it, which reads as a solid
+	// white sheet behind the glass. Keep in sync with themes.contribution.ts.
+	export const SYSTEM_COLOR_THEME = new Setting<'default' | 'auto' | 'light' | 'dark'>('window.systemColorTheme', 'auto');
 	export const AUXILIARYBAR_DEFAULT_VISIBILITY = new Setting<'hidden' | 'visibleInWorkspace' | 'visible' | 'maximizedInWorkspace' | 'maximized'>('workbench.secondarySideBar.defaultVisibility', 'visibleInWorkspace');
 	export const STARTUP_EDITOR = new Setting<'none' | 'welcomePage' | 'readme' | 'newUntitledFile' | 'welcomePageInEmptyWorkbench' | 'terminal' | 'agentSessionsWelcomePage'>('workbench.startupEditor', 'welcomePage');
 }

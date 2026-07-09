@@ -163,7 +163,7 @@
 	height: 100%;
 	padding: clamp(32px, 8vh, 96px) 40px 32px;
 	color: var(--vscode-editor-foreground);
-	font-family: var(--vscode-font-family, "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+	font-family: var(--vscode-font-family, "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, system-ui, sans-serif);
 	text-align: left;
 }
 

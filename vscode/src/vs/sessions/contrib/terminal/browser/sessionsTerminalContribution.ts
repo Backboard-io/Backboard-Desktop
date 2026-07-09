@@ -21,12 +21,12 @@ import { TerminalCapability } from '../../../../platform/terminal/common/capabil
 import { IPathService } from '../../../../workbench/services/path/common/pathService.js';
 import { Menus } from '../../../browser/menus.js';
 import { isAgentHostProvider, LOCAL_AGENT_HOST_PROVIDER_ID } from '../../../common/agentHostSessionsProvider.js';
-import { IsPhoneLayoutContext, SessionsWelcomeVisibleContext } from '../../../common/contextkeys.js';
+import { IsNewChatSessionContext, IsPhoneLayoutContext, SessionsWelcomeVisibleContext } from '../../../common/contextkeys.js';
 import { ISessionsManagementService } from '../../../services/sessions/common/sessionsManagement.js';
 import { ISessionsService } from '../../../services/sessions/browser/sessionsService.js';
 import { ISession } from '../../../services/sessions/common/session.js';
 import { ISessionsProvidersService } from '../../../services/sessions/browser/sessionsProvidersService.js';
-import { AuxiliaryBarVisibleContext, IsAuxiliaryWindowContext } from '../../../../workbench/common/contextkeys.js';
+import { IsAuxiliaryWindowContext } from '../../../../workbench/common/contextkeys.js';
 import { ContextKeyExpr, IContextKeyService, RawContextKey } from '../../../../platform/contextkey/common/contextkey.js';
 import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry.js';
 import { logSessionsInteraction } from '../../../common/sessionsTelemetry.js';
@@ -675,12 +675,15 @@ class OpenSessionInTerminalAction extends Action2 {
 				id: Menus.SessionBarToolbar,
 				group: 'navigation',
 				order: 10,
-				when: ContextKeyExpr.and(IsAuxiliaryWindowContext.toNegated(), SessionsWelcomeVisibleContext.toNegated(), IsPhoneLayoutContext.negate(), AuxiliaryBarVisibleContext.negate()),
+				// NB: no IsAuxiliaryWindowContext gate — this floating toolbar only
+				// ever renders in the sessions window, and that key spuriously flips
+				// true when the right panel/editor opens, hiding the button.
+				when: ContextKeyExpr.and(SessionsWelcomeVisibleContext.toNegated(), IsPhoneLayoutContext.negate()),
 			}, {
-				id: Menus.TitleBarRightPanel,
+				id: Menus.TitleBarRightLayout,
 				group: 'navigation',
-				order: 98,
-				when: ContextKeyExpr.and(IsAuxiliaryWindowContext.toNegated(), SessionsWelcomeVisibleContext.toNegated(), IsPhoneLayoutContext.negate()),
+				order: 2,
+				when: ContextKeyExpr.and(IsAuxiliaryWindowContext.toNegated(), IsNewChatSessionContext, IsPhoneLayoutContext.negate()),
 			}]
 		});
 	}

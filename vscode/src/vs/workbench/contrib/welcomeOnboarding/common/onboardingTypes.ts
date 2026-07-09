@@ -94,7 +94,6 @@ export function getOnboardingStepSubtitle(stepId: OnboardingStepId): string {
  */
 export const ONBOARDING_STEPS: readonly OnboardingStepId[] = [
 	OnboardingStepId.Welcome,
-	OnboardingStepId.Experience,
 ];
 
 /**
@@ -112,6 +111,14 @@ export const ONBOARDING_STORAGE_KEY = 'welcomeOnboarding.state';
  * Storage key for tracking whether the post-onboarding tour has been shown.
  */
 export const ONBOARDING_TOUR_STORAGE_KEY = 'welcomeOnboarding.tourComplete';
+
+/**
+ * Storage key for tracking whether the Agents-window post-onboarding tour has
+ * been shown. Lives here (rather than in the sessions window that owns the tour)
+ * so the onboarding reset action can clear it too — the tour runs in a separate
+ * window that cannot be reached by importing from `vs/sessions`.
+ */
+export const ONBOARDING_SESSIONS_TOUR_STORAGE_KEY = 'sessions.postOnboardingTour.complete';
 
 export type OnboardingDismissReason = 'complete' | 'skip';
 

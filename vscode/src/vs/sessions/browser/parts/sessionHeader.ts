@@ -34,7 +34,6 @@ import { applySessionBarThemeColors } from './sessionBarStyles.js';
 import { IContextKeyService } from '../../../platform/contextkey/common/contextkey.js';
 import { isAgentHostProviderId } from '../../common/agentHostSessionsProvider.js';
 import { onUnexpectedError } from '../../../base/common/errors.js';
-import { SessionStatusIcon } from '../sessionStatusIcon.js';
 
 /**
  * An action runner for the session header toolbars that promotes the header's
@@ -72,7 +71,6 @@ class SessionActivatingActionRunner extends ActionRunner {
 export class SessionHeader extends Disposable {
 
 	private readonly _container: HTMLElement;
-	private readonly _iconEl: HTMLElement;
 	private readonly _titleEl: HTMLElement;
 	private readonly _titleTextEl: HTMLElement;
 	private readonly _metaRow: HTMLElement;
@@ -98,8 +96,6 @@ export class SessionHeader extends Disposable {
 
 	private readonly _readStateSignal: IObservable<void>;
 	private readonly _metaActionsSignal: IObservable<void>;
-
-	private readonly _statusIcon: SessionStatusIcon;
 
 	get element(): HTMLElement {
 		return this._container;
@@ -129,16 +125,10 @@ export class SessionHeader extends Disposable {
 
 		this._container = $('.chat-composite-bar.session-header-bar');
 
-		// Header: a status icon column alongside a main column that stacks the title
-		// row (title + actions) and the meta row (workspace · diff). This mirrors the
-		// sessions list so the meta row aligns under the title rather than under the
-		// status icon.
+		// Header: a single main column that stacks the title row (status pill +
+		// title + actions) and the meta row (workspace breadcrumb · diff stats).
 		const header = $('.chat-composite-bar-header');
 		this._container.appendChild(header);
-
-		this._iconEl = $('.chat-composite-bar-session-icon');
-		header.appendChild(this._iconEl);
-		this._statusIcon = this._register(instantiationService.createInstance(SessionStatusIcon, this._iconEl));
 
 		const main = $('.chat-composite-bar-header-main');
 		header.appendChild(main);
@@ -295,7 +285,6 @@ export class SessionHeader extends Disposable {
 		this._cancelTitleEditing();
 		this._session = session;
 		this._metaToolbar.context = session;
-		this._statusIcon.reset();
 
 		const store = new DisposableStore();
 		this._sessionDisposables.value = store;
@@ -316,14 +305,6 @@ export class SessionHeader extends Disposable {
 	}
 
 	private _updateHeader(session: IActiveSession, reader: IReader): void {
-		// Session icon — the SessionStatusIcon widget owns the rendering (spinner vs.
-		// codicon, cross-fade, reduced-motion); here we just feed it the latest state.
-		const status = session.status.read(reader);
-		const isRead = this._sessionsListModelService.isSessionRead(session);
-		const isArchived = session.isArchived.read(reader);
-		const pullRequestIcon = session.workspace.read(reader)?.folders[0]?.gitRepository?.gitHubInfo.read(reader)?.pullRequest?.icon;
-		this._statusIcon.setStatus(status, isRead, isArchived, pullRequestIcon);
-
 		// Session title
 		this._titleTextEl.textContent = session.title.read(reader) || localize('agentSessions.newSession', "New Session");
 		this._titleEl.classList.toggle('editable', this._isTitleEditable());
@@ -553,9 +534,9 @@ export class SessionViewFloatingToolbar extends Disposable {
 		this._toolbar = this._register(instantiationService.createInstance(MenuWorkbenchToolBar, toolbar, Menus.SessionBarToolbar, {
 			hiddenItemStrategy: HiddenItemStrategy.Ignore,
 			menuOptions: { shouldForwardArgs: true },
-			highlightToggledItems: true,
+			highlightToggledItems: false,
 			actionRunner: this._actionRunner,
-			toolbarOptions: { primaryGroup: () => true, useSeparatorsInPrimaryActions: true },
+			toolbarOptions: { primaryGroup: () => true, useSeparatorsInPrimaryActions: false },
 		}));
 
 		this._setVisible(false);

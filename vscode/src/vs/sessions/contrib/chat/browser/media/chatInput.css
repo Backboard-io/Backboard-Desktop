@@ -45,7 +45,8 @@
 }
 
 .new-chat-input-area:focus-within {
-	border-color: var(--vscode-agentsChatInput-focusBorder, var(--vscode-focusBorder));
+	border-color: color-mix(in srgb, var(--vscode-agentsChatInput-focusBorder, var(--vscode-focusBorder)) 48%, var(--vscode-agentsChatInput-border));
+	box-shadow: 0 0 0 2px color-mix(in srgb, var(--vscode-agentsChatInput-focusBorder, var(--vscode-focusBorder)) 20%, transparent);
 }
 
 .new-chat-input-area .monaco-editor .ghost-text-decoration {
@@ -90,7 +91,7 @@
 .sessions-chat-editor .monaco-editor .sessions-agent-host-reference {
 	color: var(--vscode-chat-slashCommandForeground);
 	background-color: var(--vscode-chat-slashCommandBackground);
-	border-radius: 3px;
+	border-radius: var(--vscode-cornerRadius-small);
 }
 
 /* Description shown as ghost text after a recognized slash command. */
@@ -102,7 +103,7 @@
 .sessions-chat-toolbar {
 	display: flex;
 	align-items: center;
-	padding: 2px 6px 6px 6px;
+	padding: 2px 6px 0;
 	gap: 6px;
 	color: var(--vscode-icon-foreground);
 }
@@ -148,21 +149,23 @@
 .sessions-chat-config-toolbar .action-label {
 	display: flex;
 	align-items: center;
-	height: 16px;
-	padding: 3px 7px;
-	background-color: transparent;
-	border: none;
-	border-radius: var(--vscode-cornerRadius-small);
+	height: 22px;
+	padding: 0 8px;
+	background-color: var(--vscode-button-secondaryBackground, transparent);
+	border: 1px solid var(--vscode-button-secondaryBorder, transparent);
+	border-radius: 999px;
 	cursor: pointer;
 	touch-action: manipulation;
-	color: var(--vscode-icon-foreground);
+	color: var(--vscode-button-secondaryForeground, var(--vscode-icon-foreground));
 	white-space: nowrap;
 	min-width: 30px;
 	overflow: hidden;
+	box-sizing: border-box;
 }
 
 .sessions-chat-config-toolbar .action-label:hover {
-	background-color: var(--vscode-toolbar-hoverBackground);
+	background-color: var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground));
+	border-color: color-mix(in srgb, var(--vscode-button-secondaryBorder, var(--vscode-editorWidget-border)) 72%, var(--vscode-foreground) 28%);
 	color: var(--vscode-foreground);
 }
 
@@ -329,16 +332,19 @@
 	width: 22px;
 	height: 22px;
 	flex-shrink: 0;
-	border-radius: var(--vscode-cornerRadius-small);
+	border-radius: 999px;
 	cursor: pointer;
-	color: var(--vscode-icon-foreground);
-	background: transparent;
-	border: none;
+	color: var(--vscode-button-secondaryForeground, var(--vscode-icon-foreground));
+	background: var(--vscode-button-secondaryBackground, transparent);
+	border: 1px solid var(--vscode-button-secondaryBorder, transparent);
 	outline: none;
+	box-sizing: border-box;
 }
 
 .sessions-chat-attach-button:hover {
-	background-color: var(--vscode-toolbar-hoverBackground);
+	background-color: var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground));
+	border-color: color-mix(in srgb, var(--vscode-button-secondaryBorder, var(--vscode-editorWidget-border)) 72%, var(--vscode-foreground) 28%);
+	color: var(--vscode-foreground);
 }
 
 .sessions-chat-attach-button:focus-visible {
