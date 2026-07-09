@@ -47,6 +47,16 @@
 	-webkit-app-region: drag;
 }
 
+/* Windows/Linux: there are no traffic lights at the left edge, and the native
+   window controls (min/max/close) are drawn by the OS as an overlay over the
+   top-right corner. Flip the reserved space accordingly: hug the left edge and
+   keep the right-panel toggle clear of the controls overlay. */
+.agent-sessions-workbench.windows .optimus-window-chrome,
+.agent-sessions-workbench.linux .optimus-window-chrome {
+	padding-left: 12px;
+	padding-right: calc(100vw - env(titlebar-area-width, 100vw) + 10px);
+}
+
 .optimus-window-chrome-button,
 .optimus-window-chrome-mode {
 	pointer-events: auto;

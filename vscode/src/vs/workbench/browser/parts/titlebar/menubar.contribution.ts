@@ -5,7 +5,7 @@
 
 import { localize } from '../../../../nls.js';
 import { MenuId, MenuRegistry } from '../../../../platform/actions/common/actions.js';
-import { IsMacNativeContext } from '../../../../platform/contextkey/common/contextkeys.js';
+import { IsMacNativeContext, IsWindowsContext } from '../../../../platform/contextkey/common/contextkeys.js';
 
 MenuRegistry.appendMenuItem(MenuId.MenubarMainMenu, {
 	submenu: MenuId.MenubarFileMenu,
@@ -14,6 +14,30 @@ MenuRegistry.appendMenuItem(MenuId.MenubarMainMenu, {
 		original: 'File',
 		mnemonicTitle: localize({ key: 'mFile', comment: ['&& denotes a mnemonic'] }, "&&File"),
 	},
+	order: 1
+});
+
+// Windows has no macOS-style application menu hosting About, Settings and
+// Themes, so surface the Preferences menu as a top-level "Settings" menu
+// between File and Edit.
+MenuRegistry.appendMenuItem(MenuId.MenubarMainMenu, {
+	submenu: MenuId.MenubarPreferencesMenu,
+	title: {
+		value: 'Settings',
+		original: 'Settings',
+		mnemonicTitle: localize({ key: 'mSettings', comment: ['&& denotes a mnemonic'] }, "Se&&ttings")
+	},
+	when: IsWindowsContext,
+	order: 1.5
+});
+
+MenuRegistry.appendMenuItem(MenuId.MenubarPreferencesMenu, {
+	command: {
+		id: 'workbench.action.showAboutDialog',
+		title: localize({ key: 'mAbout', comment: ['&& denotes a mnemonic'] }, "&&About"),
+	},
+	when: IsWindowsContext,
+	group: '1_about',
 	order: 1
 });
 

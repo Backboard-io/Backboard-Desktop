@@ -8,7 +8,8 @@ import * as DOM from '../../../../../base/browser/dom.js';
 import { renderIcon } from '../../../../../base/browser/ui/iconLabel/iconLabels.js';
 import { onUnexpectedError } from '../../../../../base/common/errors.js';
 import { autorun } from '../../../../../base/common/observable.js';
-import { isWeb } from '../../../../../base/common/platform.js';
+import { isWeb, isWindows } from '../../../../../base/common/platform.js';
+import { Separator, toAction } from '../../../../../base/common/actions.js';
 import { Codicon } from '../../../../../base/common/codicons.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { ContextKeyExpr, IContextKey, IContextKeyService, RawContextKey } from '../../../../../platform/contextkey/common/contextkey.js';
@@ -48,6 +49,7 @@ import { IRequestService } from '../../../../../platform/request/common/request.
 import { IPathService } from '../../../../../workbench/services/path/common/pathService.js';
 import { resolveBackboardUserInfo } from '../../../../../workbench/contrib/chat/browser/backboardUserInfo.js';
 import { isBackboardProduct } from '../../../../../workbench/contrib/chat/common/backboardAuth.js';
+import { IProductService } from '../../../../../platform/product/common/productService.js';
 
 const $ = DOM.$;
 export const SessionsViewId = 'sessions.workbench.view.sessionsView';
@@ -137,6 +139,7 @@ export class SessionsView extends ViewPane {
 		@IPathService private readonly pathService: IPathService,
 		@IRequestService private readonly requestService: IRequestService,
 		@ILogService private readonly logService: ILogService,
+		@IProductService private readonly productService: IProductService,
 	) {
 		super(options, keybindingService, contextMenuService, configurationService, contextKeyService, viewDescriptorService, instantiationService, openerService, themeService, hoverService);
 
@@ -423,6 +426,37 @@ export class SessionsView extends ViewPane {
 			e.stopPropagation();
 			this.commandService.executeCommand('backboard.installAvailableUpdate').catch(onUnexpectedError);
 		}));
+
+		// Windows has no application menu — macOS hosts About, Settings and
+		// Themes under the "Backboard Studio" app menu — so surface those
+		// entries behind a cog button beside the identity card.
+		if (isWindows) {
+			// Sibling of the identity card, not a child: the card stays at
+			// opacity 0 until the signed-in user resolves, and the cog must
+			// remain usable even when no user is signed in.
+			const appMenuButton = DOM.append(footer, $('button.agent-sessions-app-menu-icon')) as HTMLButtonElement;
+			appMenuButton.type = 'button';
+			const appMenuLabel = localize('backboardAppMenu', "Settings and More");
+			appMenuButton.title = appMenuLabel;
+			appMenuButton.setAttribute('aria-label', appMenuLabel);
+			appMenuButton.setAttribute('aria-haspopup', 'menu');
+			appMenuButton.appendChild(renderIcon(Codicon.settingsGear));
+			this._register(DOM.addDisposableListener(appMenuButton, DOM.EventType.CLICK, e => {
+				e.preventDefault();
+				e.stopPropagation();
+				this.contextMenuService.showContextMenu({
+					getAnchor: () => appMenuButton,
+					getActions: () => [
+						toAction({ id: 'workbench.action.showAboutDialog', label: localize('backboardAbout', "About {0}", this.productService.nameShort), run: () => this.commandService.executeCommand('workbench.action.showAboutDialog') }),
+						new Separator(),
+						toAction({ id: 'workbench.action.openSettings', label: localize('backboardSettings', "Settings"), run: () => this.commandService.executeCommand('workbench.action.openSettings') }),
+						toAction({ id: 'workbench.action.openGlobalKeybindings', label: localize('backboardKeyboardShortcuts', "Keyboard Shortcuts"), run: () => this.commandService.executeCommand('workbench.action.openGlobalKeybindings') }),
+						new Separator(),
+						toAction({ id: 'workbench.action.selectTheme', label: localize('backboardColorTheme', "Color Theme"), run: () => this.commandService.executeCommand('workbench.action.selectTheme') }),
+					],
+				});
+			}));
+		}
 
 		const UPDATE_CONTEXT_KEY = 'backboard.updateAvailable';
 		const syncUpdateButton = () => {

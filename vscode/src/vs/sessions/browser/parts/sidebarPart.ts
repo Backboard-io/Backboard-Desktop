@@ -34,7 +34,7 @@ import { Extensions } from '../../../workbench/browser/panecomposite.js';
 import { Menus } from '../menus.js';
 import { $, append, prepend } from '../../../base/browser/dom.js';
 import { HiddenItemStrategy, MenuWorkbenchToolBar } from '../../../platform/actions/browser/toolbar.js';
-import { isWeb } from '../../../base/common/platform.js';
+import { isMacintosh, isWeb } from '../../../base/common/platform.js';
 import { IWorkbenchEnvironmentService } from '../../../workbench/services/environment/common/environmentService.js';
 import { SessionsPanelHeader } from './panelHeader.js';
 
@@ -147,14 +147,18 @@ export class SidebarPart extends AbstractPaneCompositePart {
 		// The Optimus window renders its own fixed chrome overlay with the mode
 		// selector and panel toggles, so its header stays empty (drag region and
 		// spacing only) to avoid mounting duplicate controls.
+		// macOS keeps the header controls in the right section because the
+		// traffic lights occupy the left edge; on Windows/Linux there are no
+		// window controls at the left edge, so the controls hug it instead.
+		const headerToolbars = [
+			{ menuId: Menus.TitleBarLeftLayout, telemetrySource: 'sidebarPanelHeader.left' },
+			{ menuId: Menus.TitleBarCenterLeft, telemetrySource: 'sidebarPanelHeader.centerLeft' },
+		];
 		this.panelHeader = this._register(this.instantiationService.createInstance(SessionsPanelHeader, parent, this.environmentService.isOptimusWindow
 			? { classes: ['sidebar-part-header'] }
 			: {
 				classes: ['sidebar-part-header'],
-				right: [
-					{ menuId: Menus.TitleBarLeftLayout, telemetrySource: 'sidebarPanelHeader.left' },
-					{ menuId: Menus.TitleBarCenterLeft, telemetrySource: 'sidebarPanelHeader.centerLeft' },
-				],
+				...(isMacintosh ? { right: headerToolbars } : { left: headerToolbars }),
 				windowControls: { left: true },
 			}));
 

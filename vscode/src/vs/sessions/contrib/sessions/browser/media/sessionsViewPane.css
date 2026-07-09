@@ -549,6 +549,57 @@
 		font-size: 16px;
 	}
 
+	/* Windows-only app menu cog on the right edge of the identity row: hosts
+	 * the entries macOS keeps under the application menu (About, Settings,
+	 * Themes). Same footprint as the update icon, muted until hovered. */
+	.agent-sessions-app-menu-icon {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		flex: 0 0 auto;
+		width: 26px;
+		height: 26px;
+		padding: 0;
+		border: none;
+		border-radius: var(--vscode-cornerRadius-large);
+		background: transparent;
+		color: var(--agent-sidebar-muted);
+		cursor: pointer;
+		transition: background 120ms ease, color 120ms ease;
+	}
+
+	.agent-sessions-app-menu-icon:hover,
+	.agent-sessions-app-menu-icon:focus-visible {
+		background: color-mix(in srgb, var(--agent-sidebar-primary) 10%, transparent);
+		color: var(--agent-sidebar-primary);
+	}
+
+	.agent-sessions-app-menu-icon:focus-visible {
+		outline: 1px solid var(--vscode-focusBorder);
+		outline-offset: 1px;
+	}
+
+	.agent-sessions-app-menu-icon .codicon {
+		font-size: 16px;
+	}
+
+	/* When the cog is present (Windows), the footer lays the identity card and
+	 * the cog out side by side instead of stacking them. */
+	.agent-sessions-footer:has(> .agent-sessions-app-menu-icon) {
+		flex-direction: row;
+		align-items: center;
+	}
+
+	.agent-sessions-footer:has(> .agent-sessions-app-menu-icon) .agent-sessions-user {
+		width: auto;
+		flex: 1 1 auto;
+		min-width: 0;
+	}
+
+	.agent-sessions-footer > .agent-sessions-app-menu-icon {
+		margin-right: 8px;
+	}
+
 	/* User identity card: avatar initials + name + plan/email. Fades in once the
 	 * signed-in user resolves; the avatar aligns with the folder icons above. */
 	.agent-sessions-user {
