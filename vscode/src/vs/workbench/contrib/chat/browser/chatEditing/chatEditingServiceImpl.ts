@@ -70,7 +70,7 @@ export class ChatEditingService extends Disposable implements IChatEditingServic
 		@IFileService private readonly _fileService: IFileService,
 		@ILifecycleService private readonly lifecycleService: ILifecycleService,
 		@IStorageService storageService: IStorageService,
-		@ILogService logService: ILogService,
+		@ILogService private readonly _logService: ILogService,
 		@IExtensionService extensionService: IExtensionService,
 		@IProductService productService: IProductService,
 		@INotebookService private readonly notebookService: INotebookService,
