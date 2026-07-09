@@ -1211,6 +1211,7 @@ async function saveBackboardOAuthTokens(tokens: BackboardOAuthTokens): Promise<B
 			obtained_at: new Date().toISOString()
 		}
 	});
+	await cacheBackboardUserName(accessToken);
 	return { apiKeySaved: Boolean(usableApiKey), assistantId };
 }
 
