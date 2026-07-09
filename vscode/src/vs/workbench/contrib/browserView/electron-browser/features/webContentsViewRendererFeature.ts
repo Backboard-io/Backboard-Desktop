@@ -259,7 +259,8 @@ class WebContentsViewRendererFeature extends BrowserEditorContribution {
 			return;
 		}
 		const overlays = this._overlayManager.getOverlappingOverlays(this._container);
-		const obscured = overlays.length > 0;
+		const blockingOverlays = overlays.filter(o => o.type === BrowserOverlayType.Dialog);
+		const obscured = blockingOverlays.length > 0;
 		const hasNotification = overlays.some(o => o.type === BrowserOverlayType.Notification);
 		this._overlayPauseEl.classList.toggle('show-message', hasNotification);
 		if (obscured !== this._overlayObscured) {

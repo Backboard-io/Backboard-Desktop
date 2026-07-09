@@ -527,7 +527,6 @@ export class RightWorkbenchViewPane extends ViewPane {
 		}
 
 		this.closeModePicker();
-		const restoreBrowserView = this.hideActiveBrowserViewForOverlay();
 		anchor.setAttribute('aria-expanded', 'true');
 
 		const picker = append(root, $('.sessions-right-workbench-mode-picker'));
@@ -557,7 +556,6 @@ export class RightWorkbenchViewPane extends ViewPane {
 			}
 		}));
 		this.modePickerStore.add({ dispose: () => anchor.setAttribute('aria-expanded', 'false') });
-		this.modePickerStore.add({ dispose: () => restoreBrowserView?.dispose() });
 	}
 
 	private renderModePickerRow(container: HTMLElement, entry: IRightWorkbenchModeEntry): void {
@@ -582,26 +580,6 @@ export class RightWorkbenchViewPane extends ViewPane {
 		this.modePicker?.remove();
 		this.modePicker = undefined;
 		this.modePickerStore.clear();
-	}
-
-	private hideActiveBrowserViewForOverlay(): { dispose(): void } | undefined {
-		if (this.activeMode !== 'browser') {
-			return undefined;
-		}
-		const model = this.activeTab?.browserInput?.model;
-		if (!model) {
-			return undefined;
-		}
-
-		void model.setVisible(false);
-		return {
-			dispose: () => {
-				if (this.activeMode === 'browser' && this.activeTab?.browserInput?.model === model) {
-					void model.setVisible(true);
-					this.layoutEmbeddedEditorPart();
-				}
-			}
-		};
 	}
 
 	private getModeEntries(): readonly IRightWorkbenchModeEntry[] {
@@ -1734,7 +1712,6 @@ export class RightWorkbenchViewPane extends ViewPane {
 		const model = browserInput?.model;
 		const hasUrl = !!(model?.url ?? browserInput?.url ?? (activeTab?.mode === 'browser' ? activeTab.browserUrl : undefined));
 		const storageScope = model?.storageScope;
-		const restoreBrowserView = this.hideActiveBrowserViewForOverlay();
 		this.contextMenuService.showContextMenu({
 			getAnchor: () => anchor,
 			getActions: () => [
@@ -1881,7 +1858,6 @@ export class RightWorkbenchViewPane extends ViewPane {
 				}),
 			],
 			getMenuClassName: () => 'sessions-right-workbench-browser-actions-menu',
-			onHide: () => restoreBrowserView?.dispose(),
 		});
 	}
 

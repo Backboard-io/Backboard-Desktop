@@ -313,9 +313,39 @@ export class AgentHostSnapshotController extends Disposable implements IChatEdit
 	async reject(..._uris: URI[]): Promise<void> { /* no-op */ }
 	getEntryDiffBetweenStops(_uri: URI, _requestId: string | undefined, _stopId: string | undefined): IObservable<IEditSessionEntryDiff | undefined> | undefined { return undefined; }
 	getEntryDiffBetweenRequests(_uri: URI, _startRequestId: string, _stopRequestId: string): IObservable<IEditSessionEntryDiff | undefined> { return constObservable(undefined); }
-	getDiffsForFilesInSession(): IObservable<readonly IEditSessionEntryDiff[]> { return constObservable([]); }
-	getDiffsForFilesInRequest(_requestId: string): IObservable<readonly IEditSessionEntryDiff[]> { return constObservable([]); }
-	getDiffForSession(): IObservable<IEditSessionDiffStats> { return constObservable({ added: 0, removed: 0 }); }
+	getDiffsForFilesInSession(): IObservable<readonly IEditSessionEntryDiff[]> {
+		return derived(this, reader => {
+			const currentIdx = this._currentCheckpointIndex.read(reader);
+			const merged = new Map<string, IToolCallFileEdit>();
+			for (let i = 0; i <= currentIdx; i++) {
+				const checkpoint = this._checkpoints[i];
+				if (!checkpoint) {
+					continue;
+				}
+				for (const edit of checkpoint.edits) {
+					const existing = merged.get(edit.resource.toString());
+					merged.set(edit.resource.toString(), existing ? mergeFileEdit(existing, edit) : edit);
+				}
+			}
+			return [...merged.values()].map(edit => this._toEntryDiff(edit));
+		});
+	}
+	getDiffsForFilesInRequest(requestId: string): IObservable<readonly IEditSessionEntryDiff[]> {
+		return derived(this, () => {
+			const checkpoint = this._checkpoints.find(cp => cp.requestId === requestId);
+			if (!checkpoint) {
+				return [];
+			}
+			return checkpoint.edits.map(edit => this._toEntryDiff(edit));
+		});
+	}
+	getDiffForSession(): IObservable<IEditSessionDiffStats> {
+		return this.getDiffsForFilesInSession().map(diffs => diffs.reduce<IEditSessionDiffStats>((acc, diff) => {
+			acc.added += diff.added;
+			acc.removed += diff.removed;
+			return acc;
+		}, { added: 0, removed: 0 }));
+	}
 
 	async triggerExplanationGeneration(): Promise<void> { /* no-op */ }
 	clearExplanations(): void { /* no-op */ }
@@ -412,6 +442,19 @@ export class AgentHostSnapshotController extends Disposable implements IChatEdit
 			}
 		});
 		await Promise.all(ops);
+	}
+
+	private _toEntryDiff(edit: IToolCallFileEdit): IEditSessionEntryDiff {
+		return {
+			originalURI: edit.beforeContentUri ?? edit.originalResource ?? edit.resource,
+			modifiedURI: edit.afterContentUri ?? edit.resource,
+			added: edit.diff?.added ?? 0,
+			removed: edit.diff?.removed ?? 0,
+			quitEarly: false,
+			identical: false,
+			isFinal: true,
+			isBusy: false,
+		};
 	}
 }
 

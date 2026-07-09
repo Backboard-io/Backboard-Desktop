@@ -40,7 +40,7 @@ import { CellUri, ICellEditOperation } from '../../../notebook/common/notebookCo
 import { INotebookService } from '../../../notebook/common/notebookService.js';
 import { chatEditingSessionIsReady, ChatEditingSessionState, ChatEditKind, getMultiDiffSourceUri, IChatEditingSession, IEditSessionEntryDiff, IModifiedEntryTelemetryInfo, IModifiedFileEntry, ISnapshotEntry, IStreamingEdits, ModifiedFileEntryState } from '../../common/editing/chatEditingService.js';
 import { IChatResponseModel } from '../../common/model/chatModel.js';
-import { IChatProgress, IChatWorkspaceEdit } from '../../common/chatService/chatService.js';
+import { IChatExternalEdit, IChatProgress, IChatWorkspaceEdit } from '../../common/chatService/chatService.js';
 import { ChatAgentLocation } from '../../common/constants.js';
 import { IChatEditingCheckpointTimeline } from './chatEditingCheckpointTimeline.js';
 import { ChatEditingCheckpointTimelineImpl, IChatEditingTimelineFsDelegate } from './chatEditingCheckpointTimelineImpl.js';
@@ -171,6 +171,7 @@ export class ChatEditingSession extends Disposable implements IChatEditingSessio
 		undoStopId: string;
 		releaseLocks: () => void;
 	}>();
+	private _nextHydratedExternalEditOperationId = -1;
 
 	private readonly _entriesObs = observableValue<readonly AbstractChatEditingModifiedFileEntry[]>(this, []);
 	public readonly entries: IObservable<readonly IModifiedFileEntry[]> = derived(reader => {
@@ -775,7 +776,7 @@ export class ChatEditingSession extends Disposable implements IChatEditingSessio
 				// Files that did not exist on disk before may not exist in our working
 				// set yet. Create those if that's the case.
 				if (!entry && beforeSnapshot === undefined) {
-					entry = await this._getOrCreateModifiedFileEntry(resource, NotExistBehavior.Abort, this._getTelemetryInfoForModel(responseModel), '');
+					entry = await this._getOrCreateModifiedFileEntry(resource, NotExistBehavior.Create, this._getTelemetryInfoForModel(responseModel), '');
 					if (entry) {
 						entry.startExternalEdit();
 						entry.acceptStreamingEditsStart(responseModel, operation.undoStopId, undefined);
@@ -887,6 +888,30 @@ export class ChatEditingSession extends Disposable implements IChatEditingSessio
 			this._explanationHandle = this._explanationModelManager.generateExplanations(diffInfos, this.chatSessionResource, CancellationToken.None);
 			await this._explanationHandle.completed;
 		}
+	}
+
+	async hydrateExternalEdit(responseModel: IChatResponseModel, edit: IChatExternalEdit): Promise<void> {
+		if (!edit.beforeContentUri && !edit.afterContentUri) {
+			return;
+		}
+
+		const existingDiffs = this.getDiffsForFilesInRequest(responseModel.requestId).get();
+		if (existingDiffs.some(diff => isEqual(diff.modifiedURI, edit.uri))) {
+			return;
+		}
+
+		const operationId = this._nextHydratedExternalEditOperationId--;
+		await this.startExternalEdits(
+			responseModel,
+			operationId,
+			[edit.uri],
+			edit.undoStopId ?? responseModel.requestId,
+			edit.beforeContentUri ? [edit.beforeContentUri] : undefined
+		);
+		// Reload the modified side from disk so the live editing entry stays in
+		// sync with the actual workspace file and remains visible in the
+		// changed-files widget, instead of diffing only between detached snapshots.
+		await this.stopExternalEdits(responseModel, operationId);
 	}
 
 	clearExplanations(): void {
