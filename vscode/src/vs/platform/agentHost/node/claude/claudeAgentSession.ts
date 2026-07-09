@@ -15,6 +15,7 @@ import { IAgentConfigurationService } from '../agentConfigurationService.js';
 import { ISyncedCustomization } from '../../common/agentPluginManager.js';
 import { ClaudePermissionMode } from '../../common/claudeSessionConfigKeys.js';
 import { ClaudeRuntimeEffortLevel, clampEffortForRuntime, resolveClaudeEffort } from '../../common/claudeModelConfig.js';
+import type { SessionBillingMode } from '../../common/sessionConfigKeys.js';
 import { AgentSignal, IAgentSessionProjectInfo } from '../../common/agentService.js';
 import type { IAgentServerToolHost } from '../../common/agentServerTools.js';
 import { PendingRequestRegistry } from '../../common/pendingRequestRegistry.js';
@@ -49,7 +50,14 @@ export type { IRematerializer } from './claudeSdkPipeline.js';
  * agent's per-session lookup, and the resume-vs-fresh discriminator).
  */
 export interface IMaterializeContext {
-	readonly proxyHandle: IClaudeProxyHandle;
+	/**
+	 * `undefined` for subscription-billed sessions ({@link IMaterializeContext.billing}
+	 * = `'subscription'`): the SDK subprocess then uses the user's own
+	 * Claude Code login instead of the Backboard-managed proxy.
+	 */
+	readonly proxyHandle: IClaudeProxyHandle | undefined;
+	/** Who pays for model usage. Persisted to the overlay on fresh sessions so resume restores it. */
+	readonly billing: SessionBillingMode;
 	readonly canUseTool: NonNullable<Options['canUseTool']>;
 	readonly isResume: boolean;
 	/**
@@ -321,6 +329,7 @@ export class ClaudeAgentSession extends Disposable {
 					customizationDirectory: this.workingDirectory,
 					model: this._provisionalModel,
 					permissionMode,
+					billing: ctx.billing,
 				});
 			} catch (err) {
 				this._logService.error(`[Claude] Failed to persist customization directory; aborting materialize`, err);

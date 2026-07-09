@@ -22,10 +22,7 @@
     "onStartupFinished",
     "onCommand:backboard.extension.signIn",
     "onCommand:backboard.setApiKey",
-    "onCommand:backboard.copyOAuthRedirectUri",
-    "onCommand:backboard.completeOAuthCallback",
-    "onCommand:backboard.refreshModels",
-    "onUri"
+    "onCommand:backboard.refreshModels"
   ],
   "extensionKind": [
     "workspace",
@@ -45,14 +42,6 @@
       {
         "command": "backboard.extension.signIn",
         "title": "Backboard: Sign In"
-      },
-      {
-        "command": "backboard.copyOAuthRedirectUri",
-        "title": "Backboard: Copy OAuth Redirect URI"
-      },
-      {
-        "command": "backboard.completeOAuthCallback",
-        "title": "Backboard: Complete OAuth Callback"
       },
       {
         "command": "backboard.refreshModels",
@@ -101,11 +90,6 @@
             "type": "string",
             "default": "",
             "description": "Custom Backboard API base URL. Overrides the environment when set."
-          },
-          "backboard.oauthRedirectUri": {
-            "type": "string",
-            "default": "",
-            "description": "OAuth redirect URI for Backboard sign in. Leave empty to use http://127.0.0.1:49321/auth/callback, which the IDE listens on during sign in. Register this exact URI in the Backboard OAuth app."
           },
           "backboard.defaultProvider": {
             "type": "string",

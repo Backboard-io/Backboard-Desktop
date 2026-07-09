@@ -259,7 +259,14 @@ class WebContentsViewRendererFeature extends BrowserEditorContribution {
 			return;
 		}
 		const overlays = this._overlayManager.getOverlappingOverlays(this._container);
-		const obscured = overlays.length > 0;
+		// The WebContentsView paints above all workbench DOM, so any DOM overlay
+		// (menus, dropdowns, quick input, dialogs, notifications) overlapping the
+		// browser must hide the live page and fall back to the placeholder
+		// screenshot, or the overlay renders underneath the browser. Hovers are
+		// exempt: they are frequent and short-lived, and swapping the page out for
+		// every tooltip that clips the browser edge causes constant flicker.
+		const blockingOverlays = overlays.filter(o => o.type !== BrowserOverlayType.Hover);
+		const obscured = blockingOverlays.length > 0;
 		const hasNotification = overlays.some(o => o.type === BrowserOverlayType.Notification);
 		this._overlayPauseEl.classList.toggle('show-message', hasNotification);
 		if (obscured !== this._overlayObscured) {
@@ -278,7 +285,12 @@ class WebContentsViewRendererFeature extends BrowserEditorContribution {
 		}
 		try {
 			const screenshot = await this._model.captureScreenshot({ quality: 80 });
-			this._setBackgroundImage(screenshot);
+			// The capture can yield an empty image (e.g. the page hasn't painted
+			// yet or was hidden mid-capture); keep the previous screenshot rather
+			// than replacing it with a blank background.
+			if (screenshot.byteLength > 0) {
+				this._setBackgroundImage(screenshot);
+			}
 		} catch (error) {
 			this.logService.error('Failed to capture browser view screenshot', error);
 		}

@@ -166,7 +166,17 @@ export class SessionTypePicker extends Disposable {
 		if (!pick || !this._allowedSessionTypeIds) {
 			return pick;
 		}
-		return this._allowedSessionTypeIds.includes(pick.sessionTypeId) ? pick : undefined;
+		if (this._allowedSessionTypeIds.includes(pick.sessionTypeId)) {
+			return pick;
+		}
+		// The allowlist may be expressed in chat-session ids (e.g.
+		// `agent-host-claude`) while the stored pick carries the
+		// provider-scoped session type id (e.g. bare `claude`) — map the pick
+		// through the advertised type's `chatSessionType` before rejecting it.
+		const match = this._folderSessionTypes.find(t => t.sessionType.id === pick.sessionTypeId);
+		return match?.sessionType.chatSessionType && this._allowedSessionTypeIds.includes(match.sessionType.chatSessionType)
+			? pick
+			: undefined;
 	}
 
 	/**
@@ -179,6 +189,47 @@ export class SessionTypePicker extends Disposable {
 	getPreferredSessionType(folderUri: URI): IPreferredSessionType | undefined {
 		const first = this._filterAllowedSessionTypes(this.sessionsManagementService.getSessionTypesForFolder(folderUri))[0];
 		return first ? { providerId: first.providerId, sessionTypeId: first.sessionType.id } : undefined;
+	}
+
+	/**
+	 * The chat-session type id (e.g. `agent-host-claude`) of the current
+	 * pick, resolved against the folder's advertised session types. The
+	 * composer's session-target chip speaks chat-session ids rather than the
+	 * provider-scoped session type ids (e.g. bare `claude`), so this maps the
+	 * pick through {@link ISessionType.chatSessionType} when present.
+	 */
+	getPickedChatSessionType(folderUri: URI | undefined): string | undefined {
+		const pick = this.getUserPickedSessionType() ?? (folderUri ? this.getPreferredSessionType(folderUri) : undefined);
+		if (!pick) {
+			return undefined;
+		}
+		const types = folderUri
+			? this._filterAllowedSessionTypes(this.sessionsManagementService.getSessionTypesForFolder(folderUri))
+			: this._folderSessionTypes;
+		const match = types.find(t => t.sessionType.id === pick.sessionTypeId)
+			?? this._folderSessionTypes.find(t => t.sessionType.id === pick.sessionTypeId);
+		return match?.sessionType.chatSessionType ?? pick.sessionTypeId;
+	}
+
+	/**
+	 * Programmatically pick a session type (e.g. from the composer's
+	 * session-target chip). Accepts either the provider-scoped session type
+	 * id or its chat-session id and routes through the same selection
+	 * handler as the picker UI so persistence, telemetry, and the
+	 * {@link onDidSelectSessionType} notification stay consistent. Ignored
+	 * when the id is not currently offered.
+	 */
+	selectSessionTypeById(sessionTypeId: string, folderUri?: URI): void {
+		const session = this._session.get();
+		const resolvedFolderUri = folderUri ?? session?.workspace.get()?.folders[0]?.root;
+		const types = resolvedFolderUri
+			? this._filterAllowedSessionTypes(this.sessionsManagementService.getSessionTypesForFolder(resolvedFolderUri))
+			: this._folderSessionTypes;
+		this._folderSessionTypes = types;
+		const match = types.find(t => t.sessionType.id === sessionTypeId || t.sessionType.chatSessionType === sessionTypeId);
+		if (match) {
+			this._handleSelectedSessionType({ providerId: match.providerId, sessionTypeId: match.sessionType.id });
+		}
 	}
 
 	render(container: HTMLElement, options?: { className?: string }): void {

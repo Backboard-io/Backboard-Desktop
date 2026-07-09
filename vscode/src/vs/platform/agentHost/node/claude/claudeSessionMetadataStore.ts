@@ -6,6 +6,7 @@
 import type { SDKSessionInfo } from '@anthropic-ai/claude-agent-sdk';
 import { URI } from '../../../../base/common/uri.js';
 import { ClaudePermissionMode, narrowClaudePermissionMode } from '../../common/claudeSessionConfigKeys.js';
+import { narrowSessionBillingMode, type SessionBillingMode } from '../../common/sessionConfigKeys.js';
 import { AgentProvider, AgentSession, IAgentSessionMetadata } from '../../common/agentService.js';
 import { ISessionDataService } from '../../common/sessionDataService.js';
 import type { AgentSelection, ModelSelection } from '../../common/state/protocol/state.js';
@@ -20,6 +21,7 @@ export interface IClaudeSessionOverlay {
 	readonly model?: ModelSelection;
 	readonly permissionMode?: ClaudePermissionMode;
 	readonly agent?: AgentSelection;
+	readonly billing?: SessionBillingMode;
 }
 
 /**
@@ -32,6 +34,7 @@ export interface IClaudeSessionOverlayUpdate {
 	readonly model?: ModelSelection;
 	readonly permissionMode?: ClaudePermissionMode;
 	readonly agent?: AgentSelection | null;
+	readonly billing?: SessionBillingMode;
 }
 
 /**
@@ -58,6 +61,7 @@ export class ClaudeSessionMetadataStore {
 	private static readonly KEY_MODEL = 'claude.model';
 	private static readonly KEY_PERMISSION_MODE = 'claude.permissionMode';
 	private static readonly KEY_AGENT = 'claude.agent';
+	private static readonly KEY_BILLING = 'claude.billing';
 
 	constructor(
 		private readonly _provider: AgentProvider,
@@ -90,6 +94,9 @@ export class ClaudeSessionMetadataStore {
 					fields.agent === null ? '' : JSON.stringify({ uri: fields.agent.uri }),
 				));
 			}
+			if (fields.billing) {
+				work.push(db.setMetadata(ClaudeSessionMetadataStore.KEY_BILLING, fields.billing));
+			}
 			await Promise.all(work);
 		} finally {
 			dbRef.dispose();
@@ -109,17 +116,19 @@ export class ClaudeSessionMetadataStore {
 			return {};
 		}
 		try {
-			const [customizationDirectoryRaw, modelRaw, permissionModeRaw, agentRaw] = await Promise.all([
+			const [customizationDirectoryRaw, modelRaw, permissionModeRaw, agentRaw, billingRaw] = await Promise.all([
 				ref.object.getMetadata(ClaudeSessionMetadataStore.KEY_CUSTOMIZATION_DIRECTORY),
 				ref.object.getMetadata(ClaudeSessionMetadataStore.KEY_MODEL),
 				ref.object.getMetadata(ClaudeSessionMetadataStore.KEY_PERMISSION_MODE),
 				ref.object.getMetadata(ClaudeSessionMetadataStore.KEY_AGENT),
+				ref.object.getMetadata(ClaudeSessionMetadataStore.KEY_BILLING),
 			]);
 			return {
 				customizationDirectory: customizationDirectoryRaw ? URI.parse(customizationDirectoryRaw) : undefined,
 				model: parseModelSelection(modelRaw),
 				permissionMode: narrowClaudePermissionMode(permissionModeRaw),
 				agent: parseAgentSelection(agentRaw),
+				billing: narrowSessionBillingMode(billingRaw),
 			};
 		} finally {
 			ref.dispose();

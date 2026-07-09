@@ -10,7 +10,11 @@ import { CancellationTokenSource } from '../../../../base/common/cancellation.js
 import { Codicon } from '../../../../base/common/codicons.js';
 import { Event } from '../../../../base/common/event.js';
 import { Disposable, DisposableStore, IDisposable, MutableDisposable } from '../../../../base/common/lifecycle.js';
+<<<<<<< ours
 import { autorun, derivedObservableWithCache, IObservable, observableValue } from '../../../../base/common/observable.js';
+=======
+import { autorun, derivedObservableWithCache, IObservable, observableSignalFromEvent, observableValue } from '../../../../base/common/observable.js';
+>>>>>>> theirs
 import { isWeb } from '../../../../base/common/platform.js';
 import { basename, isEqual } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
@@ -47,10 +51,222 @@ import { Menus } from '../../../browser/menus.js';
 
 // #region --- New Chat Widget ---
 
+/**
+ * Agent-host session types offered in the new-chat composer's session-target
+ * chip. Claude / Codex only surface when their gates are on (the
+ * `preferAgentHost` preference for Claude, `chat.agentHost.codexAgent.enabled`
+ * for Codex) — the picker intersects this allowlist with the session types the
+ * providers actually advertise.
+ */
+const NEW_CHAT_ALLOWED_SESSION_TYPES = [
+	AgentSessionProviders.AgentHostBackboard,
+	AgentSessionProviders.AgentHostClaude,
+	AgentSessionProviders.AgentHostCodex,
+];
+
 const NEW_CHAT_COMPOSER_LAYOUT_HEIGHT = 180;
 const NEW_CHAT_COMPOSER_INPUT_MAX_HEIGHT = 260;
 type FirstSendWorkspaceChoice = 'selectFolder' | 'createFolder' | undefined;
 
+<<<<<<< ours
+=======
+/**
+ * 8-bit octopus mascot shown above the composer. The sprite is drawn from
+ * character maps ('.' = transparent) so it is easy to tweak pixels or colors.
+ */
+const OCTOPUS_PALETTE: { [pixel: string]: string } = {
+	B: '#3b82f6',	// body
+	D: '#2257c4',	// dark shade (mouth, closed eyes)
+	L: '#8ab8ff',	// highlight
+	W: '#ffffff',	// eye
+	P: '#0f172a',	// pupil
+};
+
+const OCTOPUS_HEAD = [
+	'....BBBBBBBB....',
+	'..BBLLBBBBBBBB..',
+	'.BBLBBBBBBBBBBB.',
+	'.BBWWWBBBBWWWBB.',
+	'BBBWPWBBBBWPWBBB',
+	'BBBWWWBBBBWWWBBB',
+	'BBBBBBBDDBBBBBBB',
+	'BBBBBBBBBBBBBBBB',
+	'.BBBBBBBBBBBBBB.',
+];
+
+/** Row of {@link OCTOPUS_HEAD} where the eyes start; the blink overlay is anchored here. */
+const OCTOPUS_EYE_ROW = 3;
+
+/** Resting tentacle frame (rows continue below {@link OCTOPUS_HEAD}). */
+const OCTOPUS_TENTACLES_A = [
+	'.BB..BB..BB..BB.',
+	'.BB..BB..BB..BB.',
+	'BB..BB....BB..BB',
+	'BB..BB....BB..BB',
+];
+
+/** Wiggle tentacle frame, alternated with frame A during the idle animation. */
+const OCTOPUS_TENTACLES_B = [
+	'.BB..BB..BB..BB.',
+	'.BB..BB..BB..BB.',
+	'..BB..BBBB..BB..',
+	'..BB..BBBB..BB..',
+];
+
+/** Closed-eye overlay flashed briefly for the occasional blink. */
+const OCTOPUS_EYELIDS = [
+	'...BBB....BBB...',
+	'...DDD....DDD...',
+	'...BBB....BBB...',
+];
+
+/**
+ * Empty columns reserved on each side of the head, and empty rows above it,
+ * so the giant flip-off fist and its raised finger have room. The non-flip
+ * frames are drawn shifted by these offsets.
+ */
+const OCTOPUS_CANVAS_PAD = 4;
+const OCTOPUS_ROW_PAD = 7;
+
+/**
+ * Flip-off sequence, drawn on the full padded canvas: a giant comic fist
+ * (Gear-Third forced perspective — body-blue fill with a dark outline and
+ * knuckle seams so it pops in front of the body) punches toward the
+ * viewer, then the outlined middle finger extends from the second knuckle
+ * (up) and the fingertip waggles (waggle). While these frames show, the
+ * whole sprite scales up so the gesture lunges at the camera.
+ */
+const OCTOPUS_FIST_ROW = 13;
+const OCTOPUS_FIST = [
+	'.......PP.PP.PP.PP......',
+	'......PBBPBBPBBPBBP.....',
+	'......PBBBBBBBBBBBBP....',
+	'......PBBDBBDBBDBBBP....',
+	'......PBBDBBDBBDBBBP....',
+	'.......PBBBBBBBBBBP.....',
+	'........PPPPPPPPPP......',
+];
+
+/**
+ * Soccer keep-ups: the outlined ball bounces on the left while the left
+ * outer tentacle kicks (kick = ball low + leg swung up; up = ball high +
+ * all tentacles hanging). Both frames include the full tentacle set, so
+ * frame A is hidden while they show.
+ */
+const OCTOPUS_SOCCER_UP_ROW = 2;
+const OCTOPUS_SOCCER_UP = [
+	'.PPP....................',
+	'PWWWP...................',
+	'PWDWP...................',
+	'PWWWP...................',
+	'.PPP....................',
+	'........................',
+	'........................',
+	'........................',
+	'........................',
+	'........................',
+	'........................',
+	'........................',
+	'........................',
+	'........................',
+	'.....BB..BB..BB..BB.....',
+	'.....BB..BB..BB..BB.....',
+	'....BB..BB....BB..BB....',
+	'....BB..BB....BB..BB....',
+];
+
+const OCTOPUS_SOCCER_KICK_ROW = 8;
+const OCTOPUS_SOCCER_KICK = [
+	'.PPP....................',
+	'PWWWP...................',
+	'PWDWP...................',
+	'PWWWP...................',
+	'.PPP....................',
+	'..BB....................',
+	'...BB...................',
+	'....BB..................',
+	'.........BB..BB..BB.....',
+	'.........BB..BB..BB.....',
+	'........BB....BB..BB....',
+	'........BB....BB..BB....',
+];
+
+/**
+ * Weight lifting: a barbell (dark bar and plates) pressed from chin level
+ * (low) to overhead lockout (high, with the two side tentacles extended
+ * above the head). The hanging tentacles stay in frame A throughout.
+ */
+const OCTOPUS_LIFT_LOW_ROW = 11;
+const OCTOPUS_LIFT_LOW = [
+	'.DD..................DD.',
+	'.DDDDDDDDDDDDDDDDDDDDDD.',
+	'.DD..................DD.',
+];
+
+const OCTOPUS_LIFT_HIGH_ROW = 1;
+const OCTOPUS_LIFT_HIGH = [
+	'.DD..................DD.',
+	'.DDDDDDDDDDDDDDDDDDDDDD.',
+	'.DD..................DD.',
+	'......BB........BB......',
+	'......BB........BB......',
+	'......BB........BB......',
+];
+
+/** Pirate interlude: strap across the forehead, patch over the right eye. */
+const OCTOPUS_EYEPATCH_ROW = 9;
+const OCTOPUS_EYEPATCH = [
+	'.....PPPPPPPPPPPPPP.....',
+	'.............PPPPP......',
+	'.............PPPPP......',
+	'.............PPPPP......',
+];
+
+/** Sprite row where the extended-finger frames start (the fingertip). */
+const OCTOPUS_FINGER_ROW = 2;
+const OCTOPUS_FLIP_UP = [
+	'.........PPPP...........',
+	'.........PLLP...........',
+	'.........PBBP...........',
+	'.........PBBP...........',
+	'.........PBBP...........',
+	'.........PBBP...........',
+	'.........PBBP...........',
+	'.........PBBP...........',
+	'.........PBBP...........',
+	'.........PBBP...........',
+	'.........PBBP...........',
+	'.......PPPBBPPP.PP......',
+	'......PBBPBBPBBPBBP.....',
+	'......PBBBBBBBBBBBBP....',
+	'......PBBDBBDBBDBBBP....',
+	'......PBBDBBDBBDBBBP....',
+	'.......PBBBBBBBBBBP.....',
+	'........PPPPPPPPPP......',
+];
+
+const OCTOPUS_FLIP_WAGGLE = [
+	'........PPPP............',
+	'........PLLP............',
+	'.........PBBP...........',
+	'.........PBBP...........',
+	'.........PBBP...........',
+	'.........PBBP...........',
+	'.........PBBP...........',
+	'.........PBBP...........',
+	'.........PBBP...........',
+	'.........PBBP...........',
+	'.........PBBP...........',
+	'.......PPPBBPPP.PP......',
+	'......PBBPBBPBBPBBP.....',
+	'......PBBBBBBBBBBBBP....',
+	'......PBBDBBDBBDBBBP....',
+	'......PBBDBBDBBDBBBP....',
+	'.......PBBBBBBBBBBP.....',
+	'........PPPPPPPPPP......',
+];
+
+>>>>>>> theirs
 export class NewChatWidget extends Disposable {
 
 	private readonly _workspacePicker: WorkspacePicker;
@@ -62,11 +278,31 @@ export class NewChatWidget extends Disposable {
 	private _chatWidgetContent: HTMLElement | undefined;
 	private _composerStackElement: HTMLElement | undefined;
 	private _composerWorkspaceRowElement: HTMLElement | undefined;
+<<<<<<< ours
 	private _gitStatusElement: HTMLElement | undefined;
 	/** Bumped to re-resolve the git branch when the (non-observable) workspace picker selection changes or a repository finishes opening. */
 	private readonly _gitStatusTick = observableValue<number>('newChatGitStatusTick', 0);
 	/** Working directory we have already asked the git service to open, so we do not re-open repeatedly. */
 	private _openedGitRepositoryKey: string | undefined;
+=======
+	/** Set once the composer has seeded (or confirmed) a default workspace so it never re-seeds after an explicit clear. See {@link _ensureComposerHasWorkspace}. */
+	private _defaultWorkspaceHandled = false;
+	/**
+	 * The user's home directory, resolved only after the workspace picker's
+	 * recents have loaded so it can never win a race against a real recent
+	 * workspace. Last-resort seed for {@link _ensureComposerHasWorkspace}.
+	 */
+	private readonly _homeFolderFallback = observableValue<URI | undefined>(this, undefined);
+	private _middleTitle: HTMLElement | undefined;
+	private _middleTitlePrefix: HTMLElement | undefined;
+	private _middleTitleSuffix: HTMLElement | undefined;
+	/** Slot inside the middle heading that hosts the workspace picker trigger. */
+	private _middleTitlePickerSlot: HTMLElement | undefined;
+	/** The " with " connector between the workspace and agent picker slots. */
+	private _middleTitleConnector: HTMLElement | undefined;
+	/** Slot inside the middle heading that hosts the session-type (agent) picker trigger. */
+	private _middleTitleTypePickerSlot: HTMLElement | undefined;
+>>>>>>> theirs
 
 	/** Recreates the draft once a better/late-registering provider can serve the folder (see {@link _createNewSession}). */
 	private readonly _pendingPreferredUpgrade = new MutableDisposable<IDisposable>();
@@ -119,7 +355,7 @@ export class NewChatWidget extends Disposable {
 		});
 
 		this._sessionTypePicker = this._register(this.instantiationService.createInstance(SessionTypePicker, this._session));
-		this._sessionTypePicker.setAllowedSessionTypeIds([AgentSessionProviders.AgentHostBackboard]);
+		this._sessionTypePicker.setAllowedSessionTypeIds(NEW_CHAT_ALLOWED_SESSION_TYPES);
 
 		const scopedContextKeyService = this._register(contextKeyService.createScoped(document.createElement('div')));
 		const scopedInstantiationService = this._register(this.instantiationService.createChild(
@@ -184,9 +420,11 @@ export class NewChatWidget extends Disposable {
 
 	private _createSessionTypePickerDelegate(): ISessionTypePickerDelegate {
 		return {
-			getActiveSessionProvider: () => AgentSessionProviders.AgentHostBackboard,
-			setActiveSessionProvider: () => undefined,
-			getAllowedSessionProviders: () => [AgentSessionProviders.AgentHostBackboard],
+			getActiveSessionProvider: () =>
+				this._sessionTypePicker.getPickedChatSessionType(this._workspacePicker.selectedFolderUri)
+				?? AgentSessionProviders.AgentHostBackboard,
+			setActiveSessionProvider: provider => this._sessionTypePicker.selectSessionTypeById(provider, this._workspacePicker.selectedFolderUri),
+			getAllowedSessionProviders: () => NEW_CHAT_ALLOWED_SESSION_TYPES,
 		};
 	}
 
@@ -250,6 +488,113 @@ export class NewChatWidget extends Disposable {
 		chatWidgetContainer.classList.add('revealed');
 	}
 
+<<<<<<< ours
+=======
+	/**
+	 * The composer's model and Backboard-options controls bind to the active
+	 * session, and a session requires a workspace. When the composer opens with
+	 * no workspace restored or selected, those controls would otherwise render
+	 * hidden or stuck "loading". Seed the most recent available workspace so the
+	 * controls are functional immediately; the user can still switch workspaces
+	 * from the picker.
+	 *
+	 * A usable default can appear asynchronously — recent-session workspaces
+	 * resolve lazily, a serving provider can connect after construction, and VS
+	 * Code recent folders load after construction — so this runs in an autorun
+	 * that re-evaluates when any of those change. It seeds at most once, so it
+	 * never fights the user explicitly clearing the workspace afterwards.
+	 */
+	private _ensureComposerHasWorkspace(): void {
+		// Resolve the home-directory fallback only once the picker's recents
+		// have loaded, so a real recent workspace always wins the seed below.
+		this._workspacePicker.whenInitialRecentsLoaded
+			.then(() => this.pathService.userHome({ preferLocal: true }))
+			.then(home => {
+				this.logService.info(`[NewChatWidget][seed-debug] home resolved: ${home?.toString()} disposed=${this._store.isDisposed}`);
+				if (!this._store.isDisposed) {
+					this._homeFolderFallback.set(home, undefined);
+				}
+			}, err => { this.logService.info(`[NewChatWidget][seed-debug] home resolve failed: ${err}`); });
+
+		// Signals, not observableFromEvent(..., () => undefined): a constant
+		// mapped value is deduplicated by the equality comparator, so such an
+		// observable never fires again after the first read and the autorun
+		// would never re-evaluate.
+		const pickerChanged = observableSignalFromEvent(this, this._workspacePicker.onDidChangeSelection);
+		const sessionTypesChanged = observableSignalFromEvent(this, this.sessionsManagementService.onDidChangeSessionTypes);
+		this._register(autorun(reader => {
+			if (this._defaultWorkspaceHandled) {
+				return;
+			}
+			// Subscribe to everything that can make (or already has made) a
+			// workspace available so the autorun re-runs as they settle: the
+			// picker's recents, a serving provider connecting, the active draft,
+			// and the recent sessions' lazily-resolved workspaces.
+			pickerChanged.read(reader);
+			sessionTypesChanged.read(reader);
+			this._session.read(reader);
+			this.sessionsService.visibleSessions.read(reader);
+			const { recent, other } = this.sessionsService.getRecentlyOpenedSessions();
+			const sessions = [...recent, ...other];
+			for (const session of sessions) {
+				session.workspace.read(reader);
+			}
+
+			if (this._session.get() || this._workspacePicker.selectedFolderUri) {
+				// A session/selection was restored or created elsewhere; nothing
+				// to seed, and we must not seed later if it is cleared.
+				this.logService.info(`[NewChatWidget][seed-debug] handled: session=${!!this._session.get()} selected=${this._workspacePicker.selectedFolderUri?.toString()}`);
+				this._defaultWorkspaceHandled = true;
+				return;
+			}
+
+			// Prefer the folder of the most recent servable session (continue
+			// where the user last worked, already trusted), then fall back to
+			// the picker's recent workspaces.
+			const candidate = this._recentSessionFolder(sessions) ?? this._workspacePicker.getDefaultWorkspaceCandidate();
+			if (candidate) {
+				this._defaultWorkspaceHandled = true;
+				this._workspacePicker.setSelectedWorkspace(candidate);
+				return;
+			}
+
+			// Fresh profile with no recent sessions or folders anywhere: seed
+			// the user's home directory so the composer's model and
+			// Backboard-options controls still render. The draft is created
+			// without the upfront trust prompt (nothing was user-initiated
+			// yet); {@link _sendFromSharedComposer} requests trust before the
+			// first send instead.
+			const home = this._homeFolderFallback.read(reader);
+			this.logService.info(`[NewChatWidget][seed-debug] autorun: sessions=${sessions.length} candidate=none home=${home?.toString()} homeTypes=${home ? this.sessionsManagementService.getSessionTypesForFolder(home).length : -1}`);
+			if (home && this.sessionsManagementService.getSessionTypesForFolder(home).length > 0) {
+				this._defaultWorkspaceHandled = true;
+				this._workspacePicker.setSelectedWorkspace(home, { fireEvent: false });
+				// Defer draft creation out of the autorun: creating a session
+				// activates it, and observables must not change mid-read.
+				queueMicrotask(() => {
+					if (!this._store.isDisposed && !this._session.get()) {
+						this._createNewSession(home);
+					}
+				});
+			}
+		}));
+	}
+
+	/**
+	 * The workspace folder of the most recently opened session that can still
+	 * be served by a registered provider, or `undefined` when there is none.
+	 */
+	private _recentSessionFolder(sessions: readonly ISession[]): URI | undefined {
+		for (const session of sessions) {
+			const root = session.workspace.get()?.folders[0]?.root;
+			if (root && this.sessionsManagementService.getSessionTypesForFolder(root).length > 0) {
+				return root;
+			}
+		}
+		return undefined;
+	}
+
+>>>>>>> theirs
 	private _makeComposerEasyToFocus(): void {
 		const inputContainer = this._widget.inputPart.inputContainerElement;
 		if (!inputContainer) {
@@ -305,6 +650,7 @@ export class NewChatWidget extends Disposable {
 				this._ensureGitRepositoryOpened(folder);
 			}
 		}));
+<<<<<<< ours
 		// selectedResolved is not observable, so a picker selection needs an
 		// explicit re-run of the autorun above.
 		store.add(this._workspacePicker.onDidSelectWorkspace(() => this._gitStatusTick.set(this._gitStatusTick.get() + 1, undefined)));
@@ -324,6 +670,79 @@ export class NewChatWidget extends Disposable {
 			}
 		}
 		return undefined;
+=======
+		const middle = dom.append(container, dom.$('.new-chat-middle-section'));
+
+		// The heading embeds the workspace picker trigger mid-sentence: "What
+		// should we build in [workspace ▾]?". The prefix/suffix spans carry the
+		// localized sentence around the picker slot; the picker itself renders
+		// and maintains the workspace name.
+		this._middleTitle = dom.append(middle, dom.$('h2.new-chat-middle-title'));
+		this._middleTitlePrefix = dom.append(this._middleTitle, dom.$('span.new-chat-middle-title-text'));
+		this._middleTitlePickerSlot = dom.append(this._middleTitle, dom.$('span.new-chat-middle-title-picker'));
+		this._middleTitleConnector = dom.append(this._middleTitle, dom.$('span.new-chat-middle-title-text.session-workspace-picker-with-label'));
+		this._middleTitleTypePickerSlot = dom.append(this._middleTitle, dom.$('span.new-chat-middle-title-picker.sessions-chat-session-type-picker'));
+		this._middleTitleSuffix = dom.append(this._middleTitle, dom.$('span.new-chat-middle-title-text'));
+		this._updateMiddleTitle();
+		this._renderPixelOctopus(this._middleTitle);
+	}
+
+	/**
+	 * Renders the 8-bit octopus mascot just left of the heading text
+	 * (absolutely positioned, so it takes no layout row). Pixel rows are
+	 * merged into horizontal run rects to keep the node count low and
+	 * avoid hairline seams when the sprite scales.
+	 */
+	private _renderPixelOctopus(container: HTMLElement): void {
+		const host = dom.append(container, dom.$('.new-chat-octopus'));
+		host.setAttribute('aria-hidden', 'true');
+		const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+		svg.classList.add('octo-sprite');
+		const columns = OCTOPUS_HEAD[0].length + 2 * OCTOPUS_CANVAS_PAD;
+		const rows = OCTOPUS_ROW_PAD + OCTOPUS_HEAD.length + OCTOPUS_TENTACLES_A.length;
+		svg.setAttribute('viewBox', `0 0 ${columns} ${rows}`);
+		svg.setAttribute('width', String(columns * 6));
+		svg.setAttribute('height', String(rows * 6));
+		const appendFrame = (className: string, frame: readonly string[], rowOffset: number, columnOffset: number) => {
+			const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+			group.classList.add(className);
+			for (let y = 0; y < frame.length; y++) {
+				const row = frame[y];
+				for (let x = 0; x < row.length; x++) {
+					const color = OCTOPUS_PALETTE[row[x]];
+					if (!color) {
+						continue;
+					}
+					let runEnd = x;
+					while (runEnd + 1 < row.length && row[runEnd + 1] === row[x]) {
+						runEnd++;
+					}
+					const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+					rect.setAttribute('x', String(x + columnOffset));
+					rect.setAttribute('y', String(y + rowOffset));
+					rect.setAttribute('width', String(runEnd - x + 1));
+					rect.setAttribute('height', '1');
+					rect.setAttribute('fill', color);
+					group.appendChild(rect);
+					x = runEnd;
+				}
+			}
+			svg.appendChild(group);
+		};
+		appendFrame('octo-head', OCTOPUS_HEAD, OCTOPUS_ROW_PAD, OCTOPUS_CANVAS_PAD);
+		appendFrame('octo-frame-a', OCTOPUS_TENTACLES_A, OCTOPUS_ROW_PAD + OCTOPUS_HEAD.length, OCTOPUS_CANVAS_PAD);
+		appendFrame('octo-frame-b', OCTOPUS_TENTACLES_B, OCTOPUS_ROW_PAD + OCTOPUS_HEAD.length, OCTOPUS_CANVAS_PAD);
+		appendFrame('octo-soccer-kick', OCTOPUS_SOCCER_KICK, OCTOPUS_SOCCER_KICK_ROW, 0);
+		appendFrame('octo-soccer-up', OCTOPUS_SOCCER_UP, OCTOPUS_SOCCER_UP_ROW, 0);
+		appendFrame('octo-lift-low', OCTOPUS_LIFT_LOW, OCTOPUS_LIFT_LOW_ROW, 0);
+		appendFrame('octo-lift-high', OCTOPUS_LIFT_HIGH, OCTOPUS_LIFT_HIGH_ROW, 0);
+		appendFrame('octo-eyepatch', OCTOPUS_EYEPATCH, OCTOPUS_EYEPATCH_ROW, 0);
+		appendFrame('octo-fist', OCTOPUS_FIST, OCTOPUS_FIST_ROW, 0);
+		appendFrame('octo-flip-up', OCTOPUS_FLIP_UP, OCTOPUS_FINGER_ROW, 0);
+		appendFrame('octo-flip-waggle', OCTOPUS_FLIP_WAGGLE, OCTOPUS_FINGER_ROW, 0);
+		appendFrame('octo-eyelids', OCTOPUS_EYELIDS, OCTOPUS_ROW_PAD + OCTOPUS_EYE_ROW, OCTOPUS_CANVAS_PAD);
+		host.appendChild(svg);
+>>>>>>> theirs
 	}
 
 	/** Asks the git service to open the folder's repository once so its branch can be resolved; re-renders when it resolves. */
@@ -332,6 +751,7 @@ export class NewChatWidget extends Disposable {
 		if (!workingDirectory) {
 			return;
 		}
+<<<<<<< ours
 		const key = workingDirectory.toString();
 		if (this._openedGitRepositoryKey === key) {
 			return;
@@ -394,6 +814,38 @@ export class NewChatWidget extends Disposable {
 		const descriptionLineTwo = dom.append(description, dom.$('p'));
 		descriptionLineTwo.textContent = localize('newChatMiddleDescriptionTwo', "Pick a workspace, then describe the next step.");
 
+=======
+		// The sentence embeds two picker slots: "... in [workspace] with [agent]?".
+		// Split on the markers in order; translations must keep {0} before {1}.
+		const workspaceMarker = '\u0000';
+		const agentMarker = '\u0001';
+		const template = localize('newChatMiddleTitleInFolderWithAgent', "What should we build in {0} with {1}?", workspaceMarker, agentMarker);
+		const [prefix, rest] = template.split(workspaceMarker);
+		const [connector, suffix] = (rest ?? '').split(agentMarker);
+		this._middleTitlePrefix.textContent = prefix;
+		if (this._middleTitleConnector) {
+			this._middleTitleConnector.textContent = connector ?? '';
+		}
+		this._middleTitleSuffix.textContent = suffix ?? '';
+	}
+
+	/**
+	 * Mounts the workspace picker trigger inside the middle heading so the
+	 * heading itself is the workspace dropdown. The picker owns the trigger's
+	 * label, click/keyboard handling, and dropdown anchoring, so it keeps
+	 * working (and stays in sync with the selection) wherever it is mounted.
+	 * The session-type (agent) picker mounts the same way into its own slot,
+	 * completing the "... in [workspace] with [agent]?" sentence.
+	 */
+	private _mountTitleWorkspacePicker(): void {
+		if (this._middleTitlePickerSlot) {
+			this._workspacePicker.render(this._middleTitlePickerSlot);
+		}
+		if (this._middleTitleTypePickerSlot) {
+			dom.clearNode(this._middleTitleTypePickerSlot);
+			this._sessionTypePicker.render(this._middleTitleTypePickerSlot, { className: 'sessions-chat-session-type-picker' });
+		}
+>>>>>>> theirs
 	}
 
 	/**
@@ -657,6 +1109,15 @@ export class NewChatWidget extends Disposable {
 				}
 			}
 		}
+		// The seeded home-directory draft skips the trust prompt at creation
+		// time (see {@link _ensureComposerHasWorkspace}); request it here, at
+		// the first user-initiated action. No dialog is shown when the folder
+		// is already trusted (the common, explicitly-picked case).
+		if (!await this._ensureSessionWorkspaceTrust(session)) {
+			this._widget.setInput(query);
+			this._widget.focusInput();
+			return true;
+		}
 		const provider = this.sessionsProvidersService.getProvider(session.providerId);
 		if (input.currentLanguageModel) {
 			provider?.setModel(session.sessionId, input.currentLanguageModel);
@@ -912,6 +1373,23 @@ export class NewChatWidget extends Disposable {
 		this._workspacePicker.setSelectedWorkspace(folderUri, { fireEvent: false });
 		await this._onWorkspaceSelected(folderUri);
 		return !!this._session.get();
+	}
+
+	/**
+	 * Requests workspace trust for the session's folder when its workspace
+	 * requires it. Resolves `true` without any UI when the folder is already
+	 * trusted or trust is not required, so it is safe to gate every send.
+	 */
+	private async _ensureSessionWorkspaceTrust(session: IActiveSession): Promise<boolean> {
+		const folderUri = session.workspace.get()?.folders[0]?.root;
+		if (!folderUri) {
+			return true;
+		}
+		const resolved = this.sessionsManagementService.resolveWorkspace(folderUri);
+		if (!resolved?.workspace.requiresWorkspaceTrust) {
+			return true;
+		}
+		return this._requestFolderTrust(folderUri);
 	}
 
 	private async _requestFolderTrust(folderUri: URI): Promise<boolean> {

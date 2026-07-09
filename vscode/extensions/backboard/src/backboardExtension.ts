@@ -7,14 +7,13 @@ import * as vscode from 'vscode';
 import * as cp from 'child_process';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
-import * as http from 'http';
 import * as https from 'https';
 import * as os from 'os';
 import * as path from 'path';
 import * as readline from 'readline';
 import { codiconsStylesheetUri, fontBaseUri, iconBaseUri, panelHtml, webviewLocalResourceRoots } from './panel/panelHtml';
 import { initializeBackboardUpdates } from './updates';
-import type { BackboardAttachment, BackboardConfigJson, BackboardOAuthPending, BackboardOAuthSaveResult, BackboardOAuthTokens, BridgeEvent, BridgeModel, FileAttachment, FileChangePayload, ImageAttachment, ModelCacheEntry, PanelOptions, PanelPersistedState, PanelStateStore, PanelThreadFile, PendingRequest, ResponseSink, ToolCacheEntry, ToolResultRequest, VoiceAttachment } from './types';
+import type { BackboardAttachment, BackboardConfigJson, BackboardDeviceCodeResponse, BackboardOAuthSaveResult, BackboardOAuthTokens, BridgeEvent, BridgeModel, FileAttachment, FileChangePayload, ImageAttachment, ModelCacheEntry, PanelOptions, PanelPersistedState, PanelStateStore, PanelThreadFile, PendingRequest, ResponseSink, ToolCacheEntry, ToolResultRequest, VoiceAttachment } from './types';
 
 const BACKBOARD_DOCUMENT_INDEX_TIMEOUT_MS = 90_000;
 const BACKBOARD_DOCUMENT_POLL_INTERVAL_MS = 1_000;
@@ -23,13 +22,16 @@ const BACKBOARD_DOCUMENT_POLL_INTERVAL_MS = 1_000;
 type BackboardSettings = ReturnType<typeof readSettings>;
 const hiddenModelProviders = new Set(['featherless', 'elevenlabs', 'eleven-labs', 'speechmatics']);
 const panelStateStorageKeyPrefix = 'backboard.panel.state.';
-const backboardOAuthAuthorizeUrl = 'https://app.backboard.io/api/oauth/authorize';
+const backboardOAuthDeviceCodeUrl = 'https://app.backboard.io/api/oauth/device/code';
 const backboardOAuthTokenUrl = 'https://app.backboard.io/api/oauth/token';
-const backboardOAuthClientId = 'Backboard_oauth_BGmuDtqCPmPgmIqWZ2ORvdqpl8fdKFQY';
-const defaultBackboardOAuthRedirectUri = 'http://127.0.0.1:49321/auth/callback';
-const backboardOAuthScope = 'openid email profile';
+const backboardOAuthUserInfoUrl = 'https://app.backboard.io/api/oauth/userinfo';
+// First-party PUBLIC client (registered with is_public_client=True, no secret).
+// The device-code grant only accepts this exact id, so it is safe to ship baked in.
+const backboardOAuthClientId = 'Backboard_oauth_q_cli';
+const backboardOAuthScope = 'email profile';
+const backboardOAuthDeviceGrantType = 'urn:ietf:params:oauth:grant-type:device_code';
+const backboardOAuthTimeoutMs = 5 * 60 * 1000;
 let backboardToolOutput: vscode.OutputChannel | undefined;
-let pendingBackboardOAuth: BackboardOAuthPending | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
 	backboardToolOutput = vscode.window.createOutputChannel('Backboard Tools');
@@ -44,11 +46,6 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 	}));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.extension.signIn', () => promptBackboardSso(bridge)));
-	context.subscriptions.push(vscode.commands.registerCommand('backboard.copyOAuthRedirectUri', () => copyBackboardOAuthRedirectUri()));
-	context.subscriptions.push(vscode.commands.registerCommand('backboard.completeOAuthCallback', () => completeBackboardOAuthCallbackFromInput()));
-	context.subscriptions.push(vscode.window.registerUriHandler({
-		handleUri: uri => handleBackboardOAuthCallback(uri)
-	}));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.refreshModels', () => bridge.refreshModels()));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.openRightPanel', () => openBackboardView()));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.openPanel', () => openBackboardView()));
@@ -121,38 +118,18 @@ async function promptBackboardSso(bridge: BackboardBridge): Promise<boolean> {
 	return signInBackboard(bridge);
 }
 
+/**
+ * Signs in with the OAuth device authorization grant (RFC 8628), mirroring the
+ * Backboard CLI: request a device code, open the verification page in the
+ * browser, then poll the token endpoint until the user approves. No localhost
+ * redirect or callback server is involved.
+ */
 async function signInBackboard(bridge: BackboardBridge): Promise<boolean> {
-	const state = crypto.randomBytes(24).toString('base64url');
-	const nonce = crypto.randomBytes(24).toString('base64url');
-	const codeVerifier = crypto.randomBytes(32).toString('base64url');
-	const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
-	let callbackServer: vscode.Disposable | undefined;
-
 	try {
-		const redirectUri = await backboardOAuthCallbackUri();
-		backboardToolOutput?.appendLine(`[oauth] Redirect URI: ${redirectUri}`);
-		callbackServer = await startBackboardOAuthCallbackServer(redirectUri);
-		const codePromise = waitForBackboardOAuthCode(state);
-		const params = new URLSearchParams({
-			client_id: backboardOAuthClientId,
-			redirect_uri: redirectUri,
-			response_type: 'code',
-			scope: backboardOAuthScope,
-			state,
-			code_challenge: codeChallenge,
-			code_challenge_method: 'S256',
-			nonce
-		});
-		const authorizeUrl = `${backboardOAuthAuthorizeUrl}?${params}`;
-		backboardToolOutput?.appendLine(`[oauth] Opening Backboard authorize URL first: ${authorizeUrl}`);
-		backboardToolOutput?.appendLine(`[oauth] After Allow, Backboard redirects to the registered callback URI above.`);
-		await openBackboardOAuthAuthorizeUrl(authorizeUrl);
-
-		const code = await codePromise;
-		callbackServer?.dispose();
-		callbackServer = undefined;
-		backboardToolOutput?.appendLine('[oauth] Received Backboard authorization code; exchanging for tokens.');
-		const tokens = await exchangeBackboardOAuthCode(code, redirectUri, codeVerifier);
+		const device = await requestBackboardDeviceCode();
+		backboardToolOutput?.appendLine(`[oauth] Device login code ${device.user_code}; approve at ${device.verification_uri}`);
+		await openBackboardOAuthAuthorizeUrl(device.verification_uri_complete);
+		const tokens = await pollBackboardDeviceToken(device);
 		const saveResult = await saveBackboardOAuthTokens(tokens);
 		bridge.restart();
 		if (saveResult.apiKeySaved) {
@@ -164,8 +141,6 @@ async function signInBackboard(bridge: BackboardBridge): Promise<boolean> {
 		backboardToolOutput?.appendLine(`[oauth] sign in failed: ${error instanceof Error ? error.message : String(error)}`);
 		await vscode.window.showErrorMessage(`Backboard sign in failed: ${error instanceof Error ? error.message : String(error)}`);
 		return false;
-	} finally {
-		callbackServer?.dispose();
 	}
 }
 
@@ -184,255 +159,152 @@ function openBackboardOAuthAuthorizeUrl(authorizeUrl: string): Promise<void> {
 	return Promise.resolve(vscode.env.openExternal(vscode.Uri.parse(authorizeUrl))).then(() => undefined);
 }
 
-async function copyBackboardOAuthRedirectUri(): Promise<void> {
-	const redirectUri = defaultBackboardOAuthRedirectUri;
-	await vscode.env.clipboard.writeText(redirectUri);
-	backboardToolOutput?.appendLine(`[oauth] Copied redirect URI: ${redirectUri}`);
-	await vscode.window.showInformationMessage(`Copied Backboard OAuth redirect URI. Register this exact URI in Backboard: ${redirectUri}`);
+async function requestBackboardDeviceCode(): Promise<BackboardDeviceCodeResponse> {
+	const body = new URLSearchParams({
+		client_id: backboardOAuthClientId,
+		scope: backboardOAuthScope
+	});
+	const responseText = await postForm(backboardOAuthDeviceCodeUrl, body, 'Backboard device-code request');
+	const value: unknown = JSON.parse(responseText);
+	if (!isObjectRecord(value)) {
+		throw new Error('Backboard device-code response was not an object.');
+	}
+	const deviceCode = stringValueFromRecord(value.device_code);
+	const userCode = stringValueFromRecord(value.user_code);
+	const verificationUri = stringValueFromRecord(value.verification_uri);
+	const verificationUriComplete = stringValueFromRecord(value.verification_uri_complete);
+	const expiresIn = value.expires_in;
+	const interval = value.interval;
+	if (!deviceCode || !userCode || !verificationUri || !verificationUriComplete || typeof expiresIn !== 'number' || typeof interval !== 'number') {
+		throw new Error('Backboard device-code response was missing required fields.');
+	}
+	return {
+		device_code: deviceCode,
+		user_code: userCode,
+		verification_uri: verificationUri,
+		verification_uri_complete: verificationUriComplete,
+		expires_in: expiresIn,
+		interval
+	};
 }
 
-async function completeBackboardOAuthCallbackFromInput(): Promise<void> {
-	const value = await vscode.window.showInputBox({
-		title: 'Backboard OAuth Callback URL',
-		ignoreFocusOut: true,
-		prompt: 'Paste the full callback URL from the browser, including code and state.'
-	});
-	if (value === undefined) {
+/**
+ * Polls the token endpoint with the device-code grant until the user approves
+ * in the browser, following the standard `authorization_pending`/`slow_down`
+ * back-off semantics (RFC 8628, section 3.5).
+ */
+async function pollBackboardDeviceToken(device: BackboardDeviceCodeResponse): Promise<BackboardOAuthTokens> {
+	let intervalMs = Math.max(1, device.interval) * 1000;
+	const expiresAt = Date.now() + Math.min(backboardOAuthTimeoutMs, device.expires_in * 1000);
+
+	while (Date.now() < expiresAt) {
+		await new Promise<void>(resolve => setTimeout(resolve, intervalMs));
+		const body = new URLSearchParams({
+			grant_type: backboardOAuthDeviceGrantType,
+			device_code: device.device_code,
+			client_id: backboardOAuthClientId
+		});
+		const { statusCode, responseText } = await postFormRaw(backboardOAuthTokenUrl, body);
+		if (statusCode >= 200 && statusCode < 300) {
+			const tokens: unknown = JSON.parse(responseText);
+			if (!isObjectRecord(tokens)) {
+				throw new Error('Backboard token response was not an object.');
+			}
+			if (!stringValueFromRecord(tokens.access_token)) {
+				throw new Error('Backboard token response did not include an access token.');
+			}
+			return tokens;
+		}
+		const errorCode = parseBackboardOAuthErrorCode(responseText);
+		if (errorCode === 'authorization_pending') {
+			continue;
+		}
+		if (errorCode === 'slow_down') {
+			intervalMs += 5000;
+			continue;
+		}
+		if (errorCode === 'access_denied') {
+			throw new Error('Backboard device login was denied.');
+		}
+		if (errorCode === 'expired_token') {
+			throw new Error('Backboard device login code expired.');
+		}
+		throw new Error(`Backboard token request returned HTTP ${statusCode}: ${responseText}`);
+	}
+
+	throw new Error('Timed out waiting for Backboard device login.');
+}
+
+function parseBackboardOAuthErrorCode(responseText: string): string | undefined {
+	try {
+		const value: unknown = JSON.parse(responseText);
+		return isObjectRecord(value) ? stringValueFromRecord(value.error) : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Fetches the signed-in user's display name from the OAuth userinfo endpoint
+ * (`profile` scope) and caches it as `oauth.user_name` in the config file so
+ * the IDE welcome greeting can show it without a network round-trip. Failures
+ * are non-fatal — the greeting simply stays hidden.
+ */
+async function cacheBackboardUserName(accessToken: string | undefined): Promise<void> {
+	if (!accessToken) {
 		return;
 	}
 	try {
-		const uri = vscode.Uri.parse(value.trim());
-		if (!completeBackboardOAuthCallback(uri.query)) {
-			await vscode.window.showErrorMessage('Backboard sign in failed: no pending sign in or invalid callback URL.');
+		const payload: unknown = JSON.parse(await getJson(backboardOAuthUserInfoUrl, accessToken, 'Backboard userinfo request'));
+		if (!isObjectRecord(payload)) {
+			return;
 		}
+		const name = stringValueFromRecord(payload.name)
+			?? [stringValueFromRecord(payload.given_name), stringValueFromRecord(payload.family_name)].filter(Boolean).join(' ').trim();
+		if (!name) {
+			return;
+		}
+		const config = await readBackboardConfigJson();
+		const oauth = isObjectRecord(config.oauth) ? config.oauth : {};
+		await writeBackboardConfigJson({ ...config, oauth: { ...oauth, user_name: name } });
+		backboardToolOutput?.appendLine('[oauth] Cached signed-in user name for the welcome greeting.');
 	} catch (error) {
-		await vscode.window.showErrorMessage(`Backboard sign in failed: ${error instanceof Error ? error.message : String(error)}`);
+		backboardToolOutput?.appendLine(`[oauth] Failed to cache user name: ${error instanceof Error ? error.message : String(error)}`);
 	}
 }
 
-function waitForBackboardOAuthCode(state: string): Promise<string> {
-	pendingBackboardOAuth?.reject(new Error('A new Backboard sign in was started.'));
-	if (pendingBackboardOAuth) {
-		clearTimeout(pendingBackboardOAuth.timeout);
-	}
-
+function getJson(urlString: string, bearerToken: string, label: string): Promise<string> {
 	return new Promise<string>((resolve, reject) => {
-		const timeout = setTimeout(() => {
-			if (pendingBackboardOAuth?.state === state) {
-				pendingBackboardOAuth = undefined;
-			}
-			reject(new Error('Timed out waiting for Backboard sign in callback.'));
-		}, 5 * 60 * 1000);
-		pendingBackboardOAuth = { state, resolve, reject, timeout };
-	});
-}
-
-async function backboardOAuthCallbackUri(): Promise<string> {
-	const configured = vscode.workspace.getConfiguration('backboard').get<string>('oauthRedirectUri')?.trim();
-	if (configured) {
-		return configured;
-	}
-	return defaultBackboardOAuthRedirectUri;
-}
-
-function startBackboardOAuthCallbackServer(redirectUri: string): Promise<vscode.Disposable | undefined> {
-	const parsed = new URL(redirectUri);
-	if (parsed.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(parsed.hostname)) {
-		return Promise.resolve(undefined);
-	}
-	const port = Number(parsed.port);
-	if (!Number.isInteger(port) || port <= 0 || port > 65535) {
-		return Promise.reject(new Error(`Backboard OAuth redirect URI must include a valid localhost port: ${redirectUri}`));
-	}
-
-	return new Promise((resolve, reject) => {
-		const server = http.createServer((request, response) => {
-			const requestUrl = new URL(request.url ?? '/', redirectUri);
-			if (requestUrl.pathname !== parsed.pathname) {
-				response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-				response.end('Not Found');
-				return;
-			}
-
-				const handled = completeBackboardOAuthCallback(requestUrl.searchParams.toString());
-				response.writeHead(handled ? 200 : 400, { 'Content-Type': 'text/html; charset=utf-8' });
-				const title = handled ? 'Backboard sign in complete' : 'Backboard sign in could not be completed';
-				const message = handled ? 'Returning you to Backboard Studio. This tab may close automatically.' : 'Return to Backboard Studio and start sign in again.';
-				const accentColor = handled ? '#1677ff' : '#dc2626';
-				const iconPath = handled
-					? '<path d="M8.8 12.2 11 14.4 15.7 9.6" /><circle cx="12" cy="12" r="8.5" />'
-					: '<path d="M12 7.8v4.7" /><path d="M12 16.2h.01" /><circle cx="12" cy="12" r="8.5" />';
-				const closeScript = handled ? `<script>
-	window.setTimeout(() => {
-		window.close();
-	}, 1200);
-</script>` : '';
-				response.end(`<!doctype html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${title}</title>
-<style>
-:root {
-	color-scheme: light dark;
-	--bg: #f6f8fb;
-	--panel: #ffffff;
-	--text: #101828;
-	--muted: #5f6b7a;
-	--border: #d8dee8;
-	--accent: ${accentColor};
-}
-@media (prefers-color-scheme: dark) {
-	:root {
-		--bg: #0e1116;
-		--panel: #161b22;
-		--text: #f4f7fb;
-		--muted: #a7b0bd;
-		--border: #2b3440;
-	}
-}
-* { box-sizing: border-box; }
-body {
-	margin: 0;
-	min-height: 100vh;
-	display: grid;
-	place-items: center;
-	padding: 32px;
-	background: var(--bg);
-	color: var(--text);
-	font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-}
-main {
-	width: min(520px, 100%);
-	padding: 32px;
-	border: 1px solid var(--border);
-	border-radius: 8px;
-	background: var(--panel);
-	box-shadow: 0 16px 48px rgba(15, 23, 42, 0.12);
-}
-.mark {
-	width: 48px;
-	height: 48px;
-	display: grid;
-	place-items: center;
-	border-radius: 8px;
-	background: color-mix(in srgb, var(--accent) 12%, transparent);
-	color: var(--accent);
-}
-svg {
-	width: 28px;
-	height: 28px;
-	stroke: currentColor;
-	stroke-width: 2;
-	fill: none;
-	stroke-linecap: round;
-	stroke-linejoin: round;
-}
-h1 {
-	margin: 24px 0 10px;
-	font-size: 28px;
-	line-height: 1.2;
-	letter-spacing: 0;
-}
-p {
-	margin: 0;
-	color: var(--muted);
-	font-size: 16px;
-	line-height: 1.5;
-}
-</style>
-</head>
-<body>
-<main>
-<div class="mark" aria-hidden="true"><svg viewBox="0 0 24 24">${iconPath}</svg></div>
-<h1>${title}</h1>
-<p>${message}</p>
-</main>
-${closeScript}
-</body>
-</html>`);
-		});
-		server.once('error', error => reject(new Error(`Could not start Backboard OAuth callback server on ${redirectUri}: ${error.message}`)));
-		server.listen(port, parsed.hostname, () => {
-			backboardToolOutput?.appendLine(`[oauth] Listening for callback on ${redirectUri}`);
-			resolve({
-				dispose: () => {
-					server.close();
+		const request = https.request(new URL(urlString), {
+			method: 'GET',
+			headers: { 'Authorization': `Bearer ${bearerToken}` }
+		}, response => {
+			const chunks: Buffer[] = [];
+			response.on('data', chunk => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+			response.on('end', () => {
+				const responseText = Buffer.concat(chunks).toString('utf8');
+				if (!response.statusCode || response.statusCode < 200 || response.statusCode >= 300) {
+					reject(new Error(`${label} returned HTTP ${response.statusCode}: ${responseText}`));
+				} else {
+					resolve(responseText);
 				}
 			});
 		});
+		request.on('error', reject);
+		request.end();
 	});
 }
 
-function handleBackboardOAuthCallback(uri: vscode.Uri): void {
-	if (uri.path !== '/auth/callback') {
-		return;
+async function postForm(urlString: string, body: URLSearchParams, label: string): Promise<string> {
+	const { statusCode, responseText } = await postFormRaw(urlString, body);
+	if (statusCode < 200 || statusCode >= 300) {
+		throw new Error(`${label} returned HTTP ${statusCode}: ${responseText}`);
 	}
-
-	completeBackboardOAuthCallback(uri.query);
+	return responseText;
 }
 
-function completeBackboardOAuthCallback(queryString: string): boolean {
-	const pending = pendingBackboardOAuth;
-	if (!pending) {
-		backboardToolOutput?.appendLine('[oauth] Ignoring Backboard callback because no sign in is pending.');
-		return false;
-	}
-
-	const query = new URLSearchParams(queryString);
-	const state = query.get('state')?.trim();
-	if (state !== pending.state) {
-		pendingBackboardOAuth = undefined;
-		clearTimeout(pending.timeout);
-		pending.reject(new Error('OAuth state did not match.'));
-		return true;
-	}
-
-	const error = query.get('error')?.trim();
-	if (error) {
-		const description = query.get('error_description')?.trim();
-		pendingBackboardOAuth = undefined;
-		clearTimeout(pending.timeout);
-		pending.reject(new Error(description ? `${error}: ${description}` : error));
-		return true;
-	}
-
-	const code = query.get('code')?.trim();
-	if (!code) {
-		pendingBackboardOAuth = undefined;
-		clearTimeout(pending.timeout);
-		pending.reject(new Error('Missing Backboard authorization code.'));
-		return true;
-	}
-
-	pendingBackboardOAuth = undefined;
-	clearTimeout(pending.timeout);
-	pending.resolve(code);
-	return true;
-}
-
-async function exchangeBackboardOAuthCode(code: string, redirectUri: string, codeVerifier: string): Promise<BackboardOAuthTokens> {
-	const body = new URLSearchParams({
-		grant_type: 'authorization_code',
-		code,
-		redirect_uri: redirectUri,
-		client_id: backboardOAuthClientId,
-		code_verifier: codeVerifier
-	});
-	const responseText = await postForm(backboardOAuthTokenUrl, body, 'Backboard token request');
-	const tokens: unknown = JSON.parse(responseText);
-	if (!isObjectRecord(tokens)) {
-		throw new Error('Backboard token response was not an object.');
-	}
-	if (!stringValueFromRecord(tokens.access_token)) {
-		throw new Error('Backboard token response did not include an access token.');
-	}
-	return tokens;
-}
-
-function postForm(urlString: string, body: URLSearchParams, label: string): Promise<string> {
-	return new Promise<string>((resolve, reject) => {
+function postFormRaw(urlString: string, body: URLSearchParams): Promise<{ statusCode: number; responseText: string }> {
+	return new Promise((resolve, reject) => {
 		const requestUrl = new URL(urlString);
 		const requestBody = body.toString();
 		const request = https.request(requestUrl, {
@@ -445,13 +317,7 @@ function postForm(urlString: string, body: URLSearchParams, label: string): Prom
 			const chunks: Buffer[] = [];
 			response.on('data', chunk => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
 			response.on('end', () => {
-				const responseText = Buffer.concat(chunks).toString('utf8');
-				const statusCode = response.statusCode ?? 0;
-				if (statusCode < 200 || statusCode >= 300) {
-					reject(new Error(`${label} returned HTTP ${statusCode}: ${responseText}`));
-					return;
-				}
-				resolve(responseText);
+				resolve({ statusCode: response.statusCode ?? 0, responseText: Buffer.concat(chunks).toString('utf8') });
 			});
 		});
 		request.on('error', reject);

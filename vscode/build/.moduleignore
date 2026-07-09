@@ -215,7 +215,9 @@ zone.js/dist/**
 @xterm/xterm-addon-*/out-test/**
 
 # @github/copilot - strip unneeded binaries and files
-@github/copilot/sdk/index.js
+# NOTE: do NOT strip @github/copilot/sdk/index.js — dist/extension.js imports it
+# at runtime (the copilotcli chat-session provider). Stripping it breaks Copilot
+# chat sessions with "Cannot find module .../@github/copilot/sdk/index.js".
 @github/copilot/prebuilds/**
 @github/copilot/clipboard/**
 @github/copilot/ripgrep/**

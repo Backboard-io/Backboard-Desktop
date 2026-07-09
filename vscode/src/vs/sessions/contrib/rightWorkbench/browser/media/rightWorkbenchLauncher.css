@@ -862,8 +862,7 @@
 }
 
 .sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .browser-container::before,
-.sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .browser-container::after,
-.sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .browser-placeholder-screenshot {
+.sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .browser-container::after {
 	display: none !important;
 	background-image: none !important;
 }

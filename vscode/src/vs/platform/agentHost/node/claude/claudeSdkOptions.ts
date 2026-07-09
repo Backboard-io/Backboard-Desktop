@@ -75,18 +75,28 @@ export interface IBuildOptionsInput {
  * Used by both the initial materialize and the yield-restart rematerialize
  * — both call sites pass a freshly-built `mcpServers` snapshot consumed
  * from the session's {@link SessionClientToolsDiff}.
+ *
+ * `proxyHandle` is `undefined` for subscription-billed sessions
+ * ({@link SessionConfigKey.Billing} = `'subscription'`): no
+ * `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` is injected, so the SDK
+ * subprocess falls back to the user's own Claude Code login (credential
+ * store under `~/.claude`, macOS Keychain, or `CLAUDE_CODE_OAUTH_TOKEN`).
+ * `ANTHROPIC_API_KEY` stays stripped either way — subscription usage must
+ * flow through the CLI's own OAuth, never a raw API key.
  */
 export async function buildOptions(
 	input: IBuildOptionsInput,
-	proxyHandle: IClaudeProxyHandle,
+	proxyHandle: IClaudeProxyHandle | undefined,
 	logStderr: (data: string) => void,
 	logElicitation: (msg: string) => void,
 ): Promise<Options> {
 	const subprocessEnv = buildSubprocessEnv();
 	const resolvedRgDiskPath = await rgDiskPath();
 	const settingsEnv: Record<string, string> = {
-		ANTHROPIC_BASE_URL: proxyHandle.baseUrl,
-		ANTHROPIC_AUTH_TOKEN: `${proxyHandle.nonce}.${input.sessionId}`,
+		...(proxyHandle ? {
+			ANTHROPIC_BASE_URL: proxyHandle.baseUrl,
+			ANTHROPIC_AUTH_TOKEN: `${proxyHandle.nonce}.${input.sessionId}`,
+		} : {}),
 		CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
 		USE_BUILTIN_RIPGREP: '0',
 		PATH: `${dirname(resolvedRgDiskPath)}${delimiter}${process.env.PATH ?? ''}`,

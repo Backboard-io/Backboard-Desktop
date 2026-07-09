@@ -711,7 +711,10 @@ configurationRegistry.registerConfiguration({
 		[ClaudePreferAgentHostAgentsSettingId]: {
 			type: 'boolean',
 			description: nls.localize('chat.agents.claude.preferAgentHost', "When enabled, Claude sessions opened from Agents run inside the agent host process instead of an external chat extension. Only one Claude implementation surfaces per window."),
-			default: false,
+			// On by default so the agent-host Claude (and with it the
+			// "My Claude Subscription" billing option) is reachable from the
+			// Agents window without touching settings.
+			default: true,
 			tags: ['experimental'],
 			experiment: { mode: 'startup' },
 		},

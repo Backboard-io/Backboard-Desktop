@@ -194,6 +194,251 @@
 	min-height: 0;
 }
 
+/* --- 8-bit octopus mascot just left of the heading text --- */
+
+.new-chat-octopus {
+	position: absolute;
+	/* The canvas has 4 empty columns (8px) on its right that only fill
+	 * during the flip-off, keeping the visible idle gap to the text ~12px.
+	 * The mascot sits in the lower part of the canvas (the rows above are
+	 * headroom for the raised finger), so nudge up to center it on the
+	 * heading line. */
+	right: calc(100% + 4px);
+	top: calc(50% - 6px);
+	transform: translateY(-50%);
+	line-height: 0;
+	pointer-events: none;
+	z-index: 1;
+}
+
+.new-chat-octopus .octo-sprite {
+	/* 24x20 canvas at 2px per sprite pixel (the head is 16x9; the padding
+	 * columns and top rows host the giant flip-off fist and finger). */
+	width: 48px;
+	height: 40px;
+	shape-rendering: crispEdges;
+	image-rendering: pixelated;
+	/* Origin near the mascot's face so the punch lunge grows toward the
+	 * viewer and the open space, not into the heading text. */
+	transform-origin: 55% 60%;
+	animation: new-chat-octopus-bob 54s ease-in-out infinite;
+}
+
+.new-chat-octopus .octo-frame-b,
+.new-chat-octopus .octo-soccer-kick,
+.new-chat-octopus .octo-soccer-up,
+.new-chat-octopus .octo-lift-low,
+.new-chat-octopus .octo-lift-high,
+.new-chat-octopus .octo-eyepatch,
+.new-chat-octopus .octo-fist,
+.new-chat-octopus .octo-flip-up,
+.new-chat-octopus .octo-flip-waggle,
+.new-chat-octopus .octo-eyelids {
+	opacity: 0;
+}
+
+.new-chat-octopus .octo-frame-a {
+	animation: new-chat-octopus-frame-a 54s linear infinite;
+}
+
+.new-chat-octopus .octo-frame-b {
+	animation: new-chat-octopus-frame-b 54s linear infinite;
+}
+
+.new-chat-octopus .octo-soccer-kick {
+	animation: new-chat-octopus-soccer-kick 54s linear infinite;
+}
+
+.new-chat-octopus .octo-soccer-up {
+	animation: new-chat-octopus-soccer-up 54s linear infinite;
+}
+
+.new-chat-octopus .octo-lift-low {
+	animation: new-chat-octopus-lift-low 54s linear infinite;
+}
+
+.new-chat-octopus .octo-lift-high {
+	animation: new-chat-octopus-lift-high 54s linear infinite;
+}
+
+.new-chat-octopus .octo-eyepatch {
+	animation: new-chat-octopus-eyepatch 54s linear infinite;
+}
+
+.new-chat-octopus .octo-fist {
+	animation: new-chat-octopus-fist 54s linear infinite;
+}
+
+.new-chat-octopus .octo-flip-up {
+	animation: new-chat-octopus-flip-up 54s linear infinite;
+}
+
+.new-chat-octopus .octo-flip-waggle {
+	animation: new-chat-octopus-flip-waggle 54s linear infinite;
+}
+
+.new-chat-octopus .octo-eyelids {
+	animation: new-chat-octopus-blink 54s linear infinite;
+}
+
+/* One shared 54s idle timeline so the frames never overlap:
+ *  ~5%  blink            ~30% blink           ~58% blink   ~74% blink
+ *  10-12% tentacle wiggle    47-49% wiggle (in eyepatch)   62-64% wiggle
+ *  18-24% soccer keep-ups (ball high/low, kicking leg; frame A hidden)
+ *  34-39% barbell press (chin level -> overhead lockout, twice)
+ *  45-53% pirate eyepatch interlude
+ *  87-91% flip-off: giant fist punch, finger + two waggles, closing fist. */
+@keyframes new-chat-octopus-frame-a {
+	0%, 9.9% { opacity: 1; }
+	10%, 10.6% { opacity: 0; }
+	10.7%, 11.3% { opacity: 1; }
+	11.4%, 11.9% { opacity: 0; }
+	12%, 17.9% { opacity: 1; }
+	18%, 23.9% { opacity: 0; }
+	24%, 46.9% { opacity: 1; }
+	47%, 47.6% { opacity: 0; }
+	47.7%, 48.3% { opacity: 1; }
+	48.4%, 48.9% { opacity: 0; }
+	49%, 61.9% { opacity: 1; }
+	62%, 62.6% { opacity: 0; }
+	62.7%, 63.3% { opacity: 1; }
+	63.4%, 63.9% { opacity: 0; }
+	64%, 86.9% { opacity: 1; }
+	87%, 90.9% { opacity: 0; }
+	91%, 100% { opacity: 1; }
+}
+
+@keyframes new-chat-octopus-frame-b {
+	0%, 9.9% { opacity: 0; }
+	10%, 10.6% { opacity: 1; }
+	10.7%, 11.3% { opacity: 0; }
+	11.4%, 11.9% { opacity: 1; }
+	12%, 46.9% { opacity: 0; }
+	47%, 47.6% { opacity: 1; }
+	47.7%, 48.3% { opacity: 0; }
+	48.4%, 48.9% { opacity: 1; }
+	49%, 61.9% { opacity: 0; }
+	62%, 62.6% { opacity: 1; }
+	62.7%, 63.3% { opacity: 0; }
+	63.4%, 63.9% { opacity: 1; }
+	64%, 100% { opacity: 0; }
+}
+
+@keyframes new-chat-octopus-soccer-kick {
+	0%, 17.9% { opacity: 0; }
+	18%, 18.7% { opacity: 1; }
+	18.8%, 19.5% { opacity: 0; }
+	19.6%, 20.2% { opacity: 1; }
+	20.3%, 21% { opacity: 0; }
+	21.1%, 21.7% { opacity: 1; }
+	21.8%, 22.5% { opacity: 0; }
+	22.6%, 23.2% { opacity: 1; }
+	23.3%, 100% { opacity: 0; }
+}
+
+@keyframes new-chat-octopus-soccer-up {
+	0%, 18.7% { opacity: 0; }
+	18.8%, 19.5% { opacity: 1; }
+	19.6%, 20.2% { opacity: 0; }
+	20.3%, 21% { opacity: 1; }
+	21.1%, 21.7% { opacity: 0; }
+	21.8%, 22.5% { opacity: 1; }
+	22.6%, 23.2% { opacity: 0; }
+	23.3%, 23.9% { opacity: 1; }
+	24%, 100% { opacity: 0; }
+}
+
+@keyframes new-chat-octopus-lift-low {
+	0%, 33.9% { opacity: 0; }
+	34%, 35.2% { opacity: 1; }
+	35.3%, 36.4% { opacity: 0; }
+	36.5%, 37.6% { opacity: 1; }
+	37.7%, 100% { opacity: 0; }
+}
+
+@keyframes new-chat-octopus-lift-high {
+	0%, 35.2% { opacity: 0; }
+	35.3%, 36.4% { opacity: 1; }
+	36.5%, 37.6% { opacity: 0; }
+	37.7%, 39% { opacity: 1; }
+	39.1%, 100% { opacity: 0; }
+}
+
+@keyframes new-chat-octopus-eyepatch {
+	0%, 44.9% { opacity: 0; }
+	45%, 52.9% { opacity: 1; }
+	53%, 100% { opacity: 0; }
+}
+
+@keyframes new-chat-octopus-fist {
+	0%, 86.9% { opacity: 0; }
+	87%, 88.1% { opacity: 1; }
+	88.2%, 90.1% { opacity: 0; }
+	90.2%, 90.9% { opacity: 1; }
+	91%, 100% { opacity: 0; }
+}
+
+@keyframes new-chat-octopus-flip-up {
+	0%, 88.1% { opacity: 0; }
+	88.2%, 88.7% { opacity: 1; }
+	88.8%, 89.1% { opacity: 0; }
+	89.2%, 89.7% { opacity: 1; }
+	89.8%, 100% { opacity: 0; }
+}
+
+@keyframes new-chat-octopus-flip-waggle {
+	0%, 88.7% { opacity: 0; }
+	88.8%, 89.1% { opacity: 1; }
+	89.2%, 89.7% { opacity: 0; }
+	89.8%, 90.1% { opacity: 1; }
+	90.2%, 100% { opacity: 0; }
+}
+
+/* Motion track: hops on the wiggles, rhythmic bounces for the keep-ups, a
+ * squat-and-press for the barbell, and the 2x punch lunge for the flip. */
+@keyframes new-chat-octopus-bob {
+	0%, 9.5%, 12.5%, 17.5%, 24.5%, 33.5%, 39.5%, 46.5%, 49.5%, 61.5%, 64.5%, 86.5%, 91.5%, 100% { transform: translateY(0) rotate(0deg) scale(1); }
+	10.5% { transform: translateY(-2px) rotate(0deg) scale(1); }
+	11.5% { transform: translateY(-1px) rotate(0deg) scale(1); }
+	18.4% { transform: translateY(-2px) rotate(0deg) scale(1); }
+	19.1% { transform: translateY(0) rotate(0deg) scale(1); }
+	19.9% { transform: translateY(-2px) rotate(0deg) scale(1); }
+	20.6% { transform: translateY(0) rotate(0deg) scale(1); }
+	21.4% { transform: translateY(-2px) rotate(0deg) scale(1); }
+	22.1% { transform: translateY(0) rotate(0deg) scale(1); }
+	22.9% { transform: translateY(-2px) rotate(0deg) scale(1); }
+	34.6% { transform: translateY(1px) rotate(0deg) scale(1); }
+	35.8% { transform: translateY(-2px) rotate(0deg) scale(1); }
+	36.9% { transform: translateY(1px) rotate(0deg) scale(1); }
+	38.2% { transform: translateY(-2px) rotate(0deg) scale(1); }
+	47.5% { transform: translateY(-2px) rotate(0deg) scale(1); }
+	48.5% { transform: translateY(-1px) rotate(0deg) scale(1); }
+	62.5% { transform: translateY(-2px) rotate(0deg) scale(1); }
+	63.5% { transform: translateY(-1px) rotate(0deg) scale(1); }
+	87.4% { transform: translateY(-2px) rotate(-8deg) scale(2.3); }
+	88%, 90.2% { transform: translateY(-2px) rotate(-4deg) scale(2); }
+}
+
+/* Quick blinks sprinkled through the idle cycle. */
+@keyframes new-chat-octopus-blink {
+	0%, 4.9% { opacity: 0; }
+	5%, 5.25% { opacity: 1; }
+	5.35%, 29.9% { opacity: 0; }
+	30%, 30.25% { opacity: 1; }
+	30.35%, 57.9% { opacity: 0; }
+	58%, 58.25% { opacity: 1; }
+	58.35%, 73.9% { opacity: 0; }
+	74%, 74.25% { opacity: 1; }
+	74.35%, 100% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.new-chat-octopus .octo-sprite,
+	.new-chat-octopus .octo-sprite g {
+		animation: none;
+	}
+}
+
 .new-chat-composer-workspace-row {
 	/* A separate panel that slides out from behind the bottom of the input card.
 	 * newChatWidget moves this row just below the input (above the category
@@ -692,9 +937,10 @@
 	pointer-events: none;
 }
 
-.new-chat-composer-stack > .interactive-session .chat-session-target-picker-item {
-	display: none !important;
-}
+/* The session-target chip (Backboard / Claude / Codex) is intentionally
+   visible in the new-chat composer: it is how users pick the agent that a
+   new session runs on (and, for Claude/Codex, reach the subscription
+   billing toggle). */
 
 .new-chat-widget-container .chat-mode-picker-item,
 .new-chat-composer-stack > .interactive-session .chat-mode-picker-item {
