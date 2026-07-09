@@ -382,18 +382,75 @@
 	position: relative;
 }
 
-/* Cards preview the conversation only: drop thinking, tool calls, progress,
-   references and confirmations from answers. The right panel renders
-   everything. Deny-list (not allow-list) so unknown part types — including
-   the markdown answer in whatever wrapper it uses — always stay visible. */
-.optimus-card-chat .interactive-response .value > .chat-thinking-box,
+/* Cards preview the conversation plus streamed thinking (kept for the live
+   "everything is streaming" feel); standalone tool calls, progress, references
+   and confirmations stay hidden. The right panel renders everything. Deny-list
+   (not allow-list) so unknown part types — including the markdown answer in
+   whatever wrapper it uses — always stay visible. The thinking box's root node
+   is `.chat-used-context.chat-thinking-box` (ChatCollapsibleContentPart), so it
+   must be exempted from the used-context rule. */
 .optimus-card-chat .interactive-response .value > .chat-tool-invocation-part,
-.optimus-card-chat .interactive-response .value > .chat-used-context,
+.optimus-card-chat .interactive-response .value > .chat-used-context:not(.chat-thinking-box),
 .optimus-card-chat .interactive-response .value > .chat-used-context-list,
 .optimus-card-chat .interactive-response .value > .progress-step,
 .optimus-card-chat .interactive-response .value > .shimmer-progress,
 .optimus-card-chat .interactive-response .value > .chat-confirmation-widget-container {
 	display: none !important;
+}
+
+/* Collapsible-part plumbing the thinking box needs inside cards. These mirror
+   the `.interactive-session`-scoped rules in chat.css (cards intentionally do
+   not carry that container class — it breaks the card list layout). */
+.optimus-card-chat .chat-used-context.chat-used-context-collapsed .chat-used-context-list {
+	display: none;
+}
+
+.optimus-card-chat .chat-used-context {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	line-height: 1.5em;
+}
+
+.optimus-card-chat .chat-used-context-label {
+	font-size: 13px;
+	font-family: var(--vscode-chat-font-family, inherit);
+	color: var(--vscode-descriptionForeground);
+	user-select: none;
+}
+
+.optimus-card-chat .chat-used-context-label .monaco-button {
+	display: inline-flex;
+	width: fit-content;
+	border: none;
+	border-radius: 4px;
+	gap: 0;
+	text-align: initial;
+	justify-content: initial;
+	padding: 2px 6px 2px 2px;
+	margin-left: -2px;
+	font-size: var(--vscode-chat-font-size-body-s);
+	line-height: unset;
+}
+
+.optimus-card-chat .chat-used-context:not(.chat-used-context-collapsed) .chat-used-context-label .monaco-button,
+.optimus-card-chat .chat-used-context-label .monaco-button:hover {
+	color: var(--vscode-foreground);
+}
+
+.optimus-card-chat .chat-used-context-label .monaco-button .codicon {
+	font-size: 12px;
+	color: var(--vscode-icon-foreground) !important;
+}
+
+/* Hide the leading icon on collapsible parts, as chat.css does by default */
+.optimus-card-chat .chat-used-context-label .monaco-icon-button > .codicon:first-child:not(.chat-collapsible-hover-chevron):not(.codicon-error):not(.codicon-warning) {
+	display: none;
+}
+
+.optimus-card-chat .chat-thinking-box .chat-used-context-list {
+	border: none;
+	margin-bottom: 0;
 }
 
 .optimus-card-footer-left {
