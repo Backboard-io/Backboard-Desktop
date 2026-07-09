@@ -31,6 +31,7 @@ import { IBackboardWorkspaceService } from '../backboardWorkspace/backboardWorks
 
 const CLOSE_ACTIVE_EDITOR_COMMAND_ID = 'workbench.action.closeActiveEditor';
 const AGENT_SESSIONS_WELCOME_PAGE_ID = 'agentSessionsWelcomePage';
+const OPEN_OPTIMUS_WINDOW_COMMAND_ID = 'workbench.action.openOptimusWindow';
 
 export class BackboardModeSwitcherAction extends Action2 {
 	constructor() {
@@ -170,16 +171,22 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 			getAnchor: () => this.triggerButton!,
 			getActions: () => [
 				toAction({
+					id: 'workbench.action.mode.agents',
+					label: localize('backboardModeSwitcher.agents', "Simple"),
+					checked: agentsActive,
+					run: () => this.openAgents(),
+				}),
+				toAction({
 					id: 'workbench.action.mode.editor',
 					label: localize('backboardModeSwitcher.editor', "Editor"),
 					checked: !agentsActive,
 					run: () => this.openEditor(),
 				}),
 				toAction({
-					id: 'workbench.action.mode.agents',
-					label: localize('backboardModeSwitcher.agents', "Simple"),
-					checked: agentsActive,
-					run: () => this.openAgents(),
+					id: 'workbench.action.mode.advanced',
+					label: localize('backboardModeSwitcher.advanced', "Advanced"),
+					checked: false,
+					run: () => this.openAdvanced(),
 				}),
 			],
 			onHide: () => this.triggerButton?.setAttribute('aria-expanded', 'false'),
@@ -224,6 +231,18 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 		if (!this.isPanelClosedByUser(Parts.PANEL_PART) && this.layoutService.isVisible(Parts.PANEL_PART)) {
 			void this.paneCompositeService.openPaneComposite(TERMINAL_VIEW_ID, ViewContainerLocation.Panel, false);
 		}
+	}
+
+	private openAdvanced(): void {
+		if (this.isWorkspaceActive()) {
+			this.workspaceService.hide();
+		}
+
+		if (this.isAgentsActive()) {
+			void this.commandService.executeCommand(CLOSE_ACTIVE_EDITOR_COMMAND_ID);
+		}
+
+		void this.commandService.executeCommand(OPEN_OPTIMUS_WINDOW_COMMAND_ID);
 	}
 
 	private isAgentsActive(): boolean {

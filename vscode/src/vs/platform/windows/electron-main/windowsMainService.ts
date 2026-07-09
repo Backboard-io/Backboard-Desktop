@@ -344,6 +344,16 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 	async openOptimusWindow(openConfig: IOpenConfiguration): Promise<ICodeWindow[]> {
 		this.logService.trace('windowsManager#openOptimusWindow');
 
+		// One Optimus window per app: switching modes back to Advanced must
+		// focus the existing window, not transform the caller's window into a
+		// second one — two Optimus windows contend for the same agent host
+		// and duplicate the grid state.
+		const existingOptimusWindow = this.getWindows().find(window => window.config?.isOptimusWindow);
+		if (existingOptimusWindow && !openConfig.initialStartup) {
+			existingOptimusWindow.focus();
+			return [existingOptimusWindow];
+		}
+
 		const targetWindow = typeof openConfig.contextWindowId === 'number'
 			? this.getWindowById(openConfig.contextWindowId)
 			: this.getFocusedWindow() ?? this.getLastActiveWindow();

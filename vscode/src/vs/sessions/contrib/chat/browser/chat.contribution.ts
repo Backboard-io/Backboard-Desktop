@@ -7,6 +7,7 @@ import { KeyCode, KeyMod } from '../../../../base/common/keyCodes.js';
 import { ServicesAccessor } from '../../../../editor/browser/editorExtensions.js';
 import { localize, localize2 } from '../../../../nls.js';
 import { Action2, registerAction2 } from '../../../../platform/actions/common/actions.js';
+import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { ConfigurationScope, Extensions as ConfigurationExtensions, IConfigurationRegistry } from '../../../../platform/configuration/common/configurationRegistry.js';
 import { registerWorkbenchContribution2, WorkbenchPhase } from '../../../../workbench/common/contributions.js';
 import { ISessionsService } from '../../../services/sessions/browser/sessionsService.js';
@@ -38,8 +39,10 @@ import { AGENT_SESSIONS_SCOPED_INPUT_HISTORY_SETTING } from './sessionsChatHisto
 import '../../sessions/browser/mobile/mobileOverlayContribution.js';
 import { Registry } from '../../../../platform/registry/common/platform.js';
 import { EditorAreaFocusContext } from '../../../../workbench/common/contextkeys.js';
+import { IWorkbenchEnvironmentService } from '../../../../workbench/services/environment/common/environmentService.js';
 import { NEW_SESSION_ACTION_ID } from '../common/constants.js';
 
+const OPTIMUS_NEW_SESSION_COMMAND_ID = 'optimus.newSession';
 
 class NewChatInSessionsWindowAction extends Action2 {
 
@@ -66,6 +69,11 @@ class NewChatInSessionsWindowAction extends Action2 {
 	}
 
 	override async run(accessor: ServicesAccessor): Promise<void> {
+		if (accessor.get(IWorkbenchEnvironmentService).isOptimusWindow) {
+			await accessor.get(ICommandService).executeCommand(OPTIMUS_NEW_SESSION_COMMAND_ID);
+			return;
+		}
+
 		const sessionsService = accessor.get(ISessionsService);
 		// Inherit the active session's provider and session type so the new
 		// session defaults to the same kind the user is currently working in.

@@ -261,7 +261,9 @@ export class BrowserWorkbenchEnvironmentService implements IBrowserWorkbenchEnvi
 	get disableWorkspaceTrust(): boolean { return !this.options.enableWorkspaceTrust; }
 
 	@memoize
-	get isSessionsWindow(): boolean { return this.payload?.get('isSessionsWindow') === 'true'; }
+	// The Optimus window is an agent-sessions surface; see the matching
+	// treatment in the electron-browser environment service.
+	get isSessionsWindow(): boolean { return this.payload?.get('isSessionsWindow') === 'true' || this.payload?.get('isOptimusWindow') === 'true'; }
 
 	@memoize
 	get isOptimusWindow(): boolean { return this.payload?.get('isOptimusWindow') === 'true'; }

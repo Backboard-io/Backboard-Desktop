@@ -54,6 +54,13 @@ export interface ICreateNewSessionOptions {
 	 * chosen provider advertises for the folder URI.
 	 */
 	readonly sessionTypeId?: string;
+	/**
+	 * Keep the previous draft session alive instead of deleting it. Used by
+	 * surfaces where drafts live side by side (the Optimus window's card
+	 * grid): a draft whose first request is still awaiting a response must
+	 * not vanish because another task was started.
+	 */
+	readonly keepPreviousDraft?: boolean;
 }
 
 export const ActiveSessionSupportsMultiChatContext = new RawContextKey<boolean>('activeSessionSupportsMultiChat', false, localize('activeSessionSupportsMultiChat', "Whether the active session supports multiple chats"));

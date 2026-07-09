@@ -9,9 +9,11 @@ import { getDefaultHoverDelegate } from '../../../base/browser/ui/hover/hoverDel
 import { BaseActionViewItem, IBaseActionViewItemOptions } from '../../../base/browser/ui/actionbar/actionViewItems.js';
 import { IAction, toAction } from '../../../base/common/actions.js';
 import { localize } from '../../../nls.js';
+import { ICommandService } from '../../../platform/commands/common/commands.js';
 import { IHoverService } from '../../../platform/hover/browser/hover.js';
 import { IKeybindingService } from '../../../platform/keybinding/common/keybinding.js';
 import { IContextMenuService } from '../../../platform/contextview/browser/contextView.js';
+import { IWorkbenchEnvironmentService } from '../../../workbench/services/environment/common/environmentService.js';
 
 /**
  * Renders a stable mode titlebar switcher in the sessions workbench.
@@ -22,9 +24,13 @@ export class OpenInVSCodeTitleBarWidget extends BaseActionViewItem {
 		action: IAction,
 		options: IBaseActionViewItemOptions | undefined,
 		private readonly keybindingCommandId: string,
+		private readonly openSimpleCommandId: string | undefined,
+		private readonly openAdvancedCommandId: string | undefined,
 		@IHoverService private readonly hoverService: IHoverService,
 		@IKeybindingService private readonly keybindingService: IKeybindingService,
 		@IContextMenuService private readonly contextMenuService: IContextMenuService,
+		@ICommandService private readonly commandService: ICommandService,
+		@IWorkbenchEnvironmentService private readonly environmentService: IWorkbenchEnvironmentService,
 	) {
 		super(undefined, action, options);
 	}
@@ -37,6 +43,7 @@ export class OpenInVSCodeTitleBarWidget extends BaseActionViewItem {
 		const hoverText = this.keybindingService.appendKeybinding(localize('openInVSCodeHover', "Switch Backboard mode"), this.keybindingCommandId);
 		container.setAttribute('aria-label', hoverText);
 		this._register(this.hoverService.setupManagedHover(getDefaultHoverDelegate('element'), container, hoverText));
+		container.classList.toggle('optimus-mode', this.environmentService.isOptimusWindow);
 
 		const triggerButton = append(container, $('button.open-in-vscode-titlebar-widget-trigger'));
 		triggerButton.setAttribute('aria-haspopup', 'menu');
@@ -47,6 +54,11 @@ export class OpenInVSCodeTitleBarWidget extends BaseActionViewItem {
 		const chevron = append(triggerButton, $('span.open-in-vscode-titlebar-widget-chevron.codicon.codicon-chevron-down'));
 		chevron.setAttribute('aria-hidden', 'true');
 
+		const isOptimusWindow = this.environmentService.isOptimusWindow;
+		const currentModeLabel = isOptimusWindow
+			? localize('openInVSCodeSwitcher.advanced', "Advanced")
+			: localize('openInVSCodeSwitcher.agents', "Simple");
+
 		const showMenu = () => {
 			const actions = [
 				toAction({
@@ -56,11 +68,25 @@ export class OpenInVSCodeTitleBarWidget extends BaseActionViewItem {
 				}),
 			];
 
+			if (this.openAdvancedCommandId) {
+				actions.push(toAction({
+					id: 'agents.action.mode.advanced',
+					label: localize('openInVSCodeSwitcher.advanced', "Advanced"),
+					checked: isOptimusWindow,
+					run: () => this.commandService.executeCommand(this.openAdvancedCommandId!),
+				}));
+			}
+
 			actions.push(toAction({
 					id: 'agents.action.mode.agents',
 					label: localize('openInVSCodeSwitcher.agents', "Simple"),
-					checked: true,
-					run: () => undefined,
+					checked: !isOptimusWindow,
+					run: () => {
+						if (this.openSimpleCommandId) {
+							return this.commandService.executeCommand(this.openSimpleCommandId);
+						}
+						return undefined;
+					},
 				}));
 
 			triggerButton.setAttribute('aria-expanded', 'true');
@@ -71,8 +97,8 @@ export class OpenInVSCodeTitleBarWidget extends BaseActionViewItem {
 			});
 		};
 
-		currentIcon.className = 'open-in-vscode-titlebar-widget-icon codicon codicon-window';
-		currentLabel.textContent = localize('openInVSCodeSwitcher.agents', "Simple");
+		currentIcon.className = `open-in-vscode-titlebar-widget-icon codicon ${isOptimusWindow ? 'codicon-layout' : 'codicon-window'}`;
+		currentLabel.textContent = currentModeLabel;
 
 		this._register(addDisposableListener(triggerButton, EventType.CLICK, event => {
 			EventHelper.stop(event, true);

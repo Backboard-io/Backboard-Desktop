@@ -208,6 +208,15 @@ export class AgentHostChangesetService extends Disposable implements IAgentHostC
 		if (!diffs) {
 			return;
 		}
+		// Branch diffs carry the full contents of every changed file. Sessions
+		// are restored for any subscriber (e.g. a client that only opened the
+		// chat), so republishing a large persisted branch diff here floods the
+		// transport for clients that never asked for it. Seed the branch
+		// changeset only while someone is actually watching its channel; a
+		// later branch subscription triggers a fresh recompute instead.
+		if (kind === 'branch' && !this._hasSubscription(session, buildBranchChangesetUri(session))) {
+			return;
+		}
 		const existing = this._stateManager.getChangesetState(staticChangesetUri(session, kind));
 		if (existing && existing.files.length > 0) {
 			return;
@@ -216,6 +225,16 @@ export class AgentHostChangesetService extends Disposable implements IAgentHostC
 	}
 
 	refreshBranchChangeset(session: ProtocolURI): void {
+		// Only recompute while someone actually watches the branch changeset.
+		// The recompute publishes every changed file WITH full contents; for a
+		// large branch diff that is tens of thousands of messages, enough to
+		// flood every client that merely opened the session (chat subscribers
+		// don't need it). When a client subscribes to the branch channel, the
+		// coordinator registers the subscription before triggering the
+		// refresh, so actual viewers always get a fresh compute.
+		if (!this._hasSubscription(session, buildBranchChangesetUri(session))) {
+			return;
+		}
 		this._scheduleStaticRecompute(session, 'branch', undefined, this._markStaticChangesetComputing(session, 'branch'));
 	}
 

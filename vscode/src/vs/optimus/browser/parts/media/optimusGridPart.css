@@ -5,6 +5,8 @@
 
 .part.sessionspart > .content.optimus-grid-content {
 	display: flex;
+	flex-direction: column;
+	position: relative;
 	height: 100%;
 	width: 100%;
 
@@ -20,8 +22,103 @@
 	--optimus-shadow: color-mix(in srgb, var(--vscode-widget-shadow, #000) 28%, transparent);
 }
 
+.agent-sessions-workbench .part.titlebar.optimus-titlebar .titlebar-container,
+.agent-sessions-workbench .part.titlebar.optimus-titlebar .sessions-titlebar-container {
+	display: none !important;
+}
+
+/* Fixed window chrome. Sized and styled to match the Simple window's
+   titlebar widgets (see openInVSCode.css and the panel-header toolbars) so
+   switching modes doesn't visually move or restyle the controls. */
+.optimus-window-chrome {
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	height: 38px;
+	z-index: 5000;
+	pointer-events: none;
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	padding-left: 78px;
+	padding-right: 10px;
+	box-sizing: border-box;
+	-webkit-app-region: drag;
+}
+
+.optimus-window-chrome-button,
+.optimus-window-chrome-mode {
+	pointer-events: auto;
+	-webkit-app-region: no-drag;
+	border: 0;
+	background: transparent;
+	cursor: pointer;
+}
+
+/* Panel toggles: standard toolbar action look (22px codicon buttons). */
+.optimus-window-chrome-button {
+	width: 22px;
+	height: 22px;
+	border-radius: 5px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 16px;
+	color: var(--vscode-icon-foreground);
+}
+
+.optimus-window-chrome-button:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+}
+
+/* Mode selector: identical sizing to the Editor window's mode switcher
+   (see backboardModeSwitcher.css: 28px trigger, 4px radius, 15px icon). */
+.optimus-window-chrome-mode {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	height: 28px;
+	gap: 6px;
+	padding: 0 7px;
+	margin-right: 4px;
+	border-radius: 4px;
+	font-family: inherit;
+	font-size: 13px;
+	font-weight: 400;
+	line-height: 28px;
+	color: var(--vscode-commandCenter-foreground, var(--vscode-titleBar-activeForeground));
+}
+
+.optimus-window-chrome-mode:hover {
+	background-color: var(--vscode-toolbar-hoverBackground);
+}
+
+.optimus-window-chrome-button:focus,
+.optimus-window-chrome-button:focus-visible,
+.optimus-window-chrome-mode:focus,
+.optimus-window-chrome-mode:focus-visible {
+	outline: none;
+	box-shadow: none;
+}
+
+.optimus-window-chrome-mode-icon {
+	font-size: 15px;
+	opacity: 0.7;
+}
+
+.optimus-window-chrome-mode-chevron {
+	font-size: 12px;
+	opacity: 0.72;
+}
+
+.optimus-window-chrome-secondary {
+	margin-left: auto;
+}
+
 .optimus-grid {
 	display: grid;
+	/* Fixed 3x2 layout: six card slots per page, pagination beyond that. */
 	grid-template-columns: repeat(3, 1fr);
 	grid-template-rows: repeat(2, 1fr);
 	gap: 14px;
@@ -29,6 +126,40 @@
 	flex: 1;
 	min-height: 0;
 	min-width: 0;
+	overflow: hidden;
+}
+
+.optimus-grid-pager {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 10px;
+	padding: 2px 0 10px;
+	color: var(--optimus-muted);
+	font-size: 12px;
+}
+
+.optimus-grid-pager button {
+	width: 24px;
+	height: 24px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	border: 0;
+	border-radius: 5px;
+	background: transparent;
+	color: var(--vscode-icon-foreground);
+	cursor: pointer;
+	font-size: 16px;
+}
+
+.optimus-grid-pager button:hover:not(:disabled) {
+	background: var(--vscode-toolbar-hoverBackground);
+}
+
+.optimus-grid-pager button:disabled {
+	opacity: 0.4;
+	cursor: default;
 }
 
 .optimus-card {
@@ -72,6 +203,36 @@
 	flex-shrink: 0;
 	padding: 10px 12px;
 	border-bottom: 1px solid var(--optimus-border-subtle);
+}
+
+.optimus-card-delete {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 20px;
+	height: 20px;
+	margin-left: auto;
+	border: 0;
+	border-radius: 999px;
+	background: transparent;
+	color: var(--optimus-muted);
+	cursor: pointer;
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity .16s ease, background .16s ease, color .16s ease;
+}
+
+.optimus-card:hover .optimus-card-delete,
+.optimus-card:focus-within .optimus-card-delete {
+	opacity: 1;
+	pointer-events: auto;
+}
+
+.optimus-card-delete:hover,
+.optimus-card-delete:focus-visible {
+	background: color-mix(in srgb, var(--optimus-danger) 10%, transparent);
+	color: var(--optimus-danger);
+	outline: none;
 }
 
 .optimus-card-status-dot {
@@ -169,6 +330,95 @@
 	padding: 8px 12px;
 }
 
+/* Embedded read-only chat transcript: the real chat list renderer without
+   the composer — the right panel is the only place to type. Clicks anywhere
+   on the card open the chat, so present the transcript as a passive surface. */
+.optimus-card-chat {
+	flex: 1;
+	min-height: 0;
+	min-width: 0;
+	position: relative;
+	overflow: hidden;
+	cursor: pointer;
+}
+
+/* Compact mirror: hide checkpoint affordances ("Checkpoint Restored · Redo",
+   "Start Over" / "Restore Checkpoint" strips) — meaningful in the full chat,
+   pure noise in a small card. */
+.optimus-card-chat .checkpoint-restore-container,
+.optimus-card-chat .checkpoint-container {
+	display: none !important;
+}
+
+/* The chat renders in a monaco tree; the full chat hides the (unused)
+   twistie gutter via a rule scoped to its .interactive-list wrapper, which
+   the card's bare list lacks — without this, all rows indent 30px. */
+.optimus-card-chat .monaco-list .monaco-tl-twistie {
+	display: none !important;
+}
+
+/* Same conversation presentation as the full chat (see the
+   .interactive-session-scoped bubble rules in chat.css, which the bare list
+   cannot inherit without dragging in the whole chat-widget cascade): user
+   messages render as right-aligned bubbles, answers stay plain. */
+.optimus-card-chat .interactive-item-container.interactive-request {
+	align-items: flex-end;
+}
+
+.optimus-card-chat .interactive-item-container.interactive-request .value {
+	display: flex !important;
+	flex-direction: column !important;
+	align-items: flex-end !important;
+}
+
+.optimus-card-chat .interactive-item-container.interactive-request .value .rendered-markdown {
+	background-color: var(--vscode-chat-requestBubbleBackground);
+	border-radius: var(--vscode-cornerRadius-xLarge, 12px);
+	padding: 8px 12px;
+	max-width: 90%;
+	margin-left: auto;
+	width: fit-content;
+	margin-bottom: 5px;
+	position: relative;
+}
+
+/* Cards preview the conversation only: drop thinking, tool calls, progress,
+   references and confirmations from answers. The right panel renders
+   everything. Deny-list (not allow-list) so unknown part types — including
+   the markdown answer in whatever wrapper it uses — always stay visible. */
+.optimus-card-chat .interactive-response .value > .chat-thinking-box,
+.optimus-card-chat .interactive-response .value > .chat-tool-invocation-part,
+.optimus-card-chat .interactive-response .value > .chat-used-context,
+.optimus-card-chat .interactive-response .value > .chat-used-context-list,
+.optimus-card-chat .interactive-response .value > .progress-step,
+.optimus-card-chat .interactive-response .value > .shimmer-progress,
+.optimus-card-chat .interactive-response .value > .chat-confirmation-widget-container {
+	display: none !important;
+}
+
+.optimus-card-footer-left {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+}
+
+.optimus-card-folder {
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	max-width: 45%;
+	flex-shrink: 0;
+	color: var(--vscode-foreground);
+	opacity: 0.85;
+}
+
+.optimus-card-folder:not(:empty)::after {
+	content: '·';
+	margin-left: 8px;
+	color: var(--optimus-muted);
+}
+
 .optimus-card-footer {
 	display: flex;
 	align-items: center;
@@ -223,18 +473,27 @@
 	font-size: 11.5px;
 }
 
-/* Right panel: empty state shown when no card is active. */
+/* Right panel: editor-style chat host with a folder row under the composer. */
 .optimus-chat-view {
+	display: flex;
+	flex-direction: column;
 	position: relative;
+	height: 100%;
+	width: 100%;
+	min-height: 0;
+	min-width: 0;
 }
 
-.optimus-chat-empty {
+.optimus-chat-editor-host {
+	flex: 1;
+	min-height: 0;
+	min-width: 0;
+}
+
+.optimus-chat-folder-row {
+	height: 30px;
+	flex-shrink: 0;
 	display: flex;
 	align-items: center;
-	justify-content: center;
-	height: 100%;
-	padding: 24px;
-	text-align: center;
-	font-size: 12px;
-	color: var(--vscode-descriptionForeground);
+	padding: 0 12px;
 }
