@@ -156,12 +156,22 @@ export class OpenAgentHostClaudeOptionsAction extends Action2 {
 			tooltip: localize('agentHost.claudeOptionsTooltip', "Open Claude session options"),
 			icon: Codicon.settingsGear,
 			f1: false,
-			precondition: ChatContextKeys.enabled,
+			// No `precondition`: like the Backboard Options gear, this action's
+			// view item owns its own enablement. A precondition here would stamp
+			// the whole gear `disabled` (via ActionWidgetDropdownActionViewItem.
+			// updateEnabled) and silently block the dropdown from opening.
 			menu: [{
 				id: MenuId.ChatInput,
 				group: 'navigation',
 				order: 3.3,
-				when: agentHostPickerVisibility,
+				// Exact mirror of the Backboard Options gear's `when`
+				// (chatSessionIsExternalAgent.negate()): these options only apply
+				// to third-party agent sessions (Claude, Codex), so this gear is
+				// hidden on Backboard sessions and the two gears never co-exist.
+				// Note: unlike the other agent-host pickers we do NOT fall back to
+				// IsSessionsWindow — that is always true in the Simple window and
+				// would wrongly show this gear on Backboard chats there.
+				when: ChatContextKeys.chatSessionIsExternalAgent,
 			}],
 		});
 	}
