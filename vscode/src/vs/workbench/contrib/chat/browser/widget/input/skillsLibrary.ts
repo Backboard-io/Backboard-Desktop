@@ -2645,7 +2645,13 @@ export class SkillsLibraryController {
 							config: item.installServerConfig,
 							inputs: item.installInputs ? [...item.installInputs] : undefined,
 						};
-						await this._mcpManagementService.install(installable);
+						const local = await this._mcpManagementService.install(installable);
+						if (item.installServerConfig.type === McpServerType.REMOTE) {
+							// Kick remote servers off right away so OAuth sign-in (which
+							// also authorizes the server for chat) happens as part of
+							// the marketplace flow rather than on first use.
+							this._startServerAfterInstall(local);
+						}
 					} else {
 						const galleryServer = this._mcpGalleryService.isEnabled()
 							? await this.resolveGalleryMcpForInstall(item)
@@ -2735,6 +2741,26 @@ export class SkillsLibraryController {
 			throw new Error(localize('chat.skillsLibrary.mcpRegistryEntryUnavailable', "The official registry entry for '{0}' is unavailable.", item.label));
 		}
 		return server;
+	}
+
+	/**
+	 * Starts a freshly installed server once it surfaces in the runtime MCP
+	 * service (discovery of the just-written config is asynchronous).
+	 * Fire-and-forget: a failed start surfaces through the server's own UI.
+	 */
+	private _startServerAfterInstall(local: IWorkbenchLocalMcpServer): void {
+		const definitionId = getMcpDefinitionIdForWorkbenchServer(local);
+		(async () => {
+			for (let attempt = 0; attempt < 20; attempt++) {
+				const runtimeServer = this._mcpService.servers.get().find(candidate => candidate.definition.id === definitionId);
+				if (runtimeServer) {
+					await runtimeServer.start();
+					return;
+				}
+				await new Promise<void>(resolve => setTimeout(resolve, 250));
+			}
+			this._logService.trace(`[SkillsLibrary] Installed MCP server '${local.name}' did not surface in the runtime service; skipping auto-start.`);
+		})().catch(err => this._logService.warn(`[SkillsLibrary] Failed to auto-start MCP server '${local.name}':`, err));
 	}
 
 	private async backboardCliMcpConfigResource(): Promise<URI> {
