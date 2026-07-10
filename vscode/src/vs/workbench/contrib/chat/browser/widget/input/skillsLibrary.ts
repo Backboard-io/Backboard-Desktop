@@ -873,7 +873,10 @@ export function buildMcpMarketplaceItems(
 		return installed.filter(matchesInstalled).sort(compareInstalledMcpServers);
 	}
 
-	if (category === 'all') {
+	// A search query spans the whole catalog: with ~270 entries across seven
+	// categories, scoping search to the active category makes most queries
+	// come back empty and look like missing servers.
+	if (category === 'all' || query) {
 		return state.items
 			.filter(matchesItem)
 			.sort(compareMcpMarketplaceItems);
