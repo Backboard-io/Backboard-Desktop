@@ -25,7 +25,7 @@ import { IContextMenuService } from '../../../../../../platform/contextview/brow
 import { FileSystemProviderCapabilities, IFileService } from '../../../../../../platform/files/common/files.js';
 import { ILogService } from '../../../../../../platform/log/common/log.js';
 import { GalleryMcpServerStatus, IGalleryMcpServer, IGalleryMcpServerConfiguration, IInstallableMcpServer, ILocalMcpServer, IMcpGalleryService, RegistryType, TransportType } from '../../../../../../platform/mcp/common/mcpManagement.js';
-import { IMcpServerConfiguration, IMcpServerVariable } from '../../../../../../platform/mcp/common/mcpPlatformTypes.js';
+import { IMcpServerConfiguration, IMcpServerVariable, McpServerType } from '../../../../../../platform/mcp/common/mcpPlatformTypes.js';
 import { INotificationService, Severity } from '../../../../../../platform/notification/common/notification.js';
 import { IProgressService, ProgressLocation } from '../../../../../../platform/progress/common/progress.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../../platform/storage/common/storage.js';
@@ -885,6 +885,17 @@ export function buildMcpMarketplaceItems(
 	return state.items
 		.filter(item => item.category === category && matchesItem(item))
 		.sort(compareMcpMarketplaceItems);
+}
+
+/** Maps a Backboard CLI (.backboard/mcp.json) server entry onto the workbench config shape. */
+export function cliServerToWorkbenchConfig(cliConfig: IMcpCliServerConfig | undefined): IMcpServerConfiguration | undefined {
+	if (cliConfig?.url) {
+		return { type: McpServerType.REMOTE, url: cliConfig.url, headers: cliConfig.headers ? { ...cliConfig.headers } : undefined };
+	}
+	if (cliConfig?.command) {
+		return { type: McpServerType.LOCAL, command: cliConfig.command, args: cliConfig.args ? [...cliConfig.args] : undefined, env: cliConfig.env ? { ...cliConfig.env } : undefined };
+	}
+	return undefined;
 }
 
 function isVerifiedLatestMcpServer(server: IGalleryMcpServer, entry: Pick<IMcpMarketplaceCatalogEntry, 'officialPublisherHints' | 'trustedSource'>): boolean {
@@ -2573,7 +2584,44 @@ export class SkillsLibraryController {
 	}
 
 	async getInstalledMcps(): Promise<IWorkbenchLocalMcpServer[]> {
+		await this.importBackboardCliServers();
 		return this._mcpManagementService.getInstalled();
+	}
+
+	/**
+	 * Servers added from chat (the /mcp command) live only in the Backboard CLI
+	 * config. Import any the workbench does not know about yet so the
+	 * marketplace's Installed view reflects both worlds and remove works on
+	 * both configs.
+	 */
+	private async importBackboardCliServers(): Promise<void> {
+		try {
+			const resource = await this.backboardCliMcpConfigResource();
+			const content = await this._fileService.readFile(resource);
+			const parsed: unknown = JSON.parse(content.value.toString());
+			const servers = (parsed && typeof parsed === 'object') ? (parsed as { mcpServers?: Record<string, IMcpCliServerConfig & { disabled?: boolean }> }).mcpServers : undefined;
+			if (!servers) {
+				return;
+			}
+			const installed = await this._mcpManagementService.getInstalled();
+			const known = new Set(installed.map(server => server.name.toLowerCase()));
+			for (const [name, cliConfig] of Object.entries(servers)) {
+				if (known.has(name.toLowerCase()) || cliConfig?.disabled) {
+					continue;
+				}
+				const config = cliServerToWorkbenchConfig(cliConfig);
+				if (!config) {
+					continue;
+				}
+				try {
+					await this._mcpManagementService.install({ name, config });
+				} catch (err) {
+					this._logService.warn(`[SkillsLibrary] Failed to import Backboard CLI MCP server '${name}':`, err);
+				}
+			}
+		} catch {
+			// No CLI config or unparseable: nothing to import.
+		}
 	}
 
 	async installMcp(item: IMcpMarketplaceItem): Promise<void> {
