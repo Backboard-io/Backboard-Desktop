@@ -14,6 +14,7 @@ import { DisposableStore, toDisposable } from '../../../../../../base/common/lif
 import { isWindows } from '../../../../../../base/common/platform.js';
 import { basename, dirname, joinPath } from '../../../../../../base/common/resources.js';
 import { ThemeIcon } from '../../../../../../base/common/themables.js';
+import { VSBuffer } from '../../../../../../base/common/buffer.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { localize } from '../../../../../../nls.js';
 import { ActionListItemKind, IActionListItem } from '../../../../../../platform/actionWidget/browser/actionList.js';
@@ -23,7 +24,8 @@ import { IDialogService } from '../../../../../../platform/dialogs/common/dialog
 import { IContextMenuService } from '../../../../../../platform/contextview/browser/contextView.js';
 import { FileSystemProviderCapabilities, IFileService } from '../../../../../../platform/files/common/files.js';
 import { ILogService } from '../../../../../../platform/log/common/log.js';
-import { GalleryMcpServerStatus, IGalleryMcpServer, IGalleryMcpServerConfiguration, ILocalMcpServer, IMcpGalleryService, RegistryType, TransportType } from '../../../../../../platform/mcp/common/mcpManagement.js';
+import { GalleryMcpServerStatus, IGalleryMcpServer, IGalleryMcpServerConfiguration, IInstallableMcpServer, ILocalMcpServer, IMcpGalleryService, RegistryType, TransportType } from '../../../../../../platform/mcp/common/mcpManagement.js';
+import { IMcpServerConfiguration, IMcpServerVariable } from '../../../../../../platform/mcp/common/mcpPlatformTypes.js';
 import { INotificationService, Severity } from '../../../../../../platform/notification/common/notification.js';
 import { IProgressService, ProgressLocation } from '../../../../../../platform/progress/common/progress.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../../platform/storage/common/storage.js';
@@ -76,33 +78,10 @@ const SKILLS_MARKETPLACE_PAGES: readonly { readonly id: SkillsMarketplacePage; r
 	{ id: 'mcp', label: localize('chat.skillsLibrary.page.mcp', "MCP") },
 ];
 
-export type McpMarketplaceCategory =
-	| 'pinned'
-	| 'installed'
-	| 'communication-design-pm'
-	| 'cloud-infrastructure'
-	| 'observability'
-	| 'core-utilities'
-	| 'developer-tools'
-	| 'all';
+import { IMcpCliServerConfig, IMcpMarketplaceCatalogEntry, MCP_MARKETPLACE_CATALOG, McpCatalogInstallability, McpMarketplaceCategory } from './mcpMarketplaceCatalog.js';
 
-export type McpCatalogInstallability = 'installable' | 'missing' | 'unsupportedAuth' | 'brokenRuntime';
-
-export interface IMcpMarketplaceCatalogEntry {
-	readonly id: string;
-	readonly label: string;
-	readonly category: Exclude<McpMarketplaceCategory, 'pinned' | 'installed' | 'all'>;
-	readonly expectedNames: readonly string[];
-	readonly searchTerms?: readonly string[];
-	readonly officialPublisherHints: readonly string[];
-	readonly description?: string;
-	readonly publisher?: string;
-	readonly installConfiguration?: IGalleryMcpServerConfiguration;
-	readonly repositoryUrl?: string;
-	readonly trustedSource?: 'github.com/mcp';
-	readonly logoUrl?: string;
-	readonly installability: McpCatalogInstallability;
-}
+export { MCP_MARKETPLACE_CATALOG } from './mcpMarketplaceCatalog.js';
+export type { IMcpMarketplaceCatalogEntry, McpCatalogInstallability, McpMarketplaceCategory } from './mcpMarketplaceCatalog.js';
 
 export interface IMcpMarketplaceItem {
 	readonly kind: 'marketplaceMcp';
@@ -120,6 +99,10 @@ export interface IMcpMarketplaceItem {
 	readonly trustedSource?: 'github.com/mcp';
 	readonly logoUrl?: string;
 	readonly verified: boolean;
+	readonly preferredPackageType?: RegistryType;
+	readonly installServerConfig?: IMcpServerConfiguration;
+	readonly installInputs?: readonly IMcpServerVariable[];
+	readonly cliConfig?: IMcpCliServerConfig;
 }
 
 export interface IMcpMarketplaceState {
@@ -139,11 +122,13 @@ export interface IMcpMarketplaceBuildOptions {
 const MCP_MARKETPLACE_CATEGORIES: readonly { readonly id: McpMarketplaceCategory; readonly label: string; readonly gapBefore?: boolean }[] = [
 	{ id: 'pinned', label: localize('chat.skillsLibrary.mcpCategory.pinned', "Pinned") },
 	{ id: 'installed', label: localize('chat.skillsLibrary.mcpCategory.installed', "Installed") },
-	{ id: 'communication-design-pm', label: localize('chat.skillsLibrary.mcpCategory.communication', "Productivity"), gapBefore: true },
-	{ id: 'cloud-infrastructure', label: localize('chat.skillsLibrary.mcpCategory.cloud', "Infrastructure") },
-	{ id: 'observability', label: localize('chat.skillsLibrary.mcpCategory.observability', "Observability") },
-	{ id: 'core-utilities', label: localize('chat.skillsLibrary.mcpCategory.coreUtilities', "Utilities") },
-	{ id: 'developer-tools', label: localize('chat.skillsLibrary.mcpCategory.developerTools', "Developer") },
+	{ id: 'development-testing', label: localize('chat.skillsLibrary.mcpCategory.development', "Development"), gapBefore: true },
+	{ id: 'project-management-docs', label: localize('chat.skillsLibrary.mcpCategory.projectManagement', "Projects & Docs") },
+	{ id: 'payments-commerce', label: localize('chat.skillsLibrary.mcpCategory.payments', "Payments") },
+	{ id: 'design-media', label: localize('chat.skillsLibrary.mcpCategory.design', "Design & Media") },
+	{ id: 'infrastructure-devops', label: localize('chat.skillsLibrary.mcpCategory.infrastructure', "Infrastructure") },
+	{ id: 'stdio-utilities', label: localize('chat.skillsLibrary.mcpCategory.utilities', "Utilities") },
+	{ id: 'remote-servers', label: localize('chat.skillsLibrary.mcpCategory.integrations', "Integrations") },
 	{ id: 'all', label: localize('chat.skillsLibrary.mcpCategory.all', "All MCPs"), gapBefore: true },
 ];
 
@@ -151,177 +136,14 @@ const EMBEDDED_MCP_MARKETPLACE_CATEGORIES: readonly { readonly id: McpMarketplac
 	{ id: 'pinned', label: localize('chat.skillsLibrary.mcpCategory.pinned', "Pinned") },
 	{ id: 'installed', label: localize('chat.skillsLibrary.mcpCategory.installed', "Installed") },
 	{ id: 'all', label: localize('chat.skillsLibrary.mcpCategory.all', "All MCPs") },
-	{ id: 'communication-design-pm', label: localize('chat.skillsLibrary.mcpCategory.communication', "Productivity") },
-	{ id: 'cloud-infrastructure', label: localize('chat.skillsLibrary.mcpCategory.cloud', "Infrastructure") },
-	{ id: 'observability', label: localize('chat.skillsLibrary.mcpCategory.observability', "Observability") },
-	{ id: 'core-utilities', label: localize('chat.skillsLibrary.mcpCategory.coreUtilities', "Utilities") },
-	{ id: 'developer-tools', label: localize('chat.skillsLibrary.mcpCategory.developerTools', "Developer") },
+	{ id: 'development-testing', label: localize('chat.skillsLibrary.mcpCategory.development', "Development") },
+	{ id: 'project-management-docs', label: localize('chat.skillsLibrary.mcpCategory.projectManagement', "Projects & Docs") },
+	{ id: 'payments-commerce', label: localize('chat.skillsLibrary.mcpCategory.payments', "Payments") },
+	{ id: 'design-media', label: localize('chat.skillsLibrary.mcpCategory.design', "Design & Media") },
+	{ id: 'infrastructure-devops', label: localize('chat.skillsLibrary.mcpCategory.infrastructure', "Infrastructure") },
+	{ id: 'stdio-utilities', label: localize('chat.skillsLibrary.mcpCategory.utilities', "Utilities") },
+	{ id: 'remote-servers', label: localize('chat.skillsLibrary.mcpCategory.integrations', "Integrations") },
 ];
-
-const MCP_MARKETPLACE_CATALOG: readonly IMcpMarketplaceCatalogEntry[] = [
-	oauthMcpCatalogEntry('figma', 'Figma', 'communication-design-pm', ['com.figma.mcp/mcp', 'com.figma/mcp', 'io.figma/mcp', 'figma/mcp'], ['figma.com', 'figma'], 'Bring Figma design context into AI workflows.'),
-	oauthMcpCatalogEntry('linear', 'Linear', 'communication-design-pm', ['app.linear/linear'], ['linear.app', 'linear']),
-	oauthMcpCatalogEntry('atlassian', 'Atlassian', 'communication-design-pm', ['com.atlassian/atlassian-mcp-server'], ['atlassian.com', 'atlassian'], 'Connect Jira, Confluence, and Atlassian work management.'),
-	oauthMcpCatalogEntry('lovable', 'Lovable', 'communication-design-pm', ['dev.lovable/mcp'], ['lovable.dev', 'lovable', 'lovablelabs']),
-	oauthMcpCatalogEntry('notion', 'Notion', 'communication-design-pm', ['com.notion/mcp'], ['notion.com', 'notion'], 'Access and update Notion workspace content.'),
-	mcpCatalogEntry('slack-native', 'Slack Native', 'communication-design-pm', ['com.slack/mcp', 'slack/mcp'], ['slack.com', 'slack'], 'missing'),
-	mcpCatalogEntry('asana-team-board', 'Asana Team Board', 'communication-design-pm', ['com.asana/mcp', 'asana/team-board'], ['asana.com', 'asana'], 'missing'),
-	mcpCatalogEntry('outlook-assistant', 'Outlook Assistant', 'communication-design-pm', ['com.microsoft/outlook-mcp', 'microsoft/outlook'], ['microsoft.com', 'microsoft'], 'missing'),
-	mcpCatalogEntry('zendesk', 'Zendesk', 'communication-design-pm', ['com.zendesk/mcp', 'zendesk/mcp'], ['zendesk.com', 'zendesk'], 'missing'),
-	mcpCatalogEntry('microsoft-dataverse', 'Microsoft Dataverse', 'communication-design-pm', ['com.microsoft/dataverse-mcp', 'microsoft/dataverse'], ['microsoft.com', 'microsoft'], 'missing'),
-	mcpCatalogEntry('raisely', 'Raisely', 'communication-design-pm', ['com.raisely/mcp', 'raisely/mcp'], ['raisely.com', 'raisely'], 'missing'),
-	mcpCatalogEntry('plain', 'Plain', 'communication-design-pm', ['com.plain/mcp', 'plain/mcp'], ['plain.com', 'plain'], 'missing'),
-
-	oauthMcpCatalogEntry('cloudflare', 'Cloudflare', 'cloud-infrastructure', ['com.cloudflare.mcp/mcp'], ['cloudflare.com', 'cloudflare']),
-	oauthMcpCatalogEntry('vercel', 'Vercel', 'cloud-infrastructure', ['com.vercel/vercel-mcp'], ['vercel.com', 'vercel']),
-	trustedMcpCatalogEntry('next-devtools', 'Next.js Devtools', 'cloud-infrastructure', ['io.github.vercel/next-devtools-mcp'], ['vercel.com', 'vercel'], 'Inspect and debug Next.js applications.'),
-	oauthMcpCatalogEntry('firebase', 'Firebase', 'cloud-infrastructure', ['io.github.firebase/firebase-mcp'], ['google.com', 'firebase.google.com', 'firebase']),
-	oauthMcpCatalogEntry('railway', 'Railway', 'cloud-infrastructure', ['com.railway/mcp'], ['railway.app', 'railway.com', 'railway', 'railwayapp']),
-	trustedMcpCatalogEntry('terraform', 'Terraform', 'cloud-infrastructure', ['hashicorp/terraform-mcp-server', 'io.github.hashicorp/terraform-mcp-server'], ['hashicorp.com', 'hashicorp', 'terraform'], 'Work with Terraform providers and infrastructure context.'),
-	oauthMcpCatalogEntry('gitlab', 'GitLab', 'cloud-infrastructure', ['com.gitlab/mcp'], ['gitlab.com', 'gitlab']),
-	trustedMcpCatalogEntry('azure', 'Azure', 'cloud-infrastructure', ['com.microsoft/azure'], ['microsoft.com', 'azure', 'microsoft'], 'Create a connection between AI agents and Azure services.'),
-	mcpCatalogEntry('azure-devops', 'Azure DevOps', 'cloud-infrastructure', ['microsoft/azure-devops-mcp'], ['microsoft.com', 'azure', 'microsoft'], 'missing'),
-	trustedMcpCatalogEntry('microsoft-fabric', 'Fabric', 'cloud-infrastructure', ['com.microsoft/microsoft-fabric'], ['microsoft.com', 'fabric', 'microsoft'], 'Interact with Microsoft Fabric resources.'),
-	trustedMcpCatalogEntry('supabase', 'Supabase', 'cloud-infrastructure', ['com.supabase/mcp'], ['supabase.com', 'supabase'], 'Interact with the Supabase platform.'),
-	trustedMcpCatalogEntry('kubernetes', 'Kubernetes', 'cloud-infrastructure', ['io.github.containers/kubernetes-mcp-server'], ['kubernetes.io', 'containers'], 'Manage Kubernetes and OpenShift clusters.'),
-	mcpCatalogEntry('aws-core', 'AWS Core', 'cloud-infrastructure', ['com.amazonaws/aws-mcp', 'aws/core'], ['amazon.com', 'amazonaws.com', 'aws'], 'missing'),
-	mcpCatalogEntry('aws-data', 'AWS Data', 'cloud-infrastructure', ['com.amazonaws/aws-data-mcp', 'aws/data'], ['amazon.com', 'amazonaws.com', 'aws'], 'missing'),
-	mcpCatalogEntry('databricks', 'Databricks', 'cloud-infrastructure', ['com.databricks/mcp', 'databricks/mcp'], ['databricks.com', 'databricks'], 'missing'),
-	mcpCatalogEntry('port', 'Port', 'cloud-infrastructure', ['io.getport/mcp', 'com.getport/mcp', 'port/mcp'], ['getport.io', 'getport'], 'missing'),
-	mcpCatalogEntry('mainframe', 'Mainframe', 'cloud-infrastructure', ['com.ibm/mainframe-mcp', 'ibm/mainframe'], ['ibm.com', 'ibm'], 'missing'),
-	mcpCatalogEntry('pstack', 'pstack', 'cloud-infrastructure', ['com.pstack/mcp', 'pstack/mcp'], ['pstack.com', 'pstack'], 'missing'),
-
-	oauthMcpCatalogEntry('sentry', 'Sentry', 'observability', ['io.github.getsentry/sentry-mcp', 'io.sentry/mcp', 'sentry/mcp'], ['sentry.io', 'getsentry', 'sentry']),
-	mcpCatalogEntry('datadog', 'Datadog', 'observability', ['com.datadoghq/mcp', 'datadog/mcp'], ['datadoghq.com', 'datadog'], 'missing'),
-	mcpCatalogEntry('grafana', 'Grafana', 'observability', ['io.github.grafana/mcp-grafana'], ['grafana.com', 'grafana']),
-	trustedMcpCatalogEntry('netdata', 'Netdata', 'observability', ['io.github.netdata/mcp-server'], ['netdata.cloud', 'netdata'], 'Monitor infrastructure and application telemetry.'),
-	oauthMcpCatalogEntry('thousandeyes', 'ThousandEyes', 'observability', ['com.thousandeyes/mcp'], ['thousandeyes.com', 'thousandeyes', 'cisco']),
-	mcpCatalogEntry('causely', 'Causely', 'observability', ['ai.causely/mcp', 'causely/mcp'], ['causely.ai', 'causely'], 'missing'),
-	mcpCatalogEntry('coralogix', 'Coralogix', 'observability', ['com.coralogix/mcp', 'coralogix/mcp'], ['coralogix.com', 'coralogix'], 'missing'),
-	mcpCatalogEntry('dnb-risk-analytics', 'D&B Risk Analytics', 'observability', ['com.dnb/risk-analytics-mcp', 'dnb/risk-analytics'], ['dnb.com', 'dun-and-bradstreet'], 'missing'),
-
-	trustedMcpCatalogEntry('chrome-devtools', 'Chrome DevTools', 'core-utilities', ['io.github.ChromeDevTools/chrome-devtools-mcp'], ['developer.chrome.com', 'chrome', 'google'], 'Debug and inspect Chrome browser sessions.'),
-	trustedMcpCatalogEntry('microsoft-playwright', 'Playwright', 'core-utilities', ['io.github.microsoft/playwright-mcp', 'com.microsoft/playwright', 'io.playwright/mcp'], ['microsoft.com', 'playwright.dev', 'microsoft'], 'Automate and inspect browsers with Playwright.'),
-	mcpCatalogEntry('microsoft-markitdown', 'MarkItDown', 'core-utilities', ['microsoft/markitdown', 'com.microsoft/markitdown'], ['microsoft.com', 'microsoft'], 'missing'),
-	mcpCatalogEntry('microsoft-docs', 'Microsoft Docs', 'core-utilities', ['microsoftdocs/mcp'], ['microsoft.com', 'microsoft'], 'missing'),
-	trustedMcpCatalogEntry('nuget', 'NuGet', 'core-utilities', ['com.microsoft/nuget'], ['nuget.org', 'microsoft'], 'Search and inspect NuGet packages.'),
-	trustedMcpCatalogEntry('desktop-commander', 'Desktop Commander', 'core-utilities', ['io.github.wonderwhy-er/desktop-commander'], ['github.com', 'wonderwhy-er'], 'Desktop and terminal automation utilities.'),
-	trustedMcpCatalogEntry('serena', 'Serena', 'core-utilities', ['io.github.oraios/serena'], ['oraios.com', 'oraios'], 'Semantic code navigation and editing tools.'),
-	trustedMcpCatalogEntry('everything', 'Everything', 'core-utilities', ['io.github.modelcontextprotocol/server-everything'], ['modelcontextprotocol.io', 'modelcontextprotocol'], 'Reference server for testing MCP protocol features.'),
-	trustedMcpCatalogEntry('fetch', 'Fetch', 'core-utilities', ['io.github.modelcontextprotocol/server-fetch'], ['modelcontextprotocol.io', 'modelcontextprotocol'], 'Fetch web content and convert it to Markdown.'),
-	trustedMcpCatalogEntry('filesystem', 'Filesystem', 'core-utilities', ['io.github.modelcontextprotocol/server-filesystem'], ['modelcontextprotocol.io', 'modelcontextprotocol'], 'Secure file operations with configurable access controls.'),
-	trustedMcpCatalogEntry('git-reference', 'Git', 'core-utilities', ['io.github.modelcontextprotocol/server-git'], ['modelcontextprotocol.io', 'modelcontextprotocol'], 'Read, search, and manipulate Git repositories.'),
-	trustedMcpCatalogEntry('memory-reference', 'Memory', 'core-utilities', ['io.github.modelcontextprotocol/server-memory'], ['modelcontextprotocol.io', 'modelcontextprotocol'], 'Knowledge graph based persistent memory.'),
-	trustedMcpCatalogEntry('sequential-thinking', 'Sequential Thinking', 'core-utilities', ['io.github.modelcontextprotocol/server-sequentialthinking', 'io.github.modelcontextprotocol/server-sequential-thinking'], ['modelcontextprotocol.io', 'modelcontextprotocol'], 'Structured reflective problem solving.'),
-	trustedMcpCatalogEntry('time-reference', 'Time', 'core-utilities', ['io.github.modelcontextprotocol/server-time'], ['modelcontextprotocol.io', 'modelcontextprotocol'], 'Time and timezone conversion tools.'),
-	mcpCatalogEntry('thermos', 'Thermos', 'core-utilities', ['com.thermos/mcp', 'thermos/mcp'], ['thermos.com', 'thermos'], 'missing'),
-	mcpCatalogEntry('modern-web-guidance', 'Modern Web Guidance', 'core-utilities', ['com.modern-web-guidance/mcp', 'modern-web-guidance/mcp'], ['modernweb.dev', 'modern-web-guidance'], 'missing'),
-	mcpCatalogEntry('cursor-sdk', 'Cursor SDK', 'core-utilities', ['com.cursor/sdk-mcp', 'cursor/sdk'], ['cursor.com', 'cursor'], 'missing'),
-	mcpCatalogEntry('cli-for-agents', 'CLI for Agents', 'core-utilities', ['com.cursor/cli-for-agents', 'cursor/cli-for-agents'], ['cursor.com', 'cursor'], 'missing'),
-	mcpCatalogEntry('agent-compatibility', 'Agent Compatibility', 'core-utilities', ['com.cursor/agent-compatibility', 'cursor/agent-compatibility'], ['cursor.com', 'cursor'], 'missing'),
-	mcpCatalogEntry('cursor-team-kit', 'Cursor Team Kit', 'core-utilities', ['com.cursor/team-kit', 'cursor/team-kit'], ['cursor.com', 'cursor'], 'missing'),
-	mcpCatalogEntry('continual-learning', 'Continual Learning', 'core-utilities', ['com.continual-learning/mcp', 'continual-learning/mcp'], ['continual-learning.com', 'continual'], 'missing'),
-
-	trustedMcpCatalogEntry('github', 'GitHub', 'developer-tools', ['io.github.github/github-mcp-server'], ['github.com', 'github'], 'Manage repositories, issues, pull requests, and code search.'),
-	trustedMcpCatalogEntry('firecrawl', 'Firecrawl', 'developer-tools', ['firecrawl/firecrawl-mcp-server', 'io.github.firecrawl/firecrawl-mcp-server'], ['firecrawl.dev', 'firecrawl'], 'Search, scrape, and crawl web pages.'),
-	oauthMcpCatalogEntry('exa', 'Exa', 'developer-tools', ['ai.exa/exa'], ['exa.ai', 'exa', 'exa-labs']),
-	mcpCatalogEntry('postman', 'Postman', 'developer-tools', ['com.postman/postman-mcp-server'], ['postman.com', 'postman', 'postmanlabs']),
-	trustedMcpCatalogEntry('mongodb', 'MongoDB', 'developer-tools', ['mongodb-js/mongodb-mcp-server', 'io.github.mongodb-js/mongodb-mcp-server'], ['mongodb.com', 'mongodb', 'mongodb-js'], 'Work with MongoDB data and schemas.'),
-	trustedMcpCatalogEntry('bytebase', 'Bytebase', 'developer-tools', ['io.github.bytebase/dbhub'], ['bytebase.com', 'bytebase'], 'Database access and change management for agents.'),
-	mcpCatalogEntry('courier', 'Courier', 'developer-tools', ['io.github.trycourier/courier'], ['courier.com', 'courier', 'trycourier']),
-	trustedMcpCatalogEntry('upstash-context7', 'Context7', 'developer-tools', ['upstash/context7', 'io.github.upstash/context7'], ['upstash.com', 'context7.com', 'upstash', 'context7'], 'Retrieve up-to-date library documentation.'),
-	mcpCatalogEntry('jfrog', 'JFrog', 'developer-tools', ['io.github.jfrog/jfrog-mcp-server'], ['jfrog.com', 'jfrog']),
-	mcpCatalogEntry('roboflow', 'Roboflow', 'developer-tools', ['com.roboflow/roboflow-mcp'], ['roboflow.com', 'roboflow']),
-	mcpCatalogEntry('snyk-api-web', 'Snyk API & Web', 'developer-tools', ['io.github.snyk/saw-mcp'], ['snyk.io', 'snyk.com', 'snyk']),
-	mcpCatalogEntry('snyk', 'Snyk', 'developer-tools', ['io.snyk/mcp'], ['snyk.io', 'snyk.com', 'snyk']),
-	mcpCatalogEntry('sonarqube', 'SonarQube', 'developer-tools', ['io.github.SonarSource/sonarqube-mcp-server'], ['sonarsource.com', 'sonarqube.org', 'sonarsource']),
-	mcpCatalogEntry('buildkite', 'Buildkite', 'developer-tools', ['io.github.buildkite/buildkite-mcp-server'], ['buildkite.com', 'buildkite']),
-	mcpCatalogEntry('sonatype', 'Sonatype', 'developer-tools', ['com.sonatype/dependency-management-mcp-server'], ['sonatype.com', 'sonatype']),
-	oauthMcpCatalogEntry('auth0', 'Auth0', 'developer-tools', ['com.auth0/mcp'], ['auth0.com', 'auth0']),
-	mcpCatalogEntry('cloudinary', 'Cloudinary', 'developer-tools', ['io.github.cloudinary/asset-management-mcp'], ['cloudinary.com', 'cloudinary']),
-	trustedMcpCatalogEntry('tavily', 'Tavily', 'developer-tools', ['tavily-ai/tavily-mcp', 'io.github.tavily-ai/tavily-mcp'], ['tavily.com', 'tavily-ai'], 'Search and extract web content.'),
-	trustedMcpCatalogEntry('stripe', 'Stripe', 'developer-tools', ['com.stripe/mcp'], ['stripe.com', 'stripe'], 'Work with customers, products, payments, and billing.'),
-	trustedMcpCatalogEntry('apify', 'Apify', 'developer-tools', ['com.apify/apify-mcp-server'], ['apify.com', 'apify'], 'Run web scrapers, crawlers, and automations.'),
-	trustedMcpCatalogEntry('browserbase', 'Browserbase', 'developer-tools', ['io.github.browserbase/mcp-server-browserbase', 'browserbasehq/mcp-browserbase'], ['browserbase.com', 'browserbase'], 'Control cloud browser sessions for automation.'),
-	trustedMcpCatalogEntry('bright-data', 'Bright Data', 'developer-tools', ['io.github.brightdata/brightdata-mcp'], ['brightdata.com', 'brightdata'], 'Access Bright Data web data tools.'),
-	trustedMcpCatalogEntry('brandfetch', 'Brandfetch', 'developer-tools', ['io.brandfetch/brandfetch'], ['brandfetch.com', 'brandfetch'], 'Search brands and retrieve design assets.'),
-	trustedMcpCatalogEntry('stackql', 'StackQL', 'developer-tools', ['stackql/stackql-mcp'], ['stackql.io', 'stackql'], 'Query cloud and SaaS resources with StackQL.'),
-	trustedMcpCatalogEntry('searxng', 'SearXNG', 'developer-tools', ['ihor-sokoliuk/mcp-searxng'], ['searxng.org', 'searxng'], 'Search the web through SearXNG.'),
-	mcpCatalogEntry('nuxt', 'Nuxt', 'developer-tools', ['antfu/nuxt-mcp'], ['nuxt.com', 'nuxt'], 'missing'),
-	mcpCatalogEntry('unity', 'Unity', 'developer-tools', ['coplaydev/unity-mcp'], ['unity.com', 'unity'], 'missing'),
-	mcpCatalogEntry('redis', 'Redis', 'developer-tools', ['io.github.redis/mcp-redis'], ['redis.io', 'redis']),
-	mcpCatalogEntry('neon', 'Neon', 'developer-tools', ['tech.neon/mcp', 'neon/mcp'], ['neon.tech', 'neon'], 'missing'),
-	mcpCatalogEntry('pinecone', 'Pinecone', 'developer-tools', ['io.pinecone/mcp', 'pinecone/mcp'], ['pinecone.io', 'pinecone'], 'missing'),
-	mcpCatalogEntry('qdrant', 'Qdrant', 'developer-tools', ['tech.qdrant/mcp', 'qdrant/mcp'], ['qdrant.tech', 'qdrant'], 'missing'),
-	mcpCatalogEntry('twilio', 'Twilio', 'developer-tools', ['com.twilio/mcp', 'twilio/mcp'], ['twilio.com', 'twilio'], 'missing'),
-	mcpCatalogEntry('resend', 'Resend', 'developer-tools', ['com.resend/mcp', 'resend/mcp'], ['resend.com', 'resend'], 'missing'),
-	mcpCatalogEntry('google-maps', 'Google Maps', 'developer-tools', ['com.google/maps-mcp', 'google/maps'], ['google.com', 'google'], 'missing'),
-	mcpCatalogEntry('google-sheets', 'Google Sheets', 'developer-tools', ['com.google/sheets-mcp', 'google/sheets'], ['google.com', 'google'], 'missing'),
-	mcpCatalogEntry('phantom', 'Phantom', 'developer-tools', ['app.phantom/mcp', 'phantom/mcp'], ['phantom.app', 'phantom'], 'missing'),
-	mcpCatalogEntry('quiverai', 'QuiverAI', 'developer-tools', ['ai.quiver/mcp', 'quiverai/mcp'], ['quiver.ai', 'quiverai'], 'missing'),
-	mcpCatalogEntry('heygen', 'HeyGen', 'developer-tools', ['com.heygen/mcp', 'heygen/mcp'], ['heygen.com', 'heygen'], 'missing'),
-	mcpCatalogEntry('higgsfield', 'Higgsfield', 'developer-tools', ['ai.higgsfield/mcp', 'higgsfield/mcp'], ['higgsfield.ai', 'higgsfield'], 'missing'),
-	mcpCatalogEntry('corridor', 'Corridor', 'developer-tools', ['com.corridor/mcp', 'corridor/mcp'], ['corridor.dev', 'corridor'], 'missing'),
-	mcpCatalogEntry('aikido', 'Aikido', 'developer-tools', ['dev.aikido/mcp', 'aikido/mcp'], ['aikido.dev', 'aikido'], 'missing'),
-	mcpCatalogEntry('orchestrate', 'Orchestrate', 'developer-tools', ['com.orchestrate/mcp', 'orchestrate/mcp'], ['orchestrate.com', 'orchestrate'], 'missing'),
-	mcpCatalogEntry('sinch', 'Sinch', 'developer-tools', ['com.sinch/mcp', 'sinch/mcp'], ['sinch.com', 'sinch'], 'missing'),
-	mcpCatalogEntry('scandit', 'Scandit', 'developer-tools', ['com.scandit/mcp', 'scandit/mcp'], ['scandit.com', 'scandit'], 'missing'),
-	mcpCatalogEntry('etoro', 'eToro', 'developer-tools', ['com.etoro/mcp', 'etoro/mcp'], ['etoro.com', 'etoro'], 'missing'),
-	mcpCatalogEntry('onepassword', '1Password', 'developer-tools', ['com.1password/mcp', '1password/mcp'], ['1password.com', '1password'], 'missing'),
-	mcpCatalogEntry('semgrep', 'Semgrep', 'developer-tools', ['com.semgrep/mcp', 'semgrep/mcp'], ['semgrep.dev', 'semgrep'], 'missing'),
-	mcpCatalogEntry('endor-labs', 'Endor Labs', 'developer-tools', ['com.endorlabs/mcp', 'endorlabs/mcp'], ['endorlabs.com', 'endor-labs'], 'missing'),
-	mcpCatalogEntry('chainguard', 'Chainguard', 'developer-tools', ['dev.chainguard/mcp', 'chainguard/mcp'], ['chainguard.dev', 'chainguard'], 'missing'),
-];
-
-function mcpCatalogEntry(
-	id: string,
-	label: string,
-	category: Exclude<McpMarketplaceCategory, 'pinned' | 'installed' | 'all'>,
-	expectedNames: readonly string[],
-	officialPublisherHints: readonly string[],
-	installability: McpCatalogInstallability = 'installable',
-	logoUrl?: string,
-	description?: string,
-	publisher?: string,
-): IMcpMarketplaceCatalogEntry {
-	return {
-		id,
-		label,
-		category,
-		expectedNames,
-		searchTerms: [label, ...expectedNames],
-		officialPublisherHints,
-		description,
-		publisher,
-		logoUrl,
-		installability,
-	};
-}
-
-function trustedMcpCatalogEntry(
-	id: string,
-	label: string,
-	category: Exclude<McpMarketplaceCategory, 'pinned' | 'installed' | 'all'>,
-	expectedNames: readonly string[],
-	officialPublisherHints: readonly string[],
-	description?: string,
-): IMcpMarketplaceCatalogEntry {
-	return {
-		...mcpCatalogEntry(id, label, category, expectedNames, officialPublisherHints, 'installable', undefined, description),
-		trustedSource: 'github.com/mcp',
-	};
-}
-
-function oauthMcpCatalogEntry(
-	id: string,
-	label: string,
-	category: Exclude<McpMarketplaceCategory, 'pinned' | 'installed' | 'all'>,
-	expectedNames: readonly string[],
-	officialPublisherHints: readonly string[],
-	description?: string,
-): IMcpMarketplaceCatalogEntry {
-	return mcpCatalogEntry(id, label, category, expectedNames, officialPublisherHints, 'unsupportedAuth', undefined, description);
-}
 
 export interface ISkillsShListItem {
 	readonly id: string;
@@ -996,6 +818,8 @@ function getMcpInstallabilityReason(installability: McpCatalogInstallability): s
 			return localize('chat.skillsLibrary.mcpInstallabilityUnsupportedAuth', "the server requires OAuth client registration that Backboard does not support yet.");
 		case 'brokenRuntime':
 			return localize('chat.skillsLibrary.mcpInstallabilityBrokenRuntime', "the server requires a runtime command that Backboard cannot start yet.");
+		case 'disabled':
+			return localize('chat.skillsLibrary.mcpInstallabilityDisabled', "the server is disabled in the catalog.");
 	}
 }
 
@@ -1018,7 +842,7 @@ export function buildMcpMarketplaceItems(
 	state: IMcpMarketplaceState,
 	options: IMcpMarketplaceBuildOptions = {},
 ): McpMarketplaceModalItem[] {
-	const category = options.category ?? 'communication-design-pm';
+	const category = options.category ?? 'development-testing';
 	const query = (options.query ?? '').trim().toLowerCase();
 	const recentlyRemovedSet = new Set(options.recentlyRemovedIds ?? []);
 	const installed = state.installed.filter(server => !recentlyRemovedSet.has(getMcpServerKey(server)));
@@ -1119,6 +943,10 @@ function createMcpMarketplaceItem(entry: IMcpMarketplaceCatalogEntry, gallery?: 
 		trustedSource: entry.trustedSource,
 		logoUrl: gallery?.icon?.dark ?? gallery?.icon?.light ?? getMcpCatalogLogoUrl(entry),
 		verified: true,
+		preferredPackageType: entry.preferredPackageType,
+		installServerConfig: entry.installServerConfig,
+		installInputs: entry.installInputs,
+		cliConfig: entry.cliConfig,
 	};
 }
 
@@ -1554,7 +1382,7 @@ export class SkillsLibraryController {
 		const store = new DisposableStore();
 		let activeMarketplacePage: SkillsMarketplacePage = 'skills';
 		let activeCategory: SkillsLibraryCategory = 'official';
-		let activeMcpCategory: McpMarketplaceCategory = 'communication-design-pm';
+		let activeMcpCategory: McpMarketplaceCategory = 'development-testing';
 		let installedFilter: InstalledSkillFilter = 'all';
 		let recentlyRemovedInstalled: IRecentlyRemovedSkill[] = [];
 		let recentlyRemovedMcps: IRecentlyRemovedMcp[] = [];
@@ -2671,7 +2499,7 @@ export class SkillsLibraryController {
 				};
 			}
 			if (activeMcpCategory === 'pinned' && !buildMcpMarketplaceItems(mcpState, { category: 'pinned' }).length) {
-				activeMcpCategory = 'communication-design-pm';
+				activeMcpCategory = 'development-testing';
 			}
 			render();
 		};
@@ -2751,19 +2579,35 @@ export class SkillsLibraryController {
 			if (catalogEntry && !isMcpCatalogEntryInstallable(catalogEntry)) {
 				throw new Error(getMcpInstallabilityReason(catalogEntry.installability));
 			}
-			const galleryServer = this._mcpGalleryService.isEnabled()
-				? await this.resolveGalleryMcpForInstall(item)
-				: createTrustedGithubMcpGalleryServer(item);
-			if (!galleryServer) {
-				throw new Error(localize('chat.skillsLibrary.mcpGalleryUnavailable', "MCP registry is unavailable."));
-			}
 			await this._progressService.withProgress(
 				{
 					location: ProgressLocation.Notification,
 					title: localize('chat.skillsLibrary.mcpInstalling', "Installing MCP server '{0}'...", item.label),
 					cancellable: false,
 				},
-				() => this._mcpManagementService.installFromGallery(galleryServer)
+				async () => {
+					if (item.installServerConfig) {
+						// Catalog entries ship a concrete configuration; install it
+						// directly without consulting the MCP registry.
+						const installable: IInstallableMcpServer = {
+							name: item.registryName,
+							config: item.installServerConfig,
+							inputs: item.installInputs ? [...item.installInputs] : undefined,
+						};
+						await this._mcpManagementService.install(installable);
+					} else {
+						const galleryServer = this._mcpGalleryService.isEnabled()
+							? await this.resolveGalleryMcpForInstall(item)
+							: createTrustedGithubMcpGalleryServer(item);
+						if (!galleryServer) {
+							throw new Error(localize('chat.skillsLibrary.mcpGalleryUnavailable', "MCP registry is unavailable."));
+						}
+						await this._mcpManagementService.installFromGallery(galleryServer, item.preferredPackageType ? { packageType: item.preferredPackageType } : undefined);
+					}
+					// Mirror into the Backboard CLI config so chat sessions can use the
+					// server too; workbench and cli-ts read different config files.
+					await this.addToBackboardCliConfig(item);
+				}
 			);
 			this._notificationService.info(localize('chat.skillsLibrary.mcpInstallSuccess', "Installed MCP server '{0}'.", item.label));
 		} catch (err) {
@@ -2842,9 +2686,55 @@ export class SkillsLibraryController {
 		return server;
 	}
 
+	private async backboardCliMcpConfigResource(): Promise<URI> {
+		const home = await this._pathService.userHome();
+		return URI.joinPath(home, '.backboard', 'mcp.json');
+	}
+
+	private async addToBackboardCliConfig(item: IMcpMarketplaceItem): Promise<void> {
+		if (!item.cliConfig) {
+			return;
+		}
+		try {
+			const resource = await this.backboardCliMcpConfigResource();
+			let root: { mcpServers?: Record<string, unknown> } = {};
+			try {
+				const content = await this._fileService.readFile(resource);
+				const parsed: unknown = JSON.parse(content.value.toString());
+				if (parsed && typeof parsed === 'object') {
+					root = parsed as { mcpServers?: Record<string, unknown> };
+				}
+			} catch {
+				// Missing or unparseable file: start a fresh config.
+			}
+			const servers: Record<string, unknown> = (root.mcpServers && typeof root.mcpServers === 'object') ? root.mcpServers : {};
+			servers[item.registryName] = item.cliConfig;
+			root.mcpServers = servers;
+			await this._fileService.writeFile(resource, VSBuffer.fromString(`${JSON.stringify(root, null, '\t')}\n`));
+		} catch (err) {
+			this._logService.warn('[SkillsLibrary] Failed to sync MCP server into the Backboard CLI config:', err);
+		}
+	}
+
+	private async removeFromBackboardCliConfig(serverName: string): Promise<void> {
+		try {
+			const resource = await this.backboardCliMcpConfigResource();
+			const content = await this._fileService.readFile(resource);
+			const root: unknown = JSON.parse(content.value.toString());
+			const servers = (root && typeof root === 'object') ? (root as { mcpServers?: Record<string, unknown> }).mcpServers : undefined;
+			if (servers && serverName in servers) {
+				delete servers[serverName];
+				await this._fileService.writeFile(resource, VSBuffer.fromString(`${JSON.stringify(root, null, '\t')}\n`));
+			}
+		} catch (err) {
+			this._logService.warn('[SkillsLibrary] Failed to remove MCP server from the Backboard CLI config:', err);
+		}
+	}
+
 	async removeMcp(server: IWorkbenchLocalMcpServer): Promise<void> {
 		try {
 			await this._mcpManagementService.uninstall(server);
+			await this.removeFromBackboardCliConfig(server.name);
 			this._notificationService.info(localize('chat.skillsLibrary.mcpRemoveSuccess', "Removed MCP server '{0}'.", server.displayName ?? server.name));
 		} catch (err) {
 			this._logService.error('[SkillsLibrary] Failed to remove MCP server:', err);

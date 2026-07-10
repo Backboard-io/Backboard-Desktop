@@ -1282,9 +1282,9 @@ suite('skillsLibrary', () => {
 
 	test('resolves only active latest official registry MCP entries', () => {
 		const catalog = [
-			mcpCatalogEntry('figma', 'Figma', 'communication-design-pm', ['com.figma/mcp'], ['figma.com', 'figma']),
-			mcpCatalogEntry('linear', 'Linear', 'communication-design-pm', ['app.linear/mcp'], ['linear.app', 'linear']),
-			mcpCatalogEntry('missing', 'Missing', 'developer-tools', ['com.missing/mcp'], ['missing']),
+			mcpCatalogEntry('figma', 'Figma', 'project-management-docs', ['com.figma/mcp'], ['figma.com', 'figma']),
+			mcpCatalogEntry('linear', 'Linear', 'project-management-docs', ['app.linear/mcp'], ['linear.app', 'linear']),
+			mcpCatalogEntry('missing', 'Missing', 'development-testing', ['com.missing/mcp'], ['missing']),
 		];
 
 		const items = resolveMcpMarketplaceItems(catalog, [
@@ -1299,10 +1299,10 @@ suite('skillsLibrary', () => {
 
 	test('keeps non-installable MCP catalog entries tracked but hidden', () => {
 		const catalog = [
-			mcpCatalogEntry('figma', 'Figma', 'communication-design-pm', ['com.figma/mcp'], ['figma']),
-			mcpCatalogEntry('slack-native', 'Slack Native', 'communication-design-pm', ['com.slack/mcp'], ['slack'], 'missing'),
-			mcpCatalogEntry('oauth-only', 'OAuth Only', 'developer-tools', ['com.oauth/mcp'], ['oauth'], 'unsupportedAuth'),
-			mcpCatalogEntry('broken-runtime', 'Broken Runtime', 'developer-tools', ['com.broken/mcp'], ['broken'], 'brokenRuntime'),
+			mcpCatalogEntry('figma', 'Figma', 'project-management-docs', ['com.figma/mcp'], ['figma']),
+			mcpCatalogEntry('slack-native', 'Slack Native', 'project-management-docs', ['com.slack/mcp'], ['slack'], 'missing'),
+			mcpCatalogEntry('oauth-only', 'OAuth Only', 'development-testing', ['com.oauth/mcp'], ['oauth'], 'unsupportedAuth'),
+			mcpCatalogEntry('broken-runtime', 'Broken Runtime', 'development-testing', ['com.broken/mcp'], ['broken'], 'brokenRuntime'),
 		];
 
 		const items = createMcpMarketplaceItemsFromCatalog(catalog);
@@ -1314,7 +1314,7 @@ suite('skillsLibrary', () => {
 
 	test('excludes OAuth MCP catalog entries even when registry has a matching official server', () => {
 		const catalog = [
-			mcpCatalogEntry('figma', 'Figma', 'communication-design-pm', ['com.figma/mcp'], ['figma'], 'unsupportedAuth'),
+			mcpCatalogEntry('figma', 'Figma', 'project-management-docs', ['com.figma/mcp'], ['figma'], 'unsupportedAuth'),
 		];
 
 		const items = resolveMcpMarketplaceItems(catalog, [
@@ -1326,8 +1326,8 @@ suite('skillsLibrary', () => {
 
 	test('builds MCP items with category, pinned, installed, and search filtering', () => {
 		const figma = resolveMcpMarketplaceItems([
-			mcpCatalogEntry('figma', 'Figma', 'communication-design-pm', ['com.figma/mcp'], ['figma']),
-			mcpCatalogEntry('sentry', 'Sentry', 'observability', ['io.sentry/mcp'], ['sentry']),
+			mcpCatalogEntry('figma', 'Figma', 'project-management-docs', ['com.figma/mcp'], ['figma']),
+			mcpCatalogEntry('sentry', 'Sentry', 'development-testing', ['io.sentry/mcp'], ['sentry']),
 		], [
 			galleryMcp('com.figma/mcp'),
 			galleryMcp('io.sentry/mcp', { publisher: 'sentry', publisherDisplayName: 'Sentry', publisherUrl: 'https://sentry.io', publisherDomain: { link: 'https://sentry.io', verified: true } }),
@@ -1338,7 +1338,7 @@ suite('skillsLibrary', () => {
 			items: figma,
 			installed: [installed],
 			favoriteIds: ['sentry'],
-		}, { category: 'communication-design-pm' }).map(mcpItemLabel), ['Figma']);
+		}, { category: 'project-management-docs' }).map(mcpItemLabel), ['Figma']);
 
 		assert.deepStrictEqual(buildMcpMarketplaceItems({
 			items: figma,
@@ -1350,7 +1350,7 @@ suite('skillsLibrary', () => {
 			items: figma,
 			installed: [installed],
 			favoriteIds: [],
-		}, { category: 'all' }).map(mcpItemLabel), ['Figma', 'Sentry']);
+		}, { category: 'all' }).map(mcpItemLabel), ['Sentry', 'Figma']);
 
 		assert.deepStrictEqual(buildMcpMarketplaceItems({
 			items: figma,
@@ -1372,7 +1372,7 @@ suite('skillsLibrary', () => {
 
 	test('does not match unrelated MCPs when gallery URLs are absent', () => {
 		const [exa] = resolveMcpMarketplaceItems([
-			mcpCatalogEntry('exa', 'Exa', 'developer-tools', ['ai.exa/exa'], ['exa']),
+			mcpCatalogEntry('exa', 'Exa', 'development-testing', ['ai.exa/exa'], ['exa']),
 		], [
 			galleryMcp('ai.exa/exa', { publisher: 'exa', publisherDisplayName: 'Exa', publisherUrl: 'https://exa.ai', publisherDomain: { link: 'https://exa.ai', verified: true } }),
 		]);
