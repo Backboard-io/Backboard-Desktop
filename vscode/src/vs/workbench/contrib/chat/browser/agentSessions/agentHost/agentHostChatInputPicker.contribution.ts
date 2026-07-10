@@ -3,7 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { localize2 } from '../../../../../../nls.js';
+import { Codicon } from '../../../../../../base/common/codicons.js';
+import { localize, localize2 } from '../../../../../../nls.js';
 import { Action2, MenuId, registerAction2 } from '../../../../../../platform/actions/common/actions.js';
 import { ContextKeyExpr } from '../../../../../../platform/contextkey/common/contextkey.js';
 import { IsSessionsWindowContext, WorkspaceFolderCountContext } from '../../../../../common/contextkeys.js';
@@ -16,8 +17,13 @@ import { ChatContextKeys, ChatContextKeyExprs } from '../../../common/actions/ch
  * Order layout in the primary toolbar:
  *   3    OpenModelPickerAction
  *   3.2  OpenAgentHostAutoApprovePickerAction
- *   3.3  OpenAgentHostPermissionModePickerAction
+ *   3.3  OpenAgentHostClaudeOptionsAction     (Thinking Level + Approvals + Fast Mode, Claude only)
  *   3.4  OpenAgentHostFolderPickerAction      (multi-root only)
+ *
+ * `OpenAgentHostPermissionModePickerAction` and `OpenAgentHostFastModePickerAction`
+ * no longer have their own composer icon — `OpenAgentHostClaudeOptionsAction`'s
+ * view item constructs their underlying pickers directly and lists them as rows
+ * in one dropdown instead of three separate icons.
  */
 
 export class OpenAgentHostFolderPickerAction extends Action2 {
@@ -92,12 +98,63 @@ export class OpenAgentHostAutoApprovePickerAction extends Action2 {
 	override async run(): Promise<void> { /* the action view item handles interaction */ }
 }
 
+/**
+ * No longer has its own composer icon — folded into
+ * {@link OpenAgentHostClaudeOptionsAction}'s dropdown. The class (and its
+ * underlying {@link AgentHostChatInputPicker}) is still constructed directly
+ * by that gear's view item, so it stays registered as a command without a
+ * `menu` entry.
+ */
 export class OpenAgentHostPermissionModePickerAction extends Action2 {
 	static readonly ID = 'workbench.action.chat.openAgentHostPermissionModePicker';
 	constructor() {
 		super({
 			id: OpenAgentHostPermissionModePickerAction.ID,
 			title: localize2('agentHost.permissionModePicker', "Approvals"),
+			f1: false,
+			precondition: ChatContextKeys.enabled,
+		});
+	}
+	override async run(): Promise<void> { /* the action view item handles interaction */ }
+}
+
+/**
+ * No longer has its own composer icon — folded into
+ * {@link OpenAgentHostClaudeOptionsAction}'s dropdown, same as
+ * {@link OpenAgentHostPermissionModePickerAction}.
+ */
+export class OpenAgentHostFastModePickerAction extends Action2 {
+	static readonly ID = 'workbench.action.chat.openAgentHostFastModePicker';
+	constructor() {
+		super({
+			id: OpenAgentHostFastModePickerAction.ID,
+			title: localize2('agentHost.fastModePicker', "Fast Mode"),
+			f1: false,
+			precondition: ChatContextKeys.enabled,
+		});
+	}
+	override async run(): Promise<void> { /* the action view item handles interaction */ }
+}
+
+/**
+ * Single gear icon consolidating the Claude-only composer controls —
+ * Thinking Level, Approvals, and Fast Mode — into one dropdown instead of
+ * three separate icons. Each row opens its own underlying picker (the same
+ * ones {@link OpenAgentHostPermissionModePickerAction} /
+ * {@link OpenAgentHostFastModePickerAction} / the model's thinking-level
+ * picker used to render standalone), so selection behavior is unchanged —
+ * only the entry point is unified. Rows that have nothing to show (e.g. a
+ * model with no thinking levels) are omitted; if none apply, the dropdown
+ * shows a single disabled "No options" row.
+ */
+export class OpenAgentHostClaudeOptionsAction extends Action2 {
+	static readonly ID = 'workbench.action.chat.openAgentHostClaudeOptions';
+	constructor() {
+		super({
+			id: OpenAgentHostClaudeOptionsAction.ID,
+			title: localize2('agentHost.claudeOptions', "Claude Options"),
+			tooltip: localize('agentHost.claudeOptionsTooltip', "Open Claude session options"),
+			icon: Codicon.settingsGear,
 			f1: false,
 			precondition: ChatContextKeys.enabled,
 			menu: [{
@@ -114,4 +171,6 @@ export class OpenAgentHostPermissionModePickerAction extends Action2 {
 registerAction2(OpenAgentHostModePickerAction);
 registerAction2(OpenAgentHostAutoApprovePickerAction);
 registerAction2(OpenAgentHostPermissionModePickerAction);
+registerAction2(OpenAgentHostFastModePickerAction);
+registerAction2(OpenAgentHostClaudeOptionsAction);
 registerAction2(OpenAgentHostFolderPickerAction);

@@ -202,7 +202,10 @@ export class ChatMultiDiffContentPart extends Disposable implements IChatContent
 
 			const items: IChatMultiDiffItem[] = [];
 			for (const resource of resources) {
-				const uri = resource.modifiedUri || resource.originalUri || resource.goToFileUri;
+				// goToFileUri is the real on-disk file, used for the label; it
+				// can differ from modifiedUri/originalUri, which may point at
+				// content snapshots used only to open an accurate diff.
+				const uri = resource.goToFileUri || resource.modifiedUri || resource.originalUri;
 				if (!uri) {
 					continue;
 				}

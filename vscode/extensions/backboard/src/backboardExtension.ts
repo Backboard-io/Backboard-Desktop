@@ -28,7 +28,8 @@ const backboardOAuthUserInfoUrl = 'https://app.backboard.io/api/oauth/userinfo';
 // First-party PUBLIC client (registered with is_public_client=True, no secret).
 // The device-code grant only accepts this exact id, so it is safe to ship baked in.
 const backboardOAuthClientId = 'Backboard_oauth_q_cli';
-const backboardOAuthScope = 'email profile';
+// `openid` is required by the /userinfo endpoint (name caching for the greeting).
+const backboardOAuthScope = 'openid email profile';
 const backboardOAuthDeviceGrantType = 'urn:ietf:params:oauth:grant-type:device_code';
 const backboardOAuthTimeoutMs = 5 * 60 * 1000;
 let backboardToolOutput: vscode.OutputChannel | undefined;
@@ -43,6 +44,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.setApiKey', async () => {
 		if (await setApiKey()) {
 			bridge.restart();
+			bridge.warmUp();
 		}
 	}));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.extension.signIn', () => promptBackboardSso(bridge)));
@@ -133,6 +135,7 @@ async function signInBackboard(bridge: BackboardBridge): Promise<boolean> {
 		const saveResult = await saveBackboardOAuthTokens(tokens);
 		await cacheBackboardUserName(stringValueFromRecord(tokens.access_token));
 		bridge.restart();
+		bridge.warmUp();
 		if (saveResult.apiKeySaved) {
 			backboardToolOutput?.appendLine(`[oauth] Backboard SSO complete. API key saved to ${backboardConfigPath()}.`);
 		}
@@ -1363,6 +1366,10 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 
 	resolveWebviewView(webviewView: vscode.WebviewView): void {
 		this.view = webviewView;
+		// The panel just became visible: start the serve process and resolve
+		// the assistant now, while the user is still typing their first
+		// message, instead of paying CLI startup on the first send.
+		this.bridge.warmUp();
 		webviewView.title = '\u200B';
 		webviewView.webview.options = { enableScripts: true, localResourceRoots: webviewLocalResourceRoots(this.context) };
 		webviewView.webview.html = panelHtml(webviewView.webview, codiconsStylesheetUri(this.context, webviewView.webview), iconBaseUri(this.context, webviewView.webview), fontBaseUri(this.context, webviewView.webview), { showHeader: false, initialState: this.readPanelState() });
@@ -1543,12 +1550,14 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 		try {
 			boundThreadId = await uploadBackboardDocuments(this.bridge, sessionId, boundThreadId, attachments, settings, token);
 			let currentToolRequest: ToolResultRequest | undefined;
-			const submitTools = trimBackboardToolsForRequest(
-				await this.bridge.listTools(settings.mode, token).catch(() => undefined),
-				modelContent,
-				settings.webSearch,
-				imageGeneration
-			);
+			// The serve submit op carries no tool schemas (cli-ts owns tool
+			// execution), so the trimmed tool list only feeds the legacy
+			// tool-continuation loop below. Resolve it off the critical path: a
+			// cold tool cache would otherwise serialize a full bridge round trip
+			// before the prompt even reaches the agent.
+			const submitToolsPromise = this.bridge.listTools(settings.mode, token)
+				.then(tools => trimBackboardToolsForRequest(tools, modelContent, settings.webSearch, imageGeneration))
+				.catch(() => undefined);
 			await this.bridge.send('sendPrompt', sessionId, {
 				content: modelContent,
 				threadId: boundThreadId,
@@ -1562,7 +1571,6 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 				voiceMode,
 				audioFile: audio,
 				mcpCalls: mcpCallsPayload(settings),
-				tools: submitTools,
 				config: settings.config
 			}, event => {
 				if (event.type === 'sessionBinding' && event.threadId) {
@@ -1584,6 +1592,8 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 				}
 			}, token);
 
+			// Long resolved by now: the turn above finished before this await.
+			const submitTools = await submitToolsPromise;
 			let nextToolRequest = pendingToolRequests.shift();
 			while (nextToolRequest && !token.isCancellationRequested) {
 				const toolOutputs = await executeToolCalls(this.bridge, nextToolRequest.toolCalls, settings.mode, sink, token);
@@ -1698,6 +1708,26 @@ class BackboardBridge implements vscode.Disposable {
 
 	refreshModels(): void {
 		void this.listModels(new vscode.CancellationTokenSource().token, true);
+	}
+
+	/**
+	 * Best-effort warm-up during user think-time: spawns the serve process (so
+	 * CLI boot and session/MCP/LSP init happen before the first send) and asks
+	 * it to pre-resolve the Backboard assistant. The `warmup` op is sent
+	 * without a requestId, so it needs no response bookkeeping and cannot trip
+	 * the inactivity timeout; any failure simply surfaces on the real first
+	 * send.
+	 */
+	warmUp(): void {
+		if (!hasBackboardCredentials() || this.activeTurnRequestId !== undefined) {
+			return;
+		}
+		try {
+			const child = this.ensureProcess();
+			child.stdin.write(`${JSON.stringify({ op: 'warmup' })}\n`);
+		} catch (error) {
+			this.output.appendLine(`[${new Date().toISOString()}] Backboard warm-up skipped: ${error instanceof Error ? error.message : String(error)}`);
+		}
 	}
 
 	async cachedModels(): Promise<BridgeModel[] | undefined> {

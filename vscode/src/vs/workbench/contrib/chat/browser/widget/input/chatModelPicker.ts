@@ -341,7 +341,7 @@ function createPinAction(
  * Resolves a configuration property from a model's configurationSchema by group.
  * Returns the key, current value (with default fallback), and schema metadata.
  */
-function resolveConfigProperty(
+export function resolveConfigProperty(
 	model: ILanguageModelChatMetadataAndIdentifier,
 	group: string,
 	configAccess: IModelConfigurationAccess,

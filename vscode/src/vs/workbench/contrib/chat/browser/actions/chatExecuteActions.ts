@@ -417,6 +417,28 @@ class SwitchToNextPinnedModelAction extends Action2 {
 	}
 }
 
+/**
+ * Shared visibility for the model picker and its companion thinking-level
+ * chip: both live on the same models, so they show and hide together.
+ */
+const MODEL_PICKER_VISIBILITY = ContextKeyExpr.and(
+	// Hide the model picker while a delegation (continue in) target is pending
+	ChatContextKeys.hasPendingDelegationTarget.negate(),
+	ContextKeyExpr.or(
+		ChatContextKeys.lockedToCodingAgent.negate(),
+		ChatContextKeys.chatSessionHasTargetedModels),
+	ContextKeyExpr.or(
+		ContextKeyExpr.equals(ChatContextKeys.location.key, ChatAgentLocation.Chat),
+		ContextKeyExpr.equals(ChatContextKeys.location.key, ChatAgentLocation.EditorInline),
+		ContextKeyExpr.equals(ChatContextKeys.location.key, ChatAgentLocation.Notebook),
+		ContextKeyExpr.equals(ChatContextKeys.location.key, ChatAgentLocation.Terminal)),
+	// Hide in welcome view when session type is not local
+	ContextKeyExpr.or(
+		ChatContextKeys.inAgentSessionsWelcome.negate(),
+		ChatContextKeys.chatSessionHasTargetedModels,
+		ChatContextKeys.agentSessionType.isEqualTo(AgentSessionProviders.Local))
+);
+
 export class OpenModelPickerAction extends Action2 {
 	static readonly ID = 'workbench.action.chat.openModelPicker';
 
@@ -435,24 +457,7 @@ export class OpenModelPickerAction extends Action2 {
 				id: MenuId.ChatInput,
 				order: 3,
 				group: 'navigation',
-				when:
-					ContextKeyExpr.and(
-						// Hide the model picker while a delegation (continue in) target is pending
-						ChatContextKeys.hasPendingDelegationTarget.negate(),
-						ContextKeyExpr.or(
-							ChatContextKeys.lockedToCodingAgent.negate(),
-							ChatContextKeys.chatSessionHasTargetedModels),
-						ContextKeyExpr.or(
-							ContextKeyExpr.equals(ChatContextKeys.location.key, ChatAgentLocation.Chat),
-							ContextKeyExpr.equals(ChatContextKeys.location.key, ChatAgentLocation.EditorInline),
-							ContextKeyExpr.equals(ChatContextKeys.location.key, ChatAgentLocation.Notebook),
-							ContextKeyExpr.equals(ChatContextKeys.location.key, ChatAgentLocation.Terminal)),
-						// Hide in welcome view when session type is not local
-						ContextKeyExpr.or(
-							ChatContextKeys.inAgentSessionsWelcome.negate(),
-							ChatContextKeys.chatSessionHasTargetedModels,
-							ChatContextKeys.agentSessionType.isEqualTo(AgentSessionProviders.Local))
-					)
+				when: MODEL_PICKER_VISIBILITY
 			}
 		});
 	}
@@ -568,6 +573,36 @@ export class ToggleBackboardComposerMicrophoneAction extends Action2 {
 	}
 }
 
+export class OpenChatThinkingPickerAction extends Action2 {
+	static readonly ID = 'workbench.action.chat.openThinkingPicker';
+
+	constructor() {
+		super({
+			id: OpenChatThinkingPickerAction.ID,
+			title: localize2('interactive.openThinkingPicker.label', "Open Thinking Level Picker"),
+			tooltip: localize('setThinkingLevel', "Set Thinking Level"),
+			category: CHAT_CATEGORY,
+			f1: false,
+			menu: {
+				id: MenuId.ChatInput,
+				// Right after the model picker (order 3) so the level reads as
+				// part of the model choice. The chip self-hides when the active
+				// model has no thinking levels.
+				order: 3.05,
+				group: 'navigation',
+				// Excluded for Claude/Codex agent-host sessions: their thinking
+				// level lives inside the consolidated "Claude Options" gear
+				// (OpenAgentHostClaudeOptionsAction) instead of its own icon.
+				when: ContextKeyExpr.and(MODEL_PICKER_VISIBILITY, ChatContextKeys.chatSessionIsExternalAgent.negate()),
+			}
+		});
+	}
+
+	override async run(): Promise<void> {
+		// The custom action view item owns the dropdown.
+	}
+}
+
 export class OpenBackboardComposerOptionsAction extends Action2 {
 	static readonly ID = 'workbench.action.chat.openBackboardComposerOptions';
 
@@ -583,7 +618,10 @@ export class OpenBackboardComposerOptionsAction extends Action2 {
 				id: MenuId.ChatInput,
 				order: 3.1,
 				group: 'navigation',
-				when: ChatContextKeys.inQuickChat.negate()
+				// Backboard-specific options don't apply to third-party agent
+				// sessions (Claude, Codex) — their config lives in the agent's
+				// own session-config chips.
+				when: ContextKeyExpr.and(ChatContextKeys.inQuickChat.negate(), ChatContextKeys.chatSessionIsExternalAgent.negate())
 			}
 		});
 	}
@@ -1466,6 +1504,7 @@ export function registerChatExecuteActions(): DisposableStore {
 	store.add(registerAction2(SwitchToNextModelAction));
 	store.add(registerAction2(SwitchToNextPinnedModelAction));
 	store.add(registerAction2(OpenModelPickerAction));
+	store.add(registerAction2(OpenChatThinkingPickerAction));
 	store.add(registerAction2(ToggleBackboardComposerMicrophoneAction));
 	store.add(registerAction2(OpenBackboardComposerOptionsAction));
 	store.add(registerAction2(BackboardUsageMetricsAction));

@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import type { AgentInfo, McpServerStatus, PermissionMode, Query, SDKUserMessage, SlashCommand, WarmQuery } from '@anthropic-ai/claude-agent-sdk';
+import type { AgentInfo, McpServerStatus, ModelInfo, PermissionMode, Query, SDKUserMessage, SlashCommand, WarmQuery } from '@anthropic-ai/claude-agent-sdk';
 import { CancellationError, isCancellationError } from '../../../../base/common/errors.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable, IReference, toDisposable } from '../../../../base/common/lifecycle.js';
@@ -133,6 +133,8 @@ export class ClaudeSdkPipeline extends Disposable {
 	/** Current values the consumer has asked for. Replayed to a fresh Query on bind / rebind. */
 	private _currentModel: string | undefined;
 	private _currentEffort: ClaudeRuntimeEffortLevel | undefined;
+	private _currentFastMode: boolean | undefined;
+	private _appliedFastMode: boolean | undefined;
 	private _currentPermissionMode: PermissionMode | undefined;
 
 	private _rematerializer: IRematerializer | undefined;
@@ -231,13 +233,15 @@ export class ClaudeSdkPipeline extends Disposable {
 	 * "current" (what the consumer wants) and "applied" (what the SDK has)
 	 * to avoid a redundant `setModel` / `applyFlagSettings` on first use.
 	 */
-	seedCurrentConfig(model: string | undefined, effort: ClaudeRuntimeEffortLevel | undefined, permissionMode: PermissionMode | undefined): void {
+	seedCurrentConfig(model: string | undefined, effort: ClaudeRuntimeEffortLevel | undefined, permissionMode: PermissionMode | undefined, fastMode?: boolean): void {
 		this._currentModel = model;
 		this._currentEffort = effort;
 		this._currentPermissionMode = permissionMode;
+		this._currentFastMode = fastMode;
 		this._appliedModel = model;
 		this._appliedEffort = effort;
 		this._appliedPermissionMode = permissionMode;
+		this._appliedFastMode = fastMode;
 	}
 
 	/**
@@ -278,6 +282,35 @@ export class ClaudeSdkPipeline extends Disposable {
 				this._logService.warn(`[ClaudeSdkPipeline:${this.sessionId}] setEffort failed: ${err}`);
 			}
 		}
+	}
+
+	/**
+	 * Eagerly push a fast-mode change to the SDK via
+	 * `applyFlagSettings({ fastMode })`. Same mid-turn safety and
+	 * buffered-until-bound semantics as {@link setEffort}.
+	 */
+	async setFastMode(fastMode: boolean): Promise<void> {
+		this._currentFastMode = fastMode;
+		if (this._query && fastMode !== this._appliedFastMode) {
+			try {
+				await this._query.applyFlagSettings({ fastMode });
+				this._appliedFastMode = fastMode;
+			} catch (err) {
+				this._logService.warn(`[ClaudeSdkPipeline:${this.sessionId}] setFastMode failed: ${err}`);
+			}
+		}
+	}
+
+	/**
+	 * The models the SDK reports as available to the logged-in account,
+	 * with per-model effort / fast-mode capabilities. Only available once
+	 * the Query is bound (first send); returns `undefined` before that.
+	 */
+	async supportedModels(): Promise<ModelInfo[] | undefined> {
+		if (!this._query) {
+			return undefined;
+		}
+		return this._query.supportedModels();
 	}
 
 	/**
@@ -413,6 +446,10 @@ export class ClaudeSdkPipeline extends Disposable {
 			if (this._currentPermissionMode !== undefined && this._currentPermissionMode !== this._appliedPermissionMode) {
 				await this._query?.setPermissionMode(this._currentPermissionMode);
 				this._appliedPermissionMode = this._currentPermissionMode;
+			}
+			if (this._currentFastMode !== undefined && this._currentFastMode !== this._appliedFastMode) {
+				await this._query?.applyFlagSettings({ fastMode: this._currentFastMode });
+				this._appliedFastMode = this._currentFastMode;
 			}
 		} catch (err) {
 			this._logService.warn(`[ClaudeSdkPipeline:${this.sessionId}] _replayCurrentConfig failed: ${err}`);

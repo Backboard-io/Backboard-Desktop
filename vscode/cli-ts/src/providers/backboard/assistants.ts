@@ -22,10 +22,21 @@ function assistantCachePath(): string {
 	return join(qUserConfigDir(), ASSISTANT_CACHE_FILE);
 }
 
-/** Cache key: the assistant is namespaced by backend, prompt, and tools. */
-function cacheKey(apiUrl: string | undefined, name: string): string {
+/**
+ * Cache key: the assistant is namespaced by backend, account, prompt, and
+ * tools. The account fingerprint matters — assistants belong to the signed-in
+ * account, so after a re-login (new API key) a cached id from the previous
+ * account would 404 with "Assistant not found" on every turn.
+ */
+function cacheKey(
+	apiUrl: string | undefined,
+	accountFingerprint: string,
+	name: string,
+): string {
 	return createHash("sha256")
 		.update(apiUrl ?? "")
+		.update(" ")
+		.update(accountFingerprint)
 		.update(" ")
 		.update(name)
 		.digest("hex")
@@ -69,6 +80,36 @@ function writeAssistantCache(key: string, assistantId: string): void {
 	}
 }
 
+/**
+ * Drops every cache entry that resolves to the given assistant id. Called when
+ * the backend reports the assistant gone (e.g. deleted server-side, or created
+ * under credentials that no longer exist) so the next turn re-creates one
+ * instead of failing forever.
+ */
+export function invalidateAssistantCache(assistantId: string): void {
+	if (assistantCacheDisabled()) {
+		return;
+	}
+	try {
+		const cache = readAssistantCache();
+		const remaining = Object.fromEntries(
+			Object.entries(cache).filter(([, id]) => id !== assistantId),
+		);
+		if (Object.keys(remaining).length === Object.keys(cache).length) {
+			return;
+		}
+		writeFileSync(
+			assistantCachePath(),
+			`${JSON.stringify(remaining, null, "\t")}\n`,
+			"utf8",
+		);
+	} catch (err) {
+		logger.warn(
+			`Failed to invalidate assistant cache: ${err instanceof Error ? err.message : String(err)}`,
+		);
+	}
+}
+
 export async function ensureAssistant(
 	client: BackboardClient,
 	systemPrompt: string,
@@ -88,7 +129,7 @@ export async function ensureAssistant(
 	// A repeat prompt/tools/backend combination resolves to the same stable
 	// assistant. Cache the id locally so subsequent sessions skip the ~1s
 	// `GET /assistants` list scan (the dominant first-token latency).
-	const key = cacheKey(client.apiUrl, name);
+	const key = cacheKey(client.apiUrl, client.accountFingerprint, name);
 	if (!fresh) {
 		const cached = readAssistantCache()[key];
 		if (cached) {

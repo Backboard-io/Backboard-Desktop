@@ -48,6 +48,19 @@ import { Menus } from '../../../browser/menus.js';
 
 // #region --- New Chat Widget ---
 
+/**
+ * Agent-host session types offered in the new-chat session-type (agent)
+ * picker. Claude / Codex only surface when their gates are on (the
+ * `preferAgentHost` preference for Claude, `chat.agentHost.codexAgent.enabled`
+ * for Codex) — the picker intersects this allowlist with the session types the
+ * providers actually advertise.
+ */
+const NEW_CHAT_ALLOWED_SESSION_TYPES = [
+	AgentSessionProviders.AgentHostBackboard,
+	AgentSessionProviders.AgentHostClaude,
+	AgentSessionProviders.AgentHostCodex,
+];
+
 const NEW_CHAT_COMPOSER_LAYOUT_HEIGHT = 180;
 const NEW_CHAT_COMPOSER_INPUT_MAX_HEIGHT = 260;
 type FirstSendWorkspaceChoice = 'selectFolder' | 'createFolder' | undefined;
@@ -104,73 +117,45 @@ const OCTOPUS_EYELIDS = [
 
 /**
  * Empty columns reserved on each side of the head, and empty rows above it,
- * so the giant flip-off fist and its raised finger have room. The non-flip
- * frames are drawn shifted by these offsets.
+ * so the sleep Z's have room to drift up. The non-flip frames are drawn
+ * shifted by these offsets.
  */
 const OCTOPUS_CANVAS_PAD = 4;
 const OCTOPUS_ROW_PAD = 7;
 
 /**
- * Flip-off sequence, drawn on the full padded canvas: a giant comic fist
- * (Gear-Third forced perspective — body-blue fill with a dark outline and
- * knuckle seams so it pops in front of the body) punches toward the
- * viewer, then the outlined middle finger extends from the second knuckle
- * (up) and the fingertip waggles (waggle). While these frames show, the
- * whole sprite scales up so the gesture lunges at the camera.
- */
-const OCTOPUS_FIST_ROW = 13;
-const OCTOPUS_FIST = [
-	'.......PP.PP.PP.PP......',
-	'......PBBPBBPBBPBBP.....',
-	'......PBBBBBBBBBBBBP....',
-	'......PBBDBBDBBDBBBP....',
-	'......PBBDBBDBBDBBBP....',
-	'.......PBBBBBBBBBBP.....',
-	'........PPPPPPPPPP......',
-];
-
-/** Sprite row where the extended-finger frames start (the fingertip). */
-const OCTOPUS_FINGER_ROW = 2;
-const OCTOPUS_FLIP_UP = [
-	'.........PPPP...........',
-	'.........PLLP...........',
-	'.........PBBP...........',
-	'.........PBBP...........',
-	'.........PBBP...........',
-	'.........PBBP...........',
-	'.........PBBP...........',
-	'.........PBBP...........',
-	'.........PBBP...........',
-	'.........PBBP...........',
-	'.........PBBP...........',
-	'.......PPPBBPPP.PP......',
-	'......PBBPBBPBBPBBP.....',
-	'......PBBBBBBBBBBBBP....',
-	'......PBBDBBDBBDBBBP....',
-	'......PBBDBBDBBDBBBP....',
-	'.......PBBBBBBBBBBP.....',
-	'........PPPPPPPPPP......',
+ * Subtle flip-off: one middle tentacle rises modestly in front of the face
+ * (dark shade so it silhouettes against the body, light tip) while the
+ * others keep hanging. A second frame leans the tip for a tiny waggle. Drawn
+ * shifted by the canvas padding so it lines up with the tentacles; no scale
+ * lunge, no giant fist — a quick, understated flip. */
+const OCTOPUS_FLIP_ROW = OCTOPUS_ROW_PAD + 2;
+const OCTOPUS_FLIP = [
+	'.......LL.......',
+	'.......DD.......',
+	'.......DD.......',
+	'.......DD.......',
+	'.......DD.......',
+	'.......DD.......',
+	'.......DD.......',
+	'.BB..BB......BB.',
+	'.BB..BB......BB.',
+	'BB..BB........BB',
+	'BB..BB........BB',
 ];
 
 const OCTOPUS_FLIP_WAGGLE = [
-	'........PPPP............',
-	'........PLLP............',
-	'.........PBBP...........',
-	'.........PBBP...........',
-	'.........PBBP...........',
-	'.........PBBP...........',
-	'.........PBBP...........',
-	'.........PBBP...........',
-	'.........PBBP...........',
-	'.........PBBP...........',
-	'.........PBBP...........',
-	'.......PPPBBPPP.PP......',
-	'......PBBPBBPBBPBBP.....',
-	'......PBBBBBBBBBBBBP....',
-	'......PBBDBBDBBDBBBP....',
-	'......PBBDBBDBBDBBBP....',
-	'.......PBBBBBBBBBBP.....',
-	'........PPPPPPPPPP......',
+	'......LL........',
+	'......DD........',
+	'.......DD.......',
+	'.......DD.......',
+	'.......DD.......',
+	'.......DD.......',
+	'.......DD.......',
+	'.BB..BB......BB.',
+	'.BB..BB......BB.',
+	'BB..BB........BB',
+	'BB..BB........BB',
 ];
 
 /**
@@ -311,6 +296,10 @@ export class NewChatWidget extends Disposable {
 	private _middleTitleSuffix: HTMLElement | undefined;
 	/** Slot inside the middle heading that hosts the workspace picker trigger. */
 	private _middleTitlePickerSlot: HTMLElement | undefined;
+	/** The " with " connector between the workspace and agent picker slots. */
+	private _middleTitleConnector: HTMLElement | undefined;
+	/** Slot inside the middle heading that hosts the session-type (agent) picker trigger. */
+	private _middleTitleTypePickerSlot: HTMLElement | undefined;
 
 	/** Recreates the draft once a better/late-registering provider can serve the folder (see {@link _createNewSession}). */
 	private readonly _pendingPreferredUpgrade = new MutableDisposable<IDisposable>();
@@ -368,7 +357,7 @@ export class NewChatWidget extends Disposable {
 		});
 
 		this._sessionTypePicker = this._register(this.instantiationService.createInstance(SessionTypePicker, this._session));
-		this._sessionTypePicker.setAllowedSessionTypeIds([AgentSessionProviders.AgentHostBackboard]);
+		this._sessionTypePicker.setAllowedSessionTypeIds(NEW_CHAT_ALLOWED_SESSION_TYPES);
 
 		const scopedContextKeyService = this._register(contextKeyService.createScoped(document.createElement('div')));
 		const scopedInstantiationService = this._register(this.instantiationService.createChild(
@@ -433,9 +422,11 @@ export class NewChatWidget extends Disposable {
 
 	private _createSessionTypePickerDelegate(): ISessionTypePickerDelegate {
 		return {
-			getActiveSessionProvider: () => AgentSessionProviders.AgentHostBackboard,
-			setActiveSessionProvider: () => undefined,
-			getAllowedSessionProviders: () => [AgentSessionProviders.AgentHostBackboard],
+			getActiveSessionProvider: () =>
+				this._sessionTypePicker.getPickedChatSessionType(this._workspacePicker.selectedFolderUri)
+				?? AgentSessionProviders.AgentHostBackboard,
+			setActiveSessionProvider: provider => this._sessionTypePicker.selectSessionTypeById(provider, this._workspacePicker.selectedFolderUri),
+			getAllowedSessionProviders: () => NEW_CHAT_ALLOWED_SESSION_TYPES,
 		};
 	}
 
@@ -693,6 +684,8 @@ export class NewChatWidget extends Disposable {
 		this._middleTitle = dom.append(middle, dom.$('h2.new-chat-middle-title'));
 		this._middleTitlePrefix = dom.append(this._middleTitle, dom.$('span.new-chat-middle-title-text'));
 		this._middleTitlePickerSlot = dom.append(this._middleTitle, dom.$('span.new-chat-middle-title-picker'));
+		this._middleTitleConnector = dom.append(this._middleTitle, dom.$('span.new-chat-middle-title-text.session-workspace-picker-with-label'));
+		this._middleTitleTypePickerSlot = dom.append(this._middleTitle, dom.$('span.new-chat-middle-title-picker.sessions-chat-session-type-picker'));
 		this._middleTitleSuffix = dom.append(this._middleTitle, dom.$('span.new-chat-middle-title-text'));
 		this._updateMiddleTitle();
 		this._renderPixelOctopus(this._middleTitle);
@@ -751,9 +744,8 @@ export class NewChatWidget extends Disposable {
 		appendFrame('octo-sleep-z1', OCTOPUS_SLEEP_Z1, OCTOPUS_SLEEP_Z1_ROW, 0);
 		appendFrame('octo-sleep-z2', OCTOPUS_SLEEP_Z2, OCTOPUS_SLEEP_Z2_ROW, 0);
 		appendFrame('octo-sleep-z3', OCTOPUS_SLEEP_Z3, OCTOPUS_SLEEP_Z3_ROW, 0);
-		appendFrame('octo-fist', OCTOPUS_FIST, OCTOPUS_FIST_ROW, 0);
-		appendFrame('octo-flip-up', OCTOPUS_FLIP_UP, OCTOPUS_FINGER_ROW, 0);
-		appendFrame('octo-flip-waggle', OCTOPUS_FLIP_WAGGLE, OCTOPUS_FINGER_ROW, 0);
+		appendFrame('octo-flip', OCTOPUS_FLIP, OCTOPUS_FLIP_ROW, OCTOPUS_CANVAS_PAD);
+		appendFrame('octo-flip-waggle', OCTOPUS_FLIP_WAGGLE, OCTOPUS_FLIP_ROW, OCTOPUS_CANVAS_PAD);
 		appendFrame('octo-eyelids', OCTOPUS_EYELIDS, OCTOPUS_ROW_PAD + OCTOPUS_EYE_ROW, OCTOPUS_CANVAS_PAD);
 		host.appendChild(svg);
 	}
@@ -767,9 +759,17 @@ export class NewChatWidget extends Disposable {
 		if (!this._middleTitlePrefix || !this._middleTitleSuffix) {
 			return;
 		}
-		const marker = '\u0000';
-		const [prefix, suffix] = localize('newChatMiddleTitleInFolder', "What should we build in {0}?", marker).split(marker);
+		// The sentence embeds two picker slots: "... in [workspace] with [agent]?".
+		// Split on the markers in order; translations must keep {0} before {1}.
+		const workspaceMarker = '\u0000';
+		const agentMarker = '\u0001';
+		const template = localize('newChatMiddleTitleInFolderWithAgent', "What should we build in {0} with {1}?", workspaceMarker, agentMarker);
+		const [prefix, rest] = template.split(workspaceMarker);
+		const [connector, suffix] = (rest ?? '').split(agentMarker);
 		this._middleTitlePrefix.textContent = prefix;
+		if (this._middleTitleConnector) {
+			this._middleTitleConnector.textContent = connector ?? '';
+		}
 		this._middleTitleSuffix.textContent = suffix ?? '';
 	}
 
@@ -782,6 +782,10 @@ export class NewChatWidget extends Disposable {
 	private _mountTitleWorkspacePicker(): void {
 		if (this._middleTitlePickerSlot) {
 			this._workspacePicker.render(this._middleTitlePickerSlot);
+		}
+		if (this._middleTitleTypePickerSlot) {
+			dom.clearNode(this._middleTitleTypePickerSlot);
+			this._sessionTypePicker.render(this._middleTitleTypePickerSlot, { className: 'sessions-chat-session-type-picker' });
 		}
 	}
 

@@ -79,7 +79,11 @@ export class ChangesTitleBarContribution extends Disposable implements IWorkbenc
 			},
 			group: 'navigation',
 			order: 3,
-			when: ContextKeyExpr.and(IsAuxiliaryWindowContext.toNegated(), IsNewChatSessionContext),
+			// NB: no IsAuxiliaryWindowContext gate — same spurious-flip issue as the
+			// SessionBarToolbar registration above; this row is the only place the
+			// toggle shows before a session exists, so there is no fallback if it
+			// gets hidden when the right panel opens.
+			when: IsNewChatSessionContext,
 		}));
 
 		this._register(MenuRegistry.appendMenuItem(Menus.AuxiliaryBarTitle, {

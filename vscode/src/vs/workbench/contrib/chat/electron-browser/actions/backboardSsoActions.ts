@@ -8,12 +8,13 @@ import { BaseActionViewItem, IActionViewItemOptions } from '../../../../../base/
 import { IAction } from '../../../../../base/common/actions.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
+import { URI } from '../../../../../base/common/uri.js';
 import { ServicesAccessor } from '../../../../../editor/browser/editorExtensions.js';
 import { localize2 } from '../../../../../nls.js';
 import { IActionViewItemService } from '../../../../../platform/actions/browser/actionViewItemService.js';
 import { Action2, MenuId, MenuRegistry, registerAction2 } from '../../../../../platform/actions/common/actions.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
-import { ContextKeyExpr, IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
+import { ContextKeyExpr, IContextKey, IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
 import { IFileService } from '../../../../../platform/files/common/files.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
 import { IWorkbenchContribution } from '../../../../common/contributions.js';
@@ -64,6 +65,8 @@ export class BackboardCredentialsContribution extends Disposable implements IWor
 
 	static readonly ID = 'workbench.contrib.backboardCredentials';
 
+	private readonly signedInKey: IContextKey<boolean>;
+
 	constructor(
 		@IActionViewItemService actionViewItemService: IActionViewItemService,
 		@IChatEntitlementService private readonly chatEntitlementService: IChatEntitlementService,
@@ -75,21 +78,44 @@ export class BackboardCredentialsContribution extends Disposable implements IWor
 		super();
 		this._register(actionViewItemService.register(MenuId.TitleBar, 'backboard.signIn', (action, options) => new BackboardSignInTitleBarEntry(action, options)));
 
+		this.signedInKey = BackboardAuthContextKeys.signedIn.bindTo(this.contextKeyService);
 		if (isBackboardProduct()) {
 			BackboardAuthContextKeys.enabled.bindTo(this.contextKeyService).set(true);
-			BackboardAuthContextKeys.signedIn.bindTo(this.contextKeyService).set(false);
-			this.checkBackboardCredentials().catch(error => this.logService.error(`[Backboard] Failed to check credentials: ${error instanceof Error ? error.message : String(error)}`));
+			this.signedInKey.set(false);
+			this.watchBackboardCredentials().catch(error => this.logService.error(`[Backboard] Failed to check credentials: ${error instanceof Error ? error.message : String(error)}`));
 		} else {
 			BackboardAuthContextKeys.enabled.bindTo(this.contextKeyService).set(false);
-			BackboardAuthContextKeys.signedIn.bindTo(this.contextKeyService).set(true);
+			this.signedInKey.set(true);
 		}
 	}
 
-	private async checkBackboardCredentials(): Promise<void> {
+	/**
+	 * Keeps `backboard.signedIn` in sync with the credentials on disk for the
+	 * lifetime of the window, so every auth gate (session view, chat panes,
+	 * agents welcome) appears when the user signs out and disappears when a
+	 * sign-in lands — including sign-ins performed in another window, which
+	 * only communicate through the shared config file.
+	 */
+	private async watchBackboardCredentials(): Promise<void> {
 		const configResource = await backboardConfigResource(this.pathService);
-		if (await hasBackboardCredentials(this.fileService, configResource)) {
+		const watcher = this._register(this.fileService.createWatcher(configResource, { recursive: false, excludes: [] }));
+		this._register(watcher.onDidChange(() => {
+			this.updateSignedInState(configResource).catch(error => this.logService.error(`[Backboard] Failed to refresh credentials state: ${error instanceof Error ? error.message : String(error)}`));
+		}));
+		await this.updateSignedInState(configResource);
+	}
+
+	private async updateSignedInState(configResource: URI): Promise<void> {
+		const signedIn = await hasBackboardCredentials(this.fileService, configResource);
+		if (signedIn === this.signedInKey.get()) {
+			return;
+		}
+		this.signedInKey.set(signedIn);
+		if (signedIn) {
 			markBackboardChatReady(this.chatEntitlementService, this.contextKeyService);
-			this.logService.info(`[Backboard] Existing credentials found in ${configResource.fsPath}; chat setup marked ready.`);
+			this.logService.info(`[Backboard] Credentials found in ${configResource.fsPath}; chat setup marked ready.`);
+		} else {
+			this.logService.info(`[Backboard] Credentials removed from ${configResource.fsPath}; auth gates enabled.`);
 		}
 	}
 }

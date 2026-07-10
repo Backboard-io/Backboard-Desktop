@@ -26,7 +26,6 @@ import { ISessionsManagementService } from '../../../services/sessions/common/se
 import { ISessionsService } from '../../../services/sessions/browser/sessionsService.js';
 import { ISession } from '../../../services/sessions/common/session.js';
 import { ISessionsProvidersService } from '../../../services/sessions/browser/sessionsProvidersService.js';
-import { IsAuxiliaryWindowContext } from '../../../../workbench/common/contextkeys.js';
 import { ContextKeyExpr, IContextKeyService, RawContextKey } from '../../../../platform/contextkey/common/contextkey.js';
 import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry.js';
 import { logSessionsInteraction } from '../../../common/sessionsTelemetry.js';
@@ -683,7 +682,11 @@ class OpenSessionInTerminalAction extends Action2 {
 				id: Menus.TitleBarRightLayout,
 				group: 'navigation',
 				order: 2,
-				when: ContextKeyExpr.and(IsAuxiliaryWindowContext.toNegated(), IsNewChatSessionContext, IsPhoneLayoutContext.negate()),
+				// NB: no IsAuxiliaryWindowContext gate — same spurious-flip issue as the
+				// SessionBarToolbar registration above; this row is the only place the
+				// toggle shows before a session exists, so there is no fallback if it
+				// gets hidden when the right panel opens.
+				when: ContextKeyExpr.and(IsNewChatSessionContext, IsPhoneLayoutContext.negate()),
 			}]
 		});
 	}

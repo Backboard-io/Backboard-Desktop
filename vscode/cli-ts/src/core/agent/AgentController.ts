@@ -363,11 +363,18 @@ export class AgentController {
 	async prewarmAssistant(): Promise<void> {
 		try {
 			const controller = new AbortController();
-			await this.loopFactory.resolveAssistantId({
-				systemPrompt: this.baseSystemPrompt(),
-				tools: this.baseTools(),
-				signal: controller.signal,
-			});
+			// Also fill the thinking-metadata cache for the current model so the
+			// first turn's network pre-flight has no round-trips left. allSettled:
+			// either half failing must not cancel the other, and the first turn
+			// re-resolves whatever is missing.
+			await Promise.allSettled([
+				this.loopFactory.resolveAssistantId({
+					systemPrompt: this.baseSystemPrompt(),
+					tools: this.baseTools(),
+					signal: controller.signal,
+				}),
+				createRuntimeThinkingResolver(this.deps.config, this.deps.client),
+			]);
 		} catch {
 			// Best-effort warm-up; the first turn will resolve it if this failed.
 		}

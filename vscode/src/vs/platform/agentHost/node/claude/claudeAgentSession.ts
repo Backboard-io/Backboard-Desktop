@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import type { McpSdkServerConfigWithInstance, Options, PermissionMode, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { McpSdkServerConfigWithInstance, ModelInfo, Options, PermissionMode, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { CancellationError } from '../../../../base/common/errors.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
@@ -15,7 +15,6 @@ import { IAgentConfigurationService } from '../agentConfigurationService.js';
 import { ISyncedCustomization } from '../../common/agentPluginManager.js';
 import { ClaudePermissionMode } from '../../common/claudeSessionConfigKeys.js';
 import { ClaudeRuntimeEffortLevel, clampEffortForRuntime, resolveClaudeEffort } from '../../common/claudeModelConfig.js';
-import type { SessionBillingMode } from '../../common/sessionConfigKeys.js';
 import { AgentSignal, IAgentSessionProjectInfo } from '../../common/agentService.js';
 import type { IAgentServerToolHost } from '../../common/agentServerTools.js';
 import { PendingRequestRegistry } from '../../common/pendingRequestRegistry.js';
@@ -29,13 +28,12 @@ import { toSdkModelId } from './claudeModelId.js';
 import { buildServerToolMcpServer, CLAUDE_SERVER_TOOL_MCP_SERVER_NAME, serverToolAllowList } from './claudeServerToolMcpServer.js';
 import { ClaudeSessionMetadataStore } from './claudeSessionMetadataStore.js';
 import { convertToolCallResult } from './clientTools/claudeClientToolResult.js';
-import { readClaudePermissionMode } from './claudeSessionPermissionMode.js';
+import { readClaudeFastMode, readClaudePermissionMode } from './claudeSessionPermissionMode.js';
 import { SessionClientToolsDiff } from './clientTools/claudeSessionClientToolsModel.js';
 import { SessionClientCustomizationsDiff } from './customizations/claudeSessionClientCustomizationsModel.js';
 import { projectSessionCustomizations } from './customizations/claudeSessionCustomizationsProjector.js';
 import { ClaudeSdkCustomizationBundler } from './customizations/claudeSdkCustomizationBundler.js';
 import { resolvePromptToContentBlocks } from './claudePromptResolver.js';
-import { IClaudeProxyHandle } from './claudeProxyService.js';
 import { ClaudeSdkPipeline, IRematerializer, type ISdkResolvedCustomizations } from './claudeSdkPipeline.js';
 import { SubagentRegistry } from './claudeSubagentRegistry.js';
 import { ClaudePermissionKind } from './claudeToolDisplay.js';
@@ -50,14 +48,6 @@ export type { IRematerializer } from './claudeSdkPipeline.js';
  * agent's per-session lookup, and the resume-vs-fresh discriminator).
  */
 export interface IMaterializeContext {
-	/**
-	 * `undefined` for subscription-billed sessions ({@link IMaterializeContext.billing}
-	 * = `'subscription'`): the SDK subprocess then uses the user's own
-	 * Claude Code login instead of the Backboard-managed proxy.
-	 */
-	readonly proxyHandle: IClaudeProxyHandle | undefined;
-	/** Who pays for model usage. Persisted to the overlay on fresh sessions so resume restores it. */
-	readonly billing: SessionBillingMode;
 	readonly canUseTool: NonNullable<Options['canUseTool']>;
 	readonly isResume: boolean;
 	/**
@@ -235,8 +225,8 @@ export class ClaudeAgentSession extends Disposable {
 	 * snapshot change). Idempotent on re-call: extra calls throw rather
 	 * than silently re-materialize.
 	 *
-	 * If the supplied {@link IMaterializeContext.proxyHandle}'s underlying
-	 * `abortController` fires while `sdk.startup()` is in flight, the SDK
+	 * If this session's {@link abortController} fires while `sdk.startup()`
+	 * is in flight, the SDK
 	 * unwinds via the controller; if `startup` resolves anyway, the
 	 * `WarmQuery` is asyncDisposed and a {@link CancellationError} is
 	 * thrown (Q8 belt-and-suspenders).
@@ -250,6 +240,7 @@ export class ClaudeAgentSession extends Disposable {
 		}
 
 		const permissionMode = readClaudePermissionMode(this._configurationService, this.sessionUri) ?? this._permissionModeFallback;
+		const fastMode = readClaudeFastMode(this._configurationService, this.sessionUri) ?? false;
 		const { mcpServers, allowedTools } = await this._buildStartupToolWiring(ctx.serverToolHost);
 
 		const options = await buildOptions(
@@ -259,6 +250,7 @@ export class ClaudeAgentSession extends Disposable {
 				model: this._provisionalModel,
 				abortController: this.abortController,
 				permissionMode,
+				fastMode,
 				canUseTool: ctx.canUseTool,
 				isResume: ctx.isResume,
 				mcpServers,
@@ -266,7 +258,9 @@ export class ClaudeAgentSession extends Disposable {
 				plugins: this.clientCustomizationsDiff.consume(),
 				agent: this._resolveAgentName(this._provisionalAgent),
 			},
-			ctx.proxyHandle,
+			// Always subscription-billed: the SDK subprocess uses the
+			// user's own Claude Code login, never the Backboard proxy.
+			undefined,
 			data => this._logService.error(`[Claude SDK stderr] ${data}`),
 			msg => this._logService.info(`[Claude] declining elicitation from MCP server (Phase 7 stub): ${msg}`),
 		);
@@ -317,6 +311,7 @@ export class ClaudeAgentSession extends Disposable {
 			toSdkModelId(this._provisionalModel?.id),
 			clampEffortForRuntime(resolveClaudeEffort(this._provisionalModel)),
 			permissionMode,
+			fastMode,
 		);
 
 		// Fresh sessions persist their customization-directory / model /
@@ -329,7 +324,6 @@ export class ClaudeAgentSession extends Disposable {
 					customizationDirectory: this.workingDirectory,
 					model: this._provisionalModel,
 					permissionMode,
-					billing: ctx.billing,
 				});
 			} catch (err) {
 				this._logService.error(`[Claude] Failed to persist customization directory; aborting materialize`, err);
@@ -348,6 +342,7 @@ export class ClaudeAgentSession extends Disposable {
 
 		pipeline.attachRematerializer(async (_reason) => {
 			const liveMode = readClaudePermissionMode(this._configurationService, this.sessionUri) ?? this._permissionModeFallback;
+			const liveFastMode = readClaudeFastMode(this._configurationService, this.sessionUri) ?? false;
 			try {
 				const { mcpServers: rebuildMcp, allowedTools: rebuildAllowedTools } = await this._buildStartupToolWiring(ctx.serverToolHost);
 				const rebuildAbort = new AbortController();
@@ -358,6 +353,7 @@ export class ClaudeAgentSession extends Disposable {
 						model: this._provisionalModel,
 						abortController: rebuildAbort,
 						permissionMode: liveMode,
+						fastMode: liveFastMode,
 						canUseTool: ctx.canUseTool,
 						isResume: true,
 						mcpServers: rebuildMcp,
@@ -365,7 +361,7 @@ export class ClaudeAgentSession extends Disposable {
 						plugins: this.clientCustomizationsDiff.consume(),
 						agent: this._resolveAgentName(this._provisionalAgent),
 					},
-					ctx.proxyHandle,
+					undefined,
 					data => this._logService.error(`[Claude SDK stderr] ${data}`),
 					msg => this._logService.info(`[Claude] declining elicitation from MCP server (Phase 7 stub): ${msg}`),
 				);
@@ -433,6 +429,15 @@ export class ClaudeAgentSession extends Disposable {
 	/** True once {@link materialize} has installed the SDK pipeline. */
 	get isPipelineReady(): boolean { return this._pipeline !== undefined; }
 
+	/**
+	 * The models the SDK reports for the logged-in account, or `undefined`
+	 * pre-materialize / pre-first-send. Used by the agent to upgrade its
+	 * static fallback catalog with real per-account model metadata.
+	 */
+	async supportedModels(): Promise<ModelInfo[] | undefined> {
+		return this._pipeline?.supportedModels();
+	}
+
 	/** Pre-materialize model selection accessor (read by materializer to build Options). */
 	get provisionalModel(): ModelSelection | undefined { return this._provisionalModel; }
 
@@ -486,6 +491,10 @@ export class ClaudeAgentSession extends Disposable {
 		} else {
 			await pipeline.setPermissionMode(resolveCurrentPermissionMode(this._configurationService, this.sessionUri, this._permissionModeFallback));
 		}
+		// Forward the live fast-mode flag so a mid-session toggle from the
+		// composer chip reaches the SDK on the next turn. The pipeline's
+		// bijective cache makes this free when nothing changed.
+		await pipeline.setFastMode(readClaudeFastMode(this._configurationService, this.sessionUri) ?? false);
 		return pipeline.send(prompt, turnId);
 	}
 

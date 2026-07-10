@@ -58,6 +58,13 @@ export interface IBuildOptionsInput {
 	 * Omit when no custom agent is selected (SDK default behavior).
 	 */
 	readonly agent?: string;
+	/**
+	 * Claude fast mode: faster output on supported models (uses more of the
+	 * account's usage limits). Projected onto `Options.settings.fastMode` so
+	 * the SDK starts the session with it; mid-session flips go through
+	 * `Query.applyFlagSettings({ fastMode })` in the pipeline.
+	 */
+	readonly fastMode?: boolean;
 }
 
 /**
@@ -76,13 +83,13 @@ export interface IBuildOptionsInput {
  * — both call sites pass a freshly-built `mcpServers` snapshot consumed
  * from the session's {@link SessionClientToolsDiff}.
  *
- * `proxyHandle` is `undefined` for subscription-billed sessions
- * ({@link SessionConfigKey.Billing} = `'subscription'`): no
- * `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` is injected, so the SDK
- * subprocess falls back to the user's own Claude Code login (credential
- * store under `~/.claude`, macOS Keychain, or `CLAUDE_CODE_OAUTH_TOKEN`).
- * `ANTHROPIC_API_KEY` stays stripped either way — subscription usage must
- * flow through the CLI's own OAuth, never a raw API key.
+ * `proxyHandle` is always `undefined` in practice: Claude sessions run
+ * entirely on the user's own subscription, never the Backboard-managed
+ * proxy, so no `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` is injected and
+ * the SDK subprocess falls back to the user's own Claude Code login
+ * (credential store under `~/.claude`, macOS Keychain, or
+ * `CLAUDE_CODE_OAUTH_TOKEN`). `ANTHROPIC_API_KEY` stays stripped regardless
+ * — usage must flow through the CLI's own OAuth, never a raw API key.
  */
 export async function buildOptions(
 	input: IBuildOptionsInput,
@@ -130,7 +137,7 @@ export async function buildOptions(
 			: {}),
 		...(input.agent ? { agent: input.agent } : {}),
 		settingSources: ['user', 'project', 'local'],
-		settings: { env: settingsEnv },
+		settings: { env: settingsEnv, ...(input.fastMode !== undefined ? { fastMode: input.fastMode } : {}) },
 		systemPrompt: { type: 'preset', preset: 'claude_code' },
 		stderr: logStderr,
 	};

@@ -229,7 +229,7 @@ export function editEntriesToMultiDiffData(entriesObs: IObservable<readonly IEdi
 		resources: entries.map(entry => ({
 			originalUri: entry.originalURI,
 			modifiedUri: entry.modifiedURI,
-			goToFileUri: entry.modifiedURI,
+			goToFileUri: entry.resource ?? entry.modifiedURI,
 			added: entry.added,
 			removed: entry.removed,
 		}))
@@ -290,6 +290,15 @@ export interface IEditSessionEntryDiff extends IEditSessionDiffStats {
 	/** LHS and RHS of a diff editor, if opened: */
 	originalURI: URI;
 	modifiedURI: URI;
+
+	/**
+	 * The real on-disk file this diff is for. Usually equal to `modifiedURI`,
+	 * except for adapters (e.g. the agent host) where `modifiedURI` points at
+	 * an internal content snapshot rather than the file itself — those should
+	 * set this so consumers displaying a file name/path don't show the
+	 * snapshot URI's internal scheme and encoded path.
+	 */
+	resource?: URI;
 
 	/** Diff state information: */
 	quitEarly: boolean;

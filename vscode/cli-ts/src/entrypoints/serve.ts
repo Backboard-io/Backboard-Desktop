@@ -73,6 +73,22 @@ export async function runServe(argv: string[]): Promise<void> {
 
 	const client = new BackboardClient(config.env, serverLog);
 	const hookConfig = loadHookConfig(config.hookConfigPaths);
+	// A fresh serve process gates the host's first send whenever the spawn
+	// lands on the critical path (cold send, workspace switch), so overlap the
+	// independent boot steps: MCP config load + server startup run alongside
+	// the environment scan (git + directory listing).
+	const mcpReady = (async () => {
+		const mcpConfig = await loadMcpConfig({
+			cwd: config.cwd,
+			paths: config.mcpConfigPaths,
+		});
+		const manager = new McpClientManager(mcpConfig, config.cwd);
+		return { manager, mcp: await manager.initialize(new AbortController().signal) };
+	})();
+	// Keeps an MCP failure from becoming an unhandled rejection if the
+	// environment scan below throws first; the real error still surfaces at
+	// the `await mcpReady`.
+	mcpReady.catch(() => undefined);
 	const startupEnvironmentPrompt = await buildStartupEnvironmentPrompt(
 		config.cwd,
 	);
@@ -82,12 +98,7 @@ export async function runServe(argv: string[]): Promise<void> {
 		cwd: config.cwd,
 		sessionId,
 	});
-	const mcpConfig = await loadMcpConfig({
-		cwd: config.cwd,
-		paths: config.mcpConfigPaths,
-	});
-	const mcpManager = new McpClientManager(mcpConfig, config.cwd);
-	const mcp = await mcpManager.initialize(new AbortController().signal);
+	const { manager: mcpManager, mcp } = await mcpReady;
 	for (const warning of [...hookConfig.warnings, ...mcp.warnings]) {
 		bus.emit({ type: "system:warning", message: warning });
 	}

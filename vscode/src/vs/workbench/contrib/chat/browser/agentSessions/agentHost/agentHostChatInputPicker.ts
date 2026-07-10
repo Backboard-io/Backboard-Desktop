@@ -11,7 +11,6 @@ import { BaseActionViewItem } from '../../../../../../base/browser/ui/actionbar/
 import { Delayer } from '../../../../../../base/common/async.js';
 import { CancellationTokenSource } from '../../../../../../base/common/cancellation.js';
 import { Codicon } from '../../../../../../base/common/codicons.js';
-import { Emitter, Event } from '../../../../../../base/common/event.js';
 import { Disposable, DisposableStore, IDisposable, MutableDisposable } from '../../../../../../base/common/lifecycle.js';
 import { ThemeIcon } from '../../../../../../base/common/themables.js';
 import { URI } from '../../../../../../base/common/uri.js';
@@ -112,8 +111,8 @@ function getConfigIcon(property: string, value: unknown | undefined): ThemeIcon 
 			case 'bypassPermissions': return Codicon.warning;
 		}
 	}
-	if (property === SessionConfigKey.Billing) {
-		return value === 'subscription' ? Codicon.account : Codicon.creditCard;
+	if (property === ClaudeSessionConfigKey.FastMode) {
+		return isToggledOff(value) ? Codicon.circleSlash : Codicon.zap;
 	}
 	return undefined;
 }
@@ -217,8 +216,8 @@ export const WELL_KNOWN_PICKER_PROPERTIES: ReadonlySet<string> = new Set<string>
 	SessionConfigKey.Isolation,
 	SessionConfigKey.Branch,
 	SessionConfigKey.Permissions,
-	SessionConfigKey.Billing,
 	ClaudeSessionConfigKey.PermissionMode,
+	ClaudeSessionConfigKey.FastMode,
 ]);
 
 /**
@@ -255,18 +254,6 @@ export class AgentHostChatInputPicker extends Disposable {
 
 	private _initialResolved: { readonly sessionResource: URI; readonly result: ResolveSessionConfigResult } | undefined;
 	private readonly _initialResolveCts = this._register(new MutableDisposable<CancellationTokenSource>());
-
-	/**
-	 * Fires after every chip (re-)render — including renders that hid the
-	 * chip. Lets wrapper widgets (e.g. the billing toggle) mirror the chip's
-	 * current context without duplicating the state subscription.
-	 */
-	private readonly _onDidRenderChip = this._register(new Emitter<void>());
-	readonly onDidRenderChip: Event<void> = this._onDidRenderChip.event;
-
-	/** Fires with the normalized value after the user picks a new value. */
-	private readonly _onDidSelectValue = this._register(new Emitter<unknown>());
-	readonly onDidSelectValue: Event<unknown> = this._onDidSelectValue.event;
 
 	constructor(
 		private readonly _widget: IChatWidget,
@@ -384,17 +371,6 @@ export class AgentHostChatInputPicker extends Disposable {
 	}
 
 	private _renderChip(): void {
-		if (this._isDisposed || !this._container) {
-			return;
-		}
-		try {
-			this._doRenderChip();
-		} finally {
-			this._onDidRenderChip.fire();
-		}
-	}
-
-	private _doRenderChip(): void {
 		if (this._isDisposed || !this._container) {
 			return;
 		}
@@ -598,15 +574,17 @@ export class AgentHostChatInputPicker extends Disposable {
 		);
 	}
 
+	/**
+	 * Opens the picker anchored to `anchor`, or to this picker's own rendered
+	 * trigger when omitted. Works even if `render()` was never called (e.g.
+	 * when this picker is used only for its state and nested from another
+	 * widget's dropdown, like the consolidated Claude options gear).
+	 */
 	show(anchor?: HTMLElement): void {
-		if (this._trigger) {
-			void this._showPicker(anchor ?? this._trigger);
+		const trigger = anchor ?? this._trigger;
+		if (trigger) {
+			void this._showPicker(trigger);
 		}
-	}
-
-	getCurrentLabel(): string | undefined {
-		const ctx = this._readContext();
-		return ctx ? this._labelFor(ctx.schema, ctx.value) : undefined;
 	}
 
 	/** Current config value for the bound property, or `undefined` when no context is attached. */
@@ -614,18 +592,14 @@ export class AgentHostChatInputPicker extends Disposable {
 		return this._readContext()?.value;
 	}
 
-	/** Agent provider id of the bound backend session (its URI scheme), if any. */
-	getBackendProvider(): string | undefined {
-		if (this._subRef.value) {
-			return this._subRef.value.backendSession.scheme;
-		}
-		const sessionResource = this._widget.viewModel?.sessionResource;
-		return sessionResource ? toAgentHostBackendSessionUri(sessionResource)?.scheme : undefined;
-	}
-
-	/** Whether the bound property is advertised by the current session's schema. */
+	/** Whether the bound property is currently advertised by the session's schema (i.e. this picker has something to show). */
 	hasContext(): boolean {
 		return this._readContext() !== undefined;
+	}
+
+	getCurrentLabel(): string | undefined {
+		const ctx = this._readContext();
+		return ctx ? this._labelFor(ctx.schema, ctx.value) : undefined;
 	}
 
 	/**
@@ -730,7 +704,6 @@ export class AgentHostChatInputPicker extends Disposable {
 			if (!this._subRef.value || this._subRef.value.backendSession.toString() !== created.toString()) {
 				this._reattach();
 			}
-			this._onDidSelectValue.fire(normalizedValue);
 			return;
 		}
 
@@ -744,7 +717,6 @@ export class AgentHostChatInputPicker extends Disposable {
 			this._readWorkingDirectory(),
 			nextConfig,
 		);
-		this._onDidSelectValue.fire(normalizedValue);
 	}
 }
 

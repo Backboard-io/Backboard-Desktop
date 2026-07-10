@@ -68,6 +68,20 @@
 		box-shadow: none;
 	}
 
+	/* Folder header rows carry their highlight on the inner compact
+	 * `.session-section` band only (see the `.session-section` pill rules
+	 * below). Suppress the base list widget's full-row focus/selection
+	 * background and outline for these rows — otherwise the row paints a
+	 * second, taller pill nested around the band. */
+	.monaco-list-row:has(.session-section):hover,
+	.monaco-list-row.focused:has(.session-section),
+	.monaco-list-row.selected:has(.session-section),
+	.monaco-list:focus .monaco-list-row.selected:has(.session-section) {
+		background: transparent !important;
+		outline: none !important;
+		box-shadow: none !important;
+	}
+
 	.monaco-list-row .force-no-twistie {
 		display: none !important;
 	}

@@ -1703,6 +1703,15 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 			newSession.setConfigValue(property, normalizedValue);
 			this._onDidChangeSessionConfig.fire(sessionId);
 			await this._refreshNewSessionConfig(newSession);
+			// The eager backend create may have failed earlier (e.g.
+			// AHP_AUTH_REQUIRED for a Backboard-billed Claude draft while
+			// signed out). A config change can lift that gate (billing →
+			// subscription), so retry the create with the updated config.
+			// `eagerCreate` no-ops when the backend session already exists.
+			const retryConnection = this.connection;
+			if (retryConnection) {
+				newSession.eagerCreate(retryConnection);
+			}
 			return;
 		}
 

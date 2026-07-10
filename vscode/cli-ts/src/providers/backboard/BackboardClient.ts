@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { BackboardEnv } from "../../config/env.ts";
 import type { ServerEventLog } from "../../core/session/ServerEventLog.ts";
 import type { OpenAITool } from "../../core/tools/schema.ts";
@@ -35,6 +36,14 @@ export class BackboardClient {
 	/** Base API URL, used to namespace host-side caches per backend. */
 	get apiUrl(): string {
 		return this.env.apiUrl;
+	}
+
+	/**
+	 * Non-reversible fingerprint of the API key, used to namespace host-side
+	 * caches per signed-in account (assistants are account-owned server-side).
+	 */
+	get accountFingerprint(): string {
+		return createHash("sha256").update(this.env.apiKey).digest("hex").slice(0, 16);
 	}
 
 	private headers(): Record<string, string> {

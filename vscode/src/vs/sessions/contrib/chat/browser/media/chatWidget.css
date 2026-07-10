@@ -182,7 +182,11 @@
 	align-items: center;
 	justify-content: center;
 	gap: 14px;
-	width: min(680px, calc(100% - 48px));
+	/* Wide enough that the one-line heading — now carrying both the workspace
+	 * and agent pickers ("... in <ws> with <agent>?") — fits without wrapping;
+	 * still bounded to the region so it never spills off-screen. The title's
+	 * fluid font-size shrinks it to fit on narrower regions. */
+	width: min(960px, calc(100% - 48px));
 	align-self: end;
 	justify-self: center;
 	grid-row: 2;
@@ -216,8 +220,6 @@
 	height: 40px;
 	shape-rendering: crispEdges;
 	image-rendering: pixelated;
-	/* Origin near the mascot's face so the punch lunge grows toward the
-	 * viewer and the open space, not into the heading text. */
 	transform-origin: 55% 60%;
 	animation: new-chat-octopus-bob 32s ease-in-out infinite;
 }
@@ -231,8 +233,7 @@
 .new-chat-octopus .octo-sleep-z1,
 .new-chat-octopus .octo-sleep-z2,
 .new-chat-octopus .octo-sleep-z3,
-.new-chat-octopus .octo-fist,
-.new-chat-octopus .octo-flip-up,
+.new-chat-octopus .octo-flip,
 .new-chat-octopus .octo-flip-waggle,
 .new-chat-octopus .octo-eyelids {
 	opacity: 0;
@@ -295,12 +296,8 @@
 	fill: #ffffff;
 }
 
-.new-chat-octopus .octo-fist {
-	animation: new-chat-octopus-fist 32s linear infinite;
-}
-
-.new-chat-octopus .octo-flip-up {
-	animation: new-chat-octopus-flip-up 32s linear infinite;
+.new-chat-octopus .octo-flip {
+	animation: new-chat-octopus-flip 32s linear infinite;
 }
 
 .new-chat-octopus .octo-flip-waggle {
@@ -317,8 +314,8 @@
  *  14-20% soccer keep-ups (ball high/low, kicking leg; frame A hidden)
  *  30-36% barbell press (chin level -> overhead lockout, twice)
  *  64-76% dozes off (eyes shut, Z's stream up, slow breathing) -- then
- *  jolts awake for the
- *  78-86% flip-off: giant fist punch, finger + two waggles, closing fist. */
+ *  wakes for the
+ *  78-81% subtle flip-off: one tentacle rises briefly, tip leans, drops. */
 @keyframes new-chat-octopus-frame-a {
 	0%, 7.9% { opacity: 1; }
 	8%, 8.6% { opacity: 0; }
@@ -335,8 +332,8 @@
 	60.7%, 61.3% { opacity: 1; }
 	61.4%, 61.9% { opacity: 0; }
 	62%, 77.9% { opacity: 1; }
-	78%, 85.9% { opacity: 0; }
-	86%, 100% { opacity: 1; }
+	78%, 81.1% { opacity: 0; }
+	81.2%, 100% { opacity: 1; }
 }
 
 @keyframes new-chat-octopus-frame-b {
@@ -433,36 +430,30 @@
 	76%, 100% { opacity: 0; }
 }
 
-@keyframes new-chat-octopus-fist {
+/* Subtle flip-off (~78-81%): one tentacle rises for a beat and the tip
+ * leans a couple times, then drops. No scale, no fist — understated. */
+@keyframes new-chat-octopus-flip {
 	0%, 77.9% { opacity: 0; }
-	78%, 79.9% { opacity: 1; }
-	80%, 84.3% { opacity: 0; }
-	84.4%, 85.9% { opacity: 1; }
-	86%, 100% { opacity: 0; }
-}
-
-@keyframes new-chat-octopus-flip-up {
-	0%, 79.9% { opacity: 0; }
-	80%, 80.8% { opacity: 1; }
-	80.9%, 81.7% { opacity: 0; }
-	81.8%, 82.6% { opacity: 1; }
-	82.7%, 83.5% { opacity: 0; }
-	83.6%, 84.3% { opacity: 1; }
-	84.4%, 100% { opacity: 0; }
+	78%, 78.8% { opacity: 1; }
+	78.9%, 79.3% { opacity: 0; }
+	79.4%, 80.2% { opacity: 1; }
+	80.3%, 80.7% { opacity: 0; }
+	80.8%, 81% { opacity: 1; }
+	81.1%, 100% { opacity: 0; }
 }
 
 @keyframes new-chat-octopus-flip-waggle {
-	0%, 80.8% { opacity: 0; }
-	80.9%, 81.7% { opacity: 1; }
-	81.8%, 82.6% { opacity: 0; }
-	82.7%, 83.5% { opacity: 1; }
-	83.6%, 100% { opacity: 0; }
+	0%, 78.8% { opacity: 0; }
+	78.9%, 79.3% { opacity: 1; }
+	79.4%, 80.2% { opacity: 0; }
+	80.3%, 80.7% { opacity: 1; }
+	80.8%, 100% { opacity: 0; }
 }
 
 /* Motion track: hops on the wiggles, rhythmic bounces for the keep-ups, a
- * squat-and-press for the barbell, and the 2x punch lunge for the flip. */
+ * squat-and-press for the barbell, and a small lean for the flip. */
 @keyframes new-chat-octopus-bob {
-	0%, 7.5%, 10.5%, 13.5%, 20.5%, 29.5%, 36.5%, 41.5%, 46.5%, 59.5%, 62.5%, 77.5%, 86.5%, 100% { transform: translateY(0) rotate(0deg) scale(1); }
+	0%, 7.5%, 10.5%, 13.5%, 20.5%, 29.5%, 36.5%, 41.5%, 46.5%, 59.5%, 62.5%, 77.5%, 81.5%, 100% { transform: translateY(0) rotate(0deg) scale(1); }
 	8.5% { transform: translateY(-2px) rotate(0deg) scale(1); }
 	9.5% { transform: translateY(-1px) rotate(0deg) scale(1); }
 	14.4% { transform: translateY(-2px) rotate(0deg) scale(1); }
@@ -489,8 +480,8 @@
 	72.8% { transform: translateY(1px) rotate(2deg) scale(1); }
 	74.8% { transform: translateY(2px) rotate(2deg) scale(1); }
 	76.3% { transform: translateY(0) rotate(0deg) scale(1); }
-	78.5% { transform: translateY(-2px) rotate(-8deg) scale(2.3); }
-	79.2%, 85.2% { transform: translateY(-2px) rotate(-4deg) scale(2); }
+	/* Flip-off: just a small lift and slight lean, no scale. */
+	79.5% { transform: translateY(-1px) rotate(-3deg) scale(1); }
 }
 
 /* Quick blinks sprinkled through the idle cycle. */
@@ -627,7 +618,12 @@
 .new-chat-middle-title {
 	margin: 0;
 	color: var(--vscode-foreground);
-	font-size: 30px;
+	/* Keep the whole sentence (text + both pickers + "?") on one row. The
+	 * font-size is fluid — 30px on wide regions, scaling down with the region
+	 * width (`cqw`, resolved against the size-container `.new-chat-widget-container`)
+	 * so the nowrap line always fits instead of clipping. */
+	font-size: min(30px, 3.8cqw);
+	white-space: nowrap;
 	font-weight: 400;
 	line-height: 1.2;
 	/* Anchor for the absolutely positioned octopus mascot. */
@@ -689,6 +685,74 @@
 }
 
 .new-chat-middle-title .new-chat-middle-title-picker .sessions-chat-picker-slot.sessions-chat-workspace-picker .action-label .sessions-chat-dropdown-chevron {
+	font-size: 18px;
+	margin-left: 2px;
+	color: var(--vscode-descriptionForeground);
+	flex-shrink: 0;
+	align-self: center;
+	transform: translateY(2px);
+}
+
+/* The session-type (agent) picker sits at the end of the same heading
+	sentence ("... with <agent>?"). Scale it to the heading's type exactly
+	like the workspace picker above so both dropdowns read at the same size;
+	unlike the workspace picker, its leading icon (the agent's identity mark)
+	stays visible, sized to the heading line. These selectors repeat the
+	picker-slot classes so they beat the generic chip-size rules further down
+	this file. */
+.new-chat-middle-title .new-chat-middle-title-picker.sessions-chat-session-type-picker,
+.new-chat-middle-title .new-chat-middle-title-picker .sessions-chat-picker-slot.sessions-chat-session-type-picker {
+	display: inline-flex;
+	align-items: center;
+	vertical-align: bottom;
+	max-width: 100%;
+	min-width: 0;
+}
+
+.new-chat-middle-title .new-chat-middle-title-picker .sessions-chat-picker-slot.sessions-chat-session-type-picker .action-label {
+	display: inline-flex;
+	align-items: baseline;
+	gap: 6px;
+	height: auto;
+	padding: 0 8px;
+	margin: 0 -4px;
+	font: inherit;
+	line-height: inherit;
+	color: inherit;
+	background-color: transparent;
+	border: none;
+	border-radius: var(--vscode-cornerRadius-medium, 10px);
+	cursor: pointer;
+	max-width: 100%;
+	min-width: 0;
+}
+
+.new-chat-middle-title .new-chat-middle-title-picker .sessions-chat-picker-slot.sessions-chat-session-type-picker .action-label:hover,
+.new-chat-middle-title .new-chat-middle-title-picker .sessions-chat-picker-slot.sessions-chat-session-type-picker .action-label:focus-visible {
+	background-color: var(--vscode-toolbar-hoverBackground);
+	color: inherit;
+}
+
+.new-chat-middle-title .new-chat-middle-title-picker .sessions-chat-picker-slot.sessions-chat-session-type-picker .action-label > .codicon:not(.sessions-chat-dropdown-chevron) {
+	display: inline-flex;
+	align-self: center;
+	/* Match the heading's cap height rather than the compact chip size. */
+	font-size: 0.8em;
+	margin: 0;
+	color: inherit;
+}
+
+.new-chat-middle-title .new-chat-middle-title-picker .sessions-chat-picker-slot.sessions-chat-session-type-picker .action-label .sessions-chat-dropdown-label {
+	font: inherit;
+	margin-left: 0;
+	min-width: 0;
+	max-width: 18ch;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.new-chat-middle-title .new-chat-middle-title-picker .sessions-chat-picker-slot.sessions-chat-session-type-picker .action-label .sessions-chat-dropdown-chevron {
 	font-size: 18px;
 	margin-left: 2px;
 	color: var(--vscode-descriptionForeground);

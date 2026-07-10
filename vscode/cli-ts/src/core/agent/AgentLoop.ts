@@ -6,7 +6,9 @@ import type {
 	ThinkingRequestKind,
 } from "../../config/defaults.ts";
 import type { RuntimeThinkingResolver } from "../../config/thinkingRuntime.ts";
+import { invalidateAssistantCache } from "../../providers/backboard/assistants.ts";
 import type { BackboardClient } from "../../providers/backboard/BackboardClient.ts";
+import { BackboardError } from "../../providers/backboard/errors.ts";
 import type { EventBus } from "../bus/EventBus.ts";
 import type { TurnStatus } from "../bus/events.ts";
 import type { Session } from "../session/Session.ts";
@@ -155,9 +157,21 @@ export class AgentLoop {
 				return "cancelled";
 			}
 			turn.status = "failed";
+			// A 404 on the turn means the assistant no longer exists server-side
+			// (deleted, or cached from another account). Drop the stale id so the
+			// next message provisions a fresh assistant instead of failing forever.
+			let errorMessage = err instanceof Error ? err.message : String(err);
+			if (isStaleAssistantError(err)) {
+				if (this.deps.assistantId) {
+					invalidateAssistantCache(this.deps.assistantId);
+				}
+				session.assistantId = null;
+				errorMessage =
+					"Backboard assistant was not found (it may belong to a previous sign-in). Cleared the stale assistant — please send your message again.";
+			}
 			bus.emit({
 				type: "run:error",
-				error: err instanceof Error ? err.message : String(err),
+				error: errorMessage,
 			});
 			bus.emit({
 				type: "turn:end",
@@ -185,4 +199,16 @@ export class AgentLoop {
 		}
 		return evidence.phase === "initial" ? this.deps.thinking : undefined;
 	}
+}
+
+/** True when the backend rejected the turn because the assistant id is gone. */
+function isStaleAssistantError(err: unknown): boolean {
+	if (!(err instanceof BackboardError) || err.status !== 404) {
+		return false;
+	}
+	const detail =
+		err.body && typeof err.body === "object"
+			? (err.body as { detail?: unknown }).detail
+			: undefined;
+	return typeof detail === "string" && /assistant not found/i.test(detail);
 }

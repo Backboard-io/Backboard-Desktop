@@ -7,6 +7,7 @@ import * as dom from '../../../../base/browser/dom.js';
 import { Gesture, EventType as TouchEventType } from '../../../../base/browser/touch.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
+import { ThemeIcon } from '../../../../base/common/themables.js';
 import { renderIcon } from '../../../../base/browser/ui/iconLabel/iconLabels.js';
 import { localize } from '../../../../nls.js';
 import { IActionWidgetService } from '../../../../platform/actionWidget/browser/actionWidget.js';
@@ -27,6 +28,19 @@ import { IChatEntitlementService } from '../../../../workbench/services/chat/com
 import { reportNewChatPickerClosed } from './newChatPickerTelemetry.js';
 
 const STORAGE_KEY_LAST_SESSION_TYPE = 'sessions.userSelectedSessionType';
+
+/** Marker providerId for the "coming soon" placeholder rows below. */
+const COMING_SOON_PROVIDER_ID = '__comingSoon__';
+
+/**
+ * Agents shown in the picker as disabled "coming soon" rows — not backed by
+ * a registered provider, so picking one is a no-op. Lets the picker preview
+ * upcoming agents before their backend wiring lands.
+ */
+const COMING_SOON_SESSION_TYPES: readonly { readonly id: string; readonly label: string; readonly icon: ThemeIcon } [] = [
+	{ id: 'codex', label: 'Codex', icon: Codicon.openai },
+	{ id: 'opencode', label: 'OpenCode', icon: Codicon.circuitBoard },
+];
 
 /**
  * A picked session type, paired with the provider that serves it. Two
@@ -53,6 +67,13 @@ export interface IPreferredSessionType {
 interface IStoredSessionTypePick {
 	readonly providerId?: string;
 	readonly sessionTypeId: string;
+	/**
+	 * The type's chat-session id (e.g. `agent-host-claude`), captured at pick
+	 * time. Allowlist checks (which speak chat-session ids) use this instead
+	 * of re-resolving through `_folderSessionTypes`, which can be momentarily
+	 * empty while providers re-advertise their session types.
+	 */
+	readonly chatSessionType?: string;
 }
 
 /**
@@ -162,7 +183,8 @@ export class SessionTypePicker extends Disposable {
 	 * consumers should fall back to {@link getPreferredSessionType}.
 	 */
 	getUserPickedSessionType(): IPreferredSessionType | undefined {
-		const pick = this._readStoredPick();
+		const stored = this._readStoredPickRaw();
+		const pick = this._toPreferredSessionType(stored);
 		if (!pick || !this._allowedSessionTypeIds) {
 			return pick;
 		}
@@ -171,8 +193,15 @@ export class SessionTypePicker extends Disposable {
 		}
 		// The allowlist may be expressed in chat-session ids (e.g.
 		// `agent-host-claude`) while the stored pick carries the
-		// provider-scoped session type id (e.g. bare `claude`) — map the pick
-		// through the advertised type's `chatSessionType` before rejecting it.
+		// provider-scoped session type id (e.g. bare `claude`). Prefer the
+		// chat-session id persisted at pick time — `_folderSessionTypes` can
+		// be momentarily empty while providers re-advertise, and dropping the
+		// pick then would silently revert the draft to the preferred type.
+		if (stored?.chatSessionType && this._allowedSessionTypeIds.includes(stored.chatSessionType)) {
+			return pick;
+		}
+		// Legacy stored picks have no chat-session id — map through the
+		// advertised types as a fallback.
 		const match = this._folderSessionTypes.find(t => t.sessionType.id === pick.sessionTypeId);
 		return match?.sessionType.chatSessionType && this._allowedSessionTypeIds.includes(match.sessionType.chatSessionType)
 			? pick
@@ -291,7 +320,13 @@ export class SessionTypePicker extends Disposable {
 			: this._folderSessionTypes;
 		this._folderSessionTypes = folderTypes;
 
-		if (folderTypes.length <= 1) {
+		// "Coming soon" rows preview agents that aren't wired up yet; skip any
+		// whose id already has a real, registered session type so we never
+		// show a duplicate once the real one lands.
+		const comingSoonTypes = COMING_SOON_SESSION_TYPES.filter(placeholder =>
+			!folderTypes.some(t => t.sessionType.id === placeholder.id));
+
+		if (folderTypes.length + comingSoonTypes.length <= 1) {
 			return;
 		}
 
@@ -310,7 +345,10 @@ export class SessionTypePicker extends Disposable {
 				groups.set(groupTitle, [folderType]);
 			}
 		}
-		const showSectionHeaders = groups.size > 1;
+		// "Coming soon" rows get their own section header whenever there's
+		// anything else in the list to distinguish them from, so they read as
+		// a preview rather than real, pickable providers.
+		const showSectionHeaders = groups.size > 1 || (groups.size > 0 && comingSoonTypes.length > 0);
 
 		const groupedItems: IActionListItem<ISessionTypePickerItem>[] = [];
 		for (const [groupTitle, types] of groups) {
@@ -352,9 +390,43 @@ export class SessionTypePicker extends Disposable {
 			}
 		}
 
+		if (comingSoonTypes.length > 0) {
+			if (showSectionHeaders) {
+				if (groupedItems.length > 0) {
+					groupedItems.push({ kind: ActionListItemKind.Separator, label: '' });
+				}
+				groupedItems.push({
+					kind: ActionListItemKind.Header,
+					group: { title: localize('sessionTypePicker.comingSoon', "Coming Soon") },
+					label: localize('sessionTypePicker.comingSoon', "Coming Soon"),
+				});
+			}
+			for (const placeholder of comingSoonTypes) {
+				const item: ISessionTypePickerItem = {
+					providerId: COMING_SOON_PROVIDER_ID,
+					sessionTypeId: placeholder.id,
+					label: placeholder.label,
+				};
+				groupedItems.push({
+					kind: ActionListItemKind.Action,
+					label: placeholder.label,
+					disabled: true,
+					description: localize('sessionTypePicker.comingSoonDescription', "Not available yet"),
+					group: {
+						title: '',
+						icon: placeholder.icon,
+					},
+					item,
+				});
+			}
+		}
+
 		const triggerElement = this._triggerElement;
 		const delegate: IActionListDelegate<ISessionTypePickerItem> = {
 			onSelect: (item) => {
+				if (item.providerId === COMING_SOON_PROVIDER_ID) {
+					return;
+				}
 				this.actionWidgetService.hide();
 				this._handleSelectedSessionType(item);
 			},
@@ -426,6 +498,19 @@ export class SessionTypePicker extends Disposable {
 	}
 
 	private _readStoredPick(): IPreferredSessionType | undefined {
+		return this._toPreferredSessionType(this._readStoredPickRaw());
+	}
+
+	private _toPreferredSessionType(stored: IStoredSessionTypePick | undefined): IPreferredSessionType | undefined {
+		if (!stored) {
+			return undefined;
+		}
+		return typeof stored.providerId === 'string'
+			? { providerId: stored.providerId, sessionTypeId: stored.sessionTypeId }
+			: { sessionTypeId: stored.sessionTypeId };
+	}
+
+	private _readStoredPickRaw(): IStoredSessionTypePick | undefined {
 		const raw = this.storageService.get(STORAGE_KEY_LAST_SESSION_TYPE, StorageScope.PROFILE);
 		if (!raw) {
 			return undefined;
@@ -435,9 +520,7 @@ export class SessionTypePicker extends Disposable {
 		try {
 			const parsed = JSON.parse(raw) as IStoredSessionTypePick;
 			if (parsed && typeof parsed.sessionTypeId === 'string') {
-				return typeof parsed.providerId === 'string'
-					? { providerId: parsed.providerId, sessionTypeId: parsed.sessionTypeId }
-					: { sessionTypeId: parsed.sessionTypeId };
+				return parsed;
 			}
 		} catch {
 			// Not JSON — fall through to legacy raw-string handling.
@@ -449,7 +532,13 @@ export class SessionTypePicker extends Disposable {
 
 	private _writeStoredPick(pick: IPickedSessionType): void {
 		this._picked = pick;
-		const stored: IStoredSessionTypePick = { providerId: pick.providerId, sessionTypeId: pick.sessionTypeId };
+		const chatSessionType = this._folderSessionTypes.find(t =>
+			t.providerId === pick.providerId && t.sessionType.id === pick.sessionTypeId)?.sessionType.chatSessionType;
+		const stored: IStoredSessionTypePick = {
+			providerId: pick.providerId,
+			sessionTypeId: pick.sessionTypeId,
+			...(chatSessionType ? { chatSessionType } : {}),
+		};
 		this.storageService.store(STORAGE_KEY_LAST_SESSION_TYPE, JSON.stringify(stored), StorageScope.PROFILE, StorageTarget.MACHINE);
 	}
 

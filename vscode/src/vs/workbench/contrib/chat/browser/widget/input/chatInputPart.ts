@@ -102,7 +102,7 @@ import { IChatResponseViewModel, isResponseVM } from '../../../common/model/chat
 import { IChatAgentService } from '../../../common/participants/chatAgents.js';
 import { ILanguageModelToolsService } from '../../../common/tools/languageModelToolsService.js';
 import { ChatHistoryNavigator } from '../../../common/widget/chatWidgetHistoryService.js';
-import { BackboardUsageMetricsAction, ChatSessionPrimaryPickerAction, ChatSubmitAction, IChatExecuteActionContext, OpenBackboardComposerOptionsAction, OpenDelegationPickerAction, OpenModelPickerAction, OpenModePickerAction, OpenPermissionPickerAction, OpenSessionTargetPickerAction, OpenWorkspacePickerAction } from '../../actions/chatExecuteActions.js';
+import { BackboardUsageMetricsAction, ChatSessionPrimaryPickerAction, ChatSubmitAction, IChatExecuteActionContext, OpenBackboardComposerOptionsAction, OpenChatThinkingPickerAction, OpenDelegationPickerAction, OpenModelPickerAction, OpenModePickerAction, OpenPermissionPickerAction, OpenSessionTargetPickerAction, OpenWorkspacePickerAction } from '../../actions/chatExecuteActions.js';
 import { AgentSessionProviders, AgentSessionTarget, getAgentSessionProvider } from '../../agentSessions/agentSessions.js';
 import { IAgentSessionsService } from '../../agentSessions/agentSessionsService.js';
 import { ChatAttachmentModel } from '../../attachments/chatAttachmentModel.js';
@@ -114,9 +114,8 @@ import { IChatWidget, IChatWidgetViewModelChangeEvent, ISessionTypePickerDelegat
 import { ChatEditingShowChangesAction, ViewPreviousEditsAction } from '../../chatEditing/chatEditingActions.js';
 import { resizeImage } from '../../chatImageUtils.js';
 import { ChatSessionPickerActionItem, IChatSessionPickerDelegate } from '../../chatSessions/chatSessionPickerActionItem.js';
-import { AgentHostByosToggle } from '../../agentSessions/agentHost/agentHostByosToggle.js';
 import { AgentHostChatInputPicker, AgentHostChatInputPickerActionViewItem } from '../../agentSessions/agentHost/agentHostChatInputPicker.js';
-import { OpenAgentHostAutoApprovePickerAction, OpenAgentHostModePickerAction, OpenAgentHostPermissionModePickerAction, OpenAgentHostFolderPickerAction } from '../../agentSessions/agentHost/agentHostChatInputPicker.contribution.js';
+import { OpenAgentHostAutoApprovePickerAction, OpenAgentHostClaudeOptionsAction, OpenAgentHostModePickerAction, OpenAgentHostFolderPickerAction } from '../../agentSessions/agentHost/agentHostChatInputPicker.contribution.js';
 import { AgentHostGenericConfigChips, IAgentHostGenericConfigOption } from '../../agentSessions/agentHost/agentHostGenericConfigChips.js';
 import { AgentHostFolderPickerActionItem } from '../../agentSessions/agentHost/agentHostFolderPickerActionItem.js';
 import { SessionConfigKey } from '../../../../../../platform/agentHost/common/sessionConfigKeys.js';
@@ -138,10 +137,11 @@ import { ChatFollowups } from './chatFollowups.js';
 import { IChatInputNotificationService } from './chatInputNotificationService.js';
 import { ChatGoalBannerWidget } from './chatGoalBannerWidget.js';
 import { ChatInputNotificationWidget } from './chatInputNotificationWidget.js';
-import { IChatInputPickerOptions } from './chatInputPickerActionItem.js';
+import { ChatInputPickerActionViewItem, IChatInputPickerOptions } from './chatInputPickerActionItem.js';
 import { ChatSelectedTools } from './chatSelectedTools.js';
 import { DelegationSessionPickerActionItem } from './delegationSessionPickerActionItem.js';
 import { ModelPickerActionItem, IModelPickerDelegate } from './modelPickerActionItem.js';
+import { ChatThinkingPickerActionItem } from './chatThinkingPickerActionItem.js';
 import { IModePickerDelegate, ModePickerActionItem } from './modePickerActionItem.js';
 import { IPermissionPickerDelegate, PermissionPickerActionItem } from './permissionPickerActionItem.js';
 import { SessionTypePickerActionItem } from './sessionTargetPickerActionItem.js';
@@ -369,6 +369,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	private chatInputNotificationContainer!: HTMLElement;
 	private chatGoalBannerContainer!: HTMLElement;
 	private inputContainer!: HTMLElement;
+	private editorContainer!: HTMLElement;
 	private readonly _notificationWidget = this._register(new MutableDisposable<ChatInputNotificationWidget>());
 	private readonly _goalBannerWidget = this._register(new MutableDisposable<ChatGoalBannerWidget>());
 	private readonly _onDidDismissGoalBanner = this._register(new Emitter<void>());
@@ -447,6 +448,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	private chatHasPendingDelegationTargetKey: IContextKey<boolean>;
 	private chatSessionHasCustomAgentTarget: IContextKey<boolean>;
 	private chatSessionHasTargetedModels: IContextKey<boolean>;
+	private chatSessionIsExternalAgent: IContextKey<boolean>;
 	private modelWidget: ModelPickerActionItem | undefined;
 	private modeWidget: ModePickerActionItem | undefined;
 	private permissionWidget: PermissionPickerActionItem | undefined;
@@ -746,6 +748,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		}
 		this.chatSessionHasCustomAgentTarget = ChatContextKeys.chatSessionHasCustomAgentTarget.bindTo(contextKeyService);
 		this.chatSessionHasTargetedModels = ChatContextKeys.chatSessionHasTargetedModels.bindTo(contextKeyService);
+		this.chatSessionIsExternalAgent = ChatContextKeys.chatSessionIsExternalAgent.bindTo(contextKeyService);
 
 		this.history = this._register(this.instantiationService.createInstance(ChatHistoryNavigator, this.location));
 
@@ -2442,6 +2445,22 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	}
 
 	/**
+	 * Updates the `chatSessionIsExternalAgent` context key from the active
+	 * session's agent family. Backboard-specific composer controls (the
+	 * Backboard Options gear, usage metrics) key off this to hide on
+	 * third-party (Claude / Codex) agent sessions.
+	 */
+	private _updateAgentProviderStyling(sessionResource: URI | undefined): void {
+		if (!this.container) {
+			return;
+		}
+		const provider = sessionResource ? getAgentSessionProvider(sessionResource) : undefined;
+		const isClaude = provider === AgentSessionProviders.Claude || provider === AgentSessionProviders.AgentHostClaude;
+		const isCodex = provider === AgentSessionProviders.Codex || provider === AgentSessionProviders.AgentHostCodex;
+		this.chatSessionIsExternalAgent.set(isClaude || isCodex);
+	}
+
+	/**
 	 * Computes which option groups should be visible for the current session.
 	 *
 	 * A picker should show if and only if:
@@ -2453,6 +2472,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	 * whether the picker action is shown in the toolbar via its `when` clause.
 	 */
 	private getVisibleOptionGroupsModeAndUpdateContextKeys(sessionResource: URI | undefined): IChatSessionProviderOptionGroup[] {
+		this._updateAgentProviderStyling(sessionResource);
 		const customAgentTarget = sessionResource && this.chatSessionsService.getCustomAgentTargetForSessionType(getChatSessionType(sessionResource));
 		this.chatSessionHasCustomAgentTarget.set(customAgentTarget !== Target.Undefined);
 
@@ -2933,7 +2953,6 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 					dom.h('.interactive-input-and-side-toolbar@inputAndSideToolbar', [
 						dom.h('.chat-input-container@inputContainer', [
 							dom.h('.chat-editor-container@editorContainer'),
-							dom.h('.chat-byos-toggle-container@byosToggleContainer'),
 							dom.h('.chat-input-toolbars@inputToolbars'),
 						]),
 					]),
@@ -2966,7 +2985,6 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 							dom.h('.chat-attached-context@attachedContextContainer'),
 						]),
 						dom.h('.chat-editor-container@editorContainer'),
-						dom.h('.chat-byos-toggle-container@byosToggleContainer'),
 						dom.h('.chat-input-toolbars@inputToolbars'),
 					]),
 				]),
@@ -2988,7 +3006,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		const inputAndSideToolbar = elements.inputAndSideToolbar; // The chat input and toolbar to the right
 		const inputContainer = elements.inputContainer; // The chat editor, attachments, and toolbars
 		this.inputContainer = inputContainer;
-		const editorContainer = elements.editorContainer;
+		const editorContainer = this.editorContainer = elements.editorContainer;
 		this.chatInputOverlay = editorContainer.appendChild(dom.$('.chat-input-overlay'));
 		this.attachmentsContainer = elements.attachmentsContainer;
 		this.attachedContextContainer = elements.attachedContextContainer;
@@ -3219,6 +3237,8 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 
 					const itemDelegate: IModelPickerDelegate = this._createModelPickerDelegate();
 					return this.modelWidget = this.instantiationService.createInstance(ModelPickerActionItem, action, itemDelegate, pickerOptions);
+				} else if (action.id === OpenChatThinkingPickerAction.ID && action instanceof MenuItemAction) {
+					return this.instantiationService.createInstance(ChatThinkingPickerActionItem, action, this._createModelPickerDelegate());
 				} else if (action.id === OpenBackboardComposerOptionsAction.ID && action instanceof MenuItemAction) {
 					return this.instantiationService.createInstance(BackboardComposerOptionsActionViewItem, action, this, pickerOptions);
 				} else if (action.id === ConfigureToolsAction.ID) {
@@ -3266,28 +3286,25 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 					return new HiddenRenderedActionViewItem(action, this.instantiationService.createInstance(ChatSessionPickersContainerActionItem, action, widgets));
 				} else if (
 					(action.id === OpenAgentHostModePickerAction.ID
-						|| action.id === OpenAgentHostAutoApprovePickerAction.ID
-						|| action.id === OpenAgentHostPermissionModePickerAction.ID)
+						|| action.id === OpenAgentHostAutoApprovePickerAction.ID)
 					&& action instanceof MenuItemAction
 				) {
 					// Rendered in the sessions (Simple) window too: its composer
-					// carries the same auto-approve/permission chips as the
-					// editor window's right panel.
+					// carries the same auto-approve chip as the editor window's
+					// right panel.
 					const property = action.id === OpenAgentHostAutoApprovePickerAction.ID
 						? SessionConfigKey.AutoApprove
-						: action.id === OpenAgentHostPermissionModePickerAction.ID
-							? ClaudeSessionConfigKey.PermissionMode
-							: SessionConfigKey.Mode;
+						: SessionConfigKey.Mode;
 					const picker = this.instantiationService.createInstance(AgentHostChatInputPicker, widget, property);
 					const item = new AgentHostChatInputPickerActionViewItem(action, picker);
 					if (action.id === OpenAgentHostAutoApprovePickerAction.ID) {
 						this.agentHostAutoApproveWidget = item;
-					} else if (action.id === OpenAgentHostPermissionModePickerAction.ID) {
-						this.agentHostPermissionModeWidget = item;
 					} else {
 						this.agentHostModeWidget = item;
 					}
 					return new HiddenRenderedActionViewItem(action, item);
+				} else if (action.id === OpenAgentHostClaudeOptionsAction.ID && action instanceof MenuItemAction) {
+					return this.instantiationService.createInstance(AgentHostClaudeOptionsActionViewItem, action, widget, this._createModelPickerDelegate(), pickerOptions);
 				} else if (action.id === OpenAgentHostFolderPickerAction.ID && action instanceof MenuItemAction) {
 					if (this.options.isSessionsWindow) {
 						return new HiddenActionViewItem(action);
@@ -3374,12 +3391,6 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		genericChipsContainer.style.display = 'none';
 		dom.append(toolbarsContainer, genericChipsContainer);
 
-		// "Use my subscription" billing toggle, rendered above the input
-		// toolbars. Self-hides for agents whose session-config schema does
-		// not advertise the `billing` property (Copilot, cli-ts, ...).
-		const byosToggle = this._register(this.instantiationService.createInstance(AgentHostByosToggle, widget));
-		byosToggle.render(elements.byosToggleContainer);
-
 		// Secondary toolbar (permissions) — below the input box.
 		// Most Backboard agent-host config pickers now render in the primary
 		// composer toolbar; keep these min widths for any session-provider
@@ -3387,7 +3398,6 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		const agentHostShortPickerMinWidths = new Map<string, number>([
 			[OpenAgentHostModePickerAction.ID, 22],
 			[OpenAgentHostAutoApprovePickerAction.ID, 22],
-			[OpenAgentHostPermissionModePickerAction.ID, 22],
 			[OpenAgentHostFolderPickerAction.ID, 22],
 			['sessions.tunnelHost.toggleSharing', 16],
 		]);
@@ -3487,24 +3497,19 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 					return new HiddenRenderedActionViewItem(action, widget);
 				} else if (
 					(action.id === OpenAgentHostModePickerAction.ID
-						|| action.id === OpenAgentHostAutoApprovePickerAction.ID
-						|| action.id === OpenAgentHostPermissionModePickerAction.ID)
+						|| action.id === OpenAgentHostAutoApprovePickerAction.ID)
 					&& action instanceof MenuItemAction
 				) {
 					// Rendered in the sessions (Simple) window too: its composer
-					// carries the same auto-approve/permission chips as the
-					// editor window's right panel.
+					// carries the same auto-approve chip as the editor window's
+					// right panel.
 					const property = action.id === OpenAgentHostAutoApprovePickerAction.ID
 						? SessionConfigKey.AutoApprove
-						: action.id === OpenAgentHostPermissionModePickerAction.ID
-							? ClaudeSessionConfigKey.PermissionMode
-							: SessionConfigKey.Mode;
+						: SessionConfigKey.Mode;
 					const picker = this.instantiationService.createInstance(AgentHostChatInputPicker, widget, property);
 					const item = new AgentHostChatInputPickerActionViewItem(action, picker);
 					if (action.id === OpenAgentHostAutoApprovePickerAction.ID) {
 						this.agentHostAutoApproveWidget = item;
-					} else if (action.id === OpenAgentHostPermissionModePickerAction.ID) {
-						this.agentHostPermissionModeWidget = item;
 					} else {
 						this.agentHostModeWidget = item;
 					}
@@ -4241,7 +4246,12 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			this.agentSessionsService.model.onDidChangeSessions,
 			() => {
 				const sessionResource = this._widget?.viewModel?.model?.sessionResource;
-				if (!sessionResource) {
+				// Only Background sessions lack live turn-tracked edits, so only
+				// they fall back to the session's git-derived change list. Other
+				// session types are already covered by the turn-scoped edited
+				// files widget; reading it here too would surface unrelated
+				// pre-existing dirty files from the workspace's git state.
+				if (!sessionResource || getChatSessionType(sessionResource) !== AgentSessionProviders.Background) {
 					return Iterable.empty();
 				}
 				const model = this.agentSessionsService.getSession(sessionResource);
@@ -4291,7 +4301,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 
 		seenEntries.add(diff.modifiedURI);
 		entries.push({
-			reference: diff.modifiedURI,
+			reference: diff.resource ?? diff.modifiedURI,
 			state: ModifiedFileEntryState.Modified,
 			kind: 'reference',
 			options: {
@@ -4636,7 +4646,21 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		this.followupsContainer.style.width = `${followupsWidth}px`;
 
 		const initialEditorScrollWidth = this._inputEditor.getScrollWidth();
-		const newEditorWidth = Math.max(1, width - data.inputPartHorizontalPadding - data.editorBorder - data.inputPartHorizontalPaddingInside - data.toolbarsWidth - data.sideToolbarWidth);
+		let newEditorWidth = Math.max(1, width - data.inputPartHorizontalPadding - data.editorBorder - data.inputPartHorizontalPaddingInside - data.toolbarsWidth - data.sideToolbarWidth);
+		if (this.options.renderStyle !== 'compact') {
+			// CSS skins can cap the input part narrower than the width handed to
+			// layout() (e.g. the sessions window caps `.interactive-input-part` at
+			// 760px via max-width, well below the 950px the chat widget lays out
+			// with). Monaco wraps lines at the programmatic width, so a wider
+			// value paints long lines past the input's border. The editor
+			// container's measured width is the ground truth — never lay out
+			// wider. Skipped for compact inputs, where the editor shares its row
+			// with the toolbars and the container width follows the editor.
+			const editorContainerWidth = dom.getContentWidth(this.editorContainer);
+			if (editorContainerWidth > 0) {
+				newEditorWidth = Math.min(newEditorWidth, editorContainerWidth);
+			}
+		}
 		const effectiveMaxHeight = this._effectiveInputEditorMaxHeight;
 		const clampedContentHeight = Math.min(this._inputEditor.getContentHeight(), effectiveMaxHeight);
 		const inputEditorHeight = this.inputEditorMinHeight ? Math.min(Math.max(this.inputEditorMinHeight, clampedContentHeight), effectiveMaxHeight) : clampedContentHeight;
@@ -4971,5 +4995,126 @@ class BackboardComposerOptionsActionViewItem extends ActionWidgetDropdownActionV
 	override dispose(): void {
 		this.inputPart.setBackboardOptionsAnchor(undefined);
 		super.dispose();
+	}
+}
+
+/**
+ * Single gear icon consolidating the Claude-only composer controls —
+ * Thinking Level, Approvals, and Fast Mode — that previously rendered as
+ * three separate icons. Same "gear opens a dropdown, each row opens its own
+ * nested picker" shape as {@link BackboardComposerOptionsActionViewItem};
+ * the three underlying pickers (two {@link AgentHostChatInputPicker}s and a
+ * {@link ChatThinkingPickerActionItem}) are owned here directly rather than
+ * rendered into the toolbar, so their selection logic is reused unchanged.
+ */
+class AgentHostClaudeOptionsActionViewItem extends ChatInputPickerActionViewItem {
+
+	private readonly permissionPicker: AgentHostChatInputPicker;
+	private readonly fastModePicker: AgentHostChatInputPicker;
+	private readonly thinkingPicker: ChatThinkingPickerActionItem;
+
+	constructor(
+		action: MenuItemAction,
+		widget: IChatWidget,
+		modelPickerDelegate: IModelPickerDelegate,
+		pickerOptions: IChatInputPickerOptions,
+		@IInstantiationService instantiationService: IInstantiationService,
+		@IActionWidgetService actionWidgetService: IActionWidgetService,
+		@IKeybindingService keybindingService: IKeybindingService,
+		@IContextKeyService contextKeyService: IContextKeyService,
+		@ITelemetryService telemetryService: ITelemetryService,
+	) {
+		const actionProvider: IActionWidgetDropdownActionProvider = {
+			getActions: () => this.getActions(),
+		};
+		const options: Omit<IActionWidgetDropdownOptions, 'label' | 'labelRenderer'> = {
+			actionProvider,
+			showItemKeybindings: false,
+			reporter: { id: 'AgentHostClaudeOptions', name: 'AgentHostClaudeOptions', includeOptions: false },
+			listOptions: { minWidth: 220 },
+		};
+		super(action, options, pickerOptions, actionWidgetService, keybindingService, contextKeyService, telemetryService);
+		this.permissionPicker = this._register(instantiationService.createInstance(AgentHostChatInputPicker, widget, ClaudeSessionConfigKey.PermissionMode));
+		this.fastModePicker = this._register(instantiationService.createInstance(AgentHostChatInputPicker, widget, ClaudeSessionConfigKey.FastMode));
+		// BaseActionViewItem requires an IAction; this placeholder is never
+		// rendered or invoked directly — only `hasThinkingLevel`/`getCurrentLabel`/
+		// `show` are used, mirroring how the standalone icon used to work.
+		const thinkingPlaceholderAction: IAction = {
+			id: 'agentHostClaudeOptions.thinkingLevel',
+			label: '',
+			tooltip: '',
+			class: undefined,
+			enabled: true,
+			run: async () => { },
+		};
+		this.thinkingPicker = this._register(instantiationService.createInstance(ChatThinkingPickerActionItem, thinkingPlaceholderAction, modelPickerDelegate));
+	}
+
+	private getActions(): IActionWidgetDropdownAction[] {
+		const actions: IActionWidgetDropdownAction[] = [];
+		const anchor = this.getAnchorElement();
+
+		if (this.thinkingPicker.hasThinkingLevel()) {
+			const label = localize('agentHostClaudeOptions.thinkingLevel', "Thinking Level");
+			actions.push({
+				id: 'agentHostClaudeOptions.thinkingLevel',
+				label,
+				description: this.thinkingPicker.getCurrentLabel(),
+				class: undefined,
+				tooltip: label,
+				icon: Codicon.lightbulb,
+				enabled: true,
+				run: () => this.openNestedPicker(() => this.thinkingPicker.show(anchor)),
+			});
+		}
+		if (this.permissionPicker.hasContext()) {
+			const label = localize('agentHostClaudeOptions.approvals', "Approvals");
+			actions.push({
+				id: 'agentHostClaudeOptions.approvals',
+				label,
+				description: this.permissionPicker.getCurrentLabel(),
+				class: undefined,
+				tooltip: label,
+				icon: Codicon.shield,
+				enabled: true,
+				run: () => this.openNestedPicker(() => this.permissionPicker.show(anchor)),
+			});
+		}
+		if (this.fastModePicker.hasContext()) {
+			const label = localize('agentHostClaudeOptions.fastMode', "Fast Mode");
+			const on = this.fastModePicker.getCurrentValue() === true;
+			actions.push({
+				id: 'agentHostClaudeOptions.fastMode',
+				label,
+				description: this.fastModePicker.getCurrentLabel(),
+				class: undefined,
+				tooltip: label,
+				icon: on ? Codicon.zap : Codicon.circleSlash,
+				enabled: true,
+				run: () => this.openNestedPicker(() => this.fastModePicker.show(anchor)),
+			});
+		}
+
+		if (!actions.length) {
+			actions.push({
+				id: 'agentHostClaudeOptions.empty',
+				label: localize('agentHostClaudeOptions.empty', "No options"),
+				class: undefined,
+				tooltip: localize('agentHostClaudeOptions.emptyTooltip', "No configurable options are available for this session."),
+				icon: Codicon.info,
+				enabled: false,
+				run: () => undefined,
+			});
+		}
+		return actions;
+	}
+
+	private openNestedPicker(open: () => void): void {
+		setTimeout(open, 0);
+	}
+
+	protected override renderLabel(element: HTMLElement): IDisposable | null {
+		element.classList.add('codicon', 'codicon-settings-gear');
+		return super.renderLabel(element);
 	}
 }

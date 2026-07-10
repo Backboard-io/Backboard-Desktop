@@ -19,7 +19,7 @@ import { ILogService } from '../../../log/common/log.js';
 import { createSchema, platformSessionSchema, schemaProperty, type SessionMode } from '../../common/agentHostSchema.js';
 import { getReasoningEffortDescription, getReasoningEffortLabel } from '../../common/reasoningEffort.js';
 import { AgentHostCodexAgentBinaryArgsEnvVar, AgentHostCodexAgentCodexHomeEnvVar, AgentHostCodexAgentSdkRootEnvVar, AgentSession, AgentSignal, GITHUB_COPILOT_PROTECTED_RESOURCE, IAgent, IAgentCreateSessionConfig, IAgentCreateSessionResult, IAgentDescriptor, IAgentMaterializeSessionEvent, IAgentModelInfo, IAgentResolveSessionConfigParams, IAgentSessionConfigCompletionsParams, IAgentSessionMetadata, IMcpNotification, type AgentProvider } from '../../common/agentService.js';
-import { SessionConfigKey, narrowSessionBillingMode, type SessionBillingMode } from '../../common/sessionConfigKeys.js';
+import { SessionConfigKey } from '../../common/sessionConfigKeys.js';
 import { AHP_AUTH_REQUIRED, ProtocolError } from '../../common/state/sessionProtocol.js';
 import { ActionType, type SessionAction, type ChatAction } from '../../common/state/sessionActions.js';
 import type { ConfigSchema, ModelSelection, ProtectedResourceMetadata, ToolDefinition } from '../../common/state/protocol/state.js';
@@ -36,7 +36,6 @@ import { buildCodexMcpReadResult, codexMcpListToInventory, codexMcpToolsChanged,
 import { buildElicitationRequest, cancelledElicitationResponse, declinedElicitationResponse, elicitationResponseFromAnswers } from './codexElicitationMapper.js';
 import type { AhpMcpUiHostCapabilities, Customization } from '../../common/state/protocol/channels-session/state.js';
 import { IAgentConfigurationService } from '../agentConfigurationService.js';
-import { resolveSessionBillingMode } from '../shared/agentSessionBilling.js';
 import { ICopilotApiService } from '../shared/copilotApiService.js';
 import { extractForwardedErrorInfo } from '../shared/forwardedChatError.js';
 import { IAgentSdkDownloader, IAgentSdkPackage } from '../agentSdkDownloader.js';
@@ -252,22 +251,6 @@ const codexSessionConfigSchema = createSchema({
 		sessionMutable: true,
 	}),
 	[SessionConfigKey.Permissions]: platformSessionSchema.definition[SessionConfigKey.Permissions],
-	[SessionConfigKey.Billing]: schemaProperty<SessionBillingMode>({
-		type: 'string',
-		title: localize('codex.sessionConfig.billing', "Billing"),
-		description: localize('codex.sessionConfig.billingDescription', "Who pays for model usage in this session."),
-		enum: ['backboard', 'subscription'],
-		enumLabels: [
-			localize('codex.sessionConfig.billing.backboard', "Backboard"),
-			localize('codex.sessionConfig.billing.subscription', "My ChatGPT Subscription"),
-		],
-		enumDescriptions: [
-			localize('codex.sessionConfig.billing.backboardDescription', "Model usage is billed to your Backboard plan."),
-			localize('codex.sessionConfig.billing.subscriptionDescription', "Model usage runs on your own ChatGPT account (Plus or Pro). Requires being logged in with the Codex CLI (codex login). The available model list may differ."),
-		],
-		default: 'backboard',
-		sessionMutable: false,
-	}),
 });
 
 const codexVisibleSessionConfigSchema = createSchema({
@@ -278,7 +261,6 @@ const codexVisibleSessionConfigSchema = createSchema({
 	[CodexSessionConfigKey.Personality]: codexSessionConfigSchema.definition[CodexSessionConfigKey.Personality],
 	[CodexSessionConfigKey.ReasoningSummary]: codexSessionConfigSchema.definition[CodexSessionConfigKey.ReasoningSummary],
 	[SessionConfigKey.Permissions]: platformSessionSchema.definition[SessionConfigKey.Permissions],
-	[SessionConfigKey.Billing]: codexSessionConfigSchema.definition[SessionConfigKey.Billing],
 });
 
 const codexWorkspaceWriteSessionConfigSchema = createSchema({
@@ -296,7 +278,6 @@ interface ICodexSessionConfigDefaults {
 	readonly [SessionConfigKey.Mode]: SessionMode;
 	readonly [CodexSessionConfigKey.Personality]: Personality;
 	readonly [CodexSessionConfigKey.ReasoningSummary]: ReasoningSummary;
-	readonly [SessionConfigKey.Billing]: SessionBillingMode;
 }
 
 const codexSessionConfigDefaults: ICodexSessionConfigDefaults = {
@@ -309,7 +290,6 @@ const codexSessionConfigDefaults: ICodexSessionConfigDefaults = {
 	[SessionConfigKey.Mode]: 'interactive',
 	[CodexSessionConfigKey.Personality]: 'none',
 	[CodexSessionConfigKey.ReasoningSummary]: 'auto',
-	[SessionConfigKey.Billing]: 'backboard',
 };
 
 const CodexPrewarmTtlMs = 60_000;
@@ -1648,14 +1628,13 @@ export class CodexAgent extends Disposable implements IAgent {
 		const conn = await this._ensureConnection();
 		const config = this._readSessionConfig(session);
 		const model = await this._resolveModel(session);
-		// Subscription-billed threads run on codex's built-in `openai`
-		// provider (auth from the user's own `codex login`) instead of the
-		// process-wide `vscode-proxy` default set via `-c` at spawn.
-		const billing = narrowSessionBillingMode(config[SessionConfigKey.Billing]) ?? codexSessionConfigDefaults[SessionConfigKey.Billing];
+		// Threads always run on codex's built-in `openai` provider (auth from
+		// the user's own `codex login`) instead of the process-wide
+		// `vscode-proxy` default set via `-c` at spawn.
 		const startResult = await conn.client.request<'thread/start', { thread: { id: string } }>('thread/start', {
 			cwd: session.workingDirectory.fsPath,
 			model: model.id,
-			...(billing === 'subscription' ? { modelProvider: 'openai' } : {}),
+			modelProvider: 'openai',
 			approvalPolicy: narrowApprovalPolicy(config[CodexSessionConfigKey.ApprovalPolicy]) ?? codexSessionConfigDefaults[CodexSessionConfigKey.ApprovalPolicy],
 			sandbox: narrowSandboxMode(config[CodexSessionConfigKey.SandboxMode]) ?? codexSessionConfigDefaults[CodexSessionConfigKey.SandboxMode],
 			config: {
@@ -1767,7 +1746,6 @@ export class CodexAgent extends Disposable implements IAgent {
 			threadId: session.threadId,
 			cwd: session.workingDirectory,
 			modelId: session.model?.id,
-			billing: resolveSessionBillingMode(this._configurationService, session.sessionUri, undefined),
 		});
 	}
 
@@ -1831,12 +1809,10 @@ export class CodexAgent extends Disposable implements IAgent {
 			try {
 				// Re-assert the thread's model provider on resume: without it,
 				// codex re-applies the process-wide `vscode-proxy` default and
-				// a subscription-billed thread would silently flip to CAPI.
-				const overlayBilling = (await this._metadataStore.read(sessionUri)).billing;
-				const billing = resolveSessionBillingMode(this._configurationService, sessionUri, undefined, overlayBilling);
+				// the thread would silently flip off the user's own login.
 				await conn.client.request<'thread/resume'>('thread/resume', {
 					threadId,
-					...(billing === 'subscription' ? { modelProvider: 'openai' } : {}),
+					modelProvider: 'openai',
 				});
 				session.needsResume = false;
 			} catch (err) {
@@ -2557,7 +2533,6 @@ export class CodexAgent extends Disposable implements IAgent {
 			[CodexSessionConfigKey.WebSearchMode]: values[CodexSessionConfigKey.WebSearchMode],
 			[CodexSessionConfigKey.Personality]: values[CodexSessionConfigKey.Personality],
 			[CodexSessionConfigKey.ReasoningSummary]: values[CodexSessionConfigKey.ReasoningSummary],
-			[SessionConfigKey.Billing]: values[SessionConfigKey.Billing],
 		};
 		if (isWorkspaceWrite) {
 			resolvedValues[CodexSessionConfigKey.NetworkAccessEnabled] = values[CodexSessionConfigKey.NetworkAccessEnabled];

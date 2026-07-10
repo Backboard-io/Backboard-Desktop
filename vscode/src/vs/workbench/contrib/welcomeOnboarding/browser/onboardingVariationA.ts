@@ -751,16 +751,35 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		const signInButton = this._registerStepFocusable(append(welcomeContent, $<HTMLButtonElement>('button.onboarding-backboard-sign-in-button')));
 		signInButton.type = 'button';
 		signInButton.textContent = localize('onboarding.backboard.signInButton', "Sign in to Backboard.io");
-		this.stepDisposables.add(addDisposableListener(signInButton, EventType.CLICK, () => {
+		// Completing onboarding reloads this window into the chosen experience,
+		// which would kill an in-flight sign-in (the extension host dies with the
+		// reload before the device-code flow can open the browser or save the
+		// tokens). So wait for the sign-in to finish before advancing; the
+		// browser opens right away, this page just stays up until approval.
+		this.stepDisposables.add(addDisposableListener(signInButton, EventType.CLICK, async () => {
+			if (signInButton.disabled) {
+				return;
+			}
 			this._logAction('openBackboardSso');
-			void this.commandService.executeCommand('backboard.signIn').catch(error => {
+			signInButton.disabled = true;
+			const idleLabel = signInButton.textContent;
+			signInButton.textContent = localize('onboarding.backboard.signInWaiting', "Waiting for sign in… finish in your browser");
+			try {
+				// Resolves true once the tokens are saved; false when the sign-in
+				// failed or was denied (the extension already surfaced that error).
+				if (await this.commandService.executeCommand<boolean>('backboard.signIn')) {
+					this._advanceOrComplete();
+					return;
+				}
+			} catch (error) {
 				this.notificationService.notify({
 					severity: Severity.Error,
 					message: localize('onboarding.backboard.signInFailed', "Could not start Backboard sign in."),
 					source: error instanceof Error ? error.message : undefined,
 				});
-			});
-			this._advanceOrComplete();
+			}
+			signInButton.disabled = false;
+			signInButton.textContent = idleLabel;
 		}));
 
 		const skipArea = append(welcomeContent, $('.onboarding-backboard-skip-area'));

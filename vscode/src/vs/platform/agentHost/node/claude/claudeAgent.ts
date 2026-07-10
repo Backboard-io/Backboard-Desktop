@@ -21,19 +21,17 @@ import { IProductService } from '../../../product/common/productService.js';
 import { IAgentPluginManager, ISyncedCustomization } from '../../common/agentPluginManager.js';
 import { createSchema, platformSessionSchema, schemaProperty } from '../../common/agentHostSchema.js';
 import { ClaudePermissionMode, ClaudeSessionConfigKey, narrowClaudePermissionMode } from '../../common/claudeSessionConfigKeys.js';
-import { createClaudeThinkingLevelSchema, isClaudeEffortLevel } from '../../common/claudeModelConfig.js';
-import { SessionConfigKey, narrowSessionBillingMode, type SessionBillingMode } from '../../common/sessionConfigKeys.js';
+import { createClaudeThinkingLevelSchema, isClaudeEffortLevel, type ClaudeEffortLevel } from '../../common/claudeModelConfig.js';
+import { SessionConfigKey } from '../../common/sessionConfigKeys.js';
 import { AgentProvider, AgentSession, AgentSignal, GITHUB_COPILOT_PROTECTED_RESOURCE, IAgent, IAgentCreateSessionConfig, IAgentCreateSessionResult, IAgentDescriptor, IAgentMaterializeSessionEvent, IAgentModelInfo, IAgentResolveSessionConfigParams, IAgentSessionConfigCompletionsParams, IAgentSessionMetadata, IAgentSessionProjectInfo } from '../../common/agentService.js';
 import { ActionType } from '../../common/state/sessionActions.js';
 import type { ResolveSessionConfigResult, SessionConfigCompletionsResult } from '../../common/state/protocol/commands.js';
-import { AHP_AUTH_REQUIRED, ProtocolError } from '../../common/state/sessionProtocol.js';
 import { PolicyState, ProtectedResourceMetadata, type AgentSelection, type ModelSelection, type ToolDefinition } from '../../common/state/protocol/state.js';
 import { isSubagentSession, parseSubagentSessionUri, ChatInputResponseKind, type ClientPluginCustomization, type Customization, type MessageAttachment, type PendingMessage, type ChatInputAnswer, type ToolCallResult, type Turn } from '../../common/state/sessionState.js';
 import { IAgentConfigurationService } from '../agentConfigurationService.js';
 import { IAgentHostGitService } from '../agentHostGitService.js';
 import { PendingRequestRegistry } from '../../common/pendingRequestRegistry.js';
 import { projectFromCopilotContext } from '../copilot/copilotGitProject.js';
-import { resolveSessionBillingMode } from '../shared/agentSessionBilling.js';
 import { ICopilotApiService } from '../shared/copilotApiService.js';
 import { IClaudeAgentSdkService } from './claudeAgentSdkService.js';
 import { mapSessionMessagesToTurns } from './claudeReplayMapper.js';
@@ -110,6 +108,35 @@ function toAgentModelInfo(m: CCAModel, provider: AgentProvider): IAgentModelInfo
 	};
 }
 
+/**
+ * Static fallback model catalog advertised when no CAPI catalog is
+ * available — no GitHub token yet, or a subscription-billed setup that
+ * never signs in to Backboard. Ids use the canonical endpoint (dotted)
+ * format; {@link toSdkModelId} converts at the SDK seam, so these work
+ * against the Anthropic API directly.
+ *
+ * Efforts follow Anthropic's documented support matrix (`'max'` on Opus
+ * 4.6+/Sonnet 4.6+; Haiku has no effort parameter); fast mode is Opus
+ * 4.7+. This list is a bootstrap only — it is replaced by the SDK's own
+ * per-account catalog ({@link ClaudeAgent._refreshModelsFromSdk}) after
+ * the first message, and by the CAPI catalog when Backboard
+ * authentication succeeds.
+ */
+const FALLBACK_CLAUDE_MODELS: ReadonlyArray<{
+	readonly id: string;
+	readonly name: string;
+	readonly maxContextWindow: number;
+	readonly efforts: readonly ClaudeEffortLevel[];
+	readonly supportsFastMode: boolean;
+}> = [
+	{ id: 'claude-fable-5', name: 'Claude Fable 5', maxContextWindow: 200_000, efforts: ['low', 'medium', 'high', 'xhigh', 'max'], supportsFastMode: false },
+	{ id: 'claude-opus-4.8', name: 'Claude Opus 4.8', maxContextWindow: 200_000, efforts: ['low', 'medium', 'high', 'xhigh', 'max'], supportsFastMode: true },
+	{ id: 'claude-opus-4.6', name: 'Claude Opus 4.6', maxContextWindow: 200_000, efforts: ['low', 'medium', 'high', 'xhigh', 'max'], supportsFastMode: false },
+	{ id: 'claude-sonnet-5', name: 'Claude Sonnet 5', maxContextWindow: 200_000, efforts: ['low', 'medium', 'high', 'xhigh', 'max'], supportsFastMode: false },
+	{ id: 'claude-sonnet-4.6', name: 'Claude Sonnet 4.6', maxContextWindow: 200_000, efforts: ['low', 'medium', 'high', 'xhigh', 'max'], supportsFastMode: false },
+	{ id: 'claude-haiku-4.5', name: 'Claude Haiku 4.5', maxContextWindow: 200_000, efforts: [], supportsFastMode: false },
+];
+
 // Single source of truth for narrowing an arbitrary runtime value to
 // the closed `ClaudePermissionMode` union now lives in
 // `../../common/claudeSessionConfigKeys.ts` so it can be shared by
@@ -157,6 +184,8 @@ export class ClaudeAgent extends Disposable implements IAgent {
 	readonly models: IObservable<readonly IAgentModelInfo[]> = this._models;
 
 	private _githubToken: string | undefined;
+	/** Set once the SDK's per-account model catalog has replaced the static fallback. */
+	private _sdkCatalogPublished = false;
 	private _proxyHandle: IClaudeProxyHandle | undefined;
 	private _serverToolHost: IAgentServerToolHost | undefined;
 
@@ -242,6 +271,65 @@ export class ClaudeAgent extends Disposable implements IAgent {
 	) {
 		super();
 		this._metadataStore = _instantiationService.createInstance(ClaudeSessionMetadataStore, this.id);
+		// Advertise the static fallback catalog immediately so the model
+		// picker is usable before (or without) CAPI authentication — e.g.
+		// subscription-billed sessions while signed out of Backboard.
+		this._models.set(this._fallbackModels(), undefined);
+	}
+
+	private _fallbackModels(): IAgentModelInfo[] {
+		return FALLBACK_CLAUDE_MODELS.map(m => {
+			const configSchema = createClaudeThinkingLevelSchema(m.efforts);
+			return {
+				provider: this.id,
+				id: m.id,
+				name: m.name,
+				maxContextWindow: m.maxContextWindow,
+				supportsVision: true,
+				...(configSchema ? { configSchema } : {}),
+				_meta: { supportsFastMode: m.supportsFastMode },
+			};
+		});
+	}
+
+	/**
+	 * Upgrade the static fallback catalog with the SDK's own per-account
+	 * model list (`Query.supportedModels()`), which carries real effort and
+	 * fast-mode capabilities for the logged-in subscription. Only available
+	 * once a session's Query is bound (first send), so this is invoked
+	 * fire-and-forget from {@link sendMessage}. The CAPI catalog stays
+	 * authoritative whenever a GitHub token exists.
+	 */
+	private async _refreshModelsFromSdk(session: ClaudeAgentSession): Promise<void> {
+		if (this._githubToken || this._sdkCatalogPublished) {
+			return;
+		}
+		try {
+			const models = await session.supportedModels();
+			if (!models || models.length === 0 || this._githubToken || this._sdkCatalogPublished) {
+				return;
+			}
+			const mapped = models.map((m): IAgentModelInfo => {
+				const efforts = (m.supportedEffortLevels ?? []).filter(isClaudeEffortLevel);
+				const configSchema = createClaudeThinkingLevelSchema(efforts);
+				return {
+					provider: this.id,
+					// Canonical picker ids use the endpoint (dotted) format;
+					// unparseable ids (e.g. previews) pass through unchanged
+					// and `toSdkModelId` leaves them untouched at the SDK seam.
+					id: tryParseClaudeModelId(m.value)?.toEndpointModelId() ?? m.value,
+					name: m.displayName,
+					supportsVision: true,
+					...(configSchema ? { configSchema } : {}),
+					_meta: { supportsFastMode: !!m.supportsFastMode, description: m.description },
+				};
+			});
+			this._sdkCatalogPublished = true;
+			this._logService.info(`[Claude] Models refreshed from SDK account catalog. Count: ${mapped.length}`);
+			this._models.set(mapped, undefined);
+		} catch (err) {
+			this._logService.warn(`[Claude] SDK model catalog fetch failed; keeping fallback list: ${err}`);
+		}
 	}
 
 	// #region Descriptor + auth
@@ -256,18 +344,6 @@ export class ClaudeAgent extends Disposable implements IAgent {
 
 	getProtectedResources(): ProtectedResourceMetadata[] {
 		return [GITHUB_COPILOT_PROTECTED_RESOURCE];
-	}
-
-	private _ensureAuthenticated(): IClaudeProxyHandle {
-		const handle = this._proxyHandle;
-		if (!handle) {
-			throw new ProtocolError(
-				AHP_AUTH_REQUIRED,
-				'Authentication is required to use Claude',
-				this.getProtectedResources(),
-			);
-		}
-		return handle;
 	}
 
 	async authenticate(resource: string, token: string): Promise<boolean> {
@@ -304,7 +380,7 @@ export class ClaudeAgent extends Disposable implements IAgent {
 	private async _refreshModels(): Promise<void> {
 		const tokenAtStart = this._githubToken;
 		if (!tokenAtStart) {
-			this._models.set([], undefined);
+			this._models.set(this._fallbackModels(), undefined);
 			return;
 		}
 		try {
@@ -328,11 +404,14 @@ export class ClaudeAgent extends Disposable implements IAgent {
 				.map(m => toAgentModelInfo(m, this.id));
 
 			this._logService.info(`[Claude] Models refreshed. Count: ${filtered.length}`);
-			this._models.set(filtered, undefined);
+			// A CAPI catalog that filters down to nothing (or a fetch error
+			// below) must not blank the picker — fall back to the static
+			// list so Claude sessions stay usable.
+			this._models.set(filtered.length > 0 ? filtered : this._fallbackModels(), undefined);
 		} catch (err) {
 			this._logService.error(err, '[Claude] Failed to refresh models');
 			if (this._githubToken === tokenAtStart) {
-				this._models.set([], undefined);
+				this._models.set(this._fallbackModels(), undefined);
 			}
 		}
 	}
@@ -342,12 +421,6 @@ export class ClaudeAgent extends Disposable implements IAgent {
 	// #region Stubs — implemented in later phases
 
 	async createSession(config: IAgentCreateSessionConfig = {}): Promise<IAgentCreateSessionResult> {
-		// Subscription-billed sessions never touch the Backboard proxy, so
-		// they may be created without a GitHub token. Backboard-billed
-		// sessions keep the fail-fast auth gate.
-		if (narrowSessionBillingMode(config.config?.[SessionConfigKey.Billing]) !== 'subscription') {
-			this._ensureAuthenticated();
-		}
 		if (config.fork) {
 			throw new Error('TODO: Phase 6.5: fork requires message-UUID lookup via sdk.getSessionMessages');
 		}
@@ -407,7 +480,6 @@ export class ClaudeAgent extends Disposable implements IAgent {
 	 *
 	 * Failure modes:
 	 * - Missing session entry → programmer error, throws.
-	 * - Missing proxy handle → caller forgot {@link authenticate}, throws.
 	 * - Aborted before SDK init returns → {@link ClaudeAgentSession.materialize}
 	 *   disposes the `WarmQuery` and throws {@link CancellationError}.
 	 * - Customization-directory persistence failure → fatal: the session's
@@ -422,9 +494,6 @@ export class ClaudeAgent extends Disposable implements IAgent {
 		if (!session) {
 			throw new Error(`Cannot materialize unknown provisional session: ${sessionId}`);
 		}
-		const billing = resolveSessionBillingMode(this._configurationService, session.sessionUri, session.provisionalConfig);
-		const proxyHandle = billing === 'subscription' ? undefined : this._ensureAuthenticated();
-
 		const canUseTool: NonNullable<Options['canUseTool']> = (toolName, input, options) =>
 			handleCanUseTool(
 				{ getSession: id => this._findAnySession(id), configurationService: this._configurationService },
@@ -432,7 +501,7 @@ export class ClaudeAgent extends Disposable implements IAgent {
 			);
 
 		try {
-			await session.materialize({ proxyHandle, billing, canUseTool, isResume: false, serverToolHost: this._serverToolHost });
+			await session.materialize({ canUseTool, isResume: false, serverToolHost: this._serverToolHost });
 		} catch (err) {
 			this._sessions.deleteAndDispose(sessionId);
 			throw err;
@@ -480,10 +549,6 @@ export class ClaudeAgent extends Disposable implements IAgent {
 		const permissionMode = readClaudePermissionMode(this._configurationService, sessionUri)
 			?? overlay.permissionMode
 			?? 'default';
-		// The persisted overlay is the resume-time source of truth for who
-		// pays; the auth gate only applies to Backboard-billed sessions.
-		const billing = resolveSessionBillingMode(this._configurationService, sessionUri, undefined, overlay.billing);
-		const proxyHandle = billing === 'subscription' ? undefined : this._ensureAuthenticated();
 		let project: IAgentSessionProjectInfo | undefined;
 		try {
 			project = await projectFromCopilotContext({ cwd: workingDirectory.fsPath }, this._gitService);
@@ -516,7 +581,7 @@ export class ClaudeAgent extends Disposable implements IAgent {
 			);
 
 		try {
-			await session.materialize({ proxyHandle, billing, canUseTool, isResume: true, serverToolHost: this._serverToolHost });
+			await session.materialize({ canUseTool, isResume: true, serverToolHost: this._serverToolHost });
 		} catch (err) {
 			this._sessions.deleteAndDispose(sessionId);
 			throw err;
@@ -734,27 +799,18 @@ export class ClaudeAgent extends Disposable implements IAgent {
 				sessionMutable: true,
 			}),
 			[SessionConfigKey.Permissions]: platformSessionSchema.definition[SessionConfigKey.Permissions],
-			[SessionConfigKey.Billing]: schemaProperty<SessionBillingMode>({
-				type: 'string',
-				title: localize('claude.sessionConfig.billing', "Billing"),
-				description: localize('claude.sessionConfig.billingDescription', "Who pays for model usage in this session."),
-				enum: ['backboard', 'subscription'],
-				enumLabels: [
-					localize('claude.sessionConfig.billing.backboard', "Backboard"),
-					localize('claude.sessionConfig.billing.subscription', "My Claude Subscription"),
-				],
-				enumDescriptions: [
-					localize('claude.sessionConfig.billing.backboardDescription', "Model usage is billed to your Backboard plan."),
-					localize('claude.sessionConfig.billing.subscriptionDescription', "Model usage runs on your own Claude account (Pro or Max). Requires being logged in to Claude Code. The available model list may differ."),
-				],
-				default: 'backboard',
-				sessionMutable: false,
+			[ClaudeSessionConfigKey.FastMode]: schemaProperty<boolean>({
+				type: 'boolean',
+				title: localize('claude.sessionConfig.fastMode', "Fast Mode"),
+				description: localize('claude.sessionConfig.fastModeDescription', "Faster responses on supported models (Opus 4.7+). Uses more of your usage limits."),
+				default: false,
+				sessionMutable: true,
 			}),
 		});
 
 		const values = sessionSchema.validateOrDefault(_params.config, {
 			[ClaudeSessionConfigKey.PermissionMode]: 'default' satisfies ClaudePermissionMode,
-			[SessionConfigKey.Billing]: 'backboard' satisfies SessionBillingMode,
+			[ClaudeSessionConfigKey.FastMode]: false,
 			// Permissions intentionally omitted from defaults — leave
 			// unset so auto-approval falls through to the host-level
 			// default, materializing on the session only once the user
@@ -848,7 +904,12 @@ export class ClaudeAgent extends Disposable implements IAgent {
 				uuid: effectiveTurnId as `${string}-${string}-${string}-${string}-${string}`,
 			};
 
-			await session.send(sdkPrompt, effectiveTurnId);
+			const sendPromise = session.send(sdkPrompt, effectiveTurnId);
+			// The Query binds synchronously inside send(), so the SDK's
+			// per-account model catalog becomes fetchable now. Fire and
+			// forget — the catalog is a UI nicety, never send-blocking.
+			void this._refreshModelsFromSdk(session);
+			await sendPromise;
 		});
 	}
 

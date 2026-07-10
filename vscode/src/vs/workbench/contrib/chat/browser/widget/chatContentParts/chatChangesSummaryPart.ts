@@ -282,9 +282,10 @@ class CollapsibleChangesSummaryListRenderer implements IListRenderer<IEditSessio
 
 	renderElement(data: IEditSessionEntryDiff, index: number, templateData: ICollapsibleChangesSummaryListTemplate): void {
 		const label = templateData.label;
-		label.setFile(data.modifiedURI, {
+		const displayUri = data.resource ?? data.modifiedURI;
+		label.setFile(displayUri, {
 			fileKind: FileKind.FILE,
-			title: data.modifiedURI.path
+			title: displayUri.path
 		});
 		const labelElement = label.element;
 

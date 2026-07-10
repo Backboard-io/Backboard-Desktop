@@ -22,6 +22,26 @@
 export const enum ClaudeSessionConfigKey {
 	/** `'permissionMode'` — Claude SDK approval mode. */
 	PermissionMode = 'permissionMode',
+	/** `'fastMode'` — Claude fast mode (faster output on supported models). */
+	FastMode = 'fastMode',
+}
+
+/**
+ * Narrow an arbitrary runtime value to the boolean fast-mode flag.
+ * Accepts real booleans plus the `'true'`/`'false'` strings the generic
+ * boolean chips dispatch. Returns `undefined` for anything else.
+ */
+export function narrowClaudeFastMode(raw: unknown): boolean | undefined {
+	if (typeof raw === 'boolean') {
+		return raw;
+	}
+	if (raw === 'true') {
+		return true;
+	}
+	if (raw === 'false') {
+		return false;
+	}
+	return undefined;
 }
 
 /**

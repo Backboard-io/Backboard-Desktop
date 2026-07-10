@@ -5,7 +5,6 @@
 
 import { URI } from '../../../../base/common/uri.js';
 import { ILogService } from '../../../log/common/log.js';
-import { narrowSessionBillingMode, type SessionBillingMode } from '../../common/sessionConfigKeys.js';
 import { ISessionDataService } from '../../common/sessionDataService.js';
 
 /**
@@ -25,23 +24,18 @@ import { ISessionDataService } from '../../common/sessionDataService.js';
  *   `codex.model`    — serialized {@link ModelSelection.id} string,
  *                      remembered for restore so resumed sessions reuse
  *                      the model picked during the prior process.
- *   `codex.billing`  — who pays for model usage ({@link SessionBillingMode}),
- *                      re-asserted on `thread/resume` so a subscription
- *                      thread never flips back to the proxy provider.
  */
 
 export interface ICodexSessionOverlay {
 	readonly threadId?: string;
 	readonly cwd?: URI;
 	readonly modelId?: string;
-	readonly billing?: SessionBillingMode;
 }
 
 export interface ICodexSessionOverlayUpdate {
 	readonly threadId?: string;
 	readonly cwd?: URI;
 	readonly modelId?: string;
-	readonly billing?: SessionBillingMode;
 }
 
 export class CodexSessionMetadataStore {
@@ -49,7 +43,6 @@ export class CodexSessionMetadataStore {
 	private static readonly KEY_THREAD_ID = 'codex.threadId';
 	private static readonly KEY_CWD = 'codex.cwd';
 	private static readonly KEY_MODEL = 'codex.model';
-	private static readonly KEY_BILLING = 'codex.billing';
 
 	constructor(
 		@ISessionDataService private readonly _sessionDataService: ISessionDataService,
@@ -77,9 +70,6 @@ export class CodexSessionMetadataStore {
 				if (fields.modelId !== undefined) {
 					work.push(db.setMetadata(CodexSessionMetadataStore.KEY_MODEL, fields.modelId));
 				}
-				if (fields.billing !== undefined) {
-					work.push(db.setMetadata(CodexSessionMetadataStore.KEY_BILLING, fields.billing));
-				}
 				await Promise.all(work);
 			} finally {
 				ref.dispose();
@@ -101,17 +91,15 @@ export class CodexSessionMetadataStore {
 				return {};
 			}
 			try {
-				const [threadId, cwdRaw, modelId, billingRaw] = await Promise.all([
+				const [threadId, cwdRaw, modelId] = await Promise.all([
 					ref.object.getMetadata(CodexSessionMetadataStore.KEY_THREAD_ID),
 					ref.object.getMetadata(CodexSessionMetadataStore.KEY_CWD),
 					ref.object.getMetadata(CodexSessionMetadataStore.KEY_MODEL),
-					ref.object.getMetadata(CodexSessionMetadataStore.KEY_BILLING),
 				]);
 				return {
 					threadId: threadId ?? undefined,
 					cwd: cwdRaw ? URI.parse(cwdRaw) : undefined,
 					modelId: modelId ?? undefined,
-					billing: narrowSessionBillingMode(billingRaw),
 				};
 			} finally {
 				ref.dispose();

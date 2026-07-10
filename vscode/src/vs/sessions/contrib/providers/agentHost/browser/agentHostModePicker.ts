@@ -130,6 +130,14 @@ export abstract class AgentHostSessionEnumPicker extends Disposable {
 	protected _handleFooterActionItem(_item: IAgentHostSessionEnumPickerItem): boolean { return false; }
 
 	/**
+	 * Whether the chip should render for this session at all. The base
+	 * renders whenever the schema advertises the property; pickers for
+	 * creation-time-only properties (`sessionMutable: false`) override this
+	 * to hide themselves once the session has started.
+	 */
+	protected _shouldRenderForSession(_provider: IAgentHostSessionsProvider, _sessionId: string): boolean { return true; }
+
+	/**
 	 * `true` while the active session's provider is resolving its config.
 	 * Subclasses gate picker-open paths on this; the desktop chip is
 	 * rendered visually disabled in {@link _updateTrigger}.
@@ -153,6 +161,9 @@ export abstract class AgentHostSessionEnumPicker extends Disposable {
 		}
 		const rawProvider = this._sessionsProvidersService.getProvider(session.providerId);
 		if (!rawProvider || !isAgentHostProvider(rawProvider)) {
+			return undefined;
+		}
+		if (!this._shouldRenderForSession(rawProvider, session.sessionId)) {
 			return undefined;
 		}
 		const config = rawProvider.getSessionConfig(session.sessionId);

@@ -14,12 +14,12 @@ import { Delayer } from '../../../../../base/common/async.js';
 import { Codicon } from '../../../../../base/common/codicons.js';
 import { MarkdownString } from '../../../../../base/common/htmlContent.js';
 import { Disposable, DisposableMap, DisposableStore, IDisposable } from '../../../../../base/common/lifecycle.js';
-import { autorun, constObservable, IObservable } from '../../../../../base/common/observable.js';
+import { autorun, IObservable } from '../../../../../base/common/observable.js';
 import Severity from '../../../../../base/common/severity.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { localize, localize2 } from '../../../../../nls.js';
-import { IActionViewItemService, type IActionViewItemFactory } from '../../../../../platform/actions/browser/actionViewItemService.js';
-import { Action2, MenuId, MenuItemAction, registerAction2 } from '../../../../../platform/actions/common/actions.js';
+import { IActionViewItemService } from '../../../../../platform/actions/browser/actionViewItemService.js';
+import { Action2, MenuId, registerAction2 } from '../../../../../platform/actions/common/actions.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { ContextKeyExpr, IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
 import { IDialogService } from '../../../../../platform/dialogs/common/dialogs.js';
@@ -30,7 +30,6 @@ import type { SessionConfigPropertySchema, SessionConfigValueItem } from '../../
 import { ChatConfiguration } from '../../../../../workbench/contrib/chat/common/constants.js';
 import { ChatContextKeyExprs, ChatContextKeys } from '../../../../../workbench/contrib/chat/common/actions/chatContextKeys.js';
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../../../workbench/common/contributions.js';
-import { type IChatInputPickerOptions } from '../../../../../workbench/contrib/chat/browser/widget/input/chatInputPickerActionItem.js';
 import { Menus } from '../../../../browser/menus.js';
 import { ActiveSessionProviderIdContext, IsPhoneLayoutContext } from '../../../../common/contextkeys.js';
 import { IWorkbenchLayoutService } from '../../../../../workbench/services/layout/browser/layoutService.js';
@@ -46,7 +45,6 @@ import { isPhoneLayout } from '../../../../browser/parts/mobile/mobileLayout.js'
 import { showMobilePickerSheet, IMobilePickerSheetItem, IMobilePickerSheetSearchSource } from '../../../../browser/parts/mobile/mobilePickerSheet.js';
 import { AgentHostModePicker } from './agentHostModePicker.js';
 import { MobileAgentHostModePicker } from './mobile/mobileAgentHostModePicker.js';
-import { AgentHostPermissionPickerActionItem } from './agentHostPermissionPickerActionItem.js';
 import { AgentHostPermissionPickerDelegate, isWellKnownAutoApproveSchema, isWellKnownClaudePermissionModeSchema, isWellKnownModeSchema } from './agentHostPermissionPickerDelegate.js';
 import { SessionConfigKey } from '../../../../../platform/agentHost/common/sessionConfigKeys.js';
 import { AgentHostClaudePermissionModePicker } from './agentHostClaudePermissionModePicker.js';
@@ -115,8 +113,8 @@ export function getConfigIcon(property: string, value: unknown | undefined): The
 	if (property === 'imageGeneration') {
 		return Codicon.symbolColor;
 	}
-	if (property === SessionConfigKey.Billing) {
-		return value === 'subscription' ? Codicon.account : Codicon.creditCard;
+	if (property === ClaudeSessionConfigKey.FastMode) {
+		return value === false || value === 'false' ? Codicon.circleSlash : Codicon.zap;
 	}
 	return undefined;
 }
@@ -855,19 +853,6 @@ class AgentHostSessionConfigPickerContribution extends Disposable implements IWo
 				return new PickerActionViewItem(scopedInstantiationService.createInstance(AgentHostClaudePermissionModePicker, session));
 			},
 		));
-		this._register(actionViewItemService.register(
-			MenuId.ChatInputSecondary,
-			RUNNING_SESSION_CONFIG_PICKER_ID,
-			this._createRunningSessionPermissionPickerFactory(),
-		));
-		this._register(actionViewItemService.register(
-			MenuId.ChatInputSecondary,
-			RUNNING_SESSION_PERMISSION_MODE_PICKER_ID,
-			(_action, _options, scopedInstantiationService) => {
-				const { session } = scopedInstantiationService.invokeFunction(accessor => accessor.get(ISessionContext));
-				return new PickerActionViewItem(scopedInstantiationService.createInstance(AgentHostClaudePermissionModePicker, session));
-			},
-		));
 	}
 
 	/**
@@ -880,30 +865,6 @@ class AgentHostSessionConfigPickerContribution extends Disposable implements IWo
 		const delegate = instantiationService.createInstance(AgentHostPermissionPickerDelegate, session);
 		const picker = instantiationService.createInstance(MobilePermissionPicker, delegate);
 		return new PickerActionViewItem(picker, delegate);
-	}
-
-	/**
-	 * Inside a running chat widget (`ChatInputSecondary`), use the workbench
-	 * {@link PermissionPickerActionItem} so it matches the rest of the
-	 * chat-input secondary toolbar (which is what the extension-host CLI
-	 * already uses).
-	 */
-	private _createRunningSessionPermissionPickerFactory(): IActionViewItemFactory {
-		return (action, _options, instantiationService) => {
-			if (!(action instanceof MenuItemAction)) {
-				return undefined;
-			}
-			const { session } = instantiationService.invokeFunction(accessor => accessor.get(ISessionContext));
-			const pickerOptions: IChatInputPickerOptions = {
-				compact: constObservable(true),
-			};
-			return instantiationService.createInstance(
-				AgentHostPermissionPickerActionItem,
-				action,
-				pickerOptions,
-				session,
-			);
-		};
 	}
 }
 
@@ -970,49 +931,6 @@ registerAction2(class extends Action2 {
 					ContextKeyExpr.or(IsActiveSessionLocalAgentHost, IsActiveSessionRemoteAgentHost),
 					IsPhoneLayoutContext.negate(),
 				),
-			}],
-		});
-	}
-
-	override async run(): Promise<void> { }
-});
-
-
-// ---- Running session config picker (ChatInputSecondary) ----
-
-const RUNNING_SESSION_CONFIG_PICKER_ID = 'sessions.agentHost.runningSessionConfigPicker';
-
-registerAction2(class extends Action2 {
-	constructor() {
-		super({
-			id: RUNNING_SESSION_CONFIG_PICKER_ID,
-			title: localize2('agentHostRunningSessionConfigPicker', "Session Approvals"),
-			f1: false,
-			menu: [{
-				id: MenuId.ChatInputSecondary,
-				group: 'navigation',
-				order: 10,
-				when: ChatContextKeyExprs.isAgentHostSession,
-			}],
-		});
-	}
-
-	override async run(): Promise<void> { }
-});
-
-const RUNNING_SESSION_PERMISSION_MODE_PICKER_ID = 'sessions.agentHost.runningSessionPermissionModePicker';
-
-registerAction2(class extends Action2 {
-	constructor() {
-		super({
-			id: RUNNING_SESSION_PERMISSION_MODE_PICKER_ID,
-			title: localize2('agentHostRunningSessionPermissionModePicker', "Approvals"),
-			f1: false,
-			menu: [{
-				id: MenuId.ChatInputSecondary,
-				group: 'navigation',
-				order: 11,
-				when: ChatContextKeyExprs.isAgentHostSession,
 			}],
 		});
 	}

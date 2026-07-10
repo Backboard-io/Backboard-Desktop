@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import type { URI } from '../../../../base/common/uri.js';
-import { type ClaudePermissionMode, ClaudeSessionConfigKey, narrowClaudePermissionMode } from '../../common/claudeSessionConfigKeys.js';
+import { type ClaudePermissionMode, ClaudeSessionConfigKey, narrowClaudeFastMode, narrowClaudePermissionMode } from '../../common/claudeSessionConfigKeys.js';
 import type { IAgentConfigurationService } from '../agentConfigurationService.js';
 
 /**
@@ -26,5 +26,21 @@ export function readClaudePermissionMode(
 ): ClaudePermissionMode | undefined {
 	return narrowClaudePermissionMode(
 		configurationService.getSessionConfigValues(sessionUri.toString())?.[ClaudeSessionConfigKey.PermissionMode],
+	);
+}
+
+/**
+ * Read the live `fastMode` flag for a session, same semantics as
+ * {@link readClaudePermissionMode}: `undefined` when the session carries
+ * no (valid) value and the caller applies its own fallback. Read at
+ * materialize and before each `session.send` so a mid-session toggle
+ * reaches the SDK on the next turn.
+ */
+export function readClaudeFastMode(
+	configurationService: IAgentConfigurationService,
+	sessionUri: URI,
+): boolean | undefined {
+	return narrowClaudeFastMode(
+		configurationService.getSessionConfigValues(sessionUri.toString())?.[ClaudeSessionConfigKey.FastMode],
 	);
 }

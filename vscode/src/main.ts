@@ -327,6 +327,16 @@ function configureCommandlineSwitchesSync(cliArgs: NativeParsedArgs) {
 		}
 	});
 
+	// Avoid the macOS "Backboard Studio Safe Storage" Keychain consent prompt:
+	// the mock keychain makes OSCrypt derive its encryption key from a constant
+	// instead of a Keychain item, so the app never touches the user's Keychain.
+	// Secrets stored via safeStorage are then only obfuscated on disk, not
+	// encrypted with a user-protected key. Set "password-store": "keychain" in
+	// argv.json to opt back into the real Keychain.
+	if (process.platform === 'darwin' && argvConfig['password-store'] !== 'keychain') {
+		app.commandLine.appendSwitch('use-mock-keychain');
+	}
+
 	// Following features are enabled from the runtime:
 	// `NetAdapterMaxBufSizeFeature` - Specify the max buffer size for NetToMojoPendingBuffer, refs https://github.com/microsoft/vscode/issues/268800
 	// `DocumentPolicyIncludeJSCallStacksInCrashReports` - https://www.electronjs.org/docs/latest/api/web-frame-main#framecollectjavascriptcallstack-experimental
@@ -380,6 +390,7 @@ interface IArgvConfig {
 	readonly 'log-level'?: string | string[];
 	readonly 'disable-chromium-sandbox'?: boolean;
 	readonly 'use-inmemory-secretstorage'?: boolean;
+	readonly 'password-store'?: string;
 	readonly 'enable-rdp-display-tracking'?: boolean;
 	readonly 'remote-debugging-port'?: string;
 	readonly 'js-flags'?: string;
