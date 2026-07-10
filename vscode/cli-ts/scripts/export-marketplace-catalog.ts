@@ -54,6 +54,33 @@ const STDIO_LOGO_DOMAINS: Record<string, string> = {
 	mongodb: "mongodb.com",
 };
 
+/**
+ * Remotes that answered a live MCP initialize probe (2026-07-10) with an OAuth
+ * challenge but whose authorization server offers no dynamic client
+ * registration. Until Backboard is pre-registered with each vendor (set
+ * IMcpRemoteServerOAuthConfiguration.clientId), sign-in cannot complete, so
+ * these are hidden from the marketplace.
+ */
+const NO_DCR_REMOTES = new Set([
+	"adobe-for-creativity", "adobe-marketing-agent", "airwallex-developer", "audible",
+	"bigdata-com", "biorender", "booking-com", "box", "chronograph",
+	"dandb-risk-analytics", "directbooker", "docuseal", "everlaw", "expedia", "fmp",
+	"g2", "glovo", "govtribe", "guidepoint", "guru", "ice-data-services", "instacart",
+	"interactive-brokers-ibkr", "intercom", "intuit-quickbooks", "intuit-turbotax",
+	"jentic", "learning-commons-knowledge-graph", "lumin", "make", "microsoft-365",
+	"mixpanel", "owkin", "pagerduty", "playmcp", "polar-analytics", "razorpay",
+	"resy", "shopify", "slack", "solve-intelligence", "spotify", "stubhub",
+	"thoughtspot-spotter", "thumbtack", "ticket-tailor", "topcounsel-by-the-l-suite",
+	"trellis", "uber", "uber-eats", "vibe-prospecting", "wyndham-hotels-and-resorts",
+	"xero", "zoom-for-claude",
+]);
+
+/** Endpoints that failed the same probe outright. */
+const BROKEN_REMOTES: Record<string, string> = {
+	"intuit-credit-karma": "The endpoint currently serves a non-MCP response.",
+	"airops": "The endpoint currently does not respond.",
+};
+
 const ENV_REF = /\$\{([A-Z][A-Z0-9_]*)\}/g;
 
 function collectInputIds(server: McpCatalogServer): string[] {
@@ -98,9 +125,12 @@ function emitEntry(server: McpCatalogServer): string {
 	lines.push(`\t\tofficialPublisherHints: [${logoDomain ? quote(logoDomain) : ""}],`);
 	lines.push(`\t\tdescription: ${quote(server.description)},`);
 
-	if (server.disabledReason) {
+	const brokenReason = BROKEN_REMOTES[server.name];
+	if (server.disabledReason || brokenReason) {
 		lines.push(`\t\tinstallability: 'disabled',`);
-		lines.push(`\t\tdisabledReason: ${quote(server.disabledReason)},`);
+		lines.push(`\t\tdisabledReason: ${quote(server.disabledReason ?? brokenReason!)},`);
+	} else if (NO_DCR_REMOTES.has(server.name)) {
+		lines.push(`\t\tinstallability: 'unsupportedAuth',`);
 	} else {
 		lines.push(`\t\tinstallability: 'installable',`);
 	}
