@@ -22,12 +22,9 @@ import { IThemeService } from '../../../platform/theme/common/themeService.js';
 import { Part } from '../../../workbench/browser/part.js';
 import { IWorkbenchLayoutService, Parts } from '../../../workbench/services/layout/browser/layoutService.js';
 import { AbstractProgressScope, ScopedProgressIndicator } from '../../../workbench/services/progress/browser/progressIndicator.js';
-import { URI } from '../../../base/common/uri.js';
-import { INotificationService } from '../../../platform/notification/common/notification.js';
 import { LocalSelectionTransfer } from '../../../platform/dnd/browser/dnd.js';
 import { DraggedSessionIdentifier } from '../../../sessions/browser/dnd.js';
 import { agentsPanelBackground, agentsPanelBorder, agentsPanelForeground } from '../../../sessions/common/theme.js';
-import { SessionType } from '../../../workbench/contrib/chat/common/chatSessionsService.js';
 import { ISessionsManagementService, IActiveSession } from '../../../sessions/services/sessions/common/sessionsManagement.js';
 import { ISession, SessionStatus } from '../../../sessions/services/sessions/common/session.js';
 import { OptimusCard, IOptimusCardSessionModel } from './optimusCard.js';
@@ -137,7 +134,6 @@ export class OptimusGridPart extends Part {
 		@ICommandService private readonly commandService: ICommandService,
 		@ISessionsManagementService private readonly sessionsManagementService: ISessionsManagementService,
 		@IContextKeyService contextKeyService: IContextKeyService,
-		@INotificationService private readonly notificationService: INotificationService,
 	) {
 		super(
 			Parts.SESSIONS_PART,
@@ -300,29 +296,10 @@ export class OptimusGridPart extends Part {
 					return;
 				}
 				EventHelper.stop(e, true);
-
-				// The board can only render Backboard sessions; dropping a
-				// Claude/Codex chat would silently add a phantom to the open
-				// set. Only open supported ones, and tell the user why the
-				// others didn't appear rather than failing quietly.
-				const byKey = new Map(this.sessionsManagementService.getSessions().map(session => [session.resource.toString(), session]));
-				let firstOpened: URI | undefined;
-				let skipped = 0;
 				for (const dragged of data) {
-					const key = dragged.resource.toString();
-					const session = byKey.get(key);
-					if (session && !this.isBackboardSession(session)) {
-						skipped++;
-						continue;
-					}
-					this.openSession(key);
-					firstOpened ??= dragged.resource;
+					this.openSession(dragged.resource.toString());
 				}
-				if (firstOpened) {
-					this.commandService.executeCommand(OPTIMUS_FOCUS_SESSION_COMMAND_ID, firstOpened);
-				} else if (skipped > 0) {
-					this.notificationService.info(localize('optimus.drop.unsupported', "The Advanced board shows Backboard chats only. Claude and Codex sessions stay in the sidebar."));
-				}
+				this.commandService.executeCommand(OPTIMUS_FOCUS_SESSION_COMMAND_ID, data[0].resource);
 			},
 		}));
 
@@ -588,21 +565,15 @@ export class OptimusGridPart extends Part {
 		}
 	}
 
-	/**
-	 * Advanced orchestrates Backboard chats only for now: other local agent
-	 * sessions (Claude Code, Codex, …) stream through per-session CLI processes
-	 * that are too heavy to mirror in every card.
-	 */
-	private isBackboardSession(session: ISession): boolean {
-		return session.sessionType === 'backboard' || session.sessionType === SessionType.AgentHostBackboard;
-	}
-
 	private buildCardModels(): IOptimusCardSessionModel[] {
+		// All session types can be cards. Claude/Codex chats mirror through
+		// their per-session CLI processes, which is affordable now that only
+		// explicitly opened sessions get cards (the board no longer auto-opens
+		// every chat).
 		const isCommittedSession = (session: ISession): boolean => session.status.get() !== SessionStatus.Untitled;
-		const isBackboardSession = (session: ISession): boolean => this.isBackboardSession(session);
 		const visibleByKey = new Map<string, IActiveSession>();
 		for (const session of this.visibleSessions) {
-			if (session && isCommittedSession(session) && isBackboardSession(session)) {
+			if (session && isCommittedSession(session)) {
 				// A session open through the service (sidebar click, new chat)
 				// is open by definition — record it so it persists as open.
 				this.openSession(session.resource.toString());
@@ -617,7 +588,7 @@ export class OptimusGridPart extends Part {
 		const models: IOptimusCardSessionModel[] = [];
 		const seen = new Set<string>();
 		for (const session of this.sessionsManagementService.getSessions()) {
-			if (!isCommittedSession(session) || !isBackboardSession(session)) {
+			if (!isCommittedSession(session)) {
 				continue;
 			}
 

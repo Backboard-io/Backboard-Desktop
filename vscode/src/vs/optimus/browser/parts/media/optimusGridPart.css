@@ -78,8 +78,15 @@
 	color: var(--vscode-icon-foreground);
 }
 
+/* Icon buttons brighten on hover instead of gaining a fill. */
+.optimus-window-chrome-button {
+	opacity: 0.75;
+}
+
 .optimus-window-chrome-button:hover {
-	background: var(--vscode-toolbar-hoverBackground);
+	background: transparent;
+	opacity: 1;
+	color: var(--vscode-foreground);
 }
 
 /* The shared titlebar styles give `.checked` toggles a permanent fill that
@@ -89,7 +96,7 @@
 }
 
 .optimus-window-chrome-button.checked:hover {
-	background: var(--vscode-toolbar-hoverBackground);
+	background: transparent;
 }
 
 /* Mode selector: identical sizing to the Editor window's mode switcher
@@ -174,7 +181,8 @@
 }
 
 .optimus-grid-pager button:hover:not(:disabled) {
-	background: var(--vscode-toolbar-hoverBackground);
+	background: transparent;
+	color: var(--vscode-foreground);
 }
 
 .optimus-grid-pager button:disabled {
@@ -256,7 +264,7 @@
 
 .optimus-card-delete:hover,
 .optimus-card-delete:focus-visible {
-	background: color-mix(in srgb, var(--optimus-danger) 10%, transparent);
+	background: transparent;
 	color: var(--optimus-danger);
 	outline: none;
 }
@@ -825,7 +833,8 @@
 }
 
 .optimus-board-new-task:hover {
-	background: var(--vscode-toolbar-hoverBackground);
+	background: transparent;
+	color: var(--vscode-foreground);
 }
 
 .optimus-board-new-task:focus-visible {
