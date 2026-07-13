@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import './media/optimusGridPart.css';
-import { $, addDisposableListener, append, EventType } from '../../../base/browser/dom.js';
+import { $, addDisposableListener, append, DragAndDropObserver, EventHelper, EventType } from '../../../base/browser/dom.js';
 import { localize } from '../../../nls.js';
 import { ProgressBar } from '../../../base/browser/ui/progressbar/progressbar.js';
 import { RunOnceScheduler } from '../../../base/common/async.js';
@@ -23,7 +23,9 @@ import { Part } from '../../../workbench/browser/part.js';
 import { IWorkbenchLayoutService, Parts } from '../../../workbench/services/layout/browser/layoutService.js';
 import { AbstractProgressScope, ScopedProgressIndicator } from '../../../workbench/services/progress/browser/progressIndicator.js';
 import { URI } from '../../../base/common/uri.js';
-import { SessionsDataTransfers } from '../../../sessions/browser/dnd.js';
+import { INotificationService } from '../../../platform/notification/common/notification.js';
+import { LocalSelectionTransfer } from '../../../platform/dnd/browser/dnd.js';
+import { DraggedSessionIdentifier } from '../../../sessions/browser/dnd.js';
 import { agentsPanelBackground, agentsPanelBorder, agentsPanelForeground } from '../../../sessions/common/theme.js';
 import { SessionType } from '../../../workbench/contrib/chat/common/chatSessionsService.js';
 import { ISessionsManagementService, IActiveSession } from '../../../sessions/services/sessions/common/sessionsManagement.js';
@@ -125,6 +127,7 @@ export class OptimusGridPart extends Part {
 	readonly onDidFocusSession: Event<string> = this._onDidFocusSession.event;
 
 	private readonly openSessions = new Set<string>();
+	private readonly sessionTransfer = LocalSelectionTransfer.getInstance<DraggedSessionIdentifier>();
 
 	constructor(
 		@IThemeService themeService: IThemeService,
@@ -134,6 +137,7 @@ export class OptimusGridPart extends Part {
 		@ICommandService private readonly commandService: ICommandService,
 		@ISessionsManagementService private readonly sessionsManagementService: ISessionsManagementService,
 		@IContextKeyService contextKeyService: IContextKeyService,
+		@INotificationService private readonly notificationService: INotificationService,
 	) {
 		super(
 			Parts.SESSIONS_PART,
@@ -270,37 +274,56 @@ export class OptimusGridPart extends Part {
 			this.commandService.executeCommand(OPTIMUS_NEW_SESSION_COMMAND_ID);
 		}));
 
-		// Sessions dragged out of the sidebar list drop here and open as cards
-		// (the list advertises each dragged session as a typed payload).
-		this._register(addDisposableListener(contentArea, EventType.DRAG_OVER, e => {
-			if (e.dataTransfer?.types.includes(SessionsDataTransfers.SESSION)) {
-				e.preventDefault();
-				e.dataTransfer.dropEffect = 'copy';
-				contentArea.classList.add('drop-target');
-			}
-		}));
-		this._register(addDisposableListener(contentArea, EventType.DRAG_LEAVE, e => {
-			if (!contentArea.contains(e.relatedTarget as HTMLElement | null)) {
-				contentArea.classList.remove('drop-target');
-			}
-		}));
-		this._register(addDisposableListener(contentArea, EventType.DROP, e => {
-			contentArea.classList.remove('drop-target');
-			const raw = e.dataTransfer?.getData(SessionsDataTransfers.SESSION);
-			if (!raw) {
-				return;
-			}
-			e.preventDefault();
-			try {
-				const payload = JSON.parse(raw) as { resource?: string };
-				if (payload.resource) {
-					const resource = URI.parse(payload.resource);
-					this.openSession(resource.toString());
-					this.commandService.executeCommand(OPTIMUS_FOCUS_SESSION_COMMAND_ID, resource);
+		// Sessions dragged out of the sidebar list drop here and open as cards.
+		// The list tracks the dragged session via LocalSelectionTransfer (an
+		// in-process channel), which is the reliable way to read it — the tree's
+		// own DnD controller owns the native DataTransfer. DragAndDropObserver
+		// also guarantees the drop-target highlight clears on dragend, so a
+		// drop that lands outside can't leave the board stuck highlighted.
+		this._register(new DragAndDropObserver(contentArea, {
+			onDragOver: e => {
+				if (!this.sessionTransfer.hasData(DraggedSessionIdentifier.prototype)) {
+					return;
 				}
-			} catch {
-				// Malformed payload: ignore the drop.
-			}
+				e.preventDefault();
+				if (e.dataTransfer) {
+					e.dataTransfer.dropEffect = 'copy';
+				}
+				contentArea.classList.add('drop-target');
+			},
+			onDragLeave: () => contentArea.classList.remove('drop-target'),
+			onDragEnd: () => contentArea.classList.remove('drop-target'),
+			onDrop: e => {
+				contentArea.classList.remove('drop-target');
+				const data = this.sessionTransfer.getData(DraggedSessionIdentifier.prototype);
+				if (!Array.isArray(data) || data.length === 0) {
+					return;
+				}
+				EventHelper.stop(e, true);
+
+				// The board can only render Backboard sessions; dropping a
+				// Claude/Codex chat would silently add a phantom to the open
+				// set. Only open supported ones, and tell the user why the
+				// others didn't appear rather than failing quietly.
+				const byKey = new Map(this.sessionsManagementService.getSessions().map(session => [session.resource.toString(), session]));
+				let firstOpened: URI | undefined;
+				let skipped = 0;
+				for (const dragged of data) {
+					const key = dragged.resource.toString();
+					const session = byKey.get(key);
+					if (session && !this.isBackboardSession(session)) {
+						skipped++;
+						continue;
+					}
+					this.openSession(key);
+					firstOpened ??= dragged.resource;
+				}
+				if (firstOpened) {
+					this.commandService.executeCommand(OPTIMUS_FOCUS_SESSION_COMMAND_ID, firstOpened);
+				} else if (skipped > 0) {
+					this.notificationService.info(localize('optimus.drop.unsupported', "The Advanced board shows Backboard chats only. Claude and Codex sessions stay in the sidebar."));
+				}
+			},
 		}));
 
 		// Persistent "start a task" placeholder, always the last grid item.
@@ -565,13 +588,18 @@ export class OptimusGridPart extends Part {
 		}
 	}
 
+	/**
+	 * Advanced orchestrates Backboard chats only for now: other local agent
+	 * sessions (Claude Code, Codex, …) stream through per-session CLI processes
+	 * that are too heavy to mirror in every card.
+	 */
+	private isBackboardSession(session: ISession): boolean {
+		return session.sessionType === 'backboard' || session.sessionType === SessionType.AgentHostBackboard;
+	}
+
 	private buildCardModels(): IOptimusCardSessionModel[] {
 		const isCommittedSession = (session: ISession): boolean => session.status.get() !== SessionStatus.Untitled;
-		// Advanced orchestrates Backboard chats only for now: other local
-		// agent sessions (Claude Code, Codex, …) stream through per-session
-		// CLI processes that are too heavy to mirror in every card.
-		const isBackboardSession = (session: ISession): boolean =>
-			session.sessionType === 'backboard' || session.sessionType === SessionType.AgentHostBackboard;
+		const isBackboardSession = (session: ISession): boolean => this.isBackboardSession(session);
 		const visibleByKey = new Map<string, IActiveSession>();
 		for (const session of this.visibleSessions) {
 			if (session && isCommittedSession(session) && isBackboardSession(session)) {
