@@ -450,19 +450,34 @@
 	min-width: 0;
 }
 
+/* Workspace chip: folder icon + name, given room before the diff badge. */
 .optimus-card-folder {
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	max-width: 45%;
-	flex-shrink: 0;
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	min-width: 0;
 	color: var(--vscode-foreground);
 	opacity: 0.85;
 }
 
-.optimus-card-folder:not(:empty)::after {
+.optimus-card-folder.no-folder {
+	display: none;
+}
+
+.optimus-card-folder .codicon-folder {
+	font-size: 12px;
+	color: var(--optimus-muted);
+}
+
+.optimus-card-folder-label {
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	min-width: 0;
+}
+
+.optimus-card-changes:not(:empty)::before {
 	content: '·';
-	margin-left: 8px;
 	color: var(--optimus-muted);
 }
 
@@ -551,6 +566,7 @@
 	display: flex;
 	align-items: center;
 	gap: 6px;
+	flex-shrink: 0;
 }
 
 .optimus-card-diff-files {
@@ -633,21 +649,17 @@
 	min-height: 0;
 	display: flex;
 	flex-direction: column;
-	border: 1px solid var(--optimus-border-subtle);
-	border-radius: 6px;
-	background: color-mix(in srgb, var(--optimus-card) 45%, transparent);
 }
 
 .optimus-kanban-column-header {
 	display: flex;
 	align-items: center;
-	gap: 6px;
+	gap: 7px;
 	flex-shrink: 0;
-	padding: 8px 10px;
-	font-size: 11px;
+	padding: 4px 4px 10px;
+	font-size: 12px;
 	font-weight: 600;
-	color: var(--optimus-muted);
-	border-bottom: 1px solid var(--optimus-border-subtle);
+	color: var(--vscode-foreground);
 }
 
 .optimus-kanban-column-dot {
@@ -670,13 +682,8 @@
 }
 
 .optimus-kanban-column-count {
-	margin-left: auto;
-	min-width: 16px;
-	text-align: center;
-	padding: 0 5px;
-	border-radius: 8px;
 	font-weight: 400;
-	background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
+	color: var(--optimus-muted);
 }
 
 .optimus-kanban-column-list {
@@ -685,8 +692,8 @@
 	overflow-y: auto;
 	display: flex;
 	flex-direction: column;
-	gap: 10px;
-	padding: 10px;
+	gap: 12px;
+	padding: 2px;
 }
 
 .optimus-kanban-column-list .optimus-card {
@@ -694,11 +701,11 @@
 	height: 240px;
 }
 
-.optimus-kanban-column.empty .optimus-kanban-column-list::after {
-	content: '—';
-	text-align: center;
-	padding: 18px 0;
-	color: color-mix(in srgb, var(--optimus-muted) 55%, transparent);
+.optimus-kanban-column.empty .optimus-kanban-column-list {
+	border: 1px dashed color-mix(in srgb, var(--optimus-border) 60%, transparent);
+	border-radius: 6px;
+	min-height: 80px;
+	flex: 0 0 auto;
 }
 
 /* --- First-run empty state ----------------------------------------------- */
@@ -784,4 +791,59 @@
 	outline: 2px dashed color-mix(in srgb, var(--optimus-focus) 55%, transparent);
 	outline-offset: -8px;
 	border-radius: 8px;
+}
+
+
+/* --- Board header: segmented Grid | Kanban switcher ---------------------- */
+
+.optimus-board-header {
+	display: flex;
+	align-items: center;
+	flex-shrink: 0;
+	padding: 10px 14px 0;
+}
+
+.optimus-view-switcher {
+	display: inline-flex;
+	gap: 2px;
+	padding: 2px;
+	border-radius: 6px;
+	background: color-mix(in srgb, var(--vscode-foreground) 6%, transparent);
+}
+
+.optimus-view-switcher-segment {
+	border: 1px solid transparent;
+	border-radius: 5px;
+	padding: 2px 12px;
+	font-family: inherit;
+	font-size: 12px;
+	line-height: 18px;
+	color: var(--optimus-muted);
+	background: transparent;
+	cursor: pointer;
+}
+
+.optimus-view-switcher-segment:hover {
+	color: var(--vscode-foreground);
+}
+
+.optimus-view-switcher-segment.active {
+	background: var(--optimus-card);
+	border-color: var(--optimus-border-subtle);
+	color: var(--vscode-foreground);
+	font-weight: 600;
+}
+
+.optimus-view-switcher-segment:focus-visible {
+	outline: 1px solid var(--optimus-focus);
+	outline-offset: -1px;
+}
+
+/* The header supplies the top spacing now. */
+.optimus-grid {
+	padding-top: 12px;
+}
+
+.optimus-kanban {
+	padding-top: 12px;
 }

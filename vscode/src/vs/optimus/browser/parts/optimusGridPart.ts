@@ -67,11 +67,11 @@ interface IKanbanColumn {
 }
 
 /**
- * Sessions the user explicitly closed from the grid. Everything else is open
- * by default; the set persists across relaunches so a closed chat stays
- * closed until the user opens it again (e.g. from the sidebar list).
+ * Sessions open on the board. Only chats the user opened (sidebar click,
+ * drop, new task) get a card, and the set persists across relaunches so the
+ * board comes back exactly as it was left.
  */
-const CLOSED_SESSIONS_STORAGE_KEY = 'optimus.closedSessions';
+const OPEN_SESSIONS_STORAGE_KEY = 'optimus.openSessions';
 
 interface ICardEntry {
 	readonly card: OptimusCard;
@@ -107,6 +107,7 @@ export class OptimusGridPart extends Part {
 	private readonly kanbanColumns = new Map<KanbanBucket, IKanbanColumn>();
 	private viewMode: OptimusViewMode = 'grid';
 	private readonly viewModeContextKey;
+	private readonly viewSwitcherButtons = new Map<OptimusViewMode, HTMLButtonElement>();
 	/** Watches bound sessions' statuses so kanban re-buckets on transitions. */
 	private readonly statusWatchStore = this._register(new DisposableStore());
 	private readonly refreshScheduler = this._register(new RunOnceScheduler(() => this.refreshCards(), 50));
@@ -123,7 +124,7 @@ export class OptimusGridPart extends Part {
 	private readonly _onDidFocusSession = this._register(new Emitter<string>());
 	readonly onDidFocusSession: Event<string> = this._onDidFocusSession.event;
 
-	private readonly closedSessions = new Set<string>();
+	private readonly openSessions = new Set<string>();
 
 	constructor(
 		@IThemeService themeService: IThemeService,
@@ -143,14 +144,14 @@ export class OptimusGridPart extends Part {
 		);
 
 		try {
-			const raw = this.storageService.get(CLOSED_SESSIONS_STORAGE_KEY, StorageScope.PROFILE);
+			const raw = this.storageService.get(OPEN_SESSIONS_STORAGE_KEY, StorageScope.PROFILE);
 			if (raw) {
 				for (const key of JSON.parse(raw) as string[]) {
-					this.closedSessions.add(key);
+					this.openSessions.add(key);
 				}
 			}
 		} catch {
-			// Malformed storage: treat everything as open.
+			// Malformed storage: start with an empty board.
 		}
 
 		this.viewMode = this.storageService.get(VIEW_MODE_STORAGE_KEY, StorageScope.PROFILE) === 'kanban' ? 'kanban' : 'grid';
@@ -162,27 +163,44 @@ export class OptimusGridPart extends Part {
 	}
 
 	private toggleViewMode(): void {
-		this.viewMode = this.viewMode === 'grid' ? 'kanban' : 'grid';
+		this.setViewMode(this.viewMode === 'grid' ? 'kanban' : 'grid');
+	}
+
+	private setViewMode(mode: OptimusViewMode): void {
+		if (this.viewMode === mode) {
+			return;
+		}
+		this.viewMode = mode;
 		this.storageService.store(VIEW_MODE_STORAGE_KEY, this.viewMode, StorageScope.PROFILE, StorageTarget.USER);
 		this.viewModeContextKey.set(this.viewMode);
 		this.contentAreaEl?.classList.toggle('view-kanban', this.viewMode === 'kanban');
+		this.updateViewSwitcher();
 		this.refreshCards();
 	}
 
-	private persistClosedSessions(): void {
-		this.storageService.store(CLOSED_SESSIONS_STORAGE_KEY, JSON.stringify([...this.closedSessions]), StorageScope.PROFILE, StorageTarget.MACHINE);
+	private updateViewSwitcher(): void {
+		for (const [mode, button] of this.viewSwitcherButtons) {
+			button.classList.toggle('active', this.viewMode === mode);
+			button.setAttribute('aria-pressed', String(this.viewMode === mode));
+		}
+	}
+
+	private persistOpenSessions(): void {
+		this.storageService.store(OPEN_SESSIONS_STORAGE_KEY, JSON.stringify([...this.openSessions]), StorageScope.PROFILE, StorageTarget.MACHINE);
 	}
 
 	private closeSession(key: string): void {
-		this.closedSessions.add(key);
-		this.persistClosedSessions();
+		if (this.openSessions.delete(key)) {
+			this.persistOpenSessions();
+		}
 		this.refreshCards();
 	}
 
-	/** Sessions opened through the service (sidebar click, new chat) un-close themselves. */
-	private uncloseSession(key: string): void {
-		if (this.closedSessions.delete(key)) {
-			this.persistClosedSessions();
+	/** Sessions opened through the service (sidebar click, drop, new chat) join the board. */
+	private openSession(key: string): void {
+		if (!this.openSessions.has(key)) {
+			this.openSessions.add(key);
+			this.persistOpenSessions();
 		}
 	}
 
@@ -199,6 +217,22 @@ export class OptimusGridPart extends Part {
 
 		this.progressBar = this._register(new ProgressBar(contentArea, defaultProgressBarStyles));
 		this.progressBar.hide();
+
+		// Board header: segmented Grid | Kanban switcher.
+		const boardHeader = append(contentArea, $('.optimus-board-header'));
+		const switcher = append(boardHeader, $('.optimus-view-switcher'));
+		switcher.setAttribute('role', 'group');
+		switcher.setAttribute('aria-label', localize('optimus.viewSwitcher', "Board view"));
+		const addSegment = (mode: OptimusViewMode, label: string): void => {
+			const button = append(switcher, $('button.optimus-view-switcher-segment')) as HTMLButtonElement;
+			button.type = 'button';
+			button.textContent = label;
+			this._register(addDisposableListener(button, EventType.CLICK, () => this.setViewMode(mode)));
+			this.viewSwitcherButtons.set(mode, button);
+		};
+		addSegment('grid', localize('optimus.view.grid', "Grid"));
+		addSegment('kanban', localize('optimus.view.kanban', "Kanban"));
+		this.updateViewSwitcher();
 
 		this.gridContainer = append(contentArea, $('.optimus-grid'));
 
@@ -220,7 +254,7 @@ export class OptimusGridPart extends Part {
 		hero.type = 'button';
 		append(hero, $('.optimus-empty-logo'));
 		append(hero, $('.optimus-empty-title')).textContent = localize('optimus.empty.title', "What should we build?");
-		append(hero, $('.optimus-empty-subtitle')).textContent = localize('optimus.empty.subtitle', "Tasks you start will show up here as live cards.");
+		append(hero, $('.optimus-empty-subtitle')).textContent = localize('optimus.empty.subtitle', "Start or drag a chat into the agent workspace.");
 		const cta = append(hero, $('.optimus-empty-cta'));
 		append(cta, $('span.codicon.codicon-add'));
 		append(cta, $('span')).textContent = localize('optimus.empty.cta', "Start a Task");
@@ -253,7 +287,7 @@ export class OptimusGridPart extends Part {
 				const payload = JSON.parse(raw) as { resource?: string };
 				if (payload.resource) {
 					const resource = URI.parse(payload.resource);
-					this.uncloseSession(resource.toString());
+					this.openSession(resource.toString());
 					this.commandService.executeCommand(OPTIMUS_FOCUS_SESSION_COMMAND_ID, resource);
 				}
 			} catch {
@@ -534,8 +568,8 @@ export class OptimusGridPart extends Part {
 		for (const session of this.visibleSessions) {
 			if (session && isCommittedSession(session) && isBackboardSession(session)) {
 				// A session open through the service (sidebar click, new chat)
-				// is open by definition — un-close it so it persists as open.
-				this.uncloseSession(session.resource.toString());
+				// is open by definition — record it so it persists as open.
+				this.openSession(session.resource.toString());
 				visibleByKey.set(session.resource.toString(), session);
 			}
 		}
@@ -552,7 +586,7 @@ export class OptimusGridPart extends Part {
 			}
 
 			const key = session.resource.toString();
-			if (seen.has(key) || this.closedSessions.has(key)) {
+			if (seen.has(key) || !this.openSessions.has(key)) {
 				continue;
 			}
 			seen.add(key);

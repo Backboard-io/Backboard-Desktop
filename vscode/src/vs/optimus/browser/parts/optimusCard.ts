@@ -86,6 +86,7 @@ export class OptimusCard extends Disposable {
 	private readonly feedEl: HTMLElement;
 	private readonly chatEl: HTMLElement;
 	private readonly folderEl: HTMLElement;
+	private readonly folderLabelEl: HTMLElement;
 	private readonly changesEl: HTMLElement;
 	private readonly timeEl: HTMLElement;
 	private readonly placeholderEl: HTMLElement;
@@ -144,6 +145,8 @@ export class OptimusCard extends Disposable {
 		const footer = append(this.contentEl, $('.optimus-card-footer'));
 		const footerLeft = append(footer, $('.optimus-card-footer-left'));
 		this.folderEl = append(footerLeft, $('.optimus-card-folder'));
+		append(this.folderEl, $('span.codicon.codicon-folder'));
+		this.folderLabelEl = append(this.folderEl, $('span.optimus-card-folder-label'));
 		this.changesEl = append(footerLeft, $('.optimus-card-changes'));
 		this.timeEl = append(footer, $('.optimus-card-time'));
 
@@ -260,10 +263,11 @@ export class OptimusCard extends Disposable {
 			this.statusText.className = `optimus-card-status-label ${statusClass(status)}`;
 			this.statusDot.className = `optimus-card-status-icon codicon ${statusIconClass(status)} ${statusClass(status)}`;
 
-			// Folder this agent operates on, next to the diff stats.
+			// Folder this agent operates on, bottom-left with a folder icon.
 			const workspace = sessionModel.workspace.read(reader);
 			const folderUri = workspace?.folders[0]?.workingDirectory;
-			this.folderEl.textContent = folderUri ? basename(folderUri) : '';
+			this.folderLabelEl.textContent = folderUri ? basename(folderUri) : '';
+			this.folderEl.classList.toggle('no-folder', !folderUri);
 			this.folderEl.title = folderUri?.fsPath ?? '';
 
 			// Diff stats sourced the same way as the Simple window's sessions

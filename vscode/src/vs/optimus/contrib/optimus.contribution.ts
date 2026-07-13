@@ -16,7 +16,6 @@ import { SyncDescriptor } from '../../platform/instantiation/common/descriptors.
 import { Registry } from '../../platform/registry/common/platform.js';
 import { registerIcon } from '../../platform/theme/common/iconRegistry.js';
 import { ICommandService } from '../../platform/commands/common/commands.js';
-import { IContextKeyService } from '../../platform/contextkey/common/contextkey.js';
 import { IContextMenuService } from '../../platform/contextview/browser/contextView.js';
 import { ViewPaneContainer } from '../../workbench/browser/parts/views/viewPaneContainer.js';
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../workbench/common/contributions.js';
@@ -26,7 +25,7 @@ import { IWorkbenchLayoutService, Parts } from '../../workbench/services/layout/
 import { SessionsView, SessionsViewId } from '../../sessions/contrib/sessions/browser/views/sessionsView.js';
 import { ISessionsManagementService } from '../../sessions/services/sessions/common/sessionsManagement.js';
 import { ISessionsService } from '../../sessions/services/sessions/browser/sessionsService.js';
-import { OPTIMUS_CLOSE_SESSION_COMMAND_ID, OPTIMUS_DELETE_SESSION_COMMAND_ID, OPTIMUS_FOCUS_SESSION_COMMAND_ID, OPTIMUS_NEW_SESSION_COMMAND_ID, OPTIMUS_TOGGLE_VIEW_MODE_COMMAND_ID, OPTIMUS_VIEW_MODE_CONTEXT_KEY, OptimusViewMode } from '../browser/parts/optimusGridPart.js';
+import { OPTIMUS_CLOSE_SESSION_COMMAND_ID, OPTIMUS_DELETE_SESSION_COMMAND_ID, OPTIMUS_FOCUS_SESSION_COMMAND_ID, OPTIMUS_NEW_SESSION_COMMAND_ID } from '../browser/parts/optimusGridPart.js';
 import { OptimusChatViewPane, OptimusChatViewId } from './chat/browser/optimusChatViewPane.js';
 
 // Toolbar/context-menu actions used by the reused SessionsView. In the Simple
@@ -309,14 +308,12 @@ class OptimusChromeContribution extends Disposable implements IWorkbenchContribu
 	static readonly ID = 'workbench.contrib.optimusChrome';
 
 	private readonly sidebarButton: HTMLButtonElement;
-	private readonly viewModeButton: HTMLButtonElement;
 	private readonly secondaryButton: HTMLButtonElement;
 
 	constructor(
 		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
 		@ICommandService private readonly commandService: ICommandService,
 		@IContextMenuService private readonly contextMenuService: IContextMenuService,
-		@IContextKeyService private readonly contextKeyService: IContextKeyService,
 	) {
 		super();
 
@@ -335,8 +332,6 @@ class OptimusChromeContribution extends Disposable implements IWorkbenchContribu
 		this.sidebarButton.title = localize('optimusChrome.toggleSidebar', "Toggle left panel");
 		this.sidebarButton.setAttribute('aria-label', this.sidebarButton.title);
 
-		this.viewModeButton = append(chrome, $('button.optimus-window-chrome-button.optimus-window-chrome-view-mode.codicon'));
-
 		this.secondaryButton = append(chrome, $('button.optimus-window-chrome-button.optimus-window-chrome-secondary.codicon'));
 		this.secondaryButton.title = localize('optimusChrome.toggleRightPanel', "Toggle right panel");
 		this.secondaryButton.setAttribute('aria-label', this.secondaryButton.title);
@@ -344,15 +339,6 @@ class OptimusChromeContribution extends Disposable implements IWorkbenchContribu
 		this._register(addDisposableListener(this.sidebarButton, EventType.CLICK, e => {
 			EventHelper.stop(e, true);
 			this.layoutService.setPartHidden(this.layoutService.isVisible(Parts.SIDEBAR_PART), Parts.SIDEBAR_PART);
-		}));
-		this._register(addDisposableListener(this.viewModeButton, EventType.CLICK, e => {
-			EventHelper.stop(e, true);
-			this.commandService.executeCommand(OPTIMUS_TOGGLE_VIEW_MODE_COMMAND_ID);
-		}));
-		this._register(this.contextKeyService.onDidChangeContext(e => {
-			if (e.affectsSome(new Set([OPTIMUS_VIEW_MODE_CONTEXT_KEY.key]))) {
-				this.updateState();
-			}
 		}));
 		this._register(addDisposableListener(this.secondaryButton, EventType.CLICK, e => {
 			EventHelper.stop(e, true);
@@ -399,14 +385,6 @@ class OptimusChromeContribution extends Disposable implements IWorkbenchContribu
 		this.sidebarButton.classList.toggle('codicon-layout-sidebar-left-off', !sidebarVisible);
 		this.sidebarButton.classList.toggle('checked', sidebarVisible);
 
-		// The icon previews the view you'd switch TO.
-		const viewMode = this.contextKeyService.getContextKeyValue<OptimusViewMode>(OPTIMUS_VIEW_MODE_CONTEXT_KEY.key) ?? 'grid';
-		this.viewModeButton.classList.toggle('codicon-project', viewMode === 'grid');
-		this.viewModeButton.classList.toggle('codicon-table', viewMode === 'kanban');
-		this.viewModeButton.title = viewMode === 'grid'
-			? localize('optimusChrome.kanbanView', "Switch to Kanban View")
-			: localize('optimusChrome.gridView', "Switch to Grid View");
-		this.viewModeButton.setAttribute('aria-label', this.viewModeButton.title);
 
 		const secondaryVisible = this.layoutService.isVisible(Parts.AUXILIARYBAR_PART);
 		this.secondaryButton.classList.toggle('codicon-layout-sidebar-right', secondaryVisible);
