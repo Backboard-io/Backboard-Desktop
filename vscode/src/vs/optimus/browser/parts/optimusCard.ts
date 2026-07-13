@@ -3,9 +3,10 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { $, append, EventHelper, EventType, addDisposableListener, getWindow, scheduleAtNextAnimationFrame } from '../../../base/browser/dom.js';
-import { disposableTimeout } from '../../../base/common/async.js';
+import { $, append, clearNode, EventHelper, EventType, addDisposableListener, getWindow, scheduleAtNextAnimationFrame } from '../../../base/browser/dom.js';
+import { disposableTimeout, IntervalTimer } from '../../../base/common/async.js';
 import { CancellationTokenSource } from '../../../base/common/cancellation.js';
+import { fromNow } from '../../../base/common/date.js';
 import { Emitter, Event } from '../../../base/common/event.js';
 import { Disposable, DisposableStore, MutableDisposable, toDisposable } from '../../../base/common/lifecycle.js';
 import { autorun } from '../../../base/common/observable.js';
@@ -56,6 +57,20 @@ function statusClass(status: SessionStatus): string {
 }
 
 /**
+ * Codicon per status — the workbench's quiet status language (spinner while
+ * running, plain check when done) instead of colored badge pills.
+ */
+function statusIconClass(status: SessionStatus): string {
+	switch (status) {
+		case SessionStatus.InProgress: return 'codicon-loading codicon-modifier-spin';
+		case SessionStatus.NeedsInput: return 'codicon-bell-dot';
+		case SessionStatus.Completed: return 'codicon-check';
+		case SessionStatus.Error: return 'codicon-error';
+		default: return 'codicon-circle-outline';
+	}
+}
+
+/**
  * One compact task-slot card in the Optimus grid. Renders the bound session's
  * status, title, a read-only embedded chat transcript (the same ChatWidget
  * rendering the Simple window uses), changed-file stats and last-activity
@@ -89,6 +104,12 @@ export class OptimusCard extends Disposable {
 	private _session: IOptimusCardSessionModel | undefined;
 	get session(): IOptimusCardSessionModel | undefined { return this._session; }
 
+	private lastUpdatedAt: Date | undefined;
+
+	private _status: SessionStatus | undefined;
+	/** Latest bound session status, for grouping cards (e.g. kanban columns). */
+	get status(): SessionStatus | undefined { return this._status; }
+
 	private readonly _onDidAction = this._register(new Emitter<OptimusCardAction>());
 	readonly onDidAction: Event<OptimusCardAction> = this._onDidAction.event;
 
@@ -108,14 +129,13 @@ export class OptimusCard extends Disposable {
 		this.contentEl = append(this.element, $('.optimus-card-content'));
 
 		const header = append(this.contentEl, $('.optimus-card-header'));
-		this.statusDot = append(header, $('.optimus-card-status-dot'));
+		this.statusDot = append(header, $('.optimus-card-status-icon.codicon'));
 		this.titleEl = append(header, $('.optimus-card-title'));
 		this.statusText = append(header, $('.optimus-card-status-label'));
-		this.deleteButton = append(header, $('button.optimus-card-delete'));
+		this.deleteButton = append(header, $('button.optimus-card-delete.codicon.codicon-close'));
 		this.deleteButton.type = 'button';
 		this.deleteButton.title = localize('optimus.card.close', "Close chat");
 		this.deleteButton.setAttribute('aria-label', this.deleteButton.title);
-		this.deleteButton.textContent = '×';
 
 		this.feedEl = append(this.contentEl, $('.optimus-card-feed'));
 		this.chatEl = append(this.contentEl, $('.optimus-card-chat'));
@@ -205,12 +225,15 @@ export class OptimusCard extends Disposable {
 		}
 
 		this._session = session;
+		this._status = undefined;
+		this.lastUpdatedAt = undefined;
 		this.bindStore.clear();
 		this.viewModelStore.clear();
 		this.modelRef.clear();
 		this.chatList?.refresh();
 		this.chatEl.style.display = 'none';
 		this.feedEl.style.display = '';
+		this.element.classList.remove('loading');
 
 		this.element.classList.toggle('active', isActive && !!session);
 		this.element.classList.toggle('empty', !session);
@@ -230,10 +253,12 @@ export class OptimusCard extends Disposable {
 			const status = sessionModel.status.read(reader);
 			const updatedAt = sessionModel.updatedAt.read(reader);
 
+			this._status = status;
 			this.titleEl.textContent = title || localize('optimus.card.untitled', "Untitled");
 			this.titleEl.title = this.titleEl.textContent;
 			this.statusText.textContent = statusLabel(status);
-			this.statusDot.className = `optimus-card-status-dot ${statusClass(status)}`;
+			this.statusText.className = `optimus-card-status-label ${statusClass(status)}`;
+			this.statusDot.className = `optimus-card-status-icon codicon ${statusIconClass(status)} ${statusClass(status)}`;
 
 			// Folder this agent operates on, next to the diff stats.
 			const workspace = sessionModel.workspace.read(reader);
@@ -243,7 +268,8 @@ export class OptimusCard extends Disposable {
 
 			// Diff stats sourced the same way as the Simple window's sessions
 			// list: prefer the provider's changes summary, fall back to summing
-			// the per-file changes of the live changeset.
+			// the per-file changes of the live changeset. Rendered as an
+			// SCM-style +N −N badge; quietly absent while nothing changed.
 			const changesSummary = sessionModel.changesSummary?.read(reader);
 			const changes = sessionModel.changes.read(reader);
 			let additions = 0, deletions = 0;
@@ -257,16 +283,25 @@ export class OptimusCard extends Disposable {
 				}
 			}
 			const files = changesSummary?.files || changes.length;
+			clearNode(this.changesEl);
 			if (additions > 0 || deletions > 0 || files > 0) {
-				this.changesEl.textContent = files > 0
-					? localize('optimus.card.changes', "{0} files +{1} −{2}", files, additions, deletions)
-					: localize('optimus.card.changesNoFiles', "+{0} −{1}", additions, deletions);
+				if (files > 0) {
+					append(this.changesEl, $('span.optimus-card-diff-files')).textContent = localize('optimus.card.files', "{0} files", files);
+				}
+				append(this.changesEl, $('span.optimus-card-diff-added')).textContent = `+${additions}`;
+				append(this.changesEl, $('span.optimus-card-diff-removed')).textContent = `−${deletions}`;
+				this.changesEl.title = localize('optimus.card.changesTitle', "{0} changed files: {1} additions, {2} deletions", files, additions, deletions);
 			} else {
-				this.changesEl.textContent = localize('optimus.card.noChanges', "No changed files");
+				this.changesEl.title = '';
 			}
 
-			this.timeEl.textContent = updatedAt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+			this.lastUpdatedAt = updatedAt;
+			this.updateRelativeTime();
 		}));
+
+		// Relative timestamps drift; refresh them on a slow tick.
+		const timeTicker = this.bindStore.add(new IntervalTimer());
+		timeTicker.cancelAndSet(() => this.updateRelativeTime(), 30_000);
 
 		// Read-only transcript: every card in the grid is an OPEN chat, so it
 		// loads its transcript eagerly (same path as the right panel) and
@@ -276,6 +311,9 @@ export class OptimusCard extends Disposable {
 			this.logService.info(`[OptimusDiag] card attached existing model for ${session.chatResource.toString()}`);
 		} else {
 			this.logService.info(`[OptimusDiag] card loading ${session.chatResource.toString()} (status=${sessionModel.status.get()})`);
+
+			// Skeleton shimmer until the transcript (or a description) arrives.
+			this.element.classList.add('loading');
 
 			// Status-description fallback, shown only until a model attaches.
 			this.bindStore.add(autorun(reader => {
@@ -357,6 +395,7 @@ export class OptimusCard extends Disposable {
 			this.viewModelStore.clear();
 		}));
 
+		this.element.classList.remove('loading');
 		this.feedEl.style.display = 'none';
 		this.chatEl.style.display = '';
 		// Lay out now and once more after the browser has applied the display
@@ -426,6 +465,15 @@ export class OptimusCard extends Disposable {
 			}
 		));
 		return this.chatList;
+	}
+
+	private updateRelativeTime(): void {
+		if (!this.lastUpdatedAt) {
+			this.timeEl.textContent = '';
+			return;
+		}
+		this.timeEl.textContent = fromNow(this.lastUpdatedAt, true);
+		this.timeEl.title = this.lastUpdatedAt.toLocaleString();
 	}
 
 	/** Re-layout the embedded transcript list to the card's current size. */

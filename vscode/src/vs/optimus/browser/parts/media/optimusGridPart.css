@@ -172,30 +172,35 @@
 	cursor: default;
 }
 
+/* Flat, workbench-density cards: 1px borders and hover tints instead of
+   drop shadows, matching editor widgets and list rows. */
 .optimus-card {
 	display: flex;
 	flex-direction: column;
 	min-height: 0;
 	min-width: 0;
 	border: 1px solid var(--optimus-border);
-	border-radius: 8px;
+	border-radius: 6px;
 	background: var(--optimus-card);
-	box-shadow: 0 1px 2px var(--optimus-shadow);
 	cursor: pointer;
 	outline: none;
 	overflow: hidden;
-	transition: border-color .16s ease, box-shadow .16s ease, background .16s ease;
+	transition: border-color .12s ease, background .12s ease;
 }
 
-.optimus-card:hover,
+.optimus-card:hover {
+	border-color: color-mix(in srgb, var(--optimus-focus) 35%, var(--optimus-border));
+	background: color-mix(in srgb, var(--vscode-list-hoverBackground) 35%, var(--optimus-card));
+}
+
 .optimus-card:focus-visible {
-	border-color: color-mix(in srgb, var(--optimus-focus) 40%, var(--optimus-border));
-	box-shadow: 0 4px 12px var(--optimus-shadow);
+	outline: 1px solid var(--optimus-focus);
+	outline-offset: -1px;
 }
 
 .optimus-card.active {
-	border-color: color-mix(in srgb, var(--optimus-focus) 66%, var(--optimus-border));
-	box-shadow: 0 0 0 1px color-mix(in srgb, var(--optimus-focus) 24%, transparent), 0 6px 16px var(--optimus-shadow);
+	border-color: var(--optimus-focus);
+	box-shadow: 0 0 0 1px color-mix(in srgb, var(--optimus-focus) 30%, transparent);
 }
 
 .optimus-card-content {
@@ -208,10 +213,10 @@
 .optimus-card-header {
 	display: flex;
 	align-items: center;
-	gap: 8px;
+	gap: 6px;
 	min-width: 0;
 	flex-shrink: 0;
-	padding: 10px 12px;
+	padding: 8px 10px;
 	border-bottom: 1px solid var(--optimus-border-subtle);
 }
 
@@ -223,13 +228,14 @@
 	height: 20px;
 	margin-left: auto;
 	border: 0;
-	border-radius: 999px;
+	border-radius: 4px;
 	background: transparent;
 	color: var(--optimus-muted);
 	cursor: pointer;
+	font-size: 12px;
 	opacity: 0;
 	pointer-events: none;
-	transition: opacity .16s ease, background .16s ease, color .16s ease;
+	transition: opacity .12s ease, background .12s ease, color .12s ease;
 }
 
 .optimus-card:hover .optimus-card-delete,
@@ -245,40 +251,28 @@
 	outline: none;
 }
 
-.optimus-card-status-dot {
-	width: 7px;
-	height: 7px;
-	border-radius: 50%;
+/* Quiet workbench status language: a codicon (spinner while running, plain
+   check when done) plus a muted text label — no badge pills. */
+.optimus-card-status-icon {
 	flex-shrink: 0;
-	background-color: var(--optimus-muted);
+	font-size: 14px;
+	color: var(--optimus-muted);
 }
 
-.optimus-card-status-dot.running {
-	background-color: var(--optimus-focus);
-	animation: optimus-pulse 1.6s ease-in-out infinite;
+.optimus-card-status-icon.running {
+	color: var(--vscode-charts-blue, var(--optimus-focus));
 }
 
-.optimus-card-status-dot.needs-input {
-	background-color: var(--optimus-warning);
+.optimus-card-status-icon.needs-input {
+	color: var(--optimus-warning);
 }
 
-.optimus-card-status-dot.done {
-	background-color: var(--optimus-success);
+.optimus-card-status-icon.done {
+	color: var(--optimus-success);
 }
 
-.optimus-card-status-dot.error {
-	background-color: var(--optimus-danger);
-}
-
-@keyframes optimus-pulse {
-	0%, 100% { opacity: 1; }
-	50% { opacity: 0.35; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-	.optimus-card-status-dot.running {
-		animation: none;
-	}
+.optimus-card-status-icon.error {
+	color: var(--optimus-danger);
 }
 
 .optimus-card-title {
@@ -287,44 +281,26 @@
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	font-size: 12.5px;
-	font-weight: 650;
-	line-height: 16px;
+	font-size: 13px;
+	font-weight: 600;
+	line-height: 18px;
 }
 
 .optimus-card-status-label {
 	flex-shrink: 0;
 	max-width: 110px;
 	overflow: hidden;
-	padding: 2px 8px;
-	border-radius: 999px;
-	font-size: 10px;
-	font-weight: 500;
-	text-transform: uppercase;
-	letter-spacing: 0.4px;
 	white-space: nowrap;
+	font-size: 11px;
 	color: var(--optimus-muted);
-	background: color-mix(in srgb, var(--optimus-muted) 8%, transparent);
 }
 
-.optimus-card:has(.optimus-card-status-dot.running) .optimus-card-status-label {
-	color: color-mix(in srgb, var(--optimus-focus) 70%, var(--optimus-muted));
-	background: color-mix(in srgb, var(--optimus-focus) 8%, transparent);
+.optimus-card-status-label.needs-input {
+	color: color-mix(in srgb, var(--optimus-warning) 80%, var(--optimus-muted));
 }
 
-.optimus-card:has(.optimus-card-status-dot.done) .optimus-card-status-label {
-	color: color-mix(in srgb, var(--optimus-success) 78%, var(--optimus-muted));
-	background: color-mix(in srgb, var(--optimus-success) 8%, transparent);
-}
-
-.optimus-card:has(.optimus-card-status-dot.needs-input) .optimus-card-status-label {
-	color: color-mix(in srgb, var(--optimus-warning) 78%, var(--optimus-muted));
-	background: color-mix(in srgb, var(--optimus-warning) 8%, transparent);
-}
-
-.optimus-card:has(.optimus-card-status-dot.error) .optimus-card-status-label {
-	color: color-mix(in srgb, var(--optimus-danger) 78%, var(--optimus-muted));
-	background: color-mix(in srgb, var(--optimus-danger) 8%, transparent);
+.optimus-card-status-label.error {
+	color: color-mix(in srgb, var(--optimus-danger) 80%, var(--optimus-muted));
 }
 
 .optimus-card-feed {
@@ -350,6 +326,10 @@
 	position: relative;
 	overflow: hidden;
 	cursor: pointer;
+	/* The transcript stays pinned to the newest turn, so older content clips
+	   at the top; a short fade makes the cut-off read as intentional. */
+	-webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 24px);
+	mask-image: linear-gradient(to bottom, transparent 0, #000 24px);
 }
 
 /* Compact mirror: hide checkpoint affordances ("Checkpoint Restored · Redo",
@@ -563,4 +543,237 @@
 	display: flex;
 	align-items: center;
 	padding: 0 12px;
+}
+
+/* --- Diff badge (SCM-style +N −N) --------------------------------------- */
+
+.optimus-card-changes {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.optimus-card-diff-files {
+	color: var(--optimus-muted);
+}
+
+.optimus-card-diff-added {
+	color: var(--vscode-gitDecoration-addedResourceForeground, var(--optimus-success));
+}
+
+.optimus-card-diff-removed {
+	color: var(--vscode-gitDecoration-deletedResourceForeground, var(--optimus-danger));
+}
+
+/* --- Loading skeleton ----------------------------------------------------
+   Shimmer bars while a card waits for its transcript; the status-description
+   fallback replaces them the moment it has text. */
+
+.optimus-card.loading .optimus-card-feed:empty {
+	padding: 12px;
+}
+
+.optimus-card.loading .optimus-card-feed:empty::before,
+.optimus-card.loading .optimus-card-feed:empty::after {
+	content: '';
+	display: block;
+	height: 10px;
+	border-radius: 3px;
+	margin-bottom: 10px;
+	background: linear-gradient(90deg,
+		color-mix(in srgb, var(--vscode-foreground) 6%, transparent) 25%,
+		color-mix(in srgb, var(--vscode-foreground) 12%, transparent) 50%,
+		color-mix(in srgb, var(--vscode-foreground) 6%, transparent) 75%);
+	background-size: 200% 100%;
+	animation: optimus-shimmer 1.4s ease-in-out infinite;
+}
+
+.optimus-card.loading .optimus-card-feed:empty::after {
+	width: 62%;
+}
+
+@keyframes optimus-shimmer {
+	0% { background-position: 200% 0; }
+	100% { background-position: -200% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.optimus-card.loading .optimus-card-feed:empty::before,
+	.optimus-card.loading .optimus-card-feed:empty::after {
+		animation: none;
+	}
+}
+
+/* --- Kanban board --------------------------------------------------------
+   Three status columns sharing the grid's cards. Columns scroll on their own;
+   there is no pagination in this view. */
+
+.optimus-kanban {
+	display: none;
+	flex: 1;
+	min-height: 0;
+	min-width: 0;
+	gap: 12px;
+	padding: 12px 14px 14px;
+	overflow-x: auto;
+}
+
+.optimus-grid-content.view-kanban .optimus-grid,
+.optimus-grid-content.view-kanban .optimus-grid-pager {
+	display: none;
+}
+
+.optimus-grid-content.view-kanban .optimus-kanban {
+	display: flex;
+}
+
+.optimus-kanban-column {
+	flex: 1 1 0;
+	min-width: 210px;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+	border: 1px solid var(--optimus-border-subtle);
+	border-radius: 6px;
+	background: color-mix(in srgb, var(--optimus-card) 45%, transparent);
+}
+
+.optimus-kanban-column-header {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex-shrink: 0;
+	padding: 8px 10px;
+	font-size: 11px;
+	font-weight: 600;
+	color: var(--optimus-muted);
+	border-bottom: 1px solid var(--optimus-border-subtle);
+}
+
+.optimus-kanban-column-dot {
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: var(--optimus-muted);
+}
+
+.optimus-kanban-column.running .optimus-kanban-column-dot {
+	background: var(--vscode-charts-blue, var(--optimus-focus));
+}
+
+.optimus-kanban-column.attention .optimus-kanban-column-dot {
+	background: var(--optimus-warning);
+}
+
+.optimus-kanban-column.done .optimus-kanban-column-dot {
+	background: var(--optimus-success);
+}
+
+.optimus-kanban-column-count {
+	margin-left: auto;
+	min-width: 16px;
+	text-align: center;
+	padding: 0 5px;
+	border-radius: 8px;
+	font-weight: 400;
+	background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
+}
+
+.optimus-kanban-column-list {
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	padding: 10px;
+}
+
+.optimus-kanban-column-list .optimus-card {
+	flex: 0 0 auto;
+	height: 240px;
+}
+
+.optimus-kanban-column.empty .optimus-kanban-column-list::after {
+	content: '—';
+	text-align: center;
+	padding: 18px 0;
+	color: color-mix(in srgb, var(--optimus-muted) 55%, transparent);
+}
+
+/* --- First-run empty state ----------------------------------------------- */
+
+.optimus-empty-state {
+	display: none;
+	flex: 1;
+	min-height: 0;
+	align-items: center;
+	justify-content: center;
+}
+
+.optimus-grid-content.empty .optimus-grid,
+.optimus-grid-content.empty .optimus-kanban,
+.optimus-grid-content.empty .optimus-grid-pager {
+	display: none;
+}
+
+.optimus-grid-content.empty .optimus-empty-state {
+	display: flex;
+}
+
+.optimus-empty-hero {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 6px;
+	padding: 36px 48px;
+	border: 1px dashed var(--optimus-border);
+	border-radius: 8px;
+	background: transparent;
+	color: var(--vscode-foreground);
+	cursor: pointer;
+	transition: border-color .12s ease, background .12s ease;
+}
+
+.optimus-empty-hero:hover,
+.optimus-empty-hero:focus-visible {
+	border-color: color-mix(in srgb, var(--optimus-focus) 45%, var(--optimus-border));
+	background: color-mix(in srgb, var(--optimus-focus) 4%, transparent);
+	outline: none;
+}
+
+.optimus-empty-logo {
+	width: 30px;
+	height: 40px;
+	margin-bottom: 6px;
+	background: currentColor;
+	opacity: 0.85;
+	-webkit-mask: url('data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNjQuNSAyMjEuMTkiPgogIDxwYXRoIGZpbGw9IndoaXRlIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiIGQ9Ik03Ny4yMSwwaDEwLjFjMS4zMiwwLDIuNCwxLjA3LDIuNCwyLjR2MjE2LjM5YzAsMS4zMi0xLjA3LDIuNC0yLjQsMi40aC0xMC4xYy0xLjMyLDAtMi40LTEuMDctMi40LTIuNFYyLjRjMC0xLjMyLDEuMDctMi40LDIuNC0yLjRaIi8+CiAgPHJlY3QgZmlsbD0id2hpdGUiIHg9IjQ5Ljg3IiB5PSIzMC4zNCIgd2lkdGg9IjE0Ljg5IiBoZWlnaHQ9IjgwLjI1IiByeD0iMi40IiByeT0iMi40Ii8+CiAgPHJlY3QgZmlsbD0id2hpdGUiIHk9IjkwLjgiIHdpZHRoPSIxNC44OCIgaGVpZ2h0PSIxOS44IiByeD0iMi40IiByeT0iMi40Ii8+CiAgPHJlY3QgZmlsbD0id2hpdGUiIHg9Ijk5Ljc0IiB5PSIxMTAuNTkiIHdpZHRoPSIxNC44OSIgaGVpZ2h0PSI4MC4yNSIgcng9IjIuNCIgcnk9IjIuNCIvPgogIDxyZWN0IGZpbGw9IndoaXRlIiB4PSIxNDkuNjEiIHk9IjExMC41OSIgd2lkdGg9IjE0Ljg5IiBoZWlnaHQ9IjE5LjgiIHJ4PSIyLjQiIHJ5PSIyLjQiLz4KICA8cmVjdCBmaWxsPSJ3aGl0ZSIgeD0iMTI0LjY4IiB5PSIxMTAuNTkiIHdpZHRoPSIxNC44OSIgaGVpZ2h0PSI1MC4wNiIgcng9IjIuNCIgcnk9IjIuNCIvPgogIDxyZWN0IGZpbGw9IndoaXRlIiB4PSIyNC45NCIgeT0iNjAuNTMiIHdpZHRoPSIxNC44OSIgaGVpZ2h0PSI1MC4wNiIgcng9IjIuNCIgcnk9IjIuNCIvPgo8L3N2Zz4K') no-repeat center / contain;
+	mask: url('data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxNjQuNSAyMjEuMTkiPgogIDxwYXRoIGZpbGw9IndoaXRlIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiIGQ9Ik03Ny4yMSwwaDEwLjFjMS4zMiwwLDIuNCwxLjA3LDIuNCwyLjR2MjE2LjM5YzAsMS4zMi0xLjA3LDIuNC0yLjQsMi40aC0xMC4xYy0xLjMyLDAtMi40LTEuMDctMi40LTIuNFYyLjRjMC0xLjMyLDEuMDctMi40LDIuNC0yLjRaIi8+CiAgPHJlY3QgZmlsbD0id2hpdGUiIHg9IjQ5Ljg3IiB5PSIzMC4zNCIgd2lkdGg9IjE0Ljg5IiBoZWlnaHQ9IjgwLjI1IiByeD0iMi40IiByeT0iMi40Ii8+CiAgPHJlY3QgZmlsbD0id2hpdGUiIHk9IjkwLjgiIHdpZHRoPSIxNC44OCIgaGVpZ2h0PSIxOS44IiByeD0iMi40IiByeT0iMi40Ii8+CiAgPHJlY3QgZmlsbD0id2hpdGUiIHg9Ijk5Ljc0IiB5PSIxMTAuNTkiIHdpZHRoPSIxNC44OSIgaGVpZ2h0PSI4MC4yNSIgcng9IjIuNCIgcnk9IjIuNCIvPgogIDxyZWN0IGZpbGw9IndoaXRlIiB4PSIxNDkuNjEiIHk9IjExMC41OSIgd2lkdGg9IjE0Ljg5IiBoZWlnaHQ9IjE5LjgiIHJ4PSIyLjQiIHJ5PSIyLjQiLz4KICA8cmVjdCBmaWxsPSJ3aGl0ZSIgeD0iMTI0LjY4IiB5PSIxMTAuNTkiIHdpZHRoPSIxNC44OSIgaGVpZ2h0PSI1MC4wNiIgcng9IjIuNCIgcnk9IjIuNCIvPgogIDxyZWN0IGZpbGw9IndoaXRlIiB4PSIyNC45NCIgeT0iNjAuNTMiIHdpZHRoPSIxNC44OSIgaGVpZ2h0PSI1MC4wNiIgcng9IjIuNCIgcnk9IjIuNCIvPgo8L3N2Zz4K') no-repeat center / contain;
+}
+
+.optimus-empty-title {
+	font-size: 15px;
+	font-weight: 600;
+}
+
+.optimus-empty-subtitle {
+	font-size: 12px;
+	color: var(--optimus-muted);
+}
+
+.optimus-empty-cta {
+	display: flex;
+	align-items: center;
+	gap: 5px;
+	margin-top: 12px;
+	padding: 4px 12px;
+	border-radius: 4px;
+	font-size: 12px;
+	color: var(--vscode-button-foreground);
+	background: var(--vscode-button-background);
+}
+
+.optimus-empty-hero:hover .optimus-empty-cta {
+	background: var(--vscode-button-hoverBackground, var(--vscode-button-background));
 }
