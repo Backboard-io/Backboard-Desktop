@@ -22,6 +22,8 @@ import { IThemeService } from '../../../platform/theme/common/themeService.js';
 import { Part } from '../../../workbench/browser/part.js';
 import { IWorkbenchLayoutService, Parts } from '../../../workbench/services/layout/browser/layoutService.js';
 import { AbstractProgressScope, ScopedProgressIndicator } from '../../../workbench/services/progress/browser/progressIndicator.js';
+import { URI } from '../../../base/common/uri.js';
+import { SessionsDataTransfers } from '../../../sessions/browser/dnd.js';
 import { agentsPanelBackground, agentsPanelBorder, agentsPanelForeground } from '../../../sessions/common/theme.js';
 import { SessionType } from '../../../workbench/contrib/chat/common/chatSessionsService.js';
 import { ISessionsManagementService, IActiveSession } from '../../../sessions/services/sessions/common/sessionsManagement.js';
@@ -226,6 +228,39 @@ export class OptimusGridPart extends Part {
 			this.commandService.executeCommand(OPTIMUS_NEW_SESSION_COMMAND_ID);
 		}));
 
+		// Sessions dragged out of the sidebar list drop here and open as cards
+		// (the list advertises each dragged session as a typed payload).
+		this._register(addDisposableListener(contentArea, EventType.DRAG_OVER, e => {
+			if (e.dataTransfer?.types.includes(SessionsDataTransfers.SESSION)) {
+				e.preventDefault();
+				e.dataTransfer.dropEffect = 'copy';
+				contentArea.classList.add('drop-target');
+			}
+		}));
+		this._register(addDisposableListener(contentArea, EventType.DRAG_LEAVE, e => {
+			if (!contentArea.contains(e.relatedTarget as HTMLElement | null)) {
+				contentArea.classList.remove('drop-target');
+			}
+		}));
+		this._register(addDisposableListener(contentArea, EventType.DROP, e => {
+			contentArea.classList.remove('drop-target');
+			const raw = e.dataTransfer?.getData(SessionsDataTransfers.SESSION);
+			if (!raw) {
+				return;
+			}
+			e.preventDefault();
+			try {
+				const payload = JSON.parse(raw) as { resource?: string };
+				if (payload.resource) {
+					const resource = URI.parse(payload.resource);
+					this.uncloseSession(resource.toString());
+					this.commandService.executeCommand(OPTIMUS_FOCUS_SESSION_COMMAND_ID, resource);
+				}
+			} catch {
+				// Malformed payload: ignore the drop.
+			}
+		}));
+
 		// Persistent "start a task" placeholder, always the last grid item.
 		const placeholder = this._register(this.instantiationService.createInstance(OptimusCard, this.gridContainer));
 		this._register(placeholder.onDidAction(action => {
@@ -263,9 +298,30 @@ export class OptimusGridPart extends Part {
 	 * Sessions beyond the sixth slot are not rendered.
 	 */
 	updateVisibleSessions(visible: readonly (IActiveSession | undefined)[], active: IActiveSession | undefined): void {
+		const activeChanged = !!active && active.sessionId !== this.activeSession?.sessionId;
 		this.visibleSessions = visible;
 		this.activeSession = active;
+
+		// Opening a session (sidebar click, drop, new chat) must surface its
+		// card: jump the grid to the page that holds it.
+		if (activeChanged && this.viewMode === 'grid') {
+			const models = this.buildCardModels();
+			const index = models.findIndex(model => model.session.sessionId === active.sessionId);
+			if (index >= 0) {
+				this.pageIndex = Math.floor(index / OptimusGridPart.PAGE_SIZE);
+			}
+		}
+
 		this.refreshCards();
+
+		if (activeChanged) {
+			for (const entry of this.cardEntries.values()) {
+				if (entry.card.session?.session.sessionId === active.sessionId) {
+					entry.card.element.scrollIntoView({ block: 'nearest' });
+					break;
+				}
+			}
+		}
 	}
 
 	focusSession(session: IActiveSession | undefined): void {

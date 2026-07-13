@@ -777,3 +777,11 @@
 .optimus-empty-hero:hover .optimus-empty-cta {
 	background: var(--vscode-button-hoverBackground, var(--vscode-button-background));
 }
+
+/* Drop highlight while dragging a session from the sidebar over the board. */
+.optimus-grid-content.drop-target .optimus-grid,
+.optimus-grid-content.drop-target .optimus-kanban {
+	outline: 2px dashed color-mix(in srgb, var(--optimus-focus) 55%, transparent);
+	outline-offset: -8px;
+	border-radius: 8px;
+}
