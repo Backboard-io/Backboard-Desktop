@@ -45,10 +45,10 @@ const VIEW_MODE_STORAGE_KEY = 'optimus.viewMode';
 
 type KanbanBucket = 'running' | 'attention' | 'done';
 
-const KANBAN_BUCKETS: readonly { readonly key: KanbanBucket; readonly label: string }[] = [
-	{ key: 'running', label: localize('optimus.kanban.running', "Running") },
-	{ key: 'attention', label: localize('optimus.kanban.attention', "Needs Attention") },
-	{ key: 'done', label: localize('optimus.kanban.done', "Done") },
+const KANBAN_BUCKETS: readonly { readonly key: KanbanBucket; readonly label: string; readonly icon: string }[] = [
+	{ key: 'running', label: localize('optimus.kanban.running', "Running"), icon: 'codicon-play-circle' },
+	{ key: 'attention', label: localize('optimus.kanban.attention', "Needs Attention"), icon: 'codicon-bell-dot' },
+	{ key: 'done', label: localize('optimus.kanban.done', "Done"), icon: 'codicon-check' },
 ];
 
 function kanbanBucket(status: SessionStatus): KanbanBucket {
@@ -234,6 +234,14 @@ export class OptimusGridPart extends Part {
 		addSegment('kanban', localize('optimus.view.kanban', "Kanban"));
 		this.updateViewSwitcher();
 
+		const newTaskButton = append(boardHeader, $('button.optimus-board-new-task.codicon.codicon-add')) as HTMLButtonElement;
+		newTaskButton.type = 'button';
+		newTaskButton.title = localize('optimus.board.newTask', "New Chat");
+		newTaskButton.setAttribute('aria-label', newTaskButton.title);
+		this._register(addDisposableListener(newTaskButton, EventType.CLICK, () => {
+			this.commandService.executeCommand(OPTIMUS_NEW_SESSION_COMMAND_ID);
+		}));
+
 		this.gridContainer = append(contentArea, $('.optimus-grid'));
 
 		// Kanban board: one column per status bucket, cards shared with the grid.
@@ -241,7 +249,7 @@ export class OptimusGridPart extends Part {
 		for (const bucket of KANBAN_BUCKETS) {
 			const element = append(this.kanbanContainer, $(`.optimus-kanban-column.${bucket.key}`));
 			const header = append(element, $('.optimus-kanban-column-header'));
-			append(header, $('.optimus-kanban-column-dot'));
+			append(header, $(`span.codicon.${bucket.icon}.optimus-kanban-column-icon`));
 			append(header, $('span.optimus-kanban-column-label')).textContent = bucket.label;
 			const countEl = append(header, $('span.optimus-kanban-column-count'));
 			const listEl = append(element, $('.optimus-kanban-column-list'));

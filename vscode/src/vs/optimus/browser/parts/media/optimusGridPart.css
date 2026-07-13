@@ -82,6 +82,16 @@
 	background: var(--vscode-toolbar-hoverBackground);
 }
 
+/* The shared titlebar styles give `.checked` toggles a permanent fill that
+   reads as a stuck button here — resting state stays transparent. */
+.optimus-window-chrome-button.checked {
+	background: transparent;
+}
+
+.optimus-window-chrome-button.checked:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+}
+
 /* Mode selector: identical sizing to the Editor window's mode switcher
    (see backboardModeSwitcher.css: 28px trigger, 4px radius, 15px icon). */
 .optimus-window-chrome-mode {
@@ -662,23 +672,21 @@
 	color: var(--vscode-foreground);
 }
 
-.optimus-kanban-column-dot {
-	width: 7px;
-	height: 7px;
-	border-radius: 50%;
-	background: var(--optimus-muted);
+.optimus-kanban-column-icon {
+	font-size: 14px;
+	color: var(--optimus-muted);
 }
 
-.optimus-kanban-column.running .optimus-kanban-column-dot {
-	background: var(--vscode-charts-blue, var(--optimus-focus));
+.optimus-kanban-column.running .optimus-kanban-column-icon {
+	color: var(--vscode-charts-blue, var(--optimus-focus));
 }
 
-.optimus-kanban-column.attention .optimus-kanban-column-dot {
-	background: var(--optimus-warning);
+.optimus-kanban-column.attention .optimus-kanban-column-icon {
+	color: var(--optimus-warning);
 }
 
-.optimus-kanban-column.done .optimus-kanban-column-dot {
-	background: var(--optimus-success);
+.optimus-kanban-column.done .optimus-kanban-column-icon {
+	color: var(--optimus-success);
 }
 
 .optimus-kanban-column-count {
@@ -701,12 +709,7 @@
 	height: 240px;
 }
 
-.optimus-kanban-column.empty .optimus-kanban-column-list {
-	border: 1px dashed color-mix(in srgb, var(--optimus-border) 60%, transparent);
-	border-radius: 6px;
-	min-height: 80px;
-	flex: 0 0 auto;
-}
+
 
 /* --- First-run empty state ----------------------------------------------- */
 
@@ -799,8 +802,35 @@
 .optimus-board-header {
 	display: flex;
 	align-items: center;
+	justify-content: space-between;
 	flex-shrink: 0;
-	padding: 10px 14px 0;
+	/* The window chrome overlays the top 38px as a drag region; the header
+	   must sit below it or clicks start a window drag instead. */
+	margin-top: 38px;
+	padding: 6px 14px 0;
+}
+
+.optimus-board-new-task {
+	width: 24px;
+	height: 24px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	border: 0;
+	border-radius: 5px;
+	background: transparent;
+	color: var(--vscode-icon-foreground);
+	font-size: 14px;
+	cursor: pointer;
+}
+
+.optimus-board-new-task:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+}
+
+.optimus-board-new-task:focus-visible {
+	outline: 1px solid var(--optimus-focus);
+	outline-offset: -1px;
 }
 
 .optimus-view-switcher {
@@ -808,16 +838,16 @@
 	gap: 2px;
 	padding: 2px;
 	border-radius: 6px;
-	background: color-mix(in srgb, var(--vscode-foreground) 6%, transparent);
+	background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
 }
 
 .optimus-view-switcher-segment {
-	border: 1px solid transparent;
+	border: 0;
 	border-radius: 5px;
-	padding: 2px 12px;
+	padding: 3px 12px;
 	font-family: inherit;
 	font-size: 12px;
-	line-height: 18px;
+	line-height: 16px;
 	color: var(--optimus-muted);
 	background: transparent;
 	cursor: pointer;
@@ -828,8 +858,7 @@
 }
 
 .optimus-view-switcher-segment.active {
-	background: var(--optimus-card);
-	border-color: var(--optimus-border-subtle);
+	background: color-mix(in srgb, var(--vscode-foreground) 11%, transparent);
 	color: var(--vscode-foreground);
 	font-weight: 600;
 }
