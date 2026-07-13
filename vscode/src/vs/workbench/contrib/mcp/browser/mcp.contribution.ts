@@ -42,6 +42,7 @@ import { McpGatewayToolBrokerContribution } from './mcpGatewayToolBrokerContribu
 import { McpAddContextContribution } from './mcpAddContextContribution.js';
 import { BackboardMcpContribution } from './backboardDocsMcpContribution.js';
 import { AddConfigurationAction, EditStoredInput, InstallFromManifestAction, ListMcpServerCommand, McpAgentHostServerOptionsCommand, McpBrowseCommand, McpBrowseResourcesCommand, McpConfigureSamplingModels, McpConfirmationServerOptionsCommand, MCPServerActionRendering, McpServerOptionsCommand, McpSkipCurrentAutostartCommand, McpStartPromptingServerCommand, OpenRemoteUserMcpResourceCommand, OpenUserMcpResourceCommand, OpenWorkspaceFolderMcpResourceCommand, OpenWorkspaceMcpResourceCommand, RemoveStoredInput, ResetMcpCachedTools, ResetMcpTrustCommand, RestartServer, SetOAuthClientSecret, ShowConfiguration, ShowInstalledMcpServersCommand, ShowOutput, StartServer, StopServer } from './mcpCommands.js';
+import { McpBackboardChatAuthBridge } from './mcpBackboardChatAuthBridge.js';
 import { McpDiscovery } from './mcpDiscovery.js';
 import { McpElicitationService } from './mcpElicitationService.js';
 import { McpLanguageFeatures } from './mcpLanguageFeatures.js';
@@ -106,6 +107,7 @@ registerWorkbenchContribution2('mcpActionRendering', MCPServerActionRendering, W
 registerWorkbenchContribution2('mcpAddContext', McpAddContextContribution, WorkbenchPhase.Eventually);
 registerWorkbenchContribution2(MCPContextsInitialisation.ID, MCPContextsInitialisation, WorkbenchPhase.AfterRestored);
 registerWorkbenchContribution2(McpConfigMigrationContribution.ID, McpConfigMigrationContribution, WorkbenchPhase.Eventually);
+registerWorkbenchContribution2(McpBackboardChatAuthBridge.ID, McpBackboardChatAuthBridge, WorkbenchPhase.Eventually);
 
 const jsonRegistry = <jsonContributionRegistry.IJSONContributionRegistry>Registry.as(jsonContributionRegistry.Extensions.JSONContribution);
 jsonRegistry.registerSchema(mcpSchemaId, mcpServerSchema);
