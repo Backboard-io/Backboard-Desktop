@@ -72,6 +72,14 @@ interface IKanbanColumn {
  */
 const OPEN_SESSIONS_STORAGE_KEY = 'optimus.openSessions';
 
+/**
+ * Ceiling on open cards. Every card mirrors a live transcript, and
+ * Claude/Codex cards additionally hold their per-session CLI process, so an
+ * unbounded board degrades the whole window. Opening beyond the cap evicts
+ * the oldest-opened card that is not active or visible.
+ */
+const MAX_OPEN_CARDS = 15;
+
 interface ICardEntry {
 	readonly card: OptimusCard;
 	readonly store: DisposableStore;
@@ -198,9 +206,36 @@ export class OptimusGridPart extends Part {
 
 	/** Sessions opened through the service (sidebar click, drop, new chat) join the board. */
 	private openSession(key: string): void {
-		if (!this.openSessions.has(key)) {
-			this.openSessions.add(key);
-			this.persistOpenSessions();
+		if (this.openSessions.has(key)) {
+			return;
+		}
+		this.openSessions.add(key);
+		this.enforceOpenCardLimit();
+		this.persistOpenSessions();
+	}
+
+	/** Evicts the oldest-opened, not-currently-visible cards beyond the cap. */
+	private enforceOpenCardLimit(): void {
+		if (this.openSessions.size <= MAX_OPEN_CARDS) {
+			return;
+		}
+		const protectedKeys = new Set<string>();
+		if (this.activeSession) {
+			protectedKeys.add(this.activeSession.resource.toString());
+		}
+		for (const session of this.visibleSessions) {
+			if (session) {
+				protectedKeys.add(session.resource.toString());
+			}
+		}
+		// Set preserves insertion order: the first entries are the oldest opens.
+		for (const key of this.openSessions) {
+			if (this.openSessions.size <= MAX_OPEN_CARDS) {
+				break;
+			}
+			if (!protectedKeys.has(key)) {
+				this.openSessions.delete(key);
+			}
 		}
 	}
 
@@ -429,22 +464,28 @@ export class OptimusGridPart extends Part {
 		const allModels = this.buildCardModels();
 		this.contentAreaEl?.classList.toggle('empty', allModels.length === 0);
 
-		// Kanban re-buckets when a session's status flips, which the sessions
-		// service does not necessarily emit for. Schedule (never re-enter) a
-		// refresh from an observable read of every bound status.
+		// Status transitions matter in both views but the sessions service does
+		// not necessarily emit for them: kanban re-buckets on them, and a new
+		// chat's draft only joins the board once its status leaves Untitled
+		// (the first response). Watch every bound AND visible session's status
+		// and schedule (never re-enter) a refresh on change.
 		this.statusWatchStore.clear();
+		let initialRun = true;
+		this.statusWatchStore.add(autorun(reader => {
+			for (const model of allModels) {
+				model.session.status.read(reader);
+			}
+			for (const session of this.visibleSessions) {
+				session?.status.read(reader);
+			}
+			if (initialRun) {
+				initialRun = false;
+				return;
+			}
+			this.refreshScheduler.schedule();
+		}));
+
 		if (this.viewMode === 'kanban') {
-			let initialRun = true;
-			this.statusWatchStore.add(autorun(reader => {
-				for (const model of allModels) {
-					model.session.status.read(reader);
-				}
-				if (initialRun) {
-					initialRun = false;
-					return;
-				}
-				this.refreshScheduler.schedule();
-			}));
 			this.refreshKanban(allModels);
 			return;
 		}
