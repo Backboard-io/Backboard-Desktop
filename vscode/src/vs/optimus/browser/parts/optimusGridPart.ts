@@ -132,6 +132,9 @@ export class OptimusGridPart extends Part {
 	readonly onDidFocusSession: Event<string> = this._onDidFocusSession.event;
 
 	private readonly openSessions = new Set<string>();
+	/** Session keys already seen in the service, to spot newly created chats. */
+	private knownSessionKeys: Set<string> | undefined;
+	private readonly windowStartTime = Date.now();
 	private readonly sessionTransfer = LocalSelectionTransfer.getInstance<DraggedSessionIdentifier>();
 
 	constructor(
@@ -379,6 +382,14 @@ export class OptimusGridPart extends Part {
 		this.visibleSessions = visible;
 		this.activeSession = active;
 
+		// The session the user is actively chatting with belongs on the board,
+		// whatever path opened it — a brand-new chat (composer-first drafts
+		// never pass through the visible-sessions filter until committed) must
+		// not require a manual drag to get its card.
+		if (active) {
+			this.openSession(active.resource.toString());
+		}
+
 		// Opening a session (sidebar click, drop, new chat) must surface its
 		// card: jump the grid to the page that holds it.
 		if (activeChanged && this.viewMode === 'grid') {
@@ -478,6 +489,7 @@ export class OptimusGridPart extends Part {
 			for (const session of this.visibleSessions) {
 				session?.status.read(reader);
 			}
+			this.activeSession?.status.read(reader);
 			if (initialRun) {
 				initialRun = false;
 				return;
@@ -612,6 +624,27 @@ export class OptimusGridPart extends Part {
 		// explicitly opened sessions get cards (the board no longer auto-opens
 		// every chat).
 		const isCommittedSession = (session: ISession): boolean => session.status.get() !== SessionStatus.Untitled;
+
+		// Chats created while this window is open join the board on their own:
+		// the right panel's chat does not pass through the visible/active
+		// session plumbing here, so a session that newly appears in the service
+		// with fresh activity is the reliable "user just started this" signal.
+		const sessions = this.sessionsManagementService.getSessions();
+		if (!this.knownSessionKeys && sessions.length > 0) {
+			this.knownSessionKeys = new Set(sessions.map(session => session.resource.toString()));
+		} else if (this.knownSessionKeys) {
+			for (const session of sessions) {
+				const key = session.resource.toString();
+				if (this.knownSessionKeys.has(key)) {
+					continue;
+				}
+				this.knownSessionKeys.add(key);
+				if (session.updatedAt.get().getTime() >= this.windowStartTime) {
+					this.openSession(key);
+				}
+			}
+		}
+
 		const visibleByKey = new Map<string, IActiveSession>();
 		for (const session of this.visibleSessions) {
 			if (session && isCommittedSession(session)) {
