@@ -131,7 +131,6 @@ import { IChatContentPartRenderContext } from '../chatContentParts/chatContentPa
 import { CollapsibleListPool, IChatCollapsibleListItem } from '../chatContentParts/chatReferencesContentPart.js';
 import { ChatTodoListWidget } from '../chatContentParts/chatTodoListWidget.js';
 import { ChatArtifactsWidget } from '../chatArtifactsWidget.js';
-import { ChatEditedFilesWidget } from '../chatEditedFilesWidget.js';
 import { ChatDragAndDrop } from '../chatDragAndDrop.js';
 import { ChatFollowups } from './chatFollowups.js';
 import { IChatInputNotificationService } from './chatInputNotificationService.js';
@@ -262,7 +261,6 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	private _stableInputPartWidth = observableValue('chatInputPart.stableInputPartWidth', 0);
 	private readonly _chatInputTodoListWidget = this._register(new MutableDisposable<ChatTodoListWidget>());
 	private readonly _chatArtifactsWidget = this._register(new MutableDisposable<ChatArtifactsWidget>());
-	private readonly _chatEditedFilesWidget = this._register(new MutableDisposable<ChatEditedFilesWidget>());
 	private readonly _chatQuestionCarouselWidgets = this._register(new DisposableMap<string, ChatQuestionCarouselPart>());
 	private readonly _questionCarouselResponseIds = new Map<string, string>();
 	private readonly _questionCarouselSessionResources = new Map<string, URI>();
@@ -361,7 +359,6 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	private chatEditingSessionWidgetContainer!: HTMLElement;
 	private chatInputTodoListWidgetContainer!: HTMLElement;
 	private chatArtifactsWidgetContainer!: HTMLElement;
-	private chatEditedFilesWidgetContainer!: HTMLElement;
 	private chatGettingStartedTipContainer!: HTMLElement;
 	private chatQuestionCarouselContainer!: HTMLElement;
 	private chatPlanReviewContainer!: HTMLElement;
@@ -2457,7 +2454,8 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		const provider = sessionResource ? getAgentSessionProvider(sessionResource) : undefined;
 		const isClaude = provider === AgentSessionProviders.Claude || provider === AgentSessionProviders.AgentHostClaude;
 		const isCodex = provider === AgentSessionProviders.Codex || provider === AgentSessionProviders.AgentHostCodex;
-		this.chatSessionIsExternalAgent.set(isClaude || isCodex);
+		const isOpencode = provider === AgentSessionProviders.AgentHostOpencode;
+		this.chatSessionIsExternalAgent.set(isClaude || isCodex || isOpencode);
 	}
 
 	/**
@@ -2949,7 +2947,6 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 					dom.h('.chat-artifacts-widget-container@chatArtifactsWidgetContainer'),
 					dom.h('.chat-editing-session@chatEditingSessionWidgetContainer'),
 					dom.h('.chat-getting-started-tip-container@chatGettingStartedTipContainer'),
-					dom.h('.chat-edited-files-widget-container@chatEditedFilesWidgetContainer'),
 					dom.h('.interactive-input-and-side-toolbar@inputAndSideToolbar', [
 						dom.h('.chat-input-container@inputContainer', [
 							dom.h('.chat-editor-container@editorContainer'),
@@ -2978,7 +2975,6 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 				dom.h('.chat-artifacts-widget-container@chatArtifactsWidgetContainer'),
 				dom.h('.chat-editing-session@chatEditingSessionWidgetContainer'),
 				dom.h('.chat-getting-started-tip-container@chatGettingStartedTipContainer'),
-				dom.h('.chat-edited-files-widget-container@chatEditedFilesWidgetContainer'),
 				dom.h('.interactive-input-and-side-toolbar@inputAndSideToolbar', [
 					dom.h('.chat-input-container@inputContainer', [
 						dom.h('.chat-attachments-container@attachmentsContainer', [
@@ -3018,7 +3014,6 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		this.chatEditingSessionWidgetContainer = elements.chatEditingSessionWidgetContainer;
 		this.chatInputTodoListWidgetContainer = elements.chatInputTodoListWidgetContainer;
 		this.chatArtifactsWidgetContainer = elements.chatArtifactsWidgetContainer;
-		this.chatEditedFilesWidgetContainer = elements.chatEditedFilesWidgetContainer;
 		this.chatGettingStartedTipContainer = elements.chatGettingStartedTipContainer;
 		this.chatGettingStartedTipContainer.style.display = 'none';
 		this.chatQuestionCarouselContainer = elements.chatQuestionCarouselContainer;
@@ -3909,20 +3904,6 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		this._chatArtifactsWidget.value?.setSessionResource(undefined);
 	}
 
-	renderEditedFilesWidget(chatSessionResource: URI): void {
-		if (!this._chatEditedFilesWidget.value) {
-			const widget = this._register(this.instantiationService.createInstance(ChatEditedFilesWidget));
-			this._chatEditedFilesWidget.value = widget;
-			dom.clearNode(this.chatEditedFilesWidgetContainer);
-			dom.append(this.chatEditedFilesWidgetContainer, widget.domNode);
-		}
-		this._chatEditedFilesWidget.value.render(chatSessionResource);
-	}
-
-	clearEditedFilesWidget(): void {
-		this._chatEditedFilesWidget.value?.clear();
-	}
-
 	renderQuestionCarousel(carousel: IChatQuestionCarousel, context: IChatContentPartRenderContext, options: IChatQuestionCarouselOptions): ChatQuestionCarouselPart {
 
 		const carouselKey = carousel.resolveId ?? `${isResponseVM(context.element) ? context.element.requestId : ''}_${context.contentIndex}`;
@@ -4177,7 +4158,10 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	}
 
 	renderChatEditingSessionState(chatEditingSession: IChatEditingSession | null) {
-		dom.setVisibility(Boolean(chatEditingSession), this.chatEditingSessionWidgetContainer);
+		// The working-set summary bar above the composer is hidden; keep the
+		// rest of this method running so context keys and menu/action wiring
+		// that other UI (e.g. Keep All / Undo All) depends on stay live.
+		dom.setVisibility(false, this.chatEditingSessionWidgetContainer);
 
 		if (chatEditingSession) {
 			if (!isEqual(chatEditingSession.chatSessionResource, this._lastEditingSessionResource)) {
@@ -4415,7 +4399,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		}));
 
 		store.add(autorun(reader => {
-			const { files, added, removed, shouldShowEditingSession } = topLevelStats.read(reader);
+			const { files, added, removed } = topLevelStats.read(reader);
 
 			const buttonLabel = files === 1
 				? localize('chatEditingSession.oneFile', '1 file changed')
@@ -4427,7 +4411,12 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			this._workingSetLinesAddedSpan.value.textContent = `+${added}`;
 			this._workingSetLinesRemovedSpan.value.textContent = `-${removed}`;
 
-			dom.setVisibility(shouldShowEditingSession, this.chatEditingSessionWidgetContainer);
+			// The working-set summary bar above the composer is hidden. The DOM
+			// and its menu/context-key wiring are still built above (other UI
+			// such as Keep All / Undo All depends on them), but the bar itself
+			// never becomes visible. `shouldShowEditingSession` is intentionally
+			// unused here.
+			dom.setVisibility(false, this.chatEditingSessionWidgetContainer);
 		}));
 
 		const countsContainer = dom.$('.working-set-line-counts');

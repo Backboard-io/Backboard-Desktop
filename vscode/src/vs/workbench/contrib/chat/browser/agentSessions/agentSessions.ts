@@ -24,6 +24,7 @@ export enum AgentSessionProviders {
 	AgentHostCopilot = SessionType.AgentHostBackboard,
 	AgentHostClaude = SessionType.AgentHostClaude,
 	AgentHostCodex = SessionType.AgentHostCodex,
+	AgentHostOpencode = SessionType.AgentHostOpencode,
 }
 
 /**
@@ -52,6 +53,7 @@ export function getAgentSessionProvider(sessionResource: URI | string): AgentSes
 		case AgentSessionProviders.AgentHostCopilot:
 		case AgentSessionProviders.AgentHostClaude:
 		case AgentSessionProviders.AgentHostCodex:
+		case AgentSessionProviders.AgentHostOpencode:
 			return type;
 		default:
 			return undefined;
@@ -72,6 +74,8 @@ export function getAgentSessionProviderName(provider: AgentSessionTarget): strin
 		case AgentSessionProviders.Codex:
 		case AgentSessionProviders.AgentHostCodex:
 			return 'Codex';
+		case AgentSessionProviders.AgentHostOpencode:
+			return 'OpenCode';
 		case AgentSessionProviders.Growth:
 			return 'Growth';
 		case AgentSessionProviders.AgentHostCopilot:
@@ -94,6 +98,8 @@ export function getAgentSessionProviderIcon(provider: AgentSessionTarget): Theme
 		case AgentSessionProviders.Codex:
 		case AgentSessionProviders.AgentHostCodex:
 			return Codicon.openai;
+		case AgentSessionProviders.AgentHostOpencode:
+			return Codicon.circuitBoard;
 		case AgentSessionProviders.Claude:
 		case AgentSessionProviders.AgentHostClaude:
 			return Codicon.claude;
@@ -117,6 +123,7 @@ export function isFirstPartyAgentSessionProvider(provider: AgentSessionTarget): 
 		case AgentSessionProviders.AgentHostClaude:
 		case AgentSessionProviders.Codex:
 		case AgentSessionProviders.AgentHostCodex:
+		case AgentSessionProviders.AgentHostOpencode:
 		case AgentSessionProviders.Growth:
 			return false;
 		default:

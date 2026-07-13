@@ -110,6 +110,28 @@ export interface ISessionShowMore {
 
 export type SessionListItem = ISession | ISessionSection | ISessionShowMore;
 
+/**
+ * Maps a session's agent type to the logo shown before its title in the
+ * sessions list. Bare agent-host ids ('claude', 'codex', 'opencode',
+ * 'backboard') and their chat-session forms ('agent-host-…') both match.
+ * Unknown types render no logo.
+ */
+function providerIconForSessionType(sessionType: string): ThemeIcon | undefined {
+	if (sessionType.includes('claude')) {
+		return Codicon.claude;
+	}
+	if (sessionType === 'openai' || sessionType.includes('codex')) {
+		return Codicon.openai;
+	}
+	if (sessionType.includes('opencode')) {
+		return Codicon.circuitBoard;
+	}
+	if (sessionType.includes('backboard') || sessionType.includes('copilot')) {
+		return ThemeIcon.fromId('backboard-logo');
+	}
+	return undefined;
+}
+
 function isSessionSection(item: SessionListItem): item is ISessionSection {
 	return 'sessions' in item && Array.isArray((item as ISessionSection).sessions);
 }
@@ -247,6 +269,7 @@ class SessionItemActionRunner extends ActionRunner {
 interface ISessionItemTemplate {
 	readonly container: HTMLElement;
 	readonly statusIcon: SessionStatusIcon;
+	readonly providerIcon: HTMLElement;
 	readonly title: HighlightedLabel;
 	readonly titleToolbar: MenuWorkbenchToolBar;
 	readonly detailsRow: HTMLElement;
@@ -297,6 +320,7 @@ class SessionItemRenderer implements ITreeRenderer<SessionListItem, FuzzyScore, 
 		const statusIcon = disposables.add(this.instantiationService.createInstance(SessionStatusIcon, iconContainer));
 		const mainCol = DOM.append(container, $('.session-main'));
 		const titleRow = DOM.append(mainCol, $('.session-title-row'));
+		const providerIcon = DOM.append(titleRow, $('.session-provider-icon'));
 		const title = disposables.add(new HighlightedLabel(DOM.append(titleRow, $('.session-title'))));
 		const detailsRow = DOM.append(titleRow, $('.session-details-row'));
 		const titleToolbarContainer = DOM.append(titleRow, $('.session-title-toolbar'));
@@ -323,7 +347,7 @@ class SessionItemRenderer implements ITreeRenderer<SessionListItem, FuzzyScore, 
 			actionRunner,
 		}));
 
-		return { container, statusIcon, title, titleToolbar, detailsRow, approvalRow, approvalLabel, approvalButtonContainer, contextKeyService, disposables, elementDisposables };
+		return { container, statusIcon, providerIcon, title, titleToolbar, detailsRow, approvalRow, approvalLabel, approvalButtonContainer, contextKeyService, disposables, elementDisposables };
 	}
 
 	renderElement(node: ITreeNode<SessionListItem, FuzzyScore>, _index: number, template: ISessionItemTemplate): void {
@@ -352,6 +376,14 @@ class SessionItemRenderer implements ITreeRenderer<SessionListItem, FuzzyScore, 
 			position: { hoverPosition: HoverPosition.RIGHT, forcePosition: true },
 			persistence: { hideOnHover: false },
 		}), { groupId: 'sessions-list' }));
+
+		// Provider logo — identifies which agent (Backboard, Claude, Codex,
+		// OpenCode, …) owns the session, rendered just before the title.
+		const providerIcon = providerIconForSessionType(element.sessionType);
+		template.providerIcon.className = providerIcon
+			? `session-provider-icon ${ThemeIcon.asClassName(providerIcon)}`
+			: 'session-provider-icon';
+		template.providerIcon.classList.toggle('no-icon', !providerIcon);
 
 		// Toolbar context
 		template.titleToolbar.context = element;

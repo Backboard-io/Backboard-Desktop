@@ -73,22 +73,6 @@
 	font-weight: 500;
 }
 
-.sessions-environment-popup-add {
-	all: unset;
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	width: 24px;
-	height: 24px;
-	border-radius: 6px;
-	color: var(--vscode-icon-foreground);
-	cursor: pointer;
-}
-
-.sessions-environment-popup-add:hover {
-	background: var(--vscode-toolbar-hoverBackground);
-}
-
 .sessions-environment-popup-row,
 .sessions-environment-popup-source {
 	all: unset;

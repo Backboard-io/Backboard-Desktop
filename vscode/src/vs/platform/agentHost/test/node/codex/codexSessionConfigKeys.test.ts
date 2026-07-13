@@ -11,17 +11,13 @@ import { TestInstantiationService } from '../../../../../platform/instantiation/
 import { ILogService, NullLogService } from '../../../../../platform/log/common/log.js';
 import { ISessionDataService } from '../../../common/sessionDataService.js';
 import { CodexAgent } from '../../../node/codex/codexAgent.js';
-import { ICodexProxyService } from '../../../node/codex/codexProxyService.js';
 import { IAgentConfigurationService } from '../../../node/agentConfigurationService.js';
 import { IAgentSdkDownloader } from '../../../node/agentSdkDownloader.js';
-import { ICopilotApiService } from '../../../node/shared/copilotApiService.js';
 import { SessionConfigKey } from '../../../common/sessionConfigKeys.js';
 
 function createAgent(disposables: Pick<DisposableStore, 'add'>): CodexAgent {
 	const instantiationService = new TestInstantiationService();
 	instantiationService.stub(ISessionDataService, { _serviceBrand: undefined });
-	instantiationService.stub(ICopilotApiService, { _serviceBrand: undefined });
-	instantiationService.stub(ICodexProxyService, { _serviceBrand: undefined });
 	instantiationService.stub(IAgentConfigurationService, { _serviceBrand: undefined });
 	instantiationService.stub(IAgentSdkDownloader, { _serviceBrand: undefined });
 	instantiationService.stub(ILogService, new NullLogService());

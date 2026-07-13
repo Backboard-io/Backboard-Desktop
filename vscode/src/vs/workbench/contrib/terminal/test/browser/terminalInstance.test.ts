@@ -149,7 +149,7 @@ suite('Workbench - TerminalInstance', () => {
 			instantiationService.stub(IEnvironmentVariableService, store.add(instantiationService.createInstance(EnvironmentVariableService)));
 			instantiationService.stub(ITerminalInstanceService, store.add(new TestTerminalInstanceService()));
 			instantiationService.stub(ITerminalService, { setNextCommandId: async () => { } } as Partial<ITerminalService>);
-			const instance = store.add(instantiationService.createInstance(TerminalInstance, terminalShellTypeContextKey, {}));
+			const instance = store.add(instantiationService.createInstance(TerminalInstance, terminalShellTypeContextKey, {}, undefined));
 			await instance.xtermReadyPromise;
 			return instance;
 		}
@@ -188,7 +188,7 @@ suite('Workbench - TerminalInstance', () => {
 			const taskTerminal = store.add(instantiationService.createInstance(TerminalInstance, terminalShellTypeContextKey, {
 				type: 'Task',
 				name: 'Test Task Name'
-			}));
+			}, undefined));
 
 
 			// Simulate setting the title via API (as the task system would do)

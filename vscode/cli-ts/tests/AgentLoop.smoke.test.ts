@@ -708,7 +708,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 		expect(req.memory).toBe("Auto");
 		expect(req.memory_profile).toBe("code");
 		expect(req.thinking).toEqual({ effort: "high" });
-		expect(req.system_prompt).toContain("You are R-CLI");
+		expect(req.system_prompt).toContain("You are Backboard Studio");
 		expect(req.system_prompt).not.toContain("Model profile:");
 		expect(req.tools?.map((tool) => tool.function.name)).toEqual(["Visible"]);
 	});

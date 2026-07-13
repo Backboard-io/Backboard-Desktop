@@ -16,7 +16,10 @@ import { ICommandService } from '../../../../platform/commands/common/commands.j
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { IWorkbenchContribution, getWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../../workbench/common/contributions.js';
 import { IAgentHostTerminalService } from '../../../../workbench/contrib/terminal/browser/agentHostTerminalService.js';
-import { ITerminalInstance, ITerminalService } from '../../../../workbench/contrib/terminal/browser/terminal.js';
+import { ITerminalInstance, ITerminalService, IXtermColorProvider } from '../../../../workbench/contrib/terminal/browser/terminal.js';
+import { TERMINAL_BACKGROUND_COLOR } from '../../../../workbench/contrib/terminal/common/terminalColorRegistry.js';
+import { PANEL_BACKGROUND } from '../../../../workbench/common/theme.js';
+import { agentsPanelBackground } from '../../../common/theme.js';
 import { TerminalCapability } from '../../../../platform/terminal/common/capabilities/capabilities.js';
 import { IPathService } from '../../../../workbench/services/path/common/pathService.js';
 import { Menus } from '../../../browser/menus.js';
@@ -27,6 +30,7 @@ import { ISessionsService } from '../../../services/sessions/browser/sessionsSer
 import { ISession } from '../../../services/sessions/common/session.js';
 import { ISessionsProvidersService } from '../../../services/sessions/browser/sessionsProvidersService.js';
 import { ContextKeyExpr, IContextKeyService, RawContextKey } from '../../../../platform/contextkey/common/contextkey.js';
+import { AuxiliaryBarVisibleContext } from '../../../../workbench/common/contextkeys.js';
 import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry.js';
 import { logSessionsInteraction } from '../../../common/sessionsTelemetry.js';
 import { IViewsService } from '../../../../workbench/services/views/common/viewsService.js';
@@ -36,6 +40,15 @@ import { AgentHostSessionTaskRunner } from './agentHostSessionTaskRunner.js';
 import { IWorkbenchLayoutService, Parts } from '../../../../workbench/services/layout/browser/layoutService.js';
 
 const SessionsTerminalViewVisibleContext = new RawContextKey<boolean>('sessionsTerminalViewVisible', false);
+
+/**
+ * Resolves the xterm canvas background to the sessions panel background so it
+ * matches the surrounding agents panel chrome, falling back to the default
+ * terminal background chain.
+ */
+export const sessionsTerminalColorProvider: IXtermColorProvider = {
+	getBackgroundColor: theme => theme.getColor(agentsPanelBackground) ?? theme.getColor(TERMINAL_BACKGROUND_COLOR) ?? theme.getColor(PANEL_BACKGROUND)
+};
 
 interface ISessionTerminalInfo {
 	/** The cwd to use for terminal matching/creation. For agent host sessions this is the unwrapped file URI. */
@@ -335,12 +348,12 @@ export class SessionsTerminalContribution extends Disposable implements IWorkben
 	private async _createTerminalForSession(cwd: URI, session: ISession | undefined): Promise<ITerminalInstance> {
 		const address = session && this._getSessionAgentHostAddress(session);
 		if (address) {
-			const instance = await this._agentHostTerminalService.createTerminalForEntry(address, { cwd });
+			const instance = await this._agentHostTerminalService.createTerminalForEntry(address, { cwd, colorProvider: sessionsTerminalColorProvider });
 			if (instance) {
 				return instance;
 			}
 		}
-		return this._terminalService.createTerminal({ config: { cwd } });
+		return this._terminalService.createTerminal({ config: { cwd }, colorProvider: sessionsTerminalColorProvider });
 	}
 
 	/**
@@ -686,7 +699,10 @@ class OpenSessionInTerminalAction extends Action2 {
 				// SessionBarToolbar registration above; this row is the only place the
 				// toggle shows before a session exists, so there is no fallback if it
 				// gets hidden when the right panel opens.
-				when: ContextKeyExpr.and(IsNewChatSessionContext, IsPhoneLayoutContext.negate()),
+				when: ContextKeyExpr.and(
+					ContextKeyExpr.or(IsNewChatSessionContext, AuxiliaryBarVisibleContext),
+					IsPhoneLayoutContext.negate(),
+				),
 			}]
 		});
 	}

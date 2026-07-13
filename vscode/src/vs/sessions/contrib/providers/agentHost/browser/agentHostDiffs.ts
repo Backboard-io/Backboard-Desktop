@@ -48,10 +48,12 @@ export function diffToChange(d: ISessionFileDiff, mapUri?: (uri: URI) => URI): I
 
 	const uri = parseAndMap(rawUri);
 
-	// For deletions (no `after`), `modifiedUri` is `undefined` so the
-	// renderer treats the entry as a deletion and doesn't try to open the
-	// (now-missing) file as the "modified" side of the diff editor.
-	const modifiedUri = d.after ? parseAndMap(d.after.uri) : undefined;
+	// Keep `uri` as the logical working-tree identity used for labels and
+	// operations, but resolve the modified editor side from the content
+	// reference. Checkpoint diffs point this at an immutable `git-blob:` (or
+	// `session-db:`) snapshot, while live working-tree diffs point it at the
+	// file itself. For deletions (no `after`), `modifiedUri` stays undefined.
+	const modifiedUri = d.after ? parseAndMap(d.after.content.uri) : undefined;
 
 	// Use the before-content reference URI so the diff editor can
 	// fetch the snapshot of the file *before* the session's edits.

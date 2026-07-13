@@ -280,6 +280,20 @@
 		width: 100%;
 	}
 
+	/* Agent logo (Backboard / Claude / Codex / OpenCode) before the title. */
+	.session-provider-icon {
+		flex: 0 0 auto;
+		display: flex;
+		align-items: center;
+		font-size: 13px;
+		color: var(--sessions-row-icon-fg);
+		opacity: 0.85;
+	}
+
+	.session-provider-icon.no-icon {
+		display: none;
+	}
+
 	.session-details-row {
 		/* Never shrink below content: the title ellipsizes instead, so the
 		 * timestamp/diff stats are not clipped mid-word on long titles. */

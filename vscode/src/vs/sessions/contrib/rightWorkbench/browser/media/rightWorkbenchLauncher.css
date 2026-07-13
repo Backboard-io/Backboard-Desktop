@@ -71,33 +71,27 @@
 	align-items: center;
 	min-height: 44px;
 	padding: 6px 10px;
-	/* Reserve room on the right so tab/frame content never renders under the
-	 * persistent terminal/close controls (see .sessions-right-workbench-persistent-controls). */
-	padding-right: 84px;
 	box-sizing: border-box;
 	border-bottom: 0;
 	background: var(--rwb-bg);
 }
 
-/* Terminal toggle + close-panel controls: fixed to the shell's top-right
- * corner so they stay in the same spot across every mode (launcher, terminal,
- * files, browser, review) and are unaffected by tab count or header content. */
-.sessions-right-workbench-persistent-controls {
-	position: absolute;
-	top: 8px;
-	right: 10px;
-	z-index: 5;
-	display: flex;
-	align-items: center;
-	gap: 4px;
-}
-
+/* The strip scrolls horizontally when tabs overflow instead of letting tab
+ * content shrink below its min-content and bleed over the header controls.
+ * The scrollbar is hidden — the active tab is kept in view programmatically. */
 .sessions-right-workbench-tabs {
 	display: flex;
 	align-items: center;
 	gap: 6px;
 	min-width: 0;
 	flex: 1;
+	overflow-x: auto;
+	overflow-y: hidden;
+	scrollbar-width: none;
+}
+
+.sessions-right-workbench-tabs::-webkit-scrollbar {
+	display: none;
 }
 
 .sessions-right-workbench-tab,
@@ -121,6 +115,8 @@
 	line-height: 1;
 	white-space: nowrap;
 	min-width: 0;
+	flex-shrink: 0;
+	overflow: hidden;
 }
 
 .sessions-right-workbench-tab-label {
@@ -172,6 +168,7 @@
 	width: 28px;
 	height: 28px;
 	border-radius: var(--vscode-cornerRadius-large);
+	flex-shrink: 0;
 }
 
 .sessions-right-workbench-tab-add .codicon {
@@ -185,6 +182,12 @@
 	justify-content: flex-end;
 	gap: 4px;
 	padding-left: 8px;
+	/* Never shrinks or gets painted over by an overflowing tab strip — the
+	 * folder toggle must stay pinned and clickable at the panel's top right. */
+	flex-shrink: 0;
+	position: relative;
+	z-index: 1;
+	background: var(--rwb-bg);
 }
 
 .sessions-right-workbench-icon-button {

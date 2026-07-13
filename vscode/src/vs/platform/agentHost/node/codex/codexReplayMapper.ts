@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { generateUuid } from '../../../../base/common/uuid.js';
+import { stripInjectedContextBlocks } from '../shared/injectedContextScrubber.js';
 import { MessageKind, ResponsePartKind, type Turn, type ResponsePart } from '../../common/state/sessionState.js';
 import type { Thread } from './protocol/generated/v2/Thread.js';
 import type { ThreadItem } from './protocol/generated/v2/ThreadItem.js';
@@ -45,7 +46,12 @@ function replayTurnToTurn(codexTurn: CodexTurn): Turn | undefined {
 			const collected: string[] = [];
 			for (const c of item.content) {
 				if (c.type === 'text') {
-					collected.push(c.text);
+					// Drop workbench-injected context blocks — see
+					// `extractUserInputText` for the rationale.
+					const visible = stripInjectedContextBlocks(c.text);
+					if (visible.length > 0) {
+						collected.push(visible);
+					}
 				}
 			}
 			if (collected.length > 0) {

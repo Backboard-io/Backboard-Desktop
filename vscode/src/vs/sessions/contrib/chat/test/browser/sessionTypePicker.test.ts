@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
+import { IAgentCliSetupService } from '../../browser/agentCliSetup.js';
 import { Codicon } from '../../../../../base/common/codicons.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { Disposable, DisposableStore } from '../../../../../base/common/lifecycle.js';
@@ -87,6 +88,7 @@ function createPicker(
 	instantiationService.stub(IActionWidgetService, { isVisible: false, hide: () => { }, show: () => { } });
 	instantiationService.stub(ISessionsManagementService, managementService);
 	instantiationService.stub(ISessionsProvidersService, { getProvider: () => undefined });
+	instantiationService.stub(IAgentCliSetupService, { getSetupCandidates: () => [], beginSetup: async () => { } });
 	instantiationService.stub(IStorageService, storage);
 	instantiationService.stub(ITelemetryService, NullTelemetryService);
 	instantiationService.stub(IChatSessionsService, {

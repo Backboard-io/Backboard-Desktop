@@ -10,7 +10,7 @@ import { CancellationError } from '../../../../base/common/errors.js';
 import { Emitter } from '../../../../base/common/event.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { type IObservable, observableValue } from '../../../../base/common/observable.js';
-import { basename, dirname, isAbsolute, join, resolve, sep } from '../../../../base/common/path.js';
+import { basename, delimiter, dirname, isAbsolute, join, resolve, sep } from '../../../../base/common/path.js';
 import { URI } from '../../../../base/common/uri.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
 import { IInstantiationService } from '../../../instantiation/common/instantiation.js';
@@ -20,11 +20,10 @@ import { createSchema, platformSessionSchema, schemaProperty, type SessionMode }
 import { getReasoningEffortDescription, getReasoningEffortLabel } from '../../common/reasoningEffort.js';
 import { AgentHostCodexAgentBinaryArgsEnvVar, AgentHostCodexAgentCodexHomeEnvVar, AgentHostCodexAgentSdkRootEnvVar, AgentSession, AgentSignal, GITHUB_COPILOT_PROTECTED_RESOURCE, IAgent, IAgentCreateSessionConfig, IAgentCreateSessionResult, IAgentDescriptor, IAgentMaterializeSessionEvent, IAgentModelInfo, IAgentResolveSessionConfigParams, IAgentSessionConfigCompletionsParams, IAgentSessionMetadata, IMcpNotification, type AgentProvider } from '../../common/agentService.js';
 import { SessionConfigKey } from '../../common/sessionConfigKeys.js';
-import { AHP_AUTH_REQUIRED, ProtocolError } from '../../common/state/sessionProtocol.js';
 import { ActionType, type SessionAction, type ChatAction } from '../../common/state/sessionActions.js';
 import type { ConfigSchema, ModelSelection, ProtectedResourceMetadata, ToolDefinition } from '../../common/state/protocol/state.js';
 import type { ResolveSessionConfigResult, SessionConfigCompletionsResult } from '../../common/state/protocol/commands.js';
-import { type ClientPluginCustomization, type MessageAttachment, type PendingMessage, type ChatInputAnswer, ChatInputResponseKind, type PolicyState, type ToolCallResult, ToolResultContentType, type Turn } from '../../common/state/sessionState.js';
+import { type ClientPluginCustomization, type MessageAttachment, type PendingMessage, type ChatInputAnswer, ChatInputResponseKind, type ToolCallResult, ToolResultContentType, type Turn } from '../../common/state/sessionState.js';
 import { IAgentPluginManager, type ISyncedCustomization } from '../../common/agentPluginManager.js';
 import type { IAgentServerToolHost } from '../../common/agentServerTools.js';
 import { IFileService } from '../../../files/common/files.js';
@@ -36,13 +35,11 @@ import { buildCodexMcpReadResult, codexMcpListToInventory, codexMcpToolsChanged,
 import { buildElicitationRequest, cancelledElicitationResponse, declinedElicitationResponse, elicitationResponseFromAnswers } from './codexElicitationMapper.js';
 import type { AhpMcpUiHostCapabilities, Customization } from '../../common/state/protocol/channels-session/state.js';
 import { IAgentConfigurationService } from '../agentConfigurationService.js';
-import { ICopilotApiService } from '../shared/copilotApiService.js';
 import { extractForwardedErrorInfo } from '../shared/forwardedChatError.js';
 import { IAgentSdkDownloader, IAgentSdkPackage } from '../agentSdkDownloader.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { PendingRequestRegistry } from '../../common/pendingRequestRegistry.js';
 import { CodexAppServerClient, JsonRpcError, transportFromChildProcess, type ICodexAppServerClient, type ServerRequestHandlerResult } from './codexAppServerClient.js';
-import { ICodexProxyService, type ICodexProxyHandle } from './codexProxyService.js';
 import { createCodexSessionMapState, extractUserInputText, mapAgentMessageDelta, mapCommandExecutionOutputDelta, mapFileChangeOutputDelta, mapFileChangePatchUpdated, mapItemCompleted, mapItemStarted, mapMcpToolCallProgress, mapReasoningSummaryPartAdded, mapReasoningSummaryTextDelta, mapReasoningTextDelta, mapTokenUsageUpdated, mapTurnCompleted, mapTurnStarted, resetCodexTurnMapState, type ICodexSessionMapState } from './codexMapAppServerEvents.js';
 import { resolveCodexInput } from './codexPromptResolver.js';
 import { buildUserInputRequest, emptyUserInputResponse, userInputResponseFromAnswers } from './codexUserInputMapper.js';
@@ -56,6 +53,7 @@ import type { WebSearchMode } from './protocol/generated/WebSearchMode.js';
 import type { SandboxMode } from './protocol/generated/v2/SandboxMode.js';
 import type { SandboxPolicy } from './protocol/generated/v2/SandboxPolicy.js';
 import type { CommandExecutionApprovalDecision } from './protocol/generated/v2/CommandExecutionApprovalDecision.js';
+import type { ModelListResponse } from './protocol/generated/v2/ModelListResponse.js';
 import type { CommandExecutionRequestApprovalParams } from './protocol/generated/v2/CommandExecutionRequestApprovalParams.js';
 import type { CommandExecutionRequestApprovalResponse } from './protocol/generated/v2/CommandExecutionRequestApprovalResponse.js';
 import type { FileChangeApprovalDecision } from './protocol/generated/v2/FileChangeApprovalDecision.js';
@@ -103,7 +101,7 @@ const CODEX_REASONING_EFFORTS: readonly ReasoningEffort[] = ['minimal', 'low', '
 /**
  * MCP App capabilities advertised on every codex MCP server. Mirrors
  * {@link DEFAULT_MCP_APP_CAPABILITIES} but omits `sampling`: codex owns
- * the model connection (through the `vscode-proxy` provider) and exposes
+ * the model connection (its built-in `openai` provider) and exposes
  * no app-server RPC for App-initiated `sampling/createMessage`, so the
  * host cannot serve that capability for codex.
  */
@@ -127,17 +125,6 @@ const CODEX_MCP_APP_CAPABILITIES: AhpMcpUiHostCapabilities = {
 const MCP_TOOL_APPROVAL_QUESTION_ID_PREFIX = 'mcp_tool_call_approval_';
 const MCP_TOOL_APPROVAL_ANSWER_ALLOW = 'Allow';
 const MCP_TOOL_APPROVAL_ANSWER_DECLINE = '__codex_mcp_decline__';
-
-/**
- * `supported_endpoints` value (on a Copilot CAPI {@link CCAModel}) that marks
- * a model as reachable through CAPI's OpenAI-shaped Responses endpoint. Codex
- * only drives models via this endpoint (the `vscode-proxy` provider uses
- * `wire_api="responses"`), so the model picker is filtered to models that
- * advertise it. Confirmed against the live CAPI catalog: gpt-5.x / gpt-5*-codex
- * / mai-code carry `/responses`; Anthropic models carry `/v1/messages` and
- * chat-only models carry `/chat/completions` (neither is usable by codex).
- */
-const CODEX_RESPONSES_ENDPOINT = '/responses';
 
 const codexSessionConfigSchema = createSchema({
 	[CodexSessionConfigKey.ApprovalPolicy]: schemaProperty<CodexApprovalPolicy>({
@@ -420,7 +407,6 @@ type ConnectionState =
 
 interface IConnectionReady {
 	readonly client: ICodexAppServerClient;
-	readonly proxyHandle: ICodexProxyHandle;
 	readonly child: ChildProcessWithoutNullStreams;
 }
 
@@ -448,6 +434,53 @@ export const CodexSdkPackage: IAgentSdkPackage = {
 	devOverrideEnvVar: AgentHostCodexAgentSdkRootEnvVar,
 	hasSeparateMuslLinuxPackage: false,
 };
+
+/**
+ * Locate a `codex` binary on PATH. Registration and spawning fall back to
+ * the user's own install (the CLI they ran `codex login` with — the t3code
+ * model) when no SDK root / product download is configured.
+ */
+export function findCodexOnPath(): string | undefined {
+	const names = process.platform === 'win32' ? ['codex.exe', 'codex.cmd', 'codex'] : ['codex'];
+	// The GUI app's PATH (resolved from the login shell) frequently misses
+	// user-local install dirs that interactive shells add via .zshrc — scan
+	// the well-known install locations after PATH so `codex login` installs
+	// are found no matter how the app was launched.
+	const dirs = [
+		...(process.env.PATH?.split(delimiter) ?? []),
+		join(homedir(), '.local', 'bin'),
+		join(homedir(), 'bin'),
+		'/opt/homebrew/bin',
+		'/usr/local/bin',
+	];
+	for (const dir of dirs) {
+		if (!dir) {
+			continue;
+		}
+		for (const name of names) {
+			const candidate = join(dir, name);
+			try {
+				fs.accessSync(candidate, fs.constants.X_OK);
+				return candidate;
+			} catch {
+				// keep scanning
+			}
+		}
+	}
+	return undefined;
+}
+
+/**
+ * Static bootstrap model catalog shown before the app-server's own
+ * `model/list` responds. Ids and effort sets mirror the current codex CLI
+ * catalog; the live per-account list replaces this at first connection.
+ */
+const FALLBACK_CODEX_MODELS: ReadonlyArray<{ readonly id: string; readonly name: string; readonly description: string }> = [
+	{ id: 'gpt-5.5', name: 'GPT-5.5', description: 'Frontier model for complex coding, research, and real-world work.' },
+	{ id: 'gpt-5.4', name: 'GPT-5.4', description: 'Strong model for everyday coding.' },
+	{ id: 'gpt-5.4-mini', name: 'GPT-5.4-Mini', description: 'Small, fast, and cost-efficient model for simpler coding tasks.' },
+	{ id: 'gpt-5.3-codex-spark', name: 'GPT-5.3-Codex-Spark', description: 'Ultra-fast coding model.' },
+];
 
 /**
  * Convert a workbench {@link ToolCallResult} into the codex
@@ -529,7 +562,6 @@ export class CodexAgent extends Disposable implements IAgent {
 	 * session's {@link ICodexSession.mcpController}. Keyed by server name.
 	 */
 	private readonly _mcpInventory = new Map<string, ICodexMcpServerEntry>();
-	private _githubToken: string | undefined;
 	private _connection: ConnectionState = { kind: 'idle' };
 	private _modelsRefreshPromise: Promise<void> | undefined;
 	private readonly _metadataStore: CodexSessionMetadataStore;
@@ -545,8 +577,6 @@ export class CodexAgent extends Disposable implements IAgent {
 
 	constructor(
 		@ILogService private readonly _logService: ILogService,
-		@ICopilotApiService private readonly _copilotApiService: ICopilotApiService,
-		@ICodexProxyService private readonly _codexProxyService: ICodexProxyService,
 		@IAgentConfigurationService private readonly _configurationService: IAgentConfigurationService,
 		@IAgentSdkDownloader private readonly _agentSdkDownloader: IAgentSdkDownloader,
 		@IAgentPluginManager private readonly _pluginManager: IAgentPluginManager,
@@ -554,6 +584,10 @@ export class CodexAgent extends Disposable implements IAgent {
 		@IInstantiationService instantiationService: IInstantiationService,
 	) {
 		super();
+		// Advertise a static bootstrap catalog immediately so the picker is
+		// usable before the app-server spawns; `model/list` from the user's
+		// own account replaces it at first connection.
+		this._models.set(this._fallbackModels(), undefined);
 		this._metadataStore = instantiationService.createInstance(CodexSessionMetadataStore);
 	}
 
@@ -567,41 +601,23 @@ export class CodexAgent extends Disposable implements IAgent {
 		if (resource !== GITHUB_COPILOT_PROTECTED_RESOURCE.resource) {
 			return false;
 		}
-		const changed = this._githubToken !== token;
-		this._githubToken = token;
-		if (changed && this._connection.kind === 'ready') {
-			// Codex stays running — proxy reads the new token from its
-			// own cell on the next request (Decision 4).
-			this._connection.proxyHandle.setToken(token);
-			this._queueModelRefresh(token);
-		} else if (changed) {
-			// Defer model refresh until the connection comes up.
-			this._queueModelRefresh(token);
-		}
-		this._logService.info('[Codex] Auth token updated');
+		// Codex is subscription-native: sessions run on the user's own
+		// `codex login` (ChatGPT plan / API key in ~/.codex/auth.json), so the
+		// workbench's GitHub token is accepted for the protected-resources
+		// contract but never used for model traffic.
 		return true;
 	}
 
-	private _queueModelRefresh(token: string): void {
-		const refreshPromise = this._refreshModels(token).finally(() => {
-			if (this._modelsRefreshPromise === refreshPromise) {
-				this._modelsRefreshPromise = undefined;
-			}
-		});
-		this._modelsRefreshPromise = refreshPromise;
-		void this._modelsRefreshPromise;
-	}
-
-	private _ensureAuthenticated(): string {
-		const token = this._githubToken;
-		if (!token) {
-			throw new ProtocolError(
-				AHP_AUTH_REQUIRED,
-				'Authentication is required to use Codex',
-				this.getProtectedResources(),
-			);
-		}
-		return token;
+	private _fallbackModels(): IAgentModelInfo[] {
+		const configSchema = this._createReasoningEffortConfigSchema(['low', 'medium', 'high', 'xhigh'], 'medium');
+		return FALLBACK_CODEX_MODELS.map((m): IAgentModelInfo => ({
+			provider: this.id,
+			id: m.id,
+			name: m.name,
+			supportsVision: true,
+			...(configSchema ? { configSchema } : {}),
+			_meta: { description: m.description },
+		}));
 	}
 
 	private _defaultModel(): ModelSelection | undefined {
@@ -634,7 +650,13 @@ export class CodexAgent extends Disposable implements IAgent {
 		throw new Error('Codex has no available models.');
 	}
 
-	private _createReasoningEffortConfigSchema(): ConfigSchema {
+	private _createReasoningEffortConfigSchema(
+		efforts: readonly ReasoningEffort[] = CODEX_REASONING_EFFORTS,
+		defaultEffort: ReasoningEffort = 'medium',
+	): ConfigSchema | undefined {
+		if (efforts.length === 0) {
+			return undefined;
+		}
 		return {
 			type: 'object',
 			properties: {
@@ -642,10 +664,10 @@ export class CodexAgent extends Disposable implements IAgent {
 					type: 'string',
 					title: localize('codex.modelThinkingLevel.title', "Thinking Level"),
 					description: localize('codex.modelThinkingLevel.description', "Controls how much reasoning effort Codex uses."),
-					default: 'medium',
-					enum: [...CODEX_REASONING_EFFORTS],
-					enumLabels: CODEX_REASONING_EFFORTS.map(getReasoningEffortLabel),
-					enumDescriptions: CODEX_REASONING_EFFORTS.map(effort => getReasoningEffortDescription(effort) ?? ''),
+					default: efforts.includes(defaultEffort) ? defaultEffort : efforts[0],
+					enum: [...efforts],
+					enumLabels: efforts.map(getReasoningEffortLabel),
+					enumDescriptions: efforts.map(effort => getReasoningEffortDescription(effort) ?? ''),
 				},
 			},
 		};
@@ -718,43 +740,43 @@ export class CodexAgent extends Disposable implements IAgent {
 		};
 	}
 
-	private async _refreshModels(token: string): Promise<void> {
-		try {
-			const all = await this._copilotApiService.models(token);
-			if (this._githubToken !== token) {
+	/**
+	 * Populate the model catalog from the app-server's own `model/list` —
+	 * the models the user's `codex login` account can actually use, with
+	 * per-model reasoning-effort capabilities. Replaces the old CAPI-sourced
+	 * catalog: codex is subscription-native, so CAPI's list is irrelevant.
+	 */
+	private async _refreshModelsFromAppServer(client: ICodexAppServerClient): Promise<void> {
+		const refreshPromise = (async () => {
+			const response = await client.request<'model/list', ModelListResponse>('model/list', { limit: 100 });
+			const items = (response.data ?? []).filter(m => !m.hidden);
+			if (items.length === 0) {
 				return;
 			}
-			const configSchema = this._createReasoningEffortConfigSchema();
-			// Codex talks to every model through the `vscode-proxy` custom model
-			// provider with `wire_api="responses"` (see CodexProxyService), so it
-			// can only drive models that expose Copilot CAPI's OpenAI-shaped
-			// Responses endpoint. Filter the catalog to those advertising
-			// `/responses` in `supported_endpoints` (this drops Anthropic
-			// `/v1/messages` and chat-completions-only models, which codex cannot
-			// use). The chosen id is forwarded straight through; CAPI remains the
-			// authority on what the token may actually use.
-			const models = all
-				.filter(m => m.supported_endpoints?.includes(CODEX_RESPONSES_ENDPOINT))
-				.sort((a, b) => Number(b.is_chat_default) - Number(a.is_chat_default))
+			const models = items
+				.sort((a, b) => Number(b.isDefault) - Number(a.isDefault))
 				.map((m): IAgentModelInfo => ({
 					provider: this.id,
 					id: m.id,
-					name: m.name ?? m.id,
-					maxContextWindow: m.capabilities?.limits?.max_context_window_tokens,
-					supportsVision: !!m.capabilities?.supports?.vision,
-					configSchema,
-					policyState: m.policy?.state as PolicyState | undefined,
-					_meta: typeof m.billing?.multiplier === 'number' ? {
-						multiplierNumeric: m.billing.multiplier,
-					} : undefined,
+					name: m.displayName || m.id,
+					supportsVision: m.inputModalities.includes('image'),
+					configSchema: this._createReasoningEffortConfigSchema(
+						m.supportedReasoningEfforts.map(e => e.reasoningEffort),
+						m.defaultReasoningEffort,
+					),
+					_meta: { description: m.description },
 				}));
 			this._models.set(models, undefined);
-		} catch (err) {
-			this._logService.warn(`[Codex] Failed to refresh models: ${err instanceof Error ? err.message : String(err)}`);
-			if (this._githubToken === token) {
-				this._models.set([], undefined);
+			this._logService.info(`[Codex] Models refreshed from app-server. Count: ${models.length}`);
+		})().catch(err => {
+			this._logService.warn(`[Codex] model/list failed; keeping fallback catalog: ${err instanceof Error ? err.message : String(err)}`);
+		}).finally(() => {
+			if (this._modelsRefreshPromise === refreshPromise) {
+				this._modelsRefreshPromise = undefined;
 			}
-		}
+		});
+		this._modelsRefreshPromise = refreshPromise;
+		return refreshPromise;
 	}
 
 	// #endregion
@@ -762,9 +784,10 @@ export class CodexAgent extends Disposable implements IAgent {
 	// #region Connection lifecycle
 
 	/**
-	 * Lazily spawn the codex app-server, initialize the connection,
-	 * authenticate via apiKey, and return the ready connection. Idempotent
-	 * — concurrent callers share the same promise.
+	 * Lazily spawn the codex app-server, initialize the connection, and
+	 * return the ready connection (codex authenticates itself from the
+	 * user's own `codex login`). Idempotent — concurrent callers share the
+	 * same promise.
 	 */
 	private _ensureConnection(): Promise<IConnectionReady> {
 		if (this._connection.kind === 'ready') {
@@ -773,8 +796,7 @@ export class CodexAgent extends Disposable implements IAgent {
 		if (this._connection.kind === 'starting') {
 			return this._connection.promise;
 		}
-		const token = this._ensureAuthenticated();
-		const promise = this._startConnection(token).then(ready => {
+		const promise = this._startConnection().then(ready => {
 			this._connection = { kind: 'ready', ...ready };
 			return ready;
 		}).catch(err => {
@@ -785,62 +807,56 @@ export class CodexAgent extends Disposable implements IAgent {
 		return promise;
 	}
 
-	private async _startConnection(token: string): Promise<IConnectionReady> {
-		// Resolve the Codex SDK root via the downloader: dev override → cache →
-		// download from `product.agentSdks.codex`. We spawn the native codex
-		// binary inside the platform package directly (the same shape the JS
-		// shim at `node_modules/@openai/codex/bin/codex.js` would resolve to)
-		// — going through the shim adds a launcher hop and forces an
-		// `ELECTRON_RUN_AS_NODE` round-trip when the agent host runs as an
-		// Electron utility process.
-		const root = await this._agentSdkDownloader.loadSdkRoot(CodexSdkPackage, CancellationToken.None);
-		const codexTarget = codexPackageSuffix(process.platform, process.arch);
-		if (!codexTarget) {
-			throw new Error(`Codex: unsupported platform ${process.platform}-${process.arch}`);
-		}
-		const triple = codexBinaryTriple(codexTarget);
-		if (!triple) {
-			throw new Error(`Codex: no binary triple known for sdkTarget '${codexTarget}'`);
-		}
-		const binaryName = process.platform === 'win32' ? 'codex.exe' : 'codex';
-		const binaryPath = join(root, 'node_modules', `@openai/codex-${codexTarget}`, 'vendor', triple, 'bin', binaryName);
-		try {
+	/**
+	 * Resolve the codex binary to spawn: the downloaded/dev-override SDK
+	 * tree when configured, otherwise the user's own `codex` install on
+	 * PATH (the t3code model — the CLI the user already logged into).
+	 */
+	private async _resolveCodexBinary(): Promise<string> {
+		if (this._agentSdkDownloader.isAvailable(CodexSdkPackage)) {
+			// Spawn the native codex binary inside the platform package
+			// directly (the same shape the JS shim at
+			// `node_modules/@openai/codex/bin/codex.js` would resolve to) —
+			// going through the shim adds a launcher hop and forces an
+			// `ELECTRON_RUN_AS_NODE` round-trip when the agent host runs as
+			// an Electron utility process.
+			const root = await this._agentSdkDownloader.loadSdkRoot(CodexSdkPackage, CancellationToken.None);
+			const codexTarget = codexPackageSuffix(process.platform, process.arch);
+			if (!codexTarget) {
+				throw new Error(`Codex: unsupported platform ${process.platform}-${process.arch}`);
+			}
+			const triple = codexBinaryTriple(codexTarget);
+			if (!triple) {
+				throw new Error(`Codex: no binary triple known for sdkTarget '${codexTarget}'`);
+			}
+			const binaryName = process.platform === 'win32' ? 'codex.exe' : 'codex';
+			const binaryPath = join(root, 'node_modules', `@openai/codex-${codexTarget}`, 'vendor', triple, 'bin', binaryName);
 			fs.accessSync(binaryPath, fs.constants.X_OK);
-		} catch (err) {
-			throw new Error(`Codex binary not executable: ${binaryPath} (${err instanceof Error ? err.message : String(err)})`);
+			return binaryPath;
 		}
+		const onPath = findCodexOnPath();
+		if (!onPath) {
+			throw new Error(`Codex CLI not found: install it (npm install -g @openai/codex) so 'codex' is on PATH, or set ${AgentHostCodexAgentSdkRootEnvVar}.`);
+		}
+		return onPath;
+	}
 
-		const proxyHandle = await this._codexProxyService.start(token);
+	private async _startConnection(): Promise<IConnectionReady> {
+		const binaryPath = await this._resolveCodexBinary();
 
-		// Build child env: inherit, and pass the proxy nonce through a
-		// private variable so the proxy provider's `env_key` check passes.
-		// Deliberately NOT `OPENAI_API_KEY`: subscription-billed threads run
-		// on the built-in `openai` provider, which must auth from the user's
-		// own `~/.codex/auth.json` login — a nonce in `OPENAI_API_KEY` would
-		// shadow it and 401. We also deliberately do NOT write a config.toml,
-		// which would force a managed CODEX_HOME and trip codex's
-		// "refusing to write helper binaries under TMPDIR" warning.
-		const env: NodeJS.ProcessEnv = {
-			...process.env,
-			BACKBOARD_PROXY_API_KEY: proxyHandle.nonce,
-		};
+		// Subscription-native: codex authenticates itself from the user's own
+		// `codex login` (ChatGPT plan or API key in `$CODEX_HOME/auth.json`,
+		// default `~/.codex`). No proxy, no injected credentials — the child
+		// simply inherits the environment. We deliberately do NOT write a
+		// config.toml, which would force a managed CODEX_HOME and trip
+		// codex's "refusing to write helper binaries under TMPDIR" warning.
+		const env: NodeJS.ProcessEnv = { ...process.env };
 		const userCodexHome = process.env[AgentHostCodexAgentCodexHomeEnvVar];
 		if (userCodexHome) {
 			env.CODEX_HOME = userCodexHome;
 		}
 
-		// Define an in-memory `vscode-proxy` provider that points at our
-		// local proxy with WebSocket transport disabled. Using `-c`
-		// overrides composes with the user's ~/.codex/config.toml — their
-		// other settings (model, MCP servers, etc.) still apply.
-		const providerOverrides = [
-			`model_provider="vscode-proxy"`,
-			`model_providers.vscode-proxy.name="VS Code Proxy"`,
-			`model_providers.vscode-proxy.base_url="${proxyHandle.baseUrl}/v1"`,
-			`model_providers.vscode-proxy.wire_api="responses"`,
-			`model_providers.vscode-proxy.env_key="BACKBOARD_PROXY_API_KEY"`,
-			`model_providers.vscode-proxy.requires_openai_auth=false`,
-			`model_providers.vscode-proxy.supports_websockets=false`,
+		const configOverrides = [
 			// Route MCP tool-call approvals through codex's `request_user_input`
 			// path (a proper Allow / Allow-and-remember / Cancel options
 			// question the agent host already renders) instead of the
@@ -854,7 +870,7 @@ export class CodexAgent extends Disposable implements IAgent {
 
 		// Extra args forwarded as JSON from the workbench setting.
 		const extraArgs = parseBinaryArgs(process.env[AgentHostCodexAgentBinaryArgsEnvVar]);
-		const args = ['app-server', ...providerOverrides.flatMap(kv => ['-c', kv]), ...extraArgs];
+		const args = ['app-server', ...configOverrides.flatMap(kv => ['-c', kv]), ...extraArgs];
 
 		this._logService.info(`[Codex] spawning ${binaryPath} ${args.join(' ')}`);
 		const child = spawn(binaryPath, args, { env, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -886,22 +902,15 @@ export class CodexAgent extends Disposable implements IAgent {
 				capabilities: { experimentalApi: true, requestAttestation: false, optOutNotificationMethods: null },
 			});
 			client.notify<'initialized'>('initialized', undefined as never);
-			// With `requires_openai_auth = false` on the proxy provider,
-			// codex does not require a separate login step — the proxy
-			// nonce is read from BACKBOARD_PROXY_API_KEY by the provider's
-			// env_key.
-			if (userCodexHome) {
-				// User-provided CODEX_HOME may target a provider that
-				// still requires auth; preserve the apiKey login path.
-				await client.request<'account/login/start'>('account/login/start', {
-					type: 'apiKey',
-					apiKey: proxyHandle.nonce,
-				});
-			}
+			// Codex reads its own login from `$CODEX_HOME/auth.json`; log the
+			// account it resolved so a signed-out CLI is diagnosable.
 			void this._logAccountSnapshot(client);
+			// Populate the model catalog from this account's `model/list`
+			// (fire-and-forget: `_resolveModel` awaits `_modelsRefreshPromise`
+			// when the catalog is still empty).
+			void this._refreshModelsFromAppServer(client);
 		} catch (err) {
 			client.dispose();
-			proxyHandle.dispose();
 			try { child.kill('SIGKILL'); } catch { /* already dead */ }
 			throw err;
 		}
@@ -979,7 +988,7 @@ export class CodexAgent extends Disposable implements IAgent {
 		// until the next `mcpServer/startupStatus/updated` notification.
 		void this._refreshMcpInventory(client);
 
-		return { client, proxyHandle, child };
+		return { client, child };
 	}
 
 	/**
@@ -1498,7 +1507,7 @@ export class CodexAgent extends Disposable implements IAgent {
 			this._logService.error(`[Codex] Failed to dispose app-server client after connection lost: ${err instanceof Error ? err.message : String(err)}`);
 		}
 		try {
-			conn.proxyHandle.dispose();
+
 		} catch (err) {
 			this._logService.error(`[Codex] Failed to dispose proxy handle after connection lost: ${err instanceof Error ? err.message : String(err)}`);
 		}
@@ -1518,7 +1527,6 @@ export class CodexAgent extends Disposable implements IAgent {
 
 	async createSession(config: IAgentCreateSessionConfig = {}): Promise<IAgentCreateSessionResult> {
 		this._logService.info(`[Codex DEBUG] createSession session=${config.session?.toString() ?? '(none)'} model=${config.model?.id ?? '(none)'} cwd=${config.workingDirectory?.toString() ?? '(none)'}`);
-		this._ensureAuthenticated();
 		if (config.fork) {
 			throw new Error('Codex agent does not support session forking');
 		}
@@ -1628,9 +1636,9 @@ export class CodexAgent extends Disposable implements IAgent {
 		const conn = await this._ensureConnection();
 		const config = this._readSessionConfig(session);
 		const model = await this._resolveModel(session);
-		// Threads always run on codex's built-in `openai` provider (auth from
-		// the user's own `codex login`) instead of the process-wide
-		// `vscode-proxy` default set via `-c` at spawn.
+		// Threads always run on codex's built-in `openai` provider — auth
+		// comes from the user's own `codex login` (~/.codex/auth.json), the
+		// t3code subscription-native model.
 		const startResult = await conn.client.request<'thread/start', { thread: { id: string } }>('thread/start', {
 			cwd: session.workingDirectory.fsPath,
 			model: model.id,
@@ -1807,9 +1815,8 @@ export class CodexAgent extends Disposable implements IAgent {
 		const threadId = session.threadId!;
 		if (session.needsResume) {
 			try {
-				// Re-assert the thread's model provider on resume: without it,
-				// codex re-applies the process-wide `vscode-proxy` default and
-				// the thread would silently flip off the user's own login.
+				// Re-assert the thread's model provider on resume so the
+				// thread stays pinned to the user's own `codex login`.
 				await conn.client.request<'thread/resume'>('thread/resume', {
 					threadId,
 					modelProvider: 'openai',
@@ -2184,9 +2191,6 @@ export class CodexAgent extends Disposable implements IAgent {
 	}
 
 	async listSessions(): Promise<IAgentSessionMetadata[]> {
-		if (!this._githubToken) {
-			return [];
-		}
 		try {
 			const conn = await this._ensureConnection();
 			const response = await conn.client.request<'thread/list', ThreadListResponse>('thread/list', {
@@ -2506,7 +2510,6 @@ export class CodexAgent extends Disposable implements IAgent {
 	async shutdown(): Promise<void> {
 		if (this._connection.kind === 'ready') {
 			try { this._connection.client.dispose(); } catch { /* ignore */ }
-			try { this._connection.proxyHandle.dispose(); } catch { /* ignore */ }
 		}
 		this._connection = { kind: 'idle' };
 		for (const s of this._sessions.values()) {
@@ -2579,7 +2582,6 @@ export class CodexAgent extends Disposable implements IAgent {
 	override dispose(): void {
 		if (this._connection.kind === 'ready') {
 			try { this._connection.client.dispose(); } catch { /* ignore */ }
-			try { this._connection.proxyHandle.dispose(); } catch { /* ignore */ }
 		}
 		this._connection = { kind: 'idle' };
 		for (const s of this._sessions.values()) {

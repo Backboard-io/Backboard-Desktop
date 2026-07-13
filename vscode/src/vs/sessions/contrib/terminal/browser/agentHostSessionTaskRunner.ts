@@ -16,6 +16,7 @@ import { resolveTaskCommand } from '../../chat/browser/taskCommand.js';
 import { ITaskEntry, ISessionsTasksService } from '../../chat/browser/sessionsTasksService.js';
 import { ISession } from '../../../services/sessions/common/session.js';
 import { ISessionsProvidersService } from '../../../services/sessions/browser/sessionsProvidersService.js';
+import { sessionsTerminalColorProvider } from './sessionsTerminalContribution.js';
 
 const LOG_PREFIX = '[AgentHostSessionTaskRunner]';
 
@@ -65,6 +66,7 @@ export class AgentHostSessionTaskRunner implements ISessionTaskRunner {
 		const instance = await this._agentHostTerminalService.createTerminalForEntry(address, {
 			cwd,
 			name: localize('agentHostSessionTaskTerminalName', "Task: {0}", task.label),
+			colorProvider: sessionsTerminalColorProvider,
 		});
 		if (!instance) {
 			this._logService.warn(`${LOG_PREFIX} Failed to create terminal for task '${task.label}' on '${address}'.`);

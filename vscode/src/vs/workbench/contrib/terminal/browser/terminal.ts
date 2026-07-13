@@ -88,8 +88,11 @@ export interface ITerminalInstanceService {
 	 * Create a new terminal instance.
 	 * @param launchConfig The shell launch config.
 	 * @param target The target of the terminal.
+	 * @param editorOptions The editor options for editor terminals.
+	 * @param colorProvider An optional xterm color provider that overrides the default terminal
+	 * background resolution, used when the terminal is embedded in a custom surface.
 	 */
-	createInstance(launchConfig: IShellLaunchConfig, target: TerminalLocation, editorOptions?: TerminalEditorLocation): ITerminalInstance;
+	createInstance(launchConfig: IShellLaunchConfig, target: TerminalLocation, editorOptions?: TerminalEditorLocation, colorProvider?: IXtermColorProvider): ITerminalInstance;
 
 	/**
 	 * Gets the registered backend for a remote authority (undefined = local). This is a convenience

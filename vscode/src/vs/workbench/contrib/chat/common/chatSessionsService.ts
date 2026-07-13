@@ -308,6 +308,7 @@ export namespace SessionType {
 	export const AgentHostCopilot = AgentHostBackboard;
 	export const AgentHostClaude = 'agent-host-claude';
 	export const AgentHostCodex = 'agent-host-codex';
+	export const AgentHostOpencode = 'agent-host-opencode';
 }
 
 /**

@@ -7,6 +7,7 @@ import { generateUuid } from '../../../../base/common/uuid.js';
 import { ActionType, type SessionAction, type ChatAction } from '../../common/state/sessionActions.js';
 import { MessageKind, ResponsePartKind, ToolCallConfirmationReason, ToolCallContributorKind, ToolResultContentType, TurnState } from '../../common/state/sessionState.js';
 import { extractForwardedErrorInfo } from '../shared/forwardedChatError.js';
+import { stripInjectedContextBlocks } from '../shared/injectedContextScrubber.js';
 import type { AgentMessageDeltaNotification } from './protocol/generated/v2/AgentMessageDeltaNotification.js';
 import type { CommandExecutionOutputDeltaNotification } from './protocol/generated/v2/CommandExecutionOutputDeltaNotification.js';
 import type { FileChangeOutputDeltaNotification } from './protocol/generated/v2/FileChangeOutputDeltaNotification.js';
@@ -105,7 +106,14 @@ export function extractUserInputText(content: readonly UserInput[]): string {
 	const collected: string[] = [];
 	for (const c of content) {
 		if (c.type === 'text') {
-			collected.push(c.text);
+			// Injected workbench context (skills index, reminders) rides in
+			// the same message — either as its own item (new threads) or
+			// merged into the user's text (threads persisted before the
+			// split). Scrub both so it never renders as user text.
+			const visible = stripInjectedContextBlocks(c.text);
+			if (visible.length > 0) {
+				collected.push(visible);
+			}
 		}
 	}
 	return collected.join('\n\n');

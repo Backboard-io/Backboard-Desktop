@@ -38,13 +38,14 @@ import { CopilotApiService, ICopilotApiService } from './shared/copilotApiServic
 import { ClaudeAgent } from './claude/claudeAgent.js';
 import { ClaudeAgentSdkService, ClaudeSdkPackage, IClaudeAgentSdkService } from './claude/claudeAgentSdkService.js';
 import { ClaudeProxyService, IClaudeProxyService } from './claude/claudeProxyService.js';
-import { CodexAgent, CodexSdkPackage } from './codex/codexAgent.js';
+import { CodexAgent, CodexSdkPackage, findCodexOnPath } from './codex/codexAgent.js';
+import { OpenCodeAgent, findOpenCodeOnPath } from './opencode/opencodeAgent.js';
 import { CodexProxyService, ICodexProxyService } from './codex/codexProxyService.js';
 import { AgentSdkDownloader, IAgentSdkDownloader } from './agentSdkDownloader.js';
 import { IAgentHostOTelService } from '../common/otel/agentHostOTelService.js';
 import { AgentHostOTelService } from './otel/agentHostOTelService.js';
 import { AgentService } from './agentService.js';
-import { AgentHostClaudeAgentEnabledEnvVar, AgentHostClaudeSdkRootEnvVar, AgentHostCodexAgentEnabledEnvVar, IAgentService, AgentHostCodexAgentSdkRootEnvVar, isAgentEnabled } from '../common/agentService.js';
+import { AgentHostClaudeAgentEnabledEnvVar, AgentHostClaudeSdkRootEnvVar, AgentHostCodexAgentEnabledEnvVar, AgentHostOpenCodeAgentEnabledEnvVar, IAgentService, AgentHostCodexAgentSdkRootEnvVar, isAgentEnabled } from '../common/agentService.js';
 import { IAgentConfigurationService } from './agentConfigurationService.js';
 import { IAgentHostCompletions } from './agentHostCompletions.js';
 import { IAgentHostTerminalManager } from './agentHostTerminalManager.js';
@@ -295,17 +296,22 @@ async function main(): Promise<void> {
 		//     so the bare-import path in `ClaudeAgentSdkService._loadSdk`
 		//     always succeeds in dev; in built/shipped server installs the
 		//     SDK comes from the CLI flag / env var dev override or a
-		//     `product.agentSdks.claude` entry. Codex still requires the
-		//     env-var override or product config.
+		//     `product.agentSdks.claude` entry. Codex accepts the env-var
+		//     override, product config, or a `codex` binary on PATH.
 		if (isAgentEnabled(process.env[AgentHostClaudeAgentEnabledEnvVar], false) && (!environmentService.isBuilt || agentSdkDownloader.isAvailable(ClaudeSdkPackage))) {
 			const claudeAgent = disposables.add(instantiationService.createInstance(ClaudeAgent));
 			agentService.registerProvider(claudeAgent);
 			log('ClaudeAgent registered');
 		}
-		if (isAgentEnabled(process.env[AgentHostCodexAgentEnabledEnvVar], false) && agentSdkDownloader.isAvailable(CodexSdkPackage)) {
+		if (isAgentEnabled(process.env[AgentHostCodexAgentEnabledEnvVar], false) && (agentSdkDownloader.isAvailable(CodexSdkPackage) || findCodexOnPath() !== undefined)) {
 			const codexAgent = disposables.add(instantiationService.createInstance(CodexAgent));
 			agentService.registerProvider(codexAgent);
 			log('CodexAgent registered');
+		}
+		if (isAgentEnabled(process.env[AgentHostOpenCodeAgentEnabledEnvVar], false) && findOpenCodeOnPath() !== undefined) {
+			const opencodeAgent = disposables.add(instantiationService.createInstance(OpenCodeAgent));
+			agentService.registerProvider(opencodeAgent);
+			log('OpenCodeAgent registered');
 		}
 	}
 

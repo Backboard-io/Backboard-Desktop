@@ -11,7 +11,7 @@ import { Registry } from '../../registry/common/platform.js';
 import {
 	AgentHostClaudeAgentEnabledSettingId,
 	AgentHostCodexAgentBinaryArgsSettingId,
-	AgentHostCodexAgentEnabledSettingId,
+	AgentHostCodexAgentEnabledSettingId, AgentHostOpenCodeAgentEnabledSettingId,
 	AgentHostCodexAgentSdkRootSettingId,
 	AgentHostCodexAgentCodexHomeSettingId,
 	AgentHostOTelCaptureContentSettingId,
@@ -56,8 +56,8 @@ configurationRegistry.registerConfiguration({
 		},
 		[AgentHostCodexAgentEnabledSettingId]: {
 			type: 'boolean',
-			description: nls.localize('chat.agentHost.codexAgent.enabled', "When enabled, the agent host registers the Codex provider (subject to the Codex SDK being reachable). Requires `#chat.agentHost.enabled#`. The agent host process must be restarted for changes to take effect."),
-			default: false,
+			description: nls.localize('chat.agentHost.codexAgent.enabled', "When enabled, the agent host registers the Codex provider (subject to a Codex CLI being reachable — an SDK distribution or a `codex` binary on PATH). Requires `#chat.agentHost.enabled#`. The agent host process must be restarted for changes to take effect."),
+			default: true,
 			tags: ['experimental', 'advanced'],
 			// Owns the `Codex3PIntegration` policy; gating here disables Codex across all agent-host surfaces.
 			policy: {
@@ -68,10 +68,16 @@ configurationRegistry.registerConfiguration({
 				localization: {
 					description: {
 						key: 'chat.agentHost.codexAgent.enabled.policy',
-						value: nls.localize('chat.agentHost.codexAgent.enabled.policy', "Enable Codex Agent sessions in Backboard IDE. Start and resume agentic coding sessions powered by OpenAI Codex SDK. Uses your existing Backboard access."),
+						value: nls.localize('chat.agentHost.codexAgent.enabled.policy', "Enable Codex Agent sessions in Backboard IDE. Start and resume agentic coding sessions powered by the OpenAI Codex CLI. Uses your own ChatGPT subscription."),
 					}
 				}
 			},
+		},
+		[AgentHostOpenCodeAgentEnabledSettingId]: {
+			type: 'boolean',
+			description: nls.localize('chat.agentHost.opencodeAgent.enabled', "When enabled, the agent host registers the OpenCode provider (subject to an `opencode` binary being on PATH). Requires `#chat.agentHost.enabled#`. The agent host process must be restarted for changes to take effect."),
+			default: true,
+			tags: ['experimental', 'advanced'],
 		},
 		[AgentHostCodexAgentSdkRootSettingId]: {
 			type: 'string',

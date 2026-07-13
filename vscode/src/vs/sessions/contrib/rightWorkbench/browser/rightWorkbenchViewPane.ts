@@ -7,8 +7,10 @@ import './media/rightWorkbenchLauncher.css';
 import { $, addDisposableListener, append, clearNode, EventType } from '../../../../base/browser/dom.js';
 import { renderIcon } from '../../../../base/browser/ui/iconLabel/iconLabels.js';
 import { Separator, toAction } from '../../../../base/common/actions.js';
+import { RunOnceScheduler } from '../../../../base/common/async.js';
 import { Color } from '../../../../base/common/color.js';
 import { Codicon } from '../../../../base/common/codicons.js';
+import { Event } from '../../../../base/common/event.js';
 import { DisposableMap, DisposableStore } from '../../../../base/common/lifecycle.js';
 import { autorun, IReader } from '../../../../base/common/observable.js';
 import { basename, dirname } from '../../../../base/common/resources.js';
@@ -49,7 +51,7 @@ import { GitChange, GitDiffChange, IGitRepository, IGitService } from '../../../
 import { ITerminalEditorService, ITerminalInstance, ITerminalService, IXtermColorProvider } from '../../../../workbench/contrib/terminal/browser/terminal.js';
 import { IAgentHostCustomizationService } from '../../../../workbench/contrib/chat/browser/agentSessions/agentHost/agentHostCustomizationService.js';
 import { isIChatSessionFileChange2 } from '../../../../workbench/contrib/chat/common/chatSessionsService.js';
-import { agentsPanelBackground } from '../../../common/theme.js';
+import { agentsBackground, agentsPanelBackground } from '../../../common/theme.js';
 import { ISessionsService } from '../../../services/sessions/browser/sessionsService.js';
 import { IActiveSession } from '../../../services/sessions/common/sessionsManagement.js';
 import { ISessionFileChange } from '../../../services/sessions/common/session.js';
@@ -86,6 +88,7 @@ interface IRightWorkbenchTabState {
 	browserInput?: BrowserEditorInput;
 	selectedFile?: URI;
 	selectedReviewResourceKey?: string;
+	selectedReviewSourceUri?: URI;
 }
 
 export class RightWorkbenchViewPane extends ViewPane {
@@ -126,7 +129,11 @@ export class RightWorkbenchViewPane extends ViewPane {
 	private reviewContainer: HTMLElement | undefined;
 	private reviewBodyElement: HTMLElement | undefined;
 	private reviewScmRailElement: HTMLElement | undefined;
+	private reviewListContainer: HTMLElement | undefined;
 	private openedReviewResourceKey: string | undefined;
+	private pendingReviewOpenResource: IReviewResource | undefined;
+	private reviewOpenTimeout: ReturnType<typeof setTimeout> | undefined;
+	private readonly scmReviewRefreshScheduler = this._register(new RunOnceScheduler(() => this.refreshReviewRail(undefined), 100));
 	private modePicker: HTMLElement | undefined;
 	private isRightWorkbenchVisible = false;
 
@@ -214,6 +221,14 @@ export class RightWorkbenchViewPane extends ViewPane {
 		}
 	}
 
+	override dispose(): void {
+		if (this.reviewOpenTimeout !== undefined) {
+			clearTimeout(this.reviewOpenTimeout);
+			this.reviewOpenTimeout = undefined;
+		}
+		super.dispose();
+	}
+
 	override layoutBody(height: number, width: number): void {
 		super.layoutBody(height, width);
 		if (this.root) {
@@ -226,6 +241,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 		}
 		this.layoutFilesExplorer();
 		this.layoutEmbeddedEditorPart();
+		this.layoutReviewTree();
 	}
 
 	private getAuxiliaryContentElement(): HTMLElement | undefined {
@@ -267,6 +283,12 @@ export class RightWorkbenchViewPane extends ViewPane {
 		const willChangeTab = modeRequest.mode === 'launcher'
 			? this.activeTabId !== undefined
 			: existing?.id !== this.activeTabId;
+		// Re-requesting the already-active surface with no new content is a
+		// no-op: tearing down and rebuilding the shell would recreate trees and
+		// editors for nothing.
+		if (!willChangeTab && !modeRequest.browserUrl && !modeRequest.browserViewId && (modeRequest.mode === 'launcher' || existing !== undefined)) {
+			return;
+		}
 		if (willChangeTab) {
 			const closed = await this.closeEmbeddedEditorPart();
 			if (!closed) {
@@ -366,6 +388,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 		this.reviewContainer = undefined;
 		this.reviewBodyElement = undefined;
 		this.reviewScmRailElement = undefined;
+		this.reviewListContainer = undefined;
 		this.reviewTree = undefined;
 		this.reviewTreeCountElement = undefined;
 		this.filePathElement = undefined;
@@ -415,6 +438,11 @@ export class RightWorkbenchViewPane extends ViewPane {
 		add.setAttribute('aria-expanded', 'false');
 		add.appendChild(renderIcon(Codicon.add));
 		this.domStore.add(addDisposableListener(add, EventType.CLICK, () => this.toggleModePicker(add)));
+
+		// With many tabs the strip scrolls horizontally — keep the active tab
+		// in view so it never hides behind the overflow edge.
+		const activeTabElement = tabs.querySelector(':scope > .sessions-right-workbench-tab.active');
+		activeTabElement?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 
 		if (this.activeMode === 'files') {
 			const controls = append(header, $('.sessions-right-workbench-frame-controls'));
@@ -680,15 +708,41 @@ export class RightWorkbenchViewPane extends ViewPane {
 		this.embeddedEditorHost = append(content, $('.sessions-right-workbench-embedded-editor-host'));
 		this.observeElementResize(this.embeddedEditorHost, () => this.layoutEmbeddedEditorPart());
 		const currentUrl = tab.browserUrl ?? tab.browserInput?.url;
-		if (currentUrl || tab.browserViewId) {
-			tab.browserUrl = currentUrl;
-			url.value = currentUrl ?? '';
-			void this.openBrowserEditor(tab, currentUrl);
+		if (!currentUrl && tab.browserViewId && !tab.browserInput) {
+			// Resolve the existing view (if any) first so a URL that lives on
+			// the model can be recovered before deciding between the browser
+			// surface and the empty state.
+			tab.browserInput = this.browserViewWorkbenchService.getOrCreateLazy(tab.browserViewId);
+			this.bindBrowserInput(tab, tab.browserInput);
+		}
+		const resolvedUrl = currentUrl ?? tab.browserInput?.url;
+		if (resolvedUrl) {
+			tab.browserUrl = resolvedUrl;
+			url.value = resolvedUrl;
+			void this.openBrowserEditor(tab, resolvedUrl);
 		} else {
 			const empty = append(content, $('.sessions-right-workbench-browser-empty'));
 			empty.appendChild(renderIcon(Codicon.globe));
 			append(empty, $('h2', {}, localize('rightWorkbench.startBrowsing', "Start browsing")));
 			append(empty, $('p', {}, localize('rightWorkbench.enterUrlToOpenPage', "Enter a URL to open a page")));
+			// A view opened by id may resolve its URL asynchronously — swap
+			// the empty state for the page as soon as it arrives instead of
+			// leaving a blank surface behind.
+			if (tab.browserInput) {
+				const input = tab.browserInput;
+				const rerender = () => {
+					if (this.activeTab === tab && this.activeMode === 'browser' && tab.browserInput === input) {
+						this.renderShell();
+					}
+				};
+				this.domStore.add(input.onceModelResolves(model => {
+					if (model.url) {
+						rerender();
+					} else {
+						this.domStore.add(Event.once(model.onDidNavigate)(rerender));
+					}
+				}));
+			}
 		}
 		this.refreshBrowserControls();
 	}
@@ -722,6 +776,8 @@ export class RightWorkbenchViewPane extends ViewPane {
 		this.reviewTreeCountElement = append(header, $('span.sessions-right-workbench-review-scm-count'));
 
 		const listContainer = append(container, $('.sessions-right-workbench-review-scm-list'));
+		this.reviewListContainer = listContainer;
+		this.observeElementResize(listContainer, () => this.layoutReviewTree());
 		const store = this.domStore.add(new DisposableStore());
 		const resourceLabels = store.add(this.instantiationService.createInstance(ResourceLabels, DEFAULT_LABELS_CONTAINER));
 		this.reviewTree = store.add(this.instantiationService.createInstance(
@@ -751,10 +807,30 @@ export class RightWorkbenchViewPane extends ViewPane {
 			const activeTab = this.activeTab;
 			if (activeTab?.mode === 'review') {
 				activeTab.selectedReviewResourceKey = e.element.key;
+				activeTab.selectedReviewSourceUri = e.element.sourceUri;
 			}
 			this.openedReviewResourceKey = undefined;
 			this.openSelectedReviewResource(e.element);
 		}));
+	}
+
+	/**
+	 * Sizes the review rail tree to its container. The tree only renders rows
+	 * inside the viewport set by its last layout() call, so without this the
+	 * viewport stays at whatever the DOM measured during construction and rows
+	 * beyond it never render.
+	 */
+	private layoutReviewTree(): void {
+		const tree = this.reviewTree;
+		const container = this.reviewListContainer;
+		if (!tree || !container) {
+			return;
+		}
+		const height = container.clientHeight;
+		const width = container.clientWidth;
+		if (height > 0 && width > 0) {
+			tree.layout(height, width);
+		}
 	}
 
 	private updateReviewTree(resources: readonly IReviewResource[], selectedKey: string): void {
@@ -763,6 +839,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 		}
 		this.reviewTreeCountElement.textContent = String(resources.length);
 		this.reviewTree.setChildren(null, buildReviewTreeChildren(resources));
+		this.layoutReviewTree();
 		const selected = resources.find(resource => resource.key === selectedKey);
 		if (selected) {
 			this.reviewTree.setSelection([selected]);
@@ -831,7 +908,28 @@ export class RightWorkbenchViewPane extends ViewPane {
 		for (const repository of this.getGitReviewRepositories(activeSession)) {
 			this.requestGitReviewStats(repository);
 		}
-		this.openSelectedReviewResource(selectedReviewResource);
+		this.scheduleReviewResourceOpen(selectedReviewResource);
+	}
+
+	/**
+	 * Defers opening the selected review resource to the next macrotask so the
+	 * rail paints first: opening a diff editor resolves both text models and
+	 * builds the embedded editor part, which would otherwise block the panel's
+	 * first render and make Review feel much slower than its sibling tabs.
+	 */
+	private scheduleReviewResourceOpen(resource: IReviewResource): void {
+		this.pendingReviewOpenResource = resource;
+		if (this.reviewOpenTimeout !== undefined) {
+			return;
+		}
+		this.reviewOpenTimeout = setTimeout(() => {
+			this.reviewOpenTimeout = undefined;
+			const pending = this.pendingReviewOpenResource;
+			this.pendingReviewOpenResource = undefined;
+			if (pending && this.activeMode === 'review') {
+				this.openSelectedReviewResource(pending);
+			}
+		}, 0);
 	}
 
 	private toSessionReviewResources(changes: readonly ISessionFileChange[]): IReviewResource[] {
@@ -867,10 +965,19 @@ export class RightWorkbenchViewPane extends ViewPane {
 	}
 
 	private registerScmReviewRefresh(): void {
-		const refresh = () => {
-			this.loadedGitReviewStatsKeys.clear();
-			this.gitReviewStats.clear();
-			this.refreshReviewRail(undefined);
+		// Debounce through the scheduler: repositories fire resource events in
+		// bursts (per group, per refresh), and each full refresh re-runs git
+		// stats and rebuilds the tree. Invalidate only the repository that
+		// changed so unrelated repositories keep their cached +/- counts.
+		const refresh = (repository?: ISCMRepository) => {
+			const rootUri = repository?.provider.rootUri?.toString();
+			if (rootUri) {
+				this.loadedGitReviewStatsKeys.delete(rootUri);
+			} else {
+				this.loadedGitReviewStatsKeys.clear();
+				this.gitReviewStats.clear();
+			}
+			this.scmReviewRefreshScheduler.schedule();
 		};
 		const repositoryListeners = this.domStore.add(new DisposableMap<ISCMRepository>());
 		const wireRepository = (repository: ISCMRepository) => {
@@ -879,20 +986,20 @@ export class RightWorkbenchViewPane extends ViewPane {
 			const wireGroups = () => {
 				groupListeners.clear();
 				for (const group of repository.provider.groups) {
-					groupListeners.add(group.onDidChangeResources(refresh));
+					groupListeners.add(group.onDidChangeResources(() => refresh(repository)));
 				}
 			};
-			store.add(repository.provider.onDidChangeResources(refresh));
+			store.add(repository.provider.onDidChangeResources(() => refresh(repository)));
 			store.add(repository.provider.onDidChangeResourceGroups(() => {
 				wireGroups();
-				refresh();
+				refresh(repository);
 			}));
 			wireGroups();
 			repositoryListeners.set(repository, store);
 		};
 		this.domStore.add(this.scmService.onDidAddRepository(repository => {
 			wireRepository(repository);
-			refresh();
+			refresh(repository);
 		}));
 		this.domStore.add(this.scmService.onDidRemoveRepository(repository => {
 			repositoryListeners.deleteAndDispose(repository);
@@ -956,7 +1063,10 @@ export class RightWorkbenchViewPane extends ViewPane {
 			}
 			element = element.parentElement;
 		}
-		return theme.getColor(agentsPanelBackground);
+		// Fallback must match the CSS chain that paints the DOM around the
+		// terminal (--rwb-bg -> agents.background), not the sidebar-tinted
+		// panel token, or the xterm canvas shows as a mismatched rectangle.
+		return theme.getColor(agentsBackground) ?? theme.getColor(agentsPanelBackground);
 	}
 
 	private renderFilesExplorer(container: HTMLElement): void {
@@ -1040,13 +1150,69 @@ export class RightWorkbenchViewPane extends ViewPane {
 		const reviewRepositories = matchedRepositories.length > 0 ? matchedRepositories : repositories;
 		const resources = new Map<string, ISCMResource>();
 		for (const repository of reviewRepositories) {
+			// A never-committed repository (e.g. a freshly scaffolded project)
+			// reports its entire file tree as untracked "changes" and floods
+			// the rail with files the user reads as unchanged — skip it. The
+			// definitive signal is an unborn HEAD in the git state; the git
+			// service may need the nested repository opened first.
+			if (this.isUnbornScmRepository(repository)) {
+				continue;
+			}
+			// Same idea per group: untracked files only show alongside real
+			// tracked changes; session-created files come via changesets.
+			const hasTrackedChanges = repository.provider.groups.some(group => group.id !== 'untracked' && group.resources.length > 0);
 			for (const group of repository.provider.groups) {
+				if (group.id === 'untracked' && !hasTrackedChanges) {
+					continue;
+				}
 				for (const resource of group.resources) {
 					resources.set(resource.sourceUri.toString(), resource);
 				}
 			}
 		}
 		return Array.from(resources.values()).sort((a, b) => a.sourceUri.fsPath.localeCompare(b.sourceUri.fsPath));
+	}
+
+	/**
+	 * Whether the SCM repository is backed by a git repository that has no
+	 * commits yet (unborn HEAD). When the git service does not know the
+	 * repository yet, it is opened in the background and the rail refreshes
+	 * once the state is available; until then the repository is not treated
+	 * as unborn.
+	 */
+	private isUnbornScmRepository(repository: ISCMRepository): boolean {
+		const rootUri = repository.provider.rootUri;
+		if (!rootUri) {
+			return false;
+		}
+		const gitRepository = Array.from(this.gitService.repositories).find(candidate => candidate.rootUri.toString() === rootUri.toString());
+		if (!gitRepository) {
+			this.ensureGitRepositoryKnown(rootUri);
+			return false;
+		}
+		return !gitRepository.state.get().HEAD?.commit;
+	}
+
+	/**
+	 * Asks the git service to open a repository discovered through SCM so its
+	 * state (HEAD, changes) becomes available to the review rail.
+	 */
+	private ensureGitRepositoryKnown(rootUri: URI): void {
+		const key = rootUri.toString();
+		if (this.pendingGitReviewRefreshKeys.has(key)) {
+			return;
+		}
+		this.pendingGitReviewRefreshKeys.add(key);
+		void this.gitService.openRepository(rootUri).then(repository => {
+			this.pendingGitReviewRefreshKeys.delete(key);
+			this.settleGitProbeIfIdle();
+			if (repository) {
+				this.refreshReviewRail(undefined);
+			}
+		}, () => {
+			this.pendingGitReviewRefreshKeys.delete(key);
+			this.settleGitProbeIfIdle();
+		});
 	}
 
 	private getGitReviewResources(activeSession: IActiveSession | undefined, reader: IReader | undefined): IReviewResource[] {
@@ -1058,6 +1224,13 @@ export class RightWorkbenchViewPane extends ViewPane {
 			// Deduplicate by URI (a file can be both staged and modified) so the
 			// resource tree gets one node per file; later groups win.
 			const state = repository.state.read(reader);
+			// A never-committed repository (unborn HEAD) reports its entire
+			// file tree as untracked changes — skip it entirely; those read as
+			// "files with no changes". Session-created files surface via the
+			// changeset tier instead.
+			if (!state.HEAD?.commit) {
+				continue;
+			}
 			for (const change of state.mergeChanges) {
 				resources.set(change.uri.toString(), this.toGitReviewResource(change, 'merge', localize('rightWorkbench.gitMergeChange', "Merge")));
 			}
@@ -1067,8 +1240,14 @@ export class RightWorkbenchViewPane extends ViewPane {
 			for (const change of state.workingTreeChanges) {
 				resources.set(change.uri.toString(), this.toGitReviewResource(change, 'modified', localize('rightWorkbench.gitModifiedChange', "Modified")));
 			}
-			for (const change of state.untrackedChanges) {
-				resources.set(change.uri.toString(), this.toGitReviewResource(change, 'untracked', localize('rightWorkbench.gitUntrackedChange', "Untracked")));
+			// Untracked-only repositories (never-committed scaffolds) would list
+			// their whole file tree as "changes" — mirror the SCM tier and only
+			// show untracked files alongside real tracked changes.
+			const hasTrackedChanges = state.mergeChanges.length + state.indexChanges.length + state.workingTreeChanges.length > 0;
+			if (hasTrackedChanges) {
+				for (const change of state.untrackedChanges) {
+					resources.set(change.uri.toString(), this.toGitReviewResource(change, 'untracked', localize('rightWorkbench.gitUntrackedChange', "Untracked")));
+				}
 			}
 		}
 		return Array.from(resources.values()).sort((a, b) => a.sourceUri.fsPath.localeCompare(b.sourceUri.fsPath));
@@ -1151,9 +1330,17 @@ export class RightWorkbenchViewPane extends ViewPane {
 	private getSelectedReviewResource(resources: readonly IReviewResource[]): IReviewResource {
 		const activeTab = this.activeTab;
 		const selectedKey = activeTab?.mode === 'review' ? activeTab.selectedReviewResourceKey : undefined;
-		const selectedReviewResource = resources.find(resource => resource.key === selectedKey) ?? resources[0];
+		// Keys encode the data source (session/scm/git), which flips as richer
+		// data arrives during startup — fall back to the source URI so the
+		// user's selection survives those flips instead of jumping to the first
+		// file.
+		const selectedSourceUri = activeTab?.mode === 'review' ? activeTab.selectedReviewSourceUri?.toString() : undefined;
+		const selectedReviewResource = resources.find(resource => resource.key === selectedKey)
+			?? (selectedSourceUri ? resources.find(resource => resource.sourceUri.toString() === selectedSourceUri) : undefined)
+			?? resources[0];
 		if (activeTab?.mode === 'review') {
 			activeTab.selectedReviewResourceKey = selectedReviewResource.key;
+			activeTab.selectedReviewSourceUri = selectedReviewResource.sourceUri;
 		}
 		return selectedReviewResource;
 	}

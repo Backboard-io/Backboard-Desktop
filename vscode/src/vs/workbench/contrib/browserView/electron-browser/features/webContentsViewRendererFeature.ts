@@ -259,7 +259,10 @@ class WebContentsViewRendererFeature extends BrowserEditorContribution {
 			return;
 		}
 		const overlays = this._overlayManager.getOverlappingOverlays(this._container);
-		const blockingOverlays = overlays.filter(o => o.type === BrowserOverlayType.Dialog);
+		// The always-on-top WebContentsView paints over any workbench DOM, so
+		// every overlay type must hide it — except hovers, which come and go
+		// too quickly and would make the page flicker.
+		const blockingOverlays = overlays.filter(o => o.type !== BrowserOverlayType.Hover);
 		const obscured = blockingOverlays.length > 0;
 		const hasNotification = overlays.some(o => o.type === BrowserOverlayType.Notification);
 		this._overlayPauseEl.classList.toggle('show-message', hasNotification);
@@ -288,12 +291,17 @@ class WebContentsViewRendererFeature extends BrowserEditorContribution {
 	}
 
 	private _setBackgroundImage(buffer: VSBuffer | undefined): void {
-		if (buffer) {
-			const dataUrl = `data:image/jpeg;base64,${encodeBase64(buffer)}`;
-			this._placeholderScreenshot.style.backgroundImage = `url('${dataUrl}')`;
-		} else {
+		if (buffer === undefined) {
 			this._placeholderScreenshot.style.backgroundImage = '';
+			return;
 		}
+		if (buffer.byteLength === 0) {
+			// An empty capture means the page has not painted yet — keep the
+			// last good screenshot instead of swapping in a blank placeholder.
+			return;
+		}
+		const dataUrl = `data:image/jpeg;base64,${encodeBase64(buffer)}`;
+		this._placeholderScreenshot.style.backgroundImage = `url('${dataUrl}')`;
 	}
 
 	private async _handleKeyEvent(keyEvent: IBrowserViewKeyDownEvent): Promise<void> {

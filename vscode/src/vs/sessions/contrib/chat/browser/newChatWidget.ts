@@ -59,6 +59,7 @@ const NEW_CHAT_ALLOWED_SESSION_TYPES = [
 	AgentSessionProviders.AgentHostBackboard,
 	AgentSessionProviders.AgentHostClaude,
 	AgentSessionProviders.AgentHostCodex,
+	AgentSessionProviders.AgentHostOpencode,
 ];
 
 const NEW_CHAT_COMPOSER_LAYOUT_HEIGHT = 180;

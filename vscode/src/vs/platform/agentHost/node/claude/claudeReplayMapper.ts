@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import type { SessionMessage } from '@anthropic-ai/claude-agent-sdk';
+import { stripInjectedContextBlocks } from '../shared/injectedContextScrubber.js';
 import type { URI } from '../../../../base/common/uri.js';
 import type { ILogService } from '../../../log/common/log.js';
 import {
@@ -99,13 +100,18 @@ function parseUserMessage(msg: SessionMessage): ParsedSessionMessage | undefined
 		return { kind: 'user-text', uuid: msg.uuid, text: content };
 	}
 	const textBlocks = content.filter((b): b is UserTextBlock => b.type === 'text');
-	if (textBlocks.length === 0) {
+	// The prompt resolver appends workbench-injected context (the skills
+	// index, reference reminders) as extra text blocks on the same user
+	// message — model-only payload that must not resurface as visible user
+	// text on replay.
+	const visibleTexts = textBlocks.map(b => stripInjectedContextBlocks(b.text)).filter(t => t.length > 0);
+	if (visibleTexts.length === 0) {
 		const results = content.filter((b): b is UserToolResultBlock => b.type === 'tool_result');
 		return results.length > 0 ? { kind: 'user-tool-results', uuid: msg.uuid, results } : undefined;
 	}
 	// Mixed or text-only: text wins — matches prior behavior where tool_results
 	// in a text-bearing envelope are dropped (they should already have been delivered).
-	return { kind: 'user-text', uuid: msg.uuid, text: textBlocks.map(b => b.text).join('\n') };
+	return { kind: 'user-text', uuid: msg.uuid, text: visibleTexts.join('\n') };
 }
 
 function parseAssistantMessage(msg: SessionMessage): ParsedSessionMessage | undefined {

@@ -376,6 +376,7 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 	constructor(
 		private readonly _terminalShellTypeContextKey: IContextKey<string>,
 		private _shellLaunchConfig: IShellLaunchConfig,
+		private readonly _colorProviderOverride: IXtermColorProvider | undefined,
 		@IContextKeyService private readonly _contextKeyService: IContextKeyService,
 		@IContextMenuService private readonly _contextMenuService: IContextMenuService,
 		@IInstantiationService instantiationService: IInstantiationService,
@@ -806,7 +807,7 @@ export class TerminalInstance extends Disposable implements ITerminalInstance {
 		const xterm = this._scopedInstantiationService.createInstance(XtermTerminal, this._resource, Terminal, {
 			cols: this._cols,
 			rows: this._rows,
-			xtermColorProvider: this._scopedInstantiationService.createInstance(TerminalInstanceColorProvider, this._targetRef),
+			xtermColorProvider: this._colorProviderOverride ?? this._scopedInstantiationService.createInstance(TerminalInstanceColorProvider, this._targetRef),
 			capabilities: this.capabilities,
 			shellIntegrationNonce: this._processManager.shellIntegrationNonce,
 			disableShellIntegrationReporting,

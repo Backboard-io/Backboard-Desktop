@@ -5,12 +5,12 @@
 
 import './media/environmentTitleBarWidget.css';
 
-import { $, addDisposableListener, append, clearNode, EventHelper, EventType, getWindow } from '../../../base/browser/dom.js';
+import { $, addDisposableListener, append, clearNode, EventHelper, EventLike, EventType, getWindow } from '../../../base/browser/dom.js';
 import { getDefaultHoverDelegate } from '../../../base/browser/ui/hover/hoverDelegateFactory.js';
 import { renderIcon } from '../../../base/browser/ui/iconLabel/iconLabels.js';
 import { BaseActionViewItem, IBaseActionViewItemOptions } from '../../../base/browser/ui/actionbar/actionViewItems.js';
 import { Codicon } from '../../../base/common/codicons.js';
-import { Disposable, DisposableStore } from '../../../base/common/lifecycle.js';
+import { Disposable, DisposableStore, MutableDisposable } from '../../../base/common/lifecycle.js';
 import { autorun, IReader, observableValue } from '../../../base/common/observable.js';
 import { basename } from '../../../base/common/resources.js';
 import { IAction } from '../../../base/common/actions.js';
@@ -31,7 +31,7 @@ import { ThemeIcon } from '../../../base/common/themables.js';
 import { IGitRepository, IGitService } from '../../../workbench/contrib/git/common/gitService.js';
 import { ISCMRepository, ISCMService } from '../../../workbench/contrib/scm/common/scm.js';
 import { IWorkbenchContribution } from '../../../workbench/common/contributions.js';
-import { IsAuxiliaryWindowContext } from '../../../workbench/common/contextkeys.js';
+import { AuxiliaryBarVisibleContext } from '../../../workbench/common/contextkeys.js';
 import { Menus } from '../menus.js';
 import { isAgentHostProvider } from '../../common/agentHostSessionsProvider.js';
 import { IsNewChatSessionContext, IsPhoneLayoutContext, SessionsWelcomeVisibleContext } from '../../common/contextkeys.js';
@@ -48,7 +48,7 @@ export class ShowEnvironmentPopupAction extends Action2 {
 			id: ShowEnvironmentPopupAction.ID,
 			title: localize2('showEnvironmentPopup', "Show Environment"),
 			icon: Codicon.settings,
-			precondition: ContextKeyExpr.and(IsAuxiliaryWindowContext.toNegated(), IsPhoneLayoutContext.negate()),
+			precondition: IsPhoneLayoutContext.negate(),
 		});
 	}
 
@@ -63,6 +63,8 @@ interface IEnvironmentRow {
 	readonly value?: string;
 	readonly muted?: boolean;
 	readonly command?: string;
+	/** Custom click behavior. Takes precedence over {@link command}. */
+	readonly run?: () => void;
 }
 
 interface IResolvedGitInfo {
@@ -77,13 +79,22 @@ interface IResolvedGitInfo {
 export class EnvironmentTitleBarWidget extends BaseActionViewItem {
 
 	private triggerButton: HTMLButtonElement | undefined;
-	private popupStore = this._register(new DisposableStore());
+	/**
+	 * Holds the listeners of the currently open popup. The context view disposes
+	 * the store returned from `render` when the popup hides and a disposed store
+	 * cannot be reused, so a fresh store is created for every open; this mutable
+	 * disposable only ensures the current one is also cleaned up if the widget
+	 * itself is disposed while the popup is open.
+	 */
+	private readonly popupStore = this._register(new MutableDisposable<DisposableStore>());
 	private readonly contentStore = this._register(new DisposableStore());
 	private popupContainer: HTMLElement | undefined;
 	/** Bumped once a repository finishes opening so the popup re-resolves the branch. */
 	private readonly gitStatusTick = observableValue<number>('environmentGitStatusTick', 0);
-	/** Working directory already handed to the git service to open. Reset on every popup open so each open re-checks. */
-	private openedGitRepositoryKey: string | undefined;
+	/** Working directories (by URI string) already handed to the git service to open. */
+	private readonly requestedGitRepositoryKeys = new Set<string>();
+	/** Working directories (by URI string) the git service could not open, so a negative probe is not repeated. */
+	private readonly failedGitRepositoryKeys = new Set<string>();
 
 	constructor(
 		action: IAction,
@@ -126,6 +137,16 @@ export class EnvironmentTitleBarWidget extends BaseActionViewItem {
 		}));
 	}
 
+	/**
+	 * The base class runs the widget's action (which opens the Review panel) for
+	 * clicks anywhere on the container, including the padding around the trigger
+	 * button. Toggle the popup instead so container clicks behave like the trigger.
+	 */
+	override onClick(event: EventLike): void {
+		EventHelper.stop(event, true);
+		this.togglePopup();
+	}
+
 	private togglePopup(): void {
 		if (!this.triggerButton) {
 			return;
@@ -140,38 +161,68 @@ export class EnvironmentTitleBarWidget extends BaseActionViewItem {
 		this.contextViewService.showContextView({
 			getAnchor: () => this.triggerButton!,
 			render: container => this.renderPopup(container),
+			focus: () => this.popupContainer?.focus(),
 			onHide: () => {
+				const popupContainer = this.popupContainer;
+				const activeElement = popupContainer ? getWindow(popupContainer).document.activeElement : null;
+				const shouldRestoreFocus = !!popupContainer && !!activeElement && popupContainer.contains(activeElement);
+				popupContainer?.removeAttribute('tabindex');
+				this.popupContainer = undefined;
 				this.popupStore.clear();
 				this.contentStore.clear();
 				this.triggerButton?.setAttribute('aria-expanded', 'false');
+				if (shouldRestoreFocus) {
+					this.triggerButton?.focus();
+				}
 			},
 		});
+	}
+
+	/**
+	 * Renders the popup into the context view's container and returns the store
+	 * holding all per-open listeners. The context view owns and disposes the
+	 * returned store when the popup hides.
+	 */
+	private renderPopup(container: HTMLElement): DisposableStore {
+		const store = new DisposableStore();
+		this.popupStore.value = store;
+		this.popupContainer = container;
+		// Make the popup focusable so focus moves into it on open (the trigger
+		// advertises aria-haspopup=dialog) and Escape can dismiss it.
+		container.tabIndex = -1;
 
 		// Dismiss the popup when the user clicks anywhere outside of it. The
 		// context view's built-in outside-click handling only fires for clicks
 		// outside the whole workbench container, so it never closes for clicks
 		// elsewhere in the window; register our own pointer listener instead.
-		// Added after showContextView (whose synchronous render clears the popup
-		// store) so the listener survives until the popup hides.
-		this.popupStore.add(addDisposableListener(getWindow(this.triggerButton), EventType.MOUSE_DOWN, event => {
+		// Clicks within the widget container are ignored here because the widget
+		// itself toggles the popup for those.
+		store.add(addDisposableListener(getWindow(container), EventType.MOUSE_DOWN, event => {
 			const target = event.target as HTMLElement | null;
-			if (target && (this.popupContainer?.contains(target) || this.triggerButton?.contains(target))) {
+			if (target && (this.popupContainer?.contains(target) || this.element?.contains(target))) {
 				return;
 			}
 			this.contextViewService.hideContextView();
 		}, true));
-	}
 
-	private renderPopup(container: HTMLElement): DisposableStore {
-		this.popupStore.clear();
-		this.popupContainer = container;
-		// Re-check the repository from scratch every time the popup opens.
-		this.openedGitRepositoryKey = undefined;
+		// Dismiss the popup on Escape; onHide restores focus to the trigger.
+		store.add(addDisposableListener(getWindow(container), EventType.KEY_DOWN, event => {
+			if (event.key === 'Escape') {
+				EventHelper.stop(event, true);
+				this.contextViewService.hideContextView();
+			}
+		}, true));
+
 		// Render inside an autorun so the popup stays live while open: the branch
 		// updates as soon as the git repository finishes opening, the user checks
 		// out a different branch, or the active session's workspace changes.
-		this.popupStore.add(autorun(reader => this.renderPopupContent(reader)));
-		return this.popupStore;
+		store.add(autorun(reader => {
+			this.renderPopupContent(reader);
+			// Async git data can change the popup's size: re-measure so the
+			// context view stays anchored correctly.
+			this.contextViewService.layout();
+		}));
+		return store;
 	}
 
 	private renderPopupContent(reader: IReader): void {
@@ -186,7 +237,6 @@ export class EnvironmentTitleBarWidget extends BaseActionViewItem {
 		const popup = append(container, $('.sessions-environment-popup'));
 		const header = append(popup, $('.sessions-environment-popup-header'));
 		append(header, $('span.sessions-environment-popup-title', undefined, localize('environmentPopupTitle', "Environment")));
-		append(header, $('button.sessions-environment-popup-add', { 'aria-label': localize('environmentPopupAdd', "Add") }, renderIcon(Codicon.add)));
 
 		const activeSession = this.sessionsService.activeSession.read(reader);
 		if (!activeSession) {
@@ -204,7 +254,14 @@ export class EnvironmentTitleBarWidget extends BaseActionViewItem {
 		const gitRepository = folder?.gitRepository;
 		const providerBranchName = this.getProviderBranchName(activeSession);
 		const providerWorkingDirectory = this.getProviderWorkingDirectory(activeSession);
-		const gitInfo = this.resolveGitInfo(reader, folder, providerWorkingDirectory);
+		const liveRepository = this.findGitRepository(folder, providerWorkingDirectory);
+		// The session folder itself may not be a repository while a nested one
+		// is (e.g. a project checked out inside the workspace folder) — the SCM
+		// repository's root still gives git.checkout/commit/push a valid target.
+		const scmRootUri = liveRepository ? undefined : this.findScmRepository(folder, providerWorkingDirectory)?.provider.rootUri;
+		const gitRootUri = liveRepository?.rootUri ?? scmRootUri;
+		const gitInfo = this.resolveGitInfo(reader, folder, providerWorkingDirectory, liveRepository);
+		const gitKey = this.getGitInfoKey(folder, providerWorkingDirectory);
 		const branchName = gitInfo?.branchName ?? gitRepository?.branchName ?? providerBranchName;
 		const upstreamBranchName = gitInfo?.upstreamBranchName ?? gitRepository?.upstreamBranchName;
 		const changesSummary = activeSession.changesSummary?.read(reader);
@@ -228,19 +285,42 @@ export class EnvironmentTitleBarWidget extends BaseActionViewItem {
 			label: branchName ?? localize('environmentNoBranch', "No Branch"),
 			value: upstreamBranchName,
 			muted: !branchName,
+			// The git extension's checkout command resolves the repository from
+			// the passed root Uri and shows its own branch quick pick.
+			run: gitRootUri && branchName ? () => { void this.commandService.executeCommand('git.checkout', gitRootUri); } : undefined,
 		});
+
+		const outgoingChanges = gitInfo?.outgoingChanges ?? gitRepository?.outgoingChanges;
+		const incomingChanges = gitInfo?.incomingChanges ?? gitRepository?.incomingChanges;
+		let syncActionLabel = localize('environmentCommitOrPush', "Commit or Push");
+		let syncRun: (() => void) | undefined;
+		if (gitRootUri) {
+			if (gitInfo?.uncommittedChanges) {
+				syncActionLabel = localize('environmentCommit', "Commit");
+				syncRun = () => { void this.commandService.executeCommand('git.commitAll', gitRootUri); };
+			} else if (outgoingChanges) {
+				syncActionLabel = localize('environmentPush', "Push");
+				syncRun = () => { void this.commandService.executeCommand('git.push', gitRootUri); };
+			}
+		}
 		this.renderRow(popup, {
 			icon: Codicon.circleOutline,
-			label: localize('environmentCommitOrPush', "Commit or Push"),
-			value: this.getSyncLabel(gitInfo?.outgoingChanges ?? gitRepository?.outgoingChanges, gitInfo?.incomingChanges ?? gitRepository?.incomingChanges),
-			command: RightWorkbenchCommandId.OpenReview,
+			label: syncActionLabel,
+			value: this.getSyncLabel(outgoingChanges, incomingChanges),
+			muted: !syncRun,
+			run: syncRun,
 		});
+
+		const hasGitHubRemote = gitInfo?.hasGitHubRemote ?? gitRepository?.hasGitHubRemote;
+		const checkingGitHubRemote = hasGitHubRemote === undefined && !liveRepository && !!gitKey && !this.failedGitRepositoryKeys.has(gitKey);
 		this.renderRow(popup, {
 			icon: Codicon.github,
-			label: (gitInfo?.hasGitHubRemote ?? gitRepository?.hasGitHubRemote)
-				? localize('environmentGitHubRemote', "GitHub Remote Connected")
-				: localize('environmentGitHubRemoteMissing', "GitHub Remote Not Detected"),
-			muted: !(gitInfo?.hasGitHubRemote ?? gitRepository?.hasGitHubRemote),
+			label: checkingGitHubRemote
+				? localize('environmentGitHubRemoteChecking', "Checking GitHub Remote...")
+				: hasGitHubRemote
+					? localize('environmentGitHubRemote', "GitHub Remote Connected")
+					: localize('environmentGitHubRemoteMissing', "GitHub Remote Not Detected"),
+			muted: !hasGitHubRemote,
 		});
 
 		append(popup, $('.sessions-environment-popup-separator'));
@@ -277,9 +357,10 @@ export class EnvironmentTitleBarWidget extends BaseActionViewItem {
 	}
 
 	private renderRow(container: HTMLElement, row: IEnvironmentRow): void {
+		const run = row.run ?? (row.command ? () => { void this.commandService.executeCommand(row.command!); } : undefined);
 		const element = append(container, $('button.sessions-environment-popup-row')) as HTMLButtonElement;
 		element.classList.toggle('muted', !!row.muted);
-		element.disabled = !row.command;
+		element.disabled = !run;
 		element.appendChild(renderIcon(row.icon));
 
 		const label = append(element, $('span.sessions-environment-popup-row-label'));
@@ -289,10 +370,10 @@ export class EnvironmentTitleBarWidget extends BaseActionViewItem {
 			value.textContent = row.value;
 		}
 
-		if (row.command) {
+		if (run) {
 			this.contentStore.add(addDisposableListener(element, EventType.CLICK, () => {
 				this.contextViewService.hideContextView();
-				void this.commandService.executeCommand(row.command!);
+				run();
 			}));
 		}
 	}
@@ -342,14 +423,13 @@ export class EnvironmentTitleBarWidget extends BaseActionViewItem {
 			: localize('environmentNoChanges', "No changes");
 	}
 
-	private resolveGitInfo(reader: IReader, folder: ISessionFolder | undefined, providerWorkingDirectory: URI | undefined): IResolvedGitInfo | undefined {
+	private resolveGitInfo(reader: IReader, folder: ISessionFolder | undefined, providerWorkingDirectory: URI | undefined, repository: IGitRepository | undefined): IResolvedGitInfo | undefined {
 		const key = this.getGitInfoKey(folder, providerWorkingDirectory);
 		if (!key) {
 			return undefined;
 		}
 		// Prefer the live git repository. Reading its state subscribes the popup so
 		// the branch refreshes as soon as the repository loads or HEAD changes.
-		const repository = this.findGitRepository(folder, providerWorkingDirectory);
 		if (repository) {
 			repository.state.read(reader);
 			return this.toResolvedGitInfo(repository);
@@ -388,15 +468,26 @@ export class EnvironmentTitleBarWidget extends BaseActionViewItem {
 	}
 
 	private ensureGitRepositoryOpened(key: string, workingDirectory: URI | undefined): void {
-		if (!workingDirectory || this.openedGitRepositoryKey === key) {
+		if (!workingDirectory || this.requestedGitRepositoryKeys.has(key) || this.failedGitRepositoryKeys.has(key)) {
 			return;
 		}
-		this.openedGitRepositoryKey = key;
-		this.gitService.openRepository(workingDirectory).then(() => {
+		this.requestedGitRepositoryKeys.add(key);
+		this.gitService.openRepository(workingDirectory).then(repository => {
+			if (!repository) {
+				// Remember directories that are not git repositories so the probe
+				// is not repeated on every popup open.
+				this.failedGitRepositoryKeys.add(key);
+			}
 			if (!this._store.isDisposed) {
 				this.gitStatusTick.set(this.gitStatusTick.get() + 1, undefined);
 			}
-		}, error => this.logService.warn('[EnvironmentTitleBar] Failed to open git repository for branch status', error));
+		}, error => {
+			this.failedGitRepositoryKeys.add(key);
+			this.logService.warn('[EnvironmentTitleBar] Failed to open git repository for branch status', error);
+			if (!this._store.isDisposed) {
+				this.gitStatusTick.set(this.gitStatusTick.get() + 1, undefined);
+			}
+		});
 	}
 
 	private findScmRepository(folder: ISessionFolder | undefined, providerWorkingDirectory: URI | undefined): ISCMRepository | undefined {
@@ -448,7 +539,7 @@ export class EnvironmentTitleBarWidget extends BaseActionViewItem {
 			outgoingChanges: state.HEAD?.ahead,
 			incomingChanges: state.HEAD?.behind,
 			uncommittedChanges: state.mergeChanges.length + state.indexChanges.length + state.workingTreeChanges.length + state.untrackedChanges.length,
-			hasGitHubRemote: state.remotes.some(remote => /github\.com/i.test(remote.fetchUrl ?? remote.pushUrl ?? '')),
+			hasGitHubRemote: state.remotes.some(remote => [remote.fetchUrl, remote.pushUrl].some(url => !!url && /github\.com/i.test(url))),
 		};
 	}
 
@@ -491,7 +582,7 @@ export class EnvironmentTitleBarContribution extends Disposable implements IWork
 			command: environmentMenuCommand,
 			group: 'navigation',
 			order: 1,
-			when: ContextKeyExpr.and(IsAuxiliaryWindowContext.toNegated(), IsNewChatSessionContext, IsPhoneLayoutContext.negate()),
+			when: ContextKeyExpr.and(ContextKeyExpr.or(IsNewChatSessionContext, AuxiliaryBarVisibleContext), IsPhoneLayoutContext.negate()),
 		}));
 		const registerEnvironmentWidget = (menuId: typeof Menus.SessionBarToolbar) => this._register(actionViewItemService.register(menuId, ShowEnvironmentPopupAction.ID, (action, options) => {
 			return instantiationService.createInstance(EnvironmentTitleBarWidget, action, options);

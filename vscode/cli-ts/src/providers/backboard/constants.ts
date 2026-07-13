@@ -4,7 +4,7 @@ export const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
 /** Page size used for Backboard provider model catalog requests. */
 export const MODEL_PAGE_LIMIT = 500;
 
-/** Providers that are not selectable chat model providers in Backboard R-CLI. */
+/** Providers that are not selectable chat model providers in Backboard Studio. */
 export const EXCLUDED_MODEL_PROVIDERS = ["elevenlabs", "featherless"] as const;
 
 /** Product order for grouping providers in the model picker. */

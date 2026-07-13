@@ -44,6 +44,7 @@ export function resolveCodexInput(
 	const cleanupPaths: string[] = [];
 	const input: UserInput[] = [];
 	const textChunks: string[] = [prompt];
+	const injectedChunks: string[] = [];
 
 	if (attachments && attachments.length > 0) {
 		for (const att of attachments) {
@@ -82,9 +83,13 @@ export function resolveCodexInput(
 					break;
 				}
 				case MessageAttachmentKind.Simple: {
+					// Workbench-injected context (skills index, reminders).
+					// Kept out of the user's text chunk and appended as its
+					// own input item so display-side reconstruction can drop
+					// it without touching the user-authored prompt.
 					const rep = att.modelRepresentation;
 					if (typeof rep === 'string' && rep.length > 0) {
-						textChunks.push(rep);
+						injectedChunks.push(rep);
 					}
 					break;
 				}
@@ -96,6 +101,9 @@ export function resolveCodexInput(
 	// Always include a text input first, even if empty (codex needs at
 	// least one element).
 	input.unshift({ type: 'text', text, text_elements: EMPTY_TEXT_ELEMENTS });
+	if (injectedChunks.length > 0) {
+		input.push({ type: 'text', text: injectedChunks.join('\n\n'), text_elements: EMPTY_TEXT_ELEMENTS });
+	}
 
 	return { input, cleanupPaths };
 }

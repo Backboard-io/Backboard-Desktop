@@ -83,6 +83,13 @@
 	 * lives in the upper spacer (bottom-aligned) so it hugs the composer without
 	 * pushing it off-center. */
 	grid-template-rows: 52px minmax(56px, 1fr) auto minmax(56px, 1fr);
+	/* Pin the single column to the region width. Without an explicit column the
+	 * grid defaults to `min-width: auto` (= min-content), so the composer's chat
+	 * input and the nowrap heading expand the column past the region and spill
+	 * under the sidebar / right panel when the region is squeezed narrow. The
+	 * `minmax(0, …)` lets the column shrink so children stay inside the region
+	 * (composer shrinks, buttons wrap, oversized heading clips at the edge). */
+	grid-template-columns: minmax(0, 1fr);
 	align-items: stretch;
 	align-self: stretch;
 	gap: 0;
@@ -619,10 +626,12 @@
 	margin: 0;
 	color: var(--vscode-foreground);
 	/* Keep the whole sentence (text + both pickers + "?") on one row. The
-	 * font-size is fluid — 30px on wide regions, scaling down with the region
-	 * width (`cqw`, resolved against the size-container `.new-chat-widget-container`)
-	 * so the nowrap line always fits instead of clipping. */
-	font-size: min(30px, 3.8cqw);
+	 * font-size is fluid across the whole width range so the heading visibly
+	 * tracks the region as the right panel is resized: `cqw` is resolved against
+	 * the size-container `.new-chat-widget-container`, clamped between a 20px
+	 * floor (narrow regions) and the 30px hero size (wide/panel-closed regions).
+	 * The floor keeps the nowrap line readable; the ceiling caps the hero. */
+	font-size: clamp(20px, 3.4cqw, 30px);
 	white-space: nowrap;
 	font-weight: 400;
 	line-height: 1.2;
@@ -1016,11 +1025,6 @@
 		width: calc(100% - 32px);
 		gap: 10px;
 		padding-bottom: 20px;
-	}
-
-	.new-chat-middle-title {
-		font-size: 20px;
-		line-height: 28px;
 	}
 
 	.new-chat-middle-description {

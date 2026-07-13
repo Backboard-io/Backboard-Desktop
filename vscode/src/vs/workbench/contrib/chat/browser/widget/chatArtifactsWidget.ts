@@ -254,7 +254,11 @@ export class ChatArtifactsWidget extends Disposable {
 			return /\.html?$/i.test(uri.path);
 		}
 
-		return false;
+		// Bare "localhost:5173" / "127.0.0.1:3000" strings parse with the host
+		// as their URI scheme, so they miss the http/https check above — treat
+		// anything that looks like a local server as a browser target so the
+		// artifact popup lands in the browser panel, never a hidden editor.
+		return /^(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?::\d{2,5})?(?:\/|$)/i.test(artifact.uri ?? '');
 	}
 
 	private async _openScreenshotInCarousel(clicked: IChatArtifact): Promise<void> {

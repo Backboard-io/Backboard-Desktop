@@ -1426,26 +1426,35 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 					// edits. These are hydrated with before/after content (before
 					// = git-blob at the turn-start sha, after = working tree) so
 					// they render the same diff pill/card as tool-declared edits.
+					//
+					// Guarded: any failure here (repo probing, hydration, the
+					// progress sink) must never prevent the turn promise from
+					// resolving — an unresolved turn leaves the request spinning
+					// forever with a live Cancel button.
 					this._logService.info(`[AgentHost][FsWatch] Turn ${turnId} ended: fsChangedUris=${fsChangedUris.size} toolCallCoveredUris=${toolCallCoveredUris.size} ignored=${ignoredChangeCount}`);
-					const repoInfos = await turnRepoInfoPromise;
-					const extraEdits: IChatProgress[] = [];
-					for (const [uri, changeType] of fsChangedUris) {
-						if (toolCallCoveredUris.has(uri)) {
-							this._logService.info(`[AgentHost][FsWatch] Skipping ${uri.toString()} (covered by tool call)`);
-							continue;
+					try {
+						const repoInfos = await turnRepoInfoPromise;
+						const extraEdits: IChatProgress[] = [];
+						for (const [uri, changeType] of fsChangedUris) {
+							if (toolCallCoveredUris.has(uri)) {
+								this._logService.info(`[AgentHost][FsWatch] Skipping ${uri.toString()} (covered by tool call)`);
+								continue;
+							}
+							const repo = repoInfos.find(info => uri.path.startsWith(`${info.rootPath}/`));
+							extraEdits.push(hydrateUncoveredTurnEdit({
+								uri,
+								changeType,
+								repo,
+								backendSessionUri: session.toString(),
+								connectionAuthority: this._config.connectionAuthority,
+								undoStopId: turnId,
+							}));
 						}
-						const repo = repoInfos.find(info => uri.path.startsWith(`${info.rootPath}/`));
-						extraEdits.push(hydrateUncoveredTurnEdit({
-							uri,
-							changeType,
-							repo,
-							backendSessionUri: session.toString(),
-							connectionAuthority: this._config.connectionAuthority,
-							undoStopId: turnId,
-						}));
-					}
-					if (extraEdits.length > 0) {
-						progress(extraEdits);
+						if (extraEdits.length > 0) {
+							progress(extraEdits);
+						}
+					} catch (err) {
+						this._logService.error(`[AgentHost][FsWatch] Turn ${turnId}: failed to surface out-of-band edits`, err);
 					}
 
 					store.dispose();

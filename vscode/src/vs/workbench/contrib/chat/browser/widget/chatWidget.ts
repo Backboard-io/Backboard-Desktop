@@ -1010,7 +1010,6 @@ export class ChatWidget extends Disposable implements IChatWidget {
 
 		this.inputPart?.clearTodoListWidget(this.viewModel?.sessionResource, true);
 		this.inputPart?.clearArtifactsWidget();
-		this.inputPart?.clearEditedFilesWidget();
 		this.chatSuggestNextWidget.hide();
 		await this.viewOptions.clear?.();
 	}
@@ -1036,9 +1035,6 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			}
 
 			this.renderFollowups();
-			if (this.viewModel) {
-				this.inputPart?.renderEditedFilesWidget(this.viewModel.sessionResource);
-			}
 		}
 	}
 
@@ -2379,14 +2375,12 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			}
 			if (e.kind === 'addRequest') {
 				this.inputPart?.clearTodoListWidget(this.viewModel?.sessionResource, false);
-				this.inputPart?.clearEditedFilesWidget();
 				this._sessionIsEmptyContextKey.set(false);
 				this.chatSuggestNextWidget.hide();
 			}
 			// Hide widget on request removal
 			if (e.kind === 'removeRequest') {
 				this.inputPart?.clearTodoListWidget(this.viewModel?.sessionResource, true);
-				this.inputPart?.clearEditedFilesWidget();
 				this.chatSuggestNextWidget.hide();
 				this._sessionIsEmptyContextKey.set((this.viewModel?.model.getRequests().length ?? 0) === 0);
 			}
@@ -2417,7 +2411,6 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		this.updateChatInputContext();
 		this.input.renderChatTodoListWidget(this.viewModel.sessionResource);
 		this.input.renderArtifactsWidget(this.viewModel.sessionResource);
-		this.inputPart?.renderEditedFilesWidget(this.viewModel.sessionResource);
 	}
 
 	getFocus(): ChatTreeItem | undefined {

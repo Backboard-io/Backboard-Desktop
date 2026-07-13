@@ -14,7 +14,7 @@ import { createDecorator } from '../../../../platform/instantiation/common/insta
 import { IQuickInputService, IQuickPickItem } from '../../../../platform/quickinput/common/quickInput.js';
 import { AgentHostPty } from './agentHostPty.js';
 import { AhpTerminalCommandSource } from './ahpTerminalCommandSource.js';
-import { ITerminalChatService, ITerminalInstance, ITerminalLocationOptions, ITerminalService } from './terminal.js';
+import { ITerminalChatService, ITerminalInstance, ITerminalLocationOptions, ITerminalService, IXtermColorProvider } from './terminal.js';
 import { ITerminalProfileProvider, ITerminalProfileService } from '../common/terminal.js';
 
 export interface IAgentHostTerminalCreateOptions {
@@ -24,6 +24,8 @@ export interface IAgentHostTerminalCreateOptions {
 	readonly cwd?: URI;
 	/** Terminal location (panel, editor, split, etc.). */
 	readonly location?: ITerminalLocationOptions;
+	/** Overrides the xterm color provider for terminals embedded in custom surfaces. */
+	readonly colorProvider?: IXtermColorProvider;
 }
 
 export interface IAgentHostEntry {
@@ -311,6 +313,7 @@ export class AgentHostTerminalService extends Disposable implements IAgentHostTe
 				isFeatureTerminal: false,
 			},
 			location: options?.location,
+			colorProvider: options?.colorProvider,
 		});
 
 		this._register(instance.onDisposed(() => {

@@ -26,21 +26,36 @@ import { ILanguageModelsService } from '../../../../workbench/contrib/chat/commo
 import { getSessionTypeAvailability, getSessionTypeUnavailableDescription, getSessionTypeUnavailableHover, SessionTypeAvailability } from '../../../../workbench/contrib/chat/browser/agentSessions/sessionTypeAvailability.js';
 import { IChatEntitlementService } from '../../../../workbench/services/chat/common/chatEntitlementService.js';
 import { reportNewChatPickerClosed } from './newChatPickerTelemetry.js';
+import { IAgentCliSetupService } from './agentCliSetup.js';
 
 const STORAGE_KEY_LAST_SESSION_TYPE = 'sessions.userSelectedSessionType';
 
-/** Marker providerId for the "coming soon" placeholder rows below. */
-const COMING_SOON_PROVIDER_ID = '__comingSoon__';
+/**
+ * Branding for the well-known agent-host types, used while the folder's
+ * advertised session types are still resolving (the trigger would otherwise
+ * flash the raw stored id with a generic glyph).
+ */
+function knownAgentPresentation(sessionTypeId: string): { readonly label: string; readonly icon: ThemeIcon } | undefined {
+	switch (sessionTypeId) {
+		case 'backboard':
+			return { label: 'Backboard', icon: ThemeIcon.fromId('backboard-logo') };
+		case 'claude':
+			return { label: 'Claude', icon: Codicon.claude };
+		case 'codex':
+			return { label: 'Codex', icon: Codicon.openai };
+		case 'opencode':
+			return { label: 'OpenCode', icon: Codicon.circuitBoard };
+		default:
+			return undefined;
+	}
+}
 
 /**
- * Agents shown in the picker as disabled "coming soon" rows — not backed by
- * a registered provider, so picking one is a no-op. Lets the picker preview
- * upcoming agents before their backend wiring lands.
+ * Marker providerId for the one-click setup rows: agents whose CLI is not
+ * installed yet. Selecting one starts the guided install instead of picking
+ * a session type.
  */
-const COMING_SOON_SESSION_TYPES: readonly { readonly id: string; readonly label: string; readonly icon: ThemeIcon } [] = [
-	{ id: 'codex', label: 'Codex', icon: Codicon.openai },
-	{ id: 'opencode', label: 'OpenCode', icon: Codicon.circuitBoard },
-];
+const AGENT_SETUP_PROVIDER_ID = '__agentSetup__';
 
 /**
  * A picked session type, paired with the provider that serves it. Two
@@ -124,15 +139,16 @@ export class SessionTypePicker extends Disposable {
 		@IChatSessionsService protected readonly chatSessionsService: IChatSessionsService,
 		@IChatEntitlementService protected readonly chatEntitlementService: IChatEntitlementService,
 		@ILanguageModelsService protected readonly languageModelsService: ILanguageModelsService,
+		@IAgentCliSetupService private readonly agentCliSetupService: IAgentCliSetupService,
 	) {
 		super();
 
 		// Restore the previously selected session type from storage
 		this._picked = this._readStoredPick();
 
-		const refresh = (session: ISession | undefined) => {
+		const refresh = (session: ISession | undefined, workspace = session?.workspace.get()) => {
 			if (session) {
-				const folderUri = session.workspace.get()?.folders[0]?.root;
+				const folderUri = workspace?.folders[0]?.root;
 				this._folderSessionTypes = this._filterAllowedSessionTypes(folderUri ? this.sessionsManagementService.getSessionTypesForFolder(folderUri) : []);
 				// Reflect the active session's type in the trigger label, but do
 				// not persist it: the stored preference must only change when the
@@ -149,7 +165,13 @@ export class SessionTypePicker extends Disposable {
 
 		this._register(autorun(reader => {
 			const session = this._session.read(reader);
-			refresh(session);
+			// Track the workspace observable too: a fresh draft session's
+			// workspace resolves shortly after the session appears, and the
+			// folder's session types can only be computed once it has. An
+			// untracked read here left the trigger permanently empty when the
+			// New Chat flow re-rendered before the workspace landed.
+			const workspace = session?.workspace.read(reader);
+			refresh(session, workspace);
 		}));
 		// Re-read when a provider advertises/removes session types at runtime
 		// (e.g. a remote agent host discovers a new agent).
@@ -320,13 +342,12 @@ export class SessionTypePicker extends Disposable {
 			: this._folderSessionTypes;
 		this._folderSessionTypes = folderTypes;
 
-		// "Coming soon" rows preview agents that aren't wired up yet; skip any
-		// whose id already has a real, registered session type so we never
-		// show a duplicate once the real one lands.
-		const comingSoonTypes = COMING_SOON_SESSION_TYPES.filter(placeholder =>
-			!folderTypes.some(t => t.sessionType.id === placeholder.id));
+		// Agents whose CLI isn't installed become one-click setup rows; any
+		// id with a real, registered session type is excluded so the setup
+		// row disappears the moment the real provider lands.
+		const setupTypes = this.agentCliSetupService.getSetupCandidates(new Set(folderTypes.map(t => t.sessionType.id)));
 
-		if (folderTypes.length + comingSoonTypes.length <= 1) {
+		if (folderTypes.length + setupTypes.length <= 1) {
 			return;
 		}
 
@@ -345,10 +366,10 @@ export class SessionTypePicker extends Disposable {
 				groups.set(groupTitle, [folderType]);
 			}
 		}
-		// "Coming soon" rows get their own section header whenever there's
-		// anything else in the list to distinguish them from, so they read as
-		// a preview rather than real, pickable providers.
-		const showSectionHeaders = groups.size > 1 || (groups.size > 0 && comingSoonTypes.length > 0);
+		// Setup rows get their own section header whenever there's anything
+		// else in the list to distinguish them from, so they read as an
+		// install action rather than a real, pickable provider.
+		const showSectionHeaders = groups.size > 1 || (groups.size > 0 && setupTypes.length > 0);
 
 		const groupedItems: IActionListItem<ISessionTypePickerItem>[] = [];
 		for (const [groupTitle, types] of groups) {
@@ -390,31 +411,30 @@ export class SessionTypePicker extends Disposable {
 			}
 		}
 
-		if (comingSoonTypes.length > 0) {
+		if (setupTypes.length > 0) {
 			if (showSectionHeaders) {
 				if (groupedItems.length > 0) {
 					groupedItems.push({ kind: ActionListItemKind.Separator, label: '' });
 				}
 				groupedItems.push({
 					kind: ActionListItemKind.Header,
-					group: { title: localize('sessionTypePicker.comingSoon', "Coming Soon") },
-					label: localize('sessionTypePicker.comingSoon', "Coming Soon"),
+					group: { title: localize('sessionTypePicker.addAgents', "Add Agents") },
+					label: localize('sessionTypePicker.addAgents', "Add Agents"),
 				});
 			}
-			for (const placeholder of comingSoonTypes) {
+			for (const candidate of setupTypes) {
 				const item: ISessionTypePickerItem = {
-					providerId: COMING_SOON_PROVIDER_ID,
-					sessionTypeId: placeholder.id,
-					label: placeholder.label,
+					providerId: AGENT_SETUP_PROVIDER_ID,
+					sessionTypeId: candidate.id,
+					label: candidate.label,
 				};
 				groupedItems.push({
 					kind: ActionListItemKind.Action,
-					label: placeholder.label,
-					disabled: true,
-					description: localize('sessionTypePicker.comingSoonDescription', "Not available yet"),
+					label: candidate.label,
+					description: candidate.description,
 					group: {
 						title: '',
-						icon: placeholder.icon,
+						icon: candidate.icon,
 					},
 					item,
 				});
@@ -424,10 +444,11 @@ export class SessionTypePicker extends Disposable {
 		const triggerElement = this._triggerElement;
 		const delegate: IActionListDelegate<ISessionTypePickerItem> = {
 			onSelect: (item) => {
-				if (item.providerId === COMING_SOON_PROVIDER_ID) {
+				this.actionWidgetService.hide();
+				if (item.providerId === AGENT_SETUP_PROVIDER_ID) {
+					void this.agentCliSetupService.beginSetup(item.sessionTypeId);
 					return;
 				}
-				this.actionWidgetService.hide();
 				this._handleSelectedSessionType(item);
 			},
 			onHide: () => { triggerElement.focus(); },
@@ -566,7 +587,12 @@ export class SessionTypePicker extends Disposable {
 		// uses `:has(+ .sessions-chat-session-type-picker .action-label.hidden)`
 		// to also hide the "with" connector when the trigger is hidden.
 		const hideForSingleHarness = isWeb && this._folderSessionTypes.length <= 1;
-		if (this._folderSessionTypes.length === 0 || hideForSingleHarness) {
+		// Only hide when there is genuinely nothing to show. The folder list
+		// is transiently empty while providers (re-)advertise their session
+		// types and while a draft session's workspace resolves — wiping the
+		// trigger then would strand the user with no way to switch agents
+		// (the dropdown itself re-resolves the list when opened).
+		if (hideForSingleHarness || (this._folderSessionTypes.length === 0 && !this._picked)) {
 			this._triggerElement.classList.add('hidden');
 			return;
 		}
@@ -575,8 +601,13 @@ export class SessionTypePicker extends Disposable {
 		const currentType = this._folderSessionTypes.find(t =>
 			t.providerId === this._picked?.providerId && t.sessionType.id === this._picked?.sessionTypeId)?.sessionType
 			?? this._folderSessionTypes.find(t => t.sessionType.id === this._picked?.sessionTypeId)?.sessionType;
-		const modeIcon = currentType?.icon ?? Codicon.terminal;
-		const modeLabel = currentType?.label ?? this._picked?.sessionTypeId ?? '';
+		// While the folder's session types are still resolving, render the
+		// stored pick with its well-known branding instead of the raw id +
+		// generic terminal glyph — the advertised type replaces this on the
+		// next refresh.
+		const fallback = this._picked ? knownAgentPresentation(this._picked.sessionTypeId) : undefined;
+		const modeIcon = currentType?.icon ?? fallback?.icon ?? Codicon.terminal;
+		const modeLabel = currentType?.label ?? fallback?.label ?? this._picked?.sessionTypeId ?? '';
 
 		dom.append(this._triggerElement, renderIcon(modeIcon));
 		const labelSpan = dom.append(this._triggerElement, dom.$('span.sessions-chat-dropdown-label'));

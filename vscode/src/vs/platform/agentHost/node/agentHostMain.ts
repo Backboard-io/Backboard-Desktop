@@ -15,7 +15,7 @@ import { URI } from '../../../base/common/uri.js';
 import { generateUuid } from '../../../base/common/uuid.js';
 import * as os from 'os';
 import * as inspector from 'inspector';
-import { AgentHostClaudeAgentEnabledEnvVar, AgentHostCodexAgentEnabledEnvVar, AgentHostIpcChannels, IAgentHostInspectInfo, IAgentHostSocketInfo, IAgentService, IConnectionTrackerService, isAgentEnabled } from '../common/agentService.js';
+import { AgentHostClaudeAgentEnabledEnvVar, AgentHostCodexAgentEnabledEnvVar, AgentHostOpenCodeAgentEnabledEnvVar, AgentHostIpcChannels, IAgentHostInspectInfo, IAgentHostSocketInfo, IAgentService, IConnectionTrackerService, isAgentEnabled } from '../common/agentService.js';
 import { AgentService } from './agentService.js';
 import { IAgentConfigurationService } from './agentConfigurationService.js';
 import { IAgentHostCompletions } from './agentHostCompletions.js';
@@ -25,7 +25,8 @@ import { CopilotApiService, ICopilotApiService } from './shared/copilotApiServic
 import { ClaudeAgent } from './claude/claudeAgent.js';
 import { ClaudeAgentSdkService, ClaudeSdkPackage, IClaudeAgentSdkService } from './claude/claudeAgentSdkService.js';
 import { ClaudeProxyService, IClaudeProxyService } from './claude/claudeProxyService.js';
-import { CodexAgent, CodexSdkPackage } from './codex/codexAgent.js';
+import { CodexAgent, CodexSdkPackage, findCodexOnPath } from './codex/codexAgent.js';
+import { OpenCodeAgent, findOpenCodeOnPath } from './opencode/opencodeAgent.js';
 import { CodexProxyService, ICodexProxyService } from './codex/codexProxyService.js';
 import { AgentSdkDownloader, IAgentSdkDownloader } from './agentSdkDownloader.js';
 import { IAgentHostOTelService } from '../common/otel/agentHostOTelService.js';
@@ -194,15 +195,19 @@ async function startAgentHost(): Promise<void> {
 		//     so the bare-import path in `ClaudeAgentSdkService._loadSdk`
 		//     always succeeds in dev; in built products the SDK ships via
 		//     `product.agentSdks.claude` and the downloader handles it. Codex
-		//     has no equivalent dev path yet, so it still requires either the
-		//     env-var override or a `product.agentSdks.codex` entry.
+		//     accepts the env-var override, a `product.agentSdks.codex` entry,
+		//     or — the subscription-native default — a `codex` binary on PATH
+		//     (the CLI the user ran `codex login` with).
 		// If either gate fails, the provider is not registered and never appears
 		// in the agent picker (matches the pre-CDN UX exactly).
 		if (isAgentEnabled(process.env[AgentHostClaudeAgentEnabledEnvVar], false) && (!environmentService.isBuilt || agentSdkDownloader.isAvailable(ClaudeSdkPackage))) {
 			agentService.registerProvider(instantiationService.createInstance(ClaudeAgent));
 		}
-		if (isAgentEnabled(process.env[AgentHostCodexAgentEnabledEnvVar], false) && agentSdkDownloader.isAvailable(CodexSdkPackage)) {
+		if (isAgentEnabled(process.env[AgentHostCodexAgentEnabledEnvVar], false) && (agentSdkDownloader.isAvailable(CodexSdkPackage) || findCodexOnPath() !== undefined)) {
 			agentService.registerProvider(instantiationService.createInstance(CodexAgent));
+		}
+		if (isAgentEnabled(process.env[AgentHostOpenCodeAgentEnabledEnvVar], false) && findOpenCodeOnPath() !== undefined) {
+			agentService.registerProvider(instantiationService.createInstance(OpenCodeAgent));
 		}
 	} catch (err) {
 		logService.error('Failed to create AgentService', err);

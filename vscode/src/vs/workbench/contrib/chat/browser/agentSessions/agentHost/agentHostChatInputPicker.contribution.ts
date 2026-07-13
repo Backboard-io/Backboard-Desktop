@@ -137,7 +137,7 @@ export class OpenAgentHostFastModePickerAction extends Action2 {
 }
 
 /**
- * Single gear icon consolidating the Claude-only composer controls —
+ * Single gear icon consolidating the third-party-agent composer controls —
  * Thinking Level, Approvals, and Fast Mode — into one dropdown instead of
  * three separate icons. Each row opens its own underlying picker (the same
  * ones {@link OpenAgentHostPermissionModePickerAction} /
@@ -152,8 +152,8 @@ export class OpenAgentHostClaudeOptionsAction extends Action2 {
 	constructor() {
 		super({
 			id: OpenAgentHostClaudeOptionsAction.ID,
-			title: localize2('agentHost.claudeOptions', "Claude Options"),
-			tooltip: localize('agentHost.claudeOptionsTooltip', "Open Claude session options"),
+			title: localize2('agentHost.claudeOptions', "Agent Options"),
+			tooltip: localize('agentHost.claudeOptionsTooltip', "Open agent session options"),
 			icon: Codicon.settingsGear,
 			f1: false,
 			// No `precondition`: like the Backboard Options gear, this action's

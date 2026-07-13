@@ -27,7 +27,7 @@ import { IAgentWorkbenchLayoutService } from '../../../browser/workbench.js';
 import { IActiveSession, ISessionsManagementService } from '../../../services/sessions/common/sessionsManagement.js';
 import { ISessionsService } from '../../../services/sessions/browser/sessionsService.js';
 import { SessionStatus } from '../../../services/sessions/common/session.js';
-import { SESSIONS_RIGHT_WORKBENCH_CONTAINER_ID } from '../../rightWorkbench/browser/rightWorkbench.js';
+import { pendingModeRequest, SESSIONS_RIGHT_WORKBENCH_CONTAINER_ID } from '../../rightWorkbench/browser/rightWorkbench.js';
 
 /**
  * Per-session view state: auxiliary bar visibility and active view container.
@@ -300,6 +300,12 @@ export class LayoutController extends Disposable {
 			return;
 		}
 
+		// A right-workbench mode request is being applied (e.g. a completion
+		// popup routing to the browser tab, which can also activate the
+		// session) — don't fight it by hiding or re-routing the aux bar.
+		if (pendingModeRequest) {
+			return;
+		}
 
 		if (!sessionResource || !hasWorkspace) {
 			return;

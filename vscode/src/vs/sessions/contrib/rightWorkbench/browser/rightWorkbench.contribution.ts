@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { Sequencer } from '../../../../base/common/async.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { localize2 } from '../../../../nls.js';
 import { Action2, registerAction2 } from '../../../../platform/actions/common/actions.js';
@@ -41,17 +42,25 @@ Registry.as<IViewsRegistry>(ViewContainerExtensions.ViewsRegistry).registerViews
 	windowEnablement: WindowEnablement.Sessions,
 }], rightWorkbenchContainer);
 
-async function openRightWorkbenchMode(accessor: ServicesAccessor, request: RightWorkbenchMode | IRightWorkbenchModeRequest): Promise<void> {
-	const modeRequest = typeof request === 'string' ? { mode: request } : request;
-	setPendingModeRequest(modeRequest);
+// Serialize mode requests: two rapid requests (e.g. a completion-popup click
+// racing an automatic OpenBrowser) share the single pending-request slot, and
+// interleaving lets the first request's cleanup null out the second's before a
+// cold-constructing pane consumes it.
+const modeRequestSequencer = new Sequencer();
+
+function openRightWorkbenchMode(accessor: ServicesAccessor, request: RightWorkbenchMode | IRightWorkbenchModeRequest): Promise<void> {
 	const layoutService = accessor.get(IWorkbenchLayoutService);
-	layoutService.setPartHidden(false, Parts.AUXILIARYBAR_PART);
-	layoutService.setPartHidden(true, Parts.EDITOR_PART);
 	const viewsService = accessor.get(IViewsService);
-	await viewsService.openViewContainer(SESSIONS_RIGHT_WORKBENCH_CONTAINER_ID, true);
-	await viewsService.openView(SESSIONS_RIGHT_WORKBENCH_LAUNCHER_VIEW_ID, true);
-	onDidRequestModeEmitter.fire(modeRequest);
-	setPendingModeRequest(undefined);
+	return modeRequestSequencer.queue(async () => {
+		const modeRequest = typeof request === 'string' ? { mode: request } : request;
+		setPendingModeRequest(modeRequest);
+		layoutService.setPartHidden(false, Parts.AUXILIARYBAR_PART);
+		layoutService.setPartHidden(true, Parts.EDITOR_PART);
+		await viewsService.openViewContainer(SESSIONS_RIGHT_WORKBENCH_CONTAINER_ID, true);
+		await viewsService.openView(SESSIONS_RIGHT_WORKBENCH_LAUNCHER_VIEW_ID, true);
+		onDidRequestModeEmitter.fire(modeRequest);
+		setPendingModeRequest(undefined);
+	});
 }
 
 registerAction2(class OpenRightWorkbenchLauncherModeAction extends Action2 {

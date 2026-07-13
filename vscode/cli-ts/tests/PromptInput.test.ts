@@ -395,11 +395,11 @@ describe("PromptInput paste preview", () => {
 		).join("\n");
 		const preview = createPromptInputPastePreview(paste, {
 			now: new Date("2026-06-26T07:45:00Z"),
-			sourceLabel: "Backboard R-CLI You",
+			sourceLabel: "Backboard Studio You",
 		});
 
 		expect(preview?.value).toBe(paste);
-		expect(preview?.label).toContain("Backboard R-CLI You");
+		expect(preview?.label).toContain("Backboard Studio You");
 		expect(preview?.label).toContain("line 1 line 2");
 		expect(preview?.label).toContain("10 lines");
 		expect(preview?.label).not.toContain(preview?.id ?? "");

@@ -1073,7 +1073,7 @@ export class TerminalService extends Disposable implements ITerminalService {
 		const location = await this.resolveLocation(options?.location) || this._terminalConfigurationService.defaultLocation;
 
 		if (shellLaunchConfig.hideFromUser) {
-			const instance = this._terminalInstanceService.createInstance(shellLaunchConfig, location);
+			const instance = this._terminalInstanceService.createInstance(shellLaunchConfig, location, undefined, options?.colorProvider);
 			this._backgroundedTerminalInstances.push({ instance, terminalLocationOptions: options?.location });
 			this._backgroundedTerminalDisposables.set(instance.instanceId, [
 				instance.onDisposed(instance => {
@@ -1231,11 +1231,16 @@ export class TerminalService extends Disposable implements ITerminalService {
 	private _createTerminal(shellLaunchConfig: IShellLaunchConfig, location: TerminalLocation, options?: ICreateTerminalOptions): ITerminalInstance {
 		let instance;
 		if (location === TerminalLocation.Editor) {
-			instance = this._terminalInstanceService.createInstance(shellLaunchConfig, TerminalLocation.Editor);
+			instance = this._terminalInstanceService.createInstance(shellLaunchConfig, TerminalLocation.Editor, undefined, options?.colorProvider);
 			if (!shellLaunchConfig.hideFromUser) {
 				const editorOptions = this._getEditorOptions(options?.location);
 				this._terminalEditorService.openEditor(instance, editorOptions);
 			}
+		} else if (options?.colorProvider) {
+			// Create the instance directly so the custom color provider is honored, then wrap it
+			// in a group like a regular panel terminal.
+			instance = this._terminalInstanceService.createInstance(shellLaunchConfig, TerminalLocation.Panel, undefined, options.colorProvider);
+			this._terminalGroupService.createGroup(instance);
 		} else {
 			// TODO: pass resource?
 			const group = this._terminalGroupService.createGroup(shellLaunchConfig);
