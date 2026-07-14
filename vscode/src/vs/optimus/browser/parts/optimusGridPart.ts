@@ -4,14 +4,17 @@
  *--------------------------------------------------------------------------------------------*/
 
 import './media/optimusGridPart.css';
-import { $, addDisposableListener, append, EventType } from '../../../base/browser/dom.js';
+import { $, addDisposableListener, append, DragAndDropObserver, EventHelper, EventType } from '../../../base/browser/dom.js';
 import { localize } from '../../../nls.js';
 import { ProgressBar } from '../../../base/browser/ui/progressbar/progressbar.js';
+import { RunOnceScheduler } from '../../../base/common/async.js';
 import { Emitter, Event } from '../../../base/common/event.js';
 import { DisposableStore } from '../../../base/common/lifecycle.js';
+import { autorun } from '../../../base/common/observable.js';
 import { assertReturnsDefined } from '../../../base/common/types.js';
 import { defaultProgressBarStyles } from '../../../platform/theme/browser/defaultStyles.js';
-import { ICommandService } from '../../../platform/commands/common/commands.js';
+import { CommandsRegistry, ICommandService } from '../../../platform/commands/common/commands.js';
+import { IContextKeyService, RawContextKey } from '../../../platform/contextkey/common/contextkey.js';
 import { IInstantiationService } from '../../../platform/instantiation/common/instantiation.js';
 import { IProgressIndicator } from '../../../platform/progress/common/progress.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../platform/storage/common/storage.js';
@@ -19,8 +22,9 @@ import { IThemeService } from '../../../platform/theme/common/themeService.js';
 import { Part } from '../../../workbench/browser/part.js';
 import { IWorkbenchLayoutService, Parts } from '../../../workbench/services/layout/browser/layoutService.js';
 import { AbstractProgressScope, ScopedProgressIndicator } from '../../../workbench/services/progress/browser/progressIndicator.js';
+import { LocalSelectionTransfer } from '../../../platform/dnd/browser/dnd.js';
+import { DraggedSessionIdentifier } from '../../../sessions/browser/dnd.js';
 import { agentsPanelBackground, agentsPanelBorder, agentsPanelForeground } from '../../../sessions/common/theme.js';
-import { SessionType } from '../../../workbench/contrib/chat/common/chatSessionsService.js';
 import { ISessionsManagementService, IActiveSession } from '../../../sessions/services/sessions/common/sessionsManagement.js';
 import { ISession, SessionStatus } from '../../../sessions/services/sessions/common/session.js';
 import { OptimusCard, IOptimusCardSessionModel } from './optimusCard.js';
@@ -29,13 +33,52 @@ export const OPTIMUS_NEW_SESSION_COMMAND_ID = 'optimus.newSession';
 export const OPTIMUS_FOCUS_SESSION_COMMAND_ID = 'optimus.focusSession';
 export const OPTIMUS_DELETE_SESSION_COMMAND_ID = 'optimus.deleteSession';
 export const OPTIMUS_CLOSE_SESSION_COMMAND_ID = 'optimus.closeSession';
+export const OPTIMUS_TOGGLE_VIEW_MODE_COMMAND_ID = 'optimus.toggleViewMode';
+
+export type OptimusViewMode = 'grid' | 'kanban';
+
+/** Current grid/kanban mode, for chrome buttons to mirror. */
+export const OPTIMUS_VIEW_MODE_CONTEXT_KEY = new RawContextKey<OptimusViewMode>('optimusViewMode', 'grid');
+
+const VIEW_MODE_STORAGE_KEY = 'optimus.viewMode';
+
+type KanbanBucket = 'running' | 'attention' | 'done';
+
+const KANBAN_BUCKETS: readonly { readonly key: KanbanBucket; readonly label: string; readonly icon: string }[] = [
+	{ key: 'running', label: localize('optimus.kanban.running', "Running"), icon: 'codicon-play-circle' },
+	{ key: 'attention', label: localize('optimus.kanban.attention', "Needs Attention"), icon: 'codicon-bell-dot' },
+	{ key: 'done', label: localize('optimus.kanban.done', "Done"), icon: 'codicon-check' },
+];
+
+function kanbanBucket(status: SessionStatus): KanbanBucket {
+	switch (status) {
+		case SessionStatus.InProgress: return 'running';
+		case SessionStatus.NeedsInput:
+		case SessionStatus.Error: return 'attention';
+		default: return 'done';
+	}
+}
+
+interface IKanbanColumn {
+	readonly element: HTMLElement;
+	readonly listEl: HTMLElement;
+	readonly countEl: HTMLElement;
+}
 
 /**
- * Sessions the user explicitly closed from the grid. Everything else is open
- * by default; the set persists across relaunches so a closed chat stays
- * closed until the user opens it again (e.g. from the sidebar list).
+ * Sessions open on the board. Only chats the user opened (sidebar click,
+ * drop, new task) get a card, and the set persists across relaunches so the
+ * board comes back exactly as it was left.
  */
-const CLOSED_SESSIONS_STORAGE_KEY = 'optimus.closedSessions';
+const OPEN_SESSIONS_STORAGE_KEY = 'optimus.openSessions';
+
+/**
+ * Ceiling on open cards. Every card mirrors a live transcript, and
+ * Claude/Codex cards additionally hold their per-session CLI process, so an
+ * unbounded board degrades the whole window. Opening beyond the cap evicts
+ * the oldest-opened card that is not active or visible.
+ */
+const MAX_OPEN_CARDS = 15;
 
 interface ICardEntry {
 	readonly card: OptimusCard;
@@ -65,7 +108,16 @@ export class OptimusGridPart extends Part {
 
 	private readonly cardEntries = new Map<string, ICardEntry>();
 	private placeholderCard: OptimusCard | undefined;
+	private contentAreaEl: HTMLElement | undefined;
 	private gridContainer: HTMLElement | undefined;
+	private kanbanContainer: HTMLElement | undefined;
+	private readonly kanbanColumns = new Map<KanbanBucket, IKanbanColumn>();
+	private viewMode: OptimusViewMode = 'grid';
+	private readonly viewModeContextKey;
+	private readonly viewSwitcherButtons = new Map<OptimusViewMode, HTMLButtonElement>();
+	/** Watches bound sessions' statuses so kanban re-buckets on transitions. */
+	private readonly statusWatchStore = this._register(new DisposableStore());
+	private readonly refreshScheduler = this._register(new RunOnceScheduler(() => this.refreshCards(), 50));
 	private pageIndex = 0;
 	private pagerElement: HTMLElement | undefined;
 	private pagerLabel: HTMLElement | undefined;
@@ -79,7 +131,11 @@ export class OptimusGridPart extends Part {
 	private readonly _onDidFocusSession = this._register(new Emitter<string>());
 	readonly onDidFocusSession: Event<string> = this._onDidFocusSession.event;
 
-	private readonly closedSessions = new Set<string>();
+	private readonly openSessions = new Set<string>();
+	/** Session keys already seen in the service, to spot newly created chats. */
+	private knownSessionKeys: Set<string> | undefined;
+	private readonly windowStartTime = Date.now();
+	private readonly sessionTransfer = LocalSelectionTransfer.getInstance<DraggedSessionIdentifier>();
 
 	constructor(
 		@IThemeService themeService: IThemeService,
@@ -88,6 +144,7 @@ export class OptimusGridPart extends Part {
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@ICommandService private readonly commandService: ICommandService,
 		@ISessionsManagementService private readonly sessionsManagementService: ISessionsManagementService,
+		@IContextKeyService contextKeyService: IContextKeyService,
 	) {
 		super(
 			Parts.SESSIONS_PART,
@@ -98,33 +155,90 @@ export class OptimusGridPart extends Part {
 		);
 
 		try {
-			const raw = this.storageService.get(CLOSED_SESSIONS_STORAGE_KEY, StorageScope.PROFILE);
+			const raw = this.storageService.get(OPEN_SESSIONS_STORAGE_KEY, StorageScope.PROFILE);
 			if (raw) {
 				for (const key of JSON.parse(raw) as string[]) {
-					this.closedSessions.add(key);
+					this.openSessions.add(key);
 				}
 			}
 		} catch {
-			// Malformed storage: treat everything as open.
+			// Malformed storage: start with an empty board.
 		}
+
+		this.viewMode = this.storageService.get(VIEW_MODE_STORAGE_KEY, StorageScope.PROFILE) === 'kanban' ? 'kanban' : 'grid';
+		this.viewModeContextKey = OPTIMUS_VIEW_MODE_CONTEXT_KEY.bindTo(contextKeyService);
+		this.viewModeContextKey.set(this.viewMode);
+		this._register(CommandsRegistry.registerCommand(OPTIMUS_TOGGLE_VIEW_MODE_COMMAND_ID, () => this.toggleViewMode()));
 
 		this._register(this.sessionsManagementService.onDidChangeSessions(() => this.refreshCards()));
 	}
 
-	private persistClosedSessions(): void {
-		this.storageService.store(CLOSED_SESSIONS_STORAGE_KEY, JSON.stringify([...this.closedSessions]), StorageScope.PROFILE, StorageTarget.MACHINE);
+	private toggleViewMode(): void {
+		this.setViewMode(this.viewMode === 'grid' ? 'kanban' : 'grid');
 	}
 
-	private closeSession(key: string): void {
-		this.closedSessions.add(key);
-		this.persistClosedSessions();
+	private setViewMode(mode: OptimusViewMode): void {
+		if (this.viewMode === mode) {
+			return;
+		}
+		this.viewMode = mode;
+		this.storageService.store(VIEW_MODE_STORAGE_KEY, this.viewMode, StorageScope.PROFILE, StorageTarget.USER);
+		this.viewModeContextKey.set(this.viewMode);
+		this.contentAreaEl?.classList.toggle('view-kanban', this.viewMode === 'kanban');
+		this.updateViewSwitcher();
 		this.refreshCards();
 	}
 
-	/** Sessions opened through the service (sidebar click, new chat) un-close themselves. */
-	private uncloseSession(key: string): void {
-		if (this.closedSessions.delete(key)) {
-			this.persistClosedSessions();
+	private updateViewSwitcher(): void {
+		for (const [mode, button] of this.viewSwitcherButtons) {
+			button.classList.toggle('active', this.viewMode === mode);
+			button.setAttribute('aria-pressed', String(this.viewMode === mode));
+		}
+	}
+
+	private persistOpenSessions(): void {
+		this.storageService.store(OPEN_SESSIONS_STORAGE_KEY, JSON.stringify([...this.openSessions]), StorageScope.PROFILE, StorageTarget.MACHINE);
+	}
+
+	private closeSession(key: string): void {
+		if (this.openSessions.delete(key)) {
+			this.persistOpenSessions();
+		}
+		this.refreshCards();
+	}
+
+	/** Sessions opened through the service (sidebar click, drop, new chat) join the board. */
+	private openSession(key: string): void {
+		if (this.openSessions.has(key)) {
+			return;
+		}
+		this.openSessions.add(key);
+		this.enforceOpenCardLimit();
+		this.persistOpenSessions();
+	}
+
+	/** Evicts the oldest-opened, not-currently-visible cards beyond the cap. */
+	private enforceOpenCardLimit(): void {
+		if (this.openSessions.size <= MAX_OPEN_CARDS) {
+			return;
+		}
+		const protectedKeys = new Set<string>();
+		if (this.activeSession) {
+			protectedKeys.add(this.activeSession.resource.toString());
+		}
+		for (const session of this.visibleSessions) {
+			if (session) {
+				protectedKeys.add(session.resource.toString());
+			}
+		}
+		// Set preserves insertion order: the first entries are the oldest opens.
+		for (const key of this.openSessions) {
+			if (this.openSessions.size <= MAX_OPEN_CARDS) {
+				break;
+			}
+			if (!protectedKeys.has(key)) {
+				this.openSessions.delete(key);
+			}
 		}
 	}
 
@@ -136,11 +250,96 @@ export class OptimusGridPart extends Part {
 
 	protected override createContentArea(parent: HTMLElement): HTMLElement {
 		const contentArea = append(parent, $('.content.optimus-grid-content'));
+		this.contentAreaEl = contentArea;
+		contentArea.classList.toggle('view-kanban', this.viewMode === 'kanban');
 
 		this.progressBar = this._register(new ProgressBar(contentArea, defaultProgressBarStyles));
 		this.progressBar.hide();
 
+		// Board header: segmented Grid | Kanban switcher.
+		const boardHeader = append(contentArea, $('.optimus-board-header'));
+		const switcher = append(boardHeader, $('.optimus-view-switcher'));
+		switcher.setAttribute('role', 'group');
+		switcher.setAttribute('aria-label', localize('optimus.viewSwitcher', "Board view"));
+		const addSegment = (mode: OptimusViewMode, label: string): void => {
+			const button = append(switcher, $('button.optimus-view-switcher-segment')) as HTMLButtonElement;
+			button.type = 'button';
+			button.textContent = label;
+			this._register(addDisposableListener(button, EventType.CLICK, () => this.setViewMode(mode)));
+			this.viewSwitcherButtons.set(mode, button);
+		};
+		addSegment('grid', localize('optimus.view.grid', "Grid"));
+		addSegment('kanban', localize('optimus.view.kanban', "Kanban"));
+		this.updateViewSwitcher();
+
+		const newTaskButton = append(boardHeader, $('button.optimus-board-new-task.codicon.codicon-add')) as HTMLButtonElement;
+		newTaskButton.type = 'button';
+		newTaskButton.title = localize('optimus.board.newTask', "New Chat");
+		newTaskButton.setAttribute('aria-label', newTaskButton.title);
+		this._register(addDisposableListener(newTaskButton, EventType.CLICK, () => {
+			this.commandService.executeCommand(OPTIMUS_NEW_SESSION_COMMAND_ID);
+		}));
+
 		this.gridContainer = append(contentArea, $('.optimus-grid'));
+
+		// Kanban board: one column per status bucket, cards shared with the grid.
+		this.kanbanContainer = append(contentArea, $('.optimus-kanban'));
+		for (const bucket of KANBAN_BUCKETS) {
+			const element = append(this.kanbanContainer, $(`.optimus-kanban-column.${bucket.key}`));
+			const header = append(element, $('.optimus-kanban-column-header'));
+			append(header, $(`span.codicon.${bucket.icon}.optimus-kanban-column-icon`));
+			append(header, $('span.optimus-kanban-column-label')).textContent = bucket.label;
+			const countEl = append(header, $('span.optimus-kanban-column-count'));
+			const listEl = append(element, $('.optimus-kanban-column-list'));
+			this.kanbanColumns.set(bucket.key, { element, listEl, countEl });
+		}
+
+		// First-run hero shown instead of a lone dashed placeholder card.
+		const emptyState = append(contentArea, $('.optimus-empty-state'));
+		const hero = append(emptyState, $('button.optimus-empty-hero')) as HTMLButtonElement;
+		hero.type = 'button';
+		append(hero, $('.optimus-empty-logo'));
+		append(hero, $('.optimus-empty-title')).textContent = localize('optimus.empty.title', "What should we build?");
+		append(hero, $('.optimus-empty-subtitle')).textContent = localize('optimus.empty.subtitle', "Start or drag a chat into the agent workspace.");
+		const cta = append(hero, $('.optimus-empty-cta'));
+		append(cta, $('span.codicon.codicon-add'));
+		append(cta, $('span')).textContent = localize('optimus.empty.cta', "Start a Task");
+		this._register(addDisposableListener(hero, EventType.CLICK, () => {
+			this.commandService.executeCommand(OPTIMUS_NEW_SESSION_COMMAND_ID);
+		}));
+
+		// Sessions dragged out of the sidebar list drop here and open as cards.
+		// The list tracks the dragged session via LocalSelectionTransfer (an
+		// in-process channel), which is the reliable way to read it — the tree's
+		// own DnD controller owns the native DataTransfer. DragAndDropObserver
+		// also guarantees the drop-target highlight clears on dragend, so a
+		// drop that lands outside can't leave the board stuck highlighted.
+		this._register(new DragAndDropObserver(contentArea, {
+			onDragOver: e => {
+				if (!this.sessionTransfer.hasData(DraggedSessionIdentifier.prototype)) {
+					return;
+				}
+				e.preventDefault();
+				if (e.dataTransfer) {
+					e.dataTransfer.dropEffect = 'copy';
+				}
+				contentArea.classList.add('drop-target');
+			},
+			onDragLeave: () => contentArea.classList.remove('drop-target'),
+			onDragEnd: () => contentArea.classList.remove('drop-target'),
+			onDrop: e => {
+				contentArea.classList.remove('drop-target');
+				const data = this.sessionTransfer.getData(DraggedSessionIdentifier.prototype);
+				if (!Array.isArray(data) || data.length === 0) {
+					return;
+				}
+				EventHelper.stop(e, true);
+				for (const dragged of data) {
+					this.openSession(dragged.resource.toString());
+				}
+				this.commandService.executeCommand(OPTIMUS_FOCUS_SESSION_COMMAND_ID, data[0].resource);
+			},
+		}));
 
 		// Persistent "start a task" placeholder, always the last grid item.
 		const placeholder = this._register(this.instantiationService.createInstance(OptimusCard, this.gridContainer));
@@ -179,9 +378,38 @@ export class OptimusGridPart extends Part {
 	 * Sessions beyond the sixth slot are not rendered.
 	 */
 	updateVisibleSessions(visible: readonly (IActiveSession | undefined)[], active: IActiveSession | undefined): void {
+		const activeChanged = !!active && active.sessionId !== this.activeSession?.sessionId;
 		this.visibleSessions = visible;
 		this.activeSession = active;
+
+		// The session the user is actively chatting with belongs on the board,
+		// whatever path opened it — a brand-new chat (composer-first drafts
+		// never pass through the visible-sessions filter until committed) must
+		// not require a manual drag to get its card.
+		if (active) {
+			this.openSession(active.resource.toString());
+		}
+
+		// Opening a session (sidebar click, drop, new chat) must surface its
+		// card: jump the grid to the page that holds it.
+		if (activeChanged && this.viewMode === 'grid') {
+			const models = this.buildCardModels();
+			const index = models.findIndex(model => model.session.sessionId === active.sessionId);
+			if (index >= 0) {
+				this.pageIndex = Math.floor(index / OptimusGridPart.PAGE_SIZE);
+			}
+		}
+
 		this.refreshCards();
+
+		if (activeChanged) {
+			for (const entry of this.cardEntries.values()) {
+				if (entry.card.session?.session.sessionId === active.sessionId) {
+					entry.card.element.scrollIntoView({ block: 'nearest' });
+					break;
+				}
+			}
+		}
 	}
 
 	focusSession(session: IActiveSession | undefined): void {
@@ -244,10 +472,87 @@ export class OptimusGridPart extends Part {
 			return;
 		}
 
+		const allModels = this.buildCardModels();
+		this.contentAreaEl?.classList.toggle('empty', allModels.length === 0);
+
+		// Status transitions matter in both views but the sessions service does
+		// not necessarily emit for them: kanban re-buckets on them, and a new
+		// chat's draft only joins the board once its status leaves Untitled
+		// (the first response). Watch every bound AND visible session's status
+		// and schedule (never re-enter) a refresh on change.
+		this.statusWatchStore.clear();
+		let initialRun = true;
+		this.statusWatchStore.add(autorun(reader => {
+			for (const model of allModels) {
+				model.session.status.read(reader);
+			}
+			for (const session of this.visibleSessions) {
+				session?.status.read(reader);
+			}
+			this.activeSession?.status.read(reader);
+			if (initialRun) {
+				initialRun = false;
+				return;
+			}
+			this.refreshScheduler.schedule();
+		}));
+
+		if (this.viewMode === 'kanban') {
+			this.refreshKanban(allModels);
+			return;
+		}
+
+		this.refreshGrid(allModels);
+	}
+
+	private refreshKanban(allModels: readonly IOptimusCardSessionModel[]): void {
+		const modelKeys = new Set(allModels.map(model => model.session.resource.toString()));
+		for (const [key, entry] of [...this.cardEntries]) {
+			if (!modelKeys.has(key)) {
+				this.disposeCardEntry(key, entry);
+			}
+		}
+
+		const buckets = new Map<KanbanBucket, IOptimusCardSessionModel[]>(KANBAN_BUCKETS.map(bucket => [bucket.key, []]));
+		for (const model of allModels) {
+			buckets.get(kanbanBucket(model.session.status.get()))!.push(model);
+		}
+
+		for (const [bucketKey, models] of buckets) {
+			const column = assertReturnsDefined(this.kanbanColumns.get(bucketKey));
+			column.countEl.textContent = String(models.length);
+			column.element.classList.toggle('empty', models.length === 0);
+
+			let previousElement: HTMLElement | undefined;
+			for (const model of models) {
+				const key = model.session.resource.toString();
+				const entry = this.cardEntries.get(key) ?? this.createCardEntry(key);
+				entry.card.bind(model, model.session.sessionId === this.activeSession?.sessionId);
+
+				const element = entry.card.element;
+				const expectedPrevious = previousElement ?? null;
+				if (element.parentElement !== column.listEl || element.previousElementSibling !== expectedPrevious) {
+					column.listEl.insertBefore(element, expectedPrevious ? expectedPrevious.nextElementSibling : column.listEl.firstElementChild);
+					entry.card.layout();
+				}
+				previousElement = element;
+			}
+		}
+
+		// The "start a task" placeholder and pager are grid-mode furniture.
+		if (this.placeholderCard) {
+			this.placeholderCard.element.style.display = 'none';
+		}
+		this.updatePager(1);
+		this.layoutCards();
+	}
+
+	private refreshGrid(allModels: readonly IOptimusCardSessionModel[]): void {
+		const gridContainer = assertReturnsDefined(this.gridContainer);
+
 		// Paginate: six slots per page; the "start a task" placeholder
 		// occupies the slot right after the last session, so a full page
 		// pushes it onto the next one.
-		const allModels = this.buildCardModels();
 		const totalItems = allModels.length + 1;
 		const totalPages = Math.max(1, Math.ceil(totalItems / OptimusGridPart.PAGE_SIZE));
 		this.pageIndex = Math.min(Math.max(0, this.pageIndex), totalPages - 1);
@@ -274,8 +579,11 @@ export class OptimusGridPart extends Part {
 
 			const element = entry.card.element;
 			const expectedPrevious = previousElement ?? null;
-			if (element.previousElementSibling !== expectedPrevious) {
+			// Parent check matters when switching back from kanban: the card
+			// may sit first in a column with a coincidentally matching sibling.
+			if (element.parentElement !== gridContainer || element.previousElementSibling !== expectedPrevious) {
 				gridContainer.insertBefore(element, expectedPrevious ? expectedPrevious.nextElementSibling : gridContainer.firstElementChild);
+				entry.card.layout();
 			}
 			previousElement = element;
 		}
@@ -311,18 +619,38 @@ export class OptimusGridPart extends Part {
 	}
 
 	private buildCardModels(): IOptimusCardSessionModel[] {
+		// All session types can be cards. Claude/Codex chats mirror through
+		// their per-session CLI processes, which is affordable now that only
+		// explicitly opened sessions get cards (the board no longer auto-opens
+		// every chat).
 		const isCommittedSession = (session: ISession): boolean => session.status.get() !== SessionStatus.Untitled;
-		// Advanced orchestrates Backboard chats only for now: other local
-		// agent sessions (Claude Code, Codex, …) stream through per-session
-		// CLI processes that are too heavy to mirror in every card.
-		const isBackboardSession = (session: ISession): boolean =>
-			session.sessionType === 'backboard' || session.sessionType === SessionType.AgentHostBackboard;
+
+		// Chats created while this window is open join the board on their own:
+		// the right panel's chat does not pass through the visible/active
+		// session plumbing here, so a session that newly appears in the service
+		// with fresh activity is the reliable "user just started this" signal.
+		const sessions = this.sessionsManagementService.getSessions();
+		if (!this.knownSessionKeys && sessions.length > 0) {
+			this.knownSessionKeys = new Set(sessions.map(session => session.resource.toString()));
+		} else if (this.knownSessionKeys) {
+			for (const session of sessions) {
+				const key = session.resource.toString();
+				if (this.knownSessionKeys.has(key)) {
+					continue;
+				}
+				this.knownSessionKeys.add(key);
+				if (session.updatedAt.get().getTime() >= this.windowStartTime) {
+					this.openSession(key);
+				}
+			}
+		}
+
 		const visibleByKey = new Map<string, IActiveSession>();
 		for (const session of this.visibleSessions) {
-			if (session && isCommittedSession(session) && isBackboardSession(session)) {
+			if (session && isCommittedSession(session)) {
 				// A session open through the service (sidebar click, new chat)
-				// is open by definition — un-close it so it persists as open.
-				this.uncloseSession(session.resource.toString());
+				// is open by definition — record it so it persists as open.
+				this.openSession(session.resource.toString());
 				visibleByKey.set(session.resource.toString(), session);
 			}
 		}
@@ -334,12 +662,12 @@ export class OptimusGridPart extends Part {
 		const models: IOptimusCardSessionModel[] = [];
 		const seen = new Set<string>();
 		for (const session of this.sessionsManagementService.getSessions()) {
-			if (!isCommittedSession(session) || !isBackboardSession(session)) {
+			if (!isCommittedSession(session)) {
 				continue;
 			}
 
 			const key = session.resource.toString();
-			if (seen.has(key) || this.closedSessions.has(key)) {
+			if (seen.has(key) || !this.openSessions.has(key)) {
 				continue;
 			}
 			seen.add(key);

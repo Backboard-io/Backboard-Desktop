@@ -385,6 +385,7 @@ class OptimusChromeContribution extends Disposable implements IWorkbenchContribu
 		this.sidebarButton.classList.toggle('codicon-layout-sidebar-left-off', !sidebarVisible);
 		this.sidebarButton.classList.toggle('checked', sidebarVisible);
 
+
 		const secondaryVisible = this.layoutService.isVisible(Parts.AUXILIARYBAR_PART);
 		this.secondaryButton.classList.toggle('codicon-layout-sidebar-right', secondaryVisible);
 		this.secondaryButton.classList.toggle('codicon-layout-sidebar-right-off', !secondaryVisible);
