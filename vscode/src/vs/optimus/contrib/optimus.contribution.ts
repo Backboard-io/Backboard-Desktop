@@ -16,6 +16,7 @@ import { SyncDescriptor } from '../../platform/instantiation/common/descriptors.
 import { Registry } from '../../platform/registry/common/platform.js';
 import { registerIcon } from '../../platform/theme/common/iconRegistry.js';
 import { ICommandService } from '../../platform/commands/common/commands.js';
+import { IContextKeyService } from '../../platform/contextkey/common/contextkey.js';
 import { IContextMenuService } from '../../platform/contextview/browser/contextView.js';
 import { ViewPaneContainer } from '../../workbench/browser/parts/views/viewPaneContainer.js';
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../workbench/common/contributions.js';
@@ -25,7 +26,7 @@ import { IWorkbenchLayoutService, Parts } from '../../workbench/services/layout/
 import { SessionsView, SessionsViewId } from '../../sessions/contrib/sessions/browser/views/sessionsView.js';
 import { ISessionsManagementService } from '../../sessions/services/sessions/common/sessionsManagement.js';
 import { ISessionsService } from '../../sessions/services/sessions/browser/sessionsService.js';
-import { OPTIMUS_CLOSE_SESSION_COMMAND_ID, OPTIMUS_DELETE_SESSION_COMMAND_ID, OPTIMUS_FOCUS_SESSION_COMMAND_ID, OPTIMUS_NEW_SESSION_COMMAND_ID } from '../browser/parts/optimusGridPart.js';
+import { OPTIMUS_CLOSE_SESSION_COMMAND_ID, OPTIMUS_DELETE_SESSION_COMMAND_ID, OPTIMUS_FOCUS_SESSION_COMMAND_ID, OPTIMUS_NEW_SESSION_COMMAND_ID, OPTIMUS_SET_VIEW_MODE_COMMAND_ID, OPTIMUS_VIEW_MODE_CONTEXT_KEY, OptimusViewMode } from '../browser/parts/optimusGridPart.js';
 import { OptimusChatViewPane, OptimusChatViewId } from './chat/browser/optimusChatViewPane.js';
 
 // Toolbar/context-menu actions used by the reused SessionsView. In the Simple
@@ -309,11 +310,13 @@ class OptimusChromeContribution extends Disposable implements IWorkbenchContribu
 
 	private readonly sidebarButton: HTMLButtonElement;
 	private readonly secondaryButton: HTMLButtonElement;
+	private readonly viewSwitcherButtons = new Map<OptimusViewMode, HTMLButtonElement>();
 
 	constructor(
 		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
 		@ICommandService private readonly commandService: ICommandService,
 		@IContextMenuService private readonly contextMenuService: IContextMenuService,
+		@IContextKeyService private readonly contextKeyService: IContextKeyService,
 	) {
 		super();
 
@@ -331,6 +334,32 @@ class OptimusChromeContribution extends Disposable implements IWorkbenchContribu
 		this.sidebarButton = append(chrome, $('button.optimus-window-chrome-button.optimus-window-chrome-sidebar.codicon'));
 		this.sidebarButton.title = localize('optimusChrome.toggleSidebar', "Toggle left panel");
 		this.sidebarButton.setAttribute('aria-label', this.sidebarButton.title);
+
+		// Grid | Kanban switcher, in the icon row so the board keeps its full
+		// height. Children of the chrome are no-drag, so clicks land.
+		const switcher = append(chrome, $('.optimus-view-switcher.optimus-window-chrome-switcher'));
+		switcher.setAttribute('role', 'group');
+		switcher.setAttribute('aria-label', localize('optimusChrome.viewSwitcher', "Board view"));
+		const addSegment = (mode: OptimusViewMode, label: string): void => {
+			const button = append(switcher, $('button.optimus-view-switcher-segment')) as HTMLButtonElement;
+			button.type = 'button';
+			button.textContent = label;
+			this._register(addDisposableListener(button, EventType.CLICK, e => {
+				EventHelper.stop(e, true);
+				this.commandService.executeCommand(OPTIMUS_SET_VIEW_MODE_COMMAND_ID, mode);
+			}));
+			this.viewSwitcherButtons.set(mode, button);
+		};
+		addSegment('grid', localize('optimusChrome.view.grid', "Grid"));
+		addSegment('kanban', localize('optimusChrome.view.kanban', "Kanban"));
+
+		const newTaskButton = append(chrome, $('button.optimus-window-chrome-button.optimus-window-chrome-plus.codicon.codicon-add'));
+		newTaskButton.title = localize('optimusChrome.newTask', "New Chat");
+		newTaskButton.setAttribute('aria-label', newTaskButton.title);
+		this._register(addDisposableListener(newTaskButton, EventType.CLICK, e => {
+			EventHelper.stop(e, true);
+			this.commandService.executeCommand(OPTIMUS_NEW_SESSION_COMMAND_ID);
+		}));
 
 		this.secondaryButton = append(chrome, $('button.optimus-window-chrome-button.optimus-window-chrome-secondary.codicon'));
 		this.secondaryButton.title = localize('optimusChrome.toggleRightPanel', "Toggle right panel");
@@ -376,10 +405,21 @@ class OptimusChromeContribution extends Disposable implements IWorkbenchContribu
 		}));
 
 		this._register(this.layoutService.onDidChangePartVisibility(() => this.updateState()));
+		this._register(this.contextKeyService.onDidChangeContext(e => {
+			if (e.affectsSome(new Set([OPTIMUS_VIEW_MODE_CONTEXT_KEY.key]))) {
+				this.updateState();
+			}
+		}));
 		this.updateState();
 	}
 
 	private updateState(): void {
+		const viewMode = this.contextKeyService.getContextKeyValue<OptimusViewMode>(OPTIMUS_VIEW_MODE_CONTEXT_KEY.key) ?? 'grid';
+		for (const [mode, button] of this.viewSwitcherButtons) {
+			button.classList.toggle('active', viewMode === mode);
+			button.setAttribute('aria-pressed', String(viewMode === mode));
+		}
+
 		const sidebarVisible = this.layoutService.isVisible(Parts.SIDEBAR_PART);
 		this.sidebarButton.classList.toggle('codicon-layout-sidebar-left', sidebarVisible);
 		this.sidebarButton.classList.toggle('codicon-layout-sidebar-left-off', !sidebarVisible);

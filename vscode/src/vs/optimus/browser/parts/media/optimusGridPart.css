@@ -9,6 +9,7 @@
 	position: relative;
 	height: 100%;
 	width: 100%;
+	overflow: hidden;
 
 	/* Design tokens carried over from the original Optimus window styling. */
 	--optimus-card: var(--vscode-editorWidget-background, var(--vscode-sideBar-background));
@@ -45,6 +46,11 @@
 	padding-right: 10px;
 	box-sizing: border-box;
 	-webkit-app-region: drag;
+	/* Content scrolling in the panels passes under this strip; a translucent
+	   blur keeps the controls legible without a hard titlebar. */
+	background: color-mix(in srgb, var(--vscode-sideBar-background, #1e1e1e) 62%, transparent);
+	-webkit-backdrop-filter: blur(14px);
+	backdrop-filter: blur(14px);
 }
 
 /* Windows/Linux: there are no traffic lights at the left edge, and the native
@@ -139,15 +145,29 @@
 	opacity: 0.72;
 }
 
-.optimus-window-chrome-secondary {
+.optimus-window-chrome-switcher {
+	pointer-events: auto;
+	-webkit-app-region: no-drag;
+	margin-left: 6px;
+}
+
+.optimus-window-chrome-switcher .optimus-view-switcher-segment {
+	padding: 2px 10px;
+}
+
+.optimus-window-chrome-plus {
 	margin-left: auto;
+}
+
+.optimus-window-chrome-secondary {
+	margin-left: 0;
 }
 
 .optimus-grid {
 	display: grid;
 	/* Fixed 3x2 layout: six card slots per page, pagination beyond that. */
-	grid-template-columns: repeat(3, 1fr);
-	grid-template-rows: repeat(2, 1fr);
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	grid-template-rows: repeat(2, minmax(0, 1fr));
 	gap: 14px;
 	padding: 14px;
 	flex: 1;
@@ -649,7 +669,7 @@
 	min-width: 0;
 	gap: 12px;
 	padding: 12px 14px 14px;
-	overflow-x: auto;
+	overflow-x: hidden;
 }
 
 .optimus-grid-content.view-kanban .optimus-grid,
@@ -663,10 +683,13 @@
 
 .optimus-kanban-column {
 	flex: 1 1 0;
-	min-width: 210px;
+	min-width: 0;
 	min-height: 0;
 	display: flex;
 	flex-direction: column;
+	background: color-mix(in srgb, var(--vscode-foreground) 3.5%, transparent);
+	border-radius: 8px;
+	padding: 4px;
 }
 
 .optimus-kanban-column-header {
@@ -674,10 +697,12 @@
 	align-items: center;
 	gap: 7px;
 	flex-shrink: 0;
-	padding: 4px 4px 10px;
+	padding: 6px 8px 8px;
 	font-size: 12px;
 	font-weight: 600;
 	color: var(--vscode-foreground);
+	border-bottom: 1px solid color-mix(in srgb, var(--optimus-border) 40%, transparent);
+	margin-bottom: 6px;
 }
 
 .optimus-kanban-column-icon {
@@ -708,8 +733,8 @@
 	overflow-y: auto;
 	display: flex;
 	flex-direction: column;
-	gap: 12px;
-	padding: 2px;
+	gap: 10px;
+	padding: 4px;
 }
 
 .optimus-kanban-column-list .optimus-card {
@@ -805,43 +830,6 @@
 }
 
 
-/* --- Board header: segmented Grid | Kanban switcher ---------------------- */
-
-.optimus-board-header {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	flex-shrink: 0;
-	/* The window chrome overlays the top 38px as a drag region; the header
-	   must sit below it or clicks start a window drag instead. */
-	margin-top: 38px;
-	padding: 6px 14px 0;
-}
-
-.optimus-board-new-task {
-	width: 24px;
-	height: 24px;
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	border: 0;
-	border-radius: 5px;
-	background: transparent;
-	color: var(--vscode-icon-foreground);
-	font-size: 14px;
-	cursor: pointer;
-}
-
-.optimus-board-new-task:hover {
-	background: transparent;
-	color: var(--vscode-foreground);
-}
-
-.optimus-board-new-task:focus-visible {
-	outline: 1px solid var(--optimus-focus);
-	outline-offset: -1px;
-}
-
 .optimus-view-switcher {
 	display: inline-flex;
 	gap: 2px;
@@ -877,11 +865,11 @@
 	outline-offset: -1px;
 }
 
-/* The header supplies the top spacing now. */
+/* Clear the window chrome strip. */
 .optimus-grid {
-	padding-top: 12px;
+	padding-top: 48px;
 }
 
 .optimus-kanban {
-	padding-top: 12px;
+	padding-top: 48px;
 }
