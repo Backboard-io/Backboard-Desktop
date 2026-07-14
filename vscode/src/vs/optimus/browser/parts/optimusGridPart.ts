@@ -34,6 +34,7 @@ export const OPTIMUS_FOCUS_SESSION_COMMAND_ID = 'optimus.focusSession';
 export const OPTIMUS_DELETE_SESSION_COMMAND_ID = 'optimus.deleteSession';
 export const OPTIMUS_CLOSE_SESSION_COMMAND_ID = 'optimus.closeSession';
 export const OPTIMUS_TOGGLE_VIEW_MODE_COMMAND_ID = 'optimus.toggleViewMode';
+export const OPTIMUS_SET_VIEW_MODE_COMMAND_ID = 'optimus.setViewMode';
 
 export type OptimusViewMode = 'grid' | 'kanban';
 
@@ -114,7 +115,6 @@ export class OptimusGridPart extends Part {
 	private readonly kanbanColumns = new Map<KanbanBucket, IKanbanColumn>();
 	private viewMode: OptimusViewMode = 'grid';
 	private readonly viewModeContextKey;
-	private readonly viewSwitcherButtons = new Map<OptimusViewMode, HTMLButtonElement>();
 	/** Watches bound sessions' statuses so kanban re-buckets on transitions. */
 	private readonly statusWatchStore = this._register(new DisposableStore());
 	private readonly refreshScheduler = this._register(new RunOnceScheduler(() => this.refreshCards(), 50));
@@ -169,6 +169,7 @@ export class OptimusGridPart extends Part {
 		this.viewModeContextKey = OPTIMUS_VIEW_MODE_CONTEXT_KEY.bindTo(contextKeyService);
 		this.viewModeContextKey.set(this.viewMode);
 		this._register(CommandsRegistry.registerCommand(OPTIMUS_TOGGLE_VIEW_MODE_COMMAND_ID, () => this.toggleViewMode()));
+		this._register(CommandsRegistry.registerCommand(OPTIMUS_SET_VIEW_MODE_COMMAND_ID, (_accessor, mode: unknown) => this.setViewMode(mode === 'kanban' ? 'kanban' : 'grid')));
 
 		this._register(this.sessionsManagementService.onDidChangeSessions(() => this.refreshCards()));
 	}
@@ -185,15 +186,7 @@ export class OptimusGridPart extends Part {
 		this.storageService.store(VIEW_MODE_STORAGE_KEY, this.viewMode, StorageScope.PROFILE, StorageTarget.USER);
 		this.viewModeContextKey.set(this.viewMode);
 		this.contentAreaEl?.classList.toggle('view-kanban', this.viewMode === 'kanban');
-		this.updateViewSwitcher();
 		this.refreshCards();
-	}
-
-	private updateViewSwitcher(): void {
-		for (const [mode, button] of this.viewSwitcherButtons) {
-			button.classList.toggle('active', this.viewMode === mode);
-			button.setAttribute('aria-pressed', String(this.viewMode === mode));
-		}
 	}
 
 	private persistOpenSessions(): void {
@@ -255,30 +248,6 @@ export class OptimusGridPart extends Part {
 
 		this.progressBar = this._register(new ProgressBar(contentArea, defaultProgressBarStyles));
 		this.progressBar.hide();
-
-		// Board header: segmented Grid | Kanban switcher.
-		const boardHeader = append(contentArea, $('.optimus-board-header'));
-		const switcher = append(boardHeader, $('.optimus-view-switcher'));
-		switcher.setAttribute('role', 'group');
-		switcher.setAttribute('aria-label', localize('optimus.viewSwitcher', "Board view"));
-		const addSegment = (mode: OptimusViewMode, label: string): void => {
-			const button = append(switcher, $('button.optimus-view-switcher-segment')) as HTMLButtonElement;
-			button.type = 'button';
-			button.textContent = label;
-			this._register(addDisposableListener(button, EventType.CLICK, () => this.setViewMode(mode)));
-			this.viewSwitcherButtons.set(mode, button);
-		};
-		addSegment('grid', localize('optimus.view.grid', "Grid"));
-		addSegment('kanban', localize('optimus.view.kanban', "Kanban"));
-		this.updateViewSwitcher();
-
-		const newTaskButton = append(boardHeader, $('button.optimus-board-new-task.codicon.codicon-add')) as HTMLButtonElement;
-		newTaskButton.type = 'button';
-		newTaskButton.title = localize('optimus.board.newTask', "New Chat");
-		newTaskButton.setAttribute('aria-label', newTaskButton.title);
-		this._register(addDisposableListener(newTaskButton, EventType.CLICK, () => {
-			this.commandService.executeCommand(OPTIMUS_NEW_SESSION_COMMAND_ID);
-		}));
 
 		this.gridContainer = append(contentArea, $('.optimus-grid'));
 
