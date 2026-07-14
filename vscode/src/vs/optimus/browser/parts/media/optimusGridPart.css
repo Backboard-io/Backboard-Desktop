@@ -9,6 +9,7 @@
 	position: relative;
 	height: 100%;
 	width: 100%;
+	overflow: hidden;
 
 	/* Design tokens carried over from the original Optimus window styling. */
 	--optimus-card: var(--vscode-editorWidget-background, var(--vscode-sideBar-background));
@@ -146,8 +147,8 @@
 .optimus-grid {
 	display: grid;
 	/* Fixed 3x2 layout: six card slots per page, pagination beyond that. */
-	grid-template-columns: repeat(3, 1fr);
-	grid-template-rows: repeat(2, 1fr);
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	grid-template-rows: repeat(2, minmax(0, 1fr));
 	gap: 14px;
 	padding: 14px;
 	flex: 1;
@@ -649,7 +650,7 @@
 	min-width: 0;
 	gap: 12px;
 	padding: 12px 14px 14px;
-	overflow-x: auto;
+	overflow-x: hidden;
 }
 
 .optimus-grid-content.view-kanban .optimus-grid,
@@ -663,7 +664,7 @@
 
 .optimus-kanban-column {
 	flex: 1 1 0;
-	min-width: 210px;
+	min-width: 0;
 	min-height: 0;
 	display: flex;
 	flex-direction: column;
