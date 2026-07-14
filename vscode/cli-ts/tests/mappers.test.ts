@@ -33,6 +33,24 @@ describe("reasoning streaming", () => {
 	});
 });
 
+describe("pre-content phase status", () => {
+	it("maps prep/lifecycle frames to preparing/generating status", () => {
+		expect(mapStreamPayloadToEvents({ type: "message_received", phase: "stateless_prep" }))
+			.toEqual([{ kind: "status", phase: "preparing" }]);
+		expect(mapStreamPayloadToEvents({ type: "message_received", phase: "prep" }))
+			.toEqual([{ kind: "status", phase: "preparing" }]);
+		expect(mapStreamPayloadToEvents({ type: "run_started" }))
+			.toEqual([{ kind: "status", phase: "preparing" }]);
+		expect(mapStreamPayloadToEvents({ type: "message_start" }))
+			.toEqual([{ kind: "status", phase: "generating" }]);
+	});
+
+	it("still surfaces thread binding alongside a phase frame", () => {
+		expect(mapStreamPayloadToEvents({ type: "run_started", thread_id: "thr_1" }))
+			.toEqual([{ kind: "thread", threadId: "thr_1" }, { kind: "status", phase: "preparing" }]);
+	});
+});
+
 describe("mapStreamPayloadToEvents", () => {
 	it("maps a completed stream response", () => {
 		const events = mapStreamPayloadToEvents({

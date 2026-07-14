@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { localize } from '../../../../../nls.js';
+import { URI } from '../../../../../base/common/uri.js';
 import { IAgentCliSetupService } from '../agentCliSetup.js';
 import { IActionWidgetService } from '../../../../../platform/actionWidget/browser/actionWidget.js';
 import { IStorageService } from '../../../../../platform/storage/common/storage.js';
@@ -36,6 +37,7 @@ export class MobileSessionTypePicker extends SessionTypePicker {
 
 	constructor(
 		session: IObservable<ISession | undefined>,
+		fallbackFolder: (() => URI | undefined) | undefined,
 		@IActionWidgetService actionWidgetService: IActionWidgetService,
 		@ISessionsManagementService sessionsManagementService: ISessionsManagementService,
 		@ISessionsProvidersService private readonly _sessionsProvidersService: ISessionsProvidersService,
@@ -47,7 +49,7 @@ export class MobileSessionTypePicker extends SessionTypePicker {
 		@IAgentCliSetupService agentCliSetupService: IAgentCliSetupService,
 		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
 	) {
-		super(session, actionWidgetService, sessionsManagementService, _sessionsProvidersService, storageService, telemetryService, chatSessionsService, chatEntitlementService, languageModelsService, agentCliSetupService);
+		super(session, fallbackFolder, actionWidgetService, sessionsManagementService, _sessionsProvidersService, storageService, telemetryService, chatSessionsService, chatEntitlementService, languageModelsService, agentCliSetupService);
 	}
 
 	override render(container: HTMLElement, options?: { className?: string }): void {

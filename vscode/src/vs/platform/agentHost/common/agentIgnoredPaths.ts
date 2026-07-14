@@ -25,9 +25,28 @@ export const AGENT_IGNORED_DIRECTORIES: readonly string[] = [
 	'target',
 	'.next',
 	'.turbo',
+	'.build',
+	'notebook-out',
+];
+
+/**
+ * Build-state and OS-metadata files that land *next to* sources rather than
+ * inside an ignored directory, so the directory-segment check can't catch
+ * them: TypeScript incremental build state is written beside each tsconfig
+ * (e.g. `extensions/emmet/tsconfig.tsbuildinfo`), and Finder drops
+ * `.DS_Store` wherever a folder is browsed. A background build running
+ * during a turn creates/deletes dozens of these, which would otherwise
+ * flood the session step log with "Created tsconfig.tsbuildinfo" entries.
+ * Glob-shaped so they can feed file-watcher excludes directly.
+ */
+export const AGENT_IGNORED_FILE_GLOBS: readonly string[] = [
+	'**/*.tsbuildinfo',
+	'**/.DS_Store',
 ];
 
 const ignoredSegments = new Set(AGENT_IGNORED_DIRECTORIES);
+
+const IGNORED_FILE_PATTERN = /(?:\.tsbuildinfo|\/\.DS_Store)$/;
 
 /**
  * Matches the atomic-write temp files that editors and agent tooling create
@@ -46,10 +65,12 @@ const TEMP_WRITE_FILE_PATTERN = /(?:\.tmp\.\d+\.[0-9a-f]+|\.\d+\.\d+(?:\.[0-9a-f
 /**
  * Whether a slash-separated path should not be tracked as a user-visible file
  * edit: it either contains a segment from {@link AGENT_IGNORED_DIRECTORIES}
- * (VCS-internal or build/dependency output) or is an atomic-write temp file
- * (see {@link TEMP_WRITE_FILE_PATTERN}).
+ * (VCS-internal or build/dependency output), is a build-state/OS-metadata
+ * file (see {@link AGENT_IGNORED_FILE_GLOBS}), or is an atomic-write temp
+ * file (see {@link TEMP_WRITE_FILE_PATTERN}).
  */
 export function isIgnoredAgentPath(path: string): boolean {
 	return path.split('/').some(segment => ignoredSegments.has(segment))
+		|| IGNORED_FILE_PATTERN.test(path)
 		|| TEMP_WRITE_FILE_PATTERN.test(path);
 }

@@ -101,7 +101,7 @@ function createPicker(
 		getLanguageModelIds: () => [],
 		lookupLanguageModel: () => undefined,
 	});
-	return disposables.add(instantiationService.createInstance(TestSessionTypePicker, session));
+	return disposables.add(instantiationService.createInstance(TestSessionTypePicker, session, undefined));
 }
 
 // ---- Tests ------------------------------------------------------------------

@@ -86,6 +86,7 @@ import { ChatDisabledClaudeHooksContentPart } from './chatContentParts/chatDisab
 import { ChatMultiDiffContentPart } from './chatContentParts/chatMultiDiffContentPart.js';
 import { ChatProgressContentPart, ChatProgressSubPart, ChatWorkingProgressContentPart } from './chatContentParts/chatProgressContentPart.js';
 import { ChatPullRequestContentPart } from './chatContentParts/chatPullRequestContentPart.js';
+import { ChatWebPreviewContentPart } from './chatContentParts/chatWebPreviewContentPart.js';
 import { ChatQuotaExceededPart } from './chatContentParts/chatQuotaExceededPart.js';
 import { ChatCollapsibleListContentPart, ChatUsedReferencesListContentPart, CollapsibleListPool } from './chatContentParts/chatReferencesContentPart.js';
 import { ChatTaskContentPart } from './chatContentParts/chatTaskContentPart.js';
@@ -2349,6 +2350,8 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 				return this.renderExtensionsContent(content, context, templateData);
 			} else if (content.kind === 'pullRequest') {
 				return this.renderPullRequestContent(content, context, templateData);
+			} else if (content.kind === 'webPreview') {
+				return this.instantiationService.createInstance(ChatWebPreviewContentPart, content, context);
 			} else if (content.kind === 'undoStop') {
 				return this.renderUndoStop(content);
 			} else if (content.kind === 'errorDetails') {

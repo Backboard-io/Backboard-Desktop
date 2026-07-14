@@ -131,6 +131,7 @@ export class SessionTypePicker extends Disposable {
 
 	constructor(
 		private readonly _session: IObservable<ISession | undefined>,
+		private readonly _fallbackFolder: (() => URI | undefined) | undefined,
 		@IActionWidgetService private readonly actionWidgetService: IActionWidgetService,
 		@ISessionsManagementService private readonly sessionsManagementService: ISessionsManagementService,
 		@ISessionsProvidersService private readonly sessionsProvidersService: ISessionsProvidersService,
@@ -147,18 +148,21 @@ export class SessionTypePicker extends Disposable {
 		this._picked = this._readStoredPick();
 
 		const refresh = (session: ISession | undefined, workspace = session?.workspace.get()) => {
+			// Sessionless surfaces (the Simple window's new chat creates its
+			// session lazily on first send) fall back to the host-provided
+			// folder so the picker stays functional without a session.
+			const folderUri = workspace?.folders[0]?.root ?? this._fallbackFolder?.();
+			this._folderSessionTypes = this._filterAllowedSessionTypes(folderUri ? this.sessionsManagementService.getSessionTypesForFolder(folderUri) : []);
 			if (session) {
-				const folderUri = workspace?.folders[0]?.root;
-				this._folderSessionTypes = this._filterAllowedSessionTypes(folderUri ? this.sessionsManagementService.getSessionTypesForFolder(folderUri) : []);
 				// Reflect the active session's type in the trigger label, but do
 				// not persist it: the stored preference must only change when the
 				// user explicitly picks a type via the picker.
 				this._picked = { providerId: session.providerId, sessionTypeId: session.sessionType };
 			} else {
-				this._folderSessionTypes = [];
-				// Preserve the stored pick when no active session exists,
-				// so it can be used as the default for the next new session.
-				this._picked = this._readStoredPick();
+				// Preserve the stored pick when no active session exists (so it
+				// seeds the next new session); keep the previous in-memory pick
+				// when nothing is stored rather than blanking the trigger.
+				this._picked = this._readStoredPick() ?? this._picked;
 			}
 			this._updateTriggerLabel();
 		};
@@ -328,15 +332,13 @@ export class SessionTypePicker extends Disposable {
 		}
 
 		const session = this._session.get();
-		if (!session) {
-			return;
-		}
 
 		// Recompute types fresh at open time so a late-registering provider
 		// (e.g. Local Agent Host whose session types are populated only after
 		// agent discovery) shows up without waiting for the refresh event to
-		// land before the user clicks.
-		const folderUri = session.workspace.get()?.folders[0]?.root;
+		// land before the user clicks. Sessionless new-chat surfaces resolve
+		// through the fallback folder instead.
+		const folderUri = session?.workspace.get()?.folders[0]?.root ?? this._fallbackFolder?.();
 		const folderTypes = folderUri
 			? this._filterAllowedSessionTypes(this.sessionsManagementService.getSessionTypesForFolder(folderUri))
 			: this._folderSessionTypes;
@@ -600,7 +602,8 @@ export class SessionTypePicker extends Disposable {
 		this._triggerElement.classList.remove('hidden');
 		const currentType = this._folderSessionTypes.find(t =>
 			t.providerId === this._picked?.providerId && t.sessionType.id === this._picked?.sessionTypeId)?.sessionType
-			?? this._folderSessionTypes.find(t => t.sessionType.id === this._picked?.sessionTypeId)?.sessionType;
+			?? this._folderSessionTypes.find(t => t.sessionType.id === this._picked?.sessionTypeId)?.sessionType
+			?? (this._picked ? undefined : this._folderSessionTypes[0]?.sessionType);
 		// While the folder's session types are still resolving, render the
 		// stored pick with its well-known branding instead of the raw id +
 		// generic terminal glyph — the advertised type replaces this on the

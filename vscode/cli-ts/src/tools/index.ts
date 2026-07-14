@@ -23,6 +23,7 @@ import { ExecuteTool } from "./ExecuteTool.tsx";
 import { FetchUrlTool } from "./FetchUrlTool.tsx";
 import { GlobTool } from "./GlobTool.tsx";
 import { GrepTool } from "./GrepTool.tsx";
+import { OpenPreviewTool } from "./OpenPreviewTool.tsx";
 import { ReadTool } from "./ReadTool.tsx";
 import { TodoWriteTool } from "./TodoWriteTool.tsx";
 import { WebSearchTool } from "./WebSearchTool.tsx";
@@ -43,6 +44,7 @@ function createBaseTools(): Tool[] {
 		new TodoWriteTool(),
 		new ComputerTool(),
 		new BrowserTool(),
+		new OpenPreviewTool(),
 	];
 }
 

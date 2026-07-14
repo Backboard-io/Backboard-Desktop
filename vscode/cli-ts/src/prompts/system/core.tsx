@@ -26,6 +26,7 @@ Guidelines:
 - Never retry tool calls that were cancelled by the user, unless user explicitly asks you to do so.`,
 		clarificationGuidance(context),
 		autonomousFallbackGuidance(context),
+		previewGuidance(context),
 		factoryDocsGuidance(context),
 		`Focus on the task at hand, don't try to jump to related but not requested tasks.
 Once you are done with the task, you can summarize the changes you made in a 1-4 sentences, don't go into too much detail.
@@ -63,6 +64,11 @@ Before completing the task, always verify that the code you generated works as e
 function clarificationGuidance(context: PromptContext): string {
 	if (!hasTool(context, "AskUser")) return "";
 	return "- When you need clarification from the user, ALWAYS use the ask_user tool instead of asking questions in plain text. ask_user provides a structured questionnaire format that ensures you get clear, actionable answers. Do not ask questions in regular text messages - use ask_user for all clarification needs.";
+}
+
+function previewGuidance(context: PromptContext): string {
+	if (!hasTool(context, "OpenPreview")) return "";
+	return "- As soon as a local dev server reports its URL (e.g. after `npm run dev` or `python -m http.server`), call the open_preview tool with that URL so the user gets a live preview of the app. Call it once per app, again only if the app moves to a different port.";
 }
 
 function autonomousFallbackGuidance(context: PromptContext): string {

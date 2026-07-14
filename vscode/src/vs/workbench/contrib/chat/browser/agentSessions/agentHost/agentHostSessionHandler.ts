@@ -63,7 +63,7 @@ import { IAgentHostActiveClientService } from './agentHostActiveClientService.js
 import { IAgentHostSessionWorkingDirectoryResolver } from './agentHostSessionWorkingDirectoryResolver.js';
 import { IAgentHostNewSessionFolderService } from './agentHostNewSessionFolderService.js';
 import { fromAgentHostUri, toAgentHostUri } from '../../../../../../platform/agentHost/common/agentHostUri.js';
-import { AGENT_IGNORED_DIRECTORIES, isIgnoredAgentPath } from '../../../../../../platform/agentHost/common/agentIgnoredPaths.js';
+import { AGENT_IGNORED_DIRECTORIES, AGENT_IGNORED_FILE_GLOBS, isIgnoredAgentPath } from '../../../../../../platform/agentHost/common/agentIgnoredPaths.js';
 import { hydrateUncoveredTurnEdit, resolveTurnRepoInfo, type ITurnRepoInfo, type ReadTextFn } from './agentHostTurnFsEdits.js';
 import { AgentHostSnapshotController } from './agentHostSnapshotController.js';
 import { toolDataToDefinition } from './agentHostToolUtils.js';
@@ -1362,7 +1362,10 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 		// this turn. VCS internals and build output are excluded — a git
 		// commit/worktree operation during the turn writes loose objects and
 		// temp files under `.git/**` that must never surface as file edits.
-		const watcherExcludes = AGENT_IGNORED_DIRECTORIES.map(directory => `**/${directory}/**`);
+		const watcherExcludes = [
+			...AGENT_IGNORED_DIRECTORIES.map(directory => `**/${directory}/**`),
+			...AGENT_IGNORED_FILE_GLOBS,
+		];
 		const watcherDisposables = workspaceFileUris.map(root =>
 			this._fileService.watch(root, { recursive: true, excludes: watcherExcludes })
 		);

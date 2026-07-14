@@ -357,7 +357,7 @@ export class NewChatWidget extends Disposable {
 			return activeSession;
 		});
 
-		this._sessionTypePicker = this._register(this.instantiationService.createInstance(SessionTypePicker, this._session));
+		this._sessionTypePicker = this._register(this.instantiationService.createInstance(SessionTypePicker, this._session, () => this._workspacePicker.selectedFolderUri));
 		this._sessionTypePicker.setAllowedSessionTypeIds(NEW_CHAT_ALLOWED_SESSION_TYPES);
 
 		const scopedContextKeyService = this._register(contextKeyService.createScoped(document.createElement('div')));

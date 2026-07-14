@@ -29,6 +29,11 @@ const OVERLAY_DEFINITIONS: ReadonlyArray<{ className: string; type: BrowserOverl
 	{ className: 'monaco-modal-editor-block', type: BrowserOverlayType.Dialog },
 	{ className: 'notifications-center', type: BrowserOverlayType.Notification },
 	{ className: 'notification-toast-container', type: BrowserOverlayType.Notification },
+	// The right workbench's custom "+" mode-picker dropdown (vs/sessions
+	// rightWorkbenchViewPane, referenced by class name because workbench code
+	// must not import from vs/sessions) — rendered as plain DOM over the pane,
+	// so the native browser view must yield to it like any other menu.
+	{ className: 'sessions-right-workbench-mode-picker', type: BrowserOverlayType.Menu },
 	// Context view is very generic, so treat the content as unknown
 	{ className: 'context-view', type: BrowserOverlayType.Unknown }
 ];

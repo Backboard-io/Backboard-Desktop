@@ -33,9 +33,14 @@ suite('agentHostTurnFsEdits', () => {
 				vscTmp: isIgnoredAgentPath('/repo/src/AgentController.ts.vsctmp'),
 				bunBuildTmp: isIgnoredAgentPath('/repo/cli-ts/.18bf259f3f2fcae3-00000000.bun-build'),
 				codesignTmp: isIgnoredAgentPath('/repo/bin/backboard-cli-ts.cstemp'),
+				tsBuildInfo: isIgnoredAgentPath('/repo/extensions/emmet/tsconfig.tsbuildinfo'),
+				notebookOut: isIgnoredAgentPath('/repo/extensions/markdown-math/notebook-out/fonts/KaTeX_Main-Bold.woff2'),
+				dotBuild: isIgnoredAgentPath('/repo/.build/extensions/foo.js'),
+				dsStore: isIgnoredAgentPath('/repo/src/.DS_Store'),
 				normalFile: isIgnoredAgentPath('/repo/src/EXTENSIONS_AND_RIGHT_PANEL.md'),
 				gitLikeName: isIgnoredAgentPath('/repo/src/gitHelpers.ts'),
 				normalTmpName: isIgnoredAgentPath('/repo/src/template.ts'),
+				buildInfoLikeName: isIgnoredAgentPath('/repo/src/tsbuildinfoParser.ts'),
 			}, {
 				gitObject: true,
 				gitTmp: true,
@@ -45,9 +50,14 @@ suite('agentHostTurnFsEdits', () => {
 				vscTmp: true,
 				bunBuildTmp: true,
 				codesignTmp: true,
+				tsBuildInfo: true,
+				notebookOut: true,
+				dotBuild: true,
+				dsStore: true,
 				normalFile: false,
 				gitLikeName: false,
 				normalTmpName: false,
+				buildInfoLikeName: false,
 			});
 		});
 	});

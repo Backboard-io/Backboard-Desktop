@@ -73,6 +73,13 @@ export class ProviderStreamConsumer {
 						});
 					}
 					break;
+				case "status":
+					// Pre-content pipeline phase — lets the host show a truthful
+					// live status ("Preparing…"/"Working…") during the silent
+					// send→first-token gap. Purely informational; never affects
+					// the pending action or turn outcome.
+					this.bus.emit({ type: "turn:status", phase: event.phase });
+					break;
 				case "assistant_delta":
 					if (event.text) assistant.appendDelta(event.text);
 					break;

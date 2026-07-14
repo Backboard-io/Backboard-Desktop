@@ -13,6 +13,7 @@ const BUILTIN_AGENT_NAMES: Record<string, string> = {
 	TodoWrite: "todo_write",
 	Computer: "computer",
 	Browser: "browser",
+	OpenPreview: "open_preview",
 	Agent: "agent",
 };
 

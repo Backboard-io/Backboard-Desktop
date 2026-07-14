@@ -39,7 +39,7 @@ import { getSubagentTranscript } from './claudeSubagentResolver.js';
 import { ClaudeAgentSession } from './claudeAgentSession.js';
 import { handleCanUseTool } from './claudeCanUseTool.js';
 import type { IAgentServerToolHost } from '../../common/agentServerTools.js';
-import { tryParseClaudeModelId } from './claudeModelId.js';
+import { tryParseClaudeModelId, type ParsedClaudeModelId } from './claudeModelId.js';
 import { resolvePromptToContentBlocks } from './claudePromptResolver.js';
 import { IClaudeProxyHandle, IClaudeProxyService } from './claudeProxyService.js';
 import { readClaudePermissionMode } from './claudeSessionPermissionMode.js';
@@ -150,6 +150,47 @@ const FALLBACK_CLAUDE_MODELS: ReadonlyArray<{
 // (pre-materialize fields: project, abortController, provisionalModel,
 // provisionalConfig). The legacy `IClaudeProvisionalSession` map shape
 // was retired in Phase 10.5 Step 3a.
+
+/**
+ * Current version shown for the SDK's version-less picker aliases
+ * ('sonnet' → "Sonnet 5"). The picker must always show versioned names;
+ * keep this in step with {@link FALLBACK_CLAUDE_MODELS} when Anthropic
+ * ships new model versions.
+ */
+const CLAUDE_ALIAS_VERSIONS: Record<string, string> = {
+	fable: 'Fable 5',
+	opus: 'Opus 4.8',
+	sonnet: 'Sonnet 5',
+	haiku: 'Haiku 4.5',
+};
+
+/**
+ * Builds a versioned human-readable model name ("Fable 5", "Opus 4.8",
+ * "Sonnet 4.6 (1M context)") from a parsed Claude model id. Ids that carry
+ * a version are formatted directly; version-less aliases resolve through
+ * {@link CLAUDE_ALIAS_VERSIONS}. Returns `undefined` for ids outside the
+ * known grammar (e.g. the `default` alias), which keep their SDK label.
+ */
+function friendlyClaudeModelName(parsed: ParsedClaudeModelId | undefined): string | undefined {
+	if (!parsed || !parsed.name) {
+		return undefined;
+	}
+	let base: string;
+	if (parsed.version) {
+		const family = parsed.name.charAt(0).toUpperCase() + parsed.name.slice(1);
+		base = `${family} ${parsed.version}`;
+	} else if (CLAUDE_ALIAS_VERSIONS[parsed.name]) {
+		base = CLAUDE_ALIAS_VERSIONS[parsed.name];
+	} else {
+		return undefined;
+	}
+	return parsed.modifiers.includes('1m') ? `${base} (1M context)` : base;
+}
+
+/** Whether a catalog entry is the SDK's plan-routed default alias. */
+function isDefaultCatalogEntry(model: IAgentModelInfo): boolean {
+	return model.id === 'default' || /^default\b/i.test(model.name);
+}
 
 /**
  * Phase 4 skeleton {@link IAgent} provider for the Claude Agent SDK.
@@ -309,21 +350,41 @@ export class ClaudeAgent extends Disposable implements IAgent {
 			if (!models || models.length === 0 || this._githubToken || this._sdkCatalogPublished) {
 				return;
 			}
-			const mapped = models.map((m): IAgentModelInfo => {
+			const mapped: IAgentModelInfo[] = [];
+			const seenIds = new Set<string>();
+			for (const m of models) {
 				const efforts = (m.supportedEffortLevels ?? []).filter(isClaudeEffortLevel);
 				const configSchema = createClaudeThinkingLevelSchema(efforts);
-				return {
+				const parsed = tryParseClaudeModelId(m.value);
+				// Canonical picker ids use the endpoint (dotted) format;
+				// unparseable ids (e.g. previews, the `default` alias) pass
+				// through unchanged and `toSdkModelId` leaves them untouched
+				// at the SDK seam.
+				const id = parsed?.toEndpointModelId() ?? m.value;
+				// The SDK can report the same model twice — once as its picker
+				// alias and once as the user's explicitly-configured raw id.
+				if (seenIds.has(id)) {
+					continue;
+				}
+				seenIds.add(id);
+				// Always show versioned names ("Fable 5", not "Fable" or
+				// `claude-fable-5`): prefer the name derived from the model id
+				// (or the alias-version table) over the SDK's short picker
+				// label. Entries outside the known grammar — notably the
+				// plan-routed "Default (recommended)" — keep their SDK label.
+				const name = friendlyClaudeModelName(parsed) ?? m.displayName ?? id;
+				mapped.push({
 					provider: this.id,
-					// Canonical picker ids use the endpoint (dotted) format;
-					// unparseable ids (e.g. previews) pass through unchanged
-					// and `toSdkModelId` leaves them untouched at the SDK seam.
-					id: tryParseClaudeModelId(m.value)?.toEndpointModelId() ?? m.value,
-					name: m.displayName,
+					id,
+					name,
 					supportsVision: true,
 					...(configSchema ? { configSchema } : {}),
 					_meta: { supportsFastMode: !!m.supportsFastMode, description: m.description },
-				};
-			});
+				});
+			}
+			// Keep the plan-routed default first so it stays the picker's
+			// preselection, then the SDK's own order.
+			mapped.sort((a, b) => Number(isDefaultCatalogEntry(b)) - Number(isDefaultCatalogEntry(a)));
 			this._sdkCatalogPublished = true;
 			this._logService.info(`[Claude] Models refreshed from SDK account catalog. Count: ${mapped.length}`);
 			this._models.set(mapped, undefined);

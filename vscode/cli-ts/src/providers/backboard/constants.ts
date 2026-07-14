@@ -21,6 +21,13 @@ export const CHAT_PROVIDER_PRIORITY = [
 
 export const BACKBOARD_STREAM_EVENTS = {
 	userMessage: "user_message",
+	// Server-side pipeline phase frames emitted before the model produces any
+	// content. Surfaced as `status` provider events so the host can show a
+	// truthful "Preparing…/Working…" indicator during the otherwise-silent
+	// send→first-token gap instead of a static placeholder.
+	messageReceived: "message_received",
+	runStarted: "run_started",
+	messageStart: "message_start",
 	contentStreaming: "content_streaming",
 	reasoningStreaming: "reasoning_streaming",
 	reasoningDelta: "reasoning_delta",

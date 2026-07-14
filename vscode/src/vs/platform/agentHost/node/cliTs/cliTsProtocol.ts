@@ -89,6 +89,8 @@ export interface CliTsAgentEvent {
 	readonly sessionId?: string;
 	readonly threadId?: string | null;
 	readonly text?: string;
+	/** Coarse pre-content turn phase, carried by `turn:status` events. */
+	readonly phase?: 'preparing' | 'generating';
 	readonly turnId?: string;
 	readonly messageId?: string;
 	readonly toolCallId?: string;

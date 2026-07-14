@@ -218,6 +218,20 @@ export class RightWorkbenchViewPane extends ViewPane {
 		this.isRightWorkbenchVisible = visible;
 		if (visible) {
 			this.activateSingleSurface();
+			// Restore the active tab's native browser view. The browser editor
+			// lives in the embedded modal editor part, which is not part of the
+			// view-pane visibility chain — it never re-shows the view on its own.
+			const activeInput = this.activeTab?.browserInput;
+			if (this.activeTab?.mode === 'browser' && activeInput?.model) {
+				void activeInput.model.setVisible(true);
+			}
+		} else {
+			// The native WebContentsView paints above all workbench DOM. Hide
+			// every view when the pane goes away (e.g. the New Chat page), or
+			// it keeps floating over whatever replaced us.
+			for (const input of this.browserViewWorkbenchService.getKnownBrowserViews().values()) {
+				void input.model?.setVisible(false);
+			}
 		}
 	}
 
@@ -556,6 +570,10 @@ export class RightWorkbenchViewPane extends ViewPane {
 		this.closeModePicker();
 		anchor.setAttribute('aria-expanded', 'true');
 
+		// The class name is registered with the browser view overlay manager
+		// (browserView/electron-browser/overlayManager.ts) so the native
+		// WebContentsView hides while the picker is open — without that the
+		// browser paints over the popup. Keep the names in sync.
 		const picker = append(root, $('.sessions-right-workbench-mode-picker'));
 		picker.setAttribute('role', 'menu');
 		const rootRect = root.getBoundingClientRect();

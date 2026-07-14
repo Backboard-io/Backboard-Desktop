@@ -18,6 +18,7 @@ import { Schemas } from '../../../../base/common/network.js';
 import { IBrowserViewCDPService, IBrowserViewWorkbenchService } from '../common/browserView.js';
 import { BrowserViewWorkbenchService } from './browserViewWorkbenchService.js';
 import { BrowserViewCDPService } from './browserViewCDPService.js';
+import { ChatWebPreviewTracker } from '../../chat/browser/chatWebPreviewTracker.js';
 
 // Register actions and browser features
 import './features/webContentsViewRendererFeature.js';
@@ -97,6 +98,7 @@ class BrowserEditorResolverContribution implements IWorkbenchContribution {
 }
 
 registerWorkbenchContribution2(BrowserEditorResolverContribution.ID, BrowserEditorResolverContribution, WorkbenchPhase.BlockStartup);
+registerWorkbenchContribution2(ChatWebPreviewTracker.ID, ChatWebPreviewTracker, WorkbenchPhase.AfterRestored);
 
 registerSingleton(IBrowserViewWorkbenchService, BrowserViewWorkbenchService, InstantiationType.Delayed);
 registerSingleton(IBrowserViewCDPService, BrowserViewCDPService, InstantiationType.Delayed);

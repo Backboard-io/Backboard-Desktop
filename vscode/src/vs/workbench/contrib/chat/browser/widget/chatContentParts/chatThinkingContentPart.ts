@@ -436,6 +436,8 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 	private hasExpandedOnce: boolean = false;
 	private workingSpinnerElement: HTMLElement | undefined;
 	private workingSpinnerLabel: HTMLElement | undefined;
+	/** The spinner phrase / active-tool label without the live elapsed suffix. */
+	private workingSpinnerBaseText: string | undefined;
 	private availableMessagesByCategory = new Map<WorkingMessageCategory, string[]>();
 	private readonly toolWrappersByCallId = new Map<string, HTMLElement>();
 	private readonly toolIconsByCallId = new Map<string, HTMLElement>();
@@ -562,6 +564,9 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 					return;
 				}
 				this.updateElapsedIndicator();
+				// Keep the in-thinking spinner ticking too, so it never looks
+				// frozen on a static phrase while the model reasons silently.
+				this.renderWorkingSpinnerLabel();
 			}, 1000);
 		}
 
@@ -700,7 +705,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			const spinnerIcon = createThinkingIcon(Codicon.circleFilled);
 			this.workingSpinnerElement.appendChild(spinnerIcon);
 			this.workingSpinnerLabel = $('span.chat-thinking-spinner-label');
-			this.workingSpinnerLabel.textContent = this.getRandomWorkingMessage(WorkingMessageCategory.Thinking);
+			this.setWorkingSpinnerBase(this.getRandomWorkingMessage(WorkingMessageCategory.Thinking));
 			this.workingSpinnerElement.appendChild(this.workingSpinnerLabel);
 			this.wrapper.appendChild(this.workingSpinnerElement);
 			this.updateWorkingSpinnerVisibility();
@@ -1239,7 +1244,37 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		if (!this.workingSpinnerLabel) {
 			return;
 		}
-		this.workingSpinnerLabel.textContent = this.getActiveToolLabel() ?? this.getRandomWorkingMessage(category);
+		this.setWorkingSpinnerBase(this.getActiveToolLabel() ?? this.getRandomWorkingMessage(category));
+	}
+
+	/** Records the current spinner phrase (or active-tool label) and repaints it with the live elapsed. */
+	private setWorkingSpinnerBase(text: string): void {
+		this.workingSpinnerBaseText = text;
+		this.renderWorkingSpinnerLabel();
+	}
+
+	/**
+	 * Repaints the working spinner as "<phrase> · <elapsed>" while the run is
+	 * live, so the row always shows the ticking elapsed time — it never sits
+	 * frozen on a static phrase when the model is reasoning silently with
+	 * nothing to stream. The phrase (a running tool's label, e.g. "Reading
+	 * package.json", or a category phrase) is preserved; only the trailing
+	 * elapsed is refreshed on each 1s timer tick. Once complete, the suffix is
+	 * dropped so finalized rows read cleanly.
+	 */
+	private renderWorkingSpinnerLabel(): void {
+		if (!this.workingSpinnerLabel) {
+			return;
+		}
+		const base = this.workingSpinnerBaseText ?? '';
+		if (this.wasStreamingLive && !this.streamingCompleted && !this.element.isComplete) {
+			const elapsed = formatThinkingElapsed(this.getElapsedMs());
+			this.workingSpinnerLabel.textContent = base
+				? localize('chat.thinking.spinnerElapsed', "{0} · {1}", base, elapsed)
+				: elapsed;
+		} else {
+			this.workingSpinnerLabel.textContent = base;
+		}
 	}
 
 	// --- Codex-style activity groups -------------------------------------------------
@@ -2325,7 +2360,7 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 						if (this.workingSpinnerLabel) {
 							const activeLabel = this.getActiveToolLabel();
 							if (activeLabel) {
-								this.workingSpinnerLabel.textContent = activeLabel;
+								this.setWorkingSpinnerBase(activeLabel);
 							}
 						}
 						this.refreshActivityGroupForTool(toolCallId);

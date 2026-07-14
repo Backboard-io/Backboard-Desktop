@@ -1,0 +1,135 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.chat-web-preview-part {
+	border: 1px solid var(--vscode-chat-requestBorder, var(--vscode-editorWidget-border));
+	border-radius: var(--vscode-cornerRadius-large, 8px);
+	margin: 8px 0;
+	max-width: 480px;
+	overflow: hidden;
+	background-color: var(--vscode-editorWidget-background);
+}
+
+.chat-web-preview-part .chat-web-preview-thumbnail {
+	display: block;
+	width: 100%;
+	height: 160px;
+	padding: 0;
+	margin: 0;
+	border: none;
+	border-bottom: 1px solid var(--vscode-chat-requestBorder, var(--vscode-editorWidget-border));
+	background: none;
+	cursor: pointer;
+}
+
+.chat-web-preview-part .chat-web-preview-thumbnail:disabled {
+	cursor: default;
+	opacity: 0.6;
+}
+
+.chat-web-preview-part .chat-web-preview-thumbnail-image {
+	width: 100%;
+	height: 100%;
+	background-size: cover;
+	background-position: top center;
+	background-repeat: no-repeat;
+	background-color: color-mix(in srgb, var(--vscode-foreground) 6%, transparent);
+}
+
+/* Skeleton shimmer until the first capture lands. */
+.chat-web-preview-part:not(.has-thumbnail) .chat-web-preview-thumbnail-image {
+	animation: chat-web-preview-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes chat-web-preview-pulse {
+	0%, 100% { opacity: 1; }
+	50% { opacity: 0.55; }
+}
+
+.chat-web-preview-part .chat-web-preview-footer {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 10px;
+}
+
+.chat-web-preview-part .chat-web-preview-info {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	flex: 1;
+	min-width: 0;
+}
+
+.chat-web-preview-part .chat-web-preview-title-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+}
+
+.chat-web-preview-part .chat-web-preview-favicon {
+	width: 16px;
+	height: 16px;
+	flex-shrink: 0;
+}
+
+.chat-web-preview-part .chat-web-preview-favicon-fallback {
+	display: flex;
+	align-items: center;
+	flex-shrink: 0;
+	color: var(--vscode-descriptionForeground);
+}
+
+.chat-web-preview-part .chat-web-preview-title {
+	font-weight: 600;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.chat-web-preview-part .chat-web-preview-subtitle {
+	color: var(--vscode-descriptionForeground);
+	font-size: 12px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.chat-web-preview-part.stopped .chat-web-preview-subtitle {
+	opacity: 0.8;
+	font-style: italic;
+}
+
+.chat-web-preview-part .chat-web-preview-actions {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	flex-shrink: 0;
+}
+
+.chat-web-preview-part .chat-web-preview-actions .monaco-button {
+	width: initial;
+	padding: 2px 10px;
+}
+
+.chat-web-preview-part .chat-web-preview-more {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 22px;
+	height: 22px;
+	padding: 0;
+	margin: 0;
+	border: none;
+	border-radius: var(--vscode-cornerRadius-small, 4px);
+	background: none;
+	color: var(--vscode-foreground);
+	cursor: pointer;
+}
+
+.chat-web-preview-part .chat-web-preview-more:hover {
+	background-color: var(--vscode-toolbar-hoverBackground);
+}

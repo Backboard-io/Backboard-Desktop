@@ -4,19 +4,23 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Codicon } from '../../../../base/common/codicons.js';
-import { IntervalTimer } from '../../../../base/common/async.js';
 import { DisposableStore } from '../../../../base/common/lifecycle.js';
-import { URI } from '../../../../base/common/uri.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
+import { URI } from '../../../../base/common/uri.js';
+import { Event } from '../../../../base/common/event.js';
 import { localize } from '../../../../nls.js';
 import { IAgentHostService } from '../../../../platform/agentHost/common/agentService.js';
+import type { RootState } from '../../../../platform/agentHost/common/state/protocol/state.js';
+import { IDialogService } from '../../../../platform/dialogs/common/dialogs.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
-import { IFileService } from '../../../../platform/files/common/files.js';
-import { INotificationService, Severity } from '../../../../platform/notification/common/notification.js';
-import { TerminalCapability } from '../../../../platform/terminal/common/capabilities/capabilities.js';
-import { ITerminalService } from '../../../../workbench/contrib/terminal/browser/terminal.js';
+import { INotificationService } from '../../../../platform/notification/common/notification.js';
+import { IOpenerService } from '../../../../platform/opener/common/opener.js';
+import { IProgressService, ProgressLocation } from '../../../../platform/progress/common/progress.js';
+import { IQuickInputService } from '../../../../platform/quickinput/common/quickInput.js';
+import { ITerminalService, type ITerminalInstance } from '../../../../workbench/contrib/terminal/browser/terminal.js';
+import { IHostService } from '../../../../workbench/services/host/browser/host.js';
 import { IPathService } from '../../../../workbench/services/path/common/pathService.js';
 
 /** An agent CLI the user can set up with one click from the session-type picker. */
@@ -30,68 +34,79 @@ export interface IAgentCliSetupCandidate {
 }
 
 interface IAgentCliSetupDefinition extends IAgentCliSetupCandidate {
-	/** Single shell line run in the integrated terminal to install + log in. */
+	/** Shell line executed invisibly to install (and, where possible, sign in). */
 	readonly command: string;
+	/** Dialog detail explaining what Install will do. */
+	readonly installDetail: string;
 	/** Notification shown once the agent is enabled. */
 	readonly readyMessage: string;
-	/** Binary name to poll for as the install-completion fallback. */
-	readonly binaryName: string;
+	/**
+	 * Whether the CLI's sign-in hands the user a code to paste back
+	 * (Claude's out-of-band OAuth). When set, the runner watches the hidden
+	 * process output for the sign-in URL, opens it in the browser, and
+	 * collects the code through a quick input instead of a terminal.
+	 */
+	readonly pasteBackSignIn?: boolean;
 }
 
 /**
  * Subscription-native agents the picker can offer to set up when their
- * provider is not registered. Install goes through npm so the one-liner is
- * identical across platforms; the terminal keeps the whole run visible
- * (including each vendor's own browser-based login).
+ * provider is not registered. The install runs in a hidden shell — the user
+ * only sees the Install dialog, a progress notification, and (for vendors
+ * that need it) their browser's sign-in page.
  */
 const SETUP_DEFINITIONS: readonly IAgentCliSetupDefinition[] = [
 	{
 		id: 'claude',
 		label: 'Claude',
 		icon: Codicon.claude,
-		description: localize('agentSetup.claude.description', "Uses your Claude Pro/Max subscription"),
-		command: `npm install -g @anthropic-ai/claude-code && claude setup-token`,
+		description: localize('agentSetup.claude.description', "Sign in to use your Claude Pro/Max subscription"),
+		installDetail: localize('agentSetup.claude.detail', "Backboard will install the Claude CLI and open your browser to sign in with your Claude account. New sessions bill to your existing Claude subscription."),
+		command: `npm install -g @anthropic-ai/claude-code && claude auth login --claudeai`,
 		readyMessage: localize('agentSetup.claude.ready', "Claude is ready — new sessions bill to your Claude subscription."),
-		binaryName: 'claude',
+		pasteBackSignIn: true,
 	},
 	{
 		id: 'codex',
 		label: 'Codex',
 		icon: Codicon.openai,
-		description: localize('agentSetup.codex.description', "Uses your ChatGPT subscription"),
+		description: localize('agentSetup.codex.description', "Sign in to use your ChatGPT subscription"),
+		installDetail: localize('agentSetup.codex.detail', "Backboard will install the Codex CLI and open your browser to sign in with your ChatGPT account. New sessions bill to your existing ChatGPT plan."),
 		command: `npm install -g @openai/codex && codex login`,
 		readyMessage: localize('agentSetup.codex.ready', "Codex is ready — new sessions bill to your ChatGPT plan."),
-		binaryName: 'codex',
 	},
 	{
 		id: 'opencode',
 		label: 'OpenCode',
 		icon: Codicon.circuitBoard,
 		description: localize('agentSetup.opencode.description', "Free models included, no account needed"),
+		installDetail: localize('agentSetup.opencode.detail', "Backboard will install the OpenCode CLI. Free models work immediately — no account needed."),
 		command: `npm install -g opencode-ai`,
-		readyMessage: localize('agentSetup.opencode.ready', "OpenCode is ready — free models work now; run 'opencode auth login' in a terminal to add more providers."),
-		binaryName: 'opencode',
+		readyMessage: localize('agentSetup.opencode.ready', "OpenCode is ready — free models work now."),
 	},
 ];
+
+/** Matches the vendor OAuth URL in CLI sign-in output. */
+const SIGN_IN_URL_RE = /https:\/\/\S*(?:oauth|authorize)\S*/i;
+
+const INSTALL_TIMEOUT_MS = 10 * 60_000;
+const REGISTRATION_TIMEOUT_MS = 10_000;
 
 export const IAgentCliSetupService = createDecorator<IAgentCliSetupService>('agentCliSetupService');
 
 /**
  * One-click install for subscription-native agent CLIs. The session-type
  * picker lists {@link getSetupCandidates} for providers the agent host has
- * not registered; {@link beginSetup} opens the integrated terminal with the
- * install command and, once the command finishes (or the user confirms via
- * the fallback notification), restarts the agent host so the new provider
- * registers without an app restart.
+ * not registered; {@link beginSetup} runs the whole flow: a confirm dialog
+ * with an Install button, a hidden install + vendor sign-in, an automatic
+ * agent-host restart, and — only if the agent still hasn't appeared — a
+ * simple restart-IDE popup.
  */
 export interface IAgentCliSetupService {
 	readonly _serviceBrand: undefined;
 	getSetupCandidates(registeredTypeIds: ReadonlySet<string>): IAgentCliSetupCandidate[];
 	beginSetup(id: string): Promise<void>;
 }
-
-const SETUP_POLL_INTERVAL_MS = 3_000;
-const SETUP_POLL_TIMEOUT_MS = 15 * 60_000;
 
 export class AgentCliSetupService implements IAgentCliSetupService {
 
@@ -103,25 +118,15 @@ export class AgentCliSetupService implements IAgentCliSetupService {
 	constructor(
 		@ITerminalService private readonly _terminalService: ITerminalService,
 		@IAgentHostService private readonly _agentHostService: IAgentHostService,
+		@IDialogService private readonly _dialogService: IDialogService,
+		@IProgressService private readonly _progressService: IProgressService,
+		@IQuickInputService private readonly _quickInputService: IQuickInputService,
+		@IOpenerService private readonly _openerService: IOpenerService,
 		@INotificationService private readonly _notificationService: INotificationService,
+		@IHostService private readonly _hostService: IHostService,
 		@IPathService private readonly _pathService: IPathService,
-		@IFileService private readonly _fileService: IFileService,
 		@ILogService private readonly _logService: ILogService,
 	) { }
-
-	private async _binaryPresent(dirs: readonly URI[], name: string): Promise<boolean> {
-		for (const dir of dirs) {
-			try {
-				const stat = await this._fileService.stat(dir.with({ path: `${dir.path}/${name}` }));
-				if (stat.isFile || stat.isSymbolicLink) {
-					return true;
-				}
-			} catch {
-				// keep scanning
-			}
-		}
-		return false;
-	}
 
 	getSetupCandidates(registeredTypeIds: ReadonlySet<string>): IAgentCliSetupCandidate[] {
 		return SETUP_DEFINITIONS.filter(d => !registeredTypeIds.has(d.id));
@@ -135,113 +140,149 @@ export class AgentCliSetupService implements IAgentCliSetupService {
 		this._inFlight.add(id);
 		try {
 			await this._runSetup(definition);
+		} catch (err) {
+			this._logService.error(`[AgentCliSetup] ${id} setup failed`, err);
+			this._notificationService.error(localize('agentSetup.failed', "{0} could not be installed: {1}", definition.label, err instanceof Error ? err.message : String(err)));
 		} finally {
 			this._inFlight.delete(id);
 		}
 	}
 
 	private async _runSetup(definition: IAgentCliSetupDefinition): Promise<void> {
+		// 1. Clean confirm dialog — the primary button is the Install button.
+		const { confirmed } = await this._dialogService.confirm({
+			message: localize('agentSetup.confirmTitle', "Install {0}?", definition.label),
+			detail: definition.installDetail,
+			primaryButton: localize('agentSetup.installButton', "Install"),
+		});
+		if (!confirmed) {
+			return;
+		}
+
+		// 2. Hidden install + sign-in under a progress notification.
+		const exitCode = await this._progressService.withProgress({
+			location: ProgressLocation.Notification,
+			title: localize('agentSetup.installing', "Installing {0}…", definition.label),
+			sticky: true,
+		}, () => this._runHidden(definition));
+
+		if (exitCode !== 0) {
+			this._notificationService.error(localize('agentSetup.exitFailed', "{0} setup did not complete (exit code {1}). Try again, or install it from a terminal with: {2}", definition.label, exitCode, definition.command));
+			return;
+		}
+
+		// 3. Silent agent-host restart so the new provider registers.
+		try {
+			await this._agentHostService.restartAgentHost();
+		} catch (err) {
+			this._logService.error(`[AgentCliSetup] agent host restart failed after ${definition.id} setup`, err);
+		}
+
+		// 4. Verify the provider actually appeared; if not, one simple popup.
+		if (await this._waitForRegistration(definition.id)) {
+			this._notificationService.info(definition.readyMessage);
+			return;
+		}
+		const { confirmed: restart } = await this._dialogService.confirm({
+			message: localize('agentSetup.restartTitle', "{0} is installed", definition.label),
+			detail: localize('agentSetup.restartDetail', "Restart Backboard to finish enabling {0}.", definition.label),
+			primaryButton: localize('agentSetup.restartButton', "Restart"),
+		});
+		if (restart) {
+			await this._hostService.restart();
+		}
+	}
+
+	/**
+	 * Runs the definition's command in a terminal hidden from the user and
+	 * resolves with its exit code. For paste-back sign-ins (Claude), watches
+	 * the output for the OAuth URL, opens it in the browser, and forwards
+	 * the code the user pastes into a quick input.
+	 */
+	private async _runHidden(definition: IAgentCliSetupDefinition): Promise<number> {
 		const userHome = await this._pathService.userHome();
 		const instance = await this._terminalService.createTerminal({
-			config: { cwd: userHome },
+			config: { cwd: userHome, hideFromUser: true },
 		});
-		this._terminalService.setActiveInstance(instance);
-		await this._terminalService.focusActiveInstance();
-		instance.sendText(definition.command, true);
-
 		const store = new DisposableStore();
-		let settled = false;
-		const finish = async (enable: boolean) => {
-			if (settled) {
-				return;
+		try {
+			if (definition.pasteBackSignIn) {
+				this._wireSignInPasteBack(definition, instance, store);
 			}
-			settled = true;
+			// `exit` after the command so the hidden shell terminates and
+			// surfaces the command's status as the terminal exit code.
+			instance.sendText(`${definition.command}; exit`, true);
+
+			const exit = await Promise.race([
+				Event.toPromise(instance.onExit),
+				new Promise<number>(resolve => {
+					const timer = setTimeout(() => resolve(124), INSTALL_TIMEOUT_MS);
+					store.add({ dispose: () => clearTimeout(timer) });
+				}),
+			]);
+			return typeof exit === 'number' ? exit : exit === undefined ? 0 : 1;
+		} finally {
 			store.dispose();
-			handle.close();
-			if (!enable) {
-				return;
-			}
-			try {
-				await this._agentHostService.restartAgentHost();
-				this._notificationService.info(localize('agentSetup.readyWithHint', "{0} If it doesn't appear in the agent picker, restart the IDE.", definition.readyMessage));
-			} catch (err) {
-				this._logService.error(`[AgentCliSetup] agent host restart failed after ${definition.id} setup`, err);
-				this._notificationService.error(localize('agentSetup.restartFailed', "{0} was installed, but agents could not be restarted automatically. Restart the app to finish enabling it.", definition.label));
-			}
-		};
-
-		// Auto-enable when the install command completes successfully. Shell
-		// integration reports the composite line as a single command; ignore
-		// unrelated empty/prompt commands.
-		const hookCommandDetection = (): boolean => {
-			const detection = instance.capabilities.get(TerminalCapability.CommandDetection);
-			if (!detection) {
-				return false;
-			}
-			store.add(detection.onCommandFinished(command => {
-				const line = command.command?.trim() ?? '';
-				if (!line.includes('npm install')) {
-					return;
-				}
-				if (command.exitCode === 0) {
-					void finish(true);
-				} else {
-					this._notificationService.warn(localize('agentSetup.installFailed', "{0} setup exited with code {1} — see the terminal for details.", definition.label, command.exitCode ?? -1));
-				}
-			}));
-			return true;
-		};
-		if (!hookCommandDetection()) {
-			store.add(instance.capabilities.onDidAddCapability(e => {
-				if (e.id === TerminalCapability.CommandDetection) {
-					hookCommandDetection();
-				}
-			}));
+			instance.dispose();
 		}
-		// Shell integration is not guaranteed (and its command reporting can
-		// miss composite lines) — also poll the well-known install dirs for
-		// the binary and enable as soon as it appears. First signal wins.
-		const pollDirs = [
-			userHome.with({ path: `${userHome.path}/.local/bin` }),
-			userHome.with({ path: `${userHome.path}/bin` }),
-			URI.file('/opt/homebrew/bin'),
-			URI.file('/usr/local/bin'),
-		];
-		const alreadyPresent = await this._binaryPresent(pollDirs, definition.binaryName);
-		const poll = new IntervalTimer();
-		store.add(poll);
-		const pollDeadline = Date.now() + SETUP_POLL_TIMEOUT_MS;
-		poll.cancelAndSet(async () => {
-			if (settled || Date.now() > pollDeadline) {
-				poll.cancel();
+	}
+
+	/**
+	 * Claude's `setup-token` sign-in prints an OAuth URL and waits for the
+	 * user to paste a code back. Surface that as: open the browser to the
+	 * URL, then a single quick-input box for the code — no terminal shown.
+	 */
+	private _wireSignInPasteBack(definition: IAgentCliSetupDefinition, instance: ITerminalInstance, store: DisposableStore): void {
+		let output = '';
+		let handled = false;
+		store.add(instance.onData(chunk => {
+			if (handled) {
 				return;
 			}
-			// Only auto-enable on a NEW appearance: if the binary already
-			// existed when setup began (reinstall flows), rely on command
-			// detection or the manual button instead.
-			if (!alreadyPresent && await this._binaryPresent(pollDirs, definition.binaryName)) {
-				this._logService.info(`[AgentCliSetup] detected ${definition.binaryName} on disk — enabling`);
-				void finish(true);
+			output += chunk;
+			const match = SIGN_IN_URL_RE.exec(output);
+			if (!match) {
+				return;
 			}
-		}, SETUP_POLL_INTERVAL_MS);
-
-		// If the terminal goes away without a detected completion, drop the
-		// listeners; the manual notification button remains the fallback.
-		store.add(this._terminalService.onDidDisposeInstance(disposed => {
-			if (disposed === instance) {
-				store.dispose();
-			}
+			handled = true;
+			void this._openerService.open(URI.parse(match[0]));
+			void this._quickInputService.input({
+				title: localize('agentSetup.pasteTitle', "Sign in to {0}", definition.label),
+				prompt: localize('agentSetup.pastePrompt', "Complete the sign-in in your browser, then paste the code here."),
+				placeHolder: localize('agentSetup.pastePlaceholder', "Paste sign-in code"),
+				ignoreFocusLost: true,
+			}).then(code => {
+				if (code) {
+					instance.sendText(code.trim(), true);
+				} else {
+					// Cancelled — abort the hidden sign-in so the flow fails
+					// fast instead of hanging until the timeout.
+					instance.sendText('', false);
+				}
+			});
 		}));
+	}
 
-		const handle = this._notificationService.prompt(
-			Severity.Info,
-			localize('agentSetup.inProgress', "Setting up {0} in the terminal. It is enabled automatically when the install finishes — or click Enable once it's done. If {0} still doesn't appear in the agent picker afterwards, restart the IDE.", definition.label),
-			[{
-				label: localize('agentSetup.enableNow', "Enable {0}", definition.label),
-				run: () => { void finish(true); },
-			}],
-			{ sticky: true, onCancel: () => { void finish(false); } },
-		);
+	/** Polls the agent host's root state until the provider registers. */
+	private async _waitForRegistration(id: string): Promise<boolean> {
+		const isRegistered = () => {
+			const state = this._agentHostService.rootState.value;
+			return !!state && !(state instanceof Error) && (state as RootState).agents.some(agent => agent.provider === id);
+		};
+		if (isRegistered()) {
+			return true;
+		}
+		return new Promise<boolean>(resolve => {
+			const store = new DisposableStore();
+			const timer = setTimeout(() => { store.dispose(); resolve(false); }, REGISTRATION_TIMEOUT_MS);
+			store.add({ dispose: () => clearTimeout(timer) });
+			store.add(this._agentHostService.rootState.onDidChange(() => {
+				if (isRegistered()) {
+					store.dispose();
+					resolve(true);
+				}
+			}));
+		});
 	}
 }
 

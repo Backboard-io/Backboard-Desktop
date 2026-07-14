@@ -97,7 +97,7 @@ export async function resizeImage(data: Uint8Array | string, mimeType?: string):
  * @param maxSize The maximum width or height of the thumbnail, in pixels.
  * @returns A promise that resolves to a {@link Blob} of the thumbnail, or `undefined` on failure.
  */
-function createImageThumbnail(data: Uint8Array, maxSize: number): Promise<Blob | undefined> {
+export function createImageThumbnail(data: Uint8Array, maxSize: number): Promise<Blob | undefined> {
 	return new Promise((resolve) => {
 		const blob = new Blob([data as Uint8Array<ArrayBuffer>]);
 		const img = document.createElement('img');

@@ -721,7 +721,13 @@ configurationRegistry.registerConfiguration({
 		[ClaudePreferAgentHostEditorSettingId]: {
 			type: 'boolean',
 			description: nls.localize('chat.editor.claude.preferAgentHost', "When enabled, Claude sessions opened from the regular workbench (sidebar chat) run inside the agent host process instead of an external chat extension. Only one Claude implementation surfaces per window."),
-			default: false,
+			// Default on, matching the Agents window: the agent host Claude is
+			// the subscription-native integration and the one the new-chat
+			// picker offers. Leaving it off strands editor-window users — the
+			// picker shows a Claude setup row that installing the CLI can
+			// never satisfy, because the suppression is window preference,
+			// not CLI availability.
+			default: true,
 			tags: ['experimental'],
 			experiment: { mode: 'startup' },
 		},

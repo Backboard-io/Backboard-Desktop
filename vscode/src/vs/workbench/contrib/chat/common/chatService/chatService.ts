@@ -1015,6 +1015,19 @@ export interface IChatPullRequestContent {
 	kind: 'pullRequest';
 }
 
+/**
+ * An inline preview card for a local web app that the agent started or opened
+ * during the session. Plain JSON so it round-trips session serialization
+ * unchanged.
+ */
+export interface IChatWebPreviewPart {
+	kind: 'webPreview';
+	/** Fully qualified URL of the previewed app (e.g. `http://localhost:3000/`). */
+	url: string;
+	/** Id of the integrated browser view showing the app, when one exists. */
+	browserViewId?: string;
+}
+
 export interface IChatSubagentToolInvocationData {
 	kind: 'subagent';
 	description?: string;
@@ -1276,6 +1289,7 @@ export type IChatProgress =
 	| IChatToolInvocationSerialized
 	| IChatExtensionsContent
 	| IChatPullRequestContent
+	| IChatWebPreviewPart
 	| IChatUndoStop
 	| IChatThinkingPart
 	| IChatTaskSerialized

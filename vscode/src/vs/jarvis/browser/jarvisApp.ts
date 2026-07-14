@@ -34,8 +34,6 @@ interface IJarvisSlotState {
 	output: string;
 	commandDraft: string;
 	cli: JarvisCliKind;
-	cardWidth?: number;
-	cardHeight?: number;
 	terminal?: XtermTerminal;
 	terminalInputDisposable?: IXtermDisposable;
 	lastPrompt?: string;
@@ -110,8 +108,10 @@ const jarvisBuiltInBackgrounds: readonly IJarvisBackgroundOption[] = [
 export class JarvisApp extends Disposable {
 
 	private readonly slots = new Map<string, IJarvisSlotState>();
+	private activeSlotId: string | undefined;
 	private shell!: HTMLElement;
-	private grid!: HTMLElement;
+	private tabBar!: HTMLElement;
+	private panel!: HTMLElement;
 	private statusLine!: HTMLElement;
 	private promptInput!: HTMLInputElement;
 	private voiceButton!: HTMLButtonElement;
@@ -121,7 +121,6 @@ export class JarvisApp extends Disposable {
 	private backgroundSelect!: HTMLSelectElement;
 	private customBackgroundPath: string | undefined;
 	private currentBackgroundId = jarvisBuiltInBackgrounds[0].id;
-	private readonly cardResizeObservers = new Map<string, ResizeObserver>();
 	private readonly terminalResizeObservers = new Map<string, ResizeObserver>();
 	private selectedWorkspacePath: string | undefined;
 	private xtermCtor: typeof XtermTerminal | undefined;
@@ -156,7 +155,7 @@ export class JarvisApp extends Disposable {
 			if (slot.terminal) {
 				slot.terminal.write(event.data);
 			} else {
-				this.renderGrid();
+				this.renderView();
 			}
 		}));
 		this._register(this.bridge.onTerminalExit(event => {
@@ -171,7 +170,7 @@ export class JarvisApp extends Disposable {
 			const exitMessage = `\r\n[Jarvis] Terminal exited with code ${event.exitCode ?? 0}.\r\n`;
 			slot.output = `${slot.output}${exitMessage}`.slice(-50000);
 			slot.terminal?.write(exitMessage);
-			this.renderGrid();
+			this.renderView();
 		}));
 	}
 
@@ -185,15 +184,18 @@ export class JarvisApp extends Disposable {
 		this.shell.appendChild(this.renderSideRail());
 		this.shell.appendChild(this.renderCommandBar());
 
-		this.grid = document.createElement('section');
-		this.grid.className = 'jarvis-grid';
-		this.shell.appendChild(this.grid);
-		this.installCanvasPanning();
+		this.tabBar = document.createElement('nav');
+		this.tabBar.className = 'jarvis-tabbar';
+		this.shell.appendChild(this.tabBar);
+
+		this.panel = document.createElement('section');
+		this.panel.className = 'jarvis-panel';
+		this.shell.appendChild(this.panel);
 
 		this.container.appendChild(this.shell);
 		this.applyInitialBackground();
 		this.installBackboardVoice();
-		this.renderGrid();
+		this.renderView();
 		this.updateStatus(localize('jarvis.ready', "Ready. Say or type: Hey Backboard, open a terminal."));
 	}
 
@@ -429,77 +431,68 @@ export class JarvisApp extends Disposable {
 		return commandBar;
 	}
 
-	private installCanvasPanning(): void {
-		let dragState: { readonly pointerId: number; readonly startX: number; readonly startY: number; readonly scrollLeft: number; readonly scrollTop: number } | undefined;
-
-		const onPointerDown = (event: PointerEvent) => {
-			if (event.button !== 0 || isCanvasInteractiveTarget(event.target)) {
-				return;
-			}
-			dragState = {
-				pointerId: event.pointerId,
-				startX: event.clientX,
-				startY: event.clientY,
-				scrollLeft: this.grid.scrollLeft,
-				scrollTop: this.grid.scrollTop
-			};
-			this.grid.classList.add('panning');
-			this.grid.setPointerCapture(event.pointerId);
-			event.preventDefault();
-		};
-
-		const onPointerMove = (event: PointerEvent) => {
-			if (!dragState || event.pointerId !== dragState.pointerId) {
-				return;
-			}
-			this.grid.scrollLeft = dragState.scrollLeft - (event.clientX - dragState.startX);
-			this.grid.scrollTop = dragState.scrollTop - (event.clientY - dragState.startY);
-		};
-
-		const endPan = (event: PointerEvent) => {
-			if (!dragState || event.pointerId !== dragState.pointerId) {
-				return;
-			}
-			dragState = undefined;
-			this.grid.classList.remove('panning');
-			if (this.grid.hasPointerCapture(event.pointerId)) {
-				this.grid.releasePointerCapture(event.pointerId);
-			}
-		};
-
-		const onWheel = (event: WheelEvent) => {
-			if (!event.shiftKey || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) {
-				return;
-			}
-			this.grid.scrollLeft += event.deltaY;
-			event.preventDefault();
-		};
-
-		this.grid.addEventListener('pointerdown', onPointerDown);
-		this.grid.addEventListener('pointermove', onPointerMove);
-		this.grid.addEventListener('pointerup', endPan);
-		this.grid.addEventListener('pointercancel', endPan);
-		this.grid.addEventListener('wheel', onWheel, { passive: false });
-		this._register({
-			dispose: () => {
-				this.grid.removeEventListener('pointerdown', onPointerDown);
-				this.grid.removeEventListener('pointermove', onPointerMove);
-				this.grid.removeEventListener('pointerup', endPan);
-				this.grid.removeEventListener('pointercancel', endPan);
-				this.grid.removeEventListener('wheel', onWheel);
-			}
-		});
-	}
-
-	private renderGrid(): void {
+	private renderView(): void {
 		const activeSlots = terminalSlots
 			.map(slot => this.slots.get(slot.id)!)
 			.filter(slot => slot.status !== 'idle');
-		this.grid.classList.toggle('empty', activeSlots.length === 0);
-		for (let count = 1; count <= terminalSlots.length; count++) {
-			this.grid.classList.toggle(`count-${count}`, activeSlots.length === count);
+
+		if (!activeSlots.some(slot => slot.id === this.activeSlotId)) {
+			this.activeSlotId = activeSlots[0]?.id;
 		}
-		this.grid.replaceChildren(...(activeSlots.length ? activeSlots.map(slot => this.renderCard(slot)) : [this.renderEmptyState()]));
+
+		this.renderTabBar(activeSlots);
+		this.renderPanel(activeSlots);
+	}
+
+	private renderTabBar(activeSlots: readonly IJarvisSlotState[]): void {
+		this.tabBar.classList.toggle('empty', activeSlots.length === 0);
+		this.tabBar.replaceChildren(...activeSlots.map(slot => this.renderTab(slot)));
+	}
+
+	private renderTab(slot: IJarvisSlotState): HTMLElement {
+		const tab = document.createElement('button');
+		tab.type = 'button';
+		tab.className = `jarvis-tab ${slot.status}${slot.id === this.activeSlotId ? ' active' : ''}`;
+		tab.title = slot.name;
+		tab.addEventListener('click', () => {
+			this.activeSlotId = slot.id;
+			this.renderView();
+		});
+
+		const dot = document.createElement('span');
+		dot.className = 'jarvis-tab-dot';
+		tab.appendChild(dot);
+
+		const label = document.createElement('span');
+		label.className = 'jarvis-tab-label';
+		label.textContent = slot.name;
+		tab.appendChild(label);
+
+		const close = document.createElement('span');
+		close.className = 'jarvis-tab-close';
+		close.textContent = 'x';
+		close.title = localize('jarvis.closeTerminal', "Close terminal");
+		close.setAttribute('role', 'button');
+		close.setAttribute('aria-label', close.title);
+		close.addEventListener('click', event => {
+			event.stopPropagation();
+			this.disposeTerminal(slot.id);
+		});
+		tab.appendChild(close);
+
+		return tab;
+	}
+
+	private renderPanel(activeSlots: readonly IJarvisSlotState[]): void {
+		if (activeSlots.length === 0) {
+			this.panel.className = 'jarvis-panel empty';
+			this.panel.replaceChildren(this.renderEmptyState());
+			return;
+		}
+
+		const slot = this.slots.get(this.activeSlotId!)!;
+		this.panel.className = `jarvis-panel ${slot.status}`;
+		this.panel.replaceChildren(...this.renderSlotPanelContent(slot));
 	}
 
 	private renderEmptyState(): HTMLElement {
@@ -508,7 +501,7 @@ export class JarvisApp extends Disposable {
 
 		const eyebrow = document.createElement('div');
 		eyebrow.className = 'jarvis-empty-eyebrow';
-		eyebrow.textContent = localize('jarvis.empty.eyebrow', "Voice terminal canvas");
+		eyebrow.textContent = localize('jarvis.empty.eyebrow', "Voice terminal launcher");
 		empty.appendChild(eyebrow);
 
 		const title = document.createElement('h2');
@@ -562,62 +555,27 @@ export class JarvisApp extends Disposable {
 		return empty;
 	}
 
-	private renderCard(slot: IJarvisSlotState): HTMLElement {
-		const card = document.createElement('article');
-		card.className = `jarvis-card ${slot.status}`;
-		if (slot.cardWidth) {
-			card.style.width = `${slot.cardWidth}px`;
-			card.style.flexBasis = `${slot.cardWidth}px`;
-		}
-		if (slot.cardHeight) {
-			card.style.height = `${slot.cardHeight}px`;
-		}
-		this.installCardResizeObserver(slot, card);
-
-		const header = document.createElement('header');
-		header.className = 'jarvis-card-header';
-		const identity = document.createElement('div');
-		identity.className = 'jarvis-card-identity';
-		const dot = document.createElement('span');
-		dot.className = 'jarvis-card-dot';
-		const title = document.createElement('h2');
-		title.textContent = slot.name;
-		identity.appendChild(dot);
-		identity.appendChild(title);
-		header.appendChild(identity);
-
-		const openButton = document.createElement('button');
-		openButton.type = 'button';
-		openButton.className = 'jarvis-icon-button';
-		openButton.title = localize('jarvis.openTerminal', "Open terminal");
-		openButton.setAttribute('aria-label', openButton.title);
-		openButton.textContent = '+';
-		openButton.disabled = slot.status === 'opening' || slot.status === 'running';
-		openButton.addEventListener('click', () => this.openTerminal(slot.id, 'backboard'));
-
-		const actions = document.createElement('div');
-		actions.className = 'jarvis-card-actions';
-
-		const closeBtn = document.createElement('button');
-		closeBtn.type = 'button';
-		closeBtn.className = 'jarvis-card-close';
-		closeBtn.title = localize('jarvis.closeTerminal', "Close terminal");
-		closeBtn.setAttribute('aria-label', closeBtn.title);
-		closeBtn.addEventListener('click', () => this.disposeTerminal(slot.id));
-		actions.appendChild(closeBtn);
-
-		actions.appendChild(openButton);
-		header.appendChild(actions);
-		card.appendChild(header);
-
+	private renderSlotPanelContent(slot: IJarvisSlotState): HTMLElement[] {
 		const meta = document.createElement('div');
-		meta.className = 'jarvis-card-meta';
-		meta.textContent = this.statusLabel(slot);
-		card.appendChild(meta);
+		meta.className = 'jarvis-panel-meta';
+
+		const metaText = document.createElement('span');
+		metaText.className = 'jarvis-panel-meta-text';
+		metaText.textContent = this.statusLabel(slot);
+		meta.appendChild(metaText);
+
+		const reopenButton = document.createElement('button');
+		reopenButton.type = 'button';
+		reopenButton.className = 'jarvis-icon-button';
+		reopenButton.title = localize('jarvis.openTerminal', "Open terminal");
+		reopenButton.setAttribute('aria-label', reopenButton.title);
+		reopenButton.textContent = '+';
+		reopenButton.disabled = slot.status === 'opening' || slot.status === 'running';
+		reopenButton.addEventListener('click', () => this.openTerminal(slot.id, 'backboard'));
+		meta.appendChild(reopenButton);
 
 		const terminal = document.createElement('div');
 		terminal.className = 'jarvis-terminal';
-		card.appendChild(terminal);
 		this.attachTerminal(slot, terminal);
 
 		const commandForm = document.createElement('form');
@@ -662,8 +620,7 @@ export class JarvisApp extends Disposable {
 		close.addEventListener('click', () => this.disposeTerminal(slot.id));
 		commandForm.appendChild(close);
 
-		card.appendChild(commandForm);
-		return card;
+		return [meta, terminal, commandForm];
 	}
 
 	private attachTerminal(slot: IJarvisSlotState, container: HTMLElement): void {
@@ -733,21 +690,6 @@ export class JarvisApp extends Disposable {
 		});
 		observer.observe(container);
 		this.terminalResizeObservers.set(slot.id, observer);
-	}
-
-	private installCardResizeObserver(slot: IJarvisSlotState, card: HTMLElement): void {
-		this.cardResizeObservers.get(slot.id)?.disconnect();
-		const observer = new ResizeObserver(entries => {
-			const entry = entries[0];
-			if (!entry) {
-				return;
-			}
-			const { width, height } = entry.contentRect;
-			slot.cardWidth = Math.round(width);
-			slot.cardHeight = Math.round(height);
-		});
-		observer.observe(card);
-		this.cardResizeObservers.set(slot.id, observer);
 	}
 
 	private terminalTheme(): ITheme {
@@ -1046,7 +988,8 @@ export class JarvisApp extends Disposable {
 		slot.error = undefined;
 		slot.cli = cli;
 		slot.output = slot.output || `[Jarvis] Opening ${slot.name}...\r\n`;
-		this.renderGrid();
+		this.activeSlotId = slotId;
+		this.renderView();
 		this.updateStatus(localize('jarvis.opening', "Opening {0}.", slot.name));
 		try {
 			await this.bridge.openTerminal(slot.id, slot.name, this.selectedWorkspacePath);
@@ -1063,7 +1006,7 @@ export class JarvisApp extends Disposable {
 			slot.output = `${slot.output}\r\n[Jarvis] ${slot.error}\r\n`;
 			this.updateStatus(slot.error);
 		}
-		this.renderGrid();
+		this.renderView();
 	}
 
 	private async sendTerminalInput(slotId: string, value: string): Promise<void> {
@@ -1092,7 +1035,7 @@ export class JarvisApp extends Disposable {
 		} catch (error) {
 			this.updateStatus(errorMessage(error));
 		}
-		this.renderGrid();
+		this.renderView();
 	}
 
 	private updateStatus(message: string): void {
@@ -1139,8 +1082,6 @@ export class JarvisApp extends Disposable {
 	}
 
 	private disposeSlotTerminal(slot: IJarvisSlotState): void {
-		this.cardResizeObservers.get(slot.id)?.disconnect();
-		this.cardResizeObservers.delete(slot.id);
 		this.terminalResizeObservers.get(slot.id)?.disconnect();
 		this.terminalResizeObservers.delete(slot.id);
 		slot.terminalInputDisposable?.dispose();
@@ -1155,13 +1096,6 @@ function modeOption(value: string, label: string): HTMLOptionElement {
 	option.value = value;
 	option.textContent = label;
 	return option;
-}
-
-function isCanvasInteractiveTarget(target: EventTarget | null): boolean {
-	if (!(target instanceof HTMLElement)) {
-		return false;
-	}
-	return !!target.closest('button, input, select, textarea, a, .jarvis-card, .jarvis-empty-state, .jarvis-command-bar, .jarvis-header, .jarvis-side-rail');
 }
 
 function readSavedBackground(): IJarvisBackgroundOption | undefined {

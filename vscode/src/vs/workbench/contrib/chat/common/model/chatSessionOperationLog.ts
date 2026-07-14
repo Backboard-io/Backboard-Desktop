@@ -88,6 +88,11 @@ const responsePartSchema = Adapt.v<IChatProgressResponseContent, SerializedChatR
 				case 'disabledClaudeHooks':
 					return a.kind === b.kind;
 
+				// Plain-JSON part that never mutates after push, but two parts of the
+				// same kind can point at different apps — compare by content.
+				case 'webPreview':
+					return objectsEqual(a, b);
+
 				default: {
 					// Hello developer! You are probably here because you added a new chat response type.
 					// This logic controls when we'll update chat parts stored on disk as part of the session.

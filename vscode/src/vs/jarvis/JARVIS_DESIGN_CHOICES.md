@@ -2,42 +2,34 @@
 
 ## Product Direction
 
-Jarvis is a standalone voice-controlled terminal canvas. It is not a workbench page, not Optimus, and not the editor chat surface. Its main job is to let the user open and control up to four named Backboard/Codex terminal sessions with voice or typed natural language.
+Jarvis is a standalone voice-controlled terminal launcher. It is not a workbench page, not Optimus, and not the editor chat surface. Its main job is to let the user open and control up to four named Backboard/Codex terminal sessions with voice or typed natural language.
 
-The page should feel like a retro control surface: clean, flat, readable, low-chrome, and direct. The strongest visual signal should be the background scene and the terminal canvas, not nested panels.
+The page should feel like a retro control surface: clean, flat, readable, low-chrome, and direct. The strongest visual signal should be the background scene and the terminal panel, not nested panels.
 
 ## Visual Principles
 
-- Fewer containers are better. Avoid wrapping controls in multiple glass boxes or nested cards.
+- Fewer containers are better. Avoid wrapping controls in multiple glass boxes.
 - Rounded corners should be minimal. Current direction uses `0px` or `2px` corners instead of large pills.
 - Use thin, visible borders instead of heavy shadows.
-- Prefer hard pixel-like shadows only where depth is useful, such as active terminal cards or the microphone button.
+- Prefer hard pixel-like shadows only where depth is useful, such as the active terminal panel or the microphone button.
 - Use monospace for controls, labels, hints, and terminal-related UI to make the page feel more retro and operational.
 - Keep backgrounds immersive, but darken them enough that controls and terminals remain readable.
 
 ## Layout
 
-- The page is a full-screen canvas over a video or image background.
+- The page is a full-screen scene over a video or image background.
 - The top controls are intentionally flat and unboxed: mode switch, workspace selector, background selector, page label, and status.
 - The side rail is a functional quick launcher for named terminals, not decoration.
 - The bottom command bar is the primary voice/text command surface.
-- The terminal area is a scrollable canvas, not a fixed workbench grid.
+- The terminal area is a single fixed panel: a tab bar above it switches between open terminals, one visible at a time.
 
-## Canvas Behavior
+## Terminal Tabs And Panel
 
-- Terminal cards sit on a horizontally scrollable canvas.
-- Users can scroll left/right and up/down.
-- Dragging empty canvas space pans the canvas.
-- Shift + mouse wheel scrolls horizontally.
-- The canvas should not move when interacting with terminal content, inputs, buttons, or cards.
-
-## Terminal Cards
-
-- Terminal cards are resizable.
-- Resizing a card resizes the xterm viewport.
-- The renderer forwards terminal size changes to the backing PTY so Backboard/Codex sees the new terminal dimensions.
-- Cards preserve manual size across Jarvis re-renders.
-- Cards should look like flat retro terminal windows: thin borders, square corners, dark transparent fill, minimal header.
+- Each open terminal (Erin, Seif, Youseph, Nir) gets a tab in the tab bar; only the active tab's terminal is shown in the panel below.
+- Switching tabs re-parents the existing xterm instance into the panel rather than recreating it, so scrollback and running state are preserved for background terminals.
+- Closing a terminal removes its tab; if it was the active tab, the view falls back to another open tab or the empty state.
+- The panel resizes with the window; the renderer forwards terminal size changes to the backing PTY so Backboard/Codex sees the new terminal dimensions.
+- The panel should look like a flat retro terminal window: thin borders, square corners, dark transparent fill, minimal header.
 
 ## Empty State
 
@@ -75,13 +67,13 @@ The page should feel like a retro control surface: clean, flat, readable, low-ch
 - Do not add large rounded glass panels around every section.
 - Do not add decorative controls that do nothing.
 - Do not make a marketing/landing page.
-- Do not hide the terminal canvas behind explanatory copy.
+- Do not hide the terminal panel behind explanatory copy.
 - Do not use a busy one-note palette; the background carries the mood and the UI stays restrained.
 
 ## Acceptance Notes
 
 - The page should read as retro, clean, and operational at first glance.
 - A user should understand that they can open named terminal sessions immediately.
-- The canvas should feel movable and spatial.
-- Terminal cards should feel like working terminals, not preview cards.
+- Switching between open terminals should feel instant, like switching browser tabs.
+- The terminal panel should feel like a working terminal, not a preview card.
 - Background changing should be visible but not visually dominant.

@@ -129,8 +129,18 @@ export interface BackboardResponse {
  * Provider-neutral turn events. Backboard can yield these from either one JSON
  * response or many SSE payloads without changing the agent loop contract.
  */
+/**
+ * Coarse, provider-neutral phase of the current turn, derived from the
+ * backend's pre-content pipeline frames. `preparing` covers server-side
+ * request handling and run setup; `generating` means the model has been
+ * engaged and the first token is imminent. Consumed by the host to render a
+ * live status line while nothing else is streaming yet.
+ */
+export type TurnStatusPhase = "preparing" | "generating";
+
 export type ProviderEvent =
 	| { kind: "thread"; threadId: string }
+	| { kind: "status"; phase: TurnStatusPhase }
 	| { kind: "assistant_delta"; text: string }
 	| { kind: "reasoning_delta"; text: string }
 	| { kind: "requires_action"; runId: string | null; calls: ProviderToolCall[] }

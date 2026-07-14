@@ -40,6 +40,24 @@ import { ClaudeAgentSdkService, ClaudeSdkPackage, IClaudeAgentSdkService } from 
 import { ClaudeProxyService, IClaudeProxyService } from './claude/claudeProxyService.js';
 import { CodexAgent, CodexSdkPackage, findCodexOnPath } from './codex/codexAgent.js';
 import { OpenCodeAgent, findOpenCodeOnPath } from './opencode/opencodeAgent.js';
+import { isClaudeLoggedIn, isCodexLoggedIn } from './shared/agentLoginProbes.js';
+
+/**
+ * Whether the Claude Agent SDK is importable from the app's own
+ * `node_modules` — true in dev (devDependency install) and in built apps
+ * that bundle the SDK as a production dependency. Complements the
+ * downloader path (`product.agentSdks.claude`) so builds without product
+ * config still register Claude.
+ */
+async function isClaudeSdkImportable(): Promise<boolean> {
+	try {
+		await import('@anthropic-ai/claude-agent-sdk');
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 import { CodexProxyService, ICodexProxyService } from './codex/codexProxyService.js';
 import { AgentSdkDownloader, IAgentSdkDownloader } from './agentSdkDownloader.js';
 import { IAgentHostOTelService } from '../common/otel/agentHostOTelService.js';
@@ -298,12 +316,16 @@ async function main(): Promise<void> {
 		//     SDK comes from the CLI flag / env var dev override or a
 		//     `product.agentSdks.claude` entry. Codex accepts the env-var
 		//     override, product config, or a `codex` binary on PATH.
-		if (isAgentEnabled(process.env[AgentHostClaudeAgentEnabledEnvVar], false) && (!environmentService.isBuilt || agentSdkDownloader.isAvailable(ClaudeSdkPackage))) {
+		// Subscription-native providers only register when the user is
+		// actually signed in — a logged-out provider would fail every send
+		// with a raw vendor auth error, while an unregistered one surfaces
+		// as the picker's guided install+sign-in row instead.
+		if (isAgentEnabled(process.env[AgentHostClaudeAgentEnabledEnvVar], false) && (!environmentService.isBuilt || agentSdkDownloader.isAvailable(ClaudeSdkPackage) || await isClaudeSdkImportable()) && await isClaudeLoggedIn()) {
 			const claudeAgent = disposables.add(instantiationService.createInstance(ClaudeAgent));
 			agentService.registerProvider(claudeAgent);
 			log('ClaudeAgent registered');
 		}
-		if (isAgentEnabled(process.env[AgentHostCodexAgentEnabledEnvVar], false) && (agentSdkDownloader.isAvailable(CodexSdkPackage) || findCodexOnPath() !== undefined)) {
+		if (isAgentEnabled(process.env[AgentHostCodexAgentEnabledEnvVar], false) && (agentSdkDownloader.isAvailable(CodexSdkPackage) || findCodexOnPath() !== undefined) && isCodexLoggedIn()) {
 			const codexAgent = disposables.add(instantiationService.createInstance(CodexAgent));
 			agentService.registerProvider(codexAgent);
 			log('CodexAgent registered');

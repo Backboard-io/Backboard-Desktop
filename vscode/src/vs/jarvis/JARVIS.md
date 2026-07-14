@@ -1,15 +1,16 @@
 # Jarvis Page
 
 Jarvis is a standalone Backboard IDE window that turns short voice or text commands into
-real terminal sessions. It owns four named terminal "cards" (Erin, Seif, Youseph, Nir),
+real terminal sessions. It owns four named terminal slots (Erin, Seif, Youseph, Nir),
 opens them through `node-pty` in the Electron main process, streams their output back over
-IPC, and renders each one with an embedded `xterm.js` terminal. It can be driven with a
+IPC, and renders the active one with an embedded `xterm.js` terminal in a single panel with
+a tab bar above it for switching between open terminals. It can be driven with a
 keyboard, with natural language, or with the microphone — all of which route through the
 Backboard API so the same tool-calling model can decide what to do.
 
 This document describes the files, the IPC endpoints, the Backboard API calls, the
-terminal lifecycle, the voice/text command pipeline, and the exact way each terminal card
-appears and behaves.
+terminal lifecycle, the voice/text command pipeline, and the exact way the tab bar and
+terminal panel appear and behave.
 
 ---
 
@@ -23,7 +24,7 @@ src/vs/jarvis/
 ├── browser/
 │   ├── jarvisApp.ts              # The entire UI, state machine, and command pipeline
 │   └── media/
-│       ├── jarvis.css            # Layout, glassmorphism, card styling, responsive rules
+│       ├── jarvis.css            # Layout, glassmorphism, tab/panel styling, responsive rules
 │       └── jarvis-background.mp4 # Looping background video behind the shell
 ├── common/
 │   └── jarvisTypes.ts            # Shared TypeScript interfaces (bridge + events)
@@ -116,8 +117,8 @@ implemented by `ElectronJarvisBridge`.
 | Channel | Direction | Payload in | Payload out | Purpose |
 |---|---|---|---|---|
 | `vscode:jarvisTerminalCommand` | renderer -> main | `{ type, slotId, terminalName?, data?, cwd? }` | `{ accepted, slotId?, error? }` | Open / write to / dispose a pty |
-| `vscode:jarvisTerminalData` | main -> renderer | `{ slotId, data }` | — | Stream bytes from the pty to the card |
-| `vscode:jarvisTerminalExit` | main -> renderer | `{ slotId, exitCode?, signal? }` | — | Notify the card that its pty exited |
+| `vscode:jarvisTerminalData` | main -> renderer | `{ slotId, data }` | — | Stream bytes from the pty to the slot's terminal |
+| `vscode:jarvisTerminalExit` | main -> renderer | `{ slotId, exitCode?, signal? }` | — | Notify the slot that its pty exited |
 | `vscode:jarvisSelectWorkspaceFolder` | renderer -> main (invoke) | `currentPath?: string` | `{ accepted, path?, error? }` | Open a native folder picker |
 | `vscode:jarvisVoiceTranscribe` | renderer -> main (invoke) | `{ audio, mimeType, systemPrompt, tools }` | `{ accepted, transcript?, toolCalls?, error? }` | Send mic audio to the Backboard API |
 | `vscode:jarvisInterpretCommand` | renderer -> main (invoke) | `{ text, systemPrompt, tools }` | `{ accepted, text?, toolCalls?, error? }` | Send typed text to the Backboard API |
@@ -190,7 +191,7 @@ Handler: `handleJarvisTerminalCommand(sender, value)`.
      - `pty.onData(data => sender.send('vscode:jarvisTerminalData', { slotId, data }))`
        is the byte stream the renderer renders.
      - `pty.onExit(event => { jarvisTerminals.delete(slotId); sender.send('vscode:jarvisTerminalExit', { slotId, exitCode, signal }) })`
-       cleans up and notifies the card.
+       cleans up and notifies the slot.
      - It immediately writes a banner:
        `[Jarvis] Opened {terminalName} in {cwd}.\r\n`.
 
@@ -210,7 +211,7 @@ Handler: `handleJarvisTerminalCommand(sender, value)`.
 
 These are `sender.send(...)` events emitted from inside `openJarvisTerminal`. The bridge
 re-broadcasts them to any registered listener, and `JarvisApp` updates the slot state
-(see "Terminal card lifecycle" below).
+(see "Terminal slot lifecycle" below).
 
 ### `vscode:jarvisSelectWorkspaceFolder`
 
@@ -349,7 +350,7 @@ JARVIS_SYSTEM_PROMPT = [
   'If the user names a slot, use that slot. ... make Erin tell me a short story -> send_terminal_input with slot: "Erin" and input: "tell me a short story".',
   'When the user asks to type, run, ask, make, or tell something in a terminal, call send_terminal_input with the exact requested input.',
   'When the user asks to close a terminal, call close_terminal.',
-  'Do not send normal coding chat messages from this page. Jarvis controls terminal cards only.'
+  'Do not send normal coding chat messages from this page. Jarvis controls terminal slots only.'
 ].join('\n');
 ```
 
@@ -363,7 +364,7 @@ command interpretation, so the model always knows the surface it is driving.
 
 ---
 
-## The four terminal cards
+## The four terminal slots
 
 `terminalSlots` is a hardcoded list:
 
@@ -384,7 +385,7 @@ interface IJarvisSlotState {
   name: string;
   status: 'idle' | 'opening' | 'running' | 'closed' | 'error';
   output: string;            // capped to the last 50,000 chars
-  commandDraft: string;      // text typed into the card's input that hasn't been sent
+  commandDraft: string;      // text typed into the tab's input that hasn't been sent
   cli: 'backboard' | 'codex';
   terminal?: XtermTerminal;  // lazily created xterm.js instance
   terminalInputDisposable?: IDisposable;  // onData subscription for user keystrokes
@@ -393,14 +394,20 @@ interface IJarvisSlotState {
 }
 ```
 
-### Terminal card lifecycle
+Only one slot is visible at a time — the currently selected tab — via
+`private activeSlotId: string | undefined` on `JarvisApp`. Non-idle slots each get a
+tab in the tab bar; the active tab's slot is rendered into the single terminal panel.
+
+### Terminal slot lifecycle
 
 A slot starts `idle`. State transitions:
 
 - `idle` -> `opening` when `openTerminal(slotId, cli)` is called (voice tool, typed
-  command, or the per-card `+` button). The app immediately renders the card with the
-  `opening` class and the status label "Opening Backboard"/"Opening Codex CLI". It also
-  seeds `slot.output` with `[Jarvis] Opening {name}...\r\n`.
+  command, the side rail, an empty-state launch button, or the panel's `+` button).
+  `openTerminal` also sets `this.activeSlotId = slotId`, so opening (or reopening) a
+  terminal always foregrounds it, like opening a new browser tab. The app immediately
+  re-renders with the `opening` status and the label "Opening Backboard"/"Opening Codex
+  CLI". It also seeds `slot.output` with `[Jarvis] Opening {name}...\r\n`.
 - `opening` -> `running` after `bridge.openTerminal(...)` resolves. The app writes the
   chosen CLI command (`Backboard` or `codex`) followed by `\r` to the pty, enables
   stdin in xterm, and focuses the terminal. From this point on, every
@@ -410,43 +417,47 @@ A slot starts `idle`. State transitions:
   `idle`, which means the event is for a stale/unknown slot and is ignored). The app
   appends `\r\n[Jarvis] Terminal exited with code {exitCode}.\r\n` and re-renders.
 - `*` -> `error` if `bridge.openTerminal` throws. The error message is appended to
-  the output and shown in the status line; the card gets the `error` class.
-- `*` -> `idle` when the user clicks the card's `x` button or says "close terminal".
-  `disposeTerminal(slotId)` calls `bridge.disposeTerminal`, then resets `output`,
-  `commandDraft`, disposes the xterm, and re-renders. The card disappears from the
-  grid entirely because `renderGrid` filters out `idle` slots.
+  the output and shown in the status line; the tab and panel get the `error` class.
+- `*` -> `idle` when the user clicks a tab's `x` close icon, the panel's command-form
+  close button, or says "close terminal". `disposeTerminal(slotId)` calls
+  `bridge.disposeTerminal`, then resets `output`, `commandDraft`, disposes the xterm,
+  and re-renders. The slot's tab disappears because `renderView` filters out `idle`
+  slots; if it was the active tab, `renderView` falls back to another open slot (or
+  the empty state if none remain).
 
-### How a terminal card appears
+### How the tab bar and panel appear
 
-Each visible card is an `<article class="jarvis-card {status}">` built by
-`renderCard(slot)`. Layout (top to bottom):
+`renderView()` recomputes the non-`idle` slots, picks a fallback `activeSlotId` if the
+current one is no longer active, then calls `renderTabBar()` and `renderPanel()`.
 
-1. **Header** (`jarvis-card-header`)
-   - Identity group: a colored status dot (`jarvis-card-dot`) and the slot name
-     (`<h2>`).
-   - A `+` icon button (`jarvis-icon-button`) to open the terminal. Disabled while
-     the slot is `opening` or `running`.
-2. **Meta line** (`jarvis-card-meta`): a one-line status label produced by
-   `statusLabel(slot)`:
-   - `idle`: "Ready to open by voice or button"
-   - `opening`: "Opening Backboard" / "Opening Codex CLI"
-   - `running`: "Backboard running" / "Codex CLI running"
-   - `closed`: "Terminal closed"
-   - `error`: the error message
-3. **Terminal surface** (`jarvis-terminal`): a container `<div>` that hosts the
+**Tab bar** (`nav.jarvis-tabbar`): one `renderTab(slot)` button per active slot —
+
+- a status dot (`jarvis-tab-dot`, colored by status, same palette as before),
+- the slot name (`jarvis-tab-label`),
+- an `x` close icon (`jarvis-tab-close`) that calls `disposeTerminal` without
+  selecting the tab (`stopPropagation` on click).
+
+Clicking anywhere else on the tab sets `this.activeSlotId` and re-renders. The active
+tab gets the `active` class.
+
+**Panel** (`section.jarvis-panel`): if there are no active slots, it renders the empty
+state (unchanged: eyebrow, title, subtitle, per-slot launch buttons, hint chips).
+Otherwise `renderSlotPanelContent(slot)` builds the active slot's content top to
+bottom:
+
+1. **Meta row** (`jarvis-panel-meta`): a one-line status label from `statusLabel(slot)`
+   (`idle`/`opening`/`running`/`closed`/`error`, same text as before) plus a `+` icon
+   button to reopen the slot, disabled while `opening` or `running`.
+2. **Terminal surface** (`jarvis-terminal`): a container `<div>` that hosts the
    xterm.js instance (see below).
-4. **Per-card command form** (`jarvis-terminal-command`): a text input, a `>` submit
-   button, and an `x` close button. The input is disabled unless the slot is
-   `running`. Submitting sends `input.value + '\r'` to the pty via
-   `sendTerminalInput`.
+3. **Command form** (`jarvis-terminal-command`): a text input, a `>` submit button,
+   and an `x` close button. The input is disabled unless the slot is `running`.
+   Submitting sends `input.value + '\r'` to the pty via `sendTerminalInput`.
 
-The status dot is grey by default; orange (`#ff6e49`) with a soft halo when
-`running`; the focus color when `opening`; the danger color when `error`. The card's
-border thickens to `--jarvis-border-strong` while running.
+### xterm.js rendering and tab switching
 
-### xterm.js rendering
-
-`attachTerminal(slot, container)` lazily creates an `xterm.Terminal` per slot with:
+`attachTerminal(slot, container)` lazily creates an `xterm.Terminal` per slot (only
+ever called for the currently active slot) with:
 
 ```ts
 {
@@ -465,7 +476,7 @@ border thickens to `--jarvis-border-strong` while running.
 ```
 
 The theme (`terminalTheme()`) maps Backboard/VSCS terminal ANSI CSS variables to
-xterm colors, with a transparent background so the card glass shows through:
+xterm colors, with a transparent background so the panel glass shows through:
 
 ```ts
 {
@@ -487,28 +498,19 @@ $ hey backboard, open a terminal
 ```
 
 Keystrokes are wired through `slot.terminal.onData(data => bridge.writeTerminal(slot.id, data))`
-so typing in the xterm goes straight to the pty. On re-render (e.g. after the grid
-layout changes), `attachTerminal` re-parents the existing xterm element into the new
-container and calls `resizeTerminalToContainer`, which computes cols/rows from the
-container's pixel size and the current font size and calls `slot.terminal.resize`.
+so typing in the xterm goes straight to the pty. Because `slot.terminal` (the xterm.js
+instance) is kept on the slot object rather than recreated per render, switching tabs
+re-parents the *existing* element into the new panel container instead of building a
+new terminal: `attachTerminal` checks whether `slot.terminal.element.parentElement`
+still matches the container and, if not, re-appends it, then calls
+`resizeTerminalToContainer` to recompute cols/rows from the panel's pixel size. A
+background slot that keeps receiving `onTerminalData` while its tab isn't active still
+writes into its (detached) xterm instance, so scrollback and output are preserved when
+the user switches back to it.
 
-### Grid layout
-
-`renderGrid()` filters to non-`idle` slots and toggles CSS classes:
-
-- `empty` when nothing is open (the grid is hidden).
-- `count-1`, `count-2`, `count-3` (no class for 4) to reshape the grid.
-
-Default (4 cards or unspecified count) is a 2x2 grid of at least 360x280 cards. The
-variants:
-
-- `count-1`: one full-width card.
-- `count-2`: two columns, one row.
-- `count-3`: two rows; the first card spans both rows (a tall left column).
-
-Responsive breakpoints in `jarvis.css` collapse everything to a single scrollable
-column at <=1120px, hide the side rail at <=720px, and shrink the mic button / hide
-meta lines at <=520px or <=620px height.
+Responsive breakpoints in `jarvis.css` narrow the tab bar/panel inset at <=1120px, hide
+the side rail at <=720px, and shrink the mic button / hide the panel meta row at
+<=520px or <=620px height.
 
 ---
 
@@ -529,7 +531,8 @@ div.jarvis-shell
 ├── form.jarvis-command-bar
 │   ├── input.jarvis-prompt-input      ("Hey Backboard, open a terminal")
 │   └── button.jarvis-mic-button
-└── section.jarvis-grid                (the terminal cards)
+├── nav.jarvis-tabbar                  (one tab per open terminal slot)
+└── section.jarvis-panel               (the active slot's terminal, or the empty state)
 ```
 
 ### Header
@@ -667,23 +670,23 @@ The whole page is a warm, peach-toned glassmorphism surface:
 - `--jarvis-bg: #f6d6cc` (peach) base, with a looping background video and a
   radial/linear gradient overlay (`.jarvis-background::after`) adding light blooms.
 - `--jarvis-glass: rgba(248, 242, 234, .82)` for the header and side rail.
-- `--jarvis-card: rgba(51, 43, 62, .82)` for the terminal cards (dark glass over the
-  peach background).
-- `--jarvis-border: rgba(255, 120, 92, .76)` (coral) for card borders; the strong
-  variant is used when a card is `running`.
+- `--jarvis-card: rgba(51, 43, 62, .82)` for the tab bar and terminal panel (dark
+  glass over the peach background).
+- `--jarvis-border: rgba(255, 120, 92, .76)` (coral) for tab and panel borders; the
+  strong variant is used when the active slot is `running`.
 - `--jarvis-button-bg: #ff7e67` / `--jarvis-button-hover: #ff684d` for the mic and
   primary buttons.
 - `--jarvis-terminal: rgba(39, 36, 53, .42)` for the terminal surface (dark but
-  translucent so the card glass shows through).
+  translucent so the panel glass shows through).
 - `--jarvis-control-text: #463934` for text on the light glass surfaces (header,
   command bar, side rail).
 
 All interactive surfaces use `backdrop-filter: blur(...)` and `box-shadow` for depth.
 The header is horizontally centered at the top; the command bar is centered at the
-bottom; the side rail is a vertical pill on the left; the grid fills the middle
-(`inset: 76px 74px 92px 74px`). The header and side rail are `-webkit-app-region: drag`
-so they can be used to move the frameless window, while the controls inside are
-`no-drag`.
+bottom; the side rail is a vertical pill on the left; the tab bar sits below the
+header and the panel fills the rest of the middle area. The header and side rail are
+`-webkit-app-region: drag` so they can be used to move the frameless window, while the
+controls inside are `no-drag`.
 
 ---
 
@@ -718,5 +721,6 @@ User says into the mic: "Hey Backboard, make Erin tell me a short story."
    for the shell), then writes `tell me a short story\r` to it.
 5. The main-process pty receives the bytes, Backboard CLI inside the shell produces
    output, and each chunk is sent back via `vscode:jarvisTerminalData` and rendered
-   into the `Erin` card's xterm in real time.
+   into the `Erin` tab's xterm in real time (the tab was foregrounded automatically
+   when `open_terminal`/`send_terminal_input` opened it).
 6. The status line reads: "Jarvis ran: sent prompt to Erin."

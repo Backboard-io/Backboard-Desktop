@@ -92,6 +92,8 @@ interface CliTsTurnState {
 	reasoningText: string;
 	didCreateStatusPart?: boolean;
 	lastProgressMessage?: string;
+	/** Last phase-status label shown in the pre-content progress line (dedupes re-fires). */
+	lastStatusLabel?: string;
 	responseText: string;
 	failed?: boolean;
 }
@@ -338,21 +340,18 @@ export class CliTsAgent extends Disposable implements IAgent {
 			reasoningText: '',
 		};
 		session.turn = turn;
-		// Fill the send→first-token gap with an instant, self-erasing status
-		// line so the turn feels responsive the moment the user hits send —
-		// well before the model streams its first token. The agent-host adapter
-		// renders a SystemNotification part as an ephemeral `progressMessage`
-		// (shimmering spinner) that auto-hides the instant any real content —
-		// markdown, reasoning, or a tool call — arrives, so it leaves no
-		// clutter. Fired synchronously before the submit round-trip; the active
-		// turn already exists (ChatTurnStarted was reduced before sendMessage),
-		// so the part renders on the first frame. Not gated by
-		// `didCreateStatusPart` so genuine `system:warning`s still surface.
-		this._fire(session.sessionUri, {
-			type: ActionType.ChatResponsePart,
-			turnId: effectiveTurnId,
-			part: { kind: ResponsePartKind.SystemNotification, content: localize('cliTsAgent.thinking', "Thinking…") },
-		});
+		// Fill the send→first-token gap with an instant status line so the turn
+		// feels responsive the moment the user hits send — well before the model
+		// streams its first token. It starts at "Preparing…" and is upgraded to
+		// "Working…" by the backend's own pipeline phases (see the `turn:status`
+		// handler), giving truthful, visibly-changing progress instead of a
+		// static placeholder. The adapter renders it as an ephemeral
+		// `progressMessage` (shimmering spinner) that auto-hides the instant any
+		// real content — markdown, reasoning, or a tool call — arrives. Fired
+		// synchronously before the submit round-trip; the active turn already
+		// exists (ChatTurnStarted was reduced before sendMessage), so it renders
+		// on the first frame.
+		this._fireStatus(session, turn, localize('cliTsAgent.status.preparing', "Preparing…"));
 		this._logService.info(`[cli-ts] turn_start session=${session.sessionId} model=${settings.provider}/${settings.model} permission=${permission} cwd=${session.workingDirectory?.fsPath ?? '(missing)'}`);
 
 		try {
@@ -675,6 +674,27 @@ export class CliTsAgent extends Disposable implements IAgent {
 		this._onDidSessionProgress.fire({ kind: 'action', session, action });
 	}
 
+	/**
+	 * Updates the pre-content progress line with a truthful, backend-derived
+	 * phase label ("Preparing…" → "Working…"). Rendered as an ephemeral
+	 * `progressMessage`: the latest supersedes the previous, and the line
+	 * auto-hides the instant real content (markdown, reasoning, or a tool call)
+	 * starts streaming. Deduped so an unchanged phase never re-renders.
+	 * Deliberately does NOT set `didCreateStatusPart`, so a genuine
+	 * `system:warning` can still take over the line.
+	 */
+	private _fireStatus(session: CliTsSession, turn: CliTsTurnState, label: string): void {
+		if (turn.lastStatusLabel === label) {
+			return;
+		}
+		turn.lastStatusLabel = label;
+		this._fire(session.sessionUri, {
+			type: ActionType.ChatResponsePart,
+			turnId: turn.turnId,
+			part: { kind: ResponsePartKind.SystemNotification, content: label },
+		});
+	}
+
 	private _handleAgentEvent(session: CliTsSession, event: CliTsAgentEvent): void {
 		const turn = session.turn;
 		if (!turn) {
@@ -687,6 +707,17 @@ export class CliTsAgent extends Disposable implements IAgent {
 					session.threadId = event.threadId;
 				}
 				return;
+			case 'turn:status': {
+				// Truthful backend pipeline phase for the silent send→first-token
+				// gap. "preparing" = server assembling the run; "generating" =
+				// model engaged, first token imminent. Superseded automatically
+				// once real content streams.
+				const label = event.phase === 'generating'
+					? localize('cliTsAgent.status.generating', "Working…")
+					: localize('cliTsAgent.status.preparing', "Preparing…");
+				this._fireStatus(session, turn, label);
+				return;
+			}
 			case 'assistant:delta': {
 				if (!event.text || !event.messageId) {
 					return;

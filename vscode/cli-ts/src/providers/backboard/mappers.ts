@@ -90,6 +90,17 @@ function mapStreamPayload(
 	switch (payload.type) {
 		case BACKBOARD_STREAM_EVENTS.userMessage:
 			return done();
+		case BACKBOARD_STREAM_EVENTS.messageReceived:
+		case BACKBOARD_STREAM_EVENTS.runStarted:
+			// Server acknowledged the request and is assembling the run (thread
+			// creation, prompt/tool wiring) — no model output yet.
+			events.push({ kind: "status", phase: "preparing" });
+			return done();
+		case BACKBOARD_STREAM_EVENTS.messageStart:
+			// The assistant message container opened: the model is engaged and
+			// the first token is imminent.
+			events.push({ kind: "status", phase: "generating" });
+			return done();
 		case BACKBOARD_STREAM_EVENTS.contentStreaming: {
 			const content = normalizeStreamText(
 				stringField(payload, "content"),
