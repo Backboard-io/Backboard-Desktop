@@ -80,44 +80,15 @@
  * lobe at the bottom-right corner barely reaches the sidebar region. */
 @supports (background: color-mix(in srgb, black 0%, white)) {
 	.agent-sessions-workbench.shell-gradient-background::before {
-		background:
-			radial-gradient(ellipse 110% 90% at 0% 0%,
-				color-mix(in srgb, var(--vscode-agentsGradient-tintColor) 14%, transparent) 0%,
-				color-mix(in srgb, var(--vscode-agentsGradient-tintColor) 8%, transparent) 28%,
-				transparent 55%),
-			radial-gradient(ellipse 128% 102% at 100% 100%,
-				color-mix(in srgb, var(--vscode-agentsGradient-tintColor) 9%, transparent) 0%,
-				color-mix(in srgb, var(--vscode-agentsGradient-tintColor) 7%, transparent) 16%,
-				color-mix(in srgb, var(--vscode-agentsGradient-tintColor) 5%, transparent) 30%,
-				transparent 60%),
-			var(--vscode-agents-background);
+		background: var(--vscode-agents-background);
 	}
 
 	.monaco-workbench.vs.agent-sessions-workbench.shell-gradient-background::before {
-		background:
-			radial-gradient(ellipse 110% 90% at 0% 0%,
-				color-mix(in srgb, var(--vscode-agentsGradient-tintColor) 14%, transparent) 0%,
-				color-mix(in srgb, var(--vscode-agentsGradient-tintColor) 8%, transparent) 28%,
-				transparent 55%),
-			radial-gradient(ellipse 128% 102% at 100% 100%,
-				color-mix(in srgb, var(--vscode-agentsGradient-tintColor) 12%, transparent) 0%,
-				color-mix(in srgb, var(--vscode-agentsGradient-tintColor) 6%, transparent) 18%,
-				color-mix(in srgb, var(--vscode-agentsGradient-tintColor) 1%, transparent) 32%,
-				transparent 58%),
-			var(--vscode-agents-background);
+		background: var(--vscode-agents-background);
 	}
 
 	.monaco-workbench.vs-dark.agent-sessions-workbench.shell-gradient-background::before {
-		background:
-			radial-gradient(ellipse 110% 90% at 0% 0%,
-				color-mix(in srgb, var(--vscode-agentsGradient-tintColor) 14%, transparent) 0%,
-				color-mix(in srgb, var(--vscode-agentsGradient-tintColor) 8%, transparent) 28%,
-				transparent 55%),
-			radial-gradient(ellipse 128% 102% at 100% 100%,
-				color-mix(in srgb, var(--vscode-agentsGradient-tintColor) 13%, var(--vscode-agents-background)) 0%,
-				color-mix(in srgb, var(--vscode-agentsGradient-tintColor) 10%, var(--vscode-agents-background)) 17%,
-				color-mix(in srgb, var(--vscode-agentsGradient-tintColor) 7%, var(--vscode-agents-background)) 31%,
-				var(--vscode-agents-background) 60%);
+		background: var(--vscode-agents-background);
 	}
 }
 
@@ -134,18 +105,12 @@
  * per user request). High contrast stays opaque via the rules above/below,
  * and reduced transparency via the media query below. */
 .monaco-workbench.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light) {
-	/* Tint balance point: 42% washed out over bright desktops, 62% read as
-	 * not see-through enough (both user-rejected) — keep at 52%. */
-	--sessions-sidebar-region-background: color-mix(in srgb, var(--vscode-sideBar-background, var(--vscode-editor-background)) 52%, transparent);
-	background: transparent;
-}
-
-.monaco-workbench.vs.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light) {
-	/* Light-appearance vibrancy renders naturally lighter/whiter than dark
-	 * (same macOS material, different visual weight per appearance), so the
-	 * same tint percentage as dark reads far more opaque here — needs a
-	 * lower value to actually show the desktop through it. */
-	--sessions-sidebar-region-background: color-mix(in srgb, color-mix(in srgb, var(--vscode-sideBar-background, color-mix(in srgb, var(--vscode-editor-background) 94%, var(--vscode-foreground) 6%)) 56%, var(--vscode-foreground) 44%) 32%, transparent);
+	/* Opaque sidebar: the translucent glass tint (formerly 52% over native
+	 * vibrancy) let whatever moved behind the window shift the pane's colour
+	 * while in use. Paint the solid theme colour instead; the vibrancy
+	 * material stays attached but nothing renders with alpha over it. */
+	--sessions-sidebar-region-background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+	background: var(--sessions-main-region-background);
 }
 
 .monaco-workbench.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light)::before {

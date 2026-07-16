@@ -12,19 +12,20 @@
 	display: flex;
 	align-items: center;
 	width: 100%;
-	height: 38px;
-	flex: 0 0 38px;
+	/* Matches the Editor window titlebar so the mode switcher sits at the
+	   same height in every mode. */
+	height: 32px;
+	flex: 0 0 32px;
 	box-sizing: border-box;
 	color: var(--vscode-agentsPanel-foreground);
 	overflow: hidden;
 	-webkit-app-region: drag;
 }
 
-/* macOS: nudge the header controls down so they sit a little lower than the
- * traffic lights instead of level with them. Windows/Linux draw their window
- * controls vertically centered, so the controls stay centered there. */
+/* macOS: the native traffic lights center ~4px below the strip's midline, so
+ * nudge the header controls down to sit on the same line as them. */
 .agent-sessions-workbench.mac .sessions-panel-header {
-	padding-top: 8px;
+	padding-top: 4px;
 }
 
 /* Headers are pure desktop/tablet chrome — the phone layout has its own
@@ -51,9 +52,6 @@
 	height: 100%;
 	flex: 0 0 auto;
 	min-width: 0;
-	/* The auxiliary bar composite title owns the inline header's vertical
-	 * alignment, so keep the global down-nudge out of it. */
-	padding-top: 0;
 }
 
 .agent-sessions-workbench .sessions-panel-header.inline > .sessions-panel-header-right {

@@ -8,6 +8,9 @@
 	align-items: center;
 	height: 32px;
 	padding: 0;
+	/* Align with the Simple/Advanced mode switchers (x = 78 after the
+	   traffic lights). */
+	margin-left: 6px;
 	color: var(--vscode-titleBar-activeForeground);
 	-webkit-app-region: no-drag;
 	white-space: nowrap;
@@ -67,4 +70,12 @@
 .monaco-workbench .backboard-mode-titlebar-widget-chevron {
 	font-size: 12px;
 	opacity: 0.72;
+}
+
+/* macOS desktop: the native traffic lights center ~4px below the titlebar's
+   midline; shift the titlebar contents down so the mode switcher and the
+   right-side layout controls sit on the same line as them (matches the Simple
+   and Advanced window header strips). */
+.monaco-workbench.mac:not(.web) .part.titlebar > .titlebar-container {
+	padding-top: 4px;
 }

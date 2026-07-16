@@ -1550,3 +1550,17 @@
 .action-widget .monaco-list-row.action.sessions-browse-inline-item.focused:not(.option-disabled) .description {
 	visibility: visible;
 }
+
+/* Session-type (agent host) picker inside the composer's primary toolbar,
+   between the model picker and the options gear. */
+.sessions-chat-widget .new-chat-composer-type-picker {
+	display: flex;
+	align-items: center;
+	min-width: 0;
+	margin: 0 2px;
+}
+
+.sessions-chat-widget .new-chat-composer-type-picker .sessions-chat-picker-slot {
+	display: flex;
+	align-items: center;
+}
