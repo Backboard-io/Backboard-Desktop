@@ -995,6 +995,31 @@ export class NativeHostMainService extends Disposable implements INativeHostMain
 	//#endregion
 
 
+	//#region Error report upload
+
+	async uploadErrorReport(_windowId: number | undefined, url: string, content: string): Promise<void> {
+		const isLoopback = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//.test(url);
+		if (!url.startsWith('https://') && !isLoopback) {
+			throw new Error(`Error report upload rejected: only https endpoints are allowed (got ${url.substring(0, 64)})`);
+		}
+
+		const { net } = await import('electron');
+
+		// Uses net.fetch which bypasses CORS restrictions of the renderer
+		const response = await net.fetch(url, {
+			method: 'PUT',
+			headers: { 'Content-Type': 'application/json' },
+			body: content,
+		});
+		if (!response.ok) {
+			const text = await response.text();
+			throw new Error(`Error report upload failed ${response.status}: ${text.substring(0, 300)}`);
+		}
+	}
+
+	//#endregion
+
+
 	//#region Process
 
 	async getProcessId(windowId: number | undefined): Promise<number | undefined> {

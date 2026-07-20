@@ -99,6 +99,8 @@ import { InstantiationType, registerSingleton } from '../platform/instantiation/
 import { registerSharedProcessRemoteService } from '../platform/ipc/electron-browser/services.js';
 import { IPluginGitService } from '../workbench/contrib/chat/common/plugins/pluginGitService.js';
 import { NativePluginGitCommandService } from '../workbench/contrib/chat/electron-browser/pluginGitCommandService.js';
+import { IChatErrorReportService } from '../workbench/contrib/chat/common/chatErrorReporting.js';
+import { NativeChatErrorReportService } from '../workbench/contrib/chat/electron-browser/chatErrorReportService.js';
 import { IUserDataInitializationService, UserDataInitializationService } from '../workbench/services/userData/browser/userDataInit.js';
 import { SyncDescriptor } from '../platform/instantiation/common/descriptors.js';
 
@@ -108,6 +110,10 @@ registerSingleton(IUserDataInitializationService, new SyncDescriptor(UserDataIni
 // runs git locally via the shared process.
 registerSingleton(IPluginGitService, NativePluginGitCommandService, InstantiationType.Delayed);
 registerSharedProcessRemoteService(ILocalGitService, 'localGit');
+
+// Override the browser stub with the native implementation that uploads error
+// reports from the main process (the endpoint disallows cross-origin renderer fetches).
+registerSingleton(IChatErrorReportService, NativeChatErrorReportService, InstantiationType.Delayed);
 
 
 //#endregion

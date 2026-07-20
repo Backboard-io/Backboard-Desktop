@@ -19,6 +19,7 @@ import { Part } from '../../workbench/browser/part.js';
 import { Direction, ISerializableView, ISerializedGrid, ISerializedLeafNode, ISerializedNode, IViewSize, Orientation, SerializableGrid } from '../../base/browser/ui/grid/grid.js';
 import { IEditorGroupsService } from '../../workbench/services/editor/common/editorGroupsService.js';
 import { IEditorService } from '../../workbench/services/editor/common/editorService.js';
+import { IWorkbenchEnvironmentService } from '../../workbench/services/environment/common/environmentService.js';
 import { IPaneCompositePartService } from '../../workbench/services/panecomposite/browser/panecomposite.js';
 import { IViewDescriptorService, ViewContainerLocation } from '../../workbench/common/views.js';
 import { ILogService } from '../../platform/log/common/log.js';
@@ -343,6 +344,20 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 	private sessionsPartService!: ISessionsPartService;
 	private instantiationService!: IInstantiationService;
 	private storageService!: IStorageService;
+
+	/**
+	 * `true` only for the advanced (Optimus) window, which is a full workbench.
+	 * The simple Sessions window keeps the main editor area hidden and routes
+	 * editors to modal overlays / the right-workbench instead.
+	 */
+	private _isOptimusWindow = false;
+
+	/**
+	 * `true` only for the Jarvis window, the infinite-canvas agent surface. Like
+	 * the advanced (Optimus) window it shows the auxiliary bar / right panel and
+	 * keeps the editor and panel parts hidden behind the canvas center part.
+	 */
+	private _isJarvisWindow = false;
 
 	//#endregion
 
@@ -1023,6 +1038,8 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		this.sessionsPartService = accessor.get(ISessionsPartService);
 		this.instantiationService = accessor.get(IInstantiationService);
 		this.storageService = accessor.get(IStorageService);
+		this._isOptimusWindow = accessor.get(IWorkbenchEnvironmentService).isOptimusWindow;
+		this._isJarvisWindow = accessor.get(IWorkbenchEnvironmentService).isJarvisWindow;
 		accessor.get(ITitleService);
 
 		// Register layout listeners
@@ -1033,25 +1050,40 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		// they actually target one of the main editor groups. Modal
 		// opens stay neutral. Programmatic opens that suppress auto
 		// visibility (e.g. working set application) are ignored.
-		this._register(this.editorService.onWillOpenEditor(e => {
-			if (this._editorPartAutoVisibilitySuppressionCount > 0) {
-				return;
-			}
+		//
+		// The simple Sessions window never auto-reveals the main editor
+		// area: editors there open as modal overlays, so revealing the
+		// (empty) main editor part would surface the workbench watermark.
+		// Only the advanced (Optimus) and Jarvis windows follow editor opens.
+		if (this._isOptimusWindow || this._isJarvisWindow) {
+			this._register(this.editorService.onWillOpenEditor(e => {
+				if (this._editorPartAutoVisibilitySuppressionCount > 0) {
+					return;
+				}
 
-			const targetsMainEditorPart = this.editorGroupService.mainPart.groups.some(group => group.id === e.groupId);
-			if (!targetsMainEditorPart) {
-				return;
-			}
+				const targetsMainEditorPart = this.editorGroupService.mainPart.groups.some(group => group.id === e.groupId);
+				if (!targetsMainEditorPart) {
+					return;
+				}
 
-			if (!this.partVisibility.auxiliaryBar) {
-				this.setAuxiliaryBarHidden(false);
-			}
+				if (!this.partVisibility.auxiliaryBar) {
+					this.setAuxiliaryBarHidden(false);
+				}
 
-			if (!this.partVisibility.editor) {
-				this.setEditorHidden(false);
-				this.restoreAttachedEditorMaximizedState();
-			}
-		}));
+				if (!this.partVisibility.editor) {
+					this.setEditorHidden(false);
+					this.restoreAttachedEditorMaximizedState();
+				}
+			}));
+		} else {
+			// Safety net for the simple window: the main editor area must
+			// never be visible while it holds no editors, or the empty-editor
+			// watermark ("Welcome to Backboard Studio") shows next to the chat.
+			// This catches any path that reveals it empty (restored state, a
+			// transient layout reveal) as well as closing the last editor after
+			// an explicit "Open in Editor Area".
+			this._register(this.editorService.onDidEditorsChange(() => this.enforceNoEmptyMainEditor()));
+		}
 
 		// Initialize layout state (must be done before createWorkbenchLayout)
 		this._mainContainerDimension = getClientArea(this.parent, new Dimension(800, 600));
@@ -1065,6 +1097,11 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		this.partVisibility.panel = visDefaults.panel;
 		this.partVisibility.sessions = visDefaults.sessions;
 		this.partVisibility.editor = isPhone ? visDefaults.editor : this.partVisibility.editor;
+
+		// A persisted-visible main editor part restores empty in the simple
+		// window (editors are not restored into it); hide it before the grid is
+		// built so the watermark never flashes.
+		this.enforceNoEmptyMainEditor();
 	}
 
 	suppressEditorPartAutoVisibility(): IDisposable {
@@ -1778,7 +1815,12 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		}
 
 		if (!hidden) {
-			const shouldRestoreEditor = this._restoreEditorOnAuxiliaryBarShow || this.layoutPolicy.getPartVisibilityDefaults().editor;
+			// In the simple window, showing the auxiliary bar (right-workbench)
+			// must not drag the empty main editor area along with it — only
+			// restore an editor that was explicitly visible before the bar was
+			// hidden. The advanced (Optimus) window follows the layout default.
+			const editorIsDefaultSurface = (this._isOptimusWindow || this._isJarvisWindow) && this.layoutPolicy.getPartVisibilityDefaults().editor;
+			const shouldRestoreEditor = this._restoreEditorOnAuxiliaryBarShow || editorIsDefaultSurface;
 			this._restoreEditorOnAuxiliaryBarShow = false;
 			if (shouldRestoreEditor && !this.partVisibility.editor) {
 				this.setEditorHidden(false);
@@ -1829,6 +1871,24 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		}
 
 		this._savePartVisibility();
+	}
+
+	/**
+	 * Keeps the invariant that, in the simple Sessions window, the main editor
+	 * area is never visible while it holds no editors. An empty visible editor
+	 * part renders the workbench watermark ("Welcome to Backboard Studio") next
+	 * to the chat, which must never appear in simple mode. The advanced
+	 * (Optimus) window is a full workbench and is exempt.
+	 */
+	private enforceNoEmptyMainEditor(): void {
+		if (this._isOptimusWindow || this._isJarvisWindow || !this.partVisibility.editor) {
+			return;
+		}
+
+		const hasMainEditors = this.editorGroupService.mainPart.groups.some(group => group.count > 0);
+		if (!hasMainEditors) {
+			this.setEditorHidden(true);
+		}
 	}
 
 	/**

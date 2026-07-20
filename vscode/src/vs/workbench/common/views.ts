@@ -78,6 +78,10 @@ export const enum WindowEnablement {
 	 * Visible only in the Optimus window
 	 */
 	Optimus = 4,
+	/**
+	 * Visible only in the Jarvis window
+	 */
+	Jarvis = 8,
 }
 
 /**

@@ -376,4 +376,54 @@ suite('Sessions - Workbench', () => {
 
 		assert.strictEqual(storeCalled, false);
 	});
+
+	const enforceNoEmptyMainEditor = Reflect.get(Workbench.prototype, 'enforceNoEmptyMainEditor') as (this: IEnforceEmptyEditorTestHarness) => void;
+
+	interface IEnforceEmptyEditorTestHarness {
+		_isOptimusWindow: boolean;
+		partVisibility: { editor: boolean };
+		editorGroupService: { mainPart: { groups: { count: number }[] } };
+		readonly hiddenCalls: boolean[];
+		setEditorHidden(hidden: boolean): void;
+	}
+
+	function createEnforceEmptyEditorHarness(options: { isOptimusWindow: boolean; editorVisible: boolean; mainEditorCounts: number[] }): IEnforceEmptyEditorTestHarness {
+		const hiddenCalls: boolean[] = [];
+		const harness: IEnforceEmptyEditorTestHarness = {
+			_isOptimusWindow: options.isOptimusWindow,
+			partVisibility: { editor: options.editorVisible },
+			editorGroupService: { mainPart: { groups: options.mainEditorCounts.map(count => ({ count })) } },
+			hiddenCalls,
+			setEditorHidden: hidden => hiddenCalls.push(hidden),
+		};
+		return harness;
+	}
+
+	test('hides the empty main editor area in the simple window', () => {
+		const workbench = createEnforceEmptyEditorHarness({ isOptimusWindow: false, editorVisible: true, mainEditorCounts: [0] });
+
+		enforceNoEmptyMainEditor.call(workbench);
+
+		assert.deepStrictEqual(workbench.hiddenCalls, [true]);
+	});
+
+	test('keeps the main editor area when it holds editors or is already hidden, and never touches the advanced window', () => {
+		const withEditors = createEnforceEmptyEditorHarness({ isOptimusWindow: false, editorVisible: true, mainEditorCounts: [0, 2] });
+		const alreadyHidden = createEnforceEmptyEditorHarness({ isOptimusWindow: false, editorVisible: false, mainEditorCounts: [0] });
+		const optimusEmpty = createEnforceEmptyEditorHarness({ isOptimusWindow: true, editorVisible: true, mainEditorCounts: [0] });
+
+		enforceNoEmptyMainEditor.call(withEditors);
+		enforceNoEmptyMainEditor.call(alreadyHidden);
+		enforceNoEmptyMainEditor.call(optimusEmpty);
+
+		assert.deepStrictEqual({
+			withEditors: withEditors.hiddenCalls,
+			alreadyHidden: alreadyHidden.hiddenCalls,
+			optimusEmpty: optimusEmpty.hiddenCalls,
+		}, {
+			withEditors: [],
+			alreadyHidden: [],
+			optimusEmpty: [],
+		});
+	});
 });

@@ -71,6 +71,7 @@ export class ViewDescriptorService extends Disposable implements IViewDescriptor
 
 	private readonly logger: Lazy<ILogger>;
 	private readonly isSessionsWindow: boolean;
+	private readonly isJarvisWindow: boolean;
 	private readonly isOptimusWindow: boolean;
 
 	constructor(
@@ -86,6 +87,7 @@ export class ViewDescriptorService extends Disposable implements IViewDescriptor
 
 		this.logger = new Lazy(() => loggerService.createLogger(VIEWS_LOG_ID, { name: VIEWS_LOG_NAME, group: windowLogGroup }));
 		this.isSessionsWindow = environmentService.isSessionsWindow;
+		this.isJarvisWindow = environmentService.isJarvisWindow;
 		this.isOptimusWindow = environmentService.isOptimusWindow;
 
 		this.activeViewContextKeys = new Map<string, IContextKey<boolean>>();
@@ -341,6 +343,9 @@ export class ViewDescriptorService extends Disposable implements IViewDescriptor
 		if (this.isOptimusWindow) {
 			return enablement === WindowEnablement.Optimus || enablement === WindowEnablement.Both;
 		}
+		if (this.isJarvisWindow) {
+			return enablement === WindowEnablement.Jarvis || enablement === WindowEnablement.Both;
+		}
 		if (this.isSessionsWindow) {
 			return enablement === WindowEnablement.Sessions || enablement === WindowEnablement.Both;
 		}
@@ -353,7 +358,7 @@ export class ViewDescriptorService extends Disposable implements IViewDescriptor
 	}
 
 	canMoveViews(): boolean {
-		return !this.isSessionsWindow && !this.isOptimusWindow;
+		return !this.isSessionsWindow && !this.isJarvisWindow && !this.isOptimusWindow;
 	}
 
 	moveViewContainerToLocation(viewContainer: ViewContainer, location: ViewContainerLocation, requestedIndex?: number, reason?: string): void {
@@ -714,14 +719,14 @@ export class ViewDescriptorService extends Disposable implements IViewDescriptor
 	}
 
 	private getStoredViewCustomizationsValue(): string {
-		if (this.isSessionsWindow || this.isOptimusWindow) {
+		if (this.isSessionsWindow || this.isJarvisWindow || this.isOptimusWindow) {
 			return '{}';
 		}
 		return this.storageService.get(ViewDescriptorService.VIEWS_CUSTOMIZATIONS, StorageScope.PROFILE, '{}');
 	}
 
 	private setStoredViewCustomizationsValue(value: string): void {
-		if (this.isSessionsWindow || this.isOptimusWindow) {
+		if (this.isSessionsWindow || this.isJarvisWindow || this.isOptimusWindow) {
 			return;
 		}
 		this.storageService.store(ViewDescriptorService.VIEWS_CUSTOMIZATIONS, value, StorageScope.PROFILE, StorageTarget.USER);

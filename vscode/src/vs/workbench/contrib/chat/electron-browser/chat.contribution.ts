@@ -55,11 +55,17 @@ import { HoldToVoiceChatInChatViewAction, InlineVoiceChatAction, KeywordActivati
 import { OpenWorkspaceInAgentsWindowAction, OpenAgentsWindowAction, OpenJarvisWindowAction, OpenOptimusWindowAction, OpenChatSessionInAgentsWindowAction, AgentsHandoffInputTipContribution } from './agentSessions/agentSessionsActions.js';
 import { NativeBuiltinToolsContribution } from './builtInTools/tools.js';
 import { NativePluginGitCommandService } from './pluginGitCommandService.js';
+import { IChatErrorReportService } from '../common/chatErrorReporting.js';
+import { NativeChatErrorReportService } from './chatErrorReportService.js';
 
 // Override the browser PluginGitCommandService with the native one that always
 // runs git locally via the shared process. See the decision matrix on the
 // `IPluginGitService` interface for the full per-flavor wiring.
 registerSingleton(IPluginGitService, NativePluginGitCommandService, InstantiationType.Delayed);
+
+// Override the browser stub with the native implementation that uploads error
+// reports from the main process (the endpoint disallows cross-origin renderer fetches).
+registerSingleton(IChatErrorReportService, NativeChatErrorReportService, InstantiationType.Delayed);
 registerSharedProcessRemoteService(ILocalGitService, 'localGit');
 
 class ChatCommandLineHandler extends Disposable {

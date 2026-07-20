@@ -439,6 +439,9 @@ import './contrib/workspace/browser/workspace.contribution.js';
 // Workspaces
 import './contrib/workspaces/browser/workspaces.contribution.js';
 
+// Recent Workspaces Status
+import './contrib/recentWorkspaces/browser/recentWorkspaces.contribution.js';
+
 // List
 import './contrib/list/browser/list.contribution.js';
 

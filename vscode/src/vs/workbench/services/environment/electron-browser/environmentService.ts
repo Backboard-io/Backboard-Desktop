@@ -152,12 +152,15 @@ export class NativeWorkbenchEnvironmentService extends AbstractNativeEnvironment
 	get filesToWait(): IPathsToWaitFor | undefined { return this.configuration.filesToWait; }
 
 	@memoize
-	// The Optimus window is an agent-sessions surface: it runs the sessions
-	// chat stack, so every renderer consumer of `isSessionsWindow` (model
-	// registration targets, provisional sessions, settings scoping, chat
+	// The Optimus and Jarvis windows are agent-sessions surfaces: they run the
+	// sessions chat stack, so every renderer consumer of `isSessionsWindow`
+	// (model registration targets, provisional sessions, settings scoping, chat
 	// rendering) must follow the sessions-window paths there. Consumers that
-	// need the Optimus window specifically check `isOptimusWindow`.
-	get isSessionsWindow(): boolean { return !!this.configuration.isSessionsWindow || !!this.configuration.isOptimusWindow; }
+	// need those windows specifically check `isOptimusWindow` / `isJarvisWindow`.
+	get isSessionsWindow(): boolean { return !!this.configuration.isSessionsWindow || !!this.configuration.isJarvisWindow || !!this.configuration.isOptimusWindow; }
+
+	@memoize
+	get isJarvisWindow(): boolean { return !!this.configuration.isJarvisWindow; }
 
 	@memoize
 	get isOptimusWindow(): boolean { return !!this.configuration.isOptimusWindow; }

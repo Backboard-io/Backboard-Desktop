@@ -6,23 +6,76 @@
 		<meta
 			http-equiv="Content-Security-Policy"
 			content="
-				default-src 'none';
-				img-src 'self' data: blob: vscode-remote-resource: vscode-managed-remote-resource: https:;
-				script-src 'self' 'unsafe-eval' blob:;
-				style-src 'self' 'unsafe-inline';
-				media-src 'self' blob:;
-				connect-src 'self' https: ws: wss:;
-				font-src 'self' vscode-remote-resource: vscode-managed-remote-resource: https://*.vscode-unpkg.net;
-				require-trusted-types-for 'script';
-				trusted-types vscode-bootstrapImportMap amdLoader defaultWorkerFactory lit-html;
+				default-src
+					'none'
+				;
+				img-src
+					'self'
+					data:
+					blob:
+					vscode-remote-resource:
+					vscode-managed-remote-resource:
+					https:
+				;
+				media-src
+					'self'
+				;
+				frame-src
+					'self'
+					vscode-webview:
+				;
+				script-src
+					'self'
+					'unsafe-eval'
+					blob:
+				;
+				style-src
+					'self'
+					'unsafe-inline'
+				;
+				connect-src
+					'self'
+					https:
+					ws:
+				;
+				font-src
+					'self'
+					vscode-remote-resource:
+					vscode-managed-remote-resource:
+					https://*.vscode-unpkg.net
+				;
+				require-trusted-types-for
+					'script'
+				;
+				trusted-types
+					amdLoader
+					cellRendererEditorText
+					collapsedCellPreview
+					defaultWorkerFactory
+					diffEditorWidget
+					diffReview
+					domLineBreaksComputer
+					dompurify
+					lit-html
+					editorGhostText
+					editorViewLayer
+					htmlToMarkdown
+					notebookRenderer
+					stickyScrollViewLayer
+					tokenizeToString
+					notebookChatEditController
+					richScreenReaderContent
+					chatDebugTokenizer
+				;
 		"/>
 
-		<link rel="stylesheet" href="../../workbench/contrib/terminal/browser/media/xterm.css">
-		<link rel="stylesheet" href="../browser/media/jarvis.css">
+		<!-- Workbench CSS -->
+		<link rel="stylesheet" href="../jarvis.desktop.main.css">
 	</head>
 
-	<body aria-label="Jarvis">
+	<body aria-label="">
 	</body>
 
+	<!-- Startup (do not modify order of script tags!) -->
 	<script src="./jarvis.js" type="module"></script>
 </html>
