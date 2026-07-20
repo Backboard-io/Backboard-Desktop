@@ -73,6 +73,13 @@ const NO_DCR_REMOTES = new Set([
 	"thoughtspot-spotter", "thumbtack", "ticket-tailor", "topcounsel-by-the-l-suite",
 	"trellis", "uber", "uber-eats", "vibe-prospecting", "wyndham-hotels-and-resorts",
 	"xero", "zoom-for-claude",
+	// Google's MCP endpoints answer the initialize handshake anonymously (so a
+	// handshake probe classifies them as working) but demand OAuth on the
+	// first tool call — and Google's auth server does not support dynamic
+	// client registration ("Incompatible auth server"). Hidden until Backboard
+	// ships a registered Google OAuth client id.
+	"google-cloud-bigquery", "google-compute-engine", "google-calendar",
+	"google-drive", "gmail",
 ]);
 
 /** Endpoints that failed the same probe outright. */

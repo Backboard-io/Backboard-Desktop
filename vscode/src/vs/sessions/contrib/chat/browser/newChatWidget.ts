@@ -465,6 +465,7 @@ export class NewChatWidget extends Disposable {
 		// on web as a host for the no-agent-host empty state.
 		const emptyStateContainer = isWeb ? this._renderComposerWorkspaceRow(composerStack) : undefined;
 		this._widget.render(composerStack);
+		this._mountComposerSessionTypePicker(composerStack);
 		this._placeWorkspaceRowBelowInput(composerStack);
 		// On web (vscode.dev / insiders.vscode.dev) the workspace picker is
 		// scoped to the currently selected agent host. When no hosts are
@@ -760,16 +761,15 @@ export class NewChatWidget extends Disposable {
 		if (!this._middleTitlePrefix || !this._middleTitleSuffix) {
 			return;
 		}
-		// The sentence embeds two picker slots: "... in [workspace] with [agent]?".
-		// Split on the markers in order; translations must keep {0} before {1}.
+		// The sentence embeds the workspace picker: "... in [workspace]?". The
+		// agent picker lives in the composer's toolbar row beside the model
+		// picker, not in the heading.
 		const workspaceMarker = '\u0000';
-		const agentMarker = '\u0001';
-		const template = localize('newChatMiddleTitleInFolderWithAgent', "What should we build in {0} with {1}?", workspaceMarker, agentMarker);
-		const [prefix, rest] = template.split(workspaceMarker);
-		const [connector, suffix] = (rest ?? '').split(agentMarker);
+		const template = localize('newChatMiddleTitleInFolder', "What should we build in {0}?", workspaceMarker);
+		const [prefix, suffix] = template.split(workspaceMarker);
 		this._middleTitlePrefix.textContent = prefix;
 		if (this._middleTitleConnector) {
-			this._middleTitleConnector.textContent = connector ?? '';
+			this._middleTitleConnector.textContent = '';
 		}
 		this._middleTitleSuffix.textContent = suffix ?? '';
 	}
@@ -784,10 +784,54 @@ export class NewChatWidget extends Disposable {
 		if (this._middleTitlePickerSlot) {
 			this._workspacePicker.render(this._middleTitlePickerSlot);
 		}
-		if (this._middleTitleTypePickerSlot) {
-			dom.clearNode(this._middleTitleTypePickerSlot);
-			this._sessionTypePicker.render(this._middleTitleTypePickerSlot, { className: 'sessions-chat-session-type-picker' });
+	}
+
+	/**
+	 * Mounts the session-type (agent host) picker inside the composer's bottom
+	 * toolbar row, right after the input toolbar that hosts the model picker —
+	 * the agent choice belongs with the other send-time options instead of the
+	 * heading. Falls back to the heading slot if the embedded widget's toolbar
+	 * row cannot be found.
+	 */
+	private _mountComposerSessionTypePicker(composerStack: HTMLElement): void {
+		const inputToolbar = composerStack.querySelector('.chat-input-toolbars > .chat-input-toolbar');
+		if (!inputToolbar) {
+			if (this._middleTitleTypePickerSlot) {
+				dom.clearNode(this._middleTitleTypePickerSlot);
+				this._sessionTypePicker.render(this._middleTitleTypePickerSlot, { className: 'sessions-chat-session-type-picker' });
+			}
+			return;
 		}
+		const slot = dom.$('.new-chat-composer-type-picker');
+		this._sessionTypePicker.render(slot, { className: 'sessions-chat-session-type-picker' });
+		// Place the agent host between the model picker and the options gear in
+		// the composer's primary toolbar. Switching hosts (or menu/context key
+		// changes) rebuilds the entire chat input subtree, which silently drops
+		// foreign children — so watch the stable composer root and re-resolve
+		// the current toolbar on every mutation, re-inserting when detached.
+		const placeSlot = () => {
+			const actionsContainer = composerStack.querySelector('.chat-input-toolbars > .chat-input-toolbar .monaco-toolbar .actions-container');
+			if (!actionsContainer) {
+				return;
+			}
+			if (slot.parentElement === actionsContainer && slot.isConnected) {
+				return;
+			}
+			const gearItem = actionsContainer.querySelector('.codicon-settings-gear')?.closest('.action-item');
+			const pickerItems = actionsContainer.querySelectorAll('.chat-input-picker-item');
+			const modelItem = pickerItems.length ? pickerItems[pickerItems.length - 1].closest('.action-item') : null;
+			if (gearItem) {
+				gearItem.insertAdjacentElement('beforebegin', slot);
+			} else if (modelItem) {
+				modelItem.insertAdjacentElement('afterend', slot);
+			} else {
+				actionsContainer.appendChild(slot);
+			}
+		};
+		placeSlot();
+		const observer = new MutationObserver(() => placeSlot());
+		observer.observe(composerStack, { childList: true, subtree: true });
+		this._register(toDisposable(() => observer.disconnect()));
 	}
 
 	/**

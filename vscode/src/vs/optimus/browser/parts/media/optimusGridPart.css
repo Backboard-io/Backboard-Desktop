@@ -36,7 +36,7 @@
 	top: 0;
 	left: 0;
 	right: 0;
-	height: 38px;
+	height: 32px;
 	z-index: 5000;
 	pointer-events: none;
 	display: flex;
@@ -51,6 +51,12 @@
 	background: color-mix(in srgb, var(--vscode-sideBar-background, #1e1e1e) 62%, transparent);
 	-webkit-backdrop-filter: blur(14px);
 	backdrop-filter: blur(14px);
+}
+
+/* macOS: the native traffic lights center ~4px below the strip's midline, so
+   nudge the chrome controls down to sit on the same line as them. */
+.agent-sessions-workbench.mac .optimus-window-chrome {
+	padding-top: 4px;
 }
 
 /* Windows/Linux: there are no traffic lights at the left edge, and the native
@@ -867,9 +873,9 @@
 
 /* Clear the window chrome strip. */
 .optimus-grid {
-	padding-top: 48px;
+	padding-top: 42px;
 }
 
 .optimus-kanban {
-	padding-top: 48px;
+	padding-top: 42px;
 }

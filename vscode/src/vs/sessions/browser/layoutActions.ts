@@ -50,7 +50,10 @@ class ToggleSidebarVisibilityAction extends Action2 {
 			},
 			menu: [
 				{
-					id: Menus.TitleBarLeftLayout,
+					// Rendered in the sidebar header's right cluster with the
+					// back/forward navigation; the left cluster holds only the
+					// mode switcher (same spot as Editor/Advanced).
+					id: Menus.TitleBarCenterLeft,
 					group: 'navigation',
 					order: 0,
 					when: ContextKeyExpr.and(IsAuxiliaryWindowContext.toNegated(), SessionsWelcomeVisibleContext.toNegated())
