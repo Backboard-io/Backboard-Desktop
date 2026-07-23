@@ -1,0 +1,173 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* T3 Code's chat palette, applied to the Simple-mode transcript.
+ * Ported from https://github.com/pingdotgg/t3code (apps/web/src/index.css).
+ *
+ *   MIT License. Copyright (c) 2026 T3 Tools Inc.
+ *
+ * `chatMarkdown.css` carries the typography and resolves colour through VS Code
+ * theme tokens so it works under any theme. This file pins those colours to T3's
+ * own dark values, which is what makes the chat read as theirs rather than
+ * merely well-spaced.
+ *
+ * Scope is deliberately narrow:
+ *
+ * - Simple window only. The Advanced (`optimus-window`) and Jarvis windows use
+ *   the same chat widget but keep the product's own chrome, so they are excluded
+ *   by the same root markers the vibrancy rules use.
+ * - Dark appearances only. T3 ships a light palette too, but the light theme here
+ *   already resolves sensibly through the VS Code tokens, and hard-coding a
+ *   second fixed palette would break every user theme that is not near-white.
+ * - Chat surfaces only, not the workbench shell. Repainting the shell would
+ *   fight the macOS vibrancy treatment on the sidebar. */
+
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart {
+	/* Source values, verbatim. */
+	--t3-background: #000;
+	--t3-foreground: #f1f3f7;
+	--t3-muted: #0a0a0a;
+	--t3-muted-foreground: #a3a3a3;
+	--t3-accent: #191a1d;
+	--t3-border: rgb(255 255 255 / 8%);
+	/* `--secondary` in their dark theme — the user bubble fill. */
+	--t3-secondary: rgb(255 255 255 / 4%);
+	/* Their `--info-foreground` in dark: Tailwind blue-400. */
+	--t3-link: #60a5fa;
+}
+
+/* ---- Transcript surface ---- */
+
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .interactive-session,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .interactive-session {
+	background: var(--t3-background);
+}
+
+/* ---- Prose ---- */
+
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .interactive-item-container .value .rendered-markdown,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .interactive-item-container .value .rendered-markdown {
+	/* `text-foreground/80` against their near-white, not against ours. */
+	color: color-mix(in srgb, var(--t3-foreground) 80%, transparent);
+}
+
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .value .rendered-markdown h1,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .value .rendered-markdown h2,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .value .rendered-markdown h3,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .value .rendered-markdown h4,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .value .rendered-markdown h5,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .value .rendered-markdown h1,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .value .rendered-markdown h2,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .value .rendered-markdown h3,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .value .rendered-markdown h4,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .value .rendered-markdown h5 {
+	color: var(--t3-foreground);
+}
+
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .value .rendered-markdown h6,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .value .rendered-markdown blockquote,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .value .rendered-markdown h6,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .value .rendered-markdown blockquote {
+	color: var(--t3-muted-foreground);
+}
+
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .value .rendered-markdown blockquote,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .value .rendered-markdown blockquote {
+	border-left-color: var(--t3-border);
+}
+
+/* ---- Links ---- */
+
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .value .rendered-markdown a,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .value .rendered-markdown a {
+	color: var(--t3-link);
+}
+
+/* ---- Code ---- */
+
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .value .rendered-markdown :not(pre):not(.monaco-editor) > code,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .value .rendered-markdown :not(pre):not(.monaco-editor) > code {
+	border-color: var(--t3-border);
+	background: var(--t3-muted);
+	color: var(--t3-foreground);
+}
+
+/* Their `.chat-markdown-codeblock` sits a shade off the page rather than
+ * matching it, so the block still reads as a distinct surface on pure black. */
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .value .interactive-result-code-block,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .value .interactive-result-code-block {
+	border-color: var(--t3-border);
+	background-color: var(--t3-muted);
+}
+
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .value .interactive-result-code-block .monaco-editor,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .value .interactive-result-code-block .monaco-editor .monaco-editor-background,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .value .interactive-result-code-block .monaco-editor,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .value .interactive-result-code-block .monaco-editor .monaco-editor-background {
+	/* The editor paints its own theme background over the container fill. */
+	background-color: var(--t3-muted);
+}
+
+/* ---- Tables and rules ---- */
+
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .value .rendered-markdown th,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .value .rendered-markdown td,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .value .rendered-markdown hr,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .value .rendered-markdown th,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .value .rendered-markdown td,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .value .rendered-markdown hr {
+	border-color: var(--t3-border);
+}
+
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .value .rendered-markdown th,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .value .rendered-markdown th {
+	color: var(--t3-foreground);
+}
+
+/* ---- Sent prompt bubble ---- */
+
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .interactive-item-container.interactive-request .value .rendered-markdown,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .interactive-item-container.interactive-request .value .rendered-markdown {
+	background-color: var(--t3-secondary) !important;
+	color: var(--t3-foreground);
+}
+
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .interactive-item-container.interactive-request .value .rendered-markdown.clickable:hover,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .interactive-item-container.interactive-request .value .rendered-markdown.clickable:hover {
+	background-color: var(--t3-accent) !important;
+}
+
+/* ---- Composer ---- */
+
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .interactive-session .chat-input-container,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .interactive-session .chat-input-container {
+	border-color: var(--t3-border);
+	background-color: var(--t3-muted);
+	/* Their `--radius`, one step up for the composer shell. */
+	border-radius: 0.75rem;
+}
+
+/* The input's Monaco layer paints its own theme background over the container
+ * fill above, which otherwise shows as a pale slab inside the composer. Must
+ * stay a *solid* colour: the editor reuses this class for the reverse-rounded
+ * selection corner pieces, and a transparent value makes those corners render
+ * as blocks (see the matching note in style.css). */
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background {
+	background-color: var(--t3-muted) !important;
+}
+
+/* ---- Header ---- */
+
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-header,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-header {
+	border-bottom-color: var(--t3-border);
+}
+
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-session-title-text,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-session-title-text {
+	color: var(--t3-muted-foreground);
+}
