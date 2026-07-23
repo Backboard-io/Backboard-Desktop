@@ -22,6 +22,7 @@ export class EditorGroupWatermark extends Disposable {
 
 	private static readonly SETTINGS_KEY = 'workbench.tips.enabled';
 
+	private readonly welcome: HTMLElement;
 	private readonly shortcuts: HTMLElement;
 	private readonly toolbarContainer: HTMLElement;
 	private readonly transientDisposables = this._register(new DisposableStore());
@@ -45,12 +46,18 @@ export class EditorGroupWatermark extends Disposable {
 			h('.editor-group-watermark-toolbar-container@toolbarContainer'),
 			h('.editor-group-watermark', [
 				h('.watermark-container', [
+					// The Backboard welcome lives in its own container: `.shortcuts` is
+					// hidden once the group is short (see `max-height-478px` in
+					// editorgroupview.css), which would make the welcome vanish as soon
+					// as the panel is dragged up.
+					h('.backboard-welcome@welcome'),
 					h('.shortcuts@shortcuts'),
 				])
 			])
 		]);
 
 		append(container, elements.root);
+		this.welcome = elements.welcome;
 		this.shortcuts = elements.shortcuts;
 		this.toolbarContainer = elements.toolbarContainer;
 
@@ -86,6 +93,7 @@ export class EditorGroupWatermark extends Disposable {
 	private render(): void {
 		this.enabled = this.configurationService.getValue<boolean>(EditorGroupWatermark.SETTINGS_KEY);
 
+		clearNode(this.welcome);
 		clearNode(this.shortcuts);
 		this.transientDisposables.clear();
 
@@ -152,6 +160,6 @@ export class EditorGroupWatermark extends Disposable {
 			),
 		);
 
-		append(this.shortcuts, welcome);
+		append(this.welcome, welcome);
 	}
 }

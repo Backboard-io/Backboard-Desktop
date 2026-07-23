@@ -111,6 +111,8 @@
 .monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper > .editor-group-watermark > .watermark-container {
 	display: flex;
 	width: 100%;
+	max-height: 100%;
+	min-height: 0;
 	flex-direction: column;
 	align-items: center;
 	justify-content: center;
@@ -154,13 +156,25 @@
 	width: 100%;
 }
 
+/* The upstream tips list is not rendered in Backboard; collapse it so the
+   `.watermark-container` gap does not reserve space for an empty element. */
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .shortcuts:empty {
+	display: none;
+}
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .backboard-welcome {
+	width: 100%;
+	min-height: 0;
+	overflow: auto;
+}
+
 .monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .backboard-welcome-page {
 	box-sizing: border-box;
 	display: flex;
 	align-items: flex-start;
 	justify-content: center;
 	width: 100%;
-	height: 100%;
+	min-height: 100%;
 	padding: clamp(32px, 8vh, 96px) 40px 32px;
 	color: var(--vscode-editor-foreground);
 	font-family: var(--vscode-font-family, "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, system-ui, sans-serif);
@@ -323,10 +337,24 @@
 	outline-offset: 2px;
 }
 
+/* Secondary groups and auxiliary windows show the compact watermark only, never
+   the tips list or the Backboard welcome. Note that short groups are NOT hidden
+   here: the welcome stays put when the panel is dragged up, it just gets
+   tighter padding (see the `max-height-478px` rule below). */
 .monaco-workbench .part.editor > .content:not(.empty) .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .shortcuts,
 .monaco-workbench .part.editor > .content.auxiliary .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .shortcuts,
-.monaco-workbench .part.editor > .content .editor-group-container.max-height-478px > .editor-group-watermark-wrapper .editor-group-watermark .shortcuts {
+.monaco-workbench .part.editor > .content .editor-group-container.max-height-478px > .editor-group-watermark-wrapper .editor-group-watermark .shortcuts,
+.monaco-workbench .part.editor > .content:not(.empty) .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .backboard-welcome,
+.monaco-workbench .part.editor > .content.auxiliary .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .backboard-welcome {
 	display: none;
+}
+
+/* When the group gets short — e.g. the user drags the panel up to enlarge the
+   terminal — tighten the welcome instead of hiding it. */
+.monaco-workbench .part.editor > .content .editor-group-container.max-height-478px > .editor-group-watermark-wrapper .editor-group-watermark .backboard-welcome-page {
+	align-items: center;
+	padding-top: 24px;
+	padding-bottom: 24px;
 }
 
 .monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark-wrapper .editor-group-watermark .shortcuts > .watermark-box {
