@@ -3,20 +3,17 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { KeyChord, KeyCode, KeyMod } from '../../base/common/keyCodes.js';
-import { localize, localize2 } from '../../nls.js';
-import { Categories } from '../../platform/action/common/actionCommonCategories.js';
-import { Action2, MenuId, MenuRegistry, registerAction2 } from '../../platform/actions/common/actions.js';
+import { localize } from '../../nls.js';
 import { Extensions as ConfigurationExtensions, IConfigurationRegistry } from '../../platform/configuration/common/configurationRegistry.js';
-import { IContextKeyService } from '../../platform/contextkey/common/contextkey.js';
-import { ServicesAccessor } from '../../platform/instantiation/common/instantiation.js';
-import { KeybindingsRegistry, KeybindingWeight } from '../../platform/keybinding/common/keybindingsRegistry.js';
 import { Registry } from '../../platform/registry/common/platform.js';
-import { InEditorZenModeContext, IsAuxiliaryWindowFocusedContext } from '../common/contextkeys.js';
-import { IWorkbenchLayoutService } from '../services/layout/browser/layoutService.js';
-import { ZenHideEditorTabsAction, ZenShowMultipleEditorTabsAction, ZenShowSingleEditorTabAction } from './actions/layoutActions.js';
 
 // --- Configuration
+//
+// Zen Mode is not offered in Backboard Studio: there is no command, keybinding
+// or menu entry that can enter it (see the removed entrypoints below). The
+// `zenMode.*` settings stay registered so the layout code that still reads them
+// keeps resolving its defaults, and so re-enabling the feature is a matter of
+// putting the entrypoints back.
 
 (function registerZenModeConfiguration(): void {
 	const registry = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration);
@@ -77,66 +74,9 @@ import { ZenHideEditorTabsAction, ZenShowMultipleEditorTabsAction, ZenShowSingle
 	});
 })();
 
-// --- Zen Mode Editor Tabs Actions
-
-registerAction2(ZenHideEditorTabsAction);
-registerAction2(ZenShowMultipleEditorTabsAction);
-registerAction2(ZenShowSingleEditorTabAction);
-
-// --- Tab Bar Submenu in View Appearance Menu (Zen Mode variant)
-
-MenuRegistry.appendMenuItem(MenuId.MenubarAppearanceMenu, {
-	submenu: MenuId.EditorTabsBarShowTabsZenModeSubmenu,
-	title: localize('tabBar', "Tab Bar"),
-	group: '3_workbench_layout_move',
-	order: 10,
-	when: InEditorZenModeContext
-});
-
-// --- Toggle Zen Mode
-
-registerAction2(class extends Action2 {
-
-	constructor() {
-		super({
-			id: 'workbench.action.toggleZenMode',
-			title: {
-				...localize2('toggleZenMode', "Toggle Zen Mode"),
-				mnemonicTitle: localize({ key: 'miToggleZenMode', comment: ['&& denotes a mnemonic'] }, "Zen Mode"),
-			},
-			precondition: IsAuxiliaryWindowFocusedContext.toNegated(),
-			category: Categories.View,
-			f1: true,
-			keybinding: {
-				weight: KeybindingWeight.WorkbenchContrib,
-				primary: KeyChord(KeyMod.CtrlCmd | KeyCode.KeyK, KeyCode.KeyZ)
-			},
-			toggled: InEditorZenModeContext,
-			menu: [{
-				id: MenuId.MenubarAppearanceMenu,
-				group: '1_toggle_view',
-				order: 2
-			}]
-		});
-	}
-
-	run(accessor: ServicesAccessor): void {
-		return accessor.get(IWorkbenchLayoutService).toggleZenMode();
-	}
-});
-
-// --- Exit Zen Mode
-
-KeybindingsRegistry.registerCommandAndKeybindingRule({
-	id: 'workbench.action.exitZenMode',
-	weight: KeybindingWeight.EditorContrib - 1000,
-	handler(accessor: ServicesAccessor) {
-		const layoutService = accessor.get(IWorkbenchLayoutService);
-		const contextKeyService = accessor.get(IContextKeyService);
-		if (InEditorZenModeContext.getValue(contextKeyService)) {
-			layoutService.toggleZenMode();
-		}
-	},
-	when: InEditorZenModeContext,
-	primary: KeyChord(KeyCode.Escape, KeyCode.Escape)
-});
+// --- Removed entrypoints
+//
+// The `workbench.action.toggleZenMode` action (Command Palette entry, Ctrl/Cmd+K Z
+// keybinding and View > Appearance menu item), the `workbench.action.exitZenMode`
+// Escape Escape keybinding, and the Zen Mode "Tab Bar" submenu used to be
+// registered here. They are intentionally gone so Zen Mode is unreachable.

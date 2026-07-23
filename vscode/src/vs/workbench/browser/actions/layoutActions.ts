@@ -57,7 +57,6 @@ const quickInputAlignmentCenterIcon = registerIcon('quickInputAlignmentCenter', 
 
 const fullscreenIcon = registerIcon('fullscreen', Codicon.screenFull, localize('fullScreenIcon', "Represents full screen"));
 const centerLayoutIcon = registerIcon('centerLayoutIcon', Codicon.layoutCentered, localize('centerLayoutIcon', "Represents centered layout mode"));
-const zenModeIcon = registerIcon('zenMode', Codicon.target, localize('zenModeIcon', "Represents zen mode"));
 
 export const ToggleActivityBarVisibilityActionId = 'workbench.action.toggleActivityBarVisibility';
 
@@ -1389,7 +1388,6 @@ const QuickInputActions: CustomizeLayoutItem[] = [
 
 const MiscLayoutOptions: CustomizeLayoutItem[] = [
 	CreateOptionLayoutItem('workbench.action.toggleFullScreen', IsMainWindowFullscreenContext, localize('fullscreen', "Full Screen"), fullscreenIcon),
-	CreateOptionLayoutItem('workbench.action.toggleZenMode', InEditorZenModeContext, localize('zenMode', "Zen Mode"), zenModeIcon),
 	CreateOptionLayoutItem('workbench.action.toggleCenteredLayout', IsMainEditorCenteredLayoutContext, localize('centeredLayout', "Centered Layout"), centerLayoutIcon),
 ];
 
