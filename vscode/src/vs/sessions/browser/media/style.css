@@ -1055,30 +1055,45 @@
 	box-sizing: border-box;
 }
 
+/* The sent prompt reads as a distinct speaker turn: a rounded bubble pushed to
+ * the trailing edge, with the agent's reply running full width beneath it. The
+ * bubble is capped well short of the column so the two turns stay visually
+ * distinct even on a wide panel. */
 .agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container.interactive-request,
 .agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-item-container.interactive-request {
-	align-items: flex-start;
+	align-items: flex-end;
 }
 
 .agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container.interactive-request .value,
 .agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-item-container.interactive-request .value {
-	align-items: flex-start !important;
+	align-items: flex-end !important;
 }
 
 .agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown,
 .agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown {
-	width: auto;
-	max-width: 100%;
+	width: fit-content;
+	max-width: 75%;
 	margin: 0 0 8px;
-	padding: 0;
+	padding: 12px 18px;
 	border: 0;
-	border-radius: 0;
-	background-color: transparent !important;
+	border-radius: 18px;
+	/* Lifted off the page rather than a fixed grey, so the bubble reads
+	   correctly against both light and dark themes. */
+	background-color: color-mix(in srgb, var(--vscode-foreground) 8%, transparent) !important;
+	/* Body weight and size: the bubble itself marks the speaker turn, so the
+	   text doesn't also need to be heavier than the agent's prose. */
+	font-size: var(--vscode-chat-font-size-body-l);
+	font-weight: normal;
+	line-height: 1.45;
+	/* Prompts wrap inside the bubble; the trailing-edge alignment applies to the
+	   bubble, not to the text within it. */
+	text-align: left;
+	color: var(--vscode-foreground);
 }
 
 .agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown.clickable:hover,
 .agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown.clickable:hover {
-	background-color: transparent !important;
+	background-color: color-mix(in srgb, var(--vscode-foreground) 12%, transparent) !important;
 }
 
 .agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container.interactive-request .value > .rendered-markdown p,
