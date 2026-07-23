@@ -315,3 +315,43 @@
 	border: 0;
 	border-top: 1px solid var(--vscode-widget-border, color-mix(in srgb, var(--vscode-foreground) 14%, transparent));
 }
+
+/* ---- Work rows ----
+ * Tool and reasoning headers, matched to the source's work-log row: 12px on a
+ * 20px line, 6px gap, small hit padding on a rounded hover plate, and a
+ * chevron that is quieter than its label. Fixed 12px rather than an `em` of
+ * the 14px prose — these rows are chrome around the message, not part of it,
+ * and the source sizes them independently of body text for the same reason. */
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .chat-used-context-label .monaco-button.monaco-icon-button,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .chat-used-context-label .monaco-button.monaco-icon-button {
+	gap: 6px;
+	padding: 2px 4px;
+	border-radius: 6px;
+	font-size: 12px;
+	line-height: 20px;
+	color: color-mix(in srgb, var(--vscode-foreground) 82%, transparent);
+	transition: background-color 150ms ease-out, color 120ms ease;
+}
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .chat-used-context-label .monaco-button.monaco-icon-button:hover,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .chat-used-context-label .monaco-button.monaco-icon-button:hover {
+	background-color: color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
+	color: var(--vscode-foreground);
+}
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .chat-used-context-label .monaco-button.monaco-icon-button .monaco-button-mdlabel,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .chat-used-context-label .monaco-button.monaco-icon-button .monaco-button-mdlabel {
+	font-size: 12px;
+	line-height: 20px;
+	font-weight: 500;
+}
+
+/* The twistie reads as a hint, not a control: smaller and dimmer than the
+ * label it belongs to. */
+.agent-sessions-workbench .part.sessionspart .interactive-session .chat-used-context-label .monaco-button.monaco-icon-button > .codicon,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .chat-used-context-label .monaco-button.monaco-icon-button > .codicon {
+	font-size: 14px;
+	opacity: 0.7;
+	color: color-mix(in srgb, var(--vscode-descriptionForeground) 65%, transparent);
+}

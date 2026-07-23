@@ -160,6 +160,25 @@
 	background-color: var(--t3-muted) !important;
 }
 
+/* ---- Work rows ---- */
+
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .chat-used-context-label .monaco-button.monaco-icon-button,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .chat-used-context-label .monaco-button.monaco-icon-button {
+	color: color-mix(in srgb, var(--t3-foreground) 82%, transparent);
+}
+
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .chat-used-context-label .monaco-button.monaco-icon-button:hover,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .chat-used-context-label .monaco-button.monaco-icon-button:hover {
+	/* Their `hover:bg-accent/20` against the dark accent. */
+	background-color: color-mix(in srgb, var(--t3-accent) 20%, transparent);
+	color: var(--t3-foreground);
+}
+
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .chat-used-context-label .monaco-button.monaco-icon-button > .codicon,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .chat-used-context-label .monaco-button.monaco-icon-button > .codicon {
+	color: color-mix(in srgb, var(--t3-muted-foreground) 65%, transparent);
+}
+
 /* ---- Header ---- */
 
 .agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-header,
