@@ -172,6 +172,13 @@ export interface ICommonNativeHostService {
 	setBackgroundThrottling(allowed: boolean): Promise<void>;
 
 	/**
+	 * Schedules a full repaint of the window's web contents. Used to clear
+	 * stale composited pixels (ghosting) that transparent vibrancy windows
+	 * can accumulate when overlays (menus, pickers) are removed.
+	 */
+	invalidateWindowRepaint(options?: INativeHostOptions): Promise<void>;
+
+	/**
 	 * Make the window focused.
 	 * @param options specify the specific window to focus and the focus mode.
 	 * Defaults to {@link FocusMode.Transfer}.

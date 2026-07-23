@@ -1040,6 +1040,10 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		this.storageService = accessor.get(IStorageService);
 		this._isOptimusWindow = accessor.get(IWorkbenchEnvironmentService).isOptimusWindow;
 		this._isJarvisWindow = accessor.get(IWorkbenchEnvironmentService).isJarvisWindow;
+		// Root marker classes so CSS can scope per window mode (e.g. the
+		// translucent sidebar treatment is Simple-window only, see style.css).
+		this.mainContainer.classList.toggle('optimus-window', this._isOptimusWindow);
+		this.mainContainer.classList.toggle('jarvis-window', this._isJarvisWindow);
 		accessor.get(ITitleService);
 
 		// Register layout listeners

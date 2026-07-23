@@ -500,6 +500,12 @@ export class NativeHostMainService extends Disposable implements INativeHostMain
 		window?.win?.webContents?.setBackgroundThrottling(allowed);
 	}
 
+	async invalidateWindowRepaint(windowId: number | undefined, options?: INativeHostOptions): Promise<void> {
+		const window = this.windowById(options?.targetWindowId, windowId);
+
+		window?.win?.webContents?.invalidate();
+	}
+
 	//#endregion
 
 

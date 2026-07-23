@@ -103,17 +103,28 @@
  * sidebar region. See-through comes from the vibrancy material alone: there
  * is deliberately NO in-app backdrop-filter blur here (frosted glass removed
  * per user request). High contrast stays opaque via the rules above/below,
- * and reduced transparency via the media query below. */
-.monaco-workbench.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light) {
-	/* Opaque sidebar: the translucent glass tint (formerly 52% over native
-	 * vibrancy) let whatever moved behind the window shift the pane's colour
-	 * while in use. Paint the solid theme colour instead; the vibrancy
-	 * material stays attached but nothing renders with alpha over it. */
-	--sessions-sidebar-region-background: var(--vscode-sideBar-background, var(--vscode-editor-background));
-	background: var(--sessions-main-region-background);
+ * and reduced transparency via the media query below.
+ *
+ * Simple window only: the Advanced (Optimus) and Jarvis windows scroll dense
+ * content beside the panel, and painting alpha over the native vibrancy there
+ * smears while scrolling — those windows keep the opaque base rendering via
+ * the .optimus-window/.jarvis-window root markers. */
+.monaco-workbench.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light):not(.optimus-window):not(.jarvis-window) {
+	/* Tint balance point: 42% washed out over bright desktops, 62% read as
+	 * not see-through enough (both user-rejected) — keep at 52%. */
+	--sessions-sidebar-region-background: color-mix(in srgb, var(--vscode-sideBar-background, var(--vscode-editor-background)) 52%, transparent);
+	background: transparent;
 }
 
-.monaco-workbench.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light)::before {
+.monaco-workbench.vs.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light):not(.optimus-window):not(.jarvis-window) {
+	/* Light-appearance vibrancy renders naturally lighter/whiter than dark
+	 * (same macOS material, different visual weight per appearance), so the
+	 * same tint percentage as dark reads far more opaque here — needs a
+	 * lower value to actually show the desktop through it. */
+	--sessions-sidebar-region-background: color-mix(in srgb, color-mix(in srgb, var(--vscode-sideBar-background, color-mix(in srgb, var(--vscode-editor-background) 94%, var(--vscode-foreground) 6%)) 56%, var(--vscode-foreground) 44%) 32%, transparent);
+}
+
+.monaco-workbench.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light):not(.optimus-window):not(.jarvis-window)::before {
 	/* Only visible behind the translucent (sidebar) region; the panel is
 	 * already backed by native vibrancy, so keep this to a faint whisper
 	 * rather than a second light source stacking on top of it. */
@@ -128,7 +139,7 @@
 		background: var(--sessions-main-region-background);
 	}
 
-	.monaco-workbench.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light)::before {
+	.monaco-workbench.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light):not(.optimus-window):not(.jarvis-window)::before {
 		opacity: 1;
 	}
 }

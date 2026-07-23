@@ -269,7 +269,13 @@ export function defaultBrowserWindowOptions(accessor: ServicesAccessor, windowSt
 	if (overrides?.vibrancy && isMacintosh) {
 		options.vibrancy = overrides.vibrancy;
 		options.visualEffectState = 'active';
-		options.backgroundColor = '#00000000'; // vibrancy is only visible through a fully transparent background color
+		// Vibrancy is only visible through a transparent background color, but a
+		// FULLY transparent one (alpha 0) makes Chromium skip clearing damaged
+		// regions on macOS: scrolling and large style flips then smear stale
+		// composited pixels over the glass (ghost/double-render artifacts) and
+		// the material reads as opaque until something repaints. Alpha 1/255 is
+		// visually indistinguishable while forcing proper clears every frame.
+		options.backgroundColor = '#01000000';
 	}
 
 	if (overrides?.notResizable) {

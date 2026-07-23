@@ -844,8 +844,27 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 		try {
 			this._win.setBackgroundColor('#00000000');
 			this._win.setVibrancy(AGENTS_WINDOW_VIBRANCY ?? null);
+			this._win.webContents.invalidate(); // replace any stale composited frame in the same pass
 		} catch (error) {
 			this.logService.warn(`window#${reason}: failed to re-assert window vibrancy: ${error instanceof Error ? error.message : String(error)}`);
+		}
+	}
+
+	/**
+	 * macOS: transparent vibrancy windows can accumulate stale composited
+	 * pixels (ghost remnants of closed menus/overlays) because the compositor
+	 * does not reliably clear damaged regions over a fully transparent
+	 * backing. Scheduling a full repaint replaces the entire frame, wiping
+	 * any such artifacts. Cheap (one frame) and guarded to vibrancy windows.
+	 */
+	private invalidateVibrancyRepaint(reason: string): void {
+		if (!isMacintosh || !this._hasVibrancy || !this._win || this._win.isDestroyed()) {
+			return;
+		}
+		try {
+			this._win.webContents.invalidate();
+		} catch (error) {
+			this.logService.warn(`window#${reason}: failed to schedule window repaint: ${error instanceof Error ? error.message : String(error)}`);
 		}
 	}
 
@@ -903,6 +922,11 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 			// window and can drop the vibrancy material. IThemeMainService is
 			// already a dependency, so reuse its color-scheme signal here.
 			this._register(this.themeMainService.onDidChangeColorScheme(() => this.reapplyVibrancy('color-scheme')));
+
+			// Self-heal stale composited pixels (ghosting) whenever the user
+			// returns to a vibrancy window: a full repaint replaces whatever
+			// frame remnants the compositor failed to clear while unfocused.
+			this._register(Event.fromNodeEventEmitter(this._win, 'focus')(() => this.invalidateVibrancyRepaint('focus')));
 		}
 
 		// Window (Un)Maximize

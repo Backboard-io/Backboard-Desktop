@@ -194,6 +194,7 @@ export class TestNativeHostService implements INativeHostService {
 	async getScreenshot(rect?: IRectangle): Promise<VSBuffer | undefined> { return undefined; }
 	async uploadFileViaMobileApi(_token: string, _repoId: string, fileName: string, _fileBytes: VSBuffer, contentType: string): Promise<{ fileName: string; assetUrl: string; contentType: string }> { return { fileName, assetUrl: '', contentType }; }
 	async uploadErrorReport(_url: string, _content: string): Promise<void> { }
+	async invalidateWindowRepaint(): Promise<void> { }
 	async showToast(options: IToastOptions): Promise<IToastResult> { return { supported: false, clicked: false }; }
 	async clearToast(id: string): Promise<void> { }
 	async clearToasts(): Promise<void> { }
