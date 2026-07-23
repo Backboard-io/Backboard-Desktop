@@ -585,9 +585,9 @@ export class SessionTypePicker extends Disposable {
 		// In web (vscode.dev/agents) the host filter already scopes the
 		// workbench to a single agent host, so when that host advertises only
 		// one harness there is nothing to pick — hide the trigger entirely.
-		// Note: the existing CSS rule on `.session-workspace-picker-with-label`
-		// uses `:has(+ .sessions-chat-session-type-picker .action-label.hidden)`
-		// to also hide the "with" connector when the trigger is hidden.
+		// Note: the existing CSS rule on `.new-chat-header-type-picker`
+		// uses `:has(.sessions-chat-session-type-picker .action-label.hidden)`
+		// to also hide the header-row picker container when the trigger is hidden.
 		const hideForSingleHarness = isWeb && this._folderSessionTypes.length <= 1;
 		// Only hide when there is genuinely nothing to show. The folder list
 		// is transiently empty while providers (re-)advertise their session

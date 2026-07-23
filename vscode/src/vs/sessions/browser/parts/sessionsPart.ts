@@ -70,6 +70,8 @@ export class SessionsPart extends Part {
 
 	/** Header strip absorbed from the former integrated chrome bar. */
 	private _panelHeader: SessionsPanelHeader | undefined;
+	/** Header-row host for the new-chat session-type picker (see {@link IChatViewOptions.headerTypePickerSlot}). */
+	private _headerTypePickerSlot: HTMLElement | undefined;
 
 	/** Lazily-created progress bar shown at the top of the content area. */
 	private _progressBar: ProgressBar | undefined;
@@ -186,6 +188,10 @@ export class SessionsPart extends Part {
 			],
 			windowControls: { left: true, right: true },
 		}));
+
+		// Host for the new-chat session-type (agent host) picker, so it renders
+		// in the same header row as the layout toggles instead of inside the page.
+		this._headerTypePickerSlot = this._panelHeader.createLeftSlot('sessions-header-type-picker-slot');
 	}
 
 	protected override createContentArea(parent: HTMLElement): HTMLElement {
@@ -269,7 +275,7 @@ export class SessionsPart extends Part {
 			const slot = this._slots[i];
 			const session = visible[i];
 			slot.boundSessionId = session?.sessionId;
-			slot.view.openSession(session, { renderSessionTypePickerInControls: this._renderSessionTypePickerInControls });
+			slot.view.openSession(session, { renderSessionTypePickerInControls: this._renderSessionTypePickerInControls, headerTypePickerSlot: this._headerTypePickerSlot });
 		}
 
 		// Mark the active session's element for styling/focus indication.

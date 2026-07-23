@@ -189,10 +189,10 @@
 	align-items: center;
 	justify-content: center;
 	gap: 14px;
-	/* Wide enough that the one-line heading — now carrying both the workspace
-	 * and agent pickers ("... in <ws> with <agent>?") — fits without wrapping;
-	 * still bounded to the region so it never spills off-screen. The title's
-	 * fluid font-size shrinks it to fit on narrower regions. */
+	/* Wide enough that the one-line heading — carrying the workspace picker
+	 * ("... in <ws>?") — fits without wrapping; still bounded to the region so
+	 * it never spills off-screen. The title's fluid font-size shrinks it to
+	 * fit on narrower regions. */
 	width: min(960px, calc(100% - 48px));
 	align-self: end;
 	justify-self: center;
@@ -694,74 +694,6 @@
 }
 
 .new-chat-middle-title .new-chat-middle-title-picker .sessions-chat-picker-slot.sessions-chat-workspace-picker .action-label .sessions-chat-dropdown-chevron {
-	font-size: 18px;
-	margin-left: 2px;
-	color: var(--vscode-descriptionForeground);
-	flex-shrink: 0;
-	align-self: center;
-	transform: translateY(2px);
-}
-
-/* The session-type (agent) picker sits at the end of the same heading
-	sentence ("... with <agent>?"). Scale it to the heading's type exactly
-	like the workspace picker above so both dropdowns read at the same size;
-	unlike the workspace picker, its leading icon (the agent's identity mark)
-	stays visible, sized to the heading line. These selectors repeat the
-	picker-slot classes so they beat the generic chip-size rules further down
-	this file. */
-.new-chat-middle-title .new-chat-middle-title-picker.sessions-chat-session-type-picker,
-.new-chat-middle-title .new-chat-middle-title-picker .sessions-chat-picker-slot.sessions-chat-session-type-picker {
-	display: inline-flex;
-	align-items: center;
-	vertical-align: bottom;
-	max-width: 100%;
-	min-width: 0;
-}
-
-.new-chat-middle-title .new-chat-middle-title-picker .sessions-chat-picker-slot.sessions-chat-session-type-picker .action-label {
-	display: inline-flex;
-	align-items: baseline;
-	gap: 6px;
-	height: auto;
-	padding: 0 8px;
-	margin: 0 -4px;
-	font: inherit;
-	line-height: inherit;
-	color: inherit;
-	background-color: transparent;
-	border: none;
-	border-radius: var(--vscode-cornerRadius-medium, 10px);
-	cursor: pointer;
-	max-width: 100%;
-	min-width: 0;
-}
-
-.new-chat-middle-title .new-chat-middle-title-picker .sessions-chat-picker-slot.sessions-chat-session-type-picker .action-label:hover,
-.new-chat-middle-title .new-chat-middle-title-picker .sessions-chat-picker-slot.sessions-chat-session-type-picker .action-label:focus-visible {
-	background-color: var(--vscode-toolbar-hoverBackground);
-	color: inherit;
-}
-
-.new-chat-middle-title .new-chat-middle-title-picker .sessions-chat-picker-slot.sessions-chat-session-type-picker .action-label > .codicon:not(.sessions-chat-dropdown-chevron) {
-	display: inline-flex;
-	align-self: center;
-	/* Match the heading's cap height rather than the compact chip size. */
-	font-size: 0.8em;
-	margin: 0;
-	color: inherit;
-}
-
-.new-chat-middle-title .new-chat-middle-title-picker .sessions-chat-picker-slot.sessions-chat-session-type-picker .action-label .sessions-chat-dropdown-label {
-	font: inherit;
-	margin-left: 0;
-	min-width: 0;
-	max-width: 18ch;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-.new-chat-middle-title .new-chat-middle-title-picker .sessions-chat-picker-slot.sessions-chat-session-type-picker .action-label .sessions-chat-dropdown-chevron {
 	font-size: 18px;
 	margin-left: 2px;
 	color: var(--vscode-descriptionForeground);
@@ -1350,7 +1282,9 @@
 	display: none;
 }
 
-.session-workspace-picker-with-label:has(+ .sessions-chat-session-type-picker .action-label.hidden) {
+/* When the session-type picker hides its trigger (e.g. web scoped to a single
+   harness), hide its header-row container as well. */
+.new-chat-header-type-picker:has(.sessions-chat-session-type-picker .action-label.hidden) {
 	display: none;
 }
 
@@ -1551,16 +1485,75 @@
 	visibility: visible;
 }
 
-/* Session-type (agent host) picker inside the composer's primary toolbar,
-   between the model picker and the options gear. */
-.sessions-chat-widget .new-chat-composer-type-picker {
+/* Session-type (agent host) picker for the new-chat (agents) page. Preferred
+   mount point is the sessions header row (the strip with the layout toggles),
+   via the part-provided `.sessions-header-type-picker-slot`; when no slot is
+   provided the picker overlays the page's own header band instead, mirroring
+   the actions toolbar (.new-chat-middle-toolbar) pinned to the right edge. */
+.sessions-panel-header .sessions-header-type-picker-slot {
 	display: flex;
 	align-items: center;
 	min-width: 0;
-	margin: 0 2px;
+	pointer-events: auto;
+	-webkit-app-region: no-drag;
 }
 
-.sessions-chat-widget .new-chat-composer-type-picker .sessions-chat-picker-slot {
+.new-chat-header-type-picker {
 	display: flex;
 	align-items: center;
+	min-width: 0;
+}
+
+.sessions-chat-widget > .new-chat-header-type-picker {
+	position: absolute;
+	top: 12px;
+	left: 16px;
+	z-index: 40;
+	pointer-events: auto;
+	-webkit-app-region: no-drag;
+}
+
+.new-chat-header-type-picker .new-chat-header-type-picker-slot {
+	display: inline-flex;
+	align-items: center;
+	min-width: 0;
+}
+
+.new-chat-header-type-picker .sessions-chat-picker-slot.sessions-chat-session-type-picker .action-label {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	height: auto;
+	padding: 3px 8px;
+	margin: 0;
+	font-size: 13px;
+	line-height: 1.4;
+	color: var(--vscode-foreground);
+	background-color: transparent;
+	border: none;
+	border-radius: var(--vscode-cornerRadius-medium, 8px);
+	cursor: pointer;
+	max-width: 100%;
+	min-width: 0;
+}
+
+.new-chat-header-type-picker .sessions-chat-picker-slot.sessions-chat-session-type-picker .action-label:hover,
+.new-chat-header-type-picker .sessions-chat-picker-slot.sessions-chat-session-type-picker .action-label:focus-visible {
+	background-color: var(--vscode-toolbar-hoverBackground);
+	color: var(--vscode-foreground);
+}
+
+.new-chat-header-type-picker .sessions-chat-picker-slot.sessions-chat-session-type-picker .action-label .sessions-chat-dropdown-label {
+	min-width: 0;
+	max-width: 24ch;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.new-chat-header-type-picker .sessions-chat-picker-slot.sessions-chat-session-type-picker .action-label .sessions-chat-dropdown-chevron {
+	font-size: 14px;
+	margin-left: 0;
+	color: var(--vscode-descriptionForeground);
+	flex-shrink: 0;
 }

@@ -71,6 +71,8 @@ export class SessionsPanelHeader extends Disposable {
 
 	readonly element: HTMLElement;
 
+	private _leftContent!: HTMLElement;
+
 	private readonly welcomeHiddenContainers: HTMLElement[] = [];
 
 	constructor(
@@ -97,6 +99,7 @@ export class SessionsPanelHeader extends Disposable {
 		prepend(this.element, $('div.titlebar-drag-region'));
 
 		const leftContent = append(this.element, $('.sessions-panel-header-left'));
+		this._leftContent = leftContent;
 		const centerContent = append(this.element, $('.sessions-panel-header-center'));
 		const rightContent = append(this.element, $('.sessions-panel-header-right'));
 
@@ -131,6 +134,16 @@ export class SessionsPanelHeader extends Disposable {
 	 */
 	get height(): number {
 		return this.element.offsetHeight;
+	}
+
+	/**
+	 * Appends a container to the header's left section (after the window
+	 * controls spacer and left toolbars) for custom widget content, e.g. the
+	 * new-chat session-type picker, and returns it. The caller owns the
+	 * container's content.
+	 */
+	createLeftSlot(className: string): HTMLElement {
+		return append(this._leftContent, $(`div.${className}`));
 	}
 
 	private createToolbar(parent: HTMLElement, toolbar: ISessionsPanelHeaderToolbar): void {

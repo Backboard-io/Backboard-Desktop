@@ -32,6 +32,14 @@ export interface IChatViewOptions {
 	 * changes, so the placement stays stable for the view's lifetime.
 	 */
 	readonly renderSessionTypePickerInControls: IObservable<boolean>;
+
+	/**
+	 * Host element in the sessions header row (the strip with the layout
+	 * toggles) for the session-type (agent host) picker. When present, the
+	 * new-chat view mounts its picker here instead of overlaying its own
+	 * header-row container inside the page.
+	 */
+	readonly headerTypePickerSlot?: HTMLElement;
 }
 
 /**

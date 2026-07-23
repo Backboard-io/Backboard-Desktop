@@ -297,10 +297,8 @@ export class NewChatWidget extends Disposable {
 	private _middleTitleSuffix: HTMLElement | undefined;
 	/** Slot inside the middle heading that hosts the workspace picker trigger. */
 	private _middleTitlePickerSlot: HTMLElement | undefined;
-	/** The " with " connector between the workspace and agent picker slots. */
-	private _middleTitleConnector: HTMLElement | undefined;
-	/** Slot inside the middle heading that hosts the session-type (agent) picker trigger. */
-	private _middleTitleTypePickerSlot: HTMLElement | undefined;
+	/** Slot in the page's top-left corner that hosts the session-type (agent) picker trigger. */
+	private _sessionTypePickerSlot: HTMLElement | undefined;
 
 	/** Recreates the draft once a better/late-registering provider can serve the folder (see {@link _createNewSession}). */
 	private readonly _pendingPreferredUpgrade = new MutableDisposable<IDisposable>();
@@ -316,7 +314,7 @@ export class NewChatWidget extends Disposable {
 	private readonly _session: IObservable<IActiveSession | undefined>;
 
 	constructor(
-		_options: IChatViewOptions,
+		private readonly _options: IChatViewOptions,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@IContextKeyService contextKeyService: IContextKeyService,
 		@ILogService private readonly logService: ILogService,
@@ -453,6 +451,20 @@ export class NewChatWidget extends Disposable {
 
 	render(parent: HTMLElement): void {
 		const element = dom.append(parent, dom.$('.sessions-chat-widget'));
+		// The session-type (agent host) picker renders in the sessions header
+		// row (the strip with the layout toggles) when the part provides a
+		// slot for it; otherwise it overlays the page's own header band. It is
+		// pulled out of the heading sentence so the heading stays on a single
+		// line.
+		const headerSlot = this._options.headerTypePickerSlot;
+		if (headerSlot) {
+			dom.clearNode(headerSlot);
+		}
+		const typePickerBar = dom.append(headerSlot ?? element, dom.$('.new-chat-header-type-picker'));
+		if (headerSlot) {
+			this._register(toDisposable(() => typePickerBar.remove()));
+		}
+		this._sessionTypePickerSlot = dom.append(typePickerBar, dom.$('span.new-chat-header-type-picker-slot.sessions-chat-session-type-picker'));
 		const chatWidgetContainer = dom.append(element, dom.$('.new-chat-widget-container'));
 		const chatWidgetContent = dom.append(chatWidgetContainer, dom.$('.new-chat-widget-content'));
 		this._chatWidgetContent = chatWidgetContent;
@@ -465,7 +477,6 @@ export class NewChatWidget extends Disposable {
 		// on web as a host for the no-agent-host empty state.
 		const emptyStateContainer = isWeb ? this._renderComposerWorkspaceRow(composerStack) : undefined;
 		this._widget.render(composerStack);
-		this._mountComposerSessionTypePicker(composerStack);
 		this._placeWorkspaceRowBelowInput(composerStack);
 		// On web (vscode.dev / insiders.vscode.dev) the workspace picker is
 		// scoped to the currently selected agent host. When no hosts are
@@ -686,8 +697,6 @@ export class NewChatWidget extends Disposable {
 		this._middleTitle = dom.append(middle, dom.$('h2.new-chat-middle-title'));
 		this._middleTitlePrefix = dom.append(this._middleTitle, dom.$('span.new-chat-middle-title-text'));
 		this._middleTitlePickerSlot = dom.append(this._middleTitle, dom.$('span.new-chat-middle-title-picker'));
-		this._middleTitleConnector = dom.append(this._middleTitle, dom.$('span.new-chat-middle-title-text.session-workspace-picker-with-label'));
-		this._middleTitleTypePickerSlot = dom.append(this._middleTitle, dom.$('span.new-chat-middle-title-picker.sessions-chat-session-type-picker'));
 		this._middleTitleSuffix = dom.append(this._middleTitle, dom.$('span.new-chat-middle-title-text'));
 		this._updateMiddleTitle();
 		this._renderPixelOctopus(this._middleTitle);
@@ -762,15 +771,11 @@ export class NewChatWidget extends Disposable {
 			return;
 		}
 		// The sentence embeds the workspace picker: "... in [workspace]?". The
-		// agent picker lives in the composer's toolbar row beside the model
-		// picker, not in the heading.
+		// agent picker sits in the page's header row, not in the heading.
 		const workspaceMarker = '\u0000';
 		const template = localize('newChatMiddleTitleInFolder', "What should we build in {0}?", workspaceMarker);
 		const [prefix, suffix] = template.split(workspaceMarker);
 		this._middleTitlePrefix.textContent = prefix;
-		if (this._middleTitleConnector) {
-			this._middleTitleConnector.textContent = '';
-		}
 		this._middleTitleSuffix.textContent = suffix ?? '';
 	}
 
@@ -784,54 +789,10 @@ export class NewChatWidget extends Disposable {
 		if (this._middleTitlePickerSlot) {
 			this._workspacePicker.render(this._middleTitlePickerSlot);
 		}
-	}
-
-	/**
-	 * Mounts the session-type (agent host) picker inside the composer's bottom
-	 * toolbar row, right after the input toolbar that hosts the model picker —
-	 * the agent choice belongs with the other send-time options instead of the
-	 * heading. Falls back to the heading slot if the embedded widget's toolbar
-	 * row cannot be found.
-	 */
-	private _mountComposerSessionTypePicker(composerStack: HTMLElement): void {
-		const inputToolbar = composerStack.querySelector('.chat-input-toolbars > .chat-input-toolbar');
-		if (!inputToolbar) {
-			if (this._middleTitleTypePickerSlot) {
-				dom.clearNode(this._middleTitleTypePickerSlot);
-				this._sessionTypePicker.render(this._middleTitleTypePickerSlot, { className: 'sessions-chat-session-type-picker' });
-			}
-			return;
+		if (this._sessionTypePickerSlot) {
+			dom.clearNode(this._sessionTypePickerSlot);
+			this._sessionTypePicker.render(this._sessionTypePickerSlot, { className: 'sessions-chat-session-type-picker' });
 		}
-		const slot = dom.$('.new-chat-composer-type-picker');
-		this._sessionTypePicker.render(slot, { className: 'sessions-chat-session-type-picker' });
-		// Place the agent host between the model picker and the options gear in
-		// the composer's primary toolbar. Switching hosts (or menu/context key
-		// changes) rebuilds the entire chat input subtree, which silently drops
-		// foreign children — so watch the stable composer root and re-resolve
-		// the current toolbar on every mutation, re-inserting when detached.
-		const placeSlot = () => {
-			const actionsContainer = composerStack.querySelector('.chat-input-toolbars > .chat-input-toolbar .monaco-toolbar .actions-container');
-			if (!actionsContainer) {
-				return;
-			}
-			if (slot.parentElement === actionsContainer && slot.isConnected) {
-				return;
-			}
-			const gearItem = actionsContainer.querySelector('.codicon-settings-gear')?.closest('.action-item');
-			const pickerItems = actionsContainer.querySelectorAll('.chat-input-picker-item');
-			const modelItem = pickerItems.length ? pickerItems[pickerItems.length - 1].closest('.action-item') : null;
-			if (gearItem) {
-				gearItem.insertAdjacentElement('beforebegin', slot);
-			} else if (modelItem) {
-				modelItem.insertAdjacentElement('afterend', slot);
-			} else {
-				actionsContainer.appendChild(slot);
-			}
-		};
-		placeSlot();
-		const observer = new MutationObserver(() => placeSlot());
-		observer.observe(composerStack, { childList: true, subtree: true });
-		this._register(toDisposable(() => observer.disconnect()));
 	}
 
 	/**
