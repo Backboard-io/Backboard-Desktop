@@ -4607,7 +4607,7 @@ have to be updated for changes to the rules above, or to support more deeply nes
 		.checkpoint-line-right {
 			flex: 1;
 			height: 1px;
-			background-color: var(--vscode-chat-requestBorder, var(--vscode-input-background));
+			background-color: color-mix(in srgb, var(--vscode-chat-requestBorder, var(--vscode-input-background)) 70%, transparent);
 		}
 
 		.checkpoint-line-left {
@@ -4633,9 +4633,11 @@ have to be updated for changes to the rules above, or to support more deeply nes
 			line-height: 18px;
 			color: var(--vscode-descriptionForeground);
 			border: 1px solid transparent;
+			border-radius: var(--vscode-cornerRadius-medium);
 			background-color: transparent;
-			padding: 1px 5px;
+			padding: 1px 6px;
 			margin-right: 5px;
+			transition: color 120ms ease, background-color 120ms ease, border-color 120ms ease;
 		}
 
 		.monaco-toolbar .action-label.codicon.codicon-repo-forked {

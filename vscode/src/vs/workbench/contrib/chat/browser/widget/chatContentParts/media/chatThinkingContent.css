@@ -32,6 +32,11 @@
 		line-height: 1.5em;
 		font-size: 13px;
 		min-width: 0;
+		transition: color 120ms ease;
+
+		&:hover {
+			color: var(--vscode-foreground);
+		}
 
 		/* Keep the header a single line: the detail segment ellipsizes while
 		   the shimmer prefix and trailing elapsed/steps/diff stay visible. */
@@ -41,6 +46,11 @@
 			align-items: baseline;
 			min-width: 0;
 			overflow: hidden;
+			/* The verb ("Thinking", "Ran command") carries the row's hierarchy;
+			   the detail/elapsed/meta segments below reset back to regular. The
+			   weight sits on the label (not the verb span) because the finalized
+			   title renders its verb as a plain span. */
+			font-weight: 500;
 
 			.chat-thinking-title-shimmer {
 				flex: none;
@@ -91,12 +101,16 @@
 			}
 		}
 
-		.chat-thinking-title-detail-text {
+		.chat-thinking-title-detail-text,
+		.rendered-markdown.chat-thinking-title-detail {
 			opacity: 0.7;
+			font-weight: normal;
 		}
 
 		.chat-thinking-title-diff {
 			padding-left: 6px;
+			font-weight: normal;
+			font-variant-numeric: tabular-nums;
 
 			> .label-added {
 				color: var(--vscode-chat-linesAddedForeground);
@@ -163,8 +177,8 @@
 		top: 22px;
 		height: 16px;
 		width: 5px;
-		border-left: 1px solid var(--vscode-chat-requestBorder);
-		border-bottom: 1px solid var(--vscode-chat-requestBorder);
+		border-left: 1px solid color-mix(in srgb, var(--vscode-chat-requestBorder) 65%, transparent);
+		border-bottom: 1px solid color-mix(in srgb, var(--vscode-chat-requestBorder) 65%, transparent);
 		border-bottom-left-radius: 5px;
 	}
 
@@ -248,6 +262,8 @@
 			padding: 5px 12px 5px 24px;
 			position: relative;
 			font-size: var(--vscode-chat-font-size-body-s);
+			/* Muted reasoning prose gets a touch more leading for readability. */
+			line-height: 1.5;
 
 			.progress-container {
 				margin-bottom: 0px;
@@ -323,7 +339,7 @@
 				bottom: 0px;
 				width: 1px;
 				border-radius: 0;
-				background-color: var(--vscode-chat-requestBorder);
+				background-color: color-mix(in srgb, var(--vscode-chat-requestBorder) 65%, transparent);
 				mask-image: linear-gradient(to bottom, #000 0 5px, transparent 5px 25px, #000 24px 100%);
 			}
 
@@ -350,6 +366,13 @@
 				line-height: 12px;
 				text-align: center;
 				color: var(--vscode-descriptionForeground);
+			}
+
+			/* Reasoning bullets read as quiet waypoints on the rail, not full-size
+			   codicons: smaller and softened so the text carries the row. */
+			> .chat-thinking-icon.codicon-circle-filled {
+				font-size: 9px;
+				opacity: 0.75;
 			}
 
 			/* the default book icon has a pixel of space at the bottom */
@@ -455,11 +478,14 @@
 		}
 	}
 
-	/* Muted metadata at the end of the header: "· 8s", "· 24s · 6 steps". */
+	/* Muted metadata at the end of the header: "· 8s", "· 24s · 6 steps".
+	   Tabular figures keep the live timer from jittering as digits tick. */
 	.chat-thinking-title-elapsed,
 	.chat-thinking-title-meta {
 		opacity: 0.6;
 		white-space: pre;
+		font-variant-numeric: tabular-nums;
+		font-weight: normal;
 	}
 
 	/* Completed pill: quiet success check + hover affordance for re-expanding. */

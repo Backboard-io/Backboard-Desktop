@@ -1976,6 +1976,8 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 	}
 
 	private setFallbackTitle(): void {
+		this.elapsedAtCompletionMs ??= Date.now() - this.startTimeMs;
+
 		// The step count is shown in the title meta ("· 12s · 6 steps"), so the
 		// fallback label stays plain to avoid repeating it.
 		const finalLabel = localize('chat.thinking.finished', 'Finished Working');
