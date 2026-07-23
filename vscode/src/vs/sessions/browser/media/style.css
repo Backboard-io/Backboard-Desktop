@@ -617,6 +617,29 @@
 	transition: padding-left 180ms ease-out;
 }
 
+/* ---- Quiet session header ----
+ * The transcript is the content; the header only has to say which session you
+ * are in. Muted, body-weight title and dimmed actions keep it from competing
+ * with the first message. The 6% hairline below it is already set by the base
+ * header rule, so it is deliberately not restated here. */
+.agent-sessions-workbench .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-session-title-text {
+	font-weight: normal;
+	color: var(--vscode-descriptionForeground);
+}
+
+/* Header actions recede until pointed at. Opacity rather than a colour swap so
+ * the icons dim uniformly whatever each one's own colour is. */
+.agent-sessions-workbench .part.sessionspart .chat-composite-bar.session-header-bar .monaco-toolbar .action-label {
+	opacity: 0.55;
+	transition: opacity 100ms ease-out;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-composite-bar.session-header-bar:hover .monaco-toolbar .action-label,
+.agent-sessions-workbench .part.sessionspart .chat-composite-bar.session-header-bar .monaco-toolbar .action-label:hover,
+.agent-sessions-workbench .part.sessionspart .chat-composite-bar.session-header-bar .monaco-toolbar .action-label:focus-visible {
+	opacity: 1;
+}
+
 .agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.sessionspart),
 .agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.editor:not(.modal-editor-part)),
 .agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.auxiliarybar),
@@ -1072,17 +1095,20 @@
 .agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown,
 .agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown {
 	width: fit-content;
-	max-width: 75%;
+	/* Bubble geometry matches T3 Code's user row (`max-w-[80%] rounded-2xl p-3`,
+	 * MIT, (c) 2026 T3 Tools Inc). */
+	max-width: 80%;
 	margin: 0 0 8px;
-	padding: 12px 18px;
+	padding: 12px;
 	border: 0;
-	border-radius: 18px;
+	border-radius: 16px;
 	/* Lifted off the page rather than a fixed grey, so the bubble reads
 	   correctly against both light and dark themes. */
 	background-color: color-mix(in srgb, var(--vscode-foreground) 8%, transparent) !important;
 	/* Body weight and size: the bubble itself marks the speaker turn, so the
-	   text doesn't also need to be heavier than the agent's prose. */
-	font-size: var(--vscode-chat-font-size-body-l);
+	   text doesn't also need to be heavier than the agent's prose. Matches the
+	   14px agent prose set in chatMarkdown.css. */
+	font-size: 14px;
 	font-weight: normal;
 	line-height: 1.45;
 	/* Prompts wrap inside the bubble; the trailing-edge alignment applies to the

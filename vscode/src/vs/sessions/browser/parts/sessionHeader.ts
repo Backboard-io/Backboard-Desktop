@@ -36,6 +36,34 @@ import { isAgentHostProviderId } from '../../common/agentHostSessionsProvider.js
 import { onUnexpectedError } from '../../../base/common/errors.js';
 
 /**
+ * Removes inline Markdown syntax from a session title.
+ *
+ * Titles are derived from the opening message, which is authored as Markdown,
+ * so a prompt that starts with `**Build me a chatbot**` would otherwise render
+ * its asterisks literally in the header. Only inline emphasis, code spans,
+ * links and leading heading/quote markers are unwrapped — the intent is to show
+ * the text a person wrote, not to parse Markdown.
+ */
+function stripInlineMarkdown(title: string | undefined): string {
+	if (!title) {
+		return '';
+	}
+	return title
+		// Leading block markers: `# `, `> `, `- `, `* `, `1. `.
+		.replace(/^\s*(?:#{1,6}\s+|>\s+|[-*+]\s+|\d+\.\s+)/, '')
+		// Links and images: keep the label, drop the target.
+		.replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+		// Emphasis: `***x***`, `**x**`, `*x*`.
+		.replace(/(\*{1,3})(?=\S)([\s\S]*?\S)\1/g, '$2')
+		// The `_` form, but only at word boundaries: identifiers like
+		// `snake_case_name` are common in these titles and must survive.
+		.replace(/(?<![A-Za-z0-9_])(_{1,3})(?=\S)([\s\S]*?\S)\1(?![A-Za-z0-9_])/g, '$2')
+		// Code spans, including the multi-backtick form.
+		.replace(/(`+)(?=\S)([\s\S]*?\S)\1/g, '$2')
+		.trim();
+}
+
+/**
  * An action runner for the session header toolbars that promotes the header's
  * session to be the active session before running any contributed command. This
  * ensures commands (e.g. View Changes) operate on the clicked session even when
@@ -306,7 +334,7 @@ export class SessionHeader extends Disposable {
 
 	private _updateHeader(session: IActiveSession, reader: IReader): void {
 		// Session title
-		this._titleTextEl.textContent = session.title.read(reader) || localize('agentSessions.newSession', "New Session");
+		this._titleTextEl.textContent = stripInlineMarkdown(session.title.read(reader)) || localize('agentSessions.newSession', "New Session");
 		this._titleEl.classList.toggle('editable', this._isTitleEditable());
 
 		// Meta row: workspace · diff stats

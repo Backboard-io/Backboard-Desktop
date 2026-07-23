@@ -1,0 +1,317 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* Chat prose styling for the sessions window, ported from T3 Code's
+ * `.chat-markdown` system (https://github.com/pingdotgg/t3code,
+ * apps/web/src/index.css).
+ *
+ *   MIT License. Copyright (c) 2026 T3 Tools Inc.
+ *
+ * Two deliberate departures from the source:
+ *
+ * - Sizes are `em`-relative rather than the source's fixed `rem` values, so the
+ *   whole scale tracks the `chat.fontSize` setting instead of pinning the chat
+ *   to 14px. The ratios are preserved (T3's 14px body / 12px code becomes
+ *   1em / 0.857em, and so on).
+ * - Colors resolve through VS Code theme tokens instead of the source's
+ *   Tailwind custom properties, so the chat stays correct under any theme
+ *   rather than only T3's own palette.
+ *
+ * Scoped to the sessions panel and the chat editor host, matching the rest of
+ * the sessions chat overrides — the inline-chat and hover widgets reuse
+ * `.rendered-markdown` and must keep the stock workbench styling. */
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container .value .rendered-markdown,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-item-container .value .rendered-markdown {
+	min-width: 0;
+	overflow-wrap: anywhere;
+	word-break: break-word;
+	/* 14px is the source's body size (Tailwind `text-sm` against a 16px root),
+	 * and every `em` size below is a ratio of it — so this one declaration is
+	 * what puts the whole scale on T3's exact pixel values (20/18/16px
+	 * headings, 12px code). Set explicitly rather than inherited from
+	 * `chat.fontSize` (13px), which was leaving the scale a step small. */
+	font-size: 14px;
+	line-height: 1.625;
+	/* Body prose sits just off full-strength foreground. Headings, links and
+	 * code below deliberately return to 100% so they lift off this baseline. */
+	color: color-mix(in srgb, var(--vscode-foreground) 80%, transparent);
+}
+
+/* ---- Block rhythm ---- */
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown > :first-child,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown > :first-child {
+	margin-top: 0;
+}
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown > :last-child,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown > :last-child {
+	margin-bottom: 0;
+}
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown p,
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown ul,
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown ol,
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown blockquote,
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown pre,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown p,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown ul,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown ol,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown blockquote,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown pre {
+	margin: 0.65em 0;
+}
+
+/* ---- Headings ---- */
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown h1,
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown h2,
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown h3,
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown h4,
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown h5,
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown h6,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown h1,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown h2,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown h3,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown h4,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown h5,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown h6 {
+	/* Asymmetric: a heading belongs to the block beneath it, so it keeps a wide
+	 * gap above and a tight one below. */
+	margin: 1.25em 0 0.5em;
+	padding: 0;
+	border: 0;
+	font-weight: 600;
+	line-height: 1.3;
+	color: var(--vscode-foreground);
+}
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown h1,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown h1 {
+	font-size: 1.4286em;
+}
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown h2,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown h2 {
+	font-size: 1.2857em;
+}
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown h3,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown h3 {
+	font-size: 1.1429em;
+}
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown h4,
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown h5,
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown h6,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown h4,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown h5,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown h6 {
+	font-size: 1em;
+}
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown h6,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown h6 {
+	color: var(--vscode-descriptionForeground);
+}
+
+/* ---- Lists ---- */
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown ul,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown ul {
+	padding-left: 1.25em;
+	list-style-type: disc;
+}
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown ol,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown ol {
+	padding-left: 1.25em;
+	list-style-type: decimal;
+}
+
+/* Nesting depth is carried by the marker shape, so indented lists stay
+ * readable without extra vertical separation. */
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown ul ul,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown ul ul {
+	list-style-type: circle;
+}
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown ul ul ul,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown ul ul ul {
+	list-style-type: square;
+}
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown ol ol,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown ol ol {
+	list-style-type: lower-alpha;
+}
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown ol ol ol,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown ol ol ol {
+	list-style-type: lower-roman;
+}
+
+/* Nested lists hug their parent item; only sibling items get the gap. */
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown li + li,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown li + li {
+	margin-top: 0.25em;
+}
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown li > ul,
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown li > ol,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown li > ul,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown li > ol {
+	margin: 0.25em 0 0;
+}
+
+/* GitHub-style task lists: the checkbox stands in for the list marker. */
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown li.task-list-item,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown li.task-list-item {
+	list-style-type: none;
+}
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown li.task-list-item input[type="checkbox"],
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown li.task-list-item input[type="checkbox"] {
+	margin: 0 0.35em 0.15em -1.25em;
+	vertical-align: middle;
+}
+
+/* ---- Inline code ---- */
+
+/* Notably smaller than the prose around it: monospace at the same nominal size
+ * reads visually larger, and the step down keeps code from dominating a
+ * sentence. Excludes code inside the Monaco-backed block widget below. */
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown :not(pre):not(.monaco-editor) > code,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown :not(pre):not(.monaco-editor) > code {
+	border: 1px solid var(--vscode-widget-border, color-mix(in srgb, var(--vscode-foreground) 14%, transparent));
+	border-radius: 0.375em;
+	background: var(--vscode-textCodeBlock-background, color-mix(in srgb, var(--vscode-foreground) 8%, transparent));
+	padding: 0.1em 0.35em;
+	color: var(--vscode-foreground);
+	font-size: 0.857em;
+}
+
+/* ---- Block quotes ---- */
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown blockquote,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown blockquote {
+	border-left: 2px solid var(--vscode-widget-border, color-mix(in srgb, var(--vscode-foreground) 20%, transparent));
+	padding: 0 0 0 0.8em;
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+}
+
+/* ---- Links ---- */
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown a,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown a {
+	color: var(--vscode-textLink-foreground);
+	text-decoration: none;
+}
+
+/* A dotted rule rather than a solid underline, so link-dense prose does not
+ * turn into a row of hard lines. */
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown a:hover,
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown a:focus-visible,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown a:hover,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown a:focus-visible {
+	text-decoration: none;
+	background-image: radial-gradient(circle, currentcolor 0.75px, transparent 1px);
+	background-position: left bottom;
+	background-repeat: repeat-x;
+	background-size: 4px 2px;
+}
+
+/* ---- Code blocks ---- */
+
+/* The source styles a plain `<pre>`; our code blocks are Monaco editor
+ * instances (`CodeBlockPart`), so only the container chrome — border, radius,
+ * fill — is portable. Token colors inside come from the active editor theme.
+ *
+ * Only the geometry is set here. The fill stays with the existing sessions
+ * rule in style.css so there is a single source of truth for the colour —
+ * declaring it in both places left the action toolbar sitting on a different
+ * background from the editor beside it, reading as a detached grey panel. */
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .interactive-result-code-block,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .interactive-result-code-block {
+	margin: 0.65em 0;
+	position: relative;
+	overflow: hidden;
+	border: 1px solid var(--vscode-widget-border, color-mix(in srgb, var(--vscode-foreground) 14%, transparent));
+	border-radius: 0.75em;
+}
+
+/* Float the actions over the code rather than reserving a column beside it:
+ * the toolbar is a peer of the editor in the DOM, so left in flow it carves a
+ * blank strip out of the block's right edge. Transparent until hovered so the
+ * block reads as one surface at rest. */
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .interactive-result-code-block > .interactive-result-code-block-toolbar,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .interactive-result-code-block > .interactive-result-code-block-toolbar {
+	position: absolute;
+	top: 4px;
+	right: 4px;
+	z-index: 2;
+	width: auto;
+	padding: 2px;
+	border-radius: 6px;
+	background: transparent;
+	opacity: 0;
+	transition: opacity 100ms ease-out;
+}
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .interactive-result-code-block:hover > .interactive-result-code-block-toolbar,
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .interactive-result-code-block:focus-within > .interactive-result-code-block-toolbar,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .interactive-result-code-block:hover > .interactive-result-code-block-toolbar,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .interactive-result-code-block:focus-within > .interactive-result-code-block-toolbar {
+	opacity: 1;
+	/* Only once visible does it need a plate to stay legible over code. */
+	background: color-mix(in srgb, var(--vscode-editorWidget-background) 92%, var(--vscode-foreground));
+	box-shadow: 0 1px 4px color-mix(in srgb, #000 22%, transparent);
+}
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .interactive-result-code-block > .interactive-result-code-block-toolbar .action-label,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .interactive-result-code-block > .interactive-result-code-block-toolbar .action-label {
+	color: var(--vscode-descriptionForeground);
+}
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .interactive-result-code-block > .interactive-result-code-block-toolbar .action-label:hover,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .interactive-result-code-block > .interactive-result-code-block-toolbar .action-label:hover {
+	color: var(--vscode-foreground);
+}
+
+/* Tables inherit the same rounded, bordered treatment as code blocks. */
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown table,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown table {
+	display: block;
+	max-width: 100%;
+	overflow-x: auto;
+	margin: 0.65em 0;
+	border-collapse: collapse;
+}
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown th,
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown td,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown th,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown td {
+	border: 1px solid var(--vscode-widget-border, color-mix(in srgb, var(--vscode-foreground) 14%, transparent));
+	padding: 0.35em 0.6em;
+	text-align: left;
+}
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown th,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown th {
+	font-weight: 600;
+	color: var(--vscode-foreground);
+}
+
+/* ---- Horizontal rules ---- */
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .value .rendered-markdown hr,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .value .rendered-markdown hr {
+	margin: 1.25em 0;
+	border: 0;
+	border-top: 1px solid var(--vscode-widget-border, color-mix(in srgb, var(--vscode-foreground) 14%, transparent));
+}
