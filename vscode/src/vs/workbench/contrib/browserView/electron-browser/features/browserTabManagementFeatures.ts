@@ -116,6 +116,9 @@ class BrowserTabQuickPick extends Disposable {
 			if (selected === this._openNewTabPick) {
 				logBrowserOpen(telemetryService, 'quickOpenWithoutUrl');
 				this._quickPick.hide();
+				if (this._browserViewService.adoptUrlOpen({})) {
+					return;
+				}
 				await this._editorService.openEditor({
 					resource: BrowserViewUri.forId(generateUuid()),
 				});
@@ -318,12 +321,19 @@ class OpenIntegratedBrowserAction extends Action2 {
 				if (options.url) {
 					matchingEditor.navigate(options.url);
 				}
+				if (browserViewService.adoptUrlOpen({ viewId: matchingEditor.id })) {
+					return;
+				}
 				await editorService.openEditor(matchingEditor);
 				return;
 			}
 		}
 
 		logBrowserOpen(telemetryService, options.url ? 'commandWithUrl' : 'commandWithoutUrl');
+
+		if (browserViewService.adoptUrlOpen({ url: options.url })) {
+			return;
+		}
 
 		const editorPane = await editorService.openEditor({ resource, options: { viewState: { url: options.url } } }, group);
 
@@ -373,6 +383,7 @@ class OpenFileInIntegratedBrowserAction extends Action2 {
 	async run(accessor: ServicesAccessor, resource?: URI): Promise<void> {
 		const editorService = accessor.get(IEditorService);
 		const telemetryService = accessor.get(ITelemetryService);
+		const browserViewService = accessor.get(IBrowserViewWorkbenchService);
 
 		// Resolve the file URI from the context or the active editor
 		const fileUri = resource ?? EditorResourceAccessor.getOriginalUri(editorService.activeEditor, { filterByScheme: [Schemas.file], supportSideBySide: SideBySideEditor.PRIMARY });
@@ -381,6 +392,10 @@ class OpenFileInIntegratedBrowserAction extends Action2 {
 		}
 
 		logBrowserOpen(telemetryService, 'openFileCommand');
+
+		if (browserViewService.adoptUrlOpen({ url: fileUri.toString() })) {
+			return;
+		}
 
 		const browserUri = BrowserViewUri.forId(generateUuid());
 		await editorService.openEditor({ resource: browserUri, options: { viewState: { url: fileUri.toString() } } });
@@ -413,9 +428,14 @@ class NewTabAction extends Action2 {
 	async run(accessor: ServicesAccessor, _browserEditor = accessor.get(IEditorService).activeEditorPane): Promise<void> {
 		const editorService = accessor.get(IEditorService);
 		const telemetryService = accessor.get(ITelemetryService);
+		const browserViewService = accessor.get(IBrowserViewWorkbenchService);
 		const resource = BrowserViewUri.forId(generateUuid());
 
 		logBrowserOpen(telemetryService, 'newTabCommand');
+
+		if (browserViewService.adoptUrlOpen({})) {
+			return;
+		}
 
 		await editorService.openEditor({ resource });
 	}
@@ -614,6 +634,10 @@ class LocalhostLinkOpenerContribution extends Disposable implements IWorkbenchCo
 		}
 
 		logBrowserOpen(this.telemetryService, 'localhostLinkOpener');
+
+		if (this.browserViewWorkbenchService.adoptUrlOpen({ url: href })) {
+			return true;
+		}
 
 		// Check whether the setting was explicitly set by the user or is still at its default value.
 		// When it is a default, tag the viewState so that the hint pill can be shown.

@@ -87,6 +87,13 @@ export class SessionBrowserViewController extends Disposable implements IWorkben
 				void this._commandService.executeCommand(RightWorkbenchCommandId.OpenBrowser, { browserViewId: input.id });
 				return false; // the right workbench adopts the view; suppress the editor
 			},
+			// URL-driven opens (e.g. a localhost link clicked in chat) likewise
+			// belong in the right workbench's Browser tab — opening a browser
+			// editor here would surface it as a modal popup over the chat.
+			shouldOpenUrlEditor: request => {
+				void this._commandService.executeCommand(RightWorkbenchCommandId.OpenBrowser, { browserUrl: request.url, browserViewId: request.viewId });
+				return false;
+			},
 		}));
 
 		// Force-destroy browser views when sessions are removed.

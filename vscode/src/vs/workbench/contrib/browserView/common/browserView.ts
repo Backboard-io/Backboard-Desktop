@@ -183,6 +183,23 @@ export interface IBrowserViewFilterContext {
 }
 
 /**
+ * A URL- or view-targeted browser open that would otherwise be surfaced as a
+ * browser editor (e.g. a localhost link click or the Open Integrated Browser
+ * command). Passed to {@link IBrowserViewOpenHandler.shouldOpenUrlEditor}.
+ */
+export interface IBrowserViewUrlOpenRequest {
+	/**
+	 * The URL to open, if any.
+	 */
+	readonly url?: string;
+
+	/**
+	 * The id of an existing browser view to surface, if any.
+	 */
+	readonly viewId?: string;
+}
+
+/**
  * A handler that decides whether an editor should be opened for a newly
  * created browser view. Registered via
  * {@link IBrowserViewWorkbenchService.registerOpenHandler}.
@@ -194,6 +211,15 @@ export interface IBrowserViewOpenHandler {
 	 * only when every registered handler allows it.
 	 */
 	shouldOpenEditor(input: BrowserEditorInput, owner: IBrowserViewOwner, openOptions: IBrowserViewOpenOptions): boolean;
+
+	/**
+	 * Called before a browser editor is opened for a URL or an existing view
+	 * outside of view creation (e.g. a localhost link clicked in chat or the
+	 * Open Integrated Browser command). Return `false` to prevent the editor
+	 * from being opened — the handler is then expected to surface the browser
+	 * itself (e.g. in a custom pane).
+	 */
+	shouldOpenUrlEditor?(request: IBrowserViewUrlOpenRequest): boolean;
 }
 
 /**
@@ -256,6 +282,13 @@ export interface IBrowserViewWorkbenchService {
 	 * registered handler allows it.
 	 */
 	registerOpenHandler(handler: IBrowserViewOpenHandler): IDisposable;
+
+	/**
+	 * Routes a URL-driven browser open through the registered open handlers.
+	 * Returns `true` when a handler adopted the request, in which case the
+	 * caller must not open a browser editor.
+	 */
+	adoptUrlOpen(request: IBrowserViewUrlOpenRequest): boolean;
 
 	/**
 	 * Get an existing browser view for the given ID, or create a new one if it doesn't exist.

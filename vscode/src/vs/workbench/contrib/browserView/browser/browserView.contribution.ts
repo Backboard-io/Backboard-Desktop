@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { registerSingleton, InstantiationType } from '../../../../platform/instantiation/common/extensions.js';
-import { IBrowserViewWorkbenchService, IBrowserViewCDPService, IBrowserViewModel, IBrowserEditorViewState, IBrowserViewContextualFilter, IBrowserViewOpenHandler } from '../common/browserView.js';
+import { IBrowserViewWorkbenchService, IBrowserViewCDPService, IBrowserViewModel, IBrowserEditorViewState, IBrowserViewContextualFilter, IBrowserViewOpenHandler, IBrowserViewUrlOpenRequest } from '../common/browserView.js';
 import { Event } from '../../../../base/common/event.js';
 import { Disposable, IDisposable } from '../../../../base/common/lifecycle.js';
 import { CDPEvent, CDPRequest, CDPResponse } from '../../../../platform/browserView/common/cdp/types.js';
@@ -40,6 +40,10 @@ class WebBrowserViewWorkbenchService implements IBrowserViewWorkbenchService {
 
 	registerOpenHandler(_handler: IBrowserViewOpenHandler): IDisposable {
 		return Disposable.None;
+	}
+
+	adoptUrlOpen(_request: IBrowserViewUrlOpenRequest): boolean {
+		return false;
 	}
 
 	getOrCreateLazy(_id: string, _state: IBrowserEditorViewState): BrowserEditorInput {
