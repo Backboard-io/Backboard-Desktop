@@ -188,7 +188,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 			}
 			const models = (Array.isArray(raw.models) ? raw.models : []).filter(isBridgeModel);
 			if (models.length) {
-				this._models.set(backboardModelInfos(models), undefined);
+				this._models.set(backboardModelInfos(models, BUNDLED_BACKBOARD_MODELS), undefined);
 			}
 		} catch {
 			// First run or unreadable cache — the bundled fallback stays.
@@ -657,7 +657,9 @@ export class CliTsAgent extends Disposable implements IAgent {
 			const payload = record.payload as { models?: unknown[] } | undefined;
 			const models = (payload?.models ?? []).filter(isBridgeModel);
 			if (models.length) {
-				const infos = backboardModelInfos(models);
+				// The bundled snapshot acts as a floor so a partial live result
+				// (e.g. one upstream provider erroring) never shrinks the picker.
+				const infos = backboardModelInfos(models, BUNDLED_BACKBOARD_MODELS);
 				this._models.set(infos.length ? infos : [fallbackModel()], undefined);
 				// Persist for instant hydration on the next window start.
 				this._persistModelsCache(models);

@@ -156,6 +156,64 @@ describe("Backboard model catalog", () => {
 		expect(requestedInit?.method).toBe("GET");
 	});
 
+	it("keeps other providers' models when one provider fetch fails", async () => {
+		globalThis.fetch = (async (input, _init) => {
+			const url = new URL(String(input));
+			if (url.pathname === "/models/providers") {
+				return new Response(
+					JSON.stringify({ providers: ["openai", "anthropic"], total: 2 }),
+					{ status: 200 },
+				);
+			}
+			if (url.pathname === "/models/provider/openai") {
+				return new Response("upstream down", { status: 502 });
+			}
+			return new Response(
+				JSON.stringify({
+					models: [
+						{ name: "claude-sonnet", provider: "anthropic", model_type: "llm" },
+					],
+					total: 1,
+				}),
+				{ status: 200 },
+			);
+		}) as typeof fetch;
+
+		const client = new BackboardClient({
+			apiKey: "test-key",
+			apiUrl: "https://api.backboard.test",
+		});
+
+		const result = await client.listModels();
+
+		expect(result).toEqual({
+			models: [
+				{ name: "claude-sonnet", provider: "anthropic", model_type: "llm" },
+			],
+			total: 1,
+		});
+	});
+
+	it("rejects when every provider fetch fails", async () => {
+		globalThis.fetch = (async (input, _init) => {
+			const url = new URL(String(input));
+			if (url.pathname === "/models/providers") {
+				return new Response(
+					JSON.stringify({ providers: ["openai", "anthropic"], total: 2 }),
+					{ status: 200 },
+				);
+			}
+			return new Response("upstream down", { status: 502 });
+		}) as typeof fetch;
+
+		const client = new BackboardClient({
+			apiKey: "test-key",
+			apiUrl: "https://api.backboard.test",
+		});
+
+		await expect(client.listModels()).rejects.toThrow("HTTP 502");
+	});
+
 	it("caches normalized results per client", async () => {
 		let listCalls = 0;
 		const client = {

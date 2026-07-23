@@ -23,6 +23,7 @@ import { ToolPermissionGate } from "../core/tools/ToolPermissionGate.ts";
 import { ToolRegistry } from "../core/tools/ToolRegistry.ts";
 import { buildStartupEnvironmentPrompt } from "../prompts/system/startupEnvironment.ts";
 import { BackboardClient } from "../providers/backboard/BackboardClient.ts";
+import { bundledModelCatalog } from "../providers/backboard/bundledCatalog.ts";
 import { createDefaultTools } from "../tools/index.ts";
 import { shortId } from "../utils/id.ts";
 import type {
@@ -310,7 +311,12 @@ export async function runServe(argv: string[]): Promise<void> {
 				return;
 			}
 			case "listModels": {
-				const models = await client.listModels();
+				// The build-time snapshot answers when the live fetch fails or
+				// comes back empty, so the host always gets a full catalog.
+				const models = await client
+					.listModels()
+					.then((live) => (live.models.length ? live : bundledModelCatalog()))
+					.catch(() => bundledModelCatalog());
 				writeRecord("serve:models", control.requestId, models);
 				return;
 			}

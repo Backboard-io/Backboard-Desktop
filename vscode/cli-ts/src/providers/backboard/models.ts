@@ -1,4 +1,5 @@
 import type { BackboardClient } from "./BackboardClient.ts";
+import { bundledModelCatalog } from "./bundledCatalog.ts";
 import { MODEL_CACHE_TTL_MS } from "./constants.ts";
 import { normalizeSelectableModels } from "./modelCatalog.ts";
 import type { ModelInfo } from "./types.ts";
@@ -46,5 +47,10 @@ async function fetchFreshModels(
 	client: Pick<BackboardClient, "listModels">,
 ): Promise<ModelInfo[]> {
 	const catalog = await client.listModels();
-	return normalizeSelectableModels(catalog.models);
+	const models = normalizeSelectableModels(catalog.models);
+	// Fall back to the build-time snapshot when the live fetch yields nothing,
+	// so the picker is never empty. The cache TTL still triggers live retries.
+	return models.length
+		? models
+		: normalizeSelectableModels(bundledModelCatalog().models);
 }

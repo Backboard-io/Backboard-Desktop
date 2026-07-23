@@ -186,7 +186,9 @@ export class BackboardClient {
 
 	async listModels(options: RequestOptions = {}): Promise<ModelsListResponse> {
 		const providers = await this.listModelProviders(options);
-		const pages = await Promise.all(
+		// All providers are fetched concurrently, and a single failing provider
+		// only drops its own models instead of rejecting the whole catalog.
+		const pages = await Promise.allSettled(
 			providers.map((provider) =>
 				this.listModelPages(
 					`/models/provider/${encodeURIComponent(provider)}`,
@@ -195,9 +197,20 @@ export class BackboardClient {
 				),
 			),
 		);
+		const failed = pages.find(
+			(page): page is PromiseRejectedResult => page.status === "rejected",
+		);
+		const allFailed = pages.every((page) => page.status === "rejected");
+		if (failed && (options.signal?.aborted || allFailed)) {
+			throw failed.reason;
+		}
+		const fulfilled = pages.filter(
+			(page): page is PromiseFulfilledResult<ModelsListResponse> =>
+				page.status === "fulfilled",
+		);
 		return {
-			models: pages.flatMap((page) => page.models),
-			total: pages.reduce((sum, page) => sum + page.total, 0),
+			models: fulfilled.flatMap((page) => page.value.models),
+			total: fulfilled.reduce((sum, page) => sum + page.value.total, 0),
 		};
 	}
 

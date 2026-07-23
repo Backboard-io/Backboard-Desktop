@@ -16,6 +16,7 @@
 		"prepare": "git config core.hooksPath .githooks",
 		"precommit": "bun run validate",
 		"validate": "bun run lint && bun run typecheck && bun test",
+		"refresh-bundled-models": "bun run scripts/refresh-bundled-models.ts && bunx biome check --write src/providers/backboard/bundledModels.json",
 		"build": "bun run scripts/build.ts",
 		"build:release": "bun run scripts/build-release.ts",
 		"typecheck": "bunx tsc --noEmit",

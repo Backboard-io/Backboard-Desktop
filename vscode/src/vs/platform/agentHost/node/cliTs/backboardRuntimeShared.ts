@@ -12,6 +12,7 @@ import { IAgentModelInfo } from '../../common/agentService.js';
 import { createAgentModelPricingMeta } from '../../common/agentModelPricing.js';
 import type { ResolveSessionConfigResult } from '../../common/state/protocol/commands.js';
 import type { ModelSelection } from '../../common/state/protocol/state.js';
+import { BUNDLED_CATALOG_MODELS } from './backboardBundledModels.js';
 
 /**
  * Backboard runtime configuration, model-catalog, and session-config helpers
@@ -71,7 +72,9 @@ export interface BridgeModel {
 	readonly model_type?: string;
 	readonly displayName?: string;
 	readonly contextLimit?: number;
+	readonly context_limit?: number | null;
 	readonly supportsVision?: boolean;
+	readonly supports_vision?: boolean | null;
 	readonly pricing?: string;
 	readonly inputPricePerMillion?: number | string;
 	readonly outputPricePerMillion?: number | string;
@@ -92,36 +95,21 @@ export interface BridgeModel {
 	readonly cacheCost?: number | string;
 	readonly cacheCostPer1mTokens?: number | string;
 	readonly cachePricePerMillion?: number | string;
+	readonly cached_input_cost_per_1m_tokens?: number | string | null;
 	readonly cacheWritePrice?: number | string;
 	readonly cache_write_price?: number | string;
 	readonly cacheWriteCost?: number | string;
 	readonly cacheWriteCostPer1mTokens?: number | string;
 	readonly cacheWritePricePerMillion?: number | string;
+	readonly cache_write_input_cost_per_1m_tokens?: number | string | null;
 }
 
-export const BUNDLED_BACKBOARD_MODELS: readonly BridgeModel[] = [
-	{ provider: 'openrouter', name: 'deepseek/deepseek-v4-flash', displayName: 'DeepSeek V4 Flash', modelType: 'llm' },
-	{ provider: 'openrouter', name: 'openai/gpt-5-chat', displayName: 'GPT-5 Chat', modelType: 'llm' },
-	{ provider: 'openrouter', name: 'openai/gpt-5', displayName: 'GPT-5', modelType: 'llm' },
-	{ provider: 'openrouter', name: 'openai/gpt-5-mini', displayName: 'GPT-5 Mini', modelType: 'llm' },
-	{ provider: 'openrouter', name: 'anthropic/claude-sonnet-4.5', displayName: 'Claude Sonnet 4.5', modelType: 'llm', contextLimit: 200000, inputPricePerMillion: 3, outputPricePerMillion: 15 },
-	{ provider: 'openrouter', name: 'anthropic/claude-opus-4.5', displayName: 'Claude Opus 4.5', modelType: 'llm', contextLimit: 200000, inputPricePerMillion: 5, outputPricePerMillion: 25 },
-	{ provider: 'openrouter', name: 'anthropic/claude-haiku-4.5', displayName: 'Claude Haiku 4.5', modelType: 'llm', contextLimit: 200000, inputPricePerMillion: 1, outputPricePerMillion: 5 },
-	{ provider: 'openrouter', name: 'google/gemini-2.5-pro', displayName: 'Gemini 2.5 Pro', modelType: 'llm' },
-	{ provider: 'openrouter', name: 'google/gemini-2.5-flash', displayName: 'Gemini 2.5 Flash', modelType: 'llm' },
-	{ provider: 'openrouter', name: 'x-ai/grok-4', displayName: 'Grok 4', modelType: 'llm' },
-	{ provider: 'openrouter', name: 'mistralai/mistral-large', displayName: 'Mistral Large', modelType: 'llm' },
-	{ provider: 'aws-bedrock', name: 'anthropic.claude-sonnet-4-6', displayName: 'Claude Sonnet 4.6', modelType: 'llm', contextLimit: 200000, inputPricePerMillion: 3, outputPricePerMillion: 15 },
-	{ provider: 'aws-bedrock', name: 'anthropic.claude-opus-4-6', displayName: 'Claude Opus 4.6', modelType: 'llm', contextLimit: 200000, inputPricePerMillion: 5, outputPricePerMillion: 25 },
-	{ provider: 'aws-bedrock', name: 'anthropic.claude-haiku-4-5', displayName: 'Claude Haiku 4.5', modelType: 'llm', contextLimit: 200000, inputPricePerMillion: 1, outputPricePerMillion: 5 },
-	{ provider: 'openai', name: 'gpt-5', displayName: 'GPT-5', modelType: 'llm' },
-	{ provider: 'openai', name: 'gpt-5-mini', displayName: 'GPT-5 Mini', modelType: 'llm' },
-	{ provider: 'google', name: 'gemini-2.5-pro', displayName: 'Gemini 2.5 Pro', modelType: 'llm' },
-	{ provider: 'google', name: 'gemini-2.5-flash', displayName: 'Gemini 2.5 Flash', modelType: 'llm' },
-	{ provider: 'anthropic', name: 'claude-sonnet-4.5', displayName: 'Claude Sonnet 4.5', modelType: 'llm', contextLimit: 200000, inputPricePerMillion: 3, outputPricePerMillion: 15 },
-	{ provider: 'anthropic', name: 'claude-opus-4.5', displayName: 'Claude Opus 4.5', modelType: 'llm', contextLimit: 200000, inputPricePerMillion: 5, outputPricePerMillion: 25 },
-	{ provider: 'anthropic', name: 'claude-haiku-4.5', displayName: 'Claude Haiku 4.5', modelType: 'llm', contextLimit: 200000, inputPricePerMillion: 1, outputPricePerMillion: 5 },
-];
+/**
+ * Full model-catalog snapshot generated at build time (see
+ * `cli-ts/scripts/refresh-bundled-models.ts`), so the picker offers the
+ * complete catalog on first launch instead of a short hand-picked list.
+ */
+export const BUNDLED_BACKBOARD_MODELS: readonly BridgeModel[] = BUNDLED_CATALOG_MODELS;
 
 interface BackboardConfigJson {
 	readonly env?: unknown;
@@ -260,20 +248,21 @@ function toAgentModelInfo(model: BridgeModel): IAgentModelInfo {
 	const pricePair = modelPricePair(model);
 	const inputCost = pricePair?.[0];
 	const outputCost = pricePair?.[1];
-	const cacheCost = numericBridgeModelValue(model, ['cachePricePerMillion', 'cacheCostPer1mTokens', 'cachePrice', 'cache_price', 'cacheCost']);
-	const cacheWriteCost = numericBridgeModelValue(model, ['cacheWritePricePerMillion', 'cacheWriteCostPer1mTokens', 'cacheWritePrice', 'cache_write_price', 'cacheWriteCost']);
+	const cacheCost = numericBridgeModelValue(model, ['cachePricePerMillion', 'cacheCostPer1mTokens', 'cachePrice', 'cache_price', 'cacheCost', 'cached_input_cost_per_1m_tokens']);
+	const cacheWriteCost = numericBridgeModelValue(model, ['cacheWritePricePerMillion', 'cacheWriteCostPer1mTokens', 'cacheWritePrice', 'cache_write_price', 'cacheWriteCost', 'cache_write_input_cost_per_1m_tokens']);
 	const pricingMeta = createAgentModelPricingMeta({
 		inputCost,
 		cacheCost,
 		cacheWriteCost,
 		outputCost,
 	});
+	const contextLimit = model.contextLimit ?? model.context_limit;
 	return {
 		provider: 'backboard',
 		id,
 		name: model.displayName || model.name,
-		maxContextWindow: typeof model.contextLimit === 'number' ? model.contextLimit : undefined,
-		supportsVision: model.supportsVision ?? inferBackboardModelSupportsVision(model),
+		maxContextWindow: typeof contextLimit === 'number' ? contextLimit : undefined,
+		supportsVision: model.supportsVision ?? model.supports_vision ?? inferBackboardModelSupportsVision(model),
 		_meta: {
 			upstreamProvider: normalizeProviderKey(model.provider),
 			upstreamProviderLabel: providerLabel(model.provider),
