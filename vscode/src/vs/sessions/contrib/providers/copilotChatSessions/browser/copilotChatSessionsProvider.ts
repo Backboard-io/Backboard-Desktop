@@ -48,6 +48,7 @@ import { IStorageService, StorageScope, StorageTarget } from '../../../../../pla
 import { IGitHubService } from '../../../github/browser/githubService.js';
 import { computePullRequestIcon, GitHubPullRequestState } from '../../../github/common/types.js';
 import { structuralEquals } from '../../../../../base/common/equals.js';
+import { equals } from '../../../../../base/common/objects.js';
 import { CopilotCLISessionType } from '../../agentHost/browser/baseAgentHostSessionsProvider.js';
 import { createChangesets } from './copilotChatSessionsChangesets.js';
 import { IUriIdentityService } from '../../../../../platform/uriIdentity/common/uriIdentity.js';
@@ -493,7 +494,7 @@ class CopilotCLISession extends Disposable implements ICopilotChatSession {
 		this.chatSessionsService.setSessionOption(this.resource, optionId, value);
 	}
 
-	update(agentSession: IAgentSession): void {
+	update(agentSession: IAgentSession): boolean {
 		transaction((tx) => {
 			const session = new AgentSessionAdapter(agentSession, this.providerId, this.gitHubService);
 			this._workspaceData.set(session.workspace.get(), tx);
@@ -504,6 +505,7 @@ class CopilotCLISession extends Disposable implements ICopilotChatSession {
 			this._checkpoints.set(session.checkpoints.get(), tx);
 			this._description.set(session.description.get(), tx);
 		});
+		return true;
 	}
 }
 
@@ -761,7 +763,7 @@ export class RemoteNewSession extends Disposable implements ICopilotChatSession 
 		return group.items.find(i => i.default === true) ?? group.items[0];
 	}
 
-	update(_session: IAgentSession): void { }
+	update(_session: IAgentSession): boolean { return false; }
 }
 
 /**
@@ -897,7 +899,7 @@ class ClaudeCodeNewSession extends Disposable implements ICopilotChatSession {
 		}
 	}
 
-	update(_session: IAgentSession): void { }
+	update(_session: IAgentSession): boolean { return false; }
 }
 
 /**
@@ -919,6 +921,52 @@ function toSessionStatus(status: ChatSessionStatus): SessionStatus {
 /**
  * Adapts an existing {@link IAgentSession} from the chat layer into the new {@link ICopilotChatSession} facade.
  */
+/**
+ * The subset of {@link IAgentSession} data that {@link AgentSessionAdapter.update}
+ * derives its reactive properties from. Captured on every update so a refresh
+ * that carries identical data can be detected and skipped.
+ */
+interface IAgentSessionUpdateSnapshot {
+	readonly label: string;
+	readonly description: string | undefined;
+	readonly status: IAgentSession['status'];
+	readonly created: number;
+	readonly lastRequestStarted: number | undefined;
+	readonly lastRequestEnded: number | undefined;
+	readonly changes: IAgentSession['changes'];
+	readonly metadata: IAgentSession['metadata'];
+	readonly archived: boolean;
+	readonly read: boolean;
+}
+
+function captureAgentSessionUpdateSnapshot(session: IAgentSession): IAgentSessionUpdateSnapshot {
+	return {
+		label: session.label,
+		description: typeof session.description === 'string' ? session.description : session.description?.value,
+		status: session.status,
+		created: session.timing.created,
+		lastRequestStarted: session.timing.lastRequestStarted,
+		lastRequestEnded: session.timing.lastRequestEnded,
+		changes: session.changes,
+		metadata: session.metadata,
+		archived: session.isArchived(),
+		read: session.isRead(),
+	};
+}
+
+function agentSessionUpdateSnapshotEquals(a: IAgentSessionUpdateSnapshot, b: IAgentSessionUpdateSnapshot): boolean {
+	return a.label === b.label
+		&& a.description === b.description
+		&& a.status === b.status
+		&& a.created === b.created
+		&& a.lastRequestStarted === b.lastRequestStarted
+		&& a.lastRequestEnded === b.lastRequestEnded
+		&& a.archived === b.archived
+		&& a.read === b.read
+		&& equals(a.changes, b.changes)
+		&& equals(a.metadata, b.metadata);
+}
+
 class AgentSessionAdapter implements ICopilotChatSession {
 
 	readonly sessionId: string;
@@ -974,11 +1022,15 @@ class AgentSessionAdapter implements ICopilotChatSession {
 
 	readonly mainChat: ISettableObservable<IChat>;
 
+	/** Source data of the last applied update, used to skip no-op updates. */
+	private _updateSnapshot: IAgentSessionUpdateSnapshot;
+
 	constructor(
 		session: IAgentSession,
 		providerId: string,
 		private readonly _gitHubService: IGitHubService,
 	) {
+		this._updateSnapshot = captureAgentSessionUpdateSnapshot(session);
 		this.sessionId = toSessionId(providerId, session.resource);
 		this.resource = session.resource;
 		this.providerId = providerId;
@@ -1053,9 +1105,17 @@ class AgentSessionAdapter implements ICopilotChatSession {
 	}
 
 	/**
-	 * Update reactive properties from a refreshed agent session.
+	 * Update reactive properties from a refreshed agent session. Returns
+	 * whether the session data actually differed from the previous update —
+	 * `false` means no observable changed and the session can be omitted
+	 * from change events.
 	 */
-	update(session: IAgentSession): void {
+	update(session: IAgentSession): boolean {
+		const snapshot = captureAgentSessionUpdateSnapshot(session);
+		if (agentSessionUpdateSnapshotEquals(this._updateSnapshot, snapshot)) {
+			return false;
+		}
+		this._updateSnapshot = snapshot;
 		transaction(tx => {
 			this._title.set(session.label, tx);
 			this._workspace.set(this._buildWorkspace(session), tx);
@@ -1070,6 +1130,7 @@ class AgentSessionAdapter implements ICopilotChatSession {
 			this._lastTurnEnd.set(session.timing.lastRequestEnded ? new Date(session.timing.lastRequestEnded) : undefined, tx);
 			this._baseGitHubInfo.set(this._extractGitHubInfo(session), tx);
 		});
+		return true;
 	}
 
 	private _getSessionTypeIcon(session: IAgentSession): ThemeIcon {
@@ -2635,8 +2696,12 @@ export class CopilotChatSessionsProvider extends Disposable implements ISessions
 
 			const existing = this._sessionCache.get(key);
 			if (existing) {
-				existing.update(session);
-				changedData.push(existing);
+				// Only report sessions whose data actually changed — pushing
+				// every cached session on every model event turns each event
+				// into a `changed: ALL` storm downstream.
+				if (existing.update(session)) {
+					changedData.push(existing);
+				}
 			} else {
 				const adapter = new AgentSessionAdapter(session, this.id, this.gitHubService);
 				this._sessionCache.set(key, adapter);

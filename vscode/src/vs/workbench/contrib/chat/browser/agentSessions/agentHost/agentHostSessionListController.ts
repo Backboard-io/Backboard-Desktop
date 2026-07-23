@@ -223,11 +223,12 @@ export class AgentHostSessionListController extends Disposable implements IChatS
 	async refresh(token: CancellationToken): Promise<void> {
 		if (this._cacheValid) {
 			// Cache is kept in sync by notify/sessionAdded,
-			// notify/sessionRemoved, and notify/sessionSummaryChanged. No
-			// need to round-trip through the agent host on every refresh.
-			if (this._items.length > 0) {
-				this._onDidChangeChatSessionItems.fire({ addedOrUpdated: this._items });
-			}
+			// notify/sessionRemoved, and notify/sessionSummaryChanged, and
+			// each of those already fires a granular delta. Do not re-emit
+			// the full item list here: callers read `items` directly after
+			// awaiting refresh, and an unconditional `addedOrUpdated: ALL`
+			// echo feeds the sessions model an endless stream of no-op
+			// deltas that cascade into full sidebar rebuilds (flicker).
 			return;
 		}
 		const previousResources = this._items.map(item => item.resource);

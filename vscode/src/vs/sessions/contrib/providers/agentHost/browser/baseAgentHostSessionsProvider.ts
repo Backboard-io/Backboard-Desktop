@@ -1393,6 +1393,10 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 			return CopilotCLISessionType.icon;
 		}
 
+		if (provider.includes('backboard')) {
+			return ThemeIcon.fromId('backboard-logo');
+		}
+
 		if (provider.includes('claude')) {
 			return Codicon.claude;
 		}

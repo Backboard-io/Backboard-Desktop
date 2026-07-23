@@ -467,19 +467,44 @@ class MainThreadChatSessionItemController extends Disposable implements IChatSes
 			if (!this._resolving.has(resource)) {
 				this._resolveCache.delete(resource);
 			}
-			addedOrUpdatedItems.push(await this.addOrUpdateItem(item));
+			const before = this._items.get(resource);
+			const updated = await this.doAddOrUpdateItem(item);
+			if (updated !== before) {
+				addedOrUpdatedItems.push(updated);
+			}
 		}
 		for (const uri of change.removed) {
 			this._resolveCache.delete(uri);
 			this._items.delete(uri);
 		}
-		this._onDidChangeChatSessionItems.fire({
-			addedOrUpdated: addedOrUpdatedItems,
-			removed: change.removed,
-		});
+		// Fire a single delta covering only the items that actually changed.
+		// Extensions routinely push their full item list; re-broadcasting
+		// unchanged items cascades into needless session list rebuilds.
+		if (addedOrUpdatedItems.length > 0 || change.removed.length > 0) {
+			this._onDidChangeChatSessionItems.fire({
+				addedOrUpdated: addedOrUpdatedItems,
+				removed: change.removed,
+			});
+		}
 	}
 
 	private async addOrUpdateItem(dto: Dto<IChatSessionItem>): Promise<MainThreadChatSessionItem> {
+		const before = this._items.get(URI.revive(dto.resource));
+		const updated = await this.doAddOrUpdateItem(dto);
+		if (updated !== before) {
+			this._onDidChangeChatSessionItems.fire({
+				addedOrUpdated: [updated],
+			});
+		}
+		return updated;
+	}
+
+	/**
+	 * Stores the item if it differs from the cached one and returns the stored
+	 * item (the previously cached instance when nothing changed). Does not fire
+	 * any event — callers decide whether and how to announce the change.
+	 */
+	private async doAddOrUpdateItem(dto: Dto<IChatSessionItem>): Promise<MainThreadChatSessionItem> {
 		const resource = URI.revive(dto.resource);
 		const existing = this._items.get(resource);
 		const updated = new MainThreadChatSessionItem(dto, this._chatService.getSession(resource), await this._chatService.getMetadataForSession(resource));
@@ -494,9 +519,6 @@ class MainThreadChatSessionItemController extends Disposable implements IChatSes
 		}
 
 		this._items.set(resource, updated);
-		this._onDidChangeChatSessionItems.fire({
-			addedOrUpdated: [updated],
-		});
 		return updated;
 	}
 
@@ -639,7 +661,10 @@ class MainThreadChatSessionItem implements IChatSessionItem {
 	isEqual(other: MainThreadChatSessionItem): boolean {
 		return isEqual(this.resource, other.resource)
 			&& this.label === other.label
-			&& this.description === other.description
+			// The description may be a revived IMarkdownString object; a `===`
+			// compare would always report two equivalent objects as different,
+			// producing phantom change events on every update pass.
+			&& stringOrMarkdownEqual(this.description, other.description)
 			&& this.status === other.status
 			&& this.timing.created === other.timing.created
 			&& this.timing.lastRequestStarted === other.timing.lastRequestStarted

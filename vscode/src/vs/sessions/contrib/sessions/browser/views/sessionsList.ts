@@ -14,6 +14,7 @@ import { Codicon } from '../../../../../base/common/codicons.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { HighlightedLabel } from '../../../../../base/browser/ui/highlightedlabel/highlightedLabel.js';
 import { createMatches, FuzzyScore, IMatch } from '../../../../../base/common/filters.js';
+import { RunOnceScheduler } from '../../../../../base/common/async.js';
 import { Disposable, DisposableStore, MutableDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { MarkdownString } from '../../../../../base/common/htmlContent.js';
 import { IObservable, IReader, autorun, observableSignalFromEvent, observableValue } from '../../../../../base/common/observable.js';
@@ -950,6 +951,7 @@ export class SessionsList extends Disposable implements ISessionsList {
 	private static readonly EXCLUDE_READ_KEY = 'sessionsListControl.excludeRead';
 	private static readonly WORKSPACE_GROUP_CAPPED_KEY = 'sessionsListControl.workspaceGroupCapped';
 	private static readonly DEFAULT_WORKSPACE_GROUP_LIMIT = 5;
+	private static readonly REBUILD_COALESCE_DELAY = 100;
 
 	/**
 	 * Experiment treatment that overrides how many sessions are shown per
@@ -987,6 +989,27 @@ export class SessionsList extends Disposable implements ISessionsList {
 	private openWindowSourceFolder: URI | undefined;
 	private hasFindPattern = false;
 	private suspendCollapseStatePersistence = false;
+
+	/**
+	 * Event-driven rebuilds are coalesced through this scheduler so a burst of
+	 * change events (providers typically fire several per resolve pass)
+	 * produces a single tree rebuild instead of one full rebuild per event —
+	 * rebuild storms are visible as list flicker. User-initiated updates
+	 * (filters, show-more, …) keep calling {@link update} directly.
+	 */
+	private pendingRefresh = false;
+	private readonly rebuildScheduler = this._register(new RunOnceScheduler(() => {
+		const refresh = this.pendingRefresh;
+		this.pendingRefresh = false;
+		if (!this.visible) {
+			return;
+		}
+		if (refresh) {
+			this.refresh();
+		} else {
+			this.update();
+		}
+	}, SessionsList.REBUILD_COALESCE_DELAY));
 
 	private readonly _onDidUpdate = this._register(new Emitter<void>());
 	readonly onDidUpdate: Event<void> = this._onDidUpdate.event;
@@ -1029,7 +1052,7 @@ export class SessionsList extends Disposable implements ISessionsList {
 		this._missingFolderTracker = this._register(instantiationService.createInstance(MissingFolderTracker));
 		this._register(this._missingFolderTracker.onDidChange(() => {
 			if (this.visible) {
-				this.update();
+				this.scheduleUpdate();
 			}
 		}));
 
@@ -1239,19 +1262,19 @@ export class SessionsList extends Disposable implements ISessionsList {
 
 		this._register(this._sessionsManagementService.onDidChangeSessions(() => {
 			if (this.visible) {
-				this.refresh();
+				this.scheduleRefresh();
 			}
 		}));
 
 		this._register(this._sessionsListModelService.onDidChange(() => {
 			if (this.visible) {
-				this.update();
+				this.scheduleUpdate();
 			}
 		}));
 
 		this._register(this._agentHostFilterService.onDidChange(() => {
 			if (this.visible) {
-				this.update();
+				this.scheduleUpdate();
 			}
 		}));
 
@@ -1264,7 +1287,7 @@ export class SessionsList extends Disposable implements ISessionsList {
 				this._sessionsListModelService.markRead(activeSession);
 			}
 			if (this.visible) {
-				this.update();
+				this.scheduleUpdate();
 			}
 		}));
 
@@ -1299,6 +1322,21 @@ export class SessionsList extends Disposable implements ISessionsList {
 		this.sessions = this._sessionsManagementService.getSessions();
 		this.recheckMissingFolders();
 		this.update();
+	}
+
+	/** Schedules a coalesced {@link refresh}; see {@link rebuildScheduler}. */
+	private scheduleRefresh(): void {
+		this.pendingRefresh = true;
+		if (!this.rebuildScheduler.isScheduled()) {
+			this.rebuildScheduler.schedule();
+		}
+	}
+
+	/** Schedules a coalesced {@link update}; see {@link rebuildScheduler}. */
+	private scheduleUpdate(): void {
+		if (!this.rebuildScheduler.isScheduled()) {
+			this.rebuildScheduler.schedule();
+		}
 	}
 
 	/**

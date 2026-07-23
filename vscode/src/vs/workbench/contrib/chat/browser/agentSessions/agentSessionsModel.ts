@@ -11,7 +11,7 @@ import { IMarkdownString } from '../../../../../base/common/htmlContent.js';
 import { Disposable, DisposableMap } from '../../../../../base/common/lifecycle.js';
 import { ResourceMap, ResourceSet } from '../../../../../base/common/map.js';
 import { MarshalledId } from '../../../../../base/common/marshallingIds.js';
-import { safeStringify } from '../../../../../base/common/objects.js';
+import { equals, safeStringify } from '../../../../../base/common/objects.js';
 import { derived, IObservable, observableSignalFromEvent } from '../../../../../base/common/observable.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { URI, UriComponents } from '../../../../../base/common/uri.js';
@@ -147,6 +147,41 @@ interface IInternalAgentSessionData extends IAgentSessionData {
 }
 
 interface IInternalAgentSession extends IAgentSession, IInternalAgentSessionData { }
+
+function stringOrMarkdownValueEqual(a: string | IMarkdownString | undefined, b: string | IMarkdownString | undefined): boolean {
+	const aValue = typeof a === 'string' ? a : a?.value;
+	const bValue = typeof b === 'string' ? b : b?.value;
+	return aValue === bValue;
+}
+
+/**
+ * Compares the provider-supplied data of two sessions so that a resolve pass
+ * which produced identical data can be detected (and its change event
+ * suppressed). Intentionally ignores the state accessors (`isArchived()`,
+ * `isRead()`, …) — state changes fire through their own events.
+ */
+function agentSessionDataEquals(a: IInternalAgentSession, b: IInternalAgentSession): boolean {
+	if (a === b) {
+		return true;
+	}
+	return a.providerType === b.providerType
+		&& a.providerLabel === b.providerLabel
+		&& a.resource.toString() === b.resource.toString()
+		&& a.label === b.label
+		&& stringOrMarkdownValueEqual(a.description, b.description)
+		&& stringOrMarkdownValueEqual(a.badge, b.badge)
+		&& stringOrMarkdownValueEqual(a.tooltip, b.tooltip)
+		&& a.icon.id === b.icon.id
+		&& a.status === b.status
+		&& a.archived === b.archived
+		&& a.timing.created === b.timing.created
+		&& a.timing.lastRequestStarted === b.timing.lastRequestStarted
+		&& a.timing.lastRequestEnded === b.timing.lastRequestEnded
+		&& equals(a.changes, b.changes)
+		&& equals(a.metadata, b.metadata)
+		&& (a.legacyResource === undefined) === (b.legacyResource === undefined)
+		&& (a.legacyResource === undefined || a.legacyResource.toString() === b.legacyResource!.toString());
+}
 
 export function isLocalAgentSessionItem(session: IAgentSession): boolean {
 	return session.providerType === AgentSessionProviders.Local;
@@ -694,12 +729,31 @@ export class AgentSessionsModel extends Disposable implements IAgentSessionsMode
 			}
 		}
 
+		const previousSessions = this._sessions;
+		const wasResolved = this._resolved;
 		this._sessions = sessions;
 		this._resolved = true;
 
 		this.logger.logAllStatsIfTrace('Sessions resolved from providers');
 
-		this._onDidChangeSessions.fire();
+		// Only announce a change when this resolve pass actually produced
+		// different data. Resolve passes run frequently (provider refreshes,
+		// item-change echoes, availability churn) and an unconditional fire
+		// cascades into a full sidebar rebuild per pass, which is visible as
+		// list flicker.
+		let changed = !wasResolved || previousSessions.size !== sessions.size;
+		if (!changed) {
+			for (const [resource, session] of sessions) {
+				const previous = previousSessions.get(resource);
+				if (!previous || !agentSessionDataEquals(previous, session)) {
+					changed = true;
+					break;
+				}
+			}
+		}
+		if (changed) {
+			this._onDidChangeSessions.fire();
+		}
 	}
 
 	private toAgentSession(data: IInternalAgentSessionData): IInternalAgentSession {
