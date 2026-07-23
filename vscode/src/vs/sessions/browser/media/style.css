@@ -1036,7 +1036,9 @@
 	background: transparent !important;
 }
 
-/* Constrain content items to the same max-width, centered.
+/* Let content items fill the full width of their host, with only a gutter to
+ * keep text off the edge. The base chat stylesheet centers a fixed reading
+ * column; the sessions window instead uses the whole panel.
  * Scoped to the chat panel (`.part.sessionspart`) and the chat editor host
  * (`.chat-editor-relative`) so the "card style" doesn't leak into other chat
  * surfaces that reuse `.interactive-item-container` — notably the terminal
@@ -1045,8 +1047,9 @@
 .agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-item-container,
 .agent-sessions-workbench .part.sessionspart .interactive-session > .chat-suggest-next-widget,
 .agent-sessions-workbench .chat-editor-relative .interactive-session > .chat-suggest-next-widget {
-	max-width: 760px;
-	margin: 0 auto;
+	max-width: none;
+	width: 100%;
+	margin: 0;
 	padding-left: 20px;
 	padding-right: 20px;
 	box-sizing: border-box;
@@ -1166,8 +1169,8 @@
 .agent-sessions-workbench .part.sessionspart .interactive-session .interactive-input-part,
 .agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-input-part {
 	width: 100%;
-	max-width: 760px;
-	margin: 0 auto;
+	max-width: none;
+	margin: 0;
 	display: inherit;
 	padding: 4px 20px;
 	box-sizing: border-box;
