@@ -71,6 +71,23 @@
 	background: var(--t3-background);
 }
 
+/* The chat view feeds the session-view background into the list styler, which
+ * repaints every row (and all hover/focus/selection states) a shade lighter
+ * than the black above — visible as a two-tone seam where the transcript ends
+ * and the composer band begins. T3 has one flat page colour and no row-state
+ * fills, so pin the whole list surface to the same black. `!important` beats
+ * the styler's injected per-widget stylesheet. */
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .interactive-session .interactive-list,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .interactive-session .interactive-list .monaco-list,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .interactive-session .interactive-list .monaco-list-rows,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .interactive-session .interactive-list .monaco-list-row,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .interactive-session .interactive-list,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .interactive-session .interactive-list .monaco-list,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .interactive-session .interactive-list .monaco-list-rows,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .interactive-session .interactive-list .monaco-list-row {
+	background-color: var(--t3-background) !important;
+}
+
 /* ---- Prose ---- */
 
 .agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .interactive-item-container .value .rendered-markdown,

@@ -169,13 +169,9 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 		this.triggerButton.setAttribute('aria-expanded', 'true');
 		this.contextMenuService.showContextMenu({
 			getAnchor: () => this.triggerButton!,
+			// Same order as the Simple and Advanced windows' mode switcher menus,
+			// so each mode keeps a fixed position no matter which window is active.
 			getActions: () => [
-				toAction({
-					id: 'workbench.action.mode.agents',
-					label: localize('backboardModeSwitcher.agents', "Simple"),
-					checked: agentsActive,
-					run: () => this.openAgents(),
-				}),
 				toAction({
 					id: 'workbench.action.mode.editor',
 					label: localize('backboardModeSwitcher.editor', "Editor"),
@@ -187,6 +183,12 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 					label: localize('backboardModeSwitcher.advanced', "Advanced"),
 					checked: false,
 					run: () => this.openAdvanced(),
+				}),
+				toAction({
+					id: 'workbench.action.mode.agents',
+					label: localize('backboardModeSwitcher.agents', "Simple"),
+					checked: agentsActive,
+					run: () => this.openAgents(),
 				}),
 			],
 			onHide: () => this.triggerButton?.setAttribute('aria-expanded', 'false'),
