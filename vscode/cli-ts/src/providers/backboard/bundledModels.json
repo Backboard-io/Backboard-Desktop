@@ -1366,10 +1366,10 @@
 				"defaults_only": false
 			},
 			"input_cost_per_1m_tokens": 1.5,
-			"output_cost_per_1m_tokens": 9,
+			"output_cost_per_1m_tokens": 7.5,
 			"cached_input_cost_per_1m_tokens": 0.15,
 			"cache_write_input_cost_per_1m_tokens": 0.08333333333333334,
-			"last_updated": "2026-07-09T16:28:04"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -1394,8 +1394,7 @@
 			"provider": "openrouter",
 			"name": "~moonshotai/kimi-latest",
 			"model_type": "llm",
-			"context_limit": 262144,
-			"max_output_tokens": 262144,
+			"context_limit": 1048576,
 			"supports_vision": true,
 			"supports_thinking": true,
 			"thinking_controls": {
@@ -1403,10 +1402,10 @@
 				"allowed_fields": ["exclude_reasoning", "max_tokens"],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.66,
-			"output_cost_per_1m_tokens": 3.41,
-			"cached_input_cost_per_1m_tokens": 0.15,
-			"last_updated": "2026-07-10T13:35:30"
+			"input_cost_per_1m_tokens": 3,
+			"output_cost_per_1m_tokens": 15,
+			"cached_input_cost_per_1m_tokens": 0.3,
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -1459,8 +1458,8 @@
 			},
 			"input_cost_per_1m_tokens": 2,
 			"output_cost_per_1m_tokens": 6,
-			"cached_input_cost_per_1m_tokens": 0.5,
-			"last_updated": "2026-07-09T16:28:04"
+			"cached_input_cost_per_1m_tokens": 0.3,
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -1646,7 +1645,7 @@
 			"provider": "openrouter",
 			"name": "anthracite-org/magnum-v4-72b",
 			"model_type": "llm",
-			"context_limit": 32768,
+			"context_limit": 16384,
 			"max_output_tokens": 2048,
 			"supports_vision": false,
 			"supports_thinking": false,
@@ -1658,7 +1657,7 @@
 			"input_cost_per_1m_tokens": 3,
 			"output_cost_per_1m_tokens": 5,
 			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-05-26T15:13:28"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -1871,6 +1870,44 @@
 		},
 		{
 			"provider": "openrouter",
+			"name": "anthropic/claude-opus-5",
+			"model_type": "llm",
+			"context_limit": 1000000,
+			"max_output_tokens": 128000,
+			"supports_vision": true,
+			"supports_thinking": true,
+			"thinking_controls": {
+				"supported": true,
+				"allowed_fields": ["exclude_reasoning", "max_tokens"],
+				"defaults_only": false
+			},
+			"input_cost_per_1m_tokens": 5,
+			"output_cost_per_1m_tokens": 25,
+			"cached_input_cost_per_1m_tokens": 0.5,
+			"cache_write_input_cost_per_1m_tokens": 6.25,
+			"last_updated": "2026-07-24T17:27:04"
+		},
+		{
+			"provider": "openrouter",
+			"name": "anthropic/claude-opus-5-fast",
+			"model_type": "llm",
+			"context_limit": 1000000,
+			"max_output_tokens": 128000,
+			"supports_vision": true,
+			"supports_thinking": true,
+			"thinking_controls": {
+				"supported": true,
+				"allowed_fields": ["exclude_reasoning", "max_tokens"],
+				"defaults_only": false
+			},
+			"input_cost_per_1m_tokens": 10,
+			"output_cost_per_1m_tokens": 50,
+			"cached_input_cost_per_1m_tokens": 1,
+			"cache_write_input_cost_per_1m_tokens": 12.5,
+			"last_updated": "2026-07-24T17:27:04"
+		},
+		{
+			"provider": "openrouter",
 			"name": "anthropic/claude-sonnet-4",
 			"model_type": "llm",
 			"context_limit": 1000000,
@@ -1961,25 +1998,7 @@
 			"input_cost_per_1m_tokens": 0.25,
 			"output_cost_per_1m_tokens": 0.8,
 			"cached_input_cost_per_1m_tokens": 0.06,
-			"last_updated": "2026-07-09T16:28:04"
-		},
-		{
-			"provider": "openrouter",
-			"name": "arcee-ai/trinity-mini",
-			"model_type": "llm",
-			"context_limit": 131072,
-			"max_output_tokens": 131072,
-			"supports_vision": false,
-			"supports_thinking": true,
-			"thinking_controls": {
-				"supported": true,
-				"allowed_fields": ["exclude_reasoning", "max_tokens"],
-				"defaults_only": false
-			},
-			"input_cost_per_1m_tokens": 0.045,
-			"output_cost_per_1m_tokens": 0.15,
-			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-04-21T18:39:08"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -2003,7 +2022,7 @@
 			"provider": "openrouter",
 			"name": "baidu/ernie-4.5-vl-424b-a47b",
 			"model_type": "llm",
-			"context_limit": 131072,
+			"context_limit": 123000,
 			"max_output_tokens": 16000,
 			"supports_vision": true,
 			"supports_thinking": true,
@@ -2015,7 +2034,7 @@
 			"input_cost_per_1m_tokens": 0.42,
 			"output_cost_per_1m_tokens": 1.25,
 			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-05-26T15:13:28"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -2218,7 +2237,7 @@
 			"provider": "openrouter",
 			"name": "deepseek/deepseek-chat",
 			"model_type": "llm",
-			"context_limit": 131072,
+			"context_limit": 163840,
 			"max_output_tokens": 16000,
 			"supports_vision": false,
 			"supports_thinking": false,
@@ -2230,14 +2249,14 @@
 			"input_cost_per_1m_tokens": 0.2002,
 			"output_cost_per_1m_tokens": 0.8001,
 			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-06-09T18:54:52"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
 			"name": "deepseek/deepseek-chat-v3-0324",
 			"model_type": "llm",
 			"context_limit": 163840,
-			"max_output_tokens": 16384,
+			"max_output_tokens": 65536,
 			"supports_vision": false,
 			"supports_thinking": false,
 			"thinking_controls": {
@@ -2245,10 +2264,10 @@
 				"allowed_fields": [],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.24,
-			"output_cost_per_1m_tokens": 0.9,
+			"input_cost_per_1m_tokens": 0.27,
+			"output_cost_per_1m_tokens": 1.12,
 			"cached_input_cost_per_1m_tokens": 0.135,
-			"last_updated": "2026-07-09T16:28:04"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -2263,10 +2282,10 @@
 				"allowed_fields": ["exclude_reasoning", "max_tokens"],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.21,
-			"output_cost_per_1m_tokens": 0.79,
+			"input_cost_per_1m_tokens": 0.25,
+			"output_cost_per_1m_tokens": 0.95,
 			"cached_input_cost_per_1m_tokens": 0.13,
-			"last_updated": "2026-05-15T19:54:35"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -2308,7 +2327,7 @@
 			"provider": "openrouter",
 			"name": "deepseek/deepseek-r1-distill-llama-70b",
 			"model_type": "llm",
-			"context_limit": 128000,
+			"context_limit": 8192,
 			"max_output_tokens": 8192,
 			"supports_vision": false,
 			"supports_thinking": true,
@@ -2320,7 +2339,7 @@
 			"input_cost_per_1m_tokens": 0.8,
 			"output_cost_per_1m_tokens": 0.8,
 			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-06-13T14:35:21"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -2336,16 +2355,16 @@
 				"defaults_only": false
 			},
 			"input_cost_per_1m_tokens": 0.27,
-			"output_cost_per_1m_tokens": 0.95,
-			"cached_input_cost_per_1m_tokens": 0.13,
-			"last_updated": "2026-05-05T15:06:30"
+			"output_cost_per_1m_tokens": 1,
+			"cached_input_cost_per_1m_tokens": 0.135,
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
 			"name": "deepseek/deepseek-v3.2",
 			"model_type": "llm",
-			"context_limit": 131072,
-			"max_output_tokens": 64000,
+			"context_limit": 163840,
+			"max_output_tokens": 65536,
 			"supports_vision": false,
 			"supports_thinking": true,
 			"thinking_controls": {
@@ -2353,10 +2372,10 @@
 				"allowed_fields": ["exclude_reasoning", "max_tokens"],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.2145,
-			"output_cost_per_1m_tokens": 0.32175,
-			"cached_input_cost_per_1m_tokens": 0.02145,
-			"last_updated": "2026-07-10T13:35:30"
+			"input_cost_per_1m_tokens": 0.269,
+			"output_cost_per_1m_tokens": 0.4,
+			"cached_input_cost_per_1m_tokens": 0.1345,
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -2381,7 +2400,6 @@
 			"name": "deepseek/deepseek-v4-flash",
 			"model_type": "llm",
 			"context_limit": 1048576,
-			"max_output_tokens": 65536,
 			"supports_vision": false,
 			"supports_thinking": true,
 			"thinking_controls": {
@@ -2389,10 +2407,10 @@
 				"allowed_fields": ["exclude_reasoning", "max_tokens"],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.09,
-			"output_cost_per_1m_tokens": 0.18,
-			"cached_input_cost_per_1m_tokens": 0.02,
-			"last_updated": "2026-06-19T13:14:02"
+			"input_cost_per_1m_tokens": 0.098,
+			"output_cost_per_1m_tokens": 0.196,
+			"cached_input_cost_per_1m_tokens": 0.0196,
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -2587,7 +2605,7 @@
 			"provider": "openrouter",
 			"name": "google/gemini-3.1-pro-preview-customtools",
 			"model_type": "llm",
-			"context_limit": 1048756,
+			"context_limit": 1048576,
 			"max_output_tokens": 65536,
 			"supports_vision": true,
 			"supports_thinking": true,
@@ -2600,7 +2618,7 @@
 			"output_cost_per_1m_tokens": 12,
 			"cached_input_cost_per_1m_tokens": 0.2,
 			"cache_write_input_cost_per_1m_tokens": 0.375,
-			"last_updated": "2026-07-09T16:28:04"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -2620,6 +2638,44 @@
 			"cached_input_cost_per_1m_tokens": 0.15,
 			"cache_write_input_cost_per_1m_tokens": 0.08333333333333334,
 			"last_updated": "2026-07-09T16:28:04"
+		},
+		{
+			"provider": "openrouter",
+			"name": "google/gemini-3.5-flash-lite",
+			"model_type": "llm",
+			"context_limit": 1048576,
+			"max_output_tokens": 65536,
+			"supports_vision": true,
+			"supports_thinking": true,
+			"thinking_controls": {
+				"supported": true,
+				"allowed_fields": ["exclude_reasoning", "max_tokens"],
+				"defaults_only": false
+			},
+			"input_cost_per_1m_tokens": 0.3,
+			"output_cost_per_1m_tokens": 2.5,
+			"cached_input_cost_per_1m_tokens": 0.03,
+			"cache_write_input_cost_per_1m_tokens": 0.08333333333333334,
+			"last_updated": "2026-07-24T17:27:04"
+		},
+		{
+			"provider": "openrouter",
+			"name": "google/gemini-3.6-flash",
+			"model_type": "llm",
+			"context_limit": 1048576,
+			"max_output_tokens": 65536,
+			"supports_vision": true,
+			"supports_thinking": true,
+			"thinking_controls": {
+				"supported": true,
+				"allowed_fields": ["exclude_reasoning", "max_tokens"],
+				"defaults_only": false
+			},
+			"input_cost_per_1m_tokens": 1.5,
+			"output_cost_per_1m_tokens": 7.5,
+			"cached_input_cost_per_1m_tokens": 0.15,
+			"cache_write_input_cost_per_1m_tokens": 0.08333333333333334,
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -2661,8 +2717,8 @@
 			"provider": "openrouter",
 			"name": "google/gemma-3-27b-it",
 			"model_type": "llm",
-			"context_limit": 131072,
-			"max_output_tokens": 16384,
+			"context_limit": 262144,
+			"max_output_tokens": 131072,
 			"supports_vision": true,
 			"supports_thinking": false,
 			"thinking_controls": {
@@ -2671,9 +2727,9 @@
 				"defaults_only": false
 			},
 			"input_cost_per_1m_tokens": 0.08,
-			"output_cost_per_1m_tokens": 0.16,
-			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-05-15T19:54:35"
+			"output_cost_per_1m_tokens": 0.45,
+			"cached_input_cost_per_1m_tokens": 0.04,
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -2715,6 +2771,7 @@
 			"name": "google/gemma-4-26b-a4b-it",
 			"model_type": "llm",
 			"context_limit": 262144,
+			"max_output_tokens": 262144,
 			"supports_vision": true,
 			"supports_thinking": true,
 			"thinking_controls": {
@@ -2722,10 +2779,10 @@
 				"allowed_fields": ["exclude_reasoning", "max_tokens"],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.06,
-			"output_cost_per_1m_tokens": 0.33,
-			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-05-15T19:54:35"
+			"input_cost_per_1m_tokens": 0.12,
+			"output_cost_per_1m_tokens": 0.35,
+			"cached_input_cost_per_1m_tokens": 0.05,
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -2740,16 +2797,16 @@
 				"allowed_fields": ["exclude_reasoning", "max_tokens"],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.12,
-			"output_cost_per_1m_tokens": 0.35,
-			"cached_input_cost_per_1m_tokens": 0.09,
-			"last_updated": "2026-06-13T14:35:21"
+			"input_cost_per_1m_tokens": 0.14,
+			"output_cost_per_1m_tokens": 0.4,
+			"cached_input_cost_per_1m_tokens": 0,
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
 			"name": "gryphe/mythomax-l2-13b",
 			"model_type": "llm",
-			"context_limit": 4096,
+			"context_limit": 8192,
 			"max_output_tokens": 4096,
 			"supports_vision": false,
 			"supports_thinking": false,
@@ -2761,7 +2818,7 @@
 			"input_cost_per_1m_tokens": 0.06,
 			"output_cost_per_1m_tokens": 0.06,
 			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-04-16T19:04:39"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -2909,9 +2966,27 @@
 		},
 		{
 			"provider": "openrouter",
-			"name": "kwaipilot/kat-coder-pro-v2",
+			"name": "kwaipilot/kat-coder-air-v2.5",
 			"model_type": "llm",
 			"context_limit": 256000,
+			"max_output_tokens": 80000,
+			"supports_vision": false,
+			"supports_thinking": false,
+			"thinking_controls": {
+				"supported": false,
+				"allowed_fields": [],
+				"defaults_only": false
+			},
+			"input_cost_per_1m_tokens": 0.15,
+			"output_cost_per_1m_tokens": 0.6,
+			"cached_input_cost_per_1m_tokens": 0.03,
+			"last_updated": "2026-07-24T17:27:04"
+		},
+		{
+			"provider": "openrouter",
+			"name": "kwaipilot/kat-coder-pro-v2",
+			"model_type": "llm",
+			"context_limit": 262144,
 			"max_output_tokens": 80000,
 			"supports_vision": false,
 			"supports_thinking": false,
@@ -2923,7 +2998,25 @@
 			"input_cost_per_1m_tokens": 0.3,
 			"output_cost_per_1m_tokens": 1.2,
 			"cached_input_cost_per_1m_tokens": 0.06,
-			"last_updated": "2026-05-15T19:54:35"
+			"last_updated": "2026-07-24T17:27:04"
+		},
+		{
+			"provider": "openrouter",
+			"name": "kwaipilot/kat-coder-pro-v2.5",
+			"model_type": "llm",
+			"context_limit": 256000,
+			"max_output_tokens": 80000,
+			"supports_vision": false,
+			"supports_thinking": false,
+			"thinking_controls": {
+				"supported": false,
+				"allowed_fields": [],
+				"defaults_only": false
+			},
+			"input_cost_per_1m_tokens": 0.74,
+			"output_cost_per_1m_tokens": 2.96,
+			"cached_input_cost_per_1m_tokens": 0.15,
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -2938,27 +3031,28 @@
 				"allowed_fields": [],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.75,
-			"output_cost_per_1m_tokens": 1,
+			"input_cost_per_1m_tokens": 0.5,
+			"output_cost_per_1m_tokens": 0.75,
 			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-04-16T19:04:39"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
-			"name": "meta-llama/llama-3-8b-instruct",
+			"name": "meituan/longcat-2.0",
 			"model_type": "llm",
-			"context_limit": 8192,
+			"context_limit": 1048756,
+			"max_output_tokens": 262144,
 			"supports_vision": false,
-			"supports_thinking": false,
+			"supports_thinking": true,
 			"thinking_controls": {
-				"supported": false,
-				"allowed_fields": [],
+				"supported": true,
+				"allowed_fields": ["exclude_reasoning", "max_tokens"],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.14,
-			"output_cost_per_1m_tokens": 0.14,
-			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-06-19T13:14:02"
+			"input_cost_per_1m_tokens": 0.3,
+			"output_cost_per_1m_tokens": 1.2,
+			"cached_input_cost_per_1m_tokens": 0.006,
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -2983,7 +3077,7 @@
 			"name": "meta-llama/llama-3.1-8b-instruct",
 			"model_type": "llm",
 			"context_limit": 131072,
-			"max_output_tokens": 16384,
+			"max_output_tokens": 131072,
 			"supports_vision": false,
 			"supports_thinking": false,
 			"thinking_controls": {
@@ -2991,34 +3085,16 @@
 				"allowed_fields": [],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.02,
-			"output_cost_per_1m_tokens": 0.03,
-			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-06-09T18:54:52"
-		},
-		{
-			"provider": "openrouter",
-			"name": "meta-llama/llama-3.2-11b-vision-instruct",
-			"model_type": "llm",
-			"context_limit": 131072,
-			"max_output_tokens": 16384,
-			"supports_vision": true,
-			"supports_thinking": false,
-			"thinking_controls": {
-				"supported": false,
-				"allowed_fields": [],
-				"defaults_only": false
-			},
-			"input_cost_per_1m_tokens": 0.345,
-			"output_cost_per_1m_tokens": 0.345,
-			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-06-09T18:54:52"
+			"input_cost_per_1m_tokens": 0.05,
+			"output_cost_per_1m_tokens": 0.08,
+			"cached_input_cost_per_1m_tokens": 0.025,
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
 			"name": "meta-llama/llama-3.2-1b-instruct",
 			"model_type": "llm",
-			"context_limit": 131072,
+			"context_limit": 60000,
 			"max_output_tokens": 60000,
 			"supports_vision": false,
 			"supports_thinking": false,
@@ -3030,7 +3106,7 @@
 			"input_cost_per_1m_tokens": 0.027,
 			"output_cost_per_1m_tokens": 0.201,
 			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-05-26T15:13:28"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -3055,7 +3131,7 @@
 			"name": "meta-llama/llama-3.3-70b-instruct",
 			"model_type": "llm",
 			"context_limit": 131072,
-			"max_output_tokens": 16384,
+			"max_output_tokens": 128000,
 			"supports_vision": false,
 			"supports_thinking": false,
 			"thinking_controls": {
@@ -3063,10 +3139,10 @@
 				"allowed_fields": [],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.1,
-			"output_cost_per_1m_tokens": 0.32,
+			"input_cost_per_1m_tokens": 0.13,
+			"output_cost_per_1m_tokens": 0.4,
 			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-05-05T15:06:30"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -3081,16 +3157,16 @@
 				"allowed_fields": [],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.15,
-			"output_cost_per_1m_tokens": 0.6,
+			"input_cost_per_1m_tokens": 0.2,
+			"output_cost_per_1m_tokens": 0.8,
 			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-06-09T18:54:52"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
 			"name": "meta-llama/llama-4-scout",
 			"model_type": "llm",
-			"context_limit": 10000000,
+			"context_limit": 1310720,
 			"max_output_tokens": 16384,
 			"supports_vision": true,
 			"supports_thinking": false,
@@ -3102,13 +3178,13 @@
 			"input_cost_per_1m_tokens": 0.1,
 			"output_cost_per_1m_tokens": 0.3,
 			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-06-09T18:54:52"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
 			"name": "meta-llama/llama-guard-4-12b",
 			"model_type": "llm",
-			"context_limit": 163840,
+			"context_limit": 1048576,
 			"max_output_tokens": 16384,
 			"supports_vision": true,
 			"supports_thinking": false,
@@ -3120,7 +3196,24 @@
 			"input_cost_per_1m_tokens": 0.18,
 			"output_cost_per_1m_tokens": 0.18,
 			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-05-15T19:54:35"
+			"last_updated": "2026-07-24T17:27:04"
+		},
+		{
+			"provider": "openrouter",
+			"name": "meta/muse-spark-1.1",
+			"model_type": "llm",
+			"context_limit": 1048576,
+			"supports_vision": true,
+			"supports_thinking": true,
+			"thinking_controls": {
+				"supported": true,
+				"allowed_fields": ["exclude_reasoning", "max_tokens"],
+				"defaults_only": false
+			},
+			"input_cost_per_1m_tokens": 1.25,
+			"output_cost_per_1m_tokens": 4.25,
+			"cached_input_cost_per_1m_tokens": 0.15,
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -3144,7 +3237,7 @@
 			"provider": "openrouter",
 			"name": "microsoft/wizardlm-2-8x22b",
 			"model_type": "llm",
-			"context_limit": 65536,
+			"context_limit": 65535,
 			"max_output_tokens": 8000,
 			"supports_vision": false,
 			"supports_thinking": false,
@@ -3156,7 +3249,7 @@
 			"input_cost_per_1m_tokens": 0.62,
 			"output_cost_per_1m_tokens": 0.62,
 			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-05-26T15:13:28"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -3189,10 +3282,10 @@
 				"allowed_fields": ["exclude_reasoning", "max_tokens"],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.4,
+			"input_cost_per_1m_tokens": 0.55,
 			"output_cost_per_1m_tokens": 2.2,
 			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-04-21T18:39:08"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -3271,7 +3364,7 @@
 			"name": "minimax/minimax-m2.7",
 			"model_type": "llm",
 			"context_limit": 204800,
-			"max_output_tokens": 196608,
+			"max_output_tokens": 131072,
 			"supports_vision": false,
 			"supports_thinking": true,
 			"thinking_controls": {
@@ -3279,17 +3372,17 @@
 				"allowed_fields": ["exclude_reasoning", "max_tokens"],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.24,
-			"output_cost_per_1m_tokens": 0.96,
-			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-07-09T16:28:04"
+			"input_cost_per_1m_tokens": 0.25,
+			"output_cost_per_1m_tokens": 1,
+			"cached_input_cost_per_1m_tokens": 0.05,
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
 			"name": "minimax/minimax-m3",
 			"model_type": "llm",
 			"context_limit": 1048576,
-			"max_output_tokens": 131072,
+			"max_output_tokens": 512000,
 			"supports_vision": true,
 			"supports_thinking": true,
 			"thinking_controls": {
@@ -3300,7 +3393,7 @@
 			"input_cost_per_1m_tokens": 0.3,
 			"output_cost_per_1m_tokens": 1.2,
 			"cached_input_cost_per_1m_tokens": 0.06,
-			"last_updated": "2026-07-10T13:35:30"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -3494,6 +3587,7 @@
 			"name": "mistralai/mistral-nemo",
 			"model_type": "llm",
 			"context_limit": 131072,
+			"max_output_tokens": 16384,
 			"supports_vision": false,
 			"supports_thinking": false,
 			"thinking_controls": {
@@ -3501,10 +3595,10 @@
 				"allowed_fields": [],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.02,
+			"input_cost_per_1m_tokens": 0.019,
 			"output_cost_per_1m_tokens": 0.03,
 			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-05-05T15:06:30"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -3580,8 +3674,7 @@
 			"provider": "openrouter",
 			"name": "mistralai/mistral-small-3.2-24b-instruct",
 			"model_type": "llm",
-			"context_limit": 128000,
-			"max_output_tokens": 16384,
+			"context_limit": 256000,
 			"supports_vision": true,
 			"supports_thinking": false,
 			"thinking_controls": {
@@ -3589,10 +3682,10 @@
 				"allowed_fields": [],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.075,
-			"output_cost_per_1m_tokens": 0.2,
-			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-05-15T19:54:35"
+			"input_cost_per_1m_tokens": 0.1,
+			"output_cost_per_1m_tokens": 0.3,
+			"cached_input_cost_per_1m_tokens": 0.01,
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -3687,6 +3780,7 @@
 			"name": "moonshotai/kimi-k2.5",
 			"model_type": "llm",
 			"context_limit": 262144,
+			"max_output_tokens": 262144,
 			"supports_vision": true,
 			"supports_thinking": true,
 			"thinking_controls": {
@@ -3694,10 +3788,10 @@
 				"allowed_fields": ["exclude_reasoning", "max_tokens"],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.375,
-			"output_cost_per_1m_tokens": 2.025,
-			"cached_input_cost_per_1m_tokens": 0.203,
-			"last_updated": "2026-07-09T16:28:04"
+			"input_cost_per_1m_tokens": 0.57,
+			"output_cost_per_1m_tokens": 2.85,
+			"cached_input_cost_per_1m_tokens": 0.095,
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -3712,10 +3806,10 @@
 				"allowed_fields": ["exclude_reasoning", "max_tokens"],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.66,
-			"output_cost_per_1m_tokens": 3.41,
-			"cached_input_cost_per_1m_tokens": 0.15,
-			"last_updated": "2026-07-10T13:35:30"
+			"input_cost_per_1m_tokens": 0.684,
+			"output_cost_per_1m_tokens": 3.42,
+			"cached_input_cost_per_1m_tokens": 0.144,
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -3730,10 +3824,27 @@
 				"allowed_fields": ["exclude_reasoning", "max_tokens"],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.72,
-			"output_cost_per_1m_tokens": 3.5,
+			"input_cost_per_1m_tokens": 0.82,
+			"output_cost_per_1m_tokens": 3.75,
 			"cached_input_cost_per_1m_tokens": 0.15,
-			"last_updated": "2026-07-09T16:28:04"
+			"last_updated": "2026-07-24T17:27:04"
+		},
+		{
+			"provider": "openrouter",
+			"name": "moonshotai/kimi-k3",
+			"model_type": "llm",
+			"context_limit": 1048576,
+			"supports_vision": true,
+			"supports_thinking": true,
+			"thinking_controls": {
+				"supported": true,
+				"allowed_fields": ["exclude_reasoning", "max_tokens"],
+				"defaults_only": false
+			},
+			"input_cost_per_1m_tokens": 3,
+			"output_cost_per_1m_tokens": 15,
+			"cached_input_cost_per_1m_tokens": 0.3,
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -3879,24 +3990,6 @@
 		},
 		{
 			"provider": "openrouter",
-			"name": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
-			"model_type": "llm",
-			"context_limit": 131072,
-			"max_output_tokens": 16384,
-			"supports_vision": false,
-			"supports_thinking": true,
-			"thinking_controls": {
-				"supported": true,
-				"allowed_fields": ["exclude_reasoning", "max_tokens"],
-				"defaults_only": false
-			},
-			"input_cost_per_1m_tokens": 0.4,
-			"output_cost_per_1m_tokens": 0.4,
-			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-06-09T18:54:52"
-		},
-		{
-			"provider": "openrouter",
 			"name": "nvidia/nemotron-3-nano-30b-a3b",
 			"model_type": "llm",
 			"context_limit": 262144,
@@ -3934,7 +4027,7 @@
 			"provider": "openrouter",
 			"name": "nvidia/nemotron-3-ultra-550b-a55b",
 			"model_type": "llm",
-			"context_limit": 1000000,
+			"context_limit": 512288,
 			"max_output_tokens": 16384,
 			"supports_vision": false,
 			"supports_thinking": true,
@@ -3946,7 +4039,7 @@
 			"input_cost_per_1m_tokens": 0.5,
 			"output_cost_per_1m_tokens": 2.2,
 			"cached_input_cost_per_1m_tokens": 0.1,
-			"last_updated": "2026-06-19T13:14:02"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -4061,6 +4154,7 @@
 			"name": "openai/gpt-4.1",
 			"model_type": "llm",
 			"context_limit": 1047576,
+			"max_output_tokens": 32768,
 			"supports_vision": true,
 			"supports_thinking": false,
 			"thinking_controls": {
@@ -4071,7 +4165,7 @@
 			"input_cost_per_1m_tokens": 2,
 			"output_cost_per_1m_tokens": 8,
 			"cached_input_cost_per_1m_tokens": 0.5,
-			"last_updated": "2026-05-15T19:54:35"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -4124,8 +4218,8 @@
 			},
 			"input_cost_per_1m_tokens": 2.5,
 			"output_cost_per_1m_tokens": 10,
-			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-05-15T19:54:35"
+			"cached_input_cost_per_1m_tokens": 1.25,
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -4330,6 +4424,7 @@
 			"name": "openai/gpt-5-nano",
 			"model_type": "llm",
 			"context_limit": 400000,
+			"max_output_tokens": 128000,
 			"supports_vision": true,
 			"supports_thinking": true,
 			"thinking_controls": {
@@ -4339,8 +4434,8 @@
 			},
 			"input_cost_per_1m_tokens": 0.05,
 			"output_cost_per_1m_tokens": 0.4,
-			"cached_input_cost_per_1m_tokens": 0.01,
-			"last_updated": "2026-05-15T19:54:35"
+			"cached_input_cost_per_1m_tokens": 0.005,
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -4383,7 +4478,7 @@
 			"name": "openai/gpt-5.1-chat",
 			"model_type": "llm",
 			"context_limit": 128000,
-			"max_output_tokens": 32000,
+			"max_output_tokens": 16384,
 			"supports_vision": true,
 			"supports_thinking": false,
 			"thinking_controls": {
@@ -4393,8 +4488,8 @@
 			},
 			"input_cost_per_1m_tokens": 1.25,
 			"output_cost_per_1m_tokens": 10,
-			"cached_input_cost_per_1m_tokens": 0.13,
-			"last_updated": "2026-06-09T18:54:52"
+			"cached_input_cost_per_1m_tokens": 0.125,
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -4803,6 +4898,7 @@
 			"name": "openai/gpt-oss-120b",
 			"model_type": "llm",
 			"context_limit": 131072,
+			"max_output_tokens": 131072,
 			"supports_vision": false,
 			"supports_thinking": true,
 			"thinking_controls": {
@@ -4810,10 +4906,10 @@
 				"allowed_fields": ["exclude_reasoning", "max_tokens"],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.039,
-			"output_cost_per_1m_tokens": 0.18,
+			"input_cost_per_1m_tokens": 0.037,
+			"output_cost_per_1m_tokens": 0.17,
 			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-05-05T15:06:30"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -5155,6 +5251,24 @@
 		},
 		{
 			"provider": "openrouter",
+			"name": "poolside/laguna-s-2.1",
+			"model_type": "llm",
+			"context_limit": 1048576,
+			"max_output_tokens": 131072,
+			"supports_vision": false,
+			"supports_thinking": true,
+			"thinking_controls": {
+				"supported": true,
+				"allowed_fields": ["exclude_reasoning", "max_tokens"],
+				"defaults_only": false
+			},
+			"input_cost_per_1m_tokens": 0.1,
+			"output_cost_per_1m_tokens": 0.2,
+			"cached_input_cost_per_1m_tokens": 0.01,
+			"last_updated": "2026-07-24T17:27:04"
+		},
+		{
+			"provider": "openrouter",
 			"name": "poolside/laguna-xs-2.1",
 			"model_type": "llm",
 			"context_limit": 262144,
@@ -5175,7 +5289,7 @@
 			"provider": "openrouter",
 			"name": "qwen/qwen-2.5-72b-instruct",
 			"model_type": "llm",
-			"context_limit": 131072,
+			"context_limit": 32768,
 			"max_output_tokens": 16384,
 			"supports_vision": false,
 			"supports_thinking": false,
@@ -5187,13 +5301,13 @@
 			"input_cost_per_1m_tokens": 0.36,
 			"output_cost_per_1m_tokens": 0.4,
 			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-05-26T15:13:28"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
 			"name": "qwen/qwen-2.5-7b-instruct",
 			"model_type": "llm",
-			"context_limit": 131072,
+			"context_limit": 32768,
 			"max_output_tokens": 32768,
 			"supports_vision": false,
 			"supports_thinking": false,
@@ -5205,13 +5319,13 @@
 			"input_cost_per_1m_tokens": 0.04,
 			"output_cost_per_1m_tokens": 0.1,
 			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-06-19T13:14:02"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
 			"name": "qwen/qwen-2.5-coder-32b-instruct",
 			"model_type": "llm",
-			"context_limit": 128000,
+			"context_limit": 32768,
 			"max_output_tokens": 32768,
 			"supports_vision": false,
 			"supports_thinking": false,
@@ -5223,7 +5337,7 @@
 			"input_cost_per_1m_tokens": 0.66,
 			"output_cost_per_1m_tokens": 1,
 			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-05-26T15:13:28"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -5285,7 +5399,7 @@
 			"provider": "openrouter",
 			"name": "qwen/qwen2.5-vl-72b-instruct",
 			"model_type": "llm",
-			"context_limit": 131072,
+			"context_limit": 128000,
 			"max_output_tokens": 128000,
 			"supports_vision": true,
 			"supports_thinking": false,
@@ -5297,14 +5411,14 @@
 			"input_cost_per_1m_tokens": 0.8,
 			"output_cost_per_1m_tokens": 1,
 			"cached_input_cost_per_1m_tokens": 0.4,
-			"last_updated": "2026-06-13T14:35:21"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
 			"name": "qwen/qwen3-14b",
 			"model_type": "llm",
-			"context_limit": 131702,
-			"max_output_tokens": 40960,
+			"context_limit": 131072,
+			"max_output_tokens": 8192,
 			"supports_vision": false,
 			"supports_thinking": true,
 			"thinking_controls": {
@@ -5312,10 +5426,10 @@
 				"allowed_fields": ["exclude_reasoning", "max_tokens"],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.1,
-			"output_cost_per_1m_tokens": 0.24,
+			"input_cost_per_1m_tokens": 0.2275,
+			"output_cost_per_1m_tokens": 0.91,
 			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-05-26T15:13:28"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -5349,15 +5463,16 @@
 				"defaults_only": false
 			},
 			"input_cost_per_1m_tokens": 0.09,
-			"output_cost_per_1m_tokens": 0.1,
+			"output_cost_per_1m_tokens": 0.55,
 			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-06-09T18:54:52"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
 			"name": "qwen/qwen3-235b-a22b-thinking-2507",
 			"model_type": "llm",
 			"context_limit": 262144,
+			"max_output_tokens": 32768,
 			"supports_vision": false,
 			"supports_thinking": true,
 			"thinking_controls": {
@@ -5365,17 +5480,17 @@
 				"allowed_fields": ["exclude_reasoning", "max_tokens"],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.1495,
-			"output_cost_per_1m_tokens": 1.495,
+			"input_cost_per_1m_tokens": 0.3,
+			"output_cost_per_1m_tokens": 3,
 			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-07-09T16:28:04"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
 			"name": "qwen/qwen3-30b-a3b",
 			"model_type": "llm",
 			"context_limit": 131072,
-			"max_output_tokens": 16384,
+			"max_output_tokens": 8192,
 			"supports_vision": false,
 			"supports_thinking": true,
 			"thinking_controls": {
@@ -5383,17 +5498,16 @@
 				"allowed_fields": ["exclude_reasoning", "max_tokens"],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.12,
-			"output_cost_per_1m_tokens": 0.5,
+			"input_cost_per_1m_tokens": 0.13,
+			"output_cost_per_1m_tokens": 0.52,
 			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-06-09T18:54:52"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
 			"name": "qwen/qwen3-30b-a3b-instruct-2507",
 			"model_type": "llm",
-			"context_limit": 131072,
-			"max_output_tokens": 32000,
+			"context_limit": 262144,
 			"supports_vision": false,
 			"supports_thinking": false,
 			"thinking_controls": {
@@ -5401,16 +5515,16 @@
 				"allowed_fields": [],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.04815,
-			"output_cost_per_1m_tokens": 0.19305,
+			"input_cost_per_1m_tokens": 0.1,
+			"output_cost_per_1m_tokens": 0.3,
 			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-06-09T18:54:52"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
 			"name": "qwen/qwen3-30b-a3b-thinking-2507",
 			"model_type": "llm",
-			"context_limit": 131072,
+			"context_limit": 81920,
 			"max_output_tokens": 32768,
 			"supports_vision": false,
 			"supports_thinking": true,
@@ -5422,7 +5536,7 @@
 			"input_cost_per_1m_tokens": 0.13,
 			"output_cost_per_1m_tokens": 1.56,
 			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-07-09T16:28:04"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -5464,7 +5578,7 @@
 			"provider": "openrouter",
 			"name": "qwen/qwen3-coder",
 			"model_type": "llm",
-			"context_limit": 1048576,
+			"context_limit": 262144,
 			"max_output_tokens": 65536,
 			"supports_vision": false,
 			"supports_thinking": false,
@@ -5473,16 +5587,16 @@
 				"allowed_fields": [],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.22,
-			"output_cost_per_1m_tokens": 1.8,
-			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-05-26T15:13:28"
+			"input_cost_per_1m_tokens": 0.3,
+			"output_cost_per_1m_tokens": 1,
+			"cached_input_cost_per_1m_tokens": 0.1,
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
 			"name": "qwen/qwen3-coder-30b-a3b-instruct",
 			"model_type": "llm",
-			"context_limit": 160000,
+			"context_limit": 262144,
 			"max_output_tokens": 32768,
 			"supports_vision": false,
 			"supports_thinking": false,
@@ -5494,7 +5608,7 @@
 			"input_cost_per_1m_tokens": 0.07,
 			"output_cost_per_1m_tokens": 0.27,
 			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-04-16T19:04:39"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -5594,7 +5708,7 @@
 			"name": "qwen/qwen3-next-80b-a3b-instruct",
 			"model_type": "llm",
 			"context_limit": 262144,
-			"max_output_tokens": 16384,
+			"max_output_tokens": 262144,
 			"supports_vision": false,
 			"supports_thinking": false,
 			"thinking_controls": {
@@ -5602,10 +5716,10 @@
 				"allowed_fields": [],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.09,
+			"input_cost_per_1m_tokens": 0.1,
 			"output_cost_per_1m_tokens": 1.1,
-			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-05-15T19:54:35"
+			"cached_input_cost_per_1m_tokens": 0.07,
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -5630,7 +5744,7 @@
 			"name": "qwen/qwen3-vl-235b-a22b-instruct",
 			"model_type": "llm",
 			"context_limit": 262144,
-			"max_output_tokens": 16384,
+			"max_output_tokens": 32768,
 			"supports_vision": true,
 			"supports_thinking": false,
 			"thinking_controls": {
@@ -5638,10 +5752,10 @@
 				"allowed_fields": [],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.2,
-			"output_cost_per_1m_tokens": 0.88,
-			"cached_input_cost_per_1m_tokens": 0.11,
-			"last_updated": "2026-05-15T19:54:35"
+			"input_cost_per_1m_tokens": 0.21,
+			"output_cost_per_1m_tokens": 1.9,
+			"cached_input_cost_per_1m_tokens": 0.1,
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -5666,7 +5780,7 @@
 			"name": "qwen/qwen3-vl-30b-a3b-instruct",
 			"model_type": "llm",
 			"context_limit": 262144,
-			"max_output_tokens": 32768,
+			"max_output_tokens": 16384,
 			"supports_vision": true,
 			"supports_thinking": false,
 			"thinking_controls": {
@@ -5674,16 +5788,16 @@
 				"allowed_fields": [],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.13,
-			"output_cost_per_1m_tokens": 0.52,
+			"input_cost_per_1m_tokens": 0.15,
+			"output_cost_per_1m_tokens": 0.6,
 			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-05-26T15:13:28"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
 			"name": "qwen/qwen3-vl-30b-a3b-thinking",
 			"model_type": "llm",
-			"context_limit": 131072,
+			"context_limit": 262144,
 			"max_output_tokens": 32768,
 			"supports_vision": true,
 			"supports_thinking": true,
@@ -5695,13 +5809,13 @@
 			"input_cost_per_1m_tokens": 0.13,
 			"output_cost_per_1m_tokens": 1.56,
 			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-05-15T19:54:35"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
 			"name": "qwen/qwen3-vl-32b-instruct",
 			"model_type": "llm",
-			"context_limit": 262144,
+			"context_limit": 131072,
 			"max_output_tokens": 32768,
 			"supports_vision": true,
 			"supports_thinking": false,
@@ -5713,13 +5827,13 @@
 			"input_cost_per_1m_tokens": 0.104,
 			"output_cost_per_1m_tokens": 0.416,
 			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-05-26T15:13:28"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
 			"name": "qwen/qwen3-vl-8b-instruct",
 			"model_type": "llm",
-			"context_limit": 256000,
+			"context_limit": 262144,
 			"max_output_tokens": 32768,
 			"supports_vision": true,
 			"supports_thinking": false,
@@ -5731,13 +5845,13 @@
 			"input_cost_per_1m_tokens": 0.117,
 			"output_cost_per_1m_tokens": 0.455,
 			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-07-09T16:28:04"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
 			"name": "qwen/qwen3-vl-8b-thinking",
 			"model_type": "llm",
-			"context_limit": 256000,
+			"context_limit": 131072,
 			"max_output_tokens": 32768,
 			"supports_vision": true,
 			"supports_thinking": true,
@@ -5749,14 +5863,14 @@
 			"input_cost_per_1m_tokens": 0.117,
 			"output_cost_per_1m_tokens": 1.365,
 			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-05-26T15:13:28"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
 			"name": "qwen/qwen3.5-122b-a10b",
 			"model_type": "llm",
 			"context_limit": 262144,
-			"max_output_tokens": 262144,
+			"max_output_tokens": 65536,
 			"supports_vision": true,
 			"supports_thinking": true,
 			"thinking_controls": {
@@ -5767,7 +5881,7 @@
 			"input_cost_per_1m_tokens": 0.26,
 			"output_cost_per_1m_tokens": 2.08,
 			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-05-26T15:13:28"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -5792,7 +5906,7 @@
 			"name": "qwen/qwen3.5-35b-a3b",
 			"model_type": "llm",
 			"context_limit": 262144,
-			"max_output_tokens": 81920,
+			"max_output_tokens": 262144,
 			"supports_vision": true,
 			"supports_thinking": true,
 			"thinking_controls": {
@@ -5802,14 +5916,15 @@
 			},
 			"input_cost_per_1m_tokens": 0.14,
 			"output_cost_per_1m_tokens": 1,
-			"cached_input_cost_per_1m_tokens": 0.05,
-			"last_updated": "2026-07-09T16:28:04"
+			"cached_input_cost_per_1m_tokens": 0,
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
 			"name": "qwen/qwen3.5-397b-a17b",
 			"model_type": "llm",
-			"context_limit": 256000,
+			"context_limit": 262144,
+			"max_output_tokens": 65536,
 			"supports_vision": true,
 			"supports_thinking": true,
 			"thinking_controls": {
@@ -5817,10 +5932,10 @@
 				"allowed_fields": ["exclude_reasoning", "max_tokens"],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.385,
-			"output_cost_per_1m_tokens": 2.45,
-			"cached_input_cost_per_1m_tokens": 0.111,
-			"last_updated": "2026-07-09T16:28:04"
+			"input_cost_per_1m_tokens": 0.39,
+			"output_cost_per_1m_tokens": 2.34,
+			"cached_input_cost_per_1m_tokens": 0,
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -5900,7 +6015,6 @@
 			"name": "qwen/qwen3.6-27b",
 			"model_type": "llm",
 			"context_limit": 262144,
-			"max_output_tokens": 262140,
 			"supports_vision": true,
 			"supports_thinking": true,
 			"thinking_controls": {
@@ -5908,10 +6022,10 @@
 				"allowed_fields": ["exclude_reasoning", "max_tokens"],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.285,
+			"input_cost_per_1m_tokens": 0.288,
 			"output_cost_per_1m_tokens": 2.4,
-			"cached_input_cost_per_1m_tokens": 0.15,
-			"last_updated": "2026-07-09T16:28:04"
+			"cached_input_cost_per_1m_tokens": 0,
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -6001,11 +6115,11 @@
 				"allowed_fields": ["exclude_reasoning", "max_tokens"],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 1.25,
-			"output_cost_per_1m_tokens": 3.75,
-			"cached_input_cost_per_1m_tokens": 0.25,
-			"cache_write_input_cost_per_1m_tokens": 1.5625,
-			"last_updated": "2026-07-09T16:28:04"
+			"input_cost_per_1m_tokens": 1.475,
+			"output_cost_per_1m_tokens": 4.425,
+			"cached_input_cost_per_1m_tokens": 0.295,
+			"cache_write_input_cost_per_1m_tokens": 1.84375,
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -6136,23 +6250,6 @@
 		},
 		{
 			"provider": "openrouter",
-			"name": "sao10k/l3.1-70b-hanami-x1",
-			"model_type": "llm",
-			"context_limit": 16000,
-			"supports_vision": false,
-			"supports_thinking": false,
-			"thinking_controls": {
-				"supported": false,
-				"allowed_fields": [],
-				"defaults_only": false
-			},
-			"input_cost_per_1m_tokens": 3,
-			"output_cost_per_1m_tokens": 3,
-			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-06-19T13:14:02"
-		},
-		{
-			"provider": "openrouter",
 			"name": "sao10k/l3.1-euryale-70b",
 			"model_type": "llm",
 			"context_limit": 131072,
@@ -6209,7 +6306,7 @@
 			"provider": "openrouter",
 			"name": "stepfun/step-3.7-flash",
 			"model_type": "llm",
-			"context_limit": 256000,
+			"context_limit": 262144,
 			"max_output_tokens": 256000,
 			"supports_vision": true,
 			"supports_thinking": true,
@@ -6221,7 +6318,7 @@
 			"input_cost_per_1m_tokens": 0.2,
 			"output_cost_per_1m_tokens": 1.15,
 			"cached_input_cost_per_1m_tokens": 0.04,
-			"last_updated": "2026-06-09T18:54:52"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -6246,6 +6343,7 @@
 			"name": "tencent/hy3",
 			"model_type": "llm",
 			"context_limit": 262144,
+			"max_output_tokens": 128000,
 			"supports_vision": false,
 			"supports_thinking": true,
 			"thinking_controls": {
@@ -6253,10 +6351,10 @@
 				"allowed_fields": ["exclude_reasoning", "max_tokens"],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.14,
-			"output_cost_per_1m_tokens": 0.58,
-			"cached_input_cost_per_1m_tokens": 0.035,
-			"last_updated": "2026-07-09T16:28:04"
+			"input_cost_per_1m_tokens": 0.132,
+			"output_cost_per_1m_tokens": 0.528,
+			"cached_input_cost_per_1m_tokens": 0.033,
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -6349,10 +6447,27 @@
 		},
 		{
 			"provider": "openrouter",
+			"name": "thinkingmachines/inkling",
+			"model_type": "llm",
+			"context_limit": 1048576,
+			"supports_vision": true,
+			"supports_thinking": true,
+			"thinking_controls": {
+				"supported": true,
+				"allowed_fields": ["exclude_reasoning", "max_tokens"],
+				"defaults_only": false
+			},
+			"input_cost_per_1m_tokens": 1,
+			"output_cost_per_1m_tokens": 4.05,
+			"cached_input_cost_per_1m_tokens": 0.17,
+			"last_updated": "2026-07-24T17:27:04"
+		},
+		{
+			"provider": "openrouter",
 			"name": "undi95/remm-slerp-l2-13b",
 			"model_type": "llm",
 			"context_limit": 6144,
-			"max_output_tokens": 4096,
+			"max_output_tokens": 2048,
 			"supports_vision": false,
 			"supports_thinking": false,
 			"thinking_controls": {
@@ -6363,7 +6478,7 @@
 			"input_cost_per_1m_tokens": 0.45,
 			"output_cost_per_1m_tokens": 0.65,
 			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-04-16T19:04:39"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -6465,8 +6580,8 @@
 			},
 			"input_cost_per_1m_tokens": 2,
 			"output_cost_per_1m_tokens": 6,
-			"cached_input_cost_per_1m_tokens": 0.5,
-			"last_updated": "2026-07-09T16:28:04"
+			"cached_input_cost_per_1m_tokens": 0.3,
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -6489,7 +6604,8 @@
 			"provider": "openrouter",
 			"name": "xiaomi/mimo-v2.5",
 			"model_type": "llm",
-			"context_limit": 1048576,
+			"context_limit": 1050000,
+			"max_output_tokens": 131072,
 			"supports_vision": true,
 			"supports_thinking": true,
 			"thinking_controls": {
@@ -6497,16 +6613,16 @@
 				"allowed_fields": ["exclude_reasoning", "max_tokens"],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.105,
+			"input_cost_per_1m_tokens": 0.14,
 			"output_cost_per_1m_tokens": 0.28,
-			"cached_input_cost_per_1m_tokens": 0.028,
-			"last_updated": "2026-07-09T16:28:04"
+			"cached_input_cost_per_1m_tokens": 0.0028,
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
 			"name": "xiaomi/mimo-v2.5-pro",
 			"model_type": "llm",
-			"context_limit": 1048576,
+			"context_limit": 1050000,
 			"max_output_tokens": 131072,
 			"supports_vision": false,
 			"supports_thinking": true,
@@ -6518,7 +6634,7 @@
 			"input_cost_per_1m_tokens": 0.435,
 			"output_cost_per_1m_tokens": 0.87,
 			"cached_input_cost_per_1m_tokens": 0.0036,
-			"last_updated": "2026-06-09T18:54:52"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -6578,7 +6694,7 @@
 			"provider": "openrouter",
 			"name": "z-ai/glm-4.6",
 			"model_type": "llm",
-			"context_limit": 202752,
+			"context_limit": 204800,
 			"max_output_tokens": 131072,
 			"supports_vision": false,
 			"supports_thinking": true,
@@ -6587,10 +6703,10 @@
 				"allowed_fields": ["exclude_reasoning", "max_tokens"],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.43,
-			"output_cost_per_1m_tokens": 1.74,
-			"cached_input_cost_per_1m_tokens": 0.08,
-			"last_updated": "2026-05-15T19:54:35"
+			"input_cost_per_1m_tokens": 0.5,
+			"output_cost_per_1m_tokens": 2,
+			"cached_input_cost_per_1m_tokens": 0.1,
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -6614,7 +6730,7 @@
 			"provider": "openrouter",
 			"name": "z-ai/glm-4.7",
 			"model_type": "llm",
-			"context_limit": 202752,
+			"context_limit": 204800,
 			"max_output_tokens": 131072,
 			"supports_vision": false,
 			"supports_thinking": true,
@@ -6626,7 +6742,7 @@
 			"input_cost_per_1m_tokens": 0.4,
 			"output_cost_per_1m_tokens": 1.75,
 			"cached_input_cost_per_1m_tokens": 0.08,
-			"last_updated": "2026-05-15T19:54:35"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -6650,7 +6766,8 @@
 			"provider": "openrouter",
 			"name": "z-ai/glm-5",
 			"model_type": "llm",
-			"context_limit": 202752,
+			"context_limit": 204800,
+			"max_output_tokens": 131072,
 			"supports_vision": false,
 			"supports_thinking": true,
 			"thinking_controls": {
@@ -6658,16 +6775,16 @@
 				"allowed_fields": ["exclude_reasoning", "max_tokens"],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.6,
-			"output_cost_per_1m_tokens": 1.92,
-			"cached_input_cost_per_1m_tokens": 0.12,
-			"last_updated": "2026-05-15T19:54:35"
+			"input_cost_per_1m_tokens": 0.95,
+			"output_cost_per_1m_tokens": 2.55,
+			"cached_input_cost_per_1m_tokens": 0.2,
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
 			"name": "z-ai/glm-5-turbo",
 			"model_type": "llm",
-			"context_limit": 262144,
+			"context_limit": 202752,
 			"max_output_tokens": 131072,
 			"supports_vision": false,
 			"supports_thinking": true,
@@ -6679,13 +6796,13 @@
 			"input_cost_per_1m_tokens": 1.2,
 			"output_cost_per_1m_tokens": 4,
 			"cached_input_cost_per_1m_tokens": 0.24,
-			"last_updated": "2026-06-13T14:35:21"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
 			"name": "z-ai/glm-5.1",
 			"model_type": "llm",
-			"context_limit": 202752,
+			"context_limit": 204800,
 			"max_output_tokens": 128000,
 			"supports_vision": false,
 			"supports_thinking": true,
@@ -6697,7 +6814,7 @@
 			"input_cost_per_1m_tokens": 0.966,
 			"output_cost_per_1m_tokens": 3.036,
 			"cached_input_cost_per_1m_tokens": 0.1794,
-			"last_updated": "2026-07-09T16:28:04"
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
@@ -6712,10 +6829,10 @@
 				"allowed_fields": ["exclude_reasoning", "max_tokens"],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.77,
-			"output_cost_per_1m_tokens": 2.42,
-			"cached_input_cost_per_1m_tokens": 0.143,
-			"last_updated": "2026-07-10T13:35:30"
+			"input_cost_per_1m_tokens": 0.791,
+			"output_cost_per_1m_tokens": 2.486,
+			"cached_input_cost_per_1m_tokens": 0.1469,
+			"last_updated": "2026-07-24T17:27:04"
 		},
 		{
 			"provider": "openrouter",
