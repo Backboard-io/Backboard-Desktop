@@ -84,7 +84,7 @@ import { ChatMarkdownContentPart, codeblockHasClosingBackticks } from './chatCon
 import { ChatMcpServersInteractionContentPart } from './chatContentParts/chatMcpServersInteractionContentPart.js';
 import { ChatDisabledClaudeHooksContentPart } from './chatContentParts/chatDisabledClaudeHooksContentPart.js';
 import { ChatMultiDiffContentPart } from './chatContentParts/chatMultiDiffContentPart.js';
-import { ChatProgressContentPart, ChatProgressSubPart, ChatWorkingProgressContentPart } from './chatContentParts/chatProgressContentPart.js';
+import { ChatProgressContentPart, ChatProgressSubPart, ChatWorkingProgressContentPart, computeLiveWorkingLabel } from './chatContentParts/chatProgressContentPart.js';
 import { ChatPullRequestContentPart } from './chatContentParts/chatPullRequestContentPart.js';
 import { ChatWebPreviewContentPart } from './chatContentParts/chatWebPreviewContentPart.js';
 import { ChatQuotaExceededPart } from './chatContentParts/chatQuotaExceededPart.js';
@@ -999,7 +999,19 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			}, $('span.agentOrSlashCommandDetected')));
 
 		} else if (this.rendererOptions.renderStyle !== 'minimal' && !element.isComplete && !checkModeOption(this.delegate.currentChatMode(), this.rendererOptions.progressMessageAtBottomOfResponse)) {
-			templateData.detail.textContent = localize('working', "Working");
+			// Live status label: steps through "Connecting to model" / "Waiting for
+			// first token" and then rotates through the thinking phrase pool so the
+			// header never sits on a static "Working". The animated ellipsis span
+			// next to the detail supplies the trailing dots.
+			const tick = () => {
+				const elapsedMs = Math.max(0, Date.now() - element.confirmationAdjustedTimestamp.get());
+				const label = computeLiveWorkingLabel(element.id, element.response.value.length > 0, elapsedMs, this.configService);
+				if (templateData.detail.textContent !== label) {
+					templateData.detail.textContent = label;
+				}
+			};
+			tick();
+			templateData.elementDisposables.add(dom.disposableWindowInterval(dom.getWindow(templateData.detail), tick, 1000));
 		}
 	}
 

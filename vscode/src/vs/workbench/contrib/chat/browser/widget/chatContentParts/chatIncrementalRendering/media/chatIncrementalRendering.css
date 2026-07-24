@@ -22,7 +22,7 @@
 /* ---- fade (default) ---- */
 .chat-smooth-animate-fade {
 	opacity: 0;
-	animation: chatSmoothFade var(--chat-smooth-duration, 600ms) ease-out var(--chat-smooth-delay, 0ms) forwards;
+	animation: chatSmoothFade var(--chat-smooth-duration, 400ms) ease-out var(--chat-smooth-delay, 0ms) forwards;
 }
 @keyframes chatSmoothFade {
 	from { opacity: 0; }
@@ -32,11 +32,11 @@
 /* ---- rise ---- */
 .chat-smooth-animate-rise {
 	opacity: 0;
-	transform: translateY(4px);
-	animation: chatSmoothRise var(--chat-smooth-duration, 600ms) cubic-bezier(0.0, 0.0, 0.2, 1) var(--chat-smooth-delay, 0ms) forwards;
+	transform: translateY(6px);
+	animation: chatSmoothRise var(--chat-smooth-duration, 400ms) cubic-bezier(0.0, 0.0, 0.2, 1) var(--chat-smooth-delay, 0ms) forwards;
 }
 @keyframes chatSmoothRise {
-	from { opacity: 0; transform: translateY(4px); }
+	from { opacity: 0; transform: translateY(6px); }
 	to   { opacity: 1; transform: translateY(0); }
 }
 
@@ -44,7 +44,7 @@
 .chat-smooth-animate-blur {
 	opacity: 0;
 	filter: blur(2px);
-	animation: chatSmoothBlur var(--chat-smooth-duration, 600ms) cubic-bezier(0.0, 0.0, 0.2, 1) var(--chat-smooth-delay, 0ms) forwards;
+	animation: chatSmoothBlur var(--chat-smooth-duration, 400ms) cubic-bezier(0.0, 0.0, 0.2, 1) var(--chat-smooth-delay, 0ms) forwards;
 }
 @keyframes chatSmoothBlur {
 	from { opacity: 0; filter: blur(2px); }
@@ -55,7 +55,7 @@
 .chat-smooth-animate-scale {
 	opacity: 0;
 	transform: scale(0.95);
-	animation: chatSmoothScale var(--chat-smooth-duration, 600ms) cubic-bezier(0.0, 0.0, 0.2, 1) var(--chat-smooth-delay, 0ms) forwards;
+	animation: chatSmoothScale var(--chat-smooth-duration, 400ms) cubic-bezier(0.0, 0.0, 0.2, 1) var(--chat-smooth-delay, 0ms) forwards;
 }
 @keyframes chatSmoothScale {
 	from { opacity: 0; transform: scale(0.95); }
@@ -66,7 +66,7 @@
 .chat-smooth-animate-slide {
 	opacity: 0;
 	transform: translateX(-4px);
-	animation: chatSmoothSlide var(--chat-smooth-duration, 600ms) cubic-bezier(0.0, 0.0, 0.2, 1) var(--chat-smooth-delay, 0ms) forwards;
+	animation: chatSmoothSlide var(--chat-smooth-duration, 400ms) cubic-bezier(0.0, 0.0, 0.2, 1) var(--chat-smooth-delay, 0ms) forwards;
 }
 @keyframes chatSmoothSlide {
 	from { opacity: 0; transform: translateX(-4px); }
@@ -81,7 +81,7 @@
 	mask-size: 100% 0%;
 	-webkit-mask-repeat: no-repeat;
 	mask-repeat: no-repeat;
-	animation: chatSmoothReveal var(--chat-smooth-duration, 600ms) cubic-bezier(0.0, 0.0, 0.2, 1) var(--chat-smooth-delay, 0ms) forwards;
+	animation: chatSmoothReveal var(--chat-smooth-duration, 400ms) cubic-bezier(0.0, 0.0, 0.2, 1) var(--chat-smooth-delay, 0ms) forwards;
 }
 @keyframes chatSmoothReveal {
 	from {

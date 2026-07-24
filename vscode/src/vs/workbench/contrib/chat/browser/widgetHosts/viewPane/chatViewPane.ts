@@ -833,6 +833,7 @@ referencesExpandedWhenEmptyResponse: false,
 				enableImplicitContext: true,
 				enableWorkingSet: 'explicit',
 				supportsChangingModes: true,
+				inputEditorMinLines: 4,
 				dndContainer: parent,
 			},
 			{

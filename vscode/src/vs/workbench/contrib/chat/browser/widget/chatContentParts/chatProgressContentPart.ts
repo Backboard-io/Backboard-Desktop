@@ -15,7 +15,7 @@ import { IMarkdownRenderer } from '../../../../../../platform/markdown/browser/m
 import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
 import { localize } from '../../../../../../nls.js';
 import { IChatProgressMessage, IChatTask, IChatTaskSerialized, IChatToolInvocation, IChatToolInvocationSerialized } from '../../../common/chatService/chatService.js';
-import { IChatRendererContent, IChatWorkingProgress, IChatWorkingProgressState, isResponseVM } from '../../../common/model/chatViewModel.js';
+import { IChatRendererContent, IChatResponseViewModel, IChatWorkingProgress, IChatWorkingProgressState, isResponseVM } from '../../../common/model/chatViewModel.js';
 import { ChatTreeItem } from '../../chat.js';
 import { renderFileWidgets } from './chatInlineAnchorWidget.js';
 import { IChatContentPart, IChatContentPartRenderContext } from './chatContentParts.js';
@@ -250,6 +250,63 @@ function pickWorkingLabel(elementId: string, configurationService: IConfiguratio
 }
 
 /**
+ * Schedule for the live working label. While no response tokens have arrived
+ * yet, the label walks through connection-flavored startup stages (matching
+ * Zed's "Connecting to model" treatment); after that it rotates through the
+ * thinking phrase pool so the row never sits still. Labels are derived
+ * deterministically from elapsed time and the element id, so re-renders during
+ * streaming land on the same label instead of flickering.
+ */
+const WORKING_CONNECT_STAGE_MS = 2000;
+const WORKING_FIRST_TOKEN_STAGE_MS = 6000;
+const WORKING_ROTATE_INTERVAL_MS = 4000;
+
+const workingStartupStages = [
+	localize('chat.working.connecting', "Connecting to model"),
+	localize('chat.working.firstToken', "Waiting for first token"),
+];
+
+function hashWorkingSeed(value: string): number {
+	let hash = 0;
+	for (let i = 0; i < value.length; i++) {
+		hash = (hash * 31 + value.charCodeAt(i)) | 0;
+	}
+	return Math.abs(hash);
+}
+
+/** Small deterministic LCG so fun-message picks are stable per rotation step. */
+function workingRandomFromSeed(seed: number): () => number {
+	let state = seed || 1;
+	return () => {
+		state = (state * 1103515245 + 12345) & 0x7fffffff;
+		return state / 0x7fffffff;
+	};
+}
+
+function pickRotatingWorkingLabel(elementId: string, rotationStep: number, configurationService: IConfigurationService): string {
+	const fun = maybePickFunWorkingMessage(configurationService, workingRandomFromSeed(hashWorkingSeed(`${elementId}:${rotationStep}`)));
+	if (fun) {
+		return fun;
+	}
+	const pool = buildPhrasePool(defaultThinkingMessages, configurationService);
+	return pool[(hashWorkingSeed(elementId) + rotationStep) % pool.length];
+}
+
+export function computeLiveWorkingLabel(elementId: string, hasResponseContent: boolean, elapsedMs: number, configurationService: IConfigurationService): string {
+	// Startup stages only apply while nothing has streamed back yet; a working
+	// indicator shown mid-turn (between tool calls) goes straight to the rotation.
+	if (!hasResponseContent) {
+		if (elapsedMs < WORKING_CONNECT_STAGE_MS) {
+			return workingStartupStages[0];
+		}
+		if (elapsedMs < WORKING_FIRST_TOKEN_STAGE_MS) {
+			return workingStartupStages[1];
+		}
+	}
+	return pickRotatingWorkingLabel(elementId, Math.floor(elapsedMs / WORKING_ROTATE_INTERVAL_MS), configurationService);
+}
+
+/**
  * Formats an elapsed duration for the live working label, matching T3 Code's
  * ticker: seconds under a minute (`42s`), minutes and seconds up to an hour
  * (`3m 20s`), then hours and minutes (`1h 5m`). The unit letters are numeric
@@ -280,7 +337,9 @@ export class ChatWorkingProgressContentPart extends Disposable implements IChatC
 	private readonly label: string;
 	private readonly hasState: boolean;
 	private readonly isCompleteState: boolean;
-	/** Ticks the live "Working for Xs" label once per second while the turn runs. */
+	private readonly elementId: string;
+	private readonly responseElement: IChatResponseViewModel | undefined;
+	/** Ticks the live working label and elapsed time once per second while the turn runs. */
 	private readonly workingTimer = this._register(new MutableDisposable<IDisposable>());
 
 	constructor(
@@ -289,11 +348,13 @@ export class ChatWorkingProgressContentPart extends Disposable implements IChatC
 		context: IChatContentPartRenderContext,
 		@IInstantiationService instantiationService: IInstantiationService,
 		@IChatMarkdownAnchorService chatMarkdownAnchorService: IChatMarkdownAnchorService,
-		@IConfigurationService configurationService: IConfigurationService,
+		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@ILanguageModelToolsService languageModelToolsService: ILanguageModelToolsService,
 	) {
 		super();
 		this.explicitContent = workingProgress.content;
+		this.elementId = context.element.id;
+		this.responseElement = isResponseVM(context.element) ? context.element : undefined;
 		this.label = pickWorkingLabel(context.element.id, configurationService);
 
 		// Build the DOM
@@ -360,15 +421,35 @@ export class ChatWorkingProgressContentPart extends Disposable implements IChatC
 			return;
 		}
 
-		// Live "Working for Xs" ticker. The start timestamp is confirmation-adjusted
-		// and can move, so it is re-read each tick rather than captured once. Stats
-		// remain intentionally hidden in the minimal shipping version.
+		// Live status ticker. The start timestamp is confirmation-adjusted and can
+		// move, so it is re-read each tick rather than captured once. The label
+		// steps through startup stages and then rotates through the phrase pool;
+		// the elapsed time ticks alongside in the secondary stats span.
 		const tick = () => {
 			const elapsedMs = Math.max(0, Date.now() - state.confirmationAdjustedTimestamp.get());
-			this.labelElement.textContent = localize('chatWorkingFor', "Working for {0}", formatWorkingElapsed(elapsedMs));
+			this.setWorkingLabel(this.computeLiveLabel(elapsedMs));
+			this.statsElement.textContent = formatWorkingElapsed(elapsedMs);
 		};
 		tick();
 		this.workingTimer.value = disposableWindowInterval(getWindow(this.domNode), tick, 1000);
+	}
+
+	private computeLiveLabel(elapsedMs: number): string {
+		const hasResponseContent = this.responseElement ? this.responseElement.response.value.length > 0 : true;
+		return computeLiveWorkingLabel(this.elementId, hasResponseContent, elapsedMs, this.configurationService);
+	}
+
+	private setWorkingLabel(label: string): void {
+		if (this.labelElement.textContent === label) {
+			return;
+		}
+		this.labelElement.textContent = label;
+		if (!getWindow(this.domNode).matchMedia('(prefers-reduced-motion: reduce)').matches) {
+			this.labelElement.animate?.(
+				[{ opacity: 0, transform: 'translateY(2px)' }, { opacity: 1, transform: 'none' }],
+				{ duration: 220, easing: 'ease-out' }
+			);
+		}
 	}
 
 	updateWorkingContent(content: IMarkdownString): void {

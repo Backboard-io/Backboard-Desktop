@@ -1430,6 +1430,9 @@ configurationRegistry.registerConfiguration({
 		[listSmoothScrolling]: {
 			type: 'boolean',
 			default: false,
+			/* The Agents window streams chat into a list; animated scroll makes the
+			 * transcript glide instead of jumping as content arrives. */
+			agentsWindow: { default: true },
 			description: localize('list smoothScrolling setting', "Controls whether lists and trees have smooth scrolling."),
 		},
 		[mouseWheelScrollSensitivityKey]: {

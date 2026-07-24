@@ -987,7 +987,7 @@
 }
 
 .new-chat-composer-stack > .interactive-session .chat-input-container {
-	min-height: 132px;
+	min-height: 172px;
 	padding: 18px 20px 14px;
 	display: flex;
 	flex-direction: column;

@@ -15,9 +15,10 @@
  *
  * Scope is deliberately narrow:
  *
- * - Simple window only. The Advanced (`optimus-window`) and Jarvis windows use
- *   the same chat widget but keep the product's own chrome, so they are excluded
- *   by the same root markers the vibrancy rules use.
+ * - The Simple window, plus the Advanced (`optimus-window`) window's right
+ *   chat panel (`.optimus-chat-view`) — the `:is()` host lists carry both.
+ *   The rest of the Advanced chrome and the Jarvis window keep the product's
+ *   own look.
  * - Dark appearances only. T3 ships a light palette too, but the light theme here
  *   already resolves sensibly through the VS Code tokens, and hard-coding a
  *   second fixed palette would break every user theme that is not near-white.
@@ -49,8 +50,8 @@
 	}
 }
 
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart {
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view),
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) {
 	/* Source values, verbatim. */
 	--t3-background: #000;
 	--t3-foreground: #f1f3f7;
@@ -64,10 +65,22 @@
 	--t3-link: #60a5fa;
 }
 
+/* Defined at the workbench root (not `.part.sessionspart`) so the chat-editor
+ * host's composer can resolve it too. T3's dark `.chat-composer-glass-host`
+ * mixes white into the page colour (`color-mix(... 84%, white)` behind ~70%
+ * glass opacity ≈ a 9-11% lift), which is what makes their composer read as a
+ * raised card on pure black. */
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark,
+.agent-sessions-workbench.optimus-window.vs-dark,
+.agent-sessions-workbench.optimus-window.hc-black,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black {
+	--t3-composer-surface: color-mix(in srgb, var(--session-view-background, var(--sessions-main-region-background, var(--vscode-editor-background))) 91%, #fff);
+}
+
 /* ---- Transcript surface ---- */
 
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .interactive-session,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .interactive-session {
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .interactive-session,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .interactive-session {
 	background: var(--t3-background);
 }
 
@@ -77,61 +90,61 @@
  * and the composer band begins. T3 has one flat page colour and no row-state
  * fills, so pin the whole list surface to the same black. `!important` beats
  * the styler's injected per-widget stylesheet. */
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .interactive-session .interactive-list,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .interactive-session .interactive-list .monaco-list,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .interactive-session .interactive-list .monaco-list-rows,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .interactive-session .interactive-list .monaco-list-row,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .interactive-session .interactive-list,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .interactive-session .interactive-list .monaco-list,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .interactive-session .interactive-list .monaco-list-rows,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .interactive-session .interactive-list .monaco-list-row {
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .interactive-session .interactive-list,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .interactive-session .interactive-list .monaco-list,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .interactive-session .interactive-list .monaco-list-rows,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .interactive-session .interactive-list .monaco-list-row,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .interactive-session .interactive-list,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .interactive-session .interactive-list .monaco-list,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .interactive-session .interactive-list .monaco-list-rows,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .interactive-session .interactive-list .monaco-list-row {
 	background-color: var(--t3-background) !important;
 }
 
 /* ---- Prose ---- */
 
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .interactive-item-container .value .rendered-markdown,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .interactive-item-container .value .rendered-markdown {
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .interactive-item-container .value .rendered-markdown,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .interactive-item-container .value .rendered-markdown {
 	/* `text-foreground/80` against their near-white, not against ours. */
 	color: color-mix(in srgb, var(--t3-foreground) 80%, transparent);
 }
 
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .value .rendered-markdown h1,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .value .rendered-markdown h2,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .value .rendered-markdown h3,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .value .rendered-markdown h4,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .value .rendered-markdown h5,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .value .rendered-markdown h1,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .value .rendered-markdown h2,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .value .rendered-markdown h3,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .value .rendered-markdown h4,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .value .rendered-markdown h5 {
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .value .rendered-markdown h1,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .value .rendered-markdown h2,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .value .rendered-markdown h3,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .value .rendered-markdown h4,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .value .rendered-markdown h5,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .value .rendered-markdown h1,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .value .rendered-markdown h2,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .value .rendered-markdown h3,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .value .rendered-markdown h4,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .value .rendered-markdown h5 {
 	color: var(--t3-foreground);
 }
 
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .value .rendered-markdown h6,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .value .rendered-markdown blockquote,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .value .rendered-markdown h6,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .value .rendered-markdown blockquote {
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .value .rendered-markdown h6,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .value .rendered-markdown blockquote,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .value .rendered-markdown h6,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .value .rendered-markdown blockquote {
 	color: var(--t3-muted-foreground);
 }
 
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .value .rendered-markdown blockquote,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .value .rendered-markdown blockquote {
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .value .rendered-markdown blockquote,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .value .rendered-markdown blockquote {
 	border-left-color: var(--t3-border);
 }
 
 /* ---- Links ---- */
 
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .value .rendered-markdown a,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .value .rendered-markdown a {
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .value .rendered-markdown a,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .value .rendered-markdown a {
 	color: var(--t3-link);
 }
 
 /* ---- Code ---- */
 
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .value .rendered-markdown :not(pre):not(.monaco-editor) > code,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .value .rendered-markdown :not(pre):not(.monaco-editor) > code {
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .value .rendered-markdown :not(pre):not(.monaco-editor) > code,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .value .rendered-markdown :not(pre):not(.monaco-editor) > code {
 	border-color: var(--t3-border);
 	background: var(--t3-muted);
 	color: var(--t3-foreground);
@@ -139,59 +152,59 @@
 
 /* Their `.chat-markdown-codeblock` sits a shade off the page rather than
  * matching it, so the block still reads as a distinct surface on pure black. */
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .value .interactive-result-code-block,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .value .interactive-result-code-block {
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .value .interactive-result-code-block,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .value .interactive-result-code-block {
 	border-color: var(--t3-border);
 	background-color: var(--t3-muted);
 }
 
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .value .interactive-result-code-block .monaco-editor,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .value .interactive-result-code-block .monaco-editor .monaco-editor-background,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .value .interactive-result-code-block .monaco-editor,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .value .interactive-result-code-block .monaco-editor .monaco-editor-background {
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .value .interactive-result-code-block .monaco-editor,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .value .interactive-result-code-block .monaco-editor .monaco-editor-background,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .value .interactive-result-code-block .monaco-editor,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .value .interactive-result-code-block .monaco-editor .monaco-editor-background {
 	/* The editor paints its own theme background over the container fill. */
 	background-color: var(--t3-muted);
 }
 
 /* ---- Tables and rules ---- */
 
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .value .rendered-markdown th,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .value .rendered-markdown td,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .value .rendered-markdown hr,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .value .rendered-markdown th,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .value .rendered-markdown td,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .value .rendered-markdown hr {
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .value .rendered-markdown th,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .value .rendered-markdown td,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .value .rendered-markdown hr,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .value .rendered-markdown th,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .value .rendered-markdown td,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .value .rendered-markdown hr {
 	border-color: var(--t3-border);
 }
 
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .value .rendered-markdown th,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .value .rendered-markdown th {
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .value .rendered-markdown th,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .value .rendered-markdown th {
 	color: var(--t3-foreground);
 }
 
 /* ---- Sent prompt bubble ---- */
 
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .interactive-item-container.interactive-request .value .rendered-markdown,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .interactive-item-container.interactive-request .value .rendered-markdown {
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .interactive-item-container.interactive-request .value .rendered-markdown,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .interactive-item-container.interactive-request .value .rendered-markdown {
 	background-color: var(--t3-secondary) !important;
 	color: var(--t3-foreground);
 }
 
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .interactive-item-container.interactive-request .value .rendered-markdown.clickable:hover,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .interactive-item-container.interactive-request .value .rendered-markdown.clickable:hover {
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .interactive-item-container.interactive-request .value .rendered-markdown.clickable:hover,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .interactive-item-container.interactive-request .value .rendered-markdown.clickable:hover {
 	background-color: var(--t3-accent) !important;
 }
 
 /* ---- Composer ---- */
 
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .interactive-session .chat-input-container,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .interactive-session .chat-input-container {
-	border-color: var(--t3-border);
-	/* Match the agents screen background so the composer reads as part of the
-	 * surface (defined by its border), not a darker slab. */
-	background-color: var(--session-view-background, var(--sessions-main-region-background, var(--vscode-editor-background)));
-	/* Their `--radius`, one step up for the composer shell. */
-	border-radius: 0.75rem;
+/* T3's dark composer card: a ~10% white ring instead of a border (drop
+ * shadows barely register on black, so the ring carries the edge) over the
+ * lifted `--t3-composer-surface`. Geometry — radius, drop shadow, control
+ * sizes — is theme-independent and lives in style.css. */
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .interactive-session .chat-input-container,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .interactive-session .chat-input-container {
+	border-color: rgb(255 255 255 / 10%);
+	background-color: var(--t3-composer-surface);
 }
 
 /* The input's Monaco layer paints its own theme background over the container
@@ -199,27 +212,45 @@
  * stay a *solid* colour: the editor reuses this class for the reverse-rounded
  * selection corner pieces, and a transparent value makes those corners render
  * as blocks (see the matching note in style.css). */
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background {
-	background-color: var(--session-view-background, var(--sessions-main-region-background, var(--vscode-editor-background))) !important;
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background {
+	background-color: var(--t3-composer-surface) !important;
+}
+
+/* The new-chat composer pins itself to the flat page colour with
+ * high-specificity rules in chatWidget.css; out-rank them so the draft-screen
+ * card gets the same lifted surface as the session composer. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .chat-editor-relative .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .chat-editor-relative .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container {
+	border-color: rgb(255 255 255 / 10%);
+	background-color: var(--t3-composer-surface);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .margin,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .margin {
+	background-color: var(--t3-composer-surface) !important;
 }
 
 /* ---- Work rows ---- */
 
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .chat-used-context-label .monaco-button.monaco-icon-button,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .chat-used-context-label .monaco-button.monaco-icon-button {
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .chat-used-context-label .monaco-button.monaco-icon-button,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .chat-used-context-label .monaco-button.monaco-icon-button {
 	color: color-mix(in srgb, var(--t3-foreground) 82%, transparent);
 }
 
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .chat-used-context-label .monaco-button.monaco-icon-button:hover,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .chat-used-context-label .monaco-button.monaco-icon-button:hover {
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .chat-used-context-label .monaco-button.monaco-icon-button:hover,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .chat-used-context-label .monaco-button.monaco-icon-button:hover {
 	/* Their `hover:bg-accent/20` against the dark accent. */
 	background-color: color-mix(in srgb, var(--t3-accent) 20%, transparent);
 	color: var(--t3-foreground);
 }
 
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .chat-used-context-label .monaco-button.monaco-icon-button > .codicon,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .chat-used-context-label .monaco-button.monaco-icon-button > .codicon {
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .chat-used-context-label .monaco-button.monaco-icon-button > .codicon,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .chat-used-context-label .monaco-button.monaco-icon-button > .codicon {
 	color: color-mix(in srgb, var(--t3-muted-foreground) 65%, transparent);
 }
 
@@ -237,20 +268,20 @@
  * `status-pulse` wave without needing three real nodes. Values track T3's dots
  * (`bg-muted-foreground/30`, 4px, 3px gap → 7px centre-to-centre). */
 
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .progress-container.shimmer-progress,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .progress-container.shimmer-progress {
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .progress-container.shimmer-progress,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .progress-container.shimmer-progress {
 	font-size: 11px;
 	font-variant-numeric: tabular-nums;
 }
 
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .progress-container.shimmer-progress .chat-working-progress-step,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .progress-container.shimmer-progress .chat-working-progress-step {
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .progress-container.shimmer-progress .chat-working-progress-step,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .progress-container.shimmer-progress .chat-working-progress-step {
 	/* T3 centres the dots against the text rather than sitting them on the baseline. */
 	align-items: center;
 }
 
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .progress-container.shimmer-progress .chat-working-progress-step::before,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .progress-container.shimmer-progress .chat-working-progress-step::before {
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .progress-container.shimmer-progress .chat-working-progress-step::before,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .progress-container.shimmer-progress .chat-working-progress-step::before {
 	content: "";
 	flex: 0 0 auto;
 	align-self: center;
@@ -268,8 +299,8 @@
 }
 
 /* Drop the shimmer gradient: T3's label is flat muted text at 11px. */
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .progress-container.shimmer-progress .chat-working-progress-step > p,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .progress-container.shimmer-progress .chat-working-progress-step > p {
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .progress-container.shimmer-progress .chat-working-progress-step > p,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .progress-container.shimmer-progress .chat-working-progress-step > p {
 	background: none;
 	-webkit-background-clip: border-box;
 	background-clip: border-box;
@@ -286,47 +317,47 @@
  * no weight or opacity hierarchy inside it. The stock header carries a bold
  * bright verb and a dimmed detail segment; flatten all of it to the fold's
  * single tone. */
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button {
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button {
 	font-size: 12px;
 	color: var(--t3-muted-foreground);
 	font-variant-numeric: tabular-nums;
 }
 
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button:hover,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button:hover {
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button:hover,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button:hover {
 	color: var(--t3-foreground);
 }
 
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button .monaco-button-mdlabel,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button .monaco-button-mdlabel {
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button .monaco-button-mdlabel,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button .monaco-button-mdlabel {
 	font-size: 12px;
 	font-weight: 400;
 }
 
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button .chat-thinking-title-detail-text,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button .rendered-markdown.chat-thinking-title-detail,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button .chat-thinking-title-detail-text,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button .rendered-markdown.chat-thinking-title-detail {
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button .chat-thinking-title-detail-text,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button .rendered-markdown.chat-thinking-title-detail,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button .chat-thinking-title-detail-text,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button .rendered-markdown.chat-thinking-title-detail {
 	opacity: 1;
 }
 
 /* ---- Header ---- */
 
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-header,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-header {
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .chat-composite-bar.session-header-bar .chat-composite-bar-header,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .chat-composite-bar.session-header-bar .chat-composite-bar-header {
 	border-bottom-color: var(--t3-border);
 }
 
 /* Single-line header: the title is the line's anchor, full foreground; the
  * workspace pill and stats carry the muted tone. */
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-session-title-text,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-session-title-text {
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .chat-composite-bar.session-header-bar .chat-composite-bar-session-title-text,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .chat-composite-bar.session-header-bar .chat-composite-bar-session-title-text {
 	color: var(--t3-foreground);
 }
 
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-meta-workspace,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-meta-workspace {
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .chat-composite-bar.session-header-bar .chat-composite-bar-meta-workspace,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .chat-composite-bar.session-header-bar .chat-composite-bar-meta-workspace {
 	border-color: var(--t3-border);
 	background: var(--t3-muted);
 	color: var(--t3-muted-foreground);
