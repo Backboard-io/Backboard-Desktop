@@ -390,6 +390,17 @@ fi
 
 cleanup
 /usr/bin/open "$APP_PATH"
+# \`open\` launched from this detached, non-interactive shell does not reliably
+# activate/foreground the new process (no active Terminal/Finder context to hand
+# focus from), so the app can start invisibly in the background. Explicitly
+# activate it, retrying briefly since System Events may not know about the
+# process in the instant right after \`open\` returns.
+for _ in {1..20}; do
+  if /usr/bin/osascript -e "tell application id \\"$BUNDLE_IDENTIFIER\\" to activate" >/dev/null 2>&1; then
+    break
+  fi
+  /bin/sleep 0.5
+done
 echo "[$(/bin/date -u '+%Y-%m-%dT%H:%M:%SZ')] Installed Backboard Studio $VERSION"
 `;
 }
