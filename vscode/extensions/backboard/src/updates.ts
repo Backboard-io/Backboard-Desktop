@@ -361,9 +361,9 @@ done
 
 replace_app() {
   /bin/rm -rf "$APP_PATH"
-  /usr/bin/ditto "$SOURCE_APP" "$APP_PATH"
+  /usr/bin/ditto --norsrc --noextattr --noacl --noqtn "$SOURCE_APP" "$APP_PATH"
   /bin/chmod -R u+rwX "$APP_PATH" >/dev/null 2>&1 || true
-  /usr/bin/xattr -dr com.apple.quarantine "$APP_PATH" >/dev/null 2>&1 || true
+  /usr/bin/xattr -cr "$APP_PATH" >/dev/null 2>&1 || true
 }
 
 if [[ -w "$(dirname "$APP_PATH")" || -w "$APP_PATH" ]]; then
@@ -379,9 +379,9 @@ else
     printf 'SOURCE_APP=%s\\n' "$(shell_quote "$SOURCE_APP")"
     printf 'APP_PATH=%s\\n' "$(shell_quote "$APP_PATH")"
     echo '/bin/rm -rf "$APP_PATH"'
-    echo '/usr/bin/ditto "$SOURCE_APP" "$APP_PATH"'
+    echo '/usr/bin/ditto --norsrc --noextattr --noacl --noqtn "$SOURCE_APP" "$APP_PATH"'
     echo '/bin/chmod -R a+rX "$APP_PATH" >/dev/null 2>&1 || true'
-    echo '/usr/bin/xattr -dr com.apple.quarantine "$APP_PATH" >/dev/null 2>&1 || true'
+    echo '/usr/bin/xattr -cr "$APP_PATH" >/dev/null 2>&1 || true'
   } > "$HELPER"
   /bin/chmod 700 "$HELPER"
   /usr/bin/osascript -e "do shell script \\"/bin/zsh $HELPER\\" with administrator privileges"
