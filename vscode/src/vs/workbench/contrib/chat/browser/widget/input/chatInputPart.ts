@@ -140,6 +140,7 @@ import { ChatInputPickerActionViewItem, IChatInputPickerOptions } from './chatIn
 import { ChatSelectedTools } from './chatSelectedTools.js';
 import { DelegationSessionPickerActionItem } from './delegationSessionPickerActionItem.js';
 import { ModelPickerActionItem, IModelPickerDelegate } from './modelPickerActionItem.js';
+import { CombinedModelProviderPickerActionItem } from './combinedModelProviderPickerActionItem.js';
 import { ChatThinkingPickerActionItem } from './chatThinkingPickerActionItem.js';
 import { IModePickerDelegate, ModePickerActionItem } from './modePickerActionItem.js';
 import { IPermissionPickerDelegate, PermissionPickerActionItem } from './permissionPickerActionItem.js';
@@ -3231,6 +3232,11 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 					}
 
 					const itemDelegate: IModelPickerDelegate = this._createModelPickerDelegate();
+					// In the Sessions window, fold the provider (session type) and
+					// model pickers into one combined chip with a provider rail.
+					if (this.options.isSessionsWindow && this.options.sessionTypePickerDelegate?.setActiveSessionProvider) {
+						return this.instantiationService.createInstance(CombinedModelProviderPickerActionItem, action, itemDelegate, this.options.sessionTypePickerDelegate, pickerOptions);
+					}
 					return this.modelWidget = this.instantiationService.createInstance(ModelPickerActionItem, action, itemDelegate, pickerOptions);
 				} else if (action.id === OpenChatThinkingPickerAction.ID && action instanceof MenuItemAction) {
 					return this.instantiationService.createInstance(ChatThinkingPickerActionItem, action, this._createModelPickerDelegate());

@@ -69,6 +69,7 @@ export class SessionView extends Disposable implements ISerializableView {
 	private readonly _compositeBar: ChatCompositeBar;
 	private readonly _floatingToolbar: SessionViewFloatingToolbar;
 	private readonly _centeredContentContainer: HTMLElement;
+	private _headerInPanel = false;
 	private readonly _contentContainer: HTMLElement;
 	private readonly _scopedInstantiationService: IInstantiationService;
 	private readonly _backboardAuthEnabledKey: IContextKey<boolean>;
@@ -360,7 +361,9 @@ export class SessionView extends Disposable implements ISerializableView {
 		const centeredWidth = Math.min(width, SessionView.CENTERED_CONTENT_MAX_WIDTH);
 		this._centeredContentContainer.style.width = `${centeredWidth}px`;
 
-		const headerHeight = this._header.visible ? this._header.height : 0;
+		// When the header is relocated into the window header row it no longer
+		// occupies the centered band, so the transcript reclaims that height.
+		const headerHeight = (this._header.visible && !this._headerInPanel) ? this._header.height : 0;
 		const tabsHeight = this._compositeBar.visible ? this._compositeBar.height : 0;
 		const barHeight = headerHeight + tabsHeight;
 
@@ -371,6 +374,44 @@ export class SessionView extends Disposable implements ISerializableView {
 		// Lay out the chat content at full width so its scrollbar reaches the
 		// right edge; the chat rows and input center themselves via CSS.
 		this._currentView.value?.layout(width, height - barHeight, top + barHeight, left);
+	}
+
+	/**
+	 * Relocates this view's session header (title/workspace) and action toolbar
+	 * into the shared window header row (panel header slots) so they sit inline
+	 * with the mode dropdown and scale with the session region as panels open and
+	 * close. The elements keep their per-view scoped instantiation (and context
+	 * keys); only their DOM parent changes. Idempotent.
+	 */
+	mountHeaderIntoPanel(titleSlot: HTMLElement, toolbarSlot: HTMLElement): void {
+		if (this._header.element.parentElement !== titleSlot) {
+			titleSlot.appendChild(this._header.element);
+		}
+		if (this._floatingToolbar.element.parentElement !== toolbarSlot) {
+			toolbarSlot.appendChild(this._floatingToolbar.element);
+		}
+		if (!this._headerInPanel) {
+			this._headerInPanel = true;
+			this._layoutChildren();
+		}
+	}
+
+	/**
+	 * Returns the header and toolbar to their in-view positions (used when this
+	 * view is not the one that owns the shared header slots, e.g. a multi-session
+	 * grid). Idempotent.
+	 */
+	restoreHeaderToView(): void {
+		if (this._header.element.parentElement !== this._centeredContentContainer) {
+			this._centeredContentContainer.insertBefore(this._header.element, this._compositeBar.element);
+		}
+		if (this._floatingToolbar.element.parentElement !== this.element) {
+			this.element.appendChild(this._floatingToolbar.element);
+		}
+		if (this._headerInPanel) {
+			this._headerInPanel = false;
+			this._layoutChildren();
+		}
 	}
 
 	toJSON(): object {

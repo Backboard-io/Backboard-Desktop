@@ -3,6 +3,43 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+/* ---- Typeface ---- */
+
+/* T3 Code's UI face (`--font-sans`), shipped so Simple mode renders with the
+ * same font rather than the system fallback. Files and declarations are taken
+ * verbatim from @fontsource-variable/dm-sans@5.2.8 — the exact package T3 pins
+ * (SIL Open Font License; font (c) Colophon Foundry, Jonny Pinhorn, Indian
+ * Type Foundry). Only the normal style ships: T3 imports just the upright
+ * variable font and lets italics synthesize. */
+
+/* dm-sans-latin-ext-wght-normal */
+@font-face {
+	font-family: 'DM Sans Variable';
+	font-style: normal;
+	font-display: swap;
+	font-weight: 100 1000;
+	src: url(./fonts/dm-sans-latin-ext-wght-normal.woff2) format('woff2-variations');
+	unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* dm-sans-latin-wght-normal */
+@font-face {
+	font-family: 'DM Sans Variable';
+	font-style: normal;
+	font-display: swap;
+	font-weight: 100 1000;
+	src: url(./fonts/dm-sans-latin-wght-normal.woff2) format('woff2-variations');
+	unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* T3's full sans stack, applied to the Simple window. Monaco surfaces (the
+ * code editor, code blocks) keep their own configured mono face — matching
+ * T3, whose `--font-mono` starts at the macOS-native SF Mono. The Advanced
+ * and Jarvis windows keep the product's system font. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) {
+	font-family: 'DM Sans Variable', 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+}
+
 /* ---- Action Bar Items ---- */
 
 /* Default rounded hover/active background for all action bar items in the
@@ -1133,6 +1170,49 @@
 	max-width: 100%;
 }
 
+/* ---- Simple mode: T3 Code row treatment ---- */
+
+/* T3's row rhythm: no top padding, `pb-4` (16px) below each turn. The
+ * transcript keeps the sessions window's full-panel width (with its 20px
+ * gutters, set above) — a hard reading-column cap left too much dead space
+ * at the panel edges. */
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .interactive-item-container {
+	padding-top: 2px;
+	padding-bottom: 14px;
+}
+
+/* T3 streams the reply as a plain append — `ChatMarkdown` re-renders with the
+ * new text and nothing else moves (no cursor, no reveal transition). VS Code
+ * decorates each newly streamed block with a staggered fade/rise/blur/scale
+ * entrance; neutralise all of those so Simple mode streams like T3. The
+ * `animationend` cleanup listener never fires once the animation is gone, so
+ * the class lingers on the element — the resets below make that harmless. */
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart :is(
+	.chat-smooth-animate-fade,
+	.chat-smooth-animate-rise,
+	.chat-smooth-animate-blur,
+	.chat-smooth-animate-scale,
+	.chat-smooth-animate-slide,
+	.chat-smooth-animate-reveal) {
+	animation: none;
+	opacity: 1;
+	transform: none;
+	filter: none;
+}
+
+/* Response meta (copy button, etc.) is hover-revealed in T3
+ * (`opacity-0 … group-hover/assistant:opacity-100 focus-within:opacity-100`),
+ * not a permanent row under the reply. */
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-item-container.interactive-response .chat-footer-toolbar {
+	opacity: 0;
+	transition: opacity 200ms;
+}
+
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-item-container.interactive-response:hover .chat-footer-toolbar,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-item-container.interactive-response:focus-within .chat-footer-toolbar {
+	opacity: 1;
+}
+
 /* ---- Chat Output ---- */
 
 /* Top fade overlay: dims content scrolled near the top edge of the chat bar card.
@@ -1151,6 +1231,16 @@
 }
 
 /* ---- Chat Input ---- */
+
+/* Simple window: the composer surface matches the agents screen background so
+ * it reads as part of the page rather than a darker slab. Redefining the shared
+ * surface variable (rather than only overriding specific composer rules) covers
+ * every context the composer renders in — the session host (`.part.sessionspart`)
+ * and the editor host (`.chat-editor-relative`), and any request/working state —
+ * so it never falls back to the darker default. */
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) {
+	--sessions-codex-surface-background: var(--sessions-main-region-background, var(--vscode-editor-background));
+}
 
 .agent-sessions-workbench .interactive-session .chat-input-container {
 	border-radius: 18px;

@@ -12,9 +12,9 @@
 	overflow: hidden;
 }
 
-/* Header host: title row + meta row, with the top padding for the whole bar area */
+/* Header host: one compact line (title · workspace pill · diff stats … actions) */
 .chat-composite-bar.session-header-bar {
-	padding: 6px 10px 0;
+	padding: 6px 12px 0;
 	box-sizing: border-box;
 }
 
@@ -30,34 +30,31 @@
 	--chat-tab-max-width: min(200px, 40cqi);
 }
 
-/* Header: a status icon column next to a main column (title row + meta row).
-	Mirrors the sessions list so the meta row aligns under the title. */
+/* Header: a single-line band. A faint tinted fill and hairline separate it
+	from the transcript without the tall stacked-rows footprint. */
 .chat-composite-bar-header {
 	display: flex;
 	flex-direction: column;
-	gap: 6px;
-	padding-bottom: 10px;
-	border-bottom: 1px solid color-mix(in srgb, var(--session-view-foreground) 6%, transparent);
+	padding-bottom: 6px;
+	border-bottom: 1px solid color-mix(in srgb, var(--session-view-foreground) 8%, transparent);
 }
 
-/* Main column stacks the title row and the meta row */
 .chat-composite-bar-header-main {
 	display: flex;
 	flex-direction: column;
-	gap: 4px;
 	flex: 1 1 auto;
 	min-width: 0;
 }
 
-/* Title row: title + actions.
-	Reserve space on the right for the absolutely-positioned floating session
-	toolbar (see .chat-composite-bar-toolbar-floating) so the title text
+/* Title line: title, then the inline meta (workspace pill · diff stats), then
+	actions. Reserve space on the right for the absolutely-positioned floating
+	session toolbar (see .chat-composite-bar-toolbar-floating) so the line
 	ellipsizes before it reaches the buttons instead of clipping underneath. */
 .chat-composite-bar-title-row {
 	display: flex;
 	align-items: center;
-	gap: 6px;
-	height: 26px;
+	gap: 10px;
+	height: 32px;
 	padding-right: var(--chat-session-toolbar-reserve, 210px);
 }
 
@@ -142,13 +139,15 @@
 	display: none;
 }
 
-/* Meta row: workspace · diff stats */
+/* Inline meta: workspace pill · diff stats. Shares the title line and yields
+	to the title when space runs out. */
 .chat-composite-bar-meta-row {
 	display: flex;
 	align-items: center;
-	gap: 6px;
-	height: 22px;
-	font-size: var(--vscode-agents-fontSize-label1, 12px);
+	gap: 8px;
+	flex: 0 1 auto;
+	min-width: 0;
+	font-size: var(--vscode-agents-fontSize-label1, 11px);
 	font-weight: var(--vscode-agents-fontWeight-regular, 400);
 	line-height: 18px;
 	color: var(--chat-tab-inactive-foreground, var(--session-view-foreground));
@@ -163,12 +162,19 @@
 	min-width: 0;
 }
 
+/* Workspace as a small bordered pill chip: reads as a tag on the title line
+	rather than a second line of prose. */
 .chat-composite-bar-meta-workspace {
 	display: inline-flex;
 	align-items: center;
 	gap: 4px;
 	min-width: 0;
 	overflow: hidden;
+	padding: 1px 8px;
+	border-radius: 999px;
+	border: 1px solid color-mix(in srgb, var(--session-view-foreground) 12%, transparent);
+	background: color-mix(in srgb, var(--session-view-foreground) 4%, transparent);
+	flex-shrink: 1;
 }
 
 .monaco-workbench .chat-composite-bar-meta-workspace-icon.codicon[class*='codicon-'] {
@@ -178,9 +184,9 @@
 	flex-shrink: 0;
 }
 
-.chat-composite-bar-meta-separator::before {
-	content: '\00B7';
-	opacity: 0.8;
+/* The pill chip already separates workspace from the diff stats; no glyph. */
+.chat-composite-bar-meta-separator {
+	display: none;
 }
 
 /* Flatten the session header meta toolbar action bar so contributed items such as the diff-stats +/- counts read as inline, clickable labels rather than buttons. */
@@ -281,6 +287,55 @@
 	z-index: 45;
 	pointer-events: auto;
 	-webkit-app-region: no-drag;
+}
+
+/* When the session header is relocated into the window header row (the panel
+ * header center/right slots), the toolbar flows inline in its slot rather than
+ * floating over the session view, and the title no longer needs to reserve
+ * space for an absolutely-positioned toolbar. Rendering it in the panel header
+ * means it scales with the session region (e.g. when the right panel opens). */
+.sessions-header-session-toolbar-slot .chat-composite-bar.chat-composite-bar-toolbar-floating {
+	position: static;
+	top: auto;
+	right: auto;
+}
+
+.sessions-header-session-title-slot {
+	display: flex;
+	align-items: center;
+	min-width: 0;
+	width: 100%;
+	height: 100%;
+	overflow: hidden;
+}
+
+.sessions-header-session-title-slot .chat-composite-bar.session-header-bar {
+	width: 100%;
+	min-width: 0;
+	padding: 0;
+	display: flex;
+	align-items: center;
+}
+
+.sessions-header-session-title-slot .chat-composite-bar-header,
+.sessions-header-session-title-slot .chat-composite-bar-header-main {
+	width: 100%;
+	min-width: 0;
+	border-bottom: none;
+	padding-bottom: 0;
+}
+
+.sessions-header-session-title-slot .chat-composite-bar-title-row {
+	--chat-session-toolbar-reserve: 0px;
+	height: auto;
+}
+
+/* The action toolbar sits inline at the header's right end; drop the top offset
+ * it used when floating so it centers in the row. */
+.sessions-header-session-toolbar-slot {
+	display: flex;
+	align-items: center;
+	height: 100%;
 }
 
 /* Flat icon buttons — no container, just the glyph with a light hover, so the

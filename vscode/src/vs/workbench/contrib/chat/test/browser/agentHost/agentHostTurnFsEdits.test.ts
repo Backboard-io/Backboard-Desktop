@@ -37,10 +37,13 @@ suite('agentHostTurnFsEdits', () => {
 				notebookOut: isIgnoredAgentPath('/repo/extensions/markdown-math/notebook-out/fonts/KaTeX_Main-Bold.woff2'),
 				dotBuild: isIgnoredAgentPath('/repo/.build/extensions/foo.js'),
 				dsStore: isIgnoredAgentPath('/repo/src/.DS_Store'),
+				playwrightCli: isIgnoredAgentPath('/repo/.playwright-cli/console-2026-07-23T20-52-19-886Z.log'),
+				logFile: isIgnoredAgentPath('/repo/server.log'),
 				normalFile: isIgnoredAgentPath('/repo/src/EXTENSIONS_AND_RIGHT_PANEL.md'),
 				gitLikeName: isIgnoredAgentPath('/repo/src/gitHelpers.ts'),
 				normalTmpName: isIgnoredAgentPath('/repo/src/template.ts'),
 				buildInfoLikeName: isIgnoredAgentPath('/repo/src/tsbuildinfoParser.ts'),
+				logLikeName: isIgnoredAgentPath('/repo/src/catalog.ts'),
 			}, {
 				gitObject: true,
 				gitTmp: true,
@@ -54,10 +57,13 @@ suite('agentHostTurnFsEdits', () => {
 				notebookOut: true,
 				dotBuild: true,
 				dsStore: true,
+				playwrightCli: true,
+				logFile: true,
 				normalFile: false,
 				gitLikeName: false,
 				normalTmpName: false,
 				buildInfoLikeName: false,
+				logLikeName: false,
 			});
 		});
 	});

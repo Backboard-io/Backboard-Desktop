@@ -27,6 +27,11 @@ export const AGENT_IGNORED_DIRECTORIES: readonly string[] = [
 	'.turbo',
 	'.build',
 	'notebook-out',
+	// Scratch output of the @playwright/cli automation harness (console logs,
+	// page snapshots) — written continuously while a browser session is
+	// attached, so any turn running alongside automation would report them
+	// as file edits.
+	'.playwright-cli',
 ];
 
 /**
@@ -38,15 +43,21 @@ export const AGENT_IGNORED_DIRECTORIES: readonly string[] = [
  * during a turn creates/deletes dozens of these, which would otherwise
  * flood the session step log with "Created tsconfig.tsbuildinfo" entries.
  * Glob-shaped so they can feed file-watcher excludes directly.
+ *
+ * `*.log` is here because an out-of-band write to a log file during a turn is
+ * runtime output by definition — a dev server, watcher, or logger appending in
+ * the background. Deliberate agent file edits are reported through the
+ * tool-call FileEdit protocol and are unaffected by this list.
  */
 export const AGENT_IGNORED_FILE_GLOBS: readonly string[] = [
 	'**/*.tsbuildinfo',
 	'**/.DS_Store',
+	'**/*.log',
 ];
 
 const ignoredSegments = new Set(AGENT_IGNORED_DIRECTORIES);
 
-const IGNORED_FILE_PATTERN = /(?:\.tsbuildinfo|\/\.DS_Store)$/;
+const IGNORED_FILE_PATTERN = /(?:\.tsbuildinfo|\/\.DS_Store|\.log)$/;
 
 /**
  * Matches the atomic-write temp files that editors and agent tooling create

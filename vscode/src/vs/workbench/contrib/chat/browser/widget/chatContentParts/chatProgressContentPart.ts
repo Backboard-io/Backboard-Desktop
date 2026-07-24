@@ -3,13 +3,13 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { $, append, isHTMLElement } from '../../../../../../base/browser/dom.js';
+import { $, append, disposableWindowInterval, getWindow, isHTMLElement } from '../../../../../../base/browser/dom.js';
 import { IRenderedMarkdown, renderAsPlaintext } from '../../../../../../base/browser/markdownRenderer.js';
 import { alert } from '../../../../../../base/browser/ui/aria/aria.js';
 import { Codicon } from '../../../../../../base/common/codicons.js';
 import { MarkdownString, type IMarkdownString } from '../../../../../../base/common/htmlContent.js';
 import { stripIcons } from '../../../../../../base/common/iconLabels.js';
-import { Disposable, DisposableStore, MutableDisposable } from '../../../../../../base/common/lifecycle.js';
+import { Disposable, DisposableStore, IDisposable, MutableDisposable } from '../../../../../../base/common/lifecycle.js';
 import { ThemeIcon } from '../../../../../../base/common/themables.js';
 import { IMarkdownRenderer } from '../../../../../../platform/markdown/browser/markdownRenderer.js';
 import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
@@ -249,6 +249,29 @@ function pickWorkingLabel(elementId: string, configurationService: IConfiguratio
 	return label;
 }
 
+/**
+ * Formats an elapsed duration for the live working label, matching T3 Code's
+ * ticker: seconds under a minute (`42s`), minutes and seconds up to an hour
+ * (`3m 20s`), then hours and minutes (`1h 5m`). The unit letters are numeric
+ * suffixes rather than translatable words, so they are left un-externalized.
+ */
+function formatWorkingElapsed(elapsedMs: number): string {
+	const elapsedSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
+	if (elapsedSeconds < 60) {
+		return `${elapsedSeconds}s`;
+	}
+
+	const hours = Math.floor(elapsedSeconds / 3600);
+	const minutes = Math.floor((elapsedSeconds % 3600) / 60);
+	const seconds = elapsedSeconds % 60;
+
+	if (hours > 0) {
+		return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+	}
+
+	return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+}
+
 export class ChatWorkingProgressContentPart extends Disposable implements IChatContentPart {
 	public readonly domNode: HTMLElement;
 	private readonly labelElement: HTMLElement;
@@ -257,6 +280,8 @@ export class ChatWorkingProgressContentPart extends Disposable implements IChatC
 	private readonly label: string;
 	private readonly hasState: boolean;
 	private readonly isCompleteState: boolean;
+	/** Ticks the live "Working for Xs" label once per second while the turn runs. */
+	private readonly workingTimer = this._register(new MutableDisposable<IDisposable>());
 
 	constructor(
 		workingProgress: IChatWorkingProgress,
@@ -329,15 +354,26 @@ export class ChatWorkingProgressContentPart extends Disposable implements IChatC
 	}
 
 	private startLiveProgress(state: IChatWorkingProgressState): void {
-		// If explicit content was set (e.g., tool unresponsive), show that; otherwise
-		// just show the shimmered working label. Stats are intentionally hidden in
-		// the minimal shipping version.
-		if (!this.explicitContent) {
-			this.labelElement.textContent = this.label;
+		// If explicit content was set (e.g., tool unresponsive), show that and let it
+		// stand — the elapsed-time label is only meaningful for the plain working state.
+		if (this.explicitContent) {
+			return;
 		}
+
+		// Live "Working for Xs" ticker. The start timestamp is confirmation-adjusted
+		// and can move, so it is re-read each tick rather than captured once. Stats
+		// remain intentionally hidden in the minimal shipping version.
+		const tick = () => {
+			const elapsedMs = Math.max(0, Date.now() - state.confirmationAdjustedTimestamp.get());
+			this.labelElement.textContent = localize('chatWorkingFor', "Working for {0}", formatWorkingElapsed(elapsedMs));
+		};
+		tick();
+		this.workingTimer.value = disposableWindowInterval(getWindow(this.domNode), tick, 1000);
 	}
 
 	updateWorkingContent(content: IMarkdownString): void {
+		// An explicit message (e.g. a tool going unresponsive) supersedes the timer.
+		this.workingTimer.clear();
 		this.explicitContent = content;
 		this.labelElement.textContent = renderAsPlaintext(content);
 		this.statsElement.textContent = '';

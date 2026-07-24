@@ -62,8 +62,8 @@ const NEW_CHAT_ALLOWED_SESSION_TYPES = [
 	AgentSessionProviders.AgentHostOpencode,
 ];
 
-const NEW_CHAT_COMPOSER_LAYOUT_HEIGHT = 180;
-const NEW_CHAT_COMPOSER_INPUT_MAX_HEIGHT = 260;
+const NEW_CHAT_COMPOSER_LAYOUT_HEIGHT = 216;
+const NEW_CHAT_COMPOSER_INPUT_MAX_HEIGHT = 300;
 type FirstSendWorkspaceChoice = 'selectFolder' | 'createFolder' | undefined;
 
 /**
@@ -297,8 +297,6 @@ export class NewChatWidget extends Disposable {
 	private _middleTitleSuffix: HTMLElement | undefined;
 	/** Slot inside the middle heading that hosts the workspace picker trigger. */
 	private _middleTitlePickerSlot: HTMLElement | undefined;
-	/** Slot in the page's top-left corner that hosts the session-type (agent) picker trigger. */
-	private _sessionTypePickerSlot: HTMLElement | undefined;
 
 	/** Recreates the draft once a better/late-registering provider can serve the folder (see {@link _createNewSession}). */
 	private readonly _pendingPreferredUpgrade = new MutableDisposable<IDisposable>();
@@ -451,20 +449,14 @@ export class NewChatWidget extends Disposable {
 
 	render(parent: HTMLElement): void {
 		const element = dom.append(parent, dom.$('.sessions-chat-widget'));
-		// The session-type (agent host) picker renders in the sessions header
-		// row (the strip with the layout toggles) when the part provides a
-		// slot for it; otherwise it overlays the page's own header band. It is
-		// pulled out of the heading sentence so the heading stays on a single
-		// line.
+		// The provider (session type) picker is folded into the combined
+		// provider+model chip in the composer toolbar (see
+		// CombinedModelProviderPickerActionItem), so nothing renders in the
+		// header slot — clear any slot the part handed us so it stays empty.
 		const headerSlot = this._options.headerTypePickerSlot;
 		if (headerSlot) {
 			dom.clearNode(headerSlot);
 		}
-		const typePickerBar = dom.append(headerSlot ?? element, dom.$('.new-chat-header-type-picker'));
-		if (headerSlot) {
-			this._register(toDisposable(() => typePickerBar.remove()));
-		}
-		this._sessionTypePickerSlot = dom.append(typePickerBar, dom.$('span.new-chat-header-type-picker-slot.sessions-chat-session-type-picker'));
 		const chatWidgetContainer = dom.append(element, dom.$('.new-chat-widget-container'));
 		const chatWidgetContent = dom.append(chatWidgetContainer, dom.$('.new-chat-widget-content'));
 		this._chatWidgetContent = chatWidgetContent;
@@ -788,10 +780,6 @@ export class NewChatWidget extends Disposable {
 	private _mountTitleWorkspacePicker(): void {
 		if (this._middleTitlePickerSlot) {
 			this._workspacePicker.render(this._middleTitlePickerSlot);
-		}
-		if (this._sessionTypePickerSlot) {
-			dom.clearNode(this._sessionTypePickerSlot);
-			this._sessionTypePicker.render(this._sessionTypePickerSlot, { className: 'sessions-chat-session-type-picker' });
 		}
 	}
 

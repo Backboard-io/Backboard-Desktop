@@ -18,7 +18,7 @@ import { IWorkbenchLayoutService, Parts } from '../../../../workbench/services/l
 import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry.js';
 import { registerIcon } from '../../../../platform/theme/common/iconRegistry.js';
 import { Menus } from '../../../browser/menus.js';
-import { IsNewChatSessionContext, SessionsWelcomeVisibleContext } from '../../../common/contextkeys.js';
+import { SessionsWelcomeVisibleContext } from '../../../common/contextkeys.js';
 import { logChangesViewToggle } from '../../../common/sessionsTelemetry.js';
 import { RightWorkbenchCommandId } from '../../rightWorkbench/browser/rightWorkbench.js';
 
@@ -79,11 +79,11 @@ export class ChangesTitleBarContribution extends Disposable implements IWorkbenc
 			},
 			group: 'navigation',
 			order: 3,
-			// NB: no IsAuxiliaryWindowContext gate — same spurious-flip issue as the
-			// SessionBarToolbar registration above; this row is the only place the
-			// toggle shows before a session exists, so there is no fallback if it
-			// gets hidden when the right panel opens.
-			when: ContextKeyExpr.or(IsNewChatSessionContext, AuxiliaryBarVisibleContext),
+			// Exact complement of the SessionBarToolbar registration above: the
+			// title bar carries this toggle only on the welcome/new-session screen
+			// (where no session header exists); once a session is open the header
+			// toolbar is its sole home, so the two rows never show duplicates.
+			when: SessionsWelcomeVisibleContext,
 		}));
 
 		this._register(MenuRegistry.appendMenuItem(Menus.AuxiliaryBarTitle, {

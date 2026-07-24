@@ -179,12 +179,15 @@ export class SessionHeader extends Disposable {
 			this.startTitleEditing();
 		}));
 
+		// The meta row sits inline on the title line (title · workspace pill ·
+		// diff stats … actions) so the header reads as one compact line rather
+		// than two stacked rows.
+		this._metaRow = $('.chat-composite-bar-meta-row');
+		titleRow.appendChild(this._metaRow);
+
 		const titleActions = $('.chat-composite-bar-title-actions');
 		titleRow.appendChild(titleActions);
 		this._titleActionsEl = titleActions;
-
-		this._metaRow = $('.chat-composite-bar-meta-row');
-		main.appendChild(this._metaRow);
 
 		// Workspace label (rebuilt per session) followed by a separator and the
 		// session header meta toolbar. Actions are contributed into the generic

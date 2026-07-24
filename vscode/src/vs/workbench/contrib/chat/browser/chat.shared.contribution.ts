@@ -751,11 +751,17 @@ configurationRegistry.registerConfiguration({
 		[ChatConfiguration.ChatPersistentProgressEnabled]: {
 			type: 'boolean',
 			default: product.quality !== 'stable',
+			// The Agents window streams like T3 Code: a persistent working row at
+			// the bottom of the response rather than an animated input border.
+			agentsWindow: { default: true },
 			description: nls.localize('chat.persistentProgress.enabled', "Always show progress in chat."),
 		},
 		[ChatConfiguration.ProgressBorder]: {
 			type: 'boolean',
 			default: true,
+			// Off in the Agents window: the persistent working row above owns the
+			// streaming indicator there (this setting overrides it when on).
+			agentsWindow: { default: false },
 			markdownDescription: nls.localize('chat.progressBorder.enabled', "Show an animated gradient border around the chat input while the agent is working or thinking. When enabled and reduced motion is not enabled, this overrides {0} to be off. Has no effect when reduced motion is enabled.", '`#chat.persistentProgress.enabled#`'),
 		},
 		[ChatConfiguration.NotifyWindowOnResponseReceived]: {

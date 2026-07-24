@@ -1979,8 +1979,9 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 		this.elapsedAtCompletionMs ??= Date.now() - this.startTimeMs;
 
 		// The step count is shown in the title meta ("· 12s · 6 steps"), so the
-		// fallback label stays plain to avoid repeating it.
-		const finalLabel = localize('chat.thinking.finished', 'Finished Working');
+		// fallback label stays plain to avoid repeating it. "Worked" mirrors
+		// T3 Code's turn fold ("Worked for 12s") with the duration in the meta.
+		const finalLabel = localize('chat.thinking.finished', 'Worked');
 
 		this.currentTitle = finalLabel;
 		// With lazy rendering, wrapper may not be created yet if content hasn't been expanded

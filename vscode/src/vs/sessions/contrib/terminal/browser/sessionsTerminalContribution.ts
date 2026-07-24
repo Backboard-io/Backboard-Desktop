@@ -24,13 +24,12 @@ import { TerminalCapability } from '../../../../platform/terminal/common/capabil
 import { IPathService } from '../../../../workbench/services/path/common/pathService.js';
 import { Menus } from '../../../browser/menus.js';
 import { isAgentHostProvider, LOCAL_AGENT_HOST_PROVIDER_ID } from '../../../common/agentHostSessionsProvider.js';
-import { IsNewChatSessionContext, IsPhoneLayoutContext, SessionsWelcomeVisibleContext } from '../../../common/contextkeys.js';
+import { IsPhoneLayoutContext, SessionsWelcomeVisibleContext } from '../../../common/contextkeys.js';
 import { ISessionsManagementService } from '../../../services/sessions/common/sessionsManagement.js';
 import { ISessionsService } from '../../../services/sessions/browser/sessionsService.js';
 import { ISession } from '../../../services/sessions/common/session.js';
 import { ISessionsProvidersService } from '../../../services/sessions/browser/sessionsProvidersService.js';
 import { ContextKeyExpr, IContextKeyService, RawContextKey } from '../../../../platform/contextkey/common/contextkey.js';
-import { AuxiliaryBarVisibleContext } from '../../../../workbench/common/contextkeys.js';
 import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry.js';
 import { logSessionsInteraction } from '../../../common/sessionsTelemetry.js';
 import { IViewsService } from '../../../../workbench/services/views/common/viewsService.js';
@@ -695,12 +694,13 @@ class OpenSessionInTerminalAction extends Action2 {
 				id: Menus.TitleBarRightLayout,
 				group: 'navigation',
 				order: 2,
-				// NB: no IsAuxiliaryWindowContext gate — same spurious-flip issue as the
-				// SessionBarToolbar registration above; this row is the only place the
-				// toggle shows before a session exists, so there is no fallback if it
-				// gets hidden when the right panel opens.
+				// Exact complement of the SessionBarToolbar registration above: the
+				// title bar carries this toggle only on the welcome/new-session
+				// screen (where no session header exists); once a session is open
+				// the header toolbar is its sole home, so the two rows never show
+				// duplicates.
 				when: ContextKeyExpr.and(
-					ContextKeyExpr.or(IsNewChatSessionContext, AuxiliaryBarVisibleContext),
+					SessionsWelcomeVisibleContext,
 					IsPhoneLayoutContext.negate(),
 				),
 			}]

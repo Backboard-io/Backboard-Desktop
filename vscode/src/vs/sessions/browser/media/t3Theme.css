@@ -24,6 +24,31 @@
  * - Chat surfaces only, not the workbench shell. Repainting the shell would
  *   fight the macOS vibrancy treatment on the sidebar. */
 
+/* Streaming "working" dots — the highlight walks left→right across the three
+ * dots, mirroring T3's staggered `status-pulse`. Offsets are fixed; only the
+ * colour interpolates, so the compositor never reflows. 30% = T3's dot at rest,
+ * 12% = its dimmed trough. */
+@keyframes t3-working-dots {
+	0%, 100% {
+		background-color: color-mix(in srgb, var(--t3-muted-foreground) 30%, transparent);
+		box-shadow:
+			7px 0 0 0 color-mix(in srgb, var(--t3-muted-foreground) 12%, transparent),
+			14px 0 0 0 color-mix(in srgb, var(--t3-muted-foreground) 12%, transparent);
+	}
+	33% {
+		background-color: color-mix(in srgb, var(--t3-muted-foreground) 12%, transparent);
+		box-shadow:
+			7px 0 0 0 color-mix(in srgb, var(--t3-muted-foreground) 30%, transparent),
+			14px 0 0 0 color-mix(in srgb, var(--t3-muted-foreground) 12%, transparent);
+	}
+	66% {
+		background-color: color-mix(in srgb, var(--t3-muted-foreground) 12%, transparent);
+		box-shadow:
+			7px 0 0 0 color-mix(in srgb, var(--t3-muted-foreground) 12%, transparent),
+			14px 0 0 0 color-mix(in srgb, var(--t3-muted-foreground) 30%, transparent);
+	}
+}
+
 .agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart,
 .agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart {
 	/* Source values, verbatim. */
@@ -145,7 +170,9 @@
 .agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .interactive-session .chat-input-container,
 .agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .interactive-session .chat-input-container {
 	border-color: var(--t3-border);
-	background-color: var(--t3-muted);
+	/* Match the agents screen background so the composer reads as part of the
+	 * surface (defined by its border), not a darker slab. */
+	background-color: var(--session-view-background, var(--sessions-main-region-background, var(--vscode-editor-background)));
 	/* Their `--radius`, one step up for the composer shell. */
 	border-radius: 0.75rem;
 }
@@ -157,7 +184,7 @@
  * as blocks (see the matching note in style.css). */
 .agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background,
 .agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background {
-	background-color: var(--t3-muted) !important;
+	background-color: var(--session-view-background, var(--sessions-main-region-background, var(--vscode-editor-background))) !important;
 }
 
 /* ---- Work rows ---- */
@@ -179,6 +206,94 @@
 	color: color-mix(in srgb, var(--t3-muted-foreground) 65%, transparent);
 }
 
+/* ---- Working indicator (streaming) ---- */
+
+/* T3's `WorkingTimelineRow`: three staggered pulsing dots followed by flat
+ * muted "Working…" text — no spinner, no shimmer. VS Code streams a
+ * `.progress-container.shimmer-progress` (a spinning codicon + a shimmer-gradient
+ * label); we swap that chrome for T3's. Gated on `.shimmer-progress` so it only
+ * applies while the turn is live — the completed state keeps its check icon.
+ *
+ * The dots are one pseudo-element: the middle dot is the box, the outer two are
+ * box-shadows, and a single keyframe walks the highlight across all three (their
+ * offsets never change, so there is no layout jitter). This mirrors the source's
+ * `status-pulse` wave without needing three real nodes. Values track T3's dots
+ * (`bg-muted-foreground/30`, 4px, 3px gap → 7px centre-to-centre). */
+
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .progress-container.shimmer-progress,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .progress-container.shimmer-progress {
+	font-size: 11px;
+	font-variant-numeric: tabular-nums;
+}
+
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .progress-container.shimmer-progress .chat-working-progress-step,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .progress-container.shimmer-progress .chat-working-progress-step {
+	/* T3 centres the dots against the text rather than sitting them on the baseline. */
+	align-items: center;
+}
+
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .progress-container.shimmer-progress .chat-working-progress-step::before,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .progress-container.shimmer-progress .chat-working-progress-step::before {
+	content: "";
+	flex: 0 0 auto;
+	align-self: center;
+	width: 4px;
+	height: 4px;
+	/* Reserve the two box-shadow dots' width (third ends 18px in); the container's
+	 * own flex gap then supplies T3's ~8px separation before the label. */
+	margin-right: 18px;
+	border-radius: 50%;
+	background-color: color-mix(in srgb, var(--t3-muted-foreground) 30%, transparent);
+	box-shadow:
+		7px 0 0 0 color-mix(in srgb, var(--t3-muted-foreground) 30%, transparent),
+		14px 0 0 0 color-mix(in srgb, var(--t3-muted-foreground) 30%, transparent);
+	animation: t3-working-dots 1.4s linear infinite;
+}
+
+/* Drop the shimmer gradient: T3's label is flat muted text at 11px. */
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .progress-container.shimmer-progress .chat-working-progress-step > p,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .progress-container.shimmer-progress .chat-working-progress-step > p {
+	background: none;
+	-webkit-background-clip: border-box;
+	background-clip: border-box;
+	-webkit-text-fill-color: currentColor;
+	animation: none;
+	font-size: 11px;
+	color: color-mix(in srgb, var(--t3-muted-foreground) 70%, transparent);
+}
+
+/* ---- Turn fold (thinking/work summary) ---- */
+
+/* T3's turn fold is one flat muted 12px line ("Worked for 12s ⌄" —
+ * `text-xs text-muted-foreground tabular-nums hover:text-foreground`), with
+ * no weight or opacity hierarchy inside it. The stock header carries a bold
+ * bright verb and a dimmed detail segment; flatten all of it to the fold's
+ * single tone. */
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button {
+	font-size: 12px;
+	color: var(--t3-muted-foreground);
+	font-variant-numeric: tabular-nums;
+}
+
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button:hover,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button:hover {
+	color: var(--t3-foreground);
+}
+
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button .monaco-button-mdlabel,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button .monaco-button-mdlabel {
+	font-size: 12px;
+	font-weight: 400;
+}
+
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button .chat-thinking-title-detail-text,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button .rendered-markdown.chat-thinking-title-detail,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button .chat-thinking-title-detail-text,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button .rendered-markdown.chat-thinking-title-detail {
+	opacity: 1;
+}
+
 /* ---- Header ---- */
 
 .agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-header,
@@ -186,7 +301,16 @@
 	border-bottom-color: var(--t3-border);
 }
 
+/* Single-line header: the title is the line's anchor, full foreground; the
+ * workspace pill and stats carry the muted tone. */
 .agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-session-title-text,
 .agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-session-title-text {
+	color: var(--t3-foreground);
+}
+
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-meta-workspace,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-meta-workspace {
+	border-color: var(--t3-border);
+	background: var(--t3-muted);
 	color: var(--t3-muted-foreground);
 }

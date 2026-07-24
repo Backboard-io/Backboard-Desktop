@@ -72,6 +72,8 @@ export class SessionsPanelHeader extends Disposable {
 	readonly element: HTMLElement;
 
 	private _leftContent!: HTMLElement;
+	private _centerContent!: HTMLElement;
+	private _rightContent!: HTMLElement;
 
 	private readonly welcomeHiddenContainers: HTMLElement[] = [];
 
@@ -101,7 +103,9 @@ export class SessionsPanelHeader extends Disposable {
 		const leftContent = append(this.element, $('.sessions-panel-header-left'));
 		this._leftContent = leftContent;
 		const centerContent = append(this.element, $('.sessions-panel-header-center'));
+		this._centerContent = centerContent;
 		const rightContent = append(this.element, $('.sessions-panel-header-right'));
+		this._rightContent = rightContent;
 
 		this.createWindowControls(leftContent, rightContent, options.windowControls);
 
@@ -144,6 +148,24 @@ export class SessionsPanelHeader extends Disposable {
 	 */
 	createLeftSlot(className: string): HTMLElement {
 		return append(this._leftContent, $(`div.${className}`));
+	}
+
+	/**
+	 * Appends a container to the header's center section (which flexes to fill
+	 * the space between the left and right sections) for custom widget content,
+	 * e.g. the active session's title/workspace. The caller owns the content.
+	 */
+	createCenterSlot(className: string): HTMLElement {
+		return append(this._centerContent, $(`div.${className}`));
+	}
+
+	/**
+	 * Appends a container to the header's right section (end-aligned, before the
+	 * right-edge window controls) for custom widget content, e.g. the active
+	 * session's action toolbar. The caller owns the content.
+	 */
+	createRightSlot(className: string): HTMLElement {
+		return append(this._rightContent, $(`div.${className}`));
 	}
 
 	private createToolbar(parent: HTMLElement, toolbar: ISessionsPanelHeaderToolbar): void {

@@ -31,10 +31,9 @@ import { ThemeIcon } from '../../../base/common/themables.js';
 import { IGitRepository, IGitService } from '../../../workbench/contrib/git/common/gitService.js';
 import { ISCMRepository, ISCMService } from '../../../workbench/contrib/scm/common/scm.js';
 import { IWorkbenchContribution } from '../../../workbench/common/contributions.js';
-import { AuxiliaryBarVisibleContext } from '../../../workbench/common/contextkeys.js';
 import { Menus } from '../menus.js';
 import { isAgentHostProvider } from '../../common/agentHostSessionsProvider.js';
-import { IsNewChatSessionContext, IsPhoneLayoutContext, SessionsWelcomeVisibleContext } from '../../common/contextkeys.js';
+import { IsPhoneLayoutContext, SessionsWelcomeVisibleContext } from '../../common/contextkeys.js';
 import { ISessionsService } from '../../services/sessions/browser/sessionsService.js';
 import { ISession, ISessionFolder, ISessionWorkspace } from '../../services/sessions/common/session.js';
 import { ISessionsProvidersService } from '../../services/sessions/browser/sessionsProvidersService.js';
@@ -577,12 +576,14 @@ export class EnvironmentTitleBarContribution extends Disposable implements IWork
 		}));
 		// Mirror it in the title bar's right layout on the new-session screen so the
 		// workspace controls (environment, terminal, right panel) sit in the top
-		// title-bar row before a session is created too.
+		// title-bar row before a session is created. Exact complement of the
+		// SessionBarToolbar registration above — once a session is open the header
+		// toolbar is the sole home, so the two rows never show duplicates.
 		this._register(MenuRegistry.appendMenuItem(Menus.TitleBarRightLayout, {
 			command: environmentMenuCommand,
 			group: 'navigation',
 			order: 1,
-			when: ContextKeyExpr.and(ContextKeyExpr.or(IsNewChatSessionContext, AuxiliaryBarVisibleContext), IsPhoneLayoutContext.negate()),
+			when: ContextKeyExpr.and(SessionsWelcomeVisibleContext, IsPhoneLayoutContext.negate()),
 		}));
 		const registerEnvironmentWidget = (menuId: typeof Menus.SessionBarToolbar) => this._register(actionViewItemService.register(menuId, ShowEnvironmentPopupAction.ID, (action, options) => {
 			return instantiationService.createInstance(EnvironmentTitleBarWidget, action, options);

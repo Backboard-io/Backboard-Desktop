@@ -72,6 +72,9 @@ export class SessionsPart extends Part {
 	private _panelHeader: SessionsPanelHeader | undefined;
 	/** Header-row host for the new-chat session-type picker (see {@link IChatViewOptions.headerTypePickerSlot}). */
 	private _headerTypePickerSlot: HTMLElement | undefined;
+	/** Header-row hosts for the active session's relocated title/workspace and action toolbar. */
+	private _headerSessionTitleSlot: HTMLElement | undefined;
+	private _headerSessionToolbarSlot: HTMLElement | undefined;
 
 	/** Lazily-created progress bar shown at the top of the content area. */
 	private _progressBar: ProgressBar | undefined;
@@ -192,6 +195,13 @@ export class SessionsPart extends Part {
 		// Host for the new-chat session-type (agent host) picker, so it renders
 		// in the same header row as the layout toggles instead of inside the page.
 		this._headerTypePickerSlot = this._panelHeader.createLeftSlot('sessions-header-type-picker-slot');
+
+		// Hosts for the active session's relocated header: the title/workspace sit
+		// in the center of the header row and the action toolbar at its right end,
+		// so they share the row with the mode dropdown and scale with the session
+		// region (e.g. as the right panel opens/closes).
+		this._headerSessionTitleSlot = this._panelHeader.createCenterSlot('sessions-header-session-title-slot');
+		this._headerSessionToolbarSlot = this._panelHeader.createRightSlot('sessions-header-session-toolbar-slot');
 	}
 
 	protected override createContentArea(parent: HTMLElement): HTMLElement {
@@ -284,6 +294,20 @@ export class SessionsPart extends Part {
 			const isActive = (slot.boundSessionId !== undefined && slot.boundSessionId === activeId) || this._slots.length === 1;
 			slot.view.element.classList.toggle('is-active', isActive);
 			slot.view.setActive(isActive);
+		}
+
+		// Relocate the header (title/workspace + action toolbar) into the shared
+		// window header row for the single visible session, so it sits inline with
+		// the mode dropdown and scales with the session region. With more than one
+		// session visible (a grid) there is only one shared header slot, so each
+		// view keeps its own in-view header instead.
+		const relocateSlot = this._slots.length === 1 && this._slots[0].boundSessionId !== undefined ? this._slots[0] : undefined;
+		for (const slot of this._slots) {
+			if (slot === relocateSlot && this._headerSessionTitleSlot && this._headerSessionToolbarSlot) {
+				slot.view.mountHeaderIntoPanel(this._headerSessionTitleSlot, this._headerSessionToolbarSlot);
+			} else {
+				slot.view.restoreHeaderToView();
+			}
 		}
 
 		// Exit the grid's maximized state when the active session lands in a
