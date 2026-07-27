@@ -22,15 +22,18 @@ export const enum CodexSessionConfigKey {
 	ReasoningSummary = 'codex.reasoningSummary',
 }
 
-export type CodexApprovalPolicy = Extract<AskForApproval, 'never' | 'on-request' | 'on-failure' | 'untrusted'>;
+export type CodexApprovalPolicy = Extract<AskForApproval, 'never' | 'on-request' | 'untrusted'>;
 
 export function narrowApprovalPolicy(value: unknown): CodexApprovalPolicy | undefined {
 	switch (value) {
 		case 'never':
 		case 'on-request':
-		case 'on-failure':
 		case 'untrusted':
 			return value;
+		case 'on-failure':
+			// Removed from codex's AskForApproval in 0.145; sessions that stored
+			// the legacy value degrade to the closest surviving policy.
+			return 'on-request';
 		default:
 			return undefined;
 	}

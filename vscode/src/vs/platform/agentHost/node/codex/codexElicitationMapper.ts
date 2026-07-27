@@ -7,6 +7,7 @@ import { hasKey } from '../../../../base/common/types.js';
 import { ChatInputAnswerState, ChatInputAnswerValueKind, ChatInputQuestionKind, ChatInputResponseKind, type ChatInputAnswer, type ChatInputOption, type ChatInputQuestion, type ChatInputRequest } from '../../common/state/sessionState.js';
 import type { JsonValue } from './protocol/generated/serde_json/JsonValue.js';
 import type { McpElicitationPrimitiveSchema } from './protocol/generated/v2/McpElicitationPrimitiveSchema.js';
+import type { McpElicitationSchema } from './protocol/generated/v2/McpElicitationSchema.js';
 import type { McpServerElicitationRequestParams } from './protocol/generated/v2/McpServerElicitationRequestParams.js';
 import type { McpServerElicitationRequestResponse } from './protocol/generated/v2/McpServerElicitationRequestResponse.js';
 
@@ -33,11 +34,15 @@ export function buildElicitationRequest(requestId: string, params: McpServerElic
 		}
 		return request;
 	}
-	const required = new Set(params.requestedSchema.required ?? []);
+	const schema = formSchema(params);
+	const required = new Set(schema?.required ?? []);
 	const questions: ChatInputQuestion[] = [];
-	for (const [name, field] of Object.entries(params.requestedSchema.properties)) {
+	for (const [name, field] of Object.entries(schema?.properties ?? {})) {
 		if (field) {
-			questions.push(elicitationFieldToQuestion(name, field, required.has(name)));
+			const question = elicitationFieldToQuestion(name, field, required.has(name));
+			if (question) {
+				questions.push(question);
+			}
 		}
 	}
 	return questions.length > 0
@@ -67,7 +72,7 @@ export function elicitationResponseFromAnswers(
 		return { action: 'accept', content: null, _meta: null };
 	}
 	const content: { [key: string]: JsonValue } = {};
-	for (const [name, field] of Object.entries(params.requestedSchema.properties)) {
+	for (const [name, field] of Object.entries(formSchema(params)?.properties ?? {})) {
 		if (!field) {
 			continue;
 		}
@@ -89,7 +94,26 @@ export function cancelledElicitationResponse(): McpServerElicitationRequestRespo
 	return { action: 'cancel', content: null, _meta: null };
 }
 
-function elicitationFieldToQuestion(id: string, field: McpElicitationPrimitiveSchema, required: boolean): ChatInputQuestion {
+/**
+ * Extract the typed form schema from a form-mode elicitation. `form` carries
+ * a typed {@link McpElicitationSchema}; `openai/form` carries freeform JSON
+ * that is interpreted best-effort when it matches the same object shape, and
+ * yields a question-less request otherwise.
+ */
+function formSchema(params: McpServerElicitationRequestParams): McpElicitationSchema | undefined {
+	if (params.mode === 'form') {
+		return params.requestedSchema;
+	}
+	if (params.mode === 'openai/form') {
+		const schema = params.requestedSchema;
+		if (schema && typeof schema === 'object' && !Array.isArray(schema) && typeof (schema as { properties?: unknown }).properties === 'object') {
+			return schema as unknown as McpElicitationSchema;
+		}
+	}
+	return undefined;
+}
+
+function elicitationFieldToQuestion(id: string, field: McpElicitationPrimitiveSchema, required: boolean): ChatInputQuestion | undefined {
 	const base = { id, title: field.title, message: field.description ?? field.title ?? id, required };
 
 	switch (field.type) {

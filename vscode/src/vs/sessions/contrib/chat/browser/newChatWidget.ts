@@ -675,7 +675,19 @@ export class NewChatWidget extends Disposable {
 	}
 
 	private _renderMiddleSection(container: HTMLElement): void {
-		const actions = dom.append(container, dom.$('.new-chat-middle-toolbar'));
+		// Prefer the part-provided header slot so the workspace controls sit in
+		// the sessions header row — the same spot the session's own toolbar takes
+		// once a chat has been sent. Without a slot (e.g. a host that renders no
+		// header row) they fall back to overlaying the page's top-right corner.
+		const headerToolbarSlot = this._options.headerToolbarSlot;
+		let actions: HTMLElement;
+		if (headerToolbarSlot) {
+			dom.clearNode(headerToolbarSlot);
+			actions = dom.append(headerToolbarSlot, dom.$('.new-chat-header-toolbar'));
+			this._register(toDisposable(() => actions.remove()));
+		} else {
+			actions = dom.append(container, dom.$('.new-chat-middle-toolbar'));
+		}
 		this._register(this.instantiationService.createInstance(MenuWorkbenchToolBar, actions, Menus.NewSessionToolbar, {
 			hiddenItemStrategy: HiddenItemStrategy.Ignore,
 			toolbarOptions: { primaryGroup: () => true },

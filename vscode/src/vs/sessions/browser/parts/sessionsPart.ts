@@ -75,6 +75,8 @@ export class SessionsPart extends Part {
 	/** Header-row hosts for the active session's relocated title/workspace and action toolbar. */
 	private _headerSessionTitleSlot: HTMLElement | undefined;
 	private _headerSessionToolbarSlot: HTMLElement | undefined;
+	/** Header-row host for the new-chat action toolbar (see {@link IChatViewOptions.headerToolbarSlot}). */
+	private _headerNewSessionToolbarSlot: HTMLElement | undefined;
 
 	/** Lazily-created progress bar shown at the top of the content area. */
 	private _progressBar: ProgressBar | undefined;
@@ -202,6 +204,11 @@ export class SessionsPart extends Part {
 		// region (e.g. as the right panel opens/closes).
 		this._headerSessionTitleSlot = this._panelHeader.createCenterSlot('sessions-header-session-title-slot');
 		this._headerSessionToolbarSlot = this._panelHeader.createRightSlot('sessions-header-session-toolbar-slot');
+
+		// Host for the new-chat view's action toolbar, at the same end of the row
+		// as the session toolbar above so the controls keep their position once a
+		// chat is sent. Only one of the two is ever populated at a time.
+		this._headerNewSessionToolbarSlot = this._panelHeader.createRightSlot('sessions-header-new-session-toolbar-slot');
 	}
 
 	protected override createContentArea(parent: HTMLElement): HTMLElement {
@@ -285,7 +292,7 @@ export class SessionsPart extends Part {
 			const slot = this._slots[i];
 			const session = visible[i];
 			slot.boundSessionId = session?.sessionId;
-			slot.view.openSession(session, { renderSessionTypePickerInControls: this._renderSessionTypePickerInControls, headerTypePickerSlot: this._headerTypePickerSlot });
+			slot.view.openSession(session, { renderSessionTypePickerInControls: this._renderSessionTypePickerInControls, headerTypePickerSlot: this._headerTypePickerSlot, headerToolbarSlot: this._headerNewSessionToolbarSlot });
 		}
 
 		// Mark the active session's element for styling/focus indication.

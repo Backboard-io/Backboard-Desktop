@@ -1525,6 +1525,28 @@
 	min-width: 0;
 }
 
+/* New-chat action toolbar (environment, terminal, right panel) mounted in the
+   sessions header row via the part-provided slot, so it lands on the same line
+   as the mode switcher — where the session's own toolbar sits once a chat has
+   been sent. The in-page fallback is `.new-chat-middle-toolbar` below. */
+.sessions-panel-header .sessions-header-new-session-toolbar-slot {
+	display: flex;
+	align-items: center;
+	height: 100%;
+	pointer-events: auto;
+	-webkit-app-region: no-drag;
+}
+
+.new-chat-header-toolbar {
+	display: flex;
+	align-items: center;
+	height: 100%;
+}
+
+.new-chat-header-toolbar .monaco-toolbar .actions-container {
+	gap: 1px;
+}
+
 .sessions-chat-widget > .new-chat-header-type-picker {
 	position: absolute;
 	top: 12px;

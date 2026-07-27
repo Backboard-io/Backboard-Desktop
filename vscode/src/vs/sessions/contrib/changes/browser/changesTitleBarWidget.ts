@@ -61,10 +61,11 @@ export class ChangesTitleBarContribution extends Disposable implements IWorkbenc
 			when: SessionsWelcomeVisibleContext.toNegated(),
 		}));
 
-		// Same toggle in the title bar's right layout (next to the update button)
-		// on the new-session screen, so the terminal and right-panel controls sit
-		// in the top title-bar row before a session is created.
-		this._register(MenuRegistry.appendMenuItem(Menus.TitleBarRightLayout, {
+		// Same toggle in the new-chat page's own top-right slot, so the terminal
+		// and right-panel controls sit above the composer before a session is
+		// created. The floating SessionBarToolbar above only mounts once the
+		// session exists (`isCreated`), so the two never show duplicates.
+		this._register(MenuRegistry.appendMenuItem(Menus.NewSessionToolbar, {
 			command: {
 				id: TOGGLE_CHANGES_VIEW_ID,
 				title: localize2('showRightPanel', "Show Right Panel"),
@@ -78,12 +79,8 @@ export class ChangesTitleBarContribution extends Disposable implements IWorkbenc
 				},
 			},
 			group: 'navigation',
-			order: 3,
-			// Exact complement of the SessionBarToolbar registration above: the
-			// title bar carries this toggle only on the welcome/new-session screen
-			// (where no session header exists); once a session is open the header
-			// toolbar is its sole home, so the two rows never show duplicates.
-			when: SessionsWelcomeVisibleContext,
+			order: 11, // Same order as in the session toolbar
+			when: SessionsWelcomeVisibleContext.toNegated(),
 		}));
 
 		this._register(MenuRegistry.appendMenuItem(Menus.AuxiliaryBarTitle, {

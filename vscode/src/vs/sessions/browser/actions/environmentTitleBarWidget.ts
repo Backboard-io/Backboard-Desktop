@@ -574,22 +574,22 @@ export class EnvironmentTitleBarContribution extends Disposable implements IWork
 			// when the right panel/editor opens, which would hide this button.
 			when: ContextKeyExpr.and(SessionsWelcomeVisibleContext.toNegated(), IsPhoneLayoutContext.negate()),
 		}));
-		// Mirror it in the title bar's right layout on the new-session screen so the
-		// workspace controls (environment, terminal, right panel) sit in the top
-		// title-bar row before a session is created. Exact complement of the
-		// SessionBarToolbar registration above — once a session is open the header
-		// toolbar is the sole home, so the two rows never show duplicates.
-		this._register(MenuRegistry.appendMenuItem(Menus.TitleBarRightLayout, {
+		// Mirror it in the new-chat page's own top-right slot so the workspace
+		// controls (environment, terminal, right panel) sit above the composer
+		// before a session is created. Complement of the SessionBarToolbar
+		// registration above — that floating toolbar only mounts once the session
+		// exists (`isCreated`), so the two rows never show duplicates.
+		this._register(MenuRegistry.appendMenuItem(Menus.NewSessionToolbar, {
 			command: environmentMenuCommand,
 			group: 'navigation',
-			order: 1,
-			when: ContextKeyExpr.and(SessionsWelcomeVisibleContext, IsPhoneLayoutContext.negate()),
+			order: 8, // Same order as in the session toolbar
+			when: ContextKeyExpr.and(SessionsWelcomeVisibleContext.toNegated(), IsPhoneLayoutContext.negate()),
 		}));
 		const registerEnvironmentWidget = (menuId: typeof Menus.SessionBarToolbar) => this._register(actionViewItemService.register(menuId, ShowEnvironmentPopupAction.ID, (action, options) => {
 			return instantiationService.createInstance(EnvironmentTitleBarWidget, action, options);
 		}, undefined));
 		registerEnvironmentWidget(Menus.SessionBarToolbar);
-		registerEnvironmentWidget(Menus.TitleBarRightLayout);
+		registerEnvironmentWidget(Menus.NewSessionToolbar);
 	}
 }
 

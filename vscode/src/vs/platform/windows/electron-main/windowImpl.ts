@@ -33,7 +33,7 @@ import { ITelemetryService } from '../../telemetry/common/telemetry.js';
 import { ThemeIcon } from '../../../base/common/themables.js';
 import { IThemeMainService } from '../../theme/electron-main/themeMainService.js';
 import { getMenuBarVisibility, IFolderToOpen, INativeWindowConfiguration, IWindowSettings, IWorkspaceToOpen, MenuBarVisibility, hasNativeTitlebar, useNativeFullScreen, useWindowControlsOverlay, DEFAULT_CUSTOM_TITLEBAR_HEIGHT, TitlebarStyle, MenuSettings } from '../../window/common/window.js';
-import { defaultBrowserWindowOptions, getAllWindowsExcludingOffscreen, IWindowsMainService, OpenContext, WindowStateValidator } from './windows.js';
+import { defaultBrowserWindowOptions, getAllWindowsExcludingOffscreen, IWindowsMainService, OpenContext, VIBRANCY_CLEAR_BACKGROUND, WindowStateValidator } from './windows.js';
 import { ISingleFolderWorkspaceIdentifier, IWorkspaceIdentifier, isSingleFolderWorkspaceIdentifier, isWorkspaceIdentifier, toWorkspaceIdentifier } from '../../workspace/common/workspace.js';
 import { IWorkspacesManagementMainService } from '../../workspaces/electron-main/workspacesManagementMainService.js';
 import { IWindowState, ICodeWindow, ILoadEvent, WindowMode, WindowError, LoadReason, defaultWindowState, IBaseWindow } from '../../window/electron-main/window.js';
@@ -842,7 +842,13 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 			return;
 		}
 		try {
-			this._win.setBackgroundColor('#00000000');
+			// VIBRANCY_CLEAR_BACKGROUND, never alpha-0: a fully transparent
+			// background makes Chromium skip clearing damaged regions, which is
+			// the root cause of overlay/modal/mode-switch ghosting (see the
+			// constant's doc in windows.ts). This function used to write
+			// '#00000000' here, silently reintroducing the bug on every
+			// re-assert (ready-to-show, full-screen, maximize, color-scheme).
+			this._win.setBackgroundColor(VIBRANCY_CLEAR_BACKGROUND);
 			this._win.setVibrancy(AGENTS_WINDOW_VIBRANCY ?? null);
 			this._win.webContents.invalidate(); // replace any stale composited frame in the same pass
 		} catch (error) {
@@ -1277,26 +1283,52 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 		// navigation settles: mutating the native surface mid-`loadURL` has
 		// destabilized the WebContents in testing. Guarded because a vibrancy
 		// miss must never take the window down with it.
-		if (isMacintosh && ((configuration.isSessionsWindow || configuration.isOptimusWindow) !== this._hasVibrancy)) {
+		//
+		// Two extra wrinkles on reused windows, both sources of the previous
+		// page GHOSTING through the new page's translucent surfaces:
+		// - The compositor holds the previous document's frame across the
+		//   navigation and does not reliably clear it over a transparent
+		//   backing (same failure mode `reapplyVibrancy` documents), so it
+		//   must be explicitly replaced with `webContents.invalidate()` —
+		//   including when BOTH modes use vibrancy (Editor(Advanced)→Simple),
+		//   where the old code skipped this path entirely.
+		// - While the new page is still loading, its translucent regions
+		//   composite against whatever backing the window has. Make the
+		//   backing opaque for the duration of the navigation so the stale
+		//   frame can never blend through, then restore transparency once the
+		//   load settles. Applied before `loadURL` starts, not mid-flight.
+		if (isMacintosh) {
 			const wantsVibrancy = !!(configuration.isSessionsWindow || configuration.isOptimusWindow);
-			this._win.webContents.once('did-finish-load', () => {
-				try {
-					if (this._win.isDestroyed()) {
-						return;
-					}
-					if (wantsVibrancy && !this._hasVibrancy) {
-						this._win.setBackgroundColor('#00000000');
-						this._win.setVibrancy(AGENTS_WINDOW_VIBRANCY ?? null);
-						this._hasVibrancy = true;
-					} else if (!wantsVibrancy && this._hasVibrancy) {
-						this._win.setVibrancy(null);
+			if (wantsVibrancy !== this._hasVibrancy || (this.wasLoaded && wantsVibrancy)) {
+				if (this.wasLoaded && this._hasVibrancy) {
+					try {
 						this._win.setBackgroundColor(this.themeMainService.getBackgroundColor());
-						this._hasVibrancy = false;
+					} catch (error) {
+						this.logService.warn(`window#load: failed to set interstitial window background: ${error instanceof Error ? error.message : String(error)}`);
 					}
-				} catch (error) {
-					this.logService.warn(`window#load: failed to update window vibrancy: ${error instanceof Error ? error.message : String(error)}`);
 				}
-			});
+				this._win.webContents.once('did-finish-load', () => {
+					try {
+						if (this._win.isDestroyed()) {
+							return;
+						}
+						if (wantsVibrancy) {
+							this._win.setBackgroundColor(VIBRANCY_CLEAR_BACKGROUND);
+							this._win.setVibrancy(AGENTS_WINDOW_VIBRANCY ?? null);
+						} else {
+							this._win.setVibrancy(null);
+							this._win.setBackgroundColor(this.themeMainService.getBackgroundColor());
+						}
+						this._hasVibrancy = wantsVibrancy;
+						// Replace the held frame of the previous document in the
+						// same pass so no stale pixels survive behind the new
+						// page's translucent surfaces.
+						this._win.webContents.invalidate();
+					} catch (error) {
+						this.logService.warn(`window#load: failed to update window vibrancy: ${error instanceof Error ? error.message : String(error)}`);
+					}
+				});
+			}
 		}
 
 		// Clear Document Edited if needed

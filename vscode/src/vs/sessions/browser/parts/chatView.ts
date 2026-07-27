@@ -40,6 +40,15 @@ export interface IChatViewOptions {
 	 * header-row container inside the page.
 	 */
 	readonly headerTypePickerSlot?: HTMLElement;
+
+	/**
+	 * Host element at the end of the sessions header row for the new-chat
+	 * view's action toolbar (environment, terminal, right panel). It is the
+	 * same spot the session's own toolbar takes once a chat has been sent, so
+	 * the controls stay put across that transition. When absent, the new-chat
+	 * view pins the toolbar to the top-right of the page instead.
+	 */
+	readonly headerToolbarSlot?: HTMLElement;
 }
 
 /**

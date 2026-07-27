@@ -24,6 +24,7 @@ suite('claudeReplayMapper', () => {
 			uuid,
 			session_id: 'sess-1',
 			parent_tool_use_id: null,
+			parent_agent_id: null,
 			message: { role: 'user', content: [{ type: 'text', text }] },
 		};
 	}
@@ -34,6 +35,7 @@ suite('claudeReplayMapper', () => {
 			uuid,
 			session_id: 'sess-1',
 			parent_tool_use_id: null,
+			parent_agent_id: null,
 			message: { id: `msg_${uuid}`, role: 'assistant', content: [{ type: 'text', text }] },
 		};
 	}
@@ -44,6 +46,7 @@ suite('claudeReplayMapper', () => {
 			uuid,
 			session_id: 'sess-1',
 			parent_tool_use_id: null,
+			parent_agent_id: null,
 			message: {
 				id: `msg_${uuid}`,
 				role: 'assistant',
@@ -58,6 +61,7 @@ suite('claudeReplayMapper', () => {
 			uuid,
 			session_id: 'sess-1',
 			parent_tool_use_id: null,
+			parent_agent_id: null,
 			message: {
 				role: 'user',
 				content: [{ type: 'tool_result', tool_use_id: toolUseId, content: text, ...(isError ? { is_error: true } : {}) }],
@@ -71,6 +75,7 @@ suite('claudeReplayMapper', () => {
 			uuid,
 			session_id: 'sess-1',
 			parent_tool_use_id: null,
+			parent_agent_id: null,
 			message: { subtype, ...(text !== undefined ? { text } : {}) },
 		};
 	}
@@ -246,6 +251,7 @@ suite('claudeReplayMapper', () => {
 				uuid: 'echo-1',
 				session_id: 'sess-1',
 				parent_tool_use_id: null,
+				parent_agent_id: null,
 				message: { role: 'user', content: '<command-name>/model</command-name>\n            <command-message>model</command-message>\n            <command-args>claude-opus-4.7</command-args>' },
 			},
 			{
@@ -253,6 +259,7 @@ suite('claudeReplayMapper', () => {
 				uuid: 'echo-2',
 				session_id: 'sess-1',
 				parent_tool_use_id: null,
+				parent_agent_id: null,
 				message: { role: 'user', content: '<local-command-stdout>Set model to claude-opus-4.7</local-command-stdout>' },
 			},
 			makeUser('u2', 'how about now'),

@@ -432,7 +432,11 @@ class RoundTripQuery implements AsyncGenerator<SDKMessage, void> {
 				const result = await startup.canUseTool(item.toolName, item.input, {
 					signal: new AbortController().signal,
 					toolUseID: item.toolUseID,
+					requestId: `req_${item.toolUseID}`,
 				});
+				if (!result) {
+					throw new Error('integration test: canUseTool resolved to null');
+				}
 				this._sdk.canUseToolResults.push(result);
 				continue;
 			}
@@ -450,9 +454,11 @@ class RoundTripQuery implements AsyncGenerator<SDKMessage, void> {
 		throw err;
 	}
 
-	async interrupt(): Promise<void> { /* not used */ }
+	async interrupt(): Promise<undefined> { return undefined; /* not used */ }
 
 	setPermissionMode(): never { throw new Error('not modeled'); }
+	setMcpPermissionModeOverride(): never { throw new Error('not modeled'); }
+	reinitialize(): never { throw new Error('not modeled'); }
 	setModel(): never { throw new Error('not modeled'); }
 	setMaxThinkingTokens(): never { throw new Error('not modeled'); }
 	applyFlagSettings(): never { throw new Error('not modeled'); }

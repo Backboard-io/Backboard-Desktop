@@ -691,16 +691,15 @@ class OpenSessionInTerminalAction extends Action2 {
 				// true when the right panel/editor opens, hiding the button.
 				when: ContextKeyExpr.and(SessionsWelcomeVisibleContext.toNegated(), IsPhoneLayoutContext.negate()),
 			}, {
-				id: Menus.TitleBarRightLayout,
+				id: Menus.NewSessionToolbar,
 				group: 'navigation',
-				order: 2,
-				// Exact complement of the SessionBarToolbar registration above: the
-				// title bar carries this toggle only on the welcome/new-session
-				// screen (where no session header exists); once a session is open
-				// the header toolbar is its sole home, so the two rows never show
-				// duplicates.
+				order: 10, // Same order as in the session toolbar
+				// The new-chat page carries this toggle in its own top-right slot
+				// before a session is created; the floating toolbar above only
+				// mounts once the session exists (`isCreated`), so the two never
+				// show duplicates.
 				when: ContextKeyExpr.and(
-					SessionsWelcomeVisibleContext,
+					SessionsWelcomeVisibleContext.toNegated(),
 					IsPhoneLayoutContext.negate(),
 				),
 			}]
