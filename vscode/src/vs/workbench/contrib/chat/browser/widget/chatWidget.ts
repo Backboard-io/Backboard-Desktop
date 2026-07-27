@@ -72,7 +72,7 @@ import { ILanguageModelToolsService, isToolSet } from '../../common/tools/langua
 import { IHandOff, PromptHeader } from '../../common/promptSyntax/promptFileParser.js';
 import { IPromptsService, PromptsStorage } from '../../common/promptSyntax/service/promptsService.js';
 import { GENERATE_AGENT_INSTRUCTIONS_COMMAND_ID, handleModeSwitch } from '../actions/chatActions.js';
-import { ChatTreeItem, IChatAcceptInputOptions, IChatAccessibilityService, IChatCodeBlockInfo, IChatFileTreeInfo, IChatListItemRendererOptions, IChatWidget, IChatWidgetService, IChatWidgetViewContext, IChatWidgetViewModelChangeEvent, IChatWidgetViewOptions, isIChatResourceViewContext, isIChatViewViewContext } from '../chat.js';
+import { ChatTreeItem, ChatViewId, IChatAcceptInputOptions, IChatAccessibilityService, IChatCodeBlockInfo, IChatFileTreeInfo, IChatListItemRendererOptions, IChatWidget, IChatWidgetService, IChatWidgetViewContext, IChatWidgetViewModelChangeEvent, IChatWidgetViewOptions, isIChatResourceViewContext, isIChatViewViewContext } from '../chat.js';
 import { ChatAttachmentModel } from '../attachments/chatAttachmentModel.js';
 import { IChatAttachmentResolveService } from '../attachments/chatAttachmentResolveService.js';
 import { ChatDynamicVariableModel } from '../attachments/chatDynamicVariables.js';
@@ -1407,11 +1407,18 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			title = localize('agentTitle', "Build with Agent");
 		}
 
+		// The classic Chat view pane (Editor mode's right panel) mirrors the
+		// bigger, more prominent welcome treatment Simple mode's middle
+		// agents panel uses, instead of the smaller upstream default.
+		const isChatViewPane = isIChatViewViewContext(this.viewContext) && this.viewContext.viewId === ChatViewId;
+
 		return {
 			title,
 			message: new MarkdownString(DISCLAIMER),
 			icon: BackboardLogoIcon,
 			additionalMessage,
+			useLargeIcon: isChatViewPane,
+			styleVariant: isChatViewPane ? 'backboard' : undefined,
 		};
 	}
 

@@ -9,7 +9,7 @@ import './media/chatMarkdown.css';
 import './media/t3Theme.css';
 import { Disposable, DisposableStore, IDisposable, toDisposable } from '../../base/common/lifecycle.js';
 import { Emitter, Event, setGlobalLeakWarningThreshold } from '../../base/common/event.js';
-import { getActiveDocument, getActiveElement, getClientArea, getWindowId, getWindows, IDimension, isAncestorUsingFlowTo, isHTMLElement, size, Dimension, runWhenWindowIdle } from '../../base/browser/dom.js';
+import { getActiveDocument, getActiveElement, getClientArea, getWindowId, getWindows, IDimension, isAncestorUsingFlowTo, isHTMLElement, size, Dimension, runWhenWindowIdle, scheduleAtNextAnimationFrame } from '../../base/browser/dom.js';
 import { DeferredPromise, RunOnceScheduler } from '../../base/common/async.js';
 import { isFullscreen, onDidChangeFullscreen, isChrome, isFirefox, isSafari } from '../../base/browser/browser.js';
 import { mark } from '../../base/common/performance.js';
@@ -72,7 +72,7 @@ import {
 	NotificationsSettings,
 	getNotificationsPosition
 } from '../../workbench/common/notifications.js';
-import { SessionsLayoutPolicy } from './layoutPolicy.js';
+import { IPartVisibilityDefaults, OPTIMUS_CHAT_PANEL_WIDTH, SessionsLayoutPolicy } from './layoutPolicy.js';
 import { MobileNavigationStack } from './mobileNavigationStack.js';
 import { SessionsPanelHeader } from './parts/panelHeader.js';
 import { MobileTitlebarPart } from './parts/mobile/mobileTitlebarPart.js';
@@ -111,7 +111,8 @@ enum LayoutClasses {
 	PHONE_LAYOUT = 'phone-layout',
 	AUXILIARY_FILES_ACTIVE = 'sessions-auxiliary-files-active',
 	AUXILIARY_BROWSER_ACTIVE = 'sessions-auxiliary-browser-active',
-	PARTS_ANIMATING = 'parts-animating'
+	PARTS_ANIMATING = 'parts-animating',
+	BOOTING = 'workbench-booting'
 }
 
 //#endregion
@@ -737,6 +738,23 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 
 	//#endregion
 
+	/**
+	 * Part visibility to start from, before the grid is built. The Advanced
+	 * (Optimus) window overrides the shared sessions defaults: it docks the
+	 * conversation in the auxiliary bar and keeps the editor and panel hidden.
+	 *
+	 * Resolving this up front — rather than letting a workbench contribution
+	 * correct the layout after `Restored` — is what keeps a mode switch from
+	 * visibly rearranging itself once the window has already painted.
+	 */
+	private getInitialPartVisibilityDefaults(): IPartVisibilityDefaults {
+		if (this._isOptimusWindow && this.layoutPolicy.viewportClass.get() !== 'phone') {
+			return this.layoutPolicy.getOptimusPartVisibilityDefaults();
+		}
+
+		return this.layoutPolicy.getPartVisibilityDefaults();
+	}
+
 	private renderWorkbench(instantiationService: IInstantiationService, notificationService: NotificationService, storageService: IStorageService, configurationService: IConfigurationService): void {
 		// ARIA & Signals
 		setARIAContainer(this.mainContainer);
@@ -747,7 +765,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		this.layoutPolicy.update(initialDimension.width, initialDimension.height);
 
 		// Apply initial part visibility from layout policy (phone hides sidebar, etc.)
-		const visibilityDefaults = this.layoutPolicy.getPartVisibilityDefaults();
+		const visibilityDefaults = this.getInitialPartVisibilityDefaults();
 		this.partVisibility.sidebar = visibilityDefaults.sidebar;
 		this.partVisibility.auxiliaryBar = visibilityDefaults.auxiliaryBar;
 		this.partVisibility.panel = visibilityDefaults.panel;
@@ -769,6 +787,11 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 			'monaco-workbench',
 			'agent-sessions-workbench',
 			LayoutClasses.SHELL_GRADIENT_BACKGROUND,
+			// Held transparent until the first laid-out frame is ready, then
+			// faded in (see `revealWorkbench`). Mode switching reloads the
+			// window in place, so without this the user watches the workbench
+			// assemble itself over the outgoing mode.
+			LayoutClasses.BOOTING,
 			platformClass,
 			isWeb ? 'web' : undefined,
 			isChrome ? 'chromium' : isFirefox ? 'firefox' : isSafari ? 'safari' : undefined,
@@ -1003,6 +1026,34 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 			this._register(runWhenWindowIdle(mainWindow, () => lifecycleService.phase = LifecyclePhase.Eventually, 2500));
 		}, 2500));
 		eventuallyPhaseScheduler.schedule();
+
+		// Reveal the finished workbench
+		this.revealWorkbench();
+	}
+
+	/**
+	 * Fades the workbench in once it has a laid-out frame to show.
+	 *
+	 * Everything up to here — services, parts, grid, first layout — happens in
+	 * one synchronous task, so the frame this waits for is the complete
+	 * workbench rather than a half-built one. Waiting two frames lets the parts
+	 * that restore themselves during `Restored` (the sessions list, the docked
+	 * conversation) land in the same frame instead of popping in afterwards.
+	 */
+	private revealWorkbench(): void {
+		const reveal = () => this.mainContainer.classList.remove(LayoutClasses.BOOTING);
+
+		// Never leave the workbench invisible if frames stop arriving (an
+		// occluded or fully offscreen window gets no animation frames at all).
+		const fallback = this._register(new RunOnceScheduler(reveal, 300));
+		fallback.schedule();
+
+		this._register(scheduleAtNextAnimationFrame(mainWindow, () => {
+			this._register(scheduleAtNextAnimationFrame(mainWindow, () => {
+				fallback.cancel();
+				reveal();
+			}));
+		}));
 	}
 
 	private restoreParts(): void {
@@ -1096,7 +1147,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		this.layoutPolicy.update(this._mainContainerDimension.width, this._mainContainerDimension.height);
 
 		// Update part visibility based on final viewport classification
-		const visDefaults = this.layoutPolicy.getPartVisibilityDefaults();
+		const visDefaults = this.getInitialPartVisibilityDefaults();
 		const isPhone = this.layoutPolicy.viewportClass.get() === 'phone';
 		this.partVisibility.sidebar = isPhone ? visDefaults.sidebar : this.partVisibility.sidebar;
 		this.partVisibility.auxiliaryBar = isPhone ? visDefaults.auxiliaryBar : this.partVisibility.auxiliaryBar;
@@ -1306,9 +1357,17 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		// Calculate right section width — when sidebar is hidden it takes no space.
 		const effectiveSideBarWidth = this.partVisibility.sidebar ? sideBarSize : 0;
 		const rightSectionWidth = Math.max(0, width - effectiveSideBarWidth);
-		const preferredRightWorkColumnWidth = this._savedPartSizes.sessions !== undefined
-			? rightSectionWidth - this._savedPartSizes.sessions
-			: Math.max(sizes.auxiliaryBarSize, Math.floor(rightSectionWidth * 0.56));
+		// The Advanced window's right column is the chat panel alone (the editor
+		// stays hidden there) and its width is fixed, so build the grid at that
+		// width directly — including over a saved width from a differently sized
+		// window. Anything else gets corrected to it by the Optimus layout
+		// contribution a beat after the window has already painted, which reads
+		// as the chat panel snapping to size on every mode switch.
+		const preferredRightWorkColumnWidth = this._isOptimusWindow
+			? OPTIMUS_CHAT_PANEL_WIDTH
+			: this._savedPartSizes.sessions !== undefined
+				? rightSectionWidth - this._savedPartSizes.sessions
+				: Math.max(sizes.auxiliaryBarSize, Math.floor(rightSectionWidth * 0.56));
 		const minimumRightWorkColumnWidth = (this.partVisibility.auxiliaryBar && this.partVisibility.editor)
 			? Math.min(rightSectionWidth, Math.max(420, rightSectionWidth < 900 ? Math.floor(rightSectionWidth * 0.72) : Math.max(560, Math.floor(rightSectionWidth * 0.48))))
 			: 300;
@@ -1318,7 +1377,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		// is preserved across reloads. Fall back to the remainder of the right
 		// section, which the grid distributes proportionally when the saved
 		// sizes don't fit the current container.
-		const sessionsWidth = this._savedPartSizes.sessions !== undefined
+		const sessionsWidth = (this._savedPartSizes.sessions !== undefined && !this._isOptimusWindow)
 			? Math.max(0, Math.min(this._savedPartSizes.sessions, rightSectionWidth - effectiveRightWorkColumnWidth))
 			: Math.max(0, rightSectionWidth - effectiveRightWorkColumnWidth);
 
@@ -1446,7 +1505,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 				this.mobileTopBarDisposables.clear();
 				this.mobileTopBarElement = undefined;
 				// Restore desktop part visibility
-				const defaults = this.layoutPolicy.getPartVisibilityDefaults();
+				const defaults = this.getInitialPartVisibilityDefaults();
 				if (this.partVisibility.sidebar !== defaults.sidebar) {
 					this.setSideBarHidden(!defaults.sidebar);
 				}

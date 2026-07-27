@@ -32,6 +32,20 @@ export interface IPartSizeDefaults {
 const PHONE_MAX_WIDTH = 640;
 const TABLET_MAX_WIDTH = 1024;
 
+//#region Advanced (Optimus) window layout
+
+/**
+ * Width of the Advanced window's docked chat panel. Kept here rather than in
+ * the Optimus contribution because the workbench needs it BEFORE the grid is
+ * built: the contribution that enforces it runs on idle after `Restored`, so
+ * a grid built at any other width visibly snaps to this one a beat after the
+ * window has already painted — very obvious when switching modes, since the
+ * window stays on screen the whole time.
+ */
+export const OPTIMUS_CHAT_PANEL_WIDTH = 400;
+
+//#endregion
+
 /**
  * Whether the current platform is a phone/tablet OS. The phone layout is
  * only applied on actual mobile devices so that resizing a desktop window
@@ -125,6 +139,23 @@ export class SessionsLayoutPolicy extends Disposable {
 				// A dedicated tablet layout has not been designed yet.
 				return { sidebar: true, auxiliaryBar: false, panel: false, sessions: true, editor: true };
 		}
+	}
+
+	/**
+	 * Part visibility for the Advanced (Optimus) window: the board owns the
+	 * centre, the conversation is always docked on the right, and the editor
+	 * and panel stay out of the way until something explicitly opens them.
+	 * The sessions sidebar folds away on narrow windows so the board and the
+	 * conversation both stay readable.
+	 */
+	getOptimusPartVisibilityDefaults(): IPartVisibilityDefaults {
+		return {
+			sidebar: true,
+			auxiliaryBar: true,
+			panel: false,
+			sessions: true,
+			editor: false
+		};
 	}
 
 	/**

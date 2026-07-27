@@ -97,6 +97,30 @@
 	background-color: transparent;
 }
 
+/* Boot reveal. Switching modes reloads the window in place, so the workbench
+ * builds itself while the outgoing mode is still on screen. Hold the contents
+ * transparent until there is a laid-out frame to show, then fade them in — see
+ * `revealWorkbench()` in workbench.ts, which drops the class.
+ *
+ * The contents fade, not the workbench root: the root paints the shell
+ * background (or, on the Simple window, lets the native vibrancy through), so
+ * keeping it visible means the very first frame after the reload already looks
+ * like the destination mode instead of an empty window. */
+.agent-sessions-workbench > * {
+	transition: opacity 140ms ease-out;
+}
+
+.agent-sessions-workbench.workbench-booting > * {
+	opacity: 0;
+	transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.agent-sessions-workbench > * {
+		transition: none;
+	}
+}
+
 .agent-sessions-workbench.shell-gradient-background {
 	position: relative;
 	isolation: isolate;

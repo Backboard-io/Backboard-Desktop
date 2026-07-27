@@ -24,6 +24,9 @@ import { IViewContainersRegistry, IViewDescriptor, IViewsRegistry, ViewContainer
 import { IViewsService } from '../../workbench/services/views/common/viewsService.js';
 import { IWorkbenchLayoutService, Parts } from '../../workbench/services/layout/browser/layoutService.js';
 import { SessionsView, SessionsViewId } from '../../sessions/contrib/sessions/browser/views/sessionsView.js';
+// Shared with the agent-sessions workbench, which builds the grid at this width
+// so the panel never has to be resized after the window has painted.
+import { OPTIMUS_CHAT_PANEL_WIDTH } from '../../sessions/browser/layoutPolicy.js';
 import { ISessionsManagementService } from '../../sessions/services/sessions/common/sessionsManagement.js';
 import { ISessionsService } from '../../sessions/services/sessions/browser/sessionsService.js';
 import { OPTIMUS_CLOSE_SESSION_COMMAND_ID, OPTIMUS_DELETE_SESSION_COMMAND_ID, OPTIMUS_FOCUS_SESSION_COMMAND_ID, OPTIMUS_NEW_SESSION_COMMAND_ID, OPTIMUS_SET_VIEW_MODE_COMMAND_ID, OPTIMUS_VIEW_MODE_CONTEXT_KEY, OptimusViewMode } from '../browser/parts/optimusGridPart.js';
@@ -77,7 +80,6 @@ viewsRegistry.registerViews([optimusSessionsViewDescriptor], optimusSessionsView
 const optimusChatViewIcon = registerIcon('optimus-chat-icon', Codicon.commentDiscussion, localize('optimusChatViewIcon', 'Icon for the chat view in the Optimus window'));
 const OPTIMUS_CHAT_VIEW_TITLE = localize2('optimus.chat.view.label', "Chat");
 const OptimusChatContainerId = 'optimus.workbench.view.chatContainer';
-const OPTIMUS_CHAT_PANEL_WIDTH = 400;
 // The sessions-window variants of the mode-switching commands (registered in
 // sessions.desktop.contribution, which is part of the Optimus manifest). The
 // editor-workbench `workbench.action.openAgentsWindow` command is gated on
