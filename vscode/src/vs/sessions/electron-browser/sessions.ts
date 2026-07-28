@@ -22,6 +22,48 @@
 
 	//#region Splash Screen
 
+	// The sessions workbench always builds its sidebar at the layout policy's
+	// default width (`getPartSizes().sideBarSize`); this bootstrap runs before
+	// any workbench module is loaded, so the value is repeated rather than
+	// imported. Being a little off costs nothing — the skeleton is replaced the
+	// moment the real sidebar paints.
+	const SPLASH_SIDEBAR_WIDTH = 360;
+
+	// Backstop for the frozen frame below: `PartsSplash` takes it down once the
+	// workbench has painted, so this only ever fires for a workbench that never
+	// gets that far — better a blank window than a fake one forever.
+	const TRANSITION_SNAPSHOT_MAX_DURATION = 10000;
+
+	/**
+	 * Holds up the frame the window was showing before this load (see
+	 * `INativeWindowConfiguration.transitionSnapshot`) so that switching modes
+	 * doesn't blank the window for the second or so the workbench takes to
+	 * boot. `PartsSplash` cross-fades it away once the workbench has a
+	 * laid-out frame of its own.
+	 */
+	function showTransitionSnapshot(configuration: INativeWindowConfiguration) {
+		if (!configuration.transitionSnapshot) {
+			return;
+		}
+
+		const snapshot = document.createElement('div');
+		snapshot.id = 'monaco-transition-snapshot';
+		snapshot.style.position = 'fixed';
+		snapshot.style.inset = '0';
+		snapshot.style.zIndex = '100000';
+		// Clicks land on the real workbench underneath the moment it exists —
+		// the image is scenery, never a target.
+		snapshot.style.pointerEvents = 'none';
+		snapshot.style.backgroundImage = `url("${configuration.transitionSnapshot}")`;
+		// The window cannot have resized between the capture and this load, so
+		// stretching to the viewport reproduces it pixel for pixel.
+		snapshot.style.backgroundSize = '100% 100%';
+
+		window.document.body.appendChild(snapshot);
+
+		setTimeout(() => snapshot.remove(), TRANSITION_SNAPSHOT_MAX_DURATION);
+	}
+
 	function showSplash(configuration: INativeWindowConfiguration) {
 		performance.mark('code/willShowPartsSplash');
 
@@ -84,6 +126,23 @@
 		const splash = document.createElement('div');
 		splash.id = 'monaco-parts-splash';
 		splash.className = baseTheme ?? 'vs-dark';
+
+		// Sketch the sidebar column. The workbench takes a second or more to
+		// boot, and switching modes reloads the window in place — with only a
+		// flat colour here the window reads as blank for that entire stretch,
+		// which is the most visible part of a mode switch. Painting the one
+		// part whose position is fixed keeps the destination mode's shape on
+		// screen from the first frame, and the real sidebar lands on top of it.
+		if (data?.colorInfo.sideBarBackground) {
+			const sideBar = document.createElement('div');
+			sideBar.style.position = 'absolute';
+			sideBar.style.top = '0';
+			sideBar.style.left = '0';
+			sideBar.style.bottom = '0';
+			sideBar.style.width = `${SPLASH_SIDEBAR_WIDTH}px`;
+			sideBar.style.backgroundColor = data.colorInfo.sideBarBackground;
+			splash.appendChild(sideBar);
+		}
 
 		window.document.body.appendChild(splash);
 
@@ -331,6 +390,9 @@
 
 				// Show our splash as early as possible
 				showSplash(windowConfig);
+
+				// ...under the outgoing window's last frame, when there is one
+				showTransitionSnapshot(windowConfig);
 
 				// Code windows have a `vscodeWindowId` property to identify them
 				Object.defineProperty(window, 'vscodeWindowId', {

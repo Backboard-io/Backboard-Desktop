@@ -145,13 +145,26 @@ export class SessionsLayoutPolicy extends Disposable {
 	 * Part visibility for the Advanced (Optimus) window: the board owns the
 	 * centre, the conversation is always docked on the right, and the editor
 	 * and panel stay out of the way until something explicitly opens them.
-	 * The sessions sidebar folds away on narrow windows so the board and the
-	 * conversation both stay readable.
 	 */
 	getOptimusPartVisibilityDefaults(): IPartVisibilityDefaults {
 		return {
 			sidebar: true,
 			auxiliaryBar: true,
+			panel: false,
+			sessions: true,
+			editor: false
+		};
+	}
+
+	/**
+	 * The Jarvis window is a single unlimited canvas. Tool, file, browser and
+	 * agent surfaces live as cards inside the sessions part, so the workbench's
+	 * docked side parts stay out of the initial composition.
+	 */
+	getJarvisPartVisibilityDefaults(): IPartVisibilityDefaults {
+		return {
+			sidebar: false,
+			auxiliaryBar: false,
 			panel: false,
 			sessions: true,
 			editor: false

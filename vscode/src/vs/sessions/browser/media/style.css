@@ -97,28 +97,12 @@
 	background-color: transparent;
 }
 
-/* Boot reveal. Switching modes reloads the window in place, so the workbench
- * builds itself while the outgoing mode is still on screen. Hold the contents
- * transparent until there is a laid-out frame to show, then fade them in — see
- * `revealWorkbench()` in workbench.ts, which drops the class.
- *
- * The contents fade, not the workbench root: the root paints the shell
- * background (or, on the Simple window, lets the native vibrancy through), so
- * keeping it visible means the very first frame after the reload already looks
- * like the destination mode instead of an empty window. */
-.agent-sessions-workbench > * {
-	transition: opacity 140ms ease-out;
-}
-
-.agent-sessions-workbench.workbench-booting > * {
+/* Held transparent for the one frame between the boot splash being torn down
+ * and the workbench's first laid-out frame, so a mode switch never shows a
+ * half-built workbench. Dropped by `revealWorkbench()` in workbench.ts. */
+.agent-sessions-workbench.workbench-booting > .monaco-grid-view,
+.agent-sessions-workbench.workbench-booting > .part {
 	opacity: 0;
-	transition: none;
-}
-
-@media (prefers-reduced-motion: reduce) {
-	.agent-sessions-workbench > * {
-		transition: none;
-	}
 }
 
 .agent-sessions-workbench.shell-gradient-background {
@@ -166,18 +150,24 @@
  * per user request). High contrast stays opaque via the rules above/below,
  * and reduced transparency via the media query below.
  *
- * Simple window only: the Advanced (Optimus) and Jarvis windows scroll dense
- * content beside the panel, and painting alpha over the native vibrancy there
- * smears while scrolling — those windows keep the opaque base rendering via
- * the .optimus-window/.jarvis-window root markers. */
-.monaco-workbench.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light):not(.optimus-window):not(.jarvis-window) {
+ * Simple and Advanced (Optimus) both: they are the same kind of window all the
+ * way down — `isOptimusWindow` is created with the same vibrancy material and
+ * the same VIBRANCY_CLEAR_BACKGROUND alpha-1 backing as `isSessionsWindow`
+ * (windowImpl.ts), so the whole anti-ghosting stack is already live in both.
+ * Advanced was held opaque here when that stack first landed, before the
+ * alpha-1 backing had been shown to fix the scroll smearing at its root; the
+ * dense content it scrolls beside the panel (the board, the docked chat) all
+ * paints opaque, so the only region with alpha over the glass is the sidebar —
+ * the same sessions list the Simple window puts there. Jarvis keeps the opaque
+ * base rendering via its root marker. */
+.monaco-workbench.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light):not(.jarvis-window) {
 	/* Tint balance point: 42% washed out over bright desktops, 62% read as
 	 * not see-through enough (both user-rejected) — keep at 52%. */
 	--sessions-sidebar-region-background: color-mix(in srgb, var(--vscode-sideBar-background, var(--vscode-editor-background)) 52%, transparent);
 	background: transparent;
 }
 
-.monaco-workbench.vs.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light):not(.optimus-window):not(.jarvis-window) {
+.monaco-workbench.vs.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light):not(.jarvis-window) {
 	/* Light-appearance vibrancy renders naturally lighter/whiter than dark
 	 * (same macOS material, different visual weight per appearance), so the
 	 * same tint percentage as dark reads far more opaque here — needs a
@@ -185,7 +175,7 @@
 	--sessions-sidebar-region-background: color-mix(in srgb, color-mix(in srgb, var(--vscode-sideBar-background, color-mix(in srgb, var(--vscode-editor-background) 94%, var(--vscode-foreground) 6%)) 56%, var(--vscode-foreground) 44%) 32%, transparent);
 }
 
-.monaco-workbench.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light):not(.optimus-window):not(.jarvis-window)::before {
+.monaco-workbench.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light):not(.jarvis-window)::before {
 	/* Only visible behind the translucent (sidebar) region; the panel is
 	 * already backed by native vibrancy, so keep this to a faint whisper
 	 * rather than a second light source stacking on top of it. */
@@ -200,7 +190,7 @@
 		background: var(--sessions-main-region-background);
 	}
 
-	.monaco-workbench.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light):not(.optimus-window):not(.jarvis-window)::before {
+	.monaco-workbench.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light):not(.jarvis-window)::before {
 		opacity: 1;
 	}
 }
@@ -1123,13 +1113,18 @@
 /* Let content items fill the full width of their host, with only a gutter to
  * keep text off the edge. The base chat stylesheet centers a fixed reading
  * column; the sessions window instead uses the whole panel.
- * Scoped to the chat panel (`.part.sessionspart`) and the chat editor host
- * (`.chat-editor-relative`) so the "card style" doesn't leak into other chat
- * surfaces that reuse `.interactive-item-container` — notably the terminal
- * and editor inline chat widgets and the agent-session hover widget. */
+ * Scoped to the chat panel (`.part.sessionspart`), the Advanced window's right
+ * chat panel (`.optimus-chat-view`, which mounts the same chat views) and the
+ * chat editor host (`.chat-editor-relative`) so the "card style" doesn't leak
+ * into other chat surfaces that reuse `.interactive-item-container` — notably
+ * the terminal and editor inline chat widgets and the agent-session hover
+ * widget. The three hosts stay separate selectors rather than one `:is()` list
+ * because they do not all carry the same specificity. */
 .agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container,
+.agent-sessions-workbench.optimus-window .optimus-chat-view .interactive-session .interactive-item-container,
 .agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-item-container,
 .agent-sessions-workbench .part.sessionspart .interactive-session > .chat-suggest-next-widget,
+.agent-sessions-workbench.optimus-window .optimus-chat-view .interactive-session > .chat-suggest-next-widget,
 .agent-sessions-workbench .chat-editor-relative .interactive-session > .chat-suggest-next-widget {
 	max-width: none;
 	width: 100%;
@@ -1144,16 +1139,19 @@
  * bubble is capped well short of the column so the two turns stay visually
  * distinct even on a wide panel. */
 .agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container.interactive-request,
+.agent-sessions-workbench.optimus-window .optimus-chat-view .interactive-session .interactive-item-container.interactive-request,
 .agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-item-container.interactive-request {
 	align-items: flex-end;
 }
 
 .agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container.interactive-request .value,
+.agent-sessions-workbench.optimus-window .optimus-chat-view .interactive-session .interactive-item-container.interactive-request .value,
 .agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-item-container.interactive-request .value {
 	align-items: flex-end !important;
 }
 
 .agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown,
+.agent-sessions-workbench.optimus-window .optimus-chat-view .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown,
 .agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown {
 	width: fit-content;
 	/* Bubble geometry matches T3 Code's user row (`max-w-[80%] rounded-2xl p-3`,
@@ -1179,28 +1177,36 @@
 }
 
 .agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown.clickable:hover,
+.agent-sessions-workbench.optimus-window .optimus-chat-view .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown.clickable:hover,
 .agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown.clickable:hover {
 	background-color: color-mix(in srgb, var(--vscode-foreground) 12%, transparent) !important;
 }
 
 .agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container.interactive-request .value > .rendered-markdown p,
+.agent-sessions-workbench.optimus-window .optimus-chat-view .interactive-session .interactive-item-container.interactive-request .value > .rendered-markdown p,
 .agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-item-container.interactive-request .value > .rendered-markdown p {
 	width: auto;
 }
 
 /* Let request bubbles that contain a code block grow to fit the code editor. */
 .agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown:has(.interactive-result-code-block),
+.agent-sessions-workbench.optimus-window .optimus-chat-view .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown:has(.interactive-result-code-block),
 .agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown:has(.interactive-result-code-block) {
 	max-width: 100%;
 }
 
-/* ---- Simple mode: T3 Code row treatment ---- */
+/* ---- Simple mode: T3 Code row treatment ----
+ *
+ * The Advanced (Optimus) window mounts the very same chat views in its right
+ * panel, so every rule in this block lists `.optimus-chat-view` as an
+ * alternative host. It is deliberately NOT applied window-wide there: the board
+ * cards mirror transcripts too, and they keep their own compact treatment. */
 
 /* T3's row rhythm: no top padding, `pb-4` (16px) below each turn. The
  * transcript keeps the sessions window's full-panel width (with its 20px
  * gutters, set above) — a hard reading-column cap left too much dead space
  * at the panel edges. */
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .interactive-item-container {
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart, .agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .interactive-item-container {
 	padding-top: 2px;
 	padding-bottom: 14px;
 }
@@ -1211,7 +1217,7 @@
  * entrance; neutralise all of those so Simple mode streams like T3. The
  * `animationend` cleanup listener never fires once the animation is gone, so
  * the class lingers on the element — the resets below make that harmless. */
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart :is(
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart, .agent-sessions-workbench.optimus-window .optimus-chat-view) :is(
 	.chat-smooth-animate-fade,
 	.chat-smooth-animate-rise,
 	.chat-smooth-animate-blur,
@@ -1227,13 +1233,13 @@
 /* Response meta (copy button, etc.) is hover-revealed in T3
  * (`opacity-0 … group-hover/assistant:opacity-100 focus-within:opacity-100`),
  * not a permanent row under the reply. */
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-item-container.interactive-response .chat-footer-toolbar {
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart, .agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-item-container.interactive-response .chat-footer-toolbar {
 	opacity: 0;
 	transition: opacity 200ms;
 }
 
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-item-container.interactive-response:hover .chat-footer-toolbar,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-item-container.interactive-response:focus-within .chat-footer-toolbar {
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart, .agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-item-container.interactive-response:hover .chat-footer-toolbar,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart, .agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-item-container.interactive-response:focus-within .chat-footer-toolbar {
 	opacity: 1;
 }
 
@@ -1241,7 +1247,8 @@
 
 /* Top fade overlay: dims content scrolled near the top edge of the chat bar card.
  * Use the Monaco scroll shadow element, which is only shown when scrollTop > 0. */
-.agent-sessions-workbench .part.sessionspart .monaco-scrollable-element > .shadow.top {
+.agent-sessions-workbench .part.sessionspart .monaco-scrollable-element > .shadow.top,
+.agent-sessions-workbench.optimus-window .optimus-chat-view .monaco-scrollable-element > .shadow.top {
 	height: 16px;
 	background: linear-gradient(to bottom, var(--part-background), transparent);
 	box-shadow: none;
@@ -1263,6 +1270,13 @@
  * and the editor host (`.chat-editor-relative`), and any request/working state —
  * so it never falls back to the darker default. */
 .agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) {
+	--sessions-codex-surface-background: var(--sessions-main-region-background, var(--vscode-editor-background));
+}
+
+/* Same composer surface in the Advanced window's right panel, but scoped to the
+ * panel rather than redefined on the workbench root: the board cards render
+ * transcripts of their own and must keep the default surface. */
+.agent-sessions-workbench.optimus-window .optimus-chat-view {
 	--sessions-codex-surface-background: var(--sessions-main-region-background, var(--vscode-editor-background));
 }
 
@@ -1322,6 +1336,7 @@
  * (`.chat-editor-relative`) to avoid leaking into other chat surfaces such as
  * the inline chat widgets and agent-session hover widget. */
 .agent-sessions-workbench .part.sessionspart .interactive-session .interactive-input-part,
+.agent-sessions-workbench.optimus-window .optimus-chat-view .interactive-session .interactive-input-part,
 .agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-input-part {
 	width: 100%;
 	max-width: none;
@@ -1333,6 +1348,7 @@
 
 /* Make sure when editing we don't give unnecessary padding. */
 .agent-sessions-workbench .part.sessionspart .interactive-session .chat-edit-input-container .interactive-input-part,
+.agent-sessions-workbench.optimus-window .optimus-chat-view .interactive-session .chat-edit-input-container .interactive-input-part,
 .agent-sessions-workbench .chat-editor-relative .interactive-session .chat-edit-input-container .interactive-input-part {
 	padding: 4px 0;
 }

@@ -46,11 +46,21 @@
 	padding-right: 10px;
 	box-sizing: border-box;
 	-webkit-app-region: drag;
-	/* Content scrolling in the panels passes under this strip; a translucent
-	   blur keeps the controls legible without a hard titlebar. */
-	background: color-mix(in srgb, var(--vscode-sideBar-background, #1e1e1e) 62%, transparent);
-	-webkit-backdrop-filter: blur(14px);
-	backdrop-filter: blur(14px);
+	/* Deliberately unpainted. The strip is a sibling of the workbench grid at a
+	   far higher z-index, and the grid is its own stacking context, so any
+	   background here paints over the top 32px of the column separators (the
+	   `::after` overlays on the sidebar and auxiliary-bar grid wrappers) and
+	   they stop short of the window's top edge. Nothing needs covering: every
+	   column reserves its own space behind the strip — the sidebar's empty 32px
+	   header, the board's 42px padding, the chat panel's composite title — so
+	   no content scrolls under the controls. */
+	background: transparent;
+}
+
+/* Appears with the rest of the workbench rather than dropping onto an
+   already-painted window — see the boot reveal in the sessions style. */
+.workbench-booting > .optimus-window-chrome {
+	opacity: 0;
 }
 
 /* macOS: the native traffic lights center ~4px below the strip's midline, so
@@ -579,7 +589,9 @@
 	font-size: 11.5px;
 }
 
-/* Right panel: editor-style chat host with a folder row under the composer. */
+/* Right panel: hosts the Sessions chat views (the Simple window's composer and
+   transcript). The view sizes its own element in px from `layoutBody`, so the
+   content host only has to fill the pane and not add a scroll context. */
 .optimus-chat-view {
 	display: flex;
 	flex-direction: column;
@@ -590,18 +602,11 @@
 	min-width: 0;
 }
 
-.optimus-chat-editor-host {
+.optimus-chat-view-content {
 	flex: 1;
 	min-height: 0;
 	min-width: 0;
-}
-
-.optimus-chat-folder-row {
-	height: 30px;
-	flex-shrink: 0;
-	display: flex;
-	align-items: center;
-	padding: 0 12px;
+	overflow: hidden;
 }
 
 /* --- Diff badge (SCM-style +N −N) --------------------------------------- */

@@ -23,7 +23,11 @@ import { IsPhoneLayoutContext } from '../../common/contextkeys.js';
 import { logSessionsInteraction } from '../../common/sessionsTelemetry.js';
 import { Menus } from '../../browser/menus.js';
 import { ISessionsService } from '../../services/sessions/browser/sessionsService.js';
+import { ISession } from '../../services/sessions/common/session.js';
 import { ISessionsProvidersService } from '../../services/sessions/browser/sessionsProvidersService.js';
+import { raceTimeout } from '../../../base/common/async.js';
+import { CancellationTokenSource } from '../../../base/common/cancellation.js';
+import { waitForState } from '../../../base/common/observable.js';
 import { IWorkbenchContribution } from '../../../workbench/common/contributions.js';
 import { OpenInVSCodeTitleBarWidget } from '../../browser/widget/openInVSCodeWidget.js';
 import { IActionViewItemService } from '../../../platform/actions/browser/actionViewItemService.js';
@@ -36,14 +40,16 @@ import { BACKBOARD_WORKSPACE_OPEN_ON_STARTUP_STORAGE_KEY } from '../../../workbe
 
 const OPEN_WORKSPACE_IN_VSCODE_ACTION_ID = 'agents.openWorkspaceInVSCode';
 
-function getFolderUriToOpen(sessionsService: ISessionsService, sessionsProvidersService: ISessionsProvidersService, remoteAgentHostService: IRemoteAgentHostService): URI | undefined {
-	const activeSession = sessionsService.activeSession.get();
-	if (!activeSession) {
-		return undefined;
-	}
+/**
+ * How long to wait for a session that is still resolving its workspace (e.g.
+ * looking up its git repository). Short enough that Editor mode never feels
+ * stuck, long enough to cover the common case of switching modes moments after
+ * opening a session.
+ */
+const WORKSPACE_RESOLVE_TIMEOUT = 2000;
 
-	const workspace = activeSession.workspace.get();
-	const rawFolderUri = workspace?.folders[0]?.workingDirectory;
+function toFolderUri(session: ISession, sessionsProvidersService: ISessionsProvidersService, remoteAgentHostService: IRemoteAgentHostService): URI | undefined {
+	const rawFolderUri = session.workspace.get()?.folders[0]?.workingDirectory;
 	if (!rawFolderUri) {
 		return undefined;
 	}
@@ -52,13 +58,55 @@ function getFolderUriToOpen(sessionsService: ISessionsService, sessionsProviders
 		return rawFolderUri;
 	}
 
-	const remoteAuthority = resolveRemoteAuthority(activeSession.providerId, sessionsProvidersService, remoteAgentHostService);
+	const remoteAuthority = resolveRemoteAuthority(session.providerId, sessionsProvidersService, remoteAgentHostService);
 	if (!remoteAuthority) {
 		return rawFolderUri;
 	}
 
 	const agentHostUri = fromAgentHostUri(rawFolderUri);
 	return agentHostUri.with({ authority: remoteAuthority, scheme: Schemas.vscodeRemote });
+}
+
+/**
+ * The folder Editor mode should open.
+ *
+ * Falling through to `undefined` opens an *empty* editor window, which reads as
+ * the app forgetting where the user was — so this tries hard to find a folder
+ * before giving up:
+ *
+ * 1. The session on screen. Its workspace resolves asynchronously, so if it is
+ *    still loading we wait briefly rather than treating it as folderless.
+ * 2. Failing that, the most recently opened session that has a folder. This is
+ *    what covers the common complaints: the board with no card focused, and a
+ *    brand new chat that has no workspace of its own yet. Recency is persisted,
+ *    so it still points somewhere sensible after a restart.
+ */
+async function getFolderUriToOpen(sessionsService: ISessionsService, sessionsProvidersService: ISessionsProvidersService, remoteAgentHostService: IRemoteAgentHostService): Promise<URI | undefined> {
+	const activeSession = sessionsService.activeSession.get();
+	if (activeSession) {
+		if (!activeSession.workspace.get() && activeSession.loading.get()) {
+			// Cancelled either way, so a session that never finishes loading
+			// doesn't leave an observer behind on every mode switch.
+			const cts = new CancellationTokenSource();
+			const settled = waitForState(activeSession.loading, loading => !loading, undefined, cts.token).catch(() => undefined);
+			await raceTimeout(settled, WORKSPACE_RESOLVE_TIMEOUT);
+			cts.dispose(true);
+		}
+
+		const activeFolderUri = toFolderUri(activeSession, sessionsProvidersService, remoteAgentHostService);
+		if (activeFolderUri) {
+			return activeFolderUri;
+		}
+	}
+
+	for (const session of sessionsService.getRecentlyOpenedSessions().recent) {
+		const folderUri = toFolderUri(session, sessionsProvidersService, remoteAgentHostService);
+		if (folderUri) {
+			return folderUri;
+		}
+	}
+
+	return undefined;
 }
 
 async function openEditorWindowForActiveSession(accessor: ServicesAccessor, openInNewWindow?: boolean): Promise<void> {
@@ -70,7 +118,7 @@ async function openEditorWindowForActiveSession(accessor: ServicesAccessor, open
 	const notificationService = accessor.get(INotificationService);
 
 	const windowOptions = openInNewWindow ? { forceNewWindow: true } : { forceReuseWindow: true };
-	const folderUri = getFolderUriToOpen(sessionsService, sessionsProvidersService, remoteAgentHostService);
+	const folderUri = await getFolderUriToOpen(sessionsService, sessionsProvidersService, remoteAgentHostService);
 	if (!folderUri) {
 		return nativeHostService.openWindow(windowOptions);
 	}

@@ -61,6 +61,7 @@ suite('WindowsFinder', () => {
 			setReady(): void { throw new Error('Method not implemented.'); }
 			addTabbedWindow(window: ICodeWindow): void { throw new Error('Method not implemented.'); }
 			load(config: INativeWindowConfiguration, options: { isReload?: boolean }): void { throw new Error('Method not implemented.'); }
+			captureTransitionSnapshot(): Promise<string | undefined> { throw new Error('Method not implemented.'); }
 			reload(cli?: NativeParsedArgs): void { throw new Error('Method not implemented.'); }
 			focus(options?: { mode: FocusMode }): void { throw new Error('Method not implemented.'); }
 			close(): void { throw new Error('Method not implemented.'); }

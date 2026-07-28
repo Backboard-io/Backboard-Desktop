@@ -1823,6 +1823,12 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 			}
 		}
 
+		// Hand the frame this window is showing right now to the page about to
+		// replace it, so switching modes doesn't blank the window for the
+		// second or so the incoming workbench takes to boot. No-ops (and costs
+		// nothing) for a window that has never loaded.
+		configuration.transitionSnapshot = await window.captureTransitionSnapshot();
+
 		// Load it
 		window.load(configuration);
 	}

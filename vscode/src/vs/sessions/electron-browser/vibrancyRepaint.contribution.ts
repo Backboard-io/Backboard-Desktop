@@ -43,10 +43,24 @@ export class VibrancyRepaintContribution extends Disposable implements IWorkbenc
 		this._register(contextMenuService.onDidHideContextMenu(() => repaintScheduler.schedule()));
 		this._register(quickInputService.onHide(() => repaintScheduler.schedule()));
 
-		// Scrolling smears stale pixels over the glass the same way. `wheel` is
-		// used rather than `scroll` because the workbench lists scroll via
-		// transforms and never emit native scroll events; the trailing-edge
-		// scheduler means one repaint per scroll burst, after momentum settles.
+		// The boot reveal flips the grid and every part from `opacity: 0` to
+		// opaque in one frame (see `revealWorkbench`), which is the same kind of
+		// large style flip that leaves stale pixels over the glass — and it runs
+		// on every mode switch, since switching reloads the window in place. The
+		// main process invalidates on `did-finish-load`, but that lands before
+		// the workbench has painted anything, so the flip needs its own repaint.
+		// This contribution starts after `Restored`, i.e. after the reveal.
+		repaintScheduler.schedule();
+
+		// Scrolling smears stale pixels over the glass the same way. `wheel`
+		// carries trackpad and mouse scrolling over the workbench lists, which
+		// scroll via transforms and never emit native scroll events; `scroll`
+		// covers the real scroll containers, including when they are driven by
+		// the keyboard or moved programmatically (revealing a session in the
+		// list) and no wheel event is ever produced. Both feed the same
+		// trailing-edge scheduler, so a burst still costs one repaint once it
+		// settles, whichever way it was driven.
 		this._register(addDisposableListener(mainWindow, 'wheel', () => repaintScheduler.schedule(), { capture: true, passive: true }));
+		this._register(addDisposableListener(mainWindow, 'scroll', () => repaintScheduler.schedule(), { capture: true, passive: true }));
 	}
 }

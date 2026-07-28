@@ -162,11 +162,10 @@ registerAction2(class OptimusNewSessionAction extends Action2 {
 		const layoutService = accessor.get(IWorkbenchLayoutService);
 		const viewsService = accessor.get(IViewsService);
 
-		// Do NOT create a provider draft session here. Chatting through the
-		// Optimus panel materializes a session on first send (the untitled
-		// provisional flow); a pre-created draft would stay empty forever
-		// while the conversation lands in a separate materialized session —
-		// leaking an immortal empty card per task.
+		// Discard any pending draft and deactivate, which puts the panel on the
+		// new-chat composer. Session creation is the composer's job from here
+		// (same as the Simple window), and uncommitted drafts are filtered out
+		// of the board, so this cannot leave an empty card behind.
 		sessionsService.openNewSession({ forceNew: true });
 
 		const view = await revealOptimusChatPanel(layoutService, viewsService, true);
@@ -254,9 +253,15 @@ registerAction2(class OptimusDeleteSessionAction extends Action2 {
 //#region --- layout
 
 /**
- * The agent-sessions workbench hides the auxiliary bar by default (it opens
- * on demand in the Simple window). Optimus's right chat panel lives there and
- * should always be visible, so unhide it once the workbench has restored.
+ * Keeps the Optimus layout — board in the centre, chat docked on the right —
+ * as parts come and go at runtime.
+ *
+ * The workbench now starts from these same defaults (see
+ * `getOptimusPartVisibilityDefaults` in the sessions layout policy), so
+ * `applyInitialLayout` is a no-op on a clean start and exists only to repair a
+ * layout that restored wrong. That is deliberate: this contribution runs on
+ * idle after `Restored`, long after the window has painted, so anything it
+ * actually changes is a visible jump.
  */
 class OptimusLayoutContribution extends Disposable implements IWorkbenchContribution {
 
@@ -288,7 +293,8 @@ class OptimusLayoutContribution extends Disposable implements IWorkbenchContribu
 
 	private applyInitialLayout(): void {
 		// Optimus starts with both side panels visible, but after startup each
-		// panel is user-controlled through Optimus's own chrome buttons.
+		// panel is user-controlled through Optimus's own chrome buttons. Each
+		// call is a no-op when the part is already in the wanted state.
 		this.layoutService.setPartHidden(false, Parts.SIDEBAR_PART);
 		this.layoutService.setPartHidden(false, Parts.AUXILIARYBAR_PART);
 		this.ensureOptimusCenter();
@@ -435,6 +441,11 @@ class OptimusChromeContribution extends Disposable implements IWorkbenchContribu
 	}
 }
 
-registerWorkbenchContribution2(OptimusChromeContribution.ID, OptimusChromeContribution, WorkbenchPhase.AfterRestored);
+// BlockRestore, not AfterRestored: the window chrome is part of the frame, not
+// something loaded into it. Built on idle after `Restored` it visibly drops in
+// on top of an already-painted window every time the mode is switched. It only
+// touches `mainContainer` and the layout/context-key services, all of which are
+// available this early.
+registerWorkbenchContribution2(OptimusChromeContribution.ID, OptimusChromeContribution, WorkbenchPhase.BlockRestore);
 
 //#endregion

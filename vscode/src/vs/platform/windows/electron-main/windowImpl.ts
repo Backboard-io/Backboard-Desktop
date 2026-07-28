@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import electron, { BrowserWindowConstructorOptions, Display, screen } from 'electron';
-import { DeferredPromise, RunOnceScheduler, timeout, Delayer } from '../../../base/common/async.js';
+import { DeferredPromise, RunOnceScheduler, timeout, Delayer, raceTimeout } from '../../../base/common/async.js';
 import { CancellationToken } from '../../../base/common/cancellation.js';
 import { toErrorMessage } from '../../../base/common/errorMessage.js';
 import { Emitter, Event } from '../../../base/common/event.js';
@@ -614,6 +614,12 @@ export abstract class BaseWindow extends Disposable implements IBaseWindow {
 
 export class CodeWindow extends BaseWindow implements ICodeWindow {
 
+	/**
+	 * Budget for grabbing the outgoing frame before a reload. Spent before the
+	 * reload can start, so it is kept well under the boot it is covering for.
+	 */
+	private static readonly TRANSITION_SNAPSHOT_TIMEOUT = 600;
+
 	//#region Events
 
 	private readonly _onWillLoad = this._register(new Emitter<ILoadEvent>());
@@ -788,6 +794,14 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 		this.logService.trace(`window#load: window reported ready (id: ${this._id})`);
 
 		this.readyState = ReadyState.READY;
+
+		// The transition snapshot has served its purpose by now (the renderer
+		// read the configuration long before signalling ready). Drop it rather
+		// than let a multi-megabyte data URL sit in the window configuration for
+		// the lifetime of the window — and be replayed, stale, by `reload()`.
+		if (this._config) {
+			this._config.transitionSnapshot = undefined;
+		}
 
 		// inform all waiting promises that we are ready now
 		while (this.whenReadyCallbacks.length) {
@@ -1271,6 +1285,39 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 		}
 	}
 
+	async captureTransitionSnapshot(): Promise<string | undefined> {
+
+		// Only a window that is loaded and actually on screen has anything the
+		// next page could hold up. A first load has nothing to carry over, and
+		// capturing a hidden window costs time for pixels nobody sees.
+		if (!this.wasLoaded || this._win.isDestroyed() || !this._win.isVisible() || this._win.isMinimized()) {
+			return undefined;
+		}
+
+		try {
+			// Bounded: capturing and encoding sits between the user's click and
+			// the reload starting, so a slow or wedged capture must fall back to
+			// loading immediately rather than hold the switch up.
+			const start = Date.now();
+			const image = await raceTimeout(this._win.webContents.capturePage(), CodeWindow.TRANSITION_SNAPSHOT_TIMEOUT);
+			if (!image || image.isEmpty()) {
+				return undefined;
+			}
+
+			// PNG (`toDataURL`), not JPEG: these windows can be translucent on
+			// macOS, and JPEG would flatten the transparent sidebar region to
+			// black.
+			const dataUrl = image.toDataURL();
+			this.logService.trace(`window#captureTransitionSnapshot: captured ${Math.round(dataUrl.length / 1024)}kb in ${Date.now() - start}ms (id: ${this._id})`);
+
+			return dataUrl;
+		} catch (error) {
+			this.logService.warn(`window#captureTransitionSnapshot: failed to capture window (id: ${this._id}): ${error instanceof Error ? error.message : String(error)}`);
+
+			return undefined;
+		}
+	}
+
 	load(configuration: INativeWindowConfiguration, options: ILoadOptions = Object.create(null)): void {
 		this.logService.trace(`window#load: attempt to load window (id: ${this._id})`);
 
@@ -1473,6 +1520,9 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 		delete configuration.filesToDiff;
 		delete configuration.filesToMerge;
 		delete configuration.filesToWait;
+		// Belt and braces with the clear in `setReady`: a snapshot captured for
+		// an earlier load shows the wrong frame if it is replayed here.
+		delete configuration.transitionSnapshot;
 
 		// Some configuration things get inherited if the window is being reloaded and we are
 		// in extension development mode. These options are all development related.

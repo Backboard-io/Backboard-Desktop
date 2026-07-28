@@ -8,6 +8,7 @@ import * as dom from '../../../../base/browser/dom.js';
 import { Color } from '../../../../base/common/color.js';
 import { Event } from '../../../../base/common/event.js';
 import { DisposableStore, MutableDisposable } from '../../../../base/common/lifecycle.js';
+import { disposableTimeout } from '../../../../base/common/async.js';
 import { editorBackground, foreground } from '../../../../platform/theme/common/colorRegistry.js';
 import { getThemeTypeSelector, IThemeService } from '../../../../platform/theme/common/themeService.js';
 import { DEFAULT_EDITOR_MIN_DIMENSIONS } from '../../../browser/parts/editor/editor.js';
@@ -28,6 +29,8 @@ export class PartsSplash {
 	static readonly ID = 'workbench.contrib.partsSplash';
 
 	private static readonly _splashElementId = 'monaco-parts-splash';
+	private static readonly _transitionSnapshotElementId = 'monaco-transition-snapshot';
+	private static readonly _transitionSnapshotFadeDuration = 120;
 
 	private readonly _disposables = new DisposableStore();
 
@@ -44,6 +47,7 @@ export class PartsSplash {
 	) {
 		Event.once(_layoutService.onDidLayoutMainContainer)(() => {
 			this._removePartsSplash();
+			this._removeTransitionSnapshot();
 			perf.mark('code/didRemovePartsSplash');
 		}, undefined, this._disposables);
 
@@ -105,6 +109,30 @@ export class PartsSplash {
 
 	private _shouldSaveLayoutInfo(): boolean {
 		return !isFullscreen(mainWindow) && !this._environmentService.isExtensionDevelopment && !this._didChangeTitleBarStyle;
+	}
+
+	/**
+	 * Cross-fades away the frozen frame of the previous page that the window
+	 * bootstrap put up to cover this workbench's boot (see
+	 * `INativeWindowConfiguration.transitionSnapshot`).
+	 *
+	 * Deferred by a frame: this runs from within the first layout, before the
+	 * workbench has painted anything, so fading from here would cross the
+	 * snapshot onto a blank window rather than onto the finished workbench.
+	 */
+	private _removeTransitionSnapshot(): void {
+		// eslint-disable-next-line no-restricted-syntax
+		const element = mainWindow.document.getElementById(PartsSplash._transitionSnapshotElementId);
+		if (!element) {
+			return;
+		}
+
+		this._disposables.add(dom.scheduleAtNextAnimationFrame(mainWindow, () => {
+			element.style.transition = `opacity ${PartsSplash._transitionSnapshotFadeDuration}ms ease-out`;
+			element.style.opacity = '0';
+
+			this._disposables.add(disposableTimeout(() => element.remove(), PartsSplash._transitionSnapshotFadeDuration));
+		}));
 	}
 
 	private _removePartsSplash(): void {

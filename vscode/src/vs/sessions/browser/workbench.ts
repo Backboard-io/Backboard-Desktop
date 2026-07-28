@@ -748,6 +748,9 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 	 * visibly rearranging itself once the window has already painted.
 	 */
 	private getInitialPartVisibilityDefaults(): IPartVisibilityDefaults {
+		if (this._isJarvisWindow && this.layoutPolicy.viewportClass.get() !== 'phone') {
+			return this.layoutPolicy.getJarvisPartVisibilityDefaults();
+		}
 		if (this._isOptimusWindow && this.layoutPolicy.viewportClass.get() !== 'phone') {
 			return this.layoutPolicy.getOptimusPartVisibilityDefaults();
 		}
@@ -775,6 +778,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		this.partVisibility.auxiliaryBar = visibilityDefaults.auxiliaryBar;
 		this.partVisibility.editor = this.partVisibility.auxiliaryBar ? visibilityDefaults.editor : false;
 		this.partVisibility.sidebar = visibilityDefaults.sidebar;
+		this.partVisibility.sessions = visibilityDefaults.sessions;
 
 		// Load saved grid part sizes — these will be consumed when building the
 		// grid descriptor so editor/sidebar/auxbar/panel restore to their previous
@@ -787,10 +791,9 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 			'monaco-workbench',
 			'agent-sessions-workbench',
 			LayoutClasses.SHELL_GRADIENT_BACKGROUND,
-			// Held transparent until the first laid-out frame is ready, then
-			// faded in (see `revealWorkbench`). Mode switching reloads the
-			// window in place, so without this the user watches the workbench
-			// assemble itself over the outgoing mode.
+			// Held transparent until the first laid-out frame is ready (see
+			// `revealWorkbench`). Mode switching reloads the window in place,
+			// so without this a half-built workbench can reach the screen.
 			LayoutClasses.BOOTING,
 			platformClass,
 			isWeb ? 'web' : undefined,
@@ -1032,13 +1035,14 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 	}
 
 	/**
-	 * Fades the workbench in once it has a laid-out frame to show.
+	 * Reveals the workbench on the frame it first paints.
 	 *
-	 * Everything up to here — services, parts, grid, first layout — happens in
-	 * one synchronous task, so the frame this waits for is the complete
-	 * workbench rather than a half-built one. Waiting two frames lets the parts
-	 * that restore themselves during `Restored` (the sessions list, the docked
-	 * conversation) land in the same frame instead of popping in afterwards.
+	 * Everything up to here — services, parts, grid, first layout, restore —
+	 * happens in one synchronous task, so the frame this runs ahead of is the
+	 * finished workbench rather than a half-built one. Revealing on this frame
+	 * rather than a later one matters: the boot splash is already torn down by
+	 * `layout()`, so staying hidden any longer would leave a blank frame
+	 * between the splash and the workbench.
 	 */
 	private revealWorkbench(): void {
 		const reveal = () => this.mainContainer.classList.remove(LayoutClasses.BOOTING);
@@ -1049,10 +1053,8 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		fallback.schedule();
 
 		this._register(scheduleAtNextAnimationFrame(mainWindow, () => {
-			this._register(scheduleAtNextAnimationFrame(mainWindow, () => {
-				fallback.cancel();
-				reveal();
-			}));
+			fallback.cancel();
+			reveal();
 		}));
 	}
 

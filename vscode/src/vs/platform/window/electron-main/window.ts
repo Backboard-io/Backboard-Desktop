@@ -80,6 +80,15 @@ export interface ICodeWindow extends IBaseWindow {
 	load(config: INativeWindowConfiguration, options?: { isReload?: boolean }): void;
 	reload(cli?: NativeParsedArgs): void;
 
+	/**
+	 * A PNG data URL of what this window is showing right now, for the next
+	 * page loaded into it to hold up while it boots (see
+	 * {@link INativeWindowConfiguration.transitionSnapshot}). Resolves to
+	 * `undefined` when there is nothing worth capturing or the capture fails —
+	 * this is a nicety, never a precondition for loading.
+	 */
+	captureTransitionSnapshot(): Promise<string | undefined>;
+
 	close(): void;
 
 	getBounds(): electron.Rectangle;

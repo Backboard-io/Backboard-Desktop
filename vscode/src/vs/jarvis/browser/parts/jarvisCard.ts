@@ -22,10 +22,9 @@ const CARD_BORDER_WIDTH = 1;
  * the {@link JarvisCanvasPart} can position it.
  *
  * Concrete cards (chat, terminal, ...) extend this and fill in
- * {@link contentElement} through {@link layoutContent}. Drag and resize
- * behaviour is intentionally left to Phase 1: the DOM anchors exist so the
- * interaction layer has stable hooks, but this base only wires the close button
- * and focus reporting.
+ * {@link contentElement} through {@link layoutContent}. The canvas interaction
+ * layer owns drag and resize behaviour through stable DOM anchors while the
+ * base class wires close and focus reporting.
  */
 export abstract class JarvisCard extends Disposable {
 
@@ -37,8 +36,10 @@ export abstract class JarvisCard extends Disposable {
 
 	private readonly _element: HTMLElement;
 	private readonly _contentElement: HTMLElement;
+	private readonly _headerElement: HTMLElement;
+	private readonly _titleElement: HTMLElement;
 
-	/** Bottom-right resize anchor. Interaction wiring is a Phase 1 concern. */
+	/** Bottom-right resize anchor used by the canvas interaction controller. */
 	protected readonly resizeHandle: HTMLElement;
 
 	private _geometry: IJarvisRect;
@@ -63,9 +64,10 @@ export abstract class JarvisCard extends Disposable {
 		this._element.setAttribute('role', 'group');
 		this._element.setAttribute('aria-label', title);
 
-		const header = append(this._element, $('.jarvis-card-header'));
-		append(header, $('span.jarvis-card-title')).textContent = title;
-		const closeButton = append(header, $('button.jarvis-card-close.codicon.codicon-close')) as HTMLButtonElement;
+		this._headerElement = append(this._element, $('.jarvis-card-header'));
+		this._titleElement = append(this._headerElement, $('span.jarvis-card-title'));
+		this._titleElement.textContent = title;
+		const closeButton = append(this._headerElement, $('button.jarvis-card-close.codicon.codicon-close')) as HTMLButtonElement;
 		closeButton.type = 'button';
 		closeButton.title = localize('jarvis.card.close', "Close Card");
 		closeButton.setAttribute('aria-label', closeButton.title);
@@ -93,6 +95,21 @@ export abstract class JarvisCard extends Disposable {
 		return this._contentElement;
 	}
 
+	/** Header drag target used by the canvas interaction controller. */
+	get headerElement(): HTMLElement {
+		return this._headerElement;
+	}
+
+	/** Bottom-right resize target used by the canvas interaction controller. */
+	get resizeHandleElement(): HTMLElement {
+		return this.resizeHandle;
+	}
+
+	setTitle(title: string): void {
+		this._titleElement.textContent = title;
+		this._element.setAttribute('aria-label', title);
+	}
+
 	getGeometry(): IJarvisRect {
 		return this._geometry;
 	}
@@ -111,6 +128,11 @@ export abstract class JarvisCard extends Disposable {
 
 	setZIndex(z: number): void {
 		this._element.style.zIndex = String(z);
+	}
+
+	/** Recomputes embedded widget bounds without changing world geometry. */
+	relayout(): void {
+		this.applyGeometry();
 	}
 
 	private applyGeometry(): void {
