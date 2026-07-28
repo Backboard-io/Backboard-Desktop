@@ -135,6 +135,25 @@
 		},
 		{
 			"provider": "anthropic",
+			"name": "claude-opus-5",
+			"model_type": "llm",
+			"context_limit": 1000000,
+			"max_output_tokens": 128000,
+			"supports_vision": true,
+			"supports_thinking": true,
+			"thinking_controls": {
+				"supported": true,
+				"allowed_fields": ["effort"],
+				"defaults_only": false
+			},
+			"input_cost_per_1m_tokens": 5,
+			"output_cost_per_1m_tokens": 25,
+			"cached_input_cost_per_1m_tokens": 0.5,
+			"cache_write_input_cost_per_1m_tokens": 6.25,
+			"last_updated": "2026-07-25T01:40:15"
+		},
+		{
+			"provider": "anthropic",
 			"name": "claude-sonnet-4-5-20250929",
 			"model_type": "llm",
 			"context_limit": 1000000,
@@ -197,16 +216,17 @@
 			"context_limit": 1000000,
 			"max_output_tokens": 128000,
 			"supports_vision": false,
-			"supports_thinking": false,
+			"supports_thinking": true,
 			"thinking_controls": {
-				"supported": false,
-				"allowed_fields": [],
+				"supported": true,
+				"allowed_fields": ["effort"],
 				"defaults_only": false
 			},
 			"input_cost_per_1m_tokens": 10,
 			"output_cost_per_1m_tokens": 50,
 			"cached_input_cost_per_1m_tokens": 1,
-			"last_updated": "2026-06-09T18:59:11"
+			"cache_write_input_cost_per_1m_tokens": 12.5,
+			"last_updated": "2026-07-25T01:39:12"
 		},
 		{
 			"provider": "aws-bedrock",
@@ -224,7 +244,8 @@
 			"input_cost_per_1m_tokens": 1,
 			"output_cost_per_1m_tokens": 5,
 			"cached_input_cost_per_1m_tokens": 0.1,
-			"last_updated": "2026-06-09T18:59:11"
+			"cache_write_input_cost_per_1m_tokens": 1.25,
+			"last_updated": "2026-07-25T01:39:12"
 		},
 		{
 			"provider": "aws-bedrock",
@@ -242,7 +263,8 @@
 			"input_cost_per_1m_tokens": 5,
 			"output_cost_per_1m_tokens": 25,
 			"cached_input_cost_per_1m_tokens": 0.5,
-			"last_updated": "2026-06-09T18:59:11"
+			"cache_write_input_cost_per_1m_tokens": 6.25,
+			"last_updated": "2026-07-25T01:39:12"
 		},
 		{
 			"provider": "aws-bedrock",
@@ -260,7 +282,8 @@
 			"input_cost_per_1m_tokens": 5,
 			"output_cost_per_1m_tokens": 25,
 			"cached_input_cost_per_1m_tokens": 0.5,
-			"last_updated": "2026-06-09T18:59:11"
+			"cache_write_input_cost_per_1m_tokens": 6.25,
+			"last_updated": "2026-07-25T01:39:12"
 		},
 		{
 			"provider": "aws-bedrock",
@@ -272,13 +295,14 @@
 			"supports_thinking": true,
 			"thinking_controls": {
 				"supported": true,
-				"allowed_fields": ["budget_tokens", "effort"],
+				"allowed_fields": ["effort"],
 				"defaults_only": false
 			},
 			"input_cost_per_1m_tokens": 5,
 			"output_cost_per_1m_tokens": 25,
 			"cached_input_cost_per_1m_tokens": 0.5,
-			"last_updated": "2026-06-09T18:59:11"
+			"cache_write_input_cost_per_1m_tokens": 6.25,
+			"last_updated": "2026-07-25T01:39:12"
 		},
 		{
 			"provider": "aws-bedrock",
@@ -290,13 +314,33 @@
 			"supports_thinking": true,
 			"thinking_controls": {
 				"supported": true,
-				"allowed_fields": ["budget_tokens", "effort"],
+				"allowed_fields": ["effort"],
 				"defaults_only": false
 			},
 			"input_cost_per_1m_tokens": 5,
 			"output_cost_per_1m_tokens": 25,
 			"cached_input_cost_per_1m_tokens": 0.5,
-			"last_updated": "2026-06-09T18:59:11"
+			"cache_write_input_cost_per_1m_tokens": 6.25,
+			"last_updated": "2026-07-25T01:39:12"
+		},
+		{
+			"provider": "aws-bedrock",
+			"name": "anthropic.claude-opus-5",
+			"model_type": "llm",
+			"context_limit": 1000000,
+			"max_output_tokens": 128000,
+			"supports_vision": false,
+			"supports_thinking": true,
+			"thinking_controls": {
+				"supported": true,
+				"allowed_fields": ["effort"],
+				"defaults_only": false
+			},
+			"input_cost_per_1m_tokens": 5,
+			"output_cost_per_1m_tokens": 25,
+			"cached_input_cost_per_1m_tokens": 0.5,
+			"cache_write_input_cost_per_1m_tokens": 6.25,
+			"last_updated": "2026-07-25T01:39:12"
 		},
 		{
 			"provider": "aws-bedrock",
@@ -314,7 +358,8 @@
 			"input_cost_per_1m_tokens": 3,
 			"output_cost_per_1m_tokens": 15,
 			"cached_input_cost_per_1m_tokens": 0.3,
-			"last_updated": "2026-06-09T18:59:11"
+			"cache_write_input_cost_per_1m_tokens": 3.75,
+			"last_updated": "2026-07-25T01:39:12"
 		},
 		{
 			"provider": "aws-bedrock",
@@ -332,7 +377,8 @@
 			"input_cost_per_1m_tokens": 3,
 			"output_cost_per_1m_tokens": 15,
 			"cached_input_cost_per_1m_tokens": 0.3,
-			"last_updated": "2026-06-09T18:59:11"
+			"cache_write_input_cost_per_1m_tokens": 3.75,
+			"last_updated": "2026-07-25T01:39:12"
 		},
 		{
 			"provider": "cerebras",
@@ -667,6 +713,44 @@
 			"last_updated": "2026-07-09T16:26:11"
 		},
 		{
+			"provider": "google",
+			"name": "gemini-3.5-flash-lite",
+			"model_type": "llm",
+			"context_limit": 1048576,
+			"max_output_tokens": 65536,
+			"supports_vision": true,
+			"supports_thinking": true,
+			"thinking_controls": {
+				"supported": true,
+				"allowed_fields": ["effort"],
+				"defaults_only": false
+			},
+			"input_cost_per_1m_tokens": 0.3,
+			"output_cost_per_1m_tokens": 2.5,
+			"cached_input_cost_per_1m_tokens": 0.03,
+			"cache_write_input_cost_per_1m_tokens": 0.08333333333333334,
+			"last_updated": "2026-07-25T01:40:15"
+		},
+		{
+			"provider": "google",
+			"name": "gemini-3.6-flash",
+			"model_type": "llm",
+			"context_limit": 1048576,
+			"max_output_tokens": 65536,
+			"supports_vision": true,
+			"supports_thinking": true,
+			"thinking_controls": {
+				"supported": true,
+				"allowed_fields": ["effort"],
+				"defaults_only": false
+			},
+			"input_cost_per_1m_tokens": 1.5,
+			"output_cost_per_1m_tokens": 7.5,
+			"cached_input_cost_per_1m_tokens": 0.15,
+			"cache_write_input_cost_per_1m_tokens": 0.08333333333333334,
+			"last_updated": "2026-07-25T01:40:15"
+		},
+		{
 			"provider": "openai",
 			"name": "gpt-4.1",
 			"model_type": "llm",
@@ -734,8 +818,8 @@
 			},
 			"input_cost_per_1m_tokens": 2.5,
 			"output_cost_per_1m_tokens": 10,
-			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-07-09T16:26:11"
+			"cached_input_cost_per_1m_tokens": 1.25,
+			"last_updated": "2026-07-25T01:40:15"
 		},
 		{
 			"provider": "openai",
@@ -1167,6 +1251,63 @@
 			"output_cost_per_1m_tokens": 180,
 			"cached_input_cost_per_1m_tokens": 0,
 			"last_updated": "2026-07-09T16:26:11"
+		},
+		{
+			"provider": "openai",
+			"name": "gpt-5.6-luna",
+			"model_type": "llm",
+			"context_limit": 1050000,
+			"max_output_tokens": 128000,
+			"supports_vision": true,
+			"supports_thinking": true,
+			"thinking_controls": {
+				"supported": true,
+				"allowed_fields": ["effort"],
+				"defaults_only": false
+			},
+			"input_cost_per_1m_tokens": 1,
+			"output_cost_per_1m_tokens": 6,
+			"cached_input_cost_per_1m_tokens": 0.1,
+			"cache_write_input_cost_per_1m_tokens": 1.25,
+			"last_updated": "2026-07-25T01:40:15"
+		},
+		{
+			"provider": "openai",
+			"name": "gpt-5.6-sol",
+			"model_type": "llm",
+			"context_limit": 1050000,
+			"max_output_tokens": 128000,
+			"supports_vision": true,
+			"supports_thinking": true,
+			"thinking_controls": {
+				"supported": true,
+				"allowed_fields": ["effort"],
+				"defaults_only": false
+			},
+			"input_cost_per_1m_tokens": 5,
+			"output_cost_per_1m_tokens": 30,
+			"cached_input_cost_per_1m_tokens": 0.5,
+			"cache_write_input_cost_per_1m_tokens": 6.25,
+			"last_updated": "2026-07-25T01:40:15"
+		},
+		{
+			"provider": "openai",
+			"name": "gpt-5.6-terra",
+			"model_type": "llm",
+			"context_limit": 1050000,
+			"max_output_tokens": 128000,
+			"supports_vision": true,
+			"supports_thinking": true,
+			"thinking_controls": {
+				"supported": true,
+				"allowed_fields": ["effort"],
+				"defaults_only": false
+			},
+			"input_cost_per_1m_tokens": 2.5,
+			"output_cost_per_1m_tokens": 15,
+			"cached_input_cost_per_1m_tokens": 0.25,
+			"cache_write_input_cost_per_1m_tokens": 3.125,
+			"last_updated": "2026-07-25T01:40:15"
 		},
 		{
 			"provider": "openai",
@@ -3824,10 +3965,10 @@
 				"allowed_fields": ["exclude_reasoning", "max_tokens"],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.82,
-			"output_cost_per_1m_tokens": 3.75,
+			"input_cost_per_1m_tokens": 0.78,
+			"output_cost_per_1m_tokens": 3.5,
 			"cached_input_cost_per_1m_tokens": 0.15,
-			"last_updated": "2026-07-24T17:27:04"
+			"last_updated": "2026-07-25T01:39:26"
 		},
 		{
 			"provider": "openrouter",
@@ -4011,23 +4152,6 @@
 			"name": "nvidia/nemotron-3-super-120b-a12b",
 			"model_type": "llm",
 			"context_limit": 1000000,
-			"supports_vision": false,
-			"supports_thinking": true,
-			"thinking_controls": {
-				"supported": true,
-				"allowed_fields": ["exclude_reasoning", "max_tokens"],
-				"defaults_only": false
-			},
-			"input_cost_per_1m_tokens": 0.09,
-			"output_cost_per_1m_tokens": 0.45,
-			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-05-26T15:13:28"
-		},
-		{
-			"provider": "openrouter",
-			"name": "nvidia/nemotron-3-ultra-550b-a55b",
-			"model_type": "llm",
-			"context_limit": 512288,
 			"max_output_tokens": 16384,
 			"supports_vision": false,
 			"supports_thinking": true,
@@ -4036,10 +4160,27 @@
 				"allowed_fields": ["exclude_reasoning", "max_tokens"],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.5,
-			"output_cost_per_1m_tokens": 2.2,
-			"cached_input_cost_per_1m_tokens": 0.1,
-			"last_updated": "2026-07-24T17:27:04"
+			"input_cost_per_1m_tokens": 0.085,
+			"output_cost_per_1m_tokens": 0.4,
+			"cached_input_cost_per_1m_tokens": 0,
+			"last_updated": "2026-07-25T01:39:26"
+		},
+		{
+			"provider": "openrouter",
+			"name": "nvidia/nemotron-3-ultra-550b-a55b",
+			"model_type": "llm",
+			"context_limit": 512288,
+			"supports_vision": false,
+			"supports_thinking": true,
+			"thinking_controls": {
+				"supported": true,
+				"allowed_fields": ["exclude_reasoning", "max_tokens"],
+				"defaults_only": false
+			},
+			"input_cost_per_1m_tokens": 0.6,
+			"output_cost_per_1m_tokens": 3.6,
+			"cached_input_cost_per_1m_tokens": 0.2,
+			"last_updated": "2026-07-25T01:39:26"
 		},
 		{
 			"provider": "openrouter",
@@ -4916,6 +5057,7 @@
 			"name": "openai/gpt-oss-20b",
 			"model_type": "llm",
 			"context_limit": 131072,
+			"max_output_tokens": 131072,
 			"supports_vision": false,
 			"supports_thinking": true,
 			"thinking_controls": {
@@ -4923,10 +5065,10 @@
 				"allowed_fields": ["exclude_reasoning", "max_tokens"],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.029,
-			"output_cost_per_1m_tokens": 0.14,
-			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-06-09T18:54:52"
+			"input_cost_per_1m_tokens": 0.03,
+			"output_cost_per_1m_tokens": 0.13,
+			"cached_input_cost_per_1m_tokens": 0.03,
+			"last_updated": "2026-07-25T01:39:26"
 		},
 		{
 			"provider": "openrouter",
@@ -6015,6 +6157,7 @@
 			"name": "qwen/qwen3.6-27b",
 			"model_type": "llm",
 			"context_limit": 262144,
+			"max_output_tokens": 131072,
 			"supports_vision": true,
 			"supports_thinking": true,
 			"thinking_controls": {
@@ -6022,10 +6165,10 @@
 				"allowed_fields": ["exclude_reasoning", "max_tokens"],
 				"defaults_only": false
 			},
-			"input_cost_per_1m_tokens": 0.288,
+			"input_cost_per_1m_tokens": 0.289,
 			"output_cost_per_1m_tokens": 2.4,
 			"cached_input_cost_per_1m_tokens": 0,
-			"last_updated": "2026-07-24T17:27:04"
+			"last_updated": "2026-07-25T01:39:26"
 		},
 		{
 			"provider": "openrouter",
@@ -6934,8 +7077,8 @@
 			},
 			"input_cost_per_1m_tokens": 2,
 			"output_cost_per_1m_tokens": 6,
-			"cached_input_cost_per_1m_tokens": 0.5,
-			"last_updated": "2026-07-09T16:26:11"
+			"cached_input_cost_per_1m_tokens": 0.3,
+			"last_updated": "2026-07-25T01:40:15"
 		},
 		{
 			"provider": "xai",
