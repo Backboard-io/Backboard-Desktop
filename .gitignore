@@ -1,0 +1,29 @@
+# macOS system files
+.DS_Store
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Node.js dependencies (ignore at any depth)
+node_modules/
+**/node_modules/
+.npm-cache/
+**/.npm-cache/
+
+# Local VS Code packaging outputs
+/VSCode-darwin-arm64/
+/vscode-release/
+/vscode/extensions/backboard/bin/
+
+# Local debug/automation scratch output (launch scripts, Playwright driving,
+# UI screenshots). Regenerated per run; never part of a build.
+/vscode/launch_info*.json
+/vscode/launch_stderr*.log
+/vscode/pw_session.env
+/vscode/screenshots/
+/vscode/Lefpanelold.md
+
+# Local-only Zed scratch files
+zed/crates/beginner_ui/src/beginner_workspace.rs
+zed/crates/beginner_ui/src/simple_design.rs
