@@ -23,10 +23,33 @@ import { SessionType } from '../../common/chatSessionsService.js';
 import { IChatViewTitleActionContext } from '../../common/actions/chatActions.js';
 import { getChatSessionType, isUntitledChatSession } from '../../common/model/chatUri.js';
 import { ChatInputNotificationSeverity, IChatInputNotificationService } from '../../browser/widget/input/chatInputNotificationService.js';
-import { OPEN_WORKSPACE_IN_AGENTS_WINDOW_COMMAND_ID, OPEN_AGENTS_WINDOW_PRECONDITION, OPEN_AGENTS_WINDOW_COMMAND_ID, ChatConfiguration } from '../../common/constants.js';
+import { OPEN_WORKSPACE_IN_AGENTS_WINDOW_COMMAND_ID, OPEN_AGENTS_WINDOW_PRECONDITION, OPEN_AGENTS_WINDOW_COMMAND_ID, ChatConfiguration, BACKBOARD_LAST_EDITOR_FOLDER_STORAGE_KEY } from '../../common/constants.js';
 import { CommandsRegistry, ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { ITelemetryService } from '../../../../../platform/telemetry/common/telemetry.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
+import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
+
+/**
+ * Records the folder this editor window is on so that switching back to Editor
+ * mode later can return to it, and returns that folder.
+ *
+ * Called from every action that takes the editor window into another mode
+ * (including the keybinding paths that bypass the title bar switcher), because
+ * once the user is in Simple/Advanced there is nothing left to read the folder
+ * off of.
+ */
+function rememberEditorFolder(accessor: ServicesAccessor): URI | undefined {
+	const storageService = accessor.get(IStorageService);
+	const folderUri = accessor.get(IWorkspaceContextService).getWorkspace().folders[0]?.uri;
+	if (folderUri) {
+		storageService.store(BACKBOARD_LAST_EDITOR_FOLDER_STORAGE_KEY, folderUri.toString(), StorageScope.APPLICATION, StorageTarget.MACHINE);
+	} else {
+		// An empty editor window has nothing to come back to; leaving a stale
+		// entry behind would reopen a folder the user had already closed.
+		storageService.remove(BACKBOARD_LAST_EDITOR_FOLDER_STORAGE_KEY, StorageScope.APPLICATION);
+	}
+	return folderUri;
+}
 
 export class OpenWorkspaceInAgentsWindowAction extends Action2 {
 	constructor() {
@@ -47,8 +70,7 @@ export class OpenWorkspaceInAgentsWindowAction extends Action2 {
 
 	async run(accessor: ServicesAccessor) {
 		const nativeHostService = accessor.get(INativeHostService);
-		const workspaceContextService = accessor.get(IWorkspaceContextService);
-		const folderUri = workspaceContextService.getWorkspace().folders[0]?.uri;
+		const folderUri = rememberEditorFolder(accessor);
 		await nativeHostService.openAgentsWindow({ folderUri: folderUri?.scheme === Schemas.file ? folderUri.toJSON() : undefined });
 	}
 }
@@ -76,7 +98,15 @@ export class OpenAgentsWindowAction extends Action2 {
 	}
 
 	async run(accessor: ServicesAccessor, args?: { folderUri?: UriComponents; sessionResource?: UriComponents }) {
-		await accessor.get(INativeHostService).openAgentsWindow(args);
+		const folderUri = rememberEditorFolder(accessor);
+		// Callers that don't name a folder (the title bar mode switcher, the
+		// keybinding) mean "take this window to Simple" — hand the Simple window
+		// the folder we are leaving so it opens on the same project instead of
+		// whatever it was last showing.
+		await accessor.get(INativeHostService).openAgentsWindow({
+			...args,
+			folderUri: args?.folderUri ?? (folderUri?.scheme === Schemas.file ? folderUri.toJSON() : undefined),
+		});
 	}
 }
 
@@ -112,6 +142,7 @@ export class OpenOptimusWindowAction extends Action2 {
 	}
 
 	async run(accessor: ServicesAccessor): Promise<void> {
+		rememberEditorFolder(accessor);
 		await accessor.get(INativeHostService).openOptimusWindow();
 	}
 }
@@ -150,7 +181,6 @@ export class OpenChatSessionInAgentsWindowAction extends Action2 {
 	async run(accessor: ServicesAccessor, ...rest: unknown[]): Promise<void> {
 		const chatWidgetService = accessor.get(IChatWidgetService);
 		const nativeHostService = accessor.get(INativeHostService);
-		const workspaceContextService = accessor.get(IWorkspaceContextService);
 
 		let sessionResource: URI | undefined;
 		const arg = rest[0];
@@ -166,7 +196,7 @@ export class OpenChatSessionInAgentsWindowAction extends Action2 {
 			sessionResource = chatWidgetService.lastFocusedWidget?.viewModel?.sessionResource;
 		}
 
-		const folderUri = workspaceContextService.getWorkspace().folders[0]?.uri;
+		const folderUri = rememberEditorFolder(accessor);
 		await nativeHostService.openAgentsWindow({
 			folderUri: folderUri?.scheme === Schemas.file ? folderUri.toJSON() : undefined,
 			sessionResource: sessionResource && !isUntitledChatSession(sessionResource) ? sessionResource.toJSON() : undefined,

@@ -1113,18 +1113,13 @@
 /* Let content items fill the full width of their host, with only a gutter to
  * keep text off the edge. The base chat stylesheet centers a fixed reading
  * column; the sessions window instead uses the whole panel.
- * Scoped to the chat panel (`.part.sessionspart`), the Advanced window's right
- * chat panel (`.optimus-chat-view`, which mounts the same chat views) and the
- * chat editor host (`.chat-editor-relative`) so the "card style" doesn't leak
- * into other chat surfaces that reuse `.interactive-item-container` — notably
- * the terminal and editor inline chat widgets and the agent-session hover
- * widget. The three hosts stay separate selectors rather than one `:is()` list
- * because they do not all carry the same specificity. */
+ * Scoped to the chat panel (`.part.sessionspart`) and the chat editor host
+ * (`.chat-editor-relative`) so the "card style" doesn't leak into other chat
+ * surfaces that reuse `.interactive-item-container` — notably the terminal
+ * and editor inline chat widgets and the agent-session hover widget. */
 .agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container,
-.agent-sessions-workbench.optimus-window .optimus-chat-view .interactive-session .interactive-item-container,
 .agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-item-container,
 .agent-sessions-workbench .part.sessionspart .interactive-session > .chat-suggest-next-widget,
-.agent-sessions-workbench.optimus-window .optimus-chat-view .interactive-session > .chat-suggest-next-widget,
 .agent-sessions-workbench .chat-editor-relative .interactive-session > .chat-suggest-next-widget {
 	max-width: none;
 	width: 100%;
@@ -1139,19 +1134,16 @@
  * bubble is capped well short of the column so the two turns stay visually
  * distinct even on a wide panel. */
 .agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container.interactive-request,
-.agent-sessions-workbench.optimus-window .optimus-chat-view .interactive-session .interactive-item-container.interactive-request,
 .agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-item-container.interactive-request {
 	align-items: flex-end;
 }
 
 .agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container.interactive-request .value,
-.agent-sessions-workbench.optimus-window .optimus-chat-view .interactive-session .interactive-item-container.interactive-request .value,
 .agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-item-container.interactive-request .value {
 	align-items: flex-end !important;
 }
 
 .agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown,
-.agent-sessions-workbench.optimus-window .optimus-chat-view .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown,
 .agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown {
 	width: fit-content;
 	/* Bubble geometry matches T3 Code's user row (`max-w-[80%] rounded-2xl p-3`,
@@ -1177,38 +1169,49 @@
 }
 
 .agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown.clickable:hover,
-.agent-sessions-workbench.optimus-window .optimus-chat-view .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown.clickable:hover,
 .agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown.clickable:hover {
 	background-color: color-mix(in srgb, var(--vscode-foreground) 12%, transparent) !important;
 }
 
 .agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container.interactive-request .value > .rendered-markdown p,
-.agent-sessions-workbench.optimus-window .optimus-chat-view .interactive-session .interactive-item-container.interactive-request .value > .rendered-markdown p,
 .agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-item-container.interactive-request .value > .rendered-markdown p {
 	width: auto;
 }
 
 /* Let request bubbles that contain a code block grow to fit the code editor. */
 .agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown:has(.interactive-result-code-block),
-.agent-sessions-workbench.optimus-window .optimus-chat-view .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown:has(.interactive-result-code-block),
 .agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown:has(.interactive-result-code-block) {
 	max-width: 100%;
 }
 
-/* ---- Simple mode: T3 Code row treatment ----
- *
- * The Advanced (Optimus) window mounts the very same chat views in its right
- * panel, so every rule in this block lists `.optimus-chat-view` as an
- * alternative host. It is deliberately NOT applied window-wide there: the board
- * cards mirror transcripts too, and they keep their own compact treatment. */
+/* ---- Simple mode: T3 Code row treatment ---- */
 
-/* T3's row rhythm: no top padding, `pb-4` (16px) below each turn. The
- * transcript keeps the sessions window's full-panel width (with its 20px
- * gutters, set above) — a hard reading-column cap left too much dead space
- * at the panel edges. */
-:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart, .agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .interactive-item-container {
-	padding-top: 2px;
-	padding-bottom: 14px;
+/* T3's row rhythm, tightened: the turns sit closer together so more of the
+ * conversation is on screen at once, and the transcript runs in a narrower
+ * column than the shared 20px gutters set above — still full-panel width
+ * rather than a hard reading-column cap, just pulled further off the edges. */
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .interactive-item-container,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session > .chat-suggest-next-widget {
+	padding-left: 32px;
+	padding-right: 32px;
+}
+
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .interactive-item-container {
+	padding-top: 0;
+	padding-bottom: 8px;
+}
+
+/* The composer keeps the same gutters as the transcript above it. */
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .interactive-input-part {
+	padding-left: 32px;
+	padding-right: 32px;
+}
+
+/* …except the inline edit box inside a sent request, which is already inset by
+ * the row it lives in. */
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .chat-edit-input-container .interactive-input-part {
+	padding-left: 0;
+	padding-right: 0;
 }
 
 /* T3 streams the reply as a plain append — `ChatMarkdown` re-renders with the
@@ -1217,7 +1220,7 @@
  * entrance; neutralise all of those so Simple mode streams like T3. The
  * `animationend` cleanup listener never fires once the animation is gone, so
  * the class lingers on the element — the resets below make that harmless. */
-:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart, .agent-sessions-workbench.optimus-window .optimus-chat-view) :is(
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart :is(
 	.chat-smooth-animate-fade,
 	.chat-smooth-animate-rise,
 	.chat-smooth-animate-blur,
@@ -1233,13 +1236,13 @@
 /* Response meta (copy button, etc.) is hover-revealed in T3
  * (`opacity-0 … group-hover/assistant:opacity-100 focus-within:opacity-100`),
  * not a permanent row under the reply. */
-:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart, .agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-item-container.interactive-response .chat-footer-toolbar {
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-item-container.interactive-response .chat-footer-toolbar {
 	opacity: 0;
 	transition: opacity 200ms;
 }
 
-:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart, .agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-item-container.interactive-response:hover .chat-footer-toolbar,
-:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart, .agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-item-container.interactive-response:focus-within .chat-footer-toolbar {
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-item-container.interactive-response:hover .chat-footer-toolbar,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-item-container.interactive-response:focus-within .chat-footer-toolbar {
 	opacity: 1;
 }
 
@@ -1247,8 +1250,7 @@
 
 /* Top fade overlay: dims content scrolled near the top edge of the chat bar card.
  * Use the Monaco scroll shadow element, which is only shown when scrollTop > 0. */
-.agent-sessions-workbench .part.sessionspart .monaco-scrollable-element > .shadow.top,
-.agent-sessions-workbench.optimus-window .optimus-chat-view .monaco-scrollable-element > .shadow.top {
+.agent-sessions-workbench .part.sessionspart .monaco-scrollable-element > .shadow.top {
 	height: 16px;
 	background: linear-gradient(to bottom, var(--part-background), transparent);
 	box-shadow: none;
@@ -1270,13 +1272,6 @@
  * and the editor host (`.chat-editor-relative`), and any request/working state —
  * so it never falls back to the darker default. */
 .agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) {
-	--sessions-codex-surface-background: var(--sessions-main-region-background, var(--vscode-editor-background));
-}
-
-/* Same composer surface in the Advanced window's right panel, but scoped to the
- * panel rather than redefined on the workbench root: the board cards render
- * transcripts of their own and must keep the default surface. */
-.agent-sessions-workbench.optimus-window .optimus-chat-view {
 	--sessions-codex-surface-background: var(--sessions-main-region-background, var(--vscode-editor-background));
 }
 
@@ -1336,7 +1331,6 @@
  * (`.chat-editor-relative`) to avoid leaking into other chat surfaces such as
  * the inline chat widgets and agent-session hover widget. */
 .agent-sessions-workbench .part.sessionspart .interactive-session .interactive-input-part,
-.agent-sessions-workbench.optimus-window .optimus-chat-view .interactive-session .interactive-input-part,
 .agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-input-part {
 	width: 100%;
 	max-width: none;
@@ -1348,7 +1342,6 @@
 
 /* Make sure when editing we don't give unnecessary padding. */
 .agent-sessions-workbench .part.sessionspart .interactive-session .chat-edit-input-container .interactive-input-part,
-.agent-sessions-workbench.optimus-window .optimus-chat-view .interactive-session .chat-edit-input-container .interactive-input-part,
 .agent-sessions-workbench .chat-editor-relative .interactive-session .chat-edit-input-container .interactive-input-part {
 	padding: 4px 0;
 }
@@ -1369,7 +1362,7 @@
 	border-radius: 22px;
 	/* T3's host shadow: `0 12px 28px -18px rgb(0 0 0 / 40%)`. */
 	box-shadow: 0 12px 28px -18px rgb(0 0 0 / 40%);
-	padding: 0 8px 8px;
+	padding: 4px 12px 10px;
 }
 
 /* Keep the drop shadow underneath the focus ring. */
@@ -1402,20 +1395,34 @@
 }
 
 /* Room for the taller controls between the editor and the footer row. The
- * extra 2px side padding lands the controls at T3's footer inset (px-2.5)
- * on top of the container's 8px. */
+ * container already supplies 12px of side inset, so the row itself sits flush
+ * with it and only adds vertical breathing room. */
 :is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars {
-	margin-top: 8px;
-	padding: 0 2px;
+	margin-top: 10px;
+	padding: 0;
+}
+
+/* The context usage dial rides in the composer footer here (moved off the
+ * secondary toolbar in chatInputPart), so it needs its own separation from the
+ * pickers on its left and the send button on its right — `margin-left: auto`
+ * from chat.css only handles the former. */
+:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars .chat-context-usage-container {
+	margin-left: auto;
+	margin-right: 8px;
+}
+
+:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars .chat-context-usage-widget {
+	padding: 4px 6px;
+	border-radius: 10px;
 }
 
 /* Prompt text inset: T3 pads the editor `px-4` (16px) from the card edge. The
- * container contributes 8px; the editor row supplies the rest. Safe against
+ * container contributes 12px; the editor row supplies the rest. Safe against
  * Monaco's layout — chatInputPart caps the editor at the container's *content*
  * width (`dom.getContentWidth`), which excludes this padding. */
 :is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .interactive-input-part .chat-editor-container,
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .chat-editor-relative .interactive-session .interactive-input-part .chat-editor-container {
-	padding: 0 8px;
+	padding: 0 4px;
 }
 
 /* The new-chat card already carries 20px of its own horizontal padding
@@ -1521,12 +1528,17 @@
 	background: var(--vscode-button-hoverBackground);
 }
 
+/* The stop button sits on the composer rather than shouting from it: it takes
+ * the composer's own surface colour instead of T3's destructive red, so the
+ * only thing that reads during a run is the glyph. */
 :is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-stop-circle {
-	background: color-mix(in srgb, var(--vscode-inputValidation-errorBorder, var(--vscode-errorForeground)) 90%, transparent);
-	color: #fff !important;
-	box-shadow:
-		inset 0 1px 0 rgb(255 255 255 / 16%),
-		0 1px 2px rgb(0 0 0 / 24%);
+	background: var(--sessions-codex-surface-background);
+	color: var(--vscode-foreground) !important;
+	box-shadow: none;
+}
+
+:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-stop-circle:hover {
+	background: color-mix(in srgb, var(--vscode-foreground) 10%, var(--sessions-codex-surface-background));
 }
 
 :is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-arrow-up:hover,
@@ -1563,9 +1575,15 @@
 }
 
 /* Hide shared chat-session option-group pickers in the sessions app active chat UI.
- * The sessions workbench provides its own new-session configuration controls and
- * should not surface the shared workbench chat session pickers here. */
-.agent-sessions-workbench .interactive-session .chat-input-toolbars .chat-sessionPicker-container {
+ * The Simple window provides its own new-session configuration controls (the
+ * combined provider+model chip, backed by a session-type picker) and should not
+ * surface the shared workbench chat session pickers on top of them.
+ *
+ * Advanced (Optimus) is excluded: it has no session-type picker of its own, so
+ * these are the only control that can reach a BYOS ("bring your own server")
+ * agent provider there — hiding them made BYOS unselectable in that window.
+ * Drop the exclusion once Advanced grows its own provider picker. */
+.agent-sessions-workbench:not(.optimus-window) .interactive-session .chat-input-toolbars .chat-sessionPicker-container {
 	display: none;
 }
 

@@ -13,6 +13,7 @@ import { IStringDictionary } from '../../../../../../base/common/collections.js'
 import { Event } from '../../../../../../base/common/event.js';
 import { MutableDisposable } from '../../../../../../base/common/lifecycle.js';
 import { autorun, IObservable } from '../../../../../../base/common/observable.js';
+import { ThemeIcon } from '../../../../../../base/common/themables.js';
 import { localize } from '../../../../../../nls.js';
 import { IContextKeyService } from '../../../../../../platform/contextkey/common/contextkey.js';
 import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
@@ -39,6 +40,21 @@ export interface IModelConfigurationAccess {
 	readonly onDidChange?: Event<string /* modelId */>;
 }
 
+/**
+ * A "bring your own subscription" agent the user has not set up yet (e.g. the
+ * Claude or Codex CLI). Rendered at the bottom of the model picker with an
+ * Install affordance so a user with no subscription configured can start the
+ * install + sign-in flow straight from the picker.
+ */
+export interface IModelPickerSetupCandidate {
+	/** Provider id handed back to {@link IModelPickerDelegate.runSetup}. */
+	readonly id: string;
+	readonly label: string;
+	readonly icon?: ThemeIcon;
+	/** Short row description, e.g. "Sign in to use your Claude Pro/Max subscription". */
+	readonly description?: string;
+}
+
 export interface IModelPickerDelegate {
 	readonly currentModel: IObservable<ILanguageModelChatMetadataAndIdentifier | undefined>;
 	setModel(model: ILanguageModelChatMetadataAndIdentifier): void;
@@ -55,6 +71,14 @@ export interface IModelPickerDelegate {
 	 * Student users) instead of an Auto entry.
 	 */
 	showAutoModel?(): boolean;
+	/**
+	 * Bring-your-own-subscription agents that are not set up yet. When this
+	 * returns entries (and {@link runSetup} is implemented) the picker appends a
+	 * "Bring Your Own Subscription" section whose rows offer to install them.
+	 */
+	getSetupCandidates?(): IModelPickerSetupCandidate[];
+	/** Starts the install + sign-in flow for a {@link getSetupCandidates} entry. */
+	runSetup?(id: string): void;
 	/**
 	 * Per-editor model configuration access. When omitted, the picker reads and
 	 * writes configuration through the global {@link ILanguageModelsService}.

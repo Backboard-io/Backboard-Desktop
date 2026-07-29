@@ -35,7 +35,7 @@ import { MANAGE_CHAT_COMMAND_ID } from '../../../common/constants.js';
 import { IModelControlEntry, ILanguageModelChatMetadataAndIdentifier, ILanguageModelsService, IModelsControlManifest } from '../../../common/languageModels.js';
 import { ChatEntitlement, IChatEntitlementService, isProUser } from '../../../../../services/chat/common/chatEntitlementService.js';
 import * as semver from '../../../../../../base/common/semver/semver.js';
-import { IModelConfigurationAccess, IModelPickerDelegate } from './modelPickerActionItem.js';
+import { IModelConfigurationAccess, IModelPickerDelegate, IModelPickerSetupCandidate } from './modelPickerActionItem.js';
 import { IUriIdentityService } from '../../../../../../platform/uriIdentity/common/uriIdentity.js';
 import { GitHubPaths, IDefaultAccountService } from '../../../../../../platform/defaultAccount/common/defaultAccount.js';
 import { IUpdateService, StateType } from '../../../../../../platform/update/common/update.js';
@@ -432,6 +432,50 @@ function createModelAction(
 	return { action, ariaDescription: textDescription };
 }
 
+/**
+ * Builds the trailing "Bring Your Own Subscription" section: one row per agent
+ * the user could install, each carrying an Install badge. Selecting a row runs
+ * {@link onSetup}, which owns the confirm dialog and the install itself.
+ * Returns an empty list when there is nothing to install.
+ */
+function createSetupItems(
+	candidates: readonly IModelPickerSetupCandidate[],
+	onSetup: ((id: string) => void) | undefined,
+): IActionListItem<IActionWidgetDropdownAction>[] {
+	if (!candidates.length || !onSetup) {
+		return [];
+	}
+	const installLabel = localize('chat.modelPicker.install', "Install");
+	const items: IActionListItem<IActionWidgetDropdownAction>[] = [{
+		kind: ActionListItemKind.Separator,
+		label: localize('chat.modelPicker.bringYourOwnSubscription', "Bring Your Own Subscription"),
+	}];
+	for (const candidate of candidates) {
+		items.push({
+			item: {
+				id: `setup.${candidate.id}`,
+				enabled: true,
+				checked: false,
+				class: undefined,
+				tooltip: localize('chat.modelPicker.installTooltip', "Install {0}", candidate.label),
+				label: candidate.label,
+				description: candidate.description,
+				run: () => onSetup(candidate.id),
+			},
+			kind: ActionListItemKind.Action,
+			label: candidate.label,
+			description: candidate.description,
+			ariaDescription: candidate.description ? `${installLabel}, ${candidate.description}` : installLabel,
+			badge: installLabel,
+			group: { title: '', icon: candidate.icon ?? ThemeIcon.fromId(Codicon.cloudDownload.id) },
+			hideIcon: false,
+			className: 'chat-model-picker-setup',
+			showAlways: true,
+		});
+	}
+	return items;
+}
+
 function shouldShowManageModelsAction(chatEntitlementService: IChatEntitlementService): boolean {
 	return chatEntitlementService.clientByokEnabled ||
 		chatEntitlementService.hasByokModels ||
@@ -498,8 +542,11 @@ export function buildModelPickerItems(
 	isUBB?: boolean,
 	showAutoModel: boolean = false,
 	onConfigure?: (model: ILanguageModelChatMetadataAndIdentifier, group: string) => void,
+	setupCandidates: readonly IModelPickerSetupCandidate[] = [],
+	onSetup?: (id: string) => void,
 ): IActionListItem<IActionWidgetDropdownAction>[] {
 	const items: IActionListItem<IActionWidgetDropdownAction>[] = [];
+	const setupItems = createSetupItems(setupCandidates, onSetup);
 	if (models.length === 0) {
 		if (!showAutoModel) {
 			// Auto is not available for this session type (e.g. the Claude agent
@@ -536,9 +583,11 @@ export function buildModelPickerItems(
 				hover: hover ? { content: hover } : undefined,
 			});
 			// Nothing else is selectable in this state, so surface only the
-			// single disabled entry. Returning here prevents the grouped-picker
-			// logic below from appending an Auto entry, model groups, or a
-			// standalone "Manage Models" action.
+			// single disabled entry — plus any agent the user could install,
+			// which is the one action that can get them out of it. Returning
+			// here prevents the grouped-picker logic below from appending an
+			// Auto entry, model groups, or a standalone "Manage Models" action.
+			items.push(...setupItems);
 			return items;
 		} else {
 			items.push(createModelItem({
@@ -874,6 +923,8 @@ export function buildModelPickerItems(
 		}
 	}
 
+	items.push(...setupItems);
+
 	return items;
 }
 
@@ -1199,6 +1250,8 @@ export class ModelPickerWidget extends Disposable {
 			isUBB,
 			this._delegate.showAutoModel?.() ?? false,
 			onConfigure,
+			this._delegate.getSetupCandidates?.() ?? [],
+			this._delegate.runSetup ? (id: string) => this._delegate.runSetup!(id) : undefined,
 		);
 
 		// Collect all hover disposables so they are properly cleaned up when the

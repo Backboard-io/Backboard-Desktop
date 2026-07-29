@@ -37,6 +37,7 @@ import { resolveRemoteAuthority } from '../../browser/openInVSCodeUtils.js';
 import { INativeHostService } from '../../../platform/native/common/native.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../platform/storage/common/storage.js';
 import { BACKBOARD_WORKSPACE_OPEN_ON_STARTUP_STORAGE_KEY } from '../../../workbench/contrib/chat/electron-browser/backboardWorkspace/backboardWorkspaceConstants.js';
+import { BACKBOARD_LAST_EDITOR_FOLDER_STORAGE_KEY } from '../../../workbench/contrib/chat/common/constants.js';
 
 const OPEN_WORKSPACE_IN_VSCODE_ACTION_ID = 'agents.openWorkspaceInVSCode';
 
@@ -68,6 +69,32 @@ function toFolderUri(session: ISession, sessionsProvidersService: ISessionsProvi
 }
 
 /**
+ * The folder the editor window was on when the user last left Editor mode, or
+ * `undefined` if there is none recorded or it has since been deleted.
+ */
+async function getRememberedEditorFolder(storageService: IStorageService, fileService: IFileService): Promise<URI | undefined> {
+	const stored = storageService.get(BACKBOARD_LAST_EDITOR_FOLDER_STORAGE_KEY, StorageScope.APPLICATION);
+	if (!stored) {
+		return undefined;
+	}
+
+	let folderUri: URI;
+	try {
+		folderUri = URI.parse(stored, true);
+	} catch {
+		return undefined;
+	}
+
+	// A remembered folder that no longer exists should fall through to the
+	// session-based candidates rather than fail the whole switch.
+	if (folderUri.scheme === Schemas.file && fileService.hasProvider(folderUri) && !await fileService.exists(folderUri)) {
+		return undefined;
+	}
+
+	return folderUri;
+}
+
+/**
  * The folder Editor mode should open.
  *
  * Falling through to `undefined` opens an *empty* editor window, which reads as
@@ -76,12 +103,15 @@ function toFolderUri(session: ISession, sessionsProvidersService: ISessionsProvi
  *
  * 1. The session on screen. Its workspace resolves asynchronously, so if it is
  *    still loading we wait briefly rather than treating it as folderless.
- * 2. Failing that, the most recently opened session that has a folder. This is
- *    what covers the common complaints: the board with no card focused, and a
- *    brand new chat that has no workspace of its own yet. Recency is persisted,
- *    so it still points somewhere sensible after a restart.
+ * 2. Failing that, the folder the editor window was on when the user last left
+ *    Editor mode. A round trip through Simple/Advanced that never lands on a
+ *    session must come back to the project the user was working in.
+ * 3. Failing that, the most recently opened session that has a folder. This is
+ *    what covers a first-ever switch into Editor mode, where nothing has been
+ *    remembered yet. Recency is persisted, so it still points somewhere
+ *    sensible after a restart.
  */
-async function getFolderUriToOpen(sessionsService: ISessionsService, sessionsProvidersService: ISessionsProvidersService, remoteAgentHostService: IRemoteAgentHostService): Promise<URI | undefined> {
+async function getFolderUriToOpen(sessionsService: ISessionsService, sessionsProvidersService: ISessionsProvidersService, remoteAgentHostService: IRemoteAgentHostService, storageService: IStorageService, fileService: IFileService): Promise<URI | undefined> {
 	const activeSession = sessionsService.activeSession.get();
 	if (activeSession) {
 		if (!activeSession.workspace.get() && activeSession.loading.get()) {
@@ -97,6 +127,11 @@ async function getFolderUriToOpen(sessionsService: ISessionsService, sessionsPro
 		if (activeFolderUri) {
 			return activeFolderUri;
 		}
+	}
+
+	const rememberedFolderUri = await getRememberedEditorFolder(storageService, fileService);
+	if (rememberedFolderUri) {
+		return rememberedFolderUri;
 	}
 
 	for (const session of sessionsService.getRecentlyOpenedSessions().recent) {
@@ -116,9 +151,10 @@ async function openEditorWindowForActiveSession(accessor: ServicesAccessor, open
 	const nativeHostService = accessor.get(INativeHostService);
 	const fileService = accessor.get(IFileService);
 	const notificationService = accessor.get(INotificationService);
+	const storageService = accessor.get(IStorageService);
 
 	const windowOptions = openInNewWindow ? { forceNewWindow: true } : { forceReuseWindow: true };
-	const folderUri = await getFolderUriToOpen(sessionsService, sessionsProvidersService, remoteAgentHostService);
+	const folderUri = await getFolderUriToOpen(sessionsService, sessionsProvidersService, remoteAgentHostService, storageService, fileService);
 	if (!folderUri) {
 		return nativeHostService.openWindow(windowOptions);
 	}
@@ -129,6 +165,11 @@ async function openEditorWindowForActiveSession(accessor: ServicesAccessor, open
 		notificationService.error(localize('sessionFolderMissing', "The folder \"{0}\" no longer exists on this computer.", basename(folderUri)));
 		return nativeHostService.openWindow(windowOptions);
 	}
+
+	// Keep the remembered folder in step with the window we are about to open, so
+	// the next switch out of Editor mode has the right value even if that window
+	// is closed rather than switched away from.
+	storageService.store(BACKBOARD_LAST_EDITOR_FOLDER_STORAGE_KEY, folderUri.toString(), StorageScope.APPLICATION, StorageTarget.MACHINE);
 
 	return nativeHostService.openWindow([{ folderUri }], windowOptions);
 }

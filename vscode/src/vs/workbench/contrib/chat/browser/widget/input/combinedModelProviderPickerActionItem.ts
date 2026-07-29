@@ -22,7 +22,7 @@ import { AgentSessionTarget } from '../../agentSessions/agentSessions.js';
 import { ISessionTypePickerDelegate } from '../../chat.js';
 import { ILanguageModelChatMetadataAndIdentifier, ILanguageModelsService } from '../../../common/languageModels.js';
 import { IChatInputPickerOptions } from './chatInputPickerActionItem.js';
-import { IModelPickerDelegate } from './modelPickerActionItem.js';
+import { IModelPickerDelegate, IModelPickerSetupCandidate } from './modelPickerActionItem.js';
 import './media/combinedModelProviderPicker.css';
 
 const FAVORITES_STORAGE_KEY = 'chat.combinedModelProviderPicker.favorites';
@@ -271,9 +271,17 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 				: models;
 
 			if (filtered.length === 0) {
+				// Only offer setup when the provider genuinely has nothing
+				// registered — not when a search simply matched no model.
+				const candidate = !showingFavorites && models.length === 0 ? this._setupCandidate() : undefined;
 				dom.append(list, dom.$('.combined-model-provider-empty')).textContent = showingFavorites
 					? localize('combinedPicker.noFavorites', "No favorite models yet")
-					: localize('combinedPicker.noModels', "No models available");
+					: candidate
+						? localize('combinedPicker.notSetUp', "{0} is not set up yet", candidate.label)
+						: localize('combinedPicker.noModels', "No models available");
+				if (candidate) {
+					this._renderSetupPrompt(list, store, candidate);
+				}
 				return;
 			}
 
@@ -350,6 +358,53 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 
 		renderList();
 		setTimeout(() => search.focus(), 0);
+	}
+
+	/**
+	 * The installable agent CLI behind the rail's current provider, when that
+	 * agent is not set up yet. Undefined for providers that are already
+	 * registered or cannot be installed from here.
+	 */
+	private _setupCandidate(): IModelPickerSetupCandidate | undefined {
+		if (!this._sessionTypeDelegate.runSetup || !this._railProvider) {
+			return undefined;
+		}
+		return this._sessionTypeDelegate.getSetupCandidateForProvider?.(this._railProvider as AgentSessionTarget);
+	}
+
+	/**
+	 * Empty-state affordance for a provider the user hasn't set up yet: the
+	 * agent has no models because its CLI was never installed, so offer an
+	 * Install button that hands off to the vendor's install + sign-in flow.
+	 */
+	private _renderSetupPrompt(list: HTMLElement, store: DisposableStore, candidate: IModelPickerSetupCandidate): void {
+		const runSetup = this._sessionTypeDelegate.runSetup;
+		if (!runSetup) {
+			return;
+		}
+
+		const setup = dom.append(list, dom.$('.combined-model-provider-setup'));
+		if (candidate.description) {
+			dom.append(setup, dom.$('.combined-model-provider-setup-description')).textContent = candidate.description;
+		}
+		const button = dom.append(setup, dom.$('button.combined-model-provider-setup-button')) as HTMLButtonElement;
+		button.textContent = localize('combinedPicker.install', "Install");
+		button.title = localize('combinedPicker.installTooltip', "Install {0}", candidate.label);
+		const install = () => {
+			this._overlay.clear();
+			runSetup(candidate.id);
+		};
+		store.add(dom.addDisposableListener(button, dom.EventType.CLICK, e => {
+			dom.EventHelper.stop(e, true);
+			install();
+		}));
+		store.add(dom.addDisposableListener(button, dom.EventType.KEY_DOWN, e => {
+			const event = new StandardKeyboardEvent(e);
+			if (event.equals(KeyCode.Enter) || event.equals(KeyCode.Space)) {
+				dom.EventHelper.stop(e, true);
+				install();
+			}
+		}));
 	}
 
 	private _commit(providerId: string, model: ILanguageModelChatMetadataAndIdentifier): void {

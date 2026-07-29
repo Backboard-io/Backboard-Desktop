@@ -16,7 +16,6 @@ import { HighlightedLabel } from '../../../../../base/browser/ui/highlightedlabe
 import { createMatches, FuzzyScore, IMatch } from '../../../../../base/common/filters.js';
 import { RunOnceScheduler } from '../../../../../base/common/async.js';
 import { Disposable, DisposableStore, MutableDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
-import { MarkdownString } from '../../../../../base/common/htmlContent.js';
 import { IObservable, IReader, autorun, observableSignalFromEvent, observableValue } from '../../../../../base/common/observable.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { URI } from '../../../../../base/common/uri.js';
@@ -33,15 +32,13 @@ import { IInstantiationService } from '../../../../../platform/instantiation/com
 import { IKeybindingService } from '../../../../../platform/keybinding/common/keybinding.js';
 import { ServiceCollection } from '../../../../../platform/instantiation/common/serviceCollection.js';
 import { WorkbenchObjectTree } from '../../../../../platform/list/browser/listService.js';
-import { IStyleOverride, defaultButtonStyles, defaultFindWidgetStyles, defaultToggleStyles } from '../../../../../platform/theme/browser/defaultStyles.js';
+import { IStyleOverride, defaultFindWidgetStyles, defaultToggleStyles } from '../../../../../platform/theme/browser/defaultStyles.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
 import { GITHUB_REMOTE_FILE_SCHEME, ISession, ISessionWorkspace, SessionStatus } from '../../../../services/sessions/common/session.js';
 import { AgentSessionApprovalModel, IAgentSessionApprovalInfo } from '../../../../../workbench/contrib/chat/browser/agentSessions/agentSessionApprovalModel.js';
-import { Button } from '../../../../../base/browser/ui/button/button.js';
 import { IMarkdownRendererService } from '../../../../../platform/markdown/browser/markdownRenderer.js';
 import { Action, ActionRunner, IAction, Separator } from '../../../../../base/common/actions.js';
 import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
-import { HoverStyle } from '../../../../../base/browser/ui/hover/hover.js';
 import { HoverPosition } from '../../../../../base/browser/ui/hover/hoverWidget.js';
 import { ISessionsManagementService, IActiveSession } from '../../../../services/sessions/common/sessionsManagement.js';
 import { ISessionsService } from '../../../../services/sessions/browser/sessionsService.js';
@@ -205,7 +202,6 @@ class SessionsTreeDelegate implements IListVirtualDelegate<SessionListItem> {
 	private static readonly SHOW_MORE_HEIGHT = 24;
 
 	constructor(
-		private readonly _approvalModel: AgentSessionApprovalModel | undefined,
 		private readonly _isPhone: () => boolean,
 	) { }
 
@@ -217,18 +213,7 @@ class SessionsTreeDelegate implements IListVirtualDelegate<SessionListItem> {
 			return SessionsTreeDelegate.SHOW_MORE_HEIGHT;
 		}
 
-		let height = this._isPhone() ? SessionsTreeDelegate.ITEM_HEIGHT_PHONE : SessionsTreeDelegate.ITEM_HEIGHT;
-		if (this._approvalModel) {
-			const approval = getFirstApprovalAcrossChats(this._approvalModel, element as ISession, undefined);
-			if (approval) {
-				height += SessionItemRenderer.getApprovalRowHeight(approval.label);
-			}
-		}
-		return height;
-	}
-
-	hasDynamicHeight(element: SessionListItem): boolean {
-		return !!this._approvalModel && !isSessionSection(element) && !isSessionShowMore(element);
+		return this._isPhone() ? SessionsTreeDelegate.ITEM_HEIGHT_PHONE : SessionsTreeDelegate.ITEM_HEIGHT;
 	}
 
 	getTemplateId(element: SessionListItem): string {
@@ -274,9 +259,6 @@ interface ISessionItemTemplate {
 	readonly title: HighlightedLabel;
 	readonly titleToolbar: MenuWorkbenchToolBar;
 	readonly detailsRow: HTMLElement;
-	readonly approvalRow: HTMLElement;
-	readonly approvalLabel: HTMLElement;
-	readonly approvalButtonContainer: HTMLElement;
 	readonly contextKeyService: IContextKeyService;
 	readonly disposables: DisposableStore;
 	readonly elementDisposables: DisposableStore;
@@ -285,18 +267,6 @@ interface ISessionItemTemplate {
 class SessionItemRenderer implements ITreeRenderer<SessionListItem, FuzzyScore, ISessionItemTemplate> {
 	static readonly TEMPLATE_ID = 'session-item';
 	readonly templateId = SessionItemRenderer.TEMPLATE_ID;
-
-	private static readonly APPROVAL_ROW_MAX_LINES = 3;
-	private static readonly _APPROVAL_ROW_LINE_HEIGHT = 18;
-	private static readonly _APPROVAL_ROW_OVERHEAD = 14;
-
-	static getApprovalRowHeight(label: string): number {
-		const lineCount = Math.min(label.split(/\r?\n/).length, SessionItemRenderer.APPROVAL_ROW_MAX_LINES);
-		return lineCount * SessionItemRenderer._APPROVAL_ROW_LINE_HEIGHT + SessionItemRenderer._APPROVAL_ROW_OVERHEAD;
-	}
-
-	private readonly _onDidChangeItemHeight = new Emitter<ISession>();
-	readonly onDidChangeItemHeight: Event<ISession> = this._onDidChangeItemHeight.event;
 
 	constructor(
 		private readonly options: { grouping: () => SessionsGrouping; sorting: () => SessionsSorting; isPinned: (session: ISession) => boolean; isRead: (session: ISession) => boolean; visibleSessions: IObservable<readonly (IActiveSession | undefined)[]>; getMultiSelectedSessions: (session: ISession) => ISession[] },
@@ -335,10 +305,6 @@ class SessionItemRenderer implements ITreeRenderer<SessionListItem, FuzzyScore, 
 			disposables.add(DOM.addDisposableListener(titleToolbarContainer, eventType, e => e.stopPropagation()));
 		}
 		disposables.add(Gesture.ignoreTarget(titleToolbarContainer));
-		// Approval row
-		const approvalRow = DOM.append(mainCol, $('.session-approval-row'));
-		const approvalLabel = DOM.append(approvalRow, $('span.session-approval-label'));
-		const approvalButtonContainer = DOM.append(approvalRow, $('.session-approval-button'));
 
 		const contextKeyService = disposables.add(this.contextKeyService.createScoped(container));
 		const scopedInstantiationService = disposables.add(this.instantiationService.createChild(new ServiceCollection([IContextKeyService, contextKeyService])));
@@ -348,7 +314,7 @@ class SessionItemRenderer implements ITreeRenderer<SessionListItem, FuzzyScore, 
 			actionRunner,
 		}));
 
-		return { container, statusIcon, providerIcon, title, titleToolbar, detailsRow, approvalRow, approvalLabel, approvalButtonContainer, contextKeyService, disposables, elementDisposables };
+		return { container, statusIcon, providerIcon, title, titleToolbar, detailsRow, contextKeyService, disposables, elementDisposables };
 	}
 
 	renderElement(node: ITreeNode<SessionListItem, FuzzyScore>, _index: number, template: ISessionItemTemplate): void {
@@ -572,71 +538,27 @@ class SessionItemRenderer implements ITreeRenderer<SessionListItem, FuzzyScore, 
 			}
 		}));
 
-		// Approval row — reactive
+		// Pending approval — reactive
 		if (this.approvalModel) {
-			this.renderApprovalRow(element, template);
+			this.renderPendingApproval(element, template);
 		}
 	}
 
-	private renderApprovalRow(element: ISession, template: ISessionItemTemplate): void {
+	/**
+	 * A session blocked on a tool approval is called out by tinting its row
+	 * rather than by expanding an inline approval card inside the list. The
+	 * prompt itself — and the buttons that answer it — live in the chat, so the
+	 * sidebar only has to point at the session that is waiting on the user.
+	 */
+	private renderPendingApproval(element: ISession, template: ISessionItemTemplate): void {
 		if (!this.approvalModel) {
 			return;
 		}
 
 		const approvalModel = this.approvalModel;
-		const initialInfo = getFirstApprovalAcrossChats(approvalModel, element, undefined);
-		let wasVisible = !!initialInfo;
-		template.approvalRow.classList.toggle('visible', wasVisible);
-
-		const buttonStore = template.elementDisposables.add(new DisposableStore());
-
 		template.elementDisposables.add(autorun(reader => {
-			buttonStore.clear();
-
 			const info = getFirstApprovalAcrossChats(approvalModel, element, reader);
-			const visible = !!info;
-
-			template.approvalRow.classList.toggle('visible', visible);
-
-			if (info) {
-				// Render up to 3 lines as separate code blocks
-				const lines = info.label.split('\n');
-				const maxLines = SessionItemRenderer.APPROVAL_ROW_MAX_LINES;
-				const visibleLines = lines.slice(0, maxLines);
-				if (lines.length > maxLines) {
-					visibleLines[maxLines - 1] = `${visibleLines[maxLines - 1]} \u2026`;
-				}
-				const langId = info.languageId ?? 'json';
-				const labelContent = new MarkdownString();
-				for (const line of visibleLines) {
-					labelContent.appendCodeblock(langId, line);
-				}
-
-				template.approvalLabel.textContent = '';
-				buttonStore.add(this.markdownRendererService.render(labelContent, {}, template.approvalLabel));
-
-				// Hover with full content as a code block
-				const fullContent = new MarkdownString().appendCodeblock(info.languageId ?? 'json', info.label);
-				buttonStore.add(this.hoverService.setupDelayedHover(template.approvalLabel, {
-					content: fullContent,
-					style: HoverStyle.Pointer,
-					position: { hoverPosition: HoverPosition.BELOW },
-				}));
-
-				template.approvalButtonContainer.textContent = '';
-				const button = buttonStore.add(new Button(template.approvalButtonContainer, {
-					title: localize('allowActionOnce', "Allow once"),
-					secondary: true,
-					...defaultButtonStyles
-				}));
-				button.label = localize('allowAction', "Allow");
-				buttonStore.add(button.onDidClick(() => info.confirm()));
-			}
-
-			if (wasVisible !== visible) {
-				wasVisible = visible;
-				this._onDidChangeItemHeight.fire(element);
-			}
+			template.container.classList.toggle('awaiting-approval', !!info);
 		}));
 	}
 
@@ -1088,7 +1010,7 @@ export class SessionsList extends Disposable implements ISessionsList {
 		// observe the workbench's value rather than shadowing it with a fresh
 		// scoped default of `false`. The reactive height refresh below listens
 		// on the same scoped service for changes.
-		const delegate = new SessionsTreeDelegate(approvalModel, () => !!IsPhoneLayoutContext.getValue(contextKeyService));
+		const delegate = new SessionsTreeDelegate(() => !!IsPhoneLayoutContext.getValue(contextKeyService));
 
 		this.tree = this._register(instantiationService.createInstance(
 			WorkbenchObjectTree<SessionListItem, FuzzyScore>,
@@ -1195,12 +1117,6 @@ export class SessionsList extends Disposable implements ISessionsList {
 			if (!isSessionSection(element)) {
 				this.markRead(element);
 				this.options.onSessionOpen(element.resource, e.editorOptions.preserveFocus ?? false, e.sideBySide);
-			}
-		}));
-
-		this._register(sessionRenderer.onDidChangeItemHeight(session => {
-			if (this.tree.hasElement(session)) {
-				this.tree.updateElementHeight(session, delegate.getHeight(session));
 			}
 		}));
 

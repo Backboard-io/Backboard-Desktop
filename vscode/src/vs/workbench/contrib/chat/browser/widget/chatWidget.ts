@@ -1055,6 +1055,11 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		// category shortcut buttons beneath it (Claude.ai-style home).
 		const showEmptyHome = !!this.categorySuggestionsContainer && this.isLockedToCodingAgent && isStandardLayout && numItems === 0;
 		this.container.classList.toggle('chat-empty-centered', showEmptyHome);
+
+		// Plain "nothing sent yet" marker, unconditional where `chat-empty-centered`
+		// is gated on the coding-agent home. Hosts that opt into the shared composer
+		// (backboardComposer.css) use it to render the new-chat hero card.
+		this.container.classList.toggle('chat-composer-empty', numItems === 0);
 		if (!showEmptyHome) {
 			// Collapse any open prompt panel so the next empty state starts on the button row.
 			this.resetCategoryPanel();

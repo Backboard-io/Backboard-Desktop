@@ -29,6 +29,12 @@
 	 * Heavily mixed toward the muted foreground so it reads as a soft blue-grey
 	 * dot rather than a saturated accent. */
 	--sessions-status-done-fg: color-mix(in srgb, var(--vscode-charts-blue, var(--vscode-textLink-foreground)) 42%, var(--sessions-row-muted-fg));
+	/* Sessions blocked on the user. Unlike the unread dot this one is meant to
+	 * be noticed, so the accent stays saturated rather than being mixed toward
+	 * the muted foreground; the row tint behind it carries the same hue at low
+	 * alpha so the pill reads as highlighted without going opaque on glass. */
+	--sessions-row-waiting-fg: var(--vscode-charts-orange, var(--vscode-editorWarning-foreground, #d18616));
+	--sessions-row-waiting-bg: color-mix(in srgb, var(--sessions-row-waiting-fg) 12%, transparent);
 
 	/* The tree is laid out at full content height (the sidebar column owns the
 	 * scroll), so a sticky header is never meaningful here — and its opaque
@@ -397,54 +403,30 @@
 		white-space: nowrap;
 	}
 
-	.session-approval-row {
-		display: none;
-		gap: 8px;
-		margin-top: 4px;
-		margin-left: -6px;
-		padding: 4px 4px 4px 6px;
-		box-sizing: border-box;
-		border: 1px solid var(--vscode-contrastBorder, var(--vscode-widget-border, transparent));
-		border-radius: var(--vscode-cornerRadius-large);
-		background-color: var(--vscode-editor-background);
-		color: var(--vscode-editor-foreground);
-		align-items: center;
-
-		&.visible {
-			display: flex;
+	/* Waiting on the user — either the session reported `NeedsInput` or a tool
+	 * approval is pending. Both mean the same thing to someone scanning the
+	 * sidebar ("this one is stuck on you"), so both get the warm accent. The
+	 * prompt itself is answered in the chat; the row only has to point at it. */
+	&.needs-input,
+	&.awaiting-approval {
+		.session-title,
+		.session-description,
+		.session-icon {
+			color: var(--sessions-row-waiting-fg);
 		}
 
-		.session-approval-label {
-			flex: 1;
-			overflow: hidden;
-			min-width: 0;
-
-			& > .rendered-markdown,
-			& > .rendered-markdown > .code,
-			& > .rendered-markdown > .code > span {
-				display: block;
-				overflow: hidden;
-			}
-
-			.monaco-tokenized-source {
-				display: block;
-				overflow: hidden;
-				white-space: nowrap;
-				text-overflow: ellipsis;
-				font-size: var(--vscode-agents-fontSize-label1, 12px);
-			}
-		}
-
-		.session-approval-button {
-			flex-shrink: 0;
-
-			.monaco-button {
-				padding: 2px 10px;
-				font-size: var(--vscode-agents-fontSize-label1, 12px);
-				white-space: nowrap;
-			}
+		.session-icon > .codicon {
+			color: var(--sessions-row-waiting-fg) !important;
 		}
 	}
+}
+
+/* Row tint for the waiting state. Applied on the list row (rather than the
+ * item) so it fills the full pill, and without `!important` so the hover and
+ * selected backgrounds above still win when the user interacts with it. */
+.sessions-list-control .monaco-list-row:has(.session-item.needs-input),
+.sessions-list-control .monaco-list-row:has(.session-item.awaiting-approval) {
+	background: var(--sessions-row-waiting-bg);
 }
 
 /* Show More */

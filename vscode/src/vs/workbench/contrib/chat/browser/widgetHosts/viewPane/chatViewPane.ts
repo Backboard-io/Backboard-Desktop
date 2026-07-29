@@ -54,6 +54,7 @@ import { AgentSessionsControl } from '../../agentSessions/agentSessionsControl.j
 import { ACTION_ID_NEW_CHAT } from '../../actions/chatActions.js';
 import { ChatWidget } from '../../widget/chatWidget.js';
 import { SkillsLibraryController } from '../../widget/input/skillsLibrary.js';
+import { createBackboardSessionTypePickerDelegate } from '../../widget/input/backboardSessionTypePickerDelegate.js';
 import { ChatViewWelcomeController, IViewWelcomeDelegate } from '../../viewsWelcome/chatViewWelcomeController.js';
 import { IChatViewsWelcomeDescriptor } from '../../viewsWelcome/chatViewsWelcome.js';
 import { IWorkbenchLayoutService, LayoutSettings, Position } from '../../../../../services/layout/browser/layoutService.js';
@@ -802,6 +803,9 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 		const chatControlsContainer = append(parent, $('.chat-controls-container'));
 		this.chatControlsContainer = chatControlsContainer;
 		chatControlsContainer.classList.toggle('backboard-chat-controls', isBackboardProduct());
+		// Shared composer look (backboardComposer.css): the same shell the Simple
+		// window renders, so a composer reads the same wherever it is mounted.
+		chatControlsContainer.classList.toggle('backboard-composer', isBackboardProduct());
 
 		const locationBasedColors = this.getLocationBasedColors();
 
@@ -832,7 +836,20 @@ referencesExpandedWhenEmptyResponse: false,
 				editorOverflowWidgetsDomNode,
 				enableImplicitContext: true,
 				enableWorkingSet: 'explicit',
-				supportsChangingModes: true,
+				// Together these two swap the plain model picker for the Simple
+				// window's combined provider+model chip (see
+				// `createBackboardSessionTypePickerDelegate`). `isSessionsWindow`
+				// also suppresses the mode picker, which is the same trade the
+				// Simple window makes: the chip's provider rail replaces it.
+				// Backboard builds only — stock VS Code keeps its own picker.
+				isSessionsWindow: isBackboardProduct(),
+				sessionTypePickerDelegate: isBackboardProduct()
+					? createBackboardSessionTypePickerDelegate(
+						() => this._widget?.viewModel?.model.sessionResource,
+						this.commandService,
+						this.chatSessionsService)
+					: undefined,
+				supportsChangingModes: !isBackboardProduct(),
 				inputEditorMinLines: 4,
 				dndContainer: parent,
 			},

@@ -10,6 +10,13 @@
   "type": "module",
   "private": true,
   "scripts": {
+    "dev": "./scripts/dev.sh",
+    "dev-doctor": "./scripts/dev.sh doctor",
+    "dev-setup": "./scripts/dev.sh setup",
+    "dev-watch": "./scripts/dev.sh watch",
+    "dev-logs": "./scripts/dev.sh logs",
+    "dev-status": "./scripts/dev.sh status",
+    "dev-stop": "./scripts/dev.sh stop",
     "test": "echo Please run any of the test scripts from the scripts folder.",
     "test-browser": "npx playwright install && node test/unit/browser/index.js",
     "test-browser-no-install": "node test/unit/browser/index.js",

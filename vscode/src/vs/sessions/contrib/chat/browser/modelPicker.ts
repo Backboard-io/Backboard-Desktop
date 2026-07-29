@@ -13,7 +13,7 @@ import { IInstantiationService } from '../../../../platform/instantiation/common
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry.js';
 import { IChatInputPickerOptions } from '../../../../workbench/contrib/chat/browser/widget/input/chatInputPickerActionItem.js';
-import { IModelPickerDelegate, ModelPickerActionItem } from '../../../../workbench/contrib/chat/browser/widget/input/modelPickerActionItem.js';
+import { IModelPickerDelegate, IModelPickerSetupCandidate, ModelPickerActionItem } from '../../../../workbench/contrib/chat/browser/widget/input/modelPickerActionItem.js';
 import { ILanguageModelChatMetadataAndIdentifier, ILanguageModelsService } from '../../../../workbench/contrib/chat/common/languageModels.js';
 import { Menus } from '../../../browser/menus.js';
 import { IsPhoneLayoutContext, ActiveSessionUsesCombinedConfigPickerContext } from '../../../common/contextkeys.js';
@@ -23,6 +23,7 @@ import { ISession, SessionStatus } from '../../../services/sessions/common/sessi
 import { IActiveSession } from '../../../services/sessions/common/sessionsManagement.js';
 import { INewChatModelPickerService } from './newChatModelPicker.js';
 import { reportNewChatPickerClosed } from './newChatPickerTelemetry.js';
+import { IAgentCliSetupService } from './agentCliSetup.js';
 
 /**
  * Returns the core model-picker storage key for a provider/session-type pair.
@@ -107,6 +108,7 @@ export class ModelPicker extends Disposable {
 		@IStorageService private readonly _storageService: IStorageService,
 		@ITelemetryService private readonly _telemetryService: ITelemetryService,
 		@INewChatModelPickerService private readonly _newChatModelPickerService: INewChatModelPickerService,
+		@IAgentCliSetupService private readonly _agentCliSetupService: IAgentCliSetupService,
 	) {
 		super();
 
@@ -137,6 +139,8 @@ export class ModelPicker extends Disposable {
 			showUnavailableFeatured: () => getModelPickerOptionsForSession(this._session.get(), this._sessionsProvidersService).showUnavailableFeatured,
 			showFeatured: () => getModelPickerOptionsForSession(this._session.get(), this._sessionsProvidersService).showFeatured,
 			showAutoModel: () => !!getModelPickerOptionsForSession(this._session.get(), this._sessionsProvidersService).showAutoModel,
+			getSetupCandidates: () => this._getSetupCandidates(),
+			runSetup: (id: string) => { void this._agentCliSetupService.beginSetup(id); },
 		};
 
 		const pickerOptions: IChatInputPickerOptions = {
@@ -242,6 +246,22 @@ export class ModelPicker extends Disposable {
 		} finally {
 			this._settingModelInternally = false;
 		}
+	}
+
+	/**
+	 * Bring-your-own-subscription agents whose CLI is not installed yet. The
+	 * registered set is collected from every provider's session types (their ids
+	 * are the bare agent-host provider ids, e.g. `claude`), so a setup row
+	 * disappears as soon as the real agent registers.
+	 */
+	private _getSetupCandidates(): IModelPickerSetupCandidate[] {
+		const registered = new Set<string>();
+		for (const provider of this._sessionsProvidersService.getProviders()) {
+			for (const sessionType of provider.sessionTypes) {
+				registered.add(sessionType.id);
+			}
+		}
+		return this._agentCliSetupService.getSetupCandidates(registered);
 	}
 
 	private _hasResolvedSessionModelVendor(modelIdentifier: string): boolean {

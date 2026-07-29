@@ -15,6 +15,7 @@ import { McpServerType } from '../../../../../../../platform/mcp/common/mcpPlatf
 import { StateType } from '../../../../../../../platform/update/common/update.js';
 import { buildModelPickerItems, getControlModelsForEntitlement, getModelPickerAccessibilityProvider } from '../../../../browser/widget/input/chatModelPicker.js';
 import { buildMcpMarketplaceItems, buildSkillsLibraryItems, createMcpMarketplaceItemsFromCatalog, getHiddenMcpMarketplaceCatalogEntries, IMcpMarketplaceCatalogEntry, mcpItemMatchesInstalledServer, McpMarketplaceModalItem, resolveMcpMarketplaceItems, parseSkillsShHtml, splitSkillsShId } from '../../../../browser/widget/input/skillsLibrary.js';
+import { IModelPickerSetupCandidate } from '../../../../browser/widget/input/modelPickerActionItem.js';
 import { filterModelsForSession } from '../../../../browser/widget/input/chatModelSelectionLogic.js';
 import { ChatAgentLocation, ChatModeKind } from '../../../../common/constants.js';
 import { ILanguageModelChatMetadata, ILanguageModelChatMetadataAndIdentifier, ILanguageModelsService, IModelControlEntry, IModelsControlManifest } from '../../../../common/languageModels.js';
@@ -120,6 +121,8 @@ function callBuild(
 		isUBB?: boolean;
 		languageModelsService?: ILanguageModelsService;
 		showAutoModel?: boolean;
+		setupCandidates?: IModelPickerSetupCandidate[];
+		onSetup?: (id: string) => void;
 	} = {},
 ): IActionListItem<IActionWidgetDropdownAction>[] {
 	const onSelect = () => { };
@@ -148,6 +151,9 @@ function callBuild(
 		undefined,
 		opts.isUBB,
 		opts.showAutoModel ?? true,
+		undefined,
+		opts.setupCandidates ?? [],
+		opts.onSetup,
 	);
 }
 
@@ -234,6 +240,33 @@ suite('buildModelPickerItems', () => {
 		const noModels = actions.find(a => a.item?.id === 'noModels');
 		assert.ok(noModels, 'expected a no-models entry');
 		assert.strictEqual(noModels!.description, undefined);
+	});
+
+	test('setup candidates render an Install row that runs setup', () => {
+		const installed: string[] = [];
+		const candidates: IModelPickerSetupCandidate[] = [
+			{ id: 'claude', label: 'Claude', description: 'Sign in to use your Claude Pro/Max subscription' },
+		];
+		const items = callBuild([createModel('gpt-4o', 'GPT-4o')], { setupCandidates: candidates, onSetup: id => installed.push(id) });
+		const setup = getActionItems(items).find(a => a.item?.id === 'setup.claude');
+		assert.ok(setup, 'expected a setup row');
+		assert.strictEqual(setup!.badge, 'Install');
+		assert.strictEqual(setup!.description, 'Sign in to use your Claude Pro/Max subscription');
+		setup!.item!.run();
+		assert.deepStrictEqual(installed, ['claude']);
+	});
+
+	test('setup candidates are offered even when no models are available', () => {
+		const candidates: IModelPickerSetupCandidate[] = [{ id: 'codex', label: 'Codex' }];
+		const items = callBuild([], { showAutoModel: false, setupCandidates: candidates, onSetup: () => { } });
+		const actions = getActionItems(items);
+		assert.deepStrictEqual(actions.map(a => a.item?.id), ['noModels', 'setup.codex']);
+	});
+
+	test('no setup section without a setup handler', () => {
+		const candidates: IModelPickerSetupCandidate[] = [{ id: 'codex', label: 'Codex' }];
+		const items = callBuild([createModel('gpt-4o', 'GPT-4o')], { setupCandidates: candidates });
+		assert.strictEqual(getActionItems(items).some(a => a.item?.id === 'setup.codex'), false);
 	});
 
 	test('showAutoModel=false with available models shows the models, not the empty state', () => {

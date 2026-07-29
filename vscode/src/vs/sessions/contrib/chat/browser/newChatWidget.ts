@@ -36,7 +36,9 @@ import { NoAgentHostEmptyState } from './noAgentHostEmptyState.js';
 import { IAgentHostFilterService } from '../../../services/agentHostFilter/common/agentHostFilter.js';
 import { IChatViewOptions } from '../../../browser/parts/chatView.js';
 import { ISessionTypePickerDelegate, IWorkspacePickerDelegate, IWorkspacePickerItem as IChatWorkspacePickerItem } from '../../../../workbench/contrib/chat/browser/chat.js';
-import { AgentSessionProviders } from '../../../../workbench/contrib/chat/browser/agentSessions/agentSessions.js';
+import { IModelPickerSetupCandidate } from '../../../../workbench/contrib/chat/browser/widget/input/modelPickerActionItem.js';
+import { AgentSessionProviders, AgentSessionTarget } from '../../../../workbench/contrib/chat/browser/agentSessions/agentSessions.js';
+import { IAgentCliSetupService } from './agentCliSetup.js';
 import { ChatWidget } from '../../../../workbench/contrib/chat/browser/widget/chatWidget.js';
 import { IChatModelReference, IChatService } from '../../../../workbench/contrib/chat/common/chatService/chatService.js';
 import { ChatAgentLocation, ChatModeKind } from '../../../../workbench/contrib/chat/common/constants.js';
@@ -61,6 +63,9 @@ const NEW_CHAT_ALLOWED_SESSION_TYPES = [
 	AgentSessionProviders.AgentHostCodex,
 	AgentSessionProviders.AgentHostOpencode,
 ];
+
+/** Prefix that turns a bare agent-host provider id into its session type. */
+const AGENT_HOST_SESSION_TYPE_PREFIX = 'agent-host-';
 
 const NEW_CHAT_COMPOSER_LAYOUT_HEIGHT = 216;
 const NEW_CHAT_COMPOSER_INPUT_MAX_HEIGHT = 300;
@@ -326,6 +331,7 @@ export class NewChatWidget extends Disposable {
 		@IFileDialogService private readonly fileDialogService: IFileDialogService,
 		@IFileService private readonly fileService: IFileService,
 		@IPathService private readonly pathService: IPathService,
+		@IAgentCliSetupService private readonly agentCliSetupService: IAgentCliSetupService,
 	) {
 		super();
 		// Track the live instance for the test-only reset command.
@@ -424,7 +430,29 @@ export class NewChatWidget extends Disposable {
 				?? AgentSessionProviders.AgentHostBackboard,
 			setActiveSessionProvider: provider => this._sessionTypePicker.selectSessionTypeById(provider, this._workspacePicker.selectedFolderUri),
 			getAllowedSessionProviders: () => NEW_CHAT_ALLOWED_SESSION_TYPES,
+			getSetupCandidateForProvider: provider => this._getSetupCandidateForProvider(provider),
+			runSetup: id => { void this.agentCliSetupService.beginSetup(id); },
 		};
+	}
+
+	/**
+	 * Resolves the installable agent CLI behind a picker provider — e.g. the
+	 * `agent-host-claude` rail entry maps to the `claude` CLI. Returns undefined
+	 * once the agent is registered (its session type shows up on a provider), so
+	 * the Install affordance disappears as soon as the real agent lands.
+	 */
+	private _getSetupCandidateForProvider(provider: AgentSessionTarget): IModelPickerSetupCandidate | undefined {
+		if (!provider.startsWith(AGENT_HOST_SESSION_TYPE_PREFIX)) {
+			return undefined;
+		}
+		const providerId = provider.slice(AGENT_HOST_SESSION_TYPE_PREFIX.length);
+		const registered = new Set<string>();
+		for (const sessionsProvider of this.sessionsProvidersService.getProviders()) {
+			for (const sessionType of sessionsProvider.sessionTypes) {
+				registered.add(sessionType.id);
+			}
+		}
+		return this.agentCliSetupService.getSetupCandidates(registered).find(candidate => candidate.id === providerId);
 	}
 
 	private _getSelectedChatWorkspacePickerItem(): IChatWorkspacePickerItem | undefined {

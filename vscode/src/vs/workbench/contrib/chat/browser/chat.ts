@@ -26,6 +26,7 @@ import { ChatAgentLocation, ChatModeKind } from '../common/constants.js';
 import { ChatAttachmentModel } from './attachments/chatAttachmentModel.js';
 import { IChatEditorOptions } from './widgetHosts/editor/chatEditor.js';
 import { ChatInputPart } from './widget/input/chatInputPart.js';
+import { IModelPickerSetupCandidate } from './widget/input/modelPickerActionItem.js';
 import { ChatWidget, IChatWidgetContrib } from './widget/chatWidget.js';
 import { ICodeBlockActionContext } from './widget/chatContentParts/codeBlockPart.js';
 import { AgentSessionTarget } from './agentSessions/agentSessions.js';
@@ -108,6 +109,15 @@ export interface ISessionTypePickerDelegate {
 	 * Used to gate cloud delegation which requires a GitHub repository.
 	 */
 	hasGitRepository?(): boolean;
+	/**
+	 * Optional lookup for a "bring your own subscription" provider whose agent
+	 * CLI is not installed yet. When this returns a candidate, provider surfaces
+	 * (e.g. the combined provider + model picker) offer to install it instead of
+	 * only showing an empty model list.
+	 */
+	getSetupCandidateForProvider?(provider: AgentSessionTarget): IModelPickerSetupCandidate | undefined;
+	/** Starts the install + sign-in flow for a {@link getSetupCandidateForProvider} entry. */
+	runSetup?(id: string): void;
 }
 
 export const IChatWidgetService = createDecorator<IChatWidgetService>('chatWidgetService');

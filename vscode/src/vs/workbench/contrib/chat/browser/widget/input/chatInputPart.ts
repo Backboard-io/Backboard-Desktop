@@ -3026,7 +3026,10 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		this.contextUsageWidgetContainer = elements.contextUsageWidgetContainer;
 		this.statusToolbarContainer = elements.statusToolbarContainer;
 
-		if (this.options.renderStyle === 'compact') {
+		// Compact chats have no secondary toolbar to hang the context usage off, and
+		// the sessions window deliberately keeps it inside the composer shell rather
+		// than on the row beneath it, so both host it in the composer footer.
+		if (this.options.renderStyle === 'compact' || this.options.isSessionsWindow) {
 			toolbarsContainer.prepend(this.contextUsageWidgetContainer);
 		}
 

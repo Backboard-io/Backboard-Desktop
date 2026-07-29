@@ -298,15 +298,22 @@
 	animation: t3-working-dots 1.4s linear infinite;
 }
 
-/* Drop the shimmer gradient: T3's label is flat muted text at 11px. */
+/* Drop the shimmer gradient: T3's label is flat muted text at 11px. The
+ * elapsed-time span alongside it must match the label exactly — stock leaves it
+ * at the larger `body-s` size, and with the row centre-aligned (rather than on a
+ * shared baseline) the two runs of text visibly sit off each other. Same size,
+ * same line-height, same tone puts the ticker back on the label's baseline. */
 :is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .progress-container.shimmer-progress .chat-working-progress-step > p,
-:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .progress-container.shimmer-progress .chat-working-progress-step > p {
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .progress-container.shimmer-progress .chat-working-progress-step > span,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .progress-container.shimmer-progress .chat-working-progress-step > p,
+:is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .progress-container.shimmer-progress .chat-working-progress-step > span {
 	background: none;
 	-webkit-background-clip: border-box;
 	background-clip: border-box;
 	-webkit-text-fill-color: currentColor;
 	animation: none;
 	font-size: 11px;
+	line-height: 16px;
 	color: color-mix(in srgb, var(--t3-muted-foreground) 70%, transparent);
 }
 

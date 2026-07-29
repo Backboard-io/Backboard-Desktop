@@ -2897,6 +2897,27 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	flex-shrink: 0;
 }
 
+/* Bring-your-own-subscription rows: the Install badge trails the row and reads
+   as a button, with the sign-in hint kept next to the agent name. */
+.action-widget .monaco-list-row.chat-model-picker-setup .action-item-badge {
+	order: 1;
+	border-radius: 4px;
+	background-color: var(--vscode-button-background);
+	color: var(--vscode-button-foreground);
+	font-weight: 600;
+}
+
+.action-widget .monaco-list-row.chat-model-picker-setup.focused .action-item-badge {
+	background-color: var(--vscode-button-hoverBackground, var(--vscode-button-background));
+}
+
+.action-widget .monaco-list-row.chat-model-picker-setup .description {
+	flex-shrink: 1;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
 .interactive-session .chat-input-toolbars .codicon-debug-stop {
 	color: var(--vscode-icon-foreground) !important;
 }
@@ -5119,4 +5140,363 @@ have to be updated for changes to the rules above, or to support more deeply nes
 
 .monaco-workbench .chat-model-hover-configurable > .monaco-button .codicon[class*='codicon-'] {
 	font-size: var(--vscode-codiconFontSize-compact);
+}
+
+/* ==========================================================================
+ * Backboard's shared chat composer look.
+ *
+ * The Simple window's composer is the reference design; these rules reproduce
+ * it for the other products so a composer looks the same wherever it is
+ * mounted. Add `backboard-composer` to a host element to opt its composer in —
+ * the Advanced (Optimus) right panel and the Editor window's chat view pane
+ * both do. The Simple window is styled by `vs/sessions/browser/media/style.css`
+ * and does NOT carry the class; that file remains the source these rules were
+ * derived from, so changes there should be mirrored here.
+ *
+ * Colours route through `--bb-composer-*`, which fall back to the `--sessions-*`
+ * tokens where they exist (the agent-sessions workbench, including its
+ * per-theme overrides) and to stock workbench tokens where they do not (the
+ * editor workbench, which never loads the sessions stylesheets).
+ *
+ * These live at the end of chat.css rather than in their own stylesheet on
+ * purpose. A NEW .css file is absent from the dev CSS import map until the
+ * Electron main process restarts (`CSSDevelopmentService` ripgreps `out/` once
+ * per run and caches it), so importing one makes the window die with
+ * "Expected a JavaScript-or-Wasm module script ... MIME type of text/css"
+ * until a full relaunch. Appending here keeps Cmd+R working, and the rules
+ * need to out-rank chat.css's base composer rules anyway.
+ * ========================================================================== */
+
+.monaco-workbench .backboard-composer {
+	--bb-composer-region-background: var(--sessions-main-region-background, var(--vscode-agents-background, var(--vscode-editor-background)));
+	--bb-composer-surface-border: var(--sessions-codex-surface-border, color-mix(in srgb, var(--vscode-agentsChatInput-border, var(--vscode-editorWidget-border)) 72%, transparent));
+	/* The composer sits on the region rather than floating a widget-coloured
+	 * card on it — the border alone defines the shell. */
+	--bb-composer-surface-background: var(--bb-composer-region-background);
+}
+
+.monaco-workbench .backboard-composer .interactive-session .chat-input-container {
+	border-radius: 18px;
+	border-color: var(--bb-composer-surface-border) !important;
+	background-color: var(--bb-composer-surface-background);
+	color: var(--vscode-agentsChatInput-foreground);
+}
+
+.monaco-workbench .backboard-composer .interactive-session .chat-input-container.focused {
+	border-color: color-mix(in srgb, var(--vscode-agentsChatInput-focusBorder, var(--vscode-focusBorder)) 48%, var(--vscode-agentsChatInput-border)) !important;
+	box-shadow: 0 0 0 2px color-mix(in srgb, var(--vscode-agentsChatInput-focusBorder, var(--vscode-focusBorder)) 20%, transparent);
+}
+
+/* While the developer-joy animated border is active, keep a faint
+	persistent ring so the input still has a visible boundary throughout
+	the comet animation (improves visuals + accessibility). The spinning
+	gradient ring overlays this. When focused, the regular focus border
+	is blended/dimmed during the animation to avoid competing visually. */
+.monaco-workbench .backboard-composer .interactive-session .chat-input-container.working:not(.focused) {
+	border-color: var(--vscode-agentsChatInput-border) !important;
+}
+
+.monaco-workbench .backboard-composer .interactive-session .chat-input-container.working {
+	/* The disabled input overlay shown during an active run inherits the shared
+		chat input's working state. Keep it clipped to the Agents composer frame. */
+	overflow: hidden;
+}
+
+/* Dim the focus border while the comet is animating so the bright focus
+	ring doesn't visually fight with the spinning gradient. */
+.monaco-workbench .backboard-composer .interactive-session .chat-input-container.working.focused {
+	border-color: color-mix(in srgb, var(--vscode-agentsChatInput-focusBorder, var(--vscode-focusBorder)) 40%, transparent) !important;
+}
+
+/* Make the Monaco editor inside the chat input transparent so it inherits the chatInput.background */
+.monaco-workbench .backboard-composer .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor {
+	background-color: transparent !important;
+}
+
+/* The `.monaco-editor-background` layer must use a *solid* color (not transparent):
+ * the editor reuses this class for the reverse-rounded selection corner pieces,
+ * which "carve" the rounded notches out of the selection highlight. With a
+ * transparent background those pieces stop covering the selection layer and the
+ * corners render as blocky squares. Paint it with the same color the chat input
+ * container uses so the editor still visually matches its surroundings. */
+.monaco-workbench .backboard-composer .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background {
+	background-color: var(--bb-composer-surface-background) !important;
+}
+
+.monaco-workbench .backboard-composer .interactive-session .chat-edit-input-container .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background {
+	background-color: transparent !important;
+}
+
+/* `.backboard-composer` is applied to the composer's host element only, so
+ * these never leak into other chat surfaces that reuse `.interactive-session`
+ * — the inline chat widgets and the agent-session hover widget. */
+.monaco-workbench .backboard-composer .interactive-session .interactive-input-part {
+	width: 100%;
+	max-width: none;
+	margin: 0;
+	display: inherit;
+	padding: 4px 20px;
+	box-sizing: border-box;
+}
+
+/* Make sure when editing we don't give unnecessary padding. */
+.monaco-workbench .backboard-composer .interactive-session .chat-edit-input-container .interactive-input-part {
+	padding: 4px 0;
+}
+
+/* ---- T3 Code composer shell ---- */
+
+/* Geometry ported from T3 Code's composer (`ChatComposer.tsx` +
+ * `.chat-composer-glass-host` in their index.css): a 22px shell radius, a low
+ * soft drop shadow, 28px footer controls with 10px corners and a 32px circular
+ * send button. Colours stay on theme tokens (t3Theme.css pins the dark
+ * palette), so this block holds in light themes too. */
+.monaco-workbench .backboard-composer .interactive-session .chat-input-container {
+	border-radius: 22px;
+	/* T3's host shadow: `0 12px 28px -18px rgb(0 0 0 / 40%)`. */
+	box-shadow: 0 12px 28px -18px rgb(0 0 0 / 40%);
+	padding: 4px 12px 10px;
+}
+
+/* Keep the drop shadow underneath the focus ring. */
+.monaco-workbench .backboard-composer .interactive-session .chat-input-container.focused {
+	box-shadow:
+		0 0 0 2px color-mix(in srgb, var(--vscode-agentsChatInput-focusBorder, var(--vscode-focusBorder)) 20%, transparent),
+		0 12px 28px -18px rgb(0 0 0 / 40%);
+}
+
+/* The new-chat (draft) composer flattens the shadow and pins its own radius in
+ * chatWidget.css; out-rank those so both composers share one shell. The
+ * padding must also be restated here: the shared shell rule above would
+ * otherwise shrink this card's generous inset to the session composer's 8px,
+ * leaving the prompt text against the edge. T3's hero card: `pt-4 px-4 pb-3`. */
+.monaco-workbench .backboard-composer .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container {
+	border-radius: 22px;
+	box-shadow: 0 12px 28px -18px rgb(0 0 0 / 40%);
+	padding: 16px 16px 12px;
+}
+
+/* The inline edit box inside a sent request shares `.chat-input-container` but
+ * is a compact bubble, not the main shell — keep it near the stock look. */
+.monaco-workbench .backboard-composer .interactive-session .chat-edit-input-container .chat-input-container {
+	border-radius: 12px;
+	box-shadow: none;
+	padding: 0 6px 6px;
+}
+
+/* Room for the taller controls between the editor and the footer row. The
+ * container already supplies 12px of side inset, so the row itself sits flush
+ * with it and only adds vertical breathing room. */
+.monaco-workbench .backboard-composer .interactive-session .chat-input-toolbars {
+	margin-top: 10px;
+	padding: 0;
+}
+
+/* The context usage dial rides in the composer footer here (moved off the
+ * secondary toolbar in chatInputPart), so it needs its own separation from the
+ * pickers on its left and the send button on its right — `margin-left: auto`
+ * from chat.css only handles the former. */
+.monaco-workbench .backboard-composer .interactive-session .chat-input-toolbars .chat-context-usage-container {
+	margin-left: auto;
+	margin-right: 8px;
+}
+
+.monaco-workbench .backboard-composer .interactive-session .chat-input-toolbars .chat-context-usage-widget {
+	padding: 4px 6px;
+	border-radius: 10px;
+}
+
+/* Prompt text inset: T3 pads the editor `px-4` (16px) from the card edge. The
+ * container contributes 12px; the editor row supplies the rest. Safe against
+ * Monaco's layout — chatInputPart caps the editor at the container's *content*
+ * width (`dom.getContentWidth`), which excludes this padding. */
+.monaco-workbench .backboard-composer .interactive-session .interactive-input-part .chat-editor-container {
+	padding: 0 4px;
+}
+
+/* The new-chat card already carries 20px of its own horizontal padding
+ * (chatWidget.css) — don't stack the session inset on top of it. */
+.monaco-workbench .backboard-composer .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-editor-container {
+	padding: 0;
+}
+
+/* Footer controls: T3's ghost buttons are 28px tall with `rounded-lg` (10px)
+ * corners. The split model picker keeps its own inner-section highlight, so it
+ * is excluded here and resized below. Descendant (not child) combinators: the
+ * gear sits inside a `.monaco-dropdown` and the mode chip inside a
+ * `.sessions-chat-picker-slot`, both between the action-item and its label.
+ * `!important` counters the workbench-wide `border-radius: 0 !important`
+ * action-label flattener at the top of this file. */
+.monaco-workbench .backboard-composer .interactive-session .chat-input-toolbar .monaco-action-bar .action-item .action-label:not(.model-picker-split),
+.monaco-workbench .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item .action-label.codicon-mic {
+	height: 28px;
+	min-width: 28px;
+	box-sizing: border-box;
+	border-radius: 10px !important;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+/* Rounded hover container on every footer control (T3's ghost-button hover). */
+.monaco-workbench .backboard-composer .interactive-session .chat-input-toolbar .monaco-action-bar .action-item:not(.disabled) .action-label:not(.model-picker-split):hover,
+.monaco-workbench .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) .action-label.codicon-mic:hover {
+	background-color: var(--vscode-toolbar-hoverBackground);
+}
+
+.monaco-workbench .backboard-composer .interactive-session .chat-input-picker-item .action-label.model-picker-split .model-picker-section {
+	height: 22px;
+	padding: 0 7px;
+	box-sizing: border-box;
+	border-radius: 8px;
+}
+
+/* Chips with a text label get T3's chip padding (`px-2`). */
+.monaco-workbench .backboard-composer .interactive-session .chat-input-toolbar .monaco-action-bar .action-item .action-label:not(.model-picker-split):has(.chat-input-picker-label),
+.monaco-workbench .backboard-composer .interactive-session .chat-input-toolbar .monaco-action-bar .action-item .action-label:not(.model-picker-split):has(.combined-model-provider-trigger-label),
+.monaco-workbench .backboard-composer .interactive-session .chat-input-toolbar .monaco-action-bar .action-item .action-label:not(.model-picker-split):has(.sessions-chat-dropdown-label) {
+	padding: 0 8px;
+}
+
+/* Row icons: T3's `size-4.5` (18px) for the icon-only controls. The labels
+ * here are the codicon glyphs themselves, and the 28px/32px flex boxes above
+ * give the larger glyph room, so nothing clips. */
+.monaco-workbench .backboard-composer .interactive-session .chat-input-toolbar .monaco-action-bar .action-item .action-label.codicon,
+.monaco-workbench .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item .action-label.codicon {
+	font-size: 18px;
+}
+
+/* The provider mark inside the model chip sits in a fixed 16px codicon box
+ * (actionbar.css), so free the box alongside the size bump. */
+.monaco-workbench .backboard-composer .interactive-session .chat-input-toolbar .combined-model-provider-trigger-icon .codicon {
+	font-size: 16px;
+	width: auto;
+	height: auto;
+}
+
+/* Dropdown chevrons scale with the rest of the row. The combined picker's
+ * chevron span *is* the codicon element, so match it directly too. */
+.monaco-workbench .backboard-composer .interactive-session .chat-input-toolbar .chat-input-picker-item .action-label .codicon-chevron-down,
+.monaco-workbench .backboard-composer .interactive-session .chat-input-toolbar .codicon.combined-model-provider-trigger-chevron,
+.monaco-workbench .backboard-composer .interactive-session .chat-input-toolbar .combined-model-provider-trigger-chevron .codicon {
+	font-size: 12px;
+}
+
+/* Primary action: T3's 32px `rounded-full` send button (`size-8`) with an
+ * inset top highlight, hover scale and 30% disabled opacity; the stop state is
+ * their destructive red circle. This fork's submit action uses
+ * `Codicon.newLine` (↵) — the stock filled-circle rules above only cover
+ * `codicon-arrow-up`, so the fill is applied here for both glyphs. */
+.monaco-workbench .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-arrow-up,
+.monaco-workbench .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-newline,
+.monaco-workbench .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-stop-circle {
+	box-sizing: border-box;
+	width: 32px;
+	height: 32px;
+	min-width: 32px;
+	/* Beats the workbench-wide `border-radius: 0 !important` flattener. */
+	border-radius: 999px !important;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	transition: background-color 120ms ease, transform 150ms ease, box-shadow 150ms ease;
+}
+
+.monaco-workbench .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-arrow-up,
+.monaco-workbench .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-newline {
+	background: var(--vscode-button-background);
+	color: var(--vscode-button-foreground) !important;
+	box-shadow:
+		inset 0 1px 0 rgb(255 255 255 / 16%),
+		0 1px 2px rgb(0 0 0 / 24%);
+}
+
+.monaco-workbench .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-arrow-up:hover,
+.monaco-workbench .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-newline:hover {
+	background: var(--vscode-button-hoverBackground);
+}
+
+/* The stop button sits on the composer rather than shouting from it: it takes
+ * the composer's own surface colour instead of T3's destructive red, so the
+ * only thing that reads during a run is the glyph. */
+.monaco-workbench .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-stop-circle {
+	background: var(--bb-composer-surface-background);
+	color: var(--vscode-foreground) !important;
+	box-shadow: none;
+}
+
+.monaco-workbench .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-stop-circle:hover {
+	background: color-mix(in srgb, var(--vscode-foreground) 10%, var(--bb-composer-surface-background));
+}
+
+.monaco-workbench .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-arrow-up:hover,
+.monaco-workbench .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-newline:hover,
+.monaco-workbench .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-stop-circle:hover {
+	transform: scale(1.05);
+}
+
+.monaco-workbench .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-arrow-up:active,
+.monaco-workbench .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-newline:active,
+.monaco-workbench .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-stop-circle:active {
+	transform: scale(1);
+	box-shadow: inset 0 1px 0 rgb(0 0 0 / 8%);
+}
+
+/* T3 keeps the primary fill on the disabled send button, just faded. Fading
+ * via `opacity` washes the glyph out against light themes (white arrow over a
+ * 30%-alpha fill), so mix the fade into the fill instead and keep the glyph
+ * at full strength. */
+.monaco-workbench .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item.disabled > .action-label.codicon-arrow-up,
+.monaco-workbench .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item.disabled > .action-label.codicon-newline {
+	background: color-mix(in srgb, var(--vscode-button-background) 45%, var(--vscode-agentsChatInput-background, var(--vscode-editor-background)));
+	color: var(--vscode-button-foreground) !important;
+	opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.monaco-workbench .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-arrow-up,
+	.monaco-workbench .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-newline,
+	.monaco-workbench .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-stop-circle {
+		transition: background-color 120ms ease;
+		transform: none;
+	}
+}
+
+/* NOTE: the Simple window additionally hides `.chat-sessionPicker-container`
+ * here (style.css) because it replaces those option-group pickers with its own
+ * new-session controls. That rule is deliberately NOT reproduced in this shared
+ * block: the Editor and Advanced composers have no replacement, and the session
+ * pickers are the only way to reach a BYOS ("bring your own server") agent
+ * provider there. Hiding them makes BYOS unselectable. */
+
+/* ---- New-chat hero composer ----
+ *
+ * Simple builds a dedicated new-chat surface whose composer is a tall centred
+ * card (`.new-chat-composer-stack` in
+ * `vs/sessions/contrib/chat/browser/media/chatWidget.css`). The other products
+ * reuse one composer for the whole conversation, so there is no such element to
+ * hook — they get the same geometry from `chat-composer-empty`, which ChatWidget
+ * sets while nothing has been sent yet, and lose it on the first request. */
+
+.monaco-workbench .backboard-composer .interactive-session.chat-composer-empty .interactive-input-part {
+	width: min(820px, calc(100% - 40px));
+	margin: 0 auto;
+	padding: 0;
+	box-sizing: border-box;
+}
+
+.monaco-workbench .backboard-composer .interactive-session.chat-composer-empty .interactive-input-part .chat-input-container {
+	/* T3's hero card: 20px corners, `pt-4 px-4 pb-3`, tall enough to read as a
+	 * prompt surface rather than a one-line reply box. */
+	min-height: 172px;
+	padding: 18px 20px 14px;
+	border-radius: 20px;
+	box-shadow: none;
+	display: flex;
+	flex-direction: column;
+	justify-content: flex-start;
+	gap: 12px;
+	overflow: hidden;
+	position: relative;
+	box-sizing: border-box;
 }

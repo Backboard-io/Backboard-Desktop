@@ -326,6 +326,19 @@ export const MANAGE_CHAT_COMMAND_ID = 'workbench.action.chat.manage';
 export const BACKBOARD_MODE_SWITCHER_COMMAND_ID = 'workbench.action.backboardModeSwitcher';
 export const OPEN_WORKSPACE_IN_AGENTS_WINDOW_COMMAND_ID = 'workbench.action.openWorkspaceInAgentsWindow';
 export const OPEN_AGENTS_WINDOW_COMMAND_ID = 'workbench.action.openAgentsWindow';
+
+/**
+ * The folder the editor window was on the last time the user left Editor mode,
+ * as a URI string. Written by the actions that switch the editor window to
+ * Simple/Advanced and read when switching back, so a round trip through another
+ * mode returns to the folder the user was actually working in rather than to
+ * whichever session happens to be most recent.
+ *
+ * Application-scoped on purpose: the Simple and Advanced windows are separate
+ * windows and need to read what the editor window wrote.
+ */
+export const BACKBOARD_LAST_EDITOR_FOLDER_STORAGE_KEY = 'backboard.mode.lastEditorFolder';
+
 export const OPEN_AGENTS_WINDOW_PRECONDITION = ContextKeyExpr.and(
 	ChatEntitlementContextKeys.Setup.hidden.negate(),
 	ChatEntitlementContextKeys.Setup.disabledInWorkspace.negate(),

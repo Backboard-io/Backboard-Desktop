@@ -1,0 +1,20 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* MOVED — this file is dead and safe to delete (`rm` it).
+ *
+ * The shared `.backboard-composer` rules now live at the end of `chat.css`.
+ * They were moved because a NEW stylesheet cannot be imported without a full
+ * Electron main-process restart: `CSSDevelopmentService` ripgreps `out/` for
+ * CSS modules once per app run and caches the result, and the renderer builds
+ * its CSS import map from that list. A file missing from the map resolves to
+ * the real `.css`, which the browser then tries to parse as an ES module:
+ *
+ *   Failed to load module script: Expected a JavaScript-or-Wasm module script
+ *   but the server responded with a MIME type of "text/css".
+ *
+ * That takes down the whole `sessions.desktop.main.js` graph, and Cmd+R does
+ * not recover it. Appending to an already-mapped stylesheet keeps the normal
+ * reload loop working. */

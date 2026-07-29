@@ -589,9 +589,7 @@
 	font-size: 11.5px;
 }
 
-/* Right panel: hosts the Sessions chat views (the Simple window's composer and
-   transcript). The view sizes its own element in px from `layoutBody`, so the
-   content host only has to fill the pane and not add a scroll context. */
+/* Right panel: editor-style chat host with a folder row under the composer. */
 .optimus-chat-view {
 	display: flex;
 	flex-direction: column;
@@ -602,11 +600,18 @@
 	min-width: 0;
 }
 
-.optimus-chat-view-content {
+.optimus-chat-editor-host {
 	flex: 1;
 	min-height: 0;
 	min-width: 0;
-	overflow: hidden;
+}
+
+.optimus-chat-folder-row {
+	height: 30px;
+	flex-shrink: 0;
+	display: flex;
+	align-items: center;
+	padding: 0 12px;
 }
 
 /* --- Diff badge (SCM-style +N −N) --------------------------------------- */
