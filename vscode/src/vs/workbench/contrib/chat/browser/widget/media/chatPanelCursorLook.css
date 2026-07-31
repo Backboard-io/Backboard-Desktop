@@ -46,25 +46,13 @@
 	order: -1;
 }
 
-/* The chat container has no switcher tab of its own once its sessions are in the
-   row — they stand in for it, exactly as Cursor's chat tabs do.
- *
- * Two guards, because dropping this tab wrongly leaves no way back to chat:
- * `has-chat-tabs` means the session tabs are actually there to stand in for it,
- * and `:has()` means some other panel is there to switch to — otherwise hiding
- * it would empty the switcher entirely. */
-.monaco-workbench .part.auxiliarybar .composite.title.has-chat-tabs > .composite-bar-container:has(.action-item[data-composite-id]:not([data-composite-id="workbench.panel.chat"])) .action-item[data-composite-id="workbench.panel.chat"] {
-	display: none;
-}
-
 .monaco-workbench .part.auxiliarybar > .composite.title {
 	align-items: center;
 	padding-inline: var(--bb-agent-tab-inset);
 }
 
-/* Panels take the width they need; the session strip absorbs the squeeze and
-   scrolls, so a long chat title never pushes "Claude Code" out of reach. The
-   negative inset lets the fade below sit on the row's true edges. */
+/* The switcher is handed an explicit pixel width by `layoutCompositeBar()`, so it
+   grows into the space it was measured for rather than shrink-wrapping. */
 .monaco-workbench .part.auxiliarybar > .title.has-composite-bar > .composite-bar-container {
 	align-items: center;
 	display: flex;
@@ -145,8 +133,8 @@
 	overflow-x: auto;
 	overflow-y: hidden;
 	scrollbar-width: none;
-	/* The composite bar draws the edge fade for the whole row; a second mask here
-	   would fade the seam between the two strips. */
+	/* The base strip fades its last 96px to hint at scroll; in this row that would
+	   fade the seam into the panel tabs instead. */
 	mask-image: none;
 	-webkit-mask-image: none;
 }
@@ -158,9 +146,10 @@
 /* --- The tab itself, shared by both strips -------------------------------- */
 
 /*
- * A tab is a text pill: no icon, no divider, no underline. Inactive tabs are
- * capped narrow and truncate; the selected one is allowed to grow, which is what
- * keeps the active chat readable while the rest compress.
+ * A tab is a rounded pill: its agent's mark, then its name. No divider, no
+ * underline — the fill is the only selection cue. Inactive tabs are capped narrow
+ * and truncate; the selected one grows, which keeps the active chat readable
+ * while the rest compress.
  */
 .monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab,
 .monaco-workbench .part.auxiliarybar > .title.has-composite-bar > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(.icon) {
@@ -214,9 +203,21 @@
 	background: color-mix(in srgb, var(--bb-agent-tab-selected-background) 55%, transparent);
 }
 
-/* Text only, like Cursor's. */
-.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab .chat-view-title-tab-icon {
-	display: none;
+/* Each tab carries its agent's mark: the Backboard chat sessions, and whatever
+   icon Claude Code or Codex contributed for their view container. URI icons are
+   painted as a mask tinted by the item's foreground colour (set inline by
+   `CompositeBarActionViewItem.updateStyles`), codicons render as a glyph. */
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab .chat-view-title-tab-icon,
+.monaco-workbench .part.auxiliarybar > .title.has-composite-bar > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item .composite-bar-action-icon {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 auto;
+	width: 16px;
+	height: 16px;
+	font-size: 14px;
+	background-repeat: no-repeat;
+	background-position: 50% 50%;
 }
 
 .monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab .chat-view-title-tab-label,

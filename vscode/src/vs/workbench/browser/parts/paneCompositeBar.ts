@@ -73,6 +73,9 @@ export interface IPaneCompositeBarOptions {
 	readonly placeholderViewContainersKey: string;
 	readonly viewContainersWorkspaceStateKey: string;
 	readonly icon: boolean;
+
+	/** Show each composite's icon next to its label instead of instead of it. */
+	readonly showIconWithLabel?: boolean;
 	readonly compact?: boolean;
 	readonly iconSize: number;
 	readonly recomputeSizes: boolean;
@@ -134,6 +137,7 @@ export class PaneCompositeBar extends Disposable {
 	private createCompositeBar(cachedItems: ICompositeBarItem[]) {
 		return this._register(this.instantiationService.createInstance(CompositeBar, cachedItems, {
 			icon: this.options.icon,
+			showIconWithLabel: this.options.showIconWithLabel,
 			compact: this.options.compact,
 			orientation: this.options.orientation,
 			activityHoverOptions: this.options.activityHoverOptions,
@@ -392,14 +396,16 @@ export class PaneCompositeBar extends Disposable {
 	private toCompositeBarActionItem(id: string, name: string, icon: URI | ThemeIcon | undefined, keybindingId: string | undefined): ICompositeBarActionItem {
 		let classNames: string[] | undefined = undefined;
 		let iconUrl: URI | undefined = undefined;
-		if (this.options.icon) {
+		if (this.options.icon || this.options.showIconWithLabel) {
 			if (URI.isUri(icon)) {
 				iconUrl = icon;
 				const cssUrl = asCSSUrl(icon);
 				const hash = new StringSHA1();
 				hash.update(cssUrl);
 				const iconId = `activity-${id.replace(/\./g, '-')}-${hash.digest()}`;
-				const iconClass = `.monaco-workbench .${this.options.partContainerClass} .monaco-action-bar .action-label.${iconId}`;
+				// Matches whichever element carries the icon: the label itself in icon
+				// mode, or the dedicated icon element when it sits beside the label.
+				const iconClass = `.monaco-workbench .${this.options.partContainerClass} .monaco-action-bar .action-label.${iconId}, .monaco-workbench .${this.options.partContainerClass} .monaco-action-bar .composite-bar-action-icon.${iconId}`;
 				classNames = [iconId, 'uri-icon'];
 				createCSSRule(iconClass, `
 				mask: ${cssUrl} no-repeat 50% 50%;

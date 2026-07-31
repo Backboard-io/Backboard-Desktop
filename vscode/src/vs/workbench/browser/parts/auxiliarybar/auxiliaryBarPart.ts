@@ -214,6 +214,9 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 			placeholderViewContainersKey: AuxiliaryBarPart.placeholdeViewContainersKey,
 			viewContainersWorkspaceStateKey: AuxiliaryBarPart.viewContainersWorkspaceStateKey,
 			icon: !this.configuration.showLabels,
+			// The right bar's tabs name an agent — Backboard, Claude Code, Codex — so
+			// they carry the product mark alongside the label rather than instead of it.
+			showIconWithLabel: true,
 			orientation: ActionsOrientation.HORIZONTAL,
 			recomputeSizes: true,
 			activityHoverOptions: {

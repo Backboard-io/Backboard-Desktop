@@ -145,6 +145,12 @@ export interface IActivityHoverOptions {
 
 export interface ICompositeBarActionViewItemOptions extends IActionViewItemOptions {
 	readonly icon?: boolean;
+
+	/**
+	 * Render the composite's icon *next to* its label rather than instead of it.
+	 * Only meaningful when {@link icon} is off, which otherwise means label-only.
+	 */
+	readonly showIconWithLabel?: boolean;
 	readonly colors: (theme: IColorTheme) => ICompositeBarColors;
 
 	readonly hoverOptions: IActivityHoverOptions;
@@ -156,6 +162,7 @@ export class CompositeBarActionViewItem extends BaseActionViewItem {
 
 	protected container!: HTMLElement;
 	protected label!: HTMLElement;
+	private iconElement: HTMLElement | undefined;
 	protected badge!: HTMLElement;
 	protected override readonly options: ICompositeBarActionViewItemOptions;
 
@@ -208,6 +215,14 @@ export class CompositeBarActionViewItem extends BaseActionViewItem {
 				const borderBottomColor = this._action.checked ? colors.activeBorderBottomColor : null;
 				this.label.style.color = foreground ? foreground.toString() : '';
 				this.label.style.borderBottomColor = borderBottomColor ? borderBottomColor.toString() : '';
+
+				if (this.iconElement) {
+					// A URI icon is painted as a mask, so its colour is the background;
+					// a codicon is a glyph, so its colour is the foreground.
+					const iconColor = foreground ? foreground.toString() : '';
+					this.iconElement.style.backgroundColor = this.compositeBarActionItem.iconUrl ? iconColor : '';
+					this.iconElement.style.color = this.compositeBarActionItem.iconUrl ? '' : iconColor;
+				}
 			}
 
 			this.container.style.setProperty('--insert-border-color', colors.dragAndDropBorder ? colors.dragAndDropBorder.toString() : '');
@@ -273,6 +288,11 @@ export class CompositeBarActionViewItem extends BaseActionViewItem {
 				hideOnKeyDown: true,
 			},
 		}), { groupId: 'composite-bar-actions' }));
+
+		// Icon, when it accompanies the label rather than replacing it
+		if (this.options.showIconWithLabel && !this.options.icon) {
+			this.iconElement = append(container, $('.composite-bar-action-icon'));
+		}
 
 		// Label
 		this.label = append(container, $('a'));
@@ -397,8 +417,14 @@ export class CompositeBarActionViewItem extends BaseActionViewItem {
 	protected override updateLabel(): void {
 		this.label.className = 'action-label';
 
+		if (this.iconElement) {
+			this.iconElement.className = 'composite-bar-action-icon';
+		}
+
 		if (this.compositeBarActionItem.classNames) {
-			this.label.classList.add(...this.compositeBarActionItem.classNames);
+			// With a separate icon element the label carries text only; without one
+			// the label element *is* the icon.
+			(this.iconElement ?? this.label).classList.add(...this.compositeBarActionItem.classNames);
 		}
 
 		if (!this.options.icon) {
