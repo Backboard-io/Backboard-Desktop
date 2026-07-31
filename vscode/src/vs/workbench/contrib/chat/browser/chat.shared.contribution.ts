@@ -34,7 +34,6 @@ import { type ConfigurationKeyValuePairs, Extensions, IConfigurationMigrationReg
 import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry.js';
 import { IWorkbenchContribution, WorkbenchPhase, registerWorkbenchContribution2 } from '../../../common/contributions.js';
 import { EditorExtensions, IEditorFactoryRegistry } from '../../../common/editor.js';
-import { IViewDescriptor, IViewDescriptorService, ViewVisibilityState } from '../../../common/views.js';
 import { IWorkbenchAssignmentService } from '../../../services/assignment/common/assignmentService.js';
 import { ChatEntitlement, IChatEntitlementService } from '../../../services/chat/common/chatEntitlementService.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
@@ -126,7 +125,7 @@ import './agentSessions/agentSessions.contribution.js';
 
 import { ChatContextKeys } from '../common/actions/chatContextKeys.js';
 
-import { ChatViewContainerId, ChatViewId, IChatAccessibilityService, IChatCodeBlockContextProviderService, IChatWidgetService, IQuickChatService, isIChatResourceViewContext, isIChatViewViewContext } from './chat.js';
+import { ChatViewId, IChatAccessibilityService, IChatCodeBlockContextProviderService, IChatWidgetService, IQuickChatService, isIChatResourceViewContext, isIChatViewViewContext } from './chat.js';
 import { ChatAccessibilityService } from './accessibility/chatAccessibilityService.js';
 import './attachments/chatAttachmentModel.js';
 import './widget/input/chatInputNotificationService.js';
@@ -2097,80 +2096,6 @@ class ChatDebugResolverContribution implements IWorkbenchContribution {
 	}
 }
 
-class CodexExtensionChatContainerContribution extends Disposable implements IWorkbenchContribution {
-
-	static readonly ID = 'workbench.contrib.codexExtensionChatContainer';
-
-	private static readonly codexViewIds = new Set([
-		'chatgpt.sidebarView',
-		'chatgpt.sidebarSecondaryView'
-	]);
-
-	private readonly containerListeners = this._register(new DisposableMap<string>());
-
-	constructor(
-		@IViewDescriptorService private readonly viewDescriptorService: IViewDescriptorService,
-	) {
-		super();
-
-		for (const viewContainer of this.viewDescriptorService.viewContainers) {
-			this.watchContainer(viewContainer.id);
-		}
-
-		this._register(this.viewDescriptorService.onDidChangeViewContainers(({ added }) => {
-			for (const { container } of added) {
-				this.watchContainer(container.id);
-			}
-			this.relocateCodexViews();
-		}));
-
-		this._register(this.viewDescriptorService.onDidChangeContainer(({ views }) => {
-			if (views.some(view => CodexExtensionChatContainerContribution.codexViewIds.has(view.id))) {
-				this.relocateCodexViews();
-			}
-		}));
-
-		this.relocateCodexViews();
-	}
-
-	private watchContainer(containerId: string): void {
-		if (this.containerListeners.has(containerId)) {
-			return;
-		}
-
-		const viewContainer = this.viewDescriptorService.getViewContainerById(containerId);
-		if (!viewContainer) {
-			return;
-		}
-
-		const viewContainerModel = this.viewDescriptorService.getViewContainerModel(viewContainer);
-		this.containerListeners.set(containerId, viewContainerModel.onDidChangeAllViewDescriptors(({ added }) => {
-			if (added.some(view => CodexExtensionChatContainerContribution.codexViewIds.has(view.id))) {
-				this.relocateCodexViews();
-			}
-		}));
-	}
-
-	private relocateCodexViews(): void {
-		const chatViewContainer = this.viewDescriptorService.getViewContainerById(ChatViewContainerId);
-		if (!chatViewContainer) {
-			return;
-		}
-
-		const viewsToMove: IViewDescriptor[] = [];
-		for (const viewId of CodexExtensionChatContainerContribution.codexViewIds) {
-			const view = this.viewDescriptorService.getViewDescriptorById(viewId);
-			if (view && this.viewDescriptorService.getViewContainerByViewId(view.id)?.id !== ChatViewContainerId) {
-				viewsToMove.push(view);
-			}
-		}
-
-		if (viewsToMove.length) {
-			this.viewDescriptorService.moveViewsToContainer(viewsToMove, chatViewContainer, ViewVisibilityState.Default, 'backboard.codexExtensionChatContainer');
-		}
-	}
-}
-
 class ChatAgentSettingContribution extends Disposable implements IWorkbenchContribution {
 
 	static readonly ID = 'workbench.contrib.chatAgentSetting';
@@ -2506,7 +2431,6 @@ registerWorkbenchContribution2(ChatExtensionPointHandler.ID, ChatExtensionPointH
 registerWorkbenchContribution2(LanguageModelToolsExtensionPointHandler.ID, LanguageModelToolsExtensionPointHandler, WorkbenchPhase.BlockRestore);
 registerWorkbenchContribution2(ChatPromptFilesExtensionPointHandler.ID, ChatPromptFilesExtensionPointHandler, WorkbenchPhase.BlockRestore);
 registerWorkbenchContribution2(ChatCompatibilityNotifier.ID, ChatCompatibilityNotifier, WorkbenchPhase.Eventually);
-registerWorkbenchContribution2(CodexExtensionChatContainerContribution.ID, CodexExtensionChatContainerContribution, WorkbenchPhase.AfterRestored);
 registerWorkbenchContribution2(CodeBlockActionRendering.ID, CodeBlockActionRendering, WorkbenchPhase.BlockRestore);
 registerWorkbenchContribution2(ChatCopyActionRendering.ID, ChatCopyActionRendering, WorkbenchPhase.BlockRestore);
 registerWorkbenchContribution2(ChatImplicitContextContribution.ID, ChatImplicitContextContribution, WorkbenchPhase.Eventually);

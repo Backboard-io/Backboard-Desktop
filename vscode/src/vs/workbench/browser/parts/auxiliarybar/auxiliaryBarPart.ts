@@ -128,9 +128,9 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 			menuService,
 		);
 
-		// Track visible view containers for auto-hide
+		// Track visible view containers for auto-hide and for the agent panel switcher
 		this.visibleViewContainersTracker = this._register(instantiationService.createInstance(VisibleViewContainersTracker, ViewContainerLocation.AuxiliaryBar));
-		this._register(this.visibleViewContainersTracker.onDidChange((e) => this.onDidChangeAutoHideViewContainers(e)));
+		this._register(this.visibleViewContainersTracker.onDidChange((e) => this.onDidChangeVisibleViewContainers(e)));
 
 		this.configuration = this.resolveConfiguration();
 
@@ -147,15 +147,24 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 		}));
 	}
 
-	private onDidChangeAutoHideViewContainers(e: { before: number; after: number }): void {
-		// Only update if auto-hide is enabled and composite bar would show
+	private onDidChangeVisibleViewContainers(e: { before: number; after: number }): void {
+		const visibleBefore = e.before > 1;
+		const visibleAfter = e.after > 1;
+		if (visibleBefore === visibleAfter) {
+			return;
+		}
+
+		// With the activity bar hidden, the composite bar is the only switcher the
+		// right bar has, so it appears as soon as there is a second panel to reach.
+		if (this.configuration.position === ActivityBarPosition.HIDDEN) {
+			this.onDidChangeActivityBarLocation();
+			return;
+		}
+
+		// Otherwise only update if auto-hide is enabled and composite bar would show
 		const autoHide = this.configurationService.getValue<boolean>(LayoutSettings.ACTIVITY_BAR_AUTO_HIDE);
 		if (autoHide && (this.configuration.position === ActivityBarPosition.TOP || this.configuration.position === ActivityBarPosition.BOTTOM)) {
-			const visibleBefore = e.before > 1;
-			const visibleAfter = e.after > 1;
-			if (visibleBefore !== visibleAfter) {
-				this.onDidChangeActivityBarLocation();
-			}
+			this.onDidChangeActivityBarLocation();
 		}
 	}
 
@@ -261,7 +270,11 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 
 	protected shouldShowCompositeBar(): boolean {
 		if (this.configuration.position === ActivityBarPosition.HIDDEN) {
-			return false;
+			// The right bar is Backboard's home and is shared with any agent panel
+			// installed from the marketplace (Claude Code, Codex). Hiding the activity
+			// bar must not leave those unreachable, so the composite bar stays as the
+			// switcher between them — it is still absent while chat is alone there.
+			return this.visibleViewContainersTracker.visibleCount > 1;
 		}
 
 		// Check if auto-hide is enabled and there's only one visible view container

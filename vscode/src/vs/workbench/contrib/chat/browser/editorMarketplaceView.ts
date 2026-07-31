@@ -64,7 +64,7 @@ class EditorMarketplaceViewPane extends ViewPane {
 const marketplaceViewContainer: ViewContainer = Registry.as<IViewContainersRegistry>(ViewExtensions.ViewContainersRegistry).registerViewContainer({
 	id: BackboardMarketplaceViewContainerId,
 	title: localize2('backboardMarketplace.viewContainer', "Marketplace"),
-	icon: Codicon.extensions,
+	icon: Codicon.library,
 	ctorDescriptor: new SyncDescriptor(ViewPaneContainer, [BackboardMarketplaceViewContainerId, { mergeViewWithContainerWhenSingleView: true }]),
 	storageId: BackboardMarketplaceViewContainerId,
 	order: 6,

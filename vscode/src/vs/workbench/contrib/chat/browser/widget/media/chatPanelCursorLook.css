@@ -9,22 +9,109 @@
  * specific as the rules they refine so the restyle wins without !important.
  */
 
-/* --- Session tabs merged into the composite title row -------------------- */
+/* --- One tab strip: chat sessions + installed agent panels ---------------- */
 
 /*
- * The tab strip is re-parented into `.composite.title` (marked `.has-chat-tabs`)
- * by ChatViewPane so it shares one line with the +/history actions. Hide the
- * redundant "Chat" label and drop the divider below the header.
+ * The right panel has a single row of tabs: every Backboard chat session is a
+ * tab, and every agent panel installed from the marketplace (Claude Code, Codex)
+ * is a tab beside them. One is active and owns the whole surface.
+ *
+ * Two DOM strips make up that row and they are styled to be indistinguishable:
+ *   .chat-view-title-container  the session tabs, re-parented into this row by
+ *                               ChatViewPane so they share the line
+ *   .composite-bar-container    the workbench switcher, one item per view
+ *                               container living in the auxiliary bar
+ * Sessions come first (`order`), then the panels, then the actions pinned right.
+ *
+ * Geometry, type and the selected fill below are taken from Cursor's shipped
+ * stylesheet for the same row, which drives the very same VS Code composite bar.
  */
+
+/* Shared tab metrics. Defined on the row itself so both strips inherit them, and
+   unconditionally so the look holds when Backboard is the only panel. */
+.monaco-workbench .part.auxiliarybar > .composite.title {
+	--bb-agent-tab-radius: 6px;
+	--bb-agent-tab-inset: 8px;
+	--bb-agent-tab-gap: 4px;
+	--bb-agent-tab-selected-background: color-mix(in srgb, var(--vscode-list-inactiveSelectionBackground) 90%, transparent);
+}
+
 .monaco-workbench .part.auxiliarybar .composite.title.has-chat-tabs .title-label {
 	display: none;
+}
+
+/* Sessions ahead of the panels. The switcher is prepended into the row by
+   `updateCompositeBar()`, so DOM order alone would put the panels first. */
+.monaco-workbench .part.auxiliarybar .composite.title.has-chat-tabs .chat-view-title-container {
+	order: -1;
+}
+
+/* The chat container has no switcher tab of its own once its sessions are in the
+   row — they stand in for it, exactly as Cursor's chat tabs do.
+ *
+ * Two guards, because dropping this tab wrongly leaves no way back to chat:
+ * `has-chat-tabs` means the session tabs are actually there to stand in for it,
+ * and `:has()` means some other panel is there to switch to — otherwise hiding
+ * it would empty the switcher entirely. */
+.monaco-workbench .part.auxiliarybar .composite.title.has-chat-tabs > .composite-bar-container:has(.action-item[data-composite-id]:not([data-composite-id="workbench.panel.chat"])) .action-item[data-composite-id="workbench.panel.chat"] {
+	display: none;
+}
+
+.monaco-workbench .part.auxiliarybar > .composite.title {
+	align-items: center;
+	padding-inline: var(--bb-agent-tab-inset);
+}
+
+/* Panels take the width they need; the session strip absorbs the squeeze and
+   scrolls, so a long chat title never pushes "Claude Code" out of reach. The
+   negative inset lets the fade below sit on the row's true edges. */
+.monaco-workbench .part.auxiliarybar > .title.has-composite-bar > .composite-bar-container {
+	align-items: center;
+	display: flex;
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.monaco-workbench .part.auxiliarybar > .title.has-composite-bar > .composite-bar-container > .composite-bar {
+	box-sizing: border-box;
+	height: 30px;
+}
+
+.monaco-workbench .part.auxiliarybar > .title.has-composite-bar > .composite-bar-container > .composite-bar > .monaco-action-bar:not(.vertical) .actions-container {
+	align-items: center;
+	flex-wrap: nowrap;
+	gap: var(--bb-agent-tab-gap);
+	min-width: 0;
+	padding-left: 0;
+}
+
+/* Actions sit at the far end of the row, after the tabs. */
+.monaco-workbench .part.auxiliarybar > .composite.title > .title-actions {
+	align-items: center;
+	display: flex;
+	flex-shrink: 0;
+	gap: 0;
+	margin-left: auto;
+	padding-left: var(--bb-agent-tab-inset);
+}
+
+.monaco-workbench .part.auxiliarybar > .composite.title > .title-actions .monaco-action-bar:not(.vertical) .action-item {
+	border-radius: var(--bb-agent-tab-radius);
+	box-sizing: border-box;
+	height: auto;
+	margin: 0;
+}
+
+.monaco-workbench .part.auxiliarybar > .composite.title > .title-actions .monaco-action-bar .action-label {
+	border-radius: var(--bb-agent-tab-radius);
+	padding: 4px;
 }
 
 /* The tab strip was moved out of `.chat-viewpane`, so its original flex layout
    no longer applies — re-establish a single horizontal, scrolling row here. */
 .monaco-workbench .composite.title.has-chat-tabs .chat-view-title-container {
 	display: flex;
-	flex: 1 1 auto;
+	flex: 0 1 auto;
 	align-items: center;
 	min-width: 0;
 	height: 100%;
@@ -53,108 +140,119 @@
 	flex: 1 1 auto;
 	min-width: 0;
 	height: 100%;
-	gap: 0;
+	gap: var(--bb-agent-tab-gap);
 	padding: 0;
 	overflow-x: auto;
 	overflow-y: hidden;
 	scrollbar-width: none;
+	/* The composite bar draws the edge fade for the whole row; a second mask here
+	   would fade the seam between the two strips. */
+	mask-image: none;
+	-webkit-mask-image: none;
 }
 
 .monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tabs::-webkit-scrollbar {
 	display: none;
 }
 
-.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab {
+/* --- The tab itself, shared by both strips -------------------------------- */
+
+/*
+ * A tab is a text pill: no icon, no divider, no underline. Inactive tabs are
+ * capped narrow and truncate; the selected one is allowed to grow, which is what
+ * keeps the active chat readable while the rest compress.
+ */
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab,
+.monaco-workbench .part.auxiliarybar > .title.has-composite-bar > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(.icon) {
 	display: flex;
 	align-items: center;
 	box-sizing: border-box;
-	width: 176px;
-	min-width: 120px;
-	max-width: 220px;
 	flex: 0 0 auto;
-	height: 100%;
-	padding: 0 8px 0 12px;
-	gap: 6px;
-	border-radius: 0;
+	height: auto;
+	max-width: 120px;
+	margin: 0;
+	padding: 3px 6px;
 	border: none;
-	/* clear, visible divider between every tab */
-	border-right: 1px solid var(--bb-tab-divider, var(--vscode-panel-border, rgba(128, 128, 128, 0.45)));
+	border-radius: var(--bb-agent-tab-radius);
 	background: transparent;
-	color: var(--vscode-tab-inactiveForeground, var(--vscode-descriptionForeground));
-	opacity: 0.85;
-}
-
-.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab:first-child {
-	border-left: 1px solid var(--bb-tab-divider, var(--vscode-panel-border, rgba(128, 128, 128, 0.45)));
-}
-
-.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab:hover {
-	opacity: 1;
-	background: color-mix(in srgb, var(--vscode-toolbar-hoverBackground) 60%, transparent);
-}
-
-/*
- * Active tab: filled with the panel-body surface (see --bb-panel-surface below).
- * Left/right dividers are kept (inherited from the base rule); the bottom
- * divider is simply never applied to the active tab (see the divider rule
- * below, which only targets `:not(.chat-view-title-tab-active)`), so it bleeds
- * straight into the body with no border-erasing tricks needed.
- */
-.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab-active,
-.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab-active:hover {
-	opacity: 1;
-	color: var(--vscode-tab-activeForeground, var(--vscode-foreground));
-	background: var(--bb-panel-surface, var(--vscode-editor-background));
-}
-
-.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab .chat-view-title-tab-icon {
-	flex: 0 0 auto;
-	font-size: 18px;
-}
-
-.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab .chat-view-title-tab-label {
-	font-size: 14px;
-	flex: 1 1 auto;
-	min-width: 0;
 	overflow: hidden;
 	white-space: nowrap;
 	text-overflow: ellipsis;
+	font-size: 13px;
+	font-weight: 400;
+	line-height: 18px;
+	text-transform: none;
+	transition: background-color 80ms linear, color 80ms linear;
+}
+
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab {
+	width: auto;
+	gap: 4px;
+}
+
+/* The selected tab gets the room the others give up. */
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab-active,
+.monaco-workbench .part.auxiliarybar > .title.has-composite-bar > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(.icon).checked {
+	flex-grow: 1;
+	flex-shrink: 0;
+	max-width: 200px;
+	background: var(--bb-agent-tab-selected-background);
+	color: var(--vscode-panelTitle-activeForeground, var(--vscode-foreground));
+}
+
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab {
+	color: var(--vscode-panelTitle-inactiveForeground, var(--vscode-descriptionForeground));
+}
+
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab:hover,
+.monaco-workbench .part.auxiliarybar > .title.has-composite-bar > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(.icon):hover {
+	color: var(--vscode-panelTitle-activeForeground, var(--vscode-foreground));
+}
+
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab:not(.chat-view-title-tab-active):hover,
+.monaco-workbench .part.auxiliarybar > .title.has-composite-bar > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(.icon):not(.checked):hover {
+	background: color-mix(in srgb, var(--bb-agent-tab-selected-background) 55%, transparent);
+}
+
+/* Text only, like Cursor's. */
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab .chat-view-title-tab-icon {
+	display: none;
+}
+
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab .chat-view-title-tab-label,
+.monaco-workbench .part.auxiliarybar > .title.has-composite-bar > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(.icon) .action-label {
+	background: transparent;
+	box-sizing: border-box;
+	flex: 1 1 auto;
+	max-width: 100%;
+	min-width: 0;
+	margin: 0;
+	padding: 0;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	font-size: 13px;
+	font-weight: 400;
+	line-height: 18px;
+}
+
+/* The filled pill is the selected state; the underline would repeat it. Keyboard
+   focus keeps its own indicator. */
+.monaco-workbench .part.auxiliarybar > .title.has-composite-bar > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(.icon).checked:not(:focus) .active-item-indicator:before,
+.monaco-workbench .part.auxiliarybar > .title.has-composite-bar > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(.icon).checked.clicked:focus .active-item-indicator:before {
+	border-top-color: transparent !important;
 }
 
 /* Quiet the close ✕ until hover, Cursor-style. */
 .monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab .chat-view-title-tab-close {
 	opacity: 0;
+	flex: 0 0 auto;
 	transition: opacity 0.1s ease;
 }
 
 .monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab:hover .chat-view-title-tab-close,
 .monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab-active .chat-view-title-tab-close {
 	opacity: 0.7;
-}
-
-/*
- * One divider — not per-tab — exactly where the tab strip ends and the icon
- * actions (+, history, ...) begin. `.chat-view-title-container` (the tabs)
- * and `.title-actions` (the native +/history/... toolbar) are inserted as
- * siblings by `mergeTabsIntoTitleBar()`, so this seam is the boundary between
- * them. Anchored on `.title-actions` (rather than `.chat-view-title-container`,
- * which has `overflow: hidden`) so the pseudo-element isn't clipped.
- */
-.monaco-workbench .part.auxiliarybar .composite.title.has-chat-tabs > .title-actions {
-	position: relative;
-}
-
-/* Well before the first icon (which starts ~8px into `.title-actions`) so it
-   doesn't cut through the "+" glyph. Full height. */
-.monaco-workbench .part.auxiliarybar .composite.title.has-chat-tabs > .title-actions::after {
-	content: "";
-	position: absolute;
-	top: 0;
-	bottom: 0;
-	left: 2px;
-	width: 1px;
-	background: var(--bb-tab-divider, var(--vscode-panel-border, rgba(128, 128, 128, 0.45)));
-	pointer-events: none;
 }
 
 /* --- Trim header: drop the nav toolbar (Go Back arrow + "Backboard" session
@@ -164,9 +262,9 @@
 	display: none;
 }
 
-.monaco-workbench .part.auxiliarybar .composite.title.has-chat-tabs .action-item:has(.codicon-arrow-left),
-.monaco-workbench .part.auxiliarybar .composite.title.has-chat-tabs .action-item:has(.codicon-layout-sidebar-right-off),
-.monaco-workbench .part.auxiliarybar .composite.title.has-chat-tabs .action-item:has(.codicon-layout-sidebar-right) {
+.monaco-workbench .part.auxiliarybar .composite.title.has-chat-tabs .title-actions .action-item:has(.codicon-arrow-left),
+.monaco-workbench .part.auxiliarybar .composite.title.has-chat-tabs .title-actions .action-item:has(.codicon-layout-sidebar-right-off),
+.monaco-workbench .part.auxiliarybar .composite.title.has-chat-tabs .title-actions .action-item:has(.codicon-layout-sidebar-right) {
 	display: none;
 }
 
@@ -264,20 +362,7 @@
    container, because `.chat-view-title-tabs` clips overflow-y:hidden, which
    would clip any box-shadow/border trick trying to "erase" a container-level
    border under just the active tab. Owning the border per-child avoids that. */
-.monaco-workbench .part.auxiliarybar .composite.title.has-chat-tabs {
-	background-color: var(--bb-header-surface);
-	/* Base composite-title styles reserve left padding for the (now-hidden)
-	   title-label — drop it so the first tab sits flush against the aux-bar
-	   edge, matching the editor's own tab strip which has no left inset. */
-	padding-left: 0;
-}
-
-.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab:not(.chat-view-title-tab-active),
-.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-actions-toolbar {
-	border-bottom: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.4));
-}
-
-.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab:not(.chat-view-title-tab-active) {
+.monaco-workbench .part.auxiliarybar > .composite.title {
 	background-color: var(--bb-header-surface);
 }
 

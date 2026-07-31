@@ -39,6 +39,7 @@ import { IViewPaneOptions, ViewPane } from '../../../../../browser/parts/views/v
 import { Memento } from '../../../../../common/memento.js';
 import { SIDE_BAR_FOREGROUND } from '../../../../../common/theme.js';
 import { IViewDescriptorService, ViewContainerLocation } from '../../../../../common/views.js';
+import { IPaneCompositePartService } from '../../../../../services/panecomposite/browser/panecomposite.js';
 import { ILifecycleService, StartupKind } from '../../../../../services/lifecycle/common/lifecycle.js';
 import { IPathService } from '../../../../../services/path/common/pathService.js';
 import { IChatViewTitleActionContext } from '../../../common/actions/chatActions.js';
@@ -60,7 +61,7 @@ import { IChatViewsWelcomeDescriptor } from '../../viewsWelcome/chatViewsWelcome
 import { IWorkbenchLayoutService, LayoutSettings, Position } from '../../../../../services/layout/browser/layoutService.js';
 import { AgentSessionsViewerOrientation, AgentSessionsViewerPosition } from '../../agentSessions/agentSessions.js';
 import { IProgressService } from '../../../../../../platform/progress/common/progress.js';
-import { ChatViewId } from '../../chat.js';
+import { ChatViewContainerId, ChatViewId } from '../../chat.js';
 import { IActivityService, ProgressBadge } from '../../../../../services/activity/common/activity.js';
 import { disposableTimeout } from '../../../../../../base/common/async.js';
 import { AgentSessionsFilter, AgentSessionsGrouping } from '../../agentSessions/agentSessionsFilter.js';
@@ -157,6 +158,7 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 		@IWorkbenchEnvironmentService private readonly workbenchEnvironmentService: IWorkbenchEnvironmentService,
 		@IFileService private readonly fileService: IFileService,
 		@IPathService private readonly pathService: IPathService,
+		@IPaneCompositePartService private readonly paneCompositePartService: IPaneCompositePartService,
 	) {
 		super(options, keybindingService2, contextMenuService, configurationService, contextKeyService, viewDescriptorService, instantiationService, openerService, themeService, hoverService);
 
@@ -943,6 +945,10 @@ referencesExpandedWhenEmptyResponse: false,
 			{
 				focusChat: () => this._widget.focusInput(),
 				openChatSession: async sessionResource => {
+					// The session tabs sit in the shared strip alongside the agent
+					// panels, so one can be clicked while Claude Code or Codex owns
+					// the surface — bring chat back before loading into it.
+					await this.paneCompositePartService.openPaneComposite(ChatViewContainerId, ViewContainerLocation.AuxiliaryBar, false);
 					await this.loadSession(sessionResource);
 				}
 			}
@@ -986,6 +992,10 @@ referencesExpandedWhenEmptyResponse: false,
 			return; // already merged
 		}
 		compositeTitle.classList.add('has-chat-tabs');
+		// `has-chat-tabs` is also what tells the strip to drop the chat container's
+		// own switcher tab — the session tabs stand in for it. If this pane goes
+		// away, that tab has to come back or there is no way back to chat.
+		this._register(toDisposable(() => compositeTitle.classList.remove('has-chat-tabs')));
 		const anchor = compositeTitle.querySelector('.title-actions');
 		compositeTitle.insertBefore(tabs, anchor ?? null);
 		this.tabsMergedIntoTitleBar = true;

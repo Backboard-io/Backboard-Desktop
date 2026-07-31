@@ -110,6 +110,45 @@ built-in GitHub Copilot Chat extension plus product-level branding overrides**.
   chat UI reads from `product.json`; the plumbing (extension host, RPC, view
   container, widget, renderer) is stock VS Code chat architecture.
 
+## 4. Sharing the right panel with Claude Code and Codex
+
+Backboard owns the right panel, but it is not the only thing that can live there.
+Agent panels installed from the marketplace share the same surface as **sibling
+tabs**, one view container each:
+
+| Panel | View container id | Views |
+| --- | --- | --- |
+| Backboard chat | `workbench.panel.chat` | `workbench.panel.chat.view.copilot` |
+| Claude Code (`anthropic.claude-code`) | `workbench.view.extension.claude-sidebar-secondary` | `claudeVSCodeSidebarSecondary` |
+| Codex (`openai.chatgpt`) | `workbench.view.extension.codexSecondaryViewContainer` | `chatgpt.sidebarSecondaryView` |
+
+Both extensions declare those containers under `contributes.viewsContainers.secondarySidebar`
+(gated on VS Code >= 1.106, so they take that path here), which means they land in
+the auxiliary bar on their own — no relocation needed for the normal case.
+
+The pieces that make them read as one panel:
+
+- **One container per panel, never nested.** A panel stays a peer of the chat
+  container instead of being merged into it. Merging views into
+  `workbench.panel.chat` stacks them as collapsible panes *under* Backboard chat;
+  keeping them separate is what makes the auxiliary bar render them as tabs where
+  the selected one owns the whole surface.
+- **The switcher.** `AuxiliaryBarPart.shouldShowCompositeBar()` keeps the composite
+  bar even when `workbench.activityBar.location` is `hidden` (the default in this
+  fork) as long as more than one container lives on the right — otherwise the other
+  panels would be unreachable. With one panel there, the strip stays hidden.
+  [`auxiliaryBarPart.css`](src/vs/workbench/browser/parts/auxiliarybar/media/auxiliaryBarPart.css)
+  styles it as tabs matching the chat session tabs rendered directly below it.
+- **Adoption and repair.** [`agentPanelContainers.ts`](src/vs/workbench/contrib/chat/browser/agentPanelContainers.ts)
+  moves a panel that contributed itself to the activity bar over to the right once
+  (a later move by the user sticks), and undoes an earlier build that merged the
+  Codex webview into the chat container — that arrangement is persisted per profile,
+  so it has to be actively reversed.
+- **Backboard keeps the right.** [`chatPanelResilience.ts`](src/vs/workbench/contrib/chat/browser/chatPanelResilience.ts)
+  reclaims the right bar for chat unless the user deliberately put some *other* view
+  there. Known agent panels are excluded from that check, so installing Claude Code
+  or Codex does not read as the user handing the right bar to something else.
+
 ## End-to-end flow
 
 ```

@@ -11,6 +11,7 @@ import { IViewsService } from '../../../services/views/common/viewsService.js';
 import { IViewDescriptorService, ViewContainerLocation } from '../../../common/views.js';
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
 import { ChatViewContainerId } from './chat.js';
+import { isAgentPanelContainer } from './agentPanelContainers.js';
 
 /**
  * Makes the Chat panel behave like a permanent, built-in part of the workbench.
@@ -18,6 +19,8 @@ import { ChatViewContainerId } from './chat.js';
  * The rule: **the right (auxiliary) bar belongs to Chat, unless the user has
  * deliberately placed some other view there.** From that single rule:
  *   - Chat is always on the right by default.
+ *   - Agent panels installed from the marketplace (Claude Code, Codex) share the
+ *     right with Chat as sibling tabs, so they do not count as "some other view".
  *   - If the user moves the file explorer / another view to the right, the right
  *     is no longer "reserved" and Chat is left wherever it is (e.g. the left).
  *   - The right bar is never left visible-but-empty (the "Drag a view here"
@@ -75,10 +78,16 @@ export class ChatPanelResilienceContribution extends Disposable implements IWork
 	 * Whether the right (auxiliary) bar is reserved for Chat — i.e. no *other*
 	 * view container currently lives there. When some other view has been moved
 	 * to the right, the user is arranging that space and Chat is left alone.
+	 *
+	 * Installed agent panels (Claude Code, Codex) are the exception: they are meant
+	 * to sit on the right *alongside* Chat as sibling tabs, so their presence never
+	 * means the user handed the right bar to something else.
 	 */
 	private rightIsReservedForChat(): boolean {
 		return !this.viewDescriptorService.getViewContainersByLocation(ViewContainerLocation.AuxiliaryBar)
-			.some(container => container.id !== ChatViewContainerId && container.id !== ChatPanelResilienceContribution.LEGACY_BACKBOARD_CONTAINER_ID);
+			.some(container => container.id !== ChatViewContainerId
+				&& container.id !== ChatPanelResilienceContribution.LEGACY_BACKBOARD_CONTAINER_ID
+				&& !isAgentPanelContainer(container.id));
 	}
 
 	/** Evicts the legacy Backboard extension container off the right, back to its default. */

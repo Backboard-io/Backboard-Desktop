@@ -225,6 +225,7 @@ import './contrib/chat/browser/chat.shared.contribution.js';
 import './contrib/chat/browser/chat.contribution.js';
 import './contrib/chat/browser/chat.view.contribution.js';
 import './contrib/chat/browser/chatPanelResilience.js';
+import './contrib/chat/browser/agentPanelContainers.js';
 import './contrib/inlineChat/browser/inlineChat.contribution.js';
 
 // Copilot Voice

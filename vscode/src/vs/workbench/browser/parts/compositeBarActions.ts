@@ -237,6 +237,10 @@ export class CompositeBarActionViewItem extends BaseActionViewItem {
 			this.container.classList.add('icon');
 		}
 
+		// Lets a part style or hide an individual composite without matching on the
+		// localized label, which is the only other thing this item renders.
+		this.container.setAttribute('data-composite-id', this.compositeBarActionItem.id);
+
 		// Use 'tab' inside tablist, 'button' for popup items outside tablist
 		const role = this.options.isTabList || !this.options.hasPopup ? 'tab' : 'button';
 		this.container.setAttribute('role', role);

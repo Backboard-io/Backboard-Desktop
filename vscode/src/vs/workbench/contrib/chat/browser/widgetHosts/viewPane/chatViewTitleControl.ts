@@ -10,7 +10,7 @@ import { Gesture, EventType as TouchEventType } from '../../../../../../base/bro
 import { Delayer } from '../../../../../../base/common/async.js';
 import { Emitter } from '../../../../../../base/common/event.js';
 import { MarkdownString } from '../../../../../../base/common/htmlContent.js';
-import { Disposable, DisposableStore, MutableDisposable } from '../../../../../../base/common/lifecycle.js';
+import { Disposable, DisposableStore, MutableDisposable, toDisposable } from '../../../../../../base/common/lifecycle.js';
 import { MarshalledId } from '../../../../../../base/common/marshallingIds.js';
 import { localize } from '../../../../../../nls.js';
 import { HiddenItemStrategy, MenuWorkbenchToolBar } from '../../../../../../platform/actions/browser/toolbar.js';
@@ -159,6 +159,9 @@ export class ChatViewTitleControl extends Disposable {
 		}
 
 		parent.appendChild(this.titleContainer);
+		// The host re-parents this element between the pane body and the composite
+		// title row, so it can outlive `parent` — take it with us on dispose.
+		this._register(toDisposable(() => this.titleContainer?.remove()));
 		this.updateTitle(ChatViewTitleControl.DEFAULT_TITLE);
 	}
 
