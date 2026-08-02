@@ -22,10 +22,14 @@ case "${ARCH}" in
   aarch64)
     GULP_TARGET="vscode-darwin-arm64"
     VSAPP_DIR="${REPO_ROOT}/VSCode-darwin-arm64"
+    CLI_TARGET="bun-darwin-arm64"
+    MSAL_VARIANT="macos/arm64"
     ;;
   x86_64)
     GULP_TARGET="vscode-darwin-x64"
     VSAPP_DIR="${REPO_ROOT}/VSCode-darwin-x64"
+    CLI_TARGET="bun-darwin-x64"
+    MSAL_VARIANT="macos/x64"
     ;;
   *)
     echo "Unsupported ARCH=${ARCH}; expected aarch64 or x86_64" >&2
@@ -59,7 +63,21 @@ echo "Compiling Backboard extension"
 npm --prefix extensions/backboard run compile
 
 echo "Compiling Backboard CLI runtime"
-npm --prefix extensions/backboard run package-cli-ts
+# Without an explicit target bun compiles for the host, which puts an arm64 CLI
+# inside an Intel release when cross-building on Apple Silicon.
+BACKBOARD_CLI_TARGET="${CLI_TARGET}" npm --prefix extensions/backboard run package-cli-ts
+
+# @azure/msal-node-runtime ships every platform's binaries and copies the host's
+# up to dist/ at install time, so a cross-build inherits the wrong one. Promote
+# the variant matching the target architecture before the app is assembled.
+MSAL_RUNTIME_DIR="extensions/microsoft-authentication/node_modules/@azure/msal-node-runtime/dist"
+if [[ -d "${MSAL_RUNTIME_DIR}/${MSAL_VARIANT}" ]]; then
+  echo "Promoting MSAL runtime for ${ARCH}"
+  cp "${MSAL_RUNTIME_DIR}/${MSAL_VARIANT}/libmsalruntime.dylib" "${MSAL_RUNTIME_DIR}/libmsalruntime.dylib"
+  cp "${MSAL_RUNTIME_DIR}/${MSAL_VARIANT}/msal-node-runtime.node" "${MSAL_RUNTIME_DIR}/msal-node-runtime.node"
+else
+  echo "No MSAL runtime variant at ${MSAL_RUNTIME_DIR}/${MSAL_VARIANT}; keeping install-time copy" >&2
+fi
 
 echo "Building standalone ${GULP_TARGET} app"
 BACKBOARD_KEEP_COPILOT_SHIM_MARKER=1 npm run gulp -- "${GULP_TARGET}"
