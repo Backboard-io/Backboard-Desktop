@@ -26,20 +26,21 @@ ICON_CENTER_Y = 198
 APP_CENTER_X = 172
 APPS_CENTER_X = 488
 
+BACKGROUND = (255, 255, 255)
+TITLE_COLOR = (29, 29, 31)
+SUBTITLE_COLOR = (110, 110, 115)
+
 CHANNELS = {
     "stable": {
         "title": "Backboard Studio",
-        "accent": (99, 140, 255),
-        "top": (24, 26, 38),
-        "bottom": (16, 17, 26),
+        "accent": (46, 92, 209),
     },
     "sandbox": {
         "title": "Backboard Studio Sandbox",
-        # Sandbox gets a distinct amber accent so a sandbox DMG is never
-        # mistaken for a stable one at install time.
-        "accent": (232, 165, 71),
-        "top": (34, 28, 20),
-        "bottom": (22, 18, 13),
+        # Sandbox keeps a distinct amber accent so a sandbox DMG is never
+        # mistaken for a stable one; darkened from the on-dark value to hold
+        # contrast against white.
+        "accent": (198, 126, 20),
     },
 }
 
@@ -60,16 +61,6 @@ def load_font(size: int, *, bold: bool = False) -> ImageFont.FreeTypeFont:
                 except OSError:
                     continue
     return ImageFont.load_default()
-
-
-def vertical_gradient(size, top, bottom):
-    w, h = size
-    base = Image.new("RGB", (1, h))
-    px = base.load()
-    for y in range(h):
-        t = y / max(h - 1, 1)
-        px[0, y] = tuple(round(top[i] + (bottom[i] - top[i]) * t) for i in range(3))
-    return base.resize((w, h), Image.BILINEAR)
 
 
 def centered(draw, text, font, cx, cy, fill):
@@ -99,7 +90,7 @@ def render(channel: str, scale: int, out_path: Path) -> None:
     cfg = CHANNELS[channel]
     w, h = WIDTH * scale, HEIGHT * scale
 
-    img = vertical_gradient((w, h), cfg["top"], cfg["bottom"]).convert("RGBA")
+    img = Image.new("RGBA", (w, h), BACKGROUND + (255,))
     overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
     accent = cfg["accent"]
@@ -113,9 +104,9 @@ def render(channel: str, scale: int, out_path: Path) -> None:
 
     title_font = load_font(round(23 * scale), bold=True)
     sub_font = load_font(round(13 * scale))
-    centered(draw, cfg["title"], title_font, w / 2, 52 * scale, (244, 246, 252, 255))
+    centered(draw, cfg["title"], title_font, w / 2, 52 * scale, TITLE_COLOR + (255,))
     centered(draw, "Drag the app onto Applications to install",
-             sub_font, w / 2, 82 * scale, (168, 176, 196, 255))
+             sub_font, w / 2, 82 * scale, SUBTITLE_COLOR + (255,))
 
     # No icon captions here: Finder draws its own labels under both icons, and
     # painting them into the art too renders them twice, offset.
