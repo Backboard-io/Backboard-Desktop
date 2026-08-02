@@ -224,7 +224,15 @@ rebuild_backboard_runtime() {
 
   echo "Rebuilding Backboard extension and CLI runtime"
   (cd "${VSCODE_ROOT}" && npm --prefix extensions/backboard run compile)
-  (cd "${BACKBOARD_EXTENSION_SOURCE}" && npm run package-cli-ts)
+  # bun compiles for the host unless told otherwise, which puts an arm64 CLI in
+  # an Intel release when cross-building on Apple Silicon.
+  local cli_target
+  case "${ARCH}" in
+    aarch64) cli_target="bun-darwin-arm64" ;;
+    x86_64) cli_target="bun-darwin-x64" ;;
+    *) cli_target="" ;;
+  esac
+  (cd "${BACKBOARD_EXTENSION_SOURCE}" && BACKBOARD_CLI_TARGET="${cli_target}" npm run package-cli-ts)
 }
 
 sync_backboard_extension_runtime() {
@@ -359,6 +367,54 @@ else
 fi
 
 prune_release_app
+
+# A cross-compiled release can pick up host-architecture binaries: the app
+# installs and launches, then fails the moment it touches an affected module.
+# That shipped undetected before, so the staged bundle is checked here, while
+# failing is still cheap -- signing and notarizing take far longer.
+#
+# Vendored per-architecture payloads are deliberately foreign (the consuming
+# package selects at runtime), so paths carrying an explicit architecture
+# segment are exempt.
+verify_release_architecture() {
+  local expected_arch mismatches info relative
+  case "${ARCH}" in
+    aarch64) expected_arch="arm64" ;;
+    x86_64) expected_arch="x86_64" ;;
+    *) echo "Cannot verify architecture for ARCH=${ARCH}" >&2; exit 1 ;;
+  esac
+
+  echo "Verifying every Mach-O binary is ${expected_arch}"
+  mismatches=0
+  while IFS= read -r -d '' binary; do
+    case "${binary}" in
+      */_CodeSignature/*) continue ;;
+      *-darwin/*|*/darwin-x64/*|*/darwin-arm64/*) continue ;;
+    esac
+    info="$(file -b "${binary}" 2>/dev/null || true)"
+    case "${info}" in
+      *Mach-O*) ;;
+      *) continue ;;
+    esac
+    case "${info}" in
+      *universal*) continue ;;
+      *"${expected_arch}"*) ;;
+      *)
+        relative="${binary#"${APP_PATH}/"}"
+        echo "  not ${expected_arch}: ${relative} (${info})" >&2
+        mismatches=$((mismatches + 1))
+        ;;
+    esac
+  done < <(find "${APP_PATH}/Contents" -type f -print0)
+
+  if (( mismatches > 0 )); then
+    echo "Refusing to sign: ${mismatches} binaries are not ${expected_arch}." >&2
+    exit 1
+  fi
+  echo "Architecture check passed"
+}
+
+verify_release_architecture
 
 # Builds the DMG with `hdiutil makehybrid` + `hdiutil convert` instead of
 # `hdiutil create -srcfolder`. The latter attaches a temp volume at /Volumes and
@@ -530,6 +586,14 @@ while IFS= read -r -d '' macho_file; do
     # with "code object is not signed at all". Each of these is sealed further
     # down by its own bundle, in the correct inside-out order.
     */Contents/MacOS/*) continue ;;
+  esac
+  # Framework main binaries, named <Name>.framework/Versions/<V>/<Name>. Same
+  # premature seal: signing one seals the framework, which requires the Helpers
+  # sitting beside it -- signed later in this very pass -- to be signed already.
+  # The framework pass below seals them once their contents are ready.
+  macho_base="$(basename "${macho_file}")"
+  case "${macho_file}" in
+    */"${macho_base}".framework/Versions/*/"${macho_base}") continue ;;
   esac
   sign_macho_file "${macho_file}"
 done < <(find "${APP_PATH}/Contents" -type f -print0)
