@@ -11,10 +11,17 @@ node_modules/
 .npm-cache/
 **/.npm-cache/
 
-# Local VS Code packaging outputs
-/VSCode-darwin-arm64/
+# Local VS Code packaging outputs. Globbed per architecture: only arm64 was
+# listed, so an Intel build dropped a couple of GB of untracked output at the
+# repo root.
+/VSCode-darwin-*/
 /vscode-release/
 /vscode/extensions/backboard/bin/
+
+# The DMG installer-window assets under scripts/dmg-assets/ are deliberately
+# NOT ignored. A previous revision ignored that whole directory, generators
+# included, so the toolchain was lost -- and because packaging only warns when
+# the assets are missing, releases silently shipped a bare Finder window.
 
 # Local debug/automation scratch output (launch scripts, Playwright driving,
 # UI screenshots). Regenerated per run; never part of a build.
