@@ -419,11 +419,23 @@ if [[ "${SKIP_SIGNING}" == "1" ]]; then
   exit 0
 fi
 
-ORIGINAL_DEFAULT_KEYCHAIN="$(security default-keychain -d user 2>/dev/null | tr -d '"' || true)"
+# `security` indents its output and wraps each path in quotes, so both have to
+# come off. Stripping only the quotes leaves the leading spaces in place, which
+# turns every restored entry into a bogus path and grows the search list on each
+# release until it holds dozens of malformed duplicates.
+strip_keychain_path() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  value="${value#\"}"
+  value="${value%\"}"
+  printf '%s' "${value}"
+}
+
+ORIGINAL_DEFAULT_KEYCHAIN="$(strip_keychain_path "$(security default-keychain -d user 2>/dev/null || true)")"
 ORIGINAL_KEYCHAINS=()
 while IFS= read -r keychain; do
-  keychain="${keychain%\"}"
-  keychain="${keychain#\"}"
+  keychain="$(strip_keychain_path "${keychain}")"
   [[ -n "${keychain}" ]] && ORIGINAL_KEYCHAINS+=("${keychain}")
 done < <(security list-keychains -d user 2>/dev/null || true)
 

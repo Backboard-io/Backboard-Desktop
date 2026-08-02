@@ -389,7 +389,43 @@ else
 fi
 
 cleanup
-/usr/bin/open "$APP_PATH"
+
+# The bundle was just deleted and recreated, so LaunchServices can still hold a
+# record describing the copy that is gone. Re-register first, or \`open\` may
+# resolve the stale entry and refuse to launch.
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+if [[ -x "$LSREGISTER" ]]; then
+  "$LSREGISTER" -f "$APP_PATH" >/dev/null 2>&1 || true
+fi
+
+# Reopening is the step users actually notice, so it retries rather than trusting
+# a single \`open\`. Under \`set -e\` one transient failure would abort the script
+# right here, leaving the update installed but the app never coming back.
+RELAUNCHED=0
+for attempt in {1..10}; do
+  if /usr/bin/open "$APP_PATH" >/dev/null 2>&1; then
+    RELAUNCHED=1
+    echo "Relaunched via open (attempt $attempt)"
+    break
+  fi
+  /bin/sleep 1
+done
+
+if [[ "$RELAUNCHED" == "0" ]]; then
+  # Fall back to running the binary directly, which does not depend on
+  # LaunchServices agreeing that the bundle is openable.
+  APP_EXECUTABLE="$(/usr/bin/defaults read "$APP_PATH/Contents/Info" CFBundleExecutable 2>/dev/null || true)"
+  if [[ -n "$APP_EXECUTABLE" && -x "$APP_PATH/Contents/MacOS/$APP_EXECUTABLE" ]]; then
+    "$APP_PATH/Contents/MacOS/$APP_EXECUTABLE" >/dev/null 2>&1 &
+    RELAUNCHED=1
+    echo "Relaunched via direct exec"
+  fi
+fi
+
+if [[ "$RELAUNCHED" == "0" ]]; then
+  echo "WARNING: could not relaunch $APP_PATH"
+fi
+
 # \`open\` launched from this detached, non-interactive shell does not reliably
 # activate/foreground the new process (no active Terminal/Finder context to hand
 # focus from), so the app can start invisibly in the background. Explicitly
@@ -401,6 +437,15 @@ for _ in {1..20}; do
   fi
   /bin/sleep 0.5
 done
+
+# Confirm the app is genuinely up. Without this a silent failure is invisible in
+# the log, which reads as a successful install either way.
+if /usr/bin/pgrep -f "$APP_PATH/Contents/MacOS/" >/dev/null 2>&1; then
+  echo "Confirmed running: $APP_PATH"
+else
+  echo "WARNING: $APP_PATH is not running after relaunch"
+fi
+
 echo "[$(/bin/date -u '+%Y-%m-%dT%H:%M:%SZ')] Installed Backboard Studio $VERSION"
 `;
 }
