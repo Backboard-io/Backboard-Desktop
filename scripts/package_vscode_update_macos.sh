@@ -521,6 +521,15 @@ echo "Signing nested Mach-O files"
 while IFS= read -r -d '' macho_file; do
   case "${macho_file}" in
     */_CodeSignature/*) continue ;;
+    # Bundle main executables -- the app's own and each helper app's. codesign
+    # resolves these to their enclosing bundle, so signing one here seals that
+    # whole bundle before its nested code has been signed. On arm64 that happens
+    # to succeed, because the architecture requires every binary to be signed and
+    # the build leaves ad-hoc signatures behind that satisfy the seal. x64 has no
+    # such requirement and its helpers arrive unsigned, so the same call fails
+    # with "code object is not signed at all". Each of these is sealed further
+    # down by its own bundle, in the correct inside-out order.
+    */Contents/MacOS/*) continue ;;
   esac
   sign_macho_file "${macho_file}"
 done < <(find "${APP_PATH}/Contents" -type f -print0)
