@@ -166,7 +166,11 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 			this._triggerIcon.appendChild(renderIcon(getAgentSessionProviderIcon(provider as AgentSessionTarget)));
 		}
 		const model = this._modelDelegate.currentModel.get();
-		this._triggerLabel.textContent = model?.metadata.name ?? localize('combinedPicker.auto', "Auto");
+		// The chip shows just the model, Cursor-style — provider paths like
+		// "deepseek/deepseek-v4-flash" reduce to their final segment; the full
+		// name stays visible in the dropdown list.
+		const name = model?.metadata.name;
+		this._triggerLabel.textContent = name ? (name.split('/').pop() || name) : localize('combinedPicker.auto', "Auto");
 		this._triggerElement?.setAttribute('aria-label', localize('combinedPicker.ariaLabel', "Provider and model: {0}", this._triggerLabel.textContent));
 	}
 

@@ -121,39 +121,9 @@ MenuRegistry.appendMenuItem(MenuId.AgentSessionsToolbar, {
 
 // --- Sessions Title Toolbar
 
-MenuRegistry.appendMenuItem(MenuId.ChatViewSessionTitleToolbar, {
-	command: {
-		id: ShowAgentSessionsSidebar.ID,
-		title: ShowAgentSessionsSidebar.TITLE,
-		icon: Codicon.layoutSidebarLeftOff,
-	},
-	group: 'navigation',
-	order: 1,
-	when: ContextKeyExpr.and(
-		ContextKeyExpr.or(
-			ChatContextKeys.agentSessionsViewerVisible.negate(),
-			ChatContextKeys.agentSessionsViewerOrientation.isEqualTo(AgentSessionsViewerOrientation.Stacked),
-		),
-		ChatContextKeys.agentSessionsViewerPosition.isEqualTo(AgentSessionsViewerPosition.Left)
-	)
-});
-
-MenuRegistry.appendMenuItem(MenuId.ChatViewSessionTitleToolbar, {
-	command: {
-		id: ShowAgentSessionsSidebar.ID,
-		title: ShowAgentSessionsSidebar.TITLE,
-		icon: Codicon.layoutSidebarRightOff,
-	},
-	group: 'navigation',
-	order: 1,
-	when: ContextKeyExpr.and(
-		ContextKeyExpr.or(
-			ChatContextKeys.agentSessionsViewerVisible.negate(),
-			ChatContextKeys.agentSessionsViewerOrientation.isEqualTo(AgentSessionsViewerOrientation.Stacked),
-		),
-		ChatContextKeys.agentSessionsViewerPosition.isEqualTo(AgentSessionsViewerPosition.Right)
-	)
-});
+// The session tab strip deliberately contributes no sidebar toggle: it renders
+// as Cursor's clean tab row (+ / history / ⋯ / close only). The agent-sessions
+// sidebar stays reachable via the ShowAgentSessionsSidebar command (f1).
 
 //#endregion
 

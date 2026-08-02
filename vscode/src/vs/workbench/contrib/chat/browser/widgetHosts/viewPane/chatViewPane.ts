@@ -852,7 +852,9 @@ referencesExpandedWhenEmptyResponse: false,
 						this.chatSessionsService)
 					: undefined,
 				supportsChangingModes: !isBackboardProduct(),
-				inputEditorMinLines: 4,
+				// Compact, Cursor-sized composer: two lines at rest, grows with
+				// content. Four lines reads as an oversized card in the panel.
+				inputEditorMinLines: 2,
 				dndContainer: parent,
 			},
 			{
@@ -950,6 +952,12 @@ referencesExpandedWhenEmptyResponse: false,
 					// the surface — bring chat back before loading into it.
 					await this.paneCompositePartService.openPaneComposite(ChatViewContainerId, ViewContainerLocation.AuxiliaryBar, false);
 					await this.loadSession(sessionResource);
+				},
+				openNewChat: () => {
+					// Same shared-strip rule as openChatSession: reclaim the
+					// surface for chat first, then start the fresh session.
+					void this.paneCompositePartService.openPaneComposite(ChatViewContainerId, ViewContainerLocation.AuxiliaryBar, false)
+						.then(() => this.commandService.executeCommand('workbench.action.chat.newChat'));
 				}
 			}
 		));
@@ -998,6 +1006,14 @@ referencesExpandedWhenEmptyResponse: false,
 		this._register(toDisposable(() => compositeTitle.classList.remove('has-chat-tabs')));
 		const anchor = compositeTitle.querySelector('.title-actions');
 		compositeTitle.insertBefore(tabs, anchor ?? null);
+		// The + / history / ⋯ cluster moves to the end of the row (after the
+		// agent-panel tabs, before the global panel toggle) so it reads as the
+		// strip's own controls and stays put whichever composite is active.
+		const actionsToolbar = this.titleControl?.actionsToolbarElement;
+		if (actionsToolbar) {
+			const globalActions = compositeTitle.querySelector('.global-actions');
+			compositeTitle.insertBefore(actionsToolbar, globalActions ?? null);
+		}
 		this.tabsMergedIntoTitleBar = true;
 	}
 

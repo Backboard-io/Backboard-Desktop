@@ -110,6 +110,12 @@ if [[ "${DEBUG_IDE:-}" == "1" ]]; then
 	ARGS+=(--verbose)
 fi
 
+# Optional Chrome DevTools Protocol port for driving the dev app with
+# automation tooling (@playwright/cli attach --cdp=...).
+if [[ -n "${CDP_PORT:-}" ]]; then
+	ARGS+=(--remote-debugging-port="$CDP_PORT")
+fi
+
 if [[ "${DISABLE_GPU:-}" == "1" ]]; then
 	ARGS+=(--disable-gpu)
 fi

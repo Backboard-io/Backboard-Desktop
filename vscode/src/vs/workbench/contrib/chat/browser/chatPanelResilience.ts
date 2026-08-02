@@ -67,11 +67,41 @@ export class ChatPanelResilienceContribution extends Disposable implements IWork
 
 		// Ongoing: never leave the right bar visible-but-empty.
 		this.healEmptyAuxiliaryBar();
+		this.warmChatStrip();
 		this._register(this.layoutService.onDidChangePartVisibility(e => {
 			if (e.partId === Parts.AUXILIARYBAR_PART && this.layoutService.isVisible(Parts.AUXILIARYBAR_PART)) {
 				this.healEmptyAuxiliaryBar();
+				this.warmChatStrip();
 			}
 		}));
+	}
+
+	private warmedChatStrip = false;
+
+	/**
+	 * The session tab strip lives in the auxiliary bar's title row but is
+	 * created by the chat pane (`mergeTabsIntoTitleBar`). If the bar restores
+	 * with an agent panel (Claude Code, Codex) active before chat was ever
+	 * opened, the strip does not exist and there is no way back to chat —
+	 * Cursor always shows the strip in this state. Warm the chat composite
+	 * once in the background, then restore the panel the user was on. Once the
+	 * chat pane exists the strip survives composite switches, so this is a
+	 * one-time repair per window.
+	 */
+	private warmChatStrip(): void {
+		if (this.warmedChatStrip || !this.layoutService.isVisible(Parts.AUXILIARYBAR_PART)) {
+			return;
+		}
+		const active = this.paneCompositePartService.getActivePaneComposite(ViewContainerLocation.AuxiliaryBar);
+		if (!active || active.getId() === ChatViewContainerId || !isAgentPanelContainer(active.getId()) || !this.chatIsOnRight()) {
+			return;
+		}
+		this.warmedChatStrip = true;
+		const restoreId = active.getId();
+		(async () => {
+			await this.paneCompositePartService.openPaneComposite(ChatViewContainerId, ViewContainerLocation.AuxiliaryBar, false);
+			await this.paneCompositePartService.openPaneComposite(restoreId, ViewContainerLocation.AuxiliaryBar, false);
+		})();
 	}
 
 	/**

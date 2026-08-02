@@ -33,7 +33,25 @@
 	--bb-agent-tab-radius: 6px;
 	--bb-agent-tab-inset: 8px;
 	--bb-agent-tab-gap: 4px;
-	--bb-agent-tab-selected-background: color-mix(in srgb, var(--vscode-list-inactiveSelectionBackground) 90%, transparent);
+	--bb-agent-tab-hover-background: color-mix(in srgb, var(--vscode-list-inactiveSelectionBackground) 55%, transparent);
+}
+
+/* Sessions ARE the chat surface: hide the chat container's own switcher item —
+   the behavior `mergeTabsIntoTitleBar()` documents. Clicking any session tab
+   re-activates the chat composite (see `openChatSession` in ChatViewPane), so
+   the item is redundant next to the session tabs and Cursor shows no such
+   self-tab. Foreign panels (Claude Code, Codex) keep their items.
+   The selector mirrors the shared tab-metrics rule below and appends the
+   attribute, so it always out-ranks that rule's `display: flex`. */
+.monaco-workbench .part.auxiliarybar > .title.has-composite-bar.has-chat-tabs > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item[data-composite-id='workbench.panel.chat'] {
+	display: none;
+}
+
+/* Exactly one tab reads selected across both strips: while a foreign panel
+   (Claude Code, Codex) owns the surface, the active chat session tab drops its
+   bright foreground and reads like the other inactive tabs. */
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs:has(.composite-bar .action-item[data-composite-id='workbench.panel.chat']:not(.checked)) .chat-view-title-tab-active {
+	color: var(--vscode-panelTitle-inactiveForeground, var(--vscode-descriptionForeground));
 }
 
 .monaco-workbench .part.auxiliarybar .composite.title.has-chat-tabs .title-label {
@@ -49,15 +67,18 @@
 .monaco-workbench .part.auxiliarybar > .composite.title {
 	align-items: center;
 	padding-inline: var(--bb-agent-tab-inset);
+	column-gap: var(--bb-agent-tab-gap);
 }
 
-/* The switcher is handed an explicit pixel width by `layoutCompositeBar()`, so it
-   grows into the space it was measured for rather than shrink-wrapping. */
+/* The switcher never paints over its neighbours: it shrink-wraps its tabs and
+   clips when the row runs out of room (the session strip gives up its space
+   first — see the higher flex-shrink on `.chat-view-title-container`). */
 .monaco-workbench .part.auxiliarybar > .title.has-composite-bar > .composite-bar-container {
 	align-items: center;
 	display: flex;
-	flex: 1 1 auto;
+	flex: 0 1 auto;
 	min-width: 0;
+	overflow: hidden;
 }
 
 .monaco-workbench .part.auxiliarybar > .title.has-composite-bar > .composite-bar-container > .composite-bar {
@@ -96,12 +117,15 @@
 }
 
 /* The tab strip was moved out of `.chat-viewpane`, so its original flex layout
-   no longer applies — re-establish a single horizontal, scrolling row here. */
+   no longer applies — re-establish a single horizontal, scrolling row here.
+   The high shrink factor makes the session tabs give up room (they scroll
+   internally) before the agent-panel switcher or the action cluster are
+   touched, so nothing ever overlaps. */
 .monaco-workbench .composite.title.has-chat-tabs .chat-view-title-container {
 	display: flex;
-	flex: 0 1 auto;
+	flex: 0 4 auto;
 	align-items: center;
-	min-width: 0;
+	min-width: 48px;
 	height: 100%;
 	margin: 0;
 	padding: 0;
@@ -156,7 +180,10 @@
 	display: flex;
 	align-items: center;
 	box-sizing: border-box;
-	flex: 0 0 auto;
+	/* Tabs compress (labels truncate) rather than overflow, so every tab —
+	   including the permanent New Chat — stays on the row like Cursor's. */
+	flex: 0 1 auto;
+	min-width: 36px;
 	height: auto;
 	max-width: 120px;
 	margin: 0;
@@ -180,12 +207,20 @@
 }
 
 /* The selected tab gets the room the others give up. */
+/* The permanent New Chat tab compresses last so its label stays readable. */
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab.chat-view-title-tab-permanent {
+	flex-shrink: 0.25;
+	min-width: 70px;
+}
+
 .monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab-active,
 .monaco-workbench .part.auxiliarybar > .title.has-composite-bar > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(.icon).checked {
-	flex-grow: 1;
-	flex-shrink: 0;
+	flex: 1 1 auto;
+	min-width: 64px;
 	max-width: 200px;
-	background: var(--bb-agent-tab-selected-background);
+	/* Selection reads through type alone — bright foreground on the shared flat
+	   surface, no fill — matching Cursor's shipped strip. */
+	background: transparent;
 	color: var(--vscode-panelTitle-activeForeground, var(--vscode-foreground));
 }
 
@@ -200,24 +235,14 @@
 
 .monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab:not(.chat-view-title-tab-active):hover,
 .monaco-workbench .part.auxiliarybar > .title.has-composite-bar > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(.icon):not(.checked):hover {
-	background: color-mix(in srgb, var(--bb-agent-tab-selected-background) 55%, transparent);
+	background: var(--bb-agent-tab-hover-background);
 }
 
-/* Each tab carries its agent's mark: the Backboard chat sessions, and whatever
-   icon Claude Code or Codex contributed for their view container. URI icons are
-   painted as a mask tinted by the item's foreground colour (set inline by
-   `CompositeBarActionViewItem.updateStyles`), codicons render as a glyph. */
+/* Cursor's tabs are text-only — no per-tab agent mark on either strip. The
+   provider identity reads from the label ("Claude Code", "Codex") alone. */
 .monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab .chat-view-title-tab-icon,
 .monaco-workbench .part.auxiliarybar > .title.has-composite-bar > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item .composite-bar-action-icon {
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	flex: 0 0 auto;
-	width: 16px;
-	height: 16px;
-	font-size: 14px;
-	background-repeat: no-repeat;
-	background-position: 50% 50%;
+	display: none;
 }
 
 .monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab .chat-view-title-tab-label,
@@ -244,16 +269,23 @@
 	border-top-color: transparent !important;
 }
 
-/* Quiet the close ✕ until hover, Cursor-style. */
+/* Close ✕ appears only while hovering its tab, Cursor-style — it reserves no
+   space otherwise, so tabs read as plain text at rest. */
 .monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab .chat-view-title-tab-close {
+	width: 0;
 	opacity: 0;
+	overflow: hidden;
 	flex: 0 0 auto;
 	transition: opacity 0.1s ease;
 }
 
-.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab:hover .chat-view-title-tab-close,
-.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab-active .chat-view-title-tab-close {
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab:hover .chat-view-title-tab-close {
+	width: 16px;
 	opacity: 0.7;
+}
+
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab .chat-view-title-tab-close:hover {
+	opacity: 1;
 }
 
 /* --- Trim header: drop the nav toolbar (Go Back arrow + "Backboard" session
@@ -261,6 +293,39 @@
 
 .monaco-workbench .part.auxiliarybar .composite.title.has-chat-tabs .chat-view-title-navigation-toolbar {
 	display: none;
+}
+
+/* Cursor's strip ends in exactly four controls: + / history / ⋯ / panel
+   toggle. The first three live in the session strip's own toolbar
+   (`.chat-view-title-actions-toolbar`, re-parented to the end of the row by
+   `mergeTabsIntoTitleBar`) so they persist whichever composite is active. The
+   per-composite `.title-actions` toolbar only duplicates them for chat, so it
+   is dropped entirely; maximize stays reachable from the ⋯ menu / palette. */
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs > .title-actions,
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs > .global-actions .action-item:has(.codicon-auxiliarybar-maximize) {
+	display: none;
+}
+
+/* The strip's own + / history / ⋯ cluster, pinned to the right end of the row
+   just before the global panel toggle. */
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs > .chat-view-title-actions-toolbar {
+	display: flex;
+	align-items: center;
+	flex-shrink: 0;
+	margin-left: auto;
+	padding-left: var(--bb-agent-tab-inset);
+}
+
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs > .chat-view-title-actions-toolbar .monaco-action-bar:not(.vertical) .action-item {
+	border-radius: var(--bb-agent-tab-radius);
+	box-sizing: border-box;
+	height: auto;
+	margin: 0;
+}
+
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs > .chat-view-title-actions-toolbar .monaco-action-bar .action-label {
+	border-radius: var(--bb-agent-tab-radius);
+	padding: 4px;
 }
 
 .monaco-workbench .part.auxiliarybar .composite.title.has-chat-tabs .title-actions .action-item:has(.codicon-arrow-left),
@@ -298,7 +363,9 @@
 	 * so anchoring to it keeps our own surfaces internally consistent always,
 	 * even though it only matches the titlebar's rendered color while focused.
 	 */
-	--bb-header-surface: var(--vscode-sideBar-background, var(--vscode-editor-background));
+	/* Cursor's panel is one flat surface — the strip shares the body's shade
+	   rather than sitting on a lighter header band. */
+	--bb-header-surface: var(--vscode-editor-background);
 	/* Crisp hairline between tabs — a touch lighter than the header so it stays
 	   visible against it (panel-border alone is too close to the header shade). */
 	--bb-tab-divider: color-mix(in srgb, var(--vscode-sideBar-background, var(--vscode-editor-background)) 80%, var(--vscode-foreground) 20%);
@@ -411,4 +478,68 @@
 
 .monaco-workbench .interactive-session .interactive-item-container .value {
 	line-height: 1.55;
+}
+
+/* --- Empty (new chat) state: Cursor's top-anchored composer --------------- */
+
+/*
+ * Cursor's new-agent tab pins the composer directly under the tab strip with
+ * nothing beneath it. Scoped to the editor window's right panel
+ * (`.chat-viewpane` only exists there) so the Agents window keeps its own
+ * centered, chip-decorated home.
+ */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session.chat-empty-centered {
+	justify-content: flex-start;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session.chat-empty-centered > .chat-empty-below-composer {
+	display: none;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session.chat-empty-centered .interactive-input-part:not(.compact) {
+	margin-top: 10px;
+}
+
+/* --- Composer: Cursor's compact input, not the T3 hero card --------------- */
+
+/*
+ * chat.css's shared backboard-composer block sizes the composer as the Simple
+ * window's hero card: min-height 172px, 18/20px padding, 20px corners, an
+ * 820px centered column, and a tinted surface behind the text. In the editor
+ * window's narrow right panel that reads as a huge floating card. Cursor's
+ * composer is a compact hairline-bordered box sitting directly on the panel —
+ * these overrides (scoped to the panel, and deliberately more specific than
+ * the hero rules) restore that in both the empty and conversation states.
+ */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session.chat-composer-empty .interactive-input-part {
+	width: auto;
+	max-width: none;
+	margin: 0 10px 10px;
+	padding: 0;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session.chat-composer-empty .interactive-input-part {
+	margin-top: 10px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part .chat-input-container,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session.chat-composer-empty .interactive-input-part .chat-input-container {
+	min-height: 0;
+	padding: 8px 10px;
+	gap: 4px;
+	border-radius: 10px;
+	box-shadow: none;
+	/* The hairline border is the only shell: paint the input (and the editor's
+	   solid background layer, which reads this token) with the panel surface
+	   instead of the tinted card color. */
+	--bb-composer-surface-background: var(--bb-panel-surface, var(--vscode-editor-background));
+	background-color: var(--bb-panel-surface, var(--vscode-editor-background));
+}
+
+/* The hero card stretches its editor to fill the 172px card; with the card
+   gone the editor sizes to its content again (one line at rest, grows as you
+   type), like Cursor. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part .interactive-input-editor {
+	min-height: 24px;
 }

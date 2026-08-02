@@ -10,7 +10,7 @@ import { ContextKeyExpr } from '../../../../platform/contextkey/common/contextke
 import { registerIcon } from '../../../../platform/theme/common/iconRegistry.js';
 import { Categories } from '../../../../platform/action/common/actionCommonCategories.js';
 import { alert } from '../../../../base/browser/ui/aria/aria.js';
-import { AuxiliaryBarMaximizedContext, AuxiliaryBarVisibleContext, IsAuxiliaryWindowContext } from '../../../common/contextkeys.js';
+import { AuxiliaryBarMaximizedContext, AuxiliaryBarVisibleContext, IsAuxiliaryWindowContext, IsSessionsWindowContext } from '../../../common/contextkeys.js';
 import { ViewContainerLocation, ViewContainerLocationToString } from '../../../common/views.js';
 import { ActivityBarPosition, IWorkbenchLayoutService, LayoutSettings, Parts } from '../../../services/layout/browser/layoutService.js';
 import { IPaneCompositePartService } from '../../../services/panecomposite/browser/panecomposite.js';
@@ -92,6 +92,24 @@ MenuRegistry.appendMenuItem(MenuId.AuxiliaryBarTitle, {
 	group: 'navigation',
 	order: 2,
 	when: ContextKeyExpr.equals(`config.${LayoutSettings.ACTIVITY_BAR_LOCATION}`, ActivityBarPosition.DEFAULT)
+});
+
+// With the activity bar hidden (this product's default), the editor window's
+// right panel still ends its strip with a panel toggle, mirroring Cursor's
+// + / history / ⋯ / toggle cluster. The Agents window has its own layout
+// controls, so it is excluded.
+MenuRegistry.appendMenuItem(MenuId.AuxiliaryBarTitle, {
+	command: {
+		id: ToggleAuxiliaryBarAction.ID,
+		title: localize('closeSecondarySideBar', 'Hide Secondary Side Bar'),
+		icon: auxiliaryBarRightIcon
+	},
+	group: 'navigation',
+	order: 3,
+	when: ContextKeyExpr.and(
+		ContextKeyExpr.equals(`config.${LayoutSettings.ACTIVITY_BAR_LOCATION}`, ActivityBarPosition.HIDDEN),
+		IsSessionsWindowContext.negate()
+	)
 });
 
 registerAction2(class extends Action2 {
