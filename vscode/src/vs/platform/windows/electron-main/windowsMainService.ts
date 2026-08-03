@@ -297,6 +297,17 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 	async openAgentsWindow(openConfig: IOpenConfiguration, folderUri?: URI, sessionResource?: URI): Promise<ICodeWindow[]> {
 		this.logService.trace('windowsManager#openAgentsWindow');
 
+		// The agents window always opens the fixed agent-sessions workspace
+		// (see `ensureAgentsWindow`), so a folder passed on the command line —
+		// `backboard-studio <folder> --agents` — would otherwise be dropped
+		// entirely and the window would start with no recognized folder. Route
+		// it through the same folder-pre-select handoff that window-to-window
+		// mode switches use.
+		if (!folderUri && (openConfig.cli._.length > 0 || openConfig.cli['folder-uri']?.length)) {
+			const cliPaths = await this.doExtractPathsFromCLI(openConfig.cli);
+			folderUri = cliPaths.find(isSingleFolderWorkspacePathToOpen)?.workspace.uri;
+		}
+
 		// Open the agent sessions workspace, reusing the calling window when requested.
 		const windows = await this.open(await this.ensureAgentsWindow(openConfig));
 

@@ -37,7 +37,7 @@ export interface IChatViewTitleDelegate {
 
 export class ChatViewTitleControl extends Disposable {
 
-	private static readonly DEFAULT_TITLE = localize('chat', "New Chat");
+	private static readonly DEFAULT_TITLE = localize('chat', "New Agent");
 	private static readonly PICK_AGENT_SESSION_ACTION_ID = 'workbench.action.chat.pickAgentSession';
 	private static readonly MORE_ACTIONS_ACTION_ID = 'workbench.action.chat.viewTitleMoreActions';
 	/** Stable ids of actions registered elsewhere; referenced by id to avoid import cycles. */
@@ -169,7 +169,7 @@ export class ChatViewTitleControl extends Disposable {
 			MenuRegistry.appendMenuItem(MenuId.ChatViewSessionTitleToolbar, {
 				command: {
 					id: ChatViewTitleControl.NEW_CHAT_COMMAND_ID,
-					title: localize('chat.newChatTab', "New Chat"),
+					title: localize('chat.newChatTab', "New Agent"),
 					icon: Codicon.plus,
 				},
 				group: 'navigation',
@@ -368,6 +368,11 @@ export class ChatViewTitleControl extends Disposable {
 		// New Chat tab represents it. It graduates to a real tab (and the
 		// permanent tab deactivates) once its first request lands.
 		const currentIsEmptyDraft = !this.model || this.model.getRequests().length === 0;
+		if (currentSessionResourceKey) {
+			// Reopening a session whose tab was closed (via history) revives the
+			// tab — the session owning the surface always has a visible tab.
+			this.closedSessionTabs.delete(currentSessionResourceKey);
+		}
 		if (currentSessionResource && currentSessionResourceKey && !this.closedSessionTabs.has(currentSessionResourceKey)) {
 			if (currentIsEmptyDraft) {
 				this.openSessionTabs.delete(currentSessionResourceKey);
@@ -383,7 +388,9 @@ export class ChatViewTitleControl extends Disposable {
 		const sessionsByResource = new Map(this.agentSessionsService.model.sessions.map(session => [session.resource.toString(), session]));
 		for (const resourceKey of this.openSessionTabs.keys()) {
 			if (!this.tabOrder.includes(resourceKey)) {
-				this.tabOrder.push(resourceKey);
+				// Newest chats sit directly beside the permanent New Agent tab,
+				// nudging older ones right — never appended at the far end.
+				this.tabOrder.unshift(resourceKey);
 			}
 		}
 		this.tabOrder = this.tabOrder.filter(resourceKey => !this.closedSessionTabs.has(resourceKey) && this.openSessionTabs.has(resourceKey));
@@ -490,6 +497,12 @@ export class ChatViewTitleControl extends Disposable {
 				this.openSessionTabs.delete(resourceKey);
 			}
 			this.updateTabs(this.getResolvedTitle());
+			if (options.isCurrent) {
+				// Closing the tab that owns the surface falls back to the panel's
+				// resting state: the permanent New Agent tab, active over an
+				// empty draft. Closing every tab therefore always ends there.
+				this.delegate.openNewChat();
+			}
 		}));
 	}
 

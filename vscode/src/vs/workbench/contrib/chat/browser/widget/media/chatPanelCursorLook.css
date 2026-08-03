@@ -49,8 +49,9 @@
 
 /* Exactly one tab reads selected across both strips: while a foreign panel
    (Claude Code, Codex) owns the surface, the active chat session tab drops its
-   bright foreground and reads like the other inactive tabs. */
+   pill fill and bright foreground and reads like the other inactive tabs. */
 .monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs:has(.composite-bar .action-item[data-composite-id='workbench.panel.chat']:not(.checked)) .chat-view-title-tab-active {
+	background: transparent;
 	color: var(--vscode-panelTitle-inactiveForeground, var(--vscode-descriptionForeground));
 }
 
@@ -206,10 +207,10 @@
 	gap: 4px;
 }
 
-/* The selected tab gets the room the others give up. */
-/* The permanent New Chat tab compresses last so its label stays readable. */
+/* The permanent New Agent tab never compresses — it is the strip's fixed,
+   far-left anchor. */
 .monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab.chat-view-title-tab-permanent {
-	flex-shrink: 0.25;
+	flex: 0 0 auto;
 	min-width: 70px;
 }
 
@@ -218,9 +219,10 @@
 	flex: 1 1 auto;
 	min-width: 64px;
 	max-width: 200px;
-	/* Selection reads through type alone — bright foreground on the shared flat
-	   surface, no fill — matching Cursor's shipped strip. */
-	background: transparent;
+	/* Selection is a soft filled pill plus bright foreground — Cursor's current
+	   strip fills the active tab (a ~8% foreground wash) rather than relying on
+	   type alone. The same foreground-mix works on light and dark themes. */
+	background: color-mix(in srgb, var(--vscode-foreground) 9%, transparent);
 	color: var(--vscode-panelTitle-activeForeground, var(--vscode-foreground));
 }
 
@@ -236,6 +238,19 @@
 .monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab:not(.chat-view-title-tab-active):hover,
 .monaco-workbench .part.auxiliarybar > .title.has-composite-bar > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(.icon):not(.checked):hover {
 	background: var(--bb-agent-tab-hover-background);
+}
+
+/* Session tabs keep their natural width: when the row runs out of room the
+   strip scrolls horizontally (.chat-view-title-tabs owns overflow-x and the
+   wheel handler) instead of squeezing labels down. The strip itself still
+   yields space before the composite bar and the pinned action cluster, so
+   tabs never paint over + / history / ⋯. Long titles cap at 180px and
+   ellipsize rather than growing without bound. */
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab,
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab.chat-view-title-tab-active {
+	flex: 0 0 auto;
+	min-width: 0;
+	max-width: 180px;
 }
 
 /* Cursor's tabs are text-only — no per-tab agent mark on either strip. The
@@ -456,6 +471,17 @@
 	box-shadow: 0 1px 5px rgba(0, 0, 0, 0.2);
 }
 
+/* Cursor's composer never swaps to the accent focus ring — the hairline stays
+   neutral whether or not the input has focus. Scoped to the right panel so
+   dialogs/editors keep the stock focus treatment. !important: the
+   backboard-composer block in chat.css pins its focused border-color (a
+   focusBorder mix) with !important, so only another !important can undo it. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session .chat-input-container.focused,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-container.focused {
+	border-color: var(--bb-composer-surface-border, var(--vscode-agentsChatInput-border, var(--vscode-input-border, transparent))) !important;
+	box-shadow: none;
+}
+
 .monaco-workbench .interactive-session .interactive-input-part .interactive-input-editor {
 	min-height: 42px;
 	font-size: 13px;
@@ -526,7 +552,7 @@
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part .chat-input-container,
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session.chat-composer-empty .interactive-input-part .chat-input-container {
 	min-height: 0;
-	padding: 8px 10px;
+	padding: 10px 12px;
 	gap: 4px;
 	border-radius: 10px;
 	box-shadow: none;
@@ -538,8 +564,8 @@
 }
 
 /* The hero card stretches its editor to fill the 172px card; with the card
-   gone the editor sizes to its content again (one line at rest, grows as you
-   type), like Cursor. */
+   gone the editor rests at a few open lines — Cursor's roomy composer — and
+   keeps growing as you type. */
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part .interactive-input-editor {
-	min-height: 24px;
+	min-height: 64px;
 }

@@ -30,6 +30,9 @@ node_modules/
 /vscode/pw_session.env
 /vscode/screenshots/
 /vscode/Lefpanelold.md
+# @playwright/cli drops a session-artifacts dir (snapshots, console logs)
+# in whatever cwd it runs from — unanchored so it is caught anywhere.
+.playwright-cli/
 
 # Local-only Zed scratch files
 zed/crates/beginner_ui/src/beginner_workspace.rs

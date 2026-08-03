@@ -259,7 +259,20 @@ export class WorkspacePicker extends Disposable {
 					this._onDidChangeSelection.fire();
 					this._onDidSelectWorkspace.fire(undefined);
 				} else {
+					const becameResolvable = !this._selectedResolved;
 					this._selectedResolved = reresolved;
+					if (becameResolvable) {
+						// The folder was selected (or restored) before any
+						// provider could resolve it, so the trigger has been
+						// showing the "workspace" placeholder and listeners
+						// never learned of the selection. Surface it like a
+						// real pick now — otherwise the header stays stale
+						// until the window reloads.
+						this._updateTriggerLabel();
+						this._onDidChangeSelection.fire();
+						this._onDidSelectWorkspace.fire(this._selectedFolderUri);
+						this._watchForConnectionFailure(reresolved);
+					}
 				}
 			}
 			if (!this._userHasPicked) {
