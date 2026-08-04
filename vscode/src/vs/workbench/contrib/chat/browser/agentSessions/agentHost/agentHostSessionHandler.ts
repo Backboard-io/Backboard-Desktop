@@ -3028,26 +3028,48 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 	 */
 	private _createTurnModelLookup(sessionResource: URI, fallbackRawModelId: string | undefined): TurnModelLookup {
 		const resolveRaw = (rawModelId: string | undefined): string | undefined => rawModelId ?? fallbackRawModelId;
+		const lookupModelName = (rawModelId: string): string | undefined => {
+			const modelId = this._toLanguageModelId(sessionResource, rawModelId);
+			if (!modelId) {
+				return undefined;
+			}
+			const exact = this._languageModelsService.lookupLanguageModel(modelId);
+			if (exact) {
+				return exact.name;
+			}
+			// The backend may report a raw model id without its provider segment
+			// (e.g. `deepseek/deepseek-v4-flash` for the registered
+			// `openrouter/deepseek/deepseek-v4-flash`); fall back to a suffix match
+			// within this session type's models.
+			const sessionType = getChatSessionType(sessionResource);
+			const suffix = `/${rawModelId}`;
+			for (const id of this._languageModelsService.getLanguageModelIds()) {
+				const metadata = this._languageModelsService.lookupLanguageModel(id);
+				if (metadata?.targetChatSessionType === sessionType && (metadata.id === rawModelId || metadata.id.endsWith(suffix))) {
+					return metadata.name;
+				}
+			}
+			return undefined;
+		};
 		return {
 			toLanguageModelId: (rawModelId) => this._toLanguageModelId(sessionResource, resolveRaw(rawModelId)),
 			toResponseDetails: (rawModelId, usage) => {
-				const modelId = this._toLanguageModelId(sessionResource, resolveRaw(rawModelId));
-				if (!modelId) {
+				const raw = resolveRaw(rawModelId);
+				if (!raw) {
 					return undefined;
 				}
-				const model = this._languageModelsService.lookupLanguageModel(modelId);
-				if (!model) {
-					return undefined;
-				}
+				// When the model isn't (or is no longer) registered, show the raw
+				// id's final path segment so the footer still says what ran.
+				const name = lookupModelName(raw) ?? raw.split('/').pop() ?? raw;
 				const credits = getCopilotCredits(usage);
 				if (credits !== undefined) {
 					const formatted = credits % 1 === 0 ? credits.toString() : credits.toFixed(1);
 					const creditDetails = credits === 1
 						? localize('agentHost.responseDetails.credit', "{0} credit", formatted)
 						: localize('agentHost.responseDetails.credits', "{0} credits", formatted);
-					return [model.name, creditDetails].join(' • ');
+					return [name, creditDetails].join(' • ');
 				}
-				return model.name;
+				return name;
 			},
 		};
 	}

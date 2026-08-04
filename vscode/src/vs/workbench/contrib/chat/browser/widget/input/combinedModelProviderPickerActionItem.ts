@@ -198,6 +198,18 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 			render: (container: HTMLElement) => {
 				container.classList.add('combined-model-provider-overlay');
 				this._renderOverlay(container, store);
+				// The base ContextView only auto-hides for interactions outside the
+				// whole workbench container, so a click elsewhere in the window would
+				// leave the overlay open. Dismiss on any pointer-down outside the
+				// overlay; the trigger chip is exempt so its own click handler can
+				// toggle without immediately reopening.
+				store.add(dom.addDisposableListener(dom.getWindow(container), dom.EventType.MOUSE_DOWN, e => {
+					const target = e.target;
+					if (target instanceof Node && (dom.isAncestor(target, container) || (this._triggerElement && dom.isAncestor(target, this._triggerElement)))) {
+						return;
+					}
+					this._overlay.clear();
+				}, true));
 				return store;
 			},
 			onHide: () => {

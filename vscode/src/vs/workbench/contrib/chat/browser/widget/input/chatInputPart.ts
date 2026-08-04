@@ -77,6 +77,7 @@ import { ISharedWebContentExtractorService } from '../../../../../../platform/we
 import { IWorkspaceContextService, WorkbenchState } from '../../../../../../platform/workspace/common/workspace.js';
 import { ISCMService } from '../../../../scm/common/scm.js';
 import { IWorkbenchLayoutService, Position } from '../../../../../services/layout/browser/layoutService.js';
+import { IWorkbenchEnvironmentService } from '../../../../../services/environment/common/environmentService.js';
 import { IPathService } from '../../../../../services/path/common/pathService.js';
 import { IViewDescriptorService, ViewContainerLocation } from '../../../../../common/views.js';
 import { ResourceLabels } from '../../../../../browser/labels.js';
@@ -606,6 +607,14 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	private _chatSessionIsEmpty = false;
 	private _pendingDelegationTarget: AgentSessionTarget | undefined = undefined;
 	private _currentSessionType: string | undefined = undefined;
+
+	/**
+	 * The storage key {@link initSelectedModel} last restored from. When a session
+	 * binds with a different (location, sessionType) bucket — e.g. the editor-window
+	 * agent panel whose session type is unknown at construction — the restore is
+	 * re-run against the correct bucket (see {@link setInputModel}).
+	 */
+	private _selectedModelInitedStorageKey: string | undefined = undefined;
 	private _backboardRecentUsageCache: { readonly fetchedAt: number; readonly metrics: IBackboardUsageMetrics } | undefined;
 	private _backboardRecentUsagePromise: Promise<IBackboardUsageMetrics> | undefined;
 
@@ -644,6 +653,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		@IChatAttachmentWidgetRegistry private readonly _chatAttachmentWidgetRegistry: IChatAttachmentWidgetRegistry,
 		@IChatInputNotificationService private readonly chatInputNotificationService: IChatInputNotificationService,
 		@IChatPhoneInputPresenter private readonly chatPhoneInputPresenter: IChatPhoneInputPresenter,
+		@IWorkbenchEnvironmentService private readonly environmentService: IWorkbenchEnvironmentService,
 	) {
 		super();
 
@@ -790,6 +800,15 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		}));
 
 		const resetCurrentLanguageModelIfUnavailable = () => {
+			// The (location, sessionType)-scoped storage bucket may only become
+			// resolvable after this session type's contribution/models register
+			// (e.g. agent-host models arriving after window restore) — until then
+			// initSelectedModel reads the generic bucket. Re-run the persisted
+			// restore the moment the effective bucket changes so the user's stored
+			// pick for this pool wins over the pool default.
+			if (this.getSelectedModelStorageKey() !== this._selectedModelInitedStorageKey) {
+				this.initSelectedModel();
+			}
 			const modelIdentifier = this._currentLanguageModel.get()?.identifier;
 			const models = this.getModels();
 			if (canLog(this.logService.getLevel(), LogLevel.Debug)) {
@@ -922,13 +941,18 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		this._modelConfigStore.clear();
 
 		const selectedModelStorageKey = this.getSelectedModelStorageKey();
+		this._selectedModelInitedStorageKey = selectedModelStorageKey;
 		const selectedModelIsDefaultStorageKey = this.getSelectedModelIsDefaultStorageKey();
 		const persistedSelection = this.storageService.get(selectedModelStorageKey, StorageScope.APPLICATION);
 		const persistedAsDefault = this.storageService.getBoolean(selectedModelIsDefaultStorageKey, StorageScope.APPLICATION, true);
 		logChangesToStateModel(this._inputModel, `[INIT-SELECTED-MODEL] storageKey=${selectedModelStorageKey}, isDefaultKey=${selectedModelIsDefaultStorageKey}, persistedSelection=${persistedSelection}, persistedAsDefault=${persistedAsDefault}, currentSessionType=${this._currentSessionType}, getCurrentSessionType=${this.getCurrentSessionType()}, widgetSession=${this._currentSessionKey}, boundInputModelSession=${this._inputModelSessionResource?.toString()}, currentLanguageModel=${this._currentLanguageModel.get()?.identifier}`, this._inputModel?.state.get(), undefined, this.logService);
 
 		if (persistedSelection) {
-			const result = shouldRestorePersistedModel(persistedSelection, persistedAsDefault, this.getModels(), this.location);
+			// Validate against the pool of the session type the storage key was built
+			// from. `getCurrentSessionType()` can lag behind `_currentSessionType`
+			// during setInputModel (the widget's view model binds later), which would
+			// filter out session-targeted models and wrongly fail the restore.
+			const result = shouldRestorePersistedModel(persistedSelection, persistedAsDefault, this.getModelsForSessionType(this._currentSessionType ?? this.getCurrentSessionType()), this.location);
 			logChangesToStateModel(this._inputModel, `[INIT-SELECTED-MODEL] restore decision persistedSelection=${persistedSelection}, shouldRestore=${result.shouldRestore}, resultModel=${result.model?.identifier}, storageKey=${selectedModelStorageKey}, currentSessionType=${this._currentSessionType}, getCurrentSessionType=${this.getCurrentSessionType()}`, this._inputModel?.state.get(), undefined, this.logService);
 			if (result.shouldRestore && result.model) {
 				this.setCurrentLanguageModel(result.model);
@@ -1551,6 +1575,18 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		this.selectedToolsModel.resetSessionEnablementState();
 		this._chatSessionIsEmpty = chatSessionIsEmpty;
 
+		// The persisted-model storage bucket is keyed by session type, which hosts
+		// that bind their session late (e.g. the editor-window agent panel restoring
+		// an agent-host draft) don't know at construction time — the constructor's
+		// initSelectedModel then reads the generic bucket. Once the bound session
+		// reveals the real bucket, re-run the restore so the user's stored pick for
+		// this session type is applied instead of the pool default. Restricted to
+		// empty sessions: non-empty sessions carry their own selectedModel in input
+		// state, which the model->view sync applies.
+		if (chatSessionIsEmpty && this.getSelectedModelStorageKey() !== this._selectedModelInitedStorageKey) {
+			this.initSelectedModel();
+		}
+
 		if (chatSessionIsEmpty) {
 			logChangesToStateModel(this._inputModel, `(1) setting empty model state for ${forSessionResource.toString()}`, undefined, undefined, this.logService);
 			this._setEmptyModelState();
@@ -1768,11 +1804,11 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		}
 	}
 
-	public setCurrentLanguageModel(model: ILanguageModelChatMetadataAndIdentifier) {
+	public setCurrentLanguageModel(model: ILanguageModelChatMetadataAndIdentifier, persist = true) {
 		const modelDetails = this.getModels().map(m => `${m.identifier} (${m.metadata.id})`).join(', ');
 		const selectedModelStorageKey = this.getSelectedModelStorageKey();
 		const selectedModelIsDefaultStorageKey = this.getSelectedModelIsDefaultStorageKey();
-		logChangesToStateModel(this._inputModel, `setCurrentLanguageModel to ${model.identifier} in ${this._currentSessionKey}, storageKey=${selectedModelStorageKey}, isDefaultKey=${selectedModelIsDefaultStorageKey}, currentSessionType=${this._currentSessionType}, getCurrentSessionType=${this.getCurrentSessionType()}, boundInputModelSession=${this._inputModelSessionResource?.toString()}, modelDetials = ${modelDetails}`, undefined, undefined, this.logService);
+		logChangesToStateModel(this._inputModel, `setCurrentLanguageModel to ${model.identifier} (persist=${persist}) in ${this._currentSessionKey}, storageKey=${selectedModelStorageKey}, isDefaultKey=${selectedModelIsDefaultStorageKey}, currentSessionType=${this._currentSessionType}, getCurrentSessionType=${this.getCurrentSessionType()}, boundInputModelSession=${this._inputModelSessionResource?.toString()}, modelDetials = ${modelDetails}`, undefined, undefined, this.logService);
 		this._currentLanguageModel.set(model, undefined);
 
 		if (this.cachedWidth) {
@@ -1780,9 +1816,14 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			this.layout(this.cachedWidth);
 		}
 
-		// Store as global user preference (session-specific state is in the model's inputModel)
-		this.storageService.store(this.getSelectedModelStorageKey(), model.identifier, StorageScope.APPLICATION, StorageTarget.USER);
-		this.storageService.store(this.getSelectedModelIsDefaultStorageKey(), !!model.metadata.isDefaultForLocation[this.location], StorageScope.APPLICATION, StorageTarget.USER);
+		// Store as global user preference (session-specific state is in the model's inputModel).
+		// Automatic fallbacks (`setCurrentLanguageModelToDefault`) pass persist=false: a transient
+		// default applied while a session's model pool is still loading must not overwrite the
+		// user's stored selection for that pool.
+		if (persist) {
+			this.storageService.store(this.getSelectedModelStorageKey(), model.identifier, StorageScope.APPLICATION, StorageTarget.USER);
+			this.storageService.store(this.getSelectedModelIsDefaultStorageKey(), !!model.metadata.isDefaultForLocation[this.location], StorageScope.APPLICATION, StorageTarget.USER);
+		}
 
 		// Sync to model
 		this._syncInputStateToModel();
@@ -2071,7 +2112,10 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		const defaultModel = findDefaultModel(allModels, this.location);
 		logChangesToStateModel(this._inputModel, `[DEFAULT] setCurrentLanguageModelToDefault called (defaultModel=${defaultModel?.identifier}, currentLm=${this._currentLanguageModel.get()?.identifier}) in ${this._currentSessionKey}`, undefined, this._inputModel?.state.get(), this.logService);
 		if (defaultModel) {
-			this.setCurrentLanguageModel(defaultModel);
+			// persist=false: this is an automatic fallback, not a user choice — persisting it
+			// would clobber the user's stored selection for this pool (and mark it as default),
+			// permanently resetting their model on the next restore.
+			this.setCurrentLanguageModel(defaultModel, false);
 		}
 	}
 
@@ -3028,8 +3072,10 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 
 		// Compact chats have no secondary toolbar to hang the context usage off, and
 		// the sessions window deliberately keeps it inside the composer shell rather
-		// than on the row beneath it, so both host it in the composer footer.
-		if (this.options.renderStyle === 'compact' || this.options.isSessionsWindow) {
+		// than on the row beneath it, so both host it in the composer footer. The
+		// environment flag covers sessions-window widgets whose host doesn't set the
+		// per-widget option (e.g. the Simple window's running-session view).
+		if (this.options.renderStyle === 'compact' || this.options.isSessionsWindow || this.environmentService.isSessionsWindow) {
 			toolbarsContainer.prepend(this.contextUsageWidgetContainer);
 		}
 

@@ -1207,6 +1207,45 @@
 	padding-right: 32px;
 }
 
+/* ---- Simple mode: compressed transcript + composer ----
+ * Smaller type and a tighter rhythm so more of the conversation fits on
+ * screen: 13px prose on snugger lines, a slimmer prompt bubble, narrower
+ * gutters, and a shorter composer shell. */
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .interactive-item-container .value .rendered-markdown {
+	font-size: 13px;
+	line-height: 1.45;
+}
+
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown {
+	font-size: 13px;
+	margin-bottom: 4px;
+	padding: 7px 10px;
+	border-radius: 12px;
+}
+
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .interactive-item-container,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session > .chat-suggest-next-widget {
+	padding-left: 20px;
+	padding-right: 20px;
+}
+
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .interactive-item-container {
+	padding-bottom: 4px;
+}
+
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .interactive-input-part {
+	padding-left: 20px;
+	padding-right: 20px;
+}
+
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .interactive-input-part .chat-input-container {
+	padding: 2px 10px 6px;
+}
+
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .interactive-input-part .chat-input-toolbars {
+	margin-top: 4px;
+}
+
 /* …except the inline edit box inside a sent request, which is already inset by
  * the row it lives in. */
 .agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .chat-edit-input-container .interactive-input-part {
@@ -1235,14 +1274,16 @@
 
 /* Response meta (copy button, etc.) is hover-revealed in T3
  * (`opacity-0 … group-hover/assistant:opacity-100 focus-within:opacity-100`),
- * not a permanent row under the reply. */
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-item-container.interactive-response .chat-footer-toolbar {
+ * not a permanent row under the reply. The response details (model name,
+ * credits) stay visible on every completed response, so only the action
+ * buttons are gated. */
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-item-container.interactive-response .chat-footer-toolbar .monaco-action-bar {
 	opacity: 0;
 	transition: opacity 200ms;
 }
 
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-item-container.interactive-response:hover .chat-footer-toolbar,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-item-container.interactive-response:focus-within .chat-footer-toolbar {
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-item-container.interactive-response:hover .chat-footer-toolbar .monaco-action-bar,
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-item-container.interactive-response:focus-within .chat-footer-toolbar .monaco-action-bar {
 	opacity: 1;
 }
 

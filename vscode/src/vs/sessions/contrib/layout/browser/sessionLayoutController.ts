@@ -13,6 +13,7 @@ import { isMobile, isWeb } from '../../../../base/common/platform.js';
 import { URI } from '../../../../base/common/uri.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { observableConfigValue } from '../../../../platform/observable/common/platformObservableUtils.js';
+import { IFileService } from '../../../../platform/files/common/files.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { IWorkbenchEnvironmentService } from '../../../../workbench/services/environment/common/environmentService.js';
@@ -75,6 +76,7 @@ export class LayoutController extends Disposable {
 		@IWorkspaceContextService private readonly _workspaceContextService: IWorkspaceContextService,
 		@IWorkspaceEditingService private readonly _workspaceEditingService: IWorkspaceEditingService,
 		@IWorkbenchEnvironmentService environmentService: IWorkbenchEnvironmentService,
+		@IFileService private readonly _fileService: IFileService,
 	) {
 		super();
 
@@ -258,6 +260,15 @@ export class LayoutController extends Disposable {
 	// --- Auxiliary bar ---
 
 	private async _syncWorkspaceFolder(workspaceFolderUri: URI | undefined): Promise<void> {
+		// A session can reference a folder that no longer exists on disk (the
+		// project was deleted or moved). Never inject it into the workspace:
+		// extensions resolve `workspaceFolders[0]` with fs calls that throw on
+		// dead paths (e.g. the Claude Code panel fails its whole webview), so a
+		// missing folder is treated the same as no folder.
+		if (workspaceFolderUri && !(await this._fileService.exists(workspaceFolderUri))) {
+			workspaceFolderUri = undefined;
+		}
+
 		const currentFolders = this._workspaceContextService.getWorkspace().folders;
 		if (!workspaceFolderUri) {
 			if (currentFolders.length > 0) {
