@@ -230,6 +230,30 @@ describe("thinking config", () => {
 		);
 	});
 
+	it("runtime resolver degrades to no thinking for unsupported models", async () => {
+		const resolver = await createRuntimeThinkingResolver(
+			{
+				model: { provider: "cohere", model: "command-r7b-12-2024" },
+				thinkingIntent: { kind: "level", level: "low" },
+			},
+			{
+				getModelThinkingMetadata: async () =>
+					metadata([], { supports_thinking: false }),
+			},
+		);
+
+		expect({
+			intent: resolver.intent,
+			degradedReason: resolver.degradedReason,
+			resolved: resolver.resolve({ phase: "initial", requestKind: "user" }),
+		}).toEqual({
+			intent: null,
+			degradedReason:
+				"cohere/command-r7b-12-2024 does not support thinking; running without it.",
+			resolved: null,
+		});
+	});
+
 	it("runtime resolver skips metadata lookup when thinking is off", async () => {
 		let metadataCalls = 0;
 		const resolver = await createRuntimeThinkingResolver(

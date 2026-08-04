@@ -257,6 +257,12 @@ export class AgentController {
 				),
 			});
 			const [assistantId, thinkingResolver] = await preflight;
+			if (thinkingResolver.degradedReason) {
+				bus.emit({
+					type: "system:warning",
+					message: thinkingResolver.degradedReason,
+				});
+			}
 
 			const loop = this.loopFactory.createLoop({
 				scheduler: this.scheduler,
