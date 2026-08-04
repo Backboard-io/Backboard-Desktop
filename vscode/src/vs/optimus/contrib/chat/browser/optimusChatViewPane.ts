@@ -14,6 +14,7 @@ import { IContextKeyService } from '../../../../platform/contextkey/common/conte
 import { IContextMenuService } from '../../../../platform/contextview/browser/contextView.js';
 import { IHoverService } from '../../../../platform/hover/browser/hover.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
+import { IAgentCliSetupService } from '../../../../workbench/contrib/chat/browser/agentSessions/agentCliSetup.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { IKeybindingService } from '../../../../platform/keybinding/common/keybinding.js';
 import { IOpenerService } from '../../../../platform/opener/common/opener.js';
@@ -77,6 +78,7 @@ export class OptimusChatViewPane extends ViewPane {
 		@IAgentHostNewSessionFolderService private readonly newSessionFolderService: IAgentHostNewSessionFolderService,
 		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
 		@ICommandService private readonly commandService: ICommandService,
+		@IAgentCliSetupService private readonly agentCliSetupService: IAgentCliSetupService,
 	) {
 		super(options, keybindingService, contextMenuService, configurationService, contextKeyService, viewDescriptorService, instantiationService, openerService, themeService, hoverService);
 	}
@@ -187,7 +189,8 @@ export class OptimusChatViewPane extends ViewPane {
 				sessionTypePickerDelegate: createBackboardSessionTypePickerDelegate(
 					() => this.chatWidget?.viewModel?.model.sessionResource,
 					this.commandService,
-					this.chatSessionsService),
+					this.chatSessionsService,
+					this.agentCliSetupService),
 				supportsChangingModes: false,
 				inputEditorMinLines: 4,
 				workspacePickerDelegate: this.createWorkspacePickerDelegate(),

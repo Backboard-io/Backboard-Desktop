@@ -23,7 +23,7 @@ import { ISession, SessionStatus } from '../../../services/sessions/common/sessi
 import { IActiveSession } from '../../../services/sessions/common/sessionsManagement.js';
 import { INewChatModelPickerService } from './newChatModelPicker.js';
 import { reportNewChatPickerClosed } from './newChatPickerTelemetry.js';
-import { IAgentCliSetupService } from './agentCliSetup.js';
+import { IAgentCliSetupService } from '../../../../workbench/contrib/chat/browser/agentSessions/agentCliSetup.js';
 
 /**
  * Returns the core model-picker storage key for a provider/session-type pair.

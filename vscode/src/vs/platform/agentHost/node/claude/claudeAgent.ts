@@ -130,6 +130,7 @@ const FALLBACK_CLAUDE_MODELS: ReadonlyArray<{
 	readonly supportsFastMode: boolean;
 }> = [
 	{ id: 'claude-fable-5', name: 'Claude Fable 5', maxContextWindow: 200_000, efforts: ['low', 'medium', 'high', 'xhigh', 'max'], supportsFastMode: false },
+	{ id: 'claude-opus-5', name: 'Claude Opus 5', maxContextWindow: 200_000, efforts: ['low', 'medium', 'high', 'xhigh', 'max'], supportsFastMode: true },
 	{ id: 'claude-opus-4.8', name: 'Claude Opus 4.8', maxContextWindow: 200_000, efforts: ['low', 'medium', 'high', 'xhigh', 'max'], supportsFastMode: true },
 	{ id: 'claude-opus-4.6', name: 'Claude Opus 4.6', maxContextWindow: 200_000, efforts: ['low', 'medium', 'high', 'xhigh', 'max'], supportsFastMode: false },
 	{ id: 'claude-sonnet-5', name: 'Claude Sonnet 5', maxContextWindow: 200_000, efforts: ['low', 'medium', 'high', 'xhigh', 'max'], supportsFastMode: false },
@@ -159,7 +160,7 @@ const FALLBACK_CLAUDE_MODELS: ReadonlyArray<{
  */
 const CLAUDE_ALIAS_VERSIONS: Record<string, string> = {
 	fable: 'Fable 5',
-	opus: 'Opus 4.8',
+	opus: 'Opus 5',
 	sonnet: 'Sonnet 5',
 	haiku: 'Haiku 4.5',
 };

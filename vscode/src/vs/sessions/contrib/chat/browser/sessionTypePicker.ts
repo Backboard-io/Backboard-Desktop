@@ -26,7 +26,7 @@ import { ILanguageModelsService } from '../../../../workbench/contrib/chat/commo
 import { getSessionTypeAvailability, getSessionTypeUnavailableDescription, getSessionTypeUnavailableHover, SessionTypeAvailability } from '../../../../workbench/contrib/chat/browser/agentSessions/sessionTypeAvailability.js';
 import { IChatEntitlementService } from '../../../../workbench/services/chat/common/chatEntitlementService.js';
 import { reportNewChatPickerClosed } from './newChatPickerTelemetry.js';
-import { IAgentCliSetupService } from './agentCliSetup.js';
+import { IAgentCliSetupService } from '../../../../workbench/contrib/chat/browser/agentSessions/agentCliSetup.js';
 
 const STORAGE_KEY_LAST_SESSION_TYPE = 'sessions.userSelectedSessionType';
 

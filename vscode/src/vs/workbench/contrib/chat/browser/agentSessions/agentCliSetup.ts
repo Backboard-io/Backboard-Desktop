@@ -3,26 +3,26 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Codicon } from '../../../../base/common/codicons.js';
-import { DisposableStore } from '../../../../base/common/lifecycle.js';
-import { ThemeIcon } from '../../../../base/common/themables.js';
-import { URI } from '../../../../base/common/uri.js';
-import { Event } from '../../../../base/common/event.js';
-import { isWindows } from '../../../../base/common/platform.js';
-import { localize } from '../../../../nls.js';
-import { IAgentHostService } from '../../../../platform/agentHost/common/agentService.js';
-import type { RootState } from '../../../../platform/agentHost/common/state/protocol/state.js';
-import { IDialogService } from '../../../../platform/dialogs/common/dialogs.js';
-import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
-import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
-import { ILogService } from '../../../../platform/log/common/log.js';
-import { INotificationService } from '../../../../platform/notification/common/notification.js';
-import { IOpenerService } from '../../../../platform/opener/common/opener.js';
-import { IProgressService, ProgressLocation } from '../../../../platform/progress/common/progress.js';
-import { IQuickInputService } from '../../../../platform/quickinput/common/quickInput.js';
-import { ITerminalService, type ITerminalInstance } from '../../../../workbench/contrib/terminal/browser/terminal.js';
-import { IHostService } from '../../../../workbench/services/host/browser/host.js';
-import { IPathService } from '../../../../workbench/services/path/common/pathService.js';
+import { Codicon } from '../../../../../base/common/codicons.js';
+import { DisposableStore } from '../../../../../base/common/lifecycle.js';
+import { ThemeIcon } from '../../../../../base/common/themables.js';
+import { URI } from '../../../../../base/common/uri.js';
+import { Event } from '../../../../../base/common/event.js';
+import { isWindows } from '../../../../../base/common/platform.js';
+import { localize } from '../../../../../nls.js';
+import { IAgentHostService } from '../../../../../platform/agentHost/common/agentService.js';
+import type { RootState } from '../../../../../platform/agentHost/common/state/protocol/state.js';
+import { IDialogService } from '../../../../../platform/dialogs/common/dialogs.js';
+import { createDecorator } from '../../../../../platform/instantiation/common/instantiation.js';
+import { InstantiationType, registerSingleton } from '../../../../../platform/instantiation/common/extensions.js';
+import { ILogService } from '../../../../../platform/log/common/log.js';
+import { INotificationService } from '../../../../../platform/notification/common/notification.js';
+import { IOpenerService } from '../../../../../platform/opener/common/opener.js';
+import { IProgressService, ProgressLocation } from '../../../../../platform/progress/common/progress.js';
+import { IQuickInputService } from '../../../../../platform/quickinput/common/quickInput.js';
+import { ITerminalService, type ITerminalInstance } from '../../../terminal/browser/terminal.js';
+import { IHostService } from '../../../../services/host/browser/host.js';
+import { IPathService } from '../../../../services/path/common/pathService.js';
 
 /** An agent CLI the user can set up with one click from the session-type picker. */
 export interface IAgentCliSetupCandidate {

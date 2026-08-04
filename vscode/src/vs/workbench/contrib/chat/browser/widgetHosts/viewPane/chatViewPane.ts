@@ -40,6 +40,7 @@ import { Memento } from '../../../../../common/memento.js';
 import { SIDE_BAR_FOREGROUND } from '../../../../../common/theme.js';
 import { IViewDescriptorService, ViewContainerLocation } from '../../../../../common/views.js';
 import { IPaneCompositePartService } from '../../../../../services/panecomposite/browser/panecomposite.js';
+import { IAgentCliSetupService } from '../../agentSessions/agentCliSetup.js';
 import { ILifecycleService, StartupKind } from '../../../../../services/lifecycle/common/lifecycle.js';
 import { IPathService } from '../../../../../services/path/common/pathService.js';
 import { IChatViewTitleActionContext } from '../../../common/actions/chatActions.js';
@@ -159,6 +160,7 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 		@IFileService private readonly fileService: IFileService,
 		@IPathService private readonly pathService: IPathService,
 		@IPaneCompositePartService private readonly paneCompositePartService: IPaneCompositePartService,
+		@IAgentCliSetupService private readonly agentCliSetupService: IAgentCliSetupService,
 	) {
 		super(options, keybindingService2, contextMenuService, configurationService, contextKeyService, viewDescriptorService, instantiationService, openerService, themeService, hoverService);
 
@@ -849,7 +851,8 @@ referencesExpandedWhenEmptyResponse: false,
 					? createBackboardSessionTypePickerDelegate(
 						() => this._widget?.viewModel?.model.sessionResource,
 						this.commandService,
-						this.chatSessionsService)
+						this.chatSessionsService,
+						this.agentCliSetupService)
 					: undefined,
 				supportsChangingModes: !isBackboardProduct(),
 				// Compact, Cursor-sized composer: two lines at rest, grows with

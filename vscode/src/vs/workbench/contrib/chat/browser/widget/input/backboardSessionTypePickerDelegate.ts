@@ -7,8 +7,10 @@ import { URI } from '../../../../../../base/common/uri.js';
 import { ICommandService } from '../../../../../../platform/commands/common/commands.js';
 import { IChatSessionsService } from '../../../common/chatSessionsService.js';
 import { getChatSessionType } from '../../../common/model/chatUri.js';
+import { IAgentCliSetupService } from '../../agentSessions/agentCliSetup.js';
 import { AgentSessionProviders, AgentSessionTarget } from '../../agentSessions/agentSessions.js';
 import { ISessionTypePickerDelegate } from '../../chat.js';
+import { IModelPickerSetupCandidate } from './modelPickerActionItem.js';
 
 /**
  * Session providers the Simple window's new-chat composer offers, in its order.
@@ -57,6 +59,7 @@ export function createBackboardSessionTypePickerDelegate(
 	getSessionResource: () => URI | undefined,
 	commandService: ICommandService,
 	chatSessionsService: IChatSessionsService,
+	agentCliSetupService: IAgentCliSetupService,
 ): ISessionTypePickerDelegate {
 	return {
 		getActiveSessionProvider: () => {
@@ -79,5 +82,25 @@ export function createBackboardSessionTypePickerDelegate(
 			}
 			return providers;
 		},
+
+		// Bring-your-own-subscription: a rail provider whose agent CLI is not
+		// installed offers the one-click Install (curl installer + sign-in)
+		// instead of a dead "No models available" state — the same flow the
+		// Simple window's composer offers.
+		getSetupCandidateForProvider: (provider: AgentSessionTarget): IModelPickerSetupCandidate | undefined => {
+			if (!provider.startsWith(AGENT_HOST_SESSION_TYPE_PREFIX)) {
+				return undefined;
+			}
+			const providerId = provider.slice(AGENT_HOST_SESSION_TYPE_PREFIX.length);
+			const registered = new Set<string>();
+			for (const contribution of chatSessionsService.getAllChatSessionContributions()) {
+				if (contribution.type.startsWith(AGENT_HOST_SESSION_TYPE_PREFIX) && contribution.agentHostProviderId) {
+					registered.add(contribution.agentHostProviderId);
+				}
+			}
+			return agentCliSetupService.getSetupCandidates(registered).find(candidate => candidate.id === providerId);
+		},
+
+		runSetup: id => { void agentCliSetupService.beginSetup(id); },
 	};
 }

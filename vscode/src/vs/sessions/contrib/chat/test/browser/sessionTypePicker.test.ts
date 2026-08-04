@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
-import { IAgentCliSetupService } from '../../browser/agentCliSetup.js';
+import { IAgentCliSetupService } from '../../../../../workbench/contrib/chat/browser/agentSessions/agentCliSetup.js';
 import { Codicon } from '../../../../../base/common/codicons.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { Disposable, DisposableStore } from '../../../../../base/common/lifecycle.js';

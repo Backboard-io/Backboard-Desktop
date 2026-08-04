@@ -5,7 +5,7 @@
 
 import { localize } from '../../../../../nls.js';
 import { URI } from '../../../../../base/common/uri.js';
-import { IAgentCliSetupService } from '../agentCliSetup.js';
+import { IAgentCliSetupService } from '../../../../../workbench/contrib/chat/browser/agentSessions/agentCliSetup.js';
 import { IActionWidgetService } from '../../../../../platform/actionWidget/browser/actionWidget.js';
 import { IStorageService } from '../../../../../platform/storage/common/storage.js';
 import { ITelemetryService } from '../../../../../platform/telemetry/common/telemetry.js';
