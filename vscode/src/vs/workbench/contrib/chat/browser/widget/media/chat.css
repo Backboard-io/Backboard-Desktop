@@ -2785,6 +2785,55 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	line-height: 1;
 }
 
+/* Reasoning intensity slider popup (opened from the composer options gear) */
+.backboard-reasoning-slider {
+	box-sizing: border-box;
+	min-width: 260px;
+	padding: 12px 14px;
+	background: var(--vscode-editorWidget-background);
+	border: 1px solid var(--vscode-editorWidget-border);
+	border-radius: 6px;
+	box-shadow: 0 4px 12px var(--vscode-widget-shadow);
+	color: var(--vscode-foreground);
+}
+
+.backboard-reasoning-slider-title {
+	font-size: 12px;
+	font-weight: 600;
+	margin-bottom: 10px;
+}
+
+.backboard-reasoning-slider input.backboard-reasoning-slider-input {
+	display: block;
+	width: 100%;
+	margin: 0 0 6px;
+	accent-color: var(--vscode-charts-blue, var(--vscode-focusBorder));
+	cursor: pointer;
+}
+
+.backboard-reasoning-slider-labels {
+	display: flex;
+	justify-content: space-between;
+	margin-bottom: 8px;
+}
+
+.backboard-reasoning-slider-label {
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+	cursor: pointer;
+}
+
+.backboard-reasoning-slider-label.selected {
+	color: var(--vscode-charts-blue, var(--vscode-focusBorder));
+	font-weight: 600;
+}
+
+.backboard-reasoning-slider-description {
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+	min-height: 14px;
+}
+
 /* When chevrons are hidden and only showing an icon (no label), size to 22x22 with centered icon */
 .interactive-session .chat-input-toolbar .chat-input-picker-item .action-label.compact:not(:has(.chat-input-picker-label)),
 .interactive-session .chat-input-toolbar .chat-input-picker-item.compact .action-label:not(:has(.chat-input-picker-label)),

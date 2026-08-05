@@ -592,6 +592,32 @@ export class AgentHostChatInputPicker extends Disposable {
 		return this._readContext()?.value;
 	}
 
+	/**
+	 * Static enum metadata for the bound property, for custom (non-list)
+	 * editors like the reasoning slider. `undefined` for non-enum properties
+	 * or before the schema has resolved.
+	 */
+	getEnumInfo(): { values: string[]; labels: string[]; descriptions: (string | undefined)[]; current: string | undefined } | undefined {
+		const ctx = this._readContext();
+		if (!ctx || !Array.isArray(ctx.schema.enum) || ctx.schema.enum.length === 0) {
+			return undefined;
+		}
+		return {
+			values: [...ctx.schema.enum],
+			labels: ctx.schema.enum.map((value, index) => ctx.schema.enumLabels?.[index] ?? value),
+			descriptions: ctx.schema.enum.map((_, index) => ctx.schema.enumDescriptions?.[index]),
+			current: typeof ctx.value === 'string' ? ctx.value : undefined,
+		};
+	}
+
+	/** Applies a value directly, bypassing the list popup (used by custom editors like the reasoning slider). */
+	setValue(value: string): void {
+		const ctx = this._readContext();
+		if (ctx && !ctx.schema.readOnly) {
+			void this._setValue(ctx.backendSession, value);
+		}
+	}
+
 	/** Whether the bound property is currently advertised by the session's schema (i.e. this picker has something to show). */
 	hasContext(): boolean {
 		return this._readContext() !== undefined;

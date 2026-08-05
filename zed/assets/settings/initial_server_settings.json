@@ -1,7 +1,0 @@
-// Server-specific settings
-//
-// For a full list of overridable settings, and general information on settings,
-// server settings
-{
-  "lsp": {},
-}

@@ -61,6 +61,7 @@ import { IActionWidgetService } from '../../../../../../platform/actionWidget/br
 import { IActionWidgetDropdownAction, IActionWidgetDropdownActionProvider, IActionWidgetDropdownOptions } from '../../../../../../platform/actionWidget/browser/actionWidgetDropdown.js';
 import { IConfigurationService } from '../../../../../../platform/configuration/common/configuration.js';
 import { ContextKeyExpr, IContextKey, IContextKeyService, RawContextKey } from '../../../../../../platform/contextkey/common/contextkey.js';
+import { IContextViewService } from '../../../../../../platform/contextview/browser/contextView.js';
 import { FileOperationResult, IFileService, toFileOperationResult } from '../../../../../../platform/files/common/files.js';
 import { registerAndCreateHistoryNavigationContext } from '../../../../../../platform/history/browser/contextScopedHistoryWidget.js';
 import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
@@ -4907,6 +4908,7 @@ class BackboardComposerOptionsActionViewItem extends ActionWidgetDropdownActionV
 		@IKeybindingService keybindingService: IKeybindingService,
 		@IContextKeyService contextKeyService: IContextKeyService,
 		@ITelemetryService telemetryService: ITelemetryService,
+		@IContextViewService private readonly contextViewService: IContextViewService,
 	) {
 		const actionProvider: IActionWidgetDropdownActionProvider = {
 			getActions: () => this.getActions(),
@@ -4929,6 +4931,9 @@ class BackboardComposerOptionsActionViewItem extends ActionWidgetDropdownActionV
 			const combined = option.valueLabel
 				? localize('backboardComposerOptions.genericWithValue', "{0}: {1}", option.label, option.valueLabel)
 				: option.label;
+			// Reasoning gets a slider editor instead of the generic list popup:
+			// its three ordered levels read naturally as low -> high stops.
+			const isReasoningSlider = option.id === 'intensity' && !!option.getEnumInfo();
 			actions.push({
 				id: `backboardComposerOptions.generic.${option.id}`,
 				// Keep the label short and show the current value as a separate
@@ -4940,7 +4945,9 @@ class BackboardComposerOptionsActionViewItem extends ActionWidgetDropdownActionV
 				tooltip: option.description ?? combined,
 				icon: this.getGenericOptionIcon(option.id),
 				enabled: true,
-				run: () => this.openNestedPicker(() => option.show(this.inputPart.getBackboardOptionsAnchor())),
+				run: () => this.openNestedPicker(() => isReasoningSlider
+					? this.showReasoningSlider(option)
+					: option.show(this.inputPart.getBackboardOptionsAnchor())),
 			});
 		}
 		if (!actions.length) {
@@ -4967,6 +4974,75 @@ class BackboardComposerOptionsActionViewItem extends ActionWidgetDropdownActionV
 	private openNestedPicker(open: () => void): void {
 		this.inputPart.setBackboardOptionsAnchor(this.element ?? this.inputPart.getBackboardOptionsAnchor());
 		setTimeout(open, 0);
+	}
+
+	/**
+	 * Slider editor for the reasoning intensity: a discrete range input with
+	 * one labeled stop per enum value. Selecting a stop applies the value
+	 * immediately; the popup stays open for further adjustment and closes on
+	 * Escape or an outside click.
+	 */
+	private showReasoningSlider(option: IAgentHostGenericConfigOption): void {
+		const info = option.getEnumInfo();
+		const anchor = this.inputPart.getBackboardOptionsAnchor() ?? this.element;
+		if (!info || !anchor || info.values.length === 0) {
+			return;
+		}
+		this.contextViewService.showContextView({
+			getAnchor: () => anchor,
+			render: container => {
+				const disposables = new DisposableStore();
+				const root = dom.append(container, dom.$('.backboard-reasoning-slider'));
+				const title = dom.append(root, dom.$('.backboard-reasoning-slider-title'));
+				title.textContent = option.label;
+
+				const slider = dom.append(root, dom.$('input.backboard-reasoning-slider-input')) as HTMLInputElement;
+				slider.type = 'range';
+				slider.min = '0';
+				slider.max = String(info.values.length - 1);
+				slider.step = '1';
+				const initialIndex = Math.max(0, info.values.indexOf(info.current ?? ''));
+				slider.value = String(initialIndex);
+				slider.setAttribute('aria-label', option.label);
+
+				const labelsRow = dom.append(root, dom.$('.backboard-reasoning-slider-labels'));
+				const description = dom.append(root, dom.$('.backboard-reasoning-slider-description'));
+
+				const paint = (index: number) => {
+					labelEls.forEach((el, i) => el.classList.toggle('selected', i === index));
+					description.textContent = info.descriptions[index] ?? '';
+					slider.setAttribute('aria-valuetext', info.labels[index]);
+				};
+				const apply = (index: number) => {
+					paint(index);
+					option.setValue(info.values[index]);
+				};
+
+				const labelEls = info.labels.map((label, index) => {
+					const el = dom.append(labelsRow, dom.$('span.backboard-reasoning-slider-label'));
+					el.textContent = label;
+					disposables.add(addDisposableListener(el, 'click', () => {
+						slider.value = String(index);
+						apply(index);
+					}));
+					return el;
+				});
+				paint(initialIndex);
+
+				disposables.add(addDisposableListener(slider, 'input', () => apply(Number(slider.value))));
+				disposables.add(addDisposableListener(root, 'keydown', e => {
+					if (e.key === 'Escape') {
+						e.stopPropagation();
+						this.contextViewService.hideContextView();
+					}
+				}));
+				return disposables;
+			},
+			focus: () => {
+				const slider = this.element?.ownerDocument.querySelector<HTMLInputElement>('.backboard-reasoning-slider-input');
+				slider?.focus();
+			},
+		});
 	}
 
 	private getGenericOptionIcon(property: string): ThemeIcon {

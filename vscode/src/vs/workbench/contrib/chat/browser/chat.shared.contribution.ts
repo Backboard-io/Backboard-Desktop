@@ -56,8 +56,6 @@ import { ChatSlashCommandService, IChatSlashCommandService } from '../common/par
 import { ChatArtifactsService, IChatArtifactsService } from '../common/tools/chatArtifactsService.js';
 import { ChatTodoListService, IChatTodoListService } from '../common/tools/chatTodoListService.js';
 import { ChatTransferService, IChatTransferService } from '../common/model/chatTransferService.js';
-import { ChatErrorReportingConfig, IChatErrorReportService } from '../common/chatErrorReporting.js';
-import { BrowserChatErrorReportService } from './chatErrorReportService.js';
 import { IChatVariablesService } from '../common/attachments/chatVariables.js';
 import { ChatWidgetHistoryService, IChatWidgetHistoryService } from '../common/widget/chatWidgetHistoryService.js';
 import { ChatAgentLocation, ChatConfiguration, ChatNotificationMode, ChatPermissionLevel } from '../common/constants.js';
@@ -240,16 +238,6 @@ configurationRegistry.registerConfiguration({
 			default: 13,
 			minimum: 6,
 			maximum: 100
-		},
-		[ChatErrorReportingConfig.Enabled]: {
-			type: 'boolean',
-			description: nls.localize('chat.errorReporting.enabled', "Controls whether errors shown in chat offer to send an error report."),
-			default: true
-		},
-		[ChatErrorReportingConfig.Url]: {
-			type: 'string',
-			description: nls.localize('chat.errorReporting.url', "The endpoint error reports are uploaded to. Reports are sent as a JSON object per error via HTTP PUT."),
-			default: 'https://ide-error-logs.s3.ca-central-1.amazonaws.com/error-logs'
 		},
 		'chat.fontFamily': {
 			type: 'string',
@@ -2498,7 +2486,6 @@ agentPluginDiscoveryRegistry.register(new SyncDescriptor(ExtensionAgentPluginDis
 agentPluginDiscoveryRegistry.register(new SyncDescriptor(CopilotCliAgentPluginDiscovery));
 
 registerSingleton(IChatResponseResourceFileSystemProvider, ChatResponseResourceFileSystemProvider, InstantiationType.Delayed);
-registerSingleton(IChatErrorReportService, BrowserChatErrorReportService, InstantiationType.Delayed);
 registerSingleton(IChatTransferService, ChatTransferService, InstantiationType.Delayed);
 registerSingleton(IChatService, ChatService, InstantiationType.Delayed);
 registerSingleton(IChatWidgetService, ChatWidgetService, InstantiationType.Delayed);

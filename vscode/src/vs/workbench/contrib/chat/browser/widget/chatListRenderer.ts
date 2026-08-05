@@ -2341,9 +2341,9 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			} else if (content.kind === 'confirmation') {
 				return this.renderConfirmation(context, content, templateData);
 			} else if (content.kind === 'warning') {
-				return this.instantiationService.createInstance(ChatErrorContentPart, ChatErrorLevel.Warning, content.content, content, this.chatContentMarkdownRenderer, context);
+				return this.instantiationService.createInstance(ChatErrorContentPart, ChatErrorLevel.Warning, content.content, content, this.chatContentMarkdownRenderer);
 			} else if (content.kind === 'info') {
-				return this.instantiationService.createInstance(ChatErrorContentPart, ChatErrorLevel.Info, content.content, content, this.chatContentMarkdownRenderer, context);
+				return this.instantiationService.createInstance(ChatErrorContentPart, ChatErrorLevel.Info, content.content, content, this.chatContentMarkdownRenderer);
 			} else if (content.kind === 'hook') {
 				return this.renderHookPart(content, context, templateData);
 			} else if (content.kind === 'markdownContent') {
@@ -2392,7 +2392,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		} catch (err) {
 			alert(`Chat error: ${toErrorMessage(err, false)}`);
 			this.logService.error('ChatListItemRenderer#renderChatContentPart: error rendering content', toErrorMessage(err, true));
-			const errorPart = this.instantiationService.createInstance(ChatErrorContentPart, ChatErrorLevel.Error, new MarkdownString(localize('renderFailMsg', "Failed to render content") + `: ${toErrorMessage(err, false)}`), content, this.chatContentMarkdownRenderer, context);
+			const errorPart = this.instantiationService.createInstance(ChatErrorContentPart, ChatErrorLevel.Error, new MarkdownString(localize('renderFailMsg', "Failed to render content") + `: ${toErrorMessage(err, false)}`), content, this.chatContentMarkdownRenderer);
 			return {
 				dispose: () => errorPart.dispose(),
 				domNode: errorPart.domNode,
@@ -2425,7 +2425,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			return errorConfirmation;
 		} else {
 			const level = content.errorDetails.level ?? ChatErrorLevel.Error;
-			return this.instantiationService.createInstance(ChatErrorContentPart, level, new MarkdownString(content.errorDetails.message), content, this.chatContentMarkdownRenderer, context);
+			return this.instantiationService.createInstance(ChatErrorContentPart, level, new MarkdownString(content.errorDetails.message), content, this.chatContentMarkdownRenderer);
 		}
 	}
 

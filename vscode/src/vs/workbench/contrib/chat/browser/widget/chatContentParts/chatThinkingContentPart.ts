@@ -59,7 +59,7 @@ export function getEffectiveThinkingDisplayMode(configurationService: IConfigura
 	if (contextKeyService.getContextKeyValue<boolean>(SESSIONS_IS_PHONE_LAYOUT_KEY) === true) {
 		return ThinkingDisplayMode.CollapsedPreview;
 	}
-	return configurationService.getValue<ThinkingDisplayMode>('chat.agent.thinkingStyle') ?? ThinkingDisplayMode.Collapsed;
+	return configurationService.getValue<ThinkingDisplayMode>('chat.agent.thinkingStyle') ?? ThinkingDisplayMode.CollapsedPreview;
 }
 
 function extractTextFromPart(content: IChatThinkingPart): string {
@@ -264,6 +264,18 @@ function extractTitleFromThinkingContent(content: string): string | undefined {
 	return headerMatch ? headerMatch[1] : undefined;
 }
 
+/** Last non-empty line of the streaming reasoning, stripped of list/heading markers. */
+function lastNonEmptyThinkingLine(content: string): string | undefined {
+	const lines = content.split('\n');
+	for (let i = lines.length - 1; i >= 0; i--) {
+		const line = lines[i].replace(/^[\s#*>-]+/, '').replace(/\*\*/g, '').trim();
+		if (line.length > 0) {
+			return line;
+		}
+	}
+	return undefined;
+}
+
 /**
  * Metadata passed to {@link ChatThinkingContentPart.appendItem} to drive
  * title / icon extraction. The `kind` discriminates which payload is
@@ -436,6 +448,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 	private hasExpandedOnce: boolean = false;
 	private workingSpinnerElement: HTMLElement | undefined;
 	private workingSpinnerLabel: HTMLElement | undefined;
+	private liveReasoningTail: string | undefined;
 	/** The spinner phrase / active-tool label without the live elapsed suffix. */
 	private workingSpinnerBaseText: string | undefined;
 	private availableMessagesByCategory = new Map<WorkingMessageCategory, string[]>();
@@ -564,6 +577,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 					return;
 				}
 				this.updateElapsedIndicator();
+				this.applyLiveReasoningTail();
 				// Keep the in-thinking spinner ticking too, so it never looks
 				// frozen on a static phrase while the model reasons silently.
 				this.renderWorkingSpinnerLabel();
@@ -622,12 +636,14 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		this._register(autorun(r => {
 			const isExpanded = this._isExpanded.read(r);
 			// Materialize lazy items when first expanded
-			if (isExpanded && !this.hasExpandedOnce && this.lazyItems.length > 0) {
+			if (isExpanded && !this.hasExpandedOnce) {
 				this.hasExpandedOnce = true;
-				// Flush pending removals so that completed hidden tools are removed from lazyItems before materialization
-				this.processPendingRemovals();
-				for (const item of this.lazyItems) {
-					this.materializeLazyItem(item);
+				if (this.lazyItems.length > 0) {
+					// Flush pending removals so that completed hidden tools are removed from lazyItems before materialization
+					this.processPendingRemovals();
+					for (const item of this.lazyItems) {
+						this.materializeLazyItem(item);
+					}
 				}
 			}
 
@@ -1254,6 +1270,25 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 	}
 
 	/**
+	 * Paints the tail of the live reasoning stream into the spinner row and,
+	 * while collapsed without an extracted title, into the header — so neither
+	 * sits frozen on a canned phrase while reasoning streams. Runs on the 1s
+	 * elapsed tick rather than per delta to keep DOM churn bounded.
+	 */
+	private applyLiveReasoningTail(): void {
+		const tail = this.liveReasoningTail;
+		if (!tail || this.streamingCompleted || this.element.isComplete) {
+			return;
+		}
+		if (!this.getActiveToolLabel()) {
+			this.setWorkingSpinnerBase(middleTruncate(tail, 80));
+		}
+		if (!this.fixedScrollingMode && !this._isExpanded.get() && !this.lastExtractedTitle) {
+			this.setTitle(middleTruncate(tail, 64));
+		}
+	}
+
+	/**
 	 * Repaints the working spinner as "<phrase> · <elapsed>" while the run is
 	 * live, so the row always shows the ticking elapsed time — it never sits
 	 * frozen on a static phrase when the model is reasoning silently with
@@ -1490,6 +1525,10 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		if (this.fixedScrollingMode && this.scrollableElement) {
 			this.refreshContentHeight();
 			this.updateScrollDimensionsFromCache();
+		}
+
+		if (this.wasStreamingLive && !this.streamingCompleted) {
+			this.liveReasoningTail = lastNonEmptyThinkingLine(raw);
 		}
 
 		const extractedTitle = extractTitleFromThinkingContent(raw);

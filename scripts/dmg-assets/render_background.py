@@ -7,113 +7,163 @@ a single multi-resolution TIFF via tiffutil so the window stays crisp on Retina.
 The geometry constants here are the single source of truth for the installer
 window: author_dsstore_finder.sh reads them back via --dump-geometry so the icon
 positions Finder records line up with the artwork instead of drifting from it.
+
+Look: white canvas with a faint square grid that bows into arcs around the
+bottom-left corner, and a thin dark arrow between the two icon slots. No text —
+Finder draws the labels under both icons itself.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 
 # Installer window content geometry, in 1x points.
 WIDTH = 660
 HEIGHT = 360
 ICON_SIZE = 128
-ICON_CENTER_Y = 198
+ICON_CENTER_Y = 168
 APP_CENTER_X = 172
 APPS_CENTER_X = 488
 
 BACKGROUND = (255, 255, 255)
-TITLE_COLOR = (29, 29, 31)
-SUBTITLE_COLOR = (110, 110, 115)
+GRID_COLOR = (233, 233, 234)
+GRID_SPACING = 40
+
+# The corner motif is a crossfade, all radii measured in 1x points from the
+# bottom-left corner: the straight grid fades out approaching the corner, true
+# concentric arcs fade in to replace it, and a mild barrel warp leans the
+# straight lines into the transition so the two systems appear to melt into
+# each other rather than merely overlap.
+GRID_FADE_IN = (70.0, 200.0)   # straight grid: invisible below, full above
+ARC_FADE_OUT = (140.0, 280.0)  # arcs: full below, gone above
+
+WARP_CENTER = (-10.0, HEIGHT + 10.0)
+WARP_STRENGTH = 0.25
+WARP_RADIUS = 130.0
 
 CHANNELS = {
     "stable": {
-        "title": "Backboard Studio",
-        "accent": (46, 92, 209),
+        "arrow": (23, 23, 26),
     },
     "sandbox": {
-        "title": "Backboard Studio Sandbox",
-        # Sandbox keeps a distinct amber accent so a sandbox DMG is never
-        # mistaken for a stable one; darkened from the on-dark value to hold
-        # contrast against white.
-        "accent": (198, 126, 20),
+        # Sandbox keeps a distinct amber arrow so a sandbox DMG is never
+        # mistaken for a stable one; the artwork is otherwise identical.
+        "arrow": (198, 126, 20),
     },
 }
 
 
-def load_font(size: int, *, bold: bool = False) -> ImageFont.FreeTypeFont:
-    candidates = [
-        "/System/Library/Fonts/SFNS.ttf",
-        "/System/Library/Fonts/Helvetica.ttc",
-        "/Library/Fonts/Arial.ttf",
-    ]
-    for path in candidates:
-        if Path(path).exists():
-            try:
-                return ImageFont.truetype(path, size=size, index=1 if bold else 0)
-            except (OSError, ValueError):
-                try:
-                    return ImageFont.truetype(path, size=size)
-                except OSError:
-                    continue
-    return ImageFont.load_default()
+def smoothstep(edge0: float, edge1: float, x: float) -> float:
+    t = min(1.0, max(0.0, (x - edge0) / (edge1 - edge0)))
+    return t * t * (3 - 2 * t)
 
 
-def centered(draw, text, font, cx, cy, fill):
-    left, top, right, bottom = draw.textbbox((0, 0), text, font=font)
-    draw.text((cx - (right - left) / 2 - left, cy - (bottom - top) / 2 - top),
-              text, font=font, fill=fill)
+def fade_color(t: float) -> tuple[int, int, int]:
+    """Grid color at visibility t, blended toward the flat white background."""
+    return tuple(round(255 + (c - 255) * t) for c in GRID_COLOR)
 
 
-def draw_arrow(draw, x0, x1, y, accent, scale):
-    """A tapered shaft plus solid head, pointing at the Applications slot."""
-    shaft_h = max(2, round(3 * scale))
-    head_w = round(22 * scale)
-    head_h = round(20 * scale)
-    shaft_end = x1 - head_w
+def warp(x: float, y: float, s: float) -> tuple[float, float]:
+    cx, cy = WARP_CENTER[0] * s, WARP_CENTER[1] * s
+    dx, dy = x - cx, y - cy
+    r = math.hypot(dx, dy)
+    if r < 1e-9:
+        return (x, y)
+    m = 1.0 + WARP_STRENGTH * math.exp(-((r / (WARP_RADIUS * s)) ** 2))
+    return (cx + dx * m, cy + dy * m)
+
+
+def draw_fading_polyline(draw: ImageDraw.ImageDraw, pts, s: float, line_w: int) -> None:
+    """Draw a polyline whose opacity ramps up with distance from the corner."""
+    cx, cy = 0.0, HEIGHT * s
+    for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+        r = math.hypot((x0 + x1) / 2 - cx, (y0 + y1) / 2 - cy) / s
+        t = smoothstep(*GRID_FADE_IN, r)
+        if t <= 0.01:
+            continue
+        draw.line([(x0, y0), (x1, y1)], fill=fade_color(t), width=line_w)
+
+
+def draw_corner_arcs(draw: ImageDraw.ImageDraw, s: float, line_w: int) -> None:
+    cx, cy = 0.0, HEIGHT * s
+    for k in range(1, math.ceil(ARC_FADE_OUT[1] / GRID_SPACING) + 1):
+        radius = k * GRID_SPACING
+        t = 1.0 - smoothstep(*ARC_FADE_OUT, radius)
+        if t <= 0.01:
+            continue
+        rr = radius * s
+        # 265..5 rather than an exact quarter so clipping, not the arc's own
+        # endpoints, decides where it meets the canvas edges.
+        draw.arc([cx - rr, cy - rr, cx + rr, cy + rr], 265, 5,
+                 fill=fade_color(t), width=line_w)
+
+
+def draw_grid(draw: ImageDraw.ImageDraw, w: int, h: int, s: float) -> None:
+    spacing = GRID_SPACING * s
+    line_w = max(1, round(s))
+    step = max(2, round(3 * s))
+    # Overhang past every edge: the warp stretches lines outward, so the
+    # preimage of the visible canvas extends beyond it.
+    over = round(2 * spacing)
+
+    for i in range(-2, math.ceil(w / spacing) + 3):
+        x = i * spacing
+        pts = [warp(x, y, s) for y in range(-over, h + over, step)]
+        draw_fading_polyline(draw, pts, s, line_w)
+    for j in range(-2, math.ceil(h / spacing) + 3):
+        y = j * spacing
+        pts = [warp(x, y, s) for x in range(-over, w + over, step)]
+        draw_fading_polyline(draw, pts, s, line_w)
+
+    draw_corner_arcs(draw, s, line_w)
+
+
+def draw_arrow(draw: ImageDraw.ImageDraw, x0: float, x1: float, y: float,
+               color: tuple[int, int, int], s: float) -> None:
+    """A thin shaft with a compact solid head, pointing at Applications."""
+    shaft_h = max(2, round(2.6 * s))
+    head_w = round(15 * s)
+    head_h = round(13 * s)
+    # Tuck the shaft slightly under the head so no seam shows at the joint.
+    shaft_end = x1 - head_w + s
     draw.rounded_rectangle(
         [x0, y - shaft_h / 2, shaft_end, y + shaft_h / 2],
         radius=shaft_h / 2,
-        fill=accent + (215,),
+        fill=color,
     )
     draw.polygon(
-        [(x1, y), (shaft_end, y - head_h / 2), (shaft_end, y + head_h / 2)],
-        fill=accent + (235,),
+        [(x1, y), (x1 - head_w, y - head_h / 2), (x1 - head_w, y + head_h / 2)],
+        fill=color,
     )
 
 
 def render(channel: str, scale: int, out_path: Path) -> None:
     cfg = CHANNELS[channel]
-    w, h = WIDTH * scale, HEIGHT * scale
+    # Render supersampled and fold back down so the warped grid and the arrow
+    # come out antialiased; PIL draws hard-edged primitives otherwise.
+    ss = 2
+    s = scale * ss
+    w, h = WIDTH * s, HEIGHT * s
 
-    img = Image.new("RGBA", (w, h), BACKGROUND + (255,))
-    overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-    accent = cfg["accent"]
+    img = Image.new("RGB", (w, h), BACKGROUND)
+    draw = ImageDraw.Draw(img)
 
-    cy = ICON_CENTER_Y * scale
-    app_cx = APP_CENTER_X * scale
-    apps_cx = APPS_CENTER_X * scale
+    draw_grid(draw, w, h, s)
 
-    gap_pad = (ICON_SIZE / 2 + 34) * scale
-    draw_arrow(draw, app_cx + gap_pad, apps_cx - gap_pad, cy, accent, scale)
+    cy = ICON_CENTER_Y * s
+    gap_pad = (ICON_SIZE / 2 + 42) * s
+    draw_arrow(draw, APP_CENTER_X * s + gap_pad, APPS_CENTER_X * s - gap_pad,
+               cy, cfg["arrow"], s)
 
-    title_font = load_font(round(23 * scale), bold=True)
-    sub_font = load_font(round(13 * scale))
-    centered(draw, cfg["title"], title_font, w / 2, 52 * scale, TITLE_COLOR + (255,))
-    centered(draw, "Drag the app onto Applications to install",
-             sub_font, w / 2, 82 * scale, SUBTITLE_COLOR + (255,))
-
-    # No icon captions here: Finder draws its own labels under both icons, and
-    # painting them into the art too renders them twice, offset.
-
-    out = Image.alpha_composite(img, overlay).convert("RGB")
+    img = img.resize((WIDTH * scale, HEIGHT * scale), Image.LANCZOS)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out.save(out_path, format="PNG")
+    img.save(out_path, format="PNG")
 
 
 def main() -> int:

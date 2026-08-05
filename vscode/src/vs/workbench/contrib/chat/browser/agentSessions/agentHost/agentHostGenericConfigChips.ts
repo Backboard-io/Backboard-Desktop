@@ -34,6 +34,10 @@ export interface IAgentHostGenericConfigOption {
 	/** Whether this option is currently set to a non-default (active) value. */
 	readonly active: boolean;
 	show(anchor?: HTMLElement): void;
+	/** Static enum metadata for slider-style editors; `undefined` for non-enum properties. */
+	getEnumInfo(): { values: string[]; labels: string[]; descriptions: (string | undefined)[]; current: string | undefined } | undefined;
+	/** Applies a value directly, bypassing the list popup (used by slider-style editors). */
+	setValue(value: string): void;
 }
 
 interface IAgentHostGenericConfigChipEntry extends IDisposable {
@@ -154,6 +158,8 @@ export class AgentHostGenericConfigChips extends Disposable {
 				description: schema.description,
 				active: chip.isActive(),
 				show: (anchor?: HTMLElement) => chip.show(anchor),
+				getEnumInfo: () => chip.getEnumInfo(),
+				setValue: value => chip.setValue(value),
 			});
 		}
 		return options;

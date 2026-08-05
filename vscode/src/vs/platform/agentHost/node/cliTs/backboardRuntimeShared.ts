@@ -442,6 +442,11 @@ export function resolveBackboardSessionConfig(rawConfig: Record<string, unknown>
 							localize('backboard.config.intensity.balanced', "Balanced"),
 							localize('backboard.config.intensity.deep', "Deep"),
 						],
+						enumDescriptions: [
+							localize('backboard.config.intensity.fast.description', "Minimal reasoning for the fastest responses."),
+							localize('backboard.config.intensity.balanced.description', "Moderate reasoning that balances speed and quality."),
+							localize('backboard.config.intensity.deep.description', "Extended reasoning for hard, multi-step problems."),
+						],
 						sessionMutable: true,
 					},
 					[BACKBOARD_MEMORY_CONFIG_KEY]: {
@@ -451,10 +456,16 @@ export function resolveBackboardSessionConfig(rawConfig: Record<string, unknown>
 						default: 'off',
 						enum: ['off', 'on', 'auto', 'readonly'],
 						enumLabels: [
-							localize('backboard.config.memory.off', "Memory Off"),
-							localize('backboard.config.memory.on', "Memory On"),
+							localize('backboard.config.memory.off', "Off"),
+							localize('backboard.config.memory.on', "On"),
 							localize('backboard.config.memory.auto', "Auto"),
 							localize('backboard.config.memory.readonly', "Read-only"),
+						],
+						enumDescriptions: [
+							localize('backboard.config.memory.off.description', "Nothing is stored or recalled."),
+							localize('backboard.config.memory.on.description', "Store new memories and recall existing ones."),
+							localize('backboard.config.memory.auto.description', "Backboard decides when to store and recall."),
+							localize('backboard.config.memory.readonly.description', "Recall existing memories without storing new ones."),
 						],
 						sessionMutable: true,
 					},

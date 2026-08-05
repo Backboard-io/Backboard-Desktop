@@ -26,12 +26,10 @@ import { ExtensionType } from '../../../../platform/extensions/common/extensions
 import { IFileService, FileOperationResult, toFileOperationResult } from '../../../../platform/files/common/files.js';
 import product from '../../../../platform/product/common/product.js';
 import { ILayoutService } from '../../../../platform/layout/browser/layoutService.js';
-import { INativeHostService } from '../../../../platform/native/common/native.js';
 import { IOpenerService } from '../../../../platform/opener/common/opener.js';
 import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry.js';
 import { IAccessibilityService } from '../../../../platform/accessibility/common/accessibility.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
-import { IRectangle, WindowMinimumSize } from '../../../../platform/window/common/window.js';
 import { IPathService } from '../../../services/path/common/pathService.js';
 import { IWorkbenchThemeService } from '../../../services/themes/common/workbenchThemeService.js';
 import { IUserDataProfileService } from '../../../services/userDataProfile/common/userDataProfile.js';
@@ -116,9 +114,6 @@ const BACKBOARD_SIGN_IN_URL = 'https://app.backboard.io/signup';
 const BACKBOARD_API_KEYS_URL = 'https://app.backboard.io/dashboard/api-keys';
 const BACKBOARD_API_KEY_PATTERN = /^espr_[A-Za-z0-9_-]{43}$/;
 const LOCAL_AGENT_HOST_PROVIDER_ID = 'local-agent-host';
-const ONBOARDING_WINDOW_WIDTH = 920;
-const ONBOARDING_WINDOW_HEIGHT = 600;
-const ONBOARDING_WELCOME_VIDEO_PLAYBACK_RATE = 1.75;
 const SOURCE_SETTINGS_RESOURCE_NAMES = ['settings.json', 'keybindings.json'] as const;
 const DEFAULT_SETTINGS_IMPORT_SELECTION: ISettingsImportSelection = {
 	settings: true,
@@ -202,8 +197,6 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 	private selectedExperience = OnboardingExperience.Simple;
 	private hasConfirmedBackboardSignIn = false;
 	private hasImportedApiKey = false;
-	private previousWindowResizable: boolean | undefined;
-	private previousWindowPosition: IRectangle | undefined;
 
 	constructor(
 		@ILayoutService private readonly layoutService: ILayoutService,
@@ -214,7 +207,6 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		@IAccessibilityService private readonly accessibilityService: IAccessibilityService,
 		@IOpenerService private readonly openerService: IOpenerService,
 		@ICommandService private readonly commandService: ICommandService,
-		@INativeHostService private readonly nativeHostService: INativeHostService,
 		@IStorageService private readonly storageService: IStorageService,
 		@IFileService private readonly fileService: IFileService,
 		@IPathService private readonly pathService: IPathService,
@@ -248,10 +240,6 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		this._isShowing = true;
 		this.currentStepIndex = 0;
 		this.previouslyFocusedElement = getActiveWindow().document.activeElement as HTMLElement | undefined;
-		void this._lockOnboardingWindowMinimumSize();
-		this.disposables.add(toDisposable(() => {
-			void this._restoreWindowMinimumSize();
-		}));
 
 		const container = this.layoutService.activeContainer;
 
@@ -402,43 +390,6 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		};
 
 		this.storageService.store(ONBOARDING_STORAGE_KEY, JSON.stringify(state), StorageScope.APPLICATION, StorageTarget.USER);
-	}
-
-	private async _lockOnboardingWindowMinimumSize(): Promise<void> {
-		try {
-			this.previousWindowResizable = await this.nativeHostService.isWindowResizable();
-			this.previousWindowPosition = await this.nativeHostService.getActiveWindowPosition();
-			await this.nativeHostService.setMinimumSize(ONBOARDING_WINDOW_WIDTH, ONBOARDING_WINDOW_HEIGHT);
-			if (this.previousWindowPosition) {
-				await this.nativeHostService.positionWindow(this._centeredOnboardingWindowPosition(this.previousWindowPosition));
-			}
-			await this.nativeHostService.setWindowResizable(false);
-		} catch {
-			// Keep onboarding available if native window constraints cannot be applied.
-		}
-	}
-
-	private async _restoreWindowMinimumSize(): Promise<void> {
-		try {
-			await this.nativeHostService.setWindowResizable(this.previousWindowResizable ?? true);
-			await this.nativeHostService.setMinimumSize(WindowMinimumSize.WIDTH, WindowMinimumSize.HEIGHT);
-			if (this.previousWindowPosition) {
-				await this.nativeHostService.positionWindow(this.previousWindowPosition);
-			}
-			this.previousWindowResizable = undefined;
-			this.previousWindowPosition = undefined;
-		} catch {
-			// The window may be gone during shutdown.
-		}
-	}
-
-	private _centeredOnboardingWindowPosition(position: IRectangle): IRectangle {
-		return {
-			x: Math.round(position.x + ((position.width - ONBOARDING_WINDOW_WIDTH) / 2)),
-			y: Math.round(position.y + ((position.height - ONBOARDING_WINDOW_HEIGHT) / 2)),
-			width: ONBOARDING_WINDOW_WIDTH,
-			height: ONBOARDING_WINDOW_HEIGHT,
-		};
 	}
 
 	private async _openSelectedExperienceAfterOnboarding(): Promise<void> {
@@ -724,29 +675,16 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 
 	private _renderWelcomeStep(container: HTMLElement): void {
 		const wrapper = append(container, $('.onboarding-backboard-welcome'));
-		const body = append(wrapper, $('.onboarding-backboard-welcome-layout'));
+		const welcomeContent = append(wrapper, $('.onboarding-backboard-welcome-content'));
 
-		const welcomeContent = append(body, $('.onboarding-backboard-welcome-content'));
+		this._createBackboardMark(welcomeContent, 'onboarding-backboard-welcome-mark');
+
 		const intro = append(welcomeContent, $('.onboarding-backboard-welcome-intro'));
 		const title = append(intro, $('h1.onboarding-backboard-title'));
 		title.textContent = getOnboardingStepTitle(OnboardingStepId.Welcome);
 
 		const subtitle = append(intro, $('p.onboarding-backboard-subtitle'));
 		subtitle.textContent = getOnboardingStepSubtitle(OnboardingStepId.Welcome);
-
-		const accountPrompt = append(welcomeContent, $('.onboarding-backboard-account-prompt'));
-		const accountPromptText = append(accountPrompt, $('span.onboarding-backboard-account-copy'));
-		accountPromptText.textContent = localize('onboarding.backboard.accountPrompt', "New to Backboard?");
-		const accountLink = this._registerStepFocusable(append(accountPrompt, $<HTMLAnchorElement>('a.onboarding-backboard-account-link')));
-		accountLink.href = BACKBOARD_SIGN_IN_URL;
-		accountLink.textContent = localize('onboarding.backboard.createAccount', "Create your free account.");
-		this.stepDisposables.add(addDisposableListener(accountLink, EventType.CLICK, (event: MouseEvent) => {
-			event.preventDefault();
-			this._logAction('openBackboardSignIn');
-			void this.openerService.open(URI.parse(BACKBOARD_SIGN_IN_URL), { openExternal: true });
-		}));
-
-		append(welcomeContent, $('.onboarding-backboard-welcome-divider'));
 
 		const signInButton = this._registerStepFocusable(append(welcomeContent, $<HTMLButtonElement>('button.onboarding-backboard-sign-in-button')));
 		signInButton.type = 'button';
@@ -782,40 +720,26 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			signInButton.textContent = idleLabel;
 		}));
 
+		const accountPrompt = append(welcomeContent, $('.onboarding-backboard-account-prompt'));
+		const accountPromptText = append(accountPrompt, $('span.onboarding-backboard-account-copy'));
+		accountPromptText.textContent = localize('onboarding.backboard.accountPrompt', "New to Backboard?");
+		const accountLink = this._registerStepFocusable(append(accountPrompt, $<HTMLAnchorElement>('a.onboarding-backboard-account-link')));
+		accountLink.href = BACKBOARD_SIGN_IN_URL;
+		accountLink.textContent = localize('onboarding.backboard.createAccount', "Create your free account.");
+		this.stepDisposables.add(addDisposableListener(accountLink, EventType.CLICK, (event: MouseEvent) => {
+			event.preventDefault();
+			this._logAction('openBackboardSignIn');
+			void this.openerService.open(URI.parse(BACKBOARD_SIGN_IN_URL), { openExternal: true });
+		}));
+
 		const skipArea = append(welcomeContent, $('.onboarding-backboard-skip-area'));
 		const skipButton = this._registerStepFocusable(append(skipArea, $<HTMLButtonElement>('button.onboarding-backboard-skip-link')));
 		skipButton.type = 'button';
-		skipButton.textContent = localize('onboarding.backboard.skipStep', "Skip this step");
+		skipButton.textContent = localize('onboarding.backboard.skipStep', "Skip and continue");
 		this.stepDisposables.add(addDisposableListener(skipButton, EventType.CLICK, () => {
 			this._logAction('skipWelcomeSignIn');
 			this._advanceOrComplete();
 		}));
-
-		const visual = append(body, $('.onboarding-backboard-welcome-visual'));
-		this._createBackboardLiquidVisual(visual);
-	}
-
-	private _createBackboardLiquidVisual(parent: HTMLElement): void {
-		parent.setAttribute('aria-hidden', 'true');
-		const video = append(parent, $<HTMLVideoElement>('video.onboarding-backboard-welcome-video'));
-		video.autoplay = true;
-		video.loop = true;
-		video.muted = true;
-		video.playsInline = true;
-		video.preload = 'auto';
-		video.src = this._mediaUri('onboarding-welcome-animation.mp4');
-		this.stepDisposables.add(addDisposableListener(video, 'canplay', () => {
-			video.playbackRate = ONBOARDING_WELCOME_VIDEO_PLAYBACK_RATE;
-			video.classList.add('loaded');
-		}));
-
-		const canvas = append(parent, $('.onboarding-backboard-liquid'));
-		for (let index = 0; index < 5; index++) {
-			const layer = append(canvas, $('.onboarding-backboard-liquid-layer'));
-			layer.style.setProperty('--liquid-index', String(index));
-		}
-		append(canvas, $('.onboarding-backboard-liquid-shine'));
-		append(canvas, $('.onboarding-backboard-liquid-noise'));
 	}
 
 	private _createBackboardMark(parent: HTMLElement, className: string): HTMLElement {
