@@ -108,6 +108,11 @@ export type AgentEvent =
 	  }
 	| { type: "assistant:message:discard"; turnId: string; messageId: string }
 	| { type: "tool:requested"; turnId: string; calls: ToolCallRef[] }
+	| {
+			type: "tool:discarded";
+			toolCallId: string;
+			name: string;
+	  }
 	| ToolPendingEvent
 	| ToolStartEvent
 	| { type: "tool:progress"; toolCallId: string; data: unknown }

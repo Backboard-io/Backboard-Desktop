@@ -96,8 +96,17 @@ export function reduce(state: AppState, event: AgentEvent): AppState {
 				inputSummary: event.inputSummary,
 				status: "pending",
 			};
-			return pushLive(push(state, item), item);
+			const exists = state.transcript.some(
+				(candidate) => candidate.kind === "tool" && candidate.id === item.id,
+			);
+			const next = exists
+				? updateTool(state, item.id, () => item)
+				: push(state, item);
+			return pushLive(next, item);
 		}
+
+		case "tool:discarded":
+			return removeTool(state, event.toolCallId);
 
 		case "tool:start": {
 			if (event.name === "TodoWrite") return state;
@@ -659,6 +668,19 @@ function updateTool(
 		transcript: state.transcript.map((item) =>
 			item.kind === "tool" && item.id === id ? fn(item) : item,
 		),
+	};
+}
+
+function removeTool(state: AppState, id: string): AppState {
+	return {
+		...state,
+		transcript: state.transcript.filter(
+			(item) => item.kind !== "tool" || item.id !== id,
+		),
+		render: {
+			...state.render,
+			liveItems: state.render.liveItems.filter((item) => item.id !== id),
+		},
 	};
 }
 

@@ -35,19 +35,83 @@ describe("reasoning streaming", () => {
 
 describe("pre-content phase status", () => {
 	it("maps prep/lifecycle frames to preparing/generating status", () => {
-		expect(mapStreamPayloadToEvents({ type: "message_received", phase: "stateless_prep" }))
-			.toEqual([{ kind: "status", phase: "preparing" }]);
-		expect(mapStreamPayloadToEvents({ type: "message_received", phase: "prep" }))
-			.toEqual([{ kind: "status", phase: "preparing" }]);
-		expect(mapStreamPayloadToEvents({ type: "run_started" }))
-			.toEqual([{ kind: "status", phase: "preparing" }]);
-		expect(mapStreamPayloadToEvents({ type: "message_start" }))
-			.toEqual([{ kind: "status", phase: "generating" }]);
+		expect(
+			mapStreamPayloadToEvents({
+				type: "message_received",
+				phase: "stateless_prep",
+			}),
+		).toEqual([{ kind: "status", phase: "preparing" }]);
+		expect(
+			mapStreamPayloadToEvents({ type: "message_received", phase: "prep" }),
+		).toEqual([{ kind: "status", phase: "preparing" }]);
+		expect(mapStreamPayloadToEvents({ type: "run_started" })).toEqual([
+			{ kind: "status", phase: "preparing" },
+		]);
+		expect(mapStreamPayloadToEvents({ type: "message_start" })).toEqual([
+			{ kind: "status", phase: "generating" },
+		]);
 	});
 
 	it("still surfaces thread binding alongside a phase frame", () => {
-		expect(mapStreamPayloadToEvents({ type: "run_started", thread_id: "thr_1" }))
-			.toEqual([{ kind: "thread", threadId: "thr_1" }, { kind: "status", phase: "preparing" }]);
+		expect(
+			mapStreamPayloadToEvents({ type: "run_started", thread_id: "thr_1" }),
+		).toEqual([
+			{ kind: "thread", threadId: "thr_1" },
+			{ kind: "status", phase: "preparing" },
+		]);
+	});
+});
+
+describe("early tool-call lifecycle", () => {
+	it("maps a tool call as soon as its id and name are known", () => {
+		expect(
+			mapStreamPayloadToEvents({
+				type: "tool_call_start",
+				run_id: "run_1",
+				tool_call_id: "call_1",
+				name: "Write",
+			}),
+		).toEqual([
+			{ kind: "tool_call_start", toolCallId: "call_1", name: "Write" },
+		]);
+	});
+
+	it("maps completed advisory arguments without treating them as authoritative", () => {
+		expect(
+			mapStreamPayloadToEvents({
+				type: "tool_call_ready",
+				tool_call: {
+					id: "call_1",
+					type: "function",
+					function: {
+						name: "Write",
+						arguments: '{"file_path":"index.html","content":"hello"}',
+					},
+				},
+			}),
+		).toEqual([
+			{
+				kind: "tool_call_ready",
+				call: {
+					id: "call_1",
+					name: "Write",
+					input: { file_path: "index.html", content: "hello" },
+				},
+			},
+		]);
+	});
+
+	it("ignores an advisory call without a stable id", () => {
+		expect(
+			mapStreamPayloadToEvents({
+				type: "tool_call_ready",
+				tool_call: {
+					id: null,
+					type: "function",
+					function: { name: "Write", arguments: "{}" },
+				},
+			}),
+		).toEqual([]);
 	});
 });
 

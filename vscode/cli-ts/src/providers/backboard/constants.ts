@@ -31,6 +31,12 @@ export const BACKBOARD_STREAM_EVENTS = {
 	contentStreaming: "content_streaming",
 	reasoningStreaming: "reasoning_streaming",
 	reasoningDelta: "reasoning_delta",
+	// Advisory early tool-call lifecycle events. `tool_call_start` arrives as
+	// soon as the provider knows the call id/name, while its arguments are
+	// still being generated; `tool_call_ready` carries the completed call.
+	// `tool_submit_required` remains the authoritative list.
+	toolCallStart: "tool_call_start",
+	toolCallReady: "tool_call_ready",
 	toolSubmitRequired: "tool_submit_required",
 	runEnded: "run_ended",
 	messageComplete: "message_complete",

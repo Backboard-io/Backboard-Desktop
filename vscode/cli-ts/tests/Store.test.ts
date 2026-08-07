@@ -396,6 +396,44 @@ describe("Store reducer", () => {
 		]);
 	});
 
+	it("updates an early tool announcement in place and removes it if discarded", () => {
+		let state = initialState("gpt-test");
+		state = reduce(state, {
+			type: "tool:pending",
+			toolCallId: "call_early",
+			name: "Write",
+			inputSummary: "Generating input…",
+		});
+		state = reduce(state, {
+			type: "tool:pending",
+			toolCallId: "call_early",
+			name: "Write",
+			inputSummary: "index.html",
+		});
+
+		expect(
+			state.transcript.filter(
+				(item) => item.kind === "tool" && item.id === "call_early",
+			),
+		).toHaveLength(1);
+		expect(state.render.liveItems).toMatchObject([
+			{
+				kind: "tool",
+				id: "call_early",
+				status: "pending",
+				inputSummary: "index.html",
+			},
+		]);
+
+		state = reduce(state, {
+			type: "tool:discarded",
+			toolCallId: "call_early",
+			name: "Write",
+		});
+		expect(state.transcript).toEqual([]);
+		expect(state.render.liveItems).toEqual([]);
+	});
+
 	it("commits parallel tools in start order", () => {
 		let state = initialState("gpt-test");
 		state = reduce(state, {

@@ -17,7 +17,7 @@ import { AgentSession, AgentSignal, IAgent, IAgentCreateSessionConfig, IAgentCre
 import { ActionType, type ChatAction, type SessionAction } from '../../common/state/sessionActions.js';
 import type { ResolveSessionConfigResult, SessionConfigCompletionsResult } from '../../common/state/protocol/commands.js';
 import type { ModelSelection, ProtectedResourceMetadata, ToolDefinition } from '../../common/state/protocol/state.js';
-import { ChatInputAnswerValueKind, ChatInputQuestionKind, ChatInputResponseKind, MessageAttachmentKind, MessageKind, ResponsePartKind, SessionStatus, ToolCallConfirmationReason, ToolCallStatus, ToolResultContentType, TurnState, type ChatInputAnswer, type ChatInputQuestion, type ClientPluginCustomization, type MessageAttachment, type PendingMessage, type SessionInputAnswer, type SessionInputResponseKind, type ToolCallResult, type ToolResultContent, type Turn } from '../../common/state/sessionState.js';
+import { ChatInputAnswerValueKind, ChatInputQuestionKind, ChatInputResponseKind, MessageAttachmentKind, MessageKind, ResponsePartKind, SessionStatus, ToolCallCancellationReason, ToolCallConfirmationReason, ToolCallStatus, ToolResultContentType, TurnState, type ChatInputAnswer, type ChatInputQuestion, type ClientPluginCustomization, type MessageAttachment, type PendingMessage, type SessionInputAnswer, type SessionInputResponseKind, type ToolCallResult, type ToolResultContent, type Turn } from '../../common/state/sessionState.js';
 import type { ISyncedCustomization } from '../../common/agentPluginManager.js';
 import { IInstantiationService } from '../../../instantiation/common/instantiation.js';
 import { ISessionDatabase, ISessionDataService } from '../../common/sessionDataService.js';
@@ -797,6 +797,31 @@ export class CliTsAgent extends Disposable implements IAgent {
 					turn.toolInputs.set(call.id, { name: call.name, input: call.input });
 				}
 				return;
+			case 'tool:discarded': {
+				if (!event.toolCallId || !event.name || !turn.startedToolCalls.has(event.toolCallId)) {
+					return;
+				}
+				// Backboard's early tool events are advisory. If the final
+				// tool_submit_required frame omits one, close its speculative card
+				// instead of leaving a permanent spinner behind.
+				this._fire(session.sessionUri, {
+					type: ActionType.ChatToolCallReady,
+					turnId,
+					toolCallId: event.toolCallId,
+					invocationMessage: toolDisplayName(event.name),
+					toolInput: '',
+					_meta: { source: 'cli-ts' },
+				});
+				this._fire(session.sessionUri, {
+					type: ActionType.ChatToolCallConfirmed,
+					turnId,
+					toolCallId: event.toolCallId,
+					approved: false,
+					reason: ToolCallCancellationReason.Skipped,
+					reasonMessage: localize('cliTsAgent.toolDiscarded', "The model did not include this advisory call in its final tool request."),
+				});
+				return;
+			}
 			case 'tool:pending': {
 				if (!event.toolCallId || !event.name) {
 					return;

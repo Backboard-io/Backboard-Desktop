@@ -137,6 +137,24 @@ function mapStreamPayload(
 			if (text) events.push({ kind: "reasoning_delta", text });
 			return done();
 		}
+		case BACKBOARD_STREAM_EVENTS.toolCallStart: {
+			const toolCallId = stringField(payload, "tool_call_id");
+			const name = stringField(payload, "name");
+			// Early events are advisory. Providers that do not reveal a stable id
+			// until arguments finish may omit this event; malformed hints are safe
+			// to skip because `tool_submit_required` is still authoritative.
+			if (toolCallId && name) {
+				events.push({ kind: "tool_call_start", toolCallId, name });
+			}
+			return done();
+		}
+		case BACKBOARD_STREAM_EVENTS.toolCallReady: {
+			const call = payload.tool_call;
+			if (isRawToolCall(call)) {
+				events.push({ kind: "tool_call_ready", call: mapToolCall(call) });
+			}
+			return done();
+		}
 		case BACKBOARD_STREAM_EVENTS.toolSubmitRequired: {
 			const rawCalls: unknown[] = Array.isArray(payload.tool_calls)
 				? payload.tool_calls

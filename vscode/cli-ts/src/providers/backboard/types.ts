@@ -173,6 +173,8 @@ export type ProviderEvent =
 	| { kind: "status"; phase: TurnStatusPhase }
 	| { kind: "assistant_delta"; text: string }
 	| { kind: "reasoning_delta"; text: string }
+	| { kind: "tool_call_start"; toolCallId: string; name: string }
+	| { kind: "tool_call_ready"; call: ProviderToolCall }
 	| { kind: "voice"; records: BackboardVoiceRecord[] }
 	| { kind: "requires_action"; runId: string | null; calls: ProviderToolCall[] }
 	| { kind: "usage"; usage: ProviderUsage }

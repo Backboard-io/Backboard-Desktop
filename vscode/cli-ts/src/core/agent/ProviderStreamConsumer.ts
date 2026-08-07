@@ -8,6 +8,7 @@ import type { EventBus } from "../bus/EventBus.ts";
 import type { ToolCallRef } from "../bus/events.ts";
 import type { Session } from "../session/Session.ts";
 import { AbortError } from "../tools/ToolAbort.ts";
+import { summarizeToolInput } from "../tools/ToolEventFactory.ts";
 import type { AssistantAccumulator } from "./AssistantAccumulator.ts";
 
 export interface PendingAction {
@@ -59,6 +60,20 @@ export class ProviderStreamConsumer {
 		stream: AsyncIterable<ProviderEvent>,
 		assistant: AssistantAccumulator,
 	): Promise<PendingAction | null> {
+		const advisoryCalls = new Map<string, { name: string }>();
+		const discardUnconfirmedCalls = (
+			confirmedIds: ReadonlySet<string>,
+		): void => {
+			for (const [toolCallId, call] of advisoryCalls) {
+				if (confirmedIds.has(toolCallId)) continue;
+				this.bus.emit({
+					type: "tool:discarded",
+					toolCallId,
+					name: call.name,
+				});
+			}
+			advisoryCalls.clear();
+		};
 		for await (const event of stream) {
 			switch (event.kind) {
 				case "thread":
@@ -90,6 +105,28 @@ export class ProviderStreamConsumer {
 				case "reasoning_delta":
 					if (event.text) assistant.appendReasoning(event.text);
 					break;
+				case "tool_call_start":
+					advisoryCalls.set(event.toolCallId, { name: event.name });
+					this.bus.emit({
+						type: "tool:pending",
+						toolCallId: event.toolCallId,
+						name: event.name,
+						inputSummary: "Generating input…",
+					});
+					break;
+				case "tool_call_ready":
+					advisoryCalls.set(event.call.id, { name: event.call.name });
+					// Some providers cannot announce the id/name until the arguments
+					// are complete. Upsert here as well so those calls still appear
+					// before the authoritative submission frame.
+					this.bus.emit({
+						type: "tool:pending",
+						toolCallId: event.call.id,
+						name: event.call.name,
+						inputSummary:
+							summarizeToolInput(event.call.input) || "Input ready…",
+					});
+					break;
 				case "voice":
 					this.bus.emit({ type: "assistant:voice", records: event.records });
 					break;
@@ -103,19 +140,23 @@ export class ProviderStreamConsumer {
 						name: call.name,
 						input: call.input,
 					}));
+					discardUnconfirmedCalls(new Set(calls.map((call) => call.id)));
 					assistant.finalize(calls);
 					return { runId: event.runId, calls };
 				}
 				case "failed":
+					discardUnconfirmedCalls(new Set());
 					throw new ProviderStreamFailure(
 						event.error,
 						event.retryable === true,
 					);
 				case "completed":
+					discardUnconfirmedCalls(new Set());
 					assistant.finalize([], event.finalText);
 					return null;
 			}
 		}
+		discardUnconfirmedCalls(new Set());
 		assistant.finalize();
 		return null;
 	}
