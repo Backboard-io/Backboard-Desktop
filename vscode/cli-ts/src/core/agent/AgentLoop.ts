@@ -9,6 +9,10 @@ import type { RuntimeThinkingResolver } from "../../config/thinkingRuntime.ts";
 import { invalidateAssistantCache } from "../../providers/backboard/assistants.ts";
 import type { BackboardClient } from "../../providers/backboard/BackboardClient.ts";
 import { BackboardError } from "../../providers/backboard/errors.ts";
+import type {
+	BackboardAudioFile,
+	BackboardVoiceConfig,
+} from "../../providers/backboard/types.ts";
 import type { EventBus } from "../bus/EventBus.ts";
 import type { TurnStatus } from "../bus/events.ts";
 import type { Session } from "../session/Session.ts";
@@ -38,6 +42,8 @@ export interface AgentLoopDeps {
 	model: { provider: string; model: string };
 	memory: MemoryMode;
 	memoryProfile: MemoryProfile;
+	voice?: BackboardVoiceConfig;
+	audioFile?: BackboardAudioFile;
 	thinking: ThinkingConfig | null | undefined;
 	thinkingResolver?: RuntimeThinkingResolver;
 	requestKind?: ThinkingRequestKind;

@@ -23,7 +23,6 @@ const STATIC_SESSION_PROVIDERS: readonly AgentSessionTarget[] = [
 	AgentSessionProviders.AgentHostBackboard,
 	AgentSessionProviders.AgentHostClaude,
 	AgentSessionProviders.AgentHostCodex,
-	AgentSessionProviders.AgentHostOpencode,
 ];
 
 /** Prefix identifying an agent-host session type. */

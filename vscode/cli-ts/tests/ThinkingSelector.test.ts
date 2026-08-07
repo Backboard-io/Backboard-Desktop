@@ -27,7 +27,15 @@ describe("ThinkingSelector choices", () => {
 	it("keeps level choices for models with controls", () => {
 		expect(
 			thinkingChoicesForModel(model()).map((choice) => choice.label),
-		).toEqual(["Off", "Low", "Medium", "High", "Max", "Dynamic"]);
+		).toEqual([
+			"Off",
+			"Provider Default",
+			"Low",
+			"Medium",
+			"High",
+			"Max",
+			"Dynamic",
+		]);
 	});
 
 	it("identifies defaults-only models for automatic selection outside the picker", () => {

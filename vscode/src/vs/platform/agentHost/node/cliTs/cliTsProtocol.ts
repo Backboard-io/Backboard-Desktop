@@ -36,6 +36,8 @@ export type CliTsServeControl =
 		readonly threadId?: string;
 		readonly model?: string;
 		readonly thinking?: string;
+		/** Omit provider reasoning traces from responses when supported. */
+		readonly excludeReasoning?: boolean;
 		readonly excludedTools?: readonly string[];
 		readonly permission?: CliTsPermissionPolicy;
 		readonly memory?: string;

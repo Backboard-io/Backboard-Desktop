@@ -31,7 +31,7 @@ import Severity from '../../../../base/common/severity.js';
 import { IActivityService, IBadge, NumberBadge, WarningBadge } from '../../../services/activity/common/activity.js';
 import { IThemeService } from '../../../../platform/theme/common/themeService.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
-import { IViewsRegistry, IViewDescriptor, Extensions, ViewContainer, IViewDescriptorService, IAddedViewDescriptorRef, ViewContainerLocation, IViewContainersRegistry } from '../../../common/views.js';
+import { IViewsRegistry, IViewDescriptor, Extensions, ViewContainer, IViewDescriptorService, IAddedViewDescriptorRef, ViewContainerLocation, IViewContainersRegistry, WindowEnablement } from '../../../common/views.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { IContextKeyService, ContextKeyExpr, RawContextKey, IContextKey } from '../../../../platform/contextkey/common/contextkey.js';
@@ -152,6 +152,11 @@ export class ExtensionsViewletViewsContribution extends Disposable implements IW
 		});
 
 		const viewRegistry = Registry.as<IViewsRegistry>(Extensions.ViewsRegistry);
+		if (this.container.windowEnablement === WindowEnablement.Both) {
+			for (const viewDescriptor of viewDescriptors) {
+				(viewDescriptor as { windowEnablement?: WindowEnablement }).windowEnablement = WindowEnablement.Both;
+			}
+		}
 		viewRegistry.registerViews(viewDescriptors, this.container);
 
 		viewRegistry.registerViewWelcomeContent('workbench.views.extensions.marketplaceAccess', {

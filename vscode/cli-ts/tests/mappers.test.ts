@@ -90,6 +90,33 @@ describe("mapStreamPayloadToEvents", () => {
 		});
 	});
 
+	it("maps Backboard voice records from the completed message", () => {
+		const events = mapStreamPayloadToEvents({
+			type: "message_complete",
+			content: "Here is the answer",
+			voice_records: {
+				stt: {
+					transcript: "What time is it?",
+					audio_url: "https://audio.test/input",
+				},
+				tts: { audio_url: "https://audio.test/output", voice: "alloy" },
+			},
+		});
+
+		expect(events.find((event) => event.kind === "voice")).toEqual({
+			kind: "voice",
+			records: [
+				{
+					stt: {
+						transcript: "What time is it?",
+						audio_url: "https://audio.test/input",
+					},
+					tts: { audio_url: "https://audio.test/output", voice: "alloy" },
+				},
+			],
+		});
+	});
+
 	it("maps content deltas", () => {
 		const events = mapStreamPayloadToEvents({
 			type: "content_streaming",

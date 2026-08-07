@@ -164,16 +164,19 @@ export class OptimusCard extends Disposable {
 			}
 		};
 
-		// The embedded transcript is read-only: any click on the card opens
-		// its chat in the right panel. Listen in the capture phase so the
-		// widget's own interactive elements cannot swallow the click, but let
-		// drags through (scrollbar handling) and keep the delete button live.
+		// Most of the embedded transcript is a passive preview: clicking it opens
+		// the focused chat. Question carousels are the exception. They are the
+		// real chat controls (not a screenshot), so keep their options, freeform
+		// input and submit/skip actions interactive directly on the tile.
 		let mouseDownPosition: { x: number; y: number } | undefined;
 		this._register(addDisposableListener(this.element, EventType.MOUSE_DOWN, event => {
 			mouseDownPosition = { x: event.clientX, y: event.clientY };
 		}, true));
 		this._register(addDisposableListener(this.element, EventType.CLICK, event => {
 			if ((event.target as HTMLElement).closest('.optimus-card-delete')) {
+				return;
+			}
+			if ((event.target as HTMLElement).closest('.chat-question-carousel-container')) {
 				return;
 			}
 			if (mouseDownPosition && (Math.abs(event.clientX - mouseDownPosition.x) > 4 || Math.abs(event.clientY - mouseDownPosition.y) > 4)) {
@@ -183,6 +186,9 @@ export class OptimusCard extends Disposable {
 			firePrimaryAction();
 		}, true));
 		this._register(addDisposableListener(this.element, EventType.KEY_DOWN, event => {
+			if ((event.target as HTMLElement).closest('.chat-question-carousel-container')) {
+				return;
+			}
 			if (event.key === 'Enter' || event.key === ' ') {
 				EventHelper.stop(event, true);
 				firePrimaryAction();

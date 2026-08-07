@@ -144,7 +144,7 @@
 		"walkthroughCommand": "",
 		"completionsMenuCommand": "",
 		"chatRefreshTokenCommand": "backboard.signIn",
-		"generateCommitMessageCommand": "",
+		"generateCommitMessageCommand": "backboard.generateCommitMessage",
 		"resolveMergeConflictsCommand": "",
 		"completionsAdvancedSetting": "backboard.advanced",
 		"completionsEnablementSetting": "backboard.enable",

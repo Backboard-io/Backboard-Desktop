@@ -43,8 +43,6 @@ function knownAgentPresentation(sessionTypeId: string): { readonly label: string
 			return { label: 'Claude', icon: Codicon.claude };
 		case 'codex':
 			return { label: 'Codex', icon: Codicon.openai };
-		case 'opencode':
-			return { label: 'OpenCode', icon: Codicon.circuitBoard };
 		default:
 			return undefined;
 	}
@@ -254,7 +252,8 @@ export class SessionTypePicker extends Disposable {
 	 * pick through {@link ISessionType.chatSessionType} when present.
 	 */
 	getPickedChatSessionType(folderUri: URI | undefined): string | undefined {
-		const pick = this.getUserPickedSessionType() ?? (folderUri ? this.getPreferredSessionType(folderUri) : undefined);
+		const userPick = this.getUserPickedSessionType();
+		const pick = userPick ?? (folderUri ? this.getPreferredSessionType(folderUri) : undefined);
 		if (!pick) {
 			return undefined;
 		}
@@ -263,7 +262,11 @@ export class SessionTypePicker extends Disposable {
 			: this._folderSessionTypes;
 		const match = types.find(t => t.sessionType.id === pick.sessionTypeId)
 			?? this._folderSessionTypes.find(t => t.sessionType.id === pick.sessionTypeId);
-		return match?.sessionType.chatSessionType ?? pick.sessionTypeId;
+		// Preserve an explicitly selected provider while it is temporarily
+		// unavailable. This keeps the combined picker on (for example) Codex so
+		// its Install action is shown instead of silently presenting Backboard.
+		const storedChatSessionType = userPick ? this._readStoredPickRaw()?.chatSessionType : undefined;
+		return match?.sessionType.chatSessionType ?? storedChatSessionType ?? pick.sessionTypeId;
 	}
 
 	/**

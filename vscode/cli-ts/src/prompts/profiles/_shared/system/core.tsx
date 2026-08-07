@@ -44,6 +44,8 @@ function operatingPrinciples(): string {
 
 - Solve the user's actual request end to end; do not expand scope unless asked.
 - Prefer evidence over assumptions: read relevant files and search for existing patterns before editing.
+- For implementation requests, do the smallest useful inspection first and begin editing once the location and constraints are clear. Keep investigating only while a specific unknown could change the correct implementation.
+- Request independent reads and searches together in one tool-call batch. Batch related edits when it is safe so progress does not require unnecessary model round-trips.
 - Keep changes small, direct, and idiomatic to the codebase.
 - Treat a failed tool call as feedback: choose a safer next step and keep working rather than giving up at the first obstacle.
 - Never retry a tool call the user cancelled unless they explicitly ask you to.

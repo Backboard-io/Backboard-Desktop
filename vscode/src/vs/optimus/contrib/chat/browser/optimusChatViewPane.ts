@@ -26,6 +26,7 @@ import { SIDE_BAR_FOREGROUND } from '../../../../workbench/common/theme.js';
 import { IWorkspacePickerDelegate, IWorkspacePickerItem } from '../../../../workbench/contrib/chat/browser/chat.js';
 import { IAgentHostNewSessionFolderService } from '../../../../workbench/contrib/chat/browser/agentSessions/agentHost/agentHostNewSessionFolderService.js';
 import { ChatWidget } from '../../../../workbench/contrib/chat/browser/widget/chatWidget.js';
+import { ChatViewTitleControl } from '../../../../workbench/contrib/chat/browser/widgetHosts/viewPane/chatViewTitleControl.js';
 import { createBackboardSessionTypePickerDelegate } from '../../../../workbench/contrib/chat/browser/widget/input/backboardSessionTypePickerDelegate.js';
 import { ChatAgentLocation, ChatModeKind } from '../../../../workbench/contrib/chat/common/constants.js';
 import { getChatSessionType, isUntitledChatSession } from '../../../../workbench/contrib/chat/common/model/chatUri.js';
@@ -39,6 +40,7 @@ import { ILanguageModelsService } from '../../../../workbench/contrib/chat/commo
 import { IChatSessionsService, localChatSessionType, SessionType } from '../../../../workbench/contrib/chat/common/chatSessionsService.js';
 import { ISessionsService } from '../../../../sessions/services/sessions/browser/sessionsService.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
+import { IWorkbenchLayoutService, Parts } from '../../../../workbench/services/layout/browser/layoutService.js';
 
 export const OptimusChatViewId = 'optimus.workbench.view.chat';
 
@@ -51,12 +53,14 @@ export const OptimusChatViewId = 'optimus.workbench.view.chat';
 export class OptimusChatViewPane extends ViewPane {
 
 	private chatWidget: ChatWidget | undefined;
+	private chatTitleControl: ChatViewTitleControl | undefined;
 	private lastBodyWidth = 0;
 	private lastBodyHeight = 0;
 	private readonly modelRef = this._register(new MutableDisposable<IChatModelReference>());
 	private readonly loadCts = this._register(new MutableDisposable<CancellationTokenSource>());
 	private readonly modelChangeListener = this._register(new MutableDisposable());
 	private currentResourceKey: string | undefined;
+	private resetComposerAfterSubmittedAgent = false;
 
 	constructor(
 		options: IViewPaneOptions,
@@ -79,6 +83,7 @@ export class OptimusChatViewPane extends ViewPane {
 		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
 		@ICommandService private readonly commandService: ICommandService,
 		@IAgentCliSetupService private readonly agentCliSetupService: IAgentCliSetupService,
+		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
 	) {
 		super(options, keybindingService, contextMenuService, configurationService, contextKeyService, viewDescriptorService, instantiationService, openerService, themeService, hoverService);
 	}
@@ -147,7 +152,21 @@ export class OptimusChatViewPane extends ViewPane {
 		// `optimus-chat-view` scopes this panel's own layout; `backboard-composer`
 		// opts its composer into the shared shell (backboardComposer.css) so it
 		// reads the same as the Simple window's and the Editor window's.
-		container.classList.add('optimus-chat-view', 'backboard-composer');
+		container.classList.add('optimus-chat-view', 'chat-viewpane', 'backboard-composer');
+
+		// Use the Editor chat's own title control instead of recreating its tabs
+		// and action cluster. Keeping it inside this pane gives Advanced the same
+		// New Agent/history workflow without switching workbench windows.
+		this.chatTitleControl = this._register(this.instantiationService.createInstance(
+			ChatViewTitleControl,
+			container,
+			{
+				focusChat: () => this.chatWidget?.focusInput(),
+				openChatSession: async sessionResource => { await this.loadChatResource(sessionResource); },
+				openNewChat: () => { void this.showNewChat(); },
+			}
+		));
+		this._register(this.chatTitleControl.onDidChangeHeight(() => this.layoutChatView()));
 
 		this.workspacePicker = this._register(this.instantiationService.createInstance(WorkspacePicker));
 		this.workspacePicker.setLocalOnly(true);
@@ -211,25 +230,42 @@ export class OptimusChatViewPane extends ViewPane {
 		// composed task runs in. (The composer toolbar's own workspace-picker
 		// slot is a hidden dropdown anchor by design, so the chip is rendered
 		// here as its own row, like the Simple window's new-chat surface.)
-		this.folderRow = append(container, $('.optimus-chat-folder-row'));
+		const inputPart = chatContainer.querySelector<HTMLElement>('.interactive-input-part');
+		this.folderRow = append(inputPart ?? container, $('.optimus-chat-folder-row'));
+		this.folderRowEmbedded = !!inputPart;
 		this.workspacePicker.render(this.folderRow);
 		// Folder choice only applies to NEW chats — an existing session's
 		// working directory is fixed at creation. Hidden until the untitled
 		// composer is showing (see updateFolderRowVisibility).
 		this.folderRow.style.display = 'none';
 
-		// The folder locks in the moment the first message is committed —
-		// hide the chip at send time. (The model-side hasRequests check can
-		// lag: the first send converts the untitled chat into a real session
-		// on a different model, so our model's change event never fires.)
+		// The folder locks in the moment the first message is committed. Remember
+		// that this submission came from the launch composer before hiding the
+		// chip: once the backend accepts it, Advanced resets this panel to a fresh
+		// composer while the resulting task continues in its tile instead of
+		// becoming a transcript here. (The first send converts the untitled chat
+		// into a real session on a different model, so model-side checks can lag.)
 		this._register(this.chatWidget.onDidAcceptInput(() => {
 			if (this.folderRowVisible) {
+				this.resetComposerAfterSubmittedAgent = true;
 				this.folderRowVisible = false;
 				if (this.folderRow) {
 					this.folderRow.style.display = 'none';
 				}
 				this.layoutChatView();
 			}
+		}));
+		this._register(this.chatWidget.onDidSubmitAgent(() => {
+			if (!this.resetComposerAfterSubmittedAgent) {
+				return;
+			}
+			this.resetComposerAfterSubmittedAgent = false;
+			this.showNewChat().then(() => {
+				// Session materialization can apply the shared session layout while the
+				// fresh model is loading. Reassert the Advanced launcher's open panel
+				// only after that transition settles.
+				this.layoutService.setPartHidden(false, Parts.AUXILIARYBAR_PART);
+			}).catch(err => this.logService.error('[OptimusChatViewPane] Failed to reset launch composer after submit', err));
 		}));
 
 		this._register(autorun(reader => {
@@ -260,6 +296,7 @@ export class OptimusChatViewPane extends ViewPane {
 	private static readonly FOLDER_ROW_HEIGHT = 30;
 
 	private folderRow: HTMLElement | undefined;
+	private folderRowEmbedded = false;
 	private folderRowVisible = false;
 
 	private updateFolderRowVisibility(resource: URI | undefined): void {
@@ -281,8 +318,9 @@ export class OptimusChatViewPane extends ViewPane {
 
 	private layoutChatView(): void {
 		if (this.chatWidget && this.lastBodyWidth > 0 && this.lastBodyHeight > 0) {
-			const rowHeight = this.folderRowVisible ? OptimusChatViewPane.FOLDER_ROW_HEIGHT : 0;
-			this.chatWidget.layout(this.lastBodyHeight - rowHeight, this.lastBodyWidth);
+			const rowHeight = this.folderRowVisible && !this.folderRowEmbedded ? OptimusChatViewPane.FOLDER_ROW_HEIGHT : 0;
+			const titleHeight = this.chatTitleControl?.getHeight() ?? 0;
+			this.chatWidget.layout(Math.max(0, this.lastBodyHeight - titleHeight - rowHeight), this.lastBodyWidth);
 		}
 	}
 
@@ -319,11 +357,11 @@ export class OptimusChatViewPane extends ViewPane {
 	 */
 	async showNewChat(): Promise<void> {
 		this.untitledResource = undefined; // mint a fresh blank chat
-		await this.showBackboardNewChat(CancellationToken.None);
+		await this.showBackboardNewChat(CancellationToken.None, true);
 	}
 
-	private async showBackboardNewChat(token: CancellationToken): Promise<void> {
-		const resource = this.sessionsService.activeSession.get()?.activeChat.get().resource ?? this.getOrCreateUntitledResource();
+	private async showBackboardNewChat(token: CancellationToken, forceNew = false): Promise<void> {
+		const resource = (!forceNew ? this.sessionsService.activeSession.get()?.activeChat.get().resource : undefined) ?? this.getOrCreateUntitledResource();
 
 		// The untitled chat's provisional backend needs a working directory —
 		// loading can hang indefinitely without one. Seed it BEFORE the load
@@ -427,6 +465,7 @@ export class OptimusChatViewPane extends ViewPane {
 		this.modelChangeListener.value = ref ? ref.object.onDidChange(() => this.updateFolderRowVisibility(ref.object.sessionResource)) : undefined;
 		this.updateFolderRowVisibility(ref?.object.sessionResource);
 		this.chatWidget?.setModel(ref?.object);
+		this.chatTitleControl?.update(ref?.object);
 
 		// Reflect the loaded chat's folder in the composer's folder chip; for
 		// untitled chats the chip keeps the user's (or last) selection, which

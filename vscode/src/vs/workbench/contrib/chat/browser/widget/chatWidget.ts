@@ -2312,7 +2312,14 @@ export class ChatWidget extends Disposable implements IChatWidget {
 
 		this.listWidget.setViewModel(this.viewModel);
 
-		if (this._lockedAgent) {
+		const rightPanelInputPlaceholder = this.container.closest('.part.auxiliarybar')
+			? localize('chat.input.placeholder.editorRightPanel', "Ask anything — @ for context")
+			: undefined;
+
+		if (rightPanelInputPlaceholder) {
+			this.viewModel.setInputPlaceholder(rightPanelInputPlaceholder);
+			this.inputEditor.updateOptions({ placeholder: rightPanelInputPlaceholder });
+		} else if (this._lockedAgent) {
 			let placeholder = this.chatSessionsService.getChatSessionContribution(this._lockedAgent.id)?.inputPlaceholder;
 			if (!placeholder) {
 				placeholder = localize('chat.input.placeholder.lockedToAgent', "Chat with {0}", this._lockedAgent.displayName || this._lockedAgent.name);
@@ -2337,7 +2344,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 
 			// Update the editor's placeholder text when it changes in the view model
 			if (events?.some(e => e?.kind === 'changePlaceholder')) {
-				this.inputEditor.updateOptions({ placeholder: this.viewModel.inputPlaceholder });
+				this.inputEditor.updateOptions({ placeholder: rightPanelInputPlaceholder ?? this.viewModel.inputPlaceholder });
 			}
 
 			this.onDidChangeItems();

@@ -8,6 +8,10 @@ import type {
 import type { RuntimeThinkingResolver } from "../../config/thinkingRuntime.ts";
 import { ensureAssistant } from "../../providers/backboard/assistants.ts";
 import type { BackboardClient } from "../../providers/backboard/BackboardClient.ts";
+import type {
+	BackboardAudioFile,
+	BackboardVoiceConfig,
+} from "../../providers/backboard/types.ts";
 import type { EventBus } from "../bus/EventBus.ts";
 import type { HookController } from "../hooks/index.ts";
 import type { Session } from "../session/Session.ts";
@@ -38,6 +42,8 @@ export interface CreateLoopOptions {
 	model: ModelRef;
 	memory: MemoryMode;
 	memoryProfile: MemoryProfile;
+	voice?: BackboardVoiceConfig;
+	audioFile?: BackboardAudioFile;
 	thinking?: ThinkingConfig | null;
 	thinkingResolver?: RuntimeThinkingResolver;
 	requestKind: ThinkingRequestKind;
@@ -92,6 +98,8 @@ export class AgentLoopFactory {
 			model: options.model,
 			memory: options.memory,
 			memoryProfile: options.memoryProfile,
+			voice: options.voice,
+			audioFile: options.audioFile,
 			thinking: options.thinking,
 			thinkingResolver: options.thinkingResolver,
 			requestKind: options.requestKind,

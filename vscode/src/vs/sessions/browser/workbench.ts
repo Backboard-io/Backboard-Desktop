@@ -319,6 +319,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 
 	private _editorMaximized = false;
 	private _editorLastNonMaximizedVisibility: IPartVisibilityState | undefined;
+	private _auxiliaryBarLastNonMaximizedVisibility: IPartVisibilityState | undefined;
 	private _restoreAttachedEditorMaximizedOnShow = false;
 	private _restoreEditorOnAuxiliaryBarShow = false;
 	private _editorPartAutoVisibilitySuppressionCount = 0;
@@ -1350,8 +1351,14 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		const sizes = this.layoutPolicy.getPartSizes(width, height);
 		// For hidden parts, still provide a reasonable cached size for when they're shown later.
 		// Saved sizes from a previous session take precedence over policy defaults.
-		const sideBarSize = this._savedPartSizes.sidebar
+		const restoredSideBarSize = this._savedPartSizes.sidebar
 			?? (this.partVisibility.sidebar ? sizes.sideBarSize : Math.max(sizes.sideBarSize, 250));
+		// The Codex-style Simple shell uses a compact navigation rail. Older
+		// builds persisted the previous 360px default, so clamp that restored
+		// value here while still allowing the user to resize after launch.
+		const sideBarSize = (!this._isOptimusWindow && !this._isJarvisWindow)
+			? Math.min(restoredSideBarSize, 300)
+			: restoredSideBarSize;
 		const panelSize = this._savedPartSizes.panel
 			?? (this.partVisibility.panel ? sizes.panelSize : Math.max(sizes.panelSize, 250));
 		const contentHeight = Math.max(0, height);
@@ -1795,7 +1802,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		// cramped against the window controls.
 		if (!hidden && this.sideBarPartView) {
 			const restored = this.workbenchGrid.getViewSize(this.sideBarPartView);
-			const comfortableOpenWidth = 360;
+			const comfortableOpenWidth = 300;
 			if (restored.width > 0 && restored.width < comfortableOpenWidth) {
 				this.workbenchGrid.resizeView(this.sideBarPartView, { width: comfortableOpenWidth, height: restored.height });
 			}
@@ -1882,15 +1889,41 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		}
 
 		if (!hidden) {
-			// In the simple window, showing the auxiliary bar (right-workbench)
-			// must not drag the empty main editor area along with it — only
-			// restore an editor that was explicitly visible before the bar was
-			// hidden. The advanced (Optimus) window follows the layout default.
-			const editorIsDefaultSurface = (this._isOptimusWindow || this._isJarvisWindow) && this.layoutPolicy.getPartVisibilityDefaults().editor;
-			const shouldRestoreEditor = this._restoreEditorOnAuxiliaryBarShow || editorIsDefaultSurface;
-			this._restoreEditorOnAuxiliaryBarShow = false;
-			if (shouldRestoreEditor && !this.partVisibility.editor) {
-				this.setEditorHidden(false);
+			// Simple mode has one right-hand inspection surface. Never reintroduce
+			// the main editor beside it: an empty editor becomes a thin watermark
+			// sliver, and an occupied editor turns the right side into two cramped
+			// IDE columns. Optimus/Jarvis retain the full-workbench restore policy.
+			if (!this._isOptimusWindow && !this._isJarvisWindow) {
+				this._restoreEditorOnAuxiliaryBarShow = false;
+				if (this.partVisibility.editor) {
+					this.setEditorHidden(true);
+				} else if (this.workbenchGrid.isViewVisible(this.editorPartView)) {
+					// Restored grid state can momentarily disagree with the persisted
+					// part flag. Repair the actual view as well as the logical state.
+					this.workbenchGrid.setViewVisible(this.editorPartView, false);
+					this.mainContainer.classList.add(LayoutClasses.MAIN_EDITOR_AREA_HIDDEN);
+				}
+			} else {
+				const editorIsDefaultSurface = this.layoutPolicy.getPartVisibilityDefaults().editor;
+				const shouldRestoreEditor = this._restoreEditorOnAuxiliaryBarShow || editorIsDefaultSurface;
+				this._restoreEditorOnAuxiliaryBarShow = false;
+				if (shouldRestoreEditor && !this.partVisibility.editor) {
+					this.setEditorHidden(false);
+				}
+			}
+
+			// A stale auxiliary-bar width from the old editor+rail split can leave
+			// the right workbench as a clipped icon sliver. In Simple mode it is a
+			// single Codex-style inspection panel, so give it a useful opening width.
+			if (!this._isOptimusWindow && !this._isJarvisWindow && !this.partVisibility.editor) {
+				const currentSize = this.workbenchGrid.getViewSize(this.auxiliaryBarPartView);
+				if (currentSize.width < 400) {
+					const comfortableWidth = Math.min(560, Math.max(460, Math.floor(this._mainContainerDimension.width * 0.34)));
+					this.workbenchGrid.resizeView(this.auxiliaryBarPartView, {
+						width: comfortableWidth,
+						height: currentSize.height
+					});
+				}
 			}
 		}
 
@@ -2154,15 +2187,58 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 	}
 
 	toggleMaximizedAuxiliaryBar(): void {
-		// No-op: Maximize not supported in this layout
+		this.setAuxiliaryBarMaximized(!this.isAuxiliaryBarMaximized());
 	}
 
-	setAuxiliaryBarMaximized(_maximized: boolean): boolean {
-		return false; // Maximize not supported
+	setAuxiliaryBarMaximized(maximized: boolean): boolean {
+		if (!this.workbenchGrid || maximized === this.isAuxiliaryBarMaximized()) {
+			return false;
+		}
+
+		if (maximized) {
+			// Match Codex's full-width side panel: consume the main workspace,
+			// while the project sidebar remains available for navigation.
+			this._auxiliaryBarLastNonMaximizedVisibility = {
+				sidebar: this.workbenchGrid.isViewVisible(this.sideBarPartView),
+				sessions: this.workbenchGrid.isViewVisible(this.sessionsPartView),
+				editor: this.workbenchGrid.isViewVisible(this.editorPartView),
+				auxiliaryBar: this.workbenchGrid.isViewVisible(this.auxiliaryBarPartView),
+				// Simple mode's right workbench owns the auxiliary workspace. The
+				// bottom panel must stay closed across expand/restore, even when a
+				// terminal composite remains cached as the panel's active view.
+				panel: false,
+			};
+			this.workbenchGrid.maximizeView(this.auxiliaryBarPartView, [this.sideBarPartView]);
+		} else {
+			const visibility = this._auxiliaryBarLastNonMaximizedVisibility ?? { ...this.partVisibility };
+			this.workbenchGrid.exitMaximizedView();
+			// GridView restores every leaf when leaving maximized mode. Reapply
+			// Simple mode's logical visibility immediately so hidden editor/panel
+			// parts do not leak back into the layout.
+			Object.assign(this.partVisibility, visibility);
+			this.mainContainer.classList.toggle(LayoutClasses.SIDEBAR_HIDDEN, !visibility.sidebar);
+			this.mainContainer.classList.toggle(LayoutClasses.SESSIONS_HIDDEN, !visibility.sessions);
+			this.mainContainer.classList.toggle(LayoutClasses.MAIN_EDITOR_AREA_HIDDEN, !visibility.editor);
+			this.mainContainer.classList.toggle(LayoutClasses.AUXILIARYBAR_HIDDEN, !visibility.auxiliaryBar);
+			this.mainContainer.classList.toggle(LayoutClasses.PANEL_HIDDEN, !visibility.panel);
+			this.workbenchGrid.setViewVisible(this.sideBarPartView, visibility.sidebar);
+			this.workbenchGrid.setViewVisible(this.sessionsPartView, visibility.sessions);
+			this.workbenchGrid.setViewVisible(this.editorPartView, visibility.editor);
+			this.workbenchGrid.setViewVisible(this.auxiliaryBarPartView, visibility.auxiliaryBar);
+			this.workbenchGrid.setViewVisible(this.panelPartView, visibility.panel);
+			if (!visibility.panel && this.paneCompositeService.getActivePaneComposite(ViewContainerLocation.Panel)) {
+				this.paneCompositeService.hideActivePaneComposite(ViewContainerLocation.Panel);
+			}
+			this._auxiliaryBarLastNonMaximizedVisibility = undefined;
+			this._savePartVisibility();
+		}
+
+		this._onDidChangeAuxiliaryBarMaximized.fire();
+		return true;
 	}
 
 	isAuxiliaryBarMaximized(): boolean {
-		return false; // Maximize not supported
+		return !!this.workbenchGrid && this.workbenchGrid.isViewMaximized(this.auxiliaryBarPartView);
 	}
 
 	isEditorMaximized(): boolean {

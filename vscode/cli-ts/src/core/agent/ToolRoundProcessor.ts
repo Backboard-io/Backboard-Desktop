@@ -12,6 +12,7 @@ import type { Session } from "../session/Session.ts";
 import type { ToolContext } from "../tools/ToolContext.ts";
 import type { ToolOutput, ToolScheduler } from "../tools/ToolScheduler.ts";
 import type { AssistantAccumulator } from "./AssistantAccumulator.ts";
+import { ExecutionPacing } from "./ExecutionPacing.ts";
 import type {
 	PendingAction,
 	ProviderStreamConsumer,
@@ -37,6 +38,7 @@ export class ToolRoundProcessor {
 	private consecutiveFailureCount = 0;
 	private maxUsed = false;
 	private rounds = 0;
+	private readonly executionPacing = new ExecutionPacing();
 
 	constructor(private readonly deps: ToolRoundProcessorDeps) {}
 
@@ -81,12 +83,14 @@ export class ToolRoundProcessor {
 				turnId,
 			});
 			this.recordToolMessage(newCalls, outputs);
+			const submittedOutputs =
+				this.executionPacing.prepareForSubmission(outputs);
 
 			const continuationThinking = this.resolveContinuationThinking(outputs);
 			const request: SubmitToolOutputsRequest = {
 				thread_id: this.deps.session.threadId ?? "",
 				...(pending.runId ? { run_id: pending.runId } : {}),
-				tool_outputs: outputs.map(toBackboardToolOutput),
+				tool_outputs: submittedOutputs.map(toBackboardToolOutput),
 				tools: this.deps.tools,
 				...(continuationThinking === undefined
 					? {}

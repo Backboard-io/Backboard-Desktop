@@ -39,6 +39,8 @@ import { toErrorMessage } from '../../../../../base/common/errorMessage.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
 import { IPaneCompositePartService } from '../../../../services/panecomposite/browser/panecomposite.js';
 import { AgentSessionsHistoryModal } from './agentSessionsHistoryModal.js';
+import { isBackboardProduct } from '../../common/backboardAuth.js';
+import { timeout } from '../../../../../base/common/async.js';
 
 const AGENT_SESSIONS_CATEGORY = localize2('chatSessions', "Chat Agent Sessions");
 let currentAgentSessionsHistoryModal: AgentSessionsHistoryModal | undefined;
@@ -1029,12 +1031,13 @@ abstract class UpdateChatViewWidthAction extends Action2 {
 		const part = paneCompositeService.getPartId(chatLocation);
 		let currentSize = layoutService.getSize(part);
 
-		const chatViewDefaultWidth = 300;
-		const sessionsViewDefaultWidth = chatViewDefaultWidth;
-		const sideBySideMinWidth = chatViewDefaultWidth + sessionsViewDefaultWidth + 1;	// account for possible theme border
+		const chatViewDefaultWidth = isBackboardProduct() ? 516 : 300;
+		const sideBySideChatWidth = isBackboardProduct() ? 552 : chatViewDefaultWidth;
+		const sessionsViewDefaultWidth = isBackboardProduct() ? 292 : 216;
+		const sideBySideMinWidth = sideBySideChatWidth + sessionsViewDefaultWidth;
 
 		if (
-			(newOrientation === AgentSessionsViewerOrientation.SideBySide && currentSize.width >= sideBySideMinWidth) ||													// already wide enough to show side by side
+			(!isBackboardProduct() && newOrientation === AgentSessionsViewerOrientation.SideBySide && currentSize.width >= sideBySideMinWidth) ||			// already wide enough to show side by side
 			(newOrientation === AgentSessionsViewerOrientation.Stacked && chatLocation === ViewContainerLocation.AuxiliaryBar && layoutService.isAuxiliaryBarMaximized()) 	// try to not leave maximized state if maximized
 		) {
 			return;
@@ -1048,7 +1051,14 @@ abstract class UpdateChatViewWidthAction extends Action2 {
 
 		// Figure out the right new width
 		let newWidth: number;
-		if (newOrientation === AgentSessionsViewerOrientation.SideBySide) {
+		if (isBackboardProduct()) {
+			// Latest Cursor capture: 1104px chat + 584px drawer at 2x Retina,
+			// i.e. a 552px conversation beside a 292px Agents drawer. The closed
+			// New Agent capture remains 516px wide.
+			newWidth = newOrientation === AgentSessionsViewerOrientation.SideBySide
+				? sideBySideMinWidth
+				: chatViewDefaultWidth;
+		} else if (newOrientation === AgentSessionsViewerOrientation.SideBySide) {
 			newWidth = Math.max(sideBySideMinWidth, lastWidthForOrientation || Math.round(layoutService.mainContainerDimension.width / 2));
 		} else {
 			newWidth = lastWidthForOrientation || Math.max(chatViewDefaultWidth, currentSize.width - sessionsViewDefaultWidth);
@@ -1056,11 +1066,17 @@ abstract class UpdateChatViewWidthAction extends Action2 {
 
 		// Apply the new width
 		layoutService.setSize(part, { width: newWidth, height: currentSize.height });
+		if (isBackboardProduct()) {
+			await timeout(0);
+			const settledSize = layoutService.getSize(part);
+			layoutService.setSize(part, { width: newWidth, height: settledSize.height });
+		}
+		const actualSize = layoutService.getSize(part);
 
 		// If we figure out that the width was not applied due to constraints (such as window dimensions),
 		// we maximize the auxiliary bar to ensure the side by side experience is optimal
-		const actualSize = layoutService.getSize(part);
 		if (
+			!isBackboardProduct() &&
 			chatLocation === ViewContainerLocation.AuxiliaryBar &&			// only applicable for auxiliary bar
 			newOrientation === AgentSessionsViewerOrientation.SideBySide &&	// only applicable when going to side by side
 			actualSize.width < sideBySideMinWidth							// width is still not enough for side by side

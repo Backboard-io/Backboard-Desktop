@@ -30,7 +30,7 @@ const auxiliaryBarLeftOffIcon = registerIcon('auxiliarybar-left-off-layout-icon'
 export class ToggleAuxiliaryBarAction extends Action2 {
 
 	static readonly ID = 'workbench.action.toggleAuxiliaryBar';
-	static readonly LABEL = localize2('toggleAuxiliaryBar', "Toggle Secondary Side Bar Visibility");
+	static readonly LABEL = localize2('toggleAuxiliaryBar', "Toggle Agents");
 
 	constructor() {
 		super({
@@ -38,19 +38,21 @@ export class ToggleAuxiliaryBarAction extends Action2 {
 			title: ToggleAuxiliaryBarAction.LABEL,
 			toggled: {
 				condition: AuxiliaryBarVisibleContext,
-				title: localize('closeSecondarySideBar', 'Hide Secondary Side Bar'),
+				title: localize('hideAgents', 'Hide Agents'),
 				icon: closeIcon,
 				mnemonicTitle: localize({ key: 'miCloseSecondarySideBar', comment: ['&& denotes a mnemonic'] }, "&&Secondary Side Bar"),
 			},
 			icon: closeIcon,
 			category: Categories.View,
 			metadata: {
-				description: localize('openAndCloseAuxiliaryBar', 'Open/Show and Close/Hide Secondary Side Bar'),
+				description: localize('openAndCloseAuxiliaryBar', 'Open/Show and Close/Hide Agents'),
 			},
 			f1: true,
 			keybinding: {
-				weight: KeybindingWeight.WorkbenchContrib,
-				primary: KeyMod.CtrlCmd | KeyMod.Alt | KeyCode.KeyB
+				// Cmd/Ctrl+I is the product-level Agents toggle. Give it a slight
+				// priority over the stock chat bindings that also use this chord.
+				weight: KeybindingWeight.WorkbenchContrib + 1,
+				primary: KeyMod.CtrlCmd | KeyCode.KeyI
 			},
 			menu: [
 				{
@@ -75,8 +77,8 @@ export class ToggleAuxiliaryBarAction extends Action2 {
 
 		// Announce visibility change to screen readers
 		const alertMessage = isCurrentlyVisible
-			? localize('auxiliaryBarHidden', "Secondary Side Bar hidden")
-			: localize('auxiliaryBarVisible', "Secondary Side Bar shown");
+			? localize('auxiliaryBarHidden', "Agents hidden")
+			: localize('auxiliaryBarVisible', "Agents shown");
 		alert(alertMessage);
 	}
 }

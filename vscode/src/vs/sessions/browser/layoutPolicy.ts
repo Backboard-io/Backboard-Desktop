@@ -193,10 +193,10 @@ export class SessionsLayoutPolicy extends Disposable {
 			case 'desktop':
 				// Tablet currently falls back to desktop sizing.
 				return {
-					sideBarSize: 360,
+					sideBarSize: 300,
 					auxiliaryBarSize: 340,
 					panelSize: 300,
-					sessionsWidth: width - 360,
+					sessionsWidth: width - 300,
 				};
 		}
 	}

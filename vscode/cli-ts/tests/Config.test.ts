@@ -78,6 +78,22 @@ describe("Config", () => {
 		expect(reopened.memoryProfile).toBe("code");
 	});
 
+	it("persists provider-default thinking and reasoning-trace preferences", async () => {
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "q-cli-config-"));
+		await saveBackboardConfig({ apiKey: "file-key" }, homeDir);
+		const config = new Config({ env, argv: [], homeDir });
+
+		config.setThinking({ kind: "default" });
+		config.setExcludeReasoning(true);
+		await config.saveRuntimeSelection();
+
+		const reopened = new Config({ env, argv: [], homeDir });
+		expect(reopened.thinking).toEqual({
+			kind: "default",
+			excludeReasoning: true,
+		});
+	});
+
 	it("loads saved dynamic thinking selections", async () => {
 		const homeDir = await mkdtemp(path.join(os.tmpdir(), "q-cli-config-"));
 		await saveBackboardConfig(

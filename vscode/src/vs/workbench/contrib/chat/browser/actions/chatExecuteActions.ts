@@ -482,15 +482,31 @@ interface IBackboardConfigJson {
 	readonly personal_api_key?: unknown;
 	readonly env_keys?: unknown;
 	readonly oauth?: unknown;
+	readonly assistant_id?: unknown;
 }
 
 interface IBackboardComposerMicState {
-	readonly recorder: MediaRecorder;
-	readonly chunks: Blob[];
 	readonly widget: IChatWidget;
+	readonly socket: WebSocket;
+	readonly stream: MediaStream;
+	readonly audioContext: AudioContext;
+	readonly source: MediaStreamAudioSourceNode;
+	readonly processor: ScriptProcessorNode;
+	readonly silentOutput: GainNode;
+	readonly initialInput: string;
+	readonly threadId: string;
+	readonly apiUrl: string;
+	readonly authHeaders: Record<string, string>;
+	readonly finalTranscript: Promise<string>;
+	readonly resolveFinal: (value: string) => void;
+	readonly rejectFinal: (error: Error) => void;
+	readonly setRecording: (value: boolean) => void;
+	lastTranscript: string;
+	stopping: boolean;
 }
 
 let backboardComposerMicState: IBackboardComposerMicState | undefined;
+let backboardComposerMicStarting = false;
 
 export class ToggleBackboardComposerMicrophoneAction extends Action2 {
 	static readonly ID = 'workbench.action.chat.toggleBackboardComposerMicrophone';
@@ -528,47 +544,40 @@ export class ToggleBackboardComposerMicrophoneAction extends Action2 {
 		}
 
 		if (backboardComposerMicState) {
-			backboardComposerMicState.recorder.stop();
+			try {
+				await stopBackboardRealtimeTranscription(backboardComposerMicState);
+			} catch (error) {
+				notificationService.error(localize('interactive.backboardMicrophone.failed', "Backboard transcription failed: {0}", getErrorMessage(error)));
+			}
+			return;
+		}
+		if (backboardComposerMicStarting) {
 			return;
 		}
 
 		const win = widget.inputEditor.getDomNode()?.ownerDocument.defaultView;
-		if (!win?.navigator.mediaDevices?.getUserMedia || typeof win.MediaRecorder === 'undefined') {
+		if (!win?.navigator.mediaDevices?.getUserMedia || typeof win.AudioContext === 'undefined' || typeof win.WebSocket === 'undefined') {
 			notificationService.error(localize('interactive.backboardMicrophone.unsupported', "Microphone recording is not available in this window."));
 			return;
 		}
 
 		try {
-			const stream = await win.navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
-			const mimeType = win.MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
-			const chunks: Blob[] = [];
-			const recorder = new win.MediaRecorder(stream, { mimeType });
-			backboardComposerMicState = { recorder, chunks, widget };
+			backboardComposerMicStarting = true;
+			backboardComposerMicState = await startBackboardRealtimeTranscription(
+				widget,
+				win,
+				fileService,
+				pathService,
+				configurationService,
+				value => recordingKey.set(value),
+			);
 			recordingKey.set(true);
-			recorder.ondataavailable = event => {
-				if (event.data.size > 0) {
-					chunks.push(event.data);
-				}
-			};
-			recorder.onstop = () => {
-				const stoppedState = backboardComposerMicState;
-				backboardComposerMicState = undefined;
-				recordingKey.set(false);
-				for (const track of stream.getTracks()) {
-					track.stop();
-				}
-				if (!stoppedState || stoppedState.chunks.length === 0) {
-					return;
-				}
-				transcribeBackboardComposerAudio(stoppedState, mimeType, fileService, pathService, configurationService, notificationService).catch(error => {
-					notificationService.error(localize('interactive.backboardMicrophone.failed', "Backboard transcription failed: {0}", getErrorMessage(error)));
-				});
-			};
-			recorder.start();
 		} catch (error) {
 			backboardComposerMicState = undefined;
 			recordingKey.set(false);
 			notificationService.error(localize('interactive.backboardMicrophone.startFailed', "Could not start microphone: {0}", getErrorMessage(error)));
+		} finally {
+			backboardComposerMicStarting = false;
 		}
 	}
 }
@@ -651,55 +660,248 @@ export class BackboardUsageMetricsAction extends Action2 {
 	}
 }
 
-async function transcribeBackboardComposerAudio(
-	state: IBackboardComposerMicState,
-	mimeType: string,
+async function startBackboardRealtimeTranscription(
+	widget: IChatWidget,
+	win: Window & typeof globalThis,
 	fileService: IFileService,
 	pathService: IPathService,
 	configurationService: IConfigurationService,
-	notificationService: INotificationService,
-): Promise<void> {
+	setRecording: (value: boolean) => void,
+): Promise<IBackboardComposerMicState> {
 	const config = await readBackboardComposerConfig(fileService, pathService);
 	const authHeaders = backboardComposerAuthHeaders(config);
-	if (!authHeaders) {
-		throw new Error(localize('interactive.backboardMicrophone.noCredentials', "No Backboard API key or OAuth token found in ~/.backboard_ide/config.json."));
+	const apiKey = backboardComposerApiKey(config);
+	if (!authHeaders || !apiKey) {
+		throw new Error(localize('interactive.backboardMicrophone.noCredentials', "Realtime voice requires a Backboard API key in ~/.backboard_ide/config.json."));
 	}
-
-	const blob = new Blob(state.chunks, { type: mimeType });
-	const form = new FormData();
-	form.append('stream', 'false');
-	form.append('content', 'Transcribe this audio.');
-	form.append('send_to_llm', 'false');
-	form.append('voice', JSON.stringify({
-		stt: {
-			provider: 'openai',
-			model: 'gpt-4o-mini-transcribe',
-			language: 'en',
-		},
-		send_to_llm: false,
-		client: 'backboard-composer',
-	}));
-	form.append('audio_file', blob, 'backboard-composer-voice.webm');
-
-	const response = await fetch(`${backboardComposerApiUrl(config, configurationService)}/threads/messages`, {
-		method: 'POST',
-		headers: authHeaders,
-		body: form,
+	const apiUrl = backboardComposerApiUrl(config, configurationService);
+	const assistantId = await resolveBackboardComposerAssistantId(config, apiUrl, authHeaders);
+	const threadId = await createBackboardComposerVoiceThread(apiUrl, assistantId, authHeaders);
+	const socketUrl = new URL(`${apiUrl}/threads/messages`);
+	socketUrl.protocol = socketUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+	socketUrl.searchParams.set('api_key', apiKey);
+	const socket = new win.WebSocket(socketUrl.toString());
+	let state: IBackboardComposerMicState | undefined;
+	let sessionReady = false;
+	let resolveSession!: () => void;
+	let rejectSession!: (error: Error) => void;
+	const session = new Promise<void>((resolve, reject) => {
+		resolveSession = resolve;
+		rejectSession = reject;
 	});
-	if (!response.ok) {
-		throw new Error(`${response.status} ${response.statusText}: ${await response.text()}`);
-	}
+	const sessionTimeout = win.setTimeout(() => rejectSession(new Error('Backboard realtime voice session timed out.')), 15_000);
+	let stream: MediaStream | undefined;
+	let audioContext: AudioContext | undefined;
+	let source: MediaStreamAudioSourceNode | undefined;
+	let processor: ScriptProcessorNode | undefined;
+	let silentOutput: GainNode | undefined;
+	socket.addEventListener('open', () => {
+		socket.send(JSON.stringify({
+			thread_id: threadId,
+			voice: {
+				stt: {
+					model: 'scribe_v2_realtime',
+					sample_rate: 16000,
+					audio_format: 'pcm_16000',
+					commit_strategy: 'manual',
+					language: 'en',
+				}
+			},
+			send_to_llm: false,
+			memory: 'off',
+		}));
+	}, { once: true });
+	socket.addEventListener('message', event => {
+		if (typeof event.data !== 'string') {
+			return;
+		}
+		let payload: unknown;
+		try {
+			payload = JSON.parse(event.data);
+		} catch {
+			return;
+		}
+		if (!isBackboardRecord(payload)) {
+			return;
+		}
+		const type = stringFromBackboardRecord(payload.type);
+		if (type === 'session.begin') {
+			sessionReady = true;
+			win.clearTimeout(sessionTimeout);
+			resolveSession();
+			return;
+		}
+		if (type === 'error') {
+			const error = new Error(stringFromBackboardRecord(payload.message) ?? stringFromBackboardRecord(payload.code) ?? 'Backboard realtime voice failed.');
+			if (!sessionReady) {
+				rejectSession(error);
+			} else {
+				state?.rejectFinal(error);
+			}
+			return;
+		}
+		if (type !== 'transcript.partial' && type !== 'transcript.final') {
+			return;
+		}
+		const transcript = stringFromBackboardRecord(payload.text);
+		if (!state || !transcript) {
+			return;
+		}
+		state.lastTranscript = transcript;
+		setBackboardComposerTranscript(state, transcript);
+		if (type === 'transcript.final') {
+			state.resolveFinal(transcript);
+		}
+	});
+	socket.addEventListener('error', () => {
+		const error = new Error('Backboard realtime voice connection failed.');
+		if (!sessionReady) {
+			rejectSession(error);
+		} else {
+			state?.rejectFinal(error);
+		}
+	});
+	socket.addEventListener('close', () => {
+		if (!sessionReady) {
+			rejectSession(new Error('Backboard closed the realtime voice session before it started.'));
+		} else if (state && !state.stopping) {
+			state.rejectFinal(new Error('Backboard closed the realtime voice session.'));
+		}
+	});
 
-	const payload: unknown = await response.json();
-	const transcript = extractBackboardTranscript(payload);
-	if (!transcript) {
-		throw new Error(localize('interactive.backboardMicrophone.noTranscript', "Backboard response did not include a transcript."));
+	try {
+		await session;
+		stream = await win.navigator.mediaDevices.getUserMedia({
+			audio: { channelCount: 1, sampleRate: 16000, echoCancellation: true, noiseSuppression: true }
+		});
+		audioContext = new win.AudioContext();
+		await audioContext.resume();
+		source = audioContext.createMediaStreamSource(stream);
+		processor = audioContext.createScriptProcessor(4096, 1, 1);
+		silentOutput = audioContext.createGain();
+		silentOutput.gain.value = 0;
+		let resolveFinal!: (value: string) => void;
+		let rejectFinal!: (error: Error) => void;
+		const finalTranscript = new Promise<string>((resolve, reject) => {
+			resolveFinal = resolve;
+			rejectFinal = reject;
+		});
+		void finalTranscript.catch(() => undefined);
+		state = {
+			widget,
+			socket,
+			stream,
+			audioContext,
+			source,
+			processor,
+			silentOutput,
+			initialInput: widget.inputEditor.getValue(),
+			threadId,
+			apiUrl,
+			authHeaders,
+			finalTranscript,
+			resolveFinal,
+			rejectFinal,
+			setRecording,
+			lastTranscript: '',
+			stopping: false,
+		};
+		const inputSampleRate = audioContext.sampleRate;
+		processor.onaudioprocess = event => {
+			if (!state || state.stopping || socket.readyState !== win.WebSocket.OPEN) {
+				return;
+			}
+			const pcm = encodeBackboardRealtimePcm(event.inputBuffer.getChannelData(0), inputSampleRate);
+			if (pcm.byteLength > 0) {
+				socket.send(pcm);
+			}
+		};
+		source.connect(processor);
+		processor.connect(silentOutput);
+		silentOutput.connect(audioContext.destination);
+		return state;
+	} catch (error) {
+		win.clearTimeout(sessionTimeout);
+		processor?.disconnect();
+		source?.disconnect();
+		silentOutput?.disconnect();
+		for (const track of stream?.getTracks() ?? []) {
+			track.stop();
+		}
+		if (audioContext && audioContext.state !== 'closed') {
+			await audioContext.close();
+		}
+		if (socket.readyState === win.WebSocket.OPEN) {
+			socket.send(JSON.stringify({ type: 'stop' }));
+		}
+		socket.close();
+		await deleteBackboardComposerVoiceThread(apiUrl, threadId, authHeaders);
+		throw error;
 	}
+}
 
-	const current = state.widget.inputEditor.getValue();
+async function stopBackboardRealtimeTranscription(state: IBackboardComposerMicState): Promise<void> {
+	if (state.stopping) {
+		return;
+	}
+	state.stopping = true;
+	state.setRecording(false);
+	state.processor.onaudioprocess = null;
+	state.source.disconnect();
+	state.processor.disconnect();
+	state.silentOutput.disconnect();
+	for (const track of state.stream.getTracks()) {
+		track.stop();
+	}
+	await state.audioContext.close();
+	try {
+		if (state.socket.readyState !== WebSocket.OPEN) {
+			throw new Error('Backboard realtime voice connection is not open.');
+		}
+		state.socket.send(JSON.stringify({ type: 'commit' }));
+		const transcript = await Promise.race([
+			state.finalTranscript,
+			new Promise<string>((_resolve, reject) => setTimeout(() => reject(new Error('Backboard did not finalize the transcript.')), 10_000)),
+		]);
+		setBackboardComposerTranscript(state, transcript);
+		state.widget.inputEditor.focus();
+	} finally {
+		if (state.socket.readyState === WebSocket.OPEN) {
+			state.socket.send(JSON.stringify({ type: 'stop' }));
+		}
+		state.socket.close();
+		await deleteBackboardComposerVoiceThread(state.apiUrl, state.threadId, state.authHeaders);
+		if (backboardComposerMicState === state) {
+			backboardComposerMicState = undefined;
+		}
+	}
+}
+
+function setBackboardComposerTranscript(state: IBackboardComposerMicState, transcript: string): void {
+	const current = state.initialInput;
 	const next = current.trim().length > 0 ? `${current}${current.endsWith(' ') ? '' : ' '}${transcript}` : transcript;
 	state.widget.setInput(next);
-	state.widget.inputEditor.focus();
+}
+
+export function encodeBackboardRealtimePcm(input: Float32Array, inputSampleRate: number, outputSampleRate = 16000): ArrayBuffer {
+	if (inputSampleRate < outputSampleRate || input.length === 0) {
+		return new ArrayBuffer(0);
+	}
+	const ratio = inputSampleRate / outputSampleRate;
+	const outputLength = Math.floor(input.length / ratio);
+	const buffer = new ArrayBuffer(outputLength * 2);
+	const view = new DataView(buffer);
+	for (let outputIndex = 0; outputIndex < outputLength; outputIndex++) {
+		const start = Math.floor(outputIndex * ratio);
+		const end = Math.min(input.length, Math.max(start + 1, Math.floor((outputIndex + 1) * ratio)));
+		let sum = 0;
+		for (let inputIndex = start; inputIndex < end; inputIndex++) {
+			sum += input[inputIndex];
+		}
+		const sample = Math.max(-1, Math.min(1, sum / (end - start)));
+		view.setInt16(outputIndex * 2, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+	}
+	return buffer;
 }
 
 async function readBackboardComposerConfig(fileService: IFileService, pathService: IPathService): Promise<IBackboardConfigJson> {
@@ -712,6 +914,74 @@ async function readBackboardComposerConfig(fileService: IFileService, pathServic
 			return {};
 		}
 		throw error;
+	}
+}
+
+async function resolveBackboardComposerAssistantId(
+	config: IBackboardConfigJson,
+	apiUrl: string,
+	authHeaders: Record<string, string>,
+): Promise<string> {
+	const oauth = isBackboardRecord(config.oauth) ? config.oauth : undefined;
+	const configured = stringFromBackboardRecord(config.assistant_id) ?? stringFromBackboardRecord(oauth?.assistant_id);
+	if (configured) {
+		return configured;
+	}
+	const response = await fetch(`${apiUrl}/assistants?limit=1`, { headers: authHeaders });
+	if (!response.ok) {
+		throw new Error(`Could not find a Backboard assistant: ${response.status} ${response.statusText}`);
+	}
+	const payload: unknown = await response.json();
+	const assistants = Array.isArray(payload)
+		? payload
+		: isBackboardRecord(payload) && Array.isArray(payload.assistants) ? payload.assistants : [];
+	for (const assistant of assistants) {
+		if (isBackboardRecord(assistant)) {
+			const assistantId = stringFromBackboardRecord(assistant.assistant_id) ?? stringFromBackboardRecord(assistant.assistantId);
+			if (assistantId) {
+				return assistantId;
+			}
+		}
+	}
+	throw new Error('No Backboard assistant is available for realtime voice.');
+}
+
+async function createBackboardComposerVoiceThread(
+	apiUrl: string,
+	assistantId: string,
+	authHeaders: Record<string, string>,
+): Promise<string> {
+	const response = await fetch(`${apiUrl}/assistants/${encodeURIComponent(assistantId)}/threads`, {
+		method: 'POST',
+		headers: { ...authHeaders, 'Content-Type': 'application/json' },
+		body: '{}',
+	});
+	if (!response.ok) {
+		throw new Error(`Could not start a Backboard voice thread: ${response.status} ${response.statusText}`);
+	}
+	const payload: unknown = await response.json();
+	const threadId = isBackboardRecord(payload)
+		? stringFromBackboardRecord(payload.thread_id) ?? stringFromBackboardRecord(payload.threadId)
+		: undefined;
+	if (!threadId) {
+		throw new Error('Backboard did not return a voice thread ID.');
+	}
+	return threadId;
+}
+
+async function deleteBackboardComposerVoiceThread(
+	apiUrl: string,
+	threadId: string,
+	authHeaders: Record<string, string>,
+): Promise<void> {
+	try {
+		await fetch(`${apiUrl}/threads/${encodeURIComponent(threadId)}`, {
+			method: 'DELETE',
+			headers: authHeaders,
+		});
+	} catch {
+		// Dictation threads are temporary. Cleanup is best effort and must not
+		// hide a successfully returned transcript.
 	}
 }
 
@@ -750,33 +1020,6 @@ function backboardComposerAccessToken(config: IBackboardConfigJson): string | un
 function normalizeBackboardComposerEnv(value: unknown): string {
 	const env = stringFromBackboardRecord(value);
 	return (env || 'prod').trim().toLowerCase();
-}
-
-function extractBackboardTranscript(value: unknown): string | undefined {
-	if (!isBackboardRecord(value)) {
-		return undefined;
-	}
-	const direct = stringFromBackboardRecord(value.transcript) ?? stringFromBackboardRecord(value.text);
-	if (direct) {
-		return direct;
-	}
-	const messages = Array.isArray(value.messages) ? value.messages : [value];
-	for (const message of messages) {
-		if (!isBackboardRecord(message)) {
-			continue;
-		}
-		const voiceRecords = isBackboardRecord(message.voice_records) ? message.voice_records : isBackboardRecord(message.voiceRecords) ? message.voiceRecords : undefined;
-		const stt = isBackboardRecord(voiceRecords?.stt) ? voiceRecords.stt : undefined;
-		const transcript = stringFromBackboardRecord(stt?.transcript) ?? stringFromBackboardRecord(stt?.text) ?? stringFromBackboardRecord(stt?.message);
-		if (transcript) {
-			return transcript;
-		}
-		const content = stringFromBackboardRecord(message.content) ?? stringFromBackboardRecord(message.message);
-		if (content) {
-			return content;
-		}
-	}
-	return undefined;
 }
 
 function isBackboardRecord(value: unknown): value is Record<string, unknown> {

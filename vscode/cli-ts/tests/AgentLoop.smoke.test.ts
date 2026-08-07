@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { Config } from "../src/config/Config.ts";
 import { AgentController } from "../src/core/agent/AgentController.ts";
+import { IMPLEMENTATION_PROGRESS_HINT } from "../src/core/agent/ExecutionPacing.ts";
 import { FINAL_VERIFICATION_MIN_TOOL_CALLS } from "../src/core/agent/FinalVerificationRunner.ts";
 import { EventBus } from "../src/core/bus/EventBus.ts";
 import type { AgentEvent } from "../src/core/bus/events.ts";
@@ -41,6 +42,7 @@ async function delay(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 class FakeClient {
+	readonly accountFingerprint = "test-account";
 	messageRequests: SendMessageRequest[] = [];
 	toolOutputRequests: SubmitToolOutputsRequest[] = [];
 	modelThinkingMetadataCount = 0;
@@ -173,6 +175,40 @@ function controllerWith(
 }
 
 describe("AgentController loop (mocked Backboard)", () => {
+	it("carries per-turn voice and audio through the agent loop", async () => {
+		const client = new FakeClient(
+			[
+				{
+					kind: "voice",
+					records: [{ stt: { transcript: "hello" } }],
+				},
+				{ kind: "assistant_delta", text: "Hi there" },
+				{ kind: "completed" },
+			],
+			[],
+		);
+		const { ctrl, events } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+		);
+		const voice = {
+			stt: { provider: "openai", model: "gpt-4o-mini-transcribe" },
+		};
+		const audioFile = {
+			fileName: "voice.webm",
+			mimeType: "audio/webm",
+			dataBase64: "dm9pY2U=",
+		};
+
+		await ctrl.submit("Transcribe and answer", { voice, audioFile });
+		expect(client.messageRequests[0]?.voice).toEqual(voice);
+		expect(client.messageRequests[0]?.audioFile).toEqual(audioFile);
+		expect(events).toContainEqual({
+			type: "assistant:voice",
+			records: [{ stt: { transcript: "hello" } }],
+		});
+	});
+
 	it("emits turn:start and accepted prompt before assistant setup finishes", async () => {
 		const client = new FakeClient(
 			[
@@ -225,6 +261,56 @@ describe("AgentController loop (mocked Backboard)", () => {
 		expect(types).toContain("assistant:message");
 		expect(types).not.toContain("assistant:message:discard");
 		expect(types[types.length - 1]).toBe("turn:end");
+	});
+
+	it("nudges progress after two tool rounds without implementation", async () => {
+		class ExplorationClient extends FakeClient {
+			constructor() {
+				super([], []);
+			}
+
+			override async *runMessage(
+				req: SendMessageRequest,
+			): AsyncIterable<ProviderEvent> {
+				this.messageRequests.push(req);
+				yield { kind: "thread", threadId: "thr_1" };
+				yield {
+					kind: "requires_action",
+					runId: "run_1",
+					calls: [{ id: "c1", name: "Echo", input: {} }],
+				};
+			}
+
+			override async *runToolOutputs(
+				req: SubmitToolOutputsRequest,
+			): AsyncIterable<ProviderEvent> {
+				this.toolOutputRequests.push(req);
+				if (this.toolOutputRequests.length === 1) {
+					yield {
+						kind: "requires_action",
+						runId: "run_1",
+						calls: [{ id: "c2", name: "Echo", input: {} }],
+					};
+					return;
+				}
+				yield { kind: "assistant_delta", text: "done" };
+				yield { kind: "completed" };
+			}
+		}
+
+		const client = new ExplorationClient();
+		const { ctrl } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+		);
+
+		const status = await ctrl.submit("implement it");
+
+		expect(status).toBe("completed");
+		expect(client.toolOutputRequests[0]?.tool_outputs[0]?.output).toBe("Echo");
+		expect(client.toolOutputRequests[1]?.tool_outputs[0]?.output).toContain(
+			IMPLEMENTATION_PROGRESS_HINT,
+		);
 	});
 
 	it("injects the startup environment per turn but keeps it out of the stable base assistant", async () => {
@@ -383,7 +469,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 			}
 		}
 		const client = new RetryMessageClient();
-		const { ctrl } = controllerWith(
+		const { ctrl, events } = controllerWith(
 			client,
 			new TestTool({ name: "Echo", readOnly: true }),
 		);
@@ -392,6 +478,10 @@ describe("AgentController loop (mocked Backboard)", () => {
 
 		expect(status).toBe("completed");
 		expect(client.messageRequests).toHaveLength(2);
+		expect(events).toContainEqual({
+			type: "system:warning",
+			message: "Provider connection interrupted. Retrying (1/2)…",
+		});
 	});
 
 	it("retries retryable tool-output continuation failures without rerunning tools", async () => {

@@ -1392,8 +1392,8 @@
 /* Geometry ported from T3 Code's composer (`ChatComposer.tsx` +
  * `.chat-composer-glass-host` in their index.css): a 22px shell radius, a low
  * soft drop shadow, 28px footer controls with 10px corners and a 32px circular
- * send button. Colours stay on theme tokens (t3Theme.css pins the dark
- * palette), so this block holds in light themes too. Scoped to the Simple
+ * send button. Colours stay on theme tokens, so this block holds in light
+ * themes too. Scoped to the Simple
  * window and the Advanced window's right chat panel (`.optimus-chat-view`,
  * via the `:is()` host lists); the rest of Advanced and Jarvis keep the
  * stock composer. */
@@ -1401,8 +1401,7 @@
 :is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-container,
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .chat-editor-relative .interactive-session .chat-input-container {
 	border-radius: 22px;
-	/* T3's host shadow: `0 12px 28px -18px rgb(0 0 0 / 40%)`. */
-	box-shadow: 0 12px 28px -18px rgb(0 0 0 / 40%);
+	box-shadow: 0 12px 28px -18px var(--vscode-widget-shadow, transparent);
 	padding: 4px 12px 10px;
 }
 
@@ -1411,7 +1410,7 @@
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .chat-editor-relative .interactive-session .chat-input-container.focused {
 	box-shadow:
 		0 0 0 2px color-mix(in srgb, var(--vscode-agentsChatInput-focusBorder, var(--vscode-focusBorder)) 20%, transparent),
-		0 12px 28px -18px rgb(0 0 0 / 40%);
+		0 12px 28px -18px var(--vscode-widget-shadow, transparent);
 }
 
 /* The new-chat (draft) composer flattens the shadow and pins its own radius in
@@ -1422,7 +1421,7 @@
 :is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container,
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .chat-editor-relative .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container {
 	border-radius: 22px;
-	box-shadow: 0 12px 28px -18px rgb(0 0 0 / 40%);
+	box-shadow: 0 12px 28px -18px var(--vscode-widget-shadow, transparent);
 	padding: 16px 16px 12px;
 }
 
@@ -1559,9 +1558,7 @@
 :is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-newline {
 	background: var(--vscode-button-background);
 	color: var(--vscode-button-foreground) !important;
-	box-shadow:
-		inset 0 1px 0 rgb(255 255 255 / 16%),
-		0 1px 2px rgb(0 0 0 / 24%);
+	box-shadow: 0 1px 2px var(--vscode-widget-shadow, transparent);
 }
 
 :is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-arrow-up:hover,
@@ -1592,7 +1589,7 @@
 :is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-newline:active,
 :is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-stop-circle:active {
 	transform: scale(1);
-	box-shadow: inset 0 1px 0 rgb(0 0 0 / 8%);
+	box-shadow: inset 0 1px 0 var(--vscode-widget-shadow, transparent);
 }
 
 /* T3 keeps the primary fill on the disabled send button, just faded. Fading

@@ -10,7 +10,7 @@ import { ICompressibleTreeRenderer } from '../../../../base/browser/ui/tree/obje
 import { ITreeNode, ITreeSorter } from '../../../../base/browser/ui/tree/tree.js';
 import { DisposableStore } from '../../../../base/common/lifecycle.js';
 import { compareFileNames } from '../../../../base/common/comparers.js';
-import { basename, extUriBiasedIgnorePathCase } from '../../../../base/common/resources.js';
+import { basename, dirname, extUriBiasedIgnorePathCase } from '../../../../base/common/resources.js';
 import { IResourceNode, ResourceTree } from '../../../../base/common/resourceTree.js';
 import { URI } from '../../../../base/common/uri.js';
 import { FileKind } from '../../../../platform/files/common/files.js';
@@ -44,7 +44,19 @@ export function buildReviewTreeChildren(resources: readonly IReviewResource[]): 
 		return [];
 	}
 
-	const resourceTree = new ResourceTree<IReviewResource, void>(undefined, URI.file('/'), extUriBiasedIgnorePathCase);
+	// Root the tree at the deepest common directory. The review panel is a
+	// narrow inspection surface, so rendering /Users/name/... for every change
+	// wastes most of the rail before the first useful project folder appears.
+	let commonRoot = dirname(resources[0].sourceUri);
+	while (!resources.every(resource => extUriBiasedIgnorePathCase.isEqualOrParent(resource.sourceUri, commonRoot))) {
+		const parent = dirname(commonRoot);
+		if (extUriBiasedIgnorePathCase.isEqual(parent, commonRoot)) {
+			break;
+		}
+		commonRoot = parent;
+	}
+
+	const resourceTree = new ResourceTree<IReviewResource, void>(undefined, commonRoot, extUriBiasedIgnorePathCase);
 	for (const resource of resources) {
 		resourceTree.add(resource.sourceUri, resource);
 	}

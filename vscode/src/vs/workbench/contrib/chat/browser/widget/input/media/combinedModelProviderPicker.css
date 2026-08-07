@@ -129,6 +129,59 @@
 	padding: 3px;
 }
 
+.combined-model-provider-list-heading {
+	padding: 6px 8px 4px;
+	color: var(--vscode-descriptionForeground);
+	font-size: 10.5px;
+	font-weight: var(--vscode-agents-fontWeight-semiBold);
+	letter-spacing: 0.02em;
+	text-transform: uppercase;
+}
+
+.combined-model-provider-footer {
+	padding: 2px 4px 4px;
+	border-top: 1px solid var(--vscode-editorWidget-border, var(--vscode-widget-border));
+}
+
+.combined-model-provider-footer:empty {
+	display: none;
+}
+
+.combined-model-provider-show-rest {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 4px;
+	width: 100%;
+	min-height: 26px;
+	margin: 0;
+	padding: 0 8px;
+	border: 0;
+	border-radius: 4px;
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+	font-family: inherit;
+	font-size: 11px;
+	font-weight: 400;
+	cursor: pointer;
+}
+
+.combined-model-provider-show-rest:hover {
+	background: var(--vscode-list-hoverBackground);
+	color: var(--vscode-foreground);
+}
+
+.combined-model-provider-show-rest:focus-visible {
+	color: var(--vscode-foreground);
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.combined-model-provider-show-rest .codicon {
+	font-size: 10px;
+	opacity: 0.8;
+}
+
 .combined-model-provider-empty {
 	padding: 14px 10px;
 	opacity: 0.6;

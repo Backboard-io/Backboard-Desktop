@@ -101,6 +101,36 @@ export interface SendMessageRequest {
 	thinking?: ThinkingConfig | null;
 	tools?: OpenAITool[];
 	stream?: boolean;
+	voice?: BackboardVoiceConfig;
+	audioFile?: BackboardAudioFile;
+}
+
+export interface BackboardVoiceConfig {
+	stt?: {
+		provider: string;
+		model: string;
+		language?: string;
+		provider_options?: Record<string, unknown>;
+	};
+	tts?: {
+		provider: string;
+		model: string;
+		voice?: string;
+		output_format?: string;
+		provider_options?: Record<string, unknown>;
+	};
+}
+
+/** Audio transported over the NDJSON host bridge before becoming multipart. */
+export interface BackboardAudioFile {
+	fileName: string;
+	mimeType: string;
+	dataBase64: string;
+}
+
+export interface BackboardVoiceRecord {
+	stt?: Record<string, unknown> | null;
+	tts?: Record<string, unknown> | null;
 }
 
 export interface SubmitToolOutputsRequest {
@@ -143,6 +173,7 @@ export type ProviderEvent =
 	| { kind: "status"; phase: TurnStatusPhase }
 	| { kind: "assistant_delta"; text: string }
 	| { kind: "reasoning_delta"; text: string }
+	| { kind: "voice"; records: BackboardVoiceRecord[] }
 	| { kind: "requires_action"; runId: string | null; calls: ProviderToolCall[] }
 	| { kind: "usage"; usage: ProviderUsage }
 	| {

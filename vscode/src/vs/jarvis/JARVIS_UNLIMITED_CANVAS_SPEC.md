@@ -452,7 +452,7 @@ Creation flow:
 4. Jarvis immediately creates an empty card at the viewport center.
 5. The first prompt graduates the draft through the existing sessions provider.
 
-“BYOS” is a presentation category, not a hard-coded provider ID. Build it from `ISessionsProvidersService.getProviders()` and `ISessionsManagementService.getSessionTypesForFolder(...)`, then filter to agent-host session types and exclude Backboard itself. This keeps Claude, Codex, OpenCode, and future external agent hosts dynamic without leaking generic Cloud or Local session modes into the picker.
+“BYOS” is a presentation category, not a hard-coded provider ID. Build it from `ISessionsProvidersService.getProviders()` and `ISessionsManagementService.getSessionTypesForFolder(...)`, then filter to agent-host session types and exclude Backboard itself. This keeps Claude, Codex, and future external agent hosts dynamic without leaking generic Cloud or Local session modes into the picker.
 
 Backboard should map to `AgentSessionProviders.AgentHostBackboard` / the appropriate registered sessions provider rather than a separate Jarvis-only backend.
 
@@ -836,7 +836,7 @@ Exit condition: note cards can be freely created, moved, resized, zoomed, focuse
 4. Support multiple draft cards with `keepPreviousDraft`.
 5. Add overview semantic-zoom rendering.
 
-Exit condition: native Backboard plus registered BYOS providers such as Claude, Codex, OpenCode, and future remote agent hosts can run concurrently in separate cards.
+Exit condition: native Backboard plus registered BYOS providers such as Claude, Codex, and future remote agent hosts can run concurrently in separate cards.
 
 ### Phase 3 — terminal, browser, and file cards
 

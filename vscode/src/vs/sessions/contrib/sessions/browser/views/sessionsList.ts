@@ -110,7 +110,7 @@ export type SessionListItem = ISession | ISessionSection | ISessionShowMore;
 
 /**
  * Maps a session's agent type to the logo shown before its title in the
- * sessions list. Bare agent-host ids ('claude', 'codex', 'opencode',
+ * sessions list. Bare agent-host ids ('claude', 'codex',
  * 'backboard') and their chat-session forms ('agent-host-…') both match.
  * Unknown types render no logo.
  */
@@ -120,9 +120,6 @@ function providerIconForSessionType(sessionType: string): ThemeIcon | undefined 
 	}
 	if (sessionType === 'openai' || sessionType.includes('codex')) {
 		return Codicon.openai;
-	}
-	if (sessionType.includes('opencode')) {
-		return Codicon.circuitBoard;
 	}
 	if (sessionType.includes('backboard') || sessionType.includes('copilot')) {
 		return ThemeIcon.fromId('backboard-logo');
@@ -345,7 +342,7 @@ class SessionItemRenderer implements ITreeRenderer<SessionListItem, FuzzyScore, 
 		}), { groupId: 'sessions-list' }));
 
 		// Provider logo — identifies which agent (Backboard, Claude, Codex,
-		// OpenCode, …) owns the session, rendered just before the title.
+		// and future providers) owns the session, rendered just before the title.
 		const providerIcon = providerIconForSessionType(element.sessionType);
 		template.providerIcon.className = providerIcon
 			? `session-provider-icon ${ThemeIcon.asClassName(providerIcon)}`

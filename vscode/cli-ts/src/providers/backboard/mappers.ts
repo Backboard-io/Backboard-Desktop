@@ -3,6 +3,7 @@ import { isRetryableStreamServerErrorMessage } from "./streamRetry.ts";
 import type {
 	BackboardContextUsage,
 	BackboardStreamPayload,
+	BackboardVoiceRecord,
 	ContentDeltaResult,
 	ProviderEvent,
 	ProviderToolCall,
@@ -32,6 +33,7 @@ export class BackboardStreamEventMapper {
 	private accumulatedReasoning = "";
 	private lastContentChunk = "";
 	private lastReasoningChunk = "";
+	private readonly emittedVoiceRecords = new Set<string>();
 
 	map(payload: unknown): ProviderEvent[] {
 		const result = mapStreamPayload(
@@ -41,6 +43,13 @@ export class BackboardStreamEventMapper {
 			this.lastContentChunk,
 			this.lastReasoningChunk,
 		);
+		result.events = result.events.filter((event) => {
+			if (event.kind !== "voice") return true;
+			const key = JSON.stringify(event.records);
+			if (this.emittedVoiceRecords.has(key)) return false;
+			this.emittedVoiceRecords.add(key);
+			return true;
+		});
 		this.accumulatedContent = result.accumulatedContent;
 		this.accumulatedReasoning = result.accumulatedReasoning;
 		this.lastContentChunk = result.lastContentChunk;
@@ -161,6 +170,10 @@ function mapStreamPayload(
 				return done();
 			}
 			addUsageEvent(events, payload);
+			const voiceRecords = voiceRecordsField(payload);
+			if (voiceRecords.length) {
+				events.push({ kind: "voice", records: voiceRecords });
+			}
 			const contextUsage = contextUsageField(payload);
 			const usage = usageFromPayload(payload);
 			const rawFinalText =
@@ -202,6 +215,29 @@ function mapStreamPayload(
 		default:
 			return done();
 	}
+}
+
+function voiceRecordsField(
+	payload: Record<string, unknown>,
+): BackboardVoiceRecord[] {
+	const direct = normalizeVoiceRecords(payload.voice_records);
+	if (direct.length) return direct;
+	for (const key of ["message", "response", "data"]) {
+		const nested = payload[key];
+		if (isRecord(nested)) {
+			const records = normalizeVoiceRecords(nested.voice_records);
+			if (records.length) return records;
+		}
+	}
+	return [];
+}
+
+function normalizeVoiceRecords(value: unknown): BackboardVoiceRecord[] {
+	const values = Array.isArray(value) ? value : value ? [value] : [];
+	return values.filter(
+		(record): record is BackboardVoiceRecord =>
+			isRecord(record) && ("stt" in record || "tts" in record),
+	);
 }
 
 function failedEvent(

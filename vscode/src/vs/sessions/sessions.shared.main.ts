@@ -313,9 +313,12 @@ import '../workbench/contrib/externalUriOpener/common/externalUriOpener.contribu
 // Extensions Management
 import { IExtensionsWorkbenchService } from '../workbench/contrib/extensions/common/extensions.js';
 import { ExtensionsWorkbenchService } from '../workbench/contrib/extensions/browser/extensionsWorkbenchService.js';
+import { ExtensionRecommendationsService } from '../workbench/contrib/extensions/browser/extensionRecommendationsService.js';
+import { IExtensionRecommendationsService } from '../workbench/services/extensionRecommendations/common/extensionRecommendations.js';
 import { IExtensionRecommendationNotificationService } from '../platform/extensionRecommendations/common/extensionRecommendations.js';
 import { NullExtensionRecommendationNotificationService } from './services/extensionRecommendations/common/extensionRecommendationNotificationService.js';
 registerSingleton(IExtensionsWorkbenchService, ExtensionsWorkbenchService, InstantiationType.Eager /* Auto updates extensions */);
+registerSingleton(IExtensionRecommendationsService, ExtensionRecommendationsService, InstantiationType.Eager);
 registerSingleton(IExtensionRecommendationNotificationService, NullExtensionRecommendationNotificationService, InstantiationType.Delayed);
 
 // Output View

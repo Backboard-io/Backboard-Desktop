@@ -25,6 +25,7 @@ function metadata(
 describe("thinking config", () => {
 	it("parses semantic thinking intent", () => {
 		expect(parseThinking("off")).toBeNull();
+		expect(parseThinking("default")).toEqual({ kind: "default" });
 		expect(parseThinking("low")).toEqual({ kind: "level", level: "low" });
 		expect(parseThinking("maximum")).toEqual({
 			kind: "level",
@@ -33,6 +34,16 @@ describe("thinking config", () => {
 		expect(parseThinking("dynamic")).toEqual({ kind: "dynamic" });
 		expect(parseThinking("4096")).toEqual({ kind: "budget", tokens: 4096 });
 		expect(() => parseThinking("on")).toThrow();
+	});
+
+	it("uses an empty object for provider defaults", () => {
+		expect(
+			resolveThinking({
+				intent: { kind: "default" },
+				model,
+				metadata: metadata(["effort"]),
+			}),
+		).toEqual({});
 	});
 
 	it("resolves level intent using allowed fields", () => {
@@ -95,6 +106,33 @@ describe("thinking config", () => {
 				metadata: metadata(["effort"]),
 			}),
 		).toThrow("explicit token budgets");
+	});
+
+	it("passes OpenRouter and Cerebras reasoning-trace controls", () => {
+		expect(
+			resolveThinking({
+				intent: {
+					kind: "level",
+					level: "medium",
+					excludeReasoning: true,
+				},
+				model: { provider: "openrouter", model: "anthropic/claude-sonnet-5" },
+				// Older Backboard metadata only advertises the token field. The
+				// provider profile supplies its documented trace-visibility field.
+				metadata: metadata(["max_tokens"]),
+			}),
+		).toEqual({ max_tokens: 4096, exclude_reasoning: true });
+		expect(
+			resolveThinking({
+				intent: {
+					kind: "level",
+					level: "medium",
+					excludeReasoning: true,
+				},
+				model: { provider: "openai", model: "gpt-5.5" },
+				metadata: metadata(["effort"]),
+			}),
+		).toEqual({ effort: "medium" });
 	});
 
 	it("resolves dynamic intent deterministically from evidence", () => {

@@ -27,7 +27,7 @@ Inside `vscode/src/vs/`, beyond the stock VS Code layers (`base`, `platform`, `e
 | [sessions/](vscode/src/vs/sessions/) | The **Agents Window** — the Simple mode workbench. Its own layout, parts, and session-provider model. |
 | [optimus/](vscode/src/vs/optimus/) | The **Advanced** window — a grid/kanban of many concurrent sessions. |
 | [jarvis/](vscode/src/vs/jarvis/) | The **Jarvis** canvas — a cinematic, voice-driven surface with free-floating glass cards. |
-| [platform/agentHost/](vscode/src/vs/platform/agentHost/) | The agent host: process management, changesets, checkpoints, git integration, and one subdirectory per agent backend (`cliTs`, `claude`, `codex`, `copilot`, `opencode`). |
+| [platform/agentHost/](vscode/src/vs/platform/agentHost/) | The agent host: process management, changesets, checkpoints, git integration, and one subdirectory per agent backend (`cliTs`, `claude`, `codex`, `copilot`). |
 
 Layering rule: `vs/sessions` may import from `vs/workbench` and below, but **`vs/workbench`
 must never import from `vs/sessions`**. Enforced by ESLint — see
@@ -218,7 +218,7 @@ and tab bar. See [JARVIS.md](vscode/src/vs/jarvis/JARVIS.md).
 ## BYOS — Bring Your Own Session
 
 BYOS is how non-Backboard agents plug in. Backboard's own agent is the native, first-class
-path; **BYOS is everything else** — Claude, Codex, OpenCode, and any future external or
+path; **BYOS is everything else** — Claude, Codex, and any future external or
 remote agent host.
 
 The important design point: *BYOS is a presentation category, not a hard-coded provider
@@ -229,7 +229,7 @@ or Local session modes never leak into the picker
 ([JARVIS_UNLIMITED_CANVAS_SPEC.md:455](vscode/src/vs/jarvis/JARVIS_UNLIMITED_CANVAS_SPEC.md)).
 
 Backends live under [platform/agentHost/node/](vscode/src/vs/platform/agentHost/node/) — one
-directory each for `cliTs`, `claude`, `codex`, `copilot`, and `opencode`. Sessions can run
+directory each for `cliTs`, `claude`, `codex`, and `copilot`. Sessions can run
 locally, over SSH, through a tunnel, or in WSL
 (`sshRemoteAgentHostService.ts`, `tunnelAgentHostService.ts`, `wslRemoteAgentHostService.ts`).
 
@@ -377,4 +377,4 @@ BACKBOARD_ENV=prod
 
 ## License
 
-[MIT](vscode/LICENSE.txt).
+Released under the [MIT License](vscode/LICENSE.txt).

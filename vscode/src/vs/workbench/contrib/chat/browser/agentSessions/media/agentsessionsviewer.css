@@ -37,7 +37,7 @@
 		border: 1px solid var(--vscode-panel-border);
 		border-radius: 4px;
 		background: var(--vscode-editor-background);
-		box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+		box-shadow: 0 8px 28px var(--vscode-widget-shadow, transparent);
 	}
 
 	.backboard-auth-gate-logo.codicon.codicon-backboard-logo {
@@ -673,6 +673,126 @@
 		padding: 0 6px;
 		color: var(--vscode-descriptionForeground);
 		font-size: 12px;
+	}
+}
+
+/* Cursor's editor drawer uses the full two-row session card. The earlier
+ * Backboard compact override collapsed the row to a one-line history entry,
+ * hiding the status icon, diff summary and file count. */
+.backboard-side-chat-sessions .agent-sessions-viewer {
+	.monaco-list-row {
+		border-radius: 6px;
+	}
+
+	.monaco-list-row:hover,
+	.monaco-list-row.focused:not(.selected) {
+		background: var(--vscode-list-hoverBackground, var(--vscode-toolbar-hoverBackground)) !important;
+	}
+
+	.monaco-list-row.selected,
+	.monaco-list:focus .monaco-list-row.selected,
+	.monaco-list:not(:focus) .monaco-list-row.selected {
+		background: var(--vscode-list-activeSelectionBackground, var(--vscode-list-inactiveSelectionBackground)) !important;
+		outline: none !important;
+	}
+
+	.agent-session-item {
+		height: 100%;
+		align-items: flex-start;
+		padding: 5px 8px;
+		border-left: 0;
+		background: transparent !important;
+		box-sizing: border-box;
+	}
+
+	.agent-session-icon-col {
+		display: flex;
+		align-items: flex-start;
+		width: 18px;
+		flex: 0 0 18px;
+	}
+
+	.agent-session-icon-col .agent-session-icon {
+		display: flex;
+		width: 18px;
+		height: 18px;
+		align-items: center;
+		justify-content: center;
+		font-size: 13px;
+		color: var(--vscode-descriptionForeground);
+	}
+
+	.agent-session-main-col {
+		display: block;
+		min-width: 0;
+		padding-left: 7px;
+	}
+
+	.agent-session-title-row,
+	.agent-session-details-row {
+		display: flex;
+		align-items: center;
+		max-width: none;
+	}
+
+	.agent-session-title-row {
+		gap: 6px;
+		padding-bottom: 1px;
+		line-height: 18px;
+	}
+
+	.agent-session-title {
+		flex: 1 1 auto;
+		min-width: 0;
+		max-width: none;
+		color: var(--vscode-foreground);
+		font-size: 14px;
+		font-weight: 500;
+		line-height: 18px;
+	}
+
+	.monaco-list-row.selected .agent-session-title {
+		color: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground));
+		font-weight: 600;
+	}
+
+	.agent-session-details-row {
+		gap: 4px;
+		max-height: 15px;
+		overflow: hidden;
+		color: var(--vscode-descriptionForeground);
+		font-size: 12px;
+		line-height: 15px;
+	}
+
+	.agent-session-details-row .agent-session-badge.has-badge,
+	.agent-session-details-row .agent-session-description:not(:empty) {
+		display: block !important;
+	}
+
+	.agent-session-details-row .agent-session-separator.has-separator {
+		display: inline !important;
+	}
+
+	.agent-session-details-row .agent-session-diff-container {
+		display: none !important;
+		gap: 5px;
+	}
+
+	.agent-session-details-row .agent-session-diff-container.has-diff {
+		display: flex !important;
+	}
+
+	.agent-session-diff-added {
+		color: var(--vscode-gitDecoration-addedResourceForeground) !important;
+	}
+
+	.agent-session-diff-removed {
+		color: var(--vscode-gitDecoration-deletedResourceForeground) !important;
+	}
+
+	.agent-session-details-row:has(.agent-session-diff-container.has-diff) .agent-session-status {
+		display: none;
 	}
 }
 

@@ -1,0 +1,614 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/*
+ * Simple mode follows the ChatGPT/Codex desktop app rather than the denser
+ * editor chrome used by the other Backboard workbenches.  Keep the parity
+ * layer last in the Sessions workbench import order: the shared chat widget
+ * and the legacy T3 treatment still provide behavior, while these rules own
+ * the Simple window's visual language.
+ */
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) {
+	font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+	--codex-canvas: var(--vscode-agents-background, var(--vscode-editor-background));
+	--codex-sidebar: transparent;
+	--codex-composer: var(--vscode-input-background, var(--codex-canvas));
+	--codex-hover: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground));
+	--codex-selected: var(--vscode-list-inactiveSelectionBackground, var(--codex-hover));
+	--codex-text-primary: var(--vscode-foreground, var(--vscode-editor-foreground));
+	--codex-text-secondary: var(--vscode-descriptionForeground, var(--vscode-input-placeholderForeground));
+	--codex-border: var(--vscode-panel-border, var(--vscode-widget-border));
+	--codex-border-strong: var(--vscode-input-border, var(--vscode-focusBorder));
+	--sessions-main-region-background: var(--codex-canvas);
+	--sessions-codex-surface-background: var(--codex-composer);
+	--sessions-codex-surface-border: var(--codex-border-strong);
+	--sessions-codex-muted-foreground: var(--codex-text-secondary);
+	--sessions-panel-divider-color: var(--codex-border);
+	color: var(--codex-text-primary);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) :is(
+	.part.sessionspart,
+	.part.sessionspart > .title,
+	.part.sessionspart > .content,
+	.part.sessionspart .session-view,
+	.part.sessionspart .session-view .session-view-content,
+	.part.sessionspart .sessions-chat-widget,
+	.part.sessionspart .new-chat-widget-container,
+	.part.sessionspart .new-chat-widget-content) {
+	background: var(--codex-canvas) !important;
+	color: var(--codex-text-primary);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-panel-header {
+	color: var(--codex-text-secondary);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-panel-header .action-label {
+	border-radius: 8px !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-panel-header .action-label:hover {
+	background: var(--codex-hover) !important;
+	color: var(--codex-text-primary) !important;
+}
+
+/* Product/mode switch: the current ChatGPT desktop app treats this as the
+ * primary piece of window chrome, not as a compact editor toolbar label. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .open-in-vscode-titlebar-widget > .open-in-vscode-titlebar-widget-trigger {
+	gap: 5px;
+	padding: 0 8px;
+	border-radius: 8px;
+	color: var(--codex-text-primary);
+	font-size: 15px;
+	font-weight: 600;
+	letter-spacing: -0.015em;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .open-in-vscode-titlebar-widget > .open-in-vscode-titlebar-widget-trigger:hover {
+	background: var(--codex-hover) !important;
+}
+
+/* ---- Sidebar ------------------------------------------------------------ */
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-viewpane {
+	--agent-sidebar-bg: var(--codex-sidebar);
+	--agent-sidebar-primary: var(--codex-text-primary);
+	--agent-sidebar-secondary: color-mix(in srgb, var(--codex-text-primary) 82%, transparent);
+	--agent-sidebar-muted: var(--codex-text-secondary);
+	--agent-sidebar-raised-bg: var(--codex-hover);
+	--agent-sidebar-hover-bg: var(--codex-hover);
+	--agent-sidebar-active-bg: var(--codex-selected);
+	--agent-sidebar-border: var(--codex-border);
+	--agent-sidebar-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+}
+
+/* Keep Simple's native macOS glass on the window's base layer. The shared
+ * workbench animation targets the split-view wrapper around every part; an
+ * opacity transition there promotes the complete translucent sidebar to an
+ * offscreen Chromium layer. macOS can briefly back that layer with opaque
+ * black while it is being re-rasterized, which makes the background, text and
+ * icons flash together. Stabilize both possible sidebar wrappers as well as
+ * the inner reveal target. Width remains owned by SplitView's inline layout,
+ * and the 52% theme-derived sidebar tint remains untouched and translucent. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light):not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sidebar),
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light):not(.phone-layout) .monaco-grid-view .split-view-view:has(> .monaco-grid-branch-node .part.sidebar),
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light):not(.phone-layout) .part.sidebar,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light):not(.phone-layout) .part.sidebar > .content {
+	transition: none !important;
+	opacity: 1 !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light):not(.phone-layout) .part.sidebar > .content {
+	transform: none;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-viewpane .agent-sessions-container {
+	padding: 10px 9px 12px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-viewpane .agent-sessions-pinned {
+	gap: 0;
+	margin-bottom: 10px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-viewpane .agent-sessions-sidebar-action {
+	height: 30px;
+	padding: 0 8px;
+	border-radius: 8px;
+	font-size: 13px;
+	font-weight: 400;
+	letter-spacing: -0.01em;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-viewpane .agent-sessions-workspaces-header {
+	height: 26px;
+	margin-top: 10px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-viewpane .agent-sessions-workspaces-title {
+	color: var(--codex-text-secondary);
+	font-size: 12px;
+	font-weight: 600;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-list-control {
+	--sessions-row-fg: var(--codex-text-primary);
+	--sessions-row-title-fg: var(--codex-text-primary);
+	--sessions-row-attention-fg: var(--codex-text-primary);
+	--sessions-row-muted-fg: var(--codex-text-secondary);
+	--sessions-row-icon-fg: color-mix(in srgb, var(--codex-text-primary) 66%, transparent);
+	--sessions-row-hover-bg: var(--codex-hover);
+	--sessions-row-selected-bg: var(--codex-selected);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-list-control .monaco-list-row:has(.session-item),
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-list-control .monaco-list-row:has(.session-section) {
+	border-radius: 8px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .session-item .session-title {
+	font-size: 13px;
+	letter-spacing: -0.012em;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-viewpane .agent-sessions-footer {
+	border-top-color: var(--codex-border);
+}
+
+/* ---- New task ----------------------------------------------------------- */
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .new-chat-composer-stack {
+	width: min(820px, calc(100% - 64px));
+	--new-chat-card-radius: 16px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .new-chat-composer-stack > .interactive-session {
+	margin-top: 0;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .new-chat-composer-stack > .interactive-session .interactive-input-part {
+	padding: 0;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container {
+	height: auto;
+	min-height: 136px;
+	padding: 14px 16px 12px;
+	border: 1px solid var(--codex-border-strong) !important;
+	border-radius: 16px !important;
+	background: var(--codex-composer) !important;
+	box-shadow: 0 1px 2px var(--vscode-widget-shadow);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .new-chat-composer-stack > .interactive-session .chat-editor-container,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .new-chat-composer-stack > .interactive-session .interactive-input-editor,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .new-chat-composer-stack > .interactive-session .interactive-input-editor .monaco-editor,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .new-chat-composer-stack > .interactive-session .interactive-input-editor .overflow-guard {
+	min-height: 54px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .margin {
+	background: var(--codex-composer) !important;
+}
+
+/* t3Theme.css imports this parity layer before its legacy dark-theme rules.
+ * Carry the full host chain here so the Codex composer surface still wins the
+ * cascade without relying on source order. */
+html body .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .new-chat-composer-stack > .interactive-session .interactive-input-part :is(
+	.chat-editor-container,
+	.interactive-input-editor,
+	.monaco-editor,
+	.overflow-guard,
+	.monaco-editor-background,
+	.margin,
+	.margin-view-overlays,
+	.monaco-scrollable-element,
+	.lines-content,
+	.view-lines,
+	.view-overlays) {
+	background: var(--codex-composer) !important;
+	background-color: var(--codex-composer) !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .new-chat-composer-stack > .interactive-session .chat-input-container.focused {
+	border-color: color-mix(in srgb, var(--codex-text-primary) 28%, var(--codex-border-strong)) !important;
+	box-shadow: 0 0 0 1px color-mix(in srgb, var(--codex-text-primary) 8%, transparent);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .new-chat-composer-stack .chat-empty-below-composer {
+	display: none !important;
+}
+
+/* ---- Active chat -------------------------------------------------------- */
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart {
+	--t3-background: var(--codex-canvas);
+	--t3-foreground: var(--codex-text-primary);
+	--t3-muted: var(--codex-hover);
+	--t3-muted-foreground: var(--codex-text-secondary);
+	--t3-accent: var(--codex-hover);
+	--t3-border: var(--codex-border);
+	--t3-secondary: var(--codex-hover);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart :is(
+	.interactive-session,
+	.interactive-session .interactive-list,
+	.interactive-session .interactive-list .monaco-list,
+	.interactive-session .interactive-list .monaco-list-rows,
+	.interactive-session .interactive-list .monaco-list-row) {
+	background: var(--codex-canvas) !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .interactive-item-container,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session > .chat-suggest-next-widget {
+	width: 100%;
+	max-width: 950px;
+	margin-right: auto;
+	margin-left: auto;
+	padding-right: 28px;
+	padding-left: 28px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .interactive-item-container .value .rendered-markdown {
+	font-size: 14px;
+	line-height: 1.55;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown {
+	margin-bottom: 10px;
+	padding: 10px 14px;
+	border-radius: 12px;
+	background: var(--codex-hover) !important;
+	font-size: 14px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session > .interactive-input-part {
+	width: 100%;
+	max-width: 950px;
+	margin-right: auto;
+	margin-left: auto;
+	padding: 6px 28px 10px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session > .interactive-input-part .chat-input-container {
+	padding: 6px 12px 10px;
+	border: 1px solid var(--codex-border-strong) !important;
+	border-radius: 16px;
+	background: var(--codex-composer);
+	box-shadow: 0 1px 2px var(--vscode-widget-shadow);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session > .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background {
+	background: var(--codex-composer) !important;
+}
+
+/* Footer controls stay quiet and monochrome until interaction, matching the
+ * new-task card and the current Codex task composer. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .interactive-session .chat-input-toolbar .monaco-action-bar .action-item .action-label:not(.model-picker-split),
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item .action-label.codicon-mic {
+	border-radius: 8px !important;
+	color: var(--codex-text-secondary);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .interactive-session .chat-input-toolbar .monaco-action-bar .action-item:not(.disabled) .action-label:not(.model-picker-split):hover,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) .action-label.codicon-mic:hover {
+	background: var(--codex-hover);
+	color: var(--codex-text-primary);
+}
+
+/* ---- Right workbench ---------------------------------------------------- */
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.auxiliarybar {
+	border: 0 !important;
+	border-left: 1px solid var(--codex-border) !important;
+	border-radius: 0 !important;
+	background: var(--codex-canvas) !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.auxiliarybar > .content,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.auxiliarybar .pane-body {
+	background: var(--codex-canvas) !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-shell {
+	--rwb-bg: var(--codex-canvas);
+	--rwb-bg-muted: var(--codex-hover);
+	--rwb-chrome: var(--codex-hover);
+	--rwb-chrome-soft: var(--codex-canvas);
+	--rwb-border: var(--codex-border);
+	--rwb-border-strong: var(--codex-border-strong);
+	--rwb-hover: var(--codex-hover);
+	--rwb-selection: var(--codex-selected);
+	--rwb-rail-selection: var(--codex-selected);
+	--rwb-selection-border: transparent;
+	--rwb-foreground: var(--codex-text-primary);
+	--rwb-muted: var(--codex-text-secondary);
+	background: var(--codex-canvas);
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+	font-size: 12px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-header {
+	height: 46px;
+	min-height: 46px;
+	padding: 0 8px;
+	border-bottom: 0;
+	background: var(--codex-canvas);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-tabs {
+	gap: 3px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-tab {
+	flex: 1 1 90px;
+	min-width: 90px;
+	max-width: 156px;
+	height: 28px;
+	gap: 8px;
+	padding: 4px 8px;
+	box-sizing: border-box;
+	border-radius: 8px;
+	font-size: 12px;
+	font-weight: 400;
+	line-height: 18px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-tab.active {
+	background: var(--codex-selected);
+	font-weight: 400;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-tab-label {
+	max-width: none;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-tab.active .sessions-right-workbench-tab-close {
+	visibility: visible;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-tab > .codicon {
+	font-size: 16px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-tab-close {
+	margin-left: -2px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) :is(
+	.sessions-right-workbench-tab-add,
+	.sessions-right-workbench-icon-button) {
+	width: 28px;
+	height: 28px;
+	border-radius: 8px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-frame-controls {
+	gap: 0;
+	padding-left: 0;
+	background: var(--codex-canvas);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-body,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-review,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-files,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-terminal {
+	background: var(--codex-canvas);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-browser-chrome {
+	min-height: 40px;
+	border-bottom-color: var(--codex-border);
+	background: var(--codex-canvas);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-browser-content {
+	height: calc(100% - 40px);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-browser-nav {
+	grid-template-columns: 28px 28px 28px minmax(120px, 770px) 28px;
+	justify-content: center;
+	gap: 4px;
+	height: 40px;
+	padding: 0 8px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-file-filter {
+	border: 1px solid var(--codex-border);
+	border-radius: 8px;
+	background: var(--codex-selected);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-mode-browser .sessions-right-workbench-browser-url {
+	height: 28px;
+	padding: 0 10px;
+	box-sizing: border-box;
+	border: 1px solid transparent;
+	border-radius: 10px;
+	background: transparent;
+	text-align: center;
+	font-size: 12px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-mode-browser .sessions-right-workbench-browser-url:hover {
+	background: var(--codex-hover);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-mode-browser .sessions-right-workbench-browser-url:focus,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-file-filter:focus-within {
+	border-color: var(--codex-border-strong);
+	background: var(--codex-canvas);
+	box-shadow: inset 0 0 0 1px var(--codex-border);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) :is(
+	.sessions-right-workbench-browser-empty,
+	.sessions-right-workbench-file-empty,
+	.sessions-right-workbench-review-empty) {
+	padding: 32px 16px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) :is(
+	.sessions-right-workbench-browser-empty,
+	.sessions-right-workbench-file-empty,
+	.sessions-right-workbench-review-empty) > .codicon {
+	width: auto;
+	height: auto;
+	margin-bottom: 12px;
+	border-radius: 0;
+	background: transparent;
+	font-size: 32px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) :is(
+	.sessions-right-workbench-browser-empty,
+	.sessions-right-workbench-file-empty,
+	.sessions-right-workbench-review-empty) h2 {
+	font-size: 16px;
+	font-weight: 500;
+	line-height: 24px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) :is(
+	.sessions-right-workbench-browser-empty,
+	.sessions-right-workbench-file-empty,
+	.sessions-right-workbench-review-empty) p {
+	max-width: 288px;
+	margin-top: 8px;
+	font-size: 12px;
+	line-height: 18px;
+}
+
+/* Review is a focused diff plus a compact changed-files rail. Its tree is
+ * rooted at the files' common ancestor in reviewTree.ts, so this rail shows
+ * useful project-relative structure instead of /Users/... path scaffolding. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-review-workspace {
+	grid-template-columns: minmax(0, 1fr) minmax(196px, 36%);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-review-rail::before {
+	inset: 0 auto 0 0;
+	opacity: 1;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-review-scm-rail {
+	padding: 10px 8px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-review-scm-header {
+	display: none;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-review-scm-count {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 18px;
+	height: 18px;
+	padding: 0 5px;
+	border-radius: 9px;
+	box-sizing: border-box;
+	color: var(--codex-text-secondary);
+	background: var(--codex-hover);
+	font-size: 11px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-review-scm-list {
+	margin-top: 4px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-file-tree,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-review-scm-rail {
+	padding: 8px;
+}
+
+/* Until a file is chosen, the explorer is the task—not a narrow rail beside
+ * a large blank editor. Selecting a file restores the editor/tree split. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-mode-files:not(.sessions-right-workbench-has-file) .sessions-right-workbench-files {
+	grid-template-columns: minmax(0, 1fr);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-mode-files:not(.sessions-right-workbench-has-file) .sessions-right-workbench-file-editor {
+	display: none;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-mode-files.sessions-right-workbench-has-file .sessions-right-workbench-files {
+	grid-template-columns: minmax(0, 1fr) minmax(196px, 36%);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-file-tree {
+	padding: 8px 8px 0;
+	border-left: 1px solid var(--codex-border);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-file-filter {
+	height: 28px;
+	font-size: 14px;
+	line-height: 18px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-file-filter input {
+	font-size: 14px;
+	line-height: 18px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-mode-files:not(.sessions-right-workbench-has-file) .sessions-right-workbench-file-tree {
+	border-left: 0;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-file-explorer-host {
+	margin-top: 1px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-file-explorer-host .monaco-list-row {
+	border-radius: 7px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host {
+	inset: 0 0 12px 16px !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-mode-terminal .terminal-wrapper {
+	font-family: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+	font-size: 12px;
+	line-height: 1.2;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-file-explorer-host .monaco-list-row,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-review-rail .monaco-list-row {
+	border-radius: 6px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-file-explorer-host .monaco-list-row.selected,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-file-explorer-host .monaco-list-row.focused,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-review-rail .monaco-list-row.selected,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-review-rail .monaco-list-row.focused {
+	outline: none !important;
+	background: var(--codex-selected) !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .changes-view-body {
+	padding: 8px;
+	background: var(--codex-canvas);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .changes-view-body .chat-editing-session-actions .monaco-button {
+	border-radius: 8px;
+}
+
+@container (max-width: 620px) {
+	.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .new-chat-composer-stack {
+		width: calc(100% - 32px);
+	}
+
+	.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .new-chat-middle-section {
+		padding-bottom: 26px;
+	}
+}

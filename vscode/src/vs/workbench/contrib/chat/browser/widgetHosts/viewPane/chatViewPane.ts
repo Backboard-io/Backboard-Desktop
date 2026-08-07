@@ -5,7 +5,7 @@
 
 import './media/chatViewPane.css';
 import '../../widget/media/chatPanelCursorLook.css';
-import { $, addDisposableListener, append, EventHelper, EventType, getWindow, setVisibility } from '../../../../../../base/browser/dom.js';
+import { $, addDisposableListener, append, EventHelper, EventType, getWindow, scheduleAtNextAnimationFrame, setVisibility } from '../../../../../../base/browser/dom.js';
 import { StandardMouseEvent } from '../../../../../../base/browser/mouseEvent.js';
 import { Orientation, Sash } from '../../../../../../base/browser/ui/sash/sash.js';
 import { CancellationToken, CancellationTokenSource } from '../../../../../../base/common/cancellation.js';
@@ -62,6 +62,7 @@ import { IChatViewsWelcomeDescriptor } from '../../viewsWelcome/chatViewsWelcome
 import { IWorkbenchLayoutService, LayoutSettings, Position } from '../../../../../services/layout/browser/layoutService.js';
 import { AgentSessionsViewerOrientation, AgentSessionsViewerPosition } from '../../agentSessions/agentSessions.js';
 import { IProgressService } from '../../../../../../platform/progress/common/progress.js';
+import { IRequestService } from '../../../../../../platform/request/common/request.js';
 import { ChatViewContainerId, ChatViewId } from '../../chat.js';
 import { IActivityService, ProgressBadge } from '../../../../../services/activity/common/activity.js';
 import { disposableTimeout } from '../../../../../../base/common/async.js';
@@ -87,6 +88,7 @@ import { IVoicePlaybackService } from '../../../common/voicePlaybackService.js';
 import { VoiceOnboardingCompletedClassification, VoiceOnboardingCompletedEvent } from '../../voiceClient/voiceTelemetry.js';
 import { IWorkbenchEnvironmentService } from '../../../../../services/environment/common/environmentService.js';
 import { backboardConfigResource, BackboardAuthContextKeys, BackboardAuthGateContextKeys, hasBackboardCredentials, isBackboardProduct } from '../../../common/backboardAuth.js';
+import { resolveBackboardUserInfo } from '../../backboardUserInfo.js';
 
 interface IChatViewPaneState extends Partial<IChatModelInputState> {
 	/**
@@ -161,6 +163,7 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 		@IPathService private readonly pathService: IPathService,
 		@IPaneCompositePartService private readonly paneCompositePartService: IPaneCompositePartService,
 		@IAgentCliSetupService private readonly agentCliSetupService: IAgentCliSetupService,
+		@IRequestService private readonly requestService: IRequestService,
 	) {
 		super(options, keybindingService2, contextMenuService, configurationService, contextKeyService, viewDescriptorService, instantiationService, openerService, themeService, hoverService);
 
@@ -177,7 +180,10 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 			this.viewState.sessionResource = undefined;
 		}
 		this.sessionsViewerVisible = false; // will be updated from layout code
-		this.sessionsViewerSidebarWidth = Math.max(ChatViewPane.SESSIONS_SIDEBAR_MIN_WIDTH, this.viewState.sessionsSidebarWidth ?? ChatViewPane.SESSIONS_SIDEBAR_DEFAULT_WIDTH);
+		this.sessionsViewerSidebarWidth = Math.max(
+			ChatViewPane.SESSIONS_SIDEBAR_MIN_WIDTH,
+			this.viewState.sessionsSidebarWidth ?? ChatViewPane.SESSIONS_SIDEBAR_DEFAULT_WIDTH
+		);
 
 		// Contextkeys
 		this.chatViewLocationContext = ChatContextKeys.panelLocation.bindTo(contextKeyService);
@@ -560,11 +566,11 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 
 	//#region Sessions Control
 
-	private static readonly SESSIONS_SIDEBAR_MIN_WIDTH = 260;
+	private static readonly SESSIONS_SIDEBAR_MIN_WIDTH = 216;
 	private static readonly SESSIONS_SIDEBAR_SNAP_THRESHOLD = this.SESSIONS_SIDEBAR_MIN_WIDTH / 2; // snap to hide when dragged below half of minimum width
-	private static readonly SESSIONS_SIDEBAR_DEFAULT_WIDTH = 360;
-	private static readonly CHAT_WIDGET_DEFAULT_WIDTH = 300;
-	private static readonly SESSIONS_SIDEBAR_VIEW_MIN_WIDTH = this.CHAT_WIDGET_DEFAULT_WIDTH + this.SESSIONS_SIDEBAR_DEFAULT_WIDTH;
+	private static readonly SESSIONS_SIDEBAR_DEFAULT_WIDTH = 292;
+	private static readonly CHAT_WIDGET_MIN_WIDTH = 320;
+	private static readonly SESSIONS_SIDEBAR_VIEW_MIN_WIDTH = 516;
 
 	private sessionsContainer: HTMLElement | undefined;
 	private sessionsTitleContainer: HTMLElement | undefined;
@@ -615,7 +621,22 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 		// Sessions Filter
 		const sessionsFilter = this._register(this.instantiationService.createInstance(AgentSessionsFilter, {
 			filterMenuId: MenuId.AgentSessionsViewerFilterSubMenu,
-			groupResults: () => this.sessionsViewerOrientation === AgentSessionsViewerOrientation.Stacked ? AgentSessionsGrouping.Capped : AgentSessionsGrouping.Repository
+			// Cursor's drawer is a flat recency list under "Today". Repository
+			// grouping is useful in the full Agents workbench, but makes this narrow
+			// editor drawer read like a second file explorer.
+			groupResults: () => isBackboardProduct()
+				? undefined
+				: this.sessionsViewerOrientation === AgentSessionsViewerOrientation.Stacked ? AgentSessionsGrouping.Capped : AgentSessionsGrouping.Repository,
+			overrideExclude: session => {
+				if (!isBackboardProduct()) {
+					return undefined;
+				}
+
+				// This custom drawer has one fixed "Today" heading instead of the
+				// stock date sections, so do not place older sessions underneath it.
+				const startOfToday = new Date().setHours(0, 0, 0, 0);
+				return session.isArchived() || session.timing.created < startOfToday;
+			}
 		}));
 		this._register(Event.runAndSubscribe(sessionsFilter.onDidChange, () => {
 			sessionsToolbarContainer.classList.toggle('filtered', !sessionsFilter.isDefault());
@@ -623,7 +644,7 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 
 		const searchButton = append(sessionsContainer, $('button.agent-sessions-search-button')) as HTMLButtonElement;
 		searchButton.type = 'button';
-		const searchLabel = localize('searchWorkspaces', "Search workspaces");
+		const searchLabel = localize('searchAgents', "Search Agents...");
 		searchButton.title = searchLabel;
 		searchButton.setAttribute('aria-label', searchLabel);
 		const searchIcon = append(searchButton, $('span.agent-sessions-search-icon'));
@@ -636,17 +657,18 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 		const primaryActions = append(sessionsContainer, $('.agent-sessions-primary-actions'));
 		const newChatAction = append(primaryActions, $('button.agent-sessions-action-row.agent-sessions-new-chat-row')) as HTMLButtonElement;
 		newChatAction.type = 'button';
-		const newChatLabel = localize('newChat', "New Chat");
+		const newChatLabel = localize('newAgent', "New Agent");
 		newChatAction.title = newChatLabel;
 		newChatAction.setAttribute('aria-label', newChatLabel);
 		const newChatIcon = append(newChatAction, $('span.agent-sessions-action-icon'));
 		newChatIcon.classList.add(...ThemeIcon.asClassNameArray(Codicon.edit));
 		append(newChatAction, $('span.agent-sessions-action-label', undefined, newChatLabel));
+		append(newChatAction, $('span.agent-sessions-action-shortcut', undefined, '⌘N'));
 		this._register(addDisposableListener(newChatAction, EventType.CLICK, () => this.commandService.executeCommand(ACTION_ID_NEW_CHAT)));
 
 		const marketplaceAction = append(primaryActions, $('button.agent-sessions-action-row.agent-sessions-marketplace-row')) as HTMLButtonElement;
 		marketplaceAction.type = 'button';
-		const marketplaceLabel = localize('marketplace', "Marketplace");
+		const marketplaceLabel = localize('customizeAgents', "Customize");
 		marketplaceAction.title = marketplaceLabel;
 		marketplaceAction.setAttribute('aria-label', marketplaceLabel);
 		const marketplaceIcon = append(marketplaceAction, $('span.agent-sessions-action-icon'));
@@ -668,7 +690,7 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 		}));
 
 		const workspacesHeader = append(sessionsContainer, $('.agent-sessions-workspaces-header'));
-		append(workspacesHeader, $('span.agent-sessions-workspaces-title', undefined, localize('workspacesHeader', "Workspaces")));
+		append(workspacesHeader, $('span.agent-sessions-workspaces-title', undefined, localize('todayHeader', "Today")));
 		workspacesHeader.appendChild(sessionsToolbarContainer);
 
 		// Legacy button slot kept for orientation-specific CSS and extensions that query it.
@@ -680,10 +702,11 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 			source: 'chatViewPane',
 			filter: sessionsFilter,
 			overrideStyles: this.getLocationBasedColors().listOverrideStyles,
-			compactRows: true,
-			compactShowMore: true,
+			compactRows: false,
+			compactShowMore: false,
 			hideSectionCount: true,
 			hideSessionBadge: true,
+			showDiffFileCount: true,
 			getHoverPosition: () => this.getSessionHoverPosition(),
 			trackActiveEditorSession: () => {
 				return !this._widget || this._widget.isEmpty(); // only track and reveal if chat widget is empty
@@ -705,6 +728,32 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 				sessionsControl.refresh();
 			}
 		}));
+
+		const accountFooter = append(sessionsContainer, $('.agent-sessions-account-footer'));
+		const accountAvatar = append(accountFooter, $('span.agent-sessions-account-avatar'));
+		accountAvatar.classList.add(...ThemeIcon.asClassNameArray(Codicon.account));
+		const accountCopy = append(accountFooter, $('.agent-sessions-account-copy'));
+		const accountName = append(accountCopy, $('span.agent-sessions-account-name', undefined, localize('backboardAccountName', "Backboard Studio")));
+		const accountSettings = append(accountFooter, $('button.agent-sessions-account-settings')) as HTMLButtonElement;
+		accountSettings.type = 'button';
+		accountSettings.title = localize('backboardAccountSettings', "Settings");
+		accountSettings.setAttribute('aria-label', accountSettings.title);
+		const settingsIcon = append(accountSettings, $('span'));
+		settingsIcon.classList.add(...ThemeIcon.asClassNameArray(Codicon.menu));
+		this._register(addDisposableListener(accountSettings, EventType.CLICK, () => this.commandService.executeCommand('workbench.action.openSettings')));
+		resolveBackboardUserInfo(this.fileService, this.pathService, this.requestService, this.logService).then(info => {
+			if (!accountFooter.isConnected) {
+				return;
+			}
+			// Match the Simple-mode sidebar: both surfaces use the shared resolver
+			// and prefer the signed-in display name before falling back to email.
+			accountName.textContent = info.name ?? info.email ?? localize('backboardAccountName', "Backboard Studio");
+			const identity = info.name ?? info.email;
+			if (identity) {
+				accountAvatar.classList.remove(...ThemeIcon.asClassNameArray(Codicon.account));
+				accountAvatar.textContent = identity.split(/\s+|@/).filter(Boolean).slice(0, 2).map(part => part[0]?.toUpperCase()).join('');
+			}
+		}).catch(error => this.logService.warn(`[Backboard] Unable to populate chat drawer identity: ${toErrorMessage(error)}`));
 
 		// Deal with orientation configuration
 		this._register(Event.runAndSubscribe(Event.filter(this.configurationService.onDidChangeConfiguration, e => e.affectsConfiguration(ChatConfiguration.ChatViewSessionsOrientation)), e => {
@@ -754,7 +803,12 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 
 		let newSessionsContainerVisible: boolean;
 		if (isBackboardProduct()) {
-			newSessionsContainerVisible = false;
+			// Backboard's sessions surface is a Cursor-style drawer: it is only
+			// visible in the explicit side-by-side orientation and never replaces
+			// the empty composer as a stacked welcome view.
+			newSessionsContainerVisible =
+				this.sessionsViewerOrientation === AgentSessionsViewerOrientation.SideBySide &&
+				!!this.lastDimensions && this.lastDimensions.width >= ChatViewPane.SESSIONS_SIDEBAR_VIEW_MIN_WIDTH;
 		} else if (!this.configurationService.getValue<boolean>(ChatConfiguration.ChatViewSessionsEnabled)) {
 			newSessionsContainerVisible = false; // disabled in settings
 		} else {
@@ -776,6 +830,7 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 		}
 
 		this.viewPaneContainer.classList.toggle('has-sessions-control', newSessionsContainerVisible);
+		this.viewPaneContainer.closest('.part.auxiliarybar')?.classList.toggle('backboard-agents-drawer-open', isBackboardProduct() && newSessionsContainerVisible);
 
 		const sessionsContainerVisible = this.sessionsContainer.style.display !== 'none';
 		setVisibility(newSessionsContainerVisible, this.sessionsContainer);
@@ -1545,14 +1600,28 @@ referencesExpandedWhenEmptyResponse: false,
 		// Show as sidebar
 		if (this.sessionsViewerOrientation === AgentSessionsViewerOrientation.SideBySide) {
 			const sessionsViewerSidebarWidth = this.computeEffectiveSideBySideSessionsSidebarWidth(width);
+			this.viewPaneContainer.closest<HTMLElement>('.part.auxiliarybar')?.style.setProperty(
+				'--backboard-agents-drawer-width',
+				`${sessionsViewerSidebarWidth}px`
+			);
 
 			this.sessionsControlContainer.style.height = `${availableSessionsHeight}px`;
-			this.sessionsControlContainer.style.width = `${sessionsViewerSidebarWidth}px`;
-			this.sessionsControl.layout(availableSessionsHeight, sessionsViewerSidebarWidth);
+			if (isBackboardProduct()) {
+				// The Backboard drawer owns its outer width (including padding). Let
+				// the control fill the content box instead of overflowing that width.
+				this.sessionsControlContainer.style.width = '';
+				this.sessionsControl.layout(availableSessionsHeight, this.sessionsControlContainer.offsetWidth);
+			} else {
+				this.sessionsControlContainer.style.width = `${sessionsViewerSidebarWidth}px`;
+				this.sessionsControl.layout(availableSessionsHeight, sessionsViewerSidebarWidth);
+			}
 			this.sessionsViewerSash?.layout();
 
 			heightReduction = 0; // side by side to chat widget
-			widthReduction = this.sessionsContainer.offsetWidth;
+			// The Backboard drawer's width is driven by the same value as its sash.
+			// Avoid reading offsetWidth here: during a drag that measurement can still
+			// reflect the previous frame and briefly leaves the chat under the drawer.
+			widthReduction = isBackboardProduct() ? sessionsViewerSidebarWidth : this.sessionsContainer.offsetWidth;
 		}
 
 		// Show stacked
@@ -1573,7 +1642,7 @@ referencesExpandedWhenEmptyResponse: false,
 			ChatViewPane.SESSIONS_SIDEBAR_MIN_WIDTH,			// never smaller than min width for side by side sessions
 			Math.min(
 				sessionsViewerSidebarWidth,
-				width - ChatViewPane.CHAT_WIDGET_DEFAULT_WIDTH	// never so wide that chat widget is smaller than default width
+				width - ChatViewPane.CHAT_WIDGET_MIN_WIDTH	// never so wide that chat widget becomes unusable
 			)
 		);
 	}
@@ -1584,22 +1653,82 @@ referencesExpandedWhenEmptyResponse: false,
 
 	private createSessionsViewerSash(container: HTMLElement, height: number, width: number): void {
 		const disposables = this.sessionsViewerSashDisposables.value = new DisposableStore();
+		// Backboard's drawer includes the panel header, so its sash must be hosted
+		// by that same full-height part. Extending a body-owned sash with CSS makes
+		// the line visible above the body but leaves that segment unhittable.
+		const sashContainer = isBackboardProduct()
+			? container.closest<HTMLElement>('.part.auxiliarybar') ?? container
+			: container;
+		const backboardDrawerHost = isBackboardProduct() ? sashContainer : undefined;
 
-		const sash = this.sessionsViewerSash = disposables.add(new Sash(container, {
+		const sash = this.sessionsViewerSash = disposables.add(new Sash(sashContainer, {
 			getVerticalSashLeft: () => {
 				const sessionsViewerSidebarWidth = this.computeEffectiveSideBySideSessionsSidebarWidth(this.lastDimensions?.width ?? width);
 				const { position } = this.getViewPositionAndLocation();
 				if (position === Position.RIGHT) {
-					return (this.lastDimensions?.width ?? width) - sessionsViewerSidebarWidth;
+					// The Backboard sash is hosted one level higher than the body so it
+					// reaches the header. Position it in that host's coordinate space.
+					const sashHostWidth = isBackboardProduct()
+						? sashContainer.clientWidth
+						: this.lastDimensions?.width ?? width;
+					return sashHostWidth - sessionsViewerSidebarWidth;
 				}
 
 				return sessionsViewerSidebarWidth;
 			}
-		}, { orientation: Orientation.VERTICAL }));
+		}, {
+			orientation: Orientation.VERTICAL,
+			// Keep a comfortable drag target while CSS paints only a one-pixel
+			// divider. This sash is distinct from the auxiliary bar's outer sash.
+			size: isBackboardProduct() ? 8 : undefined,
+		}));
+
+		// The auxiliary part already owns a separate sash for resizing the entire
+		// panel. Mark only the newly appended sessions sash so drawer styling never
+		// leaks onto that outer panel boundary.
+		const sashElement = sashContainer.lastElementChild;
+		if (isBackboardProduct() && sashElement?.classList.contains('monaco-sash')) {
+			sashElement.classList.add('backboard-agents-drawer-sash');
+			disposables.add(toDisposable(() => sashElement.classList.remove('backboard-agents-drawer-sash')));
+		}
 
 		let sashStartWidth: number | undefined;
-		disposables.add(sash.onDidStart(() => sashStartWidth = this.sessionsViewerSidebarWidth));
-		disposables.add(sash.onDidEnd(() => sashStartWidth = undefined));
+		let pendingLayout = false;
+		const scheduledLayout = disposables.add(new MutableDisposable());
+
+		const layoutAtCurrentSize = () => {
+			pendingLayout = false;
+			if (this.lastDimensions) {
+				this.layoutBody(this.lastDimensions.height, this.lastDimensions.width);
+			}
+		};
+
+		const scheduleLayout = () => {
+			if (pendingLayout) {
+				return;
+			}
+
+			pendingLayout = true;
+			scheduledLayout.value = scheduleAtNextAnimationFrame(getWindow(sashContainer), layoutAtCurrentSize);
+		};
+
+		disposables.add(sash.onDidStart(() => {
+			sashStartWidth = this.computeEffectiveSideBySideSessionsSidebarWidth(this.lastDimensions?.width ?? width);
+			backboardDrawerHost?.classList.add('backboard-agents-drawer-resizing');
+		}));
+		disposables.add(sash.onDidEnd(() => {
+			sashStartWidth = undefined;
+			backboardDrawerHost?.classList.remove('backboard-agents-drawer-resizing');
+
+			// Commit the final pointer position immediately. Pointer events can arrive
+			// faster than animation frames, so the last scheduled layout may not have
+			// run by the time the sash ends.
+			if (pendingLayout) {
+				scheduledLayout.clear();
+				layoutAtCurrentSize();
+			}
+		}));
+		disposables.add(toDisposable(() => backboardDrawerHost?.classList.remove('backboard-agents-drawer-resizing')));
 
 		disposables.add(sash.onDidChange(e => {
 			if (sashStartWidth === undefined || !this.lastDimensions) {
@@ -1618,7 +1747,10 @@ referencesExpandedWhenEmptyResponse: false,
 			this.sessionsViewerSidebarWidth = this.computeEffectiveSideBySideSessionsSidebarWidth(this.lastDimensions.width, newWidth);
 			this.viewState.sessionsSidebarWidth = this.sessionsViewerSidebarWidth;
 
-			this.layoutBody(this.lastDimensions.height, this.lastDimensions.width);
+			// Move the CSS-owned drawer immediately, then coalesce the expensive chat
+			// and sessions-list layout to one pass per animation frame.
+			backboardDrawerHost?.style.setProperty('--backboard-agents-drawer-width', `${this.sessionsViewerSidebarWidth}px`);
+			scheduleLayout();
 		}));
 
 		disposables.add(sash.onDidReset(() => {

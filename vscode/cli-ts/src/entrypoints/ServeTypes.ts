@@ -1,4 +1,8 @@
 import type { PermissionPolicy } from "../core/tools/ToolPermissionGateTypes.ts";
+import type {
+	BackboardAudioFile,
+	BackboardVoiceConfig,
+} from "../providers/backboard/types.ts";
 
 /**
  * One control operation, sent by the host as a single NDJSON line on stdin.
@@ -26,6 +30,8 @@ export type ServeControl =
 			threadId?: string;
 			model?: string;
 			thinking?: string;
+			/** Omit provider reasoning traces from responses when supported. */
+			excludeReasoning?: boolean;
 			excludedTools?: string[];
 			permission?: PermissionPolicy;
 			memory?: string;
@@ -39,6 +45,10 @@ export type ServeControl =
 			notify?: boolean;
 			/** Enables image-generation intent (reserved; inert until a tool consumes it). */
 			imageGeneration?: boolean;
+			/** Per-turn Backboard voice pipeline configuration. */
+			voice?: BackboardVoiceConfig;
+			/** Base64 audio from the desktop composer; uploaded as audio_file. */
+			audioFile?: BackboardAudioFile;
 	  }
 	| { op: "steer"; requestId?: string; prompt: string }
 	| { op: "warmup"; requestId?: string }

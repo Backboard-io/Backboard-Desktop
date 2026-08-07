@@ -723,7 +723,7 @@ export function renderModelSelectScript(iconBase: string): string {
 			setActive(buttons.model, activePopover === 'model');
 			setActive(buttons.web, activePopover === 'web' || hasWeb);
 			setActive(buttons.image, activePopover === 'image' || hasImage);
-			setActive(buttons.voice, voiceRecording);
+			setActive(buttons.voice, activePopover === 'voice' || voiceRecording || controls.voiceMode.value !== 'off');
 			buttons.stop.classList.toggle('visible', runInProgress);
 			buttons.stop.disabled = !runInProgress || stopRequested;
 			buttons.stop.title = stopRequested ? 'Stopping...' : 'Stop generation';
@@ -737,7 +737,7 @@ export function renderModelSelectScript(iconBase: string): string {
 		function setVoiceRecording(recording) {
 			voiceRecording = recording;
 			buttons.voice.classList.toggle('recording', recording);
-			buttons.voice.title = recording ? 'Stop voice recording' : 'Start voice recording';
+			buttons.voice.title = recording ? 'Stop voice recording' : controls.voiceMode.value === 'off' ? 'Choose voice mode' : 'Start voice recording';
 			buttons.voice.setAttribute('aria-label', buttons.voice.title);
 			document.querySelector('.composerCard')?.classList.toggle('recording', recording);
 			syncComposerButtons();

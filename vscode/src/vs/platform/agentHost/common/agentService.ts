@@ -79,14 +79,6 @@ export const AgentHostClaudeAgentEnabledSettingId = 'chat.agentHost.claudeAgent.
 export const AgentHostCodexAgentEnabledSettingId = 'chat.agentHost.codexAgent.enabled';
 
 /**
- * Configuration key controlling whether the OpenCode provider is registered
- * in the agent host process. OpenCode has no SDK distribution; the provider
- * additionally requires an `opencode` binary on PATH. The agent host process
- * must be restarted for changes to take effect.
- */
-export const AgentHostOpenCodeAgentEnabledSettingId = 'chat.agentHost.opencodeAgent.enabled';
-
-/**
  * Optional override that points at an **SDK root directory** containing a
  * `node_modules/@anthropic-ai/claude-agent-sdk` subtree. When set, the agent
  * host loads the Claude SDK from that path instead of the bare import (which
@@ -110,13 +102,6 @@ export const AgentHostClaudeAgentEnabledEnvVar = 'VSCODE_AGENT_HOST_CLAUDE_AGENT
  * `'false'`; absent means "default" (`false`).
  */
 export const AgentHostCodexAgentEnabledEnvVar = 'VSCODE_AGENT_HOST_CODEX_AGENT_ENABLED';
-
-/**
- * Environment variable form of {@link AgentHostOpenCodeAgentEnabledSettingId}.
- * Set by the agent host starters from the setting. Accepts `'true'` /
- * `'false'`; absent means "default" (`false`).
- */
-export const AgentHostOpenCodeAgentEnabledEnvVar = 'VSCODE_AGENT_HOST_OPENCODE_AGENT_ENABLED';
 
 /**
  * Resolves the effective enable state for a Claude/Codex provider from the
@@ -393,7 +378,6 @@ export interface IAgentSdkStarterSettings {
 	readonly codexBinaryArgs?: readonly string[];
 	readonly claudeAgentEnabled?: boolean;
 	readonly codexAgentEnabled?: boolean;
-	readonly opencodeAgentEnabled?: boolean;
 }
 
 export function buildAgentSdkEnv(
@@ -417,9 +401,6 @@ export function buildAgentSdkEnv(
 	}
 	if (settings.codexAgentEnabled !== undefined) {
 		setIfMissing(AgentHostCodexAgentEnabledEnvVar, settings.codexAgentEnabled ? 'true' : 'false');
-	}
-	if (settings.opencodeAgentEnabled !== undefined) {
-		setIfMissing(AgentHostOpenCodeAgentEnabledEnvVar, settings.opencodeAgentEnabled ? 'true' : 'false');
 	}
 	return out;
 }

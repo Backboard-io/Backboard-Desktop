@@ -198,6 +198,9 @@ export class CodeApplication extends Disposable {
 
 		const allowedPermissionsInWebview = new Set([
 			...alwaysAllowedPermissions,
+			// Composer webviews use getUserMedia for Backboard voice input.
+			// The OS microphone consent prompt still gates actual capture.
+			'media',
 			'clipboard-read',
 			'clipboard-sanitized-write',
 			// TODO(deepak1556): Should be removed once migration is complete

@@ -70,6 +70,7 @@ function codebase(): string {
 
 Every codebase has an opinion. Find it before you add code:
 - Explore enough structure to know where your change belongs and what it will touch.
+- For implementation requests, do the smallest useful inspection first and begin editing once the location and constraints are clear. Keep investigating only while a specific unknown could change the correct implementation.
 - A library is not available just because it is popular. Confirm it is in the project's dependencies before importing it.
 - At edit time, match the surrounding lines — naming, error handling, formatting, comment density. Your diff should read like the person who wrote the file also wrote the change.
 - Comment only where the code cannot speak for itself.`;

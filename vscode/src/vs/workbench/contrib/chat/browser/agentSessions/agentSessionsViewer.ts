@@ -95,6 +95,7 @@ export interface IAgentSessionRendererOptions {
 	readonly disableHover?: boolean;
 	readonly hideSessionBadge?: boolean;
 	readonly useStatusOnlyIcons?: boolean;
+	readonly showDiffFileCount?: boolean;
 	getHoverPosition(): HoverPosition;
 
 	isGroupedByRepository?(): boolean;
@@ -299,7 +300,16 @@ export class AgentSessionRenderer extends Disposable implements ICompressibleTre
 
 
 		// Description
-		const hasDescription = this.renderDescription(session, template);
+		let hasDescription = this.renderDescription(session, template);
+		if (!hasDescription && hasDiff && this.options.showDiffFileCount) {
+			const summary = getAgentChangesSummary(session.element.changes);
+			if (summary?.files) {
+				template.description.textContent = summary.files === 1
+					? localize('chat.session.fileCount.one', "1 File")
+					: localize('chat.session.fileCount.many', "{0} Files", summary.files);
+				hasDescription = true;
+			}
+		}
 
 		// Status
 		const hasStatus = this.renderStatus(session, template);

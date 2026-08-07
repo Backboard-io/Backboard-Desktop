@@ -46,6 +46,10 @@ export class ProviderStreamConsumer {
 					throw err;
 				}
 				assistant.discardPartial();
+				this.bus.emit({
+					type: "system:warning",
+					message: `Provider connection interrupted. Retrying (${attempt + 1}/${maxRetries})…`,
+				});
 				await waitForRetry(streamRetryDelayMs(attempt + 1), signal);
 			}
 		}
@@ -85,6 +89,9 @@ export class ProviderStreamConsumer {
 					break;
 				case "reasoning_delta":
 					if (event.text) assistant.appendReasoning(event.text);
+					break;
+				case "voice":
+					this.bus.emit({ type: "assistant:voice", records: event.records });
 					break;
 				case "usage":
 					this.session.addUsage(event.usage);

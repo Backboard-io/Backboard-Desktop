@@ -5,11 +5,19 @@
 
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import { codexBinaryTriple, codexPackageSuffix } from '../../../node/codex/codexAgent.js';
+import { codexBinaryTriple, codexPackageSuffix, isBundledApplicationCliPath } from '../../../node/codex/codexAgent.js';
 
 suite('codex package paths', () => {
 
 	ensureNoDisposablesAreLeakedInTestSuite();
+
+	test('distinguishes user CLI installs from binaries bundled in desktop apps', () => {
+		assert.deepStrictEqual({
+			standalone: isBundledApplicationCliPath('/Users/me/.local/bin/codex'),
+			macApp: isBundledApplicationCliPath('/Applications/ChatGPT.app/Contents/Resources/codex'),
+			windowsApp: isBundledApplicationCliPath('C:\\Apps\\ChatGPT.app\\Contents\\Resources\\codex.exe'),
+		}, { standalone: false, macApp: true, windowsApp: true });
+	});
 
 	suite('codexPackageSuffix', () => {
 

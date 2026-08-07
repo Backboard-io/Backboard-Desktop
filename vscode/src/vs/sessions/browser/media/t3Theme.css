@@ -3,15 +3,15 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-/* T3 Code's chat palette, applied to the Simple-mode transcript.
+@import url('./codexTheme.css');
+
+/* T3 Code's chat treatment, applied to the Simple-mode transcript.
  * Ported from https://github.com/pingdotgg/t3code (apps/web/src/index.css).
  *
  *   MIT License. Copyright (c) 2026 T3 Tools Inc.
  *
- * `chatMarkdown.css` carries the typography and resolves colour through VS Code
- * theme tokens so it works under any theme. This file pins those colours to T3's
- * own dark values, which is what makes the chat read as theirs rather than
- * merely well-spaced.
+ * `chatMarkdown.css` carries the typography. Colours here deliberately resolve
+ * through VS Code theme tokens so the transcript follows the user's theme.
  *
  * Scope is deliberately narrow:
  *
@@ -52,29 +52,23 @@
 
 :is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view),
 :is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) {
-	/* Source values, verbatim. */
-	--t3-background: #000;
-	--t3-foreground: #f1f3f7;
-	--t3-muted: #0a0a0a;
-	--t3-muted-foreground: #a3a3a3;
-	--t3-accent: #191a1d;
-	--t3-border: rgb(255 255 255 / 8%);
-	/* `--secondary` in their dark theme — the user bubble fill. */
-	--t3-secondary: rgb(255 255 255 / 4%);
-	/* Their `--info-foreground` in dark: Tailwind blue-400. */
-	--t3-link: #60a5fa;
+	--t3-background: var(--session-view-background, var(--sessions-main-region-background, var(--vscode-agents-background, var(--vscode-editor-background))));
+	--t3-foreground: var(--vscode-foreground, var(--vscode-editor-foreground));
+	--t3-muted: var(--vscode-textCodeBlock-background, var(--vscode-editorWidget-background, var(--vscode-input-background)));
+	--t3-muted-foreground: var(--vscode-descriptionForeground, var(--vscode-input-placeholderForeground));
+	--t3-accent: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground));
+	--t3-border: var(--vscode-widget-border, var(--vscode-panel-border, var(--vscode-contrastBorder, transparent)));
+	--t3-secondary: var(--vscode-chat-requestBackground, var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground)));
+	--t3-link: var(--vscode-textLink-foreground, var(--vscode-foreground));
 }
 
 /* Defined at the workbench root (not `.part.sessionspart`) so the chat-editor
- * host's composer can resolve it too. T3's dark `.chat-composer-glass-host`
- * mixes white into the page colour (`color-mix(... 84%, white)` behind ~70%
- * glass opacity ≈ a 9-11% lift), which is what makes their composer read as a
- * raised card on pure black. */
+ * host's composer can resolve it too. */
 .agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark,
 .agent-sessions-workbench.optimus-window.vs-dark,
 .agent-sessions-workbench.optimus-window.hc-black,
 .agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black {
-	--t3-composer-surface: color-mix(in srgb, var(--session-view-background, var(--sessions-main-region-background, var(--vscode-editor-background))) 91%, #fff);
+	--t3-composer-surface: var(--sessions-codex-surface-background, var(--vscode-agentsChatInput-background, var(--vscode-input-background, var(--vscode-editorWidget-background, var(--vscode-editor-background)))));
 }
 
 /* ---- Transcript surface ---- */
@@ -105,8 +99,7 @@
 
 :is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .interactive-item-container .value .rendered-markdown,
 :is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .interactive-item-container .value .rendered-markdown {
-	/* `text-foreground/80` against their near-white, not against ours. */
-	color: color-mix(in srgb, var(--t3-foreground) 80%, transparent);
+	color: var(--t3-foreground);
 }
 
 :is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .value .rendered-markdown h1,
@@ -203,7 +196,7 @@
  * sizes — is theme-independent and lives in style.css. */
 :is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .interactive-session .chat-input-container,
 :is(.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .interactive-session .chat-input-container {
-	border-color: rgb(255 255 255 / 10%);
+	border-color: var(--vscode-agentsChatInput-border, var(--vscode-input-border, var(--vscode-editorWidget-border, var(--vscode-widget-border, transparent))));
 	background-color: var(--t3-composer-surface);
 }
 
@@ -224,7 +217,7 @@
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .chat-editor-relative .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container,
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .part.sessionspart .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container,
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).hc-black .chat-editor-relative .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container {
-	border-color: rgb(255 255 255 / 10%);
+	border-color: var(--vscode-agentsChatInput-border, var(--vscode-input-border, var(--vscode-editorWidget-border, var(--vscode-widget-border, transparent))));
 	background-color: var(--t3-composer-surface);
 }
 
@@ -314,7 +307,7 @@
 	animation: none;
 	font-size: 11px;
 	line-height: 16px;
-	color: color-mix(in srgb, var(--t3-muted-foreground) 70%, transparent);
+	color: var(--t3-muted-foreground);
 }
 
 /* ---- Turn fold (thinking/work summary) ---- */

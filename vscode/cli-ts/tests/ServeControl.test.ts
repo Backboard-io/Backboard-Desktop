@@ -38,6 +38,8 @@ describe("parseControlLine", () => {
 					prompt: "hello",
 					model: "openai/gpt-5.5",
 					permission: "default",
+					thinking: "default",
+					excludeReasoning: true,
 					excludedTools: ["Browser", "Computer"],
 				}),
 			),
@@ -49,6 +51,8 @@ describe("parseControlLine", () => {
 				prompt: "hello",
 				model: "openai/gpt-5.5",
 				permission: "default",
+				thinking: "default",
+				excludeReasoning: true,
 				excludedTools: ["Browser", "Computer"],
 			},
 		});

@@ -11,7 +11,7 @@ import { Codicon } from '../../../../../base/common/codicons.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { FuzzyScore } from '../../../../../base/common/filters.js';
 import { Disposable, toDisposable } from '../../../../../base/common/lifecycle.js';
-import { ScrollEvent } from '../../../../../base/common/scrollable.js';
+import { ScrollbarVisibility, ScrollEvent } from '../../../../../base/common/scrollable.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { MenuId } from '../../../../../platform/actions/common/actions.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
@@ -261,6 +261,8 @@ export class ChatListWidget extends Disposable {
 		this._getCurrentModeInfo = options.getCurrentModeInfo;
 		this._lastItemIdContextKey = ChatContextKeys.lastItemId.bindTo(this.contextKeyService);
 		this._container = container;
+		const isAuxiliaryBarChat = !!container.closest('.part.auxiliarybar');
+		this._container.classList.toggle('right-panel-chat-scroll', isAuxiliaryBarChat);
 
 		// Toggle link-style for inline reference widgets based on configuration (single listener for all widgets)
 		const updateInlineReferencesStyle = () => {
@@ -370,6 +372,12 @@ export class ChatListWidget extends Disposable {
 				identityProvider: { getId: (e: ChatTreeItem) => e.id },
 				horizontalScrolling: false,
 				alwaysConsumeMouseWheel: false,
+				// The editor's right-panel chat is narrow enough that an auto-hiding
+				// scrollbar is easy to miss. Keep a slim rail present there and make
+				// wheel/trackpad movement feel continuous without changing other chats.
+				verticalScrollMode: isAuxiliaryBarChat ? ScrollbarVisibility.Visible : ScrollbarVisibility.Auto,
+				smoothScrolling: isAuxiliaryBarChat,
+				scrollableElementChangeOptions: isAuxiliaryBarChat ? { verticalScrollbarSize: 8 } : undefined,
 				supportDynamicHeights: true,
 				hideTwistiesOfChildlessElements: true,
 				accessibilityProvider: this.instantiationService.createInstance(ChatAccessibilityProvider),

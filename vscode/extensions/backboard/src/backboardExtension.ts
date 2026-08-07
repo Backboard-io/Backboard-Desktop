@@ -32,7 +32,37 @@ const backboardOAuthClientId = 'Backboard_oauth_q_cli';
 const backboardOAuthScope = 'openid email profile';
 const backboardOAuthDeviceGrantType = 'urn:ietf:params:oauth:grant-type:device_code';
 const backboardOAuthTimeoutMs = 5 * 60 * 1000;
+const commitMessageModelProvider = 'openrouter';
+const commitMessageModel = 'deepseek/deepseek-v4-flash';
+const maxCommitDiffChars = 60_000;
 let backboardToolOutput: vscode.OutputChannel | undefined;
+
+interface GitChange {
+	readonly uri: vscode.Uri;
+}
+
+interface GitRepository {
+	readonly rootUri: vscode.Uri;
+	readonly inputBox: { value: string };
+	readonly state: {
+		readonly HEAD?: { readonly name?: string };
+		readonly indexChanges: readonly GitChange[];
+		readonly workingTreeChanges: readonly GitChange[];
+		readonly untrackedChanges: readonly GitChange[];
+	};
+	status(): Promise<void>;
+	diff(cached?: boolean): Promise<string>;
+}
+
+interface GitApi {
+	readonly repositories: readonly GitRepository[];
+	getRepository(uri: vscode.Uri): GitRepository | null;
+}
+
+interface GitExtension {
+	readonly enabled: boolean;
+	getAPI(version: 1): GitApi;
+}
 
 export function activate(context: vscode.ExtensionContext): void {
 	backboardToolOutput = vscode.window.createOutputChannel('Backboard Tools');
@@ -49,6 +79,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	}));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.extension.signIn', () => promptBackboardSso(bridge)));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.refreshModels', () => bridge.refreshModels()));
+	context.subscriptions.push(vscode.commands.registerCommand('backboard.generateCommitMessage', (rootUri: vscode.Uri | undefined, _context: unknown, token: vscode.CancellationToken | undefined) => generateBackboardCommitMessage(bridge, rootUri, token)));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.openRightPanel', () => openBackboardView()));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.openPanel', () => openBackboardView()));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.newChat', async () => {
@@ -95,6 +126,139 @@ async function openBackboardView(): Promise<void> {
 	} catch {
 		// Older workbench states may not have registered the generated focus command yet.
 	}
+}
+
+async function generateBackboardCommitMessage(bridge: BackboardBridge, rootUri: vscode.Uri | undefined, cancellationToken: vscode.CancellationToken | undefined): Promise<void> {
+	if (!configuredBackboardApiKey()) {
+		const signIn = 'Sign In to Backboard';
+		const selection = await vscode.window.showInformationMessage('Sign in to Backboard before generating a commit message.', signIn);
+		if (selection === signIn) {
+			await promptBackboardSso(bridge);
+		}
+		return;
+	}
+
+	const gitExtension = vscode.extensions.getExtension<GitExtension>('vscode.git');
+	if (!gitExtension) {
+		void vscode.window.showErrorMessage('Git is unavailable, so Backboard cannot generate a commit message.');
+		return;
+	}
+
+	try {
+		const git = await gitExtension.activate();
+		if (!git.enabled) {
+			void vscode.window.showErrorMessage('Git is disabled, so Backboard cannot generate a commit message.');
+			return;
+		}
+
+		const api = git.getAPI(1);
+		const repository = rootUri
+			? api.getRepository(rootUri)
+			: api.repositories.length === 1 ? api.repositories[0] : undefined;
+		if (!repository) {
+			void vscode.window.showErrorMessage('Backboard could not find the Git repository for this commit message.');
+			return;
+		}
+
+		const generated = await vscode.window.withProgress({ location: vscode.ProgressLocation.SourceControl }, async () => {
+			await repository.status();
+			const hasStagedChanges = repository.state.indexChanges.length > 0;
+			const changes = hasStagedChanges
+				? repository.state.indexChanges
+				: [...repository.state.workingTreeChanges, ...repository.state.untrackedChanges];
+			if (changes.length === 0) {
+				void vscode.window.showInformationMessage('Cannot generate a commit message because there are no changes.');
+				return undefined;
+			}
+
+			const diff = await commitMessageDiff(repository, hasStagedChanges);
+			const prompt = commitMessagePrompt(repository, changes, diff, hasStagedChanges);
+			const fallbackTokenSource = cancellationToken ? undefined : new vscode.CancellationTokenSource();
+			const token = cancellationToken ?? fallbackTokenSource!.token;
+			let responseText = '';
+			let responseError: string | undefined;
+			try {
+				await bridge.send('sendPrompt', `commit-message:${repository.rootUri.toString()}`, {
+					content: prompt,
+					workspace: repository.rootUri.fsPath,
+					provider: commitMessageModelProvider,
+					model: commitMessageModel,
+					mode: 'manual',
+					intensity: 'fast'
+				}, event => {
+					if (event.type === 'assistantTextDelta' && event.text) {
+						responseText += event.text;
+					} else if (event.type === 'error') {
+						responseError = event.message ?? 'Backboard failed to generate a commit message.';
+					}
+				}, token);
+			} finally {
+				fallbackTokenSource?.dispose();
+			}
+			if (responseError) {
+				throw new Error(responseError);
+			}
+			return cleanCommitMessage(responseText);
+		});
+
+		if (generated) {
+			repository.inputBox.value = generated;
+		}
+	} catch (error) {
+		backboardToolOutput?.appendLine(`[commit-message] ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
+		void vscode.window.showErrorMessage(`Backboard could not generate a commit message: ${error instanceof Error ? error.message : String(error)}`);
+	}
+}
+
+async function commitMessageDiff(repository: GitRepository, cached: boolean): Promise<string> {
+	let diff = await repository.diff(cached);
+	if (!cached) {
+		for (const change of repository.state.untrackedChanges) {
+			if (diff.length >= maxCommitDiffChars) {
+				break;
+			}
+			const relativePath = path.relative(repository.rootUri.fsPath, change.uri.fsPath).split(path.sep).join('/');
+			try {
+				const bytes = await vscode.workspace.fs.readFile(change.uri);
+				const contents = Buffer.from(bytes).includes(0)
+					? '[binary file]'
+					: Buffer.from(bytes).toString('utf8');
+				diff += `\n\nUntracked file: ${relativePath}\n${contents}`;
+			} catch {
+				diff += `\n\nUntracked file: ${relativePath}\n[contents unavailable]`;
+			}
+		}
+	}
+	return diff.length > maxCommitDiffChars
+		? `${diff.slice(0, maxCommitDiffChars)}\n\n[diff truncated]`
+		: diff;
+}
+
+function commitMessagePrompt(repository: GitRepository, changes: readonly GitChange[], diff: string, cached: boolean): string {
+	const files = changes.map(change => path.relative(repository.rootUri.fsPath, change.uri.fsPath).split(path.sep).join('/'));
+	return [
+		'Generate a concise Git commit subject for the changes below.',
+		'Return exactly one plain-text line, with no quotes, Markdown, explanation, or trailing period.',
+		'Use imperative mood, keep it at most 72 characters, and follow Conventional Commits only if the changes clearly support a type.',
+		`Repository: ${path.basename(repository.rootUri.fsPath)}`,
+		`Branch: ${repository.state.HEAD?.name ?? 'unknown'}`,
+		`Changes used: ${cached ? 'staged' : 'working tree'}`,
+		`Files: ${files.join(', ')}`,
+		'',
+		'diff:',
+		diff || '[No textual diff is available; infer the subject from the changed file list.]'
+	].join('\n');
+}
+
+function cleanCommitMessage(value: string): string | undefined {
+	let message = value.trim();
+	const fenced = /^```(?:text)?\s*([\s\S]*?)\s*```$/i.exec(message);
+	if (fenced) {
+		message = fenced[1].trim();
+	}
+	message = message.split(/\r?\n/).map(line => line.trim()).find(Boolean) ?? '';
+	message = message.replace(/^commit message:\s*/i, '').replace(/^[`"']|[`"']$/g, '').trim();
+	return message || undefined;
 }
 
 async function setApiKey(): Promise<boolean> {
@@ -348,7 +512,7 @@ function isBackboardAuthError(error: unknown): boolean {
 
 function unsupportedVoiceModeMessage(voiceMode: string): string | undefined {
 	if (voiceMode === 'stt' || voiceMode === 'conversation') {
-		return 'Audio input is not implemented in the Backboard Studio host yet. Use TTS or turn voice off.';
+		return 'This voice mode needs microphone audio. Click the mic, record, then click it again to send.';
 	}
 	return undefined;
 }
@@ -1141,9 +1305,14 @@ function configuredBackboardAccessToken(): string | undefined {
 	return backboardConfigAccessToken(readBackboardConfigJsonSync());
 }
 
+function configuredBackboardApiKey(): string | undefined {
+	const configured = vscode.workspace.getConfiguration('backboard').get<string>('apiKey')?.trim();
+	return configured || backboardConfigApiKey(readBackboardConfigJsonSync());
+}
+
 function hasBackboardCredentials(): boolean {
 	const config = readBackboardConfigJsonSync();
-	return Boolean(backboardConfigApiKey(config) || backboardConfigAccessToken(config));
+	return Boolean(configuredBackboardApiKey() || backboardConfigAccessToken(config));
 }
 
 async function updateBackboardAuthContext(): Promise<void> {
@@ -2123,6 +2292,16 @@ class BackboardBridge implements vscode.Disposable {
 			case 'usage':
 				this.deliver({ type: 'usage', requestId, usage: event.usage });
 				return;
+			case 'turn:status':
+				this.deliver({
+					type: 'progress',
+					requestId,
+					message: event.phase === 'generating' ? 'Waiting for model.' : 'Preparing request.',
+				});
+				return;
+			case 'assistant:voice':
+				this.deliver({ type: 'voice', requestId, chunk: event.records ?? [] });
+				return;
 			case 'system:warning':
 				if (event.message) {
 					this.deliver({ type: 'progress', requestId, message: event.message });
@@ -2196,6 +2375,8 @@ interface ServeAgentEvent {
 	readonly inputSummary?: string;
 	readonly title?: string;
 	readonly usage?: unknown;
+	readonly records?: unknown[];
+	readonly phase?: 'preparing' | 'generating';
 	readonly request?: { readonly id?: string };
 }
 
@@ -2207,6 +2388,9 @@ function buildServeOp(command: string, requestId: string, params: unknown): Reco
 		const model = typeof record.model === 'string' ? record.model : 'deepseek/deepseek-v4-flash';
 		const mode = typeof record.mode === 'string' ? record.mode : 'free';
 		const intensity = typeof record.intensity === 'string' ? record.intensity : undefined;
+		const voiceMode = typeof record.voiceMode === 'string' ? record.voiceMode : 'off';
+		const voice = voiceConfigForMode(voiceMode);
+		const audioFile = serveAudioFile(record.audioFile);
 		// No approval or question UI exists in this panel: run auto-approved,
 		// hide AskUser, and in manual/ask modes hide write tools entirely
 		// (parity with the old bridge's manual-mode denials).
@@ -2218,10 +2402,13 @@ function buildServeOp(command: string, requestId: string, params: unknown): Reco
 			op: 'submit',
 			requestId,
 			prompt: typeof record.content === 'string' ? record.content : '',
+			...(typeof record.threadId === 'string' && record.threadId ? { threadId: record.threadId } : {}),
 			model: `${provider}/${model}`,
 			permission: 'autoApprove',
 			excludedTools,
 			...(thinking ? { thinking } : {}),
+			...(voice ? { voice } : {}),
+			...(audioFile ? { audioFile } : {}),
 		};
 	}
 	if (command === 'listModels') {
@@ -2231,6 +2418,36 @@ function buildServeOp(command: string, requestId: string, params: unknown): Reco
 		return { op: 'listTools', requestId };
 	}
 	return { op: command, requestId };
+}
+
+function voiceConfigForMode(voiceMode: string): Record<string, unknown> | undefined {
+	const stt = { provider: 'openai', model: 'gpt-4o-mini-transcribe', language: 'en' };
+	const tts = { provider: 'openai', model: 'tts-1', voice: 'alloy', output_format: 'mp3' };
+	if (voiceMode === 'stt') {
+		return { stt };
+	}
+	if (voiceMode === 'tts') {
+		return { tts };
+	}
+	if (voiceMode === 'conversation') {
+		return { stt, tts };
+	}
+	return undefined;
+}
+
+function serveAudioFile(value: unknown): Record<string, string> | undefined {
+	if (!isObjectRecord(value) || !Array.isArray(value.data) || typeof value.fileName !== 'string' || typeof value.mimeType !== 'string') {
+		return undefined;
+	}
+	const bytes = value.data.filter((item): item is number => typeof item === 'number' && Number.isInteger(item) && item >= 0 && item <= 255);
+	if (!bytes.length || bytes.length !== value.data.length) {
+		return undefined;
+	}
+	return {
+		fileName: value.fileName,
+		mimeType: value.mimeType,
+		dataBase64: Buffer.from(bytes).toString('base64'),
+	};
 }
 
 /** Terminal events for commands with no serve equivalent. */
@@ -2262,9 +2479,7 @@ function serveCredentialEnv(): Record<string, string> {
 		BACKBOARD_SESSION_ROOT: path.join(os.homedir(), '.backboard_ide', 'cli-ts-sessions'),
 	};
 	const settings = readSettings().config;
-	const configured = vscode.workspace.getConfiguration('backboard').get<string>('apiKey')?.trim();
-	const persisted = readBackboardIdeConfigApiKey(settings.env);
-	const apiKey = configured || persisted;
+	const apiKey = configuredBackboardApiKey();
 	if (apiKey) {
 		out['BACKBOARD_API_KEY'] = apiKey;
 	}
@@ -2272,21 +2487,6 @@ function serveCredentialEnv(): Record<string, string> {
 		out['BACKBOARD_API_URL'] = settings.apiUrl;
 	}
 	return out;
-}
-
-function readBackboardIdeConfigApiKey(env: string): string | undefined {
-	try {
-		const parsed: unknown = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.backboard_ide', 'config.json'), 'utf8'));
-		if (!isObjectRecord(parsed)) {
-			return undefined;
-		}
-		const direct = typeof parsed.api_key === 'string' && parsed.api_key ? parsed.api_key : undefined;
-		const envKeys = isObjectRecord(parsed.env_keys) ? parsed.env_keys : undefined;
-		const byEnv = envKeys && typeof envKeys[env] === 'string' ? envKeys[env] as string : undefined;
-		return direct ?? byEnv;
-	} catch {
-		return undefined;
-	}
 }
 
 function bridgeInactivityTimeoutMs(command: string): number {

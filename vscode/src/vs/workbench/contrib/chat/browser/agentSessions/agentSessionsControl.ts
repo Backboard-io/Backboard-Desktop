@@ -60,6 +60,7 @@ export interface IAgentSessionsControlOptions {
 	readonly useStatusOnlyIcons?: boolean;
 	readonly compactShowMore?: boolean;
 	readonly compactRows?: boolean;
+	readonly showDiffFileCount?: boolean;
 
 	getHoverPosition(): HoverPosition;
 	trackActiveEditorSession(): boolean;

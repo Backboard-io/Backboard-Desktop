@@ -54,15 +54,15 @@ function findBinary(name: string): string | undefined {
  * (keychain, credential file, enterprise helpers) without guessing names.
  */
 export async function isClaudeLoggedIn(): Promise<boolean> {
+	const claude = findBinary('claude');
+	if (!claude) {
+		return false;
+	}
 	try {
 		fs.accessSync(join(homedir(), '.claude', '.credentials.json'), fs.constants.R_OK);
 		return true;
 	} catch {
 		// fall through to the CLI probe
-	}
-	const claude = findBinary('claude');
-	if (!claude) {
-		return false;
 	}
 	return new Promise<boolean>(resolve => {
 		execFile(claude, ['auth', 'status'], { timeout: 10_000 }, (err, stdout) => {

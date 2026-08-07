@@ -39,7 +39,6 @@ import { ClaudeAgent } from './claude/claudeAgent.js';
 import { ClaudeAgentSdkService, ClaudeSdkPackage, IClaudeAgentSdkService } from './claude/claudeAgentSdkService.js';
 import { ClaudeProxyService, IClaudeProxyService } from './claude/claudeProxyService.js';
 import { CodexAgent, CodexSdkPackage, findCodexOnPath } from './codex/codexAgent.js';
-import { OpenCodeAgent, findOpenCodeOnPath } from './opencode/opencodeAgent.js';
 import { isClaudeLoggedIn, isCodexLoggedIn } from './shared/agentLoginProbes.js';
 
 /**
@@ -63,7 +62,7 @@ import { AgentSdkDownloader, IAgentSdkDownloader } from './agentSdkDownloader.js
 import { IAgentHostOTelService } from '../common/otel/agentHostOTelService.js';
 import { AgentHostOTelService } from './otel/agentHostOTelService.js';
 import { AgentService } from './agentService.js';
-import { AgentHostClaudeAgentEnabledEnvVar, AgentHostClaudeSdkRootEnvVar, AgentHostCodexAgentEnabledEnvVar, AgentHostOpenCodeAgentEnabledEnvVar, IAgentService, AgentHostCodexAgentSdkRootEnvVar, isAgentEnabled } from '../common/agentService.js';
+import { AgentHostClaudeAgentEnabledEnvVar, AgentHostClaudeSdkRootEnvVar, AgentHostCodexAgentEnabledEnvVar, IAgentService, AgentHostCodexAgentSdkRootEnvVar, isAgentEnabled } from '../common/agentService.js';
 import { IAgentConfigurationService } from './agentConfigurationService.js';
 import { IAgentHostCompletions } from './agentHostCompletions.js';
 import { IAgentHostTerminalManager } from './agentHostTerminalManager.js';
@@ -329,11 +328,6 @@ async function main(): Promise<void> {
 			const codexAgent = disposables.add(instantiationService.createInstance(CodexAgent));
 			agentService.registerProvider(codexAgent);
 			log('CodexAgent registered');
-		}
-		if (isAgentEnabled(process.env[AgentHostOpenCodeAgentEnabledEnvVar], false) && findOpenCodeOnPath() !== undefined) {
-			const opencodeAgent = disposables.add(instantiationService.createInstance(OpenCodeAgent));
-			agentService.registerProvider(opencodeAgent);
-			log('OpenCodeAgent registered');
 		}
 	}
 

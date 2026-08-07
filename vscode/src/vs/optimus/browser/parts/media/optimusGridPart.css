@@ -20,7 +20,7 @@
 	--optimus-success: var(--vscode-charts-green);
 	--optimus-danger: var(--vscode-charts-red);
 	--optimus-warning: var(--vscode-charts-yellow);
-	--optimus-shadow: color-mix(in srgb, var(--vscode-widget-shadow, #000) 28%, transparent);
+	--optimus-shadow: color-mix(in srgb, var(--vscode-widget-shadow, var(--vscode-foreground)) 28%, transparent);
 }
 
 .agent-sessions-workbench .part.titlebar.optimus-titlebar .titlebar-container,
@@ -32,6 +32,8 @@
    titlebar widgets (see openInVSCode.css and the panel-header toolbars) so
    switching modes doesn't visually move or restyle the controls. */
 .optimus-window-chrome {
+	--optimus-border: var(--vscode-widget-border, var(--vscode-sideBar-border, var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 15%, transparent))));
+	--optimus-sidebar-width: 0px;
 	position: absolute;
 	top: 0;
 	left: 0;
@@ -41,20 +43,48 @@
 	pointer-events: none;
 	display: flex;
 	align-items: center;
-	gap: 4px;
+	gap: 8px;
 	padding-left: 78px;
-	padding-right: 10px;
+	padding-right: 8px;
 	box-sizing: border-box;
 	-webkit-app-region: drag;
-	/* Deliberately unpainted. The strip is a sibling of the workbench grid at a
-	   far higher z-index, and the grid is its own stacking context, so any
-	   background here paints over the top 32px of the column separators (the
-	   `::after` overlays on the sidebar and auxiliary-bar grid wrappers) and
-	   they stop short of the window's top edge. Nothing needs covering: every
-	   column reserves its own space behind the strip — the sidebar's empty 32px
-	   header, the board's 42px padding, the chat panel's composite title — so
-	   no content scrolls under the controls. */
+	/* Keep the sidebar segment genuinely transparent. A translucent ::before
+	   cannot reveal vibrancy if it is composited over an opaque parent, so the
+	   title surface begins only after the live sidebar width. */
+	background: linear-gradient(to right,
+		transparent 0,
+		transparent var(--optimus-sidebar-width),
+		var(--vscode-titleBar-activeBackground) var(--optimus-sidebar-width),
+		var(--vscode-titleBar-activeBackground) 100%);
+	border-bottom: 0;
+}
+
+/* The titlebar rule belongs to the opaque workspace, not the glass sidebar.
+   Starting it at the live sidebar edge avoids a seam through the translucent
+   material while preserving the header boundary over the centre/right area. */
+.optimus-window-chrome::after {
+	content: '';
+	position: absolute;
+	left: var(--optimus-sidebar-width);
+	right: 0;
+	bottom: 0;
+	height: 1px;
+	background: color-mix(in srgb, var(--optimus-border) 62%, transparent);
+	pointer-events: none;
+}
+
+.optimus-window-chrome.sidebar-visible::before {
+	content: '';
+	position: absolute;
+	inset: 0 auto 0 0;
+	width: var(--optimus-sidebar-width);
+	box-sizing: border-box;
+	/* No tint here: the macOS vibrancy surface is already underneath the
+	   custom chrome. Painting the sidebar token a second time makes this strip
+	   darker and visually opaque compared with the sidebar immediately below. */
 	background: transparent;
+	border-right: 1px solid var(--sessions-panel-divider-color);
+	pointer-events: none;
 }
 
 /* Appears with the rest of the workbench rather than dropping onto an
@@ -80,7 +110,9 @@
 }
 
 .optimus-window-chrome-button,
-.optimus-window-chrome-mode {
+.optimus-window-chrome-mode,
+.optimus-window-nav-button,
+.optimus-window-command-center {
 	pointer-events: auto;
 	-webkit-app-region: no-drag;
 	border: 0;
@@ -89,9 +121,10 @@
 }
 
 /* Panel toggles: standard toolbar action look (22px codicon buttons). */
-.optimus-window-chrome-button {
-	width: 22px;
-	height: 22px;
+.optimus-window-chrome-button,
+.optimus-window-nav-button {
+	width: 24px;
+	height: 24px;
 	border-radius: 5px;
 	display: inline-flex;
 	align-items: center;
@@ -101,11 +134,13 @@
 }
 
 /* Icon buttons brighten on hover instead of gaining a fill. */
-.optimus-window-chrome-button {
+.optimus-window-chrome-button,
+.optimus-window-nav-button {
 	opacity: 0.75;
 }
 
-.optimus-window-chrome-button:hover {
+.optimus-window-chrome-button:hover,
+.optimus-window-nav-button:hover:not(:disabled) {
 	background: transparent;
 	opacity: 1;
 	color: var(--vscode-foreground);
@@ -119,6 +154,125 @@
 
 .optimus-window-chrome-button.checked:hover {
 	background: transparent;
+}
+
+.optimus-window-navigation {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	flex: 0 0 auto;
+}
+
+/* Treat arrows + command search as one navigation instrument and pin its
+   optical centre to the window, independent of the mode and panel controls. */
+.optimus-window-navigation-cluster {
+	position: absolute;
+	top: 0;
+	left: 50%;
+	height: 32px;
+	width: min(660px, calc(100vw - 460px));
+	min-width: 300px;
+	transform: translateX(-50%);
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	pointer-events: none;
+}
+
+.optimus-window-navigation-cluster > * {
+	pointer-events: auto;
+}
+
+.optimus-window-nav-button {
+	border: 0;
+	background: transparent;
+	color: var(--vscode-icon-foreground);
+	cursor: pointer;
+}
+
+.optimus-window-nav-button:disabled {
+	opacity: 0.3;
+	cursor: default;
+}
+
+.optimus-window-command-center {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	width: auto;
+	min-width: 180px;
+	flex: 1 1 auto;
+	height: 24px;
+	box-sizing: border-box;
+	padding: 0 5px 0 9px;
+	border: 1px solid color-mix(in srgb, var(--optimus-border) 72%, transparent);
+	border-radius: 6px;
+	background: color-mix(in srgb, var(--vscode-input-background) 88%, var(--vscode-foreground) 12%);
+	color: var(--vscode-input-foreground);
+}
+
+.optimus-window-command-center:focus-within {
+	border-color: color-mix(in srgb, var(--vscode-focusBorder) 68%, var(--optimus-border));
+}
+
+.optimus-window-command-icon {
+	flex: 0 0 auto;
+	font-size: 13px;
+	color: var(--vscode-input-placeholderForeground);
+}
+
+.optimus-window-command-input {
+	min-width: 0;
+	flex: 1;
+	border: 0;
+	outline: 0;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	font-size: 12px;
+}
+
+.optimus-window-command-input::placeholder {
+	color: var(--vscode-input-placeholderForeground);
+}
+
+.optimus-window-command-input::-webkit-search-cancel-button {
+	display: none;
+}
+
+.optimus-window-command-shortcuts {
+	display: flex;
+	align-items: center;
+	gap: 3px;
+	flex: 0 0 auto;
+}
+
+.optimus-window-command-key {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 17px;
+	height: 17px;
+	box-sizing: border-box;
+	padding: 0 3px;
+	border: 1px solid color-mix(in srgb, var(--optimus-border) 68%, transparent);
+	border-radius: 3px;
+	background: color-mix(in srgb, var(--vscode-foreground) 6%, transparent);
+	color: var(--vscode-descriptionForeground);
+	font-size: 10px;
+	line-height: 1;
+}
+
+.optimus-window-command-key.codicon {
+	font-size: 10px;
+}
+
+.optimus-window-actions {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-left: auto;
+	flex: 0 0 auto;
 }
 
 /* Mode selector: identical sizing to the Editor window's mode switcher
@@ -146,7 +300,9 @@
 .optimus-window-chrome-button:focus,
 .optimus-window-chrome-button:focus-visible,
 .optimus-window-chrome-mode:focus,
-.optimus-window-chrome-mode:focus-visible {
+.optimus-window-chrome-mode:focus-visible,
+.optimus-window-nav-button:focus,
+.optimus-window-nav-button:focus-visible {
 	outline: none;
 	box-shadow: none;
 }
@@ -156,74 +312,214 @@
 	opacity: 0.7;
 }
 
+.optimus-window-chrome-mode-label {
+	white-space: nowrap;
+}
+
 .optimus-window-chrome-mode-chevron {
-	font-size: 12px;
+	font-size: 11px;
 	opacity: 0.72;
 }
 
-.optimus-window-chrome-switcher {
-	pointer-events: auto;
-	-webkit-app-region: no-drag;
-	margin-left: 6px;
-}
-
-.optimus-window-chrome-switcher .optimus-view-switcher-segment {
-	padding: 2px 10px;
-}
-
 .optimus-window-chrome-plus {
-	margin-left: auto;
+	margin-left: 0;
 }
 
 .optimus-window-chrome-secondary {
 	margin-left: 0;
 }
 
-.optimus-grid {
-	display: grid;
-	/* Fixed 3x2 layout: six card slots per page, pagination beyond that. */
-	grid-template-columns: repeat(3, minmax(0, 1fr));
-	grid-template-rows: repeat(2, minmax(0, 1fr));
-	gap: 14px;
-	padding: 14px;
-	flex: 1;
-	min-height: 0;
-	min-width: 0;
-	overflow: hidden;
+@media (max-width: 920px) {
+	.optimus-window-chrome {
+		padding-left: 78px;
+	}
+
+	.optimus-window-command-shortcuts {
+		display: none;
+	}
+
+	.optimus-window-navigation-cluster {
+		width: calc(100vw - 400px);
+		min-width: 260px;
+	}
 }
 
-.optimus-grid-pager {
+/* --- Sessions dashboard ------------------------------------------------- */
+
+.optimus-dashboard-header {
+	flex: 0 0 auto;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 42px 14px 10px;
+	border-bottom: 1px solid var(--optimus-border-subtle);
+}
+
+.optimus-dashboard-primary,
+.optimus-dashboard-secondary,
+.optimus-dashboard-controls,
+.optimus-dashboard-search,
+.optimus-dashboard-button,
+.optimus-dashboard-filter-chip {
 	display: flex;
 	align-items: center;
-	justify-content: center;
-	gap: 10px;
-	padding: 2px 0 10px;
+}
+
+.optimus-dashboard-primary {
+	gap: 12px;
+}
+
+.optimus-dashboard-controls {
+	min-width: 0;
+	margin-left: auto;
+	gap: 8px;
+}
+
+.optimus-dashboard-search {
+	width: clamp(180px, 28vw, 320px);
+	height: 28px;
+	gap: 7px;
+	box-sizing: border-box;
+	padding: 0 9px;
+	border: 1px solid var(--vscode-input-border, var(--optimus-border));
+	border-radius: 6px;
+	background: var(--vscode-input-background);
+	color: var(--vscode-input-foreground);
+}
+
+.optimus-dashboard-search:focus-within {
+	border-color: var(--optimus-focus);
+}
+
+.optimus-dashboard-search > .codicon {
+	font-size: 13px;
 	color: var(--optimus-muted);
+}
+
+.optimus-dashboard-search-input {
+	width: 100%;
+	min-width: 0;
+	border: 0;
+	outline: 0;
+	background: transparent;
+	color: inherit;
+	font: inherit;
 	font-size: 12px;
 }
 
-.optimus-grid-pager button {
-	width: 24px;
-	height: 24px;
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	border: 0;
-	border-radius: 5px;
-	background: transparent;
-	color: var(--vscode-icon-foreground);
-	cursor: pointer;
-	font-size: 16px;
+.optimus-dashboard-search-input::placeholder {
+	color: var(--vscode-input-placeholderForeground);
 }
 
-.optimus-grid-pager button:hover:not(:disabled) {
+.optimus-dashboard-search-input::-webkit-search-cancel-button {
+	display: none;
+}
+
+.optimus-dashboard-button,
+.optimus-dashboard-reset,
+.optimus-dashboard-filter-chip,
+.optimus-no-results-action {
+	border: 0;
+	font-family: inherit;
+	cursor: pointer;
+}
+
+.optimus-dashboard-button {
+	height: 28px;
+	gap: 6px;
+	padding: 0 9px;
+	border: 1px solid var(--optimus-border);
+	border-radius: 6px;
 	background: transparent;
+	color: var(--vscode-foreground);
+	font-size: 12px;
+}
+
+.optimus-dashboard-button:hover,
+.optimus-dashboard-filter-chip:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+}
+
+.optimus-dashboard-button > .codicon {
+	font-size: 13px;
+	color: var(--optimus-muted);
+}
+
+.optimus-dashboard-filter-count {
+	min-width: 16px;
+	height: 16px;
+	box-sizing: border-box;
+	padding: 0 4px;
+	border-radius: 8px;
+	background: var(--vscode-badge-background);
+	color: var(--vscode-badge-foreground);
+	font-size: 10px;
+	line-height: 16px;
+	text-align: center;
+}
+
+.optimus-dashboard-filter-count.empty {
+	display: none;
+}
+
+.optimus-dashboard-reset {
+	padding: 4px 2px;
+	background: transparent;
+	color: var(--optimus-muted);
+	font-size: 12px;
+	white-space: nowrap;
+}
+
+.optimus-dashboard-reset:hover {
 	color: var(--vscode-foreground);
 }
 
-.optimus-grid-pager button:disabled {
-	opacity: 0.4;
-	cursor: default;
+.optimus-dashboard-secondary {
+	min-height: 24px;
+	gap: 10px;
+}
+
+.optimus-dashboard-filter-chips {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 5px;
+	min-width: 0;
+}
+
+.optimus-dashboard-filter-chips.empty {
+	display: none;
+}
+
+.optimus-dashboard-filter-chip {
+	height: 22px;
+	gap: 5px;
+	padding: 0 7px;
+	border: 1px solid color-mix(in srgb, var(--optimus-focus) 35%, var(--optimus-border));
+	border-radius: 11px;
+	background: color-mix(in srgb, var(--optimus-focus) 8%, transparent);
+	color: var(--vscode-foreground);
+	font-size: 11px;
+}
+
+.optimus-dashboard-filter-chip .codicon {
+	font-size: 11px;
+	color: var(--optimus-muted);
+}
+
+.optimus-dashboard-results {
+	margin-left: auto;
+	color: var(--optimus-muted);
+	font-size: 11px;
+	white-space: nowrap;
+}
+
+.optimus-dashboard-button:focus-visible,
+.optimus-dashboard-reset:focus-visible,
+.optimus-dashboard-filter-chip:focus-visible,
+.optimus-no-results-action:focus-visible {
+	outline: 1px solid var(--optimus-focus);
+	outline-offset: 1px;
 }
 
 /* Flat, workbench-density cards: 1px borders and hover tints instead of
@@ -426,6 +722,350 @@
 	position: relative;
 }
 
+/* The question renderer normally inherits its layout from `.interactive-session`.
+   Cards intentionally host a bare chat list, so without a scoped compact
+   treatment the question falls back to unstyled HTML (including a white
+   textarea and a full-width submit button). This is a tile-native version of
+   the same live widget: two-column choices, a dark input, and a quiet action
+   rail. Unlike the rest of the transcript, these controls remain interactive. */
+.optimus-card-chat:has(.chat-question-carousel-container) {
+	-webkit-mask-image: none;
+	mask-image: none;
+}
+
+.optimus-card-chat .chat-question-carousel-container {
+	display: flex;
+	flex-direction: column;
+	position: relative;
+	max-height: none;
+	margin: 4px 8px 8px;
+	border: 1px solid color-mix(in srgb, var(--optimus-warning) 24%, var(--optimus-border));
+	border-radius: 7px;
+	background: color-mix(in srgb, var(--optimus-warning) 4%, var(--optimus-card));
+	color: var(--vscode-foreground);
+	overflow: hidden;
+	container-type: inline-size;
+	cursor: default;
+}
+
+.optimus-card-chat .chat-question-carousel-content,
+.optimus-card-chat .chat-question-header-row {
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+}
+
+.optimus-card-chat .chat-question-title-row {
+	display: flex;
+	align-items: flex-start;
+	gap: 6px;
+	min-width: 0;
+	padding: 7px 8px 7px 10px;
+	border-bottom: 1px solid var(--optimus-border-subtle);
+}
+
+.optimus-card-chat .chat-question-title {
+	display: -webkit-box;
+	flex: 1;
+	min-width: 0;
+	margin: 0;
+	overflow: hidden;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+	font-size: 12px;
+	font-weight: 600;
+	line-height: 16px;
+	word-break: break-word;
+}
+
+.optimus-card-chat .chat-question-title .rendered-markdown p {
+	margin: 0;
+}
+
+/* The long preamble duplicates the title in card-sized asks. Keep the actual
+   question, which is both denser and the label announced by the controls. */
+.optimus-card-chat .chat-question-carousel-message {
+	display: none;
+}
+
+.optimus-card-chat .chat-question-header-actions {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	flex-shrink: 0;
+}
+
+.optimus-card-chat .monaco-button.chat-question-close,
+.optimus-card-chat .monaco-button.chat-question-collapse-toggle,
+.optimus-card-chat .monaco-button.chat-question-focus-terminal,
+.optimus-card-chat .monaco-button.chat-question-nav-arrow {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 20px;
+	width: 20px;
+	height: 20px;
+	padding: 0;
+	border: 0 !important;
+	border-radius: 4px;
+	box-shadow: none !important;
+	background: transparent !important;
+	color: var(--vscode-icon-foreground) !important;
+}
+
+.optimus-card-chat .monaco-button.chat-question-close:hover:not(.disabled),
+.optimus-card-chat .monaco-button.chat-question-collapse-toggle:hover:not(.disabled),
+.optimus-card-chat .monaco-button.chat-question-focus-terminal:hover:not(.disabled),
+.optimus-card-chat .monaco-button.chat-question-nav-arrow:hover:not(.disabled) {
+	background: var(--vscode-toolbar-hoverBackground) !important;
+}
+
+.optimus-card-chat .chat-question-description {
+	display: -webkit-box;
+	padding: 4px 10px 0;
+	overflow: hidden;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+	font-size: 10.5px;
+	line-height: 14px;
+	color: var(--optimus-muted);
+}
+
+.optimus-card-chat .chat-question-input-scrollable {
+	flex: 0 1 auto;
+	min-height: 0;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+}
+
+.optimus-card-chat .chat-question-input-container {
+	display: flex;
+	flex-direction: column;
+	gap: 5px;
+	min-width: 0;
+	padding: 6px 8px;
+}
+
+.optimus-card-chat .chat-question-input-container::after {
+	display: none;
+}
+
+.optimus-card-chat .chat-question-list {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 4px;
+	min-width: 0;
+	padding: 0;
+	outline: none;
+}
+
+.optimus-card-chat .chat-question-list-item {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+	min-height: 28px;
+	box-sizing: border-box;
+	padding: 4px 6px;
+	border: 1px solid color-mix(in srgb, var(--optimus-border) 82%, transparent);
+	border-radius: 5px;
+	background: color-mix(in srgb, var(--vscode-foreground) 3%, transparent);
+	cursor: pointer;
+	user-select: none;
+}
+
+.optimus-card-chat .chat-question-list-item:hover {
+	border-color: color-mix(in srgb, var(--optimus-warning) 42%, var(--optimus-border));
+	background: color-mix(in srgb, var(--optimus-warning) 7%, transparent);
+}
+
+.optimus-card-chat .chat-question-list-item:focus,
+.optimus-card-chat .chat-question-list:focus {
+	outline: none;
+}
+
+.optimus-card-chat .chat-question-list:focus .chat-question-list-item.selected,
+.optimus-card-chat .chat-question-list-item.selected {
+	border-color: color-mix(in srgb, var(--optimus-warning) 58%, var(--optimus-border));
+	background: color-mix(in srgb, var(--optimus-warning) 13%, transparent);
+	color: var(--vscode-foreground);
+}
+
+.optimus-card-chat .chat-question-list-number {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 17px;
+	height: 17px;
+	box-sizing: border-box;
+	border: 1px solid var(--optimus-muted);
+	border-radius: 50%;
+	font-size: 9px;
+	font-weight: 600;
+	line-height: 1;
+	color: var(--optimus-muted);
+	flex-shrink: 0;
+}
+
+.optimus-card-chat .chat-question-list-item.selected .chat-question-list-number {
+	border-color: var(--optimus-warning);
+	background: var(--optimus-warning);
+	color: var(--vscode-editor-background);
+}
+
+.optimus-card-chat .chat-question-list-label {
+	display: flex;
+	align-items: baseline;
+	gap: 4px;
+	min-width: 0;
+	flex: 1;
+	overflow: hidden;
+	font-size: 10.5px;
+	line-height: 14px;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+.optimus-card-chat .chat-question-list-label-title {
+	font-weight: 600;
+	flex-shrink: 0;
+}
+
+.optimus-card-chat .chat-question-list-label-desc {
+	min-width: 0;
+	flex: 1;
+	overflow: hidden;
+	color: var(--optimus-muted);
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+.optimus-card-chat .chat-question-list-indicator,
+.optimus-card-chat .chat-question-list-checkbox {
+	display: none;
+}
+
+.optimus-card-chat .chat-question-freeform {
+	display: grid;
+	grid-template-columns: 17px minmax(0, 1fr);
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+	margin: 0;
+	padding: 0 1px;
+}
+
+.optimus-card-chat .chat-question-freeform-number {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 17px;
+	height: 17px;
+	font-size: 12px;
+	color: var(--optimus-muted);
+}
+
+.optimus-card-chat .chat-question-freeform-textarea {
+	width: 100%;
+	min-width: 0;
+	min-height: 28px;
+	max-height: 60px;
+	box-sizing: border-box;
+	padding: 5px 7px;
+	border: 1px solid color-mix(in srgb, var(--optimus-border) 86%, transparent);
+	border-radius: 5px;
+	outline: none;
+	resize: none;
+	background: color-mix(in srgb, var(--vscode-input-background) 92%, var(--vscode-foreground) 8%);
+	color: var(--vscode-input-foreground);
+	font-family: var(--vscode-chat-font-family, inherit);
+	font-size: 10.5px;
+	line-height: 16px;
+	overflow-y: hidden;
+}
+
+.optimus-card-chat .chat-question-freeform-textarea:focus {
+	border-color: var(--optimus-warning);
+	box-shadow: 0 0 0 1px color-mix(in srgb, var(--optimus-warning) 30%, transparent);
+}
+
+.optimus-card-chat .chat-question-freeform-textarea::placeholder {
+	color: var(--vscode-input-placeholderForeground);
+}
+
+.optimus-card-chat .chat-question-validation-message {
+	padding: 0 9px 5px;
+	font-size: 10px;
+	line-height: 13px;
+	color: var(--vscode-editorWarning-foreground);
+}
+
+.optimus-card-chat .chat-question-footer-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 6px;
+	min-height: 31px;
+	box-sizing: border-box;
+	padding: 4px 7px;
+	border-top: 1px solid var(--optimus-border-subtle);
+}
+
+.optimus-card-chat .chat-question-footer-left,
+.optimus-card-chat .chat-question-footer-right,
+.optimus-card-chat .chat-question-nav-arrows {
+	display: flex;
+	align-items: center;
+	gap: 3px;
+}
+
+.optimus-card-chat .chat-question-footer-right {
+	margin-left: auto;
+}
+
+.optimus-card-chat .chat-question-step-indicator {
+	font-size: 10px;
+	color: var(--optimus-muted);
+}
+
+.optimus-card-chat .chat-question-dismiss-hint,
+.optimus-card-chat .chat-question-submit-hint {
+	display: none;
+}
+
+.optimus-card-chat .monaco-button.chat-question-submit-button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: auto;
+	min-width: 0;
+	height: 23px;
+	padding: 0 9px;
+	border: 0 !important;
+	border-radius: 5px;
+	background: color-mix(in srgb, var(--optimus-warning) 82%, var(--vscode-button-background)) !important;
+	color: var(--vscode-editor-background) !important;
+	font-size: 10.5px;
+	font-weight: 600;
+}
+
+.optimus-card-chat .monaco-button.chat-question-submit-button:hover:not(.disabled) {
+	background: var(--optimus-warning) !important;
+}
+
+.optimus-card-chat .chat-question-carousel-collapsed .chat-question-description,
+.optimus-card-chat .chat-question-carousel-collapsed .chat-question-input-scrollable,
+.optimus-card-chat .chat-question-carousel-collapsed .chat-question-validation-message,
+.optimus-card-chat .chat-question-carousel-collapsed .chat-question-footer-row {
+	display: none;
+}
+
+@container (max-width: 330px) {
+	.optimus-card-chat .chat-question-list {
+		grid-template-columns: 1fr;
+	}
+}
+
 /* Cards preview the conversation plus streamed thinking (kept for the live
    "everything is streaming" feel); standalone tool calls, progress, references
    and confirmations stay hidden. The right panel renders everything. Deny-list
@@ -589,17 +1229,6 @@
 	font-size: 11.5px;
 }
 
-/* Right panel: editor-style chat host with a folder row under the composer. */
-.optimus-chat-view {
-	display: flex;
-	flex-direction: column;
-	position: relative;
-	height: 100%;
-	width: 100%;
-	min-height: 0;
-	min-width: 0;
-}
-
 .optimus-chat-editor-host {
 	flex: 1;
 	min-height: 0;
@@ -612,6 +1241,20 @@
 	display: flex;
 	align-items: center;
 	padding: 0 12px;
+}
+
+/* The Editor folder picker belongs to the prompt it scopes. When the chat
+ * widget is available, keep it in the input block directly below the composer
+ * instead of letting the pane's outer flex column push it to the footer. */
+.optimus-chat-view .interactive-input-part:has(> .optimus-chat-folder-row) {
+	flex-direction: column;
+}
+
+.optimus-chat-view .interactive-input-part > .optimus-chat-folder-row {
+	width: 100%;
+	margin-top: 2px;
+	padding: 0 4px;
+	box-sizing: border-box;
 }
 
 /* --- Diff badge (SCM-style +N −N) --------------------------------------- */
@@ -674,36 +1317,31 @@
 	}
 }
 
-/* --- Kanban board --------------------------------------------------------
-   Three status columns sharing the grid's cards. Columns scroll on their own;
-   there is no pagination in this view. */
+/* --- Board ---------------------------------------------------------------
+   Three Devin-style status columns sharing the existing Advanced cards. */
 
 .optimus-kanban {
-	display: none;
+	display: flex;
 	flex: 1;
 	min-height: 0;
 	min-width: 0;
 	gap: 12px;
 	padding: 12px 14px 14px;
-	overflow-x: hidden;
+	overflow-x: auto;
 }
 
-.optimus-grid-content.view-kanban .optimus-grid,
-.optimus-grid-content.view-kanban .optimus-grid-pager {
+.optimus-grid-content.view-list .optimus-kanban {
 	display: none;
-}
-
-.optimus-grid-content.view-kanban .optimus-kanban {
-	display: flex;
 }
 
 .optimus-kanban-column {
 	flex: 1 1 0;
-	min-width: 0;
+	min-width: 250px;
 	min-height: 0;
 	display: flex;
 	flex-direction: column;
-	background: color-mix(in srgb, var(--vscode-foreground) 3.5%, transparent);
+	background: color-mix(in srgb, var(--vscode-foreground) 2.5%, transparent);
+	border: 1px solid color-mix(in srgb, var(--optimus-border) 48%, transparent);
 	border-radius: 8px;
 	padding: 4px;
 }
@@ -730,11 +1368,11 @@
 	color: var(--vscode-charts-blue, var(--optimus-focus));
 }
 
-.optimus-kanban-column.attention .optimus-kanban-column-icon {
+.optimus-kanban-column.blocked .optimus-kanban-column-icon {
 	color: var(--optimus-warning);
 }
 
-.optimus-kanban-column.done .optimus-kanban-column-icon {
+.optimus-kanban-column.ready .optimus-kanban-column-icon {
 	color: var(--optimus-success);
 }
 
@@ -758,6 +1396,159 @@
 	height: 240px;
 }
 
+/* --- Compact List -------------------------------------------------------- */
+
+.optimus-session-list {
+	display: none;
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+	padding: 8px 14px 18px;
+}
+
+.optimus-grid-content.view-list .optimus-session-list {
+	display: block;
+}
+
+.optimus-session-list-group {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	height: 34px;
+	padding: 8px 8px 4px;
+	box-sizing: border-box;
+	color: var(--optimus-muted);
+	font-size: 11px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: .04em;
+}
+
+.optimus-session-list-group .codicon {
+	font-size: 12px;
+}
+
+.optimus-session-list-group-count {
+	margin-left: auto;
+	font-weight: 400;
+}
+
+.optimus-session-list-item {
+	border-bottom: 1px solid var(--optimus-border-subtle);
+}
+
+.optimus-session-list-item:first-child,
+.optimus-session-list-group + .optimus-session-list-item {
+	border-top: 1px solid var(--optimus-border-subtle);
+}
+
+.optimus-session-list-row {
+	display: grid;
+	grid-template-columns: 8px minmax(180px, 1fr) minmax(90px, auto) 92px 18px;
+	align-items: center;
+	gap: 10px;
+	width: 100%;
+	min-height: 58px;
+	box-sizing: border-box;
+	padding: 8px 10px;
+	border: 0;
+	background: transparent;
+	color: var(--vscode-foreground);
+	font-family: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+
+.optimus-session-list-row:hover {
+	background: var(--vscode-list-hoverBackground);
+}
+
+.optimus-session-list-row.active {
+	background: color-mix(in srgb, var(--vscode-list-activeSelectionBackground) 45%, transparent);
+}
+
+.optimus-session-list-row:focus-visible {
+	outline: 1px solid var(--optimus-focus);
+	outline-offset: -1px;
+}
+
+.optimus-session-list-unread {
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: var(--vscode-charts-blue, var(--optimus-focus));
+}
+
+.optimus-session-list-unread.hidden {
+	visibility: hidden;
+}
+
+.optimus-session-list-main {
+	min-width: 0;
+}
+
+.optimus-session-list-title {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 13px;
+	font-weight: 600;
+	line-height: 18px;
+}
+
+.optimus-session-list-metadata {
+	display: flex;
+	align-items: center;
+	gap: 5px;
+	min-width: 0;
+	margin-top: 2px;
+	overflow: hidden;
+	color: var(--optimus-muted);
+	font-size: 11px;
+	white-space: nowrap;
+}
+
+.optimus-session-list-metadata > span {
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.optimus-session-list-separator {
+	flex: 0 0 auto;
+}
+
+.optimus-session-list-status {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 11px;
+	color: var(--optimus-muted);
+}
+
+.optimus-session-list-status.running {
+	color: var(--vscode-charts-blue, var(--optimus-focus));
+}
+
+.optimus-session-list-status.blocked {
+	color: var(--optimus-warning);
+}
+
+.optimus-session-list-status.ready {
+	color: var(--optimus-success);
+}
+
+.optimus-session-list-time {
+	color: var(--optimus-muted);
+	font-size: 11px;
+	text-align: right;
+	white-space: nowrap;
+}
+
+.optimus-session-list-open {
+	color: var(--optimus-muted);
+	font-size: 13px;
+}
+
 
 
 /* --- First-run empty state ----------------------------------------------- */
@@ -770,14 +1561,48 @@
 	justify-content: center;
 }
 
-.optimus-grid-content.empty .optimus-grid,
 .optimus-grid-content.empty .optimus-kanban,
-.optimus-grid-content.empty .optimus-grid-pager {
+.optimus-grid-content.empty .optimus-session-list,
+.optimus-grid-content.no-results .optimus-kanban,
+.optimus-grid-content.no-results .optimus-session-list {
 	display: none;
 }
 
 .optimus-grid-content.empty .optimus-empty-state {
 	display: flex;
+}
+
+.optimus-no-results {
+	display: none;
+	flex: 1;
+	min-height: 0;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	color: var(--optimus-muted);
+}
+
+.optimus-grid-content.no-results .optimus-no-results {
+	display: flex;
+}
+
+.optimus-no-results > .codicon {
+	font-size: 24px;
+	opacity: .65;
+}
+
+.optimus-no-results-title {
+	font-size: 13px;
+}
+
+.optimus-no-results-action {
+	margin-top: 4px;
+	padding: 5px 10px;
+	border-radius: 5px;
+	background: var(--vscode-button-secondaryBackground, var(--vscode-button-background));
+	color: var(--vscode-button-secondaryForeground, var(--vscode-button-foreground));
+	font-size: 12px;
 }
 
 .optimus-empty-hero {
@@ -839,7 +1664,8 @@
 
 /* Drop highlight while dragging a session from the sidebar over the board. */
 .optimus-grid-content.drop-target .optimus-grid,
-.optimus-grid-content.drop-target .optimus-kanban {
+.optimus-grid-content.drop-target .optimus-kanban,
+.optimus-grid-content.drop-target .optimus-session-list {
 	outline: 2px dashed color-mix(in srgb, var(--optimus-focus) 55%, transparent);
 	outline-offset: -8px;
 	border-radius: 8px;
@@ -881,11 +1707,294 @@
 	outline-offset: -1px;
 }
 
-/* Clear the window chrome strip. */
-.optimus-grid {
-	padding-top: 42px;
+@media (max-width: 760px) {
+	.optimus-dashboard-primary {
+		align-items: flex-start;
+		flex-direction: column;
+	}
+
+	.optimus-dashboard-controls {
+		width: 100%;
+		margin-left: 0;
+	}
+
+	.optimus-dashboard-search {
+		flex: 1;
+		width: auto;
+	}
+
+	.optimus-dashboard-reset {
+		display: none;
+	}
+
+	.optimus-session-list-row {
+		grid-template-columns: 8px minmax(120px, 1fr) 82px 18px;
+	}
+
+	.optimus-session-list-status {
+		display: none;
+	}
+}
+
+/* --- Devin-aligned dashboard and focused workspace ----------------------- */
+
+/* The reference dashboard is intentionally flat: the status columns are
+   positions on one canvas, not three bordered panels. */
+.optimus-dashboard-header {
+	gap: 10px;
+	padding: 48px 14px 11px;
+	background: var(--sessions-main-region-background, var(--vscode-agents-background, var(--vscode-editor-background)));
+	border-bottom-color: color-mix(in srgb, var(--optimus-border) 72%, transparent);
+}
+
+.optimus-dashboard-primary,
+.optimus-dashboard-secondary {
+	min-height: 32px;
+}
+
+.optimus-dashboard-primary {
+	align-items: center;
+}
+
+.optimus-dashboard-secondary {
+	justify-content: space-between;
+}
+
+.optimus-dashboard-filter-controls {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+}
+
+.optimus-dashboard-search {
+	width: clamp(210px, 25vw, 300px);
+	height: 32px;
+	padding: 0 10px;
+	border-color: color-mix(in srgb, var(--optimus-border) 70%, transparent);
+	border-radius: 7px;
+	background: color-mix(in srgb, var(--vscode-input-background) 90%, var(--vscode-foreground) 10%);
+}
+
+.optimus-dashboard-search > .codicon {
+	font-size: 14px;
+}
+
+.optimus-dashboard-search-input {
+	font-size: 13px;
+}
+
+.optimus-dashboard-button {
+	height: 32px;
+	gap: 7px;
+	padding: 0 11px;
+	border-color: color-mix(in srgb, var(--optimus-border) 70%, transparent);
+	border-radius: 7px;
+	font-size: 13px;
+}
+
+.optimus-dashboard-button > .codicon {
+	font-size: 14px;
+}
+
+.optimus-dashboard-filter-button {
+	border-color: color-mix(in srgb, var(--optimus-border) 52%, transparent);
+}
+
+.optimus-dashboard-filter-button > .codicon {
+	color: var(--vscode-foreground);
+}
+
+.optimus-dashboard-results {
+	display: none;
+}
+
+.optimus-dashboard-reset {
+	margin-left: auto;
+	padding-right: 4px;
+	font-size: 13px;
+}
+
+.optimus-view-switcher {
+	gap: 0;
+	padding: 2px;
+	border-radius: 8px;
+	background: color-mix(in srgb, var(--vscode-foreground) 6%, transparent);
+}
+
+.optimus-view-switcher-segment {
+	padding: 5px 14px;
+	border-radius: 6px;
+	font-size: 13px;
+	line-height: 18px;
+}
+
+.optimus-view-switcher-segment.active {
+	background: color-mix(in srgb, var(--vscode-foreground) 12%, transparent);
+	font-weight: 500;
 }
 
 .optimus-kanban {
-	padding-top: 42px;
+	display: grid;
+	grid-template-columns: repeat(3, minmax(220px, 1fr));
+	gap: 24px;
+	padding: 8px 14px 16px;
+	overflow-x: auto;
+}
+
+.optimus-kanban-column {
+	min-width: 220px;
+	padding: 0;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+}
+
+.optimus-kanban-column-header {
+	height: 28px;
+	box-sizing: border-box;
+	gap: 6px;
+	margin: 0;
+	padding: 4px 0 8px;
+	border: 0;
+	font-size: 12px;
+	font-weight: 600;
+}
+
+.optimus-kanban-column-icon {
+	font-size: 13px;
+}
+
+.optimus-kanban-column-list {
+	gap: 8px;
+	padding: 0;
+}
+
+/* Kanban uses the same rich session tiles as List. Columns remain independently
+   scrollable, while each tile keeps its live transcript, status and workspace
+   footer visible instead of collapsing to a title-only summary. */
+.optimus-kanban-column-list .optimus-card {
+	height: 320px;
+	border-color: var(--optimus-border);
+	border-radius: 7px;
+	background: color-mix(in srgb, var(--optimus-card) 94%, var(--vscode-foreground) 2%);
+}
+
+.optimus-kanban-column-list .optimus-card:hover {
+	border-color: color-mix(in srgb, var(--optimus-border) 72%, transparent);
+	background: color-mix(in srgb, var(--vscode-list-hoverBackground) 46%, var(--optimus-card));
+}
+
+/* List is the original Advanced six-card board, as requested. */
+.optimus-grid {
+	display: none;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	grid-template-rows: repeat(2, minmax(0, 1fr));
+	gap: 14px;
+	padding: 14px;
+	flex: 1;
+	min-width: 0;
+	min-height: 0;
+	overflow: hidden;
+}
+
+.optimus-grid-content.view-list .optimus-grid {
+	display: grid;
+}
+
+.optimus-grid-pager {
+	display: none;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	padding: 0 0 9px;
+	color: var(--optimus-muted);
+	font-size: 11px;
+}
+
+.optimus-grid-pager button {
+	width: 22px;
+	height: 22px;
+	padding: 0;
+	border: 0;
+	border-radius: 4px;
+	background: transparent;
+	color: var(--vscode-icon-foreground);
+	cursor: pointer;
+}
+
+.optimus-grid-pager button:hover:not(:disabled) {
+	background: var(--vscode-toolbar-hoverBackground);
+}
+
+.optimus-grid-pager button:disabled {
+	opacity: .35;
+	cursor: default;
+}
+
+.optimus-grid-content.empty .optimus-kanban,
+.optimus-grid-content.empty .optimus-grid,
+.optimus-grid-content.no-results .optimus-kanban,
+.optimus-grid-content.no-results .optimus-grid {
+	display: none;
+}
+
+.optimus-focused-session {
+	display: none;
+	position: relative;
+	flex: 1;
+	min-width: 0;
+	min-height: 0;
+	flex-direction: column;
+	overflow: hidden;
+}
+
+.optimus-focused-session-header {
+	flex: 0 0 32px;
+	min-height: 32px;
+}
+
+.optimus-focused-session-body {
+	position: relative;
+	flex: 1;
+	min-width: 0;
+	min-height: 0;
+	overflow: hidden;
+}
+
+.optimus-focused-session-body > .session-view {
+	width: 100%;
+	height: 100%;
+}
+
+.optimus-grid-content.focused-session .optimus-dashboard-header,
+.optimus-grid-content.focused-session .optimus-kanban,
+.optimus-grid-content.focused-session .optimus-grid,
+.optimus-grid-content.focused-session .optimus-grid-pager,
+.optimus-grid-content.focused-session .optimus-empty-state,
+.optimus-grid-content.focused-session .optimus-no-results {
+	display: none !important;
+}
+
+.optimus-grid-content.focused-session .optimus-focused-session {
+	display: flex;
+}
+
+@media (max-width: 900px) {
+	.optimus-kanban {
+		gap: 14px;
+	}
+
+	.optimus-grid {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		grid-template-rows: repeat(3, minmax(0, 1fr));
+	}
+}
+
+/* The fixed 32px Optimus chrome sits above the workbench grid. The right
+   workbench has no native title row, so reserve that strip inside its own
+   flex box rather than letting its tabs and embedded tools render under the
+   titlebar controls. */
+.agent-sessions-workbench.optimus-window .sessions-right-workbench-shell {
+	padding-top: 32px;
 }

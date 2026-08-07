@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Lotus Volleyball Academy in Ottawa provides position-specific volleyball training, private lessons, small group sessions, and development labs for youth athletes." />
+  <title>Lotus Volleyball Academy | Ottawa Volleyball Training</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script>
+    document.documentElement.classList.add('js');
+    // Fail-safe: if script.js never initialises the scroll reveals, show
+    // everything rather than leave the page blank.
+    window.addEventListener('load', function () {
+      window.setTimeout(function () {
+        if (window.lotusRevealReady) return;
+        var hidden = document.querySelectorAll('.reveal');
+        for (var i = 0; i < hidden.length; i += 1) hidden[i].classList.add('visible');
+      }, 400);
+    });
+  </script>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header" id="top">
+    <nav class="nav container" aria-label="Main navigation">
+      <a class="brand" href="#top" aria-label="Lotus Volleyball Academy home">
+        <img src="assets/lotus-logo.png" alt="Lotus Volleyball Academy logo" class="brand-mark" />
+        <span>
+          <strong>Lotus</strong>
+          <small>Volleyball Academy</small>
+        </span>
+      </a>
+      <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="nav-menu">
+        <span></span><span></span><span></span>
+        <span class="sr-only">Open menu</span>
+      </button>
+      <div class="nav-links" id="nav-menu">
+        <a href="#top">Home</a>
+        <div class="nav-group">
+          <a class='nav-group-link' href='/community'>Lotus Programs</a>
+          <button class="nav-caret" type="button" aria-expanded="false" aria-controls="nav-sub-community"><span class="sr-only">Show Lotus Programs links</span></button>
+          <div class="nav-submenu" id="nav-sub-community">
+            <a href='/train-and-play'>Lotus Volleyball Development</a>
+            <a href='/socials'>Lotus Socials</a>
+            <a href='/beyond-the-court'>Lotus Beyond the Court</a>
+            <a href='/membership'>Membership</a>
+          </div>
+        </div>
+        <div class="nav-group">
+          <a class="nav-group-link" href="#about">About Us</a>
+          <button class="nav-caret" type="button" aria-expanded="false" aria-controls="nav-sub-about"><span class="sr-only">Show About Us links</span></button>
+          <div class="nav-submenu" id="nav-sub-about">
+            <a href="#staff">Staff</a>
+          </div>
+        </div>
+        <a href='/pricing'>Pricing</a>
+        <a href="#process">Registration</a>
+        <a href="#gallery">Gallery</a>
+        <a href="#contact">Contact</a>
+        <a href='/login'>Athlete Portal</a>
+        <a href="#contact" class="nav-cta">Book Training</a>
+      </div>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="hero section-dark">
+      <div class="hero-bg" aria-hidden="true"></div>
+      <div class="container hero-grid">
+        <div class="hero-copy reveal">
+          <p class="eyebrow">Ottawa · Asian-Community Founded</p>
+          <h1>Rooted in Culture. Growing Through Community.</h1>
+          <p class="hero-lead">Lotus combines high-level volleyball development with culture, leadership, education, mentorship, healthy living, and meaningful community connection.</p>
+          <div class="hero-actions">
+            <a href="#community" class="button button-primary">Explore Our Community</a>
+            <a href="#programs-overview" class="button button-secondary">Explore Lotus Programs</a>
+          </div>
+          <div class="trust-row" aria-label="Academy highlights">
+            <span>Train Smart</span>
+            <span>Have Fun</span>
+            <span>Keep Growing</span>
+          </div>
+        </div>
+        <div class="hero-card reveal delay-1" aria-label="Lotus Academy highlights card">
+          <div class="card-topline">Personalized. Purposeful. Precise.</div>
+          <h2>High-level, personalized volleyball development</h2>
+          <p>Structured sessions in a supportive community environment, built for athletes who want more touches, better habits, and clear feedback.</p>
+          <ul class="check-list">
+            <li>Private and semi-private training</li>
+            <li>Weekend development sessions</li>
+            <li>Setter and Libero labs</li>
+            <li>Individual improvement plans</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="priorities">
+      <div class="container section-heading reveal">
+        <p class="eyebrow red">What Lotus Develops</p>
+        <h2>Three priorities behind everything we do.</h2>
+        <p>Every Lotus program is designed to strengthen all three at the same time.</p>
+      </div>
+      <div class="container program-grid">
+        <article class="program-card reveal">
+          <span class="program-tag">Community Building</span>
+          <h3>Belonging that lasts</h3>
+          <p>Creating belonging, cultural connection, friendships, family engagement, mentorship, and opportunities to give back.</p>
+        </article>
+        <article class="program-card reveal delay-1">
+          <span class="program-tag">Athlete Development</span>
+          <h3>Precise, purposeful coaching</h3>
+          <p>Delivering high-level, personalized volleyball development through detailed, purposeful, and precise coaching.</p>
+        </article>
+        <article class="program-card reveal delay-2">
+          <span class="program-tag">Personal Development</span>
+          <h3>Ready for life ahead</h3>
+          <p>Building leadership, communication, confidence, career readiness, healthy habits, resilience, and practical life skills.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section section-muted" id="community">
+      <div class="container split-grid">
+        <div class="reveal">
+          <p class="eyebrow red">Our Community</p>
+          <h2>A wider community built through volleyball.</h2>
+          <p>Volleyball brings us together. Community is why we stay. Lotus is an Asian-community-founded, member-centred organization, and volleyball is the doorway into something much larger than a training session.</p>
+          <p>Alongside high-level development, Lotus supports the whole person and the whole family.</p>
+          <div class="pill-list">
+            <span>Cultural connection</span>
+            <span>Leadership</span>
+            <span>Education</span>
+            <span>Mentorship</span>
+            <span>Career readiness</span>
+            <span>Healthy living</span>
+            <span>Family engagement</span>
+            <span>Social experiences</span>
+            <span>Community service</span>
+            <span>Personal growth</span>
+          </div>
+          <a class='program-link' href='/community'>Explore Our Community</a>
+        </div>
+        <div class="approach-panel reveal delay-1">
+          <p class="panel-kicker">Member-centred by design</p>
+          <h3>Protecting the purpose of the community</h3>
+          <ul class="check-list">
+            <li>Builds trust between athletes, families, and coaches</li>
+            <li>Preserves the cultural purpose Lotus was founded on</li>
+            <li>Lets programs be designed around real community needs</li>
+            <li>Connects young people with mentors who know them</li>
+            <li>Keeps programming small, personal, and meaningful</li>
+            <li>Reinvests time and resources back into the community</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="programs-overview">
+      <div class="container section-heading reveal">
+        <p class="eyebrow red">How Lotus Delivers</p>
+        <h2>Three ways to grow with Lotus.</h2>
+        <p>Our program categories are how the three priorities reach athletes, families, and the wider community.</p>
+      </div>
+      <div class="container program-grid">
+        <article class="program-card anchor-offset reveal" id="train-and-play">
+          <span class="program-tag">Lotus Volleyball Development</span>
+          <h3>Develop your game</h3>
+          <p>High-level, personalized volleyball training, specialized position labs, video analysis, athlete education, and game understanding.</p>
+          <a class='program-link' href='/train-and-play'>See Lotus Volleyball Development</a>
+        </article>
+        <article class="program-card anchor-offset reveal delay-1" id="lotus-socials">
+          <span class="program-tag">Lotus Socials</span>
+          <h3>Connection beyond the gym</h3>
+          <p>Cultural experiences, family gatherings, mentorship, recreation, volunteering, fundraising, and meaningful community connection.</p>
+          <a class='program-link' href='/socials'>See Lotus Socials</a>
+        </article>
+        <article class="program-card anchor-offset reveal delay-2" id="beyond-the-court">
+          <span class="program-tag">Lotus Beyond the Court</span>
+          <h3>Helping young people become future-ready</h3>
+          <p>Leadership, career discovery, AI literacy, financial literacy, wellness, study skills, intercultural learning, and practical life development.</p>
+          <a class='program-link' href='/beyond-the-court'>See Lotus Beyond the Court</a>
+        </article>
+      </div>
+    </section>
+
+    <section class="stats-strip" aria-label="Training focus areas">
+      <div class="container stats-grid">
+        <div><strong>8–10</strong><span>athletes max for development groups</span></div>
+        <div><strong>1:1</strong><span>private coaching available</span></div>
+        <div><strong>5</strong><span>core skills tracked</span></div>
+        <div><strong>100%</strong><span>athlete-centred feedback</span></div>
+      </div>
+    </section>
+
+    <section class="section section-muted" id="approach">
+      <div class="container split-grid">
+        <div class="reveal">
+          <p class="eyebrow red">Why the Training Is High Level</p>
+          <h2>Personalized. Purposeful. Precise.</h2>
+          <p>High-level, personalized volleyball development in a supportive community environment. Lotus sessions are built around game-like learning, high-quality corrections, and clear athlete accountability — focused on what athletes can apply immediately in club, school, and competitive environments.</p>
+          <div class="pill-list">
+            <span>Small training groups</span>
+            <span>Individualized coaching</span>
+            <span>Detailed technical corrections</span>
+            <span>Precise mechanics</span>
+            <span>Purposeful repetitions</span>
+            <span>Position-specific development</span>
+            <span>Video analysis</span>
+            <span>Advanced volleyball IQ</span>
+            <span>Tactical education</span>
+            <span>Game-based learning</span>
+            <span>Personalized development planning</span>
+            <span>Understanding why it matters</span>
+            <span>Skill progressions</span>
+            <span>Confidence building</span>
+          </div>
+        </div>
+        <div class="approach-panel reveal delay-1">
+          <p class="panel-kicker">Tracked in every development plan</p>
+          <h3>Core skills we coach with intention</h3>
+          <div class="skill-focus-grid" aria-label="Core skills Lotus tracks">
+            <div class="skill-focus"><span>Passing</span><small>Platform, angles, first-contact control</small></div>
+            <div class="skill-focus"><span>Serving</span><small>Routine, placement, pressure management</small></div>
+            <div class="skill-focus"><span>Attacking</span><small>Approach, contact, shot selection</small></div>
+            <div class="skill-focus"><span>Setting</span><small>Footwork, tempo, decision-making</small></div>
+            <div class="skill-focus"><span>Defending</span><small>Reading, positioning, transition habits</small></div>
+          </div>
+        </div>
+      </div>
+      <div class="container program-grid proof-grid">
+        <article class="program-card reveal">
+          <span class="program-tag">Personalized</span>
+          <h3>Coaching built around the athlete</h3>
+          <ul class="check-list">
+            <li>Small training groups, capped at 8–10 athletes</li>
+            <li>Individualized coaching and individual feedback</li>
+            <li>Position-specific development</li>
+            <li>Personalized development planning</li>
+            <li>Coaches selected to fit the athletes and the community</li>
+          </ul>
+        </article>
+        <article class="program-card reveal delay-1">
+          <span class="program-tag">Purposeful</span>
+          <h3>Every rep has a reason</h3>
+          <ul class="check-list">
+            <li>Purposeful repetitions, not filler volume</li>
+            <li>Game-based learning that transfers to matches</li>
+            <li>Tactical education and advanced volleyball IQ</li>
+            <li>Teaching athletes <em>why</em> movements and decisions matter</li>
+          </ul>
+        </article>
+        <article class="program-card reveal delay-2">
+          <span class="program-tag">Precise</span>
+          <h3>Detail you can see on video</h3>
+          <ul class="check-list">
+            <li>Precise mechanics and detailed technical corrections</li>
+            <li>Video analysis of live play</li>
+            <li>Clear technical cues athletes can repeat on their own</li>
+            <li>Progress reviewed against the athlete's own plan</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section class="section section-dark" id="culture-programming">
+      <div class="container section-heading reveal">
+        <p class="eyebrow">Programming Through the Year</p>
+        <h2>Culture-Focused Programming</h2>
+        <p>Lotus is not defined by a season. Its programming is rooted in culture, community, athlete development, and personal development. Summer contains the largest concentration of programming because athletes have greater freedom from school and many club obligations — families and community members also have more opportunities to gather, and our community has a long-standing tradition of connecting through summer volleyball and shared experiences.</p>
+      </div>
+      <div class="container process-grid">
+        <div class="steps reveal">
+          <div class="step season-step">
+            <strong>01</strong>
+            <span>
+              <strong class="season-title">Summer</strong>
+              <ul class="check-list">
+                <li>High-level volleyball development</li>
+                <li>Cultural programming</li>
+                <li>Lotus Socials</li>
+                <li>Family gatherings</li>
+                <li>Leadership and personal development</li>
+                <li>Mentorship</li>
+                <li>Community service</li>
+              </ul>
+            </span>
+          </div>
+        </div>
+        <div class="steps reveal delay-1">
+          <div class="step season-step">
+            <strong>02</strong>
+            <span>
+              <strong class="season-title">School Year</strong>
+              <ul class="check-list">
+                <li>Lotus Beyond the Court</li>
+                <li>Lotus Socials</li>
+                <li>Mentorship</li>
+                <li>Leadership and personal development</li>
+                <li>Community activities</li>
+                <li>Limited in-season volleyball development</li>
+              </ul>
+            </span>
+          </div>
+        </div>
+      </div>
+      <div class="container reveal">
+        <p class="mission-tag season-close">Lotus programming may change with the season, but its purpose remains the same: strengthening culture, building community, developing athletes, and preparing young people for life beyond the court.</p>
+      </div>
+    </section>
+
+    <section class="section" id="club-relationship">
+      <div class="container split-grid">
+        <div class="reveal">
+          <p class="eyebrow red">Working With Clubs</p>
+          <h2>Designed to complement existing volleyball pathways.</h2>
+          <p>Athletes train with Lotus and return to their volleyball clubs, school teams, recreational leagues, regional programs, provincial programs, and community organizations — more skilled, more confident, more knowledgeable, and better prepared.</p>
+          <p class="statement-line">Lotus complements clubs. It does not replace them.</p>
+          <div class="pill-list">
+            <span>Volleyball clubs</span>
+            <span>School teams</span>
+            <span>Recreational leagues</span>
+            <span>Regional programs</span>
+            <span>Provincial programs</span>
+            <span>Community organizations</span>
+          </div>
+        </div>
+        <div class="approach-panel reveal delay-1">
+          <p class="panel-kicker">Athletes return</p>
+          <h3>Ready to contribute more</h3>
+          <ul class="check-list">
+            <li><strong>More skilled</strong> — cleaner mechanics that hold up under match speed</li>
+            <li><strong>More confident</strong> — trust in their own decisions and reset routines</li>
+            <li><strong>More knowledgeable</strong> — they understand why a movement or read works</li>
+            <li><strong>Better prepared</strong> — able to lead, communicate, and compete for their team</li>
+          </ul>
+          <p class="panel-note">We have partnered with local clubs and run our labs for their players in exchange for a donation to their club foundation or to support families facing financial barriers.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section about-section" id="about">
+      <div class="container section-heading reveal">
+        <p class="eyebrow red">About Us</p>
+        <h2>The story, the people, and the purpose behind Lotus.</h2>
+      </div>
+
+      <div class="container about-block reveal">
+        <div class="about-block-head">
+          <span class="about-step">01</span>
+          <h3>Our History</h3>
+        </div>
+        <p class="about-history">Lotus Volleyball Academy was founded in 1998 by Tuan Nguyen and later on joined by Byron Lee as part of an initiative to support the Asian and “9-man” community with high-level volleyball development rooted in the cultural elements and values of Asian culture: respect, community, personal &amp; professional development, and family. This was a response to many Asian players losing opportunities to play further at a competitive level due to the inevitable requirement of height in this sport, despite being very skilled players. Eventually, many players return to the club at the national level as early as 16U, with many Asian athletes having a later growth and physical development.</p>
+        <p class="about-history">For over 30 years, our academy has supported the development of individuals from Montreal to Toronto, settling its base in Ottawa in 2008 to coincide with the founding of the 9-man community in Ottawa. Though quiet and private, our reputation has grown over the years for our highly meticulous focus on technical skills. Being smaller players requires maximizing body mechanics, human kinetics, and mental development.</p>
+        <p class="about-history">Over the years, many family and friends of our players have asked to be invited into the training. We have also partnered with local clubs and run our labs for their players in exchange for a donation to either their club foundation or to support those with financial challenges in participating with the hosting club.</p>
+        <p class="about-history">In 2026, we decided to open the doors by adding an extra training day on an invite-only basis upon registration. With this evolution of our community, our mission, too, has evolved in order to become a more active partner alongside volleyball clubs in developing their players.</p>
+      </div>
+
+      <div class="container about-block reveal">
+        <div class="about-block-head">
+          <span class="about-step">02</span>
+          <h3>Founders &amp; Advisors</h3>
+        </div>
+      </div>
+      <div class="container founder-grid">
+        <article class="founder-card reveal">
+          <div class="founder-photo">
+            <img src="assets/staff/tuan-nguyen.jpg" alt="Tuan Nguyen" loading="lazy" />
+          </div>
+          <span class="staff-role-pill pill-black">Co-Founder</span>
+          <h3>Tuan Nguyen</h3>
+          <p class="founder-tagline">Father · 30-year digital entrepreneur · Community builder</p>
+          <p>Tuan brings over 34 years of volleyball experience at the national level and 30 years of coaching. His specialty is technical training for setting and hitting, and he has run private programs across Quebec and Ontario, training many varsity players across Canada. That initiative grew into Lotus Volleyball Academy over the years. Tuan currently runs the youth training program for competitive players.</p>
+        </article>
+        <article class="founder-card reveal delay-1">
+          <div class="founder-photo">
+            <img src="assets/staff/byron-lee.png" alt="Byron Lee" loading="lazy" />
+          </div>
+          <span class="staff-role-pill pill-black">Co-Founder</span>
+          <h3>Byron Lee</h3>
+          <p class="founder-tagline">Father · Public servant · Founder of the Ottawa Mystics</p>
+          <p>Byron has over 20 years of volleyball experience as a player and coach and is the founder of the 9-man volleyball community in Ottawa, the Ottawa Mystics. He has played for national clubs in Montreal and Toronto and now leads the junior development team for the community — advanced, typically national-level club players from Quebec and Ontario. As the volleyball-IQ leader of the community, Byron drives team development, strategy, and culture.</p>
+        </article>
+        <article class="founder-card reveal delay-2">
+          <div class="founder-photo">
+            <img src="assets/staff/jackie-nguyen-founder.jpg" alt="Jackie Nguyen" loading="lazy" />
+          </div>
+          <span class="staff-role-pill pill-black">Development Lead</span>
+          <h3>Jackie Nguyen</h3>
+          <p class="founder-tagline">12+ years of volleyball · Youth development lead</p>
+          <p>Jackie has over 12 years of volleyball experience and is the newest addition to Lotus Volleyball Academy through succession planning. He currently runs the youth development program alongside Tuan — and no, he’s not related to Tuan, though they’re like brothers. His incredible commitment to both player development and the wider community has made it clear that he will take Lotus Volleyball Academy to the next level.</p>
+        </article>
+        <article class="founder-card reveal delay-3">
+          <div class="founder-photo">
+            <img src="assets/staff/Therese.jpeg" alt="Thérèse Thy Ngo" loading="lazy" />
+          </div>
+          <span class="staff-role-pill pill-black">Governance &amp; Strategy Advisor</span>
+          <h3>Thérèse Thy Ngo</h3>
+          <p class="founder-tagline">Executive leader · Governance &amp; strategy · 15+ years leading people</p>
+          <p>Thérèse is an executive leader with 15+ years of experience in strategy, governance, organizational design, and workforce transformation across the Government of Canada. She helps sport organizations align leadership, people, and operations to support sustainable growth and lasting impact.</p>
+          <p>Her experience includes governance, policy, risk management, board and committee leadership, volleyball club operations, strategic planning, and program development. She is also an experienced people leader, coach, and mentor who supports high-performing teams and develops athletes, coaches, and emerging leaders.</p>
+          <p>With a law degree and Bachelor of Education, Thérèse brings a unique combination of legal, educational, governance, and leadership expertise.</p>
+        </article>
+      </div>
+
+      <div class="container about-block reveal">
+        <div class="about-block-head">
+          <span class="about-step">03</span>
+          <h3>Our Mission &amp; Vision</h3>
+        </div>
+        <p class="about-history">Lotus is an Asian-community-founded, member-centred academy. Our mission, our vision, our three organizational priorities, and what being member-centred means in practice are set out together on the Our Community page.</p>
+        <a class='program-link' href='/community#mission'>Read our mission and vision</a>
+      </div>
+    </section>
+
+    <section class="section" id="staff">
+      <div class="container section-heading reveal">
+        <p class="eyebrow red">Coaching Staff</p>
+        <h2>Experienced coaches. Real backgrounds.</h2>
+        <p>Lotus Volleyball Academy is led by coaches with national-level playing and coaching experience at the club, college, and university levels.</p>
+      </div>
+
+      <!-- Jackie Nguyen – Lead Coach -->
+      <div class="container staff-featured-wrap reveal">
+        <article class="staff-card-pro staff-featured">
+          <div class="staff-photo staff-photo-featured">
+            <img src="assets/staff/jackie-nguyen.png" alt="Jackie Nguyen – Lead Coach, Lotus Volleyball Academy" />
+          </div>
+          <div class="staff-featured-body">
+            <span class="staff-role-pill pill-black">Lead Coach</span>
+            <h3>Jackie Nguyen</h3>
+            <p class="staff-role">Lead Coach</p>
+            <div class="staff-meta-grid">
+              <div><strong>Position</strong><span>Setter / Libero / MB / OH</span></div>
+              <div><strong>Experience</strong><span>13 years</span></div>
+              <div><strong>Competitive Level</strong><span>National Club, OCAA, Region 6 Beach</span></div>
+              <div><strong>Teams</strong><span>Ottawa Fusion, Maverick VC, Algonquin College</span></div>
+            </div>
+            <ul class="staff-achievements-list">
+              <li>2013 &amp; 2014 OVA Award of Excellence</li>
+              <li>16U Boys Ontario Championship Bronze Medalist</li>
+              <li>16U Boys Youth Nationals Bronze Medalist</li>
+              <li>Development Coach Trained · Assistant Coach, 18UG Maverick Colts</li>
+            </ul>
+          </div>
+        </article>
+      </div>
+
+      <!-- Assistant Coaches -->
+      <div class="container staff-subhead reveal">
+        <p class="eyebrow red">Assistant Coaches</p>
+      </div>
+      <div class="container staff-assistants-grid">
+        <article class="staff-card-pro reveal">
+          <div class="staff-photo"><img src="assets/staff/naoki-nakashima.png" alt="Naoki Nakashima – Assistant Coach, Libero Lab" /></div>
+          <div class="staff-card-body">
+            <div class="staff-card-tags">
+              <span class="staff-role-pill pill-outline">Assistant Coach</span>
+              <span class="lab-tag">Libero Lab</span>
+            </div>
+            <h3>Naoki Nakashima</h3>
+            <p class="staff-exp">Libero · 7 years · National Club &amp; College</p>
+            <ul class="staff-achievements-list">
+              <li>OCAA 2nd Team All-Star</li>
+              <li>Algonquin MVP + Captain</li>
+              <li>1× CCAA All-Canadian</li>
+              <li>#1 Defensive Leader in OCAA · Most digs in Algonquin history</li>
+            </ul>
+          </div>
+        </article>
+
+        <article class="staff-card-pro reveal delay-2">
+          <div class="staff-photo"><img src="assets/staff/mia-ladd.png" alt="Mia Ladd – Assistant Coach, Setter Lab" /></div>
+          <div class="staff-card-body">
+            <div class="staff-card-tags">
+              <span class="staff-role-pill pill-outline">Assistant Coach</span>
+              <span class="lab-tag">Setter Lab</span>
+            </div>
+            <h3>Mia Ladd</h3>
+            <p class="staff-exp">Setter · 9 years · National Club, Team Ontario &amp; AUS</p>
+            <ul class="staff-achievements-list">
+              <li>2022 Team Ontario Selection</li>
+              <li>18U National Bronze Medalist &amp; MVP</li>
+              <li>2025–2026 USport All-Canadian</li>
+              <li>3rd Year at Université de Moncton &amp; Captain</li>
+            </ul>
+          </div>
+        </article>
+
+        <article class="staff-card-pro reveal">
+          <div class="staff-photo"><img src="assets/staff/aly-saydam.png" alt="Aly Saydam – Assistant Coach, Setter Lab" /></div>
+          <div class="staff-card-body">
+            <div class="staff-card-tags">
+              <span class="staff-role-pill pill-outline">Assistant Coach</span>
+              <span class="lab-tag">Setter Lab</span>
+            </div>
+            <h3>Aly Saydam</h3>
+            <p class="staff-exp">Setter · 9 years · National Club &amp; OUA</p>
+            <ul class="staff-achievements-list">
+              <li>OUA All Rookie Team · Trent MVB Rookie of the Year</li>
+              <li>4× USport All-Canadian</li>
+              <li>All-time leader in assists &amp; digs at Trent University</li>
+            </ul>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="section contact-section" id="pricing">
+      <div class="container contact-card reveal">
+        <div>
+          <p class="eyebrow red">Pricing</p>
+          <h2>Simple, flexible pricing.</h2>
+          <p>Drop in for a single position session or commit to the full five-week program. Same pricing across every lab, so athletes can choose the lab that fits their game.</p>
+        </div>
+        <div class="contact-actions">
+          <a class='button button-primary' href='/pricing'>View Pricing &amp; Labs</a>
+          <p class="microcopy">Drop-in $75 · 5-week program $300 ($60 per session)</p>
+        </div>
+      </div>
+    </section>
+
+    <span id="membership" class="anchor-offset" aria-hidden="true"></span>
+    <section class="section section-dark" id="process">
+      <div class="container process-grid">
+        <div class="section-heading left reveal">
+          <p class="eyebrow">Invitation Request</p>
+          <h2>Request an invitation to train with Lotus.</h2>
+          <p>Every athlete begins by submitting contact information, who referred them, and their training background. Lotus extends invitations based on fit with the participants currently in the program, including position, goals, experience, and current development needs.</p>
+          <a href="https://docs.google.com/forms/d/1pm8csofEKU_xua07wR28Ewk0bXkgllsUxytj_mihI_g/viewform" class="button button-primary" target="_blank" rel="noopener">Request an Invitation</a>
+        </div>
+        <div class="steps reveal delay-1">
+          <div class="step"><strong>01</strong><span>Submit athlete contact information, referral, and training goals.</span></div>
+          <div class="step"><strong>02</strong><span>Lotus reviews fit with the participants currently in the program.</span></div>
+          <div class="step"><strong>03</strong><span>Accepted athletes are invited into the right lab, private training, or small group training.</span></div>
+          <div class="step"><strong>04</strong><span>Train with focused reps, coaching feedback, and next-step recommendations.</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section faq-section">
+      <div class="container section-heading reveal">
+        <p class="eyebrow red">Questions</p>
+        <h2>Frequently asked questions.</h2>
+      </div>
+      <div class="container faq-list">
+        <details class="faq reveal">
+          <summary>Is Lotus a competitive volleyball club?</summary>
+          <p>No. Lotus is a volleyball academy and community, not a competitive club. Athletes keep playing for their own club, school, or league team and come to Lotus to sharpen specific parts of their game.</p>
+        </details>
+        <details class="faq reveal delay-1">
+          <summary>What are Lotus&rsquo;s three organizational priorities?</summary>
+          <p>Community Building, Athlete Development, and Personal Development. Every Lotus program is designed to strengthen all three at the same time. You can read more on the <a href='/community#priorities'>Our Community page</a>.</p>
+        </details>
+        <details class="faq reveal delay-2">
+          <summary>What is Lotus Volleyball Development?</summary>
+          <p>The volleyball side of Lotus &mdash; high-level, personalized training through small groups, detailed technical instruction, purposeful repetitions, video analysis, position-specific labs, and advanced game understanding. See <a href='/train-and-play'>Lotus Volleyball Development</a>.</p>
+        </details>
+        <details class="faq reveal">
+          <summary>What are Lotus Socials?</summary>
+          <p>The times the community comes together away from formal training &mdash; family open gyms, parent learning circles, heritage nights and potlucks, storytelling, cultural celebrations, service projects, exchanges, watch parties, and season socials. See <a href='/socials'>Lotus Socials</a>.</p>
+        </details>
+        <details class="faq reveal delay-1">
+          <summary>What is Lotus Beyond the Court?</summary>
+          <p>Programs that help young people become confident, capable, healthy, and future-ready: leadership, career discovery, AI literacy, financial literacy, cultural strength, intercultural understanding, health and wellness, and study skills. See <a href='/beyond-the-court'>Lotus Beyond the Court</a>.</p>
+        </details>
+        <details class="faq reveal delay-2">
+          <summary>When do Lotus programs operate?</summary>
+          <p>Through the year. Summer holds the largest concentration of programming because athletes have more freedom from school and club commitments and families have more chances to gather. During the school year Lotus runs Beyond the Court, Socials, mentorship, leadership, community activities, and limited in-season volleyball development.</p>
+        </details>
+        <details class="faq reveal">
+          <summary>What does Culture-Focused Programming mean?</summary>
+          <p>It means Lotus is not defined by a season. The programming is rooted in culture, community, athlete development, and personal development, and it is shaped around what families can take part in at that time of year. See <a href="#culture-programming">Culture-Focused Programming</a>.</p>
+        </details>
+        <details class="faq reveal delay-1">
+          <summary>Who are member programs designed for?</summary>
+          <p>Programs marked <strong>Members Only</strong> are designed specifically for Lotus community members, which is what lets them stay small and personal. Every program on the site carries an access label, and all three are explained on the <a href='/membership#access'>Membership page</a>.</p>
+        </details>
+        <details class="faq reveal delay-2">
+          <summary>Can invited guests participate?</summary>
+          <p>Yes. Programs marked <strong>Invite Only</strong> are opened through an evaluation, a referral, previous participation, or a coach invitation. Selected Setter Lab and Libero Lab sessions may also include approved invited guests when it is a good fit for the group.</p>
+        </details>
+        <details class="faq reveal">
+          <summary>Which programs may offer limited guest access?</summary>
+          <p>The Setter Lab and the Libero Lab. They are the only Lotus programs that may open places to approved invited guests, and those places are offered at the academy&rsquo;s discretion so group size and training quality are protected.</p>
+        </details>
+        <details class="faq reveal delay-1">
+          <summary>Are the specialized labs open registration?</summary>
+          <p>No. The Setter Lab and Libero Lab are invite only rather than open public registration. Athletes ask to be considered through the <a href='/book-training'>training request form</a>, and an invitation follows a look at game footage and fit with the current group.</p>
+        </details>
+        <details class="faq reveal delay-2">
+          <summary>How does Lotus complement club volleyball?</summary>
+          <p>Lotus is designed to complement existing volleyball pathways. Athletes train with Lotus and return to their clubs, school teams, recreational leagues, and regional and provincial programs more skilled, more confident, more knowledgeable, and better prepared. Lotus complements clubs. It does not replace them.</p>
+        </details>
+        <details class="faq reveal">
+          <summary>What makes Lotus training high level?</summary>
+          <p>Small groups, three coaches, technical correction on every rep, skill progressions, game-based learning, video analysis, and an individual development plan for each athlete.</p>
+        </details>
+        <details class="faq reveal delay-1">
+          <summary>What does &ldquo;Personalized. Purposeful. Precise.&rdquo; mean?</summary>
+          <p><strong>Personalized</strong> &mdash; coaching speaks to the individual athlete, not the room. <strong>Purposeful</strong> &mdash; every repetition has a reason behind it. <strong>Precise</strong> &mdash; corrections are specific enough to act on the next ball.</p>
+        </details>
+        <details class="faq reveal delay-2">
+          <summary>What is the Lotus Wellness and Performance Lab?</summary>
+          <p>A Members Only program, in partnership with Peak Centre for Human Performance, that connects high-level athlete development with laboratory-based sports science. Through testing, education, and individualized feedback, athletes learn how movement, recovery, sleep, nutrition, physical readiness, and healthy routines influence performance.</p>
+        </details>
+        <details class="faq reveal">
+          <summary>How can families become involved?</summary>
+          <p>Send a membership inquiry through the <a href='/membership#inquiry'>Membership page</a> and a member of the Lotus team will follow up by email. Families are also welcome at Lotus Socials, and there is always room for parents and community members who want to volunteer, mentor, or help run an event.</p>
+        </details>
+      </div>
+      <div class="container section-heading section-inset reveal">
+        <p class="eyebrow red">Practical Details</p>
+        <h3>Sessions, locations, and requests</h3>
+      </div>
+      <div class="container faq-list">
+        <details class="faq reveal">
+          <summary>Who is Lotus Volleyball Academy for?</summary>
+          <p>Youth athletes who want extra development outside of club or school volleyball, especially athletes looking for position-specific feedback and more high-quality reps. Lotus welcomes athletes from all backgrounds who are passionate about improving their skills and growing within the sport.</p>
+        </details>
+        <details class="faq reveal delay-1">
+          <summary>Do athletes need club experience?</summary>
+          <p>No. Athletes can be grouped by level, position, and goals so training stays challenging but appropriate.</p>
+        </details>
+        <details class="faq reveal delay-2">
+          <summary>What happens in a typical session?</summary>
+          <p>Position labs run two hours, once a week, with three coaches across two courts and a small group of athletes. Sessions combine focused technical work, progressions, and game-based reps with direct feedback.</p>
+        </details>
+        <details class="faq reveal">
+          <summary>Where are sessions located?</summary>
+          <p>Sessions are based in Ottawa. Confirmed gym locations, dates, and times can be shared after registration.</p>
+        </details>
+        <details class="faq reveal delay-1">
+          <summary>What does private training include?</summary>
+          <p>Private training includes individual coaching, video analysis when available, an individual improvement focus, and clear feedback for athletes to review on their own.</p>
+        </details>
+        <details class="faq reveal delay-2">
+          <summary>How do I register or request training?</summary>
+          <p>Use the <a href='/book-training'>training request form</a> for private sessions, small groups, and position labs. Requests are reviewed for coach and gym availability before anything is confirmed.</p>
+        </details>
+      </div>
+    </section>
+
+    <section class="section" id="gallery">
+      <div class="container section-heading reveal">
+        <p class="eyebrow red">Gallery</p>
+        <h2>Moments from the gym.</h2>
+        <p>Training sessions, competitions, and community highlights from Lotus Volleyball Academy.</p>
+      </div>
+      <div class="container gallery-grid">
+        <figure class="gallery-item reveal">
+          <img src="assets/gallery/photo-1.jpg" alt="Lotus Volleyball Academy" loading="lazy" />
+        </figure>
+        <figure class="gallery-item reveal delay-1">
+          <img src="assets/gallery/photo-2.jpg" alt="Lotus Volleyball Academy" loading="lazy" />
+        </figure>
+        <figure class="gallery-item reveal delay-2">
+          <img src="assets/gallery/photo-3.jpg" alt="Lotus Volleyball Academy" loading="lazy" />
+        </figure>
+        <figure class="gallery-item reveal">
+          <img src="assets/gallery/photo-4.jpg" alt="Lotus Volleyball Academy" loading="lazy" />
+        </figure>
+        <figure class="gallery-item reveal delay-1">
+          <img src="assets/gallery/photo-5.jpg" alt="Lotus Volleyball Academy" loading="lazy" />
+        </figure>
+        <figure class="gallery-item reveal delay-2">
+          <img src="assets/gallery/photo-6.jpg" alt="Lotus Volleyball Academy" loading="lazy" />
+        </figure>
+        <figure class="gallery-item reveal">
+          <img src="assets/gallery/photo-7.jpg" alt="Lotus Volleyball Academy" loading="lazy" />
+        </figure>
+        <figure class="gallery-item reveal delay-1">
+          <img src="assets/gallery/photo-8.jpg" alt="Lotus Volleyball Academy" loading="lazy" />
+        </figure>
+        <figure class="gallery-item reveal delay-2">
+          <img src="assets/gallery/photo-9.jpg" alt="Lotus Volleyball Academy" loading="lazy" />
+        </figure>
+        <figure class="gallery-item reveal">
+          <img src="assets/gallery/photo-10.jpg" alt="Lotus Volleyball Academy" loading="lazy" />
+        </figure>
+
+        <figure class="gallery-item reveal">
+          <img src="assets/gallery/20260709_192142.jpg" alt="Lotus Volleyball Academy" loading="lazy" />
+        </figure>
+        <figure class="gallery-item reveal">
+          <img src="assets/gallery/20260712_154122.jpg" alt="Lotus Volleyball Academy" loading="lazy" />
+        </figure>
+
+        <figure class="gallery-item gallery-video reveal" data-video="assets/gallery/20260705_141824.mp4">
+          <video src="assets/gallery/20260705_141824.mp4#t=0.1" muted playsinline preload="metadata"></video>
+          <span class="gallery-play" aria-hidden="true">▶</span>
+        </figure>
+        <figure class="gallery-item gallery-video reveal" data-video="assets/gallery/20260705_142917.mp4">
+          <video src="assets/gallery/20260705_142917.mp4#t=0.1" muted playsinline preload="metadata"></video>
+          <span class="gallery-play" aria-hidden="true">▶</span>
+        </figure>
+        <figure class="gallery-item gallery-video reveal" data-video="assets/gallery/20260705_143425.mp4">
+          <video src="assets/gallery/20260705_143425.mp4#t=0.1" muted playsinline preload="metadata"></video>
+          <span class="gallery-play" aria-hidden="true">▶</span>
+        </figure>
+        <figure class="gallery-item gallery-video reveal" data-video="assets/gallery/20260711_124402.mp4">
+          <video src="assets/gallery/20260711_124402.mp4#t=0.1" muted playsinline preload="metadata"></video>
+          <span class="gallery-play" aria-hidden="true">▶</span>
+        </figure>
+        <figure class="gallery-item gallery-video reveal" data-video="assets/gallery/20260712_154148.mp4">
+          <video src="assets/gallery/20260712_154148.mp4#t=0.1" muted playsinline preload="metadata"></video>
+          <span class="gallery-play" aria-hidden="true">▶</span>
+        </figure>
+        <figure class="gallery-item gallery-video reveal" data-video="assets/gallery/20260712_141113.mp4">
+          <video src="assets/gallery/20260712_141113.mp4#t=0.1" muted playsinline preload="metadata"></video>
+          <span class="gallery-play" aria-hidden="true">▶</span>
+        </figure>
+
+        <!-- TO ADD A VIDEO: drop the file into assets/gallery/ then copy this block
+             and change both file names below to match your video file.
+        <figure class="gallery-item gallery-video reveal" data-video="assets/gallery/YOUR-VIDEO.mp4">
+          <video src="assets/gallery/YOUR-VIDEO.mp4#t=0.1" muted playsinline preload="metadata"></video>
+          <span class="gallery-play" aria-hidden="true">▶</span>
+        </figure>
+        -->
+      </div>
+    </section>
+
+    <section class="section contact-section" id="contact">
+      <div class="container contact-card reveal">
+        <div>
+          <p class="eyebrow">Get Started</p>
+          <h2>Grow With Lotus</h2>
+          <p>Come train, learn, connect, give back, and grow with us.</p>
+        </div>
+        <div class="contact-actions">
+          <a class='button button-primary' href='/membership'>Explore Membership</a>
+          <a class="button button-secondary dark" href="#programs-overview">Explore Lotus Programs</a>
+          <a class='button button-secondary dark' href='/membership#inquiry'>Become a Community Partner</a>
+          <a class="button button-secondary dark" href="mailto:lotusvolleyballacademy@gmail.com?subject=Lotus%20Volleyball%20Academy%20Training%20Inquiry">Contact Lotus</a>
+          <p class="microcopy">Ready to train? Use the <a href="https://forms.gle/y1UwVdyE3w4zPyiG7" target="_blank" rel="noopener">Training Request Form</a>. Private training is $135 per session; small group pricing is TBD based on group numbers.</p>
+          <p class="microcopy">Email: <a href="mailto:lotusvolleyballacademy@gmail.com">lotusvolleyballacademy@gmail.com</a></p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-grid">
+      <div>
+        <a class="brand footer-brand" href="#top">
+          <img src="assets/lotus-logo.png" alt="Lotus Volleyball Academy logo" class="brand-mark" />
+          <span><strong>Lotus</strong><small>Volleyball Academy</small></span>
+        </a>
+        <p>Ottawa youth volleyball training built on purpose, confidence, and community.</p>
+      </div>
+      <div class="footer-links">
+        <a href='/community'>Our Community</a>
+        <a href='/train-and-play'>Lotus Volleyball Development</a>
+        <a href='/socials'>Lotus Socials</a>
+        <a href='/beyond-the-court'>Lotus Beyond the Court</a>
+        <a href='/membership'>Membership</a>
+        <a href="#about">About Us</a>
+        <a href="#staff">Staff</a>
+        <a href="#programs-overview">Programs</a>
+        <a href='/pricing'>Pricing</a>
+        <a href="#process">Registration</a>
+        <a href="#gallery">Gallery</a>
+        <a href="#contact">Contact</a>
+        <a href='/login'>Athlete Portal</a>
+      </div>
+    </div>
+    <div class="container copyright">
+      <span>© <span id="year"></span> Lotus Volleyball Academy. All rights reserved.</span>
+      <span>Contact: lotusvolleyballacademy@gmail.com</span>
+    </div>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>

@@ -16,12 +16,10 @@ import { SyncDescriptor } from '../../platform/instantiation/common/descriptors.
 import { Registry } from '../../platform/registry/common/platform.js';
 import { registerIcon } from '../../platform/theme/common/iconRegistry.js';
 import { ICommandService } from '../../platform/commands/common/commands.js';
-import { IContextKeyService } from '../../platform/contextkey/common/contextkey.js';
 import { IContextMenuService } from '../../platform/contextview/browser/contextView.js';
 import { ViewPaneContainer } from '../../workbench/browser/parts/views/viewPaneContainer.js';
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../workbench/common/contributions.js';
 import { IViewContainersRegistry, IViewDescriptor, IViewsRegistry, ViewContainer, ViewContainerLocation, Extensions as ViewContainerExtensions, WindowEnablement } from '../../workbench/common/views.js';
-import { IViewsService } from '../../workbench/services/views/common/viewsService.js';
 import { IWorkbenchLayoutService, Parts } from '../../workbench/services/layout/browser/layoutService.js';
 import { SessionsView, SessionsViewId } from '../../sessions/contrib/sessions/browser/views/sessionsView.js';
 // Shared with the agent-sessions workbench, which builds the grid at this width
@@ -29,8 +27,8 @@ import { SessionsView, SessionsViewId } from '../../sessions/contrib/sessions/br
 import { OPTIMUS_CHAT_PANEL_WIDTH } from '../../sessions/browser/layoutPolicy.js';
 import { ISessionsManagementService } from '../../sessions/services/sessions/common/sessionsManagement.js';
 import { ISessionsService } from '../../sessions/services/sessions/browser/sessionsService.js';
-import { OPTIMUS_CLOSE_SESSION_COMMAND_ID, OPTIMUS_DELETE_SESSION_COMMAND_ID, OPTIMUS_FOCUS_SESSION_COMMAND_ID, OPTIMUS_NEW_SESSION_COMMAND_ID, OPTIMUS_SET_VIEW_MODE_COMMAND_ID, OPTIMUS_VIEW_MODE_CONTEXT_KEY, OptimusViewMode } from '../browser/parts/optimusGridPart.js';
-import { OptimusChatViewPane, OptimusChatViewId } from './chat/browser/optimusChatViewPane.js';
+import { RightWorkbenchCommandId } from '../../sessions/contrib/rightWorkbench/browser/rightWorkbench.js';
+import { OPTIMUS_CLOSE_SESSION_COMMAND_ID, OPTIMUS_DELETE_SESSION_COMMAND_ID, OPTIMUS_FOCUS_SESSION_COMMAND_ID, OPTIMUS_NEW_SESSION_COMMAND_ID, OPTIMUS_SET_SEARCH_QUERY_COMMAND_ID, OPTIMUS_SHOW_DASHBOARD_COMMAND_ID, OPTIMUS_SHOW_DASHBOARD_CONTENT_COMMAND_ID, OPTIMUS_SHOW_FOCUSED_SESSION_CONTENT_COMMAND_ID, OPTIMUS_TOGGLE_VIEW_MODE_COMMAND_ID } from '../browser/parts/optimusGridPart.js';
 
 // Toolbar/context-menu actions used by the reused SessionsView. In the Simple
 // window these are imported by its sessions.contribution; the Optimus manifest
@@ -75,11 +73,6 @@ viewsRegistry.registerViews([optimusSessionsViewDescriptor], optimusSessionsView
 //#endregion
 
 
-//#region --- right panel: chat for the active card
-
-const optimusChatViewIcon = registerIcon('optimus-chat-icon', Codicon.commentDiscussion, localize('optimusChatViewIcon', 'Icon for the chat view in the Optimus window'));
-const OPTIMUS_CHAT_VIEW_TITLE = localize2('optimus.chat.view.label', "Chat");
-const OptimusChatContainerId = 'optimus.workbench.view.chatContainer';
 // The sessions-window variants of the mode-switching commands (registered in
 // sessions.desktop.contribution, which is part of the Optimus manifest). The
 // editor-workbench `workbench.action.openAgentsWindow` command is gated on
@@ -90,38 +83,11 @@ const OptimusChatContainerId = 'optimus.workbench.view.chatContainer';
 const OPEN_SIMPLE_WINDOW_COMMAND_ID = 'agents.openAgentsWindow';
 const OPEN_EDITOR_WINDOW_COMMAND_ID = 'agents.openSessionInVSCode';
 
-const optimusChatViewContainer: ViewContainer = viewContainerRegistry.registerViewContainer({
-	id: OptimusChatContainerId,
-	title: OPTIMUS_CHAT_VIEW_TITLE,
-	icon: optimusChatViewIcon,
-	ctorDescriptor: new SyncDescriptor(ViewPaneContainer, [OptimusChatContainerId, { mergeViewWithContainerWhenSingleView: true }]),
-	storageId: OptimusChatContainerId,
-	hideIfEmpty: false,
-	order: 1,
-	windowEnablement: WindowEnablement.Optimus
-}, ViewContainerLocation.AuxiliaryBar, { isDefault: true });
-
-const optimusChatViewDescriptor: IViewDescriptor = {
-	id: OptimusChatViewId,
-	containerIcon: optimusChatViewIcon,
-	containerTitle: OPTIMUS_CHAT_VIEW_TITLE.value,
-	singleViewPaneContainerTitle: OPTIMUS_CHAT_VIEW_TITLE.value,
-	name: OPTIMUS_CHAT_VIEW_TITLE,
-	canToggleVisibility: false,
-	canMoveView: false,
-	ctorDescriptor: new SyncDescriptor(OptimusChatViewPane),
-	windowEnablement: WindowEnablement.Optimus
-};
-
-viewsRegistry.registerViews([optimusChatViewDescriptor], optimusChatViewContainer);
-
-//#endregion
-
 
 //#region --- actions
 
-function setOptimusChatPanelWidth(layoutService: IWorkbenchLayoutService): void {
-	if (!layoutService.isVisible(Parts.AUXILIARYBAR_PART)) {
+function setOptimusRightPanelWidth(layoutService: IWorkbenchLayoutService): void {
+	if (!layoutService.isVisible(Parts.AUXILIARYBAR_PART) || layoutService.isAuxiliaryBarMaximized()) {
 		return;
 	}
 
@@ -137,15 +103,19 @@ function showOptimusCenter(layoutService: IWorkbenchLayoutService): void {
 	layoutService.setPartHidden(true, Parts.PANEL_PART);
 }
 
-// Takes resolved services rather than a ServicesAccessor: callers invoke this
-// after awaiting other work, and accessors are only valid synchronously
-// during the action's run invocation.
-async function revealOptimusChatPanel(layoutService: IWorkbenchLayoutService, viewsService: IViewsService, focus: boolean): Promise<unknown> {
+async function revealOptimusWorkspace(layoutService: IWorkbenchLayoutService, commandService: ICommandService): Promise<void> {
 	showOptimusCenter(layoutService);
-	layoutService.setPartHidden(false, Parts.AUXILIARYBAR_PART);
-	setOptimusChatPanelWidth(layoutService);
+	// A focused task keeps the original Simple-mode workbench launcher. The
+	// editor-style tool rail is reserved for the dashboard/new-task surface.
+	await commandService.executeCommand(RightWorkbenchCommandId.OpenLauncherMode);
+	setOptimusRightPanelWidth(layoutService);
+}
 
-	return viewsService.openView(OptimusChatViewId, focus);
+async function revealOptimusEditorTools(layoutService: IWorkbenchLayoutService, commandService: ICommandService): Promise<void> {
+	showOptimusCenter(layoutService);
+	layoutService.setAuxiliaryBarMaximized(false);
+	await commandService.executeCommand(RightWorkbenchCommandId.OpenFiles, { editorSidebar: true });
+	setOptimusRightPanelWidth(layoutService);
 }
 
 registerAction2(class OptimusNewSessionAction extends Action2 {
@@ -159,23 +129,13 @@ registerAction2(class OptimusNewSessionAction extends Action2 {
 
 	override async run(accessor: ServicesAccessor): Promise<void> {
 		const sessionsService = accessor.get(ISessionsService);
-		const layoutService = accessor.get(IWorkbenchLayoutService);
-		const viewsService = accessor.get(IViewsService);
+		const commandService = accessor.get(ICommandService);
 
-		// Discard any pending draft and deactivate, which puts the panel on the
-		// new-chat composer. Session creation is the composer's job from here
-		// (same as the Simple window), and uncommitted drafts are filtered out
-		// of the board, so this cannot leave an empty card behind.
+		// Keep the Advanced dashboard in place and reveal the same agent composer
+		// used by the Editor window. New chat is a panel action, not a mode switch
+		// into the Simple window.
 		sessionsService.openNewSession({ forceNew: true });
-
-		const view = await revealOptimusChatPanel(layoutService, viewsService, true);
-
-		// Drive the panel explicitly: clearing the active session above only
-		// nudges it when a session WAS active — after closing chats nothing
-		// changes and the panel would keep showing the previous chat.
-		if (view instanceof OptimusChatViewPane) {
-			await view.showNewChat();
-		}
+		await commandService.executeCommand(RightWorkbenchCommandId.OpenEditor, { newChat: true });
 	}
 });
 
@@ -191,9 +151,28 @@ registerAction2(class OptimusFocusSessionAction extends Action2 {
 	override async run(accessor: ServicesAccessor, resource: URI | UriComponents): Promise<void> {
 		const sessionsService = accessor.get(ISessionsService);
 		const layoutService = accessor.get(IWorkbenchLayoutService);
-		const viewsService = accessor.get(IViewsService);
+		const commandService = accessor.get(ICommandService);
 		await sessionsService.openSession(URI.revive(resource), { preserveFocus: true });
-		await revealOptimusChatPanel(layoutService, viewsService, true);
+		await commandService.executeCommand(OPTIMUS_SHOW_FOCUSED_SESSION_CONTENT_COMMAND_ID, sessionsService.activeSession.get());
+		await revealOptimusWorkspace(layoutService, commandService);
+	}
+});
+
+registerAction2(class OptimusShowDashboardAction extends Action2 {
+	constructor() {
+		super({
+			id: OPTIMUS_SHOW_DASHBOARD_COMMAND_ID,
+			title: localize2('optimus.showDashboard', "Show Sessions Dashboard"),
+			f1: false,
+		});
+	}
+
+	override run(accessor: ServicesAccessor): void {
+		const layoutService = accessor.get(IWorkbenchLayoutService);
+		accessor.get(ICommandService).executeCommand(OPTIMUS_SHOW_DASHBOARD_CONTENT_COMMAND_ID);
+		layoutService.setAuxiliaryBarMaximized(false);
+		layoutService.setPartHidden(true, Parts.AUXILIARYBAR_PART);
+		showOptimusCenter(layoutService);
 	}
 });
 
@@ -232,7 +211,6 @@ registerAction2(class OptimusDeleteSessionAction extends Action2 {
 		const sessionsService = accessor.get(ISessionsService);
 		const sessionsManagementService = accessor.get(ISessionsManagementService);
 		const layoutService = accessor.get(IWorkbenchLayoutService);
-		const viewsService = accessor.get(IViewsService);
 		const session = sessionsManagementService.getSession(sessionResource);
 		if (!session) {
 			return;
@@ -242,7 +220,10 @@ registerAction2(class OptimusDeleteSessionAction extends Action2 {
 		await sessionsManagementService.deleteSession(session);
 		if (wasActive) {
 			sessionsService.unsetNewSession();
-			await revealOptimusChatPanel(layoutService, viewsService, false);
+			accessor.get(ICommandService).executeCommand(OPTIMUS_SHOW_DASHBOARD_CONTENT_COMMAND_ID);
+			layoutService.setAuxiliaryBarMaximized(false);
+			layoutService.setPartHidden(true, Parts.AUXILIARYBAR_PART);
+			showOptimusCenter(layoutService);
 		}
 	}
 });
@@ -269,7 +250,6 @@ class OptimusLayoutContribution extends Disposable implements IWorkbenchContribu
 
 	constructor(
 		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
-		@IViewsService viewsService: IViewsService,
 	) {
 		super();
 
@@ -288,17 +268,15 @@ class OptimusLayoutContribution extends Disposable implements IWorkbenchContribu
 			}
 		}));
 
-		viewsService.openView(OptimusChatViewId, false).catch(() => { /* view opens lazily; ignore */ });
 	}
 
 	private applyInitialLayout(): void {
-		// Optimus starts with both side panels visible, but after startup each
-		// panel is user-controlled through Optimus's own chrome buttons. Each
-		// call is a no-op when the part is already in the wanted state.
+		// The Advanced flow starts on the dashboard with its optional editor
+		// tools panel closed.
 		this.layoutService.setPartHidden(false, Parts.SIDEBAR_PART);
-		this.layoutService.setPartHidden(false, Parts.AUXILIARYBAR_PART);
+		this.layoutService.setAuxiliaryBarMaximized(false);
+		this.layoutService.setPartHidden(true, Parts.AUXILIARYBAR_PART);
 		this.ensureOptimusCenter();
-		this.ensureRightPanelWidth();
 	}
 
 	private ensureOptimusCenter(): void {
@@ -306,7 +284,7 @@ class OptimusLayoutContribution extends Disposable implements IWorkbenchContribu
 	}
 
 	private ensureRightPanelWidth(): void {
-		setOptimusChatPanelWidth(this.layoutService);
+		setOptimusRightPanelWidth(this.layoutService);
 	}
 }
 
@@ -316,22 +294,25 @@ class OptimusChromeContribution extends Disposable implements IWorkbenchContribu
 
 	static readonly ID = 'workbench.contrib.optimusChrome';
 
+	private readonly chrome: HTMLElement;
 	private readonly sidebarButton: HTMLButtonElement;
 	private readonly secondaryButton: HTMLButtonElement;
-	private readonly viewSwitcherButtons = new Map<OptimusViewMode, HTMLButtonElement>();
+	private readonly backButton: HTMLButtonElement;
+	private readonly forwardButton: HTMLButtonElement;
 
 	constructor(
 		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
 		@ICommandService private readonly commandService: ICommandService,
 		@IContextMenuService private readonly contextMenuService: IContextMenuService,
-		@IContextKeyService private readonly contextKeyService: IContextKeyService,
 	) {
 		super();
 
 		this.layoutService.mainContainer.querySelector('.optimus-window-chrome')?.remove();
 		const chrome = append(this.layoutService.mainContainer, $('div.optimus-window-chrome'));
+		this.chrome = chrome;
 
-		const modeButton = append(chrome, $('button.optimus-window-chrome-mode'));
+		const modeButton = append(chrome, $('button.optimus-window-chrome-mode')) as HTMLButtonElement;
+		modeButton.type = 'button';
 		modeButton.title = localize('optimusChrome.mode', "Switch Backboard mode");
 		modeButton.setAttribute('aria-haspopup', 'menu');
 		modeButton.setAttribute('aria-expanded', 'false');
@@ -339,39 +320,54 @@ class OptimusChromeContribution extends Disposable implements IWorkbenchContribu
 		append(modeButton, $('span.optimus-window-chrome-mode-label')).textContent = localize('optimusChrome.advanced', "Advanced");
 		append(modeButton, $('span.optimus-window-chrome-mode-chevron.codicon.codicon-chevron-down'));
 
-		this.sidebarButton = append(chrome, $('button.optimus-window-chrome-button.optimus-window-chrome-sidebar.codicon'));
+		const navigationCluster = append(chrome, $('div.optimus-window-navigation-cluster'));
+		const navigation = append(navigationCluster, $('div.optimus-window-navigation'));
+		this.backButton = append(navigation, $('button.optimus-window-nav-button.codicon.codicon-arrow-left')) as HTMLButtonElement;
+		this.backButton.type = 'button';
+		this.backButton.setAttribute('aria-label', localize('optimusChrome.backToSessions', "Back to Sessions"));
+		this._register(addDisposableListener(this.backButton, EventType.CLICK, e => {
+			EventHelper.stop(e, true);
+			this.commandService.executeCommand(OPTIMUS_SHOW_DASHBOARD_COMMAND_ID);
+		}));
+
+		this.forwardButton = append(navigation, $('button.optimus-window-nav-button.codicon.codicon-arrow-right')) as HTMLButtonElement;
+		this.forwardButton.type = 'button';
+		this.forwardButton.disabled = true;
+		this.forwardButton.setAttribute('aria-label', localize('optimusChrome.forward', "Forward"));
+
+		const commandCenter = append(navigationCluster, $('div.optimus-window-command-center'));
+		append(commandCenter, $('span.codicon.codicon-search.optimus-window-command-icon'));
+		const commandInput = append(commandCenter, $('input.optimus-window-command-input')) as HTMLInputElement;
+		commandInput.type = 'search';
+		commandInput.placeholder = localize('optimusChrome.search.placeholder', "Search sessions...");
+		commandInput.setAttribute('aria-label', localize('optimusChrome.search.ariaLabel', "Search Sessions"));
+		this._register(addDisposableListener(commandInput, EventType.INPUT, () => {
+			this.commandService.executeCommand(OPTIMUS_SET_SEARCH_QUERY_COMMAND_ID, commandInput.value);
+		}));
+		const shortcuts = append(commandCenter, $('div.optimus-window-command-shortcuts'));
+		append(shortcuts, $('span.optimus-window-command-key.codicon.codicon-home'));
+		append(shortcuts, $('span.optimus-window-command-key')).textContent = '⌘';
+		append(shortcuts, $('span.optimus-window-command-key')).textContent = 'A';
+
+		const actions = append(chrome, $('div.optimus-window-actions'));
+		this.sidebarButton = append(actions, $('button.optimus-window-chrome-button.optimus-window-chrome-sidebar.codicon'));
+		this.sidebarButton.type = 'button';
 		this.sidebarButton.title = localize('optimusChrome.toggleSidebar', "Toggle left panel");
 		this.sidebarButton.setAttribute('aria-label', this.sidebarButton.title);
 
-		// Grid | Kanban switcher, in the icon row so the board keeps its full
-		// height. Children of the chrome are no-drag, so clicks land.
-		const switcher = append(chrome, $('.optimus-view-switcher.optimus-window-chrome-switcher'));
-		switcher.setAttribute('role', 'group');
-		switcher.setAttribute('aria-label', localize('optimusChrome.viewSwitcher', "Board view"));
-		const addSegment = (mode: OptimusViewMode, label: string): void => {
-			const button = append(switcher, $('button.optimus-view-switcher-segment')) as HTMLButtonElement;
-			button.type = 'button';
-			button.textContent = label;
-			this._register(addDisposableListener(button, EventType.CLICK, e => {
-				EventHelper.stop(e, true);
-				this.commandService.executeCommand(OPTIMUS_SET_VIEW_MODE_COMMAND_ID, mode);
-			}));
-			this.viewSwitcherButtons.set(mode, button);
-		};
-		addSegment('grid', localize('optimusChrome.view.grid', "Grid"));
-		addSegment('kanban', localize('optimusChrome.view.kanban', "Kanban"));
+		const viewModeButton = append(actions, $('button.optimus-window-chrome-button.optimus-window-chrome-view.codicon.codicon-layout-panel')) as HTMLButtonElement;
+		viewModeButton.type = 'button';
+		viewModeButton.title = localize('optimusChrome.toggleView', "Toggle board or list view");
+		viewModeButton.setAttribute('aria-label', viewModeButton.title);
 
-		const newTaskButton = append(chrome, $('button.optimus-window-chrome-button.optimus-window-chrome-plus.codicon.codicon-add'));
-		newTaskButton.title = localize('optimusChrome.newTask', "New Chat");
-		newTaskButton.setAttribute('aria-label', newTaskButton.title);
-		this._register(addDisposableListener(newTaskButton, EventType.CLICK, e => {
-			EventHelper.stop(e, true);
-			this.commandService.executeCommand(OPTIMUS_NEW_SESSION_COMMAND_ID);
-		}));
-
-		this.secondaryButton = append(chrome, $('button.optimus-window-chrome-button.optimus-window-chrome-secondary.codicon'));
+		this.secondaryButton = append(actions, $('button.optimus-window-chrome-button.optimus-window-chrome-secondary.codicon')) as HTMLButtonElement;
+		this.secondaryButton.type = 'button';
 		this.secondaryButton.title = localize('optimusChrome.toggleRightPanel', "Toggle right panel");
 		this.secondaryButton.setAttribute('aria-label', this.secondaryButton.title);
+		this._register(addDisposableListener(viewModeButton, EventType.CLICK, e => {
+			EventHelper.stop(e, true);
+			this.commandService.executeCommand(OPTIMUS_TOGGLE_VIEW_MODE_COMMAND_ID);
+		}));
 
 		this._register(addDisposableListener(this.sidebarButton, EventType.CLICK, e => {
 			EventHelper.stop(e, true);
@@ -379,9 +375,12 @@ class OptimusChromeContribution extends Disposable implements IWorkbenchContribu
 		}));
 		this._register(addDisposableListener(this.secondaryButton, EventType.CLICK, e => {
 			EventHelper.stop(e, true);
-			this.layoutService.setPartHidden(this.layoutService.isVisible(Parts.AUXILIARYBAR_PART), Parts.AUXILIARYBAR_PART);
 			if (this.layoutService.isVisible(Parts.AUXILIARYBAR_PART)) {
-				setOptimusChatPanelWidth(this.layoutService);
+				this.layoutService.setPartHidden(true, Parts.AUXILIARYBAR_PART);
+			} else if (this.isFocusedSession()) {
+				void revealOptimusWorkspace(this.layoutService, this.commandService);
+			} else {
+				void revealOptimusEditorTools(this.layoutService, this.commandService);
 			}
 		}));
 		this._register(addDisposableListener(modeButton, EventType.CLICK, e => {
@@ -413,31 +412,30 @@ class OptimusChromeContribution extends Disposable implements IWorkbenchContribu
 		}));
 
 		this._register(this.layoutService.onDidChangePartVisibility(() => this.updateState()));
-		this._register(this.contextKeyService.onDidChangeContext(e => {
-			if (e.affectsSome(new Set([OPTIMUS_VIEW_MODE_CONTEXT_KEY.key]))) {
-				this.updateState();
-			}
-		}));
+		this._register(this.layoutService.onDidLayoutMainContainer(() => this.updateState()));
+		this._register(this.layoutService.onDidChangeAuxiliaryBarMaximized(() => this.updateState()));
 		this.updateState();
 	}
 
 	private updateState(): void {
-		const viewMode = this.contextKeyService.getContextKeyValue<OptimusViewMode>(OPTIMUS_VIEW_MODE_CONTEXT_KEY.key) ?? 'grid';
-		for (const [mode, button] of this.viewSwitcherButtons) {
-			button.classList.toggle('active', viewMode === mode);
-			button.setAttribute('aria-pressed', String(viewMode === mode));
-		}
-
 		const sidebarVisible = this.layoutService.isVisible(Parts.SIDEBAR_PART);
+		const sidebarWidth = sidebarVisible ? this.layoutService.getSize(Parts.SIDEBAR_PART).width : 0;
+		this.chrome.style.setProperty('--optimus-sidebar-width', `${sidebarWidth}px`);
+		this.chrome.classList.toggle('sidebar-visible', sidebarVisible);
 		this.sidebarButton.classList.toggle('codicon-layout-sidebar-left', sidebarVisible);
 		this.sidebarButton.classList.toggle('codicon-layout-sidebar-left-off', !sidebarVisible);
 		this.sidebarButton.classList.toggle('checked', sidebarVisible);
+		const rightPanelVisible = this.layoutService.isVisible(Parts.AUXILIARYBAR_PART);
+		this.secondaryButton.classList.toggle('codicon-layout-sidebar-right', rightPanelVisible);
+		this.secondaryButton.classList.toggle('codicon-layout-sidebar-right-off', !rightPanelVisible);
+		this.secondaryButton.classList.toggle('checked', rightPanelVisible);
+		const focusedSession = this.isFocusedSession();
+		this.chrome.classList.toggle('focused-session', focusedSession);
+		this.backButton.disabled = !focusedSession;
+	}
 
-
-		const secondaryVisible = this.layoutService.isVisible(Parts.AUXILIARYBAR_PART);
-		this.secondaryButton.classList.toggle('codicon-layout-sidebar-right', secondaryVisible);
-		this.secondaryButton.classList.toggle('codicon-layout-sidebar-right-off', !secondaryVisible);
-		this.secondaryButton.classList.toggle('checked', secondaryVisible);
+	private isFocusedSession(): boolean {
+		return !!this.layoutService.mainContainer.querySelector('.optimus-grid-content.focused-session');
 	}
 }
 

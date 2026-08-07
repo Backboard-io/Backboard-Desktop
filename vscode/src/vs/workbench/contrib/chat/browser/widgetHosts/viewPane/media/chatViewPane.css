@@ -83,7 +83,7 @@
 		border: 1px solid var(--vscode-panel-border);
 		border-radius: 4px;
 		background: var(--vscode-editor-background);
-		box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+		box-shadow: 0 8px 28px var(--vscode-widget-shadow, transparent);
 	}
 
 	.backboard-auth-gate-logo.codicon.codicon-backboard-logo {
@@ -171,19 +171,34 @@
 	}
 }
 
+
 .chat-viewpane.has-sessions-control .agent-sessions-container.backboard-side-chat-sessions {
-	--backboard-side-chat-bg: var(--sessions-integrated-sidebar-background);
-	--backboard-side-chat-raised: color-mix(in srgb, var(--vscode-sideBar-foreground, #f2f2f2) 7%, var(--backboard-side-chat-bg));
-	--backboard-side-chat-active: color-mix(in srgb, var(--vscode-sideBar-foreground, #f2f2f2) 8%, transparent);
-	--backboard-side-chat-border: var(--vscode-sideBar-border, #2f2f2f);
-	--backboard-side-chat-primary: var(--vscode-sideBar-foreground, #f2f2f2);
-	--backboard-side-chat-secondary: color-mix(in srgb, var(--vscode-sideBar-foreground, #f2f2f2) 82%, transparent);
-	--backboard-side-chat-muted: var(--vscode-descriptionForeground, #939393);
-	gap: 20px;
-	padding: 24px;
+	/* Derive every drawer surface from the active workbench theme. These map
+	   to the same semantic roles as VS Code's side bar, inputs and lists, so
+	   custom light, dark and high-contrast themes remain internally coherent. */
+	--backboard-side-chat-bg: var(--vscode-sideBar-background, var(--vscode-editor-background));
+	--backboard-side-chat-raised: var(--vscode-input-background, var(--vscode-editorWidget-background, var(--vscode-editor-background)));
+	--backboard-side-chat-active: var(--vscode-list-hoverBackground, var(--vscode-toolbar-hoverBackground));
+	--backboard-side-chat-border: var(--vscode-sideBar-border, var(--vscode-panel-border, var(--vscode-contrastBorder, transparent)));
+	--backboard-side-chat-primary: var(--vscode-foreground);
+	--backboard-side-chat-secondary: var(--vscode-descriptionForeground, var(--vscode-foreground));
+	--backboard-side-chat-muted: var(--vscode-disabledForeground, var(--vscode-descriptionForeground));
+	--backboard-vscode-ui-font: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", system-ui, Ubuntu, "Droid Sans", sans-serif;
+	gap: 8px;
+	padding: 12px 8px 8px;
 	box-sizing: border-box;
 	background: var(--backboard-side-chat-bg);
 	color: var(--backboard-side-chat-primary);
+	font-family: var(--backboard-vscode-ui-font);
+	font-size: 13px;
+
+	button,
+	input,
+	.agent-sessions-viewer,
+	.agent-sessions-viewer .monaco-list,
+	.agent-sessions-viewer .monaco-list-row {
+		font-family: var(--backboard-vscode-ui-font) !important;
+	}
 
 	.agent-sessions-title-container {
 		display: none;
@@ -244,15 +259,15 @@
 		align-items: center;
 		gap: 10px;
 		width: 100%;
-		height: 34px;
-		padding: 0 14px;
+		height: 30px;
+		padding: 0 10px;
 		box-sizing: border-box;
-		border: 1px solid transparent;
-		border-radius: 10px;
+		border: 1px solid var(--backboard-side-chat-border);
+		border-radius: 7px;
 		background: var(--backboard-side-chat-raised);
 		color: var(--backboard-side-chat-muted);
 		font-family: inherit;
-		font-size: 12px;
+		font-size: 13px;
 		line-height: 18px;
 		text-align: left;
 		cursor: pointer;
@@ -288,6 +303,12 @@
 		white-space: nowrap;
 	}
 
+	.agent-sessions-action-shortcut {
+		margin-left: auto;
+		color: var(--backboard-side-chat-muted);
+		font-size: 11px;
+	}
+
 	.agent-sessions-primary-actions {
 		display: flex;
 		flex-direction: column;
@@ -299,7 +320,7 @@
 		align-items: center;
 		gap: 10px;
 		width: 100%;
-		height: 32px;
+		height: 30px;
 		padding: 0 6px 0 0;
 		box-sizing: border-box;
 		border: none;
@@ -307,7 +328,7 @@
 		background: transparent;
 		color: var(--backboard-side-chat-secondary);
 		font-family: inherit;
-		font-size: 12px;
+		font-size: 13px;
 		line-height: 18px;
 		text-align: left;
 		cursor: pointer;
@@ -389,7 +410,101 @@
 	.agent-sessions-control-container {
 		flex: 1;
 		min-height: 0;
-		margin-top: -14px;
+		margin-top: -4px;
+	}
+
+	/* Let the history use the drawer surface instead of introducing a second
+	   list background. Interaction states remain visible on individual rows. */
+	.agent-sessions-control-container,
+	.agent-sessions-viewer,
+	.agent-sessions-viewer .monaco-list,
+	.agent-sessions-viewer .monaco-list-rows,
+	.agent-sessions-viewer .monaco-scrollable-element {
+		background-color: transparent !important;
+	}
+
+	.agent-sessions-account-footer {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		min-height: 38px;
+		padding: 8px 4px 0;
+		border-top: 1px solid var(--backboard-side-chat-border);
+	}
+
+	.agent-sessions-account-avatar {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 24px;
+		height: 24px;
+		flex: 0 0 24px;
+		border-radius: 50%;
+		background: var(--backboard-side-chat-raised);
+		color: var(--backboard-side-chat-secondary);
+	}
+
+	.agent-sessions-account-copy {
+		display: flex;
+		flex: 1 1 auto;
+		min-width: 0;
+		align-items: center;
+		line-height: 18px;
+	}
+
+	.agent-sessions-account-name,
+	.agent-sessions-account-plan {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.agent-sessions-account-name {
+		font-size: 13px;
+		color: var(--backboard-side-chat-primary);
+	}
+
+	.agent-sessions-account-plan {
+		font-size: 12px;
+		color: var(--backboard-side-chat-muted);
+	}
+
+	.agent-sessions-account-update,
+	.agent-sessions-account-settings {
+		height: 28px;
+		padding: 0 9px;
+		border: 0;
+		border-radius: 10px;
+		font: inherit;
+		font-size: 12px;
+		cursor: pointer;
+	}
+
+	.agent-sessions-account-update {
+		background: var(--vscode-button-background);
+		color: var(--vscode-button-foreground);
+	}
+
+	.agent-sessions-account-settings {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 28px;
+		flex: 0 0 28px;
+		padding: 0;
+		background: var(--backboard-side-chat-raised);
+		color: var(--backboard-side-chat-secondary);
+	}
+
+	.agent-sessions-account-update:hover,
+	.agent-sessions-account-update:focus-visible {
+		background: var(--vscode-button-hoverBackground);
+	}
+
+	.agent-sessions-account-settings:hover,
+	.agent-sessions-account-settings:focus-visible {
+		background: var(--backboard-side-chat-active);
+		color: var(--backboard-side-chat-primary);
 	}
 }
 
@@ -494,5 +609,62 @@
 				padding-left: 8px;
 			}
 		}
+	}
+}
+
+
+/* Cursor drawer measurements from the latest 2x capture. */
+.chat-viewpane.has-sessions-control .agent-sessions-container.backboard-side-chat-sessions {
+	--backboard-side-chat-primary: var(--vscode-foreground);
+	--backboard-side-chat-secondary: var(--vscode-descriptionForeground, var(--vscode-foreground));
+	--backboard-side-chat-muted: var(--vscode-disabledForeground, var(--vscode-descriptionForeground));
+	padding: 12px 8px 8px 12px;
+	font-size: 13px;
+
+	.agent-sessions-search-button,
+	.agent-sessions-action-row,
+	.agent-sessions-workspaces-title {
+		font-size: 13px;
+	}
+
+	.agent-sessions-search-button {
+		height: 30px;
+	}
+
+	.agent-sessions-action-shortcut {
+		font-size: 12px;
+	}
+
+	.agent-sessions-workspaces-header {
+		height: 34px;
+		flex-basis: 34px;
+	}
+
+	.agent-sessions-control-container {
+		margin-left: -4px;
+	}
+
+	.agent-sessions-account-footer {
+		min-height: 46px;
+		padding-top: 8px;
+	}
+
+	.agent-sessions-account-name {
+		font-size: 13px;
+	}
+
+	.agent-sessions-account-plan {
+		font-size: 13px;
+	}
+
+	.agent-sessions-account-update,
+	.agent-sessions-account-settings {
+		height: 26px;
+	}
+
+	.agent-sessions-viewer .agent-session-title {
+		font-family: var(--backboard-vscode-ui-font) !important;
+		font-size: 13px;
+		font-weight: 400;
 	}
 }

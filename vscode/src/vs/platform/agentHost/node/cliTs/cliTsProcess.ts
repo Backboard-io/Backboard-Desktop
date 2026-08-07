@@ -20,6 +20,57 @@ interface PendingServeRequest {
 	readonly reject: (error: Error) => void;
 }
 
+/** Returns the CPU architecture encoded in a native executable header. */
+export function detectCliTsExecutableArchitecture(header: Buffer, platform: NodeJS.Platform): NodeJS.Architecture | undefined {
+	if (platform === 'darwin' && header.length >= 8) {
+		const magic = header.readUInt32LE(0);
+		if (magic === 0xfeedfacf || magic === 0xfeedface) {
+			switch (header.readUInt32LE(4)) {
+				case 0x01000007: return 'x64';
+				case 0x0100000c: return 'arm64';
+			}
+		}
+	}
+
+	if (platform === 'linux' && header.length >= 20 && header[0] === 0x7f && header.toString('ascii', 1, 4) === 'ELF') {
+		const machine = header[5] === 2 ? header.readUInt16BE(18) : header.readUInt16LE(18);
+		switch (machine) {
+			case 0x3e: return 'x64';
+			case 0xb7: return 'arm64';
+		}
+	}
+
+	if (platform === 'win32' && header.length >= 64 && header[0] === 0x4d && header[1] === 0x5a) {
+		const peOffset = header.readUInt32LE(0x3c);
+		if (peOffset + 6 <= header.length && header.toString('ascii', peOffset, peOffset + 4) === 'PE\0\0') {
+			switch (header.readUInt16LE(peOffset + 4)) {
+				case 0x8664: return 'x64';
+				case 0xaa64: return 'arm64';
+			}
+		}
+	}
+
+	return undefined;
+}
+
+function isCliTsExecutableCompatible(path: string): boolean {
+	let descriptor: number | undefined;
+	try {
+		descriptor = fs.openSync(path, 'r');
+		const header = Buffer.alloc(4096);
+		const bytesRead = fs.readSync(descriptor, header, 0, header.length, 0);
+		const executableArchitecture = detectCliTsExecutableArchitecture(header.subarray(0, bytesRead), process.platform);
+		return executableArchitecture === undefined || executableArchitecture === process.arch;
+	} catch {
+		// Let spawn surface unreadable or unrecognized executable errors normally.
+		return true;
+	} finally {
+		if (descriptor !== undefined) {
+			fs.closeSync(descriptor);
+		}
+	}
+}
+
 export interface CliTsServeProcessOptions {
 	/** Working directory the agent operates on (the session's workspace folder). */
 	readonly workingDirectory?: string;
@@ -255,7 +306,10 @@ export class CliTsServeProcess extends Disposable {
 		];
 		for (const candidate of candidates) {
 			if (fs.existsSync(candidate)) {
-				return { command: candidate, args: [] };
+				if (isCliTsExecutableCompatible(candidate)) {
+					return { command: candidate, args: [] };
+				}
+				this.logService.warn(`[cli-ts] skipping packaged binary for the wrong CPU architecture: ${candidate} (host=${process.platform}-${process.arch})`);
 			}
 		}
 		const devEntrypoint = join(appRoot, 'cli-ts', 'src', 'entrypoints', 'cli.tsx');

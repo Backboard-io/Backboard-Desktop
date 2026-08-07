@@ -205,7 +205,6 @@ Most folders under `ide/zed/crates/` follow the same Rust crate pattern:
 | `rules_library` | Rules and guidance material used by agent workflows. |
 | `ui_prompt` | Prompt-oriented UI components. |
 | `zeta_prompt` | Prompt material for Zed/Zeta-style assistant behavior. |
-| `opencode` | OpenCode integration/provider support. |
 
 ### Language Models And Providers
 

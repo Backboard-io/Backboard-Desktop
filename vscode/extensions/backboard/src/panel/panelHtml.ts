@@ -598,8 +598,8 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 			return section('Voice', [
 				choice('chooseVoice', 'off', 'Off', '', controls.voiceMode.value === 'off', false),
 				choice('chooseVoice', 'tts', 'TTS', '', controls.voiceMode.value === 'tts', false),
-				choice('chooseVoice', 'stt', 'STT', '', controls.voiceMode.value === 'stt', true),
-				choice('chooseVoice', 'conversation', 'Conversation', '', controls.voiceMode.value === 'conversation', true)
+				choice('chooseVoice', 'stt', 'STT', '', controls.voiceMode.value === 'stt', false),
+				choice('chooseVoice', 'conversation', 'Conversation', '', controls.voiceMode.value === 'conversation', false)
 			].join(''));
 		}
 		function renderUsagePopover() {
@@ -808,7 +808,13 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 		buttons.model.addEventListener('click', event => openPopover('model', event.currentTarget));
 		buttons.web.addEventListener('click', event => openPopover('web', event.currentTarget));
 		buttons.image.addEventListener('click', event => openPopover('image', event.currentTarget));
-		buttons.voice.addEventListener('click', toggleVoiceCapture);
+		buttons.voice.addEventListener('click', event => {
+			if (voiceRecording || controls.voiceMode.value === 'stt' || controls.voiceMode.value === 'conversation') {
+				void toggleVoiceCapture();
+				return;
+			}
+			openPopover('voice', event.currentTarget);
+		});
 		buttons.stop.addEventListener('click', () => {
 			if (!runInProgress) {
 				return;
@@ -1023,6 +1029,9 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 				chooseSelect(controls.imageGeneration, value, true);
 			} else if (action === 'chooseVoice') {
 				chooseSelect(controls.voiceMode, value, true);
+				if (value === 'stt' || value === 'conversation') {
+					void toggleVoiceCapture();
+				}
 			} else if (action === 'toggleProviderFilter') {
 				const provider = target.dataset.provider || value;
 				if (disabledModelProviders.has(provider)) {
@@ -2026,7 +2035,7 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 					const img = document.createElement('img');
 					img.src = url;
 					row.appendChild(img);
-				} else if (/\\.(mp3|wav|ogg|m4a|webm)(\\?|$)/i.test(url) || url.startsWith('data:audio/')) {
+				} else if (role === 'voice' || /\\.(mp3|wav|ogg|m4a|webm)(\\?|$)/i.test(url) || url.startsWith('data:audio/')) {
 					const audio = document.createElement('audio');
 					audio.controls = true;
 					audio.src = url;

@@ -99,6 +99,7 @@ export type AgentEvent =
 	| { type: "turn:status"; phase: "preparing" | "generating" }
 	| { type: "assistant:delta"; turnId: string; messageId: string; text: string }
 	| { type: "assistant:reasoning"; turnId: string; text: string }
+	| { type: "assistant:voice"; records: unknown[] }
 	| {
 			type: "assistant:message";
 			turnId: string;

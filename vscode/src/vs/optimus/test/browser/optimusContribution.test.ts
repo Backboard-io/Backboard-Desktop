@@ -9,7 +9,7 @@ import { URI } from '../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../base/test/common/utils.js';
 import { Codicon } from '../../../base/common/codicons.js';
 import { IChat, ISession, ISessionWorkspace, SessionStatus } from '../../../sessions/services/sessions/common/session.js';
-import { collectOptimusFolderCandidates } from '../../common/optimusSessions.js';
+import { collectOptimusFolderCandidates, filterAndSortOptimusSessions, getOptimusDashboardBucket, IOptimusDashboardFilters, IOptimusSessionSummary } from '../../common/optimusSessions.js';
 
 function workspace(uri: URI, workingDirectory = uri): ISessionWorkspace {
 	return {
@@ -100,5 +100,38 @@ suite('Optimus contribution', () => {
 			otherWorkingDirectory.toString(),
 			otherWorkspace.toString(),
 		]);
+	});
+
+	test('dashboard groups provider statuses into Running, Blocked, and Ready', () => {
+		assert.deepStrictEqual([
+			getOptimusDashboardBucket(SessionStatus.InProgress),
+			getOptimusDashboardBucket(SessionStatus.NeedsInput),
+			getOptimusDashboardBucket(SessionStatus.Error),
+			getOptimusDashboardBucket(SessionStatus.Completed),
+			getOptimusDashboardBucket(SessionStatus.Untitled),
+		], ['running', 'blocked', 'blocked', 'ready', 'ready']);
+	});
+
+	test('dashboard combines search, filters, unread priority, and display sorting', () => {
+		const now = new Date('2026-08-06T16:00:00Z').getTime();
+		const summaries: IOptimusSessionSummary[] = [
+			{ key: 'old', title: 'Archived API work', providerId: 'claude', workspaceLabel: 'backend', status: SessionStatus.Completed, createdAt: now - 10_000, updatedAt: now - 9_000, isArchived: true, isRead: false },
+			{ key: 'read', title: 'API migration', providerId: 'codex', workspaceLabel: 'backend', status: SessionStatus.InProgress, createdAt: now - 8_000, updatedAt: now - 1_000, isArchived: false, isRead: true },
+			{ key: 'unread', title: 'API tests', providerId: 'codex', workspaceLabel: 'backend', status: SessionStatus.InProgress, createdAt: now - 7_000, updatedAt: now - 2_000, isArchived: false, isRead: false },
+			{ key: 'other', title: 'Landing page', providerId: 'codex', workspaceLabel: 'frontend', status: SessionStatus.InProgress, createdAt: now - 6_000, updatedAt: now - 500, isArchived: false, isRead: false },
+		];
+		const filters: IOptimusDashboardFilters = {
+			query: 'api',
+			buckets: ['running'],
+			timeRange: 'day',
+			archive: 'exclude',
+			providers: ['codex'],
+			workspaces: ['backend'],
+		};
+
+		assert.deepStrictEqual(
+			filterAndSortOptimusSessions(summaries, filters, 'updated-desc', true, now).map(summary => summary.key),
+			['unread', 'read'],
+		);
 	});
 });

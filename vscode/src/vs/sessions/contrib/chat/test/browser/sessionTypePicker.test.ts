@@ -45,8 +45,8 @@ class MockSessionsManagementService extends Disposable {
 	}
 }
 
-function sessionType(providerId: string, id: string, label: string): IProviderSessionType {
-	return { providerId, sessionType: { id, label, icon: Codicon.terminal } };
+function sessionType(providerId: string, id: string, label: string, chatSessionType?: string): IProviderSessionType {
+	return { providerId, sessionType: { id, label, icon: Codicon.terminal, chatSessionType } };
 }
 
 function createFakeSession(providerId: string, sessionTypeId: string, folderUri: URI): ISession {
@@ -101,7 +101,7 @@ function createPicker(
 		getLanguageModelIds: () => [],
 		lookupLanguageModel: () => undefined,
 	});
-	return disposables.add(instantiationService.createInstance(TestSessionTypePicker, session, undefined));
+	return disposables.add(instantiationService.createInstance(TestSessionTypePicker, session, () => URI.file('/project')));
 }
 
 // ---- Tests ------------------------------------------------------------------
@@ -162,6 +162,22 @@ suite('SessionTypePicker', () => {
 		const reloaded = createPicker(disposables, observableValue<ISession | undefined>('session2', undefined), management, storage);
 		assert.deepStrictEqual(reloaded.getUserPickedSessionType(), { providerId: 'copilot', sessionTypeId: 'copilot-cli' });
 		assert.deepStrictEqual(reloaded.selectedPick, { providerId: 'copilot', sessionTypeId: 'copilot-cli' } as IPreferredSessionType);
+	});
+
+	test('preserves the stored chat-session provider while its CLI is unavailable', () => {
+		management.setSessionTypes([
+			sessionType('local-1', 'backboard', 'Backboard', 'agent-host-backboard'),
+			sessionType('local-1', 'codex', 'Codex', 'agent-host-codex'),
+		]);
+		const picker = createPicker(disposables, session, management, storage);
+		picker.setAllowedSessionTypeIds(['agent-host-backboard', 'agent-host-codex']);
+
+		picker.pick({ providerId: 'local-1', sessionTypeId: 'codex' });
+		management.setSessionTypes([
+			sessionType('local-1', 'backboard', 'Backboard', 'agent-host-backboard'),
+		]);
+
+		assert.strictEqual(picker.getPickedChatSessionType(folder), 'agent-host-codex');
 	});
 
 	test('observing an active session does not overwrite the user pick', () => {

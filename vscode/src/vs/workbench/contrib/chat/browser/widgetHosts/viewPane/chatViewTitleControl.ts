@@ -43,6 +43,7 @@ export class ChatViewTitleControl extends Disposable {
 	/** Stable ids of actions registered elsewhere; referenced by id to avoid import cycles. */
 	private static readonly NEW_CHAT_COMMAND_ID = 'workbench.action.chat.newChat';
 	private static readonly OPEN_AGENT_SESSION_COMMAND_ID = 'workbench.action.chat.history';
+	private static readonly TOGGLE_AGENT_SESSIONS_SIDEBAR_COMMAND_ID = 'agentSessions.toggleAgentSessionsSidebar';
 	private static readonly MAX_HISTORY_TABS = 40;
 	private static toolbarMenuItemsRegistered = false;
 
@@ -192,6 +193,15 @@ export class ChatViewTitleControl extends Disposable {
 				},
 				group: 'navigation',
 				order: 3,
+			});
+			MenuRegistry.appendMenuItem(MenuId.ChatViewSessionTitleToolbar, {
+				command: {
+					id: ChatViewTitleControl.TOGGLE_AGENT_SESSIONS_SIDEBAR_COMMAND_ID,
+					title: localize('chat.toggleAgentsDrawer', "Toggle Agents Drawer"),
+					icon: Codicon.layoutSidebarRight,
+				},
+				group: 'navigation',
+				order: 4,
 			});
 		}
 	}

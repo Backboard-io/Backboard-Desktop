@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { $, addDisposableListener, clearNode } from '../../../../../../base/browser/dom.js';
+import { createTrustedTypesPolicy } from '../../../../../../base/browser/trustedTypes.js';
 import { disposableTimeout } from '../../../../../../base/common/async.js';
 import { Codicon } from '../../../../../../base/common/codicons.js';
 import { Emitter, Event } from '../../../../../../base/common/event.js';
@@ -15,6 +16,7 @@ import { localize } from '../../../../../../nls.js';
 import { linesDiffComputers } from '../../../../../../editor/common/diff/linesDiffComputers.js';
 import { DetailedLineRangeMapping } from '../../../../../../editor/common/diff/rangeMapping.js';
 import { ILanguageService } from '../../../../../../editor/common/languages/language.js';
+import { tokenizeToString } from '../../../../../../editor/common/languages/textToHtmlTokenizer.js';
 import { IModelService } from '../../../../../../editor/common/services/model.js';
 import { ITextModelService } from '../../../../../../editor/common/services/resolverService.js';
 import { IClipboardService } from '../../../../../../platform/clipboard/common/clipboardService.js';
@@ -29,6 +31,12 @@ import { ChatTreeItem } from '../../chat.js';
 import { ChatEditPillElement } from './chatEditPillElement.js';
 import { IChatContentPart } from './chatContentParts.js';
 import './media/chatExternalEditCard.css';
+
+const _tokenizerTrustedTypesPolicy = createTrustedTypesPolicy('chatExternalEditTokenizer', {
+	createHTML(html: string) {
+		return html;
+	}
+});
 
 /**
  * Renders an {@link IChatExternalEdit} progress part as a static "edit pill".
@@ -172,6 +180,11 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 
 			const originalLines = beforeContent.split('\n');
 			const modifiedLines = afterContent.split('\n');
+			const languageId = this.languageService.guessLanguageIdByFilepathOrFirstLine(this.edit.uri, modifiedLines[0]);
+			const [originalTokenizedLines, modifiedTokenizedLines] = await Promise.all([
+				this.tokenizeLines(beforeContent, languageId),
+				this.tokenizeLines(afterContent, languageId),
+			]);
 			const diff = linesDiffComputers.getDefault().computeDiff(originalLines, modifiedLines, {
 				ignoreTrimWhitespace: false,
 				computeMoves: false,
@@ -182,7 +195,7 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 			if (diff.changes.length === 0) {
 				body.appendChild($('.chat-external-edit-diff-note', {}, localize('chat.externalEdit.noChanges', "No line changes")));
 			} else {
-				this.renderDiffRows(body, originalLines, modifiedLines, diff.changes);
+				this.renderDiffRows(body, originalLines, modifiedLines, originalTokenizedLines, modifiedTokenizedLines, diff.changes);
 			}
 			this.diffBodyState = 'ready';
 		} catch {
@@ -192,6 +205,17 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 			clearNode(body);
 			body.appendChild($('.chat-external-edit-diff-note', {}, localize('chat.externalEdit.diffUnavailable', "Diff unavailable")));
 			this.diffBodyState = 'error';
+		}
+	}
+
+	private async tokenizeLines(content: string, languageId: string | null): Promise<readonly string[]> {
+		try {
+			const tokenized = await tokenizeToString(this.languageService, content, languageId);
+			const start = tokenized.indexOf('>') + 1;
+			const end = tokenized.lastIndexOf('</div>');
+			return tokenized.slice(start, end).split('<br/>');
+		} catch {
+			return [];
 		}
 	}
 
@@ -209,20 +233,27 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 	 * added lines (modified numbering), ±2 context lines, and gap dividers
 	 * between non-contiguous hunks — no fake context fill.
 	 */
-	private renderDiffRows(body: HTMLElement, originalLines: string[], modifiedLines: string[], changes: readonly DetailedLineRangeMapping[]): void {
+	private renderDiffRows(body: HTMLElement, originalLines: string[], modifiedLines: string[], originalTokenizedLines: readonly string[], modifiedTokenizedLines: readonly string[], changes: readonly DetailedLineRangeMapping[]): void {
 		const CONTEXT_LINES = 2;
 		const MAX_ROWS = 400;
 		let renderedRows = 0;
 		let lastRenderedModifiedLine = 0;
 
-		const appendRow = (kind: 'added' | 'removed' | 'context', lineNumber: number, text: string): boolean => {
+		const appendRow = (kind: 'added' | 'removed' | 'context', lineNumber: number, text: string, tokenizedText: string | undefined): boolean => {
 			if (renderedRows >= MAX_ROWS) {
 				return false;
 			}
 			renderedRows++;
 			const row = $(`.chat-external-edit-diff-row.${kind}`);
 			row.appendChild($('span.chat-external-edit-diff-gutter', {}, String(lineNumber)));
-			row.appendChild($('span.chat-external-edit-diff-text', {}, text));
+			const textElement = $('span.chat-external-edit-diff-text');
+			if (tokenizedText !== undefined) {
+				const trustedHtml = _tokenizerTrustedTypesPolicy?.createHTML(tokenizedText) ?? tokenizedText;
+				textElement.innerHTML = trustedHtml as string;
+			} else {
+				textElement.textContent = text;
+			}
+			row.appendChild(textElement);
 			body.appendChild(row);
 			return true;
 		};
@@ -237,14 +268,14 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 				body.appendChild($('.chat-external-edit-diff-gap'));
 			}
 			for (let m = leadStart; m < change.modified.startLineNumber; m++) {
-				appendRow('context', m, modifiedLines[m - 1] ?? '');
+				appendRow('context', m, modifiedLines[m - 1] ?? '', modifiedTokenizedLines[m - 1]);
 			}
 
 			for (let o = change.original.startLineNumber; o < change.original.endLineNumberExclusive; o++) {
-				appendRow('removed', o, originalLines[o - 1] ?? '');
+				appendRow('removed', o, originalLines[o - 1] ?? '', originalTokenizedLines[o - 1]);
 			}
 			for (let m = change.modified.startLineNumber; m < change.modified.endLineNumberExclusive; m++) {
-				appendRow('added', m, modifiedLines[m - 1] ?? '');
+				appendRow('added', m, modifiedLines[m - 1] ?? '', modifiedTokenizedLines[m - 1]);
 			}
 
 			// Trailing context, clamped to the file end and the next hunk.
@@ -253,7 +284,7 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 				trailEnd = Math.min(trailEnd, next.modified.startLineNumber - 1);
 			}
 			for (let m = change.modified.endLineNumberExclusive; m <= trailEnd; m++) {
-				appendRow('context', m, modifiedLines[m - 1] ?? '');
+				appendRow('context', m, modifiedLines[m - 1] ?? '', modifiedTokenizedLines[m - 1]);
 			}
 			lastRenderedModifiedLine = Math.max(lastRenderedModifiedLine, trailEnd, change.modified.endLineNumberExclusive - 1);
 
@@ -363,4 +394,3 @@ function describeEdit(edit: IChatExternalEdit): { icon: ThemeIcon; label: string
 			return { icon: Codicon.check, label: localize('chat.codeblock.edited', 'Edited') };
 	}
 }
-

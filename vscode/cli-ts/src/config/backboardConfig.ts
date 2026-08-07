@@ -110,15 +110,27 @@ function readThinkingConfig(
 	}
 	const thinkingConfig = thinking as BackboardConfigJson;
 	if (Object.keys(thinkingConfig).length === 0) return undefined;
+	const excludeReasoning =
+		typeof thinkingConfig.excludeReasoning === "boolean"
+			? { excludeReasoning: thinkingConfig.excludeReasoning }
+			: {};
+
+	if (thinkingConfig.kind === "default") {
+		return { kind: "default", ...excludeReasoning };
+	}
 
 	if (
 		thinkingConfig.kind === "level" &&
 		isThinkingLevel(thinkingConfig.level)
 	) {
-		return { kind: "level", level: thinkingConfig.level };
+		return {
+			kind: "level",
+			level: thinkingConfig.level,
+			...excludeReasoning,
+		};
 	}
 	if (thinkingConfig.kind === "dynamic") {
-		return { kind: "dynamic" };
+		return { kind: "dynamic", ...excludeReasoning };
 	}
 	if (
 		thinkingConfig.kind === "budget" &&
@@ -126,7 +138,11 @@ function readThinkingConfig(
 		Number.isInteger(thinkingConfig.tokens) &&
 		thinkingConfig.tokens > 0
 	) {
-		return { kind: "budget", tokens: thinkingConfig.tokens };
+		return {
+			kind: "budget",
+			tokens: thinkingConfig.tokens,
+			...excludeReasoning,
+		};
 	}
 
 	if (isThinkingEffort(thinkingConfig.effort)) {

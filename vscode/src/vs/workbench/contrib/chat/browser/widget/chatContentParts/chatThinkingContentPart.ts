@@ -426,6 +426,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 	private fixedScrollingMode: boolean = false;
 	private streamThenCollapseMode: boolean = false;
 	private readonly wasStreamingLive: boolean;
+	private readonly useCursorPanelPresentation: boolean;
 	private readonly _collapseAnimation = this._register(new MutableDisposable<DisposableStore>());
 	private readonly startTimeMs: number;
 	private elapsedAtCompletionMs: number | undefined;
@@ -526,6 +527,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			?? localize('chat.thinking.header.initial', 'Thinking');
 
 		super(extractedTitle, context, undefined, hoverService, configurationService);
+		this.useCursorPanelPresentation = context.container.closest('.part.auxiliarybar') !== null;
 
 		this.id = content.id;
 		this.content = content;
@@ -988,6 +990,19 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		const labelElement = this._collapseButton.labelElement;
 		labelElement.textContent = '';
 
+		// Cursor keeps the completed turn fold deliberately quiet in the editor's
+		// right panel: "Worked for 39s". Generated summaries, step counts, and
+		// aggregate diff stats remain useful in the larger chat surfaces, but make
+		// this narrow transcript header feel busier than the reference UI.
+		if (this.useCursorPanelPresentation && !this.isCanceledResponse()) {
+			const panelTitle = this.wasStreamingLive
+				? localize('chat.thinking.workedFor', "Worked for {0}", formatThinkingElapsed(this.getElapsedMs()))
+				: localize('chat.thinking.finished', 'Worked');
+			labelElement.textContent = panelTitle;
+			this._collapseButton.element.ariaLabel = panelTitle;
+			return;
+		}
+
 		const firstSpaceIndex = title.indexOf(' ');
 		if (firstSpaceIndex === -1) {
 			// Single word title, no need to split
@@ -1429,18 +1444,25 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 				const reads = group.items.filter(item => item.subkind === 'read').length;
 				const searches = total - reads;
 				if (reads > 0 && searches > 0) {
-					return reads === 1
-						? localize('chat.thinking.group.readAndSearched.one', "Read a file and searched code")
-						: localize('chat.thinking.group.readAndSearched', "Read {0} files and searched code", reads);
+					if (reads === 1 && searches === 1) {
+						return localize('chat.thinking.group.explored.oneFileOneSearch', "Explored 1 file, 1 search");
+					}
+					if (reads === 1) {
+						return localize('chat.thinking.group.explored.oneFile', "Explored 1 file, {0} searches", searches);
+					}
+					if (searches === 1) {
+						return localize('chat.thinking.group.explored.oneSearch', "Explored {0} files, 1 search", reads);
+					}
+					return localize('chat.thinking.group.explored', "Explored {0} files, {1} searches", reads, searches);
 				}
 				if (searches > 0) {
 					return searches === 1
-						? localize('chat.thinking.group.searched.one', "Searched code")
-						: localize('chat.thinking.group.searched', "Searched code {0} times", searches);
+						? localize('chat.thinking.group.searched.one', "Explored 1 search")
+						: localize('chat.thinking.group.searched', "Explored {0} searches", searches);
 				}
 				return reads === 1
-					? localize('chat.thinking.group.read.one', "Read a file")
-					: localize('chat.thinking.group.read', "Read {0} files", reads);
+					? localize('chat.thinking.group.read.one', "Explored 1 file")
+					: localize('chat.thinking.group.read', "Explored {0} files", reads);
 			}
 			case ToolActivityCategory.Edit:
 				return total === 1

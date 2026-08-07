@@ -43,13 +43,66 @@ export class BackboardClient {
 	 * caches per signed-in account (assistants are account-owned server-side).
 	 */
 	get accountFingerprint(): string {
-		return createHash("sha256").update(this.env.apiKey).digest("hex").slice(0, 16);
+		return createHash("sha256")
+			.update(this.env.apiKey)
+			.digest("hex")
+			.slice(0, 16);
 	}
 
-	private headers(): Record<string, string> {
+	private headers(json = true): Record<string, string> {
 		return {
 			"X-API-Key": this.env.apiKey,
-			"Content-Type": "application/json",
+			...(json ? { "Content-Type": "application/json" } : {}),
+		};
+	}
+
+	private requestPayload(
+		path: string,
+		body: unknown,
+	): {
+		headers: Record<string, string>;
+		body: BodyInit;
+		logBody: unknown;
+	} {
+		if (path !== "/threads/messages" || !hasAudioFile(body)) {
+			return {
+				headers: this.headers(),
+				body: JSON.stringify(body),
+				logBody: body,
+			};
+		}
+
+		const { audioFile, ...fields } = body;
+		const form = new FormData();
+		for (const [key, value] of Object.entries(fields)) {
+			if (value === undefined) continue;
+			form.append(
+				key,
+				typeof value === "string"
+					? value
+					: typeof value === "object"
+						? JSON.stringify(value)
+						: String(value),
+			);
+		}
+		form.append(
+			"audio_file",
+			new Blob([Buffer.from(audioFile.dataBase64, "base64")], {
+				type: audioFile.mimeType || "application/octet-stream",
+			}),
+			audioFile.fileName,
+		);
+		return {
+			headers: this.headers(false),
+			body: form,
+			logBody: {
+				...fields,
+				audio_file: {
+					fileName: audioFile.fileName,
+					mimeType: audioFile.mimeType,
+					bytes: Buffer.byteLength(audioFile.dataBase64, "base64"),
+				},
+			},
 		};
 	}
 
@@ -59,17 +112,23 @@ export class BackboardClient {
 		options: RequestOptions,
 	): Promise<T> {
 		const url = `${this.env.apiUrl}${path}`;
-		const headers = this.headers();
+		const payload = this.requestPayload(path, body);
+		const { headers } = payload;
 		const started = Date.now();
 
-		this.serverLog?.request({ endpoint: path, method: "POST", headers, body });
+		this.serverLog?.request({
+			endpoint: path,
+			method: "POST",
+			headers,
+			body: payload.logBody,
+		});
 
 		let res: Response;
 		try {
 			res = await fetch(url, {
 				method: "POST",
 				headers,
-				body: JSON.stringify(body),
+				body: payload.body,
 				signal: options.signal,
 			});
 		} catch (err) {
@@ -273,7 +332,8 @@ export class BackboardClient {
 		body: unknown,
 		options: RequestOptions,
 	): AsyncIterable<ProviderEvent> {
-		const headers = this.headers();
+		const payload = this.requestPayload(path, body);
+		const { headers } = payload;
 		const started = Date.now();
 		let status = 0;
 		let events = 0;
@@ -281,13 +341,18 @@ export class BackboardClient {
 		let error: string | undefined;
 		let errorLogged = false;
 
-		this.serverLog?.request({ endpoint: path, method: "POST", headers, body });
+		this.serverLog?.request({
+			endpoint: path,
+			method: "POST",
+			headers,
+			body: payload.logBody,
+		});
 
 		try {
 			const res = await fetch(`${this.env.apiUrl}${path}`, {
 				method: "POST",
 				headers,
-				body: JSON.stringify(body),
+				body: payload.body,
 				signal: options.signal,
 			});
 			status = res.status;
@@ -365,6 +430,25 @@ export class BackboardClient {
 			}
 		}
 	}
+}
+
+function hasAudioFile(value: unknown): value is SendMessageRequest & {
+	audioFile: NonNullable<SendMessageRequest["audioFile"]>;
+} {
+	if (typeof value !== "object" || value === null || !("audioFile" in value)) {
+		return false;
+	}
+	const audio = value.audioFile;
+	return (
+		typeof audio === "object" &&
+		audio !== null &&
+		"dataBase64" in audio &&
+		typeof audio.dataBase64 === "string" &&
+		"fileName" in audio &&
+		typeof audio.fileName === "string" &&
+		"mimeType" in audio &&
+		typeof audio.mimeType === "string"
+	);
 }
 
 function modelPageQuery(

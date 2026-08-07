@@ -116,6 +116,8 @@ export class AgentController {
 		return this.enqueueSubmit(text, "back", {
 			emitUserMessage: options.emitUserMessage ?? true,
 			onStart: options.onStart,
+			voice: options.voice,
+			audioFile: options.audioFile,
 		});
 	}
 
@@ -124,6 +126,8 @@ export class AgentController {
 		const run = this.enqueueSubmit(text, "front", {
 			emitUserMessage: options.emitUserMessage ?? false,
 			onStart: options.onStart,
+			voice: options.voice,
+			audioFile: options.audioFile,
 		});
 		if (shouldCancelActiveTurn) this.cancel();
 		return run;
@@ -133,13 +137,15 @@ export class AgentController {
 		text: string,
 		placement: "front" | "back",
 		options: Required<Pick<SubmitOptions, "emitUserMessage">> &
-			Pick<SubmitOptions, "onStart">,
+			Pick<SubmitOptions, "onStart" | "voice" | "audioFile">,
 	): Promise<TurnStatus> {
 		const run = new Promise<TurnStatus>((resolve, reject) => {
 			const queued = {
 				text,
 				emitUserMessage: options.emitUserMessage,
 				onStart: options.onStart,
+				voice: options.voice,
+				audioFile: options.audioFile,
 				resolve,
 				reject,
 			};
@@ -165,6 +171,8 @@ export class AgentController {
 					queued.resolve(
 						await this.runTurn(queued.text, {
 							emitUserMessage: queued.emitUserMessage,
+							voice: queued.voice,
+							audioFile: queued.audioFile,
 						}),
 					);
 				} catch (err) {
@@ -179,7 +187,7 @@ export class AgentController {
 
 	private async runTurn(
 		text: string,
-		options: { emitUserMessage: boolean },
+		options: Pick<QueuedSubmit, "emitUserMessage" | "voice" | "audioFile">,
 	): Promise<TurnStatus> {
 		const { bus, session, config } = this.deps;
 		this.abortController = new AbortController();
@@ -274,6 +282,8 @@ export class AgentController {
 				model: config.model,
 				memory: config.memory,
 				memoryProfile: config.memoryProfile,
+				voice: options.voice,
+				audioFile: options.audioFile,
 				thinking: undefined,
 				thinkingResolver,
 				requestKind: "user",

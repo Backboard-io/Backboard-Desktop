@@ -269,7 +269,7 @@
 	opacity: 1;
 	/* Only once visible does it need a plate to stay legible over code. */
 	background: color-mix(in srgb, var(--vscode-editorWidget-background) 92%, var(--vscode-foreground));
-	box-shadow: 0 1px 4px color-mix(in srgb, #000 22%, transparent);
+	box-shadow: 0 1px 4px var(--vscode-widget-shadow, transparent);
 }
 
 :is(.agent-sessions-workbench .part.sessionspart, .agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .value .interactive-result-code-block > .interactive-result-code-block-toolbar .action-label,

@@ -43,6 +43,17 @@
 	max-height: var(--titlebar-height, 35px) !important;
 	overflow: visible;
 	pointer-events: none;
+	/* Optimus paints its visible chrome in `.optimus-window-chrome`. Leaving
+	 * the generic titlebar panel colour underneath that translucent layer
+	 * double-tints the left 32px and creates the apparent overlay/seam above
+	 * the sidebar. Keep the structural titlebar, but let vibrancy show through. */
+	background: transparent !important;
+	background-color: transparent !important;
+}
+
+.agent-sessions-workbench.monaco-workbench > .part.titlebar.optimus-titlebar > .optimus-titlebar-placeholder {
+	background: transparent !important;
+	background-color: transparent !important;
 }
 
 .agent-sessions-workbench.monaco-workbench > .part.titlebar.optimus-titlebar > .content,

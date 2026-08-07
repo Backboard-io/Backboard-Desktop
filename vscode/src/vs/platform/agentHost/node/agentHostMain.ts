@@ -15,7 +15,7 @@ import { URI } from '../../../base/common/uri.js';
 import { generateUuid } from '../../../base/common/uuid.js';
 import * as os from 'os';
 import * as inspector from 'inspector';
-import { AgentHostClaudeAgentEnabledEnvVar, AgentHostCodexAgentEnabledEnvVar, AgentHostOpenCodeAgentEnabledEnvVar, AgentHostIpcChannels, IAgentHostInspectInfo, IAgentHostSocketInfo, IAgentService, IConnectionTrackerService, isAgentEnabled } from '../common/agentService.js';
+import { AgentHostClaudeAgentEnabledEnvVar, AgentHostCodexAgentEnabledEnvVar, AgentHostIpcChannels, IAgentHostInspectInfo, IAgentHostSocketInfo, IAgentService, IConnectionTrackerService, isAgentEnabled } from '../common/agentService.js';
 import { AgentService } from './agentService.js';
 import { IAgentConfigurationService } from './agentConfigurationService.js';
 import { IAgentHostCompletions } from './agentHostCompletions.js';
@@ -26,7 +26,6 @@ import { ClaudeAgent } from './claude/claudeAgent.js';
 import { ClaudeAgentSdkService, ClaudeSdkPackage, IClaudeAgentSdkService } from './claude/claudeAgentSdkService.js';
 import { ClaudeProxyService, IClaudeProxyService } from './claude/claudeProxyService.js';
 import { CodexAgent, CodexSdkPackage, findCodexOnPath } from './codex/codexAgent.js';
-import { OpenCodeAgent, findOpenCodeOnPath } from './opencode/opencodeAgent.js';
 import { isClaudeLoggedIn, isCodexLoggedIn } from './shared/agentLoginProbes.js';
 
 /**
@@ -227,9 +226,6 @@ async function startAgentHost(): Promise<void> {
 		}
 		if (isAgentEnabled(process.env[AgentHostCodexAgentEnabledEnvVar], false) && (agentSdkDownloader.isAvailable(CodexSdkPackage) || findCodexOnPath() !== undefined) && isCodexLoggedIn()) {
 			agentService.registerProvider(instantiationService.createInstance(CodexAgent));
-		}
-		if (isAgentEnabled(process.env[AgentHostOpenCodeAgentEnabledEnvVar], false) && findOpenCodeOnPath() !== undefined) {
-			agentService.registerProvider(instantiationService.createInstance(OpenCodeAgent));
 		}
 	} catch (err) {
 		logService.error('Failed to create AgentService', err);

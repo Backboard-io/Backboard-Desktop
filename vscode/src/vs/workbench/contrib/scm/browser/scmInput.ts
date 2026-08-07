@@ -94,7 +94,8 @@ class SCMInputWidgetActionRunner extends ActionRunner {
 
 	constructor(
 		private readonly input: ISCMInput,
-		@IStorageService private readonly storageService: IStorageService
+		@IStorageService private readonly storageService: IStorageService,
+		private readonly commandService: ICommandService,
 	) {
 		super();
 	}
@@ -122,7 +123,13 @@ class SCMInputWidgetActionRunner extends ActionRunner {
 			// Run action
 			this._runningActions.add(action);
 			this._cts = new CancellationTokenSource();
-			await action.run(...[this.input.repository.provider.rootUri, context, this._cts.token]);
+			const actionArgs = [this.input.repository.provider.rootUri, context, this._cts.token];
+			const generateCommitMessageCommand = product.defaultChatAgent?.generateCommitMessageCommand;
+			if (action.id === 'github.copilot.git.generateCommitMessage' && generateCommitMessageCommand && generateCommitMessageCommand !== action.id) {
+				await this.commandService.executeCommand(generateCommitMessageCommand, ...actionArgs);
+			} else {
+				await action.run(...actionArgs);
+			}
 		} finally {
 			this._runningActions.delete(action);
 
@@ -159,7 +166,7 @@ class SCMInputWidgetToolbar extends WorkbenchToolBar {
 		@IMenuService private readonly menuService: IMenuService,
 		@IContextKeyService private readonly contextKeyService: IContextKeyService,
 		@IContextMenuService contextMenuService: IContextMenuService,
-		@ICommandService commandService: ICommandService,
+		@ICommandService private readonly commandService: ICommandService,
 		@IKeybindingService keybindingService: IKeybindingService,
 		@IStorageService private readonly storageService: IStorageService,
 		@ITelemetryService telemetryService: ITelemetryService,
@@ -222,7 +229,7 @@ class SCMInputWidgetToolbar extends WorkbenchToolBar {
 		this._disposables.value.add(input.repository.provider.onDidChangeResources(() => updateToolbar()));
 		this._disposables.value.add(this.storageService.onDidChangeValue(StorageScope.PROFILE, SCMInputWidgetStorageKey.LastActionId, this._disposables.value)(() => updateToolbar()));
 
-		this.actionRunner = this._disposables.value.add(new SCMInputWidgetActionRunner(input, this.storageService));
+		this.actionRunner = this._disposables.value.add(new SCMInputWidgetActionRunner(input, this.storageService, this.commandService));
 		this._disposables.value.add(this.actionRunner.onWillRun(e => {
 			if ((this.actionRunner as SCMInputWidgetActionRunner).runningActions.size === 0) {
 				super.setActions([this._cancelAction], []);

@@ -323,7 +323,6 @@ export class CliTsAgent extends Disposable implements IAgent {
 		if (!settings.webSearch) {
 			excludedTools.push(CLI_TS_WEB_SEARCH_TOOL_NAME);
 		}
-		const thinking = cliTsThinkingLevel(settings.intensity);
 		const turn: CliTsTurnState = {
 			turnId: effectiveTurnId,
 			messageParts: new Map(),
@@ -365,7 +364,10 @@ export class CliTsAgent extends Disposable implements IAgent {
 				...(session.threadId ? { threadId: session.threadId } : {}),
 				model: `${settings.provider}/${settings.model}`,
 				permission,
-				...(thinking ? { thinking } : {}),
+				// Always send the semantic state. In particular, `off` must reach the
+				// persistent serve process so a previous turn's thinking config is reset.
+				thinking: settings.intensity,
+				excludeReasoning: !settings.showReasoning,
 				// Sent unconditionally so the persistent serve process resets
 				// these when a toggle is turned back off between turns.
 				memory: settings.memory,
@@ -1133,16 +1135,6 @@ export class CliTsAgent extends Disposable implements IAgent {
 }
 
 // ---- helpers -----------------------------------------------------------------
-
-/** Maps the session's reasoning intensity onto cli-ts thinking levels. */
-function cliTsThinkingLevel(intensity: string): string | undefined {
-	switch (intensity) {
-		case 'fast': return 'low';
-		case 'balanced': return 'medium';
-		case 'deep': return 'high';
-		default: return undefined;
-	}
-}
 
 function firstPromptLine(prompt: string): string {
 	const line = prompt.split('\n', 1)[0]?.trim() ?? '';

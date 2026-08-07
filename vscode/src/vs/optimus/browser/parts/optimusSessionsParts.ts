@@ -52,8 +52,8 @@ export class OptimusSessionsParts extends Disposable implements ISessionsPartSer
 		this._mainPart.focusSession(session);
 	}
 
-	getSessionView(_sessionId: string | undefined): SessionView | undefined {
-		return undefined;
+	getSessionView(sessionId: string | undefined): SessionView | undefined {
+		return this._mainPart.getSessionView(sessionId);
 	}
 
 	getProgressIndicator(): IProgressIndicator {

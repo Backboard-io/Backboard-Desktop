@@ -66,6 +66,782 @@
 	container-type: inline-size;
 }
 
+/* Advanced uses the same compact chrome as the Editor workbench, but its tool
+ * surface is one continuous canvas rather than a stack of sidebar, title-bar,
+ * chat and composer fills. Let borders and active states carry the hierarchy
+ * so dark themes do not turn the right panel into bands of black and grey. */
+.optimus-window .sessions-right-workbench-shell {
+	--rwb-bg: var(--sessions-main-region-background, var(--vscode-agents-background, var(--vscode-editor-background)));
+	--rwb-bg-muted: var(--rwb-bg);
+	--rwb-chrome: var(--rwb-bg);
+	--rwb-chrome-soft: var(--rwb-bg);
+	--session-view-background: var(--rwb-bg);
+	--sessions-codex-surface-background: var(--rwb-bg);
+	--t3-background: var(--rwb-bg);
+	--t3-composer-surface: var(--rwb-bg);
+	border-left: 1px solid var(--vscode-sideBar-border, var(--vscode-panel-border, transparent));
+}
+
+.sessions-right-workbench-editor-activity {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	height: 36px;
+	min-height: 36px;
+	padding: 0 7px;
+	box-sizing: border-box;
+	border-bottom: 1px solid var(--rwb-border);
+	background: var(--rwb-chrome);
+}
+
+.sessions-right-workbench-editor-activity-button {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 29px;
+	height: 29px;
+	padding: 0;
+	border: 0;
+	border-radius: var(--vscode-cornerRadius-small);
+	background: transparent;
+	color: var(--vscode-activityBar-inactiveForeground, var(--rwb-muted));
+	cursor: pointer;
+}
+
+.sessions-right-workbench-editor-activity-button:hover {
+	background: var(--vscode-toolbar-hoverBackground, var(--rwb-hover));
+	color: var(--vscode-activityBar-foreground, var(--rwb-foreground));
+}
+
+.sessions-right-workbench-editor-activity-button.active {
+	color: var(--vscode-activityBar-foreground, var(--rwb-foreground));
+}
+
+.sessions-right-workbench-editor-activity-button.active::after {
+	content: '';
+	position: absolute;
+	left: 6px;
+	right: 6px;
+	bottom: -4px;
+	height: 2px;
+	border-radius: var(--vscode-cornerRadius-circle);
+	background: var(--vscode-activityBarTop-activeBorder, var(--vscode-focusBorder));
+}
+
+.sessions-right-workbench-editor-activity-button .codicon {
+	font-size: 16px;
+}
+
+.sessions-right-workbench-editor-section-header {
+	display: flex;
+	align-items: center;
+	height: 34px;
+	min-height: 34px;
+	padding: 0 6px 0 12px;
+	box-sizing: border-box;
+	background: var(--rwb-bg);
+}
+
+.sessions-right-workbench-editor-section-title {
+	min-width: 0;
+	flex: 1;
+	overflow: hidden;
+	color: var(--vscode-sideBarTitle-foreground, var(--rwb-foreground));
+	font-size: 11px;
+	font-weight: 500;
+	letter-spacing: .04em;
+	line-height: 1;
+	text-overflow: ellipsis;
+	text-transform: uppercase;
+	white-space: nowrap;
+}
+
+.sessions-right-workbench-editor-folder {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	max-width: min(52%, 190px);
+	height: 24px;
+	margin-right: 3px;
+	padding: 0 7px;
+	box-sizing: border-box;
+	border: 1px solid var(--vscode-sideBar-border, var(--rwb-border));
+	border-radius: var(--vscode-cornerRadius-small);
+	background: var(--vscode-button-secondaryBackground, transparent);
+	color: var(--vscode-sideBar-foreground, var(--rwb-foreground));
+	font: inherit;
+	font-size: 11px;
+	cursor: pointer;
+}
+
+.sessions-right-workbench-editor-folder:hover {
+	background: var(--vscode-toolbar-hoverBackground, var(--rwb-hover));
+}
+
+.sessions-right-workbench-editor-folder:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.sessions-right-workbench-editor-folder > .codicon:first-child {
+	color: var(--vscode-icon-foreground, var(--rwb-muted));
+}
+
+.sessions-right-workbench-editor-folder-label {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sessions-right-workbench-editor-section-header .sessions-right-workbench-icon-button {
+	width: 24px;
+	height: 24px;
+}
+
+.sessions-right-workbench-editor-explorer,
+.sessions-right-workbench-extensions {
+	display: flex;
+	flex-direction: column;
+	width: 100%;
+	height: 100%;
+	min-width: 0;
+	min-height: 0;
+	background: var(--rwb-bg);
+}
+
+.sessions-right-workbench-editor-search {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	height: 28px;
+	min-height: 28px;
+	margin: 4px 8px 7px;
+	padding: 0 8px;
+	box-sizing: border-box;
+	border: 1px solid var(--vscode-input-border, var(--rwb-border));
+	border-radius: var(--vscode-cornerRadius-medium);
+	background: var(--vscode-input-background);
+	color: var(--vscode-input-foreground);
+}
+
+.sessions-right-workbench-editor-search:focus-within {
+	border-color: var(--vscode-focusBorder);
+}
+
+.sessions-right-workbench-editor-search .codicon {
+	flex: 0 0 auto;
+	color: var(--vscode-input-placeholderForeground, var(--rwb-muted));
+	font-size: 13px;
+}
+
+.sessions-right-workbench-editor-search input {
+	min-width: 0;
+	width: 100%;
+	height: 100%;
+	padding: 0;
+	border: 0;
+	outline: 0;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+}
+
+.sessions-right-workbench-editor-search input::placeholder {
+	color: var(--vscode-input-placeholderForeground, var(--rwb-muted));
+}
+
+.sessions-right-workbench-editor-explorer-host {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	flex: 1;
+	min-width: 0;
+	min-height: 0;
+	overflow: hidden;
+}
+
+.sessions-right-workbench-workspace-tree {
+	flex: 1;
+	min-height: 0;
+	overflow: auto;
+	padding: 0 0 8px;
+	box-sizing: border-box;
+}
+
+.sessions-right-workbench-workspace-section-header,
+.sessions-right-workbench-workspace-auxiliary-row {
+	display: flex;
+	align-items: center;
+	width: 100%;
+	height: 22px;
+	padding: 0 8px;
+	box-sizing: border-box;
+	border: 0;
+	background: var(--vscode-sideBarSectionHeader-background, transparent);
+	color: var(--vscode-sideBarSectionHeader-foreground, var(--rwb-foreground));
+	font: inherit;
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: .02em;
+	text-align: left;
+	cursor: pointer;
+}
+
+.sessions-right-workbench-workspace-section-header:hover,
+.sessions-right-workbench-workspace-auxiliary-row:hover {
+	background: var(--vscode-list-hoverBackground, var(--rwb-hover));
+}
+
+.sessions-right-workbench-workspace-section-twistie,
+.sessions-right-workbench-workspace-auxiliary-row > .codicon:first-child {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 16px;
+	margin-right: 1px;
+	flex: 0 0 auto;
+}
+
+.sessions-right-workbench-workspace-section-label {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sessions-right-workbench-workspace-section-children {
+	padding: 1px 0 4px;
+}
+
+.sessions-right-workbench-workspace-auxiliary {
+	flex: 0 0 auto;
+	border-top: 1px solid var(--vscode-sideBarSectionHeader-border, var(--rwb-border));
+}
+
+.sessions-right-workbench-workspace-auxiliary-row {
+	gap: 3px;
+	height: 23px;
+}
+
+.sessions-right-workbench-workspace-auxiliary-row + .sessions-right-workbench-workspace-auxiliary-row {
+	border-top: 1px solid var(--vscode-sideBarSectionHeader-border, var(--rwb-border));
+}
+
+.sessions-right-workbench-workspace-row {
+	width: 100%;
+	height: 22px;
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	padding: 0 8px 0 var(--workspace-tree-indent);
+	border: 0;
+	background: transparent;
+	color: var(--vscode-sideBar-foreground, var(--vscode-foreground));
+	font: inherit;
+	font-size: 12px;
+	text-align: left;
+	cursor: pointer;
+}
+
+.sessions-right-workbench-workspace-row:hover {
+	background: var(--vscode-list-hoverBackground);
+}
+
+.sessions-right-workbench-workspace-row.selected {
+	background: var(--vscode-list-activeSelectionBackground);
+	color: var(--vscode-list-activeSelectionForeground);
+}
+
+.sessions-right-workbench-workspace-twistie,
+.sessions-right-workbench-workspace-icon {
+	width: 16px;
+	height: 16px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 auto;
+	color: var(--vscode-icon-foreground);
+}
+
+.sessions-right-workbench-workspace-twistie.leaf {
+	visibility: hidden;
+}
+
+.sessions-right-workbench-workspace-label {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sessions-right-workbench-workspace-empty,
+.sessions-right-workbench-workspace-empty-row {
+	color: var(--vscode-descriptionForeground);
+	font-size: 12px;
+}
+
+.sessions-right-workbench-workspace-empty {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	padding: 10px 12px;
+}
+
+.sessions-right-workbench-workspace-empty-copy {
+	display: flex;
+	align-items: flex-start;
+	flex-direction: column;
+	gap: 7px;
+}
+
+.sessions-right-workbench-workspace-choose {
+	padding: 2px 8px;
+	border: 1px solid var(--vscode-button-border, transparent);
+	border-radius: var(--vscode-cornerRadius-small);
+	background: var(--vscode-button-secondaryBackground);
+	color: var(--vscode-button-secondaryForeground);
+	font: inherit;
+	cursor: pointer;
+}
+
+.sessions-right-workbench-workspace-choose:hover {
+	background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.sessions-right-workbench-editor-preview {
+	display: flex;
+	flex-direction: column;
+	width: 100%;
+	height: 100%;
+	min-width: 0;
+	min-height: 0;
+	background: var(--rwb-bg);
+}
+
+.sessions-right-workbench-editor-preview-toolbar {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	height: 32px;
+	min-height: 32px;
+	padding: 0 5px;
+	box-sizing: border-box;
+	border-bottom: 1px solid var(--rwb-border);
+}
+
+.sessions-right-workbench-editor-preview-name {
+	min-width: 0;
+	flex: 1;
+	overflow: hidden;
+	font-size: 12px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sessions-right-workbench-editor-preview > .sessions-right-workbench-embedded-editor-host {
+	position: relative;
+	flex: 1;
+	min-height: 0;
+}
+
+.sessions-right-workbench-code-editor,
+.sessions-right-workbench-native-extensions,
+.sessions-right-workbench-editor-chat {
+	position: relative;
+	width: 100%;
+	height: 100%;
+	min-width: 0;
+	min-height: 0;
+	box-sizing: border-box;
+	background: var(--rwb-bg);
+}
+
+.sessions-right-workbench-editor-chat {
+	display: flex;
+	overflow: hidden;
+}
+
+.sessions-right-workbench-editor-chat > .pane {
+	position: absolute;
+	inset: 0;
+	min-width: 0;
+	min-height: 0;
+}
+
+.sessions-right-workbench-editor-chat > .pane > .pane-body,
+.sessions-right-workbench-editor-chat .optimus-chat-view {
+	display: flex;
+	flex-direction: column;
+	width: 100%;
+	height: 100% !important;
+	min-width: 0;
+	min-height: 0;
+	padding: 0 !important;
+	background: var(--rwb-bg) !important;
+}
+
+/* ChatViewTitleControl is the Editor panel's real New Agent/session strip.
+ * In Editor it is re-parented into the auxiliary title bar; inside Advanced
+ * it stays with the embedded chat so the custom tool rail remains available. */
+.sessions-right-workbench-editor-chat .chat-view-title-container.visible {
+	display: flex;
+	height: 34px;
+	min-height: 34px;
+	border-bottom-color: var(--rwb-border);
+	background: var(--rwb-bg);
+}
+
+.sessions-right-workbench-editor-chat .chat-view-title-inner {
+	min-width: 0;
+}
+
+.sessions-right-workbench-editor-chat .chat-view-title-tabs {
+	padding: 4px 6px;
+	mask-image: none;
+	-webkit-mask-image: none;
+}
+
+.sessions-right-workbench-editor-chat .chat-view-title-tab {
+	width: auto;
+	min-width: 70px;
+	max-width: 160px;
+	flex: 0 1 auto;
+}
+
+.sessions-right-workbench-editor-chat .chat-view-title-tab-active {
+	border-color: transparent;
+	background: transparent;
+	box-shadow: inset 0 -2px var(--vscode-focusBorder);
+}
+
+.sessions-right-workbench-editor-chat .chat-view-title-container .chat-view-title-actions-toolbar {
+	display: flex !important;
+	align-items: center;
+	margin-left: auto;
+	padding: 0 5px 0 2px;
+}
+
+.sessions-right-workbench-editor-chat .chat-view-title-actions-toolbar .actions-container {
+	align-items: center;
+}
+
+.sessions-right-workbench-editor-chat .chat-view-title-actions-toolbar .action-label {
+	border-radius: var(--vscode-cornerRadius-small);
+	padding: 4px;
+}
+
+.sessions-right-workbench-editor-chat .optimus-chat-editor-host {
+	position: relative;
+	flex: 1;
+	min-width: 0;
+	min-height: 0;
+}
+
+.sessions-right-workbench-code-editor {
+	display: flex;
+	flex-direction: column;
+}
+
+.sessions-right-workbench-code-editor-toolbar {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	height: 32px;
+	min-height: 32px;
+	padding: 0 5px;
+	box-sizing: border-box;
+	border-bottom: 1px solid var(--rwb-border);
+	color: var(--rwb-foreground);
+}
+
+.sessions-right-workbench-code-editor-name {
+	min-width: 0;
+	flex: 1;
+	overflow: hidden;
+	font-size: 12px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sessions-right-workbench-code-editor > .sessions-right-workbench-embedded-editor-host {
+	position: relative;
+	flex: 1;
+	min-height: 0;
+}
+
+.sessions-right-workbench-code-editor-empty {
+	display: flex;
+	flex: 1;
+	min-height: 0;
+	align-items: center;
+	justify-content: center;
+	flex-direction: column;
+	gap: 8px;
+	padding: 24px;
+	box-sizing: border-box;
+	text-align: center;
+	color: var(--rwb-muted);
+}
+
+.sessions-right-workbench-code-editor-empty > .codicon {
+	font-size: 28px;
+	color: var(--vscode-descriptionForeground, var(--rwb-muted));
+}
+
+.sessions-right-workbench-code-editor-empty h2,
+.sessions-right-workbench-code-editor-empty p {
+	margin: 0;
+}
+
+.sessions-right-workbench-code-editor-empty h2 {
+	font-size: 14px;
+	font-weight: 600;
+	color: var(--rwb-foreground);
+}
+
+.sessions-right-workbench-code-editor-empty button {
+	margin-top: 4px;
+	padding: 4px 10px;
+	border: 1px solid var(--vscode-button-border, transparent);
+	border-radius: var(--vscode-cornerRadius-small);
+	background: var(--vscode-button-secondaryBackground);
+	color: var(--vscode-button-secondaryForeground);
+	font: inherit;
+	cursor: pointer;
+}
+
+.sessions-right-workbench-code-editor-empty button:hover {
+	background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.sessions-right-workbench-native-extensions {
+	position: absolute;
+	inset: 0;
+	overflow: hidden;
+}
+
+.sessions-right-workbench-extension-detail-body {
+	display: flex;
+	flex-direction: column;
+	gap: 14px;
+	overflow-y: auto;
+	padding: 16px;
+	box-sizing: border-box;
+}
+
+.sessions-right-workbench-extension-detail-hero {
+	display: grid;
+	grid-template-columns: 38px minmax(0, 1fr);
+	align-items: center;
+	gap: 10px;
+}
+
+.sessions-right-workbench-extension-detail-hero > .codicon {
+	color: var(--vscode-extensionIcon-starForeground, var(--vscode-icon-foreground));
+	font-size: 30px;
+}
+
+.sessions-right-workbench-extension-detail-identity {
+	min-width: 0;
+}
+
+.sessions-right-workbench-extension-detail-identity h2,
+.sessions-right-workbench-extension-detail-identity p,
+.sessions-right-workbench-extension-detail-description {
+	margin: 0;
+}
+
+.sessions-right-workbench-extension-detail-identity h2 {
+	overflow: hidden;
+	font-size: 15px;
+	font-weight: 600;
+	line-height: 20px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sessions-right-workbench-extension-detail-identity p,
+.sessions-right-workbench-extension-detail-description {
+	color: var(--rwb-muted);
+	font-size: 11px;
+	line-height: 16px;
+}
+
+.sessions-right-workbench-extension-detail-badges,
+.sessions-right-workbench-extension-detail-actions {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.sessions-right-workbench-extension-detail-badges > span {
+	padding: 2px 6px;
+	border-radius: var(--vscode-cornerRadius-small);
+	background: var(--vscode-badge-background);
+	color: var(--vscode-badge-foreground);
+	font-size: 10px;
+}
+
+.sessions-right-workbench-extension-detail-primary,
+.sessions-right-workbench-extension-detail-secondary {
+	height: 26px;
+	padding: 0 10px;
+	border: 1px solid var(--vscode-button-border, transparent);
+	border-radius: var(--vscode-cornerRadius-small);
+	font: inherit;
+	font-size: 11px;
+	cursor: pointer;
+}
+
+.sessions-right-workbench-extension-detail-primary {
+	background: var(--vscode-button-background);
+	color: var(--vscode-button-foreground);
+}
+
+.sessions-right-workbench-extension-detail-primary:hover {
+	background: var(--vscode-button-hoverBackground);
+}
+
+.sessions-right-workbench-extension-detail-secondary {
+	background: var(--vscode-button-secondaryBackground);
+	color: var(--vscode-button-secondaryForeground);
+}
+
+.sessions-right-workbench-extension-detail-secondary:hover {
+	background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.sessions-right-workbench-extension-detail-installed {
+	color: var(--vscode-testing-iconPassed, var(--rwb-success));
+	font-size: 11px;
+}
+
+.sessions-right-workbench-workspace-empty-row {
+	padding: 4px 12px 4px 38px;
+}
+
+.sessions-right-workbench-editor-explorer-host > .pane {
+	position: absolute;
+	inset: 0;
+}
+
+.sessions-right-workbench-editor-explorer-host > .pane > .pane-header {
+	display: none !important;
+}
+
+.sessions-right-workbench-editor-explorer-host > .pane > .pane-body,
+.sessions-right-workbench-editor-explorer-host .explorer-folders-view,
+.sessions-right-workbench-editor-explorer-host .monaco-list,
+.sessions-right-workbench-editor-explorer-host .monaco-scrollable-element {
+	height: 100% !important;
+	background: var(--rwb-bg) !important;
+}
+
+.sessions-right-workbench-extension-status {
+	min-height: 18px;
+	padding: 0 10px 5px;
+	box-sizing: border-box;
+	color: var(--rwb-muted);
+	font-size: 11px;
+}
+
+.sessions-right-workbench-extension-list {
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+	padding: 0 5px 8px;
+}
+
+.sessions-right-workbench-extension-row {
+	display: grid;
+	grid-template-columns: 26px minmax(0, 1fr);
+	gap: 8px;
+	width: 100%;
+	padding: 8px 7px;
+	box-sizing: border-box;
+	border: 0;
+	border-radius: var(--vscode-cornerRadius-medium);
+	background: transparent;
+	color: var(--rwb-foreground);
+	text-align: left;
+	cursor: pointer;
+}
+
+.sessions-right-workbench-extension-row:hover,
+.sessions-right-workbench-extension-row.selected {
+	background: var(--vscode-list-hoverBackground, var(--rwb-hover));
+}
+
+.sessions-right-workbench-extension-row > .codicon {
+	padding-top: 2px;
+	color: var(--vscode-extensionIcon-starForeground, var(--vscode-icon-foreground, var(--rwb-muted)));
+	font-size: 19px;
+}
+
+.sessions-right-workbench-extension-copy {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	min-width: 0;
+}
+
+.sessions-right-workbench-extension-name {
+	overflow: hidden;
+	font-size: 13px;
+	font-weight: 600;
+	line-height: 18px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sessions-right-workbench-extension-description {
+	display: -webkit-box;
+	overflow: hidden;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+	color: var(--rwb-muted);
+	font-size: 11px;
+	line-height: 15px;
+}
+
+.sessions-right-workbench-extension-meta {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+	color: var(--rwb-muted);
+	font-size: 10px;
+	line-height: 14px;
+}
+
+.sessions-right-workbench-extension-meta > span {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sessions-right-workbench-extension-badge {
+	padding: 0 4px;
+	border-radius: var(--vscode-cornerRadius-small);
+	background: var(--vscode-badge-background);
+	color: var(--vscode-badge-foreground);
+}
+
+.sessions-right-workbench-extension-empty {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 120px;
+	padding: 18px;
+	box-sizing: border-box;
+	color: var(--rwb-muted);
+	font-size: 12px;
+	text-align: center;
+}
+
 .sessions-right-workbench-header {
 	display: flex;
 	align-items: center;
@@ -82,12 +858,25 @@
 .sessions-right-workbench-tabs {
 	display: flex;
 	align-items: center;
-	gap: 6px;
+	gap: 3px;
 	min-width: 0;
 	flex: 1;
 	overflow-x: auto;
 	overflow-y: hidden;
 	scrollbar-width: none;
+}
+
+.sessions-right-workbench-tab-separator {
+	width: 1px;
+	height: 12px;
+	margin: 0 3px;
+	flex: 0 0 1px;
+	background: var(--rwb-border);
+}
+
+.sessions-right-workbench-tab.active + .sessions-right-workbench-tab-separator,
+.sessions-right-workbench-tab-separator:has(+ .sessions-right-workbench-tab.active) {
+	visibility: hidden;
 }
 
 .sessions-right-workbench-tabs::-webkit-scrollbar {
@@ -216,6 +1005,7 @@
 }
 
 .sessions-right-workbench-body {
+	position: relative;
 	flex: 1;
 	min-height: 0;
 	overflow: hidden;
@@ -225,7 +1015,7 @@
 .sessions-right-workbench-mode-picker {
 	position: absolute;
 	z-index: 10;
-	width: 220px;
+	width: 280px;
 	padding: 5px;
 	box-sizing: border-box;
 	border: 1px solid var(--rwb-border-strong);
@@ -290,8 +1080,8 @@
 .sessions-right-workbench-launcher-rows {
 	display: flex;
 	flex-direction: column;
-	gap: 5px;
-	width: min(100%, 560px);
+	gap: 4px;
+	width: min(100%, 536px);
 }
 
 .sessions-right-workbench-launcher-row {
@@ -300,13 +1090,13 @@
 	align-items: center;
 	gap: 10px;
 	width: 100%;
-	min-height: 38px;
+	height: 40px;
 	padding: 0 12px;
 	box-sizing: border-box;
 	border: 0;
 	border-radius: var(--vscode-cornerRadius-large);
 	color: var(--rwb-foreground);
-	background: color-mix(in srgb, var(--rwb-foreground) 4%, var(--rwb-bg));
+	background: var(--rwb-selection);
 	text-align: left;
 	cursor: pointer;
 }
@@ -372,6 +1162,21 @@
 	font-size: 13px;
 }
 
+.sessions-right-workbench-browser-address {
+	position: relative;
+	min-width: 0;
+}
+
+.sessions-right-workbench-browser-address .sessions-right-workbench-browser-url {
+	padding-right: 36px !important;
+}
+
+.sessions-right-workbench-browser-address .sessions-right-workbench-icon-button {
+	position: absolute;
+	top: 0;
+	right: 0;
+}
+
 .sessions-right-workbench-browser-url::placeholder {
 	color: var(--vscode-input-placeholderForeground, var(--rwb-muted));
 	opacity: 1;
@@ -428,21 +1233,138 @@
 }
 
 .sessions-right-workbench-review {
-	display: grid;
-	grid-template-columns: minmax(0, 1fr) minmax(220px, 32%);
+	display: flex;
+	flex-direction: column;
 	height: 100%;
 	min-height: 0;
 	background: var(--rwb-bg);
 }
 
-.sessions-right-workbench-review.sessions-right-workbench-review-empty-state {
+.sessions-right-workbench-review-workspace {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(220px, 32%);
+	flex: 1;
+	min-height: 0;
+}
+
+.sessions-right-workbench-review-workspace.rail-hidden,
+.sessions-right-workbench-review.sessions-right-workbench-review-empty-state .sessions-right-workbench-review-workspace {
 	grid-template-columns: minmax(0, 1fr);
 }
 
+.sessions-right-workbench-review-workspace.rail-hidden .sessions-right-workbench-review-rail {
+	display: none;
+}
+
+.sessions-right-workbench-review-toolbar {
+	flex: 0 0 auto;
+	padding: 8px 12px 7px;
+	border-bottom: 1px solid var(--rwb-border);
+	background: var(--rwb-bg);
+}
+
+.sessions-right-workbench-review-toolbar-row {
+	display: flex;
+	align-items: center;
+	min-width: 0;
+}
+
+.sessions-right-workbench-review-toolbar-row.primary {
+	height: 34px;
+}
+
+.sessions-right-workbench-review-toolbar-row.secondary {
+	height: 24px;
+	gap: 10px;
+	color: var(--rwb-muted);
+	font-size: 12px;
+}
+
+.sessions-right-workbench-review-toolbar-row.secondary .codicon {
+	font-size: 12px;
+}
+
+.sessions-right-workbench-review-branch,
+.sessions-right-workbench-review-commit {
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+	height: 28px;
+	padding: 0 8px;
+	border: 0;
+	border-radius: var(--vscode-cornerRadius-large);
+	color: var(--rwb-foreground);
+	background: transparent;
+	font: inherit;
+	cursor: pointer;
+}
+
+.sessions-right-workbench-review-branch:hover,
+.sessions-right-workbench-review-commit:hover {
+	background: var(--rwb-hover);
+}
+
+.sessions-right-workbench-review-branch:disabled,
+.sessions-right-workbench-review-commit:disabled {
+	opacity: 0.6;
+	cursor: default;
+}
+
+.sessions-right-workbench-review-total-stats {
+	display: inline-flex;
+	gap: 6px;
+	margin-left: 10px;
+	font-size: 13px;
+}
+
+.sessions-right-workbench-review-total-stats .additions {
+	color: var(--rwb-success);
+}
+
+.sessions-right-workbench-review-total-stats .deletions {
+	color: var(--rwb-danger);
+}
+
+.sessions-right-workbench-review-actions {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	margin-left: auto;
+}
+
+.sessions-right-workbench-review-commit {
+	margin-left: 4px;
+	padding: 0 10px;
+	border: 1px solid var(--rwb-border-strong);
+	font-size: 13px;
+}
+
 .sessions-right-workbench-review-main {
+	display: flex;
+	flex-direction: column;
 	min-width: 0;
 	min-height: 0;
 	background: var(--rwb-bg);
+}
+
+.sessions-right-workbench-review-file-header {
+	display: flex;
+	align-items: center;
+	flex: 0 0 34px;
+	min-width: 0;
+	padding: 0 12px;
+	box-sizing: border-box;
+	border-bottom: 1px solid var(--rwb-border);
+	color: var(--rwb-foreground);
+	background: var(--rwb-chrome-soft);
+}
+
+.sessions-right-workbench-review-file-title {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 12px;
+	font-weight: 500;
 }
 
 .sessions-right-workbench-review.sessions-right-workbench-review-empty-state .sessions-right-workbench-review-main {
@@ -500,7 +1422,7 @@
 
 .sessions-right-workbench-review-editor {
 	position: relative;
-	height: 100%;
+	flex: 1;
 	min-height: 0;
 	overflow: hidden;
 }
@@ -570,7 +1492,7 @@
 }
 
 @container (max-width: 760px) {
-	.sessions-right-workbench-review {
+	.sessions-right-workbench-review-workspace {
 		grid-template-columns: minmax(0, 1fr) 220px;
 	}
 
@@ -580,7 +1502,7 @@
 }
 
 @container (max-width: 620px) {
-	.sessions-right-workbench-review {
+	.sessions-right-workbench-review-workspace {
 		grid-template-columns: minmax(0, 1fr) 176px;
 	}
 
@@ -588,6 +1510,11 @@
 		font-size: 11px;
 	}
 
+}
+
+.sessions-right-workbench-review-filter {
+	flex: 0 0 28px;
+	margin-bottom: 6px;
 }
 
 .sessions-right-workbench-review-scm-stats {
@@ -634,18 +1561,62 @@
 }
 
 .sessions-right-workbench-file-path {
-	height: 34px;
-	padding: 9px 12px 0;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	height: 46px;
+	padding: 0 12px;
 	box-sizing: border-box;
 	color: var(--rwb-foreground);
 	font-size: 14px;
-	font-weight: 500;
+	font-weight: 400;
 	line-height: 18px;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 	background: var(--rwb-bg);
 	border-bottom: 1px solid var(--rwb-border);
+}
+
+.sessions-right-workbench-file-workspace {
+	color: var(--rwb-muted);
+}
+
+.sessions-right-workbench-file-name {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sessions-right-workbench-file-actions {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-left: auto;
+}
+
+.sessions-right-workbench-file-action,
+.sessions-right-workbench-file-open {
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+	height: 30px;
+	padding: 0 9px;
+	border: 0;
+	border-radius: var(--vscode-cornerRadius-large);
+	color: var(--rwb-foreground);
+	background: transparent;
+	font: inherit;
+	cursor: pointer;
+}
+
+.sessions-right-workbench-file-action:hover,
+.sessions-right-workbench-file-open:hover {
+	background: var(--rwb-hover);
+}
+
+.sessions-right-workbench-file-open {
+	border: 1px solid var(--rwb-border-strong);
 }
 
 .sessions-right-workbench-file-editor-body {
@@ -804,28 +1775,76 @@
 	margin: 0;
 }
 
-.sessions-right-workbench-mode-files.sessions-right-workbench-has-file .sessions-right-workbench-file-path {
-	display: none;
-}
-
 .sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .modal-editor-header,
 .sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .modal-editor-header,
-.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .modal-editor-header {
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .modal-editor-header,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .modal-editor-header {
 	display: none !important;
 	height: 0 !important;
 	min-height: 0 !important;
 	border: 0 !important;
 }
 
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .editor-group-container > .title {
+	display: none !important;
+}
+
+.sessions-right-workbench-mode-editor .sessions-right-workbench-embedded-editor-host .modal-editor-header,
+.sessions-right-workbench-mode-editor .sessions-right-workbench-embedded-editor-host .editor-group-container > .title {
+	display: none !important;
+	height: 0 !important;
+	min-height: 0 !important;
+	border: 0 !important;
+}
+
+.sessions-right-workbench-mode-editor .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part {
+	grid-template-rows: 1fr !important;
+}
+
+.sessions-right-workbench-mode-editor .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part > .content {
+	grid-row: 1 !important;
+	grid-column: 1 !important;
+}
+
+.sessions-right-workbench-mode-editor .sessions-right-workbench-embedded-editor-host :is(
+	.monaco-modal-editor-block.embedded,
+	.modal-editor-resizable,
+	.modal-editor-shadow,
+	.part.editor.modal-editor-part,
+	.content,
+	.grid-view-container,
+	.monaco-grid-view,
+	.monaco-grid-branch-node,
+	.monaco-split-view2,
+	.monaco-scrollable-element,
+	.split-view-container,
+	.split-view-view,
+	.editor-group-container,
+	.editor-container,
+	.editor-instance,
+	.monaco-editor,
+	.monaco-editor-background,
+	.overflow-guard,
+	.margin,
+	.margin-view-overlays,
+	.lines-content,
+	.view-lines,
+	.view-overlays
+) {
+	background: var(--rwb-bg) !important;
+}
+
 .sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part,
 .sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part,
-.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part {
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part {
 	grid-template-rows: 1fr !important;
 }
 
 .sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part > .content,
 .sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part > .content,
-.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part > .content {
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part > .content,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part > .content {
 	grid-row: 1 !important;
 	grid-column: 1 !important;
 }

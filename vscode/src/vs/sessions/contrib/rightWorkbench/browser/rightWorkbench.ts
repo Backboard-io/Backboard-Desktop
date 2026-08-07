@@ -8,24 +8,33 @@ import { ThemeIcon } from '../../../../base/common/themables.js';
 
 export const SESSIONS_RIGHT_WORKBENCH_CONTAINER_ID = 'workbench.sessions.auxiliaryBar.rightWorkbenchContainer';
 export const SESSIONS_RIGHT_WORKBENCH_LAUNCHER_VIEW_ID = 'sessions.rightWorkbench.launcherView';
+export const OPTIMUS_RIGHT_WORKBENCH_CONTAINER_ID = 'workbench.optimus.auxiliaryBar.rightWorkbenchContainer';
+export const OPTIMUS_RIGHT_WORKBENCH_LAUNCHER_VIEW_ID = 'optimus.rightWorkbench.launcherView';
 
 export const enum RightWorkbenchCommandId {
 	OpenLauncher = 'workbench.action.sessions.rightWorkbench.openLauncher',
 	OpenLauncherMode = 'workbench.action.sessions.rightWorkbench.openLauncherMode',
+	OpenEditor = 'workbench.action.sessions.rightWorkbench.openEditor',
 	OpenReview = 'workbench.action.sessions.rightWorkbench.openReview',
 	OpenFiles = 'workbench.action.sessions.rightWorkbench.openFiles',
 	OpenBrowser = 'workbench.action.sessions.rightWorkbench.openBrowser',
 	OpenTerminal = 'workbench.action.sessions.rightWorkbench.openTerminal',
+	OpenSearch = 'workbench.action.sessions.rightWorkbench.openSearch',
+	OpenExtensions = 'workbench.action.sessions.rightWorkbench.openExtensions',
+	OpenMarketplace = 'workbench.action.sessions.rightWorkbench.openMarketplace',
 }
 
-export type RightWorkbenchMode = 'launcher' | 'review' | 'browser' | 'files' | 'terminal';
+export type RightWorkbenchMode = 'launcher' | 'editor' | 'review' | 'browser' | 'files' | 'terminal' | 'search' | 'extensions' | 'marketplace';
 
-export const orderedTabModes: readonly RightWorkbenchMode[] = ['review', 'browser', 'files', 'terminal'];
+export const orderedTabModes: readonly RightWorkbenchMode[] = ['editor', 'files', 'search', 'review', 'extensions', 'marketplace', 'browser', 'terminal'];
 
 export interface IRightWorkbenchModeRequest {
 	readonly mode: RightWorkbenchMode;
 	readonly browserUrl?: string;
 	readonly browserViewId?: string;
+	readonly editorSidebar?: boolean;
+	/** Start a fresh task in the embedded Editor-style chat surface. */
+	readonly newChat?: boolean;
 }
 
 export interface IRightWorkbenchModeEntry {

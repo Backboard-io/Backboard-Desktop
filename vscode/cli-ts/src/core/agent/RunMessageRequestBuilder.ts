@@ -4,7 +4,11 @@ import {
 	type MemoryProfile,
 	type ThinkingConfig,
 } from "../../config/defaults.ts";
-import type { SendMessageRequest } from "../../providers/backboard/types.ts";
+import type {
+	BackboardAudioFile,
+	BackboardVoiceConfig,
+	SendMessageRequest,
+} from "../../providers/backboard/types.ts";
 import type { Session } from "../session/Session.ts";
 import type { OpenAITool } from "../tools/schema.ts";
 
@@ -16,6 +20,8 @@ export interface RunMessageRequestContext {
 	model: { provider: string; model: string };
 	memory: MemoryMode;
 	memoryProfile: MemoryProfile;
+	voice?: BackboardVoiceConfig;
+	audioFile?: BackboardAudioFile;
 }
 
 export function buildRunMessageRequest(
@@ -34,5 +40,7 @@ export function buildRunMessageRequest(
 		memory_profile: context.memoryProfile,
 		...(thinking === undefined ? {} : { thinking }),
 		tools: context.tools,
+		...(context.voice ? { voice: context.voice } : {}),
+		...(context.audioFile ? { audioFile: context.audioFile } : {}),
 	};
 }

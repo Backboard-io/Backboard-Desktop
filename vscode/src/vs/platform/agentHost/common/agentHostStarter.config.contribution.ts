@@ -11,7 +11,7 @@ import { Registry } from '../../registry/common/platform.js';
 import {
 	AgentHostClaudeAgentEnabledSettingId,
 	AgentHostCodexAgentBinaryArgsSettingId,
-	AgentHostCodexAgentEnabledSettingId, AgentHostOpenCodeAgentEnabledSettingId,
+	AgentHostCodexAgentEnabledSettingId,
 	AgentHostCodexAgentSdkRootSettingId,
 	AgentHostCodexAgentCodexHomeSettingId,
 	AgentHostOTelCaptureContentSettingId,
@@ -72,12 +72,6 @@ configurationRegistry.registerConfiguration({
 					}
 				}
 			},
-		},
-		[AgentHostOpenCodeAgentEnabledSettingId]: {
-			type: 'boolean',
-			description: nls.localize('chat.agentHost.opencodeAgent.enabled', "When enabled, the agent host registers the OpenCode provider (subject to an `opencode` binary being on PATH). Requires `#chat.agentHost.enabled#`. The agent host process must be restarted for changes to take effect."),
-			default: true,
-			tags: ['experimental', 'advanced'],
 		},
 		[AgentHostCodexAgentSdkRootSettingId]: {
 			type: 'string',

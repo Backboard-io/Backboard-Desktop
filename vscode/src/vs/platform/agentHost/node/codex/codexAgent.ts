@@ -433,6 +433,11 @@ export const CodexSdkPackage: IAgentSdkPackage = {
 	hasSeparateMuslLinuxPackage: false,
 };
 
+/** Whether a discovered Codex executable belongs to another signed desktop app rather than a user CLI install. */
+export function isBundledApplicationCliPath(path: string): boolean {
+	return /\.app[\\/]Contents[\\/]/i.test(path);
+}
+
 /**
  * Locate a `codex` binary on PATH. Registration and spawning fall back to
  * the user's own install (the CLI they ran `codex login` with — the t3code
@@ -459,6 +464,9 @@ export function findCodexOnPath(): string | undefined {
 			const candidate = join(dir, name);
 			try {
 				fs.accessSync(candidate, fs.constants.X_OK);
+				if (isBundledApplicationCliPath(fs.realpathSync(candidate))) {
+					continue;
+				}
 				return candidate;
 			} catch {
 				// keep scanning

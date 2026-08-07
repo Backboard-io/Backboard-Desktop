@@ -78,11 +78,10 @@
 	max-width: none;
 	height: 100%;
 	display: grid;
-	/* Header, then the composer (row 3) centered between two equal flexible
-	 * spacers so it sits in the vertical middle of the screen. The intro title
-	 * lives in the upper spacer (bottom-aligned) so it hugs the composer without
-	 * pushing it off-center. */
-	grid-template-rows: 52px minmax(56px, 1fr) auto minmax(56px, 1fr);
+	/* Header, then the composer (row 3) centered between flexible spacers. The
+	 * upper spacer may collapse when pasted content grows so the composer keeps
+	 * its footer on-screen; the lower spacer retains a small breathing margin. */
+	grid-template-rows: 52px minmax(0, 1fr) auto minmax(12px, 1fr);
 	/* Pin the single column to the region width. Without an explicit column the
 	 * grid defaults to `min-width: auto` (= min-content), so the composer's chat
 	 * input and the nowrap heading expand the column past the region and spill
@@ -201,6 +200,7 @@
 	box-sizing: border-box;
 	text-align: center;
 	min-height: 0;
+	overflow: hidden;
 }
 
 /* --- 8-bit octopus mascot just left of the heading text --- */

@@ -11,7 +11,7 @@ import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/
 import { CommandsRegistry } from '../../../../../../platform/commands/common/commands.js';
 import { TestInstantiationService } from '../../../../../../platform/instantiation/test/common/instantiationServiceMock.js';
 import { IChatWidget, IChatWidgetService } from '../../../browser/chat.js';
-import { GetHandoffsActionId, ExecuteHandoffActionId, registerChatExecuteActions } from '../../../browser/actions/chatExecuteActions.js';
+import { GetHandoffsActionId, ExecuteHandoffActionId, encodeBackboardRealtimePcm, registerChatExecuteActions } from '../../../browser/actions/chatExecuteActions.js';
 import { IChatMode, IChatModes, IChatModeService, ICustomAgentInfo } from '../../../common/chatModes.js';
 import { ChatModeKind } from '../../../common/constants.js';
 import { IHandOff } from '../../../common/promptSyntax/promptFileParser.js';
@@ -24,6 +24,21 @@ interface IExecuteHandoffResult {
 	targetMode?: string;
 	error?: string;
 }
+
+
+suite('Backboard realtime voice', () => {
+	test('downsamples microphone frames to 16 kHz signed PCM', () => {
+		const encoded = encodeBackboardRealtimePcm(new Float32Array([1, 1, 1, -1, -1, -1]), 48000);
+		const pcm = new DataView(encoded);
+		assert.strictEqual(pcm.byteLength, 4);
+		assert.strictEqual(pcm.getInt16(0, true), 32767);
+		assert.strictEqual(pcm.getInt16(2, true), -32768);
+	});
+
+	test('does not synthesize samples when the input rate is too low', () => {
+		assert.strictEqual(encodeBackboardRealtimePcm(new Float32Array([0.5]), 8000).byteLength, 0);
+	});
+});
 
 
 async function runCommandAsync<T>(handler: Function, ...args: unknown[]): Promise<T> {

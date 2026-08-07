@@ -7,14 +7,16 @@ import './media/optimusGridPart.css';
 import { $, addDisposableListener, append, DragAndDropObserver, EventHelper, EventType } from '../../../base/browser/dom.js';
 import { localize } from '../../../nls.js';
 import { ProgressBar } from '../../../base/browser/ui/progressbar/progressbar.js';
+import { IAction, Separator, SubmenuAction, toAction } from '../../../base/common/actions.js';
 import { RunOnceScheduler } from '../../../base/common/async.js';
 import { Emitter, Event } from '../../../base/common/event.js';
 import { DisposableStore } from '../../../base/common/lifecycle.js';
-import { autorun } from '../../../base/common/observable.js';
+import { autorun, observableValue } from '../../../base/common/observable.js';
 import { assertReturnsDefined } from '../../../base/common/types.js';
 import { defaultProgressBarStyles } from '../../../platform/theme/browser/defaultStyles.js';
 import { CommandsRegistry, ICommandService } from '../../../platform/commands/common/commands.js';
 import { IContextKeyService, RawContextKey } from '../../../platform/contextkey/common/contextkey.js';
+import { IContextMenuService } from '../../../platform/contextview/browser/contextView.js';
 import { IInstantiationService } from '../../../platform/instantiation/common/instantiation.js';
 import { IProgressIndicator } from '../../../platform/progress/common/progress.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../platform/storage/common/storage.js';
@@ -24,46 +26,50 @@ import { IWorkbenchLayoutService, Parts } from '../../../workbench/services/layo
 import { AbstractProgressScope, ScopedProgressIndicator } from '../../../workbench/services/progress/browser/progressIndicator.js';
 import { LocalSelectionTransfer } from '../../../platform/dnd/browser/dnd.js';
 import { DraggedSessionIdentifier } from '../../../sessions/browser/dnd.js';
+import { SessionView } from '../../../sessions/browser/parts/sessionView.js';
 import { agentsPanelBackground, agentsPanelBorder, agentsPanelForeground } from '../../../sessions/common/theme.js';
 import { ISessionsManagementService, IActiveSession } from '../../../sessions/services/sessions/common/sessionsManagement.js';
 import { ISession, SessionStatus } from '../../../sessions/services/sessions/common/session.js';
+import { filterAndSortOptimusSessions, getOptimusDashboardBucket, IOptimusDashboardFilters, IOptimusSessionSummary, OptimusDashboardArchiveFilter, OptimusDashboardBucket, OptimusDashboardSort, OptimusDashboardTimeRange } from '../../common/optimusSessions.js';
 import { OptimusCard, IOptimusCardSessionModel } from './optimusCard.js';
 
 export const OPTIMUS_NEW_SESSION_COMMAND_ID = 'optimus.newSession';
 export const OPTIMUS_FOCUS_SESSION_COMMAND_ID = 'optimus.focusSession';
 export const OPTIMUS_DELETE_SESSION_COMMAND_ID = 'optimus.deleteSession';
 export const OPTIMUS_CLOSE_SESSION_COMMAND_ID = 'optimus.closeSession';
+export const OPTIMUS_SHOW_DASHBOARD_COMMAND_ID = 'optimus.showDashboard';
+export const OPTIMUS_SHOW_FOCUSED_SESSION_CONTENT_COMMAND_ID = 'optimus.showFocusedSessionContent';
+export const OPTIMUS_SHOW_DASHBOARD_CONTENT_COMMAND_ID = 'optimus.showDashboardContent';
 export const OPTIMUS_TOGGLE_VIEW_MODE_COMMAND_ID = 'optimus.toggleViewMode';
 export const OPTIMUS_SET_VIEW_MODE_COMMAND_ID = 'optimus.setViewMode';
+export const OPTIMUS_SET_SEARCH_QUERY_COMMAND_ID = 'optimus.setSearchQuery';
 
-export type OptimusViewMode = 'grid' | 'kanban';
+export type OptimusViewMode = 'board' | 'list';
 
-/** Current grid/kanban mode, for chrome buttons to mirror. */
-export const OPTIMUS_VIEW_MODE_CONTEXT_KEY = new RawContextKey<OptimusViewMode>('optimusViewMode', 'grid');
+/** Current dashboard presentation, exposed for keyboard commands and chrome. */
+export const OPTIMUS_VIEW_MODE_CONTEXT_KEY = new RawContextKey<OptimusViewMode>('optimusViewMode', 'board');
 
 const VIEW_MODE_STORAGE_KEY = 'optimus.viewMode';
+const DASHBOARD_DISPLAY_STORAGE_KEY = 'optimus.dashboardDisplay';
 
-type KanbanBucket = 'running' | 'attention' | 'done';
-
-const KANBAN_BUCKETS: readonly { readonly key: KanbanBucket; readonly label: string; readonly icon: string }[] = [
-	{ key: 'running', label: localize('optimus.kanban.running', "Running"), icon: 'codicon-play-circle' },
-	{ key: 'attention', label: localize('optimus.kanban.attention', "Needs Attention"), icon: 'codicon-bell-dot' },
-	{ key: 'done', label: localize('optimus.kanban.done', "Done"), icon: 'codicon-check' },
+const BOARD_BUCKETS: readonly { readonly key: OptimusDashboardBucket; readonly label: string; readonly icon: string }[] = [
+	{ key: 'running', label: localize('optimus.board.running', "Running"), icon: 'codicon-loading.codicon-modifier-spin' },
+	{ key: 'blocked', label: localize('optimus.board.blocked', "Blocked"), icon: 'codicon-error' },
+	{ key: 'ready', label: localize('optimus.board.ready', "Ready"), icon: 'codicon-check' },
 ];
 
-function kanbanBucket(status: SessionStatus): KanbanBucket {
-	switch (status) {
-		case SessionStatus.InProgress: return 'running';
-		case SessionStatus.NeedsInput:
-		case SessionStatus.Error: return 'attention';
-		default: return 'done';
-	}
-}
-
-interface IKanbanColumn {
+interface IBoardColumn {
 	readonly element: HTMLElement;
 	readonly listEl: HTMLElement;
 	readonly countEl: HTMLElement;
+}
+
+type OptimusDashboardGroup = 'none' | 'workspace';
+
+interface IOptimusDashboardDisplayState {
+	readonly sort: OptimusDashboardSort;
+	readonly group: OptimusDashboardGroup;
+	readonly unreadFirst: boolean;
 }
 
 /**
@@ -104,29 +110,55 @@ export class OptimusGridPart extends Part {
 	override readonly minimumHeight: number = 0;
 	override readonly maximumHeight: number = Number.POSITIVE_INFINITY;
 
-	/** Six card slots per page (3x2); older sessions paginate. */
+	/** Six card slots per page (3×2); later sessions paginate. */
 	private static readonly PAGE_SIZE = 6;
 
 	private readonly cardEntries = new Map<string, ICardEntry>();
-	private placeholderCard: OptimusCard | undefined;
 	private contentAreaEl: HTMLElement | undefined;
+	private boardContainer: HTMLElement | undefined;
 	private gridContainer: HTMLElement | undefined;
-	private kanbanContainer: HTMLElement | undefined;
-	private readonly kanbanColumns = new Map<KanbanBucket, IKanbanColumn>();
-	private viewMode: OptimusViewMode = 'grid';
-	private readonly viewModeContextKey;
-	/** Watches bound sessions' statuses so kanban re-buckets on transitions. */
-	private readonly statusWatchStore = this._register(new DisposableStore());
-	private readonly refreshScheduler = this._register(new RunOnceScheduler(() => this.refreshCards(), 50));
-	private pageIndex = 0;
+	private placeholderCard: OptimusCard | undefined;
 	private pagerElement: HTMLElement | undefined;
 	private pagerLabel: HTMLElement | undefined;
 	private pagerPrevious: HTMLButtonElement | undefined;
 	private pagerNext: HTMLButtonElement | undefined;
+	private pageIndex = 0;
+	private focusedSessionHost: HTMLElement | undefined;
+	private focusedSessionBody: HTMLElement | undefined;
+	private focusedHeaderTypePickerSlot: HTMLElement | undefined;
+	private focusedHeaderTitleSlot: HTMLElement | undefined;
+	private focusedHeaderToolbarSlot: HTMLElement | undefined;
+	private focusedSessionView: SessionView | undefined;
+	private focusedMode = false;
+	private readonly renderSessionTypePickerInControls = observableValue<boolean>(this, false);
+	private readonly boardColumns = new Map<OptimusDashboardBucket, IBoardColumn>();
+	private readonly viewSwitcherButtons = new Map<OptimusViewMode, HTMLButtonElement>();
+	private viewMode: OptimusViewMode = 'board';
+	private readonly viewModeContextKey;
+	/** Watches bound sessions' dashboard fields so filtering and sorting stay live. */
+	private readonly statusWatchStore = this._register(new DisposableStore());
+	private readonly filterChipStore = this._register(new DisposableStore());
+	private readonly refreshScheduler = this._register(new RunOnceScheduler(() => this.refreshCards(), 50));
 	private progressBar: ProgressBar | undefined;
 	private progressIndicator: IProgressIndicator | undefined;
+	private searchInput: HTMLInputElement | undefined;
+	private displayButton: HTMLButtonElement | undefined;
+	private filterButton: HTMLButtonElement | undefined;
+	private filterCountElement: HTMLElement | undefined;
+	private filterChipsElement: HTMLElement | undefined;
+	private resultsElement: HTMLElement | undefined;
+	private lastModels: readonly IOptimusCardSessionModel[] = [];
 	private visibleSessions: readonly (IActiveSession | undefined)[] = [];
 	private activeSession: IActiveSession | undefined;
+	private query = '';
+	private readonly filteredBuckets = new Set<OptimusDashboardBucket>();
+	private timeRange: OptimusDashboardTimeRange = 'all';
+	private archiveFilter: OptimusDashboardArchiveFilter = 'exclude';
+	private readonly filteredProviders = new Set<string>();
+	private readonly filteredWorkspaces = new Set<string>();
+	private sortMode: OptimusDashboardSort = 'updated-desc';
+	private groupMode: OptimusDashboardGroup = 'none';
+	private unreadFirst = false;
 
 	private readonly _onDidFocusSession = this._register(new Emitter<string>());
 	readonly onDidFocusSession: Event<string> = this._onDidFocusSession.event;
@@ -145,6 +177,7 @@ export class OptimusGridPart extends Part {
 		@ICommandService private readonly commandService: ICommandService,
 		@ISessionsManagementService private readonly sessionsManagementService: ISessionsManagementService,
 		@IContextKeyService contextKeyService: IContextKeyService,
+		@IContextMenuService private readonly contextMenuService: IContextMenuService,
 	) {
 		super(
 			Parts.SESSIONS_PART,
@@ -165,17 +198,32 @@ export class OptimusGridPart extends Part {
 			// Malformed storage: start with an empty board.
 		}
 
-		this.viewMode = this.storageService.get(VIEW_MODE_STORAGE_KEY, StorageScope.PROFILE) === 'kanban' ? 'kanban' : 'grid';
+		this.viewMode = this.storageService.get(VIEW_MODE_STORAGE_KEY, StorageScope.PROFILE) === 'list' ? 'list' : 'board';
+		try {
+			const displayState = JSON.parse(this.storageService.get(DASHBOARD_DISPLAY_STORAGE_KEY, StorageScope.PROFILE, '{}')) as Partial<IOptimusDashboardDisplayState>;
+			if (displayState.sort && ['updated-desc', 'updated-asc', 'created-desc', 'created-asc', 'title-asc', 'title-desc'].includes(displayState.sort)) {
+				this.sortMode = displayState.sort;
+			}
+			if (displayState.group === 'workspace') {
+				this.groupMode = 'workspace';
+			}
+			this.unreadFirst = displayState.unreadFirst === true;
+		} catch {
+			// Malformed display preferences: retain dashboard defaults.
+		}
 		this.viewModeContextKey = OPTIMUS_VIEW_MODE_CONTEXT_KEY.bindTo(contextKeyService);
 		this.viewModeContextKey.set(this.viewMode);
 		this._register(CommandsRegistry.registerCommand(OPTIMUS_TOGGLE_VIEW_MODE_COMMAND_ID, () => this.toggleViewMode()));
-		this._register(CommandsRegistry.registerCommand(OPTIMUS_SET_VIEW_MODE_COMMAND_ID, (_accessor, mode: unknown) => this.setViewMode(mode === 'kanban' ? 'kanban' : 'grid')));
+		this._register(CommandsRegistry.registerCommand(OPTIMUS_SET_VIEW_MODE_COMMAND_ID, (_accessor, mode: unknown) => this.setViewMode(mode === 'list' ? 'list' : 'board')));
+		this._register(CommandsRegistry.registerCommand(OPTIMUS_SET_SEARCH_QUERY_COMMAND_ID, (_accessor, query: unknown) => this.setSearchQuery(typeof query === 'string' ? query : '')));
+		this._register(CommandsRegistry.registerCommand(OPTIMUS_SHOW_FOCUSED_SESSION_CONTENT_COMMAND_ID, (_accessor, session: IActiveSession | undefined) => this.showFocusedSession(session)));
+		this._register(CommandsRegistry.registerCommand(OPTIMUS_SHOW_DASHBOARD_CONTENT_COMMAND_ID, () => this.showDashboardContent()));
 
 		this._register(this.sessionsManagementService.onDidChangeSessions(() => this.refreshCards()));
 	}
 
 	private toggleViewMode(): void {
-		this.setViewMode(this.viewMode === 'grid' ? 'kanban' : 'grid');
+		this.setViewMode(this.viewMode === 'board' ? 'list' : 'board');
 	}
 
 	private setViewMode(mode: OptimusViewMode): void {
@@ -185,8 +233,54 @@ export class OptimusGridPart extends Part {
 		this.viewMode = mode;
 		this.storageService.store(VIEW_MODE_STORAGE_KEY, this.viewMode, StorageScope.PROFILE, StorageTarget.USER);
 		this.viewModeContextKey.set(this.viewMode);
-		this.contentAreaEl?.classList.toggle('view-kanban', this.viewMode === 'kanban');
+		this.contentAreaEl?.classList.toggle('view-list', this.viewMode === 'list');
+		this.pageIndex = 0;
 		this.refreshCards();
+	}
+
+	private showFocusedSession(session: IActiveSession | undefined): void {
+		// Advanced keeps the board as its empty state. New task creation is routed
+		// to the canonical Simple composer rather than a duplicate side chat.
+		if (!session) {
+			this.showDashboardContent();
+			return;
+		}
+		const host = this.focusedSessionBody;
+		if (!host) {
+			return;
+		}
+		if (!this.focusedSessionView) {
+			this.focusedSessionView = this._register(this.instantiationService.createInstance(SessionView));
+			host.appendChild(this.focusedSessionView.element);
+		}
+		this.focusedMode = true;
+		this.contentAreaEl?.classList.add('focused-session');
+		this.focusedSessionView.element.classList.add('is-active');
+		this.focusedSessionView.setActive(true);
+		this.focusedSessionView.openSession(session, {
+			renderSessionTypePickerInControls: this.renderSessionTypePickerInControls,
+			headerTypePickerSlot: this.focusedHeaderTypePickerSlot,
+			headerToolbarSlot: this.focusedHeaderToolbarSlot,
+		});
+		if (session && this.focusedHeaderTitleSlot && this.focusedHeaderToolbarSlot) {
+			this.focusedSessionView.mountHeaderIntoPanel(this.focusedHeaderTitleSlot, this.focusedHeaderToolbarSlot);
+		} else {
+			this.focusedSessionView.restoreHeaderToView();
+		}
+		this.layoutFocusedSession();
+		this.focusedSessionView.focus();
+	}
+
+	private showDashboardContent(): void {
+		this.focusedMode = false;
+		this.contentAreaEl?.classList.remove('focused-session');
+		this.focusedSessionView?.setActive(false);
+		this.refreshCards();
+	}
+
+	private persistDisplayState(): void {
+		const state: IOptimusDashboardDisplayState = { sort: this.sortMode, group: this.groupMode, unreadFirst: this.unreadFirst };
+		this.storageService.store(DASHBOARD_DISPLAY_STORAGE_KEY, JSON.stringify(state), StorageScope.PROFILE, StorageTarget.USER);
 	}
 
 	private persistOpenSessions(): void {
@@ -244,24 +338,31 @@ export class OptimusGridPart extends Part {
 	protected override createContentArea(parent: HTMLElement): HTMLElement {
 		const contentArea = append(parent, $('.content.optimus-grid-content'));
 		this.contentAreaEl = contentArea;
-		contentArea.classList.toggle('view-kanban', this.viewMode === 'kanban');
+		contentArea.classList.toggle('view-list', this.viewMode === 'list');
 
 		this.progressBar = this._register(new ProgressBar(contentArea, defaultProgressBarStyles));
 		this.progressBar.hide();
 
-		this.gridContainer = append(contentArea, $('.optimus-grid'));
+		this.createDashboardToolbar(contentArea);
 
-		// Kanban board: one column per status bucket, cards shared with the grid.
-		this.kanbanContainer = append(contentArea, $('.optimus-kanban'));
-		for (const bucket of KANBAN_BUCKETS) {
-			const element = append(this.kanbanContainer, $(`.optimus-kanban-column.${bucket.key}`));
+		// Board: one column per Devin-style status bucket. The card instances are
+		// the existing Advanced-mode cards and move between these columns live.
+		this.boardContainer = append(contentArea, $('.optimus-kanban.optimus-board'));
+		for (const bucket of BOARD_BUCKETS) {
+			const element = append(this.boardContainer, $(`.optimus-kanban-column.${bucket.key}`));
 			const header = append(element, $('.optimus-kanban-column-header'));
 			append(header, $(`span.codicon.${bucket.icon}.optimus-kanban-column-icon`));
 			append(header, $('span.optimus-kanban-column-label')).textContent = bucket.label;
 			const countEl = append(header, $('span.optimus-kanban-column-count'));
 			const listEl = append(element, $('.optimus-kanban-column-list'));
-			this.kanbanColumns.set(bucket.key, { element, listEl, countEl });
+			this.boardColumns.set(bucket.key, { element, listEl, countEl });
 		}
+
+		// "List" intentionally restores the original Advanced presentation: six
+		// full task cards in a paginated 3×2 grid, rather than compact table rows.
+		this.gridContainer = append(contentArea, $('.optimus-grid'));
+		this.gridContainer.setAttribute('role', 'list');
+		this.gridContainer.setAttribute('aria-label', localize('optimus.list.ariaLabel', "Sessions"));
 
 		// First-run hero shown instead of a lone dashed placeholder card.
 		const emptyState = append(contentArea, $('.optimus-empty-state'));
@@ -276,6 +377,50 @@ export class OptimusGridPart extends Part {
 		this._register(addDisposableListener(hero, EventType.CLICK, () => {
 			this.commandService.executeCommand(OPTIMUS_NEW_SESSION_COMMAND_ID);
 		}));
+
+		const noResults = append(contentArea, $('.optimus-no-results'));
+		append(noResults, $('.codicon.codicon-search'));
+		append(noResults, $('.optimus-no-results-title')).textContent = localize('optimus.noResults.title', "No Sessions Match These Filters");
+		const clearFilters = append(noResults, $('button.optimus-no-results-action')) as HTMLButtonElement;
+		clearFilters.type = 'button';
+		clearFilters.textContent = localize('optimus.noResults.clear', "Reset Filters");
+		this._register(addDisposableListener(clearFilters, EventType.CLICK, () => this.resetFilters()));
+
+		const placeholder = this._register(this.instantiationService.createInstance(OptimusCard, this.gridContainer));
+		this._register(placeholder.onDidAction(action => {
+			if (action.kind === 'create-session') {
+				this.commandService.executeCommand(OPTIMUS_NEW_SESSION_COMMAND_ID);
+			}
+		}));
+		this.placeholderCard = placeholder;
+
+		this.pagerElement = append(contentArea, $('.optimus-grid-pager'));
+		this.pagerPrevious = append(this.pagerElement, $('button.codicon.codicon-chevron-left')) as HTMLButtonElement;
+		this.pagerPrevious.type = 'button';
+		this.pagerPrevious.title = localize('optimus.pager.previous', "Previous page");
+		this.pagerLabel = append(this.pagerElement, $('span.optimus-grid-pager-label'));
+		this.pagerNext = append(this.pagerElement, $('button.codicon.codicon-chevron-right')) as HTMLButtonElement;
+		this.pagerNext.type = 'button';
+		this.pagerNext.title = localize('optimus.pager.next', "Next page");
+		this._register(addDisposableListener(this.pagerPrevious, EventType.CLICK, () => {
+			this.pageIndex = Math.max(0, this.pageIndex - 1);
+			this.refreshCards();
+		}));
+		this._register(addDisposableListener(this.pagerNext, EventType.CLICK, () => {
+			this.pageIndex++;
+			this.refreshCards();
+		}));
+
+		this.focusedSessionHost = append(contentArea, $('.optimus-focused-session'));
+		const focusedHeader = append(this.focusedSessionHost, $('.sessions-panel-header.sessions-part-header.optimus-focused-session-header'));
+		append(focusedHeader, $('.titlebar-drag-region'));
+		const focusedHeaderLeft = append(focusedHeader, $('.sessions-panel-header-left'));
+		this.focusedHeaderTypePickerSlot = append(focusedHeaderLeft, $('.sessions-header-type-picker-slot'));
+		const focusedHeaderCenter = append(focusedHeader, $('.sessions-panel-header-center'));
+		this.focusedHeaderTitleSlot = append(focusedHeaderCenter, $('.sessions-header-session-title-slot'));
+		const focusedHeaderRight = append(focusedHeader, $('.sessions-panel-header-right'));
+		this.focusedHeaderToolbarSlot = append(focusedHeaderRight, $('.sessions-header-session-toolbar-slot.sessions-header-new-session-toolbar-slot'));
+		this.focusedSessionBody = append(this.focusedSessionHost, $('.optimus-focused-session-body'));
 
 		// Sessions dragged out of the sidebar list drop here and open as cards.
 		// The list tracks the dragged session via LocalSelectionTransfer (an
@@ -310,42 +455,351 @@ export class OptimusGridPart extends Part {
 			},
 		}));
 
-		// Persistent "start a task" placeholder, always the last grid item.
-		const placeholder = this._register(this.instantiationService.createInstance(OptimusCard, this.gridContainer));
-		this._register(placeholder.onDidAction(action => {
-			if (action.kind === 'create-session') {
-				this.commandService.executeCommand(OPTIMUS_NEW_SESSION_COMMAND_ID);
-			}
-		}));
-		this.placeholderCard = placeholder;
-
-		// Pager below the grid; hidden while everything fits on one page.
-		this.pagerElement = append(contentArea, $('.optimus-grid-pager'));
-		this.pagerPrevious = append(this.pagerElement, $('button')) as HTMLButtonElement;
-		this.pagerPrevious.textContent = '‹';
-		this.pagerPrevious.title = localize('optimus.pager.previous', "Previous page");
-		this.pagerLabel = append(this.pagerElement, $('span.optimus-grid-pager-label'));
-		this.pagerNext = append(this.pagerElement, $('button')) as HTMLButtonElement;
-		this.pagerNext.textContent = '›';
-		this.pagerNext.title = localize('optimus.pager.next', "Next page");
-		this._register(addDisposableListener(this.pagerPrevious, EventType.CLICK, () => {
-			this.pageIndex = Math.max(0, this.pageIndex - 1);
-			this.refreshCards();
-		}));
-		this._register(addDisposableListener(this.pagerNext, EventType.CLICK, () => {
-			this.pageIndex = this.pageIndex + 1;
-			this.refreshCards();
-		}));
-
 		this.refreshCards();
 
 		return contentArea;
 	}
 
-	/**
-	 * Reconcile the six fixed slots against the service's visible sessions.
-	 * Sessions beyond the sixth slot are not rendered.
-	 */
+	private createDashboardToolbar(parent: HTMLElement): void {
+		const dashboardHeader = append(parent, $('.optimus-dashboard-header'));
+		const primaryRow = append(dashboardHeader, $('.optimus-dashboard-primary'));
+		const switcher = append(primaryRow, $('.optimus-view-switcher'));
+		switcher.setAttribute('role', 'group');
+		switcher.setAttribute('aria-label', localize('optimus.dashboard.view', "Session View"));
+		const addViewButton = (mode: OptimusViewMode, label: string): void => {
+			const button = append(switcher, $('button.optimus-view-switcher-segment')) as HTMLButtonElement;
+			button.type = 'button';
+			button.textContent = label;
+			this._register(addDisposableListener(button, EventType.CLICK, () => this.setViewMode(mode)));
+			this.viewSwitcherButtons.set(mode, button);
+		};
+		addViewButton('board', localize('optimus.dashboard.board', "Board"));
+		addViewButton('list', localize('optimus.dashboard.list', "List"));
+
+		const controls = append(primaryRow, $('.optimus-dashboard-controls'));
+		const search = append(controls, $('.optimus-dashboard-search'));
+		append(search, $('.codicon.codicon-search'));
+		this.searchInput = append(search, $('input.optimus-dashboard-search-input')) as HTMLInputElement;
+		this.searchInput.type = 'search';
+		this.searchInput.placeholder = localize('optimus.dashboard.search.placeholder', "Search sessions...");
+		this.searchInput.setAttribute('aria-label', localize('optimus.dashboard.search.ariaLabel', "Search Sessions"));
+		this._register(addDisposableListener(this.searchInput, EventType.INPUT, () => {
+			this.setSearchQuery(this.searchInput?.value ?? '', this.searchInput);
+		}));
+
+		this.displayButton = append(controls, $('button.optimus-dashboard-button')) as HTMLButtonElement;
+		this.displayButton.type = 'button';
+		this.displayButton.setAttribute('aria-haspopup', 'menu');
+		append(this.displayButton, $('span')).textContent = localize('optimus.dashboard.display', "Display");
+		append(this.displayButton, $('.codicon.codicon-chevron-down'));
+		this._register(addDisposableListener(this.displayButton, EventType.CLICK, () => this.showDisplayMenu()));
+
+		const secondaryRow = append(dashboardHeader, $('.optimus-dashboard-secondary'));
+		const filterControls = append(secondaryRow, $('.optimus-dashboard-filter-controls'));
+		this.filterButton = append(filterControls, $('button.optimus-dashboard-button.optimus-dashboard-filter-button')) as HTMLButtonElement;
+		this.filterButton.type = 'button';
+		this.filterButton.setAttribute('aria-haspopup', 'menu');
+		append(this.filterButton, $('.codicon.codicon-add'));
+		append(this.filterButton, $('span')).textContent = localize('optimus.dashboard.addFilters', "Add filters");
+		this.filterCountElement = append(this.filterButton, $('.optimus-dashboard-filter-count'));
+		this._register(addDisposableListener(this.filterButton, EventType.CLICK, () => this.showFilterMenu()));
+		this.filterChipsElement = append(filterControls, $('.optimus-dashboard-filter-chips'));
+		this.resultsElement = append(filterControls, $('.optimus-dashboard-results'));
+
+		const resetButton = append(secondaryRow, $('button.optimus-dashboard-reset')) as HTMLButtonElement;
+		resetButton.type = 'button';
+		resetButton.textContent = localize('optimus.dashboard.resetFilters', "Reset filters");
+		this._register(addDisposableListener(resetButton, EventType.CLICK, () => this.resetFilters()));
+	}
+
+	private setSearchQuery(query: string, source?: HTMLInputElement): void {
+		this.query = query;
+		if (this.searchInput && this.searchInput !== source) {
+			this.searchInput.value = query;
+		}
+		const chromeInput = this.element?.ownerDocument.querySelector<HTMLInputElement>('.optimus-window-command-input');
+		if (chromeInput && chromeInput !== source) {
+			chromeInput.value = query;
+		}
+		this.refreshCards();
+	}
+
+	private showDisplayMenu(): void {
+		const anchor = this.displayButton;
+		if (!anchor) {
+			return;
+		}
+		const setSort = (sort: OptimusDashboardSort): void => {
+			this.sortMode = sort;
+			this.persistDisplayState();
+			this.refreshCards();
+		};
+		const sortAction = (id: string, label: string, sort: OptimusDashboardSort): IAction => toAction({
+			id,
+			label,
+			checked: this.sortMode === sort,
+			run: () => setSort(sort),
+		});
+		const groupAction = (id: string, label: string, group: OptimusDashboardGroup): IAction => toAction({
+			id,
+			label,
+			checked: this.groupMode === group,
+			run: () => {
+				this.groupMode = group;
+				this.persistDisplayState();
+				this.refreshCards();
+			},
+		});
+
+		anchor.setAttribute('aria-expanded', 'true');
+		this.contextMenuService.showContextMenu({
+			getAnchor: () => anchor,
+			getActions: () => [
+				toAction({
+					id: 'optimus.dashboard.unreadFirst',
+					label: localize('optimus.dashboard.unreadFirst', "Unread First"),
+					checked: this.unreadFirst,
+					run: () => {
+						this.unreadFirst = !this.unreadFirst;
+						this.persistDisplayState();
+						this.refreshCards();
+					},
+				}),
+				new Separator(),
+				new SubmenuAction('optimus.dashboard.sort', localize('optimus.dashboard.sort', "Sort"), [
+					sortAction('optimus.dashboard.sort.updatedDesc', localize('optimus.dashboard.sort.updatedDesc', "Last Updated"), 'updated-desc'),
+					sortAction('optimus.dashboard.sort.updatedAsc', localize('optimus.dashboard.sort.updatedAsc', "First Updated"), 'updated-asc'),
+					sortAction('optimus.dashboard.sort.createdDesc', localize('optimus.dashboard.sort.createdDesc', "Last Created"), 'created-desc'),
+					sortAction('optimus.dashboard.sort.createdAsc', localize('optimus.dashboard.sort.createdAsc', "First Created"), 'created-asc'),
+					sortAction('optimus.dashboard.sort.titleAsc', localize('optimus.dashboard.sort.titleAsc', "Title A–Z"), 'title-asc'),
+					sortAction('optimus.dashboard.sort.titleDesc', localize('optimus.dashboard.sort.titleDesc', "Title Z–A"), 'title-desc'),
+				]),
+				new SubmenuAction('optimus.dashboard.group', localize('optimus.dashboard.group', "Group"), [
+					groupAction('optimus.dashboard.group.none', localize('optimus.dashboard.group.none', "None"), 'none'),
+					groupAction('optimus.dashboard.group.repository', localize('optimus.dashboard.group.repository', "Repository"), 'workspace'),
+				]),
+			],
+			onHide: () => anchor.setAttribute('aria-expanded', 'false'),
+		});
+	}
+
+	private showFilterMenu(): void {
+		const anchor = this.filterButton;
+		if (!anchor) {
+			return;
+		}
+		const toggleBucket = (bucket: OptimusDashboardBucket): void => {
+			if (this.filteredBuckets.has(bucket)) {
+				this.filteredBuckets.delete(bucket);
+			} else {
+				this.filteredBuckets.add(bucket);
+			}
+			this.refreshCards();
+		};
+		const timeAction = (id: string, label: string, range: OptimusDashboardTimeRange): IAction => toAction({
+			id,
+			label,
+			checked: this.timeRange === range,
+			run: () => {
+				this.timeRange = range;
+				this.refreshCards();
+			},
+		});
+		const archiveAction = (id: string, label: string, filter: OptimusDashboardArchiveFilter): IAction => toAction({
+			id,
+			label,
+			checked: this.archiveFilter === filter,
+			run: () => {
+				this.archiveFilter = filter;
+				this.refreshCards();
+			},
+		});
+		const providers = [...new Set(this.lastModels.map(model => model.session.providerId))].sort((a, b) => a.localeCompare(b));
+		const workspaces = [...new Set(this.lastModels.map(model => model.session.workspace.get()?.label ?? ''))].sort((a, b) => a.localeCompare(b));
+		const toggleValue = (values: Set<string>, value: string): void => {
+			if (values.has(value)) {
+				values.delete(value);
+			} else {
+				values.add(value);
+			}
+			this.refreshCards();
+		};
+		const providerActions = providers.map(provider => toAction({
+			id: `optimus.dashboard.provider.${provider}`,
+			label: provider,
+			checked: this.filteredProviders.has(provider),
+			run: () => toggleValue(this.filteredProviders, provider),
+		}));
+		const workspaceActions = workspaces.map(workspace => toAction({
+			id: `optimus.dashboard.workspace.${workspace}`,
+			label: workspace || localize('optimus.dashboard.noRepository', "No Repository"),
+			checked: this.filteredWorkspaces.has(workspace),
+			run: () => toggleValue(this.filteredWorkspaces, workspace),
+		}));
+
+		anchor.setAttribute('aria-expanded', 'true');
+		this.contextMenuService.showContextMenu({
+			getAnchor: () => anchor,
+			getActions: () => [
+				new SubmenuAction('optimus.dashboard.filter.status', localize('optimus.dashboard.filter.status', "Status"), BOARD_BUCKETS.map(bucket => toAction({
+					id: `optimus.dashboard.status.${bucket.key}`,
+					label: bucket.label,
+					checked: this.filteredBuckets.has(bucket.key),
+					run: () => toggleBucket(bucket.key),
+				}))),
+				new SubmenuAction('optimus.dashboard.filter.time', localize('optimus.dashboard.filter.time', "Time"), [
+					timeAction('optimus.dashboard.time.all', localize('optimus.dashboard.time.all', "Any Time"), 'all'),
+					timeAction('optimus.dashboard.time.hour', localize('optimus.dashboard.time.hour', "Past Hour"), 'hour'),
+					timeAction('optimus.dashboard.time.day', localize('optimus.dashboard.time.day', "Past 24 Hours"), 'day'),
+					timeAction('optimus.dashboard.time.week', localize('optimus.dashboard.time.week', "Past 7 Days"), 'week'),
+					timeAction('optimus.dashboard.time.month', localize('optimus.dashboard.time.month', "Past 30 Days"), 'month'),
+				]),
+				new SubmenuAction('optimus.dashboard.filter.archived', localize('optimus.dashboard.filter.archived', "Archived"), [
+					archiveAction('optimus.dashboard.archive.exclude', localize('optimus.dashboard.archive.exclude', "Exclude Archived"), 'exclude'),
+					archiveAction('optimus.dashboard.archive.include', localize('optimus.dashboard.archive.include', "Include Archived"), 'include'),
+					archiveAction('optimus.dashboard.archive.only', localize('optimus.dashboard.archive.only', "Only Archived"), 'only'),
+				]),
+				new SubmenuAction('optimus.dashboard.filter.agent', localize('optimus.dashboard.filter.agent', "Agent"), providerActions.length > 0 ? providerActions : [toAction({
+					id: 'optimus.dashboard.provider.empty',
+					label: localize('optimus.dashboard.provider.empty', "No Agents"),
+					enabled: false,
+					run: () => undefined,
+				})]),
+				new SubmenuAction('optimus.dashboard.filter.repository', localize('optimus.dashboard.filter.repository', "Repository"), workspaceActions.length > 0 ? workspaceActions : [toAction({
+					id: 'optimus.dashboard.workspace.empty',
+					label: localize('optimus.dashboard.workspace.empty', "No Repositories"),
+					enabled: false,
+					run: () => undefined,
+				})]),
+				new Separator(),
+				toAction({
+					id: 'optimus.dashboard.filters.reset',
+					label: localize('optimus.dashboard.filters.reset', "Reset Filters"),
+					run: () => this.resetFilters(),
+				}),
+			],
+			onHide: () => anchor.setAttribute('aria-expanded', 'false'),
+		});
+	}
+
+	private resetFilters(): void {
+		this.query = '';
+		if (this.searchInput) {
+			this.searchInput.value = '';
+		}
+		this.filteredBuckets.clear();
+		this.timeRange = 'all';
+		this.archiveFilter = 'exclude';
+		this.filteredProviders.clear();
+		this.filteredWorkspaces.clear();
+		this.refreshCards();
+	}
+
+	private getDashboardFilters(): IOptimusDashboardFilters {
+		return {
+			query: this.query,
+			buckets: [...this.filteredBuckets],
+			timeRange: this.timeRange,
+			archive: this.archiveFilter,
+			providers: [...this.filteredProviders],
+			workspaces: [...this.filteredWorkspaces],
+		};
+	}
+
+	private toSessionSummary(model: IOptimusCardSessionModel): IOptimusSessionSummary {
+		const session = model.session;
+		return {
+			key: session.resource.toString(),
+			title: session.title.get(),
+			providerId: session.providerId,
+			workspaceLabel: session.workspace.get()?.label ?? '',
+			status: session.status.get(),
+			createdAt: session.createdAt.getTime(),
+			updatedAt: session.updatedAt.get().getTime(),
+			isArchived: session.isArchived.get(),
+			isRead: session.isRead.get(),
+		};
+	}
+
+	private filterAndSortModels(models: readonly IOptimusCardSessionModel[]): IOptimusCardSessionModel[] {
+		const modelByKey = new Map(models.map(model => [model.session.resource.toString(), model]));
+		return filterAndSortOptimusSessions(models.map(model => this.toSessionSummary(model)), this.getDashboardFilters(), this.sortMode, this.unreadFirst)
+			.map(summary => assertReturnsDefined(modelByKey.get(summary.key)));
+	}
+
+	private getFilterCount(): number {
+		return this.filteredBuckets.size
+			+ (this.timeRange === 'all' ? 0 : 1)
+			+ (this.archiveFilter === 'exclude' ? 0 : 1)
+			+ this.filteredProviders.size
+			+ this.filteredWorkspaces.size;
+	}
+
+	private updateDashboardControls(total: number, filtered: number): void {
+		for (const [mode, button] of this.viewSwitcherButtons) {
+			button.classList.toggle('active', this.viewMode === mode);
+			button.setAttribute('aria-pressed', String(this.viewMode === mode));
+		}
+		const filterCount = this.getFilterCount();
+		if (this.filterCountElement) {
+			this.filterCountElement.textContent = filterCount > 0 ? String(filterCount) : '';
+			this.filterCountElement.classList.toggle('empty', filterCount === 0);
+		}
+		if (this.resultsElement) {
+			this.resultsElement.textContent = total === filtered
+				? localize('optimus.dashboard.results.total', "{0} sessions", total)
+				: localize('optimus.dashboard.results.filtered', "{0} of {1} sessions", filtered, total);
+		}
+		this.renderFilterChips();
+	}
+
+	private renderFilterChips(): void {
+		const container = this.filterChipsElement;
+		if (!container) {
+			return;
+		}
+		this.filterChipStore.clear();
+		container.textContent = '';
+		const appendChip = (label: string, remove: () => void): void => {
+			const chip = append(container, $('button.optimus-dashboard-filter-chip')) as HTMLButtonElement;
+			chip.type = 'button';
+			append(chip, $('span')).textContent = label;
+			append(chip, $('.codicon.codicon-close'));
+			chip.setAttribute('aria-label', localize('optimus.dashboard.removeFilter', "Remove Filter: {0}", label));
+			this.filterChipStore.add(addDisposableListener(chip, EventType.CLICK, () => {
+				remove();
+				this.refreshCards();
+			}));
+		};
+		for (const bucket of BOARD_BUCKETS) {
+			if (this.filteredBuckets.has(bucket.key)) {
+				appendChip(bucket.label, () => this.filteredBuckets.delete(bucket.key));
+			}
+		}
+		const timeLabels: Record<Exclude<OptimusDashboardTimeRange, 'all'>, string> = {
+			hour: localize('optimus.dashboard.chip.hour', "Past Hour"),
+			day: localize('optimus.dashboard.chip.day', "Past 24 Hours"),
+			week: localize('optimus.dashboard.chip.week', "Past 7 Days"),
+			month: localize('optimus.dashboard.chip.month', "Past 30 Days"),
+		};
+		if (this.timeRange !== 'all') {
+			appendChip(timeLabels[this.timeRange], () => this.timeRange = 'all');
+		}
+		if (this.archiveFilter !== 'exclude') {
+			appendChip(this.archiveFilter === 'include'
+				? localize('optimus.dashboard.chip.includeArchived', "Include Archived")
+				: localize('optimus.dashboard.chip.onlyArchived', "Only Archived"), () => this.archiveFilter = 'exclude');
+		}
+		for (const provider of this.filteredProviders) {
+			appendChip(provider, () => this.filteredProviders.delete(provider));
+		}
+		for (const workspace of this.filteredWorkspaces) {
+			appendChip(workspace || localize('optimus.dashboard.noRepository', "No Repository"), () => this.filteredWorkspaces.delete(workspace));
+		}
+		container.classList.toggle('empty', container.childElementCount === 0);
+	}
+
+	/** Reconcile dashboard sessions against the sessions service. */
 	updateVisibleSessions(visible: readonly (IActiveSession | undefined)[], active: IActiveSession | undefined): void {
 		const activeChanged = !!active && active.sessionId !== this.activeSession?.sessionId;
 		this.visibleSessions = visible;
@@ -358,20 +812,13 @@ export class OptimusGridPart extends Part {
 		if (active) {
 			this.openSession(active.resource.toString());
 		}
-
-		// Opening a session (sidebar click, drop, new chat) must surface its
-		// card: jump the grid to the page that holds it.
-		if (activeChanged && this.viewMode === 'grid') {
-			const models = this.buildCardModels();
-			const index = models.findIndex(model => model.session.sessionId === active.sessionId);
-			if (index >= 0) {
-				this.pageIndex = Math.floor(index / OptimusGridPart.PAGE_SIZE);
-			}
+		if (this.focusedMode) {
+			this.showFocusedSession(active);
 		}
 
 		this.refreshCards();
 
-		if (activeChanged) {
+		if (activeChanged && !this.focusedMode) {
 			for (const entry of this.cardEntries.values()) {
 				if (entry.card.session?.session.sessionId === active.sessionId) {
 					entry.card.element.scrollIntoView({ block: 'nearest' });
@@ -382,6 +829,10 @@ export class OptimusGridPart extends Part {
 	}
 
 	focusSession(session: IActiveSession | undefined): void {
+		if (this.focusedMode) {
+			this.focusedSessionView?.focus();
+			return;
+		}
 		if (!session) {
 			this.placeholderCard?.focus();
 			return;
@@ -395,9 +846,9 @@ export class OptimusGridPart extends Part {
 	}
 
 	private createCardEntry(key: string): ICardEntry {
-		const gridContainer = assertReturnsDefined(this.gridContainer);
+		const initialContainer = assertReturnsDefined(this.gridContainer ?? this.boardContainer);
 		const store = new DisposableStore();
-		const card = store.add(this.instantiationService.createInstance(OptimusCard, gridContainer));
+		const card = store.add(this.instantiationService.createInstance(OptimusCard, initialContainer));
 		store.add(card.onDidAction(action => {
 			switch (action.kind) {
 				case 'create-session':
@@ -418,9 +869,10 @@ export class OptimusGridPart extends Part {
 				case 'focus-session':
 					if (action.card.isVisible && action.card.activeSession) {
 						this._onDidFocusSession.fire(action.card.activeSession.sessionId);
-					} else {
-						this.commandService.executeCommand(OPTIMUS_FOCUS_SESSION_COMMAND_ID, action.card.session.resource);
 					}
+					// Always route through the focus command: even an already-active
+					// card must transition from the dashboard to the focused workspace.
+					this.commandService.executeCommand(OPTIMUS_FOCUS_SESSION_COMMAND_ID, action.card.session.resource);
 					break;
 			}
 		}));
@@ -436,24 +888,36 @@ export class OptimusGridPart extends Part {
 	}
 
 	private refreshCards(): void {
-		const gridContainer = this.gridContainer;
-		if (!gridContainer) {
+		if (!this.boardContainer || !this.gridContainer) {
 			return;
 		}
 
 		const allModels = this.buildCardModels();
+		this.lastModels = allModels;
+		const filteredModels = this.filterAndSortModels(allModels);
 		this.contentAreaEl?.classList.toggle('empty', allModels.length === 0);
+		this.contentAreaEl?.classList.toggle('no-results', allModels.length > 0 && filteredModels.length === 0);
+		this.updateDashboardControls(allModels.length, filteredModels.length);
 
-		// Status transitions matter in both views but the sessions service does
-		// not necessarily emit for them: kanban re-buckets on them, and a new
-		// chat's draft only joins the board once its status leaves Untitled
-		// (the first response). Watch every bound AND visible session's status
-		// and schedule (never re-enter) a refresh on change.
+		const allModelKeys = new Set(allModels.map(model => model.session.resource.toString()));
+		for (const [key, entry] of [...this.cardEntries]) {
+			if (!allModelKeys.has(key)) {
+				this.disposeCardEntry(key, entry);
+			}
+		}
+
+		// The sessions service does not emit for every observable mutation. Watch
+		// the fields that influence dashboard search, filters, ordering, and rows.
 		this.statusWatchStore.clear();
 		let initialRun = true;
 		this.statusWatchStore.add(autorun(reader => {
 			for (const model of allModels) {
 				model.session.status.read(reader);
+				model.session.title.read(reader);
+				model.session.updatedAt.read(reader);
+				model.session.workspace.read(reader);
+				model.session.isArchived.read(reader);
+				model.session.isRead.read(reader);
 			}
 			for (const session of this.visibleSessions) {
 				session?.status.read(reader);
@@ -466,29 +930,27 @@ export class OptimusGridPart extends Part {
 			this.refreshScheduler.schedule();
 		}));
 
-		if (this.viewMode === 'kanban') {
-			this.refreshKanban(allModels);
+		if (this.viewMode === 'board') {
+			this.refreshBoard(filteredModels);
 			return;
 		}
 
-		this.refreshGrid(allModels);
+		this.refreshGrid(filteredModels);
 	}
 
-	private refreshKanban(allModels: readonly IOptimusCardSessionModel[]): void {
-		const modelKeys = new Set(allModels.map(model => model.session.resource.toString()));
-		for (const [key, entry] of [...this.cardEntries]) {
-			if (!modelKeys.has(key)) {
-				this.disposeCardEntry(key, entry);
-			}
+	private refreshBoard(models: readonly IOptimusCardSessionModel[]): void {
+		const visibleKeys = new Set(models.map(model => model.session.resource.toString()));
+		for (const [key, entry] of this.cardEntries) {
+			entry.card.element.style.display = visibleKeys.has(key) ? '' : 'none';
 		}
 
-		const buckets = new Map<KanbanBucket, IOptimusCardSessionModel[]>(KANBAN_BUCKETS.map(bucket => [bucket.key, []]));
-		for (const model of allModels) {
-			buckets.get(kanbanBucket(model.session.status.get()))!.push(model);
+		const buckets = new Map<OptimusDashboardBucket, IOptimusCardSessionModel[]>(BOARD_BUCKETS.map(bucket => [bucket.key, []]));
+		for (const model of models) {
+			buckets.get(getOptimusDashboardBucket(model.session.status.get()))!.push(model);
 		}
 
 		for (const [bucketKey, models] of buckets) {
-			const column = assertReturnsDefined(this.kanbanColumns.get(bucketKey));
+			const column = assertReturnsDefined(this.boardColumns.get(bucketKey));
 			column.countEl.textContent = String(models.length);
 			column.element.classList.toggle('empty', models.length === 0);
 
@@ -496,6 +958,7 @@ export class OptimusGridPart extends Part {
 			for (const model of models) {
 				const key = model.session.resource.toString();
 				const entry = this.cardEntries.get(key) ?? this.createCardEntry(key);
+				entry.card.element.style.display = '';
 				entry.card.bind(model, model.session.sessionId === this.activeSession?.sessionId);
 
 				const element = entry.card.element;
@@ -507,8 +970,6 @@ export class OptimusGridPart extends Part {
 				previousElement = element;
 			}
 		}
-
-		// The "start a task" placeholder and pager are grid-mode furniture.
 		if (this.placeholderCard) {
 			this.placeholderCard.element.style.display = 'none';
 		}
@@ -518,38 +979,26 @@ export class OptimusGridPart extends Part {
 
 	private refreshGrid(allModels: readonly IOptimusCardSessionModel[]): void {
 		const gridContainer = assertReturnsDefined(this.gridContainer);
-
-		// Paginate: six slots per page; the "start a task" placeholder
-		// occupies the slot right after the last session, so a full page
-		// pushes it onto the next one.
 		const totalItems = allModels.length + 1;
 		const totalPages = Math.max(1, Math.ceil(totalItems / OptimusGridPart.PAGE_SIZE));
 		this.pageIndex = Math.min(Math.max(0, this.pageIndex), totalPages - 1);
 		const pageStart = this.pageIndex * OptimusGridPart.PAGE_SIZE;
 		const models = allModels.slice(pageStart, pageStart + OptimusGridPart.PAGE_SIZE);
 		const placeholderOnThisPage = allModels.length >= pageStart && allModels.length < pageStart + OptimusGridPart.PAGE_SIZE;
-		const modelKeys = new Set(models.map(model => model.session.resource.toString()));
+		const visibleKeys = new Set(models.map(model => model.session.resource.toString()));
 
-		// Drop cards whose session left this page (closed, deleted, paged out).
-		for (const [key, entry] of [...this.cardEntries]) {
-			if (!modelKeys.has(key)) {
-				this.disposeCardEntry(key, entry);
-			}
+		for (const [key, entry] of this.cardEntries) {
+			entry.card.element.style.display = visibleKeys.has(key) ? '' : 'none';
 		}
 
-		// Bind each session to ITS card (creating on demand) and keep the DOM
-		// in model order without touching cards that are already in place —
-		// reparenting a card would disturb its live transcript.
 		let previousElement: HTMLElement | undefined;
 		for (const model of models) {
 			const key = model.session.resource.toString();
 			const entry = this.cardEntries.get(key) ?? this.createCardEntry(key);
+			entry.card.element.style.display = '';
 			entry.card.bind(model, model.session.sessionId === this.activeSession?.sessionId);
-
 			const element = entry.card.element;
 			const expectedPrevious = previousElement ?? null;
-			// Parent check matters when switching back from kanban: the card
-			// may sit first in a column with a coincidentally matching sibling.
 			if (element.parentElement !== gridContainer || element.previousElementSibling !== expectedPrevious) {
 				gridContainer.insertBefore(element, expectedPrevious ? expectedPrevious.nextElementSibling : gridContainer.firstElementChild);
 				entry.card.layout();
@@ -557,17 +1006,13 @@ export class OptimusGridPart extends Part {
 			previousElement = element;
 		}
 
-		// The placeholder is the last grid item of the page that has room.
 		if (this.placeholderCard) {
 			this.placeholderCard.element.style.display = placeholderOnThisPage ? '' : 'none';
-			if (placeholderOnThisPage && this.placeholderCard.element.nextElementSibling) {
+			if (placeholderOnThisPage) {
 				gridContainer.appendChild(this.placeholderCard.element);
 			}
 		}
-
 		this.updatePager(totalPages);
-
-		// Card sizes depend on how many grid tracks are occupied.
 		this.layoutCards();
 	}
 
@@ -575,7 +1020,7 @@ export class OptimusGridPart extends Part {
 		if (!this.pagerElement || !this.pagerLabel || !this.pagerPrevious || !this.pagerNext) {
 			return;
 		}
-		this.pagerElement.style.display = totalPages > 1 ? '' : 'none';
+		this.pagerElement.style.display = this.viewMode === 'list' && totalPages > 1 ? '' : 'none';
 		this.pagerLabel.textContent = localize('optimus.pager.label', "{0} of {1}", this.pageIndex + 1, totalPages);
 		this.pagerPrevious.disabled = this.pageIndex === 0;
 		this.pagerNext.disabled = this.pageIndex >= totalPages - 1;
@@ -585,6 +1030,23 @@ export class OptimusGridPart extends Part {
 		for (const entry of this.cardEntries.values()) {
 			entry.card.layout();
 		}
+	}
+
+	private layoutFocusedSession(): void {
+		if (!this.focusedMode || !this.focusedSessionBody || !this.focusedSessionView) {
+			return;
+		}
+		this.focusedSessionView.layout(this.focusedSessionBody.clientWidth, this.focusedSessionBody.clientHeight, 0, 0);
+	}
+
+	getSessionView(sessionId: string | undefined): SessionView | undefined {
+		if (!this.focusedMode) {
+			return undefined;
+		}
+		if (sessionId === undefined || this.activeSession?.sessionId === sessionId) {
+			return this.focusedSessionView;
+		}
+		return undefined;
 	}
 
 	private buildCardModels(): IOptimusCardSessionModel[] {
@@ -690,6 +1152,7 @@ export class OptimusGridPart extends Part {
 		super.layout(width, height, top, left);
 		super.layoutContents(width, height);
 		this.layoutCards();
+		this.layoutFocusedSession();
 	}
 
 	toJSON(): object {

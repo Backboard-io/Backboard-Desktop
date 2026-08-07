@@ -247,6 +247,12 @@ export class Config {
 		this.currentThinking = thinking;
 	}
 
+	setExcludeReasoning(excludeReasoning: boolean): void {
+		if (this.currentThinking) {
+			this.currentThinking = { ...this.currentThinking, excludeReasoning };
+		}
+	}
+
 	async saveRuntimeSelection(): Promise<void> {
 		const existing = readBackboardConfig(this.persistedConfigHomeDir);
 		await saveBackboardConfig(

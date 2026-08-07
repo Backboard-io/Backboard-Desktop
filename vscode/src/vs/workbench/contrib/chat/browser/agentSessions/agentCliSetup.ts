@@ -26,7 +26,7 @@ import { IPathService } from '../../../../services/path/common/pathService.js';
 
 /** An agent CLI the user can set up with one click from the session-type picker. */
 export interface IAgentCliSetupCandidate {
-	/** Bare agent-host provider id ('claude' | 'codex' | 'opencode'). */
+	/** Bare agent-host provider id ('claude' | 'codex'). */
 	readonly id: string;
 	readonly label: string;
 	readonly icon: ThemeIcon;
@@ -113,19 +113,6 @@ const SETUP_DEFINITIONS: readonly IAgentCliSetupDefinition[] = [
 		binDir: { posix: '$HOME/.local/bin', win32: '$env:USERPROFILE\\.local\\bin' },
 		signIn: 'codex login',
 		readyMessage: localize('agentSetup.codex.ready', "Codex is ready — new sessions bill to your ChatGPT plan."),
-	},
-	{
-		id: 'opencode',
-		label: 'OpenCode',
-		icon: Codicon.circuitBoard,
-		description: localize('agentSetup.opencode.description', "Free models included, no account needed"),
-		installDetail: localize('agentSetup.opencode.detail', "Backboard will install the OpenCode CLI. Free models work immediately — no account needed."),
-		// OpenCode ships no Node-less Windows installer (npm/scoop/choco only),
-		// so `win32` is omitted and the picker hides it on Windows.
-		install: {
-			posix: 'curl -fsSL https://opencode.ai/install | bash',
-		},
-		readyMessage: localize('agentSetup.opencode.ready', "OpenCode is ready — free models work now."),
 	},
 ];
 
