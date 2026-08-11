@@ -24,12 +24,28 @@ case "${ARCH}" in
     VSAPP_DIR="${REPO_ROOT}/VSCode-darwin-arm64"
     CLI_TARGET="bun-darwin-arm64"
     MSAL_VARIANT="macos/arm64"
+    NPM_TARGET_ARCH="arm64"
+    MACHO_TARGET_ARCH="arm64"
+    OPTIONAL_ARCH_PROBES=(
+      "node_modules/@vscode/vsce-sign-darwin-arm64/bin/vsce-sign"
+      "extensions/copilot/node_modules/@img/sharp-darwin-arm64/lib/sharp-darwin-arm64.node"
+      "extensions/copilot/node_modules/@anthropic-ai/claude-agent-sdk/vendor/audio-capture/arm64-darwin/audio-capture.node"
+      "extensions/copilot/node_modules/@anthropic-ai/claude-agent-sdk/vendor/ripgrep/arm64-darwin/rg"
+    )
     ;;
   x86_64)
     GULP_TARGET="vscode-darwin-x64"
     VSAPP_DIR="${REPO_ROOT}/VSCode-darwin-x64"
     CLI_TARGET="bun-darwin-x64"
     MSAL_VARIANT="macos/x64"
+    NPM_TARGET_ARCH="x64"
+    MACHO_TARGET_ARCH="x86_64"
+    OPTIONAL_ARCH_PROBES=(
+      "node_modules/@vscode/vsce-sign-darwin-x64/bin/vsce-sign"
+      "extensions/copilot/node_modules/@img/sharp-darwin-x64/lib/sharp-darwin-x64.node"
+      "extensions/copilot/node_modules/@anthropic-ai/claude-agent-sdk/vendor/audio-capture/x64-darwin/audio-capture.node"
+      "extensions/copilot/node_modules/@anthropic-ai/claude-agent-sdk/vendor/ripgrep/x64-darwin/rg"
+    )
     ;;
   *)
     echo "Unsupported ARCH=${ARCH}; expected aarch64 or x86_64" >&2
@@ -53,6 +69,76 @@ if [[ -s "${HOME}/.nvm/nvm.sh" ]]; then
 fi
 
 echo "Using node $(node -v)"
+
+# VS Code's npm install selects and builds native modules for npm_config_arch.
+# Reusing a workspace last installed for the other Mac architecture otherwise
+# creates an app whose Electron binary is correct but whose native modules crash
+# when loaded. Probe one required runtime module and refresh all dependency
+# directories through the repository's normal postinstall when it is stale.
+NATIVE_ARCH_PROBE="node_modules/native-keymap/build/Release/keymapping.node"
+NATIVE_ARCH_INFO="$(file -b "${NATIVE_ARCH_PROBE}" 2>/dev/null || true)"
+REFRESH_NATIVE_DEPENDENCIES=0
+if [[ ! -f "${NATIVE_ARCH_PROBE}" || "${NATIVE_ARCH_INFO}" != *"${MACHO_TARGET_ARCH}"* ]]; then
+  REFRESH_NATIVE_DEPENDENCIES=1
+fi
+for probe in "${OPTIONAL_ARCH_PROBES[@]}"; do
+  if [[ ! -f "${probe}" || "$(file -b "${probe}" 2>/dev/null || true)" != *"${MACHO_TARGET_ARCH}"* ]]; then
+    REFRESH_NATIVE_DEPENDENCIES=1
+  fi
+done
+
+if [[ "${REFRESH_NATIVE_DEPENDENCIES}" -eq 1 ]]; then
+  echo "Refreshing native dependencies for ${ARCH} (npm arch ${NPM_TARGET_ARCH})"
+  npm_config_arch="${NPM_TARGET_ARCH}" \
+  npm_config_cpu="${NPM_TARGET_ARCH}" \
+  ELECTRON_SKIP_BINARY_DOWNLOAD=1 \
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
+  GYP_DEFINES="kerberos_use_rtld=false" \
+  npm ci
+fi
+
+for probe in "${NATIVE_ARCH_PROBE}" "${OPTIONAL_ARCH_PROBES[@]}"; do
+  probe_info="$(file -b "${probe}" 2>/dev/null || true)"
+  if [[ ! -f "${probe}" || "${probe_info}" != *"${MACHO_TARGET_ARCH}"* ]]; then
+    echo "Native dependency target check failed: ${probe} (${probe_info:-missing})" >&2
+    exit 1
+  fi
+done
+
+# Cross-building also needs a compiler executable for the host. npm's CPU
+# filter correctly selects target runtime packages, but that leaves the
+# TypeScript native launcher unable to run on the build machine. Install the
+# lockfile-pinned host package alongside the target package without changing
+# either package.json or package-lock.json.
+HOST_NPM_ARCH="$(node -p 'process.arch')"
+if [[ "${HOST_NPM_ARCH}" == "arm64" ]]; then
+  HOST_MACHO_ARCH="arm64"
+else
+  HOST_MACHO_ARCH="x86_64"
+fi
+if [[ "${HOST_NPM_ARCH}" != "${NPM_TARGET_ARCH}" ]]; then
+  HOST_TSGO_PACKAGE="@typescript/native-preview-darwin-${HOST_NPM_ARCH}"
+  HOST_TSGO_DIR="node_modules/${HOST_TSGO_PACKAGE}"
+  HOST_TSGO_BINARY="${HOST_TSGO_DIR}/lib/tsgo"
+  if [[ ! -f "${HOST_TSGO_BINARY}" || "$(file -b "${HOST_TSGO_BINARY}" 2>/dev/null || true)" != *"${HOST_MACHO_ARCH}"* ]]; then
+    HOST_TSGO_VERSION="$(node -e "const lock=require('./package-lock.json'); const entry=lock.packages['node_modules/${HOST_TSGO_PACKAGE}']; if (!entry?.version) process.exit(1); process.stdout.write(entry.version)")"
+    HOST_TSGO_TEMP="$(mktemp -d /tmp/backboard-host-tsgo.XXXXXX)"
+    echo "Installing host TypeScript compiler ${HOST_TSGO_PACKAGE}@${HOST_TSGO_VERSION}"
+    npm pack "${HOST_TSGO_PACKAGE}@${HOST_TSGO_VERSION}" --pack-destination "${HOST_TSGO_TEMP}" --silent >/dev/null
+    mkdir -p "${HOST_TSGO_DIR}"
+    tar -xzf "$(find "${HOST_TSGO_TEMP}" -type f -name '*.tgz' -print -quit)" -C "${HOST_TSGO_DIR}" --strip-components=1
+    find "${HOST_TSGO_TEMP}" -depth -delete
+  fi
+  if [[ ! -f "${HOST_TSGO_BINARY}" || "$(file -b "${HOST_TSGO_BINARY}" 2>/dev/null || true)" != *"${HOST_MACHO_ARCH}"* ]]; then
+    echo "Host TypeScript compiler check failed: ${HOST_TSGO_BINARY}" >&2
+    exit 1
+  fi
+fi
+
+# Extension bundlers such as microsoft-authentication select their vendored
+# native runtime from VSCODE_ARCH rather than from the gulp target name.
+export VSCODE_ARCH="${NPM_TARGET_ARCH}"
+
 echo "Preparing the same dev shell used by scripts/code.sh"
 node build/lib/preLaunch.ts
 
@@ -61,6 +147,9 @@ npm run compile-client
 
 echo "Compiling Backboard extension"
 npm --prefix extensions/backboard run compile
+
+echo "Testing Backboard updater release safeguards"
+npm --prefix extensions/backboard run test-updater
 
 echo "Compiling Backboard CLI runtime"
 # Without an explicit target bun compiles for the host, which puts an arm64 CLI
@@ -111,8 +200,19 @@ SKIP_SIGNING="${SKIP_SIGNING:-0}" \
 VSAPP="${VSAPP}" \
 "${REPO_ROOT}/scripts/package_vscode_update_macos.sh"
 
-echo "Built DMG: ${REPO_ROOT}/vscode-release/${VERSION}/${ARCH}/Backboard-Studio-${ARCH}.dmg"
+DMG_PATH="${REPO_ROOT}/vscode-release/${VERSION}/${ARCH}/Backboard-Studio-${ARCH}.dmg"
+echo "Built DMG: ${DMG_PATH}"
+
+if [[ "${SKIP_SIGNING:-0}" == "1" || "${SKIP_NOTARIZATION:-0}" == "1" ]]; then
+  echo "Skipping release-readiness validation because signing or notarization was disabled."
+else
+  "${REPO_ROOT}/scripts/validate_macos_release.sh" \
+    --version "${VERSION}" \
+    --arch "${ARCH}" \
+    --dmg "${DMG_PATH}"
+fi
+
 echo
 echo "Release size report:"
-du -sh "${VSAPP}" "${REPO_ROOT}/vscode-release/${VERSION}/${ARCH}/dmg" "${REPO_ROOT}/vscode-release/${VERSION}/${ARCH}/Backboard-Studio-${ARCH}.dmg"
-echo "DMG bytes: $(stat -f%z "${REPO_ROOT}/vscode-release/${VERSION}/${ARCH}/Backboard-Studio-${ARCH}.dmg")"
+du -sh "${VSAPP}" "${REPO_ROOT}/vscode-release/${VERSION}/${ARCH}/dmg" "${DMG_PATH}"
+echo "DMG bytes: $(stat -f%z "${DMG_PATH}")"

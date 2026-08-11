@@ -11,6 +11,7 @@ import * as http from 'http';
 import * as https from 'https';
 import * as os from 'os';
 import * as path from 'path';
+import { macUpdateInstallerScript } from './updatesInstaller';
 
 interface UpdateManifest {
 	readonly version: string;
@@ -198,7 +199,11 @@ async function installBackboardUpdate(manifest: UpdateManifest): Promise<void> {
 			await downloadBackboardUpdate(manifest.url, dmgPath, progress);
 		});
 		await verifyBackboardUpdate(dmgPath, manifest);
-		await stageMacBackboardInstaller(dmgPath, appPath, manifest.version);
+		await vscode.window.withProgress({
+			location: vscode.ProgressLocation.Notification,
+			title: `Preparing Backboard Studio ${manifest.version}`,
+			cancellable: false
+		}, async () => stageMacBackboardInstaller(dmgPath, appPath, manifest.version));
 		await vscode.window.showInformationMessage(`Backboard Studio ${manifest.version} is verified. Restarting to install.`);
 		await vscode.commands.executeCommand('workbench.action.quit');
 	} catch (error) {
@@ -311,143 +316,75 @@ function sha256File(filePath: string): Promise<string> {
 
 async function stageMacBackboardInstaller(dmgPath: string, appPath: string, version: string): Promise<void> {
 	const installerPath = path.join(path.dirname(dmgPath), 'install-backboard-update.sh');
+	const statusPath = path.join(path.dirname(dmgPath), 'install-backboard-update.status');
 	const logPath = path.join(os.tmpdir(), 'backboard-studio-update.log');
 	const appName = path.basename(appPath);
 	const bundleIdentifier = appName === 'Backboard Studio Sandbox.app' ? 'io.backboard.studio.sandbox' : 'io.backboard.studio';
 	await fs.promises.writeFile(installerPath, macUpdateInstallerScript(), { mode: 0o700 });
-	const child = cp.spawn('/bin/zsh', [installerPath, dmgPath, appPath, String(process.pid), version, logPath, appName, bundleIdentifier], {
+	const child = cp.spawn('/bin/zsh', [installerPath, dmgPath, appPath, String(process.pid), version, logPath, appName, bundleIdentifier, statusPath], {
 		detached: true,
 		stdio: 'ignore'
 	});
+	await waitForMacInstallerReady(child, statusPath, logPath);
 	child.unref();
 }
 
-function macUpdateInstallerScript(): string {
-	return `#!/bin/zsh
-set -euo pipefail
-
-DMG_PATH="$1"
-APP_PATH="$2"
-CURRENT_PID="$3"
-VERSION="$4"
-LOG_PATH="$5"
-APP_NAME="\${6:-Backboard Studio.app}"
-BUNDLE_IDENTIFIER="\${7:-io.backboard.studio}"
-MOUNT_POINT="$(/usr/bin/mktemp -d /tmp/backboard-studio-update-mount.XXXXXX)"
-
-exec >>"$LOG_PATH" 2>&1
-echo "[$(/bin/date -u '+%Y-%m-%dT%H:%M:%SZ')] Installing Backboard Studio $VERSION"
-
-cleanup() {
-  /usr/bin/hdiutil detach "$MOUNT_POINT" -quiet >/dev/null 2>&1 || true
-}
-trap cleanup EXIT
-
-/usr/bin/hdiutil attach "$DMG_PATH" -mountpoint "$MOUNT_POINT" -nobrowse -quiet
-SOURCE_APP="$MOUNT_POINT/$APP_NAME"
-if [[ ! -d "$SOURCE_APP" ]]; then
-  echo "Mounted DMG did not contain $APP_NAME"
-  exit 1
-fi
-
-/usr/bin/osascript -e "tell application id \\"$BUNDLE_IDENTIFIER\\" to quit" >/dev/null 2>&1 || true
-for _ in {1..120}; do
-  if ! /bin/ps -p "$CURRENT_PID" >/dev/null 2>&1; then
-    break
-  fi
-  /bin/sleep 1
-done
-/usr/bin/pkill -f "$APP_PATH/Contents/" >/dev/null 2>&1 || true
-
-replace_app() {
-  /bin/rm -rf "$APP_PATH"
-  /usr/bin/ditto --norsrc --noextattr --noacl --noqtn "$SOURCE_APP" "$APP_PATH"
-  /bin/chmod -R u+rwX "$APP_PATH" >/dev/null 2>&1 || true
-  /usr/bin/xattr -cr "$APP_PATH" >/dev/null 2>&1 || true
-}
-
-if [[ -w "$(dirname "$APP_PATH")" || -w "$APP_PATH" ]]; then
-  replace_app
-else
-  HELPER="$(/usr/bin/mktemp /tmp/backboard-studio-update-elevated.XXXXXX.sh)"
-  shell_quote() {
-    /usr/bin/python3 -c 'import shlex, sys; print(shlex.quote(sys.argv[1]))' "$1"
-  }
-  {
-    echo '#!/bin/zsh'
-    echo 'set -euo pipefail'
-    printf 'SOURCE_APP=%s\\n' "$(shell_quote "$SOURCE_APP")"
-    printf 'APP_PATH=%s\\n' "$(shell_quote "$APP_PATH")"
-    echo '/bin/rm -rf "$APP_PATH"'
-    echo '/usr/bin/ditto --norsrc --noextattr --noacl --noqtn "$SOURCE_APP" "$APP_PATH"'
-    echo '/bin/chmod -R a+rX "$APP_PATH" >/dev/null 2>&1 || true'
-    echo '/usr/bin/xattr -cr "$APP_PATH" >/dev/null 2>&1 || true'
-  } > "$HELPER"
-  /bin/chmod 700 "$HELPER"
-  /usr/bin/osascript -e "do shell script \\"/bin/zsh $HELPER\\" with administrator privileges"
-  /bin/rm -f "$HELPER"
-fi
-
-cleanup
-
-# The bundle was just deleted and recreated, so LaunchServices can still hold a
-# record describing the copy that is gone. Re-register first, or \`open\` may
-# resolve the stale entry and refuse to launch.
-LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
-if [[ -x "$LSREGISTER" ]]; then
-  "$LSREGISTER" -f "$APP_PATH" >/dev/null 2>&1 || true
-fi
-
-# Reopening is the step users actually notice, so it retries rather than trusting
-# a single \`open\`. Under \`set -e\` one transient failure would abort the script
-# right here, leaving the update installed but the app never coming back.
-RELAUNCHED=0
-for attempt in {1..10}; do
-  if /usr/bin/open "$APP_PATH" >/dev/null 2>&1; then
-    RELAUNCHED=1
-    echo "Relaunched via open (attempt $attempt)"
-    break
-  fi
-  /bin/sleep 1
-done
-
-if [[ "$RELAUNCHED" == "0" ]]; then
-  # Fall back to running the binary directly, which does not depend on
-  # LaunchServices agreeing that the bundle is openable.
-  APP_EXECUTABLE="$(/usr/bin/defaults read "$APP_PATH/Contents/Info" CFBundleExecutable 2>/dev/null || true)"
-  if [[ -n "$APP_EXECUTABLE" && -x "$APP_PATH/Contents/MacOS/$APP_EXECUTABLE" ]]; then
-    "$APP_PATH/Contents/MacOS/$APP_EXECUTABLE" >/dev/null 2>&1 &
-    RELAUNCHED=1
-    echo "Relaunched via direct exec"
-  fi
-fi
-
-if [[ "$RELAUNCHED" == "0" ]]; then
-  echo "WARNING: could not relaunch $APP_PATH"
-fi
-
-# \`open\` launched from this detached, non-interactive shell does not reliably
-# activate/foreground the new process (no active Terminal/Finder context to hand
-# focus from), so the app can start invisibly in the background. Explicitly
-# activate it, retrying briefly since System Events may not know about the
-# process in the instant right after \`open\` returns.
-for _ in {1..20}; do
-  if /usr/bin/osascript -e "tell application id \\"$BUNDLE_IDENTIFIER\\" to activate" >/dev/null 2>&1; then
-    break
-  fi
-  /bin/sleep 0.5
-done
-
-# Confirm the app is genuinely up. Without this a silent failure is invisible in
-# the log, which reads as a successful install either way.
-if /usr/bin/pgrep -f "$APP_PATH/Contents/MacOS/" >/dev/null 2>&1; then
-  echo "Confirmed running: $APP_PATH"
-else
-  echo "WARNING: $APP_PATH is not running after relaunch"
-fi
-
-echo "[$(/bin/date -u '+%Y-%m-%dT%H:%M:%SZ')] Installed Backboard Studio $VERSION"
-`;
+function waitForMacInstallerReady(child: cp.ChildProcess, statusPath: string, logPath: string): Promise<void> {
+	return new Promise((resolve, reject) => {
+		let settled = false;
+		const finish = (error?: Error): void => {
+			if (settled) {
+				return;
+			}
+			settled = true;
+			clearInterval(statusTimer);
+			clearTimeout(timeoutTimer);
+			child.off('error', onError);
+			child.off('exit', onExit);
+			if (error) {
+				reject(error);
+			} else {
+				resolve();
+			}
+		};
+		const installerFailure = (): Error => {
+			let detail = '';
+			try {
+				const logLines = fs.readFileSync(logPath, 'utf8').trim().split(/\\r?\\n/);
+				detail = logLines.at(-1) ?? '';
+			} catch {
+				// The installer may fail before opening its log.
+			}
+			return new Error(detail ? `Update preparation failed: ${detail}` : 'Update preparation failed.');
+		};
+		const checkStatus = (): void => {
+			try {
+				const status = fs.readFileSync(statusPath, 'utf8').trim();
+				if (status === 'ready') {
+					finish();
+				} else if (status === 'failed') {
+					finish(installerFailure());
+				}
+			} catch {
+				// The detached installer creates the status file after its preflight checks.
+			}
+		};
+		const onError = (error: Error): void => finish(error);
+		const onExit = (code: number | null, signal: NodeJS.Signals | null): void => {
+			checkStatus();
+			if (!settled) {
+				finish(new Error(`Update installer exited before preparation completed (code ${code ?? 'none'}, signal ${signal ?? 'none'}).`));
+			}
+		};
+		const statusTimer = setInterval(checkStatus, 250);
+		const timeoutTimer = setTimeout(() => {
+			child.kill('SIGTERM');
+			finish(new Error('Update preparation timed out.'));
+		}, 15 * 60 * 1000);
+		child.once('error', onError);
+		child.once('exit', onExit);
+		checkStatus();
+	});
 }
 
 function getBackboardUpdateManifestUrl(): string | undefined {

@@ -1118,8 +1118,21 @@ export function toolCallStateToInvocation(tc: ToolCallState, subAgentInvocationI
 		);
 	}
 
-	const invocation = new ChatToolInvocation(undefined, toolData, tc.toolCallId, subAgentInvocationId, undefined);
-	invocation.invocationMessage = stringOrMarkdownToString(tc.invocationMessage, connectionAuthority) ?? localize('ahp.running', "Running {0}...", tc.displayName);
+	const invocation = tc.status === ToolCallStatus.Streaming
+		? ChatToolInvocation.createStreaming({
+			toolCallId: tc.toolCallId,
+			toolId: tc.toolName,
+			toolData,
+			subagentInvocationId: subAgentInvocationId,
+		})
+		: new ChatToolInvocation(undefined, toolData, tc.toolCallId, subAgentInvocationId, undefined);
+	invocation.invocationMessage = stringOrMarkdownToString(tc.invocationMessage, connectionAuthority)
+		?? (tc.status === ToolCallStatus.Streaming
+			? localize('ahp.generatingToolInput', "Generating {0} input…", tc.displayName)
+			: localize('ahp.running', "Running {0}...", tc.displayName));
+	if (tc.status === ToolCallStatus.Streaming && tc.partialInput !== undefined) {
+		invocation.updatePartialInput(tc.partialInput);
+	}
 
 	if (isTerminalToolCall(tc)) {
 		// Set terminal toolSpecificData eagerly so the renderer shows a

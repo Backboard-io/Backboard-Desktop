@@ -496,7 +496,38 @@ suite('ChatThinkingContentPart', () => {
 			appendTool(part, createRunningToolInvocation('read_file', 'Reading package.json', 'call-1'));
 
 			const spinnerLabel = part.domNode.querySelector('.chat-thinking-spinner-label');
-			assert.strictEqual(spinnerLabel?.textContent, 'Reading package.json', 'Spinner should show the running tool label');
+			assert.ok(/^Reading package\.json · \d+s$/.test(spinnerLabel?.textContent ?? ''), 'Spinner should show the running tool label and elapsed time');
+		});
+
+		test('clean chat always exposes a stable reasoning or live tool status', () => {
+			const context = createMockRenderContext(false);
+			context.container.classList.add('backboard-clean-chat');
+			const part = store.add(instantiationService.createInstance(
+				ChatThinkingContentPart,
+				createThinkingPart('plain reasoning without a bold title'),
+				context,
+				mockMarkdownRenderer,
+				false
+			));
+			mainWindow.document.body.appendChild(part.domNode);
+			disposables.add(toDisposable(() => part.domNode.remove()));
+
+			assert.ok(part.domNode.querySelector('.chat-thinking-spinner-item .codicon-loading.codicon-modifier-spin'), 'Clean chat should render an animated loading icon while reasoning');
+			assert.ok(/^Reasoning · \d+s$/.test(part.domNode.querySelector('.chat-thinking-spinner-label')?.textContent ?? ''), 'Clean chat should use a stable reasoning fallback with elapsed time');
+
+			appendTool(part, createRunningToolInvocation('write', 'Generating Write input…', 'call-write'));
+			const liveGroupHeader = part.domNode.querySelector('.chat-thinking-group-live > .chat-thinking-group-header');
+			const liveGroupLabel = liveGroupHeader?.querySelector('.chat-thinking-group-label')?.textContent ?? '';
+			assert.ok(/^Generating Write input… · \d+s$/.test(liveGroupLabel), 'Live tool status should keep ticking while Backboard generates its arguments');
+			assert.deepStrictEqual({
+				role: liveGroupHeader?.getAttribute('role'),
+				live: liveGroupHeader?.getAttribute('aria-live'),
+				loading: !!liveGroupHeader?.querySelector('.codicon-loading.codicon-modifier-spin'),
+			}, {
+				role: 'status',
+				live: 'polite',
+				loading: true,
+			});
 		});
 
 		test('completed pill shows elapsed time and step count meta', () => {
@@ -529,7 +560,7 @@ suite('ChatThinkingContentPart', () => {
 			}, `Cancelled pill should read "Stopped after Ns" with circle-slash (was "${label?.textContent}")`);
 		});
 
-		test('grouped activity pills: consecutive reads summarize as "Read N files"', () => {
+		test('grouped activity pills: consecutive reads summarize as "Explored N files"', () => {
 			const part = createLivePart('**Analyzing**\nreasoning body');
 			appendTool(part, createCompletedToolInvocation('read_file', 'Read a.ts', 'call-1'));
 			appendTool(part, createCompletedToolInvocation('read_file', 'Read b.ts', 'call-2'));
@@ -545,13 +576,13 @@ suite('ChatThinkingContentPart', () => {
 				rowCount: group?.querySelectorAll('.chat-thinking-tool-wrapper').length,
 			}, {
 				groupCount: 1,
-				label: 'Read 3 files',
+				label: 'Explored 3 files',
 				collapsed: true,
 				rowCount: 3,
 			});
 		});
 
-		test('grouped activity pills: mixed read + search summarizes as "Read a file and searched code"', () => {
+		test('grouped activity pills: mixed read + search summarizes as exploration counts', () => {
 			const part = createLivePart('**Analyzing**\nreasoning body');
 			appendTool(part, createCompletedToolInvocation('read_file', 'Read a.ts', 'call-1'));
 			appendTool(part, createCompletedToolInvocation('search_code', 'Searched for z-index', 'call-2'));
@@ -559,7 +590,7 @@ suite('ChatThinkingContentPart', () => {
 			part.finalizeTitleIfDefault();
 
 			const label = part.domNode.querySelector('.chat-thinking-group-label');
-			assert.strictEqual(label?.textContent, 'Read a file and searched code');
+			assert.strictEqual(label?.textContent, 'Explored 1 file, 1 search');
 		});
 
 		test('grouped activity pills: a single item keeps its own label and category changes split groups', () => {

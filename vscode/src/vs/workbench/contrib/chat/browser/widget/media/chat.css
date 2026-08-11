@@ -5553,3 +5553,539 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	position: relative;
 	box-sizing: border-box;
 }
+
+/* ---- Backboard clean chat flow -------------------------------------------
+ *
+ * A shared transcript treatment for the Simple session, Advanced pane, and
+ * editor-side chat. The host class deliberately owns the presentation so the
+ * same ChatWidget state renders consistently without affecting inline chat,
+ * terminal chat, or extension-provided chat surfaces.
+ *
+ * The visual hierarchy is intentionally selective: prompts, inspectable
+ * artifacts, pending confirmations, and the composer earn a surface. Ordinary
+ * reasoning, reads, searches, and progress remain a quiet text timeline.
+ */
+
+.monaco-workbench .backboard-clean-chat {
+	--bb-clean-chat-column: 780px;
+	--bb-clean-chat-gutter: clamp(14px, 3vw, 28px);
+	--bb-clean-chat-surface: color-mix(in srgb, var(--vscode-foreground) 5%, var(--vscode-editor-background));
+	--bb-clean-chat-surface-hover: color-mix(in srgb, var(--vscode-foreground) 8%, var(--vscode-editor-background));
+	--bb-clean-chat-border: color-mix(in srgb, var(--vscode-foreground) 15%, transparent);
+	--bb-clean-chat-border-strong: color-mix(in srgb, var(--vscode-foreground) 23%, transparent);
+	--bb-clean-chat-muted: color-mix(in srgb, var(--vscode-descriptionForeground) 88%, var(--vscode-foreground));
+	--bb-clean-chat-radius: 10px;
+}
+
+/* One readable column in wide surfaces; narrow panels keep the same gutters. */
+.monaco-workbench .backboard-clean-chat .interactive-session .interactive-item-container,
+.monaco-workbench .backboard-clean-chat .interactive-session > .chat-suggest-next-widget {
+	box-sizing: border-box;
+	width: min(100%, var(--bb-clean-chat-column));
+	max-width: var(--bb-clean-chat-column);
+	margin-inline: auto;
+	padding-inline: var(--bb-clean-chat-gutter);
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-session .interactive-item-container {
+	padding-top: 0;
+	padding-bottom: 8px;
+	background: transparent;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-session .interactive-item-container:hover,
+.monaco-workbench .backboard-clean-chat .interactive-session .interactive-item-container.focused,
+.monaco-workbench .backboard-clean-chat .interactive-session .interactive-item-container.selected {
+	background: transparent;
+}
+
+/* The request is the only conversational bubble. It spans the reading column
+ * instead of floating as a second, narrower card hierarchy. */
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-request {
+	align-items: stretch;
+	padding-top: 8px;
+	padding-bottom: 12px;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-request .value {
+	align-items: stretch !important;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-request .value > .rendered-markdown {
+	box-sizing: border-box;
+	width: 100%;
+	max-width: 100%;
+	margin: 0;
+	padding: 9px 12px;
+	border: 1px solid var(--bb-clean-chat-border);
+	border-radius: var(--bb-clean-chat-radius);
+	background: var(--bb-clean-chat-surface) !important;
+	color: var(--vscode-foreground);
+	font-size: 13px;
+	font-weight: normal;
+	line-height: 1.45;
+	text-align: left;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-request .value > .rendered-markdown.clickable:hover {
+	border-color: var(--bb-clean-chat-border-strong);
+	background: var(--bb-clean-chat-surface-hover) !important;
+}
+
+/* Authorship is established by order and shape. Provider headers and always-on
+ * response controls repeat information without helping the scan. */
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-response > .header,
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-response .chat-footer-details {
+	display: none;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-response .chat-footer-toolbar .monaco-action-bar {
+	opacity: 0;
+	visibility: hidden;
+	transition: opacity 120ms ease;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-response:hover .chat-footer-toolbar .monaco-action-bar,
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-response:focus-within .chat-footer-toolbar .monaco-action-bar {
+	opacity: 1;
+	visibility: visible;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-item-container .value,
+.monaco-workbench .backboard-clean-chat .interactive-item-container .value .rendered-markdown {
+	color: var(--vscode-foreground);
+	font-size: 13px;
+	line-height: 1.5;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-item-container .value > .rendered-markdown p {
+	margin-bottom: 10px;
+}
+
+/* Completed work is a disclosure row, not another card. Consecutive passive
+ * tools are already projected into activity groups by ChatThinkingContentPart;
+ * this presentation makes the projection visible as a calm text outline. */
+.monaco-workbench .backboard-clean-chat .chat-thinking-box {
+	margin: 2px 0 8px;
+	padding: 0;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+	color: var(--bb-clean-chat-muted);
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button,
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-group-header {
+	min-height: 24px;
+	padding: 2px 0;
+	border: 0;
+	border-radius: 5px;
+	background: transparent;
+	color: var(--bb-clean-chat-muted);
+	font-size: 13px;
+	font-weight: normal;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button:hover,
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-group-header:hover {
+	background: transparent;
+	color: var(--vscode-foreground);
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box:not(.chat-used-context-collapsed)::after,
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-tool-wrapper::before,
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-item.markdown-content::before,
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-spinner-item::before {
+	display: none;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-used-context-list.chat-thinking-collapsible {
+	margin-left: 0;
+	padding-left: 0;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-icon:not(.codicon-error):not(.codicon-warning):not(.codicon-loading) {
+	display: none;
+}
+
+/* A turn never becomes visually inert: reasoning gets a compact animated row,
+ * and a running tool replaces it with its more specific live status below. */
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-spinner-item {
+	display: flex;
+	min-height: 24px;
+	align-items: center;
+	gap: 7px;
+	padding: 2px 0;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-spinner-item > .chat-thinking-icon {
+	display: inline-flex;
+	flex: 0 0 auto;
+	font-size: 13px;
+}
+
+/* Backboard phase notifications can be the only event on screen while a
+ * provider is waiting to produce its first token. Keep their elapsed counter
+ * outside the shimmer so the row visibly ticks instead of looking frozen. */
+.monaco-workbench .backboard-clean-chat .progress-step.chat-progress-with-elapsed {
+	display: flex;
+	align-items: baseline;
+	gap: 5px;
+	font-variant-numeric: tabular-nums;
+}
+
+.monaco-workbench .backboard-clean-chat .progress-step.chat-progress-with-elapsed > p {
+	margin: 0;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-progress-elapsed {
+	flex: 0 0 auto;
+	color: var(--bb-clean-chat-muted);
+	font-size: var(--vscode-chat-font-size-body-s);
+	-webkit-text-fill-color: currentColor;
+}
+
+/* During a live turn, keep only the newest reasoning passage in view. Earlier
+ * passages remain available once the disclosure is completed and reopened,
+ * but do not stack as near-duplicate paragraphs while the model is working. */
+.monaco-workbench .backboard-clean-chat .chat-thinking-collapsible.chat-thinking-streaming > .chat-thinking-item.markdown-content:has(~ .chat-thinking-item.markdown-content) {
+	display: none;
+}
+
+/* A running tool owns the live status row. Keep its card body out of the way,
+ * but show the streamed label (for example "Writing cats.md") and throbber.
+ * The generic reasoning row returns as soon as the group completes. */
+.monaco-workbench .backboard-clean-chat .chat-thinking-collapsible.chat-thinking-streaming > .chat-thinking-group-live {
+	display: block;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-group-live > .chat-thinking-group-header {
+	display: flex;
+	cursor: default;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-group-live > .chat-thinking-group-body,
+.monaco-workbench .backboard-clean-chat .chat-thinking-group-live > .chat-thinking-group-header > .chat-thinking-group-chevron {
+	display: none;
+}
+
+/* While the model is assembling a tool call, expose the actual argument
+ * stream as a compact follow-along tape. Executing tool cards stay hidden. */
+.monaco-workbench .backboard-clean-chat .chat-thinking-group-live > .chat-thinking-group-body:has(.chat-tool-streaming-part.has-streaming-input) {
+	display: block;
+	padding: 0;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-group-live .chat-tool-streaming-message {
+	display: none;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-group-live .chat-tool-streaming-input {
+	box-sizing: border-box;
+	width: calc(100% - 20px);
+	max-height: 132px;
+	margin: 1px 0 7px 20px;
+	padding: 5px 9px;
+	overflow: auto;
+	border-left: 1px solid var(--bb-clean-chat-border-strong);
+	background: color-mix(in srgb, var(--vscode-foreground) 2.5%, transparent);
+	color: var(--bb-clean-chat-muted);
+	font-family: var(--monaco-monospace-font);
+	font-size: 11px;
+	line-height: 1.45;
+	outline: none;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-group-live .chat-tool-streaming-input:focus {
+	border-left-color: var(--vscode-focusBorder);
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-group-live .chat-tool-streaming-input code::after {
+	display: inline-block;
+	width: 1px;
+	height: 1em;
+	margin-left: 2px;
+	background: currentColor;
+	content: '';
+	vertical-align: -0.15em;
+	animation: backboard-streaming-caret 800ms steps(1, end) infinite;
+}
+
+@keyframes backboard-streaming-caret {
+	50% {
+		opacity: 0;
+	}
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-collapsible.chat-thinking-streaming:has(> .chat-thinking-group-live) > .chat-thinking-spinner-item {
+	display: none;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-group-body {
+	padding-left: 14px;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-group-chevron {
+	font-size: 11px;
+	opacity: 0.7;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-item.markdown-content,
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-spinner-item,
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-tool-wrapper,
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-tool-wrapper .chat-markdown-part.rendered-markdown,
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-tool-invocation-part {
+	padding-left: 0;
+	border: 0;
+	background: transparent;
+	box-shadow: none;
+	color: var(--bb-clean-chat-muted);
+	font-size: 13px;
+	line-height: 1.55;
+}
+
+/* Artifacts and decisions retain a surface because they are inspectable or
+ * actionable. Every variant uses the same quiet border language. */
+.monaco-workbench .backboard-clean-chat .chat-codeblock-pill-container.chat-external-edit-card,
+.monaco-workbench .backboard-clean-chat .chat-web-preview-part,
+.monaco-workbench .backboard-clean-chat .interactive-item-container > .value > .chat-confirmation-widget,
+.monaco-workbench .backboard-clean-chat .interactive-item-container > .value > .chat-confirmation-widget-container > .chat-confirmation-widget,
+.monaco-workbench .backboard-clean-chat .chat-confirmation-widget2,
+.monaco-workbench .backboard-clean-chat .chat-question-carousel-content,
+.monaco-workbench .backboard-clean-chat .chat-tool-confirmation-carousel {
+	border: 1px solid var(--bb-clean-chat-border);
+	border-radius: var(--bb-clean-chat-radius);
+	background: var(--bb-clean-chat-surface);
+	box-shadow: none;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-codeblock-pill-container.chat-external-edit-card {
+	margin: 6px 0 10px;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-result-code-block,
+.monaco-workbench .backboard-clean-chat .chat-external-edit-diff-body {
+	border-color: var(--bb-clean-chat-border);
+	border-radius: 8px;
+	box-shadow: none;
+}
+
+/* Expanded activity groups are outlines, not a deck of nested cards. Tool
+ * rows stay flat; only the details of the one row a user opens earn a surface. */
+.monaco-workbench .backboard-clean-chat .chat-thinking-group-body .chat-thinking-tool-wrapper,
+.monaco-workbench .backboard-clean-chat .chat-thinking-group-body .chat-tool-invocation-part,
+.monaco-workbench .backboard-clean-chat .chat-thinking-group-body .chat-confirmation-widget-container,
+.monaco-workbench .backboard-clean-chat .chat-thinking-group-body .chat-confirmation-widget {
+	box-sizing: border-box;
+	width: 100%;
+	min-width: 0;
+	margin: 0;
+	padding: 0;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-group-body .chat-confirmation-widget-title.monaco-button {
+	box-sizing: border-box;
+	width: 100%;
+	min-height: 25px;
+	padding: 3px 2px !important;
+	border: 0;
+	border-radius: 5px;
+	background: transparent;
+	color: var(--bb-clean-chat-muted);
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-group-body .chat-confirmation-widget-title.monaco-button:hover {
+	background: var(--bb-clean-chat-surface-hover);
+	color: var(--vscode-foreground);
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-group-body .chat-confirmation-widget-title .chat-query-title-part {
+	display: flex;
+	min-width: 0;
+	align-items: baseline;
+	gap: 6px;
+	overflow: hidden;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-group-body .chat-confirmation-widget-title .chat-query-title-part > .rendered-markdown {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-group-body .chat-confirmation-widget-title small {
+	min-width: 0;
+	overflow: hidden;
+	color: var(--bb-clean-chat-muted);
+	font-size: 12px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-group-body .chat-confirmation-widget-title small::before {
+	content: none;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-group-body .chat-confirmation-widget-message {
+	box-sizing: border-box;
+	width: calc(100% - 12px);
+	min-width: 0;
+	margin: 4px 0 8px 12px !important;
+	padding: 7px 9px !important;
+	overflow: hidden;
+	border: 1px solid var(--bb-clean-chat-border) !important;
+	border-radius: 8px !important;
+	background: var(--bb-clean-chat-surface);
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-group-body .chat-confirmation-widget-message h3 {
+	margin: 4px 0;
+	color: var(--bb-clean-chat-muted);
+	font-size: 11px;
+	font-weight: 500;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-group-body .chat-confirmation-widget-message .interactive-result-code-block {
+	max-width: 100%;
+	margin: 0 0 6px;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+}
+
+/* Review state and composer form one dock. The review strip is compact and the
+ * composer remains the single dominant control at the bottom of the flow. */
+.monaco-workbench .backboard-clean-chat .interactive-session .interactive-input-part {
+	box-sizing: border-box;
+	width: min(100%, var(--bb-clean-chat-column));
+	max-width: var(--bb-clean-chat-column);
+	margin-inline: auto;
+	padding: 0 var(--bb-clean-chat-gutter) 10px;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-session .chat-editing-session {
+	margin-bottom: -1px;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-session .chat-editing-session .chat-editing-session-container {
+	padding: 5px 9px;
+	border: 1px solid var(--bb-clean-chat-border);
+	border-bottom: 0;
+	border-radius: var(--bb-clean-chat-radius) var(--bb-clean-chat-radius) 0 0;
+	background: var(--bb-clean-chat-surface);
+	box-shadow: none;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-session .chat-editing-session .chat-editing-session-overview {
+	min-height: 26px;
+	padding-right: 2px;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-session .chat-editing-session .monaco-list-row {
+	background: transparent;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-session .chat-input-container {
+	min-height: 72px;
+	padding: 7px 10px 6px;
+	gap: 2px;
+	border: 1px solid var(--bb-clean-chat-border);
+	border-radius: var(--bb-clean-chat-radius);
+	background: var(--bb-clean-chat-surface);
+	box-shadow: none;
+}
+
+/* The previous empty-state treatment inflated the same composer to a 172px
+ * hero card. Cursor keeps the prompt ready without turning it into the page's
+ * main visual object, so clean hosts use the compact dock before and after the
+ * first message. */
+.monaco-workbench .backboard-clean-chat.backboard-composer .interactive-session.chat-composer-empty .interactive-input-part .chat-input-container {
+	min-height: 82px;
+	padding: 9px 11px 7px;
+	gap: 2px;
+	border-radius: var(--bb-clean-chat-radius);
+}
+
+.monaco-workbench .backboard-clean-chat.backboard-composer .interactive-session.chat-composer-empty .interactive-input-part {
+	width: min(100%, var(--bb-clean-chat-column));
+	padding-inline: var(--bb-clean-chat-gutter);
+}
+
+/* The editor side panel has an older, highly-specific 152px draft rule in its
+ * Cursor parity stylesheet. Keep the shared clean-flow decision authoritative
+ * there as well. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-clean-chat.backboard-composer .interactive-session.chat-composer-empty .interactive-input-part .chat-input-container {
+	min-height: 82px;
+	padding: 9px 11px 7px;
+	gap: 2px;
+	border-radius: var(--bb-clean-chat-radius);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-clean-chat.backboard-composer .interactive-session.chat-composer-empty .interactive-input-part .interactive-input-editor {
+	min-height: 18px;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-session .chat-input-container.focused,
+.monaco-workbench .backboard-clean-chat .interactive-session .chat-input-container:focus-within {
+	border-color: color-mix(in srgb, var(--vscode-focusBorder) 68%, var(--bb-clean-chat-border));
+	box-shadow: none;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-input-part:has(.chat-editing-session > .chat-editing-session-container) .chat-input-container {
+	border-top-color: transparent;
+	border-top-left-radius: 0;
+	border-top-right-radius: 0;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-session .chat-input-toolbars {
+	margin-top: 4px;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-session .chat-input-toolbar .monaco-action-bar .action-item .action-label:not(.model-picker-split),
+.monaco-workbench .backboard-clean-chat .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item .action-label.codicon {
+	min-width: 24px;
+	height: 24px;
+	border: 0;
+	border-radius: 6px !important;
+	background: transparent;
+	box-shadow: none;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-session .chat-input-toolbar .monaco-action-bar .action-item:not(.disabled) .action-label:not(.model-picker-split):hover,
+.monaco-workbench .backboard-clean-chat .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) .action-label.codicon:hover {
+	background: var(--bb-clean-chat-surface-hover);
+	transform: none;
+	box-shadow: none;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-arrow-up,
+.monaco-workbench .backboard-clean-chat .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-newline,
+.monaco-workbench .backboard-clean-chat .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-stop-circle {
+	width: 26px;
+	height: 26px;
+	min-width: 26px;
+	border-radius: 999px !important;
+	box-shadow: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-response .chat-footer-toolbar .monaco-action-bar {
+		transition: none;
+	}
+
+	.monaco-workbench .backboard-clean-chat .chat-thinking-icon.codicon-modifier-spin {
+		animation: none;
+	}
+
+	.monaco-workbench .backboard-clean-chat .chat-thinking-group-live .chat-tool-streaming-input code::after {
+		animation: none;
+	}
+}

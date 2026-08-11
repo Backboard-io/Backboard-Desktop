@@ -341,7 +341,10 @@
 	align-items: stretch;
 	justify-content: stretch;
 	max-width: none;
-	padding: 48px 32px;
+	padding: 40px 32px 54px;
+	background:
+		radial-gradient(circle at 50% 37%, rgba(255, 255, 255, 0.028), transparent 24%),
+		linear-gradient(90deg, #151618 0%, #17181a 31%, #18191b 50%, #17181a 69%, #151618 100%);
 }
 
 .onboarding-a-card-welcome .onboarding-a-step-content,
@@ -363,16 +366,35 @@
 	text-align: initial;
 }
 
+.onboarding-backboard-welcome {
+	isolation: isolate;
+	color: #f4f4f3;
+	overflow: hidden;
+}
+
+.onboarding-backboard-welcome::before {
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	z-index: -1;
+	width: min(660px, 72vw);
+	height: min(660px, 72vw);
+	content: '';
+	background: radial-gradient(circle, rgba(115, 130, 148, 0.08) 0%, rgba(31, 34, 38, 0.035) 34%, transparent 69%);
+	border-radius: 50%;
+	transform: translate(-50%, -53%);
+}
+
 .onboarding-backboard-welcome-content {
 	display: flex;
 	flex-direction: column;
 	align-items: center;
 	justify-content: center;
-	gap: 22px;
+	gap: 16px;
 	width: 100%;
-	max-width: 464px;
+	max-width: 560px;
 	min-height: 0;
-	padding: 0;
+	padding: 16px 0 0;
 	box-sizing: border-box;
 	text-align: center;
 }
@@ -381,16 +403,68 @@
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	width: 88px;
-	height: 88px;
+	width: clamp(116px, 11vw, 158px);
+	height: clamp(116px, 11vw, 158px);
+	margin-bottom: 12px;
+	filter: drop-shadow(0 26px 42px rgba(0, 0, 0, 0.3));
 }
 
 .onboarding-backboard-welcome-mark img {
 	display: block;
 	width: 100%;
 	height: 100%;
-	filter: brightness(0);
+	filter: brightness(0) invert(1);
 	object-fit: contain;
+}
+
+.onboarding-backboard-water-mark {
+	display: block;
+	width: 100%;
+	height: 100%;
+	overflow: visible;
+}
+
+.onboarding-backboard-water-strand-base {
+	fill: #bcd9e8;
+	opacity: 0.34;
+}
+
+.onboarding-backboard-water-current,
+.onboarding-backboard-water-glint {
+	transform-box: fill-box;
+	transform-origin: center;
+	will-change: transform;
+}
+
+.onboarding-backboard-water-current {
+	opacity: 0.96;
+	animation: onboarding-backboard-water-flow var(--onboarding-water-duration, 3.4s) linear var(--onboarding-water-delay, 0s) infinite;
+}
+
+.onboarding-backboard-water-glint {
+	mix-blend-mode: screen;
+	opacity: 0.78;
+	animation: onboarding-backboard-water-glint var(--onboarding-water-duration, 4.8s) linear var(--onboarding-water-delay, 0s) infinite;
+}
+
+@keyframes onboarding-backboard-water-flow {
+	from {
+		transform: translateY(0);
+	}
+
+	to {
+		transform: translateY(86px);
+	}
+}
+
+@keyframes onboarding-backboard-water-glint {
+	from {
+		transform: translate(-4px, -124px) skewX(-2deg);
+	}
+
+	to {
+		transform: translate(4px, 0) skewX(2deg);
+	}
 }
 
 .monaco-workbench.vs-dark .onboarding-backboard-welcome-mark img,
@@ -398,88 +472,149 @@
 	filter: brightness(0) invert(1);
 }
 
+.monaco-workbench.hc-black .onboarding-backboard-water-strand-base,
+.monaco-workbench.hc-light .onboarding-backboard-water-strand-base {
+	fill: var(--vscode-editor-foreground);
+	opacity: 1;
+}
+
+.monaco-workbench.hc-black .onboarding-backboard-water-current,
+.monaco-workbench.hc-black .onboarding-backboard-water-glint,
+.monaco-workbench.hc-light .onboarding-backboard-water-current,
+.monaco-workbench.hc-light .onboarding-backboard-water-glint {
+	display: none;
+}
+
 .onboarding-backboard-welcome-intro {
 	display: flex;
 	flex-direction: column;
 	align-items: center;
-	gap: 10px;
+	gap: 14px;
 	width: 100%;
+	margin-bottom: 22px;
 }
 
 .onboarding-backboard-title {
 	width: 100%;
 	max-width: none;
 	margin: 0;
-	color: var(--vscode-editor-foreground);
-	font-size: 42px;
-	font-weight: 600;
-	line-height: 1.08;
+	color: #f4f4f3;
+	font-size: clamp(28px, 2.55vw, 42px);
+	font-weight: 650;
+	line-height: 1;
+	letter-spacing: -0.035em;
+	text-transform: uppercase;
 	white-space: pre-line;
 }
 
 .onboarding-backboard-subtitle {
 	width: 100%;
 	margin: 0;
-	color: var(--vscode-descriptionForeground);
-	font-size: 15px;
+	color: #ececeb;
+	font-size: clamp(21px, 2.35vw, 34px);
 	font-weight: 400;
-	line-height: 23px;
+	line-height: 1.18;
+	letter-spacing: -0.025em;
 }
 
 .onboarding-backboard-account-prompt {
 	display: flex;
-	flex-wrap: wrap;
 	align-items: center;
 	justify-content: center;
-	gap: 4px;
-	color: var(--vscode-descriptionForeground);
-	font-size: 14px;
-	line-height: 20px;
-}
-
-.onboarding-backboard-account-link,
-.onboarding-backboard-skip-link {
-	color: var(--vscode-textLink-foreground);
-	font: inherit;
-	font-weight: 500;
-	text-decoration: none;
-}
-
-.onboarding-backboard-account-link:hover,
-.onboarding-backboard-skip-link:hover {
-	color: var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground));
-	text-decoration: underline;
+	width: min(545px, 100%);
 }
 
 .onboarding-backboard-sign-in-button {
-	width: min(320px, 100%);
-	height: 40px;
-	padding: 0 16px;
-	color: var(--vscode-button-foreground);
+	width: min(545px, 100%);
+	height: 54px;
+	padding: 0 20px;
+	color: #0d1620;
 	font-family: inherit;
-	font-size: 14px;
-	font-weight: 600;
-	background: var(--vscode-button-background);
-	border: 1px solid var(--vscode-button-border, transparent);
-	border-radius: 8px;
+	font-size: 18px;
+	font-weight: 500;
+	background: #5c9ee0;
+	border: 1px solid #69a8e8;
+	border-radius: 9px;
 	cursor: pointer;
+	box-shadow: inset 0 1px rgba(255, 255, 255, 0.12), 0 1px 2px rgba(0, 0, 0, 0.32);
+	transition: background 0.14s ease, border-color 0.14s ease, transform 0.14s ease;
 }
 
 .onboarding-backboard-sign-in-button:hover {
-	background: var(--vscode-button-hoverBackground);
+	background: #69a9ea;
+	border-color: #7bb5ed;
+}
+
+.onboarding-backboard-sign-in-button:active {
+	transform: translateY(1px);
+}
+
+.onboarding-backboard-sign-in-button:disabled {
+	cursor: wait;
+	opacity: 0.72;
+}
+
+.onboarding-backboard-account-link {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 100%;
+	height: 54px;
+	padding: 0;
+	box-sizing: border-box;
+	color: #f1f1f0;
+	font-family: inherit;
+	font-size: 18px;
+	font-weight: 500;
+	line-height: 1;
+	text-decoration: none;
+	background: #2b2c2e;
+	border: 1px solid #343638;
+	border-radius: 9px;
+	cursor: pointer;
+	box-shadow: inset 0 1px rgba(255, 255, 255, 0.025), 0 1px 2px rgba(0, 0, 0, 0.28);
+	transition: background 0.14s ease, border-color 0.14s ease, transform 0.14s ease;
+}
+
+.onboarding-backboard-account-link:hover {
+	color: #ffffff;
+	text-decoration: none;
+	background: #343537;
+	border-color: #404245;
+}
+
+.onboarding-backboard-account-link:active {
+	transform: translateY(1px);
+}
+
+.onboarding-backboard-account-link:disabled {
+	cursor: wait;
+	opacity: 0.72;
 }
 
 .onboarding-backboard-skip-area {
 	display: flex;
 	justify-content: center;
-	margin-top: 6px;
+	width: min(545px, 100%);
 }
 
 .onboarding-backboard-skip-link {
-	padding: 0;
+	padding: 5px 7px;
+	color: #9b9da2;
+	font: inherit;
+	font-size: 12px;
+	font-weight: 500;
+	letter-spacing: 0.01em;
+	text-decoration: none;
 	background: transparent;
 	border: 0;
+	border-radius: 4px;
 	cursor: pointer;
+}
+
+.onboarding-backboard-skip-link:hover {
+	color: #d4d5d7;
+	text-decoration: underline;
 }
 
 .onboarding-backboard-mode-layout {
@@ -1244,6 +1379,30 @@
 }
 
 @media (max-width: 520px) {
+	.onboarding-a-card-welcome .onboarding-a-body {
+		padding: 28px 20px 36px;
+	}
+
+	.onboarding-backboard-welcome-content {
+		max-width: 390px;
+	}
+
+	.onboarding-backboard-welcome-mark {
+		width: 104px;
+		height: 104px;
+		margin-bottom: 6px;
+	}
+
+	.onboarding-backboard-welcome-intro {
+		margin-bottom: 12px;
+	}
+
+	.onboarding-backboard-sign-in-button,
+	.onboarding-backboard-account-link {
+		height: 48px;
+		font-size: 16px;
+	}
+
 	.onboarding-a-footer-right {
 		width: 100%;
 		justify-content: flex-end;
@@ -1253,8 +1412,15 @@
 @media (prefers-reduced-motion: reduce) {
 	.onboarding-a-overlay,
 	.onboarding-a-card,
-	.onboarding-a-progress-dot {
+	.onboarding-a-progress-dot,
+	.onboarding-backboard-water-current,
+	.onboarding-backboard-water-glint {
 		transition: none;
 		animation: none;
+	}
+
+	.onboarding-backboard-water-current,
+	.onboarding-backboard-water-glint {
+		transform: none;
 	}
 }

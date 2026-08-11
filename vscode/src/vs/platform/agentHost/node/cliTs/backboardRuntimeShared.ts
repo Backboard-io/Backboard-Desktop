@@ -438,9 +438,10 @@ export function resolveBackboardSessionConfig(rawConfig: Record<string, unknown>
 						type: 'string',
 						title: localize('backboard.config.intensity.title', "Reasoning"),
 						description: localize('backboard.config.intensity.description', "Controls Backboard's per-turn thinking configuration."),
-						default: 'default',
-						enum: ['off', 'default', 'low', 'medium', 'high', 'max'],
+						default: 'dynamic',
+						enum: ['dynamic', 'off', 'default', 'low', 'medium', 'high', 'max'],
 						enumLabels: [
+							localize('backboard.config.intensity.dynamic', "Adaptive (Recommended)"),
 							localize('backboard.config.intensity.off', "Off"),
 							localize('backboard.config.intensity.default', "Provider Default"),
 							localize('backboard.config.intensity.low', "Low"),
@@ -449,12 +450,13 @@ export function resolveBackboardSessionConfig(rawConfig: Record<string, unknown>
 							localize('backboard.config.intensity.max', "Max"),
 						],
 						enumDescriptions: [
+							localize('backboard.config.intensity.dynamic.description', "Start balanced, then increase reasoning only after a failed tool or test step."),
 							localize('backboard.config.intensity.off.description', "Disable Backboard thinking for this turn."),
 							localize('backboard.config.intensity.default.description', "Use the selected provider's default thinking behavior."),
 							localize('backboard.config.intensity.low.description', "Use low reasoning effort or a small reasoning-token budget."),
 							localize('backboard.config.intensity.medium.description', "Use medium reasoning effort or a balanced reasoning-token budget."),
 							localize('backboard.config.intensity.high.description', "Use high reasoning effort or a large reasoning-token budget."),
-							localize('backboard.config.intensity.max.description', "Use the provider's maximum supported reasoning level."),
+							localize('backboard.config.intensity.max.description', "Use the provider's maximum reasoning level. This can add substantial latency, especially while generating large tool inputs."),
 						],
 						sessionMutable: true,
 					},
@@ -554,7 +556,7 @@ export function createBackboardTurnSettings(
 		model: parsedModel.model,
 		accessMode: rawMode === BACKBOARD_MODE_PLAN ? BACKBOARD_ACCESS_MANUAL : rawMode,
 		rawMode,
-		intensity: stringConfigValue(values, BACKBOARD_INTENSITY_CONFIG_KEY, 'default'),
+		intensity: stringConfigValue(values, BACKBOARD_INTENSITY_CONFIG_KEY, 'dynamic'),
 		showReasoning: booleanConfigValue(values, BACKBOARD_SHOW_REASONING_CONFIG_KEY, true),
 		memory: stringConfigValue(values, BACKBOARD_MEMORY_CONFIG_KEY, 'off'),
 		webSearch: booleanConfigValue(values, BACKBOARD_WEB_SEARCH_CONFIG_KEY, true),
@@ -570,10 +572,12 @@ function normalizeBackboardIntensity(value: unknown): string {
 	// Preserve existing profiles while migrating the former presentation-only
 	// names to the SDK's documented thinking levels.
 	switch (value) {
+		case 'auto':
+		case 'adaptive': return 'dynamic';
 		case 'fast': return 'low';
 		case 'balanced': return 'medium';
 		case 'deep': return 'high';
-		default: return oneOf(value, ['off', 'default', 'low', 'medium', 'high', 'max'], 'default');
+		default: return oneOf(value, ['dynamic', 'off', 'default', 'low', 'medium', 'high', 'max'], 'dynamic');
 	}
 }
 

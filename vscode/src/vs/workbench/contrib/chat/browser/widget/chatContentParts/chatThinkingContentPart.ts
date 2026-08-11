@@ -245,13 +245,15 @@ export function formatThinkingElapsed(elapsedMs: number): string {
 
 /**
  * One Codex-style activity group: consecutive same-category tool rows wrapped
- * under a collapsible summary header. Hidden while the group is live (raw rows
- * stream in), summarized + collapsed once the run moves on.
+ * under a summary header. Clean chat hosts expose that header as a live status
+ * while the tool runs; completed groups become ordinary collapsible summaries.
  */
 interface IToolActivityGroup {
 	readonly category: ToolActivityCategory;
+	readonly startedAt: number;
 	readonly container: HTMLElement;
 	readonly header: HTMLElement;
+	readonly iconElement: HTMLElement;
 	readonly headerLabel: HTMLElement;
 	readonly chevron: HTMLElement;
 	readonly body: HTMLElement;
@@ -527,7 +529,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			?? localize('chat.thinking.header.initial', 'Thinking');
 
 		super(extractedTitle, context, undefined, hoverService, configurationService);
-		this.useCursorPanelPresentation = context.container.closest('.part.auxiliarybar') !== null;
+		this.useCursorPanelPresentation = context.container.closest('.backboard-clean-chat, .part.auxiliarybar') !== null;
 
 		this.id = content.id;
 		this.content = content;
@@ -583,6 +585,9 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 				// Keep the in-thinking spinner ticking too, so it never looks
 				// frozen on a static phrase while the model reasons silently.
 				this.renderWorkingSpinnerLabel();
+				if (this.activeActivityGroup) {
+					this.updateActivityGroupHeader(this.activeActivityGroup);
+				}
 			}, 1000);
 		}
 
@@ -720,10 +725,12 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		// active indicator instead, so skip creating the in-thinking spinner.
 		if (!this.streamingCompleted && !this.element.isComplete && !(this.fixedScrollingMode && this.showProgressDetails)) {
 			this.workingSpinnerElement = $('.chat-thinking-item.chat-thinking-spinner-item');
-			const spinnerIcon = createThinkingIcon(Codicon.circleFilled);
+			const spinnerIcon = createThinkingIcon(this.useCursorPanelPresentation
+				? ThemeIcon.modify(Codicon.loading, 'spin')
+				: Codicon.circleFilled);
 			this.workingSpinnerElement.appendChild(spinnerIcon);
 			this.workingSpinnerLabel = $('span.chat-thinking-spinner-label');
-			this.setWorkingSpinnerBase(this.getRandomWorkingMessage(WorkingMessageCategory.Thinking));
+			this.setWorkingSpinnerBase(this.getWorkingFallbackMessage(WorkingMessageCategory.Thinking));
 			this.workingSpinnerElement.appendChild(this.workingSpinnerLabel);
 			this.wrapper.appendChild(this.workingSpinnerElement);
 			this.updateWorkingSpinnerVisibility();
@@ -1275,7 +1282,14 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		if (!this.workingSpinnerLabel) {
 			return;
 		}
-		this.setWorkingSpinnerBase(this.getActiveToolLabel() ?? this.getRandomWorkingMessage(category));
+		this.setWorkingSpinnerBase(this.getActiveToolLabel() ?? this.getWorkingFallbackMessage(category));
+	}
+
+	/** Clean hosts keep the no-tool fallback explicit and stable. */
+	private getWorkingFallbackMessage(category: WorkingMessageCategory): string {
+		return this.useCursorPanelPresentation
+			? localize('chat.thinking.reasoning', 'Reasoning')
+			: this.getRandomWorkingMessage(category);
 	}
 
 	/** Records the current spinner phrase (or active-tool label) and repaints it with the live elapsed. */
@@ -1295,7 +1309,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		if (!tail || this.streamingCompleted || this.element.isComplete) {
 			return;
 		}
-		if (!this.getActiveToolLabel()) {
+		if (!this.useCursorPanelPresentation && !this.getActiveToolLabel()) {
 			this.setWorkingSpinnerBase(middleTruncate(tail, 80));
 		}
 		if (!this.fixedScrollingMode && !this._isExpanded.get() && !this.lastExtractedTitle) {
@@ -1356,9 +1370,14 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 	private createActivityGroup(category: ToolActivityCategory): IToolActivityGroup {
 		const container = $('.chat-thinking-group.chat-thinking-group-live');
 		const header = $('.chat-thinking-group-header');
-		header.tabIndex = 0;
-		header.role = 'button';
-		const iconElement = createThinkingIcon(toolActivityCategoryIcon(category));
+		header.tabIndex = this.useCursorPanelPresentation ? -1 : 0;
+		header.role = this.useCursorPanelPresentation ? 'status' : 'button';
+		if (this.useCursorPanelPresentation) {
+			header.setAttribute('aria-live', 'polite');
+		}
+		const iconElement = createThinkingIcon(this.useCursorPanelPresentation
+			? ThemeIcon.modify(Codicon.loading, 'spin')
+			: toolActivityCategoryIcon(category));
 		const headerLabel = $('span.chat-thinking-group-label');
 		const chevron = $('span.codicon.codicon-chevron-right.chat-thinking-group-chevron', { 'aria-hidden': 'true' });
 		header.append(iconElement, headerLabel, chevron);
@@ -1366,6 +1385,9 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		container.append(header, body);
 
 		const toggle = () => {
+			if (this.useCursorPanelPresentation && container.classList.contains('chat-thinking-group-live')) {
+				return;
+			}
 			const collapsed = container.classList.toggle('chat-thinking-group-collapsed');
 			chevron.classList.toggle('codicon-chevron-right', collapsed);
 			chevron.classList.toggle('codicon-chevron-down', !collapsed);
@@ -1382,7 +1404,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 
 		const hover = new MutableDisposable<IDisposable>();
 		this._register(hover);
-		return { category, container, header, headerLabel, chevron, body, items: [], hover };
+		return { category, startedAt: Date.now(), container, header, iconElement, headerLabel, chevron, body, items: [], hover };
 	}
 
 	/**
@@ -1402,6 +1424,13 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		this.updateActivityGroupHeader(group);
 		group.container.classList.remove('chat-thinking-group-live');
 		group.container.classList.add('chat-thinking-group-collapsed');
+		if (this.useCursorPanelPresentation) {
+			group.iconElement.className = 'chat-thinking-icon';
+			group.iconElement.classList.add(...ThemeIcon.asClassNameArray(toolActivityCategoryIcon(group.category)));
+			group.header.tabIndex = 0;
+			group.header.role = 'button';
+			group.header.removeAttribute('aria-live');
+		}
 		group.chevron.classList.add('codicon-chevron-right');
 		group.chevron.classList.remove('codicon-chevron-down');
 		group.header.ariaExpanded = 'false';
@@ -1420,11 +1449,14 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 
 	private updateActivityGroupHeader(group: IToolActivityGroup): void {
 		const label = this.buildActivityGroupLabel(group);
-		const truncated = middleTruncate(label);
+		const liveLabel = this.useCursorPanelPresentation && group === this.activeActivityGroup && group.container.classList.contains('chat-thinking-group-live')
+			? localize('chat.thinking.group.liveElapsed', "{0} · {1}", label, formatThinkingElapsed(Date.now() - group.startedAt))
+			: label;
+		const truncated = middleTruncate(liveLabel);
 		group.headerLabel.textContent = truncated;
-		group.header.ariaLabel = label;
-		if (truncated !== label) {
-			group.hover.value = this.hoverService.setupDelayedHover(group.headerLabel, { content: label, style: HoverStyle.Pointer });
+		group.header.ariaLabel = liveLabel;
+		if (truncated !== liveLabel) {
+			group.hover.value = this.hoverService.setupDelayedHover(group.headerLabel, { content: liveLabel, style: HoverStyle.Pointer });
 		} else {
 			group.hover.clear();
 		}
@@ -2480,6 +2512,20 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 						if (currentState.type === IChatToolInvocation.StateKind.Completed) {
 							this.updateExternalResourceParts(toolInvocationOrMarkdown);
 						}
+
+						// A completed live group must stop advertising itself as active even
+						// when the model emits no follow-up reasoning chunk. This is the gap
+						// that previously left clean chat looking frozen after a file write.
+						if (this.activeActivityGroup?.items.some(item => item.toolCallId === toolCallId)) {
+							const groupStillRunning = this.activeActivityGroup.items.some(item => {
+								const invocation = this.toolInvocations.find(candidate => candidate.toolCallId === item.toolCallId);
+								return invocation?.kind === 'toolInvocation' && !IChatToolInvocation.isComplete(invocation, reader);
+							});
+							if (!groupStillRunning) {
+								this.finishActiveActivityGroup();
+							}
+						}
+						this.setWorkingSpinnerMessage(WorkingMessageCategory.Thinking);
 
 						isComplete = true;
 						return;

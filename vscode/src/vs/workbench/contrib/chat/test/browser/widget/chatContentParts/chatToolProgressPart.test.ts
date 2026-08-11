@@ -8,7 +8,7 @@ import { Event } from '../../../../../../../base/common/event.js';
 import { DisposableStore } from '../../../../../../../base/common/lifecycle.js';
 import { observableValue } from '../../../../../../../base/common/observable.js';
 import { IRenderedMarkdown, MarkdownRenderOptions, renderAsPlaintext } from '../../../../../../../base/browser/markdownRenderer.js';
-import { IMarkdownString } from '../../../../../../../base/common/htmlContent.js';
+import { IMarkdownString, MarkdownString } from '../../../../../../../base/common/htmlContent.js';
 import { URI } from '../../../../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../../base/test/common/utils.js';
 import { mainWindow } from '../../../../../../../base/browser/window.js';
@@ -19,7 +19,9 @@ import { TestConfigurationService } from '../../../../../../../platform/configur
 import { workbenchInstantiationService } from '../../../../../../test/browser/workbenchTestServices.js';
 import { IChatMarkdownAnchorService } from '../../../../browser/widget/chatContentParts/chatMarkdownAnchorService.js';
 import { IChatContentPartRenderContext, InlineTextModelCollection } from '../../../../browser/widget/chatContentParts/chatContentParts.js';
+import { ChatProgressContentPart } from '../../../../browser/widget/chatContentParts/chatProgressContentPart.js';
 import { ChatToolProgressSubPart } from '../../../../browser/widget/chatContentParts/toolInvocationParts/chatToolProgressPart.js';
+import { ChatToolStreamingSubPart, formatStreamingToolInput } from '../../../../browser/widget/chatContentParts/toolInvocationParts/chatToolStreamingSubPart.js';
 import { isMcpToolInvocation } from '../../../../browser/widget/chatContentParts/toolInvocationParts/chatToolPartUtilities.js';
 import { DiffEditorPool, EditorPool } from '../../../../browser/widget/chatContentParts/chatContentCodePools.js';
 import { IChatToolInvocation, IChatToolInvocationSerialized, ToolConfirmKind } from '../../../../common/chatService/chatService.js';
@@ -245,6 +247,48 @@ suite('ChatToolProgressSubPart', () => {
 			!!analyzingAnswersTool.domNode.querySelector('.shimmer-progress'),
 			analyzingAnswersTool.domNode.querySelector('.chat-progress-shimmer-text')?.textContent
 		], [true, 'Asking a question', 'Asking a question (Target)', 'Asking 3 questions', 'Asking 3 questions (What should we work on?, Preferred area, How hands-on?)', false, undefined]);
+	});
+
+	test('streams the actual tool input into a live preview', () => {
+		const partialInput = observableValue<unknown>('partialInput', undefined);
+		const invocation: IChatToolInvocation = {
+			...createToolInvocation({ invocationMessage: 'Generating Write input…', toolId: 'write' }),
+			state: observableValue('streamingState', {
+				type: IChatToolInvocation.StateKind.Streaming,
+				partialInput,
+				streamingMessage: observableValue('streamingMessage', 'Generating Write input…')
+			})
+		};
+		const part = disposables.add(instantiationService.createInstance(
+			ChatToolStreamingSubPart,
+			invocation,
+			createRenderContext(false),
+			mockMarkdownRenderer,
+		));
+
+		assert.strictEqual(part.domNode.classList.contains('has-streaming-input'), false);
+		partialInput.set('{"path":"cats.md","content":"# Cats', undefined);
+		assert.strictEqual(part.domNode.querySelector('.chat-tool-streaming-input code')?.textContent, '{"path":"cats.md","content":"# Cats');
+		assert.strictEqual(part.domNode.classList.contains('has-streaming-input'), true);
+		assert.strictEqual(formatStreamingToolInput({ path: 'cats.md' }), '{\n  "path": "cats.md"\n}');
+	});
+
+	test('keeps a clean-chat provider status visibly ticking during silent gaps', () => {
+		const context = createRenderContext(false);
+		context.container.classList.add('backboard-clean-chat');
+		const part = disposables.add(instantiationService.createInstance(
+			ChatProgressContentPart,
+			{ kind: 'progressMessage', content: new MarkdownString('Working…') },
+			mockMarkdownRenderer,
+			context,
+			true,
+			true,
+			undefined,
+			undefined,
+			true,
+		));
+
+		assert.ok(/^· \d+s$/.test(part.domNode.querySelector('.chat-progress-elapsed')?.textContent ?? ''));
 	});
 
 	test('does not render a loading icon for run playwright code progress', () => {

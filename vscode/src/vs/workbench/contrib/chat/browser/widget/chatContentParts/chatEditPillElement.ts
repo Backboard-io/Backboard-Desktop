@@ -162,7 +162,7 @@ export class ChatEditPillElement extends Disposable {
 	 * and sets the aria label to a localized summary. Pass `undefined` to
 	 * hide the counters.
 	 */
-	setDiff(diff: { added: number; removed: number } | undefined): void {
+	setDiff(diff: { added: number; removed: number } | undefined, animate = true): void {
 		if (!diff) {
 			this._diffAnimation.clear();
 			this._labelAddedEl?.remove();
@@ -178,6 +178,14 @@ export class ChatEditPillElement extends Disposable {
 		}
 		if (!this._labelRemovedEl) {
 			this._labelRemovedEl = this.pillElement.appendChild($('span.label-removed'));
+		}
+		if (!animate) {
+			this._diffAnimation.clear();
+			this._labelAddedEl.textContent = `+${diff.added}`;
+			this._labelRemovedEl.textContent = `-${diff.removed}`;
+			this._displayedAdded = diff.added;
+			this._displayedRemoved = diff.removed;
+			return;
 		}
 		this._animateDiff(diff.added, diff.removed);
 	}

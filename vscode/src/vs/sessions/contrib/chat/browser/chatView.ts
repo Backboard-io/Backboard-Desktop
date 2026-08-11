@@ -132,7 +132,7 @@ export class ChatView extends AbstractChatView {
 	) {
 		super();
 
-		this.element.classList.add('chat-view-chat');
+		this.element.classList.add('chat-view-chat', 'backboard-clean-chat', 'backboard-composer');
 
 		const scopedContextKeyService = this._register(contextKeyService.createScoped(this.element));
 		const scopedInstantiationService = this._register(instantiationService.createChild(
@@ -148,6 +148,7 @@ export class ChatView extends AbstractChatView {
 				renderFollowups: true,
 				supportsFileReferences: true,
 				rendererOptions: {
+					renderTextEditsAsSummary: () => true,
 					referencesExpandedWhenEmptyResponse: false,
 					progressMessageAtBottomOfResponse: mode => mode !== ChatModeKind.Ask,
 				},

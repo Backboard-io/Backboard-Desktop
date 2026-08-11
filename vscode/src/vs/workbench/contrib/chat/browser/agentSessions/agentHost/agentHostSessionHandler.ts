@@ -170,6 +170,18 @@ function confirmedReasonToProtocol(reason: ConfirmedReason | undefined): ToolCal
 	}
 }
 
+function protocolConfirmationToConfirmedReason(reason: ToolCallConfirmationReason): ConfirmedReason {
+	switch (reason) {
+		case ToolCallConfirmationReason.Setting:
+			return { type: ToolConfirmKind.Setting, id: 'agentHost' };
+		case ToolCallConfirmationReason.UserAction:
+			return { type: ToolConfirmKind.UserAction };
+		case ToolCallConfirmationReason.NotNeeded:
+		default:
+			return { type: ToolConfirmKind.ConfirmationNotNeeded };
+	}
+}
+
 function shouldAutoApproveClientToolCall(toolCall: ToolCallState): boolean {
 	return toolCall._meta?.autoApproveBySetting === true;
 }
@@ -1871,6 +1883,13 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 		store.add(autorun(reader => {
 			const tc = part$.read(reader).toolCall;
 			const status = tc.status;
+			if (status === ToolCallStatus.Streaming && invocation.state.read(reader).type === IChatToolInvocation.StateKind.Streaming) {
+				invocation.updatePartialInput(tc.partialInput ?? '');
+				const streamingMessage = stringOrMarkdownToString(tc.invocationMessage, this._config.connectionAuthority);
+				if (streamingMessage) {
+					invocation.updateStreamingMessage(streamingMessage);
+				}
+			}
 			const isReconfirmation = previousStatus !== undefined
 				&& previousStatus !== ToolCallStatus.PendingConfirmation
 				&& status === ToolCallStatus.PendingConfirmation;
@@ -1887,6 +1906,17 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 				this._awaitToolConfirmation(confirmInvocation, toolCallId, opts.backendSession, opts.turnId, opts.cancellationToken, tc.options);
 				invocation = confirmInvocation;
 			} else if (status === ToolCallStatus.Running || status === ToolCallStatus.PendingResultConfirmation) {
+				if (status === ToolCallStatus.Running && invocation.state.read(reader).type === IChatToolInvocation.StateKind.Streaming) {
+					// AHP created this invocation while the LM was still assembling
+					// its tool arguments. Move the same card into execution once the
+					// authoritative ready/start event arrives, instead of leaving the
+					// UI stuck forever on "Generating … input".
+					invocation.transitionFromStreaming(
+						undefined,
+						tc.toolInput,
+						protocolConfirmationToConfirmedReason(tc.confirmed),
+					);
+				}
 				invocation.invocationMessage = stringOrMarkdownToString(tc.invocationMessage, this._config.connectionAuthority);
 				this._reviveTerminalIfNeeded(invocation, tc, opts.backendSession);
 				updateRunningToolSpecificData(invocation, tc, opts.backendSession, this._config.connectionAuthority);
@@ -1977,6 +2007,9 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 			});
 			return;
 		}
+		if (initial.status === ToolCallStatus.Streaming && initial.partialInput !== undefined) {
+			invocation.updatePartialInput(initial.partialInput);
+		}
 
 		const cts = new CancellationTokenSource();
 		store.add(toDisposable(() => cts.dispose(true)));
@@ -2060,6 +2093,9 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 		store.add(autorun(reader => {
 			const tc = part$.read(reader).toolCall;
 			const state = invocation.state.read(reader);
+			if (tc.status === ToolCallStatus.Streaming && state.type === IChatToolInvocation.StateKind.Streaming) {
+				invocation.updatePartialInput(tc.partialInput ?? '');
+			}
 			if (state.type === IChatToolInvocation.StateKind.WaitingForConfirmation && shouldAutoApproveClientToolCall(tc)) {
 				state.confirm({ type: ToolConfirmKind.Setting, id: SessionConfigKey.AutoApprove });
 			}

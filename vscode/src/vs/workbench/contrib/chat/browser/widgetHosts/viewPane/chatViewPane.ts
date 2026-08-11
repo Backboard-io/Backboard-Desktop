@@ -862,6 +862,7 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 		const chatControlsContainer = append(parent, $('.chat-controls-container'));
 		this.chatControlsContainer = chatControlsContainer;
 		chatControlsContainer.classList.toggle('backboard-chat-controls', isBackboardProduct());
+		chatControlsContainer.classList.toggle('backboard-clean-chat', isBackboardProduct());
 		// Shared composer look (backboardComposer.css): the same shell the Simple
 		// window renders, so a composer reads the same wherever it is mounted.
 		chatControlsContainer.classList.toggle('backboard-composer', isBackboardProduct());

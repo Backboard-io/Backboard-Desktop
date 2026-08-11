@@ -7,7 +7,7 @@ import assert from 'assert';
 import { autorun } from '../../../../../../base/common/observable.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
-import { MessageKind, ToolCallStatus, ToolCallConfirmationReason, ToolResultContentType, TurnState, ResponsePartKind, type ActiveTurn, type ICompletedToolCall, type ToolCallRunningState, type Turn, type ToolCallResponsePart, ToolCallCancellationReason, type Message } from '../../../../../../platform/agentHost/common/state/sessionState.js';
+import { MessageKind, ToolCallStatus, ToolCallConfirmationReason, ToolResultContentType, TurnState, ResponsePartKind, type ActiveTurn, type ICompletedToolCall, type ToolCallRunningState, type ToolCallStreamingState, type Turn, type ToolCallResponsePart, ToolCallCancellationReason, type Message } from '../../../../../../platform/agentHost/common/state/sessionState.js';
 import { IChatToolInvocation, IChatToolInvocationSerialized, type IChatMarkdownContent, type IChatProgressMessage, type IChatUsage } from '../../../common/chatService/chatService.js';
 import { isToolResultInputOutputDetails, type IToolResultInputOutputDetails, ToolDataSource, ToolInvocationPresentation } from '../../../common/tools/languageModelToolsService.js';
 import { turnsToHistory as rawTurnsToHistory, activeTurnToProgress as rawActiveTurnToProgress, toolCallStateToInvocation as rawToolCallStateToInvocation, finalizeToolInvocation as rawFinalizeToolInvocation, updateRunningToolSpecificData as rawUpdateRunningToolSpecificData } from '../../../browser/agentSessions/agentHost/stateToProgressAdapter.js';
@@ -665,6 +665,23 @@ suite('stateToProgressAdapter', () => {
 	});
 
 	suite('toolCallStateToInvocation', () => {
+
+		test('creates a visible streaming invocation while tool input is generated', () => {
+			const tc: ToolCallStreamingState = {
+				toolCallId: 'tc-streaming',
+				toolName: 'Write',
+				displayName: 'Write',
+				invocationMessage: 'Generating Write input…',
+				partialInput: '{"path":"cats.md"',
+				status: ToolCallStatus.Streaming,
+			};
+
+			const invocation = toolCallStateToInvocation(tc);
+			assert.strictEqual(invocation.state.get().type, IChatToolInvocation.StateKind.Streaming);
+			assert.strictEqual(invocation.invocationMessage, 'Generating Write input…');
+			const state = invocation.state.get();
+			assert.strictEqual(state.type === IChatToolInvocation.StateKind.Streaming ? state.partialInput.get() : undefined, '{"path":"cats.md"');
+		});
 
 		test('creates ChatToolInvocation for running tool', () => {
 			const tc = createToolCallState({

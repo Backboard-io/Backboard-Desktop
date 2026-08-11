@@ -87,6 +87,10 @@ class LocalAgentHostContribution extends Disposable implements IWorkbenchContrib
 	}
 }
 
-registerWorkbenchContribution2(AgentHostContribution.ID, AgentHostContribution, WorkbenchPhase.AfterRestored);
+// The Sessions workbench restores its active chat while the Restored-phase
+// contributions are still queued for idle execution. Register the agent-host
+// bridge and its sessions provider before that restore begins so a cold launch
+// does not wait on providers that only exist after switching through Editor.
+registerWorkbenchContribution2(AgentHostContribution.ID, AgentHostContribution, WorkbenchPhase.BlockRestore);
 registerWorkbenchContribution2(AgentHostTerminalContribution.ID, AgentHostTerminalContribution, WorkbenchPhase.AfterRestored);
-registerWorkbenchContribution2(LocalAgentHostContribution.ID, LocalAgentHostContribution, WorkbenchPhase.AfterRestored);
+registerWorkbenchContribution2(LocalAgentHostContribution.ID, LocalAgentHostContribution, WorkbenchPhase.BlockRestore);

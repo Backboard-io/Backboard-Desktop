@@ -1087,6 +1087,9 @@ export class CliTsAgent extends Disposable implements IAgent {
 			turnId: turn.turnId,
 			toolCallId,
 			content: inputSummary ?? '',
+			invocationMessage: inputSummary === 'Generating input…'
+				? localize('cliTsAgent.toolGeneratingInput', "Generating {0} input…", toolDisplayName(toolName))
+				: toolInvocationMessage(toolName, inputSummary),
 		});
 	}
 

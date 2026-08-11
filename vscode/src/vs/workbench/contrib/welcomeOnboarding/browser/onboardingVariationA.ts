@@ -677,7 +677,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		const wrapper = append(container, $('.onboarding-backboard-welcome'));
 		const welcomeContent = append(wrapper, $('.onboarding-backboard-welcome-content'));
 
-		this._createBackboardMark(welcomeContent, 'onboarding-backboard-welcome-mark');
+		this._createAnimatedBackboardMark(welcomeContent);
 
 		const intro = append(welcomeContent, $('.onboarding-backboard-welcome-intro'));
 		const title = append(intro, $('h1.onboarding-backboard-title'));
@@ -688,24 +688,50 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 
 		const signInButton = this._registerStepFocusable(append(welcomeContent, $<HTMLButtonElement>('button.onboarding-backboard-sign-in-button')));
 		signInButton.type = 'button';
-		signInButton.textContent = localize('onboarding.backboard.signInButton', "Sign in to Backboard.io");
+		signInButton.textContent = localize('onboarding.backboard.signInButton', "Log In");
+
+		const accountPrompt = append(welcomeContent, $('.onboarding-backboard-account-prompt'));
+		const signUpButton = this._registerStepFocusable(append(accountPrompt, $<HTMLButtonElement>('button.onboarding-backboard-account-link')));
+		signUpButton.type = 'button';
+		signUpButton.textContent = localize('onboarding.backboard.createAccount', "Sign Up");
+
+		let didContinueWithoutAccount = false;
+		let skipButton: HTMLButtonElement | undefined;
+		const showContinueWithoutAccount = (): void => {
+			if (skipButton) {
+				return;
+			}
+
+			const skipArea = append(welcomeContent, $('.onboarding-backboard-skip-area'));
+			skipButton = this._registerStepFocusable(append(skipArea, $<HTMLButtonElement>('button.onboarding-backboard-skip-link')));
+			skipButton.type = 'button';
+			skipButton.textContent = localize('onboarding.backboard.skipStep', "Continue without an account");
+			this.stepDisposables.add(addDisposableListener(skipButton, EventType.CLICK, () => {
+				didContinueWithoutAccount = true;
+				this._logAction('skipWelcomeSignIn');
+				this._advanceOrComplete();
+			}));
+		};
+
 		// Completing onboarding reloads this window into the chosen experience,
 		// which would kill an in-flight sign-in (the extension host dies with the
 		// reload before the device-code flow can open the browser or save the
 		// tokens). So wait for the sign-in to finish before advancing; the
 		// browser opens right away, this page just stays up until approval.
-		this.stepDisposables.add(addDisposableListener(signInButton, EventType.CLICK, async () => {
-			if (signInButton.disabled) {
+		const startBackboardSignIn = async (sourceButton: HTMLButtonElement, action: string): Promise<void> => {
+			if (signInButton.disabled || signUpButton.disabled) {
 				return;
 			}
-			this._logAction('openBackboardSso');
+			this._logAction(action);
+			showContinueWithoutAccount();
 			signInButton.disabled = true;
-			const idleLabel = signInButton.textContent;
-			signInButton.textContent = localize('onboarding.backboard.signInWaiting', "Waiting for sign in… finish in your browser");
+			signUpButton.disabled = true;
+			const idleLabel = sourceButton.textContent;
+			sourceButton.textContent = localize('onboarding.backboard.signInWaiting', "Waiting for sign in… finish in your browser");
 			try {
 				// Resolves true once the tokens are saved; false when the sign-in
 				// failed or was denied (the extension already surfaced that error).
-				if (await this.commandService.executeCommand<boolean>('backboard.signIn')) {
+				if (await this.commandService.executeCommand<boolean>('backboard.signIn') && !didContinueWithoutAccount) {
 					this._advanceOrComplete();
 					return;
 				}
@@ -717,29 +743,159 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 				});
 			}
 			signInButton.disabled = false;
-			signInButton.textContent = idleLabel;
-		}));
+			signUpButton.disabled = false;
+			sourceButton.textContent = idleLabel;
+		};
 
-		const accountPrompt = append(welcomeContent, $('.onboarding-backboard-account-prompt'));
-		const accountPromptText = append(accountPrompt, $('span.onboarding-backboard-account-copy'));
-		accountPromptText.textContent = localize('onboarding.backboard.accountPrompt', "New to Backboard?");
-		const accountLink = this._registerStepFocusable(append(accountPrompt, $<HTMLAnchorElement>('a.onboarding-backboard-account-link')));
-		accountLink.href = BACKBOARD_SIGN_IN_URL;
-		accountLink.textContent = localize('onboarding.backboard.createAccount', "Create your free account.");
-		this.stepDisposables.add(addDisposableListener(accountLink, EventType.CLICK, (event: MouseEvent) => {
-			event.preventDefault();
-			this._logAction('openBackboardSignIn');
-			void this.openerService.open(URI.parse(BACKBOARD_SIGN_IN_URL), { openExternal: true });
+		this.stepDisposables.add(addDisposableListener(signInButton, EventType.CLICK, () => {
+			void startBackboardSignIn(signInButton, 'openBackboardSso');
 		}));
+		this.stepDisposables.add(addDisposableListener(signUpButton, EventType.CLICK, () => {
+			void startBackboardSignIn(signUpButton, 'openBackboardSignIn');
+		}));
+	}
 
-		const skipArea = append(welcomeContent, $('.onboarding-backboard-skip-area'));
-		const skipButton = this._registerStepFocusable(append(skipArea, $<HTMLButtonElement>('button.onboarding-backboard-skip-link')));
-		skipButton.type = 'button';
-		skipButton.textContent = localize('onboarding.backboard.skipStep', "Skip and continue");
-		this.stepDisposables.add(addDisposableListener(skipButton, EventType.CLICK, () => {
-			this._logAction('skipWelcomeSignIn');
-			this._advanceOrComplete();
+	private _createAnimatedBackboardMark(parent: HTMLElement): HTMLElement {
+		const mark = append(parent, $('.onboarding-backboard-welcome-mark'));
+		const targetDocument = getActiveWindow().document;
+		const svgNamespace = 'http://www.w3.org/2000/svg';
+		const createSvgElement = (tagName: string): SVGElement => targetDocument.createElementNS(svgNamespace, tagName) as SVGElement;
+		const setAttributes = (element: SVGElement, attributes: Record<string, string>): SVGElement => {
+			for (const [name, value] of Object.entries(attributes)) {
+				element.setAttribute(name, value);
+			}
+			return element;
+		};
+
+		const strands = [
+			{ tagName: 'path', attributes: { d: 'M77.21,0h10.1c1.32,0,2.4,1.07,2.4,2.4v216.39c0,1.32-1.07,2.4-2.4,2.4h-10.1c-1.32,0-2.4-1.07-2.4-2.4V2.4c0-1.32,1.07-2.4,2.4-2.4Z', 'fill-rule': 'evenodd' } },
+			{ tagName: 'rect', attributes: { x: '49.87', y: '30.34', width: '14.89', height: '80.25', rx: '2.4', ry: '2.4' } },
+			{ tagName: 'rect', attributes: { x: '0', y: '90.8', width: '14.88', height: '19.8', rx: '2.4', ry: '2.4' } },
+			{ tagName: 'rect', attributes: { x: '99.74', y: '110.59', width: '14.89', height: '80.25', rx: '2.4', ry: '2.4' } },
+			{ tagName: 'rect', attributes: { x: '149.61', y: '110.59', width: '14.89', height: '19.8', rx: '2.4', ry: '2.4' } },
+			{ tagName: 'rect', attributes: { x: '124.68', y: '110.59', width: '14.89', height: '50.06', rx: '2.4', ry: '2.4' } },
+			{ tagName: 'rect', attributes: { x: '24.94', y: '60.53', width: '14.89', height: '50.06', rx: '2.4', ry: '2.4' } },
+		] as const;
+		const createStrand = (strand: typeof strands[number]): SVGElement => setAttributes(createSvgElement(strand.tagName), strand.attributes);
+
+		const svg = setAttributes(createSvgElement('svg'), {
+			viewBox: '0 0 164.5 221.19',
+			preserveAspectRatio: 'xMidYMid meet',
+			'aria-hidden': 'true',
+			focusable: 'false',
+		});
+		svg.classList.add('onboarding-backboard-water-mark');
+
+		const definitions = createSvgElement('defs');
+		const waterGradientId = 'onboarding-backboard-water-gradient';
+		const waterGradient = setAttributes(createSvgElement('linearGradient'), {
+			id: waterGradientId,
+			x1: '0',
+			y1: '0',
+			x2: '0',
+			y2: '86',
+			gradientUnits: 'userSpaceOnUse',
+			spreadMethod: 'repeat',
+		});
+		for (const [offset, color, opacity] of [
+			['0%', '#f8fcff', '1'],
+			['18%', '#b9e8f8', '1'],
+			['38%', '#649fe2', '0.96'],
+			['58%', '#e8faff', '1'],
+			['77%', '#72c6df', '0.98'],
+			['100%', '#f8fcff', '1'],
+		]) {
+			waterGradient.appendChild(setAttributes(createSvgElement('stop'), { offset, 'stop-color': color, 'stop-opacity': opacity }));
+		}
+		definitions.appendChild(waterGradient);
+
+		const glintGradientId = 'onboarding-backboard-water-glint';
+		const glintGradient = setAttributes(createSvgElement('linearGradient'), {
+			id: glintGradientId,
+			x1: '0',
+			y1: '0',
+			x2: '0',
+			y2: '124',
+			gradientUnits: 'userSpaceOnUse',
+			spreadMethod: 'repeat',
+		});
+		for (const [offset, opacity] of [
+			['0%', '0'],
+			['42%', '0'],
+			['50%', '0.7'],
+			['58%', '0'],
+			['100%', '0'],
+		]) {
+			glintGradient.appendChild(setAttributes(createSvgElement('stop'), { offset, 'stop-color': '#ffffff', 'stop-opacity': opacity }));
+		}
+		definitions.appendChild(glintGradient);
+
+		const textureFilterId = 'onboarding-backboard-water-texture';
+		const textureFilter = setAttributes(createSvgElement('filter'), {
+			id: textureFilterId,
+			x: '-12%',
+			y: '-10%',
+			width: '124%',
+			height: '120%',
+			'color-interpolation-filters': 'sRGB',
+		});
+		textureFilter.appendChild(setAttributes(createSvgElement('feTurbulence'), {
+			type: 'fractalNoise',
+			baseFrequency: '0.012 0.095',
+			numOctaves: '2',
+			seed: '7',
+			result: 'waterNoise',
 		}));
+		textureFilter.appendChild(setAttributes(createSvgElement('feDisplacementMap'), {
+			in: 'SourceGraphic',
+			in2: 'waterNoise',
+			scale: '3.4',
+			xChannelSelector: 'R',
+			yChannelSelector: 'B',
+		}));
+		definitions.appendChild(textureFilter);
+		svg.appendChild(definitions);
+
+		for (const [index, strand] of strands.entries()) {
+			const clipId = `onboarding-backboard-water-clip-${index}`;
+			const clipPath = setAttributes(createSvgElement('clipPath'), { id: clipId });
+			clipPath.appendChild(createStrand(strand));
+			definitions.appendChild(clipPath);
+
+			const base = createStrand(strand);
+			base.classList.add('onboarding-backboard-water-strand-base');
+			svg.appendChild(base);
+
+			const clippedFlow = setAttributes(createSvgElement('g'), { 'clip-path': `url(#${clipId})` });
+			const current = setAttributes(createSvgElement('rect'), {
+				x: '-18',
+				y: '-442',
+				width: '200.5',
+				height: '1105',
+				fill: `url(#${waterGradientId})`,
+				filter: `url(#${textureFilterId})`,
+			});
+			current.classList.add('onboarding-backboard-water-current');
+			current.style.setProperty('--onboarding-water-delay', `${index * -0.43}s`);
+			current.style.setProperty('--onboarding-water-duration', `${3.1 + (index % 4) * 0.36}s`);
+			clippedFlow.appendChild(current);
+
+			const glint = setAttributes(createSvgElement('rect'), {
+				x: '-28',
+				y: '-442',
+				width: '220.5',
+				height: '1105',
+				fill: `url(#${glintGradientId})`,
+			});
+			glint.classList.add('onboarding-backboard-water-glint');
+			glint.style.setProperty('--onboarding-water-delay', `${-1.2 + index * -0.61}s`);
+			glint.style.setProperty('--onboarding-water-duration', `${4.4 + (index % 3) * 0.52}s`);
+			clippedFlow.appendChild(glint);
+			svg.appendChild(clippedFlow);
+		}
+
+		mark.appendChild(svg);
+		return mark;
 	}
 
 	private _createBackboardMark(parent: HTMLElement, className: string): HTMLElement {

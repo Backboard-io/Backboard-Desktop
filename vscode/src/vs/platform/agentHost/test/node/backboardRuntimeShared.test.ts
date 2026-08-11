@@ -14,14 +14,15 @@ suite('Backboard runtime configuration', () => {
 		const resolved = resolveBackboardSessionConfig(undefined);
 		const intensity = resolved.schema.properties?.intensity;
 
-		assert.deepStrictEqual(intensity?.enum, ['off', 'default', 'low', 'medium', 'high', 'max']);
-		assert.strictEqual(intensity?.default, 'default');
-		assert.strictEqual(resolved.values.intensity, 'default');
+		assert.deepStrictEqual(intensity?.enum, ['dynamic', 'off', 'default', 'low', 'medium', 'high', 'max']);
+		assert.strictEqual(intensity?.default, 'dynamic');
+		assert.strictEqual(resolved.values.intensity, 'dynamic');
 		assert.strictEqual(resolved.values.showReasoning, true);
 	});
 
 	test('migrates legacy intensity names and keeps trace visibility', () => {
 		const expected = new Map([
+			['adaptive', 'dynamic'],
 			['fast', 'low'],
 			['balanced', 'medium'],
 			['deep', 'high'],

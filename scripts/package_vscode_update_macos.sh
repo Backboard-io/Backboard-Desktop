@@ -36,6 +36,7 @@ DMG_PATH="${OUT}/${DMG_NAME}"
 DMG_FORMAT="${DMG_FORMAT:-ULMO}"
 DMG_ASSETS_DIR="${DMG_ASSETS_DIR:-${REPO_ROOT}/scripts/dmg-assets}"
 P12_PATH="${P12_PATH:-${HOME}/.backboard/apple-notarization/developer-id-application.p12}"
+P12_PASSWORD_PATH="${P12_PASSWORD_PATH:-${HOME}/.backboard/apple-notarization/p12-password.txt}"
 ASC_KEY_PATH="${ASC_KEY_PATH:-${HOME}/.backboard/apple-notarization/AuthKey_394Z48F5U4.p8}"
 SKIP_NOTARIZATION="${SKIP_NOTARIZATION:-0}"
 SKIP_SIGNING="${SKIP_SIGNING:-0}"
@@ -78,6 +79,40 @@ require_file() {
     echo "Missing required file: ${path}" >&2
     exit 1
   fi
+}
+
+preflight_disk_space() {
+  local source_kb
+  local existing_out_kb=0
+  local available_kb
+  local effective_available_kb
+  local required_kb
+
+  source_kb="$(du -sk "${VSAPP}" | awk '{ print $1 }')"
+  if [[ -e "${OUT}" ]]; then
+    existing_out_kb="$(du -sk "${OUT}" | awk '{ print $1 }')"
+  fi
+  available_kb="$(df -Pk "${REPO_ROOT}" | awk 'NR == 2 { print $4 }')"
+  effective_available_kb=$((available_kb + existing_out_kb))
+
+  # Packaging temporarily needs the copied app, an uncompressed hybrid image,
+  # and the final compressed DMG at the same time. Keep an additional GiB free
+  # so hdiutil and codesign do not fail midway through a release.
+  required_kb=$((source_kb * 2 + 1048576))
+  if (( effective_available_kb < required_kb )); then
+    awk -v available="${effective_available_kb}" -v required="${required_kb}" '
+      BEGIN {
+        printf "Insufficient disk space for packaging: %.1f GiB available after replacing OUT; %.1f GiB required.\n", available / 1048576, required / 1048576 > "/dev/stderr"
+      }
+    '
+    exit 1
+  fi
+
+  awk -v available="${effective_available_kb}" -v required="${required_kb}" '
+    BEGIN {
+      printf "Disk-space preflight passed: %.1f GiB available after replacing OUT; %.1f GiB required.\n", available / 1048576, required / 1048576
+    }
+  '
 }
 
 set_plist_string() {
@@ -213,6 +248,7 @@ fi
 if [[ "${SKIP_SIGNING}" != "1" ]]; then
   require_file "${REPO_ROOT}/vscode/build/azure-pipelines/darwin/app-entitlements.plist"
 fi
+preflight_disk_space
 
 BACKBOARD_EXTENSION_SOURCE="${VSCODE_ROOT}/extensions/backboard"
 BACKBOARD_CLI_SOURCE="${BACKBOARD_EXTENSION_SOURCE}/bin/backboard-cli-ts"
@@ -290,8 +326,15 @@ prune_release_app() {
 rebuild_backboard_runtime
 
 if [[ "${SKIP_SIGNING}" != "1" && -z "${MACOS_CERTIFICATE_PASSWORD:-}" ]]; then
-  read -rsp "Developer ID .p12 password: " MACOS_CERTIFICATE_PASSWORD
-  echo
+  if [[ -s "${P12_PASSWORD_PATH}" ]]; then
+    MACOS_CERTIFICATE_PASSWORD="$(<"${P12_PASSWORD_PATH}")"
+  elif [[ -t 0 ]]; then
+    read -rsp "Developer ID .p12 password: " MACOS_CERTIFICATE_PASSWORD
+    echo
+  else
+    echo "Missing signing password. Set MACOS_CERTIFICATE_PASSWORD or create ${P12_PASSWORD_PATH}." >&2
+    exit 1
+  fi
 fi
 
 echo "Packaging ${VSAPP} for ${CHANNEL} updates"
@@ -389,7 +432,11 @@ verify_release_architecture() {
   while IFS= read -r -d '' binary; do
     case "${binary}" in
       */_CodeSignature/*) continue ;;
-      *-darwin/*|*/darwin-x64/*|*/darwin-arm64/*) continue ;;
+      # Some dependencies intentionally vendor both Mac architectures in
+      # directories or package names that state the architecture explicitly.
+      # The build script separately requires target-architecture variants for
+      # representative optional packages before this payload is assembled.
+      *-darwin-x64/*|*-darwin-arm64/*|*/darwin-x64/*|*/darwin-arm64/*|*/x64-darwin/*|*/arm64-darwin/*|*/bin/x64/*|*/bin/arm64/*|*/prebuilds/darwin-x64/*|*/prebuilds/darwin-arm64/*) continue ;;
     esac
     info="$(file -b "${binary}" 2>/dev/null || true)"
     case "${info}" in
@@ -456,8 +503,18 @@ create_dmg() {
   # plus the background art and icon layout (.DS_Store).
   ln -s /Applications "${src_folder}/Applications"
   stage_dmg_layout "${src_folder}"
-  hdiutil makehybrid -hfs -hfs-volume-name "${DMG_VOLUME_NAME}" -o "${hybrid_path}" "${src_folder}"
-  hdiutil convert "${hybrid_path}" -format "${DMG_FORMAT}" -o "${DMG_PATH}"
+  if ! hdiutil makehybrid -hfs -hfs-volume-name "${DMG_VOLUME_NAME}" -o "${hybrid_path}" "${src_folder}"; then
+    rm -f "${hybrid_path}" "${DMG_PATH}"
+    rm -f "${src_folder}/Applications" "${src_folder}/.DS_Store"
+    rm -rf "${src_folder}/.background"
+    return 1
+  fi
+  if ! hdiutil convert "${hybrid_path}" -format "${DMG_FORMAT}" -o "${DMG_PATH}"; then
+    rm -f "${hybrid_path}" "${DMG_PATH}"
+    rm -f "${src_folder}/Applications" "${src_folder}/.DS_Store"
+    rm -rf "${src_folder}/.background"
+    return 1
+  fi
   rm -f "${hybrid_path}"
   # Drop installer-only chrome from the payload folder so it can't leak into any
   # later step that operates on "${src_folder}".
@@ -488,12 +545,25 @@ strip_keychain_path() {
   printf '%s' "${value}"
 }
 
+LOGIN_KEYCHAIN_PATH="${HOME}/Library/Keychains/login.keychain-db"
 ORIGINAL_DEFAULT_KEYCHAIN="$(strip_keychain_path "$(security default-keychain -d user 2>/dev/null || true)")"
+if [[ "${ORIGINAL_DEFAULT_KEYCHAIN}" == "${KEYCHAIN_PATH}" || ! -e "${ORIGINAL_DEFAULT_KEYCHAIN}" ]]; then
+  if [[ -e "${LOGIN_KEYCHAIN_PATH}" ]]; then
+    ORIGINAL_DEFAULT_KEYCHAIN="${LOGIN_KEYCHAIN_PATH}"
+  else
+    ORIGINAL_DEFAULT_KEYCHAIN=""
+  fi
+fi
 ORIGINAL_KEYCHAINS=()
 while IFS= read -r keychain; do
   keychain="$(strip_keychain_path "${keychain}")"
-  [[ -n "${keychain}" ]] && ORIGINAL_KEYCHAINS+=("${keychain}")
+  if [[ -n "${keychain}" && "${keychain}" != "${KEYCHAIN_PATH}" && -e "${keychain}" ]]; then
+    ORIGINAL_KEYCHAINS+=("${keychain}")
+  fi
 done < <(security list-keychains -d user 2>/dev/null || true)
+if [[ "${#ORIGINAL_KEYCHAINS[@]}" -eq 0 && -e "${LOGIN_KEYCHAIN_PATH}" ]]; then
+  ORIGINAL_KEYCHAINS+=("${LOGIN_KEYCHAIN_PATH}")
+fi
 
 cleanup() {
   if [[ -n "${ORIGINAL_DEFAULT_KEYCHAIN}" ]]; then

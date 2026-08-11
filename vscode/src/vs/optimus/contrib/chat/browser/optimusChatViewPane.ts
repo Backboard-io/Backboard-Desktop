@@ -152,7 +152,7 @@ export class OptimusChatViewPane extends ViewPane {
 		// `optimus-chat-view` scopes this panel's own layout; `backboard-composer`
 		// opts its composer into the shared shell (backboardComposer.css) so it
 		// reads the same as the Simple window's and the Editor window's.
-		container.classList.add('optimus-chat-view', 'chat-viewpane', 'backboard-composer');
+		container.classList.add('optimus-chat-view', 'chat-viewpane', 'backboard-clean-chat', 'backboard-composer');
 
 		// Use the Editor chat's own title control instead of recreating its tabs
 		// and action cluster. Keeping it inside this pane gives Advanced the same
@@ -211,7 +211,7 @@ export class OptimusChatViewPane extends ViewPane {
 					this.chatSessionsService,
 					this.agentCliSetupService),
 				supportsChangingModes: false,
-				inputEditorMinLines: 4,
+				inputEditorMinLines: 1,
 				workspacePickerDelegate: this.createWorkspacePickerDelegate(),
 				dndContainer: container,
 			},

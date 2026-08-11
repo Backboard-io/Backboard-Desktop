@@ -36,6 +36,10 @@ export class ChatProgressContentPart extends Disposable implements IChatContentP
 	private readonly isHidden: boolean;
 	private readonly renderedMessage = this._register(new MutableDisposable<IRenderedMarkdown>());
 	private readonly _fileWidgetStore = this._register(new DisposableStore());
+	private readonly liveElapsedTimer = this._register(new MutableDisposable<IDisposable>());
+	private readonly liveElapsedStartedAt = Date.now();
+	private readonly showLiveElapsed: boolean;
+	private liveElapsedElement: HTMLElement | undefined;
 	private currentContent: IMarkdownString;
 
 	constructor(
@@ -56,6 +60,7 @@ export class ChatProgressContentPart extends Disposable implements IChatContentP
 
 		const followingContent = context.content.slice(context.contentIndex + 1);
 		this.showSpinner = forceShowSpinner ?? shouldShowSpinner(followingContent, context.element);
+		this.showLiveElapsed = this.showSpinner && context.container.closest('.backboard-clean-chat') !== null;
 		this.isHidden = forceShowMessage !== true && followingContent.some(part => part.kind !== 'progressMessage');
 		if (this.isHidden) {
 			// Placeholder, don't show the progress message
@@ -78,6 +83,7 @@ export class ChatProgressContentPart extends Disposable implements IChatContentP
 		if (useShimmer) {
 			this.applyPartialShimmer(result.element);
 		}
+		this.attachLiveElapsed(result.element);
 
 		const tooltip: IMarkdownString | undefined = this.createApprovalMessage();
 		const progressPart = this._register(instantiationService.createInstance(ChatProgressSubPart, result.element, codicon, tooltip));
@@ -86,6 +92,26 @@ export class ChatProgressContentPart extends Disposable implements IChatContentP
 			this.domNode.classList.add('shimmer-progress');
 		}
 		this.renderedMessage.value = result;
+		if (this.showLiveElapsed) {
+			const tick = () => {
+				if (this.liveElapsedElement) {
+					this.liveElapsedElement.textContent = `· ${formatWorkingElapsed(Date.now() - this.liveElapsedStartedAt)}`;
+				}
+			};
+			tick();
+			this.liveElapsedTimer.value = disposableWindowInterval(getWindow(this.domNode), tick, 1000);
+		}
+	}
+
+	/** Keeps provider/status progress visibly alive even when no stream event arrives. */
+	private attachLiveElapsed(element: HTMLElement): void {
+		this.liveElapsedElement = undefined;
+		if (!this.showLiveElapsed) {
+			return;
+		}
+		element.classList.add('chat-progress-with-elapsed');
+		this.liveElapsedElement = $('span.chat-progress-elapsed');
+		element.appendChild(this.liveElapsedElement);
 	}
 
 	private applyPartialShimmer(element: HTMLElement): void {
@@ -138,10 +164,12 @@ export class ChatProgressContentPart extends Disposable implements IChatContentP
 		if (this.isHidden) {
 			return;
 		}
+		this.currentContent = content;
 
 		// Render the new message
 		const result = this._register(this.chatContentMarkdownRenderer.render(content));
 		result.element.classList.add('progress-step');
+		this.attachLiveElapsed(result.element);
 		this._fileWidgetStore.clear();
 		renderFileWidgets(result.element, this.instantiationService, this.chatMarkdownAnchorService, this._fileWidgetStore);
 

@@ -13,6 +13,7 @@ RELEASE_ROOT="${RELEASE_ROOT:-${REPO_ROOT}/vscode-release}"
 DRY_RUN=0
 VERIFY_PUBLIC=0
 UPLOAD_LATEST_DMG=1
+PUBLISH_LATEST=1
 FORCE=0
 AWS_PROFILE_NAME="${AWS_PROFILE:-}"
 ARCHES=()
@@ -23,9 +24,14 @@ Usage:
   VERSION=2.0.1 $0
   $0 --version 2.0.1 --arch aarch64
 
-Uploads Backboard Studio release artifacts to S3:
+Uploads Backboard Studio release artifacts to S3. By default this also moves the
+selected channel's latest manifest. Use --versioned-only for a manual release.
+
+Versioned objects:
   s3://BUCKET/ide-releases/CHANNEL/VERSION/ASSET/macos-ARCH/Backboard-Studio-ARCH.dmg
   s3://BUCKET/ide-releases/CHANNEL/VERSION/ASSET/macos-ARCH.json
+
+Latest objects (omitted with --versioned-only):
   s3://BUCKET/ide-releases/CHANNEL/latest/ASSET/macos-ARCH.json
   s3://BUCKET/ide-releases/CHANNEL/latest/ASSET/macos-ARCH/Backboard-Studio-ARCH.dmg
 
@@ -40,7 +46,8 @@ Options:
   --profile PROFILE      AWS CLI profile name.
   --dry-run              Print what would upload and still regenerate local manifests.
   --force                Allow overwriting versioned release S3 objects.
-  --verify-public        After upload, curl the public latest manifest and versioned DMG.
+  --verify-public        After upload, curl the public versioned manifest and DMG, plus latest when published.
+  --versioned-only       Upload only immutable versioned objects for a manual release; do not change latest.
   --no-latest-dmg        Do not upload the duplicate latest DMG object; still updates latest manifest.
   -h, --help             Show this help.
 EOF
@@ -90,6 +97,11 @@ while [[ $# -gt 0 ]]; do
       ;;
     --verify-public)
       VERIFY_PUBLIC=1
+      shift
+      ;;
+    --versioned-only)
+      PUBLISH_LATEST=0
+      UPLOAD_LATEST_DMG=0
       shift
       ;;
     --no-latest-dmg)
@@ -241,6 +253,11 @@ echo "Asset: ${ASSET}"
 echo "Version: ${VERSION}"
 echo "Release root: ${RELEASE_ROOT}"
 echo "Architectures: ${ARCHES[*]}"
+if [[ "${PUBLISH_LATEST}" -eq 1 ]]; then
+  echo "Publish latest: yes"
+else
+  echo "Publish latest: no (manual/versioned-only release)"
+fi
 echo
 
 for arch in "${ARCHES[@]}"; do
@@ -259,6 +276,13 @@ for arch in "${ARCHES[@]}"; do
     echo "Missing DMG for ${arch}: ${dmg_path}" >&2
     exit 1
   fi
+
+  echo "Running mandatory macOS release-readiness validation for ${arch}"
+  "${REPO_ROOT}/scripts/validate_macos_release.sh" \
+    --version "${VERSION}" \
+    --arch "${arch}" \
+    --dmg "${dmg_path}"
+  echo
 
   version_prefix="ide-releases/${CHANNEL}/${VERSION}/${ASSET}"
   latest_prefix="ide-releases/${CHANNEL}/latest/${ASSET}"
@@ -288,38 +312,52 @@ JSON
 
   upload_file "${dmg_path}" "${dmg_key}" "application/x-apple-diskimage" "public, max-age=31536000, immutable" 0
   upload_file "${manifest_path}" "${manifest_key}" "application/json" "no-cache, max-age=60" 0
-  upload_file "${manifest_path}" "${latest_manifest_key}" "application/json" "no-cache, max-age=60" 1
-
-  if [[ "${UPLOAD_LATEST_DMG}" -eq 1 ]]; then
-    upload_file "${dmg_path}" "${latest_dmg_key}" "application/x-apple-diskimage" "no-cache, max-age=60" 1
+  if [[ "${PUBLISH_LATEST}" -eq 1 ]]; then
+    if [[ "${UPLOAD_LATEST_DMG}" -eq 1 ]]; then
+      upload_file "${dmg_path}" "${latest_dmg_key}" "application/x-apple-diskimage" "no-cache, max-age=60" 1
+    fi
+    # Publish the small pointer last so clients cannot discover the release
+    # before every artifact referenced by it is available.
+    upload_file "${manifest_path}" "${latest_manifest_key}" "application/json" "no-cache, max-age=60" 1
   fi
 
   echo "S3 object checks for ${arch}:"
   head_object "${dmg_key}" || true
   head_object "${manifest_key}" || true
-  head_object "${latest_manifest_key}" || true
-  if [[ "${UPLOAD_LATEST_DMG}" -eq 1 ]]; then
-    head_object "${latest_dmg_key}" || true
+  if [[ "${PUBLISH_LATEST}" -eq 1 ]]; then
+    head_object "${latest_manifest_key}" || true
+    if [[ "${UPLOAD_LATEST_DMG}" -eq 1 ]]; then
+      head_object "${latest_dmg_key}" || true
+    fi
   fi
   echo
 
   echo "Versioned DMG URL:"
   echo "${dmg_url}"
-  echo "Latest manifest URL:"
-  echo "${latest_manifest_url}"
-  if [[ "${UPLOAD_LATEST_DMG}" -eq 1 ]]; then
-    echo "Latest DMG URL:"
-    echo "${BASE_URL}/${latest_dmg_key}"
+  echo "Versioned manifest URL:"
+  echo "${BASE_URL}/${manifest_key}"
+  if [[ "${PUBLISH_LATEST}" -eq 1 ]]; then
+    echo "Latest manifest URL:"
+    echo "${latest_manifest_url}"
+    if [[ "${UPLOAD_LATEST_DMG}" -eq 1 ]]; then
+      echo "Latest DMG URL:"
+      echo "${BASE_URL}/${latest_dmg_key}"
+    fi
   fi
   echo
 
   if [[ "${VERIFY_PUBLIC}" -eq 1 && "${DRY_RUN}" -eq 0 ]]; then
-    echo "Public latest manifest:"
-    curl -fsS "${latest_manifest_url}"
+    echo "Public versioned manifest:"
+    curl -fsS "${BASE_URL}/${manifest_key}"
     echo
     echo "Public versioned DMG headers:"
     curl -fsSI "${dmg_url}" | sed -n '1,20p'
     echo
+    if [[ "${PUBLISH_LATEST}" -eq 1 ]]; then
+      echo "Public latest manifest:"
+      curl -fsS "${latest_manifest_url}"
+      echo
+    fi
   fi
 done
 

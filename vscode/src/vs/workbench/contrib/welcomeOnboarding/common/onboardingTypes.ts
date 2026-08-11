@@ -55,7 +55,7 @@ export const ONBOARDING_EXPERIENCE_OPTIONS: readonly IOnboardingExperienceOption
 export function getOnboardingStepTitle(stepId: OnboardingStepId): string {
 	switch (stepId) {
 		case OnboardingStepId.Welcome:
-			return localize('onboarding.backboard.step.welcome', "Welcome to\nBackboard Studio");
+			return localize('onboarding.backboard.step.welcome', "Backboard Studio");
 		case OnboardingStepId.Experience:
 			return localize('onboarding.backboard.step.experience', "Your Workspace. Your way.");
 		case OnboardingStepId.Theme:
@@ -75,7 +75,7 @@ export function getOnboardingStepTitle(stepId: OnboardingStepId): string {
 export function getOnboardingStepSubtitle(stepId: OnboardingStepId): string {
 	switch (stepId) {
 		case OnboardingStepId.Welcome:
-			return localize('onboarding.backboard.step.welcome.subtitle', "Set up a focused workspace for designing, coding, and shipping AI-assisted interfaces.");
+			return localize('onboarding.backboard.step.welcome.subtitle', "The best way to build with AI");
 		case OnboardingStepId.Experience:
 			return localize('onboarding.backboard.step.experience.subtitle', "Choose a view built around how you like to work.\nYou can change this later as your project grows.");
 		case OnboardingStepId.Theme:

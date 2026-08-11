@@ -1,0 +1,122 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1480" viewBox="0 0 1600 1480">
+  <rect width="1600" height="1480" fill="#F4F2EC"/>
+  <style>
+    .card { fill: #FBFAF6; stroke: #DDD8CC; stroke-width: 2; }
+    .ink { color: #141414; fill: #141414; }
+    .paper { color: #F4F2EC; fill: #F4F2EC; }
+    .word { fill: #141414; font: 560 58px "Helvetica Neue", Helvetica, Arial, sans-serif; letter-spacing: -0.045em; }
+    .word-rev { fill: #F4F2EC; font: 560 37px "Helvetica Neue", Helvetica, Arial, sans-serif; letter-spacing: -0.045em; }
+    .label { fill: #8E8A80; font: 600 15px "Helvetica Neue", Helvetica, Arial, sans-serif; letter-spacing: 0.14em; }
+    .title { fill: #141414; font: 600 32px "Helvetica Neue", Helvetica, Arial, sans-serif; letter-spacing: -0.025em; }
+    .meta { fill: #8E8A80; font: 600 15px "Helvetica Neue", Helvetica, Arial, sans-serif; letter-spacing: 0.16em; }
+  </style>
+
+  <defs>
+    <g id="memory-spine" fill="currentColor">
+      <rect x="72" y="15" width="16" height="130" rx="8"/>
+      <rect x="43" y="37" width="16" height="57" rx="8" transform="rotate(-18 51 66)"/>
+      <rect x="17" y="63" width="16" height="29" rx="8" transform="rotate(-32 25 78)"/>
+      <rect x="101" y="66" width="16" height="57" rx="8" transform="rotate(-18 109 95)"/>
+      <rect x="127" y="70" width="16" height="29" rx="8" transform="rotate(-32 135 85)"/>
+    </g>
+
+    <g id="signal-slash" fill="currentColor" transform="rotate(-42 80 80)">
+      <rect x="72" y="15" width="16" height="130" rx="8"/>
+      <rect x="46" y="39" width="16" height="64" rx="8"/>
+      <rect x="20" y="68" width="16" height="26" rx="8"/>
+      <rect x="98" y="57" width="16" height="64" rx="8"/>
+      <rect x="124" y="68" width="16" height="26" rx="8"/>
+    </g>
+
+    <g id="three-slash" fill="currentColor" transform="rotate(-42 80 80)">
+      <rect x="71" y="13" width="18" height="134" rx="9"/>
+      <rect x="38" y="53" width="18" height="54" rx="9"/>
+      <rect x="104" y="53" width="18" height="54" rx="9"/>
+    </g>
+
+    <g id="back-plane" fill="currentColor">
+      <path d="M23 45L91 17C98 14 104 18 104 25V54L58 73V132L31 143C24 146 18 142 18 135V55C18 50 20 47 23 45Z"/>
+      <path d="M66 66L132 39C139 36 145 40 145 47V126C145 131 143 134 139 136L73 145C66 148 60 144 60 137V76C60 71 62 68 66 66Z"/>
+    </g>
+  </defs>
+
+  <text x="70" y="72" class="title">Backboard finalist lockups</text>
+  <text x="70" y="106" class="meta">PRIMARY · REVERSE · 16 / 24 / 32 PX SURVIVAL · ROUND 06</text>
+  <line x1="70" y1="145" x2="1530" y2="145" stroke="#D6D1C5" stroke-width="2"/>
+
+  <!-- A -->
+  <g transform="translate(70 190)">
+    <rect width="1460" height="280" rx="32" class="card"/>
+    <text x="30" y="48" class="label">A · MEMORY SPINE</text>
+    <g transform="translate(92 70)" class="ink"><use href="#memory-spine"/></g>
+    <text x="292" y="170" class="word">Backboard</text>
+    <g transform="translate(790 45)">
+      <rect width="500" height="190" rx="28" fill="#141414"/>
+      <g transform="translate(35 39) scale(.7)" class="paper"><use href="#memory-spine"/></g>
+      <text x="190" y="112" class="word-rev">Backboard</text>
+    </g>
+    <g transform="translate(1332 78)" class="ink">
+      <g transform="translate(0 45) scale(.10)"><use href="#memory-spine"/></g>
+      <g transform="translate(54 38) scale(.15)"><use href="#memory-spine"/></g>
+      <g transform="translate(116 31) scale(.20)"><use href="#memory-spine"/></g>
+      <text x="0" y="120" class="label">16</text><text x="54" y="120" class="label">24</text><text x="116" y="120" class="label">32</text>
+    </g>
+  </g>
+
+  <!-- B -->
+  <g transform="translate(70 500)">
+    <rect width="1460" height="280" rx="32" class="card"/>
+    <text x="30" y="48" class="label">B · SIGNAL SLASH</text>
+    <g transform="translate(92 70)" class="ink"><use href="#signal-slash"/></g>
+    <text x="292" y="170" class="word">Backboard</text>
+    <g transform="translate(790 45)">
+      <rect width="500" height="190" rx="28" fill="#141414"/>
+      <g transform="translate(35 39) scale(.7)" class="paper"><use href="#signal-slash"/></g>
+      <text x="190" y="112" class="word-rev">Backboard</text>
+    </g>
+    <g transform="translate(1332 78)" class="ink">
+      <g transform="translate(0 45) scale(.10)"><use href="#signal-slash"/></g>
+      <g transform="translate(54 38) scale(.15)"><use href="#signal-slash"/></g>
+      <g transform="translate(116 31) scale(.20)"><use href="#signal-slash"/></g>
+      <text x="0" y="120" class="label">16</text><text x="54" y="120" class="label">24</text><text x="116" y="120" class="label">32</text>
+    </g>
+  </g>
+
+  <!-- C -->
+  <g transform="translate(70 810)">
+    <rect width="1460" height="280" rx="32" class="card"/>
+    <text x="30" y="48" class="label">C · THREE-STROKE REDUCTION</text>
+    <g transform="translate(92 70)" class="ink"><use href="#three-slash"/></g>
+    <text x="292" y="170" class="word">Backboard</text>
+    <g transform="translate(790 45)">
+      <rect width="500" height="190" rx="28" fill="#141414"/>
+      <g transform="translate(35 39) scale(.7)" class="paper"><use href="#three-slash"/></g>
+      <text x="190" y="112" class="word-rev">Backboard</text>
+    </g>
+    <g transform="translate(1332 78)" class="ink">
+      <g transform="translate(0 45) scale(.10)"><use href="#three-slash"/></g>
+      <g transform="translate(54 38) scale(.15)"><use href="#three-slash"/></g>
+      <g transform="translate(116 31) scale(.20)"><use href="#three-slash"/></g>
+      <text x="0" y="120" class="label">16</text><text x="54" y="120" class="label">24</text><text x="116" y="120" class="label">32</text>
+    </g>
+  </g>
+
+  <!-- D -->
+  <g transform="translate(70 1120)">
+    <rect width="1460" height="280" rx="32" class="card"/>
+    <text x="30" y="48" class="label">D · BACK PLANE</text>
+    <g transform="translate(92 70)" class="ink"><use href="#back-plane"/></g>
+    <text x="292" y="170" class="word">Backboard</text>
+    <g transform="translate(790 45)">
+      <rect width="500" height="190" rx="28" fill="#141414"/>
+      <g transform="translate(35 39) scale(.7)" class="paper"><use href="#back-plane"/></g>
+      <text x="190" y="112" class="word-rev">Backboard</text>
+    </g>
+    <g transform="translate(1332 78)" class="ink">
+      <g transform="translate(0 45) scale(.10)"><use href="#back-plane"/></g>
+      <g transform="translate(54 38) scale(.15)"><use href="#back-plane"/></g>
+      <g transform="translate(116 31) scale(.20)"><use href="#back-plane"/></g>
+      <text x="0" y="120" class="label">16</text><text x="54" y="120" class="label">24</text><text x="116" y="120" class="label">32</text>
+    </g>
+  </g>
+</svg>

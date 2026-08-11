@@ -224,7 +224,8 @@
     "package-cli-ts": "npm run build-cli-ts && mkdir -p ./bin && cp ../../cli-ts/backboard ./bin/backboard-cli-ts && chmod 755 ./bin/backboard-cli-ts && npm run resign-cli-ts",
     "compile": "npm run prepare-cli-ts && tsgo --project ./tsconfig.json",
     "watch": "tsgo --project ./tsconfig.json --watch",
-    "typecheck": "tsgo --project ./tsconfig.json --noEmit"
+    "typecheck": "tsgo --project ./tsconfig.json --noEmit",
+    "test-updater": "node --test ./out/test/updatesInstaller.test.js"
   },
   "devDependencies": {
     "@types/node": "24.x"

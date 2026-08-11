@@ -324,7 +324,10 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 		this.setLabelDetail('');
 
 		if (edit.diff && (edit.diff.added > 0 || edit.diff.removed > 0)) {
-			this.setDiff(edit.diff);
+			// External edits are already complete when they enter the transcript.
+			// Render their totals immediately instead of replaying a progress
+			// animation every time a restored conversation is opened.
+			this.setDiff(edit.diff, false);
 			const fileName = this.labelService.getUriBasenameLabel(edit.uri);
 			const insertionsFragment = edit.diff.added === 1
 				? localize('chat.codeblock.insertions.one', "1 insertion")
