@@ -531,7 +531,7 @@ function fetchText(rawUrl: string, redirectLimit: number): Promise<string> {
 	});
 }
 
-function readCurrentAppVersion(): string {
+export function readCurrentAppVersion(): string {
 	const envVersion = process.env.BACKBOARD_STUDIO_VERSION || process.env.BBIDE_VERSION;
 	if (envVersion?.trim()) {
 		return envVersion.trim();

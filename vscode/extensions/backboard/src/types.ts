@@ -48,6 +48,8 @@ export interface BridgeModel {
 export interface ModelCacheEntry {
 	readonly env: string;
 	readonly version?: number;
+	readonly ideVersion?: string;
+	readonly apiUrl?: string;
 	readonly fetchedAt: number;
 	readonly models: BridgeModel[];
 }
@@ -55,6 +57,8 @@ export interface ModelCacheEntry {
 export interface ToolCacheEntry {
 	readonly env: string;
 	readonly version?: number;
+	readonly ideVersion?: string;
+	readonly apiUrl?: string;
 	readonly mode: string;
 	readonly fetchedAt: number;
 	readonly tools: unknown[];

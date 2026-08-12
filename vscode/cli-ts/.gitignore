@@ -12,4 +12,5 @@ q
 # These are large binaries; tracking them makes `git status` hang.
 # Anchored to the repo root so src/providers/backboard/ stays trackable.
 /backboard
+/backboard.exe
 *.bun-build

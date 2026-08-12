@@ -16,6 +16,8 @@ node_modules/
 # repo root.
 /VSCode-darwin-*/
 /vscode-release/
+/VSCode-win32-*/
+/windows-release/
 /vscode/extensions/backboard/bin/
 
 # The DMG installer-window assets under scripts/dmg-assets/ are deliberately

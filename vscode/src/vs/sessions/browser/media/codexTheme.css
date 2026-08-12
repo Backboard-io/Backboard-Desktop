@@ -63,9 +63,9 @@
 	padding: 0 8px;
 	border-radius: 8px;
 	color: var(--codex-text-primary);
-	font-size: 15px;
-	font-weight: 600;
-	letter-spacing: -0.015em;
+	font-size: 13px;
+	font-weight: 500;
+	letter-spacing: 0;
 }
 
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .open-in-vscode-titlebar-widget > .open-in-vscode-titlebar-widget-trigger:hover {
@@ -366,6 +366,7 @@ html body .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.j
 }
 
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-tab-label {
+	flex: 1;
 	max-width: none;
 }
 
@@ -378,7 +379,8 @@ html body .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.j
 }
 
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-tab-close {
-	margin-left: -2px;
+	margin-left: auto;
+	flex-shrink: 0;
 }
 
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) :is(
@@ -541,6 +543,10 @@ html body .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.j
 
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-mode-files.sessions-right-workbench-has-file .sessions-right-workbench-files {
 	grid-template-columns: minmax(0, 1fr) minmax(196px, 36%);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-mode-files.sessions-right-workbench-files-tree-hidden .sessions-right-workbench-files {
+	grid-template-columns: minmax(0, 1fr) 0;
 }
 
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-file-tree {

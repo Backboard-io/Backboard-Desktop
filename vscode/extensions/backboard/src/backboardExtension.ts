@@ -12,7 +12,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as readline from 'readline';
 import { codiconsStylesheetUri, fontBaseUri, iconBaseUri, panelHtml, webviewLocalResourceRoots } from './panel/panelHtml';
-import { initializeBackboardUpdates } from './updates';
+import { initializeBackboardUpdates, readCurrentAppVersion } from './updates';
 import type { BackboardAttachment, BackboardConfigJson, BackboardDeviceCodeResponse, BackboardOAuthSaveResult, BackboardOAuthTokens, BridgeEvent, BridgeModel, FileAttachment, FileChangePayload, ImageAttachment, ModelCacheEntry, PanelOptions, PanelPersistedState, PanelStateStore, PanelThreadFile, PendingRequest, ResponseSink, ToolCacheEntry, ToolResultRequest, VoiceAttachment } from './types';
 
 const BACKBOARD_DOCUMENT_INDEX_TIMEOUT_MS = 90_000;
@@ -78,7 +78,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 	}));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.extension.signIn', () => promptBackboardSso(bridge)));
-	context.subscriptions.push(vscode.commands.registerCommand('backboard.refreshModels', () => bridge.refreshModels()));
+	context.subscriptions.push(vscode.commands.registerCommand('backboard.refreshModels', () => panelProvider.refreshModels()));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.generateCommitMessage', (rootUri: vscode.Uri | undefined, _context: unknown, token: vscode.CancellationToken | undefined) => generateBackboardCommitMessage(bridge, rootUri, token)));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.openRightPanel', () => openBackboardView()));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.openPanel', () => openBackboardView()));
@@ -1529,8 +1529,20 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 	refreshState(): void {
 		const view = this.view;
 		if (view) {
-			void postPanelState(this.bridge, view.webview);
+			// Config-file changes can switch accounts or credentials without
+			// changing the environment. Revalidate instead of accepting model
+			// metadata cached for the previous identity.
+			void postPanelState(this.bridge, view.webview, true);
 		}
+	}
+
+	refreshModels(): void {
+		const view = this.view;
+		if (view) {
+			void postPanelState(this.bridge, view.webview, true);
+			return;
+		}
+		this.bridge.refreshModels();
 	}
 
 	resolveWebviewView(webviewView: vscode.WebviewView): void {
@@ -1570,7 +1582,11 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 			} else if (message?.type === 'insertBranchDiff') {
 				void postBranchDiff(webviewView.webview);
 			} else if (message?.type === 'ready' || message?.type === 'refreshModels') {
-				void postPanelState(this.bridge, webviewView.webview, message?.type === 'refreshModels');
+				// The initial host-side call below can paint cached models quickly,
+				// but cache is never authoritative for a newly-created webview. Once
+				// its message listener is ready, revalidate so first load cannot stay
+				// empty or stale until an unrelated mode change forces a refresh.
+				void postPanelState(this.bridge, webviewView.webview, true);
 				void this.postPanelStateSnapshot();
 			} else if (message?.type === 'refreshUsage') {
 				void postUsageSnapshot(this.bridge, webviewView.webview);
@@ -1835,9 +1851,10 @@ class BackboardBridge implements vscode.Disposable {
 	private static readonly modelCacheTtl = 24 * 60 * 60 * 1000;
 	private activeTurnRequestId: string | undefined;
 	private currentCwd: string | undefined;
-	private static readonly modelCacheVersion = 2;
+	private static readonly modelCacheVersion = 3;
 	private static readonly toolCacheTtl = 24 * 60 * 60 * 1000;
-	private static readonly toolCacheVersion = 1;
+	private static readonly toolCacheVersion = 2;
+	private readonly cacheIdeVersion = readCurrentAppVersion();
 	private child: cp.ChildProcessWithoutNullStreams | undefined;
 	private readonly pending = new Map<string, PendingRequest>();
 	private readonly output = vscode.window.createOutputChannel('Backboard Bridge');
@@ -1949,10 +1966,17 @@ class BackboardBridge implements vscode.Disposable {
 		try {
 			const parsed: unknown = JSON.parse(await fs.promises.readFile(this.modelCachePath(), 'utf8'));
 			const env = isObjectRecord(parsed) ? stringValueFromRecord(parsed.env) : undefined;
-			if (!isObjectRecord(parsed) || env !== currentBackboardEnv() || parsed.version !== BackboardBridge.modelCacheVersion || typeof parsed.fetchedAt !== 'number' || !Array.isArray(parsed.models)) {
+			const apiUrl = isObjectRecord(parsed) ? stringValueFromRecord(parsed.apiUrl) : undefined;
+			if (!isObjectRecord(parsed)
+				|| env !== currentBackboardEnv()
+				|| parsed.version !== BackboardBridge.modelCacheVersion
+				|| parsed.ideVersion !== this.cacheIdeVersion
+				|| apiUrl !== readSettings().config.apiUrl
+				|| typeof parsed.fetchedAt !== 'number'
+				|| !Array.isArray(parsed.models)) {
 				return undefined;
 			}
-			return { env, version: parsed.version, fetchedAt: parsed.fetchedAt, models: parsed.models.filter(isBridgeModel).filter(isVisibleBridgeModel) };
+			return { env, version: parsed.version, ideVersion: parsed.ideVersion, apiUrl, fetchedAt: parsed.fetchedAt, models: parsed.models.filter(isBridgeModel).filter(isVisibleBridgeModel) };
 		} catch (error) {
 			if (isFileNotFoundError(error) || error instanceof SyntaxError) {
 				return undefined;
@@ -1968,6 +1992,8 @@ class BackboardBridge implements vscode.Disposable {
 		const entry: ModelCacheEntry = {
 			env: currentBackboardEnv(),
 			version: BackboardBridge.modelCacheVersion,
+			ideVersion: this.cacheIdeVersion,
+			apiUrl: readSettings().config.apiUrl,
 			fetchedAt: Date.now(),
 			models: models.filter(isBridgeModel).filter(isVisibleBridgeModel)
 		};
@@ -2008,10 +2034,18 @@ class BackboardBridge implements vscode.Disposable {
 		try {
 			const parsed: unknown = JSON.parse(await fs.promises.readFile(this.toolCachePath(), 'utf8'));
 			const env = isObjectRecord(parsed) ? stringValueFromRecord(parsed.env) : undefined;
-			if (!isObjectRecord(parsed) || env !== currentBackboardEnv() || parsed.version !== BackboardBridge.toolCacheVersion || parsed.mode !== mode || typeof parsed.fetchedAt !== 'number' || !Array.isArray(parsed.tools)) {
+			const apiUrl = isObjectRecord(parsed) ? stringValueFromRecord(parsed.apiUrl) : undefined;
+			if (!isObjectRecord(parsed)
+				|| env !== currentBackboardEnv()
+				|| parsed.version !== BackboardBridge.toolCacheVersion
+				|| parsed.ideVersion !== this.cacheIdeVersion
+				|| apiUrl !== readSettings().config.apiUrl
+				|| parsed.mode !== mode
+				|| typeof parsed.fetchedAt !== 'number'
+				|| !Array.isArray(parsed.tools)) {
 				return undefined;
 			}
-			return { env, version: parsed.version, mode, fetchedAt: parsed.fetchedAt, tools: parsed.tools };
+			return { env, version: parsed.version, ideVersion: parsed.ideVersion, apiUrl, mode, fetchedAt: parsed.fetchedAt, tools: parsed.tools };
 		} catch (error) {
 			if (isFileNotFoundError(error) || error instanceof SyntaxError) {
 				return undefined;
@@ -2027,6 +2061,8 @@ class BackboardBridge implements vscode.Disposable {
 		const entry: ToolCacheEntry = {
 			env: currentBackboardEnv(),
 			version: BackboardBridge.toolCacheVersion,
+			ideVersion: this.cacheIdeVersion,
+			apiUrl: readSettings().config.apiUrl,
 			mode,
 			fetchedAt: Date.now(),
 			tools

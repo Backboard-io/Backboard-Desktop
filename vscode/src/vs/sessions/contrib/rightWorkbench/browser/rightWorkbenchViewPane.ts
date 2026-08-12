@@ -45,6 +45,7 @@ import { EditorInput } from '../../../../workbench/common/editor/editorInput.js'
 import { BrowserEditorInput } from '../../../../workbench/contrib/browserView/common/browserEditorInput.js';
 import { IBrowserViewModel, IBrowserViewWorkbenchService } from '../../../../workbench/contrib/browserView/common/browserView.js';
 import { BrowserEditor } from '../../../../workbench/contrib/browserView/electron-browser/browserEditor.js';
+import { WebviewEditor } from '../../../../workbench/contrib/webviewPanel/browser/webviewEditor.js';
 import { ExtensionState, IExtension, IExtensionsWorkbenchService } from '../../../../workbench/contrib/extensions/common/extensions.js';
 import { ExtensionsViewPaneContainer } from '../../../../workbench/contrib/extensions/browser/extensionsViewlet.js';
 import { IViewDescriptorService } from '../../../../workbench/common/views.js';
@@ -162,6 +163,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 	private reviewOpenTimeout: ReturnType<typeof setTimeout> | undefined;
 	private readonly scmReviewRefreshScheduler = this._register(new RunOnceScheduler(() => this.refreshReviewRail(undefined), 100));
 	private modePicker: HTMLElement | undefined;
+	private modePickerHiddenEditorPane: WebviewEditor | undefined;
 	private isRightWorkbenchVisible = false;
 	private editorSidebarEnabled = false;
 	private editorSidebarFolderUri: URI | undefined;
@@ -840,6 +842,15 @@ export class RightWorkbenchViewPane extends ViewPane {
 		this.closeModePicker();
 		anchor.setAttribute('aria-expanded', 'true');
 
+		// Webview editors (for example Markdown previews) render in an overlay
+		// outside this DOM subtree. Temporarily release that overlay so it cannot
+		// paint through the mode picker, then restore it when the picker closes.
+		const activeEditorPane = this.editorGroupsService.activeModalEditorPart?.activeGroup.activeEditorPane;
+		if (activeEditorPane instanceof WebviewEditor) {
+			activeEditorPane.setVisible(false);
+			this.modePickerHiddenEditorPane = activeEditorPane;
+		}
+
 		// The class name is registered with the browser view overlay manager
 		// (browserView/electron-browser/overlayManager.ts) so the native
 		// WebContentsView hides while the picker is open — without that the
@@ -895,6 +906,8 @@ export class RightWorkbenchViewPane extends ViewPane {
 		this.modePicker?.remove();
 		this.modePicker = undefined;
 		this.modePickerStore.clear();
+		this.modePickerHiddenEditorPane?.setVisible(true);
+		this.modePickerHiddenEditorPane = undefined;
 	}
 
 	private getModeEntries(): readonly IRightWorkbenchModeEntry[] {
@@ -1527,6 +1540,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 			void this.openSelectedFile(tab.selectedFile);
 		}));
 		const folder = this.renderIconButton(fileActions, Codicon.folderOpened, localize('rightWorkbench.toggleFiles', "Toggle files"));
+		folder.classList.toggle('active', this.isFilesTreeVisible);
 		this.domStore.add(addDisposableListener(folder, EventType.CLICK, () => {
 			this.isFilesTreeVisible = !this.isFilesTreeVisible;
 			this.renderShell();
@@ -1544,6 +1558,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 		}));
 		const editorBody = append(editor, $('.sessions-right-workbench-file-editor-body'));
 		this.embeddedEditorHost = append(editorBody, $('.sessions-right-workbench-embedded-editor-host'));
+		this.observeElementResize(this.embeddedEditorHost, () => this.layoutEmbeddedEditorPart());
 		if (!selectedFile) {
 			const empty = append(editorBody, $('.sessions-right-workbench-file-empty'));
 			this.fileEmptyElement = empty;
@@ -1552,6 +1567,10 @@ export class RightWorkbenchViewPane extends ViewPane {
 			append(empty, $('p', {}, localize('rightWorkbench.selectFileFromTree', "Select a file from the workspace tree")));
 		} else {
 			void this.openSelectedFile(selectedFile);
+		}
+
+		if (!this.isFilesTreeVisible) {
+			return;
 		}
 
 		const tree = append(files, $('.sessions-right-workbench-file-tree'));

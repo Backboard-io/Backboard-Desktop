@@ -1,0 +1,123 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="1500" viewBox="0 0 1500 1500">
+  <rect width="1500" height="1500" fill="#F4F1EA"/>
+  <style>
+    .ink { fill: #171717; }
+    .line { fill: none; stroke: #171717; stroke-width: 17; stroke-linecap: round; stroke-linejoin: round; }
+    .paper { fill: #F4F1EA; }
+    .cell { fill: #FBF9F4; stroke: #DED8CC; stroke-width: 2; }
+    .title { fill: #171717; font: 600 31px "Helvetica Neue", Helvetica, Arial, sans-serif; letter-spacing: -0.025em; }
+    .meta { fill: #918C82; font: 600 15px "Helvetica Neue", Helvetica, Arial, sans-serif; letter-spacing: 0.16em; }
+    .word { fill: #171717; font: 620 32px "Helvetica Neue", Helvetica, Arial, sans-serif; letter-spacing: 0.04em; }
+    .num { fill: #918C82; font: 600 15px "Helvetica Neue", Helvetica, Arial, sans-serif; letter-spacing: 0.14em; }
+  </style>
+
+  <text x="60" y="70" class="title">Backboard core-glyph studies</text>
+  <text x="60" y="102" class="meta">BACK PLANE · MODEL CHAMBER · MEMORY CORE · ROUND 08</text>
+  <line x1="60" y1="140" x2="1440" y2="140" stroke="#D6D0C4" stroke-width="2"/>
+
+  <!-- 01 · Monoline chamber -->
+  <g transform="translate(60 180)">
+    <rect width="440" height="390" rx="30" class="cell"/>
+    <g transform="translate(140 48)">
+      <path d="M35 18V142" class="line"/>
+      <path d="M36 43H93C116 43 130 57 130 80C130 103 116 117 93 117H67" class="line"/>
+      <rect x="82" y="67" width="28" height="28" rx="8" class="ink"/>
+    </g>
+    <text x="220" y="276" text-anchor="middle" class="word">BACKBOARD</text>
+    <text x="28" y="353" class="num">01</text>
+  </g>
+
+  <!-- 02 · Open bowl -->
+  <g transform="translate(530 180)">
+    <rect width="440" height="390" rx="30" class="cell"/>
+    <g transform="translate(140 48)">
+      <rect x="27" y="17" width="18" height="126" rx="9" class="ink"/>
+      <path d="M55 46H94C116 46 130 59 130 80C130 101 116 114 94 114H55" class="line"/>
+      <rect x="82" y="67" width="26" height="26" rx="7" class="ink"/>
+    </g>
+    <text x="220" y="276" text-anchor="middle" class="word">BACKBOARD</text>
+    <text x="28" y="353" class="num">02</text>
+  </g>
+
+  <!-- 03 · Filled b with square counter -->
+  <g transform="translate(1000 180)">
+    <rect width="440" height="390" rx="30" class="cell"/>
+    <g transform="translate(140 48)">
+      <path fill-rule="evenodd" class="ink" d="M28 15H51V45H95C118 45 132 59 132 80C132 101 118 115 95 115H51V145H28V15ZM74 65H101C108 65 112 70 112 80C112 90 108 95 101 95H74V65Z"/>
+    </g>
+    <text x="220" y="276" text-anchor="middle" class="word">BACKBOARD</text>
+    <text x="28" y="353" class="num">03</text>
+  </g>
+
+  <!-- 04 · Split-stem chamber -->
+  <g transform="translate(60 600)">
+    <rect width="440" height="390" rx="30" class="cell"/>
+    <g transform="translate(140 48)">
+      <rect x="28" y="17" width="19" height="126" rx="9.5" class="ink"/>
+      <path fill-rule="evenodd" class="ink" d="M58 44H96C119 44 133 58 133 80C133 102 119 116 96 116H58V44ZM78 64H102C110 64 114 69 114 80C114 91 110 96 102 96H78V64Z"/>
+    </g>
+    <text x="220" y="276" text-anchor="middle" class="word">BACKBOARD</text>
+    <text x="28" y="353" class="num">04</text>
+  </g>
+
+  <!-- 05 · Squared monoline -->
+  <g transform="translate(530 600)">
+    <rect width="440" height="390" rx="30" class="cell"/>
+    <g transform="translate(140 48)">
+      <path d="M32 18V142" class="line"/>
+      <path d="M34 45H104C120 45 130 55 130 71V89C130 105 120 115 104 115H60" class="line"/>
+      <rect x="87" y="67" width="26" height="26" rx="4" class="ink"/>
+    </g>
+    <text x="220" y="276" text-anchor="middle" class="word">BACKBOARD</text>
+    <text x="28" y="353" class="num">05</text>
+  </g>
+
+  <!-- 06 · Core orbit b -->
+  <g transform="translate(1000 600)">
+    <rect width="440" height="390" rx="30" class="cell"/>
+    <g transform="translate(140 48)">
+      <path d="M38 18V142" class="line"/>
+      <path d="M39 80A45 45 0 1 0 84 35" class="line"/>
+      <rect x="74" y="70" width="20" height="20" rx="6" class="ink"/>
+    </g>
+    <text x="220" y="276" text-anchor="middle" class="word">BACKBOARD</text>
+    <text x="28" y="353" class="num">06</text>
+  </g>
+
+  <!-- 07 · Board and inset tile -->
+  <g transform="translate(60 1020)">
+    <rect width="440" height="390" rx="30" class="cell"/>
+    <g transform="translate(140 48)">
+      <rect x="25" y="16" width="20" height="128" rx="10" class="ink"/>
+      <rect x="54" y="43" width="82" height="74" rx="26" class="ink"/>
+      <rect x="82" y="67" width="30" height="26" rx="8" class="paper"/>
+    </g>
+    <text x="220" y="276" text-anchor="middle" class="word">BACKBOARD</text>
+    <text x="28" y="353" class="num">07</text>
+  </g>
+
+  <!-- 08 · Continuous return -->
+  <g transform="translate(530 1020)">
+    <rect width="440" height="390" rx="30" class="cell"/>
+    <g transform="translate(140 48)">
+      <path d="M32 18V142M34 48H91C114 48 128 61 128 81C128 101 114 114 91 114H64C49 114 39 105 39 91C39 77 49 68 64 68H93" class="line"/>
+    </g>
+    <text x="220" y="276" text-anchor="middle" class="word">BACKBOARD</text>
+    <text x="28" y="353" class="num">08</text>
+  </g>
+
+  <!-- 09 · Double-b memory cells -->
+  <g transform="translate(1000 1020)">
+    <rect width="440" height="390" rx="30" class="cell"/>
+    <g transform="translate(140 48)">
+      <rect x="22" y="18" width="18" height="124" rx="9" class="ink"/>
+      <path d="M41 54H72C89 54 100 64 100 80C100 96 89 106 72 106H55" class="line"/>
+      <rect x="105" y="31" width="18" height="98" rx="9" class="ink"/>
+      <rect x="64" y="70" width="20" height="20" rx="6" class="ink"/>
+    </g>
+    <text x="220" y="276" text-anchor="middle" class="word">BACKBOARD</text>
+    <text x="28" y="353" class="num">09</text>
+  </g>
+
+  <text x="60" y="1450" class="meta">ALL OPTIONS DERIVE FROM ONE OWNED B / BOARD / CORE CONSTRUCTION</text>
+</svg>

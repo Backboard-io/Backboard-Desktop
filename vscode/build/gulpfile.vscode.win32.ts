@@ -72,6 +72,7 @@ function buildWin32Setup(arch: string, target: string): task.CallbackTask {
 		fs.mkdirSync(outputPath, { recursive: true });
 
 		const quality = (product as typeof product & { quality?: string }).quality || 'dev';
+		const releaseVersion = product.backboardVersion || pkg.version;
 		const useVersionedUpdate = (product as typeof product & { win32VersionedUpdate?: boolean })?.win32VersionedUpdate;
 		const versionedResourcesFolder = useVersionedUpdate ? commit!.substring(0, 10) : '';
 		const issPath = path.join(import.meta.dirname, 'win32', 'code.iss');
@@ -84,8 +85,8 @@ function buildWin32Setup(arch: string, target: string): task.CallbackTask {
 			NameLong: product.nameLong,
 			NameShort: product.nameShort,
 			DirName: product.win32DirName,
-			Version: pkg.version,
-			RawVersion: pkg.version.replace(/-\w+$/, ''),
+			Version: releaseVersion,
+			RawVersion: releaseVersion.split(/[-+]/, 1)[0],
 			Commit: commit,
 			NameVersion: product.win32NameVersion + (target === 'user' ? ' (User)' : ''),
 			ExeBasename: product.nameShort,
