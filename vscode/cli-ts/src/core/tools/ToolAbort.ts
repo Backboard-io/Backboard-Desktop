@@ -12,3 +12,8 @@ export function isAbortError(err: unknown): boolean {
 			(err.name === "AbortError" || err.name === "TimeoutError"))
 	);
 }
+
+/** Throw `AbortError` if the turn was cancelled; a no-op otherwise. */
+export function throwIfAborted(signal: AbortSignal): void {
+	if (signal.aborted) throw new AbortError();
+}

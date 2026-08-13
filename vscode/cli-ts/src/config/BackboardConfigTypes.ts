@@ -12,6 +12,7 @@ export interface BackboardConfigFile {
 	memory?: MemoryMode;
 	memoryProfile?: MemoryProfile;
 	notify?: boolean;
+	verbose?: boolean;
 }
 
 export interface LoadEnvOptions {

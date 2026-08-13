@@ -1,3 +1,4 @@
+import type { PermissionMode } from "../permissions/PermissionMode.ts";
 import type { AgentToolOutput } from "../tools/AgentToolOutput.ts";
 import type { FileEditPreview } from "../tools/ToolResult.ts";
 import type { ToolResultDetailLine } from "../tools/ToolResultDetail.ts";
@@ -52,6 +53,11 @@ export interface UsageInfo {
 	inputTokens?: number;
 	outputTokens?: number;
 	totalTokens?: number;
+	cachedTokens?: number;
+	cacheWriteTokens?: number;
+	costUsd?: number;
+	contextTokens?: number;
+	contextLimit?: number;
 	model?: string;
 	provider?: string;
 }
@@ -62,28 +68,22 @@ export interface TodoItem {
 	status: "pending" | "in_progress" | "completed";
 }
 
-export interface AskUserRequest {
-	id: string;
+export interface AskUserQuestionSpec {
+	/** Short title shown in the breadcrumb at the top of the prompt. */
+	header?: string;
 	question: string;
 	options: string[];
 }
 
+export interface AskUserRequest {
+	id: string;
+	questions: AskUserQuestionSpec[];
+}
+
 export interface AskUserResponse {
 	id: string;
-	answer: string;
-}
-
-export interface PermissionRequest {
-	id: string;
-	toolCallId: string;
-	name: string;
-	inputSummary: string;
-}
-
-export interface PermissionResponse {
-	id: string;
-	decision: "approve" | "deny";
-	reason?: string;
+	/** One answer per question, aligned by index with `request.questions`. */
+	answers: string[];
 }
 
 /**
@@ -96,10 +96,7 @@ export type AgentEvent =
 	| { type: "session:created"; sessionId: string; threadId: string | null }
 	| { type: "user:message"; text: string }
 	| { type: "turn:start"; turnId: string }
-	| { type: "turn:status"; phase: "preparing" | "generating" }
 	| { type: "assistant:delta"; turnId: string; messageId: string; text: string }
-	| { type: "assistant:reasoning"; turnId: string; text: string }
-	| { type: "assistant:voice"; records: unknown[] }
 	| {
 			type: "assistant:message";
 			turnId: string;
@@ -108,12 +105,11 @@ export type AgentEvent =
 	  }
 	| { type: "assistant:message:discard"; turnId: string; messageId: string }
 	| { type: "tool:requested"; turnId: string; calls: ToolCallRef[] }
-	| {
-			type: "tool:discarded";
-			toolCallId: string;
-			name: string;
-	  }
 	| ToolPendingEvent
+	// A previously announced (tool:pending) call that will never execute:
+	// its stream attempt was retried, or the authoritative call list never
+	// confirmed it. Subscribers should drop the row.
+	| { type: "tool:retracted"; toolCallId: string }
 	| ToolStartEvent
 	| { type: "tool:progress"; toolCallId: string; data: unknown }
 	| {
@@ -136,10 +132,15 @@ export type AgentEvent =
 			durationMs: number;
 	  }
 	| { type: "turn:cancelled"; turnId: string }
+	| {
+			type: "checkpoint:restored";
+			checkpointId: string;
+			files: number;
+			skipped: number;
+	  }
 	| { type: "input:request"; request: AskUserRequest }
 	| { type: "input:response"; response: AskUserResponse }
-	| { type: "permission:request"; request: PermissionRequest }
-	| { type: "permission:response"; response: PermissionResponse }
+	| { type: "permission:mode"; mode: PermissionMode }
 	| { type: "todos:updated"; todos: TodoItem[] }
 	| { type: "usage"; usage: UsageInfo }
 	| { type: "system:warning"; message: string }

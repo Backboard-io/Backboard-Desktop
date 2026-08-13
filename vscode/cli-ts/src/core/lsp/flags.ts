@@ -1,3 +1,8 @@
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { isFalsy, isTruthy } from "../../utils/envFlags.ts";
+import { logger } from "../../utils/logger.ts";
+
 /**
  * Runtime knobs for the LSP subsystem, resolved once from the environment.
  *
@@ -17,18 +22,6 @@ export interface LspFlags {
 	cacheDir: string;
 }
 
-function isFalsy(value: string | undefined): boolean {
-	if (value === undefined) return false;
-	const v = value.trim().toLowerCase();
-	return v === "0" || v === "false" || v === "off" || v === "no";
-}
-
-function isTruthy(value: string | undefined): boolean {
-	if (value === undefined) return false;
-	const v = value.trim().toLowerCase();
-	return v === "1" || v === "true" || v === "on" || v === "yes";
-}
-
 export function resolveLspFlags(
 	env: Record<string, string | undefined> = process.env,
 ): LspFlags {
@@ -43,14 +36,28 @@ export function resolveLspFlags(
 	if (isTruthy(env.BACKBOARD_DISABLE_LSP_DOWNLOAD)) allowDownload = false;
 
 	const cacheDir =
-		env.BACKBOARD_LSP_DIR?.trim() ||
-		env.LSP_CACHE_DIR?.trim() ||
+		absoluteDir(env.BACKBOARD_LSP_DIR) ??
+		absoluteDir(env.LSP_CACHE_DIR) ??
 		defaultCacheDir(env);
 
 	return { enabled, allowDownload, cacheDir };
 }
 
+function absoluteDir(value: string | undefined): string | undefined {
+	const trimmed = value?.trim();
+	if (!trimmed) return undefined;
+	if (!path.isAbsolute(trimmed)) {
+		logger.warn(
+			`Ignoring relative LSP cache dir override "${trimmed}"; falling back to the default path.`,
+		);
+		return undefined;
+	}
+	return trimmed;
+}
+
 function defaultCacheDir(env: Record<string, string | undefined>): string {
 	const home = env.HOME || env.USERPROFILE || "";
-	return home ? `${home}/.backboard/lsp` : ".backboard/lsp";
+	return home
+		? path.join(home, ".backboard", "lsp")
+		: path.join(tmpdir(), "backboard-lsp");
 }

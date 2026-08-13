@@ -132,6 +132,8 @@ function runInstaller(
 	});
 }
 
+// Unlike utils/errors.ts errorMessage, falls back to String(error) when an
+// Error carries a blank message (installer failures often do).
 function formatError(error: unknown): string {
 	if (error instanceof Error && error.message.trim()) return error.message;
 	return String(error);

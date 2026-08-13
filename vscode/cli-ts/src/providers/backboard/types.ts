@@ -39,6 +39,17 @@ export interface BackboardContentStreamingPayload extends BackboardStreamBase {
 	accumulated_content?: string;
 }
 
+export interface BackboardToolCallStartPayload extends BackboardStreamBase {
+	type: typeof BACKBOARD_STREAM_EVENTS.toolCallStart;
+	tool_call_id?: string;
+	name?: string;
+}
+
+export interface BackboardToolCallReadyPayload extends BackboardStreamBase {
+	type: typeof BACKBOARD_STREAM_EVENTS.toolCallReady;
+	tool_call?: unknown;
+}
+
 export interface BackboardToolSubmitRequiredPayload
 	extends BackboardStreamBase {
 	type: typeof BACKBOARD_STREAM_EVENTS.toolSubmitRequired;
@@ -83,6 +94,8 @@ export interface BackboardRunCancelledPayload extends BackboardStreamBase {
 export type BackboardStreamPayload =
 	| BackboardUserMessagePayload
 	| BackboardContentStreamingPayload
+	| BackboardToolCallStartPayload
+	| BackboardToolCallReadyPayload
 	| BackboardToolSubmitRequiredPayload
 	| BackboardRunEndedPayload
 	| BackboardRunFailedPayload
@@ -98,39 +111,10 @@ export interface SendMessageRequest {
 	system_prompt?: string;
 	memory?: string;
 	memory_profile?: MemoryProfile;
+	metadata?: Record<string, unknown>;
 	thinking?: ThinkingConfig | null;
 	tools?: OpenAITool[];
 	stream?: boolean;
-	voice?: BackboardVoiceConfig;
-	audioFile?: BackboardAudioFile;
-}
-
-export interface BackboardVoiceConfig {
-	stt?: {
-		provider: string;
-		model: string;
-		language?: string;
-		provider_options?: Record<string, unknown>;
-	};
-	tts?: {
-		provider: string;
-		model: string;
-		voice?: string;
-		output_format?: string;
-		provider_options?: Record<string, unknown>;
-	};
-}
-
-/** Audio transported over the NDJSON host bridge before becoming multipart. */
-export interface BackboardAudioFile {
-	fileName: string;
-	mimeType: string;
-	dataBase64: string;
-}
-
-export interface BackboardVoiceRecord {
-	stt?: Record<string, unknown> | null;
-	tts?: Record<string, unknown> | null;
 }
 
 export interface SubmitToolOutputsRequest {
@@ -155,29 +139,49 @@ export interface BackboardResponse {
 	total_tokens?: number | null;
 }
 
+export type BackboardMessageRole = "user" | "assistant" | "tool";
+
+export interface BackboardThreadMessage {
+	message_id: string;
+	role: BackboardMessageRole;
+	content?: string | null;
+	metadata_?: Record<string, unknown> | null;
+	status?: string | null;
+	created_at?: string | null;
+	model_provider?: string | null;
+	model_name?: string | null;
+}
+
+export interface BackboardThread {
+	thread_id: string;
+	assistant_id?: string | null;
+	title?: string | null;
+	first_user_message?: string | null;
+	message_count?: number | null;
+	updated_at?: string | null;
+	created_at?: string | null;
+	metadata_?: Record<string, unknown> | null;
+	messages: BackboardThreadMessage[];
+}
+
 /**
  * Provider-neutral turn events. Backboard can yield these from either one JSON
  * response or many SSE payloads without changing the agent loop contract.
  */
-/**
- * Coarse, provider-neutral phase of the current turn, derived from the
- * backend's pre-content pipeline frames. `preparing` covers server-side
- * request handling and run setup; `generating` means the model has been
- * engaged and the first token is imminent. Consumed by the host to render a
- * live status line while nothing else is streaming yet.
- */
-export type TurnStatusPhase = "preparing" | "generating";
-
 export type ProviderEvent =
 	| { kind: "thread"; threadId: string }
-	| { kind: "status"; phase: TurnStatusPhase }
 	| { kind: "assistant_delta"; text: string }
-	| { kind: "reasoning_delta"; text: string }
-	| { kind: "tool_call_start"; toolCallId: string; name: string }
-	| { kind: "tool_call_ready"; call: ProviderToolCall }
-	| { kind: "voice"; records: BackboardVoiceRecord[] }
-	| { kind: "requires_action"; runId: string | null; calls: ProviderToolCall[] }
+	| { kind: "tool_started"; id: string; name: string }
+	| { kind: "tool_ready"; call: ProviderToolCall }
+	| {
+			kind: "requires_action";
+			runId: string | null;
+			calls: ProviderToolCall[];
+			/** Serialized opaque turn-level provider state needed for continuation. */
+			providerMetadata?: string;
+	  }
 	| { kind: "usage"; usage: ProviderUsage }
+	| { kind: "warning"; message: string }
 	| {
 			kind: "completed";
 			finalText?: string;
@@ -189,31 +193,41 @@ export type ProviderEvent =
 export interface StreamMappingResult {
 	events: ProviderEvent[];
 	accumulatedContent: string;
-	accumulatedReasoning: string;
-	lastContentChunk: string;
-	lastReasoningChunk: string;
 }
 
 export interface ContentDeltaResult {
 	text: string | null;
 	accumulatedContent: string;
-	/** Raw `content` field of this frame, kept for segment-cumulative recovery. */
-	lastChunk: string;
 }
 
 export interface ProviderToolCall {
 	id: string;
 	name: string;
 	input: unknown;
+	/**
+	 * Opaque provider token that must be echoed back with the call when the
+	 * conversation is replayed. Gemini 3 signs its function calls and rejects a
+	 * history whose calls come back unsigned; providers that do not sign leave
+	 * this unset.
+	 */
+	signature?: string;
 }
 
 export interface ProviderUsage {
 	inputTokens?: number;
 	outputTokens?: number;
 	totalTokens?: number;
+	cachedTokens?: number;
+	cacheWriteTokens?: number;
+	costUsd?: number;
+	contextTokens?: number;
+	contextLimit?: number;
 	provider?: string;
 	model?: string;
 }
+
+/** Which backend serves a model: a saved provider key, or Backboard routing. */
+export type ModelSource = "byok" | "backboard";
 
 export interface ModelInfo extends ThinkingModelMetadata {
 	id: string;
@@ -221,6 +235,9 @@ export interface ModelInfo extends ThinkingModelMetadata {
 	model: string;
 	label: string;
 	releaseTimestamp?: number;
+	source?: ModelSource;
+	/** Context window in tokens, when the catalog reports one. */
+	contextLimit?: number;
 }
 
 export interface ModelCatalogItem {
@@ -231,6 +248,8 @@ export interface ModelCatalogItem {
 	max_output_tokens?: number | null;
 	supports_thinking?: boolean | null;
 	thinking_controls?: ThinkingModelMetadata["thinking_controls"];
+	source?: ModelSource;
+	context_limit?: number | null;
 }
 
 export type ModelThinkingMetadataResponse = ThinkingModelMetadata;

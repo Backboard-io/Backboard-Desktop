@@ -105,7 +105,7 @@ interface ICardEntry {
  */
 export class OptimusGridPart extends Part {
 
-	override readonly minimumWidth: number = 300;
+	override readonly minimumWidth: number = 220;
 	override readonly maximumWidth: number = Number.POSITIVE_INFINITY;
 	override readonly minimumHeight: number = 0;
 	override readonly maximumHeight: number = Number.POSITIVE_INFINITY;

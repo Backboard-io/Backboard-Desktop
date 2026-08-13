@@ -678,6 +678,24 @@
 	--agent-sidebar-primary: var(--vscode-sideBar-foreground, var(--vscode-foreground));
 }
 
+/* Advanced has a two-row dashboard toolbar whose bottom edge sits 134px from
+ * the top of the window. Keep the sidebar's pinned actions inside that same
+ * header band so the divider continues cleanly through both parts. The 32px
+ * panel chrome + 9px top inset + 92px of actions + 1px divider = 134px. */
+.agent-sessions-workbench.optimus-window .agent-sessions-viewpane .agent-sessions-container {
+	padding-top: 9px;
+}
+
+.agent-sessions-workbench.optimus-window .agent-sessions-viewpane .agent-sessions-pinned {
+	min-height: 93px;
+	box-sizing: border-box;
+	margin-right: -10px;
+	margin-left: -10px;
+	padding-right: 10px;
+	padding-left: 10px;
+	border-bottom: 1px solid color-mix(in srgb, var(--agent-sidebar-border) 72%, transparent);
+}
+
 /* The interior must not paint any opaque surface of its own: the sidebar
  * Part paints the single sidebar background, and every layer above it stays
  * transparent so the panel reads as one solid sheet (an inner opaque layer

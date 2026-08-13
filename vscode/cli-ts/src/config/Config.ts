@@ -1,9 +1,16 @@
 import { canonicalToolName } from "../core/tools/names.ts";
 import { ToolPolicy } from "../core/tools/ToolPolicy.ts";
+import {
+	type AuthState,
+	hasAnyCredentials,
+	NO_CREDENTIALS_MESSAGE,
+	resolveAuth,
+} from "./auth.ts";
 import { readBackboardConfig, saveBackboardConfig } from "./backboardConfig.ts";
 import {
 	DEFAULTS,
 	formatModel,
+	keyOnlyDefaultModel,
 	type MemoryMode,
 	type MemoryProfile,
 	type ModelRef,
@@ -16,7 +23,7 @@ import {
 	parseThinking,
 	type ThinkingIntent,
 } from "./defaults.ts";
-import { type BackboardEnv, loadEnv } from "./env.ts";
+import { type BackboardEnv, resolveApiUrl } from "./env.ts";
 import { type CliFlags, parseFlags } from "./flags.ts";
 import {
 	type ModelProfile,
@@ -27,6 +34,7 @@ import {
 	type McpConfigPaths,
 	qProjectHookConfigPath,
 	qProjectMcpConfigPath,
+	qProjectWorkspaceId,
 	qUserHookConfigPath,
 	qUserMcpConfigPath,
 } from "./paths.ts";
@@ -38,6 +46,11 @@ export interface ConfigOptions {
 	homeDir?: string;
 }
 
+/** Placeholder env used when the run authenticates with provider keys only. */
+function anonymousEnv(): BackboardEnv {
+	return { apiKey: "", apiUrl: resolveApiUrl() };
+}
+
 /**
  * Central runtime configuration. Merges, in priority order:
  *   defaults  <  active profile  <  CLI flags.
@@ -45,12 +58,15 @@ export interface ConfigOptions {
  */
 export class Config {
 	readonly env: BackboardEnv;
+	/** Credentials this run may use: a Backboard sign-in, provider keys, or both. */
+	auth: AuthState;
 	readonly flags: CliFlags;
 	readonly cwd: string;
 	readonly profile: Profile;
 	readonly mcpConfigPaths: McpConfigPaths;
 	readonly hookConfigPaths: HookConfigPaths;
 	private readonly homeDir: string | undefined;
+	private workspaceId: string | null = null;
 
 	private currentModel: ModelRef;
 	private currentModelProfile: ModelProfile;
@@ -58,10 +74,9 @@ export class Config {
 	private currentMemory: MemoryMode;
 	private computerUseEnabled = false;
 	private browserUseEnabled = false;
+	private skillDiscoveryEnabled = false;
 	private notifyEnabled = false;
-	// Reserved for a future image-generation tool. The host can toggle this per
-	// turn today; no tool consumes it yet, so it is inert until that lands.
-	private imageGenerationEnabled = false;
+	private verboseEnabled = true;
 	private readonly currentMemoryProfile: MemoryProfile;
 	private currentThinking: ThinkingIntent | null | undefined;
 	private readonly currentFinalVerificationNudge: boolean;
@@ -71,7 +86,16 @@ export class Config {
 	constructor(options: ConfigOptions = {}) {
 		this.flags = parseFlags(options.argv ?? process.argv.slice(2));
 		this.homeDir = options.homeDir;
-		this.env = options.env ?? loadEnv({ homeDir: options.homeDir });
+		this.auth = resolveAuth(
+			options.homeDir === undefined ? {} : { homeDir: options.homeDir },
+		);
+		if (options.env) {
+			// An injected env is an explicit Backboard credential (tests, evals).
+			this.auth = { ...this.auth, backboard: options.env };
+		} else if (!hasAnyCredentials(this.auth)) {
+			throw new Error(NO_CREDENTIALS_MESSAGE);
+		}
+		this.env = this.auth.backboard ?? anonymousEnv();
 		this.persistedConfigHomeDir = options.homeDir;
 		const persistedConfig =
 			options.homeDir !== undefined || options.env === undefined
@@ -90,9 +114,13 @@ export class Config {
 			project: qProjectHookConfigPath(this.cwd),
 			user: qUserHookConfigPath(options.homeDir),
 		};
+		const keyOnlyDefault =
+			this.auth.backboard === null && persistedConfig.model === undefined
+				? keyOnlyDefaultModel(this.auth.providerKeys[0]?.provider)
+				: null;
 		this.currentModel = this.flags.model
 			? parseModel(this.flags.model)
-			: (persistedConfig.model ?? this.profile.model);
+			: (persistedConfig.model ?? keyOnlyDefault ?? this.profile.model);
 		this.currentModelProfile = resolveModelProfile(this.currentModel);
 		this.currentFormat = this.flags.format
 			? parseOutputFormat(this.flags.format)
@@ -110,6 +138,7 @@ export class Config {
 		this.currentFinalVerificationNudge =
 			this.flags.finalVerification ?? DEFAULTS.finalVerificationNudge;
 		this.notifyEnabled = persistedConfig.notify ?? false;
+		this.verboseEnabled = persistedConfig.verbose ?? true;
 		this.excludedToolNames = parseExcludedTools(this.flags.excludedTools).map(
 			canonicalToolName,
 		);
@@ -149,10 +178,10 @@ export class Config {
 	}
 
 	get excludedTools(): string[] {
-		return this.excludedToolNames;
+		return [...this.excludedToolNames];
 	}
 
-	/** Replaces the runtime tool exclusion list, e.g. per serve-mode submit. */
+	/** Replace the per-turn exclusions supplied by Backboard Studio. */
 	setExcludedTools(names: string[]): void {
 		this.excludedToolNames = parseExcludedTools(names).map(canonicalToolName);
 	}
@@ -173,6 +202,7 @@ export class Config {
 			modelExcludedTools: this.currentModelProfile.excludedTools,
 			computerUseEnabled: this.computerUseEnabled,
 			browserUseEnabled: this.browserUseEnabled,
+			skillDiscoveryEnabled: this.skillDiscoveryEnabled,
 		});
 	}
 
@@ -180,8 +210,7 @@ export class Config {
 		this.computerUseEnabled = true;
 	}
 
-	/** Toggles computer-use tools on or off, e.g. per serve-mode submit. */
-	setComputerUse(enabled: boolean): void {
+	setComputerUseEnabled(enabled: boolean): void {
 		this.computerUseEnabled = enabled;
 	}
 
@@ -189,12 +218,19 @@ export class Config {
 		return this.computerUseEnabled;
 	}
 
+	setSkillDiscoveryEnabled(enabled: boolean): void {
+		this.skillDiscoveryEnabled = enabled;
+	}
+
+	get isSkillDiscoveryEnabled(): boolean {
+		return this.skillDiscoveryEnabled;
+	}
+
 	enableBrowserUse(): void {
 		this.browserUseEnabled = true;
 	}
 
-	/** Toggles the browser-use tool on or off, e.g. per serve-mode submit. */
-	setBrowserUse(enabled: boolean): void {
+	setBrowserUseEnabled(enabled: boolean): void {
 		this.browserUseEnabled = enabled;
 	}
 
@@ -210,21 +246,21 @@ export class Config {
 		this.notifyEnabled = enabled;
 	}
 
-	get isImageGenerationEnabled(): boolean {
-		return this.imageGenerationEnabled;
+	get isVerbose(): boolean {
+		return this.verboseEnabled;
 	}
 
-	/**
-	 * Toggles image-generation intent for this session. Currently inert — no
-	 * tool reads it yet — but wired end-to-end so a future image tool can honor
-	 * it without additional host/protocol changes.
-	 */
-	setImageGeneration(enabled: boolean): void {
-		this.imageGenerationEnabled = enabled;
+	setVerbose(enabled: boolean): void {
+		this.verboseEnabled = enabled;
 	}
 
 	get memoryProfile(): MemoryProfile {
 		return this.currentMemoryProfile;
+	}
+
+	getWorkspaceId(): string {
+		this.workspaceId ??= qProjectWorkspaceId(this.cwd);
+		return this.workspaceId;
 	}
 
 	get thinking(): ThinkingIntent | null | undefined {
@@ -245,12 +281,6 @@ export class Config {
 
 	setThinking(thinking: ThinkingIntent | null | undefined): void {
 		this.currentThinking = thinking;
-	}
-
-	setExcludeReasoning(excludeReasoning: boolean): void {
-		if (this.currentThinking) {
-			this.currentThinking = { ...this.currentThinking, excludeReasoning };
-		}
 	}
 
 	async saveRuntimeSelection(): Promise<void> {
@@ -284,9 +314,40 @@ export class Config {
 		);
 	}
 
-	reloadEnv(): void {
-		const next = loadEnv({ homeDir: this.homeDir });
+	async saveVerbosePreference(): Promise<void> {
+		const existing = readBackboardConfig(this.persistedConfigHomeDir);
+		await saveBackboardConfig(
+			{
+				...existing,
+				verbose: this.verboseEnabled,
+			},
+			this.persistedConfigHomeDir,
+		);
+	}
+
+	get hasBackboardAuth(): boolean {
+		return this.auth.backboard !== null;
+	}
+
+	get hasProviderKeys(): boolean {
+		return this.auth.providerKeys.length > 0;
+	}
+
+	/**
+	 * Re-reads credentials after `/login`, `/logout`, or a `/keys` change so the
+	 * running session picks them up without a restart.
+	 */
+	refreshAuth(): AuthState {
+		this.auth = resolveAuth(
+			this.homeDir === undefined ? {} : { homeDir: this.homeDir },
+		);
+		const next = this.auth.backboard ?? anonymousEnv();
 		this.env.apiKey = next.apiKey;
 		this.env.apiUrl = next.apiUrl;
+		return this.auth;
+	}
+
+	reloadEnv(): void {
+		this.refreshAuth();
 	}
 }

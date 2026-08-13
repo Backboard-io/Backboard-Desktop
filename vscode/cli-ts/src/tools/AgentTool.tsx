@@ -1,12 +1,14 @@
 import { z } from "zod";
 import type { JSONValue } from "../core/agent/rlm/RLMTypes.ts";
 import type { SubAgentResult } from "../core/agent/SubAgentRunner.ts";
+import type { PermissionDecision } from "../core/permissions/types.ts";
 import type { OpenAITool } from "../core/tools/schema.ts";
 import { Tool } from "../core/tools/Tool.ts";
 import type { ToolContext } from "../core/tools/ToolContext.ts";
 import { ok, type ToolResult } from "../core/tools/ToolResult.ts";
 import type { PromptContext } from "../prompts/PromptModule.ts";
 import { getToolPrompt } from "../prompts/tools/index.tsx";
+import { pluralize } from "../utils/string.ts";
 import type {
 	AgentToolDeps,
 	AgentToolInput,
@@ -86,6 +88,10 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 	readonly inputSchema = schema;
 	readonly readOnly = false;
 
+	override get displayName(): string {
+		return "Subagent";
+	}
+
 	constructor(private readonly deps: AgentToolDeps) {
 		super();
 	}
@@ -111,6 +117,16 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 
 	override isConcurrencySafe(_input: AgentToolInput): boolean {
 		return true;
+	}
+
+	// Spawning is orchestration, not a direct effect: the sub-agent inherits the
+	// permission context and its own tool calls are gated individually, so the
+	// spawn itself auto-allows (else a non-interactive sub-agent can't delegate).
+	override checkPermissions(): PermissionDecision | undefined {
+		return {
+			behavior: "allow",
+			reason: "sub-agent tools are gated individually",
+		};
 	}
 
 	override async execute(
@@ -186,6 +202,9 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 				parentSignal: ctx.signal,
 				parentBus: ctx.bus,
 				parentToolCallId: ctx.toolCallId,
+				parentTurnId: ctx.turnId,
+				checkpoints: ctx.checkpoints,
+				parentPermissions: ctx.permissions,
 				trace: workerTrace,
 			});
 		} catch (err) {
@@ -208,8 +227,8 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 
 function agentTitle(status: string, rounds: number): string {
 	return status === "completed"
-		? `Completed in ${rounds} round${rounds === 1 ? "" : "s"}`
-		: `Failed after ${rounds} round${rounds === 1 ? "" : "s"}`;
+		? `Completed in ${rounds} ${pluralize(rounds, "round")}`
+		: `Failed after ${rounds} ${pluralize(rounds, "round")}`;
 }
 
 function workerReportForLLM(result: SubAgentResult): string {

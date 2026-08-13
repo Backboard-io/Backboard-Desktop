@@ -9,6 +9,7 @@ import { renderIcon } from '../../../../../base/browser/ui/iconLabel/iconLabels.
 import { onUnexpectedError } from '../../../../../base/common/errors.js';
 import { autorun } from '../../../../../base/common/observable.js';
 import { isWeb, isWindows } from '../../../../../base/common/platform.js';
+import { basename } from '../../../../../base/common/resources.js';
 import { Separator, toAction } from '../../../../../base/common/actions.js';
 import { Codicon } from '../../../../../base/common/codicons.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
@@ -50,12 +51,15 @@ import { IPathService } from '../../../../../workbench/services/path/common/path
 import { resolveBackboardUserInfo } from '../../../../../workbench/contrib/chat/browser/backboardUserInfo.js';
 import { isBackboardProduct } from '../../../../../workbench/contrib/chat/common/backboardAuth.js';
 import { IProductService } from '../../../../../platform/product/common/productService.js';
+import { isRecentFolder, IWorkspacesService } from '../../../../../platform/workspaces/common/workspaces.js';
 
 const $ = DOM.$;
 export const SessionsViewId = 'sessions.workbench.view.sessionsView';
 const OPTIMUS_NEW_SESSION_COMMAND_ID = 'optimus.newSession';
 const GROUPING_STORAGE_KEY = 'sessionsViewPane.grouping.v3';
 const SORTING_STORAGE_KEY = 'sessionsViewPane.sorting.v2';
+const SIMPLE_COMPACT_STORAGE_KEY = 'sessionsViewPane.simpleCompact';
+const SIMPLE_LEGACY_RECENT_ONLY_STORAGE_KEY = 'sessionsViewPane.simpleRecentOnly';
 
 /**
  * Place the given session in the sessions grid to the right of the last
@@ -106,7 +110,12 @@ export class SessionsView extends ViewPane {
 	private primaryActions: HTMLElement | undefined;
 	private workspacesHeader: HTMLElement | undefined;
 	private filterButton: HTMLButtonElement | undefined;
+	private projectFilterButton: HTMLButtonElement | undefined;
+	private projectFilterLabel: HTMLElement | undefined;
 	private filterPopover: HTMLElement | undefined;
+	private selectedWorkspaceFolderUri: string | undefined;
+	private selectedWorkspaceFolderLabel: string | undefined;
+	private simpleCompact = false;
 	private isFindWidgetOpen = false;
 	sessionsControl: SessionsList | undefined;
 	private currentGrouping: SessionsGrouping = SessionsGrouping.Workspace;
@@ -140,8 +149,13 @@ export class SessionsView extends ViewPane {
 		@IRequestService private readonly requestService: IRequestService,
 		@ILogService private readonly logService: ILogService,
 		@IProductService private readonly productService: IProductService,
+		@IWorkspacesService private readonly workspacesService: IWorkspacesService,
 	) {
 		super(options, keybindingService, contextMenuService, configurationService, contextKeyService, viewDescriptorService, instantiationService, openerService, themeService, hoverService);
+
+		this.simpleCompact = this.storageService.getBoolean(SIMPLE_COMPACT_STORAGE_KEY, StorageScope.PROFILE)
+			?? this.storageService.getBoolean(SIMPLE_LEGACY_RECENT_ONLY_STORAGE_KEY, StorageScope.PROFILE)
+			?? false;
 
 		// Restore persisted grouping
 		const storedGrouping = this.storageService.get(GROUPING_STORAGE_KEY, StorageScope.PROFILE);
@@ -188,6 +202,8 @@ export class SessionsView extends ViewPane {
 	}
 
 	private createControls(parent: HTMLElement): void {
+		const phoneLayout = isPhoneLayout(this.layoutService);
+		const simpleMode = !phoneLayout && !this.environmentService.isOptimusWindow && !this.environmentService.isJarvisWindow;
 		const sessionsContainer = DOM.append(parent, $('.agent-sessions-container'));
 
 		// Sessions section (top, fills available space)
@@ -211,8 +227,57 @@ export class SessionsView extends ViewPane {
 		// is hidden in favor of the mobile filter chip row + the (+) button in the
 		// MobileTitlebarPart. We still create the row container because the find
 		// widget mounts inside it.
-		const phoneLayout = isPhoneLayout(this.layoutService);
-		if (!phoneLayout) {
+		if (!phoneLayout && simpleMode) {
+			const primaryActions = this.primaryActions = DOM.append(pinnedHeader, $('.agent-sessions-primary-actions.agent-sessions-simple-actions'));
+			const searchRow = DOM.append(primaryActions, $('.agent-sessions-simple-search-row'));
+
+			this.searchButton = DOM.append(searchRow, $('button.agent-sessions-sidebar-action.agent-sessions-search-button')) as HTMLButtonElement;
+			this.searchButton.type = 'button';
+			const searchLabel = localize('searchThreads', "Search threads");
+			this.searchButton.title = searchLabel;
+			this.searchButton.setAttribute('aria-label', searchLabel);
+			DOM.append(this.searchButton, $('span.agent-sessions-sidebar-action-icon')).appendChild(renderIcon(Codicon.search));
+			DOM.append(this.searchButton, $('span.agent-sessions-sidebar-action-label', undefined, localize('search', "Search")));
+			this._register(DOM.addDisposableListener(this.searchButton, DOM.EventType.CLICK, e => {
+				e.preventDefault();
+				this.openFind();
+			}));
+
+			const compactToggleButton = DOM.append(searchRow, $('button.agent-sessions-simple-icon-button.agent-sessions-simple-compact-toggle')) as HTMLButtonElement;
+			compactToggleButton.type = 'button';
+			compactToggleButton.setAttribute('aria-pressed', 'false');
+			compactToggleButton.appendChild(renderIcon(Codicon.filter));
+			const updateCompactToggleButton = () => {
+				const label = this.simpleCompact
+					? localize('showThreadCards', "Show full thread cards")
+					: localize('showCompactThreads', "Use compact thread list");
+				compactToggleButton.title = label;
+				compactToggleButton.setAttribute('aria-label', label);
+				compactToggleButton.setAttribute('aria-pressed', String(this.simpleCompact));
+			};
+			updateCompactToggleButton();
+			this._register(DOM.addDisposableListener(compactToggleButton, DOM.EventType.CLICK, e => {
+				e.preventDefault();
+				this.simpleCompact = !this.simpleCompact;
+				this.storageService.store(SIMPLE_COMPACT_STORAGE_KEY, this.simpleCompact, StorageScope.PROFILE, StorageTarget.USER);
+				updateCompactToggleButton();
+				this.sessionsControl?.setSimpleCompact(this.simpleCompact);
+			}));
+
+			const newChatButton = DOM.append(searchRow, $('button.agent-sessions-simple-icon-button')) as HTMLButtonElement;
+			newChatButton.type = 'button';
+			const newChatLabel = localize('newChat', "New chat");
+			newChatButton.title = newChatLabel;
+			newChatButton.setAttribute('aria-label', newChatLabel);
+			newChatButton.appendChild(renderIcon(Codicon.edit));
+			this._register(DOM.addDisposableListener(newChatButton, DOM.EventType.CLICK, e => {
+				e.preventDefault();
+				logSessionsInteraction(this.telemetryService, 'newSession');
+				this.sessionsService.openNewSession({ forceNew: true });
+			}));
+
+			this.createProjectFilterRow(primaryActions);
+		} else if (!phoneLayout) {
 			headerLabel.textContent = localize('backboardBrand', "Backboard");
 
 			const collapseButton = DOM.append(headerActions, $('button.agent-sessions-collapse-button')) as HTMLButtonElement;
@@ -281,6 +346,9 @@ export class SessionsView extends ViewPane {
 			overrideStyles: this.getLocationBasedColors().listOverrideStyles,
 			grouping: () => this.currentGrouping,
 			sorting: () => this.currentSorting,
+			simpleMode,
+			workspaceFolderFilter: () => this.selectedWorkspaceFolderUri,
+			simpleCompact: () => this.simpleCompact,
 			findWidgetContainer,
 			onSessionOpen: (resource, preserveFocus, sideBySide) => {
 				const onOpened = () => {
@@ -302,7 +370,7 @@ export class SessionsView extends ViewPane {
 		this._register(this.onDidChangeBodyVisibility(visible => sessionsControl.setVisible(visible)));
 
 		// Bottom-pinned footer: update button (above) + signed-in user identity.
-		this.createFooter(sessionsSection);
+		this.createFooter(sessionsSection, simpleMode);
 
 		// Toggle header label/actions visibility when find widget opens/closes
 		this._register(sessionsControl.onDidChangeFindOpenState(open => {
@@ -398,12 +466,21 @@ export class SessionsView extends ViewPane {
 	 * Backboard-only, so the whole footer is skipped for non-Backboard builds and
 	 * on phone layouts (which use their own chrome).
 	 */
-	private createFooter(container: HTMLElement): void {
+	private createFooter(container: HTMLElement, simpleMode: boolean): void {
 		if (!isBackboardProduct() || isPhoneLayout(this.layoutService)) {
 			return;
 		}
 
 		const footer = DOM.append(container, $('.agent-sessions-footer'));
+		if (simpleMode) {
+			const navigation = DOM.append(footer, $('.agent-sessions-footer-navigation'));
+			this.createSidebarAction(navigation, Codicon.extensions, localize('marketplace', "Marketplace"), anchor => {
+				this.instantiationService.createInstance(SkillsLibraryController).showMarketplace(anchor);
+			});
+			this.createSidebarAction(navigation, Codicon.settingsGear, localize('settings', "Settings"), () => {
+				void this.commandService.executeCommand('workbench.action.openSettings');
+			});
+		}
 
 		// Signed-in user identity card.
 		const user = DOM.append(footer, $('.agent-sessions-user'));
@@ -521,6 +598,124 @@ export class SessionsView extends ViewPane {
 		this.updateGroupingToggleState();
 	}
 
+	private createProjectFilterRow(container: HTMLElement): void {
+		const row = DOM.append(container, $('.agent-sessions-simple-project-row'));
+		const button = this.projectFilterButton = DOM.append(row, $('button.agent-sessions-project-filter-button')) as HTMLButtonElement;
+		button.type = 'button';
+		button.setAttribute('aria-haspopup', 'menu');
+		button.setAttribute('aria-expanded', 'false');
+		DOM.append(button, $('span.agent-sessions-sidebar-action-icon')).appendChild(renderIcon(Codicon.folder));
+		this.projectFilterLabel = DOM.append(button, $('span.agent-sessions-project-filter-label'));
+		DOM.append(button, $('span.agent-sessions-project-filter-chevron')).appendChild(renderIcon(Codicon.chevronDown));
+		this.updateProjectFilterLabel();
+		this._register(DOM.addDisposableListener(button, DOM.EventType.CLICK, e => {
+			e.preventDefault();
+			void this.toggleProjectFilterPopover(row);
+		}));
+		this._register(DOM.addDisposableListener(button.ownerDocument, DOM.EventType.POINTER_DOWN, e => {
+			const target = e.target as Node | null;
+			if (!target || !this.filterPopover || this.filterPopover.contains(target) || button.contains(target)) {
+				return;
+			}
+			this.closeFilterPopover();
+		}, true));
+
+		const newProjectButton = DOM.append(row, $('button.agent-sessions-simple-icon-button')) as HTMLButtonElement;
+		newProjectButton.type = 'button';
+		const newProjectLabel = localize('newProject', "Add project");
+		newProjectButton.title = newProjectLabel;
+		newProjectButton.setAttribute('aria-label', newProjectLabel);
+		newProjectButton.appendChild(renderIcon(Codicon.newFolder));
+		this._register(DOM.addDisposableListener(newProjectButton, DOM.EventType.CLICK, e => {
+			e.preventDefault();
+			void this.commandService.executeCommand('workbench.action.addRootFolder');
+		}));
+	}
+
+	private updateProjectFilterLabel(): void {
+		const label = this.selectedWorkspaceFolderLabel ?? localize('allFolders', "All folders");
+		this.projectFilterLabel && (this.projectFilterLabel.textContent = label);
+		this.projectFilterButton?.setAttribute('title', label);
+		this.projectFilterButton?.setAttribute('aria-label', localize('filterThreadsByFolder', "Filter threads by folder: {0}", label));
+	}
+
+	private async toggleProjectFilterPopover(container: HTMLElement): Promise<void> {
+		if (this.filterPopover) {
+			this.closeFilterPopover();
+			return;
+		}
+		if (!this.projectFilterButton) {
+			return;
+		}
+
+		const popover = this.filterPopover = DOM.append(container, $('.agent-sessions-filter-popover.agent-sessions-project-filter-popover'));
+		popover.setAttribute('role', 'menu');
+		this.projectFilterButton.setAttribute('aria-expanded', 'true');
+
+		const folders = new Map<string, { label: string; description?: string }>();
+		for (const session of this.sessionsManagementService.getSessions()) {
+			for (const folder of session.workspace.get()?.folders ?? []) {
+				const uri = folder.root.toString();
+				if (!folders.has(uri)) {
+					folders.set(uri, { label: folder.name || basename(folder.root), description: folder.description });
+				}
+			}
+		}
+
+		// Include recently opened folders even when they do not have a thread yet.
+		// Session workspace labels are not unique, so folder URIs remain the stable
+		// identity used for both deduplication and filtering.
+		try {
+			const recentlyOpened = await this.workspacesService.getRecentlyOpened();
+			for (const recent of recentlyOpened.workspaces) {
+				if (!isRecentFolder(recent)) {
+					continue;
+				}
+				const uri = recent.folderUri.toString();
+				if (!folders.has(uri)) {
+					folders.set(uri, { label: recent.label || basename(recent.folderUri) });
+				}
+			}
+		} catch (error) {
+			this.logService.warn('[SessionsView] Unable to load recent folders for the folder filter', error);
+		}
+
+		if (this.filterPopover !== popover) {
+			return;
+		}
+
+		const options: readonly { label: string; uri: string | undefined; description?: string }[] = [
+			{ label: localize('allFolders', "All folders"), uri: undefined },
+			...[...folders.entries()]
+				.map(([uri, folder]) => ({ ...folder, uri }))
+				.sort((a, b) => a.label.localeCompare(b.label) || a.uri.localeCompare(b.uri)),
+		];
+
+		for (const option of options) {
+			const selected = option.uri === this.selectedWorkspaceFolderUri;
+			const optionButton = DOM.append(popover, $('button.agent-sessions-project-filter-option')) as HTMLButtonElement;
+			optionButton.type = 'button';
+			optionButton.setAttribute('role', 'menuitemradio');
+			optionButton.setAttribute('aria-checked', String(selected));
+			optionButton.title = option.description ? `${option.label} — ${option.description}` : option.label;
+			DOM.append(optionButton, $('span.agent-sessions-project-filter-check')).appendChild(renderIcon(selected ? Codicon.check : Codicon.blank));
+			DOM.append(optionButton, $('span.agent-sessions-project-filter-option-icon')).appendChild(renderIcon(Codicon.folder));
+			const content = DOM.append(optionButton, $('span.agent-sessions-project-filter-option-content'));
+			DOM.append(content, $('span.agent-sessions-project-filter-option-label', undefined, option.label));
+			if (option.description) {
+				DOM.append(content, $('span.agent-sessions-project-filter-option-description', undefined, option.description));
+			}
+			optionButton.addEventListener(DOM.EventType.CLICK, e => {
+				e.preventDefault();
+				this.selectedWorkspaceFolderUri = option.uri;
+				this.selectedWorkspaceFolderLabel = option.uri ? option.label : undefined;
+				this.updateProjectFilterLabel();
+				this.closeFilterPopover();
+				this.sessionsControl?.refresh();
+			});
+		}
+	}
+
 	private updateGroupingToggleState(): void {
 		if (!this.filterButton) {
 			return;
@@ -618,6 +813,7 @@ export class SessionsView extends ViewPane {
 		this.filterPopover?.remove();
 		this.filterPopover = undefined;
 		this.filterButton?.setAttribute('aria-expanded', 'false');
+		this.projectFilterButton?.setAttribute('aria-expanded', 'false');
 	}
 
 	focusCustomizations(): void {

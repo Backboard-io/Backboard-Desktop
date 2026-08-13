@@ -24,7 +24,7 @@ import { IWorkbenchLayoutService, Parts } from '../../workbench/services/layout/
 import { SessionsView, SessionsViewId } from '../../sessions/contrib/sessions/browser/views/sessionsView.js';
 // Shared with the agent-sessions workbench, which builds the grid at this width
 // so the panel never has to be resized after the window has painted.
-import { OPTIMUS_CHAT_PANEL_WIDTH } from '../../sessions/browser/layoutPolicy.js';
+import { getOptimusChatPanelWidth } from '../../sessions/browser/layoutPolicy.js';
 import { ISessionsManagementService } from '../../sessions/services/sessions/common/sessionsManagement.js';
 import { ISessionsService } from '../../sessions/services/sessions/browser/sessionsService.js';
 import { RightWorkbenchCommandId } from '../../sessions/contrib/rightWorkbench/browser/rightWorkbench.js';
@@ -92,8 +92,10 @@ function setOptimusRightPanelWidth(layoutService: IWorkbenchLayoutService): void
 	}
 
 	const currentWidth = layoutService.getSize(Parts.AUXILIARYBAR_PART).width;
-	if (currentWidth > 0 && currentWidth !== OPTIMUS_CHAT_PANEL_WIDTH) {
-		layoutService.resizePart(Parts.AUXILIARYBAR_PART, OPTIMUS_CHAT_PANEL_WIDTH - currentWidth, 0);
+	const sideBarWidth = layoutService.isVisible(Parts.SIDEBAR_PART) ? layoutService.getSize(Parts.SIDEBAR_PART).width : 0;
+	const targetWidth = getOptimusChatPanelWidth(layoutService.mainContainerDimension.width, sideBarWidth);
+	if (currentWidth > 0 && Math.abs(currentWidth - targetWidth) > 1) {
+		layoutService.resizePart(Parts.AUXILIARYBAR_PART, targetWidth - currentWidth, 0);
 	}
 }
 
@@ -247,6 +249,7 @@ registerAction2(class OptimusDeleteSessionAction extends Action2 {
 class OptimusLayoutContribution extends Disposable implements IWorkbenchContribution {
 
 	static readonly ID = 'workbench.contrib.optimusLayout';
+	private lastAvailableWorkspaceWidth = 0;
 
 	constructor(
 		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
@@ -259,11 +262,23 @@ class OptimusLayoutContribution extends Disposable implements IWorkbenchContribu
 		// auxiliary bar was hidden (its default in the shared agent-sessions
 		// workbench), so re-assert the Optimus layout once after it settles.
 		this._register(Event.once(this.layoutService.onDidLayoutMainContainer)(() => this.ensureRightPanelWidth()));
+		this._register(this.layoutService.onDidLayoutMainContainer(dimension => {
+			const sideBarWidth = this.layoutService.isVisible(Parts.SIDEBAR_PART) ? this.layoutService.getSize(Parts.SIDEBAR_PART).width : 0;
+			const availableWorkspaceWidth = dimension.width - sideBarWidth;
+			if (availableWorkspaceWidth === this.lastAvailableWorkspaceWidth) {
+				return;
+			}
+			this.lastAvailableWorkspaceWidth = availableWorkspaceWidth;
+			this.ensureRightPanelWidth();
+		}));
 		this._register(this.layoutService.onDidChangePartVisibility(e => {
 			if ((e.partId === Parts.EDITOR_PART || e.partId === Parts.PANEL_PART) && e.visible) {
 				this.ensureOptimusCenter();
 			}
 			if (e.partId === Parts.AUXILIARYBAR_PART && e.visible) {
+				this.ensureRightPanelWidth();
+			}
+			if (e.partId === Parts.SIDEBAR_PART && this.layoutService.isVisible(Parts.AUXILIARYBAR_PART)) {
 				this.ensureRightPanelWidth();
 			}
 		}));
@@ -426,6 +441,8 @@ class OptimusChromeContribution extends Disposable implements IWorkbenchContribu
 		this.sidebarButton.classList.toggle('codicon-layout-sidebar-left-off', !sidebarVisible);
 		this.sidebarButton.classList.toggle('checked', sidebarVisible);
 		const rightPanelVisible = this.layoutService.isVisible(Parts.AUXILIARYBAR_PART);
+		const rightPanelWidth = rightPanelVisible ? this.layoutService.getSize(Parts.AUXILIARYBAR_PART).width : 0;
+		this.chrome.style.setProperty('--optimus-right-workbench-width', `${rightPanelWidth}px`);
 		this.secondaryButton.classList.toggle('codicon-layout-sidebar-right', rightPanelVisible);
 		this.secondaryButton.classList.toggle('codicon-layout-sidebar-right-off', !rightPanelVisible);
 		this.secondaryButton.classList.toggle('checked', rightPanelVisible);

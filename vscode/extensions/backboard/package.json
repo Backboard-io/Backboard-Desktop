@@ -170,12 +170,12 @@
               "conversation"
             ],
             "default": "off",
-            "description": "Backboard voice mode for REST turns. TTS synthesizes assistant audio; STT and conversation require audio attachment support."
+            "description": "Backboard voice input mode. Recorded audio is attached through the public R-CLI; speech synthesis is not available in this runtime."
           },
           "backboard.cliPath": {
             "type": "string",
             "default": "",
-            "description": "Path to the local backboard-cli-ts binary. Leave empty for the packaged binary."
+            "description": "Path to a local Backboard R-CLI binary. Leave empty for the packaged public R-CLI runtime."
           },
           "backboard.workspaceRoot": {
             "type": "string",
@@ -219,7 +219,7 @@
   },
   "scripts": {
     "prepare-cli-ts": "sh -c 'if command -v bun >/dev/null 2>&1; then npm run package-cli-ts; else echo \"Skipping Backboard cli-ts build: bun not found.\"; fi'",
-    "build-cli-ts": "cd ../../cli-ts && bun install && bun run build",
+    "build-cli-ts": "cd ../../cli-ts && bun install --frozen-lockfile && bun run build",
     "resign-cli-ts": "sh -c 'if command -v codesign >/dev/null 2>&1; then codesign --force --sign - ./bin/backboard-cli-ts; fi'",
     "package-cli-ts": "npm run build-cli-ts && mkdir -p ./bin && cp ../../cli-ts/backboard ./bin/backboard-cli-ts && chmod 755 ./bin/backboard-cli-ts && npm run resign-cli-ts",
     "compile": "npm run prepare-cli-ts && tsgo --project ./tsconfig.json",

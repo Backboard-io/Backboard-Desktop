@@ -164,6 +164,7 @@ function runInstall(pkg: string, prefix: string): Promise<void> {
 				"--no-save",
 				"--no-audit",
 				"--no-fund",
+				"--ignore-scripts",
 				pkg,
 			],
 			{ stdio: "ignore" },

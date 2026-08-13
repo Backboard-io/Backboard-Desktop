@@ -44,6 +44,21 @@ const TABLET_MAX_WIDTH = 1024;
  */
 export const OPTIMUS_CHAT_PANEL_WIDTH = 400;
 
+/**
+ * Returns a responsive width for Advanced's right workbench. The panel keeps
+ * its familiar 400px ceiling on a large window, but yields space to the board
+ * as the window or sidebar grows instead of clipping the centre workspace.
+ */
+export function getOptimusChatPanelWidth(windowWidth: number, sideBarWidth: number): number {
+	const workspaceWidth = Math.max(0, windowWidth - sideBarWidth);
+	const preferredWidth = Math.floor(workspaceWidth * 0.4);
+	const minimumWidth = Math.min(280, Math.max(120, Math.floor(workspaceWidth * 0.28)));
+	const centerReserve = Math.min(520, Math.max(220, Math.floor(workspaceWidth * 0.55)));
+	const maximumWidth = Math.min(OPTIMUS_CHAT_PANEL_WIDTH, Math.max(minimumWidth, workspaceWidth - centerReserve));
+
+	return Math.min(maximumWidth, Math.max(minimumWidth, preferredWidth));
+}
+
 //#endregion
 
 /**

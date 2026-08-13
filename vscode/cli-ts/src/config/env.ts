@@ -1,3 +1,4 @@
+import { isTruthy } from "../utils/envFlags.ts";
 import type { LoadEnvOptions } from "./BackboardConfigTypes.ts";
 import { readBackboardConfig } from "./backboardConfig.ts";
 
@@ -37,6 +38,33 @@ export function normalizeApiUrl(value: string): string {
 	return value.trim().replace(/\/+$/, "");
 }
 
+function isLoopbackHost(hostname: string): boolean {
+	const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+	// URL parsing canonicalizes IPv4-mapped IPv6 to hex groups, so mapped
+	// loopback arrives as ::ffff:7fxx:xxxx, never ::ffff:127.x.x.x.
+	return (
+		host === "localhost" ||
+		host === "::1" ||
+		/^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host) ||
+		/^::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}$/.test(host)
+	);
+}
+
+function assertSecureApiUrl(value: string): string {
+	let url: URL;
+	try {
+		url = new URL(value);
+	} catch {
+		throw new Error(`Invalid API URL: ${value}`);
+	}
+	if (url.protocol === "https:" || isLoopbackHost(url.hostname)) return value;
+	if (isTruthy(process.env.BACKBOARD_ALLOW_INSECURE_API_URL)) return value;
+	throw new Error(
+		`Refusing to send credentials to a non-https API URL: ${value}. ` +
+			"Set BACKBOARD_ALLOW_INSECURE_API_URL=1 to allow it for an internal dev endpoint.",
+	);
+}
+
 /**
  * Resolves the API URL with precedence: the BACKBOARD_API_URL env var (a
  * whitespace-only value is treated as unset), then the saved config file, then
@@ -44,8 +72,10 @@ export function normalizeApiUrl(value: string): string {
  * login flow.
  */
 export function resolveApiUrl(fileApiUrl?: string): string {
-	return normalizeApiUrl(
-		process.env.BACKBOARD_API_URL?.trim() || fileApiUrl || DEFAULT_API_URL,
+	return assertSecureApiUrl(
+		normalizeApiUrl(
+			process.env.BACKBOARD_API_URL?.trim() || fileApiUrl || DEFAULT_API_URL,
+		),
 	);
 }
 
@@ -79,12 +109,10 @@ export function loadBrowserEnv(
 	source: Record<string, string | undefined> = process.env,
 ): BrowserEnv {
 	return {
-		browserPath: optionalTrimmed(source.Q_BROWSER_PATH),
+		browserPath: optionalTrimmed(source.BROWSER_PATH),
 		chromePath: optionalTrimmed(source.CHROME_PATH),
-		browserCdpUrl:
-			optionalTrimmed(source.Q_BROWSER_CDP_URL) ??
-			optionalTrimmed(source.BROWSER_CDP_URL),
-		browserWsUrl: optionalTrimmed(source.Q_BROWSER_WS_URL),
+		browserCdpUrl: optionalTrimmed(source.BROWSER_CDP_URL),
+		browserWsUrl: optionalTrimmed(source.BROWSER_WS_URL),
 		home: optionalTrimmed(source.HOME),
 		localAppData: optionalTrimmed(source.LOCALAPPDATA),
 		path: source.PATH,

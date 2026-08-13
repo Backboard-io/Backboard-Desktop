@@ -1,11 +1,16 @@
 import { z } from "zod";
 import { APP_PACKAGE_NAME, APP_VERSION } from "../config/branding.ts";
+import type {
+	PermissionCheckContext,
+	PermissionDecision,
+} from "../core/permissions/types.ts";
 import { Tool } from "../core/tools/Tool.ts";
 import type { ToolContext } from "../core/tools/ToolContext.ts";
 import { ok, type ToolResult } from "../core/tools/ToolResult.ts";
 import type { PromptContext } from "../prompts/PromptModule.ts";
 import { getToolPrompt } from "../prompts/tools/index.tsx";
 import { readLimitedResponseText } from "../utils/http.ts";
+import { pluralize } from "../utils/string.ts";
 
 const schema = z.object({
 	query: z.string().describe("The search query string"),
@@ -45,6 +50,28 @@ export class WebSearchTool extends Tool<Input, Output> {
 		return getToolPrompt(this.name, context);
 	}
 
+	override isReadOnly(): boolean {
+		return false;
+	}
+
+	override permissionContent(input: Input): string {
+		return input.query;
+	}
+
+	override checkPermissions(
+		_input: Input,
+		ctx: PermissionCheckContext,
+	): PermissionDecision | undefined {
+		if (ctx.mode === "auto") {
+			return { behavior: "allow", reason: "network read (auto mode)" };
+		}
+		return undefined;
+	}
+
+	override isConcurrencySafe(): boolean {
+		return true;
+	}
+
 	override async execute(
 		input: Input,
 		ctx: ToolContext,
@@ -77,7 +104,7 @@ export class WebSearchTool extends Tool<Input, Output> {
 			body,
 			results.length === 0
 				? "No results found"
-				: `Found ${results.length} result${results.length === 1 ? "" : "s"}`,
+				: `Found ${results.length} ${pluralize(results.length, "result")}`,
 		);
 	}
 }

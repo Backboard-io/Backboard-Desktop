@@ -1,8 +1,14 @@
 import { spawn } from "node:child_process";
 import { createAsyncCache } from "../../utils/asyncCache.ts";
+import { stripAnsi } from "../../utils/terminalSafe.ts";
 
 const BASE_URL = "https://skills.sh";
 const MAX_OUTPUT_LENGTH = 4000;
+const MAX_ERROR_DETAIL_LENGTH = 600;
+const MAX_AVAILABLE_SKILLS = 20;
+const NOISE_LINE_PATTERN =
+	/(^Tip:|^Source:|Cloning repositor|Repository cloned|^Found \d+ skills)/i;
+const NO_MATCHING_SKILLS_PATTERN = /No matching skills found/i;
 const DEFAULT_LIST_TIMEOUT_MS = 10_000;
 const DEFAULT_IMPORT_TIMEOUT_MS = 120_000;
 const KILL_GRACE_MS = 2_000;
@@ -42,13 +48,46 @@ export class SkillsShClient {
 		signal?: AbortSignal,
 	): Promise<void> {
 		const { source, slug } = splitSkillsShId(id);
-		await runSkillsCommand(
-			["-y", "skills", "add", source, "--skill", slug, "-a", "universal", "-y"],
-			cwd,
-			{
-				signal,
-				timeoutMs: this.options.importTimeoutMs ?? DEFAULT_IMPORT_TIMEOUT_MS,
-			},
+		try {
+			await runSkillsCommand(
+				[
+					"-y",
+					"skills",
+					"add",
+					source,
+					"--skill",
+					slug,
+					"-a",
+					"universal",
+					"-y",
+				],
+				cwd,
+				{
+					signal,
+					timeoutMs: this.options.importTimeoutMs ?? DEFAULT_IMPORT_TIMEOUT_MS,
+				},
+			);
+		} catch (err) {
+			throw this.describeImportError(err, source, slug);
+		}
+	}
+
+	private describeImportError(
+		err: unknown,
+		source: string,
+		slug: string,
+	): unknown {
+		if (!(err instanceof SkillsCliError)) return err;
+		if (!NO_MATCHING_SKILLS_PATTERN.test(err.output)) return err;
+		this.directoryCache.clear();
+		const available = availableSkillsFromOutput(err.output);
+		const listing =
+			available.length > 0
+				? ` Skills available in that source: ${available.join(", ")}.`
+				: "";
+		return new Error(
+			`Skill "${slug}" was not found in ${source} — the skills.sh listing may be out of date.${listing}`,
+			{ cause: err },
 		);
 	}
 
@@ -68,6 +107,44 @@ export class SkillsShClient {
 
 		return dedupeItems(pages.flat());
 	}
+}
+
+export class SkillsCliError extends Error {
+	constructor(
+		message: string,
+		readonly output: string,
+	) {
+		super(message);
+		this.name = "SkillsCliError";
+	}
+}
+
+export function condenseSkillsCliOutput(output: string): string {
+	const lines = stripAnsi(output)
+		.split(/\r?\n|\r/)
+		.map((line) => line.trim())
+		.filter(isMeaningfulLine);
+	return lines.join("\n").slice(-MAX_ERROR_DETAIL_LENGTH).trim();
+}
+
+export function availableSkillsFromOutput(output: string): string[] {
+	const names: string[] = [];
+	for (const line of stripAnsi(output).split(/\r?\n|\r/)) {
+		const match = /^\s*-\s+([A-Za-z0-9._-]+)\s*$/.exec(line);
+		if (match?.[1]) names.push(match[1]);
+	}
+	if (names.length <= MAX_AVAILABLE_SKILLS) return names;
+	return [
+		...names.slice(0, MAX_AVAILABLE_SKILLS),
+		`… (+${names.length - MAX_AVAILABLE_SKILLS} more)`,
+	];
+}
+
+function isMeaningfulLine(line: string): boolean {
+	if (!line) return false;
+	if (NOISE_LINE_PATTERN.test(line)) return false;
+	const informative = line.match(/[A-Za-z0-9]/g)?.length ?? 0;
+	return informative / line.length >= 0.4;
 }
 
 export function parseSkillsShHtml(html: string): SkillsShListItem[] {
@@ -221,7 +298,7 @@ function runSkillsCommand(
 		const append = (chunk: Buffer): void => {
 			output = `${output}${chunk.toString("utf8")}`.slice(-MAX_OUTPUT_LENGTH);
 		};
-		const detail = (): string => output.trim();
+		const detail = (): string => condenseSkillsCliOutput(output);
 		const cleanup = (clearKillTimeout = true): void => {
 			if (timeout) clearTimeout(timeout);
 			if (clearKillTimeout && killTimeout) clearTimeout(killTimeout);
@@ -272,7 +349,10 @@ function runSkillsCommand(
 				return;
 			}
 			finish(
-				new Error(`skills import failed: ${detail() || `exit code ${code}`}`),
+				new SkillsCliError(
+					`skills import failed: ${detail() || `exit code ${code}`}`,
+					output,
+				),
 			);
 		});
 	});
@@ -307,7 +387,7 @@ function isValidSkillsShSlug(slug: string): boolean {
 }
 
 function isSafeSkillsShSegment(segment: string): boolean {
-	return segment !== "." && segment !== "..";
+	return segment !== "." && segment !== ".." && !segment.startsWith("-");
 }
 
 function cmdSafeArg(value: string): string {

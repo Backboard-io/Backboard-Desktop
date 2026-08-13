@@ -193,6 +193,58 @@ describe("MCP config", () => {
 		).toEqual(["keep", "other"]);
 	});
 
+	it("honors trustToolAnnotations from user config only", async () => {
+		const root = await tempDir();
+		await mkdir(path.join(root, ".git"));
+		await writeJson(path.join(root, ".backboard", "mcp.json"), {
+			mcpServers: {
+				fromProject: {
+					type: "http",
+					url: "https://project.example.com/mcp",
+					trustToolAnnotations: true,
+				},
+			},
+		});
+		const home = await tempDir();
+		await writeJson(path.join(home, ".backboard", "mcp.json"), {
+			mcpServers: {
+				fromUser: {
+					type: "http",
+					url: "https://user.example.com/mcp",
+					trustToolAnnotations: true,
+				},
+			},
+		});
+
+		const config = await loadMcpConfig({ cwd: root, homeDir: home });
+
+		expect(
+			expectServer(config.servers, "fromProject").trustToolAnnotations,
+		).toBe(false);
+		expect(expectServer(config.servers, "fromUser").trustToolAnnotations).toBe(
+			true,
+		);
+		expect(
+			config.warnings.some((warning) =>
+				warning.includes("Ignored trustToolAnnotations"),
+			),
+		).toBe(true);
+	});
+
+	it("defaults trustToolAnnotations to false", async () => {
+		const root = await tempDir();
+		await mkdir(path.join(root, ".git"));
+		await writeJson(path.join(root, ".backboard", "mcp.json"), {
+			mcpServers: { plain: { type: "http", url: "https://example.com/mcp" } },
+		});
+
+		const config = await loadMcpConfig({ cwd: root, homeDir: await tempDir() });
+
+		expect(expectServer(config.servers, "plain").trustToolAnnotations).toBe(
+			false,
+		);
+	});
+
 	it("rejects unsupported SSE servers with a warning", async () => {
 		const root = await tempDir();
 		await mkdir(path.join(root, ".git"));
@@ -247,7 +299,7 @@ describe("MCP config", () => {
 				"MongoDB",
 				"Supabase",
 			]);
-			expect(servers.length).toBeGreaterThan(250);
+			expect(servers.length).toBeGreaterThan(215);
 			expect(
 				servers.find((server) => server.name === "linear")?.config,
 			).toEqual({
@@ -271,11 +323,10 @@ describe("MCP config", () => {
 			expect(servers.find((server) => server.name === "stripe")).toMatchObject({
 				category: "Payments & Commerce",
 				config: {
-					command: "npx",
-					args: ["-y", "@stripe/mcp", "--api-key", envRef("STRIPE_SECRET_KEY")],
-					env: { STRIPE_SECRET_KEY: envRef("STRIPE_SECRET_KEY") },
+					type: "streamable-http",
+					url: "https://mcp.stripe.com",
 				},
-				requiredEnv: ["STRIPE_SECRET_KEY"],
+				requiredEnv: [],
 			});
 			expect(servers.find((server) => server.name === "paypal")).toMatchObject({
 				config: {
@@ -987,6 +1038,7 @@ describe("McpToolAdapter", () => {
 			registeredName: "mcp__linear__search",
 			serverName: "linear",
 			toolName: "search",
+			trustAnnotations: true,
 			description: "Search Linear issues",
 			inputSchema: {
 				$schema: "https://json-schema.org/draft/2020-12/schema",
@@ -1031,12 +1083,56 @@ describe("McpToolAdapter", () => {
 		expect(destructive.isDestructive({})).toBe(true);
 	});
 
+	it("ignores readOnlyHint until the user's config trusts the server", () => {
+		const claimed = { annotations: { readOnlyHint: true } };
+		const untrusted = new McpToolAdapter(
+			fakeDefinition({ ...claimed, trustAnnotations: false }),
+		);
+		const trusted = new McpToolAdapter(
+			fakeDefinition({ ...claimed, trustAnnotations: true }),
+		);
+
+		expect(untrusted.isReadOnly({})).toBe(false);
+		expect(trusted.isReadOnly({})).toBe(true);
+		expect(untrusted.isConcurrencySafe({})).toBe(true);
+	});
+
+	it("hints at trustToolAnnotations only for untrusted read-only claims", () => {
+		const claimed = { annotations: { readOnlyHint: true } };
+		const untrusted = new McpToolAdapter(
+			fakeDefinition({ ...claimed, trustAnnotations: false }),
+		);
+		const trusted = new McpToolAdapter(
+			fakeDefinition({ ...claimed, trustAnnotations: true }),
+		);
+		const unannotated = new McpToolAdapter(
+			fakeDefinition({ trustAnnotations: false }),
+		);
+
+		expect(untrusted.permissionHint({})).toContain("trustToolAnnotations");
+		expect(untrusted.permissionHint({})).toContain("'server'");
+		expect(trusted.permissionHint({})).toBeUndefined();
+		expect(unannotated.permissionHint({})).toBeUndefined();
+	});
+
+	it("keeps a destructive tool out of read-only even when trusted", () => {
+		const tool = new McpToolAdapter(
+			fakeDefinition({
+				annotations: { readOnlyHint: true, destructiveHint: true },
+				trustAnnotations: true,
+			}),
+		);
+
+		expect(tool.isReadOnly({})).toBe(false);
+	});
+
 	it("omits optional null MCP arguments without coercing schema-valid values", async () => {
 		let calledInput: Record<string, unknown> | undefined;
 		const tool = new McpToolAdapter({
 			registeredName: "mcp__notion__notion-update-page",
 			serverName: "notion",
 			toolName: "notion-update-page",
+			trustAnnotations: false,
 			description: "Update a Notion page",
 			inputSchema: {
 				type: "object",
@@ -1539,7 +1635,7 @@ describe("MCP primitive manager", () => {
 });
 
 async function tempDir(): Promise<string> {
-	return mkdtemp(path.join(os.tmpdir(), "q-cli-mcp-"));
+	return mkdtemp(path.join(os.tmpdir(), "cli-mcp-"));
 }
 
 async function writeJson(filePath: string, value: unknown): Promise<void> {
@@ -1565,6 +1661,7 @@ function fakeDefinition(
 		toolName: "tool",
 		description: "",
 		inputSchema: { type: "object" },
+		trustAnnotations: false,
 		timeoutMs: 1_000,
 		call: async () => ({ content: [] }) as McpCallResult,
 		...overrides,
@@ -1577,6 +1674,7 @@ function listedDefinition(toolName: string): McpListedToolDefinition {
 		toolName,
 		description: "",
 		inputSchema: { type: "object" },
+		trustAnnotations: false,
 		timeoutMs: 1_000,
 		call: async () => ({ content: [] }) as McpCallResult,
 	};
@@ -1597,6 +1695,7 @@ function serverConfig(
 		disabledTools: [],
 		disabledPrompts: [],
 		disabledResources: [],
+		trustToolAnnotations: false,
 		timeoutMs: 1_000,
 		...overrides,
 	};

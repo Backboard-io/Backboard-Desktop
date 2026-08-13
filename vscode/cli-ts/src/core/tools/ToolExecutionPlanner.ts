@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/errors.ts";
 import type { ToolCallRef } from "../bus/events.ts";
 import type { HookController } from "../hooks/index.ts";
 import type { Tool } from "./Tool.ts";
@@ -46,6 +47,10 @@ export class ToolExecutionPlanner {
 			}
 			try {
 				const input = tool.parseInput(ref.input);
+				// Trusted hooks force serial execution AND (via the round's
+				// concurrency gate) block early start: user hook commands must
+				// fire exactly once per call id, and a discarded early run
+				// would replay them. Untrusted hooks never execute at all.
 				const hasMatchingToolHooks =
 					this.hookController?.hasTrustedToolHooksFor(ref.name) ?? false;
 				return {
@@ -58,15 +63,11 @@ export class ToolExecutionPlanner {
 			} catch (err) {
 				return {
 					ref,
-					errorOutput: `Error: invalid arguments for "${ref.name}": ${errMessage(err)}`,
+					errorOutput: `Error: invalid arguments for "${ref.name}": ${errorMessage(err)}`,
 					concurrencySafe: false,
 					displayName: tool.displayName,
 				};
 			}
 		});
 	}
-}
-
-function errMessage(err: unknown): string {
-	return err instanceof Error ? err.message : String(err);
 }

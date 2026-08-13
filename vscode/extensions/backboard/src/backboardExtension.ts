@@ -15,10 +15,6 @@ import { codiconsStylesheetUri, fontBaseUri, iconBaseUri, panelHtml, webviewLoca
 import { initializeBackboardUpdates, readCurrentAppVersion } from './updates';
 import type { BackboardAttachment, BackboardConfigJson, BackboardDeviceCodeResponse, BackboardOAuthSaveResult, BackboardOAuthTokens, BridgeEvent, BridgeModel, FileAttachment, FileChangePayload, ImageAttachment, ModelCacheEntry, PanelOptions, PanelPersistedState, PanelStateStore, PanelThreadFile, PendingRequest, ResponseSink, ToolCacheEntry, ToolResultRequest, VoiceAttachment } from './types';
 
-const BACKBOARD_DOCUMENT_INDEX_TIMEOUT_MS = 90_000;
-const BACKBOARD_DOCUMENT_POLL_INTERVAL_MS = 1_000;
-
-
 type BackboardSettings = ReturnType<typeof readSettings>;
 const hiddenModelProviders = new Set(['featherless', 'elevenlabs', 'eleven-labs', 'speechmatics']);
 const panelStateStorageKeyPrefix = 'backboard.panel.state.';
@@ -511,6 +507,9 @@ function isBackboardAuthError(error: unknown): boolean {
 }
 
 function unsupportedVoiceModeMessage(voiceMode: string): string | undefined {
+	if (voiceMode === 'tts') {
+		return 'Speech synthesis is not available in the public Backboard R-CLI runtime.';
+	}
 	if (voiceMode === 'stt' || voiceMode === 'conversation') {
 		return 'This voice mode needs microphone audio. Click the mic, record, then click it again to send.';
 	}
@@ -1673,7 +1672,7 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 		const content = prompt.trim() || 'Please transcribe this audio and respond.';
 		const attachments = backboardAttachments(image, files);
 		let boundThreadId = readBackboardThreadId(existingEntry);
-		const modelContent = promptWithBackboardDocuments(content, attachments);
+		const modelContent = content;
 		const imageGeneration = imageGenerationForPrompt(modelContent, settings.imageGeneration);
 		const liveStartedAt = Date.now();
 		const existingMessages = normalizePanelMessages(existingEntry?.messages);
@@ -1733,7 +1732,6 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 		const pendingToolRequests: ToolResultRequest[] = [];
 		const seenToolRequests = new Set<string>();
 		try {
-			boundThreadId = await uploadBackboardDocuments(this.bridge, sessionId, boundThreadId, attachments, settings, token);
 			let currentToolRequest: ToolResultRequest | undefined;
 			// The serve submit op carries no tool schemas (cli-ts owns tool
 			// execution), so the trimmed tool list only feeds the legacy
@@ -1755,6 +1753,7 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 				imageGeneration: imageGeneration === 'auto' ? 'auto' : undefined,
 				voiceMode,
 				audioFile: audio,
+				files: attachments,
 				mcpCalls: mcpCallsPayload(settings),
 				config: settings.config
 			}, event => {
@@ -2289,6 +2288,9 @@ class BackboardBridge implements vscode.Disposable {
 		const payload = isObjectRecord(record.payload) ? record.payload : {};
 		switch (record.type) {
 			case 'serve:turn':
+				if (typeof payload.threadId === 'string' && payload.threadId) {
+					this.deliver({ type: 'sessionBinding', requestId, threadId: payload.threadId });
+				}
 				this.deliver({ type: 'done', requestId, stopReason: typeof payload.status === 'string' ? payload.status : 'end_turn' });
 				return;
 			case 'serve:models':
@@ -2358,16 +2360,9 @@ class BackboardBridge implements vscode.Disposable {
 			case 'tool:error':
 				this.deliver({ type: 'progress', requestId, message: `${event.name ?? 'Tool'} failed: ${event.error ?? 'unknown error'}` });
 				return;
-			case 'permission:request':
-				// The panel has no approval UI; it always submits with the
-				// auto-approve policy, so this is a belt-and-braces answer.
-				if (event.request?.id) {
-					this.write({ op: 'respondPermission', id: event.request.id, decision: 'approve' });
-				}
-				return;
 			case 'input:request':
 				if (event.request?.id) {
-					this.write({ op: 'respondInput', id: event.request.id, answer: '' });
+					this.write({ op: 'respondInput', id: event.request.id, answers: [] });
 					this.deliver({ type: 'progress', requestId, message: 'Skipped an agent question (not supported in this panel).' });
 				}
 				return;
@@ -2413,7 +2408,10 @@ interface ServeAgentEvent {
 	readonly usage?: unknown;
 	readonly records?: unknown[];
 	readonly phase?: 'preparing' | 'generating';
-	readonly request?: { readonly id?: string };
+	readonly request?: {
+		readonly id?: string;
+		readonly questions?: readonly { readonly header?: string; readonly question: string; readonly options: readonly string[] }[];
+	};
 }
 
 /** Serve ops for commands that still cross the wire; the rest resolve synthetically. */
@@ -2424,10 +2422,12 @@ function buildServeOp(command: string, requestId: string, params: unknown): Reco
 		const model = typeof record.model === 'string' ? record.model : 'deepseek/deepseek-v4-flash';
 		const mode = typeof record.mode === 'string' ? record.mode : 'free';
 		const intensity = typeof record.intensity === 'string' ? record.intensity : undefined;
-		const voiceMode = typeof record.voiceMode === 'string' ? record.voiceMode : 'off';
-		const voice = voiceConfigForMode(voiceMode);
-		const audioFile = serveAudioFile(record.audioFile);
-		// No approval or question UI exists in this panel: run auto-approved,
+		const audioFile = serveFileAttachment(record.audioFile);
+		const files = [
+			...(Array.isArray(record.files) ? record.files.map(serveFileAttachment).filter((file): file is Record<string, string> => !!file) : []),
+			...(audioFile ? [audioFile] : []),
+		];
+		// No approval or question UI exists in this panel: run in bypass mode,
 		// hide AskUser, and in manual/ask modes hide write tools entirely
 		// (parity with the old bridge's manual-mode denials).
 		const excludedTools = mode === 'manual' || mode === 'ask'
@@ -2440,11 +2440,10 @@ function buildServeOp(command: string, requestId: string, params: unknown): Reco
 			prompt: typeof record.content === 'string' ? record.content : '',
 			...(typeof record.threadId === 'string' && record.threadId ? { threadId: record.threadId } : {}),
 			model: `${provider}/${model}`,
-			permission: 'autoApprove',
+			permission: 'bypass',
 			excludedTools,
 			...(thinking ? { thinking } : {}),
-			...(voice ? { voice } : {}),
-			...(audioFile ? { audioFile } : {}),
+			...(files.length ? { files } : {}),
 		};
 	}
 	if (command === 'listModels') {
@@ -2456,22 +2455,7 @@ function buildServeOp(command: string, requestId: string, params: unknown): Reco
 	return { op: command, requestId };
 }
 
-function voiceConfigForMode(voiceMode: string): Record<string, unknown> | undefined {
-	const stt = { provider: 'openai', model: 'gpt-4o-mini-transcribe', language: 'en' };
-	const tts = { provider: 'openai', model: 'tts-1', voice: 'alloy', output_format: 'mp3' };
-	if (voiceMode === 'stt') {
-		return { stt };
-	}
-	if (voiceMode === 'tts') {
-		return { tts };
-	}
-	if (voiceMode === 'conversation') {
-		return { stt, tts };
-	}
-	return undefined;
-}
-
-function serveAudioFile(value: unknown): Record<string, string> | undefined {
+function serveFileAttachment(value: unknown): Record<string, string> | undefined {
 	if (!isObjectRecord(value) || !Array.isArray(value.data) || typeof value.fileName !== 'string' || typeof value.mimeType !== 'string') {
 		return undefined;
 	}
@@ -3264,249 +3248,6 @@ function backboardAttachments(image: ImageAttachment | undefined, files: readonl
 		...(image ? [{ data: image.data, fileName: image.fileName, mimeType: image.mimeType }] : []),
 		...files.map(file => ({ data: file.data, fileName: file.fileName, mimeType: file.mimeType })),
 	];
-}
-
-function promptWithBackboardDocuments(prompt: string, attachments: readonly BackboardAttachment[]): string {
-	if (!attachments.length) {
-		return prompt;
-	}
-	const list = attachments.map((attachment, index) => `${index + 1}. ${attachment.fileName}`).join('\n');
-	return `${prompt}\n\nThe user attached the following file(s) to this Backboard thread as indexed documents:\n${list}\n\nThese files were uploaded to Backboard thread documents and must be handled through Backboard document retrieval, not as inline attachments. Do not claim to directly view, OCR, or visually inspect the raw files. Use the indexed Backboard thread documents when answering. If a file's indexed content is unavailable, say that Backboard document retrieval did not return usable content for that file.`;
-}
-
-function stringAtBackboardPath(value: unknown, path: readonly string[]): string | undefined {
-	let current: unknown = value;
-	for (const segment of path) {
-		if (!isObjectRecord(current)) {
-			return undefined;
-		}
-		current = current[segment];
-	}
-	return typeof current === 'string' && current.trim() ? current : undefined;
-}
-
-function backboardThreadIdFromValue(value: unknown): string | undefined {
-	for (const candidate of [
-		['thread_id'],
-		['threadId'],
-		['thread', 'id'],
-		['thread', 'thread_id'],
-		['data', 'thread_id'],
-		['data', 'threadId'],
-		['data', 'thread', 'id'],
-		['message', 'thread_id'],
-		['message', 'threadId'],
-		['run', 'thread_id'],
-		['run', 'threadId'],
-	] as const) {
-		const resolved = stringAtBackboardPath(value, candidate);
-		if (resolved) {
-			return resolved;
-		}
-	}
-	return undefined;
-}
-
-function backboardDocumentIdFromValue(value: unknown): string | undefined {
-	for (const candidate of [
-		['id'],
-		['document_id'],
-		['documentId'],
-		['document', 'id'],
-		['data', 'id'],
-		['data', 'document_id'],
-		['data', 'documentId'],
-		['data', 'document', 'id'],
-	] as const) {
-		const resolved = stringAtBackboardPath(value, candidate);
-		if (resolved) {
-			return resolved;
-		}
-	}
-	return undefined;
-}
-
-function backboardDocumentStatusFromValue(value: unknown): string | undefined {
-	for (const candidate of [
-		['status'],
-		['document_status'],
-		['documentStatus'],
-		['document', 'status'],
-		['data', 'status'],
-		['data', 'document_status'],
-		['data', 'documentStatus'],
-		['data', 'document', 'status'],
-	] as const) {
-		const resolved = stringAtBackboardPath(value, candidate);
-		if (resolved) {
-			return resolved.toLowerCase();
-		}
-	}
-	return undefined;
-}
-
-async function waitForBackboardDelay(ms: number, token: vscode.CancellationToken): Promise<void> {
-	await new Promise<void>(resolve => {
-		const handle = setTimeout(resolve, ms);
-		token.onCancellationRequested(() => {
-			clearTimeout(handle);
-			resolve();
-		});
-	});
-}
-
-async function withBackboardTempAttachmentFile<T>(attachment: BackboardAttachment, callback: (filePath: string) => Promise<T>): Promise<T> {
-	const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'backboard-document-'));
-	const filePath = path.join(tempDir, backboardTempAttachmentFileName(attachment));
-	try {
-		logBackboardDocumentDiagnostic('temp_file_created', {
-			tempDir,
-			filePath,
-			fileName: attachment.fileName,
-			mimeType: attachment.mimeType,
-			bytes: attachment.data.length,
-		});
-		await fs.promises.writeFile(filePath, Buffer.from(attachment.data));
-		return await callback(filePath);
-	} finally {
-		logBackboardDocumentDiagnostic('temp_file_cleanup', { tempDir, filePath, fileName: attachment.fileName });
-		await fs.promises.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
-	}
-}
-
-function backboardTempAttachmentFileName(attachment: BackboardAttachment): string {
-	const baseName = path.basename(attachment.fileName).replace(/[\\/:*?"<>|]/g, '_');
-	return baseName || 'attachment.bin';
-}
-
-async function ensureBackboardDocumentThreadId(
-	bridge: BackboardBridge,
-	_sessionId: string,
-	threadId: string | undefined,
-	settings: BackboardSettings,
-	token: vscode.CancellationToken
-): Promise<string> {
-	if (threadId) {
-		logBackboardDocumentDiagnostic('thread_reuse', { sessionId: _sessionId, threadId });
-		return threadId;
-	}
-	logBackboardDocumentDiagnostic('thread_bootstrap_start', {
-		sessionId: _sessionId,
-		panelStatePath: backboardPanelStatePath(),
-		threadsDir: backboardThreadsDir(),
-		env: currentBackboardEnv(),
-		provider: settings.defaultProvider,
-		model: settings.defaultModel,
-		webSearch: settings.webSearch,
-	});
-	const response = await bridge.callApi('sendMessage', {
-		body: {
-			content: 'Attachment upload bootstrap.',
-			llm_provider: settings.defaultProvider,
-			model_name: settings.defaultModel,
-			memory: 'off',
-			web_search: settings.webSearch,
-			send_to_llm: false,
-		}
-	}, token);
-	const createdThreadId = backboardThreadIdFromValue(response);
-	logBackboardDocumentDiagnostic('thread_bootstrap_response', {
-		sessionId: _sessionId,
-		response,
-		createdThreadId,
-	});
-	if (!createdThreadId) {
-		throw new Error('Backboard did not return a thread ID while preparing document upload.');
-	}
-	return createdThreadId;
-}
-
-async function waitForBackboardDocumentIndexed(
-	bridge: BackboardBridge,
-	documentId: string,
-	fileName: string,
-	token: vscode.CancellationToken
-): Promise<void> {
-	const deadline = Date.now() + BACKBOARD_DOCUMENT_INDEX_TIMEOUT_MS;
-	let attempt = 0;
-	while (!token.isCancellationRequested && Date.now() < deadline) {
-		attempt++;
-		const statusResponse = await bridge.callApi('getDocumentStatus', { documentId }, token);
-		const status = backboardDocumentStatusFromValue(statusResponse);
-		logBackboardDocumentDiagnostic('document_status_poll', {
-			documentId,
-			fileName,
-			attempt,
-			status,
-			response: statusResponse,
-			remainingMs: Math.max(0, deadline - Date.now()),
-		});
-		if (status === 'indexed' || status === 'ready' || status === 'completed' || status === 'complete') {
-			return;
-		}
-		if (status === 'failed' || status === 'error' || status === 'cancelled') {
-			throw new Error(`Backboard could not index ${fileName} (status: ${status}).`);
-		}
-		await waitForBackboardDelay(BACKBOARD_DOCUMENT_POLL_INTERVAL_MS, token);
-	}
-	if (token.isCancellationRequested) {
-		throw new Error('Backboard document upload was cancelled.');
-	}
-	throw new Error(`Backboard did not finish indexing ${fileName} within ${Math.round(BACKBOARD_DOCUMENT_INDEX_TIMEOUT_MS / 1000)} seconds.`);
-}
-
-async function uploadBackboardDocuments(
-	bridge: BackboardBridge,
-	sessionId: string,
-	threadId: string | undefined,
-	attachments: readonly BackboardAttachment[],
-	settings: BackboardSettings,
-	token: vscode.CancellationToken
-): Promise<string | undefined> {
-	if (!attachments.length) {
-		logBackboardDocumentDiagnostic('upload_skipped_no_attachments', { sessionId, threadId });
-		return threadId;
-	}
-	logBackboardDocumentDiagnostic('upload_start', {
-		sessionId,
-		incomingThreadId: threadId,
-		attachmentCount: attachments.length,
-		attachments: attachments.map(attachment => ({
-			fileName: attachment.fileName,
-			mimeType: attachment.mimeType,
-			bytes: attachment.data.length,
-		})),
-	});
-	const ensuredThreadId = await ensureBackboardDocumentThreadId(bridge, sessionId, threadId, settings, token);
-	logBackboardDocumentDiagnostic('upload_thread_ready', { sessionId, threadId: ensuredThreadId });
-	for (const attachment of attachments) {
-		await withBackboardTempAttachmentFile(attachment, async filePath => {
-			logBackboardDocumentDiagnostic('document_upload_request', {
-				threadId: ensuredThreadId,
-				filePath,
-				fileName: attachment.fileName,
-				mimeType: attachment.mimeType,
-				bytes: attachment.data.length,
-			});
-			const uploadResponse = await bridge.callApi('uploadThreadDocument', {
-				threadId: ensuredThreadId,
-				filePath,
-			}, token);
-			const documentId = backboardDocumentIdFromValue(uploadResponse);
-			logBackboardDocumentDiagnostic('document_upload_response', {
-				threadId: ensuredThreadId,
-				fileName: attachment.fileName,
-				documentId,
-				response: uploadResponse,
-			});
-			if (!documentId) {
-				throw new Error(`Backboard did not return a document ID for ${attachment.fileName}.`);
-			}
-			await waitForBackboardDocumentIndexed(bridge, documentId, attachment.fileName, token);
-		});
-	}
-	logBackboardDocumentDiagnostic('upload_complete', { sessionId, threadId: ensuredThreadId });
-	return ensuredThreadId;
 }
 
 function isBackboardAttachmentTool(name: string): boolean {

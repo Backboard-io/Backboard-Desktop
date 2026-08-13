@@ -15,6 +15,7 @@ import type { ToolContext } from "../src/core/tools/ToolContext.ts";
 import { BackboardClient } from "../src/providers/backboard/BackboardClient.ts";
 import type { AgentTool } from "../src/tools/AgentTool.tsx";
 import { createDefaultTools } from "../src/tools/index.ts";
+import { truncate } from "../src/utils/string.ts";
 
 interface EvalCase {
 	name: string;
@@ -99,10 +100,6 @@ function buildHaystack(
 		);
 	}
 	return out.join("\n");
-}
-
-function truncate(text: string, max: number): string {
-	return text.length > max ? `${text.slice(0, max)}...` : text;
 }
 
 main().catch((err) => {

@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { z } from "zod";
+import { errorMessage } from "../../utils/errors.ts";
 import { HOOK_EVENT_NAMES, isToolHookEvent } from "./constants.ts";
 import { hookDefinitionHash } from "./hash.ts";
 import { validateHookMatcher } from "./matcher.ts";
@@ -105,11 +106,7 @@ function readHookConfig(
 		return {
 			config: {},
 			source,
-			warnings: [
-				`Skipped hooks in ${path}: ${
-					err instanceof Error ? err.message : String(err)
-				}`,
-			],
+			warnings: [`Skipped hooks in ${path}: ${errorMessage(err)}`],
 		};
 	}
 }

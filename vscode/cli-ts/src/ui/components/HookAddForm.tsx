@@ -9,7 +9,10 @@ import {
 	isToolHookEvent,
 	validateHookMatcher,
 } from "../../core/hooks/index.ts";
+import { useAsyncAction } from "../hooks/useAsyncAction.ts";
 import { theme } from "../theme/theme.ts";
+import { ErrorLine } from "./ErrorLine.tsx";
+import { HintFooter } from "./HintFooter.tsx";
 import { HookPanel } from "./HookShared.tsx";
 import { MatcherAutocomplete } from "./MatcherAutocomplete.tsx";
 import { Spinner } from "./Spinner.tsx";
@@ -50,11 +53,11 @@ export function HookAddForm({
 	const [matcher, setMatcher] = useState(initialMatcher ?? "");
 	const [command, setCommand] = useState("");
 	const [name, setName] = useState("");
-	const [error, setError] = useState<string | null>(null);
-	const [submitting, setSubmitting] = useState(false);
+	const action = useAsyncAction();
+	const { setError } = action;
 
 	useInput((_input, key) => {
-		if (submitting) return;
+		if (action.running) return;
 		if (step === "scope") {
 			if (key.escape) {
 				onCancel();
@@ -94,23 +97,20 @@ export function HookAddForm({
 	};
 
 	const finish = (): void => {
-		if (submitting) return;
-		setSubmitting(true);
-		setError(null);
-		Promise.resolve(
-			onSubmit({
-				scope,
-				event,
-				...(isToolHookEvent(event) ? { matcher: matcher.trim() } : {}),
-				command: command.trim(),
-				...(name.trim() ? { name: name.trim() } : {}),
-			}),
-		)
-			.catch((err) => {
-				setError(err instanceof Error ? err.message : String(err));
+		action.run("Saving hook", async () => {
+			try {
+				await onSubmit({
+					scope,
+					event,
+					...(isToolHookEvent(event) ? { matcher: matcher.trim() } : {}),
+					command: command.trim(),
+					...(name.trim() ? { name: name.trim() } : {}),
+				});
+			} catch (err) {
 				setStep("command");
-			})
-			.finally(() => setSubmitting(false));
+				throw err;
+			}
+		});
 	};
 
 	return (
@@ -186,12 +186,12 @@ export function HookAddForm({
 					</Box>
 				</Box>
 			) : null}
-			{error ? <Text color={theme.error}>{error}</Text> : null}
-			{submitting ? <Spinner label="Saving hook" /> : null}
+			<ErrorLine error={action.error} />
+			{action.running ? (
+				<Spinner label={action.label ?? "Saving hook"} />
+			) : null}
 			{step === "matcher" ? null : (
-				<Box marginTop={1}>
-					<Text color={theme.subtle}>Enter to continue · Esc to cancel</Text>
-				</Box>
+				<HintFooter hints={["Enter continue", "Esc cancel"]} />
 			)}
 		</HookPanel>
 	);

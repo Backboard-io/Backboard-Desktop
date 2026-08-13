@@ -180,6 +180,10 @@ export class RightWorkbenchViewPane extends ViewPane {
 		return this.environmentService.isOptimusWindow && this.editorSidebarEnabled;
 	}
 
+	private get useSimpleRightWorkbench(): boolean {
+		return !this.environmentService.isOptimusWindow && !this.environmentService.isJarvisWindow;
+	}
+
 	constructor(
 		options: IViewPaneOptions,
 		@IKeybindingService keybindingService: IKeybindingService,
@@ -808,9 +812,32 @@ export class RightWorkbenchViewPane extends ViewPane {
 
 	private renderLauncher(container: HTMLElement): void {
 		const center = append(container, $('.sessions-right-workbench-launcher-center'));
+		if (this.useSimpleRightWorkbench) {
+			center.tabIndex = 0;
+			center.ariaLabel = localize('rightWorkbench.openSurface', "Open a surface");
+			append(center, $('h3.sessions-right-workbench-launcher-title', {}, localize('rightWorkbench.openSurface', "Open a surface")));
+			append(center, $('p.sessions-right-workbench-launcher-description', {}, localize('rightWorkbench.chooseSurface', "Choose what to show in the right panel.")));
+		}
 		const rows = append(center, $('.sessions-right-workbench-launcher-rows'));
-		for (const entry of this.getModeEntries()) {
+		const entries = this.getModeEntries();
+		for (const entry of entries) {
 			this.renderLauncherRow(rows, entry);
+		}
+		if (this.useSimpleRightWorkbench) {
+			this.domStore.add(addDisposableListener(center, EventType.KEY_DOWN, event => {
+				const keyboardEvent = event as KeyboardEvent;
+				if (keyboardEvent.metaKey || keyboardEvent.ctrlKey || keyboardEvent.altKey || keyboardEvent.isComposing) {
+					return;
+				}
+				const entry = entries.find(candidate => candidate.shortcut.toLowerCase() === keyboardEvent.key.toLowerCase());
+				if (!entry) {
+					return;
+				}
+				keyboardEvent.preventDefault();
+				keyboardEvent.stopPropagation();
+				void this.openMode(entry.mode);
+			}));
+			center.focus();
 		}
 	}
 
@@ -819,6 +846,9 @@ export class RightWorkbenchViewPane extends ViewPane {
 		button.type = 'button';
 		button.appendChild(renderIcon(entry.icon));
 		append(button, $('.sessions-right-workbench-launcher-label', {}, entry.label));
+		if (this.useSimpleRightWorkbench) {
+			append(button, $('.sessions-right-workbench-launcher-card-description', {}, this.getLauncherDescription(entry.mode)));
+		}
 		if (entry.shortcut) {
 			append(button, $('.sessions-right-workbench-launcher-shortcut', {}, entry.shortcut));
 		}
@@ -911,12 +941,35 @@ export class RightWorkbenchViewPane extends ViewPane {
 	}
 
 	private getModeEntries(): readonly IRightWorkbenchModeEntry[] {
+		if (!this.useSimpleRightWorkbench) {
+			return [
+				{ mode: 'review', icon: Codicon.diffMultiple, label: localize('rightWorkbench.review', "Review"), shortcut: '⌃⇧G' },
+				{ mode: 'terminal', icon: Codicon.terminal, label: localize('rightWorkbench.terminal', "Terminal"), shortcut: '' },
+				{ mode: 'browser', icon: Codicon.globe, label: localize('rightWorkbench.browser', "Browser"), shortcut: '⌘T' },
+				{ mode: 'files', icon: Codicon.folder, label: localize('rightWorkbench.files', "Files"), shortcut: '⌘P' },
+			];
+		}
 		return [
-			{ mode: 'review', icon: Codicon.diffMultiple, label: localize('rightWorkbench.review', "Review"), shortcut: '⌃⇧G' },
-			{ mode: 'terminal', icon: Codicon.terminal, label: localize('rightWorkbench.terminal', "Terminal"), shortcut: '' },
-			{ mode: 'browser', icon: Codicon.globe, label: localize('rightWorkbench.browser', "Browser"), shortcut: '⌘T' },
-			{ mode: 'files', icon: Codicon.folder, label: localize('rightWorkbench.files', "Files"), shortcut: '⌘P' },
+			{ mode: 'browser', icon: Codicon.globe, label: localize('rightWorkbench.browser', "Browser"), shortcut: 'B' },
+			{ mode: 'terminal', icon: Codicon.terminal, label: localize('rightWorkbench.terminal', "Terminal"), shortcut: 'T' },
+			{ mode: 'files', icon: Codicon.folder, label: localize('rightWorkbench.files', "Files"), shortcut: 'F' },
+			{ mode: 'review', icon: Codicon.diffMultiple, label: localize('rightWorkbench.diff', "Diff"), shortcut: 'D' },
 		];
+	}
+
+	private getLauncherDescription(mode: RightWorkbenchMode): string {
+		switch (mode) {
+			case 'browser':
+				return localize('rightWorkbench.browserDescription', "Open a local app or URL.");
+			case 'terminal':
+				return localize('rightWorkbench.terminalDescription', "Start a shell in this workspace.");
+			case 'files':
+				return localize('rightWorkbench.filesDescription', "Browse and read workspace files.");
+			case 'review':
+				return localize('rightWorkbench.diffDescription', "Review changes in this thread.");
+			default:
+				return '';
+		}
 	}
 
 	private getEditorModeEntries(): readonly IRightWorkbenchModeEntry[] {
@@ -989,7 +1042,9 @@ export class RightWorkbenchViewPane extends ViewPane {
 			case 'editor':
 				return localize('rightWorkbench.editor', "Editor");
 			case 'review':
-				return localize('rightWorkbench.review', "Review");
+				return this.useSimpleRightWorkbench
+					? localize('rightWorkbench.diff', "Diff")
+					: localize('rightWorkbench.review', "Review");
 			case 'browser':
 				return localize('rightWorkbench.newTab', "New tab");
 			case 'files':

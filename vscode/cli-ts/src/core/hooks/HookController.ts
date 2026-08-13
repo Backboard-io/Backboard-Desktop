@@ -33,7 +33,7 @@ export class HookController {
 	private hooks: readonly LoadedHook[];
 	private readonly bus: EventBus;
 	private readonly cwd: string;
-	private readonly sessionId: string;
+	private sessionId: string;
 	private readonly projectDir: string;
 	private readonly sessionContext: string[] = [];
 
@@ -43,6 +43,10 @@ export class HookController {
 		this.cwd = options.cwd;
 		this.sessionId = options.sessionId;
 		this.projectDir = options.projectDir ?? findRepoRoot(options.cwd);
+	}
+
+	setSessionId(sessionId: string): void {
+		this.sessionId = sessionId;
 	}
 
 	get baseContext(): string {

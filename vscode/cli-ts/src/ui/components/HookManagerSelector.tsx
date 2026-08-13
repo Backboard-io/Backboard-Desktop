@@ -1,13 +1,17 @@
 import { Box, Text, useInput } from "ink";
 import type React from "react";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import type {
 	HookEventName,
 	HookEventSummary,
 	HookManagerSnapshot,
 } from "../../core/hooks/index.ts";
-import { useTheme } from "../theme/ThemeProvider.tsx";
+import { pluralize } from "../../utils/string.ts";
+import { useListSelection } from "../hooks/useListSelection.ts";
 import { theme } from "../theme/theme.ts";
+import { HintFooter } from "./HintFooter.tsx";
+import { HookPanel } from "./HookShared.tsx";
+import { SelectRow } from "./SelectRow.tsx";
 
 export interface HookManagerSelection {
 	type: "event";
@@ -39,74 +43,45 @@ export function HookManagerSelector({
 	onSelect,
 	onCancel,
 }: Props): React.ReactElement {
-	const uiTheme = useTheme();
 	const items = useMemo(() => hookManagerItems(snapshot), [snapshot]);
-	const [selectedIndex, setSelectedIndex] = useState(0);
+	const selection = useListSelection(items.length, { digitJump: true });
 	const selected =
-		items[Math.min(selectedIndex, Math.max(0, items.length - 1))];
+		items[Math.min(selection.index, Math.max(0, items.length - 1))];
 
 	useInput((input, key) => {
 		if (key.escape || input.toLowerCase() === "q") {
 			onCancel();
 			return;
 		}
-		if (key.upArrow) {
-			setSelectedIndex((index) => (index <= 0 ? items.length - 1 : index - 1));
-			return;
-		}
-		if (key.downArrow) {
-			setSelectedIndex((index) => (index >= items.length - 1 ? 0 : index + 1));
-			return;
-		}
-		if (/^[1-9]$/.test(input)) {
-			const index = Number(input) - 1;
-			if (index >= 0 && index < items.length) setSelectedIndex(index);
-			return;
-		}
+		if (selection.onInput(input, key)) return;
 		if (key.return && selected) {
 			onSelect({ type: "event", event: selected.event });
 		}
 	});
 
 	return (
-		<Box flexDirection="column">
-			<Box
-				flexDirection="column"
-				marginTop={1}
-				paddingX={2}
-				paddingY={1}
-				width="100%"
-				backgroundColor={uiTheme.inputSurfaceBackground}
-			>
-				<Box marginBottom={1}>
-					<Text color={theme.text} bold>
-						Hooks
-					</Text>
-				</Box>
+		<HookPanel>
+			<Text color={theme.subtle}>
+				{snapshot.hooks.length} {pluralize(snapshot.hooks.length, "hook")}{" "}
+				configured
+			</Text>
+			<Box marginTop={1}>
 				<Text color={theme.subtle}>
-					{snapshot.hooks.length} hook{snapshot.hooks.length === 1 ? "" : "s"}{" "}
-					configured
+					Open an event to add or remove personal hooks.
 				</Text>
-				<Box marginTop={1}>
-					<Text color={theme.subtle}>
-						Open an event to add or remove personal hooks.
-					</Text>
-				</Box>
-				<Box marginTop={1} flexDirection="column">
-					{items.map((item, index) => (
-						<HookManagerRow
-							key={item.id}
-							index={index}
-							item={item}
-							selected={item === selected}
-						/>
-					))}
-				</Box>
-				<Box marginTop={1}>
-					<Text color={theme.subtle}>Enter to open · Esc cancel</Text>
-				</Box>
 			</Box>
-		</Box>
+			<Box marginTop={1} flexDirection="column">
+				{items.map((item, index) => (
+					<HookManagerRow
+						key={item.id}
+						index={index}
+						item={item}
+						selected={item === selected}
+					/>
+				))}
+			</Box>
+			<HintFooter hints={["Enter open", "Esc cancel"]} />
+		</HookPanel>
 	);
 }
 
@@ -120,9 +95,8 @@ function HookManagerRow({
 	selected: boolean;
 }): React.ReactElement {
 	return (
-		<Box>
+		<SelectRow selected={selected}>
 			<Text color={selected ? theme.accentBright : theme.subtle}>
-				{selected ? "› " : "  "}
 				{`${index + 1}.`.padStart(3)}{" "}
 			</Text>
 			<Text color={selected ? theme.accentBright : theme.text} bold={selected}>
@@ -132,7 +106,7 @@ function HookManagerRow({
 				{" "}
 				{item.event.description}
 			</Text>
-		</Box>
+		</SelectRow>
 	);
 }
 

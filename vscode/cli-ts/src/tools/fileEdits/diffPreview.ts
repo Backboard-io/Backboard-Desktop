@@ -1,4 +1,5 @@
 import type { ToolResultDetailLine } from "../../core/tools/ToolResultDetail.ts";
+import { expandTabs } from "../../utils/string.ts";
 
 type DiffKind = "context" | "add" | "remove";
 
@@ -357,7 +358,9 @@ function formatNumber(value: number | "", width: number): string {
 }
 
 function formatText(text: string): string {
-	return text === FINAL_NEWLINE_SENTINEL ? FINAL_NEWLINE_DISPLAY : text;
+	return text === FINAL_NEWLINE_SENTINEL
+		? FINAL_NEWLINE_DISPLAY
+		: expandTabs(text);
 }
 
 function splitDisplayLines(

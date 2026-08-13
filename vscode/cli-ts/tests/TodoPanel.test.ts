@@ -80,13 +80,43 @@ describe("TodoPanel", () => {
 		});
 	});
 
-	it("summarizes compact todos with the active item", () => {
+	it("summarizes compact todos with the active item, counting only outstanding work", () => {
+		// One completed + one active + one pending: the (+N) badge should count
+		// only the pending item, not the completed sibling that stays in the list.
 		expect(
 			compactTodoSummary([
 				{ id: "1", content: "done", status: "completed" },
 				{ id: "2", content: "active", status: "in_progress" },
 				{ id: "3", content: "next", status: "pending" },
 			]),
-		).toBe("[>] active (+2)");
+		).toBe("[>] active (+1)");
+	});
+
+	it("omits the badge when the active item is the only outstanding work", () => {
+		expect(
+			compactTodoSummary([
+				{ id: "1", content: "done", status: "completed" },
+				{ id: "2", content: "active", status: "in_progress" },
+			]),
+		).toBe("[>] active");
+	});
+
+	it("summarizes compact todos without an active item", () => {
+		expect(
+			compactTodoSummary([
+				{ id: "1", content: "done", status: "completed" },
+				{ id: "2", content: "next", status: "pending" },
+				{ id: "3", content: "later", status: "pending" },
+			]),
+		).toBe("2 pending, 1 done");
+	});
+
+	it("summarizes compact todos when everything is done", () => {
+		expect(
+			compactTodoSummary([
+				{ id: "1", content: "done", status: "completed" },
+				{ id: "2", content: "also done", status: "completed" },
+			]),
+		).toBe("2 done");
 	});
 });

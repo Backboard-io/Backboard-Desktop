@@ -3,7 +3,10 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentTraceContext } from "../src/core/agent/AgentTraceStore.ts";
-import { SubAgentRunner } from "../src/core/agent/SubAgentRunner.ts";
+import {
+	SubAgentRunner,
+	type SubAgentRunParams,
+} from "../src/core/agent/SubAgentRunner.ts";
 import { EventBus } from "../src/core/bus/EventBus.ts";
 import type { OpenAITool } from "../src/core/tools/schema.ts";
 import type { Tool } from "../src/core/tools/Tool.ts";
@@ -196,7 +199,7 @@ describe("SubAgentRunner", () => {
 	});
 
 	it("records worker child events when trace logging is configured", async () => {
-		const dir = await mkdtemp(join(tmpdir(), "q-cli-worker-trace-"));
+		const dir = await mkdtemp(join(tmpdir(), "cli-worker-trace-"));
 		try {
 			const client = new CompletingClient();
 			const runner = runnerWith(client, []);
@@ -278,5 +281,55 @@ describe("SubAgentRunner", () => {
 		expect(result.report).toBe("child done");
 		expect(parentTodoUpdates).toEqual([]);
 		expect(childProgress).toHaveLength(1);
+	});
+
+	it("stops relaying child events once the parent signal is aborted", () => {
+		const parentBus = new EventBus();
+		const relayed: string[] = [];
+		parentBus.on("agent:child_tool_start", () => relayed.push("start"));
+		parentBus.on("agent:child_tool_result", () => relayed.push("result"));
+
+		const childBus = new EventBus();
+		const controller = new AbortController();
+		const runner = runnerWith(new CompletingClient(), []);
+		const detach = (
+			runner as unknown as {
+				attachParentProgressRelay: (
+					params: SubAgentRunParams,
+					bus: EventBus,
+				) => () => void;
+			}
+		).attachParentProgressRelay(
+			{
+				prompt: "x",
+				depth: 1,
+				parentCwd: process.cwd(),
+				parentSignal: controller.signal,
+				parentBus,
+				parentToolCallId: "agent_1",
+			},
+			childBus,
+		);
+
+		childBus.emit({
+			type: "tool:start",
+			toolCallId: "c1",
+			name: "Read",
+			inputSummary: "",
+		});
+		expect(relayed).toEqual(["start"]);
+
+		// After cancel the winding-down child keeps emitting, but nothing may
+		// reach the parent - it would resurrect the committed "Interrupted" row.
+		controller.abort();
+		childBus.emit({
+			type: "tool:result",
+			toolCallId: "c1",
+			name: "Read",
+			title: "ok",
+		});
+		detach();
+
+		expect(relayed).toEqual(["start"]);
 	});
 });

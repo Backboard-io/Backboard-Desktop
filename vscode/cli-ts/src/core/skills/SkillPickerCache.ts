@@ -26,7 +26,7 @@ export class SkillPickerCache {
 		if (this.pending) return this.pending;
 		const pending = load()
 			.then((state) => {
-				this.state = state;
+				if (this.pending === pending) this.state = state;
 				return state;
 			})
 			.finally(() => {
@@ -34,6 +34,12 @@ export class SkillPickerCache {
 			});
 		this.pending = pending;
 		return pending;
+	}
+
+	/** Drop cached state so the next read reloads from disk. */
+	invalidate(): void {
+		this.state = undefined;
+		this.pending = undefined;
 	}
 }
 

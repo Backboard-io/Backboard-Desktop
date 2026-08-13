@@ -2,7 +2,11 @@ import { Box, Text, useInput } from "ink";
 import TextInput from "ink-text-input";
 import type React from "react";
 import { useState } from "react";
+import { useAsyncAction } from "../hooks/useAsyncAction.ts";
 import { theme } from "../theme/theme.ts";
+import { ErrorLine } from "./ErrorLine.tsx";
+import { HintFooter } from "./HintFooter.tsx";
+import { SelectRow } from "./SelectRow.tsx";
 import { Spinner } from "./Spinner.tsx";
 
 export interface McpArgumentField {
@@ -28,21 +32,20 @@ export function McpArgumentInput({
 	onCancel,
 }: Props): React.ReactElement {
 	const [values, setValues] = useState<Record<string, string>>({});
+	// Field navigation clamps at the ends rather than wrapping, so it stays
+	// local instead of using useListSelection.
 	const [fieldIndex, setFieldIndex] = useState(0);
-	const [error, setError] = useState<string | null>(null);
-	const [submitting, setSubmitting] = useState(false);
-	const [abortController, setAbortController] =
-		useState<AbortController | null>(null);
+	const asyncAction = useAsyncAction();
 	const field = fields[fieldIndex] ?? null;
 
 	useInput((_input, key) => {
-		if (submitting) {
-			if (key.escape) abortController?.abort();
+		if (asyncAction.running) {
+			if (key.escape) asyncAction.cancel();
 			return;
 		}
 		if (key.escape) {
-			if (error) {
-				setError(null);
+			if (asyncAction.error) {
+				asyncAction.setError(null);
 				return;
 			}
 			onCancel();
@@ -50,23 +53,23 @@ export function McpArgumentInput({
 		}
 		if (key.upArrow) {
 			setFieldIndex((index) => Math.max(0, index - 1));
-			setError(null);
+			asyncAction.setError(null);
 			return;
 		}
 		if (key.downArrow) {
 			setFieldIndex((index) => Math.min(fields.length - 1, index + 1));
-			setError(null);
+			asyncAction.setError(null);
 		}
 	});
 
 	const submit = (): void => {
-		if (submitting) return;
+		if (asyncAction.running) return;
 		const missing = fields.find(
 			(candidate) => candidate.required && !values[candidate.name]?.trim(),
 		);
 		if (missing) {
 			setFieldIndex(fields.indexOf(missing));
-			setError(`${missing.name} is required.`);
+			asyncAction.setError(`${missing.name} is required.`);
 			return;
 		}
 		const payload = Object.fromEntries(
@@ -74,21 +77,9 @@ export function McpArgumentInput({
 				.map(([key, value]) => [key, value.trim()] as const)
 				.filter(([, value]) => value.length > 0),
 		);
-		const controller = new AbortController();
-		setSubmitting(true);
-		setAbortController(controller);
-		setError(null);
-		Promise.resolve(onSubmit(payload, controller.signal))
-			.catch((err) => {
-				if (controller.signal.aborted) return;
-				setError(err instanceof Error ? err.message : String(err));
-			})
-			.finally(() => {
-				setAbortController((current) =>
-					current === controller ? null : current,
-				);
-				setSubmitting(false);
-			});
+		asyncAction.run("Loading MCP item", async (signal) => {
+			await onSubmit(payload, signal);
+		});
 	};
 
 	return (
@@ -96,27 +87,27 @@ export function McpArgumentInput({
 			flexDirection="column"
 			marginTop={1}
 			borderStyle="round"
-			borderColor={theme.accent}
+			borderColor={theme.accentBright}
 			paddingX={1}
 		>
-			<Text color={theme.accent} bold>
+			<Text color={theme.accentBright} bold>
 				{title}
 			</Text>
 			{fields.map((candidate, index) => {
 				const selected = index === fieldIndex;
 				const label = `${candidate.name}${candidate.required ? " *" : ""}`;
 				return (
-					<Text
-						key={candidate.name}
-						color={selected ? theme.accentBright : theme.subtle}
-						bold={selected}
-					>
-						{selected ? "❯ " : "  "}
-						{label}
-						{values[candidate.name]?.trim()
-							? ` = ${values[candidate.name]?.trim()}`
-							: ""}
-					</Text>
+					<SelectRow key={candidate.name} selected={selected}>
+						<Text
+							color={selected ? theme.accentBright : theme.subtle}
+							bold={selected}
+						>
+							{label}
+							{values[candidate.name]?.trim()
+								? ` = ${values[candidate.name]?.trim()}`
+								: ""}
+						</Text>
+					</SelectRow>
 				);
 			})}
 			{field ? (
@@ -131,7 +122,7 @@ export function McpArgumentInput({
 							value={values[field.name] ?? ""}
 							onChange={(value) => {
 								setValues((current) => ({ ...current, [field.name]: value }));
-								setError(null);
+								asyncAction.setError(null);
 							}}
 							onSubmit={submit}
 							placeholder={field.required ? "required" : "optional"}
@@ -140,9 +131,14 @@ export function McpArgumentInput({
 					</Box>
 				</>
 			) : null}
-			{error ? <Text color={theme.error}>{error}</Text> : null}
-			<Text color={theme.subtle}>↑/↓ fields · Enter submit · Esc cancel</Text>
-			{submitting ? <Spinner label="Loading MCP item" /> : null}
+			<ErrorLine error={asyncAction.error} />
+			<HintFooter
+				marginTop={0}
+				hints={["↑/↓ fields", "Enter submit", "Esc cancel"]}
+			/>
+			{asyncAction.running && asyncAction.label ? (
+				<Spinner label={asyncAction.label} />
+			) : null}
 		</Box>
 	);
 }

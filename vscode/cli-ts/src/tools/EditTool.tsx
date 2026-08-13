@@ -1,6 +1,11 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { z } from "zod";
+import { pathsInsideCwd } from "../core/permissions/pathsInside.ts";
+import type {
+	PermissionCheckContext,
+	PermissionDecision,
+} from "../core/permissions/types.ts";
 import { Tool } from "../core/tools/Tool.ts";
 import type { ToolContext } from "../core/tools/ToolContext.ts";
 import { ok, type ToolResult } from "../core/tools/ToolResult.ts";
@@ -54,6 +59,32 @@ export class EditTool extends Tool<Input, Output> {
 		return false;
 	}
 
+	override permissionContent(input: Input): string {
+		return input.file_path;
+	}
+
+	override permissionContentIsPaths(): boolean {
+		return true;
+	}
+
+	override permissionPaths(input: Input): readonly string[] {
+		return [input.file_path];
+	}
+
+	override checkPermissions(
+		input: Input,
+		ctx: PermissionCheckContext,
+	): PermissionDecision | undefined {
+		if (ctx.mode !== "acceptEdits" && ctx.mode !== "auto") return undefined;
+		if (pathsInsideCwd([input.file_path], ctx.cwd)) {
+			return {
+				behavior: "allow",
+				reason: `edit inside working directory (${ctx.mode})`,
+			};
+		}
+		return undefined;
+	}
+
 	override isConcurrencySafe(): boolean {
 		return true;
 	}
@@ -87,7 +118,18 @@ export class EditTool extends Tool<Input, Output> {
 			const { updated, replacements, addedLines, removedLines } =
 				applyTextReplacements(original, input.edits);
 
+			// Byte-exact pre-image (re-read internally; the utf8 `original` above
+			// is lossy for CRLF/BOM/binary) journaled before the write so the
+			// edit is undoable.
+			await ctx.checkpoints?.recordPreImage(filePath, ctx, {
+				tool: this.name,
+			});
 			await writeFile(filePath, updated, "utf8");
+			await ctx.checkpoints?.recordPostImage(
+				filePath,
+				ctx,
+				Buffer.from(updated, "utf8"),
+			);
 
 			const diagnostics = await collectDiagnosticsFeedback(ctx, filePath);
 

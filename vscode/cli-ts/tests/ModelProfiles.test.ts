@@ -85,6 +85,6 @@ describe("model profiles", () => {
 
 		expect(openaiPrompt).toBe(defaultPrompt);
 		expect(antPrompt).toBe(defaultPrompt);
-		expect(openaiPrompt).toContain("You are Backboard Studio");
+		expect(openaiPrompt).toContain("You are R-CLI");
 	});
 });

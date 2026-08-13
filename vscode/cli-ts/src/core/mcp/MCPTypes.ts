@@ -20,6 +20,7 @@ export interface McpToolDefinition {
 	description: string;
 	inputSchema: Record<string, unknown>;
 	annotations?: SdkTool["annotations"];
+	trustAnnotations: boolean;
 	timeoutMs: number;
 	call: (
 		input: Record<string, unknown>,

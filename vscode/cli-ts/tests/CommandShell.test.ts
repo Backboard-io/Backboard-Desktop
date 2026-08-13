@@ -71,6 +71,36 @@ describe("detectCommandShell", () => {
 		expect(isProcessAlive(pid)).toBe(true);
 		killProcessGroup(pid);
 	});
+
+	it("uses friendly command result titles", async () => {
+		const tool = new ExecuteTool();
+		const success = await tool.execute(
+			{ command: "echo ok" },
+			makeContext(new AbortController().signal),
+		);
+		const failed = await tool.execute(
+			{ command: "echo bad news >&2; exit 1" },
+			makeContext(new AbortController().signal),
+		);
+
+		expect(success.title).toBe("Success");
+		// The detail carries a multi-line preview: the command, then its output.
+		expect(success.detail).toBe("$ echo ok\nstdout:\nok");
+		expect(failed.title).toBe("Failed: bad news");
+		expect(failed.detail).toBe(
+			"$ echo bad news >&2; exit 1\nstderr:\nbad news",
+		);
+	});
+
+	it("strips ANSI color codes from the result title", async () => {
+		const tool = new ExecuteTool();
+		const result = await tool.execute(
+			{ command: "printf '\\033[31mbad news\\033[0m\\n' >&2; exit 1" },
+			makeContext(new AbortController().signal),
+		);
+
+		expect(result.title).toBe("Failed: bad news");
+	});
 });
 
 function isProcessAlive(pid: number): boolean {

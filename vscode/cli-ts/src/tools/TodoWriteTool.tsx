@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { TodoItem } from "../core/bus/events.ts";
-import { reconcileTodos } from "../core/todos/TodoList.ts";
+import type { PermissionDecision } from "../core/permissions/types.ts";
+import { normalizeTodoUpdate, reconcileTodos } from "../core/todos/TodoList.ts";
 import { Tool } from "../core/tools/Tool.ts";
 import type { ToolContext } from "../core/tools/ToolContext.ts";
 import { ok, type ToolResult } from "../core/tools/ToolResult.ts";
@@ -19,43 +20,32 @@ const todoSchema = z.object({
 		.describe("One of pending, in_progress, or completed."),
 });
 
-const schema = z
-	.object({
-		todos: z
-			.array(todoSchema)
-			.max(50)
-			.describe(
-				"The updated todo list as an array of { content, status } objects",
-			),
-	})
-	.superRefine((input, ctx) => {
-		const activeCount = input.todos.filter(
-			(todo) => todo.status === "in_progress",
-		).length;
-		const pendingCount = input.todos.filter(
-			(todo) => todo.status === "pending",
-		).length;
-		if (activeCount > 1) {
-			ctx.addIssue({
-				code: z.ZodIssueCode.custom,
-				message: "TodoWrite accepts at most one in_progress todo.",
-				path: ["todos"],
-			});
-		}
-		if (pendingCount > 0 && activeCount === 0) {
-			ctx.addIssue({
-				code: z.ZodIssueCode.custom,
-				message:
-					"TodoWrite requires one in_progress todo when pending todos remain.",
-				path: ["todos"],
-			});
-		}
-	});
+const schema = z.object({
+	todos: z
+		.array(todoSchema)
+		.max(50)
+		.describe(
+			"The full updated todo list. If pending items remain, mark exactly one item in_progress; the CLI will promote the first pending item if none is active.",
+		),
+});
 
 type Input = z.infer<typeof schema>;
 
 interface Output {
 	count: number;
+}
+
+/**
+ * Reads the reconciled list back to the model as `[status] content` items, so
+ * it sees its own plan's ground-truth state after reconciliation (ids/omitted
+ * items resolved) and can steer against it - not just a bare completed count.
+ */
+export function formatTodoReadback(todos: readonly TodoItem[]): string {
+	if (todos.length === 0) return "Updated 0 todos";
+	const items = todos
+		.map((todo) => `[${todo.status}] ${todo.content}`)
+		.join(", ");
+	return `Updated ${todos.length} todos: ${items}`;
 }
 
 export class TodoWriteTool extends Tool<Input, Output> {
@@ -74,22 +64,23 @@ export class TodoWriteTool extends Tool<Input, Output> {
 		return false;
 	}
 
+	override checkPermissions(): PermissionDecision | undefined {
+		return { behavior: "allow", reason: "internal tool" };
+	}
+
 	override async execute(
 		input: Input,
 		ctx: ToolContext,
 	): Promise<ToolResult<Output>> {
+		const previousTodos = ctx.getTodos?.() ?? [];
 		const todos: TodoItem[] = reconcileTodos(
-			input.todos,
-			ctx.getTodos?.() ?? [],
+			normalizeTodoUpdate(input.todos, previousTodos),
+			previousTodos,
 		);
 
 		ctx.bus.emit({ type: "todos:updated", todos });
 
-		const done = todos.filter((todo) => todo.status === "completed").length;
-		return ok(
-			{ count: todos.length },
-			`Updated ${todos.length} todos (${done} completed)`,
-			`Updated ${todos.length} todos (${done} completed)`,
-		);
+		const readback = formatTodoReadback(todos);
+		return ok({ count: todos.length }, readback, readback);
 	}
 }

@@ -1,9 +1,14 @@
 import { Box, Text } from "ink";
 import type React from "react";
+import { useState } from "react";
 import { APP_DISPLAY_NAME } from "../../config/branding.ts";
-import type { HookEventName } from "../../core/hooks/index.ts";
-import { useTheme } from "../theme/ThemeProvider.tsx";
+import type { HookEventName, LoadedHook } from "../../core/hooks/index.ts";
+import { errorMessage } from "../../utils/errors.ts";
 import { theme } from "../theme/theme.ts";
+import { ErrorLine } from "./ErrorLine.tsx";
+import { Panel } from "./Panel.tsx";
+import { SelectRow } from "./SelectRow.tsx";
+import { Spinner } from "./Spinner.tsx";
 
 export function HookPanel({
 	title,
@@ -12,45 +17,102 @@ export function HookPanel({
 	title?: string;
 	children: React.ReactNode;
 }): React.ReactElement {
-	const uiTheme = useTheme();
 	return (
-		<Box flexDirection="column">
-			<Box
-				flexDirection="column"
-				marginTop={1}
-				paddingX={2}
-				paddingY={1}
-				width="100%"
-				backgroundColor={uiTheme.inputSurfaceBackground}
-			>
-				<Box marginBottom={1}>
-					<Text color={theme.text} bold>
-						Hooks
-					</Text>
-				</Box>
-				{title ? (
-					<Text color={theme.accentBright} bold>
-						{title}
-					</Text>
-				) : null}
-				{children}
-			</Box>
-		</Box>
+		<Panel title="Hooks">
+			{title ? (
+				<Text color={theme.accentBright} bold>
+					{title}
+				</Text>
+			) : null}
+			{children}
+		</Panel>
 	);
 }
 
-// Stable React keys for lists that may contain duplicate values.
-export function withStableKeys<T>(
-	items: readonly T[],
-	keyOf: (item: T) => string,
-): Array<{ key: string; item: T }> {
-	const seen = new Map<string, number>();
-	return items.map((item) => {
-		const base = keyOf(item);
-		const count = seen.get(base) ?? 0;
-		seen.set(base, count + 1);
-		return { key: `${base}:${count}`, item };
-	});
+/** The "+ Add new hook" row shared by the event and matcher selectors. */
+export function AddHookRow({
+	selected,
+}: {
+	selected: boolean;
+}): React.ReactElement {
+	return (
+		<SelectRow selected={selected}>
+			<Text
+				color={selected ? theme.accentBright : theme.accentBright}
+				bold={selected}
+			>
+				+ Add new hook
+			</Text>
+		</SelectRow>
+	);
+}
+
+export interface DeleteConfirmation {
+	confirming: boolean;
+	deleting: boolean;
+	error: string | null;
+	canDelete: boolean;
+	requestConfirm: () => void;
+	cancelConfirm: () => void;
+	performDelete: (hook: LoadedHook) => void;
+}
+
+/** Confirm/delete/error state shared by the hook list and detail views. */
+export function useDeleteConfirmation(
+	onDelete?: (hook: LoadedHook) => Promise<void>,
+): DeleteConfirmation {
+	const [confirming, setConfirming] = useState(false);
+	const [deleting, setDeleting] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+	return {
+		confirming,
+		deleting,
+		error,
+		canDelete: Boolean(onDelete),
+		requestConfirm: () => {
+			setError(null);
+			setConfirming(true);
+		},
+		cancelConfirm: () => {
+			setConfirming(false);
+			setError(null);
+		},
+		performDelete: (hook: LoadedHook) => {
+			if (!onDelete) return;
+			setDeleting(true);
+			setError(null);
+			onDelete(hook)
+				.catch((err) => setError(errorMessage(err)))
+				.finally(() => {
+					setDeleting(false);
+					setConfirming(false);
+				});
+		},
+	};
+}
+
+export function DeleteConfirmationStatus({
+	hook,
+	state,
+}: {
+	hook: LoadedHook | undefined;
+	state: DeleteConfirmation;
+}): React.ReactElement {
+	return (
+		<>
+			<ErrorLine error={state.error} />
+			{state.confirming ? (
+				<Box marginTop={1}>
+					<Text color={theme.error}>
+						{hook?.source.kind === "project"
+							? "Delete this project hook (shared)? y / n"
+							: "Delete this personal hook? y / n"}
+					</Text>
+				</Box>
+			) : null}
+			{state.deleting ? <Spinner label="Removing hook" /> : null}
+		</>
+	);
 }
 
 export function hookHelpLines(event: HookEventName): string[] {

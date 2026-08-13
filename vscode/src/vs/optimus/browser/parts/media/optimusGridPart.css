@@ -9,7 +9,10 @@
 	position: relative;
 	height: 100%;
 	width: 100%;
+	min-width: 0;
 	overflow: hidden;
+	container-type: inline-size;
+	container-name: optimus-workspace;
 
 	/* Design tokens carried over from the original Optimus window styling. */
 	--optimus-card: var(--vscode-editorWidget-background, var(--vscode-sideBar-background));
@@ -34,6 +37,7 @@
 .optimus-window-chrome {
 	--optimus-border: var(--vscode-widget-border, var(--vscode-sideBar-border, var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 15%, transparent))));
 	--optimus-sidebar-width: 0px;
+	--optimus-right-workbench-width: 0px;
 	position: absolute;
 	top: 0;
 	left: 0;
@@ -168,10 +172,10 @@
 .optimus-window-navigation-cluster {
 	position: absolute;
 	top: 0;
-	left: 50%;
+	left: calc(var(--optimus-sidebar-width) + ((100% - var(--optimus-sidebar-width) - var(--optimus-right-workbench-width)) / 2));
 	height: 32px;
-	width: min(660px, calc(100vw - 460px));
-	min-width: 300px;
+	width: min(660px, max(180px, calc(100% - var(--optimus-sidebar-width) - var(--optimus-right-workbench-width) - 210px)));
+	max-width: calc(100% - var(--optimus-sidebar-width) - var(--optimus-right-workbench-width) - 24px);
 	transform: translateX(-50%);
 	display: flex;
 	align-items: center;
@@ -339,8 +343,40 @@
 	}
 
 	.optimus-window-navigation-cluster {
-		width: calc(100vw - 400px);
-		min-width: 260px;
+		width: min(480px, max(160px, calc(100% - var(--optimus-sidebar-width) - var(--optimus-right-workbench-width) - 180px)));
+	}
+}
+
+@media (max-width: 980px) {
+	.optimus-window-chrome {
+		padding-left: 70px;
+		gap: 4px;
+	}
+
+	.optimus-window-chrome-mode {
+		width: 28px;
+		padding: 0;
+		margin-right: 0;
+	}
+
+	.optimus-window-chrome-mode-label,
+	.optimus-window-chrome-mode-chevron,
+	.optimus-window-command-shortcuts,
+	.optimus-window-navigation {
+		display: none;
+	}
+
+	.optimus-window-navigation-cluster {
+		position: static;
+		transform: none;
+		width: auto;
+		max-width: none;
+		min-width: 0;
+		flex: 1 1 auto;
+	}
+
+	.optimus-window-actions {
+		gap: 2px;
 	}
 }
 
@@ -1885,6 +1921,105 @@
 	background: color-mix(in srgb, var(--vscode-list-hoverBackground) 46%, var(--optimus-card));
 }
 
+/* The board reacts to its own workbench part, rather than the outer window.
+   This is what keeps it usable while the sidebar or right tools panel resize. */
+@container optimus-workspace (max-width: 1020px) {
+	.optimus-kanban {
+		grid-template-columns: repeat(2, minmax(220px, 1fr));
+		gap: 16px;
+		padding-inline: 12px;
+		overflow-x: hidden;
+		overflow-y: auto;
+		align-content: start;
+	}
+
+	.optimus-kanban-column {
+		min-width: 0;
+		min-height: 280px;
+		height: min(52vh, 560px);
+	}
+
+	.optimus-kanban-column-list .optimus-card {
+		height: clamp(240px, 34vh, 320px);
+	}
+}
+
+@container optimus-workspace (max-width: 720px) {
+	.optimus-dashboard-header {
+		gap: 8px;
+		padding: 42px 10px 9px;
+	}
+
+	.optimus-dashboard-primary,
+	.optimus-dashboard-secondary {
+		align-items: stretch;
+		min-height: 0;
+	}
+
+	.optimus-dashboard-primary {
+		flex-direction: column;
+		gap: 8px;
+	}
+
+	.optimus-dashboard-controls,
+	.optimus-dashboard-filter-controls {
+		width: 100%;
+		margin-left: 0;
+	}
+
+	.optimus-dashboard-search {
+		width: auto;
+		flex: 1 1 140px;
+	}
+
+	.optimus-dashboard-secondary {
+		gap: 6px;
+	}
+
+	.optimus-dashboard-filter-controls {
+		flex-wrap: wrap;
+	}
+
+	.optimus-dashboard-filter-chips {
+		order: 3;
+		width: 100%;
+	}
+
+	.optimus-dashboard-reset {
+		display: none;
+	}
+
+	.optimus-kanban {
+		grid-template-columns: minmax(0, 1fr);
+		gap: 14px;
+		padding: 8px 10px 14px;
+	}
+
+	.optimus-kanban-column {
+		min-height: 300px;
+		height: min(62vh, 600px);
+	}
+}
+
+@container optimus-workspace (max-width: 460px) {
+	.optimus-dashboard-controls {
+		flex-wrap: wrap;
+	}
+
+	.optimus-dashboard-search {
+		flex-basis: 100%;
+	}
+
+	.optimus-dashboard-controls > .optimus-dashboard-button {
+		flex: 1 1 auto;
+		justify-content: center;
+	}
+
+	.optimus-empty-hero {
+		width: calc(100% - 20px);
+	}
+}
+
 /* List is the original Advanced six-card board, as requested. */
 .optimus-grid {
 	display: none;
@@ -1900,6 +2035,26 @@
 
 .optimus-grid-content.view-list .optimus-grid {
 	display: grid;
+}
+
+@container optimus-workspace (max-width: 1020px) {
+	.optimus-grid {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		grid-template-rows: repeat(3, minmax(220px, 1fr));
+		gap: 12px;
+		padding: 12px;
+		overflow-y: auto;
+	}
+}
+
+@container optimus-workspace (max-width: 460px) {
+	.optimus-grid {
+		grid-template-columns: minmax(0, 1fr);
+		grid-template-rows: none;
+		grid-auto-rows: minmax(240px, 52vh);
+		gap: 10px;
+		padding: 10px;
+	}
 }
 
 .optimus-grid-pager {
@@ -1978,17 +2133,6 @@
 
 .optimus-grid-content.focused-session .optimus-focused-session {
 	display: flex;
-}
-
-@media (max-width: 900px) {
-	.optimus-kanban {
-		gap: 14px;
-	}
-
-	.optimus-grid {
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		grid-template-rows: repeat(3, minmax(0, 1fr));
-	}
 }
 
 /* The fixed 32px Optimus chrome sits above the workbench grid. The right

@@ -18,7 +18,12 @@ export class JsonEventStream {
 	private sequence = 0;
 	private unsubscribe: (() => void) | null = null;
 
-	constructor(private readonly sessionId: string) {}
+	constructor(private sessionId: string) {}
+
+	activate(sessionId: string): void {
+		if (sessionId === this.sessionId) return;
+		this.sessionId = sessionId;
+	}
 
 	attach(bus: EventBus): void {
 		if (this.unsubscribe) return;

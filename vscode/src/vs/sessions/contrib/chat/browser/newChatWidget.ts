@@ -308,6 +308,8 @@ export class NewChatWidget extends Disposable {
 	private _middleTitleSuffix: HTMLElement | undefined;
 	/** Slot inside the middle heading that hosts the workspace picker trigger. */
 	private _middleTitlePickerSlot: HTMLElement | undefined;
+	private _headerWorkspaceButton: HTMLButtonElement | undefined;
+	private _headerWorkspaceLabel: HTMLElement | undefined;
 
 	/** Recreates the draft once a better/late-registering provider can serve the folder (see {@link _createNewSession}). */
 	private readonly _pendingPreferredUpgrade = new MutableDisposable<IDisposable>();
@@ -388,7 +390,11 @@ export class NewChatWidget extends Disposable {
 				enableWorkingSet: 'explicit',
 				supportsChangingModes: false,
 				isSessionsWindow: true,
-				inputEditorMinLines: 4,
+				// T3 Code's draft composer opens on a 70px prompt well. Two Monaco
+				// lines plus the input part's 24px vertical editor padding lands on
+				// the same compact height while still allowing pasted/multiline input
+				// and attachments to grow the shell normally.
+				inputEditorMinLines: 2,
 				workspacePickerDelegate: this._createWorkspacePickerDelegate(),
 				sessionTypePickerDelegate: this._createSessionTypePickerDelegate(),
 				submitHandler: async query => this._sendFromSharedComposer(query),
@@ -406,6 +412,7 @@ export class NewChatWidget extends Disposable {
 			await this._onWorkspaceSelected(folderUri);
 			this._widget.focusInput();
 		}));
+		this._register(this._workspacePicker.onDidChangeSelection(() => this._updateHeaderBreadcrumb()));
 		this._register(this._sessionTypePicker.onDidSelectSessionType(async () => {
 			await this._onWorkspaceSelected(this._workspacePicker.selectedFolderUri);
 			this._widget.focusInput();
@@ -483,13 +490,11 @@ export class NewChatWidget extends Disposable {
 
 	render(parent: HTMLElement): void {
 		const element = dom.append(parent, dom.$('.sessions-chat-widget'));
-		// The provider (session type) picker is folded into the combined
-		// provider+model chip in the composer toolbar (see
-		// CombinedModelProviderPickerActionItem), so nothing renders in the
-		// header slot — clear any slot the part handed us so it stays empty.
+		// The provider picker lives in the composer. Use the vacated header slot
+		// for the same compact workspace / draft breadcrumb as T3 Code.
 		const headerSlot = this._options.headerTypePickerSlot;
 		if (headerSlot) {
-			dom.clearNode(headerSlot);
+			this._renderHeaderBreadcrumb(headerSlot);
 		}
 		const chatWidgetContainer = dom.append(element, dom.$('.new-chat-widget-container'));
 		const chatWidgetContent = dom.append(chatWidgetContainer, dom.$('.new-chat-widget-content'));
@@ -517,6 +522,7 @@ export class NewChatWidget extends Disposable {
 		}
 
 		this._widget.setVisible(true);
+		this._widget.setInputPlaceholder(localize('newChatInputPlaceholder', "Ask for follow-up changes or attach images"));
 		this._makeComposerEasyToFocus();
 		this.layout(NEW_CHAT_COMPOSER_LAYOUT_HEIGHT, chatWidgetContent.clientWidth);
 
@@ -533,6 +539,34 @@ export class NewChatWidget extends Disposable {
 		this._ensureComposerHasWorkspace();
 
 		chatWidgetContainer.classList.add('revealed');
+	}
+
+	private _renderHeaderBreadcrumb(container: HTMLElement): void {
+		dom.clearNode(container);
+		const breadcrumb = dom.append(container, dom.$('.new-chat-header-breadcrumb'));
+		// The panel header slot outlives this new-chat view. Remove only the node
+		// owned by this widget when a draft graduates or an existing chat opens,
+		// otherwise it collides with the active session's relocated header.
+		this._register(toDisposable(() => breadcrumb.remove()));
+		const workspaceButton = dom.append(breadcrumb, dom.$('button.new-chat-header-breadcrumb-workspace', { type: 'button' })) as HTMLButtonElement;
+		this._headerWorkspaceButton = workspaceButton;
+		dom.append(workspaceButton, renderIcon(Codicon.folder));
+		this._headerWorkspaceLabel = dom.append(workspaceButton, dom.$('span.new-chat-header-breadcrumb-label'));
+		const separator = dom.append(breadcrumb, dom.$('span.new-chat-header-breadcrumb-separator', undefined, '/'));
+		separator.setAttribute('aria-hidden', 'true');
+		dom.append(breadcrumb, dom.$('span.new-chat-header-breadcrumb-draft', undefined, localize('newChatHeaderDraft', "New thread")));
+		this._register(dom.addDisposableListener(workspaceButton, dom.EventType.CLICK, () => this._workspacePicker.showPicker()));
+		this._updateHeaderBreadcrumb();
+	}
+
+	private _updateHeaderBreadcrumb(): void {
+		if (!this._headerWorkspaceLabel || !this._headerWorkspaceButton) {
+			return;
+		}
+		const workspaceLabel = this._workspacePicker.selectedResolved?.workspace.label
+			?? localize('newChatHeaderWorkspace', "Workspace");
+		this._headerWorkspaceLabel.textContent = workspaceLabel;
+		this._headerWorkspaceButton.title = localize('newChatHeaderChooseWorkspace', "Choose workspace: {0}", workspaceLabel);
 	}
 
 	/**
@@ -1460,6 +1494,9 @@ export class NewChatWidget extends Disposable {
 			}
 			this._modelRef.value = ref;
 			this._widget.setModel(ref.object);
+			// setModel derives the provider's generic "Chat with …" placeholder.
+			// The draft surface deliberately keeps T3 Code's more useful prompt.
+			this._widget.setInputPlaceholder(localize('newChatInputPlaceholder', "Ask for follow-up changes or attach images"));
 		}, err => {
 			if (!token.isCancellationRequested) {
 				this.logService.error('[NewChatWidget] Failed to load chat model', err);

@@ -1,5 +1,5 @@
 import type { ModelRef } from "../../../config/defaults.ts";
-import type { BackboardClient } from "../../../providers/backboard/BackboardClient.ts";
+import type { AgentClient } from "../../../providers/AgentClient.ts";
 import type { UsageInfo } from "../../bus/events.ts";
 
 export type JSONValue =
@@ -14,7 +14,7 @@ export type JSONObject = { [key: string]: JSONValue };
 export type SandboxValue = JSONValue | undefined;
 
 export interface RLMDeps {
-	client: Pick<BackboardClient, "sendMessage">;
+	client: Pick<AgentClient, "sendMessage">;
 	model: ModelRef;
 	executor: REPLExecutor;
 	maxIterations?: number;

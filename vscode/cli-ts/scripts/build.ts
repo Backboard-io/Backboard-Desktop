@@ -10,9 +10,7 @@ const command = [
 	"./src/entrypoints/cli.tsx",
 ];
 
-// Cross-compilation target, e.g. "bun-darwin-x64". Without it bun compiles for
-// whatever host runs the build, which silently produces an arm64 CLI inside an
-// Intel release when building x64 on Apple Silicon.
+// Backboard Studio may cross-build for a target different from the host.
 const compileTarget = process.env.BACKBOARD_CLI_TARGET?.trim();
 if (compileTarget) {
 	command.splice(3, 0, "--target", compileTarget);

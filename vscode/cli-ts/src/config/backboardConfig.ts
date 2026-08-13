@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { chmod, mkdir, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { errorMessage } from "../utils/errors.ts";
 import type { JsonValue } from "../utils/JsonTypes.ts";
 import type {
 	BackboardConfigFile,
@@ -47,12 +48,11 @@ export function readBackboardConfig(
 			memory: readMemoryConfig(config),
 			memoryProfile: readMemoryProfileConfig(config),
 			notify: typeof config.notify === "boolean" ? config.notify : undefined,
+			verbose: typeof config.verbose === "boolean" ? config.verbose : undefined,
 		};
 	} catch (err) {
 		if ((err as { code?: string }).code === "ENOENT") return {};
-		throw new Error(
-			`Failed to read ${file}: ${err instanceof Error ? err.message : String(err)}`,
-		);
+		throw new Error(`Failed to read ${file}: ${errorMessage(err)}`);
 	}
 }
 
@@ -110,27 +110,15 @@ function readThinkingConfig(
 	}
 	const thinkingConfig = thinking as BackboardConfigJson;
 	if (Object.keys(thinkingConfig).length === 0) return undefined;
-	const excludeReasoning =
-		typeof thinkingConfig.excludeReasoning === "boolean"
-			? { excludeReasoning: thinkingConfig.excludeReasoning }
-			: {};
-
-	if (thinkingConfig.kind === "default") {
-		return { kind: "default", ...excludeReasoning };
-	}
 
 	if (
 		thinkingConfig.kind === "level" &&
 		isThinkingLevel(thinkingConfig.level)
 	) {
-		return {
-			kind: "level",
-			level: thinkingConfig.level,
-			...excludeReasoning,
-		};
+		return { kind: "level", level: thinkingConfig.level };
 	}
 	if (thinkingConfig.kind === "dynamic") {
-		return { kind: "dynamic", ...excludeReasoning };
+		return { kind: "dynamic" };
 	}
 	if (
 		thinkingConfig.kind === "budget" &&
@@ -138,11 +126,7 @@ function readThinkingConfig(
 		Number.isInteger(thinkingConfig.tokens) &&
 		thinkingConfig.tokens > 0
 	) {
-		return {
-			kind: "budget",
-			tokens: thinkingConfig.tokens,
-			...excludeReasoning,
-		};
+		return { kind: "budget", tokens: thinkingConfig.tokens };
 	}
 
 	if (isThinkingEffort(thinkingConfig.effort)) {
@@ -205,8 +189,6 @@ export async function deleteBackboardConfig(
 		if ((err as { code?: string }).code === "ENOENT") {
 			return { path: file, removed: false };
 		}
-		throw new Error(
-			`Failed to delete ${file}: ${err instanceof Error ? err.message : String(err)}`,
-		);
+		throw new Error(`Failed to delete ${file}: ${errorMessage(err)}`);
 	}
 }

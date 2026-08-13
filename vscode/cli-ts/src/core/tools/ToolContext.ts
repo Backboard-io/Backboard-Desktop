@@ -1,20 +1,23 @@
 import type { AgentTraceStore } from "../agent/AgentTraceStore.ts";
 import type { EventBus } from "../bus/EventBus.ts";
-import type { TodoItem } from "../bus/events.ts";
+import type { AskUserQuestionSpec, TodoItem } from "../bus/events.ts";
+import type { CheckpointRecorder } from "../checkpoints/CheckpointStore.ts";
 import type { LspService } from "../lsp/index.ts";
-import type {
-	PermissionGateDecision,
-	PermissionGateRequest,
-} from "./ToolPermissionGateTypes.ts";
+import type { PermissionContext } from "../permissions/types.ts";
 
 export type AskUserFn = (
 	question: string,
 	options: string[],
+	signal?: AbortSignal,
 ) => Promise<string>;
 
-export type RequestPermissionFn = (
-	request: PermissionGateRequest,
-) => Promise<PermissionGateDecision>;
+/**
+ * Ask several related questions in a single interruption. Returns one answer
+ * per question, aligned by index with the input.
+ */
+export type AskQuestionsFn = (
+	questions: AskUserQuestionSpec[],
+) => Promise<string[]>;
 
 export interface ToolTraceContext {
 	forToolCall(toolCallId: string): ToolTraceContext;
@@ -38,14 +41,18 @@ export interface ToolContext {
 	signal: AbortSignal;
 	askUser: AskUserFn;
 	/**
-	 * Optional approval gate for non-read-only tool calls. When present, the
-	 * scheduler asks it before executing a gated call; absent means no gating
-	 * (the interactive CLI's behavior).
+	 * Ask a batch of related questions in one prompt. Optional: contexts that
+	 * only implement `askUser` still work — callers fall back to asking each
+	 * question sequentially.
 	 */
-	requestPermission?: RequestPermissionFn;
+	askQuestions?: AskQuestionsFn;
 	getTodos?: () => readonly TodoItem[];
 	agentDepth?: number;
 	trace?: ToolTraceContext;
 	/** Optional language-server service for post-edit diagnostics. */
 	lsp?: LspService;
+	/** Optional pre-image journal powering /undo, /redo and /rewind. */
+	checkpoints?: CheckpointRecorder;
+	/** Permission state for this session. Absent = permission gate disabled. */
+	permissions?: PermissionContext;
 }

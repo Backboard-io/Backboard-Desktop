@@ -1,5 +1,7 @@
 export type SkillPickerSource = "repo" | "personal" | "skills-sh";
 
+export type SkillInstallTarget = "repo" | "personal";
+
 export interface SkillPickerItem {
 	id: string;
 	name: string;

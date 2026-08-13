@@ -36,12 +36,93 @@
 }
 /* Sidebar Footer Container */
 .agent-sessions-workbench .part.sidebar > .sidebar-footer {
+	position: relative;
+	isolation: isolate;
+	overflow: visible;
 	display: flex;
 	align-items: stretch;
 	gap: 4px;
 	padding: 6px 0 0 0;
 	margin: 0 10px 2px 10px;
 	flex-shrink: 0;
+}
+
+/* A contained water-current treatment behind the bottom account strip. The
+ * sidebar remains opaque; these layers animate within its own surface. */
+.agent-sessions-workbench:not(.phone-layout) .part.sidebar > .sidebar-footer::before,
+.agent-sessions-workbench:not(.phone-layout) .part.sidebar > .sidebar-footer::after {
+	content: '';
+	position: absolute;
+	inset: -22px -10px -2px;
+	z-index: 0;
+	pointer-events: none;
+	border-radius: 0 0 var(--vscode-cornerRadius-large) var(--vscode-cornerRadius-large);
+}
+
+.agent-sessions-workbench:not(.phone-layout) .part.sidebar > .sidebar-footer::before {
+	background:
+		radial-gradient(ellipse 72% 58% at 12% 92%, rgba(75, 153, 241, 0.42) 0%, rgba(79, 194, 224, 0.24) 34%, transparent 70%),
+		radial-gradient(ellipse 58% 48% at 78% 74%, rgba(185, 232, 248, 0.3) 0%, rgba(74, 145, 226, 0.16) 38%, transparent 72%),
+		repeating-radial-gradient(ellipse 80% 36% at 32% 112%, transparent 0 17px, rgba(232, 250, 255, 0.16) 20px 22px, transparent 26px 38px);
+	background-size: 132% 128%, 118% 146%, 124% 156%;
+	filter: blur(6px) saturate(1.28);
+	opacity: 1;
+	transform: translate3d(-3%, 4%, 0) scale(1.06);
+	animation: sessions-sidebar-water-current 8.5s ease-in-out infinite alternate;
+}
+
+.agent-sessions-workbench:not(.phone-layout) .part.sidebar > .sidebar-footer::after {
+	background: linear-gradient(104deg, transparent 18%, rgba(248, 252, 255, 0.06) 34%, rgba(232, 250, 255, 0.3) 48%, rgba(185, 232, 248, 0.1) 58%, transparent 76%);
+	background-position: 125% 0;
+	background-size: 220% 100%;
+	mix-blend-mode: screen;
+	opacity: 0.9;
+	animation: sessions-sidebar-water-glint 6.8s linear infinite;
+}
+
+.agent-sessions-workbench:not(.phone-layout) .part.sidebar > .sidebar-footer :is(.monaco-toolbar, .monaco-action-bar, .actions-container) {
+	position: relative;
+	z-index: 1;
+}
+
+@keyframes sessions-sidebar-water-current {
+	0% {
+		background-position: 0% 8%, 100% 0%, 0% 12%;
+		transform: translate3d(-3%, 4%, 0) scale(1.06) skewX(-1deg);
+	}
+
+	50% {
+		background-position: 36% 0%, 62% 10%, 24% -8%;
+	}
+
+	100% {
+		background-position: 72% -6%, 18% 2%, 48% -18%;
+		transform: translate3d(3%, -2%, 0) scale(1.1) skewX(1deg);
+	}
+}
+
+@keyframes sessions-sidebar-water-glint {
+	from {
+		background-position: 125% 0;
+	}
+
+	to {
+		background-position: -125% 0;
+	}
+}
+
+.monaco-workbench.hc-black .part.sidebar > .sidebar-footer::before,
+.monaco-workbench.hc-black .part.sidebar > .sidebar-footer::after,
+.monaco-workbench.hc-light .part.sidebar > .sidebar-footer::before,
+.monaco-workbench.hc-light .part.sidebar > .sidebar-footer::after {
+	display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.agent-sessions-workbench .part.sidebar > .sidebar-footer::before,
+	.agent-sessions-workbench .part.sidebar > .sidebar-footer::after {
+		animation: none;
+	}
 }
 
 /* Make the toolbar fill the footer width and stack actions vertically */

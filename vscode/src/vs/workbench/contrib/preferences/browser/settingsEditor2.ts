@@ -16,6 +16,7 @@ import { Action } from '../../../../base/common/actions.js';
 import { CancelablePromise, createCancelablePromise, Delayer, raceTimeout } from '../../../../base/common/async.js';
 import { CancellationToken, CancellationTokenSource } from '../../../../base/common/cancellation.js';
 import { Color } from '../../../../base/common/color.js';
+import { Codicon } from '../../../../base/common/codicons.js';
 import { fromNow } from '../../../../base/common/date.js';
 import { isCancellationError } from '../../../../base/common/errors.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
@@ -113,8 +114,6 @@ export class SettingsEditor2 extends EditorPane {
 	private static TOC_MIN_WIDTH: number = 238;
 	private static TOC_RESET_WIDTH: number = 238;
 	private static EDITOR_MIN_WIDTH: number = 500;
-	// Below NARROW_TOTAL_WIDTH, we only render the editor rather than the ToC.
-	private static NARROW_TOTAL_WIDTH: number = this.TOC_RESET_WIDTH + this.EDITOR_MIN_WIDTH;
 
 	private static SUGGESTIONS: string[] = [
 		`@${MODIFIED_SETTING_TAG}`,
@@ -239,6 +238,8 @@ export class SettingsEditor2 extends EditorPane {
 	private readonly inputChangeListener: MutableDisposable<IDisposable>;
 
 	private searchInputActionBar: ActionBar | null = null;
+	private t3SettingsTopbar: HTMLElement | undefined;
+	private t3SettingsBreadcrumbSection: HTMLElement | undefined;
 
 	constructor(
 		group: IEditorGroup,
@@ -457,10 +458,12 @@ export class SettingsEditor2 extends EditorPane {
 	protected createEditor(parent: HTMLElement): void {
 		parent.setAttribute('tabindex', '-1');
 		this.rootElement = DOM.append(parent, $('.settings-editor', { tabindex: '-1' }));
+		this.rootElement.classList.toggle('t3-settings-experience', this.environmentService.isSessionsWindow);
 
 		this.createHeader(this.rootElement);
 		this.createBody(this.rootElement);
 		this.addCtrlAInterceptor(this.rootElement);
+		this.addT3SettingsKeyboardNavigation(this.rootElement);
 		this.updateStyles();
 
 		this._register(registerNavigableContainer({
@@ -606,7 +609,8 @@ export class SettingsEditor2 extends EditorPane {
 		const monacoWidth = Math.max(0, innerWidth - 10 - this.controlsElement.clientWidth - 12);
 		this.searchWidget.layout(new DOM.Dimension(monacoWidth, 20));
 
-		this.rootElement.classList.toggle('narrow-width', dimension.width < SettingsEditor2.NARROW_TOTAL_WIDTH);
+		const tableOfContentsWidth = this.environmentService.isSessionsWindow ? 256 : SettingsEditor2.TOC_RESET_WIDTH;
+		this.rootElement.classList.toggle('narrow-width', dimension.width < SettingsEditor2.EDITOR_MIN_WIDTH + tableOfContentsWidth);
 	}
 
 	override focus(): void {
@@ -721,7 +725,7 @@ export class SettingsEditor2 extends EditorPane {
 		this.searchContainer = DOM.append(this.headerContainer, $('.search-container'));
 
 		const clearInputAction = this._register(new Action(SETTINGS_EDITOR_COMMAND_CLEAR_SEARCH_RESULTS,
-			localize('clearInput', "Clear Settings Search Input"), ThemeIcon.asClassName(preferencesClearInputIcon), false,
+			localize('clearInput', "Clear Settings Search Input"), `${ThemeIcon.asClassName(preferencesClearInputIcon)} t3-settings-clear-action`, false,
 			async () => this.clearSearchResults()
 		));
 
@@ -734,7 +738,7 @@ export class SettingsEditor2 extends EditorPane {
 		}));
 
 		const filterAction = this._register(new Action(SETTINGS_EDITOR_COMMAND_SUGGEST_FILTERS,
-			localize('filterInput', "Filter Settings"), ThemeIcon.asClassName(preferencesFilterIcon)
+			localize('filterInput', "Filter Settings"), `${ThemeIcon.asClassName(preferencesFilterIcon)} t3-settings-filter-action`
 		));
 
 		this.searchWidget = this._register(this.instantiationService.createInstance(SuggestEnabledInput, `${SettingsEditor2.ID}.searchbox`, this.searchContainer, {
@@ -766,11 +770,15 @@ export class SettingsEditor2 extends EditorPane {
 			}
 			// TODO: Aria-live
 		}));
+		if (this.environmentService.isSessionsWindow) {
+			this.searchWidget.setPlaceHolder(localize('t3SettingsSearchPlaceholder', "Search"));
+		}
 		this._register(this.searchWidget.onDidFocus(() => {
 			this._currentFocusContext = SettingsFocusContext.Search;
 		}));
 		this._register(this.searchWidget.onInputDidChange(() => {
 			const searchVal = this.searchWidget.getValue();
+			this.searchContainer?.classList.toggle('has-query', !!searchVal);
 			clearInputAction.enabled = !!searchVal;
 			this.searchInputDelayer.trigger(() => this.onSearchInputChanged(true));
 		}));
@@ -954,6 +962,9 @@ export class SettingsEditor2 extends EditorPane {
 	}
 
 	private createBody(parent: HTMLElement): void {
+		if (this.environmentService.isSessionsWindow) {
+			this.createT3SettingsTopbar(parent);
+		}
 		this.bodyContainer = DOM.append(parent, $('.settings-body'));
 
 		this.noResultsMessage = DOM.append(this.bodyContainer, $('.no-results-message'));
@@ -983,26 +994,47 @@ export class SettingsEditor2 extends EditorPane {
 		DOM.append(accountText, $('.settings-account-name', {}, localize('settingsAccountName', "Backboard")));
 		if (this.searchContainer) {
 			DOM.append(sidebarHeader, this.searchContainer);
+			if (this.environmentService.isSessionsWindow) {
+				const searchIcon = $(`span.t3-settings-search-icon.codicon.codicon-${Codicon.search.id}`);
+				this.searchContainer.insertBefore(searchIcon, this.searchContainer.firstChild);
+				DOM.append(this.searchContainer, $('span.t3-settings-search-shortcut', {}, '/'));
+				this.searchContainer.classList.toggle('has-query', !!this.searchWidget.getValue());
+			}
 		}
 		const searchCountContainer = DOM.append(sidebarHeader, $('.settings-search-count-container'));
 		DOM.append(searchCountContainer, this.countElement);
 		DOM.append(sidebarHeader, this.headerControlsContainer);
 
 		this.createTOC(this.tocTreeContainer);
+		if (this.environmentService.isSessionsWindow) {
+			const footer = DOM.append(this.tocTreeContainer, $('.t3-settings-sidebar-footer'));
+			const backButton = DOM.append(footer, $('button.t3-settings-back-button', {
+				type: 'button',
+				'aria-label': localize('t3SettingsBack', "Back")
+			}));
+			DOM.append(backButton, $(`span.codicon.codicon-${Codicon.arrowLeft.id}`));
+			DOM.append(backButton, $('span', {}, localize('t3SettingsBack', "Back")));
+			this._register(DOM.addDisposableListener(backButton, DOM.EventType.CLICK, () => void this.group.closeEditor(this.input)));
+		}
 		this.createSettingsTree(this.settingsTreeContainer);
 
 		this.splitView = this._register(new SplitView(this.bodyContainer, {
 			orientation: Orientation.HORIZONTAL,
 			proportionalLayout: true
 		}));
-		const startingWidth = this.storageService.getNumber('settingsEditor2.splitViewWidth', StorageScope.PROFILE, SettingsEditor2.TOC_RESET_WIDTH);
+		const defaultTocWidth = this.environmentService.isSessionsWindow ? 256 : SettingsEditor2.TOC_RESET_WIDTH;
+		const splitViewStorageKey = this.environmentService.isSessionsWindow ? 'settingsEditor2.simpleMode.splitViewWidth' : 'settingsEditor2.splitViewWidth';
+		const storedWidth = this.storageService.getNumber(splitViewStorageKey, StorageScope.PROFILE, defaultTocWidth);
+		const startingWidth = Math.max(defaultTocWidth, storedWidth);
+		this.rootElement.style.setProperty('--t3-settings-sidebar-width', `${startingWidth}px`);
 		this.splitView.addView({
 			onDidChange: Event.None,
 			element: this.tocTreeContainer,
-			minimumSize: SettingsEditor2.TOC_MIN_WIDTH,
+			minimumSize: this.environmentService.isSessionsWindow ? 256 : SettingsEditor2.TOC_MIN_WIDTH,
 			maximumSize: Number.POSITIVE_INFINITY,
 			layout: (width, _, height) => {
 				this.tocTreeContainer.style.width = `${width}px`;
+				this.rootElement.style.setProperty('--t3-settings-sidebar-width', `${width}px`);
 				this.tocTree.layout(height, width);
 			}
 		}, startingWidth, undefined, true);
@@ -1018,12 +1050,12 @@ export class SettingsEditor2 extends EditorPane {
 		}, Sizing.Distribute, undefined, true);
 		this._register(this.splitView.onDidSashReset(() => {
 			const totalSize = this.splitView.getViewSize(0) + this.splitView.getViewSize(1);
-			this.splitView.resizeView(0, SettingsEditor2.TOC_RESET_WIDTH);
-			this.splitView.resizeView(1, totalSize - SettingsEditor2.TOC_RESET_WIDTH);
+			this.splitView.resizeView(0, defaultTocWidth);
+			this.splitView.resizeView(1, totalSize - defaultTocWidth);
 		}));
 		this._register(this.splitView.onDidSashChange(() => {
 			const width = this.splitView.getViewSize(0);
-			this.storageService.store('settingsEditor2.splitViewWidth', width, StorageScope.PROFILE, StorageTarget.USER);
+			this.storageService.store(splitViewStorageKey, width, StorageScope.PROFILE, StorageTarget.USER);
 		}));
 		const borderColor = this.theme.getColor(settingsSashBorder)!;
 		this.splitView.style({ separatorBorder: borderColor });
@@ -1039,6 +1071,47 @@ export class SettingsEditor2 extends EditorPane {
 				// Avoid browser ctrl+a
 				e.browserEvent.stopPropagation();
 				e.browserEvent.preventDefault();
+			}
+		}));
+	}
+
+	private createT3SettingsTopbar(parent: HTMLElement): void {
+		this.t3SettingsTopbar = DOM.append(parent, $('.t3-settings-topbar'));
+		const sidebar = DOM.append(this.t3SettingsTopbar, $('.t3-settings-topbar-sidebar'));
+		const sidebarBrand = DOM.append(sidebar, $('.t3-settings-sidebar-brand'));
+		DOM.append(sidebarBrand, $('.t3-settings-sidebar-brand-mark'));
+		DOM.append(sidebarBrand, $('span.t3-settings-sidebar-brand-name', {}, localize('t3SettingsBrandName', "Backboard")));
+		const breadcrumb = DOM.append(this.t3SettingsTopbar, $('nav.t3-settings-breadcrumb', {
+			'aria-label': localize('t3SettingsBreadcrumb', "Settings breadcrumb")
+		}));
+		DOM.append(breadcrumb, $('span.t3-settings-breadcrumb-parent', {}, localize('settings', "Settings")));
+		DOM.append(breadcrumb, $('span.t3-settings-breadcrumb-separator', { 'aria-hidden': 'true' }, '/'));
+		this.t3SettingsBreadcrumbSection = DOM.append(breadcrumb, $('span.t3-settings-breadcrumb-current', {}, localize('commonlyUsed', "Commonly Used")));
+	}
+
+	private updateT3SettingsBreadcrumb(element: SettingsTreeGroupElement | null): void {
+		if (this.t3SettingsBreadcrumbSection && element) {
+			this.t3SettingsBreadcrumbSection.textContent = element.label;
+		}
+	}
+
+	private addT3SettingsKeyboardNavigation(container: HTMLElement): void {
+		if (!this.environmentService.isSessionsWindow) {
+			return;
+		}
+
+		this._register(DOM.addDisposableListener(container, DOM.EventType.KEY_DOWN, (event: KeyboardEvent) => {
+			if (event.defaultPrevented) {
+				return;
+			}
+			if (event.key === '/' && !event.metaKey && !event.ctrlKey && !event.altKey && !DOM.isEditableElement(event.target as HTMLElement)) {
+				event.preventDefault();
+				this.focusSearch();
+				return;
+			}
+			if (event.key === 'Escape' && !this.searchWidget.getValue()) {
+				event.preventDefault();
+				void this.group.closeEditor(this.input);
 			}
 		}));
 	}
@@ -1060,6 +1133,7 @@ export class SettingsEditor2 extends EditorPane {
 
 		this._register(this.tocTree.onDidChangeFocus(e => {
 			const element: SettingsTreeGroupElement | null = e.elements?.[0] ?? null;
+			this.updateT3SettingsBreadcrumb(element);
 			if (this.tocFocusedElement === element) {
 				return;
 			}
@@ -2115,7 +2189,7 @@ export class SettingsEditor2 extends EditorPane {
 		if (!this.isVisible()) {
 			return;
 		}
-		const listHeight = Math.max(0, dimension.height - this.headerContainer.offsetHeight);
+		const listHeight = Math.max(0, dimension.height - this.headerContainer.offsetHeight - (this.t3SettingsTopbar?.offsetHeight ?? 0));
 
 		this.splitView.el.style.height = `${listHeight}px`;
 
@@ -2129,13 +2203,15 @@ export class SettingsEditor2 extends EditorPane {
 		const hideTocForSearch = tocBehavior === 'hide' && this.searchResultModel;
 		if (!hideTocForSearch) {
 			const firstViewWasVisible = this.splitView.isViewVisible(0);
-			const firstViewVisible = this.bodyContainer.clientWidth >= SettingsEditor2.NARROW_TOTAL_WIDTH;
+			const tableOfContentsWidth = this.environmentService.isSessionsWindow ? 256 : SettingsEditor2.TOC_RESET_WIDTH;
+			const narrowTotalWidth = SettingsEditor2.EDITOR_MIN_WIDTH + tableOfContentsWidth;
+			const firstViewVisible = this.bodyContainer.clientWidth >= narrowTotalWidth;
 
 			this.splitView.setViewVisible(0, firstViewVisible);
 			// If the first view is again visible, and we have enough space, immediately set the
 			// editor to use the reset width rather than the cached min width
-			if (!firstViewWasVisible && firstViewVisible && this.bodyContainer.clientWidth >= SettingsEditor2.EDITOR_MIN_WIDTH + SettingsEditor2.TOC_RESET_WIDTH) {
-				this.splitView.resizeView(0, SettingsEditor2.TOC_RESET_WIDTH);
+			if (!firstViewWasVisible && firstViewVisible && this.bodyContainer.clientWidth >= narrowTotalWidth) {
+				this.splitView.resizeView(0, tableOfContentsWidth);
 			}
 			this.splitView.style({
 				separatorBorder: firstViewVisible ? this.theme.getColor(settingsSashBorder)! : Color.transparent

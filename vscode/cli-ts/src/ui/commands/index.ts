@@ -9,20 +9,37 @@ export type Command =
 	| { type: "logout" }
 	| { type: "model" }
 	| { type: "memory" }
+	| { type: "settings" }
 	| { type: "cua" }
 	| { type: "browser" }
 	| { type: "lsp" }
 	| { type: "mcp" }
+	| { type: "keys" }
+	| { type: "context" }
+	| { type: "compress" }
+	| { type: "discover" }
 	| { type: "hooks" }
 	| { type: "skills" }
+	| { type: "sessions" }
 	| { type: "notify" }
+	| { type: "verbose" }
+	| { type: "update" }
+	| { type: "undo" }
+	| { type: "redo" }
+	| { type: "rewind" }
 	| { type: "unknown"; name: string };
 
-export interface SlashCommandDefinition {
+/** A command offered in slash suggestions: built-in or loaded skill. */
+export interface SuggestibleSlashCommand {
 	name: string;
 	type: Command["type"];
 	description: string;
-	aliases?: string[];
+	aliases?: readonly string[];
+}
+
+/** Built-in commands always resolve to a concrete command type. */
+export interface SlashCommandDefinition extends SuggestibleSlashCommand {
+	type: Exclude<Command["type"], "message" | "unknown">;
 }
 
 export interface SlashCommandSuggestion {
@@ -36,6 +53,12 @@ export const SLASH_COMMANDS: readonly SlashCommandDefinition[] = [
 		name: "model",
 		type: "model",
 		description: "Pick a model and thinking mode from Backboard",
+	},
+	{
+		name: "settings",
+		type: "settings",
+		description: "Adjust session preferences",
+		aliases: ["config"],
 	},
 	{
 		name: "memory",
@@ -58,8 +81,41 @@ export const SLASH_COMMANDS: readonly SlashCommandDefinition[] = [
 		description: "Toggle language-server diagnostics for this session",
 	},
 	{ name: "mcp", type: "mcp", description: "Manage MCP servers" },
+	{
+		name: "context",
+		type: "context",
+		description: "Show what is filling the context window",
+	},
+	{
+		name: "compress",
+		type: "compress",
+		description: "Compress the conversation to free context",
+		aliases: ["compact"],
+	},
+	{
+		name: "keys",
+		type: "keys",
+		description: "Manage provider API keys (BYOK)",
+		aliases: ["apikeys"],
+	},
+	{
+		name: "discover",
+		type: "discover",
+		description: "Toggle the skill & MCP discovery tools for this session",
+	},
 	{ name: "hooks", type: "hooks", description: "Manage hooks" },
-	{ name: "new", type: "new", description: "Start a new thread" },
+	{
+		name: "new",
+		type: "new",
+		description: "Start a new thread",
+		aliases: ["clear", "reset"],
+	},
+	{
+		name: "sessions",
+		type: "sessions",
+		description: "Resume a session",
+		aliases: ["resume", "continue"],
+	},
 	{ name: "login", type: "login", description: "Sign in with Backboard" },
 	{
 		name: "logout",
@@ -71,6 +127,7 @@ export const SLASH_COMMANDS: readonly SlashCommandDefinition[] = [
 		name: "quit",
 		type: "quit",
 		description: `Quit ${APP_DISPLAY_NAME} (or press Ctrl+C twice)`,
+		aliases: ["exit"],
 	},
 	{ name: "skills", type: "skills", description: "Open the skill picker" },
 	{
@@ -78,23 +135,55 @@ export const SLASH_COMMANDS: readonly SlashCommandDefinition[] = [
 		type: "notify",
 		description: "Toggle a ring when a prompt finishes",
 	},
+	{
+		name: "verbose",
+		type: "verbose",
+		description: "Toggle detailed tool-call output",
+	},
+	{
+		name: "update",
+		type: "update",
+		description: "Check for a newer CLI version",
+	},
+	{
+		name: "undo",
+		type: "undo",
+		description: "Revert files changed by the last turn",
+	},
+	{
+		name: "redo",
+		type: "redo",
+		description: "Reapply the last undone file changes",
+	},
+	{
+		name: "rewind",
+		type: "rewind",
+		description: "Restore files to an earlier checkpoint",
+		aliases: ["checkpoints"],
+	},
 ];
 
 const SLASH_SUGGESTION_LIMIT = 6;
 
+const COMMAND_NAME_WIDTH = Math.max(
+	...SLASH_COMMANDS.map((command) => command.name.length),
+);
+
 export const HELP_TEXT = [
 	"Commands:",
-	...SLASH_COMMANDS.map(
-		(command) => `  /${command.name.padEnd(7)} ${command.description}`,
-	),
-	"  /skill-name Invoke a loaded skill by name",
+	...SLASH_COMMANDS.map((command) => {
+		const aliases = command.aliases?.length
+			? ` (aliases: ${command.aliases.map((alias) => `/${alias}`).join(", ")})`
+			: "";
+		return `  /${command.name.padEnd(COMMAND_NAME_WIDTH)} ${command.description}${aliases}`;
+	}),
+	"",
+	"Shortcuts:",
+	"  Ctrl+V      Attach an image from the clipboard (some terminals capture Ctrl+V for text paste, so it may not reach the app)",
 ].join("\n");
 
 /** Parses raw input into a command. Non-slash input becomes a message. */
-export function parseCommand(
-	input: string,
-	skillCommands: ReadonlySet<string> = new Set(),
-): Command {
+export function parseCommand(input: string): Command {
 	const trimmed = input.trim();
 	if (!trimmed.startsWith("/")) {
 		return { type: "message", text: trimmed };
@@ -102,51 +191,27 @@ export function parseCommand(
 
 	const withoutSlash = trimmed.slice(1);
 	const name = withoutSlash.split(/\s+/)[0]?.toLowerCase() ?? "";
-	switch (name) {
-		case "help":
-			return { type: "help" };
-		case "new":
-			return { type: "new" };
-		case "exit":
-		case "quit":
-			return { type: "quit" };
-		case "login":
-			return { type: "login" };
-		case "logout":
-			return { type: "logout" };
-		case "model":
-			return { type: "model" };
-		case "memory":
-			return { type: "memory" };
-		case "cua":
-			return { type: "cua" };
-		case "browser":
-			return { type: "browser" };
-		case "lsp":
-			return { type: "lsp" };
-		case "mcp":
-			return { type: "mcp" };
-		case "hooks":
-			return { type: "hooks" };
-		case "skills":
-			return { type: "skills" };
-		case "notify":
-			return { type: "notify" };
-		default:
-			if (skillCommands.has(name)) {
-				const rest = withoutSlash.slice(name.length).trim();
-				return {
-					type: "message",
-					text: rest ? `$${name} ${rest}` : `$${name}`,
-				};
-			}
-			// Filepath-like input (e.g. /a/b/c) is not a command; send it as a
-			// message instead of failing with "unknown command".
-			if (name.includes("/")) {
-				return { type: "message", text: trimmed };
-			}
-			return { type: "unknown", name };
+	const definition = findSlashCommand(name);
+	if (definition) {
+		return { type: definition.type };
 	}
+	// Filepath-like input (e.g. /a/b/c) is not a command; send it as a
+	// message instead of failing with "unknown command".
+	if (name.includes("/")) {
+		return { type: "message", text: trimmed };
+	}
+	return { type: "unknown", name };
+}
+
+/** Resolves a built-in command by canonical name or alias. */
+export function findSlashCommand(
+	name: string,
+): SlashCommandDefinition | undefined {
+	const normalized = name.toLowerCase();
+	return SLASH_COMMANDS.find(
+		(command) =>
+			command.name === normalized || command.aliases?.includes(normalized),
+	);
 }
 
 export function canRunCommandAfterSessionEnd(
@@ -159,15 +224,25 @@ export function canRunCommandAfterSessionEnd(
 		command === "login" ||
 		command === "logout" ||
 		command === "memory" ||
+		command === "keys" ||
+		command === "context" ||
+		command === "settings" ||
+		command === "cua" ||
+		command === "browser" ||
+		command === "discover" ||
 		command === "lsp" ||
-		command === "notify"
+		command === "notify" ||
+		command === "verbose" ||
+		command === "update" ||
+		command === "undo" ||
+		command === "redo" ||
+		command === "rewind"
 	);
 }
 
 export function slashCommandSuggestions(
 	input: string,
 	options: {
-		skillCommands?: readonly string[];
 		allowCommand?: (type: Command["type"]) => boolean;
 		limit?: number;
 	} = {},
@@ -175,7 +250,7 @@ export function slashCommandSuggestions(
 	const query = slashCommandQuery(input);
 	if (query === null) return [];
 
-	const commands = availableSlashCommands(options.skillCommands ?? []).filter(
+	const commands = availableSlashCommands().filter(
 		(command) => options.allowCommand?.(command.type) ?? true,
 	);
 	const limit = options.limit ?? SLASH_SUGGESTION_LIMIT;
@@ -212,30 +287,12 @@ function slashCommandQuery(input: string): string | null {
 	return query.toLowerCase();
 }
 
-function availableSlashCommands(
-	skillCommands: readonly string[],
-): SlashCommandDefinition[] {
-	const seen = new Set<string>();
-	const commands: SlashCommandDefinition[] = [];
-	for (const command of SLASH_COMMANDS) {
-		seen.add(command.name);
-		commands.push(command);
-	}
-	for (const skill of skillCommands) {
-		const name = skill.trim().toLowerCase();
-		if (!name || seen.has(name)) continue;
-		seen.add(name);
-		commands.push({
-			name,
-			type: "message",
-			description: "Invoke loaded skill",
-		});
-	}
-	return commands;
+function availableSlashCommands(): SuggestibleSlashCommand[] {
+	return [...SLASH_COMMANDS];
 }
 
 function slashCommandScore(
-	command: SlashCommandDefinition,
+	command: SuggestibleSlashCommand,
 	query: string,
 ): number {
 	if (!query) return 0;
@@ -246,7 +303,8 @@ function slashCommandScore(
 	if (name === query) return 0;
 	if (name.startsWith(query)) return 10 + name.length;
 	if (aliases.some((alias) => alias === query)) return 20;
-	if (aliases.some((alias) => alias.startsWith(query))) return 30 + name.length;
+	const prefixedAlias = aliases.find((alias) => alias.startsWith(query));
+	if (prefixedAlias) return 30 + prefixedAlias.length;
 	if (name.includes(query)) return 50 + name.indexOf(query);
 	if (description.includes(query)) return 100 + description.indexOf(query);
 

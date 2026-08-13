@@ -1,8 +1,11 @@
 import { describe, expect, it } from "bun:test";
+import { z } from "zod";
 import { EventBus } from "../src/core/bus/EventBus.ts";
 import type { ToolCallRef } from "../src/core/bus/events.ts";
 import type { HookController } from "../src/core/hooks/index.ts";
+import { Tool } from "../src/core/tools/Tool.ts";
 import { ToolRegistry } from "../src/core/tools/ToolRegistry.ts";
+import { ok, type ToolResult } from "../src/core/tools/ToolResult.ts";
 import { AbortError, ToolScheduler } from "../src/core/tools/ToolScheduler.ts";
 import { makeContext, TestTool } from "./helpers.ts";
 
@@ -233,6 +236,98 @@ describe("ToolScheduler", () => {
 		expect(outputs[0]?.output).toContain("disabled");
 	});
 
+	it("suppresses tool:start when cancelled during pre-tool hooks", async () => {
+		const events: string[] = [];
+		const bus = new EventBus();
+		bus.on("tool:start", (event) => events.push(`start:${event.name}`));
+		bus.on("tool:error", (event) => events.push(`error:${event.name}`));
+		const registry = new ToolRegistry([new TestTool({ name: "A" })]);
+		const ac = new AbortController();
+		const scheduler = new ToolScheduler(
+			registry,
+			bus,
+			() => true,
+			hookControllerStub({
+				runPreToolUse: async (input) => {
+					ac.abort();
+					return { input: input.toolInput };
+				},
+			}),
+		);
+
+		await expect(
+			scheduler.run([callRef("A")], makeContext(ac.signal, bus)),
+		).rejects.toBeInstanceOf(AbortError);
+		expect(events).toEqual([]);
+	});
+
+	it("suppresses tool:result when the turn is cancelled mid-execution", async () => {
+		const events: string[] = [];
+		const bus = new EventBus();
+		bus.on("tool:result", (event) => events.push(`result:${event.name}`));
+		bus.on("tool:error", (event) => events.push(`error:${event.name}`));
+		const ac = new AbortController();
+		const registry = new ToolRegistry([new OutlivesAbortTool(ac)]);
+		const scheduler = new ToolScheduler(registry, bus);
+
+		await expect(
+			scheduler.run([callRef("Outlives")], makeContext(ac.signal, bus)),
+		).rejects.toBeInstanceOf(AbortError);
+		expect(events).toEqual([]);
+	});
+
+	it("suppresses tool:result when cancelled during a post-tool hook", async () => {
+		const events: string[] = [];
+		const bus = new EventBus();
+		bus.on("tool:result", (event) => events.push(`result:${event.name}`));
+		bus.on("tool:error", (event) => events.push(`error:${event.name}`));
+		const ac = new AbortController();
+		const registry = new ToolRegistry([new TestTool({ name: "A" })]);
+		const scheduler = new ToolScheduler(
+			registry,
+			bus,
+			() => true,
+			hookControllerStub({
+				runPostToolUse: async (input) => {
+					ac.abort();
+					return { output: input.output };
+				},
+			}),
+		);
+
+		await expect(
+			scheduler.run([callRef("A")], makeContext(ac.signal, bus)),
+		).rejects.toBeInstanceOf(AbortError);
+		expect(events).toEqual([]);
+	});
+
+	it("suppresses tool:error when cancelled during the error post-hook", async () => {
+		const events: string[] = [];
+		const bus = new EventBus();
+		bus.on("tool:error", (event) => events.push(`error:${event.name}`));
+		bus.on("tool:result", (event) => events.push(`result:${event.name}`));
+		const ac = new AbortController();
+		const registry = new ToolRegistry([
+			new TestTool({ name: "A", readOnly: false, throws: true }),
+		]);
+		const scheduler = new ToolScheduler(
+			registry,
+			bus,
+			() => true,
+			hookControllerStub({
+				runPostToolUse: async (input) => {
+					ac.abort();
+					return { output: input.output };
+				},
+			}),
+		);
+
+		await expect(
+			scheduler.run([callRef("A")], makeContext(ac.signal, bus)),
+		).rejects.toBeInstanceOf(AbortError);
+		expect(events).toEqual([]);
+	});
+
 	it("throws AbortError when cancelled before running", async () => {
 		const registry = new ToolRegistry([new TestTool({ name: "A" })]);
 		const scheduler = new ToolScheduler(registry, new EventBus());
@@ -356,6 +451,22 @@ describe("ToolScheduler", () => {
 		expect(outputs[0]?.output.startsWith("Error:")).toBe(true);
 	});
 });
+
+// Aborts the turn from inside execute, then resolves anyway - the completion
+// must stay silent on the bus.
+class OutlivesAbortTool extends Tool<Record<string, never>, { value: string }> {
+	readonly name = "Outlives";
+	readonly inputSchema = z.object({});
+
+	constructor(private readonly controller: AbortController) {
+		super();
+	}
+
+	override async execute(): Promise<ToolResult<{ value: string }>> {
+		this.controller.abort();
+		return ok({ value: "done" }, "done", "done");
+	}
+}
 
 function hookControllerStub(
 	methods: Partial<

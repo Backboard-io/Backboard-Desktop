@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/errors.ts";
 import {
 	disableConfiguredMcpServer,
 	type McpServerFileEntry,
@@ -308,7 +309,7 @@ export class McpController {
 		const warnings = [promptsResult, resourcesResult, templatesResult]
 			.filter((result) => result.status === "rejected")
 			.map((result) =>
-				result.status === "rejected" ? formatUnknownError(result.reason) : "",
+				result.status === "rejected" ? errorMessage(result.reason) : "",
 			)
 			.filter(Boolean);
 		if (
@@ -506,10 +507,6 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
 
 function requiredSignal(signal: AbortSignal | undefined): AbortSignal {
 	return signal ?? new AbortController().signal;
-}
-
-function formatUnknownError(err: unknown): string {
-	return err instanceof Error ? err.message : String(err);
 }
 
 function isAbortError(err: unknown): boolean {

@@ -1,10 +1,16 @@
-import { readFile, stat } from "node:fs/promises";
-import { extname, resolve } from "node:path";
+import { readdir, readFile, stat } from "node:fs/promises";
+import { basename, dirname, extname, join, resolve } from "node:path";
 import { z } from "zod";
 import {
 	ImageContent,
 	type ImageContentPayload,
 } from "../core/image/ImageContent.ts";
+import {
+	asNumber,
+	asString,
+	lineRange,
+	relativizePath,
+} from "../core/tools/inputSummary.ts";
 import { Tool } from "../core/tools/Tool.ts";
 import type { ToolContext } from "../core/tools/ToolContext.ts";
 import { ok, type ToolResult } from "../core/tools/ToolResult.ts";
@@ -62,11 +68,22 @@ export class ReadTool extends Tool<Input, Output> {
 		return getToolPrompt(this.name, context);
 	}
 
+	override summarizeInput(input: Input): string | undefined {
+		const filePath = asString(input.file_path);
+		if (!filePath) return undefined;
+		return (
+			relativizePath(filePath) +
+			lineRange(asNumber(input.offset), asNumber(input.limit))
+		);
+	}
+
 	override async execute(
 		input: Input,
 		ctx: ToolContext,
 	): Promise<ToolResult<Output>> {
-		const filePath = resolve(ctx.cwd, input.file_path);
+		const filePath = await resolveReadablePath(
+			resolve(ctx.cwd, decodeUnicodeEscapes(input.file_path)),
+		);
 		const info = await stat(filePath);
 		if (info.size > READ_TOOL_MAX_BYTES) {
 			throw new Error(
@@ -124,4 +141,43 @@ function imageMimeTypeForPath(filePath: string): string | null {
 		READ_TOOL_IMAGE_MIME_BY_EXTENSION.get(extname(filePath).toLowerCase()) ??
 		null
 	);
+}
+
+/** Turns literal unicode escapes (`\u{202f}`, ` `) into the real glyph. */
+function decodeUnicodeEscapes(value: string): string {
+	if (!value.includes("\\u")) return value;
+	const fromHex = (original: string, hex: string): string => {
+		const code = Number.parseInt(hex, 16);
+		if (!Number.isFinite(code) || code > 0x10ffff) return original;
+		try {
+			return String.fromCodePoint(code);
+		} catch {
+			return original;
+		}
+	};
+	return value
+		.replace(/\\u\{([0-9a-fA-F]{1,6})\}/g, (m, hex) => fromHex(m, hex))
+		.replace(/\\u([0-9a-fA-F]{4})/g, (m, hex) => fromHex(m, hex));
+}
+
+/** Whitespace-insensitive path fallback (macOS U+202F screenshot names). */
+async function resolveReadablePath(filePath: string): Promise<string> {
+	try {
+		await stat(filePath);
+		return filePath;
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+	}
+	const dir = dirname(filePath);
+	const target = basename(filePath).replace(/\s+/g, " ");
+	let entries: string[];
+	try {
+		entries = await readdir(dir);
+	} catch {
+		return filePath;
+	}
+	for (const entry of entries) {
+		if (entry.replace(/\s+/g, " ") === target) return join(dir, entry);
+	}
+	return filePath;
 }

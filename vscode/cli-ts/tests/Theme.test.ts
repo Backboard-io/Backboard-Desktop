@@ -5,12 +5,10 @@ import { createTheme } from "../src/ui/theme/theme.ts";
 
 const UI_ROOT = join(import.meta.dir, "../src/ui");
 const DYNAMIC_THEME_FIELDS = [
-	"surface1",
-	"surface2",
-	"surface3",
 	"inputSurfaceBackground",
-	"inputHighlight",
 	"highlightBackground",
+	"diffAddedBackground",
+	"diffRemovedBackground",
 ] as const;
 
 describe("UI theme usage", () => {
@@ -21,7 +19,9 @@ describe("UI theme usage", () => {
 			if (path === "src/ui/theme/theme.ts") continue;
 			const source = await readFile(file, "utf8");
 			for (const field of DYNAMIC_THEME_FIELDS) {
-				if (source.includes(`theme.${field}`)) {
+				// \b keeps `uiTheme.<field>` (the ThemeProvider path) legal while
+				// catching the module singleton, even via names like `myTheme`.
+				if (new RegExp(`\\btheme\\.${field}\\b`).test(source)) {
 					offenders.push(`${path}: theme.${field}`);
 				}
 			}
@@ -32,7 +32,7 @@ describe("UI theme usage", () => {
 
 	it("falls secondary text back to terminal foreground on low-contrast backgrounds and surfaces", () => {
 		expect(createTheme("#05070b").subtle).toBe("gray");
-		expect(createTheme("#05070b").secondaryText).toBe("gray");
+		expect(createTheme("#05070b").readableSecondaryText).toBe("gray");
 		expect(createTheme("#171717").subtle).toBeUndefined();
 		expect(createTheme("#777777").subtle).toBeUndefined();
 		expect(createTheme("#ffffff").subtle).toBeUndefined();

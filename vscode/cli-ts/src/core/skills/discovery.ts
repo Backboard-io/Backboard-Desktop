@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { parseDocument } from "yaml";
 import { findRepoRoot } from "../../config/paths.ts";
+import { errorMessage } from "../../utils/errors.ts";
 import type { Skill, SkillSource } from "./Skill.ts";
 import { buildSkillCatalog, type SkillCatalog } from "./SkillCatalog.ts";
 
@@ -137,13 +138,19 @@ async function loadSkillRoot(
 	try {
 		entries = await readdir(root, { withFileTypes: true });
 	} catch (err) {
-		return [{ warning: `Skipped skills root ${root}: ${formatError(err)}.` }];
+		return [{ warning: `Skipped skills root ${root}: ${errorMessage(err)}.` }];
 	}
 	entries.sort((a, b) => a.name.localeCompare(b.name));
 
 	const results: LoadResult[] = [];
 	for (const entry of entries) {
 		if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+		if (source === "repo" && entry.isSymbolicLink()) {
+			results.push({
+				warning: `Skipped symlinked repo skill directory ${path.join(root, entry.name)}.`,
+			});
+			continue;
+		}
 		const dir = path.join(root, entry.name);
 		try {
 			const info = await stat(dir);
@@ -156,7 +163,7 @@ async function loadSkillRoot(
 			);
 		} catch (err) {
 			results.push({
-				warning: `Skipped skill at ${dir}: ${formatError(err)}.`,
+				warning: `Skipped skill at ${dir}: ${errorMessage(err)}.`,
 			});
 		}
 	}
@@ -183,8 +190,4 @@ function stringValue(value: unknown): string | null {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function formatError(err: unknown): string {
-	return err instanceof Error ? err.message : String(err);
 }

@@ -2,6 +2,10 @@ import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { z } from "zod";
 import { APP_PACKAGE_NAME, APP_VERSION } from "../config/branding.ts";
+import type {
+	PermissionCheckContext,
+	PermissionDecision,
+} from "../core/permissions/types.ts";
 import { Tool } from "../core/tools/Tool.ts";
 import type { ToolContext } from "../core/tools/ToolContext.ts";
 import { ok, type ToolResult } from "../core/tools/ToolResult.ts";
@@ -34,6 +38,30 @@ export class FetchUrlTool extends Tool<Input, Output> {
 
 	override prompt(context: PromptContext = {}): string {
 		return getToolPrompt(this.name, context);
+	}
+
+	override isReadOnly(): boolean {
+		return false;
+	}
+
+	override permissionContent(input: Input): string {
+		return input.url;
+	}
+
+	// Not read-only (a crafted URL can exfiltrate), but still a read: auto
+	// trusts it, manual keeps the prompt, deny rules can block domains.
+	override checkPermissions(
+		_input: Input,
+		ctx: PermissionCheckContext,
+	): PermissionDecision | undefined {
+		if (ctx.mode === "auto") {
+			return { behavior: "allow", reason: "network read (auto mode)" };
+		}
+		return undefined;
+	}
+
+	override isConcurrencySafe(): boolean {
+		return true;
 	}
 
 	override async execute(

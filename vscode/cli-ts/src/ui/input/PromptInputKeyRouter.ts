@@ -23,6 +23,10 @@ export function resolvePromptInputKeyAction(
 		return { kind: "deleteBeforeCursorOnLine" };
 	}
 
+	if (key.ctrl && input === "v") {
+		return { kind: "pasteClipboardImage" };
+	}
+
 	if (isDeletePreviousWord(input, key, context.platform)) {
 		return { kind: "deletePreviousWord" };
 	}

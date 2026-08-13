@@ -1,3 +1,5 @@
+import type { AttachmentItem } from "../../core/attachments/AttachmentTypes.ts";
+import type { CandidateFile } from "../../core/attachments/attachmentPaths.ts";
 import type { Command } from "../commands/index.ts";
 import type {
 	PromptHistoryState,
@@ -17,9 +19,15 @@ export interface PromptInputProps {
 	disabled?: boolean;
 	busy?: boolean;
 	queuedPrompts?: readonly QueuedPromptItem[];
-	skillCommands?: readonly string[];
 	allowCommand?: (type: Command["type"]) => boolean;
 	promptHistory?: PromptHistoryState;
 	onPromptHistoryChange?: (history: PromptHistoryState) => void;
-	onSubmit: (value: string, intent: PromptSubmitIntent) => void;
+	onSubmit: (
+		value: string,
+		intent: PromptSubmitIntent,
+		attachmentIds?: string[],
+	) => void;
+	onAttachFiles?: (files: CandidateFile[]) => AttachmentItem[];
+	onRemoveAttachment?: (id: string) => void;
+	onNotice?: (text: string, level?: "info" | "error") => void;
 }

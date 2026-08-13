@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/errors.ts";
 import type { McpServerConfig } from "./config.ts";
 import {
 	listMcpServerPromptDefinitions,
@@ -120,7 +121,7 @@ export class McpPrimitiveManager {
 				);
 			} catch (err) {
 				warnings.push(
-					`Failed to refresh MCP server '${connection.server.name}' prompts: ${formatError(err)}.`,
+					`Failed to refresh MCP server '${connection.server.name}' prompts: ${errorMessage(err)}.`,
 				);
 				this.dirtyPromptServers.add(connection.server.name);
 				continue;
@@ -283,7 +284,7 @@ export class McpPrimitiveManager {
 				);
 			} catch (err) {
 				warnings.push(
-					`Failed to refresh MCP server '${connection.server.name}' resources: ${formatError(err)}.`,
+					`Failed to refresh MCP server '${connection.server.name}' resources: ${errorMessage(err)}.`,
 				);
 				this.dirtyResourceServers.add(connection.server.name);
 				continue;
@@ -350,10 +351,6 @@ function isPromptEnabled(server: McpServerConfig, promptName: string): boolean {
 		return server.enabledPrompts.includes(promptName);
 	}
 	return !server.disabledPrompts.includes(promptName);
-}
-
-function formatError(err: unknown): string {
-	return err instanceof Error ? err.message : String(err);
 }
 
 function unique(values: readonly string[]): string[] {

@@ -55,7 +55,14 @@ function yieldToEventLoop(): Promise<void> {
 	return new Promise((resolve) => setImmediate(resolve));
 }
 
-export function parseSseFrame(frame: string): unknown | null {
+/**
+ * The frame's `data:` payload, joined across continuation lines.
+ *
+ * Sentinels like OpenAI's `[DONE]` must be recognised from this, never from a
+ * substring of the raw frame: the payload is JSON, so assistant content that
+ * happens to contain the sentinel text would otherwise end the stream mid-turn.
+ */
+export function sseDataPayload(frame: string): string | null {
 	const data: string[] = [];
 
 	for (const line of frame.split("\n")) {
@@ -67,6 +74,11 @@ export function parseSseFrame(frame: string): unknown | null {
 
 	if (data.length === 0) return null;
 	const payload = data.join("\n").trim();
-	if (!payload) return null;
+	return payload || null;
+}
+
+export function parseSseFrame(frame: string): unknown | null {
+	const payload = sseDataPayload(frame);
+	if (payload === null) return null;
 	return JSON.parse(payload);
 }

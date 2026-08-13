@@ -1,5 +1,7 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import os from "node:os";
+import { errorMessage } from "../../utils/errors.ts";
+import { killProcessTree, treeSpawnOptions } from "../../utils/processTree.ts";
 import {
 	DEFAULT_HOOK_TIMEOUT_MS,
 	HOOK_ENV_PREFIX,
@@ -9,21 +11,6 @@ import {
 import type { HookInput, HookOutput, LoadedHook } from "./types.ts";
 
 const KILL_GRACE_MS = 2000;
-
-function killTree(child: ChildProcess, signal: NodeJS.Signals): void {
-	if (child.pid === undefined) {
-		child.kill(signal);
-		return;
-	}
-	try {
-		// Negative pid targets the whole process group (requires detached spawn).
-		process.kill(-child.pid, signal);
-	} catch {
-		try {
-			child.kill(signal);
-		} catch {}
-	}
-}
 
 export type CommandHookRunResult =
 	| { status: "success"; output: HookOutput; stderr: string }
@@ -59,7 +46,7 @@ export async function runCommandHook(
 		stdio: ["pipe", "pipe", "pipe"],
 		// Own process group so we can kill grandchildren too (a hook that
 		// backgrounds a child must not keep the pipe open and hang the turn).
-		detached: true,
+		...treeSpawnOptions(),
 	});
 
 	let stdout = "";
@@ -70,8 +57,11 @@ export async function runCommandHook(
 	let killTimer: ReturnType<typeof setTimeout> | undefined;
 
 	const escalateKill = (): void => {
-		killTree(child, "SIGTERM");
-		killTimer = setTimeout(() => killTree(child, "SIGKILL"), KILL_GRACE_MS);
+		killProcessTree(child, "SIGTERM");
+		killTimer = setTimeout(
+			() => killProcessTree(child, "SIGKILL"),
+			KILL_GRACE_MS,
+		);
 	};
 
 	const timer = setTimeout(() => {
@@ -211,9 +201,9 @@ function parseHookOutput(
 	} catch (err) {
 		return {
 			status: "warning",
-			warning: `${formatHookName(loadedHook)} printed non-JSON stdout: ${
-				err instanceof Error ? err.message : String(err)
-			}`,
+			warning: `${formatHookName(loadedHook)} printed non-JSON stdout: ${errorMessage(
+				err,
+			)}`,
 		};
 	}
 }

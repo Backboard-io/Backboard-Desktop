@@ -1,12 +1,6 @@
 import type { ToolResultDetailLine } from "./ToolResultDetail.ts";
 
-/**
- * The before/after content of a file that a tool edited, surfaced so hosts
- * (the Backboard IDE) can render an inline diff. The tool provides these
- * because it holds the pre-edit content in memory; a host observing tool
- * events cannot snapshot "before" reliably, since the edit has already been
- * written to disk by the time the event is delivered.
- */
+/** Before/after text retained so Backboard Studio can render inline diffs. */
 export interface FileEditPreview {
 	path: string;
 	before: string;
@@ -25,7 +19,6 @@ export interface ToolResult<O = unknown> {
 	title: string;
 	detail?: string;
 	detailLines?: ToolResultDetailLine[];
-	/** Set by file-edit tools so hosts can render before/after diffs. */
 	fileEdits?: FileEditPreview[];
 }
 

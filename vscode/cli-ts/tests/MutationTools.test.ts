@@ -22,7 +22,7 @@ function context(cwd: string): ToolContext {
 }
 
 async function tempDir(): Promise<string> {
-	return await mkdtemp(join(tmpdir(), "q-cli-tools-"));
+	return await mkdtemp(join(tmpdir(), "cli-tools-"));
 }
 
 describe("mutation tools", () => {
@@ -30,7 +30,7 @@ describe("mutation tools", () => {
 		const cwd = await tempDir();
 		const tool = new WriteTool();
 
-		await tool.execute(
+		const result = await tool.execute(
 			{ file_path: "nested/file.txt", content: "hello\nworld\n" },
 			context(cwd),
 		);
@@ -38,6 +38,13 @@ describe("mutation tools", () => {
 		expect(await readFile(join(cwd, "nested/file.txt"), "utf8")).toBe(
 			"hello\nworld\n",
 		);
+		expect(result.fileEdits).toEqual([
+			{
+				path: join(cwd, "nested/file.txt"),
+				before: "",
+				after: "hello\nworld\n",
+			},
+		]);
 	});
 
 	it("applies multiple multiline edits and legacy single edits", async () => {
@@ -319,6 +326,13 @@ describe("mutation tools", () => {
 
 		expect(result.title).toBe("Changed +1, -1 lines");
 		expect(result.detail).toBeUndefined();
+		expect(result.fileEdits).toEqual([
+			{
+				path: join(cwd, "file.txt"),
+				before: "alpha\nbeta\n",
+				after: "alpha\ngamma\n",
+			},
+		]);
 		expect(result.detailLines).toContainEqual({
 			key: "file.txt:line:1",
 			displayValue: "  2     │ beta",

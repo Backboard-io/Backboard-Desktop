@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/errors.ts";
 import { createPlatform, type Platform } from "../platform/index.ts";
 import type { ToolContext } from "../tools/ToolContext.ts";
 import { toPlatformAction } from "./ComputerPlatformAction.ts";
@@ -108,7 +109,7 @@ export class ComputerRuntime {
 				observationId: this.lastObservation?.observationId,
 				verification: "failed",
 				summary: `Failed to execute ${action.action}.`,
-				error: err instanceof Error ? err.message : String(err),
+				error: errorMessage(err),
 			};
 		}
 	}

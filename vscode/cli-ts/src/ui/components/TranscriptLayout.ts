@@ -1,4 +1,5 @@
 import type { RenderTranscriptItem } from "../../state/AppState.ts";
+import { pluralize } from "../../utils/string.ts";
 import {
 	LIVE_TRANSCRIPT_TAIL_ITEMS,
 	RESPONSIVE_TRANSCRIPT_TAIL_ITEMS,
@@ -38,7 +39,7 @@ export function compactLiveTranscriptItems(
 			kind: "notice",
 			id: "live-items-hidden",
 			level: "info",
-			text: `${hiddenCount} earlier live item${hiddenCount === 1 ? "" : "s"} hidden while this turn is running.`,
+			text: `${hiddenCount} earlier live ${pluralize(hiddenCount, "item")} hidden while this turn is running.`,
 		},
 		...visibleItems,
 	];

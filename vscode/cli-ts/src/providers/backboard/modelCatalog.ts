@@ -44,6 +44,10 @@ export function normalizeModel(model: ModelCatalogItem): ModelInfo | null {
 			? { thinking_controls: model.thinking_controls }
 			: {}),
 		...(releaseTimestamp !== null ? { releaseTimestamp } : {}),
+		...(model.source ? { source: model.source } : {}),
+		...(typeof model.context_limit === "number" && model.context_limit > 0
+			? { contextLimit: model.context_limit }
+			: {}),
 	};
 }
 

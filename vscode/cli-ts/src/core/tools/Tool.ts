@@ -1,6 +1,10 @@
 import type { ReactNode } from "react";
 import type { z } from "zod";
 import type { PromptContext } from "../../prompts/PromptModule.ts";
+import type {
+	PermissionCheckContext,
+	PermissionDecision,
+} from "../permissions/types.ts";
 import { toAgentToolName } from "./names.ts";
 import { type OpenAITool, toOpenAITool } from "./schema.ts";
 import type { ToolContext } from "./ToolContext.ts";
@@ -44,10 +48,66 @@ export abstract class Tool<I = unknown, O = unknown> {
 		return false;
 	}
 
+	/**
+	 * Tool-specific permission verdict. Return undefined for "no opinion" —
+	 * the permission engine then falls through to rules and mode defaults.
+	 */
+	checkPermissions(
+		_input: I,
+		_ctx: PermissionCheckContext,
+	): PermissionDecision | undefined {
+		return undefined;
+	}
+
+	/**
+	 * The string permission rules match against (a command for Execute, a
+	 * file path for file tools). Undefined = only bare tool rules match.
+	 */
+	permissionContent(_input: I): string | undefined {
+		return undefined;
+	}
+
+	/**
+	 * True when permissionContent is a list of paths rather than a command.
+	 * A persisted grant then covers exactly those paths: prefix generalization
+	 * on a path list would let a later call append unapproved paths and match.
+	 */
+	permissionContentIsPaths(_input: I): boolean {
+		return false;
+	}
+
+	/**
+	 * Raw path boundaries for path-list permission matching. Aggregate
+	 * permissionContent remains the persisted exact-rule surface; this list lets
+	 * configured globs authorize every path independently.
+	 */
+	permissionPaths(_input: I): readonly string[] | undefined {
+		return undefined;
+	}
+
+	/**
+	 * Extra sentence appended to this call's permission prompt, e.g. pointing
+	 * at a config switch that would skip the prompt. Undefined = no addendum.
+	 */
+	permissionHint(_input: I): string | undefined {
+		return undefined;
+	}
+
 	abstract execute(input: I, ctx: ToolContext): Promise<ToolResult<O>>;
 
 	/** Optional lifecycle cleanup for tools that hold external resources. */
 	async dispose(): Promise<void> {}
+
+	/**
+	 * One-line parameter summary shown beneath the tool name in the transcript.
+	 * Override to surface the parameters that explain a call (a command, a search
+	 * pattern, a path + line range); return `undefined` to use the generic
+	 * free-form fallback. The result is whitespace-collapsed and length-clamped by
+	 * the caller, so return the raw human-readable summary.
+	 */
+	summarizeInput(_input: I): string | undefined {
+		return undefined;
+	}
 
 	/** UI rendering of the invocation line. Overridable per tool. */
 	renderCall(_input: I): ReactNode {

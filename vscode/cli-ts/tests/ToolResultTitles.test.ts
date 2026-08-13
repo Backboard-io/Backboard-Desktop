@@ -28,8 +28,13 @@ describe("tool result titles", () => {
 	it("shows the selected AskUser option as the result", async () => {
 		const result = await new AskUserTool().execute(
 			{
-				question: "Choose one",
-				options: ["Alpha", "Beta"],
+				questions: [
+					{
+						header: "Pick",
+						question: "Choose one",
+						options: ["Alpha", "Beta"],
+					},
+				],
 			},
 			context(process.cwd(), async () => "Beta"),
 		);
@@ -40,8 +45,13 @@ describe("tool result titles", () => {
 	it("shows typed AskUser answers separately from selected options", async () => {
 		const result = await new AskUserTool().execute(
 			{
-				question: "Choose one",
-				options: ["Alpha", "Beta"],
+				questions: [
+					{
+						header: "Pick",
+						question: "Choose one",
+						options: ["Alpha", "Beta"],
+					},
+				],
 			},
 			context(process.cwd(), async () => "Custom answer"),
 		);
@@ -49,8 +59,32 @@ describe("tool result titles", () => {
 		expect(result.title).toBe("Answered: Custom answer");
 	});
 
+	it("summarizes multiple AskUser answers as a count", async () => {
+		const answers = ["Beta", "Two"];
+		let index = 0;
+		const result = await new AskUserTool().execute(
+			{
+				questions: [
+					{
+						header: "Pick",
+						question: "Choose one",
+						options: ["Alpha", "Beta"],
+					},
+					{ header: "Count", question: "How many", options: ["One", "Two"] },
+				],
+			},
+			context(process.cwd(), async () => answers[index++] ?? ""),
+		);
+
+		expect(result.title).toBe("Answered 2 questions");
+		expect(result.data.answers).toEqual([
+			{ header: "Pick", question: "Choose one", answer: "Beta" },
+			{ header: "Count", question: "How many", answer: "Two" },
+		]);
+	});
+
 	it("summarizes changed lines and returns a compact edit diff", async () => {
-		const cwd = await mkdtemp(join(tmpdir(), "q-cli-edit-"));
+		const cwd = await mkdtemp(join(tmpdir(), "cli-edit-"));
 		const filePath = "sample.txt";
 		await writeFile(join(cwd, filePath), "hello\nworld\n", "utf8");
 
@@ -102,7 +136,7 @@ describe("tool result titles", () => {
 	});
 
 	it("counts all replacement lines for replace_all edits", async () => {
-		const cwd = await mkdtemp(join(tmpdir(), "q-cli-edit-all-"));
+		const cwd = await mkdtemp(join(tmpdir(), "cli-edit-all-"));
 		const filePath = "sample.txt";
 		await writeFile(join(cwd, filePath), "one\none\n", "utf8");
 
@@ -152,6 +186,27 @@ describe("tool result titles", () => {
 		expect(lines.at(-1)?.displayValue).toContain("changed line(s) hidden");
 		expect(lines.some((line) => line.displayValue.includes("+"))).toBe(false);
 		expect(lines.some((line) => line.displayValue.includes("-"))).toBe(false);
+	});
+
+	it("expands tabs so diff rows align with their highlight background", () => {
+		const original = "const a = 1;\n";
+		const updated = "const a = 1;\n\t\tif (a) {\n\t\t\tgo();\n\t\t}\n";
+
+		const lines = buildEditDiffDetailLines("tabs.ts", original, updated);
+
+		expect(lines.some((line) => line.displayValue.includes("\t"))).toBe(false);
+		expect(lines).toContainEqual({
+			key: "line:1",
+			displayValue: "      2 │         if (a) {",
+			highlighted: true,
+			kind: "added",
+		});
+		expect(lines).toContainEqual({
+			key: "line:2",
+			displayValue: "      3 │             go();",
+			highlighted: true,
+			kind: "added",
+		});
 	});
 
 	it("shows final newline only edits in compact edit diffs", () => {

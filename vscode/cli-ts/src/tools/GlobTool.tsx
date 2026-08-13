@@ -1,11 +1,22 @@
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 import { z } from "zod";
+import {
+	asString,
+	asStringArray,
+	relativizePath,
+	withMeta,
+} from "../core/tools/inputSummary.ts";
+import {
+	BROWSING_PREVIEW_LINES,
+	buildOutputPreview,
+} from "../core/tools/outputPreview.ts";
 import { Tool } from "../core/tools/Tool.ts";
 import type { ToolContext } from "../core/tools/ToolContext.ts";
 import { ok, type ToolResult } from "../core/tools/ToolResult.ts";
 import type { PromptContext } from "../prompts/PromptModule.ts";
 import { getToolPrompt } from "../prompts/tools/index.tsx";
+import { pluralize } from "../utils/string.ts";
 
 const schema = z
 	.object({
@@ -56,6 +67,19 @@ export class GlobTool extends Tool<Input, Output> {
 		return getToolPrompt(this.name, context);
 	}
 
+	override summarizeInput(input: Input): string | undefined {
+		const patterns = [...(asStringArray(input.patterns) ?? [])];
+		const legacy = asString(input.pattern);
+		if (legacy) patterns.unshift(legacy);
+		if (patterns.length === 0) return undefined;
+		const meta: string[] = [];
+		const path = asString(input.path);
+		if (path) meta.push(`in ${relativizePath(path)}`);
+		const exclude = asStringArray(input.excludePatterns);
+		if (exclude) meta.push(`excl ${exclude.join(", ")}`);
+		return withMeta(patterns.join(", "), meta);
+	}
+
 	override parseInput(raw: unknown): Input {
 		// Tolerate a bare string (or JSON-encoded array) for `patterns`.
 		if (typeof raw === "object" && raw !== null && "patterns" in raw) {
@@ -75,25 +99,23 @@ export class GlobTool extends Tool<Input, Output> {
 		const cwd = input.path ? resolve(ctx.cwd, input.path) : ctx.cwd;
 		const patterns = [...(input.patterns ?? [])];
 		if (input.pattern) patterns.unshift(input.pattern);
-		const { files, truncated } = await runRipgrepFiles(
+		const files = await runRipgrepFiles(
 			cwd,
 			patterns,
 			input.excludePatterns ?? [],
 			ctx,
 		);
 
-		const body = files.length
-			? files.join("\n") +
-				(truncated
-					? "\n[results truncated — narrow the pattern or path to see the rest]"
-					: "")
-			: "No files matched";
+		const body = files.length ? files.join("\n") : "No files matched";
 		return ok(
 			{ files, count: files.length },
 			body,
 			files.length === 0
 				? "No files matched"
-				: `Found ${files.length}${truncated ? "+" : ""} file${files.length === 1 && !truncated ? "" : "s"}`,
+				: `Found ${files.length} ${pluralize(files.length, "file")}`,
+			buildOutputPreview(files.join("\n"), {
+				maxLines: BROWSING_PREVIEW_LINES,
+			}),
 		);
 	}
 }
@@ -110,14 +132,12 @@ function normalizePatterns(patterns: unknown): unknown {
 	return [patterns];
 }
 
-const OUTPUT_CAP_BYTES = 80_000;
-
 function runRipgrepFiles(
 	cwd: string,
 	patterns: string[],
 	excludePatterns: string[],
 	ctx: ToolContext,
-): Promise<{ files: string[]; truncated: boolean }> {
+): Promise<string[]> {
 	return new Promise((resolvePromise, reject) => {
 		if (ctx.signal.aborted) return reject(new Error("aborted"));
 		const args = ["--files", "--color=never"];
@@ -126,40 +146,22 @@ function runRipgrepFiles(
 		const child = spawn("rg", args, { cwd, signal: ctx.signal });
 		let stdout = "";
 		let stderr = "";
-		// Stopping rg once we have more output than we can return is a
-		// truncated success — it must never surface as a tool error.
-		let stoppedForCap = false;
 		child.stdout?.on("data", (chunk) => {
 			stdout += chunk.toString();
-			if (stdout.length > OUTPUT_CAP_BYTES && !stoppedForCap) {
-				stoppedForCap = true;
-				child.kill("SIGTERM");
-			}
+			if (stdout.length > 80_000) child.kill("SIGTERM");
 		});
 		child.stderr?.on("data", (chunk) => {
 			stderr += chunk.toString();
 		});
 		child.on("error", (err) => reject(err));
-		child.on("close", (code, signal) => {
-			// A cap-stop can cut the final path mid-line; drop the partial line.
-			let text = stdout;
-			if (stoppedForCap && text.length > 0 && !text.endsWith("\n")) {
-				text = text.slice(0, text.lastIndexOf("\n") + 1);
-			}
-			const allFiles = text.trim() ? text.trimEnd().split("\n") : [];
-			const files = allFiles.slice(0, MAX_RESULTS);
-			if (stoppedForCap) {
-				resolvePromise({ files, truncated: true });
-				return;
-			}
-			// rg exit 0 = matches, 1 = no matches; anything else (or a signal
-			// death we didn't cause) is a real failure.
+		child.on("close", (code) => {
 			if (code !== 0 && code !== 1) {
-				const reason = signal ? `killed by ${signal}` : `exit ${code}`;
-				reject(new Error(stderr.trim() || `ripgrep failed (${reason})`));
+				reject(new Error(stderr || `ripgrep failed (exit ${code ?? 1})`));
 				return;
 			}
-			resolvePromise({ files, truncated: allFiles.length > MAX_RESULTS });
+			resolvePromise(
+				stdout.trim() ? stdout.trimEnd().split("\n").slice(0, MAX_RESULTS) : [],
+			);
 		});
 	});
 }

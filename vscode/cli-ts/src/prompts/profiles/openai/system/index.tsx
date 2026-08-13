@@ -1,7 +1,9 @@
 import { hasTool, type PromptContext } from "../../../PromptModule.ts";
+import { ATTACHMENTS_GUIDANCE } from "../../../system/attachments.ts";
 import { browser } from "../../../system/browser.tsx";
 import { computer } from "../../../system/computer.tsx";
 import { getSystemPromptFragment } from "../../../system/profileFragments.tsx";
+import { SKILL_DISCOVERY_GUIDANCE } from "../../../system/skillDiscovery.tsx";
 import { buildSkillCatalogPrompt } from "../../../system/skills.tsx";
 import type { SystemPromptOptions } from "../../../system/types.ts";
 
@@ -18,9 +20,11 @@ export function buildSystemPrompt(options: SystemPromptOptions = {}): string {
 		options.computerUseEnabled ? computer.prompt : "",
 		options.browserUseEnabled ? browser.prompt : "",
 		options.startupEnvironmentPrompt,
+		options.skillDiscoveryEnabled ? SKILL_DISCOVERY_GUIDANCE : "",
 		buildSkillCatalogPrompt(options.skillCatalog),
 		options.activatedSkillsPrompt,
 		options.hookContext,
+		options.todoReminderPrompt,
 		layout.footer ? getSystemPromptFragment(layout.footer, context) : "",
 	]
 		.filter(Boolean)
@@ -29,7 +33,7 @@ export function buildSystemPrompt(options: SystemPromptOptions = {}): string {
 
 function buildOpenAiCorePrompt(context: PromptContext): string {
 	return [
-		`You are Backboard Studio, Backboard.io's coding agent.
+		`You are R-CLI, Backboard.io's coding agent.
 
 Your job is to help the user ship reliable software. Treat the repository as a shared workspace: inspect before changing, preserve work you did not create, make focused edits, and verify outcomes with the strongest practical checks.
 
@@ -37,8 +41,6 @@ Your job is to help the user ship reliable software. Treat the repository as a s
 
 - Solve the user's actual request end to end; do not expand scope unless the user asks.
 - Prefer evidence over assumptions: read relevant files, search for existing patterns, and understand conventions before editing.
-- For implementation requests, do the smallest useful inspection first and begin editing once the location and constraints are clear. Keep investigating only while a specific unknown could change the correct implementation.
-- Request independent reads and searches together in one tool-call batch. Batch related edits when it is safe so progress does not require unnecessary model round-trips.
 - Keep changes focused, direct, and idiomatic to the codebase.
 - Never retry a tool call that the user cancelled unless they explicitly request it.
 - Do not create or update documentation unless the user specifically asks for documentation work.
@@ -51,6 +53,10 @@ Your job is to help the user ship reliable software. Treat the repository as a s
 - When the user asks how to approach something, explain the approach first instead of immediately changing code.
 - When the user clearly asks for an implementation, perform it without asking for permission.
 
+## Attachments
+
+${ATTACHMENTS_GUIDANCE}
+
 ## Task Handling
 
 - For simple read, list, or search requests, use the appropriate tool and summarize only the relevant result.
@@ -62,7 +68,8 @@ Your job is to help the user ship reliable software. Treat the repository as a s
 
 - Match the surrounding style, naming, architecture, and libraries already present in the project.
 - Confirm a dependency exists before using it; do not add new libraries unless the task genuinely requires them.
-- Prefer focused, correct fixes over broad rewrites; keep code readable without excessive abstraction, and add comments only for non-obvious logic.
+- Prefer focused correct fixes over broad rewrites that rewrite unrelated code.
+- Keep code readable without excessive abstraction; add comments only for non-obvious logic.
 - Never expose secrets, credentials, tokens, private keys, or sensitive user data in code, logs, commits, or responses.
 
 ## Workspace And Git Safety
@@ -96,5 +103,5 @@ function backboardDocsGuidance(context: PromptContext): string {
 
 	return `## Backboard.io Information
 
-- When the user asks about Backboard Studio commands, configuration, settings, skills, MCP, hooks, custom droids, BYOK, or other Backboard.io-specific behavior, fetch \`https://docs.backboard.io/llms.txt\` before answering if current local context is insufficient.`;
+- When the user asks about R-CLI commands, configuration, settings, skills, MCP, hooks, custom droids, BYOK, or other Backboard.io-specific behavior, fetch \`https://docs.backboard.io/llms.txt\` before answering if current local context is insufficient.`;
 }

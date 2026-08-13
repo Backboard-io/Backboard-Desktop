@@ -9,8 +9,10 @@ import { IListVirtualDelegate } from '../../../../base/browser/ui/list/list.js';
 import { DefaultStyleController, IListAccessibilityProvider } from '../../../../base/browser/ui/list/listWidget.js';
 import { RenderIndentGuides } from '../../../../base/browser/ui/tree/abstractTree.js';
 import { ITreeElement, ITreeNode, ITreeRenderer } from '../../../../base/browser/ui/tree/tree.js';
+import { Codicon } from '../../../../base/common/codicons.js';
 import { Iterable } from '../../../../base/common/iterator.js';
 import { DisposableStore } from '../../../../base/common/lifecycle.js';
+import { ThemeIcon } from '../../../../base/common/themables.js';
 import { localize } from '../../../../nls.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
@@ -103,9 +105,38 @@ export class TOCTreeModel {
 const TOC_ENTRY_TEMPLATE_ID = 'settings.toc.entry';
 
 interface ITOCEntryTemplate {
+	iconElement: HTMLElement;
 	labelElement: HTMLElement;
 	countElement: HTMLElement;
 	elementDisposables: DisposableStore;
+}
+
+function getSettingsSectionIcon(element: SettingsTreeGroupElement): ThemeIcon {
+	const section = `${element.id} ${element.label}`.toLowerCase();
+
+	if (section.includes('keyboard') || section.includes('keybinding')) {
+		return Codicon.keyboard;
+	}
+	if (section.includes('appearance') || section.includes('theme') || section.includes('color')) {
+		return Codicon.symbolColor;
+	}
+	if (section.includes('provider') || section.includes('agent') || section.includes('chat')) {
+		return Codicon.robot;
+	}
+	if (section.includes('source control') || section.includes('scm') || section.includes('git')) {
+		return Codicon.sourceControl;
+	}
+	if (section.includes('connection') || section.includes('remote') || section.includes('network')) {
+		return Codicon.plug;
+	}
+	if (section.includes('archive')) {
+		return Codicon.archive;
+	}
+	if (section.includes('extension')) {
+		return Codicon.extensions;
+	}
+
+	return Codicon.settingsGear;
 }
 
 export class TOCRenderer implements ITreeRenderer<SettingsTreeGroupElement, never, ITOCEntryTemplate> {
@@ -117,6 +148,7 @@ export class TOCRenderer implements ITreeRenderer<SettingsTreeGroupElement, neve
 
 	renderTemplate(container: HTMLElement): ITOCEntryTemplate {
 		return {
+			iconElement: DOM.append(container, $('.settings-toc-icon.codicon')),
 			labelElement: DOM.append(container, $('.settings-toc-entry')),
 			countElement: DOM.append(container, $('.settings-toc-count')),
 			elementDisposables: new DisposableStore()
@@ -129,7 +161,9 @@ export class TOCRenderer implements ITreeRenderer<SettingsTreeGroupElement, neve
 		const element = node.element;
 		const count = element.count;
 		const label = element.label;
+		const icon = getSettingsSectionIcon(element);
 
+		template.iconElement.className = `settings-toc-icon codicon codicon-${icon.id}`;
 		template.labelElement.textContent = label;
 		template.elementDisposables.add(this._hoverService.setupDelayedHover(template.labelElement, { content: label }));
 

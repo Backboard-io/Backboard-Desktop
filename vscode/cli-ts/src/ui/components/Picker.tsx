@@ -2,9 +2,15 @@ import { Box, Text, useInput } from "ink";
 import TextInput from "ink-text-input";
 import type React from "react";
 import { useRef, useState } from "react";
+import { errorMessage } from "../../utils/errors.ts";
+import { padColumn } from "../../utils/string.ts";
 import { useTerminalSize } from "../hooks/TerminalSizeContext.tsx";
 import { useTheme } from "../theme/ThemeProvider.tsx";
 import { theme } from "../theme/theme.ts";
+import { ErrorLine } from "./ErrorLine.tsx";
+import { hintFooterText } from "./HintFooter.tsx";
+import { Panel } from "./Panel.tsx";
+import { SelectCaret } from "./SelectRow.tsx";
 import { Spinner } from "./Spinner.tsx";
 
 const VISIBLE_ITEMS = 12;
@@ -24,6 +30,9 @@ export type PickerMove = "up" | "down" | "pageUp" | "pageDown";
 export interface PickerItem<T> {
 	id: string;
 	name: string;
+	nameColor?: string;
+	status?: string;
+	statusColor?: string;
 	badge?: string;
 	badgeColor?: string;
 	description?: string;
@@ -43,6 +52,7 @@ export interface PickerTab<T> {
 
 interface ColumnLayout {
 	nameWidth: number;
+	statusWidth: number;
 	descWidth: number;
 	badgeWidth: number;
 	badgeOffset: number;
@@ -50,29 +60,34 @@ interface ColumnLayout {
 
 interface Props<T> {
 	title: string;
+	subtitle?: string;
 	tabs: PickerTab<T>[];
 	onSelect: (item: T, signal: AbortSignal) => Promise<void> | void;
 	onCancel: () => void;
 	emptyLabel: string;
 	selectingLabel?: string;
 	showSearch?: boolean;
+	initialItemId?: string;
 }
 
 export function Picker<T>({
 	title,
+	subtitle,
 	tabs,
 	onSelect,
 	onCancel,
 	emptyLabel,
 	selectingLabel,
 	showSearch = true,
+	initialItemId,
 }: Props<T>): React.ReactElement {
 	const uiTheme = useTheme();
 	const { columns } = useTerminalSize();
 	const [error, setError] = useState<string | null>(null);
-	const [tabIndex, setTabIndex] = useState(0);
+	const initialPosition = initialPickerPosition(tabs, initialItemId);
+	const [tabIndex, setTabIndex] = useState(initialPosition.tabIndex);
 	const [selection, setSelection] = useState<PickerSelection>(
-		resetPickerSelection(),
+		resetPickerSelection(initialPosition.itemIndex),
 	);
 	const [selecting, setSelecting] = useState(false);
 	const [search, setSearch] = useState("");
@@ -106,7 +121,7 @@ export function Picker<T>({
 		Promise.resolve(onSelect(item.value, controller.signal))
 			.catch((err) => {
 				if (controller.signal.aborted) return;
-				setError(err instanceof Error ? err.message : String(err));
+				setError(errorMessage(err));
 			})
 			.finally(() => {
 				if (selectAbort.current === controller) {
@@ -139,8 +154,10 @@ export function Picker<T>({
 		}
 		if (tabs.length === 0) return;
 
-		if (key.leftArrow) return moveTab(-1);
-		if (key.rightArrow) return moveTab(1);
+		if (key.leftArrow || key.rightArrow) {
+			if (!pickerTabArrowsEnabled(showSearch, search)) return;
+			return moveTab(key.leftArrow ? -1 : 1);
+		}
 		if (items.length === 0) return;
 
 		if (key.pageUp) {
@@ -167,86 +184,77 @@ export function Picker<T>({
 	if (error) {
 		return (
 			<Box marginTop={1} paddingX={2} flexDirection="column">
-				<Text color={theme.error}>{error}</Text>
+				<ErrorLine error={error} />
 				<Text color={theme.subtle}>Esc return</Text>
 			</Box>
 		);
 	}
 
 	return (
-		<Box flexDirection="column">
-			<Box
-				flexDirection="column"
-				marginTop={1}
-				paddingX={2}
-				paddingY={1}
-				width="100%"
-			>
-				<Box marginBottom={1}>
-					<Text color={theme.text} bold>
-						{title}
-					</Text>
-				</Box>
-
-				{hasTabs ? (
-					<PickerTabs
-						tabs={tabs}
-						activeIndex={safeTabIndex}
-						accent={uiTheme.accent}
-					/>
-				) : null}
-
-				{showSearch ? (
-					<PickerSearch
-						value={search}
-						accent={uiTheme.accent}
-						marginTop={hasTabs ? 1 : 0}
-						onChange={updateSearch}
-						onSubmit={selectCurrentItem}
-					/>
-				) : null}
-
-				{activeTab?.error ? (
-					<Text color={theme.error}>{activeTab.error}</Text>
-				) : items.length === 0 ? (
-					<Text color={theme.subtle}>
-						{showSearch && search
-							? "No items match this search."
-							: (activeTab?.emptyLabel ?? emptyLabel)}
-					</Text>
-				) : (
-					<>
-						{hasPages ? (
-							<Text color={theme.subtle}>
-								{" "}
-								{start + 1}-{end} of {items.length}
-							</Text>
-						) : null}
-						{start > 0 ? <Text color={theme.subtle}> ↑ more</Text> : null}
-						{visible.map((item, index) => (
-							<PickerRow
-								key={item.id}
-								item={item}
-								selected={start + index === safeItemIndex}
-								layout={layout}
-							/>
-						))}
-						{end < items.length ? (
-							<Text color={theme.subtle}> ↓ more</Text>
-						) : null}
-					</>
-				)}
-
-				<Box marginTop={1}>
-					<Text color={theme.subtle}>
-						{footerText(showSearch, hasTabs, hasPages)}
-					</Text>
-				</Box>
-				{selecting && selectingLabel ? (
-					<Spinner label={selectingLabel} />
-				) : null}
+		<Panel>
+			<Box marginBottom={1} flexDirection="column">
+				<Text color={theme.text} bold>
+					{title}
+				</Text>
+				{subtitle ? <Text color={theme.subtle}>{subtitle}</Text> : null}
 			</Box>
-		</Box>
+
+			{hasTabs ? (
+				<PickerTabs
+					tabs={tabs}
+					activeIndex={safeTabIndex}
+					accent={uiTheme.accentBright}
+				/>
+			) : null}
+
+			{showSearch ? (
+				<PickerSearch
+					value={search}
+					accent={uiTheme.accentBright}
+					marginTop={hasTabs ? 1 : 0}
+					onChange={updateSearch}
+					onSubmit={selectCurrentItem}
+				/>
+			) : null}
+
+			{activeTab?.error ? (
+				<ErrorLine error={activeTab.error} />
+			) : items.length === 0 ? (
+				<Text color={theme.subtle}>
+					{showSearch && search
+						? "No items match this search."
+						: (activeTab?.emptyLabel ?? emptyLabel)}
+				</Text>
+			) : (
+				<>
+					{hasPages ? (
+						<Text color={theme.subtle}>
+							{" "}
+							{start + 1}-{end} of {items.length}
+						</Text>
+					) : null}
+					{start > 0 ? <Text color={theme.subtle}> ↑ more</Text> : null}
+					{visible.map((item, index) => (
+						<PickerRow
+							key={item.id}
+							item={item}
+							selected={start + index === safeItemIndex}
+							layout={layout}
+						/>
+					))}
+					{end < items.length ? (
+						<Text color={theme.subtle}> ↓ more</Text>
+					) : null}
+				</>
+			)}
+
+			<Box marginTop={1}>
+				<Text color={theme.subtle}>
+					{footerText(showSearch, hasTabs, hasPages)}
+				</Text>
+			</Box>
+			{selecting && selectingLabel ? <Spinner label={selectingLabel} /> : null}
+		</Panel>
 	);
 }
 
@@ -293,19 +301,10 @@ function PickerSearch({
 	onSubmit: () => void;
 }): React.ReactElement {
 	return (
-		<Box
-			marginTop={marginTop}
-			marginBottom={1}
-			borderStyle="round"
-			borderColor={accent}
-			paddingX={1}
-		>
-			<Box marginRight={2}>
-				<Text color={accent}>⌕</Text>
-			</Box>
+		<Box marginTop={marginTop} marginBottom={1}>
+			<Text color={accent}>Search: </Text>
 			<TextInput
-				// Remount after clears so ink-text-input's hidden cursor keeps
-				// appending at the end while arrows drive picker navigation.
+				// Remount after clears so the cursor lands back at the end.
 				key={value.length === 0 ? "search-empty" : "search-active"}
 				value={value}
 				onChange={onChange}
@@ -328,19 +327,26 @@ function PickerRow<T>({
 	layout: ColumnLayout;
 }): React.ReactElement {
 	const disabled = Boolean(item.disabledReason);
-	const nameColor = selected && !disabled ? theme.accentBright : theme.subtle;
+	const nameColor = disabled
+		? theme.subtle
+		: selected
+			? theme.accentBright
+			: (item.nameColor ?? theme.subtle);
 	const descColor = selected && !disabled ? theme.text : theme.subtle;
 	const badgeColor = disabled
 		? theme.subtle
 		: (item.badgeColor ?? theme.subtle);
 	return (
 		<Box marginTop={item.spacingBefore ? 1 : 0}>
-			<Text color={selected ? theme.accentBright : theme.subtle}>
-				{selected ? "› " : "  "}
-			</Text>
+			<SelectCaret selected={selected} />
 			<Text color={nameColor} bold={selected && !disabled}>
 				{padColumn(item.name, layout.nameWidth)}
 			</Text>
+			{layout.statusWidth > 0 ? (
+				<Text color={item.statusColor ?? theme.subtle}>
+					{padColumn(item.status ?? "", layout.statusWidth)}
+				</Text>
+			) : null}
 			<Text color={descColor}>
 				{padColumn(item.description ?? "", layout.descWidth)}
 			</Text>
@@ -359,16 +365,19 @@ function computeColumnLayout<T>(
 	width: number,
 ): ColumnLayout {
 	const nameWidth = longestLength(items, (item) => item.name) + COLUMN_GAP;
+	const statusMax = longestLength(items, (item) => item.status ?? "");
+	const statusWidth = statusMax > 0 ? statusMax + COLUMN_GAP : 0;
 	const maxDesc = longestLength(visible, (item) => item.description ?? "");
 	const badgeWidth = longestLength(visible, (item) => item.badge ?? "");
-	const fixedWidth = HORIZONTAL_PADDING_WIDTH + ROW_PREFIX_WIDTH + nameWidth;
+	const fixedWidth =
+		HORIZONTAL_PADDING_WIDTH + ROW_PREFIX_WIDTH + nameWidth + statusWidth;
 	const descBudget = width - fixedWidth - badgeWidth - COLUMN_GAP;
 	const descWidth = Math.max(
 		MIN_DESC_WIDTH,
 		Math.min(maxDesc + COLUMN_GAP, descBudget),
 	);
 	const badgeOffset = Math.max(0, width - fixedWidth - descWidth - badgeWidth);
-	return { nameWidth, descWidth, badgeWidth, badgeOffset };
+	return { nameWidth, statusWidth, descWidth, badgeWidth, badgeOffset };
 }
 
 function longestLength<T>(
@@ -378,49 +387,66 @@ function longestLength<T>(
 	return items.reduce((max, item) => Math.max(max, pick(item).length), 0);
 }
 
-function padColumn(text: string, width: number): string {
-	if (width <= 0) return "";
-	if (text.length <= width) return text.padEnd(width);
-	if (width === 1) return "…";
-	return `${text.slice(0, width - 1)}…`;
-}
-
 function footerText(
 	showSearch: boolean,
 	hasTabs: boolean,
 	hasPages: boolean,
 ): string {
-	const parts: string[] = [];
-	if (showSearch) parts.push("type to search");
-	if (hasTabs) parts.push("←/→ tabs");
-	parts.push("↑/↓ choose");
-	if (hasPages) parts.push("PgUp/PgDn page");
-	parts.push("Enter select", "Esc cancel");
-	return parts.join(" · ");
+	return hintFooterText([
+		showSearch && "type to search",
+		hasTabs && "←/→ tabs",
+		"↑/↓ choose",
+		hasPages && "PgUp/PgDn page",
+		"Enter select",
+		"Esc cancel",
+	]);
 }
 
-function filterItems<T>(
+export function filterItems<T>(
 	items: readonly PickerItem<T>[],
 	query: string,
 ): PickerItem<T>[] {
 	const normalized = query.trim().toLowerCase();
 	if (!normalized) return [...items];
-	return items.filter((item) =>
-		[
-			item.name,
-			item.badge ?? "",
-			item.description ?? "",
-			item.id,
-			item.detail ?? "",
-		]
-			.join(" ")
-			.toLowerCase()
-			.includes(normalized),
+	return items.filter(
+		(item) =>
+			(item.status ?? "").toLowerCase() === normalized ||
+			[
+				item.name,
+				item.badge ?? "",
+				item.description ?? "",
+				item.id,
+				item.detail ?? "",
+			]
+				.join(" ")
+				.toLowerCase()
+				.includes(normalized),
 	);
 }
 
-export function resetPickerSelection(): PickerSelection {
-	return { itemIndex: 0, windowStart: 0 };
+/** While the user is editing search text, ←/→ move the text cursor instead of switching tabs. */
+export function pickerTabArrowsEnabled(
+	showSearch: boolean,
+	search: string,
+): boolean {
+	return !showSearch || search.length === 0;
+}
+
+export function resetPickerSelection(itemIndex = 0): PickerSelection {
+	return { itemIndex, windowStart: 0 };
+}
+
+export function initialPickerPosition<T>(
+	tabs: readonly PickerTab<T>[],
+	itemId: string | undefined,
+): { tabIndex: number; itemIndex: number } {
+	if (itemId) {
+		for (const [tabIndex, tab] of tabs.entries()) {
+			const itemIndex = tab.items.findIndex((item) => item.id === itemId);
+			if (itemIndex >= 0) return { tabIndex, itemIndex };
+		}
+	}
+	return { tabIndex: 0, itemIndex: 0 };
 }
 
 export function movePickerSelection(

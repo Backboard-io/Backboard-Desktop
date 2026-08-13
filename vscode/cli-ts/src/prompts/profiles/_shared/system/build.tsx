@@ -2,6 +2,7 @@ import type { SystemPromptFragmentId } from "../../../../config/modelProfiles/ty
 import type { PromptContext, PromptModule } from "../../../PromptModule.ts";
 import { browser as sharedBrowser } from "../../../system/browser.tsx";
 import { computer as sharedComputer } from "../../../system/computer.tsx";
+import { SKILL_DISCOVERY_GUIDANCE } from "../../../system/skillDiscovery.tsx";
 import { buildSkillCatalogPrompt } from "../../../system/skills.tsx";
 import type { SystemPromptOptions } from "../../../system/types.ts";
 import { getSystemPromptFragment as sharedFragment } from "./fragments.tsx";
@@ -51,9 +52,11 @@ export function buildSystemPromptWith(
 		options.computerUseEnabled ? deps.computer.prompt : "",
 		options.browserUseEnabled ? deps.browser.prompt : "",
 		options.startupEnvironmentPrompt,
+		options.skillDiscoveryEnabled ? SKILL_DISCOVERY_GUIDANCE : "",
 		buildSkillCatalogPrompt(options.skillCatalog),
 		options.activatedSkillsPrompt,
 		options.hookContext,
+		options.todoReminderPrompt,
 		layout.footer ? deps.getSystemPromptFragment(layout.footer) : "",
 	]
 		.filter(Boolean)

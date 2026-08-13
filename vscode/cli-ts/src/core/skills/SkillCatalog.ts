@@ -1,5 +1,6 @@
 import { readdir, realpath, stat } from "node:fs/promises";
 import path from "node:path";
+import { truncate } from "../../utils/string.ts";
 import type { Skill } from "./Skill.ts";
 
 export const DEFAULT_SKILL_CATALOG_BUDGET = 8000;
@@ -93,12 +94,6 @@ export function buildSkillCatalog(
 
 function entry(skill: Skill, description = skill.description): string {
 	return `- ${skill.name}: ${description}`;
-}
-
-function truncate(value: string, limit: number): string {
-	if (value.length <= limit) return value;
-	if (limit <= 3) return value.slice(0, limit);
-	return `${value.slice(0, limit - 3).trimEnd()}...`;
 }
 
 async function collectBundledFiles(dir: string): Promise<string[]> {

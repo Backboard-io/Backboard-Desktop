@@ -1,59 +1,71 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { basename, join } from "node:path";
 import { createInterface } from "node:readline";
 import { Config } from "../config/Config.ts";
-import { parseMemoryMode, parseModel } from "../config/defaults.ts";
-import { parseThinking } from "../config/thinking.ts";
+import {
+	parseMemoryMode,
+	parseModel,
+	parseThinking,
+} from "../config/defaults.ts";
 import { AgentController } from "../core/agent/AgentController.ts";
 import { EventBus } from "../core/bus/EventBus.ts";
+import { CheckpointManager } from "../core/checkpoints/CheckpointManager.ts";
+import { CheckpointStore } from "../core/checkpoints/CheckpointStore.ts";
 import { HookController, loadHookConfig } from "../core/hooks/index.ts";
 import { LspService, resolveLspFlags } from "../core/lsp/index.ts";
 import {
 	loadMcpConfig,
 	McpClientManager,
+	McpController,
 	McpToolRegistrar,
 } from "../core/mcp/index.ts";
+import {
+	buildPermissionContext,
+	parsePermissionMode,
+} from "../core/permissions/index.ts";
 import { ClientEventLog } from "../core/session/ClientEventLog.ts";
 import { JsonEventStream } from "../core/session/JsonEventStream.ts";
 import { ServerEventLog } from "../core/session/ServerEventLog.ts";
 import { Session } from "../core/session/Session.ts";
 import { SessionStore } from "../core/session/SessionStore.ts";
 import { SkillController } from "../core/skills/SkillController.ts";
-import { ToolPermissionGate } from "../core/tools/ToolPermissionGate.ts";
 import { ToolRegistry } from "../core/tools/ToolRegistry.ts";
 import { buildStartupEnvironmentPrompt } from "../prompts/system/startupEnvironment.ts";
-import { BackboardClient } from "../providers/backboard/BackboardClient.ts";
-import { bundledModelCatalog } from "../providers/backboard/bundledCatalog.ts";
+import { createAgentClient } from "../providers/createAgentClient.ts";
 import { createDefaultTools } from "../tools/index.ts";
+import { errorMessage } from "../utils/errors.ts";
 import { shortId } from "../utils/id.ts";
 import type {
 	ServeControl,
+	ServeFileAttachment,
 	ServeRecord,
 	ServeRecordType,
 } from "./ServeTypes.ts";
 import { parseControlLine } from "./serveControl.ts";
 
 /**
- * Persistent host mode: a long-lived agent session driven over stdio. The host
- * writes one `ServeControl` JSON object per stdin line and reads two kinds of
- * JSONL records from stdout: `JsonEventStream` agent events (`source:
- * "client"`) and serve control responses (`source: "serve"`). stdout carries
- * nothing else; human-readable output goes to stderr.
+ * Persistent IDE host for the public Backboard R-CLI runtime.
+ *
+ * Backboard Studio owns only this NDJSON transport. R-CLI still owns provider
+ * routing, the agent loop, permissions, tools, checkpoints, MCP, skills, and
+ * local session state. stdout is machine-readable; diagnostics go to stderr.
  */
 export async function runServe(argv: string[]): Promise<void> {
 	let config: Config;
 	try {
 		config = new Config({ argv });
-	} catch (err) {
-		process.stderr.write(
-			`${err instanceof Error ? err.message : String(err)}\n`,
-		);
+	} catch (error) {
+		process.stderr.write(`${errorMessage(error)}\n`);
 		process.exitCode = 1;
 		return;
 	}
 
 	const sessionId = shortId("sess");
-	const store = new SessionStore(sessionId, config.cwd);
+	// The IDE intentionally keeps R-CLI's logs/checkpoints outside the opened
+	// workspace so they never appear as agent edits in Changes/Review.
+	const sessionBaseDir =
+		process.env.BACKBOARD_SESSION_ROOT?.trim() || config.cwd;
+	const store = new SessionStore(sessionId, sessionBaseDir);
 	await store.init({
 		sessionId,
 		createdAt: new Date().toISOString(),
@@ -69,27 +81,15 @@ export async function runServe(argv: string[]): Promise<void> {
 	const jsonStream = new JsonEventStream(sessionId);
 	jsonStream.attach(bus);
 
+	await CheckpointStore.recoverAbandonedRestore(store.paths.pendingUndo);
+	const checkpoints = new CheckpointManager(bus, store.paths, config.cwd);
+	checkpoints.warmShellCapture(config.cwd);
+
 	const session = new Session(sessionId);
 	bus.emit({ type: "session:created", sessionId, threadId: session.threadId });
 
-	const client = new BackboardClient(config.env, serverLog);
+	const client = createAgentClient(config, serverLog, sessionBaseDir);
 	const hookConfig = loadHookConfig(config.hookConfigPaths);
-	// A fresh serve process gates the host's first send whenever the spawn
-	// lands on the critical path (cold send, workspace switch), so overlap the
-	// independent boot steps: MCP config load + server startup run alongside
-	// the environment scan (git + directory listing).
-	const mcpReady = (async () => {
-		const mcpConfig = await loadMcpConfig({
-			cwd: config.cwd,
-			paths: config.mcpConfigPaths,
-		});
-		const manager = new McpClientManager(mcpConfig, config.cwd);
-		return { manager, mcp: await manager.initialize(new AbortController().signal) };
-	})();
-	// Keeps an MCP failure from becoming an unhandled rejection if the
-	// environment scan below throws first; the real error still surfaces at
-	// the `await mcpReady`.
-	mcpReady.catch(() => undefined);
 	const startupEnvironmentPrompt = await buildStartupEnvironmentPrompt(
 		config.cwd,
 	);
@@ -99,8 +99,14 @@ export async function runServe(argv: string[]): Promise<void> {
 		cwd: config.cwd,
 		sessionId,
 	});
-	const { manager: mcpManager, mcp } = await mcpReady;
-	for (const warning of [...hookConfig.warnings, ...mcp.warnings]) {
+
+	const mcpConfig = await loadMcpConfig({
+		cwd: config.cwd,
+		paths: config.mcpConfigPaths,
+	});
+	const mcpManager = new McpClientManager(mcpConfig, config.cwd);
+	const mcp = await mcpManager.initialize(new AbortController().signal);
+	for (const warning of hookConfig.warnings) {
 		bus.emit({ type: "system:warning", message: warning });
 	}
 
@@ -108,35 +114,78 @@ export async function runServe(argv: string[]): Promise<void> {
 	const lsp = new LspService({
 		directory: config.cwd,
 		flags: { ...lspFlags, enabled: config.flags.lsp ?? lspFlags.enabled },
-		onWarning: (message) => {
-			bus.emit({ type: "system:warning", message });
-		},
+		onWarning: (message) => bus.emit({ type: "system:warning", message }),
 	});
+	const skillController = new SkillController({ cwd: config.cwd, bus });
 	let registry: ToolRegistry;
+	let mcpController: McpController;
 	registry = new ToolRegistry(
 		createDefaultTools({
 			client,
 			config,
 			hookController,
 			lsp,
+			checkpoints,
 			getTools: () => registry.list(),
+			skillController,
+			getMcpRegistrar: () => mcpController,
 		}),
 	);
 	const mcpToolRegistrar = new McpToolRegistrar(registry, bus);
-	mcpToolRegistrar.register(mcp);
-	const skillController = new SkillController({ cwd: config.cwd, bus });
+	mcpToolRegistrar.register({ ...mcp, warnings: [] });
 	const syncMcpToolUpdates = async (signal: AbortSignal): Promise<void> => {
-		const result = await mcpManager.refreshTools(signal);
-		mcpToolRegistrar.applyRefresh(result);
-		mcpToolRegistrar.emitWarnings(
-			(await mcpManager.refreshPrompts(signal)).warnings,
-		);
-		mcpToolRegistrar.emitWarnings(
-			(await mcpManager.refreshResources(signal)).warnings,
-		);
+		const [tools, prompts, resources] = await Promise.all([
+			mcpManager.refreshTools(signal),
+			mcpManager.refreshPrompts(signal),
+			mcpManager.refreshResources(signal),
+		]);
+		mcpToolRegistrar.applyRefresh(tools);
+		mcpToolRegistrar.emitWarnings(prompts.warnings);
+		mcpToolRegistrar.emitWarnings(resources.warnings);
 	};
+	mcpController = new McpController({
+		cwd: config.cwd,
+		activateServer: async (name, server, signal) => {
+			const controller = signal ?? new AbortController().signal;
+			return mcpToolRegistrar.register(
+				await mcpManager.addServer(name, server, controller),
+			);
+		},
+		authenticateServer: async (name, signal) => {
+			const controller = signal ?? new AbortController().signal;
+			const previousToolNames =
+				mcpManager.listServerStatuses().find((status) => status.name === name)
+					?.toolNames ?? [];
+			const result = await mcpManager.authenticateServer(name, controller);
+			mcpToolRegistrar.unregister({
+				toolNames: previousToolNames,
+				warnings: [],
+			});
+			return mcpToolRegistrar.register(result);
+		},
+		disableServer: async (name) =>
+			mcpToolRegistrar.unregister(await mcpManager.disableServer(name)),
+		removeServer: async (name) =>
+			mcpToolRegistrar.unregister(await mcpManager.removeServer(name)),
+		listServerStatuses: () => mcpManager.listServerStatuses(),
+		listPrompts: (name, signal) => mcpManager.listPrompts(name, signal),
+		getPrompt: (serverName, name, args, signal) =>
+			mcpManager.getPrompt(serverName, name, args, signal),
+		listResources: (name, signal) => mcpManager.listResources(name, signal),
+		listResourceTemplates: (name, signal) =>
+			mcpManager.listResourceTemplates(name, signal),
+		readResource: (name, uri, signal) =>
+			mcpManager.readResource(name, uri, signal),
+		subscribeResource: (name, uri, signal) =>
+			mcpManager.subscribeResource(name, uri, signal),
+		unsubscribeResource: (name, uri, signal) =>
+			mcpManager.unsubscribeResource(name, uri, signal),
+		refreshPrompts: (signal) => mcpManager.refreshPrompts(signal),
+		refreshResources: (signal) => mcpManager.refreshResources(signal),
+	});
 
-	const permissionGate = new ToolPermissionGate(bus);
+	const permissions = buildPermissionContext(config.cwd, "manual", true);
+	let replacedThreadId: string | undefined;
 	const controller = new AgentController({
 		config,
 		bus,
@@ -145,13 +194,22 @@ export async function runServe(argv: string[]): Promise<void> {
 		client,
 		skillController,
 		hookController,
-		permissionGate,
 		lsp,
+		checkpoints,
+		permissions,
 		syncDynamicTools: syncMcpToolUpdates,
 		startupEnvironmentPrompt,
+		getDurableSession: () => ({
+			sessionId,
+			sessionRoot: store.paths.root,
+			...(replacedThreadId ? { replacesThreadId: replacedThreadId } : {}),
+		}),
+		onThreadReplaced: (threadId) => {
+			replacedThreadId = threadId ?? undefined;
+		},
+		getTranscriptPath: () => store.paths.clientLog,
 	});
 
-	/** Selects named repo/personal skills into the catalog for upcoming turns. */
 	const selectSkillsByName = async (names: string[]): Promise<void> => {
 		const tabs = await skillController.listSkillTabs();
 		const wanted = new Set(names);
@@ -161,10 +219,10 @@ export async function runServe(argv: string[]): Promise<void> {
 				if (!wanted.delete(item.name)) continue;
 				try {
 					await skillController.selectSkill(item);
-				} catch (err) {
+				} catch (error) {
 					bus.emit({
 						type: "system:warning",
-						message: `Failed to load skill "${item.name}": ${err instanceof Error ? err.message : String(err)}`,
+						message: `Failed to load skill "${item.name}": ${errorMessage(error)}`,
 					});
 				}
 			}
@@ -174,21 +232,21 @@ export async function runServe(argv: string[]): Promise<void> {
 		}
 	};
 
-	/** Persists host-sent attachments and appends read-me pointers to the prompt. */
-	const writeAttachments = async (
-		prompt: string,
-		files: readonly { fileName: string; dataBase64: string }[],
-	): Promise<string> => {
-		const attachmentsDir = join(dirname(store.paths.clientLog), "attachments");
+	const stageAttachments = async (
+		files: readonly ServeFileAttachment[],
+	): Promise<string[]> => {
+		const attachmentsDir = join(store.paths.root, "attachments");
 		await mkdir(attachmentsDir, { recursive: true });
-		const pointers: string[] = [];
-		for (const file of files) {
-			const safeName = basename(file.fileName) || "attachment";
-			const target = join(attachmentsDir, safeName);
+		const paths: string[] = [];
+		for (let index = 0; index < files.length; index++) {
+			const file = files[index];
+			if (!file) continue;
+			const safeName = basename(file.fileName) || `attachment-${index + 1}`;
+			const target = join(attachmentsDir, `${index + 1}-${safeName}`);
 			await writeFile(target, Buffer.from(file.dataBase64, "base64"));
-			pointers.push(`Attached file (read it with the Read tool): ${target}`);
+			paths.push(target);
 		}
-		return pointers.length ? `${prompt}\n\n${pointers.join("\n")}` : prompt;
+		return paths;
 	};
 
 	const writeRecord = (
@@ -214,34 +272,30 @@ export async function runServe(argv: string[]): Promise<void> {
 		await controller.dispose();
 		await lsp.shutdown();
 		await mcpManager.close();
-		await Promise.all([clientLog.flush(), serverLog.flush()]);
+		await Promise.all([
+			clientLog.flush(),
+			serverLog.flush(),
+			checkpoints.dispose(),
+		]);
 	};
 
-	const pendingOps: Promise<void>[] = [];
+	const pendingOps = new Set<Promise<void>>();
 	let disposing = false;
 	const handleControl = async (control: ServeControl): Promise<void> => {
 		switch (control.op) {
 			case "submit": {
-				const { requestId } = control;
-				// Resume the host's persisted backend thread so a fresh serve
-				// process keeps the conversation's memory. Only adopted while
-				// this session has no thread binding of its own.
 				if (control.threadId && session.threadId === null) {
 					session.threadId = control.threadId;
-				}
-				if (control.permission !== undefined) {
-					permissionGate.setPolicy(control.permission);
 				}
 				if (control.skills?.length) {
 					await selectSkillsByName(control.skills);
 				}
-				let prompt = control.prompt;
-				if (control.files?.length) {
-					prompt = await writeAttachments(prompt, control.files);
-				}
-				const status = await controller.submit(prompt, {
-					voice: control.voice,
-					audioFile: control.audioFile,
+				const attachmentFilePaths = control.files?.length
+					? await stageAttachments(control.files)
+					: undefined;
+				const status = await controller.submit(control.prompt, {
+					attachmentFilePaths,
+					displayContent: control.prompt,
 					onStart: () => {
 						if (control.model !== undefined) {
 							config.setModel(parseModel(control.model));
@@ -249,30 +303,30 @@ export async function runServe(argv: string[]): Promise<void> {
 						if (control.thinking !== undefined) {
 							config.setThinking(parseThinking(control.thinking));
 						}
-						if (control.excludeReasoning !== undefined) {
-							config.setExcludeReasoning(control.excludeReasoning);
-						}
 						if (control.excludedTools !== undefined) {
 							config.setExcludedTools(control.excludedTools);
 						}
 						if (control.memory !== undefined) {
 							config.setMemory(parseMemoryMode(control.memory));
 						}
+						if (control.permission !== undefined) {
+							permissions.mode = parsePermissionMode(control.permission);
+						}
 						if (control.computerUse !== undefined) {
-							config.setComputerUse(control.computerUse);
+							config.setComputerUseEnabled(control.computerUse);
 						}
 						if (control.browserUse !== undefined) {
-							config.setBrowserUse(control.browserUse);
+							config.setBrowserUseEnabled(control.browserUse);
 						}
 						if (control.notify !== undefined) {
 							config.setNotifyEnabled(control.notify);
 						}
-						if (control.imageGeneration !== undefined) {
-							config.setImageGeneration(control.imageGeneration);
-						}
 					},
 				});
-				writeRecord("serve:turn", requestId, { status });
+				writeRecord("serve:turn", control.requestId, {
+					status,
+					threadId: session.threadId,
+				});
 				return;
 			}
 			case "steer": {
@@ -280,59 +334,50 @@ export async function runServe(argv: string[]): Promise<void> {
 					emitUserMessage: true,
 				});
 				if (control.requestId !== undefined) {
-					writeRecord("serve:turn", control.requestId, { status });
+					writeRecord("serve:turn", control.requestId, {
+						status,
+						threadId: session.threadId,
+					});
 				}
 				return;
 			}
-			case "warmup": {
-				await controller.prewarmAssistant();
+			case "warmup":
+				// Process startup itself is the main warm-up. A model request also
+				// establishes DNS/TLS without creating remote assistant state.
+				await client.listModels().catch(() => undefined);
 				if (control.requestId !== undefined) {
 					writeRecord("serve:warm", control.requestId, { ok: true });
 				}
 				return;
-			}
-			case "cancel": {
+			case "cancel":
 				controller.cancel({ clearQueue: true });
 				writeRecord("serve:ack", control.requestId, { op: "cancel" });
 				return;
-			}
-			case "respondInput": {
-				controller.provideInput(control.id, control.answer);
+			case "respondInput":
+				controller.provideInput(control.id, control.answers);
 				return;
-			}
-			case "respondPermission": {
-				permissionGate.respond(control.id, {
-					decision: control.decision,
-					reason: control.reason,
-				});
-				return;
-			}
-			case "setModel": {
+			case "setModel":
 				config.setModel(parseModel(control.model));
 				writeRecord("serve:ack", control.requestId, {
 					op: "setModel",
 					model: config.modelString,
 				});
 				return;
-			}
-			case "listModels": {
-				// The build-time snapshot answers when the live fetch fails or
-				// comes back empty, so the host always gets a full catalog.
-				const models = await client
-					.listModels()
-					.then((live) => (live.models.length ? live : bundledModelCatalog()))
-					.catch(() => bundledModelCatalog());
-				writeRecord("serve:models", control.requestId, models);
+			case "listModels":
+				writeRecord(
+					"serve:models",
+					control.requestId,
+					await client.listModels(),
+				);
 				return;
-			}
-			case "listTools": {
-				const tools = registry.list().map((tool) => ({
-					name: tool.agentName,
-					displayName: tool.displayName,
-				}));
-				writeRecord("serve:tools", control.requestId, { tools });
+			case "listTools":
+				writeRecord("serve:tools", control.requestId, {
+					tools: registry.list().map((tool) => ({
+						name: tool.agentName,
+						displayName: tool.displayName,
+					})),
+				});
 				return;
-			}
 			case "listSkills": {
 				const tabs = await skillController.listSkillTabs();
 				const skillsByName = new Map<
@@ -356,30 +401,28 @@ export async function runServe(argv: string[]): Promise<void> {
 				});
 				return;
 			}
-			case "dispose": {
-				// Graceful shutdown: drain in-flight ops (e.g. an active turn)
-				// before flushing. The snapshot is taken synchronously on
-				// dispose entry, so it never contains dispose's own promise.
-				// Hosts that want immediate teardown send `cancel` first; the
-				// IDE additionally SIGKILLs after a grace period.
+			case "dispose":
 				disposing = true;
+				controller.cancel({ clearQueue: true });
+				// handleControl reaches this await before the dispose promise is
+				// inserted into pendingOps, so the snapshot contains only older work.
 				await Promise.allSettled([...pendingOps]);
 				await flush();
 				process.exit(0);
-			}
 		}
 	};
 
-	// Fire SessionStart at init so hooks run even before the first submit.
 	await controller.start();
 	writeRecord("serve:ready", undefined, {
 		sessionId,
 		cwd: config.cwd,
 		model: config.modelString,
+		upstream: "Backboard-io/Backboard-R-CLI",
 	});
 
 	const reader = createInterface({ input: process.stdin });
 	reader.on("line", (line) => {
+		if (disposing) return;
 		const parsed = parseControlLine(line);
 		if (parsed === null) return;
 		if (!parsed.ok) {
@@ -387,28 +430,24 @@ export async function runServe(argv: string[]): Promise<void> {
 			return;
 		}
 		const control = parsed.control;
-		const run = handleControl(control).catch((err) => {
-			const requestId =
-				"requestId" in control && typeof control.requestId === "string"
-					? control.requestId
-					: undefined;
-			writeRecord("serve:error", requestId, {
-				op: control.op,
-				error: err instanceof Error ? err.message : String(err),
-			});
-		});
-		pendingOps.push(run);
+		let run: Promise<void>;
+		run = handleControl(control)
+			.catch((error) => {
+				const requestId =
+					"requestId" in control && typeof control.requestId === "string"
+						? control.requestId
+						: undefined;
+				writeRecord("serve:error", requestId, {
+					op: control.op,
+					error: errorMessage(error),
+				});
+			})
+			.finally(() => pendingOps.delete(run));
+		pendingOps.add(run);
 	});
 
-	await new Promise<void>((resolve) => {
-		reader.on("close", () => resolve());
-	});
-	// stdin closed. If a graceful `dispose` op is already draining, let it
-	// finish the in-flight turn; otherwise the host vanished — cancel work,
-	// settle in-flight ops, and exit.
-	if (!disposing) {
-		controller.cancel({ clearQueue: true });
-	}
-	await Promise.allSettled(pendingOps);
+	await new Promise<void>((resolve) => reader.on("close", resolve));
+	if (!disposing) controller.cancel({ clearQueue: true });
+	await Promise.allSettled([...pendingOps]);
 	await flush();
 }

@@ -13,8 +13,9 @@ const BUILTIN_AGENT_NAMES: Record<string, string> = {
 	TodoWrite: "todo_write",
 	Computer: "computer",
 	Browser: "browser",
-	OpenPreview: "open_preview",
 	Agent: "agent",
+	FindSkill: "find_skill",
+	FindMcp: "find_mcp",
 };
 
 const BUILTIN_DISPLAY_NAMES = new Map(

@@ -3,6 +3,11 @@ import type React from "react";
 import { useMemo, useState } from "react";
 import { theme } from "../theme/theme.ts";
 import {
+	SELECT_CARET_PLACEHOLDER,
+	SELECT_CARET_PREFIX,
+} from "./Glyphs.constants.ts";
+import { HintFooter } from "./HintFooter.tsx";
+import {
 	ALL_TOOLS_OPTION,
 	completeSegment,
 	filterSuggestions,
@@ -112,7 +117,7 @@ export function MatcherAutocomplete({
 									color={active ? theme.accentBright : theme.text}
 									bold={active}
 								>
-									{active ? "› " : "  "}
+									{active ? SELECT_CARET_PREFIX : SELECT_CARET_PLACEHOLDER}
 									{suggestion === ALL_TOOLS_OPTION
 										? "All tools (*)"
 										: suggestion}
@@ -122,11 +127,9 @@ export function MatcherAutocomplete({
 					})
 				)}
 			</Box>
-			<Box marginTop={1}>
-				<Text color={theme.subtle}>
-					Enter select · Tab complete · ↑/↓ choose · Esc cancel
-				</Text>
-			</Box>
+			<HintFooter
+				hints={["Enter select", "Tab complete", "↑/↓ choose", "Esc cancel"]}
+			/>
 		</Box>
 	);
 }

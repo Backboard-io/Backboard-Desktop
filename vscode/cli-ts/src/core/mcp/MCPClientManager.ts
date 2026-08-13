@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/errors.ts";
 import {
 	type McpConfig,
 	type McpServerConfig,
@@ -253,7 +254,7 @@ export class McpClientManager {
 				);
 			} catch (err) {
 				warnings.push(
-					`Failed to refresh MCP server '${connection.server.name}': ${formatError(err)}.`,
+					`Failed to refresh MCP server '${connection.server.name}': ${errorMessage(err)}.`,
 				);
 				this.dirtyToolServers.add(connection.server.name);
 				continue;
@@ -475,8 +476,4 @@ async function closeTransport(
 	} finally {
 		if (timer) clearTimeout(timer);
 	}
-}
-
-function formatError(err: unknown): string {
-	return err instanceof Error ? err.message : String(err);
 }

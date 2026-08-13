@@ -221,8 +221,8 @@ export class SidebarPart extends AbstractPaneCompositePart {
 
 		const container = assertReturnsDefined(this.getContainer());
 
-		// Background comes from CSS (translucent frosted-glass tint); clear any
-		// inline color so the stylesheet rule applies.
+		// Background comes from CSS; clear any inline color so the opaque sidebar
+		// and its contained footer animation remain theme-aware.
 		container.style.backgroundColor = '';
 		container.style.color = this.getColor(SIDE_BAR_FOREGROUND) || '';
 		container.style.outlineColor = this.getColor(SIDE_BAR_DRAG_AND_DROP_BACKGROUND) ?? '';

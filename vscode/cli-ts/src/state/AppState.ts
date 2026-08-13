@@ -4,6 +4,7 @@ import type {
 	TodoItem,
 	UsageInfo,
 } from "../core/bus/events.ts";
+import type { PermissionMode } from "../core/permissions/PermissionMode.ts";
 import type { ToolResultDetailLine } from "../core/tools/ToolResultDetail.ts";
 
 export type TranscriptItem =
@@ -28,7 +29,12 @@ export type TranscriptItem =
 			detailLines?: ToolResultDetailLine[];
 			error?: string;
 	  }
-	| { kind: "notice"; id: string; level: "info" | "error"; text: string };
+	| {
+			kind: "notice";
+			id: string;
+			level: "info" | "warning" | "error";
+			text: string;
+	  };
 
 export type RenderTranscriptItem =
 	| TranscriptItem
@@ -66,6 +72,7 @@ export interface RenderState {
 	liveItems: RenderTranscriptItem[];
 	assistantStreams: AssistantRenderStream[];
 	generation: number;
+	staticOnly: boolean;
 }
 
 export type RunStatus = "idle" | "running" | "cancelled";
@@ -78,9 +85,13 @@ export interface AppState {
 	usage: UsageInfo;
 	pendingAsk: AskUserRequest | null;
 	model: string;
+	permissionMode: PermissionMode;
 }
 
-export function initialState(model: string): AppState {
+export function initialState(
+	model: string,
+	permissionMode: PermissionMode = "manual",
+): AppState {
 	return {
 		status: "idle",
 		transcript: [],
@@ -89,10 +100,12 @@ export function initialState(model: string): AppState {
 			liveItems: [],
 			assistantStreams: [],
 			generation: 0,
+			staticOnly: false,
 		},
 		todos: [],
 		usage: {},
 		pendingAsk: null,
 		model,
+		permissionMode,
 	};
 }

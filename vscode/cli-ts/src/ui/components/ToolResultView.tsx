@@ -1,16 +1,17 @@
 import { Box, Text } from "ink";
 import type React from "react";
 import type { ToolResultDetailLine } from "../../core/tools/ToolResultDetail.ts";
+import { expandTabs, padColumn } from "../../utils/string.ts";
 import { useTerminalSize } from "../hooks/TerminalSizeContext.tsx";
+import { useVerbose } from "../hooks/VerboseContext.tsx";
 import { useTheme } from "../theme/ThemeProvider.tsx";
 import { theme } from "../theme/theme.ts";
+import { withStableKeys } from "../utils/stableKeys.ts";
 
 const RESULT_PREFIX = "  └ ";
 const RESULT_DETAIL_INDENT = RESULT_PREFIX.length;
 const DIFF_DETAIL_MAX_WIDTH = 96;
 const DIFF_DETAIL_TERMINAL_PADDING = 14;
-const DIFF_ADDED_BACKGROUND = "#1f3a24";
-const DIFF_REMOVED_BACKGROUND = "#4a2528";
 
 interface Props {
 	status: "pending" | "running" | "done" | "error";
@@ -28,8 +29,13 @@ export function ToolResultView({
 	error,
 }: Props): React.ReactElement | null {
 	const uiTheme = useTheme();
+	const verbose = useVerbose();
 	const { columns } = useTerminalSize();
-	const plainDetailLines = detail ? stableDetailLines(detail) : [];
+	// The free-form output preview is the "verbose" content; structured diff
+	// lines (detailLines) stay visible either way since they are compact edit
+	// feedback, not chatty output.
+	const plainDetailLines =
+		detail && verbose ? withStableKeys(detail.split("\n"), (line) => line) : [];
 	const diffWidth = diffDetailBlockWidth(columns);
 	if (status === "error") {
 		return (
@@ -39,7 +45,10 @@ export function ToolResultView({
 			</Text>
 		);
 	}
-	if (status === "done" && (title || detail || detailLines?.length)) {
+	if (
+		status === "done" &&
+		(title || plainDetailLines.length || detailLines?.length)
+	) {
 		return (
 			<Box flexDirection="column">
 				{title ? (
@@ -58,9 +67,9 @@ export function ToolResultView({
 						{detailLines.map((line) => {
 							const backgroundColor =
 								line.kind === "added"
-									? DIFF_ADDED_BACKGROUND
+									? uiTheme.diffAddedBackground
 									: line.kind === "removed"
-										? DIFF_REMOVED_BACKGROUND
+										? uiTheme.diffRemovedBackground
 										: line.highlighted
 											? uiTheme.highlightBackground
 											: undefined;
@@ -81,10 +90,14 @@ export function ToolResultView({
 					</Box>
 				) : null}
 				{plainDetailLines.length > 0 ? (
-					<Box marginLeft={RESULT_DETAIL_INDENT} flexDirection="column">
+					<Box
+						marginLeft={RESULT_DETAIL_INDENT}
+						flexDirection="column"
+						width={diffWidth}
+					>
 						{plainDetailLines.map((line) => (
-							<Text key={line.key} color={theme.subtle}>
-								{line.value}
+							<Text key={line.key} color={theme.subtle} wrap="truncate-end">
+								{line.item}
 							</Text>
 						))}
 					</Box>
@@ -93,17 +106,6 @@ export function ToolResultView({
 		);
 	}
 	return null;
-}
-
-function stableDetailLines(
-	detail: string,
-): Array<{ key: string; value: string }> {
-	const seen = new Map<string, number>();
-	return detail.split("\n").map((value) => {
-		const count = seen.get(value) ?? 0;
-		seen.set(value, count + 1);
-		return { key: `${value}:${count}`, value };
-	});
 }
 
 export function diffDetailBlockWidth(columns: number): number {
@@ -117,8 +119,5 @@ export function diffDetailBlockWidth(columns: number): number {
 }
 
 function fitDetailLine(value: string, width: number): string {
-	if (value.length > width) {
-		return width <= 1 ? "…" : `${value.slice(0, width - 1)}…`;
-	}
-	return value.padEnd(width, " ");
+	return padColumn(expandTabs(value), width);
 }

@@ -1,15 +1,17 @@
 import { Box, Text, useInput } from "ink";
 import type React from "react";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import type {
 	HookEventName,
 	HookEventSummary,
 	HookManagerSnapshot,
 	LoadedHook,
 } from "../../core/hooks/index.ts";
-import { useTheme } from "../theme/ThemeProvider.tsx";
+import { useListSelection } from "../hooks/useListSelection.ts";
 import { theme } from "../theme/theme.ts";
-import { hookHelpLines } from "./HookShared.tsx";
+import { HintFooter } from "./HintFooter.tsx";
+import { AddHookRow, HookPanel, hookHelpLines } from "./HookShared.tsx";
+import { SelectRow } from "./SelectRow.tsx";
 
 export type HookEventSelection = {
 	type: "matcher";
@@ -43,7 +45,6 @@ export function HookEventSelector({
 	onAddHook,
 	onCancel,
 }: Props): React.ReactElement {
-	const uiTheme = useTheme();
 	const matchers = useMemo(
 		() => hookEventItems(event, snapshot),
 		[event, snapshot],
@@ -59,8 +60,8 @@ export function HookEventSelector({
 		],
 		[matchers],
 	);
-	const [selectedIndex, setSelectedIndex] = useState(0);
-	const safeIndex = Math.min(selectedIndex, Math.max(0, rows.length - 1));
+	const selection = useListSelection(rows.length);
+	const safeIndex = Math.min(selection.index, Math.max(0, rows.length - 1));
 	const selected = rows[safeIndex];
 
 	useInput((input, key) => {
@@ -68,17 +69,11 @@ export function HookEventSelector({
 			onCancel();
 			return;
 		}
-		if (key.upArrow) {
-			setSelectedIndex((index) => (index <= 0 ? rows.length - 1 : index - 1));
-			return;
-		}
-		if (key.downArrow) {
-			setSelectedIndex((index) => (index >= rows.length - 1 ? 0 : index + 1));
-			return;
-		}
+		if (selection.onInput(input, key)) return;
 		if (/^[1-9]$/.test(input)) {
+			// Digits address matcher rows, offset past the leading "add" row.
 			const matcherIndex = Number(input) - 1;
-			if (matcherIndex < matchers.length) setSelectedIndex(matcherIndex + 1);
+			if (matcherIndex < matchers.length) selection.setIndex(matcherIndex + 1);
 			return;
 		}
 		if (key.return && selected) {
@@ -96,45 +91,26 @@ export function HookEventSelector({
 	});
 
 	return (
-		<Box flexDirection="column">
-			<Box
-				flexDirection="column"
-				marginTop={1}
-				paddingX={2}
-				paddingY={1}
-				width="100%"
-				backgroundColor={uiTheme.inputSurfaceBackground}
-			>
-				<Box marginBottom={1}>
-					<Text color={theme.text} bold>
-						Hooks
-					</Text>
-				</Box>
-				<Text color={theme.accentBright} bold>
-					{event.event} - {matcherLabel(event.event)}
-				</Text>
-				<Box marginTop={1}>
-					<HookEventHelp event={event.event} />
-				</Box>
-				<Box flexDirection="column" marginTop={1}>
-					{rows.map((row, index) =>
-						row.kind === "add" ? (
-							<AddHookRow key={row.id} selected={index === safeIndex} />
-						) : (
-							<HookEventRow
-								key={row.id}
-								matcherNumber={matcherDisplayNumber(rows, index)}
-								item={row.item}
-								selected={index === safeIndex}
-							/>
-						),
-					)}
-				</Box>
-				<Box marginTop={1}>
-					<Text color={theme.subtle}>Enter to confirm · Esc to cancel</Text>
-				</Box>
+		<HookPanel title={`${event.event} - ${matcherLabel(event.event)}`}>
+			<Box marginTop={1}>
+				<HookEventHelp event={event.event} />
 			</Box>
-		</Box>
+			<Box flexDirection="column" marginTop={1}>
+				{rows.map((row, index) =>
+					row.kind === "add" ? (
+						<AddHookRow key={row.id} selected={index === safeIndex} />
+					) : (
+						<HookEventRow
+							key={row.id}
+							matcherNumber={matcherDisplayNumber(rows, index)}
+							item={row.item}
+							selected={index === safeIndex}
+						/>
+					),
+				)}
+			</Box>
+			<HintFooter hints={["Enter confirm", "Esc cancel"]} />
+		</HookPanel>
 	);
 }
 
@@ -144,22 +120,6 @@ function matcherDisplayNumber(
 ): number {
 	return (
 		rows.slice(0, index).filter((row) => row.kind === "matcher").length + 1
-	);
-}
-
-function AddHookRow({ selected }: { selected: boolean }): React.ReactElement {
-	return (
-		<Box>
-			<Text color={selected ? theme.accentBright : theme.subtle}>
-				{selected ? "› " : "  "}
-			</Text>
-			<Text
-				color={selected ? theme.accentBright : theme.accent}
-				bold={selected}
-			>
-				+ Add new hook
-			</Text>
-		</Box>
 	);
 }
 
@@ -174,9 +134,8 @@ function HookEventRow({
 }): React.ReactElement {
 	const hookLabel = item.hooks.length === 1 ? "hook" : "hooks";
 	return (
-		<Box>
+		<SelectRow selected={selected}>
 			<Text color={selected ? theme.accentBright : theme.subtle}>
-				{selected ? "› " : "  "}
 				{`${matcherNumber}.`.padStart(3)}{" "}
 			</Text>
 			<Text color={selected ? theme.accentBright : theme.text} bold={selected}>
@@ -186,7 +145,7 @@ function HookEventRow({
 				{"  "}
 				{item.hooks.length} {hookLabel}
 			</Text>
-		</Box>
+		</SelectRow>
 	);
 }
 

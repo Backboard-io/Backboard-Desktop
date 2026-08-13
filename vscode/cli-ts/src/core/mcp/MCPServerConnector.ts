@@ -3,6 +3,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { ResourceUpdatedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import { APP_PACKAGE_NAME, APP_VERSION } from "../../config/branding.ts";
+import { errorMessage } from "../../utils/errors.ts";
 import type { McpServerConfig } from "./config.ts";
 import { listMcpServerToolDefinitionsIfSupported } from "./MCPToolDefinitions.ts";
 import { createMcpTransport } from "./MCPTransport.ts";
@@ -113,7 +114,7 @@ export class McpServerConnector {
 			) {
 				const message = authRequired
 					? "Authentication required."
-					: formatError(err);
+					: errorMessage(err);
 				await transport?.close().catch(() => undefined);
 				return {
 					tools: [],
@@ -122,7 +123,7 @@ export class McpServerConnector {
 				};
 			}
 
-			const message = formatError(err);
+			const message = errorMessage(err);
 			warnings.push(`Skipped MCP server '${server.name}': ${message}.`);
 			await transport?.close().catch(() => undefined);
 			return {
@@ -202,10 +203,6 @@ function statusFor(
 		updatedResourceUris: [],
 		subscribedResourceUris: [],
 	};
-}
-
-function formatError(err: unknown): string {
-	return err instanceof Error ? err.message : String(err);
 }
 
 function isAuthRequired(err: unknown): boolean {

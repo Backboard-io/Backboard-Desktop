@@ -6,12 +6,11 @@ import type {
 	ThinkingRequestKind,
 } from "../../config/defaults.ts";
 import type { RuntimeThinkingResolver } from "../../config/thinkingRuntime.ts";
-import { ensureAssistant } from "../../providers/backboard/assistants.ts";
-import type { BackboardClient } from "../../providers/backboard/BackboardClient.ts";
 import type {
-	BackboardAudioFile,
-	BackboardVoiceConfig,
-} from "../../providers/backboard/types.ts";
+	AgentClient,
+	RunMessageOptions,
+} from "../../providers/AgentClient.ts";
+import { ensureAssistant } from "../../providers/backboard/assistants.ts";
 import type { EventBus } from "../bus/EventBus.ts";
 import type { HookController } from "../hooks/index.ts";
 import type { Session } from "../session/Session.ts";
@@ -21,7 +20,7 @@ import { ToolScheduler } from "../tools/ToolScheduler.ts";
 import { AgentLoop } from "./AgentLoop.ts";
 
 export interface AgentLoopFactoryDeps {
-	client: BackboardClient;
+	client: AgentClient;
 	hookController?: HookController;
 	assistantResolver?: (options: ResolveAssistantOptions) => Promise<string>;
 }
@@ -38,12 +37,12 @@ export interface CreateLoopOptions {
 	bus: EventBus;
 	tools: OpenAITool[];
 	systemPrompt: string;
+	refreshSystemPrompt?: () => string;
 	assistantId?: string;
 	model: ModelRef;
 	memory: MemoryMode;
 	memoryProfile: MemoryProfile;
-	voice?: BackboardVoiceConfig;
-	audioFile?: BackboardAudioFile;
+	workspaceId?: string;
 	thinking?: ThinkingConfig | null;
 	thinkingResolver?: RuntimeThinkingResolver;
 	requestKind: ThinkingRequestKind;
@@ -52,6 +51,9 @@ export interface CreateLoopOptions {
 	turnStartedAt?: number;
 	turnAlreadyStarted?: boolean;
 	maxToolRounds?: number;
+	attachmentFilePaths?: string[];
+	displayContent?: string;
+	durableSession?: RunMessageOptions["durableSession"];
 }
 
 export interface ResolveAssistantOptions {
@@ -94,12 +96,12 @@ export class AgentLoopFactory {
 			bus: options.bus,
 			tools: options.tools,
 			systemPrompt: options.systemPrompt,
+			refreshSystemPrompt: options.refreshSystemPrompt,
 			assistantId: options.assistantId,
 			model: options.model,
 			memory: options.memory,
 			memoryProfile: options.memoryProfile,
-			voice: options.voice,
-			audioFile: options.audioFile,
+			workspaceId: options.workspaceId,
 			thinking: options.thinking,
 			thinkingResolver: options.thinkingResolver,
 			requestKind: options.requestKind,
@@ -108,6 +110,9 @@ export class AgentLoopFactory {
 			turnStartedAt: options.turnStartedAt,
 			turnAlreadyStarted: options.turnAlreadyStarted,
 			maxToolRounds: options.maxToolRounds,
+			attachmentFilePaths: options.attachmentFilePaths,
+			displayContent: options.displayContent,
+			durableSession: options.durableSession,
 		});
 	}
 }

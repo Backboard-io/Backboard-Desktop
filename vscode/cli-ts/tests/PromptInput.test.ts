@@ -46,6 +46,7 @@ function emptyPromptInputState(): PromptInputState {
 		edit: { value: "", cursorOffset: 0 },
 		history: emptyPromptHistoryState(),
 		pastePreviews: [],
+		attachments: [],
 		selectedIndex: 0,
 	};
 }
@@ -242,6 +243,53 @@ describe("PromptInput key router", () => {
 		).toEqual({ kind: "deleteBeforeCursorOnLine" });
 	});
 
+	it("maps Ctrl+V to clipboard image paste on macOS and Linux", () => {
+		for (const platform of ["darwin", "linux"] as const) {
+			expect(
+				resolvePromptInputKeyAction("v", key({ ctrl: true }), {
+					busy: false,
+					cursorOffset: 0,
+					platform,
+					suggestionsVisible: false,
+					value: "",
+				}),
+			).toEqual({ kind: "pasteClipboardImage" });
+		}
+	});
+
+	it("maps Ctrl+V to clipboard image paste on Windows", () => {
+		expect(
+			resolvePromptInputKeyAction("v", key({ ctrl: true }), {
+				busy: false,
+				cursorOffset: 0,
+				platform: "win32",
+				suggestionsVisible: false,
+				value: "",
+			}),
+		).toEqual({ kind: "pasteClipboardImage" });
+		expect(
+			resolvePromptInputKeyAction("v", key({ meta: true }), {
+				busy: false,
+				cursorOffset: 0,
+				platform: "win32",
+				suggestionsVisible: false,
+				value: "",
+			}),
+		).not.toEqual({ kind: "pasteClipboardImage" });
+	});
+
+	it("does not treat plain v as clipboard image paste", () => {
+		expect(
+			resolvePromptInputKeyAction("v", key({}), {
+				busy: false,
+				cursorOffset: 0,
+				platform: "darwin",
+				suggestionsVisible: false,
+				value: "",
+			}),
+		).toEqual({ kind: "insertText", text: "v" });
+	});
+
 	it("maps Shift+Enter and backslash Enter to newline actions", () => {
 		expect(
 			resolvePromptInputKeyAction("", key({ return: true, shift: true }), {
@@ -395,11 +443,11 @@ describe("PromptInput paste preview", () => {
 		).join("\n");
 		const preview = createPromptInputPastePreview(paste, {
 			now: new Date("2026-06-26T07:45:00Z"),
-			sourceLabel: "Backboard Studio You",
+			sourceLabel: "Backboard R-CLI You",
 		});
 
 		expect(preview?.value).toBe(paste);
-		expect(preview?.label).toContain("Backboard Studio You");
+		expect(preview?.label).toContain("Backboard R-CLI You");
 		expect(preview?.label).toContain("line 1 line 2");
 		expect(preview?.label).toContain("10 lines");
 		expect(preview?.label).not.toContain(preview?.id ?? "");

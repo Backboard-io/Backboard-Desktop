@@ -1,12 +1,12 @@
 import { useEffect } from "react";
 import type { SkillController } from "../../core/skills/SkillController.ts";
-import type { BackboardClient } from "../../providers/backboard/BackboardClient.ts";
+import type { AgentClient } from "../../providers/AgentClient.ts";
 import { fetchModels } from "../../providers/backboard/models.ts";
 
 const PICKER_PRELOAD_REFRESH_MS = 5 * 60 * 1000;
 
 export function useStartupPickerPreload(
-	client: BackboardClient,
+	client: AgentClient,
 	skillController: SkillController,
 ): void {
 	useEffect(() => {
@@ -20,7 +20,7 @@ export function useStartupPickerPreload(
 }
 
 function preloadPickers(
-	client: BackboardClient,
+	client: AgentClient,
 	skillController: SkillController,
 ): void {
 	void fetchModels(client).catch(() => undefined);

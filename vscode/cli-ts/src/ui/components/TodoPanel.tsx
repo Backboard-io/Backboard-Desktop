@@ -1,6 +1,7 @@
 import { Box, Text } from "ink";
 import type React from "react";
 import type { TodoItem } from "../../core/bus/events.ts";
+import { pluralize } from "../../utils/string.ts";
 import { theme } from "../theme/theme.ts";
 import {
 	TODO_PANEL_COMPACT_HEIGHT,
@@ -44,7 +45,7 @@ export function TodoPanel({
 			borderColor={theme.accentBright}
 			paddingX={1}
 		>
-			<Text color={theme.accent} bold>
+			<Text color={theme.accentBright} bold>
 				Todos
 			</Text>
 			{visible.items.map((todo) => (
@@ -58,8 +59,8 @@ export function TodoPanel({
 			))}
 			{visible.hiddenCount > 0 ? (
 				<Text color={theme.subtle} wrap="truncate-end">
-					... {visible.hiddenCount} more todo
-					{visible.hiddenCount === 1 ? "" : "s"}
+					... {visible.hiddenCount} more{" "}
+					{pluralize(visible.hiddenCount, "todo")}
 				</Text>
 			) : null}
 		</Box>
@@ -77,7 +78,7 @@ function CompactTodoPanel({
 }): React.ReactElement {
 	return (
 		<Box marginTop={1}>
-			<Text color={theme.accent} bold wrap="truncate-end">
+			<Text color={theme.accentBright} bold wrap="truncate-end">
 				Todos {compactTodoSummary(todos)}
 			</Text>
 		</Box>
@@ -128,7 +129,9 @@ export function todoPanelDisplayForTerminalHeight(
 export function compactTodoSummary(todos: readonly TodoItem[]): string {
 	const active = todos.find((todo) => todo.status === "in_progress");
 	if (active) {
-		const remaining = todos.length - 1;
+		// Count only work still outstanding; completed siblings stay in the
+		// list (kept-completed lifecycle) but shouldn't inflate "+N more to do".
+		const remaining = todos.filter((todo) => todo.status === "pending").length;
 		return `[>] ${active.content}${remaining > 0 ? ` (+${remaining})` : ""}`;
 	}
 

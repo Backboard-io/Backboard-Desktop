@@ -1,8 +1,9 @@
 import { describe, expect, it } from "bun:test";
 import {
-	clipEnd,
+	cardHeaderWidths,
 	sessionCardLayout,
 } from "../src/ui/components/SessionCard.tsx";
+import { clipEnd } from "../src/utils/string.ts";
 
 describe("SessionCard responsive layout", () => {
 	it("keeps the full startup card on wide terminals", () => {
@@ -67,5 +68,21 @@ describe("clipEnd", () => {
 
 	it("does not add dots when the width is too small", () => {
 		expect(clipEnd("abcdef", 2)).toBe("ab");
+	});
+});
+
+describe("cardHeaderWidths", () => {
+	it("reserves mascot space and borders inside the default card", () => {
+		expect(cardHeaderWidths(sessionCardLayout(80))).toEqual({
+			contentWidth: 68,
+			headerTextWidth: 53,
+		});
+	});
+
+	it("gives the header the full card when the mascot is hidden", () => {
+		expect(cardHeaderWidths(sessionCardLayout(40))).toEqual({
+			contentWidth: 28,
+			headerTextWidth: 28,
+		});
 	});
 });

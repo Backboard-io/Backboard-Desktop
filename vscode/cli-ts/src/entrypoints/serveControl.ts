@@ -6,7 +6,6 @@ const KNOWN_OPS = new Set<ServeControl["op"]>([
 	"warmup",
 	"cancel",
 	"respondInput",
-	"respondPermission",
 	"setModel",
 	"listModels",
 	"listTools",
@@ -18,11 +17,7 @@ export type ParsedControlLine =
 	| { ok: true; control: ServeControl }
 	| { ok: false; error: string; requestId?: string };
 
-/**
- * Parses one stdin control line into a `ServeControl`. Malformed lines return
- * a structured error instead of throwing so a bad host write can never crash
- * the serve process.
- */
+/** Parse a host line without allowing malformed input to crash the CLI. */
 export function parseControlLine(line: string): ParsedControlLine | null {
 	const trimmed = line.trim();
 	if (!trimmed) return null;
@@ -64,12 +59,11 @@ export function parseControlLine(line: string): ParsedControlLine | null {
 			break;
 		case "respondInput":
 			if (typeof record.id !== "string") return missing("id");
-			if (typeof record.answer !== "string") return missing("answer");
-			break;
-		case "respondPermission":
-			if (typeof record.id !== "string") return missing("id");
-			if (record.decision !== "approve" && record.decision !== "deny") {
-				return missing("decision");
+			if (
+				!Array.isArray(record.answers) ||
+				record.answers.some((answer) => typeof answer !== "string")
+			) {
+				return missing("answers");
 			}
 			break;
 		case "setModel":

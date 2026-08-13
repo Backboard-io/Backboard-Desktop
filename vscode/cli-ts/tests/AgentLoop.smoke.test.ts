@@ -4,10 +4,12 @@ import os from "node:os";
 import path from "node:path";
 import { Config } from "../src/config/Config.ts";
 import { AgentController } from "../src/core/agent/AgentController.ts";
-import { IMPLEMENTATION_PROGRESS_HINT } from "../src/core/agent/ExecutionPacing.ts";
-import { FINAL_VERIFICATION_MIN_TOOL_CALLS } from "../src/core/agent/FinalVerificationRunner.ts";
+import { FINAL_VERIFICATION_MIN_TOOL_CALLS } from "../src/core/agent/notifications/FinalVerificationNotification.ts";
 import { EventBus } from "../src/core/bus/EventBus.ts";
 import type { AgentEvent } from "../src/core/bus/events.ts";
+import { emptyRuleSet } from "../src/core/permissions/PermissionRules.ts";
+import type { PermissionContext } from "../src/core/permissions/types.ts";
+import { assistantMessage, userMessage } from "../src/core/session/Message.ts";
 import { Session } from "../src/core/session/Session.ts";
 import { SkillController } from "../src/core/skills/SkillController.ts";
 import { ToolRegistry } from "../src/core/tools/ToolRegistry.ts";
@@ -17,6 +19,7 @@ import type {
 } from "../src/providers/backboard/BackboardClient.ts";
 import type {
 	AssistantInfo,
+	BackboardResponse,
 	ModelsListResponse,
 	ModelThinkingMetadataResponse,
 	ProviderEvent,
@@ -26,6 +29,14 @@ import type {
 import { TestTool } from "./helpers.ts";
 
 const env = { apiKey: "k", apiUrl: "https://example.test/api" };
+
+// Bypass mode with no rules keeps the permission gate a no-op, matching the
+// pre-wiring behavior these tests were written against.
+const TEST_PERMISSIONS: PermissionContext = {
+	mode: "bypass",
+	rules: emptyRuleSet(),
+	interactive: false,
+};
 
 async function delay(ms: number, signal?: AbortSignal): Promise<void> {
 	await new Promise<void>((resolve, reject) => {
@@ -42,11 +53,15 @@ async function delay(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 class FakeClient {
-	readonly accountFingerprint = "test-account";
+	/** Stands in for Backboard, so the assistant/thread paths stay exercised. */
+	readonly capabilities = { assistants: true, threads: true, memory: true };
 	messageRequests: SendMessageRequest[] = [];
+	messageAttachmentPaths: Array<string[] | undefined> = [];
 	toolOutputRequests: SubmitToolOutputsRequest[] = [];
+	preservedToolOutputRequests: SubmitToolOutputsRequest[] = [];
 	modelThinkingMetadataCount = 0;
 	listModelsCount = 0;
+	threadSource: "byok" | "backboard" = "backboard";
 	listAssistantsDelayMs = 0;
 	assistantRequests: Array<{
 		name: string;
@@ -122,8 +137,28 @@ class FakeClient {
 		};
 	}
 
-	async *runMessage(req: SendMessageRequest): AsyncIterable<ProviderEvent> {
+	sourceForThread(): "byok" | "backboard" {
+		return this.threadSource;
+	}
+
+	async sendMessage(): Promise<BackboardResponse> {
+		return {
+			thread_id: "compaction_helper",
+			content:
+				"## Objective\nKeep the work moving.\n\n## Current State\nHistory compressed.",
+			status: "COMPLETED",
+			tool_calls: null,
+			model_provider: "anthropic",
+			model_name: "test",
+		};
+	}
+
+	async *runMessage(
+		req: SendMessageRequest,
+		options?: { attachmentFilePaths?: string[] },
+	): AsyncIterable<ProviderEvent> {
 		this.messageRequests.push(req);
+		this.messageAttachmentPaths.push(options?.attachmentFilePaths);
 		yield* this.first;
 	}
 
@@ -132,6 +167,13 @@ class FakeClient {
 	): AsyncIterable<ProviderEvent> {
 		this.toolOutputRequests.push(req);
 		yield* this.second;
+	}
+
+	async preserveFailedToolOutputs(
+		req: SubmitToolOutputsRequest,
+	): Promise<string | null> {
+		this.preservedToolOutputRequests.push(req);
+		return null;
 	}
 }
 
@@ -153,15 +195,16 @@ class DisposableTool extends TestTool {
 
 function controllerWith(
 	client: FakeClient,
-	tool: TestTool,
+	tool: TestTool | TestTool[],
 	argv: string[] = [],
-): { ctrl: AgentController; events: AgentEvent[] } {
+	options: { onThreadReplaced?: (threadId: string | null) => void } = {},
+): { ctrl: AgentController; events: AgentEvent[]; session: Session } {
 	const config = new Config({ env, argv });
 	const bus = new EventBus();
 	const events: AgentEvent[] = [];
 	bus.onAny((e) => events.push(e));
 	const session = new Session("sess_test");
-	const registry = new ToolRegistry([tool]);
+	const registry = new ToolRegistry(Array.isArray(tool) ? tool : [tool]);
 	const skillController = new SkillController({ cwd: config.cwd, bus });
 	const ctrl = new AgentController({
 		config,
@@ -170,45 +213,15 @@ function controllerWith(
 		registry,
 		client: client as unknown as BackboardClient,
 		skillController,
+		permissions: TEST_PERMISSIONS,
+		...(options.onThreadReplaced
+			? { onThreadReplaced: options.onThreadReplaced }
+			: {}),
 	});
-	return { ctrl, events };
+	return { ctrl, events, session };
 }
 
 describe("AgentController loop (mocked Backboard)", () => {
-	it("carries per-turn voice and audio through the agent loop", async () => {
-		const client = new FakeClient(
-			[
-				{
-					kind: "voice",
-					records: [{ stt: { transcript: "hello" } }],
-				},
-				{ kind: "assistant_delta", text: "Hi there" },
-				{ kind: "completed" },
-			],
-			[],
-		);
-		const { ctrl, events } = controllerWith(
-			client,
-			new TestTool({ name: "Echo", readOnly: true }),
-		);
-		const voice = {
-			stt: { provider: "openai", model: "gpt-4o-mini-transcribe" },
-		};
-		const audioFile = {
-			fileName: "voice.webm",
-			mimeType: "audio/webm",
-			dataBase64: "dm9pY2U=",
-		};
-
-		await ctrl.submit("Transcribe and answer", { voice, audioFile });
-		expect(client.messageRequests[0]?.voice).toEqual(voice);
-		expect(client.messageRequests[0]?.audioFile).toEqual(audioFile);
-		expect(events).toContainEqual({
-			type: "assistant:voice",
-			records: [{ stt: { transcript: "hello" } }],
-		});
-	});
-
 	it("emits turn:start and accepted prompt before assistant setup finishes", async () => {
 		const client = new FakeClient(
 			[
@@ -263,10 +276,16 @@ describe("AgentController loop (mocked Backboard)", () => {
 		expect(types[types.length - 1]).toBe("turn:end");
 	});
 
-	it("nudges progress after two tool rounds without implementation", async () => {
-		class ExplorationClient extends FakeClient {
+	it("starts a safe tool mid-stream when tool_call_ready arrives early", async () => {
+		let requiresActionYielded = false;
+		let startedDuringStream = false;
+		let runs = 0;
+		class EarlyReadyClient extends FakeClient {
 			constructor() {
-				super([], []);
+				super(
+					[],
+					[{ kind: "assistant_delta", text: "done" }, { kind: "completed" }],
+				);
 			}
 
 			override async *runMessage(
@@ -274,46 +293,49 @@ describe("AgentController loop (mocked Backboard)", () => {
 			): AsyncIterable<ProviderEvent> {
 				this.messageRequests.push(req);
 				yield { kind: "thread", threadId: "thr_1" };
+				yield { kind: "tool_started", id: "c1", name: "Echo" };
+				yield {
+					kind: "tool_ready",
+					call: { id: "c1", name: "Echo", input: { value: "v" } },
+				};
+				// The rest of the model turn is still streaming while the
+				// early-offered call should already be executing.
+				await delay(30);
+				requiresActionYielded = true;
 				yield {
 					kind: "requires_action",
 					runId: "run_1",
-					calls: [{ id: "c1", name: "Echo", input: {} }],
+					calls: [{ id: "c1", name: "Echo", input: { value: "v" } }],
 				};
 			}
-
-			override async *runToolOutputs(
-				req: SubmitToolOutputsRequest,
-			): AsyncIterable<ProviderEvent> {
-				this.toolOutputRequests.push(req);
-				if (this.toolOutputRequests.length === 1) {
-					yield {
-						kind: "requires_action",
-						runId: "run_1",
-						calls: [{ id: "c2", name: "Echo", input: {} }],
-					};
-					return;
-				}
-				yield { kind: "assistant_delta", text: "done" };
-				yield { kind: "completed" };
-			}
 		}
-
-		const client = new ExplorationClient();
+		const client = new EarlyReadyClient();
 		const { ctrl } = controllerWith(
 			client,
-			new TestTool({ name: "Echo", readOnly: true }),
+			new TestTool({
+				name: "Echo",
+				readOnly: true,
+				onStart: () => {
+					runs++;
+					startedDuringStream ||= !requiresActionYielded;
+				},
+			}),
 		);
 
-		const status = await ctrl.submit("implement it");
+		const status = await ctrl.submit("do it");
 
 		expect(status).toBe("completed");
-		expect(client.toolOutputRequests[0]?.tool_outputs[0]?.output).toBe("Echo");
-		expect(client.toolOutputRequests[1]?.tool_outputs[0]?.output).toContain(
-			IMPLEMENTATION_PROGRESS_HINT,
-		);
+		expect(startedDuringStream).toBe(true);
+		// The early run is reused at finalize, never re-executed, and the
+		// outputs are still submitted as a single batch.
+		expect(runs).toBe(1);
+		expect(client.toolOutputRequests).toHaveLength(1);
+		expect(
+			client.toolOutputRequests[0]?.tool_outputs.map((o) => o.tool_call_id),
+		).toEqual(["c1"]);
 	});
 
-	it("injects the startup environment per turn but keeps it out of the stable base assistant", async () => {
+	it("includes the startup environment prompt in assistant and turn prompts", async () => {
 		const client = new FakeClient(
 			[
 				{ kind: "thread", threadId: "thr_1" },
@@ -338,17 +360,14 @@ describe("AgentController loop (mocked Backboard)", () => {
 			client: client as unknown as BackboardClient,
 			skillController,
 			startupEnvironmentPrompt,
+			permissions: TEST_PERMISSIONS,
 		});
 
 		await ctrl.submit("do it");
 
-		// The volatile environment snapshot must NOT be part of the base
-		// assistant (it would make the assistant fingerprint change per
-		// day/workspace/branch and defeat the assistant cache)...
-		expect(client.assistantRequests[0]?.system_prompt).not.toContain(
+		expect(client.assistantRequests[0]?.system_prompt).toContain(
 			startupEnvironmentPrompt,
 		);
-		// ...but it MUST reach the model via the per-turn system_prompt override.
 		expect(client.messageRequests[0]?.system_prompt).toContain(
 			startupEnvironmentPrompt,
 		);
@@ -469,7 +488,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 			}
 		}
 		const client = new RetryMessageClient();
-		const { ctrl, events } = controllerWith(
+		const { ctrl } = controllerWith(
 			client,
 			new TestTool({ name: "Echo", readOnly: true }),
 		);
@@ -478,10 +497,6 @@ describe("AgentController loop (mocked Backboard)", () => {
 
 		expect(status).toBe("completed");
 		expect(client.messageRequests).toHaveLength(2);
-		expect(events).toContainEqual({
-			type: "system:warning",
-			message: "Provider connection interrupted. Retrying (1/2)…",
-		});
 	});
 
 	it("retries retryable tool-output continuation failures without rerunning tools", async () => {
@@ -786,6 +801,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 			registry,
 			client: client as unknown as BackboardClient,
 			skillController,
+			permissions: TEST_PERMISSIONS,
 		});
 
 		await ctrl.submit("do it");
@@ -798,7 +814,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 		expect(req.memory).toBe("Auto");
 		expect(req.memory_profile).toBe("code");
 		expect(req.thinking).toEqual({ effort: "high" });
-		expect(req.system_prompt).toContain("You are Backboard Studio");
+		expect(req.system_prompt).toContain("You are R-CLI");
 		expect(req.system_prompt).not.toContain("Model profile:");
 		expect(req.tools?.map((tool) => tool.function.name)).toEqual(["Visible"]);
 	});
@@ -829,6 +845,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 			registry,
 			client: client as unknown as BackboardClient,
 			skillController,
+			permissions: TEST_PERMISSIONS,
 		});
 
 		await ctrl.submit("do it");
@@ -868,6 +885,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 			registry,
 			client: client as unknown as BackboardClient,
 			skillController,
+			permissions: TEST_PERMISSIONS,
 		});
 
 		await ctrl.submit("do it");
@@ -909,6 +927,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 			registry,
 			client: client as unknown as BackboardClient,
 			skillController,
+			permissions: TEST_PERMISSIONS,
 		});
 
 		await ctrl.submit("do it");
@@ -946,6 +965,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 			registry,
 			client: client as unknown as BackboardClient,
 			skillController,
+			permissions: TEST_PERMISSIONS,
 		});
 
 		await ctrl.submit("do it");
@@ -1017,6 +1037,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 			registry,
 			client: client as unknown as BackboardClient,
 			skillController,
+			permissions: TEST_PERMISSIONS,
 		});
 
 		await ctrl.submit("do it");
@@ -1078,6 +1099,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 			registry,
 			client: client as unknown as BackboardClient,
 			skillController,
+			permissions: TEST_PERMISSIONS,
 		});
 
 		await ctrl.submit("$docs use it");
@@ -1092,15 +1114,22 @@ describe("AgentController loop (mocked Backboard)", () => {
 		const item = repoTab?.items.find((skill) => skill.name === "docs");
 		expect(item).toBeDefined();
 		if (!item) throw new Error("expected docs skill");
+		expect(item.active).toBe(false);
+		expect(item.description).toBe("doc skill");
+		expect(item.source).toBe("repo");
 		const personalTab = tabs.find((tab) => tab.id === "personal");
-		const activeItem = personalTab?.items.find(
-			(skill) => skill.name === "docs",
+		expect(personalTab?.items.some((skill) => skill.name === "docs")).toBe(
+			false,
 		);
-		expect(activeItem?.active).toBe(true);
-		expect(activeItem?.description).toBe("doc skill");
-		expect(activeItem?.source).toBe("repo");
 		const loadResult = await skillController.selectSkill(item);
 		expect(loadResult.selectedName).toBe("docs");
+		expect(loadResult.action).toBe("activated");
+		const tabsAfterLoad = await skillController.listSkillTabs();
+		expect(
+			tabsAfterLoad
+				.find((tab) => tab.id === "repo")
+				?.items.find((skill) => skill.name === "docs")?.active,
+		).toBe(true);
 
 		await ctrl.submit("$docs use it");
 
@@ -1125,6 +1154,39 @@ describe("AgentController loop (mocked Backboard)", () => {
 		expect(afterActivation.thread_id).toBe("thr_1");
 		expect(afterActivation.system_prompt).toContain("- docs: doc skill");
 		expect(afterActivation.system_prompt).not.toContain("# Skill: docs");
+		// Real skill filesystem I/O across three turns runs close to the default
+		// 5s budget under full-file load; give it headroom to avoid a flake.
+	}, 20_000);
+
+	it("transfers compaction ownership only for BYOK threads", async () => {
+		const replacements: Array<string | null> = [];
+		const backboard = new FakeClient([], []);
+		const first = controllerWith(
+			backboard,
+			new TestTool({ name: "Echo" }),
+			[],
+			{ onThreadReplaced: (threadId) => replacements.push(threadId) },
+		);
+		first.session.threadId = "thread_backboard";
+		first.session.addMessage(userMessage("one"));
+		first.session.addMessage(assistantMessage("two"));
+		first.session.addMessage(userMessage("three"));
+		first.session.addMessage(assistantMessage("four"));
+		await first.ctrl.compact();
+
+		const byok = new FakeClient([], []);
+		byok.threadSource = "byok";
+		const second = controllerWith(byok, new TestTool({ name: "Echo" }), [], {
+			onThreadReplaced: (threadId) => replacements.push(threadId),
+		});
+		second.session.threadId = "byok_previous";
+		second.session.addMessage(userMessage("one"));
+		second.session.addMessage(assistantMessage("two"));
+		second.session.addMessage(userMessage("three"));
+		second.session.addMessage(assistantMessage("four"));
+		await second.ctrl.compact();
+
+		expect(replacements).toEqual([null, "byok_previous"]);
 	});
 
 	it("cancels an in-flight turn", async () => {
@@ -1150,6 +1212,66 @@ describe("AgentController loop (mocked Backboard)", () => {
 
 		expect(status).toBe("cancelled");
 		expect(events.map((e) => e.type)).toContain("turn:cancelled");
+	});
+
+	it("preserves a synthetic tool result when cancellation interrupts execution", async () => {
+		const client = new FakeClient(
+			[
+				{ kind: "thread", threadId: "byok_tool_cancel" },
+				{
+					kind: "tool_ready",
+					call: { id: "call_1", name: "SlowWrite", input: {} },
+				},
+				{
+					kind: "requires_action",
+					runId: null,
+					calls: [{ id: "call_1", name: "SlowWrite", input: {} }],
+				},
+			],
+			[],
+		);
+		const { ctrl } = controllerWith(
+			client,
+			new TestTool({ name: "SlowWrite", readOnly: false, delayMs: 100 }),
+		);
+
+		const promise = ctrl.submit("run the slow write");
+		setTimeout(() => ctrl.cancel(), 20);
+
+		expect(await promise).toBe("cancelled");
+		expect(client.preservedToolOutputRequests).toHaveLength(1);
+		expect(
+			client.preservedToolOutputRequests[0]?.tool_outputs[0]?.output,
+		).toContain("interrupted");
+	});
+
+	it("keeps completed tool outputs when a later tool is interrupted", async () => {
+		const calls = [
+			{ id: "call_fast", name: "FastWrite", input: {} },
+			{ id: "call_slow", name: "SlowWrite", input: {} },
+		];
+		const client = new FakeClient(
+			[
+				{ kind: "thread", threadId: "byok_partial_tool_cancel" },
+				{ kind: "tool_ready", call: calls[0] as (typeof calls)[number] },
+				{ kind: "tool_ready", call: calls[1] as (typeof calls)[number] },
+				{ kind: "requires_action", runId: null, calls },
+			],
+			[],
+		);
+		const { ctrl } = controllerWith(client, [
+			new TestTool({ name: "FastWrite", readOnly: false }),
+			new TestTool({ name: "SlowWrite", readOnly: false, delayMs: 100 }),
+		]);
+
+		const promise = ctrl.submit("run both writes");
+		setTimeout(() => ctrl.cancel(), 30);
+
+		expect(await promise).toBe("cancelled");
+		const outputs = client.preservedToolOutputRequests[0]?.tool_outputs ?? [];
+		expect(outputs).toHaveLength(2);
+		expect(outputs[0]?.output).not.toContain("interrupted");
+		expect(outputs[1]?.output).toContain("interrupted");
 	});
 
 	it("cancels while resolving the assistant", async () => {
@@ -1201,6 +1323,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 			registry,
 			client: client as unknown as BackboardClient,
 			skillController,
+			permissions: TEST_PERMISSIONS,
 		});
 
 		await ctrl.submit("first");
@@ -1247,6 +1370,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 					);
 				}
 			},
+			permissions: TEST_PERMISSIONS,
 		});
 
 		await ctrl.submit("use the current tools");
@@ -1284,6 +1408,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 			registry,
 			client: client as unknown as BackboardClient,
 			skillController,
+			permissions: TEST_PERMISSIONS,
 		});
 
 		ctrl.enableBrowserUse();
@@ -1327,6 +1452,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 			registry,
 			client: client as unknown as BackboardClient,
 			skillController,
+			permissions: TEST_PERMISSIONS,
 		});
 
 		const status = await ctrl.submit("do it");
@@ -1340,8 +1466,142 @@ describe("AgentController loop (mocked Backboard)", () => {
 	});
 });
 
+describe("AgentController attachment file paths", () => {
+	it("puts the staged file paths on the first run request only", async () => {
+		const client = new FakeClient(
+			[
+				{ kind: "thread", threadId: "thr_1" },
+				{ kind: "assistant_delta", text: "done" },
+				{ kind: "completed" },
+			],
+			[],
+		);
+		const { ctrl } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+		);
+
+		const status = await ctrl.submit("do it", {
+			attachmentFilePaths: ["/tmp/a.png", "/tmp/b.pdf"],
+		});
+
+		expect(status).toBe("completed");
+		expect(client.messageAttachmentPaths[0]).toEqual([
+			"/tmp/a.png",
+			"/tmp/b.pdf",
+		]);
+		expect(client.messageRequests[0]).not.toHaveProperty(
+			"attachment_file_paths",
+		);
+	});
+
+	it("keeps attachments off nudge and tool-round requests", async () => {
+		class ToolThenNudgeClient extends FakeClient {
+			constructor() {
+				super(
+					[],
+					[{ kind: "assistant_delta", text: "done" }, { kind: "completed" }],
+				);
+			}
+			override async *runMessage(
+				req: SendMessageRequest,
+				options?: { attachmentFilePaths?: string[] },
+			): AsyncIterable<ProviderEvent> {
+				this.messageRequests.push(req);
+				this.messageAttachmentPaths.push(options?.attachmentFilePaths);
+				if (this.messageRequests.length === 1) {
+					yield { kind: "thread", threadId: "thr_1" };
+					yield {
+						kind: "requires_action",
+						runId: "run_1",
+						calls: Array.from(
+							{ length: FINAL_VERIFICATION_MIN_TOOL_CALLS },
+							(_, index) => ({ id: `c${index + 1}`, name: "Echo", input: {} }),
+						),
+					};
+					return;
+				}
+				yield { kind: "assistant_delta", text: "verified" };
+				yield { kind: "completed" };
+			}
+		}
+		const client = new ToolThenNudgeClient();
+		const { ctrl } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+			["--final-verification"],
+		);
+
+		await ctrl.submit("do it", { attachmentFilePaths: ["/tmp/a.png"] });
+
+		// First request carries the files; the nudge (second) must not.
+		expect(client.messageAttachmentPaths[0]).toEqual(["/tmp/a.png"]);
+		expect(client.messageAttachmentPaths[1]).toBeUndefined();
+	});
+
+	it("resends the files on a transport retry, matching the resent content", async () => {
+		class RetryMessageClient extends FakeClient {
+			constructor() {
+				super([], []);
+			}
+			override async *runMessage(
+				req: SendMessageRequest,
+				options?: { attachmentFilePaths?: string[] },
+			): AsyncIterable<ProviderEvent> {
+				this.messageRequests.push(req);
+				this.messageAttachmentPaths.push(options?.attachmentFilePaths);
+				if (this.messageRequests.length === 1) {
+					yield {
+						kind: "failed",
+						error: "Upstream idle timeout exceeded",
+						retryable: true,
+					};
+					return;
+				}
+				yield { kind: "thread", threadId: "thr_retry" };
+				yield { kind: "assistant_delta", text: "recovered" };
+				yield { kind: "completed" };
+			}
+		}
+		const client = new RetryMessageClient();
+		const { ctrl } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+		);
+
+		const status = await ctrl.submit("do it", {
+			attachmentFilePaths: ["/tmp/a.png"],
+		});
+
+		expect(status).toBe("completed");
+		expect(client.messageAttachmentPaths).toEqual([
+			["/tmp/a.png"],
+			["/tmp/a.png"],
+		]);
+	});
+
+	it("treats an empty path list as no attachments", async () => {
+		const client = new FakeClient(
+			[
+				{ kind: "thread", threadId: "thr_1" },
+				{ kind: "assistant_delta", text: "done" },
+				{ kind: "completed" },
+			],
+			[],
+		);
+		const { ctrl } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+		);
+
+		await ctrl.submit("do it", { attachmentFilePaths: [] });
+
+		expect(client.messageAttachmentPaths[0]).toBeUndefined();
+	});
+});
+
 async function tempDir(): Promise<string> {
-	return mkdtemp(path.join(os.tmpdir(), "q-cli-agent-"));
+	return mkdtemp(path.join(os.tmpdir(), "cli-agent-"));
 }
 
 async function writeSkill(

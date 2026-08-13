@@ -1,4 +1,4 @@
-import { elevate } from "./blend.ts";
+import { blend, elevate } from "./blend.ts";
 import { readableAnsiOrForeground } from "./contrast.ts";
 import { palette } from "./palette.ts";
 
@@ -28,18 +28,13 @@ export function createTheme(bg: string = palette.bg) {
 		SECONDARY_TEXT_MIN_CONTRAST,
 	);
 	return {
-		title: FG,
+		// text/inputText are deliberately undefined: render in the terminal's
+		// default foreground color.
 		text: FG,
-		assistant: FG,
 		inputText: FG,
-		user: "cyan",
-		model: "cyan",
-		accent: "cyan",
 		accentBright: "cyan",
-		borderFocused: "cyan",
 		toolRunning: "cyan",
 		spinner: "cyan",
-		secondaryText: readableSecondaryText,
 		readableSecondaryText,
 		subtle: readableSecondaryText,
 		subtleDecoration: "gray",
@@ -48,7 +43,6 @@ export function createTheme(bg: string = palette.bg) {
 		inputPlaceholder: "gray",
 		inputBackground: "black",
 		success: "green",
-		active: "green",
 		toolDone: "green",
 		error: "red",
 		toolError: "red",
@@ -57,12 +51,12 @@ export function createTheme(bg: string = palette.bg) {
 		spinnerHighlightCore: "cyan",
 		spinnerHighlightLead: "cyanBright",
 
-		surface1: surfaces.surface1,
-		surface2: surfaces.surface2,
-		surface3: surfaces.surface3,
 		inputSurfaceBackground: surfaces.surface1,
-		inputHighlight: surfaces.surface3,
 		highlightBackground: surfaces.surface3,
+		// Diff row tints composited over the detected terminal background so
+		// they stay legible on light terminals too.
+		diffAddedBackground: blend("#2ea043", bg, 0.35),
+		diffRemovedBackground: blend("#f85149", bg, 0.28),
 	} as const;
 }
 

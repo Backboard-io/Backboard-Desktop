@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/errors.ts";
 // Matcher semantics shared by the writer, loader, and runtime so they can't drift.
 
 export function validateHookMatcher(matcher: string): string | null {
@@ -6,7 +7,7 @@ export function validateHookMatcher(matcher: string): string | null {
 		new RegExp(matcher);
 		return null;
 	} catch (err) {
-		return `Invalid matcher regex: ${err instanceof Error ? err.message : String(err)}`;
+		return `Invalid matcher regex: ${errorMessage(err)}`;
 	}
 }
 

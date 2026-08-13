@@ -1,6 +1,15 @@
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 import { z } from "zod";
+import {
+	asString,
+	relativizePath,
+	withMeta,
+} from "../core/tools/inputSummary.ts";
+import {
+	BROWSING_PREVIEW_LINES,
+	buildOutputPreview,
+} from "../core/tools/outputPreview.ts";
 import { Tool } from "../core/tools/Tool.ts";
 import type { ToolContext } from "../core/tools/ToolContext.ts";
 import { ok, type ToolResult } from "../core/tools/ToolResult.ts";
@@ -108,6 +117,22 @@ export class GrepTool extends Tool<Input, Output> {
 		return getToolPrompt(this.name, context);
 	}
 
+	override summarizeInput(input: Input): string | undefined {
+		const pattern = asString(input.pattern);
+		if (!pattern) return undefined;
+		const filters: string[] = [];
+		const glob = asString(input.glob);
+		if (glob) filters.push(glob);
+		const type = asString(input.type);
+		if (type) filters.push(type);
+		const path = asString(input.path);
+		if (path) filters.push(relativizePath(path));
+		return withMeta(
+			pattern.replace(/\s+/g, " ").trim(),
+			filters.length ? [`in ${filters.join(", ")}`] : [],
+		);
+	}
+
 	override async execute(
 		input: Input,
 		ctx: ToolContext,
@@ -164,6 +189,7 @@ export class GrepTool extends Tool<Input, Output> {
 			matchCount === 0
 				? "No matches found"
 				: `Found ${matchCount} match${matchCount === 1 ? "" : "es"}`,
+			buildOutputPreview(trimmed, { maxLines: BROWSING_PREVIEW_LINES }),
 		);
 	}
 }
@@ -177,27 +203,11 @@ function run(
 		if (ctx.signal.aborted) return reject(new Error("aborted"));
 		const child = spawn(cmd, args, { signal: ctx.signal });
 		let stdout = "";
-		// Stopping the search once output exceeds what we can return is a
-		// truncated success, not an error (the caller slices to MAX_OUTPUT).
-		let stoppedForCap = false;
 		child.stdout?.on("data", (c) => {
 			stdout += c.toString();
-			if (stdout.length > MAX_OUTPUT * 2 && !stoppedForCap) {
-				stoppedForCap = true;
-				child.kill("SIGTERM");
-			}
+			if (stdout.length > MAX_OUTPUT * 2) child.kill("SIGTERM");
 		});
 		child.on("error", (err) => reject(err));
-		child.on("close", (code, signal) => {
-			if (stoppedForCap) {
-				resolvePromise({ stdout, code: 0 });
-				return;
-			}
-			if (code === null) {
-				reject(new Error(`${cmd} was killed by ${signal ?? "a signal"}`));
-				return;
-			}
-			resolvePromise({ stdout, code });
-		});
+		child.on("close", (code) => resolvePromise({ stdout, code: code ?? 1 }));
 	});
 }

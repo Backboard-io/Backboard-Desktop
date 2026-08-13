@@ -260,37 +260,42 @@ Guidance:
 }
 
 function buildAskUserPrompt(): string {
-	return `Ask the user a focused multiple-choice clarification question.
+	return `Ask the user one or more focused multiple-choice clarification questions.
 
 Use this only when the answer materially changes the result and cannot be safely inferred from context. Do all safe non-blocked work first.
 
 Guidance:
-- Keep the question short, specific, and actionable.
-- Provide clear option labels plus a custom-answer path when useful.
+- Batch related decisions into a single call: pass several \`questions\` the user would naturally settle together rather than interrupting repeatedly. Put the most load-bearing question first.
+- Give each question a short \`header\` (2-4 words) — headers form a breadcrumb across the top so the user can see and jump between the whole set.
+- Keep each question short, specific, and actionable, with clear option labels. The user can always type a custom answer, so do not add an "other" option.
 - Include enough context in the question text for the user to understand the tradeoff.
-- Prefer one question at a time.
 
 ### Parameters
 
 | Name | Type | Required | Description |
 | --- | --- | --- | --- |
-| \`question\` | \`string\` | yes | Question to present. |
-| \`options\` | \`array\` | yes | Multiple-choice options. |`.trim();
+| \`questions\` | \`array\` | yes | 1-4 related questions to ask together. |
+| \`questions[].header\` | \`string\` | yes | Short title (2-4 words) shown in the breadcrumb. |
+| \`questions[].question\` | \`string\` | yes | Question to present. |
+| \`questions[].options\` | \`array\` | yes | 1-4 mutually exclusive options (2-4 recommended). |`.trim();
 }
 
 function buildTodoWritePrompt(context: PromptContext = {}): string {
 	return `Maintain a visible todo list for non-trivial work.
 
-Use this for multi-step tasks, deliberate investigations, user-requested plans, or when new instructions change the work. Skip it for simple one-step requests or purely conversational answers.
+Use this when work needs 3+ tool calls, the user gives multiple tasks, or new instructions arrive; skip it when 1-2 tool calls suffice or the request is purely conversational. Track only tasks the user actually gave, never ones inferred from system context or environment output.
 
 Rules:
 - Maximum 50 items; each item must be under 500 characters.
 - Each item is an object with content and status.
 - Status is one of pending, in_progress, or completed.
 - Keep exactly one in_progress item while work is active and pending items remain.
-- Mark an item completed only after it is actually done and verified.
-- Do not mark validation complete if checks failed or were not run.
+- Mark a task in_progress before starting it; mark completed immediately after finishing, never in advance or in batches.
+- Mark an item completed only after it is actually done and verified - never while tests fail, work is partial, or errors are unresolved.
+- If blocked, keep the item in_progress and add an item for the blocker.
+- Capture user-provided commands verbatim, with all flags and order preserved.
 - Remove obsolete items rather than preserving stale plans.
+- When all work is done and only a waiting-for-user item remains, mark it in_progress or remove the list.
 ${parallelTodoTip(context)}
 
 Input shape:

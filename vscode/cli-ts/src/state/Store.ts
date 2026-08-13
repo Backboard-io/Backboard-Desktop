@@ -1,6 +1,14 @@
 import type { AgentChildToolCall, AgentEvent } from "../core/bus/events.ts";
+import type { Message } from "../core/session/Message.ts";
 import { areTodosComplete } from "../core/todos/TodoList.ts";
 import type { AgentToolOutput } from "../core/tools/AgentToolOutput.ts";
+import {
+	asString,
+	clampSummary,
+	firstLine,
+	genericInputSummary,
+} from "../core/tools/inputSummary.ts";
+import { toDisplayToolName } from "../core/tools/names.ts";
 import { shortId } from "../utils/id.ts";
 import { clampFlushLengthForOpenTable } from "../utils/markdownTable.ts";
 import type {
@@ -13,6 +21,7 @@ import { groupConsecutiveToolItems } from "./toolGrouping.ts";
 
 const MAX_LIVE_ASSISTANT_CHARS = 800;
 const TARGET_LIVE_ASSISTANT_CHARS = 400;
+const MAX_OPEN_TABLE_HOLD_CHARS = 4000;
 
 /**
  * Pure reducer mapping a bus event onto the next UI state. Keeping this pure
@@ -27,7 +36,7 @@ export function reduce(state: AppState, event: AgentEvent): AppState {
 				id: shortId("u"),
 				text: event.text,
 			};
-			return pushCommitted(state, item);
+			return pushCommitted(clearStaticOnly(state), item);
 		}
 
 		case "turn:start":
@@ -35,6 +44,10 @@ export function reduce(state: AppState, event: AgentEvent): AppState {
 				...state,
 				status: "running",
 				todos: areTodosComplete(state.todos) ? [] : state.todos,
+				render: {
+					...state.render,
+					staticOnly: false,
+				},
 			};
 
 		case "assistant:delta":
@@ -89,45 +102,77 @@ export function reduce(state: AppState, event: AgentEvent): AppState {
 		// animation) and are upserted in place by the later tool:start.
 		case "tool:pending": {
 			if (event.name === "TodoWrite") return state;
-			const item: TranscriptItem = {
-				kind: "tool",
-				id: event.toolCallId,
-				name: event.name,
-				inputSummary: event.inputSummary,
-				status: "pending",
-			};
-			const exists = state.transcript.some(
-				(candidate) => candidate.kind === "tool" && candidate.id === item.id,
+			// A row may already exist from an earlier streamed announcement
+			// (name only, before args finished) - upsert so the summary fills
+			// in instead of duplicating the row.
+			return upsertTool(
+				state,
+				{
+					kind: "tool",
+					id: event.toolCallId,
+					name: event.name,
+					inputSummary: event.inputSummary,
+					status: "pending",
+				},
+				// Returning `t` itself (not a clone) is load-bearing: upsertTool
+				// treats same-reference as "keep" and skips the live re-push.
+				(t, item) => (t.status === "pending" ? item : t),
 			);
-			const next = exists
-				? updateTool(state, item.id, () => item)
-				: push(state, item);
-			return pushLive(next, item);
 		}
 
-		case "tool:discarded":
-			return removeTool(state, event.toolCallId);
+		// A pending row whose call will never execute (stream retried, or the
+		// authoritative list never confirmed it). Drop it entirely - a stuck
+		// pending row at the head of the live region would pin every later
+		// item live forever. Rows that already reached a terminal state stay:
+		// they may have drained to static scrollback and can't be un-printed.
+		case "tool:retracted": {
+			const retractable = (item: RenderTranscriptItem) =>
+				item.kind === "tool" &&
+				item.id === event.toolCallId &&
+				isUnfinishedTool(item.status);
+			const transcript = state.transcript.filter((item) => !retractable(item));
+			const liveItems = state.render.liveItems.filter(
+				(item) => !retractable(item),
+			);
+			// No-op retractions happen (a retracted TodoWrite row was never
+			// stored; a completed row is kept) - don't churn state for them.
+			if (
+				transcript.length === state.transcript.length &&
+				liveItems.length === state.render.liveItems.length
+			) {
+				return state;
+			}
+			return {
+				...state,
+				transcript,
+				render: { ...state.render, liveItems },
+			};
+		}
 
 		case "tool:start": {
 			if (event.name === "TodoWrite") return state;
-			const item: TranscriptItem = {
-				kind: "tool",
-				id: event.toolCallId,
-				name: event.name,
-				inputSummary: event.inputSummary,
-				status: "running",
-				...(event.agentMode ? { agentMode: event.agentMode } : {}),
-			};
-			const exists = state.transcript.some(
-				(candidate) => candidate.kind === "tool" && candidate.id === item.id,
+			return upsertTool(
+				state,
+				{
+					kind: "tool",
+					id: event.toolCallId,
+					name: event.name,
+					inputSummary: event.inputSummary,
+					status: "running",
+					...(event.agentMode ? { agentMode: event.agentMode } : {}),
+				},
+				// Never downgrade a finished row back to running: a straggler
+				// start after cancel, or a finalize re-run / retried stream
+				// re-starting a settled id, targets a row whose outcome is
+				// already rendered (possibly drained to static scrollback) -
+				// flipping it would resurrect a spinner and drain a duplicate.
+				// Returning `t` itself is the "keep" signal (see upsertTool).
+				(t, item) => (isUnfinishedTool(t.status) ? item : t),
 			);
-			const next = exists
-				? updateTool(state, item.id, () => item)
-				: push(state, item);
-			return pushLive(next, item);
 		}
 
 		case "agent:child_tool_start": {
+			if (isToolCommittedTerminal(state, event.agentToolCallId)) return state;
 			const next = updateTool(state, event.agentToolCallId, (t) => ({
 				...t,
 				childToolCalls: upsertChildToolCall(t.childToolCalls ?? [], event.call),
@@ -139,6 +184,7 @@ export function reduce(state: AppState, event: AgentEvent): AppState {
 		}
 
 		case "agent:child_tool_result": {
+			if (isToolCommittedTerminal(state, event.agentToolCallId)) return state;
 			const next = updateTool(state, event.agentToolCallId, (t) => ({
 				...t,
 				childToolCalls: updateChildToolCall(
@@ -154,6 +200,7 @@ export function reduce(state: AppState, event: AgentEvent): AppState {
 		}
 
 		case "tool:result": {
+			if (isToolCommittedTerminal(state, event.toolCallId)) return state;
 			const next = updateTool(state, event.toolCallId, (t) => ({
 				...t,
 				status: "done",
@@ -171,6 +218,7 @@ export function reduce(state: AppState, event: AgentEvent): AppState {
 		}
 
 		case "tool:error": {
+			if (isToolCommittedTerminal(state, event.toolCallId)) return state;
 			const next = updateTool(state, event.toolCallId, (t) => ({
 				...t,
 				status: "error",
@@ -213,16 +261,21 @@ export function reduce(state: AppState, event: AgentEvent): AppState {
 		case "input:response":
 			return { ...state, pendingAsk: null };
 
-		case "turn:cancelled":
+		case "permission:mode":
+			return { ...state, permissionMode: event.mode };
+
+		case "turn:cancelled": {
+			const next = failRunningTools(state, "Interrupted");
 			return drainCompletedLiveTools(
 				{
-					...state,
+					...next,
 					status: "cancelled",
 					pendingAsk: null,
-					render: clearLiveAssistants(state.render),
+					render: clearLiveAssistants(next.render),
 				},
 				{ force: true },
 			);
+		}
 
 		case "turn:end": {
 			return appendAssistantFooter(
@@ -256,6 +309,114 @@ export function reduce(state: AppState, event: AgentEvent): AppState {
 		default:
 			return state;
 	}
+}
+
+export function transcriptFromMessages(
+	messages: readonly Message[],
+): TranscriptItem[] {
+	const inputsByCallId = new Map<string, unknown>();
+	for (const message of messages) {
+		if (message.role !== "assistant") continue;
+		for (const call of message.toolCalls) {
+			inputsByCallId.set(call.id, call.input);
+		}
+	}
+	return messages.flatMap((message, index): TranscriptItem[] => {
+		switch (message.role) {
+			case "user":
+				return [
+					{
+						kind: "user",
+						id: `history-user-${index}`,
+						text: message.text,
+					},
+				];
+			case "assistant":
+				if (message.text.trim().length === 0) return [];
+				return [
+					{
+						kind: "assistant",
+						id: `history-assistant-${index}`,
+						turnId: `history-turn-${index}`,
+						text: message.text,
+					},
+				];
+			case "tool":
+				return message.results.map((result, resultIndex) => {
+					const output = typeof result.output === "string" ? result.output : "";
+					const summary = clampSummary(firstLine(output));
+					return {
+						kind: "tool" as const,
+						id: `history-tool-${index}-${resultIndex}`,
+						name: toDisplayToolName(result.name),
+						inputSummary: historyInputSummary(
+							inputsByCallId.get(result.toolCallId),
+						),
+						status: result.isError ? ("error" as const) : ("done" as const),
+						...(result.isError
+							? summary
+								? { error: summary }
+								: {}
+							: summary
+								? { title: summary }
+								: {}),
+					};
+				});
+			default:
+				return [];
+		}
+	});
+}
+
+function historyInputSummary(input: unknown): string {
+	const generic = genericInputSummary(input);
+	if (generic) return clampSummary(generic);
+	if (!input || typeof input !== "object") return "";
+	const obj = input as Record<string, unknown>;
+	const fallback = asString(obj.command) ?? asString(obj.pattern);
+	return fallback ? clampSummary(fallback) : "";
+}
+
+function clearStaticOnly(state: AppState): AppState {
+	if (!state.render.staticOnly) return state;
+	return {
+		...state,
+		render: {
+			...state.render,
+			staticOnly: false,
+		},
+	};
+}
+
+/** Marks still-unfinished tool items as errored; nothing will complete them after a cancel. */
+function failRunningTools(state: AppState, error: string): AppState {
+	const fail = <T extends TranscriptItem | RenderTranscriptItem>(item: T): T =>
+		item.kind === "tool" && isUnfinishedTool(item.status)
+			? { ...item, status: "error", error }
+			: item;
+	return {
+		...state,
+		transcript: state.transcript.map(fail),
+		render: {
+			...state.render,
+			liveItems: state.render.liveItems.map(fail),
+		},
+	};
+}
+
+/** True when the row already reached a terminal state and left liveItems -
+ * "Interrupted" after a cancel, or a done early-run row a finalize re-run /
+ * retried stream targets again. Its copy in static scrollback can't be
+ * un-printed, so a late event must stay silent or it re-drains a duplicate. */
+function isToolCommittedTerminal(state: AppState, toolCallId: string): boolean {
+	// Live ids are never committed - skip the O(transcript) scan for them.
+	if (state.render.liveItems.some((item) => item.id === toolCallId)) {
+		return false;
+	}
+	const tool = state.transcript.find(
+		(item) => item.kind === "tool" && item.id === toolCallId,
+	);
+	return tool?.kind === "tool" && !isUnfinishedTool(tool.status);
 }
 
 function upsertChildToolCall(
@@ -542,7 +703,7 @@ function assistantFlushLength(text: string): number {
 	return clampFlushLengthForOpenTable(
 		text,
 		rawAssistantFlushLength(text),
-		MAX_LIVE_ASSISTANT_CHARS,
+		MAX_OPEN_TABLE_HOLD_CHARS,
 	);
 }
 
@@ -550,7 +711,7 @@ function assistantFlushLength(text: string): number {
 // as separate static chunks would render it as broken fragments instead of
 // one aligned table. `assistantFlushLength` clamps the cut point so an
 // open (still-streaming) table is held back in `pendingText` and flushed
-// whole once it closes — or once it outgrows MAX_LIVE_ASSISTANT_CHARS, so a
+// whole once it closes — or once it outgrows MAX_OPEN_TABLE_HOLD_CHARS, so a
 // malformed table that never closes can't buffer forever.
 function rawAssistantFlushLength(text: string): number {
 	const newlineIndex = text.lastIndexOf("\n");
@@ -658,6 +819,40 @@ function upsertAssistant(
 	return { ...state, transcript };
 }
 
+/** Insert the tool row, or replace an existing same-id row via `replace`
+ * (receives the existing row and the incoming one); then re-render it live.
+ *
+ * Contract: to KEEP the existing row, `replace` must return the exact same
+ * object it was given (`=== existing`) — that identity is how the no-op
+ * path below detects "keep" and skips re-pushing the row live. Returning
+ * an equivalent clone (`{...existing}`) type-checks but re-drains the row
+ * into scrollback and can resurrect a spinner for a finished tool. */
+function upsertTool(
+	state: AppState,
+	item: Extract<TranscriptItem, { kind: "tool" }>,
+	replace: (
+		existing: Extract<TranscriptItem, { kind: "tool" }>,
+		incoming: Extract<TranscriptItem, { kind: "tool" }>,
+	) => TranscriptItem,
+): AppState {
+	const existing = state.transcript.find(
+		(candidate): candidate is Extract<TranscriptItem, { kind: "tool" }> =>
+			candidate.kind === "tool" && candidate.id === item.id,
+	);
+	// The live region must mirror what the transcript kept, not the raw
+	// incoming item: when replace() refuses a downgrade (a re-announced
+	// pending event for a row that already completed), pushing the incoming
+	// pending item would resurrect a spinner for a finished tool.
+	const merged = existing ? replace(existing, item) : item;
+	// Rejected outright (row kept as-is): no state change at all - re-pushing
+	// the kept row live would re-drain a duplicate into static scrollback.
+	if (existing && merged === existing) return state;
+	const next = existing
+		? updateTool(state, item.id, () => merged)
+		: push(state, merged);
+	return pushLive(next, merged);
+}
+
 function updateTool(
 	state: AppState,
 	id: string,
@@ -668,19 +863,6 @@ function updateTool(
 		transcript: state.transcript.map((item) =>
 			item.kind === "tool" && item.id === id ? fn(item) : item,
 		),
-	};
-}
-
-function removeTool(state: AppState, id: string): AppState {
-	return {
-		...state,
-		transcript: state.transcript.filter(
-			(item) => item.kind !== "tool" || item.id !== id,
-		),
-		render: {
-			...state.render,
-			liveItems: state.render.liveItems.filter((item) => item.id !== id),
-		},
 	};
 }
 

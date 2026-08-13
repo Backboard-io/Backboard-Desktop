@@ -37,6 +37,8 @@ function sanitizeComponent(value: string, fallback: string): string {
 	return sanitized.length > 0 ? sanitized : fallback;
 }
 
+// Deliberate hard slice with no ellipsis: results feed generated tool names,
+// which must stay within the [A-Za-z0-9_-] charset.
 function truncate(value: string, maxLength: number): string {
 	return value.length <= maxLength ? value : value.slice(0, maxLength);
 }

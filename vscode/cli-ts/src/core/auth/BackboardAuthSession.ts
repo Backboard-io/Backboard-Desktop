@@ -26,10 +26,13 @@ export async function loginWithBackboardSso(
 			}
 		},
 	});
-	const apiKey = result.token.backboard_api_key;
+	// Prefer the workspace key; fall back to the personal key when the selected
+	// organization has no API key yet (e.g. a freshly created org).
+	const apiKey =
+		result.token.backboard_api_key || result.token.personal_api_key;
 	if (!apiKey) {
 		throw new Error(
-			"Backboard SSO did not return a personal API key. Check that the OAuth client returns individual user tokens, or set BACKBOARD_API_KEY for non-interactive use.",
+			"Backboard SSO did not return a workspace or personal API key. Check that the OAuth client returns individual user tokens, or set BACKBOARD_API_KEY for non-interactive use.",
 		);
 	}
 	const configPath = await saveBackboardConfig({

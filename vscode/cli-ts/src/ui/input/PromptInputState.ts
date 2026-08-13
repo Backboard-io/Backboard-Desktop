@@ -4,6 +4,12 @@ import {
 	type SlashCommandSuggestion,
 } from "../commands/index.ts";
 import {
+	insertAttachmentChipLabels,
+	type PromptInputAttachmentChips,
+	preserveAttachmentChips,
+	resolveAttachmentSubmit,
+} from "./PromptInputChips.ts";
+import {
 	deletePromptInputBeforeCursorOnLine,
 	deletePromptInputCharacterAtCursor,
 	deletePromptInputCharacterBeforeCursor,
@@ -44,6 +50,7 @@ export interface PromptInputState {
 	edit: PromptInputEdit;
 	history: PromptHistoryState;
 	pastePreviews: PromptInputPastePreviews;
+	attachments: PromptInputAttachmentChips;
 	selectedIndex: number;
 }
 
@@ -55,7 +62,16 @@ export interface PromptInputActionContext {
 
 export type PromptInputActionEffect =
 	| { kind: "none" }
-	| { kind: "submit"; intent: PromptSubmitIntent; value: string };
+	| { kind: "pasteClipboardImage" }
+	| {
+			kind: "submit";
+			intent: PromptSubmitIntent;
+			value: string;
+			attachmentIds: string[];
+	  };
+
+/** Anything rendered as an atomic chip inside the prompt text. */
+type ChipLike = readonly { label: string }[];
 
 export interface PromptInputActionResult {
 	state: PromptInputState;
@@ -92,6 +108,23 @@ export function applyPromptInputPaste(
 	};
 }
 
+export function applyPromptInputAttachments(
+	state: PromptInputState,
+	chips: PromptInputAttachmentChips,
+): PromptInputState {
+	if (chips.length === 0) return state;
+	const edit = insertAttachmentChipLabels(state.edit, chips);
+	return {
+		...state,
+		edit,
+		attachments: [
+			...preserveAttachmentChips(edit.value, state.attachments),
+			...chips,
+		],
+		selectedIndex: 0,
+	};
+}
+
 export function applyPromptInputAction(
 	state: PromptInputState,
 	context: PromptInputActionContext,
@@ -107,14 +140,23 @@ export function applyPromptInputAction(
 				...state,
 				edit: { value: completed, cursorOffset: completed.length },
 				pastePreviews: [],
+				attachments: [],
 				selectedIndex: 0,
 			});
 		}
 		case "submit": {
-			const submitted = resolvePromptInputSubmitValue(
+			const activeChips = preserveAttachmentChips(
+				state.edit.value,
+				state.attachments,
+			);
+			const pasteResolved = resolvePromptInputSubmitValue(
 				state.edit.value,
 				state.pastePreviews,
-				selectedSuggestion?.command,
+				activeChips.length > 0 ? undefined : selectedSuggestion?.command,
+			);
+			const { value: submitted, attachmentIds } = resolveAttachmentSubmit(
+				pasteResolved,
+				activeChips,
 			);
 			if (!submitted) return withoutEffect(state);
 			return {
@@ -123,9 +165,15 @@ export function applyPromptInputAction(
 					edit: emptyPromptInputEdit(),
 					history: recordPromptHistory(state.history, submitted),
 					pastePreviews: [],
+					attachments: [],
 					selectedIndex: 0,
 				},
-				effect: { kind: "submit", intent: action.intent, value: submitted },
+				effect: {
+					kind: "submit",
+					intent: action.intent,
+					value: submitted,
+					attachmentIds,
+				},
 			};
 		}
 		case "insertNewline":
@@ -138,9 +186,9 @@ export function applyPromptInputAction(
 		case "moveCursor":
 			return updateEdit(
 				state,
-				movePromptInputCursorOverPastePreview(
+				movePromptInputCursorOverChip(
 					movePromptInputCursor(action.direction)(state.edit),
-					state.pastePreviews,
+					allChips(state),
 					action.direction,
 				),
 				{
@@ -158,37 +206,32 @@ export function applyPromptInputAction(
 		case "deletePreviousCharacter":
 			return updateEdit(
 				state,
-				deletePromptInputCharacterBeforeCursorOverPastePreview(
+				deletePromptInputCharacterBeforeCursorOverChip(
 					state.edit,
-					state.pastePreviews,
+					allChips(state),
 				),
 			);
 		case "deleteNextCharacter":
 			return updateEdit(
 				state,
-				deletePromptInputCharacterAtCursorOverPastePreview(
-					state.edit,
-					state.pastePreviews,
-				),
+				deletePromptInputCharacterAtCursorOverChip(state.edit, allChips(state)),
 			);
 		case "slashCompletion":
 			return updateEdit(
 				state,
-				insertPromptInputTextOutsidePastePreview(
-					state.edit,
-					"/",
-					state.pastePreviews,
-				),
+				insertPromptInputTextOutsideChip(state.edit, "/", allChips(state)),
 			);
 		case "insertText":
 			return updateEdit(
 				state,
-				insertPromptInputTextOutsidePastePreview(
+				insertPromptInputTextOutsideChip(
 					state.edit,
 					action.text,
-					state.pastePreviews,
+					allChips(state),
 				),
 			);
+		case "pasteClipboardImage":
+			return { state, effect: { kind: "pasteClipboardImage" } };
 		case "ignore":
 			return withoutEffect(state);
 		default:
@@ -213,6 +256,7 @@ function applyPromptInputHistoryOrMoveUp(
 			edit: promptInputEditFromValue(next.value),
 			history: next.history,
 			pastePreviews: [],
+			attachments: [],
 			selectedIndex: 0,
 		});
 	}
@@ -239,6 +283,7 @@ function applyPromptInputHistoryOrMoveDown(
 			edit: promptInputEditFromValue(next.value),
 			history: next.history,
 			pastePreviews: [],
+			attachments: [],
 			selectedIndex: 0,
 		});
 	}
@@ -270,27 +315,27 @@ function updateEdit(
 	});
 }
 
-function insertPromptInputTextOutsidePastePreview(
+function allChips(state: PromptInputState): ChipLike {
+	return [...state.pastePreviews, ...state.attachments];
+}
+
+function insertPromptInputTextOutsideChip(
 	edit: PromptInputEdit,
 	text: string,
-	previews: PromptInputPastePreviews,
+	chips: ChipLike,
 ): PromptInputEdit {
-	if (findPastePreviewRangeAtOffset(edit, previews, edit.cursorOffset)) {
+	if (findChipRangeAtOffset(edit, chips, edit.cursorOffset)) {
 		return edit;
 	}
 	return insertPromptInputText(edit, text);
 }
 
-function movePromptInputCursorOverPastePreview(
+function movePromptInputCursorOverChip(
 	edit: PromptInputEdit,
-	previews: PromptInputPastePreviews,
+	chips: ChipLike,
 	direction: PromptInputMoveDirection,
 ): PromptInputEdit {
-	const range = findPastePreviewRangeAtOffset(
-		edit,
-		previews,
-		edit.cursorOffset,
-	);
+	const range = findChipRangeAtOffset(edit, chips, edit.cursorOffset);
 	if (!range) return edit;
 	if (direction === "right" || direction === "wordRight") {
 		return { ...edit, cursorOffset: range.end };
@@ -306,33 +351,25 @@ function movePromptInputCursorOverPastePreview(
 	};
 }
 
-function deletePromptInputCharacterBeforeCursorOverPastePreview(
+function deletePromptInputCharacterBeforeCursorOverChip(
 	edit: PromptInputEdit,
-	previews: PromptInputPastePreviews,
+	chips: ChipLike,
 ): PromptInputEdit {
-	const range = findPastePreviewRangeBeforeOffset(
-		edit,
-		previews,
-		edit.cursorOffset,
-	);
-	if (range) return deletePastePreviewRange(edit, range);
+	const range = findChipRangeBeforeOffset(edit, chips, edit.cursorOffset);
+	if (range) return deleteChipRange(edit, range);
 	return deletePromptInputCharacterBeforeCursor(edit);
 }
 
-function deletePromptInputCharacterAtCursorOverPastePreview(
+function deletePromptInputCharacterAtCursorOverChip(
 	edit: PromptInputEdit,
-	previews: PromptInputPastePreviews,
+	chips: ChipLike,
 ): PromptInputEdit {
-	const range = findPastePreviewRangeAfterOffset(
-		edit,
-		previews,
-		edit.cursorOffset,
-	);
-	if (range) return deletePastePreviewRange(edit, range);
+	const range = findChipRangeAfterOffset(edit, chips, edit.cursorOffset);
+	if (range) return deleteChipRange(edit, range);
 	return deletePromptInputCharacterAtCursor(edit);
 }
 
-function deletePastePreviewRange(
+function deleteChipRange(
 	edit: PromptInputEdit,
 	range: { start: number; end: number },
 ): PromptInputEdit {
@@ -342,47 +379,47 @@ function deletePastePreviewRange(
 	};
 }
 
-function findPastePreviewRangeAtOffset(
+function findChipRangeAtOffset(
 	edit: PromptInputEdit,
-	previews: PromptInputPastePreviews,
+	chips: ChipLike,
 	offset: number,
 ): { start: number; end: number } | null {
-	return findPastePreviewRange(edit, previews, (range) => {
+	return findChipRange(edit, chips, (range) => {
 		return range.start < offset && offset < range.end;
 	});
 }
 
-function findPastePreviewRangeBeforeOffset(
+function findChipRangeBeforeOffset(
 	edit: PromptInputEdit,
-	previews: PromptInputPastePreviews,
+	chips: ChipLike,
 	offset: number,
 ): { start: number; end: number } | null {
-	return findPastePreviewRange(edit, previews, (range) => {
+	return findChipRange(edit, chips, (range) => {
 		return range.start < offset && offset <= range.end;
 	});
 }
 
-function findPastePreviewRangeAfterOffset(
+function findChipRangeAfterOffset(
 	edit: PromptInputEdit,
-	previews: PromptInputPastePreviews,
+	chips: ChipLike,
 	offset: number,
 ): { start: number; end: number } | null {
-	return findPastePreviewRange(edit, previews, (range) => {
+	return findChipRange(edit, chips, (range) => {
 		return range.start <= offset && offset < range.end;
 	});
 }
 
-function findPastePreviewRange(
+function findChipRange(
 	edit: PromptInputEdit,
-	previews: PromptInputPastePreviews,
+	chips: ChipLike,
 	matches: (range: { start: number; end: number }) => boolean,
 ): { start: number; end: number } | null {
-	for (const preview of previews) {
-		let start = edit.value.indexOf(preview.label);
+	for (const chip of chips) {
+		let start = edit.value.indexOf(chip.label);
 		while (start !== -1) {
-			const range = { start, end: start + preview.label.length };
+			const range = { start, end: start + chip.label.length };
 			if (matches(range)) return range;
-			start = edit.value.indexOf(preview.label, range.end);
+			start = edit.value.indexOf(chip.label, range.end);
 		}
 	}
 	return null;

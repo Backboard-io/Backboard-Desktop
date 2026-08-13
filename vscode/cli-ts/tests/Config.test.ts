@@ -1,5 +1,13 @@
 import { describe, expect, it } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+	chmod,
+	mkdir,
+	mkdtemp,
+	readFile,
+	rename,
+	rm,
+	writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -8,22 +16,24 @@ import {
 	saveBackboardConfig,
 } from "../src/config/backboardConfig.ts";
 import { Config } from "../src/config/Config.ts";
-import { loadBrowserEnv, loadEnv } from "../src/config/env.ts";
+import { loadBrowserEnv, loadEnv, resolveApiUrl } from "../src/config/env.ts";
 import { parseFlags } from "../src/config/flags.ts";
 import {
 	qProjectConfigDir,
 	qProjectHookConfigPath,
 	qProjectMcpConfigPath,
+	qProjectWorkspaceId,
 	qSessionDir,
 	qUserHookConfigPath,
 	qUserMcpConfigPath,
 } from "../src/config/paths.ts";
+import { setProviderKey } from "../src/core/keys/ProviderKeyStore.ts";
 
 const env = { apiKey: "test-key", apiUrl: "https://example.test/api" };
 
 describe("Config", () => {
 	it("loads saved model and thinking selections", async () => {
-		const homeDir = await mkdtemp(path.join(os.tmpdir(), "q-cli-config-"));
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
 		await saveBackboardConfig(
 			{
 				apiKey: "file-key",
@@ -43,8 +53,153 @@ describe("Config", () => {
 		expect(config.memoryProfile).toBe("code");
 	});
 
+	it("persists a stable project workspace id in the project config", async () => {
+		const dir = await mkdtemp(path.join(os.tmpdir(), "cli-workspace-"));
+		const child = path.join(dir, "packages", "app");
+		await mkdir(path.join(dir, ".git"), { recursive: true });
+		await mkdir(child, { recursive: true });
+
+		const id = qProjectWorkspaceId(child);
+		const workspacePath = path.join(dir, ".backboard", "workspace.json");
+		const saved = JSON.parse(await readFile(workspacePath, "utf8"));
+		expect(saved).toEqual({ id });
+
+		const moved = `${dir}-moved`;
+		await rename(dir, moved);
+		expect(qProjectWorkspaceId(path.join(moved, "packages", "app"))).toBe(id);
+
+		await rm(moved, { recursive: true, force: true });
+	});
+
+	it("gitignores the workspace file it creates", async () => {
+		const dir = await mkdtemp(path.join(os.tmpdir(), "cli-workspace-"));
+		await mkdir(path.join(dir, ".git"), { recursive: true });
+
+		qProjectWorkspaceId(dir);
+
+		const gitignore = await readFile(
+			path.join(dir, ".backboard", ".gitignore"),
+			"utf8",
+		);
+		expect(gitignore).toContain("workspace.json");
+
+		await rm(dir, { recursive: true, force: true });
+	});
+
+	it("appends workspace.json to an existing .backboard/.gitignore that lacks it", async () => {
+		const dir = await mkdtemp(path.join(os.tmpdir(), "cli-workspace-"));
+		await mkdir(path.join(dir, ".git"), { recursive: true });
+		await mkdir(path.join(dir, ".backboard"), { recursive: true });
+		const gitignorePath = path.join(dir, ".backboard", ".gitignore");
+		await writeFile(gitignorePath, "sessions", "utf8");
+
+		qProjectWorkspaceId(dir);
+
+		expect(await readFile(gitignorePath, "utf8")).toBe(
+			"sessions\nworkspace.json\n",
+		);
+
+		// Already listed: second run leaves the file untouched.
+		await writeFile(gitignorePath, "workspace.json\n# custom\n", "utf8");
+		await rm(path.join(dir, ".backboard", "workspace.json"));
+		qProjectWorkspaceId(dir);
+		expect(await readFile(gitignorePath, "utf8")).toBe(
+			"workspace.json\n# custom\n",
+		);
+
+		await rm(dir, { recursive: true, force: true });
+	});
+
+	it("repairs the gitignore when workspace.json predates it", async () => {
+		const dir = await mkdtemp(path.join(os.tmpdir(), "cli-workspace-"));
+		await mkdir(path.join(dir, ".git"), { recursive: true });
+		const backboardDir = path.join(dir, ".backboard");
+		await mkdir(backboardDir, { recursive: true });
+		await writeFile(
+			path.join(backboardDir, "workspace.json"),
+			'{"id":"pre-existing-id"}\n',
+			"utf8",
+		);
+		await writeFile(
+			path.join(backboardDir, ".gitignore"),
+			"sessions\n",
+			"utf8",
+		);
+
+		expect(qProjectWorkspaceId(dir)).toBe("pre-existing-id");
+		expect(await readFile(path.join(backboardDir, ".gitignore"), "utf8")).toBe(
+			"sessions\nworkspace.json\n",
+		);
+
+		await rm(dir, { recursive: true, force: true });
+	});
+
+	it("returns an existing workspace id even when the gitignore repair cannot write", async () => {
+		const dir = await mkdtemp(path.join(os.tmpdir(), "cli-workspace-"));
+		await mkdir(path.join(dir, ".git"), { recursive: true });
+		const backboardDir = path.join(dir, ".backboard");
+		await mkdir(backboardDir, { recursive: true });
+		await writeFile(
+			path.join(backboardDir, "workspace.json"),
+			'{"id":"stored-id"}\n',
+			"utf8",
+		);
+		await chmod(backboardDir, 0o555);
+
+		try {
+			expect(qProjectWorkspaceId(dir)).toBe("stored-id");
+		} finally {
+			await chmod(backboardDir, 0o755);
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("falls back to a stable in-memory workspace id when the project dir is unwritable", async () => {
+		const dir = await mkdtemp(path.join(os.tmpdir(), "cli-workspace-"));
+		await mkdir(path.join(dir, ".git"), { recursive: true });
+		await chmod(dir, 0o555);
+
+		try {
+			const id = qProjectWorkspaceId(dir);
+			expect(id).toMatch(/^[0-9a-f]{32}$/);
+			expect(qProjectWorkspaceId(dir)).toBe(id);
+			await expect(
+				Bun.file(path.join(dir, ".backboard", "workspace.json")).exists(),
+			).resolves.toBe(false);
+		} finally {
+			await chmod(dir, 0o755);
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("does not create a project workspace id while constructing config", async () => {
+		const dir = await mkdtemp(path.join(os.tmpdir(), "cli-workspace-"));
+		await mkdir(path.join(dir, ".git"), { recursive: true });
+
+		new Config({ env, argv: ["--cwd", dir] });
+
+		const workspacePath = path.join(dir, ".backboard", "workspace.json");
+		await expect(Bun.file(workspacePath).exists()).resolves.toBe(false);
+
+		await rm(dir, { recursive: true, force: true });
+	});
+
+	it("lazily persists the project workspace id when requested", async () => {
+		const dir = await mkdtemp(path.join(os.tmpdir(), "cli-workspace-"));
+		await mkdir(path.join(dir, ".git"), { recursive: true });
+		const config = new Config({ env, argv: ["--cwd", dir] });
+
+		const id = config.getWorkspaceId();
+
+		const workspacePath = path.join(dir, ".backboard", "workspace.json");
+		const saved = JSON.parse(await readFile(workspacePath, "utf8"));
+		expect(saved).toEqual({ id });
+
+		await rm(dir, { recursive: true, force: true });
+	});
+
 	it("treats legacy empty thinking config as automatic", async () => {
-		const homeDir = await mkdtemp(path.join(os.tmpdir(), "q-cli-config-"));
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
 		const configPath = backboardConfigPath(homeDir);
 		await mkdir(path.dirname(configPath), { recursive: true });
 		await writeFile(
@@ -62,7 +217,7 @@ describe("Config", () => {
 	});
 
 	it("persists runtime model and thinking selections", async () => {
-		const homeDir = await mkdtemp(path.join(os.tmpdir(), "q-cli-config-"));
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
 		await saveBackboardConfig({ apiKey: "file-key" }, homeDir);
 		const config = new Config({ env, argv: [], homeDir });
 
@@ -78,24 +233,8 @@ describe("Config", () => {
 		expect(reopened.memoryProfile).toBe("code");
 	});
 
-	it("persists provider-default thinking and reasoning-trace preferences", async () => {
-		const homeDir = await mkdtemp(path.join(os.tmpdir(), "q-cli-config-"));
-		await saveBackboardConfig({ apiKey: "file-key" }, homeDir);
-		const config = new Config({ env, argv: [], homeDir });
-
-		config.setThinking({ kind: "default" });
-		config.setExcludeReasoning(true);
-		await config.saveRuntimeSelection();
-
-		const reopened = new Config({ env, argv: [], homeDir });
-		expect(reopened.thinking).toEqual({
-			kind: "default",
-			excludeReasoning: true,
-		});
-	});
-
 	it("loads saved dynamic thinking selections", async () => {
-		const homeDir = await mkdtemp(path.join(os.tmpdir(), "q-cli-config-"));
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
 		await saveBackboardConfig(
 			{
 				apiKey: "file-key",
@@ -110,7 +249,7 @@ describe("Config", () => {
 	});
 
 	it("persists the notify preference", async () => {
-		const homeDir = await mkdtemp(path.join(os.tmpdir(), "q-cli-config-"));
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
 		await saveBackboardConfig({ apiKey: "file-key" }, homeDir);
 		const config = new Config({ env, argv: [], homeDir });
 
@@ -122,8 +261,22 @@ describe("Config", () => {
 		expect(reopened.isNotifyEnabled).toBe(true);
 	});
 
+	it("persists the verbose preference", async () => {
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
+		await saveBackboardConfig({ apiKey: "file-key" }, homeDir);
+		const config = new Config({ env, argv: [], homeDir });
+
+		// Verbose defaults on; toggle it off and confirm the choice survives a reload.
+		expect(config.isVerbose).toBe(true);
+		config.setVerbose(false);
+		await config.saveVerbosePreference();
+
+		const reopened = new Config({ env, argv: [], homeDir });
+		expect(reopened.isVerbose).toBe(false);
+	});
+
 	it("lets startup flags override saved model and thinking selections", async () => {
-		const homeDir = await mkdtemp(path.join(os.tmpdir(), "q-cli-config-"));
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
 		await saveBackboardConfig(
 			{
 				apiKey: "file-key",
@@ -154,17 +307,34 @@ describe("Config", () => {
 		expect(config.thinking).toBeNull();
 		expect(config.memory).toBe("auto");
 		expect(config.memoryProfile).toBe("code");
+
+		await config.saveRuntimeSelection();
+		const reopened = new Config({ env, argv: [], homeDir });
+		expect(reopened.modelString).toBe("anthropic/claude-sonnet-4.5");
+		expect(reopened.thinking).toEqual({ kind: "level", level: "high" });
+		expect(reopened.memory).toBe("readonly");
+		expect(reopened.memoryProfile).toBe("default");
 	});
 
 	it("applies defaults from the coding profile", () => {
 		const config = new Config({ env, argv: [] });
 		expect(config.modelString).toBe("openai/gpt-5.5");
-		expect(config.memory).toBe("off");
+		expect(config.memory).toBe("auto");
 		expect(config.profile.name).toBe("coding");
 		expect(config.modelProfile.name).toBe("openai");
 		expect(config.isToolEnabled("ApplyPatch")).toBe(true);
 		expect(config.isToolEnabled("Write")).toBe(false);
 		expect(config.isToolEnabled("Edit")).toBe(false);
+	});
+
+	it("selects a compatible default for a keys-only install", async () => {
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
+		await setProviderKey("anthropic", "sk-ant-test", homeDir);
+
+		await withBackboardEnv({}, async () => {
+			const config = new Config({ argv: [], homeDir });
+			expect(config.modelString).toBe("anthropic/claude-opus-5");
+		});
 	});
 
 	it("derives model profiles without changing memory profiles", () => {
@@ -253,15 +423,21 @@ describe("Config", () => {
 		expect(config.isBrowserUseEnabled).toBe(false);
 		config.enableBrowserUse();
 		expect(config.isBrowserUseEnabled).toBe(true);
+		config.setBrowserUseEnabled(false);
+		expect(config.isBrowserUseEnabled).toBe(false);
+		config.setComputerUseEnabled(true);
+		expect(config.isComputerUseEnabled).toBe(true);
+		config.setComputerUseEnabled(false);
+		expect(config.isComputerUseEnabled).toBe(false);
 	});
 
 	it("loads browser environment settings", () => {
 		expect(
 			loadBrowserEnv({
-				Q_BROWSER_PATH: " /Applications/Chrome ",
+				BROWSER_PATH: " /Applications/Chrome ",
 				CHROME_PATH: "/usr/bin/chromium",
-				Q_BROWSER_CDP_URL: " http://127.0.0.1:9222 ",
-				Q_BROWSER_WS_URL: " ws://127.0.0.1/devtools/browser/1 ",
+				BROWSER_CDP_URL: " http://127.0.0.1:9222 ",
+				BROWSER_WS_URL: " ws://127.0.0.1/devtools/browser/1 ",
 				HOME: " /Users/test ",
 				LOCALAPPDATA: " C:\\Users\\test\\AppData\\Local ",
 				PATH: "/bin:/usr/bin",
@@ -296,6 +472,19 @@ describe("Config", () => {
 		expect(config.isToolEnabled("ApplyPatch")).toBe(false);
 	});
 
+	it("allows the IDE host to replace per-turn tool exclusions", () => {
+		const config = new Config({ env, argv: [] });
+		config.setExcludedTools(["write", "Execute"]);
+
+		expect(config.excludedTools).toEqual(["write", "execute"]);
+		expect(config.isToolEnabled("Write")).toBe(false);
+		expect(config.isToolEnabled("Execute")).toBe(false);
+
+		const copy = config.excludedTools;
+		copy.length = 0;
+		expect(config.excludedTools).toEqual(["write", "execute"]);
+	});
+
 	it("uses the injected env as-is", () => {
 		const config = new Config({
 			env: { apiKey: "secret", apiUrl: "https://x.test/api" },
@@ -305,7 +494,7 @@ describe("Config", () => {
 	});
 
 	it("centralizes Backboard config paths", async () => {
-		const root = await mkdtemp(path.join(os.tmpdir(), "q-cli-paths-"));
+		const root = await mkdtemp(path.join(os.tmpdir(), "cli-paths-"));
 		try {
 			await mkdir(path.join(root, ".git"));
 			const nested = path.join(root, "packages", "app");
@@ -344,7 +533,7 @@ describe("Config", () => {
 	});
 
 	it("loads credentials from ~/.backboard/config.json", async () => {
-		const homeDir = await mkdtemp(path.join(os.tmpdir(), "q-cli-config-"));
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
 
 		await withBackboardEnv({}, async () => {
 			await saveBackboardConfig(
@@ -359,7 +548,7 @@ describe("Config", () => {
 	});
 
 	it("reloads saved credentials into the live env object", async () => {
-		const homeDir = await mkdtemp(path.join(os.tmpdir(), "q-cli-config-"));
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
 
 		await withBackboardEnv({}, async () => {
 			await saveBackboardConfig(
@@ -384,7 +573,7 @@ describe("Config", () => {
 	});
 
 	it("lets environment credentials override ~/.backboard config", async () => {
-		const homeDir = await mkdtemp(path.join(os.tmpdir(), "q-cli-config-"));
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
 
 		await withBackboardEnv(
 			{ apiKey: "env-key", apiUrl: "https://env.test/api/" },
@@ -402,7 +591,7 @@ describe("Config", () => {
 	});
 
 	it("uses environment credentials without reading an invalid saved config", async () => {
-		const homeDir = await mkdtemp(path.join(os.tmpdir(), "q-cli-config-"));
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
 		const configPath = backboardConfigPath(homeDir);
 		await mkdir(path.dirname(configPath), { recursive: true });
 		await writeFile(configPath, "{not json");
@@ -419,7 +608,7 @@ describe("Config", () => {
 	});
 
 	it("uses API keys exactly as provided", async () => {
-		const homeDir = await mkdtemp(path.join(os.tmpdir(), "q-cli-config-"));
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
 
 		await withBackboardEnv({ apiKey: " env-key " }, () => {
 			expect(loadEnv({ homeDir }).apiKey).toBe(" env-key ");
@@ -432,7 +621,7 @@ describe("Config", () => {
 	});
 
 	it("ignores unusable environment credentials before saved credentials", async () => {
-		const homeDir = await mkdtemp(path.join(os.tmpdir(), "q-cli-config-"));
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
 
 		await withBackboardEnv({ apiKey: "your_key_here" }, async () => {
 			await saveBackboardConfig(
@@ -458,7 +647,7 @@ describe("Config", () => {
 	});
 
 	it("lets usable environment credentials override saved credentials", async () => {
-		const homeDir = await mkdtemp(path.join(os.tmpdir(), "q-cli-config-"));
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
 
 		await withBackboardEnv({ apiKey: "env-key" }, async () => {
 			await saveBackboardConfig(
@@ -511,7 +700,7 @@ describe("Config", () => {
 	});
 
 	it("deletes saved Backboard credentials", async () => {
-		const homeDir = await mkdtemp(path.join(os.tmpdir(), "q-cli-config-"));
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
 
 		await withBackboardEnv({}, async () => {
 			await saveBackboardConfig({ apiKey: "file-key" }, homeDir);
@@ -521,6 +710,69 @@ describe("Config", () => {
 				"BACKBOARD_API_KEY is not set",
 			);
 		});
+	});
+});
+
+describe("resolveApiUrl", () => {
+	it("refuses a non-https API URL", async () => {
+		await withBackboardEnv(
+			{ apiUrl: "http://attacker.example.com/api" },
+			() => {
+				expect(() => resolveApiUrl()).toThrow(/non-https/);
+			},
+		);
+	});
+
+	it("allows https and loopback http", async () => {
+		await withBackboardEnv({ apiUrl: "https://app.backboard.io/api" }, () => {
+			expect(resolveApiUrl()).toBe("https://app.backboard.io/api");
+		});
+		await withBackboardEnv({ apiUrl: "http://localhost:8000/api" }, () => {
+			expect(resolveApiUrl()).toBe("http://localhost:8000/api");
+		});
+		await withBackboardEnv({ apiUrl: "http://127.0.0.1:8000/api" }, () => {
+			expect(resolveApiUrl()).toBe("http://127.0.0.1:8000/api");
+		});
+		await withBackboardEnv({ apiUrl: "http://127.0.0.53:8000/api" }, () => {
+			expect(resolveApiUrl()).toBe("http://127.0.0.53:8000/api");
+		});
+		await withBackboardEnv(
+			{ apiUrl: "http://[::ffff:127.0.0.1]:8000/api" },
+			() => {
+				expect(resolveApiUrl()).toBe("http://[::ffff:127.0.0.1]:8000/api");
+			},
+		);
+	});
+
+	it("treats the wildcard bind address as non-loopback", async () => {
+		await withBackboardEnv({ apiUrl: "http://0.0.0.0:8000/api" }, () => {
+			expect(() => resolveApiUrl()).toThrow(/non-https/);
+		});
+	});
+
+	it("refuses a non-https URL from the config file", async () => {
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
+		await withBackboardEnv({}, async () => {
+			await saveBackboardConfig(
+				{ apiKey: "file-key", apiUrl: "http://192.168.1.10/api" },
+				homeDir,
+			);
+			expect(() => loadEnv({ homeDir })).toThrow(/non-https/);
+		});
+	});
+
+	it("allows a non-https URL only with the explicit escape hatch", async () => {
+		const original = process.env.BACKBOARD_ALLOW_INSECURE_API_URL;
+		process.env.BACKBOARD_ALLOW_INSECURE_API_URL = "true";
+		try {
+			await withBackboardEnv({ apiUrl: "http://10.0.0.5:8000/api" }, () => {
+				expect(resolveApiUrl()).toBe("http://10.0.0.5:8000/api");
+			});
+		} finally {
+			if (original === undefined)
+				delete process.env.BACKBOARD_ALLOW_INSECURE_API_URL;
+			else process.env.BACKBOARD_ALLOW_INSECURE_API_URL = original;
+		}
 	});
 });
 

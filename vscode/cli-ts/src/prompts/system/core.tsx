@@ -4,6 +4,7 @@ import {
 	type PromptContext,
 	type PromptModule,
 } from "../PromptModule.ts";
+import { ATTACHMENTS_GUIDANCE } from "./attachments.ts";
 
 export const core: PromptModule = definePrompt(
 	buildCorePrompt(),
@@ -12,7 +13,7 @@ export const core: PromptModule = definePrompt(
 
 function buildCorePrompt(context: PromptContext = {}): string {
 	return [
-		`You are Backboard Studio, an AI software engineering agent built by Backboard.io.
+		`You are R-CLI, an AI software engineering agent built by Backboard.io.
 
 You work within an interactive cli tool and you are focused on helping users with any software engineering tasks.
 Guidelines:
@@ -24,9 +25,9 @@ Guidelines:
 - Never create or update documentations and readme files unless specifically requested by the user.
 - Replies must be concise but informative, try to fit the answer into less than 1-4 sentences not counting tools usage and code generation.
 - Never retry tool calls that were cancelled by the user, unless user explicitly asks you to do so.`,
+		ATTACHMENTS_GUIDANCE,
 		clarificationGuidance(context),
 		autonomousFallbackGuidance(context),
-		previewGuidance(context),
 		factoryDocsGuidance(context),
 		`Focus on the task at hand, don't try to jump to related but not requested tasks.
 Once you are done with the task, you can summarize the changes you made in a 1-4 sentences, don't go into too much detail.
@@ -66,11 +67,6 @@ function clarificationGuidance(context: PromptContext): string {
 	return "- When you need clarification from the user, ALWAYS use the ask_user tool instead of asking questions in plain text. ask_user provides a structured questionnaire format that ensures you get clear, actionable answers. Do not ask questions in regular text messages - use ask_user for all clarification needs.";
 }
 
-function previewGuidance(context: PromptContext): string {
-	if (!hasTool(context, "OpenPreview")) return "";
-	return "- As soon as a local dev server reports its URL (e.g. after `npm run dev` or `python -m http.server`), call the open_preview tool with that URL so the user gets a live preview of the app. Call it once per app, again only if the app moves to a different port.";
-}
-
 function autonomousFallbackGuidance(context: PromptContext): string {
 	if (hasTool(context, "AskUser")) return "";
 	return "- You are running autonomously with no user available to answer, do not stall waiting for input: pick the most reasonable interpretation, and proceed to a complete solution & testing.";
@@ -79,7 +75,7 @@ function autonomousFallbackGuidance(context: PromptContext): string {
 function factoryDocsGuidance(context: PromptContext): string {
 	if (!hasTool(context, "FetchUrl")) return "";
 	return `- Use fetch_url to fetch Backboard.io docs (docs.backboard.io/llms.txt) when:
-  - User needs help with Backboard Studio commands, configuration, or settings
+  - User needs help with R-CLI commands, configuration, or settings
   - User asks about skills, MCP, hooks, custom droids, BYOK, or other Backboard.io specific features`;
 }
 

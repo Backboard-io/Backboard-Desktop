@@ -1,8 +1,116 @@
 import { describe, expect, it } from "bun:test";
+import {
+	assistantMessage,
+	type Message,
+	toolMessage,
+	userMessage,
+} from "../src/core/session/Message.ts";
 import { initialState } from "../src/state/AppState.ts";
-import { reduce } from "../src/state/Store.ts";
+import { reduce, transcriptFromMessages } from "../src/state/Store.ts";
 
 describe("Store reducer", () => {
+	it("omits empty assistant placeholders from hydrated transcripts", () => {
+		const transcript = transcriptFromMessages([
+			userMessage("hi"),
+			assistantMessage("", [{ id: "call_1", name: "Read", input: {} }]),
+			toolMessage([
+				{
+					toolCallId: "call_1",
+					name: "Read",
+					output: "done",
+					isError: false,
+				},
+			]),
+			assistantMessage("done"),
+		]);
+
+		expect(transcript.map((item) => item.kind)).toEqual([
+			"user",
+			"tool",
+			"assistant",
+		]);
+	});
+
+	it("renders hydrated tool results with input summaries and output titles", () => {
+		const transcript = transcriptFromMessages([
+			assistantMessage("", [
+				{ id: "call_1", name: "read", input: { file_path: "/x/notes.md" } },
+			]),
+			toolMessage([
+				{
+					toolCallId: "call_1",
+					name: "read",
+					output: "line one\nline two",
+					isError: false,
+				},
+			]),
+		]);
+
+		expect(transcript).toEqual([
+			{
+				kind: "tool",
+				id: "history-tool-1-0",
+				name: "Read",
+				inputSummary: "/x/notes.md",
+				status: "done",
+				title: "line one …",
+			},
+		]);
+	});
+
+	it("renders one row per hydrated tool result and marks errors", () => {
+		const transcript = transcriptFromMessages([
+			assistantMessage("", [
+				{ id: "call_1", name: "execute", input: { command: "bun test" } },
+				{ id: "call_2", name: "grep", input: { pattern: "todo" } },
+			]),
+			toolMessage([
+				{
+					toolCallId: "call_1",
+					name: "execute",
+					output: "12 tests passed",
+					isError: false,
+				},
+				{
+					toolCallId: "call_2",
+					name: "grep",
+					output: "Error: bad pattern",
+					isError: true,
+				},
+			]),
+		]);
+
+		expect(transcript).toEqual([
+			{
+				kind: "tool",
+				id: "history-tool-1-0",
+				name: "Execute",
+				inputSummary: "bun test",
+				status: "done",
+				title: "12 tests passed",
+			},
+			{
+				kind: "tool",
+				id: "history-tool-1-1",
+				name: "Grep",
+				inputSummary: "todo",
+				status: "error",
+				error: "Error: bad pattern",
+			},
+		]);
+	});
+
+	it("ignores unknown hydrated message roles", () => {
+		const messages = [
+			{ role: "system", text: "ignored" },
+			userMessage("hi"),
+		] as unknown as readonly Message[];
+
+		const transcript = transcriptFromMessages(messages);
+
+		expect(transcript.map((item) => item.kind)).toEqual(["user"]);
+	});
+
 	it("attaches turn duration to assistant messages when the turn ends", () => {
 		let state = initialState("gpt-test");
 		state = reduce(state, {
@@ -203,6 +311,113 @@ describe("Store reducer", () => {
 		expect(state.todos).toEqual([]);
 	});
 
+	it("finalizes running tool calls when the turn is cancelled", () => {
+		let state = initialState("gpt-test");
+		state = reduce(state, {
+			type: "tool:start",
+			toolCallId: "call_1",
+			name: "Execute",
+			inputSummary: "npm run dev",
+		});
+		state = reduce(state, { type: "turn:cancelled", turnId: "turn_1" });
+
+		expect(state.render.liveItems).toEqual([]);
+		expect(state.render.staticItems).toMatchObject([
+			{ kind: "tool", id: "call_1", status: "error", error: "Interrupted" },
+		]);
+		expect(state.transcript[0]).toMatchObject({
+			kind: "tool",
+			status: "error",
+			error: "Interrupted",
+		});
+	});
+
+	it("ignores tool events that land after the turn was cancelled", () => {
+		let state = initialState("gpt-test");
+		state = reduce(state, {
+			type: "tool:start",
+			toolCallId: "call_1",
+			name: "Execute",
+			inputSummary: "npm run dev",
+		});
+		state = reduce(state, { type: "turn:cancelled", turnId: "turn_1" });
+		state = reduce(state, {
+			type: "tool:result",
+			toolCallId: "call_1",
+			name: "Execute",
+			title: "Success",
+		});
+
+		expect(state.render.liveItems).toEqual([]);
+		expect(state.render.staticItems).toMatchObject([
+			{ kind: "tool", id: "call_1", status: "error", error: "Interrupted" },
+		]);
+		expect(state.transcript[0]).toMatchObject({
+			kind: "tool",
+			status: "error",
+			error: "Interrupted",
+		});
+	});
+
+	it("ignores a late tool:start after the turn was cancelled", () => {
+		let state = initialState("gpt-test");
+		state = reduce(state, {
+			type: "tool:pending",
+			toolCallId: "call_1",
+			name: "Execute",
+			inputSummary: "npm run dev",
+		});
+		state = reduce(state, { type: "turn:cancelled", turnId: "turn_1" });
+		state = reduce(state, {
+			type: "tool:start",
+			toolCallId: "call_1",
+			name: "Execute",
+			inputSummary: "npm run dev",
+		});
+
+		expect(state.render.liveItems).toEqual([]);
+		expect(state.render.staticItems).toMatchObject([
+			{ kind: "tool", id: "call_1", status: "error", error: "Interrupted" },
+		]);
+		expect(state.transcript[0]).toMatchObject({
+			kind: "tool",
+			status: "error",
+			error: "Interrupted",
+		});
+	});
+
+	it("ignores child tool events for a cancelled Agent call", () => {
+		let state = initialState("gpt-test");
+		state = reduce(state, {
+			type: "tool:start",
+			toolCallId: "agent_1",
+			name: "Subagent",
+			inputSummary: "research the codebase",
+		});
+		state = reduce(state, { type: "turn:cancelled", turnId: "turn_1" });
+		state = reduce(state, {
+			type: "agent:child_tool_start",
+			agentToolCallId: "agent_1",
+			call: {
+				id: "child_1",
+				name: "Read",
+				inputSummary: "src/index.ts",
+				status: "running",
+			},
+		});
+		state = reduce(state, {
+			type: "agent:child_tool_result",
+			agentToolCallId: "agent_1",
+			childToolCallId: "child_1",
+			status: "done",
+		});
+
+		expect(state.render.liveItems).toEqual([]);
+		expect(state.render.staticItems).toMatchObject([
+			{ kind: "tool", id: "agent_1", status: "error", error: "Interrupted" },
+		]);
+	});
+
 	it("commits complete lines and hides the in-progress tail", () => {
 		let state = initialState("gpt-test");
 		state = reduce(state, {
@@ -280,6 +495,40 @@ describe("Store reducer", () => {
 		expect(state.render.assistantStreams[0]?.pendingText).toBe("done");
 	});
 
+	it("holds a table past the live char cap instead of slicing it mid-body", () => {
+		let state = initialState("gpt-test");
+		const delta = (text: string) =>
+			reduce(state, {
+				type: "assistant:delta",
+				turnId: "turn_1",
+				messageId: "turn_1:assistant:0",
+				text,
+			});
+		state = delta(
+			"| City | Weather | Temp | Feels like | Humidity | Wind |\n| --- | --- | --- | --- | --- | --- |\n",
+		);
+		for (let row = 0; row < 20; row++) {
+			state = delta(
+				`| City ${row}, Country ${row} | Partly cloudy | 2${row % 10}.5 | 3${row % 10}.1 | 9${row % 10}% | 1${row % 10}.3 |\n`,
+			);
+		}
+
+		// Well past MAX_LIVE_ASSISTANT_CHARS, but still one open table: nothing
+		// may flush, or the tail rows would render as headerless pipe text.
+		expect(state.render.staticItems).toEqual([]);
+
+		state = delta("\nHottest: City 5.");
+
+		const chunks = state.render.staticItems.filter(
+			(item) => item.kind === "assistant_chunk",
+		);
+		expect(chunks).toHaveLength(1);
+		const text = chunks[0]?.kind === "assistant_chunk" ? chunks[0].text : "";
+		expect(text).toContain("| --- |");
+		expect(text).toContain("| City 0,");
+		expect(text).toContain("| City 19,");
+	});
+
 	it("finalizes assistant stream into static transcript and appends footer", () => {
 		let state = initialState("gpt-test");
 		state = reduce(state, {
@@ -341,6 +590,114 @@ describe("Store reducer", () => {
 		]);
 	});
 
+	it("a re-announced pending event cannot resurrect a completed tool row", () => {
+		let state = initialState("gpt-test");
+		state = reduce(state, {
+			type: "tool:start",
+			toolCallId: "call_1",
+			name: "Read",
+			inputSummary: "a.ts",
+		});
+		state = reduce(state, {
+			type: "tool:result",
+			toolCallId: "call_1",
+			name: "Read",
+			title: "Read 10 lines",
+		});
+		// The done row drained out of the live region.
+		expect(state.render.liveItems).toEqual([]);
+
+		// A stream retry re-announces the same call id. The transcript keeps
+		// the done row - and the live region must not grow a pending spinner
+		// for a tool that already rendered its result.
+		const next = reduce(state, {
+			type: "tool:pending",
+			toolCallId: "call_1",
+			name: "Read",
+			inputSummary: "a.ts",
+		});
+		expect(next).toBe(state);
+	});
+
+	it("a finalize re-run cannot resurrect a drained early-run tool row", () => {
+		// An early-dispatched read completes fast and its done row drains to
+		// static scrollback; the authoritative round then arrives with
+		// different args, so the scheduler aborts the settled early run and
+		// re-runs the call - re-emitting tool:start and tool:result for the
+		// same id. Neither may revive the drained row or drain a duplicate.
+		let state = initialState("gpt-test");
+		state = reduce(state, {
+			type: "tool:start",
+			toolCallId: "call_1",
+			name: "Read",
+			inputSummary: "a.ts",
+		});
+		state = reduce(state, {
+			type: "tool:result",
+			toolCallId: "call_1",
+			name: "Read",
+			title: "Read 10 lines",
+		});
+		expect(state.render.liveItems).toEqual([]);
+		expect(state.render.staticItems).toHaveLength(1);
+
+		const afterStart = reduce(state, {
+			type: "tool:start",
+			toolCallId: "call_1",
+			name: "Read",
+			inputSummary: "b.ts",
+		});
+		expect(afterStart).toBe(state);
+
+		const afterResult = reduce(afterStart, {
+			type: "tool:result",
+			toolCallId: "call_1",
+			name: "Read",
+			title: "Read 20 lines",
+		});
+		expect(afterResult).toBe(state);
+		expect(afterResult.render.staticItems).toHaveLength(1);
+	});
+
+	it("retraction drops unfinished tool rows but never completed ones", () => {
+		let state = initialState("gpt-test");
+		state = reduce(state, {
+			type: "tool:pending",
+			toolCallId: "call_1",
+			name: "Read",
+			inputSummary: "a.ts",
+		});
+		state = reduce(state, {
+			type: "tool:start",
+			toolCallId: "call_2",
+			name: "Grep",
+			inputSummary: "foo",
+		});
+		state = reduce(state, {
+			type: "tool:start",
+			toolCallId: "call_3",
+			name: "Read",
+			inputSummary: "b.ts",
+		});
+		state = reduce(state, {
+			type: "tool:result",
+			toolCallId: "call_3",
+			name: "Read",
+			title: "Read 10 lines",
+		});
+
+		// pending and running rows retract (their call will never resolve)...
+		state = reduce(state, { type: "tool:retracted", toolCallId: "call_1" });
+		state = reduce(state, { type: "tool:retracted", toolCallId: "call_2" });
+		// ...but a stray retraction for a completed row is ignored - it may
+		// already have drained to static scrollback and can't be un-printed.
+		state = reduce(state, { type: "tool:retracted", toolCallId: "call_3" });
+
+		expect(
+			state.transcript.filter((item) => item.kind === "tool"),
+		).toMatchObject([{ id: "call_3", status: "done" }]);
+	});
+
 	it("shows a pending round immediately and upserts rows in place", () => {
 		let state = initialState("gpt-test");
 		state = reduce(state, {
@@ -394,44 +751,6 @@ describe("Store reducer", () => {
 		expect(state.render.liveItems).toMatchObject([
 			{ kind: "tool", id: "call_2", status: "pending" },
 		]);
-	});
-
-	it("updates an early tool announcement in place and removes it if discarded", () => {
-		let state = initialState("gpt-test");
-		state = reduce(state, {
-			type: "tool:pending",
-			toolCallId: "call_early",
-			name: "Write",
-			inputSummary: "Generating input…",
-		});
-		state = reduce(state, {
-			type: "tool:pending",
-			toolCallId: "call_early",
-			name: "Write",
-			inputSummary: "index.html",
-		});
-
-		expect(
-			state.transcript.filter(
-				(item) => item.kind === "tool" && item.id === "call_early",
-			),
-		).toHaveLength(1);
-		expect(state.render.liveItems).toMatchObject([
-			{
-				kind: "tool",
-				id: "call_early",
-				status: "pending",
-				inputSummary: "index.html",
-			},
-		]);
-
-		state = reduce(state, {
-			type: "tool:discarded",
-			toolCallId: "call_early",
-			name: "Write",
-		});
-		expect(state.transcript).toEqual([]);
-		expect(state.render.liveItems).toEqual([]);
 	});
 
 	it("commits parallel tools in start order", () => {

@@ -46,15 +46,29 @@ export class McpToolAdapter extends Tool<
 		};
 	}
 
-	override isReadOnly(_input: Record<string, unknown>): boolean {
+	private claimsReadOnly(): boolean {
 		return (
 			this.definition.annotations?.readOnlyHint === true &&
 			this.definition.annotations?.destructiveHint !== true
 		);
 	}
 
-	override isConcurrencySafe(input: Record<string, unknown>): boolean {
-		return this.isReadOnly(input);
+	override isReadOnly(_input: Record<string, unknown>): boolean {
+		return this.definition.trustAnnotations && this.claimsReadOnly();
+	}
+
+	override permissionHint(_input: Record<string, unknown>): string | undefined {
+		if (this.definition.trustAnnotations || !this.claimsReadOnly()) {
+			return undefined;
+		}
+		return `The server marks this tool read-only; set trustToolAnnotations: true for '${this.definition.serverName}' in your user MCP config to skip these prompts.`;
+	}
+
+	// Deliberately not gated on trustAnnotations: concurrency is a scheduling
+	// hint where trusting the server costs nothing, unlike isReadOnly, which
+	// feeds a permission decision.
+	override isConcurrencySafe(_input: Record<string, unknown>): boolean {
+		return this.claimsReadOnly();
 	}
 
 	override isDestructive(_input: Record<string, unknown>): boolean {

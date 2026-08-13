@@ -2,6 +2,8 @@ import { Box } from "ink";
 import type React from "react";
 import { APP_VERSION } from "../../config/branding.ts";
 import type { UsageInfo } from "../../core/bus/events.ts";
+import { formatTokens } from "../../core/context/tokens.ts";
+import type { StartupUpdateInfo } from "../../core/update/startupNotice.ts";
 import type { RunStatus } from "../../state/AppState.ts";
 import { shellPathLabel } from "../utils/pathLabels.ts";
 import { SessionCard } from "./SessionCard.tsx";
@@ -12,6 +14,7 @@ interface Props {
 	model: string;
 	cwd: string;
 	usage: UsageInfo;
+	update?: StartupUpdateInfo | null;
 }
 
 const CONTEXT_LIMIT = 1_000_000;
@@ -21,6 +24,7 @@ export function Banner({
 	model,
 	cwd,
 	usage,
+	update,
 }: Props): React.ReactElement {
 	return (
 		<Box flexDirection="column">
@@ -38,6 +42,7 @@ export function Banner({
 					model={model}
 					context={contextLabel(usage)}
 					status={statusLabel(status)}
+					update={update}
 				/>
 			</Box>
 		</Box>
@@ -45,14 +50,9 @@ export function Banner({
 }
 
 function contextLabel(usage: UsageInfo): string {
-	const tokens = usage.totalTokens ?? 0;
-	return `${tokens.toLocaleString()} / ${compactTokenCount(CONTEXT_LIMIT)}`;
-}
-
-function compactTokenCount(tokens: number): string {
-	if (tokens >= 1_000_000) return `${tokens / 1_000_000}M`;
-	if (tokens >= 1_000) return `${tokens / 1_000}K`;
-	return String(tokens);
+	const tokens = usage.contextTokens ?? usage.totalTokens ?? 0;
+	const limit = usage.contextLimit ?? CONTEXT_LIMIT;
+	return `${tokens.toLocaleString()} / ${formatTokens(limit)}`;
 }
 
 function workspaceLabel(cwd: string): string {

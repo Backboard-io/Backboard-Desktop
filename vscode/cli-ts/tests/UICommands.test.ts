@@ -24,12 +24,28 @@ describe("parseCommand", () => {
 		expect(parseCommand("/notify")).toEqual({ type: "notify" });
 	});
 
+	it("parses verbose", () => {
+		expect(parseCommand("/verbose")).toEqual({ type: "verbose" });
+	});
+
 	it("parses lsp", () => {
 		expect(parseCommand("/lsp")).toEqual({ type: "lsp" });
 	});
 
 	it("parses memory", () => {
 		expect(parseCommand("/memory")).toEqual({ type: "memory" });
+	});
+
+	it("parses settings", () => {
+		expect(parseCommand("/settings")).toEqual({ type: "settings" });
+	});
+
+	it("resolves /config as an alias of settings", () => {
+		expect(parseCommand("/config")).toEqual({ type: "settings" });
+	});
+
+	it("parses sessions", () => {
+		expect(parseCommand("/sessions")).toEqual({ type: "sessions" });
 	});
 
 	it("parses logout", () => {
@@ -40,21 +56,15 @@ describe("parseCommand", () => {
 		expect(parseCommand("/login")).toEqual({ type: "login" });
 	});
 
-	it("turns loaded skill slash commands into explicit skill messages", () => {
-		expect(
-			parseCommand("/skill-creator build one", new Set(["skill-creator"])),
-		).toEqual({
-			type: "message",
-			text: "$skill-creator build one",
-		});
-		expect(parseCommand("/skill-creator", new Set(["skill-creator"]))).toEqual({
-			type: "message",
-			text: "$skill-creator",
+	it("treats loaded skill names as unknown commands", () => {
+		expect(parseCommand("/skill-creator")).toEqual({
+			type: "unknown",
+			name: "skill-creator",
 		});
 	});
 
 	it("keeps unknown slash command behavior", () => {
-		expect(parseCommand("/missing", new Set(["skill-creator"]))).toEqual({
+		expect(parseCommand("/missing")).toEqual({
 			type: "unknown",
 			name: "missing",
 		});
@@ -77,6 +87,13 @@ describe("parseCommand", () => {
 		expect(parseCommand("/exit")).toEqual({ type: "quit" });
 	});
 
+	it("resolves aliases to their canonical command", () => {
+		expect(parseCommand("/clear")).toEqual({ type: "new" });
+		expect(parseCommand("/reset")).toEqual({ type: "new" });
+		expect(parseCommand("/resume")).toEqual({ type: "sessions" });
+		expect(parseCommand("/continue")).toEqual({ type: "sessions" });
+	});
+
 	it("blocks commands that would use an ended authenticated session", () => {
 		for (const type of [
 			"help",
@@ -87,17 +104,21 @@ describe("parseCommand", () => {
 			"memory",
 			"lsp",
 			"notify",
+			"verbose",
+			"settings",
+			"cua",
+			"browser",
+			"discover",
 		] as const) {
 			expect(canRunCommandAfterSessionEnd(type)).toBe(true);
 		}
 		for (const type of [
 			"message",
 			"model",
-			"cua",
-			"browser",
 			"mcp",
 			"hooks",
 			"skills",
+			"sessions",
 			"unknown",
 		] as const) {
 			expect(canRunCommandAfterSessionEnd(type)).toBe(false);
@@ -111,11 +132,11 @@ describe("slashCommandSuggestions", () => {
 		expect(suggestions).toHaveLength(6);
 		expect(suggestions.map((suggestion) => suggestion.command)).toEqual([
 			"/model",
+			"/settings",
 			"/memory",
 			"/cua",
 			"/browser",
 			"/lsp",
-			"/mcp",
 		]);
 	});
 
@@ -125,29 +146,17 @@ describe("slashCommandSuggestions", () => {
 		expect(suggestions[0]?.command).toBe("/logout");
 	});
 
-	it("includes loaded skill commands", () => {
-		const suggestions = slashCommandSuggestions("/btw", {
-			skillCommands: ["btw"],
-		});
-		expect(suggestions).toHaveLength(6);
-		expect(suggestions[0]).toEqual({
-			command: "/btw",
-			type: "message",
-			description: "Invoke loaded skill",
-		});
-	});
-
 	it("filters to commands allowed after a session ends", () => {
 		const suggestions = slashCommandSuggestions("/", {
 			allowCommand: canRunCommandAfterSessionEnd,
 		});
 		expect(suggestions.map((suggestion) => suggestion.command)).toEqual([
+			"/settings",
 			"/memory",
+			"/cua",
+			"/browser",
 			"/lsp",
-			"/new",
-			"/login",
-			"/logout",
-			"/help",
+			"/context",
 		]);
 	});
 
@@ -161,6 +170,16 @@ describe("slashCommandSuggestions", () => {
 		expect(completeSlashCommandInput("/mod", suggestions[0])).toBe("/model ");
 		expect(completeSlashCommandInput("hello", suggestions[0])).toBe("hello");
 		expect(completeSlashCommandInput("/mod", undefined)).toBe("/mod");
+	});
+
+	it("ranks the canonical command first when an alias is typed", () => {
+		const suggestions = slashCommandSuggestions("/clear");
+		expect(suggestions[0]).toEqual({
+			command: "/new",
+			type: "new",
+			description: "Start a new thread",
+		});
+		expect(completeSlashCommandInput("/clear", suggestions[0])).toBe("/new ");
 	});
 });
 

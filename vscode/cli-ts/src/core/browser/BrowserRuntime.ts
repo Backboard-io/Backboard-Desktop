@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/errors.ts";
 import { ComputerPaths } from "../computer/ComputerPaths.ts";
 import { ImageContent } from "../image/ImageContent.ts";
 import type { PlatformKey } from "../platform/index.ts";
@@ -115,7 +116,7 @@ export class BrowserRuntime {
 				success: false,
 				action: action.action,
 				summary: `Failed to execute ${action.action}.`,
-				error: err instanceof Error ? err.message : String(err),
+				error: errorMessage(err),
 			};
 		}
 	}

@@ -3,11 +3,23 @@ import { qSessionDir } from "../../config/paths.ts";
 import { createRuntimeThinkingResolver } from "../../config/thinkingRuntime.ts";
 import { toPromptProfileId } from "../../prompts/profiles/ids.ts";
 import { getSystemPrompt } from "../../prompts/system/index.tsx";
-import type { BackboardClient } from "../../providers/backboard/BackboardClient.ts";
+import { TODO_NOT_CALLED_REMINDER } from "../../prompts/todoReminders.ts";
+import type { AgentClient } from "../../providers/AgentClient.ts";
 import { BackboardError } from "../../providers/backboard/errors.ts";
+import { errorMessage } from "../../utils/errors.ts";
 import { shortId } from "../../utils/id.ts";
 import type { EventBus } from "../bus/EventBus.ts";
-import type { TurnStatus } from "../bus/events.ts";
+import type { AskUserQuestionSpec, TurnStatus } from "../bus/events.ts";
+import type { CheckpointRecorder } from "../checkpoints/CheckpointStore.ts";
+import {
+	AUTO_COMPACT_THRESHOLD_PERCENT,
+	buildContextReport,
+	CompactionError,
+	type CompactionResult,
+	Compactor,
+	type ContextReport,
+	shouldAutoCompact,
+} from "../context/index.ts";
 import { TERMINAL_HOOK_TIMEOUT_MS } from "../hooks/constants.ts";
 import {
 	type HookController,
@@ -15,12 +27,18 @@ import {
 	type UserPromptHookResult,
 } from "../hooks/index.ts";
 import type { LspService } from "../lsp/index.ts";
+import {
+	nextPermissionMode,
+	type PermissionMode,
+} from "../permissions/PermissionMode.ts";
+import type { PermissionContext } from "../permissions/types.ts";
+import type { Message } from "../session/Message.ts";
 import { userMessage } from "../session/Message.ts";
 import type { Session } from "../session/Session.ts";
 import type { SkillController } from "../skills/SkillController.ts";
+import { canonicalToolName } from "../tools/names.ts";
 import type { OpenAITool } from "../tools/schema.ts";
 import type { ToolContext } from "../tools/ToolContext.ts";
-import type { ToolPermissionGate } from "../tools/ToolPermissionGate.ts";
 import type { ToolRegistry } from "../tools/ToolRegistry.ts";
 import type { ToolScheduler } from "../tools/ToolScheduler.ts";
 import type {
@@ -38,14 +56,27 @@ export interface AgentControllerDeps {
 	bus: EventBus;
 	session: Session;
 	registry: ToolRegistry;
-	client: BackboardClient;
+	client: AgentClient;
 	skillController: SkillController;
 	hookController?: HookController;
-	permissionGate?: ToolPermissionGate;
 	assistantBinding?: AssistantSessionBinding;
 	syncDynamicTools?: (signal: AbortSignal) => Promise<void>;
 	startupEnvironmentPrompt?: string;
 	lsp?: LspService;
+	checkpoints?: CheckpointRecorder;
+	getDurableSession?: () => {
+		sessionId: string;
+		sessionRoot: string;
+		replacesThreadId?: string;
+	};
+	onThreadReplaced?: (threadId: string | null) => void;
+	permissions: PermissionContext;
+	/**
+	 * Absolute path to this run's client transcript. Named in the handoff so a
+	 * compressed agent can read back anything the summary left out.
+	 */
+	transcriptPath?: string;
+	getTranscriptPath?: () => string;
 }
 
 /**
@@ -54,7 +85,7 @@ export interface AgentControllerDeps {
  */
 export class AgentController {
 	private abortController: AbortController | null = null;
-	private readonly pendingAsks = new Map<string, (answer: string) => void>();
+	private readonly pendingAsks = new Map<string, (answers: string[]) => void>();
 	private readonly scheduler: ToolScheduler;
 	private readonly loopFactory: AgentLoopFactory;
 	private readonly assistantBinding: AssistantSessionBinding;
@@ -89,6 +120,30 @@ export class AgentController {
 		return this.abortController !== null;
 	}
 
+	get hasActiveWork(): boolean {
+		return (
+			this.abortController !== null ||
+			this.drainingQueue ||
+			this.queue.length > 0
+		);
+	}
+
+	get permissionMode(): PermissionMode {
+		return this.deps.permissions.mode;
+	}
+
+	/** Shift+Tab: advance the mode and notify the UI. */
+	cyclePermissionMode(): PermissionMode {
+		const next = nextPermissionMode(this.deps.permissions.mode);
+		this.deps.permissions.mode = next;
+		this.deps.bus.emit({ type: "permission:mode", mode: next });
+		return next;
+	}
+
+	get threadId(): string | null {
+		return this.deps.session.threadId;
+	}
+
 	listToolNames(): string[] {
 		return this.deps.registry.list().map((tool) => tool.name);
 	}
@@ -97,8 +152,40 @@ export class AgentController {
 		this.deps.config.enableComputerUse();
 	}
 
+	setComputerUseEnabled(enabled: boolean): void {
+		this.deps.config.setComputerUseEnabled(enabled);
+	}
+
+	get isComputerUseEnabled(): boolean {
+		return this.deps.config.isComputerUseEnabled;
+	}
+
+	setSkillDiscoveryEnabled(enabled: boolean): void {
+		this.deps.config.setSkillDiscoveryEnabled(enabled);
+	}
+
+	get isSkillDiscoveryEnabled(): boolean {
+		return this.deps.config.isSkillDiscoveryEnabled;
+	}
+
 	enableBrowserUse(): void {
 		this.deps.config.enableBrowserUse();
+	}
+
+	setBrowserUseEnabled(enabled: boolean): void {
+		this.deps.config.setBrowserUseEnabled(enabled);
+	}
+
+	get isBrowserUseEnabled(): boolean {
+		return this.deps.config.isBrowserUseEnabled;
+	}
+
+	hydrateSession(input: {
+		threadId: string;
+		assistantId?: string | null;
+		messages: readonly Message[];
+	}): void {
+		this.deps.session.hydrate(input);
 	}
 
 	async dispose(): Promise<void> {
@@ -116,8 +203,8 @@ export class AgentController {
 		return this.enqueueSubmit(text, "back", {
 			emitUserMessage: options.emitUserMessage ?? true,
 			onStart: options.onStart,
-			voice: options.voice,
-			audioFile: options.audioFile,
+			attachmentFilePaths: options.attachmentFilePaths,
+			displayContent: options.displayContent,
 		});
 	}
 
@@ -126,8 +213,8 @@ export class AgentController {
 		const run = this.enqueueSubmit(text, "front", {
 			emitUserMessage: options.emitUserMessage ?? false,
 			onStart: options.onStart,
-			voice: options.voice,
-			audioFile: options.audioFile,
+			attachmentFilePaths: options.attachmentFilePaths,
+			displayContent: options.displayContent,
 		});
 		if (shouldCancelActiveTurn) this.cancel();
 		return run;
@@ -137,15 +224,15 @@ export class AgentController {
 		text: string,
 		placement: "front" | "back",
 		options: Required<Pick<SubmitOptions, "emitUserMessage">> &
-			Pick<SubmitOptions, "onStart" | "voice" | "audioFile">,
+			Pick<SubmitOptions, "onStart" | "attachmentFilePaths" | "displayContent">,
 	): Promise<TurnStatus> {
 		const run = new Promise<TurnStatus>((resolve, reject) => {
 			const queued = {
 				text,
 				emitUserMessage: options.emitUserMessage,
 				onStart: options.onStart,
-				voice: options.voice,
-				audioFile: options.audioFile,
+				attachmentFilePaths: options.attachmentFilePaths,
+				displayContent: options.displayContent,
 				resolve,
 				reject,
 			};
@@ -171,8 +258,8 @@ export class AgentController {
 					queued.resolve(
 						await this.runTurn(queued.text, {
 							emitUserMessage: queued.emitUserMessage,
-							voice: queued.voice,
-							audioFile: queued.audioFile,
+							attachmentFilePaths: queued.attachmentFilePaths,
+							displayContent: queued.displayContent,
 						}),
 					);
 				} catch (err) {
@@ -187,7 +274,11 @@ export class AgentController {
 
 	private async runTurn(
 		text: string,
-		options: Pick<QueuedSubmit, "emitUserMessage" | "voice" | "audioFile">,
+		options: {
+			emitUserMessage: boolean;
+			attachmentFilePaths?: string[];
+			displayContent?: string;
+		},
 	): Promise<TurnStatus> {
 		const { bus, session, config } = this.deps;
 		this.abortController = new AbortController();
@@ -224,26 +315,30 @@ export class AgentController {
 			turnStarted = true;
 
 			const ctx = this.buildContext(signal);
-			// Kick off the independent network pre-flight concurrently with the
-			// local pre-flight so first-token latency is the max of the two, not
-			// the sum. The base assistant inputs are computed from the STABLE
-			// base prompt/tools (no dependency on the turn's dynamic MCP tools),
-			// so resolving it does not race `syncDynamicTools`.
-			const preflight = Promise.all([
-				this.loopFactory.resolveAssistantId({
-					systemPrompt: this.baseSystemPrompt(),
-					tools: this.baseTools(),
-					signal,
-				}),
-				createRuntimeThinkingResolver(config, this.deps.client),
-			]);
-			// Attach a handler so a throw in the local pre-flight below (before we
-			// await `preflight`) can't turn it into an unhandled rejection; the
-			// real error still surfaces via the `await preflight` / outer catch.
-			preflight.catch(() => undefined);
-			await this.deps.syncDynamicTools?.(signal);
-			const skillPromptContext =
-				await this.deps.skillController.buildPromptContext(text);
+			// All four are independent of each other: assistant resolution and
+			// thinking metadata are network round-trips, the skill scan reads
+			// only the skill catalog + filesystem, and the tool sync talks to
+			// MCP servers - none may stall the others. The only ordering that
+			// matters is that syncDynamicTools completes before
+			// visibleSchemas() below, which the single Promise.all preserves.
+			// An existing thread already knows its assistant, so skip the
+			// resolution round-trip entirely.
+			const [, skillPromptContext, assistantId, thinkingResolver] =
+				await Promise.all([
+					this.deps.syncDynamicTools?.(signal),
+					this.deps.skillController.buildPromptContext(text),
+					// A key-backed model has no assistant record to resolve, and an
+					// existing thread already knows its assistant - either way the
+					// round-trip is skipped.
+					!this.deps.client.capabilities.assistants || session.threadId
+						? (session.assistantId ?? undefined)
+						: this.loopFactory.resolveAssistantId({
+								systemPrompt: this.baseSystemPrompt(),
+								tools: this.baseTools(),
+								signal,
+							}),
+					createRuntimeThinkingResolver(config, this.deps.client),
+				]);
 			const promptProfile = toPromptProfileId(config.modelProfile.name);
 			const tools = config.toolPolicy.visibleSchemas(
 				this.deps.registry,
@@ -251,39 +346,44 @@ export class AgentController {
 				promptProfile,
 			);
 			const enabledTools = tools.map((tool) => tool.function.name);
-			const systemPrompt = getSystemPrompt({
-				layout: config.modelProfile.systemPromptLayout,
-				profile: promptProfile,
-				enabledTools,
-				...skillPromptContext,
-				computerUseEnabled: config.isComputerUseEnabled,
-				browserUseEnabled: config.isBrowserUseEnabled,
-				startupEnvironmentPrompt: this.deps.startupEnvironmentPrompt,
-				hookContext: joinHookContext(
-					this.deps.hookController?.baseContext,
-					promptHook?.additionalContext,
-				),
-			});
-			const [assistantId, thinkingResolver] = await preflight;
-			if (thinkingResolver.degradedReason) {
-				bus.emit({
-					type: "system:warning",
-					message: thinkingResolver.degradedReason,
+			const todoWriteAvailable = enabledTools.some(
+				(name) => canonicalToolName(name) === "todo_write",
+			);
+			// Re-invoked for injected notification requests, so the reminder
+			// disappears as soon as TodoWrite runs mid-turn.
+			const buildTurnSystemPrompt = () =>
+				getSystemPrompt({
+					layout: config.modelProfile.systemPromptLayout,
+					profile: promptProfile,
+					enabledTools,
+					...skillPromptContext,
+					computerUseEnabled: config.isComputerUseEnabled,
+					browserUseEnabled: config.isBrowserUseEnabled,
+					skillDiscoveryEnabled: config.isSkillDiscoveryEnabled,
+					startupEnvironmentPrompt: this.deps.startupEnvironmentPrompt,
+					hookContext: joinHookContext(
+						this.deps.hookController?.baseContext,
+						promptHook?.additionalContext,
+					),
+					todoReminderPrompt:
+						todoWriteAvailable && !session.hasUsedTodoWrite
+							? TODO_NOT_CALLED_REMINDER
+							: undefined,
 				});
-			}
-
+			const systemPrompt = buildTurnSystemPrompt();
 			const loop = this.loopFactory.createLoop({
 				scheduler: this.scheduler,
 				session,
 				bus,
 				tools,
 				systemPrompt,
+				refreshSystemPrompt: buildTurnSystemPrompt,
 				assistantId,
 				model: config.model,
 				memory: config.memory,
 				memoryProfile: config.memoryProfile,
-				voice: options.voice,
-				audioFile: options.audioFile,
+				workspaceId:
+					config.memory === "off" ? undefined : config.getWorkspaceId(),
 				thinking: undefined,
 				thinkingResolver,
 				requestKind: "user",
@@ -291,6 +391,11 @@ export class AgentController {
 				turnId: turn.id,
 				turnStartedAt: turn.startedAt,
 				turnAlreadyStarted: true,
+				attachmentFilePaths: options.attachmentFilePaths?.length
+					? options.attachmentFilePaths
+					: undefined,
+				displayContent: options.displayContent,
+				durableSession: this.deps.getDurableSession?.(),
 			});
 
 			finalStatus = await loop.run(text, ctx);
@@ -369,33 +474,6 @@ export class AgentController {
 		}
 	}
 
-	/**
-	 * Pre-resolves the stable base assistant so the first real turn skips the
-	 * ~1s `GET /assistants` list scan (and populates the on-disk cache). Called
-	 * by serve mode's `warmup` op right after the process is spawned — i.e.
-	 * during user think-time, before the first message. Best-effort: any
-	 * failure is swallowed and the first turn resolves the assistant normally.
-	 */
-	async prewarmAssistant(): Promise<void> {
-		try {
-			const controller = new AbortController();
-			// Also fill the thinking-metadata cache for the current model so the
-			// first turn's network pre-flight has no round-trips left. allSettled:
-			// either half failing must not cancel the other, and the first turn
-			// re-resolves whatever is missing.
-			await Promise.allSettled([
-				this.loopFactory.resolveAssistantId({
-					systemPrompt: this.baseSystemPrompt(),
-					tools: this.baseTools(),
-					signal: controller.signal,
-				}),
-				createRuntimeThinkingResolver(this.deps.config, this.deps.client),
-			]);
-		} catch {
-			// Best-effort warm-up; the first turn will resolve it if this failed.
-		}
-	}
-
 	/** Runs SessionStart once at init; SessionEnd is paired in dispose(). */
 	async start(): Promise<void> {
 		if (this.sessionHooksStarted) return;
@@ -410,15 +488,100 @@ export class AgentController {
 		}
 	}
 
+	/**
+	 * Seeds the context window from the catalog entry the user just picked, so
+	 * `/context` is right immediately rather than after the first turn.
+	 */
+	setModelContextLimit(limit: number | null): void {
+		this.deps.session.setContextLimit(limit);
+	}
+
+	/**
+	 * Snapshot of what is filling the context window, for `/context`. Reads the
+	 * same prompt and tool schemas a turn would send, so the breakdown reflects
+	 * the real request rather than an idealized one.
+	 */
+	contextReport(source = "backboard"): ContextReport {
+		const { config, session } = this.deps;
+		return buildContextReport({
+			model: config.model,
+			source,
+			systemPrompt: this.baseSystemPrompt(),
+			tools: this.baseTools(),
+			messages: session.getMessages(),
+			todos: session.todos,
+			usedTokens: session.contextTokens,
+			reportedLimit: session.reportedContextLimit,
+			cachedTokens: session.cachedTokens,
+			compactThresholdPercent: AUTO_COMPACT_THRESHOLD_PERCENT,
+		});
+	}
+
+	/**
+	 * True once the last measured turn crossed the auto-compression threshold.
+	 * The UI checks this after a turn ends, never during one.
+	 */
+	needsCompaction(): boolean {
+		const report = this.contextReport();
+		return shouldAutoCompact({
+			usedTokens: report.measured ? report.usedTokens : 0,
+			limit: report.limit,
+			messageCount: report.messageCount,
+		});
+	}
+
+	get canCompact(): boolean {
+		return new Compactor({
+			client: this.deps.client,
+			session: this.deps.session,
+			config: this.deps.config,
+		}).canCompact();
+	}
+
+	/**
+	 * Compresses the conversation and restarts the thread from a handoff
+	 * document. Returns the context the caller must carry into the next turn.
+	 */
+	async compact(signal?: AbortSignal): Promise<CompactionResult> {
+		if (this.abortController) {
+			throw new CompactionError(
+				"Finish or cancel the current turn before compressing.",
+			);
+		}
+		const transcriptPath =
+			this.deps.getTranscriptPath?.() ?? this.deps.transcriptPath;
+		const compactor = new Compactor({
+			client: this.deps.client,
+			session: this.deps.session,
+			config: this.deps.config,
+			bus: this.deps.bus,
+			...(transcriptPath ? { transcriptPath } : {}),
+		});
+		const replacedThreadId = this.deps.session.threadId;
+		const result = await compactor.compact(
+			signal === undefined ? {} : { signal },
+		);
+		const replacedSource = replacedThreadId
+			? this.deps.client.sourceForThread?.(replacedThreadId)
+			: undefined;
+		this.deps.onThreadReplaced?.(
+			replacedThreadId &&
+				(replacedSource === undefined || replacedSource === "byok")
+				? replacedThreadId
+				: null,
+		);
+		// The thread was reset, so the assistant binding for the old thread is
+		// stale too; a new one is resolved on the next turn.
+		this.deps.session.assistantId = null;
+		return result;
+	}
+
 	private baseSystemPrompt(): string {
 		const enabledTools = this.baseTools().map((tool) => tool.function.name);
-		// Deliberately EXCLUDES the startup-environment prompt: that content is
-		// volatile (date, cwd, git branch, tool versions, directory listing) and
-		// would make the assistant fingerprint change every day / workspace /
-		// branch, defeating the assistant cache and creating backend assistant
-		// sprawl. The base assistant must stay stable; the live environment is
-		// injected per turn via the `systemPrompt` override in `runTurn`.
-		return getSystemPrompt({ enabledTools });
+		return getSystemPrompt({
+			enabledTools,
+			startupEnvironmentPrompt: this.deps.startupEnvironmentPrompt,
+		});
 	}
 
 	private baseTools(): OpenAITool[] {
@@ -452,35 +615,37 @@ export class AgentController {
 	}
 
 	/** Resolves a pending AskUser request raised by a tool. */
-	provideInput(id: string, answer: string): void {
+	provideInput(id: string, answers: string[]): void {
 		const resolve = this.pendingAsks.get(id);
 		if (resolve) {
 			this.pendingAsks.delete(id);
-			this.deps.bus.emit({ type: "input:response", response: { id, answer } });
-			resolve(answer);
+			this.deps.bus.emit({ type: "input:response", response: { id, answers } });
+			resolve(answers);
 		}
 	}
 
 	private buildContext(signal: AbortSignal): ToolContext {
-		const permissionGate = this.deps.permissionGate;
+		const durable = this.deps.getDurableSession?.();
 		return {
-			sessionId: this.deps.session.sessionId,
+			sessionId: durable?.sessionId ?? this.deps.session.sessionId,
 			cwd: this.deps.config.cwd,
 			bus: this.deps.bus,
 			signal,
-			askUser: (question, options) => this.askUser(question, options, signal),
-			requestPermission: permissionGate
-				? (request) => permissionGate.request(request, signal)
-				: undefined,
+			askUser: (question, options, promptSignal) =>
+				this.askQuestions([{ question, options }], promptSignal ?? signal).then(
+					(answers) => answers[0] ?? "",
+				),
+			askQuestions: (questions) => this.askQuestions(questions, signal),
 			getTodos: () => this.deps.session.todos,
 			agentDepth: 0,
 			lsp: this.deps.lsp,
+			checkpoints: this.deps.checkpoints,
+			permissions: this.deps.permissions,
 			trace: new AgentTraceContext({
-				sessionId: this.deps.session.sessionId,
-				sessionRoot: qSessionDir(
-					this.deps.config.cwd,
-					this.deps.session.sessionId,
-				),
+				sessionId: durable?.sessionId ?? this.deps.session.sessionId,
+				sessionRoot:
+					durable?.sessionRoot ??
+					qSessionDir(this.deps.config.cwd, this.deps.session.sessionId),
 				cwd: this.deps.config.cwd,
 			}),
 		};
@@ -493,23 +658,29 @@ export class AgentController {
 		}
 	}
 
-	private askUser(
-		question: string,
-		options: string[],
+	private askQuestions(
+		questions: AskUserQuestionSpec[],
 		signal: AbortSignal,
-	): Promise<string> {
+	): Promise<string[]> {
+		if (signal.aborted) return Promise.reject(new Error("aborted"));
 		const id = shortId("ask");
 		this.deps.bus.emit({
 			type: "input:request",
-			request: { id, question, options },
+			request: { id, questions },
 		});
 
-		return new Promise<string>((resolve, reject) => {
+		return new Promise<string[]>((resolve, reject) => {
 			this.pendingAsks.set(id, resolve);
 			signal.addEventListener(
 				"abort",
 				() => {
-					if (this.pendingAsks.delete(id)) reject(new Error("aborted"));
+					if (this.pendingAsks.delete(id)) {
+						this.deps.bus.emit({
+							type: "input:response",
+							response: { id, answers: [] },
+						});
+						reject(new Error("aborted"));
+					}
 				},
 				{ once: true },
 			);
@@ -538,5 +709,5 @@ function formatSubmitError(err: unknown): string {
 	if (err instanceof BackboardError) {
 		return `${err.message}: ${JSON.stringify(err.body)}`;
 	}
-	return err instanceof Error ? err.message : String(err);
+	return errorMessage(err);
 }

@@ -1,3 +1,4 @@
+import { nextJsonlSequence } from "./JsonlSequence.ts";
 import { JsonlWriter } from "./JsonlWriter.ts";
 
 export interface ServerRequestRecord {
@@ -39,14 +40,37 @@ const SENSITIVE_HEADERS = new Set([
  * land on disk.
  */
 export class ServerEventLog {
-	private readonly writer: JsonlWriter;
+	private writer: JsonlWriter;
 	private sequence = 0;
+	private pendingDuringActivation: Array<() => void> | null = null;
 
 	constructor(
-		private readonly sessionId: string,
+		private sessionId: string,
 		filePath: string,
 	) {
 		this.writer = new JsonlWriter(filePath);
+	}
+
+	async activate(sessionId: string, filePath: string): Promise<void> {
+		if (sessionId === this.sessionId) return;
+		if (this.pendingDuringActivation) {
+			throw new Error("Server event log activation is already in progress.");
+		}
+		const pending: Array<() => void> = [];
+		this.pendingDuringActivation = pending;
+		try {
+			const sequence = await nextJsonlSequence(filePath);
+			await this.writer.flush();
+			this.sessionId = sessionId;
+			this.sequence = sequence;
+			this.writer = new JsonlWriter(filePath);
+			this.pendingDuringActivation = null;
+			for (const write of pending) write();
+		} catch (error) {
+			this.pendingDuringActivation = null;
+			for (const write of pending) write();
+			throw error;
+		}
 	}
 
 	request(input: {
@@ -55,6 +79,10 @@ export class ServerEventLog {
 		headers: Record<string, string>;
 		body: unknown;
 	}): void {
+		if (this.pendingDuringActivation) {
+			this.pendingDuringActivation.push(() => this.request(input));
+			return;
+		}
 		const record: ServerRequestRecord = {
 			timestamp: new Date().toISOString(),
 			session_id: this.sessionId,
@@ -77,6 +105,10 @@ export class ServerEventLog {
 		latencyMs: number;
 		error?: string;
 	}): void {
+		if (this.pendingDuringActivation) {
+			this.pendingDuringActivation.push(() => this.response(input));
+			return;
+		}
 		const record: ServerResponseRecord = {
 			timestamp: new Date().toISOString(),
 			session_id: this.sessionId,

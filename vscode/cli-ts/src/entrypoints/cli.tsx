@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { render } from "ink";
+import { NO_CREDENTIALS_MESSAGE } from "../config/auth.ts";
 import {
 	APP_COMMAND_NAME,
 	APP_DISPLAY_NAME,
@@ -8,16 +9,25 @@ import {
 import { Config } from "../config/Config.ts";
 import { parseFlags } from "../config/flags.ts";
 import { AgentController } from "../core/agent/AgentController.ts";
+import { AttachmentManager } from "../core/attachments/AttachmentManager.ts";
+import { sweepStaleClipboardImages } from "../core/attachments/clipboardImage.ts";
 import {
 	loginWithBackboardSso,
 	logoutSavedCredentials,
 } from "../core/auth/BackboardAuthSession.ts";
 import { EventBus } from "../core/bus/EventBus.ts";
+import { CheckpointManager } from "../core/checkpoints/CheckpointManager.ts";
+import { CheckpointStore } from "../core/checkpoints/CheckpointStore.ts";
 import {
 	HookController,
 	HookManagerController,
 	loadHookConfig,
 } from "../core/hooks/index.ts";
+import { ProviderKeyController } from "../core/keys/ProviderKeyController.ts";
+import {
+	unreadableProviderKeys,
+	upgradeProviderKeyFile,
+} from "../core/keys/ProviderKeyStore.ts";
 import { LspService, resolveLspFlags } from "../core/lsp/index.ts";
 import {
 	loadMcpConfig,
@@ -25,24 +35,36 @@ import {
 	McpController,
 	McpToolRegistrar,
 } from "../core/mcp/index.ts";
+import {
+	buildPermissionContext,
+	isKnownPermissionMode,
+	PERMISSION_MODES,
+} from "../core/permissions/index.ts";
 import { ClientEventLog } from "../core/session/ClientEventLog.ts";
 import { JsonEventStream } from "../core/session/JsonEventStream.ts";
 import { ServerEventLog } from "../core/session/ServerEventLog.ts";
 import { Session } from "../core/session/Session.ts";
-import { SessionStore } from "../core/session/SessionStore.ts";
+import { SessionLifecycle } from "../core/session/SessionLifecycle.ts";
+import {
+	SessionStore,
+	sessionPathsForRoot,
+} from "../core/session/SessionStore.ts";
 import { SkillController } from "../core/skills/SkillController.ts";
 import { ToolRegistry } from "../core/tools/ToolRegistry.ts";
 import { buildStartupEnvironmentPrompt } from "../prompts/system/startupEnvironment.ts";
-import { BackboardClient } from "../providers/backboard/BackboardClient.ts";
 import { BackboardError } from "../providers/backboard/errors.ts";
+import { createAgentClient } from "../providers/createAgentClient.ts";
 import { createDefaultTools } from "../tools/index.ts";
 import { App } from "../ui/App.tsx";
 import { AuthScreen } from "../ui/AuthScreen.tsx";
+import { CLEAR_VISIBLE_SCREEN } from "../ui/hooks/ResizeStabilizer.constants.ts";
 import { palette } from "../ui/theme/palette.ts";
 import { ThemeProvider } from "../ui/theme/ThemeProvider.tsx";
 import { detectTerminalBg } from "../ui/theme/terminalBg.ts";
-import { createTheme } from "../ui/theme/theme.ts";
+import { createTheme, setTheme } from "../ui/theme/theme.ts";
+import { errorMessage } from "../utils/errors.ts";
 import { shortId } from "../utils/id.ts";
+import { pluralize } from "../utils/string.ts";
 
 const HELP = `${APP_DISPLAY_NAME} · coding agent
 
@@ -61,7 +83,8 @@ Options:
   --profile <name>           Profile to load (default: coding)
   --cwd <path>               Working directory
   --print <prompt>           Run a single prompt non-interactively
-  --serve                    Run as a persistent stdio host (NDJSON control on stdin, JSONL events on stdout)
+  --serve                    Run as Backboard Studio's persistent NDJSON host
+  --permission-mode <mode>   manual | acceptEdits | auto (prompt only for risky) | bypass (default: manual)
   --lsp                      Enable language-server diagnostics for this run
   --fresh                    Create a new Backboard assistant/thread for this run (isolated)
   --login                    Sign in with Backboard
@@ -90,8 +113,7 @@ async function main(): Promise<void> {
 		return;
 	}
 	if (earlyFlags.serve) {
-		// Persistent host mode owns stdin/stdout; it must run before the
-		// one-shot branches below, which would consume stdin as a prompt.
+		// Host mode owns stdin/stdout and must run before JSON/print branches.
 		const { runServe } = await import("./serve.ts");
 		await runServe(argv);
 		return;
@@ -109,11 +131,23 @@ async function main(): Promise<void> {
 				if (!didLogin) return;
 				continue;
 			}
-			process.stderr.write(
-				`${err instanceof Error ? err.message : String(err)}\n`,
-			);
+			process.stderr.write(`${errorMessage(err)}\n`);
 			process.exit(1);
 		}
+	}
+
+	// Rewrites a pre-encryption keys.json in place. Best-effort: a read-only or
+	// otherwise unwritable home must not stop the CLI from starting.
+	await upgradeProviderKeyFile().catch(() => false);
+
+	// A key that cannot be decrypted is dropped, which is indistinguishable from
+	// never having saved one. Say so once at startup instead of letting the user
+	// find out when a request fails.
+	const unreadable = unreadableProviderKeys();
+	if (unreadable.length > 0) {
+		process.stderr.write(
+			`Saved ${unreadable.join(", ")} ${pluralize(unreadable.length, "key")} could not be decrypted on this machine and ${pluralize(unreadable.length, "was", "were")} ignored. Re-add ${pluralize(unreadable.length, "it", "them")} with /keys.\n`,
+		);
 	}
 
 	const sessionId = shortId("sess");
@@ -130,6 +164,14 @@ async function main(): Promise<void> {
 	const clientLog = new ClientEventLog(sessionId, store.paths.clientLog);
 	const serverLog = new ServerEventLog(sessionId, store.paths.serverLog);
 	clientLog.attach(bus);
+	// A crash mid-/undo leaves its write-ahead marker in the crashed session's
+	// journal, and every launch mints a fresh session dir — so follow the
+	// workspace-level pointer back to that journal and finish the restore.
+	await CheckpointStore.recoverAbandonedRestore(store.paths.pendingUndo);
+	const checkpoints = new CheckpointManager(bus, store.paths, config.cwd);
+	// Hash the workspace in the background so the first shell command doesn't
+	// pay the initial scan (seconds on very large trees).
+	checkpoints.warmShellCapture(config.cwd);
 	const jsonStream =
 		config.format === "json" ? new JsonEventStream(sessionId) : null;
 	jsonStream?.attach(bus);
@@ -155,7 +197,7 @@ async function main(): Promise<void> {
 		return;
 	}
 
-	const client = new BackboardClient(config.env, serverLog);
+	const client = createAgentClient(config, serverLog);
 	const hookConfig = loadHookConfig(config.hookConfigPaths);
 	const startupEnvironmentPrompt = await buildStartupEnvironmentPrompt(
 		config.cwd,
@@ -175,7 +217,28 @@ async function main(): Promise<void> {
 	});
 	const mcpManager = new McpClientManager(mcpConfig, config.cwd);
 	const mcp = await mcpManager.initialize(new AbortController().signal);
-	const startupWarnings = [...hookConfig.warnings, ...mcp.warnings];
+	// Both --print and --format json run through runHeadless, which has no UI to
+	// answer an input:request. Anything that asks there would hang forever, so
+	// the gate must know there is nobody to prompt.
+	const headless = config.flags.print !== undefined || config.format === "json";
+	const permissions = buildPermissionContext(
+		config.cwd,
+		config.flags.permissionMode,
+		!headless,
+	);
+	// Must go through startupWarnings (rendered by App/headless), not a pre-render
+	// bus.emit — the bus has no subscribers yet and doesn't replay.
+	const permissionWarnings =
+		config.flags.permissionMode !== undefined &&
+		!isKnownPermissionMode(config.flags.permissionMode)
+			? [
+					`Unknown --permission-mode "${config.flags.permissionMode}"; using ${permissions.mode} mode. Valid: ${PERMISSION_MODES.join(", ")}.`,
+				]
+			: [];
+	// MCP init warnings (unset env vars, skipped/failed servers) are deliberately
+	// kept out of the startup surface — they cluttered every launch. Server status
+	// is still inspectable via /mcp; only the noisy startup emission is dropped.
+	const startupWarnings = [...hookConfig.warnings, ...permissionWarnings];
 	for (const warning of startupWarnings) {
 		bus.emit({ type: "system:warning", message: warning });
 	}
@@ -189,27 +252,34 @@ async function main(): Promise<void> {
 			bus.emit({ type: "system:warning", message });
 		},
 	});
+	const skillController = new SkillController({ cwd: config.cwd, bus });
 	registry = new ToolRegistry(
 		createDefaultTools({
 			client,
 			config,
 			hookController,
 			lsp,
+			checkpoints,
 			getTools: () => registry.list(),
+			skillController,
+			// Lazy: mcpController is declared below (it needs `registry`), resolved at call time.
+			getMcpRegistrar: () => mcpController,
 		}),
 	);
 	const mcpToolRegistrar = new McpToolRegistrar(registry, bus);
-	mcpToolRegistrar.register(mcp);
-	const skillController = new SkillController({ cwd: config.cwd, bus });
+	// Register the initially-configured servers' tools without re-emitting their
+	// init warnings (see startupWarnings above). Servers added later at runtime
+	// still surface their warnings through the normal register() path.
+	mcpToolRegistrar.register({ ...mcp, warnings: [] });
 	const syncMcpToolUpdates = async (signal: AbortSignal): Promise<void> => {
-		const result = await mcpManager.refreshTools(signal);
-		mcpToolRegistrar.applyRefresh(result);
-		mcpToolRegistrar.emitWarnings(
-			(await mcpManager.refreshPrompts(signal)).warnings,
-		);
-		mcpToolRegistrar.emitWarnings(
-			(await mcpManager.refreshResources(signal)).warnings,
-		);
+		const [tools, prompts, resources] = await Promise.all([
+			mcpManager.refreshTools(signal),
+			mcpManager.refreshPrompts(signal),
+			mcpManager.refreshResources(signal),
+		]);
+		mcpToolRegistrar.applyRefresh(tools);
+		mcpToolRegistrar.emitWarnings(prompts.warnings);
+		mcpToolRegistrar.emitWarnings(resources.warnings);
 	};
 	const mcpController = new McpController({
 		cwd: config.cwd,
@@ -251,6 +321,30 @@ async function main(): Promise<void> {
 		refreshPrompts: (signal) => mcpManager.refreshPrompts(signal),
 		refreshResources: (signal) => mcpManager.refreshResources(signal),
 	});
+	const sessionLifecycle = new SessionLifecycle(
+		config,
+		checkpoints,
+		store,
+		async (activeSessionId, paths) => {
+			await Promise.all([
+				clientLog.activate(activeSessionId, paths.clientLog).catch((error) =>
+					bus.emit({
+						type: "system:warning",
+						message: `Failed to rotate the client session log: ${errorMessage(error)}`,
+					}),
+				),
+				serverLog.activate(activeSessionId, paths.serverLog).catch((error) =>
+					bus.emit({
+						type: "system:warning",
+						message: `Failed to rotate the server session log: ${errorMessage(error)}`,
+					}),
+				),
+			]);
+			jsonStream?.activate(activeSessionId);
+			hookController.setSessionId(activeSessionId);
+		},
+	);
+	await sessionLifecycle.initialize();
 	const controller = new AgentController({
 		config,
 		bus,
@@ -260,14 +354,30 @@ async function main(): Promise<void> {
 		skillController,
 		hookController,
 		lsp,
+		checkpoints,
+		getDurableSession: () => sessionLifecycle.current(),
+		onThreadReplaced: (threadId) => sessionLifecycle.replaceThread(threadId),
 		syncDynamicTools: syncMcpToolUpdates,
 		startupEnvironmentPrompt,
+		permissions,
+		getTranscriptPath: () =>
+			sessionPathsForRoot(sessionLifecycle.current().sessionRoot).clientLog,
 	});
+	const attachmentManager = new AttachmentManager();
+	sweepStaleClipboardImages();
 	const flush = async (): Promise<void> => {
-		await controller.dispose();
-		await lsp.shutdown();
-		await mcpManager.close();
-		await Promise.all([clientLog.flush(), serverLog.flush()]);
+		try {
+			await controller.dispose();
+			await lsp.shutdown();
+			await mcpManager.close();
+			await Promise.all([
+				clientLog.flush(),
+				serverLog.flush(),
+				checkpoints.dispose(),
+			]);
+		} finally {
+			await sessionLifecycle.dispose();
+		}
 	};
 
 	// Fire SessionStart at init so it runs even for prompt-less sessions.
@@ -300,6 +410,7 @@ async function main(): Promise<void> {
 	// Detect the terminal background so surfaces elevate from it.
 	const { hex: terminalBg } = await detectTerminalBg(palette.bg);
 	const uiTheme = createTheme(terminalBg);
+	setTheme(uiTheme);
 
 	const app = (
 		<ThemeProvider value={uiTheme}>
@@ -311,10 +422,15 @@ async function main(): Promise<void> {
 				mcpController={mcpController}
 				hookManager={hookManager}
 				lsp={lsp}
+				checkpoints={checkpoints}
 				client={client}
+				attachments={attachmentManager}
 				startupWarnings={startupWarnings}
 				onLogin={(onDeviceCode) => loginWithBackboardSso({ onDeviceCode })}
 				onLogout={logoutSavedCredentials}
+				onNewSession={() => sessionLifecycle.startNew()}
+				onResumeLocalSession={(sessionId) => sessionLifecycle.resume(sessionId)}
+				onResumeRemoteSession={() => sessionLifecycle.startNew()}
 				onExit={() => {
 					controller.cancel({ clearQueue: true });
 				}}
@@ -337,9 +453,14 @@ async function runAuthScreen(): Promise<boolean> {
 	let didLogin = false;
 	const { hex: terminalBg } = await detectTerminalBg(palette.bg);
 	const uiTheme = createTheme(terminalBg);
+	setTheme(uiTheme);
 	const app = (
 		<ThemeProvider value={uiTheme}>
 			<AuthScreen
+				keys={new ProviderKeyController()}
+				onKeySaved={() => {
+					didLogin = true;
+				}}
 				onLogin={async (onDeviceCode) => {
 					const message = await loginWithBackboardSso({ onDeviceCode });
 					didLogin = true;
@@ -362,7 +483,7 @@ async function runAuthScreen(): Promise<boolean> {
 
 function clearTerminalScreen(): void {
 	if (!process.stdout.isTTY) return;
-	process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
+	process.stdout.write(CLEAR_VISIBLE_SCREEN);
 }
 
 function shouldShowAuthScreen(
@@ -372,8 +493,12 @@ function shouldShowAuthScreen(
 	if (flags.print !== undefined || flags.format === "json") return false;
 	if (!process.stdin.isTTY || !process.stdout.isTTY) return false;
 
-	const message = err instanceof Error ? err.message : String(err);
-	return message.includes("BACKBOARD_API_KEY is not set");
+	const message = errorMessage(err);
+	return (
+		message.includes(NO_CREDENTIALS_MESSAGE) ||
+		// Older saved configs still surface the pre-BYOK wording.
+		message.includes("BACKBOARD_API_KEY is not set")
+	);
 }
 
 async function runLoginCommand(): Promise<boolean> {
@@ -397,9 +522,7 @@ async function runLoginCommand(): Promise<boolean> {
 		process.stdout.write(`${message}\n`);
 		return true;
 	} catch (err) {
-		process.stderr.write(
-			`${err instanceof Error ? err.message : String(err)}\n`,
-		);
+		process.stderr.write(`${errorMessage(err)}\n`);
 		return false;
 	}
 }

@@ -9,7 +9,6 @@ import { execute } from "../../../tools/execute.tsx";
 import { fetchUrl } from "../../../tools/fetchUrl.tsx";
 import { glob } from "../../../tools/glob.tsx";
 import { grep } from "../../../tools/grep.tsx";
-import { openPreview } from "../../../tools/openPreview.tsx";
 import { read } from "../../../tools/read.tsx";
 import { todoWrite } from "../../../tools/todoWrite.tsx";
 import { webSearch } from "../../../tools/webSearch.tsx";
@@ -30,6 +29,5 @@ export const toolPrompts: Record<string, PromptModule> = {
 	todo_write: todoWrite,
 	computer,
 	browser,
-	open_preview: openPreview,
 	agent,
 };

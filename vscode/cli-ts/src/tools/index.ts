@@ -21,9 +21,10 @@ import { ComputerTool } from "./ComputerTool.tsx";
 import { EditTool } from "./EditTool.tsx";
 import { ExecuteTool } from "./ExecuteTool.tsx";
 import { FetchUrlTool } from "./FetchUrlTool.tsx";
+import { FindMcpTool } from "./FindMcpTool.tsx";
+import { FindSkillTool } from "./FindSkillTool.tsx";
 import { GlobTool } from "./GlobTool.tsx";
 import { GrepTool } from "./GrepTool.tsx";
-import { OpenPreviewTool } from "./OpenPreviewTool.tsx";
 import { ReadTool } from "./ReadTool.tsx";
 import { TodoWriteTool } from "./TodoWriteTool.tsx";
 import { WebSearchTool } from "./WebSearchTool.tsx";
@@ -44,7 +45,6 @@ function createBaseTools(): Tool[] {
 		new TodoWriteTool(),
 		new ComputerTool(),
 		new BrowserTool(),
-		new OpenPreviewTool(),
 	];
 }
 
@@ -56,7 +56,14 @@ function createBaseTools(): Tool[] {
 export function createDefaultTools(deps?: DefaultToolDeps): Tool[] {
 	const base = createBaseTools();
 	if (!deps) return base;
-	return [...base, buildAgentTool(deps, base)];
+	const tools: Tool[] = [...base, buildAgentTool(deps, base)];
+	if (deps.skillController) {
+		tools.push(new FindSkillTool(deps.skillController));
+	}
+	if (deps.getMcpRegistrar) {
+		tools.push(new FindMcpTool(deps.getMcpRegistrar));
+	}
+	return tools;
 }
 
 function buildAgentTool(deps: DefaultToolDeps, base: Tool[]): AgentTool {
@@ -89,6 +96,7 @@ function buildAgentTool(deps: DefaultToolDeps, base: Tool[]): AgentTool {
 		isToolEnabled: (name) => deps.config.isToolEnabled(name),
 		hookController: deps.hookController,
 		lsp: deps.lsp,
+		checkpoints: deps.checkpoints,
 	});
 
 	const agent = new AgentTool({

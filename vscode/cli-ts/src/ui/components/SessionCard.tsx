@@ -1,5 +1,6 @@
 import { Box, Text } from "ink";
 import type React from "react";
+import { clipEnd } from "../../utils/string.ts";
 import { useTerminalSize } from "../hooks/TerminalSizeContext.tsx";
 import { useTheme } from "../theme/ThemeProvider.tsx";
 import { theme } from "../theme/theme.ts";
@@ -34,14 +35,12 @@ export function SessionCard({
 	status = "Synced",
 	model = "gpt-5.5 high fast",
 	context = "0 / 1.0M",
+	update = null,
 }: SessionCardProps): React.ReactElement {
 	const { columns } = useTerminalSize();
 	const uiTheme = useTheme();
 	const layout = sessionCardLayout(columns);
-	const contentWidth = Math.max(1, layout.cardWidth - layout.paddingX * 2);
-	const headerTextWidth = layout.showMascot
-		? Math.max(1, contentWidth - MASCOT_WIDTH)
-		: contentWidth;
+	const { contentWidth, headerTextWidth } = cardHeaderWidths(layout);
 	const rowValueWidth = Math.max(1, contentWidth - layout.rowLabelWidth);
 
 	if (type === "noAuth") {
@@ -72,29 +71,14 @@ export function SessionCard({
 			paddingY={1}
 			width={layout.cardWidth}
 		>
-			<Box>
-				{layout.showMascot ? (
-					<Box
-						flexDirection="column"
-						justifyContent="center"
-						marginRight={2}
-						minWidth={13}
-					>
-						<BackboardMascot />
-					</Box>
-				) : null}
-				<Box flexDirection="column" justifyContent="center">
-					<Text color={theme.text} bold>
-						{clipEnd("Backboard CLI is ready", headerTextWidth)}
+			<CardHeader layout={layout}>
+				{layout.showWorkspace ? (
+					<Text color={uiTheme.readableSecondaryText}>
+						{clipEnd(`Connected workspace: ${workspace}`, headerTextWidth)}
 					</Text>
-					{layout.showWorkspace ? (
-						<Text color={uiTheme.readableSecondaryText}>
-							{clipEnd(`Connected workspace: ${workspace}`, headerTextWidth)}
-						</Text>
-					) : null}
-					<Text color={statusColor(status)}>Status: {status}</Text>
-				</Box>
-			</Box>
+				) : null}
+				<Text color={statusColor(status)}>Status: {status}</Text>
+			</CardHeader>
 
 			<Box flexDirection="column" marginTop={1}>
 				{layout.showSessionHeading ? (
@@ -141,6 +125,59 @@ export function SessionCard({
 					) : null}
 				</Box>
 			) : null}
+
+			{update && layout.showHelpRow ? (
+				<Box>
+					<Box minWidth={layout.rowLabelWidth}>
+						<Text color={theme.warning} bold>
+							/update
+						</Text>
+					</Box>
+					<Text color={theme.warning}>
+						{clipEnd(
+							layout.showHelpDescription
+								? `New version v${update.latest} available (on v${update.current})`
+								: `v${update.latest} available`,
+							rowValueWidth,
+						)}
+					</Text>
+				</Box>
+			) : null}
+		</Box>
+	);
+}
+
+/**
+ * The shared card header row: the mascot (when the layout shows it) beside the
+ * bold "Backboard CLI is ready" title, with caller-provided lines below the
+ * title. Callers clip their own lines to `cardHeaderWidths(layout)`.
+ */
+export function CardHeader({
+	layout,
+	children,
+}: {
+	layout: SessionCardLayout;
+	children: React.ReactNode;
+}): React.ReactElement {
+	const { headerTextWidth } = cardHeaderWidths(layout);
+	return (
+		<Box>
+			{layout.showMascot ? (
+				<Box
+					flexDirection="column"
+					justifyContent="center"
+					marginRight={2}
+					minWidth={13}
+				>
+					<BackboardMascot />
+				</Box>
+			) : null}
+			<Box flexDirection="column" justifyContent="center">
+				<Text color={theme.text} bold>
+					{clipEnd("Backboard CLI is ready", headerTextWidth)}
+				</Text>
+				{children}
+			</Box>
 		</Box>
 	);
 }
@@ -169,11 +206,24 @@ export function sessionCardLayout(columns: number): SessionCardLayout {
 	};
 }
 
-export function clipEnd(value: string, maxWidth: number): string {
-	if (maxWidth <= 0) return "";
-	if (value.length <= maxWidth) return value;
-	if (maxWidth <= 3) return value.slice(0, maxWidth);
-	return `${value.slice(0, maxWidth - 3)}...`;
+// The round border occupies one column on each side of the card.
+const CARD_BORDER_COLUMNS = 2;
+
+// NOTE: unlike the pre-existing SessionCard math, this subtracts the border
+// columns — Ink renders the border inside width={cardWidth}. Intentional fix:
+// all cards now clip 2 columns earlier than before.
+export function cardHeaderWidths(layout: SessionCardLayout): {
+	contentWidth: number;
+	headerTextWidth: number;
+} {
+	const contentWidth = Math.max(
+		1,
+		layout.cardWidth - CARD_BORDER_COLUMNS - layout.paddingX * 2,
+	);
+	const headerTextWidth = layout.showMascot
+		? Math.max(1, contentWidth - MASCOT_WIDTH)
+		: contentWidth;
+	return { contentWidth, headerTextWidth };
 }
 
 function statusColor(status: string): string {

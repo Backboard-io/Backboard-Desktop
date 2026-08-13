@@ -12,6 +12,7 @@ function fakeMcpTool(name = "mcp__server__inspect"): McpToolDefinition {
 		toolName: "inspect",
 		description: "Inspect server state",
 		inputSchema: { type: "object", properties: {} },
+		trustAnnotations: false,
 		timeoutMs: 1_000,
 		call: async (_input: Record<string, unknown>, _ctx: ToolContext) => ({
 			content: [{ type: "text", text: "ok" }],

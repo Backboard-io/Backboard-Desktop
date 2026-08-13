@@ -6,9 +6,12 @@ export interface SystemPromptOptions {
 	layout?: SystemPromptLayout;
 	computerUseEnabled?: boolean;
 	browserUseEnabled?: boolean;
+	skillDiscoveryEnabled?: boolean;
 	skillCatalog?: SkillCatalog;
 	activatedSkillsPrompt?: string;
 	hookContext?: string;
+	/** Reminder segment shown until the session's first TodoWrite call. */
+	todoReminderPrompt?: string;
 	startupEnvironmentPrompt?: string;
 	enabledTools?: readonly string[];
 	/** Selects which prompt profile builds the prompt. Defaults to `default`. */

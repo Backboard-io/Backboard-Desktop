@@ -91,14 +91,12 @@ const FACTORY_MCP_SERVERS: readonly McpCatalogServer[] = [
 		args: ["-y", "@mondaydotcomorg/monday-api-mcp"],
 		requiredEnv: ["MONDAY_API_KEY"],
 	}),
-	stdioServer({
+	remoteServer({
 		name: "stripe",
 		title: "Stripe",
 		category: "Payments & Commerce",
 		description: "Payment processing and subscriptions",
-		command: "npx",
-		args: ["-y", "@stripe/mcp", "--api-key", envRef("STRIPE_SECRET_KEY")],
-		requiredEnv: ["STRIPE_SECRET_KEY"],
+		url: "https://mcp.stripe.com",
 	}),
 	stdioServer({
 		name: "paypal",
@@ -327,13 +325,6 @@ const CLAUDE_REMOTE_MCP_SERVERS: readonly McpCatalogServer[] = [
 		category: "Remote Servers",
 		description: "Search and update your company's knowledge graph",
 		url: "https://api.devrev.ai/mcp/v1",
-	}),
-	remoteServer({
-		name: "directbooker",
-		title: "DirectBooker",
-		category: "Remote Servers",
-		description: "Compare hotels, then book direct",
-		url: "https://www.directbooker.ai/claude",
 	}),
 	remoteServer({
 		name: "exa",
@@ -618,13 +609,6 @@ const CLAUDE_REMOTE_MCP_SERVERS: readonly McpCatalogServer[] = [
 		url: "https://mcp.attio.com/mcp",
 	}),
 	remoteServer({
-		name: "audible",
-		title: "Audible",
-		category: "Remote Servers",
-		description: "Ask for audiobook recommendations",
-		url: "https://mcp.audible.com/mcp",
-	}),
-	remoteServer({
 		name: "autodesk-product-help",
 		title: "Autodesk Product Help",
 		category: "Remote Servers",
@@ -660,18 +644,13 @@ const CLAUDE_REMOTE_MCP_SERVERS: readonly McpCatalogServer[] = [
 		url: "https://vast-mcp.blueskyapi.com/mcp",
 	}),
 	remoteServer({
-		name: "booking-com",
-		title: "Booking.com",
-		category: "Remote Servers",
-		description: "Find hotels, homes and more",
-		url: "https://demandapi-mcp.booking.com/v1/mcp/8132308",
-	}),
-	remoteServer({
 		name: "box",
 		title: "Box",
 		category: "Remote Servers",
 		description: "Search, edit and get insights on your Box content",
 		url: "https://mcp.box.com",
+		disabledReason:
+			"Box MCP requires admin-issued client credentials from the Box Admin Console; dynamic client registration is not supported.",
 	}),
 	remoteServer({
 		name: "brex",
@@ -864,20 +843,6 @@ const CLAUDE_REMOTE_MCP_SERVERS: readonly McpCatalogServer[] = [
 		url: "https://api.digits.com/mcp",
 	}),
 	remoteServer({
-		name: "dandb-risk-analytics",
-		title: "D&B Risk Analytics",
-		category: "Remote Servers",
-		description: "Execute risk workflows powered by the D&B Commercial Graph™",
-		url: "https://agents.riskanalytics.dnb.com/mcp",
-	}),
-	remoteServer({
-		name: "docuseal",
-		title: "DocuSeal",
-		category: "Remote Servers",
-		description: "Sign, send & manage documents with DocuSeal",
-		url: "https://docuseal.com/mcp",
-	}),
-	remoteServer({
 		name: "dovetail",
 		title: "Dovetail",
 		category: "Remote Servers",
@@ -900,20 +865,6 @@ const CLAUDE_REMOTE_MCP_SERVERS: readonly McpCatalogServer[] = [
 		url: "https://mcp.eulerapp.com/mcp",
 	}),
 	remoteServer({
-		name: "everlaw",
-		title: "Everlaw",
-		category: "Remote Servers",
-		description: "Search and explore your Everlaw database in Claude.",
-		url: "https://api.everlaw.com/v1/mcp",
-	}),
-	remoteServer({
-		name: "expedia",
-		title: "Expedia",
-		category: "Remote Servers",
-		description: "Plan trips, flights and hotels",
-		url: "https://www.expedia.com/mcp",
-	}),
-	remoteServer({
 		name: "fever-event-discovery",
 		title: "Fever Event Discovery",
 		category: "Remote Servers",
@@ -921,32 +872,11 @@ const CLAUDE_REMOTE_MCP_SERVERS: readonly McpCatalogServer[] = [
 		url: "https://data-search.apigw.feverup.com/mcp",
 	}),
 	remoteServer({
-		name: "fmp",
-		title: "FMP",
-		category: "Remote Servers",
-		description: "Comprehensive financial market data",
-		url: "https://financialmodelingprep.com/mcp",
-	}),
-	remoteServer({
-		name: "g2",
-		title: "G2",
-		category: "Remote Servers",
-		description: "Bring real buyer signals into AI workflows",
-		url: "https://mcp.g2.com/mcp",
-	}),
-	remoteServer({
 		name: "monte-carlo",
 		title: "Monte Carlo",
 		category: "Remote Servers",
 		description: "Data & AI observability",
 		url: "https://mcp.getmontecarlo.com/mcp",
-	}),
-	remoteServer({
-		name: "glovo",
-		title: "Glovo",
-		category: "Remote Servers",
-		description: "Anything delivered in minutes",
-		url: "https://api.glovoapp.com/discovery-mcp/mcp",
 	}),
 	remoteServer({
 		name: "gocardless",
@@ -975,6 +905,8 @@ const CLAUDE_REMOTE_MCP_SERVERS: readonly McpCatalogServer[] = [
 		category: "Remote Servers",
 		description: "BigQuery: Advanced analytical insights for agents",
 		url: "https://bigquery.googleapis.com/mcp",
+		disabledReason:
+			"Google MCP servers require a pre-registered OAuth client and do not support dynamic client registration. Static OAuth client support is planned.",
 	}),
 	remoteServer({
 		name: "google-compute-engine",
@@ -982,6 +914,8 @@ const CLAUDE_REMOTE_MCP_SERVERS: readonly McpCatalogServer[] = [
 		category: "Remote Servers",
 		description: "MCP server for Google Compute Engine",
 		url: "https://compute.googleapis.com/mcp",
+		disabledReason:
+			"Google MCP servers require a pre-registered OAuth client and do not support dynamic client registration. Static OAuth client support is planned.",
 	}),
 	remoteServer({
 		name: "google-calendar",
@@ -989,6 +923,8 @@ const CLAUDE_REMOTE_MCP_SERVERS: readonly McpCatalogServer[] = [
 		category: "Remote Servers",
 		description: "Manage your schedule and coordinate meetings effortlessly",
 		url: "https://calendarmcp.googleapis.com/mcp/v1",
+		disabledReason:
+			"Google MCP servers require a pre-registered OAuth client and do not support dynamic client registration. Static OAuth client support is planned.",
 	}),
 	remoteServer({
 		name: "google-drive",
@@ -996,6 +932,8 @@ const CLAUDE_REMOTE_MCP_SERVERS: readonly McpCatalogServer[] = [
 		category: "Remote Servers",
 		description: "Search, read, and upload files instantly",
 		url: "https://drivemcp.googleapis.com/mcp/v1",
+		disabledReason:
+			"Google MCP servers require a pre-registered OAuth client and do not support dynamic client registration. Static OAuth client support is planned.",
 	}),
 	remoteServer({
 		name: "gmail",
@@ -1003,6 +941,8 @@ const CLAUDE_REMOTE_MCP_SERVERS: readonly McpCatalogServer[] = [
 		category: "Remote Servers",
 		description: "Draft replies, summarize threads, & search your inbox",
 		url: "https://gmailmcp.googleapis.com/mcp/v1",
+		disabledReason:
+			"Google MCP servers require a pre-registered OAuth client and do not support dynamic client registration. Static OAuth client support is planned.",
 	}),
 	remoteServer({
 		name: "govtribe",
@@ -1061,13 +1001,6 @@ const CLAUDE_REMOTE_MCP_SERVERS: readonly McpCatalogServer[] = [
 		url: "https://api.ibkr.com/v1/api/mcp",
 	}),
 	remoteServer({
-		name: "ice-data-services",
-		title: "ICE Data Services",
-		category: "Remote Servers",
-		description: "Analyze U.S. fixed income trade and reference data",
-		url: "https://fids-mcp.ice.com/mcp",
-	}),
-	remoteServer({
 		name: "ifttt",
 		title: "IFTTT",
 		category: "Remote Servers",
@@ -1087,34 +1020,6 @@ const CLAUDE_REMOTE_MCP_SERVERS: readonly McpCatalogServer[] = [
 		category: "Remote Servers",
 		description: "Search for jobs on Indeed",
 		url: "https://mcp.indeed.com/claude/mcp",
-	}),
-	remoteServer({
-		name: "instacart",
-		title: "Instacart",
-		category: "Remote Servers",
-		description: "Groceries and more delivered as fast as 30 minutes",
-		url: "https://fig-mcp.instacart.com/mcp",
-	}),
-	remoteServer({
-		name: "intuit-mailchimp",
-		title: "Intuit Mailchimp",
-		category: "Remote Servers",
-		description: "Create marketing campaigns",
-		url: "https://ai-inc.mailchimp.com/claude/mcp/v2",
-	}),
-	remoteServer({
-		name: "intuit-quickbooks",
-		title: "Intuit QuickBooks",
-		category: "Remote Servers",
-		description: "Business Finances made simple",
-		url: "https://ai-inc.quickbooks.intuit.com/v1/mcp",
-	}),
-	remoteServer({
-		name: "intuit-turbotax",
-		title: "Intuit TurboTax",
-		category: "Remote Servers",
-		description: "Estimate tax refunds and connect with live tax experts",
-		url: "https://ai-inc.turbotax.intuit.com/358A1C1B-F73B-46A7-B130-4B14916E6843/v1/mcp",
 	}),
 	remoteServer({
 		name: "jentic",
@@ -1157,14 +1062,6 @@ const CLAUDE_REMOTE_MCP_SERVERS: readonly McpCatalogServer[] = [
 		category: "Remote Servers",
 		description: "Report, strategize & create with real-time Klaviyo data",
 		url: "https://mcp.klaviyo.com/mcp?include-mcp-app=true",
-	}),
-	remoteServer({
-		name: "lastminute-com",
-		title: "lastminute.com",
-		category: "Remote Servers",
-		description:
-			"Search, compare and book flights, dynamic packages (flight + hotel) and hotels across global airlines and hotel suppliers.",
-		url: "https://mcp.lastminute.com/mcp",
 	}),
 	remoteServer({
 		name: "legal-data-hunter",
@@ -1239,13 +1136,6 @@ const CLAUDE_REMOTE_MCP_SERVERS: readonly McpCatalogServer[] = [
 		url: "https://scamguard.malwarebytes.com/claude/mcp",
 	}),
 	remoteServer({
-		name: "melon",
-		title: "Melon",
-		category: "Remote Servers",
-		description: "Browse music charts & your personalized music picks",
-		url: "https://mcp.melon.com/mcp/",
-	}),
-	remoteServer({
 		name: "mercury",
 		title: "Mercury",
 		category: "Remote Servers",
@@ -1309,18 +1199,13 @@ const CLAUDE_REMOTE_MCP_SERVERS: readonly McpCatalogServer[] = [
 		url: "https://mcp.msci.com/mcp/v1.0/mcp",
 	}),
 	remoteServer({
-		name: "owkin",
-		title: "Owkin",
-		category: "Remote Servers",
-		description: "Interact with AI agents built for biology",
-		url: "https://mcp.k.owkin.com/mcp",
-	}),
-	remoteServer({
 		name: "pagerduty",
 		title: "PagerDuty",
 		category: "Remote Servers",
 		description: "Manage incidents, services and on-call schedules",
 		url: "https://mcp.pagerduty.com/mcp",
+		disabledReason:
+			"PagerDuty MCP requires a pre-registered OAuth app or User API Token; dynamic client registration is not supported.",
 	}),
 	remoteServer({
 		name: "pandadoc",
@@ -1386,25 +1271,11 @@ const CLAUDE_REMOTE_MCP_SERVERS: readonly McpCatalogServer[] = [
 		url: "https://mcp.ramp.com/ramp-data/anthropic/mcp",
 	}),
 	remoteServer({
-		name: "bigdata-com",
-		title: "Bigdata.com",
-		category: "Remote Servers",
-		description: "Access real-time financial data",
-		url: "https://mcp.bigdata.com/",
-	}),
-	remoteServer({
 		name: "razorpay",
 		title: "Razorpay",
 		category: "Remote Servers",
 		description: "Turn Claude into your Razorpay Dashboard Assistant",
 		url: "https://mcp.razorpay.com/mcp",
-	}),
-	remoteServer({
-		name: "resy",
-		title: "Resy",
-		category: "Remote Servers",
-		description: "Find and book restaurants instantly",
-		url: "https://apigw.americanexpress.com/dining/v1/mcp",
 	}),
 	remoteServer({
 		name: "rillet",
@@ -1419,13 +1290,6 @@ const CLAUDE_REMOTE_MCP_SERVERS: readonly McpCatalogServer[] = [
 		category: "Remote Servers",
 		description: "SEO, market data, and brand visibility insights",
 		url: "https://mcp.semrush.com/claude/v1/mcp",
-	}),
-	remoteServer({
-		name: "shopify",
-		title: "Shopify",
-		category: "Remote Servers",
-		description: "Build, manage, and analyze your Shopify store",
-		url: "https://setup.shopify.com/mcp",
 	}),
 	remoteServer({
 		name: "signnow",
@@ -1454,13 +1318,8 @@ const CLAUDE_REMOTE_MCP_SERVERS: readonly McpCatalogServer[] = [
 		category: "Remote Servers",
 		description: "Send messages, create canvases, and fetch Slack data",
 		url: "https://mcp.slack.com/mcp",
-	}),
-	remoteServer({
-		name: "solve-intelligence",
-		title: "Solve Intelligence",
-		category: "Remote Servers",
-		description: "Search, draft, and chart patents",
-		url: "https://api.solveintelligence.com/mcp/",
+		disabledReason:
+			"Slack MCP requires client credentials from an internal or Marketplace-listed Slack app; dynamic client registration is not supported.",
 	}),
 	remoteServer({
 		name: "splice",
@@ -1468,13 +1327,6 @@ const CLAUDE_REMOTE_MCP_SERVERS: readonly McpCatalogServer[] = [
 		category: "Remote Servers",
 		description: "Search Splice's sounds catalog, build stacks & more!",
 		url: "https://mcp.splice.com/mcp",
-	}),
-	remoteServer({
-		name: "spotify",
-		title: "Spotify",
-		category: "Remote Servers",
-		description: "Music and podcast recommendations, just for you.",
-		url: "https://mcp-gateway-external-pilot.spotify.net/mcp",
 	}),
 	remoteServer({
 		name: "adisinsight",
@@ -1496,13 +1348,6 @@ const CLAUDE_REMOTE_MCP_SERVERS: readonly McpCatalogServer[] = [
 		category: "Remote Servers",
 		description: "Search and manage transaction, merchant, and payment data",
 		url: "https://mcp.squareup.com/sse",
-	}),
-	remoteServer({
-		name: "stubhub",
-		title: "StubHub",
-		category: "Remote Servers",
-		description: "Find tickets on the World's Largest Ticket Marketplace",
-		url: "https://open-ai-app.stubhub.net/mcp",
 	}),
 	remoteServer({
 		name: "superhuman-mail",
@@ -1554,13 +1399,6 @@ const CLAUDE_REMOTE_MCP_SERVERS: readonly McpCatalogServer[] = [
 		url: "https://legal-mcp.thomsonreuters.com/mcp",
 	}),
 	remoteServer({
-		name: "thumbtack",
-		title: "Thumbtack",
-		category: "Remote Servers",
-		description: "Find and hire local pros in Claude",
-		url: "https://mcp.thumbtack.com/mcp",
-	}),
-	remoteServer({
 		name: "tldraw",
 		title: "tldraw",
 		category: "Remote Servers",
@@ -1587,20 +1425,6 @@ const CLAUDE_REMOTE_MCP_SERVERS: readonly McpCatalogServer[] = [
 		category: "Remote Servers",
 		description: "Build powerful communications and customer engagement",
 		url: "https://mcp.twilio.com/docs",
-	}),
-	remoteServer({
-		name: "uber",
-		title: "Uber",
-		category: "Remote Servers",
-		description: "Get Uber price & time estimates for any ride option",
-		url: "https://mcp.uber.com/claude/rides-3p/mcp",
-	}),
-	remoteServer({
-		name: "uber-eats",
-		title: "Uber Eats",
-		category: "Remote Servers",
-		description: "Explore restaurants and dishes",
-		url: "https://mcp.ubereats.com/eats-claude/mcp",
 	}),
 	remoteServer({
 		name: "udemy-business",
@@ -1666,25 +1490,13 @@ const CLAUDE_REMOTE_MCP_SERVERS: readonly McpCatalogServer[] = [
 		url: "https://mcp.workable.com/mcp",
 	}),
 	remoteServer({
-		name: "wyndham-hotels-and-resorts",
-		title: "Wyndham Hotels and Resorts",
-		category: "Remote Servers",
-		description: "Discover the right Wyndham Hotel for you, faster",
-		url: "https://mcp.wyndhamhotels.com/claude/mcp",
-	}),
-	remoteServer({
 		name: "xero",
 		title: "Xero",
 		category: "Remote Servers",
 		description: "Access your Xero financials from any conversation",
 		url: "https://mcp.xero.com/mcp",
-	}),
-	remoteServer({
-		name: "yardi-virtuoso",
-		title: "Yardi Virtuoso",
-		category: "Remote Servers",
-		description: "Real-time Yardi data & insights",
-		url: "https://mcp.virtuoso.ai/mcp",
+		disabledReason:
+			"Xero MCP requires a pre-registered Xero OAuth app; dynamic client registration is not supported.",
 	}),
 	remoteServer({
 		name: "zapier",
@@ -1748,13 +1560,6 @@ const CLAUDE_REMOTE_MCP_SERVERS: readonly McpCatalogServer[] = [
 		category: "Remote Servers",
 		description: "India's official statistics via natural language",
 		url: "https://mcp.mospi.gov.in/",
-	}),
-	remoteServer({
-		name: "adobe-for-creativity",
-		title: "Adobe for creativity",
-		category: "Remote Servers",
-		description: "Ideate, create, and deliver with Adobe pro tools",
-		url: "https://adobe-creativity.adobe.io/mcp",
 	}),
 	remoteServer({
 		name: "adobe-journey-optimizer",
@@ -1841,13 +1646,6 @@ const CLAUDE_REMOTE_MCP_SERVERS: readonly McpCatalogServer[] = [
 		url: "https://mcp.zocks.io/v1/mcp",
 	}),
 	remoteServer({
-		name: "trellis",
-		title: "Trellis",
-		category: "Remote Servers",
-		description: "Claude for Trial Court Litigators",
-		url: "https://mcp.trellis.law/anthropic",
-	}),
-	remoteServer({
 		name: "todoist",
 		title: "Todoist",
 		category: "Remote Servers",
@@ -1867,13 +1665,6 @@ const CLAUDE_REMOTE_MCP_SERVERS: readonly McpCatalogServer[] = [
 		category: "Remote Servers",
 		description: "Research nonprofits and funders using Candid's data",
 		url: "https://mcp.candid.org/mcp",
-	}),
-	remoteServer({
-		name: "learning-commons-knowledge-graph",
-		title: "Learning Commons Knowledge Graph",
-		category: "Remote Servers",
-		description: "K-12 standards, skills, and learning progressions",
-		url: "https://kg.mcp.learningcommons.org/mcp",
 	}),
 	remoteServer({
 		name: "open-targets",
@@ -1902,6 +1693,8 @@ const CLAUDE_REMOTE_MCP_SERVERS: readonly McpCatalogServer[] = [
 		category: "Remote Servers",
 		description: "Search, recap, and act on your Zoom meetings",
 		url: "https://mcp.zoom.us/mcp/zoom/streamable",
+		disabledReason:
+			"Zoom MCP requires a pre-registered Zoom app; dynamic client registration is not supported.",
 	}),
 ];
 

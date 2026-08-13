@@ -6003,6 +6003,16 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	box-shadow: none;
 }
 
+/* The clean-chat shell replaces the shared composer's surface above, so keep
+ * Monaco's independently painted editor layers on that same surface. Without
+ * this override an existing session shows the editor background as a dark
+ * rectangle inside the lighter composer card. The solid fill also preserves
+ * Monaco's reverse-rounded selection corners. */
+.monaco-workbench .backboard-clean-chat .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background,
+.monaco-workbench .backboard-clean-chat .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .margin {
+	background-color: var(--bb-clean-chat-surface) !important;
+}
+
 /* The previous empty-state treatment inflated the same composer to a 172px
  * hero card. Cursor keeps the prompt ready without turning it into the page's
  * main visual object, so clean hosts use the compact dock before and after the

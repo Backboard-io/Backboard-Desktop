@@ -1,4 +1,5 @@
 import { APP_DISPLAY_NAME } from "../../config/branding.ts";
+import { formatClockTime } from "../../utils/time.ts";
 import {
 	LARGE_PASTE_MIN_LENGTH,
 	LARGE_PASTE_MIN_LINES,
@@ -85,10 +86,7 @@ export function resolvePromptInputSubmitValue(
 }
 
 function formatPromptInputPasteTime(date: Date): string {
-	return new Intl.DateTimeFormat(undefined, {
-		hour: "numeric",
-		minute: "2-digit",
-	}).format(date);
+	return formatClockTime(date);
 }
 
 function stablePastePreviewId(value: string): string {

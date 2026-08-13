@@ -1,7 +1,17 @@
 import { Box, Text, useInput, usePaste } from "ink";
 import type React from "react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { detectAttachmentPaste } from "../../core/attachments/attachmentPaths.ts";
+import { readClipboardImage } from "../../core/attachments/clipboardImage.ts";
+import {
+	MAX_ATTACHMENT_BYTES,
+	MAX_ATTACHMENTS_PER_MESSAGE,
+} from "../../core/attachments/constants.ts";
 import { slashCommandSuggestions } from "../commands/index.ts";
+import {
+	droppedAttachmentChipIds,
+	type PromptInputAttachmentChips,
+} from "../input/PromptInputChips.ts";
 import {
 	emptyPromptInputEdit,
 	promptInputLines,
@@ -11,6 +21,7 @@ import { resolvePromptInputKeyAction } from "../input/PromptInputKeyRouter.ts";
 import type { PromptInputPastePreviews } from "../input/PromptInputPastePreview.ts";
 import {
 	applyPromptInputAction,
+	applyPromptInputAttachments,
 	applyPromptInputPaste,
 	type PromptInputState,
 } from "../input/PromptInputState.ts";
@@ -35,11 +46,13 @@ export function PromptInput({
 	disabled,
 	busy,
 	queuedPrompts = [],
-	skillCommands = [],
 	allowCommand,
 	promptHistory,
 	onPromptHistoryChange,
 	onSubmit,
+	onAttachFiles,
+	onRemoveAttachment,
+	onNotice,
 }: PromptInputProps): React.ReactElement {
 	const [edit, setEdit] = useState<PromptInputEdit>(emptyPromptInputEdit);
 	const [localHistory, setLocalHistory] = useState<PromptHistoryState>(
@@ -49,6 +62,8 @@ export function PromptInput({
 	const [pastePreviews, setPastePreviews] = useState<PromptInputPastePreviews>(
 		[],
 	);
+	const [attachmentChips, setAttachmentChips] =
+		useState<PromptInputAttachmentChips>([]);
 	const uiTheme = useTheme();
 	const value = edit.value;
 	const history = promptHistory ?? localHistory;
@@ -61,10 +76,8 @@ export function PromptInput({
 	};
 	const suggestions = useMemo(
 		() =>
-			disabled || busy
-				? []
-				: slashCommandSuggestions(value, { skillCommands, allowCommand }),
-		[allowCommand, busy, disabled, skillCommands, value],
+			disabled || busy ? [] : slashCommandSuggestions(value, { allowCommand }),
+		[allowCommand, busy, disabled, value],
 	);
 	const selectedSuggestion =
 		suggestions[Math.min(selectedIndex, Math.max(0, suggestions.length - 1))];
@@ -72,23 +85,120 @@ export function PromptInput({
 		edit,
 		history,
 		pastePreviews,
+		attachments: attachmentChips,
 		selectedIndex,
 	});
 	const commitInputState = (
 		current: PromptInputState,
 		next: PromptInputState,
+		options: { notifyRemovals?: boolean } = {},
 	): void => {
 		if (next === current) return;
 		setEdit(next.edit);
 		setPastePreviews(next.pastePreviews);
+		setAttachmentChips(next.attachments);
 		setSelectedIndex(next.selectedIndex);
 		if (next.history !== history) setPromptHistory(next.history);
+		if (options.notifyRemovals !== false && onRemoveAttachment) {
+			const remaining = next.attachments.filter((chip) =>
+				next.edit.value.includes(chip.label),
+			);
+			if (remaining.length !== next.attachments.length) {
+				setAttachmentChips(remaining);
+			}
+			for (const id of droppedAttachmentChipIds(
+				current.attachments,
+				remaining,
+			)) {
+				onRemoveAttachment(id);
+			}
+		}
+	};
+
+	const latestInputState = useRef(currentInputState);
+	latestInputState.current = currentInputState;
+	const latestCommitInputState = useRef(commitInputState);
+	latestCommitInputState.current = commitInputState;
+	const clipboardPasteBusy = useRef(false);
+
+	const pasteClipboardImage = async (): Promise<void> => {
+		if (!onAttachFiles || clipboardPasteBusy.current) return;
+		clipboardPasteBusy.current = true;
+		try {
+			const result = await readClipboardImage();
+			if (result.kind === "none") {
+				onNotice?.("No image found in clipboard", "error");
+				return;
+			}
+			if (result.kind === "too-large") {
+				onNotice?.(
+					`Skipped clipboard image: file exceeds the ${MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB limit`,
+					"error",
+				);
+				return;
+			}
+			const state = latestInputState.current();
+			if (state.attachments.length >= MAX_ATTACHMENTS_PER_MESSAGE) {
+				onNotice?.(
+					`A message can carry at most ${MAX_ATTACHMENTS_PER_MESSAGE} attachments — skipped the clipboard image`,
+					"error",
+				);
+				return;
+			}
+			const chips = onAttachFiles([result.file]).map((item) => ({
+				id: item.id,
+				label: item.label,
+				fileName: item.fileName,
+				filePath: item.filePath,
+			}));
+			latestCommitInputState.current(
+				state,
+				applyPromptInputAttachments(state, chips),
+			);
+		} finally {
+			clipboardPasteBusy.current = false;
+		}
 	};
 
 	usePaste(
 		(text) => {
 			if (disabled) return;
 			const state = currentInputState();
+			if (onAttachFiles) {
+				const detected = detectAttachmentPaste(text);
+				if (detected.kind === "attachments") {
+					for (const rejectedFile of detected.rejected) {
+						onNotice?.(
+							`Skipped ${rejectedFile.filePath}: ${rejectedFile.reason}`,
+							"error",
+						);
+					}
+					const budget = MAX_ATTACHMENTS_PER_MESSAGE - state.attachments.length;
+					const accepted = detected.accepted.slice(0, Math.max(0, budget));
+					if (accepted.length < detected.accepted.length) {
+						onNotice?.(
+							`A message can carry at most ${MAX_ATTACHMENTS_PER_MESSAGE} attachments — skipped ${detected.accepted.length - accepted.length} file(s)`,
+							"error",
+						);
+					}
+					let next = state;
+					if (accepted.length > 0) {
+						const chips = onAttachFiles(accepted).map((item) => ({
+							id: item.id,
+							label: item.label,
+							fileName: item.fileName,
+							filePath: item.filePath,
+						}));
+						next = applyPromptInputAttachments(next, chips);
+					}
+					// Keep any prose that was pasted alongside the path(s).
+					if (detected.remainingText) {
+						next = applyPromptInputPaste(next, detected.remainingText);
+					}
+					if (next !== state) commitInputState(state, next);
+					return;
+				}
+			}
 			commitInputState(state, applyPromptInputPaste(state, text));
 		},
 		{ isActive: !disabled },
@@ -110,8 +220,18 @@ export function PromptInput({
 				selectedSuggestion,
 				suggestionsLength: suggestions.length,
 			});
+			if (result.effect.kind === "pasteClipboardImage") {
+				void pasteClipboardImage();
+				return;
+			}
 			if (result.effect.kind === "submit") {
-				onSubmit(result.effect.value, result.effect.intent);
+				onSubmit(
+					result.effect.value,
+					result.effect.intent,
+					result.effect.attachmentIds,
+				);
+				commitInputState(state, result.state, { notifyRemovals: false });
+				return;
 			}
 			commitInputState(state, result.state);
 		},
@@ -135,7 +255,7 @@ export function PromptInput({
 						{renderEditablePrompt(
 							value,
 							edit.cursorOffset,
-							busy ? "Steer or queue…" : "",
+							"",
 							uiTheme.readableSecondaryText,
 						)}
 					</Box>

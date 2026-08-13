@@ -1,5 +1,6 @@
 import { shortId } from "../../utils/id.ts";
 import { EventBus } from "../bus/EventBus.ts";
+import { emptyRuleSet } from "../permissions/PermissionRules.ts";
 import { ClientEventLog } from "../session/ClientEventLog.ts";
 import { Session } from "../session/Session.ts";
 import type { ToolContext } from "../tools/ToolContext.ts";
@@ -75,6 +76,18 @@ export class SubAgentRunner {
 			? undefined
 			: await this.deps.getThinking();
 
+		// The sub-agent's turns live on this private bus, so the shared
+		// CheckpointStore never sees their turn:end and would never finalize a
+		// checkpoint journaled under them. Scope captures to the spawning user
+		// turn instead: sub-agent edits fold into the parent's (finalized)
+		// checkpoint and stay visible to /undo and /rewind. Without a parent
+		// turn to attribute to, capture is disabled rather than journaling
+		// entries no checkpoint could ever surface.
+		const parentRecorder = params.checkpoints ?? this.deps.checkpoints;
+		const checkpoints = params.parentTurnId
+			? parentRecorder?.scopedToTurn(params.parentTurnId)
+			: undefined;
+
 		const ctx: ToolContext = {
 			sessionId: session.sessionId,
 			cwd: params.parentCwd,
@@ -88,6 +101,13 @@ export class SubAgentRunner {
 			agentDepth: params.depth,
 			trace: params.trace?.context,
 			lsp: this.deps.lsp,
+			checkpoints,
+			// interactive:false so a sub-agent "ask" auto-denies. Fall back to a
+			// locked-down context (not undefined) so a missing parent can't
+			// disable the gate.
+			permissions: params.parentPermissions
+				? { ...params.parentPermissions, interactive: false }
+				: { mode: "manual", rules: emptyRuleSet(), interactive: false },
 		};
 
 		const loop = loopFactory.createLoop({
@@ -126,7 +146,11 @@ export class SubAgentRunner {
 		bus: EventBus,
 	): () => void {
 		if (!params.parentBus || !params.parentToolCallId) return () => {};
+		// The bus is synchronous, so once the parent cancels, a winding-down
+		// child's events must not reach the parent - they would resurrect the
+		// parent's already-committed "Interrupted" row.
 		const detachStart = bus.on("tool:start", (event) => {
+			if (params.parentSignal.aborted) return;
 			params.parentBus?.emit({
 				type: "agent:child_tool_start",
 				agentToolCallId: params.parentToolCallId ?? "",
@@ -139,6 +163,7 @@ export class SubAgentRunner {
 			});
 		});
 		const detachResult = bus.on("tool:result", (event) => {
+			if (params.parentSignal.aborted) return;
 			params.parentBus?.emit({
 				type: "agent:child_tool_result",
 				agentToolCallId: params.parentToolCallId ?? "",
@@ -147,6 +172,7 @@ export class SubAgentRunner {
 			});
 		});
 		const detachError = bus.on("tool:error", (event) => {
+			if (params.parentSignal.aborted) return;
 			params.parentBus?.emit({
 				type: "agent:child_tool_result",
 				agentToolCallId: params.parentToolCallId ?? "",

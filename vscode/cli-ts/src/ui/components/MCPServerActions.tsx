@@ -1,8 +1,14 @@
 import { Box, Text, useInput } from "ink";
 import type React from "react";
-import { useState } from "react";
 import type { McpServerRuntimeStatus } from "../../core/mcp/index.ts";
+import { useAsyncAction } from "../hooks/useAsyncAction.ts";
+import { useListSelection } from "../hooks/useListSelection.ts";
 import { theme } from "../theme/theme.ts";
+import { ErrorLine } from "./ErrorLine.tsx";
+import { HintFooter } from "./HintFooter.tsx";
+import { mcpStatusColor, mcpStatusLabel } from "./MCPServerStatus.ts";
+import { Panel } from "./Panel.tsx";
+import { SelectCaret } from "./SelectRow.tsx";
 import { Spinner } from "./Spinner.tsx";
 
 interface Props {
@@ -40,94 +46,55 @@ export function McpServerActions({
 	onBrowse,
 	onCancel,
 }: Props): React.ReactElement {
-	const [selectedIndex, setSelectedIndex] = useState(0);
-	const [submitting, setSubmitting] = useState(false);
-	const [submittingLabel, setSubmittingLabel] = useState("Updating MCP server");
-	const [abortController, setAbortController] =
-		useState<AbortController | null>(null);
-	const [error, setError] = useState<string | null>(null);
 	const actions = serverActions(server);
-	const safeSelectedIndex = Math.min(
-		selectedIndex,
-		Math.max(0, actions.length - 1),
-	);
-
-	const runAction = (
-		label: string,
-		action: (signal: AbortSignal) => Promise<void> | void,
-	): void => {
-		const controller = new AbortController();
-		setSubmittingLabel(label);
-		setSubmitting(true);
-		setAbortController(controller);
-		setError(null);
-		Promise.resolve(action(controller.signal))
-			.catch((err) => {
-				if (controller.signal.aborted) return;
-				setError(err instanceof Error ? err.message : String(err));
-			})
-			.finally(() => {
-				setAbortController((current) =>
-					current === controller ? null : current,
-				);
-				setSubmitting(false);
-			});
-	};
+	const selection = useListSelection(actions.length, { digitJump: true });
+	const asyncAction = useAsyncAction();
 
 	const runSelectedAction = (): void => {
-		const action = actions[safeSelectedIndex];
+		const action = actions[selection.index];
 		if (!action) return;
 		if (!action.enabled) {
-			setError(action.disabledReason ?? `${action.label} is unavailable.`);
+			asyncAction.setError(
+				action.disabledReason ?? `${action.label} is unavailable.`,
+			);
 			return;
 		}
 		if (action.id === "browse") {
-			runAction("Loading MCP prompts and resources", (signal) =>
-				onBrowse(server, signal),
-			);
+			asyncAction.run("Loading MCP prompts and resources", async (signal) => {
+				await onBrowse(server, signal);
+			});
 			return;
 		}
 		if (action.id === "authenticate") {
-			runAction("Authenticating MCP server", (signal) =>
-				onAuthenticate(server, signal),
-			);
+			asyncAction.run("Authenticating MCP server", async (signal) => {
+				await onAuthenticate(server, signal);
+			});
 			return;
 		}
 		if (action.id === "disable") {
-			runAction("Disabling MCP server", (signal) => onDisable(server, signal));
+			asyncAction.run("Disabling MCP server", async (signal) => {
+				await onDisable(server, signal);
+			});
 			return;
 		}
 		if (action.id === "remove") {
-			runAction("Removing MCP server", (signal) => onRemove(server, signal));
+			asyncAction.run("Removing MCP server", async (signal) => {
+				await onRemove(server, signal);
+			});
 		}
 	};
 
 	useInput((input, key) => {
-		if (submitting) {
-			if (key.escape) abortController?.abort();
+		if (asyncAction.running) {
+			if (key.escape) asyncAction.cancel();
 			return;
 		}
 		if (key.escape) {
 			onCancel();
 			return;
 		}
-		if (key.upArrow) {
-			setSelectedIndex((index) =>
-				index <= 0 ? actions.length - 1 : index - 1,
-			);
-			setError(null);
-			return;
-		}
-		if (key.downArrow) {
-			setSelectedIndex((index) =>
-				index >= actions.length - 1 ? 0 : index + 1,
-			);
-			setError(null);
-			return;
-		}
-		if (/^[1-4]$/.test(input)) {
-			setSelectedIndex(Number(input) - 1);
-			setError(null);
+		if (selection.onInput(input, key)) {
+			asyncAction.setError(null);
 			return;
 		}
 		if (key.return) {
@@ -136,14 +103,11 @@ export function McpServerActions({
 	});
 
 	return (
-		<Box flexDirection="column" marginTop={1}>
-			<Text color={theme.text} bold>
-				MCP Server: {server.name}
-			</Text>
+		<Panel title={`MCP Server: ${server.name}`}>
 			<Text>
 				<Text color={theme.subtle}>status </Text>
-				<Text color={statusColor(server.status)}>
-					{statusLabel(server.status)}
+				<Text color={mcpStatusColor(server.status)}>
+					{mcpStatusLabel(server.status)}
 				</Text>
 			</Text>
 			<Text color={theme.subtle}>
@@ -165,32 +129,35 @@ export function McpServerActions({
 			</Text>
 			<Box flexDirection="column" marginTop={1}>
 				{actions.map((action, index) => {
-					const selected = index === safeSelectedIndex;
+					const selected = index === selection.index;
 					const color = action.enabled
 						? selected
 							? theme.accentBright
 							: theme.subtle
 						: theme.subtle;
 					return (
-						<Text
-							key={action.id}
-							color={color}
-							bold={selected && action.enabled}
-						>
-							{selected ? "› " : "  "}
-							{action.label}
-						</Text>
+						<Box key={action.id}>
+							<SelectCaret selected={selected} color={color} />
+							<Text color={color} bold={selected && action.enabled}>
+								{action.label}
+							</Text>
+						</Box>
 					);
 				})}
 			</Box>
-			{error ? <Text color={theme.error}>{error}</Text> : null}
-			<Text color={theme.subtle}>
-				{submitting
-					? "esc cancel action"
-					: "↑/↓ choose · 1-4 jump · enter select · esc back"}
-			</Text>
-			{submitting ? <Spinner label={submittingLabel} /> : null}
-		</Box>
+			<ErrorLine error={asyncAction.error} />
+			<HintFooter
+				marginTop={0}
+				hints={
+					asyncAction.running
+						? ["Esc cancel action"]
+						: ["↑/↓ choose", "1-4 jump", "Enter select", "Esc back"]
+				}
+			/>
+			{asyncAction.running && asyncAction.label ? (
+				<Spinner label={asyncAction.label} />
+			) : null}
+		</Panel>
 	);
 }
 
@@ -210,7 +177,7 @@ function serverActions(server: McpServerRuntimeStatus): ServerAction[] {
 			disabledReason:
 				server.type !== "http"
 					? "Only HTTP MCP servers support browser authentication."
-					: `Authentication is not available while ${server.name} is ${statusLabel(server.status)}.`,
+					: `Authentication is not available while ${server.name} is ${mcpStatusLabel(server.status)}.`,
 		},
 		{
 			id: "disable",
@@ -230,34 +197,6 @@ export function canAuthenticateMcpServer(
 	server: McpServerRuntimeStatus,
 ): boolean {
 	return server.type === "http" && server.status !== "disabled";
-}
-
-function statusLabel(status: McpServerRuntimeStatus["status"]): string {
-	switch (status) {
-		case "connected":
-			return "connected";
-		case "needs_authentication":
-			return "needs authentication";
-		case "disabled":
-			return "disabled";
-		case "error":
-			return "error";
-	}
-}
-
-function statusColor(
-	status: McpServerRuntimeStatus["status"],
-): string | undefined {
-	switch (status) {
-		case "connected":
-			return theme.success;
-		case "needs_authentication":
-			return theme.warning;
-		case "disabled":
-			return theme.subtle;
-		case "error":
-			return theme.error;
-	}
 }
 
 function primitiveSupportLabel(server: McpServerRuntimeStatus): string {

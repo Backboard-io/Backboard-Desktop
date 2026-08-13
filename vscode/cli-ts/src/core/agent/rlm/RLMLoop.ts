@@ -39,7 +39,7 @@ export type {
 } from "./RLMTypes.ts";
 
 /**
- * DSPy-style Recursive Language Model loop implemented with Backboard Studio's Backboard
+ * DSPy-style Recursive Language Model loop implemented with Backboard R-CLI's Backboard
  * client and local JavaScript REPL.
  */
 export class RLMLoop {
@@ -381,6 +381,11 @@ function blankUsage(): Required<UsageInfo> {
 		inputTokens: 0,
 		outputTokens: 0,
 		totalTokens: 0,
+		cachedTokens: 0,
+		cacheWriteTokens: 0,
+		costUsd: 0,
+		contextTokens: 0,
+		contextLimit: 0,
 		model: "",
 		provider: "",
 	};

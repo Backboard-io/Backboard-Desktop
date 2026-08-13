@@ -2037,3 +2037,689 @@
 	color: var(--vscode-list-activeSelectionForeground, var(--vscode-list-inactiveSelectionForeground, var(--vscode-foreground))) !important;
 	outline: none !important;
 }
+
+/* T3 Code-inspired Settings surface for Simple Mode. Keep the standard Settings
+ * presentation unchanged in the Editor and Advanced modes. */
+.settings-toc-icon {
+	display: none;
+}
+
+.settings-editor.t3-settings-experience {
+	--t3-settings-background: var(--vscode-editor-background);
+	--t3-settings-sidebar-background: color-mix(in srgb, var(--vscode-editor-background) 97%, var(--vscode-foreground) 3%);
+	--t3-settings-foreground: var(--vscode-foreground);
+	--t3-settings-muted-foreground: var(--vscode-descriptionForeground);
+	--t3-settings-border: color-mix(in srgb, var(--vscode-foreground) 6%, transparent);
+	--t3-settings-input-background: color-mix(in srgb, var(--vscode-editor-background) 92%, var(--vscode-foreground) 8%);
+	--t3-settings-input-border: color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
+	--t3-settings-hover-background: color-mix(in srgb, var(--vscode-foreground) 4%, transparent);
+	--t3-settings-selected-background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
+	--t3-settings-primary: var(--vscode-focusBorder);
+	--t3-settings-sidebar-width: 256px;
+	display: block;
+	height: 100%;
+	margin: 0;
+	max-width: none;
+	border: 0;
+	border-radius: 0;
+	background: var(--t3-settings-background);
+	color: var(--t3-settings-foreground);
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+	font-size: 14px;
+	box-shadow: none;
+}
+
+.settings-editor.t3-settings-experience > .settings-header {
+	display: none;
+	height: 0;
+}
+
+.settings-editor.t3-settings-experience > .t3-settings-topbar {
+	position: relative;
+	z-index: 3;
+	display: flex;
+	height: 52px;
+	min-height: 52px;
+	box-sizing: border-box;
+	border-bottom: 1px solid var(--t3-settings-border);
+	background: var(--t3-settings-background);
+}
+
+.settings-editor.t3-settings-experience .t3-settings-topbar-sidebar {
+	width: var(--t3-settings-sidebar-width);
+	min-width: var(--t3-settings-sidebar-width);
+	height: 52px;
+	box-sizing: border-box;
+	border-right: 1px solid var(--t3-settings-border);
+	background: var(--t3-settings-sidebar-background);
+}
+
+.settings-editor.t3-settings-experience .t3-settings-sidebar-brand {
+	display: flex;
+	height: 100%;
+	align-items: center;
+	gap: 8px;
+	box-sizing: border-box;
+	padding: 0 14px;
+	color: var(--t3-settings-foreground);
+}
+
+.settings-editor.t3-settings-experience .t3-settings-sidebar-brand-mark {
+	width: 22px;
+	height: 22px;
+	flex: 0 0 22px;
+	background: currentColor;
+	-webkit-mask: url("../../../welcomeGettingStarted/browser/media/backboard_mark.svg") center / contain no-repeat;
+	mask: url("../../../welcomeGettingStarted/browser/media/backboard_mark.svg") center / contain no-repeat;
+}
+
+.settings-editor.t3-settings-experience .t3-settings-sidebar-brand-name {
+	overflow: hidden;
+	font-size: 14px;
+	font-weight: 600;
+	line-height: 20px;
+	letter-spacing: -0.01em;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.settings-editor.t3-settings-experience .t3-settings-breadcrumb {
+	display: flex;
+	min-width: 0;
+	flex: 1 1 auto;
+	align-items: center;
+	gap: 8px;
+	padding: 0 20px;
+	font-size: 14px;
+	font-weight: 500;
+	line-height: 20px;
+	white-space: nowrap;
+}
+
+.settings-editor.t3-settings-experience .t3-settings-breadcrumb-parent,
+.settings-editor.t3-settings-experience .t3-settings-breadcrumb-separator {
+	color: var(--t3-settings-muted-foreground);
+}
+
+.settings-editor.t3-settings-experience .t3-settings-breadcrumb-current {
+	overflow: hidden;
+	color: var(--t3-settings-foreground);
+	text-overflow: ellipsis;
+}
+
+.settings-editor.t3-settings-experience > .settings-body {
+	height: calc(100% - 52px);
+	background: var(--t3-settings-background);
+}
+
+.settings-editor.t3-settings-experience > .settings-body > .monaco-split-view2 {
+	height: 100%;
+	margin: 0;
+	background: var(--t3-settings-background);
+}
+
+.settings-editor.t3-settings-experience > .settings-body > .monaco-split-view2 .sash.vertical::before {
+	width: 1px;
+	left: calc(50% - 0.5px);
+	background: var(--t3-settings-border);
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-toc-container {
+	min-width: 256px;
+	height: 100%;
+	border: 0;
+	background: var(--t3-settings-sidebar-background) !important;
+	box-shadow: none;
+}
+
+.settings-editor.t3-settings-experience .settings-sidebar-header {
+	padding: 8px;
+	border: 0;
+	background: transparent;
+}
+
+.settings-editor.t3-settings-experience .settings-sidebar-header > .settings-account,
+.settings-editor.t3-settings-experience .settings-sidebar-header > .settings-header-controls,
+.settings-editor.t3-settings-experience .settings-sidebar-header > .settings-search-count-container {
+	display: none;
+}
+
+.settings-editor.t3-settings-experience .settings-sidebar-header > .search-container {
+	position: relative;
+	display: flex;
+	width: 100%;
+	height: 32px;
+	min-width: 0;
+	align-items: center;
+	margin: 0;
+	box-sizing: border-box;
+	overflow: hidden;
+	border: 0;
+	border-radius: 8px;
+	background: transparent;
+	color: var(--t3-settings-muted-foreground);
+	transition: background-color 120ms ease, color 120ms ease;
+}
+
+.settings-editor.t3-settings-experience .settings-sidebar-header > .search-container:hover,
+.settings-editor.t3-settings-experience .settings-sidebar-header > .search-container:focus-within {
+	background: var(--t3-settings-hover-background);
+	color: var(--t3-settings-foreground);
+}
+
+.settings-editor.t3-settings-experience .t3-settings-search-icon {
+	position: absolute;
+	z-index: 2;
+	left: 8px;
+	top: 8px;
+	width: 16px;
+	height: 16px;
+	font-size: 16px;
+	line-height: 16px;
+	pointer-events: none;
+}
+
+.settings-editor.t3-settings-experience .settings-sidebar-header > .search-container > .suggest-input-container,
+.monaco-workbench.vs-dark .settings-editor.t3-settings-experience .settings-sidebar-header > .search-container > .suggest-input-container,
+.monaco-workbench.hc-black .settings-editor.t3-settings-experience .settings-sidebar-header > .search-container > .suggest-input-container {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 32px;
+	box-sizing: border-box;
+	padding: 6px 36px 6px 32px;
+	overflow: hidden;
+	border: 0 !important;
+	border-radius: 8px;
+	outline: none !important;
+	background: transparent !important;
+	color: inherit;
+	box-shadow: none !important;
+}
+
+.settings-editor.t3-settings-experience .settings-sidebar-header > .search-container .suggest-input-placeholder {
+	margin: 0;
+	color: var(--t3-settings-muted-foreground) !important;
+	font-size: 14px;
+	line-height: 20px;
+}
+
+.settings-editor.t3-settings-experience .settings-sidebar-header > .search-container .monaco-editor,
+.settings-editor.t3-settings-experience .settings-sidebar-header > .search-container .monaco-editor .view-line {
+	font-family: inherit !important;
+	font-size: 14px !important;
+}
+
+.settings-editor.t3-settings-experience .settings-sidebar-header > .search-container > .search-container-widgets {
+	position: absolute;
+	z-index: 3;
+	top: 4px;
+	right: 4px;
+	display: flex;
+	width: auto;
+	min-width: 0;
+	height: 24px;
+	align-items: center;
+	margin: 0;
+}
+
+.settings-editor.t3-settings-experience .settings-sidebar-header > .search-container > .search-container-widgets > .settings-count-widget,
+.settings-editor.t3-settings-experience .settings-sidebar-header > .search-container .t3-settings-filter-action,
+.settings-editor.t3-settings-experience .settings-sidebar-header > .search-container .monaco-custom-toggle {
+	display: none !important;
+}
+
+.settings-editor.t3-settings-experience .settings-sidebar-header > .search-container .t3-settings-clear-action {
+	display: flex;
+	width: 24px;
+	height: 24px;
+	align-items: center;
+	justify-content: center;
+	box-sizing: border-box;
+	padding: 0;
+	border: 0;
+	border-radius: 6px;
+	color: var(--t3-settings-muted-foreground);
+}
+
+.settings-editor.t3-settings-experience .settings-sidebar-header > .search-container .t3-settings-clear-action:hover {
+	background: var(--t3-settings-hover-background);
+	color: var(--t3-settings-foreground);
+}
+
+.settings-editor.t3-settings-experience .settings-sidebar-header > .search-container:not(.has-query) .t3-settings-clear-action {
+	display: none;
+}
+
+.settings-editor.t3-settings-experience .t3-settings-search-shortcut {
+	position: absolute;
+	z-index: 2;
+	right: 8px;
+	top: 6px;
+	display: inline-flex;
+	min-width: 20px;
+	height: 20px;
+	align-items: center;
+	justify-content: center;
+	box-sizing: border-box;
+	padding: 0 6px;
+	border: 1px solid var(--t3-settings-border);
+	border-radius: 6px;
+	background: var(--t3-settings-selected-background);
+	color: var(--t3-settings-muted-foreground);
+	font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+	font-size: 11px;
+	font-weight: 500;
+	line-height: 18px;
+	pointer-events: none;
+}
+
+.settings-editor.t3-settings-experience .settings-sidebar-header > .search-container.has-query .t3-settings-search-shortcut {
+	display: none;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-toc-wrapper {
+	flex: 1 1 auto;
+	min-height: 0;
+	height: auto;
+	margin: 0;
+	padding: 0 8px 8px;
+	border: 0;
+	background: var(--t3-settings-sidebar-background) !important;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-toc-container .monaco-list,
+.settings-editor.t3-settings-experience > .settings-body .settings-toc-container .monaco-list-rows,
+.settings-editor.t3-settings-experience > .settings-body .settings-toc-container .monaco-scrollable-element {
+	background: transparent !important;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-toc-container .monaco-list-row,
+.settings-editor.t3-settings-experience > .settings-body .settings-toc-container .monaco-list-row.focused {
+	border: 0 !important;
+	border-radius: 8px;
+	outline: 0 !important;
+	background: transparent;
+	color: var(--t3-settings-muted-foreground);
+	box-shadow: none !important;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-toc-container .monaco-list-row .monaco-tl-contents {
+	display: flex;
+	height: 32px;
+	align-items: center;
+	box-sizing: border-box;
+	padding-left: 10px;
+	padding-right: 8px;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-toc-container .monaco-list-row .monaco-tl-twistie {
+	display: none !important;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-toc-container .monaco-list-row .settings-toc-icon {
+	display: inline-flex;
+	width: 16px;
+	height: 16px;
+	flex: 0 0 16px;
+	align-items: center;
+	justify-content: center;
+	margin-right: 8px;
+	color: var(--t3-settings-muted-foreground);
+	font-size: 16px;
+	line-height: 16px;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-toc-container .monaco-list-row .settings-toc-entry {
+	color: inherit;
+	font-size: 14px;
+	font-weight: 500;
+	line-height: 32px;
+	letter-spacing: -0.005em;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-toc-container .monaco-list-row .settings-toc-count {
+	display: none !important;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-toc-container .monaco-list-row:not(.selected):hover {
+	background: var(--t3-settings-hover-background);
+	color: var(--t3-settings-foreground);
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-toc-container .monaco-list-row.selected,
+.settings-editor.t3-settings-experience > .settings-body .settings-toc-container .monaco-list-row.selected.focused {
+	background: var(--t3-settings-selected-background);
+	color: var(--t3-settings-foreground);
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-toc-container .monaco-list-row.selected .settings-toc-entry {
+	color: inherit;
+	font-weight: 500;
+}
+
+.settings-editor.t3-settings-experience .t3-settings-sidebar-footer {
+	flex: 0 0 auto;
+	padding: 8px;
+	background: var(--t3-settings-sidebar-background);
+}
+
+.settings-editor.t3-settings-experience .t3-settings-back-button {
+	display: flex;
+	width: 100%;
+	height: 32px;
+	align-items: center;
+	gap: 8px;
+	box-sizing: border-box;
+	padding: 0 10px;
+	border: 0;
+	border-radius: 8px;
+	outline: 0;
+	background: transparent;
+	color: var(--t3-settings-muted-foreground);
+	font: inherit;
+	font-size: 14px;
+	font-weight: 500;
+	text-align: left;
+	cursor: pointer;
+}
+
+.settings-editor.t3-settings-experience .t3-settings-back-button:hover,
+.settings-editor.t3-settings-experience .t3-settings-back-button:focus-visible {
+	background: var(--t3-settings-hover-background);
+	color: var(--t3-settings-foreground);
+}
+
+.settings-editor.t3-settings-experience .t3-settings-back-button .codicon {
+	width: 16px;
+	height: 16px;
+	font-size: 16px;
+	line-height: 16px;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container {
+	height: 100%;
+	margin: 0;
+	padding: 0;
+	border: 0;
+	background: var(--t3-settings-background) !important;
+	box-shadow: none;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .monaco-list,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .monaco-list-rows,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .monaco-scrollable-element {
+	background: transparent !important;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .monaco-list-row,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .monaco-list-row.focused,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .monaco-list-row.selected,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .monaco-list-row:hover {
+	background: transparent !important;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .monaco-list-row .monaco-tl-contents,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .monaco-list-row .monaco-tl-contents.group-title {
+	width: 100%;
+	max-width: 960px;
+	margin: 0 auto;
+	box-sizing: border-box;
+	padding-right: 32px;
+	padding-left: 32px;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .settings-group-title-label {
+	height: 64px;
+	box-sizing: border-box;
+	margin: 0;
+	padding: 28px 16px 12px;
+	overflow: visible;
+	border: 0;
+	background: transparent !important;
+	color: var(--t3-settings-foreground);
+	font-size: 18px;
+	font-weight: 600;
+	line-height: 24px;
+	letter-spacing: -0.025em;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .settings-group-title-label.settings-group-first {
+	padding-top: 36px;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .settings-group-title-label.settings-group-level-1,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .settings-group-title-label.settings-group-level-2,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .settings-group-title-label.settings-group-level-3 {
+	font-size: 18px;
+	line-height: 24px;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-contents,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-bool .setting-item-contents,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-list .setting-item-contents {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(160px, auto);
+	column-gap: 32px;
+	align-items: center;
+	box-sizing: border-box;
+	min-height: 64px;
+	padding: 12px 16px;
+	border: 0;
+	border-radius: 12px;
+	background: transparent !important;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .monaco-list-row.focused .settings-row-inner-container,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .monaco-list-row:not(.focused) .settings-row-inner-container:hover,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .monaco-list:focus-within .monaco-list-row.focused .setting-item-contents {
+	border: 0;
+	outline: 0 !important;
+	background: transparent !important;
+	box-shadow: none;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-contents .setting-item-title {
+	grid-column: 1;
+	min-width: 0;
+	padding: 0;
+	overflow: visible;
+	text-overflow: initial;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-contents .setting-item-label,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-contents .setting-item-category {
+	color: var(--t3-settings-foreground);
+	font-size: 14px;
+	font-weight: 500;
+	line-height: 20px;
+	letter-spacing: -0.005em;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-contents .setting-item-description {
+	grid-column: 1;
+	min-width: 0;
+	max-width: 576px;
+	margin-top: 2px;
+	color: var(--t3-settings-muted-foreground);
+	font-size: 13px;
+	font-weight: 400;
+	line-height: 1.45;
+	opacity: 1;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-contents .setting-item-value,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-bool .setting-item-bool-control {
+	grid-column: 2;
+	grid-row: 1 / span 2;
+	align-self: center;
+	justify-content: flex-end;
+	margin: 0;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-bool .setting-item-value-description {
+	display: contents;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-bool .setting-item-description {
+	display: block;
+	grid-column: 1;
+	grid-row: 2;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-contents .setting-item-modified-indicator {
+	display: none !important;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-toolbar-container {
+	display: none !important;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-text .setting-item-value > .setting-item-control,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-number .setting-item-value > .setting-item-control {
+	width: min(320px, 100%);
+	max-width: 320px;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-enum .setting-item-value > .setting-item-control {
+	width: min(220px, 100%);
+	min-width: 144px;
+	max-width: 220px;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-enum .setting-item-value > .setting-item-control > .select-container,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-enum .setting-item-value > .setting-item-control > select,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-contents .monaco-select-box {
+	width: 100% !important;
+	min-width: 144px;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-contents .monaco-select-box,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-control input,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-control textarea,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-contents .edit-in-settings-button,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-list-widget .setting-list-object-list-row.select-container {
+	min-height: 32px;
+	box-sizing: border-box;
+	border: 1px solid var(--t3-settings-input-border);
+	border-radius: 8px;
+	background: var(--t3-settings-input-background);
+	color: var(--t3-settings-foreground);
+	font: inherit;
+	font-size: 13px;
+	font-weight: 400;
+	box-shadow: none;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-contents .monaco-select-box,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-control input,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-control textarea {
+	padding-inline: 11px;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-contents .monaco-select-box {
+	padding-right: 34px;
+	line-height: 30px;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-contents .edit-in-settings-button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0 12px;
+	line-height: 30px;
+	text-decoration: none;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-contents .monaco-select-box:hover,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-control input:hover,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-control textarea:hover,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-contents .edit-in-settings-button:hover {
+	border-color: color-mix(in srgb, var(--t3-settings-foreground) 16%, transparent);
+	background: var(--t3-settings-input-background);
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-contents .monaco-select-box:focus,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-control input:focus,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-control textarea:focus,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-contents .edit-in-settings-button:focus,
+.settings-editor.t3-settings-experience .monaco-inputbox.synthetic-focus,
+.settings-editor.t3-settings-experience .monaco-inputbox:focus-within,
+.settings-editor.t3-settings-experience .monaco-select-box.synthetic-focus,
+.settings-editor.t3-settings-experience .monaco-select-box:focus-within {
+	border-color: var(--t3-settings-primary) !important;
+	outline: none !important;
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--t3-settings-primary) 16%, transparent) !important;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-bool .setting-value-checkbox {
+	position: relative;
+	width: 30px;
+	height: 18px;
+	margin: 0;
+	padding: 0;
+	border: 0;
+	border-radius: 999px;
+	outline: none;
+	background: var(--t3-settings-input-background);
+	box-shadow: inset 0 0 0 1px var(--t3-settings-input-border);
+	transition: background-color 140ms ease, box-shadow 140ms ease;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-bool .setting-value-checkbox.codicon::before {
+	display: none;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-bool .setting-value-checkbox::after {
+	content: '';
+	position: absolute;
+	top: 2px;
+	left: 2px;
+	width: 14px;
+	height: 14px;
+	border-radius: 50%;
+	background: var(--t3-settings-foreground);
+	box-shadow: 0 1px 2px color-mix(in srgb, #000 24%, transparent);
+	transition: transform 140ms ease;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-bool .setting-value-checkbox.checked {
+	background: var(--t3-settings-primary);
+	box-shadow: none;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-bool .setting-value-checkbox.checked::after {
+	transform: translateX(12px);
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-bool .setting-value-checkbox:focus-visible {
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--t3-settings-primary) 16%, transparent);
+}
+
+.settings-editor.t3-settings-experience > .settings-body > .no-results-message {
+	max-width: 896px;
+	margin: 40px auto 0;
+	padding: 0 32px;
+	color: var(--t3-settings-muted-foreground) !important;
+	font-size: 14px;
+}
+
+.settings-editor.t3-settings-experience.narrow-width .t3-settings-topbar-sidebar {
+	display: none;
+}
+
+.settings-editor.t3-settings-experience.narrow-width > .settings-body .settings-tree-container .monaco-list-row .monaco-tl-contents,
+.settings-editor.t3-settings-experience.narrow-width > .settings-body .settings-tree-container .monaco-list-row .monaco-tl-contents.group-title {
+	display: block;
+	padding-right: 16px;
+	padding-left: 16px;
+}
+
+.settings-editor.t3-settings-experience.narrow-width > .settings-body .settings-tree-container .setting-item-contents {
+	display: block;
+}
+
+.settings-editor.t3-settings-experience.narrow-width > .settings-body .settings-tree-container .setting-item-contents .setting-item-value {
+	justify-content: flex-start;
+	margin-top: 9px;
+}

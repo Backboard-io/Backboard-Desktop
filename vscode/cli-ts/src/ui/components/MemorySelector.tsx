@@ -27,22 +27,25 @@ const MEMORY_CHOICES: readonly MemoryChoice[] = [
 ];
 
 interface Props {
+	currentMode: MemoryMode;
 	onSelect: (choice: MemoryChoice) => void | Promise<void>;
 	onCancel: () => void;
 }
 
 export function MemorySelector({
+	currentMode,
 	onSelect,
 	onCancel,
 }: Props): React.ReactElement {
 	return (
 		<Picker
-			title="Select Memory"
-			tabs={memoryTabs()}
+			title="Memory"
+			tabs={memoryTabs(currentMode)}
 			onSelect={onSelect}
 			onCancel={onCancel}
 			emptyLabel="No memory options."
 			showSearch={false}
+			initialItemId={currentMode}
 		/>
 	);
 }
@@ -51,14 +54,17 @@ export function memoryChoices(): readonly MemoryChoice[] {
 	return MEMORY_CHOICES;
 }
 
-function memoryTabs(): PickerTab<MemoryChoice>[] {
+function memoryTabs(currentMode: MemoryMode): PickerTab<MemoryChoice>[] {
 	return [
 		{
 			id: "memory",
 			label: "Memory",
 			items: MEMORY_CHOICES.map((choice) => ({
 				id: choice.mode,
-				name: choice.label,
+				name:
+					choice.mode === currentMode
+						? `${choice.label} [Current]`
+						: choice.label,
 				description: choice.description,
 				value: choice,
 			})),

@@ -9,6 +9,7 @@ export interface CliFlags {
 	cwd?: string;
 	print?: string;
 	serve: boolean;
+	permissionMode?: string;
 	finalVerification?: boolean;
 	lsp?: boolean;
 	fresh?: boolean;
@@ -101,6 +102,9 @@ export function parseFlags(argv: string[]): CliFlags {
 				break;
 			case "serve":
 				flags.serve = true;
+				break;
+			case "permission-mode":
+				flags.permissionMode = readValue();
 				break;
 			case "final-verification":
 			case "final_verification": {

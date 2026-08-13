@@ -1,65 +1,45 @@
-import type { PermissionPolicy } from "../core/tools/ToolPermissionGateTypes.ts";
-import type {
-	BackboardAudioFile,
-	BackboardVoiceConfig,
-} from "../providers/backboard/types.ts";
+import type { PermissionMode } from "../core/permissions/PermissionMode.ts";
 
-/**
- * One control operation, sent by the host as a single NDJSON line on stdin.
- * The host is typically the Backboard IDE's agent host, which keeps one serve
- * process per chat session and submits one `submit` op per user message.
- */
+/** A binary attachment sent by the IDE and staged for the public R-CLI. */
 export interface ServeFileAttachment {
 	fileName: string;
 	mimeType?: string;
 	dataBase64: string;
 }
 
+/**
+ * One control operation sent by Backboard Studio as one NDJSON line.
+ *
+ * This transport is the only IDE-specific surface layered on top of the
+ * public Backboard R-CLI. The agent loop, tools, permissions, providers,
+ * checkpoints, MCP, skills, and session state all remain owned by R-CLI.
+ */
 export type ServeControl =
 	| {
 			op: "submit";
 			requestId: string;
 			prompt: string;
-			/**
-			 * Backend thread to resume. A serve process starts with no thread
-			 * binding; without this, a host restart (new process) would begin a
-			 * fresh thread and lose all conversation memory even though the host
-			 * still shows the old transcript. Adopted only while the session has
-			 * no thread yet — an established binding is never clobbered.
-			 */
+			/** Existing provider thread to resume after an IDE/process restart. */
 			threadId?: string;
 			model?: string;
 			thinking?: string;
-			/** Omit provider reasoning traces from responses when supported. */
+			/** Retained for wire compatibility; R-CLI does not expose reasoning text. */
 			excludeReasoning?: boolean;
 			excludedTools?: string[];
-			permission?: PermissionPolicy;
+			permission?: PermissionMode;
 			memory?: string;
 			skills?: string[];
 			files?: ServeFileAttachment[];
-			/** Enables the computer-use tools for this turn (default off). */
 			computerUse?: boolean;
-			/** Enables the browser-use tool for this turn (default off). */
 			browserUse?: boolean;
-			/** Enables turn-completion notifications for this turn (default off). */
 			notify?: boolean;
-			/** Enables image-generation intent (reserved; inert until a tool consumes it). */
+			/** Reserved by the IDE until R-CLI exposes image-generation controls. */
 			imageGeneration?: boolean;
-			/** Per-turn Backboard voice pipeline configuration. */
-			voice?: BackboardVoiceConfig;
-			/** Base64 audio from the desktop composer; uploaded as audio_file. */
-			audioFile?: BackboardAudioFile;
 	  }
 	| { op: "steer"; requestId?: string; prompt: string }
 	| { op: "warmup"; requestId?: string }
 	| { op: "cancel"; requestId?: string }
-	| { op: "respondInput"; id: string; answer: string }
-	| {
-			op: "respondPermission";
-			id: string;
-			decision: "approve" | "deny";
-			reason?: string;
-	  }
+	| { op: "respondInput"; id: string; answers: string[] }
 	| { op: "setModel"; requestId?: string; model: string }
 	| { op: "listModels"; requestId: string }
 	| { op: "listTools"; requestId: string }
@@ -76,11 +56,7 @@ export type ServeRecordType =
 	| "serve:ack"
 	| "serve:error";
 
-/**
- * A serve-mode control response, written to stdout as one JSONL line. These
- * interleave with the `JsonEventStream` agent-event records; hosts tell them
- * apart by `source`.
- */
+/** A control response interleaved with R-CLI client events on stdout. */
 export interface ServeRecord {
 	timestamp: string;
 	session_id: string;
@@ -88,9 +64,4 @@ export interface ServeRecord {
 	type: ServeRecordType;
 	requestId?: string;
 	payload?: unknown;
-}
-
-export interface ServeToolInfo {
-	name: string;
-	displayName: string;
 }

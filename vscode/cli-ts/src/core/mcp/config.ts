@@ -8,6 +8,7 @@ import {
 	qProjectMcpConfigPath,
 	qUserMcpConfigPath,
 } from "../../config/paths.ts";
+import { errorMessage } from "../../utils/errors.ts";
 
 export const DEFAULT_MCP_TIMEOUT_MS = 60_000;
 
@@ -28,6 +29,7 @@ const ServerSchema = z
 		enabledResources: z.array(z.string()).optional(),
 		disabledResources: z.array(z.string()).optional(),
 		timeoutMs: z.number().int().positive().optional(),
+		trustToolAnnotations: z.boolean().optional(),
 	})
 	.passthrough();
 
@@ -65,6 +67,7 @@ export interface McpServerFileEntry {
 	enabledResources?: string[];
 	disabledResources?: string[];
 	timeoutMs?: number;
+	trustToolAnnotations?: boolean;
 }
 
 export interface McpServerConfig {
@@ -85,6 +88,7 @@ export interface McpServerConfig {
 	enabledResources?: string[];
 	disabledResources: string[];
 	timeoutMs: number;
+	trustToolAnnotations: boolean;
 }
 
 export interface McpConfig {
@@ -131,7 +135,8 @@ export async function loadMcpConfig(
 			timeoutMs = file.data.timeoutMs;
 		}
 		const servers = file.data.mcpServers ?? {};
-		for (const [name, raw] of Object.entries(servers)) {
+		for (const [name, entry] of Object.entries(servers)) {
+			const raw = scopedServer(name, entry, file.source, warnings);
 			const existing = layeredServers.get(name);
 			layeredServers.set(name, {
 				raw: existing ? mergeServer(existing.raw, raw) : raw,
@@ -322,10 +327,26 @@ async function loadFiles(
 			}
 			files.push({ data: result.data, source });
 		} catch (err) {
-			warnings.push(`Skipped MCP config ${filePath}: ${formatError(err)}.`);
+			warnings.push(`Skipped MCP config ${filePath}: ${errorMessage(err)}.`);
 		}
 	}
 	return files;
+}
+
+function scopedServer(
+	name: string,
+	raw: RawServer,
+	source: McpConfigSource,
+	warnings: string[],
+): RawServer {
+	if (source.scope !== "project" || raw.trustToolAnnotations === undefined) {
+		return raw;
+	}
+	warnings.push(
+		`Ignored trustToolAnnotations for MCP server '${name}' in ${source.path}: it is only honored in user config.`,
+	);
+	const { trustToolAnnotations: _ignored, ...rest } = raw;
+	return rest;
 }
 
 function mergeServer(base: RawServer, override: RawServer): RawServer {
@@ -406,6 +427,7 @@ function normalizeServer(
 			enabledResources: raw.enabledResources,
 			disabledResources: raw.disabledResources ?? [],
 			timeoutMs,
+			trustToolAnnotations: raw.trustToolAnnotations === true,
 		};
 	}
 
@@ -431,6 +453,7 @@ function normalizeServer(
 		enabledResources: raw.enabledResources,
 		disabledResources: raw.disabledResources ?? [],
 		timeoutMs,
+		trustToolAnnotations: raw.trustToolAnnotations === true,
 	};
 }
 
@@ -507,10 +530,6 @@ function expandString(
 			return match;
 		},
 	);
-}
-
-function formatError(err: unknown): string {
-	return err instanceof Error ? err.message : String(err);
 }
 
 async function readMcpFile(filePath: string): Promise<Record<string, unknown>> {

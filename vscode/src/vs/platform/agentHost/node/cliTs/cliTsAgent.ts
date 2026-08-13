@@ -17,7 +17,7 @@ import { AgentSession, AgentSignal, IAgent, IAgentCreateSessionConfig, IAgentCre
 import { ActionType, type ChatAction, type SessionAction } from '../../common/state/sessionActions.js';
 import type { ResolveSessionConfigResult, SessionConfigCompletionsResult } from '../../common/state/protocol/commands.js';
 import type { ModelSelection, ProtectedResourceMetadata, ToolDefinition } from '../../common/state/protocol/state.js';
-import { ChatInputAnswerValueKind, ChatInputQuestionKind, ChatInputResponseKind, MessageAttachmentKind, MessageKind, ResponsePartKind, SessionStatus, ToolCallCancellationReason, ToolCallConfirmationReason, ToolCallStatus, ToolResultContentType, TurnState, type ChatInputAnswer, type ChatInputQuestion, type ClientPluginCustomization, type MessageAttachment, type PendingMessage, type SessionInputAnswer, type SessionInputResponseKind, type ToolCallResult, type ToolResultContent, type Turn } from '../../common/state/sessionState.js';
+import { ChatInputAnswerValueKind, ChatInputQuestionKind, ChatInputResponseKind, MessageAttachmentKind, MessageKind, ResponsePartKind, SessionStatus, ToolCallCancellationReason, ToolCallConfirmationReason, ToolCallStatus, ToolResultContentType, TurnState, type ChatInputQuestion, type ClientPluginCustomization, type MessageAttachment, type PendingMessage, type SessionInputAnswer, type SessionInputResponseKind, type ToolCallResult, type ToolResultContent, type Turn } from '../../common/state/sessionState.js';
 import type { ISyncedCustomization } from '../../common/agentPluginManager.js';
 import { IInstantiationService } from '../../../instantiation/common/instantiation.js';
 import { ISessionDatabase, ISessionDataService } from '../../common/sessionDataService.js';
@@ -30,7 +30,7 @@ import { BACKBOARD_ACCESS_MANUAL, BACKBOARD_MODE_PLAN, BUNDLED_BACKBOARD_MODELS,
 const CLI_TS_WEB_SEARCH_TOOL_NAME = 'WebSearch';
 import { rgDiskPath } from '../../../../base/node/ripgrep.js';
 import { CliTsServeProcess } from './cliTsProcess.js';
-import type { CliTsAgentEvent, CliTsFileAttachment, CliTsPermissionPolicy, CliTsTurnStatus } from './cliTsProtocol.js';
+import type { CliTsAgentEvent, CliTsFileAttachment, CliTsPermissionMode, CliTsTurnStatus } from './cliTsProtocol.js';
 
 const CLI_TS_STORE_VERSION = 1;
 
@@ -114,10 +114,8 @@ interface CliTsSession {
 	turn?: CliTsTurnState;
 	/** Lazily-opened file-edit tracker + its session DB reference. */
 	fileEdits?: { tracker: FileEditTracker; dbRef: IReference<ISessionDatabase> };
-	/** cli-ts permission id per pending toolCallId (answered via respondToPermissionRequest). */
-	readonly pendingPermissions: Map<string, string>;
-	/** Pending cli-ts AskUser request ids (answered via respondToUserInputRequest). */
-	readonly pendingInputs: Set<string>;
+	/** Public R-CLI AskUser request ids and their ordered IDE question ids. */
+	readonly pendingInputs: Map<string, readonly string[]>;
 	readonly storedTurns: CliTsStoredTurn[];
 }
 
@@ -310,7 +308,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 		const proc = this._ensureProcess(session, rgDir);
 		const storedConfig = this._configurationService.getSessionConfigValues(session.sessionUri.toString());
 		const settings = createBackboardTurnSettings(storedConfig, session.config, session.model);
-		const permission: CliTsPermissionPolicy = settings.accessMode === BACKBOARD_ACCESS_MANUAL ? 'default' : 'autoApprove';
+		const permission: CliTsPermissionMode = settings.accessMode === BACKBOARD_ACCESS_MANUAL ? 'manual' : 'bypass';
 		// Build the per-turn tool exclusion list. Plan mode hides write-class
 		// tools from the model entirely (on top of gating); the Web Search
 		// toggle removes the built-in web search tool when disabled. The list
@@ -378,7 +376,11 @@ export class CliTsAgent extends Disposable implements IAgent {
 				excludedTools,
 				...(prepared.files.length ? { files: prepared.files } : {}),
 			});
-			const status = (record.payload as { status?: CliTsTurnStatus } | undefined)?.status;
+			const payload = record.payload as { status?: CliTsTurnStatus; threadId?: string | null } | undefined;
+			const status = payload?.status;
+			if (payload?.threadId) {
+				session.threadId = payload.threadId;
+			}
 			if (status === 'failed' && !turn.failed) {
 				turn.failed = true;
 				this._fire(session.sessionUri, {
@@ -410,7 +412,6 @@ export class CliTsAgent extends Disposable implements IAgent {
 			session.modifiedAt = Date.now();
 			this._writeStore();
 			session.turn = undefined;
-			session.pendingPermissions.clear();
 			session.pendingInputs.clear();
 			this._fire(session.sessionUri, { type: ActionType.ChatTurnComplete, turnId: effectiveTurnId });
 		}
@@ -442,7 +443,6 @@ export class CliTsAgent extends Disposable implements IAgent {
 			return;
 		}
 		session.proc?.notify({ op: 'cancel' });
-		session.pendingPermissions.clear();
 		session.pendingInputs.clear();
 	}
 
@@ -473,25 +473,21 @@ export class CliTsAgent extends Disposable implements IAgent {
 	}
 
 	respondToPermissionRequest(requestId: string, approved: boolean): void {
-		for (const session of this._sessions.values()) {
-			const permissionId = session.pendingPermissions.get(requestId);
-			if (permissionId) {
-				session.pendingPermissions.delete(requestId);
-				if (approved) {
-					session.turn?.confirmedToolCalls.add(requestId);
-				}
-				session.proc?.notify({ op: 'respondPermission', id: permissionId, decision: approved ? 'approve' : 'deny' });
-				return;
-			}
-		}
-		this._logService.warn(`[cli-ts] No pending tool approval found for ${requestId}`);
+		// Public R-CLI permission decisions use the same multi-question
+		// input:request channel as AskUser. This method remains only because it is
+		// part of IAgent; no R-CLI request is registered on this channel.
+		this._logService.warn(`[cli-ts] Ignoring legacy permission response for ${requestId} (approved=${approved})`);
 	}
 
 	respondToUserInputRequest(requestId: string, response: SessionInputResponseKind, answers?: Record<string, SessionInputAnswer>): void {
 		for (const session of this._sessions.values()) {
-			if (session.pendingInputs.delete(requestId)) {
-				const answer = response === ChatInputResponseKind.Accept ? inputAnswerText(answers) : '';
-				session.proc?.notify({ op: 'respondInput', id: requestId, answer });
+			const questionIds = session.pendingInputs.get(requestId);
+			if (questionIds) {
+				session.pendingInputs.delete(requestId);
+				const inputAnswers = response === ChatInputResponseKind.Accept
+					? questionIds.map(questionId => inputAnswerText(answers?.[questionId]))
+					: [];
+				session.proc?.notify({ op: 'respondInput', id: requestId, answers: inputAnswers });
 				return;
 			}
 		}
@@ -601,8 +597,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 			threadId: restored?.threadId,
 			materialized: !!restored,
 			disposed: false,
-			pendingPermissions: new Map(),
-			pendingInputs: new Set(),
+			pendingInputs: new Map(),
 			storedTurns: [...(restored?.turns ?? [])],
 		};
 	}
@@ -629,7 +624,6 @@ export class CliTsAgent extends Disposable implements IAgent {
 			extraPathDirs: rgDir ? [rgDir] : undefined,
 			onEvent: event => this._handleAgentEvent(session, event),
 			onExit: () => {
-				session.pendingPermissions.clear();
 				session.pendingInputs.clear();
 			},
 		});
@@ -797,10 +791,12 @@ export class CliTsAgent extends Disposable implements IAgent {
 					turn.toolInputs.set(call.id, { name: call.name, input: call.input });
 				}
 				return;
-			case 'tool:discarded': {
-				if (!event.toolCallId || !event.name || !turn.startedToolCalls.has(event.toolCallId)) {
+			case 'tool:discarded':
+			case 'tool:retracted': {
+				if (!event.toolCallId || !turn.startedToolCalls.has(event.toolCallId)) {
 					return;
 				}
+				const name = event.name ?? turn.toolInputs.get(event.toolCallId)?.name ?? 'Tool';
 				// Backboard's early tool events are advisory. If the final
 				// tool_submit_required frame omits one, close its speculative card
 				// instead of leaving a permanent spinner behind.
@@ -808,7 +804,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 					type: ActionType.ChatToolCallReady,
 					turnId,
 					toolCallId: event.toolCallId,
-					invocationMessage: toolDisplayName(event.name),
+					invocationMessage: toolDisplayName(name),
 					toolInput: '',
 					_meta: { source: 'cli-ts' },
 				});
@@ -825,6 +821,9 @@ export class CliTsAgent extends Disposable implements IAgent {
 			case 'tool:pending': {
 				if (!event.toolCallId || !event.name) {
 					return;
+				}
+				if (!turn.toolInputs.has(event.toolCallId)) {
+					turn.toolInputs.set(event.toolCallId, { name: event.name, input: undefined });
 				}
 				this._ensureToolCallStart(session, turn, event.toolCallId, event.name, event.inputSummary);
 				return;
@@ -956,55 +955,43 @@ export class CliTsAgent extends Disposable implements IAgent {
 				});
 				return;
 			}
-			case 'permission:request': {
-				const request = event.request;
-				if (!request?.id || !request.toolCallId || !request.name) {
-					return;
-				}
-				this._ensureToolCallStart(session, turn, request.toolCallId, request.name, request.inputSummary);
-				session.pendingPermissions.set(request.toolCallId, request.id);
-				this._onDidSessionProgress.fire({
-					kind: 'pending_confirmation',
-					session: session.sessionUri,
-					permissionKind: 'write',
-					state: {
-						status: ToolCallStatus.PendingConfirmation,
-						toolCallId: request.toolCallId,
-						toolName: request.name,
-						displayName: toolDisplayName(request.name),
-						invocationMessage: toolInvocationMessage(request.name, request.inputSummary),
-						toolInput: request.inputSummary,
-						confirmationTitle: localize('cliTsAgent.confirmationTitle', "Allow Backboard to use {0}?", toolDisplayName(request.name)),
-						_meta: { source: 'cli-ts' },
-					},
-				});
-				return;
-			}
 			case 'input:request': {
 				const request = event.request;
-				if (!request?.id || !request.question) {
+				if (!request?.id) {
 					return;
 				}
-				session.pendingInputs.add(request.id);
-				const options = request.options ?? [];
-				const question: ChatInputQuestion = options.length
-					? {
-						id: 'answer',
-						kind: ChatInputQuestionKind.SingleSelect,
-						message: request.question,
-						required: true,
-						options: options.map(option => ({ id: option, label: option })),
-						allowFreeformInput: true,
-					}
-					: {
-						id: 'answer',
-						kind: ChatInputQuestionKind.Text,
-						message: request.question,
-						required: true,
-					};
+				const specs = request.questions?.length
+					? request.questions
+					: request.question
+						? [{ question: request.question, options: request.options ?? [] }]
+						: [];
+				if (!specs.length) {
+					return;
+				}
+				const questions: ChatInputQuestion[] = specs.map((spec, index) => {
+					const id = `answer-${index}`;
+					return spec.options.length
+						? {
+							id,
+							title: spec.header,
+							kind: ChatInputQuestionKind.SingleSelect,
+							message: spec.question,
+							required: true,
+							options: spec.options.map(option => ({ id: option, label: option })),
+							allowFreeformInput: true,
+						}
+						: {
+							id,
+							title: spec.header,
+							kind: ChatInputQuestionKind.Text,
+							message: spec.question,
+							required: true,
+						};
+				});
+				session.pendingInputs.set(request.id, questions.map(question => question.id));
 				this._fire(session.sessionUri, {
 					type: ActionType.ChatInputRequested,
-					request: { id: request.id, message: request.question, questions: [question] },
+					request: { id: request.id, message: specs[0]?.question ?? '', questions },
 				});
 				return;
 			}
@@ -1225,8 +1212,7 @@ function prepareSubmitAttachments(prompt: string, attachments?: readonly Message
 	};
 }
 
-function inputAnswerText(answers?: Record<string, SessionInputAnswer>): string {
-	const answer: ChatInputAnswer | undefined = answers?.['answer'] ?? (answers ? Object.values(answers)[0] : undefined);
+function inputAnswerText(answer?: SessionInputAnswer): string {
 	if (!answer || !('value' in answer) || answer.value === undefined) {
 		return '';
 	}

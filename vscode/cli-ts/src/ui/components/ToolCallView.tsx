@@ -29,12 +29,34 @@ export const TOOL_STATUS_ICON: Record<ToolStatus, string> = {
 	error: "✗",
 };
 
-export const TOOL_STATUS_COLOR: Record<ToolStatus, string> = {
-	pending: theme.toolRunning,
-	running: theme.toolRunning,
-	done: theme.toolDone,
-	error: theme.toolError,
-};
+// A function rather than a module-level record: a record would snapshot the
+// theme at import time, before the terminal background has been detected.
+export function toolStatusColor(status: ToolStatus): string {
+	switch (status) {
+		case "pending":
+		case "running":
+			return theme.toolRunning;
+		case "done":
+			return theme.toolDone;
+		case "error":
+			return theme.toolError;
+	}
+}
+
+// A tool's whole body — parameters, metadata, title, detail — shares one muted
+// tone; only the tool name and the ×N call count stand out. Keep the parameter
+// line uniformly subtle so nothing under the header competes with it.
+export function InputSummary({
+	summary,
+}: {
+	summary: string;
+}): React.ReactElement {
+	return (
+		<Text color={theme.subtle} wrap="truncate-end">
+			{summary}
+		</Text>
+	);
+}
 
 export function ToolCallView({
 	name,
@@ -58,9 +80,7 @@ export function ToolCallView({
 	return (
 		<Box flexDirection="column" marginTop={1}>
 			<Box>
-				<Text color={TOOL_STATUS_COLOR[status]}>
-					{TOOL_STATUS_ICON[status]}{" "}
-				</Text>
+				<Text color={toolStatusColor(status)}>{TOOL_STATUS_ICON[status]} </Text>
 				{shadowRange ? (
 					<ShadowedText text={agentLabel} shadowRange={shadowRange} bold />
 				) : (
@@ -71,9 +91,7 @@ export function ToolCallView({
 			</Box>
 			{inputSummary ? (
 				<Box marginLeft={3}>
-					<Text color={theme.subtle} wrap="truncate-end">
-						{inputSummary}
-					</Text>
+					<InputSummary summary={inputSummary} />
 				</Box>
 			) : null}
 			{showChildLine ? (

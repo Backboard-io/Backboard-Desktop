@@ -136,6 +136,11 @@ function isSessionShowMore(item: SessionListItem): item is ISessionShowMore {
 }
 
 const SHOW_MORE_FOLDERS_LABEL = '__more_folders__';
+const SIMPLE_MORE_SETTLED_LABEL = '__simple_more_settled__';
+const SIMPLE_SETTLED_SECTION_ID = 'simple-settled';
+const SIMPLE_SETTLED_INITIAL_COUNT = 10;
+const SIMPLE_SETTLED_PAGE_COUNT = 25;
+const SIMPLE_AUTO_SETTLE_MS = 3 * 24 * 60 * 60 * 1000;
 const FOUR_DAYS_MS = 4 * 24 * 60 * 60 * 1000;
 
 const MINUTE_MS = 60 * 1000;
@@ -175,6 +180,12 @@ export function formatCompactAge(date: Date, now: number = Date.now()): string {
 	return localize('compactAge.years', "{0}y", Math.floor(elapsed / YEAR_MS));
 }
 
+function isSimpleSettledSession(session: ISession): boolean {
+	return session.isArchived.get()
+		|| (session.status.get() === SessionStatus.Completed
+			&& session.updatedAt.get().getTime() < Date.now() - SIMPLE_AUTO_SETTLE_MS);
+}
+
 //#endregion
 
 //#region Tree Delegate
@@ -200,6 +211,9 @@ class SessionsTreeDelegate implements IListVirtualDelegate<SessionListItem> {
 
 	constructor(
 		private readonly _isPhone: () => boolean,
+		private readonly _simpleMode: boolean,
+		private readonly _isSimpleSettled: (session: ISession) => boolean,
+		private readonly _isSimpleCompact: () => boolean,
 	) { }
 
 	getHeight(element: SessionListItem): number {
@@ -207,7 +221,10 @@ class SessionsTreeDelegate implements IListVirtualDelegate<SessionListItem> {
 			return SessionsTreeDelegate.SECTION_HEIGHT;
 		}
 		if (isSessionShowMore(element)) {
-			return SessionsTreeDelegate.SHOW_MORE_HEIGHT;
+			return this._simpleMode ? 32 : SessionsTreeDelegate.SHOW_MORE_HEIGHT;
+		}
+		if (this._simpleMode) {
+			return this._isSimpleSettled(element) ? 36 : this._isSimpleCompact() ? 34 : 82;
 		}
 
 		return this._isPhone() ? SessionsTreeDelegate.ITEM_HEIGHT_PHONE : SessionsTreeDelegate.ITEM_HEIGHT;
@@ -256,6 +273,8 @@ interface ISessionItemTemplate {
 	readonly title: HighlightedLabel;
 	readonly titleToolbar: MenuWorkbenchToolBar;
 	readonly detailsRow: HTMLElement;
+	readonly simpleBranch: HTMLElement;
+	readonly simpleAgentIcon: HTMLElement;
 	readonly contextKeyService: IContextKeyService;
 	readonly disposables: DisposableStore;
 	readonly elementDisposables: DisposableStore;
@@ -266,7 +285,7 @@ class SessionItemRenderer implements ITreeRenderer<SessionListItem, FuzzyScore, 
 	readonly templateId = SessionItemRenderer.TEMPLATE_ID;
 
 	constructor(
-		private readonly options: { grouping: () => SessionsGrouping; sorting: () => SessionsSorting; isPinned: (session: ISession) => boolean; isRead: (session: ISession) => boolean; visibleSessions: IObservable<readonly (IActiveSession | undefined)[]>; getMultiSelectedSessions: (session: ISession) => ISession[] },
+		private readonly options: { grouping: () => SessionsGrouping; sorting: () => SessionsSorting; simpleMode: boolean; isSimpleSettled: (session: ISession) => boolean; isSimpleCompact: () => boolean; isPinned: (session: ISession) => boolean; isRead: (session: ISession) => boolean; visibleSessions: IObservable<readonly (IActiveSession | undefined)[]>; getMultiSelectedSessions: (session: ISession) => ISession[] },
 		private readonly approvalModel: AgentSessionApprovalModel | undefined,
 		private readonly instantiationService: IInstantiationService,
 		private readonly contextKeyService: IContextKeyService,
@@ -291,6 +310,8 @@ class SessionItemRenderer implements ITreeRenderer<SessionListItem, FuzzyScore, 
 		const providerIcon = DOM.append(titleRow, $('.session-provider-icon'));
 		const title = disposables.add(new HighlightedLabel(DOM.append(titleRow, $('.session-title'))));
 		const detailsRow = DOM.append(titleRow, $('.session-details-row'));
+		const simpleBranch = DOM.append(titleRow, $('span.session-simple-branch'));
+		const simpleAgentIcon = DOM.append(titleRow, $('span.session-simple-agent-icon'));
 		const titleToolbarContainer = DOM.append(titleRow, $('.session-title-toolbar'));
 		// The list opens a session on click and on Gesture `tap` (touch).
 		// DOM event propagation stops only cover mouse/pointer events; the
@@ -311,7 +332,7 @@ class SessionItemRenderer implements ITreeRenderer<SessionListItem, FuzzyScore, 
 			actionRunner,
 		}));
 
-		return { container, statusIcon, providerIcon, title, titleToolbar, detailsRow, contextKeyService, disposables, elementDisposables };
+		return { container, statusIcon, providerIcon, title, titleToolbar, detailsRow, simpleBranch, simpleAgentIcon, contextKeyService, disposables, elementDisposables };
 	}
 
 	renderElement(node: ITreeNode<SessionListItem, FuzzyScore>, _index: number, template: ISessionItemTemplate): void {
@@ -324,6 +345,11 @@ class SessionItemRenderer implements ITreeRenderer<SessionListItem, FuzzyScore, 
 
 	private renderSession(element: ISession, template: ISessionItemTemplate, matches?: IMatch[]): void {
 		template.elementDisposables.clear();
+		const simpleSettled = this.options.simpleMode && this.options.isSimpleSettled(element);
+		const simpleCompact = this.options.simpleMode && this.options.isSimpleCompact() && !simpleSettled;
+		template.container.classList.toggle('simple-session-card', this.options.simpleMode && !simpleSettled && !simpleCompact);
+		template.container.classList.toggle('simple-session-compact', simpleCompact);
+		template.container.classList.toggle('simple-session-slim', simpleSettled);
 
 		// TEMPORARY (#320480): trigger lazy resolve of expensive session
 		// properties (e.g. changes) for rows that scroll into view, so providers
@@ -343,11 +369,24 @@ class SessionItemRenderer implements ITreeRenderer<SessionListItem, FuzzyScore, 
 
 		// Provider logo — identifies which agent (Backboard, Claude, Codex,
 		// and future providers) owns the session, rendered just before the title.
-		const providerIcon = providerIconForSessionType(element.sessionType);
+		const workspace = element.workspace.get();
+		const isWorkspaceFolder = workspace && workspace.folders.length > 0 && workspace.folders[0]?.gitRepository?.workTreeUri === undefined;
+		const providerIcon = this.options.simpleMode
+			? simpleSettled ? Codicon.comment : workspace?.isVirtualWorkspace ? Codicon.cloudCompact : isWorkspaceFolder ? Codicon.folderCompact : Codicon.worktreeCompact
+			: providerIconForSessionType(element.sessionType);
 		template.providerIcon.className = providerIcon
 			? `session-provider-icon ${ThemeIcon.asClassName(providerIcon)}`
 			: 'session-provider-icon';
 		template.providerIcon.classList.toggle('no-icon', !providerIcon);
+		const agentIcon = providerIconForSessionType(element.sessionType);
+		template.simpleAgentIcon.className = agentIcon
+			? `session-simple-agent-icon ${ThemeIcon.asClassName(agentIcon)}`
+			: 'session-simple-agent-icon';
+		template.simpleAgentIcon.classList.toggle('no-icon', !this.options.simpleMode || simpleSettled || !agentIcon);
+		const branchName = workspace?.folders[0]?.gitRepository?.branchName?.trim();
+		template.simpleBranch.textContent = this.options.simpleMode && !simpleSettled ? branchName ?? '' : '';
+		template.simpleBranch.classList.toggle('no-branch', !branchName || simpleSettled);
+		template.simpleBranch.classList.toggle('has-branch', !!branchName && !simpleSettled);
 
 		// Toolbar context
 		template.titleToolbar.context = element;
@@ -424,7 +463,7 @@ class SessionItemRenderer implements ITreeRenderer<SessionListItem, FuzzyScore, 
 			DOM.clearNode(template.detailsRow);
 			const parts: HTMLElement[] = [];
 
-			if (sessionStatus !== SessionStatus.InProgress && this.options.grouping() !== SessionsGrouping.Workspace) {
+			if (!this.options.simpleMode && sessionStatus !== SessionStatus.InProgress && this.options.grouping() !== SessionsGrouping.Workspace) {
 				const isWorkspaceSession = workspace &&
 					workspace.folders.length > 0 &&
 					workspace?.folders[0]?.gitRepository?.workTreeUri === undefined;
@@ -438,6 +477,7 @@ class SessionItemRenderer implements ITreeRenderer<SessionListItem, FuzzyScore, 
 			// or when the session is pinned/archived (their section headers
 			// don't carry the workspace name)
 			if (!hideDetails && workspace && (
+				this.options.simpleMode ||
 				this.options.grouping() !== SessionsGrouping.Workspace ||
 				this.options.isPinned(element) ||
 				element.isArchived.read(reader)
@@ -569,7 +609,7 @@ class SessionItemRenderer implements ITreeRenderer<SessionListItem, FuzzyScore, 
 			}
 		}
 
-		return workspace.label;
+		return this.options.simpleMode ? folder?.name ?? workspace.label : workspace.label;
 	}
 
 
@@ -637,6 +677,7 @@ class SessionSectionRenderer implements ITreeRenderer<SessionListItem, FuzzyScor
 			return;
 		}
 		this.templatesByElement.set(element, template);
+		template.container.classList.toggle('session-section-settled', element.id === SIMPLE_SETTLED_SECTION_ID);
 		template.label.textContent = element.label;
 		if (this.hideSectionCount) {
 			template.count.textContent = '';
@@ -706,6 +747,11 @@ class SessionShowMoreRenderer implements ITreeRenderer<SessionListItem, FuzzySco
 		}
 		const container = template.parentElement;
 		container?.classList.toggle('session-show-more-folders', element.kind === 'folders');
+		container?.classList.toggle('session-show-more-simple', element.sectionLabel === SIMPLE_MORE_SETTLED_LABEL);
+		if (element.sectionLabel === SIMPLE_MORE_SETTLED_LABEL) {
+			template.textContent = localize('showMoreSettledCompact', "Show {0} more", element.remainingCount);
+			return;
+		}
 		if (element.mode === 'less') {
 			template.textContent = element.kind === 'folders'
 				? localize('showLessWorkspacesCompact', "Show fewer workspaces")
@@ -814,6 +860,9 @@ export interface ISessionsListControlOptions {
 	readonly overrideStyles?: IStyleOverride<IListStyles>;
 	readonly grouping: () => SessionsGrouping;
 	readonly sorting: () => SessionsSorting;
+	readonly simpleMode?: boolean;
+	readonly workspaceFolderFilter?: () => string | undefined;
+	readonly simpleCompact?: () => boolean;
 	readonly findWidgetContainer?: HTMLElement;
 	onSessionOpen(resource: URI, preserveFocus: boolean, sideBySide: boolean): void;
 }
@@ -855,6 +904,7 @@ export interface ISessionsList {
 	setExcludeRead(exclude: boolean): void;
 	isExcludeRead(): boolean;
 	resetFilters(): void;
+	setSimpleCompact(compact: boolean): void;
 	setWorkspaceGroupCapped(capped: boolean): void;
 	isWorkspaceGroupCapped(): boolean;
 	setOpenWindowSourceFolder(folder: URI | undefined): void;
@@ -882,6 +932,7 @@ export class SessionsList extends Disposable implements ISessionsList {
 	private readonly listContainer: HTMLElement;
 	private lastLayoutWidth: number | undefined;
 	private readonly tree: WorkbenchObjectTree<SessionListItem, FuzzyScore>;
+	private readonly treeDelegate: SessionsTreeDelegate;
 	private sessions: ISession[] = [];
 
 	/**
@@ -905,6 +956,8 @@ export class SessionsList extends Disposable implements ISessionsList {
 	private readonly workspaceGroupLimit = observableValue<number>(this, SessionsList.DEFAULT_WORKSPACE_GROUP_LIMIT);
 	private readonly expandedWorkspaceGroups = new Set<string>();
 	private expandedMoreFolders = false;
+	private simpleSettledVisibleCount = SIMPLE_SETTLED_INITIAL_COUNT;
+	private simpleCompact: boolean;
 	private openWindowSourceFolder: URI | undefined;
 	private hasFindPattern = false;
 	private suspendCollapseStatePersistence = false;
@@ -955,6 +1008,7 @@ export class SessionsList extends Disposable implements ISessionsList {
 		@IWorkbenchAssignmentService private readonly assignmentService: IWorkbenchAssignmentService,
 	) {
 		super();
+		this.simpleCompact = this.options.simpleCompact?.() ?? false;
 
 		// Load excluded session types from storage
 		this.excludedSessionTypes = this.loadExcludedSessionTypes();
@@ -990,7 +1044,7 @@ export class SessionsList extends Disposable implements ISessionsList {
 		// TEMPORARY (#320480): see the note on the `IAgentSessionsService` import.
 		const agentSessionsService = instantiationService.invokeFunction(accessor => accessor.get(IAgentSessionsService));
 		const sessionRenderer = new SessionItemRenderer(
-			{ grouping: this.options.grouping, sorting: this.options.sorting, isPinned: s => this.isSessionPinned(s), isRead: s => this.isSessionRead(s), visibleSessions: this._sessionsService.visibleSessions, getMultiSelectedSessions: s => this.getMultiSelectedSessions(s) },
+			{ grouping: this.options.grouping, sorting: this.options.sorting, simpleMode: !!this.options.simpleMode, isSimpleSettled: isSimpleSettledSession, isSimpleCompact: () => this.simpleCompact, isPinned: s => this.isSessionPinned(s), isRead: s => this.isSessionRead(s), visibleSessions: this._sessionsService.visibleSessions, getMultiSelectedSessions: s => this.getMultiSelectedSessions(s) },
 			approvalModel,
 			instantiationService,
 			contextKeyService,
@@ -1007,13 +1061,13 @@ export class SessionsList extends Disposable implements ISessionsList {
 		// observe the workbench's value rather than shadowing it with a fresh
 		// scoped default of `false`. The reactive height refresh below listens
 		// on the same scoped service for changes.
-		const delegate = new SessionsTreeDelegate(() => !!IsPhoneLayoutContext.getValue(contextKeyService));
+		this.treeDelegate = new SessionsTreeDelegate(() => !!IsPhoneLayoutContext.getValue(contextKeyService), !!this.options.simpleMode, isSimpleSettledSession, () => this.simpleCompact);
 
 		this.tree = this._register(instantiationService.createInstance(
 			WorkbenchObjectTree<SessionListItem, FuzzyScore>,
 			'SessionsListTree',
 			this.listContainer,
-			delegate,
+			this.treeDelegate,
 			[
 				sessionRenderer,
 				sectionRenderer,
@@ -1099,6 +1153,11 @@ export class SessionsList extends Disposable implements ISessionsList {
 				return;
 			}
 			if (isSessionShowMore(element)) {
+				if (element.sectionLabel === SIMPLE_MORE_SETTLED_LABEL) {
+					this.simpleSettledVisibleCount += SIMPLE_SETTLED_PAGE_COUNT;
+					this.update();
+					return;
+				}
 				if (element.kind === 'folders') {
 					this.expandedMoreFolders = element.mode === 'more';
 				} else {
@@ -1131,7 +1190,7 @@ export class SessionsList extends Disposable implements ISessionsList {
 			}
 			for (const session of this.sessions) {
 				if (this.tree.hasElement(session)) {
-					this.tree.updateElementHeight(session, delegate.getHeight(session));
+					this.tree.updateElementHeight(session, this.treeDelegate.getHeight(session));
 				}
 			}
 		}));
@@ -1283,7 +1342,7 @@ export class SessionsList extends Disposable implements ISessionsList {
 		if (this.excludedStatuses.size > 0) {
 			filtered = filtered.filter(s => !this.excludedStatuses.has(s.status.get()));
 		}
-		if (this._excludeArchived) {
+		if (this._excludeArchived && !this.options.simpleMode) {
 			filtered = filtered.filter(s => !s.isArchived.get());
 		}
 		if (this._excludeRead) {
@@ -1293,14 +1352,60 @@ export class SessionsList extends Disposable implements ISessionsList {
 		// Hide sessions whose local workspace folder has been deleted from disk,
 		// so a removed folder no longer appears as a project group.
 		filtered = filtered.filter(s => !this._missingFolderTracker.isMissing(s.workspace.get()?.folders[0]?.root));
+		const workspaceFolderFilter = this.options.workspaceFolderFilter?.();
+		if (workspaceFolderFilter) {
+			filtered = filtered.filter(s => s.workspace.get()?.folders.some(folder => folder.root.toString() === workspaceFolderFilter));
+		}
 
-		// Always include the active session even if it was filtered out,
-		// so it remains visible while selected
-		if (activeSession && !filtered.some(s => s.sessionId === activeSession.sessionId)) {
+		// Always include the active session even if it was filtered out, so it
+		// remains visible while selected. A Simple Mode project scope is the one
+		// exception: T3 keeps that scope strict and never leaks another project.
+		if ((!this.options.simpleMode || !workspaceFolderFilter) && activeSession && !filtered.some(s => s.sessionId === activeSession.sessionId)) {
 			const match = this.sessions.find(s => s.sessionId === activeSession.sessionId);
 			if (match) {
 				filtered = [...filtered, match];
 			}
+		}
+
+		if (this.options.simpleMode) {
+			const sorted = sortSessions(filtered, this.options.sorting());
+			const pinned = sorted.filter(session => this.isSessionPinned(session));
+			const active = sorted.filter(session => !this.isSessionPinned(session) && !isSimpleSettledSession(session));
+			const settled = sorted.filter(session => !this.isSessionPinned(session) && isSimpleSettledSession(session));
+			const inbox = [...pinned, ...active];
+			const children: IObjectTreeElement<SessionListItem>[] = inbox.map(session => ({ element: session }));
+
+			if (settled.length > 0) {
+				const visibleSettled = this.hasFindPattern ? settled : settled.slice(0, this.simpleSettledVisibleCount);
+				const settledChildren: IObjectTreeElement<SessionListItem>[] = visibleSettled.map(session => ({ element: session }));
+				const hiddenSettledCount = settled.length - visibleSettled.length;
+				if (!this.hasFindPattern && hiddenSettledCount > 0) {
+					settledChildren.push({
+						element: {
+							showMore: true,
+							kind: 'sessions',
+							mode: 'more',
+							sectionLabel: SIMPLE_MORE_SETTLED_LABEL,
+							remainingCount: Math.min(hiddenSettledCount, SIMPLE_SETTLED_PAGE_COUNT),
+						}
+					});
+				}
+				const settledSection: ISessionSection = {
+					id: SIMPLE_SETTLED_SECTION_ID,
+					label: localize('settled', "Settled"),
+					sessions: settled,
+				};
+				children.push({
+					element: settledSection,
+					collapsible: true,
+					collapsed: this.getSavedCollapseState(settledSection.id) ?? ObjectTreeElementCollapseState.PreserveOrExpanded,
+					children: settledChildren,
+				});
+			}
+
+			this.tree.setChildren(null, children);
+			this._onDidUpdate.fire();
+			return;
 		}
 
 		const grouping = this.options.grouping();
@@ -1712,6 +1817,20 @@ export class SessionsList extends Disposable implements ISessionsList {
 		this._excludeArchived = exclude;
 		this.storageService.store(SessionsList.EXCLUDE_ARCHIVED_KEY, exclude, StorageScope.PROFILE, StorageTarget.USER);
 		this.update();
+	}
+
+	setSimpleCompact(compact: boolean): void {
+		if (this.simpleCompact === compact) {
+			return;
+		}
+		this.simpleCompact = compact;
+		this.update();
+		for (const session of this.sessions) {
+			if (this.tree.hasElement(session)) {
+				this.tree.updateElementHeight(session, this.treeDelegate.getHeight(session));
+				this.tree.rerender(session);
+			}
+		}
 	}
 
 	isExcludeArchived(): boolean {

@@ -3,6 +3,7 @@ import type React from "react";
 import { useTerminalSize } from "../hooks/TerminalSizeContext.tsx";
 import { theme } from "../theme/theme.ts";
 import { compactPathLabel } from "../utils/pathLabels.ts";
+import { SHELL_PROMPT_GLYPH } from "./Glyphs.constants.ts";
 import {
 	DEFAULT_SHELL_SEGMENTS,
 	SHELL_PROMPT_CHILD_GAP,
@@ -161,7 +162,7 @@ function ShellSegment({
 function ShellDivider(): React.ReactElement {
 	return (
 		<Text color={theme.subtle} bold>
-			❯
+			{SHELL_PROMPT_GLYPH}
 		</Text>
 	);
 }

@@ -1,5 +1,6 @@
 import type React from "react";
 import type { ModelInfo } from "../../providers/backboard/types.ts";
+import { pluralize } from "../../utils/string.ts";
 import { Picker, type PickerTab } from "./Picker.tsx";
 
 interface Props {
@@ -39,6 +40,9 @@ function modelTabs(models: readonly ModelInfo[]): PickerTab<ModelInfo>[] {
 			name: model.model,
 			badge:
 				provider.id === "all" ? displayProvider(model.provider) : undefined,
+			// Says where the turn will actually be billed. Only shown once a
+			// key-backed model exists, so a signed-in-only catalog stays clean.
+			...(model.source === "byok" ? { status: "your key" } : {}),
 			value: model,
 		})),
 	}));
@@ -71,7 +75,7 @@ function modelProviders(models: readonly ModelInfo[]): ModelProvider[] {
 }
 
 function formatModelCount(count: number): string {
-	return count === 1 ? "1 model" : `${count} models`;
+	return `${count} ${pluralize(count, "model")}`;
 }
 
 function displayProvider(provider: string): string {

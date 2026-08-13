@@ -3,7 +3,6 @@ import { isRetryableStreamServerErrorMessage } from "./streamRetry.ts";
 import type {
 	BackboardContextUsage,
 	BackboardStreamPayload,
-	BackboardVoiceRecord,
 	ContentDeltaResult,
 	ProviderEvent,
 	ProviderToolCall,
@@ -11,7 +10,7 @@ import type {
 	StreamMappingResult,
 } from "./types.ts";
 
-function parseArguments(raw: string): unknown {
+export function parseArguments(raw: string): unknown {
 	if (!raw) return {};
 	try {
 		return JSON.parse(raw);
@@ -30,67 +29,31 @@ export function mapToolCall(call: RawToolCall): ProviderToolCall {
 
 export class BackboardStreamEventMapper {
 	private accumulatedContent = "";
-	private accumulatedReasoning = "";
-	private lastContentChunk = "";
-	private lastReasoningChunk = "";
-	private readonly emittedVoiceRecords = new Set<string>();
 
 	map(payload: unknown): ProviderEvent[] {
-		const result = mapStreamPayload(
-			payload,
-			this.accumulatedContent,
-			this.accumulatedReasoning,
-			this.lastContentChunk,
-			this.lastReasoningChunk,
-		);
-		result.events = result.events.filter((event) => {
-			if (event.kind !== "voice") return true;
-			const key = JSON.stringify(event.records);
-			if (this.emittedVoiceRecords.has(key)) return false;
-			this.emittedVoiceRecords.add(key);
-			return true;
-		});
+		const result = mapStreamPayload(payload, this.accumulatedContent);
 		this.accumulatedContent = result.accumulatedContent;
-		this.accumulatedReasoning = result.accumulatedReasoning;
-		this.lastContentChunk = result.lastContentChunk;
-		this.lastReasoningChunk = result.lastReasoningChunk;
 		return result.events;
 	}
 }
 
 export function mapStreamPayloadToEvents(payload: unknown): ProviderEvent[] {
-	return mapStreamPayload(payload, "", "", "", "").events;
+	return mapStreamPayload(payload, "").events;
 }
 
 function mapStreamPayload(
 	payload: unknown,
 	previousAccumulatedContent: string,
-	previousAccumulatedReasoning: string,
-	previousContentChunk: string,
-	previousReasoningChunk: string,
 ): StreamMappingResult {
 	if (!isBackboardStreamPayload(payload)) {
 		return {
 			events: [failedEvent("Backboard stream sent a non-object event")],
 			accumulatedContent: previousAccumulatedContent,
-			accumulatedReasoning: previousAccumulatedReasoning,
-			lastContentChunk: previousContentChunk,
-			lastReasoningChunk: previousReasoningChunk,
 		};
 	}
 
 	const events: ProviderEvent[] = [];
 	let accumulatedContent = previousAccumulatedContent;
-	let accumulatedReasoning = previousAccumulatedReasoning;
-	let lastContentChunk = previousContentChunk;
-	let lastReasoningChunk = previousReasoningChunk;
-	const done = (): StreamMappingResult => ({
-		events,
-		accumulatedContent,
-		accumulatedReasoning,
-		lastContentChunk,
-		lastReasoningChunk,
-	});
 	const threadId = stringField(payload, "thread_id");
 	if (threadId) {
 		events.push({ kind: "thread", threadId });
@@ -98,62 +61,28 @@ function mapStreamPayload(
 
 	switch (payload.type) {
 		case BACKBOARD_STREAM_EVENTS.userMessage:
-			return done();
-		case BACKBOARD_STREAM_EVENTS.messageReceived:
-		case BACKBOARD_STREAM_EVENTS.runStarted:
-			// Server acknowledged the request and is assembling the run (thread
-			// creation, prompt/tool wiring) — no model output yet.
-			events.push({ kind: "status", phase: "preparing" });
-			return done();
-		case BACKBOARD_STREAM_EVENTS.messageStart:
-			// The assistant message container opened: the model is engaged and
-			// the first token is imminent.
-			events.push({ kind: "status", phase: "generating" });
-			return done();
+			return { events, accumulatedContent };
 		case BACKBOARD_STREAM_EVENTS.contentStreaming: {
-			const content = normalizeStreamText(
-				stringField(payload, "content"),
-				stringField(payload, "accumulated_content"),
-				accumulatedContent,
-				lastContentChunk,
-			);
+			const content = normalizeContentDelta(payload, accumulatedContent);
 			accumulatedContent = content.accumulatedContent;
-			lastContentChunk = content.lastChunk;
-			const text = suppressDsmlMarkup(content.text, accumulatedContent);
+			const text = content.text;
 			if (text) events.push({ kind: "assistant_delta", text });
-			return done();
-		}
-		case BACKBOARD_STREAM_EVENTS.reasoningStreaming:
-		case BACKBOARD_STREAM_EVENTS.reasoningDelta: {
-			const reasoning = normalizeStreamText(
-				stringField(payload, "content"),
-				stringField(payload, "accumulated_reasoning"),
-				accumulatedReasoning,
-				lastReasoningChunk,
-			);
-			accumulatedReasoning = reasoning.accumulatedContent;
-			lastReasoningChunk = reasoning.lastChunk;
-			const text = reasoning.text;
-			if (text) events.push({ kind: "reasoning_delta", text });
-			return done();
+			return { events, accumulatedContent };
 		}
 		case BACKBOARD_STREAM_EVENTS.toolCallStart: {
-			const toolCallId = stringField(payload, "tool_call_id");
+			// Advisory early-render event; malformed frames are dropped, never fatal.
+			const id = stringField(payload, "tool_call_id");
 			const name = stringField(payload, "name");
-			// Early events are advisory. Providers that do not reveal a stable id
-			// until arguments finish may omit this event; malformed hints are safe
-			// to skip because `tool_submit_required` is still authoritative.
-			if (toolCallId && name) {
-				events.push({ kind: "tool_call_start", toolCallId, name });
-			}
-			return done();
+			if (id && name) events.push({ kind: "tool_started", id, name });
+			return { events, accumulatedContent };
 		}
 		case BACKBOARD_STREAM_EVENTS.toolCallReady: {
-			const call = payload.tool_call;
-			if (isRawToolCall(call)) {
-				events.push({ kind: "tool_call_ready", call: mapToolCall(call) });
+			// Advisory early-execution event; malformed frames are dropped.
+			const rawCall = (payload as Record<string, unknown>).tool_call;
+			if (isRawToolCall(rawCall)) {
+				events.push({ kind: "tool_ready", call: mapToolCall(rawCall) });
 			}
-			return done();
+			return { events, accumulatedContent };
 		}
 		case BACKBOARD_STREAM_EVENTS.toolSubmitRequired: {
 			const rawCalls: unknown[] = Array.isArray(payload.tool_calls)
@@ -167,13 +96,17 @@ function mapStreamPayload(
 					failedEvent("Backboard requested tool outputs without tool calls"),
 				);
 			} else {
+				// Tool-call legs carry provider usage too (each leg is a billed
+				// LLM inference); emit it so per-call telemetry isn't limited to
+				// completed runs.
+				addUsageEvent(events, payload);
 				events.push({
 					kind: "requires_action",
 					runId: stringField(payload, "run_id") ?? null,
 					calls,
 				});
 			}
-			return done();
+			return { events, accumulatedContent };
 		}
 		case BACKBOARD_STREAM_EVENTS.runEnded:
 		case BACKBOARD_STREAM_EVENTS.messageComplete: {
@@ -185,29 +118,21 @@ function mapStreamPayload(
 							"Backboard run did not complete",
 					),
 				);
-				return done();
+				return { events, accumulatedContent };
 			}
 			addUsageEvent(events, payload);
-			const voiceRecords = voiceRecordsField(payload);
-			if (voiceRecords.length) {
-				events.push({ kind: "voice", records: voiceRecords });
-			}
 			const contextUsage = contextUsageField(payload);
 			const usage = usageFromPayload(payload);
-			const rawFinalText =
-				stringField(payload, "final_content") ??
-				stringField(payload, "content") ??
-				undefined;
 			events.push({
 				kind: "completed",
 				finalText:
-					rawFinalText === undefined
-						? undefined
-						: stripDsmlMarkup(rawFinalText),
+					stringField(payload, "final_content") ??
+					stringField(payload, "content") ??
+					undefined,
 				...(usage ? { usage } : {}),
 				...(contextUsage ? { contextUsage } : {}),
 			});
-			return done();
+			return { events, accumulatedContent };
 		}
 		case BACKBOARD_STREAM_EVENTS.runFailed:
 			events.push(
@@ -217,10 +142,10 @@ function mapStreamPayload(
 						"Backboard run failed",
 				),
 			);
-			return done();
+			return { events, accumulatedContent };
 		case BACKBOARD_STREAM_EVENTS.runCancelled:
 			events.push({ kind: "failed", error: "Backboard run was cancelled" });
-			return done();
+			return { events, accumulatedContent };
 		case BACKBOARD_STREAM_EVENTS.error:
 			events.push(
 				failedEvent(
@@ -229,33 +154,10 @@ function mapStreamPayload(
 						"Backboard stream failed",
 				),
 			);
-			return done();
+			return { events, accumulatedContent };
 		default:
-			return done();
+			return { events, accumulatedContent };
 	}
-}
-
-function voiceRecordsField(
-	payload: Record<string, unknown>,
-): BackboardVoiceRecord[] {
-	const direct = normalizeVoiceRecords(payload.voice_records);
-	if (direct.length) return direct;
-	for (const key of ["message", "response", "data"]) {
-		const nested = payload[key];
-		if (isRecord(nested)) {
-			const records = normalizeVoiceRecords(nested.voice_records);
-			if (records.length) return records;
-		}
-	}
-	return [];
-}
-
-function normalizeVoiceRecords(value: unknown): BackboardVoiceRecord[] {
-	const values = Array.isArray(value) ? value : value ? [value] : [];
-	return values.filter(
-		(record): record is BackboardVoiceRecord =>
-			isRecord(record) && ("stt" in record || "tts" in record),
-	);
 }
 
 function failedEvent(
@@ -269,132 +171,32 @@ function failedEvent(
 	};
 }
 
-/**
- * Marker DeepSeek-family models use for native tool-call tokens. The backend
- * normally converts these into `tool_submit_required` frames, but its parser
- * can fail on complex arguments and leak the raw tokens into
- * `content_streaming` — which must never render as assistant prose.
- */
-const DSML_MARKER = "<｜DSML｜";
-
-/** Duplicate frames shorter than this may be legitimate token repeats. */
-const DUPLICATE_CHUNK_MIN_LENGTH = 8;
-
-function longestCommonPrefixLength(a: string, b: string): number {
-	const n = Math.min(a.length, b.length);
-	let i = 0;
-	while (i < n && a[i] === b[i]) {
-		i++;
-	}
-	return i;
-}
-
-/**
- * Normalizes one streaming frame into the newly produced text. Handles every
- * shape the backend has been observed to send: plain incremental chunks, a
- * cumulative `accumulated` field, whole-message cumulative `content`,
- * re-sent duplicate frames, and segment-cumulative `content` that restarts
- * mid-message (seen around tool-call parse failures) — without ever
- * re-emitting text that was already emitted.
- */
-function normalizeStreamText(
-	text: string | null,
-	cumulative: string | null,
-	previousAccumulated: string,
-	previousChunk: string,
+function normalizeContentDelta(
+	payload: BackboardStreamPayload,
+	previousAccumulatedContent: string,
 ): ContentDeltaResult {
-	if (cumulative !== null) {
-		if (cumulative.startsWith(previousAccumulated)) {
-			return {
-				text: cumulative.slice(previousAccumulated.length) || null,
-				accumulatedContent: cumulative,
-				lastChunk: text ?? "",
-			};
+	const text = stringField(payload, "content");
+	const accumulatedContent = stringField(payload, "accumulated_content");
+	if (accumulatedContent === null) {
+		if (text?.startsWith(previousAccumulatedContent)) {
+			const delta = text.slice(previousAccumulatedContent.length);
+			return { text: delta || null, accumulatedContent: text };
 		}
-		// The backend's accumulation diverged from ours (e.g. it rewrote or
-		// restarted the message). Adopt it as truth and emit only what lies
-		// beyond the longest common prefix — never the whole blob again.
-		const lcp = longestCommonPrefixLength(cumulative, previousAccumulated);
 		return {
-			text: cumulative.slice(lcp) || null,
-			accumulatedContent: cumulative,
-			lastChunk: text ?? "",
+			text,
+			accumulatedContent: previousAccumulatedContent + (text ?? ""),
 		};
 	}
-	if (text === null) {
+	if (accumulatedContent.startsWith(previousAccumulatedContent)) {
 		return {
-			text: null,
-			accumulatedContent: previousAccumulated,
-			lastChunk: previousChunk,
+			text: accumulatedContent.slice(previousAccumulatedContent.length),
+			accumulatedContent,
 		};
 	}
-	// A re-sent copy of the previous frame produces nothing new. Short chunks
-	// are exempt: a model can legitimately emit the same small token twice.
-	if (text.length >= DUPLICATE_CHUNK_MIN_LENGTH && text === previousChunk) {
-		return {
-			text: null,
-			accumulatedContent: previousAccumulated,
-			lastChunk: previousChunk,
-		};
-	}
-	// Whole-message cumulative frame: `content` carries everything so far.
-	if (previousAccumulated.length > 0 && text.startsWith(previousAccumulated)) {
-		return {
-			text: text.slice(previousAccumulated.length) || null,
-			accumulatedContent: text,
-			lastChunk: text,
-		};
-	}
-	// Segment-cumulative frame: `content` strictly extends the previous frame
-	// rather than the whole message (the backend restarted its accumulation).
-	// An exact repeat of a short chunk is NOT an extension — it falls through
-	// to the incremental branch so legitimate token repeats still stream.
-	if (
-		previousChunk.length > 0 &&
-		text.length > previousChunk.length &&
-		text.startsWith(previousChunk)
-	) {
-		const delta = text.slice(previousChunk.length);
-		return {
-			text: delta || null,
-			accumulatedContent: previousAccumulated + delta,
-			lastChunk: text,
-		};
-	}
-	// Plain incremental chunk.
 	return {
-		text,
-		accumulatedContent: previousAccumulated + text,
-		lastChunk: text,
+		text: text ?? accumulatedContent,
+		accumulatedContent,
 	};
-}
-
-/**
- * Removes leaked DSML tool-call markup from an outgoing content delta. The
- * emitted `text` is always a suffix of `accumulated`, so everything at or
- * after the first marker occurrence in the accumulated message is suppressed
- * for the remainder of the message.
- */
-function suppressDsmlMarkup(
-	text: string | null,
-	accumulated: string,
-): string | null {
-	if (!text) {
-		return text;
-	}
-	const markerIndex = accumulated.indexOf(DSML_MARKER);
-	if (markerIndex === -1) {
-		return text;
-	}
-	const emittedStart = accumulated.length - text.length;
-	const visible = text.slice(0, Math.max(0, markerIndex - emittedStart));
-	return visible || null;
-}
-
-/** Truncates leaked DSML tool-call markup out of a finalized message text. */
-export function stripDsmlMarkup(text: string): string {
-	const markerIndex = text.indexOf(DSML_MARKER);
-	return markerIndex === -1 ? text : text.slice(0, markerIndex).trimEnd();
 }
 
 function addUsageEvent(
@@ -409,11 +211,13 @@ function addUsageEvent(
 function usageFromPayload(
 	payload: Record<string, unknown>,
 ): Extract<ProviderEvent, { kind: "usage" }>["usage"] | null {
+	const contextUsage = contextUsageField(payload);
 	if (
 		payload.input_tokens == null &&
 		payload.output_tokens == null &&
 		payload.total_tokens == null &&
-		payload.model_name == null
+		payload.model_name == null &&
+		contextUsage === undefined
 	) {
 		return null;
 	}
@@ -421,6 +225,11 @@ function usageFromPayload(
 		inputTokens: numberField(payload, "input_tokens"),
 		outputTokens: numberField(payload, "output_tokens"),
 		totalTokens: numberField(payload, "total_tokens"),
+		cachedTokens: numberField(payload, "cached_input_tokens"),
+		cacheWriteTokens: numberField(payload, "cache_write_input_tokens"),
+		costUsd: numberField(payload, "cost_usd"),
+		contextTokens: contextUsage?.used_tokens,
+		contextLimit: contextUsage?.context_limit,
 		provider: stringField(payload, "model_provider") ?? undefined,
 		model: stringField(payload, "model_name") ?? undefined,
 	};
@@ -436,7 +245,7 @@ function isBackboardStreamPayload(
 	return isRecord(value) && typeof value.type === "string";
 }
 
-function isRawToolCall(value: unknown): value is RawToolCall {
+export function isRawToolCall(value: unknown): value is RawToolCall {
 	if (!isRecord(value) || value.type !== "function") return false;
 	const fn = value.function;
 	return (

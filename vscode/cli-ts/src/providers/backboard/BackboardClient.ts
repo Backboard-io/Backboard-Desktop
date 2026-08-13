@@ -1,7 +1,14 @@
-import { createHash } from "node:crypto";
+import { basename } from "node:path";
 import type { BackboardEnv } from "../../config/env.ts";
 import type { ServerEventLog } from "../../core/session/ServerEventLog.ts";
 import type { OpenAITool } from "../../core/tools/schema.ts";
+import { errorMessage } from "../../utils/errors.ts";
+import type {
+	AgentClient,
+	AgentClientCapabilities,
+	RequestOptions,
+	RunMessageOptions,
+} from "../AgentClient.ts";
 import { MODEL_PAGE_LIMIT } from "./constants.ts";
 import { BackboardError, BackboardTransportError } from "./errors.ts";
 import { BackboardStreamEventMapper } from "./mappers.ts";
@@ -10,6 +17,7 @@ import { parseSseFrame, readSseFrames } from "./sse.ts";
 import type {
 	AssistantInfo,
 	BackboardResponse,
+	BackboardThread,
 	ModelCatalogItem,
 	ModelsListResponse,
 	ModelThinkingMetadataResponse,
@@ -19,90 +27,52 @@ import type {
 	SubmitToolOutputsRequest,
 } from "./types.ts";
 
-export interface RequestOptions {
-	signal?: AbortSignal;
+export type {
+	RequestOptions,
+	RunMessageOptions,
+} from "../AgentClient.ts";
+
+/** JSON-encodes the object-valued request fields the form path expects as strings. */
+function messageFormData(
+	req: SendMessageRequest & { stream: boolean },
+	filePaths: string[],
+): FormData {
+	const form = new FormData();
+	for (const [key, value] of Object.entries(req)) {
+		if (value === undefined || value === null) continue;
+		if (typeof value === "object") {
+			form.append(key, JSON.stringify(value));
+		} else {
+			form.append(key, String(value));
+		}
+	}
+	for (const filePath of filePaths) {
+		form.append("files", Bun.file(filePath), basename(filePath));
+	}
+	return form;
 }
 
 /**
  * Backboard transport. JSON helpers keep the simple request/response endpoints
  * available; the run generators consume Backboard's SSE turn streams.
  */
-export class BackboardClient {
+export class BackboardClient implements AgentClient {
+	/** Backboard holds threads, assistants, and memory server-side. */
+	readonly capabilities: AgentClientCapabilities = {
+		assistants: true,
+		threads: true,
+		memory: true,
+	};
+
 	constructor(
 		private readonly env: BackboardEnv,
 		private readonly serverLog?: ServerEventLog,
 	) {}
 
-	/** Base API URL, used to namespace host-side caches per backend. */
-	get apiUrl(): string {
-		return this.env.apiUrl;
-	}
-
-	/**
-	 * Non-reversible fingerprint of the API key, used to namespace host-side
-	 * caches per signed-in account (assistants are account-owned server-side).
-	 */
-	get accountFingerprint(): string {
-		return createHash("sha256")
-			.update(this.env.apiKey)
-			.digest("hex")
-			.slice(0, 16);
-	}
-
-	private headers(json = true): Record<string, string> {
+	private headers(): Record<string, string> {
 		return {
 			"X-API-Key": this.env.apiKey,
-			...(json ? { "Content-Type": "application/json" } : {}),
-		};
-	}
-
-	private requestPayload(
-		path: string,
-		body: unknown,
-	): {
-		headers: Record<string, string>;
-		body: BodyInit;
-		logBody: unknown;
-	} {
-		if (path !== "/threads/messages" || !hasAudioFile(body)) {
-			return {
-				headers: this.headers(),
-				body: JSON.stringify(body),
-				logBody: body,
-			};
-		}
-
-		const { audioFile, ...fields } = body;
-		const form = new FormData();
-		for (const [key, value] of Object.entries(fields)) {
-			if (value === undefined) continue;
-			form.append(
-				key,
-				typeof value === "string"
-					? value
-					: typeof value === "object"
-						? JSON.stringify(value)
-						: String(value),
-			);
-		}
-		form.append(
-			"audio_file",
-			new Blob([Buffer.from(audioFile.dataBase64, "base64")], {
-				type: audioFile.mimeType || "application/octet-stream",
-			}),
-			audioFile.fileName,
-		);
-		return {
-			headers: this.headers(false),
-			body: form,
-			logBody: {
-				...fields,
-				audio_file: {
-					fileName: audioFile.fileName,
-					mimeType: audioFile.mimeType,
-					bytes: Buffer.byteLength(audioFile.dataBase64, "base64"),
-				},
-			},
+			"Content-Type": "application/json",
 		};
 	}
 
@@ -112,23 +82,17 @@ export class BackboardClient {
 		options: RequestOptions,
 	): Promise<T> {
 		const url = `${this.env.apiUrl}${path}`;
-		const payload = this.requestPayload(path, body);
-		const { headers } = payload;
+		const headers = this.headers();
 		const started = Date.now();
 
-		this.serverLog?.request({
-			endpoint: path,
-			method: "POST",
-			headers,
-			body: payload.logBody,
-		});
+		this.serverLog?.request({ endpoint: path, method: "POST", headers, body });
 
 		let res: Response;
 		try {
 			res = await fetch(url, {
 				method: "POST",
 				headers,
-				body: payload.body,
+				body: JSON.stringify(body),
 				signal: options.signal,
 			});
 		} catch (err) {
@@ -138,7 +102,7 @@ export class BackboardClient {
 				status: 0,
 				body: null,
 				latencyMs: Date.now() - started,
-				error: err instanceof Error ? err.message : String(err),
+				error: errorMessage(err),
 			});
 			throw err;
 		}
@@ -214,13 +178,12 @@ export class BackboardClient {
 
 	async *runMessage(
 		req: SendMessageRequest,
-		options: RequestOptions = {},
+		options: RunMessageOptions = {},
 	): AsyncIterable<ProviderEvent> {
-		yield* this.postStream(
-			"/threads/messages",
-			{ ...req, stream: true },
-			options,
-		);
+		const body = options.attachmentFilePaths?.length
+			? messageFormData({ ...req, stream: true }, options.attachmentFilePaths)
+			: { ...req, stream: true };
+		yield* this.postStream("/threads/messages", body, options);
 	}
 
 	async *runToolOutputs(
@@ -245,9 +208,7 @@ export class BackboardClient {
 
 	async listModels(options: RequestOptions = {}): Promise<ModelsListResponse> {
 		const providers = await this.listModelProviders(options);
-		// All providers are fetched concurrently, and a single failing provider
-		// only drops its own models instead of rejecting the whole catalog.
-		const pages = await Promise.allSettled(
+		const pages = await Promise.all(
 			providers.map((provider) =>
 				this.listModelPages(
 					`/models/provider/${encodeURIComponent(provider)}`,
@@ -256,20 +217,9 @@ export class BackboardClient {
 				),
 			),
 		);
-		const failed = pages.find(
-			(page): page is PromiseRejectedResult => page.status === "rejected",
-		);
-		const allFailed = pages.every((page) => page.status === "rejected");
-		if (failed && (options.signal?.aborted || allFailed)) {
-			throw failed.reason;
-		}
-		const fulfilled = pages.filter(
-			(page): page is PromiseFulfilledResult<ModelsListResponse> =>
-				page.status === "fulfilled",
-		);
 		return {
-			models: fulfilled.flatMap((page) => page.value.models),
-			total: fulfilled.reduce((sum, page) => sum + page.value.total, 0),
+			models: pages.flatMap((page) => page.models),
+			total: pages.reduce((sum, page) => sum + page.total, 0),
 		};
 	}
 
@@ -285,8 +235,34 @@ export class BackboardClient {
 		);
 	}
 
-	async listAssistants(options: RequestOptions = {}): Promise<AssistantInfo[]> {
-		return this.get<AssistantInfo[]>("/assistants?limit=200", options);
+	async listAssistants(
+		options: RequestOptions = {},
+		filter: { name?: string } = {},
+	): Promise<AssistantInfo[]> {
+		const query = new URLSearchParams({ limit: "200" });
+		// Exact-name filter keeps the response to one small record instead of
+		// every assistant's full system prompt (~5MB at limit=200). Older
+		// servers ignore the param and return the full list, which callers
+		// still .find() over, so this stays backward compatible.
+		if (filter.name) query.set("name", filter.name);
+		return this.get<AssistantInfo[]>(`/assistants?${query}`, options);
+	}
+
+	async listThreads(options: RequestOptions = {}): Promise<BackboardThread[]> {
+		return this.get<BackboardThread[]>(
+			"/threads?limit=200&include_messages=false",
+			options,
+		);
+	}
+
+	async getThread(
+		threadId: string,
+		options: RequestOptions = {},
+	): Promise<BackboardThread> {
+		return this.get<BackboardThread>(
+			`/threads/${encodeURIComponent(threadId)}`,
+			options,
+		);
 	}
 
 	async createAssistant(
@@ -332,8 +308,9 @@ export class BackboardClient {
 		body: unknown,
 		options: RequestOptions,
 	): AsyncIterable<ProviderEvent> {
-		const payload = this.requestPayload(path, body);
-		const { headers } = payload;
+		const isForm = body instanceof FormData;
+		const headers = this.headers();
+		if (isForm) delete headers["Content-Type"];
 		const started = Date.now();
 		let status = 0;
 		let events = 0;
@@ -345,14 +322,16 @@ export class BackboardClient {
 			endpoint: path,
 			method: "POST",
 			headers,
-			body: payload.logBody,
+			body: isForm
+				? { multipart: true, fields: Array.from((body as FormData).keys()) }
+				: body,
 		});
 
 		try {
 			const res = await fetch(`${this.env.apiUrl}${path}`, {
 				method: "POST",
 				headers,
-				body: payload.body,
+				body: isForm ? (body as FormData) : JSON.stringify(body),
 				signal: options.signal,
 			});
 			status = res.status;
@@ -389,7 +368,7 @@ export class BackboardClient {
 				try {
 					payload = parseSseFrame(frame);
 				} catch (err) {
-					error = err instanceof Error ? err.message : String(err);
+					error = errorMessage(err);
 					const failure: ProviderEvent = {
 						kind: "failed",
 						error: `Malformed Backboard stream event: ${error}`,
@@ -407,7 +386,7 @@ export class BackboardClient {
 				}
 			}
 		} catch (err) {
-			error ??= err instanceof Error ? err.message : String(err);
+			error ??= errorMessage(err);
 			if (isAbortError(err) || err instanceof BackboardError) {
 				throw err;
 			}
@@ -430,25 +409,6 @@ export class BackboardClient {
 			}
 		}
 	}
-}
-
-function hasAudioFile(value: unknown): value is SendMessageRequest & {
-	audioFile: NonNullable<SendMessageRequest["audioFile"]>;
-} {
-	if (typeof value !== "object" || value === null || !("audioFile" in value)) {
-		return false;
-	}
-	const audio = value.audioFile;
-	return (
-		typeof audio === "object" &&
-		audio !== null &&
-		"dataBase64" in audio &&
-		typeof audio.dataBase64 === "string" &&
-		"fileName" in audio &&
-		typeof audio.fileName === "string" &&
-		"mimeType" in audio &&
-		typeof audio.mimeType === "string"
-	);
 }
 
 function modelPageQuery(

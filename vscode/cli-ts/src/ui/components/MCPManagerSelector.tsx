@@ -1,6 +1,6 @@
 import type React from "react";
 import type { McpServerRuntimeStatus } from "../../core/mcp/index.ts";
-import { theme } from "../theme/theme.ts";
+import { mcpStatusColor, mcpStatusLabel } from "./MCPServerStatus.ts";
 import { Picker, type PickerTab } from "./Picker.tsx";
 
 export type McpManagerSelection =
@@ -53,8 +53,8 @@ function tabs(
 				...servers.map((server, index) => ({
 					id: server.name,
 					name: server.name,
-					badge: statusLabel(server.status),
-					badgeColor: statusColor(server.status),
+					badge: mcpStatusLabel(server.status),
+					badgeColor: mcpStatusColor(server.status),
 					description: `${server.type.toUpperCase()} · ${server.toolNames.length} tools`,
 					detail: server.message,
 					spacingBefore: index === 0,
@@ -63,32 +63,4 @@ function tabs(
 			],
 		},
 	];
-}
-
-function statusLabel(status: McpServerRuntimeStatus["status"]): string {
-	switch (status) {
-		case "connected":
-			return "connected";
-		case "needs_authentication":
-			return "needs auth";
-		case "disabled":
-			return "disabled";
-		case "error":
-			return "error";
-	}
-}
-
-function statusColor(
-	status: McpServerRuntimeStatus["status"],
-): string | undefined {
-	switch (status) {
-		case "connected":
-			return theme.success;
-		case "needs_authentication":
-			return theme.warning;
-		case "disabled":
-			return theme.subtle;
-		case "error":
-			return theme.error;
-	}
 }

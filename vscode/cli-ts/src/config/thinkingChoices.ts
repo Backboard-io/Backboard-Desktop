@@ -15,11 +15,6 @@ export interface ThinkingChoiceMetadata {
 
 const OFF_CHOICE: ThinkingChoice = { label: "Off", value: null };
 
-const DEFAULT_CHOICE: ThinkingChoice = {
-	label: "Provider Default",
-	value: { kind: "default" },
-};
-
 const LEVEL_CHOICES: ThinkingChoice[] = [
 	{ label: "Low", value: { kind: "level", level: "low" } },
 	{ label: "Medium", value: { kind: "level", level: "medium" } },
@@ -53,7 +48,7 @@ export function buildThinkingChoiceMetadata(
 	}
 
 	return {
-		choices: [OFF_CHOICE, DEFAULT_CHOICE, ...LEVEL_CHOICES, DYNAMIC_CHOICE],
+		choices: [OFF_CHOICE, ...LEVEL_CHOICES, DYNAMIC_CHOICE],
 		automaticOnly: false,
 		selectable: true,
 	};

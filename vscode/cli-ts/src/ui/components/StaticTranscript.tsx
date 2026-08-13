@@ -1,6 +1,7 @@
 import { Static } from "ink";
 import type React from "react";
 import type { UsageInfo } from "../../core/bus/events.ts";
+import type { StartupUpdateInfo } from "../../core/update/startupNotice.ts";
 import type { RenderTranscriptItem, RunStatus } from "../../state/AppState.ts";
 import { Banner } from "./Banner.tsx";
 import { Item } from "./MessageList.tsx";
@@ -13,6 +14,7 @@ interface Props {
 		model: string;
 		cwd: string;
 		usage: UsageInfo;
+		update?: StartupUpdateInfo | null;
 	} | null;
 }
 
@@ -25,6 +27,7 @@ type StaticTranscriptItem =
 			model: string;
 			cwd: string;
 			usage: UsageInfo;
+			update?: StartupUpdateInfo | null;
 	  };
 
 export function StaticTranscript({
@@ -43,6 +46,7 @@ export function StaticTranscript({
 					model: banner.model,
 					cwd: banner.cwd,
 					usage: banner.usage,
+					update: banner.update,
 				},
 				...items,
 			]
@@ -58,6 +62,7 @@ export function StaticTranscript({
 						model={item.model}
 						cwd={item.cwd}
 						usage={item.usage}
+						update={item.update}
 					/>
 				) : (
 					<Item key={item.id} item={item} />

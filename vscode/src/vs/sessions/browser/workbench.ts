@@ -72,7 +72,7 @@ import {
 	NotificationsSettings,
 	getNotificationsPosition
 } from '../../workbench/common/notifications.js';
-import { IPartVisibilityDefaults, OPTIMUS_CHAT_PANEL_WIDTH, SessionsLayoutPolicy } from './layoutPolicy.js';
+import { getOptimusChatPanelWidth, IPartVisibilityDefaults, SessionsLayoutPolicy } from './layoutPolicy.js';
 import { MobileNavigationStack } from './mobileNavigationStack.js';
 import { SessionsPanelHeader } from './parts/panelHeader.js';
 import { MobileTitlebarPart } from './parts/mobile/mobileTitlebarPart.js';
@@ -1096,8 +1096,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		this.storageService = accessor.get(IStorageService);
 		this._isOptimusWindow = accessor.get(IWorkbenchEnvironmentService).isOptimusWindow;
 		this._isJarvisWindow = accessor.get(IWorkbenchEnvironmentService).isJarvisWindow;
-		// Root marker classes so CSS can scope per window mode (e.g. the
-		// translucent sidebar treatment is Simple-window only, see style.css).
+		// Root marker classes let CSS scope treatments per window mode.
 		this.mainContainer.classList.toggle('optimus-window', this._isOptimusWindow);
 		this.mainContainer.classList.toggle('jarvis-window', this._isJarvisWindow);
 		accessor.get(ITitleService);
@@ -1367,19 +1366,18 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		const effectiveSideBarWidth = this.partVisibility.sidebar ? sideBarSize : 0;
 		const rightSectionWidth = Math.max(0, width - effectiveSideBarWidth);
 		// The Advanced window's right column is the chat panel alone (the editor
-		// stays hidden there) and its width is fixed, so build the grid at that
-		// width directly — including over a saved width from a differently sized
-		// window. Anything else gets corrected to it by the Optimus layout
-		// contribution a beat after the window has already painted, which reads
-		// as the chat panel snapping to size on every mode switch.
+		// stays hidden there). Size it from the live space at initial construction
+		// so narrow windows keep a useful board without a post-paint snap.
 		const preferredRightWorkColumnWidth = this._isOptimusWindow
-			? OPTIMUS_CHAT_PANEL_WIDTH
+			? getOptimusChatPanelWidth(width, effectiveSideBarWidth)
 			: this._savedPartSizes.sessions !== undefined
 				? rightSectionWidth - this._savedPartSizes.sessions
 				: Math.max(sizes.auxiliaryBarSize, Math.floor(rightSectionWidth * 0.56));
-		const minimumRightWorkColumnWidth = (this.partVisibility.auxiliaryBar && this.partVisibility.editor)
-			? Math.min(rightSectionWidth, Math.max(420, rightSectionWidth < 900 ? Math.floor(rightSectionWidth * 0.72) : Math.max(560, Math.floor(rightSectionWidth * 0.48))))
-			: 300;
+		const minimumRightWorkColumnWidth = this._isOptimusWindow
+			? Math.min(rightSectionWidth, preferredRightWorkColumnWidth)
+			: (this.partVisibility.auxiliaryBar && this.partVisibility.editor)
+				? Math.min(rightSectionWidth, Math.max(420, rightSectionWidth < 900 ? Math.floor(rightSectionWidth * 0.72) : Math.max(560, Math.floor(rightSectionWidth * 0.48))))
+				: 300;
 		const rightWorkColumnWidth = Math.min(rightSectionWidth, Math.max(minimumRightWorkColumnWidth, preferredRightWorkColumnWidth));
 		const effectiveRightWorkColumnWidth = (this.partVisibility.auxiliaryBar || this.partVisibility.editor) ? rightWorkColumnWidth : 0;
 		// Prefer the saved chat bar width so the user's preferred chat bar size

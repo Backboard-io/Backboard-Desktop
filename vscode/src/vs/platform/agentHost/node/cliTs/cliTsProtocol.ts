@@ -13,7 +13,8 @@
  * — keep the two sides in sync.
  */
 
-export type CliTsPermissionPolicy = 'default' | 'autoApprove' | 'autopilot';
+/** Permission modes exposed by the public Backboard R-CLI. */
+export type CliTsPermissionMode = 'manual' | 'acceptEdits' | 'auto' | 'bypass';
 
 /** A binary attachment sent with a submit op; serve persists it and points the agent at it. */
 export interface CliTsFileAttachment {
@@ -39,7 +40,7 @@ export type CliTsServeControl =
 		/** Omit provider reasoning traces from responses when supported. */
 		readonly excludeReasoning?: boolean;
 		readonly excludedTools?: readonly string[];
-		readonly permission?: CliTsPermissionPolicy;
+		readonly permission?: CliTsPermissionMode;
 		readonly memory?: string;
 		readonly skills?: readonly string[];
 		readonly files?: readonly CliTsFileAttachment[];
@@ -55,8 +56,7 @@ export type CliTsServeControl =
 	| { readonly op: 'steer'; readonly requestId?: string; readonly prompt: string }
 	| { readonly op: 'warmup'; readonly requestId?: string }
 	| { readonly op: 'cancel'; readonly requestId?: string }
-	| { readonly op: 'respondInput'; readonly id: string; readonly answer: string }
-	| { readonly op: 'respondPermission'; readonly id: string; readonly decision: 'approve' | 'deny'; readonly reason?: string }
+	| { readonly op: 'respondInput'; readonly id: string; readonly answers: readonly string[] }
 	| { readonly op: 'setModel'; readonly requestId?: string; readonly model: string }
 	| { readonly op: 'listModels'; readonly requestId: string }
 	| { readonly op: 'listTools'; readonly requestId: string }
@@ -108,8 +108,17 @@ export interface CliTsAgentEvent {
 	readonly durationMs?: number;
 	readonly calls?: readonly { readonly id: string; readonly name: string; readonly input: unknown }[];
 	readonly data?: unknown;
-	readonly request?: { readonly id: string; readonly toolCallId?: string; readonly name?: string; readonly inputSummary?: string; readonly question?: string; readonly options?: readonly string[] };
-	readonly response?: { readonly id: string; readonly decision?: string; readonly answer?: string };
+	readonly request?: {
+		readonly id: string;
+		readonly questions?: readonly { readonly header?: string; readonly question: string; readonly options: readonly string[] }[];
+		/** Legacy private-CLI fields retained only for tolerant event decoding. */
+		readonly toolCallId?: string;
+		readonly name?: string;
+		readonly inputSummary?: string;
+		readonly question?: string;
+		readonly options?: readonly string[];
+	};
+	readonly response?: { readonly id: string; readonly answers?: readonly string[]; readonly decision?: string; readonly answer?: string };
 	readonly usage?: { readonly inputTokens?: number; readonly outputTokens?: number; readonly totalTokens?: number; readonly model?: string; readonly provider?: string };
 	readonly todos?: readonly unknown[];
 	readonly agentToolCallId?: string;

@@ -11,9 +11,10 @@ import {
 	AssistantMessageFooter,
 } from "./AssistantMessage.tsx";
 import {
-	TOOL_STATUS_COLOR,
+	InputSummary,
 	TOOL_STATUS_ICON,
 	ToolCallView,
+	toolStatusColor,
 } from "./ToolCallView.tsx";
 import { ToolResultView } from "./ToolResultView.tsx";
 import { UserMessage } from "./UserMessage.tsx";
@@ -76,12 +77,16 @@ export function Item({
 		case "notice":
 			return (
 				<Box marginTop={1}>
-					<Text color={item.level === "error" ? theme.error : theme.subtle}>
-						{item.text}
-					</Text>
+					<Text color={noticeColor(item.level)}>{item.text}</Text>
 				</Box>
 			);
 	}
+}
+
+function noticeColor(level: "info" | "warning" | "error"): string {
+	if (level === "error") return theme.error;
+	if (level === "warning") return theme.warning;
+	return theme.accentBright;
 }
 
 function ToolCallGroupView({
@@ -97,9 +102,7 @@ function ToolCallGroupView({
 	return (
 		<Box flexDirection="column" marginTop={1}>
 			<Box>
-				<Text color={TOOL_STATUS_COLOR[status]}>
-					{TOOL_STATUS_ICON[status]}{" "}
-				</Text>
+				<Text color={toolStatusColor(status)}>{TOOL_STATUS_ICON[status]} </Text>
 				<Text color={theme.accentBright} bold>
 					{name}
 				</Text>
@@ -108,9 +111,7 @@ function ToolCallGroupView({
 			{items.map((item) => (
 				<Box key={item.id} marginLeft={3} flexDirection="column">
 					{item.inputSummary ? (
-						<Text color={theme.subtle} wrap="truncate-end">
-							{item.inputSummary}
-						</Text>
+						<InputSummary summary={item.inputSummary} />
 					) : null}
 					<ToolResultView
 						status={item.status}

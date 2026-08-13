@@ -1,3 +1,5 @@
+import type { ByokProviderId } from "../core/keys/ProviderKeyTypes.ts";
+
 export type MemoryMode = "off" | "on" | "auto" | "readonly";
 export type MemoryProfile = "default" | "code";
 export type OutputFormat = "default" | "json";
@@ -24,11 +26,27 @@ export interface AgentDefaults {
 }
 
 export const DEFAULTS: AgentDefaults = {
-	memory: "off",
+	memory: "auto",
 	profile: "coding",
 	model: { provider: "openai", model: "gpt-5.5" },
 	finalVerificationNudge: true,
 };
+
+const KEY_ONLY_DEFAULT_MODELS: Readonly<Record<ByokProviderId, ModelRef>> = {
+	anthropic: { provider: "anthropic", model: "claude-opus-5" },
+	openai: DEFAULTS.model,
+	google: { provider: "google", model: "gemini-2.5-flash" },
+	openrouter: {
+		provider: "openrouter",
+		model: "anthropic/claude-sonnet-4.6",
+	},
+};
+
+export function keyOnlyDefaultModel(
+	provider: ByokProviderId | undefined,
+): ModelRef | null {
+	return provider ? KEY_ONLY_DEFAULT_MODELS[provider] : null;
+}
 
 export function formatModel(ref: ModelRef): string {
 	return `${ref.provider}/${ref.model}`;

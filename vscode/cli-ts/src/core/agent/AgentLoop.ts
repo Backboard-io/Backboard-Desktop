@@ -6,13 +6,11 @@ import type {
 	ThinkingRequestKind,
 } from "../../config/defaults.ts";
 import type { RuntimeThinkingResolver } from "../../config/thinkingRuntime.ts";
-import { invalidateAssistantCache } from "../../providers/backboard/assistants.ts";
-import type { BackboardClient } from "../../providers/backboard/BackboardClient.ts";
-import { BackboardError } from "../../providers/backboard/errors.ts";
 import type {
-	BackboardAudioFile,
-	BackboardVoiceConfig,
-} from "../../providers/backboard/types.ts";
+	AgentClient,
+	RunMessageOptions,
+} from "../../providers/AgentClient.ts";
+import { errorMessage } from "../../utils/errors.ts";
 import type { EventBus } from "../bus/EventBus.ts";
 import type { TurnStatus } from "../bus/events.ts";
 import type { Session } from "../session/Session.ts";
@@ -21,10 +19,9 @@ import { AbortError } from "../tools/ToolAbort.ts";
 import type { ToolContext } from "../tools/ToolContext.ts";
 import type { ToolScheduler } from "../tools/ToolScheduler.ts";
 import { AssistantAccumulator } from "./AssistantAccumulator.ts";
-import {
-	FinalVerificationRunner,
-	willRunFinalVerification,
-} from "./FinalVerificationRunner.ts";
+import { finalVerificationNotification } from "./notifications/FinalVerificationNotification.ts";
+import { SystemNotificationRunner } from "./notifications/SystemNotificationRunner.ts";
+import { todoReconciliationNotification } from "./notifications/TodoReconciliationNotification.ts";
 import { ProviderStreamConsumer } from "./ProviderStreamConsumer.ts";
 import { buildRunMessageRequest } from "./RunMessageRequestBuilder.ts";
 import { hasStructuralDiagnosticText } from "./ThinkingEvidence.ts";
@@ -32,18 +29,19 @@ import { ToolRoundProcessor } from "./ToolRoundProcessor.ts";
 import { Turn } from "./Turn.ts";
 
 export interface AgentLoopDeps {
-	client: BackboardClient;
+	client: AgentClient;
 	scheduler: ToolScheduler;
 	session: Session;
 	bus: EventBus;
 	tools: OpenAITool[];
 	systemPrompt: string;
+	/** Recomputes the system prompt for injected notification requests; see SystemNotificationRunnerDeps. */
+	refreshSystemPrompt?: () => string;
 	assistantId?: string;
 	model: { provider: string; model: string };
 	memory: MemoryMode;
 	memoryProfile: MemoryProfile;
-	voice?: BackboardVoiceConfig;
-	audioFile?: BackboardAudioFile;
+	workspaceId?: string;
 	thinking: ThinkingConfig | null | undefined;
 	thinkingResolver?: RuntimeThinkingResolver;
 	requestKind?: ThinkingRequestKind;
@@ -52,6 +50,9 @@ export interface AgentLoopDeps {
 	turnStartedAt?: number;
 	turnAlreadyStarted?: boolean;
 	maxToolRounds?: number;
+	attachmentFilePaths?: string[];
+	displayContent?: string;
+	durableSession?: RunMessageOptions["durableSession"];
 }
 
 /**
@@ -92,20 +93,43 @@ export class AgentLoop {
 		});
 		this.executedToolRounds = 0;
 
-		// Until the verification pass starts, a final (no-tool-call) answer that
-		// follows at least one tool round is only a preview of what the nudge is
-		// about to re-answer - buffer it so it's discarded instead of shown, and
-		// the verification pass's answer becomes the only summary shown.
-		let verificationStarted = false;
+		const notifications = new SystemNotificationRunner(
+			{
+				client: this.deps.client,
+				session,
+				consumer,
+				processor,
+				tools: this.deps.tools,
+				systemPrompt: this.deps.systemPrompt,
+				refreshSystemPrompt: this.deps.refreshSystemPrompt,
+				assistantId: this.deps.assistantId,
+				model: this.deps.model,
+				memory: this.deps.memory,
+				memoryProfile: this.deps.memoryProfile,
+				workspaceId: this.deps.workspaceId,
+				requestKind: this.deps.requestKind ?? "user",
+			},
+			[
+				// Resolve the plan first: loop the todo reminder until the agent
+				// has closed every todo, then let verification review the finished
+				// work and produce the shown summary.
+				todoReconciliationNotification(),
+				finalVerificationNotification(
+					this.deps.finalVerificationNudge ?? false,
+				),
+			],
+		);
+
+		// Until the notification passes start, a final (no-tool-call) answer that
+		// follows at least one tool round is only a preview of what a superseding
+		// notification is about to re-answer - buffer it so it's discarded instead
+		// of shown, and the notification pass's answer becomes the only summary.
+		let notificationsStarted = false;
 		const assistant = new AssistantAccumulator(turn.id, bus, session, {
 			suppressFinalMessage: () =>
-				!verificationStarted &&
-				willRunFinalVerification({
-					finalVerificationNudge: this.deps.finalVerificationNudge,
-					requestKind: this.deps.requestKind ?? "user",
-					executedRounds: processor.executedRounds,
-					executedToolCalls: processor.executedToolCalls,
-				}),
+				!notificationsStarted && notifications.willSupersedeFinalAnswer(),
+			suppressAllMessages: () =>
+				notifications.activeNotificationHidesResponse(),
 		});
 
 		try {
@@ -114,35 +138,33 @@ export class AgentLoop {
 				requestKind: this.deps.requestKind ?? "user",
 				hasDiagnosticText: hasStructuralDiagnosticText(content),
 			});
+			const messageOptions = {
+				signal: ctx.signal,
+				attachmentFilePaths: this.deps.attachmentFilePaths,
+				displayContent: this.deps.displayContent,
+				durableSession: this.deps.durableSession,
+			};
+			const buildMessageRequest = () =>
+				buildRunMessageRequest(content, this.deps, initialThinking);
 			const createMessageStream = () =>
-				this.deps.client.runMessage(
-					buildRunMessageRequest(content, this.deps, initialThinking),
-					{ signal: ctx.signal },
-				);
+				this.deps.client.runMessage(buildMessageRequest(), messageOptions);
 
+			const early = processor.createEarlyRound(ctx, turn.id);
 			const pending = await consumer.consumeWithRetry(
 				createMessageStream,
 				assistant,
 				ctx.signal,
+				early,
+				() =>
+					this.deps.client.preserveFailedMessage?.(
+						buildMessageRequest(),
+						messageOptions,
+					) ?? Promise.resolve(null),
 			);
-			await processor.process(pending, turn.id, assistant, ctx);
+			await processor.process(pending, turn.id, assistant, ctx, early);
 			this.executedToolRounds = processor.executedRounds;
-			verificationStarted = true;
-			await new FinalVerificationRunner({
-				client: this.deps.client,
-				session,
-				bus,
-				consumer,
-				processor,
-				tools: this.deps.tools,
-				systemPrompt: this.deps.systemPrompt,
-				assistantId: this.deps.assistantId,
-				model: this.deps.model,
-				memory: this.deps.memory,
-				memoryProfile: this.deps.memoryProfile,
-				finalVerificationNudge: this.deps.finalVerificationNudge,
-				requestKind: this.deps.requestKind ?? "user",
-			}).runIfNeeded(turn.id, assistant, ctx);
+			notificationsStarted = true;
+			await notifications.runPending(turn.id, assistant, ctx);
 			this.executedToolRounds = processor.executedRounds;
 			turn.status = "completed";
 		} catch (err) {
@@ -163,21 +185,9 @@ export class AgentLoop {
 				return "cancelled";
 			}
 			turn.status = "failed";
-			// A 404 on the turn means the assistant no longer exists server-side
-			// (deleted, or cached from another account). Drop the stale id so the
-			// next message provisions a fresh assistant instead of failing forever.
-			let errorMessage = err instanceof Error ? err.message : String(err);
-			if (isStaleAssistantError(err)) {
-				if (this.deps.assistantId) {
-					invalidateAssistantCache(this.deps.assistantId);
-				}
-				session.assistantId = null;
-				errorMessage =
-					"Backboard assistant was not found (it may belong to a previous sign-in). Cleared the stale assistant — please send your message again.";
-			}
 			bus.emit({
 				type: "run:error",
-				error: errorMessage,
+				error: errorMessage(err),
 			});
 			bus.emit({
 				type: "turn:end",
@@ -205,16 +215,4 @@ export class AgentLoop {
 		}
 		return evidence.phase === "initial" ? this.deps.thinking : undefined;
 	}
-}
-
-/** True when the backend rejected the turn because the assistant id is gone. */
-function isStaleAssistantError(err: unknown): boolean {
-	if (!(err instanceof BackboardError) || err.status !== 404) {
-		return false;
-	}
-	const detail =
-		err.body && typeof err.body === "object"
-			? (err.body as { detail?: unknown }).detail
-			: undefined;
-	return typeof detail === "string" && /assistant not found/i.test(detail);
 }

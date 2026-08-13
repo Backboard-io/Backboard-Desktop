@@ -45,13 +45,13 @@ const profileRules: readonly ProfileRule[] = [
 	{
 		id: "openrouter",
 		provider: "openrouter",
-		fields: ["max_tokens", "exclude_reasoning"],
+		fields: ["max_tokens"],
 		budgetPolicyId: "generic",
 	},
 	{
 		id: "cerebras",
 		provider: "cerebras",
-		fields: ["max_tokens", "exclude_reasoning"],
+		fields: ["max_tokens"],
 		budgetPolicyId: "generic",
 	},
 	{
@@ -60,6 +60,13 @@ const profileRules: readonly ProfileRule[] = [
 		matches: isXaiReasoningModel,
 		fields: ["effort"],
 		maxEffort: "high",
+	},
+	{
+		id: "aws-bedrock-adaptive",
+		provider: "aws-bedrock",
+		matches: requiresAdaptiveThinking,
+		fields: ["effort"],
+		nativeAdaptive: true,
 	},
 	{
 		id: "aws-bedrock",

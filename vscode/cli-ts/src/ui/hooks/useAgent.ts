@@ -2,8 +2,11 @@ import { useCallback, useMemo, useSyncExternalStore } from "react";
 import type { AgentController } from "../../core/agent/AgentController.ts";
 import type { EventBus } from "../../core/bus/EventBus.ts";
 import type { AgentEvent } from "../../core/bus/events.ts";
+import type { PermissionMode } from "../../core/permissions/PermissionMode.ts";
+import type { Message } from "../../core/session/Message.ts";
+import { todosFromMessages } from "../../core/todos/TodoList.ts";
 import { type AppState, initialState } from "../../state/AppState.ts";
-import { reduce } from "../../state/Store.ts";
+import { reduce, transcriptFromMessages } from "../../state/Store.ts";
 import { shortId } from "../../utils/id.ts";
 
 export interface UseAgent {
@@ -11,18 +14,21 @@ export interface UseAgent {
 	submit: (text: string) => void;
 	cancel: () => void;
 	cancelCurrent: () => void;
-	provideInput: (id: string, answer: string) => void;
+	provideInput: (id: string, answers: string[]) => void;
 	setModelLabel: (label: string) => void;
 	clear: () => void;
 	newThread: () => void;
-	notice: (text: string, level?: "info" | "error") => void;
+	hydrateTranscript: (messages: readonly Message[]) => void;
+	notice: (text: string, level?: "info" | "warning" | "error") => void;
+	cycleMode: () => void;
 }
 
 type Action =
 	| { type: "event"; event: AgentEvent }
 	| { type: "model"; label: string }
 	| { type: "clear" }
-	| { type: "notice"; text: string; level: "info" | "error" };
+	| { type: "hydrate"; messages: readonly Message[] }
+	| { type: "notice"; text: string; level: "info" | "warning" | "error" };
 
 function rootReducer(state: AppState, action: Action): AppState {
 	switch (action.type) {
@@ -39,8 +45,27 @@ function rootReducer(state: AppState, action: Action): AppState {
 					liveItems: [],
 					assistantStreams: [],
 					generation: state.render.generation + 1,
+					staticOnly: false,
 				},
 			};
+		case "hydrate": {
+			const items = transcriptFromMessages(action.messages);
+			return {
+				...state,
+				status: "idle",
+				transcript: items,
+				todos: todosFromMessages(action.messages),
+				usage: {},
+				pendingAsk: null,
+				render: {
+					staticItems: items,
+					liveItems: [],
+					assistantStreams: [],
+					generation: state.render.generation + 1,
+					staticOnly: true,
+				},
+			};
+		}
 		case "notice": {
 			const item = {
 				kind: "notice" as const,
@@ -73,8 +98,14 @@ export function useAgent(
 	startupWarnings: readonly string[] = [],
 ): UseAgent {
 	const store = useMemo(
-		() => new AgentViewStore(bus, model, startupWarnings),
-		[bus, model, startupWarnings],
+		() =>
+			new AgentViewStore(
+				bus,
+				model,
+				startupWarnings,
+				controller.permissionMode,
+			),
+		[bus, model, startupWarnings, controller],
 	);
 	const state = useSyncExternalStore(
 		store.subscribe,
@@ -97,7 +128,7 @@ export function useAgent(
 	);
 	const cancelCurrent = useCallback(() => controller.cancel(), [controller]);
 	const provideInput = useCallback(
-		(id: string, answer: string) => controller.provideInput(id, answer),
+		(id: string, answers: string[]) => controller.provideInput(id, answers),
 		[controller],
 	);
 	const setModelLabel = useCallback(
@@ -109,11 +140,19 @@ export function useAgent(
 		controller.newThread();
 		store.dispatch({ type: "clear" });
 	}, [controller, store]);
+	const hydrateTranscript = useCallback(
+		(messages: readonly Message[]) =>
+			store.dispatch({ type: "hydrate", messages }),
+		[store],
+	);
 	const notice = useCallback(
-		(text: string, level: "info" | "error" = "info") =>
+		(text: string, level: "info" | "warning" | "error" = "info") =>
 			store.dispatch({ type: "notice", text, level }),
 		[store],
 	);
+	const cycleMode = useCallback(() => {
+		controller.cyclePermissionMode();
+	}, [controller]);
 
 	return {
 		state,
@@ -124,7 +163,9 @@ export function useAgent(
 		setModelLabel,
 		clear,
 		newThread,
+		hydrateTranscript,
 		notice,
+		cycleMode,
 	};
 }
 
@@ -139,6 +180,7 @@ class AgentViewStore {
 		private readonly bus: EventBus,
 		model: string,
 		startupWarnings: readonly string[],
+		permissionMode: PermissionMode,
 	) {
 		const warnings = startupWarnings.map((text) => ({
 			kind: "notice" as const,
@@ -147,13 +189,14 @@ class AgentViewStore {
 			text,
 		}));
 		this.state = {
-			...initialState(model),
+			...initialState(model, permissionMode),
 			transcript: warnings,
 			render: {
 				staticItems: warnings,
 				liveItems: [],
 				assistantStreams: [],
 				generation: 0,
+				staticOnly: false,
 			},
 		};
 	}

@@ -16,7 +16,10 @@ export interface ToolPolicySnapshot {
 	modelExcludedTools?: readonly string[];
 	computerUseEnabled: boolean;
 	browserUseEnabled: boolean;
+	skillDiscoveryEnabled: boolean;
 }
+
+const SKILL_DISCOVERY_TOOLS = ["find_skill", "find_mcp"];
 
 export class ToolPolicy {
 	private readonly allowedTools: string[];
@@ -48,6 +51,9 @@ export class ToolPolicy {
 		const excluded = new Set(this.excludedToolNames);
 		if (!this.snapshot.computerUseEnabled) excluded.add("computer");
 		if (!this.snapshot.browserUseEnabled) excluded.add("browser");
+		if (!this.snapshot.skillDiscoveryEnabled) {
+			for (const name of SKILL_DISCOVERY_TOOLS) excluded.add(name);
+		}
 		return [...excluded];
 	}
 
@@ -57,6 +63,12 @@ export class ToolPolicy {
 			return false;
 		}
 		if (canonicalName === "browser" && !this.snapshot.browserUseEnabled) {
+			return false;
+		}
+		if (
+			SKILL_DISCOVERY_TOOLS.includes(canonicalName) &&
+			!this.snapshot.skillDiscoveryEnabled
+		) {
 			return false;
 		}
 		if (this.excludedToolNames.includes(canonicalName)) return false;

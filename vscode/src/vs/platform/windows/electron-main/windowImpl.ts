@@ -33,7 +33,7 @@ import { ITelemetryService } from '../../telemetry/common/telemetry.js';
 import { ThemeIcon } from '../../../base/common/themables.js';
 import { IThemeMainService } from '../../theme/electron-main/themeMainService.js';
 import { getMenuBarVisibility, IFolderToOpen, INativeWindowConfiguration, IWindowSettings, IWorkspaceToOpen, MenuBarVisibility, hasNativeTitlebar, useNativeFullScreen, useWindowControlsOverlay, DEFAULT_CUSTOM_TITLEBAR_HEIGHT, TitlebarStyle, MenuSettings } from '../../window/common/window.js';
-import { defaultBrowserWindowOptions, getAllWindowsExcludingOffscreen, IWindowsMainService, OpenContext, VIBRANCY_CLEAR_BACKGROUND, WindowStateValidator } from './windows.js';
+import { defaultBrowserWindowOptions, getAllWindowsExcludingOffscreen, IWindowsMainService, OpenContext, WindowStateValidator } from './windows.js';
 import { ISingleFolderWorkspaceIdentifier, IWorkspaceIdentifier, isSingleFolderWorkspaceIdentifier, isWorkspaceIdentifier, toWorkspaceIdentifier } from '../../workspace/common/workspace.js';
 import { IWorkspacesManagementMainService } from '../../workspaces/electron-main/workspacesManagementMainService.js';
 import { IWindowState, ICodeWindow, ILoadEvent, WindowMode, WindowError, LoadReason, defaultWindowState, IBaseWindow } from '../../window/electron-main/window.js';
@@ -60,17 +60,6 @@ export interface IWindowCreationOptions {
 interface ITouchBarSegment extends electron.SegmentedControlSegment {
 	readonly id: string;
 }
-
-/**
- * macOS vibrancy material for the agent-sessions style windows (Simple and
- * Optimus). 'sidebar' is the canonical translucent material for app side
- * panels (Finder, Notes): the blurred desktop clearly shows through, which
- * the glass sidebar design depends on. The previously used 'menu' material is
- * nearly opaque in dark appearance and made the sidebar read as a static
- * colour even while correctly attached; 'under-window' reads as too
- * bright/washed out once combined with the in-app tint.
- */
-const AGENTS_WINDOW_VIBRANCY = 'sidebar' as const;
 
 interface ILoadOptions {
 	readonly isReload?: boolean;
@@ -667,8 +656,7 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 
 	get isExtensionTestHost(): boolean { return !!(this._config?.extensionTestsPath); }
 
-	private _hasVibrancy = false;
-	get hasVibrancy(): boolean { return this._hasVibrancy; }
+	get hasVibrancy(): boolean { return false; }
 
 	get isExtensionDevelopmentTestFromCli(): boolean { return this.isExtensionDevelopmentHost && this.isExtensionTestHost && !this._config?.debugId; }
 
@@ -738,11 +726,7 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 				webPreferences.backgroundThrottling = false; // keep agents window responsive when in background
 			}
 
-			// Agent sessions window: native vibrancy so the desktop shows through
-			// the translucent sidebar region (macOS only, no-op elsewhere).
-			const overrides = (config.isSessionsWindow || config.isOptimusWindow) && isMacintosh ? { vibrancy: AGENTS_WINDOW_VIBRANCY } : undefined;
-			const options = instantiationService.invokeFunction(defaultBrowserWindowOptions, this.windowState, overrides, webPreferences);
-			this._hasVibrancy = !!options.vibrancy;
+			const options = instantiationService.invokeFunction(defaultBrowserWindowOptions, this.windowState, undefined, webPreferences);
 
 			// Create the browser window
 			mark('code/willCreateCodeBrowserWindow');
@@ -842,52 +826,6 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 		});
 	}
 
-	/**
-	 * macOS: re-attach the native vibrancy material for windows that were created
-	 * with it. macOS/Electron can non-deterministically drop the material (on
-	 * first paint, full-screen transitions and appearance changes), which lets the
-	 * transparent workbench root reveal the opaque backing and makes the
-	 * translucent sidebar read as a flat/static panel. Setting the same material
-	 * again is idempotent; guarded so it only runs for vibrancy windows and never
-	 * takes the window down on failure.
-	 */
-	private reapplyVibrancy(reason: string): void {
-		if (!isMacintosh || !this._hasVibrancy || !this._win || this._win.isDestroyed()) {
-			return;
-		}
-		try {
-			// VIBRANCY_CLEAR_BACKGROUND, never alpha-0: a fully transparent
-			// background makes Chromium skip clearing damaged regions, which is
-			// the root cause of overlay/modal/mode-switch ghosting (see the
-			// constant's doc in windows.ts). This function used to write
-			// '#00000000' here, silently reintroducing the bug on every
-			// re-assert (ready-to-show, full-screen, maximize, color-scheme).
-			this._win.setBackgroundColor(VIBRANCY_CLEAR_BACKGROUND);
-			this._win.setVibrancy(AGENTS_WINDOW_VIBRANCY ?? null);
-			this._win.webContents.invalidate(); // replace any stale composited frame in the same pass
-		} catch (error) {
-			this.logService.warn(`window#${reason}: failed to re-assert window vibrancy: ${error instanceof Error ? error.message : String(error)}`);
-		}
-	}
-
-	/**
-	 * macOS: transparent vibrancy windows can accumulate stale composited
-	 * pixels (ghost remnants of closed menus/overlays) because the compositor
-	 * does not reliably clear damaged regions over a fully transparent
-	 * backing. Scheduling a full repaint replaces the entire frame, wiping
-	 * any such artifacts. Cheap (one frame) and guarded to vibrancy windows.
-	 */
-	private invalidateVibrancyRepaint(reason: string): void {
-		if (!isMacintosh || !this._hasVibrancy || !this._win || this._win.isDestroyed()) {
-			return;
-		}
-		try {
-			this._win.webContents.invalidate();
-		} catch (error) {
-			this.logService.warn(`window#${reason}: failed to schedule window repaint: ${error instanceof Error ? error.message : String(error)}`);
-		}
-	}
-
 	private registerListeners(): void {
 
 		// Window error conditions to handle
@@ -913,41 +851,6 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 				this.pendingLoadConfig = undefined;
 			}
 		}));
-
-		// macOS: re-assert native vibrancy at the lifecycle points where the OS is
-		// known to drop the material, leaving the transparent workbench root to
-		// reveal the opaque backing (the translucent sidebar then reads as a
-		// flat/static panel). A window created with `vibrancy` occasionally comes
-		// up with the material not attached, and macOS also detaches it on
-		// full-screen transitions and appearance (color-scheme) changes. Unlike
-		// the deferred re-apply in `load()`, these all fire after the initial paint
-		// is prepared — safe points to touch the native surface — so re-attaching
-		// here avoids the mid-`loadURL` instability. Each re-assert is guarded and
-		// idempotent (only runs for windows that already expect vibrancy) and a
-		// failure must never take the window down with it.
-		if (isMacintosh) {
-			this._register(Event.fromNodeEventEmitter(this._win, 'ready-to-show')(() => this.reapplyVibrancy('ready-to-show')));
-
-			// macOS drops the vibrancy material across full-screen transitions.
-			this._register(this.onDidEnterFullScreen(() => this.reapplyVibrancy('enter-full-screen')));
-			this._register(this.onDidLeaveFullScreen(() => this.reapplyVibrancy('leave-full-screen')));
-
-			// Zoom (maximize/unmaximize) transitions re-composite the window the
-			// same way and can equally drop the material.
-			this._register(this.onDidMaximize(() => this.reapplyVibrancy('maximize')));
-			this._register(this.onDidUnmaximize(() => this.reapplyVibrancy('unmaximize')));
-
-			// Appearance changes (e.g. system light/dark switch, or the theme
-			// main service re-assigning `nativeTheme.themeSource`) re-composite the
-			// window and can drop the vibrancy material. IThemeMainService is
-			// already a dependency, so reuse its color-scheme signal here.
-			this._register(this.themeMainService.onDidChangeColorScheme(() => this.reapplyVibrancy('color-scheme')));
-
-			// Self-heal stale composited pixels (ghosting) whenever the user
-			// returns to a vibrancy window: a full repaint replaces whatever
-			// frame remnants the compositor failed to clear while unfocused.
-			this._register(Event.fromNodeEventEmitter(this._win, 'focus')(() => this.invalidateVibrancyRepaint('focus')));
-		}
 
 		// Window (Un)Maximize
 		this._register(this.onDidMaximize(() => {
@@ -1320,63 +1223,6 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 
 	load(configuration: INativeWindowConfiguration, options: ILoadOptions = Object.create(null)): void {
 		this.logService.trace(`window#load: attempt to load window (id: ${this._id})`);
-
-		// Vibrancy is normally decided at BrowserWindow construction, but a
-		// window can be REUSED across modes (e.g. the Editor→Simple titlebar
-		// switcher loads the agent-sessions workspace into the current window
-		// with `forceReuseWindow`). Re-apply it so a reused window gets the
-		// same translucent sidebar as a freshly created one — and drops it
-		// again when leaving the sessions workspace. Deferred to after the
-		// navigation settles: mutating the native surface mid-`loadURL` has
-		// destabilized the WebContents in testing. Guarded because a vibrancy
-		// miss must never take the window down with it.
-		//
-		// Two extra wrinkles on reused windows, both sources of the previous
-		// page GHOSTING through the new page's translucent surfaces:
-		// - The compositor holds the previous document's frame across the
-		//   navigation and does not reliably clear it over a transparent
-		//   backing (same failure mode `reapplyVibrancy` documents), so it
-		//   must be explicitly replaced with `webContents.invalidate()` —
-		//   including when BOTH modes use vibrancy (Editor(Advanced)→Simple),
-		//   where the old code skipped this path entirely.
-		// - While the new page is still loading, its translucent regions
-		//   composite against whatever backing the window has. Make the
-		//   backing opaque for the duration of the navigation so the stale
-		//   frame can never blend through, then restore transparency once the
-		//   load settles. Applied before `loadURL` starts, not mid-flight.
-		if (isMacintosh) {
-			const wantsVibrancy = !!(configuration.isSessionsWindow || configuration.isOptimusWindow);
-			if (wantsVibrancy !== this._hasVibrancy || (this.wasLoaded && wantsVibrancy)) {
-				if (this.wasLoaded && this._hasVibrancy) {
-					try {
-						this._win.setBackgroundColor(this.themeMainService.getBackgroundColor());
-					} catch (error) {
-						this.logService.warn(`window#load: failed to set interstitial window background: ${error instanceof Error ? error.message : String(error)}`);
-					}
-				}
-				this._win.webContents.once('did-finish-load', () => {
-					try {
-						if (this._win.isDestroyed()) {
-							return;
-						}
-						if (wantsVibrancy) {
-							this._win.setBackgroundColor(VIBRANCY_CLEAR_BACKGROUND);
-							this._win.setVibrancy(AGENTS_WINDOW_VIBRANCY ?? null);
-						} else {
-							this._win.setVibrancy(null);
-							this._win.setBackgroundColor(this.themeMainService.getBackgroundColor());
-						}
-						this._hasVibrancy = wantsVibrancy;
-						// Replace the held frame of the previous document in the
-						// same pass so no stale pixels survive behind the new
-						// page's translucent surfaces.
-						this._win.webContents.invalidate();
-					} catch (error) {
-						this.logService.warn(`window#load: failed to update window vibrancy: ${error instanceof Error ? error.message : String(error)}`);
-					}
-				});
-			}
-		}
 
 		// Clear Document Edited if needed
 		if (this.isDocumentEdited()) {

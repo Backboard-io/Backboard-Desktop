@@ -19,6 +19,7 @@ export type PromptInputKeyAction =
 	| { kind: "insertNewline" }
 	| { kind: "insertText"; text: string }
 	| { kind: "moveCursor"; direction: PromptInputMoveDirection }
+	| { kind: "pasteClipboardImage" }
 	| { kind: "submit"; intent: PromptSubmitIntent }
 	| { kind: "slashCompletion" }
 	| { kind: "backslashEnterNewline" };

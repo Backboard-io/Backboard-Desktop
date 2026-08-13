@@ -14,6 +14,13 @@ interface AssistantSegment {
 	 * we know at finalize time whether to reveal or discard them.
 	 */
 	buffered: boolean;
+	/**
+	 * True when this segment belongs to a hidden exchange (e.g. the todo
+	 * reconciliation reminder): it streams silently and is discarded at
+	 * finalize even if tool calls follow, though still persisted to the
+	 * session so the model keeps its own words in context.
+	 */
+	hidden: boolean;
 }
 
 export interface AssistantAccumulatorDeps {
@@ -25,6 +32,12 @@ export interface AssistantAccumulatorDeps {
 	 * instead of shown, because the verification nudge is about to replace it.
 	 */
 	suppressFinalMessage?: () => boolean;
+	/**
+	 * Called when a new segment starts. Returning true marks the segment
+	 * "hidden": it is never shown, regardless of tool calls - the whole
+	 * exchange is bookkeeping (e.g. a todo reconciliation reply).
+	 */
+	suppressAllMessages?: () => boolean;
 }
 
 export class AssistantAccumulator {
@@ -41,24 +54,11 @@ export class AssistantAccumulator {
 	appendDelta(text: string): void {
 		const segment = this.ensureSegment();
 		segment.text += text;
-		if (segment.buffered) return;
+		if (segment.buffered || segment.hidden) return;
 		this.bus.emit({
 			type: "assistant:delta",
 			turnId: this.turnId,
 			messageId: segment.id,
-			text,
-		});
-	}
-
-	/**
-	 * Streams a chunk of model reasoning/thinking. Reasoning is not part of the
-	 * assistant message segments (it is not persisted as content); it is
-	 * surfaced live so the UI shows the model thinking instead of dead air.
-	 */
-	appendReasoning(text: string): void {
-		this.bus.emit({
-			type: "assistant:reasoning",
-			turnId: this.turnId,
 			text,
 		});
 	}
@@ -75,7 +75,7 @@ export class AssistantAccumulator {
 		}
 
 		segment.text = text;
-		if (segment.buffered && toolCalls.length === 0) {
+		if (segment.hidden || (segment.buffered && toolCalls.length === 0)) {
 			this.bus.emit({
 				type: "assistant:message:discard",
 				turnId: this.turnId,
@@ -106,6 +106,7 @@ export class AssistantAccumulator {
 			text: "",
 			finalized: false,
 			buffered: this.deps.suppressFinalMessage?.() ?? false,
+			hidden: this.deps.suppressAllMessages?.() ?? false,
 		};
 		this.nextIndex++;
 		this.current = segment;

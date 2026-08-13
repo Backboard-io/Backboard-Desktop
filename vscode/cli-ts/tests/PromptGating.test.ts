@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { Config } from "../src/config/Config.ts";
 import { ToolRegistry } from "../src/core/tools/ToolRegistry.ts";
 import { getSystemPrompt } from "../src/prompts/system/index.tsx";
+import { TODO_NOT_CALLED_REMINDER } from "../src/prompts/todoReminders.ts";
 import { getToolPrompt } from "../src/prompts/tools/index.tsx";
 import { createDefaultTools } from "../src/tools/index.ts";
 import { TEST_BACKBOARD_ENV } from "./helpers/agent.ts";
@@ -95,5 +96,24 @@ describe("prompt tool gating", () => {
 		expect(prompt).toContain("Pass `todos` as an array of objects");
 		expect(prompt).toContain("Do not pass numbered strings");
 		expect(prompt).not.toContain("numbered multi-line string");
+	});
+
+	it("includes the todo reminder segment only when provided", () => {
+		expect(
+			getSystemPrompt({ todoReminderPrompt: TODO_NOT_CALLED_REMINDER }),
+		).toContain("TodoWrite was not called yet");
+		expect(
+			getSystemPrompt({
+				profile: "anthropic",
+				todoReminderPrompt: TODO_NOT_CALLED_REMINDER,
+			}),
+		).toContain("TodoWrite was not called yet");
+		expect(
+			getSystemPrompt({
+				profile: "openai",
+				todoReminderPrompt: TODO_NOT_CALLED_REMINDER,
+			}),
+		).toContain("TodoWrite was not called yet");
+		expect(getSystemPrompt({})).not.toContain("TodoWrite was not called yet");
 	});
 });

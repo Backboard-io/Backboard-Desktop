@@ -50,6 +50,7 @@ export function mapMcpTools(
 			description: tool.description ?? "",
 			inputSchema: tool.inputSchema,
 			annotations: tool.annotations,
+			trustAnnotations: server.trustToolAnnotations,
 			timeoutMs: server.timeoutMs,
 			call: async (input, ctx) =>
 				client.callTool({ name: tool.name, arguments: input }, undefined, {
