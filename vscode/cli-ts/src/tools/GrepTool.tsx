@@ -140,6 +140,7 @@ export class GrepTool extends Tool<Input, Output> {
 		const searchPath = input.path ? resolve(ctx.cwd, input.path) : ctx.cwd;
 		const outputMode = input.output_mode ?? "content";
 		const args = ["--no-heading", "--color=never"];
+		if (!input.fixed_string) args.push("--engine=auto");
 		if (outputMode === "file_paths") args.push("--files-with-matches");
 		if (outputMode === "content" && input.line_numbers !== false) {
 			args.push("--line-number");
@@ -161,11 +162,16 @@ export class GrepTool extends Tool<Input, Output> {
 		}
 		args.push("--regexp", input.pattern, searchPath);
 
-		const { stdout, code } = await run("rg", args, ctx);
+		const { stdout, stderr, code } = await run("rg", args, ctx);
 
 		// rg exit code 1 = no matches (not an error); >1 = real error.
 		if (code !== 0 && code !== 1) {
-			throw new Error(`ripgrep failed (exit ${code})`);
+			const detail = stderr.trim();
+			throw new Error(
+				detail
+					? `ripgrep failed (exit ${code}): ${detail}`
+					: `ripgrep failed (exit ${code})`,
+			);
 		}
 
 		let limited = stdout;
@@ -198,16 +204,23 @@ function run(
 	cmd: string,
 	args: string[],
 	ctx: ToolContext,
-): Promise<{ stdout: string; code: number }> {
+): Promise<{ stdout: string; stderr: string; code: number }> {
 	return new Promise((resolvePromise, reject) => {
 		if (ctx.signal.aborted) return reject(new Error("aborted"));
 		const child = spawn(cmd, args, { signal: ctx.signal });
 		let stdout = "";
+		let stderr = "";
 		child.stdout?.on("data", (c) => {
 			stdout += c.toString();
 			if (stdout.length > MAX_OUTPUT * 2) child.kill("SIGTERM");
 		});
+		child.stderr?.on("data", (c) => {
+			stderr += c.toString();
+			if (stderr.length > MAX_OUTPUT) stderr = stderr.slice(0, MAX_OUTPUT);
+		});
 		child.on("error", (err) => reject(err));
-		child.on("close", (code) => resolvePromise({ stdout, code: code ?? 1 }));
+		child.on("close", (code) =>
+			resolvePromise({ stdout, stderr, code: code ?? 1 }),
+		);
 	});
 }

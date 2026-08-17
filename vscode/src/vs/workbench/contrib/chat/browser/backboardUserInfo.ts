@@ -33,10 +33,15 @@ export interface IBackboardUserInfo {
  * (written by the SSO sign-in flow):
  * 1. `name` prefers a cached `oauth.user_name`, then the `id_token` `name` claim,
  *    then the OAuth `userinfo` endpoint.
- * 2. `email` / `plan` come from the `id_token` claims, then `userinfo`.
+ * 2. `email` / `plan` come from the `id_token` claims, then `userinfo` when
+ *    neither a local name nor email is available.
  *
  * A single `userinfo` request is made (with a one-shot token refresh on 401)
- * only when the local claims leave something unresolved. Requests go through
+ * only when the local claims cannot identify the account at all. Avoid doing
+ * network work just to fill optional metadata such as the plan: this resolver
+ * runs while the chat UI is opening, and stale OAuth metadata can otherwise
+ * add two failed requests even though a cached name or email is already enough
+ * to render the account. Requests go through
  * {@link IRequestService} (main process) because the Backboard endpoints do not
  * allow cross-origin renderer fetches. A newly resolved name is cached back into
  * the config file so later lookups work offline. Returns an empty object when
@@ -55,7 +60,7 @@ export async function resolveBackboardUserInfo(fileService: IFileService, pathSe
 	let email = idClaims ? emailFromClaims(idClaims) : undefined;
 	let plan = idClaims ? planFromClaims(idClaims) : undefined;
 
-	if (!name || !email || !plan) {
+	if (!name && !email) {
 		const claims = await userInfoClaims(oauth, fileService, configResource, requestService, logService);
 		if (claims) {
 			name = name ?? displayNameFromClaims(claims);

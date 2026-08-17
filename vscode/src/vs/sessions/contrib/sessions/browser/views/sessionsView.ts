@@ -115,6 +115,7 @@ export class SessionsView extends ViewPane {
 	private filterPopover: HTMLElement | undefined;
 	private selectedWorkspaceFolderUri: string | undefined;
 	private selectedWorkspaceFolderLabel: string | undefined;
+	private recentWorkspaceFolders: readonly { uri: string; label: string }[] = [];
 	private simpleCompact = false;
 	private isFindWidgetOpen = false;
 	sessionsControl: SessionsList | undefined;
@@ -249,8 +250,8 @@ export class SessionsView extends ViewPane {
 			compactToggleButton.appendChild(renderIcon(Codicon.filter));
 			const updateCompactToggleButton = () => {
 				const label = this.simpleCompact
-					? localize('showThreadCards', "Show full thread cards")
-					: localize('showCompactThreads', "Use compact thread list");
+					? localize('showThreadCards', "Show recent thread cards")
+					: localize('showFolderView', "Show folders");
 				compactToggleButton.title = label;
 				compactToggleButton.setAttribute('aria-label', label);
 				compactToggleButton.setAttribute('aria-pressed', String(this.simpleCompact));
@@ -348,6 +349,7 @@ export class SessionsView extends ViewPane {
 			sorting: () => this.currentSorting,
 			simpleMode,
 			workspaceFolderFilter: () => this.selectedWorkspaceFolderUri,
+			knownWorkspaceFolders: () => this.recentWorkspaceFolders,
 			simpleCompact: () => this.simpleCompact,
 			findWidgetContainer,
 			onSessionOpen: (resource, preserveFocus, sideBySide) => {
@@ -367,6 +369,7 @@ export class SessionsView extends ViewPane {
 				this.sessionsService.openSession(resource, { preserveFocus }).then(onOpened).catch(onUnexpectedError);
 			},
 		}));
+		void this.refreshRecentWorkspaceFolders();
 		this._register(this.onDidChangeBodyVisibility(visible => sessionsControl.setVisible(visible)));
 
 		// Bottom-pinned footer: update button (above) + signed-in user identity.
@@ -403,6 +406,7 @@ export class SessionsView extends ViewPane {
 		this._register(this.hostService.onDidChangeFocus(hasFocus => {
 			if (hasFocus) {
 				sessionsControl.refresh();
+				void this.refreshRecentWorkspaceFolders();
 			}
 		}));
 
@@ -476,6 +480,9 @@ export class SessionsView extends ViewPane {
 			const navigation = DOM.append(footer, $('.agent-sessions-footer-navigation'));
 			this.createSidebarAction(navigation, Codicon.extensions, localize('marketplace', "Marketplace"), anchor => {
 				this.instantiationService.createInstance(SkillsLibraryController).showMarketplace(anchor);
+			});
+			this.createSidebarAction(navigation, Codicon.graph, localize('usage', "Usage"), () => {
+				void this.commandService.executeCommand('backboard.openUsage');
 			});
 			this.createSidebarAction(navigation, Codicon.settingsGear, localize('settings', "Settings"), () => {
 				void this.commandService.executeCommand('workbench.action.openSettings');
@@ -637,6 +644,26 @@ export class SessionsView extends ViewPane {
 		this.projectFilterLabel && (this.projectFilterLabel.textContent = label);
 		this.projectFilterButton?.setAttribute('title', label);
 		this.projectFilterButton?.setAttribute('aria-label', localize('filterThreadsByFolder', "Filter threads by folder: {0}", label));
+	}
+
+	private async refreshRecentWorkspaceFolders(): Promise<void> {
+		try {
+			const recentlyOpened = await this.workspacesService.getRecentlyOpened();
+			const folders = new Map<string, { uri: string; label: string }>();
+			for (const recent of recentlyOpened.workspaces) {
+				if (!isRecentFolder(recent)) {
+					continue;
+				}
+				const uri = recent.folderUri.toString();
+				if (!folders.has(uri)) {
+					folders.set(uri, { uri, label: recent.label || basename(recent.folderUri) });
+				}
+			}
+			this.recentWorkspaceFolders = [...folders.values()];
+			this.sessionsControl?.refresh();
+		} catch (error) {
+			this.logService.warn('[SessionsView] Unable to load recent folders for the folder view', error);
+		}
 	}
 
 	private async toggleProjectFilterPopover(container: HTMLElement): Promise<void> {

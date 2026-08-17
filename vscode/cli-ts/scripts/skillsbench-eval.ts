@@ -11,6 +11,7 @@ import {
 	cp,
 	mkdir,
 	mkdtemp,
+	open,
 	readFile,
 	rm,
 	stat,
@@ -376,7 +377,12 @@ async function prepareBenchmark(
 		options.cacheDir,
 		bunTargetForDockerArchitecture(architecture),
 	);
-	const image = await buildTaskImage(taskDir, options.taskId, commit);
+	const image = await buildTaskImage(
+		taskDir,
+		options.taskId,
+		commit,
+		options.cacheDir,
+	);
 	const workingDirectory = await dockerImageWorkingDirectory(image);
 	return {
 		binaryPath,
@@ -392,7 +398,11 @@ async function prepareBenchmark(
 async function ensureSkillsBenchCheckout(
 	options: SkillsBenchOptions,
 ): Promise<string> {
-	const checkoutDir = path.join(options.cacheDir, safePathSegment(options.ref));
+	const checkoutDir = skillsBenchCheckoutDir(
+		options.cacheDir,
+		options.ref,
+		options.taskId,
+	);
 	const gitDir = path.join(checkoutDir, ".git");
 	if (!(await exists(gitDir))) {
 		if (await exists(checkoutDir)) {
@@ -425,6 +435,19 @@ async function ensureSkillsBenchCheckout(
 	return checkoutDir;
 }
 
+export function skillsBenchCheckoutDir(
+	cacheDir: string,
+	ref: string,
+	taskId: string,
+): string {
+	return path.join(
+		cacheDir,
+		"checkouts",
+		safePathSegment(ref),
+		safePathSegment(taskId),
+	);
+}
+
 async function buildLinuxBinary(
 	cacheDir: string,
 	target: string,
@@ -432,28 +455,87 @@ async function buildLinuxBinary(
 	const outputDir = path.join(cacheDir, "bin", target);
 	const binaryPath = path.join(outputDir, "backboard");
 	await mkdir(outputDir, { recursive: true });
-	await runCommand(
-		[
-			"bun",
-			"build",
-			"--compile",
-			"--target",
-			target,
-			"--outfile",
-			binaryPath,
-			"./src/entrypoints/cli.tsx",
-		],
-		{ cwd: CLI_ROOT, stream: true, timeoutMs: 300_000 },
-	);
-	await chmod(binaryPath, 0o755);
+	const release = await acquireProcessLock(`${binaryPath}.lock`, 360_000);
+	try {
+		await runCommand(
+			[
+				"bun",
+				"build",
+				"--compile",
+				"--target",
+				target,
+				"--outfile",
+				binaryPath,
+				"./src/entrypoints/cli.tsx",
+			],
+			{ cwd: CLI_ROOT, stream: true, timeoutMs: 300_000 },
+		);
+		await chmod(binaryPath, 0o755);
+	} finally {
+		await release();
+	}
 	return binaryPath;
+}
+
+async function acquireProcessLock(
+	lockPath: string,
+	timeoutMs: number,
+): Promise<() => Promise<void>> {
+	const started = Date.now();
+	while (true) {
+		try {
+			const handle = await open(lockPath, "wx");
+			try {
+				await handle.writeFile(String(process.pid));
+			} catch (error) {
+				await handle.close();
+				await rm(lockPath, { force: true });
+				throw error;
+			}
+			return async () => {
+				await handle.close();
+				await rm(lockPath, { force: true });
+			};
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+		}
+
+		const owner = Number.parseInt(
+			(await readFile(lockPath, "utf8").catch(() => "")).trim(),
+			10,
+		);
+		if (Number.isInteger(owner) && owner > 0 && !processIsRunning(owner)) {
+			await rm(lockPath, { force: true });
+			continue;
+		}
+		if (Date.now() - started >= timeoutMs) {
+			throw new Error(`Timed out waiting for build lock: ${lockPath}`);
+		}
+		await Bun.sleep(250);
+	}
+}
+
+function processIsRunning(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (error) {
+		return (error as NodeJS.ErrnoException).code !== "ESRCH";
+	}
 }
 
 async function buildTaskImage(
 	taskDir: string,
 	taskId: string,
 	commit: string,
+	cacheDir: string,
 ): Promise<string> {
+	const image = `backboard-skillsbench-${safeDockerName(taskId)}:${commit.slice(0, 12)}`;
+	const cachedImage = await runCommand(["docker", "image", "inspect", image], {
+		allowFailure: true,
+	});
+	if (cachedImage.exitCode === 0) return image;
+
 	const temporaryRoot = await mkdtemp(
 		path.join(os.tmpdir(), "backboard-skillsbench-context-"),
 	);
@@ -467,11 +549,24 @@ async function buildTaskImage(
 			},
 			recursive: true,
 		});
-		const image = `backboard-skillsbench-${safeDockerName(taskId)}:${commit.slice(0, 12)}`;
-		await runCommand(["docker", "build", "--tag", image, contextDir], {
-			stream: true,
-			timeoutMs: 900_000,
-		});
+		const release = await acquireProcessLock(
+			path.join(cacheDir, "docker-build.lock"),
+			1_860_000,
+		);
+		try {
+			const imageBuiltByAnotherProcess = await runCommand(
+				["docker", "image", "inspect", image],
+				{ allowFailure: true },
+			);
+			if (imageBuiltByAnotherProcess.exitCode === 0) return image;
+
+			await runCommand(["docker", "build", "--tag", image, contextDir], {
+				stream: true,
+				timeoutMs: 1_800_000,
+			});
+		} finally {
+			await release();
+		}
 		return image;
 	} finally {
 		await rm(temporaryRoot, { force: true, recursive: true });

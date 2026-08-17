@@ -402,7 +402,11 @@ rename_helper_app "Code - OSS Helper (Renderer)" "${APP_DISPLAY_NAME} Helper (Re
 
 BACKBOARD_EXTENSION_PATH="${APP_PATH}/Contents/Resources/app/extensions/backboard"
 if [[ -d "${BACKBOARD_EXTENSION_PATH}" ]]; then
-  sync_backboard_extension_runtime
+  if [[ "${SKIP_BACKBOARD_RUNTIME_SYNC:-0}" == "1" ]]; then
+    echo "Reusing Backboard extension runtime already present in the source app"
+  else
+    sync_backboard_extension_runtime
+  fi
   rm -rf "${BACKBOARD_EXTENSION_PATH}/rust/target"
 else
   echo "Missing Backboard extension in packaged VSCode app: ${BACKBOARD_EXTENSION_PATH}" >&2

@@ -9,6 +9,7 @@ import { HoverStyle } from '../../../../../../base/browser/ui/hover/hover.js';
 import { DomScrollableElement } from '../../../../../../base/browser/ui/scrollbar/scrollableElement.js';
 import { ScrollbarVisibility } from '../../../../../../base/common/scrollable.js';
 import { IChatExternalEdit, IChatMarkdownContent, IChatTerminalToolInvocationData, IChatThinkingPart, IChatToolInvocation, IChatToolInvocationSerialized } from '../../../common/chatService/chatService.js';
+import { migrateLegacyTerminalToolSpecificData } from '../../../common/chat.js';
 import { IChatContentPartRenderContext, IChatContentPart } from './chatContentParts.js';
 import { IChatRendererContent } from '../../../common/model/chatViewModel.js';
 import { ChatConfiguration, ThinkingDisplayMode } from '../../../common/constants.js';
@@ -18,7 +19,7 @@ import { IConfigurationService } from '../../../../../../platform/configuration/
 import { IAccessibilityService } from '../../../../../../platform/accessibility/common/accessibility.js';
 import { IContextKeyService } from '../../../../../../platform/contextkey/common/contextkey.js';
 import { AccessibilityWorkbenchSettingId } from '../../../../accessibility/browser/accessibilityConfiguration.js';
-import { MarkdownString } from '../../../../../../base/common/htmlContent.js';
+import { IMarkdownString, MarkdownString } from '../../../../../../base/common/htmlContent.js';
 import { IRenderedMarkdown } from '../../../../../../base/browser/markdownRenderer.js';
 import { IMarkdownRenderer } from '../../../../../../platform/markdown/browser/markdownRenderer.js';
 import { extractCodeblockUrisFromText } from '../../../common/widget/annotations.js';
@@ -146,6 +147,322 @@ export function createThinkingIcon(icon: ThemeIcon): HTMLElement {
  */
 type ToolActivitySubkind = 'read' | 'search' | 'edit' | 'terminal' | 'other';
 
+type T3WorkEntryIconName = 'bot' | 'eye' | 'globe' | 'hammer' | 'square-pen' | 'terminal' | 'wrench';
+
+interface IT3WorkEntryPresentation {
+	readonly heading: string;
+	readonly preview?: string;
+	readonly details?: string;
+	readonly icon: T3WorkEntryIconName;
+	readonly failed: boolean;
+}
+
+function textFromMarkdown(value: string | IMarkdownString | undefined): string | undefined {
+	if (!value) {
+		return undefined;
+	}
+	return (typeof value === 'string' ? value : value.value).replace(/\s+/g, ' ').trim() || undefined;
+}
+
+function stringifyToolValue(value: unknown): string | undefined {
+	if (value === undefined || value === null || value === '') {
+		return undefined;
+	}
+	if (typeof value === 'string') {
+		return value.trim() || undefined;
+	}
+	try {
+		return JSON.stringify(value, null, 2);
+	} catch {
+		return String(value);
+	}
+}
+
+function firstToolString(value: unknown, keys: readonly string[]): string | undefined {
+	if (!value || typeof value !== 'object') {
+		return undefined;
+	}
+	const record = value as Record<string, unknown>;
+	for (const key of keys) {
+		const candidate = record[key];
+		if (typeof candidate === 'string' && candidate.trim()) {
+			return candidate.trim();
+		}
+	}
+	return undefined;
+}
+
+function compactWorkPreview(value: string | undefined, maxLength = 120): string | undefined {
+	const compact = value?.replace(/\s+/g, ' ').trim();
+	if (!compact) {
+		return undefined;
+	}
+	return middleTruncate(compact, maxLength);
+}
+
+function toolInvocationParameters(invocation: IChatToolInvocation | IChatToolInvocationSerialized): unknown {
+	if (invocation.toolSpecificData?.kind === 'input') {
+		return invocation.toolSpecificData.rawInput;
+	}
+	if (invocation.kind === 'toolInvocationSerialized') {
+		return undefined;
+	}
+	const state = invocation.state.get();
+	return state.type === IChatToolInvocation.StateKind.Streaming ? state.partialInput.get() : state.parameters;
+}
+
+function toolInvocationResultPath(invocation: IChatToolInvocation | IChatToolInvocationSerialized): string | undefined {
+	const resultDetails: unknown = IChatToolInvocation.resultDetails(invocation);
+	if (!Array.isArray(resultDetails) || resultDetails.length === 0) {
+		return undefined;
+	}
+	const first = resultDetails[0];
+	if (!first || typeof first !== 'object') {
+		return undefined;
+	}
+	const firstRecord = first as Record<string, unknown>;
+	const candidate = firstRecord.uri && typeof firstRecord.uri === 'object'
+		? firstRecord.uri as Record<string, unknown>
+		: firstRecord;
+	const rawPath = typeof candidate.path === 'string'
+		? candidate.path
+		: typeof candidate.fsPath === 'string'
+			? candidate.fsPath
+			: undefined;
+	if (!rawPath) {
+		return undefined;
+	}
+	const segments = rawPath.split('/').filter(Boolean);
+	return segments.length > 1 ? segments.slice(-2).join('/') : rawPath;
+}
+
+function t3ToolInvocationFailed(invocation: IChatToolInvocation | IChatToolInvocationSerialized): boolean {
+	const terminalData = invocation.toolSpecificData?.kind === 'terminal'
+		? migrateLegacyTerminalToolSpecificData(invocation.toolSpecificData)
+		: undefined;
+	if (terminalData?.terminalCommandState?.exitCode !== undefined) {
+		return terminalData.terminalCommandState.exitCode !== 0;
+	}
+	return invocation.kind === 'toolInvocation'
+		&& invocation.state.get().type === IChatToolInvocation.StateKind.Cancelled;
+}
+
+function t3WorkEntryPresentation(
+	metadata: ChatThinkingItemMetadata | undefined,
+	toolInvocationId: string | undefined,
+	fallbackLabel: string | undefined,
+	nativeText: string | undefined,
+): IT3WorkEntryPresentation {
+	if (metadata?.kind === 'externalEdit') {
+		const verb = metadata.editKind === 'create' ? 'Created' : metadata.editKind === 'delete' ? 'Deleted' : metadata.editKind === 'rename' ? 'Renamed' : 'Edited';
+		return {
+			heading: 'File change',
+			preview: `${verb} ${basename(metadata.uri)}`,
+			details: metadata.uri.path,
+			icon: 'square-pen',
+			failed: false,
+		};
+	}
+	if (metadata?.kind === 'markdownContent') {
+		const uri = extractCodeblockUrisFromText(metadata.content.value)?.uri;
+		return {
+			heading: 'File change',
+			preview: uri ? basename(uri) : compactWorkPreview(fallbackLabel),
+			details: uri?.path,
+			icon: 'square-pen',
+			failed: false,
+		};
+	}
+
+	const invocation = metadata && (metadata.kind === 'toolInvocation' || metadata.kind === 'toolInvocationSerialized') ? metadata : undefined;
+	const toolId = (toolInvocationId ?? invocation?.toolId ?? '').toLowerCase();
+	const label = textFromMarkdown(invocation?.invocationMessage) ?? compactWorkPreview(fallbackLabel) ?? localize('chat.thinking.toolCall', 'Tool call');
+	const originLabel = textFromMarkdown(invocation?.originMessage);
+	const completedLabel = textFromMarkdown(invocation?.pastTenseMessage);
+	const toolData = invocation?.toolSpecificData;
+	const terminalData = toolData?.kind === 'terminal' ? migrateLegacyTerminalToolSpecificData(toolData) : undefined;
+	const parameters = invocation ? toolInvocationParameters(invocation) : undefined;
+	const modifiedFilePath = toolData?.kind === 'modifiedFilesConfirmation'
+		? toolData.modifiedFiles[0]?.title ?? toolData.modifiedFiles[0]?.uri.path
+		: undefined;
+	const filePath = firstToolString(parameters, ['filePath', 'file_path', 'path', 'targetFile', 'target_file', 'notebookPath', 'notebook_path', 'uri'])
+		?? modifiedFilePath
+		?? (invocation ? toolInvocationResultPath(invocation) : undefined);
+	const query = firstToolString(parameters, ['query', 'pattern', 'searchTerm', 'search_term', 'glob', 'url']);
+	const command = terminalData
+		? terminalData.presentationOverrides?.commandLine ?? terminalData.commandLine?.forDisplay ?? terminalData.commandLine?.userEdited ?? terminalData.commandLine?.original
+		: firstToolString(parameters, ['command', 'cmd', 'script']);
+	const subagentPreview = toolData?.kind === 'subagent'
+		? [toolData.agentName, toolData.modelName, toolData.description].filter(Boolean).join(' · ')
+		: undefined;
+	const semanticText = `${toolId} ${label}`.toLocaleLowerCase();
+	const isTerminal = toolData?.kind === 'terminal' || semanticText.includes('terminal') || semanticText.includes('bash') || semanticText.includes('shell') || semanticText.includes('exec_command') || semanticText.includes('run command');
+	const isEdit = toolData?.kind === 'modifiedFilesConfirmation' || isEditToolId(semanticText) || semanticText.includes('write') || semanticText.includes('delete file') || semanticText.includes('move file');
+	const isSearch = toolData?.kind === 'search' || semanticText.includes('search') || semanticText.includes('grep') || semanticText.includes('find') || semanticText.includes('glob') || semanticText.includes('list files') || semanticText.includes('codebase');
+	const isRead = semanticText.includes('read') || semanticText.includes('get file') || semanticText.includes('view file') || semanticText.includes('problems');
+	const isWeb = semanticText.includes('web') || semanticText.includes('fetch') || semanticText.includes('browser') || semanticText.includes('url');
+	const isSubagent = toolData?.kind === 'subagent' || semanticText.includes('agent') || semanticText.includes('subtask');
+	const isTodo = toolData?.kind === 'todoList' || semanticText.includes('todo') || semanticText.includes('plan');
+	const isMcp = invocation?.source?.type === 'mcp';
+
+	let heading = label;
+	let icon: T3WorkEntryIconName = isMcp ? 'wrench' : 'hammer';
+	let preview = compactWorkPreview(filePath ?? query ?? (originLabel !== label ? originLabel : undefined) ?? (completedLabel !== label ? completedLabel : undefined));
+	if (isTerminal) {
+		heading = 'Terminal';
+		icon = 'terminal';
+		preview = compactWorkPreview(command);
+	} else if (isTodo) {
+		heading = 'Plan';
+		icon = 'bot';
+		if (toolData?.kind === 'todoList') {
+			const complete = toolData.todoList.filter(todo => todo.status === 'completed').length;
+			preview = `${complete}/${toolData.todoList.length} completed`;
+		} else {
+			const todoCount = /(?:updated|created)\s+(\d+)\s+todos?/i.exec(preview ?? label)?.[1];
+			const completedCount = (preview ?? label).match(/\[completed\]/gi)?.length;
+			if (todoCount && completedCount !== undefined) {
+				preview = `${completedCount}/${todoCount} completed`;
+			}
+		}
+	} else if (isEdit) {
+		heading = 'File change';
+		icon = 'square-pen';
+	} else if (isRead) {
+		heading = 'Read';
+		icon = 'eye';
+	} else if (isSearch) {
+		heading = 'Search';
+		icon = 'eye';
+	} else if (isWeb) {
+		heading = 'Web search';
+		icon = 'globe';
+	} else if (isSubagent) {
+		heading = 'Agent';
+		icon = 'bot';
+		preview = compactWorkPreview(subagentPreview ?? query ?? filePath);
+	} else if (isMcp) {
+		heading = label;
+		icon = 'wrench';
+	}
+	if (!preview && nativeText) {
+		const compactNative = nativeText.replace(/\s+/g, ' ').trim();
+		const withoutLabel = compactNative.toLocaleLowerCase().startsWith(label.toLocaleLowerCase())
+			? compactNative.slice(label.length).replace(/^[\s:—–-]+/, '')
+			: compactNative;
+		preview = compactWorkPreview(withoutLabel, 90);
+	}
+	if (preview?.toLocaleLowerCase().startsWith(heading.toLocaleLowerCase())) {
+		preview = preview.slice(heading.length).replace(/^[\s:—–-]+/, '') || undefined;
+	}
+
+	if (preview?.toLocaleLowerCase() === heading.toLocaleLowerCase()) {
+		preview = undefined;
+	}
+
+	const detailBlocks: string[] = [];
+	const parameterText = stringifyToolValue(parameters);
+	if (parameterText) {
+		detailBlocks.push(parameterText);
+	}
+	if (toolData?.kind === 'simpleToolInvocation') {
+		if (toolData.input.trim()) {
+			detailBlocks.push(toolData.input.trim());
+		}
+		if (toolData.output.trim()) {
+			detailBlocks.push(toolData.output.trim());
+		}
+	}
+	if (toolData?.kind === 'subagent') {
+		if (toolData.prompt?.trim()) {
+			detailBlocks.push(toolData.prompt.trim());
+		}
+		if (toolData.result?.trim()) {
+			detailBlocks.push(toolData.result.trim());
+		}
+	}
+	if (terminalData?.terminalCommandOutput?.text.trim()) {
+		detailBlocks.push(terminalData.terminalCommandOutput.text.trim());
+	}
+	if (toolData?.kind === 'todoList') {
+		detailBlocks.push(toolData.todoList.map(todo => `${todo.status === 'completed' ? '✓' : todo.status === 'in-progress' ? '•' : '○'} ${todo.title}`).join('\n'));
+	}
+	if (detailBlocks.length === 0) {
+		const cleanNativeText = nativeText?.replace(/\s+/g, ' ').trim();
+		if (cleanNativeText && cleanNativeText.toLocaleLowerCase() !== label.toLocaleLowerCase()) {
+			detailBlocks.push(cleanNativeText);
+		}
+	}
+
+	const failed = invocation ? t3ToolInvocationFailed(invocation) : false;
+	return { heading, preview, details: detailBlocks.join('\n\n') || undefined, icon, failed };
+}
+
+function appendT3SvgElement(parent: SVGElement, name: string, attributes: Record<string, string>): SVGElement {
+	const element = parent.ownerDocument.createElementNS('http://www.w3.org/2000/svg', name);
+	for (const [key, value] of Object.entries(attributes)) {
+		element.setAttribute(key, value);
+	}
+	parent.appendChild(element);
+	return element;
+}
+
+function createT3WorkEntrySvg(document: Document, icon: T3WorkEntryIconName | 'check' | 'chevron' | 'minus' | 'x'): SVGElement {
+	const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+	svg.setAttribute('viewBox', '0 0 24 24');
+	svg.setAttribute('fill', 'none');
+	svg.setAttribute('stroke', 'currentColor');
+	svg.setAttribute('stroke-width', '1.8');
+	svg.setAttribute('stroke-linecap', 'round');
+	svg.setAttribute('stroke-linejoin', 'round');
+	svg.setAttribute('aria-hidden', 'true');
+	svg.classList.add('chat-thinking-work-row-svg');
+	const path = (d: string) => appendT3SvgElement(svg, 'path', { d });
+	const line = (x1: string, y1: string, x2: string, y2: string) => appendT3SvgElement(svg, 'line', { x1, y1, x2, y2 });
+	switch (icon) {
+		case 'terminal':
+			appendT3SvgElement(svg, 'rect', { x: '3', y: '4', width: '18', height: '16', rx: '2' });
+			path('m7 9 3 3-3 3');
+			line('13', '15', '17', '15');
+			break;
+		case 'eye':
+			path('M2.1 12a10.6 10.6 0 0 1 19.8 0 10.6 10.6 0 0 1-19.8 0Z');
+			appendT3SvgElement(svg, 'circle', { cx: '12', cy: '12', r: '3' });
+			break;
+		case 'square-pen':
+			path('M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7');
+			path('M18.4 2.6a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4Z');
+			break;
+		case 'globe':
+			appendT3SvgElement(svg, 'circle', { cx: '12', cy: '12', r: '9' });
+			path('M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18');
+			break;
+		case 'bot':
+			appendT3SvgElement(svg, 'rect', { x: '4', y: '7', width: '16', height: '12', rx: '2' });
+			path('M12 3v4M8 12h.01M16 12h.01M9 16h6');
+			break;
+		case 'wrench':
+			path('M14.7 6.3a4 4 0 0 0-5-5L12 3.6 9.6 6 7.3 3.7a4 4 0 0 0 5 5l-8.6 8.6a2.1 2.1 0 0 0 3 3Z');
+			break;
+		case 'hammer':
+			path('m15 12-8.5 8.5a2.1 2.1 0 0 1-3-3L12 9M17.6 15 22 10.6M14.3 6.3l3.4-3.4 3.4 3.4-3.4 3.4Z');
+			break;
+		case 'check':
+			path('m5 12 4 4L19 6');
+			break;
+		case 'x':
+			path('M6 6l12 12M18 6 6 18');
+			break;
+		case 'minus':
+			line('6', '12', '18', '12');
+			break;
+		case 'chevron':
+			path('m7 10 5 5 5-5');
+			break;
+	}
+	return svg;
+}
+
 /**
  * Grouping category. Reads and searches share a group so mixed exploration
  * summarizes as "Read a file and searched code".
@@ -259,6 +576,7 @@ interface IToolActivityGroup {
 	readonly body: HTMLElement;
 	readonly items: { toolCallId?: string; subkind: ToolActivitySubkind; fallbackLabel?: string }[];
 	readonly hover: MutableDisposable<IDisposable>;
+	expanded: boolean;
 }
 
 function extractTitleFromThinkingContent(content: string): string | undefined {
@@ -529,7 +847,8 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			?? localize('chat.thinking.header.initial', 'Thinking');
 
 		super(extractedTitle, context, undefined, hoverService, configurationService);
-		this.useCursorPanelPresentation = context.container.closest('.backboard-clean-chat, .part.auxiliarybar') !== null;
+		this.useCursorPanelPresentation = context.container.closest('.backboard-clean-chat, .part.auxiliarybar') !== null
+			|| context.container.ownerDocument.querySelector('.agent-sessions-workbench') !== null;
 
 		this.id = content.id;
 		this.content = content;
@@ -538,7 +857,10 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			&& (this.configurationService.getValue<boolean>(ChatConfiguration.ProgressBorder) !== true || accessibilityService.isMotionReduced());
 		const configuredMode = getEffectiveThinkingDisplayMode(this.configurationService, contextKeyService);
 
-		this.fixedScrollingMode = configuredMode === ThinkingDisplayMode.FixedScrolling;
+		// The Backboard middle panel follows T3's document-flow timeline. VS
+		// Code's fixed-height reasoning viewport clips and scrolls the whole work
+		// log as one unit, while T3 keeps every work row in ordinary page flow.
+		this.fixedScrollingMode = !this.useCursorPanelPresentation && configuredMode === ThinkingDisplayMode.FixedScrolling;
 		this.streamThenCollapseMode = configuredMode === ThinkingDisplayMode.StreamThenCollapse;
 		this.wasStreamingLive = !this.streamingCompleted && !this.element.isComplete;
 		this.startTimeMs = Date.now();
@@ -663,6 +985,12 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 
 			this._externalResourceWidget.setCollapsed(!isExpanded);
 
+			// Lazy materialization can update the title while a restored completed
+			// fold opens. T3 keeps the lifecycle label stable in both states.
+			if (this.useCursorPanelPresentation && (this.streamingCompleted || this.element.isComplete)) {
+				this.setFinalizedTitle(this.defaultTitle);
+			}
+
 			// Fire when expanded/collapsed
 			this._onDidChangeHeight.fire();
 		}));
@@ -694,10 +1022,21 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 				}
 			}));
 		}
+
+		// Restored completed turns do not pass through finalizeTitleIfDefault(),
+		// so give Backboard's clean transcript the same quiet completed label on
+		// first render that a live turn receives when it finishes.
+		if (this.useCursorPanelPresentation && (this.streamingCompleted || this.element.isComplete)) {
+			this.setFinalizedTitle(this.defaultTitle);
+		}
 	}
 
 	protected override shouldInitEarly(): boolean {
-		return this.fixedScrollingMode && !this.streamingCompleted;
+		// T3's timeline always mounts its work entries; only their individual
+		// details are disclosed on demand. The native chat renderer normally
+		// delays the entire thinking body until VS Code's outer fold is opened,
+		// which leaves restored Backboard threads with styled but unmounted rows.
+		return this.useCursorPanelPresentation || (this.fixedScrollingMode && !this.streamingCompleted);
 	}
 
 	// @TODO: @justschen Convert to template for each setting?
@@ -1344,18 +1683,138 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 	// --- Codex-style activity groups -------------------------------------------------
 
 	/**
+	 * Gives Backboard's clean transcript the same compact anatomy as a T3 work
+	 * row. The native VS Code tool part remains mounted for its output and
+	 * lifecycle, but it is revealed only when this individual row is opened.
+	 */
+	private prepareWorkRow(
+		itemWrapper: HTMLElement,
+		toolCallId: string | undefined,
+		fallbackLabel: string | undefined,
+		metadata: ChatThinkingItemMetadata | undefined,
+	): void {
+		const nativeContent = itemWrapper.lastElementChild as HTMLElement | null;
+		if (!nativeContent) {
+			return;
+		}
+
+		const nativeText = nativeContent.textContent?.trim();
+		const presentation = t3WorkEntryPresentation(metadata, toolCallId, fallbackLabel, nativeText);
+		const summary = $('.chat-thinking-work-row-summary');
+		itemWrapper.querySelector<HTMLElement>(':scope > .chat-thinking-icon')?.remove();
+		const icon = $('span.chat-thinking-work-row-icon');
+		icon.appendChild(createT3WorkEntrySvg(itemWrapper.ownerDocument, presentation.icon));
+		summary.appendChild(icon);
+		const label = $('.chat-thinking-work-row-label');
+		const heading = $('span.chat-thinking-work-row-heading');
+		heading.textContent = presentation.heading;
+		label.appendChild(heading);
+		if (presentation.preview) {
+			const preview = $('span.chat-thinking-work-row-preview');
+			preview.textContent = presentation.preview;
+			label.appendChild(preview);
+		}
+		nativeContent.classList.add('chat-thinking-work-native-content');
+
+		let details: HTMLElement | undefined;
+		if (presentation.details) {
+			details = $('.chat-thinking-work-row-details');
+			const pre = $('pre.chat-thinking-work-row-details-content');
+			pre.textContent = presentation.details;
+			details.appendChild(pre);
+		}
+		const disclosure = $('span.chat-thinking-work-row-disclosure', { 'aria-hidden': 'true' });
+		if (details) {
+			disclosure.appendChild(createT3WorkEntrySvg(itemWrapper.ownerDocument, 'chevron'));
+		}
+		const status = $('span.chat-thinking-work-row-status', { 'aria-hidden': 'true' });
+		summary.append(label, disclosure, status);
+		itemWrapper.insertBefore(summary, nativeContent);
+		if (details) {
+			itemWrapper.insertBefore(details, nativeContent);
+		}
+		itemWrapper.ariaLabel = presentation.preview ? `${presentation.heading} - ${presentation.preview}` : presentation.heading;
+		const isLiveInvocation = metadata?.kind === 'toolInvocation' && !IChatToolInvocation.isComplete(metadata);
+		const isSyntheticLiveEntry = !metadata && !this.element.isComplete;
+		this.setWorkRowStatusElement(status, presentation.failed ? 'cancelled' : (isLiveInvocation || isSyntheticLiveEntry) ? 'working' : 'complete');
+
+		if (!details) {
+			return;
+		}
+
+		itemWrapper.classList.add('chat-thinking-work-row-expandable');
+		itemWrapper.tabIndex = 0;
+		itemWrapper.role = 'button';
+		itemWrapper.ariaExpanded = 'false';
+		const toggle = () => {
+			const expanded = itemWrapper.classList.toggle('chat-thinking-work-row-expanded');
+			itemWrapper.ariaExpanded = String(expanded);
+			this._onDidChangeHeight.fire();
+		};
+		this._register(addDisposableListener(itemWrapper, 'click', event => {
+			const target = event.target as HTMLElement | null;
+			if (!target?.closest('.chat-thinking-work-native-content')) {
+				toggle();
+			}
+		}));
+		this._register(addDisposableListener(itemWrapper, 'keydown', event => {
+			if (event.key === 'Enter' || event.key === ' ') {
+				event.preventDefault();
+				toggle();
+			}
+		}));
+	}
+
+	private setWorkRowStatusElement(statusElement: HTMLElement, status: 'working' | 'complete' | 'cancelled'): void {
+		statusElement.className = 'chat-thinking-work-row-status';
+		clearNode(statusElement);
+		if (status === 'working') {
+			statusElement.classList.add('chat-thinking-work-row-status-working');
+			statusElement.appendChild(createT3WorkEntrySvg(statusElement.ownerDocument, 'minus'));
+		} else if (status === 'cancelled') {
+			statusElement.classList.add('chat-thinking-work-row-status-cancelled');
+			statusElement.appendChild(createT3WorkEntrySvg(statusElement.ownerDocument, 'x'));
+		} else {
+			statusElement.classList.add('chat-thinking-work-row-status-complete');
+			statusElement.appendChild(createT3WorkEntrySvg(statusElement.ownerDocument, 'check'));
+		}
+	}
+
+	private updateWorkRowStatus(toolCallId: string, status: 'working' | 'complete' | 'cancelled'): void {
+		const statusElement = this.toolWrappersByCallId.get(toolCallId)?.querySelector<HTMLElement>('.chat-thinking-work-row-status');
+		if (!statusElement) {
+			return;
+		}
+		this.setWorkRowStatusElement(statusElement, status);
+	}
+
+	/**
 	 * Routes a rendered tool row into the current activity group, starting a
 	 * new group when the category changes. Disabled in fixed-scrolling mode,
 	 * which has its own pinned-viewport presentation.
 	 */
-	private appendToActivityGroup(itemWrapper: HTMLElement, subkind: ToolActivitySubkind, toolCallId: string | undefined, fallbackLabel: string | undefined): void {
+	private appendToActivityGroup(
+		itemWrapper: HTMLElement,
+		subkind: ToolActivitySubkind,
+		toolCallId: string | undefined,
+		fallbackLabel: string | undefined,
+		metadata: ChatThinkingItemMetadata | undefined,
+	): void {
 		if (this.fixedScrollingMode) {
 			this.appendToWrapper(itemWrapper);
 			return;
 		}
+		if (this.useCursorPanelPresentation) {
+			this.prepareWorkRow(itemWrapper, toolCallId, fallbackLabel, metadata);
+		}
 		const category = toolActivityCategoryOf(subkind);
 		let group = this.activeActivityGroup;
-		if (!group || group.category !== category || !group.container.isConnected) {
+		// T3 treats every uninterrupted run of work entries as one group,
+		// regardless of whether the individual calls read, edit, search, or run a
+		// command. A commentary/reasoning row ends the run. Keep the existing
+		// category summaries for other VS Code chat surfaces, but use T3's
+		// provider-neutral work-log grouping in Backboard's clean transcript.
+		if (!group || (!this.useCursorPanelPresentation && group.category !== category) || !group.container.isConnected) {
 			this.finishActiveActivityGroup();
 			group = this.createActivityGroup(category);
 			this.activeActivityGroup = group;
@@ -1368,24 +1827,36 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 	}
 
 	private createActivityGroup(category: ToolActivityCategory): IToolActivityGroup {
-		const container = $('.chat-thinking-group.chat-thinking-group-live');
+		const container = this.useCursorPanelPresentation
+			? $('.chat-thinking-group.chat-thinking-work-group.chat-thinking-work-overflow-collapsed')
+			: $('.chat-thinking-group.chat-thinking-group-live');
 		const header = $('.chat-thinking-group-header');
-		header.tabIndex = this.useCursorPanelPresentation ? -1 : 0;
-		header.role = this.useCursorPanelPresentation ? 'status' : 'button';
-		if (this.useCursorPanelPresentation) {
-			header.setAttribute('aria-live', 'polite');
-		}
-		const iconElement = createThinkingIcon(this.useCursorPanelPresentation
-			? ThemeIcon.modify(Codicon.loading, 'spin')
-			: toolActivityCategoryIcon(category));
+		header.tabIndex = 0;
+		header.role = 'button';
+		const iconElement = createThinkingIcon(toolActivityCategoryIcon(category));
 		const headerLabel = $('span.chat-thinking-group-label');
-		const chevron = $('span.codicon.codicon-chevron-right.chat-thinking-group-chevron', { 'aria-hidden': 'true' });
-		header.append(iconElement, headerLabel, chevron);
+		const chevron = this.useCursorPanelPresentation
+			? $('span.chat-thinking-group-chevron.chat-thinking-group-chevron-t3', { 'aria-hidden': 'true' })
+			: $('span.codicon.codicon-chevron-right.chat-thinking-group-chevron', { 'aria-hidden': 'true' });
+		if (this.useCursorPanelPresentation) {
+			chevron.appendChild(createT3WorkEntrySvg(container.ownerDocument, 'chevron'));
+			header.append(chevron, headerLabel);
+		} else {
+			header.append(iconElement, headerLabel, chevron);
+		}
 		const body = $('.chat-thinking-group-body');
-		container.append(header, body);
+		if (this.useCursorPanelPresentation) {
+			// T3 places the overflow disclosure after the visible work row.
+			container.append(body, header);
+		} else {
+			container.append(header, body);
+		}
 
 		const toggle = () => {
-			if (this.useCursorPanelPresentation && container.classList.contains('chat-thinking-group-live')) {
+			if (this.useCursorPanelPresentation) {
+				group.expanded = !group.expanded;
+				this.updateActivityGroupHeader(group);
+				this._onDidChangeHeight.fire();
 				return;
 			}
 			const collapsed = container.classList.toggle('chat-thinking-group-collapsed');
@@ -1404,7 +1875,9 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 
 		const hover = new MutableDisposable<IDisposable>();
 		this._register(hover);
-		return { category, startedAt: Date.now(), container, header, iconElement, headerLabel, chevron, body, items: [], hover };
+		const group: IToolActivityGroup = { category, startedAt: Date.now(), container, header, iconElement, headerLabel, chevron, body, items: [], hover, expanded: false };
+		this.updateActivityGroupHeader(group);
+		return group;
 	}
 
 	/**
@@ -1422,18 +1895,17 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			return;
 		}
 		this.updateActivityGroupHeader(group);
-		group.container.classList.remove('chat-thinking-group-live');
-		group.container.classList.add('chat-thinking-group-collapsed');
 		if (this.useCursorPanelPresentation) {
-			group.iconElement.className = 'chat-thinking-icon';
-			group.iconElement.classList.add(...ThemeIcon.asClassNameArray(toolActivityCategoryIcon(group.category)));
-			group.header.tabIndex = 0;
-			group.header.role = 'button';
-			group.header.removeAttribute('aria-live');
+			group.expanded = false;
+			group.container.classList.add('chat-thinking-work-overflow-collapsed');
+			this.updateActivityGroupHeader(group);
+		} else {
+			group.container.classList.remove('chat-thinking-group-live');
+			group.container.classList.add('chat-thinking-group-collapsed');
+			group.chevron.classList.add('codicon-chevron-right');
+			group.chevron.classList.remove('codicon-chevron-down');
+			group.header.ariaExpanded = 'false';
 		}
-		group.chevron.classList.add('codicon-chevron-right');
-		group.chevron.classList.remove('codicon-chevron-down');
-		group.header.ariaExpanded = 'false';
 		this._onDidChangeHeight.fire();
 	}
 
@@ -1441,13 +1913,32 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 	private collapseAllActivityGroups(): void {
 		this.finishActiveActivityGroup();
 		for (const group of this.activityGroups) {
-			if (!group.container.classList.contains('chat-thinking-group-live')) {
+			if (this.useCursorPanelPresentation) {
+				group.expanded = false;
+				group.container.classList.add('chat-thinking-work-overflow-collapsed');
+				this.updateActivityGroupHeader(group);
+			} else if (!group.container.classList.contains('chat-thinking-group-live')) {
 				this.updateActivityGroupHeader(group);
 			}
 		}
 	}
 
 	private updateActivityGroupHeader(group: IToolActivityGroup): void {
+		if (this.useCursorPanelPresentation) {
+			const hiddenCount = Math.max(0, group.items.length - 1);
+			group.header.classList.toggle('hidden', hiddenCount === 0);
+			group.header.style.display = hiddenCount === 0 ? 'none' : '';
+			group.container.classList.toggle('chat-thinking-work-overflow-collapsed', !group.expanded);
+			group.chevron.classList.toggle('chat-thinking-group-chevron-expanded', group.expanded);
+			group.headerLabel.textContent = group.expanded
+				? localize('chat.thinking.group.showFewerTools', "Show fewer tool calls")
+				: hiddenCount === 1
+					? localize('chat.thinking.group.previousTool.one', "+1 previous tool call")
+					: localize('chat.thinking.group.previousTools', "+{0} previous tool calls", hiddenCount);
+			group.header.ariaExpanded = String(group.expanded);
+			group.header.ariaLabel = group.headerLabel.textContent;
+			return;
+		}
 		const label = this.buildActivityGroupLabel(group);
 		const liveLabel = this.useCursorPanelPresentation && group === this.activeActivityGroup && group.container.classList.contains('chat-thinking-group-live')
 			? localize('chat.thinking.group.liveElapsed', "{0} · {1}", label, formatThinkingElapsed(Date.now() - group.startedAt))
@@ -1513,6 +2004,45 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 
 	/** Refreshes the group header that owns the given tool (labels stream in late). */
 	private refreshActivityGroupForTool(toolCallId: string): void {
+		const label = this.toolLabelsByCallId.get(toolCallId);
+		const wrapper = this.toolWrappersByCallId.get(toolCallId);
+		const invocation = this.toolInvocations.find(candidate => candidate.toolCallId === toolCallId);
+		if (wrapper && invocation) {
+			const nativeContent = wrapper.querySelector<HTMLElement>(':scope > .chat-thinking-work-native-content');
+			const presentation = t3WorkEntryPresentation(invocation, toolCallId, label, nativeContent?.textContent?.trim());
+			const rowHeading = wrapper.querySelector<HTMLElement>('.chat-thinking-work-row-heading');
+			const rowLabel = wrapper.querySelector<HTMLElement>('.chat-thinking-work-row-label');
+			const rowIcon = wrapper.querySelector<HTMLElement>('.chat-thinking-work-row-icon');
+			if (rowHeading) {
+				rowHeading.textContent = presentation.heading;
+			}
+			if (rowLabel) {
+				let preview = rowLabel.querySelector<HTMLElement>(':scope > .chat-thinking-work-row-preview');
+				if (presentation.preview) {
+					preview ??= rowLabel.appendChild($('span.chat-thinking-work-row-preview'));
+					preview.textContent = presentation.preview;
+				} else {
+					preview?.remove();
+				}
+			}
+			if (rowIcon) {
+				clearNode(rowIcon);
+				rowIcon.appendChild(createT3WorkEntrySvg(wrapper.ownerDocument, presentation.icon));
+			}
+			const details = wrapper.querySelector<HTMLElement>('.chat-thinking-work-row-details-content');
+			if (details && presentation.details) {
+				details.textContent = presentation.details;
+			}
+			wrapper.ariaLabel = presentation.preview
+				? `${presentation.heading} - ${presentation.preview}`
+				: presentation.heading;
+			if (presentation.failed) {
+				const status = wrapper.querySelector<HTMLElement>('.chat-thinking-work-row-status');
+				if (status) {
+					this.setWorkRowStatusElement(status, 'cancelled');
+				}
+			}
+		}
 		for (const group of this.activityGroups) {
 			if (group.items.some(item => item.toolCallId === toolCallId)) {
 				this.updateActivityGroupHeader(group);
@@ -2147,8 +2677,13 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 			this.setWorkingSpinnerMessage(isTerminalTool ? WorkingMessageCategory.Terminal : WorkingMessageCategory.Tool);
 		}
 
-		// If expanded or has been expanded once, render immediately
-		if (this.isExpanded() || this.hasExpandedOnce || (this.fixedScrollingMode && !this.streamingCompleted)) {
+		// T3 renders work entries directly in the timeline instead of deferring
+		// them behind VS Code's outer "Worked" disclosure. Keep the native tool
+		// part mounted for lifecycle/output, but materialize it immediately in
+		// Backboard's clean middle panel.
+		const isCleanTimelineTool = this.useCursorPanelPresentation && toolInvocationOrMarkdown
+			&& (toolInvocationOrMarkdown.kind === 'toolInvocation' || toolInvocationOrMarkdown.kind === 'toolInvocationSerialized');
+		if (this.isExpanded() || this.hasExpandedOnce || isCleanTimelineTool || (this.fixedScrollingMode && !this.streamingCompleted)) {
 			const result = factory();
 			this.appendItemToDOM(result.domNode, toolInvocationId, toolInvocationOrMarkdown, originalParent);
 			if (result.disposable) {
@@ -2374,6 +2909,13 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 		toolInvocationId?: string,
 		toolInvocationOrMarkdown?: ChatThinkingItemMetadata
 	): void {
+		const isToolInvocation = toolInvocationOrMarkdown && (toolInvocationOrMarkdown.kind === 'toolInvocation' || toolInvocationOrMarkdown.kind === 'toolInvocationSerialized');
+		if (isToolInvocation && this.useCursorPanelPresentation) {
+			// Some providers restore a complete tool record without the legacy
+			// invocation id. T3 keys its row from the record itself, so make the
+			// clean timeline visible before the VS-specific id guard below.
+			this.domNode.classList.add('chat-thinking-has-work-items');
+		}
 		if (!toolInvocationId) {
 			return;
 		}
@@ -2393,7 +2935,6 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 
 		let toolCallLabel: string;
 
-		const isToolInvocation = toolInvocationOrMarkdown && (toolInvocationOrMarkdown.kind === 'toolInvocation' || toolInvocationOrMarkdown.kind === 'toolInvocationSerialized');
 		if (isToolInvocation && toolInvocationOrMarkdown.invocationMessage) {
 			const message = typeof toolInvocationOrMarkdown.invocationMessage === 'string' ? toolInvocationOrMarkdown.invocationMessage : toolInvocationOrMarkdown.invocationMessage.value;
 
@@ -2502,6 +3043,8 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 
 					if (currentState.type === IChatToolInvocation.StateKind.Completed ||
 						currentState.type === IChatToolInvocation.StateKind.Cancelled) {
+						this.refreshActivityGroupForTool(toolCallId);
+						this.updateWorkRowStatus(toolCallId, t3ToolInvocationFailed(toolInvocationOrMarkdown) ? 'cancelled' : 'complete');
 						// Remove tools that should be hidden now or after completion.
 						if (toolInvocationOrMarkdown.presentation === 'hidden' || toolInvocationOrMarkdown.presentation === 'hiddenAfterComplete') {
 							this.pendingRemovals.push({ toolCallId: toolInvocationOrMarkdown.toolCallId, toolLabel: currentToolLabel });
@@ -2706,18 +3249,18 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 			this.toolIconsByCallId.set(toolInvocationOrMarkdown.toolCallId, iconElement);
 		}
 
-		// Group consecutive same-category tool rows behind a Codex-style summary
-		// header. Skipped for hooks (no metadata) and for edit pills
-		// (isMarkdownEdit/isExternalEdit): those already render their own
-		// icon + filename + diff counts via ChatEditPillElement, so wrapping
-		// them in a second summary header would just repeat the same
-		// information (and worse, without the spacing the pill's own layout
-		// provides — see the concatenated "Editedfoo.ts+2-1" bug).
-		if (toolInvocationOrMarkdown && !isMarkdownEdit && !isExternalEdit) {
+		// T3 uses the same work-entry anatomy for every action, including file
+		// edits. Keep the old edit-pill exception on other chat surfaces only.
+		const isCleanSyntheticTool = this.useCursorPanelPresentation && !!toolInvocationId;
+		if ((toolInvocationOrMarkdown || isCleanSyntheticTool) && (this.useCursorPanelPresentation || (!isMarkdownEdit && !isExternalEdit))) {
 			const subkind = getToolActivitySubkind(toolInvocationId, toolInvocationOrMarkdown);
 			const toolCallId = isToolInvocation ? toolInvocationOrMarkdown.toolCallId : undefined;
 			const fallbackLabel = toolCallId ? undefined : content.textContent?.trim() || undefined;
-			this.appendToActivityGroup(itemWrapper, subkind, toolCallId, fallbackLabel);
+			this.appendToActivityGroup(itemWrapper, subkind, toolCallId, fallbackLabel, toolInvocationOrMarkdown);
+			if (isToolInvocation && toolCallId && this.useCursorPanelPresentation) {
+				const complete = toolInvocationOrMarkdown.kind === 'toolInvocationSerialized' || IChatToolInvocation.isComplete(toolInvocationOrMarkdown);
+				this.updateWorkRowStatus(toolCallId, t3ToolInvocationFailed(toolInvocationOrMarkdown) ? 'cancelled' : complete ? 'complete' : 'working');
+			}
 		} else {
 			this.finishActiveActivityGroup();
 			this.appendToWrapper(itemWrapper);

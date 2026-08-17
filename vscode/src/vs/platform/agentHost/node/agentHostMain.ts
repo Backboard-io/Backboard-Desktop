@@ -92,6 +92,11 @@ import { join } from '../../../base/common/path.js';
 import { createAgentHostTelemetryService } from './agentHostTelemetryService.js';
 import { ITelemetryService } from '../../telemetry/common/telemetry.js';
 
+// Agent-host startup includes filesystem and network-service initialization before
+// its main channel can be registered. Keep early renderer requests queued across a
+// cold start instead of failing at the IPC layer's one-second default.
+const AGENT_HOST_CHANNEL_REGISTRATION_TIMEOUT = 30_000;
+
 // Entry point for the agent host utility process.
 // Sets up IPC, logging, and registers agent providers.
 // When VSCODE_AGENT_HOST_PORT or VSCODE_AGENT_HOST_SOCKET_PATH env vars
@@ -106,7 +111,7 @@ async function startAgentHost(): Promise<void> {
 	// Setup RPC - supports both Electron utility process and Node child process
 	let server: ChildProcessServer<string> | UtilityProcessServer;
 	if (isUtilityProcess(process)) {
-		server = new UtilityProcessServer();
+		server = new UtilityProcessServer(undefined, AGENT_HOST_CHANNEL_REGISTRATION_TIMEOUT);
 	} else {
 		server = new ChildProcessServer(AgentHostIpcChannels.AgentHost);
 	}
@@ -204,6 +209,15 @@ async function startAgentHost(): Promise<void> {
 		// (`backboard-cli-ts --serve`), which owns the agent loop and executes
 		// its own tools. It replaced the legacy Rust `backboard-bridge` agent.
 		agentService.registerProvider(instantiationService.createInstance(CliTsAgent));
+
+		// The renderer connects as soon as the utility process starts. Register the
+		// channel once the always-available Backboard provider is ready, before the
+		// optional provider login probes below. Those probes may import SDKs or touch
+		// the keychain and previously caused cold-start requests to time out.
+		const agentChannel = ProxyChannel.fromService(agentService, disposables);
+		server.registerChannel(AgentHostIpcChannels.AgentHost, agentChannel);
+		logService.info('[AgentHost] IPC channel registered; initializing optional providers');
+
 		// Claude and Codex providers are gated on two things:
 		//  1. The user-facing enable toggle (`chat.agentHost.<x>Agent.enabled`,
 		//     forwarded as an env var by the starters). Claude defaults to on,
@@ -231,9 +245,6 @@ async function startAgentHost(): Promise<void> {
 		logService.error('Failed to create AgentService', err);
 		throw err;
 	}
-	const agentChannel = ProxyChannel.fromService(agentService, disposables);
-	server.registerChannel(AgentHostIpcChannels.AgentHost, agentChannel);
-
 	// Single shared `vscode-agent-client` filesystem provider. Per-client
 	// authorities are added either by ProtocolServerHandler (for WebSocket
 	// transports) or by the IPC connection lifecycle below (for the local

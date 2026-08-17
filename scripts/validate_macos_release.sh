@@ -144,9 +144,23 @@ for marker in \
   'spctl --assess --type execute' \
   'rollback_app' \
   'Confirmed running and activated' \
+  'confirm_app_stable' \
+  'Updated app exited during post-launch stability check' \
   'Installed and launched Backboard Studio'; do
   if ! grep -Fq "${marker}" "${UPDATER_JS}"; then
     echo "Packaged updater is missing readiness marker: ${marker}" >&2
+    exit 1
+  fi
+done
+
+COPILOT_EXTENSION="${STAGED_APP}/Contents/Resources/app/extensions/copilot"
+for runtime_file in \
+  'node_modules/source-map-support/source-map-support.js' \
+  'node_modules/source-map/source-map.js' \
+  'node_modules/buffer-from/index.js' \
+  'node_modules/dotenv/lib/main.js'; do
+  if [[ ! -f "${COPILOT_EXTENSION}/${runtime_file}" ]]; then
+    echo "Packaged Copilot extension is missing runtime dependency: ${runtime_file}" >&2
     exit 1
   fi
 done

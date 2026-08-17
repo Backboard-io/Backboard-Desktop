@@ -186,6 +186,32 @@ export interface IChatRendererDelegate {
 
 const mostRecentResponseClassName = 'chat-most-recent-response';
 
+/** Mirrors T3 Code's compact duration formatting for turn-fold labels. */
+function formatT3TurnDuration(durationMs: number): string {
+	if (!Number.isFinite(durationMs) || durationMs < 0) {
+		return '0ms';
+	}
+	if (durationMs < 1_000) {
+		return `${Math.max(1, Math.round(durationMs))}ms`;
+	}
+	if (durationMs < 10_000) {
+		const tenths = Math.round(durationMs / 100) / 10;
+		return tenths >= 10 ? '10s' : `${tenths.toFixed(1)}s`;
+	}
+	if (durationMs < 60_000) {
+		return `${Math.round(durationMs / 1_000)}s`;
+	}
+	const minutes = Math.floor(durationMs / 60_000);
+	const seconds = Math.round((durationMs % 60_000) / 1_000);
+	if (seconds === 0) {
+		return `${minutes}m`;
+	}
+	if (seconds === 60) {
+		return `${minutes + 1}m`;
+	}
+	return `${minutes}m ${seconds}s`;
+}
+
 function upvoteAnimationSettingToEnum(value: string | undefined): ClickAnimation | undefined {
 	switch (value) {
 		case 'confetti': return ClickAnimation.Confetti;
@@ -1176,7 +1202,9 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			// fixed-scrolling mode the thinking section does not show its own
 			// active indicator, so the working-progress row should still render.
 			const lastThinking = this.getLastThinkingPart(templateData.renderedParts);
-			if (lastThinking?.getIsActive() && !lastThinking.isFixedScrollingMode) {
+			if (lastThinking?.getIsActive()
+				&& !lastThinking.isFixedScrollingMode
+				&& !templateData.rowContainer.closest('.backboard-clean-chat')) {
 				return undefined;
 			}
 			if (lastPart?.kind === 'progressMessage') {
@@ -1197,7 +1225,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 
 		// never show working progress when there is an active thinking piece
 		const lastThinking = this.getLastThinkingPart(templateData.renderedParts);
-		if (lastThinking) {
+		if (lastThinking && !templateData.rowContainer.closest('.backboard-clean-chat')) {
 			return undefined;
 		}
 
@@ -1841,6 +1869,137 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 				delete renderedParts[i];
 			}
 		}
+
+		this.syncBackboardT3TurnTimeline(element, contentForThisTurn, templateData);
+	}
+
+	/**
+	 * Backboard's provider emits commentary, reasoning, and tool calls as several
+	 * native chat parts inside one response. T3 presents those parts as one turn:
+	 * the live work log is expanded while running, then the whole log collapses
+	 * behind one "Worked for …" row while the final assistant message stays out.
+	 * Keep the native renderers mounted and merely organize their top-level DOM.
+	 */
+	private syncBackboardT3TurnTimeline(
+		element: IChatResponseViewModel,
+		contentForThisTurn: ReadonlyArray<IChatRendererContent>,
+		templateData: IChatListItemTemplate,
+	): void {
+		if (!templateData.rowContainer.closest('.backboard-clean-chat')) {
+			return;
+		}
+
+		const value = templateData.value;
+		let turn = value.querySelector<HTMLElement>(':scope > .chat-t3-turn-work');
+		const renderedParts = templateData.renderedParts ?? [];
+		const hasTurnWork = renderedParts.some(part => part instanceof ChatThinkingContentPart)
+			|| contentForThisTurn.some(part => part.kind === 'thinking'
+				|| part.kind === 'toolInvocation'
+				|| part.kind === 'toolInvocationSerialized'
+				|| part.kind === 'working'
+				|| part.kind === 'hook');
+
+		if (!hasTurnWork) {
+			if (turn) {
+				const body = turn.querySelector<HTMLElement>(':scope > .chat-t3-turn-work-body');
+				if (body) {
+					for (const child of Array.from(body.children)) {
+						value.insertBefore(child, turn);
+					}
+				}
+				turn.remove();
+			}
+			return;
+		}
+
+		let foldButton: HTMLButtonElement;
+		let foldLabel: HTMLElement;
+		let body: HTMLElement;
+		if (!turn) {
+			turn = $('.chat-t3-turn-work.chat-t3-turn-work-expanded');
+			foldButton = $('button.chat-t3-turn-fold', { type: 'button' }) as HTMLButtonElement;
+			foldLabel = $('span.chat-t3-turn-fold-label');
+			const chevron = $('span.chat-t3-turn-fold-chevron', { 'aria-hidden': 'true' });
+			foldButton.append(foldLabel, chevron);
+			body = $('.chat-t3-turn-work-body');
+			turn.append(foldButton, body);
+			value.insertBefore(turn, value.firstElementChild);
+		} else {
+			foldButton = turn.querySelector<HTMLButtonElement>(':scope > .chat-t3-turn-fold')!;
+			foldLabel = foldButton.querySelector<HTMLElement>('.chat-t3-turn-fold-label')!;
+			body = turn.querySelector<HTMLElement>(':scope > .chat-t3-turn-work-body')!;
+		}
+
+		// Once complete, the last top-level markdown part is the terminal assistant
+		// answer. Earlier markdown is commentary and belongs in the work fold.
+		let finalMessageNode: HTMLElement | undefined;
+		if (element.isComplete || element.isCanceled) {
+			for (let index = renderedParts.length - 1; index >= 0; index--) {
+				const part = renderedParts[index];
+				const node = part?.domNode;
+				if (part instanceof ChatMarkdownContentPart
+					&& node
+					&& node.textContent?.trim()
+					&& !node.closest('.chat-thinking-box')) {
+					finalMessageNode = node;
+					break;
+				}
+			}
+		}
+
+		if (finalMessageNode?.parentElement === body) {
+			turn.after(finalMessageNode);
+		}
+
+		const directChildren = Array.from(value.children) as HTMLElement[];
+		for (const child of directChildren) {
+			if (child === turn || child === finalMessageNode) {
+				continue;
+			}
+			if (finalMessageNode && finalMessageNode.parentElement === value
+				&& (child.compareDocumentPosition(finalMessageNode) & Node.DOCUMENT_POSITION_PRECEDING)) {
+				continue;
+			}
+			body.appendChild(child);
+		}
+
+		const complete = element.isComplete || element.isCanceled;
+		const previousState = turn.dataset.turnState;
+		turn.dataset.turnState = complete ? 'complete' : 'active';
+		turn.classList.toggle('chat-t3-turn-work-active', !complete);
+
+		if (!complete) {
+			turn.classList.add('chat-t3-turn-work-expanded');
+		} else if (previousState !== 'complete') {
+			turn.classList.remove('chat-t3-turn-work-expanded');
+		}
+
+		const elapsedMs = element.model.elapsedMs
+			?? (element.model.completedAt !== undefined
+				? Math.max(0, element.model.completedAt - element.confirmationAdjustedTimestamp.get())
+				: undefined);
+		const duration = elapsedMs === undefined ? undefined : formatT3TurnDuration(elapsedMs);
+		foldLabel.textContent = element.isCanceled
+			? duration
+				? localize('chat.t3TurnFold.stoppedAfter', "You stopped after {0}", duration)
+				: localize('chat.t3TurnFold.stopped', "You stopped this response")
+			: duration
+				? localize('chat.t3TurnFold.workedFor', "Worked for {0}", duration)
+				: localize('chat.t3TurnFold.worked', "Worked");
+
+		const applyExpandedState = (expanded: boolean) => {
+			turn!.classList.toggle('chat-t3-turn-work-expanded', expanded);
+			body.hidden = !expanded;
+			body.ariaHidden = String(!expanded);
+			foldButton.ariaExpanded = String(expanded);
+		};
+		applyExpandedState(!complete || turn.classList.contains('chat-t3-turn-work-expanded'));
+		foldButton.onclick = () => {
+			if (turn!.classList.contains('chat-t3-turn-work-active')) {
+				return;
+			}
+			applyExpandedState(!turn!.classList.contains('chat-t3-turn-work-expanded'));
+		};
 	}
 
 	/**

@@ -17,6 +17,8 @@ describe("SkillsBench sample runner", () => {
 				"xai/grok-4.5",
 				"--jobs-dir",
 				"results/grok",
+				"--concurrency",
+				"2",
 				"--heartbeat-seconds",
 				"45",
 			],
@@ -24,6 +26,7 @@ describe("SkillsBench sample runner", () => {
 		);
 		expect(options.model).toBe("xai/grok-4.5");
 		expect(options.jobsDir).toBe("/workspace/results/grok");
+		expect(options.concurrency).toBe(2);
 		expect(options.heartbeatSeconds).toBe(45);
 		expect(options.resume).toBe(true);
 	});
@@ -34,6 +37,9 @@ describe("SkillsBench sample runner", () => {
 		).toThrow("provider/model");
 		expect(() =>
 			parseSkillsBenchSampleArgs(["--heartbeat-seconds", "0"], "/workspace"),
+		).toThrow("positive integer");
+		expect(() =>
+			parseSkillsBenchSampleArgs(["--concurrency", "0"], "/workspace"),
 		).toThrow("positive integer");
 	});
 

@@ -236,6 +236,26 @@ launch_app() {
   return 1
 }
 
+confirm_app_stable() {
+  local target_app="$1"
+  local checks="\${2:-30}"
+  local check
+
+  # Seeing the process once is not enough to call an update successful. Keep
+  # the rollback copy until the new app has survived its initial cold-start
+  # window; native-loader and early utility-process failures surface here.
+  for ((check = 1; check <= checks; check++)); do
+    /bin/sleep 0.5
+    if ! app_running "$target_app"; then
+      echo "Updated app exited during post-launch stability check ($check/$checks)."
+      return 1
+    fi
+  done
+
+  echo "Confirmed stable after launch: $target_app"
+  return 0
+}
+
 run_elevated() {
   local operation="$1"
   shift
@@ -326,8 +346,8 @@ else
 fi
 
 register_app "$APP_PATH"
-if ! launch_app "$APP_PATH" "$BUNDLE_IDENTIFIER"; then
-  echo "Updated app did not launch; restoring the previous version."
+if ! launch_app "$APP_PATH" "$BUNDLE_IDENTIFIER" || ! confirm_app_stable "$APP_PATH" 30; then
+  echo "Updated app did not launch successfully or remain stable; restoring the previous version."
   if [[ "$NEEDS_ELEVATION" == "0" ]]; then
     rollback_app "$APP_PATH" "$BACKUP_APP" "$FAILED_APP" "$BUNDLE_IDENTIFIER"
   else

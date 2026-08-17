@@ -234,5 +234,11 @@
 		"openai.chatgpt",
 		"anthropic.claude-code"
 	],
+	"extensionEnabledApiProposals": {
+		"openai.chatgpt": [
+			"chatSessionsProvider",
+			"languageModelProxy"
+		]
+	},
 	"voiceWsUrl": "wss://falcon-caas.mai.microsoft.com/voice-code/api/v1/realtime/voice"
 }

@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { DeferredPromise } from '../../../base/common/async.js';
+import { DeferredPromise, RunOnceScheduler } from '../../../base/common/async.js';
 import { Emitter, Relay } from '../../../base/common/event.js';
 import { Disposable, DisposableStore, IReference } from '../../../base/common/lifecycle.js';
 import { IObservable, ISettableObservable, observableValue } from '../../../base/common/observable.js';
@@ -32,6 +32,9 @@ import { TELEMETRY_CRASH_REPORTER_SETTING_ID, TELEMETRY_OLD_SETTING_ID, TELEMETR
 import { getTelemetryLevel } from '../../telemetry/common/telemetryUtils.js';
 import { AgentHostTelemetryLevelConfigKey, AgentHostSessionSyncEnabledConfigKey, SESSION_SYNC_ENABLED_SETTING_ID, telemetryLevelToAgentHostConfigValue } from '../common/agentHostSchema.js';
 import { IWorkspaceContextService } from '../../workspace/common/workspace.js';
+
+const ROOT_STATE_SUBSCRIPTION_MAX_ATTEMPTS = 3;
+const ROOT_STATE_SUBSCRIPTION_RETRY_DELAY = 1_000;
 
 /**
  * Renderer-side implementation of {@link IAgentHostService} that connects
@@ -68,6 +71,11 @@ export class LocalAgentHostServiceClient extends Disposable implements IAgentHos
 	private readonly _authenticationPending: ISettableObservable<boolean> = observableValue('authenticationPending', true);
 	readonly authenticationPending: IObservable<boolean> = this._authenticationPending;
 	private _authenticationSettled = false;
+	private _rootStateSubscriptionAttempts = 0;
+	private readonly _rootStateSubscriptionRetry = this._register(new RunOnceScheduler(
+		() => void this._subscribeToRootState(),
+		ROOT_STATE_SUBSCRIPTION_RETRY_DELAY,
+	));
 
 	setAuthenticationPending(pending: boolean): void {
 		// Sticky: once the first authentication pass settles, never surface
@@ -173,12 +181,29 @@ export class LocalAgentHostServiceClient extends Disposable implements IAgentHos
 		this._logService.info('[AgentHost:renderer] Direct MessagePort connection established');
 		this._onAgentHostStart.fire();
 
-		// Subscribe to root state
-		this.subscribe(URI.parse(ROOT_STATE_URI)).then(snapshot => {
+		void this._subscribeToRootState();
+	}
+
+	private async _subscribeToRootState(): Promise<void> {
+		const attempt = ++this._rootStateSubscriptionAttempts;
+		try {
+			const snapshot = await this.subscribe(URI.parse(ROOT_STATE_URI));
 			this._subscriptionManager.handleRootSnapshot(snapshot.state as RootState, snapshot.fromSeq);
-		}).catch(err => {
+			this._rootStateSubscriptionAttempts = 0;
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			const isChannelStartupTimeout = (err instanceof Error && err.name === 'Unknown channel')
+				|| message.includes(`Channel name '${AgentHostIpcChannels.AgentHost}' timed out`);
+
+			if (isChannelStartupTimeout && attempt < ROOT_STATE_SUBSCRIPTION_MAX_ATTEMPTS) {
+				const delay = ROOT_STATE_SUBSCRIPTION_RETRY_DELAY * Math.pow(2, attempt - 1);
+				this._logService.warn(`[AgentHost:renderer] Root state unavailable during startup; retrying in ${delay}ms (${attempt + 1}/${ROOT_STATE_SUBSCRIPTION_MAX_ATTEMPTS})`);
+				this._rootStateSubscriptionRetry.schedule(delay);
+				return;
+			}
+
 			this._logService.error('[AgentHost:renderer] Failed to subscribe to root state', err);
-		});
+		}
 	}
 
 	private _updateTelemetryLevel(): void {

@@ -33,6 +33,7 @@ interface SampleManifest {
 }
 
 export interface SkillsBenchSampleOptions {
+	concurrency: number;
 	dryRun: boolean;
 	heartbeatSeconds: number;
 	help: boolean;
@@ -100,6 +101,7 @@ export function parseSkillsBenchSampleArgs(
 	cwd = CLI_ROOT,
 ): SkillsBenchSampleOptions {
 	const options: SkillsBenchSampleOptions = {
+		concurrency: 1,
 		dryRun: false,
 		heartbeatSeconds: 30,
 		help: false,
@@ -117,6 +119,12 @@ export function parseSkillsBenchSampleArgs(
 		const argument = argv[index];
 		if (!argument || argument === "--") continue;
 		switch (argument) {
+			case "--concurrency":
+				options.concurrency = positiveInteger(
+					readValue(argv, ++index, argument),
+					argument,
+				);
+				break;
 			case "--dry-run":
 				options.dryRun = true;
 				break;
@@ -197,7 +205,7 @@ async function main(): Promise<void> {
 	});
 
 	process.stdout.write(
-		`${sample.name}: ${sample.tasks.length} tasks, model=${model}, condition=${sample.condition}\n`,
+		`${sample.name}: ${sample.tasks.length} tasks, model=${model}, condition=${sample.condition}, concurrency=${options.concurrency}\n`,
 	);
 	if (options.dryRun) {
 		for (const [index, task] of sample.tasks.entries()) {
@@ -208,21 +216,52 @@ async function main(): Promise<void> {
 		return;
 	}
 
-	const results: TaskRunResult[] = [];
-	for (const [index, task] of sample.tasks.entries()) {
-		const taskDirectory = path.join(options.jobsDir, "tasks", task.id);
-		const cached = options.resume
-			? await readCompletedTask(taskDirectory, task, model)
-			: null;
-		if (cached) {
-			results.push(cached);
-			process.stdout.write(
-				`[${index + 1}/${sample.tasks.length}] ${task.id}: resumed reward=${formatReward(cached.reward)}\n`,
-			);
-		} else {
-			results.push(await runTask(options, sample, task, model, index + 1));
-		}
-		await writeBatchSummary(options.jobsDir, sample, model, results);
+	const resultsByIndex = new Map<number, TaskRunResult>();
+	let nextIndex = 0;
+	let stopRequested = false;
+	let summaryWrite = Promise.resolve();
+	const workers = Array.from(
+		{ length: Math.min(options.concurrency, sample.tasks.length) },
+		async () => {
+			while (!stopRequested) {
+				const index = nextIndex++;
+				const task = sample.tasks[index];
+				if (!task) return;
+				const position = index + 1;
+				const taskDirectory = path.join(options.jobsDir, "tasks", task.id);
+				const cached = options.resume
+					? await readCompletedTask(taskDirectory, task, model)
+					: null;
+				let result: TaskRunResult;
+				if (cached) {
+					process.stdout.write(
+						`[${position}/${sample.tasks.length}] ${task.id}: resumed reward=${formatReward(cached.reward)}\n`,
+					);
+					result = cached;
+				} else {
+					result = await runTask(options, sample, task, model, position);
+				}
+				resultsByIndex.set(index, result);
+				const snapshot = orderedResults(resultsByIndex);
+				summaryWrite = summaryWrite.then(() =>
+					writeBatchSummary(options.jobsDir, sample, model, snapshot),
+				);
+				await summaryWrite;
+				if (result.status === "error") stopRequested = true;
+			}
+		},
+	);
+	await Promise.all(workers);
+	await summaryWrite;
+	const results = orderedResults(resultsByIndex);
+	const failed = results.filter((result) => result.status === "error");
+	if (failed.length > 0) {
+		process.stderr.write(
+			`Sample stopped after ${failed.map((result) => result.id).join(", ")} failed before producing an evaluation result. Fix the infrastructure issue and rerun the same command to resume.\n`,
+		);
+		process.stderr.write(`Artifacts: ${options.jobsDir}\n`);
+		process.exitCode = 1;
+		return;
 	}
 
 	const aggregate = summarizeBatchResults(results, sample.tasks.length);
@@ -366,24 +405,37 @@ function taskResultFromSummary(
 ): TaskRunResult {
 	const condition = summary.results?.[0];
 	const trace = condition?.agent?.trace;
+	const reward =
+		typeof condition?.reward === "number" && Number.isFinite(condition.reward)
+			? condition.reward
+			: null;
 	return {
 		...task,
 		agentDurationMs: finiteNumber(condition?.agent?.durationMs),
 		costUsd: finiteNumber(trace?.costUsd),
+		error:
+			condition && reward === null
+				? "Verifier did not produce a numeric reward"
+				: undefined,
 		exitCode,
 		inputTokens: finiteNumber(trace?.inputTokens),
 		outputTokens: finiteNumber(trace?.outputTokens),
 		passed: condition?.passed === true,
-		reward:
-			typeof condition?.reward === "number" && Number.isFinite(condition.reward)
-				? condition.reward
-				: null,
+		reward,
 		skillInvocations: finiteNumber(trace?.skillInvocations),
-		status: condition ? "completed" : "error",
+		status: condition && reward !== null ? "completed" : "error",
 		totalTokens: finiteNumber(trace?.totalTokens),
 		toolCalls: finiteNumber(trace?.toolCalls),
 		verifierDurationMs: finiteNumber(condition?.verifier?.durationMs),
 	};
+}
+
+function orderedResults(
+	resultsByIndex: ReadonlyMap<number, TaskRunResult>,
+): TaskRunResult[] {
+	return [...resultsByIndex.entries()]
+		.sort(([left], [right]) => left - right)
+		.map(([, result]) => result);
 }
 
 function emptyTaskResult(
@@ -492,6 +544,7 @@ Options:
   --model <provider/model>   Backboard model (default: sample manifest value)
   --sample <path>            Sample manifest JSON
   --jobs-dir <path>          Stable artifact directory for resumable runs
+  --concurrency <n>          Tasks to evaluate in parallel (default: 1)
   --heartbeat-seconds <n>    Progress interval (default: 30)
   --restart                  Ignore completed task summaries
   --dry-run                  Validate and print the sample without model calls

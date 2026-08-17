@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { ExtensionContext } from 'vscode';
+import { ExtensionContext, ExtensionMode } from 'vscode';
 import { resolve } from '../../../util/vs/base/common/path';
 import { baseActivate } from '../vscode/extension';
 import { vscodeNodeContributions } from './contributions';
@@ -37,7 +37,7 @@ export function activate(context: ExtensionContext, forceActivation?: boolean) {
 		context,
 		registerServices,
 		contributions: vscodeNodeContributions,
-		configureDevPackages,
+		configureDevPackages: context.extensionMode === ExtensionMode.Development ? configureDevPackages : undefined,
 		forceActivation
 	});
 }

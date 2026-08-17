@@ -908,7 +908,8 @@ referencesExpandedWhenEmptyResponse: false,
 						() => this._widget?.viewModel?.model.sessionResource,
 						this.commandService,
 						this.chatSessionsService,
-						this.agentCliSetupService)
+						this.agentCliSetupService,
+						() => (this._widget?.viewModel?.model.getRequests().length ?? 0) === 0)
 					: undefined,
 				supportsChangingModes: !isBackboardProduct(),
 				// Compact, Cursor-sized composer: two lines at rest, grows with

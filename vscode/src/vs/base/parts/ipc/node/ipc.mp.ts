@@ -87,8 +87,8 @@ export class Server extends IPCServer {
 		});
 	}
 
-	constructor(filter?: IClientConnectionFilter) {
-		super(Server.getOnDidClientConnect(filter));
+	constructor(filter?: IClientConnectionFilter, timeoutDelay?: number) {
+		super(Server.getOnDidClientConnect(filter), undefined, timeoutDelay);
 	}
 }
 

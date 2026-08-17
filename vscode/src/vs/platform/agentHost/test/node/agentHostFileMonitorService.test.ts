@@ -53,7 +53,7 @@ suite('AgentHostFileMonitorService', () => {
 		});
 	});
 
-	test('filters known repository metadata noise before debouncing', () => {
+	test('filters repository metadata and generated output before debouncing', () => {
 		return runWithFakedTimers({ useFakeTimers: true, maxTaskCount: 10_000 }, async () => {
 			const fileService = new TestFileService();
 			const monitor = disposables.add(new AgentHostFileMonitorService(fileService.service, new NullLogService()));
@@ -62,13 +62,21 @@ suite('AgentHostFileMonitorService', () => {
 			disposables.add(acquire(monitor, URI.file('/repo'), () => calls++, { debounceMs: 10 }));
 			fileService.fire(URI.file('/repo/.git/objects/12/abcdef'));
 			fileService.fire(URI.file('/repo/.git/index.lock'));
+			fileService.fire(URI.file('/repo/node_modules/pkg/index.js'));
+			fileService.fire(URI.file('/repo/out/main.js'));
+			fileService.fire(URI.file('/repo/VSCode-darwin-arm64/Backboard Studio'));
 			fileService.fire(URI.file('/repo/.watchman-cookie-123'));
 			await timeout(11);
 			assert.strictEqual(calls, 0);
 
-			fileService.fire(URI.file('/repo/src/a.ts'));
+			// Ref/index changes carry meaningful branch state and stay observable.
+			fileService.fire(URI.file('/repo/.git/refs/heads/main'));
 			await timeout(11);
 			assert.strictEqual(calls, 1);
+
+			fileService.fire(URI.file('/repo/src/a.ts'));
+			await timeout(11);
+			assert.strictEqual(calls, 2);
 		});
 	});
 

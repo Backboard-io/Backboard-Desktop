@@ -151,6 +151,7 @@
 }
 
 .new-chat-composer-stack {
+	position: relative;
 	grid-row: 3;
 	width: min(820px, calc(100% - 40px));
 	min-width: 0;
@@ -203,21 +204,18 @@
 	overflow: hidden;
 }
 
-/* --- 8-bit octopus mascot just left of the heading text --- */
+/* --- 8-bit octopus mascot perched on the composer --- */
 
 .new-chat-octopus {
 	position: absolute;
-	/* The canvas has 4 empty columns (8px) on its right that only fill
-	 * during the flip-off, keeping the visible idle gap to the text ~12px.
-	 * The mascot sits in the lower part of the canvas (the rows above are
-	 * headroom for the raised finger), so nudge up to center it on the
-	 * heading line. */
-	right: calc(100% + 4px);
-	top: calc(50% - 6px);
-	transform: translateY(-50%);
+	/* Set the visible body inside the composer's rounded corner and let the
+	 * tentacles overlap the top edge enough to read as a proper perch. The
+	 * empty upper canvas rows remain available for the mascot's gestures. */
+	right: 46px;
+	top: -28px;
 	line-height: 0;
 	pointer-events: none;
-	z-index: 1;
+	z-index: 2;
 }
 
 .new-chat-octopus .octo-sprite {
@@ -635,8 +633,6 @@
 	white-space: nowrap;
 	font-weight: 400;
 	line-height: 1.2;
-	/* Anchor for the absolutely positioned octopus mascot. */
-	position: relative;
 }
 
 /* The heading embeds the workspace picker trigger so the workspace name in

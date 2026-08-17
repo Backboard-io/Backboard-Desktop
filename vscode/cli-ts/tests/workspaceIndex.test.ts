@@ -142,6 +142,20 @@ describe("WorkspaceIndex", () => {
 		).toEqual([join(work, "kept.txt")]);
 	});
 
+	it("honors workspace ignore files", async () => {
+		const blobs = new BlobStore(join(root, "objects"));
+		const index = new WorkspaceIndex(work);
+		await writeFile(join(work, ".gitignore"), "generated/\n", "utf8");
+		await mkdir(join(work, "generated"));
+		await writeFile(join(work, "generated", "ignored.txt"), "ignored", "utf8");
+		await writeFile(join(work, "kept.txt"), "kept", "utf8");
+
+		const snapshot = await index.refresh(blobs);
+		expect(
+			[...(snapshot ?? new Map()).values()].map((entry) => entry.path).sort(),
+		).toEqual([join(work, ".gitignore"), join(work, "kept.txt")].sort());
+	});
+
 	it("disables itself when the file cap is exceeded", async () => {
 		const blobs = new BlobStore(join(root, "objects"));
 		const index = new WorkspaceIndex(work);

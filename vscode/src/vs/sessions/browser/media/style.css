@@ -245,6 +245,34 @@
 	box-sizing: border-box;
 }
 
+/* Simple mode treats the left panel as a resizable surface resting above the
+ * workspace. Its rounded right edge and short cast shadow create the overlap;
+ * the split-view sash remains in its own higher layer, so the resize target is
+ * unchanged. Keep the window-facing left edge square against the shell. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sidebar) {
+	z-index: 1;
+	overflow: visible !important;
+	background: var(--sessions-main-region-background) !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sidebar)::after {
+	display: none;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.phone-layout) .part.sidebar {
+	position: relative;
+	z-index: 1;
+	overflow: hidden;
+	border-right: 1px solid var(--sessions-panel-divider-color);
+	border-radius: 0 14px 14px 0 !important;
+	box-shadow: 5px 0 18px -10px color-mix(in srgb, var(--vscode-widget-shadow, #000) 58%, transparent);
+}
+
+.monaco-workbench.hc-black.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.phone-layout) .part.sidebar,
+.monaco-workbench.hc-light.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.phone-layout) .part.sidebar {
+	box-shadow: none;
+}
+
 /* The sidebar part itself paints the opaque sidebar surface; its inner surfaces
  * stay transparent so the panel reads as one continuous sheet. */
 .agent-sessions-workbench.shell-gradient-background .part.titlebar,
@@ -645,6 +673,127 @@
 	opacity: 1;
 }
 
+/* T3 thread breadcrumb: project first, slash, then the thread title. The
+ * workspace is plain breadcrumb text rather than a pill, which also prevents
+ * the duplicate-looking title treatment reported in the session header. */
+.agent-sessions-workbench .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-title-row {
+	gap: 8px;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-meta-row {
+	order: 0;
+	flex: 0 1 auto;
+	gap: 6px;
+	overflow: visible;
+	color: var(--session-view-foreground);
+	font-size: 13px;
+	line-height: 20px;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-meta-row::after {
+	flex: 0 0 auto;
+	margin-left: 2px;
+	color: color-mix(in srgb, var(--session-view-foreground) 36%, transparent);
+	content: '/';
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-meta-workspace {
+	padding: 0;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	color: var(--session-view-foreground);
+	font-size: 13px;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-session-title {
+	order: 1;
+	min-height: 20px;
+	padding: 0;
+	margin: 0;
+	font-size: 13px;
+	font-weight: 600;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-session-title-text {
+	color: var(--session-view-foreground);
+	font-weight: 600;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-title-actions {
+	order: 2;
+}
+
+/* Keep the 48px breadcrumb bar while preserving Backboard's compact,
+ * icon-only session actions. The header should never mix injected text labels
+ * into the environment, panel, done, pin, and close icon cluster. */
+.agent-sessions-workbench .part.sessionspart > .title {
+	min-height: 48px !important;
+	height: 48px !important;
+	padding-inline: 12px;
+	border-bottom: 0 !important;
+}
+
+.agent-sessions-workbench .part.sessionspart .sessions-panel-header.sessions-part-header {
+	height: 48px;
+	flex: 0 0 48px;
+	border-bottom: 0;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-composite-bar.session-header-bar,
+.agent-sessions-workbench .sessions-header-session-title-slot .chat-composite-bar.session-header-bar,
+.agent-sessions-workbench .sessions-header-session-toolbar-slot {
+	height: 48px;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-title-row {
+	height: 48px;
+	gap: 7px;
+}
+
+/* T3 keeps change counts in the changed-files surface, not inside the project
+ * breadcrumb. This also guarantees the header always reads "project / title". */
+.agent-sessions-workbench .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-meta-diff {
+	display: none;
+}
+
+.agent-sessions-workbench .sessions-header-session-toolbar-slot .monaco-toolbar .actions-container {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.agent-sessions-workbench .sessions-header-session-toolbar-slot .monaco-toolbar .action-item {
+	display: flex;
+	flex: 0 0 auto;
+	margin: 0;
+}
+
+.agent-sessions-workbench .sessions-header-session-toolbar-slot .monaco-toolbar .action-label {
+	display: inline-flex;
+	box-sizing: border-box;
+	width: 28px !important;
+	min-width: 28px;
+	height: 28px !important;
+	align-items: center;
+	justify-content: center;
+	padding: 0;
+	border: 1px solid transparent;
+	border-radius: 8px;
+	background: transparent;
+	color: color-mix(in srgb, var(--session-view-foreground) 76%, transparent);
+	font-size: 12px;
+	line-height: 26px;
+	opacity: 1;
+}
+
+.agent-sessions-workbench .sessions-header-session-toolbar-slot .monaco-toolbar .action-label:hover {
+	border-color: color-mix(in srgb, var(--session-view-foreground) 18%, transparent);
+	background: color-mix(in srgb, var(--session-view-foreground) 7%, transparent);
+	color: var(--session-view-foreground);
+}
+
+
 .agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.sessionspart),
 .agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.editor:not(.modal-editor-part)),
 .agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.auxiliarybar),
@@ -653,7 +802,6 @@
 	background: var(--sessions-main-region-background) !important;
 }
 
-.agent-sessions-workbench .part.sessionspart > .title,
 .agent-sessions-workbench .part.editor .title.tabs {
 	min-height: 38px !important;
 	height: 38px !important;
@@ -699,7 +847,6 @@
 	border-left: none !important;
 }
 
-.agent-sessions-workbench .part.sessionspart > .title,
 .agent-sessions-workbench .part.editor .title.tabs {
 	border-bottom: 1px solid var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 14%, transparent)) !important;
 }

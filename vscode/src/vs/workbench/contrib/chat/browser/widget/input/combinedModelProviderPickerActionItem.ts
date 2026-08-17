@@ -164,6 +164,19 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 		return [...(this._sessionTypeDelegate.getAllowedSessionProviders?.() ?? [])];
 	}
 
+	/**
+	 * Providers the current chat may actually select. Started chats retain the
+	 * provider they were created with, even if the host's draft allowlist has
+	 * since changed (for example, a historical Claude session in Simple mode).
+	 */
+	private _selectableProviders(): AgentSessionTarget[] {
+		const activeProvider = this._activeProvider();
+		if (activeProvider && this._sessionTypeDelegate.canChangeSessionProvider?.() === false) {
+			return [activeProvider as AgentSessionTarget];
+		}
+		return this._allowedProviders();
+	}
+
 	private _activeProvider(): string | undefined {
 		return this._sessionTypeDelegate.getActiveSessionProvider();
 	}
@@ -245,8 +258,14 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 			return;
 		}
 
-		// Default the rail to the active provider each time the picker opens.
-		this._railProvider = this._activeProvider() ?? this._allowedProviders()[0];
+		// Default to the active provider only when this host explicitly allows it.
+		// This prevents a stored subscription-backed provider from leaking back
+		// into a Backboard-only Simple-mode picker.
+		const allowedProviders = this._selectableProviders();
+		const activeProvider = this._activeProvider();
+		this._railProvider = activeProvider && allowedProviders.includes(activeProvider as AgentSessionTarget)
+			? activeProvider
+			: allowedProviders[0];
 		this._searchValue = '';
 		this._showAllBackboardModels = false;
 
@@ -317,7 +336,7 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 		};
 
 		addRailItem(FAVORITES_RAIL_ID, Codicon.star, localize('combinedPicker.favorites', "Favorites"));
-		for (const provider of this._allowedProviders()) {
+		for (const provider of this._selectableProviders()) {
 			addRailItem(provider, getAgentSessionProviderIcon(provider), getAgentSessionProviderName(provider));
 		}
 
@@ -339,8 +358,11 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 			dom.clearNode(footer);
 			const query = this._searchValue.trim().toLowerCase();
 			const showingFavorites = this._railProvider === FAVORITES_RAIL_ID;
+			const allowedModelIds = new Set(this._selectableProviders().flatMap(provider => this._modelsForProvider(provider).map(model => model.identifier)));
 			const allModels = showingFavorites
-				? this._favorites().map(id => this._resolveModel(id)).filter((m): m is ILanguageModelChatMetadataAndIdentifier => !!m)
+				? this._favorites()
+					.map(id => this._resolveModel(id))
+					.filter((model): model is ILanguageModelChatMetadataAndIdentifier => !!model && allowedModelIds.has(model.identifier))
 				: this._modelsForProvider(this._railProvider ?? '');
 			// Provider/model registrations can outlive the CLI process that supplied
 			// them. Setup state wins over a stale catalog: never let those models be
@@ -524,13 +546,23 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 	}
 
 	private _commit(providerId: string, model: ILanguageModelChatMetadataAndIdentifier): void {
+		const activeProvider = this._activeProvider();
+		const providerLocked = this._sessionTypeDelegate.canChangeSessionProvider?.() === false;
+		if (providerLocked && providerId !== activeProvider) {
+			return;
+		}
+		const providerAllowed = this._selectableProviders().includes(providerId as AgentSessionTarget);
+		const modelAllowed = providerAllowed && this._modelsForProvider(providerId).some(candidate => candidate.identifier === model.identifier);
+		if (!modelAllowed) {
+			return;
+		}
 		const setupCandidate = this._setupCandidate(providerId);
 		if (setupCandidate && this._sessionTypeDelegate.runSetup) {
 			this._overlay.clear();
 			this._sessionTypeDelegate.runSetup(setupCandidate.id);
 			return;
 		}
-		if (providerId && providerId !== this._activeProvider() && this._sessionTypeDelegate.setActiveSessionProvider) {
+		if (providerId && providerId !== activeProvider && this._sessionTypeDelegate.setActiveSessionProvider) {
 			this._sessionTypeDelegate.setActiveSessionProvider(providerId as AgentSessionTarget);
 		}
 		this._modelDelegate.setModel(model);

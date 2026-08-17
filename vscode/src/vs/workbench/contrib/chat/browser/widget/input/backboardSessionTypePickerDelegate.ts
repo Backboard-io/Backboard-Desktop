@@ -53,12 +53,16 @@ const AGENT_HOST_SESSION_TYPE_PREFIX = 'agent-host-';
  *
  * @param getSessionResource Lazily resolves the hosted chat's session resource.
  *   Called after construction, so it may return `undefined` early on.
+ * @param canChangeSessionProvider Returns true only while the hosted chat is
+ *   still an empty draft. Once it has requests, provider selection is locked
+ *   to the provider encoded by its session resource.
  */
 export function createBackboardSessionTypePickerDelegate(
 	getSessionResource: () => URI | undefined,
 	commandService: ICommandService,
 	chatSessionsService: IChatSessionsService,
 	agentCliSetupService: IAgentCliSetupService,
+	canChangeSessionProvider: () => boolean,
 ): ISessionTypePickerDelegate {
 	return {
 		getActiveSessionProvider: () => {
@@ -67,6 +71,9 @@ export function createBackboardSessionTypePickerDelegate(
 		},
 
 		setActiveSessionProvider: provider => {
+			if (!canChangeSessionProvider()) {
+				return;
+			}
 			commandService
 				.executeCommand(`workbench.action.chat.openNewChatSessionInPlace.${provider}`)
 				.then(undefined, () => { /* provider not registered; the rail keeps its current selection */ });
@@ -81,6 +88,8 @@ export function createBackboardSessionTypePickerDelegate(
 			}
 			return providers;
 		},
+
+		canChangeSessionProvider,
 
 		// Bring-your-own-subscription: a rail provider whose agent CLI is not
 		// installed offers the one-click Install (curl installer + sign-in)

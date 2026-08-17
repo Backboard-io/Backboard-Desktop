@@ -485,10 +485,15 @@ export class ChatService extends Disposable implements IChatService {
 	private initializeSession(model: ChatModel): void {
 		this.trace('initializeSession', `Initialize session ${model.sessionResource}`);
 
-		// Activate the default extension provided agent but do not wait
-		// for it to be ready so that the session can be used immediately
-		// without having to wait for the agent to be ready.
-		this.activateDefaultAgent(model.initialLocation).catch(e => this.logService.error(e));
+		// Activate the default extension-provided agent without blocking session
+		// creation. Products whose primary chat surface is backed by Agent Host do
+		// not contribute a legacy default chat participant, so skip activation
+		// quietly in that valid configuration.
+		this.extensionService.whenInstalledExtensionsRegistered().then(() => {
+			const defaultAgent = this.chatAgentService.getContributedDefaultAgent(model.initialLocation)
+				?? this.chatAgentService.getContributedDefaultAgent(ChatAgentLocation.Chat);
+			return defaultAgent ? this.activateDefaultAgent(model.initialLocation) : undefined;
+		}).catch(e => this.logService.error(e));
 	}
 
 	async activateDefaultAgent(location: ChatAgentLocation): Promise<void> {

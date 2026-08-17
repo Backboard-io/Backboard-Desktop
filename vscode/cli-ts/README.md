@@ -507,14 +507,16 @@ Run the repository's deterministic 20-task stratified sample with Grok 4.5:
 ```sh
 bun run test:skillsbench:sample -- \
   --model xai/grok-4.5 \
+  --concurrency 2 \
   --jobs-dir benchmark-results/skillsbench/grok-4-5-sample-20
 ```
 
 The sample covers all eight v1.1 categories with 1 easy, 12 medium, and 7 hard
 tasks. Its exact task list, selection seed, and pinned commit are in
-`benchmarks/skillsbench-stratified-20-v1.json`. The batch is sequential and
-resumable: run the same command again to skip completed matching tasks. Use
-`--dry-run` to validate and print the selection without making model calls.
+`benchmarks/skillsbench-stratified-20-v1.json`. The batch is resumable and runs
+one task at a time by default; use `--concurrency` for bounded parallel
+evaluation, and run the same command again to skip completed matching tasks.
+Use `--dry-run` to validate and print the selection without making model calls.
 
 Install the repository's pre-commit hook:
 

@@ -51,16 +51,12 @@ import { Menus } from '../../../browser/menus.js';
 // #region --- New Chat Widget ---
 
 /**
- * Agent-host session types offered in the new-chat session-type (agent)
- * picker. Claude / Codex only surface when their gates are on (the
- * `preferAgentHost` preference for Claude, `chat.agentHost.codexAgent.enabled`
- * for Codex) — the picker intersects this allowlist with the session types the
- * providers actually advertise.
+ * Simple mode is Backboard-managed: its composer only offers models routed
+ * through Backboard. Subscription-backed agent hosts such as Claude Code and
+ * Codex remain available in Advanced mode, but must not surface in this picker.
  */
 const NEW_CHAT_ALLOWED_SESSION_TYPES = [
 	AgentSessionProviders.AgentHostBackboard,
-	AgentSessionProviders.AgentHostClaude,
-	AgentSessionProviders.AgentHostCodex,
 ];
 
 /** Prefix that turns a bare agent-host provider id into its session type. */
@@ -441,8 +437,14 @@ export class NewChatWidget extends Disposable {
 			getActiveSessionProvider: () =>
 				this._sessionTypePicker.getPickedChatSessionType(this._workspacePicker.selectedFolderUri)
 				?? AgentSessionProviders.AgentHostBackboard,
-			setActiveSessionProvider: provider => this._sessionTypePicker.selectSessionTypeById(provider, this._workspacePicker.selectedFolderUri),
+			setActiveSessionProvider: provider => {
+				if (this.sessionsService.activeSession.get()?.isCreated.get()) {
+					return;
+				}
+				this._sessionTypePicker.selectSessionTypeById(provider, this._workspacePicker.selectedFolderUri);
+			},
 			getAllowedSessionProviders: () => NEW_CHAT_ALLOWED_SESSION_TYPES,
+			canChangeSessionProvider: () => !(this.sessionsService.activeSession.get()?.isCreated.get() ?? false),
 			getSetupCandidateForProvider: provider => this._getSetupCandidateForProvider(provider),
 			runSetup: id => { void this.agentCliSetupService.beginSetup(id); },
 		};
@@ -503,6 +505,7 @@ export class NewChatWidget extends Disposable {
 		this._renderMiddleSection(chatWidgetContent);
 		const composerStack = dom.append(chatWidgetContent, dom.$('.new-chat-composer-stack'));
 		this._composerStackElement = composerStack;
+		this._renderPixelOctopus(composerStack);
 		// The workspace picker trigger lives inside the middle heading (the
 		// heading is the dropdown), so the composer workspace row is only needed
 		// on web as a host for the no-agent-host empty state.
@@ -770,11 +773,10 @@ export class NewChatWidget extends Disposable {
 		this._middleTitlePickerSlot = dom.append(this._middleTitle, dom.$('span.new-chat-middle-title-picker'));
 		this._middleTitleSuffix = dom.append(this._middleTitle, dom.$('span.new-chat-middle-title-text'));
 		this._updateMiddleTitle();
-		this._renderPixelOctopus(this._middleTitle);
 	}
 
 	/**
-	 * Renders the 8-bit octopus mascot just left of the heading text
+	 * Renders the 8-bit octopus mascot perched above the composer's top-right edge
 	 * (absolutely positioned, so it takes no layout row). Pixel rows are
 	 * merged into horizontal run rects to keep the node count low and
 	 * avoid hairline seams when the sprite scales.

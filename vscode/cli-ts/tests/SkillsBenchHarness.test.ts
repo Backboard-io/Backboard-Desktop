@@ -8,6 +8,7 @@ import {
 	bunTargetForDockerArchitecture,
 	parseSkillsBenchArgs,
 	parseTaskDefinition,
+	skillsBenchCheckoutDir,
 	summarizeAgentTrace,
 } from "../scripts/skillsbench-eval.ts";
 
@@ -49,6 +50,18 @@ describe("SkillsBench harness", () => {
 		);
 		expect(options.prepareOnly).toBe(true);
 		expect(options.model).toBeUndefined();
+	});
+
+	it("isolates task checkouts for parallel evaluators", () => {
+		expect(
+			skillsBenchCheckoutDir(
+				"/workspace/benchmark-cache/skillsbench",
+				"v1.1",
+				"citation-check",
+			),
+		).toBe(
+			"/workspace/benchmark-cache/skillsbench/checkouts/v1.1/citation-check",
+		);
 	});
 
 	it("rejects path traversal in task ids and refs", () => {

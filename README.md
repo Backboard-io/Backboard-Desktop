@@ -173,7 +173,7 @@ Reference: [LAYOUT.md](vscode/src/vs/sessions/LAYOUT.md),
 
 The unmodified workbench. Switching *into* Editor mode restores the left, bottom, and right
 panels unless you previously closed them yourself while in Editor mode — that intent is
-remembered per part in profile storage, so the mode switcher does not fight your layout. When
+remembered per-part in profile storage, so the mode switcher does not fight your layout. When
 the bottom panel is restored, the Terminal view is made active rather than Problems or Output.
 
 ### Advanced — Optimus
@@ -196,7 +196,7 @@ exposed as the `optimusViewMode` context key so chrome buttons mirror it.
 ### Jarvis — the canvas
 
 A cinematic surface of free-floating glass cards over a cycling backdrop, driven by voice as
-much as by clicking. The launcher offers six tiles:
+much as by clicks. The launcher offers six tiles:
 
 | Tile | Does |
 | --- | --- |

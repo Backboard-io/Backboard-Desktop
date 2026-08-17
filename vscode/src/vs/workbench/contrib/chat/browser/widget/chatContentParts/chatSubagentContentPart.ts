@@ -200,10 +200,15 @@ export class ChatSubagentContentPart extends ChatCollapsibleContentPart implemen
 		// Extract description, agentName, and prompt from toolInvocation
 		const { description, isDefaultDescription, agentName, prompt, modelName } = ChatSubagentContentPart.extractSubagentInfo(toolInvocation);
 
-		// Build title: "AgentName: description" or "Subagent: description"
+		// T3 presents a subagent as an anchored workflow row instead of another
+		// thinking fold. Keep Backboard's expandable details, while using the same
+		// lifecycle lead and keeping both agent and model visible in the row.
 		const rawPrefix = agentName || localize('chat.subagent.prefix', 'Subagent');
 		const prefix = rawPrefix.charAt(0).toUpperCase() + rawPrefix.slice(1);
-		const initialTitle = `${prefix}: ${description}`;
+		const initialLead = context.element.isComplete
+			? localize('chat.subagent.ran', 'Ran subagent')
+			: localize('chat.subagent.kickedOff', 'Kicked off subagent');
+		const initialTitle = `${initialLead} · ${prefix}: ${description}`;
 		super(initialTitle, context, undefined, hoverService, configurationService);
 
 		this.description = rcut(description, MAX_TITLE_LENGTH);
@@ -227,6 +232,7 @@ export class ChatSubagentContentPart extends ChatCollapsibleContentPart implemen
 			this.titleShimmerSpan = $('span.chat-thinking-title-shimmer');
 			this.titleShimmerSpan.textContent = initialTitle;
 			labelElement.appendChild(this.titleShimmerSpan);
+			this.appendVisibleModelLabel(labelElement);
 		}
 
 		// Note: wrapper is created lazily in initContent(), so we can't set its style here
@@ -478,7 +484,10 @@ export class ChatSubagentContentPart extends ChatCollapsibleContentPart implemen
 	private updateTitle(): void {
 		const rawName = this.agentName || localize('chat.subagent.prefix', 'Subagent');
 		const prefix = rawName.charAt(0).toUpperCase() + rawName.slice(1);
-		const shimmerText = `${prefix}: ${this.description}`;
+		const lifecycleLead = this.isActive
+			? localize('chat.subagent.kickedOff', 'Kicked off subagent')
+			: localize('chat.subagent.ran', 'Ran subagent');
+		const shimmerText = `${lifecycleLead} · ${prefix}: ${this.description}`;
 		const toolCallText = this.currentRunningToolMessage && this.isActive ? ` \u2014 ${this.currentRunningToolMessage}` : ``;
 
 		if (!this._collapseButton) {
@@ -495,13 +504,14 @@ export class ChatSubagentContentPart extends ChatCollapsibleContentPart implemen
 			this._titleFileWidgetStore.clear();
 			this.titleDetailContainer = undefined;
 
-			const prefixSpan = $('span');
-			prefixSpan.textContent = `${prefix}:`;
+			const prefixSpan = $('span.chat-subagent-lifecycle');
+			prefixSpan.textContent = `${lifecycleLead} · ${prefix}:`;
 			labelElement.appendChild(prefixSpan);
 
 			const descSpan = $('span.chat-thinking-title-detail-text');
 			descSpan.textContent = ` ${this.description}`;
 			labelElement.appendChild(descSpan);
+			this.appendVisibleModelLabel(labelElement);
 
 			this._collapseButton.element.ariaLabel = shimmerText;
 			this._collapseButton.element.ariaExpanded = String(this.isExpanded());
@@ -538,10 +548,21 @@ export class ChatSubagentContentPart extends ChatCollapsibleContentPart implemen
 			}
 			this.titleDetailContainer = result.element;
 		}
+		this.appendVisibleModelLabel(labelElement);
 
 		const fullLabel = `${shimmerText}${toolCallText}`;
 		this._collapseButton.element.ariaLabel = fullLabel;
 		this._collapseButton.element.ariaExpanded = String(this.isExpanded());
+	}
+
+	private appendVisibleModelLabel(labelElement: HTMLElement): void {
+		labelElement.querySelector('.chat-subagent-model')?.remove();
+		if (!this.modelName) {
+			return;
+		}
+		const model = $('span.chat-subagent-model');
+		model.textContent = `· ${this.modelName}`;
+		labelElement.appendChild(model);
 	}
 
 	private updateHover(): void {

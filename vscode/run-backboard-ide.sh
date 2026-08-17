@@ -32,6 +32,10 @@ fi
 APP_PLIST="$APP_BUNDLE/Contents/Info.plist"
 if [[ -f "$APP_PLIST" ]]; then
 	/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier io.backboard.studio.dev" "$APP_PLIST" 2>/dev/null || true
+	# Electron derives helper bundle names from CFBundleName, so keep the binary
+	# name stable while giving LaunchServices a distinct dev-facing display name.
+	/usr/libexec/PlistBuddy -c "Set :CFBundleName Backboard Studio" "$APP_PLIST" 2>/dev/null || true
+	/usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Backboard Studio Dev" "$APP_PLIST" 2>/dev/null || true
 	/usr/libexec/PlistBuddy -c "Set :CFBundleURLTypes:0:CFBundleURLName Backboard Studio Dev" "$APP_PLIST" 2>/dev/null || true
 	/usr/libexec/PlistBuddy -c "Set :CFBundleURLTypes:0:CFBundleURLSchemes:0 backboard" "$APP_PLIST" 2>/dev/null || true
 	touch "$APP_BUNDLE"

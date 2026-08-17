@@ -67,6 +67,7 @@ export class SessionTypePickerActionItem extends ChatInputPickerActionViewItem {
 		const actionProvider: IActionWidgetDropdownActionProvider = {
 			getActions: () => {
 				const currentType = this._getSelectedSessionType() ?? this._getDefaultSessionType();
+				const providerLocked = this.delegate.canChangeSessionProvider?.() === false;
 
 				const actions: IActionWidgetDropdownAction[] = [...this._getAdditionalActions().map(a => ({ ...action, ...a }))];
 				for (const sessionTypeItem of this._sessionTypeItems) {
@@ -78,7 +79,7 @@ export class SessionTypePickerActionItem extends ChatInputPickerActionViewItem {
 						label: sessionTypeItem.label,
 						checked: currentType === sessionTypeItem.type,
 						icon: this._getSessionIcon(sessionTypeItem),
-						enabled: unavailable ? false : this._isSessionTypeEnabled(sessionTypeItem.type),
+						enabled: !unavailable && (!providerLocked || currentType === sessionTypeItem.type) && this._isSessionTypeEnabled(sessionTypeItem.type),
 						category: this._getSessionCategory(sessionTypeItem),
 						description: getSessionTypeUnavailableDescription(availability) ?? this._getSessionDescription(sessionTypeItem),
 						tooltip: '',
@@ -127,6 +128,10 @@ export class SessionTypePickerActionItem extends ChatInputPickerActionViewItem {
 	}
 
 	protected _run(sessionTypeItem: ISessionTypeItem): void {
+		const currentType = this._getSelectedSessionType();
+		if (this.delegate.canChangeSessionProvider?.() === false && sessionTypeItem.type !== currentType) {
+			return;
+		}
 		if (this.delegate.setActiveSessionProvider) {
 			// Use provided setter (for welcome view)
 			this.delegate.setActiveSessionProvider(sessionTypeItem.type);

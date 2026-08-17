@@ -367,6 +367,7 @@ export class ChatWorkingProgressContentPart extends Disposable implements IChatC
 	private readonly isCompleteState: boolean;
 	private readonly elementId: string;
 	private readonly responseElement: IChatResponseViewModel | undefined;
+	private readonly useT3TimelinePresentation: boolean;
 	/** Ticks the live working label and elapsed time once per second while the turn runs. */
 	private readonly workingTimer = this._register(new MutableDisposable<IDisposable>());
 
@@ -383,6 +384,7 @@ export class ChatWorkingProgressContentPart extends Disposable implements IChatC
 		this.explicitContent = workingProgress.content;
 		this.elementId = context.element.id;
 		this.responseElement = isResponseVM(context.element) ? context.element : undefined;
+		this.useT3TimelinePresentation = context.container.closest('.backboard-clean-chat') !== null;
 		this.label = pickWorkingLabel(context.element.id, configurationService);
 
 		// Build the DOM
@@ -393,7 +395,11 @@ export class ChatWorkingProgressContentPart extends Disposable implements IChatC
 		const isComplete = state?.isComplete ?? false;
 		this.isCompleteState = isComplete;
 
-		if (isComplete) {
+		if (this.useT3TimelinePresentation) {
+			this.domNode.classList.add('chat-t3-working-row');
+			iconElement.classList.add('chat-t3-working-dots');
+			iconElement.append($('span'), $('span'), $('span'));
+		} else if (isComplete) {
 			iconElement.classList.add(...ThemeIcon.asClassNameArray(Codicon.check));
 		} else {
 			iconElement.classList.add(...ThemeIcon.asClassNameArray(ThemeIcon.modify(Codicon.loading, 'spin')));
@@ -408,7 +414,7 @@ export class ChatWorkingProgressContentPart extends Disposable implements IChatC
 		append(messageContainer, this.statsElement);
 		append(this.domNode, messageContainer);
 
-		if (!isComplete) {
+		if (!isComplete && !this.useT3TimelinePresentation) {
 			this.domNode.classList.add('shimmer-progress');
 		}
 
@@ -455,7 +461,9 @@ export class ChatWorkingProgressContentPart extends Disposable implements IChatC
 		// the elapsed time ticks alongside in the secondary stats span.
 		const tick = () => {
 			const elapsedMs = Math.max(0, Date.now() - state.confirmationAdjustedTimestamp.get());
-			this.setWorkingLabel(this.computeLiveLabel(elapsedMs));
+			this.setWorkingLabel(this.useT3TimelinePresentation
+				? localize('chat.t3WorkingFor', "Working for")
+				: this.computeLiveLabel(elapsedMs));
 			this.statsElement.textContent = formatWorkingElapsed(elapsedMs);
 		};
 		tick();

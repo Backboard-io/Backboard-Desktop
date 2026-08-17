@@ -6,7 +6,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import type { Terminal, TerminalOptions } from 'vscode';
 import { IAuthenticationService } from '../../../../platform/authentication/common/authentication';
-import { IEnvService } from '../../../../platform/env/common/envService';
 import { IVSCodeExtensionContext } from '../../../../platform/extContext/common/extensionContext';
 import { MockAuthenticationService } from '../../../../platform/ignore/node/test/mockAuthenticationService';
 import { ILogService } from '../../../../platform/log/common/logService';
@@ -64,14 +63,13 @@ vi.mock('../../../../platform/workspace/common/workspaceService', () => ({
 }));
 
 import type { IConfigurationService } from '../../../../platform/configuration/common/configurationService';
-import { PythonTerminalService } from '../copilotCLIPythonTerminalService';
 import { CopilotCLITerminalIntegration } from '../copilotCLITerminalIntegration';
 
 interface MockTerminal extends Pick<Terminal, 'show' | 'sendText' | 'dispose'> {
 	show: Mock;
 	sendText: Mock;
 	dispose: Mock;
-	shellIntegration: undefined;
+	shellIntegration: { executeCommand: Mock };
 }
 
 class TestTerminalService extends NullTerminalService {
@@ -85,7 +83,7 @@ class TestTerminalService extends NullTerminalService {
 			show: vi.fn(),
 			sendText: vi.fn(),
 			dispose: vi.fn(),
-			shellIntegration: undefined,
+			shellIntegration: { executeCommand: vi.fn() },
 		};
 		this.createTerminalSpy = vi.fn().mockReturnValue(this.mockTerminal);
 		this.contributePathSpy = vi.fn();
@@ -98,19 +96,6 @@ class TestTerminalService extends NullTerminalService {
 	override contributePath(contributor: unknown, pathLocation: unknown, description?: unknown, prepend?: unknown): void {
 		this.contributePathSpy(contributor, pathLocation, description, prepend);
 	}
-}
-
-class TestEnvService {
-	declare readonly _serviceBrand: undefined;
-	shell = 'zsh';
-	userHome = { fsPath: '/Users/testuser' };
-	OS = 2; // OperatingSystem.Macintosh
-	appRoot = '';
-	language = 'en';
-	uiKind = 1;
-	clipboard = { readText: async () => '', writeText: async () => { } };
-	getAppSpecificStorageUri() { return undefined; }
-	getEditorInfo() { return { name: 'test-editor', version: '1.0' }; }
 }
 
 class TestExtensionContext {
@@ -181,7 +166,6 @@ describe('CopilotCLITerminalIntegration', () => {
 	const disposables = new DisposableStore();
 	let terminalService: TestTerminalService;
 	let telemetryService: TestTelemetryService;
-	let envService: TestEnvService;
 	let integration: CopilotCLITerminalIntegration;
 	let authService: MockAuthenticationService;
 
@@ -190,7 +174,6 @@ describe('CopilotCLITerminalIntegration', () => {
 
 		terminalService = disposables.add(new TestTerminalService());
 		telemetryService = new TestTelemetryService();
-		envService = new TestEnvService();
 		authService = new MockAuthenticationService();
 
 		setupTerminalConfig('zsh', {
@@ -201,7 +184,6 @@ describe('CopilotCLITerminalIntegration', () => {
 			new TestExtensionContext() as unknown as IVSCodeExtensionContext,
 			authService as unknown as IAuthenticationService,
 			terminalService as unknown as ITerminalService,
-			envService as unknown as IEnvService,
 			{ trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), createSubLogger: () => ({}) } as unknown as ILogService,
 			telemetryService as unknown as ITelemetryService,
 			{ getConfig: () => true } as unknown as IConfigurationService,
@@ -221,12 +203,9 @@ describe('CopilotCLITerminalIntegration', () => {
 	});
 
 	describe('openTerminal', () => {
-		it('should create a terminal via terminalService when no python terminal available', async () => {
+		it('should create a regular terminal via terminalService', async () => {
 			await integration.openTerminal('Test Terminal');
 
-			// Since pythonTerminalService.createTerminal returns undefined by default,
-			// and getShellInfo returns shell info for zsh, it falls through to the
-			// shell args terminal creation path
 			expect(terminalService.createTerminalSpy).toHaveBeenCalled();
 		});
 
@@ -246,12 +225,13 @@ describe('CopilotCLITerminalIntegration', () => {
 			expect(event!.properties.sessionType).toBe('resume');
 		});
 
-		it('should send telemetry with shell type', async () => {
+		it('should report the regular terminal implementation', async () => {
 			await integration.openTerminal('Test Terminal');
 
 			const event = telemetryService.events.find(e => e.name === 'copilotcli.terminal.open');
 			expect(event).toBeDefined();
-			expect(event!.properties.shell).toBe('zsh');
+			expect(event!.properties.shell).toBe('default');
+			expect(event!.properties.terminalCreationMethod).toBe('regularTerminal');
 		});
 
 		it('should pass cwd to terminal options', async () => {
@@ -261,81 +241,23 @@ describe('CopilotCLITerminalIntegration', () => {
 			expect(callArgs.cwd).toBe('/my/working/dir');
 		});
 
-		it('should show the terminal after creation in shellArgs path', async () => {
+		it('should show the terminal after creation', async () => {
 			await integration.openTerminal('Test Terminal');
 
 			expect(terminalService.mockTerminal.show).toHaveBeenCalled();
 		});
 
-		it('should fall back to terminalService when getShellInfo returns undefined', async () => {
-			// Setup config to return no matching profile
-			setupTerminalConfig(undefined, undefined);
+		it('should execute the CLI command through shell integration', async () => {
+			await integration.openTerminal('Test Terminal');
 
-			// Re-create the integration to pick up the new config
-			envService.shell = '/bin/unknownshell';
-			const freshIntegration = new CopilotCLITerminalIntegration(
-				new TestExtensionContext() as unknown as IVSCodeExtensionContext,
-				authService as unknown as IAuthenticationService,
-				terminalService as unknown as ITerminalService,
-				envService as unknown as IEnvService,
-				{ trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), createSubLogger: () => ({}) } as unknown as ILogService,
-				telemetryService as unknown as ITelemetryService,
-				{ getConfig: () => true } as unknown as IConfigurationService,
-
-				{ requestResourceTrust: vi.fn().mockResolvedValue(true) } as unknown as IWorkspaceService,
-
-				new NoopOTelService(resolveOTelConfig({ env: {}, extensionVersion: '0.0.0', sessionId: 'test' })),
-			);
-			disposables.add(freshIntegration);
-			await (freshIntegration as any).initialization;
-
-			await freshIntegration.openTerminal('Fallback Terminal');
-
-			const event = telemetryService.events.find(e => e.name === 'copilotcli.terminal.open');
-			expect(event).toBeDefined();
-			expect(event!.properties.shell).toBe('unknown');
-			expect(event!.properties.terminalCreationMethod).toBe('fallbackTerminal');
+			expect(terminalService.mockTerminal.shellIntegration.executeCommand).toHaveBeenCalledWith('backboard');
+			expect(terminalService.mockTerminal.sendText).not.toHaveBeenCalled();
 		});
 
-		it('should use pythonTerminal method when python terminal is available and shell is not powershell', async () => {
-			const mockPythonTerminal: MockTerminal = {
-				show: vi.fn(),
-				sendText: vi.fn(),
-				dispose: vi.fn(),
-				shellIntegration: undefined,
-			};
-
-			// Access the internal pythonTerminalService and mock createTerminal to return a terminal
-			const pythonService = (integration as any).pythonTerminalService as PythonTerminalService;
-			(pythonService.createTerminal as ReturnType<typeof vi.fn>).mockResolvedValue(mockPythonTerminal);
-
-			await integration.openTerminal('Python Terminal');
-
-			const event = telemetryService.events.find(e => e.name === 'copilotcli.terminal.open');
-			expect(event).toBeDefined();
-			expect(event!.properties.terminalCreationMethod).toBe('pythonTerminal');
-			expect(event!.properties.shell).toBe('zsh');
-		});
-
-		it('should use shellArgsTerminal method when python terminal is not available', async () => {
-			await integration.openTerminal('Shell Args Terminal');
-
-			const event = telemetryService.events.find(e => e.name === 'copilotcli.terminal.open');
-			expect(event).toBeDefined();
-			expect(event!.properties.terminalCreationMethod).toBe('shellArgsTerminal');
-		});
-
-		it('should prepend --clear to cliArgs', async () => {
+		it('should append cliArgs to the dispatched command', async () => {
 			await integration.openTerminal('Test Terminal', ['--resume', 'sess-1']);
 
-			// For shellArgs terminal path, --clear gets removed before getShellInfo,
-			// but the final shell args should contain the original CLI args
-			const callArgs = terminalService.createTerminalSpy.mock.calls[0][0] as TerminalOptions;
-			const shellArgs = callArgs.shellArgs as string[];
-			// Shell args should contain the cli args (--resume, sess-1) but not --clear
-			const joinedArgs = shellArgs.join(' ');
-			expect(joinedArgs).toContain('--resume');
-			expect(joinedArgs).toContain('sess-1');
+			expect(terminalService.mockTerminal.shellIntegration.executeCommand).toHaveBeenCalledWith('backboard --resume sess-1');
 		});
 
 		it('should use editor location by default', async () => {
@@ -346,33 +268,6 @@ describe('CopilotCLITerminalIntegration', () => {
 			expect(callArgs.location).toEqual({ viewColumn: -1 }); // ViewColumn.Active
 		});
 
-		it('should set bash shell info when default profile is bash', async () => {
-			setupTerminalConfig('bash', {
-				bash: { path: 'bash' },
-			});
-			envService.shell = 'bash';
-
-			const freshIntegration = new CopilotCLITerminalIntegration(
-				new TestExtensionContext() as unknown as IVSCodeExtensionContext,
-				authService as unknown as IAuthenticationService,
-				terminalService as unknown as ITerminalService,
-				envService as unknown as IEnvService,
-				{ trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), createSubLogger: () => ({}) } as unknown as ILogService,
-				telemetryService as unknown as ITelemetryService,
-
-				{ getConfig: () => true } as unknown as IConfigurationService,
-				{ requestResourceTrust: vi.fn().mockResolvedValue(true) } as unknown as IWorkspaceService,
-				new NoopOTelService(resolveOTelConfig({ env: {}, extensionVersion: '0.0.0', sessionId: 'test' })),
-			);
-			disposables.add(freshIntegration);
-			await (freshIntegration as any).initialization;
-
-			await freshIntegration.openTerminal('Bash Terminal');
-
-			const event = telemetryService.events.find(e => e.name === 'copilotcli.terminal.open');
-			expect(event).toBeDefined();
-			expect(event!.properties.shell).toBe('bash');
-		});
 	});
 
 	describe('initialize', () => {
@@ -380,16 +275,13 @@ describe('CopilotCLITerminalIntegration', () => {
 			expect(terminalService.contributePathSpy).toHaveBeenCalledWith(
 				'copilot-cli',
 				expect.stringContaining('copilotCli'),
-				expect.objectContaining({ command: 'copilot' }),
+				expect.objectContaining({ command: 'backboard' }),
 				true,
 			);
 		});
 
-		it('should register a terminal profile provider', async () => {
-			expect(mockRegisterTerminalProfileProvider).toHaveBeenCalledWith(
-				'copilot-cli',
-				expect.objectContaining({ provideTerminalProfile: expect.any(Function) }),
-			);
+		it('should not register a redundant terminal profile provider', async () => {
+			expect(mockRegisterTerminalProfileProvider).not.toHaveBeenCalled();
 		});
 	});
 
@@ -436,7 +328,6 @@ describe('CopilotCLITerminalIntegration', () => {
 				new TestExtensionContext() as unknown as IVSCodeExtensionContext,
 				authServiceWithSession as unknown as IAuthenticationService,
 				terminalService as unknown as ITerminalService,
-				envService as unknown as IEnvService,
 				{ trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), createSubLogger: () => ({}) } as unknown as ILogService,
 				telemetryService as unknown as ITelemetryService,
 

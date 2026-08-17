@@ -86,6 +86,8 @@ export class ChatWebPreviewContentPart extends Disposable implements IChatConten
 		this._favicon.alt = '';
 		this._faviconFallback = dom.append(titleRow, dom.$('.chat-web-preview-favicon-fallback'));
 		this._faviconFallback.appendChild(renderIcon(Codicon.globe));
+		const t3Heading = dom.append(titleRow, dom.$('span.chat-web-preview-t3-heading'));
+		t3Heading.textContent = localize('chat.webPreview.workEntryLabel', 'Web preview');
 		this._title = dom.append(titleRow, dom.$('.chat-web-preview-title'));
 		this._subtitle = dom.append(info, dom.$('.chat-web-preview-subtitle'));
 

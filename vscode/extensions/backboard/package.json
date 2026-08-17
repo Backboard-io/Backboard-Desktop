@@ -23,7 +23,8 @@
     "onCommand:backboard.extension.signIn",
     "onCommand:backboard.setApiKey",
     "onCommand:backboard.refreshModels",
-    "onCommand:backboard.generateCommitMessage"
+    "onCommand:backboard.generateCommitMessage",
+    "onCommand:backboard.openUsage"
   ],
   "extensionKind": [
     "workspace",
@@ -52,6 +53,10 @@
         "command": "backboard.generateCommitMessage",
         "title": "Backboard: Generate Commit Message",
         "icon": "$(sparkle)"
+      },
+      {
+        "command": "backboard.openUsage",
+        "title": "Backboard: Open Usage"
       },
       {
         "command": "backboard.checkForUpdates",

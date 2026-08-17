@@ -24,6 +24,54 @@
 	position: relative;
 }
 
+/* Per-chat identity sits in the lower-right of each session's transcript,
+ * immediately above its composer. It belongs to the input stack so it remains
+ * visible without covering the last response and follows every grid column. */
+.session-view .session-chat-identity {
+	align-self: flex-end;
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	min-height: 22px;
+	margin: 0 2px 2px;
+	padding: 0 9px;
+	box-sizing: border-box;
+	border: 1px solid color-mix(in srgb, var(--session-view-foreground) 12%, transparent);
+	border-radius: 999px;
+	color: color-mix(in srgb, var(--session-view-foreground) 72%, transparent);
+	background: color-mix(in srgb, var(--session-view-background) 94%, var(--session-view-foreground) 6%);
+	box-shadow:
+		0 1px 2px color-mix(in srgb, var(--vscode-widget-shadow) 34%, transparent),
+		0 6px 18px color-mix(in srgb, var(--vscode-widget-shadow) 16%, transparent);
+	font-size: 11px;
+	line-height: 20px;
+	white-space: nowrap;
+	user-select: text;
+}
+
+.session-view .session-chat-identity[hidden] {
+	display: none;
+}
+
+.session-view .session-chat-identity-agent {
+	color: var(--session-view-foreground);
+	font-weight: 600;
+}
+
+.session-view .session-chat-identity-separator {
+	color: color-mix(in srgb, var(--session-view-foreground) 30%, transparent);
+}
+
+.session-view:not(.is-active) .session-chat-identity {
+	opacity: 0.64;
+}
+
+.hc-black .session-view .session-chat-identity,
+.hc-light .session-view .session-chat-identity {
+	border-color: var(--vscode-contrastBorder);
+	box-shadow: none;
+}
+
 .session-view.backboard-auth-gate-active > :not(.backboard-auth-gate-overlay) {
 	filter: blur(4px);
 	opacity: 0.48;

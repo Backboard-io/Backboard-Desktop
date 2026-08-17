@@ -21,6 +21,17 @@ export const DEFAULT_AGENT_HOST_WATCH_EXCLUDES: readonly string[] = Object.freez
 	'**/.git/subtree-cache/**',
 	'**/.git/**/*.lock',
 	'**/.git/**/fsmonitor--daemon/**',
+	'**/.build/**',
+	'**/.cache/**',
+	'**/coverage/**',
+	'**/dist/**',
+	'**/node_modules/**',
+	'**/out/**',
+	'**/out-*/**',
+	'**/target/**',
+	'**/VSCode-*/**',
+	'**/vscode-release/**',
+	'**/windows-release/**',
 	'**/*.watchman-cookie-*',
 ]);
 

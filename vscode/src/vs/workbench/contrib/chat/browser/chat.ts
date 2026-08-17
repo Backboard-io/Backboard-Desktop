@@ -89,6 +89,12 @@ export interface ISessionTypePickerDelegate {
 	 */
 	getAllowedSessionProviders?(): readonly AgentSessionTarget[];
 	/**
+	 * Whether the current chat may switch to a different session provider.
+	 * New, empty drafts may switch providers; once a session has started, hosts
+	 * can return false to keep model selection scoped to its original provider.
+	 */
+	canChangeSessionProvider?(): boolean;
+	/**
 	 * Optional getter for the pending delegation target - the target that will be used when submit is pressed.
 	 */
 	getPendingDelegationTarget?(): AgentSessionTarget | undefined;

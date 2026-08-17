@@ -14,6 +14,7 @@ import * as readline from 'readline';
 import { codiconsStylesheetUri, fontBaseUri, iconBaseUri, panelHtml, webviewLocalResourceRoots } from './panel/panelHtml';
 import { initializeBackboardUpdates, readCurrentAppVersion } from './updates';
 import type { BackboardAttachment, BackboardConfigJson, BackboardDeviceCodeResponse, BackboardOAuthSaveResult, BackboardOAuthTokens, BridgeEvent, BridgeModel, FileAttachment, FileChangePayload, ImageAttachment, ModelCacheEntry, PanelOptions, PanelPersistedState, PanelStateStore, PanelThreadFile, PendingRequest, ResponseSink, ToolCacheEntry, ToolResultRequest, VoiceAttachment } from './types';
+import { BackboardUsagePanel, readLocalUsageSnapshot, type BackboardUsageSnapshot } from './usagePanel';
 
 type BackboardSettings = ReturnType<typeof readSettings>;
 const hiddenModelProviders = new Set(['featherless', 'elevenlabs', 'eleven-labs', 'speechmatics']);
@@ -64,8 +65,10 @@ export function activate(context: vscode.ExtensionContext): void {
 	backboardToolOutput = vscode.window.createOutputChannel('Backboard Tools');
 	const bridge = new BackboardBridge(context);
 	const panelProvider = new BackboardPanelProvider(bridge, context);
+	const usagePanel = new BackboardUsagePanel(() => fetchUsageSnapshot(bridge), backboardToolOutput);
 	context.subscriptions.push(backboardToolOutput);
 	context.subscriptions.push(bridge);
+	context.subscriptions.push(usagePanel);
 	initializeBackboardUpdates(context, backboardToolOutput);
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.setApiKey', async () => {
 		if (await setApiKey()) {
@@ -76,6 +79,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.extension.signIn', () => promptBackboardSso(bridge)));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.refreshModels', () => panelProvider.refreshModels()));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.generateCommitMessage', (rootUri: vscode.Uri | undefined, _context: unknown, token: vscode.CancellationToken | undefined) => generateBackboardCommitMessage(bridge, rootUri, token)));
+	context.subscriptions.push(vscode.commands.registerCommand('backboard.openUsage', () => usagePanel.show()));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.openRightPanel', () => openBackboardView()));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.openPanel', () => openBackboardView()));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.newChat', async () => {
@@ -3549,19 +3553,50 @@ async function postPanelState(bridge: BackboardBridge, webview: vscode.Webview, 
 }
 
 async function postUsageSnapshot(bridge: BackboardBridge, webview: vscode.Webview): Promise<void> {
-	const tokenSource = new vscode.CancellationTokenSource();
 	try {
-		const [balance, summary, recent] = await Promise.all([
-			bridge.callApi('getBillingBalance', {}, tokenSource.token),
-			bridge.callApi('getUsageSummary', { query: { range: 'period' } }, tokenSource.token),
-			bridge.callApi('getRecentUsage', { query: { page: 1, pageSize: 20 } }, tokenSource.token)
-		]);
-		await webview.postMessage({ type: 'usageSnapshot', payload: { balance, summary, recent } });
+		await webview.postMessage({ type: 'usageSnapshot', payload: await fetchUsageSnapshot(bridge) });
 	} catch (error) {
 		await webview.postMessage({ type: 'status', text: error instanceof Error ? error.message : String(error) });
+	}
+}
+
+async function fetchUsageSnapshot(bridge: BackboardBridge): Promise<BackboardUsageSnapshot> {
+	const tokenSource = new vscode.CancellationTokenSource();
+	try {
+		const [balance, summary, recent, models] = await Promise.all([
+			bridge.callApi('getBillingBalance', {}, tokenSource.token),
+			bridge.callApi('getUsageSummary', { query: { range: 'period' } }, tokenSource.token),
+			bridge.callApi('getRecentUsage', { query: { page: 1, pageSize: 250 } }, tokenSource.token),
+			bridge.cachedModels(),
+		]);
+		const local = await readLocalUsageSnapshot(models ?? []);
+		return {
+			balance,
+			summary: hasPricedUsagePayload(summary) ? summary : local.summary,
+			recent: hasPricedUsagePayload(recent) ? recent : local.recent,
+			fetchedAt: Date.now(),
+		};
 	} finally {
 		tokenSource.dispose();
 	}
+}
+
+function hasPricedUsagePayload(value: unknown): boolean {
+	if (Array.isArray(value)) {
+		return value.some(hasPricedUsagePayload);
+	}
+	if (!value || typeof value !== 'object') {
+		return false;
+	}
+	for (const [key, item] of Object.entries(value)) {
+		if (/cost|spend|amount/i.test(key) && ((typeof item === 'number' && item > 0) || (typeof item === 'string' && Number(item) > 0))) {
+			return true;
+		}
+		if (hasPricedUsagePayload(item)) {
+			return true;
+		}
+	}
+	return false;
 }
 
 async function postComposerContext(webview: vscode.Webview, kind: 'activeFile' | 'selection'): Promise<void> {

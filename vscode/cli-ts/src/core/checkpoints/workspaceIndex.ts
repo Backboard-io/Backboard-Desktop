@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import type { Dirent } from "node:fs";
 import { lstat, readdir, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -34,6 +35,11 @@ const DENY_DIRS = new Set([
 	".next",
 	".turbo",
 	"coverage",
+]);
+
+const RIPGREP_IGNORED_DIR_GLOBS = [...DENY_DIRS].flatMap((dir) => [
+	`!${dir}/**`,
+	`!**/${dir}/**`,
 ]);
 
 export interface IndexEntry {
@@ -192,6 +198,25 @@ export class WorkspaceIndex {
 	}
 
 	private async walk(dir: string, paths: string[]): Promise<void> {
+		const ripgrepPaths = await listFilesWithRipgrep(dir);
+		if (ripgrepPaths) {
+			for (const path of ripgrepPaths) {
+				paths.push(resolve(dir, path));
+				if (paths.length > MAX_INDEX_FILES) {
+					this.disable(`workspace exceeds the ${MAX_INDEX_FILES}-file cap`);
+					return;
+				}
+			}
+			return;
+		}
+		await this.walkWithoutIgnoreFiles(dir, paths);
+	}
+
+	/** Fallback for environments where ripgrep is unavailable. */
+	private async walkWithoutIgnoreFiles(
+		dir: string,
+		paths: string[],
+	): Promise<void> {
 		let dirents: Dirent[];
 		try {
 			dirents = await readdir(dir, { withFileTypes: true });
@@ -205,7 +230,7 @@ export class WorkspaceIndex {
 			const path = join(dir, dirent.name);
 			if (dirent.isDirectory()) {
 				if (DENY_DIRS.has(dirent.name)) continue;
-				await this.walk(path, paths);
+				await this.walkWithoutIgnoreFiles(path, paths);
 			} else if (dirent.isFile()) {
 				paths.push(path);
 				if (paths.length > MAX_INDEX_FILES) {
@@ -268,6 +293,52 @@ export class WorkspaceIndex {
 			...(storeBlobs || alreadyStored ? { stored: true } : {}),
 		};
 	}
+}
+
+/**
+ * Enumerates files with the same ignore semantics as the CLI's search tools.
+ * `--no-require-git` makes nested `.gitignore`, `.ignore`, and `.rgignore`
+ * files effective even when a workspace is not itself a Git repository.
+ * Returns null only when ripgrep is missing, so the Node walker can take over.
+ */
+function listFilesWithRipgrep(root: string): Promise<string[] | null> {
+	return new Promise((resolvePromise, reject) => {
+		const args = ["--files", "--hidden", "--no-require-git", "--null"];
+		for (const glob of RIPGREP_IGNORED_DIR_GLOBS) {
+			args.push("--glob", glob);
+		}
+		const child = spawn("rg", args, { cwd: root });
+		const stdout: Buffer[] = [];
+		let stderr = "";
+		let missing = false;
+		child.stdout?.on("data", (chunk: Buffer) => stdout.push(chunk));
+		child.stderr?.on("data", (chunk: Buffer) => {
+			stderr += chunk.toString();
+		});
+		child.on("error", (error: NodeJS.ErrnoException) => {
+			if (error.code === "ENOENT") {
+				missing = true;
+				return;
+			}
+			reject(error);
+		});
+		child.on("close", (code) => {
+			if (missing) {
+				resolvePromise(null);
+				return;
+			}
+			if (code !== 0 && code !== 1) {
+				reject(
+					new Error(
+						stderr.trim() || `ripgrep file listing failed (exit ${code ?? 1})`,
+					),
+				);
+				return;
+			}
+			const output = Buffer.concat(stdout).toString();
+			resolvePromise(output.split("\0").filter(Boolean));
+		});
+	});
 }
 
 /** Same case-normalization as CheckpointStore.pathKey. */

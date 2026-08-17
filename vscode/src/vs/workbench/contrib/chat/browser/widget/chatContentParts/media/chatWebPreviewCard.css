@@ -90,6 +90,10 @@
 	text-overflow: ellipsis;
 }
 
+.chat-web-preview-part .chat-web-preview-t3-heading {
+	display: none;
+}
+
 .chat-web-preview-part .chat-web-preview-subtitle {
 	color: var(--vscode-descriptionForeground);
 	font-size: 12px;

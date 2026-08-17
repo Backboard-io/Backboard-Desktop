@@ -5567,7 +5567,7 @@ have to be updated for changes to the rules above, or to support more deeply nes
  */
 
 .monaco-workbench .backboard-clean-chat {
-	--bb-clean-chat-column: 780px;
+	--bb-clean-chat-column: 768px;
 	--bb-clean-chat-gutter: clamp(14px, 3vw, 28px);
 	--bb-clean-chat-surface: color-mix(in srgb, var(--vscode-foreground) 5%, var(--vscode-editor-background));
 	--bb-clean-chat-surface-hover: color-mix(in srgb, var(--vscode-foreground) 8%, var(--vscode-editor-background));
@@ -5599,37 +5599,53 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	background: transparent;
 }
 
-/* The request is the only conversational bubble. It spans the reading column
- * instead of floating as a second, narrower card hierarchy. */
+/* T3 does not draw the virtualized-list selection rectangle around an entire
+ * message. Keep focus on the actual disclosure/button instead of outlining a
+ * viewport-sized transcript row with VS Code's dotted list ring. */
+.monaco-workbench .backboard-clean-chat .interactive-session .monaco-list-row.focused,
+.monaco-workbench .backboard-clean-chat .interactive-session .monaco-list-row.selected {
+	outline: 0 !important;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-session .monaco-list-row.focused.response,
+.monaco-workbench .backboard-clean-chat .interactive-session .monaco-list-row.selected.response {
+	border-color: transparent !important;
+	outline: 0 !important;
+	outline-offset: 0 !important;
+}
+
+/* T3's UserTimelineRow: the prompt is a right-aligned `max-w-[80%]`
+ * `rounded-2xl` surface with `p-3`. Keep only the subtle elevation requested
+ * for Backboard; authorship still comes from order and shape. */
 .monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-request {
-	align-items: stretch;
+	align-items: flex-end;
 	padding-top: 8px;
 	padding-bottom: 12px;
 }
 
 .monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-request .value {
-	align-items: stretch !important;
+	align-items: flex-end !important;
 }
 
 .monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-request .value > .rendered-markdown {
 	box-sizing: border-box;
-	width: 100%;
-	max-width: 100%;
-	margin: 0;
-	padding: 9px 12px;
-	border: 1px solid var(--bb-clean-chat-border);
-	border-radius: var(--bb-clean-chat-radius);
-	background: var(--bb-clean-chat-surface) !important;
+	width: fit-content;
+	max-width: 80%;
+	margin: 0 0 0 auto;
+	padding: 12px;
+	border: 0;
+	border-radius: 16px;
+	background: var(--vscode-chat-requestBubbleBackground, var(--bb-clean-chat-surface)) !important;
 	color: var(--vscode-foreground);
 	font-size: 13px;
 	font-weight: normal;
 	line-height: 1.45;
 	text-align: left;
+	box-shadow: 0 1px 2px color-mix(in srgb, #000 16%, transparent);
 }
 
 .monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-request .value > .rendered-markdown.clickable:hover {
-	border-color: var(--bb-clean-chat-border-strong);
-	background: var(--bb-clean-chat-surface-hover) !important;
+	background: var(--vscode-chat-requestBubbleHoverBackground, var(--bb-clean-chat-surface-hover)) !important;
 }
 
 /* Authorship is established by order and shape. Provider headers and always-on
@@ -5824,6 +5840,10 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	display: none;
 }
 
+.monaco-workbench .backboard-clean-chat .chat-thinking-collapsible.chat-thinking-streaming:has(> .chat-thinking-work-group) > .chat-thinking-spinner-item {
+	display: none;
+}
+
 .monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-group-body {
 	padding-left: 14px;
 }
@@ -5831,6 +5851,334 @@ have to be updated for changes to the rules above, or to support more deeply nes
 .monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-group-chevron {
 	font-size: 11px;
 	opacity: 0.7;
+}
+
+/* T3 Code work log, ported from its MIT-licensed MessagesTimeline. A run of
+ * consecutive provider-neutral tool events keeps the newest row visible and
+ * folds the older rows behind a disclosure at the end of the group. */
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group {
+	display: flex;
+	min-width: 0;
+	flex-direction: column;
+	margin: 0;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group > .chat-thinking-group-body {
+	display: flex;
+	min-width: 0;
+	flex-direction: column;
+	gap: 1px;
+	padding: 0;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group.chat-thinking-work-overflow-collapsed > .chat-thinking-group-body > .chat-thinking-tool-wrapper:not(:last-child) {
+	display: none;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group > .chat-thinking-group-header {
+	display: flex;
+	box-sizing: border-box;
+	width: 100%;
+	min-height: 24px;
+	align-items: center;
+	gap: 6px;
+	padding: 2px !important;
+	border-radius: 6px;
+	color: var(--vscode-foreground);
+	cursor: pointer;
+	font-size: 12px;
+	font-weight: 500;
+	line-height: 20px;
+	transition: background-color 150ms ease, color 150ms ease;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group > .chat-thinking-group-header.hidden {
+	display: none;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group > .chat-thinking-group-header:hover {
+	background: color-mix(in srgb, var(--vscode-foreground) 6%, transparent);
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group > .chat-thinking-group-header:focus-visible {
+	outline: 1px solid color-mix(in srgb, var(--vscode-focusBorder) 70%, transparent);
+	outline-offset: -1px;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group > .chat-thinking-group-header > .chat-thinking-group-chevron {
+	display: inline-flex;
+	width: 20px;
+	height: 20px;
+	flex: 0 0 20px;
+	align-items: center;
+	justify-content: center;
+	font-size: 14px;
+	opacity: 0.7;
+}
+
+/* Each work entry is T3's 12px one-line row: a 20px tool glyph, a truncating
+ * label/preview, a disclosure affordance when the native tool part has detail,
+ * and its success/failure state at the trailing edge. */
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-tool-wrapper {
+	display: grid;
+	box-sizing: border-box;
+	min-width: 0;
+	min-height: 24px;
+	grid-template-columns: 20px minmax(0, 1fr);
+	align-items: start;
+	gap: 6px;
+	padding: 2px;
+	border-radius: 6px;
+	color: var(--bb-clean-chat-muted);
+	font-size: 12px;
+	line-height: 20px;
+	transition: background-color 150ms ease, color 150ms ease;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-tool-wrapper:has(.chat-used-context-label),
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-tool-wrapper:has(.tool-input-output-part) {
+	cursor: pointer;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-tool-wrapper:hover {
+	background: color-mix(in srgb, var(--vscode-foreground) 6%, transparent);
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-tool-wrapper > .chat-thinking-icon {
+	position: static;
+	display: inline-flex;
+	width: 20px;
+	height: 20px;
+	align-items: center;
+	justify-content: center;
+	color: var(--vscode-descriptionForeground);
+	font-size: 14px;
+	line-height: 20px;
+	opacity: 0.8;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-tool-wrapper > :not(.chat-thinking-icon) {
+	min-width: 0;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-tool-invocation-part,
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-tool-invocation-part > div,
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .progress-container,
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-used-context,
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-used-context-label,
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-terminal-thinking-collapsible {
+	box-sizing: border-box;
+	min-width: 0;
+	margin: 0;
+	padding: 0;
+	border: 0;
+	background: transparent;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .progress-container {
+	display: flex;
+	min-height: 20px;
+	align-items: center;
+	gap: 6px;
+	font-size: 12px;
+	line-height: 20px;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .progress-container > .rendered-markdown,
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .progress-container > .rendered-markdown > p,
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-used-context-label .monaco-button,
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-used-context-label .monaco-button .monaco-button-label {
+	min-width: 0;
+	overflow: hidden;
+	color: var(--bb-clean-chat-muted);
+	font-size: 12px;
+	font-weight: 500;
+	line-height: 20px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .progress-container > .codicon:first-child {
+	order: 2;
+	display: inline-flex !important;
+	width: 16px;
+	height: 20px;
+	margin: 0 0 0 auto;
+	flex: 0 0 16px;
+	align-items: center;
+	justify-content: center;
+	font-size: 12px;
+	opacity: 0.72;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .progress-container > .codicon-error:first-child {
+	color: var(--vscode-errorForeground) !important;
+	opacity: 1;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-used-context-label .monaco-button {
+	display: flex;
+	box-sizing: border-box;
+	width: 100%;
+	height: 20px;
+	align-items: center;
+	padding: 0;
+	background: transparent;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-used-context-label .chat-collapsible-hover-chevron {
+	order: 2;
+	display: inline-flex;
+	width: 16px;
+	height: 20px;
+	margin-left: auto;
+	align-items: center;
+	justify-content: center;
+	font-size: 12px;
+	opacity: 0.7;
+}
+
+/* Expanded tool details use T3's quiet left rail and selectable 11px mono
+ * body. Native terminal/output widgets keep their existing behavior inside. */
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-used-context:not(.chat-used-context-collapsed) > .chat-used-context-list,
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .tool-input-output-part .input-output,
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-terminal-thinking-content {
+	box-sizing: border-box;
+	width: calc(100% - 26px);
+	max-height: 256px;
+	margin: 4px 0 2px 26px;
+	padding: 2px 0 2px 12px;
+	overflow: auto;
+	border: 0;
+	border-left: 1px solid color-mix(in srgb, var(--vscode-foreground) 16%, transparent);
+	border-radius: 0;
+	background: transparent;
+	font-family: var(--monaco-monospace-font);
+	font-size: 11px;
+	line-height: 1.5;
+}
+
+/* T3's subagent CTA is the one work item that keeps a quiet card surface. The
+ * native Backboard disclosure remains functional, and its agent + model stay
+ * visible without requiring a hover. */
+.monaco-workbench .backboard-clean-chat .chat-subagent-part {
+	margin: 4px -4px 8px;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-subagent-part > .chat-used-context-label .monaco-button.monaco-icon-button {
+	display: flex;
+	box-sizing: border-box;
+	width: 100%;
+	min-height: 34px;
+	align-items: center;
+	gap: 7px;
+	padding: 6px 10px;
+	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 13%, transparent);
+	border-radius: 8px;
+	background: color-mix(in srgb, var(--vscode-foreground) 4%, var(--vscode-editor-background));
+	box-shadow: 0 2px 8px color-mix(in srgb, #000 12%, transparent);
+	color: var(--vscode-foreground);
+	font-size: 13px;
+	line-height: 20px;
+	transition: background-color 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-subagent-part > .chat-used-context-label .monaco-button.monaco-icon-button:hover {
+	border-color: color-mix(in srgb, var(--vscode-foreground) 20%, transparent);
+	background: color-mix(in srgb, var(--vscode-foreground) 7%, var(--vscode-editor-background));
+	box-shadow: 0 3px 10px color-mix(in srgb, #000 15%, transparent);
+}
+
+.monaco-workbench .backboard-clean-chat .chat-subagent-part > .chat-used-context-label .monaco-button.monaco-icon-button > .codicon:first-child:not(.chat-collapsible-hover-chevron) {
+	display: inline-flex;
+	width: 14px;
+	height: 14px;
+	flex: 0 0 14px;
+	align-items: center;
+	justify-content: center;
+	font-size: 9px;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-subagent-part.chat-thinking-active > .chat-used-context-label .monaco-button.monaco-icon-button > .codicon-circle-filled:first-child {
+	color: var(--vscode-notificationsInfoIcon-foreground) !important;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-subagent-part:not(.chat-thinking-active) > .chat-used-context-label .monaco-button.monaco-icon-button > .codicon-check:first-child {
+	color: var(--vscode-testing-iconPassed) !important;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-subagent-part > .chat-used-context-label .monaco-button-label {
+	display: flex;
+	min-width: 0;
+	flex: 1;
+	align-items: baseline;
+	gap: 4px;
+	overflow: hidden;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-subagent-part .chat-thinking-title-shimmer,
+.monaco-workbench .backboard-clean-chat .chat-subagent-part .chat-subagent-lifecycle,
+.monaco-workbench .backboard-clean-chat .chat-subagent-part .chat-thinking-title-detail-text {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-subagent-part .chat-subagent-lifecycle {
+	font-weight: 500;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-subagent-part .chat-subagent-model {
+	margin-left: auto;
+	flex: 0 0 auto;
+	color: var(--vscode-descriptionForeground);
+	font-family: var(--monaco-monospace-font);
+	font-size: 11px;
+	font-weight: normal;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-subagent-part > .chat-used-context-list,
+.monaco-workbench .backboard-clean-chat .chat-subagent-part > .monaco-scrollable-element {
+	margin: 4px 6px 0;
+}
+
+/* Changed files use T3's compact tinted card, including a small elevation so
+ * the review artifact separates cleanly from assistant prose. */
+.monaco-workbench .backboard-clean-chat .checkpoint-file-changes-summary {
+	box-sizing: border-box;
+	width: 100%;
+	margin: 8px 0 10px;
+	align-items: stretch;
+	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 11%, transparent);
+	border-radius: 14px;
+	background: color-mix(in srgb, var(--vscode-foreground) 5%, var(--vscode-editor-background));
+	box-shadow: 0 5px 16px color-mix(in srgb, #000 12%, transparent);
+	overflow: hidden;
+}
+
+.monaco-workbench .backboard-clean-chat .checkpoint-file-changes-summary .checkpoint-file-changes-summary-header {
+	min-height: 34px;
+	align-items: center;
+	padding: 5px 8px;
+}
+
+.monaco-workbench .backboard-clean-chat .checkpoint-file-changes-summary .chat-file-changes-label .monaco-button {
+	min-height: 24px;
+	border-radius: 6px;
+	font-size: 12px;
+	font-weight: 500;
+}
+
+.monaco-workbench .backboard-clean-chat .checkpoint-file-changes-summary .chat-summary-list,
+.monaco-workbench .backboard-clean-chat .checkpoint-file-changes-summary .chat-summary-list .monaco-list-row {
+	border: 0;
+	background: transparent !important;
+}
+
+.monaco-workbench .backboard-clean-chat .checkpoint-file-changes-summary .chat-summary-list .monaco-list-row {
+	margin-inline: 6px;
+	border-radius: 6px;
 }
 
 .monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-item.markdown-content,
@@ -6097,5 +6445,923 @@ have to be updated for changes to the rules above, or to support more deeply nes
 
 	.monaco-workbench .backboard-clean-chat .chat-thinking-group-live .chat-tool-streaming-input code::after {
 		animation: none;
+	}
+}
+
+/* ---- T3 Code middle-panel source parity ---------------------------------
+ *
+ * These rules mirror the MIT-licensed T3 Code ChatView/MessagesTimeline
+ * geometry instead of adapting the stock VS Code chat card stack. The native
+ * Backboard parts keep their behavior, but their shell, row rhythm and footer
+ * placement follow T3's max-w-3xl timeline and composer exactly.
+ */
+
+.monaco-workbench .backboard-clean-chat {
+	--bb-t3-column: 768px;
+	--bb-t3-viewport-inset: clamp(12px, 2vw, 20px);
+	--bb-t3-border: color-mix(in srgb, var(--vscode-foreground) 13%, transparent);
+	--bb-t3-border-soft: color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
+	--bb-t3-secondary: color-mix(in srgb, var(--vscode-foreground) 5%, var(--vscode-editor-background));
+	--bb-t3-secondary-hover: color-mix(in srgb, var(--vscode-foreground) 8%, var(--vscode-editor-background));
+	--bb-t3-muted: var(--vscode-descriptionForeground);
+	--bb-t3-composer: var(--vscode-agentsChatInput-background, var(--vscode-editor-background));
+}
+
+/* T3 lets the viewport fill the whole middle panel and centers each timeline
+ * row independently. The stock 950px ChatWidget cap was the main reason the
+ * previous implementation still read like a VS Code side panel. */
+.monaco-workbench .backboard-clean-chat > .interactive-session,
+.monaco-workbench .backboard-clean-chat .interactive-session {
+	width: 100%;
+	max-width: none;
+	margin: 0;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-session .interactive-list {
+	min-height: 0;
+	flex: 1 1 auto;
+	background: transparent;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-session .interactive-item-container,
+.monaco-workbench .backboard-clean-chat .interactive-session > .chat-suggest-next-widget {
+	box-sizing: border-box;
+	width: min(calc(100% - (2 * var(--bb-t3-viewport-inset))), var(--bb-t3-column));
+	max-width: var(--bb-t3-column);
+	margin-inline: auto;
+	padding-inline: 0;
+	background: transparent;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-session .interactive-item-container {
+	padding-top: 0;
+	padding-bottom: 16px;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-list div[data-index='0'] .interactive-item-container.interactive-request {
+	padding-top: 16px;
+}
+
+/* UserTimelineRow: right-aligned 80% bubble, followed by an in-flow metadata
+ * footer. VS Code renders checkpoint actions before the message; flex order
+ * moves that exact control under the bubble where T3 renders timestamp/actions. */
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-request {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+	padding-bottom: 36px;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-request > .header,
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-request > .request-hover {
+	display: none;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-request > .value {
+	order: 1;
+	display: flex;
+	width: 100%;
+	align-items: flex-end !important;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-request > .value > .rendered-markdown {
+	box-sizing: border-box;
+	width: fit-content;
+	max-width: 80%;
+	margin: 0 0 0 auto;
+	padding: 12px;
+	border: 0;
+	border-radius: 16px;
+	background: var(--vscode-chat-requestBubbleBackground, var(--bb-t3-secondary)) !important;
+	box-shadow: 0 1px 2px rgb(0 0 0 / 12%);
+	color: var(--vscode-chat-requestBubbleForeground, var(--vscode-foreground));
+	font-size: 13px;
+	font-weight: 400;
+	line-height: 1.5;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-request > .checkpoint-container {
+	order: 2;
+	display: flex;
+	width: 80%;
+	min-height: 20px;
+	align-items: center;
+	justify-content: flex-end;
+	align-self: flex-end;
+	gap: 2px;
+	margin: 4px 4px 0 0;
+	opacity: 0;
+	transition: opacity 200ms ease;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-request:hover > .checkpoint-container,
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-request > .checkpoint-container:focus-within {
+	opacity: 1;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-request > .checkpoint-container > .checkpoint-line-left,
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-request > .checkpoint-container > .checkpoint-line-right {
+	display: none;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-request > .checkpoint-container .monaco-toolbar .action-label {
+	height: 20px;
+	margin: 0;
+	padding: 0 4px;
+	border: 0;
+	border-radius: 6px;
+	background: transparent;
+	font-size: 12px;
+	line-height: 20px;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-request > .chat-footer-toolbar,
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-request > .checkpoint-restore-container {
+	order: 3;
+}
+
+/* AssistantTimelineRow and turn spacing. Adjacent native markdown parts are
+ * separated so streamed commentary cannot collapse into a single paragraph. */
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-response {
+	padding-bottom: 16px;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-response > .value {
+	min-width: 0;
+	padding: 2px 4px;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-response > .value > .rendered-markdown:not(:last-child) {
+	margin-bottom: 10px;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-item-container .value,
+.monaco-workbench .backboard-clean-chat .interactive-item-container .value .rendered-markdown {
+	font-size: 13px;
+	line-height: 1.55;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-item-container .value > .rendered-markdown p {
+	margin: 0 0 10px;
+}
+
+/* TurnFoldTimelineRow: a quiet text disclosure. T3 has no full-width rule or
+ * VS Code card boundary between reasoning, work entries, and prose. */
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-response .chat-thinking-box {
+	box-sizing: border-box;
+	width: 100%;
+	margin: 0 0 8px;
+	padding: 2px 4px;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+}
+
+/* T3 has one turn-level fold, not one VS Code thinking disclosure per chunk.
+ * ChatListRenderer keeps every native part mounted inside this body and leaves
+ * the final assistant markdown immediately after it. */
+.monaco-workbench .backboard-clean-chat .chat-t3-turn-work {
+	display: flex;
+	min-width: 0;
+	flex-direction: column;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-t3-turn-work:not(.chat-t3-turn-work-active) {
+	margin: 0 0 16px;
+	padding: 4px 0 8px;
+	border-bottom: 1px solid color-mix(in srgb, var(--vscode-foreground) 12%, transparent);
+}
+
+.monaco-workbench .backboard-clean-chat .chat-t3-turn-fold {
+	display: flex;
+	width: fit-content;
+	min-height: 20px;
+	align-items: center;
+	gap: 4px;
+	margin: 0;
+	padding: 0 4px;
+	border: 0;
+	border-radius: 6px;
+	background: transparent;
+	color: var(--bb-t3-muted);
+	cursor: pointer;
+	font: inherit;
+	font-size: 12px;
+	font-variant-numeric: tabular-nums;
+	line-height: 20px;
+	transition: color 150ms ease;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-t3-turn-fold:hover {
+	background: transparent;
+	color: var(--vscode-foreground);
+}
+
+.monaco-workbench .backboard-clean-chat .chat-t3-turn-fold:focus-visible {
+	outline: 1px solid color-mix(in srgb, var(--vscode-focusBorder) 75%, transparent);
+	outline-offset: 1px;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-active > .chat-t3-turn-fold {
+	display: none;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-t3-turn-fold-chevron {
+	display: inline-block;
+	box-sizing: border-box;
+	width: 7px;
+	height: 7px;
+	border-right: 1.4px solid currentColor;
+	border-bottom: 1.4px solid currentColor;
+	transform: rotate(-45deg);
+	transition: transform 200ms ease;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-expanded > .chat-t3-turn-fold .chat-t3-turn-fold-chevron {
+	transform: translateY(-1px) rotate(45deg);
+}
+
+.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body {
+	display: flex;
+	min-width: 0;
+	flex-direction: column;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-t3-turn-work:not(.chat-t3-turn-work-active).chat-t3-turn-work-expanded > .chat-t3-turn-work-body {
+	margin-top: 8px;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body[hidden] {
+	display: none !important;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .rendered-markdown {
+	margin: 0 4px 8px;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body .chat-thinking-box {
+	margin: 0 0 8px;
+	padding: 0 4px;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body .chat-thinking-box > .chat-used-context-label,
+.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body .chat-thinking-spinner-item {
+	display: none !important;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body .chat-thinking-box > .chat-used-context-list.chat-thinking-collapsible,
+.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body .chat-thinking-box > .monaco-scrollable-element,
+.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body .chat-thinking-box > .monaco-scrollable-element > .monaco-scrollable-element,
+.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body .chat-thinking-box > .monaco-scrollable-element .chat-used-context-list.chat-thinking-collapsible {
+	display: block !important;
+	height: auto !important;
+	max-height: none !important;
+	overflow: visible !important;
+	opacity: 1 !important;
+}
+
+/* WorkingTimelineRow: one response-level ticker with T3's three pulsing dots. */
+.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-t3-working-row {
+	display: flex;
+	min-height: 20px;
+	align-items: center;
+	gap: 8px;
+	margin: 0 0 8px 6px;
+	padding: 2px 0 0;
+	color: var(--bb-t3-muted);
+	font-size: 11px;
+	font-variant-numeric: tabular-nums;
+	line-height: 20px;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-t3-working-row .chat-t3-working-dots {
+	display: inline-flex;
+	align-items: center;
+	gap: 3px;
+	margin: 0;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-t3-working-row .chat-t3-working-dots > span {
+	width: 4px;
+	height: 4px;
+	border-radius: 999px;
+	background: color-mix(in srgb, var(--vscode-descriptionForeground) 42%, transparent);
+	animation: backboard-t3-working-dot 1.4s ease-in-out infinite;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-t3-working-row .chat-t3-working-dots > span:nth-child(2) {
+	animation-delay: 200ms;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-t3-working-row .chat-t3-working-dots > span:nth-child(3) {
+	animation-delay: 400ms;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-t3-working-row .chat-working-progress-step {
+	display: flex;
+	gap: 3px;
+	color: var(--bb-t3-muted);
+}
+
+.monaco-workbench .backboard-clean-chat .chat-t3-working-row .chat-working-progress-step > :is(p, span) {
+	color: inherit;
+	font-size: 11px;
+}
+
+@keyframes backboard-t3-working-dot {
+	0%, 100% { opacity: 0.35; }
+	50% { opacity: 1; }
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button {
+	display: inline-flex;
+	width: auto;
+	min-height: 20px;
+	align-items: center;
+	gap: 4px;
+	padding: 0 4px;
+	border: 0;
+	border-radius: 6px;
+	background: transparent;
+	color: var(--bb-t3-muted);
+	font-size: 12px;
+	font-weight: 400;
+	line-height: 20px;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button:hover {
+	color: var(--vscode-foreground);
+	background: transparent;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box > .chat-used-context-label .chat-collapsible-hover-chevron {
+	font-size: 14px;
+	opacity: 0.8;
+}
+
+/* WorkGroupSection: T3's compact 12px / 20px rows. */
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group {
+	margin-inline: -4px;
+	padding-inline: 4px;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group > .chat-thinking-group-header,
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-tool-wrapper {
+	min-height: 24px;
+	gap: 6px;
+	padding: 2px;
+	border-radius: 6px;
+	font-size: 12px;
+	line-height: 20px;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group > .chat-thinking-group-header:hover,
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-tool-wrapper:hover {
+	background: color-mix(in srgb, var(--vscode-foreground) 6%, transparent);
+}
+
+/* PlainWorkEntryRow: keep VS Code's native tool renderer mounted, but give the
+ * timeline T3's icon / title / disclosure / status row. Native output appears
+ * only beneath the one row the user explicitly opens. */
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-tool-wrapper {
+	display: flex;
+	width: 100%;
+	flex-direction: column;
+	align-items: stretch;
+	gap: 0;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-tool-wrapper:not(.chat-thinking-work-row-expandable):hover {
+	background: transparent;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-work-row-expandable {
+	cursor: pointer;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-work-row-expandable:focus-visible {
+	outline: 0;
+	background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-work-row-summary {
+	display: flex;
+	width: 100%;
+	min-width: 0;
+	min-height: 20px;
+	align-items: center;
+	gap: 6px;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-work-row-summary > .chat-thinking-icon {
+	position: static;
+	display: inline-flex !important;
+	width: 20px;
+	height: 20px;
+	margin: 0;
+	flex: 0 0 20px;
+	align-items: center;
+	justify-content: center;
+	color: var(--vscode-descriptionForeground);
+	font-size: 14px;
+	line-height: 20px;
+	opacity: 0.8;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-work-row-icon {
+	position: static;
+	display: inline-flex;
+	width: 20px;
+	height: 20px;
+	margin: 0;
+	flex: 0 0 20px;
+	align-items: center;
+	justify-content: center;
+	color: var(--vscode-descriptionForeground);
+	opacity: 0.8;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-work-row-svg {
+	display: block;
+	width: 14px;
+	height: 14px;
+	flex: 0 0 14px;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-work-row-label {
+	display: flex;
+	min-width: 0;
+	flex: 1 1 auto;
+	align-items: baseline;
+	gap: 6px;
+	font-size: 12px;
+	line-height: 20px;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-work-row-heading,
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-work-row-preview {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-work-row-heading {
+	flex: 0 1 auto;
+	color: var(--vscode-foreground);
+	font-weight: 500;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-work-row-preview {
+	flex: 1 1 auto;
+	color: var(--bb-t3-muted);
+	font-weight: 400;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-work-row-disclosure,
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-work-row-status {
+	display: inline-flex !important;
+	width: 16px;
+	height: 20px;
+	flex: 0 0 16px;
+	align-items: center;
+	justify-content: center;
+	color: var(--vscode-descriptionForeground);
+	font-size: 12px;
+	line-height: 20px;
+	opacity: 0.72;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-work-row-disclosure:not(.codicon) {
+	visibility: visible;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-work-row-disclosure:empty {
+	visibility: hidden;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-work-row-disclosure .chat-thinking-work-row-svg {
+	width: 12px;
+	height: 12px;
+	transition: transform 200ms ease;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-work-row-expanded .chat-thinking-work-row-disclosure .chat-thinking-work-row-svg {
+	transform: rotate(180deg);
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-work-row-status-cancelled {
+	color: var(--vscode-errorForeground);
+	opacity: 1;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-work-row-status-working {
+	animation: backboard-work-status-pulse 1.4s ease-in-out infinite;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-work-row-status .chat-thinking-work-row-svg {
+	width: 12px;
+	height: 12px;
+}
+
+@keyframes backboard-work-status-pulse {
+	0%, 100% { opacity: 0.34; }
+	50% { opacity: 0.9; }
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-work-native-content {
+	display: none !important;
+	box-sizing: border-box;
+	width: calc(100% - 26px);
+	max-height: 256px;
+	margin: 2px 0 2px 26px;
+	padding: 1px 0 1px 12px;
+	overflow: auto;
+	border: 0;
+	border-left: 1px solid color-mix(in srgb, var(--vscode-foreground) 16%, transparent);
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+	font-family: var(--monaco-monospace-font);
+	font-size: 11px;
+	line-height: 1.5;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-work-row-expanded > .chat-thinking-work-native-content {
+	display: none !important;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-work-row-details {
+	display: none;
+	box-sizing: border-box;
+	width: calc(100% - 28px);
+	max-height: 256px;
+	margin: 4px 0 2px 28px;
+	padding: 2px 0 2px 12px;
+	overflow: auto;
+	border-left: 1px solid color-mix(in srgb, var(--vscode-foreground) 16%, transparent);
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-work-row-expanded > .chat-thinking-work-row-details {
+	display: block;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-work-row-details-content {
+	margin: 0;
+	padding: 0;
+	overflow: visible;
+	border: 0;
+	background: transparent;
+	color: var(--bb-t3-muted);
+	font-family: var(--monaco-monospace-font);
+	font-size: 11px;
+	font-weight: 400;
+	line-height: 1.5;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-work-group .chat-thinking-group-chevron-t3 {
+	display: inline-flex;
+	width: 20px;
+	height: 20px;
+	flex: 0 0 20px;
+	align-items: center;
+	justify-content: center;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-work-group .chat-thinking-group-chevron-t3 .chat-thinking-work-row-svg {
+	width: 14px;
+	height: 14px;
+	transition: transform 200ms ease;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-work-group .chat-thinking-group-chevron-t3.chat-thinking-group-chevron-expanded .chat-thinking-work-row-svg {
+	transform: rotate(180deg);
+}
+
+/* ChatMarkdown source parity. T3's assistant prose is plain document text,
+ * with 0.65rem block rhythm and no VS Code response/card chrome. */
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-response > .value > .rendered-markdown {
+	min-width: 0;
+	overflow-wrap: anywhere;
+	word-break: break-word;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-response > .value > .rendered-markdown > :first-child {
+	margin-top: 0;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-response > .value > .rendered-markdown > :last-child {
+	margin-bottom: 0;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-response > .value > .rendered-markdown :is(p, ul, ol, blockquote, pre, table) {
+	margin-block: 0.65rem;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-response > .value > .rendered-markdown :is(h1, h2, h3, h4, h5, h6) {
+	margin: 1.25rem 0 0.5rem;
+	color: var(--vscode-foreground);
+	font-weight: 600;
+	line-height: 1.3;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-response > .value > .rendered-markdown h1 { font-size: 1.25rem; }
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-response > .value > .rendered-markdown h2 { font-size: 1.125rem; }
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-response > .value > .rendered-markdown h3 { font-size: 1rem; }
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-response > .value > .rendered-markdown :is(h4, h5, h6) { font-size: 0.875rem; }
+
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-response > .value > .rendered-markdown :is(ul, ol) {
+	padding-left: 1.25rem;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-response > .value > .rendered-markdown li + li {
+	margin-top: 0.25rem;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-response > .value > .rendered-markdown blockquote {
+	padding-left: 0.8rem;
+	border-left: 2px solid var(--bb-t3-border);
+	color: var(--bb-t3-muted);
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-response > .value > .rendered-markdown :not(pre) > code {
+	padding: 0.1rem 0.35rem;
+	border: 1px solid var(--bb-t3-border);
+	border-radius: 6px;
+	background: var(--bb-t3-secondary);
+	color: var(--vscode-foreground);
+	font-size: 0.75rem;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-response > .value > .rendered-markdown pre {
+	max-width: 100%;
+	padding: 0.8rem 0.9rem;
+	overflow-x: auto;
+	border: 1px solid var(--bb-t3-border);
+	border-radius: 12px;
+	background: var(--bb-t3-secondary);
+}
+
+/* Web-search/preview output is a T3 work entry, not a VS Code preview card. */
+.monaco-workbench .backboard-clean-chat .chat-web-preview-part {
+	display: flex;
+	width: 100%;
+	max-width: none;
+	min-height: 24px;
+	margin: 2px 4px 8px;
+	overflow: visible;
+	border: 0;
+	border-radius: 6px;
+	background: transparent;
+	box-shadow: none;
+	font-size: 12px;
+	line-height: 20px;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-web-preview-part:hover {
+	background: color-mix(in srgb, var(--vscode-foreground) 6%, transparent);
+}
+
+.monaco-workbench .backboard-clean-chat .chat-web-preview-part .chat-web-preview-thumbnail {
+	display: none;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-web-preview-part .chat-web-preview-footer {
+	display: flex;
+	width: 100%;
+	min-width: 0;
+	align-items: center;
+	gap: 6px;
+	padding: 2px;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-web-preview-part .chat-web-preview-info,
+.monaco-workbench .backboard-clean-chat .chat-web-preview-part .chat-web-preview-title-row {
+	display: flex;
+	min-width: 0;
+	flex: 1 1 auto;
+	flex-direction: row;
+	align-items: baseline;
+	gap: 6px;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-web-preview-part .chat-web-preview-favicon,
+.monaco-workbench .backboard-clean-chat .chat-web-preview-part .chat-web-preview-favicon-fallback {
+	display: none !important;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-web-preview-part .chat-web-preview-title-row::before {
+	box-sizing: border-box;
+	width: 14px;
+	height: 14px;
+	margin: 3px 3px 0;
+	flex: 0 0 14px;
+	border: 1.5px solid var(--bb-t3-muted);
+	border-radius: 50%;
+	background:
+		linear-gradient(transparent 44%, var(--bb-t3-muted) 45%, var(--bb-t3-muted) 55%, transparent 56%),
+		linear-gradient(90deg, transparent 44%, var(--bb-t3-muted) 45%, var(--bb-t3-muted) 55%, transparent 56%);
+	content: '';
+	opacity: 0.8;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-web-preview-part .chat-web-preview-t3-heading {
+	display: inline;
+	min-width: 0;
+	flex: 0 1 auto;
+	overflow: hidden;
+	color: var(--vscode-foreground);
+	font-weight: 500;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-web-preview-part .chat-web-preview-title {
+	display: none;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-web-preview-part .chat-web-preview-subtitle {
+	min-width: 0;
+	flex: 1 1 auto;
+	overflow: hidden;
+	color: var(--bb-t3-muted);
+	font-size: 12px;
+	font-style: normal;
+	font-weight: 400;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-web-preview-part .chat-web-preview-actions {
+	margin-left: auto;
+	opacity: 0;
+	transition: opacity 160ms ease;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-web-preview-part:hover .chat-web-preview-actions,
+.monaco-workbench .backboard-clean-chat .chat-web-preview-part:focus-within .chat-web-preview-actions {
+	opacity: 1;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-web-preview-part .chat-web-preview-actions .monaco-button,
+.monaco-workbench .backboard-clean-chat .chat-web-preview-part .chat-web-preview-more {
+	height: 20px;
+	min-height: 20px;
+	padding: 0 6px;
+	border: 0;
+	border-radius: 6px;
+	background: transparent;
+	box-shadow: none;
+	font-size: 11px;
+	line-height: 20px;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-work-native-content > .progress-container,
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-work-native-content.chat-used-context > .chat-used-context-label {
+	display: none;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-work-row-expanded .chat-thinking-work-native-content .chat-used-context-list {
+	display: block !important;
+	max-height: none;
+	margin: 0;
+	padding: 0;
+	overflow: visible;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-work-native-content .tool-input-output-part .input-output,
+.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-work-native-content .chat-terminal-thinking-content {
+	width: 100%;
+	max-height: none;
+	margin: 0;
+	padding: 0;
+	border: 0;
+}
+
+/* ChangedFilesTree: T3's mt-4 rounded-2xl border/secondary/p-2 card. */
+.monaco-workbench .backboard-clean-chat .checkpoint-file-changes-summary {
+	box-sizing: border-box;
+	width: 100%;
+	margin: 16px 0 0;
+	padding: 8px;
+	overflow: hidden;
+	border: 1px solid var(--bb-t3-border);
+	border-radius: 16px;
+	background: var(--bb-t3-secondary);
+	box-shadow: 0 8px 24px -18px rgb(0 0 0 / 42%);
+}
+
+.monaco-workbench .backboard-clean-chat .checkpoint-file-changes-summary .checkpoint-file-changes-summary-header {
+	min-height: 32px;
+	padding: 0 4px;
+	border-radius: 12px;
+}
+
+.monaco-workbench .backboard-clean-chat .checkpoint-file-changes-summary .chat-file-changes-label .monaco-button {
+	min-height: 28px;
+	padding: 6px 4px;
+	border-radius: 8px;
+	font-size: 12px;
+	font-weight: 500;
+}
+
+.monaco-workbench .backboard-clean-chat .checkpoint-file-changes-summary .chat-summary-list .monaco-list-row {
+	margin-inline: 0;
+	border-radius: 8px;
+	background: transparent !important;
+}
+
+.monaco-workbench .backboard-clean-chat .checkpoint-file-changes-summary .chat-summary-list .monaco-list-row:hover {
+	background: var(--bb-t3-secondary-hover) !important;
+}
+
+/* T3's composer overlay is max-w-3xl, 22px radius, and visibly taller than a
+ * one-line VS Code reply box. The agent/model identity remains in Backboard's
+ * floating pill immediately above it. */
+.monaco-workbench .backboard-clean-chat .interactive-session .interactive-input-part,
+.monaco-workbench .backboard-clean-chat.backboard-composer .interactive-session .interactive-input-part {
+	position: relative;
+	display: block;
+	box-sizing: border-box;
+	width: min(calc(100% - (2 * var(--bb-t3-viewport-inset))), var(--bb-t3-column));
+	max-width: var(--bb-t3-column);
+	margin: 0 auto;
+	padding: 0 0 10px;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-session .chat-input-container,
+.monaco-workbench .backboard-clean-chat.backboard-composer .interactive-session .chat-input-container {
+	position: relative;
+	z-index: 2;
+	display: flex;
+	min-height: 138px;
+	flex-direction: column;
+	justify-content: space-between;
+	gap: 10px;
+	padding: 16px 16px 12px;
+	overflow: hidden;
+	border: 1px solid var(--bb-t3-border) !important;
+	border-radius: 22px;
+	background: var(--bb-t3-composer);
+	box-shadow:
+		0 12px 28px -18px rgb(0 0 0 / 40%),
+		0 2px 7px -5px rgb(0 0 0 / 24%);
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-session .chat-input-container.focused,
+.monaco-workbench .backboard-clean-chat .interactive-session .chat-input-container:focus-within {
+	border-color: color-mix(in srgb, var(--vscode-focusBorder) 55%, var(--bb-t3-border)) !important;
+	box-shadow:
+		0 0 0 2px color-mix(in srgb, var(--vscode-focusBorder) 14%, transparent),
+		0 12px 28px -18px rgb(0 0 0 / 40%),
+		0 2px 7px -5px rgb(0 0 0 / 24%);
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-session .chat-input-container > .chat-editor-container {
+	min-height: 62px;
+	padding: 0;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor,
+.monaco-workbench .backboard-clean-chat .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background,
+.monaco-workbench .backboard-clean-chat .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .margin {
+	background-color: var(--bb-t3-composer) !important;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-session .chat-input-toolbars {
+	min-height: 32px;
+	margin-top: auto;
+	padding: 0;
+}
+
+.monaco-workbench .backboard-clean-chat.backboard-composer .interactive-session.chat-composer-empty .interactive-input-part,
+.monaco-workbench .backboard-clean-chat.backboard-composer .interactive-session.chat-composer-empty .interactive-input-part .chat-input-container {
+	width: min(calc(100% - (2 * var(--bb-t3-viewport-inset))), var(--bb-t3-column));
+	max-width: var(--bb-t3-column);
+}
+
+.monaco-workbench .backboard-clean-chat.backboard-composer .interactive-session.chat-composer-empty .interactive-input-part {
+	padding: 0 0 10px;
+}
+
+.monaco-workbench .backboard-clean-chat.backboard-composer .interactive-session.chat-composer-empty .interactive-input-part .chat-input-container {
+	width: 100%;
+	min-height: 138px;
+	padding: 16px 16px 12px;
+	border-radius: 22px;
+}
+
+@media (max-width: 640px) {
+	.monaco-workbench .backboard-clean-chat {
+		--bb-t3-viewport-inset: 12px;
+	}
+
+	.monaco-workbench .backboard-clean-chat .interactive-session .chat-input-container,
+	.monaco-workbench .backboard-clean-chat.backboard-composer .interactive-session .chat-input-container {
+		min-height: 112px;
+		padding: 12px;
 	}
 }

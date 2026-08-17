@@ -435,24 +435,53 @@
 	align-self: center;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-card .session-simple-agent-icon {
-	grid-column: 3;
-	grid-row: 3;
-	align-self: center;
-	justify-self: end;
-	color: var(--sessions-row-icon-fg);
-	font-size: 13px;
-	opacity: 0.62;
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .session-simple-provider {
+	display: none;
+	min-width: 0;
+	flex: 0 0 auto;
+	align-items: center;
+	gap: 4px;
+	color: var(--sessions-row-muted-fg);
+	font-size: 10px;
+	font-weight: 500;
+	line-height: 16px;
+	white-space: nowrap;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-card .session-simple-agent-icon.no-icon,
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .session-item:not(.simple-session-card) .session-simple-agent-icon,
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .monaco-list-row:hover .simple-session-card .session-simple-agent-icon,
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .monaco-list-row.focused .simple-session-card .session-simple-agent-icon {
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .session-simple-provider.hidden {
+	display: none !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .session-simple-agent-icon {
+	flex: 0 0 auto;
+	font-size: 11px;
+	opacity: 0.8;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .session-simple-agent-label {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-card .session-simple-provider {
+	grid-column: 3;
+	grid-row: 3;
+	display: flex;
+	align-self: center;
+	justify-self: end;
+	max-width: 92px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .monaco-list-row:hover .session-simple-provider,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .monaco-list-row.focused:not(.selected) .session-simple-provider {
 	display: none;
 }
 
-/* The funnel swaps active threads back to the original one-line density. */
+/* The funnel restores the original folder-grouped sidebar. Rows keep the old
+ * one-line density and align their titles under the folder label; the hidden
+ * per-row folder glyph deliberately keeps its layout width so the hierarchy
+ * reads like the legacy view without repeating the same icon on every thread. */
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-list-control .monaco-list-row:has(.simple-session-compact) {
 	margin: 0;
 	width: 100%;
@@ -473,16 +502,35 @@
 
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-compact .session-provider-icon {
 	font-size: 13px;
-	opacity: 0.72;
+	visibility: hidden;
 }
 
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-compact .session-title {
-	font-size: 13px;
+	font-size: 14px;
 	font-weight: 400;
 }
 
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-compact .session-details-row {
-	max-width: 46%;
+	display: none;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-compact .session-simple-provider {
+	display: flex;
+	max-width: 88px;
+	margin-left: auto;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-folder-view .session-section {
+	font-size: 13px;
+	font-weight: 500;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-folder-view .session-section-empty {
+	opacity: 0.48;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-folder-view .session-section-empty .session-section-toolbar {
+	display: none;
 }
 
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-compact .session-details-row :is(.session-diff, .session-description),
@@ -532,6 +580,12 @@
 
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-slim .session-details-row {
 	max-width: 40%;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-slim .session-simple-provider {
+	display: flex;
+	max-width: 88px;
+	margin-left: auto;
 }
 
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-slim .session-details-row :is(.session-diff, .session-description),

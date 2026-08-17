@@ -4,8 +4,11 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { CancellationTokenSource } from '../../../../base/common/cancellation.js';
+import { $, append } from '../../../../base/browser/dom.js';
 import { MutableDisposable } from '../../../../base/common/lifecycle.js';
+import { autorun } from '../../../../base/common/observable.js';
 import { URI } from '../../../../base/common/uri.js';
+import { localize } from '../../../../nls.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
@@ -20,11 +23,45 @@ import { IChatSessionsService, localChatSessionType } from '../../../../workbenc
 import { AbstractChatView, ChatViewKind, IChatViewOptions } from '../../../browser/parts/chatView.js';
 import { IChat } from '../../../services/sessions/common/session.js';
 import { IChatViewFactory } from '../../../services/chatView/browser/chatViewFactory.js';
+import { ISessionContext } from '../../../services/sessions/browser/sessionContext.js';
+import { ISessionsProvidersService } from '../../../services/sessions/browser/sessionsProvidersService.js';
 import { NewChatWidget } from './newChatWidget.js';
 import { NewChatInSessionWidget } from './newChatInSessionWidget.js';
 import { AGENT_SESSIONS_SCOPED_INPUT_HISTORY_SETTING } from './sessionsChatHistory.js';
 import { activeSessionViewBackground, activeSessionViewForeground, agentsPanelBackground, inactiveSessionViewBackground, inactiveSessionViewForeground } from '../../../common/theme.js';
 import { isEqual } from '../../../../base/common/resources.js';
+
+function formatAgentLabel(sessionType: string): string {
+	return sessionType
+		.split(/[-_\s]+/)
+		.filter(Boolean)
+		.map(part => part.toLowerCase() === 'codex' ? 'Codex' : part.charAt(0).toUpperCase() + part.slice(1))
+		.join(' ');
+}
+
+function formatModelLabel(modelId: string): string {
+	const slug = modelId.split('/').pop() ?? modelId;
+	const claude = /^claude-(opus|sonnet|haiku)-(.+)$/i.exec(slug);
+	if (claude) {
+		return `Claude ${claude[1].charAt(0).toUpperCase()}${claude[1].slice(1).toLowerCase()} ${claude[2].replace(/-/g, '.')}`;
+	}
+	const gpt = /^gpt-([\d.]+)(?:-(.+))?$/i.exec(slug);
+	if (gpt) {
+		const suffix = gpt[2]
+			? `-${gpt[2].split('-').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join('-')}`
+			: '';
+		return `GPT-${gpt[1]}${suffix}`;
+	}
+	const deepSeek = /^deepseek-(.+)$/i.exec(slug);
+	if (deepSeek) {
+		return `DeepSeek ${deepSeek[1].split('-').map(part => /^v?\d/i.test(part) ? part.toUpperCase() : part.charAt(0).toUpperCase() + part.slice(1)).join(' ')}`;
+	}
+	return slug
+		.split(/[-_]+/)
+		.filter(Boolean)
+		.map(part => /^\d/.test(part) ? part : part.charAt(0).toUpperCase() + part.slice(1))
+		.join(' ');
+}
 
 /**
  * A session view that hosts a {@link NewChatWidget} — the "new session" UI
@@ -108,6 +145,9 @@ export class ChatView extends AbstractChatView {
 	override readonly kind: ChatViewKind = 'chat';
 
 	private readonly _widget: ChatWidget;
+	private readonly _identityElement: HTMLElement;
+	private readonly _identityAgentElement: HTMLElement;
+	private readonly _identityModelElement: HTMLElement;
 
 	/** Reference to the loaded chat model; disposing releases the model. */
 	private readonly _modelRef = this._register(new MutableDisposable<IChatModelReference>());
@@ -128,7 +168,9 @@ export class ChatView extends AbstractChatView {
 		@IChatService private readonly chatService: IChatService,
 		@IChatSessionsService private readonly chatSessionsService: IChatSessionsService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
-		@ILogService private readonly logService: ILogService
+		@ILogService private readonly logService: ILogService,
+		@ISessionContext private readonly sessionContext: ISessionContext,
+		@ISessionsProvidersService private readonly sessionsProvidersService: ISessionsProvidersService,
 	) {
 		super();
 
@@ -161,6 +203,48 @@ export class ChatView extends AbstractChatView {
 		));
 		this._widget.render(this.element);
 		this._widget.setVisible(true);
+
+		this._identityElement = $('.session-chat-identity');
+		this._identityElement.setAttribute('role', 'status');
+		this._identityElement.setAttribute('aria-live', 'polite');
+		this._identityAgentElement = append(this._identityElement, $('span.session-chat-identity-agent'));
+		append(this._identityElement, $('span.session-chat-identity-separator', undefined, '·'));
+		this._identityModelElement = append(this._identityElement, $('span.session-chat-identity-model'));
+		this._widget.inputPart.element.prepend(this._identityElement);
+
+		this._register(autorun(reader => {
+			const session = this.sessionContext.session.read(reader);
+			if (!session) {
+				this._identityElement.hidden = true;
+				return;
+			}
+
+			const provider = this.sessionsProvidersService.getProvider(session.providerId);
+			const sessionType = provider?.sessionTypes.find(type => type.id === session.sessionType);
+			const agentLabel = sessionType?.label ?? formatAgentLabel(session.sessionType);
+
+			const chatModelId = session.activeChat.read(reader).modelId.read(reader);
+			const sessionModelId = session.modelId.read(reader);
+			const selectedModel = this._widget.inputPart.selectedLanguageModel.read(reader);
+			const modelId = chatModelId ?? sessionModelId ?? selectedModel?.identifier;
+			const model = modelId
+				? provider?.getModels(session.sessionId).find(candidate => candidate.identifier === modelId)
+					?? (selectedModel?.identifier === modelId ? selectedModel : undefined)
+				: selectedModel;
+			const metadataName = model?.metadata.name;
+			const metadataLooksLikeIdentifier = !!metadataName && (metadataName.includes('/') || (!metadataName.includes(' ') && metadataName === metadataName.toLowerCase() && /[-_]/.test(metadataName)));
+			const modelLabel = metadataName && !metadataLooksLikeIdentifier
+				? metadataName
+				: modelId
+					? formatModelLabel(modelId)
+					: localize('sessionChatIdentity.autoModel', "Auto");
+
+			this._identityAgentElement.textContent = agentLabel;
+			this._identityModelElement.textContent = modelLabel;
+			this._identityElement.title = localize('sessionChatIdentity.tooltip', "This chat uses {0} with {1}", agentLabel, modelLabel);
+			this._identityElement.setAttribute('aria-label', this._identityElement.title);
+			this._identityElement.hidden = false;
+		}));
 
 		this._register(this.configurationService.onDidChangeConfiguration(e => {
 			if (e.affectsConfiguration(AGENT_SESSIONS_SCOPED_INPUT_HISTORY_SETTING)) {
