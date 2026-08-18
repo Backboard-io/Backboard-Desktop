@@ -46,6 +46,7 @@ export interface AgentLoopDeps {
 	thinkingResolver?: RuntimeThinkingResolver;
 	requestKind?: ThinkingRequestKind;
 	finalVerificationNudge?: boolean;
+	todoReconciliation?: boolean;
 	turnId?: string;
 	turnStartedAt?: number;
 	turnAlreadyStarted?: boolean;
@@ -93,6 +94,16 @@ export class AgentLoop {
 		});
 		this.executedToolRounds = 0;
 
+		const notificationDefinitions = [
+			// Resolve the plan first: loop the todo reminder until the agent has
+			// closed every todo, then let verification review the finished work and
+			// produce the shown summary. Studio disables both hidden follow-up passes
+			// so the answer the user watches stream is always the final answer.
+			...(this.deps.todoReconciliation === false
+				? []
+				: [todoReconciliationNotification()]),
+			finalVerificationNotification(this.deps.finalVerificationNudge ?? false),
+		];
 		const notifications = new SystemNotificationRunner(
 			{
 				client: this.deps.client,
@@ -109,15 +120,7 @@ export class AgentLoop {
 				workspaceId: this.deps.workspaceId,
 				requestKind: this.deps.requestKind ?? "user",
 			},
-			[
-				// Resolve the plan first: loop the todo reminder until the agent
-				// has closed every todo, then let verification review the finished
-				// work and produce the shown summary.
-				todoReconciliationNotification(),
-				finalVerificationNotification(
-					this.deps.finalVerificationNudge ?? false,
-				),
-			],
+			notificationDefinitions,
 		);
 
 		// Until the notification passes start, a final (no-tool-call) answer that

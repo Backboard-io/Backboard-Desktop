@@ -197,7 +197,11 @@ function controllerWith(
 	client: FakeClient,
 	tool: TestTool | TestTool[],
 	argv: string[] = [],
-	options: { onThreadReplaced?: (threadId: string | null) => void } = {},
+	options: {
+		onThreadReplaced?: (threadId: string | null) => void;
+		finalVerificationNudge?: boolean;
+		todoReconciliation?: boolean;
+	} = {},
 ): { ctrl: AgentController; events: AgentEvent[]; session: Session } {
 	const config = new Config({ env, argv });
 	const bus = new EventBus();
@@ -216,6 +220,12 @@ function controllerWith(
 		permissions: TEST_PERMISSIONS,
 		...(options.onThreadReplaced
 			? { onThreadReplaced: options.onThreadReplaced }
+			: {}),
+		...(options.finalVerificationNudge !== undefined
+			? { finalVerificationNudge: options.finalVerificationNudge }
+			: {}),
+		...(options.todoReconciliation !== undefined
+			? { todoReconciliation: options.todoReconciliation }
 			: {}),
 	});
 	return { ctrl, events, session };
@@ -238,8 +248,17 @@ describe("AgentController loop (mocked Backboard)", () => {
 		);
 
 		const promise = ctrl.submit("do it");
-		expect(events.map((e) => e.type)).toEqual(["turn:start", "user:message"]);
+		expect(events.map((e) => e.type)).toEqual([
+			"turn:start",
+			"turn:status",
+			"user:message",
+		]);
 		await promise;
+		expect(
+			events
+				.filter((event) => event.type === "turn:status")
+				.map((event) => event.phase),
+		).toEqual(["preparing", "generating"]);
 	});
 
 	it("runs a full tool round-trip to completion", async () => {
@@ -428,7 +447,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 		expect(client.toolOutputRequests).toHaveLength(1);
 	});
 
-	it("does not send the final verification nudge when disabled", async () => {
+	it("lets the host disable final verification even when config enables it", async () => {
 		class NoNudgeClient extends FakeClient {
 			constructor() {
 				super(
@@ -445,7 +464,14 @@ describe("AgentController loop (mocked Backboard)", () => {
 				yield {
 					kind: "requires_action",
 					runId: "run_1",
-					calls: [{ id: "c1", name: "Echo", input: {} }],
+					calls: Array.from(
+						{ length: FINAL_VERIFICATION_MIN_TOOL_CALLS },
+						(_, index) => ({
+							id: `c${index + 1}`,
+							name: "Echo",
+							input: {},
+						}),
+					),
 				};
 			}
 		}
@@ -453,7 +479,8 @@ describe("AgentController loop (mocked Backboard)", () => {
 		const { ctrl } = controllerWith(
 			client,
 			new TestTool({ name: "Echo", readOnly: true }),
-			["--no-final-verification"],
+			["--final-verification"],
+			{ finalVerificationNudge: false },
 		);
 
 		const status = await ctrl.submit("do it");
@@ -814,7 +841,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 		expect(req.memory).toBe("Auto");
 		expect(req.memory_profile).toBe("code");
 		expect(req.thinking).toEqual({ effort: "high" });
-		expect(req.system_prompt).toContain("You are R-CLI");
+		expect(req.system_prompt).toContain("You are Backboard");
 		expect(req.system_prompt).not.toContain("Model profile:");
 		expect(req.tools?.map((tool) => tool.function.name)).toEqual(["Visible"]);
 	});

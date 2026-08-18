@@ -281,6 +281,7 @@ for arch in "${ARCHES[@]}"; do
   "${REPO_ROOT}/scripts/validate_macos_release.sh" \
     --version "${VERSION}" \
     --arch "${arch}" \
+    --channel "${CHANNEL}" \
     --dmg "${dmg_path}"
   echo
 

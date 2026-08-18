@@ -23,6 +23,7 @@ WATCH_LOG="$STATE_DIR/watch.log"
 APP_LOG="$STATE_DIR/app.log"
 WATCH_PID_FILE="$STATE_DIR/watch.pid"
 APP_PID_FILE="$STATE_DIR/app.pid"
+RELEASE_LOCK_FILE="$ROOT/.build/release-build.lock"
 
 REQUIRED_NODE="$(tr -d '[:space:]' < "$ROOT/.nvmrc")"
 REQUIRED_NODE_MAJOR="${REQUIRED_NODE%%.*}"
@@ -241,6 +242,14 @@ watch_running() {
 }
 
 start_watch() {
+	if [[ -f "$RELEASE_LOCK_FILE" ]]; then
+		local release_pid
+		release_pid="$(cat "$RELEASE_LOCK_FILE" 2>/dev/null || true)"
+		if [[ -n "$release_pid" ]] && kill -0 "$release_pid" 2>/dev/null; then
+			fail "A release build is running (pid $release_pid). Wait for it to finish before starting the dev watcher."
+		fi
+		rm -f "$RELEASE_LOCK_FILE"
+	fi
 	if watch_running; then
 		info "Watcher already running (pid $(cat "$WATCH_PID_FILE"))"
 		return 0
@@ -379,14 +388,24 @@ supervise() {
 
 # --- lifecycle -------------------------------------------------------------
 
+stop_process_tree() {
+	local pid="$1"
+	local child
+	while IFS= read -r child; do
+		[[ -n "$child" ]] && stop_process_tree "$child"
+	done < <(pgrep -P "$pid" 2>/dev/null || true)
+	kill "$pid" 2>/dev/null || true
+}
+
 cmd_stop() {
 	if watch_running; then
 		local pid
 		pid="$(cat "$WATCH_PID_FILE")"
 		info "Stopping watcher (pid $pid)"
-		kill "$pid" 2>/dev/null || true
+		stop_process_tree "$pid"
 	fi
 	pkill -f "gulp watch-client" 2>/dev/null || true
+	pkill -f "gulp watch-extensions" 2>/dev/null || true
 	pkill -f "build/next/index.ts transpile --watch" 2>/dev/null || true
 	rm -f "$WATCH_PID_FILE"
 	info "Stopping app"

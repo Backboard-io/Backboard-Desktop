@@ -96,6 +96,11 @@ export type AgentEvent =
 	| { type: "session:created"; sessionId: string; threadId: string | null }
 	| { type: "user:message"; text: string }
 	| { type: "turn:start"; turnId: string }
+	| {
+			type: "turn:status";
+			turnId: string;
+			phase: "preparing" | "generating";
+	  }
 	| { type: "assistant:delta"; turnId: string; messageId: string; text: string }
 	| {
 			type: "assistant:message";

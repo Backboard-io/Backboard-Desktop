@@ -122,6 +122,10 @@ rollback_app() {
     return 1
   fi
 
+  # Browser-installed apps can carry Finder/quarantine metadata on nested
+  # signed files. The metadata is not part of the code signature, but codesign
+  # rejects the restored bundle until it is removed.
+  /usr/bin/xattr -cr "$app_path" >/dev/null 2>&1 || true
   validate_app "$app_path" "$expected_bundle_identifier" ""
   /bin/rm -rf "$failed_app"
 }
@@ -163,6 +167,7 @@ LOG_PATH="$5"
 APP_NAME="\${6:-Backboard Studio.app}"
 BUNDLE_IDENTIFIER="\${7:-io.backboard.studio}"
 STATUS_PATH="$8"
+ISOLATED_TEST_USER_DATA_DIR="\${9:-}"
 INSTALLER_PATH="$0"
 APP_PARENT="$(/usr/bin/dirname "$APP_PATH")"
 SAFE_VERSION="\${VERSION//[^a-zA-Z0-9._-]/_}"
@@ -188,6 +193,51 @@ app_running() {
   [[ -n "$executable" ]] && /usr/bin/pgrep -f "$target_app/Contents/MacOS/$executable" >/dev/null 2>&1
 }
 
+app_bundle_running() {
+  local target_app="$1"
+  /usr/bin/pgrep -f "$target_app/Contents/" >/dev/null 2>&1
+}
+
+wait_for_current_app_exit() {
+  local target_app="$1"
+  local current_pid="$2"
+  local bundle_identifier="$3"
+
+  # The PID supplied by the extension is its extension host. The main process
+  # and helpers can outlive it briefly, so replacement must wait for both the
+  # extension host and every process running from the installed app bundle.
+  for _ in {1..60}; do
+    if ! /bin/ps -p "$current_pid" >/dev/null 2>&1 && ! app_bundle_running "$target_app"; then
+      echo "Confirmed current Backboard Studio processes exited cleanly."
+      return 0
+    fi
+    /bin/sleep 0.5
+  done
+
+  echo "Backboard Studio is still running; requesting a graceful quit."
+  /usr/bin/osascript -e "tell application id \"$bundle_identifier\" to quit" >/dev/null 2>&1 || true
+  for _ in {1..20}; do
+    if ! /bin/ps -p "$current_pid" >/dev/null 2>&1 && ! app_bundle_running "$target_app"; then
+      echo "Confirmed current Backboard Studio processes exited after quit request."
+      return 0
+    fi
+    /bin/sleep 0.5
+  done
+
+  echo "Backboard Studio did not quit gracefully; stopping remaining app processes."
+  /usr/bin/pkill -f "$target_app/Contents/" >/dev/null 2>&1 || true
+  for _ in {1..20}; do
+    if ! /bin/ps -p "$current_pid" >/dev/null 2>&1 && ! app_bundle_running "$target_app"; then
+      echo "Confirmed all current Backboard Studio processes stopped."
+      return 0
+    fi
+    /bin/sleep 0.5
+  done
+
+  echo "Current Backboard Studio processes did not exit; leaving the installed app unchanged."
+  return 1
+}
+
 register_app() {
   local target_app="$1"
   local lsregister="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
@@ -199,6 +249,7 @@ register_app() {
 launch_app() {
   local target_app="$1"
   local bundle_identifier="$2"
+  local isolated_user_data_dir="\${3:-}"
   local executable
   local attempt
 
@@ -208,7 +259,12 @@ launch_app() {
   fi
 
   for attempt in {1..10}; do
-    /usr/bin/open "$target_app" >/dev/null 2>&1 || true
+    if [[ -n "$isolated_user_data_dir" ]]; then
+      /bin/mkdir -p "$isolated_user_data_dir/extensions"
+      /usr/bin/open -n "$target_app" --args --user-data-dir "$isolated_user_data_dir" --extensions-dir "$isolated_user_data_dir/extensions" >/dev/null 2>&1 || true
+    else
+      /usr/bin/open "$target_app" >/dev/null 2>&1 || true
+    fi
     for _ in {1..20}; do
       if app_running "$target_app"; then
         for _ in {1..20}; do
@@ -224,7 +280,11 @@ launch_app() {
     done
   done
 
-  /usr/bin/nohup "$target_app/Contents/MacOS/$executable" >/dev/null 2>&1 &
+  if [[ -n "$isolated_user_data_dir" ]]; then
+    /usr/bin/nohup "$target_app/Contents/MacOS/$executable" --user-data-dir "$isolated_user_data_dir" --extensions-dir "$isolated_user_data_dir/extensions" >/dev/null 2>&1 &
+  else
+    /usr/bin/nohup "$target_app/Contents/MacOS/$executable" >/dev/null 2>&1 &
+  fi
   for _ in {1..40}; do
     if app_running "$target_app"; then
       /usr/bin/osascript -e "tell application id \"$bundle_identifier\" to activate" >/dev/null 2>&1 || true
@@ -272,7 +332,13 @@ APPLESCRIPT
 }
 
 cleanup() {
-  /usr/bin/hdiutil detach "$MOUNT_POINT" -quiet >/dev/null 2>&1 || true
+  local detach_attempt
+  for detach_attempt in {1..5}; do
+    if /usr/bin/hdiutil detach "$MOUNT_POINT" -quiet >/dev/null 2>&1; then
+      break
+    fi
+    /bin/sleep 0.25
+  done
   /bin/rmdir "$MOUNT_POINT" >/dev/null 2>&1 || true
   if [[ -e "$STAGED_APP" ]]; then
     if [[ -w "$APP_PARENT" || -w "$STAGED_APP" ]]; then
@@ -319,23 +385,7 @@ fi
 echo "Prepared and verified Backboard Studio $VERSION at $STAGED_APP"
 write_status "ready"
 
-for _ in {1..120}; do
-  if ! /bin/ps -p "$CURRENT_PID" >/dev/null 2>&1; then
-    break
-  fi
-  /bin/sleep 1
-done
-if /bin/ps -p "$CURRENT_PID" >/dev/null 2>&1; then
-  /usr/bin/pkill -f "$APP_PATH/Contents/" >/dev/null 2>&1 || true
-  for _ in {1..20}; do
-    if ! /bin/ps -p "$CURRENT_PID" >/dev/null 2>&1; then
-      break
-    fi
-    /bin/sleep 0.5
-  done
-fi
-if /bin/ps -p "$CURRENT_PID" >/dev/null 2>&1; then
-  echo "Current Backboard Studio process did not exit; leaving the installed app unchanged."
+if ! wait_for_current_app_exit "$APP_PATH" "$CURRENT_PID" "$BUNDLE_IDENTIFIER"; then
   exit 1
 fi
 
@@ -346,7 +396,7 @@ else
 fi
 
 register_app "$APP_PATH"
-if ! launch_app "$APP_PATH" "$BUNDLE_IDENTIFIER" || ! confirm_app_stable "$APP_PATH" 30; then
+if ! launch_app "$APP_PATH" "$BUNDLE_IDENTIFIER" "$ISOLATED_TEST_USER_DATA_DIR" || ! confirm_app_stable "$APP_PATH" 30; then
   echo "Updated app did not launch successfully or remain stable; restoring the previous version."
   if [[ "$NEEDS_ELEVATION" == "0" ]]; then
     rollback_app "$APP_PATH" "$BACKUP_APP" "$FAILED_APP" "$BUNDLE_IDENTIFIER"
@@ -354,7 +404,7 @@ if ! launch_app "$APP_PATH" "$BUNDLE_IDENTIFIER" || ! confirm_app_stable "$APP_P
     run_elevated rollback "$APP_PATH" "$BACKUP_APP" "$FAILED_APP" "$BUNDLE_IDENTIFIER"
   fi
   register_app "$APP_PATH"
-  launch_app "$APP_PATH" "$BUNDLE_IDENTIFIER" || true
+  launch_app "$APP_PATH" "$BUNDLE_IDENTIFIER" "$ISOLATED_TEST_USER_DATA_DIR" || true
   exit 1
 fi
 

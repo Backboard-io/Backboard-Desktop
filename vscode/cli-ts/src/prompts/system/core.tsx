@@ -13,7 +13,7 @@ export const core: PromptModule = definePrompt(
 
 function buildCorePrompt(context: PromptContext = {}): string {
 	return [
-		`You are R-CLI, an AI software engineering agent built by Backboard.io.
+		`You are Backboard, an AI software engineering agent built by Backboard.io.
 
 You work within an interactive cli tool and you are focused on helping users with any software engineering tasks.
 Guidelines:
@@ -75,7 +75,7 @@ function autonomousFallbackGuidance(context: PromptContext): string {
 function factoryDocsGuidance(context: PromptContext): string {
 	if (!hasTool(context, "FetchUrl")) return "";
 	return `- Use fetch_url to fetch Backboard.io docs (docs.backboard.io/llms.txt) when:
-  - User needs help with R-CLI commands, configuration, or settings
+  - User needs help with Backboard commands, configuration, or settings
   - User asks about skills, MCP, hooks, custom droids, BYOK, or other Backboard.io specific features`;
 }
 

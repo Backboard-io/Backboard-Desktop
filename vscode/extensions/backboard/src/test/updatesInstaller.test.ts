@@ -13,14 +13,28 @@ describe('macUpdateInstallerScript', () => {
 		const script = macUpdateInstallerScript();
 		const prepareIndex = script.indexOf('prepare_staged_app "$SOURCE_APP"');
 		const readyIndex = script.indexOf('write_status "ready"');
+		const shutdownIndex = script.indexOf('wait_for_current_app_exit "$APP_PATH"');
 		const swapIndex = script.indexOf('swap_staged_app "$APP_PATH"');
 
 		assert.ok(prepareIndex >= 0);
 		assert.ok(readyIndex > prepareIndex);
-		assert.ok(swapIndex > readyIndex);
+		assert.ok(shutdownIndex > readyIndex);
+		assert.ok(swapIndex > shutdownIndex);
 		assert.match(script, /codesign --verify --deep --strict/);
 		assert.match(script, /spctl --assess --type execute/);
 		assert.doesNotMatch(script, /rm -rf "\$APP_PATH"/);
+	});
+
+	test('waits for the whole app bundle to stop before replacement', () => {
+		const script = macUpdateInstallerScript();
+
+		assert.match(script, /app_bundle_running\(\)/);
+		assert.match(script, /pgrep -f "\$target_app\/Contents\/"/);
+		assert.match(script, /requesting a graceful quit/);
+		assert.match(script, /tell application id/);
+		assert.match(script, /stopping remaining app processes/);
+		assert.match(script, /leaving the installed app unchanged/);
+		assert.match(script, /for detach_attempt in \{1\.\.5\}/);
 	});
 
 	test('keeps a rollback copy until the updated app is confirmed running', () => {
@@ -39,6 +53,7 @@ describe('macUpdateInstallerScript', () => {
 		assert.match(script, /Updated app exited during post-launch stability check/);
 		assert.match(script, /Confirmed stable after launch/);
 		assert.match(script, /Installed and launched Backboard Studio/);
+		assert.match(script, /xattr -cr "\$app_path"/);
 		assert.doesNotMatch(script, /local status=/);
 	});
 

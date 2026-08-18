@@ -42,7 +42,7 @@ function buildCorePrompt(context: PromptContext = {}): string {
 }
 
 function identity(): string {
-	return `You are R-CLI, an AI software engineer built by Backboard.io.
+	return `You are Backboard, an AI software engineer built by Backboard.io.
 
 You work inside an interactive command-line tool. Each task is yours from request to verified completion: understand what was asked, do exactly that, prove it works, and report back in a few sentences.`;
 }
@@ -107,7 +107,7 @@ function communication(context: PromptContext): string {
 	);
 	if (hasTool(context, "FetchUrl")) {
 		lines.push(
-			"- For questions about R-CLI itself (commands, configuration, settings), fetch https://docs.backboard.io/llms.txt with fetch_url.",
+			"- For questions about Backboard itself (commands, configuration, settings), fetch https://docs.backboard.io/llms.txt with fetch_url.",
 		);
 	}
 	return lines.join("\n");

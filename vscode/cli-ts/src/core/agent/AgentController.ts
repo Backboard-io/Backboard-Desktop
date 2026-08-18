@@ -61,6 +61,10 @@ export interface AgentControllerDeps {
 	hookController?: HookController;
 	assistantBinding?: AssistantSessionBinding;
 	syncDynamicTools?: (signal: AbortSignal) => Promise<void>;
+	/** Override hidden post-answer verification passes for this host. */
+	finalVerificationNudge?: boolean;
+	/** Override hidden todo-reconciliation passes for this host. */
+	todoReconciliation?: boolean;
 	startupEnvironmentPrompt?: string;
 	lsp?: LspService;
 	checkpoints?: CheckpointRecorder;
@@ -291,6 +295,7 @@ export class AgentController {
 			const hookController = this.deps.hookController;
 
 			bus.emit({ type: "turn:start", turnId: turn.id });
+			bus.emit({ type: "turn:status", turnId: turn.id, phase: "preparing" });
 
 			let promptHook: UserPromptHookResult | undefined;
 			if (hookController?.hasTrustedUserPromptHooks()) {
@@ -387,7 +392,9 @@ export class AgentController {
 				thinking: undefined,
 				thinkingResolver,
 				requestKind: "user",
-				finalVerificationNudge: config.finalVerificationNudge,
+				finalVerificationNudge:
+					this.deps.finalVerificationNudge ?? config.finalVerificationNudge,
+				todoReconciliation: this.deps.todoReconciliation,
 				turnId: turn.id,
 				turnStartedAt: turn.startedAt,
 				turnAlreadyStarted: true,
@@ -398,6 +405,7 @@ export class AgentController {
 				durableSession: this.deps.getDurableSession?.(),
 			});
 
+			bus.emit({ type: "turn:status", turnId: turn.id, phase: "generating" });
 			finalStatus = await loop.run(text, ctx);
 			return finalStatus;
 		} catch (err) {

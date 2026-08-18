@@ -110,6 +110,11 @@ export class CliTsServeProcess extends Disposable {
 		return this.child !== null && !this.exited;
 	}
 
+	/** Starts the serve subprocess without submitting a turn. */
+	start(): void {
+		this.ensureProcess();
+	}
+
 	override dispose(): void {
 		const child = this.child;
 		if (child && !this.exited) {

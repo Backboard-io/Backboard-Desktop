@@ -7,6 +7,7 @@ import { timeout } from '../../../../base/common/async.js';
 import { Disposable, DisposableMap, DisposableStore, IDisposable, MutableDisposable } from '../../../../base/common/lifecycle.js';
 import { autorun } from '../../../../base/common/observable.js';
 import { URI } from '../../../../base/common/uri.js';
+import { BrowserViewCommandId } from '../../../../platform/browserView/common/browserView.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { IWorkbenchContribution } from '../../../common/contributions.js';
@@ -364,7 +365,7 @@ export class ChatWebPreviewTracker extends Disposable implements IWorkbenchContr
 	}
 
 	private async _maybeAutoOpen(model: IChatModel, state: SessionPreviewState, request: IChatRequestModel, url: string, origin: string): Promise<void> {
-		if (!this.environmentService.isSessionsWindow || state.autoOpenedRequestIds.has(request.id)) {
+		if (state.autoOpenedRequestIds.has(request.id)) {
 			return;
 		}
 
@@ -402,9 +403,16 @@ export class ChatWebPreviewTracker extends Disposable implements IWorkbenchContr
 		}
 
 		try {
-			await this.commandService.executeCommand(OPEN_RIGHT_WORKBENCH_BROWSER_COMMAND_ID, browserViewId ? { browserViewId } : { url });
+			if (this.environmentService.isSessionsWindow) {
+				await this.commandService.executeCommand(OPEN_RIGHT_WORKBENCH_BROWSER_COMMAND_ID, browserViewId ? { browserViewId } : { url });
+			} else {
+				// The editor workbench has no right-workbench Browser command. Route
+				// the preview into its integrated browser editor and reuse the live
+				// localhost tab for this origin when one already exists.
+				await this.commandService.executeCommand(BrowserViewCommandId.Open, { url, reuseUrlFilter: `${origin}/**` });
+			}
 		} catch (err) {
-			this.logService.debug('[ChatWebPreviewTracker] Failed to auto-open browser panel', err);
+			this.logService.debug('[ChatWebPreviewTracker] Failed to auto-open integrated browser', err);
 		}
 	}
 }

@@ -11,6 +11,7 @@ import * as http from 'http';
 import * as https from 'https';
 import * as os from 'os';
 import * as path from 'path';
+import { deprecatedBridgeDetail, deprecatedBridgeDownloadAction, deprecatedBridgeTitle, replacementDownloadUrl, replacementManifestBaseUrl, shouldShowDeprecatedBridgeNotice, shouldUseReplacementManifest } from './migrationNotice';
 import { macUpdateInstallerScript } from './updatesInstaller';
 
 interface UpdateManifest {
@@ -29,6 +30,7 @@ let backboardUpdateOutput: vscode.OutputChannel | undefined;
 
 export function initializeBackboardUpdates(context: vscode.ExtensionContext, output: vscode.OutputChannel | undefined): void {
 	backboardUpdateOutput = output;
+	showDeprecatedBridgeNotice(context);
 	backboardUpdateStatusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
 	backboardUpdateStatusItem.command = 'backboard.installAvailableUpdate';
 	context.subscriptions.push(backboardUpdateStatusItem);
@@ -39,6 +41,51 @@ export function initializeBackboardUpdates(context: vscode.ExtensionContext, out
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.checkForUpdates', () => checkBackboardUpdates(true)));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.installAvailableUpdate', () => installAvailableBackboardUpdate()));
 	startBackboardUpdateChecks(context);
+}
+
+function showDeprecatedBridgeNotice(context: vscode.ExtensionContext): void {
+	const appPath = currentMacAppPath();
+	const appName = appPath ? path.basename(appPath) : '';
+	const channel = getBackboardUpdateChannel(vscode.workspace.getConfiguration('backboard'));
+	if (!shouldShowDeprecatedBridgeNotice(readCurrentAppVersion(), channel, appName, process.platform)) {
+		return;
+	}
+
+	let presented = false;
+	let focusSubscription: vscode.Disposable | undefined;
+	const present = (): void => {
+		if (presented) {
+			return;
+		}
+		presented = true;
+		focusSubscription?.dispose();
+		backboardUpdateOutput?.appendLine('[updates] showing Alpha-to-Beta migration notification');
+		void vscode.window.showWarningMessage(
+			`${deprecatedBridgeTitle} ${deprecatedBridgeDetail}`,
+			deprecatedBridgeDownloadAction
+		).then(choice => {
+			if (choice === deprecatedBridgeDownloadAction) {
+				void vscode.env.openExternal(vscode.Uri.parse(replacementDownloadUrl));
+			}
+		});
+	};
+
+	if (vscode.window.state.focused) {
+		present();
+		return;
+	}
+
+	// Wait until the window receives focus so the bottom-right notification is
+	// visible once on every launch, including launches initiated by an updater.
+	focusSubscription = vscode.window.onDidChangeWindowState(state => {
+		if (state.focused) {
+			present();
+		}
+	});
+	context.subscriptions.push(focusSubscription);
+	if (vscode.window.state.focused) {
+		present();
+	}
 }
 
 let backboardUpdateInstallInProgress = false;
@@ -191,6 +238,7 @@ async function installBackboardUpdate(manifest: UpdateManifest): Promise<void> {
 	try {
 		const updateDirectory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'backboard-studio-update-'));
 		const dmgPath = path.join(updateDirectory, `Backboard-Studio-${manifest.version}.dmg`);
+		backboardUpdateOutput?.appendLine(`[updates] downloading ${manifest.version} from ${manifest.url}`);
 		await vscode.window.withProgress({
 			location: vscode.ProgressLocation.Notification,
 			title: `Downloading Backboard Studio ${manifest.version}`,
@@ -198,13 +246,21 @@ async function installBackboardUpdate(manifest: UpdateManifest): Promise<void> {
 		}, async progress => {
 			await downloadBackboardUpdate(manifest.url, dmgPath, progress);
 		});
-		await verifyBackboardUpdate(dmgPath, manifest);
+		await vscode.window.withProgress({
+			location: vscode.ProgressLocation.Notification,
+			title: `Verifying Backboard Studio ${manifest.version}`,
+			cancellable: false
+		}, async () => verifyBackboardUpdate(dmgPath, manifest));
+		backboardUpdateOutput?.appendLine(`[updates] download verified for ${manifest.version}`);
 		await vscode.window.withProgress({
 			location: vscode.ProgressLocation.Notification,
 			title: `Preparing Backboard Studio ${manifest.version}`,
 			cancellable: false
 		}, async () => stageMacBackboardInstaller(dmgPath, appPath, manifest.version));
-		await vscode.window.showInformationMessage(`Backboard Studio ${manifest.version} is verified. Restarting to install.`);
+		backboardUpdateOutput?.appendLine(`[updates] ${manifest.version} is staged and verified; requesting automatic restart`);
+		// Do not await a notification here: waiting for a toast to be dismissed can
+		// delay shutdown indefinitely. The detached, already-prepared installer waits
+		// for this process to exit, swaps the app, validates it again, and relaunches it.
 		await vscode.commands.executeCommand('workbench.action.quit');
 	} catch (error) {
 		backboardUpdateInstallInProgress = false;
@@ -373,7 +429,11 @@ function waitForMacInstallerReady(child: cp.ChildProcess, statusPath: string, lo
 		const onExit = (code: number | null, signal: NodeJS.Signals | null): void => {
 			checkStatus();
 			if (!settled) {
-				finish(new Error(`Update installer exited before preparation completed (code ${code ?? 'none'}, signal ${signal ?? 'none'}).`));
+				if (code !== 0) {
+					finish(installerFailure());
+				} else {
+					finish(new Error(`Update installer exited before preparation completed (code ${code ?? 'none'}, signal ${signal ?? 'none'}).`));
+				}
 			}
 		};
 		const statusTimer = setInterval(checkStatus, 250);
@@ -401,11 +461,19 @@ function getBackboardUpdateManifestUrl(): string | undefined {
 		return undefined;
 	}
 
+	const channel = getBackboardUpdateChannel(config);
+	const appPath = currentMacAppPath();
+	const appName = appPath ? path.basename(appPath) : '';
+	const automaticBaseUrl = shouldUseReplacementManifest(readCurrentAppVersion(), channel, appName, process.platform)
+		? replacementManifestBaseUrl
+		: defaultUpdateManifestBaseUrl;
 	const configuredBaseUrl = config.get<string>('updates.manifestBaseUrl', defaultUpdateManifestBaseUrl).trim();
-	const manifestBaseUrl = (process.env.BBIDE_UPDATE_MANIFEST_BASE_URL || process.env.BACKBOARD_UPDATE_MANIFEST_BASE_URL || configuredBaseUrl || defaultUpdateManifestBaseUrl)
+	const effectiveConfiguredBaseUrl = configuredBaseUrl && configuredBaseUrl !== defaultUpdateManifestBaseUrl
+		? configuredBaseUrl
+		: automaticBaseUrl;
+	const manifestBaseUrl = (process.env.BBIDE_UPDATE_MANIFEST_BASE_URL || process.env.BACKBOARD_UPDATE_MANIFEST_BASE_URL || effectiveConfiguredBaseUrl)
 		.trim()
 		.replace(/\/+$/, '');
-	const channel = getBackboardUpdateChannel(config);
 	return `${manifestBaseUrl}/${channel}/latest/bbide/${platform}-${arch}.json`;
 }
 

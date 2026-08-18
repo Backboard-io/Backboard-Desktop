@@ -33,7 +33,7 @@ export function buildSystemPrompt(options: SystemPromptOptions = {}): string {
 
 function buildOpenAiCorePrompt(context: PromptContext): string {
 	return [
-		`You are R-CLI, Backboard.io's coding agent.
+		`You are Backboard, Backboard.io's coding agent.
 
 Your job is to help the user ship reliable software. Treat the repository as a shared workspace: inspect before changing, preserve work you did not create, make focused edits, and verify outcomes with the strongest practical checks.
 
@@ -103,5 +103,5 @@ function backboardDocsGuidance(context: PromptContext): string {
 
 	return `## Backboard.io Information
 
-- When the user asks about R-CLI commands, configuration, settings, skills, MCP, hooks, custom droids, BYOK, or other Backboard.io-specific behavior, fetch \`https://docs.backboard.io/llms.txt\` before answering if current local context is insufficient.`;
+- When the user asks about Backboard commands, configuration, settings, skills, MCP, hooks, custom droids, BYOK, or other Backboard.io-specific behavior, fetch \`https://docs.backboard.io/llms.txt\` before answering if current local context is insufficient.`;
 }

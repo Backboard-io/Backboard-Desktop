@@ -394,6 +394,12 @@ describe("Config", () => {
 	});
 
 	it("parses thinking levels and budgets as semantic intent", () => {
+		const providerDefault = new Config({
+			env,
+			argv: ["--model", "openai/gpt-5.5", "--thinking", "default"],
+		});
+		expect(providerDefault.thinking).toBeUndefined();
+
 		const level = new Config({
 			env,
 			argv: ["--model", "openrouter/deepseek", "--thinking", "max"],

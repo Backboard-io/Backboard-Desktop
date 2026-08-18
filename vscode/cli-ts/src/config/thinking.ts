@@ -15,12 +15,24 @@ import {
 	tokenFieldFor,
 } from "./thinkingCapabilities.ts";
 
-export function parseThinking(value: string): ThinkingIntent | null {
+export function parseThinking(value: string): ThinkingIntent | null | undefined {
 	const normalized = value.trim().toLowerCase();
+	if (["default", "provider-default", "provider_default"].includes(normalized))
+		return undefined;
 	if (["off", "no", "disable", "disabled", "false", "0"].includes(normalized))
 		return null;
 
-	const level = normalized === "maximum" ? "max" : normalized;
+	if (["auto", "adaptive"].includes(normalized)) return { kind: "dynamic" };
+	const level =
+		normalized === "maximum"
+			? "max"
+			: normalized === "fast"
+				? "low"
+				: normalized === "balanced"
+					? "medium"
+					: normalized === "deep"
+						? "high"
+						: normalized;
 	if (isThinkingLevel(level)) return { kind: "level", level };
 	if (normalized === "dynamic") return { kind: "dynamic" };
 

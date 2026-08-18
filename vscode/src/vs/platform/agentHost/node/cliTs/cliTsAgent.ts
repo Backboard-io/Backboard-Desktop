@@ -250,12 +250,11 @@ export class CliTsAgent extends Disposable implements IAgent {
 		session.model = config.model ?? session.model;
 		session.config = config.config ?? session.config;
 		this._sessions.set(sessionId, session);
-		// Eagerly boot the serve process and pre-resolve the base assistant now,
+		// Eagerly boot the serve process and warm its backend connection now,
 		// while the composer is open and before the user's first message, so the
-		// process spawn (~0.2s) and the first-ever assistant resolution (~1.4s)
-		// happen during think-time instead of on the critical path to first
-		// token. Best-effort and idempotent; sendMessage still ensures the
-		// process if this was skipped.
+		// process spawn and initial model-catalog request happen during think-time
+		// instead of on the critical path to first token. Best-effort and
+		// idempotent; sendMessage still ensures the process if this was skipped.
 		if (session.workingDirectory) {
 			void this._prewarm(session);
 		}
@@ -268,11 +267,9 @@ export class CliTsAgent extends Disposable implements IAgent {
 	}
 
 	/**
-	 * Spawns the serve process, fires a `warmup` op so the base assistant is
-	 * resolved (and disk-cached) before the first message, and kicks off the
-	 * model-list refresh in parallel — so the model picker shows the backend's
-	 * real list while the composer is still open instead of only after the
-	 * first submit. Best-effort.
+	 * Spawns the serve process and kicks off the model-list refresh — so startup
+	 * and the backend connection happen while the composer is open, and the
+	 * picker shows the backend's real list before the first submit. Best-effort.
 	 */
 	private async _prewarm(session: CliTsSession): Promise<void> {
 		if (session.disposed || session.proc?.isRunning) {
@@ -281,7 +278,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 		try {
 			const rgDir = await this._resolveRgDir();
 			const proc = this._ensureProcess(session, rgDir);
-			proc.notify({ op: 'warmup' });
+			proc.start();
 			this._refreshModelsOnce(session);
 		} catch (error) {
 			this._logService.info(`[cli-ts] pre-warm skipped for ${session.sessionId}: ${error instanceof Error ? error.message : String(error)}`);

@@ -63,6 +63,10 @@ export class BackboardClient implements AgentClient {
 		threads: true,
 		memory: true,
 	};
+	private readonly modelThinkingMetadataCache = new Map<
+		string,
+		ModelThinkingMetadataResponse
+	>();
 
 	constructor(
 		private readonly env: BackboardEnv,
@@ -228,11 +232,16 @@ export class BackboardClient implements AgentClient {
 		model: string,
 		options: RequestOptions = {},
 	): Promise<ModelThinkingMetadataResponse> {
+		const cacheKey = `${provider}\u0000${model}`;
+		const cached = this.modelThinkingMetadataCache.get(cacheKey);
+		if (cached) return cached;
 		const query = new URLSearchParams({ provider, model });
-		return this.get<ModelThinkingMetadataResponse>(
+		const metadata = await this.get<ModelThinkingMetadataResponse>(
 			`/models/thinking-metadata?${query}`,
 			options,
 		);
+		this.modelThinkingMetadataCache.set(cacheKey, metadata);
+		return metadata;
 	}
 
 	async listAssistants(

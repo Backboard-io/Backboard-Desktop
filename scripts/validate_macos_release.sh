@@ -10,12 +10,13 @@ fi
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="${VERSION:-}"
 ARCH="${ARCH:-aarch64}"
+CHANNEL="${CHANNEL:-stable}"
 DMG_PATH="${DMG_PATH:-}"
 
 usage() {
   cat <<EOF
 Usage:
-  $0 --version 2.5.5 --arch aarch64 --dmg /path/to/Backboard-Studio-aarch64.dmg
+  $0 --version 2.5.5 --arch aarch64 --channel stable --dmg /path/to/Backboard-Studio-aarch64.dmg
 
 Validates a signed and notarized Backboard Studio macOS release before upload.
 EOF
@@ -29,6 +30,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --arch)
       ARCH="$2"
+      shift 2
+      ;;
+    --channel)
+      CHANNEL="$2"
       shift 2
       ;;
     --dmg)
@@ -66,6 +71,21 @@ case "${ARCH}" in
     ;;
 esac
 
+case "${CHANNEL}" in
+  stable)
+    EXPECTED_APP_NAME="Backboard Studio.app"
+    EXPECTED_BUNDLE_IDENTIFIER="io.backboard.studio"
+    ;;
+  sandbox)
+    EXPECTED_APP_NAME="Backboard Studio Sandbox.app"
+    EXPECTED_BUNDLE_IDENTIFIER="io.backboard.studio.sandbox"
+    ;;
+  *)
+    echo "Unsupported channel: ${CHANNEL}; expected stable or sandbox." >&2
+    exit 1
+    ;;
+esac
+
 if [[ ! -f "${DMG_PATH}" ]]; then
   echo "Missing DMG: ${DMG_PATH}" >&2
   exit 1
@@ -73,7 +93,7 @@ fi
 
 MOUNT_POINT="$(mktemp -d /tmp/backboard-release-validate-mount.XXXXXX)"
 STAGING_ROOT="$(mktemp -d /tmp/backboard-release-validate-app.XXXXXX)"
-STAGED_APP="${STAGING_ROOT}/Backboard Studio.app"
+STAGED_APP="${STAGING_ROOT}/${EXPECTED_APP_NAME}"
 
 cleanup() {
   hdiutil detach "${MOUNT_POINT}" -quiet >/dev/null 2>&1 || true
@@ -90,9 +110,9 @@ xcrun stapler validate "${DMG_PATH}"
 spctl --assess --type open --context context:primary-signature -vv "${DMG_PATH}"
 
 hdiutil attach "${DMG_PATH}" -mountpoint "${MOUNT_POINT}" -nobrowse -readonly -quiet
-SOURCE_APP="${MOUNT_POINT}/Backboard Studio.app"
+SOURCE_APP="${MOUNT_POINT}/${EXPECTED_APP_NAME}"
 if [[ ! -d "${SOURCE_APP}" ]]; then
-  echo "DMG does not contain Backboard Studio.app." >&2
+  echo "DMG does not contain ${EXPECTED_APP_NAME}." >&2
   exit 1
 fi
 
@@ -115,8 +135,8 @@ if [[ "${ACTUAL_VERSION}" != "${VERSION}" ]]; then
   echo "Version mismatch: expected ${VERSION}, got ${ACTUAL_VERSION}." >&2
   exit 1
 fi
-if [[ "${BUNDLE_IDENTIFIER}" != "io.backboard.studio" ]]; then
-  echo "Bundle identifier mismatch: ${BUNDLE_IDENTIFIER}." >&2
+if [[ "${BUNDLE_IDENTIFIER}" != "${EXPECTED_BUNDLE_IDENTIFIER}" ]]; then
+  echo "Bundle identifier mismatch: expected ${EXPECTED_BUNDLE_IDENTIFIER}, got ${BUNDLE_IDENTIFIER}." >&2
   exit 1
 fi
 if [[ ! -x "${APP_BINARY}" ]]; then
@@ -170,6 +190,7 @@ DMG_BYTES="$(stat -f%z "${DMG_PATH}")"
 echo "Release validation passed"
 echo "  version: ${ACTUAL_VERSION}"
 echo "  architecture: ${ARCH} (${EXPECTED_MACHINE})"
+echo "  channel: ${CHANNEL}"
 echo "  bundle: ${BUNDLE_IDENTIFIER}"
 echo "  sha256: ${DMG_SHA256}"
 echo "  bytes: ${DMG_BYTES}"

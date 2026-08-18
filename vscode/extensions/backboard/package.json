@@ -230,7 +230,8 @@
     "compile": "npm run prepare-cli-ts && tsgo --project ./tsconfig.json",
     "watch": "tsgo --project ./tsconfig.json --watch",
     "typecheck": "tsgo --project ./tsconfig.json --noEmit",
-    "test-updater": "node --test ./out/test/updatesInstaller.test.js"
+    "test-updater": "node --test ./out/test/updatesInstaller.test.js ./out/test/migrationNotice.test.js",
+    "test-updater-e2e": "node --test ./out/test/updatesInstaller.e2e.test.js"
   },
   "devDependencies": {
     "@types/node": "24.x"

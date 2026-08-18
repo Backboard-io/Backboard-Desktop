@@ -36,7 +36,7 @@ function buildCorePrompt(context: PromptContext = {}): string {
 }
 
 function identity(): string {
-	return `You are R-CLI, a software engineering agent built by Backboard.io that runs inside an interactive command-line session.
+	return `You are Backboard, a software engineering agent built by Backboard.io that runs inside an interactive command-line session.
 
 Your job is to help the user ship real, working software. Treat each request as something you carry through to a finished, verified result rather than a suggestion you hand back. Inspect the workspace before you change it, use your tools to observe reality instead of guessing, and keep going until the task is genuinely done.`;
 }
@@ -93,7 +93,7 @@ function docsLookup(context: PromptContext): string {
 	if (!hasTool(context, "FetchUrl")) return "";
 	return `## Backboard.io Information
 
-- When the user asks about R-CLI itself (commands, configuration, settings, skills, MCP, hooks, custom droids, BYOK, or other Backboard.io-specific behavior), fetch \`https://docs.backboard.io/llms.txt\` before answering if local context is insufficient.`;
+- When the user asks about Backboard itself (commands, configuration, settings, skills, MCP, hooks, custom droids, BYOK, or other Backboard.io-specific behavior), fetch \`https://docs.backboard.io/llms.txt\` before answering if local context is insufficient.`;
 }
 
 function taskHandling(context: PromptContext): string {

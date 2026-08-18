@@ -39,6 +39,10 @@ describe("Backboard model catalog", () => {
 			"openrouter",
 			"z-ai/glm-5.2",
 		);
+		const cachedResult = await client.getModelThinkingMetadata(
+			"openrouter",
+			"z-ai/glm-5.2",
+		);
 
 		expect(result).toEqual({
 			provider: "openrouter",
@@ -51,6 +55,7 @@ describe("Backboard model catalog", () => {
 				defaults_only: false,
 			},
 		});
+		expect(cachedResult).toEqual(result);
 		expect(requestedUrls).toHaveLength(1);
 		const url = new URL(requestedUrls[0] ?? "");
 		expect(url.pathname).toBe("/models/thinking-metadata");

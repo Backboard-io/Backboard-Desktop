@@ -912,12 +912,61 @@
 	font-size: 14px;
 }
 
-.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-item-container.interactive-request {
-	padding-inline: 20px;
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-clean-chat {
+	/* The shared chat treatment uses a centered 768px reading column. In the
+	 * editor's right panel that leaves a large dead gutter when the panel is
+	 * widened, so let the transcript track the panel and composer instead. */
+	--bb-clean-chat-column: 100%;
+	--bb-t3-column: 100%;
 }
 
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-item-container.interactive-request,
 .monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-item-container.interactive-response {
-	padding-inline: 30px;
+	/* Share the composer's 16px rail so the transcript uses more of the narrow
+	 * editor panel without letting requests and responses drift out of alignment. */
+	padding-inline: 16px;
+}
+
+/* Keep the editor transcript dense. The shared timeline deliberately leaves
+ * generous breathing room for the full-page chat, but at sidebar scale those
+ * 8-16px part margins read as empty rows between tool activity and prose. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-item-container.interactive-response {
+	position: relative;
+	padding-bottom: 6px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-item-container.interactive-response > .value {
+	padding-block: 0;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-item-container.interactive-response > .value > .rendered-markdown:not(:last-child) {
+	margin-bottom: 4px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-t3-turn-work:not(.chat-t3-turn-work-active) {
+	margin-bottom: 8px;
+	padding-block: 2px 4px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-t3-turn-work:not(.chat-t3-turn-work-active).chat-t3-turn-work-expanded > .chat-t3-turn-work-body {
+	margin-top: 4px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-t3-turn-work-body > .rendered-markdown,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-t3-turn-work-body .chat-thinking-box {
+	margin-bottom: 3px;
+}
+
+/* Completed responses keep their actions on hover, but the invisible toolbar
+ * no longer reserves a full 28px row in the transcript. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-item-container.interactive-response:not(.chat-response-loading) > .chat-footer-toolbar {
+	position: absolute;
+	inset-inline-end: 16px;
+	bottom: 4px;
+	z-index: 2;
+	width: auto;
+	height: 22px;
+	padding-top: 0;
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-item-container .value,
@@ -932,6 +981,18 @@
 .monaco-workbench .part.auxiliarybar .chat-viewpane .chat-thinking-box .chat-thinking-group-header {
 	color: var(--vscode-descriptionForeground);
 	font-size: 14px;
+}
+
+/* Tool activity is a scan-friendly work log rather than a stack of messages.
+ * Keep consecutive calls close while preserving a full line-height target for
+ * each disclosure row. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-thinking-box .chat-thinking-work-group > .chat-thinking-group-body {
+	gap: 0;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-thinking-box .chat-thinking-work-group .chat-thinking-tool-wrapper {
+	min-height: 20px;
+	padding-block: 0;
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session:not(.chat-composer-empty) .interactive-input-part .chat-input-container {

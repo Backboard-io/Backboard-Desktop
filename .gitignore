@@ -16,9 +16,14 @@ node_modules/
 # repo root.
 /VSCode-darwin-*/
 /vscode-release/
+/vscode-release-*/
 /VSCode-win32-*/
 /windows-release/
 /vscode/extensions/backboard/bin/
+/vscode/cli-ts/.*.bun-build
+
+# Per-workspace Backboard metadata is local machine state.
+/.backboard/
 
 # The DMG installer-window assets under scripts/dmg-assets/ are deliberately
 # NOT ignored. A previous revision ignored that whole directory, generators
@@ -39,3 +44,4 @@ node_modules/
 # Local-only Zed scratch files
 zed/crates/beginner_ui/src/beginner_workspace.rs
 zed/crates/beginner_ui/src/simple_design.rs
+vscode-release-legacy/2.5.9/aarch64/Backboard-Studio-aarch64.dmg

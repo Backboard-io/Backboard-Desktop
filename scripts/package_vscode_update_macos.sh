@@ -615,7 +615,7 @@ SIGNING_IDENTITIES="$(security find-identity -v -p codesigning "${KEYCHAIN_NAME}
 echo "${SIGNING_IDENTITIES}"
 
 if [[ -n "${IDENTITY}" ]]; then
-  IDENTITY_HASH="$(awk -v identity="${IDENTITY}" '$0 ~ "\"" identity "\"" { print $2; exit }' <<<"${SIGNING_IDENTITIES}")"
+  IDENTITY_HASH="$(awk -v identity="${IDENTITY}" 'index($0, "\"" identity "\"") { print $2; exit }' <<<"${SIGNING_IDENTITIES}")"
 else
   IDENTITY_HASH="$(awk '/Developer ID Application/ { print $2; exit }' <<<"${SIGNING_IDENTITIES}")"
 fi

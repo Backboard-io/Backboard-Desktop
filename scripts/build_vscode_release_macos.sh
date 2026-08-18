@@ -58,6 +58,9 @@ case "${CHANNEL}" in
   *) echo "Unsupported CHANNEL=${CHANNEL}; expected stable or sandbox" >&2; exit 1 ;;
 esac
 
+OUT="${OUT:-${REPO_ROOT}/vscode-release/${VERSION}/${ARCH}}"
+RELEASE_LOCK_FILE="${VSCODE_ROOT}/.build/release-build.lock"
+
 cd "${VSCODE_ROOT}"
 
 if [[ -s "${HOME}/.nvm/nvm.sh" ]]; then
@@ -65,10 +68,35 @@ if [[ -s "${HOME}/.nvm/nvm.sh" ]]; then
   # shellcheck source=/dev/null
   source "${HOME}/.nvm/nvm.sh"
   nvm use
-  set -u
+	set -u
 fi
 
 echo "Using node $(node -v)"
+
+mkdir -p "$(dirname "${RELEASE_LOCK_FILE}")"
+if [[ -f "${RELEASE_LOCK_FILE}" ]]; then
+	existing_release_pid="$(cat "${RELEASE_LOCK_FILE}" 2>/dev/null || true)"
+	if [[ -n "${existing_release_pid}" ]] && kill -0 "${existing_release_pid}" 2>/dev/null; then
+		echo "Another release build is already running (pid ${existing_release_pid})." >&2
+		exit 1
+	fi
+fi
+printf '%s\n' "$$" > "${RELEASE_LOCK_FILE}"
+cleanup_release_lock() {
+	if [[ "$(cat "${RELEASE_LOCK_FILE}" 2>/dev/null || true)" == "$$" ]]; then
+		rm -f "${RELEASE_LOCK_FILE}"
+	fi
+}
+trap cleanup_release_lock EXIT INT TERM
+
+# A development watcher writes to the same `out` and extension output folders
+# that the release compiler replaces. Letting both run can produce a bundle
+# with files removed halfway through compilation, so always stop the repo's
+# tracked development processes before starting a release build.
+if [[ -x "${VSCODE_ROOT}/scripts/dev.sh" ]]; then
+	echo "Stopping local development watcher before release build"
+	"${VSCODE_ROOT}/scripts/dev.sh" stop >/dev/null 2>&1 || true
+fi
 
 # VS Code's npm install selects and builds native modules for npm_config_arch.
 # Reusing a workspace last installed for the other Mac architecture otherwise
@@ -139,11 +167,12 @@ fi
 # native runtime from VSCODE_ARCH rather than from the gulp target name.
 export VSCODE_ARCH="${NPM_TARGET_ARCH}"
 
-echo "Preparing the same dev shell used by scripts/code.sh"
-node build/lib/preLaunch.ts
-
-echo "Compiling VS Code client"
-npm run compile-client
+# The standalone gulp target below compiles the production client into
+# out-build/out-vscode. Do not run the development `compile-client` task here:
+# it writes to `out`, which is intentionally owned by the local dev watcher.
+echo "Preparing Electron and built-in extensions"
+npm run electron
+node build/lib/builtInExtensions.ts
 
 echo "Compiling Backboard extension"
 npm --prefix extensions/backboard run compile
@@ -198,9 +227,10 @@ CHANNEL="${CHANNEL}" \
 SKIP_NOTARIZATION="${SKIP_NOTARIZATION:-0}" \
 SKIP_SIGNING="${SKIP_SIGNING:-0}" \
 VSAPP="${VSAPP}" \
+OUT="${OUT}" \
 "${REPO_ROOT}/scripts/package_vscode_update_macos.sh"
 
-DMG_PATH="${REPO_ROOT}/vscode-release/${VERSION}/${ARCH}/Backboard-Studio-${ARCH}.dmg"
+DMG_PATH="${OUT}/Backboard-Studio-${ARCH}.dmg"
 echo "Built DMG: ${DMG_PATH}"
 
 if [[ "${SKIP_SIGNING:-0}" == "1" || "${SKIP_NOTARIZATION:-0}" == "1" ]]; then
@@ -214,5 +244,5 @@ fi
 
 echo
 echo "Release size report:"
-du -sh "${VSAPP}" "${REPO_ROOT}/vscode-release/${VERSION}/${ARCH}/dmg" "${DMG_PATH}"
+du -sh "${VSAPP}" "${OUT}/dmg" "${DMG_PATH}"
 echo "DMG bytes: $(stat -f%z "${DMG_PATH}")"

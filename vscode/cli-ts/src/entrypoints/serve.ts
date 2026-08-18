@@ -133,15 +133,27 @@ export async function runServe(argv: string[]): Promise<void> {
 	);
 	const mcpToolRegistrar = new McpToolRegistrar(registry, bus);
 	mcpToolRegistrar.register({ ...mcp, warnings: [] });
+	const mcpRefreshTtlMs = 60_000;
+	let lastMcpRefreshAt = Date.now();
+	let mcpRefreshInFlight: Promise<void> | undefined;
 	const syncMcpToolUpdates = async (signal: AbortSignal): Promise<void> => {
-		const [tools, prompts, resources] = await Promise.all([
-			mcpManager.refreshTools(signal),
-			mcpManager.refreshPrompts(signal),
-			mcpManager.refreshResources(signal),
-		]);
-		mcpToolRegistrar.applyRefresh(tools);
-		mcpToolRegistrar.emitWarnings(prompts.warnings);
-		mcpToolRegistrar.emitWarnings(resources.warnings);
+		if (Date.now() - lastMcpRefreshAt < mcpRefreshTtlMs) return;
+		if (!mcpRefreshInFlight) {
+			mcpRefreshInFlight = (async () => {
+				const [tools, prompts, resources] = await Promise.all([
+					mcpManager.refreshTools(signal),
+					mcpManager.refreshPrompts(signal),
+					mcpManager.refreshResources(signal),
+				]);
+				mcpToolRegistrar.applyRefresh(tools);
+				mcpToolRegistrar.emitWarnings(prompts.warnings);
+				mcpToolRegistrar.emitWarnings(resources.warnings);
+				lastMcpRefreshAt = Date.now();
+			})().finally(() => {
+				mcpRefreshInFlight = undefined;
+			});
+		}
+		await mcpRefreshInFlight;
 	};
 	mcpController = new McpController({
 		cwd: config.cwd,
@@ -198,6 +210,8 @@ export async function runServe(argv: string[]): Promise<void> {
 		checkpoints,
 		permissions,
 		syncDynamicTools: syncMcpToolUpdates,
+		finalVerificationNudge: false,
+		todoReconciliation: false,
 		startupEnvironmentPrompt,
 		getDurableSession: () => ({
 			sessionId,

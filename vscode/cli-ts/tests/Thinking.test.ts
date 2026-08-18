@@ -24,13 +24,21 @@ function metadata(
 
 describe("thinking config", () => {
 	it("parses semantic thinking intent", () => {
+		expect(parseThinking("default")).toBeUndefined();
 		expect(parseThinking("off")).toBeNull();
 		expect(parseThinking("low")).toEqual({ kind: "level", level: "low" });
+		expect(parseThinking("fast")).toEqual({ kind: "level", level: "low" });
+		expect(parseThinking("balanced")).toEqual({
+			kind: "level",
+			level: "medium",
+		});
+		expect(parseThinking("deep")).toEqual({ kind: "level", level: "high" });
 		expect(parseThinking("maximum")).toEqual({
 			kind: "level",
 			level: "max",
 		});
 		expect(parseThinking("dynamic")).toEqual({ kind: "dynamic" });
+		expect(parseThinking("adaptive")).toEqual({ kind: "dynamic" });
 		expect(parseThinking("4096")).toEqual({ kind: "budget", tokens: 4096 });
 		expect(() => parseThinking("on")).toThrow();
 	});
