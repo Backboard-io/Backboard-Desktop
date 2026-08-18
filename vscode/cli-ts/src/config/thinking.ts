@@ -15,7 +15,9 @@ import {
 	tokenFieldFor,
 } from "./thinkingCapabilities.ts";
 
-export function parseThinking(value: string): ThinkingIntent | null | undefined {
+export function parseThinking(
+	value: string,
+): ThinkingIntent | null | undefined {
 	const normalized = value.trim().toLowerCase();
 	if (["default", "provider-default", "provider_default"].includes(normalized))
 		return undefined;
