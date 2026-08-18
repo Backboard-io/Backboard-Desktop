@@ -11,7 +11,7 @@ import * as http from 'http';
 import * as https from 'https';
 import * as os from 'os';
 import * as path from 'path';
-import { deprecatedBridgeDetail, deprecatedBridgeDownloadAction, deprecatedBridgeTitle, replacementDownloadUrl, replacementManifestBaseUrl, shouldShowDeprecatedBridgeNotice, shouldUseReplacementManifest } from './migrationNotice';
+import { deprecatedBridgeDetail, deprecatedBridgeDownloadAction, deprecatedBridgeTitle, getReplacementDownloadUrl, replacementManifestBaseUrl, shouldShowDeprecatedBridgeNotice, shouldUseReplacementManifest } from './migrationNotice';
 import { macUpdateInstallerScript } from './updatesInstaller';
 
 interface UpdateManifest {
@@ -30,7 +30,14 @@ let backboardUpdateOutput: vscode.OutputChannel | undefined;
 
 export function initializeBackboardUpdates(context: vscode.ExtensionContext, output: vscode.OutputChannel | undefined): void {
 	backboardUpdateOutput = output;
-	showDeprecatedBridgeNotice(context);
+	// The deprecated Bagel bridge is intentionally a manual certificate migration.
+	// It must show only the direct-DMG notice: offering Install and Restart here
+	// sends the user through the cross-certificate in-place updater that this
+	// bridge exists to avoid.
+	if (showDeprecatedBridgeNotice(context)) {
+		backboardUpdateOutput?.appendLine('[updates] automatic updater disabled for deprecated Alpha bridge');
+		return;
+	}
 	backboardUpdateStatusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
 	backboardUpdateStatusItem.command = 'backboard.installAvailableUpdate';
 	context.subscriptions.push(backboardUpdateStatusItem);
@@ -43,12 +50,13 @@ export function initializeBackboardUpdates(context: vscode.ExtensionContext, out
 	startBackboardUpdateChecks(context);
 }
 
-function showDeprecatedBridgeNotice(context: vscode.ExtensionContext): void {
+function showDeprecatedBridgeNotice(context: vscode.ExtensionContext): boolean {
 	const appPath = currentMacAppPath();
 	const appName = appPath ? path.basename(appPath) : '';
 	const channel = getBackboardUpdateChannel(vscode.workspace.getConfiguration('backboard'));
-	if (!shouldShowDeprecatedBridgeNotice(readCurrentAppVersion(), channel, appName, process.platform)) {
-		return;
+	const replacementDownloadUrl = getReplacementDownloadUrl(process.arch);
+	if (!replacementDownloadUrl || !shouldShowDeprecatedBridgeNotice(readCurrentAppVersion(), channel, appName, process.platform)) {
+		return false;
 	}
 
 	let presented = false;
@@ -72,7 +80,7 @@ function showDeprecatedBridgeNotice(context: vscode.ExtensionContext): void {
 
 	if (vscode.window.state.focused) {
 		present();
-		return;
+		return true;
 	}
 
 	// Wait until the window receives focus so the bottom-right notification is
@@ -86,6 +94,7 @@ function showDeprecatedBridgeNotice(context: vscode.ExtensionContext): void {
 	if (vscode.window.state.focused) {
 		present();
 	}
+	return true;
 }
 
 let backboardUpdateInstallInProgress = false;

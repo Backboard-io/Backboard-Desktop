@@ -12,8 +12,9 @@ import {
 	deprecatedBridgeTitle,
 	deprecatedSandboxBridgeAppName,
 	deprecatedStableBridgeAppName,
-	replacementDownloadUrl,
+	getReplacementDownloadUrl,
 	replacementManifestBaseUrl,
+	replacementReleaseVersion,
 	shouldShowDeprecatedBridgeNotice,
 	shouldUseReplacementManifest
 } from '../migrationNotice';
@@ -43,17 +44,17 @@ describe('deprecated bridge notice', () => {
 		assert.deepStrictEqual(results, [true, true, false, false, false]);
 	});
 
-	test('links directly to the replacement 2.5.11 stable M-series DMG', () => {
-		const url = new URL(replacementDownloadUrl);
-		assert.deepStrictEqual({
-			protocol: url.protocol,
-			host: url.host,
-			path: url.pathname
-		}, {
-			protocol: 'https:',
-			host: 'backboard-studio-releases.s3.ca-central-1.amazonaws.com',
-			path: '/ide-releases/stable/2.5.11/bbide/macos-aarch64/Backboard-Studio-aarch64.dmg'
-		});
+	test('links directly to the matching 3.0.0 stable Mac DMG', () => {
+		assert.equal(
+			getReplacementDownloadUrl('arm64'),
+			'https://backboard-studio-releases.s3.ca-central-1.amazonaws.com/ide-releases/stable/3.0.0/bbide/macos-aarch64/Backboard-Studio-aarch64.dmg'
+		);
+		assert.equal(
+			getReplacementDownloadUrl('x64'),
+			'https://backboard-studio-releases.s3.ca-central-1.amazonaws.com/ide-releases/stable/3.0.0/bbide/macos-x86_64/Backboard-Studio-x86_64.dmg'
+		);
+		assert.equal(getReplacementDownloadUrl('ia32'), undefined);
+		assert.equal(replacementReleaseVersion, '3.0.0');
 	});
 
 	test('routes replacement sandbox and stable releases to the dedicated update manifest', () => {

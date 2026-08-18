@@ -134,14 +134,13 @@ test('gracefully quits, updates, and relaunches a disposable installed-app clone
 	const statusPath = path.join(testRoot, 'install-backboard-update.status');
 	const logPath = path.join(testRoot, 'install-backboard-update.log');
 	const userDataPath = path.join(testRoot, 'user-data');
-	const initialUserDataPath = path.join(testRoot, 'initial-user-data');
-	const initialExtensionsPath = path.join(initialUserDataPath, 'extensions');
+	const extensionsPath = path.join(userDataPath, 'extensions');
 	let initialAppPid: number | undefined;
 
 	try {
 		execFileSync('/usr/bin/ditto', [sourceApp, appPath], { stdio: 'inherit' });
 		fs.writeFileSync(installerPath, macUpdateInstallerScript(), { mode: 0o700 });
-		fs.mkdirSync(initialExtensionsPath, { recursive: true });
+		fs.mkdirSync(extensionsPath, { recursive: true });
 
 		const executablePath = fs.realpathSync(path.join(appPath, 'Contents', 'MacOS', 'Backboard Studio'));
 		execFileSync('/usr/bin/open', [
@@ -149,9 +148,9 @@ test('gracefully quits, updates, and relaunches a disposable installed-app clone
 			appPath,
 			'--args',
 			'--user-data-dir',
-			initialUserDataPath,
+			userDataPath,
 			'--extensions-dir',
-			initialExtensionsPath
+			extensionsPath
 		]);
 		initialAppPid = await waitForAppPid(executablePath, 30_000);
 		await new Promise(resolve => setTimeout(resolve, 5_000));

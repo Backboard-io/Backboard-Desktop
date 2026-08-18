@@ -71,6 +71,19 @@ describe('macUpdateInstallerScript', () => {
 		assert.doesNotMatch(script, /local status=/);
 	});
 
+	test('forces LaunchServices to open the exact swapped app after a certificate change', () => {
+		const script = macUpdateInstallerScript();
+		const launchFunctionStart = script.indexOf('launch_app() {');
+		const launchFunctionEnd = script.indexOf('\n}\n\nconfirm_app_stable() {', launchFunctionStart);
+		assert.ok(launchFunctionStart >= 0);
+		assert.ok(launchFunctionEnd > launchFunctionStart);
+		const launchFunction = script.slice(launchFunctionStart, launchFunctionEnd + 2);
+
+		assert.match(launchFunction, /\/usr\/bin\/open -n "\$target_app" --args --user-data-dir/);
+		assert.match(launchFunction, /\/usr\/bin\/open -n "\$target_app" >\/dev\/null/);
+		assert.doesNotMatch(launchFunction, /\/usr\/bin\/open "\$target_app"/);
+	});
+
 	test('rejects an updated app that exits during the stability window', { skip: process.platform !== 'darwin' }, () => {
 		const script = macUpdateInstallerScript();
 		const functionStart = script.indexOf('confirm_app_stable() {');

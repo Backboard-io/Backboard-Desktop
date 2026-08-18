@@ -264,7 +264,11 @@ launch_app() {
       /bin/mkdir -p "$isolated_user_data_dir/extensions"
       /usr/bin/open -n "$target_app" --args --user-data-dir "$isolated_user_data_dir" --extensions-dir "$isolated_user_data_dir/extensions" >/dev/null 2>&1 || true
     else
-      /usr/bin/open "$target_app" >/dev/null 2>&1 || true
+      # Force LaunchServices to start this exact newly swapped app. Plain open
+      # can reuse a stale registration for the previous app when the
+      # bundle identifier is unchanged but the Developer ID certificate has
+      # changed, causing the replacement process to exit immediately.
+      /usr/bin/open -n "$target_app" >/dev/null 2>&1 || true
     fi
     for _ in {1..20}; do
       if app_running "$target_app"; then
@@ -355,7 +359,7 @@ handle_exit() {
     write_status "failed"
     if [[ -d "$APP_PATH" ]] && ! app_running "$APP_PATH"; then
       register_app "$APP_PATH"
-      /usr/bin/open "$APP_PATH" >/dev/null 2>&1 || true
+      /usr/bin/open -n "$APP_PATH" >/dev/null 2>&1 || true
     fi
   fi
   exit "$exit_code"

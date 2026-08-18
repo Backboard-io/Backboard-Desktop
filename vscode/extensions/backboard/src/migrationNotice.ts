@@ -6,12 +6,24 @@
 export const deprecatedBridgeVersion = '2.5.9';
 export const deprecatedSandboxBridgeAppName = 'Backboard Studio Sandbox.app';
 export const deprecatedStableBridgeAppName = 'Backboard Studio.app';
-export const replacementVersion = '2.5.10';
+export const replacementManifestMinimumVersion = '2.5.10';
+export const replacementReleaseVersion = '3.0.0';
 export const replacementManifestBaseUrl = 'https://backboard-studio-releases.s3.ca-central-1.amazonaws.com/ide-releases';
-export const replacementDownloadUrl = 'https://backboard-studio-releases.s3.ca-central-1.amazonaws.com/ide-releases/stable/2.5.11/bbide/macos-aarch64/Backboard-Studio-aarch64.dmg';
 export const deprecatedBridgeTitle = 'Backboard Studio Alpha is deprecated.';
 export const deprecatedBridgeDetail = 'Download Backboard Studio Beta to continue. Your settings and projects will remain available.';
 export const deprecatedBridgeDownloadAction = 'Download Beta';
+
+export function getReplacementDownloadUrl(architecture: string): string | undefined {
+	const releaseArchitecture = architecture === 'arm64'
+		? 'aarch64'
+		: architecture === 'x64'
+			? 'x86_64'
+			: undefined;
+	if (!releaseArchitecture) {
+		return undefined;
+	}
+	return `${replacementManifestBaseUrl}/stable/${replacementReleaseVersion}/bbide/macos-${releaseArchitecture}/Backboard-Studio-${releaseArchitecture}.dmg`;
+}
 
 export function shouldShowDeprecatedBridgeNotice(
 	version: string,
@@ -34,7 +46,7 @@ export function shouldUseReplacementManifest(
 	return platform === 'darwin'
 		&& ((channel === 'sandbox' && appName === deprecatedSandboxBridgeAppName)
 			|| (channel === 'stable' && appName === deprecatedStableBridgeAppName))
-		&& compareNumericVersions(version, replacementVersion) >= 0;
+		&& compareNumericVersions(version, replacementManifestMinimumVersion) >= 0;
 }
 
 function compareNumericVersions(left: string, right: string): number {
