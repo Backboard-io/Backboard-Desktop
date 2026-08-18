@@ -46,6 +46,46 @@ describe("ToolScheduler", () => {
 		expect(order.slice(0, 2).sort()).toEqual(["start:A", "start:B"]);
 	});
 
+	it("starts every announced read as soon as the streamed prefix is ready", async () => {
+		const order: string[] = [];
+		const registry = new ToolRegistry([
+			new TestTool({
+				name: "A",
+				readOnly: true,
+				delayMs: 20,
+				onStart: (name) => order.push(`start:${name}`),
+			}),
+			new TestTool({
+				name: "B",
+				readOnly: true,
+				delayMs: 20,
+				onStart: (name) => order.push(`start:${name}`),
+			}),
+		]);
+		const scheduler = new ToolScheduler(registry, new EventBus());
+		const round = scheduler.createRound(
+			makeContext(new AbortController().signal),
+		);
+		const a = callRef("A");
+		const b = callRef("B");
+
+		// Some providers announce the entire batch before any call's arguments
+		// finish. B cannot pass incomplete A, but offering A should release both.
+		round.announce(a.id, a.name);
+		round.announce(b.id, b.name);
+		round.offer(b);
+		expect(order).toEqual([]);
+		round.offer(a);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(order.sort()).toEqual(["start:A", "start:B"]);
+
+		const outputs = await round.finalize([a, b]);
+		expect(outputs.map((output) => output.tool_call_id)).toEqual([
+			"call_A",
+			"call_B",
+		]);
+	});
+
 	it("runs non-concurrency-safe tools serially in order", async () => {
 		const order: string[] = [];
 		const registry = new ToolRegistry([

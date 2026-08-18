@@ -4,7 +4,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-BUCKET="${BUCKET:-ide-bucket-059623506914-ca-central-1-an}"
+BUCKET="${BUCKET:-backboard-studio-releases}"
 REGION="${REGION:-ca-central-1}"
 CHANNEL="${CHANNEL:-stable}"
 ASSET="${ASSET:-bbide}"
@@ -278,11 +278,16 @@ for arch in "${ARCHES[@]}"; do
   fi
 
   echo "Running mandatory macOS release-readiness validation for ${arch}"
-  "${REPO_ROOT}/scripts/validate_macos_release.sh" \
-    --version "${VERSION}" \
-    --arch "${arch}" \
-    --channel "${CHANNEL}" \
+  validation_args=(
+    --version "${VERSION}"
+    --arch "${arch}"
+    --channel "${CHANNEL}"
     --dmg "${dmg_path}"
+  )
+  if [[ -n "${EXPECTED_TEAM_ID:-}" ]]; then
+    validation_args+=(--expected-team-id "${EXPECTED_TEAM_ID}")
+  fi
+  "${REPO_ROOT}/scripts/validate_macos_release.sh" "${validation_args[@]}"
   echo
 
   version_prefix="ide-releases/${CHANNEL}/${VERSION}/${ASSET}"

@@ -35,16 +35,47 @@ DMG_NAME="Backboard-Studio-${ARCH}.dmg"
 DMG_PATH="${OUT}/${DMG_NAME}"
 DMG_FORMAT="${DMG_FORMAT:-ULMO}"
 DMG_ASSETS_DIR="${DMG_ASSETS_DIR:-${REPO_ROOT}/scripts/dmg-assets}"
-P12_PATH="${P12_PATH:-${HOME}/.backboard/apple-notarization/developer-id-application.p12}"
-P12_PASSWORD_PATH="${P12_PASSWORD_PATH:-${HOME}/.backboard/apple-notarization/p12-password.txt}"
-ASC_KEY_PATH="${ASC_KEY_PATH:-${HOME}/.backboard/apple-notarization/AuthKey_394Z48F5U4.p8}"
 SKIP_NOTARIZATION="${SKIP_NOTARIZATION:-0}"
 SKIP_SIGNING="${SKIP_SIGNING:-0}"
-APPLE_NOTARIZATION_KEY_ID="${APPLE_NOTARIZATION_KEY_ID:-394Z48F5U4}"
-APPLE_NOTARIZATION_ISSUER_ID="${APPLE_NOTARIZATION_ISSUER_ID:-8ff632f9-6430-4bcf-aa2b-115b23c1150e}"
+BACKBOARD_SIGNING_PROFILE="${BACKBOARD_SIGNING_PROFILE:-robert}"
+
+case "${BACKBOARD_SIGNING_PROFILE}" in
+  robert)
+    DEFAULT_SIGNING_DIR="${HOME}/.backboard/apple-notarization-robert"
+    DEFAULT_NOTARIZATION_KEY_ID="H4T54P4BTU"
+    DEFAULT_NOTARIZATION_ISSUER_ID="11ee54e4-9610-4049-b9ed-d630e07950db"
+    DEFAULT_IDENTITY="Developer ID Application: Robert Imbeault (M4UYB6AG86)"
+    DEFAULT_EXPECTED_TEAM_ID="M4UYB6AG86"
+    ;;
+  bagel)
+    DEFAULT_SIGNING_DIR="${HOME}/.backboard/apple-notarization"
+    DEFAULT_NOTARIZATION_KEY_ID="394Z48F5U4"
+    DEFAULT_NOTARIZATION_ISSUER_ID="8ff632f9-6430-4bcf-aa2b-115b23c1150e"
+    DEFAULT_IDENTITY="Developer ID Application: Bagel Ventures LLC (VR8YRDMDSP)"
+    DEFAULT_EXPECTED_TEAM_ID="VR8YRDMDSP"
+    ;;
+  custom)
+    DEFAULT_SIGNING_DIR=""
+    DEFAULT_NOTARIZATION_KEY_ID=""
+    DEFAULT_NOTARIZATION_ISSUER_ID=""
+    DEFAULT_IDENTITY=""
+    DEFAULT_EXPECTED_TEAM_ID=""
+    ;;
+  *)
+    echo "Unsupported BACKBOARD_SIGNING_PROFILE=${BACKBOARD_SIGNING_PROFILE}; expected robert, bagel, or custom." >&2
+    exit 1
+    ;;
+esac
+
+P12_PATH="${P12_PATH:-${DEFAULT_SIGNING_DIR:+${DEFAULT_SIGNING_DIR}/developer-id-application.p12}}"
+P12_PASSWORD_PATH="${P12_PASSWORD_PATH:-${DEFAULT_SIGNING_DIR:+${DEFAULT_SIGNING_DIR}/p12-password.txt}}"
+ASC_KEY_PATH="${ASC_KEY_PATH:-${DEFAULT_SIGNING_DIR:+${DEFAULT_SIGNING_DIR}/AuthKey_${DEFAULT_NOTARIZATION_KEY_ID}.p8}}"
+APPLE_NOTARIZATION_KEY_ID="${APPLE_NOTARIZATION_KEY_ID:-${DEFAULT_NOTARIZATION_KEY_ID}}"
+APPLE_NOTARIZATION_ISSUER_ID="${APPLE_NOTARIZATION_ISSUER_ID:-${DEFAULT_NOTARIZATION_ISSUER_ID}}"
 KEYCHAIN_NAME="${KEYCHAIN_NAME:-backboard-vscode-signing.keychain}"
 KEYCHAIN_PATH="${KEYCHAIN_PATH:-${HOME}/Library/Keychains/${KEYCHAIN_NAME}-db}"
-IDENTITY="${IDENTITY:-}"
+IDENTITY="${IDENTITY:-${DEFAULT_IDENTITY}}"
+EXPECTED_TEAM_ID="${EXPECTED_TEAM_ID:-${DEFAULT_EXPECTED_TEAM_ID}}"
 
 if [[ -z "${VERSION}" ]]; then
   echo "Missing VERSION. Example: VERSION=1.3.10 $0" >&2
@@ -240,9 +271,17 @@ require_file "${VSAPP}"
 require_file "${VSAPP}/Contents/Info.plist"
 require_file "${VSAPP}/Contents/Resources/app"
 if [[ "${SKIP_SIGNING}" != "1" ]]; then
+  if [[ -z "${P12_PATH}" || -z "${P12_PASSWORD_PATH}" || -z "${IDENTITY}" || -z "${EXPECTED_TEAM_ID}" ]]; then
+    echo "Signing profile ${BACKBOARD_SIGNING_PROFILE} is incomplete. Set P12_PATH, P12_PASSWORD_PATH, IDENTITY, and EXPECTED_TEAM_ID." >&2
+    exit 1
+  fi
   require_file "${P12_PATH}"
 fi
 if [[ "${SKIP_SIGNING}" != "1" && "${SKIP_NOTARIZATION}" != "1" ]]; then
+  if [[ -z "${ASC_KEY_PATH}" || -z "${APPLE_NOTARIZATION_KEY_ID}" || -z "${APPLE_NOTARIZATION_ISSUER_ID}" ]]; then
+    echo "Notarization profile ${BACKBOARD_SIGNING_PROFILE} is incomplete." >&2
+    exit 1
+  fi
   require_file "${ASC_KEY_PATH}"
 fi
 if [[ "${SKIP_SIGNING}" != "1" ]]; then
@@ -338,6 +377,9 @@ if [[ "${SKIP_SIGNING}" != "1" && -z "${MACOS_CERTIFICATE_PASSWORD:-}" ]]; then
 fi
 
 echo "Packaging ${VSAPP} for ${CHANNEL} updates"
+if [[ "${SKIP_SIGNING}" != "1" ]]; then
+  echo "Signing profile: ${BACKBOARD_SIGNING_PROFILE} (${EXPECTED_TEAM_ID})"
+fi
 rm -rf "${OUT}"
 mkdir -p "${OUT}/dmg"
 cp -R "${VSAPP}" "${APP_PATH}"
@@ -699,12 +741,22 @@ codesign \
   "${APP_PATH}" \
   -v
 codesign --verify --deep --strict --verbose=4 "${APP_PATH}"
+SIGNED_APP_TEAM_ID="$(codesign -dvvv "${APP_PATH}" 2>&1 | awk -F= '/^TeamIdentifier=/ { print $2; exit }')"
+if [[ "${SIGNED_APP_TEAM_ID}" != "${EXPECTED_TEAM_ID}" ]]; then
+  echo "Signed app team mismatch: expected ${EXPECTED_TEAM_ID}, got ${SIGNED_APP_TEAM_ID:-missing}." >&2
+  exit 1
+fi
 
 echo "Creating DMG"
 create_dmg "${OUT}/dmg"
 
 echo "Signing DMG"
 codesign --keychain "${KEYCHAIN_PATH}" --deep --force --timestamp --options runtime --sign "${IDENTITY_HASH}" "${DMG_PATH}" -v
+SIGNED_DMG_TEAM_ID="$(codesign -dvvv "${DMG_PATH}" 2>&1 | awk -F= '/^TeamIdentifier=/ { print $2; exit }')"
+if [[ "${SIGNED_DMG_TEAM_ID}" != "${EXPECTED_TEAM_ID}" ]]; then
+  echo "Signed DMG team mismatch: expected ${EXPECTED_TEAM_ID}, got ${SIGNED_DMG_TEAM_ID:-missing}." >&2
+  exit 1
+fi
 
 if [[ "${SKIP_NOTARIZATION}" == "1" ]]; then
   echo "Skipping notarization because SKIP_NOTARIZATION=1"

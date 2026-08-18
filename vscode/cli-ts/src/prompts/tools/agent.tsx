@@ -13,9 +13,10 @@ How to write a good prompt:
 5. Expected output format (e.g. file paths + summary, patch, checklist):
 
 Usage notes:
-1. If you need parallel subagents, issue multiple Agent tool calls in the same assistant message.
+1. If you need parallel subagents, issue multiple Agent tool calls in the same assistant message instead of waiting for each result before spawning the next.
 2. When the sub-agent is done, it returns a single message to you. The result is not shown to the user unless you summarize it.
 3. Clearly tell the sub-agent whether you expect it to write code or only do research, and specify exactly what it should return.
+4. Set \`read_only: true\` for research-only workers. The runtime enforces read-only tools and may start those workers while your response is still streaming. Leave it false or omit it when the worker must edit or run commands.
 
 ### Parameters
 
@@ -23,6 +24,7 @@ Usage notes:
 | --- | --- | --- | --- |
 | \`subagent_type\` | \`string enum: worker, rlm\` | no | "worker" (default) runs a tool-using sub-agent over the project; "rlm" analyzes the prompt and provided variables in a JavaScript REPL. For rlm, put all task detail in prompt, pass structured data through variables when useful, and finish with \`SUBMIT(answer)\`. |
 | \`prompt\` | \`string\` | yes | The full delegated prompt, including all task detail, context, and report requirements. |
+| \`read_only\` | \`boolean\` | no | Restrict a worker to non-mutating workspace tools. Use for parallel investigation that can begin while the parent response streams. |
 | \`variables\` | \`object\` | no | Optional JSON object for rlm sub-agents. Values are available as \`inputs\`; valid non-reserved keys are also direct variables. Use this for file trees, selected file contents, examples, or constraints gathered by the parent. |
 | \`timeout_ms\` | \`number\` | no | Optional wall-clock budget for rlm sub-agents. When the budget expires, the RLM returns a partial-progress report instead of continuing normal code execution. |`,
 );

@@ -73,6 +73,8 @@ swap_staged_app() {
   local backup_app="$3"
   local expected_bundle_identifier="$4"
   local expected_version="$5"
+  local backup_owner_id="\${6:-}"
+  local backup_group_id="\${7:-}"
 
   validate_app "$staged_app" "$expected_bundle_identifier" "$expected_version"
   if [[ ! -d "$app_path" ]]; then
@@ -94,6 +96,18 @@ swap_staged_app() {
     /bin/mv "$app_path" "$staged_app" || true
     /bin/mv "$backup_app" "$app_path" || true
     return 1
+  fi
+
+  # The backup lives in the caller-owned update directory so it can remain
+  # available through the post-launch stability check without requiring a
+  # second administrator prompt to remove it. If ownership cannot be fixed,
+  # restore the previous app immediately while this operation is privileged.
+  if [[ -n "$backup_owner_id" && -n "$backup_group_id" ]]; then
+    if ! /usr/sbin/chown -R "$backup_owner_id:$backup_group_id" "$backup_app"; then
+      /bin/mv "$app_path" "$staged_app" || true
+      /bin/mv "$backup_app" "$app_path" || true
+      return 1
+    fi
   fi
 }
 
@@ -170,11 +184,12 @@ STATUS_PATH="$8"
 ISOLATED_TEST_USER_DATA_DIR="\${9:-}"
 INSTALLER_PATH="$0"
 APP_PARENT="$(/usr/bin/dirname "$APP_PATH")"
+UPDATE_WORK_DIR="$(/usr/bin/dirname "$INSTALLER_PATH")"
 SAFE_VERSION="\${VERSION//[^a-zA-Z0-9._-]/_}"
 INSTALL_TOKEN="$SAFE_VERSION.$$.\${RANDOM}"
-STAGED_APP="$APP_PARENT/.$APP_NAME.update-$INSTALL_TOKEN"
-BACKUP_APP="$APP_PARENT/.$APP_NAME.backup-$INSTALL_TOKEN"
-FAILED_APP="$APP_PARENT/.$APP_NAME.failed-$INSTALL_TOKEN"
+STAGED_APP="$UPDATE_WORK_DIR/.$APP_NAME.update-$INSTALL_TOKEN"
+BACKUP_APP="$UPDATE_WORK_DIR/.$APP_NAME.backup-$INSTALL_TOKEN"
+FAILED_APP="$UPDATE_WORK_DIR/.$APP_NAME.failed-$INSTALL_TOKEN"
 MOUNT_POINT="$(/usr/bin/mktemp -d /tmp/backboard-studio-update-mount.XXXXXX)"
 STATUS_STATE="starting"
 
@@ -193,21 +208,17 @@ app_running() {
   [[ -n "$executable" ]] && /usr/bin/pgrep -f "$target_app/Contents/MacOS/$executable" >/dev/null 2>&1
 }
 
-app_bundle_running() {
-  local target_app="$1"
-  /usr/bin/pgrep -f "$target_app/Contents/" >/dev/null 2>&1
-}
-
 wait_for_current_app_exit() {
   local target_app="$1"
   local current_pid="$2"
   local bundle_identifier="$3"
 
-  # The PID supplied by the extension is its extension host. The main process
-  # and helpers can outlive it briefly, so replacement must wait for both the
-  # extension host and every process running from the installed app bundle.
-  for _ in {1..60}; do
-    if ! /bin/ps -p "$current_pid" >/dev/null 2>&1 && ! app_bundle_running "$target_app"; then
+  # The PID supplied by the extension is its extension host. Wait for it and
+  # the main application process to exit. Helper and crash-reporting processes
+  # can linger after a clean quit and must never be treated as permission to
+  # terminate the entire app bundle.
+  for _ in {1..120}; do
+    if ! /bin/ps -p "$current_pid" >/dev/null 2>&1 && ! app_running "$target_app"; then
       echo "Confirmed current Backboard Studio processes exited cleanly."
       return 0
     fi
@@ -216,25 +227,15 @@ wait_for_current_app_exit() {
 
   echo "Backboard Studio is still running; requesting a graceful quit."
   /usr/bin/osascript -e "tell application id \"$bundle_identifier\" to quit" >/dev/null 2>&1 || true
-  for _ in {1..20}; do
-    if ! /bin/ps -p "$current_pid" >/dev/null 2>&1 && ! app_bundle_running "$target_app"; then
+  for _ in {1..120}; do
+    if ! /bin/ps -p "$current_pid" >/dev/null 2>&1 && ! app_running "$target_app"; then
       echo "Confirmed current Backboard Studio processes exited after quit request."
       return 0
     fi
     /bin/sleep 0.5
   done
 
-  echo "Backboard Studio did not quit gracefully; stopping remaining app processes."
-  /usr/bin/pkill -f "$target_app/Contents/" >/dev/null 2>&1 || true
-  for _ in {1..20}; do
-    if ! /bin/ps -p "$current_pid" >/dev/null 2>&1 && ! app_bundle_running "$target_app"; then
-      echo "Confirmed all current Backboard Studio processes stopped."
-      return 0
-    fi
-    /bin/sleep 0.5
-  done
-
-  echo "Current Backboard Studio processes did not exit; leaving the installed app unchanged."
+  echo "Backboard Studio did not quit cleanly; canceling the update and leaving the installed app unchanged."
   return 1
 }
 
@@ -326,7 +327,7 @@ run_elevated() {
   done
   /usr/bin/osascript - "$command" <<'APPLESCRIPT'
 on run argv
-  do shell script (item 1 of argv) with administrator privileges
+  do shell script (item 1 of argv) with administrator privileges with prompt "Backboard Studio needs permission to install this verified update."
 end run
 APPLESCRIPT
 }
@@ -341,11 +342,7 @@ cleanup() {
   done
   /bin/rmdir "$MOUNT_POINT" >/dev/null 2>&1 || true
   if [[ -e "$STAGED_APP" ]]; then
-    if [[ -w "$APP_PARENT" || -w "$STAGED_APP" ]]; then
-      /bin/rm -rf "$STAGED_APP" >/dev/null 2>&1 || true
-    else
-      run_elevated remove-backup "$STAGED_APP" >/dev/null 2>&1 || true
-    fi
+    /bin/rm -rf "$STAGED_APP" >/dev/null 2>&1 || true
   fi
 }
 
@@ -372,14 +369,12 @@ if [[ ! -d "$SOURCE_APP" ]]; then
   exit 1
 fi
 
-APP_OWNER_ID="$(/usr/bin/stat -f '%u' "$APP_PATH")"
-APP_GROUP_ID="$(/usr/bin/stat -f '%g' "$APP_PATH")"
+CALLER_OWNER_ID="$(/usr/bin/id -u)"
+CALLER_GROUP_ID="$(/usr/bin/id -g)"
 NEEDS_ELEVATION=0
-if [[ -w "$APP_PARENT" ]]; then
-  prepare_staged_app "$SOURCE_APP" "$STAGED_APP" "$BUNDLE_IDENTIFIER" "$VERSION"
-else
+prepare_staged_app "$SOURCE_APP" "$STAGED_APP" "$BUNDLE_IDENTIFIER" "$VERSION"
+if [[ ! -w "$APP_PARENT" ]]; then
   NEEDS_ELEVATION=1
-  run_elevated prepare "$SOURCE_APP" "$STAGED_APP" "$BUNDLE_IDENTIFIER" "$VERSION" "$APP_OWNER_ID" "$APP_GROUP_ID"
 fi
 
 echo "Prepared and verified Backboard Studio $VERSION at $STAGED_APP"
@@ -392,7 +387,7 @@ fi
 if [[ "$NEEDS_ELEVATION" == "0" ]]; then
   swap_staged_app "$APP_PATH" "$STAGED_APP" "$BACKUP_APP" "$BUNDLE_IDENTIFIER" "$VERSION"
 else
-  run_elevated swap "$APP_PATH" "$STAGED_APP" "$BACKUP_APP" "$BUNDLE_IDENTIFIER" "$VERSION"
+  run_elevated swap "$APP_PATH" "$STAGED_APP" "$BACKUP_APP" "$BUNDLE_IDENTIFIER" "$VERSION" "$CALLER_OWNER_ID" "$CALLER_GROUP_ID"
 fi
 
 register_app "$APP_PATH"
@@ -408,11 +403,7 @@ if ! launch_app "$APP_PATH" "$BUNDLE_IDENTIFIER" "$ISOLATED_TEST_USER_DATA_DIR" 
   exit 1
 fi
 
-if [[ "$NEEDS_ELEVATION" == "0" ]]; then
-  remove_backup_app "$BACKUP_APP"
-else
-  run_elevated remove-backup "$BACKUP_APP"
-fi
+remove_backup_app "$BACKUP_APP"
 
 echo "[$(/bin/date -u '+%Y-%m-%dT%H:%M:%SZ')] Installed and launched Backboard Studio $VERSION"
 write_status "installed"

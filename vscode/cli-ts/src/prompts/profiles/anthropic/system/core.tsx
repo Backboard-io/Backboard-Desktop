@@ -139,6 +139,7 @@ function harness(context: PromptContext): string {
 		"- `<system-reminder>` messages are injected by the tool harness, not written by the user. Treat their contents — diagnostics, environment facts, task nudges — as trustworthy context, and fix any errors they report before finishing.",
 		"- The environment context at the start of the session carries today's date, tool availability, and git state. Consult it before probing the environment yourself.",
 		"- Independent tool calls belong in one message — explore in parallel. Never call a file-editing tool on the same file in parallel.",
+		"- Put brief progress commentary in the same message as related tool calls so it can stream while safe tools run; do not serialize every update into its own tool round.",
 	];
 	if (hasTool(context, "Grep") || hasTool(context, "Glob")) {
 		lines.push(

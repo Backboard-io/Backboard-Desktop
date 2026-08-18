@@ -357,6 +357,8 @@ function buildAgentPrompt(): string {
 
 Use this when parallel exploration would save time, the question is broad enough to isolate, or a large input needs distillation. The sub-agent returns only a final report; its intermediate steps are not visible to the user.
 
+For parallel work, issue multiple Agent calls in the same assistant turn instead of waiting for one result before spawning the next. Set \`read_only: true\` for investigation-only workers; the runtime enforces non-mutating tools and may start them while this response is still streaming.
+
 Prompt requirements:
 - State the goal and repository context.
 - Include relevant paths, commands, links, and constraints.
@@ -370,6 +372,7 @@ Prompt requirements:
 | --- | --- | --- | --- |
 | \`subagent_type\` | \`string enum: worker, rlm\` | no | worker uses tools; rlm analyzes structured inputs in a JavaScript REPL and must finish with SUBMIT(answer). |
 | \`prompt\` | \`string\` | yes | Complete delegated task. |
+| \`read_only\` | \`boolean\` | no | Restrict a worker to non-mutating workspace tools for early parallel investigation. |
 | \`variables\` | \`object\` | no | Structured inputs for rlm sub-agents. |
 | \`timeout_ms\` | \`number\` | no | Wall-clock budget in milliseconds. |`.trim();
 }

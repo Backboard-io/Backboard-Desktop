@@ -144,24 +144,37 @@ function runRipgrepFiles(
 		for (const pattern of patterns) args.push("--glob", pattern);
 		for (const pattern of excludePatterns) args.push("--glob", `!${pattern}`);
 		const child = spawn("rg", args, { cwd, signal: ctx.signal });
-		let stdout = "";
+		const files: string[] = [];
+		let remainder = "";
 		let stderr = "";
+		let capped = false;
 		child.stdout?.on("data", (chunk) => {
-			stdout += chunk.toString();
-			if (stdout.length > 80_000) child.kill("SIGTERM");
+			if (capped) return;
+			const lines = `${remainder}${chunk.toString()}`.split("\n");
+			remainder = lines.pop() ?? "";
+			for (const line of lines) {
+				if (line) files.push(line);
+				if (files.length >= MAX_RESULTS) {
+					capped = true;
+					child.kill("SIGTERM");
+					break;
+				}
+			}
 		});
 		child.stderr?.on("data", (chunk) => {
 			stderr += chunk.toString();
 		});
 		child.on("error", (err) => reject(err));
-		child.on("close", (code) => {
-			if (code !== 0 && code !== 1) {
-				reject(new Error(stderr || `ripgrep failed (exit ${code ?? 1})`));
+		child.on("close", (code, signal) => {
+			if (!capped && code !== 0 && code !== 1) {
+				const status = signal
+					? `signal ${signal}`
+					: `exit ${code ?? "unknown"}`;
+				reject(new Error(stderr || `ripgrep failed (${status})`));
 				return;
 			}
-			resolvePromise(
-				stdout.trim() ? stdout.trimEnd().split("\n").slice(0, MAX_RESULTS) : [],
-			);
+			if (!capped && remainder) files.push(remainder);
+			resolvePromise(files.slice(0, MAX_RESULTS));
 		});
 	});
 }

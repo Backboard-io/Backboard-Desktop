@@ -21,7 +21,7 @@ interface UpdateManifest {
 	readonly size_bytes?: number;
 }
 
-const defaultUpdateManifestBaseUrl = 'https://ide-bucket-059623506914-ca-central-1-an.s3.ca-central-1.amazonaws.com/ide-releases';
+const defaultUpdateManifestBaseUrl = 'https://backboard-studio-releases.s3.ca-central-1.amazonaws.com/ide-releases';
 const stableUpdateChannel = 'stable';
 const sandboxUpdateChannel = 'sandbox';
 const supportedUpdateChannels = new Set([stableUpdateChannel, sandboxUpdateChannel]);

@@ -174,11 +174,16 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 		this.domNode.append(this._questionContainer);
 		this._headerActionsContainer = dom.$('.chat-question-header-actions');
 
-		const collapseToggleTitle = localize('chat.questionCarousel.collapseTitle', 'Collapse Questions');
-		const collapseButton = interactiveStore.add(new Button(this._headerActionsContainer, { ...defaultButtonStyles, secondary: true, supportIcons: true }));
-		collapseButton.element.classList.add('chat-question-collapse-toggle');
-		collapseButton.element.setAttribute('aria-label', collapseToggleTitle);
-		this._collapseButton = collapseButton;
+		// A collapse control is useful for a sequence, but adds a redundant second
+		// dismiss-looking action to the common single-question prompt.
+		if (carousel.questions.length > 1) {
+			const collapseToggleTitle = localize('chat.questionCarousel.collapseTitle', 'Collapse Questions');
+			const collapseButton = interactiveStore.add(new Button(this._headerActionsContainer, { ...defaultButtonStyles, secondary: true, supportIcons: true }));
+			collapseButton.element.classList.add('chat-question-collapse-toggle');
+			collapseButton.element.setAttribute('aria-label', collapseToggleTitle);
+			interactiveStore.add(collapseButton.onDidClick(() => this.toggleCollapsed()));
+			this._collapseButton = collapseButton;
+		}
 
 		// Close/skip button (X) - placed in header row, only shown when allowSkip is true
 		if (carousel.allowSkip) {
@@ -223,8 +228,6 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 		}
 
 		// Register event listeners
-		interactiveStore.add(collapseButton.onDidClick(() => this.toggleCollapsed()));
-
 		if (this._skipAllButton) {
 			interactiveStore.add(this._skipAllButton.onDidClick(() => this.ignore()));
 		}
@@ -526,11 +529,49 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 	}
 
 	/**
+	 * Uses a normal composer submission as a free-form answer. This keeps the
+	 * current agent turn alive when the user answers a question in the main
+	 * input box instead of the carousel's embedded control.
+	 */
+	public answerFromComposer(message: string): boolean {
+		const answer = message.trim();
+		if (this._isSkipped || !answer || this.carousel.questions.some(question => question.type !== 'text' && !question.allowFreeformInput)) {
+			return false;
+		}
+
+		this._answers.clear();
+		for (const question of this.carousel.questions) {
+			const value: IChatQuestionAnswerValue = question.type === 'text'
+				? answer
+				: question.type === 'singleSelect'
+					? { freeformValue: answer }
+					: { selectedValues: [], freeformValue: answer };
+			this._answers.set(question.id, value);
+		}
+		this._options.onSubmit(new Map(this._answers));
+		this.hideAndShowSummary();
+		return true;
+	}
+
+	/**
 	 * Ignores the carousel completely - called when user wants to dismiss without data.
 	 * Returns undefined to signal the carousel was ignored.
 	 */
 	public ignore(): boolean {
-		if (this._isSkipped || !this.carousel.allowSkip) {
+		return this.ignoreInternal(false);
+	}
+
+	/**
+	 * Dismisses the question because the user sent a new composer request.
+	 * A new request is an explicit change of direction, so it supersedes even a
+	 * non-skippable question instead of leaving the previous turn unresolved.
+	 */
+	public dismissForNewRequest(): boolean {
+		return this.ignoreInternal(true);
+	}
+
+	private ignoreInternal(force: boolean): boolean {
+		if (this._isSkipped || (!force && !this.carousel.allowSkip)) {
 			return false;
 		}
 		this._isSkipped = true;
@@ -712,7 +753,7 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 		const titleRow = dom.$('.chat-question-title-row');
 
 		// Render carousel-level message if present (e.g. from MCP elicitation)
-		if (this.carousel.message && this._currentIndex === 0) {
+		if (this.carousel.message && this._currentIndex === 0 && !this.isDuplicateCarouselMessage(question)) {
 			const messageMd = isMarkdownString(this.carousel.message) ? MarkdownString.lift(this.carousel.message) : new MarkdownString(this.carousel.message);
 			const carouselMessage = dom.$('.chat-question-carousel-message');
 			const renderedMessage = questionRenderStore.add(this._markdownRendererService.render(messageMd));
@@ -898,7 +939,7 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 
 			const submitButton = interactiveStore.add(new Button(rightControls, { ...defaultButtonStyles }));
 			submitButton.element.classList.add('chat-question-submit-button');
-			submitButton.label = localize('chat.questionCarousel.submitLabel', 'Submit {0}', '\u23CE');
+			submitButton.label = localize('chat.questionCarousel.answerLabel', 'Answer');
 			interactiveStore.add(submitButton.onDidClick(() => this.submit()));
 			this._submitButton = submitButton;
 
@@ -971,7 +1012,7 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 
 			const submitButton = interactiveStore.add(new Button(rightControls, { ...defaultButtonStyles }));
 			submitButton.element.classList.add('chat-question-submit-button');
-			submitButton.label = localize('chat.questionCarousel.submitLabel', 'Submit {0}', '\u23CE');
+			submitButton.label = localize('chat.questionCarousel.answerLabel', 'Answer');
 			interactiveStore.add(submitButton.onDidClick(() => this.submit()));
 			this._submitButton = submitButton;
 
@@ -1207,7 +1248,7 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 			freeformContainer.appendChild(freeformNumber);
 
 			freeformTextarea = dom.$<HTMLTextAreaElement>('textarea.chat-question-freeform-textarea');
-			freeformTextarea.placeholder = localize('chat.questionCarousel.enterCustomAnswer', 'Enter custom answer');
+			freeformTextarea.placeholder = localize('chat.questionCarousel.enterCustomAnswer', 'Or type your own answer');
 			freeformTextarea.rows = 1;
 
 			if (previousFreeform !== undefined) {
@@ -1416,7 +1457,7 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 			freeformContainer.appendChild(freeformNumber);
 
 			freeformTextarea = dom.$<HTMLTextAreaElement>('textarea.chat-question-freeform-textarea');
-			freeformTextarea.placeholder = localize('chat.questionCarousel.enterCustomAnswer', 'Enter custom answer');
+			freeformTextarea.placeholder = localize('chat.questionCarousel.enterCustomAnswer', 'Or type your own answer');
 			freeformTextarea.rows = 1;
 
 			if (previousFreeform !== undefined) {
@@ -1690,6 +1731,22 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 	private getQuestionText(questionText: string | IMarkdownString): string {
 		const md = typeof questionText === 'string' ? new MarkdownString(questionText) : questionText;
 		return renderAsPlaintext(md);
+	}
+
+	private isDuplicateCarouselMessage(question: IChatQuestion): boolean {
+		if (!this.carousel.message) {
+			return false;
+		}
+
+		const normalize = (value: string | IMarkdownString): string => this.getQuestionText(value)
+			.replace(/\s+/g, ' ')
+			.trim()
+			.toLocaleLowerCase();
+		const message = normalize(this.carousel.message);
+		const questionCopy = [question.message, question.title, question.description, question.detailedMessage]
+			.filter((value): value is string | IMarkdownString => value !== undefined);
+
+		return questionCopy.some(value => normalize(value) === message);
 	}
 
 	/**

@@ -451,6 +451,21 @@ export class CliTsAgent extends Disposable implements IAgent {
 		if (!session?.proc?.isRunning) {
 			return;
 		}
+		const pendingInput = [...session.pendingInputs.entries()].at(-1);
+		if (pendingInput) {
+			const [requestId, questionIds] = pendingInput;
+			// The main composer is also a valid free-form AskUser input. Resolve the
+			// pending request directly instead of using `steer`, which deliberately
+			// cancels the active turn. The matching ChatInputCompleted action clears
+			// `pendingInputs` and records the answer in the carousel.
+			session.proc.notify({ op: 'respondInput', id: requestId, answers: questionIds.map(() => steeringMessage.message.text) });
+			this._onDidSessionProgress.fire({
+				kind: 'steering_consumed',
+				session: sessionUri,
+				id: steeringMessage.id,
+			});
+			return;
+		}
 		// Forward the steering message; cli-ts interrupts the active turn and
 		// front-queues it. Signal consumption so the host clears the pending slot.
 		session.proc.notify({ op: 'steer', prompt: steeringMessage.message.text });

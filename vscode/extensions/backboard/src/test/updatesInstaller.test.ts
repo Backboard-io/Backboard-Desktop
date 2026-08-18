@@ -25,16 +25,30 @@ describe('macUpdateInstallerScript', () => {
 		assert.doesNotMatch(script, /rm -rf "\$APP_PATH"/);
 	});
 
-	test('waits for the whole app bundle to stop before replacement', () => {
+	test('waits for a clean app exit and never force-terminates the IDE', () => {
 		const script = macUpdateInstallerScript();
 
-		assert.match(script, /app_bundle_running\(\)/);
-		assert.match(script, /pgrep -f "\$target_app\/Contents\/"/);
+		assert.match(script, /app_running\(\)/);
+		assert.match(script, /pgrep -f "\$target_app\/Contents\/MacOS\/\$executable"/);
 		assert.match(script, /requesting a graceful quit/);
 		assert.match(script, /tell application id/);
-		assert.match(script, /stopping remaining app processes/);
-		assert.match(script, /leaving the installed app unchanged/);
+		assert.match(script, /did not quit cleanly; canceling the update/);
+		assert.doesNotMatch(script, /app_bundle_running/);
+		assert.doesNotMatch(script, /\/usr\/bin\/pkill/);
+		assert.doesNotMatch(script, /stopping remaining app processes/);
 		assert.match(script, /for detach_attempt in \{1\.\.5\}/);
+	});
+
+	test('stages outside Applications and uses one administrator prompt on the successful path', () => {
+		const script = macUpdateInstallerScript();
+
+		assert.match(script, /UPDATE_WORK_DIR="\$\(\/usr\/bin\/dirname "\$INSTALLER_PATH"\)"/);
+		assert.match(script, /STAGED_APP="\$UPDATE_WORK_DIR\//);
+		assert.match(script, /prepare_staged_app "\$SOURCE_APP" "\$STAGED_APP"/);
+		assert.match(script, /run_elevated swap "\$APP_PATH"/);
+		assert.doesNotMatch(script, /run_elevated prepare "\$SOURCE_APP"/);
+		assert.doesNotMatch(script, /run_elevated remove-backup "\$BACKUP_APP"/);
+		assert.match(script, /with prompt "Backboard Studio needs permission to install this verified update\."/);
 	});
 
 	test('keeps a rollback copy until the updated app is confirmed running', () => {

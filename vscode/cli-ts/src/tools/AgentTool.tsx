@@ -56,6 +56,12 @@ const schema = z.object({
 		.describe(
 			"The full delegated prompt, including all task detail, context, and report requirements.",
 		),
+	read_only: z
+		.boolean()
+		.optional()
+		.describe(
+			"Restrict a worker to non-mutating workspace tools. Use for independent research so it can start while the parent response is still streaming.",
+		),
 	variables: z
 		.record(jsonValueSchema)
 		.optional()
@@ -86,7 +92,6 @@ export type {
 export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 	readonly name = "Agent";
 	readonly inputSchema = schema;
-	readonly readOnly = false;
 
 	override get displayName(): string {
 		return "Subagent";
@@ -111,8 +116,8 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 		};
 	}
 
-	override isReadOnly(_input: AgentToolInput): boolean {
-		return this.readOnly;
+	override isReadOnly(input: AgentToolInput): boolean {
+		return input.read_only === true;
 	}
 
 	override isConcurrencySafe(_input: AgentToolInput): boolean {
@@ -198,6 +203,7 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 			result = await this.deps.runner.run({
 				prompt: input.prompt,
 				depth,
+				readOnly: input.read_only === true,
 				parentCwd: ctx.cwd,
 				parentSignal: ctx.signal,
 				parentBus: ctx.bus,
@@ -263,6 +269,11 @@ function agentToolParameters(): Record<string, unknown> {
 				type: "string",
 				minLength: 1,
 				description: "The full prompt for the sub-agent.",
+			},
+			read_only: {
+				type: "boolean",
+				description:
+					"Restrict a worker to non-mutating workspace tools so independent research can start while the parent response streams.",
 			},
 			variables: {
 				type: "object",

@@ -87,4 +87,13 @@ describe("model profiles", () => {
 		expect(antPrompt).toBe(defaultPrompt);
 		expect(openaiPrompt).toContain("You are Backboard");
 	});
+
+	it("instructs every prompt profile to parallelize independent tool work", () => {
+		for (const profile of ["default", "openai", "anthropic", "glm"] as const) {
+			const prompt = getSystemPrompt({ profile });
+			expect(prompt).toMatch(/independent tool calls/i);
+			expect(prompt).toMatch(/progress commentary/i);
+			expect(prompt).toMatch(/stream while safe tools run/i);
+		}
+	});
 });

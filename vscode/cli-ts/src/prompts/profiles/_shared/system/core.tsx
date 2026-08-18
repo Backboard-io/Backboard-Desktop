@@ -46,6 +46,8 @@ function operatingPrinciples(): string {
 
 - Solve the user's actual request end to end; do not expand scope unless asked.
 - Prefer evidence over assumptions: read relevant files and search for existing patterns before editing.
+- Group independent tool calls into one assistant turn so they can run in parallel. Keep dependent operations and edits to the same file ordered.
+- Put brief progress commentary in the same turn as related tool calls so it can stream while safe tools run; do not serialize every update into its own tool round.
 - Keep changes small, direct, and idiomatic to the codebase.
 - Continue through implementation, debugging, and validation unless blocked by missing information, an unsafe action, or an explicit instruction.
 - Treat a failed tool call as feedback: choose a safer next step and keep working. Do not give up at the first obstacle.

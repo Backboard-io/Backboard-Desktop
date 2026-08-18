@@ -12,6 +12,7 @@ import { AgentTool } from "./AgentTool.tsx";
 import {
 	DEFAULT_AGENT_MAX_DEPTH,
 	NON_DELEGATABLE_AGENT_TOOLS,
+	READ_ONLY_AGENT_TOOLS,
 } from "./AgentToolConstants.ts";
 import type { DefaultToolDeps } from "./AgentToolTypes.ts";
 import { ApplyPatchTool } from "./ApplyPatchTool.tsx";
@@ -78,7 +79,7 @@ function buildAgentTool(deps: DefaultToolDeps, base: Tool[]): AgentTool {
 		getThinkingResolver: () =>
 			createRuntimeThinkingResolver(deps.config, deps.client),
 		systemPrompt: subagentPrompt.prompt,
-		toolFactory: () => {
+		toolFactory: ({ readOnly }) => {
 			const tools: Tool[] = [];
 			const availableTools = (deps.getTools?.() ?? base).filter(
 				(tool) => tool !== holder.tool,
@@ -86,9 +87,15 @@ function buildAgentTool(deps: DefaultToolDeps, base: Tool[]): AgentTool {
 			const registry = new ToolRegistry([...availableTools]);
 			const workerBaseTools = deps.config.toolPolicy.visibleTools(registry);
 			for (const tool of workerBaseTools) {
-				if (!NON_DELEGATABLE_AGENT_TOOLS.has(tool.agentName)) tools.push(tool);
+				if (NON_DELEGATABLE_AGENT_TOOLS.has(tool.agentName)) continue;
+				if (readOnly && !READ_ONLY_AGENT_TOOLS.has(tool.agentName)) continue;
+				tools.push(tool);
 			}
-			if (holder.tool && deps.config.isToolEnabled(holder.tool.agentName)) {
+			if (
+				!readOnly &&
+				holder.tool &&
+				deps.config.isToolEnabled(holder.tool.agentName)
+			) {
 				tools.push(holder.tool);
 			}
 			return tools;

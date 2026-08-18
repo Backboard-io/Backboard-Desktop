@@ -54,7 +54,7 @@ import { chatSubcommandLeader } from '../../common/requestParser/chatParserTypes
 import { ChatAgentVoteDirection, ChatErrorLevel, ChatRequestQueueKind, IChatConfirmation, IChatContentReference, IChatDisabledClaudeHooksPart, IChatElicitationRequest, IChatElicitationRequestSerialized, IChatExtensionsContent, IChatExternalEdit, IChatFollowup, IChatHookPart, IChatMarkdownContent, IChatMcpServersStarting, IChatMcpServersStartingSerialized, IChatMultiDiffData, IChatMultiDiffDataSerialized, IChatPlanReview, IChatPlanReviewResult, IChatPullRequestContent, IChatQuestionAnswerValue, IChatQuestionAnswers, IChatQuestionCarousel, IChatService, IChatTask, IChatTaskSerialized, IChatThinkingPart, IChatToolInvocation, IChatToolInvocationSerialized, IChatTreeData, IChatUndoStop, isChatFollowup } from '../../common/chatService/chatService.js';
 import { ChatPlanReviewData } from '../../common/model/chatProgressTypes/chatPlanReviewData.js';
 import { ChatQuestionCarouselData } from '../../common/model/chatProgressTypes/chatQuestionCarouselData.js';
-import { localChatSessionType } from '../../common/chatSessionsService.js';
+import { localChatSessionType, SessionType } from '../../common/chatSessionsService.js';
 import { getChatSessionType } from '../../common/model/chatUri.js';
 import { getExplicitFileOrImageAttachmentSummary, IChatRequestVariableEntry, isExplicitFileOrImageVariableEntry } from '../../common/attachments/chatVariableEntries.js';
 import { IChatChangesSummaryPart, IChatCodeCitations, IChatErrorDetailsPart, IChatReferences, IChatRendererContent, IChatRequestViewModel, IChatResponseViewModel, IChatViewModel, IChatWorkingProgress, isRequestVM, isResponseVM, IChatPendingDividerViewModel, isPendingDividerVM } from '../../common/model/chatViewModel.js';
@@ -234,7 +234,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 	private readonly templateDataByRequestId = new Map<string, IChatListItemTemplate>();
 	private readonly responseTemplateDataByRequestId = new Map<string, IChatListItemTemplate>();
 
-	/** Track pending question carousels by session resource for auto-skip on chat submission */
+	/** Track pending question carousels by session resource so a new request can supersede them. */
 	private readonly pendingQuestionCarousels = new ResourceMap<Set<ChatQuestionCarouselPart>>();
 	private readonly _notifiedQuestionCarousels = new Set<string>();
 	private readonly workingProgressConfirmationEndListeners = new WeakSet<IChatToolInvocation>();
@@ -320,12 +320,17 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 
 		this._inlineTextModels = this._register(this.instantiationService.createInstance(InlineTextModelCollection));
 		this._register(this.instantiationService.createInstance(ChatCodeBlockContentProvider));
-		// Auto-skip pending question carousels when user submits a new chat message
+		// A composer submission while a question is pending is its free-form
+		// answer. The provider consumes the matching steering message so the same
+		// turn resumes instead of being cancelled and restarted.
 		this._register(this.chatService.onDidSubmitRequest(e => {
 			const carousels = this.pendingQuestionCarousels.get(e.chatSessionResource);
+			const answerBackboardQuestion = getChatSessionType(e.chatSessionResource) === SessionType.AgentHostBackboard;
 			if (carousels) {
 				for (const carousel of carousels) {
-					carousel.skip();
+					if (!answerBackboardQuestion || !carousel.answerFromComposer(e.message?.text ?? '')) {
+						carousel.dismissForNewRequest();
+					}
 				}
 				carousels.clear();
 			}
@@ -336,7 +341,9 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			if (e.affectsConfiguration(ChatConfiguration.AutoReply) && this.configService.getValue<boolean>(ChatConfiguration.AutoReply)) {
 				for (const [, carousels] of this.pendingQuestionCarousels) {
 					for (const carousel of carousels) {
-						carousel.skip();
+						if (!carousel.skip()) {
+							carousel.dismissForNewRequest();
+						}
 					}
 					carousels.clear();
 				}
@@ -3132,9 +3139,10 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			return fallbackPart;
 		}
 
-		// Track the carousel for auto-skip when user submits a new message
+		// Track every active carousel so a new composer message can supersede even
+		// a required question. The composer is always an escape hatch back to chat.
 		// Only add tracking if not already tracked (prevents duplicate tracking on re-render)
-		if (isResponseVM(context.element) && carousel.allowSkip && !carousel.isUsed) {
+		if (isResponseVM(context.element) && !carousel.isUsed) {
 			let carousels = this.pendingQuestionCarousels.get(context.element.sessionResource);
 			if (!carousels) {
 				carousels = new Set();
@@ -3385,15 +3393,13 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 	}
 
 	private renderExternalEdit(content: IChatExternalEdit, context: IChatContentPartRenderContext, templateData: IChatListItemTemplate): IChatContentPart {
-		const editPart = this.instantiationService.createInstance(ChatExternalEditContentPart, content);
 		const isAuxiliaryBar = !!context.container.closest('.part.auxiliarybar');
-		const isFirstExternalEdit = !context.content.slice(0, context.contentIndex).some(part => part.kind === 'externalEdit');
-		if (isAuxiliaryBar && isFirstExternalEdit) {
-			editPart.expandDiffBody();
-		}
 		if (isAuxiliaryBar) {
-			return editPart;
+			// File changes belong in the dedicated Review surface, not at the end of side-panel responses.
+			return this.renderNoContent(other => other.kind === content.kind);
 		}
+
+		const editPart = this.instantiationService.createInstance(ChatExternalEditContentPart, content);
 
 		// Pin the pill into the surrounding thinking part so diff stats bubble
 		// up into the thinking title. The list renderer pinning logic above

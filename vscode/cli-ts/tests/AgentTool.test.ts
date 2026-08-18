@@ -11,6 +11,8 @@ import type {
 import { EventBus } from "../src/core/bus/EventBus.ts";
 import type { OpenAITool } from "../src/core/tools/schema.ts";
 import type { ToolContext } from "../src/core/tools/ToolContext.ts";
+import { ToolRegistry } from "../src/core/tools/ToolRegistry.ts";
+import { ToolScheduler } from "../src/core/tools/ToolScheduler.ts";
 import { AgentTool, type AgentToolDeps } from "../src/tools/AgentTool.tsx";
 
 function ctx(
@@ -165,14 +167,24 @@ describe("AgentTool schema and flags", () => {
 		).toThrow("variables must contain only JSON-serializable values");
 	});
 
-	it("is never read-only but is concurrency-safe", () => {
+	it("marks only explicitly research-only workers as read-only", () => {
 		const { tool } = makeTool();
 		expect(tool.isReadOnly({ prompt: "t" })).toBe(false);
 		expect(tool.isConcurrencySafe({ prompt: "t" })).toBe(true);
+		expect(tool.isReadOnly({ prompt: "t", read_only: true })).toBe(true);
 		expect(tool.isReadOnly({ prompt: "t", subagent_type: "rlm" })).toBe(false);
 		expect(tool.isConcurrencySafe({ prompt: "t", subagent_type: "rlm" })).toBe(
 			true,
 		);
+	});
+
+	it("advertises parallel read-only workers in every model profile", () => {
+		const { tool } = makeTool();
+		for (const profile of ["default", "openai", "anthropic", "glm"] as const) {
+			const prompt = tool.prompt({ profile });
+			expect(prompt).toContain("read_only");
+			expect(prompt).toMatch(/multiple Agent (tool )?calls/i);
+		}
 	});
 });
 
@@ -185,6 +197,67 @@ describe("AgentTool execution", () => {
 		expect(workerCalls).toHaveLength(1);
 		expect(workerCalls[0]?.prompt).toBe("investigate");
 		expect(workerCalls[0]?.depth).toBe(1);
+		expect(workerCalls[0]?.readOnly).toBe(false);
+	});
+
+	it("passes the enforced read-only mode to workers", async () => {
+		const { tool, workerCalls } = makeTool();
+		await tool.execute({ prompt: "research", read_only: true }, ctx(0));
+		expect(workerCalls[0]?.readOnly).toBe(true);
+	});
+
+	it("starts a read-only worker before the streamed tool round finalizes", async () => {
+		const { tool, workerCalls } = makeTool();
+		const bus = new EventBus();
+		const scheduler = new ToolScheduler(new ToolRegistry([tool]), bus);
+		const round = scheduler.createRound(ctx(0, { bus }));
+		const call = {
+			id: "agent_research",
+			name: "Agent",
+			input: { prompt: "research", read_only: true },
+		};
+
+		round.announce(call.id, call.name);
+		round.offer(call);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(workerCalls).toHaveLength(1);
+
+		const outputs = await round.finalize([call]);
+		expect(outputs[0]?.tool_call_id).toBe(call.id);
+	});
+
+	it("runs multiple write-capable workers concurrently after finalization", async () => {
+		let active = 0;
+		let maxActive = 0;
+		const { tool } = makeTool({
+			runner: {
+				run: async () => {
+					active++;
+					maxActive = Math.max(maxActive, active);
+					await new Promise((resolve) => setTimeout(resolve, 20));
+					active--;
+					return {
+						report: "done",
+						status: "completed",
+						usage: {},
+						toolRounds: 1,
+					};
+				},
+			},
+		});
+		const bus = new EventBus();
+		const scheduler = new ToolScheduler(new ToolRegistry([tool]), bus);
+
+		const outputs = await scheduler.run(
+			[
+				{ id: "agent_a", name: "Agent", input: { prompt: "edit A" } },
+				{ id: "agent_b", name: "Agent", input: { prompt: "edit B" } },
+			],
+			ctx(0, { bus }),
+		);
+
+		expect(maxActive).toBe(2);
+		expect(outputs).toHaveLength(2);
 	});
 
 	it("runs the worker for explicit worker subagent_type", async () => {

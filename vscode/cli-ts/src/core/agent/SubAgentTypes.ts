@@ -15,7 +15,10 @@ import type { PermissionContext } from "../permissions/types.ts";
 import type { Tool } from "../tools/Tool.ts";
 import type { ToolTraceContext } from "../tools/ToolContext.ts";
 
-export type SubAgentToolFactory = (opts: { depth: number }) => Tool[];
+export type SubAgentToolFactory = (opts: {
+	depth: number;
+	readOnly: boolean;
+}) => Tool[];
 
 export interface SubAgentRunnerDeps {
 	client: AgentClient;
@@ -35,6 +38,8 @@ export interface SubAgentRunnerDeps {
 export interface SubAgentRunParams {
 	prompt: string;
 	depth: number;
+	/** True when the worker must not receive workspace-mutating tools. */
+	readOnly?: boolean;
 	parentCwd: string;
 	parentSignal: AbortSignal;
 	parentBus?: EventBus;

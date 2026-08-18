@@ -19,6 +19,8 @@ export type {
 export interface AgentToolInput {
 	subagent_type?: AgentMode;
 	prompt: string;
+	/** Restricts a worker to non-mutating workspace tools. */
+	read_only?: boolean;
 	variables?: JSONObject;
 	timeout_ms?: number;
 }

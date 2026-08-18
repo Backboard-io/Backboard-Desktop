@@ -392,12 +392,11 @@
 	/* Semantic workbench tokens keep the entire right panel native to the
 	   selected VS Code theme, including light and high-contrast themes. */
 	--bb-panel-surface: var(--vscode-sideBar-background, var(--vscode-editor-background));
+	/* The auxiliary bar is intentionally narrow. Keep one compact content rail
+	   instead of stacking the wider full-page chat insets inside this panel. */
+	--bb-editor-panel-gutter: 12px;
 	--bb-composer-surface: var(--vscode-input-background, var(--vscode-editorWidget-background, var(--vscode-editor-background)));
 	--bb-composer-border: var(--vscode-input-border, var(--vscode-widget-border, var(--vscode-contrastBorder, transparent)));
-	/* Indent guides are the closest semantic theme role to these quiet dashed
-	   trajectories: visible over an editor surface without reading as content. */
-	--bb-empty-trajectory: color-mix(in srgb, var(--vscode-editorIndentGuide-background1, var(--vscode-descriptionForeground)) 72%, transparent);
-	--bb-empty-trajectory-drawer: color-mix(in srgb, var(--vscode-editorIndentGuide-background1, var(--vscode-descriptionForeground)) 52%, transparent);
 	/*
 	 * Header strip + inactive tabs match the sideBar surface — the same shade as
 	 * the global titlebar row above when the window is FOCUSED, so the tab strip
@@ -578,66 +577,6 @@
  */
 .monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session.chat-empty-centered {
 	justify-content: flex-start;
-}
-
-/* Empty-agent backdrop: three long, curved dashed trajectories echo the
- * codebase-spanning motion in the Devin reference without becoming a logo or
- * competing with the composer. The SVG is a mask, so its colour always comes
- * from the active VS Code theme instead of embedding a dark-theme-only value. */
-.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session.chat-composer-empty::before {
-	content: '';
-	position: absolute;
-	z-index: 0;
-	top: 150px;
-	right: 0;
-	bottom: 0;
-	left: 0;
-	pointer-events: none;
-	background: var(--bb-empty-trajectory);
-	-webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1000 1000' preserveAspectRatio='none'%3E%3Cg fill='none' stroke='white' stroke-width='1.2' stroke-linecap='round' stroke-dasharray='15 17' vector-effect='non-scaling-stroke'%3E%3Cpath d='M-100 95 C260 28 710 120 1100 365'/%3E%3Cpath d='M-120 320 C245 365 670 520 1120 665'/%3E%3Cpath d='M-100 635 C270 720 690 850 1100 965'/%3E%3C/g%3E%3C/svg%3E") center / 100% 100% no-repeat;
-	mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1000 1000' preserveAspectRatio='none'%3E%3Cg fill='none' stroke='white' stroke-width='1.2' stroke-linecap='round' stroke-dasharray='15 17' vector-effect='non-scaling-stroke'%3E%3Cpath d='M-100 95 C260 28 710 120 1100 365'/%3E%3Cpath d='M-120 320 C245 365 670 520 1120 665'/%3E%3Cpath d='M-100 635 C270 720 690 850 1100 965'/%3E%3C/g%3E%3C/svg%3E") center / 100% 100% no-repeat;
-}
-
-.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session.chat-composer-empty > .interactive-input-part {
-	position: relative;
-	z-index: 1;
-}
-
-/* Continue the motif through the Agents drawer when the adjacent chat is
- * empty. The drawer treatment is quieter because it sits behind session rows,
- * and its lower inset keeps search/actions visually clean. */
-.monaco-workbench .part.auxiliarybar.backboard-agents-drawer-open:has(.interactive-session.chat-composer-empty) .agent-sessions-container.backboard-side-chat-sessions {
-	isolation: isolate;
-	overflow: hidden;
-}
-
-.monaco-workbench .part.auxiliarybar.backboard-agents-drawer-open:has(.interactive-session.chat-composer-empty) .agent-sessions-container.backboard-side-chat-sessions::before {
-	content: '';
-	position: absolute;
-	z-index: 0;
-	top: 190px;
-	right: 0;
-	bottom: 58px;
-	left: 0;
-	pointer-events: none;
-	background: var(--bb-empty-trajectory-drawer);
-	-webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1000 1000' preserveAspectRatio='none'%3E%3Cg fill='none' stroke='white' stroke-width='1.2' stroke-linecap='round' stroke-dasharray='15 17' vector-effect='non-scaling-stroke'%3E%3Cpath d='M-100 95 C260 28 710 120 1100 365'/%3E%3Cpath d='M-120 320 C245 365 670 520 1120 665'/%3E%3Cpath d='M-100 635 C270 720 690 850 1100 965'/%3E%3C/g%3E%3C/svg%3E") center / 100% 100% no-repeat;
-	mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1000 1000' preserveAspectRatio='none'%3E%3Cg fill='none' stroke='white' stroke-width='1.2' stroke-linecap='round' stroke-dasharray='15 17' vector-effect='non-scaling-stroke'%3E%3Cpath d='M-100 95 C260 28 710 120 1100 365'/%3E%3Cpath d='M-120 320 C245 365 670 520 1120 665'/%3E%3Cpath d='M-100 635 C270 720 690 850 1100 965'/%3E%3C/g%3E%3C/svg%3E") center / 100% 100% no-repeat;
-}
-
-.monaco-workbench .part.auxiliarybar.backboard-agents-drawer-open:has(.interactive-session.chat-composer-empty) .agent-sessions-container.backboard-side-chat-sessions > * {
-	position: relative;
-	z-index: 1;
-}
-
-.monaco-workbench.hc-black .part.auxiliarybar .chat-viewpane .interactive-session.chat-composer-empty::before,
-.monaco-workbench.hc-light .part.auxiliarybar .chat-viewpane .interactive-session.chat-composer-empty::before {
-	background: color-mix(in srgb, var(--vscode-contrastBorder, var(--vscode-foreground)) 62%, transparent);
-}
-
-.monaco-workbench.hc-black .part.auxiliarybar.backboard-agents-drawer-open:has(.interactive-session.chat-composer-empty) .agent-sessions-container.backboard-side-chat-sessions::before,
-.monaco-workbench.hc-light .part.auxiliarybar.backboard-agents-drawer-open:has(.interactive-session.chat-composer-empty) .agent-sessions-container.backboard-side-chat-sessions::before {
-	background: color-mix(in srgb, var(--vscode-contrastBorder, var(--vscode-foreground)) 48%, transparent);
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session.chat-empty-centered > .chat-empty-below-composer {
@@ -922,9 +861,8 @@
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-item-container.interactive-request,
 .monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-item-container.interactive-response {
-	/* Share the composer's 16px rail so the transcript uses more of the narrow
-	 * editor panel without letting requests and responses drift out of alignment. */
-	padding-inline: 16px;
+	/* Share the composer's rail so messages and input stay aligned. */
+	padding-inline: var(--bb-editor-panel-gutter);
 }
 
 /* Keep the editor transcript dense. The shared timeline deliberately leaves
@@ -961,7 +899,7 @@
  * no longer reserves a full 28px row in the transcript. */
 .monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-item-container.interactive-response:not(.chat-response-loading) > .chat-footer-toolbar {
 	position: absolute;
-	inset-inline-end: 16px;
+	inset-inline-end: var(--bb-editor-panel-gutter);
 	bottom: 4px;
 	z-index: 2;
 	width: auto;
@@ -984,15 +922,165 @@
 }
 
 /* Tool activity is a scan-friendly work log rather than a stack of messages.
- * Keep consecutive calls close while preserving a full line-height target for
- * each disclosure row. */
+ * Keep it on the transcript rail, and keep consecutive calls close while
+ * preserving a full line-height target for each disclosure row. */
 .monaco-workbench .part.auxiliarybar .chat-viewpane .chat-thinking-box .chat-thinking-work-group > .chat-thinking-group-body {
 	gap: 0;
+	padding-left: 0;
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .chat-thinking-box .chat-thinking-work-group .chat-thinking-tool-wrapper {
 	min-height: 20px;
 	padding-block: 0;
+}
+
+/* Question prompts are compact decision cards in the editor panel. One border,
+ * one question, and one primary action keep them visually subordinate to the
+ * conversation instead of reading like a modal nested above the composer. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container {
+	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 16%, transparent);
+	border-radius: 10px;
+	background: color-mix(in srgb, var(--vscode-editor-background) 94%, var(--vscode-foreground));
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-carousel-content {
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-title-row {
+	align-items: center;
+	padding: 9px 10px 9px 12px;
+	border-bottom-color: color-mix(in srgb, var(--vscode-foreground) 10%, transparent);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-title {
+	font-size: 13px;
+	font-weight: 600;
+	line-height: 18px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-carousel-message {
+	padding: 10px 12px 0;
+	font-size: 13px;
+	line-height: 1.4;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-description {
+	padding: 10px 12px 4px;
+	color: var(--vscode-foreground);
+	font-size: 14px;
+	line-height: 1.4;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-input-container {
+	padding: 4px 12px 10px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-input-container::after {
+	height: 0;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-list {
+	gap: 2px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-list .chat-question-list-item {
+	min-height: 32px;
+	gap: 10px;
+	padding: 5px 8px;
+	border-radius: 7px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-list .chat-question-list-label {
+	font-size: 13px;
+	line-height: 20px;
+}
+
+/* Options are choices, not steps. Keep the existing keyboard number shortcuts,
+ * but replace their visual numbering with a conventional radio marker. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-list-number {
+	position: relative;
+	width: 14px;
+	height: 14px;
+	border-color: color-mix(in srgb, var(--vscode-foreground) 48%, transparent);
+	background: transparent;
+	color: transparent;
+	font-size: 0;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-list-item.selected .chat-question-list-number {
+	border-color: var(--vscode-focusBorder);
+	background: transparent;
+	color: var(--vscode-focusBorder);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-list-item.selected .chat-question-list-number::after {
+	position: absolute;
+	inset: 3px;
+	border-radius: 50%;
+	background: currentColor;
+	content: '';
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-list-item.multi-select > .chat-question-list-number,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-list-indicator {
+	display: none;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-list-item.selected,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-list:focus .chat-question-list-item.selected,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-list-item.selected:hover {
+	background: color-mix(in srgb, var(--vscode-focusBorder) 10%, transparent);
+	color: var(--vscode-foreground);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-list-item.selected :is(.chat-question-list-label, .chat-question-list-label-title),
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-list:focus .chat-question-list-item.selected :is(.chat-question-list-label, .chat-question-list-label-title) {
+	color: var(--vscode-foreground);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-list-item.selected .chat-question-list-label-desc,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-list:focus .chat-question-list-item.selected .chat-question-list-label-desc {
+	color: var(--vscode-descriptionForeground);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-freeform {
+	gap: 0;
+	margin-top: 4px;
+	padding: 0 8px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-freeform-number {
+	display: none;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-freeform-textarea {
+	min-height: 32px;
+	padding: 6px 9px;
+	border-color: color-mix(in srgb, var(--vscode-foreground) 16%, transparent);
+	border-radius: 7px;
+	background: transparent;
+	font-size: 13px;
+	line-height: 18px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-footer-row {
+	padding: 6px 8px;
+	border-top-color: color-mix(in srgb, var(--vscode-foreground) 10%, transparent);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-dismiss-hint,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-submit-hint {
+	display: none;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .monaco-button.chat-question-submit-button {
+	height: 28px;
+	padding-inline: 11px;
+	border-radius: 7px;
+	font-size: 13px;
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session:not(.chat-composer-empty) .interactive-input-part .chat-input-container {
@@ -1132,17 +1220,21 @@
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part {
-	width: min(950px, calc(100% - 32px));
+	width: min(950px, calc(100% - var(--bb-editor-panel-gutter) - var(--bb-editor-panel-gutter)));
 	margin-inline: auto;
 	padding: 0;
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session:not(.chat-composer-empty) .interactive-input-part {
-	margin-bottom: 12px;
+	/* ChatWidget subtracts this element's measured height from the message list,
+	 * while ResizeObserver's offsetHeight deliberately excludes margins. Keep the
+	 * bottom breathing room inside the measured box so the final transcript row
+	 * cannot extend underneath the composer. */
+	padding-bottom: 12px;
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session.chat-composer-empty .interactive-input-part {
-	margin-top: 5px;
+	margin-top: 12px;
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part .chat-input-container {
@@ -1157,7 +1249,7 @@
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session.chat-composer-empty .interactive-input-part .chat-input-container {
-	min-height: 132px;
+	min-height: 152px;
 	padding: 12px 11px 9px;
 	gap: 8px;
 }
@@ -1175,7 +1267,7 @@
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session.chat-composer-empty .interactive-input-part .interactive-input-editor {
-	min-height: 72px;
+	min-height: 92px;
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part .monaco-editor,

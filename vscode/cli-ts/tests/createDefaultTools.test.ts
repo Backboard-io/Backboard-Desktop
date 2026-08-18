@@ -118,6 +118,31 @@ describe("createDefaultTools", () => {
 		);
 	});
 
+	it("enforces a non-mutating tool set for read-only workers", async () => {
+		const config = new Config({ env: TEST_BACKBOARD_ENV, argv: [] });
+		const client = new FakeClient([
+			{ kind: "thread", threadId: "thr_research" },
+			{ kind: "assistant_delta", text: "research report" },
+			{ kind: "completed" },
+		]);
+		const tools = createDefaultTools({ client, config });
+		const agent = tools.find(
+			(tool): tool is AgentTool => tool.name === "Agent",
+		);
+
+		if (!agent) throw new Error("expected Agent tool");
+		await agent.execute(
+			{ prompt: "inspect without changes", read_only: true },
+			context(),
+		);
+
+		expect(toolNames(client.messageRequests[0]?.tools ?? []).sort()).toEqual([
+			"glob",
+			"grep",
+			"read",
+		]);
+	});
+
 	it("does not execute stale hidden worker tool calls", async () => {
 		const config = new Config({
 			env: TEST_BACKBOARD_ENV,

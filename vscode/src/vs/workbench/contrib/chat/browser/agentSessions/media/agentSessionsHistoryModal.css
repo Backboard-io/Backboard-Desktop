@@ -10,42 +10,67 @@
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	padding: 32px;
-	background: rgba(0, 0, 0, 0.36);
+	padding: 40px;
+	background: color-mix(in srgb, #000 42%, transparent);
+	backdrop-filter: blur(2px);
+	animation: agent-sessions-history-backdrop-in 120ms ease-out;
 }
 
 .agent-sessions-history-modal {
 	display: flex;
 	flex-direction: column;
-	width: min(720px, calc(100vw - 64px));
-	height: min(760px, calc(100vh - 64px));
-	min-width: min(420px, calc(100vw - 32px));
-	min-height: 360px;
-	border: 1px solid var(--vscode-widget-border);
-	border-radius: 8px;
-	background: var(--vscode-sideBar-background);
-	color: var(--vscode-sideBar-foreground);
-	box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+	width: min(640px, calc(100vw - 80px));
+	height: min(628px, calc(100vh - 80px));
+	min-width: min(400px, calc(100vw - 24px));
+	min-height: min(340px, calc(100vh - 24px));
+	border: 1px solid color-mix(in srgb, var(--vscode-widget-border, var(--vscode-contrastBorder)) 88%, var(--vscode-focusBorder) 12%);
+	border-radius: 12px;
+	background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background));
+	color: var(--vscode-editorWidget-foreground, var(--vscode-foreground));
+	box-shadow: 0 20px 56px color-mix(in srgb, var(--vscode-widget-shadow, #000) 58%, transparent);
 	overflow: hidden;
+	animation: agent-sessions-history-modal-in 150ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .agent-sessions-history-modal-header {
 	display: flex;
 	align-items: center;
-	height: 44px;
-	padding: 0 10px 0 14px;
-	border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border);
+	min-height: 60px;
+	gap: 6px;
+	padding: 9px 10px 9px 16px;
+	border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-sideBarSectionHeader-border));
 	flex: 0 0 auto;
+	background: color-mix(in srgb, var(--vscode-editorWidget-background, var(--vscode-sideBar-background)) 92%, var(--vscode-foreground) 8%);
+}
+
+.agent-sessions-history-modal-heading {
+	display: flex;
+	flex: 1 1 auto;
+	min-width: 0;
+	flex-direction: column;
+	gap: 1px;
 }
 
 .agent-sessions-history-modal-title {
-	flex: 1;
 	min-width: 0;
-	font-size: 12px;
-	font-weight: 700;
+	overflow: hidden;
+	font-size: 14px;
+	font-weight: 600;
+	line-height: 19px;
 	letter-spacing: 0;
-	text-transform: uppercase;
-	color: var(--vscode-sideBarTitle-foreground);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--vscode-editorWidget-foreground, var(--vscode-foreground));
+}
+
+.agent-sessions-history-modal-subtitle {
+	overflow: hidden;
+	color: var(--vscode-descriptionForeground);
+	font-size: 11px;
+	font-weight: 400;
+	line-height: 15px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .agent-sessions-history-modal-toolbar {
@@ -62,10 +87,13 @@
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	width: 28px;
-	height: 28px;
-	margin-left: 4px;
-	border-radius: 4px;
+	width: 26px;
+	height: 26px;
+	margin: 0;
+	padding: 0;
+	border: 0;
+	border-radius: 6px;
+	background: transparent;
 	color: var(--vscode-icon-foreground);
 	cursor: pointer;
 }
@@ -81,25 +109,55 @@
 
 .agent-sessions-history-modal-new {
 	flex: 0 0 auto;
-	padding: 10px 14px;
-	border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border);
 }
 
 .agent-sessions-history-modal-new .monaco-button {
-	width: 100%;
+	width: auto;
+	height: 28px;
+	min-width: 0;
+	padding-inline: 9px;
+	border-radius: 6px;
+	font-size: 12px;
 }
 
 .agent-sessions-history-modal-body {
 	flex: 1 1 auto;
 	min-height: 0;
+	padding: 6px 6px 8px;
 }
 
 .agent-sessions-history-modal-body .agent-sessions-viewer .monaco-scrollable-element {
-	padding: 0 8px;
+	padding: 0 4px;
 }
 
 .agent-sessions-history-modal-body .agent-session-item {
-	padding: 5px 6px;
+	padding: 6px 8px;
+}
+
+.agent-sessions-history-modal-body .monaco-list-row {
+	border-radius: 7px;
+}
+
+.agent-sessions-history-modal-body .monaco-list-row:hover:not(.selected):not(.focused) {
+	background: var(--vscode-list-hoverBackground);
+}
+
+@keyframes agent-sessions-history-backdrop-in {
+	from { opacity: 0; }
+}
+
+@keyframes agent-sessions-history-modal-in {
+	from {
+		opacity: 0;
+		transform: translateY(5px) scale(0.985);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.agent-sessions-history-modal-backdrop,
+	.agent-sessions-history-modal {
+		animation: none;
+	}
 }
 
 @media (max-width: 520px) {
@@ -111,5 +169,17 @@
 		width: calc(100vw - 24px);
 		height: calc(100vh - 24px);
 		min-width: 0;
+	}
+
+	.agent-sessions-history-modal-header {
+		padding-left: 12px;
+	}
+
+	.agent-sessions-history-modal-subtitle {
+		display: none;
+	}
+
+	.agent-sessions-history-modal-toolbar {
+		display: none;
 	}
 }

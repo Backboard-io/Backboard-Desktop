@@ -10,6 +10,7 @@ import { getToolPrompt } from "../prompts/tools/index.tsx";
  * confirm-each flow manageable, matching the "chain a few related decisions"
  * guidance in the prompt. */
 const MAX_QUESTIONS = 4;
+const MAX_OPTIONS = 4;
 
 const questionSchema = z.object({
 	// `header` is required here (the model should always title a question), even
@@ -24,7 +25,7 @@ const questionSchema = z.object({
 	options: z
 		.array(z.string())
 		.min(1)
-		.max(4)
+		.max(MAX_OPTIONS)
 		.describe("Mutually exclusive options to present (2-4 recommended)"),
 });
 
@@ -54,6 +55,10 @@ interface Output {
 export class AskUserTool extends Tool<Input, Output> {
 	readonly name = "AskUser";
 	readonly inputSchema = schema;
+
+	override parseInput(raw: unknown): Input {
+		return super.parseInput(normalizeInput(raw));
+	}
 
 	override prompt(context: PromptContext = {}): string {
 		return getToolPrompt(this.name, context);
@@ -134,4 +139,44 @@ export class AskUserTool extends Tool<Input, Output> {
 		}
 		return `Answered ${answers.length} questions`;
 	}
+}
+
+function normalizeInput(raw: unknown): unknown {
+	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
+	const record = raw as Record<string, unknown>;
+	if (!Array.isArray(record.questions)) return raw;
+	return {
+		...record,
+		questions: record.questions.slice(0, MAX_QUESTIONS).map((question) => {
+			if (
+				!question ||
+				typeof question !== "object" ||
+				Array.isArray(question)
+			) {
+				return question;
+			}
+			const questionRecord = question as Record<string, unknown>;
+			if (!Array.isArray(questionRecord.options)) return question;
+			return {
+				...questionRecord,
+				options: questionRecord.options
+					.map(optionLabel)
+					.filter((option): option is string => option !== undefined)
+					.slice(0, MAX_OPTIONS),
+			};
+		}),
+	};
+}
+
+function optionLabel(option: unknown): string | undefined {
+	if (typeof option === "string") return option;
+	if (!option || typeof option !== "object" || Array.isArray(option)) {
+		return undefined;
+	}
+	const record = option as Record<string, unknown>;
+	for (const key of ["label", "title", "value", "name"]) {
+		const value = record[key];
+		if (typeof value === "string") return value;
+	}
+	return undefined;
 }

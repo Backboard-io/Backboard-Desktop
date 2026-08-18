@@ -236,10 +236,16 @@ echo "Built DMG: ${DMG_PATH}"
 if [[ "${SKIP_SIGNING:-0}" == "1" || "${SKIP_NOTARIZATION:-0}" == "1" ]]; then
   echo "Skipping release-readiness validation because signing or notarization was disabled."
 else
-  "${REPO_ROOT}/scripts/validate_macos_release.sh" \
-    --version "${VERSION}" \
-    --arch "${ARCH}" \
+  VALIDATION_ARGS=(
+    --version "${VERSION}"
+    --arch "${ARCH}"
+    --channel "${CHANNEL}"
     --dmg "${DMG_PATH}"
+  )
+  if [[ -n "${EXPECTED_TEAM_ID:-}" ]]; then
+    VALIDATION_ARGS+=(--expected-team-id "${EXPECTED_TEAM_ID}")
+  fi
+  "${REPO_ROOT}/scripts/validate_macos_release.sh" "${VALIDATION_ARGS[@]}"
 fi
 
 echo

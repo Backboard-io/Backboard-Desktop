@@ -73,14 +73,21 @@ export class AgentSessionsHistoryModal extends Disposable {
 	show(): void {
 		const targetWindow = getActiveWindow();
 		const workbenchContainer = this.layoutService.getContainer(targetWindow);
+		const previousFocus = targetWindow.document.activeElement;
 		const overlay = append(workbenchContainer, $('.agent-sessions-history-modal-backdrop'));
-		this._register(toDisposable(() => overlay.remove()));
+		this._register(toDisposable(() => {
+			overlay.remove();
+			if (previousFocus instanceof targetWindow.HTMLElement && previousFocus.isConnected) {
+				previousFocus.focus();
+			}
+		}));
 
 		const modal = append(overlay, $('.agent-sessions-history-modal'));
 		modal.tabIndex = -1;
 		modal.setAttribute('role', 'dialog');
 		modal.setAttribute('aria-modal', 'true');
-		modal.setAttribute('aria-label', localize('agentSessions.historyModal.label', "Chat Session History"));
+		modal.setAttribute('aria-labelledby', 'agent-sessions-history-modal-title');
+		modal.setAttribute('aria-describedby', 'agent-sessions-history-modal-subtitle');
 
 		this._register(addDisposableListener(overlay, EventType.MOUSE_DOWN, e => {
 			if (e.target === overlay) {
@@ -93,36 +100,62 @@ export class AgentSessionsHistoryModal extends Disposable {
 			if (event.keyCode === KeyCode.Escape) {
 				EventHelper.stop(e, true);
 				this.dispose();
+			} else if (event.keyCode === KeyCode.Tab) {
+				const focusable = Array.from(modal.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input:not([disabled]), [tabindex]:not([tabindex="-1"])'))
+					.filter(element => element.offsetParent !== null);
+				const first = focusable[0];
+				const last = focusable[focusable.length - 1];
+				const activeElement = targetWindow.document.activeElement;
+				if (!first || !last) {
+					EventHelper.stop(e, true);
+					modal.focus();
+				} else if (event.shiftKey && (activeElement === first || activeElement === modal)) {
+					EventHelper.stop(e, true);
+					last.focus();
+				} else if (!event.shiftKey && activeElement === last) {
+					EventHelper.stop(e, true);
+					first.focus();
+				}
 			}
 		}));
 
 		const header = append(modal, $('.agent-sessions-history-modal-header'));
-		const title = append(header, $('span.agent-sessions-history-modal-title'));
-		title.textContent = localize('agentSessions.historyModal.title', "Sessions");
+		const heading = append(header, $('.agent-sessions-history-modal-heading'));
+		const title = append(heading, $('span.agent-sessions-history-modal-title'));
+		title.id = 'agent-sessions-history-modal-title';
+		title.textContent = localize('agentSessions.historyModal.title', "Chat history");
+		const subtitle = append(heading, $('span.agent-sessions-history-modal-subtitle'));
+		subtitle.id = 'agent-sessions-history-modal-subtitle';
+		const updateSubtitle = () => {
+			const count = this.agentSessionsService.model.sessions.filter(session => !session.isArchived()).length;
+			subtitle.textContent = count === 1
+				? localize('agentSessions.historyModal.oneConversation', "1 saved conversation")
+				: localize('agentSessions.historyModal.manyConversations', "{0} saved conversations", count);
+		};
+		this._register(Event.runAndSubscribe(this.agentSessionsService.model.onDidChangeSessions, updateSubtitle));
+
+		const newSessionContainer = append(header, $('.agent-sessions-history-modal-new'));
+		const newSessionLabel = localize('agentSessions.historyModal.newSession', "New session");
+		const newSessionButton = this._register(new Button(newSessionContainer, {
+			...defaultButtonStyles,
+			secondary: true,
+			supportIcons: true,
+			title: newSessionLabel,
+			ariaLabel: newSessionLabel,
+		}));
+		newSessionButton.label = `$(${Codicon.add.id}) ${newSessionLabel}`;
+		this._register(newSessionButton.onDidClick(async () => {
+			await this.commandService.executeCommand(ACTION_ID_NEW_CHAT);
+			this.dispose();
+		}));
 
 		const toolbarContainer = append(header, $('.agent-sessions-history-modal-toolbar'));
-		const closeButton = append(header, $('.agent-sessions-history-modal-close.codicon.codicon-close'));
-		closeButton.tabIndex = 0;
-		closeButton.setAttribute('role', 'button');
+		const closeButton = append(header, $('button.agent-sessions-history-modal-close.codicon.codicon-close')) as HTMLButtonElement;
+		closeButton.type = 'button';
 		closeButton.setAttribute('aria-label', localize('agentSessions.historyModal.close', "Close"));
 		closeButton.title = localize('agentSessions.historyModal.close', "Close");
 		this._register(addDisposableListener(closeButton, EventType.CLICK, e => {
 			EventHelper.stop(e, true);
-			this.dispose();
-		}));
-		this._register(addDisposableListener(closeButton, EventType.KEY_DOWN, e => {
-			const event = new StandardKeyboardEvent(e);
-			if (event.keyCode === KeyCode.Enter || event.keyCode === KeyCode.Space) {
-				EventHelper.stop(e, true);
-				this.dispose();
-			}
-		}));
-
-		const newSessionContainer = append(modal, $('.agent-sessions-history-modal-new'));
-		const newSessionButton = this._register(new Button(newSessionContainer, { ...defaultButtonStyles, secondary: true }));
-		newSessionButton.label = localize('agentSessions.historyModal.newSession', "New Session");
-		this._register(newSessionButton.onDidClick(async () => {
-			await this.commandService.executeCommand(ACTION_ID_NEW_CHAT);
 			this.dispose();
 		}));
 

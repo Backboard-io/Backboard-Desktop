@@ -132,7 +132,7 @@ export class ToolScheduler {
  */
 export class ToolCallRound implements EarlyToolSink {
 	private readonly announced = new Set<string>();
-	private readonly offered = new Set<string>();
+	private readonly offered = new Map<string, PlanEntry>();
 	private readonly inFlight = new Map<string, EarlyExecution>();
 	// Ids whose execution reached a terminal event (tool:result/tool:error).
 	// Retraction skips them: a completed row must survive a mid-round abort,
@@ -171,47 +171,12 @@ export class ToolCallRound implements EarlyToolSink {
 		if (this.options.skip?.(call.id) || this.offered.has(call.id)) return;
 		const entry = this.planner.build([call])[0];
 		if (!entry) return;
-		this.offered.add(call.id);
+		this.offered.set(call.id, entry);
 		// Re-emitting pending is safe: the store upserts by id, filling in the
 		// input summary on a row announced with the name alone.
 		this.emitPending(entry);
 		this.announced.add(call.id);
-
-		const startable =
-			entry.concurrencySafe && !this.earlyStartBlocked && this.allOffered();
-		if (!entry.concurrencySafe) this.earlyStartBlocked = true;
-		if (!startable || "errorOutput" in entry) return;
-		// Concurrency-safe is not enough on its own: Agent is concurrency-safe
-		// but write-capable, and an early-started write abandoned by a stream
-		// retry would keep mutating files. Only reads may run ahead.
-		// (Hooked tools can't reach here either: the planner clears
-		// concurrencySafe for any tool with a matching trusted hook, so
-		// user hooks keep exactly-once semantics - a discarded early run
-		// would otherwise fire them twice for one call id. Untrusted hooks
-		// never execute at all.)
-		if (!entry.tool.isReadOnly(entry.input)) return;
-		const abort = new AbortController();
-		const earlyCtx: ToolContext = {
-			...this.ctx,
-			signal: AbortSignal.any([this.ctx.signal, abort.signal]),
-		};
-		this.inFlight.set(call.id, {
-			input: entry.input,
-			abort,
-			settled: this.runTracked(entry, earlyCtx).then(
-				(output): SettledOutput => {
-					// Post-settlement abort is inert for the run itself; it just
-					// detaches the composite signal from the turn-long ctx.signal
-					// so consumed executions don't accumulate listeners there.
-					abort.abort();
-					return { output };
-				},
-				(error): SettledOutput => {
-					abort.abort();
-					return { error };
-				},
-			),
-		});
+		this.startReadyEarlyCalls();
 	}
 
 	reset(): void {
@@ -353,9 +318,55 @@ export class ToolCallRound implements EarlyToolSink {
 		this.offered.clear();
 	}
 
-	private allOffered(): boolean {
-		// offer() adds to both sets, so offered ⊆ announced always holds.
-		return this.offered.size === this.announced.size;
+	/**
+	 * Starts the contiguous read-only prefix whose arguments are complete.
+	 * Providers commonly announce every tool row before finishing any argument
+	 * payload. Re-checking the full prefix on every offer lets the earlier calls
+	 * start too once that gap closes, instead of only starting the final call.
+	 *
+	 * Announcement order is provider order, so an incomplete or mutating entry
+	 * is a hard barrier: a later read must not race ahead of an earlier write.
+	 */
+	private startReadyEarlyCalls(): void {
+		if (this.earlyStartBlocked) return;
+		for (const id of this.announced) {
+			if (this.inFlight.has(id)) continue;
+			const entry = this.offered.get(id);
+			if (!entry) return;
+			if (
+				"errorOutput" in entry ||
+				!entry.concurrencySafe ||
+				!entry.tool.isReadOnly(entry.input)
+			) {
+				this.earlyStartBlocked = true;
+				return;
+			}
+
+			// Hooked tools cannot reach here: the planner clears concurrencySafe
+			// for matching trusted hooks, preserving their exactly-once semantics.
+			const abort = new AbortController();
+			const earlyCtx: ToolContext = {
+				...this.ctx,
+				signal: AbortSignal.any([this.ctx.signal, abort.signal]),
+			};
+			this.inFlight.set(id, {
+				input: entry.input,
+				abort,
+				settled: this.runTracked(entry, earlyCtx).then(
+					(output): SettledOutput => {
+						// Post-settlement abort is inert for the run itself; it just
+						// detaches the composite signal from the turn-long ctx.signal
+						// so consumed executions don't accumulate listeners there.
+						abort.abort();
+						return { output };
+					},
+					(error): SettledOutput => {
+						abort.abort();
+						return { error };
+					},
+				),
+			});
+		}
 	}
 
 	private emitPending(entry: PlanEntry): void {

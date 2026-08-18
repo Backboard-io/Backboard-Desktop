@@ -43,7 +43,7 @@ describe('deprecated bridge notice', () => {
 		assert.deepStrictEqual(results, [true, true, false, false, false]);
 	});
 
-	test('links directly to the replacement 2.5.10 stable M-series DMG', () => {
+	test('links directly to the replacement 2.5.11 stable M-series DMG', () => {
 		const url = new URL(replacementDownloadUrl);
 		assert.deepStrictEqual({
 			protocol: url.protocol,
@@ -51,8 +51,8 @@ describe('deprecated bridge notice', () => {
 			path: url.pathname
 		}, {
 			protocol: 'https:',
-			host: 'backboard-ide-robert-cert.s3.ca-central-1.amazonaws.com',
-			path: '/ide-releases/stable/2.5.10/bbide/macos-aarch64/Backboard-Studio-aarch64.dmg'
+			host: 'backboard-studio-releases.s3.ca-central-1.amazonaws.com',
+			path: '/ide-releases/stable/2.5.11/bbide/macos-aarch64/Backboard-Studio-aarch64.dmg'
 		});
 	});
 
@@ -63,6 +63,6 @@ describe('deprecated bridge notice', () => {
 		assert.equal(shouldUseReplacementManifest('2.6.0', 'stable', deprecatedSandboxBridgeAppName, 'darwin'), false);
 		assert.equal(shouldUseReplacementManifest('2.6.0', 'sandbox', deprecatedStableBridgeAppName, 'darwin'), false);
 		assert.equal(shouldUseReplacementManifest('2.6.0', 'sandbox', deprecatedSandboxBridgeAppName, 'win32'), false);
-		assert.equal(replacementManifestBaseUrl, 'https://backboard-ide-robert-cert.s3.ca-central-1.amazonaws.com/ide-releases');
+		assert.equal(replacementManifestBaseUrl, 'https://backboard-studio-releases.s3.ca-central-1.amazonaws.com/ide-releases');
 	});
 });

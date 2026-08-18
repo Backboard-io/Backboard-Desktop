@@ -150,9 +150,10 @@ suite('ChatQuestionCarouselPart', () => {
 			assert.strictEqual(directChildCloseContainer, null, 'close button container should not be positioned as a direct child of the carousel container');
 		});
 
-		test('renders collapse button in title row even when skip is disabled', () => {
+		test('renders collapse button for multiple questions even when skip is disabled', () => {
 			const carousel = createMockCarousel([
-				{ id: 'q1', type: 'text', title: 'Question 1' }
+				{ id: 'q1', type: 'text', title: 'Question 1' },
+				{ id: 'q2', type: 'text', title: 'Question 2' }
 			], false);
 			createWidget(carousel);
 
@@ -161,6 +162,16 @@ suite('ChatQuestionCarouselPart', () => {
 
 			const collapseButton = titleRow?.querySelector('.chat-question-collapse-toggle');
 			assert.ok(collapseButton, 'collapse button should be rendered even when skip is disabled');
+		});
+
+		test('omits the redundant collapse button for a single question', () => {
+			const carousel = createMockCarousel([
+				{ id: 'q1', type: 'text', title: 'Question 1' }
+			]);
+			createWidget(carousel);
+
+			const collapseButton = widget.domNode.querySelector('.chat-question-collapse-toggle');
+			assert.strictEqual(collapseButton, null);
 		});
 
 		test('renders collapse button to the right of close button', () => {
@@ -537,6 +548,32 @@ suite('ChatQuestionCarouselPart', () => {
 	});
 
 	suite('Ignore Functionality', () => {
+		test('a composer message answers a pending free-form question', () => {
+			const carousel = createMockCarousel([
+				{ id: 'q1', type: 'singleSelect', title: 'Question 1', allowFreeformInput: true, options: [] }
+			], true);
+			createWidget(carousel);
+
+			const result = widget.answerFromComposer('just do it');
+			assert.deepStrictEqual({
+				result,
+				answers: submittedAnswers ? Object.fromEntries(submittedAnswers) : submittedAnswers,
+			}, {
+				result: true,
+				answers: { q1: { freeformValue: 'just do it' } },
+			});
+		});
+
+		test('a composer message does not answer a selection-only question', () => {
+			const carousel = createMockCarousel([
+				{ id: 'q1', type: 'singleSelect', title: 'Question 1', allowFreeformInput: false, options: [] }
+			], true);
+			createWidget(carousel);
+
+			const result = widget.answerFromComposer('just do it');
+			assert.deepStrictEqual({ result, submittedAnswers }, { result: false, submittedAnswers: null });
+		});
+
 		test('ignore succeeds when allowSkip is true and returns undefined', () => {
 			const carousel = createMockCarousel([
 				{ id: 'q1', type: 'text', title: 'Question 1' }
@@ -557,6 +594,17 @@ suite('ChatQuestionCarouselPart', () => {
 			const result = widget.ignore();
 			assert.strictEqual(result, false, 'ignore() should return false when allowSkip is false');
 			assert.strictEqual(submittedAnswers, null, 'onSubmit should not have been called');
+		});
+
+		test('a new composer request dismisses a non-skippable question', () => {
+			const carousel = createMockCarousel([
+				{ id: 'q1', type: 'text', title: 'Question 1' }
+			], false);
+			createWidget(carousel);
+
+			const result = widget.dismissForNewRequest();
+			assert.strictEqual(result, true);
+			assert.strictEqual(submittedAnswers, undefined);
 		});
 
 		test('ignore can only be called once', () => {
@@ -945,6 +993,17 @@ suite('ChatQuestionCarouselPart', () => {
 			const message = widget.domNode.querySelector('.chat-question-carousel-message');
 			assert.ok(message, 'Carousel message should be rendered');
 			assert.ok(message?.querySelector('.rendered-markdown'), 'Message should be rendered as markdown');
+		});
+
+		test('does not repeat a carousel message already used as the question description', () => {
+			const carousel = createMockCarousel([
+				{ id: 'q1', type: 'singleSelect', title: 'Change type', description: 'What kind of edit do you want?', options: [] }
+			]);
+			carousel.message = 'What kind of edit do you want?';
+			createWidget(carousel);
+
+			assert.strictEqual(widget.domNode.querySelector('.chat-question-carousel-message'), null);
+			assert.strictEqual(widget.domNode.querySelector('.chat-question-description')?.textContent, 'What kind of edit do you want?');
 		});
 
 		test('shows required indicator on required questions', () => {

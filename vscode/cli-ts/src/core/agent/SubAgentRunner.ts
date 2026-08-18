@@ -55,6 +55,7 @@ export class SubAgentRunner {
 
 		const tools = this.deps.toolFactory({
 			depth: params.depth,
+			readOnly: params.readOnly === true,
 		});
 		const registry = new ToolRegistry(tools);
 		const toolSchemas = registry.toJSONSchemas();

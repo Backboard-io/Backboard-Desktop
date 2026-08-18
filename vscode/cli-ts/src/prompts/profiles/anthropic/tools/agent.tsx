@@ -31,10 +31,11 @@ ${whenNotToUse(context)}
   5. Expected output format (e.g. file paths + summary, patch, checklist):
 
   Usage notes:
-  1. To run subagents in parallel, issue multiple Agent calls in the same assistant message.
+  1. To run subagents in parallel, issue multiple Agent calls in the same assistant message instead of waiting for each result before spawning the next.
   2. The subagent returns one message to you; the user sees nothing unless you summarize it.
   3. State plainly whether the subagent should write code or only research, and exactly what to return.
   4. For rlm, put all detail in the prompt, pass structured data through variables when useful, and end with \`SUBMIT(answer)\`.
+  5. Set \`read_only: true\` for research-only workers. The runtime enforces non-mutating tools and may start them while your response is still streaming.
 
 ### Parameters
 
@@ -42,6 +43,7 @@ ${whenNotToUse(context)}
 | --- | --- | --- | --- |
 | \`subagent_type\` | \`string enum: worker, rlm\` | no | "worker" (default) runs a tool-using sub-agent over the project; "rlm" analyzes the prompt and provided variables in a JavaScript REPL. |
 | \`prompt\` | \`string\` | yes | The full delegated prompt, including all task detail, context, and report requirements. |
+| \`read_only\` | \`boolean\` | no | Restrict a worker to non-mutating workspace tools so independent research can start while the parent response streams. |
 | \`variables\` | \`object\` | no | Optional JSON object for rlm sub-agents. Values are available as \`inputs\`; valid non-reserved keys are also direct variables. |
 | \`timeout_ms\` | \`number\` | no | Optional wall-clock budget for rlm sub-agents. When the budget expires, the RLM returns a partial-progress report instead of continuing normal code execution. |`.trim();
 }
