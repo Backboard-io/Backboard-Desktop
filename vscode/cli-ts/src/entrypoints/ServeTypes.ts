@@ -23,7 +23,7 @@ export type ServeControl =
 			threadId?: string;
 			model?: string;
 			thinking?: string;
-			/** Retained for wire compatibility; R-CLI does not expose reasoning text. */
+			/** "Show Reasoning" off: ask the provider to omit reasoning traces. */
 			excludeReasoning?: boolean;
 			excludedTools?: string[];
 			permission?: PermissionMode;
@@ -33,7 +33,7 @@ export type ServeControl =
 			computerUse?: boolean;
 			browserUse?: boolean;
 			notify?: boolean;
-			/** Reserved by the IDE until R-CLI exposes image-generation controls. */
+			/** Enables Backboard's built-in image generation for the turn. */
 			imageGeneration?: boolean;
 	  }
 	| { op: "steer"; requestId?: string; prompt: string }

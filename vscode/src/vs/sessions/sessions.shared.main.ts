@@ -458,6 +458,7 @@ import './contrib/aiCustomizationTreeView/browser/aiCustomizationTreeView.contri
 import './contrib/chat/browser/chat.contribution.js';
 import './contrib/providers/agentHost/browser/exportDebugLogsAction.js';
 import './contrib/providers/agentHost/browser/agentHostSessionConfigPicker.js';
+import './contrib/providers/agentHost/browser/agentHostTurnNotifier.js';
 import './contrib/chat/browser/customizationsDebugLog.contribution.js';
 import './contrib/providers/copilotChatSessions/browser/copilotChatSessions.contribution.js';
 import './contrib/providers/localChatSessions/browser/localChatSessions.contribution.js';

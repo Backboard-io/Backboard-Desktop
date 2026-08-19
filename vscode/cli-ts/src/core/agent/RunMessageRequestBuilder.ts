@@ -17,6 +17,8 @@ export interface RunMessageRequestContext {
 	memory: MemoryMode;
 	memoryProfile: MemoryProfile;
 	workspaceId?: string;
+	/** Enables Backboard's built-in image generation for the turn. */
+	imageGeneration?: boolean;
 	/**
 	 * Extra metadata merged into the request. The server persists it on the
 	 * stored message and returns it on resume, so injected notifications tag
@@ -48,6 +50,20 @@ export function buildRunMessageRequest(
 		memory_profile: context.memoryProfile,
 		...(Object.keys(metadata).length > 0 ? { metadata } : {}),
 		...(thinking === undefined ? {} : { thinking }),
+		...(context.imageGeneration
+			? {
+					image_generation: "auto",
+					image_model_provider: DEFAULT_IMAGE_MODEL_PROVIDER,
+					image_model_name: DEFAULT_IMAGE_MODEL_NAME,
+				}
+			: {}),
 		tools: context.tools,
 	};
 }
+
+/**
+ * Model used when image generation is on. Mirrors the retired Rust bridge's
+ * defaults for the Backboard `image_generation: "auto"` path.
+ */
+const DEFAULT_IMAGE_MODEL_PROVIDER = "openrouter";
+const DEFAULT_IMAGE_MODEL_NAME = "google/gemini-3.1-flash-image-preview";

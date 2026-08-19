@@ -317,6 +317,11 @@ export async function runServe(argv: string[]): Promise<void> {
 						if (control.thinking !== undefined) {
 							config.setThinking(parseThinking(control.thinking));
 						}
+						// After setThinking: the exclude flag rides the thinking
+						// intent, which setThinking replaces wholesale.
+						if (control.excludeReasoning !== undefined) {
+							config.setExcludeReasoning(control.excludeReasoning);
+						}
 						if (control.excludedTools !== undefined) {
 							config.setExcludedTools(control.excludedTools);
 						}
@@ -334,6 +339,9 @@ export async function runServe(argv: string[]): Promise<void> {
 						}
 						if (control.notify !== undefined) {
 							config.setNotifyEnabled(control.notify);
+						}
+						if (control.imageGeneration !== undefined) {
+							config.setImageGenerationEnabled(control.imageGeneration);
 						}
 					},
 				});

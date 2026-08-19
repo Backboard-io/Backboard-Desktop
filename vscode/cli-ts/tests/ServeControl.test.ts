@@ -34,6 +34,30 @@ describe("parseControlLine", () => {
 		});
 	});
 
+	it("parses the Backboard Studio submit settings", () => {
+		// The full per-turn surface the IDE sends: `auto` permission (the
+		// Default approvals tier) plus the feature toggles.
+		const control = {
+			op: "submit" as const,
+			requestId: "r2",
+			prompt: "hello",
+			model: "anthropic/claude-sonnet-4-5",
+			permission: "auto" as const,
+			thinking: "off",
+			excludeReasoning: true,
+			excludedTools: [],
+			memory: "auto",
+			computerUse: true,
+			browserUse: true,
+			notify: true,
+			imageGeneration: true,
+		};
+		expect(parseControlLine(JSON.stringify(control))).toEqual({
+			ok: true,
+			control,
+		});
+	});
+
 	it("requires submit fields and input answer arrays", () => {
 		expect(parseControlLine('{"op":"submit","requestId":"r1"}')).toEqual({
 			ok: false,

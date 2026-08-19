@@ -120,6 +120,9 @@ function readThinkingConfig(
 	if (thinkingConfig.kind === "dynamic") {
 		return { kind: "dynamic" };
 	}
+	if (thinkingConfig.kind === "default") {
+		return { kind: "default" };
+	}
 	if (
 		thinkingConfig.kind === "budget" &&
 		typeof thinkingConfig.tokens === "number" &&

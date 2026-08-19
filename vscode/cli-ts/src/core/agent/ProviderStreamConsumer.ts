@@ -95,6 +95,9 @@ export class ProviderStreamConsumer {
 				case "assistant_delta":
 					if (event.text) assistant.appendDelta(event.text);
 					break;
+				case "reasoning_delta":
+					if (event.text) assistant.appendReasoning(event.text);
+					break;
 				case "tool_started":
 					earlyTools?.announce(event.id, event.name);
 					break;
@@ -112,6 +115,20 @@ export class ProviderStreamConsumer {
 				case "warning":
 					this.bus.emit({ type: "system:warning", message: event.message });
 					break;
+				case "media": {
+					// Generated media joins the assistant message as markdown so it
+					// streams, persists, and renders through the existing text path.
+					const markdown = mediaMarkdown(event.payload);
+					if (markdown) {
+						assistant.appendDelta(markdown);
+					} else {
+						this.bus.emit({
+							type: "system:warning",
+							message: `Backboard sent generated media in an unrecognized shape (keys: ${Object.keys(event.payload).join(", ")}).`,
+						});
+					}
+					break;
+				}
 				case "requires_action": {
 					const calls = event.calls.map((call) => ({
 						id: call.id,
@@ -175,4 +192,39 @@ async function waitForRetry(ms: number, signal: AbortSignal): Promise<void> {
 			{ once: true },
 		);
 	});
+}
+
+/**
+ * Renders a `media_generated` payload as markdown, when a usable source can
+ * be found. The event shape is provider-defined; look for a URL in the
+ * common field names, at the top level and one level down.
+ */
+function mediaMarkdown(payload: Record<string, unknown>): string | null {
+	const url =
+		mediaUrlField(payload) ??
+		mediaUrlField(payload.media) ??
+		mediaUrlField(payload.data) ??
+		mediaUrlField(payload.image) ??
+		mediaUrlField(payload.chunk);
+	if (!url) return null;
+	const label =
+		typeof payload.prompt === "string" && payload.prompt.trim()
+			? payload.prompt.trim()
+			: "Generated image";
+	return `\n\n![${label.replace(/[\[\]]/g, "")}](${url})\n\n`;
+}
+
+function mediaUrlField(value: unknown): string | null {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+	const record = value as Record<string, unknown>;
+	for (const key of ["url", "image_url", "imageUrl", "media_url", "href"]) {
+		const candidate = record[key];
+		if (
+			typeof candidate === "string" &&
+			/^(https?:|data:image\/)/.test(candidate)
+		) {
+			return candidate;
+		}
+	}
+	return null;
 }

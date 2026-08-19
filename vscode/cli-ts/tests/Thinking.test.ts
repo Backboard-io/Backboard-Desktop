@@ -24,7 +24,7 @@ function metadata(
 
 describe("thinking config", () => {
 	it("parses semantic thinking intent", () => {
-		expect(parseThinking("default")).toBeUndefined();
+		expect(parseThinking("default")).toEqual({ kind: "default" });
 		expect(parseThinking("off")).toBeNull();
 		expect(parseThinking("low")).toEqual({ kind: "level", level: "low" });
 		expect(parseThinking("fast")).toEqual({ kind: "level", level: "low" });
@@ -65,6 +65,50 @@ describe("thinking config", () => {
 				metadata: metadata(["max_tokens"]),
 			}),
 		).toEqual({ max_tokens: 8192 });
+	});
+
+	it("applies the reasoning-trace preference when the model allows it", () => {
+		expect(
+			resolveThinking({
+				intent: { kind: "level", level: "high", excludeReasoning: true },
+				model,
+				metadata: metadata(["max_tokens", "exclude_reasoning"]),
+			}),
+		).toEqual({ max_tokens: 8192, exclude_reasoning: true });
+		// Provider-default thinking still carries the visibility preference.
+		expect(
+			resolveThinking({
+				intent: { kind: "default", excludeReasoning: false },
+				model,
+				metadata: metadata(["max_tokens", "exclude_reasoning"]),
+			}),
+		).toEqual({ exclude_reasoning: false });
+		// Models without the control drop the flag instead of failing.
+		expect(
+			resolveThinking({
+				intent: { kind: "level", level: "high", excludeReasoning: true },
+				model,
+				metadata: metadata(["effort"]),
+			}),
+		).toEqual({ effort: "high" });
+		// The OpenRouter profile carries the control even when the model's
+		// metadata only advertises the token field.
+		expect(
+			resolveThinking({
+				intent: { kind: "level", level: "high", excludeReasoning: true },
+				model: { provider: "openrouter", model: "deepseek" },
+				metadata: {
+					provider: "openrouter",
+					model: "deepseek",
+					supports_thinking: true,
+					thinking_controls: {
+						supported: true,
+						allowed_fields: ["max_tokens"],
+						defaults_only: false,
+					},
+				},
+			}),
+		).toEqual({ max_tokens: 8192, exclude_reasoning: true });
 	});
 
 	it("uses provider profiles when metadata is missing", () => {

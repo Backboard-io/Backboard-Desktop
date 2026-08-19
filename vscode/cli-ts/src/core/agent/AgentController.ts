@@ -389,6 +389,7 @@ export class AgentController {
 				memoryProfile: config.memoryProfile,
 				workspaceId:
 					config.memory === "off" ? undefined : config.getWorkspaceId(),
+				imageGeneration: config.isImageGenerationEnabled,
 				thinking: undefined,
 				thinkingResolver,
 				requestKind: "user",

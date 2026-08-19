@@ -63,6 +63,19 @@ export class AssistantAccumulator {
 		});
 	}
 
+	/**
+	 * Streams a provider reasoning-trace chunk. Reasoning is display-only: it
+	 * is not part of any assistant segment (never persisted, never finalized),
+	 * so it bypasses the segment buffering above.
+	 */
+	appendReasoning(text: string): void {
+		this.bus.emit({
+			type: "assistant:reasoning",
+			turnId: this.turnId,
+			text,
+		});
+	}
+
 	finalize(toolCalls: ToolCallRef[] = [], finalText?: string): void {
 		if (!this.current && !finalText) return;
 		const segment = this.ensureSegment();

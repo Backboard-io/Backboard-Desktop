@@ -23,6 +23,17 @@ function eventTypes(events: AgentEvent[]): string[] {
 }
 
 describe("AssistantAccumulator", () => {
+	it("streams reasoning chunks as display-only events", () => {
+		const { accumulator, events, session } = makeAccumulator();
+		accumulator.appendReasoning("thinking about it");
+		accumulator.finalize();
+
+		expect(events).toEqual([
+			{ type: "assistant:reasoning", turnId: "turn_1", text: "thinking about it" },
+		]);
+		expect(session.getMessages()).toEqual([]);
+	});
+
 	it("streams deltas and finalizes into a shown message by default", () => {
 		const { accumulator, events, session } = makeAccumulator();
 		accumulator.appendDelta("Hello");
