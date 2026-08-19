@@ -58,6 +58,69 @@ describe("mapStreamPayloadToEvents", () => {
 		expect(events).toEqual([{ kind: "assistant_delta", text: "hello" }]);
 	});
 
+	it("maps generated media to a media event carrying the raw payload", () => {
+		const events = mapStreamPayloadToEvents({
+			type: "media_generated",
+			url: "https://cdn.example.com/img.png",
+			prompt: "a red fox",
+		});
+		expect(events).toEqual([
+			{
+				kind: "media",
+				payload: {
+					type: "media_generated",
+					url: "https://cdn.example.com/img.png",
+					prompt: "a red fox",
+				},
+			},
+		]);
+	});
+
+	it("maps reasoning deltas on both reasoning event names", () => {
+		expect(
+			mapStreamPayloadToEvents({
+				type: "reasoning_streaming",
+				content: "let me think",
+			}),
+		).toEqual([{ kind: "reasoning_delta", text: "let me think" }]);
+		expect(
+			mapStreamPayloadToEvents({
+				type: "reasoning_delta",
+				content: "let me think",
+			}),
+		).toEqual([{ kind: "reasoning_delta", text: "let me think" }]);
+	});
+
+	it("keeps reasoning and content accumulators independent", () => {
+		const mapper = new BackboardStreamEventMapper();
+
+		const reasoningFirst = mapper.map({
+			type: "reasoning_streaming",
+			content: "Step one",
+			accumulated_reasoning: "Step one",
+		});
+		const contentFirst = mapper.map({
+			type: "content_streaming",
+			content: "Answer",
+			accumulated_content: "Answer",
+		});
+		// A cumulative reasoning retry only emits the unseen tail, and the
+		// interleaved content chunk does not disturb the reasoning channel.
+		const reasoningRetry = mapper.map({
+			type: "reasoning_delta",
+			content: "Step one and step two",
+			accumulated_reasoning: "Step one and step two",
+		});
+
+		expect(reasoningFirst).toEqual([
+			{ kind: "reasoning_delta", text: "Step one" },
+		]);
+		expect(contentFirst).toEqual([{ kind: "assistant_delta", text: "Answer" }]);
+		expect(reasoningRetry).toEqual([
+			{ kind: "reasoning_delta", text: " and step two" },
+		]);
+	});
+
 	it("normalizes accumulated content streaming into deltas", () => {
 		const mapper = new BackboardStreamEventMapper();
 

@@ -24,7 +24,7 @@ import { ISessionDatabase, ISessionDataService } from '../../common/sessionDataS
 import { FileEditTracker } from '../shared/fileEditTracker.js';
 import type { IReference } from '../../../../base/common/lifecycle.js';
 import { IAgentConfigurationService } from '../agentConfigurationService.js';
-import { BACKBOARD_ACCESS_MANUAL, BACKBOARD_MODE_PLAN, BUNDLED_BACKBOARD_MODELS, backboardModelInfos, bridgeConfig, createBackboardTurnSettings, fallbackModel, isBridgeModel, resolveBackboardSessionConfig } from './backboardRuntimeShared.js';
+import { BACKBOARD_ACCESS_FULL, BACKBOARD_ACCESS_MANUAL, BACKBOARD_MODE_PLAN, BUNDLED_BACKBOARD_MODELS, backboardModelInfos, bridgeConfig, createBackboardTurnSettings, fallbackModel, isBridgeModel, resolveBackboardSessionConfig } from './backboardRuntimeShared.js';
 
 /** cli-ts tool name excluded from the turn when Web Search is toggled off. */
 const CLI_TS_WEB_SEARCH_TOOL_NAME = 'WebSearch';
@@ -305,7 +305,14 @@ export class CliTsAgent extends Disposable implements IAgent {
 		const proc = this._ensureProcess(session, rgDir);
 		const storedConfig = this._configurationService.getSessionConfigValues(session.sessionUri.toString());
 		const settings = createBackboardTurnSettings(storedConfig, session.config, session.model);
-		const permission: CliTsPermissionMode = settings.accessMode === BACKBOARD_ACCESS_MANUAL ? 'manual' : 'bypass';
+		// Default maps to the R-CLI's `auto` tier (file edits and safe commands
+		// run unprompted; dangerous commands and outward-facing tools still
+		// ask), so only Full Access bypasses approvals entirely.
+		const permission: CliTsPermissionMode = settings.accessMode === BACKBOARD_ACCESS_MANUAL
+			? 'manual'
+			: settings.accessMode === BACKBOARD_ACCESS_FULL
+				? 'bypass'
+				: 'auto';
 		// Build the per-turn tool exclusion list. Plan mode hides write-class
 		// tools from the model entirely (on top of gating); the Web Search
 		// toggle removes the built-in web search tool when disabled. The list

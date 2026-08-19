@@ -398,7 +398,7 @@ describe("Config", () => {
 			env,
 			argv: ["--model", "openai/gpt-5.5", "--thinking", "default"],
 		});
-		expect(providerDefault.thinking).toBeUndefined();
+		expect(providerDefault.thinking).toEqual({ kind: "default" });
 
 		const level = new Config({
 			env,
@@ -417,6 +417,27 @@ describe("Config", () => {
 			argv: ["--model", "anthropic/claude", "--thinking", "dynamic"],
 		});
 		expect(dynamic.thinking).toEqual({ kind: "dynamic" });
+	});
+
+	it("carries the reasoning-trace preference on the thinking intent", () => {
+		const config = new Config({
+			env,
+			argv: ["--model", "openrouter/deepseek", "--thinking", "dynamic"],
+		});
+		config.setExcludeReasoning(true);
+		expect(config.thinking).toEqual({ kind: "dynamic", excludeReasoning: true });
+
+		// setThinking replaces the intent wholesale, dropping the flag until
+		// it is applied again (serve re-sends both fields every submit).
+		config.setThinking({ kind: "default" });
+		expect(config.thinking).toEqual({ kind: "default" });
+		config.setExcludeReasoning(false);
+		expect(config.thinking).toEqual({ kind: "default", excludeReasoning: false });
+
+		// Thinking off has no intent to carry the flag.
+		config.setThinking(null);
+		config.setExcludeReasoning(true);
+		expect(config.thinking).toBeNull();
 	});
 
 	it("supports --flag=value form", () => {

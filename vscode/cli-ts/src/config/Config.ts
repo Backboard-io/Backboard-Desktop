@@ -76,6 +76,7 @@ export class Config {
 	private browserUseEnabled = false;
 	private skillDiscoveryEnabled = false;
 	private notifyEnabled = false;
+	private imageGenerationEnabled = false;
 	private verboseEnabled = true;
 	private readonly currentMemoryProfile: MemoryProfile;
 	private currentThinking: ThinkingIntent | null | undefined;
@@ -246,6 +247,14 @@ export class Config {
 		this.notifyEnabled = enabled;
 	}
 
+	get isImageGenerationEnabled(): boolean {
+		return this.imageGenerationEnabled;
+	}
+
+	setImageGenerationEnabled(enabled: boolean): void {
+		this.imageGenerationEnabled = enabled;
+	}
+
 	get isVerbose(): boolean {
 		return this.verboseEnabled;
 	}
@@ -281,6 +290,18 @@ export class Config {
 
 	setThinking(thinking: ThinkingIntent | null | undefined): void {
 		this.currentThinking = thinking;
+	}
+
+	/**
+	 * Applies the "Show Reasoning" preference onto the current thinking
+	 * intent. Call after {@link setThinking}, which replaces the intent
+	 * wholesale. A disabled intent (`off` → null) has nothing to carry the
+	 * flag; reasoning exclusion is moot without thinking anyway.
+	 */
+	setExcludeReasoning(excludeReasoning: boolean): void {
+		if (this.currentThinking) {
+			this.currentThinking = { ...this.currentThinking, excludeReasoning };
+		}
 	}
 
 	async saveRuntimeSelection(): Promise<void> {

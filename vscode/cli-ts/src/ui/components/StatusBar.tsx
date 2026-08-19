@@ -72,6 +72,7 @@ export function formatThinkingAmount(
 	if ("kind" in thinking) {
 		if (thinking.kind === "budget") return `${thinking.tokens} tokens`;
 		if (thinking.kind === "dynamic") return "dynamic";
+		if (thinking.kind === "default") return "default";
 		return thinking.level === "max" ? "xhigh" : thinking.level;
 	}
 	if ("effort" in thinking) {

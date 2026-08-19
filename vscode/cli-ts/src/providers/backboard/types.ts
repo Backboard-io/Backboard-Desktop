@@ -39,6 +39,15 @@ export interface BackboardContentStreamingPayload extends BackboardStreamBase {
 	accumulated_content?: string;
 }
 
+export interface BackboardReasoningStreamingPayload
+	extends BackboardStreamBase {
+	type:
+		| typeof BACKBOARD_STREAM_EVENTS.reasoningStreaming
+		| typeof BACKBOARD_STREAM_EVENTS.reasoningDelta;
+	content?: string;
+	accumulated_reasoning?: string;
+}
+
 export interface BackboardToolCallStartPayload extends BackboardStreamBase {
 	type: typeof BACKBOARD_STREAM_EVENTS.toolCallStart;
 	tool_call_id?: string;
@@ -94,6 +103,7 @@ export interface BackboardRunCancelledPayload extends BackboardStreamBase {
 export type BackboardStreamPayload =
 	| BackboardUserMessagePayload
 	| BackboardContentStreamingPayload
+	| BackboardReasoningStreamingPayload
 	| BackboardToolCallStartPayload
 	| BackboardToolCallReadyPayload
 	| BackboardToolSubmitRequiredPayload
@@ -114,6 +124,10 @@ export interface SendMessageRequest {
 	metadata?: Record<string, unknown>;
 	thinking?: ThinkingConfig | null;
 	tools?: OpenAITool[];
+	/** `"auto"` enables Backboard's built-in image generation for the turn. */
+	image_generation?: string;
+	image_model_provider?: string;
+	image_model_name?: string;
 	stream?: boolean;
 }
 
@@ -171,6 +185,7 @@ export interface BackboardThread {
 export type ProviderEvent =
 	| { kind: "thread"; threadId: string }
 	| { kind: "assistant_delta"; text: string }
+	| { kind: "reasoning_delta"; text: string }
 	| { kind: "tool_started"; id: string; name: string }
 	| { kind: "tool_ready"; call: ProviderToolCall }
 	| {
@@ -182,6 +197,7 @@ export type ProviderEvent =
 	  }
 	| { kind: "usage"; usage: ProviderUsage }
 	| { kind: "warning"; message: string }
+	| { kind: "media"; payload: Record<string, unknown> }
 	| {
 			kind: "completed";
 			finalText?: string;
@@ -193,6 +209,7 @@ export type ProviderEvent =
 export interface StreamMappingResult {
 	events: ProviderEvent[];
 	accumulatedContent: string;
+	accumulatedReasoning: string;
 }
 
 export interface ContentDeltaResult {

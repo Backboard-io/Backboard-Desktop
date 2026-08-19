@@ -43,6 +43,7 @@ export interface CreateLoopOptions {
 	memory: MemoryMode;
 	memoryProfile: MemoryProfile;
 	workspaceId?: string;
+	imageGeneration?: boolean;
 	thinking?: ThinkingConfig | null;
 	thinkingResolver?: RuntimeThinkingResolver;
 	requestKind: ThinkingRequestKind;
@@ -103,6 +104,7 @@ export class AgentLoopFactory {
 			memory: options.memory,
 			memoryProfile: options.memoryProfile,
 			workspaceId: options.workspaceId,
+			imageGeneration: options.imageGeneration,
 			thinking: options.thinking,
 			thinkingResolver: options.thinkingResolver,
 			requestKind: options.requestKind,

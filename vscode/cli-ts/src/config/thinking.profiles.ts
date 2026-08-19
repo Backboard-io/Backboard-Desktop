@@ -45,13 +45,13 @@ const profileRules: readonly ProfileRule[] = [
 	{
 		id: "openrouter",
 		provider: "openrouter",
-		fields: ["max_tokens"],
+		fields: ["max_tokens", "exclude_reasoning"],
 		budgetPolicyId: "generic",
 	},
 	{
 		id: "cerebras",
 		provider: "cerebras",
-		fields: ["max_tokens"],
+		fields: ["max_tokens", "exclude_reasoning"],
 		budgetPolicyId: "generic",
 	},
 	{

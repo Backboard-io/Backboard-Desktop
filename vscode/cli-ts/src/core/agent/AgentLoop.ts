@@ -42,6 +42,7 @@ export interface AgentLoopDeps {
 	memory: MemoryMode;
 	memoryProfile: MemoryProfile;
 	workspaceId?: string;
+	imageGeneration?: boolean;
 	thinking: ThinkingConfig | null | undefined;
 	thinkingResolver?: RuntimeThinkingResolver;
 	requestKind?: ThinkingRequestKind;

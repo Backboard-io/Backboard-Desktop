@@ -55,13 +55,25 @@ function allowedThinkingFields(
 ): ThinkingRequestField[] {
 	const fields = metadata?.thinking_controls?.allowed_fields;
 	if (fields && fields.length > 0) {
-		return fields.filter(isThinkingRequestField);
+		const metadataFields = fields.filter(isThinkingRequestField);
+		// Backboard documents this as a provider-level OpenRouter/Cerebras
+		// control, but older model metadata may only advertise the token field.
+		if (
+			fallbackFields.includes("exclude_reasoning") &&
+			!metadataFields.includes("exclude_reasoning")
+		) {
+			metadataFields.push("exclude_reasoning");
+		}
+		return metadataFields;
 	}
 	return [...fallbackFields];
 }
 
 function isThinkingRequestField(value: string): value is ThinkingRequestField {
 	return (
-		value === "effort" || value === "budget_tokens" || value === "max_tokens"
+		value === "effort" ||
+		value === "budget_tokens" ||
+		value === "max_tokens" ||
+		value === "exclude_reasoning"
 	);
 }
