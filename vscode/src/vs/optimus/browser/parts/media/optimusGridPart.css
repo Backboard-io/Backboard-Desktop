@@ -103,6 +103,16 @@
 	padding-top: 4px;
 }
 
+/* Fullscreen hides the native traffic lights along with the toolbar, so the
+ * 78px reservation above becomes dead space and the mode switcher reads as
+ * centred over the sidebar instead of sitting top-left. Simple and Editor
+ * handle this by dropping their `.mac-window-controls-spacer` entirely
+ * (panelHeader.css / titlebarpart.css); collapse to the sidebar's own content
+ * inset here so all three switchers land in the same place. */
+.agent-sessions-workbench.mac.fullscreen .optimus-window-chrome {
+	padding-left: 8px;
+}
+
 /* Windows/Linux: there are no traffic lights at the left edge, and the native
    window controls (min/max/close) are drawn by the OS as an overlay over the
    top-right corner. Flip the reserved space accordingly: hug the left edge and
@@ -2104,9 +2114,16 @@
 	overflow: hidden;
 }
 
+/* The window chrome is a fixed 32px overlay across the whole window, and it is
+ * opaque from the sidebar edge rightwards. The dashboard clears it with its own
+ * top inset (see `.optimus-dashboard-header`); the focused session header has to
+ * do the same, or the session title and its toolbar — settings, terminal, pin,
+ * close — render underneath the chrome and are unreachable. Margin rather than
+ * padding: the shared `.sessions-panel-header` owns this element's height. */
 .optimus-focused-session-header {
-	flex: 0 0 32px;
+	flex: 0 0 auto;
 	min-height: 32px;
+	margin-top: 32px;
 }
 
 .optimus-focused-session-body {
