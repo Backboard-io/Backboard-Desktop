@@ -451,7 +451,12 @@ export class OptimusGridPart extends Part {
 				for (const dragged of data) {
 					this.openSession(dragged.resource.toString());
 				}
-				this.commandService.executeCommand(OPTIMUS_FOCUS_SESSION_COMMAND_ID, data[0].resource);
+				// Dropping adds the card to the board and leaves it there, in
+				// whichever status bucket it belongs to — it does NOT navigate
+				// into the session. Focusing is the job of a click on the card,
+				// so a drag can bring several sessions onto the board without
+				// each one yanking the window into the focused view.
+				this.refreshCards();
 			},
 		}));
 
