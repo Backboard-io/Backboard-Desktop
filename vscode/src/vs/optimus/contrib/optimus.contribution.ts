@@ -28,7 +28,7 @@ import { getOptimusChatPanelWidth } from '../../sessions/browser/layoutPolicy.js
 import { ISessionsManagementService } from '../../sessions/services/sessions/common/sessionsManagement.js';
 import { ISessionsService } from '../../sessions/services/sessions/browser/sessionsService.js';
 import { RightWorkbenchCommandId } from '../../sessions/contrib/rightWorkbench/browser/rightWorkbench.js';
-import { OPTIMUS_CLOSE_SESSION_COMMAND_ID, OPTIMUS_DELETE_SESSION_COMMAND_ID, OPTIMUS_FOCUS_SESSION_COMMAND_ID, OPTIMUS_NEW_SESSION_COMMAND_ID, OPTIMUS_SET_SEARCH_QUERY_COMMAND_ID, OPTIMUS_SHOW_DASHBOARD_COMMAND_ID, OPTIMUS_SHOW_DASHBOARD_CONTENT_COMMAND_ID, OPTIMUS_SHOW_FOCUSED_SESSION_CONTENT_COMMAND_ID, OPTIMUS_TOGGLE_VIEW_MODE_COMMAND_ID } from '../browser/parts/optimusGridPart.js';
+import { OPTIMUS_CLOSE_SESSION_COMMAND_ID, OPTIMUS_DELETE_SESSION_COMMAND_ID, OPTIMUS_FOCUS_SESSION_COMMAND_ID, OPTIMUS_NEW_SESSION_COMMAND_ID, OPTIMUS_SET_SEARCH_QUERY_COMMAND_ID, OPTIMUS_SHOW_DASHBOARD_COMMAND_ID, OPTIMUS_SHOW_DASHBOARD_CONTENT_COMMAND_ID, OPTIMUS_SHOW_FOCUSED_SESSION_CONTENT_COMMAND_ID } from '../browser/parts/optimusGridPart.js';
 
 // Toolbar/context-menu actions used by the reused SessionsView. In the Simple
 // window these are imported by its sessions.contribution; the Optimus manifest
@@ -313,7 +313,6 @@ class OptimusChromeContribution extends Disposable implements IWorkbenchContribu
 	private readonly sidebarButton: HTMLButtonElement;
 	private readonly secondaryButton: HTMLButtonElement;
 	private readonly backButton: HTMLButtonElement;
-	private readonly forwardButton: HTMLButtonElement;
 
 	constructor(
 		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
@@ -345,11 +344,6 @@ class OptimusChromeContribution extends Disposable implements IWorkbenchContribu
 			this.commandService.executeCommand(OPTIMUS_SHOW_DASHBOARD_COMMAND_ID);
 		}));
 
-		this.forwardButton = append(navigation, $('button.optimus-window-nav-button.codicon.codicon-arrow-right')) as HTMLButtonElement;
-		this.forwardButton.type = 'button';
-		this.forwardButton.disabled = true;
-		this.forwardButton.setAttribute('aria-label', localize('optimusChrome.forward', "Forward"));
-
 		const commandCenter = append(navigationCluster, $('div.optimus-window-command-center'));
 		append(commandCenter, $('span.codicon.codicon-search.optimus-window-command-icon'));
 		const commandInput = append(commandCenter, $('input.optimus-window-command-input')) as HTMLInputElement;
@@ -360,7 +354,6 @@ class OptimusChromeContribution extends Disposable implements IWorkbenchContribu
 			this.commandService.executeCommand(OPTIMUS_SET_SEARCH_QUERY_COMMAND_ID, commandInput.value);
 		}));
 		const shortcuts = append(commandCenter, $('div.optimus-window-command-shortcuts'));
-		append(shortcuts, $('span.optimus-window-command-key.codicon.codicon-home'));
 		append(shortcuts, $('span.optimus-window-command-key')).textContent = '⌘';
 		append(shortcuts, $('span.optimus-window-command-key')).textContent = 'A';
 
@@ -370,19 +363,13 @@ class OptimusChromeContribution extends Disposable implements IWorkbenchContribu
 		this.sidebarButton.title = localize('optimusChrome.toggleSidebar', "Toggle left panel");
 		this.sidebarButton.setAttribute('aria-label', this.sidebarButton.title);
 
-		const viewModeButton = append(actions, $('button.optimus-window-chrome-button.optimus-window-chrome-view.codicon.codicon-layout-panel')) as HTMLButtonElement;
-		viewModeButton.type = 'button';
-		viewModeButton.title = localize('optimusChrome.toggleView', "Toggle board or list view");
-		viewModeButton.setAttribute('aria-label', viewModeButton.title);
-
+		// No view-mode button here: the dashboard's own Board / List switcher is
+		// the labelled control for that, and duplicating it in the chrome gave
+		// two affordances for one piece of state.
 		this.secondaryButton = append(actions, $('button.optimus-window-chrome-button.optimus-window-chrome-secondary.codicon')) as HTMLButtonElement;
 		this.secondaryButton.type = 'button';
 		this.secondaryButton.title = localize('optimusChrome.toggleRightPanel', "Toggle right panel");
 		this.secondaryButton.setAttribute('aria-label', this.secondaryButton.title);
-		this._register(addDisposableListener(viewModeButton, EventType.CLICK, e => {
-			EventHelper.stop(e, true);
-			this.commandService.executeCommand(OPTIMUS_TOGGLE_VIEW_MODE_COMMAND_ID);
-		}));
 
 		this._register(addDisposableListener(this.sidebarButton, EventType.CLICK, e => {
 			EventHelper.stop(e, true);

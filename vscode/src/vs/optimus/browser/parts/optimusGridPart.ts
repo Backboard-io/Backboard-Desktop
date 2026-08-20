@@ -141,7 +141,6 @@ export class OptimusGridPart extends Part {
 	private readonly refreshScheduler = this._register(new RunOnceScheduler(() => this.refreshCards(), 50));
 	private progressBar: ProgressBar | undefined;
 	private progressIndicator: IProgressIndicator | undefined;
-	private searchInput: HTMLInputElement | undefined;
 	private displayButton: HTMLButtonElement | undefined;
 	private filterButton: HTMLButtonElement | undefined;
 	private filterCountElement: HTMLElement | undefined;
@@ -466,6 +465,9 @@ export class OptimusGridPart extends Part {
 	}
 
 	private createDashboardToolbar(parent: HTMLElement): void {
+		// One toolbar row: view switcher and filters on the left, the icon
+		// controls pushed to the right. Splitting these across two rows cost a
+		// whole band of vertical space for six controls that fit on one line.
 		const dashboardHeader = append(parent, $('.optimus-dashboard-header'));
 		const primaryRow = append(dashboardHeader, $('.optimus-dashboard-primary'));
 		const switcher = append(primaryRow, $('.optimus-view-switcher'));
@@ -481,26 +483,11 @@ export class OptimusGridPart extends Part {
 		addViewButton('board', localize('optimus.dashboard.board', "Board"));
 		addViewButton('list', localize('optimus.dashboard.list', "List"));
 
-		const controls = append(primaryRow, $('.optimus-dashboard-controls'));
-		const search = append(controls, $('.optimus-dashboard-search'));
-		append(search, $('.codicon.codicon-search'));
-		this.searchInput = append(search, $('input.optimus-dashboard-search-input')) as HTMLInputElement;
-		this.searchInput.type = 'search';
-		this.searchInput.placeholder = localize('optimus.dashboard.search.placeholder', "Search sessions...");
-		this.searchInput.setAttribute('aria-label', localize('optimus.dashboard.search.ariaLabel', "Search Sessions"));
-		this._register(addDisposableListener(this.searchInput, EventType.INPUT, () => {
-			this.setSearchQuery(this.searchInput?.value ?? '', this.searchInput);
-		}));
-
-		this.displayButton = append(controls, $('button.optimus-dashboard-button')) as HTMLButtonElement;
-		this.displayButton.type = 'button';
-		this.displayButton.setAttribute('aria-haspopup', 'menu');
-		append(this.displayButton, $('span')).textContent = localize('optimus.dashboard.display', "Display");
-		append(this.displayButton, $('.codicon.codicon-chevron-down'));
-		this._register(addDisposableListener(this.displayButton, EventType.CLICK, () => this.showDisplayMenu()));
-
-		const secondaryRow = append(dashboardHeader, $('.optimus-dashboard-secondary'));
-		const filterControls = append(secondaryRow, $('.optimus-dashboard-filter-controls'));
+		// Search lives once, in the window chrome's command centre — it is
+		// always on screen (including the focused session, where this toolbar
+		// is hidden), so a second field here was a mirror of the same state
+		// rather than a second capability.
+		const filterControls = append(primaryRow, $('.optimus-dashboard-filter-controls'));
 		this.filterButton = append(filterControls, $('button.optimus-dashboard-button.optimus-dashboard-filter-button')) as HTMLButtonElement;
 		this.filterButton.type = 'button';
 		this.filterButton.setAttribute('aria-haspopup', 'menu');
@@ -511,18 +498,35 @@ export class OptimusGridPart extends Part {
 		this.filterChipsElement = append(filterControls, $('.optimus-dashboard-filter-chips'));
 		this.resultsElement = append(filterControls, $('.optimus-dashboard-results'));
 
-		const resetButton = append(secondaryRow, $('button.optimus-dashboard-reset')) as HTMLButtonElement;
+		const controls = append(primaryRow, $('.optimus-dashboard-controls'));
+
+		this.displayButton = append(controls, $('button.optimus-dashboard-button.optimus-dashboard-icon-button')) as HTMLButtonElement;
+		this.displayButton.type = 'button';
+		this.displayButton.setAttribute('aria-haspopup', 'menu');
+		const displayLabel = localize('optimus.dashboard.display', "Display");
+		this.displayButton.title = displayLabel;
+		this.displayButton.setAttribute('aria-label', displayLabel);
+		append(this.displayButton, $('.codicon.codicon-settings'));
+		append(this.displayButton, $('.codicon.codicon-chevron-down'));
+		this._register(addDisposableListener(this.displayButton, EventType.CLICK, () => this.showDisplayMenu()));
+
+		const resetButton = append(controls, $('button.optimus-dashboard-reset.optimus-dashboard-icon-button')) as HTMLButtonElement;
 		resetButton.type = 'button';
-		resetButton.textContent = localize('optimus.dashboard.resetFilters', "Reset filters");
+		const resetLabel = localize('optimus.dashboard.resetFilters', "Reset filters");
+		resetButton.title = resetLabel;
+		resetButton.setAttribute('aria-label', resetLabel);
+		append(resetButton, $('.codicon.codicon-clear-all'));
 		this._register(addDisposableListener(resetButton, EventType.CLICK, () => this.resetFilters()));
+	}
+
+	/** The single search field, owned by the window chrome's command centre. */
+	private getChromeSearchInput(): HTMLInputElement | null {
+		return this.element?.ownerDocument.querySelector<HTMLInputElement>('.optimus-window-command-input') ?? null;
 	}
 
 	private setSearchQuery(query: string, source?: HTMLInputElement): void {
 		this.query = query;
-		if (this.searchInput && this.searchInput !== source) {
-			this.searchInput.value = query;
-		}
-		const chromeInput = this.element?.ownerDocument.querySelector<HTMLInputElement>('.optimus-window-command-input');
+		const chromeInput = this.getChromeSearchInput();
 		if (chromeInput && chromeInput !== source) {
 			chromeInput.value = query;
 		}
@@ -689,8 +693,9 @@ export class OptimusGridPart extends Part {
 
 	private resetFilters(): void {
 		this.query = '';
-		if (this.searchInput) {
-			this.searchInput.value = '';
+		const chromeInput = this.getChromeSearchInput();
+		if (chromeInput) {
+			chromeInput.value = '';
 		}
 		this.filteredBuckets.clear();
 		this.timeRange = 'all';
