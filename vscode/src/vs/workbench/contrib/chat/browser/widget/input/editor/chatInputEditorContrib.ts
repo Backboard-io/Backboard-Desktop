@@ -185,7 +185,8 @@ class InputEditorDecorations extends Disposable {
 		this._register(this.codeEditorService.registerDecorationType(decorationDescription, dynamicVariableDecorationType, {
 			color: themeColorFromId(chatSlashCommandForeground),
 			backgroundColor: themeColorFromId(chatSlashCommandBackground),
-			borderRadius: '3px',
+			borderRadius: '6px',
+			fontWeight: '550',
 			rangeBehavior: TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges
 		}));
 	}

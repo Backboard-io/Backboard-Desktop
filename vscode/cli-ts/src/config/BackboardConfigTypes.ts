@@ -8,6 +8,11 @@ export interface BackboardConfigFile {
 		provider: string;
 		model: string;
 	};
+	/** Most recently working models, newest first, used for capacity failover. */
+	successfulModels?: Array<{
+		provider: string;
+		model: string;
+	}>;
 	thinking?: ThinkingIntent | null;
 	memory?: MemoryMode;
 	memoryProfile?: MemoryProfile;

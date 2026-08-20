@@ -225,12 +225,14 @@ export function renderModelSelectScript(iconBase: string): string {
 			return Array.from(log.querySelectorAll('.messageCard')).map(card => {
 				const role = card.classList.contains('user')
 					? 'user'
+					: card.classList.contains('reasoning')
+						? 'reasoning'
 					: card.classList.contains('assistant')
 						? 'assistant'
 						: card.classList.contains('error')
 							? 'error'
 							: 'assistant';
-				const content = card.querySelector('.messageText')?.textContent?.trim() || '';
+				const content = card.querySelector('.messageText, .reasoningText')?.textContent?.trim() || '';
 				return { role, content };
 			}).filter(message => message.content);
 		}
@@ -244,9 +246,10 @@ export function renderModelSelectScript(iconBase: string): string {
 				if (!message || typeof message.content !== 'string' || !message.content.trim()) {
 					continue;
 				}
-				appendMessage(message.role === 'user' ? 'user' : 'assistant', message.content);
+				appendMessage(message.role === 'user' ? 'user' : message.role === 'reasoning' ? 'reasoning' : 'assistant', message.content);
 			}
 			currentAssistantCard = undefined;
+			currentReasoningCard = undefined;
 			activeToolRows = [];
 			activeToolGroup = undefined;
 			syncEmptyState();

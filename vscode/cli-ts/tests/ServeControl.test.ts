@@ -41,10 +41,10 @@ describe("parseControlLine", () => {
 			op: "submit" as const,
 			requestId: "r2",
 			prompt: "hello",
+			forkContext: "Prior conversation",
 			model: "anthropic/claude-sonnet-4-5",
 			permission: "auto" as const,
 			thinking: "off",
-			excludeReasoning: true,
 			excludedTools: [],
 			memory: "auto",
 			computerUse: true,
@@ -77,6 +77,15 @@ describe("parseControlLine", () => {
 		).toEqual({
 			ok: true,
 			control: { op: "respondInput", id: "ask", answers: ["yes", "no"] },
+		});
+		expect(
+			parseControlLine(
+				'{"op":"submit","requestId":"r1","prompt":"hello","forkContext":42}',
+			),
+		).toEqual({
+			ok: false,
+			error: "invalid submit op: missing forkContext",
+			requestId: "r1",
 		});
 	});
 

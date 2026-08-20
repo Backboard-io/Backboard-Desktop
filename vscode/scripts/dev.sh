@@ -105,9 +105,13 @@ bun_path() {
 
 # Put Bun on PATH for the launched app, which inherits our environment.
 export_bun_path() {
-	local bun
+	local bun bun_dir
 	if bun="$(bun_path)"; then
-		export PATH="$(dirname "$bun"):$PATH"
+		bun_dir="$(dirname "$bun")"
+		case ":$PATH:" in
+			*":$bun_dir:"*) ;;
+			*) export PATH="$PATH:$bun_dir" ;;
+		esac
 	fi
 }
 

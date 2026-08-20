@@ -889,6 +889,14 @@ export class ChatSessionsService extends Disposable implements IChatSessionsServ
 	}
 
 	async canResolveChatSession(sessionType: string) {
+		// Programmatic providers (notably the local agent host) register their
+		// contribution and content provider together. Once both are present there
+		// is no extension activation work left to do, so avoid putting panel
+		// restoration behind extension discovery on every open.
+		if (this._isContributionAvailableForType(sessionType) && this._contentProviders.has(sessionType)) {
+			return true;
+		}
+
 		await this._extensionService.whenInstalledExtensionsRegistered();
 		if (!this._isContributionAvailableForType(sessionType)) {
 			return false;

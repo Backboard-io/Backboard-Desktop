@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import './media/chatViewTitleControl.css';
-import { addDisposableListener, EventType, getActiveElement, h } from '../../../../../../base/browser/dom.js';
+import { addDisposableListener, EventType, h } from '../../../../../../base/browser/dom.js';
 import { renderAsPlaintext } from '../../../../../../base/browser/markdownRenderer.js';
 import { Gesture, EventType as TouchEventType } from '../../../../../../base/browser/touch.js';
 import { Delayer } from '../../../../../../base/common/async.js';
@@ -16,7 +16,6 @@ import { localize } from '../../../../../../nls.js';
 import { HiddenItemStrategy, MenuWorkbenchToolBar } from '../../../../../../platform/actions/browser/toolbar.js';
 import { Action2, MenuId, MenuRegistry, registerAction2 } from '../../../../../../platform/actions/common/actions.js';
 import { ICommandService } from '../../../../../../platform/commands/common/commands.js';
-import { IContextMenuService } from '../../../../../../platform/contextview/browser/contextView.js';
 import { IInstantiationService, ServicesAccessor } from '../../../../../../platform/instantiation/common/instantiation.js';
 import { IChatViewTitleActionContext } from '../../../common/actions/chatActions.js';
 import { IChatModel } from '../../../common/model/chatModel.js';
@@ -37,13 +36,13 @@ export interface IChatViewTitleDelegate {
 
 export class ChatViewTitleControl extends Disposable {
 
-	private static readonly DEFAULT_TITLE = localize('chat', "New Agent");
+	private static readonly DEFAULT_TITLE = localize('chat', "Chats");
 	private static readonly PICK_AGENT_SESSION_ACTION_ID = 'workbench.action.chat.pickAgentSession';
-	private static readonly MORE_ACTIONS_ACTION_ID = 'workbench.action.chat.viewTitleMoreActions';
 	/** Stable ids of actions registered elsewhere; referenced by id to avoid import cycles. */
 	private static readonly NEW_CHAT_COMMAND_ID = 'workbench.action.chat.newChat';
 	private static readonly OPEN_AGENT_SESSION_COMMAND_ID = 'workbench.action.chat.history';
-	private static readonly TOGGLE_AGENT_SESSIONS_SIDEBAR_COMMAND_ID = 'agentSessions.toggleAgentSessionsSidebar';
+	private static readonly OPEN_BACKBOARD_HISTORY_COMMAND_ID = 'workbench.action.chat.openBackboardHistory';
+	private static readonly OPEN_SETTINGS_COMMAND_ID = 'workbench.action.openSettings';
 	private static readonly MAX_HISTORY_TABS = 40;
 	private static toolbarMenuItemsRegistered = false;
 
@@ -127,38 +126,18 @@ export class ChatViewTitleControl extends Disposable {
 			}
 		}));
 
-		// The strip's ⋯: layout actions for the panel itself. Lives in the
-		// session-title toolbar so it stays visible whichever composite (chat,
-		// Claude Code, Codex) owns the surface.
 		this._register(registerAction2(class extends Action2 {
 			constructor() {
 				super({
-					id: ChatViewTitleControl.MORE_ACTIONS_ACTION_ID,
-					title: localize('chat.viewTitleMoreActions', "More Actions..."),
-					icon: Codicon.toolBarMore,
+					id: ChatViewTitleControl.OPEN_BACKBOARD_HISTORY_COMMAND_ID,
+					title: localize('chat.openAgentSession', "Chat History"),
 					f1: false,
 				});
 			}
 
-			async run(accessor: ServicesAccessor): Promise<void> {
-				const contextMenuService = accessor.get(IContextMenuService);
-				const commandService = accessor.get(ICommandService);
-				const anchorElement = getActiveElement();
-				const anchor = anchorElement instanceof HTMLElement ? anchorElement : that.titleContainer;
-				if (!anchor) {
-					return;
-				}
-				const runCommand = (id: string, label: string): IAction => ({
-					id, label, class: undefined, enabled: true, tooltip: label,
-					run: () => commandService.executeCommand(id),
-				});
-				contextMenuService.showContextMenu({
-					getAnchor: () => anchor,
-					getActions: () => [
-						runCommand('agentSessions.showAgentSessionsSidebar', localize('chat.showSessionsSidebar', "Show Agent Sessions Sidebar")),
-						runCommand('workbench.action.maximizeAuxiliaryBar', localize('chat.maximizePanel', "Maximize Panel")),
-						runCommand('workbench.action.toggleAuxiliaryBar', localize('chat.hidePanel', "Hide Panel")),
-					],
+			run(accessor: ServicesAccessor): Promise<void> {
+				return accessor.get(ICommandService).executeCommand(ChatViewTitleControl.OPEN_AGENT_SESSION_COMMAND_ID, {
+					excludeSubscriptionSessions: true,
 				});
 			}
 		}));
@@ -169,39 +148,30 @@ export class ChatViewTitleControl extends Disposable {
 			ChatViewTitleControl.toolbarMenuItemsRegistered = true;
 			MenuRegistry.appendMenuItem(MenuId.ChatViewSessionTitleToolbar, {
 				command: {
-					id: ChatViewTitleControl.NEW_CHAT_COMMAND_ID,
-					title: localize('chat.newChatTab', "New Agent"),
-					icon: Codicon.plus,
+					id: ChatViewTitleControl.OPEN_BACKBOARD_HISTORY_COMMAND_ID,
+					title: localize('chat.openAgentSession', "Chat History"),
+					icon: Codicon.history,
 				},
 				group: 'navigation',
 				order: 1,
 			});
 			MenuRegistry.appendMenuItem(MenuId.ChatViewSessionTitleToolbar, {
 				command: {
-					id: ChatViewTitleControl.OPEN_AGENT_SESSION_COMMAND_ID,
-					title: localize('chat.openAgentSession', "Open Agent Session..."),
-					icon: Codicon.history,
+					id: ChatViewTitleControl.OPEN_SETTINGS_COMMAND_ID,
+					title: localize('chat.openSettings', "Settings"),
+					icon: Codicon.settingsGear,
 				},
 				group: 'navigation',
 				order: 2,
 			});
 			MenuRegistry.appendMenuItem(MenuId.ChatViewSessionTitleToolbar, {
 				command: {
-					id: ChatViewTitleControl.MORE_ACTIONS_ACTION_ID,
-					title: localize('chat.viewTitleMoreActions', "More Actions..."),
-					icon: Codicon.toolBarMore,
+					id: ChatViewTitleControl.NEW_CHAT_COMMAND_ID,
+					title: localize('chat.newChatTab', "New Chat"),
+					icon: Codicon.edit,
 				},
 				group: 'navigation',
 				order: 3,
-			});
-			MenuRegistry.appendMenuItem(MenuId.ChatViewSessionTitleToolbar, {
-				command: {
-					id: ChatViewTitleControl.TOGGLE_AGENT_SESSIONS_SIDEBAR_COMMAND_ID,
-					title: localize('chat.toggleAgentsDrawer', "Toggle Agents Drawer"),
-					icon: Codicon.layoutSidebarRight,
-				},
-				group: 'navigation',
-				order: 4,
 			});
 		}
 	}
@@ -342,6 +312,7 @@ export class ChatViewTitleControl extends Disposable {
 		}
 
 		this.tabDisposables.clear();
+		this.activeTabLabel = undefined;
 		const previousScrollLeft = this.tabsContainer.scrollLeft;
 		this.tabsContainer.replaceChildren();
 
@@ -378,6 +349,8 @@ export class ChatViewTitleControl extends Disposable {
 		// New Chat tab represents it. It graduates to a real tab (and the
 		// permanent tab deactivates) once its first request lands.
 		const currentIsEmptyDraft = !this.model || this.model.getRequests().length === 0;
+		this.titleContainer?.classList.toggle('chat-view-title-empty', currentIsEmptyDraft);
+		this.titleContainer?.classList.toggle('chat-view-title-history', !currentIsEmptyDraft);
 		if (currentSessionResourceKey) {
 			// Reopening a session whose tab was closed (via history) revives the
 			// tab — the session owning the surface always has a visible tab.
@@ -430,6 +403,7 @@ export class ChatViewTitleControl extends Disposable {
 				label: isCurrent ? currentTitle : (session?.label ?? tab?.label ?? ChatViewTitleControl.DEFAULT_TITLE),
 				active: isCurrent,
 				isCurrent,
+				historyHeader: isCurrent && !currentIsEmptyDraft,
 				// The current tab shows the "new session" icon until it has a response;
 				// every other (history) tab necessarily already has one.
 				isNew: isCurrent && (!this.model || this.model.getRequests().length === 0),
@@ -453,24 +427,26 @@ export class ChatViewTitleControl extends Disposable {
 		}
 	}
 
-	private addTab(options: { label: string; active: boolean; isCurrent?: boolean; isNew?: boolean; permanent?: boolean; session?: IAgentSession; sessionResource?: IChatModel['sessionResource'] }): void {
+	private addTab(options: { label: string; active: boolean; isCurrent?: boolean; isNew?: boolean; permanent?: boolean; historyHeader?: boolean; session?: IAgentSession; sessionResource?: IChatModel['sessionResource'] }): void {
 		if (!this.tabsContainer) {
 			return;
 		}
 
 		const label = options.label.trim() || ChatViewTitleControl.DEFAULT_TITLE;
-		const tabElements = h('div.chat-view-title-tab@root', { role: 'button', tabIndex: 0, title: label }, [
+		const tabTitle = options.historyHeader ? localize('chat.historyHeader.backToChats', "Back to chats: {0}", label) : label;
+		const tabElements = h('div.chat-view-title-tab@root', { role: 'button', tabIndex: 0, title: tabTitle, ariaLabel: tabTitle }, [
 			h('span.chat-view-title-tab-icon@icon'),
 			h('span.chat-view-title-tab-label@label'),
 			h('span.codicon.codicon-close.chat-view-title-tab-close@close', { role: 'button', title: localize('chat.closeSessionTab', "Close Tab"), ariaLabel: localize('chat.closeSessionTab', "Close Tab") }),
 		]);
 		// Not-yet-responded-to sessions show the Backboard mark; sessions with at
 		// least one response show a chat bubble.
-		tabElements.icon.classList.add(...ThemeIcon.asClassNameArray(options.isNew ? ThemeIcon.fromId('backboard-logo') : Codicon.comment));
+		tabElements.icon.classList.add(...ThemeIcon.asClassNameArray(options.historyHeader ? Codicon.arrowLeft : (options.isNew ? ThemeIcon.fromId('backboard-logo') : Codicon.comment)));
 		tabElements.label.textContent = label;
 		const tab = tabElements.root;
 		tab.classList.toggle('chat-view-title-tab-active', options.active);
-		if (options.permanent) {
+		tab.classList.toggle('chat-view-title-tab-history-current', !!options.historyHeader);
+		if (options.permanent || options.historyHeader) {
 			// The always-there New Chat tab has nothing to close and keeps its
 			// label readable when the strip compresses.
 			tab.classList.add('chat-view-title-tab-permanent');
@@ -485,7 +461,7 @@ export class ChatViewTitleControl extends Disposable {
 		this.tabDisposables.add(addDisposableListener(tab, EventType.CLICK, e => {
 			e.preventDefault();
 			e.stopPropagation();
-			if (options.permanent) {
+			if (options.permanent || options.historyHeader) {
 				this.delegate.openNewChat();
 			} else if (options.session) {
 				void this.instantiationService.invokeFunction(openSession, options.session);
@@ -496,24 +472,26 @@ export class ChatViewTitleControl extends Disposable {
 			}
 		}));
 
-		this.tabDisposables.add(addDisposableListener(tabElements.close, EventType.CLICK, e => {
-			e.preventDefault();
-			e.stopPropagation();
-			if (options.session) {
-				this.closedSessionTabs.add(options.session.resource.toString());
-			} else if (options.sessionResource) {
-				const resourceKey = options.sessionResource.toString();
-				this.closedSessionTabs.add(resourceKey);
-				this.openSessionTabs.delete(resourceKey);
-			}
-			this.updateTabs(this.getResolvedTitle());
-			if (options.isCurrent) {
-				// Closing the tab that owns the surface falls back to the panel's
-				// resting state: the permanent New Agent tab, active over an
-				// empty draft. Closing every tab therefore always ends there.
-				this.delegate.openNewChat();
-			}
-		}));
+		if (!options.permanent && !options.historyHeader) {
+			this.tabDisposables.add(addDisposableListener(tabElements.close, EventType.CLICK, e => {
+				e.preventDefault();
+				e.stopPropagation();
+				if (options.session) {
+					this.closedSessionTabs.add(options.session.resource.toString());
+				} else if (options.sessionResource) {
+					const resourceKey = options.sessionResource.toString();
+					this.closedSessionTabs.add(resourceKey);
+					this.openSessionTabs.delete(resourceKey);
+				}
+				this.updateTabs(this.getResolvedTitle());
+				if (options.isCurrent) {
+					// Closing the tab that owns the surface falls back to the panel's
+					// resting state: the permanent New Agent tab, active over an
+					// empty draft. Closing every tab therefore always ends there.
+					this.delegate.openNewChat();
+				}
+			}));
+		}
 	}
 
 	getHeight(): number {

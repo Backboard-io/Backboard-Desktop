@@ -33,6 +33,7 @@ import { McpCustomizationController } from '../shared/mcpCustomizationController
 import { buildCodexMcpServerConfigEdits } from './codexMcpConfigSync.js';
 import { buildCodexMcpReadResult, codexMcpListToInventory, codexMcpToolsChanged, inventoryToSdkServers, translateCodexMcpStartupState, type ICodexMcpServerEntry } from './codexMcpServers.js';
 import { buildElicitationRequest, cancelledElicitationResponse, declinedElicitationResponse, elicitationResponseFromAnswers } from './codexElicitationMapper.js';
+import { resolveUserProfileSkillLocations } from '../shared/userProfileSkills.js';
 import type { AhpMcpUiHostCapabilities, Customization } from '../../common/state/protocol/channels-session/state.js';
 import { IAgentConfigurationService } from '../agentConfigurationService.js';
 import { extractForwardedErrorInfo } from '../shared/forwardedChatError.js';
@@ -908,6 +909,19 @@ export class CodexAgent extends Disposable implements IAgent {
 				capabilities: { experimentalApi: true, requestAttestation: false, optOutNotificationMethods: null },
 			});
 			client.notify<'initialized'>('initialized', undefined as never);
+			const userProfileSkills = resolveUserProfileSkillLocations();
+			if (userProfileSkills) {
+				try {
+					await client.request<'skills/extraRoots/set'>('skills/extraRoots/set', {
+						extraRoots: [userProfileSkills.skillsRoot.fsPath],
+					});
+					this._logService.info(`[Codex] Added shared user skills root ${userProfileSkills.skillsRoot.fsPath}`);
+				} catch (error) {
+					// Keep older Codex app-server builds usable even when they predate
+					// the extra-roots RPC; native ~/.codex/skills remain available.
+					this._logService.warn(`[Codex] Could not add shared user skills root: ${error instanceof Error ? error.message : String(error)}`);
+				}
+			}
 			// Codex reads its own login from `$CODEX_HOME/auth.json`; log the
 			// account it resolved so a signed-out CLI is diagnosable.
 			void this._logAccountSnapshot(client);

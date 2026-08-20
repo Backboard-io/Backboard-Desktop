@@ -173,6 +173,8 @@ async function* streamOpenRouter(
 			| {
 					delta?: {
 						content?: string | null;
+						reasoning?: string | null;
+						reasoning_content?: string | null;
 						reasoning_details?: unknown[];
 						tool_calls?: Array<{
 							index?: number;
@@ -197,6 +199,13 @@ async function* streamOpenRouter(
 		const delta = choice.delta;
 		if (delta?.content) {
 			yield { kind: "assistant_delta", text: delta.content };
+		}
+		const reasoningText =
+			delta?.reasoning ||
+			delta?.reasoning_content ||
+			reasoningDetailText(delta?.reasoning_details);
+		if (reasoningText) {
+			yield { kind: "reasoning_delta", text: reasoningText };
 		}
 		if (Array.isArray(delta?.reasoning_details)) {
 			mergeReasoningDetails(reasoningDetails, delta.reasoning_details);
@@ -507,6 +516,23 @@ function mergeReasoningDetails(
 		}
 		pending.set(key, merged);
 	}
+}
+
+function reasoningDetailText(details: readonly unknown[] | undefined): string {
+	if (!details) return "";
+	return details
+		.flatMap((detail) => {
+			if (
+				typeof detail !== "object" ||
+				detail === null ||
+				Array.isArray(detail)
+			) {
+				return [];
+			}
+			const text = (detail as Record<string, unknown>).text;
+			return typeof text === "string" ? [text] : [];
+		})
+		.join("");
 }
 
 function waitForSignal<T>(

@@ -19,14 +19,14 @@ import { TestConfigurationService } from '../../../../../../../platform/configur
 import { workbenchInstantiationService } from '../../../../../../test/browser/workbenchTestServices.js';
 import { IChatMarkdownAnchorService } from '../../../../browser/widget/chatContentParts/chatMarkdownAnchorService.js';
 import { IChatContentPartRenderContext, InlineTextModelCollection } from '../../../../browser/widget/chatContentParts/chatContentParts.js';
-import { ChatProgressContentPart } from '../../../../browser/widget/chatContentParts/chatProgressContentPart.js';
+import { ChatProgressContentPart, ChatWorkingProgressContentPart } from '../../../../browser/widget/chatContentParts/chatProgressContentPart.js';
 import { ChatToolProgressSubPart } from '../../../../browser/widget/chatContentParts/toolInvocationParts/chatToolProgressPart.js';
 import { ChatToolStreamingSubPart, formatStreamingToolInput } from '../../../../browser/widget/chatContentParts/toolInvocationParts/chatToolStreamingSubPart.js';
 import { isMcpToolInvocation } from '../../../../browser/widget/chatContentParts/toolInvocationParts/chatToolPartUtilities.js';
 import { DiffEditorPool, EditorPool } from '../../../../browser/widget/chatContentParts/chatContentCodePools.js';
 import { IChatToolInvocation, IChatToolInvocationSerialized, ToolConfirmKind } from '../../../../common/chatService/chatService.js';
-import { IChatResponseViewModel } from '../../../../common/model/chatViewModel.js';
-import { ToolDataSource, type ToolDataSource as ToolDataSourceType } from '../../../../common/tools/languageModelToolsService.js';
+import { IChatResponseViewModel, IChatWorkingProgress } from '../../../../common/model/chatViewModel.js';
+import { ILanguageModelToolsService, ToolDataSource, type ToolDataSource as ToolDataSourceType } from '../../../../common/tools/languageModelToolsService.js';
 
 suite('ChatToolProgressSubPart', () => {
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
@@ -122,6 +122,10 @@ suite('ChatToolProgressSubPart', () => {
 
 		mockConfigurationService = new TestConfigurationService();
 		instantiationService.stub(IConfigurationService, mockConfigurationService);
+		instantiationService.stub(ILanguageModelToolsService, {
+			_serviceBrand: undefined,
+			onDidPrepareToolCallBecomeUnresponsive: Event.None,
+		} as unknown as ILanguageModelToolsService);
 
 		mockMarkdownRenderer = {
 			render: (markdown: IMarkdownString, _options?: MarkdownRenderOptions, outElement?: HTMLElement): IRenderedMarkdown => {
@@ -289,6 +293,37 @@ suite('ChatToolProgressSubPart', () => {
 		));
 
 		assert.ok(/^· \d+s$/.test(part.domNode.querySelector('.chat-progress-elapsed')?.textContent ?? ''));
+	});
+
+	test('keeps cursor transcript pending work at Planning next moves across rerenders', () => {
+		const context = createRenderContext(false);
+		context.container.classList.add('backboard-clean-chat', 'backboard-cursor-transcript');
+		const createPendingState = () => ({
+			confirmationAdjustedTimestamp: observableValue('confirmationAdjustedTimestamp', Date.now() - 8_000),
+			completionTokenCountObs: observableValue<number | undefined>('completionTokenCount', undefined),
+			isComplete: false,
+		});
+		const progress: IChatWorkingProgress = { kind: 'working', state: createPendingState() };
+		const part = disposables.add(instantiationService.createInstance(
+			ChatWorkingProgressContentPart,
+			progress,
+			mockMarkdownRenderer,
+			context,
+		));
+
+		assert.deepStrictEqual({
+			cursorRow: part.domNode.classList.contains('chat-cursor-working-row'),
+			label: part.domNode.querySelector('.chat-working-progress-step > p')?.textContent,
+			stats: part.domNode.querySelector('.chat-working-progress-step > span')?.textContent,
+			loading: !!part.domNode.querySelector('.codicon-loading.codicon-modifier-spin'),
+			reused: part.hasSameContent({ kind: 'working', state: createPendingState() }, [], context.element),
+		}, {
+			cursorRow: true,
+			label: 'Planning next moves',
+			stats: '',
+			loading: false,
+			reused: true,
+		});
 	});
 
 	test('does not render a loading icon for run playwright code progress', () => {

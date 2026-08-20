@@ -49,11 +49,10 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 	static readonly placeholdeViewContainersKey = 'workbench.auxiliarybar.placeholderPanels';
 	static readonly viewContainersWorkspaceStateKey = 'workbench.auxiliarybar.viewContainersWorkspaceState';
 
-	// Cursor's editor Agent surface keeps a full conversation column even when
-	// its internal sessions drawer is closed. 516px is the logical width of the
-	// 1032px Retina reference capture and prevents the composer from collapsing
-	// into the cramped stock secondary-sidebar geometry.
-	override readonly minimumWidth: number = 516;
+	// The agent transcript is responsive down to its own 320px minimum. Keep
+	// the auxiliary bar sash aligned with that contract so the 380/480/600px
+	// Codex layouts are all reachable.
+	override readonly minimumWidth: number = 320;
 	override readonly maximumWidth: number = Number.POSITIVE_INFINITY;
 	override readonly minimumHeight: number = 0;
 	override readonly maximumHeight: number = Number.POSITIVE_INFINITY;
@@ -76,7 +75,7 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 			return undefined;
 		}
 
-		return Math.max(width, 516);
+		return Math.max(width, 320);
 	}
 
 	readonly priority = LayoutPriority.Low;

@@ -761,6 +761,27 @@ suite('RemoteAgentHostProtocolClient', () => {
 				['file:///plugins'],
 			);
 		});
+
+		test('createSession forwards fork source and custom agent', async () => {
+			const { client, transport } = createClient();
+			const source = URI.parse('backboard:/source-session');
+			const created = client.createSession({
+				provider: 'backboard',
+				agent: { uri: 'agent://custom' },
+				fork: { session: source, turnIndex: 2, turnId: 'turn-3' },
+			});
+
+			const sent = transport.sentMessages.find(
+				(m): m is JsonRpcRequest => 'method' in m && m.method === 'createSession');
+			assert.ok(sent);
+			assert.deepStrictEqual((sent.params as { fork?: unknown }).fork, {
+				session: source.toString(),
+				turnId: 'turn-3',
+			});
+			assert.deepStrictEqual((sent.params as { agent?: unknown }).agent, { uri: 'agent://custom' });
+			transport.fireMessage({ jsonrpc: '2.0', id: sent.id, result: null });
+			await created;
+		});
 	});
 
 	suite('soft reconnect (transport factory)', () => {

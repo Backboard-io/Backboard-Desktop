@@ -1,11 +1,10 @@
 export type ThinkingLevel = "low" | "medium" | "high" | "max";
 
-export type ThinkingIntent = (
+export type ThinkingIntent =
 	| { kind: "default" }
 	| { kind: "level"; level: ThinkingLevel }
 	| { kind: "budget"; tokens: number }
-	| { kind: "dynamic" }
-) & { excludeReasoning?: boolean };
+	| { kind: "dynamic" };
 
 export type ThinkingConfig =
 	| { effort: ThinkingLevel; exclude_reasoning?: boolean }

@@ -33,6 +33,12 @@ export interface IAgentHostGenericConfigOption {
 	readonly description?: string;
 	/** Whether this option is currently set to a non-default (active) value. */
 	readonly active: boolean;
+	/** Whether this capability is enabled and should be shown inside the composer. */
+	readonly composerSelected: boolean;
+	/** Value applied when the capability is chosen from the one-click Add menu. */
+	readonly activationValue?: string;
+	/** Value applied when its inline composer token is removed. */
+	readonly deactivationValue?: string;
 	show(anchor?: HTMLElement): void;
 	/** Static enum metadata for slider-style editors; `undefined` for non-enum properties. */
 	getEnumInfo(): { values: string[]; labels: string[]; descriptions: (string | undefined)[]; current: string | undefined } | undefined;
@@ -62,6 +68,55 @@ function getVisibleGenericConfigLabel(property: string, schema: SessionConfigPro
 		return localize('backboard.config.approvals.title', "Approvals");
 	}
 	return schema.title || property;
+}
+
+const composerCapabilityProperties = new Set([
+	'webSearch',
+	'web',
+	'memory',
+	'memoryMode',
+	'computerUse',
+	'cua',
+	'browserUse',
+	'browser',
+	'notifications',
+	'notify',
+	'imageGeneration',
+	'images',
+]);
+
+function getComposerActivationValue(property: string, schema: SessionConfigPropertySchema): string | undefined {
+	if (!composerCapabilityProperties.has(property)) {
+		return undefined;
+	}
+	if (schema.type === 'boolean') {
+		return 'true';
+	}
+	if ((property === 'memory' || property === 'memoryMode') && schema.enum?.includes('auto')) {
+		return 'auto';
+	}
+	return schema.enum?.find(value => value === 'on' || value === 'enabled');
+}
+
+function getComposerDeactivationValue(property: string, schema: SessionConfigPropertySchema): string | undefined {
+	if (!composerCapabilityProperties.has(property)) {
+		return undefined;
+	}
+	if (schema.type === 'boolean') {
+		return 'false';
+	}
+	return schema.enum?.find(value => value === 'off' || value === 'disabled' || value === 'false')
+		?? (typeof schema.default === 'string' ? schema.default : undefined);
+}
+
+function isComposerCapabilitySelected(property: string, schema: SessionConfigPropertySchema, value: unknown): boolean {
+	if (!composerCapabilityProperties.has(property)) {
+		return false;
+	}
+	if (schema.type === 'boolean') {
+		return value === true;
+	}
+	return typeof value === 'string' && value !== 'off' && value !== 'false' && value !== 'disabled';
 }
 
 /**
@@ -151,12 +206,16 @@ export class AgentHostGenericConfigChips extends Disposable {
 			if (!chip) {
 				continue;
 			}
+			const value = chip.getCurrentValue();
 			options.push({
 				id: property,
 				label: getVisibleGenericConfigLabel(property, schema),
 				valueLabel: chip.getCurrentLabel(),
 				description: schema.description,
 				active: chip.isActive(),
+				composerSelected: isComposerCapabilitySelected(property, schema, value),
+				activationValue: getComposerActivationValue(property, schema),
+				deactivationValue: getComposerDeactivationValue(property, schema),
 				show: (anchor?: HTMLElement) => chip.show(anchor),
 				getEnumInfo: () => chip.getEnumInfo(),
 				setValue: value => chip.setValue(value),

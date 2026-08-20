@@ -1130,6 +1130,21 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	max-width: 100%;
 }
 
+/* Backboard image generations render as an intentional media card inside the
+ * response instead of an unbounded inline bitmap. */
+.interactive-item-container .value .rendered-markdown img[src^='https://backboard-prod.s3.ca-central-1.amazonaws.com/generated-images/'] {
+	box-sizing: border-box;
+	display: block;
+	width: min(100%, 640px);
+	height: auto;
+	max-height: 520px;
+	margin: 10px 0 8px;
+	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 16%, transparent);
+	border-radius: 12px;
+	background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
+	object-fit: contain;
+}
+
 .chat-tool-hover,
 .interactive-item-container {
 
@@ -2730,13 +2745,6 @@ have to be updated for changes to the rules above, or to support more deeply nes
 		padding: 0;
 	}
 
-	/* When enabled-feature icons are shown, the gear grows to fit them even in
-	 * the narrow composer. */
-	.interactive-session .chat-input-toolbar .monaco-action-bar .actions-container > .action-item:has(.codicon-settings-gear) .action-label.has-active-options {
-		width: auto;
-		min-width: 20px;
-		padding: 0 6px;
-	}
 }
 
 .interactive-session .chat-secondary-input-toolbar .chat-sessionPicker-item .action-label {
@@ -2752,37 +2760,6 @@ have to be updated for changes to the rules above, or to support more deeply nes
 .interactive-session .chat-input-toolbar .action-label[aria-expanded="true"],
 .interactive-session .chat-secondary-toolbar .action-label[aria-expanded="true"] {
 	background-color: var(--vscode-toolbar-hoverBackground);
-}
-
-/* Backboard composer options gear: show enabled features' icons (in the accent
- * blue) next to the gear so an active configuration is visible at a glance. */
-.interactive-session .chat-input-toolbar .action-label.codicon-settings-gear {
-	position: relative;
-}
-
-.interactive-session .chat-input-toolbar .action-label.codicon-settings-gear.has-active-options {
-	display: inline-flex;
-	align-items: center;
-	gap: 4px;
-	width: auto;
-	min-width: 0;
-	padding: 0 6px;
-}
-
-.interactive-session .chat-input-toolbar .action-label.codicon-settings-gear .backboard-options-active-icons {
-	display: none;
-	align-items: center;
-	gap: 3px;
-}
-
-.interactive-session .chat-input-toolbar .action-label.codicon-settings-gear.has-active-options .backboard-options-active-icons {
-	display: inline-flex;
-}
-
-.interactive-session .chat-input-toolbar .action-label.codicon-settings-gear .backboard-options-active-icon {
-	color: var(--vscode-charts-blue, var(--vscode-focusBorder));
-	font-size: 14px;
-	line-height: 1;
 }
 
 /* Reasoning intensity slider popup (opened from the composer options gear) */
@@ -5522,38 +5499,6 @@ have to be updated for changes to the rules above, or to support more deeply nes
  * pickers are the only way to reach a BYOS ("bring your own server") agent
  * provider there. Hiding them makes BYOS unselectable. */
 
-/* ---- New-chat hero composer ----
- *
- * Simple builds a dedicated new-chat surface whose composer is a tall centred
- * card (`.new-chat-composer-stack` in
- * `vs/sessions/contrib/chat/browser/media/chatWidget.css`). The other products
- * reuse one composer for the whole conversation, so there is no such element to
- * hook — they get the same geometry from `chat-composer-empty`, which ChatWidget
- * sets while nothing has been sent yet, and lose it on the first request. */
-
-.monaco-workbench .backboard-composer .interactive-session.chat-composer-empty .interactive-input-part {
-	width: min(820px, calc(100% - 40px));
-	margin: 0 auto;
-	padding: 0;
-	box-sizing: border-box;
-}
-
-.monaco-workbench .backboard-composer .interactive-session.chat-composer-empty .interactive-input-part .chat-input-container {
-	/* T3's hero card: 20px corners, `pt-4 px-4 pb-3`, tall enough to read as a
-	 * prompt surface rather than a one-line reply box. */
-	min-height: 172px;
-	padding: 18px 20px 14px;
-	border-radius: 20px;
-	box-shadow: none;
-	display: flex;
-	flex-direction: column;
-	justify-content: flex-start;
-	gap: 12px;
-	overflow: hidden;
-	position: relative;
-	box-sizing: border-box;
-}
-
 /* ---- Backboard clean chat flow -------------------------------------------
  *
  * A shared transcript treatment for the Simple session, Advanced pane, and
@@ -6359,36 +6304,6 @@ have to be updated for changes to the rules above, or to support more deeply nes
 .monaco-workbench .backboard-clean-chat .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background,
 .monaco-workbench .backboard-clean-chat .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .margin {
 	background-color: var(--bb-clean-chat-surface) !important;
-}
-
-/* The previous empty-state treatment inflated the same composer to a 172px
- * hero card. Cursor keeps the prompt ready without turning it into the page's
- * main visual object, so clean hosts use the compact dock before and after the
- * first message. */
-.monaco-workbench .backboard-clean-chat.backboard-composer .interactive-session.chat-composer-empty .interactive-input-part .chat-input-container {
-	min-height: 82px;
-	padding: 9px 11px 7px;
-	gap: 2px;
-	border-radius: var(--bb-clean-chat-radius);
-}
-
-.monaco-workbench .backboard-clean-chat.backboard-composer .interactive-session.chat-composer-empty .interactive-input-part {
-	width: min(100%, var(--bb-clean-chat-column));
-	padding-inline: var(--bb-clean-chat-gutter);
-}
-
-/* The editor side panel has an older, highly-specific 152px draft rule in its
- * Cursor parity stylesheet. Keep the shared clean-flow decision authoritative
- * there as well. */
-.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-clean-chat.backboard-composer .interactive-session.chat-composer-empty .interactive-input-part .chat-input-container {
-	min-height: 82px;
-	padding: 9px 11px 7px;
-	gap: 2px;
-	border-radius: var(--bb-clean-chat-radius);
-}
-
-.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-clean-chat.backboard-composer .interactive-session.chat-composer-empty .interactive-input-part .interactive-input-editor {
-	min-height: 18px;
 }
 
 .monaco-workbench .backboard-clean-chat .interactive-session .chat-input-container.focused,
@@ -7221,23 +7136,6 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	min-height: 32px;
 	margin-top: auto;
 	padding: 0;
-}
-
-.monaco-workbench .backboard-clean-chat.backboard-composer .interactive-session.chat-composer-empty .interactive-input-part,
-.monaco-workbench .backboard-clean-chat.backboard-composer .interactive-session.chat-composer-empty .interactive-input-part .chat-input-container {
-	width: min(calc(100% - (2 * var(--bb-t3-viewport-inset))), var(--bb-t3-column));
-	max-width: var(--bb-t3-column);
-}
-
-.monaco-workbench .backboard-clean-chat.backboard-composer .interactive-session.chat-composer-empty .interactive-input-part {
-	padding: 0 0 10px;
-}
-
-.monaco-workbench .backboard-clean-chat.backboard-composer .interactive-session.chat-composer-empty .interactive-input-part .chat-input-container {
-	width: 100%;
-	min-height: 138px;
-	padding: 16px 16px 12px;
-	border-radius: 22px;
 }
 
 @media (max-width: 640px) {

@@ -52,6 +52,7 @@ export function buildSystemPromptWith(
 		options.computerUseEnabled ? deps.computer.prompt : "",
 		options.browserUseEnabled ? deps.browser.prompt : "",
 		options.startupEnvironmentPrompt,
+		options.conversationContext,
 		options.skillDiscoveryEnabled ? SKILL_DISCOVERY_GUIDANCE : "",
 		buildSkillCatalogPrompt(options.skillCatalog),
 		options.activatedSkillsPrompt,

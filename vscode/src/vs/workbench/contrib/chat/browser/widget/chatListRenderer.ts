@@ -186,28 +186,72 @@ export interface IChatRendererDelegate {
 
 const mostRecentResponseClassName = 'chat-most-recent-response';
 
+function isBackboardCursorTranscript(container: HTMLElement): boolean {
+	return container.closest('.backboard-cursor-transcript') !== null
+		|| (container.closest('.part.auxiliarybar') !== null && container.closest('.backboard-chat-controls') !== null);
+}
+
+type BackboardTurnRenderedNodeRole = 'none' | 'work' | 'terminal' | 'terminalSupport';
+
+/**
+ * Finds the final top-level assistant text, even when a late tool or edit event
+ * was appended after it. Work and support artifacts stay in the outer Work fold
+ * so a completed turn always ends on the assistant response.
+ */
+export function getBackboardTurnFinalContentIndexes(
+	renderedNodeRoles: ReadonlyArray<BackboardTurnRenderedNodeRole>,
+	complete: boolean,
+): number[] {
+	if (!complete) {
+		return [];
+	}
+
+	const lastTerminalIndex = renderedNodeRoles.lastIndexOf('terminal');
+	if (lastTerminalIndex < 0) {
+		return [];
+	}
+
+	const finalContentIndexes: number[] = [];
+	for (let index = lastTerminalIndex; index >= 0; index--) {
+		const role = renderedNodeRoles[index];
+		if (role === 'work') {
+			break;
+		}
+		if (role === 'terminal') {
+			finalContentIndexes.unshift(index);
+		}
+	}
+	return finalContentIndexes;
+}
+
+export function resolveBackboardTurnExpandedState(
+	complete: boolean,
+	storedExpansion: boolean | undefined,
+	previousState: string | undefined,
+	currentlyExpanded: boolean,
+): boolean {
+	if (storedExpansion !== undefined) {
+		return storedExpansion;
+	}
+	if (!complete) {
+		return true;
+	}
+	return previousState === 'complete' && currentlyExpanded;
+}
+
 /** Mirrors T3 Code's compact duration formatting for turn-fold labels. */
 function formatT3TurnDuration(durationMs: number): string {
 	if (!Number.isFinite(durationMs) || durationMs < 0) {
-		return '0ms';
+		return '1s';
 	}
-	if (durationMs < 1_000) {
-		return `${Math.max(1, Math.round(durationMs))}ms`;
+	const totalSeconds = Math.max(1, Math.round(durationMs / 1_000));
+	if (totalSeconds < 60) {
+		return `${totalSeconds}s`;
 	}
-	if (durationMs < 10_000) {
-		const tenths = Math.round(durationMs / 100) / 10;
-		return tenths >= 10 ? '10s' : `${tenths.toFixed(1)}s`;
-	}
-	if (durationMs < 60_000) {
-		return `${Math.round(durationMs / 1_000)}s`;
-	}
-	const minutes = Math.floor(durationMs / 60_000);
-	const seconds = Math.round((durationMs % 60_000) / 1_000);
+	const minutes = Math.floor(totalSeconds / 60);
+	const seconds = totalSeconds % 60;
 	if (seconds === 0) {
 		return `${minutes}m`;
-	}
-	if (seconds === 60) {
-		return `${minutes + 1}m`;
 	}
 	return `${minutes}m ${seconds}s`;
 }
@@ -233,6 +277,8 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 
 	private readonly templateDataByRequestId = new Map<string, IChatListItemTemplate>();
 	private readonly responseTemplateDataByRequestId = new Map<string, IChatListItemTemplate>();
+	private readonly backboardTurnExpansionByResponseId = new Map<string, boolean>();
+	private readonly backboardTurnDurationTimers = new Map<string, IDisposable>();
 
 	/** Track pending question carousels by session resource so a new request can supersede them. */
 	private readonly pendingQuestionCarousels = new ResourceMap<Set<ChatQuestionCarouselPart>>();
@@ -1829,8 +1875,10 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 
 			// combine tool invocations into thinking part if needed. render the tool, but do not replace the working spinner with the new part's dom node since it is already inside the thinking part.
 			const lastThinking = this.getLastThinkingPart(renderedParts);
-			const shouldPinInThisSurface = partToRender.kind !== 'externalEdit' || !context.container.closest('.part.auxiliarybar');
-			if (lastThinking && shouldPinInThisSurface && (partToRender.kind === 'toolInvocation' || partToRender.kind === 'toolInvocationSerialized' || partToRender.kind === 'markdownContent' || partToRender.kind === 'textEditGroup' || partToRender.kind === 'externalEdit' || partToRender.kind === 'hook') && this.shouldPinPart(partToRender, element)) {
+			const suppressExternalEdit = partToRender.kind === 'externalEdit'
+				&& context.container.closest('.part.auxiliarybar') !== null
+				&& !isBackboardCursorTranscript(context.container);
+			if (lastThinking && !suppressExternalEdit && (partToRender.kind === 'toolInvocation' || partToRender.kind === 'toolInvocationSerialized' || partToRender.kind === 'markdownContent' || partToRender.kind === 'textEditGroup' || partToRender.kind === 'externalEdit' || partToRender.kind === 'hook') && this.shouldPinPart(partToRender, element)) {
 				if (alreadyRenderedPart instanceof ChatMarkdownContentPart) {
 					lastThinking.removeEditPillByPartId(alreadyRenderedPart.codeblocksPartId);
 				}
@@ -1892,7 +1940,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		contentForThisTurn: ReadonlyArray<IChatRendererContent>,
 		templateData: IChatListItemTemplate,
 	): void {
-		if (!templateData.rowContainer.closest('.backboard-clean-chat')) {
+		if (!isBackboardCursorTranscript(templateData.rowContainer)) {
 			return;
 		}
 
@@ -1907,6 +1955,9 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 				|| part.kind === 'hook');
 
 		if (!hasTurnWork) {
+			this.backboardTurnExpansionByResponseId.delete(element.id);
+			this.backboardTurnDurationTimers.get(element.id)?.dispose();
+			this.backboardTurnDurationTimers.delete(element.id);
 			if (turn) {
 				const body = turn.querySelector<HTMLElement>(':scope > .chat-t3-turn-work-body');
 				if (body) {
@@ -1937,62 +1988,92 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			body = turn.querySelector<HTMLElement>(':scope > .chat-t3-turn-work-body')!;
 		}
 
-		// Once complete, the last top-level markdown part is the terminal assistant
-		// answer. Earlier markdown is commentary and belongs in the work fold.
-		let finalMessageNode: HTMLElement | undefined;
-		if (element.isComplete || element.isCanceled) {
-			for (let index = renderedParts.length - 1; index >= 0; index--) {
-				const part = renderedParts[index];
-				const node = part?.domNode;
-				if (part instanceof ChatMarkdownContentPart
-					&& node
-					&& node.textContent?.trim()
-					&& !node.closest('.chat-thinking-box')) {
-					finalMessageNode = node;
-					break;
-				}
+		const complete = element.isComplete || element.isCanceled;
+		const renderedNodeRoles: BackboardTurnRenderedNodeRole[] = [];
+		for (let index = 0; index < renderedParts.length; index++) {
+			const node = renderedParts[index]?.domNode;
+			const kind = contentForThisTurn[index]?.kind;
+			if (!node) {
+				renderedNodeRoles.push('none');
+			} else if (node.closest('.chat-thinking-box') || (node.parentElement !== body && node.parentElement !== value)) {
+				renderedNodeRoles.push('work');
+			} else if ((kind === 'markdownContent' && node.textContent?.trim())
+				|| kind === 'errorDetails'
+				|| kind === 'warning'
+				|| kind === 'info') {
+				renderedNodeRoles.push('terminal');
+			} else if (kind === 'codeCitations' || kind === 'changesSummary') {
+				renderedNodeRoles.push('terminalSupport');
+			} else {
+				renderedNodeRoles.push('work');
+			}
+		}
+		const finalContentIndexes = getBackboardTurnFinalContentIndexes(renderedNodeRoles, complete);
+		const finalContentNodes: HTMLElement[] = [];
+		const seenFinalContentNodes = new Set<HTMLElement>();
+		for (const index of finalContentIndexes) {
+			const node = renderedParts[index]?.domNode;
+			if (node && !seenFinalContentNodes.has(node)) {
+				seenFinalContentNodes.add(node);
+				finalContentNodes.push(node);
 			}
 		}
 
-		if (finalMessageNode?.parentElement === body) {
-			turn.after(finalMessageNode);
+		if (finalContentNodes.length) {
+			turn.after(...finalContentNodes);
 		}
 
+		const finalContentNodeSet = new Set(finalContentNodes);
 		const directChildren = Array.from(value.children) as HTMLElement[];
 		for (const child of directChildren) {
-			if (child === turn || child === finalMessageNode) {
-				continue;
-			}
-			if (finalMessageNode && finalMessageNode.parentElement === value
-				&& (child.compareDocumentPosition(finalMessageNode) & Node.DOCUMENT_POSITION_PRECEDING)) {
+			if (child === turn || finalContentNodeSet.has(child)) {
 				continue;
 			}
 			body.appendChild(child);
 		}
 
-		const complete = element.isComplete || element.isCanceled;
 		const previousState = turn.dataset.turnState;
+		const currentlyExpanded = turn.classList.contains('chat-t3-turn-work-expanded');
 		turn.dataset.turnState = complete ? 'complete' : 'active';
 		turn.classList.toggle('chat-t3-turn-work-active', !complete);
 
-		if (!complete) {
-			turn.classList.add('chat-t3-turn-work-expanded');
-		} else if (previousState !== 'complete') {
-			turn.classList.remove('chat-t3-turn-work-expanded');
-		}
+		const storedExpansion = this.backboardTurnExpansionByResponseId.get(element.id);
+		const expanded = resolveBackboardTurnExpandedState(
+			complete,
+			storedExpansion,
+			previousState,
+			currentlyExpanded,
+		);
 
 		const elapsedMs = element.model.elapsedMs
 			?? (element.model.completedAt !== undefined
 				? Math.max(0, element.model.completedAt - element.confirmationAdjustedTimestamp.get())
-				: undefined);
+				: Math.max(0, Date.now() - element.confirmationAdjustedTimestamp.get()));
 		const duration = elapsedMs === undefined ? undefined : formatT3TurnDuration(elapsedMs);
 		foldLabel.textContent = element.isCanceled
 			? duration
 				? localize('chat.t3TurnFold.stoppedAfter', "You stopped after {0}", duration)
 				: localize('chat.t3TurnFold.stopped', "You stopped this response")
-			: duration
-				? localize('chat.t3TurnFold.workedFor', "Worked for {0}", duration)
-				: localize('chat.t3TurnFold.worked', "Worked");
+			: complete
+				? duration
+					? localize('chat.t3TurnFold.workedFor', "Worked for {0}", duration)
+					: localize('chat.t3TurnFold.worked', "Worked")
+				: localize('chat.t3TurnFold.workingFor', "Working for {0}", duration ?? '1s');
+
+		if (!complete && !this.backboardTurnDurationTimers.has(element.id)) {
+			const window = dom.getWindow(turn);
+			const handle = window.setInterval(() => {
+				if (!turn!.isConnected || turn!.dataset.turnState !== 'active') {
+					return;
+				}
+				const liveDuration = formatT3TurnDuration(Date.now() - element.confirmationAdjustedTimestamp.get());
+				foldLabel.textContent = localize('chat.t3TurnFold.workingFor', "Working for {0}", liveDuration);
+			}, 1_000);
+			this.backboardTurnDurationTimers.set(element.id, toDisposable(() => window.clearInterval(handle)));
+		} else if (complete) {
+			this.backboardTurnDurationTimers.get(element.id)?.dispose();
+			this.backboardTurnDurationTimers.delete(element.id);
+		}
 
 		const applyExpandedState = (expanded: boolean) => {
 			turn!.classList.toggle('chat-t3-turn-work-expanded', expanded);
@@ -2000,12 +2081,11 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			body.ariaHidden = String(!expanded);
 			foldButton.ariaExpanded = String(expanded);
 		};
-		applyExpandedState(!complete || turn.classList.contains('chat-t3-turn-work-expanded'));
+		applyExpandedState(expanded);
 		foldButton.onclick = () => {
-			if (turn!.classList.contains('chat-t3-turn-work-active')) {
-				return;
-			}
-			applyExpandedState(!turn!.classList.contains('chat-t3-turn-work-expanded'));
+			const expanded = !turn!.classList.contains('chat-t3-turn-work-expanded');
+			this.backboardTurnExpansionByResponseId.set(element.id, expanded);
+			applyExpandedState(expanded);
 		};
 	}
 
@@ -2570,6 +2650,10 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 
 	override dispose(): void {
 		this._announcedToolProgressKeys.clear();
+		for (const timer of this.backboardTurnDurationTimers.values()) {
+			timer.dispose();
+		}
+		this.backboardTurnDurationTimers.clear();
 		super.dispose();
 	}
 
@@ -3389,18 +3473,42 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 
 	private renderTextEdit(context: IChatContentPartRenderContext, chatTextEdit: IChatTextEditGroup, templateData: IChatListItemTemplate): IChatContentPart {
 		const textEditPart = this.instantiationService.createInstance(ChatTextEditContentPart, chatTextEdit, context, this.rendererOptions, this._diffEditorPool, this._currentLayoutWidth.get());
+		textEditPart.addDisposable(textEditPart.onDidChangeHeight(() => this.fireItemHeightChange(templateData)));
+		if (isBackboardCursorTranscript(context.container)) {
+			const lastThinking = this.getLastThinkingPart(templateData.renderedParts);
+			if (lastThinking) {
+				const partId = `textEdit-${chatTextEdit.uri.toString()}`;
+				lastThinking.appendItem(
+					() => ({ domNode: textEditPart.domNode, disposable: textEditPart }),
+					partId,
+					chatTextEdit,
+					templateData.value,
+					textEditPart.onDidChangeDiff,
+					textEditPart,
+				);
+				const renderedEditCount = chatTextEdit.edits.reduce((count, group) => count + group.length, 0);
+				const renderedDone = chatTextEdit.done;
+				return this.renderNoContent(other => other.kind === 'textEditGroup'
+					&& isEqual(other.uri, chatTextEdit.uri)
+					&& other.edits.reduce((count, group) => count + group.length, 0) === renderedEditCount
+					&& other.done === renderedDone);
+			}
+		}
 		return textEditPart;
 	}
 
 	private renderExternalEdit(content: IChatExternalEdit, context: IChatContentPartRenderContext, templateData: IChatListItemTemplate): IChatContentPart {
-		const isAuxiliaryBar = !!context.container.closest('.part.auxiliarybar');
-		if (isAuxiliaryBar) {
-			// File changes belong in the dedicated Review surface, not at the end of side-panel responses.
+		const suppressExternalEdit = context.container.closest('.part.auxiliarybar') !== null
+			&& !isBackboardCursorTranscript(context.container);
+		if (suppressExternalEdit) {
 			return this.renderNoContent(other => other.kind === content.kind);
 		}
 
 		const editPart = this.instantiationService.createInstance(ChatExternalEditContentPart, content);
-
+		if (isBackboardCursorTranscript(context.container)) {
+			editPart.showDiffPreview();
+		}
+		editPart.addDisposable(editPart.onDidChangeHeight(() => this.fireItemHeightChange(templateData)));
 		// Pin the pill into the surrounding thinking part so diff stats bubble
 		// up into the thinking title. The list renderer pinning logic above
 		// already routes externalEdit kinds through this path.
@@ -3642,6 +3750,8 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		}
 		this.fileTreesByResponseId.delete(node.element.id);
 		this.focusedFileTreesByResponseId.delete(node.element.id);
+		this.backboardTurnDurationTimers.get(node.element.id)?.dispose();
+		this.backboardTurnDurationTimers.delete(node.element.id);
 
 		if (isRequestVM(node.element) && node.element.id === this.viewModel?.editing?.id && details?.onScroll) {
 			this._onDidDispose.fire(templateData);

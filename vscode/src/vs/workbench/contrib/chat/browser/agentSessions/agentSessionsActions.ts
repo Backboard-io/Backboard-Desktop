@@ -149,12 +149,12 @@ export class PickAgentSessionAction extends Action2 {
 		});
 	}
 
-	async run(accessor: ServicesAccessor): Promise<void> {
+	async run(accessor: ServicesAccessor, options?: { readonly excludeSubscriptionSessions?: boolean }): Promise<void> {
 		const instantiationService = accessor.get(IInstantiationService);
 
 		currentAgentSessionsHistoryModal?.dispose();
 		currentAgentSessionsHistoryModal = instantiationService.createInstance(AgentSessionsHistoryModal);
-		currentAgentSessionsHistoryModal.show();
+		currentAgentSessionsHistoryModal.show(options);
 	}
 }
 

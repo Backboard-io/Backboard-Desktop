@@ -24,6 +24,7 @@ import { PendingMessage, ChatInputAnswer, ChatInputRequest, ChatInputResponseKin
 import type { Customization, ToolCallResult } from '../../common/state/sessionState.js';
 import { IClaudeAgentSdkService } from './claudeAgentSdkService.js';
 import { buildClientMcpServers, buildOptions } from './claudeSdkOptions.js';
+import { resolveUserProfileSkillLocations } from '../shared/userProfileSkills.js';
 import { toSdkModelId } from './claudeModelId.js';
 import { buildServerToolMcpServer, CLAUDE_SERVER_TOOL_MCP_SERVER_NAME, serverToolAllowList } from './claudeServerToolMcpServer.js';
 import { ClaudeSessionMetadataStore } from './claudeSessionMetadataStore.js';
@@ -242,6 +243,7 @@ export class ClaudeAgentSession extends Disposable {
 		const permissionMode = readClaudePermissionMode(this._configurationService, this.sessionUri) ?? this._permissionModeFallback;
 		const fastMode = readClaudeFastMode(this._configurationService, this.sessionUri) ?? false;
 		const { mcpServers, allowedTools } = await this._buildStartupToolWiring(ctx.serverToolHost);
+		const userProfileSkillsPlugin = resolveUserProfileSkillLocations()?.agentsRoot;
 
 		const options = await buildOptions(
 			{
@@ -256,6 +258,7 @@ export class ClaudeAgentSession extends Disposable {
 				mcpServers,
 				allowedTools,
 				plugins: this.clientCustomizationsDiff.consume(),
+				userProfileSkillsPlugin,
 				agent: this._resolveAgentName(this._provisionalAgent),
 			},
 			// Always subscription-billed: the SDK subprocess uses the
@@ -359,6 +362,7 @@ export class ClaudeAgentSession extends Disposable {
 						mcpServers: rebuildMcp,
 						allowedTools: rebuildAllowedTools,
 						plugins: this.clientCustomizationsDiff.consume(),
+						userProfileSkillsPlugin: resolveUserProfileSkillLocations()?.agentsRoot,
 						agent: this._resolveAgentName(this._provisionalAgent),
 					},
 					undefined,

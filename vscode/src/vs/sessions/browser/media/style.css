@@ -1604,6 +1604,21 @@
 	border-radius: 8px;
 }
 
+/* The model selector belongs to the same inline toolbar as Add. Remove the
+ * persistent chip surface while retaining a compact hover/focus affordance. */
+:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .combined-model-provider-trigger {
+	border: 0;
+	background: transparent !important;
+	box-shadow: none;
+}
+
+:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .chat-input-picker-item .action-label.model-picker-split,
+:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .chat-input-picker-item .action-label.model-picker-split .model-picker-section {
+	border: 0;
+	background: transparent;
+	box-shadow: none;
+}
+
 /* Chips with a text label get T3's chip padding (`px-2`). */
 :is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .monaco-action-bar .action-item .action-label:not(.model-picker-split):has(.chat-input-picker-label),
 :is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .monaco-action-bar .action-item .action-label:not(.model-picker-split):has(.combined-model-provider-trigger-label),

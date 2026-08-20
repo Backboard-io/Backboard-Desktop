@@ -57,6 +57,15 @@ export interface IChatReferenceListItem extends IChatContentReference {
 	state?: ModifiedFileEntryState;
 	excluded?: boolean;
 	showModifiedState?: boolean;
+	actions?: readonly IChatReferenceListItemAction[];
+}
+
+export interface IChatReferenceListItemAction {
+	readonly id: string;
+	readonly label: string;
+	readonly icon: ThemeIcon;
+	readonly disabled?: boolean;
+	readonly run: () => void | Promise<void>;
 }
 
 export type IChatCollapsibleListItem = IChatReferenceListItem | IChatWarningMessage;
@@ -308,8 +317,10 @@ interface ICollapsibleListTemplate {
 	readonly contextKeyService?: IContextKeyService;
 	readonly label: IResourceLabel;
 	readonly templateDisposables: DisposableStore;
+	readonly elementDisposables: DisposableStore;
 	toolbar: MenuWorkbenchToolBar | undefined;
 	actionBarContainer?: HTMLElement;
+	customActionsContainer?: HTMLElement;
 	fileDiffsContainer?: HTMLElement;
 	addedSpan?: HTMLElement;
 	removedSpan?: HTMLElement;
@@ -330,6 +341,7 @@ class CollapsibleListRenderer implements IListRenderer<IChatCollapsibleListItem,
 
 	renderTemplate(container: HTMLElement): ICollapsibleListTemplate {
 		const templateDisposables = new DisposableStore();
+		const elementDisposables = templateDisposables.add(new DisposableStore());
 		const label = templateDisposables.add(this.labels.create(container, { supportHighlights: true, supportIcons: true }));
 
 		const fileDiffsContainer = $('.working-set-line-counts');
@@ -341,16 +353,18 @@ class CollapsibleListRenderer implements IListRenderer<IChatCollapsibleListItem,
 
 		let toolbar;
 		let actionBarContainer;
+		let customActionsContainer;
 		let contextKeyService;
 		if (this.menuId) {
 			actionBarContainer = $('.chat-collapsible-list-action-bar');
 			contextKeyService = templateDisposables.add(this.contextKeyService.createScoped(actionBarContainer));
 			const scopedInstantiationService = templateDisposables.add(this.instantiationService.createChild(new ServiceCollection([IContextKeyService, contextKeyService])));
 			toolbar = templateDisposables.add(scopedInstantiationService.createInstance(MenuWorkbenchToolBar, actionBarContainer, this.menuId, { menuOptions: { shouldForwardArgs: true, arg: undefined } }));
+			customActionsContainer = dom.append(actionBarContainer, $('.chat-collapsible-list-custom-actions'));
 			label.element.appendChild(actionBarContainer);
 		}
 
-		return { templateDisposables, label, toolbar, actionBarContainer, contextKeyService, fileDiffsContainer, addedSpan, removedSpan };
+		return { templateDisposables, elementDisposables, label, toolbar, actionBarContainer, customActionsContainer, contextKeyService, fileDiffsContainer, addedSpan, removedSpan };
 	}
 
 
@@ -365,9 +379,31 @@ class CollapsibleListRenderer implements IListRenderer<IChatCollapsibleListItem,
 	}
 
 	renderElement(data: IChatCollapsibleListItem, index: number, templateData: ICollapsibleListTemplate): void {
+		templateData.elementDisposables.clear();
+		if (templateData.customActionsContainer) {
+			dom.clearNode(templateData.customActionsContainer);
+		}
+		templateData.actionBarContainer?.classList.remove('custom-actions');
+
 		if (data.kind === 'warning') {
 			templateData.label.setResource({ name: data.content.value }, { icon: Codicon.warning });
 			return;
+		}
+
+		if (data.actions?.length && templateData.actionBarContainer && templateData.customActionsContainer) {
+			templateData.actionBarContainer.classList.add('custom-actions');
+			for (const action of data.actions) {
+				const actionButton = dom.append(templateData.customActionsContainer, $('button.chat-collapsible-list-custom-action')) as HTMLButtonElement;
+				actionButton.type = 'button';
+				actionButton.classList.add(...ThemeIcon.asClassNameArray(action.icon));
+				actionButton.title = action.label;
+				actionButton.setAttribute('aria-label', action.label);
+				actionButton.disabled = action.disabled ?? false;
+				templateData.elementDisposables.add(dom.addDisposableListener(actionButton, dom.EventType.CLICK, event => {
+					dom.EventHelper.stop(event, true);
+					void action.run();
+				}));
+			}
 		}
 
 		const reference = data.reference;
@@ -447,7 +483,7 @@ class CollapsibleListRenderer implements IListRenderer<IChatCollapsibleListItem,
 				// eslint-disable-next-line no-restricted-syntax
 				templateData.label.element.querySelector('.monaco-icon-name-container')?.classList.add('modified');
 			}
-			if (templateData.toolbar) {
+			if (templateData.toolbar && !data.actions?.length) {
 				templateData.toolbar.context = arg;
 			}
 			if (templateData.contextKeyService) {

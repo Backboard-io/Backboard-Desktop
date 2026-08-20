@@ -183,10 +183,10 @@ async function* streamGoogle(
 				thoughtSignature?: string;
 				functionCall?: { name?: string; args?: unknown; id?: string };
 			};
-			// Gemini streams reasoning as text parts flagged `thought`; those are
-			// not answer text and must not reach the transcript.
-			if (entry.text && !entry.thought) {
-				yield { kind: "assistant_delta", text: entry.text };
+			if (entry.text) {
+				yield entry.thought
+					? { kind: "reasoning_delta", text: entry.text }
+					: { kind: "assistant_delta", text: entry.text };
 			}
 			if (entry.functionCall?.name) {
 				// Gemini 3 ids its calls; older models do not, so mint one when it

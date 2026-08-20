@@ -45,6 +45,7 @@ import { IChatCollapsibleIODataPart } from './chatToolInputOutputContentPart.js'
 import { ChatThinkingExternalResourceWidget } from './chatThinkingExternalResourcesWidget.js';
 import { LocalChatSessionUri, chatSessionResourceToId } from '../../../common/model/chatUri.js';
 import { IEditSessionDiffStats } from '../../../common/editing/chatEditingService.js';
+import { IChatTextEditGroup } from '../../../common/model/chatModel.js';
 
 
 // Context key id mirrored from `vs/sessions/common/contextkeys` (`IsPhoneLayoutContext`).
@@ -153,8 +154,76 @@ interface IT3WorkEntryPresentation {
 	readonly heading: string;
 	readonly preview?: string;
 	readonly details?: string;
+	readonly kind?: 'plan';
+	readonly planItems?: readonly IT3PlanItem[];
 	readonly icon: T3WorkEntryIconName;
 	readonly failed: boolean;
+}
+
+type T3PlanItemStatus = 'completed' | 'in-progress' | 'pending';
+
+interface IT3PlanItem {
+	readonly title: string;
+	readonly status: T3PlanItemStatus;
+}
+
+function normalizeT3PlanStatus(value: unknown): T3PlanItemStatus | undefined {
+	if (value === 'completed') {
+		return 'completed';
+	}
+	if (value === 'in_progress' || value === 'in-progress') {
+		return 'in-progress';
+	}
+	if (value === 'pending' || value === 'not-started') {
+		return 'pending';
+	}
+	return undefined;
+}
+
+function t3PlanItemsFromValue(value: unknown): IT3PlanItem[] {
+	const candidate = Array.isArray(value)
+		? value
+		: value && typeof value === 'object'
+			? ((value as Record<string, unknown>).todos ?? (value as Record<string, unknown>).todoList)
+			: undefined;
+	if (!Array.isArray(candidate)) {
+		return [];
+	}
+	return candidate.flatMap(item => {
+		if (!item || typeof item !== 'object') {
+			return [];
+		}
+		const record = item as Record<string, unknown>;
+		const title = typeof record.title === 'string' ? record.title.trim() : typeof record.content === 'string' ? record.content.trim() : '';
+		const status = normalizeT3PlanStatus(record.status);
+		return title && status ? [{ title, status }] : [];
+	});
+}
+
+function t3PlanItemsFromText(value: string | undefined): IT3PlanItem[] {
+	if (!value) {
+		return [];
+	}
+	const result: IT3PlanItem[] = [];
+	const pattern = /\[(completed|in_progress|in-progress|pending|not-started)\]\s*(.*?)(?=,\s*\[(?:completed|in_progress|in-progress|pending|not-started)\]\s*|$)/gi;
+	for (const match of value.matchAll(pattern)) {
+		const status = normalizeT3PlanStatus(match[1].toLocaleLowerCase());
+		const title = match[2].trim();
+		if (status && title) {
+			result.push({ title, status });
+		}
+	}
+	return result;
+}
+
+function t3PlanItemsFromTexts(values: readonly (string | undefined)[]): IT3PlanItem[] {
+	for (const value of values) {
+		const items = t3PlanItemsFromText(value);
+		if (items.length) {
+			return items;
+		}
+	}
+	return [];
 }
 
 function textFromMarkdown(value: string | IMarkdownString | undefined): string | undefined {
@@ -304,6 +373,10 @@ function t3WorkEntryPresentation(
 	const isSubagent = toolData?.kind === 'subagent' || semanticText.includes('agent') || semanticText.includes('subtask');
 	const isTodo = toolData?.kind === 'todoList' || semanticText.includes('todo') || semanticText.includes('plan');
 	const isMcp = invocation?.source?.type === 'mcp';
+	const structuredPlanItems = isTodo ? t3PlanItemsFromValue(toolData?.kind === 'todoList' ? toolData.todoList : parameters) : [];
+	const planItems = structuredPlanItems.length
+		? structuredPlanItems
+		: isTodo ? t3PlanItemsFromTexts([completedLabel, nativeText, fallbackLabel]) : [];
 
 	let heading = label;
 	let icon: T3WorkEntryIconName = isMcp ? 'wrench' : 'hammer';
@@ -313,16 +386,16 @@ function t3WorkEntryPresentation(
 		icon = 'terminal';
 		preview = compactWorkPreview(command);
 	} else if (isTodo) {
-		heading = 'Plan';
+		heading = localize('chat.thinking.taskProgress', 'Task progress');
 		icon = 'bot';
-		if (toolData?.kind === 'todoList') {
-			const complete = toolData.todoList.filter(todo => todo.status === 'completed').length;
-			preview = `${complete}/${toolData.todoList.length} completed`;
+		if (planItems.length) {
+			const complete = planItems.filter(item => item.status === 'completed').length;
+			preview = localize('chat.thinking.taskProgressCount', '{0} of {1} done', complete, planItems.length);
 		} else {
 			const todoCount = /(?:updated|created)\s+(\d+)\s+todos?/i.exec(preview ?? label)?.[1];
 			const completedCount = (preview ?? label).match(/\[completed\]/gi)?.length;
 			if (todoCount && completedCount !== undefined) {
-				preview = `${completedCount}/${todoCount} completed`;
+				preview = localize('chat.thinking.taskProgressCount', '{0} of {1} done', completedCount, todoCount);
 			}
 		}
 	} else if (isEdit) {
@@ -362,7 +435,7 @@ function t3WorkEntryPresentation(
 
 	const detailBlocks: string[] = [];
 	const parameterText = stringifyToolValue(parameters);
-	if (parameterText) {
+	if (parameterText && !isTodo) {
 		detailBlocks.push(parameterText);
 	}
 	if (toolData?.kind === 'simpleToolInvocation') {
@@ -384,10 +457,7 @@ function t3WorkEntryPresentation(
 	if (terminalData?.terminalCommandOutput?.text.trim()) {
 		detailBlocks.push(terminalData.terminalCommandOutput.text.trim());
 	}
-	if (toolData?.kind === 'todoList') {
-		detailBlocks.push(toolData.todoList.map(todo => `${todo.status === 'completed' ? '✓' : todo.status === 'in-progress' ? '•' : '○'} ${todo.title}`).join('\n'));
-	}
-	if (detailBlocks.length === 0) {
+	if (detailBlocks.length === 0 && !isTodo) {
 		const cleanNativeText = nativeText?.replace(/\s+/g, ' ').trim();
 		if (cleanNativeText && cleanNativeText.toLocaleLowerCase() !== label.toLocaleLowerCase()) {
 			detailBlocks.push(cleanNativeText);
@@ -395,72 +465,32 @@ function t3WorkEntryPresentation(
 	}
 
 	const failed = invocation ? t3ToolInvocationFailed(invocation) : false;
-	return { heading, preview, details: detailBlocks.join('\n\n') || undefined, icon, failed };
+	return {
+		heading,
+		preview,
+		details: detailBlocks.join('\n\n') || undefined,
+		kind: isTodo ? 'plan' : undefined,
+		planItems: planItems.length ? planItems : undefined,
+		icon,
+		failed,
+	};
 }
 
-function appendT3SvgElement(parent: SVGElement, name: string, attributes: Record<string, string>): SVGElement {
-	const element = parent.ownerDocument.createElementNS('http://www.w3.org/2000/svg', name);
-	for (const [key, value] of Object.entries(attributes)) {
-		element.setAttribute(key, value);
-	}
-	parent.appendChild(element);
+function createT3WorkEntryIcon(document: Document, icon: T3WorkEntryIconName | 'check' | 'chevron' | 'x'): HTMLElement {
+	const codicon = icon === 'bot' ? Codicon.robot
+		: icon === 'eye' ? Codicon.eye
+			: icon === 'globe' ? Codicon.globe
+				: icon === 'square-pen' ? Codicon.edit
+					: icon === 'terminal' ? Codicon.terminal
+						: icon === 'wrench' ? Codicon.wrench
+							: icon === 'hammer' ? Codicon.tools
+								: icon === 'check' ? Codicon.check
+									: icon === 'x' ? Codicon.close
+										: Codicon.chevronDown;
+	const element = document.createElement('span');
+	element.classList.add('chat-thinking-work-row-svg', ...ThemeIcon.asClassNameArray(codicon));
+	element.setAttribute('aria-hidden', 'true');
 	return element;
-}
-
-function createT3WorkEntrySvg(document: Document, icon: T3WorkEntryIconName | 'check' | 'chevron' | 'minus' | 'x'): SVGElement {
-	const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-	svg.setAttribute('viewBox', '0 0 24 24');
-	svg.setAttribute('fill', 'none');
-	svg.setAttribute('stroke', 'currentColor');
-	svg.setAttribute('stroke-width', '1.8');
-	svg.setAttribute('stroke-linecap', 'round');
-	svg.setAttribute('stroke-linejoin', 'round');
-	svg.setAttribute('aria-hidden', 'true');
-	svg.classList.add('chat-thinking-work-row-svg');
-	const path = (d: string) => appendT3SvgElement(svg, 'path', { d });
-	const line = (x1: string, y1: string, x2: string, y2: string) => appendT3SvgElement(svg, 'line', { x1, y1, x2, y2 });
-	switch (icon) {
-		case 'terminal':
-			appendT3SvgElement(svg, 'rect', { x: '3', y: '4', width: '18', height: '16', rx: '2' });
-			path('m7 9 3 3-3 3');
-			line('13', '15', '17', '15');
-			break;
-		case 'eye':
-			path('M2.1 12a10.6 10.6 0 0 1 19.8 0 10.6 10.6 0 0 1-19.8 0Z');
-			appendT3SvgElement(svg, 'circle', { cx: '12', cy: '12', r: '3' });
-			break;
-		case 'square-pen':
-			path('M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7');
-			path('M18.4 2.6a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4Z');
-			break;
-		case 'globe':
-			appendT3SvgElement(svg, 'circle', { cx: '12', cy: '12', r: '9' });
-			path('M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18');
-			break;
-		case 'bot':
-			appendT3SvgElement(svg, 'rect', { x: '4', y: '7', width: '16', height: '12', rx: '2' });
-			path('M12 3v4M8 12h.01M16 12h.01M9 16h6');
-			break;
-		case 'wrench':
-			path('M14.7 6.3a4 4 0 0 0-5-5L12 3.6 9.6 6 7.3 3.7a4 4 0 0 0 5 5l-8.6 8.6a2.1 2.1 0 0 0 3 3Z');
-			break;
-		case 'hammer':
-			path('m15 12-8.5 8.5a2.1 2.1 0 0 1-3-3L12 9M17.6 15 22 10.6M14.3 6.3l3.4-3.4 3.4 3.4-3.4 3.4Z');
-			break;
-		case 'check':
-			path('m5 12 4 4L19 6');
-			break;
-		case 'x':
-			path('M6 6l12 12M18 6 6 18');
-			break;
-		case 'minus':
-			line('6', '12', '18', '12');
-			break;
-		case 'chevron':
-			path('m7 10 5 5 5-5');
-			break;
-	}
-	return svg;
 }
 
 /**
@@ -475,7 +505,7 @@ const enum ToolActivityCategory {
 }
 
 export function getToolActivitySubkind(toolInvocationId: string | undefined, metadata: ChatThinkingItemMetadata | undefined): ToolActivitySubkind {
-	if (metadata?.kind === 'markdownContent' || metadata?.kind === 'externalEdit') {
+	if (metadata?.kind === 'markdownContent' || metadata?.kind === 'externalEdit' || metadata?.kind === 'textEditGroup') {
 		return 'edit';
 	}
 	const isToolInvocation = metadata && (metadata.kind === 'toolInvocation' || metadata.kind === 'toolInvocationSerialized');
@@ -485,25 +515,37 @@ export function getToolActivitySubkind(toolInvocationId: string | undefined, met
 	if (isToolInvocation && metadata.toolSpecificData?.kind === 'search') {
 		return 'search';
 	}
-	const lowerToolId = (toolInvocationId ?? (isToolInvocation ? metadata.toolId : undefined) ?? '').toLowerCase();
-	if (isEditToolId(lowerToolId)) {
+	const semanticToolText = [
+		toolInvocationId,
+		isToolInvocation ? metadata.toolId : undefined,
+		isToolInvocation ? textFromMarkdown(metadata.invocationMessage) : undefined,
+		isToolInvocation ? textFromMarkdown(metadata.pastTenseMessage) : undefined,
+		isToolInvocation ? textFromMarkdown(metadata.originMessage) : undefined,
+	].filter(Boolean).join(' ').toLocaleLowerCase();
+	if (isEditToolId(semanticToolText)) {
 		return 'edit';
 	}
-	if (lowerToolId.includes('terminal') || lowerToolId.includes('bash') || lowerToolId.includes('run_in')) {
+	if (
+		semanticToolText.includes('terminal') ||
+		semanticToolText.includes('bash') ||
+		semanticToolText.includes('run_in') ||
+		semanticToolText.includes('exec_command') ||
+		/(?:^|\s)(?:execute|exec|shell|run_command)(?:\s|$)/.test(semanticToolText)
+	) {
 		return 'terminal';
 	}
 	if (
-		lowerToolId.includes('search') ||
-		lowerToolId.includes('grep') ||
-		lowerToolId.includes('find') ||
-		lowerToolId.includes('list') ||
-		lowerToolId.includes('semantic') ||
-		lowerToolId.includes('codebase') ||
-		lowerToolId.includes('glob')
+		semanticToolText.includes('search') ||
+		semanticToolText.includes('grep') ||
+		semanticToolText.includes('find') ||
+		semanticToolText.includes('list') ||
+		semanticToolText.includes('semantic') ||
+		semanticToolText.includes('codebase') ||
+		semanticToolText.includes('glob')
 	) {
 		return 'search';
 	}
-	if (lowerToolId.includes('read') || lowerToolId.includes('get_file') || lowerToolId.includes('fetch') || lowerToolId.includes('problems')) {
+	if (semanticToolText.includes('read') || semanticToolText.includes('get_file') || semanticToolText.includes('fetch') || semanticToolText.includes('problems')) {
 		return 'read';
 	}
 	return 'other';
@@ -607,7 +649,13 @@ export type ChatThinkingItemMetadata =
 	| IChatToolInvocation
 	| IChatToolInvocationSerialized
 	| IChatMarkdownContent
-	| IChatExternalEdit;
+	| IChatExternalEdit
+	| IChatTextEditGroup;
+
+function isBackboardCursorTranscript(container: HTMLElement): boolean {
+	return container.closest('.backboard-cursor-transcript') !== null
+		|| (container.closest('.part.auxiliarybar') !== null && container.closest('.backboard-chat-controls') !== null);
+}
 
 interface ILazyToolItem {
 	kind: 'tool';
@@ -747,6 +795,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 	private streamThenCollapseMode: boolean = false;
 	private readonly wasStreamingLive: boolean;
 	private readonly useCursorPanelPresentation: boolean;
+	private readonly useCursorTranscriptPresentation: boolean;
 	private readonly _collapseAnimation = this._register(new MutableDisposable<DisposableStore>());
 	private readonly startTimeMs: number;
 	private elapsedAtCompletionMs: number | undefined;
@@ -769,6 +818,12 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 	private hasExpandedOnce: boolean = false;
 	private workingSpinnerElement: HTMLElement | undefined;
 	private workingSpinnerLabel: HTMLElement | undefined;
+	private readonly cursorReasoningDisclosures = new Map<HTMLElement, {
+		readonly label: HTMLElement;
+		readonly labelText: HTMLElement;
+		readonly chevron: HTMLElement;
+		expanded: boolean;
+	}>();
 	private liveReasoningTail: string | undefined;
 	/** The spinner phrase / active-tool label without the live elapsed suffix. */
 	private workingSpinnerBaseText: string | undefined;
@@ -847,6 +902,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			?? localize('chat.thinking.header.initial', 'Thinking');
 
 		super(extractedTitle, context, undefined, hoverService, configurationService);
+		this.useCursorTranscriptPresentation = isBackboardCursorTranscript(context.container);
 		this.useCursorPanelPresentation = context.container.closest('.backboard-clean-chat, .part.auxiliarybar') !== null
 			|| context.container.ownerDocument.querySelector('.agent-sessions-workbench') !== null;
 
@@ -1050,10 +1106,14 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		// If there's a lazy thinking item, it will be rendered via materializeLazyItem
 		// with the latest streaming content.
 		const hasLazyThinkingItems = this.lazyItems.some(item => item.kind === 'thinking');
-		if (this.currentThinkingValue && !hasLazyThinkingItems) {
+		if ((this.currentThinkingValue || this.useCursorTranscriptPresentation) && !hasLazyThinkingItems) {
 			this.textContainer = $('.chat-thinking-item.markdown-content');
-			this.wrapper.appendChild(this.textContainer);
-			this.renderMarkdown(this.currentThinkingValue);
+			const hasReasoning = !!this.currentThinkingValue.trim();
+			this.textContainer.hidden = this.useCursorTranscriptPresentation && !hasReasoning;
+			this.appendCursorReasoningContainer(this.textContainer, hasReasoning);
+			if (this.currentThinkingValue) {
+				this.renderMarkdown(this.currentThinkingValue);
+			}
 		}
 
 		// Show the in-thinking spinner while streaming. When collapsed, the CSS
@@ -1302,6 +1362,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			}
 			return;
 		}
+		this.ensureCursorReasoningLabel();
 
 		// If the entire content is bolded, strip the bold markers for rendering
 		let contentToRender = cleanedContent;
@@ -1575,6 +1636,87 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 	}
 
 	/**
+	 * Mounts one disclosure immediately before each reasoning block. Reasoning can
+	 * resume after a diff or tool call, so a single label pinned to the top of the
+	 * wrapper loses the model's actual think → act → think chronology.
+	 */
+	private ensureCursorReasoningLabel(textContainer = this.textContainer): HTMLElement | undefined {
+		if (!this.useCursorTranscriptPresentation || !this.wrapper || !textContainer) {
+			return undefined;
+		}
+		const existing = this.cursorReasoningDisclosures.get(textContainer);
+		if (existing) {
+			if (textContainer.parentElement === this.wrapper && existing.label.nextElementSibling !== textContainer) {
+				this.wrapper.insertBefore(existing.label, textContainer);
+			}
+			return existing.label;
+		}
+
+		const label = $('button.chat-thinking-cursor-reasoning-label', {
+			type: 'button',
+			role: 'button',
+			'aria-expanded': 'true',
+		});
+		const labelText = $('span.chat-thinking-cursor-reasoning-label-text');
+		const chevron = $('span.codicon.codicon-chevron-down.chat-thinking-cursor-reasoning-chevron', { 'aria-hidden': 'true' });
+		label.append(labelText, chevron);
+		const disclosure = { label, labelText, chevron, expanded: true };
+		this.cursorReasoningDisclosures.set(textContainer, disclosure);
+		if (textContainer.parentElement === this.wrapper) {
+			this.wrapper.insertBefore(label, textContainer);
+		}
+		this._register(addDisposableListener(label, 'click', () => {
+			this.setCursorReasoningExpanded(textContainer, !disclosure.expanded);
+		}));
+		this.setCursorReasoningExpanded(textContainer, true, false);
+		this.updateCursorReasoningLabel();
+		return label;
+	}
+
+	private appendCursorReasoningContainer(textContainer: HTMLElement, showDisclosure = true): void {
+		if (this.useCursorTranscriptPresentation && showDisclosure) {
+			const label = this.ensureCursorReasoningLabel(textContainer);
+			if (label) {
+				this.appendToWrapper(label);
+			}
+		}
+		this.appendToWrapper(textContainer);
+	}
+
+	private setCursorReasoningExpanded(textContainer: HTMLElement, expanded: boolean, fireHeightChange = true): void {
+		const disclosure = this.cursorReasoningDisclosures.get(textContainer);
+		if (!disclosure) {
+			return;
+		}
+		disclosure.expanded = expanded;
+		disclosure.label.ariaExpanded = String(expanded);
+		disclosure.chevron.classList.toggle('codicon-chevron-down', expanded);
+		disclosure.chevron.classList.toggle('codicon-chevron-right', !expanded);
+		textContainer.hidden = !expanded;
+		if (fireHeightChange) {
+			this._onDidChangeHeight.fire();
+		}
+	}
+
+	/** Keeps each reasoning section legible inside the outer turn-level work fold. */
+	private updateCursorReasoningLabel(forceComplete = false): void {
+		if (this.cursorReasoningDisclosures.size === 0) {
+			return;
+		}
+		const complete = forceComplete || this.streamingCompleted || this.element.isComplete;
+		const elapsedMs = this.elapsedAtCompletionMs ?? (this.wasStreamingLive ? Date.now() - this.startTimeMs : 0);
+		const label = complete
+			? elapsedMs < 1500
+			? localize('chat.thinking.cursorReasoningBrief', "Thought briefly")
+			: localize('chat.thinking.cursorReasoningElapsed', "Thought {0}", formatThinkingElapsed(elapsedMs))
+			: localize('chat.thinking.cursorReasoningLive', "Thinking");
+		for (const disclosure of this.cursorReasoningDisclosures.values()) {
+			disclosure.label.classList.toggle('chat-thinking-cursor-reasoning-live', !complete);
+			disclosure.labelText.textContent = label;
+		}
+	}
+
+	/**
 	 * Keeps a subtle "· 8s" indicator at the end of the header label while
 	 * streaming. The label element is rewritten by title updates, so this
 	 * re-appends the span whenever it got detached.
@@ -1692,18 +1834,37 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		toolCallId: string | undefined,
 		fallbackLabel: string | undefined,
 		metadata: ChatThinkingItemMetadata | undefined,
+		subkind: ToolActivitySubkind,
 	): void {
 		const nativeContent = itemWrapper.lastElementChild as HTMLElement | null;
 		if (!nativeContent) {
 			return;
 		}
 
-		const nativeText = nativeContent.textContent?.trim();
-		const presentation = t3WorkEntryPresentation(metadata, toolCallId, fallbackLabel, nativeText);
+			const nativeText = nativeContent.textContent?.trim();
+			const presentation = t3WorkEntryPresentation(metadata, toolCallId, fallbackLabel, nativeText);
+			const isPlanRow = presentation.kind === 'plan';
+			itemWrapper.classList.toggle('chat-thinking-cursor-plan-row', isPlanRow);
+		const invocation = metadata && (metadata.kind === 'toolInvocation' || metadata.kind === 'toolInvocationSerialized') ? metadata : undefined;
+		const isLiveInvocation = metadata?.kind === 'toolInvocation' && !IChatToolInvocation.isComplete(metadata);
+		const isSyntheticLiveEntry = !metadata && !this.element.isComplete;
+		const isPendingCursorEdit = this.useCursorTranscriptPresentation
+			&& subkind === 'edit'
+			&& (isLiveInvocation || isSyntheticLiveEntry);
+		itemWrapper.classList.toggle('chat-thinking-cursor-edit-pending', isPendingCursorEdit);
+		const passiveSemanticText = [
+			toolCallId,
+			invocation?.toolId,
+			textFromMarkdown(invocation?.invocationMessage),
+			textFromMarkdown(invocation?.pastTenseMessage),
+		].filter(Boolean).join(' ').toLocaleLowerCase();
+		const isPassiveCursorRow = this.useCursorTranscriptPresentation
+			&& !presentation.failed
+			&& (subkind === 'read' || subkind === 'search' || passiveSemanticText.includes('skill'));
 		const summary = $('.chat-thinking-work-row-summary');
 		itemWrapper.querySelector<HTMLElement>(':scope > .chat-thinking-icon')?.remove();
 		const icon = $('span.chat-thinking-work-row-icon');
-		icon.appendChild(createT3WorkEntrySvg(itemWrapper.ownerDocument, presentation.icon));
+		icon.appendChild(createT3WorkEntryIcon(itemWrapper.ownerDocument, presentation.icon));
 		summary.appendChild(icon);
 		const label = $('.chat-thinking-work-row-label');
 		const heading = $('span.chat-thinking-work-row-heading');
@@ -1716,33 +1877,54 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		}
 		nativeContent.classList.add('chat-thinking-work-native-content');
 
-		let details: HTMLElement | undefined;
-		if (presentation.details) {
-			details = $('.chat-thinking-work-row-details');
-			const pre = $('pre.chat-thinking-work-row-details-content');
-			pre.textContent = presentation.details;
-			details.appendChild(pre);
-		}
+			let details: HTMLElement | undefined;
+			const preferNativeDisclosure = subkind === 'terminal' && nativeContent.childElementCount > 0;
+			if (presentation.planItems?.length) {
+				details = $('.chat-thinking-work-row-details.chat-thinking-plan-details');
+				const list = $('ul.chat-thinking-plan-list');
+				for (const item of presentation.planItems) {
+					const row = $(`li.chat-thinking-plan-item.chat-thinking-plan-item-${item.status}`);
+					const marker = $('span.chat-thinking-plan-item-marker', { 'aria-hidden': 'true' });
+					marker.textContent = item.status === 'completed' ? '✓' : item.status === 'in-progress' ? '→' : '○';
+					const title = $('span.chat-thinking-plan-item-title');
+					title.textContent = item.title;
+					row.append(marker, title);
+					list.appendChild(row);
+				}
+				details.appendChild(list);
+			} else if (presentation.details && !isPassiveCursorRow && !preferNativeDisclosure && !isPendingCursorEdit) {
+				details = $('.chat-thinking-work-row-details');
+				const pre = $('pre.chat-thinking-work-row-details-content');
+				pre.textContent = presentation.details;
+				details.appendChild(pre);
+			}
+		// Some restored/provider-native tool parts do not expose enough metadata
+		// to synthesize a details block. Keep their real subtree available as the
+		// disclosure body instead of leaving a row that can never be inspected.
+			const hasNativeDisclosure = this.useCursorTranscriptPresentation && !isPlanRow && !isPassiveCursorRow && !isPendingCursorEdit && !details && nativeContent.childElementCount > 0;
+		const hasDisclosure = !!details || hasNativeDisclosure;
 		const disclosure = $('span.chat-thinking-work-row-disclosure', { 'aria-hidden': 'true' });
-		if (details) {
-			disclosure.appendChild(createT3WorkEntrySvg(itemWrapper.ownerDocument, 'chevron'));
+		if (hasDisclosure) {
+			disclosure.appendChild(createT3WorkEntryIcon(itemWrapper.ownerDocument, 'chevron'));
 		}
-		const status = $('span.chat-thinking-work-row-status', { 'aria-hidden': 'true' });
-		summary.append(label, disclosure, status);
+			const status = $('span.chat-thinking-work-row-status', { 'aria-hidden': 'true' });
+			summary.append(label, disclosure, status);
+			if (isPlanRow) {
+				summary.title = localize('chat.thinking.taskProgressDescription', "Tracks the steps the agent is working through. It does not run commands.");
+			}
 		itemWrapper.insertBefore(summary, nativeContent);
 		if (details) {
 			itemWrapper.insertBefore(details, nativeContent);
 		}
 		itemWrapper.ariaLabel = presentation.preview ? `${presentation.heading} - ${presentation.preview}` : presentation.heading;
-		const isLiveInvocation = metadata?.kind === 'toolInvocation' && !IChatToolInvocation.isComplete(metadata);
-		const isSyntheticLiveEntry = !metadata && !this.element.isComplete;
 		this.setWorkRowStatusElement(status, presentation.failed ? 'cancelled' : (isLiveInvocation || isSyntheticLiveEntry) ? 'working' : 'complete');
 
-		if (!details) {
+		if (!hasDisclosure) {
 			return;
 		}
 
 		itemWrapper.classList.add('chat-thinking-work-row-expandable');
+		itemWrapper.classList.toggle('chat-thinking-work-row-native-expandable', hasNativeDisclosure);
 		itemWrapper.tabIndex = 0;
 		itemWrapper.role = 'button';
 		itemWrapper.ariaExpanded = 'false';
@@ -1758,6 +1940,10 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			}
 		}));
 		this._register(addDisposableListener(itemWrapper, 'keydown', event => {
+			const target = event.target as HTMLElement | null;
+			if (target?.closest('.chat-thinking-work-native-content')) {
+				return;
+			}
 			if (event.key === 'Enter' || event.key === ' ') {
 				event.preventDefault();
 				toggle();
@@ -1770,22 +1956,34 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		clearNode(statusElement);
 		if (status === 'working') {
 			statusElement.classList.add('chat-thinking-work-row-status-working');
-			statusElement.appendChild(createT3WorkEntrySvg(statusElement.ownerDocument, 'minus'));
 		} else if (status === 'cancelled') {
 			statusElement.classList.add('chat-thinking-work-row-status-cancelled');
-			statusElement.appendChild(createT3WorkEntrySvg(statusElement.ownerDocument, 'x'));
+			statusElement.appendChild(createT3WorkEntryIcon(statusElement.ownerDocument, 'x'));
 		} else {
 			statusElement.classList.add('chat-thinking-work-row-status-complete');
-			statusElement.appendChild(createT3WorkEntrySvg(statusElement.ownerDocument, 'check'));
 		}
 	}
 
 	private updateWorkRowStatus(toolCallId: string, status: 'working' | 'complete' | 'cancelled'): void {
-		const statusElement = this.toolWrappersByCallId.get(toolCallId)?.querySelector<HTMLElement>('.chat-thinking-work-row-status');
+		const wrapper = this.toolWrappersByCallId.get(toolCallId);
+		const statusElement = wrapper?.querySelector<HTMLElement>('.chat-thinking-work-row-status');
 		if (!statusElement) {
 			return;
 		}
 		this.setWorkRowStatusElement(statusElement, status);
+		if (this.useCursorTranscriptPresentation && wrapper?.classList.contains('chat-thinking-cursor-edit-row')) {
+			wrapper.classList.toggle('chat-thinking-cursor-edit-pending', status === 'working');
+		}
+		if (status === 'cancelled' && this.useCursorTranscriptPresentation && wrapper) {
+			wrapper.classList.add('chat-thinking-cursor-actionable-row');
+			wrapper.querySelector<HTMLElement>(':scope > .chat-thinking-work-native-content')?.classList.remove('chat-thinking-work-native-content');
+			wrapper.querySelector<HTMLElement>(':scope > .chat-thinking-work-row-summary')?.remove();
+			wrapper.querySelector<HTMLElement>(':scope > .chat-thinking-work-row-details')?.remove();
+			wrapper.classList.remove('chat-thinking-work-row-expandable', 'chat-thinking-work-row-expanded');
+			wrapper.removeAttribute('role');
+			wrapper.removeAttribute('aria-expanded');
+			wrapper.tabIndex = -1;
+		}
 	}
 
 	/**
@@ -1804,17 +2002,54 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			this.appendToWrapper(itemWrapper);
 			return;
 		}
-		if (this.useCursorPanelPresentation) {
-			this.prepareWorkRow(itemWrapper, toolCallId, fallbackLabel, metadata);
+		const preserveNativeTool = this.useCursorTranscriptPresentation
+			&& !!metadata
+			&& (metadata.kind === 'toolInvocation' || metadata.kind === 'toolInvocationSerialized')
+			&& ((metadata.kind === 'toolInvocation' && !!IChatToolInvocation.getConfirmationMessages(metadata)) || t3ToolInvocationFailed(metadata));
+		const hasNativeTerminalContent = itemWrapper.getElementsByClassName('chat-terminal-thinking-collapsible').length > 0
+			|| itemWrapper.getElementsByClassName('chat-terminal-content-part').length > 0;
+		const preserveNativeTerminal = this.useCursorTranscriptPresentation
+			&& (
+				subkind === 'terminal'
+				|| hasNativeTerminalContent
+				|| (!!metadata
+					&& (metadata.kind === 'toolInvocation' || metadata.kind === 'toolInvocationSerialized')
+					&& metadata.toolSpecificData?.kind === 'terminal')
+			);
+		if (preserveNativeTool) {
+			itemWrapper.classList.add('chat-thinking-cursor-actionable-row');
+		}
+		if (this.useCursorPanelPresentation && !preserveNativeTool && !preserveNativeTerminal) {
+			this.prepareWorkRow(itemWrapper, toolCallId, fallbackLabel, metadata, subkind);
+		}
+		// A shell card already owns a complete disclosure hierarchy: one command
+		// header and, when opened, its native command/output body. Grouping it
+		// behind a second "Ran N commands" disclosure produces three competing
+		// headers and obscures the actual shell action.
+		if (preserveNativeTerminal) {
+			// Restored provider calls can have opaque tool ids and no terminal
+			// metadata even though their rendered subtree is the native terminal.
+			// Normalize from the rendered semantic component before applying row
+			// chrome so those calls cannot receive a second synthetic disclosure.
+			itemWrapper.classList.remove(
+				'chat-thinking-cursor-read-row',
+				'chat-thinking-cursor-search-row',
+				'chat-thinking-cursor-edit-row',
+				'chat-thinking-cursor-other-row',
+			);
+			itemWrapper.classList.add('chat-thinking-cursor-terminal-row');
+			this.finishActiveActivityGroup();
+			this.appendToWrapper(itemWrapper);
+			return;
 		}
 		const category = toolActivityCategoryOf(subkind);
 		let group = this.activeActivityGroup;
 		// T3 treats every uninterrupted run of work entries as one group,
 		// regardless of whether the individual calls read, edit, search, or run a
 		// command. A commentary/reasoning row ends the run. Keep the existing
-		// category summaries for other VS Code chat surfaces, but use T3's
-		// provider-neutral work-log grouping in Backboard's clean transcript.
-		if (!group || (!this.useCursorPanelPresentation && group.category !== category) || !group.container.isConnected) {
+		// category summaries for other VS Code chat surfaces, but use Cursor's
+		// provider-neutral work-log grouping in Backboard's right transcript.
+		if (!group || (!this.useCursorTranscriptPresentation && group.category !== category) || group.container.parentElement !== this.wrapper) {
 			this.finishActiveActivityGroup();
 			group = this.createActivityGroup(category);
 			this.activeActivityGroup = group;
@@ -1823,29 +2058,48 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		}
 		group.items.push({ toolCallId, subkind, fallbackLabel });
 		group.body.appendChild(itemWrapper);
+		if (this.useCursorTranscriptPresentation && group.items.length === 2) {
+			// The header first becomes visible with the second row, so open it for
+			// that initial reveal. After that, preserve the user's disclosure choice
+			// while later streamed tool calls join the same group.
+			group.expanded = true;
+		}
 		this.updateActivityGroupHeader(group);
 	}
 
 	private createActivityGroup(category: ToolActivityCategory): IToolActivityGroup {
-		const container = this.useCursorPanelPresentation
+		const container = this.useCursorTranscriptPresentation
+			? $('.chat-thinking-group.chat-thinking-work-group.chat-thinking-work-summary-collapsed')
+			: this.useCursorPanelPresentation
 			? $('.chat-thinking-group.chat-thinking-work-group.chat-thinking-work-overflow-collapsed')
 			: $('.chat-thinking-group.chat-thinking-group-live');
+		if (this.useCursorTranscriptPresentation) {
+			container.dataset.workCategory = category;
+		}
 		const header = $('.chat-thinking-group-header');
 		header.tabIndex = 0;
 		header.role = 'button';
 		const iconElement = createThinkingIcon(toolActivityCategoryIcon(category));
 		const headerLabel = $('span.chat-thinking-group-label');
-		const chevron = this.useCursorPanelPresentation
+		const chevron = this.useCursorTranscriptPresentation
+			? $('span.codicon.codicon-chevron-down.chat-thinking-group-chevron.chat-thinking-group-chevron-cursor', { 'aria-hidden': 'true' })
+			: this.useCursorPanelPresentation
 			? $('span.chat-thinking-group-chevron.chat-thinking-group-chevron-t3', { 'aria-hidden': 'true' })
 			: $('span.codicon.codicon-chevron-right.chat-thinking-group-chevron', { 'aria-hidden': 'true' });
 		if (this.useCursorPanelPresentation) {
-			chevron.appendChild(createT3WorkEntrySvg(container.ownerDocument, 'chevron'));
-			header.append(chevron, headerLabel);
+			if (this.useCursorTranscriptPresentation) {
+				header.append(iconElement, headerLabel, chevron);
+			} else {
+				chevron.appendChild(createT3WorkEntryIcon(container.ownerDocument, 'chevron'));
+				header.append(chevron, headerLabel);
+			}
 		} else {
 			header.append(iconElement, headerLabel, chevron);
 		}
 		const body = $('.chat-thinking-group-body');
-		if (this.useCursorPanelPresentation) {
+		if (this.useCursorTranscriptPresentation) {
+			container.append(header, body);
+		} else if (this.useCursorPanelPresentation) {
 			// T3 places the overflow disclosure after the visible work row.
 			container.append(body, header);
 		} else {
@@ -1853,7 +2107,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		}
 
 		const toggle = () => {
-			if (this.useCursorPanelPresentation) {
+			if (this.useCursorTranscriptPresentation || this.useCursorPanelPresentation) {
 				group.expanded = !group.expanded;
 				this.updateActivityGroupHeader(group);
 				this._onDidChangeHeight.fire();
@@ -1895,7 +2149,10 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			return;
 		}
 		this.updateActivityGroupHeader(group);
-		if (this.useCursorPanelPresentation) {
+		if (this.useCursorTranscriptPresentation) {
+			group.expanded = false;
+			this.updateActivityGroupHeader(group);
+		} else if (this.useCursorPanelPresentation) {
 			group.expanded = false;
 			group.container.classList.add('chat-thinking-work-overflow-collapsed');
 			this.updateActivityGroupHeader(group);
@@ -1913,7 +2170,10 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 	private collapseAllActivityGroups(): void {
 		this.finishActiveActivityGroup();
 		for (const group of this.activityGroups) {
-			if (this.useCursorPanelPresentation) {
+			if (this.useCursorTranscriptPresentation) {
+				group.expanded = false;
+				this.updateActivityGroupHeader(group);
+			} else if (this.useCursorPanelPresentation) {
 				group.expanded = false;
 				group.container.classList.add('chat-thinking-work-overflow-collapsed');
 				this.updateActivityGroupHeader(group);
@@ -1924,17 +2184,28 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 	}
 
 	private updateActivityGroupHeader(group: IToolActivityGroup): void {
+		if (this.useCursorTranscriptPresentation) {
+			const showSummary = group.items.length > 1;
+			group.header.classList.toggle('hidden', !showSummary);
+			group.header.style.display = showSummary ? '' : 'none';
+			const expanded = !showSummary || group.expanded;
+			group.container.classList.toggle('chat-thinking-work-summary-collapsed', !expanded);
+			group.chevron.classList.toggle('chat-thinking-group-chevron-expanded', expanded);
+			group.chevron.classList.toggle('codicon-chevron-right', !expanded);
+			group.chevron.classList.toggle('codicon-chevron-down', expanded);
+			const label = this.buildActivityGroupLabel(group);
+			group.headerLabel.textContent = label;
+			group.header.ariaExpanded = String(expanded);
+			group.header.ariaLabel = label;
+			return;
+		}
 		if (this.useCursorPanelPresentation) {
-			const hiddenCount = Math.max(0, group.items.length - 1);
-			group.header.classList.toggle('hidden', hiddenCount === 0);
-			group.header.style.display = hiddenCount === 0 ? 'none' : '';
+			const showSummary = group.items.length > 1;
+			group.header.classList.toggle('hidden', !showSummary);
+			group.header.style.display = showSummary ? '' : 'none';
 			group.container.classList.toggle('chat-thinking-work-overflow-collapsed', !group.expanded);
 			group.chevron.classList.toggle('chat-thinking-group-chevron-expanded', group.expanded);
-			group.headerLabel.textContent = group.expanded
-				? localize('chat.thinking.group.showFewerTools', "Show fewer tool calls")
-				: hiddenCount === 1
-					? localize('chat.thinking.group.previousTool.one', "+1 previous tool call")
-					: localize('chat.thinking.group.previousTools', "+{0} previous tool calls", hiddenCount);
+			group.headerLabel.textContent = this.buildActivityGroupLabel(group);
 			group.header.ariaExpanded = String(group.expanded);
 			group.header.ariaLabel = group.headerLabel.textContent;
 			return;
@@ -1962,31 +2233,50 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			}
 		}
 		const total = group.items.length;
-		switch (group.category) {
-			case ToolActivityCategory.Explore: {
-				const reads = group.items.filter(item => item.subkind === 'read').length;
-				const searches = total - reads;
-				if (reads > 0 && searches > 0) {
-					if (reads === 1 && searches === 1) {
-						return localize('chat.thinking.group.explored.oneFileOneSearch', "Explored 1 file, 1 search");
-					}
-					if (reads === 1) {
-						return localize('chat.thinking.group.explored.oneFile', "Explored 1 file, {0} searches", searches);
-					}
-					if (searches === 1) {
-						return localize('chat.thinking.group.explored.oneSearch', "Explored {0} files, 1 search", reads);
-					}
-					return localize('chat.thinking.group.explored', "Explored {0} files, {1} searches", reads, searches);
+		if (this.useCursorPanelPresentation && !this.useCursorTranscriptPresentation) {
+			const labels: string[] = [];
+			const add = (label: string) => {
+				if (!labels.includes(label)) {
+					labels.push(label);
 				}
-				if (searches > 0) {
-					return searches === 1
-						? localize('chat.thinking.group.searched.one', "Explored 1 search")
-						: localize('chat.thinking.group.searched', "Explored {0} searches", searches);
+			};
+			for (const item of group.items) {
+				switch (item.subkind) {
+					case 'read': add(localize('chat.thinking.group.readFile', "read a file")); break;
+					case 'search': add(localize('chat.thinking.group.searchedCode', "searched code")); break;
+					case 'edit': add(localize('chat.thinking.group.editedFile', "edited a file")); break;
+					case 'terminal': add(localize('chat.thinking.group.ranCommand', "ran a command")); break;
+					case 'other': add(localize('chat.thinking.group.usedTool', "used a tool")); break;
 				}
-				return reads === 1
-					? localize('chat.thinking.group.read.one', "Explored 1 file")
-					: localize('chat.thinking.group.read', "Explored {0} files", reads);
 			}
+			const summary = labels.join(', ');
+			return summary ? summary.charAt(0).toLocaleUpperCase() + summary.slice(1) : localize('chat.thinking.group.worked', "Worked");
+		}
+		const reads = group.items.filter(item => item.subkind === 'read').length;
+		const searches = group.items.filter(item => item.subkind === 'search').length;
+		if (group.category === ToolActivityCategory.Explore || (this.useCursorTranscriptPresentation && reads + searches > 0)) {
+			if (reads > 0 && searches > 0) {
+				if (reads === 1 && searches === 1) {
+					return localize('chat.thinking.group.explored.oneFileOneSearch', "Explored 1 file, 1 search");
+				}
+				if (reads === 1) {
+					return localize('chat.thinking.group.explored.oneFile', "Explored 1 file, {0} searches", searches);
+				}
+				if (searches === 1) {
+					return localize('chat.thinking.group.explored.oneSearch', "Explored {0} files, 1 search", reads);
+				}
+				return localize('chat.thinking.group.explored', "Explored {0} files, {1} searches", reads, searches);
+			}
+			if (searches > 0) {
+				return searches === 1
+					? localize('chat.thinking.group.searched.one', "Explored 1 search")
+					: localize('chat.thinking.group.searched', "Explored {0} searches", searches);
+			}
+			return reads === 1
+				? localize('chat.thinking.group.read.one', "Explored 1 file")
+				: localize('chat.thinking.group.read', "Explored {0} files", reads);
+		}
+		switch (group.category) {
 			case ToolActivityCategory.Edit:
 				return total === 1
 					? localize('chat.thinking.group.edited.one', "Edited a file")
@@ -2027,7 +2317,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			}
 			if (rowIcon) {
 				clearNode(rowIcon);
-				rowIcon.appendChild(createT3WorkEntrySvg(wrapper.ownerDocument, presentation.icon));
+				rowIcon.appendChild(createT3WorkEntryIcon(wrapper.ownerDocument, presentation.icon));
 			}
 			const details = wrapper.querySelector<HTMLElement>('.chat-thinking-work-row-details-content');
 			if (details && presentation.details) {
@@ -2162,6 +2452,8 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 
 	public markAsInactive(): void {
 		this.isActive = false;
+		this.elapsedAtCompletionMs ??= Date.now() - this.startTimeMs;
+		this.updateCursorReasoningLabel(true);
 		this.domNode.classList.remove('chat-thinking-active');
 		this.domNode.classList.remove('chat-thinking-fade-top', 'chat-thinking-fade-bottom');
 		this.processPendingRemovals();
@@ -2191,6 +2483,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		this.domNode.classList.remove('chat-thinking-fade-top', 'chat-thinking-fade-bottom');
 		this.streamingCompleted = true;
 		this.elapsedAtCompletionMs ??= Date.now() - this.startTimeMs;
+		this.updateCursorReasoningLabel(true);
 		this.removeElapsedIndicator();
 		this.collapseAllActivityGroups();
 
@@ -2615,6 +2908,7 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 		this.domNode.classList.remove('chat-thinking-persistent-streaming');
 		this.streamingCompleted = true;
 		this.elapsedAtCompletionMs ??= Date.now() - this.startTimeMs;
+		this.updateCursorReasoningLabel(true);
 		this.removeElapsedIndicator();
 		this.collapseAllActivityGroups();
 
@@ -2683,7 +2977,9 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 		// Backboard's clean middle panel.
 		const isCleanTimelineTool = this.useCursorPanelPresentation && toolInvocationOrMarkdown
 			&& (toolInvocationOrMarkdown.kind === 'toolInvocation' || toolInvocationOrMarkdown.kind === 'toolInvocationSerialized');
-		if (this.isExpanded() || this.hasExpandedOnce || isCleanTimelineTool || (this.fixedScrollingMode && !this.streamingCompleted)) {
+		const isCursorTranscriptArtifact = this.useCursorTranscriptPresentation && toolInvocationOrMarkdown
+			&& (toolInvocationOrMarkdown.kind === 'markdownContent' || toolInvocationOrMarkdown.kind === 'externalEdit' || toolInvocationOrMarkdown.kind === 'textEditGroup');
+		if (this.isExpanded() || this.hasExpandedOnce || isCleanTimelineTool || isCursorTranscriptArtifact || (this.fixedScrollingMode && !this.streamingCompleted)) {
 			const result = factory();
 			this.appendItemToDOM(result.domNode, toolInvocationId, toolInvocationOrMarkdown, originalParent);
 			if (result.disposable) {
@@ -3064,7 +3360,11 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 								const invocation = this.toolInvocations.find(candidate => candidate.toolCallId === item.toolCallId);
 								return invocation?.kind === 'toolInvocation' && !IChatToolInvocation.isComplete(invocation, reader);
 							});
-							if (!groupStillRunning) {
+							// Cursor keeps a completed exploration run open until a real
+							// reasoning/edit/category boundary arrives. Sequential reads and
+							// searches otherwise finalize one-by-one and can never form the
+							// useful "Explored N files, M searches" summary.
+							if (!groupStillRunning && !this.useCursorTranscriptPresentation) {
 								this.finishActiveActivityGroup();
 							}
 						}
@@ -3211,12 +3511,13 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 		const itemWrapper = $('.chat-thinking-tool-wrapper');
 		const isMarkdownEdit = toolInvocationOrMarkdown?.kind === 'markdownContent';
 		const isExternalEdit = toolInvocationOrMarkdown?.kind === 'externalEdit';
+		const isTextEdit = toolInvocationOrMarkdown?.kind === 'textEditGroup';
 		const isTerminalTool = toolInvocationOrMarkdown && (toolInvocationOrMarkdown.kind === 'toolInvocation' || toolInvocationOrMarkdown.kind === 'toolInvocationSerialized') && toolInvocationOrMarkdown.toolSpecificData?.kind === 'terminal';
 		const isSearchTool = toolInvocationOrMarkdown && (toolInvocationOrMarkdown.kind === 'toolInvocation' || toolInvocationOrMarkdown.kind === 'toolInvocationSerialized') && toolInvocationOrMarkdown.toolSpecificData?.kind === 'search';
 		const toolInvocationIcon = toolInvocationOrMarkdown && (toolInvocationOrMarkdown.kind === 'toolInvocation' || toolInvocationOrMarkdown.kind === 'toolInvocationSerialized') ? toolInvocationOrMarkdown.icon : undefined;
 
 		let icon: ThemeIcon;
-		if (isMarkdownEdit || isExternalEdit) {
+		if (isMarkdownEdit || isExternalEdit || isTextEdit) {
 			icon = Codicon.pencil;
 		} else if (isSearchTool) {
 			icon = Codicon.search;
@@ -3249,11 +3550,21 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 			this.toolIconsByCallId.set(toolInvocationOrMarkdown.toolCallId, iconElement);
 		}
 
-		// T3 uses the same work-entry anatomy for every action, including file
-		// edits. Keep the old edit-pill exception on other chat surfaces only.
+		// Cursor keeps file diffs as full transcript cards and uses the native
+		// terminal disclosure so live output and tool actions remain available.
+		if (this.useCursorTranscriptPresentation && (isMarkdownEdit || isExternalEdit || isTextEdit)) {
+			this.finishActiveActivityGroup();
+			itemWrapper.classList.add('chat-thinking-cursor-edit-row');
+			this.appendToWrapper(itemWrapper);
+			return;
+		}
+
 		const isCleanSyntheticTool = this.useCursorPanelPresentation && !!toolInvocationId;
 		if ((toolInvocationOrMarkdown || isCleanSyntheticTool) && (this.useCursorPanelPresentation || (!isMarkdownEdit && !isExternalEdit))) {
 			const subkind = getToolActivitySubkind(toolInvocationId, toolInvocationOrMarkdown);
+			if (this.useCursorTranscriptPresentation) {
+				itemWrapper.classList.add(`chat-thinking-cursor-${subkind}-row`);
+			}
 			const toolCallId = isToolInvocation ? toolInvocationOrMarkdown.toolCallId : undefined;
 			const fallbackLabel = toolCallId ? undefined : content.textContent?.trim() || undefined;
 			this.appendToActivityGroup(itemWrapper, subkind, toolCallId, fallbackLabel, toolInvocationOrMarkdown);
@@ -3306,7 +3617,9 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 	private materializeLazyItem(item: ILazyItem): void {
 		if (item.kind === 'thinking') {
 			// Materialize thinking container
-			this.appendToWrapper(item.textContainer);
+			const hasReasoning = !!extractTextFromPart(item.content).trim();
+			item.textContainer.hidden = this.useCursorTranscriptPresentation && !hasReasoning;
+			this.appendCursorReasoningContainer(item.textContainer, hasReasoning);
 			// Store reference to textContainer for updateThinking calls
 			this.textContainer = item.textContainer;
 			this.id = item.content.id;
@@ -3356,15 +3669,25 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 		// tools don't get appended above this text.
 		this.finishActiveActivityGroup();
 		this.textContainer = $('.chat-thinking-item.markdown-content');
+		const hasReasoning = !!extractTextFromPart(content).trim();
+		this.textContainer.hidden = this.useCursorTranscriptPresentation && !hasReasoning;
 		// Observe the new textContainer for child resizes in fixed scrolling mode
 		if (this.childResizeObserver && this.fixedScrollingMode && !this.streamingCompleted) {
 			this._register(this.childResizeObserver.observe(this.textContainer));
 		}
-		if (content.value) {
+		// Reserve the response part's DOM position even before its first streamed
+		// token. A tool can render in the same frame; mounting only on non-empty
+		// text would otherwise put this earlier reasoning section below that tool.
+		if (this.useCursorTranscriptPresentation && !hasReasoning) {
+			this.appendCursorReasoningContainer(this.textContainer, false);
+			this.content = content;
+			this.id = content.id;
+		}
+		if (hasReasoning) {
 			// Use lazy rendering when collapsed to preserve order with tool items
-			if (this.isExpanded() || this.hasExpandedOnce || (this.fixedScrollingMode && !this.streamingCompleted)) {
+			if (this.useCursorTranscriptPresentation || this.isExpanded() || this.hasExpandedOnce || (this.fixedScrollingMode && !this.streamingCompleted)) {
 				// Render immediately when expanded
-				this.appendToWrapper(this.textContainer);
+				this.appendCursorReasoningContainer(this.textContainer);
 				this.id = content.id;
 				this.updateThinking(content);
 			} else {

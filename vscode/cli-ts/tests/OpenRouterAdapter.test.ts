@@ -556,6 +556,10 @@ describe("OpenRouter streaming", () => {
 
 		const events = await collect(client().runMessage(request()));
 		const action = events.find((event) => event.kind === "requires_action");
+		expect(events.filter((event) => event.kind === "reasoning_delta")).toEqual([
+			{ kind: "reasoning_delta", text: "opaque " },
+			{ kind: "reasoning_delta", text: "reasoning" },
+		]);
 
 		expect(captured).toHaveLength(1);
 		expect(

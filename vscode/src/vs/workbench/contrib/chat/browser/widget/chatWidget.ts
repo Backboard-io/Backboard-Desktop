@@ -39,6 +39,7 @@ import { MenuId } from '../../../../../platform/actions/common/actions.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { IContextKey, IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
 import { IDialogService } from '../../../../../platform/dialogs/common/dialogs.js';
+import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 
 import { ITextResourceEditorInput } from '../../../../../platform/editor/common/editor.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
@@ -86,10 +87,13 @@ import { IChatTipService } from '../chatTipService.js';
 import { ChatTipContentPart } from './chatContentParts/chatTipContentPart.js';
 import { ChatContentMarkdownRenderer } from './chatContentMarkdownRenderer.js';
 import { IAgentSessionsService } from '../agentSessions/agentSessionsService.js';
-import { BackboardLogoIcon } from '../agentSessions/agentSessions.js';
+import { BackboardLogoIcon, isSubscriptionAgentSessionProvider } from '../agentSessions/agentSessions.js';
+import { IAgentSession } from '../agentSessions/agentSessionsModel.js';
 import { IChatDebugService } from '../../common/chatDebugService.js';
 import { getChatSessionType } from '../../common/model/chatUri.js';
 import { ICustomizationHarnessService } from '../../common/customizationHarnessService.js';
+import { isBackboardProduct } from '../../common/backboardAuth.js';
+import { openSession } from '../agentSessions/agentSessionsOpener.js';
 
 const $ = dom.$;
 
@@ -279,6 +283,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 
 	private welcomeMessageContainer!: HTMLElement;
 	private readonly welcomePart: MutableDisposable<ChatViewWelcomePart> = this._register(new MutableDisposable());
+	private readonly backboardEmptyHomeDisposables = this._register(new DisposableStore());
 
 	/** Wrapper beneath the composer on a new, empty chat: holds the category button row and the prompt panel. */
 	private categorySuggestionsContainer: HTMLElement | undefined;
@@ -475,6 +480,11 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		this.hasActiveRequest = ChatContextKeys.hasActiveRequest.bindTo(contextKeyService);
 
 		this._register(this.chatEntitlementService.onDidChangeAnonymous(() => this.renderWelcomeViewContentIfNeeded()));
+		this._register(this.agentSessionsService.cachedModel.onDidChangeSessions(() => {
+			if (this.usesBackboardPanelEmptyHome() && (this.viewModel?.getItems().length ?? 0) === 0) {
+				this.renderWelcomeViewContentIfNeeded();
+			}
+		}));
 
 		this._register(this.configurationService.onDidChangeConfiguration(e => {
 			if (e.affectsConfiguration('chat.tips.enabled')) {
@@ -1053,7 +1063,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 
 		// On a new, empty coding-agent chat, center the composer and reveal the
 		// category shortcut buttons beneath it (Claude.ai-style home).
-		const showEmptyHome = !!this.categorySuggestionsContainer && this.isLockedToCodingAgent && isStandardLayout && numItems === 0;
+		const showEmptyHome = !!this.categorySuggestionsContainer && this.isLockedToCodingAgent && isStandardLayout && numItems === 0 && !this.usesBackboardPanelEmptyHome();
 		this.container.classList.toggle('chat-empty-centered', showEmptyHome);
 
 		// Plain "nothing sent yet" marker, unconditional where `chat-empty-centered`
@@ -1073,7 +1083,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			// Only use this in the standard chat layout where the welcome view is shown.
 			if (isStandardLayout && this.inputPart) {
 				const tipContainer = this.inputPart.gettingStartedTipContainerElement;
-				if (numItems === 0) {
+				if (numItems === 0 && !this.usesBackboardPanelEmptyHome()) {
 					this.renderGettingStartedTipIfNeeded();
 				} else {
 					// Dispose the cached tip part so the next empty state picks a
@@ -1262,6 +1272,12 @@ export class ChatWidget extends Disposable implements IChatWidget {
 
 			const numItems = this.viewModel?.getItems().length ?? 0;
 			if (!numItems) {
+				if (this.usesBackboardPanelEmptyHome()) {
+					this.renderBackboardPanelEmptyHome();
+					this.updateChatViewVisibility();
+					return;
+				}
+
 				const defaultAgent = this.chatAgentService.getDefaultAgent(this.location, this.input.currentModeKind);
 				let additionalMessage: string | IMarkdownString | undefined;
 				if (this.chatEntitlementService.anonymous && !this.chatEntitlementService.sentiment.completed) {
@@ -1293,6 +1309,215 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		} finally {
 			this._isRenderingWelcome = false;
 		}
+	}
+
+	private usesBackboardPanelEmptyHome(): boolean {
+		return isBackboardProduct()
+			&& isIChatViewViewContext(this.viewContext)
+			&& this.viewContext.viewId === ChatViewId;
+	}
+
+	private renderBackboardPanelEmptyHome(): void {
+		this.welcomePart.clear();
+		this.backboardEmptyHomeDisposables.clear();
+		dom.clearNode(this.welcomeMessageContainer);
+
+		const sessions = this.agentSessionsService.cachedModel.sessions
+			.filter(session => !session.isArchived() && !isSubscriptionAgentSessionProvider(session.providerType))
+			.sort((a, b) => this.getBackboardSessionActivityTime(b) - this.getBackboardSessionActivityTime(a));
+		const home = dom.append(this.welcomeMessageContainer, $('.backboard-panel-empty-home'));
+		const recent = dom.append(home, $('section.backboard-panel-recent-chats', {
+			'aria-label': localize('chat.emptyHome.recentChats', "Recent chats"),
+		}));
+		const list = dom.append(recent, $('.backboard-panel-recent-chat-list'));
+
+		for (const session of sessions.slice(0, 3)) {
+			const activityTime = this.getBackboardSessionActivityTime(session);
+			const timeLabel = this.formatBackboardSessionAge(activityTime);
+			const row = dom.append(list, $('button.backboard-panel-recent-chat', {
+				type: 'button',
+				'aria-label': localize('chat.emptyHome.openRecentChat', "Open {0}, {1}", session.label, timeLabel),
+			})) as HTMLButtonElement;
+			row.title = session.label;
+			dom.append(row, $('span.backboard-panel-recent-chat-title', undefined, session.label));
+			dom.append(row, $('span.backboard-panel-recent-chat-time', undefined, timeLabel));
+			this.backboardEmptyHomeDisposables.add(dom.addDisposableListener(row, dom.EventType.CLICK, event => {
+				dom.EventHelper.stop(event, true);
+				void this.instantiationService.invokeFunction(openSession, session);
+			}));
+		}
+
+		const viewAll = dom.append(recent, $('button.backboard-panel-view-all', {
+			type: 'button',
+			'aria-label': localize('chat.emptyHome.viewAllChats', "View all {0} chats", sessions.length),
+		})) as HTMLButtonElement;
+		viewAll.textContent = localize('chat.emptyHome.viewAllChatsWithCount', "View all ({0})", sessions.length);
+		this.backboardEmptyHomeDisposables.add(dom.addDisposableListener(viewAll, dom.EventType.CLICK, event => {
+			dom.EventHelper.stop(event, true);
+			void this.instantiationService.invokeFunction(accessor => accessor.get(ICommandService).executeCommand('workbench.action.chat.history', { excludeSubscriptionSessions: true }));
+		}));
+
+		this.renderBackboardPanelAnimatedMark(home);
+	}
+
+	private renderBackboardPanelAnimatedMark(parent: HTMLElement): void {
+		const mark = dom.append(parent, $('.backboard-panel-empty-mark', { 'aria-hidden': 'true' }));
+		const svgNamespace = 'http://www.w3.org/2000/svg';
+		const createSvgElement = (tagName: string): SVGElement => mark.ownerDocument.createElementNS(svgNamespace, tagName) as SVGElement;
+		const setAttributes = (element: SVGElement, attributes: Record<string, string>): SVGElement => {
+			for (const [name, value] of Object.entries(attributes)) {
+				element.setAttribute(name, value);
+			}
+			return element;
+		};
+		const strands = [
+			{ tagName: 'path', attributes: { d: 'M77.21,0h10.1c1.32,0,2.4,1.07,2.4,2.4v216.39c0,1.32-1.07,2.4-2.4,2.4h-10.1c-1.32,0-2.4-1.07-2.4-2.4V2.4c0-1.32,1.07-2.4,2.4-2.4Z', 'fill-rule': 'evenodd' } },
+			{ tagName: 'rect', attributes: { x: '49.87', y: '30.34', width: '14.89', height: '80.25', rx: '2.4', ry: '2.4' } },
+			{ tagName: 'rect', attributes: { x: '0', y: '90.8', width: '14.88', height: '19.8', rx: '2.4', ry: '2.4' } },
+			{ tagName: 'rect', attributes: { x: '99.74', y: '110.59', width: '14.89', height: '80.25', rx: '2.4', ry: '2.4' } },
+			{ tagName: 'rect', attributes: { x: '149.61', y: '110.59', width: '14.89', height: '19.8', rx: '2.4', ry: '2.4' } },
+			{ tagName: 'rect', attributes: { x: '124.68', y: '110.59', width: '14.89', height: '50.06', rx: '2.4', ry: '2.4' } },
+			{ tagName: 'rect', attributes: { x: '24.94', y: '60.53', width: '14.89', height: '50.06', rx: '2.4', ry: '2.4' } },
+		] as const;
+		const createStrand = (strand: typeof strands[number]): SVGElement => setAttributes(createSvgElement(strand.tagName), strand.attributes);
+		const svg = setAttributes(createSvgElement('svg'), {
+			viewBox: '0 0 164.5 221.19',
+			preserveAspectRatio: 'xMidYMid meet',
+			'aria-hidden': 'true',
+			focusable: 'false',
+		});
+		svg.classList.add('backboard-panel-water-mark');
+
+		const definitions = createSvgElement('defs');
+		const waterGradientId = 'backboard-panel-water-gradient';
+		const waterGradient = setAttributes(createSvgElement('linearGradient'), {
+			id: waterGradientId,
+			x1: '0',
+			y1: '0',
+			x2: '0',
+			y2: '86',
+			gradientUnits: 'userSpaceOnUse',
+			spreadMethod: 'repeat',
+		});
+		for (const [offset, color, opacity] of [
+			['0%', '#f8fcff', '1'],
+			['18%', '#b9e8f8', '1'],
+			['38%', '#649fe2', '0.96'],
+			['58%', '#e8faff', '1'],
+			['77%', '#72c6df', '0.98'],
+			['100%', '#f8fcff', '1'],
+		]) {
+			waterGradient.appendChild(setAttributes(createSvgElement('stop'), { offset, 'stop-color': color, 'stop-opacity': opacity }));
+		}
+		definitions.appendChild(waterGradient);
+
+		const glintGradientId = 'backboard-panel-water-glint';
+		const glintGradient = setAttributes(createSvgElement('linearGradient'), {
+			id: glintGradientId,
+			x1: '0',
+			y1: '0',
+			x2: '0',
+			y2: '124',
+			gradientUnits: 'userSpaceOnUse',
+			spreadMethod: 'repeat',
+		});
+		for (const [offset, opacity] of [
+			['0%', '0'],
+			['42%', '0'],
+			['50%', '0.7'],
+			['58%', '0'],
+			['100%', '0'],
+		]) {
+			glintGradient.appendChild(setAttributes(createSvgElement('stop'), { offset, 'stop-color': '#ffffff', 'stop-opacity': opacity }));
+		}
+		definitions.appendChild(glintGradient);
+
+		const textureFilterId = 'backboard-panel-water-texture';
+		const textureFilter = setAttributes(createSvgElement('filter'), {
+			id: textureFilterId,
+			x: '-12%',
+			y: '-10%',
+			width: '124%',
+			height: '120%',
+			'color-interpolation-filters': 'sRGB',
+		});
+		textureFilter.appendChild(setAttributes(createSvgElement('feTurbulence'), {
+			type: 'fractalNoise',
+			baseFrequency: '0.012 0.095',
+			numOctaves: '2',
+			seed: '7',
+			result: 'waterNoise',
+		}));
+		textureFilter.appendChild(setAttributes(createSvgElement('feDisplacementMap'), {
+			in: 'SourceGraphic',
+			in2: 'waterNoise',
+			scale: '3.4',
+			xChannelSelector: 'R',
+			yChannelSelector: 'B',
+		}));
+		definitions.appendChild(textureFilter);
+		svg.appendChild(definitions);
+
+		for (const [index, strand] of strands.entries()) {
+			const clipId = `backboard-panel-water-clip-${index}`;
+			const clipPath = setAttributes(createSvgElement('clipPath'), { id: clipId });
+			clipPath.appendChild(createStrand(strand));
+			definitions.appendChild(clipPath);
+
+			const base = createStrand(strand);
+			base.classList.add('backboard-panel-water-strand-base');
+			svg.appendChild(base);
+
+			const clippedFlow = setAttributes(createSvgElement('g'), { 'clip-path': `url(#${clipId})` });
+			const current = setAttributes(createSvgElement('rect'), {
+				x: '-18',
+				y: '-442',
+				width: '200.5',
+				height: '1105',
+				fill: `url(#${waterGradientId})`,
+				filter: `url(#${textureFilterId})`,
+			});
+			current.classList.add('backboard-panel-water-current');
+			current.style.setProperty('--backboard-panel-water-delay', `${index * -0.43}s`);
+			current.style.setProperty('--backboard-panel-water-duration', `${3.1 + (index % 4) * 0.36}s`);
+			clippedFlow.appendChild(current);
+
+			const glint = setAttributes(createSvgElement('rect'), {
+				x: '-28',
+				y: '-442',
+				width: '220.5',
+				height: '1105',
+				fill: `url(#${glintGradientId})`,
+			});
+			glint.classList.add('backboard-panel-water-glint');
+			glint.style.setProperty('--backboard-panel-water-delay', `${-1.2 + index * -0.61}s`);
+			glint.style.setProperty('--backboard-panel-water-duration', `${4.4 + (index % 3) * 0.52}s`);
+			clippedFlow.appendChild(glint);
+			svg.appendChild(clippedFlow);
+		}
+
+		mark.appendChild(svg);
+	}
+
+	private getBackboardSessionActivityTime(session: IAgentSession): number {
+		return session.timing.lastRequestEnded ?? session.timing.lastRequestStarted ?? session.timing.created;
+	}
+
+	private formatBackboardSessionAge(timestamp: number): string {
+		const elapsed = Math.max(0, Date.now() - timestamp);
+		const minute = 60_000;
+		const hour = 60 * minute;
+		const day = 24 * hour;
+		if (elapsed < minute) {
+			return localize('chat.emptyHome.time.now', "now");
+		}
+		if (elapsed < hour) {
+			return localize('chat.emptyHome.time.minutes', "{0}m", Math.max(1, Math.floor(elapsed / minute)));
+		}
+		if (elapsed < day) {
+			return localize('chat.emptyHome.time.hours', "{0}h", Math.max(1, Math.floor(elapsed / hour)));
+		}
+		return localize('chat.emptyHome.time.days', "{0}d", Math.max(1, Math.floor(elapsed / day)));
 	}
 
 	private renderGettingStartedTipIfNeeded(): void {
@@ -2313,7 +2538,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		this.listWidget.setViewModel(this.viewModel);
 
 		const rightPanelInputPlaceholder = this.container.closest('.part.auxiliarybar')
-			? localize('chat.input.placeholder.editorRightPanel', "Ask anything — @ for context")
+			? localize('chat.input.placeholder.editorRightPanel', "Do anything")
 			: undefined;
 
 		if (rightPanelInputPlaceholder) {

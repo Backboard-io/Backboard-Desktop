@@ -1,4 +1,7 @@
 import { describe, expect, it } from "bun:test";
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { AssistantAccumulator } from "../src/core/agent/AssistantAccumulator.ts";
 import { ProviderStreamConsumer } from "../src/core/agent/ProviderStreamConsumer.ts";
 import { EventBus } from "../src/core/bus/EventBus.ts";
@@ -157,5 +160,124 @@ describe("ProviderStreamConsumer", () => {
 		).rejects.toThrow();
 
 		expect(preserved).toBe(1);
+	});
+
+	it("normalizes generated image markup and saves the image in the project", async () => {
+		const projectRoot = await mkdtemp(join(tmpdir(), "backboard-images-"));
+		const directory = join(projectRoot, "generated-images");
+		const imageUrl = "https://example.test/generated-images/dog-one.jpg";
+		const duplicateImageUrl =
+			"https://example.test/generated-images/dog-two.jpg";
+		const imageBytes = Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]);
+		let finalizedText = "";
+		const deltas: string[] = [];
+		const assistant = {
+			appendDelta: (text: string) => deltas.push(text),
+			appendReasoning: () => {},
+			finalize: (_calls: unknown[], text?: string) => {
+				finalizedText = text ?? "";
+			},
+			discardPartial: () => {},
+		} as unknown as AssistantAccumulator;
+
+		try {
+			const consumer = new ProviderStreamConsumer(
+				new EventBus(),
+				new Session("sess_test"),
+				{
+					imageGeneration: true,
+					generatedMediaDir: directory,
+					fetch: async () =>
+						new Response(imageBytes, {
+							headers: { "content-type": "image/jpeg" },
+						}),
+				},
+			);
+			await consumer.consumeWithRetry(
+				() =>
+					streamOf([
+						{ kind: "assistant_delta", text: "Here's your dog." },
+						{ kind: "media", payload: { url: imageUrl, prompt: "dog" } },
+						{
+							kind: "media",
+							payload: { url: duplicateImageUrl, prompt: "dog" },
+						},
+						{
+							kind: "completed",
+							finalText: `\\<img src="[${imageUrl}](${imageUrl})" alt="dog">\n\nHere's your dog. [dog](${imageUrl})\n\nHere's your dog.`,
+						},
+					]),
+				assistant,
+				new AbortController().signal,
+			);
+
+			expect(deltas).toEqual([]);
+			expect(finalizedText).not.toContain("<img");
+			expect(finalizedText).not.toContain("]()");
+			expect(finalizedText.match(/Here's your dog\./g)).toHaveLength(1);
+			expect(finalizedText.match(/https:\/\/example\.test/g)).toHaveLength(1);
+			expect(finalizedText).toContain("Saved to `generated-images/");
+			const files = await readdir(directory);
+			expect(files).toHaveLength(1);
+			const filename = files[0];
+			expect(filename).toMatch(/^generated-[a-f0-9]{12}\.(?:png|jpg)$/);
+			if (!filename) throw new Error("generated image was not saved");
+			expect(
+				(await readFile(join(directory, filename))).byteLength,
+			).toBeGreaterThan(0);
+		} finally {
+			await rm(projectRoot, { recursive: true, force: true });
+		}
+	});
+
+	it("saves a generated image returned only in final markdown", async () => {
+		const projectRoot = await mkdtemp(join(tmpdir(), "backboard-images-"));
+		const directory = join(projectRoot, "generated-images");
+		const imageUrl =
+			"https://backboard-prod.s3.ca-central-1.amazonaws.com/generated-images/mario.png";
+		const imageBytes = Uint8Array.from([0x89, 0x50, 0x4e, 0x47]);
+		let finalizedText = "";
+		const assistant = {
+			appendDelta: () => {},
+			appendReasoning: () => {},
+			finalize: (_calls: unknown[], text?: string) => {
+				finalizedText = text ?? "";
+			},
+			discardPartial: () => {},
+		} as unknown as AssistantAccumulator;
+
+		try {
+			const consumer = new ProviderStreamConsumer(
+				new EventBus(),
+				new Session("sess_test"),
+				{
+					imageGeneration: true,
+					generatedMediaDir: directory,
+					fetch: async () =>
+						new Response(imageBytes, {
+							headers: { "content-type": "image/png" },
+						}),
+				},
+			);
+			await consumer.consumeWithRetry(
+				() =>
+					streamOf([
+						{
+							kind: "completed",
+							finalText: `Here's Mario.\n\n![mario](${imageUrl})`,
+						},
+					]),
+				assistant,
+				new AbortController().signal,
+			);
+
+			expect(finalizedText.match(/!\[mario\]/g)).toHaveLength(1);
+			expect(finalizedText).toContain("Saved to `generated-images/");
+			const files = await readdir(directory);
+			expect(files).toHaveLength(1);
+			expect(files[0]).toMatch(/^generated-[a-f0-9]{12}\.png$/);
+		} finally {
+			await rm(projectRoot, { recursive: true, force: true });
+		}
 	});
 });

@@ -275,6 +275,37 @@ describe("OpenAI tool reasoning compatibility", () => {
 });
 
 describe("Gemini abnormal finishes", () => {
+	it("streams thought parts as reasoning instead of answer text", async () => {
+		stubStream([
+			`data: ${JSON.stringify({
+				candidates: [
+					{
+						content: {
+							parts: [
+								{ text: "Checking first.", thought: true },
+								{ text: "Final answer." },
+							],
+						},
+						finishReason: "STOP",
+					},
+				],
+			})}`,
+		]);
+
+		const events = await collect(
+			client().runMessage(request("google", "gemini-2.5-flash")),
+		);
+
+		expect(events).toContainEqual({
+			kind: "reasoning_delta",
+			text: "Checking first.",
+		});
+		expect(events).toContainEqual({
+			kind: "assistant_delta",
+			text: "Final answer.",
+		});
+	});
+
 	it("fails when the transport closes before a finish reason", async () => {
 		stubStream([
 			`data: ${JSON.stringify({

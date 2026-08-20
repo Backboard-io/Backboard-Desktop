@@ -700,6 +700,7 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 		this.sessionsControlContainer = append(sessionsContainer, $('.agent-sessions-control-container'));
 		const sessionsControl = this.sessionsControl = this._register(this.instantiationService.createInstance(AgentSessionsControl, this.sessionsControlContainer, {
 			source: 'chatViewPane',
+			initiallyVisible: false,
 			filter: sessionsFilter,
 			overrideStyles: this.getLocationBasedColors().listOverrideStyles,
 			compactRows: false,
@@ -718,7 +719,7 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 				return openEvent;
 			},
 		}));
-		this._register(this.onDidChangeBodyVisibility(visible => sessionsControl.setVisible(visible)));
+		this._register(this.onDidChangeBodyVisibility(visible => sessionsControl.setVisible(visible && this.sessionsViewerVisible)));
 
 		sessionsToolbar.context = sessionsControl;
 
@@ -835,6 +836,7 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 		const sessionsContainerVisible = this.sessionsContainer.style.display !== 'none';
 		setVisibility(newSessionsContainerVisible, this.sessionsContainer);
 		this.sessionsViewerVisible = newSessionsContainerVisible;
+		this.sessionsControl?.setVisible(this.isBodyVisible() && newSessionsContainerVisible);
 		this.sessionsViewerVisibilityContext.set(newSessionsContainerVisible);
 
 		return {
@@ -1296,12 +1298,7 @@ referencesExpandedWhenEmptyResponse: false,
 		const model = ref?.object;
 
 		if (model) {
-			await this.updateWidgetLockState(getChatSessionType(model.sessionResource)); // Update widget lock state based on session type
-
-			if (token.isCancellationRequested) {
-				this.modelRef.value = undefined;
-				return undefined;
-			}
+			this.updateWidgetLockState(getChatSessionType(model.sessionResource)); // Update widget lock state based on session type
 
 			// remember as model to restore in view state
 			this.viewState.sessionResource = model.sessionResource;
@@ -1322,7 +1319,7 @@ referencesExpandedWhenEmptyResponse: false,
 		if (oldModelResource) {
 			const capturedOldResource = oldModelResource;
 			this._register(disposableTimeout(() => {
-				const oldSession = this.agentSessionsService.model.getSession(capturedOldResource);
+				const oldSession = this.agentSessionsService.getSession(capturedOldResource);
 				if (oldSession && !oldSession.isMarkedUnread()) {
 					oldSession.setRead(true);
 				}
@@ -1332,20 +1329,8 @@ referencesExpandedWhenEmptyResponse: false,
 		return model;
 	}
 
-	private async updateWidgetLockState(sessionType: string): Promise<void> {
+	private updateWidgetLockState(sessionType: string): void {
 		if (sessionType === localChatSessionType) {
-			this._widget.unlockFromCodingAgent();
-			return;
-		}
-
-		let canResolve = false;
-		try {
-			canResolve = await this.chatSessionsService.canResolveChatSession(sessionType);
-		} catch (error) {
-			this.logService.warn(`Failed to resolve chat session type '${sessionType}' for locking`, error);
-		}
-
-		if (!canResolve) {
 			this._widget.unlockFromCodingAgent();
 			return;
 		}

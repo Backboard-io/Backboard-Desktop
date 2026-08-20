@@ -22,7 +22,7 @@ import { MenuId } from '../../../../../../platform/actions/common/actions.js';
 import { ILifecycleService } from '../../../../../services/lifecycle/common/lifecycle.js';
 import { TestInstantiationService } from '../../../../../../platform/instantiation/test/common/instantiationServiceMock.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../../platform/storage/common/storage.js';
-import { AgentSessionProviders, getAgentCanContinueIn, getAgentSessionProvider, getAgentSessionProviderIcon, getAgentSessionProviderName } from '../../../browser/agentSessions/agentSessions.js';
+import { AgentSessionProviders, getAgentCanContinueIn, getAgentSessionProvider, getAgentSessionProviderIcon, getAgentSessionProviderName, isSubscriptionAgentSessionProvider } from '../../../browser/agentSessions/agentSessions.js';
 
 class StaticChatSessionItemController implements IChatSessionItemController {
 	readonly onDidChangeChatSessionItems = Event.None;
@@ -2212,6 +2212,20 @@ suite('AgentSessions', () => {
 		test('should resolve AgentHostCodex provider from session type', () => {
 			const provider = getAgentSessionProvider(AgentSessionProviders.AgentHostCodex);
 			assert.strictEqual(provider, AgentSessionProviders.AgentHostCodex);
+		});
+
+		test('should identify external subscription provider variants', () => {
+			assert.strictEqual(isSubscriptionAgentSessionProvider(AgentSessionProviders.Claude), true);
+			assert.strictEqual(isSubscriptionAgentSessionProvider(AgentSessionProviders.AgentHostClaude), true);
+			assert.strictEqual(isSubscriptionAgentSessionProvider('remote-machine-agent-host-claude'), true);
+			assert.strictEqual(isSubscriptionAgentSessionProvider('anthropic'), true);
+			assert.strictEqual(isSubscriptionAgentSessionProvider(AgentSessionProviders.Codex), true);
+			assert.strictEqual(isSubscriptionAgentSessionProvider(AgentSessionProviders.AgentHostCodex), true);
+			assert.strictEqual(isSubscriptionAgentSessionProvider('remote-machine-agent-host-codex'), true);
+			assert.strictEqual(isSubscriptionAgentSessionProvider('openai'), true);
+			assert.strictEqual(isSubscriptionAgentSessionProvider('chatgpt'), true);
+			assert.strictEqual(isSubscriptionAgentSessionProvider(AgentSessionProviders.AgentHostBackboard), false);
+			assert.strictEqual(isSubscriptionAgentSessionProvider(AgentSessionProviders.Background), false);
 		});
 
 		test('should handle Local provider type in model', async () => {

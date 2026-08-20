@@ -69,6 +69,7 @@ export class Config {
 	private workspaceId: string | null = null;
 
 	private currentModel: ModelRef;
+	private successfulModelRefs: ModelRef[];
 	private currentModelProfile: ModelProfile;
 	private readonly currentFormat: OutputFormat;
 	private currentMemory: MemoryMode;
@@ -83,6 +84,7 @@ export class Config {
 	private readonly currentFinalVerificationNudge: boolean;
 	private excludedToolNames: string[];
 	private readonly persistedConfigHomeDir: string | undefined;
+	private readonly recoveryPersistenceEnabled: boolean;
 
 	constructor(options: ConfigOptions = {}) {
 		this.flags = parseFlags(options.argv ?? process.argv.slice(2));
@@ -98,6 +100,8 @@ export class Config {
 		}
 		this.env = this.auth.backboard ?? anonymousEnv();
 		this.persistedConfigHomeDir = options.homeDir;
+		this.recoveryPersistenceEnabled =
+			options.homeDir !== undefined || options.env === undefined;
 		const persistedConfig =
 			options.homeDir !== undefined || options.env === undefined
 				? readBackboardConfig(options.homeDir)
@@ -122,6 +126,7 @@ export class Config {
 		this.currentModel = this.flags.model
 			? parseModel(this.flags.model)
 			: (persistedConfig.model ?? keyOnlyDefault ?? this.profile.model);
+		this.successfulModelRefs = persistedConfig.successfulModels ?? [];
 		this.currentModelProfile = resolveModelProfile(this.currentModel);
 		this.currentFormat = this.flags.format
 			? parseOutputFormat(this.flags.format)
@@ -156,6 +161,38 @@ export class Config {
 	setModel(ref: ModelRef): void {
 		this.currentModel = ref;
 		this.currentModelProfile = resolveModelProfile(ref);
+	}
+
+	/** Working models, newest first, for automatic recovery from provider capacity. */
+	get successfulModels(): ModelRef[] {
+		return this.successfulModelRefs.map((model) => ({ ...model }));
+	}
+
+	async recordSuccessfulModel(ref: ModelRef): Promise<void> {
+		const key = formatModel(ref).toLowerCase();
+		if (
+			this.successfulModelRefs[0] &&
+			formatModel(this.successfulModelRefs[0]).toLowerCase() === key
+		) {
+			return;
+		}
+		this.successfulModelRefs = [
+			{ ...ref },
+			...this.successfulModelRefs.filter(
+				(model) => formatModel(model).toLowerCase() !== key,
+			),
+		].slice(0, 10);
+		if (!this.recoveryPersistenceEnabled) return;
+		const existing = readBackboardConfig(this.persistedConfigHomeDir);
+		await saveBackboardConfig(
+			{ ...existing, successfulModels: this.successfulModelRefs },
+			this.persistedConfigHomeDir,
+		);
+	}
+
+	async saveRecoverySelection(): Promise<void> {
+		if (!this.recoveryPersistenceEnabled) return;
+		await this.saveRuntimeSelection();
 	}
 
 	get modelProfile(): ModelProfile {
@@ -290,18 +327,6 @@ export class Config {
 
 	setThinking(thinking: ThinkingIntent | null | undefined): void {
 		this.currentThinking = thinking;
-	}
-
-	/**
-	 * Applies the "Show Reasoning" preference onto the current thinking
-	 * intent. Call after {@link setThinking}, which replaces the intent
-	 * wholesale. A disabled intent (`off` → null) has nothing to carry the
-	 * flag; reasoning exclusion is moot without thinking anyway.
-	 */
-	setExcludeReasoning(excludeReasoning: boolean): void {
-		if (this.currentThinking) {
-			this.currentThinking = { ...this.currentThinking, excludeReasoning };
-		}
 	}
 
 	async saveRuntimeSelection(): Promise<void> {

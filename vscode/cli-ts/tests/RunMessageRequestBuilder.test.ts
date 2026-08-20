@@ -40,7 +40,7 @@ describe("buildRunMessageRequest", () => {
 			imageGeneration: true,
 		});
 		expect(on.image_generation).toBe("auto");
-		expect(on.image_model_provider).toBe("openrouter");
-		expect(on.image_model_name).toBe("google/gemini-3.1-flash-image-preview");
+		expect(on.image_model_provider).toBe("google");
+		expect(on.image_model_name).toBe("gemini-3.1-flash-image");
 	});
 });

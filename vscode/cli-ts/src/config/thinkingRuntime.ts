@@ -38,15 +38,19 @@ export async function createRuntimeThinkingResolver(
 	return {
 		intent,
 		resolve(evidence) {
-			if (evidence.phase === "tool_outputs" && intent?.kind !== "dynamic") {
-				return undefined;
+			try {
+				return resolveThinking({
+					intent,
+					model,
+					metadata,
+					dynamicEvidence: evidence,
+				});
+			} catch {
+				// Thinking is an optimization, never a reason to lose the whole turn.
+				// A provider may advertise stale or incomplete controls, so degrade to
+				// an explicit off value and let the model answer normally.
+				return null;
 			}
-			return resolveThinking({
-				intent,
-				model,
-				metadata,
-				dynamicEvidence: evidence,
-			});
 		},
 	};
 }

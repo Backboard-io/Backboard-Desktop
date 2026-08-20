@@ -44,6 +44,7 @@ export function readBackboardConfig(
 			apiUrl:
 				typeof config.apiUrl === "string" ? config.apiUrl.trim() : undefined,
 			model: readModelConfig(config),
+			successfulModels: readSuccessfulModels(config),
 			thinking: readThinkingConfig(config),
 			memory: readMemoryConfig(config),
 			memoryProfile: readMemoryProfileConfig(config),
@@ -54,6 +55,28 @@ export function readBackboardConfig(
 		if ((err as { code?: string }).code === "ENOENT") return {};
 		throw new Error(`Failed to read ${file}: ${errorMessage(err)}`);
 	}
+}
+
+function readSuccessfulModels(
+	config: BackboardConfigJson,
+): BackboardConfigFile["successfulModels"] {
+	if (!Array.isArray(config.successfulModels)) return undefined;
+	const models = config.successfulModels.flatMap((value) => {
+		if (typeof value !== "object" || value === null || Array.isArray(value)) {
+			return [];
+		}
+		const candidate = value as BackboardConfigJson;
+		if (
+			typeof candidate.provider !== "string" ||
+			typeof candidate.model !== "string" ||
+			!candidate.provider.trim() ||
+			!candidate.model.trim()
+		) {
+			return [];
+		}
+		return [{ provider: candidate.provider, model: candidate.model }];
+	});
+	return models.length > 0 ? models : undefined;
 }
 
 function readModelConfig(

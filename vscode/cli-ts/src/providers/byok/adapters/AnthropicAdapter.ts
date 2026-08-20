@@ -205,15 +205,23 @@ async function* streamAnthropic(
 		if (type === "content_block_delta") {
 			const index = numberOf(event.index);
 			const delta = event.delta as
-				| { type?: string; text?: string; partial_json?: string }
+				| {
+						type?: string;
+						text?: string;
+						thinking?: string;
+						partial_json?: string;
+				  }
 				| undefined;
 			if (!delta) continue;
 			if (delta.type === "text_delta" && delta.text) {
 				yield { kind: "assistant_delta", text: delta.text };
 				continue;
 			}
-			// thinking_delta / signature_delta carry reasoning the CLI does not
-			// render; they are intentionally dropped rather than shown as text.
+			if (delta.type === "thinking_delta" && delta.thinking) {
+				yield { kind: "reasoning_delta", text: delta.thinking };
+				continue;
+			}
+			// signature_delta is opaque continuation state, not display text.
 			if (delta.type === "input_json_delta" && index !== null) {
 				const pending = blocks.get(index);
 				if (pending) pending.json += delta.partial_json ?? "";

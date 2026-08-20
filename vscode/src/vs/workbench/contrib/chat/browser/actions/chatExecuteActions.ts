@@ -211,11 +211,11 @@ export class ChatSubmitAction extends SubmitAction {
 			title: localize2('interactive.submit.label', "Send"),
 			f1: false,
 			category: CHAT_CATEGORY,
-			icon: Codicon.newLine,
+			icon: Codicon.arrowUp,
 			precondition,
 			toggled: {
 				condition: ChatContextKeys.lockedToCodingAgent,
-				icon: Codicon.newLine,
+				icon: Codicon.arrowUp,
 				tooltip: localize('sendToAgent', "Send to Agent"),
 			},
 			keybinding: {
@@ -417,10 +417,7 @@ class SwitchToNextPinnedModelAction extends Action2 {
 	}
 }
 
-/**
- * Shared visibility for the model picker and its companion thinking-level
- * chip: both live on the same models, so they show and hide together.
- */
+/** Shared visibility for the model picker and its integrated configuration. */
 const MODEL_PICKER_VISIBILITY = ContextKeyExpr.and(
 	// Hide the model picker while a delegation (continue in) target is pending
 	ChatContextKeys.hasPendingDelegationTarget.negate(),
@@ -443,7 +440,7 @@ export class OpenModelPickerAction extends Action2 {
 	static readonly ID = 'workbench.action.chat.openModelPicker';
 
 	constructor() {
-		super({
+			super({
 			id: OpenModelPickerAction.ID,
 			title: localize2('interactive.openModelPicker.label', "Open Model Picker"),
 			category: CHAT_CATEGORY,
@@ -455,7 +452,7 @@ export class OpenModelPickerAction extends Action2 {
 			},
 			menu: {
 				id: MenuId.ChatInput,
-				order: 3,
+				order: -0.9,
 				group: 'navigation',
 				when: MODEL_PICKER_VISIBILITY
 			}
@@ -591,19 +588,7 @@ export class OpenChatThinkingPickerAction extends Action2 {
 			title: localize2('interactive.openThinkingPicker.label', "Open Thinking Level Picker"),
 			tooltip: localize('setThinkingLevel', "Set Thinking Level"),
 			category: CHAT_CATEGORY,
-			f1: false,
-			menu: {
-				id: MenuId.ChatInput,
-				// Right after the model picker (order 3) so the level reads as
-				// part of the model choice. The chip self-hides when the active
-				// model has no thinking levels.
-				order: 3.05,
-				group: 'navigation',
-				// Excluded for Claude/Codex agent-host sessions: their thinking
-				// level lives inside the consolidated "Claude Options" gear
-				// (OpenAgentHostClaudeOptionsAction) instead of its own icon.
-				when: ContextKeyExpr.and(MODEL_PICKER_VISIBILITY, ChatContextKeys.chatSessionIsExternalAgent.negate()),
-			}
+			f1: false
 		});
 	}
 
@@ -622,16 +607,7 @@ export class OpenBackboardComposerOptionsAction extends Action2 {
 			tooltip: localize('interactive.backboardComposerOptions.tooltip', "Open composer options"),
 			category: CHAT_CATEGORY,
 			icon: Codicon.settingsGear,
-			f1: false,
-			menu: {
-				id: MenuId.ChatInput,
-				order: 3.1,
-				group: 'navigation',
-				// Backboard-specific options don't apply to third-party agent
-				// sessions (Claude, Codex) — their config lives in the agent's
-				// own session-config chips.
-				when: ContextKeyExpr.and(ChatContextKeys.inQuickChat.negate(), ChatContextKeys.chatSessionIsExternalAgent.negate())
-			}
+			f1: false
 		});
 	}
 
@@ -1036,28 +1012,30 @@ export class OpenPermissionPickerAction extends Action2 {
 	constructor() {
 		super({
 			id: OpenPermissionPickerAction.ID,
-			title: localize2('interactive.openPermissionPicker.label', "Open Permission Picker"),
+			title: localize2('interactive.openPermissionPicker.label', "Ask for approval"),
 			tooltip: localize('setPermissionLevel', "Set Permissions"),
 			category: CHAT_CATEGORY,
 			f1: false,
 			precondition: ChatContextKeys.enabled,
-			menu: {
-				id: MenuId.ChatInputSecondary,
-				order: 1,
-				group: 'navigation',
-				when:
-					ContextKeyExpr.and(
-						ChatContextKeys.enabled,
-						ChatContextKeys.location.isEqualTo(ChatAgentLocation.Chat),
-						ChatContextKeys.chatModeKind.notEqualsTo(ChatModeKind.Ask),
-						ChatContextKeys.inQuickChat.negate(),
-						ContextKeyExpr.or(
-							ChatContextKeys.lockedToCodingAgent.negate(),
-							ChatContextKeys.lockedCodingAgentId.isEqualTo(AgentSessionProviders.Background),
-							ChatContextKeys.lockedCodingAgentId.isEqualTo(AgentSessionProviders.Claude),
-						),
-					)
-			}
+			menu: [
+				{
+					id: MenuId.ChatInputSecondary,
+					order: 1,
+					group: 'navigation',
+					when:
+						ContextKeyExpr.and(
+							ChatContextKeys.enabled,
+							ChatContextKeys.location.isEqualTo(ChatAgentLocation.Chat),
+							ChatContextKeys.chatModeKind.notEqualsTo(ChatModeKind.Ask),
+							ChatContextKeys.inQuickChat.negate(),
+							ContextKeyExpr.or(
+								ChatContextKeys.lockedToCodingAgent.negate(),
+								ChatContextKeys.lockedCodingAgentId.isEqualTo(AgentSessionProviders.Background),
+								ChatContextKeys.lockedCodingAgentId.isEqualTo(AgentSessionProviders.Claude),
+							),
+						)
+				}
+			]
 		});
 	}
 
@@ -1307,7 +1285,7 @@ export class ChatEditingSessionSubmitAction extends SubmitAction {
 			title: localize2('edits.submit.label', "Send"),
 			f1: false,
 			category: CHAT_CATEGORY,
-			icon: Codicon.newLine,
+			icon: Codicon.arrowUp,
 			precondition,
 			menu: [
 				{

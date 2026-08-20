@@ -196,6 +196,20 @@ export class ChatListWidget extends Disposable {
 	private readonly _getCurrentModeInfo: (() => IChatRequestModeInfo | undefined) | undefined;
 	private readonly _renderStyle: 'compact' | 'minimal' | undefined;
 
+	/**
+	 * ChatWidget can be constructed before its view-pane host is attached to the
+	 * workbench. Re-evaluate the stable ancestors after attachment so the visual
+	 * hook always lands on the scrollable list itself, never on its composer or
+	 * surrounding view chrome.
+	 */
+	private updateBackboardTranscriptHostClasses(): void {
+		const isAuxiliaryBarChat = this._container.closest('.part.auxiliarybar') !== null;
+		const isBackboardAuxiliaryTranscript = isAuxiliaryBarChat
+			&& this._container.closest('.backboard-chat-controls') !== null;
+		this._container.classList.toggle('right-panel-chat-scroll', isAuxiliaryBarChat);
+		this._container.classList.toggle('backboard-cursor-transcript', isBackboardAuxiliaryTranscript);
+	}
+
 	//#endregion
 
 	//#region Properties
@@ -262,7 +276,9 @@ export class ChatListWidget extends Disposable {
 		this._lastItemIdContextKey = ChatContextKeys.lastItemId.bindTo(this.contextKeyService);
 		this._container = container;
 		const isAuxiliaryBarChat = !!container.closest('.part.auxiliarybar');
-		this._container.classList.toggle('right-panel-chat-scroll', isAuxiliaryBarChat);
+		// Renderers can mount while WorkbenchObjectTree initializes, so expose the
+		// semantic host state before construction and restore it afterwards.
+		this.updateBackboardTranscriptHostClasses();
 
 		// Toggle link-style for inline reference widgets based on configuration (single listener for all widgets)
 		const updateInlineReferencesStyle = () => {
@@ -407,6 +423,12 @@ export class ChatListWidget extends Disposable {
 				}
 			}
 		));
+		// WorkbenchObjectTree initializes the host class list, so restore the
+		// transcript markers after the tree has mounted.
+		this.updateBackboardTranscriptHostClasses();
+		this._register(dom.scheduleAtNextAnimationFrame(dom.getWindow(this._container), () => {
+			this.updateBackboardTranscriptHostClasses();
+		}));
 
 		// Create scroll-down button
 		this._scrollDownButton = this._register(new Button(this._container, {
@@ -854,6 +876,7 @@ export class ChatListWidget extends Disposable {
 	 * Set the visibility of the list.
 	 */
 	setVisible(visible: boolean): void {
+		this.updateBackboardTranscriptHostClasses();
 		this._visible = visible;
 		this._renderer.setVisible(visible);
 	}
@@ -862,6 +885,7 @@ export class ChatListWidget extends Disposable {
 	 * Layout the list.
 	 */
 	layout(height: number, width: number): void {
+		this.updateBackboardTranscriptHostClasses();
 		this._bodyDimension = new dom.Dimension(width ?? this._container.clientWidth, height);
 		this.updateLastItemMinHeight();
 		this._tree.layout(height, width);

@@ -60,6 +60,7 @@ import { MenuId, MenuItemAction } from '../../../../../../platform/actions/commo
 import { IActionWidgetService } from '../../../../../../platform/actionWidget/browser/actionWidget.js';
 import { IActionWidgetDropdownAction, IActionWidgetDropdownActionProvider, IActionWidgetDropdownOptions } from '../../../../../../platform/actionWidget/browser/actionWidgetDropdown.js';
 import { IConfigurationService } from '../../../../../../platform/configuration/common/configuration.js';
+import { ICommandService } from '../../../../../../platform/commands/common/commands.js';
 import { ContextKeyExpr, IContextKey, IContextKeyService, RawContextKey } from '../../../../../../platform/contextkey/common/contextkey.js';
 import { IContextViewService } from '../../../../../../platform/contextview/browser/contextView.js';
 import { FileOperationResult, IFileService, toFileOperationResult } from '../../../../../../platform/files/common/files.js';
@@ -108,6 +109,7 @@ import { BackboardUsageMetricsAction, ChatSessionPrimaryPickerAction, ChatSubmit
 import { AgentSessionProviders, AgentSessionTarget, getAgentSessionProvider } from '../../agentSessions/agentSessions.js';
 import { IAgentSessionsService } from '../../agentSessions/agentSessionsService.js';
 import { ChatAttachmentModel } from '../../attachments/chatAttachmentModel.js';
+import { ChatDynamicVariableModel } from '../../attachments/chatDynamicVariables.js';
 import { IChatAttachmentWidgetRegistry } from '../../attachments/chatAttachmentWidgetRegistry.js';
 import { DefaultChatAttachmentWidget, ElementChatAttachmentWidget, FileAttachmentWidget, ImageAttachmentWidget, BrowserViewAttachmentWidget, NotebookCellOutputChatAttachmentWidget, PasteAttachmentWidget, PromptFileAttachmentWidget, PromptTextAttachmentWidget, SCMHistoryItemAttachmentWidget, SCMHistoryItemChangeAttachmentWidget, SCMHistoryItemChangeRangeAttachmentWidget, TerminalCommandAttachmentWidget, ToolSetOrToolItemAttachmentWidget } from '../../attachments/chatAttachmentWidgets.js';
 import { ChatImplicitContexts } from '../../attachments/chatImplicitContext.js';
@@ -115,6 +117,8 @@ import { ImplicitContextAttachmentWidget } from '../../attachments/implicitConte
 import { IChatWidget, IChatWidgetViewModelChangeEvent, ISessionTypePickerDelegate, isIChatResourceViewContext, isIChatViewViewContext, IWorkspacePickerDelegate } from '../../chat.js';
 import { ITerminalChatService } from '../../../../terminal/browser/terminal.js';
 import { ChatEditingShowChangesAction, ViewPreviousEditsAction } from '../../chatEditing/chatEditingActions.js';
+import { MultiDiffEditorInput } from '../../../../multiDiffEditor/browser/multiDiffEditorInput.js';
+import { MultiDiffEditorItem } from '../../../../multiDiffEditor/browser/multiDiffSourceResolverService.js';
 import { resizeImage } from '../../chatImageUtils.js';
 import { ChatSessionPickerActionItem, IChatSessionPickerDelegate } from '../../chatSessions/chatSessionPickerActionItem.js';
 import { AgentHostChatInputPicker, AgentHostChatInputPickerActionViewItem } from '../../agentSessions/agentHost/agentHostChatInputPicker.js';
@@ -275,7 +279,6 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	private readonly _chatToolConfirmationCarousels = this._register(new DisposableMap<string, ChatToolConfirmationCarouselPart>());
 	private readonly _chatEditingTodosDisposables = this._register(new DisposableStore());
 	private _lastEditingSessionResource: URI | undefined;
-	private _dismissedExternalEditsTurn: string | undefined;
 
 	private _onDidLoadInputState: Emitter<void> = this._register(new Emitter());
 	readonly onDidLoadInputState: Event<void> = this._onDidLoadInputState.event;
@@ -463,9 +466,13 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	private agentHostPermissionModeWidget: AgentHostChatInputPickerActionViewItem | undefined;
 	private agentHostFolderWidget: AgentHostFolderPickerActionItem | undefined;
 	private agentHostGenericConfigChips: AgentHostGenericConfigChips | undefined;
-	private readonly _onDidChangeBackboardOptions = this._register(new Emitter<void>());
-	/** Fires when the Backboard composer options or their active state change. */
-	readonly onDidChangeBackboardOptions: Event<void> = this._onDidChangeBackboardOptions.event;
+	private readonly _onDidChangeBackboardGenericConfigOptions = this._register(new Emitter<void>());
+	public readonly onDidChangeBackboardGenericConfigOptions = this._onDidChangeBackboardGenericConfigOptions.event;
+	private readonly backboardCapabilityTokenSyncScheduler = this._register(new RunOnceScheduler(() => this.syncBackboardCapabilityTokensFromOptions(), 0));
+	private readonly backboardCapabilityOptionSyncScheduler = this._register(new RunOnceScheduler(() => this.syncBackboardCapabilityOptionsFromEditor(), 0));
+	private readonly pendingBackboardCapabilityTokenRemovals = new Set<string>();
+	private isSyncingBackboardCapabilityTokens = false;
+	private isClearingInputAfterAccept = false;
 	private backboardOptionsAnchor: HTMLElement | undefined;
 	private readonly chatSessionPickerWidgets = this._register(new DisposableMap<string, ChatSessionPickerActionItem>());
 	private chatSessionPickerContainer: HTMLElement | undefined;
@@ -568,6 +575,8 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 
 	private readonly _chatEditsActionsDisposables: DisposableStore = this._register(new DisposableStore());
 	private readonly _chatEditsDisposables: DisposableStore = this._register(new DisposableStore());
+	private readonly _onDidChangeExternalEditState = this._register(new Emitter<void>());
+	private readonly _externalEditStates = new Map<string, 'accepted' | 'undone'>();
 	private readonly _renderingChatEdits = this._register(new MutableDisposable());
 	private readonly _renderingBackgroundTerminals = this._register(new MutableDisposable<DisposableStore>());
 	private _backgroundTerminalsExpanded = false;
@@ -1214,6 +1223,10 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		return this.agentHostGenericConfigChips?.getOptions() ?? [];
 	}
 
+	public getBackboardReasoningOption(): IAgentHostGenericConfigOption | undefined {
+		return this.getBackboardGenericConfigOptions().find(option => option.id === 'intensity' || option.id === 'reasoning' || option.id === 'reasoningIntensity');
+	}
+
 	/** Whether the Backboard session-config schema has finished resolving. */
 	public hasBackboardConfigResolved(): boolean {
 		return this.agentHostGenericConfigChips?.hasResolvedSchema() ?? false;
@@ -1221,6 +1234,187 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 
 	public getBackboardOptionsAnchor(): HTMLElement | undefined {
 		return this.backboardOptionsAnchor;
+	}
+
+	private renderBackboardActiveOptions(): void {
+		this.backboardCapabilityTokenSyncScheduler.schedule();
+	}
+
+	private getBackboardCapabilityVariables() {
+		const dynamicVariableModel = this._widget?.getContrib<ChatDynamicVariableModel>(ChatDynamicVariableModel.ID);
+		return dynamicVariableModel?.variables.filter(variable => getBackboardCapabilityOptionId(variable.id) !== undefined) ?? [];
+	}
+
+	/**
+	 * Reflect the backend capability state in the actual Monaco text model. The
+	 * text is registered as a dynamic variable, so it is parsed and rendered as
+	 * part of the prompt instead of living in a sibling DOM lane beside it.
+	 */
+	private syncBackboardCapabilityTokensFromOptions(): void {
+		if (this.isSyncingBackboardCapabilityTokens || !this.hasBackboardConfigResolved()) {
+			return;
+		}
+
+		const dynamicVariableModel = this._widget?.getContrib<ChatDynamicVariableModel>(ChatDynamicVariableModel.ID);
+		const editorModel = this._inputEditor?.getModel();
+		if (!dynamicVariableModel || !editorModel) {
+			return;
+		}
+
+		const options = this.getBackboardGenericConfigOptions();
+		const optionsById = new Map(options.map(option => [option.id, option]));
+		const selectedOptions = options.filter(option => option.composerSelected);
+		const selectedOptionIds = new Set(selectedOptions.map(option => option.id));
+		const capabilityVariables = this.getBackboardCapabilityVariables();
+
+		this.isSyncingBackboardCapabilityTokens = true;
+		try {
+			// A capability switched off in the settings menu must disappear from
+			// the prompt as well. Work from the end so earlier ranges stay stable.
+			const staleVariables = capabilityVariables
+				.filter(variable => {
+					const optionId = getBackboardCapabilityOptionId(variable.id);
+					return optionId !== undefined && (!optionsById.has(optionId) || !selectedOptionIds.has(optionId));
+				})
+				.sort((a, b) => editorModel.getOffsetAt(Range.getStartPosition(b.range)) - editorModel.getOffsetAt(Range.getStartPosition(a.range)));
+			for (const variable of staleVariables) {
+				this.removeBackboardCapabilityToken(variable.range);
+			}
+
+			const existingOptionIds = new Set(
+				this.getBackboardCapabilityVariables()
+					.map(variable => getBackboardCapabilityOptionId(variable.id))
+					.filter(isDefined)
+			);
+			for (const option of selectedOptions) {
+				if (!existingOptionIds.has(option.id)) {
+					this.insertBackboardCapabilityToken(dynamicVariableModel, option);
+					existingOptionIds.add(option.id);
+				}
+			}
+		} finally {
+			this.isSyncingBackboardCapabilityTokens = false;
+		}
+	}
+
+	private insertBackboardCapabilityToken(dynamicVariableModel: ChatDynamicVariableModel, option: IAgentHostGenericConfigOption): void {
+		const model = this._inputEditor.getModel();
+		if (!model) {
+			return;
+		}
+
+		let position = this._inputEditor.getPosition() ?? getLastPosition(model);
+		const containingVariable = this.getBackboardCapabilityVariables().find(variable => Range.containsPosition(variable.range, position));
+		if (containingVariable) {
+			position = Range.getEndPosition(containingVariable.range);
+		}
+
+		const value = model.getValue();
+		const insertionOffset = model.getOffsetAt(position);
+		const leadingSpace = insertionOffset > 0 && !/\s/.test(value.charAt(insertionOffset - 1)) ? ' ' : '';
+		const trailingSpace = insertionOffset >= value.length || !/\s/.test(value.charAt(insertionOffset)) ? ' ' : '';
+		const tokenText = getBackboardActiveOptionLabel(option);
+		const insertedText = `${leadingSpace}${tokenText}${trailingSpace}`;
+		if (!this._inputEditor.executeEdits(BACKBOARD_CAPABILITY_EDIT_SOURCE, [{
+			range: Range.fromPositions(position),
+			text: insertedText,
+		}])) {
+			return;
+		}
+
+		const tokenStartOffset = insertionOffset + leadingSpace.length;
+		const tokenEndOffset = tokenStartOffset + tokenText.length;
+		const tokenStart = model.getPositionAt(tokenStartOffset);
+		const tokenEnd = model.getPositionAt(tokenEndOffset);
+		dynamicVariableModel.addReference({
+			id: getBackboardCapabilityVariableId(option.id),
+			range: Range.fromPositions(tokenStart, tokenEnd),
+			fullName: tokenText,
+			icon: getBackboardGenericOptionIcon(option.id),
+			modelDescription: option.description ?? localize('backboardCapability.enabled', "{0} is enabled for this chat turn.", tokenText),
+			data: option.valueLabel ?? option.activationValue ?? tokenText,
+			_meta: {
+				backboardCapability: true,
+				backboardCapabilityId: option.id,
+				backboardCapabilityValue: option.valueLabel,
+			},
+		});
+
+		this._inputEditor.setPosition(model.getPositionAt(insertionOffset + insertedText.length));
+	}
+
+	private removeBackboardCapabilityToken(range: IRange): void {
+		const model = this._inputEditor.getModel();
+		if (!model) {
+			return;
+		}
+
+		const value = model.getValue();
+		let startOffset = model.getOffsetAt(Range.getStartPosition(range));
+		let endOffset = model.getOffsetAt(Range.getEndPosition(range));
+		// Remove one separator with the token so deleting it never leaves the
+		// user's sentence indented or with a doubled internal space.
+		if (endOffset < value.length && /\s/.test(value.charAt(endOffset))) {
+			endOffset++;
+		} else if (startOffset > 0 && /\s/.test(value.charAt(startOffset - 1))) {
+			startOffset--;
+		}
+
+		this._inputEditor.executeEdits(BACKBOARD_CAPABILITY_EDIT_SOURCE, [{
+			range: Range.fromPositions(model.getPositionAt(startOffset), model.getPositionAt(endOffset)),
+			text: '',
+		}]);
+	}
+
+	private markEditedBackboardCapabilityTokens(changes: readonly { range: IRange }[]): void {
+		if (this.isSyncingBackboardCapabilityTokens || this.isClearingInputAfterAccept) {
+			return;
+		}
+
+		for (const variable of this.getBackboardCapabilityVariables()) {
+			const optionId = getBackboardCapabilityOptionId(variable.id);
+			if (!optionId) {
+				continue;
+			}
+			const tokenRange = Range.lift(variable.range);
+			const wasEdited = changes.some(change => {
+				const changeRange = Range.lift(change.range);
+				if (!changeRange.isEmpty()) {
+					return Range.areIntersecting(tokenRange, changeRange);
+				}
+				const position = changeRange.getStartPosition();
+				return position.lineNumber === tokenRange.startLineNumber
+					&& position.column > tokenRange.startColumn
+					&& position.column < tokenRange.endColumn;
+			});
+			if (wasEdited) {
+				this.pendingBackboardCapabilityTokenRemovals.add(optionId);
+			}
+		}
+
+		if (this.pendingBackboardCapabilityTokenRemovals.size > 0) {
+			this.backboardCapabilityOptionSyncScheduler.schedule();
+		}
+	}
+
+	private syncBackboardCapabilityOptionsFromEditor(): void {
+		if (this.isSyncingBackboardCapabilityTokens || this.isClearingInputAfterAccept || this.pendingBackboardCapabilityTokenRemovals.size === 0) {
+			return;
+		}
+
+		const editedOptionIds = new Set(this.pendingBackboardCapabilityTokenRemovals);
+		this.pendingBackboardCapabilityTokenRemovals.clear();
+		const existingOptionIds = new Set(
+			this.getBackboardCapabilityVariables()
+				.map(variable => getBackboardCapabilityOptionId(variable.id))
+				.filter(isDefined)
+		);
+
+		for (const option of this.getBackboardGenericConfigOptions()) {
+			if (editedOptionIds.has(option.id) && !existingOptionIds.has(option.id) && option.composerSelected && option.deactivationValue !== undefined) {
+				option.setValue(option.deactivationValue);
+			}
+		}
 	}
 
 	public getBackboardUsageMetrics(): IBackboardUsageMetrics {
@@ -2372,17 +2566,26 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			this._emptyInputState.set(undefined, undefined);
 		}
 
-		// Clear attached context, fire event to clear input state, and clear the input editor
-		logChangesToStateModel(this._inputModel, `[ACCEPT] acceptInput -> attachmentModel.clear() in ${this._currentSessionKey}`, undefined, this._inputModel?.state.get(), this.logService);
-		this.attachmentModel.clear();
-		this._onDidLoadInputState.fire();
-		if (this.accessibilityService.isScreenReaderOptimized() && isMacintosh) {
-			this._acceptInputForVoiceover();
-		} else if (preserveFocus) {
-			this._inputEditor.setValue('');
-		} else {
-			this._inputEditor.focus();
-			this._inputEditor.setValue('');
+		// Clear attached context, fire event to clear input state, and clear the input editor.
+		// Capability tokens are session-backed, so a successful send clears their
+		// per-turn references and immediately materializes fresh tokens in the next
+		// draft instead of interpreting the submit reset as the user disabling them.
+		this.isClearingInputAfterAccept = true;
+		try {
+			logChangesToStateModel(this._inputModel, `[ACCEPT] acceptInput -> attachmentModel.clear() in ${this._currentSessionKey}`, undefined, this._inputModel?.state.get(), this.logService);
+			this.attachmentModel.clear();
+			this._onDidLoadInputState.fire();
+			if (this.accessibilityService.isScreenReaderOptimized() && isMacintosh) {
+				this._acceptInputForVoiceover();
+			} else if (preserveFocus) {
+				this._inputEditor.setValue('');
+			} else {
+				this._inputEditor.focus();
+				this._inputEditor.setValue('');
+			}
+		} finally {
+			this.isClearingInputAfterAccept = false;
+			this.renderBackboardActiveOptions();
 		}
 	}
 
@@ -3196,8 +3399,24 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 				}
 			}
 		}));
+		this._register(this._inputEditor.onMouseDown(e => {
+			const targetPosition = e.target.position;
+			if (!e.event.leftButton || !targetPosition) {
+				return;
+			}
+			const variable = this.getBackboardCapabilityVariables().find(candidate => Range.containsPosition(candidate.range, targetPosition));
+			const optionId = variable ? getBackboardCapabilityOptionId(variable.id) : undefined;
+			const option = optionId ? this.getBackboardGenericConfigOptions().find(candidate => candidate.id === optionId) : undefined;
+			if (!option) {
+				return;
+			}
+			e.event.preventDefault();
+			e.event.stopPropagation();
+			option.show(this._inputEditorElement);
+		}));
 
-		this._register(this._inputEditor.onDidChangeModelContent(() => {
+		this._register(this._inputEditor.onDidChangeModelContent(e => {
+			this.markEditedBackboardCapabilityTokens(e.changes);
 			const currentHeight = Math.min(this._inputEditor.getContentHeight(), this._effectiveInputEditorMaxHeight);
 			if (currentHeight !== this.inputEditorHeight) {
 				this.inputEditorHeight = currentHeight;
@@ -3285,7 +3504,9 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 					return new HiddenActionViewItem(action);
 				}
 
-				if (action.id === OpenModelPickerAction.ID && action instanceof MenuItemAction) {
+				if (action.id === 'workbench.action.chat.attachContext' && action instanceof MenuItemAction) {
+					return this.instantiationService.createInstance(BackboardComposerOptionsActionViewItem, action, this, pickerOptions, 'add');
+				} else if (action.id === OpenModelPickerAction.ID && action instanceof MenuItemAction) {
 					if (!this._currentLanguageModel.get()) {
 						logChangesToStateModel(this._inputModel, `actionViewItemProvider[desktop]: _currentLanguageModel is undefined at toolbar build, forcing default for ${this._currentSessionKey}`, undefined, undefined, this.logService);
 						this.setCurrentLanguageModelToDefault();
@@ -3295,13 +3516,41 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 					// In the Sessions window, fold the provider (session type) and
 					// model pickers into one combined chip with a provider rail.
 					if (this.options.isSessionsWindow && this.options.sessionTypePickerDelegate?.setActiveSessionProvider) {
-						return this.instantiationService.createInstance(CombinedModelProviderPickerActionItem, action, itemDelegate, this.options.sessionTypePickerDelegate, pickerOptions);
+						return this.instantiationService.createInstance(
+							CombinedModelProviderPickerActionItem,
+							action,
+							itemDelegate,
+							this.options.sessionTypePickerDelegate,
+							pickerOptions,
+							() => {
+								const option = this.getBackboardReasoningOption();
+								const info = option?.getEnumInfo();
+								if (!option || !info?.values.length) {
+									return undefined;
+								}
+								const compactCurrentLabel = option.valueLabel
+									?.replace(/\s*\([^)]*\)\s*$/, '')
+									.replace(/^Provider Default$/, localize('backboardReasoning.defaultShort', "Default"))
+									?? '';
+								return {
+									label: option.label,
+									currentLabel: compactCurrentLabel,
+									currentValue: info.current,
+									values: info.values,
+									labels: info.labels.map(label => label
+										.replace(/\s*\([^)]*\)\s*$/, '')
+										.replace(/^Provider Default$/, localize('backboardReasoning.defaultShort', "Default"))),
+									setValue: value => option.setValue(String(value)),
+								};
+							},
+							this.onDidChangeBackboardGenericConfigOptions,
+						);
 					}
 					return this.modelWidget = this.instantiationService.createInstance(ModelPickerActionItem, action, itemDelegate, pickerOptions);
 				} else if (action.id === OpenChatThinkingPickerAction.ID && action instanceof MenuItemAction) {
 					return this.instantiationService.createInstance(ChatThinkingPickerActionItem, action, this._createModelPickerDelegate());
 				} else if (action.id === OpenBackboardComposerOptionsAction.ID && action instanceof MenuItemAction) {
-					return this.instantiationService.createInstance(BackboardComposerOptionsActionViewItem, action, this, pickerOptions);
+					return this.instantiationService.createInstance(BackboardComposerOptionsActionViewItem, action, this, pickerOptions, 'options');
 				} else if (action.id === ConfigureToolsAction.ID) {
 					return new HiddenActionViewItem(action);
 				} else if (action.id === OpenModePickerAction.ID && action instanceof MenuItemAction) {
@@ -3365,7 +3614,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 					}
 					return new HiddenRenderedActionViewItem(action, item);
 				} else if (action.id === OpenAgentHostClaudeOptionsAction.ID && action instanceof MenuItemAction) {
-					return this.instantiationService.createInstance(AgentHostClaudeOptionsActionViewItem, action, widget, this._createModelPickerDelegate(), pickerOptions);
+					return this.instantiationService.createInstance(AgentHostClaudeOptionsActionViewItem, action, widget, pickerOptions);
 				} else if (action.id === OpenAgentHostFolderPickerAction.ID && action instanceof MenuItemAction) {
 					if (this.options.isSessionsWindow) {
 						return new HiddenActionViewItem(action);
@@ -3447,10 +3696,15 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			widget,
 		));
 		this.agentHostGenericConfigChips = genericChipsLane;
-		this._register(genericChipsLane.onDidChangeOptions(() => this._onDidChangeBackboardOptions.fire()));
+		this._register(genericChipsLane.onDidChangeOptions(() => {
+			this.renderBackboardActiveOptions();
+			this._onDidChangeBackboardGenericConfigOptions.fire();
+		}));
 		genericChipsLane.render(genericChipsContainer);
+		this._onDidChangeBackboardGenericConfigOptions.fire();
 		genericChipsContainer.style.display = 'none';
 		dom.append(toolbarsContainer, genericChipsContainer);
+		this.renderBackboardActiveOptions();
 
 		// Secondary toolbar (permissions) — below the input box.
 		// Most Backboard agent-host config pickers now render in the primary
@@ -3732,7 +3986,11 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			this.handleAttachmentNavigation(e);
 		}));
 
-		const attachments = [...this.attachmentModel.attachments.entries()];
+		const allAttachments = [...this.attachmentModel.attachments.entries()];
+		// Prompt-referenced entries already render as inline Monaco tokens. Showing
+		// them again in the attachment lane is the exact "setting on the side"
+		// duplication this composer is designed to avoid.
+		const attachments = [...this.attachmentModel.attachments.filter(attachment => !attachment.range).entries()];
 		const hasAttachments = Boolean(attachments.length);
 
 		// Render implicit context (active editor in Ask mode, or selection)
@@ -3780,7 +4038,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 
 		// Mark images that exceed the model-specific per-request limit so they render with a warning
 		const maxImagesPerRequest = getImageAttachmentLimit(this._currentLanguageModel.get()?.metadata);
-		const imageAttachments = attachments.filter(([, a]) => isImageVariableEntry(a));
+		const imageAttachments = allAttachments.filter(([, a]) => isImageVariableEntry(a));
 		if (maxImagesPerRequest !== undefined && imageAttachments.length > maxImagesPerRequest) {
 			const excessCount = imageAttachments.length - maxImagesPerRequest;
 			for (let i = 0; i < excessCount; i++) {
@@ -3806,7 +4064,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		for (const [index, attachment] of attachments) {
 			const resource = URI.isUri(attachment.value) ? attachment.value : isLocation(attachment.value) ? attachment.value.uri : undefined;
 			const range = isLocation(attachment.value) ? attachment.value.range : undefined;
-			const shouldFocusClearButton = index === Math.min(this._indexOfLastAttachedContextDeletedWithKeyboard, this.attachmentModel.size - 1) && this._indexOfLastAttachedContextDeletedWithKeyboard > -1;
+			const shouldFocusClearButton = index === Math.min(this._indexOfLastAttachedContextDeletedWithKeyboard, attachments.length - 1) && this._indexOfLastAttachedContextDeletedWithKeyboard > -1;
 
 			let attachmentWidget;
 			const options = { shouldFocusClearButton, supportsDeletion: true };
@@ -3846,7 +4104,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 				attachmentWidget.element.focus();
 			}
 
-			if (index === Math.min(this._indexOfLastOpenedContext, this.attachmentModel.size - 1)) {
+			if (index === Math.min(this._indexOfLastOpenedContext, attachments.length - 1)) {
 				attachmentWidget.element.focus();
 			}
 
@@ -4319,13 +4577,14 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		const currentModel = this._widget?.viewModel?.model;
 		const externalEdits = observableFromEvent(
 			this,
-			currentModel?.onDidChange ?? Event.None,
+			Event.any(currentModel?.onDidChange ?? Event.None, this._onDidChangeExternalEditState.event),
 			() => {
 				const turnId = currentModel?.getRequests().at(-1)?.id;
 				if (!currentModel || !turnId || this.isExternalEditSummaryDismissed(turnId)) {
 					return [] as readonly IChatExternalEdit[];
 				}
-				return getLatestTurnEditedFiles(currentModel) ?? [];
+				return (getLatestTurnEditedFiles(currentModel) ?? [])
+					.filter(edit => this.getExternalEditState(edit) !== 'accepted');
 			},
 		);
 
@@ -4393,8 +4652,9 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 					continue;
 				}
 				seenEntries.add(edit.uri);
+				const isUndone = this.getExternalEditState(edit) === 'undone';
 				entries.push({
-					reference: edit.afterContentUri ?? edit.uri,
+					reference: edit.uri,
 					state: ModifiedFileEntryState.Modified,
 					kind: 'reference',
 					options: {
@@ -4402,7 +4662,26 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 						diffMeta: { added: edit.diff?.added ?? 0, removed: edit.diff?.removed ?? 0 },
 						isDeletion: edit.editKind === 'delete',
 						originalUri: edit.beforeContentUri ?? edit.originalUri,
-					}
+					},
+					actions: [{
+						id: 'accept',
+						label: localize('chatEditingSession.acceptExternalEdit', "Accept changes"),
+						icon: Codicon.check,
+						run: () => this.acceptExternalEdit(edit),
+					}, {
+						id: isUndone ? 'redo' : 'undo',
+						label: isUndone
+							? localize('chatEditingSession.redoExternalEdit', "Redo changes")
+							: localize('chatEditingSession.undoExternalEdit', "Undo changes"),
+						icon: isUndone ? Codicon.redo : Codicon.discard,
+						disabled: isUndone && !edit.afterContentUri && edit.editKind !== 'delete',
+						run: () => this.toggleExternalEdit(edit),
+					}, {
+						id: 'diff',
+						label: localize('chatEditingSession.reviewExternalEdit', "Review changes"),
+						icon: Codicon.diffSingle,
+						run: () => this.reviewExternalEdits([edit]),
+					}],
 				});
 			}
 
@@ -4411,7 +4690,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 
 		const sessionFileChanges = observableFromEvent(
 			this,
-			this.agentSessionsService.model.onDidChangeSessions,
+			this.agentSessionsService.cachedModel.onDidChangeSessions,
 			() => {
 				const sessionResource = this._widget?.viewModel?.model?.sessionResource;
 				// Only Background sessions lack live turn-tracked edits, so only
@@ -4570,11 +4849,13 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 					button.classList.toggle('primary', primary);
 					reader.store.add(addDisposableListener(button, 'click', () => void run()));
 				};
-				createAction(localize('chatEditingSession.undoAll', "Undo All"), async () => {
-					await this.undoExternalEdits(externalEditItems);
-					this.dismissExternalEditSummary();
-				});
-				createAction(localize('chatEditingSession.keepAll', "Keep All"), () => this.dismissExternalEditSummary());
+				const appliedEdits = externalEditItems.filter(edit => this.getExternalEditState(edit) !== 'undone');
+				const undoneEdits = externalEditItems.filter(edit => this.getExternalEditState(edit) === 'undone');
+				if (appliedEdits.length > 0) {
+					createAction(localize('chatEditingSession.undo', "Undo"), () => this.undoExternalEdits(appliedEdits));
+				} else if (undoneEdits.length > 0) {
+					createAction(localize('chatEditingSession.redo', "Redo"), () => this.redoExternalEdits(undoneEdits));
+				}
 				createAction(localize('chatEditingSession.review', "Review"), () => this.reviewExternalEdits(externalEditItems), true);
 				return;
 			}
@@ -4620,8 +4901,8 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 
 			const buttonLabel = isAuxiliaryBar
 				? files === 1
-					? localize('chatEditingSession.oneFile.compact', "1 File")
-					: localize('chatEditingSession.manyFiles.compact', "{0} Files", files)
+					? localize('chatEditingSession.oneFile.edited', "Edited 1 file")
+					: localize('chatEditingSession.manyFiles.edited', "Edited {0} files", files)
 				: files === 1
 					? localize('chatEditingSession.oneFile', '1 file changed')
 					: localize('chatEditingSession.manyFiles', '{0} files changed', files);
@@ -4732,20 +5013,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		}));
 	}
 
-	private dismissExternalEditSummary(): void {
-		const model = this._widget?.viewModel?.model;
-		const turnId = model?.getRequests().at(-1)?.id;
-		this._dismissedExternalEditsTurn = turnId;
-		if (model && turnId) {
-			this.storageService.store(this.externalEditDismissalStorageKey(model.sessionResource), turnId, StorageScope.WORKSPACE, StorageTarget.MACHINE);
-		}
-		dom.setVisibility(false, this.chatEditingSessionWidgetContainer);
-	}
-
 	private isExternalEditSummaryDismissed(turnId: string): boolean {
-		if (turnId === this._dismissedExternalEditsTurn) {
-			return true;
-		}
 		const sessionResource = this._widget?.viewModel?.model.sessionResource;
 		return !!sessionResource && this.storageService.get(this.externalEditDismissalStorageKey(sessionResource), StorageScope.WORKSPACE) === turnId;
 	}
@@ -4755,38 +5023,134 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	}
 
 	private async reviewExternalEdits(edits: readonly IChatExternalEdit[]): Promise<void> {
-		const edit = edits[0];
-		if (!edit) {
+		const resources = edits
+			.filter(edit => edit.beforeContentUri || edit.afterContentUri)
+			.map(edit => new MultiDiffEditorItem(edit.beforeContentUri, edit.afterContentUri, edit.uri));
+		if (resources.length === 0) {
 			return;
 		}
-		if (edit.beforeContentUri && edit.afterContentUri) {
-			await this.editorService.openEditor({
-				original: { resource: edit.beforeContentUri },
-				modified: { resource: edit.afterContentUri },
-			});
+
+		const source = URI.parse(`multi-diff-editor:external-edits-${Date.now()}-${Math.random()}`);
+		const input = this.instantiationService.createInstance(
+			MultiDiffEditorInput,
+			source,
+			localize('chatEditingSession.externalEditsReview', "Agent changes"),
+			resources,
+			false,
+		);
+		await this.editorService.openEditor(input);
+	}
+
+	private getExternalEditStateKey(edit: IChatExternalEdit): string {
+		return [
+			edit.undoStopId ?? '',
+			edit.editKind,
+			edit.originalUri?.toString() ?? '',
+			edit.uri.toString(),
+			edit.beforeContentUri?.toString() ?? '',
+			edit.afterContentUri?.toString() ?? '',
+		].join('\0');
+	}
+
+	private getExternalEditState(edit: IChatExternalEdit): 'accepted' | 'undone' | undefined {
+		return this._externalEditStates.get(this.getExternalEditStateKey(edit));
+	}
+
+	private async acceptExternalEdit(edit: IChatExternalEdit): Promise<void> {
+		if (this.getExternalEditState(edit) === 'undone' && !await this.redoExternalEdit(edit)) {
 			return;
 		}
-		await this.editorService.openEditor({ resource: edit.afterContentUri ?? edit.uri });
+		this._externalEditStates.set(this.getExternalEditStateKey(edit), 'accepted');
+		this._onDidChangeExternalEditState.fire();
+	}
+
+	private async toggleExternalEdit(edit: IChatExternalEdit): Promise<void> {
+		const key = this.getExternalEditStateKey(edit);
+		if (this._externalEditStates.get(key) === 'undone') {
+			if (await this.redoExternalEdit(edit)) {
+				this._externalEditStates.delete(key);
+				this._onDidChangeExternalEditState.fire();
+			}
+			return;
+		}
+
+		if (await this.undoExternalEdit(edit)) {
+			this._externalEditStates.set(key, 'undone');
+			this._onDidChangeExternalEditState.fire();
+		}
 	}
 
 	private async undoExternalEdits(edits: readonly IChatExternalEdit[]): Promise<void> {
+		let changed = false;
 		for (const edit of [...edits].reverse()) {
-			if (edit.editKind === 'create') {
-				if (await this.fileService.exists(edit.uri)) {
-					await this.fileService.del(edit.uri);
-				}
+			if (this.getExternalEditState(edit) === 'undone') {
 				continue;
 			}
-			if (!edit.beforeContentUri) {
-				continue;
-			}
-			const before = await this.fileService.readFile(edit.beforeContentUri);
-			const restoreUri = edit.originalUri ?? edit.uri;
-			await this.fileService.writeFile(restoreUri, before.value);
-			if (edit.editKind === 'rename' && !isEqual(restoreUri, edit.uri) && await this.fileService.exists(edit.uri)) {
-				await this.fileService.del(edit.uri);
+			if (await this.undoExternalEdit(edit)) {
+				this._externalEditStates.set(this.getExternalEditStateKey(edit), 'undone');
+				changed = true;
 			}
 		}
+		if (changed) {
+			this._onDidChangeExternalEditState.fire();
+		}
+	}
+
+	private async redoExternalEdits(edits: readonly IChatExternalEdit[]): Promise<void> {
+		let changed = false;
+		for (const edit of edits) {
+			const key = this.getExternalEditStateKey(edit);
+			if (this._externalEditStates.get(key) !== 'undone') {
+				continue;
+			}
+			if (await this.redoExternalEdit(edit)) {
+				this._externalEditStates.delete(key);
+				changed = true;
+			}
+		}
+		if (changed) {
+			this._onDidChangeExternalEditState.fire();
+		}
+	}
+
+	private async undoExternalEdit(edit: IChatExternalEdit): Promise<boolean> {
+		if (edit.editKind === 'create') {
+			if (await this.fileService.exists(edit.uri)) {
+				await this.fileService.del(edit.uri);
+			}
+			return true;
+		}
+		if (!edit.beforeContentUri) {
+			return false;
+		}
+
+		const before = await this.fileService.readFile(edit.beforeContentUri);
+		const restoreUri = edit.originalUri ?? edit.uri;
+		await this.fileService.writeFile(restoreUri, before.value);
+		if (edit.editKind === 'rename' && !isEqual(restoreUri, edit.uri) && await this.fileService.exists(edit.uri)) {
+			await this.fileService.del(edit.uri);
+		}
+		return true;
+	}
+
+	private async redoExternalEdit(edit: IChatExternalEdit): Promise<boolean> {
+		if (edit.editKind === 'delete') {
+			const deletedUri = edit.originalUri ?? edit.uri;
+			if (await this.fileService.exists(deletedUri)) {
+				await this.fileService.del(deletedUri);
+			}
+			return true;
+		}
+		if (!edit.afterContentUri) {
+			return false;
+		}
+
+		const after = await this.fileService.readFile(edit.afterContentUri);
+		await this.fileService.writeFile(edit.uri, after.value);
+		if (edit.editKind === 'rename' && edit.originalUri && !isEqual(edit.originalUri, edit.uri) && await this.fileService.exists(edit.originalUri)) {
+			await this.fileService.del(edit.originalUri);
+		}
+		return true;
 	}
 
 	async renderFollowups(items: IChatFollowup[] | undefined, response: IChatResponseViewModel | undefined): Promise<void> {
@@ -4920,7 +5284,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			// with the toolbars and the container width follows the editor.
 			const editorContainerWidth = dom.getContentWidth(this.editorContainer);
 			if (editorContainerWidth > 0) {
-				newEditorWidth = Math.min(newEditorWidth, editorContainerWidth);
+				newEditorWidth = Math.min(newEditorWidth, Math.max(1, editorContainerWidth));
 			}
 		}
 		const effectiveMaxHeight = this._effectiveInputEditorMaxHeight;
@@ -5116,17 +5480,83 @@ class HiddenRenderedActionViewItem extends BaseActionViewItem {
 	}
 }
 
+const BACKBOARD_CAPABILITY_VARIABLE_PREFIX = 'backboard-capability:';
+const BACKBOARD_CAPABILITY_EDIT_SOURCE = 'backboardCapabilityToken';
+
+function getBackboardCapabilityVariableId(optionId: string): string {
+	return `${BACKBOARD_CAPABILITY_VARIABLE_PREFIX}${optionId}`;
+}
+
+function getBackboardCapabilityOptionId(variableId: string): string | undefined {
+	return variableId.startsWith(BACKBOARD_CAPABILITY_VARIABLE_PREFIX)
+		? variableId.slice(BACKBOARD_CAPABILITY_VARIABLE_PREFIX.length)
+		: undefined;
+}
+
+function getBackboardGenericOptionIcon(property: string): ThemeIcon {
+	switch (property) {
+		case 'mode':
+			return ThemeIcon.fromId('backboard-capability-approvals');
+		case 'intensity':
+		case 'reasoning':
+		case 'reasoningIntensity':
+			return ThemeIcon.fromId('backboard-capability-reasoning');
+		case 'webSearch':
+		case 'web':
+			return ThemeIcon.fromId('backboard-capability-web-search');
+		case 'memory':
+		case 'memoryMode':
+			return ThemeIcon.fromId('backboard-capability-memory');
+		case 'computerUse':
+		case 'cua':
+			return ThemeIcon.fromId('backboard-capability-computer');
+		case 'browserUse':
+		case 'browser':
+			return ThemeIcon.fromId('backboard-capability-browser');
+		case 'notifications':
+		case 'notify':
+			return ThemeIcon.fromId('backboard-capability-notifications');
+		case 'imageGeneration':
+		case 'images':
+			return ThemeIcon.fromId('backboard-capability-image-generation');
+		default:
+			return Codicon.layersActive;
+	}
+}
+
+function getBackboardActiveOptionLabel(option: IAgentHostGenericConfigOption): string {
+	switch (option.id) {
+		case 'computerUse':
+		case 'cua':
+			return localize('backboardActiveOption.computer', "Computer");
+		case 'browserUse':
+		case 'browser':
+			return localize('backboardActiveOption.browser', "Browser");
+		case 'webSearch':
+		case 'web':
+			return localize('backboardActiveOption.webSearch', "Web search");
+		case 'imageGeneration':
+		case 'images':
+			return localize('backboardActiveOption.images', "Images");
+		default:
+			return option.label;
+	}
+}
+
 class BackboardComposerOptionsActionViewItem extends ActionWidgetDropdownActionViewItem {
 	constructor(
-		action: MenuItemAction,
+		private readonly sourceAction: MenuItemAction,
 		private readonly inputPart: ChatInputPart,
-		pickerOptions: IChatInputPickerOptions,
+		private readonly pickerOptions: IChatInputPickerOptions,
+		private readonly menuKind: 'add' | 'options',
 		@IActionWidgetService actionWidgetService: IActionWidgetService,
 		@IKeybindingService keybindingService: IKeybindingService,
 		@IContextKeyService contextKeyService: IContextKeyService,
 		@ITelemetryService telemetryService: ITelemetryService,
 		@IContextViewService private readonly contextViewService: IContextViewService,
+		@ICommandService private readonly commandService: ICommandService,
 	) {
+		const isAddMenu = menuKind === 'add';
 		const actionProvider: IActionWidgetDropdownActionProvider = {
 			getActions: () => this.getActions(),
 		};
@@ -5134,17 +5564,38 @@ class BackboardComposerOptionsActionViewItem extends ActionWidgetDropdownActionV
 			actionProvider,
 			showItemKeybindings: false,
 			getAnchor: () => this.getAnchorElement(pickerOptions),
-			reporter: { id: 'BackboardComposerOptions', name: 'BackboardComposerOptions', includeOptions: false },
+			reporter: isAddMenu
+				? { id: 'BackboardComposerAdd', name: 'BackboardComposerAdd', includeOptions: false }
+				: { id: 'BackboardComposerOptions', name: 'BackboardComposerOptions', includeOptions: false },
 			// Give the menu a comfortable minimum width so short lists don't look
 			// cramped and the current value never gets clipped by the anchor.
-			listOptions: { minWidth: 240 },
+			listOptions: isAddMenu
+				? { minWidth: 360, maxWidth: 480, inlineDescription: true }
+				: { minWidth: 240 },
 		};
-		super(action, options, actionWidgetService, keybindingService, contextKeyService, telemetryService);
+		super(sourceAction, options, actionWidgetService, keybindingService, contextKeyService, telemetryService);
 	}
 
 	private getActions(): IActionWidgetDropdownAction[] {
 		const actions: IActionWidgetDropdownAction[] = [];
-		for (const option of this.inputPart.getBackboardGenericConfigOptions()) {
+		if (this.menuKind === 'add') {
+			actions.push({
+				id: 'backboardComposerAdd.filesAndFolders',
+				label: localize('backboardComposerAdd.filesAndFolders', "Files and folders"),
+				description: localize('backboardComposerAdd.filesAndFolders.description', "Attach files, folders, or editor context"),
+				class: undefined,
+				tooltip: localize('backboardComposerAdd.filesAndFolders.tooltip', "Choose files and folders to attach"),
+				icon: Codicon.attach,
+				category: { label: localize('backboardComposerAdd.category', "Add"), order: 0, showHeader: true },
+				enabled: true,
+				run: () => this.sourceAction.run(this.pickerOptions.actionContext),
+			});
+		}
+		const featuresCategory = this.menuKind === 'add'
+			? { label: localize('backboardComposerAdd.featuresCategory', "Features"), order: 1, showHeader: true }
+			: undefined;
+		const genericOptions = this.inputPart.getBackboardGenericConfigOptions();
+		for (const option of genericOptions) {
 			const combined = option.valueLabel
 				? localize('backboardComposerOptions.genericWithValue', "{0}: {1}", option.label, option.valueLabel)
 				: option.label;
@@ -5157,17 +5608,20 @@ class BackboardComposerOptionsActionViewItem extends ActionWidgetDropdownActionV
 				// dimmed segment so long values are never clipped by the title's
 				// ellipsis, and the menu reads like a settings list.
 				label: option.label,
-				description: option.valueLabel,
+				description: this.menuKind === 'add' ? (option.description ?? option.valueLabel) : option.valueLabel,
 				class: undefined,
 				tooltip: option.description ?? combined,
 				icon: this.getGenericOptionIcon(option.id),
+				category: featuresCategory,
 				enabled: true,
-				run: () => this.openNestedPicker(() => isReasoningSlider
-					? this.showReasoningSlider(option)
-					: option.show(this.inputPart.getBackboardOptionsAnchor())),
+				run: () => option.activationValue !== undefined
+					? option.setValue(option.activationValue)
+					: this.openNestedPicker(() => isReasoningSlider
+						? this.showReasoningSlider(option)
+						: option.show(this.inputPart.getBackboardOptionsAnchor())),
 			});
 		}
-		if (!actions.length) {
+		if (genericOptions.length === 0) {
 			// An empty option list means "still resolving" until the config
 			// schema has arrived — only then is it truly "no options".
 			const loading = !this.inputPart.hasBackboardConfigResolved();
@@ -5181,8 +5635,22 @@ class BackboardComposerOptionsActionViewItem extends ActionWidgetDropdownActionV
 					? localize('backboardComposerOptions.loadingTooltip', "Backboard options are still loading. Reopen this menu in a moment.")
 					: localize('backboardComposerOptions.emptyTooltip', "No configurable Backboard options are available for this session."),
 				icon: loading ? Codicon.loading : Codicon.info,
+				category: featuresCategory,
 				enabled: false,
 				run: () => undefined,
+			});
+		}
+		if (this.menuKind === 'add') {
+			actions.push({
+				id: 'backboardComposerAdd.settings',
+				label: localize('backboardComposerAdd.settings', "Settings"),
+				description: localize('backboardComposerAdd.settings.description', "Configure Backboard and chat preferences"),
+				class: undefined,
+				tooltip: localize('backboardComposerAdd.settings.tooltip', "Open Settings"),
+				icon: Codicon.settingsGear,
+				category: { label: localize('backboardComposerAdd.settingsCategory', "Settings"), order: 2, showHeader: true },
+				enabled: true,
+				run: () => this.commandService.executeCommand('workbench.action.openSettings'),
 			});
 		}
 		return actions;
@@ -5263,34 +5731,7 @@ class BackboardComposerOptionsActionViewItem extends ActionWidgetDropdownActionV
 	}
 
 	private getGenericOptionIcon(property: string): ThemeIcon {
-		switch (property) {
-			case 'mode':
-				return Codicon.shield;
-			case 'intensity':
-			case 'reasoning':
-			case 'reasoningIntensity':
-				return Codicon.flame;
-			case 'webSearch':
-			case 'web':
-				return Codicon.globe;
-			case 'memory':
-			case 'memoryMode':
-				return Codicon.database;
-			case 'computerUse':
-			case 'cua':
-				return Codicon.deviceDesktop;
-			case 'browserUse':
-			case 'browser':
-				return Codicon.window;
-			case 'notifications':
-			case 'notify':
-				return Codicon.bell;
-			case 'imageGeneration':
-			case 'images':
-				return Codicon.symbolColor;
-			default:
-				return Codicon.layersActive;
-		}
+		return getBackboardGenericOptionIcon(property);
 	}
 
 	private getAnchorElement(pickerOptions: IChatInputPickerOptions): HTMLElement {
@@ -5300,60 +5741,44 @@ class BackboardComposerOptionsActionViewItem extends ActionWidgetDropdownActionV
 		return pickerOptions.getOverflowAnchor?.() ?? this.element!;
 	}
 
-	private _activeIconsContainer: HTMLElement | undefined;
-
 	protected override renderLabel(element: HTMLElement): IDisposable | null {
+		if (this.menuKind === 'add') {
+			const result = super.renderLabel(element);
+			for (const className of Array.from(element.classList)) {
+				if (className.startsWith('codicon-')) {
+					element.classList.remove(className);
+				}
+			}
+			element.classList.add('codicon', 'codicon-add');
+			return result;
+		}
+
 		this.inputPart.setBackboardOptionsAnchor(element);
 		element.classList.add('codicon', 'codicon-settings-gear');
-		const result = super.renderLabel(element);
-		// When a feature is switched on (non-default), show its icon in the
-		// composer accent (blue) next to the gear, so an active configuration is
-		// visible without opening the menu.
-		this._activeIconsContainer = dom.append(element, dom.$('.backboard-options-active-icons'));
-		this._register(this.inputPart.onDidChangeBackboardOptions(() => this.updateActiveIcons()));
-		this.updateActiveIcons();
-		return result;
-	}
-
-	private updateActiveIcons(): void {
-		if (!this.element || !this._activeIconsContainer) {
-			return;
-		}
-		const active = this.inputPart.getBackboardGenericConfigOptions().filter(option => option.active);
-		dom.clearNode(this._activeIconsContainer);
-		this.element.classList.toggle('has-active-options', active.length > 0);
-		for (const option of active) {
-			const iconEl = dom.append(this._activeIconsContainer, dom.$('span.backboard-options-active-icon'));
-			iconEl.className = `backboard-options-active-icon ${ThemeIcon.asClassName(this.getGenericOptionIcon(option.id))}`;
-			iconEl.title = option.valueLabel ? `${option.label}: ${option.valueLabel}` : option.label;
-		}
+		return super.renderLabel(element);
 	}
 
 	override dispose(): void {
-		this.inputPart.setBackboardOptionsAnchor(undefined);
+		if (this.menuKind === 'options') {
+			this.inputPart.setBackboardOptionsAnchor(undefined);
+		}
 		super.dispose();
 	}
 }
 
 /**
- * Single gear icon consolidating the Claude-only composer controls —
- * Thinking Level, Approvals, and Fast Mode — that previously rendered as
- * three separate icons. Same "gear opens a dropdown, each row opens its own
- * nested picker" shape as {@link BackboardComposerOptionsActionViewItem};
- * the three underlying pickers (two {@link AgentHostChatInputPicker}s and a
- * {@link ChatThinkingPickerActionItem}) are owned here directly rather than
- * rendered into the toolbar, so their selection logic is reused unchanged.
+ * Single gear icon consolidating the Claude-only Approvals and Fast Mode
+ * controls. Thinking now lives with the model selector, where the model and
+ * its reasoning configuration can be changed together.
  */
 class AgentHostClaudeOptionsActionViewItem extends ChatInputPickerActionViewItem {
 
 	private readonly permissionPicker: AgentHostChatInputPicker;
 	private readonly fastModePicker: AgentHostChatInputPicker;
-	private readonly thinkingPicker: ChatThinkingPickerActionItem;
 
 	constructor(
 		action: MenuItemAction,
 		widget: IChatWidget,
-		modelPickerDelegate: IModelPickerDelegate,
 		pickerOptions: IChatInputPickerOptions,
 		@IInstantiationService instantiationService: IInstantiationService,
 		@IActionWidgetService actionWidgetService: IActionWidgetService,
@@ -5373,37 +5798,12 @@ class AgentHostClaudeOptionsActionViewItem extends ChatInputPickerActionViewItem
 		super(action, options, pickerOptions, actionWidgetService, keybindingService, contextKeyService, telemetryService);
 		this.permissionPicker = this._register(instantiationService.createInstance(AgentHostChatInputPicker, widget, ClaudeSessionConfigKey.PermissionMode));
 		this.fastModePicker = this._register(instantiationService.createInstance(AgentHostChatInputPicker, widget, ClaudeSessionConfigKey.FastMode));
-		// BaseActionViewItem requires an IAction; this placeholder is never
-		// rendered or invoked directly — only `hasThinkingLevel`/`getCurrentLabel`/
-		// `show` are used, mirroring how the standalone icon used to work.
-		const thinkingPlaceholderAction: IAction = {
-			id: 'agentHostClaudeOptions.thinkingLevel',
-			label: '',
-			tooltip: '',
-			class: undefined,
-			enabled: true,
-			run: async () => { },
-		};
-		this.thinkingPicker = this._register(instantiationService.createInstance(ChatThinkingPickerActionItem, thinkingPlaceholderAction, modelPickerDelegate));
 	}
 
 	private getActions(): IActionWidgetDropdownAction[] {
 		const actions: IActionWidgetDropdownAction[] = [];
 		const anchor = this.getAnchorElement();
 
-		if (this.thinkingPicker.hasThinkingLevel()) {
-			const label = localize('agentHostClaudeOptions.thinkingLevel', "Thinking Level");
-			actions.push({
-				id: 'agentHostClaudeOptions.thinkingLevel',
-				label,
-				description: this.thinkingPicker.getCurrentLabel(),
-				class: undefined,
-				tooltip: label,
-				icon: Codicon.lightbulb,
-				enabled: true,
-				run: () => this.openNestedPicker(() => this.thinkingPicker.show(anchor)),
-			});
-		}
 		if (this.permissionPicker.hasContext()) {
 			const label = localize('agentHostClaudeOptions.approvals', "Approvals");
 			actions.push({

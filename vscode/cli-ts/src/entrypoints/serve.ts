@@ -310,17 +310,13 @@ export async function runServe(argv: string[]): Promise<void> {
 				const status = await controller.submit(control.prompt, {
 					attachmentFilePaths,
 					displayContent: control.prompt,
+					conversationContext: control.forkContext,
 					onStart: () => {
 						if (control.model !== undefined) {
 							config.setModel(parseModel(control.model));
 						}
 						if (control.thinking !== undefined) {
 							config.setThinking(parseThinking(control.thinking));
-						}
-						// After setThinking: the exclude flag rides the thinking
-						// intent, which setThinking replaces wholesale.
-						if (control.excludeReasoning !== undefined) {
-							config.setExcludeReasoning(control.excludeReasoning);
 						}
 						if (control.excludedTools !== undefined) {
 							config.setExcludedTools(control.excludedTools);

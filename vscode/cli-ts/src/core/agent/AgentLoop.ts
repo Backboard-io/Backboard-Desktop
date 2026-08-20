@@ -2,6 +2,7 @@ import type {
 	DynamicThinkingEvidence,
 	MemoryMode,
 	MemoryProfile,
+	ModelRef,
 	ThinkingConfig,
 	ThinkingRequestKind,
 } from "../../config/defaults.ts";
@@ -24,9 +25,22 @@ import { SystemNotificationRunner } from "./notifications/SystemNotificationRunn
 import { todoReconciliationNotification } from "./notifications/TodoReconciliationNotification.ts";
 import { ProviderStreamConsumer } from "./ProviderStreamConsumer.ts";
 import { buildRunMessageRequest } from "./RunMessageRequestBuilder.ts";
+import {
+	isModelAvailabilityError,
+	isThinkingCompatibilityError,
+	modelKey,
+} from "./RuntimeRecovery.ts";
 import { hasStructuralDiagnosticText } from "./ThinkingEvidence.ts";
 import { ToolRoundProcessor } from "./ToolRoundProcessor.ts";
 import { Turn } from "./Turn.ts";
+
+export type CapacityFallbackResolver = (
+	current: ModelRef,
+	attemptedModelKeys: ReadonlySet<string>,
+	signal: AbortSignal,
+) => Promise<ModelRef | null>;
+export type ModelSucceededHandler = (model: ModelRef) => Promise<void> | void;
+export type ThinkingDisabledHandler = (reason: string) => Promise<void> | void;
 
 export interface AgentLoopDeps {
 	client: AgentClient;
@@ -43,6 +57,7 @@ export interface AgentLoopDeps {
 	memoryProfile: MemoryProfile;
 	workspaceId?: string;
 	imageGeneration?: boolean;
+	generatedMediaDir?: string;
 	thinking: ThinkingConfig | null | undefined;
 	thinkingResolver?: RuntimeThinkingResolver;
 	requestKind?: ThinkingRequestKind;
@@ -55,6 +70,9 @@ export interface AgentLoopDeps {
 	attachmentFilePaths?: string[];
 	displayContent?: string;
 	durableSession?: RunMessageOptions["durableSession"];
+	resolveCapacityFallback?: CapacityFallbackResolver;
+	onModelSucceeded?: ModelSucceededHandler;
+	onThinkingDisabled?: ThinkingDisabledHandler;
 }
 
 /**
@@ -81,7 +99,24 @@ export class AgentLoop {
 			bus.emit({ type: "turn:start", turnId: turn.id });
 		}
 
-		const consumer = new ProviderStreamConsumer(bus, session);
+		const consumer = new ProviderStreamConsumer(bus, session, {
+			imageGeneration: this.deps.imageGeneration,
+			generatedMediaDir: this.deps.generatedMediaDir,
+		});
+		const activeModel = { ...this.deps.model };
+		const attemptedModelKeys = new Set([modelKey(activeModel)]);
+		let forceThinkingOff = false;
+		let thinkingWarningEmitted = false;
+		const disableThinking = async (reason: string) => {
+			forceThinkingOff = true;
+			if (thinkingWarningEmitted) return;
+			thinkingWarningEmitted = true;
+			bus.emit({
+				type: "system:warning",
+				message: `Thinking was disabled for this model so the turn could continue (${reason}).`,
+			});
+			await this.deps.onThinkingDisabled?.(reason);
+		};
 		const processor = new ToolRoundProcessor({
 			client: this.deps.client,
 			scheduler: this.deps.scheduler,
@@ -89,7 +124,9 @@ export class AgentLoop {
 			bus,
 			consumer,
 			tools: this.deps.tools,
-			resolveThinking: (evidence) => this.resolveThinking(evidence),
+			resolveThinking: (evidence) =>
+				forceThinkingOff ? null : this.resolveThinking(evidence),
+			onThinkingDisabled: disableThinking,
 			requestKind: this.deps.requestKind ?? "user",
 			maxToolRounds: this.deps.maxToolRounds,
 		});
@@ -115,7 +152,7 @@ export class AgentLoop {
 				systemPrompt: this.deps.systemPrompt,
 				refreshSystemPrompt: this.deps.refreshSystemPrompt,
 				assistantId: this.deps.assistantId,
-				model: this.deps.model,
+				model: activeModel,
 				memory: this.deps.memory,
 				memoryProfile: this.deps.memoryProfile,
 				workspaceId: this.deps.workspaceId,
@@ -137,11 +174,18 @@ export class AgentLoop {
 		});
 
 		try {
-			const initialThinking = this.resolveThinking({
+			let initialThinking = this.resolveThinking({
 				phase: "initial",
 				requestKind: this.deps.requestKind ?? "user",
 				hasDiagnosticText: hasStructuralDiagnosticText(content),
 			});
+			if (
+				initialThinking === null &&
+				this.deps.thinkingResolver?.intent !== undefined &&
+				this.deps.thinkingResolver.intent !== null
+			) {
+				await disableThinking("the selected thinking controls are unsupported");
+			}
 			const messageOptions = {
 				signal: ctx.signal,
 				attachmentFilePaths: this.deps.attachmentFilePaths,
@@ -149,7 +193,11 @@ export class AgentLoop {
 				durableSession: this.deps.durableSession,
 			};
 			const buildMessageRequest = () =>
-				buildRunMessageRequest(content, this.deps, initialThinking);
+				buildRunMessageRequest(
+					content,
+					{ ...this.deps, model: activeModel },
+					initialThinking,
+				);
 			const createMessageStream = () =>
 				this.deps.client.runMessage(buildMessageRequest(), messageOptions);
 
@@ -164,6 +212,31 @@ export class AgentLoop {
 						buildMessageRequest(),
 						messageOptions,
 					) ?? Promise.resolve(null),
+				async (error) => {
+					if (isThinkingCompatibilityError(error)) {
+						initialThinking = null;
+						await disableThinking(errorMessage(error));
+						return;
+					}
+					if (!isModelAvailabilityError(error)) return;
+					const fallback = await this.deps.resolveCapacityFallback?.(
+						activeModel,
+						attemptedModelKeys,
+						ctx.signal,
+					);
+					if (!fallback) return;
+					activeModel.provider = fallback.provider;
+					activeModel.model = fallback.model;
+					attemptedModelKeys.add(modelKey(activeModel));
+					// Thinking metadata belongs to the original model. The next turn can
+					// resolve controls for the fallback normally after it becomes active.
+					initialThinking = null;
+					forceThinkingOff = true;
+					bus.emit({
+						type: "system:warning",
+						message: `Model unavailable; retrying with ${activeModel.provider}/${activeModel.model}.`,
+					});
+				},
 			);
 			await processor.process(pending, turn.id, assistant, ctx, early);
 			this.executedToolRounds = processor.executedRounds;
@@ -171,6 +244,7 @@ export class AgentLoop {
 			await notifications.runPending(turn.id, assistant, ctx);
 			this.executedToolRounds = processor.executedRounds;
 			turn.status = "completed";
+			await this.deps.onModelSucceeded?.(activeModel);
 		} catch (err) {
 			this.executedToolRounds = processor.executedRounds;
 			if (err instanceof AbortError || ctx.signal.aborted) {
@@ -217,6 +291,6 @@ export class AgentLoop {
 		if (this.deps.thinkingResolver) {
 			return this.deps.thinkingResolver.resolve(evidence);
 		}
-		return evidence.phase === "initial" ? this.deps.thinking : undefined;
+		return this.deps.thinking;
 	}
 }

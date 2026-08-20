@@ -9,7 +9,7 @@ import { Disposable } from '../../../../../../base/common/lifecycle.js';
 import { extUriBiasedIgnorePathCase } from '../../../../../../base/common/resources.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { generateUuid } from '../../../../../../base/common/uuid.js';
-import { AgentSession, type IAgentConnection } from '../../../../../../platform/agentHost/common/agentService.js';
+import { AgentSession, type IAgentConnection, type IAgentSessionMetadata } from '../../../../../../platform/agentHost/common/agentService.js';
 import type { ChangesSummary } from '../../../../../../platform/agentHost/common/state/protocol/state.js';
 import { SessionStatus, type SessionSummary } from '../../../../../../platform/agentHost/common/state/sessionState.js';
 import { IWorkspaceContextService } from '../../../../../../platform/workspace/common/workspace.js';
@@ -33,6 +33,23 @@ function mapSessionStatus(status: SessionStatus | undefined): ChatSessionStatus 
 
 function agentHostSessionIcon(provider: string) {
 	return BackboardLogoIcon;
+}
+
+const pendingSessionLists = new WeakMap<IAgentConnection, Promise<IAgentSessionMetadata[]>>();
+
+function listSessions(connection: IAgentConnection): Promise<IAgentSessionMetadata[]> {
+	const pending = pendingSessionLists.get(connection);
+	if (pending) {
+		return pending;
+	}
+
+	const request = connection.listSessions();
+	pendingSessionLists.set(connection, request);
+	void request.then(
+		() => pendingSessionLists.get(connection) === request && pendingSessionLists.delete(connection),
+		() => pendingSessionLists.get(connection) === request && pendingSessionLists.delete(connection),
+	);
+	return request;
 }
 
 /**
@@ -235,7 +252,7 @@ export class AgentHostSessionListController extends Disposable implements IChatS
 		const startGeneration = this._mutationGeneration;
 		let sessions;
 		try {
-			sessions = await this._connection.listSessions();
+			sessions = await listSessions(this._connection);
 		} catch {
 			// If notifications mutated the list while we were fetching,
 			// the in-memory state is more up-to-date than our (now failed)

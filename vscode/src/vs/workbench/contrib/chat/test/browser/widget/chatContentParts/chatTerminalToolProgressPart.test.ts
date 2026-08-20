@@ -9,6 +9,7 @@ import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../../ba
 import { runWithFakedTimers } from '../../../../../../../base/test/common/timeTravelScheduler.js';
 import { timeout } from '../../../../../../../base/common/async.js';
 import { TerminalToolAutoExpand, TerminalToolAutoExpandTimeout } from '../../../../browser/widget/chatContentParts/toolInvocationParts/terminalToolAutoExpand.js';
+import { getTerminalOutputViewportHeight } from '../../../../browser/widget/chatContentParts/toolInvocationParts/chatTerminalToolProgressPart.js';
 
 suite('ChatTerminalToolProgressPart Auto-Expand Logic', () => {
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
@@ -53,6 +54,12 @@ suite('ChatTerminalToolProgressPart Auto-Expand Logic', () => {
 		isExpanded = false;
 		userToggledOutput = false;
 		hasRealOutputValue = false;
+	});
+
+	test('Cursor transcript keeps an explicit capped viewport so long output can scroll', () => {
+		assert.strictEqual(getTerminalOutputViewportHeight(480, 200, true), '200px');
+		assert.strictEqual(getTerminalOutputViewportHeight(120, 200, true), '120px');
+		assert.strictEqual(getTerminalOutputViewportHeight(480, 200, false), '');
 	});
 
 	test('fast command without data should not auto-expand (finishes before timeout)', () => runWithFakedTimers({ useFakeTimers: true }, async () => {

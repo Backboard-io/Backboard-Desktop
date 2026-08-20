@@ -233,6 +233,27 @@ describe("Config", () => {
 		expect(reopened.memoryProfile).toBe("code");
 	});
 
+	it("persists recently successful models for capacity recovery", async () => {
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
+		await saveBackboardConfig({ apiKey: "file-key" }, homeDir);
+		const config = new Config({ env, argv: [], homeDir });
+
+		await config.recordSuccessfulModel({
+			provider: "openai",
+			model: "gpt-5.6-sol",
+		});
+		await config.recordSuccessfulModel({
+			provider: "openrouter",
+			model: "z-ai/glm-5.3",
+		});
+
+		const reopened = new Config({ env, argv: [], homeDir });
+		expect(reopened.successfulModels).toEqual([
+			{ provider: "openrouter", model: "z-ai/glm-5.3" },
+			{ provider: "openai", model: "gpt-5.6-sol" },
+		]);
+	});
+
 	it("loads saved dynamic thinking selections", async () => {
 		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
 		await saveBackboardConfig(
@@ -417,27 +438,6 @@ describe("Config", () => {
 			argv: ["--model", "anthropic/claude", "--thinking", "dynamic"],
 		});
 		expect(dynamic.thinking).toEqual({ kind: "dynamic" });
-	});
-
-	it("carries the reasoning-trace preference on the thinking intent", () => {
-		const config = new Config({
-			env,
-			argv: ["--model", "openrouter/deepseek", "--thinking", "dynamic"],
-		});
-		config.setExcludeReasoning(true);
-		expect(config.thinking).toEqual({ kind: "dynamic", excludeReasoning: true });
-
-		// setThinking replaces the intent wholesale, dropping the flag until
-		// it is applied again (serve re-sends both fields every submit).
-		config.setThinking({ kind: "default" });
-		expect(config.thinking).toEqual({ kind: "default" });
-		config.setExcludeReasoning(false);
-		expect(config.thinking).toEqual({ kind: "default", excludeReasoning: false });
-
-		// Thinking off has no intent to carry the flag.
-		config.setThinking(null);
-		config.setExcludeReasoning(true);
-		expect(config.thinking).toBeNull();
 	});
 
 	it("supports --flag=value form", () => {

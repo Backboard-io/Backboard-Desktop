@@ -21,10 +21,10 @@ export type ServeControl =
 			prompt: string;
 			/** Existing provider thread to resume after an IDE/process restart. */
 			threadId?: string;
+			/** Prior turns to seed into the first request of a newly forked thread. */
+			forkContext?: string;
 			model?: string;
 			thinking?: string;
-			/** "Show Reasoning" off: ask the provider to omit reasoning traces. */
-			excludeReasoning?: boolean;
 			excludedTools?: string[];
 			permission?: PermissionMode;
 			memory?: string;

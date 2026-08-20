@@ -164,6 +164,8 @@ async function* streamOpenAI(
 			| {
 					delta?: {
 						content?: string | null;
+						reasoning?: string | null;
+						reasoning_content?: string | null;
 						tool_calls?: Array<{
 							index?: number;
 							id?: string;
@@ -179,6 +181,10 @@ async function* streamOpenAI(
 		const delta = choice.delta;
 		if (delta?.content) {
 			yield { kind: "assistant_delta", text: delta.content };
+		}
+		const reasoningText = delta?.reasoning || delta?.reasoning_content;
+		if (reasoningText) {
+			yield { kind: "reasoning_delta", text: reasoningText };
 		}
 		for (const partial of delta?.tool_calls ?? []) {
 			const index = partial.index ?? 0;

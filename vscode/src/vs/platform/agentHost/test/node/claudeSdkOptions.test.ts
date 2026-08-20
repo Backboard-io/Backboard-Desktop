@@ -6,7 +6,7 @@
 import assert from 'assert';
 import { URI } from '../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
-import { buildOptions, buildSubprocessEnv } from '../../node/claude/claudeSdkOptions.js';
+import { buildOptions, buildSubprocessEnv, mergePluginDirectories } from '../../node/claude/claudeSdkOptions.js';
 import type { IClaudeProxyHandle } from '../../node/claude/claudeProxyService.js';
 
 suite('claudeSdkOptions / buildSubprocessEnv', () => {
@@ -125,6 +125,28 @@ suite('claudeSdkOptions / buildOptions plugins projection', () => {
 	test('undefined plugins omits Options.plugins', async () => {
 		const opts = await buildOptions(input(undefined), proxyHandle, () => { }, () => { });
 		assert.strictEqual(opts.plugins, undefined);
+	});
+
+	test('shared user profile skills are appended without replacing or duplicating plugins', () => {
+		const shared = URI.file('/home/test/.agents');
+		assert.deepStrictEqual(
+			mergePluginDirectories([URI.file('/p/a'), shared], shared).map(uri => uri.fsPath),
+			[URI.file('/p/a').fsPath, shared.fsPath],
+		);
+	});
+
+	test('shared user profile skills project to a Claude local plugin', async () => {
+		const shared = URI.file('/home/test/.agents');
+		const opts = await buildOptions(
+			{ ...input([URI.file('/p/a')]), userProfileSkillsPlugin: shared },
+			proxyHandle,
+			() => { },
+			() => { },
+		);
+		assert.deepStrictEqual(opts.plugins, [
+			{ type: 'local', path: URI.file('/p/a').fsPath },
+			{ type: 'local', path: shared.fsPath },
+		]);
 	});
 });
 

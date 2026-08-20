@@ -65,5 +65,5 @@ export function buildRunMessageRequest(
  * Model used when image generation is on. Mirrors the retired Rust bridge's
  * defaults for the Backboard `image_generation: "auto"` path.
  */
-const DEFAULT_IMAGE_MODEL_PROVIDER = "openrouter";
-const DEFAULT_IMAGE_MODEL_NAME = "google/gemini-3.1-flash-image-preview";
+const DEFAULT_IMAGE_MODEL_PROVIDER = "google";
+const DEFAULT_IMAGE_MODEL_NAME = "gemini-3.1-flash-image";

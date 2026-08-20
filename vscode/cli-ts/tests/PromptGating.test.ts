@@ -116,4 +116,15 @@ describe("prompt tool gating", () => {
 		).toContain("TodoWrite was not called yet");
 		expect(getSystemPrompt({})).not.toContain("TodoWrite was not called yet");
 	});
+
+	it("includes forked conversation context for every prompt profile", () => {
+		for (const profile of ["anthropic", "openai"] as const) {
+			expect(
+				getSystemPrompt({
+					profile,
+					conversationContext: "authoritative prior conversation",
+				}),
+			).toContain("authoritative prior conversation");
+		}
+	});
 });

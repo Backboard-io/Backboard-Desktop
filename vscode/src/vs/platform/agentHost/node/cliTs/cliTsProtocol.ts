@@ -35,10 +35,10 @@ export type CliTsServeControl =
 		 * thread with no memory of prior turns.
 		 */
 		readonly threadId?: string;
+		/** Prior turns for the first request of a newly forked backend thread. */
+		readonly forkContext?: string;
 		readonly model?: string;
 		readonly thinking?: string;
-		/** Omit provider reasoning traces from responses when supported. */
-		readonly excludeReasoning?: boolean;
 		readonly excludedTools?: readonly string[];
 		readonly permission?: CliTsPermissionMode;
 		readonly memory?: string;
@@ -50,7 +50,7 @@ export type CliTsServeControl =
 		readonly browserUse?: boolean;
 		/** Enables turn-completion notifications for this turn (default off). */
 		readonly notify?: boolean;
-		/** Enables image-generation intent (reserved; inert until backend support). */
+		/** Enables Backboard's built-in image tool for this turn. */
 		readonly imageGeneration?: boolean;
 	}
 	| { readonly op: 'steer'; readonly requestId?: string; readonly prompt: string }

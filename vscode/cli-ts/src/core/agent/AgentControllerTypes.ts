@@ -6,6 +6,7 @@ export interface QueuedSubmit {
 	onStart?: () => void;
 	attachmentFilePaths?: string[];
 	displayContent?: string;
+	conversationContext?: string;
 	resolve: (status: TurnStatus) => void;
 	reject: (err: unknown) => void;
 }
@@ -15,6 +16,8 @@ export interface SubmitOptions {
 	onStart?: () => void;
 	attachmentFilePaths?: string[];
 	displayContent?: string;
+	/** Prior conversation supplied by a host when creating a new branch. */
+	conversationContext?: string;
 }
 
 export interface CancelOptions {
