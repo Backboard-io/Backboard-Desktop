@@ -202,9 +202,28 @@ export class SessionsView extends ViewPane {
 		};
 	}
 
+	/**
+	 * Start a new chat from the sidebar. Shared by every sidebar chrome so the
+	 * window-specific routing lives in one place: the Optimus window sends new
+	 * sessions through its own command, which hosts the new chat as a card in
+	 * the grid instead of navigating the window away from the dashboard.
+	 */
+	private startNewChat(): void {
+		logSessionsInteraction(this.telemetryService, 'newSession');
+		if (this.environmentService.isOptimusWindow) {
+			void this.commandService.executeCommand(OPTIMUS_NEW_SESSION_COMMAND_ID);
+			return;
+		}
+		this.sessionsService.openNewSession({ forceNew: true });
+	}
+
 	private createControls(parent: HTMLElement): void {
 		const phoneLayout = isPhoneLayout(this.layoutService);
-		const simpleMode = !phoneLayout && !this.environmentService.isOptimusWindow && !this.environmentService.isJarvisWindow;
+		// Advanced (Optimus) shares Simple's sidebar chrome: the compact search
+		// row, the folder/thread-card toggle, the project filter and the footer
+		// navigation (Marketplace / Usage / Settings). Jarvis keeps the denser
+		// stacked-action chrome, so it stays out of Simple mode.
+		const simpleMode = !phoneLayout && !this.environmentService.isJarvisWindow;
 		const sessionsContainer = DOM.append(parent, $('.agent-sessions-container'));
 
 		// Sessions section (top, fills available space)
@@ -273,8 +292,7 @@ export class SessionsView extends ViewPane {
 			newChatButton.appendChild(renderIcon(Codicon.edit));
 			this._register(DOM.addDisposableListener(newChatButton, DOM.EventType.CLICK, e => {
 				e.preventDefault();
-				logSessionsInteraction(this.telemetryService, 'newSession');
-				this.sessionsService.openNewSession({ forceNew: true });
+				this.startNewChat();
 			}));
 
 			this.createProjectFilterRow(primaryActions);
@@ -295,16 +313,7 @@ export class SessionsView extends ViewPane {
 			// New chat, Search and Marketplace are all pinned flat action rows that
 			// stay static above the scrolling projects list.
 			const primaryActions = this.primaryActions = DOM.append(pinnedHeader, $('.agent-sessions-primary-actions'));
-			this.createSidebarAction(primaryActions, Codicon.edit, localize('newChat', "New chat"), () => {
-				logSessionsInteraction(this.telemetryService, 'newSession');
-				// The Optimus window routes new sessions through its own command so
-				// the grid can host the new chat card instead of navigating away.
-				if (this.environmentService.isOptimusWindow) {
-					void this.commandService.executeCommand(OPTIMUS_NEW_SESSION_COMMAND_ID);
-					return;
-				}
-				this.sessionsService.openNewSession({ forceNew: true });
-			});
+			this.createSidebarAction(primaryActions, Codicon.edit, localize('newChat', "New chat"), () => this.startNewChat());
 
 			// Search opens the inline find widget, which replaces the pinned block's
 			// rows while active.
