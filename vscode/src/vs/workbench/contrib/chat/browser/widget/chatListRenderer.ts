@@ -1544,11 +1544,12 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		const explicitFileOrImageVariables = element.variables.filter(isExplicitFileOrImageVariableEntry);
 		const explicitImageVariables = explicitFileOrImageVariables.filter(variable => variable.kind === 'image');
 		const explicitFileOrDirectoryVariables = explicitFileOrImageVariables.filter(variable => variable.kind === 'file' || variable.kind === 'directory');
-		const otherVariables = element.variables.filter(variable => !isExplicitFileOrImageVariableEntry(variable));
+		const capabilityVariables = element.variables.filter(isBackboardCapabilityVariableEntry);
+		const otherVariables = element.variables.filter(variable => !isExplicitFileOrImageVariableEntry(variable) && !isBackboardCapabilityVariableEntry(variable));
 		if (!element.confirmation) {
 			const markdown = isChatFollowup(element.message) ?
 				element.message.message :
-				this.markdownDecorationsRenderer.convertParsedRequestToMarkdown(element.sessionResource, element.message);
+				this.markdownDecorationsRenderer.convertParsedRequestToMarkdown(element.sessionResource, element.message, capabilityVariables.length > 0);
 			const attachmentSummary = !element.messageText.trim() && !explicitFileOrImageVariables.length ? getExplicitFileOrImageAttachmentSummary(element.variables) : undefined;
 			const requestMarkdown = markdown.trim() ? markdown : attachmentSummary;
 			if (requestMarkdown) {
@@ -1625,6 +1626,10 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 				codeBlockStartIndex += newPart.codeblocks?.length ?? 0;
 			}
 		});
+
+		if (capabilityVariables.length) {
+			templateData.value.appendChild(this.renderBackboardRequestCapabilities(capabilityVariables));
+		}
 
 		if (templateData.renderedParts) {
 			dispose(templateData.renderedParts);
@@ -3471,6 +3476,30 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		});
 	}
 
+	private renderBackboardRequestCapabilities(variables: readonly IChatRequestVariableEntry[]): HTMLElement {
+		const row = dom.$('.backboard-request-capabilities');
+		row.setAttribute('aria-label', localize('chat.request.enabledCapabilities', "Enabled capabilities"));
+
+		const ordered = variables
+			.map((variable, index) => ({ variable, index }))
+			.sort((a, b) => (a.variable.range?.start ?? Number.MAX_SAFE_INTEGER) - (b.variable.range?.start ?? Number.MAX_SAFE_INTEGER) || a.index - b.index);
+		for (const { variable } of ordered) {
+			const capabilityId = variable._meta?.backboardCapabilityId;
+			if (typeof capabilityId !== 'string') {
+				continue;
+			}
+
+			const token = dom.append(row, dom.$('span.backboard-inline-capability-token'));
+			token.dataset.optionId = capabilityId;
+			token.title = variable.modelDescription ?? variable.fullName ?? variable.name;
+			const icon = dom.append(token, dom.$('span.backboard-inline-capability-token-icon'));
+			icon.setAttribute('aria-hidden', 'true');
+			dom.append(token, dom.$('span.backboard-inline-capability-token-label', undefined, variable.fullName ?? variable.name));
+		}
+
+		return row;
+	}
+
 	private renderTextEdit(context: IChatContentPartRenderContext, chatTextEdit: IChatTextEditGroup, templateData: IChatListItemTemplate): IChatContentPart {
 		const textEditPart = this.instantiationService.createInstance(ChatTextEditContentPart, chatTextEdit, context, this.rendererOptions, this._diffEditorPool, this._currentLayoutWidth.get());
 		textEditPart.addDisposable(textEditPart.onDidChangeHeight(() => this.fireItemHeightChange(templateData)));
@@ -3835,4 +3864,8 @@ function getSubagentId(invocation: IChatToolInvocation | IChatToolInvocationSeri
  */
 function isSubagentToolInvocation(invocation: IChatToolInvocation | IChatToolInvocationSerialized): boolean {
 	return !!getSubagentId(invocation);
+}
+
+function isBackboardCapabilityVariableEntry(variable: IChatRequestVariableEntry): boolean {
+	return variable._meta?.backboardCapability === true && typeof variable._meta.backboardCapabilityId === 'string';
 }

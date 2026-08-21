@@ -121,9 +121,41 @@ MenuRegistry.appendMenuItem(MenuId.AgentSessionsToolbar, {
 
 // --- Sessions Title Toolbar
 
-// The session tab strip deliberately contributes no sidebar toggle: it renders
-// as Cursor's clean tab row (+ / history / ⋯ / close only). The agent-sessions
-// sidebar stays reachable via the ShowAgentSessionsSidebar command (f1).
+// Keep the sessions drawer opener at the trailing edge of the chat title row.
+// The drawer owns its own collapse control once it is open.
+MenuRegistry.appendMenuItem(MenuId.ChatViewSessionTitleToolbar, {
+	command: {
+		id: ShowAgentSessionsSidebar.ID,
+		title: ShowAgentSessionsSidebar.TITLE,
+		icon: Codicon.layoutSidebarLeftOff,
+	},
+	group: 'navigation',
+	order: 4,
+	when: ContextKeyExpr.and(
+		ContextKeyExpr.or(
+			ChatContextKeys.agentSessionsViewerVisible.negate(),
+			ChatContextKeys.agentSessionsViewerOrientation.isEqualTo(AgentSessionsViewerOrientation.Stacked),
+		),
+		ChatContextKeys.agentSessionsViewerPosition.isEqualTo(AgentSessionsViewerPosition.Left)
+	)
+});
+
+MenuRegistry.appendMenuItem(MenuId.ChatViewSessionTitleToolbar, {
+	command: {
+		id: ShowAgentSessionsSidebar.ID,
+		title: ShowAgentSessionsSidebar.TITLE,
+		icon: Codicon.layoutSidebarRightOff,
+	},
+	group: 'navigation',
+	order: 4,
+	when: ContextKeyExpr.and(
+		ContextKeyExpr.or(
+			ChatContextKeys.agentSessionsViewerVisible.negate(),
+			ChatContextKeys.agentSessionsViewerOrientation.isEqualTo(AgentSessionsViewerOrientation.Stacked),
+		),
+		ChatContextKeys.agentSessionsViewerPosition.isEqualTo(AgentSessionsViewerPosition.Right)
+	)
+});
 
 //#endregion
 

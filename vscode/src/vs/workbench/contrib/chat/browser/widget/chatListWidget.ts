@@ -204,10 +204,12 @@ export class ChatListWidget extends Disposable {
 	 */
 	private updateBackboardTranscriptHostClasses(): void {
 		const isAuxiliaryBarChat = this._container.closest('.part.auxiliarybar') !== null;
-		const isBackboardAuxiliaryTranscript = isAuxiliaryBarChat
-			&& this._container.closest('.backboard-chat-controls') !== null;
+		const isBackboardCodeEditorTranscript = this._container.closest('.backboard-clean-chat') !== null;
 		this._container.classList.toggle('right-panel-chat-scroll', isAuxiliaryBarChat);
-		this._container.classList.toggle('backboard-cursor-transcript', isBackboardAuxiliaryTranscript);
+		// The editor panel is the reference transcript. Every Backboard ChatWidget
+		// host opts into the same rendering path so reasoning, tools, edits and
+		// completed-work folding do not change when the user switches layouts.
+		this._container.classList.toggle('backboard-cursor-transcript', isBackboardCodeEditorTranscript);
 	}
 
 	//#endregion

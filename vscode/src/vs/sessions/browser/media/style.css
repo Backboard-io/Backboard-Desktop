@@ -1502,28 +1502,35 @@
 :is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-container,
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .chat-editor-relative .interactive-session .chat-input-container {
 	border-radius: 22px;
-	box-shadow: 0 12px 28px -18px var(--vscode-widget-shadow, transparent);
-	padding: 4px 12px 10px;
+	box-shadow: none;
+	min-height: 110px;
+	padding: 10px 12px;
+	gap: 6px;
 }
 
 /* Keep the drop shadow underneath the focus ring. */
 :is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-container.focused,
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .chat-editor-relative .interactive-session .chat-input-container.focused {
 	box-shadow:
-		0 0 0 2px color-mix(in srgb, var(--vscode-agentsChatInput-focusBorder, var(--vscode-focusBorder)) 20%, transparent),
-		0 12px 28px -18px var(--vscode-widget-shadow, transparent);
+		0 0 0 2px color-mix(in srgb, var(--vscode-agentsChatInput-focusBorder, var(--vscode-focusBorder)) 20%, transparent);
 }
 
-/* The new-chat (draft) composer flattens the shadow and pins its own radius in
- * chatWidget.css; out-rank those so both composers share one shell. The
- * padding must also be restated here: the shared shell rule above would
- * otherwise shrink this card's generous inset to the session composer's 8px,
- * leaving the prompt text against the edge. T3's hero card: `pt-4 px-4 pb-3`. */
+/* Once a transcript exists, match the right panel's compact reply state. */
+:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session:not(.chat-composer-empty) .chat-input-container,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .chat-editor-relative .interactive-session:not(.chat-composer-empty) .chat-input-container {
+	min-height: 58px;
+	padding: 5px 8px;
+	gap: 2px;
+	border-radius: 15px;
+}
+
+/* A draft uses the same compact shell as a reply. The full window contributes
+ * width, not a separate hero-card height. */
 :is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container,
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .chat-editor-relative .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container {
 	border-radius: 22px;
-	box-shadow: 0 12px 28px -18px var(--vscode-widget-shadow, transparent);
-	padding: 16px 16px 12px;
+	box-shadow: none;
+	padding: 10px 12px;
 }
 
 /* The inline edit box inside a sent request shares `.chat-input-container` but
@@ -1539,8 +1546,15 @@
  * container already supplies 12px of side inset, so the row itself sits flush
  * with it and only adds vertical breathing room. */
 :is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars {
-	margin-top: 10px;
+	height: 28px;
+	min-height: 28px;
+	margin-top: 0;
 	padding: 0;
+}
+
+:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session:not(.chat-composer-empty) .chat-input-toolbars {
+	height: 24px;
+	min-height: 24px;
 }
 
 /* The context usage dial rides in the composer footer here (moved off the
@@ -1566,11 +1580,10 @@
 	padding: 0 4px;
 }
 
-/* The new-chat card already carries 20px of its own horizontal padding
- * (chatWidget.css) — don't stack the session inset on top of it. */
+/* Keep the prompt inset identical to the right-panel composer. */
 :is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-editor-container,
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .chat-editor-relative .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-editor-container {
-	padding: 0;
+	padding: 0 2px;
 }
 
 /* Footer controls: T3's ghost buttons are 28px tall with `rounded-lg` (10px)
@@ -1589,6 +1602,12 @@
 	display: flex;
 	align-items: center;
 	justify-content: center;
+}
+
+:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session:not(.chat-composer-empty) .chat-input-toolbar .monaco-action-bar .action-item .action-label:not(.model-picker-split),
+:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session:not(.chat-composer-empty) .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item .action-label.codicon-mic {
+	height: 24px;
+	min-width: 24px;
 }
 
 /* Rounded hover container on every footer control (T3's ghost-button hover). */
@@ -1668,6 +1687,12 @@
 	align-items: center;
 	justify-content: center;
 	transition: background-color 120ms ease, transform 150ms ease, box-shadow 150ms ease;
+}
+
+:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session:not(.chat-composer-empty) .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > :is(.action-label.codicon-arrow-up, .action-label.codicon-newline, .action-label.codicon-stop-circle) {
+	width: 24px;
+	height: 24px;
+	min-width: 24px;
 }
 
 :is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-arrow-up,

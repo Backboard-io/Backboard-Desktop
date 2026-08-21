@@ -4732,7 +4732,6 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 					chatEditingSession,
 					editSessionEntries,
 					sessionFiles,
-					externalEdits,
 				);
 			} else {
 				dom.clearNode(this.chatEditingSessionWidgetContainer);
@@ -4765,7 +4764,6 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		chatEditingSession: IChatEditingSession | null,
 		editSessionEntriesObs: IObservable<readonly IChatCollapsibleListItem[]>,
 		sessionEntriesObs: IObservable<readonly IChatCollapsibleListItem[]>,
-		externalEditsObs: IObservable<readonly IChatExternalEdit[]>,
 	) {
 		// Summary of number of files changed
 		// eslint-disable-next-line no-restricted-syntax
@@ -4785,7 +4783,6 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		dom.clearNode(actionsContainer);
 
 		const sessionResource = chatEditingSession?.chatSessionResource || this._widget?.viewModel?.model.sessionResource;
-		const isAuxiliaryBar = !!this.chatEditingSessionWidgetContainer.closest('.part.auxiliarybar');
 
 		const scopedContextKeyService = this._chatEditsActionsDisposables.add(this.contextKeyService.createScoped(actionsContainer));
 		if (sessionResource) {
@@ -4840,25 +4837,6 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		store.add(autorun(reader => {
 			dom.clearNode(actionsContainer);
 			const isSessionMenu = topLevelIsSessionMenu.read(reader);
-			const externalEditItems = externalEditsObs.read(reader);
-			if (isAuxiliaryBar && externalEditItems.length > 0) {
-				const createAction = (label: string, run: () => void | Promise<void>, primary = false) => {
-					const button = dom.append(actionsContainer, $('button.cursor-external-edit-action')) as HTMLButtonElement;
-					button.type = 'button';
-					button.textContent = label;
-					button.classList.toggle('primary', primary);
-					reader.store.add(addDisposableListener(button, 'click', () => void run()));
-				};
-				const appliedEdits = externalEditItems.filter(edit => this.getExternalEditState(edit) !== 'undone');
-				const undoneEdits = externalEditItems.filter(edit => this.getExternalEditState(edit) === 'undone');
-				if (appliedEdits.length > 0) {
-					createAction(localize('chatEditingSession.undo', "Undo"), () => this.undoExternalEdits(appliedEdits));
-				} else if (undoneEdits.length > 0) {
-					createAction(localize('chatEditingSession.redo', "Redo"), () => this.redoExternalEdits(undoneEdits));
-				}
-				createAction(localize('chatEditingSession.review', "Review"), () => this.reviewExternalEdits(externalEditItems), true);
-				return;
-			}
 			reader.store.add(scopedInstantiationService.createInstance(MenuWorkbenchButtonBar, actionsContainer, isSessionMenu ? MenuId.ChatEditingSessionChangesToolbar : MenuId.ChatEditingWidgetToolbar, {
 				telemetrySource: this.options.menus.telemetrySource,
 				small: true,
@@ -4869,20 +4847,9 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 						$mid: MarshalledId.ChatViewContext,
 						sessionResource,
 					} satisfies IChatViewTitleActionContext,
-				}) : undefined,
+					}) : undefined,
 				disableWhileRunning: isSessionMenu,
 				buttonConfigProvider: (action) => {
-					if (isAuxiliaryBar) {
-						if (action.id === 'chatEditing.acceptAllFiles') {
-							return { showIcon: false, showLabel: true, isSecondary: true, customLabel: localize('chatEditingSession.keepAll', "Keep All") };
-						}
-						if (action.id === 'chatEditing.discardAllFiles') {
-							return { showIcon: false, showLabel: true, isSecondary: true, customLabel: localize('chatEditingSession.undoAll', "Undo All") };
-						}
-						if (action.id === ChatEditingShowChangesAction.ID) {
-							return { showIcon: false, showLabel: true, isSecondary: true, customLabel: localize('chatEditingSession.review', "Review") };
-						}
-					}
 					if (action.id === ChatEditingShowChangesAction.ID || action.id === ViewPreviousEditsAction.Id) {
 						return { showIcon: true, showLabel: false, isSecondary: true };
 					}
@@ -4899,13 +4866,9 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		store.add(autorun(reader => {
 			const { files, added, removed, shouldShowEditingSession } = topLevelStats.read(reader);
 
-			const buttonLabel = isAuxiliaryBar
-				? files === 1
-					? localize('chatEditingSession.oneFile.edited', "Edited 1 file")
-					: localize('chatEditingSession.manyFiles.edited', "Edited {0} files", files)
-				: files === 1
-					? localize('chatEditingSession.oneFile', '1 file changed')
-					: localize('chatEditingSession.manyFiles', '{0} files changed', files);
+			const buttonLabel = files === 1
+				? localize('chatEditingSession.oneFile', '1 file changed')
+				: localize('chatEditingSession.manyFiles', '{0} files changed', files);
 
 			button.label = buttonLabel;
 			button.element.setAttribute('aria-label', localize('chatEditingSession.ariaLabelWithCounts', '{0}, {1} lines added, {2} lines removed', buttonLabel, added, removed));
@@ -5076,39 +5039,6 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 
 		if (await this.undoExternalEdit(edit)) {
 			this._externalEditStates.set(key, 'undone');
-			this._onDidChangeExternalEditState.fire();
-		}
-	}
-
-	private async undoExternalEdits(edits: readonly IChatExternalEdit[]): Promise<void> {
-		let changed = false;
-		for (const edit of [...edits].reverse()) {
-			if (this.getExternalEditState(edit) === 'undone') {
-				continue;
-			}
-			if (await this.undoExternalEdit(edit)) {
-				this._externalEditStates.set(this.getExternalEditStateKey(edit), 'undone');
-				changed = true;
-			}
-		}
-		if (changed) {
-			this._onDidChangeExternalEditState.fire();
-		}
-	}
-
-	private async redoExternalEdits(edits: readonly IChatExternalEdit[]): Promise<void> {
-		let changed = false;
-		for (const edit of edits) {
-			const key = this.getExternalEditStateKey(edit);
-			if (this._externalEditStates.get(key) !== 'undone') {
-				continue;
-			}
-			if (await this.redoExternalEdit(edit)) {
-				this._externalEditStates.delete(key);
-				changed = true;
-			}
-		}
-		if (changed) {
 			this._onDidChangeExternalEditState.fire();
 		}
 	}

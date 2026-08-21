@@ -62,15 +62,7 @@ const NEW_CHAT_ALLOWED_SESSION_TYPES = [
 /** Prefix that turns a bare agent-host provider id into its session type. */
 const AGENT_HOST_SESSION_TYPE_PREFIX = 'agent-host-';
 
-const NEW_CHAT_COMPOSER_LAYOUT_HEIGHT = 216;
-const NEW_CHAT_COMPOSER_MIN_HEIGHT = 136;
-const NEW_CHAT_COMPOSER_MAX_HEIGHT = 250;
-const NEW_CHAT_HEADER_HEIGHT = 52;
-const NEW_CHAT_BOTTOM_GUTTER = 12;
-// ChatWidget reserves this much room for its hidden transcript before applying
-// the input-part override. Mirror that reservation so the value below describes
-// the actual maximum composer height rather than an implementation detail.
-const NEW_CHAT_RESERVED_LIST_HEIGHT = 50;
+const NEW_CHAT_COMPOSER_LAYOUT_HEIGHT = 104;
 type FirstSendWorkspaceChoice = 'selectFolder' | 'createFolder' | undefined;
 
 /**
@@ -1415,10 +1407,10 @@ export class NewChatWidget extends Disposable {
 	layout(_height: number, _width: number): void {
 		const width = this._composerStackElement?.clientWidth || this._chatWidgetContent?.clientWidth || _width;
 		const availableHeight = this._chatWidgetContent?.clientHeight || _height;
-		const availableComposerHeight = Math.max(0, availableHeight - NEW_CHAT_HEADER_HEIGHT - NEW_CHAT_BOTTOM_GUTTER);
-		const composerMaxHeight = Math.max(NEW_CHAT_COMPOSER_MIN_HEIGHT, Math.min(NEW_CHAT_COMPOSER_MAX_HEIGHT, availableComposerHeight));
-		this._widget.setInputPartMaxHeightOverride(composerMaxHeight + NEW_CHAT_RESERVED_LIST_HEIGHT);
-		this._widget.layout(Math.min(availableHeight, Math.max(NEW_CHAT_COMPOSER_LAYOUT_HEIGHT, composerMaxHeight)), width);
+		// Let the shared input size itself from its content just like the right
+		// panel. The hidden transcript receives the remaining height.
+		this._widget.setInputPartMaxHeightOverride(undefined);
+		this._widget.layout(Math.max(NEW_CHAT_COMPOSER_LAYOUT_HEIGHT, availableHeight), width);
 	}
 
 	focusInput(): void {

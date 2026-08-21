@@ -92,13 +92,18 @@ export class ChatMarkdownDecorationsRenderer {
 		@IChatMarkdownAnchorService private readonly chatMarkdownAnchorService: IChatMarkdownAnchorService,
 	) { }
 
-	convertParsedRequestToMarkdown(sessionResource: URI, parsedRequest: IParsedChatRequest): string {
+	convertParsedRequestToMarkdown(sessionResource: URI, parsedRequest: IParsedChatRequest, omitBackboardCapabilities = false): string {
 		let result = '';
 		for (const part of parsedRequest.parts) {
 			if (part instanceof ChatRequestTextPart) {
 				result += part.text;
 			} else if (part instanceof ChatRequestAgentPart) {
 				result += this.instantiationService.invokeFunction(accessor => agentToMarkdown(part.agent, sessionResource, false, accessor));
+			} else if (omitBackboardCapabilities && part instanceof ChatRequestDynamicVariablePart && part._meta?.backboardCapability === true) {
+				// Capabilities render in a stable metadata row under the request.
+				// Omitting them here prevents duplicate plain text in render styles
+				// that do not annotate markdown decoration links.
+				continue;
 			} else {
 				result += this.genericDecorationToMarkdown(part);
 			}

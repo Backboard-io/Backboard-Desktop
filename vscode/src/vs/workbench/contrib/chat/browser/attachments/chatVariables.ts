@@ -11,13 +11,21 @@ import { Range } from '../../../../../editor/common/core/range.js';
 import { URI } from '../../../../../base/common/uri.js';
 
 export function getDynamicVariablesForWidget(widget: IChatWidget): ReadonlyArray<IDynamicVariable> {
-	if (!widget.viewModel || !widget.supportsFileReferences) {
+	if (!widget.viewModel) {
 		return [];
 	}
 
 	const model = widget.getContrib<ChatDynamicVariableModel>(ChatDynamicVariableModel.ID);
 	if (!model) {
 		return [];
+	}
+
+	// Simple chat hosts can disable file references, but Backboard capability
+	// tokens are per-turn settings rather than file context. Preserve only
+	// those variables in that mode so their request metadata and sent UI row
+	// survive without reopening support for unrelated reference types.
+	if (!widget.supportsFileReferences) {
+		return model.variables.filter(variable => variable._meta?.backboardCapability === true);
 	}
 
 	// track for editing state

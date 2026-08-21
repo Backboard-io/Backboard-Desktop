@@ -88,7 +88,6 @@ import { IVoicePlaybackService } from '../../../common/voicePlaybackService.js';
 import { VoiceOnboardingCompletedClassification, VoiceOnboardingCompletedEvent } from '../../voiceClient/voiceTelemetry.js';
 import { IWorkbenchEnvironmentService } from '../../../../../services/environment/common/environmentService.js';
 import { backboardConfigResource, BackboardAuthContextKeys, BackboardAuthGateContextKeys, hasBackboardCredentials, isBackboardProduct } from '../../../common/backboardAuth.js';
-import { resolveBackboardUserInfo } from '../../backboardUserInfo.js';
 
 interface IChatViewPaneState extends Partial<IChatModelInputState> {
 	/**
@@ -729,32 +728,6 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 				sessionsControl.refresh();
 			}
 		}));
-
-		const accountFooter = append(sessionsContainer, $('.agent-sessions-account-footer'));
-		const accountAvatar = append(accountFooter, $('span.agent-sessions-account-avatar'));
-		accountAvatar.classList.add(...ThemeIcon.asClassNameArray(Codicon.account));
-		const accountCopy = append(accountFooter, $('.agent-sessions-account-copy'));
-		const accountName = append(accountCopy, $('span.agent-sessions-account-name', undefined, localize('backboardAccountName', "Backboard Studio")));
-		const accountSettings = append(accountFooter, $('button.agent-sessions-account-settings')) as HTMLButtonElement;
-		accountSettings.type = 'button';
-		accountSettings.title = localize('backboardAccountSettings', "Settings");
-		accountSettings.setAttribute('aria-label', accountSettings.title);
-		const settingsIcon = append(accountSettings, $('span'));
-		settingsIcon.classList.add(...ThemeIcon.asClassNameArray(Codicon.menu));
-		this._register(addDisposableListener(accountSettings, EventType.CLICK, () => this.commandService.executeCommand('workbench.action.openSettings')));
-		resolveBackboardUserInfo(this.fileService, this.pathService, this.requestService, this.logService).then(info => {
-			if (!accountFooter.isConnected) {
-				return;
-			}
-			// Match the Simple-mode sidebar: both surfaces use the shared resolver
-			// and prefer the signed-in display name before falling back to email.
-			accountName.textContent = info.name ?? info.email ?? localize('backboardAccountName', "Backboard Studio");
-			const identity = info.name ?? info.email;
-			if (identity) {
-				accountAvatar.classList.remove(...ThemeIcon.asClassNameArray(Codicon.account));
-				accountAvatar.textContent = identity.split(/\s+|@/).filter(Boolean).slice(0, 2).map(part => part[0]?.toUpperCase()).join('');
-			}
-		}).catch(error => this.logService.warn(`[Backboard] Unable to populate chat drawer identity: ${toErrorMessage(error)}`));
 
 		// Deal with orientation configuration
 		this._register(Event.runAndSubscribe(Event.filter(this.configurationService.onDidChangeConfiguration, e => e.affectsConfiguration(ChatConfiguration.ChatViewSessionsOrientation)), e => {

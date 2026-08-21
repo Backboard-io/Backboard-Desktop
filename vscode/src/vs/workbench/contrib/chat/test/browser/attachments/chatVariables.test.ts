@@ -85,6 +85,20 @@ suite('getDynamicVariablesForWidget', () => {
 		assert.deepStrictEqual(getDynamicVariablesForWidget(widget), []);
 	});
 
+	test('preserves only Backboard capabilities when file references are not supported', () => {
+		const capability = createMockVariable({
+			id: 'backboard-capability:computerUse',
+			_meta: { backboardCapability: true, backboardCapabilityId: 'computerUse' },
+		});
+		const ordinaryReference = createMockVariable({ id: 'ordinary-reference' });
+		const widget = createMockWidget({
+			supportsFileReferences: false,
+			contribVariables: [ordinaryReference, capability],
+		});
+
+		assert.deepStrictEqual(getDynamicVariablesForWidget(widget), [capability]);
+	});
+
 	test('returns contrib model variables when not editing', () => {
 		const variables = [createMockVariable()];
 		const widget = createMockWidget({ contribVariables: variables });
