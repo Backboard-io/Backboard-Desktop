@@ -11,7 +11,7 @@ import { isMacintosh } from '../../../../base/common/platform.js';
 import { PolicyCategory } from '../../../../base/common/policy.js';
 import '../../../../platform/agentHost/common/agentHost.config.contribution.js';
 import '../../../../platform/agentHost/common/agentHostStarter.config.contribution.js';
-import { AgentHostAhpJsonlLoggingSettingId, AgentHostCustomTerminalToolEnabledSettingId, AgentHostSdkSandboxEnabledSettingId, ClaudePreferAgentHostAgentsSettingId, ClaudePreferAgentHostEditorSettingId } from '../../../../platform/agentHost/common/agentService.js';
+import { AgentHostAhpJsonlLoggingSettingId, AgentHostCustomTerminalToolEnabledSettingId, AgentHostSdkSandboxEnabledSettingId } from '../../../../platform/agentHost/common/agentService.js';
 import { AgentNetworkFilterService, IAgentNetworkFilterService } from '../../../../platform/networkFilter/common/networkFilterService.js';
 import { AgentNetworkDomainSettingId } from '../../../../platform/networkFilter/common/settings.js';
 import { COPILOT_DISABLE_BYPASS_PERMISSIONS_MODE_KEY, COPILOT_ENABLED_PLUGINS_KEY, COPILOT_EXTRA_MARKETPLACES_KEY, COPILOT_STRICT_MARKETPLACES_KEY } from '../../../../platform/policy/common/copilotManagedSettings.js';
@@ -706,29 +706,6 @@ configurationRegistry.registerConfiguration({
 			tags: ['experimental'],
 			experiment: { mode: 'startup' },
 			description: nls.localize('chat.agentsHandoffTip.mode', "Controls the tip shown above the chat input offering to continue eligible agent sessions in Agents."),
-		},
-		[ClaudePreferAgentHostAgentsSettingId]: {
-			type: 'boolean',
-			description: nls.localize('chat.agents.claude.preferAgentHost', "When enabled, Claude sessions opened from Agents run inside the agent host process instead of an external chat extension. Only one Claude implementation surfaces per window."),
-			// On by default so the agent-host Claude (and with it the
-			// "My Claude Subscription" billing option) is reachable from the
-			// Agents window without touching settings.
-			default: true,
-			tags: ['experimental'],
-			experiment: { mode: 'startup' },
-		},
-		[ClaudePreferAgentHostEditorSettingId]: {
-			type: 'boolean',
-			description: nls.localize('chat.editor.claude.preferAgentHost', "When enabled, Claude sessions opened from the regular workbench (sidebar chat) run inside the agent host process instead of an external chat extension. Only one Claude implementation surfaces per window."),
-			// Default on, matching the Agents window: the agent host Claude is
-			// the subscription-native integration and the one the new-chat
-			// picker offers. Leaving it off strands editor-window users — the
-			// picker shows a Claude setup row that installing the CLI can
-			// never satisfy, because the suppression is window preference,
-			// not CLI availability.
-			default: true,
-			tags: ['experimental'],
-			experiment: { mode: 'startup' },
 		},
 		[ChatConfiguration.ChatContextUsageEnabled]: {
 			type: 'boolean',

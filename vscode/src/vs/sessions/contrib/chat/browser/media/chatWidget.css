@@ -208,14 +208,12 @@
 
 .new-chat-octopus {
 	position: absolute;
-	/* Set the visible body inside the composer's rounded corner and let the
-	 * tentacles overlap the top edge enough to read as a proper perch. The
-	 * empty upper canvas rows remain available for the mascot's gestures. */
-	right: 46px;
-	top: -28px;
+	/* Perch outside the card, just left of its right edge. */
+	right: 128px;
+	top: -36px;
 	line-height: 0;
 	pointer-events: none;
-	z-index: 2;
+	z-index: 3;
 }
 
 .new-chat-octopus .octo-sprite {

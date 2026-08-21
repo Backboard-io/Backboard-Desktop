@@ -3,9 +3,9 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { SequencerByKey, timeout } from '../../../../base/common/async.js';
+import { raceTimeout, SequencerByKey, timeout } from '../../../../base/common/async.js';
 import { VSBuffer } from '../../../../base/common/buffer.js';
-import { CancellationToken } from '../../../../base/common/cancellation.js';
+import { CancellationToken, CancellationTokenSource } from '../../../../base/common/cancellation.js';
 import { IStringDictionary } from '../../../../base/common/collections.js';
 import { CancellationError, getErrorMessage, isCancellationError } from '../../../../base/common/errors.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
@@ -43,6 +43,9 @@ import { ILanguageModelsProviderGroup, ILanguageModelsConfigurationService } fro
  * vendor across the chat stack (see `ILanguageModelProviderDescriptor.isDefault`).
  */
 export const COPILOT_VENDOR_ID = 'copilot';
+
+/** Prevent a stalled extension or network-backed provider from blocking model discovery forever. */
+const LANGUAGE_MODEL_RESOLUTION_TIMEOUT = 15_000;
 
 export const enum ChatMessageRole {
 	System,
@@ -920,11 +923,27 @@ export class LanguageModelsService implements ILanguageModelsService {
 		let provider = this._providers.get(vendorId);
 		if (!provider) {
 			// Activate extensions before requesting to resolve the models
-			await this._extensionService.activateByEvent(`onLanguageModelChatProvider:${vendorId}`);
+			let activationTimedOut = false;
+			try {
+				await raceTimeout(
+					this._extensionService.activateByEvent(`onLanguageModelChatProvider:${vendorId}`),
+					LANGUAGE_MODEL_RESOLUTION_TIMEOUT,
+					() => activationTimedOut = true,
+				);
+			} catch (error) {
+				this._setLanguageModelResolutionError(vendorId, getErrorMessage(error));
+				return;
+			}
+			if (activationTimedOut) {
+				this._setLanguageModelResolutionError(vendorId, localize('languageModels.activationTimedOut', "Timed out activating the {0} model provider.", vendor.displayName));
+				return;
+			}
 			provider = this._providers.get(vendorId);
 		}
 		if (!provider) {
-			this._logService.warn(`[LM] No provider registered for vendor ${vendorId}`);
+			const message = localize('languageModels.providerMissing', "The {0} model provider did not start.", vendor.displayName);
+			this._logService.warn(`[LM] ${message}`);
+			this._setLanguageModelResolutionError(vendorId, message);
 			return;
 		}
 
@@ -934,7 +953,7 @@ export class LanguageModelsService implements ILanguageModelsService {
 			const languageModelsGroups: ILanguageModelsGroup[] = [];
 
 			try {
-				const models = await provider.provideLanguageModelChatInfo({ silent }, CancellationToken.None);
+				const models = await this._provideLanguageModelChatInfoWithTimeout(provider, { silent }, vendor.displayName);
 				if (models.length) {
 					allModels.push(...models);
 					const modelIdentifiers = [];
@@ -990,7 +1009,7 @@ export class LanguageModelsService implements ILanguageModelsService {
 				const configuration = await this._resolveConfiguration(group, vendor.configuration);
 
 				try {
-					const models = await provider.provideLanguageModelChatInfo({ group: group.name, silent, configuration }, CancellationToken.None);
+					const models = await this._provideLanguageModelChatInfoWithTimeout(provider, { group: group.name, silent, configuration }, vendor.displayName);
 					if (models.length) {
 						// Provide a sensible default for `metadata.detail` so that
 						// multiple instances of the same vendor (e.g. multiple
@@ -1065,6 +1084,43 @@ export class LanguageModelsService implements ILanguageModelsService {
 				this._logService.trace(`[LM] No changes in language models for vendor ${vendorId}`);
 			}
 		});
+	}
+
+	private async _provideLanguageModelChatInfoWithTimeout(
+		provider: ILanguageModelChatProvider,
+		options: ILanguageModelChatInfoOptions,
+		vendorDisplayName: string,
+	): Promise<ILanguageModelChatMetadataAndIdentifier[]> {
+		const cancellation = new CancellationTokenSource();
+		let didTimeout = false;
+		try {
+			const models = await raceTimeout(
+				provider.provideLanguageModelChatInfo(options, cancellation.token),
+				LANGUAGE_MODEL_RESOLUTION_TIMEOUT,
+				() => {
+					didTimeout = true;
+					cancellation.cancel();
+				},
+			);
+			if (didTimeout || !models) {
+				throw new Error(localize('languageModels.resolutionTimedOut', "Timed out loading models from {0}.", vendorDisplayName));
+			}
+			return models;
+		} finally {
+			cancellation.dispose();
+		}
+	}
+
+	private _setLanguageModelResolutionError(vendorId: string, message: string): void {
+		const oldGroups = this._modelsGroups.get(vendorId) ?? [];
+		const nextGroups: ILanguageModelsGroup[] = [{
+			modelIdentifiers: [],
+			status: { message, severity: Severity.Error },
+		}];
+		this._modelsGroups.set(vendorId, nextGroups);
+		if (this._hasGroupStructureChanged(oldGroups, nextGroups)) {
+			this._onLanguageModelChange.fire(vendorId);
+		}
 	}
 
 	private _hasGroupStructureChanged(oldGroups: readonly ILanguageModelsGroup[], newGroups: readonly ILanguageModelsGroup[]): boolean {

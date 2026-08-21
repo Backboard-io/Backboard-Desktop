@@ -3,7 +3,6 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Codicon } from '../../../../../base/common/codicons.js';
 import { DisposableStore } from '../../../../../base/common/lifecycle.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { URI } from '../../../../../base/common/uri.js';
@@ -84,37 +83,7 @@ interface IAgentCliSetupDefinition extends IAgentCliSetupCandidate {
  * only sees the Install dialog, a progress notification, and (for vendors
  * that need it) their browser's sign-in page.
  */
-const SETUP_DEFINITIONS: readonly IAgentCliSetupDefinition[] = [
-	{
-		id: 'claude',
-		label: 'Claude',
-		icon: Codicon.claude,
-		description: localize('agentSetup.claude.description', "Sign in to use your Claude Pro/Max subscription"),
-		installDetail: localize('agentSetup.claude.detail', "Backboard will install the Claude CLI and open your browser to sign in with your Claude account. New sessions bill to your existing Claude subscription."),
-		install: {
-			posix: 'curl -fsSL https://claude.ai/install.sh | bash',
-			win32: 'irm https://claude.ai/install.ps1 | iex',
-		},
-		binDir: { posix: '$HOME/.local/bin', win32: '$env:USERPROFILE\\.local\\bin' },
-		signIn: 'claude auth login --claudeai',
-		readyMessage: localize('agentSetup.claude.ready', "Claude is ready — new sessions bill to your Claude subscription."),
-		pasteBackSignIn: true,
-	},
-	{
-		id: 'codex',
-		label: 'Codex',
-		icon: Codicon.openai,
-		description: localize('agentSetup.codex.description', "Sign in to use your ChatGPT subscription"),
-		installDetail: localize('agentSetup.codex.detail', "Backboard will install the Codex CLI and open your browser to sign in with your ChatGPT account. New sessions bill to your existing ChatGPT plan."),
-		install: {
-			posix: 'curl -fsSL https://chatgpt.com/codex/install.sh | sh',
-			win32: 'irm https://chatgpt.com/codex/install.ps1 | iex',
-		},
-		binDir: { posix: '$HOME/.local/bin', win32: '$env:USERPROFILE\\.local\\bin' },
-		signIn: 'codex login',
-		readyMessage: localize('agentSetup.codex.ready', "Codex is ready — new sessions bill to your ChatGPT plan."),
-	},
-];
+const SETUP_DEFINITIONS: readonly IAgentCliSetupDefinition[] = [];
 
 /** Matches the vendor OAuth URL in CLI sign-in output. */
 const SIGN_IN_URL_RE = /https:\/\/\S*(?:oauth|authorize)\S*/i;

@@ -6,13 +6,16 @@
 import { CancellationTokenSource } from '../../../../base/common/cancellation.js';
 import { MutableDisposable } from '../../../../base/common/lifecycle.js';
 import { URI } from '../../../../base/common/uri.js';
+import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { ServiceCollection } from '../../../../platform/instantiation/common/serviceCollection.js';
 import { EDITOR_DRAG_AND_DROP_BACKGROUND } from '../../../../workbench/common/theme.js';
+import { IAgentCliSetupService } from '../../../../workbench/contrib/chat/browser/agentSessions/agentCliSetup.js';
 import { ChatWidget } from '../../../../workbench/contrib/chat/browser/widget/chatWidget.js';
+import { createBackboardSessionTypePickerDelegate } from '../../../../workbench/contrib/chat/browser/widget/input/backboardSessionTypePickerDelegate.js';
 import { IChatModelReference, IChatService } from '../../../../workbench/contrib/chat/common/chatService/chatService.js';
 import { ChatAgentLocation, ChatModeKind } from '../../../../workbench/contrib/chat/common/constants.js';
 import { getChatSessionType } from '../../../../workbench/contrib/chat/common/model/chatUri.js';
@@ -129,6 +132,8 @@ export class ChatView extends AbstractChatView {
 		@IChatSessionsService private readonly chatSessionsService: IChatSessionsService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@ILogService private readonly logService: ILogService,
+		@ICommandService commandService: ICommandService,
+		@IAgentCliSetupService agentCliSetupService: IAgentCliSetupService,
 	) {
 		super();
 
@@ -154,7 +159,20 @@ export class ChatView extends AbstractChatView {
 				},
 				enableImplicitContext: true,
 				enableWorkingSet: 'explicit',
-				supportsChangingModes: true,
+				// Keep the live/sent Simple composer on the exact same contract as
+				// the code editor's sent-chat composer: one combined provider/model
+				// picker, no duplicate mode/folder controls, and the same two-line
+				// resting editor height.
+				isSessionsWindow: true,
+				sessionTypePickerDelegate: createBackboardSessionTypePickerDelegate(
+					() => this._widget?.viewModel?.model.sessionResource,
+					commandService,
+					this.chatSessionsService,
+					agentCliSetupService,
+					() => (this._widget?.viewModel?.model.getRequests().length ?? 0) === 0,
+				),
+				supportsChangingModes: false,
+				inputEditorMinLines: 2,
 				dndContainer: this.element,
 			},
 			this._buildStyles(this._isActive)

@@ -62,7 +62,6 @@ import { IChatViewsWelcomeDescriptor } from '../../viewsWelcome/chatViewsWelcome
 import { IWorkbenchLayoutService, LayoutSettings, Position } from '../../../../../services/layout/browser/layoutService.js';
 import { AgentSessionsViewerOrientation, AgentSessionsViewerPosition } from '../../agentSessions/agentSessions.js';
 import { IProgressService } from '../../../../../../platform/progress/common/progress.js';
-import { IRequestService } from '../../../../../../platform/request/common/request.js';
 import { ChatViewContainerId, ChatViewId } from '../../chat.js';
 import { IActivityService, ProgressBadge } from '../../../../../services/activity/common/activity.js';
 import { disposableTimeout } from '../../../../../../base/common/async.js';
@@ -162,7 +161,6 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 		@IPathService private readonly pathService: IPathService,
 		@IPaneCompositePartService private readonly paneCompositePartService: IPaneCompositePartService,
 		@IAgentCliSetupService private readonly agentCliSetupService: IAgentCliSetupService,
-		@IRequestService private readonly requestService: IRequestService,
 	) {
 		super(options, keybindingService2, contextMenuService, configurationService, contextKeyService, viewDescriptorService, instantiationService, openerService, themeService, hoverService);
 

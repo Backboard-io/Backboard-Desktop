@@ -891,6 +891,14 @@ html body .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.j
 	background: var(--codex-canvas) !important;
 }
 
+/* The active transcript keeps its canvas, but the dock beneath it should not
+ * paint a second full-width rectangle behind the narrower composer card. Let
+ * the Sessions part show through around the composer instead. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .chat-view-chat.backboard-clean-chat.backboard-composer > .interactive-session,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .chat-view-chat.backboard-clean-chat.backboard-composer > .interactive-session > .interactive-input-part {
+	background: transparent !important;
+}
+
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .interactive-item-container,
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session > .chat-suggest-next-widget {
 	width: 100%;

@@ -686,7 +686,7 @@
 	gap: 6px;
 	overflow: visible;
 	color: var(--session-view-foreground);
-	font-size: 13px;
+	font-size: 14px;
 	line-height: 20px;
 }
 
@@ -703,7 +703,11 @@
 	border-radius: 0;
 	background: transparent;
 	color: var(--session-view-foreground);
-	font-size: 13px;
+	font-size: 14px;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-meta-workspace-icon {
+	font-size: 15px;
 }
 
 .agent-sessions-workbench .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-session-title {
@@ -711,7 +715,7 @@
 	min-height: 20px;
 	padding: 0;
 	margin: 0;
-	font-size: 13px;
+	font-size: 14px;
 	font-weight: 600;
 }
 
@@ -749,6 +753,7 @@
 .agent-sessions-workbench .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-title-row {
 	height: 48px;
 	gap: 7px;
+	transform: translateY(-2px);
 }
 
 /* T3 keeps change counts in the changed-files surface, not inside the project
@@ -761,6 +766,7 @@
 	display: flex;
 	align-items: center;
 	gap: 6px;
+	transform: translateY(-2px);
 }
 
 .agent-sessions-workbench .sessions-header-session-toolbar-slot .monaco-toolbar .action-item {
@@ -782,7 +788,7 @@
 	border-radius: 8px;
 	background: transparent;
 	color: color-mix(in srgb, var(--session-view-foreground) 76%, transparent);
-	font-size: 12px;
+	font-size: 15px;
 	line-height: 26px;
 	opacity: 1;
 }
@@ -1334,9 +1340,13 @@
 	padding-bottom: 4px;
 }
 
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .interactive-input-part {
-	padding-left: 20px;
-	padding-right: 20px;
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .chat-view-chat.backboard-clean-chat.backboard-composer .interactive-session .interactive-input-part {
+	/* Match the code editor's sent-chat composer box model exactly. The inset
+	 * belongs to the composer's width, not inner padding, so Monaco and the
+	 * footer controls receive the same content width in both hosts. */
+	width: calc(100% - (2 * var(--bb-t3-viewport-inset)));
+	margin: 0 auto;
+	padding: 0 0 10px;
 }
 
 .agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .interactive-input-part .chat-input-container {
@@ -1552,7 +1562,9 @@
 	padding: 0;
 }
 
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session:not(.chat-composer-empty) .chat-input-toolbars {
+/* Advanced keeps its denser sent-state footer. Simple intentionally uses the
+ * shared 28px code-editor controls above. */
+.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view .interactive-session:not(.chat-composer-empty) .chat-input-toolbars {
 	height: 24px;
 	min-height: 24px;
 }
@@ -1604,8 +1616,8 @@
 	justify-content: center;
 }
 
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session:not(.chat-composer-empty) .chat-input-toolbar .monaco-action-bar .action-item .action-label:not(.model-picker-split),
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session:not(.chat-composer-empty) .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item .action-label.codicon-mic {
+.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view .interactive-session:not(.chat-composer-empty) .chat-input-toolbar .monaco-action-bar .action-item .action-label:not(.model-picker-split),
+.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view .interactive-session:not(.chat-composer-empty) .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item .action-label.codicon-mic {
 	height: 24px;
 	min-width: 24px;
 }

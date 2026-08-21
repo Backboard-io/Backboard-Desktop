@@ -103,6 +103,14 @@
 	padding-top: 4px;
 }
 
+/* Fullscreen/maximized windows have no left-side window chrome reservation.
+   Keep the Advanced mode menu anchored to the same top-left edge as Editor
+   and Simple, including at responsive widths. */
+.agent-sessions-workbench.mac.fullscreen .optimus-window-chrome,
+.agent-sessions-workbench.mac.maximized .optimus-window-chrome {
+	padding-left: 8px;
+}
+
 /* Windows/Linux: there are no traffic lights at the left edge, and the native
    window controls (min/max/close) are drawn by the OS as an overlay over the
    top-right corner. Flip the reserved space accordingly: hug the left edge and

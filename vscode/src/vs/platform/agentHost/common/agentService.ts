@@ -59,14 +59,9 @@ export const AgentHostCustomTerminalToolEnabledSettingId = 'chat.agentHost.custo
 /**
  * Configuration key controlling whether the Claude provider is registered in
  * the agent host process. When `false`, the agent host skips registering the
- * Claude provider regardless of SDK availability. Defaults to `true`.
- *
- * Independent of {@link ClaudePreferAgentHostAgentsSettingId} /
- * {@link ClaudePreferAgentHostEditorSettingId}, which control whether the
- * workbench surfaces the agent host's Claude provider (vs. the GitHub Copilot
- * Chat extension's). This setting is strictly about whether the agent host
- * advertises Claude at all. The agent host process must be restarted for
- * changes to take effect.
+ * Claude provider regardless of SDK availability. Defaults to `false` because
+ * Claude is surfaced only through extensions. The agent host process must be
+ * restarted for changes to take effect.
  */
 export const AgentHostClaudeAgentEnabledSettingId = 'chat.agentHost.claudeAgent.enabled';
 
@@ -146,72 +141,13 @@ export function isAgentEnabled(envValue: string | undefined, defaultEnabled: boo
 export const AgentHostSdkSandboxEnabledSettingId = 'chat.agentHost.sdkSandbox.enabled';
 
 /**
- * Selects which Claude integration fulfills Claude sessions opened from the
- * **Agents Window**:
- *  - `true` — Claude is provided by the agent host process.
- *  - `false` (default) — Claude is provided by the GitHub Copilot Chat extension.
- *
- * The agent host always registers Claude when its SDK is reachable; this
- * setting only controls whether the per-window bridge in
- * `AgentHostContribution` actually surfaces the AH provider in the Agents
- * Window. The extension's `chatSessions` contribution mirrors the rule
- * declaratively (its `when` clause hides the EH provider when this is `true`),
- * so flipping the setting takes effect live without a window reload.
- *
- * Paired with {@link ClaudePreferAgentHostEditorSettingId} which governs the
- * regular workbench (sidebar). EXP-backed (`experiment: { mode: 'startup' }`).
+ * Whether an agent-host provider is allowed to surface in Backboard. Claude
+ * and Codex are extension-only integrations: their built-in agent-host
+ * implementations use external Claude/ChatGPT subscriptions and must remain
+ * hidden on local and remote hosts.
  */
-export const ClaudePreferAgentHostAgentsSettingId = 'chat.agents.claude.preferAgentHost';
-
-/**
- * Sibling of {@link ClaudePreferAgentHostAgentsSettingId} that selects the
- * Claude implementation for the **regular workbench** (sidebar chat in a
- * non-Agents-Window window). Same shape, same semantics — just a different
- * surface scope.
- */
-export const ClaudePreferAgentHostEditorSettingId = 'chat.editor.claude.preferAgentHost';
-
-/**
- * The per-window setting that selects which Claude implementation surfaces:
- * the Agents Window reads {@link ClaudePreferAgentHostAgentsSettingId}, every
- * other window reads {@link ClaudePreferAgentHostEditorSettingId}. Callers that
- * observe the gate (to react to live flips) watch the id returned here; callers
- * that evaluate it use {@link shouldSurfaceLocalAgentHostProvider}.
- */
-export function claudePreferAgentHostSettingId(isSessionsWindow: boolean): string {
-	return isSessionsWindow
-		? ClaudePreferAgentHostAgentsSettingId
-		: ClaudePreferAgentHostEditorSettingId;
-}
-
-/**
- * Whether this window should surface the agent host's implementation of
- * `provider`, given the per-window AH/EH preference settings. Today only the
- * `claude` provider has dual implementations (the GitHub Copilot Chat
- * extension's extension-host provider vs. the agent host's in-process
- * provider) and a corresponding preference; every other provider is AH-only
- * and unconditionally surfaced.
- *
- * Mirrors the EH-side gate declared in the extension's `chatSessions`
- * contribution `when` clause:
- *   - Agents Window  → {@link ClaudePreferAgentHostAgentsSettingId}
- *   - Editor Window  → {@link ClaudePreferAgentHostEditorSettingId}
- *
- * When the relevant setting is `false`, the extension-host Claude is the one
- * that surfaces in this window, so every agent-host surface (the chat session
- * contribution and the sessions-window picker) suppresses its own Claude to
- * avoid two identical entries.
- *
- * TODO: Remove this gate (and the `claude` special-case below) once the
- * extension-host Claude implementation is retired. With only the agent host
- * providing Claude there is no dual implementation to disambiguate, so this
- * should unconditionally return `true` and callers can drop the gate entirely.
- */
-export function shouldSurfaceLocalAgentHostProvider(provider: AgentProvider, configurationService: IConfigurationService, isSessionsWindow: boolean): boolean {
-	if (provider !== 'claude') {
-		return true;
-	}
-	return configurationService.getValue<boolean>(claudePreferAgentHostSettingId(isSessionsWindow)) === true;
+export function shouldSurfaceAgentHostProvider(provider: AgentProvider): boolean {
+	return provider !== 'claude' && provider !== 'codex';
 }
 
 // -- Codex agent settings --------------------------------------------------------

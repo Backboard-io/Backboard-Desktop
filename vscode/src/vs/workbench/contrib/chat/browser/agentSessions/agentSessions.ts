@@ -35,18 +35,14 @@ export enum AgentSessionProviders {
 export type AgentSessionTarget = AgentSessionProviders | (string & {});
 
 /**
- * Returns whether a provider id belongs to an external subscription-backed
- * agent. This includes legacy aliases and remote provider ids for Claude and
- * Codex. Backboard sessions using Anthropic or OpenAI models still have the
- * Backboard session provider id and are intentionally not matched here.
+ * Returns whether a provider id belongs to a built-in or remote agent-host
+ * subscription integration. Extension-contributed Claude and Codex session
+ * types are intentionally not matched.
  */
 export function isSubscriptionAgentSessionProvider(provider: AgentSessionTarget): boolean {
 	const normalizedProvider = provider.toLowerCase();
-	return normalizedProvider === 'anthropic' ||
-		normalizedProvider.includes('claude') ||
-		normalizedProvider === 'openai' ||
-		normalizedProvider === 'chatgpt' ||
-		normalizedProvider.includes('codex');
+	return isAgentHostTarget(provider) &&
+		(normalizedProvider.includes('claude') || normalizedProvider.includes('codex'));
 }
 
 export function isBuiltInAgentSessionProvider(provider: AgentSessionTarget): boolean {

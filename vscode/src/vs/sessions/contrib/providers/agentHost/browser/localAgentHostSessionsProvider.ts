@@ -11,7 +11,7 @@ import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { localize } from '../../../../../nls.js';
 import { toAgentHostUri } from '../../../../../platform/agentHost/common/agentHostUri.js';
-import { IAgentConnection, IAgentHostService, claudePreferAgentHostSettingId, shouldSurfaceLocalAgentHostProvider, type IAgentSessionMetadata } from '../../../../../platform/agentHost/common/agentService.js';
+import { IAgentConnection, IAgentHostService, shouldSurfaceAgentHostProvider, type IAgentSessionMetadata } from '../../../../../platform/agentHost/common/agentService.js';
 import type { ISessionGitState } from '../../../../../platform/agentHost/common/state/sessionState.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
@@ -51,8 +51,6 @@ export class LocalAgentHostSessionsProvider extends BaseAgentHostSessionsProvide
 	readonly browseActions: readonly ISessionWorkspaceBrowseAction[];
 	readonly supportsLocalWorkspaces = true;
 
-	/** `true` when running in the dedicated Agents window vs. a regular editor window. */
-	private readonly _isSessionsWindow: boolean;
 	private readonly _isOptimusWindow: boolean;
 
 	protected override getLogOutputChannelId(): string | undefined {
@@ -89,7 +87,6 @@ export class LocalAgentHostSessionsProvider extends BaseAgentHostSessionsProvide
 	) {
 		super(chatSessionsService, chatService, chatWidgetService, languageModelsService, _configurationService, logService, gitHubService, instantiationService, sessionsService, activeClientService, storageService, rememberedSessionConfig);
 
-		this._isSessionsWindow = environmentService.isSessionsWindow;
 		this._isOptimusWindow = environmentService.isOptimusWindow;
 
 		this.label = localize('localAgentHostLabel', "Local Agent Host");
@@ -125,30 +122,10 @@ export class LocalAgentHostSessionsProvider extends BaseAgentHostSessionsProvide
 			this._resumeNewSessionAfterAuthenticationSettles();
 		}));
 
-		// Re-sync session types when a preference that gates which agents this
-		// provider advertises changes:
-		//  - `LocalAgentHostDefaultProviderSettingId` flips the provider's
-		//    `order`, so re-fire `onDidChangeSessionTypes` to re-sort.
-		//  - the per-window Claude AH/EH preference flips whether the agent
-		//    host's Claude is surfaced here (see `_shouldAdvertiseAgent`), so
-		//    re-run the full sync to add/remove the Claude session type live.
-		const preferAgentHostClaudeSettingId = claudePreferAgentHostSettingId(this._isSessionsWindow);
+		// Re-sort when the local agent host's default-provider preference changes.
 		this._register(this._configurationService.onDidChangeConfiguration(e => {
 			if (e.affectsConfiguration(LocalAgentHostDefaultProviderSettingId)) {
 				this._onDidChangeSessionTypes.fire();
-			}
-			if (e.affectsConfiguration(preferAgentHostClaudeSettingId)) {
-				const current = this._agentHostService.rootState.value;
-				if (current && !(current instanceof Error)) {
-					this._syncSessionTypesFromRootState(current);
-				}
-				// `getSessions()` filters by the same gate, so the set of visible
-				// sessions just changed too. Fire an empty-payload change so the
-				// open list re-queries and re-filters. The payload is deliberately
-				// empty: these sessions are hidden, not removed, and signalling
-				// them as `removed` would be misread as a remote deletion (e.g. by
-				// the sessions telemetry contribution).
-				this._onDidChangeSessions.fire({ added: [], removed: [], changed: [] });
 			}
 		}));
 	}
@@ -160,21 +137,11 @@ export class LocalAgentHostSessionsProvider extends BaseAgentHostSessionsProvide
 	protected get authenticationPending(): IObservable<boolean> { return this._agentHostService.authenticationPending; }
 
 	/**
-	 * Suppress the agent host's Claude when this window prefers the
-	 * extension-host Claude (provided by the GitHub Copilot Chat extension),
-	 * mirroring the gate {@link AgentHostContribution} applies to the chat
-	 * session contribution. Without this, the welcome picker's "Local Agent
-	 * Host" group would list Claude even though the running Claude session is
-	 * served by the extension host — surfacing it twice.
-	 *
-	 * TODO: Remove this override (and the gate it applies in `getSessions()`
-	 * plus the `preferAgentHost` re-fire in the constructor) once the
-	 * extension-host Claude implementation is retired. With the agent host as
-	 * the only Claude there is nothing to disambiguate, so the base default
-	 * (advertise everything) is correct. See {@link shouldSurfaceLocalAgentHostProvider}.
+	 * Keep built-in subscription-backed agents out of the session picker and
+	 * history. Claude and Codex remain available when contributed by extensions.
 	 */
 	protected override _shouldAdvertiseAgent(provider: string): boolean {
-		return shouldSurfaceLocalAgentHostProvider(provider, this._configurationService, this._isSessionsWindow);
+		return shouldSurfaceAgentHostProvider(provider);
 	}
 
 	/**

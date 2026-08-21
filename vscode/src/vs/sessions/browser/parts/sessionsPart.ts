@@ -209,6 +209,25 @@ export class SessionsPart extends Part {
 		// as the session toolbar above so the controls keep their position once a
 		// chat is sent. Only one of the two is ever populated at a time.
 		this._headerNewSessionToolbarSlot = this._panelHeader.createRightSlot('sessions-header-new-session-toolbar-slot');
+
+		// `createContentArea()` seeds the grid with an empty slot before the
+		// sessions service has necessarily emitted its first reconciliation. Bind
+		// that slot now so switching into Simple mode paints the composer
+		// synchronously instead of leaving a blank canvas while providers load.
+		const placeholder = this._slots[0];
+		if (placeholder?.boundSessionId === undefined) {
+			placeholder.view.openSession(undefined, this._newSessionViewOptions());
+			placeholder.view.element.classList.add('is-active');
+			placeholder.view.setActive(true);
+		}
+	}
+
+	private _newSessionViewOptions() {
+		return {
+			renderSessionTypePickerInControls: this._renderSessionTypePickerInControls,
+			headerTypePickerSlot: this._headerTypePickerSlot,
+			headerToolbarSlot: this._headerNewSessionToolbarSlot,
+		};
 	}
 
 	protected override createContentArea(parent: HTMLElement): HTMLElement {
@@ -292,7 +311,7 @@ export class SessionsPart extends Part {
 			const slot = this._slots[i];
 			const session = visible[i];
 			slot.boundSessionId = session?.sessionId;
-			slot.view.openSession(session, { renderSessionTypePickerInControls: this._renderSessionTypePickerInControls, headerTypePickerSlot: this._headerTypePickerSlot, headerToolbarSlot: this._headerNewSessionToolbarSlot });
+			slot.view.openSession(session, this._newSessionViewOptions());
 		}
 
 		// Mark the active session's element for styling/focus indication.

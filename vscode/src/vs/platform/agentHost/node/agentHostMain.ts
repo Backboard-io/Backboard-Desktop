@@ -276,6 +276,10 @@ async function startAgentHost(): Promise<void> {
 				reg.dispose();
 				authorityRegistrations.delete(connection);
 			}
+			const clientId = connection.ctx;
+			if (typeof clientId === 'string' && clientId) {
+				agentService.unsubscribeClient(clientId);
+			}
 		}));
 		for (const connection of server.connections) {
 			registerConnection(connection);

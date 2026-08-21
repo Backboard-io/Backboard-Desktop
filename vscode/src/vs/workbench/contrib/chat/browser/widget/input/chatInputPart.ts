@@ -19,6 +19,7 @@ import { IStringDictionary } from '../../../../../../base/common/collections.js'
 import { isDefined } from '../../../../../../base/common/types.js';
 import { CancellationToken } from '../../../../../../base/common/cancellation.js';
 import { Codicon } from '../../../../../../base/common/codicons.js';
+import { getErrorMessage } from '../../../../../../base/common/errors.js';
 import { Emitter, Event } from '../../../../../../base/common/event.js';
 import { Iterable } from '../../../../../../base/common/iterator.js';
 import { KeyCode } from '../../../../../../base/common/keyCodes.js';
@@ -876,6 +877,23 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		};
 		this._register(this.languageModelsService.onDidChangeLanguageModels(resetCurrentLanguageModelIfUnavailable));
 		this._register(this.languageModelsService.onDidChangeModelVisibility(resetCurrentLanguageModelIfUnavailable));
+
+		// Reading the model cache does not activate or resolve contributed model
+		// providers. Resolve every still-pending vendor when the input is created,
+		// and again when late extension registration adds a vendor. Without this,
+		// a startup race can leave the picker on "Loading models" indefinitely.
+		const resolvePendingLanguageModels = () => {
+			const pendingVendors = this.languageModelsService.getVendors()
+				.filter(vendor => !this.languageModelsService.hasResolvedVendor(vendor.vendor));
+			for (const vendor of pendingVendors) {
+				void this.languageModelsService.selectLanguageModels({ vendor: vendor.vendor }).then(
+					resetCurrentLanguageModelIfUnavailable,
+					error => this.logService.warn(`[ChatInputPart] Failed to resolve models for ${vendor.vendor}: ${getErrorMessage(error)}`),
+				);
+			}
+		};
+		this._register(this.languageModelsService.onDidChangeLanguageModelVendors(resolvePendingLanguageModels));
+		resolvePendingLanguageModels();
 
 		this._register(this.onDidChangeCurrentChatMode(() => {
 			this.accessibilityService.alert(this._currentModeObservable.get().label.get());
