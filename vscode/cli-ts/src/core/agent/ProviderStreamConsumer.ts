@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
+import { extname, join } from "node:path";
 import {
 	isRetryableStreamServerError,
 	streamRetryDelayMs,
@@ -11,10 +14,35 @@ import type { Session } from "../session/Session.ts";
 import { AbortError } from "../tools/ToolAbort.ts";
 import type { EarlyToolSink } from "../tools/ToolScheduler.ts";
 import type { AssistantAccumulator } from "./AssistantAccumulator.ts";
+import {
+	isModelAvailabilityError,
+	isThinkingCompatibilityError,
+} from "./RuntimeRecovery.ts";
 
 export interface PendingAction {
 	runId: string | null;
 	calls: ToolCallRef[];
+}
+
+export interface ProviderStreamConsumerOptions {
+	/** Buffer image-enabled responses so malformed provider HTML never reaches the UI. */
+	imageGeneration?: boolean;
+	/** Project directory where generated image bytes should be persisted. */
+	generatedMediaDir?: string;
+	/** Test seam for downloading generated media. */
+	fetch?: (url: string) => Promise<Response>;
+}
+
+interface GeneratedMedia {
+	url: string;
+	label: string;
+	savedPath?: string;
+	contentHash?: string;
+}
+
+interface PersistedGeneratedMedia {
+	path: string;
+	contentHash: string;
 }
 
 class ProviderStreamFailure extends Error {
@@ -31,6 +59,7 @@ export class ProviderStreamConsumer {
 	constructor(
 		private readonly bus: EventBus,
 		private readonly session: Session,
+		private readonly options: ProviderStreamConsumerOptions = {},
 	) {}
 
 	async consumeWithRetry(
@@ -39,6 +68,7 @@ export class ProviderStreamConsumer {
 		signal: AbortSignal,
 		earlyTools?: EarlyToolSink,
 		onTerminalFailure?: () => Promise<string | null>,
+		onRetry?: (error: unknown) => Promise<void> | void,
 	): Promise<PendingAction | null> {
 		const maxRetries = streamServerErrorRetries();
 		for (let attempt = 0; ; attempt++) {
@@ -67,6 +97,7 @@ export class ProviderStreamConsumer {
 					}
 					throw err;
 				}
+				await onRetry?.(err);
 				assistant.discardPartial();
 				try {
 					await waitForRetry(streamRetryDelayMs(attempt + 1), signal);
@@ -87,13 +118,21 @@ export class ProviderStreamConsumer {
 		assistant: AssistantAccumulator,
 		earlyTools?: EarlyToolSink,
 	): Promise<PendingAction | null> {
+		let bufferedText = "";
+		const generatedMedia: GeneratedMedia[] = [];
 		for await (const event of stream) {
 			switch (event.kind) {
 				case "thread":
 					this.session.threadId = event.threadId;
 					break;
 				case "assistant_delta":
-					if (event.text) assistant.appendDelta(event.text);
+					if (event.text) {
+						if (this.options.imageGeneration) bufferedText += event.text;
+						else assistant.appendDelta(event.text);
+					}
+					break;
+				case "reasoning_delta":
+					if (event.text) assistant.appendReasoning(event.text);
 					break;
 				case "tool_started":
 					earlyTools?.announce(event.id, event.name);
@@ -112,13 +151,30 @@ export class ProviderStreamConsumer {
 				case "warning":
 					this.bus.emit({ type: "system:warning", message: event.message });
 					break;
+				case "media": {
+					const media = mediaFromPayload(event.payload);
+					if (media) {
+						await this.addGeneratedMedia(media, generatedMedia);
+					} else {
+						this.bus.emit({
+							type: "system:warning",
+							message: `Backboard sent generated media in an unrecognized shape (keys: ${Object.keys(event.payload).join(", ")}).`,
+						});
+					}
+					break;
+				}
 				case "requires_action": {
 					const calls = event.calls.map((call) => ({
 						id: call.id,
 						name: call.name,
 						input: call.input,
 					}));
-					assistant.finalize(calls);
+					assistant.finalize(
+						calls,
+						this.options.imageGeneration
+							? normalizeImageResponse(bufferedText, generatedMedia)
+							: undefined,
+					);
 					return { runId: event.runId, calls };
 				}
 				case "failed":
@@ -126,15 +182,76 @@ export class ProviderStreamConsumer {
 						event.error,
 						event.retryable === true,
 					);
-				case "completed":
-					assistant.finalize([], event.finalText);
+				case "completed": {
+					const finalText = event.finalText ?? bufferedText;
+					if (this.options.imageGeneration) {
+						// Some providers omit the media event and return the generated
+						// Backboard URL only in final_content. Persist that response too.
+						for (const media of mediaFromResponseText(finalText)) {
+							await this.addGeneratedMedia(media, generatedMedia);
+						}
+					}
+					assistant.finalize(
+						[],
+						this.options.imageGeneration
+							? normalizeImageResponse(finalText, generatedMedia)
+							: event.finalText,
+					);
 					return null;
+				}
 			}
 		}
 		throw new ProviderStreamFailure(
 			"Provider stream closed unexpectedly before a terminal event.",
 			true,
 		);
+	}
+
+	private async addGeneratedMedia(
+		media: GeneratedMedia,
+		generatedMedia: GeneratedMedia[],
+	): Promise<void> {
+		if (generatedMedia.some((item) => item.url === media.url)) return;
+		const persisted = await this.persistGeneratedMedia(media.url);
+		media.savedPath = persisted?.path;
+		media.contentHash = persisted?.contentHash;
+		if (
+			!media.contentHash ||
+			!generatedMedia.some((item) => item.contentHash === media.contentHash)
+		) {
+			generatedMedia.push(media);
+		}
+	}
+
+	private async persistGeneratedMedia(
+		url: string,
+	): Promise<PersistedGeneratedMedia | undefined> {
+		const directory = this.options.generatedMediaDir;
+		if (!directory) return undefined;
+		try {
+			const response = await (this.options.fetch ?? fetch)(url);
+			if (!response.ok) {
+				throw new Error(`download returned HTTP ${response.status}`);
+			}
+			const bytes = new Uint8Array(await response.arrayBuffer());
+			if (bytes.byteLength === 0) throw new Error("download was empty");
+			await mkdir(directory, { recursive: true });
+			const contentHash = createHash("sha256").update(bytes).digest("hex");
+			const filename = generatedMediaFilename(
+				contentHash,
+				url,
+				response.headers.get("content-type"),
+			);
+			const path = join(directory, filename);
+			await writeFile(path, bytes);
+			return { path, contentHash };
+		} catch (error) {
+			this.bus.emit({
+				type: "system:warning",
+				message: `Generated image could not be saved locally: ${errorMessage(error)}`,
+			});
+			return undefined;
+		}
 	}
 }
 
@@ -156,6 +273,9 @@ export async function preserveProviderContext(
 }
 
 function isRetryableProviderStreamFailure(error: unknown): boolean {
+	if (isModelAvailabilityError(error) || isThinkingCompatibilityError(error)) {
+		return true;
+	}
 	if (error instanceof ProviderStreamFailure) {
 		return error.retryable || isRetryableStreamServerError(error);
 	}
@@ -175,4 +295,155 @@ async function waitForRetry(ms: number, signal: AbortSignal): Promise<void> {
 			{ once: true },
 		);
 	});
+}
+
+function mediaFromPayload(
+	payload: Record<string, unknown>,
+): GeneratedMedia | null {
+	const url =
+		mediaUrlField(payload) ??
+		mediaUrlField(payload.media) ??
+		mediaUrlField(payload.data) ??
+		mediaUrlField(payload.image) ??
+		mediaUrlField(payload.chunk);
+	if (!url) return null;
+	const label =
+		typeof payload.prompt === "string" && payload.prompt.trim()
+			? payload.prompt.trim()
+			: "Generated image";
+	return { url, label: label.replace(/[[\]]/g, "") };
+}
+
+function mediaFromResponseText(text: string): GeneratedMedia[] {
+	const media: GeneratedMedia[] = [];
+	const add = (url: string, label: string) => {
+		if (
+			isBackboardGeneratedMediaUrl(url) &&
+			!media.some((item) => item.url === url)
+		) {
+			media.push({
+				url,
+				label: label.replace(/[[\]]/g, "").trim() || "Generated image",
+			});
+		}
+	};
+
+	for (const match of text.matchAll(
+		/!\[([^\]]*)\]\(\s*(https:\/\/[^)\s]+)\s*\)/gi,
+	)) {
+		add(match[2] ?? "", match[1] ?? "Generated image");
+	}
+	for (const match of text.matchAll(/\\?<img\b[^>]*>/gi)) {
+		const tag = match[0];
+		const url = /\bsrc=["'](https:\/\/[^"']+)["']/i.exec(tag)?.[1];
+		const label = /\balt=["']([^"']*)["']/i.exec(tag)?.[1];
+		if (url) add(url, label ?? "Generated image");
+	}
+	return media;
+}
+
+function isBackboardGeneratedMediaUrl(value: string): boolean {
+	try {
+		const url = new URL(value);
+		return (
+			url.protocol === "https:" &&
+			url.hostname === "backboard-prod.s3.ca-central-1.amazonaws.com" &&
+			url.pathname.startsWith("/generated-images/")
+		);
+	} catch {
+		return false;
+	}
+}
+
+function normalizeImageResponse(text: string, media: GeneratedMedia[]): string {
+	let normalized = text
+		// Backboard may return an escaped HTML tag whose src itself contains a
+		// markdown link. It is invalid in both HTML and markdown, so remove it.
+		.replace(/\\?<img\b[^>]*>/gi, "")
+		.trim();
+	if (media.length > 0) {
+		// The media event is authoritative for this turn. Drop image markdown from
+		// final_content so an older conversation image cannot be repeated.
+		normalized = normalized
+			.replace(/!\[[^\]]*\]\(\s*(?:https?:\/\/|data:image\/)[^)]+\)/gi, "")
+			.trim();
+		for (const item of media) {
+			normalized = normalized.split(item.url).join("");
+		}
+		normalized = normalized
+			.replace(/\[[^\]]+\]\(\s*\)/g, "")
+			.replace(/:\s*$/, ".")
+			.trim();
+		normalized = dedupeParagraphs(normalized);
+	}
+
+	const rendered = media.map((item) => {
+		const saved = item.savedPath
+			? `\n\nSaved to \`${projectRelativeGeneratedPath(item.savedPath)}\`.`
+			: "";
+		return `![${item.label}](${item.url})${saved}`;
+	});
+	return [normalized, ...rendered].filter(Boolean).join("\n\n");
+}
+
+function dedupeParagraphs(text: string): string {
+	const seen = new Set<string>();
+	return text
+		.split(/\n{2,}/)
+		.map((paragraph) => paragraph.trim())
+		.filter((paragraph) => {
+			if (!paragraph || seen.has(paragraph)) return false;
+			seen.add(paragraph);
+			return true;
+		})
+		.join("\n\n");
+}
+
+function generatedMediaFilename(
+	contentHash: string,
+	url: string,
+	contentType: string | null,
+): string {
+	let sourceExtension = "";
+	try {
+		sourceExtension = extname(new URL(url).pathname).toLowerCase();
+	} catch {
+		// Data URLs and malformed provider URLs fall through to content type.
+	}
+	const extension = /^[.](?:png|jpe?g|webp|gif|avif)$/.test(sourceExtension)
+		? sourceExtension === ".jpeg"
+			? ".jpg"
+			: sourceExtension
+		: extensionForContentType(contentType);
+	return `generated-${contentHash.slice(0, 12)}${extension}`;
+}
+
+function extensionForContentType(contentType: string | null): string {
+	const type = contentType?.split(";", 1)[0]?.trim().toLowerCase();
+	if (type === "image/png") return ".png";
+	if (type === "image/webp") return ".webp";
+	if (type === "image/gif") return ".gif";
+	if (type === "image/avif") return ".avif";
+	return ".jpg";
+}
+
+function projectRelativeGeneratedPath(path: string): string {
+	const marker = `${join("generated-images", "")}`;
+	const index = path.lastIndexOf(marker);
+	return index >= 0 ? path.slice(index) : path;
+}
+
+function mediaUrlField(value: unknown): string | null {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+	const record = value as Record<string, unknown>;
+	for (const key of ["url", "image_url", "imageUrl", "media_url", "href"]) {
+		const candidate = record[key];
+		if (
+			typeof candidate === "string" &&
+			/^(https?:|data:image\/)/.test(candidate)
+		) {
+			return candidate;
+		}
+	}
+	return null;
 }

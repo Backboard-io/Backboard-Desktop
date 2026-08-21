@@ -46,8 +46,9 @@ configurationRegistry.registerConfiguration({
 	properties: {
 		[AgentHostClaudeAgentEnabledSettingId]: {
 			type: 'boolean',
-			description: nls.localize('chat.agentHost.claudeAgent.enabled', "When enabled, the agent host registers the Claude provider (subject to the Claude SDK being reachable). Independent of `#chat.agents.claude.preferAgentHost#` and `#chat.editor.claude.preferAgentHost#`, which choose which integration surfaces Claude. Requires `#chat.agentHost.enabled#`. The agent host process must be restarted for changes to take effect."),
-			default: true,
+			description: nls.localize('chat.agentHost.claudeAgent.enabled', "Internal development setting for the agent-host Claude provider."),
+			default: false,
+			included: false,
 			tags: ['experimental', 'advanced'],
 			// References the `Claude3PIntegration` policy (owned by `github.copilot.chat.claudeAgent.enabled`) so disabling Claude applies across surfaces.
 			policyReference: {
@@ -56,8 +57,9 @@ configurationRegistry.registerConfiguration({
 		},
 		[AgentHostCodexAgentEnabledSettingId]: {
 			type: 'boolean',
-			description: nls.localize('chat.agentHost.codexAgent.enabled', "When enabled, the agent host registers the Codex provider (subject to a Codex CLI being reachable — an SDK distribution or a `codex` binary on PATH). Requires `#chat.agentHost.enabled#`. The agent host process must be restarted for changes to take effect."),
-			default: true,
+			description: nls.localize('chat.agentHost.codexAgent.enabled', "Internal development setting for the agent-host Codex provider."),
+			default: false,
+			included: false,
 			tags: ['experimental', 'advanced'],
 			// Owns the `Codex3PIntegration` policy; gating here disables Codex across all agent-host surfaces.
 			policy: {

@@ -20,6 +20,7 @@ export function buildSystemPrompt(options: SystemPromptOptions = {}): string {
 		options.computerUseEnabled ? computer.prompt : "",
 		options.browserUseEnabled ? browser.prompt : "",
 		options.startupEnvironmentPrompt,
+		options.conversationContext,
 		options.skillDiscoveryEnabled ? SKILL_DISCOVERY_GUIDANCE : "",
 		buildSkillCatalogPrompt(options.skillCatalog),
 		options.activatedSkillsPrompt,

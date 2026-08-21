@@ -15,7 +15,9 @@ import { IConfigurationService } from '../../../../../../../platform/configurati
 import { TestConfigurationService } from '../../../../../../../platform/configuration/test/common/testConfigurationService.js';
 import { ChatThinkingContentPart, maybePickFunWorkingMessage } from '../../../../browser/widget/chatContentParts/chatThinkingContentPart.js';
 import { ChatExternalEditContentPart } from '../../../../browser/widget/chatContentParts/chatExternalEditContentPart.js';
-import { IChatExternalEdit, IChatMarkdownContent, IChatThinkingPart, IChatToolInvocation, IChatToolInvocationSerialized } from '../../../../common/chatService/chatService.js';
+import { ChatTextEditContentPart, ICodeCompareModelService } from '../../../../browser/widget/chatContentParts/chatTextEditContentPart.js';
+import { ChatTerminalThinkingCollapsibleWrapper, getCollapsedTerminalOutputPreview } from '../../../../browser/widget/chatContentParts/toolInvocationParts/chatTerminalToolProgressPart.js';
+import { IChatExternalEdit, IChatMarkdownContent, IChatThinkingPart, IChatToolInvocation, IChatToolInvocationSerialized, ToolConfirmKind } from '../../../../common/chatService/chatService.js';
 import { IChatContentPartRenderContext, InlineTextModelCollection } from '../../../../browser/widget/chatContentParts/chatContentParts.js';
 import { IChatRendererContent, IChatResponseViewModel } from '../../../../common/model/chatViewModel.js';
 import { IEditSessionDiffStats } from '../../../../common/editing/chatEditingService.js';
@@ -29,6 +31,8 @@ import { IHoverService } from '../../../../../../../platform/hover/browser/hover
 import { ILanguageModelsService } from '../../../../common/languageModels.js';
 import { ToolDataSource } from '../../../../common/tools/languageModelToolsService.js';
 import { URI } from '../../../../../../../base/common/uri.js';
+import { ITextModelService } from '../../../../../../../editor/common/services/resolverService.js';
+import { IChatTextEditGroup } from '../../../../common/model/chatModel.js';
 
 suite('ChatThinkingContentPart', () => {
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
@@ -660,6 +664,1435 @@ suite('ChatThinkingContentPart', () => {
 				groupCount: 0,
 				editRowCount: 1,
 			}, 'Edit pill should render as its own row with no wrapping group header');
+		});
+	});
+
+	suite('Cursor transcript presentation', () => {
+		setup(() => {
+			mockConfigurationService.setUserConfiguration('chat.agent.thinkingStyle', ThinkingDisplayMode.StreamThenCollapse);
+		});
+
+		function createCursorPart(thinkingText: string): ChatThinkingContentPart {
+			const context = createMockRenderContext(false);
+			context.container.classList.add('backboard-clean-chat', 'backboard-cursor-transcript');
+			const part = disposables.add(instantiationService.createInstance(
+				ChatThinkingContentPart,
+				createThinkingPart(thinkingText),
+				context,
+				mockMarkdownRenderer,
+				false
+			));
+			mainWindow.document.body.appendChild(part.domNode);
+			disposables.add(toDisposable(() => part.domNode.remove()));
+			return part;
+		}
+
+		function createCursorTool(toolId: string, invocationMessage: string, toolCallId: string, terminal = false): IChatToolInvocationSerialized {
+			return {
+				kind: 'toolInvocationSerialized',
+				toolId,
+				toolCallId,
+				invocationMessage,
+				originMessage: undefined,
+				pastTenseMessage: undefined,
+				presentation: undefined,
+				resultDetails: undefined,
+				toolSpecificData: terminal
+					? { kind: 'terminal', commandLine: { original: 'printf ready' }, language: 'sh' } as IChatToolInvocationSerialized['toolSpecificData']
+					: undefined,
+				isConfirmed: { type: 0 },
+				isComplete: true,
+				source: ToolDataSource.Internal,
+				generatedTitle: undefined,
+				isAttachedToThinking: false,
+			} as IChatToolInvocationSerialized;
+		}
+
+		function createCompletableCursorTool(toolId: string, invocationMessage: string, toolCallId: string, parameters: unknown = {}): { tool: IChatToolInvocation; complete: () => void } {
+			const state = observableValue<IChatToolInvocation.State>('state', {
+				type: IChatToolInvocation.StateKind.Executing,
+				confirmed: { type: ToolConfirmKind.ConfirmationNotNeeded },
+				progress: observableValue('progress', { progress: 0 }),
+				parameters,
+				confirmationMessages: undefined,
+			});
+			const tool = {
+				kind: 'toolInvocation',
+				toolId,
+				toolCallId,
+				invocationMessage,
+				originMessage: undefined,
+				pastTenseMessage: undefined,
+				presentation: undefined,
+				source: ToolDataSource.Internal,
+				isAttachedToThinking: false,
+				generatedTitle: undefined,
+				state,
+				toolSpecificDataKind: observableValue('toolSpecificDataKind', undefined),
+				toJSON: () => ({} as IChatToolInvocationSerialized),
+			} as IChatToolInvocation;
+
+			return {
+				tool,
+				complete: () => state.set({
+					type: IChatToolInvocation.StateKind.Completed,
+					confirmed: { type: ToolConfirmKind.ConfirmationNotNeeded },
+					parameters,
+					confirmationMessages: undefined,
+					resultDetails: undefined,
+					postConfirmed: undefined,
+					contentForModel: [],
+				}, undefined),
+			};
+		}
+
+		function createNativeTerminalDisclosure(context: IChatContentPartRenderContext, command: string, output: string) {
+			const nativeOutput = $('pre.chat-terminal-output-content.cursor-test-native-shell-output', {}, output);
+			const nativeShell = $('div.chat-terminal-output-container.cursor-test-native-shell', {}, nativeOutput);
+			const disclosure = disposables.add(instantiationService.createInstance(
+				ChatTerminalThinkingCollapsibleWrapper,
+				command,
+				false,
+				nativeShell,
+				context,
+				false,
+				true,
+				false,
+				false,
+				undefined,
+			));
+			return { disclosure, nativeShell, nativeOutput };
+		}
+
+		test('shows a stable live reasoning label and finalizes it in place', () => {
+			const part = createCursorPart('Reasoning about the implementation');
+			const liveLabel = part.domNode.querySelector<HTMLElement>('.chat-thinking-cursor-reasoning-label');
+
+			assert.deepStrictEqual({
+				text: liveLabel?.textContent,
+				live: liveLabel?.classList.contains('chat-thinking-cursor-reasoning-live'),
+			}, {
+				text: 'Thinking',
+				live: true,
+			});
+
+			part.markAsInactive();
+
+			assert.strictEqual(part.domNode.querySelector('.chat-thinking-cursor-reasoning-label'), liveLabel,
+				'Completion should update the existing reasoning label instead of replacing it');
+			assert.deepStrictEqual({
+				text: liveLabel?.textContent,
+				live: liveLabel?.classList.contains('chat-thinking-cursor-reasoning-live'),
+			}, {
+				text: 'Thought briefly',
+				live: false,
+			});
+		});
+
+		test('summarizes mixed exploration while preserving native row order', () => {
+			const part = createCursorPart('Checking the relevant files');
+			const appendExploration = (tool: IChatToolInvocationSerialized, order: string) => {
+				part.appendItem(
+					() => ({ domNode: $('div.cursor-test-native-row', { 'data-order': order }, tool.invocationMessage as string) }),
+					tool.toolId,
+					tool
+				);
+			};
+
+			appendExploration(createCursorTool('read_file', 'Read a.ts', 'call-read-a'), 'read-a');
+			appendExploration(createCursorTool('search_code', 'Searched for transcript', 'call-search'), 'search');
+			appendExploration(createCursorTool('read_file', 'Read b.ts', 'call-read-b'), 'read-b');
+			part.finalizeTitleIfDefault();
+
+			const group = part.domNode.querySelector<HTMLElement>('.chat-thinking-work-group[data-work-category="explore"]');
+			assert.deepStrictEqual({
+				label: group?.querySelector('.chat-thinking-group-label')?.textContent,
+				collapsed: group?.classList.contains('chat-thinking-work-summary-collapsed'),
+				expanded: group?.querySelector('.chat-thinking-group-header')?.getAttribute('aria-expanded'),
+				order: Array.from(group?.querySelectorAll<HTMLElement>('.cursor-test-native-row') ?? []).map(row => row.dataset.order),
+			}, {
+				label: 'Explored 2 files, 1 search',
+				collapsed: true,
+				expanded: 'false',
+				order: ['read-a', 'search', 'read-b'],
+			});
+		});
+
+		test('grouped tool-call disclosure toggles its body on every click', () => {
+			const part = createCursorPart('Checking the relevant files');
+			for (const tool of [
+				createCursorTool('read_file', 'Read a.ts', 'call-toggle-read'),
+				createCursorTool('search_code', 'Searched for transcript', 'call-toggle-search'),
+			]) {
+				part.appendItem(
+					() => ({ domNode: $('div.cursor-test-native-row', {}, tool.invocationMessage as string) }),
+					tool.toolId,
+					tool
+				);
+			}
+			part.finalizeTitleIfDefault();
+
+			const group = part.domNode.querySelector<HTMLElement>('.chat-thinking-work-group');
+			const header = group?.querySelector<HTMLElement>('.chat-thinking-group-header');
+			const body = group?.querySelector<HTMLElement>('.chat-thinking-group-body');
+			assert.ok(group && header && body, 'Expected a grouped tool-call disclosure');
+			assert.deepStrictEqual({
+				collapsed: group.classList.contains('chat-thinking-work-summary-collapsed'),
+				expanded: header.getAttribute('aria-expanded'),
+				rows: body.querySelectorAll('.cursor-test-native-row').length,
+			}, {
+				collapsed: true,
+				expanded: 'false',
+				rows: 2,
+			});
+
+			header.click();
+			assert.deepStrictEqual({
+				collapsed: group.classList.contains('chat-thinking-work-summary-collapsed'),
+				expanded: header.getAttribute('aria-expanded'),
+				bodyStillMounted: group.querySelector('.chat-thinking-group-body') === body,
+			}, {
+				collapsed: false,
+				expanded: 'true',
+				bodyStillMounted: true,
+			}, 'First click should reveal the grouped tool-call body');
+
+			header.click();
+			assert.deepStrictEqual({
+				collapsed: group.classList.contains('chat-thinking-work-summary-collapsed'),
+				expanded: header.getAttribute('aria-expanded'),
+			}, {
+				collapsed: true,
+				expanded: 'false',
+			}, 'Second click should collapse the grouped tool-call body again');
+		});
+
+		test('shared passive work rows stay flat under the single group disclosure', () => {
+			const part = createCursorPart('Using a skill while exploring the codebase');
+			const entries = [
+				{ entry: createCompletableCursorTool('use_skill', 'Used transcript skill', 'call-a', { skill: 'transcript' }), order: 'other' },
+				{ entry: createCompletableCursorTool('read_file', 'Read chat.ts', 'call-b', { filePath: '/project/src/chat.ts' }), order: 'read' },
+				{ entry: createCompletableCursorTool('search_code', 'Searched for disclosure', 'call-c', { query: 'chat-thinking-work-row' }), order: 'search' },
+			];
+			for (const { entry, order } of entries) {
+				part.appendItem(
+					() => ({ domNode: $('div.cursor-test-native-row', { 'data-order': order }, entry.tool.invocationMessage as string) }),
+					entry.tool.toolId,
+					entry.tool
+				);
+				entry.complete();
+			}
+
+			const groups = part.domNode.querySelectorAll<HTMLElement>('.chat-thinking-work-group');
+			const group = groups[0];
+			const header = group?.querySelector<HTMLElement>(':scope > .chat-thinking-group-header');
+			const rows = Array.from(group?.querySelectorAll<HTMLElement>('.chat-thinking-tool-wrapper') ?? []);
+			assert.ok(group && header, 'Expected one shared group with a group-level disclosure');
+			assert.deepStrictEqual({
+				groupCount: groups.length,
+				groupRole: header.getAttribute('role'),
+				groupExpanded: header.getAttribute('aria-expanded'),
+				groupDisclosures: header.querySelectorAll('.chat-thinking-group-chevron').length,
+				label: header.querySelector('.chat-thinking-group-label')?.textContent,
+				order: rows.map(row => row.querySelector<HTMLElement>('.cursor-test-native-row')?.dataset.order),
+				rowExpandable: rows.map(row => row.classList.contains('chat-thinking-work-row-expandable')),
+				rowRoles: rows.map(row => row.getAttribute('role')),
+				rowExpanded: rows.map(row => row.getAttribute('aria-expanded')),
+				rowDetails: group.querySelectorAll('.chat-thinking-work-row-details').length,
+				rowDisclosureSvgs: group.querySelectorAll('.chat-thinking-work-row-disclosure svg').length,
+			}, {
+				groupCount: 1,
+				groupRole: 'button',
+				groupExpanded: 'true',
+				groupDisclosures: 1,
+				label: 'Explored 1 file, 1 search',
+				order: ['other', 'read', 'search'],
+				rowExpandable: [false, false, false],
+				rowRoles: [null, null, null],
+				rowExpanded: [null, null, null],
+				rowDetails: 0,
+				rowDisclosureSvgs: 0,
+			}, 'Parameterized passive rows should not create competing per-row disclosures');
+
+			header.click();
+			assert.deepStrictEqual({
+				collapsed: group.classList.contains('chat-thinking-work-summary-collapsed'),
+				expanded: header.getAttribute('aria-expanded'),
+				order: Array.from(group.querySelectorAll<HTMLElement>('.cursor-test-native-row')).map(row => row.dataset.order),
+			}, {
+				collapsed: true,
+				expanded: 'false',
+				order: ['other', 'read', 'search'],
+			}, 'The group header should collapse every flat row without removing them');
+
+			header.click();
+			assert.deepStrictEqual({
+				collapsed: group.classList.contains('chat-thinking-work-summary-collapsed'),
+				expanded: header.getAttribute('aria-expanded'),
+				rows: group.querySelectorAll('.chat-thinking-tool-wrapper').length,
+			}, {
+				collapsed: false,
+				expanded: 'true',
+				rows: 3,
+			}, 'The same group header should restore all flat rows');
+		});
+
+		test('task progress disclosure explains TodoWrite and reveals its real checklist', () => {
+			const part = createCursorPart('Tracking a two-step change');
+			const planTool = {
+				...createCursorTool('todo_write', 'TodoWrite', 'call-plan-progress'),
+				pastTenseMessage: 'Updated 2 todos: [completed] Inspect the existing behavior, [in_progress] Implement and verify the fix',
+			} as IChatToolInvocationSerialized;
+			const emptyNativeProgress = $('div.cursor-test-plan-native', {}, $('div.progress-container', {}, 'TodoWrite'));
+
+			part.appendItem(() => ({ domNode: emptyNativeProgress }), planTool.toolId, planTool);
+
+			const row = part.domNode.querySelector<HTMLElement>('.chat-thinking-cursor-plan-row');
+			const summary = row?.querySelector<HTMLElement>(':scope > .chat-thinking-work-row-summary');
+			const details = row?.querySelector<HTMLElement>(':scope > .chat-thinking-plan-details');
+			const items = Array.from(details?.querySelectorAll<HTMLElement>('.chat-thinking-plan-item') ?? []);
+			assert.ok(row && summary && details, 'Expected TodoWrite to render a useful task-progress disclosure');
+			assert.deepStrictEqual({
+				heading: summary.querySelector('.chat-thinking-work-row-heading')?.textContent,
+				preview: summary.querySelector('.chat-thinking-work-row-preview')?.textContent,
+				title: summary.title,
+				expandable: row.classList.contains('chat-thinking-work-row-expandable'),
+				nativeExpandable: row.classList.contains('chat-thinking-work-row-native-expandable'),
+				expanded: row.getAttribute('aria-expanded'),
+				legacyRail: row.querySelector('.chat-thinking-work-row-details-content'),
+				items: items.map(item => item.textContent),
+				statuses: items.map(item => item.className),
+			}, {
+				heading: 'Task progress',
+				preview: '1 of 2 done',
+				title: 'Tracks the steps the agent is working through. It does not run commands.',
+				expandable: true,
+				nativeExpandable: false,
+				expanded: 'false',
+				legacyRail: null,
+				items: ['✓Inspect the existing behavior', '→Implement and verify the fix'],
+				statuses: [
+					'chat-thinking-plan-item chat-thinking-plan-item-completed',
+					'chat-thinking-plan-item chat-thinking-plan-item-in-progress',
+				],
+			});
+
+			summary.click();
+			assert.deepStrictEqual({
+				expanded: row.getAttribute('aria-expanded'),
+				expandedClass: row.classList.contains('chat-thinking-work-row-expanded'),
+				checklistStillMounted: row.querySelector(':scope > .chat-thinking-plan-details') === details,
+				emptyNativeUsedAsDisclosure: row.classList.contains('chat-thinking-work-row-native-expandable'),
+			}, {
+				expanded: 'true',
+				expandedClass: true,
+				checklistStillMounted: true,
+				emptyNativeUsedAsDisclosure: false,
+			});
+		});
+
+		test('task progress without checklist data never exposes an empty native disclosure', () => {
+			const part = createCursorPart('Tracking work');
+			const planTool = createCursorTool('todo_write', 'TodoWrite', 'call-plan-without-items');
+			const emptyNativeProgress = $('div.cursor-test-empty-plan-native', {}, $('div.progress-container', {}, 'TodoWrite'));
+
+			part.appendItem(() => ({ domNode: emptyNativeProgress }), planTool.toolId, planTool);
+
+			const row = part.domNode.querySelector<HTMLElement>('.chat-thinking-cursor-plan-row');
+			assert.ok(row, 'Expected TodoWrite to retain its task-progress summary');
+			assert.deepStrictEqual({
+				heading: row.querySelector('.chat-thinking-work-row-heading')?.textContent,
+				expandable: row.classList.contains('chat-thinking-work-row-expandable'),
+				nativeExpandable: row.classList.contains('chat-thinking-work-row-native-expandable'),
+				role: row.getAttribute('role'),
+				expanded: row.getAttribute('aria-expanded'),
+				details: row.querySelector('.chat-thinking-work-row-details'),
+				disclosureIcon: row.querySelector('.chat-thinking-work-row-disclosure .chat-thinking-work-row-svg'),
+			}, {
+				heading: 'Task progress',
+				expandable: false,
+				nativeExpandable: false,
+				role: null,
+				expanded: null,
+				details: null,
+				disclosureIcon: null,
+			}, 'Missing provider details should produce a flat explanatory row, never an empty rail');
+		});
+
+		test('live edit uses an inert empty diff shell until the invocation completes', () => {
+			const part = createCursorPart('Preparing a file edit');
+			const edit = createCompletableCursorTool('edit_file', 'Edit', 'call-pending-edit', { filePath: '/project/src/render.js' });
+			const nativeEdit = $('div.cursor-test-pending-edit-native', {}, 'Edit');
+
+			part.appendItem(() => ({ domNode: nativeEdit }), edit.tool.toolId, edit.tool);
+
+			const row = part.domNode.querySelector<HTMLElement>('.chat-thinking-cursor-edit-row');
+			assert.ok(row, 'Expected the live edit invocation to keep its transcript position');
+			assert.deepStrictEqual({
+				pending: row.classList.contains('chat-thinking-cursor-edit-pending'),
+				expandable: row.classList.contains('chat-thinking-work-row-expandable'),
+				role: row.getAttribute('role'),
+				expanded: row.getAttribute('aria-expanded'),
+				details: row.querySelector('.chat-thinking-work-row-details'),
+				nativeIdentity: row.querySelector('.cursor-test-pending-edit-native') === nativeEdit,
+				statusWorking: row.querySelector('.chat-thinking-work-row-status')?.classList.contains('chat-thinking-work-row-status-working'),
+			}, {
+				pending: true,
+				expandable: false,
+				role: null,
+				expanded: null,
+				details: null,
+				nativeIdentity: true,
+				statusWorking: true,
+			}, 'The waiting diff must not expose the old synthetic Edit disclosure');
+
+			edit.complete();
+			assert.deepStrictEqual({
+				pending: row.classList.contains('chat-thinking-cursor-edit-pending'),
+				nativeIdentity: row.querySelector('.cursor-test-pending-edit-native') === nativeEdit,
+				statusComplete: row.querySelector('.chat-thinking-work-row-status')?.classList.contains('chat-thinking-work-row-status-complete'),
+			}, {
+				pending: false,
+				nativeIdentity: true,
+				statusComplete: true,
+			}, 'Completion should remove only the waiting skin while preserving the live tool subtree');
+		});
+
+		test('live activity group stays user-collapsed as another tool appends and completes', () => {
+			const part = createCursorPart('Running a live sequence of tools');
+			const appendTool = (entry: ReturnType<typeof createCompletableCursorTool>, order: string) => {
+				part.appendItem(
+					() => ({ domNode: $('div.cursor-test-native-row', { 'data-order': order }, entry.tool.invocationMessage as string) }),
+					entry.tool.toolId,
+					entry.tool
+				);
+			};
+			appendTool(createCompletableCursorTool('read_file', 'Read a.ts', 'call-collapse-read'), 'read');
+			appendTool(createCompletableCursorTool('search_code', 'Searched for transcript', 'call-collapse-search'), 'search');
+
+			const group = part.domNode.querySelector<HTMLElement>('.chat-thinking-work-group');
+			const header = group?.querySelector<HTMLElement>('.chat-thinking-group-header');
+			assert.ok(group && header, 'Expected a live multi-tool activity group');
+			assert.deepStrictEqual({
+				collapsed: group.classList.contains('chat-thinking-work-summary-collapsed'),
+				expanded: header.getAttribute('aria-expanded'),
+			}, {
+				collapsed: false,
+				expanded: 'true',
+			});
+
+			header.click();
+			assert.deepStrictEqual({
+				collapsed: group.classList.contains('chat-thinking-work-summary-collapsed'),
+				expanded: header.getAttribute('aria-expanded'),
+			}, {
+				collapsed: true,
+				expanded: 'false',
+			}, 'The user should be able to collapse the live group');
+
+			const appended = createCompletableCursorTool('use_skill', 'Used transcript skill', 'call-collapse-other');
+			appendTool(appended, 'other');
+			appended.complete();
+
+			const groups = part.domNode.querySelectorAll<HTMLElement>('.chat-thinking-work-group');
+			assert.deepStrictEqual({
+				groupCount: groups.length,
+				sameGroup: groups[0] === group,
+				collapsed: group.classList.contains('chat-thinking-work-summary-collapsed'),
+				expanded: header.getAttribute('aria-expanded'),
+				order: Array.from(group.querySelectorAll<HTMLElement>('.cursor-test-native-row')).map(row => row.dataset.order),
+			}, {
+				groupCount: 1,
+				sameGroup: true,
+				collapsed: true,
+				expanded: 'false',
+				order: ['read', 'search', 'other'],
+			}, 'Appending and completing another tool must preserve the user-selected collapsed state and every row');
+		});
+
+		test('completed Thought disclosure toggles the reasoning body on every click', () => {
+			const part = createCursorPart('Reasoning body that should be disclosed independently');
+			part.markAsInactive();
+
+			const disclosure = part.domNode.querySelector<HTMLElement>('.chat-thinking-cursor-reasoning-label');
+			const reasoningBody = part.domNode.querySelector<HTMLElement>('.chat-thinking-item.markdown-content');
+			assert.ok(disclosure && reasoningBody, 'Expected a completed Thought disclosure and reasoning body');
+
+			assert.strictEqual(reasoningBody.hidden, false, 'Completed reasoning should begin visible before its first disclosure click');
+			disclosure.click();
+			assert.deepStrictEqual({
+				role: disclosure.getAttribute('role'),
+				expanded: disclosure.getAttribute('aria-expanded'),
+				bodyHidden: reasoningBody.hidden,
+			}, {
+				role: 'button',
+				expanded: 'false',
+				bodyHidden: true,
+			}, 'Clicking Thought should toggle the reasoning body and accessible disclosure state');
+
+			disclosure.click();
+			assert.deepStrictEqual({
+				expanded: disclosure.getAttribute('aria-expanded'),
+				bodyHidden: reasoningBody.hidden,
+			}, {
+				expanded: 'true',
+				bodyHidden: false,
+			}, 'A second click should restore the reasoning disclosure state');
+		});
+
+		test('restored multi-section Thought mounts an independent disclosure for every reasoning block', () => {
+			const context = createMockRenderContext(true);
+			context.container.classList.add('backboard-clean-chat', 'backboard-cursor-transcript');
+			const part = disposables.add(instantiationService.createInstance(
+				ChatThinkingContentPart,
+				createThinkingPart('First restored reasoning', 'restored-thinking-1'),
+				context,
+				mockMarkdownRenderer,
+				true
+			));
+			mainWindow.document.body.appendChild(part.domNode);
+			disposables.add(toDisposable(() => part.domNode.remove()));
+
+			part.setupThinkingContainer(createThinkingPart('Second restored reasoning', 'restored-thinking-2'));
+			part.setupThinkingContainer(createThinkingPart('Third restored reasoning', 'restored-thinking-3'));
+
+			const wrapper = part.domNode.querySelector<HTMLElement>('.chat-used-context-list.chat-thinking-collapsible');
+			const disclosures = Array.from(wrapper?.querySelectorAll<HTMLElement>(':scope > .chat-thinking-cursor-reasoning-label') ?? []);
+			const reasoningBlocks = Array.from(wrapper?.querySelectorAll<HTMLElement>(':scope > .chat-thinking-item.markdown-content') ?? []);
+			assert.ok(wrapper, 'Expected the restored Thought wrapper and its custom disclosures');
+			assert.deepStrictEqual({
+				disclosures: disclosures.length,
+				blocks: reasoningBlocks.length,
+				text: reasoningBlocks.map(block => block.textContent),
+				adjacent: disclosures.map((disclosure, index) => disclosure.nextElementSibling === reasoningBlocks[index]),
+				expanded: disclosures.map(disclosure => disclosure.getAttribute('aria-expanded')),
+				hidden: reasoningBlocks.map(block => block.hidden),
+			}, {
+				disclosures: 3,
+				blocks: 3,
+				text: ['First restored reasoning', 'Second restored reasoning', 'Third restored reasoning'],
+				adjacent: [true, true, true],
+				expanded: ['true', 'true', 'true'],
+				hidden: [false, false, false],
+			}, 'Every restored reasoning section should be mounted beside its own disclosure');
+
+			disclosures[1].click();
+			assert.deepStrictEqual({
+				expanded: disclosures.map(disclosure => disclosure.getAttribute('aria-expanded')),
+				hidden: reasoningBlocks.map(block => block.hidden),
+			}, {
+				expanded: ['true', 'false', 'true'],
+				hidden: [false, true, false],
+			}, 'A restored Thought disclosure should hide only its adjacent reasoning block');
+
+			disclosures[1].click();
+			assert.deepStrictEqual({
+				expanded: disclosures.map(disclosure => disclosure.getAttribute('aria-expanded')),
+				hidden: reasoningBlocks.map(block => block.hidden),
+			}, {
+				expanded: ['true', 'true', 'true'],
+				hidden: [false, false, false],
+			}, 'Expanding a restored Thought should restore only its adjacent block');
+		});
+
+		test('uninterrupted mixed-category tool calls remain in one activity group', () => {
+			const part = createCursorPart('Using a skill before exploring files');
+			part.domNode.remove();
+			const first = createCompletableCursorTool('use_skill', 'Used transcript skill', 'call-sequential-other');
+			part.appendItem(
+				() => ({ domNode: $('div.cursor-test-native-row', { 'data-order': 'other' }, 'Used transcript skill') }),
+				first.tool.toolId,
+				first.tool
+			);
+			const originalGroup = part.domNode.querySelector<HTMLElement>('.chat-thinking-work-group');
+			assert.ok(originalGroup, 'Expected the first live tool call to create an activity group');
+
+			first.complete();
+			const second = createCompletableCursorTool('read_file', 'Read a.ts', 'call-sequential-read');
+			part.appendItem(
+				() => ({ domNode: $('div.cursor-test-native-row', { 'data-order': 'read' }, 'Read a.ts') }),
+				second.tool.toolId,
+				second.tool
+			);
+			second.complete();
+			const third = createCompletableCursorTool('search_code', 'Searched for transcript', 'call-sequential-search');
+			part.appendItem(
+				() => ({ domNode: $('div.cursor-test-native-row', { 'data-order': 'search' }, 'Searched for transcript') }),
+				third.tool.toolId,
+				third.tool
+			);
+			third.complete();
+			part.finalizeTitleIfDefault();
+
+			const groups = part.domNode.querySelectorAll<HTMLElement>('.chat-thinking-work-group');
+			assert.deepStrictEqual({
+				groupCount: groups.length,
+				sameGroup: groups[0] === originalGroup,
+				label: groups[0]?.querySelector('.chat-thinking-group-label')?.textContent,
+				order: Array.from(groups[0]?.querySelectorAll<HTMLElement>('.cursor-test-native-row') ?? []).map(row => row.dataset.order),
+			}, {
+				groupCount: 1,
+				sameGroup: true,
+				label: 'Explored 1 file, 1 search',
+				order: ['other', 'read', 'search'],
+			});
+		});
+
+		test('metadata-light native disclosure remains expandable without synthetic details', () => {
+			const part = createCursorPart('Inspecting provider-native tool output');
+			const nativeLeaf = $('span.cursor-test-native-leaf', {}, 'Provider-native details');
+			const nativeControl = $('button.cursor-test-native-control', { type: 'button' }, 'Run native action');
+			const nativeSubtree = $('div.cursor-test-native-disclosure', {}, nativeLeaf, nativeControl);
+
+			part.appendItem(
+				() => ({ domNode: nativeSubtree }),
+				'provider_native_tool'
+			);
+
+			const row = part.domNode.querySelector<HTMLElement>('.chat-thinking-tool-wrapper');
+			const summary = row?.querySelector<HTMLElement>('.chat-thinking-work-row-summary');
+			assert.ok(row && summary, 'Expected the metadata-light provider tool to render as a Cursor work row');
+			assert.deepStrictEqual({
+				expandable: row.classList.contains('chat-thinking-work-row-expandable'),
+				nativeExpandable: row.classList.contains('chat-thinking-work-row-native-expandable'),
+				role: row.getAttribute('role'),
+				expanded: row.getAttribute('aria-expanded'),
+				syntheticDetails: row.querySelector('.chat-thinking-work-row-details'),
+				nativeRootPreserved: row.querySelector(':scope > .chat-thinking-work-native-content') === nativeSubtree,
+				nativeLeafPreserved: row.querySelector('.cursor-test-native-leaf') === nativeLeaf,
+			}, {
+				expandable: true,
+				nativeExpandable: true,
+				role: 'button',
+				expanded: 'false',
+				syntheticDetails: null,
+				nativeRootPreserved: true,
+				nativeLeafPreserved: true,
+			});
+
+			summary.click();
+			assert.deepStrictEqual({
+				expandedClass: row.classList.contains('chat-thinking-work-row-expanded'),
+				expanded: row.getAttribute('aria-expanded'),
+				nativeRootPreserved: row.querySelector(':scope > .chat-thinking-work-native-content') === nativeSubtree,
+			}, {
+				expandedClass: true,
+				expanded: 'true',
+				nativeRootPreserved: true,
+			}, 'First click should reveal the preserved provider-native subtree');
+
+			const enterEvent = new mainWindow.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+			const spaceEvent = new mainWindow.KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+			nativeControl.dispatchEvent(enterEvent);
+			nativeControl.dispatchEvent(spaceEvent);
+			assert.deepStrictEqual({
+				enterDefaultPrevented: enterEvent.defaultPrevented,
+				spaceDefaultPrevented: spaceEvent.defaultPrevented,
+				expandedClass: row.classList.contains('chat-thinking-work-row-expanded'),
+				expanded: row.getAttribute('aria-expanded'),
+			}, {
+				enterDefaultPrevented: false,
+				spaceDefaultPrevented: false,
+				expandedClass: true,
+				expanded: 'true',
+			}, 'Keyboard input owned by a native control must not cancel or toggle the outer work-row disclosure');
+
+			summary.click();
+			assert.deepStrictEqual({
+				expandedClass: row.classList.contains('chat-thinking-work-row-expanded'),
+				expanded: row.getAttribute('aria-expanded'),
+			}, {
+				expandedClass: false,
+				expanded: 'false',
+			}, 'Second click should collapse the provider-native subtree again');
+		});
+
+		test('non-Cursor clean host does not install the native disclosure fallback', () => {
+			const context = createMockRenderContext(false);
+			context.container.classList.add('backboard-clean-chat');
+			const part = disposables.add(instantiationService.createInstance(
+				ChatThinkingContentPart,
+				createThinkingPart('Inspecting provider-native tool output'),
+				context,
+				mockMarkdownRenderer,
+				false
+			));
+			mainWindow.document.body.appendChild(part.domNode);
+			disposables.add(toDisposable(() => part.domNode.remove()));
+			const nativeLeaf = $('span.cursor-test-non-cursor-native-leaf', {}, 'Provider-native details');
+			const nativeSubtree = $('div.cursor-test-non-cursor-native-disclosure', {}, nativeLeaf);
+
+			part.appendItem(
+				() => ({ domNode: nativeSubtree }),
+				'provider_native_tool'
+			);
+
+			const row = part.domNode.querySelector<HTMLElement>('.chat-thinking-tool-wrapper');
+			assert.ok(row, 'Expected the clean host to retain its ordinary work row');
+			assert.deepStrictEqual({
+				expandable: row.classList.contains('chat-thinking-work-row-expandable'),
+				nativeExpandable: row.classList.contains('chat-thinking-work-row-native-expandable'),
+				role: row.getAttribute('role'),
+				expanded: row.getAttribute('aria-expanded'),
+				nativeRootPreserved: row.querySelector(':scope > .chat-thinking-work-native-content') === nativeSubtree,
+			}, {
+				expandable: false,
+				nativeExpandable: false,
+				role: null,
+				expanded: null,
+				nativeRootPreserved: true,
+			});
+		});
+
+		test('keeps every reasoning disclosure immediately before its chronological block across diff and tool rows', () => {
+			const part = createCursorPart('Reasoning before the diff');
+			const edit: IChatExternalEdit = {
+				kind: 'externalEdit',
+				uri: URI.file('/project/src/chat.ts'),
+				editKind: 'edit',
+				diff: { added: 1, removed: 1 },
+			};
+			const nativeDiff = $('div.chat-external-edit-card.cursor-test-chronology-diff', {}, 'Changed chat.ts');
+			part.appendItem(() => ({ domNode: nativeDiff }), undefined, edit);
+
+			part.setupThinkingContainer(createThinkingPart('Reasoning between the diff and tool', 'cursor-reasoning-middle'));
+			const tool = createCursorTool('read_file', 'Read chat.ts', 'call-chronology');
+			const nativeTool = $('div.cursor-test-chronology-tool', {}, 'Read chat.ts');
+			part.appendItem(() => ({ domNode: nativeTool }), tool.toolId, tool);
+			part.setupThinkingContainer(createThinkingPart('Reasoning after the tool', 'cursor-reasoning-last'));
+
+			const wrapper = part.domNode.querySelector<HTMLElement>('.chat-used-context-list.chat-thinking-collapsible');
+			const labels = Array.from(wrapper?.querySelectorAll<HTMLElement>(':scope > .chat-thinking-cursor-reasoning-label') ?? []);
+			const reasoningBlocks = Array.from(wrapper?.querySelectorAll<HTMLElement>(':scope > .chat-thinking-item.markdown-content') ?? []);
+			const editRow = nativeDiff.closest<HTMLElement>('.chat-thinking-cursor-edit-row');
+			const toolRow = nativeTool.closest<HTMLElement>('.chat-thinking-cursor-read-row');
+			assert.ok(wrapper && editRow && toolRow, 'Expected chronological reasoning, diff, and tool transcript rows');
+			const precedes = (left: Node, right: Node) => !!(left.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+			assert.deepStrictEqual({
+				labels: labels.length,
+				blocks: reasoningBlocks.map(block => block.textContent),
+				adjacent: labels.map((label, index) => label.nextElementSibling === reasoningBlocks[index]),
+				expanded: labels.map(label => label.getAttribute('aria-expanded')),
+				hidden: reasoningBlocks.map(block => block.hidden),
+				chronological: [
+					precedes(reasoningBlocks[0], editRow),
+					precedes(editRow, labels[1]),
+					precedes(reasoningBlocks[1], toolRow),
+					precedes(toolRow, labels[2]),
+				],
+			}, {
+				labels: 3,
+				blocks: ['Reasoning before the diff', 'Reasoning between the diff and tool', 'Reasoning after the tool'],
+				adjacent: [true, true, true],
+				expanded: ['true', 'true', 'true'],
+				hidden: [false, false, false],
+				chronological: [true, true, true, true],
+			});
+
+			for (let index = 0; index < labels.length; index++) {
+				labels[index].click();
+				assert.deepStrictEqual({
+					expanded: labels.map(label => label.getAttribute('aria-expanded')),
+					hidden: reasoningBlocks.map(block => block.hidden),
+					adjacent: labels.map((label, labelIndex) => label.nextElementSibling === reasoningBlocks[labelIndex]),
+				}, {
+					expanded: labels.map((_, labelIndex) => String(labelIndex !== index)),
+					hidden: reasoningBlocks.map((_, blockIndex) => blockIndex === index),
+					adjacent: [true, true, true],
+				}, `Thought disclosure ${index + 1} should collapse only its own immediately-following block`);
+
+				labels[index].click();
+				assert.deepStrictEqual({
+					expanded: labels.map(label => label.getAttribute('aria-expanded')),
+					hidden: reasoningBlocks.map(block => block.hidden),
+				}, {
+					expanded: ['true', 'true', 'true'],
+					hidden: [false, false, false],
+				}, `Thought disclosure ${index + 1} should restore only its own block`);
+			}
+		});
+
+		test('synthetic diff-only thinking does not add an empty Thought disclosure before the card', () => {
+			const part = createCursorPart('');
+			const edit: IChatExternalEdit = {
+				kind: 'externalEdit',
+				uri: URI.file('/project/src/diff-only.ts'),
+				editKind: 'edit',
+				diff: { added: 1, removed: 0 },
+			};
+			const nativeDiff = $('div.chat-external-edit-card.cursor-test-diff-only-card', {}, 'Changed diff-only.ts');
+			part.appendItem(() => ({ domNode: nativeDiff }), undefined, edit);
+
+			const wrapper = part.domNode.querySelector<HTMLElement>('.chat-used-context-list.chat-thinking-collapsible');
+			const editRow = nativeDiff.closest<HTMLElement>('.chat-thinking-cursor-edit-row');
+			const meaningfulChildren = Array.from(wrapper?.children ?? []).filter(child => !child.classList.contains('chat-thinking-spinner-item') && !(child instanceof HTMLElement && child.hidden));
+			assert.ok(wrapper && editRow, 'Expected the diff-only Cursor transcript card');
+			assert.deepStrictEqual({
+				reasoningLabels: wrapper.querySelectorAll(':scope > .chat-thinking-cursor-reasoning-label').length,
+				visibleReasoningBlocks: wrapper.querySelectorAll(':scope > .chat-thinking-item.markdown-content:not([hidden])').length,
+				hiddenOrderingAnchors: wrapper.querySelectorAll(':scope > .chat-thinking-item.markdown-content[hidden]').length,
+				firstMeaningfulChild: meaningfulChildren[0] === editRow,
+				cardIdentity: editRow.querySelector(':scope > .cursor-test-diff-only-card') === nativeDiff,
+			}, {
+				reasoningLabels: 0,
+				visibleReasoningBlocks: 0,
+				hiddenOrderingAnchors: 1,
+				firstMeaningfulChild: true,
+				cardIdentity: true,
+			});
+		});
+
+		test('first reasoning delta claims its reserved position ahead of an already-rendered diff', () => {
+			const part = createCursorPart('');
+			const wrapper = part.domNode.querySelector<HTMLElement>('.chat-used-context-list.chat-thinking-collapsible');
+			const orderingAnchor = wrapper?.querySelector<HTMLElement>(':scope > .chat-thinking-item.markdown-content[hidden]');
+			const edit: IChatExternalEdit = {
+				kind: 'externalEdit',
+				uri: URI.file('/project/src/late-reasoning.ts'),
+				editKind: 'edit',
+				diff: { added: 1, removed: 0 },
+			};
+			const nativeDiff = $('div.chat-external-edit-card.cursor-test-late-reasoning-diff', {}, 'Changed late-reasoning.ts');
+			part.appendItem(() => ({ domNode: nativeDiff }), undefined, edit);
+			part.updateThinking(createThinkingPart('Reasoning that streamed before the diff', 'test-thinking-id'));
+
+			const label = wrapper?.querySelector<HTMLElement>(':scope > .chat-thinking-cursor-reasoning-label');
+			const editRow = nativeDiff.closest<HTMLElement>('.chat-thinking-cursor-edit-row');
+			assert.ok(wrapper && orderingAnchor && label && editRow, 'Expected the reserved reasoning position and diff card');
+			assert.deepStrictEqual({
+				sameAnchor: label.nextElementSibling === orderingAnchor,
+				anchorVisible: !orderingAnchor.hidden,
+				text: orderingAnchor.textContent,
+				reasoningBeforeDiff: !!(orderingAnchor.compareDocumentPosition(editRow) & Node.DOCUMENT_POSITION_FOLLOWING),
+			}, {
+				sameAnchor: true,
+				anchorVisible: true,
+				text: 'Reasoning that streamed before the diff',
+				reasoningBeforeDiff: true,
+			});
+		});
+
+		test('Cursor terminal preview keeps four output rows and marks overflow', () => {
+			assert.deepStrictEqual(
+				getCollapsedTerminalOutputPreview('\n\u001b[32mready\u001b[0m\n  indented\nthird\nfourth\nfifth\n'),
+				{ text: 'ready\n  indented\nthird\nfourth', overflowing: true },
+			);
+			assert.deepStrictEqual(
+				getCollapsedTerminalOutputPreview('one\ntwo'),
+				{ text: 'one\ntwo', overflowing: false },
+			);
+		});
+
+		test('Cursor Execute disclosure toggles without replacing the native shell command or output subtree', () => {
+			const shell = $('.cursor-test-terminal-shell');
+			const tabs = $('div.chat-view-title-tabs', { 'data-test-state': 'tabs' }, $('span', {}, 'Agent'));
+			const composer = $('div.backboard-composer', { 'data-test-state': 'composer' }, $('textarea', { 'aria-label': 'Message' }));
+			const context = createMockRenderContext(false);
+			context.container.classList.add('backboard-clean-chat', 'backboard-cursor-transcript');
+			shell.append(tabs, context.container, composer);
+			mainWindow.document.body.appendChild(shell);
+			disposables.add(toDisposable(() => shell.remove()));
+			const chromeBefore = { tabs: tabs.outerHTML, composer: composer.outerHTML };
+
+			const part = disposables.add(instantiationService.createInstance(
+				ChatThinkingContentPart,
+				createThinkingPart('Running a verification command'),
+				context,
+				mockMarkdownRenderer,
+				false
+			));
+			context.container.appendChild(part.domNode);
+			const command = 'printf ready';
+			const native = createNativeTerminalDisclosure(context, command, 'ready\nall checks passed');
+			const nativeRoot = native.disclosure.domNode;
+			const nativeCommand = nativeRoot.querySelector<HTMLElement>('.chat-used-context-label code');
+			// Model the lifecycle that produced the reported duplicate chrome: an
+			// opaque provider call arrives before its native terminal subpart mounts,
+			// and the serialized metadata has no toolSpecificData discriminator.
+			const tool = createCursorTool('opaque-provider-tool', 'Terminal - printf ready', 'call-terminal');
+			const lateNativeHost = $('div.chat-tool-invocation-part', {}, $('span.cursor-test-terminal-loading', {}, 'Loading terminal'));
+
+			part.appendItem(() => ({ domNode: lateNativeHost }), tool.toolId, tool);
+			lateNativeHost.querySelector('.cursor-test-terminal-loading')?.remove();
+			lateNativeHost.appendChild(nativeRoot);
+			const row = part.domNode.querySelector<HTMLElement>('.chat-thinking-cursor-terminal-row');
+			const nativeToggle = nativeRoot.querySelector<HTMLElement>(':scope > .chat-used-context-label .monaco-button');
+			assert.ok(row && nativeToggle && nativeCommand, 'Expected the Cursor terminal row to retain its one native command disclosure');
+			assert.deepStrictEqual({
+				activityGroups: part.domNode.querySelectorAll('.chat-thinking-work-group').length,
+				otherRows: part.domNode.querySelectorAll('.chat-thinking-cursor-other-row').length,
+				nativeHeaders: row.querySelectorAll('.chat-terminal-thinking-collapsible > .chat-used-context-label').length,
+				standaloneParent: row.parentElement?.classList.contains('chat-thinking-collapsible'),
+				syntheticSummary: row.querySelector('.chat-thinking-work-row-summary'),
+				syntheticDetails: row.querySelector('.chat-thinking-work-row-details'),
+				outerRole: row.getAttribute('role'),
+				outerAria: row.getAttribute('aria-expanded'),
+				nativeRoot: row.querySelector('.chat-terminal-thinking-collapsible') === nativeRoot,
+				nativeCollapsed: nativeRoot.classList.contains('chat-used-context-collapsed'),
+				nativeExpanded: native.disclosure.expanded.get(),
+				nativeCommand: row.querySelector('.chat-used-context-label code') === nativeCommand,
+				commandText: nativeCommand.textContent,
+				nativeShellMounted: !!row.querySelector('.cursor-test-native-shell'),
+				chrome: { tabs: tabs.outerHTML, composer: composer.outerHTML },
+			}, {
+				activityGroups: 0,
+				otherRows: 0,
+				nativeHeaders: 1,
+				standaloneParent: true,
+				syntheticSummary: null,
+				syntheticDetails: null,
+				outerRole: null,
+				outerAria: null,
+				nativeRoot: true,
+				nativeCollapsed: true,
+				nativeExpanded: false,
+				nativeCommand: true,
+				commandText: command,
+				nativeShellMounted: false,
+				chrome: chromeBefore,
+			});
+
+			nativeToggle.click();
+			assert.deepStrictEqual({
+				nativeCollapsed: nativeRoot.classList.contains('chat-used-context-collapsed'),
+				nativeExpanded: native.disclosure.expanded.get(),
+				nativeRoot: row.querySelector('.chat-terminal-thinking-collapsible') === nativeRoot,
+				nativeCommand: row.querySelector('.chat-used-context-label code') === nativeCommand,
+				nativeShell: row.querySelector('.cursor-test-native-shell') === native.nativeShell,
+				nativeOutput: row.querySelector('.cursor-test-native-shell-output') === native.nativeOutput,
+			}, {
+				nativeCollapsed: false,
+				nativeExpanded: true,
+				nativeRoot: true,
+				nativeCommand: true,
+				nativeShell: true,
+				nativeOutput: true,
+			}, 'Expanding Execute must reveal the original native shell subtree');
+
+			nativeToggle.click();
+			assert.deepStrictEqual({
+				nativeCollapsed: nativeRoot.classList.contains('chat-used-context-collapsed'),
+				nativeExpanded: native.disclosure.expanded.get(),
+				nativeRoot: row.querySelector('.chat-terminal-thinking-collapsible') === nativeRoot,
+				nativeCommand: row.querySelector('.chat-used-context-label code') === nativeCommand,
+				nativeShell: row.querySelector('.cursor-test-native-shell') === native.nativeShell,
+				nativeOutput: row.querySelector('.cursor-test-native-shell-output') === native.nativeOutput,
+				outputText: native.nativeOutput.textContent,
+				chrome: { tabs: tabs.outerHTML, composer: composer.outerHTML },
+			}, {
+				nativeCollapsed: true,
+				nativeExpanded: false,
+				nativeRoot: true,
+				nativeCommand: true,
+				nativeShell: true,
+				nativeOutput: true,
+				outputText: 'ready\nall checks passed',
+				chrome: chromeBefore,
+			}, 'Collapsing Execute must hide without replacing or leaking the native subtree');
+		});
+
+		test('sequential Cursor shell calls stay as independent native cards without a command group', () => {
+			const context = createMockRenderContext(false);
+			context.container.classList.add('backboard-clean-chat', 'backboard-cursor-transcript');
+			const part = disposables.add(instantiationService.createInstance(
+				ChatThinkingContentPart,
+				createThinkingPart('Running two shell commands'),
+				context,
+				mockMarkdownRenderer,
+				false
+			));
+			context.container.appendChild(part.domNode);
+
+			const first = createNativeTerminalDisclosure(context, 'pwd', '/project');
+			const second = createNativeTerminalDisclosure(context, 'npm test', '18 passing');
+			const firstTool = createCursorTool('Execute', 'Execute pwd', 'call-shell-a');
+			const secondTool = createCursorTool('exec_command', 'Execute tests', 'call-shell-b');
+			part.appendItem(() => ({ domNode: first.disclosure.domNode }), firstTool.toolId, firstTool);
+			part.appendItem(() => ({ domNode: second.disclosure.domNode }), secondTool.toolId, secondTool);
+
+			const rows = Array.from(part.domNode.querySelectorAll<HTMLElement>('.chat-thinking-cursor-terminal-row'));
+			assert.deepStrictEqual({
+				activityGroups: part.domNode.querySelectorAll('.chat-thinking-work-group').length,
+				rowCount: rows.length,
+				commands: rows.map(row => row.querySelector('.chat-used-context-label code')?.textContent),
+				roots: [
+					rows[0]?.querySelector('.chat-terminal-thinking-collapsible') === first.disclosure.domNode,
+					rows[1]?.querySelector('.chat-terminal-thinking-collapsible') === second.disclosure.domNode,
+				],
+			}, {
+				activityGroups: 0,
+				rowCount: 2,
+				commands: ['pwd', 'npm test'],
+				roots: [true, true],
+			});
+
+			const secondToggle = second.disclosure.domNode.querySelector<HTMLElement>(':scope > .chat-used-context-label .monaco-button');
+			assert.ok(secondToggle);
+			secondToggle.click();
+			assert.strictEqual(second.disclosure.expanded.get(), true);
+			assert.strictEqual(first.disclosure.expanded.get(), false, 'Opening one shell card must not change another');
+			assert.strictEqual(rows[1].querySelector('.cursor-test-native-shell-output'), second.nativeOutput);
+		});
+
+		test('non-Cursor host keeps native terminal content without Cursor transcript disclosures or chrome leakage', () => {
+			const shell = $('.cursor-test-non-cursor-terminal-shell');
+			const tabs = $('div.chat-view-title-tabs', { 'data-test-state': 'tabs' }, $('span', {}, 'Agent'));
+			const composer = $('div.backboard-composer', { 'data-test-state': 'composer' }, $('textarea', { 'aria-label': 'Message' }));
+			const context = createMockRenderContext(false);
+			context.container.classList.add('backboard-clean-chat');
+			shell.append(tabs, context.container, composer);
+			mainWindow.document.body.appendChild(shell);
+			disposables.add(toDisposable(() => shell.remove()));
+			const chromeBefore = { tabs: tabs.outerHTML, composer: composer.outerHTML };
+
+			const part = disposables.add(instantiationService.createInstance(
+				ChatThinkingContentPart,
+				createThinkingPart('Ordinary clean-host reasoning'),
+				context,
+				mockMarkdownRenderer,
+				false
+			));
+			context.container.appendChild(part.domNode);
+			const native = createNativeTerminalDisclosure(context, 'printf ordinary', 'ordinary output');
+			native.disclosure.expand();
+			const nativeRoot = native.disclosure.domNode;
+			const tool = createCursorTool('Execute', 'Execute ordinary command', 'call-non-cursor-terminal', true);
+			part.appendItem(() => ({ domNode: nativeRoot }), tool.toolId, tool);
+
+			const row = nativeRoot.closest<HTMLElement>('.chat-thinking-tool-wrapper');
+			assert.ok(row, 'Expected the ordinary host to preserve its native terminal row');
+			assert.deepStrictEqual({
+				cursorReasoningLabels: part.domNode.querySelectorAll('.chat-thinking-cursor-reasoning-label').length,
+				cursorTerminalRows: part.domNode.querySelectorAll('.chat-thinking-cursor-terminal-row').length,
+				nativeExpandable: row.classList.contains('chat-thinking-work-row-native-expandable'),
+				expandedAria: row.getAttribute('aria-expanded'),
+				nativeRoot: row.querySelector(':scope > .chat-thinking-work-native-content') === nativeRoot,
+				nativeShell: row.querySelector('.cursor-test-native-shell') === native.nativeShell,
+				nativeOutput: row.querySelector('.cursor-test-native-shell-output') === native.nativeOutput,
+				chrome: { tabs: tabs.outerHTML, composer: composer.outerHTML },
+				chromeCursorArtifacts: tabs.querySelectorAll('.chat-thinking-cursor-reasoning-label, .chat-thinking-cursor-terminal-row').length
+					+ composer.querySelectorAll('.chat-thinking-cursor-reasoning-label, .chat-thinking-cursor-terminal-row').length,
+			}, {
+				cursorReasoningLabels: 0,
+				cursorTerminalRows: 0,
+				nativeExpandable: false,
+				expandedAria: null,
+				nativeRoot: true,
+				nativeShell: true,
+				nativeOutput: true,
+				chrome: chromeBefore,
+				chromeCursorArtifacts: 0,
+			});
+		});
+
+		test('Cursor external edit renders a collapsed inline diff preview without touching tabs or composer', async () => {
+			const beforeContentUri = URI.parse('chat-edit://before/chat.css');
+			const afterContentUri = URI.parse('chat-edit://after/chat.css');
+			const contentByUri = new Map<string, string>([
+				[beforeContentUri.toString(), 'const stable = true;\nconst first = "old";\nconst second = "old";\nexport { first, second };\nconst tail = true;'],
+				[afterContentUri.toString(), 'const stable = true;\nconst first = "new";\nconst second = "new";\nexport { first, second };\nconst tail = true;'],
+			]);
+			instantiationService.stub(ITextModelService, {
+				_serviceBrand: undefined,
+				createModelReference: async (resource: URI) => ({
+					object: {
+						textEditorModel: {
+							getValue: () => contentByUri.get(resource.toString()) ?? '',
+						},
+					},
+					dispose: () => { },
+				}),
+			} as unknown as ITextModelService);
+
+			const shell = $('.cursor-test-chat-shell');
+			const tabs = $('div.chat-view-title-tabs', { 'data-test-state': 'tabs' }, $('span', {}, 'Agent'));
+			const composer = $('div.backboard-composer', { 'data-test-state': 'composer' }, $('textarea', { 'aria-label': 'Message' }));
+			const context = createMockRenderContext(false);
+			context.container.classList.add('backboard-clean-chat', 'backboard-cursor-transcript');
+			shell.append(tabs, context.container, composer);
+			mainWindow.document.body.appendChild(shell);
+			disposables.add(toDisposable(() => shell.remove()));
+			const chromeBefore = { tabs: tabs.outerHTML, composer: composer.outerHTML };
+
+			const part = disposables.add(instantiationService.createInstance(
+				ChatThinkingContentPart,
+				createThinkingPart('Reviewing an inline file change'),
+				context,
+				mockMarkdownRenderer,
+				false
+			));
+			context.container.appendChild(part.domNode);
+			const edit: IChatExternalEdit = {
+				kind: 'externalEdit',
+				uri: URI.file('/project/src/chat.css'),
+				editKind: 'edit',
+				diff: { added: 4, removed: 1 },
+				beforeContentUri,
+				afterContentUri,
+			};
+			const editPart = disposables.add(instantiationService.createInstance(ChatExternalEditContentPart, edit));
+
+			// ChatListRenderer invokes this public hook only for a Cursor transcript.
+			editPart.showDiffPreview();
+			part.appendItem(() => ({ domNode: editPart.domNode }), undefined, edit);
+			part.finalizeTitleIfDefault();
+			for (let attempt = 0; attempt < 20 && !editPart.domNode.querySelector('.chat-external-edit-diff-row'); attempt++) {
+				await new Promise<void>(resolve => mainWindow.setTimeout(resolve, 0));
+			}
+
+			const row = part.domNode.querySelector<HTMLElement>('.chat-thinking-cursor-edit-row');
+			const card = row?.querySelector<HTMLElement>(':scope > .chat-external-edit-card');
+			const body = card?.querySelector<HTMLElement>(':scope > .chat-external-edit-diff-body');
+			const diffContent = body?.querySelector<HTMLElement>(':scope > .chat-external-edit-diff-content');
+			const diffRows = Array.from(diffContent?.querySelectorAll<HTMLElement>(':scope > .chat-external-edit-diff-row') ?? []);
+			const markers = diffRows.map(diffRow => diffRow.querySelector('.chat-external-edit-diff-marker')?.textContent);
+			assert.deepStrictEqual({
+				nativeCard: card === editPart.domNode,
+				preview: card?.classList.contains('chat-external-edit-preview'),
+				expanded: card?.classList.contains('chat-external-edit-expanded'),
+				header: !!card?.querySelector(':scope > .chat-codeblock-pill-widget'),
+				expandControl: !!card?.querySelector(':scope > .chat-external-edit-expand'),
+				copyControl: !!card?.querySelector(':scope > .chat-external-edit-copy'),
+				expandAria: card?.querySelector('.chat-external-edit-expand')?.getAttribute('aria-expanded'),
+				body: !!body,
+				bodyRole: body?.getAttribute('role'),
+				bodyTabIndex: body?.tabIndex,
+				sharedWidthWrapper: !!diffContent,
+				overflowFade: body?.classList.contains('chat-external-edit-diff-overflow'),
+				rowKinds: {
+					context: diffRows.some(diffRow => diffRow.classList.contains('context')),
+					removed: diffRows.some(diffRow => diffRow.classList.contains('removed')),
+					added: diffRows.some(diffRow => diffRow.classList.contains('added')),
+				},
+				markers: {
+					blank: markers.includes(''),
+					removed: markers.includes('-'),
+					added: markers.includes('+'),
+				},
+				rowAnatomy: diffRows.every(diffRow =>
+					!!diffRow.querySelector(':scope > .chat-external-edit-diff-gutter') &&
+					!!diffRow.querySelector(':scope > .chat-external-edit-diff-marker') &&
+					!!diffRow.querySelector(':scope > .chat-external-edit-diff-text')),
+				added: row?.querySelector('.label-added')?.textContent,
+				removed: row?.querySelector('.label-removed')?.textContent,
+				activityGroups: part.domNode.querySelectorAll('.chat-thinking-work-group').length,
+				chromeAfter: { tabs: tabs.outerHTML, composer: composer.outerHTML },
+			}, {
+				nativeCard: true,
+				preview: true,
+				expanded: false,
+				header: true,
+				expandControl: true,
+				copyControl: true,
+				expandAria: 'false',
+				body: true,
+				bodyRole: 'region',
+				bodyTabIndex: -1,
+				sharedWidthWrapper: true,
+				overflowFade: true,
+				rowKinds: { context: true, removed: true, added: true },
+				markers: { blank: true, removed: true, added: true },
+				rowAnatomy: true,
+				added: '+4',
+				removed: '-1',
+				activityGroups: 0,
+				chromeAfter: chromeBefore,
+			});
+
+			const expandControl = card?.querySelector<HTMLElement>(':scope > .chat-external-edit-expand');
+			assert.ok(card && expandControl && body);
+			expandControl.click();
+			body.style.height = '20px';
+			body.style.maxHeight = '20px';
+			body.style.overflowY = 'auto';
+			assert.ok(body.scrollHeight > body.clientHeight, 'Expanded diff fixture must have real vertical overflow');
+			let outerWheelEvents = 0;
+			shell.addEventListener('wheel', () => outerWheelEvents++);
+			const downWheel = new mainWindow.WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 60 });
+			body.dispatchEvent(downWheel);
+			const afterDown = body.scrollTop;
+			const outerAfterDown = outerWheelEvents;
+			const upWheel = new mainWindow.WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -25 });
+			body.dispatchEvent(upWheel);
+			const afterUp = body.scrollTop;
+			const outerAfterUp = outerWheelEvents;
+			body.scrollTop = 0;
+			const edgeWheel = new mainWindow.WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -60 });
+			body.dispatchEvent(edgeWheel);
+			assert.deepStrictEqual({
+				expanded: card.classList.contains('chat-external-edit-expanded'),
+				expandAria: expandControl.getAttribute('aria-expanded'),
+				bodyTabIndex: body.tabIndex,
+				downScrolled: afterDown > 0,
+				upScrolled: afterUp < afterDown,
+				downConsumed: downWheel.defaultPrevented,
+				upConsumed: upWheel.defaultPrevented,
+				outerAfterDown,
+				outerAfterUp,
+				outerWheelEvents,
+			}, {
+				expanded: true,
+				expandAria: 'true',
+				bodyTabIndex: 0,
+				downScrolled: true,
+				upScrolled: true,
+				downConsumed: true,
+				upConsumed: true,
+				outerAfterDown: 0,
+				outerAfterUp: 0,
+				outerWheelEvents: 1,
+			});
+		});
+
+		test('Cursor textEditGroup replaces the full compare editor with the same compact diff card', async () => {
+			const fileUri = URI.file('/project/src/entities.js');
+			const beforeUri = URI.parse('chat-text-edit://before/entities.js');
+			const afterUri = URI.parse('chat-text-edit://after/entities.js');
+			const beforeContent = 'const stable = true;\nconst first = "old";\nconst second = "old";\nexport { first, second };\nconst tail = true;';
+			const afterContent = 'const stable = true;\nconst first = "new";\nconst second = "new";\nexport { first, second };\nconst tail = true;';
+			const contentByUri = new Map<string, string>([
+				[beforeUri.toString(), beforeContent],
+				[afterUri.toString(), afterContent],
+			]);
+			instantiationService.stub(ICodeCompareModelService, {
+				_serviceBrand: undefined,
+				createModel: async () => ({
+					object: {
+						originalSha1: 'before-sha',
+						original: { textEditorModel: { uri: beforeUri, getValue: () => beforeContent } },
+						modified: { textEditorModel: { uri: afterUri, getValue: () => afterContent } },
+					},
+					dispose: () => { },
+				}),
+			} as unknown as ICodeCompareModelService);
+			instantiationService.stub(ITextModelService, {
+				_serviceBrand: undefined,
+				createModelReference: async (resource: URI) => ({
+					object: { textEditorModel: { getValue: () => contentByUri.get(resource.toString()) ?? '' } },
+					dispose: () => { },
+				}),
+			} as unknown as ITextModelService);
+
+			const context = createMockRenderContext(true);
+			context.container.classList.add('backboard-clean-chat', 'backboard-cursor-transcript');
+			Object.assign(context.element, { setVote: () => undefined });
+			const edit: IChatTextEditGroup = {
+				kind: 'textEditGroup',
+				uri: fileUri,
+				edits: [[], []],
+				done: true,
+			};
+			const part = disposables.add(instantiationService.createInstance(
+				ChatTextEditContentPart,
+				edit,
+				context,
+				{},
+				{} as DiffEditorPool,
+				500,
+			));
+			let reportedStats: IEditSessionDiffStats | undefined;
+			disposables.add(part.onDidChangeDiff(stats => reportedStats = stats));
+			context.container.appendChild(part.domNode);
+			for (let attempt = 0; attempt < 100 && !part.domNode.classList.contains('chat-external-edit-preview'); attempt++) {
+				await new Promise<void>(resolve => mainWindow.setTimeout(resolve, 5));
+			}
+			for (let attempt = 0; attempt < 100 && !part.domNode.querySelector('.chat-external-edit-diff-row'); attempt++) {
+				await new Promise<void>(resolve => mainWindow.setTimeout(resolve, 5));
+			}
+
+			const body = part.domNode.querySelector<HTMLElement>(':scope > .chat-external-edit-diff-body');
+			assert.deepStrictEqual({
+				compactCard: part.domNode.classList.contains('chat-external-edit-card'),
+				preview: part.domNode.classList.contains('chat-external-edit-preview'),
+				fullCompareEditors: context.container.querySelectorAll('.interactive-result-code-block.compare, .interactive-result-editor').length,
+				fileName: part.domNode.querySelector('.icon-label')?.textContent,
+				added: part.domNode.querySelector('.label-added')?.textContent,
+				removed: part.domNode.querySelector('.label-removed')?.textContent,
+				rows: body?.querySelectorAll('.chat-external-edit-diff-content > .chat-external-edit-diff-row').length,
+				overflowFade: body?.classList.contains('chat-external-edit-diff-overflow'),
+				reportedStats,
+			}, {
+				compactCard: true,
+				preview: true,
+				fullCompareEditors: 0,
+				fileName: 'entities.js',
+				added: '+2',
+				removed: '-2',
+				rows: 6,
+				overflowFade: true,
+				reportedStats: { added: 2, removed: 2 },
+			});
+		});
+
+		test('restored Cursor transcript eagerly mounts one-sided create and delete previews plus markdown artifacts', async () => {
+			const createAfterUri = URI.parse('chat-edit://after/created.ts');
+			const deleteBeforeUri = URI.parse('chat-edit://before/deleted.ts');
+			const contentByUri = new Map<string, string>([
+				[createAfterUri.toString(), 'export const created = true;\nexport const ready = true;'],
+				[deleteBeforeUri.toString(), 'export const removed = true;\nexport const stale = true;'],
+			]);
+			instantiationService.stub(ITextModelService, {
+				_serviceBrand: undefined,
+				createModelReference: async (resource: URI) => ({
+					object: {
+						textEditorModel: {
+							getValue: () => contentByUri.get(resource.toString()) ?? '',
+						},
+					},
+					dispose: () => { },
+				}),
+			} as unknown as ITextModelService);
+
+			const context = createMockRenderContext(true);
+			context.container.classList.add('backboard-clean-chat', 'backboard-cursor-transcript');
+			const part = disposables.add(instantiationService.createInstance(
+				ChatThinkingContentPart,
+				createThinkingPart('Restored completed reasoning'),
+				context,
+				mockMarkdownRenderer,
+				true
+			));
+			mainWindow.document.body.appendChild(part.domNode);
+			disposables.add(toDisposable(() => part.domNode.remove()));
+			assert.strictEqual(part.domNode.classList.contains('chat-used-context-collapsed'), true, 'Restored completed Thought should begin outer-collapsed');
+
+			const createEdit: IChatExternalEdit = {
+				kind: 'externalEdit',
+				uri: URI.file('/project/src/created.ts'),
+				editKind: 'create',
+				diff: { added: 2, removed: 0 },
+				afterContentUri: createAfterUri,
+			};
+			const deleteEdit: IChatExternalEdit = {
+				kind: 'externalEdit',
+				uri: URI.file('/project/src/deleted.ts'),
+				editKind: 'delete',
+				diff: { added: 0, removed: 2 },
+				beforeContentUri: deleteBeforeUri,
+			};
+			const createPart = disposables.add(instantiationService.createInstance(ChatExternalEditContentPart, createEdit));
+			const deletePart = disposables.add(instantiationService.createInstance(ChatExternalEditContentPart, deleteEdit));
+			createPart.showDiffPreview();
+			deletePart.showDiffPreview();
+			const markdown: IChatMarkdownContent = {
+				kind: 'markdownContent',
+				content: { value: 'Updated inline markdown artifact' },
+			};
+			const markdownRoot = $('div.cursor-test-restored-markdown-artifact', {}, 'Updated inline markdown artifact');
+			const materialized: string[] = [];
+			part.appendItem(() => {
+				materialized.push('create');
+				return { domNode: createPart.domNode };
+			}, undefined, createEdit);
+			part.appendItem(() => {
+				materialized.push('delete');
+				return { domNode: deletePart.domNode };
+			}, undefined, deleteEdit);
+			part.appendItem(() => {
+				materialized.push('markdown');
+				return { domNode: markdownRoot };
+			}, undefined, markdown);
+
+			for (let attempt = 0; attempt < 100 && (!createPart.domNode.querySelector('.chat-external-edit-diff-row') || !deletePart.domNode.querySelector('.chat-external-edit-diff-row')); attempt++) {
+				await new Promise<void>(resolve => mainWindow.setTimeout(resolve, 5));
+			}
+
+			const editRows = Array.from(part.domNode.querySelectorAll<HTMLElement>('.chat-thinking-cursor-edit-row'));
+			const createMarkers = Array.from(createPart.domNode.querySelectorAll<HTMLElement>('.chat-external-edit-diff-marker')).map(marker => marker.textContent);
+			const deleteMarkers = Array.from(deletePart.domNode.querySelectorAll<HTMLElement>('.chat-external-edit-diff-marker')).map(marker => marker.textContent);
+			assert.deepStrictEqual({
+				outerCollapsed: part.domNode.classList.contains('chat-used-context-collapsed'),
+				materialized,
+				rowCount: editRows.length,
+				create: {
+					card: createPart.domNode.classList.contains('chat-external-edit-card'),
+					preview: createPart.domNode.classList.contains('chat-external-edit-preview'),
+					expandAria: createPart.domNode.querySelector('.chat-external-edit-expand')?.getAttribute('aria-expanded'),
+					body: !!createPart.domNode.querySelector('.chat-external-edit-diff-body'),
+					overflowFade: createPart.domNode.querySelector('.chat-external-edit-diff-body')?.classList.contains('chat-external-edit-diff-overflow'),
+					note: createPart.domNode.querySelector('.chat-external-edit-diff-note')?.textContent,
+					markers: createMarkers,
+				},
+				delete: {
+					card: deletePart.domNode.classList.contains('chat-external-edit-card'),
+					preview: deletePart.domNode.classList.contains('chat-external-edit-preview'),
+					expandAria: deletePart.domNode.querySelector('.chat-external-edit-expand')?.getAttribute('aria-expanded'),
+					body: !!deletePart.domNode.querySelector('.chat-external-edit-diff-body'),
+					overflowFade: deletePart.domNode.querySelector('.chat-external-edit-diff-body')?.classList.contains('chat-external-edit-diff-overflow'),
+					note: deletePart.domNode.querySelector('.chat-external-edit-diff-note')?.textContent,
+					markers: deleteMarkers,
+				},
+				markdown: {
+					identity: editRows[2]?.querySelector('.cursor-test-restored-markdown-artifact') === markdownRoot,
+					card: markdownRoot.classList.contains('chat-external-edit-card'),
+				},
+			}, {
+				outerCollapsed: true,
+				materialized: ['create', 'delete', 'markdown'],
+				rowCount: 3,
+				create: {
+					card: true,
+					preview: true,
+					expandAria: 'false',
+					body: true,
+					overflowFade: false,
+					note: undefined,
+					markers: ['+', '+'],
+				},
+				delete: {
+					card: true,
+					preview: true,
+					expandAria: 'false',
+					body: true,
+					overflowFade: false,
+					note: undefined,
+					markers: ['-', '-'],
+				},
+				markdown: {
+					identity: true,
+					card: false,
+				},
+			});
+		});
+
+		test('non-Cursor external edit remains collapsed and leaves sibling tabs and composer untouched', () => {
+			const shell = $('.cursor-test-non-cursor-shell');
+			const tabs = $('div.chat-view-title-tabs', { 'data-test-state': 'tabs' }, $('span', {}, 'Agent'));
+			const content = $('div.backboard-clean-chat');
+			const composer = $('div.backboard-composer', { 'data-test-state': 'composer' }, $('textarea', { 'aria-label': 'Message' }));
+			shell.append(tabs, content, composer);
+			mainWindow.document.body.appendChild(shell);
+			disposables.add(toDisposable(() => shell.remove()));
+			const chromeBefore = { tabs: tabs.outerHTML, composer: composer.outerHTML };
+			const edit: IChatExternalEdit = {
+				kind: 'externalEdit',
+				uri: URI.file('/project/src/chat.css'),
+				editKind: 'edit',
+				diff: { added: 4, removed: 1 },
+				beforeContentUri: URI.parse('chat-edit://before/chat.css'),
+				afterContentUri: URI.parse('chat-edit://after/chat.css'),
+			};
+			const editPart = disposables.add(instantiationService.createInstance(ChatExternalEditContentPart, edit));
+			content.appendChild(editPart.domNode);
+
+			assert.deepStrictEqual({
+				card: editPart.domNode.classList.contains('chat-external-edit-card'),
+				preview: editPart.domNode.classList.contains('chat-external-edit-preview'),
+				expanded: editPart.domNode.classList.contains('chat-external-edit-expanded'),
+				expandAria: editPart.domNode.querySelector('.chat-external-edit-expand')?.getAttribute('aria-expanded'),
+				body: editPart.domNode.querySelector('.chat-external-edit-diff-body'),
+				chromeAfter: { tabs: tabs.outerHTML, composer: composer.outerHTML },
+				leakedCards: tabs.querySelectorAll('.chat-external-edit-card').length + composer.querySelectorAll('.chat-external-edit-card').length,
+			}, {
+				card: true,
+				preview: false,
+				expanded: false,
+				expandAria: 'false',
+				body: null,
+				chromeAfter: chromeBefore,
+				leakedCards: 0,
+			});
 		});
 	});
 

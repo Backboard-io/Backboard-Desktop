@@ -804,7 +804,7 @@
 }
 
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .new-chat-composer-stack {
-	width: min(820px, calc(100% - 64px));
+	width: calc(100% - 64px);
 	--new-chat-card-radius: 22px;
 	transform: translateY(-24px);
 }
@@ -819,22 +819,19 @@
 
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container {
 	height: auto;
-	min-height: 142px;
-	padding: 16px 16px 12px;
+	min-height: 110px;
+	padding: 10px 12px;
 	border: 1px solid color-mix(in srgb, var(--codex-text-primary) 10%, transparent) !important;
 	border-radius: 22px !important;
 	background: var(--codex-composer) !important;
-	box-shadow:
-		0 20px 46px -26px rgb(16 24 40 / 28%),
-		0 10px 26px -22px color-mix(in srgb, #3b82f6 28%, transparent),
-		inset 0 1px rgb(255 255 255 / 72%);
+	box-shadow: none;
 }
 
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .new-chat-composer-stack > .interactive-session .chat-editor-container,
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .new-chat-composer-stack > .interactive-session .interactive-input-editor,
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .new-chat-composer-stack > .interactive-session .interactive-input-editor .monaco-editor,
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .new-chat-composer-stack > .interactive-session .interactive-input-editor .overflow-guard {
-	min-height: 54px;
+	min-height: 44px;
 }
 
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background,
@@ -863,26 +860,15 @@ html body .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.j
 
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .new-chat-composer-stack > .interactive-session .chat-input-container.focused {
 	border-color: color-mix(in srgb, var(--codex-text-primary) 24%, transparent) !important;
-	box-shadow:
-		0 0 0 2px color-mix(in srgb, var(--vscode-focusBorder) 18%, transparent),
-		0 24px 52px -26px rgb(16 24 40 / 32%),
-		0 12px 30px -22px color-mix(in srgb, #3b82f6 42%, transparent),
-		inset 0 1px rgb(255 255 255 / 78%);
+	box-shadow: 0 0 0 2px color-mix(in srgb, var(--vscode-focusBorder) 18%, transparent);
 }
 
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container {
-	box-shadow:
-		0 26px 58px -30px rgb(0 0 0 / 88%),
-		0 12px 30px -24px color-mix(in srgb, #3b82f6 46%, transparent),
-		inset 0 1px rgb(255 255 255 / 5%);
+	box-shadow: none;
 }
 
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .new-chat-composer-stack > .interactive-session .chat-input-container.focused {
-	box-shadow:
-		0 0 0 2px color-mix(in srgb, var(--vscode-focusBorder) 18%, transparent),
-		0 30px 66px -30px rgb(0 0 0 / 92%),
-		0 14px 34px -22px color-mix(in srgb, #3b82f6 62%, transparent),
-		inset 0 1px rgb(255 255 255 / 7%);
+	box-shadow: 0 0 0 2px color-mix(in srgb, var(--vscode-focusBorder) 18%, transparent);
 }
 
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):is(.hc-black, .hc-light) .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container,
@@ -914,6 +900,14 @@ html body .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.j
 	.interactive-session .interactive-list .monaco-list-rows,
 	.interactive-session .interactive-list .monaco-list-row) {
 	background: var(--codex-canvas) !important;
+}
+
+/* The active transcript keeps its canvas, but the dock beneath it should not
+ * paint a second full-width rectangle behind the narrower composer card. Let
+ * the Sessions part show through around the composer instead. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .chat-view-chat.backboard-clean-chat.backboard-composer > .interactive-session,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .chat-view-chat.backboard-clean-chat.backboard-composer > .interactive-session > .interactive-input-part {
+	background: transparent !important;
 }
 
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .interactive-item-container,

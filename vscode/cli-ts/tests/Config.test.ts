@@ -233,6 +233,27 @@ describe("Config", () => {
 		expect(reopened.memoryProfile).toBe("code");
 	});
 
+	it("persists recently successful models for capacity recovery", async () => {
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
+		await saveBackboardConfig({ apiKey: "file-key" }, homeDir);
+		const config = new Config({ env, argv: [], homeDir });
+
+		await config.recordSuccessfulModel({
+			provider: "openai",
+			model: "gpt-5.6-sol",
+		});
+		await config.recordSuccessfulModel({
+			provider: "openrouter",
+			model: "z-ai/glm-5.3",
+		});
+
+		const reopened = new Config({ env, argv: [], homeDir });
+		expect(reopened.successfulModels).toEqual([
+			{ provider: "openrouter", model: "z-ai/glm-5.3" },
+			{ provider: "openai", model: "gpt-5.6-sol" },
+		]);
+	});
+
 	it("loads saved dynamic thinking selections", async () => {
 		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
 		await saveBackboardConfig(
@@ -398,7 +419,7 @@ describe("Config", () => {
 			env,
 			argv: ["--model", "openai/gpt-5.5", "--thinking", "default"],
 		});
-		expect(providerDefault.thinking).toBeUndefined();
+		expect(providerDefault.thinking).toEqual({ kind: "default" });
 
 		const level = new Config({
 			env,

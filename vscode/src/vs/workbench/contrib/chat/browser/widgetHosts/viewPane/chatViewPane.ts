@@ -62,7 +62,6 @@ import { IChatViewsWelcomeDescriptor } from '../../viewsWelcome/chatViewsWelcome
 import { IWorkbenchLayoutService, LayoutSettings, Position } from '../../../../../services/layout/browser/layoutService.js';
 import { AgentSessionsViewerOrientation, AgentSessionsViewerPosition } from '../../agentSessions/agentSessions.js';
 import { IProgressService } from '../../../../../../platform/progress/common/progress.js';
-import { IRequestService } from '../../../../../../platform/request/common/request.js';
 import { ChatViewContainerId, ChatViewId } from '../../chat.js';
 import { IActivityService, ProgressBadge } from '../../../../../services/activity/common/activity.js';
 import { disposableTimeout } from '../../../../../../base/common/async.js';
@@ -88,7 +87,6 @@ import { IVoicePlaybackService } from '../../../common/voicePlaybackService.js';
 import { VoiceOnboardingCompletedClassification, VoiceOnboardingCompletedEvent } from '../../voiceClient/voiceTelemetry.js';
 import { IWorkbenchEnvironmentService } from '../../../../../services/environment/common/environmentService.js';
 import { backboardConfigResource, BackboardAuthContextKeys, BackboardAuthGateContextKeys, hasBackboardCredentials, isBackboardProduct } from '../../../common/backboardAuth.js';
-import { resolveBackboardUserInfo } from '../../backboardUserInfo.js';
 
 interface IChatViewPaneState extends Partial<IChatModelInputState> {
 	/**
@@ -163,7 +161,6 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 		@IPathService private readonly pathService: IPathService,
 		@IPaneCompositePartService private readonly paneCompositePartService: IPaneCompositePartService,
 		@IAgentCliSetupService private readonly agentCliSetupService: IAgentCliSetupService,
-		@IRequestService private readonly requestService: IRequestService,
 	) {
 		super(options, keybindingService2, contextMenuService, configurationService, contextKeyService, viewDescriptorService, instantiationService, openerService, themeService, hoverService);
 
@@ -700,6 +697,7 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 		this.sessionsControlContainer = append(sessionsContainer, $('.agent-sessions-control-container'));
 		const sessionsControl = this.sessionsControl = this._register(this.instantiationService.createInstance(AgentSessionsControl, this.sessionsControlContainer, {
 			source: 'chatViewPane',
+			initiallyVisible: false,
 			filter: sessionsFilter,
 			overrideStyles: this.getLocationBasedColors().listOverrideStyles,
 			compactRows: false,
@@ -718,7 +716,7 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 				return openEvent;
 			},
 		}));
-		this._register(this.onDidChangeBodyVisibility(visible => sessionsControl.setVisible(visible)));
+		this._register(this.onDidChangeBodyVisibility(visible => sessionsControl.setVisible(visible && this.sessionsViewerVisible)));
 
 		sessionsToolbar.context = sessionsControl;
 
@@ -728,32 +726,6 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 				sessionsControl.refresh();
 			}
 		}));
-
-		const accountFooter = append(sessionsContainer, $('.agent-sessions-account-footer'));
-		const accountAvatar = append(accountFooter, $('span.agent-sessions-account-avatar'));
-		accountAvatar.classList.add(...ThemeIcon.asClassNameArray(Codicon.account));
-		const accountCopy = append(accountFooter, $('.agent-sessions-account-copy'));
-		const accountName = append(accountCopy, $('span.agent-sessions-account-name', undefined, localize('backboardAccountName', "Backboard Studio")));
-		const accountSettings = append(accountFooter, $('button.agent-sessions-account-settings')) as HTMLButtonElement;
-		accountSettings.type = 'button';
-		accountSettings.title = localize('backboardAccountSettings', "Settings");
-		accountSettings.setAttribute('aria-label', accountSettings.title);
-		const settingsIcon = append(accountSettings, $('span'));
-		settingsIcon.classList.add(...ThemeIcon.asClassNameArray(Codicon.menu));
-		this._register(addDisposableListener(accountSettings, EventType.CLICK, () => this.commandService.executeCommand('workbench.action.openSettings')));
-		resolveBackboardUserInfo(this.fileService, this.pathService, this.requestService, this.logService).then(info => {
-			if (!accountFooter.isConnected) {
-				return;
-			}
-			// Match the Simple-mode sidebar: both surfaces use the shared resolver
-			// and prefer the signed-in display name before falling back to email.
-			accountName.textContent = info.name ?? info.email ?? localize('backboardAccountName', "Backboard Studio");
-			const identity = info.name ?? info.email;
-			if (identity) {
-				accountAvatar.classList.remove(...ThemeIcon.asClassNameArray(Codicon.account));
-				accountAvatar.textContent = identity.split(/\s+|@/).filter(Boolean).slice(0, 2).map(part => part[0]?.toUpperCase()).join('');
-			}
-		}).catch(error => this.logService.warn(`[Backboard] Unable to populate chat drawer identity: ${toErrorMessage(error)}`));
 
 		// Deal with orientation configuration
 		this._register(Event.runAndSubscribe(Event.filter(this.configurationService.onDidChangeConfiguration, e => e.affectsConfiguration(ChatConfiguration.ChatViewSessionsOrientation)), e => {
@@ -835,6 +807,7 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 		const sessionsContainerVisible = this.sessionsContainer.style.display !== 'none';
 		setVisibility(newSessionsContainerVisible, this.sessionsContainer);
 		this.sessionsViewerVisible = newSessionsContainerVisible;
+		this.sessionsControl?.setVisible(this.isBodyVisible() && newSessionsContainerVisible);
 		this.sessionsViewerVisibilityContext.set(newSessionsContainerVisible);
 
 		return {
@@ -1296,12 +1269,7 @@ referencesExpandedWhenEmptyResponse: false,
 		const model = ref?.object;
 
 		if (model) {
-			await this.updateWidgetLockState(getChatSessionType(model.sessionResource)); // Update widget lock state based on session type
-
-			if (token.isCancellationRequested) {
-				this.modelRef.value = undefined;
-				return undefined;
-			}
+			this.updateWidgetLockState(getChatSessionType(model.sessionResource)); // Update widget lock state based on session type
 
 			// remember as model to restore in view state
 			this.viewState.sessionResource = model.sessionResource;
@@ -1322,7 +1290,7 @@ referencesExpandedWhenEmptyResponse: false,
 		if (oldModelResource) {
 			const capturedOldResource = oldModelResource;
 			this._register(disposableTimeout(() => {
-				const oldSession = this.agentSessionsService.model.getSession(capturedOldResource);
+				const oldSession = this.agentSessionsService.getSession(capturedOldResource);
 				if (oldSession && !oldSession.isMarkedUnread()) {
 					oldSession.setRead(true);
 				}
@@ -1332,20 +1300,8 @@ referencesExpandedWhenEmptyResponse: false,
 		return model;
 	}
 
-	private async updateWidgetLockState(sessionType: string): Promise<void> {
+	private updateWidgetLockState(sessionType: string): void {
 		if (sessionType === localChatSessionType) {
-			this._widget.unlockFromCodingAgent();
-			return;
-		}
-
-		let canResolve = false;
-		try {
-			canResolve = await this.chatSessionsService.canResolveChatSession(sessionType);
-		} catch (error) {
-			this.logService.warn(`Failed to resolve chat session type '${sessionType}' for locking`, error);
-		}
-
-		if (!canResolve) {
 			this._widget.unlockFromCodingAgent();
 			return;
 		}

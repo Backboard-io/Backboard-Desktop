@@ -153,7 +153,7 @@
 .new-chat-composer-stack {
 	position: relative;
 	grid-row: 3;
-	width: min(820px, calc(100% - 40px));
+	width: calc(100% - 64px);
 	min-width: 0;
 	margin: 0 auto;
 	box-sizing: border-box;
@@ -208,14 +208,12 @@
 
 .new-chat-octopus {
 	position: absolute;
-	/* Set the visible body inside the composer's rounded corner and let the
-	 * tentacles overlap the top edge enough to read as a proper perch. The
-	 * empty upper canvas rows remain available for the mascot's gestures. */
-	right: 46px;
-	top: -28px;
+	/* Perch outside the card, just left of its right edge. */
+	right: 128px;
+	top: -36px;
 	line-height: 0;
 	pointer-events: none;
-	z-index: 2;
+	z-index: 3;
 }
 
 .new-chat-octopus .octo-sprite {
@@ -983,12 +981,12 @@
 }
 
 .new-chat-composer-stack > .interactive-session .chat-input-container {
-	min-height: 172px;
-	padding: 18px 20px 14px;
+	min-height: 110px;
+	padding: 10px 12px;
 	display: flex;
 	flex-direction: column;
 	justify-content: flex-start;
-	gap: 12px;
+	gap: 6px;
 	overflow: hidden;
 	position: relative;
 }
@@ -1035,9 +1033,9 @@
 
 .new-chat-composer-stack > .interactive-session .chat-editor-container {
 	display: flex;
-	padding: 0;
-	flex: 1 1 auto;
-	min-height: 78px;
+	padding: 0 2px;
+	flex: 0 0 auto;
+	min-height: 44px;
 	width: 100%;
 	position: relative;
 	z-index: 2;
@@ -1045,7 +1043,7 @@
 
 .new-chat-composer-stack > .interactive-session .interactive-input-editor {
 	flex: 1 1 auto;
-	min-height: 78px;
+	min-height: 44px;
 	width: 100%;
 	position: relative;
 	z-index: 2;
@@ -1053,7 +1051,7 @@
 
 .new-chat-composer-stack > .interactive-session .interactive-input-editor .monaco-editor,
 .new-chat-composer-stack > .interactive-session .interactive-input-editor .overflow-guard {
-	min-height: 78px;
+	min-height: 44px;
 	position: relative;
 	z-index: 2;
 }

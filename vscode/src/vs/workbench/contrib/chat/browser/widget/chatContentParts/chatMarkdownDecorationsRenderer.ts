@@ -73,6 +73,7 @@ interface ISlashCommandWidgetArgs {
 
 export interface IDecorationWidgetArgs {
 	title?: string;
+	capabilityId?: string;
 }
 
 export class ChatMarkdownDecorationsRenderer {
@@ -91,13 +92,18 @@ export class ChatMarkdownDecorationsRenderer {
 		@IChatMarkdownAnchorService private readonly chatMarkdownAnchorService: IChatMarkdownAnchorService,
 	) { }
 
-	convertParsedRequestToMarkdown(sessionResource: URI, parsedRequest: IParsedChatRequest): string {
+	convertParsedRequestToMarkdown(sessionResource: URI, parsedRequest: IParsedChatRequest, omitBackboardCapabilities = false): string {
 		let result = '';
 		for (const part of parsedRequest.parts) {
 			if (part instanceof ChatRequestTextPart) {
 				result += part.text;
 			} else if (part instanceof ChatRequestAgentPart) {
 				result += this.instantiationService.invokeFunction(accessor => agentToMarkdown(part.agent, sessionResource, false, accessor));
+			} else if (omitBackboardCapabilities && part instanceof ChatRequestDynamicVariablePart && part._meta?.backboardCapability === true) {
+				// Capabilities render in a stable metadata row under the request.
+				// Omitting them here prevents duplicate plain text in render styles
+				// that do not annotate markdown decoration links.
+				continue;
 			} else {
 				result += this.genericDecorationToMarkdown(part);
 			}
@@ -111,13 +117,19 @@ export class ChatMarkdownDecorationsRenderer {
 			part.data :
 			undefined;
 		const title = uri ? this.labelService.getUriLabel(uri, { relative: true }) :
-			part instanceof ChatRequestSlashCommandPart ? part.slashCommand.detail :
+			part instanceof ChatRequestDynamicVariablePart ? part.modelDescription :
+				part instanceof ChatRequestSlashCommandPart ? part.slashCommand.detail :
 				part instanceof ChatRequestAgentSubcommandPart ? part.command.description :
 					part instanceof ChatRequestSlashPromptPart ? part.name :
 						part instanceof ChatRequestToolPart ? (this.toolsService.getTool(part.toolId)?.userDescription) :
 							'';
 
-		const args: IDecorationWidgetArgs = { title };
+		const capabilityId = part instanceof ChatRequestDynamicVariablePart
+			&& part._meta?.backboardCapability === true
+			&& typeof part._meta.backboardCapabilityId === 'string'
+			? part._meta.backboardCapabilityId
+			: undefined;
+		const args: IDecorationWidgetArgs = { title, capabilityId };
 		const text = part.text;
 		return `[${text}](${decorationRefUrl}?${encodeURIComponent(JSON.stringify(args))})`;
 	}
@@ -251,6 +263,12 @@ export class ChatMarkdownDecorationsRenderer {
 
 	private renderResourceWidget(name: string, args: IDecorationWidgetArgs | undefined, store: DisposableStore): HTMLElement {
 		const container = dom.$('span.chat-resource-widget');
+		if (args?.capabilityId) {
+			container.classList.add('backboard-inline-capability-token');
+			container.dataset.optionId = args.capabilityId;
+			const icon = dom.append(container, dom.$('span.backboard-inline-capability-token-icon'));
+			icon.setAttribute('aria-hidden', 'true');
+		}
 		const alias = dom.$('span', undefined, name);
 		if (args?.title) {
 			store.add(this.hoverService.setupManagedHover(getDefaultHoverDelegate('element'), container, args.title));

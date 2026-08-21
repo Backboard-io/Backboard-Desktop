@@ -21,8 +21,6 @@ import { IModelPickerSetupCandidate } from './modelPickerActionItem.js';
  */
 const STATIC_SESSION_PROVIDERS: readonly AgentSessionTarget[] = [
 	AgentSessionProviders.AgentHostBackboard,
-	AgentSessionProviders.AgentHostClaude,
-	AgentSessionProviders.AgentHostCodex,
 ];
 
 /** Prefix identifying an agent-host session type. */

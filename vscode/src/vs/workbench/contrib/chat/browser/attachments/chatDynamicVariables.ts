@@ -10,6 +10,7 @@ import { URI } from '../../../../../base/common/uri.js';
 import { IRange, Range } from '../../../../../editor/common/core/range.js';
 import { IDecorationOptions } from '../../../../../editor/common/editorCommon.js';
 import { Command, isLocation } from '../../../../../editor/common/languages.js';
+import { IModelDeltaDecoration, ITextModel, TrackedRangeStickiness } from '../../../../../editor/common/model.js';
 import { Action2, registerAction2 } from '../../../../../platform/actions/common/actions.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { ServicesAccessor } from '../../../../../platform/instantiation/common/instantiation.js';
@@ -36,6 +37,8 @@ export class ChatDynamicVariableModel extends Disposable implements IChatWidgetC
 	}
 
 	private decorationData: { id: string; text: string }[] = [];
+	private capabilityDecorationIds: string[] = [];
+	private capabilityDecorationModel: ITextModel | undefined;
 
 	private readonly _editorListener = this._register(new MutableDisposable());
 
@@ -149,15 +152,36 @@ export class ChatDynamicVariableModel extends Disposable implements IChatWidgetC
 	private updateDecorations(): void {
 		const model = this.widget.inputEditor.getModel();
 		if (!model) {
+			this.clearCapabilityDecorations();
 			this.decorationData = [];
 			return;
+		}
+		if (model !== this.capabilityDecorationModel) {
+			this.clearCapabilityDecorations();
+			this.capabilityDecorationModel = model;
 		}
 
 		const validVariables = this._variables.filter(v => isValidEditorRange(v.range));
 		const decorationIds = this.widget.inputEditor.setDecorationsByType('chat', dynamicVariableDecorationType, validVariables.map((r): IDecorationOptions => ({
 			range: r.range,
-			hoverMessage: this.getHoverForReference(r)
+			hoverMessage: this.getHoverForReference(r),
 		})));
+		const capabilityDecorations = coalesce(validVariables.map((ref): IModelDeltaDecoration | null => {
+			const iconClass = getBackboardCapabilityIconClass(ref);
+			if (!iconClass) {
+				return null;
+			}
+			return {
+				range: ref.range,
+				options: {
+					description: 'backboard-capability-token',
+					inlineClassName: `backboard-inline-capability-editor-token ${iconClass}`,
+					inlineClassNameAffectsLetterSpacing: true,
+					stickiness: TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+				}
+			};
+		}));
+		this.capabilityDecorationIds = model.deltaDecorations(this.capabilityDecorationIds, capabilityDecorations);
 
 		this._variables = validVariables.slice(0, decorationIds.length);
 		this.decorationData = [];
@@ -177,6 +201,8 @@ export class ChatDynamicVariableModel extends Disposable implements IChatWidgetC
 			const prefix = ref.fullName ? ` ${ref.fullName}` : '';
 			const rangeString = `#${value.range.startLineNumber}-${value.range.endLineNumber}`;
 			return new MarkdownString(prefix + this.labelService.getUriLabel(value.uri, { relative: true }) + rangeString);
+		} else if (ref.modelDescription) {
+			return new MarkdownString(ref.modelDescription);
 		} else {
 			return undefined;
 		}
@@ -193,7 +219,16 @@ export class ChatDynamicVariableModel extends Disposable implements IChatWidgetC
 		}
 	}
 
+	private clearCapabilityDecorations(): void {
+		if (this.capabilityDecorationModel && this.capabilityDecorationIds.length > 0) {
+			this.capabilityDecorationModel.deltaDecorations(this.capabilityDecorationIds, []);
+		}
+		this.capabilityDecorationIds = [];
+		this.capabilityDecorationModel = undefined;
+	}
+
 	public override dispose() {
+		this.clearCapabilityDecorations();
 		this.disposeVariables();
 		super.dispose();
 	}
@@ -225,6 +260,32 @@ function isValidEditorRange(range: IRange): boolean {
 	}
 
 	return true;
+}
+
+function getBackboardCapabilityIconClass(ref: IDynamicVariable): string | undefined {
+	if (ref._meta?.backboardCapability !== true || typeof ref._meta.backboardCapabilityId !== 'string') {
+		return undefined;
+	}
+
+	switch (ref._meta.backboardCapabilityId) {
+		case 'mode': return 'backboard-capability-editor-icon-approvals';
+		case 'intensity':
+		case 'reasoning':
+		case 'reasoningIntensity': return 'backboard-capability-editor-icon-reasoning';
+		case 'webSearch':
+		case 'web': return 'backboard-capability-editor-icon-web-search';
+		case 'memory':
+		case 'memoryMode': return 'backboard-capability-editor-icon-memory';
+		case 'computerUse':
+		case 'cua': return 'backboard-capability-editor-icon-computer';
+		case 'browserUse':
+		case 'browser': return 'backboard-capability-editor-icon-browser';
+		case 'notifications':
+		case 'notify': return 'backboard-capability-editor-icon-notifications';
+		case 'imageGeneration':
+		case 'images': return 'backboard-capability-editor-icon-image-generation';
+	}
+	return undefined;
 }
 
 

@@ -310,6 +310,7 @@ export async function runServe(argv: string[]): Promise<void> {
 				const status = await controller.submit(control.prompt, {
 					attachmentFilePaths,
 					displayContent: control.prompt,
+					conversationContext: control.forkContext,
 					onStart: () => {
 						if (control.model !== undefined) {
 							config.setModel(parseModel(control.model));
@@ -334,6 +335,9 @@ export async function runServe(argv: string[]): Promise<void> {
 						}
 						if (control.notify !== undefined) {
 							config.setNotifyEnabled(control.notify);
+						}
+						if (control.imageGeneration !== undefined) {
+							config.setImageGenerationEnabled(control.imageGeneration);
 						}
 					},
 				});

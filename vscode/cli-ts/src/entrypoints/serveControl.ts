@@ -53,6 +53,12 @@ export function parseControlLine(line: string): ParsedControlLine | null {
 		case "submit":
 			if (typeof record.requestId !== "string") return missing("requestId");
 			if (typeof record.prompt !== "string") return missing("prompt");
+			if (
+				record.forkContext !== undefined &&
+				typeof record.forkContext !== "string"
+			) {
+				return missing("forkContext");
+			}
 			break;
 		case "steer":
 			if (typeof record.prompt !== "string") return missing("prompt");

@@ -22,6 +22,7 @@ import type {
 	ProviderStreamConsumer,
 } from "./ProviderStreamConsumer.ts";
 import { preserveProviderContext } from "./ProviderStreamConsumer.ts";
+import { isThinkingCompatibilityError } from "./RuntimeRecovery.ts";
 import { summarizeToolRound, toolRoundFailed } from "./ToolRoundEvidence.ts";
 
 export interface ToolRoundProcessorDeps {
@@ -35,6 +36,7 @@ export interface ToolRoundProcessorDeps {
 		evidence: DynamicThinkingEvidence,
 	) => ThinkingConfig | null | undefined;
 	requestKind: DynamicThinkingEvidence["requestKind"];
+	onThinkingDisabled?: (reason: string) => Promise<void> | void;
 	maxToolRounds?: number;
 }
 
@@ -135,28 +137,39 @@ export class ToolRoundProcessor {
 				}
 				this.recordToolMessage(newCalls, outputs);
 
-				const continuationThinking = this.resolveContinuationThinking(outputs);
-				const request: SubmitToolOutputsRequest = {
+				let continuationThinking = this.resolveContinuationThinking(outputs);
+				const runId = pending.runId;
+				const buildRequest = (): SubmitToolOutputsRequest => ({
 					thread_id: this.deps.session.threadId ?? "",
-					...(pending.runId ? { run_id: pending.runId } : {}),
+					...(runId ? { run_id: runId } : {}),
 					tool_outputs: outputs.map(toBackboardToolOutput),
 					tools: this.deps.tools,
 					...(continuationThinking === undefined
 						? {}
 						: { thinking: continuationThinking }),
-				};
+				});
 				round = this.createEarlyRound(ctx, turnId);
 				pending = await this.deps.consumer.consumeWithRetry(
 					() =>
-						this.deps.client.runToolOutputs(request, {
+						this.deps.client.runToolOutputs(buildRequest(), {
 							signal: ctx.signal,
 						}),
 					assistant,
 					ctx.signal,
 					round,
 					() =>
-						this.deps.client.preserveFailedToolOutputs?.(request) ??
+						this.deps.client.preserveFailedToolOutputs?.(buildRequest()) ??
 						Promise.resolve(null),
+					async (error) => {
+						if (
+							isThinkingCompatibilityError(error) &&
+							continuationThinking !== undefined &&
+							continuationThinking !== null
+						) {
+							continuationThinking = null;
+							await this.deps.onThinkingDisabled?.(String(error));
+						}
+					},
 				);
 			}
 		} finally {

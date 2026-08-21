@@ -29,31 +29,40 @@ export function mapToolCall(call: RawToolCall): ProviderToolCall {
 
 export class BackboardStreamEventMapper {
 	private accumulatedContent = "";
+	private accumulatedReasoning = "";
 
 	map(payload: unknown): ProviderEvent[] {
-		const result = mapStreamPayload(payload, this.accumulatedContent);
+		const result = mapStreamPayload(
+			payload,
+			this.accumulatedContent,
+			this.accumulatedReasoning,
+		);
 		this.accumulatedContent = result.accumulatedContent;
+		this.accumulatedReasoning = result.accumulatedReasoning;
 		return result.events;
 	}
 }
 
 export function mapStreamPayloadToEvents(payload: unknown): ProviderEvent[] {
-	return mapStreamPayload(payload, "").events;
+	return mapStreamPayload(payload, "", "").events;
 }
 
 function mapStreamPayload(
 	payload: unknown,
 	previousAccumulatedContent: string,
+	previousAccumulatedReasoning: string,
 ): StreamMappingResult {
 	if (!isBackboardStreamPayload(payload)) {
 		return {
 			events: [failedEvent("Backboard stream sent a non-object event")],
 			accumulatedContent: previousAccumulatedContent,
+			accumulatedReasoning: previousAccumulatedReasoning,
 		};
 	}
 
 	const events: ProviderEvent[] = [];
 	let accumulatedContent = previousAccumulatedContent;
+	let accumulatedReasoning = previousAccumulatedReasoning;
 	const threadId = stringField(payload, "thread_id");
 	if (threadId) {
 		events.push({ kind: "thread", threadId });
@@ -61,20 +70,46 @@ function mapStreamPayload(
 
 	switch (payload.type) {
 		case BACKBOARD_STREAM_EVENTS.userMessage:
-			return { events, accumulatedContent };
+			return { events, accumulatedContent, accumulatedReasoning };
 		case BACKBOARD_STREAM_EVENTS.contentStreaming: {
-			const content = normalizeContentDelta(payload, accumulatedContent);
+			const content = normalizeStreamDelta(
+				payload,
+				accumulatedContent,
+				"content",
+				"accumulated_content",
+			);
 			accumulatedContent = content.accumulatedContent;
 			const text = content.text;
 			if (text) events.push({ kind: "assistant_delta", text });
-			return { events, accumulatedContent };
+			return { events, accumulatedContent, accumulatedReasoning };
 		}
+		case BACKBOARD_STREAM_EVENTS.reasoningStreaming:
+		case BACKBOARD_STREAM_EVENTS.reasoningDelta: {
+			// Reasoning rides its own accumulator: the backend interleaves
+			// reasoning and content chunks, each cumulative within its channel.
+			const reasoning = normalizeStreamDelta(
+				payload,
+				accumulatedReasoning,
+				"content",
+				"accumulated_reasoning",
+			);
+			accumulatedReasoning = reasoning.accumulatedContent;
+			const text = reasoning.text;
+			if (text) events.push({ kind: "reasoning_delta", text });
+			return { events, accumulatedContent, accumulatedReasoning };
+		}
+		case BACKBOARD_STREAM_EVENTS.mediaGenerated:
+			// Backboard's built-in image generation (image_generation: "auto").
+			// The payload shape is provider-defined; the consumer extracts what
+			// it can render.
+			events.push({ kind: "media", payload });
+			return { events, accumulatedContent, accumulatedReasoning };
 		case BACKBOARD_STREAM_EVENTS.toolCallStart: {
 			// Advisory early-render event; malformed frames are dropped, never fatal.
 			const id = stringField(payload, "tool_call_id");
 			const name = stringField(payload, "name");
 			if (id && name) events.push({ kind: "tool_started", id, name });
-			return { events, accumulatedContent };
+			return { events, accumulatedContent, accumulatedReasoning };
 		}
 		case BACKBOARD_STREAM_EVENTS.toolCallReady: {
 			// Advisory early-execution event; malformed frames are dropped.
@@ -82,7 +117,7 @@ function mapStreamPayload(
 			if (isRawToolCall(rawCall)) {
 				events.push({ kind: "tool_ready", call: mapToolCall(rawCall) });
 			}
-			return { events, accumulatedContent };
+			return { events, accumulatedContent, accumulatedReasoning };
 		}
 		case BACKBOARD_STREAM_EVENTS.toolSubmitRequired: {
 			const rawCalls: unknown[] = Array.isArray(payload.tool_calls)
@@ -106,7 +141,7 @@ function mapStreamPayload(
 					calls,
 				});
 			}
-			return { events, accumulatedContent };
+			return { events, accumulatedContent, accumulatedReasoning };
 		}
 		case BACKBOARD_STREAM_EVENTS.runEnded:
 		case BACKBOARD_STREAM_EVENTS.messageComplete: {
@@ -118,7 +153,7 @@ function mapStreamPayload(
 							"Backboard run did not complete",
 					),
 				);
-				return { events, accumulatedContent };
+				return { events, accumulatedContent, accumulatedReasoning };
 			}
 			addUsageEvent(events, payload);
 			const contextUsage = contextUsageField(payload);
@@ -132,7 +167,7 @@ function mapStreamPayload(
 				...(usage ? { usage } : {}),
 				...(contextUsage ? { contextUsage } : {}),
 			});
-			return { events, accumulatedContent };
+			return { events, accumulatedContent, accumulatedReasoning };
 		}
 		case BACKBOARD_STREAM_EVENTS.runFailed:
 			events.push(
@@ -142,10 +177,10 @@ function mapStreamPayload(
 						"Backboard run failed",
 				),
 			);
-			return { events, accumulatedContent };
+			return { events, accumulatedContent, accumulatedReasoning };
 		case BACKBOARD_STREAM_EVENTS.runCancelled:
 			events.push({ kind: "failed", error: "Backboard run was cancelled" });
-			return { events, accumulatedContent };
+			return { events, accumulatedContent, accumulatedReasoning };
 		case BACKBOARD_STREAM_EVENTS.error:
 			events.push(
 				failedEvent(
@@ -154,9 +189,9 @@ function mapStreamPayload(
 						"Backboard stream failed",
 				),
 			);
-			return { events, accumulatedContent };
+			return { events, accumulatedContent, accumulatedReasoning };
 		default:
-			return { events, accumulatedContent };
+			return { events, accumulatedContent, accumulatedReasoning };
 	}
 }
 
@@ -171,12 +206,19 @@ function failedEvent(
 	};
 }
 
-function normalizeContentDelta(
+/**
+ * Turns a possibly-cumulative stream chunk into a delta. Shared by the
+ * content and reasoning channels, which carry the chunk in `textField` and
+ * the channel's running total in `accumulatedField`.
+ */
+function normalizeStreamDelta(
 	payload: BackboardStreamPayload,
 	previousAccumulatedContent: string,
+	textField: string,
+	accumulatedField: string,
 ): ContentDeltaResult {
-	const text = stringField(payload, "content");
-	const accumulatedContent = stringField(payload, "accumulated_content");
+	const text = stringField(payload, textField);
+	const accumulatedContent = stringField(payload, accumulatedField);
 	if (accumulatedContent === null) {
 		if (text?.startsWith(previousAccumulatedContent)) {
 			const delta = text.slice(previousAccumulatedContent.length);

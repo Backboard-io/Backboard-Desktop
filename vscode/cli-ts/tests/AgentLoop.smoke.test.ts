@@ -202,7 +202,12 @@ function controllerWith(
 		finalVerificationNudge?: boolean;
 		todoReconciliation?: boolean;
 	} = {},
-): { ctrl: AgentController; events: AgentEvent[]; session: Session } {
+): {
+	ctrl: AgentController;
+	events: AgentEvent[];
+	session: Session;
+	config: Config;
+} {
 	const config = new Config({ env, argv });
 	const bus = new EventBus();
 	const events: AgentEvent[] = [];
@@ -228,7 +233,7 @@ function controllerWith(
 			? { todoReconciliation: options.todoReconciliation }
 			: {}),
 	});
-	return { ctrl, events, session };
+	return { ctrl, events, session, config };
 }
 
 describe("AgentController loop (mocked Backboard)", () => {
@@ -524,6 +529,103 @@ describe("AgentController loop (mocked Backboard)", () => {
 
 		expect(status).toBe("completed");
 		expect(client.messageRequests).toHaveLength(2);
+	});
+
+	it("routes unavailable models to an available GLM-5.3 model", async () => {
+		class CapacityFallbackClient extends FakeClient {
+			constructor() {
+				super([], []);
+			}
+
+			override async listModels(): Promise<ModelsListResponse> {
+				this.listModelsCount++;
+				return {
+					models: [
+						{
+							name: "z-ai/glm-5.3",
+							provider: "openrouter",
+							model_type: "llm",
+						},
+					],
+					total: 1,
+				};
+			}
+
+			override async *runMessage(
+				req: SendMessageRequest,
+			): AsyncIterable<ProviderEvent> {
+				this.messageRequests.push(req);
+				if (req.model_name !== "z-ai/glm-5.3") {
+					yield {
+						kind: "failed",
+						error: "No endpoints found for z-ai/glm-4.7.",
+					};
+					return;
+				}
+				yield { kind: "thread", threadId: "thr_glm" };
+				yield { kind: "assistant_delta", text: "recovered" };
+				yield { kind: "completed" };
+			}
+		}
+		const client = new CapacityFallbackClient();
+		const { ctrl, config, events } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+		);
+
+		const status = await ctrl.submit("do it");
+
+		expect(status).toBe("completed");
+		expect(client.messageRequests.map((request) => request.model_name)).toEqual(
+			["gpt-5.5", "z-ai/glm-5.3"],
+		);
+		expect(client.messageRequests[1]?.thinking).toBeNull();
+		expect(config.modelString).toBe("openrouter/z-ai/glm-5.3");
+		expect(
+			events.some(
+				(event) =>
+					event.type === "system:warning" &&
+					event.message.includes("retrying with openrouter/z-ai/glm-5.3"),
+			),
+		).toBeTrue();
+	});
+
+	it("retries with thinking off when a provider rejects thinking", async () => {
+		class ThinkingFallbackClient extends FakeClient {
+			constructor() {
+				super([], []);
+			}
+
+			override async *runMessage(
+				req: SendMessageRequest,
+			): AsyncIterable<ProviderEvent> {
+				this.messageRequests.push(req);
+				if (req.thinking !== null) {
+					yield {
+						kind: "failed",
+						error: "Thinking is not supported for this model",
+					};
+					return;
+				}
+				yield { kind: "assistant_delta", text: "recovered" };
+				yield { kind: "completed" };
+			}
+		}
+		const client = new ThinkingFallbackClient();
+		const { ctrl, config } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+			["--thinking", "high"],
+		);
+
+		const status = await ctrl.submit("do it");
+
+		expect(status).toBe("completed");
+		expect(client.messageRequests.map((request) => request.thinking)).toEqual([
+			{ effort: "high" },
+			null,
+		]);
+		expect(config.thinking).toBeNull();
 	});
 
 	it("retries retryable tool-output continuation failures without rerunning tools", async () => {
@@ -878,7 +980,10 @@ describe("AgentController loop (mocked Backboard)", () => {
 		await ctrl.submit("do it");
 
 		const thinking = client.messageRequests[0]?.thinking;
-		expect(thinking).toEqual({ max_tokens: 4096 });
+		expect(thinking).toEqual({
+			max_tokens: 4096,
+			exclude_reasoning: false,
+		});
 		expect(client.modelThinkingMetadataCount).toBe(1);
 		expect(client.listModelsCount).toBe(0);
 	});
@@ -925,7 +1030,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 		expect(client.listModelsCount).toBe(0);
 	});
 
-	it("omits continuation thinking for static thinking", async () => {
+	it("resends visible static thinking on tool continuations", async () => {
 		const client = new FakeClient(
 			[
 				{ kind: "thread", threadId: "thr_1" },
@@ -939,7 +1044,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 		);
 		const config = new Config({
 			env,
-			argv: ["--model", "openai/gpt-5.5", "--thinking", "high"],
+			argv: ["--model", "openrouter/deepseek", "--thinking", "high"],
 		});
 		const bus = new EventBus();
 		const session = new Session("sess_test");
@@ -959,11 +1064,12 @@ describe("AgentController loop (mocked Backboard)", () => {
 
 		await ctrl.submit("do it");
 
-		expect(client.messageRequests[0]?.thinking).toEqual({ effort: "high" });
-		expect(client.toolOutputRequests[0]).not.toHaveProperty("thinking");
+		const expected = { max_tokens: 8192, exclude_reasoning: false };
+		expect(client.messageRequests[0]?.thinking).toEqual(expected);
+		expect(client.toolOutputRequests[0]?.thinking).toEqual(expected);
 	});
 
-	it("omits continuation thinking for off so backend reuses initial null", async () => {
+	it("resends thinking off on tool continuations", async () => {
 		const client = new FakeClient(
 			[
 				{ kind: "thread", threadId: "thr_1" },
@@ -998,7 +1104,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 		await ctrl.submit("do it");
 
 		expect(client.messageRequests[0]?.thinking).toBeNull();
-		expect(client.toolOutputRequests[0]).not.toHaveProperty("thinking");
+		expect(client.toolOutputRequests[0]?.thinking).toBeNull();
 	});
 
 	it("does not thrash max during persistent dynamic failures", async () => {

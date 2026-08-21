@@ -1,15 +1,16 @@
 export type ThinkingLevel = "low" | "medium" | "high" | "max";
 
 export type ThinkingIntent =
+	| { kind: "default" }
 	| { kind: "level"; level: ThinkingLevel }
 	| { kind: "budget"; tokens: number }
 	| { kind: "dynamic" };
 
 export type ThinkingConfig =
-	| { effort: ThinkingLevel }
-	| { budget_tokens: number }
-	| { max_tokens: number }
-	| Record<string, never>;
+	| { effort: ThinkingLevel; exclude_reasoning?: boolean }
+	| { budget_tokens: number; exclude_reasoning?: boolean }
+	| { max_tokens: number; exclude_reasoning?: boolean }
+	| { exclude_reasoning?: boolean };
 
 export interface ThinkingControlsMetadata {
 	supported: boolean;
@@ -25,7 +26,11 @@ export interface ThinkingModelMetadata {
 	thinking_controls?: ThinkingControlsMetadata | null;
 }
 
-export type ThinkingRequestField = "effort" | "budget_tokens" | "max_tokens";
+export type ThinkingRequestField =
+	| "effort"
+	| "budget_tokens"
+	| "max_tokens"
+	| "exclude_reasoning";
 
 export type ThinkingRequestKind = "user" | "subagent";
 export type ThinkingRequestPhase = "initial" | "tool_outputs";

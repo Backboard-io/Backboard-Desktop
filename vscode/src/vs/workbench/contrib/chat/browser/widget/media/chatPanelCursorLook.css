@@ -331,9 +331,9 @@
 	padding-left: var(--bb-agent-tab-inset);
 }
 
-/* Cursor keeps the workbench-level Agents toggle in the native title bar. The
-   final icon in the panel strip toggles the sessions drawer, so the stock
-   auxiliary-bar hide button must not occupy that same visual slot. */
+/* The trailing control belongs to the chat sessions drawer. The native
+   auxiliary-bar toggle controls the entire workbench panel and would duplicate
+   that slot with different behavior. */
 .monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs > .global-actions {
 	display: none;
 }
@@ -722,106 +722,45 @@
 	background: var(--vscode-toolbar-hoverBackground);
 }
 
-/* A single calm row above the composer mirrors Cursor's persistent changed-file
-   controls. The transcript remains visually separate from this session state. */
-.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session .chat-editing-session {
-	margin-bottom: 0;
-}
-
-.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session .chat-editing-session .chat-editing-session-container {
-	padding: 3px 8px;
-	border: none;
-	border-top: 1px solid color-mix(in srgb, var(--vscode-chat-requestBorder) 65%, transparent);
-	border-radius: 0;
-	background: var(--bb-panel-surface, var(--vscode-editor-background));
-}
-
-.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-input-part:has(.chat-editing-session > .chat-editing-session-container) .chat-input-container {
-	border-top-left-radius: 10px;
-	border-top-right-radius: 10px;
-}
-
-.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session .chat-editing-session .chat-editing-session-overview {
-	height: 26px;
-	line-height: 26px;
-}
-
-.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session .chat-editing-session .working-set-line-counts {
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session .chat-editing-session .chat-collapsible-list-action-bar.custom-actions > .monaco-toolbar {
 	display: none;
 }
 
-.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session .chat-editing-session .chat-editing-session-actions {
-	gap: 3px;
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session .chat-editing-session .chat-collapsible-list-custom-actions {
+	display: inline-flex;
+	align-items: center;
+	gap: 2px;
 }
 
-.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session .chat-editing-session .chat-editing-session-actions .monaco-button.secondary.monaco-text-button {
-	padding: 2px 5px;
-	border: none;
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session .chat-editing-session .chat-collapsible-list-custom-action {
+	display: inline-flex;
+	width: 22px;
+	height: 22px;
+	align-items: center;
+	justify-content: center;
+	padding: 0;
+	border: 0;
+	border-radius: 4px;
 	background: transparent;
 	color: var(--vscode-descriptionForeground);
+	font-size: 15px;
+	cursor: pointer;
 }
 
-.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session .chat-editing-session .chat-editing-session-actions .monaco-button.secondary.monaco-text-button:hover {
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session .chat-editing-session .chat-collapsible-list-custom-action:hover {
 	background: var(--vscode-toolbar-hoverBackground);
 	color: var(--vscode-foreground);
 }
 
-/* --- Composer: tall draft surface, compact conversation input ------------- */
-
-/* Once a conversation exists, Cursor uses a compact composer at the bottom of
-   the transcript. Keep this override out of `.chat-composer-empty`: the empty
-   New Agent tab is a distinct, tall prompt surface directly below the tabs. */
-.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session:not(.chat-composer-empty) .interactive-input-part {
-	width: min(950px, calc(100% - 40px));
-	max-width: none;
-	margin: 0 auto 10px;
-	padding: 0;
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session .chat-editing-session .chat-collapsible-list-custom-action:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
 }
 
-/* Empty New Agent state from the reference: a 516px logical chat column with
-   20px side gutters and a shallow 3px gap beneath the tab strip. */
-.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session.chat-composer-empty .interactive-input-part {
-	width: min(950px, calc(100% - 40px));
-	max-width: none;
-	margin: 3px auto 0;
-	padding: 0;
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session .chat-editing-session .chat-collapsible-list-custom-action:disabled {
+	opacity: 0.4;
+	cursor: default;
 }
-
-.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session:not(.chat-composer-empty) .interactive-input-part .chat-input-container {
-	min-height: 0;
-	padding: 10px 12px;
-	gap: 4px;
-	border-radius: 10px;
-	box-shadow: none;
-	/* The Monaco editor's solid background layer reads this same token so it
-	   cannot punch a panel-coloured rectangle through the composer surface. */
-	--bb-composer-surface-background: var(--bb-composer-surface);
-	background-color: var(--bb-composer-surface);
-	border-color: var(--bb-composer-border) !important;
-}
-
-/* The empty draft is intentionally much taller than the conversation input.
-   Its editor takes the flexible space while the picker/attachment row stays
-   pinned to the bottom of the card. */
-.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session.chat-composer-empty .interactive-input-part .chat-input-container {
-	min-height: 152px;
-	padding: 9px 10px 7px;
-	gap: 6px;
-	border-radius: 12px;
-	box-shadow: none;
-	--bb-composer-surface-background: var(--bb-composer-surface);
-	background-color: var(--bb-composer-surface);
-	border-color: var(--bb-composer-border) !important;
-}
-
-.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session:not(.chat-composer-empty) .interactive-input-part .interactive-input-editor {
-	min-height: 24px;
-}
-
-.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session.chat-composer-empty .interactive-input-part .interactive-input-editor {
-	min-height: 92px;
-}
-
 
 /* Latest Cursor reference parity: open-drawer title mode, readable transcript
  * type and the compact 72px reply composer. */
@@ -938,8 +877,9 @@
  * one question, and one primary action keep them visually subordinate to the
  * conversation instead of reading like a modal nested above the composer. */
 .monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container {
+	max-height: min(340px, 40vh);
 	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 16%, transparent);
-	border-radius: 10px;
+	border-radius: var(--vscode-cornerRadius-large);
 	background: color-mix(in srgb, var(--vscode-editor-background) 94%, var(--vscode-foreground));
 }
 
@@ -951,31 +891,48 @@
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-title-row {
 	align-items: center;
-	padding: 9px 10px 9px 12px;
+	gap: 4px;
+	padding: 6px 8px 6px 10px;
 	border-bottom-color: color-mix(in srgb, var(--vscode-foreground) 10%, transparent);
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-title {
-	font-size: 13px;
-	font-weight: 600;
-	line-height: 18px;
+	font-size: var(--vscode-agents-fontSize-label1);
+	font-weight: var(--vscode-agents-fontWeight-semiBold);
+	line-height: 17px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-header-actions {
+	gap: 2px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container :is(
+	.monaco-button.chat-question-focus-terminal,
+	.monaco-button.chat-question-close,
+	.monaco-button.chat-question-collapse-toggle
+) {
+	min-width: 20px;
+	width: 20px;
+	height: 20px;
+	border-radius: var(--vscode-cornerRadius-medium);
+	font-size: 14px;
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-carousel-message {
-	padding: 10px 12px 0;
-	font-size: 13px;
-	line-height: 1.4;
+	padding: 8px 10px 0;
+	font-size: var(--vscode-agents-fontSize-label1);
+	line-height: 17px;
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-description {
-	padding: 10px 12px 4px;
+	padding: 8px 10px 4px;
 	color: var(--vscode-foreground);
-	font-size: 14px;
-	line-height: 1.4;
+	font-size: var(--vscode-agents-fontSize-body1);
+	line-height: 18px;
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-input-container {
-	padding: 4px 12px 10px;
+	padding: 2px 8px 6px;
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-input-container::after {
@@ -983,27 +940,28 @@
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-list {
-	gap: 2px;
+	gap: 0;
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-list .chat-question-list-item {
-	min-height: 32px;
-	gap: 10px;
-	padding: 5px 8px;
-	border-radius: 7px;
+	box-sizing: border-box;
+	min-height: 26px;
+	gap: 8px;
+	padding: 4px 6px;
+	border-radius: var(--vscode-cornerRadius-medium);
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-list .chat-question-list-label {
-	font-size: 13px;
-	line-height: 20px;
+	font-size: var(--vscode-agents-fontSize-label1);
+	line-height: 18px;
 }
 
 /* Options are choices, not steps. Keep the existing keyboard number shortcuts,
  * but replace their visual numbering with a conventional radio marker. */
 .monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-list-number {
 	position: relative;
-	width: 14px;
-	height: 14px;
+	width: 12px;
+	height: 12px;
 	border-color: color-mix(in srgb, var(--vscode-foreground) 48%, transparent);
 	background: transparent;
 	color: transparent;
@@ -1018,7 +976,7 @@
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-list-item.selected .chat-question-list-number::after {
 	position: absolute;
-	inset: 3px;
+	inset: 2px;
 	border-radius: 50%;
 	background: currentColor;
 	content: '';
@@ -1048,8 +1006,8 @@
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-freeform {
 	gap: 0;
-	margin-top: 4px;
-	padding: 0 8px;
+	margin-top: 2px;
+	padding: 0 6px;
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-freeform-number {
@@ -1057,18 +1015,40 @@
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-freeform-textarea {
-	min-height: 32px;
-	padding: 6px 9px;
+	min-height: 28px;
+	max-height: 96px;
+	padding: 4px 8px;
 	border-color: color-mix(in srgb, var(--vscode-foreground) 16%, transparent);
-	border-radius: 7px;
+	border-radius: var(--vscode-cornerRadius-medium);
 	background: transparent;
-	font-size: 13px;
+	font-size: var(--vscode-agents-fontSize-label1);
 	line-height: 18px;
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-footer-row {
-	padding: 6px 8px;
+	box-sizing: border-box;
+	min-height: 30px;
+	padding: 4px 6px;
 	border-top-color: color-mix(in srgb, var(--vscode-foreground) 10%, transparent);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-footer-left {
+	gap: 6px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-nav-arrows {
+	gap: 2px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .monaco-button.chat-question-nav-arrow {
+	min-width: 20px;
+	width: 20px;
+	height: 20px;
+	font-size: 14px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-step-indicator {
+	font-size: var(--vscode-agents-fontSize-body2);
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-dismiss-hint,
@@ -1077,20 +1057,10 @@
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .monaco-button.chat-question-submit-button {
-	height: 28px;
-	padding-inline: 11px;
-	border-radius: 7px;
-	font-size: 13px;
-}
-
-.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session:not(.chat-composer-empty) .interactive-input-part .chat-input-container {
-	min-height: 72px;
-	padding: 7px 10px 6px;
-	gap: 2px;
-}
-
-.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session:not(.chat-composer-empty) .interactive-input-part .interactive-input-editor {
-	min-height: 18px;
+	height: 24px;
+	padding-inline: 9px;
+	border-radius: var(--vscode-cornerRadius-medium);
+	font-size: var(--vscode-agents-fontSize-label1);
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbars {
@@ -1216,58 +1186,71 @@
 	--bb-composer-model-background: var(--vscode-dropdown-background, var(--bb-composer-surface));
 	--bb-composer-model-foreground: var(--vscode-dropdown-foreground, var(--vscode-foreground));
 	--bb-composer-model-border: var(--vscode-dropdown-border, var(--bb-composer-border));
+	--bb-composer-control-size: 28px;
+	--bb-composer-icon-size: 16px;
 	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", system-ui, Ubuntu, "Droid Sans", sans-serif;
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part {
-	width: min(950px, calc(100% - var(--bb-editor-panel-gutter) - var(--bb-editor-panel-gutter)));
-	margin-inline: auto;
-	padding: 0;
+	box-sizing: border-box;
+	width: calc(100% - 28px);
+	margin: 0 auto;
+	padding: 0 0 24px;
 }
 
+/* Sent chats use a compact reply composer. The empty/new-chat state keeps the
+ * larger drafting surface below, while this state gives more room back to the
+ * transcript without crowding the footer controls. */
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session:not(.chat-composer-empty) .interactive-input-part {
-	/* ChatWidget subtracts this element's measured height from the message list,
-	 * while ResizeObserver's offsetHeight deliberately excludes margins. Keep the
-	 * bottom breathing room inside the measured box so the final transcript row
-	 * cannot extend underneath the composer. */
-	padding-bottom: 12px;
-}
-
-.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session.chat-composer-empty .interactive-input-part {
-	margin-top: 12px;
+	padding: 6px 0 10px;
+	--bb-composer-control-size: 24px;
+	--bb-composer-icon-size: 14px;
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part .chat-input-container {
-	min-height: 76px;
-	padding: 10px 11px 9px;
-	gap: 7px;
+	height: auto;
+	min-height: 110px;
+	max-height: none;
+	padding: 10px 12px;
+	gap: 6px;
 	border: 1px solid var(--bb-composer-border) !important;
-	border-radius: 11px;
+	border-radius: 22px !important;
 	background: var(--bb-composer-surface);
 	box-shadow: none;
+	overflow: visible;
 	--bb-composer-surface-background: var(--bb-composer-surface);
 }
 
-.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session.chat-composer-empty .interactive-input-part .chat-input-container {
-	min-height: 152px;
-	padding: 12px 11px 9px;
-	gap: 8px;
-}
-
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part .chat-editor-container {
+	display: flex;
+	align-items: flex-start;
+	gap: 6px;
 	padding: 0 2px;
 	background: transparent;
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part .interactive-input-editor {
-	min-height: 24px;
+	min-width: 0;
+	flex: 1 1 auto;
+	min-height: 44px;
 	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", system-ui, Ubuntu, "Droid Sans", sans-serif;
 	font-size: 13px;
 	line-height: 20px;
 }
 
-.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session.chat-composer-empty .interactive-input-part .interactive-input-editor {
-	min-height: 92px;
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session:not(.chat-composer-empty) .interactive-input-part .chat-input-container {
+	min-height: 58px;
+	padding: 5px 8px;
+	gap: 2px;
+	border-radius: 15px !important;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session:not(.chat-composer-empty) .interactive-input-part .chat-editor-container {
+	padding-inline: 1px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session:not(.chat-composer-empty) .interactive-input-part .interactive-input-editor {
+	min-height: 22px;
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part .monaco-editor,
@@ -1277,8 +1260,9 @@
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbars {
-	min-height: 28px;
-	height: 28px;
+	flex: 0 0 var(--bb-composer-control-size);
+	min-height: var(--bb-composer-control-size);
+	height: var(--bb-composer-control-size);
 	margin-top: 0;
 	padding: 0;
 	gap: 4px;
@@ -1293,13 +1277,13 @@
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .monaco-action-bar .action-item,
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item {
-	height: 28px;
+	height: var(--bb-composer-control-size);
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .monaco-action-bar .action-item .action-label:not(.model-picker-split),
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item .action-label.codicon-mic {
-	height: 28px;
-	min-width: 28px;
+	height: var(--bb-composer-control-size);
+	min-width: var(--bb-composer-control-size);
 	padding: 0 6px;
 	border-radius: 7px !important;
 	background: transparent;
@@ -1312,14 +1296,14 @@
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-picker-item .action-label.model-picker-split {
-	height: 28px;
+	height: var(--bb-composer-control-size);
 	padding: 0;
 	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", system-ui, Ubuntu, "Droid Sans", sans-serif;
 	font-size: 13px;
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-picker-item .action-label.model-picker-split .model-picker-section {
-	height: 28px;
+	height: var(--bb-composer-control-size);
 	padding: 0 6px;
 	border-radius: 7px;
 	background: transparent;
@@ -1348,50 +1332,67 @@
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-arrow-up,
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-newline,
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-stop-circle {
-	width: 28px;
-	height: 28px;
-	min-width: 28px;
+	width: var(--bb-composer-control-size);
+	height: var(--bb-composer-control-size);
+	min-width: var(--bb-composer-control-size);
 	padding: 0;
-	font-size: 15px;
+	font-size: calc(var(--bb-composer-icon-size) - 1px);
 	box-shadow: none;
 }
 
-/* Composer footer: one quiet control language. The model is the only chip;
- * icon-only actions stay transparent until hover and no separators fragment
- * the row into unrelated mini-containers. */
+/* Composer footer: one quiet control language. Controls stay transparent
+ * until hover and no separators fragment the row into mini-containers. */
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .monaco-action-bar .actions-container > .action-item + .action-item::before {
 	display: none;
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbars {
-	height: 30px;
-	min-height: 30px;
+	height: var(--bb-composer-control-size);
+	min-height: var(--bb-composer-control-size);
 	gap: 6px;
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .combined-model-provider-trigger {
-	height: 26px;
+	box-sizing: border-box;
+	height: var(--bb-composer-control-size);
 	min-width: 0;
-	max-width: 190px;
-	padding: 0 8px !important;
+	max-width: min(190px, 42cqi);
+	padding: 0 6px !important;
 	gap: 5px;
-	border: 1px solid var(--bb-composer-model-border);
-	border-radius: 8px !important;
-	background: var(--bb-composer-model-background) !important;
+	border: 0;
+	border-radius: 7px !important;
+	background: transparent !important;
+	box-shadow: none;
 	color: var(--bb-composer-model-foreground);
 	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", system-ui, Ubuntu, "Droid Sans", sans-serif;
 	font-size: 12.5px;
 	font-weight: 400;
 }
 
+/* Keep the inline model control directly beside Add. It remains the flexible
+ * item so narrow panels truncate its label before clipping icon controls. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .combined-model-provider-picker-item {
+	flex: 0 1 auto;
+	min-width: 0;
+	max-width: min(190px, 42cqi);
+	margin-left: 0;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .action-item:has(.action-label.codicon-add),
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .action-item:has(.action-label.codicon-settings-gear),
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .action-item {
+	flex: 0 0 auto;
+}
+
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .combined-model-provider-trigger:hover,
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .combined-model-provider-trigger[aria-expanded='true'] {
-	border-color: var(--vscode-focusBorder, var(--bb-composer-model-border));
-	background: var(--vscode-toolbar-hoverBackground, var(--bb-composer-model-background)) !important;
+	border-color: transparent;
+	background: var(--bb-composer-control-hover) !important;
 	color: var(--vscode-foreground);
 }
 
-.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .combined-model-provider-trigger-label {
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .combined-model-provider-trigger-label,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .combined-model-provider-trigger-thinking {
 	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -1414,14 +1415,19 @@
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .action-label.codicon-add,
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .action-label.codicon-settings-gear,
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .action-label.codicon-mic {
-	width: 26px;
-	height: 26px;
-	min-width: 26px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	box-sizing: border-box;
+	width: var(--bb-composer-control-size);
+	height: var(--bb-composer-control-size);
+	min-width: var(--bb-composer-control-size);
 	padding: 0;
 	border-radius: 7px !important;
 	background: transparent;
 	color: var(--vscode-icon-foreground, var(--vscode-foreground));
-	font-size: 15px;
+	font-size: var(--bb-composer-icon-size);
+	line-height: 1;
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .action-item:not(.disabled) .action-label.codicon-add:hover,
@@ -1430,3 +1436,334 @@
 	background: var(--bb-composer-control-hover);
 	color: var(--vscode-foreground);
 }
+
+/* Preserve the same proportions when the editor panel gets narrow. All five
+ * controls step down together; the model label continues to ellipsize first. */
+@container chat-input-part (max-width: 360px) {
+	.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-container {
+		--bb-composer-control-size: 26px;
+		--bb-composer-icon-size: 15px;
+	}
+
+	.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .combined-model-provider-trigger,
+	.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .combined-model-provider-picker-item {
+		max-width: 40cqi;
+	}
+}
+
+/* --- Reference empty-chat home ------------------------------------------
+ * The editor panel's resting state is a working history surface: three live
+ * recent chats at the top, a quiet identity mark in the open space, and the
+ * draft composer anchored to the bottom. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session.chat-composer-empty {
+	justify-content: flex-start;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session.chat-composer-empty > .chat-welcome-view-container {
+	display: block !important;
+	min-height: 0;
+	background: var(--bb-panel-surface);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-empty-home {
+	display: grid;
+	grid-template-rows: auto minmax(0, 1fr);
+	box-sizing: border-box;
+	width: 100%;
+	height: 100%;
+	min-height: 0;
+	padding: 9px 10px 0;
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", system-ui, Ubuntu, "Droid Sans", sans-serif;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chats {
+	min-width: 0;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chat-list {
+	display: flex;
+	flex-direction: column;
+	gap: 0;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chat,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-view-all {
+	display: flex;
+	align-items: center;
+	box-sizing: border-box;
+	width: 100%;
+	height: 30px;
+	min-width: 0;
+	margin: 0;
+	padding: 0 2px;
+	border: 0;
+	border-radius: 6px;
+	background: transparent;
+	color: var(--vscode-foreground);
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chat:hover,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chat:focus-visible {
+	background: color-mix(in srgb, var(--vscode-toolbar-hoverBackground) 72%, transparent);
+	color: var(--vscode-foreground);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chat:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chat-title {
+	min-width: 0;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	font-size: 14px;
+	font-weight: 400;
+	line-height: 20px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chat-time {
+	flex: 0 0 auto;
+	margin-left: 12px;
+	color: var(--vscode-descriptionForeground);
+	font-size: 13px;
+	line-height: 20px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-view-all {
+	width: auto;
+	height: 29px;
+	margin-top: 0;
+	color: color-mix(in srgb, var(--vscode-descriptionForeground) 74%, transparent);
+	font-size: 13px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-view-all:hover,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-view-all:focus-visible {
+	background: transparent;
+	color: var(--vscode-foreground);
+	text-decoration: underline;
+	text-underline-offset: 2px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-view-all:focus-visible {
+	outline: none;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-empty-mark {
+	align-self: center;
+	justify-self: center;
+	width: 50px;
+	height: 68px;
+	margin-bottom: 4px;
+	filter: drop-shadow(0 12px 22px rgba(0, 0, 0, 0.2));
+	opacity: 0.78;
+	pointer-events: none;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-water-mark {
+	display: block;
+	width: 100%;
+	height: 100%;
+	overflow: visible;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-water-strand-base {
+	fill: #bcd9e8;
+	opacity: 0.34;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-water-current,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-water-glint {
+	transform-box: fill-box;
+	transform-origin: center;
+	will-change: transform;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-water-current {
+	opacity: 0.96;
+	animation: backboard-panel-water-flow var(--backboard-panel-water-duration, 3.4s) linear var(--backboard-panel-water-delay, 0s) infinite;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-water-glint {
+	mix-blend-mode: screen;
+	opacity: 0.78;
+	animation: backboard-panel-water-glint var(--backboard-panel-water-duration, 4.8s) linear var(--backboard-panel-water-delay, 0s) infinite;
+}
+
+@keyframes backboard-panel-water-flow {
+	from {
+		transform: translateY(0);
+	}
+
+	to {
+		transform: translateY(86px);
+	}
+}
+
+@keyframes backboard-panel-water-glint {
+	from {
+		transform: translate(-4px, -124px) skewX(-2deg);
+	}
+
+	to {
+		transform: translate(4px, 0) skewX(2deg);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-water-current,
+	.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-water-glint {
+		animation: none;
+		transform: none;
+	}
+}
+
+/* Empty-state title: a plain “Chats” label and exactly the three reference
+ * actions (history, settings, new chat), without the active-tab pill. */
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs .chat-view-title-container.chat-view-title-empty {
+	flex: 0 0 auto;
+	min-width: 0;
+	width: auto;
+}
+
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs .chat-view-title-container.chat-view-title-empty .chat-view-title-inner,
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs .chat-view-title-container.chat-view-title-empty .chat-view-title-tabs {
+	flex: 0 0 auto;
+	width: auto;
+}
+
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs .chat-view-title-container.chat-view-title-empty .chat-view-title-tab:not(.chat-view-title-tab-active) {
+	display: none;
+}
+
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs .chat-view-title-container.chat-view-title-empty .chat-view-title-tab-active {
+	min-width: 0;
+	max-width: none;
+	padding: 3px 2px;
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+}
+
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs .chat-view-title-container.chat-view-title-empty .chat-view-title-tab-label {
+	font-size: 13px;
+	font-weight: 400;
+}
+
+/* Opened history: replace the multi-tab strip with the reference's back/title
+ * header while retaining the shared History, Settings and New Chat actions. */
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs:has(.chat-view-title-container.chat-view-title-history) > .composite-bar-container {
+	display: none;
+}
+
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs .chat-view-title-container.chat-view-title-history {
+	width: auto;
+	min-width: 0;
+	flex: 1 1 auto;
+}
+
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs .chat-view-title-container.chat-view-title-history .chat-view-title-tabs {
+	width: 100%;
+	min-width: 0;
+	padding: 0 2px;
+	mask-image: none;
+	-webkit-mask-image: none;
+}
+
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs .chat-view-title-container.chat-view-title-history .chat-view-title-tab:not(.chat-view-title-tab-history-current) {
+	display: none;
+}
+
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs .chat-view-title-container.chat-view-title-history .chat-view-title-tab-history-current {
+	width: auto;
+	min-width: 0;
+	max-width: none;
+	flex: 1 1 auto;
+	gap: 8px;
+	padding: 0 4px;
+	border: 0;
+	background: transparent;
+	box-shadow: none;
+	color: var(--vscode-foreground);
+}
+
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs .chat-view-title-container.chat-view-title-history .chat-view-title-tab-history-current:hover {
+	border: 0;
+	background: transparent;
+}
+
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs .chat-view-title-container.chat-view-title-history .chat-view-title-tab-history-current .chat-view-title-tab-icon {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 18px;
+	height: 24px;
+	flex: 0 0 18px;
+	color: var(--vscode-descriptionForeground);
+	font-size: 14px;
+}
+
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs .chat-view-title-container.chat-view-title-history .chat-view-title-tab-history-current:hover .chat-view-title-tab-icon {
+	color: var(--vscode-foreground);
+}
+
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs .chat-view-title-container.chat-view-title-history .chat-view-title-tab-history-current .chat-view-title-tab-label {
+	font-size: 13px;
+	font-weight: 500;
+	line-height: 18px;
+}
+
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs > .chat-view-title-actions-toolbar .actions-container {
+	gap: 2px;
+}
+
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs > .chat-view-title-actions-toolbar .action-label {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	box-sizing: border-box;
+	width: 26px;
+	height: 26px;
+	padding: 0;
+	font-size: 16px;
+}
+
+@container chat-input-part (max-width: 360px) {
+	.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part {
+		width: calc(100% - 20px);
+	}
+
+	.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-empty-home {
+		padding-inline: 8px;
+	}
+
+}
+
+/* Keep short turns visually connected in the editor panel. The checkpoint
+ * actions are the only rail between the request bubble and the response; do
+ * not add a second spacer around that already-visible 18px row. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-clean-chat .interactive-item-container.interactive-request {
+	padding-bottom: 0;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-clean-chat .interactive-item-container.interactive-request > .checkpoint-container {
+	height: 18px;
+	min-height: 18px;
+	margin-top: 0;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-clean-chat .interactive-item-container.interactive-request > .checkpoint-container .monaco-toolbar .action-label {
+	height: 18px;
+	line-height: 18px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-clean-chat .chat-t3-turn-work:not(.chat-t3-turn-work-active) {
+	padding-top: 0;
+}
+
+/* The shared Cursor transcript skin lives in chat.css so every Backboard
+ * ChatWidget host uses the editor panel experience. */

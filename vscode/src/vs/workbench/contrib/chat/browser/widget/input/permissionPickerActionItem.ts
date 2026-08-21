@@ -57,7 +57,7 @@ function getExtensionPermissionPresentation(item: IChatSessionProviderOptionItem
 	const normalizedId = item.id.trim().toLowerCase();
 	if (normalizedName === 'default' || normalizedId === 'default') {
 		return {
-			label: localize('permissions.ext.default.label', "Default"),
+			label: localize('permissions.ext.default.label', "Ask for approval"),
 			detail: localize('permissions.ext.default.detail', "Ask for approval only for actions that could be risky."),
 		};
 	}

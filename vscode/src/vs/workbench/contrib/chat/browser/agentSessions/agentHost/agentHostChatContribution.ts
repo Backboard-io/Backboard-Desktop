@@ -9,7 +9,7 @@ import { Disposable, DisposableMap, DisposableStore, toDisposable } from '../../
 import { FileAccess } from '../../../../../../base/common/network.js';
 import { ThemeIcon } from '../../../../../../base/common/themables.js';
 import { localize } from '../../../../../../nls.js';
-import { AgentHostEnabledSettingId, claudePreferAgentHostSettingId, IAgentHostService, shouldSurfaceLocalAgentHostProvider, type AgentProvider } from '../../../../../../platform/agentHost/common/agentService.js';
+import { AgentHostEnabledSettingId, IAgentHostService, shouldSurfaceAgentHostProvider, type AgentProvider } from '../../../../../../platform/agentHost/common/agentService.js';
 import { type ProtectedResourceMetadata } from '../../../../../../platform/agentHost/common/state/protocol/state.js';
 import { type AgentInfo, type RootState } from '../../../../../../platform/agentHost/common/state/sessionState.js';
 import { IConfigurationService } from '../../../../../../platform/configuration/common/configuration.js';
@@ -54,14 +54,13 @@ async function waitForLocalAgentHostActivation(accessor: ServicesAccessor, sessi
 	}
 
 	const agentHostService = accessor.get(IAgentHostService);
-	const environmentService = accessor.get(IWorkbenchEnvironmentService);
 	while (true) {
 		const rootState = agentHostService.rootState.value;
 		if (rootState instanceof Error) {
 			return false;
 		}
 		if (rootState) {
-			return rootState.agents.some(agent => agent.provider === provider && shouldSurfaceLocalAgentHostProvider(agent.provider, configurationService, environmentService.isSessionsWindow));
+			return rootState.agents.some(agent => agent.provider === provider && shouldSurfaceAgentHostProvider(agent.provider));
 		}
 
 		const changed = await Promise.race([
@@ -154,41 +153,14 @@ export class AgentHostContribution extends Disposable implements IWorkbenchContr
 			this._handleRootStateChange(initialRootState);
 		}
 
-		// React to per-window preference flips for AH-vs-EH Claude. The
-		// extension's `chatSessions` contribution gates the EH side declaratively
-		// via its `when` clause; we mirror that on the AH side by toggling
-		// registration of the `claude` provider inside this window. Flipping
-		// the relevant setting unregisters / re-registers Claude live.
-		this._register(this._configurationService.onDidChangeConfiguration(e => {
-			const relevantSetting = claudePreferAgentHostSettingId(this._isSessionsWindow);
-			if (!e.affectsConfiguration(relevantSetting)) {
-				return;
-			}
-			const current = this._agentHostService.rootState.value;
-			if (current && !(current instanceof Error)) {
-				this._handleRootStateChange(current);
-			}
-		}));
 	}
 
 	/**
-	 * Whether this window wants the given agent registered, given the
-	 * per-window AH/EH preference settings. Today only the `claude` provider
-	 * has dual implementations (EH from the Copilot extension, AH from inside
-	 * the agent host process) and a corresponding preference; all other
-	 * providers are AH-only and unconditionally allowed.
-	 *
-	 * Symmetric with the EH-side gate that lives in the extension's
-	 * `chatSessions` contribution `when` clause:
-	 *   - Agents Window  → `chat.agents.claude.preferAgentHost`
-	 *   - Editor Window  → `chat.editor.claude.preferAgentHost`
-	 *
-	 * If the relevant setting is `false`, the EH Claude is the one that
-	 * surfaces in this window, so the AH side suppresses its own registration
-	 * to avoid Claude appearing twice in the same window.
+	 * Whether Backboard wants the given built-in agent-host provider registered.
+	 * Subscription-backed Claude and Codex providers are extension-only.
 	 */
 	private _shouldRegisterAgent(provider: AgentProvider): boolean {
-		return shouldSurfaceLocalAgentHostProvider(provider, this._configurationService, this._isSessionsWindow);
+		return shouldSurfaceAgentHostProvider(provider);
 	}
 
 	private _handleRootStateChange(rootState: RootState): void {

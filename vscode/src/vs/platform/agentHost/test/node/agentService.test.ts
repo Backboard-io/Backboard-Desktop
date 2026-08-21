@@ -2289,6 +2289,34 @@ suite('AgentService (node dispatcher)', () => {
 
 	suite('empty-session GC', () => {
 
+		test('a disconnected client releases all of its subscriptions', () => {
+			return runWithFakedTimers({ useFakeTimers: true }, async () => {
+				service.registerProvider(copilotAgent);
+				const abandonedSession = await service.createSession({ provider: 'copilot' });
+				const sharedSession = await service.createSession({ provider: 'copilot' });
+				service.addSubscriber(abandonedSession, 'disconnected-client');
+				service.addSubscriber(sharedSession, 'disconnected-client');
+				service.addSubscriber(sharedSession, 'surviving-client');
+
+				service.unsubscribeClient('disconnected-client');
+				await new Promise(resolve => setTimeout(resolve, 30_000));
+
+				assert.deepStrictEqual(
+					copilotAgent.disposeSessionCalls.map(uri => uri.toString()),
+					[abandonedSession.toString()],
+					'a disconnected client arms GC only for resources with no remaining subscribers',
+				);
+
+				service.unsubscribeClient('surviving-client');
+				await new Promise(resolve => setTimeout(resolve, 30_000));
+				assert.deepStrictEqual(
+					copilotAgent.disposeSessionCalls.map(uri => uri.toString()),
+					[abandonedSession.toString(), sharedSession.toString()],
+					'the final client disconnect releases the remaining session',
+				);
+			});
+		});
+
 		test('an empty unsubscribed session is disposed after the grace period', () => {
 			return runWithFakedTimers({ useFakeTimers: true }, async () => {
 				service.registerProvider(copilotAgent);

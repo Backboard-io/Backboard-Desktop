@@ -5,9 +5,10 @@
 
 import assert from 'assert';
 import { MarkdownString } from '../../../../../../base/common/htmlContent.js';
+import { URI } from '../../../../../../base/common/uri.js';
 import { assertSnapshot } from '../../../../../../base/test/common/snapshot.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
-import { ChatContentMarkdownRenderer } from '../../../browser/widget/chatContentMarkdownRenderer.js';
+import { ChatContentMarkdownRenderer, isBackboardGeneratedImage } from '../../../browser/widget/chatContentMarkdownRenderer.js';
 import { workbenchInstantiationService } from '../../../../../test/browser/workbenchTestServices.js';
 
 suite('ChatMarkdownRenderer', () => {
@@ -141,6 +142,25 @@ suite('ChatMarkdownRenderer', () => {
 		md.supportHtml = true;
 		const result = store.add(testRenderer.render(md));
 		await assertSnapshot(result.element.outerHTML);
+	});
+
+	test('Backboard generated images render inside chat', () => {
+		const imageUrl = 'https://backboard-prod.s3.ca-central-1.amazonaws.com/generated-images/dog.jpg';
+		const md = new MarkdownString(`![Generated image](${imageUrl})`);
+		const result = store.add(testRenderer.render(md));
+		const image = result.element.querySelector('img');
+
+		assert.ok(image, `Expected an image in: ${result.element.outerHTML}`);
+		assert.strictEqual(image.getAttribute('src'), imageUrl);
+		assert.strictEqual(image.getAttribute('alt'), 'Generated image');
+		assert.strictEqual(result.element.textContent, '');
+	});
+
+	test('only the Backboard generated-image HTTPS path is allowlisted', () => {
+		assert.strictEqual(isBackboardGeneratedImage(URI.parse('https://backboard-prod.s3.ca-central-1.amazonaws.com/generated-images/dog.jpg')), true);
+		assert.strictEqual(isBackboardGeneratedImage(URI.parse('http://backboard-prod.s3.ca-central-1.amazonaws.com/generated-images/dog.jpg')), false);
+		assert.strictEqual(isBackboardGeneratedImage(URI.parse('https://backboard-prod.s3.ca-central-1.amazonaws.com/private/dog.jpg')), false);
+		assert.strictEqual(isBackboardGeneratedImage(URI.parse('https://example.com/generated-images/dog.jpg')), false);
 	});
 
 	test('code block ending at end of content does not leak body tag', async () => {

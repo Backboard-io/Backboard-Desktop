@@ -3,21 +3,13 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-/* --- Trigger chip (provider icon + model name) --- */
+/* --- Inline model + reasoning trigger --- */
 .combined-model-provider-trigger {
 	display: inline-flex;
 	align-items: center;
 	gap: 4px;
+	min-width: 0;
 	cursor: pointer;
-}
-
-.combined-model-provider-trigger-icon {
-	display: inline-flex;
-	align-items: center;
-}
-
-.combined-model-provider-trigger-icon .codicon {
-	font-size: 14px;
 }
 
 .combined-model-provider-trigger-chevron .codicon {
@@ -25,13 +17,34 @@
 	opacity: 0.7;
 }
 
-/* --- Two-pane overlay --- */
+.combined-model-provider-trigger-label {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.combined-model-provider-trigger-thinking {
+	flex: 0 0 auto;
+	color: inherit;
+	font-size: inherit;
+	font-weight: inherit;
+	line-height: inherit;
+	white-space: nowrap;
+}
+
+.combined-model-provider-trigger-thinking:not(:empty)::before {
+	content: '\00b7';
+	margin-right: 4px;
+}
+
+/* --- Model picker surface --- */
 .combined-model-provider-root {
-	display: flex;
-	width: 380px;
+	display: block;
+	width: 400px;
 	max-width: 92vw;
-	height: 296px;
-	max-height: 52vh;
+	height: 350px;
+	max-height: 62vh;
 	background: var(--vscode-editorWidget-background);
 	color: var(--vscode-editorWidget-foreground);
 	border: 1px solid var(--vscode-editorWidget-border, var(--vscode-widget-border));
@@ -40,60 +53,10 @@
 	overflow: hidden;
 }
 
-/* --- Left rail --- */
-.combined-model-provider-rail {
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	gap: 2px;
-	padding: 6px 5px;
-	border-right: 1px solid var(--vscode-editorWidget-border, var(--vscode-widget-border));
-	flex: 0 0 auto;
-}
-
-.combined-model-provider-rail-item {
-	position: relative;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	width: 28px;
-	height: 28px;
-	border-radius: 6px;
-	cursor: pointer;
-	color: var(--vscode-foreground);
-	opacity: 0.6;
-}
-
-.combined-model-provider-rail-item .codicon {
-	font-size: 16px;
-}
-
-.combined-model-provider-rail-item:hover {
-	background: var(--vscode-toolbar-hoverBackground);
-	opacity: 0.85;
-}
-
-.combined-model-provider-rail-item.active {
-	opacity: 1;
-	background: var(--vscode-toolbar-hoverBackground);
-}
-
-.combined-model-provider-rail-item.active::before {
-	content: '';
-	position: absolute;
-	left: -5px;
-	top: 6px;
-	bottom: 6px;
-	width: 2px;
-	border-radius: 1px;
-	background: var(--vscode-focusBorder);
-}
-
-/* --- Right pane --- */
 .combined-model-provider-pane {
 	display: flex;
 	flex-direction: column;
-	flex: 1 1 auto;
+	height: 100%;
 	min-width: 0;
 }
 
@@ -147,6 +110,137 @@
 	display: none;
 }
 
+.combined-model-provider-thinking {
+	display: grid;
+	grid-template-columns: 136px minmax(120px, 1fr);
+	align-items: center;
+	gap: 10px;
+	flex: 0 0 auto;
+	padding: 6px 10px;
+	border-top: 1px solid var(--vscode-editorWidget-border, var(--vscode-widget-border));
+	background: color-mix(in srgb, var(--vscode-editorWidget-background) 92%, var(--vscode-foreground) 8%);
+}
+
+.combined-model-provider-thinking.hidden {
+	display: none;
+}
+
+.combined-model-provider-thinking-heading {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr);
+	align-items: center;
+	column-gap: 5px;
+	min-width: 0;
+}
+
+.combined-model-provider-thinking-title {
+	font-size: 12.5px;
+	font-weight: var(--vscode-agents-fontWeight-semiBold);
+	line-height: 18px;
+}
+
+.combined-model-provider-thinking-current {
+	min-width: 0;
+	overflow: hidden;
+	color: var(--vscode-foreground);
+	font-size: 12.5px;
+	font-weight: 400;
+	line-height: 18px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.combined-model-provider-thinking-current::before {
+	content: '\00b7';
+	margin-right: 5px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.combined-model-provider-thinking-slider-shell {
+	--combined-thinking-accent: var(--vscode-progressBar-background, var(--vscode-focusBorder));
+
+	position: relative;
+	height: 20px;
+	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 20%, transparent);
+	border-radius: 999px;
+	background: color-mix(in srgb, var(--vscode-foreground) 22%, transparent);
+}
+
+.combined-model-provider-thinking-slider-shell::before {
+	content: '';
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: 0;
+	width: var(--combined-thinking-progress, 0%);
+	border-radius: inherit;
+	background: var(--combined-thinking-accent);
+	pointer-events: none;
+}
+
+.combined-model-provider-thinking-dots {
+	position: absolute;
+	z-index: 1;
+	top: 0;
+	right: 11px;
+	bottom: 0;
+	left: 11px;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	pointer-events: none;
+}
+
+.combined-model-provider-thinking-dot {
+	width: 3px;
+	height: 3px;
+	border-radius: 50%;
+	background: color-mix(in srgb, var(--vscode-foreground) 46%, transparent);
+	box-shadow: 0 0 0 1px color-mix(in srgb, var(--vscode-editorWidget-background) 24%, transparent);
+}
+
+.combined-model-provider-thinking-dot.active {
+	background: color-mix(in srgb, var(--vscode-button-foreground) 88%, transparent);
+}
+
+.combined-model-provider-thinking-slider {
+	position: absolute;
+	z-index: 2;
+	inset: 0;
+	width: 100%;
+	height: 20px;
+	margin: 0;
+	padding: 0;
+	appearance: none;
+	-webkit-appearance: none;
+	background: transparent;
+	cursor: pointer;
+}
+
+.combined-model-provider-thinking-slider::-webkit-slider-runnable-track {
+	height: 20px;
+	border-radius: 999px;
+	background: transparent;
+}
+
+.combined-model-provider-thinking-slider::-webkit-slider-thumb {
+	box-sizing: border-box;
+	width: 24px;
+	height: 24px;
+	margin-top: -2px;
+	appearance: none;
+	-webkit-appearance: none;
+	border: 2px solid color-mix(in srgb, var(--combined-thinking-accent) 66%, #fff);
+	border-radius: 50%;
+	background: #fff;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.42);
+}
+
+.combined-model-provider-thinking-slider-shell:has(.combined-model-provider-thinking-slider:focus-visible) {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: 2px;
+}
+
 .combined-model-provider-show-rest {
 	display: flex;
 	align-items: center;
@@ -186,41 +280,6 @@
 	padding: 14px 10px;
 	opacity: 0.6;
 	font-size: 12.5px;
-}
-
-/* Empty state for a provider whose CLI is not installed yet. */
-.combined-model-provider-setup {
-	display: flex;
-	flex-direction: column;
-	align-items: flex-start;
-	gap: 10px;
-	padding: 0 10px 14px;
-}
-
-.combined-model-provider-setup-description {
-	font-size: 12px;
-	opacity: 0.8;
-}
-
-.combined-model-provider-setup-button {
-	padding: 4px 14px;
-	border: 1px solid var(--vscode-button-border, transparent);
-	border-radius: 4px;
-	background: var(--vscode-button-background);
-	color: var(--vscode-button-foreground);
-	font-family: inherit;
-	font-size: 12px;
-	font-weight: 600;
-	cursor: pointer;
-}
-
-.combined-model-provider-setup-button:hover {
-	background: var(--vscode-button-hoverBackground, var(--vscode-button-background));
-}
-
-.combined-model-provider-setup-button:focus-visible {
-	outline: 1px solid var(--vscode-focusBorder);
-	outline-offset: 2px;
 }
 
 .combined-model-provider-row {
@@ -270,10 +329,6 @@
 	opacity: 0.6;
 }
 
-.combined-model-provider-row-sub .codicon {
-	font-size: 12px;
-}
-
 .combined-model-provider-row-aside {
 	display: flex;
 	align-items: center;
@@ -288,25 +343,4 @@
 	background: var(--vscode-keybindingLabel-background);
 	color: var(--vscode-keybindingLabel-foreground);
 	border: 1px solid var(--vscode-keybindingLabel-border, transparent);
-}
-
-.combined-model-provider-row-star {
-	display: flex;
-	align-items: center;
-	opacity: 0;
-	color: var(--vscode-foreground);
-	cursor: pointer;
-}
-
-.combined-model-provider-row:hover .combined-model-provider-row-star,
-.combined-model-provider-row-star.is-favorite {
-	opacity: 0.75;
-}
-
-.combined-model-provider-row-star.is-favorite {
-	color: var(--vscode-charts-yellow, #e2c08d);
-}
-
-.combined-model-provider-row-star .codicon {
-	font-size: 14px;
 }

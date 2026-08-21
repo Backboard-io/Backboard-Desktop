@@ -1079,6 +1079,7 @@ export interface ISessionsList {
 export class SessionsList extends Disposable implements ISessionsList {
 
 	private static readonly SECTION_COLLAPSE_STATE_KEY = 'sessionsListControl.sectionCollapseState';
+	private static readonly SIMPLE_FOLDER_COLLAPSE_STATE_KEY = 'sessionsListControl.simpleFolderCollapseState';
 	private static readonly EXCLUDED_TYPES_KEY = 'sessionsListControl.excludedSessionTypes';
 	private static readonly EXCLUDED_STATUSES_KEY = 'sessionsListControl.excludedStatuses';
 	private static readonly EXCLUDE_ARCHIVED_KEY = 'sessionsListControl.excludeArchived';
@@ -1906,6 +1907,7 @@ export class SessionsList extends Disposable implements ISessionsList {
 
 	resetSectionCollapseState(): void {
 		this.storageService.remove(SessionsList.SECTION_COLLAPSE_STATE_KEY, StorageScope.PROFILE);
+		this.storageService.remove(SessionsList.SIMPLE_FOLDER_COLLAPSE_STATE_KEY, StorageScope.PROFILE);
 	}
 
 	// -- Pinning --
@@ -2104,8 +2106,14 @@ export class SessionsList extends Disposable implements ISessionsList {
 
 	// -- Section collapse persistence --
 
+	private getSectionCollapseStateKey(): string {
+		return this.options.simpleMode && this.simpleCompact
+			? SessionsList.SIMPLE_FOLDER_COLLAPSE_STATE_KEY
+			: SessionsList.SECTION_COLLAPSE_STATE_KEY;
+	}
+
 	private getSavedCollapseState(sectionId: string): boolean | undefined {
-		const raw = this.storageService.get(SessionsList.SECTION_COLLAPSE_STATE_KEY, StorageScope.PROFILE);
+		const raw = this.storageService.get(this.getSectionCollapseStateKey(), StorageScope.PROFILE);
 		if (raw) {
 			try {
 				const state: Record<string, boolean> = JSON.parse(raw);
@@ -2121,7 +2129,8 @@ export class SessionsList extends Disposable implements ISessionsList {
 
 	private saveSectionCollapseState(sectionId: string, collapsed: boolean): void {
 		let state: Record<string, boolean> = {};
-		const raw = this.storageService.get(SessionsList.SECTION_COLLAPSE_STATE_KEY, StorageScope.PROFILE);
+		const storageKey = this.getSectionCollapseStateKey();
+		const raw = this.storageService.get(storageKey, StorageScope.PROFILE);
 		if (raw) {
 			try {
 				const parsed = JSON.parse(raw);
@@ -2133,7 +2142,7 @@ export class SessionsList extends Disposable implements ISessionsList {
 			}
 		}
 		state[sectionId] = collapsed;
-		this.storageService.store(SessionsList.SECTION_COLLAPSE_STATE_KEY, JSON.stringify(state), StorageScope.PROFILE, StorageTarget.USER);
+		this.storageService.store(storageKey, JSON.stringify(state), StorageScope.PROFILE, StorageTarget.USER);
 	}
 
 	private saveBulkCollapseState(collapsed: boolean): void {
@@ -2143,7 +2152,7 @@ export class SessionsList extends Disposable implements ISessionsList {
 				state[child.element.id] = collapsed;
 			}
 		}
-		this.storageService.store(SessionsList.SECTION_COLLAPSE_STATE_KEY, JSON.stringify(state), StorageScope.PROFILE, StorageTarget.USER);
+		this.storageService.store(this.getSectionCollapseStateKey(), JSON.stringify(state), StorageScope.PROFILE, StorageTarget.USER);
 	}
 
 }

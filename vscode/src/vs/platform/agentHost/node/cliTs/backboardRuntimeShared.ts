@@ -49,7 +49,6 @@ const SANDBOX_PROVIDER_ORDER = new Map<string, number>([
 ]);
 
 const BACKBOARD_INTENSITY_CONFIG_KEY = 'intensity';
-const BACKBOARD_SHOW_REASONING_CONFIG_KEY = 'showReasoning';
 const BACKBOARD_MEMORY_CONFIG_KEY = 'memory';
 const BACKBOARD_WEB_SEARCH_CONFIG_KEY = 'webSearch';
 const BACKBOARD_COMPUTER_USE_CONFIG_KEY = 'computerUse';
@@ -130,8 +129,6 @@ export interface BackboardTurnSettings {
 	/** The stored mode value, including `plan` (used for tool exclusion). */
 	readonly rawMode: string;
 	readonly intensity: string;
-	/** Whether provider reasoning traces should be included in the response. */
-	readonly showReasoning: boolean;
 	readonly memory: string;
 	/** Whether the built-in web-search tool is available this turn. */
 	readonly webSearch: boolean;
@@ -141,7 +138,7 @@ export interface BackboardTurnSettings {
 	readonly browserUse: boolean;
 	/** Whether turn-completion notifications are enabled this turn. */
 	readonly notifications: boolean;
-	/** Whether image-generation intent is enabled (reserved; inert until backend support). */
+	/** Whether Backboard's built-in image generation is enabled this turn. */
 	readonly imageGeneration: boolean;
 	readonly config: Record<string, unknown>;
 }
@@ -427,10 +424,10 @@ export function resolveBackboardSessionConfig(rawConfig: Record<string, unknown>
 							localize('backboard.config.mode.free', "Full Access"),
 						],
 						enumDescriptions: [
-							localize('backboard.config.mode.default.description', "Allow Backboard tool calls without extra approval."),
+							localize('backboard.config.mode.default.description', "File edits and safe commands run without asking; risky commands and external capabilities (computer, browser, MCP writes) still ask."),
 							localize('backboard.config.mode.plan.description', "Read-only planning: file edits and shell commands are hidden from the agent, and remaining tool calls ask for approval."),
 							localize('backboard.config.mode.manual.description', "Ask before each tool call."),
-							localize('backboard.config.mode.free.description', "Allow tools and external capabilities without extra approval."),
+							localize('backboard.config.mode.free.description', "Run everything without asking, including external capabilities."),
 						],
 						sessionMutable: true,
 					},
@@ -460,29 +457,20 @@ export function resolveBackboardSessionConfig(rawConfig: Record<string, unknown>
 						],
 						sessionMutable: true,
 					},
-					[BACKBOARD_SHOW_REASONING_CONFIG_KEY]: {
-						type: 'boolean',
-						title: localize('backboard.config.showReasoning.title', "Show Reasoning"),
-						description: localize('backboard.config.showReasoning.description', "Include reasoning traces in responses when the provider supports this control."),
-						default: true,
-						sessionMutable: true,
-					},
 					[BACKBOARD_MEMORY_CONFIG_KEY]: {
 						type: 'string',
 						title: localize('backboard.config.memory.title', "Memory"),
 						description: localize('backboard.config.memory.description', "Controls Backboard's semantic memory for this session."),
 						default: 'off',
-						enum: ['off', 'on', 'auto', 'readonly'],
+						enum: ['off', 'auto', 'readonly'],
 						enumLabels: [
 							localize('backboard.config.memory.off', "Off"),
-							localize('backboard.config.memory.on', "On"),
 							localize('backboard.config.memory.auto', "Auto"),
 							localize('backboard.config.memory.readonly', "Read-only"),
 						],
 						enumDescriptions: [
 							localize('backboard.config.memory.off.description', "Nothing is stored or recalled."),
-							localize('backboard.config.memory.on.description', "Store new memories and recall existing ones."),
-							localize('backboard.config.memory.auto.description', "Backboard decides when to store and recall."),
+							localize('backboard.config.memory.auto.description', "Backboard stores and recalls memories as needed."),
 							localize('backboard.config.memory.readonly.description', "Recall existing memories without storing new ones."),
 						],
 						sessionMutable: true,
@@ -518,7 +506,7 @@ export function resolveBackboardSessionConfig(rawConfig: Record<string, unknown>
 					[BACKBOARD_IMAGE_GENERATION_CONFIG_KEY]: {
 						type: 'boolean',
 						title: localize('backboard.config.imageGeneration.title', "Image Generation"),
-						description: localize('backboard.config.imageGeneration.description', "Lets Backboard generate images. Requires backend image support; has no effect until that is available."),
+						description: localize('backboard.config.imageGeneration.description', "Generate images with Gemini 3.1 Flash Image."),
 						default: false,
 						sessionMutable: true,
 					},
@@ -533,13 +521,14 @@ function normalizeBackboardConfig(rawConfig: Record<string, unknown> | undefined
 	return {
 		[SessionConfigKey.Mode]: normalizeBackboardMode(merged[SessionConfigKey.Mode]),
 		[BACKBOARD_INTENSITY_CONFIG_KEY]: normalizeBackboardIntensity(merged[BACKBOARD_INTENSITY_CONFIG_KEY]),
-		[BACKBOARD_SHOW_REASONING_CONFIG_KEY]: booleanOf(merged[BACKBOARD_SHOW_REASONING_CONFIG_KEY], true),
-		[BACKBOARD_MEMORY_CONFIG_KEY]: oneOf(merged[BACKBOARD_MEMORY_CONFIG_KEY], ['off', 'on', 'auto', 'readonly'], 'off'),
+		// Stored configs may predate the removal of the "on" option; it always
+		// behaved as Auto on the wire, so migrate instead of resetting to off.
+		[BACKBOARD_MEMORY_CONFIG_KEY]: oneOf(merged[BACKBOARD_MEMORY_CONFIG_KEY] === 'on' ? 'auto' : merged[BACKBOARD_MEMORY_CONFIG_KEY], ['off', 'auto', 'readonly'], 'off'),
 		[BACKBOARD_WEB_SEARCH_CONFIG_KEY]: booleanOf(merged[BACKBOARD_WEB_SEARCH_CONFIG_KEY], true),
 		[BACKBOARD_COMPUTER_USE_CONFIG_KEY]: booleanOf(merged[BACKBOARD_COMPUTER_USE_CONFIG_KEY], false),
 		[BACKBOARD_BROWSER_USE_CONFIG_KEY]: booleanOf(merged[BACKBOARD_BROWSER_USE_CONFIG_KEY], false),
 		[BACKBOARD_NOTIFICATIONS_CONFIG_KEY]: booleanOf(merged[BACKBOARD_NOTIFICATIONS_CONFIG_KEY], false),
-		[BACKBOARD_IMAGE_GENERATION_CONFIG_KEY]: booleanOf(merged[BACKBOARD_IMAGE_GENERATION_CONFIG_KEY], false),
+		[BACKBOARD_IMAGE_GENERATION_CONFIG_KEY]: normalizeImageGenerationEnabled(merged[BACKBOARD_IMAGE_GENERATION_CONFIG_KEY]),
 	};
 }
 
@@ -551,21 +540,31 @@ export function createBackboardTurnSettings(
 	const values = normalizeBackboardConfig(storedConfig, sessionConfig);
 	const parsedModel = parseModelSelection(model) ?? parseModelSelection({ id: DEFAULT_MODEL_ID })!;
 	const rawMode = stringConfigValue(values, SessionConfigKey.Mode, BACKBOARD_ACCESS_DEFAULT);
+	const imageGeneration = booleanConfigValue(values, BACKBOARD_IMAGE_GENERATION_CONFIG_KEY, false);
 	return {
 		provider: parsedModel.provider,
 		model: parsedModel.model,
 		accessMode: rawMode === BACKBOARD_MODE_PLAN ? BACKBOARD_ACCESS_MANUAL : rawMode,
 		rawMode,
 		intensity: stringConfigValue(values, BACKBOARD_INTENSITY_CONFIG_KEY, 'dynamic'),
-		showReasoning: booleanConfigValue(values, BACKBOARD_SHOW_REASONING_CONFIG_KEY, true),
 		memory: stringConfigValue(values, BACKBOARD_MEMORY_CONFIG_KEY, 'off'),
 		webSearch: booleanConfigValue(values, BACKBOARD_WEB_SEARCH_CONFIG_KEY, true),
 		computerUse: booleanConfigValue(values, BACKBOARD_COMPUTER_USE_CONFIG_KEY, false),
 		browserUse: booleanConfigValue(values, BACKBOARD_BROWSER_USE_CONFIG_KEY, false),
 		notifications: booleanConfigValue(values, BACKBOARD_NOTIFICATIONS_CONFIG_KEY, false),
-		imageGeneration: booleanConfigValue(values, BACKBOARD_IMAGE_GENERATION_CONFIG_KEY, false),
+		imageGeneration,
 		config: bridgeConfig(),
 	};
+}
+
+function normalizeImageGenerationEnabled(value: unknown): boolean {
+	// Migrate values saved by the short-lived image-model picker back to the
+	// simple toggle. Any selected model means Images was enabled; the runtime
+	// now ignores that id and always uses Gemini 3.1 Flash Image.
+	if (typeof value === 'string' && !['', 'off', 'false', 'disabled'].includes(value.trim().toLowerCase())) {
+		return true;
+	}
+	return booleanOf(value, false);
 }
 
 function normalizeBackboardIntensity(value: unknown): string {

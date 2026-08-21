@@ -120,6 +120,11 @@ function anthropicToolTurn(): string[] {
 		JSON.stringify({
 			type: "content_block_delta",
 			index: 0,
+			delta: { type: "thinking_delta", thinking: "Checking the file. " },
+		}),
+		JSON.stringify({
+			type: "content_block_delta",
+			index: 0,
 			delta: { type: "text_delta", text: "Reading it." },
 		}),
 		JSON.stringify({ type: "content_block_stop", index: 0 }),
@@ -190,6 +195,10 @@ describe("ByokClient", () => {
 		expect(events[0]).toEqual({
 			kind: "thread",
 			threadId: expect.stringMatching(/^byok_/) as unknown as string,
+		});
+		expect(events).toContainEqual({
+			kind: "reasoning_delta",
+			text: "Checking the file. ",
 		});
 		expect(events).toContainEqual({
 			kind: "assistant_delta",

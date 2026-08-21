@@ -24,7 +24,7 @@ import { ISessionDatabase, ISessionDataService } from '../../common/sessionDataS
 import { FileEditTracker } from '../shared/fileEditTracker.js';
 import type { IReference } from '../../../../base/common/lifecycle.js';
 import { IAgentConfigurationService } from '../agentConfigurationService.js';
-import { BACKBOARD_ACCESS_MANUAL, BACKBOARD_MODE_PLAN, BUNDLED_BACKBOARD_MODELS, backboardModelInfos, bridgeConfig, createBackboardTurnSettings, fallbackModel, isBridgeModel, resolveBackboardSessionConfig } from './backboardRuntimeShared.js';
+import { BACKBOARD_ACCESS_FULL, BACKBOARD_ACCESS_MANUAL, BACKBOARD_MODE_PLAN, BUNDLED_BACKBOARD_MODELS, backboardModelInfos, bridgeConfig, createBackboardTurnSettings, fallbackModel, isBridgeModel, resolveBackboardSessionConfig } from './backboardRuntimeShared.js';
 
 /** cli-ts tool name excluded from the turn when Web Search is toggled off. */
 const CLI_TS_WEB_SEARCH_TOOL_NAME = 'WebSearch';
@@ -38,12 +38,13 @@ const CLI_TS_STORE_VERSION = 1;
  * One ordered, restorable piece of a completed turn's response. Markdown and
  * reasoning content accumulates during the live turn (hence mutable); tool
  * parts capture the compact completion facts needed to rebuild a real
- * completed tool-call pill (not the full result detail, which can be huge).
+ * completed tool-call pill. Execute detail is retained because its upstream
+ * formatter already caps the command/output preview used by terminal replay.
  */
 type CliTsStoredPart =
 	| { readonly kind: 'markdown'; content: string }
 	| { readonly kind: 'reasoning'; content: string }
-	| { readonly kind: 'tool'; readonly id: string; readonly name: string; readonly inputSummary?: string; readonly title?: string; readonly failed?: boolean };
+	| { readonly kind: 'tool'; readonly id: string; readonly name: string; readonly inputSummary?: string; readonly title?: string; readonly detail?: string; readonly failed?: boolean };
 
 interface CliTsStoredTurn {
 	readonly prompt: string;
@@ -62,6 +63,8 @@ interface CliTsStoredSession {
 	readonly createdAt: number;
 	readonly modifiedAt: number;
 	readonly threadId?: string;
+	/** System-prompt handoff used until the fork creates its own backend thread. */
+	readonly forkContext?: string;
 	readonly turns: CliTsStoredTurn[];
 }
 
@@ -85,6 +88,8 @@ interface CliTsTurnState {
 	readonly storedTextParts: Map<string, { content: string }>;
 	/** Structured tool inputs captured from `tool:requested`, keyed by call id. */
 	readonly toolInputs: Map<string, { name: string; input: unknown }>;
+	/** Final display summaries captured before result events omit their inputs. */
+	readonly toolInputSummaries: Map<string, string>;
 	/** In-flight async tool completions (file-edit diff builds), awaited before turn end. */
 	readonly pendingCompletions: Promise<void>[];
 	reasoningPartId?: string;
@@ -108,6 +113,7 @@ interface CliTsSession {
 	config?: Record<string, unknown>;
 	title?: string;
 	threadId?: string;
+	forkContext?: string;
 	materialized: boolean;
 	disposed: boolean;
 	proc?: CliTsServeProcess;
@@ -232,9 +238,6 @@ export class CliTsAgent extends Disposable implements IAgent {
 	}
 
 	async createSession(config: IAgentCreateSessionConfig = {}): Promise<IAgentCreateSessionResult> {
-		if (config.fork) {
-			throw new Error('Backboard sessions do not support forking yet');
-		}
 		const sessionId = config.session ? AgentSession.id(config.session) : generateUuid();
 		const sessionUri = config.session ?? AgentSession.uri(this.id, sessionId);
 		const existing = this._sessions.get(sessionId);
@@ -244,12 +247,38 @@ export class CliTsAgent extends Disposable implements IAgent {
 			existing.config = { ...(existing.config ?? {}), ...(config.config ?? {}) };
 			return { session: sessionUri, workingDirectory: existing.workingDirectory, provisional: !existing.materialized };
 		}
-		const restored = config.session ? this._readStore().find(entry => entry.id === sessionId) : undefined;
+		const storedSessions = this._readStore();
+		const sourceSessionId = config.fork ? AgentSession.id(config.fork.session) : undefined;
+		const sourceSession = sourceSessionId ? this._sessions.get(sourceSessionId) : undefined;
+		const sourceStoredSession = sourceSessionId ? storedSessions.find(entry => entry.id === sourceSessionId) : undefined;
+		const sourceTurns = sourceSession?.storedTurns ?? sourceStoredSession?.turns;
+		if (config.fork && !sourceTurns) {
+			throw new Error(`Cannot fork missing Backboard session: ${config.fork.session.toString()}`);
+		}
+		const forkedTurns = config.fork
+			? cloneStoredTurns(sourceTurns!.slice(0, config.fork.turnIndex + 1))
+			: undefined;
+		const sourceTitle = sourceSession?.title ?? sourceStoredSession?.title;
+		const forkedTitlePrefix = localize('cliTsAgent.forkedTitlePrefix', "Forked: ");
+		const restored = forkedTurns ? {
+			id: sessionId,
+			title: sourceTitle
+				? (sourceTitle.startsWith(forkedTitlePrefix) ? sourceTitle : `${forkedTitlePrefix}${sourceTitle}`)
+				: localize('cliTsAgent.forkedTitle', "Forked Session"),
+			cwd: sourceSession?.workingDirectory?.fsPath ?? sourceStoredSession?.cwd,
+			createdAt: Date.now(),
+			modifiedAt: Date.now(),
+			forkContext: buildForkConversationContext(forkedTurns),
+			turns: forkedTurns,
+		} satisfies CliTsStoredSession : config.session ? storedSessions.find(entry => entry.id === sessionId) : undefined;
 		const session = this._createSessionEntry(sessionUri, restored);
 		session.workingDirectory = config.workingDirectory ?? session.workingDirectory;
-		session.model = config.model ?? session.model;
-		session.config = config.config ?? session.config;
+		session.model = config.model ?? sourceSession?.model ?? session.model;
+		session.config = config.config ?? sourceSession?.config ?? session.config;
 		this._sessions.set(sessionId, session);
+		if (forkedTurns) {
+			this._writeStore();
+		}
 		// Eagerly boot the serve process and warm its backend connection now,
 		// while the composer is open and before the user's first message, so the
 		// process spawn and initial model-catalog request happen during think-time
@@ -305,7 +334,14 @@ export class CliTsAgent extends Disposable implements IAgent {
 		const proc = this._ensureProcess(session, rgDir);
 		const storedConfig = this._configurationService.getSessionConfigValues(session.sessionUri.toString());
 		const settings = createBackboardTurnSettings(storedConfig, session.config, session.model);
-		const permission: CliTsPermissionMode = settings.accessMode === BACKBOARD_ACCESS_MANUAL ? 'manual' : 'bypass';
+		// Default maps to the R-CLI's `auto` tier (file edits and safe commands
+		// run unprompted; dangerous commands and outward-facing tools still
+		// ask), so only Full Access bypasses approvals entirely.
+		const permission: CliTsPermissionMode = settings.accessMode === BACKBOARD_ACCESS_MANUAL
+			? 'manual'
+			: settings.accessMode === BACKBOARD_ACCESS_FULL
+				? 'bypass'
+				: 'auto';
 		// Build the per-turn tool exclusion list. Plan mode hides write-class
 		// tools from the model entirely (on top of gating); the Web Search
 		// toggle removes the built-in web search tool when disabled. The list
@@ -326,10 +362,11 @@ export class CliTsAgent extends Disposable implements IAgent {
 			confirmedToolCalls: new Set(),
 			childToolLines: new Map(),
 			toolSummaries: [],
-			storedParts: [],
-			storedTextParts: new Map(),
-			toolInputs: new Map(),
-			pendingCompletions: [],
+				storedParts: [],
+				storedTextParts: new Map(),
+				toolInputs: new Map(),
+				toolInputSummaries: new Map(),
+				pendingCompletions: [],
 			responseText: '',
 			reasoningText: '',
 		};
@@ -353,6 +390,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 				op: 'submit',
 				requestId: proc.nextRequestId(),
 				prompt: prepared.prompt,
+				...(!session.threadId && session.forkContext ? { forkContext: session.forkContext } : {}),
 				// Resume the persisted backend thread so a fresh serve process
 				// (window reload, crash, binary update) keeps the conversation's
 				// memory. serve only adopts it while it has no thread binding.
@@ -362,7 +400,6 @@ export class CliTsAgent extends Disposable implements IAgent {
 				// Always send the semantic state. In particular, `off` must reach the
 				// persistent serve process so a previous turn's thinking config is reset.
 				thinking: settings.intensity,
-				excludeReasoning: !settings.showReasoning,
 				// Sent unconditionally so the persistent serve process resets
 				// these when a toggle is turned back off between turns.
 				memory: settings.memory,
@@ -377,6 +414,9 @@ export class CliTsAgent extends Disposable implements IAgent {
 			const status = payload?.status;
 			if (payload?.threadId) {
 				session.threadId = payload.threadId;
+			}
+			if (session.threadId) {
+				session.forkContext = undefined;
 			}
 			if (status === 'failed' && !turn.failed) {
 				turn.failed = true;
@@ -607,6 +647,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 			workingDirectory: restored?.cwd ? URI.file(restored.cwd) : undefined,
 			title: restored?.title,
 			threadId: restored?.threadId,
+			forkContext: restored?.forkContext,
 			materialized: !!restored,
 			disposed: false,
 			pendingInputs: new Map(),
@@ -710,11 +751,16 @@ export class CliTsAgent extends Disposable implements IAgent {
 		if (!turn) {
 			return;
 		}
+		const eventToolName = event.name ?? (event.toolCallId ? turn.toolInputs.get(event.toolCallId)?.name : undefined);
+		if (isCliTsToolLifecycleEvent(event.type) && isHiddenCliTsTool(eventToolName)) {
+			return;
+		}
 		const turnId = turn.turnId;
 		switch (event.type) {
 			case 'session:created':
 				if (event.threadId) {
 					session.threadId = event.threadId;
+					session.forkContext = undefined;
 				}
 				return;
 			case 'turn:status': {
@@ -818,7 +864,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 					toolCallId: event.toolCallId,
 					invocationMessage: toolDisplayName(name),
 					toolInput: '',
-					_meta: { source: 'cli-ts' },
+					_meta: cliTsToolMetadata(name),
 				});
 				this._fire(session.sessionUri, {
 					type: ActionType.ChatToolCallConfirmed,
@@ -852,7 +898,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 					invocationMessage: toolInvocationMessage(event.name, event.inputSummary),
 					toolInput: event.inputSummary,
 					confirmed: turn.confirmedToolCalls.has(event.toolCallId) ? ToolCallConfirmationReason.UserAction : ToolCallConfirmationReason.NotNeeded,
-					_meta: { source: 'cli-ts' },
+					_meta: cliTsToolMetadata(event.name),
 				});
 				return;
 			}
@@ -911,12 +957,14 @@ export class CliTsAgent extends Disposable implements IAgent {
 				const name = event.name;
 				this._ensureToolCallStart(session, turn, toolCallId, name, event.inputSummary);
 				turn.toolSummaries.push(`${toolDisplayName(name)}${event.title ? ` — ${event.title}` : ''}`);
+				const inputSummary = event.inputSummary ?? turn.toolInputSummaries.get(toolCallId);
 				turn.storedParts.push({
 					kind: 'tool',
 					id: toolCallId,
 					name,
-					...(event.inputSummary ? { inputSummary: event.inputSummary } : {}),
+					...(inputSummary ? { inputSummary } : {}),
 					...(event.title ? { title: event.title } : {}),
+					...(isCliTsTerminalTool(name) && event.detail ? { detail: event.detail } : {}),
 				});
 				const text = [event.title, event.detail].filter(part => !!part).join('\n');
 				const fileEdits = Array.isArray(event.fileEdits) ? event.fileEdits : [];
@@ -945,12 +993,13 @@ export class CliTsAgent extends Disposable implements IAgent {
 					return;
 				}
 				this._ensureToolCallStart(session, turn, event.toolCallId, event.name, event.inputSummary);
+				const inputSummary = event.inputSummary ?? turn.toolInputSummaries.get(event.toolCallId);
 				turn.storedParts.push({
 					kind: 'tool',
 					id: event.toolCallId,
 					name: event.name,
 					failed: true,
-					...(event.inputSummary ? { inputSummary: event.inputSummary } : {}),
+					...(inputSummary ? { inputSummary } : {}),
 					...(event.error ? { title: event.error.slice(0, 200) } : {}),
 				});
 				const message = event.error ?? localize('cliTsAgent.toolFailedNoDetail', "The tool call failed.");
@@ -1069,6 +1118,12 @@ export class CliTsAgent extends Disposable implements IAgent {
 	}
 
 	private _ensureToolCallStart(session: CliTsSession, turn: CliTsTurnState, toolCallId: string, toolName: string, inputSummary?: string): void {
+		if (isHiddenCliTsTool(toolName)) {
+			return;
+		}
+		if (inputSummary && inputSummary !== 'Generating input…') {
+			turn.toolInputSummaries.set(toolCallId, inputSummary);
+		}
 		if (turn.startedToolCalls.has(toolCallId)) {
 			return;
 		}
@@ -1079,7 +1134,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 			toolCallId,
 			toolName,
 			displayName: toolDisplayName(toolName),
-			_meta: { source: 'cli-ts' },
+			_meta: cliTsToolMetadata(toolName),
 		});
 		this._fire(session.sessionUri, {
 			type: ActionType.ChatToolCallDelta,
@@ -1150,6 +1205,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 					createdAt: session.createdAt,
 					modifiedAt: session.modifiedAt,
 					threadId: session.threadId,
+					forkContext: session.forkContext,
 					turns: session.storedTurns,
 				}));
 			const storePath = this._storePath();
@@ -1163,6 +1219,28 @@ export class CliTsAgent extends Disposable implements IAgent {
 
 // ---- helpers -----------------------------------------------------------------
 
+function cloneStoredTurns(turns: readonly CliTsStoredTurn[]): CliTsStoredTurn[] {
+	return turns.map(turn => ({
+		...turn,
+		...(turn.tools ? { tools: [...turn.tools] } : {}),
+		...(turn.parts ? { parts: turn.parts.map(part => ({ ...part })) } : {}),
+	}));
+}
+
+function buildForkConversationContext(turns: readonly CliTsStoredTurn[]): string {
+	const transcript = turns.map(turn => ({
+		user: turn.prompt,
+		assistant: turn.response,
+		...(turn.failed ? { responseFailed: true } : {}),
+	}));
+	return [
+		'This chat was branched from an earlier conversation. Treat the JSON transcript below as authoritative prior user/assistant history, then answer the current user message as the next turn. Do not mention this handoff unless the user asks about it.',
+		'<prior_conversation_json>',
+		JSON.stringify(transcript),
+		'</prior_conversation_json>',
+	].join('\n');
+}
+
 function firstPromptLine(prompt: string): string {
 	const line = prompt.split('\n', 1)[0]?.trim() ?? '';
 	return line.length > 80 ? `${line.slice(0, 77)}...` : line;
@@ -1175,6 +1253,30 @@ function toolDisplayName(toolName: string): string {
 		return `${server}: ${rest.join(' ').replaceAll('_', ' ')}`;
 	}
 	return toolName.split('_').map(word => word ? word[0].toUpperCase() + word.slice(1) : word).join(' ');
+}
+
+function isCliTsTerminalTool(toolName: string): boolean {
+	return toolName.toLocaleLowerCase() === 'execute';
+}
+
+function isHiddenCliTsTool(toolName: string | undefined): boolean {
+	return toolName?.replace(/[_-]/g, '').toLocaleLowerCase() === 'askuser';
+}
+
+function isCliTsToolLifecycleEvent(eventType: string): boolean {
+	return eventType === 'tool:pending'
+		|| eventType === 'tool:start'
+		|| eventType === 'tool:progress'
+		|| eventType === 'tool:result'
+		|| eventType === 'tool:error'
+		|| eventType === 'tool:discarded'
+		|| eventType === 'tool:retracted';
+}
+
+function cliTsToolMetadata(toolName: string): Record<string, unknown> {
+	return isCliTsTerminalTool(toolName)
+		? { source: 'cli-ts', toolKind: 'terminal', language: 'shellscript' }
+		: { source: 'cli-ts' };
 }
 
 function toolInvocationMessage(toolName: string, inputSummary?: string): string {
@@ -1259,8 +1361,9 @@ function storedTurnToProtocolTurn(sessionId: string, index: number, turn: CliTsS
 				if (part.content) {
 					responseParts.push({ kind: ResponsePartKind.Reasoning, id: partId, content: part.content });
 				}
-			} else {
+			} else if (!isHiddenCliTsTool(part.name)) {
 				const displayName = toolDisplayName(part.name);
+				const resultText = [part.title, part.detail].filter(value => !!value).join('\n');
 				responseParts.push({
 					kind: ResponsePartKind.ToolCall,
 					toolCall: {
@@ -1275,20 +1378,21 @@ function storedTurnToProtocolTurn(sessionId: string, index: number, turn: CliTsS
 						pastTenseMessage: part.title ?? (part.failed
 							? localize('cliTsAgent.toolFailed', "{0} failed", displayName)
 							: localize('cliTsAgent.toolFinished', "{0} finished", displayName)),
-						...(part.title ? { content: [{ type: ToolResultContentType.Text, text: part.title }] } : {}),
+						...(resultText ? { content: [{ type: ToolResultContentType.Text, text: resultText }] } : {}),
 						...(part.failed && part.title ? { error: { message: part.title } } : {}),
-						_meta: { source: 'cli-ts' },
+						_meta: cliTsToolMetadata(part.name),
 					},
 				});
 			}
 		}
 	} else {
 		// Legacy store (pre-`parts`): compact bullet summaries + response text.
-		if (turn.tools?.length) {
+		const visibleTools = turn.tools?.filter(tool => !/^Ask[ _-]?User(?:\s|—|-|$)/i.test(tool));
+		if (visibleTools?.length) {
 			responseParts.push({
 				kind: ResponsePartKind.Markdown,
 				id: `${sessionId}-${index}-tools`,
-				content: turn.tools.map(tool => `- ${tool}`).join('\n'),
+				content: visibleTools.map(tool => `- ${tool}`).join('\n'),
 			});
 		}
 		if (turn.response) {

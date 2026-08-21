@@ -1074,6 +1074,37 @@ suite('AgentHostChatContribution', () => {
 			assert.strictEqual(listController.items.length, 1);
 		});
 
+		test('concurrent provider refreshes share one listSessions RPC', async () => {
+			const { instantiationService, agentHostService } = createTestServices(disposables);
+			const copilotController = disposables.add(instantiationService.createInstance(AgentHostSessionListController, 'agent-host-copilot', 'copilot', agentHostService, undefined, 'local'));
+			const claudeController = disposables.add(instantiationService.createInstance(AgentHostSessionListController, 'agent-host-claude', 'claude', agentHostService, undefined, 'local'));
+
+			agentHostService.addSession({ session: AgentSession.uri('copilot', 'copilot-session'), startTime: 1000, modifiedTime: 2000, summary: 'Copilot session' });
+			agentHostService.addSession({ session: AgentSession.uri('claude', 'claude-session'), startTime: 1000, modifiedTime: 2000, summary: 'Claude session' });
+
+			let listCalls = 0;
+			const originalListSessions = agentHostService.listSessions.bind(agentHostService);
+			agentHostService.listSessions = async () => {
+				listCalls++;
+				return originalListSessions();
+			};
+
+			await Promise.all([
+				copilotController.refresh(CancellationToken.None),
+				claudeController.refresh(CancellationToken.None),
+			]);
+
+			assert.deepStrictEqual({
+				listCalls,
+				copilotItems: copilotController.items.map(item => item.label),
+				claudeItems: claudeController.items.map(item => item.label),
+			}, {
+				listCalls: 1,
+				copilotItems: ['Copilot session'],
+				claudeItems: ['Claude session'],
+			});
+		});
+
 		test('refresh retries listSessions if the first call failed', async () => {
 			const { listController, agentHostService } = createContribution(disposables);
 

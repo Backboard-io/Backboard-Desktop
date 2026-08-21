@@ -34,6 +34,17 @@ export enum AgentSessionProviders {
  */
 export type AgentSessionTarget = AgentSessionProviders | (string & {});
 
+/**
+ * Returns whether a provider id belongs to a built-in or remote agent-host
+ * subscription integration. Extension-contributed Claude and Codex session
+ * types are intentionally not matched.
+ */
+export function isSubscriptionAgentSessionProvider(provider: AgentSessionTarget): boolean {
+	const normalizedProvider = provider.toLowerCase();
+	return isAgentHostTarget(provider) &&
+		(normalizedProvider.includes('claude') || normalizedProvider.includes('codex'));
+}
+
 export function isBuiltInAgentSessionProvider(provider: AgentSessionTarget): boolean {
 	return provider === AgentSessionProviders.Local ||
 		provider === AgentSessionProviders.Background ||

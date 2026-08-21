@@ -826,8 +826,10 @@ function renderPanelThreadHtml(messages: readonly { role: string; content: strin
 		if (!message.content) {
 			continue;
 		}
-		const role = message.role === 'user' ? 'user' : 'assistant';
-		parts.push(`<div class="messageCard ${role}"><div class="messageText">${escapePanelHtml(message.content)}</div></div>`);
+		const role = message.role === 'user' ? 'user' : message.role === 'reasoning' ? 'reasoning' : 'assistant';
+		parts.push(role === 'reasoning'
+			? `<details class="messageCard reasoning" open><summary>Thinking</summary><div class="reasoningText">${escapePanelHtml(message.content)}</div></details>`
+			: `<div class="messageCard ${role}"><div class="messageText">${escapePanelHtml(message.content)}</div></div>`);
 	}
 	for (const output of toolOutputs) {
 		if (!isObjectRecord(output)) {
@@ -879,7 +881,7 @@ function extractPanelAssistantText(html: string): string {
 
 function extractPanelMessages(html: string): { role: string; content: string }[] {
 	const messages: { role: string; content: string }[] = [];
-	const pattern = /<div class="messageCard (user|assistant)"[\s\S]*?<div class="messageText">([\s\S]*?)<\/div>[\s\S]*?<\/div>/g;
+	const pattern = /<(?:div|details) class="messageCard (user|assistant|reasoning)"[\s\S]*?<div class="(?:messageText|reasoningText)">([\s\S]*?)<\/div>[\s\S]*?<\/(?:div|details)>/g;
 	let match: RegExpExecArray | null;
 	while ((match = pattern.exec(html))) {
 		const content = stripPanelHtml(match[2]);
@@ -1421,7 +1423,7 @@ function renderBridgeEvent(event: BridgeEvent, response: ResponseSink, currentTo
 			return currentToolRequest;
 		case 'reasoningDelta':
 			if (event.text) {
-				response.progress(event.text.slice(0, 180));
+				response.event?.('reasoningDelta', { text: event.text });
 			}
 			return currentToolRequest;
 		case 'media':
@@ -1690,6 +1692,14 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 				liveMessages.push({ role: 'assistant', content: text });
 			}
 		};
+		const appendLiveReasoningText = (text: string) => {
+			const last = liveMessages[liveMessages.length - 1];
+			if (last?.role === 'reasoning') {
+				liveMessages[liveMessages.length - 1] = { role: 'reasoning', content: `${last.content}${text}` };
+			} else {
+				liveMessages.push({ role: 'reasoning', content: text });
+			}
+		};
 		await view.webview.postMessage({ type: 'runStarted', prompt: content, chatId: liveChatId });
 		await view.webview.postMessage({ type: 'status', text: 'Sending to Backboard.' });
 		const saveHistory = async (status: string) => {
@@ -1769,6 +1779,11 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 					if (text) {
 						appendLiveAssistantText(text);
 					}
+				} else if (event.type === 'reasoningDelta') {
+					const text = typeof event.text === 'string' ? event.text : '';
+					if (text) {
+						appendLiveReasoningText(text);
+					}
 				} else if (event.type === 'error') {
 					const message = event.message ?? 'Backboard request failed.';
 					liveMessages.push({ role: 'error', content: message });
@@ -1807,6 +1822,11 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 						const text = typeof event.text === 'string' ? event.text : '';
 						if (text) {
 							appendLiveAssistantText(text);
+						}
+					} else if (event.type === 'reasoningDelta') {
+						const text = typeof event.text === 'string' ? event.text : '';
+						if (text) {
+							appendLiveReasoningText(text);
 						}
 					} else if (event.type === 'error') {
 						const message = event.message ?? 'Backboard request failed.';
@@ -2324,6 +2344,11 @@ class BackboardBridge implements vscode.Disposable {
 			case 'assistant:delta':
 				if (event.text) {
 					this.deliver({ type: 'assistantTextDelta', requestId, text: event.text });
+				}
+				return;
+			case 'assistant:reasoning':
+				if (event.text) {
+					this.deliver({ type: 'reasoningDelta', requestId, text: event.text });
 				}
 				return;
 			case 'session:created':

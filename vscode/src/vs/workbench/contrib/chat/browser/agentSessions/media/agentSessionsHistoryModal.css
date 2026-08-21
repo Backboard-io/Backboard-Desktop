@@ -10,8 +10,8 @@
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	padding: 40px;
-	background: color-mix(in srgb, #000 42%, transparent);
+	padding: 12px;
+	background: color-mix(in srgb, #000 36%, transparent);
 	backdrop-filter: blur(2px);
 	animation: agent-sessions-history-backdrop-in 120ms ease-out;
 }
@@ -19,58 +19,76 @@
 .agent-sessions-history-modal {
 	display: flex;
 	flex-direction: column;
-	width: min(640px, calc(100vw - 80px));
-	height: min(628px, calc(100vh - 80px));
-	min-width: min(400px, calc(100vw - 24px));
-	min-height: min(340px, calc(100vh - 24px));
-	border: 1px solid color-mix(in srgb, var(--vscode-widget-border, var(--vscode-contrastBorder)) 88%, var(--vscode-focusBorder) 12%);
-	border-radius: 12px;
+	width: min(720px, 100%);
+	height: min(620px, 100%);
+	min-width: min(400px, 100%);
+	min-height: min(340px, 100%);
+	padding: 0 8px 8px;
+	border: 1px solid color-mix(in srgb, var(--vscode-widget-border, var(--vscode-contrastBorder)) 82%, transparent);
+	border-radius: 14px;
 	background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background));
 	color: var(--vscode-editorWidget-foreground, var(--vscode-foreground));
-	box-shadow: 0 20px 56px color-mix(in srgb, var(--vscode-widget-shadow, #000) 58%, transparent);
+	box-shadow: 0 24px 64px color-mix(in srgb, var(--vscode-widget-shadow, #000) 62%, transparent);
 	overflow: hidden;
+	box-sizing: border-box;
 	animation: agent-sessions-history-modal-in 150ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.agent-sessions-history-modal-backdrop.agent-sessions-history-modal-chat-surface {
+	align-items: flex-start;
+	padding: 8px 10px 0;
+	background: transparent;
+	backdrop-filter: none;
+}
+
+.agent-sessions-history-modal-chat-surface .agent-sessions-history-modal {
+	width: 100%;
+	height: min(306px, 100%);
+	min-width: 0;
+	min-height: 0;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	box-shadow: none;
+}
+
+.agent-sessions-history-modal-chat-surface .agent-sessions-history-modal-header {
+	display: none;
+
+}
+
+.agent-sessions-history-modal-chat-surface .agent-sessions-history-modal-panel {
+	--agent-sessions-history-surface: color-mix(in srgb, var(--vscode-editorWidget-background, var(--vscode-sideBar-background)) 84%, var(--vscode-foreground) 16%);
+
+	border-radius: 12px;
+	background: var(--agent-sessions-history-surface);
+	box-shadow: 0 10px 28px color-mix(in srgb, var(--vscode-widget-shadow, #000) 42%, transparent);
 }
 
 .agent-sessions-history-modal-header {
 	display: flex;
 	align-items: center;
-	min-height: 60px;
-	gap: 6px;
-	padding: 9px 10px 9px 16px;
-	border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-sideBarSectionHeader-border));
+	min-height: 56px;
+	gap: 4px;
+	padding: 0 2px 0 6px;
 	flex: 0 0 auto;
-	background: color-mix(in srgb, var(--vscode-editorWidget-background, var(--vscode-sideBar-background)) 92%, var(--vscode-foreground) 8%);
 }
 
 .agent-sessions-history-modal-heading {
 	display: flex;
 	flex: 1 1 auto;
 	min-width: 0;
-	flex-direction: column;
-	gap: 1px;
 }
 
 .agent-sessions-history-modal-title {
 	min-width: 0;
 	overflow: hidden;
-	font-size: 14px;
-	font-weight: 600;
-	line-height: 19px;
-	letter-spacing: 0;
+	font-size: 16px;
+	font-weight: 500;
+	line-height: 22px;
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	color: var(--vscode-editorWidget-foreground, var(--vscode-foreground));
-}
-
-.agent-sessions-history-modal-subtitle {
-	overflow: hidden;
-	color: var(--vscode-descriptionForeground);
-	font-size: 11px;
-	font-weight: 400;
-	line-height: 15px;
-	text-overflow: ellipsis;
-	white-space: nowrap;
+	color: var(--vscode-foreground);
 }
 
 .agent-sessions-history-modal-toolbar {
@@ -79,16 +97,17 @@
 	flex: 0 0 auto;
 }
 
-.agent-sessions-history-modal-toolbar.filtered .codicon-filter {
-	color: var(--vscode-activityBarBadge-background);
+.agent-sessions-history-modal-toolbar .monaco-toolbar .action-label {
+	border-radius: 6px;
+	color: var(--vscode-icon-foreground);
 }
 
-.agent-sessions-history-modal-close {
+.agent-sessions-history-modal-icon-button {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	width: 26px;
-	height: 26px;
+	width: 28px;
+	height: 28px;
 	margin: 0;
 	padding: 0;
 	border: 0;
@@ -98,48 +117,270 @@
 	cursor: pointer;
 }
 
-.agent-sessions-history-modal-close:hover {
+.agent-sessions-history-modal-icon-button:hover {
 	background: var(--vscode-toolbar-hoverBackground);
 }
 
-.agent-sessions-history-modal-close:focus-visible {
+.agent-sessions-history-modal-icon-button:focus-visible {
 	outline: 1px solid var(--vscode-focusBorder);
 	outline-offset: -1px;
 }
 
-.agent-sessions-history-modal-new {
+.agent-sessions-history-modal-panel {
+	--agent-sessions-history-surface: color-mix(in srgb, var(--vscode-editorWidget-background, var(--vscode-sideBar-background)) 88%, var(--vscode-foreground) 12%);
+
+	display: flex;
+	flex: 1 1 auto;
+	min-height: 0;
+	flex-direction: column;
+	border: 1px solid color-mix(in srgb, var(--vscode-widget-border, var(--vscode-contrastBorder)) 84%, transparent);
+	border-radius: 15px;
+	background: var(--agent-sessions-history-surface);
+	overflow: hidden;
+}
+
+.agent-sessions-history-modal-search {
+	display: flex;
+	align-items: center;
+	min-height: 58px;
+	gap: 10px;
+	margin: 0 20px;
+	border-bottom: 1px solid color-mix(in srgb, var(--vscode-widget-border, var(--vscode-contrastBorder)) 70%, transparent);
 	flex: 0 0 auto;
 }
 
-.agent-sessions-history-modal-new .monaco-button {
-	width: auto;
-	height: 28px;
+.agent-sessions-history-modal-search-icon {
+	flex: 0 0 auto;
+	color: var(--vscode-descriptionForeground);
+	font-size: 17px;
+}
+
+.agent-sessions-history-modal-search-widget {
 	min-width: 0;
-	padding-inline: 9px;
-	border-radius: 6px;
-	font-size: 12px;
+	flex: 1 1 auto;
+}
+
+.agent-sessions-history-modal-search-widget .monaco-tree-type-filter {
+	position: static;
+	display: flex;
+	width: 100%;
+	max-width: none;
+	margin: 0;
+	padding: 0;
+	border: 0;
+	background: transparent !important;
+	box-shadow: none !important;
+}
+
+.agent-sessions-history-modal-search-widget .monaco-tree-type-filter-input,
+.agent-sessions-history-modal-search-widget .monaco-findInput,
+.agent-sessions-history-modal-search-widget .monaco-inputbox,
+.agent-sessions-history-modal-search-widget .monaco-inputbox > .ibwrapper {
+	width: 100%;
+	height: auto;
+	background: transparent !important;
+}
+
+.agent-sessions-history-modal-search-widget .monaco-inputbox {
+	border: 0 !important;
+	box-shadow: none !important;
+}
+
+.agent-sessions-history-modal-search-widget .monaco-inputbox > .ibwrapper > .input,
+.agent-sessions-history-modal-search-widget .monaco-inputbox > .ibwrapper > .mirror {
+	padding: 0;
+	font-size: 15px;
+	font-weight: 400;
+	line-height: 24px;
+	color: var(--vscode-input-foreground, var(--vscode-foreground));
+}
+
+.agent-sessions-history-modal-search-widget .monaco-inputbox > .ibwrapper > .input::placeholder {
+	color: var(--vscode-input-placeholderForeground, var(--vscode-descriptionForeground));
+	opacity: 1;
+}
+
+.agent-sessions-history-modal-search-widget .monaco-findInput > .controls,
+.agent-sessions-history-modal-search-widget .monaco-tree-type-filter-actionbar {
+	display: none;
 }
 
 .agent-sessions-history-modal-body {
 	flex: 1 1 auto;
 	min-height: 0;
-	padding: 6px 6px 8px;
+	padding: 0 12px 12px;
+}
+
+.agent-sessions-history-modal-body .agent-sessions-viewer,
+.agent-sessions-history-modal-body .monaco-list,
+.agent-sessions-history-modal-body .monaco-scrollable-element {
+	background: transparent !important;
 }
 
 .agent-sessions-history-modal-body .agent-sessions-viewer .monaco-scrollable-element {
-	padding: 0 4px;
+	padding: 0;
 }
 
-.agent-sessions-history-modal-body .agent-session-item {
-	padding: 6px 8px;
+.agent-sessions-history-modal-body .monaco-scrollable-element > .shadow,
+.agent-sessions-history-modal-body .monaco-tree-sticky-container-shadow {
+	display: none !important;
+	box-shadow: none !important;
 }
 
 .agent-sessions-history-modal-body .monaco-list-row {
-	border-radius: 7px;
+	border-radius: 9px !important;
+	overflow: hidden;
 }
 
-.agent-sessions-history-modal-body .monaco-list-row:hover:not(.selected):not(.focused) {
-	background: var(--vscode-list-hoverBackground);
+.agent-sessions-history-modal-body .monaco-list-row:hover:not(.selected):not(.focused),
+.agent-sessions-history-modal-body .monaco-list-row.focused:not(.selected) {
+	background: color-mix(in srgb, var(--vscode-editorWidget-background, var(--vscode-sideBar-background)) 80%, var(--vscode-foreground) 20%) !important;
+}
+
+.agent-sessions-history-modal-body .monaco-list .monaco-list-row.selected,
+.agent-sessions-history-modal-body .monaco-list:focus .monaco-list-row.selected,
+.agent-sessions-history-modal-body .monaco-list:focus .monaco-list-row.focused.selected {
+	background: color-mix(in srgb, var(--agent-sessions-history-surface) 82%, var(--vscode-focusBorder) 18%) !important;
+	box-shadow:
+		inset 0 0 0 1px color-mix(in srgb, var(--vscode-focusBorder) 52%, transparent),
+		0 1px 2px color-mix(in srgb, var(--vscode-widget-shadow, #000) 22%, transparent);
+	color: var(--vscode-foreground);
+	outline: none !important;
+}
+
+.agent-sessions-history-modal-body .agent-session-item {
+	height: 100%;
+	align-items: center;
+	padding: 0 8px;
+	border-left: 0;
+	box-sizing: border-box;
+}
+
+.agent-sessions-history-modal-body .agent-session-icon-col,
+.agent-sessions-history-modal-body .agent-session-pinned-indicator,
+.agent-sessions-history-modal-body .agent-session-title-toolbar,
+.agent-sessions-history-modal-body .agent-session-details-icon,
+.agent-sessions-history-modal-body .agent-session-badge,
+.agent-sessions-history-modal-body .agent-session-separator,
+.agent-sessions-history-modal-body .agent-session-diff-container,
+.agent-sessions-history-modal-body .agent-session-description {
+	display: none !important;
+}
+
+.agent-sessions-history-modal-body .agent-session-main-col {
+	display: flex;
+	align-items: center;
+	width: 100%;
+	min-width: 0;
+	padding-left: 0;
+}
+
+.agent-sessions-history-modal-body .agent-sessions-viewer .agent-session-item .agent-session-main-col {
+	flex: 1 1 auto;
+	width: auto;
+}
+
+.agent-sessions-history-modal-body .agent-session-title-row {
+	display: flex;
+	flex: 1 1 auto;
+	min-width: 0;
+	padding: 0;
+	line-height: 20px;
+}
+
+.agent-sessions-history-modal-body .agent-sessions-viewer .agent-session-item .agent-session-title-row {
+	flex: 1 1 0;
+}
+
+.agent-sessions-history-modal-body .agent-session-title {
+	min-width: 0;
+	max-width: none;
+	color: var(--vscode-foreground);
+	font-size: 14px;
+	font-weight: 500;
+	line-height: 20px;
+}
+
+.agent-sessions-history-modal-body .agent-session-details-row {
+	display: flex;
+	flex: 0 0 auto;
+	align-items: center;
+	max-width: none;
+	margin-left: 16px;
+	color: var(--vscode-descriptionForeground);
+	font-size: 13px;
+	line-height: 20px;
+}
+
+.agent-sessions-history-modal-body .agent-sessions-viewer .agent-session-item .agent-session-details-row {
+	flex: 0 0 auto;
+	margin-left: auto;
+	padding-left: 16px;
+}
+
+.agent-sessions-history-modal-body .monaco-list-row.selected .agent-session-item {
+	border-left: 0;
+	border-radius: inherit;
+	background: transparent !important;
+}
+
+.agent-sessions-history-modal-body .monaco-list-row:hover .agent-session-item,
+.agent-sessions-history-modal-body .monaco-list-row.focused .agent-session-item {
+	border-radius: inherit;
+	background: transparent !important;
+}
+
+.agent-sessions-history-modal-chat-surface .agent-sessions-history-modal-search {
+	min-height: 34px;
+	gap: 8px;
+	margin-inline: 14px;
+}
+
+.agent-sessions-history-modal-chat-surface .agent-sessions-history-modal-search-icon {
+	font-size: 14px;
+}
+
+.agent-sessions-history-modal-chat-surface .agent-sessions-history-modal-search-widget .monaco-inputbox,
+.agent-sessions-history-modal-chat-surface .agent-sessions-history-modal-search-widget .monaco-inputbox > .ibwrapper > .input {
+	border: 0 !important;
+	outline: none !important;
+}
+
+.agent-sessions-history-modal-chat-surface .agent-sessions-history-modal-search-widget .monaco-inputbox > .ibwrapper > .input,
+.agent-sessions-history-modal-chat-surface .agent-sessions-history-modal-search-widget .monaco-inputbox > .ibwrapper > .mirror {
+	font-size: 14px;
+	line-height: 20px;
+}
+
+.agent-sessions-history-modal-chat-surface .agent-sessions-history-modal-body {
+	padding: 0 8px 8px;
+}
+
+.agent-sessions-history-modal-chat-surface .agent-sessions-history-modal-body .monaco-tree-sticky-container {
+	display: none !important;
+}
+
+.agent-sessions-history-modal-body .agent-session-status {
+	display: block;
+	color: var(--vscode-descriptionForeground);
+}
+
+.agent-sessions-history-modal-body .agent-session-status.has-separator::before {
+	content: none;
+}
+
+.agent-sessions-history-modal-body .agent-session-section {
+	height: 100%;
+	padding: 0 8px;
+	color: var(--vscode-descriptionForeground);
+	font-size: 12px;
+	font-weight: 500;
+	text-transform: none;
+}
+
+.agent-sessions-history-modal-body .agent-session-section-count,
+.agent-sessions-history-modal-body .agent-session-section-toolbar {
+	display: none !important;
 }
 
 @keyframes agent-sessions-history-backdrop-in {
@@ -161,25 +402,17 @@
 }
 
 @media (max-width: 520px) {
-	.agent-sessions-history-modal-backdrop {
-		padding: 12px;
-	}
-
 	.agent-sessions-history-modal {
-		width: calc(100vw - 24px);
-		height: calc(100vh - 24px);
+		width: 100%;
+		height: 100%;
 		min-width: 0;
 	}
 
-	.agent-sessions-history-modal-header {
-		padding-left: 12px;
+	.agent-sessions-history-modal-search {
+		margin-inline: 14px;
 	}
 
-	.agent-sessions-history-modal-subtitle {
-		display: none;
-	}
-
-	.agent-sessions-history-modal-toolbar {
-		display: none;
+	.agent-sessions-history-modal-body {
+		padding-inline: 6px;
 	}
 }

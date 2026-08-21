@@ -29,6 +29,11 @@ import { ILanguageModelToolsService } from '../../../common/tools/languageModelT
 import { isEqual } from '../../../../../../base/common/resources.js';
 import { buildPhrasePool, defaultThinkingMessages, maybePickFunWorkingMessage } from './chatThinkingContentPart.js';
 
+function isBackboardCursorTranscript(container: HTMLElement): boolean {
+	return container.closest('.backboard-cursor-transcript') !== null
+		|| (container.closest('.part.auxiliarybar') !== null && container.closest('.backboard-chat-controls') !== null);
+}
+
 export class ChatProgressContentPart extends Disposable implements IChatContentPart {
 	public readonly domNode: HTMLElement;
 
@@ -60,7 +65,9 @@ export class ChatProgressContentPart extends Disposable implements IChatContentP
 
 		const followingContent = context.content.slice(context.contentIndex + 1);
 		this.showSpinner = forceShowSpinner ?? shouldShowSpinner(followingContent, context.element);
-		this.showLiveElapsed = this.showSpinner && context.container.closest('.backboard-clean-chat') !== null;
+		this.showLiveElapsed = this.showSpinner
+			&& context.container.closest('.backboard-clean-chat') !== null
+			&& !isBackboardCursorTranscript(context.container);
 		this.isHidden = forceShowMessage !== true && followingContent.some(part => part.kind !== 'progressMessage');
 		if (this.isHidden) {
 			// Placeholder, don't show the progress message
@@ -368,6 +375,7 @@ export class ChatWorkingProgressContentPart extends Disposable implements IChatC
 	private readonly elementId: string;
 	private readonly responseElement: IChatResponseViewModel | undefined;
 	private readonly useT3TimelinePresentation: boolean;
+	private readonly useCursorTranscriptPresentation: boolean;
 	/** Ticks the live working label and elapsed time once per second while the turn runs. */
 	private readonly workingTimer = this._register(new MutableDisposable<IDisposable>());
 
@@ -384,18 +392,26 @@ export class ChatWorkingProgressContentPart extends Disposable implements IChatC
 		this.explicitContent = workingProgress.content;
 		this.elementId = context.element.id;
 		this.responseElement = isResponseVM(context.element) ? context.element : undefined;
-		this.useT3TimelinePresentation = context.container.closest('.backboard-clean-chat') !== null;
-		this.label = pickWorkingLabel(context.element.id, configurationService);
+		this.useCursorTranscriptPresentation = isBackboardCursorTranscript(context.container);
+		this.useT3TimelinePresentation = context.container.closest('.backboard-clean-chat') !== null && !this.useCursorTranscriptPresentation;
+		this.label = this.useCursorTranscriptPresentation
+			? localize('chat.cursorPlanningNextMoves', "Planning next moves")
+			: pickWorkingLabel(context.element.id, configurationService);
 
 		// Build the DOM
 		this.domNode = $('.progress-container');
+		this.domNode.classList.toggle('chat-cursor-working-row', this.useCursorTranscriptPresentation);
 		const iconElement = $('div');
 		const state = workingProgress.state;
 		this.hasState = !!state;
 		const isComplete = state?.isComplete ?? false;
 		this.isCompleteState = isComplete;
+		this.domNode.classList.toggle('chat-cursor-working-complete', this.useCursorTranscriptPresentation && isComplete);
 
-		if (this.useT3TimelinePresentation) {
+		if (this.useCursorTranscriptPresentation) {
+			// Cursor uses one quiet text row while pending; the surrounding work
+			// disclosure already communicates that the response is active.
+		} else if (this.useT3TimelinePresentation) {
 			this.domNode.classList.add('chat-t3-working-row');
 			iconElement.classList.add('chat-t3-working-dots');
 			iconElement.append($('span'), $('span'), $('span'));
@@ -404,7 +420,9 @@ export class ChatWorkingProgressContentPart extends Disposable implements IChatC
 		} else {
 			iconElement.classList.add(...ThemeIcon.asClassNameArray(ThemeIcon.modify(Codicon.loading, 'spin')));
 		}
-		append(this.domNode, iconElement);
+		if (!this.useCursorTranscriptPresentation) {
+			append(this.domNode, iconElement);
+		}
 
 		// Structure: .progress-container > .rendered-markdown.progress-step.chat-working-progress-step > p (shimmered label) + span (stats, no shimmer)
 		const messageContainer = $('div.rendered-markdown.progress-step.chat-working-progress-step');
@@ -461,6 +479,11 @@ export class ChatWorkingProgressContentPart extends Disposable implements IChatC
 		// the elapsed time ticks alongside in the secondary stats span.
 		const tick = () => {
 			const elapsedMs = Math.max(0, Date.now() - state.confirmationAdjustedTimestamp.get());
+			if (this.useCursorTranscriptPresentation) {
+				this.setWorkingLabel(localize('chat.cursorPlanningNextMoves', "Planning next moves"));
+				this.statsElement.textContent = '';
+				return;
+			}
 			this.setWorkingLabel(this.useT3TimelinePresentation
 				? localize('chat.t3WorkingFor', "Working for")
 				: this.computeLiveLabel(elapsedMs));

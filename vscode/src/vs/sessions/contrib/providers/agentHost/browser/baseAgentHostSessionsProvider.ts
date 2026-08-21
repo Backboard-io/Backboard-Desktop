@@ -18,7 +18,7 @@ import { isDefined } from '../../../../../base/common/types.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { generateUuid } from '../../../../../base/common/uuid.js';
 import { localize } from '../../../../../nls.js';
-import { AgentSession, IAgentConnection, IAgentSessionMetadata } from '../../../../../platform/agentHost/common/agentService.js';
+import { AgentSession, IAgentConnection, IAgentSessionMetadata, shouldSurfaceAgentHostProvider } from '../../../../../platform/agentHost/common/agentService.js';
 import { buildSessionChangesetUri } from '../../../../../platform/agentHost/common/changesetUri.js';
 import { buildAnnotationsUri } from '../../../../../platform/agentHost/common/annotationsUri.js';
 import { getEffectiveAgents } from '../../../../../platform/agentHost/common/customAgents.js';
@@ -1343,14 +1343,10 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 
 	/**
 	 * Whether `provider` should be advertised as a session type by this host.
-	 * Defaults to `true` (advertise everything the host reports). The local
-	 * provider overrides this to suppress the agent host's Claude when the
-	 * window prefers the extension-host Claude, mirroring the gate
-	 * {@link AgentHostContribution} applies to the chat session contribution so
-	 * the welcome picker doesn't list Claude twice.
+	 * Subscription-backed Claude and Codex providers are extension-only.
 	 */
-	protected _shouldAdvertiseAgent(_provider: string): boolean {
-		return true;
+	protected _shouldAdvertiseAgent(provider: string): boolean {
+		return shouldSurfaceAgentHostProvider(provider);
 	}
 
 	/**
@@ -1449,20 +1445,15 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 
 	getSessions(): ISession[] {
 		this._ensureSessionCache();
-		// Filter at read time (rather than evicting from the cache) so a gate
-		// flip is instant in both directions: hidden sessions stay cached and
-		// reappear immediately when the preference flips back. The default gate
-		// admits everything; only the local provider suppresses the agent host's
-		// Claude when the window prefers the extension-host Claude.
+		// Filter at read time (rather than evicting from the cache) so hidden
+		// native subscription sessions remain unavailable without mutating the
+		// underlying agent-host history.
 		//
 		// Both `agentProvider` (cached) and `sessionType` (pending) carry the
 		// bare provider name (e.g. `claude`), which is what the gate expects —
 		// NOT the `agent-host-<provider>` resource scheme from
 		// `resourceSchemeForProvider`. Keep it that way.
 		//
-		// Subclasses whose `_shouldAdvertiseAgent` can change at runtime MUST
-		// fire `onDidChangeSessions` when it does, so consumers re-query and
-		// re-filter (see the local provider's `preferAgentHost` listener).
 		const sessions: ISession[] = [];
 		for (const cached of this._sessionCache.values()) {
 			if (this._shouldAdvertiseAgent(cached.agentProvider)) {

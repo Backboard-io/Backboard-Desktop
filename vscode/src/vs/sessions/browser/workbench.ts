@@ -310,7 +310,10 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		sessions: true
 	};
 
-	private mainWindowFullscreen = false;
+	// Mode switches reload this workbench in place. Read the live window state so
+	// Simple and Advanced immediately keep the mode menu at the same left-edge
+	// position as Editor instead of waiting for another fullscreen event.
+	private mainWindowFullscreen = isFullscreen(mainWindow);
 	private readonly maximized = new Set<number>();
 	private readonly layoutPolicy = this._register(new SessionsLayoutPolicy());
 	private readonly mobileNavStack = this._register(new MobileNavigationStack());

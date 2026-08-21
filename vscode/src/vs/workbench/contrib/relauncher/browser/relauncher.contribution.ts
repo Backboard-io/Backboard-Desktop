@@ -46,8 +46,6 @@ interface IConfiguration extends IWindowsConfiguration {
 				dbSpanExporter?: { enabled?: boolean };
 			};
 		};
-		agents?: { claude?: { preferAgentHost?: boolean } };
-		editor?: { claude?: { preferAgentHost?: boolean } };
 	};
 	_extensionsGallery?: { enablePPE?: boolean };
 	accessibility?: { verbosity?: { debug?: boolean } };
@@ -74,8 +72,6 @@ export class SettingsChangeRelauncher extends Disposable implements IWorkbenchCo
 		'chat.agentHost.enabled',
 		'chat.agentHost.claudeAgent.enabled',
 		'chat.agentHost.codexAgent.enabled',
-		'chat.agents.claude.preferAgentHost',
-		'chat.editor.claude.preferAgentHost',
 		'chat.agentHost.otel.enabled',
 		'chat.agentHost.otel.exporterType',
 		'chat.agentHost.otel.otlpEndpoint',
@@ -102,8 +98,6 @@ export class SettingsChangeRelauncher extends Disposable implements IWorkbenchCo
 	private readonly agentHostEnabled = new ChangeObserver('boolean');
 	private readonly agentHostClaudeAgentEnabled = new ChangeObserver('boolean');
 	private readonly agentHostCodexAgentEnabled = new ChangeObserver('boolean');
-	private readonly agentsClaudePreferAgentHost = new ChangeObserver('boolean');
-	private readonly editorClaudePreferAgentHost = new ChangeObserver('boolean');
 	private readonly agentHostOTelEnabled = new ChangeObserver('boolean');
 	private readonly agentHostOTelExporterType = new ChangeObserver('string');
 	private readonly agentHostOTelOtlpEndpoint = new ChangeObserver('string');
@@ -209,13 +203,9 @@ export class SettingsChangeRelauncher extends Disposable implements IWorkbenchCo
 		processChanged(this.agentHostEnabled.handleChange(config.chat?.agentHost?.enabled));
 
 		// Claude and Codex provider registration in the agent host is read at spawn
-		// time, and the two `preferAgentHost` gates pick which Claude implementation
-		// surfaces. Like the agent host child process, these only take effect after a
-		// full app restart.
+		// time, so development-only overrides require a full app restart.
 		processChanged(this.agentHostClaudeAgentEnabled.handleChange(config.chat?.agentHost?.claudeAgent?.enabled));
 		processChanged(this.agentHostCodexAgentEnabled.handleChange(config.chat?.agentHost?.codexAgent?.enabled));
-		processChanged(this.agentsClaudePreferAgentHost.handleChange(config.chat?.agents?.claude?.preferAgentHost));
-		processChanged(this.editorClaudePreferAgentHost.handleChange(config.chat?.editor?.claude?.preferAgentHost));
 
 		// Agent Host OTel: settings are forwarded as env vars when the agent host
 		// child process is spawned (see `electronAgentHostStarter.ts`). The child

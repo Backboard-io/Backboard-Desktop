@@ -50,6 +50,12 @@ export interface IBuildOptionsInput {
 	 */
 	readonly plugins?: readonly URI[];
 	/**
+	 * Provider-neutral user skill plugin (`~/.agents`). Kept separate from
+	 * client-synced plugins so every Claude session reads the user's shared
+	 * `~/.agents/skills` catalog without replacing Claude-native skills.
+	 */
+	readonly userProfileSkillsPlugin?: URI;
+	/**
 	 * Resolved SDK agent name (matches a key in `Options.agents`, or an
 	 * agent loaded from `~/.claude/agents/**`). Projected onto
 	 * `Options.agent` — the SDK's `--agent` flag. The plugin URI captured
@@ -109,6 +115,8 @@ export async function buildOptions(
 		PATH: `${dirname(resolvedRgDiskPath)}${delimiter}${process.env.PATH ?? ''}`,
 	};
 
+	const plugins = mergePluginDirectories(input.plugins, input.userProfileSkillsPlugin);
+
 	return {
 		cwd: input.workingDirectory.fsPath,
 		executable: process.execPath as 'node',
@@ -132,8 +140,8 @@ export async function buildOptions(
 			: { sessionId: input.sessionId }),
 		...(input.mcpServers ? { mcpServers: input.mcpServers } : {}),
 		...(input.allowedTools && input.allowedTools.length > 0 ? { allowedTools: [...input.allowedTools] } : {}),
-		...(input.plugins && input.plugins.length > 0
-			? { plugins: input.plugins.map(p => ({ type: 'local' as const, path: p.fsPath })) }
+		...(plugins.length > 0
+			? { plugins: plugins.map(p => ({ type: 'local' as const, path: p.fsPath })) }
 			: {}),
 		...(input.agent ? { agent: input.agent } : {}),
 		settingSources: ['user', 'project', 'local'],
@@ -141,6 +149,22 @@ export async function buildOptions(
 		systemPrompt: { type: 'preset', preset: 'claude_code' },
 		stderr: logStderr,
 	};
+}
+
+export function mergePluginDirectories(
+	plugins: readonly URI[] | undefined,
+	userProfileSkillsPlugin: URI | undefined,
+): URI[] {
+	const result: URI[] = [];
+	const seen = new Set<string>();
+	for (const plugin of [...(plugins ?? []), ...(userProfileSkillsPlugin ? [userProfileSkillsPlugin] : [])]) {
+		const key = plugin.fsPath;
+		if (!seen.has(key)) {
+			seen.add(key);
+			result.push(plugin);
+		}
+	}
+	return result;
 }
 
 /**

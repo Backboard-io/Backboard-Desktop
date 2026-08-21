@@ -11,7 +11,7 @@ import { URI } from '../../../../../base/common/uri.js';
 import * as nls from '../../../../../nls.js';
 import { agentHostAuthority } from '../../../../../platform/agentHost/common/agentHostUri.js';
 import { RemoteAgentHostProtocolClient } from '../../../../../platform/agentHost/browser/remoteAgentHostProtocolClient.js';
-import { type AgentProvider, type IAgentConnection } from '../../../../../platform/agentHost/common/agentService.js';
+import { type AgentProvider, type IAgentConnection, shouldSurfaceAgentHostProvider } from '../../../../../platform/agentHost/common/agentService.js';
 import { IRemoteAgentHostConnectionInfo, IRemoteAgentHostEntry, IRemoteAgentHostService, type IRemoteAgentHostSSHConnection, RemoteAgentHostAutoConnectSettingId, RemoteAgentHostConnectionStatus, RemoteAgentHostEntryType, RemoteAgentHostsEnabledSettingId, RemoteAgentHostsSettingId, getEntryAddress } from '../../../../../platform/agentHost/common/remoteAgentHostService.js';
 import { TunnelAgentHostsSettingId } from '../../../../../platform/agentHost/common/tunnelAgentHost.js';
 import { PROTOCOL_VERSION } from '../../../../../platform/agentHost/common/state/protocol/version/registry.js';
@@ -70,7 +70,7 @@ async function waitForRemoteAgentHostActivation(accessor: ServicesAccessor, sess
 			}
 			if (rootState) {
 				const authority = agentHostAuthority(address);
-				return rootState.agents.some(agent => remoteAgentHostSessionTypeId(authority, agent.provider) === sessionType);
+				return rootState.agents.some(agent => shouldSurfaceAgentHostProvider(agent.provider) && remoteAgentHostSessionTypeId(authority, agent.provider) === sessionType);
 			}
 
 			await Promise.race([
@@ -789,7 +789,8 @@ export class RemoteAgentHostContribution extends Disposable implements IWorkbenc
 			return;
 		}
 
-		const incoming = new Set(rootState.agents.map(a => a.provider));
+		const allowed = rootState.agents.filter(agent => shouldSurfaceAgentHostProvider(agent.provider));
+		const incoming = new Set(allowed.map(a => a.provider));
 
 		// Remove agents no longer present
 		for (const [provider] of connState.agents) {
@@ -800,11 +801,11 @@ export class RemoteAgentHostContribution extends Disposable implements IWorkbenc
 		}
 
 		// Authenticate using protectedResources from agent info
-		this._authenticateWithConnection(address, connection, rootState.agents)
+		this._authenticateWithConnection(address, connection, allowed)
 			.catch(() => { /* best-effort */ });
 
 		// Register new agents, push model updates to existing ones
-		for (const agent of rootState.agents) {
+		for (const agent of allowed) {
 			if (!connState.agents.has(agent.provider)) {
 				this._registerAgent(address, connection, agent, connState.name);
 			} else {
@@ -946,7 +947,7 @@ export class RemoteAgentHostContribution extends Disposable implements IWorkbenc
 		for (const [address, connState] of this._connections) {
 			const rootState = connState.connection.rootState.value;
 			if (rootState && !(rootState instanceof Error)) {
-				this._authenticateWithConnection(address, connState.connection, rootState.agents).catch(() => { /* best-effort */ });
+				this._authenticateWithConnection(address, connState.connection, rootState.agents.filter(agent => shouldSurfaceAgentHostProvider(agent.provider))).catch(() => { /* best-effort */ });
 			}
 		}
 	}

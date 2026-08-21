@@ -22,7 +22,7 @@ import { MenuId } from '../../../../../../platform/actions/common/actions.js';
 import { ILifecycleService } from '../../../../../services/lifecycle/common/lifecycle.js';
 import { TestInstantiationService } from '../../../../../../platform/instantiation/test/common/instantiationServiceMock.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../../platform/storage/common/storage.js';
-import { AgentSessionProviders, getAgentCanContinueIn, getAgentSessionProvider, getAgentSessionProviderIcon, getAgentSessionProviderName } from '../../../browser/agentSessions/agentSessions.js';
+import { AgentSessionProviders, BackboardLogoIcon, getAgentCanContinueIn, getAgentSessionProvider, getAgentSessionProviderIcon, getAgentSessionProviderName, isSubscriptionAgentSessionProvider } from '../../../browser/agentSessions/agentSessions.js';
 
 class StaticChatSessionItemController implements IChatSessionItemController {
 	readonly onDidChangeChatSessionItems = Event.None;
@@ -2161,7 +2161,7 @@ suite('AgentSessions', () => {
 
 		test('should return correct icon for Background provider', () => {
 			const icon = getAgentSessionProviderIcon(AgentSessionProviders.Background);
-			assert.strictEqual(icon.id, Codicon.copilot.id);
+			assert.strictEqual(icon.id, BackboardLogoIcon.id);
 		});
 
 		test('should return correct icon for Cloud provider', () => {
@@ -2171,7 +2171,7 @@ suite('AgentSessions', () => {
 
 		test('should return correct icon for AgentHostCopilot provider', () => {
 			const icon = getAgentSessionProviderIcon(AgentSessionProviders.AgentHostCopilot);
-			assert.strictEqual(icon.id, Codicon.copilot.id);
+			assert.strictEqual(icon.id, BackboardLogoIcon.id);
 		});
 
 		test('should return correct name for Growth provider', () => {
@@ -2214,6 +2214,20 @@ suite('AgentSessions', () => {
 			assert.strictEqual(provider, AgentSessionProviders.AgentHostCodex);
 		});
 
+		test('should identify native subscription providers but preserve extension providers', () => {
+			assert.strictEqual(isSubscriptionAgentSessionProvider(AgentSessionProviders.Claude), false);
+			assert.strictEqual(isSubscriptionAgentSessionProvider(AgentSessionProviders.AgentHostClaude), true);
+			assert.strictEqual(isSubscriptionAgentSessionProvider('remote-machine-agent-host-claude'), true);
+			assert.strictEqual(isSubscriptionAgentSessionProvider('anthropic'), false);
+			assert.strictEqual(isSubscriptionAgentSessionProvider(AgentSessionProviders.Codex), false);
+			assert.strictEqual(isSubscriptionAgentSessionProvider(AgentSessionProviders.AgentHostCodex), true);
+			assert.strictEqual(isSubscriptionAgentSessionProvider('remote-machine-agent-host-codex'), true);
+			assert.strictEqual(isSubscriptionAgentSessionProvider('openai'), false);
+			assert.strictEqual(isSubscriptionAgentSessionProvider('chatgpt'), false);
+			assert.strictEqual(isSubscriptionAgentSessionProvider(AgentSessionProviders.AgentHostBackboard), false);
+			assert.strictEqual(isSubscriptionAgentSessionProvider(AgentSessionProviders.Background), false);
+		});
+
 		test('should handle Local provider type in model', async () => {
 			return runWithFakedTimers({}, async () => {
 				const instantiationService = disposables.add(workbenchInstantiationService(undefined, disposables));
@@ -2251,7 +2265,7 @@ suite('AgentSessions', () => {
 
 				const session = viewModel.sessions[0];
 				assert.strictEqual(session.providerType, AgentSessionProviders.Background);
-				assert.strictEqual(session.icon.id, Codicon.copilot.id);
+				assert.strictEqual(session.icon.id, BackboardLogoIcon.id);
 				assert.strictEqual(session.providerLabel, getAgentSessionProviderName(AgentSessionProviders.Background));
 			});
 		});

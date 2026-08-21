@@ -11,12 +11,62 @@ import type {
 	ScreenshotCapture,
 } from "./types.ts";
 
+const SCREEN_RECORDING_HELP =
+	"Backboard needs macOS Screen Recording permission to capture the screen. " +
+	"Enable it for Backboard in System Settings → Privacy & Security → Screen Recording, then relaunch the app.";
+
+const ACCESSIBILITY_HELP =
+	"Backboard needs macOS Accessibility and Automation permission to control the mouse and keyboard. " +
+	"Enable it for Backboard in System Settings → Privacy & Security → Accessibility (and allow the System Events prompt), then relaunch the app.";
+
+/**
+ * Maps known macOS TCC (privacy) denial fingerprints to actionable guidance.
+ * `screencapture` prints "could not create image from display" without Screen
+ * Recording access; System Events AppleScript fails with assistive-access or
+ * Apple-events errors (-25211 / -1743) without Accessibility/Automation.
+ */
+export function translateMacAutomationError(message: string): string | null {
+	if (/could not create image/i.test(message)) {
+		return SCREEN_RECORDING_HELP;
+	}
+	if (
+		/not allowed assistive access|not authorized to send apple events|errAEEventNotPermitted|-25211|-1743/i.test(
+			message,
+		)
+	) {
+		return ACCESSIBILITY_HELP;
+	}
+	return null;
+}
+
+/**
+ * Runs an automation binary capturing stderr (plain `run` discards it), so a
+ * TCC denial surfaces as guidance instead of a bare exit code.
+ */
+async function runMacAutomation(
+	command: string,
+	args: string[],
+	signal: AbortSignal,
+): Promise<void> {
+	try {
+		await runWithOutput(command, args, signal);
+	} catch (error) {
+		if (error instanceof Error) {
+			const help = translateMacAutomationError(error.message);
+			if (help) {
+				throw new Error(`${help} (${error.message})`, { cause: error });
+			}
+		}
+		throw error;
+	}
+}
+
 export class MacPlatform extends BasePlatform {
 	async screenshot(
 		path: string,
 		signal: AbortSignal,
 	): Promise<ScreenshotCapture> {
-		await run("screencapture", ["-x", path], signal);
+		await runMacAutomation("screencapture", ["-x", path], signal);
 		const bytes = await readFile(path);
 		const size = pngSize(bytes, "screenshot");
 		return { path, bytes, screenSize: size };
@@ -54,7 +104,7 @@ export class MacPlatform extends BasePlatform {
 				await run("open", ["-a", action.appName], signal);
 				return;
 			case "type":
-				await run(
+				await runMacAutomation(
 					"osascript",
 					[
 						"-e",
@@ -64,10 +114,14 @@ export class MacPlatform extends BasePlatform {
 				);
 				return;
 			case "key":
-				await run("osascript", ["-e", macKeyScript(action.key)], signal);
+				await runMacAutomation(
+					"osascript",
+					["-e", macKeyScript(action.key)],
+					signal,
+				);
 				return;
 			case "click":
-				await run(
+				await runMacAutomation(
 					"osascript",
 					[
 						"-e",

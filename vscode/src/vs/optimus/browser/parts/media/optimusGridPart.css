@@ -103,13 +103,14 @@
 	padding-top: 4px;
 }
 
-/* Fullscreen hides the native traffic lights along with the toolbar, so the
+/* Fullscreen and maximized windows drop the native traffic lights, so the
  * 78px reservation above becomes dead space and the mode switcher reads as
  * centred over the sidebar instead of sitting top-left. Simple and Editor
  * handle this by dropping their `.mac-window-controls-spacer` entirely
  * (panelHeader.css / titlebarpart.css); collapse to the sidebar's own content
  * inset here so all three switchers land in the same place. */
-.agent-sessions-workbench.mac.fullscreen .optimus-window-chrome {
+.agent-sessions-workbench.mac.fullscreen .optimus-window-chrome,
+.agent-sessions-workbench.mac.maximized .optimus-window-chrome {
 	padding-left: 8px;
 }
 

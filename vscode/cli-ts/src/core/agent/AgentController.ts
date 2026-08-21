@@ -1,4 +1,6 @@
+import { join } from "node:path";
 import type { Config } from "../../config/Config.ts";
+import type { ModelRef } from "../../config/defaults.ts";
 import { qSessionDir } from "../../config/paths.ts";
 import { createRuntimeThinkingResolver } from "../../config/thinkingRuntime.ts";
 import { toPromptProfileId } from "../../prompts/profiles/ids.ts";
@@ -6,6 +8,7 @@ import { getSystemPrompt } from "../../prompts/system/index.tsx";
 import { TODO_NOT_CALLED_REMINDER } from "../../prompts/todoReminders.ts";
 import type { AgentClient } from "../../providers/AgentClient.ts";
 import { BackboardError } from "../../providers/backboard/errors.ts";
+import { normalizeSelectableModels } from "../../providers/backboard/modelCatalog.ts";
 import { errorMessage } from "../../utils/errors.ts";
 import { shortId } from "../../utils/id.ts";
 import type { EventBus } from "../bus/EventBus.ts";
@@ -49,6 +52,7 @@ import type {
 import { AgentLoopFactory } from "./AgentLoopFactory.ts";
 import { AgentTraceContext } from "./AgentTraceStore.ts";
 import { AssistantSessionBinding } from "./AssistantSessionBinding.ts";
+import { capacityFallbackCandidates, modelKey } from "./RuntimeRecovery.ts";
 import { Turn } from "./Turn.ts";
 
 export interface AgentControllerDeps {
@@ -209,6 +213,7 @@ export class AgentController {
 			onStart: options.onStart,
 			attachmentFilePaths: options.attachmentFilePaths,
 			displayContent: options.displayContent,
+			conversationContext: options.conversationContext,
 		});
 	}
 
@@ -219,6 +224,7 @@ export class AgentController {
 			onStart: options.onStart,
 			attachmentFilePaths: options.attachmentFilePaths,
 			displayContent: options.displayContent,
+			conversationContext: options.conversationContext,
 		});
 		if (shouldCancelActiveTurn) this.cancel();
 		return run;
@@ -228,7 +234,13 @@ export class AgentController {
 		text: string,
 		placement: "front" | "back",
 		options: Required<Pick<SubmitOptions, "emitUserMessage">> &
-			Pick<SubmitOptions, "onStart" | "attachmentFilePaths" | "displayContent">,
+			Pick<
+				SubmitOptions,
+				| "onStart"
+				| "attachmentFilePaths"
+				| "displayContent"
+				| "conversationContext"
+			>,
 	): Promise<TurnStatus> {
 		const run = new Promise<TurnStatus>((resolve, reject) => {
 			const queued = {
@@ -237,6 +249,7 @@ export class AgentController {
 				onStart: options.onStart,
 				attachmentFilePaths: options.attachmentFilePaths,
 				displayContent: options.displayContent,
+				conversationContext: options.conversationContext,
 				resolve,
 				reject,
 			};
@@ -264,6 +277,7 @@ export class AgentController {
 							emitUserMessage: queued.emitUserMessage,
 							attachmentFilePaths: queued.attachmentFilePaths,
 							displayContent: queued.displayContent,
+							conversationContext: queued.conversationContext,
 						}),
 					);
 				} catch (err) {
@@ -282,6 +296,7 @@ export class AgentController {
 			emitUserMessage: boolean;
 			attachmentFilePaths?: string[];
 			displayContent?: string;
+			conversationContext?: string;
 		},
 	): Promise<TurnStatus> {
 		const { bus, session, config } = this.deps;
@@ -366,6 +381,7 @@ export class AgentController {
 					browserUseEnabled: config.isBrowserUseEnabled,
 					skillDiscoveryEnabled: config.isSkillDiscoveryEnabled,
 					startupEnvironmentPrompt: this.deps.startupEnvironmentPrompt,
+					conversationContext: options.conversationContext,
 					hookContext: joinHookContext(
 						this.deps.hookController?.baseContext,
 						promptHook?.additionalContext,
@@ -376,6 +392,30 @@ export class AgentController {
 							: undefined,
 				});
 			const systemPrompt = buildTurnSystemPrompt();
+			let fallbackCandidatesPromise: Promise<ModelRef[]> | null = null;
+			const resolveCapacityFallback = async (
+				_current: ModelRef,
+				attemptedModelKeys: ReadonlySet<string>,
+			): Promise<ModelRef | null> => {
+				fallbackCandidatesPromise ??= this.deps.client
+					.listModels({ signal })
+					.then((catalog) =>
+						capacityFallbackCandidates(
+							normalizeSelectableModels(catalog.models),
+							config.successfulModels,
+						),
+					)
+					// A catalog outage should not erase the locally known good route.
+					.catch(() => config.successfulModels);
+				const candidates = await fallbackCandidatesPromise;
+				return (
+					candidates.find(
+						(candidate) =>
+							!attemptedModelKeys.has(modelKey(candidate)) &&
+							this.canUseFallbackInCurrentThread(candidate),
+					) ?? null
+				);
+			};
 			const loop = this.loopFactory.createLoop({
 				scheduler: this.scheduler,
 				session,
@@ -389,6 +429,8 @@ export class AgentController {
 				memoryProfile: config.memoryProfile,
 				workspaceId:
 					config.memory === "off" ? undefined : config.getWorkspaceId(),
+				imageGeneration: config.isImageGenerationEnabled,
+				generatedMediaDir: join(config.cwd, "generated-images"),
 				thinking: undefined,
 				thinkingResolver,
 				requestKind: "user",
@@ -403,6 +445,22 @@ export class AgentController {
 					: undefined,
 				displayContent: options.displayContent,
 				durableSession: this.deps.getDurableSession?.(),
+				resolveCapacityFallback,
+				onModelSucceeded: async (model) => {
+					try {
+						if (modelKey(model) !== modelKey(config.model)) {
+							config.setModel({ ...model });
+							await config.saveRecoverySelection();
+						}
+						await config.recordSuccessfulModel(model);
+					} catch {
+						// Recovery history is best-effort and must never fail a good turn.
+					}
+				},
+				onThinkingDisabled: async () => {
+					config.setThinking(null);
+					await config.saveRecoverySelection().catch(() => undefined);
+				},
 			});
 
 			bus.emit({ type: "turn:status", turnId: turn.id, phase: "generating" });
@@ -439,6 +497,14 @@ export class AgentController {
 			this.abortController = null;
 			this.rejectPendingAsks();
 		}
+	}
+
+	private canUseFallbackInCurrentThread(model: ModelRef): boolean {
+		const threadId = this.deps.session.threadId;
+		if (!threadId) return true;
+		const modelSource = this.deps.client.sourceFor?.(model);
+		const threadSource = this.deps.client.sourceForThread?.(threadId);
+		return !modelSource || !threadSource || modelSource === threadSource;
 	}
 
 	private async runUserPromptHooks(

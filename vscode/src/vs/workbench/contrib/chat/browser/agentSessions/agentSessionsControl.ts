@@ -61,6 +61,8 @@ export interface IAgentSessionsControlOptions {
 	readonly compactShowMore?: boolean;
 	readonly compactRows?: boolean;
 	readonly showDiffFileCount?: boolean;
+	readonly findWidgetContainer?: HTMLElement;
+	readonly initiallyVisible?: boolean;
 
 	getHoverPosition(): HoverPosition;
 	trackActiveEditorSession(): boolean;
@@ -104,7 +106,8 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 	private readonly _onDidUpdate = this._register(new Emitter<void>());
 	readonly onDidUpdate: Event<void> = this._onDidUpdate.event;
 
-	private visible: boolean = true;
+	private visible: boolean;
+	private readonly model: IAgentSessionsModel;
 
 	private focusedAgentSessionArchivedContextKey: IContextKey<boolean>;
 	private focusedAgentSessionPinnedContextKey: IContextKey<boolean>;
@@ -131,6 +134,8 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 		@ILogService private readonly logService: ILogService,
 	) {
 		super();
+		this.visible = options.initiallyVisible ?? true;
+		this.model = this.visible ? this.agentSessionsService.model : this.agentSessionsService.cachedModel;
 
 		this.focusedAgentSessionArchivedContextKey = ChatContextKeys.isArchivedAgentSession.bindTo(this.contextKeyService);
 		this.focusedAgentSessionPinnedContextKey = ChatContextKeys.isPinnedAgentSession.bindTo(this.contextKeyService);
@@ -166,7 +171,7 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 			return;
 		}
 
-		const matchingSession = this.agentSessionsService.model.getSession(resource);
+		const matchingSession = this.model.getSession(resource);
 		if (matchingSession && this.sessionsList?.hasNode(matchingSession)) {
 			if (this.sessionsList.getRelativeTop(matchingSession) === null) {
 				this.sessionsList.reveal(matchingSession, 0.5); // only reveal when not already visible
@@ -375,6 +380,7 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 				findWidgetEnabled: true,
 				defaultFindMode: TreeFindMode.Filter,
 				keyboardNavigationLabelProvider: new AgentSessionsKeyboardNavigationLabelProvider(),
+				findWidgetContainer: this.options.findWidgetContainer,
 				overrideStyles: this.options.overrideStyles,
 				twistieAdditionalCssClass: () => 'force-no-twistie',
 				collapseByDefault: (element: unknown) => collapseByDefault(element),
@@ -600,7 +606,7 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 			this.update();
 		}));
 
-		const model = this.agentSessionsService.model;
+		const model = this.model;
 
 		this._register(this.options.filter.onDidChange(async () => {
 			if (this.visible) {
@@ -669,7 +675,7 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 			return;
 		}
 
-		const model = this.agentSessionsService.model;
+		const model = this.model;
 		const hasSessionsInModel = model.sessions.length > 0;
 		const isFilterActive = !this.options.filter.isDefault();
 
@@ -681,7 +687,7 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 	private hasTodaySessions(): boolean {
 		const startOfToday = new Date().setHours(0, 0, 0, 0);
 
-		return this.agentSessionsService.model.sessions.some(session =>
+		return this.model.sessions.some(session =>
 			!session.isArchived() &&
 			session.timing.created >= startOfToday
 		);
@@ -690,7 +696,7 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 	private computeRecentRepositoryLabels(): void {
 		this._recentRepositoryLabels.clear();
 
-		const sessions = this.agentSessionsService.model.sessions
+		const sessions = this.model.sessions
 			.filter(s => !s.isArchived() && !s.isPinned())
 			.sort((a, b) => b.timing.created - a.timing.created)
 			.slice(0, AgentSessionsControl.RECENT_SESSIONS_FOR_EXPAND);
@@ -816,7 +822,7 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 			return;
 		}
 
-		const model = this.agentSessionsService.model;
+		const model = this.model;
 		for (const child of this.sessionsList.getNode(model).children) {
 			if (!isAgentSessionSection(child.element)) {
 				continue;
@@ -846,7 +852,10 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 	}
 
 	refresh(): Promise<void> {
-		return this.agentSessionsService.model.resolve(undefined);
+		if (!this.visible) {
+			return Promise.resolve();
+		}
+		return this.model.resolve(undefined);
 	}
 
 	collapseAllSections(): void {
@@ -854,7 +863,7 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 			return;
 		}
 
-		const model = this.agentSessionsService.model;
+		const model = this.model;
 		for (const child of this.sessionsList.getNode(model).children) {
 			if (isAgentSessionSection(child.element) && !child.collapsed) {
 				this.sessionsList.collapse(child.element);
@@ -910,7 +919,7 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 		this.visible = visible;
 
 		if (this.visible) {
-			this.update();
+			void this.refresh();
 		}
 	}
 
@@ -956,7 +965,7 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 			return false;
 		}
 
-		const session = this.agentSessionsService.model.getSession(sessionResource);
+		const session = this.model.getSession(sessionResource);
 		if (!session || !this.sessionsList.hasNode(session)) {
 			return false;
 		}

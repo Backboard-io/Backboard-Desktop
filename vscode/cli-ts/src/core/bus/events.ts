@@ -102,6 +102,7 @@ export type AgentEvent =
 			phase: "preparing" | "generating";
 	  }
 	| { type: "assistant:delta"; turnId: string; messageId: string; text: string }
+	| { type: "assistant:reasoning"; turnId: string; text: string }
 	| {
 			type: "assistant:message";
 			turnId: string;

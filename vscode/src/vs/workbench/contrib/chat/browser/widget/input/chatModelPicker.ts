@@ -1183,6 +1183,12 @@ export class ModelPickerWidget extends Disposable {
 		if (!anchorElement || this._domNode?.classList.contains('disabled')) {
 			return;
 		}
+		// A completed provider failure falls back to Auto, but opening the picker
+		// is also an explicit retry gesture. Re-resolve here so a transient startup
+		// or network failure can recover without reloading the IDE.
+		if (this._delegate.getModels().length === 0) {
+			void this._languageModelsService.selectLanguageModels({}).then(undefined, () => { });
+		}
 
 		const previousModel = this._selectedModel;
 
@@ -1351,7 +1357,13 @@ export class ModelPickerWidget extends Disposable {
 		// session type) so the label matches the dropdown's "No models
 		// available" entry.
 		const noModelsAvailable = !(this._delegate.showAutoModel?.() ?? false) && this._delegate.getModels().length === 0;
-		const loadingModels = !noModelsAvailable && !this._selectedModel && this._delegate.getModels().length === 0;
+		const registeredVendors = this._languageModelsService.getVendors();
+		const hasPendingVendors = registeredVendors.length === 0
+			|| registeredVendors.some(vendor => !this._languageModelsService.hasResolvedVendor(vendor.vendor));
+		const loadingModels = !noModelsAvailable
+			&& !this._selectedModel
+			&& this._delegate.getModels().length === 0
+			&& hasPendingVendors;
 
 		// --- Name section ---
 		const nameChildren: (HTMLElement | string)[] = [];

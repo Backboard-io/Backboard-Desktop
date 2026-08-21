@@ -17,7 +17,12 @@ import type { Session } from "../session/Session.ts";
 import type { OpenAITool } from "../tools/schema.ts";
 import type { ToolRegistry } from "../tools/ToolRegistry.ts";
 import { ToolScheduler } from "../tools/ToolScheduler.ts";
-import { AgentLoop } from "./AgentLoop.ts";
+import {
+	AgentLoop,
+	type CapacityFallbackResolver,
+	type ModelSucceededHandler,
+	type ThinkingDisabledHandler,
+} from "./AgentLoop.ts";
 
 export interface AgentLoopFactoryDeps {
 	client: AgentClient;
@@ -43,6 +48,8 @@ export interface CreateLoopOptions {
 	memory: MemoryMode;
 	memoryProfile: MemoryProfile;
 	workspaceId?: string;
+	imageGeneration?: boolean;
+	generatedMediaDir?: string;
 	thinking?: ThinkingConfig | null;
 	thinkingResolver?: RuntimeThinkingResolver;
 	requestKind: ThinkingRequestKind;
@@ -55,6 +62,9 @@ export interface CreateLoopOptions {
 	attachmentFilePaths?: string[];
 	displayContent?: string;
 	durableSession?: RunMessageOptions["durableSession"];
+	resolveCapacityFallback?: CapacityFallbackResolver;
+	onModelSucceeded?: ModelSucceededHandler;
+	onThinkingDisabled?: ThinkingDisabledHandler;
 }
 
 export interface ResolveAssistantOptions {
@@ -103,6 +113,8 @@ export class AgentLoopFactory {
 			memory: options.memory,
 			memoryProfile: options.memoryProfile,
 			workspaceId: options.workspaceId,
+			imageGeneration: options.imageGeneration,
+			generatedMediaDir: options.generatedMediaDir,
 			thinking: options.thinking,
 			thinkingResolver: options.thinkingResolver,
 			requestKind: options.requestKind,
@@ -115,6 +127,9 @@ export class AgentLoopFactory {
 			attachmentFilePaths: options.attachmentFilePaths,
 			displayContent: options.displayContent,
 			durableSession: options.durableSession,
+			resolveCapacityFallback: options.resolveCapacityFallback,
+			onModelSucceeded: options.onModelSucceeded,
+			onThinkingDisabled: options.onThinkingDisabled,
 		});
 	}
 }

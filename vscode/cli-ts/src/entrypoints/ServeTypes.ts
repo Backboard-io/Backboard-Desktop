@@ -21,10 +21,10 @@ export type ServeControl =
 			prompt: string;
 			/** Existing provider thread to resume after an IDE/process restart. */
 			threadId?: string;
+			/** Prior turns to seed into the first request of a newly forked thread. */
+			forkContext?: string;
 			model?: string;
 			thinking?: string;
-			/** Retained for wire compatibility; R-CLI does not expose reasoning text. */
-			excludeReasoning?: boolean;
 			excludedTools?: string[];
 			permission?: PermissionMode;
 			memory?: string;
@@ -33,7 +33,7 @@ export type ServeControl =
 			computerUse?: boolean;
 			browserUse?: boolean;
 			notify?: boolean;
-			/** Reserved by the IDE until R-CLI exposes image-generation controls. */
+			/** Enables Backboard's built-in image generation for the turn. */
 			imageGeneration?: boolean;
 	  }
 	| { op: "steer"; requestId?: string; prompt: string }

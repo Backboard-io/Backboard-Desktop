@@ -407,6 +407,45 @@ suite('stateToProgressAdapter', () => {
 			assert.strictEqual(serialized.pastTenseMessage, undefined);
 		});
 
+		test('restored cli-ts Execute call renders as terminal command and output instead of a generic success row', () => {
+			const turn = createTurn({
+				responseParts: [{
+					kind: ResponsePartKind.ToolCall, toolCall: createCompletedToolCall({
+						toolName: 'Execute',
+						displayName: 'Execute',
+						invocationMessage: 'Execute: printf ready',
+						toolInput: 'printf ready',
+						pastTenseMessage: 'Execute finished',
+						content: [{ type: ToolResultContentType.Text, text: 'ready' }],
+						_meta: { source: 'cli-ts', toolKind: 'terminal', language: 'shellscript' },
+					})
+				} as ToolCallResponsePart],
+			});
+
+			const history = turnsToHistory(URI.file('/'), [turn], 'p');
+			const response = history[1];
+			assert.strictEqual(response.type, 'response');
+			if (response.type !== 'response') { return; }
+			const serialized = response.parts[0] as IChatToolInvocationSerialized;
+			assert.strictEqual(serialized.toolSpecificData?.kind, 'terminal');
+			const terminal = serialized.toolSpecificData as { kind: 'terminal'; commandLine: { original: string }; language?: string; terminalCommandOutput?: { text: string }; terminalCommandState?: { exitCode: number } };
+			assert.deepStrictEqual({
+				command: terminal.commandLine.original,
+				language: terminal.language,
+				output: terminal.terminalCommandOutput?.text,
+				exitCode: terminal.terminalCommandState?.exitCode,
+				pastTenseMessage: serialized.pastTenseMessage,
+				resultDetails: serialized.resultDetails,
+			}, {
+				command: 'printf ready',
+				language: 'shellscript',
+				output: 'ready',
+				exitCode: 0,
+				pastTenseMessage: undefined,
+				resultDetails: undefined,
+			});
+		});
+
 		test('subagent tool call in history has correct subagent data', () => {
 			const turn = createTurn({
 				responseParts: [{
@@ -733,6 +772,30 @@ suite('stateToProgressAdapter', () => {
 			assert.strictEqual(termData.language, 'shellscript');
 			assert.strictEqual(termData.terminalToolSessionId, undefined, 'no AHP terminal session for built-in bash');
 			assert.strictEqual(termData.terminalCommandUri, undefined, 'no AHP terminal URI for built-in bash');
+		});
+
+		test('running cli-ts Execute call uses terminal metadata for its command and streaming output', () => {
+			const tc = createToolCallState({
+				toolName: 'Execute',
+				displayName: 'Execute',
+				invocationMessage: 'Execute: printf ready',
+				toolInput: 'printf ready',
+				_meta: { source: 'cli-ts', toolKind: 'terminal', language: 'shellscript' },
+				content: [{ type: ToolResultContentType.Text, text: 'ready\n' }],
+			});
+
+			const invocation = toolCallStateToInvocation(tc);
+			assert.strictEqual(invocation.toolSpecificData?.kind, 'terminal');
+			const terminal = invocation.toolSpecificData as { kind: 'terminal'; commandLine: { original: string }; language?: string; terminalCommandOutput?: { text: string } };
+			assert.deepStrictEqual({
+				command: terminal.commandLine.original,
+				language: terminal.language,
+				output: terminal.terminalCommandOutput?.text,
+			}, {
+				command: 'printf ready',
+				language: 'shellscript',
+				output: 'ready\r\n',
+			});
 		});
 
 		test('built-in bash terminal toolSpecificData picks up streaming text output (running)', () => {

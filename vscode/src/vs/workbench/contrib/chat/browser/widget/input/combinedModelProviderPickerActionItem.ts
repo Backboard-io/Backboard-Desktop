@@ -9,6 +9,7 @@ import { renderIcon } from '../../../../../../base/browser/ui/iconLabel/iconLabe
 import { BaseActionViewItem } from '../../../../../../base/browser/ui/actionbar/actionViewItems.js';
 import { IAction } from '../../../../../../base/common/actions.js';
 import { Codicon } from '../../../../../../base/common/codicons.js';
+import { Event } from '../../../../../../base/common/event.js';
 import { KeyCode } from '../../../../../../base/common/keyCodes.js';
 import { DisposableStore, MutableDisposable } from '../../../../../../base/common/lifecycle.js';
 import { autorun } from '../../../../../../base/common/observable.js';
@@ -16,16 +17,15 @@ import { ThemeIcon } from '../../../../../../base/common/themables.js';
 import { localize } from '../../../../../../nls.js';
 import { AnchorAlignment, AnchorAxisAlignment } from '../../../../../../base/browser/ui/contextview/contextview.js';
 import { IContextViewService } from '../../../../../../platform/contextview/browser/contextView.js';
-import { IStorageService, StorageScope, StorageTarget } from '../../../../../../platform/storage/common/storage.js';
-import { AgentSessionProviders, AgentSessionTarget, getAgentSessionProviderIcon, getAgentSessionProviderName } from '../../agentSessions/agentSessions.js';
+import { AgentSessionProviders, AgentSessionTarget } from '../../agentSessions/agentSessions.js';
 import { ISessionTypePickerDelegate } from '../../chat.js';
 import { ILanguageModelChatMetadataAndIdentifier, ILanguageModelsService } from '../../../common/languageModels.js';
 import { IChatInputPickerOptions } from './chatInputPickerActionItem.js';
-import { IModelPickerDelegate, IModelPickerSetupCandidate } from './modelPickerActionItem.js';
+import { resolveConfigProperty } from './chatModelPicker.js';
+import { IModelConfigurationAccess, IModelPickerDelegate } from './modelPickerActionItem.js';
+import { filterAndRankModels } from './modelSearch.js';
 import './media/combinedModelProviderPicker.css';
 
-const FAVORITES_STORAGE_KEY = 'chat.combinedModelProviderPicker.favorites';
-const FAVORITES_RAIL_ID = '__favorites__';
 const RECOMMENDED_BACKBOARD_MODEL_IDS = [
 	'anthropic/claude-fable-5',
 	'anthropic/claude-opus-5',
@@ -57,6 +57,15 @@ const RECOMMENDED_BACKBOARD_MODEL_PRIORITY = new Map<string, number>(
 	RECOMMENDED_BACKBOARD_MODEL_IDS.map((id, index) => [id, index])
 );
 
+interface ICombinedModelThinkingOption {
+	readonly label: string;
+	readonly currentLabel: string;
+	readonly currentValue: unknown;
+	readonly values: readonly unknown[];
+	readonly labels: readonly string[];
+	setValue(value: unknown): Promise<void> | void;
+}
+
 /** Turn provider model ids into compact user-facing labels for the composer. */
 function formatModelLabel(name: string): string {
 	const modelName = name.split('/').pop() || name;
@@ -80,24 +89,16 @@ function formatModelLabel(name: string): string {
 }
 
 /**
- * A combined provider + model picker for the Sessions composer. A single chip
- * shows the active provider icon and the current model name; opening it reveals
- * a two-pane dropdown with a provider rail on the left (Backboard / Claude /
- * Codex, plus a Favorites bucket) and a searchable model list on the
- * right. Selecting a provider filters the list to that provider's models;
- * selecting a model commits the provider switch (if needed) and the model.
- *
- * The provider side is driven by an {@link ISessionTypePickerDelegate}; the
- * model side reuses the existing {@link IModelPickerDelegate}. Models for every
- * provider are read from {@link ILanguageModelsService} (filtered by
- * `targetChatSessionType`), so the rail can preview any provider's models
- * without switching the active session.
+ * Model picker for the Sessions composer. A single inline control shows the
+ * active model and thinking level; opening it reveals a searchable model list
+ * and a discrete reasoning slider. Subscription/provider switching belongs to
+ * session setup rather than this focused model-selection surface.
  */
 export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 
 	private _triggerElement: HTMLElement | undefined;
-	private _triggerIcon: HTMLElement | undefined;
 	private _triggerLabel: HTMLElement | undefined;
+	private _triggerThinking: HTMLElement | undefined;
 	private readonly _overlay = this._register(new MutableDisposable());
 
 	/** The provider whose models are currently shown in the list. */
@@ -110,8 +111,9 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 		private readonly _modelDelegate: IModelPickerDelegate,
 		private readonly _sessionTypeDelegate: ISessionTypePickerDelegate,
 		private readonly _pickerOptions: IChatInputPickerOptions,
+		private readonly _getSessionThinkingOption: () => ICombinedModelThinkingOption | undefined,
+		onDidChangeSessionThinkingOption: Event<void>,
 		@ILanguageModelsService private readonly _languageModelsService: ILanguageModelsService,
-		@IStorageService private readonly _storageService: IStorageService,
 		@IContextViewService private readonly _contextViewService: IContextViewService,
 	) {
 		super(undefined, action);
@@ -122,6 +124,10 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 			this._updateTrigger();
 		}));
 		this._register(this._languageModelsService.onDidChangeLanguageModels(() => this._updateTrigger()));
+		if (this._modelDelegate.modelConfiguration?.onDidChange) {
+			this._register(this._modelDelegate.modelConfiguration.onDidChange(() => this._updateTrigger()));
+		}
+		this._register(onDidChangeSessionThinkingOption(() => this._updateTrigger()));
 		if (this._sessionTypeDelegate.onDidChangeActiveSessionProvider) {
 			this._register(this._sessionTypeDelegate.onDidChangeActiveSessionProvider(() => this._updateTrigger()));
 		}
@@ -134,8 +140,8 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 		trigger.tabIndex = 0;
 		trigger.setAttribute('role', 'button');
 		trigger.setAttribute('aria-haspopup', 'true');
-		this._triggerIcon = dom.append(trigger, dom.$('span.combined-model-provider-trigger-icon'));
 		this._triggerLabel = dom.append(trigger, dom.$('span.combined-model-provider-trigger-label'));
+		this._triggerThinking = dom.append(trigger, dom.$('span.combined-model-provider-trigger-thinking'));
 		dom.append(trigger, dom.$(`span.combined-model-provider-trigger-chevron${ThemeIcon.asCSSSelector(Codicon.chevronDown)}`));
 
 		this.element = trigger;
@@ -192,56 +198,40 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 			.sort((a, b) => a.metadata.name.localeCompare(b.metadata.name));
 	}
 
-	private _resolveModel(identifier: string): ILanguageModelChatMetadataAndIdentifier | undefined {
-		const metadata = this._languageModelsService.lookupLanguageModel(identifier);
-		return metadata ? { metadata, identifier } : undefined;
-	}
-
-	private _favorites(): string[] {
-		try {
-			const raw = this._storageService.get(FAVORITES_STORAGE_KEY, StorageScope.PROFILE);
-			return raw ? JSON.parse(raw) as string[] : [];
-		} catch {
-			return [];
-		}
-	}
-
-	private _isFavorite(identifier: string): boolean {
-		return this._favorites().includes(identifier);
-	}
-
-	private _toggleFavorite(identifier: string): void {
-		const favorites = this._favorites();
-		const index = favorites.indexOf(identifier);
-		if (index === -1) {
-			favorites.push(identifier);
-		} else {
-			favorites.splice(index, 1);
-		}
-		this._storageService.store(FAVORITES_STORAGE_KEY, JSON.stringify(favorites), StorageScope.PROFILE, StorageTarget.USER);
-	}
-
 	private _updateTrigger(): void {
-		if (!this._triggerIcon || !this._triggerLabel) {
-			return;
-		}
-		const provider = this._activeProvider();
-		dom.clearNode(this._triggerIcon);
-		if (provider) {
-			this._triggerIcon.appendChild(renderIcon(getAgentSessionProviderIcon(provider as AgentSessionTarget)));
-		}
-		const setupCandidate = this._setupCandidate(provider);
-		if (setupCandidate) {
-			this._triggerLabel.textContent = localize('combinedPicker.installProvider', "Install {0}", setupCandidate.label);
-			this._triggerElement?.setAttribute('aria-label', this._triggerLabel.textContent);
+		if (!this._triggerLabel || !this._triggerThinking) {
 			return;
 		}
 		const model = this._modelDelegate.currentModel.get();
-		// Keep the composer chip model-only. Provider attribution belongs in the
-		// expanded picker, where it has enough room to be useful.
 		const name = model?.metadata.name;
-		this._triggerLabel.textContent = name ? formatModelLabel(name) : localize('combinedPicker.auto', "Auto");
-		this._triggerElement?.setAttribute('aria-label', localize('combinedPicker.ariaLabel', "Provider and model: {0}", this._triggerLabel.textContent));
+		const modelLabel = name ? formatModelLabel(name) : localize('combinedPicker.auto', "Auto");
+		const thinkingLabel = this._thinkingOption(model)?.currentLabel;
+		this._triggerLabel.textContent = modelLabel;
+		this._triggerThinking.textContent = thinkingLabel ?? '';
+		this._triggerElement?.setAttribute('aria-label', thinkingLabel
+			? localize('combinedPicker.ariaLabelWithThinking', "Model: {0}, Thinking: {1}", modelLabel, thinkingLabel)
+			: localize('combinedPicker.ariaLabel', "Provider and model: {0}", modelLabel));
+	}
+
+	private get _modelConfiguration(): IModelConfigurationAccess {
+		return this._modelDelegate.modelConfiguration ?? this._languageModelsService;
+	}
+
+	private _thinkingOption(model: ILanguageModelChatMetadataAndIdentifier | undefined): ICombinedModelThinkingOption | undefined {
+		const config = model ? resolveConfigProperty(model, 'navigation', this._modelConfiguration) : undefined;
+		if (model && config?.schema.enum?.length) {
+			const labels = config.schema.enum.map((value, index) => config.schema.enumItemLabels?.[index] ?? String(value));
+			const selectedIndex = config.schema.enum.indexOf(config.value);
+			return {
+				label: localize('combinedPicker.thinking', "Thinking"),
+				currentLabel: labels[selectedIndex] ?? String(config.value ?? ''),
+				currentValue: config.value,
+				values: config.schema.enum,
+				labels,
+				setValue: value => this._modelConfiguration.setModelConfiguration(model.identifier, { [config.key]: value }),
+			};
+		}
+		return this._getSessionThinkingOption();
 	}
 
 	private _toggle(): void {
@@ -258,9 +248,8 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 			return;
 		}
 
-		// Default to the active provider only when this host explicitly allows it.
-		// This prevents a stored subscription-backed provider from leaking back
-		// into a Backboard-only Simple-mode picker.
+		// Keep this surface scoped to the session's current provider. Provider and
+		// subscription changes happen during session setup, outside this picker.
 		const allowedProviders = this._selectableProviders();
 		const activeProvider = this._activeProvider();
 		this._railProvider = activeProvider && allowedProviders.includes(activeProvider as AgentSessionTarget)
@@ -309,38 +298,7 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 		dom.clearNode(container);
 		const root = dom.append(container, dom.$('.combined-model-provider-root'));
 
-		// --- Left rail: providers + favorites ---
-		const rail = dom.append(root, dom.$('.combined-model-provider-rail'));
-		const addRailItem = (id: string, icon: ThemeIcon, label: string) => {
-			const item = dom.append(rail, dom.$('.combined-model-provider-rail-item'));
-			item.title = label;
-			item.tabIndex = 0;
-			item.setAttribute('role', 'button');
-			item.setAttribute('aria-label', label);
-			item.classList.toggle('active', this._railProvider === id);
-			item.appendChild(renderIcon(icon));
-			const select = () => {
-				this._railProvider = id;
-				this._renderOverlay(container, store);
-				const search = container.querySelector<HTMLInputElement>('.combined-model-provider-search-input');
-				search?.focus();
-			};
-			store.add(dom.addDisposableListener(item, dom.EventType.CLICK, select));
-			store.add(dom.addDisposableListener(item, dom.EventType.KEY_DOWN, e => {
-				const event = new StandardKeyboardEvent(e);
-				if (event.equals(KeyCode.Enter) || event.equals(KeyCode.Space)) {
-					dom.EventHelper.stop(e, true);
-					select();
-				}
-			}));
-		};
-
-		addRailItem(FAVORITES_RAIL_ID, Codicon.star, localize('combinedPicker.favorites', "Favorites"));
-		for (const provider of this._selectableProviders()) {
-			addRailItem(provider, getAgentSessionProviderIcon(provider), getAgentSessionProviderName(provider));
-		}
-
-		// --- Right pane: search + model list ---
+		// --- Search, model list, and fixed reasoning footer ---
 		const pane = dom.append(root, dom.$('.combined-model-provider-pane'));
 		const searchRow = dom.append(pane, dom.$('.combined-model-provider-search'));
 		searchRow.appendChild(renderIcon(Codicon.search));
@@ -352,27 +310,63 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 
 		const list = dom.append(pane, dom.$('.combined-model-provider-list'));
 		const footer = dom.append(pane, dom.$('.combined-model-provider-footer'));
+		const thinking = dom.append(pane, dom.$('.combined-model-provider-thinking'));
+		const thinkingStore = new DisposableStore();
+		store.add(thinkingStore);
+
+		const renderThinking = () => {
+			thinkingStore.clear();
+			dom.clearNode(thinking);
+			const model = this._modelDelegate.currentModel.get();
+			const option = this._thinkingOption(model);
+			thinking.classList.toggle('hidden', !model || !option);
+			if (!model || !option) {
+				return;
+			}
+
+			const heading = dom.append(thinking, dom.$('.combined-model-provider-thinking-heading'));
+			const headingText = dom.append(heading, dom.$('.combined-model-provider-thinking-title'));
+			headingText.textContent = option.label;
+			const currentValue = dom.append(heading, dom.$('.combined-model-provider-thinking-current'));
+
+			const sliderShell = dom.append(thinking, dom.$('.combined-model-provider-thinking-slider-shell'));
+			const dots = dom.append(sliderShell, dom.$('.combined-model-provider-thinking-dots'));
+			const dotElements: HTMLElement[] = [];
+			for (let index = 0; index < option.values.length; index++) {
+				dotElements.push(dom.append(dots, dom.$('span.combined-model-provider-thinking-dot')));
+			}
+			const slider = dom.append(sliderShell, dom.$('input.combined-model-provider-thinking-slider')) as HTMLInputElement;
+			slider.type = 'range';
+			slider.min = '0';
+			slider.max = String(option.values.length - 1);
+			slider.step = '1';
+			const initialIndex = Math.max(0, option.values.indexOf(option.currentValue));
+			slider.value = String(initialIndex);
+			slider.setAttribute('aria-label', localize('combinedPicker.thinkingAriaLabel', "Thinking level for {0}", model.metadata.name));
+
+			const paint = (index: number) => {
+				const label = option.labels[index] ?? String(option.values[index]);
+				currentValue.textContent = label;
+				slider.setAttribute('aria-valuetext', label);
+				dotElements.forEach((dot, dotIndex) => dot.classList.toggle('active', dotIndex <= index));
+				sliderShell.style.setProperty('--combined-thinking-progress', `${option.values.length > 1 ? index / (option.values.length - 1) * 100 : 0}%`);
+			};
+			const apply = (index: number) => {
+				paint(index);
+				this._triggerThinking!.textContent = option.labels[index] ?? String(option.values[index]);
+				void Promise.resolve(option.setValue(option.values[index])).then(() => this._updateTrigger());
+			};
+
+			paint(initialIndex);
+			thinkingStore.add(dom.addDisposableListener(slider, dom.EventType.INPUT, () => paint(Number(slider.value))));
+			thinkingStore.add(dom.addDisposableListener(slider, dom.EventType.CHANGE, () => apply(Number(slider.value))));
+		};
 
 		const renderList = () => {
 			dom.clearNode(list);
 			dom.clearNode(footer);
 			const query = this._searchValue.trim().toLowerCase();
-			const showingFavorites = this._railProvider === FAVORITES_RAIL_ID;
-			const allowedModelIds = new Set(this._selectableProviders().flatMap(provider => this._modelsForProvider(provider).map(model => model.identifier)));
-			const allModels = showingFavorites
-				? this._favorites()
-					.map(id => this._resolveModel(id))
-					.filter((model): model is ILanguageModelChatMetadataAndIdentifier => !!model && allowedModelIds.has(model.identifier))
-				: this._modelsForProvider(this._railProvider ?? '');
-			// Provider/model registrations can outlive the CLI process that supplied
-			// them. Setup state wins over a stale catalog: never let those models be
-			// selected and applied to the fallback Backboard session.
-			const setupCandidate = !showingFavorites ? this._setupCandidate() : undefined;
-			if (setupCandidate) {
-				dom.append(list, dom.$('.combined-model-provider-empty')).textContent = localize('combinedPicker.notSetUp', "{0} is not set up yet", setupCandidate.label);
-				this._renderSetupPrompt(list, store, setupCandidate);
-				return;
-			}
+			const allModels = this._modelsForProvider(this._railProvider ?? '');
 			const showingBackboard = this._railProvider === AgentSessionProviders.AgentHostBackboard;
 			const recommendedModels = showingBackboard
 				? allModels
@@ -385,16 +379,12 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 			const hasRecommendedBackboardModels = showingBackboard && recommendedModels.length > 0;
 			const showRecommendedBackboardModels = hasRecommendedBackboardModels && !query && !this._showAllBackboardModels;
 			const models = showRecommendedBackboardModels ? recommendedModels : allModels;
-			const filtered = query
-				? models.filter(m => m.metadata.name.toLowerCase().includes(query) || (m.metadata.family ?? '').toLowerCase().includes(query) || (m.metadata.detail ?? '').toLowerCase().includes(query))
-				: models;
+			const filtered = filterAndRankModels(models, query);
 
 			if (filtered.length === 0) {
 				// Only offer setup when the provider genuinely has nothing
 				// registered — not when a search simply matched no model.
-				dom.append(list, dom.$('.combined-model-provider-empty')).textContent = showingFavorites
-					? localize('combinedPicker.noFavorites', "No favorite models yet")
-					: localize('combinedPicker.noModels', "No models available");
+				dom.append(list, dom.$('.combined-model-provider-empty')).textContent = localize('combinedPicker.noModels', "No models available");
 				return;
 			}
 
@@ -421,28 +411,15 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 				if (model.identifier === currentModelId) {
 					nameRow.appendChild(renderIcon(Codicon.check));
 				}
-				const sub = dom.append(main, dom.$('.combined-model-provider-row-sub'));
-				sub.appendChild(renderIcon(getAgentSessionProviderIcon(providerId as AgentSessionTarget)));
-				// Agent-host models expose their upstream API/vendor in `detail`
-				// (for example AWS Bedrock, Anthropic, OpenAI, or xAI). Fall back
-				// to the session provider only for models that do not supply it.
-				dom.append(sub, dom.$('span')).textContent = model.metadata.detail?.trim() || getAgentSessionProviderName(providerId as AgentSessionTarget);
+				const detail = model.metadata.detail?.trim();
+				if (detail) {
+					dom.append(main, dom.$('.combined-model-provider-row-sub')).textContent = detail;
+				}
 
 				const aside = dom.append(row, dom.$('.combined-model-provider-row-aside'));
 				if (index < 9) {
 					dom.append(aside, dom.$('.combined-model-provider-row-kbd')).textContent = `⌘${index + 1}`;
 				}
-				const star = dom.append(aside, dom.$('.combined-model-provider-row-star'));
-				const favorite = this._isFavorite(model.identifier);
-				star.classList.toggle('is-favorite', favorite);
-				star.appendChild(renderIcon(favorite ? Codicon.starFull : Codicon.star));
-				star.title = favorite ? localize('combinedPicker.unfavorite', "Remove from favorites") : localize('combinedPicker.favorite', "Add to favorites");
-				store.add(dom.addDisposableListener(star, dom.EventType.CLICK, e => {
-					dom.EventHelper.stop(e, true);
-					this._toggleFavorite(model.identifier);
-					renderList();
-				}));
-
 				const commit = () => this._commit(providerId, model);
 				store.add(dom.addDisposableListener(row, dom.EventType.CLICK, commit));
 				store.add(dom.addDisposableListener(row, dom.EventType.KEY_DOWN, e => {
@@ -495,54 +472,8 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 		}));
 
 		renderList();
+		renderThinking();
 		setTimeout(() => search.focus(), 0);
-	}
-
-	/**
-	 * The installable agent CLI behind the rail's current provider, when that
-	 * agent is not set up yet. Undefined for providers that are already
-	 * registered or cannot be installed from here.
-	 */
-	private _setupCandidate(provider = this._railProvider): IModelPickerSetupCandidate | undefined {
-		if (!this._sessionTypeDelegate.runSetup || !provider) {
-			return undefined;
-		}
-		return this._sessionTypeDelegate.getSetupCandidateForProvider?.(provider as AgentSessionTarget);
-	}
-
-	/**
-	 * Empty-state affordance for a provider the user hasn't set up yet: the
-	 * agent has no models because its CLI was never installed, so offer an
-	 * Install button that hands off to the vendor's install + sign-in flow.
-	 */
-	private _renderSetupPrompt(list: HTMLElement, store: DisposableStore, candidate: IModelPickerSetupCandidate): void {
-		const runSetup = this._sessionTypeDelegate.runSetup;
-		if (!runSetup) {
-			return;
-		}
-
-		const setup = dom.append(list, dom.$('.combined-model-provider-setup'));
-		if (candidate.description) {
-			dom.append(setup, dom.$('.combined-model-provider-setup-description')).textContent = candidate.description;
-		}
-		const button = dom.append(setup, dom.$('button.combined-model-provider-setup-button')) as HTMLButtonElement;
-		button.textContent = localize('combinedPicker.install', "Install");
-		button.title = localize('combinedPicker.installTooltip', "Install {0}", candidate.label);
-		const install = () => {
-			this._overlay.clear();
-			runSetup(candidate.id);
-		};
-		store.add(dom.addDisposableListener(button, dom.EventType.CLICK, e => {
-			dom.EventHelper.stop(e, true);
-			install();
-		}));
-		store.add(dom.addDisposableListener(button, dom.EventType.KEY_DOWN, e => {
-			const event = new StandardKeyboardEvent(e);
-			if (event.equals(KeyCode.Enter) || event.equals(KeyCode.Space)) {
-				dom.EventHelper.stop(e, true);
-				install();
-			}
-		}));
 	}
 
 	private _commit(providerId: string, model: ILanguageModelChatMetadataAndIdentifier): void {
@@ -554,12 +485,6 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 		const providerAllowed = this._selectableProviders().includes(providerId as AgentSessionTarget);
 		const modelAllowed = providerAllowed && this._modelsForProvider(providerId).some(candidate => candidate.identifier === model.identifier);
 		if (!modelAllowed) {
-			return;
-		}
-		const setupCandidate = this._setupCandidate(providerId);
-		if (setupCandidate && this._sessionTypeDelegate.runSetup) {
-			this._overlay.clear();
-			this._sessionTypeDelegate.runSetup(setupCandidate.id);
 			return;
 		}
 		if (providerId && providerId !== activeProvider && this._sessionTypeDelegate.setActiveSessionProvider) {

@@ -24,7 +24,7 @@ function metadata(
 
 describe("thinking config", () => {
 	it("parses semantic thinking intent", () => {
-		expect(parseThinking("default")).toBeUndefined();
+		expect(parseThinking("default")).toEqual({ kind: "default" });
 		expect(parseThinking("off")).toBeNull();
 		expect(parseThinking("low")).toEqual({ kind: "level", level: "low" });
 		expect(parseThinking("fast")).toEqual({ kind: "level", level: "low" });
@@ -67,6 +67,50 @@ describe("thinking config", () => {
 		).toEqual({ max_tokens: 8192 });
 	});
 
+	it("always includes reasoning traces when the model exposes the control", () => {
+		expect(
+			resolveThinking({
+				intent: { kind: "level", level: "high" },
+				model,
+				metadata: metadata(["max_tokens", "exclude_reasoning"]),
+			}),
+		).toEqual({ max_tokens: 8192, exclude_reasoning: false });
+		// Provider-default thinking still requests visible traces.
+		expect(
+			resolveThinking({
+				intent: { kind: "default" },
+				model,
+				metadata: metadata(["max_tokens", "exclude_reasoning"]),
+			}),
+		).toEqual({ exclude_reasoning: false });
+		// Models without the control drop the flag instead of failing.
+		expect(
+			resolveThinking({
+				intent: { kind: "level", level: "high" },
+				model,
+				metadata: metadata(["effort"]),
+			}),
+		).toEqual({ effort: "high" });
+		// The OpenRouter profile carries the control even when the model's
+		// metadata only advertises the token field.
+		expect(
+			resolveThinking({
+				intent: { kind: "level", level: "high" },
+				model: { provider: "openrouter", model: "deepseek" },
+				metadata: {
+					provider: "openrouter",
+					model: "deepseek",
+					supports_thinking: true,
+					thinking_controls: {
+						supported: true,
+						allowed_fields: ["max_tokens"],
+						defaults_only: false,
+					},
+				},
+			}),
+		).toEqual({ max_tokens: 8192, exclude_reasoning: false });
+	});
+
 	it("uses provider profiles when metadata is missing", () => {
 		expect(
 			resolveThinking({
@@ -85,7 +129,7 @@ describe("thinking config", () => {
 				intent: { kind: "level", level: "high" },
 				model: { provider: "openrouter", model: "deepseek" },
 			}),
-		).toEqual({ max_tokens: 8192 });
+		).toEqual({ max_tokens: 8192, exclude_reasoning: false });
 	});
 
 	it("routes numeric budgets only to token fields", () => {
@@ -96,13 +140,13 @@ describe("thinking config", () => {
 				metadata: metadata(["max_tokens"]),
 			}),
 		).toEqual({ max_tokens: 4096 });
-		expect(() =>
+		expect(
 			resolveThinking({
 				intent: { kind: "budget", tokens: 4096 },
 				model,
 				metadata: metadata(["effort"]),
 			}),
-		).toThrow("explicit token budgets");
+		).toBeNull();
 	});
 
 	it("resolves dynamic intent deterministically from evidence", () => {
@@ -197,13 +241,13 @@ describe("thinking config", () => {
 				}),
 			}),
 		).toEqual({});
-		expect(() =>
+		expect(
 			resolveThinking({
 				intent: { kind: "level", level: "low" },
 				model,
 				metadata: metadata([], { supports_thinking: false }),
 			}),
-		).toThrow("not supported");
+		).toBeNull();
 	});
 
 	it("runtime resolver fetches targeted thinking metadata only", async () => {
@@ -234,8 +278,11 @@ describe("thinking config", () => {
 		expect(metadataCalls).toBe(1);
 		expect(listCalls).toBe(0);
 		expect(resolver.resolve({ phase: "initial", requestKind: "user" })).toEqual(
-			{ max_tokens: 4096 },
+			{ max_tokens: 4096, exclude_reasoning: false },
 		);
+		expect(
+			resolver.resolve({ phase: "tool_outputs", requestKind: "user" }),
+		).toEqual({ max_tokens: 4096, exclude_reasoning: false });
 	});
 
 	it("runtime resolver skips metadata lookup when thinking is off", async () => {
@@ -273,7 +320,24 @@ describe("thinking config", () => {
 		);
 
 		expect(resolver.resolve({ phase: "initial", requestKind: "user" })).toEqual(
-			{ max_tokens: 4096 },
+			{ max_tokens: 4096, exclude_reasoning: false },
 		);
+	});
+
+	it("runtime resolver turns thinking off when the model rejects it", async () => {
+		const resolver = await createRuntimeThinkingResolver(
+			{
+				model: { provider: "cerebras", model: "z-ai/glm-4.7" },
+				thinkingIntent: { kind: "level", level: "high" },
+			},
+			{
+				getModelThinkingMetadata: async () =>
+					metadata([], { supports_thinking: false }),
+			},
+		);
+
+		expect(
+			resolver.resolve({ phase: "initial", requestKind: "user" }),
+		).toBeNull();
 	});
 });

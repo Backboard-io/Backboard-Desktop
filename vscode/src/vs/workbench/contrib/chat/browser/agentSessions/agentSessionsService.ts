@@ -15,6 +15,8 @@ export interface IAgentSessionsService {
 	readonly _serviceBrand: undefined;
 
 	readonly model: IAgentSessionsModel;
+	/** Returns persisted/in-memory sessions without contacting providers. */
+	readonly cachedModel: IAgentSessionsModel;
 	readonly onDidChangeSessionArchivedState: Event<IAgentSession>;
 
 	getSession(resource: URI): IAgentSession | undefined;
@@ -27,7 +29,19 @@ export class AgentSessionsService extends Disposable implements IAgentSessionsSe
 	readonly onDidChangeSessionArchivedState = this._onDidChangeSessionArchivedState.event;
 
 	private _model: IAgentSessionsModel | undefined;
+	private _modelResolutionStarted = false;
+
 	get model(): IAgentSessionsModel {
+		const model = this.cachedModel;
+		if (!this._modelResolutionStarted) {
+			this._modelResolutionStarted = true;
+			void model.resolve(undefined /* all providers */);
+		}
+
+		return model;
+	}
+
+	get cachedModel(): IAgentSessionsModel {
 		if (!this._model) {
 			this._model = this._register(this.instantiationService.createInstance(AgentSessionsModel));
 			this._register(this._model.onDidChangeSessionArchivedState(session => {
@@ -37,7 +51,6 @@ export class AgentSessionsService extends Disposable implements IAgentSessionsSe
 
 				this._onDidChangeSessionArchivedState.fire(session);
 			}));
-			this._model.resolve(undefined /* all providers */);
 		}
 
 		return this._model;
@@ -51,7 +64,7 @@ export class AgentSessionsService extends Disposable implements IAgentSessionsSe
 	}
 
 	getSession(resource: URI): IAgentSession | undefined {
-		return this.model.getSession(resource);
+		return this.cachedModel.getSession(resource);
 	}
 }
 

@@ -147,6 +147,11 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 			.messageCard.user { position: relative; align-self: stretch; padding: 2px 2px 4px; color: var(--bb-text); border: 0; background: transparent; box-shadow: none; }
 			.messageCard.user:hover { background: transparent; }
 			.messageCard.assistant { align-self: stretch; width: 100%; max-width: 100%; padding: 2px 2px 4px 10px; border-left: 2px solid color-mix(in srgb, var(--bb-border) 82%, transparent); border-radius: 0; background: transparent; box-shadow: none; }
+			.messageCard.reasoning { align-self: stretch; width: 100%; padding: 5px 8px; border: 1px solid color-mix(in srgb, var(--bb-border) 72%, transparent); border-radius: 6px; color: var(--bb-muted); background: color-mix(in srgb, var(--bb-surface) 68%, transparent); }
+			.messageCard.reasoning > summary { display: flex; align-items: center; gap: 6px; cursor: pointer; color: var(--bb-muted); font-size: 11px; font-weight: 600; user-select: none; }
+			.messageCard.reasoning > summary::before { content: '✦'; font-size: 12px; }
+			.messageCard.reasoning[open] > summary { margin-bottom: 5px; }
+			.reasoningText { color: var(--bb-muted); font-size: 11.5px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
 			@keyframes bbFadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 			.messageHeader { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 			.messageRole { color: var(--bb-muted); font-size: 11px; font-weight: 600; white-space: nowrap; }
@@ -508,6 +513,7 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 		let disabledModelProviders = new Set();
 		let modelProviderFiltersOpen = false;
 		let currentAssistantCard = undefined;
+		let currentReasoningCard = undefined;
 		let activeToolRows = [];
 		let activeToolGroup = undefined;
 		let fileChanges = [];
@@ -1187,6 +1193,7 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 			log.textContent = '';
 			log.appendChild(ensureEmptyState());
 			currentAssistantCard = undefined;
+			currentReasoningCard = undefined;
 			activeToolRows = [];
 			activeToolGroup = undefined;
 			fileChanges = [];
@@ -1327,8 +1334,28 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 		}
 		function breakAssistantStream() {
 			currentAssistantCard = undefined;
+			currentReasoningCard = undefined;
+		}
+		function appendReasoningMessage(text) {
+			const card = document.createElement('details');
+			card.className = 'messageCard reasoning';
+			card.open = true;
+			const summary = document.createElement('summary');
+			summary.textContent = 'Thinking';
+			const body = document.createElement('div');
+			body.className = 'reasoningText';
+			body.textContent = text || '';
+			card.append(summary, body);
+			log.appendChild(card);
+			currentAssistantCard = undefined;
+			currentReasoningCard = card;
+			scrollConversation();
+			return body;
 		}
 			function appendMessage(role, text) {
+				if (role === 'reasoning') {
+					return appendReasoningMessage(text);
+				}
 				const card = document.createElement('div');
 				card.className = 'messageCard ' + role;
 				const body = document.createElement('div');
@@ -1364,6 +1391,7 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 				log.appendChild(card);
 				if (role === 'assistant') {
 					currentAssistantCard = card;
+					currentReasoningCard = undefined;
 				}
 			scrollConversation();
 			return body;
@@ -1909,7 +1937,7 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 			changeStack.scrollTop = changeStack.scrollHeight;
 		}
 		function appendRow(role, text) {
-			if (role === 'assistant' || role === 'user') {
+			if (role === 'assistant' || role === 'user' || role === 'reasoning') {
 				return appendMessage(role, text);
 			}
 			if (role === 'error') {
@@ -1919,6 +1947,13 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 			return undefined;
 		}
 		function appendDelta(role, text) {
+			if (role === 'reasoning') {
+				const activeReasoning = currentReasoningCard && latestTranscriptNode() === currentReasoningCard ? currentReasoningCard : undefined;
+				const target = activeReasoning?.querySelector('.reasoningText') || appendReasoningMessage('');
+				target.textContent += text || '';
+				scrollConversation();
+				return;
+			}
 			if (role !== 'assistant') {
 				appendRow(role, text);
 				return;
@@ -2079,6 +2114,7 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 				stopRequested = false;
 				stopRunTimer();
 				currentAssistantCard = undefined;
+				currentReasoningCard = undefined;
 				closeActiveToolGroup('finished');
 				syncComposerButtons();
 				saveActiveHistory('Done');
@@ -2099,6 +2135,7 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 					pendingQueuedSendId = undefined;
 				}
 				currentAssistantCard = undefined;
+				currentReasoningCard = undefined;
 				syncComposerButtons();
 				renderQueue();
 				saveActiveHistory();
@@ -2177,6 +2214,8 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 				insertAtCursor(message.text || '');
 			} else if (message.type === 'delta') {
 				appendDelta(message.role || 'assistant', message.text);
+			} else if (message.type === 'reasoningDelta') {
+				appendDelta('reasoning', message.payload?.text || message.text || '');
 			} else if (message.type === 'question') {
 				renderQuestion(message.payload);
 			} else if (message.type === 'fileChange') {

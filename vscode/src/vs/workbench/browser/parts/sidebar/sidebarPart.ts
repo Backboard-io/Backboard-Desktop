@@ -6,6 +6,7 @@
 import './media/sidebarpart.css';
 import './sidebarActions.js';
 import { $, addDisposableListener, append, EventType } from '../../../../base/browser/dom.js';
+import { Codicon } from '../../../../base/common/codicons.js';
 import { ActivityBarPosition, IWorkbenchLayoutService, LayoutSettings, Parts, Position as SideBarPosition } from '../../../services/layout/browser/layoutService.js';
 import { SidebarFocusContext, ActiveViewletContext } from '../../../common/contextkeys.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
@@ -136,12 +137,12 @@ export class SidebarPart extends AbstractPaneCompositePart {
 
 		const navigation = $('.sidebar-activity-navigation-header');
 		this.setHeaderArea(navigation);
-		const entries: readonly { label: string; icon?: string; iconClass?: string; command: string }[] = [
-			{ label: localize('sidebarActivityExplorer', "Explorer"), iconClass: 'sidebar-activity-navigation-explorer-icon', command: 'workbench.view.explorer' },
-			{ label: localize('sidebarActivitySearch', "Search"), iconClass: 'sidebar-activity-navigation-search-icon', command: 'workbench.view.search' },
-			{ label: localize('sidebarActivitySourceControl', "Source Control"), iconClass: 'sidebar-activity-navigation-scm-icon', command: 'workbench.view.scm' },
-			{ label: localize('sidebarActivityExtensions', "Extensions"), iconClass: 'sidebar-activity-navigation-extensions-icon', command: 'workbench.view.extensions' },
-			{ label: localize('sidebarActivityMarketplace', "Marketplace"), iconClass: 'sidebar-activity-navigation-marketplace-icon', command: 'workbench.view.backboardMarketplace' },
+		const entries: readonly { label: string; icon: string; command: string }[] = [
+			{ label: localize('sidebarActivityExplorer', "Explorer"), icon: Codicon.files.id, command: 'workbench.view.explorer' },
+			{ label: localize('sidebarActivitySearch', "Search"), icon: Codicon.searchLarge.id, command: 'workbench.view.search' },
+			{ label: localize('sidebarActivitySourceControl', "Source Control"), icon: Codicon.sourceControl.id, command: 'workbench.view.scm' },
+			{ label: localize('sidebarActivityExtensions', "Extensions"), icon: Codicon.extensions.id, command: 'workbench.view.extensions' },
+			{ label: localize('sidebarActivityMarketplace', "Marketplace"), icon: Codicon.library.id, command: 'workbench.view.backboardMarketplace' },
 		];
 
 		for (const entry of entries) {
@@ -149,9 +150,7 @@ export class SidebarPart extends AbstractPaneCompositePart {
 			button.type = 'button';
 			button.title = entry.label;
 			button.setAttribute('aria-label', entry.label);
-			const icon = entry.iconClass
-				? append(button, $(`span.${entry.iconClass}`))
-				: append(button, $(`span.codicon.codicon-${entry.icon}`));
+			const icon = append(button, $(`span.codicon.codicon-${entry.icon}`));
 			icon.setAttribute('aria-hidden', 'true');
 			this._register(addDisposableListener(button, EventType.CLICK, () => this.commandService.executeCommand(entry.command)));
 		}

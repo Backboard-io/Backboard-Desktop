@@ -8,4 +8,8 @@ import { BackboardCredentialsContribution, registerBackboardSsoActions } from '.
 
 registerBackboardSsoActions();
 
-registerWorkbenchContribution2(BackboardCredentialsContribution.ID, BackboardCredentialsContribution, WorkbenchPhase.AfterRestored);
+// Resolve the local credential gate while the workbench is restoring. The
+// auxiliary-bar shell is created during restore, so waiting until
+// `AfterRestored` leaves a visible empty Backboard panel even though checking
+// the local config file is non-blocking.
+registerWorkbenchContribution2(BackboardCredentialsContribution.ID, BackboardCredentialsContribution, WorkbenchPhase.BlockRestore);

@@ -8,6 +8,7 @@ import { IRenderedMarkdown, MarkdownRenderOptions } from '../../../../../base/br
 import { getDefaultHoverDelegate } from '../../../../../base/browser/ui/hover/hoverDelegateFactory.js';
 import { IMarkdownString } from '../../../../../base/common/htmlContent.js';
 import { DisposableStore } from '../../../../../base/common/lifecycle.js';
+import { URI } from '../../../../../base/common/uri.js';
 import { IMarkdownRenderer, IMarkdownRendererService } from '../../../../../platform/markdown/browser/markdownRenderer.js';
 import { ILanguageService } from '../../../../../editor/common/languages/language.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
@@ -17,7 +18,19 @@ import product from '../../../../../platform/product/common/product.js';
 import { Schemas } from '../../../../../base/common/network.js';
 import { AGENT_HOST_SCHEME } from '../../../../../platform/agentHost/common/agentHostUri.js';
 
-const _remoteImageDisallowed = () => false;
+const BACKBOARD_GENERATED_IMAGE_HOST = 'backboard-prod.s3.ca-central-1.amazonaws.com';
+const BACKBOARD_GENERATED_IMAGE_PATH = '/generated-images/';
+
+/**
+ * Keep chat's remote-image privacy boundary intact while allowing images
+ * produced by Backboard itself. Restricting both host and path prevents an
+ * arbitrary remote markdown image from becoming a tracking request.
+ */
+export function isBackboardGeneratedImage(uri: URI): boolean {
+	return uri.scheme === Schemas.https
+		&& uri.authority.toLocaleLowerCase() === BACKBOARD_GENERATED_IMAGE_HOST
+		&& uri.path.startsWith(BACKBOARD_GENERATED_IMAGE_PATH);
+}
 
 const nonPlainTextMarkdownSyntax = /[\\`*_[\]<>|&$~]/;
 const gfmAutolink = /\b(?:https?:\/\/|www\.)/i;
@@ -90,7 +103,7 @@ export function getChatMarkdownRenderOptions(options?: MarkdownRenderOptions): M
 			},
 			...options?.sanitizerConfig,
 			allowedLinkSchemes: { augment: [product.urlProtocol, 'copilot-skill', Schemas.vscodeBrowser, AGENT_HOST_SCHEME] },
-			remoteImageIsAllowed: _remoteImageDisallowed,
+			remoteImageIsAllowed: isBackboardGeneratedImage,
 		}
 	};
 }

@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { $, addDisposableListener, clearNode } from '../../../../../../base/browser/dom.js';
+import { $, addDisposableListener, clearNode, EventHelper } from '../../../../../../base/browser/dom.js';
 import { createTrustedTypesPolicy } from '../../../../../../base/browser/trustedTypes.js';
 import { disposableTimeout } from '../../../../../../base/common/async.js';
 import { Codicon } from '../../../../../../base/common/codicons.js';
@@ -65,6 +65,8 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 	 * `ChatThinkingContentPart.appendItem`) still receive the initial value.
 	 */
 	readonly onDidChangeDiff: Event<IEditSessionDiffStats> = this._onDidChangeDiff.event;
+	private readonly _onDidChangeHeight = this._register(new Emitter<void>());
+	readonly onDidChangeHeight: Event<void> = this._onDidChangeHeight.event;
 
 	get domNode(): HTMLElement { return this.element; }
 
@@ -96,7 +98,24 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 	}
 
 	private canRenderInlineDiff(): boolean {
-		return !!this.edit.beforeContentUri && !!this.edit.afterContentUri;
+		// Creates have no before snapshot and deletes have no after snapshot.
+		// Either side is enough to render the operation against an empty file.
+		return !!this.edit.beforeContentUri || !!this.edit.afterContentUri;
+	}
+
+	/**
+	 * Mounts the compact inline preview without opening the full disclosure.
+	 * The Cursor-style transcript uses this so a completed edit is immediately
+	 * legible while the chevron still controls the taller, scrollable diff.
+	 */
+	showDiffPreview(): void {
+		if (!this.canRenderInlineDiff()) {
+			return;
+		}
+		this.element.classList.add('chat-external-edit-preview');
+		if (this.diffBodyState === 'none') {
+			this.buildDiffBody();
+		}
 	}
 
 	/** Adds the Codex-style chevron + copy controls turning the pill into a card header. */
@@ -111,13 +130,7 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 		});
 		this.expandChevron = chevron;
 
-		const copyButton = $('span.codicon.codicon-copy.chat-external-edit-copy', {
-			role: 'button',
-			tabindex: '0',
-			'aria-label': localize('chat.externalEdit.copyContents', "Copy File Contents"),
-		});
-
-		this.element.append(chevron, copyButton);
+		this.element.appendChild(chevron);
 
 		const toggle = () => this.toggleDiffBody();
 		this._register(addDisposableListener(chevron, 'click', toggle));
@@ -128,14 +141,22 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 			}
 		}));
 
-		const copy = () => this.copyAfterContent(copyButton);
-		this._register(addDisposableListener(copyButton, 'click', copy));
-		this._register(addDisposableListener(copyButton, 'keydown', e => {
-			if (e.key === 'Enter' || e.key === ' ') {
-				e.preventDefault();
-				copy();
-			}
-		}));
+		if (this.edit.afterContentUri) {
+			const copyButton = $('span.codicon.codicon-copy.chat-external-edit-copy', {
+				role: 'button',
+				tabindex: '0',
+				'aria-label': localize('chat.externalEdit.copyContents', "Copy File Contents"),
+			});
+			this.element.appendChild(copyButton);
+			const copy = () => this.copyAfterContent(copyButton);
+			this._register(addDisposableListener(copyButton, 'click', copy));
+			this._register(addDisposableListener(copyButton, 'keydown', e => {
+				if (e.key === 'Enter' || e.key === ' ') {
+					e.preventDefault();
+					copy();
+				}
+			}));
+		}
 	}
 
 	/**
@@ -151,6 +172,9 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 	private toggleDiffBody(): void {
 		this.expanded = !this.expanded;
 		this.element.classList.toggle('chat-external-edit-expanded', this.expanded);
+		if (this.diffBody) {
+			this.diffBody.tabIndex = this.expanded ? 0 : -1;
+		}
 		if (this.expandChevron) {
 			this.expandChevron.classList.toggle('codicon-chevron-right', !this.expanded);
 			this.expandChevron.classList.toggle('codicon-chevron-down', this.expanded);
@@ -159,45 +183,63 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 		if (this.expanded && this.diffBodyState === 'none') {
 			this.buildDiffBody();
 		}
+		this._onDidChangeHeight.fire();
 	}
 
 	private async buildDiffBody(): Promise<void> {
 		this.diffBodyState = 'loading';
-		const body = $('.chat-external-edit-diff-body', { role: 'region', 'aria-label': localize('chat.externalEdit.diffRegion', "File Diff") });
+		const body = $('.chat-external-edit-diff-body', {
+			role: 'region',
+			tabindex: this.expanded ? '0' : '-1',
+			'aria-label': localize('chat.externalEdit.diffRegion', "File Diff"),
+		});
+		this._register(addDisposableListener(body, 'wheel', (event: WheelEvent) => this.scrollDiffBody(body, event), { passive: false }));
 		body.appendChild($('.chat-external-edit-diff-note', {}, localize('chat.externalEdit.loadingDiff', "Loading diff…")));
 		this.diffBody = body;
 		this.element.appendChild(body);
+		this._onDidChangeHeight.fire();
 
 		try {
 			const [beforeContent, afterContent] = await Promise.all([
-				this.resolveContent(this.edit.beforeContentUri!),
-				this.resolveContent(this.edit.afterContentUri!),
+				this.edit.beforeContentUri ? this.resolveContent(this.edit.beforeContentUri) : Promise.resolve(''),
+				this.edit.afterContentUri ? this.resolveContent(this.edit.afterContentUri) : Promise.resolve(''),
 			]);
 			if (this._store.isDisposed || this.diffBody !== body) {
 				return;
 			}
 			this.afterContentCache = afterContent;
 
-			const originalLines = beforeContent.split('\n');
-			const modifiedLines = afterContent.split('\n');
+			const originalLines = beforeContent ? beforeContent.split('\n') : [];
+			const modifiedLines = afterContent ? afterContent.split('\n') : [];
 			const languageId = this.languageService.guessLanguageIdByFilepathOrFirstLine(this.edit.uri, modifiedLines[0]);
 			const [originalTokenizedLines, modifiedTokenizedLines] = await Promise.all([
 				this.tokenizeLines(beforeContent, languageId),
 				this.tokenizeLines(afterContent, languageId),
 			]);
-			const diff = linesDiffComputers.getDefault().computeDiff(originalLines, modifiedLines, {
-				ignoreTrimWhitespace: false,
-				computeMoves: false,
-				maxComputationTimeMs: 1000,
-			});
+			const diff = this.edit.beforeContentUri && this.edit.afterContentUri
+				? linesDiffComputers.getDefault().computeDiff(originalLines, modifiedLines, {
+					ignoreTrimWhitespace: false,
+					computeMoves: false,
+					maxComputationTimeMs: 1000,
+				})
+				: undefined;
 
 			clearNode(body);
-			if (diff.changes.length === 0) {
-				body.appendChild($('.chat-external-edit-diff-note', {}, localize('chat.externalEdit.noChanges', "No line changes")));
+			const content = $('.chat-external-edit-diff-content');
+			body.appendChild(content);
+			if (!this.edit.beforeContentUri) {
+				this.renderOneSidedDiffRows(content, 'added', modifiedLines, modifiedTokenizedLines);
+			} else if (!this.edit.afterContentUri) {
+				this.renderOneSidedDiffRows(content, 'removed', originalLines, originalTokenizedLines);
+			} else if (!diff || diff.changes.length === 0) {
+				content.appendChild($('.chat-external-edit-diff-note', {}, localize('chat.externalEdit.noChanges', "No line changes")));
 			} else {
-				this.renderDiffRows(body, originalLines, modifiedLines, originalTokenizedLines, modifiedTokenizedLines, diff.changes);
+				this.renderDiffRows(content, originalLines, modifiedLines, originalTokenizedLines, modifiedTokenizedLines, diff.changes);
 			}
+			const renderedRowCount = Array.from(content.children).filter(child => child.classList.contains('chat-external-edit-diff-row')).length;
+			body.classList.toggle('chat-external-edit-diff-overflow', renderedRowCount > 4);
 			this.diffBodyState = 'ready';
+			this._onDidChangeHeight.fire();
 		} catch {
 			if (this._store.isDisposed || this.diffBody !== body) {
 				return;
@@ -205,7 +247,30 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 			clearNode(body);
 			body.appendChild($('.chat-external-edit-diff-note', {}, localize('chat.externalEdit.diffUnavailable', "Diff unavailable")));
 			this.diffBodyState = 'error';
+			this._onDidChangeHeight.fire();
 		}
+	}
+
+	private scrollDiffBody(body: HTMLElement, event: WheelEvent): void {
+		if (!this.expanded || event.deltaY === 0) {
+			return;
+		}
+		const deltaScale = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+			? 20
+			: event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+				? body.clientHeight
+				: 1;
+		const maxScrollTop = Math.max(0, body.scrollHeight - body.clientHeight);
+		const nextScrollTop = Math.min(maxScrollTop, Math.max(0, body.scrollTop + event.deltaY * deltaScale));
+		if (nextScrollTop === body.scrollTop) {
+			return;
+		}
+		EventHelper.stop(event, true);
+		body.scrollTop = nextScrollTop;
+	}
+
+	addDisposable(disposable: IDisposable): void {
+		this._register(disposable);
 	}
 
 	private async tokenizeLines(content: string, languageId: string | null): Promise<readonly string[]> {
@@ -228,13 +293,40 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 		}
 	}
 
+	private appendDiffRow(body: HTMLElement, kind: 'added' | 'removed' | 'context', lineNumber: number, text: string, tokenizedText: string | undefined): void {
+		const row = $(`.chat-external-edit-diff-row.${kind}`);
+		row.appendChild($('span.chat-external-edit-diff-gutter', {}, String(lineNumber)));
+		if (this.element.classList.contains('chat-external-edit-preview')) {
+			row.appendChild($('span.chat-external-edit-diff-marker', { 'aria-hidden': 'true' }, kind === 'added' ? '+' : kind === 'removed' ? '-' : ''));
+		}
+		const textElement = $('span.chat-external-edit-diff-text');
+		if (tokenizedText !== undefined) {
+			const trustedHtml = _tokenizerTrustedTypesPolicy?.createHTML(tokenizedText) ?? tokenizedText;
+			textElement.innerHTML = trustedHtml as string;
+		} else {
+			textElement.textContent = text;
+		}
+		row.appendChild(textElement);
+		body.appendChild(row);
+	}
+
+	private renderOneSidedDiffRows(body: HTMLElement, kind: 'added' | 'removed', lines: readonly string[], tokenizedLines: readonly string[]): void {
+		const maxRows = 400;
+		for (let index = 0; index < Math.min(lines.length, maxRows); index++) {
+			this.appendDiffRow(body, kind, index + 1, lines[index], tokenizedLines[index]);
+		}
+		if (lines.length > maxRows) {
+			body.appendChild($('.chat-external-edit-diff-note', {}, localize('chat.externalEdit.diffTruncated', "Diff truncated — open the file to see everything")));
+		}
+	}
+
 	/**
 	 * Renders unified-diff rows: red deleted lines (original numbering), green
 	 * added lines (modified numbering), ±2 context lines, and gap dividers
 	 * between non-contiguous hunks — no fake context fill.
 	 */
 	private renderDiffRows(body: HTMLElement, originalLines: string[], modifiedLines: string[], originalTokenizedLines: readonly string[], modifiedTokenizedLines: readonly string[], changes: readonly DetailedLineRangeMapping[]): void {
-		const CONTEXT_LINES = 2;
+		const CONTEXT_LINES = this.element.classList.contains('chat-external-edit-preview') ? 1 : 2;
 		const MAX_ROWS = 400;
 		let renderedRows = 0;
 		let lastRenderedModifiedLine = 0;
@@ -244,17 +336,7 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 				return false;
 			}
 			renderedRows++;
-			const row = $(`.chat-external-edit-diff-row.${kind}`);
-			row.appendChild($('span.chat-external-edit-diff-gutter', {}, String(lineNumber)));
-			const textElement = $('span.chat-external-edit-diff-text');
-			if (tokenizedText !== undefined) {
-				const trustedHtml = _tokenizerTrustedTypesPolicy?.createHTML(tokenizedText) ?? tokenizedText;
-				textElement.innerHTML = trustedHtml as string;
-			} else {
-				textElement.textContent = text;
-			}
-			row.appendChild(textElement);
-			body.appendChild(row);
+			this.appendDiffRow(body, kind, lineNumber, text, tokenizedText);
 			return true;
 		};
 
@@ -379,6 +461,10 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 		return (
 			isEqual(other.uri, this.edit.uri) &&
 			other.editKind === this.edit.editKind &&
+			other.originalUri?.toString() === this.edit.originalUri?.toString() &&
+			other.beforeContentUri?.toString() === this.edit.beforeContentUri?.toString() &&
+			other.afterContentUri?.toString() === this.edit.afterContentUri?.toString() &&
+			other.undoStopId === this.edit.undoStopId &&
 			(other.diff?.added ?? 0) === (this.edit.diff?.added ?? 0) &&
 			(other.diff?.removed ?? 0) === (this.edit.diff?.removed ?? 0)
 		);

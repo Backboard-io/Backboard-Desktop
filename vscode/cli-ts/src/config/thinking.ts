@@ -20,7 +20,7 @@ export function parseThinking(
 ): ThinkingIntent | null | undefined {
 	const normalized = value.trim().toLowerCase();
 	if (["default", "provider-default", "provider_default"].includes(normalized))
-		return undefined;
+		return { kind: "default" };
 	if (["off", "no", "disable", "disabled", "false", "0"].includes(normalized))
 		return null;
 
@@ -44,7 +44,7 @@ export function parseThinking(
 	}
 
 	throw new Error(
-		"thinking must be one of: off, low, medium, high, max, dynamic, or a token budget",
+		"thinking must be one of: off, default, low, medium, high, max, dynamic, or a token budget",
 	);
 }
 
@@ -56,16 +56,20 @@ export function resolveThinking(
 
 	const capabilities = resolveThinkingCapabilities({ model, metadata });
 	const { profile } = capabilities;
-	if (!capabilities.supportsThinking) {
-		throw new Error(`Thinking is not supported for ${formatModel(model)}.`);
-	}
-	if (capabilities.defaultsOnly) return {};
-
 	const allowedFields = capabilities.allowedFields;
+	if (!capabilities.supportsThinking) {
+		return null;
+	}
+	if (capabilities.defaultsOnly) {
+		return withVisibleReasoning({}, allowedFields);
+	}
+
 	if (allowedFields.length === 0) {
-		throw new Error(
-			`Thinking controls are not available for ${formatModel(model)}.`,
-		);
+		return null;
+	}
+
+	if (intent.kind === "default") {
+		return withVisibleReasoning({}, allowedFields);
 	}
 
 	if (intent.kind === "dynamic") {
@@ -75,7 +79,7 @@ export function resolveThinking(
 				context.dynamicEvidence,
 			)
 		) {
-			return {};
+			return withVisibleReasoning({}, allowedFields);
 		}
 		const level = resolveDynamicThinkingLevel(context.dynamicEvidence);
 		const tokenField = tokenFieldFor(allowedFields);
@@ -88,41 +92,45 @@ export function resolveThinking(
 					metadata,
 				},
 			);
-			return tokenField === "max_tokens"
-				? { max_tokens: budget }
-				: { budget_tokens: budget };
+			return withVisibleReasoning(
+				tokenField === "max_tokens"
+					? { max_tokens: budget }
+					: { budget_tokens: budget },
+				allowedFields,
+			);
 		}
 		if (allowedFields.includes("effort")) {
-			return {
-				effort: clampEffort(level, profile?.maxEffort),
-			};
+			return withVisibleReasoning(
+				{ effort: clampEffort(level, profile?.maxEffort) },
+				allowedFields,
+			);
 		}
-		throw new Error(
-			`Dynamic thinking cannot be mapped for ${formatModel(model)}.`,
-		);
+		return null;
 	}
 
 	if (intent.kind === "budget") {
 		const tokenField = tokenFieldFor(allowedFields);
 		if (!tokenField) {
-			throw new Error(
-				`Model ${formatModel(model)} accepts thinking levels, not explicit token budgets.`,
-			);
+			return null;
 		}
-		return tokenField === "max_tokens"
-			? { max_tokens: intent.tokens }
-			: { budget_tokens: intent.tokens };
+		return withVisibleReasoning(
+			tokenField === "max_tokens"
+				? { max_tokens: intent.tokens }
+				: { budget_tokens: intent.tokens },
+			allowedFields,
+		);
 	}
 
 	if (allowedFields.includes("effort")) {
-		return { effort: clampEffort(intent.level, profile?.maxEffort) };
+		return withVisibleReasoning(
+			{ effort: clampEffort(intent.level, profile?.maxEffort) },
+			allowedFields,
+		);
 	}
 
 	const tokenField = tokenFieldFor(allowedFields);
 	if (!tokenField) {
-		throw new Error(
-			`Thinking level '${intent.level}' cannot be mapped for ${formatModel(model)}.`,
-		);
+		return null;
 	}
 	const budget = resolveBudget(
 		profile?.budgetPolicyId ?? "generic",
@@ -132,9 +140,27 @@ export function resolveThinking(
 			metadata,
 		},
 	);
-	return tokenField === "max_tokens"
-		? { max_tokens: budget }
-		: { budget_tokens: budget };
+	return withVisibleReasoning(
+		tokenField === "max_tokens"
+			? { max_tokens: budget }
+			: { budget_tokens: budget },
+		allowedFields,
+	);
+}
+
+/**
+ * Reasoning traces are always user-visible. Backboard exposes this through
+ * `exclude_reasoning` for providers that support the field; Studio never
+ * offers a setting that can change this invariant.
+ */
+function withVisibleReasoning(
+	config: ThinkingConfig,
+	allowedFields: readonly string[],
+): ThinkingConfig {
+	if (allowedFields.includes("exclude_reasoning")) {
+		return { ...config, exclude_reasoning: false };
+	}
+	return config;
 }
 
 function isThinkingLevel(value: string): value is ThinkingLevel {
@@ -147,10 +173,4 @@ function clampEffort(
 ): ThinkingLevel {
 	if (level !== "max" || maxEffort === undefined) return level;
 	return maxEffort;
-}
-
-// Duplicates defaults.ts formatModel: importing it here would create a cycle,
-// since defaults.ts re-exports parseThinking/resolveThinking from this module.
-function formatModel(model: { provider: string; model: string }): string {
-	return `${model.provider}/${model.model}`;
 }

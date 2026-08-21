@@ -982,6 +982,26 @@ export class AgentService extends Disposable implements IAgentService {
 	}
 
 	/**
+	 * Releases every subscription owned by a disconnected transport client.
+	 *
+	 * A renderer normally sends individual `unsubscribe` calls as references
+	 * are disposed. Window reloads and renderer crashes can close the
+	 * MessagePort before those calls arrive, however, leaving provisional chat
+	 * sessions permanently subscribed. Besides retaining protocol state, a
+	 * prewarmed Backboard session owns a cli-ts serve process. Routing cleanup
+	 * through {@link unsubscribe} preserves the normal grace period and session
+	 * GC behavior instead of tearing down sessions that are reconnecting.
+	 */
+	unsubscribeClient(clientId: string): void {
+		for (const resource of [...this._resourceSubscribers.keys()]) {
+			if (this._resourceSubscribers.get(resource)?.has(clientId)) {
+				this.unsubscribe(resource, clientId);
+			}
+		}
+		this._clientDispatchQueues.delete(clientId);
+	}
+
+	/**
 	 * If `resource` names a session that no client is still subscribed to and
 	 * that has produced no turns (and has no active turn), schedule a delayed
 	 * {@link _runSessionGc} to fully tear it down — provider session, worktree,

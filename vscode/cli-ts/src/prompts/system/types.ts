@@ -13,6 +13,8 @@ export interface SystemPromptOptions {
 	/** Reminder segment shown until the session's first TodoWrite call. */
 	todoReminderPrompt?: string;
 	startupEnvironmentPrompt?: string;
+	/** Authoritative prior turns when the current provider thread is a branch. */
+	conversationContext?: string;
 	enabledTools?: readonly string[];
 	/** Selects which prompt profile builds the prompt. Defaults to `default`. */
 	profile?: PromptProfileId;

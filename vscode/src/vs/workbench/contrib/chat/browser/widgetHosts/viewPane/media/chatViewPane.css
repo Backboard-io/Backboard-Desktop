@@ -422,90 +422,6 @@
 	.agent-sessions-viewer .monaco-scrollable-element {
 		background-color: transparent !important;
 	}
-
-	.agent-sessions-account-footer {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		min-height: 38px;
-		padding: 8px 4px 0;
-		border-top: 1px solid var(--backboard-side-chat-border);
-	}
-
-	.agent-sessions-account-avatar {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 24px;
-		height: 24px;
-		flex: 0 0 24px;
-		border-radius: 50%;
-		background: var(--backboard-side-chat-raised);
-		color: var(--backboard-side-chat-secondary);
-	}
-
-	.agent-sessions-account-copy {
-		display: flex;
-		flex: 1 1 auto;
-		min-width: 0;
-		align-items: center;
-		line-height: 18px;
-	}
-
-	.agent-sessions-account-name,
-	.agent-sessions-account-plan {
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.agent-sessions-account-name {
-		font-size: 13px;
-		color: var(--backboard-side-chat-primary);
-	}
-
-	.agent-sessions-account-plan {
-		font-size: 12px;
-		color: var(--backboard-side-chat-muted);
-	}
-
-	.agent-sessions-account-update,
-	.agent-sessions-account-settings {
-		height: 28px;
-		padding: 0 9px;
-		border: 0;
-		border-radius: 10px;
-		font: inherit;
-		font-size: 12px;
-		cursor: pointer;
-	}
-
-	.agent-sessions-account-update {
-		background: var(--vscode-button-background);
-		color: var(--vscode-button-foreground);
-	}
-
-	.agent-sessions-account-settings {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 28px;
-		flex: 0 0 28px;
-		padding: 0;
-		background: var(--backboard-side-chat-raised);
-		color: var(--backboard-side-chat-secondary);
-	}
-
-	.agent-sessions-account-update:hover,
-	.agent-sessions-account-update:focus-visible {
-		background: var(--vscode-button-hoverBackground);
-	}
-
-	.agent-sessions-account-settings:hover,
-	.agent-sessions-account-settings:focus-visible {
-		background: var(--backboard-side-chat-active);
-		color: var(--backboard-side-chat-primary);
-	}
 }
 
 /* Sessions control: stacked */
@@ -642,24 +558,6 @@
 
 	.agent-sessions-control-container {
 		margin-left: -4px;
-	}
-
-	.agent-sessions-account-footer {
-		min-height: 46px;
-		padding-top: 8px;
-	}
-
-	.agent-sessions-account-name {
-		font-size: 13px;
-	}
-
-	.agent-sessions-account-plan {
-		font-size: 13px;
-	}
-
-	.agent-sessions-account-update,
-	.agent-sessions-account-settings {
-		height: 26px;
 	}
 
 	.agent-sessions-viewer .agent-session-title {
