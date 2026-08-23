@@ -103,9 +103,12 @@
 	padding-top: 4px;
 }
 
-/* Fullscreen/maximized windows have no left-side window chrome reservation.
-   Keep the Advanced mode menu anchored to the same top-left edge as Editor
-   and Simple, including at responsive widths. */
+/* Fullscreen and maximized windows drop the native traffic lights, so the
+ * 78px reservation above becomes dead space and the mode switcher reads as
+ * centred over the sidebar instead of sitting top-left. Simple and Editor
+ * handle this by dropping their `.mac-window-controls-spacer` entirely
+ * (panelHeader.css / titlebarpart.css); collapse to the sidebar's own content
+ * inset here so all three switchers land in the same place. */
 .agent-sessions-workbench.mac.fullscreen .optimus-window-chrome,
 .agent-sessions-workbench.mac.maximized .optimus-window-chrome {
 	padding-left: 8px;
@@ -400,9 +403,7 @@
 }
 
 .optimus-dashboard-primary,
-.optimus-dashboard-secondary,
 .optimus-dashboard-controls,
-.optimus-dashboard-search,
 .optimus-dashboard-button,
 .optimus-dashboard-filter-chip {
 	display: flex;
@@ -417,46 +418,6 @@
 	min-width: 0;
 	margin-left: auto;
 	gap: 8px;
-}
-
-.optimus-dashboard-search {
-	width: clamp(180px, 28vw, 320px);
-	height: 28px;
-	gap: 7px;
-	box-sizing: border-box;
-	padding: 0 9px;
-	border: 1px solid var(--vscode-input-border, var(--optimus-border));
-	border-radius: 6px;
-	background: var(--vscode-input-background);
-	color: var(--vscode-input-foreground);
-}
-
-.optimus-dashboard-search:focus-within {
-	border-color: var(--optimus-focus);
-}
-
-.optimus-dashboard-search > .codicon {
-	font-size: 13px;
-	color: var(--optimus-muted);
-}
-
-.optimus-dashboard-search-input {
-	width: 100%;
-	min-width: 0;
-	border: 0;
-	outline: 0;
-	background: transparent;
-	color: inherit;
-	font: inherit;
-	font-size: 12px;
-}
-
-.optimus-dashboard-search-input::placeholder {
-	color: var(--vscode-input-placeholderForeground);
-}
-
-.optimus-dashboard-search-input::-webkit-search-cancel-button {
-	display: none;
 }
 
 .optimus-dashboard-button,
@@ -489,6 +450,36 @@
 	color: var(--optimus-muted);
 }
 
+/* Icon-only toolbar buttons (Display, Reset filters). The label moves to the
+ * tooltip/aria-label so the toolbar carries symbols rather than a row of
+ * competing text buttons; square so they read as a set with the codicon
+ * controls in the window chrome above them. */
+.optimus-dashboard-icon-button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 28px;
+	height: 28px;
+	gap: 2px;
+	padding: 0 6px;
+	flex: 0 0 auto;
+}
+
+.optimus-dashboard-icon-button > .codicon {
+	font-size: 14px;
+	color: var(--optimus-muted);
+}
+
+.optimus-dashboard-icon-button:hover > .codicon {
+	color: var(--vscode-foreground);
+}
+
+/* The chevron is a disclosure hint, not a second icon — keep it quieter. */
+.optimus-dashboard-icon-button > .codicon-chevron-down {
+	font-size: 11px;
+	opacity: 0.7;
+}
+
 .optimus-dashboard-filter-count {
 	min-width: 16px;
 	height: 16px;
@@ -516,11 +507,6 @@
 
 .optimus-dashboard-reset:hover {
 	color: var(--vscode-foreground);
-}
-
-.optimus-dashboard-secondary {
-	min-height: 24px;
-	gap: 10px;
 }
 
 .optimus-dashboard-filter-chips {
@@ -1593,8 +1579,6 @@
 	font-size: 13px;
 }
 
-
-
 /* --- First-run empty state ----------------------------------------------- */
 
 .optimus-empty-state {
@@ -1715,7 +1699,6 @@
 	border-radius: 8px;
 }
 
-
 .optimus-view-switcher {
 	display: inline-flex;
 	gap: 2px;
@@ -1762,11 +1745,6 @@
 		margin-left: 0;
 	}
 
-	.optimus-dashboard-search {
-		flex: 1;
-		width: auto;
-	}
-
 	.optimus-dashboard-reset {
 		display: none;
 	}
@@ -1791,8 +1769,7 @@
 	border-bottom-color: color-mix(in srgb, var(--optimus-border) 72%, transparent);
 }
 
-.optimus-dashboard-primary,
-.optimus-dashboard-secondary {
+.optimus-dashboard-primary {
 	min-height: 32px;
 }
 
@@ -1800,32 +1777,11 @@
 	align-items: center;
 }
 
-.optimus-dashboard-secondary {
-	justify-content: space-between;
-}
-
 .optimus-dashboard-filter-controls {
 	display: flex;
 	align-items: center;
 	gap: 8px;
 	min-width: 0;
-}
-
-.optimus-dashboard-search {
-	width: clamp(210px, 25vw, 300px);
-	height: 32px;
-	padding: 0 10px;
-	border-color: color-mix(in srgb, var(--optimus-border) 70%, transparent);
-	border-radius: 7px;
-	background: color-mix(in srgb, var(--vscode-input-background) 90%, var(--vscode-foreground) 10%);
-}
-
-.optimus-dashboard-search > .codicon {
-	font-size: 14px;
-}
-
-.optimus-dashboard-search-input {
-	font-size: 13px;
 }
 
 .optimus-dashboard-button {
@@ -1958,8 +1914,7 @@
 		padding: 42px 10px 9px;
 	}
 
-	.optimus-dashboard-primary,
-	.optimus-dashboard-secondary {
+	.optimus-dashboard-primary {
 		align-items: stretch;
 		min-height: 0;
 	}
@@ -1973,15 +1928,6 @@
 	.optimus-dashboard-filter-controls {
 		width: 100%;
 		margin-left: 0;
-	}
-
-	.optimus-dashboard-search {
-		width: auto;
-		flex: 1 1 140px;
-	}
-
-	.optimus-dashboard-secondary {
-		gap: 6px;
 	}
 
 	.optimus-dashboard-filter-controls {
@@ -2012,10 +1958,6 @@
 @container optimus-workspace (max-width: 460px) {
 	.optimus-dashboard-controls {
 		flex-wrap: wrap;
-	}
-
-	.optimus-dashboard-search {
-		flex-basis: 100%;
 	}
 
 	.optimus-dashboard-controls > .optimus-dashboard-button {
@@ -2112,9 +2054,16 @@
 	overflow: hidden;
 }
 
+/* The window chrome is a fixed 32px overlay across the whole window, and it is
+ * opaque from the sidebar edge rightwards. The dashboard clears it with its own
+ * top inset (see `.optimus-dashboard-header`); the focused session header has to
+ * do the same, or the session title and its toolbar — settings, terminal, pin,
+ * close — render underneath the chrome and are unreachable. Margin rather than
+ * padding: the shared `.sessions-panel-header` owns this element's height. */
 .optimus-focused-session-header {
-	flex: 0 0 32px;
+	flex: 0 0 auto;
 	min-height: 32px;
+	margin-top: 32px;
 }
 
 .optimus-focused-session-body {

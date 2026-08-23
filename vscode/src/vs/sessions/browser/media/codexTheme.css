@@ -11,8 +11,12 @@
  * the Simple window's visual language.
  */
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) {
-	font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+/* Palette primitives. Advanced (Optimus) shares Simple's sidebar chrome, and
+ * every rule in the Sidebar section below resolves its colors through these,
+ * so the primitives must be in scope there too. They are inert custom
+ * properties: defining them costs nothing in a window whose other surfaces
+ * still opt out of the parity layer below. */
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) {
 	--codex-canvas: var(--vscode-agentsPanel-background, var(--vscode-editor-background));
 	--codex-sidebar: transparent;
 	--codex-composer: var(--vscode-input-background, var(--codex-canvas));
@@ -22,6 +26,13 @@
 	--codex-text-secondary: var(--vscode-descriptionForeground, var(--vscode-input-placeholderForeground));
 	--codex-border: var(--vscode-panel-border, var(--vscode-widget-border));
 	--codex-border-strong: var(--vscode-input-border, var(--vscode-focusBorder));
+}
+
+/* Simple only: the workbench-wide typography, the derived region/surface
+ * tokens and the base text color. Advanced keeps its own centre and right
+ * panel treatment, so these must NOT leak into it. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) {
+	font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
 	--sessions-main-region-background: var(--codex-canvas);
 	--sessions-codex-surface-background: var(--codex-composer);
 	--sessions-codex-surface-border: var(--codex-border-strong);
@@ -74,7 +85,7 @@
 
 /* ---- Sidebar ------------------------------------------------------------ */
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-viewpane {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .agent-sessions-viewpane {
 	--agent-sidebar-bg: var(--vscode-agents-background, var(--vscode-editor-background));
 	--agent-sidebar-primary: var(--codex-text-primary);
 	--agent-sidebar-secondary: color-mix(in srgb, var(--codex-text-primary) 82%, transparent);
@@ -94,28 +105,28 @@
  * icons flash together. Stabilize both possible sidebar wrappers as well as
  * the inner reveal target. Width remains owned by SplitView's inline layout,
  * and the 52% theme-derived sidebar tint remains untouched and translucent. */
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light):not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sidebar),
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light):not(.phone-layout) .monaco-grid-view .split-view-view:has(> .monaco-grid-branch-node .part.sidebar),
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light):not(.phone-layout) .part.sidebar,
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light):not(.phone-layout) .part.sidebar > .content {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window).shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light):not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sidebar),
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window).shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light):not(.phone-layout) .monaco-grid-view .split-view-view:has(> .monaco-grid-branch-node .part.sidebar),
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window).shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light):not(.phone-layout) .part.sidebar,
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window).shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light):not(.phone-layout) .part.sidebar > .content {
 	transition: none !important;
 	opacity: 1 !important;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light):not(.phone-layout) .part.sidebar > .content {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window).shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light):not(.phone-layout) .part.sidebar > .content {
 	transform: none;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-viewpane .agent-sessions-container {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .agent-sessions-viewpane .agent-sessions-container {
 	padding: 8px 8px 10px;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-viewpane .agent-sessions-pinned {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .agent-sessions-viewpane .agent-sessions-pinned {
 	gap: 0;
 	margin-bottom: 4px;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-viewpane .agent-sessions-sidebar-action {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .agent-sessions-viewpane .agent-sessions-sidebar-action {
 	height: 30px;
 	padding: 0 8px;
 	border-radius: 8px;
@@ -127,11 +138,11 @@
 /* T3 Code's sidebar is organized as a two-row command header followed by a
  * flat thread inbox. Keep the controls on one 32px rhythm and let the list be
  * the only scrolling region. */
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-simple-actions {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .agent-sessions-simple-actions {
 	gap: 2px;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) :is(.agent-sessions-simple-search-row, .agent-sessions-simple-project-row) {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) :is(.agent-sessions-simple-search-row, .agent-sessions-simple-project-row) {
 	position: relative;
 	display: flex;
 	align-items: center;
@@ -139,8 +150,8 @@
 	min-width: 0;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-simple-search-row .agent-sessions-search-button,
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-project-filter-button {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .agent-sessions-simple-search-row .agent-sessions-search-button,
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .agent-sessions-project-filter-button {
 	flex: 1 1 auto;
 	min-width: 0;
 	height: 32px;
@@ -155,23 +166,23 @@
 	cursor: pointer;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-project-filter-button {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .agent-sessions-project-filter-button {
 	display: flex;
 	align-items: center;
 	gap: 8px;
 	text-align: left;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) :is(
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) :is(
 	.agent-sessions-simple-search-row .agent-sessions-search-button,
 	.agent-sessions-project-filter-button,
 	.agent-sessions-simple-icon-button):hover,
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-project-filter-button[aria-expanded="true"] {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .agent-sessions-project-filter-button[aria-expanded="true"] {
 	background: var(--agent-sidebar-hover-bg);
 	color: var(--agent-sidebar-primary);
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) :is(
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) :is(
 	.agent-sessions-simple-search-row .agent-sessions-search-button,
 	.agent-sessions-project-filter-button,
 	.agent-sessions-simple-icon-button):focus-visible {
@@ -179,7 +190,7 @@
 	outline-offset: -1px;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-simple-icon-button {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .agent-sessions-simple-icon-button {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
@@ -194,12 +205,12 @@
 	cursor: pointer;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-simple-compact-toggle[aria-pressed="true"] {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .agent-sessions-simple-compact-toggle[aria-pressed="true"] {
 	background: var(--agent-sidebar-active-bg);
 	color: var(--agent-sidebar-primary);
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-project-filter-label {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .agent-sessions-project-filter-label {
 	min-width: 0;
 	flex: 1 1 auto;
 	overflow: hidden;
@@ -207,13 +218,13 @@
 	white-space: nowrap;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-project-filter-chevron {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .agent-sessions-project-filter-chevron {
 	display: inline-flex;
 	flex: 0 0 auto;
 	color: var(--agent-sidebar-muted);
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-project-filter-popover {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .agent-sessions-project-filter-popover {
 	top: 36px;
 	left: 0;
 	right: 36px;
@@ -223,7 +234,7 @@
 	overflow-y: auto;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-project-filter-option {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .agent-sessions-project-filter-option {
 	display: flex;
 	align-items: center;
 	gap: 8px;
@@ -241,12 +252,12 @@
 	cursor: pointer;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-project-filter-option:hover {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .agent-sessions-project-filter-option:hover {
 	background: var(--agent-sidebar-hover-bg);
 	color: var(--agent-sidebar-primary);
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) :is(
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) :is(
 	.agent-sessions-project-filter-check,
 	.agent-sessions-project-filter-option-icon) {
 	display: inline-flex;
@@ -257,14 +268,14 @@
 	color: var(--agent-sidebar-muted);
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-project-filter-option-label {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .agent-sessions-project-filter-option-label {
 	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-project-filter-option-content {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .agent-sessions-project-filter-option-content {
 	display: flex;
 	align-items: baseline;
 	gap: 7px;
@@ -272,11 +283,11 @@
 	flex: 1 1 auto;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-project-filter-option-label {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .agent-sessions-project-filter-option-label {
 	flex: 1 1 auto;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-project-filter-option-description {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .agent-sessions-project-filter-option-description {
 	max-width: 42%;
 	flex: 0 1 auto;
 	overflow: hidden;
@@ -287,18 +298,18 @@
 	font-weight: 400;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-viewpane .agent-sessions-workspaces-header {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .agent-sessions-viewpane .agent-sessions-workspaces-header {
 	height: 26px;
 	margin-top: 10px;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-viewpane .agent-sessions-workspaces-title {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .agent-sessions-viewpane .agent-sessions-workspaces-title {
 	color: var(--codex-text-secondary);
 	font-size: 12px;
 	font-weight: 600;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-list-control {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .sessions-list-control {
 	--sessions-row-fg: var(--codex-text-primary);
 	--sessions-row-title-fg: var(--codex-text-primary);
 	--sessions-row-attention-fg: var(--codex-text-primary);
@@ -308,49 +319,49 @@
 	--sessions-row-selected-bg: var(--codex-selected);
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-list-control .monaco-list-row:has(.session-item),
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-list-control .monaco-list-row:has(.session-section) {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .sessions-list-control .monaco-list-row:has(.session-item),
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .sessions-list-control .monaco-list-row:has(.session-section) {
 	border-radius: 8px;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .session-item .session-title {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .session-item .session-title {
 	font-size: 13px;
 	letter-spacing: -0.012em;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-content {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .agent-sessions-content {
 	gap: 0;
 	padding-bottom: 8px;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-control-container {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .agent-sessions-control-container {
 	margin-top: 0;
 }
 
 /* Active threads use T3's compact information card: project + age on top,
  * title in the middle, stable branch/provider metadata below. */
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-list-control .monaco-list-row:has(.simple-session-card) {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .sessions-list-control .monaco-list-row:has(.simple-session-card) {
 	margin: 2px 0;
 	width: 100%;
 	border-radius: 8px;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .session-item.simple-session-card {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .session-item.simple-session-card {
 	align-items: stretch;
 	padding: 9px 9px 8px;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-card .session-icon {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-card .session-icon {
 	display: none;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-card .session-main {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-card .session-main {
 	display: block;
 	width: 100%;
 	max-width: none;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-card .session-title-row {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-card .session-title-row {
 	display: grid;
 	grid-template-columns: 16px minmax(0, 1fr) auto;
 	grid-template-rows: 18px 22px 18px;
@@ -360,7 +371,7 @@
 	max-width: none;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-card .session-provider-icon {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-card .session-provider-icon {
 	grid-column: 1;
 	grid-row: 1;
 	align-self: center;
@@ -369,7 +380,7 @@
 	opacity: 0.72;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-card .session-title {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-card .session-title {
 	grid-column: 1 / -1;
 	grid-row: 2;
 	align-self: center;
@@ -380,7 +391,7 @@
 	line-height: 20px;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-card .session-details-row {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-card .session-details-row {
 	grid-column: 2 / -1;
 	grid-row: 1;
 	display: flex;
@@ -391,21 +402,21 @@
 	color: var(--sessions-row-muted-fg);
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-card .session-details-row .session-badge {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-card .session-details-row .session-badge {
 	min-width: 0;
 	flex: 1 1 auto;
 	font-weight: 500;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-card .session-details-row :is(.session-diff, .session-description, .session-time) {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-card .session-details-row :is(.session-diff, .session-description, .session-time) {
 	flex: 0 0 auto;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-card .session-details-row .session-separator {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-card .session-details-row .session-separator {
 	display: none;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-card .session-simple-branch {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-card .session-simple-branch {
 	grid-column: 1 / 3;
 	grid-row: 3;
 	align-self: center;
@@ -418,24 +429,24 @@
 	line-height: 18px;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-card .session-simple-branch.has-branch::before {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-card .session-simple-branch.has-branch::before {
 	content: '⑂';
 	margin-right: 5px;
 	opacity: 0.72;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .session-simple-branch.no-branch,
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .session-item:not(.simple-session-card) .session-simple-branch {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .session-simple-branch.no-branch,
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .session-item:not(.simple-session-card) .session-simple-branch {
 	display: none;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-card .session-title-toolbar {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-card .session-title-toolbar {
 	grid-column: 3;
 	grid-row: 3;
 	align-self: center;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .session-simple-provider {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .session-simple-provider {
 	display: none;
 	min-width: 0;
 	flex: 0 0 auto;
@@ -448,23 +459,23 @@
 	white-space: nowrap;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .session-simple-provider.hidden {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .session-simple-provider.hidden {
 	display: none !important;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .session-simple-agent-icon {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .session-simple-agent-icon {
 	flex: 0 0 auto;
 	font-size: 11px;
 	opacity: 0.8;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .session-simple-agent-label {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .session-simple-agent-label {
 	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-card .session-simple-provider {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-card .session-simple-provider {
 	grid-column: 3;
 	grid-row: 3;
 	display: flex;
@@ -473,8 +484,8 @@
 	max-width: 92px;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .monaco-list-row:hover .session-simple-provider,
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .monaco-list-row.focused:not(.selected) .session-simple-provider {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .monaco-list-row:hover .session-simple-provider,
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .monaco-list-row.focused:not(.selected) .session-simple-provider {
 	display: none;
 }
 
@@ -482,118 +493,118 @@
  * one-line density and align their titles under the folder label; the hidden
  * per-row folder glyph deliberately keeps its layout width so the hierarchy
  * reads like the legacy view without repeating the same icon on every thread. */
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-list-control .monaco-list-row:has(.simple-session-compact) {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .sessions-list-control .monaco-list-row:has(.simple-session-compact) {
 	margin: 0;
 	width: 100%;
 	border-radius: 7px;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .session-item.simple-session-compact {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .session-item.simple-session-compact {
 	padding: 0 8px;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-compact .session-icon {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-compact .session-icon {
 	display: none;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-compact .session-title-row {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-compact .session-title-row {
 	gap: 7px;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-compact .session-provider-icon {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-compact .session-provider-icon {
 	font-size: 13px;
 	visibility: hidden;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-compact .session-title {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-compact .session-title {
 	font-size: 14px;
 	font-weight: 400;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-compact .session-details-row {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-compact .session-details-row {
 	display: none;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-compact .session-simple-provider {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-compact .session-simple-provider {
 	display: flex;
 	max-width: 88px;
 	margin-left: auto;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-folder-view .session-section {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-folder-view .session-section {
 	font-size: 13px;
 	font-weight: 500;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-folder-view .session-section-empty {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-folder-view .session-section-empty {
 	opacity: 0.48;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-folder-view .session-section-empty .session-section-toolbar {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-folder-view .session-section-empty .session-section-toolbar {
 	display: none;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-compact .session-details-row :is(.session-diff, .session-description),
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-compact .session-details-row .session-separator {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-compact .session-details-row :is(.session-diff, .session-description),
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-compact .session-details-row .session-separator {
 	display: none;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-compact .session-details-row .session-badge,
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-slim .session-details-row .session-badge {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-compact .session-details-row .session-badge,
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-slim .session-details-row .session-badge {
 	min-width: 0;
 	flex: 1 1 auto;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-compact .session-details-row .session-time,
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-slim .session-details-row .session-time {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-compact .session-details-row .session-time,
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-slim .session-details-row .session-time {
 	flex: 0 0 auto;
 }
 
 /* Settled history deliberately collapses to T3's slim one-line row. */
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .session-item.simple-session-slim {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .session-item.simple-session-slim {
 	padding: 0 8px;
 	opacity: 0.58;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .monaco-list-row:hover .session-item.simple-session-slim,
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .monaco-list-row.selected .session-item.simple-session-slim {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .monaco-list-row:hover .session-item.simple-session-slim,
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .monaco-list-row.selected .session-item.simple-session-slim {
 	opacity: 1;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-slim .session-icon {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-slim .session-icon {
 	display: none;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-slim .session-title-row {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-slim .session-title-row {
 	gap: 8px;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-slim .session-provider-icon {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-slim .session-provider-icon {
 	font-size: 13px;
 	opacity: 0.65;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-slim .session-title {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-slim .session-title {
 	font-size: 13px;
 	font-weight: 400;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-slim .session-details-row {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-slim .session-details-row {
 	max-width: 40%;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-slim .session-simple-provider {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-slim .session-simple-provider {
 	display: flex;
 	max-width: 88px;
 	margin-left: auto;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-slim .session-details-row :is(.session-diff, .session-description),
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .simple-session-slim .session-details-row .session-separator {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-slim .session-details-row :is(.session-diff, .session-description),
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-slim .session-details-row .session-separator {
 	display: none;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .session-section.session-section-settled {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .session-section.session-section-settled {
 	height: 28px;
 	margin-top: 8px;
 	padding: 0 8px;
@@ -603,16 +614,16 @@
 	font-weight: 500;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .session-section-settled .session-section-folder-icon {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .session-section-settled .session-section-folder-icon {
 	display: none;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .session-section-settled .session-section-label {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .session-section-settled .session-section-label {
 	order: 1;
 	flex: 0 0 auto;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .session-section-settled::after {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .session-section-settled::after {
 	content: '';
 	order: 2;
 	height: 1px;
@@ -620,7 +631,7 @@
 	background: color-mix(in srgb, var(--codex-border) 70%, transparent);
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .session-section-settled .session-section-chevron {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .session-section-settled .session-section-chevron {
 	order: 3;
 	display: flex;
 	align-items: center;
@@ -629,14 +640,14 @@
 	height: 16px;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .session-show-more-simple {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .session-show-more-simple {
 	height: 32px;
 	padding-left: 9px;
 	border-radius: 8px;
 	font-size: 12px;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .session-show-more-simple::before {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .session-show-more-simple::before {
 	content: '+';
 	width: 16px;
 	margin-right: 7px;
@@ -646,7 +657,7 @@
 	text-align: center;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-viewpane .agent-sessions-footer {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .agent-sessions-viewpane .agent-sessions-footer {
 	flex-direction: row;
 	align-items: center;
 	gap: 4px;
@@ -657,7 +668,7 @@
 	border-top-color: var(--codex-border);
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-footer-navigation {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .agent-sessions-footer-navigation {
 	display: flex;
 	min-width: 0;
 	flex: 0 0 auto;
@@ -667,7 +678,7 @@
 	margin: 0;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-footer-navigation .agent-sessions-sidebar-action {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .agent-sessions-footer-navigation .agent-sessions-sidebar-action {
 	display: inline-flex;
 	width: 32px;
 	height: 32px;
@@ -678,7 +689,7 @@
 	border-radius: 8px;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-footer-navigation .agent-sessions-sidebar-action-label {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .agent-sessions-footer-navigation .agent-sessions-sidebar-action-label {
 	position: absolute;
 	width: 1px;
 	height: 1px;
@@ -691,15 +702,15 @@
 	border: 0;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-footer-navigation .agent-sessions-sidebar-action-icon,
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-footer-navigation .agent-sessions-sidebar-action-icon .codicon {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .agent-sessions-footer-navigation .agent-sessions-sidebar-action-icon,
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .agent-sessions-footer-navigation .agent-sessions-sidebar-action-icon .codicon {
 	width: 16px;
 	height: 16px;
 	font-size: 16px;
 	line-height: 16px;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-viewpane .agent-sessions-footer .agent-sessions-user {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .agent-sessions-viewpane .agent-sessions-footer .agent-sessions-user {
 	width: auto;
 	height: 32px;
 	min-width: 32px;
@@ -710,17 +721,17 @@
 	border-radius: 8px;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-footer .agent-sessions-user-text {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .agent-sessions-footer .agent-sessions-user-text {
 	display: none;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-footer .agent-sessions-user-avatar {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .agent-sessions-footer .agent-sessions-user-avatar {
 	width: 28px;
 	height: 28px;
 	font-size: 11px;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .agent-sessions-footer .agent-sessions-update-icon {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .agent-sessions-footer .agent-sessions-update-icon {
 	order: -1;
 	width: 28px;
 	height: 28px;

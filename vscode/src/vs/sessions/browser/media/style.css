@@ -249,17 +249,17 @@
  * workspace. Its rounded right edge and short cast shadow create the overlap;
  * the split-view sash remains in its own higher layer, so the resize target is
  * unchanged. Keep the window-facing left edge square against the shell. */
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sidebar) {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window):not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sidebar) {
 	z-index: 1;
 	overflow: visible !important;
 	background: var(--sessions-main-region-background) !important;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sidebar)::after {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window):not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sidebar)::after {
 	display: none;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.phone-layout) .part.sidebar {
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window):not(.phone-layout) .part.sidebar {
 	position: relative;
 	z-index: 1;
 	overflow: hidden;
@@ -268,8 +268,8 @@
 	box-shadow: 5px 0 18px -10px color-mix(in srgb, var(--vscode-widget-shadow, #000) 58%, transparent);
 }
 
-.monaco-workbench.hc-black.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.phone-layout) .part.sidebar,
-.monaco-workbench.hc-light.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.phone-layout) .part.sidebar {
+.monaco-workbench.hc-black.agent-sessions-workbench:not(.jarvis-window):not(.phone-layout) .part.sidebar,
+.monaco-workbench.hc-light.agent-sessions-workbench:not(.jarvis-window):not(.phone-layout) .part.sidebar {
 	box-shadow: none;
 }
 

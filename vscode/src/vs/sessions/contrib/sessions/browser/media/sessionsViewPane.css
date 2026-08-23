@@ -680,19 +680,22 @@
 
 /* Advanced has a two-row dashboard toolbar whose bottom edge sits 134px from
  * the top of the window. Keep the sidebar's pinned actions inside that same
- * header band so the divider continues cleanly through both parts. The 32px
- * panel chrome + 9px top inset + 92px of actions + 1px divider = 134px. */
-.agent-sessions-workbench.optimus-window .agent-sessions-viewpane .agent-sessions-container {
-	padding-top: 9px;
-}
-
+ * header band so the divider continues cleanly through both parts. Advanced
+ * now shares Simple's sidebar chrome, so the container inset comes from the
+ * Simple parity layer (`codexTheme.css`: `padding: 8px 8px 10px`) rather than
+ * an override here: 32px panel chrome + 8px top inset + 93px of actions + 1px
+ * divider = 134px. Simple's pinned block is shorter than the stacked rows this
+ * band was originally sized for, so `min-height` now holds the band open and
+ * the divider stays aligned with the dashboard toolbar. */
 .agent-sessions-workbench.optimus-window .agent-sessions-viewpane .agent-sessions-pinned {
 	min-height: 93px;
 	box-sizing: border-box;
-	margin-right: -10px;
-	margin-left: -10px;
-	padding-right: 10px;
-	padding-left: 10px;
+	/* Bleed the divider to the container walls. Must track the horizontal
+	 * inset above (8px), not the 10px used before Advanced adopted Simple. */
+	margin-right: -8px;
+	margin-left: -8px;
+	padding-right: 8px;
+	padding-left: 8px;
 	border-bottom: 1px solid color-mix(in srgb, var(--agent-sidebar-border) 72%, transparent);
 }
 
