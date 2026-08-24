@@ -160,6 +160,13 @@ if ! file "${APP_BINARY}" | grep -Fq "${EXPECTED_MACHINE}"; then
   file "${APP_BINARY}" >&2
   exit 1
 fi
+if [[ -f "${APP_BINARY}.bin" ]]; then
+  if ! file "${APP_BINARY}.bin" | grep -Fq "${EXPECTED_MACHINE}"; then
+    echo "Packaged bootstrap real executable does not contain ${EXPECTED_MACHINE}." >&2
+    file "${APP_BINARY}.bin" >&2
+    exit 1
+  fi
+fi
 
 echo "Validating app signature and Gatekeeper acceptance"
 codesign --verify --deep --strict --verbose=4 "${STAGED_APP}"
@@ -182,9 +189,11 @@ for marker in \
   'codesign --verify --deep --strict' \
   'spctl --assess --type execute' \
   'rollback_app' \
-  'Confirmed running and activated' \
+  'Confirmed exact app process running' \
   'confirm_app_stable' \
-  'Updated app exited during post-launch stability check' \
+  'app_version_matches' \
+  'no longer belongs to the installed bundle during post-launch stability check' \
+  'retrying the exact executable directly' \
   'Installed and launched Backboard Studio'; do
   if ! grep -Fq "${marker}" "${UPDATER_JS}"; then
     echo "Packaged updater is missing readiness marker: ${marker}" >&2

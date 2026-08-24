@@ -5,7 +5,8 @@
 
 import assert from 'assert';
 import { VSBuffer } from '../../../../base/common/buffer.js';
-import { DisposableStore } from '../../../../base/common/lifecycle.js';
+import { Emitter } from '../../../../base/common/event.js';
+import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
 import { URI } from '../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
 import { FileService } from '../../../files/common/fileService.js';
@@ -19,8 +20,36 @@ import { IDiffComputeService } from '../../common/diffComputeService.js';
 import { ToolResultContentType } from '../../common/state/sessionState.js';
 import { createZeroDiffComputeService, TestDiffComputeService } from '../common/sessionTestHelpers.js';
 import { SessionDatabase } from '../../node/sessionDatabase.js';
-import { IEditSurvivalReporterFactory, NullEditSurvivalReporterFactory } from '../../node/shared/editSurvivalReporter.js';
+import { type IEditSurvivalReporter, type IEditSurvivalReporterLaunchParams, IEditSurvivalReporterFactory, NullEditSurvivalReporterFactory } from '../../node/shared/editSurvivalReporter.js';
 import { FileEditTracker, buildSessionDbUri, parseSessionDbUri } from '../../node/shared/fileEditTracker.js';
+
+class TestEditSurvivalReporter extends Disposable implements IEditSurvivalReporter {
+	private readonly _onDidDispose = this._register(new Emitter<void>());
+	readonly onDidDispose = this._onDidDispose.event;
+	isDisposed = false;
+	retainedTextChars = 1;
+
+	override dispose(): void {
+		if (this.isDisposed) {
+			return;
+		}
+		this.isDisposed = true;
+		this.retainedTextChars = 0;
+		this._onDidDispose.fire();
+		super.dispose();
+	}
+}
+
+class TestEditSurvivalReporterFactory implements IEditSurvivalReporterFactory {
+	readonly _serviceBrand: undefined;
+	readonly reporters: TestEditSurvivalReporter[] = [];
+
+	launch(_params: IEditSurvivalReporterLaunchParams): IEditSurvivalReporter {
+		const reporter = new TestEditSurvivalReporter();
+		this.reporters.push(reporter);
+		return reporter;
+	}
+}
 
 suite('FileEditTracker', () => {
 
@@ -43,7 +72,7 @@ suite('FileEditTracker', () => {
 		services.set(IDiffComputeService, createZeroDiffComputeService());
 		services.set(IEditSurvivalReporterFactory, new NullEditSurvivalReporterFactory());
 		const instantiationService: IInstantiationService = disposables.add(new InstantiationService(services));
-		tracker = instantiationService.createInstance(FileEditTracker, 'copilot:/test-session', db);
+		tracker = disposables.add(instantiationService.createInstance(FileEditTracker, 'copilot:/test-session', db));
 	});
 
 	teardown(async () => {
@@ -118,7 +147,7 @@ suite('FileEditTracker', () => {
 		services.set(IDiffComputeService, new TestDiffComputeService({ added: 1, removed: 1 }));
 		services.set(IEditSurvivalReporterFactory, new NullEditSurvivalReporterFactory());
 		const inst: IInstantiationService = disposables.add(new InstantiationService(services));
-		const localTracker = inst.createInstance(FileEditTracker, 'copilot:/test-session', db);
+		const localTracker = disposables.add(inst.createInstance(FileEditTracker, 'copilot:/test-session', db));
 
 		await localTracker.trackEditStart('/workspace/brand-new.txt');
 		await fileService.writeFile(URI.file('/workspace/brand-new.txt'), VSBuffer.fromString('fresh'));
@@ -155,6 +184,46 @@ suite('FileEditTracker', () => {
 		assert.ok(content);
 		assert.strictEqual(new TextDecoder().decode(content.beforeContent), 'original');
 		assert.strictEqual(new TextDecoder().decode(content.afterContent), 'modified');
+	});
+
+	test('discardEdit releases pending and completed snapshots', async () => {
+		const uri = URI.file('/workspace/discard.ts');
+		await fileService.writeFile(uri, VSBuffer.fromString('before'));
+
+		await tracker.trackEditStart(uri.fsPath);
+		tracker.discardEdit(uri.fsPath);
+		await fileService.writeFile(uri, VSBuffer.fromString('after-pending-discard'));
+		await tracker.completeEdit(uri.fsPath);
+		assert.strictEqual(await tracker.takeCompletedEdit('turn-1', 'discard-pending', uri.fsPath, '', undefined, undefined), undefined);
+
+		await tracker.trackEditStart(uri.fsPath);
+		await fileService.writeFile(uri, VSBuffer.fromString('after-completed-discard'));
+		await tracker.completeEdit(uri.fsPath);
+		tracker.discardEdit(uri.fsPath);
+		assert.strictEqual(await tracker.takeCompletedEdit('turn-1', 'discard-completed', uri.fsPath, '', undefined, undefined), undefined);
+	});
+
+	test('owns live reporters, removes self-finished reporters, and cancels the rest on dispose', async () => {
+		const reporterFactory = new TestEditSurvivalReporterFactory();
+		const services = new ServiceCollection();
+		services.set(ILogService, new NullLogService());
+		services.set(IFileService, fileService);
+		services.set(IDiffComputeService, createZeroDiffComputeService());
+		services.set(IEditSurvivalReporterFactory, reporterFactory);
+		const inst = disposables.add(new InstantiationService(services));
+		const localTracker = disposables.add(inst.createInstance(FileEditTracker, 'copilot:/owned-reporters', db));
+
+		await localTracker.recordExplicitEdit('turn-1', 'tc-1', '/workspace/one.ts', 'before', 'after', 'Write', undefined, 'model');
+		assert.strictEqual(localTracker.activeSurvivalReporterCount, 1);
+		reporterFactory.reporters[0].dispose();
+		assert.strictEqual(localTracker.activeSurvivalReporterCount, 0, 'self-finished reporter must leave tracker registry');
+
+		await localTracker.recordExplicitEdit('turn-1', 'tc-2', '/workspace/two.ts', 'before', 'after', 'Write', undefined, 'model');
+		assert.strictEqual(localTracker.activeSurvivalReporterCount, 1);
+		localTracker.dispose();
+		assert.ok(reporterFactory.reporters[1].isDisposed, 'tracker disposal must cancel active reporter timers');
+		assert.strictEqual(reporterFactory.reporters[1].retainedTextChars, 0);
+		assert.strictEqual(localTracker.activeSurvivalReporterCount, 0);
 	});
 });
 

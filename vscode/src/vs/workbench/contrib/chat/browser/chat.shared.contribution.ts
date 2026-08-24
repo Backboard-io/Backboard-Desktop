@@ -200,7 +200,6 @@ import { ChatWindowNotifier } from './chatWindowNotifier.js';
 import { ChatRepoInfoContribution } from './chatRepoInfo.js';
 import { VALID_PROMPT_FOLDER_PATTERN } from '../common/promptSyntax/utils/promptFilesLocator.js';
 import { ChatTipService, IChatTipService } from './chatTipService.js';
-import { ChatQueuePickerRendering } from './widget/input/chatQueuePickerActionItem.js';
 import { ExploreAgentDefaultModel } from './exploreAgentDefaultModel.js';
 import { PlanAgentDefaultModel } from './planAgentDefaultModel.js';
 import { UtilityModelContribution, UtilitySmallModelContribution } from './utilityModelContribution.js';
@@ -1133,7 +1132,7 @@ configurationRegistry.registerConfiguration({
 		[AgentHostAhpJsonlLoggingSettingId]: {
 			type: 'boolean',
 			description: nls.localize('chat.agentHost.ahpJsonlLogging', "When enabled, logs all AHP transport messages for agent host connections to JSONL files under the window's log directory."),
-			default: product.quality !== 'stable',
+			default: false,
 			tags: ['experimental', 'advanced'],
 		},
 		[AgentHostCustomTerminalToolEnabledSettingId]: {
@@ -1223,15 +1222,6 @@ configurationRegistry.registerConfiguration({
 			enum: UtilitySmallModelContribution.modelIds,
 			enumItemLabels: UtilitySmallModelContribution.modelLabels,
 			markdownEnumDescriptions: UtilitySmallModelContribution.modelDescriptions
-		},
-		[ChatConfiguration.RequestQueueingDefaultAction]: {
-			type: 'string',
-			enum: ['queue'],
-			enumDescriptions: [
-				nls.localize('chat.requestQueuing.defaultAction.queue', "Queue the message to send after the current request completes."),
-			],
-			description: nls.localize('chat.requestQueuing.defaultAction.description', "Controls which action is the default for the queue button when a request is in progress."),
-			default: 'queue',
 		},
 		[ChatConfiguration.EditModeHidden]: {
 			type: 'boolean',
@@ -2415,7 +2405,6 @@ registerWorkbenchContribution2(HookSchemaAssociationContribution.ID, HookSchemaA
 registerWorkbenchContribution2(ToolReferenceNamesContribution.ID, ToolReferenceNamesContribution, WorkbenchPhase.AfterRestored);
 registerWorkbenchContribution2(ChatAgentRecommendation.ID, ChatAgentRecommendation, WorkbenchPhase.Eventually);
 registerWorkbenchContribution2(ChatEditingEditorAccessibility.ID, ChatEditingEditorAccessibility, WorkbenchPhase.AfterRestored);
-registerWorkbenchContribution2(ChatQueuePickerRendering.ID, ChatQueuePickerRendering, WorkbenchPhase.BlockRestore);
 registerWorkbenchContribution2(ChatEditingEditorOverlay.ID, ChatEditingEditorOverlay, WorkbenchPhase.AfterRestored);
 registerWorkbenchContribution2(ChatEditingEditorContextKeys.ID, ChatEditingEditorContextKeys, WorkbenchPhase.AfterRestored);
 registerWorkbenchContribution2(ChatTransferContribution.ID, ChatTransferContribution, WorkbenchPhase.BlockRestore);

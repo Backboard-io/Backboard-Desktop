@@ -607,7 +607,7 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 	 * Budget for grabbing the outgoing frame before a reload. Spent before the
 	 * reload can start, so it is kept well under the boot it is covering for.
 	 */
-	private static readonly TRANSITION_SNAPSHOT_TIMEOUT = 600;
+	private static readonly TRANSITION_SNAPSHOT_TIMEOUT = 100;
 
 	//#region Events
 
@@ -1206,12 +1206,28 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 			if (!image || image.isEmpty()) {
 				return undefined;
 			}
+			const captureMs = Date.now() - start;
+			if (captureMs >= CodeWindow.TRANSITION_SNAPSHOT_TIMEOUT) {
+				// Encoding is synchronous. If capture already spent the entire
+				// budget, skip the decorative snapshot and let the destination load.
+				this.logService.trace(`window#captureTransitionSnapshot: skipped encode, capture took ${captureMs}ms (id: ${this._id})`);
+				return undefined;
+			}
+
+			// Retina captures contain roughly four times as many pixels as the
+			// logical window. The snapshot is only held for the incoming page's
+			// first paint, so encode it at logical size to minimize synchronous PNG
+			// work and the next renderer's decode cost.
+			const [contentWidth, contentHeight] = this._win.getContentSize();
+			const captured = image.getSize();
+			const needsDownscale = contentWidth > 0 && contentHeight > 0 && (image.getScaleFactors().some(factor => factor > 1) || captured.width > contentWidth || captured.height > contentHeight);
+			const frame = needsDownscale ? image.resize({ width: contentWidth, height: contentHeight, quality: 'good' }) : image;
 
 			// PNG (`toDataURL`), not JPEG: these windows can be translucent on
 			// macOS, and JPEG would flatten the transparent sidebar region to
 			// black.
-			const dataUrl = image.toDataURL();
-			this.logService.trace(`window#captureTransitionSnapshot: captured ${Math.round(dataUrl.length / 1024)}kb in ${Date.now() - start}ms (id: ${this._id})`);
+			const dataUrl = frame.toDataURL();
+			this.logService.trace(`window#captureTransitionSnapshot: captured ${Math.round(dataUrl.length / 1024)}kb (${needsDownscale ? `downscaled to ${contentWidth}x${contentHeight}` : 'native size'}) in ${Date.now() - start}ms, capture ${captureMs}ms (id: ${this._id})`);
 
 			return dataUrl;
 		} catch (error) {

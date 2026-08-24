@@ -59,8 +59,11 @@ function renderCollapsible(context: ComponentFixtureContext, commandText: string
 		false,
 		isComplete,
 		isSkipped,
+		false,
 		isRunningInBackground,
+		false,
 		undefined,
+		() => { },
 	));
 
 	session.appendChild(wrapper.domNode);

@@ -1138,6 +1138,13 @@
 	background-color: var(--vscode-terminal-background, var(--vscode-editor-background));
 }
 
+.agent-sessions-workbench .part.panel:has(.pane-body.integrated-terminal) {
+	/* The terminal page shares one continuous surface with its header. This
+	 * also covers the DOM behind xterm's canvas when a theme supplies a
+	 * distinct terminal.background color. */
+	--vscode-terminal-background: var(--part-background);
+}
+
 .agent-sessions-workbench .part.panel {
 	margin: 0;
 	background: var(--part-background);
@@ -1918,6 +1925,16 @@
 	transition:
 		opacity 250ms ease-out,
 		transform 250ms ease-out;
+}
+
+/* Mode switches already hold the outgoing frame until this workbench's first
+ * paint. Do not spend another 250ms animating freshly-created parts underneath
+ * it; regular in-workbench part toggles keep their transitions. */
+.agent-sessions-workbench.workbench-booting .part.auxiliarybar,
+.agent-sessions-workbench.workbench-booting .part.panel,
+.agent-sessions-workbench.workbench-booting .part.sessionspart,
+.agent-sessions-workbench.workbench-booting .part.sidebar > .content {
+	transition: none;
 }
 
 @starting-style {

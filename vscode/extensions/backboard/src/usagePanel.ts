@@ -29,7 +29,9 @@ interface LocalUsageEvent {
 	readonly cost_usd: number;
 }
 
-type LocalUsageRecord = Omit<LocalUsageEvent, 'cost_usd'>;
+interface LocalUsageRecord extends Omit<LocalUsageEvent, 'cost_usd'> {
+	readonly key: string;
+}
 
 interface CachedUsageLog {
 	readonly size: number;
@@ -47,23 +49,7 @@ export async function readLocalUsageSnapshot(models: readonly BridgeModel[]): Pr
 		path.join(os.homedir(), '.backboard_ide', 'cli-ts-sessions'),
 		path.join(os.homedir(), '.backboard', 'sessions'),
 	];
-	const logPaths: string[] = [];
-	for (const root of roots) {
-		let entries: fs.Dirent[];
-		try {
-			entries = await fs.promises.readdir(root, { withFileTypes: true });
-		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-				continue;
-			}
-			throw error;
-		}
-		for (const entry of entries) {
-			if (entry.isDirectory()) {
-				logPaths.push(path.join(root, entry.name, 'server.jsonl'));
-			}
-		}
-	}
+	const logPaths = (await Promise.all(roots.map(findUsageLogPaths))).flat();
 
 	const records: LocalUsageRecord[] = [];
 	const activeLogPaths = new Set<string>();
@@ -84,8 +70,14 @@ export async function readLocalUsageSnapshot(models: readonly BridgeModel[]): Pr
 			localUsageLogCache.delete(cachedPath);
 		}
 	}
-	const events: LocalUsageEvent[] = records.map(event => ({
-		...event,
+	const uniqueRecords = [...new Map(records.map(event => [event.key, event])).values()];
+	const events: LocalUsageEvent[] = uniqueRecords.map(event => ({
+		created_at: event.created_at,
+		provider: event.provider,
+		model: event.model,
+		input_tokens: event.input_tokens,
+		output_tokens: event.output_tokens,
+		total_tokens: event.total_tokens,
 		cost_usd: estimateUsageCost(pricingModels, event.provider, event.model, event.input_tokens, event.output_tokens),
 	}));
 	const inputTokens = events.reduce((sum, event) => sum + event.input_tokens, 0);
@@ -101,6 +93,32 @@ export async function readLocalUsageSnapshot(models: readonly BridgeModel[]): Pr
 		},
 		recent: { data: events },
 	};
+}
+
+async function findUsageLogPaths(root: string): Promise<string[]> {
+	const logPaths: string[] = [];
+	const directories = [root];
+	while (directories.length > 0) {
+		const directory = directories.pop()!;
+		let entries: fs.Dirent[];
+		try {
+			entries = await fs.promises.readdir(directory, { withFileTypes: true });
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+				continue;
+			}
+			throw error;
+		}
+		for (const entry of entries) {
+			const entryPath = path.join(directory, entry.name);
+			if (entry.isDirectory()) {
+				directories.push(entryPath);
+			} else if (entry.isFile() && entry.name === 'server.jsonl') {
+				logPaths.push(entryPath);
+			}
+		}
+	}
+	return logPaths;
 }
 
 async function readLocalModelCatalog(): Promise<readonly BridgeModel[]> {
@@ -182,8 +200,10 @@ async function readUsageEventsFromLog(logPath: string): Promise<readonly LocalUs
 			}
 			const provider = nonEmptyString(usage.provider) ?? 'backboard';
 			const model = nonEmptyString(usage.model) ?? 'Unknown model';
+			const createdAt = nonEmptyString(entry.timestamp) ?? new Date(0).toISOString();
 			events.push({
-				created_at: nonEmptyString(entry.timestamp) ?? new Date(0).toISOString(),
+				key: [nonEmptyString(entry.session_id), nonEmptyString(entry.endpoint), createdAt, provider, model, inputTokens, outputTokens, totalTokens].join('\u0000'),
+				created_at: createdAt,
 				provider,
 				model,
 				input_tokens: inputTokens,
@@ -499,9 +519,10 @@ function usageHtml(webview: vscode.Webview): string {
 		const firstNumber = (source, keys) => { const item = record(source); for (const key of keys) { const value = number(item[key]); if (value !== undefined) return value; } return undefined; };
 		const firstString = (source, keys) => { const item = record(source); for (const key of keys) { if (typeof item[key] === 'string' && item[key].trim()) return item[key].trim(); } return undefined; };
 		const compact = value => value === undefined ? '—' : new Intl.NumberFormat(undefined, { notation: Math.abs(value) >= 100000 ? 'compact' : 'standard', maximumFractionDigits: Math.abs(value) < 100 ? 1 : 0 }).format(value);
-		const money = value => value === undefined ? '—' : new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: value < 1 ? 2 : value < 100 ? 2 : 0 }).format(value);
+		const money = value => value === undefined ? '—' : new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: Math.abs(value) < .01 ? 6 : Math.abs(value) < 1 ? 4 : Math.abs(value) < 100 ? 2 : 0 }).format(value);
 		const percent = value => new Intl.NumberFormat(undefined, { style: 'percent', maximumFractionDigits: 1 }).format(value || 0);
 		const titleCase = value => String(value || 'Backboard').replace(/[_-]+/g, ' ').replace(/\\b\\w/g, char => char.toUpperCase());
+		const localDayKey = date => [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-');
 		const unwrapped = value => { const item = record(value); return Object.keys(record(item.data)).length ? record(item.data) : item; };
 		function recentItems(value) {
 			const source = unwrapped(value);
@@ -516,13 +537,15 @@ function usageHtml(webview: vscode.Webview): string {
 			const date = rawDate ? new Date(rawDate) : undefined;
 			const input = firstNumber(source, ['input_tokens', 'inputTokens', 'prompt_tokens', 'promptTokens', 'token_input_tokens']);
 			const output = firstNumber(source, ['output_tokens', 'outputTokens', 'completion_tokens', 'completionTokens', 'token_output_tokens']);
-			const cached = firstNumber(source, ['cached_tokens', 'cachedTokens', 'cache_read_input_tokens', 'cacheReadTokens']);
+			const cachedRead = firstNumber(source, ['cached_input_tokens', 'cachedInputTokens', 'cache_read_input_tokens', 'cacheReadTokens']);
+			const cachedWrite = firstNumber(source, ['cache_write_input_tokens', 'cacheWriteInputTokens', 'cache_creation_input_tokens', 'cacheCreationInputTokens']);
+			const cached = firstNumber(source, ['cached_tokens', 'cachedTokens', 'cache_tokens', 'cacheTokens']) ?? (cachedRead || 0) + (cachedWrite || 0);
 			return {
 				index,
 				date: date && !Number.isNaN(date.getTime()) ? date : undefined,
 				provider: firstString(source, ['provider', 'provider_name', 'providerName', 'model_provider', 'modelProvider']) || 'Backboard',
 				model: firstString(source, ['model', 'model_name', 'modelName']) || 'Unknown model',
-				cost: firstNumber(source, ['cost_usd', 'costUsd', 'total_cost', 'totalCost', 'cost', 'spendage', 'spend', 'amount_usd', 'amountUsd', 'token_usage_usd']) || 0,
+				cost: firstNumber(source, ['cost_usd', 'costUsd', 'total_cost', 'totalCost', 'cost', 'spendage', 'spend', 'amount_usd', 'amountUsd', 'amount_deducted_usd', 'amountDeductedUsd', 'token_usage_usd']) || 0,
 				input: input || 0,
 				output: output || 0,
 				cached: cached || 0,
@@ -534,22 +557,23 @@ function usageHtml(webview: vscode.Webview): string {
 			const summary = unwrapped(snapshot.summary);
 			const balance = unwrapped(snapshot.balance);
 			const allEvents = recentItems(snapshot.recent).map(eventFrom);
-			const cutoff = Date.now() - state.range * 86400000;
+			const cutoff = new Date(); cutoff.setHours(0, 0, 0, 0); cutoff.setDate(cutoff.getDate() - (state.range - 1));
 			const dated = allEvents.some(event => event.date);
-			const events = dated ? allEvents.filter(event => !event.date || event.date.getTime() >= cutoff) : allEvents;
+			const events = dated ? allEvents.filter(event => event.date && event.date.getTime() >= cutoff.getTime()) : allEvents;
+			const hasItemizedUsage = allEvents.length > 0;
 			const eventCost = events.reduce((sum, event) => sum + event.cost, 0);
 			const summaryCost = firstNumber(summary, ['total_spending_usd', 'totalSpendingUsd', 'token_usage_usd', 'tokenUsageUsd', 'spending', 'cost']);
-			const input = events.reduce((sum, event) => sum + event.input, 0) || firstNumber(summary, ['token_input_tokens', 'tokenInputTokens', 'input_tokens', 'inputTokens']) || 0;
-			const output = events.reduce((sum, event) => sum + event.output, 0) || firstNumber(summary, ['token_output_tokens', 'tokenOutputTokens', 'output_tokens', 'outputTokens']) || 0;
-			const cached = events.reduce((sum, event) => sum + event.cached, 0) || firstNumber(summary, ['cached_tokens', 'cachedTokens', 'cache_read_tokens']) || 0;
+			const input = hasItemizedUsage ? events.reduce((sum, event) => sum + event.input, 0) : firstNumber(summary, ['token_input_tokens', 'tokenInputTokens', 'input_tokens', 'inputTokens']) || 0;
+			const output = hasItemizedUsage ? events.reduce((sum, event) => sum + event.output, 0) : firstNumber(summary, ['token_output_tokens', 'tokenOutputTokens', 'output_tokens', 'outputTokens']) || 0;
+			const cached = hasItemizedUsage ? events.reduce((sum, event) => sum + event.cached, 0) : firstNumber(summary, ['cached_tokens', 'cachedTokens', 'cache_read_tokens']) || 0;
 			return {
 				events,
-				cost: eventCost > 0 ? eventCost : summaryCost,
+				cost: hasItemizedUsage ? eventCost : summaryCost,
 				input,
 				output,
 				cached,
 				balance: firstNumber(balance, ['balance_usd', 'balanceUsd', 'balance']),
-				recentCount: events.length || firstNumber(summary, ['events_count', 'eventsCount', 'request_count', 'requestCount']) || 0,
+				recentCount: hasItemizedUsage ? events.length : firstNumber(summary, ['events_count', 'eventsCount', 'request_count', 'requestCount']) || 0,
 				fetchedAt: number(snapshot.fetchedAt),
 			};
 		}
@@ -557,7 +581,7 @@ function usageHtml(webview: vscode.Webview): string {
 			const map = new Map();
 			for (const event of events) {
 				let label;
-				if (key === 'day') label = event.date ? event.date.toISOString().slice(0, 10) : 'Undated';
+				if (key === 'day') label = event.date ? localDayKey(event.date) : 'Undated';
 				else label = event[key];
 				const row = map.get(label) || { label, cost: 0, tokens: 0, input: 0, output: 0, count: 0 };
 				row.cost += event.cost; row.tokens += event.tokens; row.input += event.input; row.output += event.output; row.count++;
@@ -617,7 +641,7 @@ function usageHtml(webview: vscode.Webview): string {
 			for (const button of document.querySelectorAll('[data-range]')) button.setAttribute('aria-pressed', String(Number(button.dataset.range) === state.range));
 			for (const button of document.querySelectorAll('[data-mode]')) button.setAttribute('aria-pressed', String(button.dataset.mode === state.mode));
 			for (const button of document.querySelectorAll('[data-breakdown]')) button.setAttribute('aria-pressed', String(button.dataset.breakdown === state.breakdown));
-			const end = new Date(); const start = new Date(Date.now() - (state.range - 1) * 86400000);
+			const end = new Date(); const start = new Date(); start.setHours(0, 0, 0, 0); start.setDate(start.getDate() - (state.range - 1));
 			$('period').textContent = start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' to ' + end.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 			$('refresh').classList.toggle('loading', state.loading);
 			if (!state.snapshot) return;

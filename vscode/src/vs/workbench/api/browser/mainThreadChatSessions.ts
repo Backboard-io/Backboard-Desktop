@@ -1023,7 +1023,7 @@ export class MainThreadChatSessions extends Disposable implements MainThreadChat
 		observableSession.handleProgressComplete(requestId);
 	}
 
-	$handleAnchorResolve(handle: number, sesssionResource: UriComponents, requestId: string, requestHandle: string, anchor: Dto<IChatContentInlineReference>): void {
+	$handleAnchorResolve(handle: number, sesssionResource: UriComponents, requestId: string, requestHandle: string, anchor: Dto<IChatContentInlineReference> | undefined): void {
 		// throw new Error('Method not implemented.');
 	}
 

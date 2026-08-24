@@ -133,15 +133,6 @@
             "default": "fast",
             "description": "Reasoning intensity sent to Backboard."
           },
-          "backboard.webSearch": {
-            "type": "string",
-            "enum": [
-              "off",
-              "Auto"
-            ],
-            "default": "off",
-            "description": "Web search setting for Backboard turns."
-          },
           "backboard.imageGeneration": {
             "type": "string",
             "enum": [

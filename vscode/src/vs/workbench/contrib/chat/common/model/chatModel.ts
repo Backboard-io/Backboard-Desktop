@@ -10,13 +10,13 @@ import { IStringDictionary } from '../../../../../base/common/collections.js';
 import { BugIndicatingError } from '../../../../../base/common/errors.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { IMarkdownString, MarkdownString, isMarkdownString } from '../../../../../base/common/htmlContent.js';
-import { Disposable, DisposableStore, IDisposable, MutableDisposable } from '../../../../../base/common/lifecycle.js';
+import { Disposable, DisposableMap, DisposableStore, IDisposable, MutableDisposable } from '../../../../../base/common/lifecycle.js';
 import { ResourceMap } from '../../../../../base/common/map.js';
 import { revive } from '../../../../../base/common/marshalling.js';
 import { Schemas } from '../../../../../base/common/network.js';
 import { equals } from '../../../../../base/common/objects.js';
 import { IObservable, autorun, constObservable, derived, observableFromEvent, observableSignalFromEvent, observableValue, observableValueOpts, registerAutorunSelfDisposable } from '../../../../../base/common/observable.js';
-import { basename, isEqual } from '../../../../../base/common/resources.js';
+import { basename, getComparisonKey } from '../../../../../base/common/resources.js';
 import { hasKey, WithDefinedProps } from '../../../../../base/common/types.js';
 import { URI, UriDto } from '../../../../../base/common/uri.js';
 import { generateUuid } from '../../../../../base/common/uuid.js';
@@ -776,6 +776,10 @@ export class Response extends AbstractResponse implements IDisposable {
 	}
 
 	private _citations: IChatCodeCitation[] = [];
+	private readonly _openTextEditGroups = new ResourceMap<IChatTextEditGroup>(getComparisonKey);
+	private readonly _openNotebookEditGroups = new ResourceMap<IChatNotebookEditGroup>(getComparisonKey);
+	private readonly _toolInvocationsByCallId = new Map<string, IChatToolInvocation>();
+	private readonly _toolInvocationStateListeners = this._store.add(new DisposableMap<string, DisposableStore>());
 
 
 	constructor(value: IMarkdownString | ReadonlyArray<SerializedChatResponsePart>) {
@@ -784,6 +788,7 @@ export class Response extends AbstractResponse implements IDisposable {
 				isMarkdownString(v) ? { content: v, kind: 'markdownContent' } satisfies IChatMarkdownContent :
 					{ kind: 'treeData', treeData: v }
 		)));
+		this._rebuildMutablePartIndexes();
 	}
 
 	dispose(): void {
@@ -793,6 +798,8 @@ export class Response extends AbstractResponse implements IDisposable {
 
 	clear(): void {
 		this._responseParts = [];
+		this._clearMutablePartIndexes();
+		this._toolInvocationStateListeners.clearAndDisposeAll();
 		this._contentChanged(true);
 	}
 
@@ -814,6 +821,7 @@ export class Response extends AbstractResponse implements IDisposable {
 		if (message) {
 			this._responseParts.push({ kind: 'warning', content: new MarkdownString(message) });
 		}
+		this._rebuildMutablePartIndexes();
 		this._contentChanged(true);
 	}
 
@@ -831,25 +839,22 @@ export class Response extends AbstractResponse implements IDisposable {
 
 			// last response which is NOT a text edit group because we do want to support heterogenous streaming but not have
 			// the MD be chopped up by text edit groups (and likely other non-renderable parts)
-			const lastResponsePart = this._responseParts
-				.filter(p => p.kind !== 'textEditGroup')
-				.at(-1);
+			const lastResponsePartIndex = this._findLastPartIndexExcludingTextEdits();
+			const lastResponsePart = this._responseParts[lastResponsePartIndex];
 
 			if (!lastResponsePart || lastResponsePart.kind !== 'markdownContent' || !canMergeMarkdownStrings(lastResponsePart.content, progress.content)) {
 				// The last part can't be merged with- not markdown, or markdown with different permissions
 				this._responseParts.push(progress);
 			} else {
 				// Don't modify the current object, since it's being diffed by the renderer
-				const idx = this._responseParts.indexOf(lastResponsePart);
-				this._responseParts[idx] = { ...lastResponsePart, content: appendMarkdownString(lastResponsePart.content, progress.content) };
+				this._responseParts[lastResponsePartIndex] = { ...lastResponsePart, content: appendMarkdownString(lastResponsePart.content, progress.content) };
 			}
 			this._contentChanged(quiet);
 		} else if (progress.kind === 'thinking') {
 
 			// tries to split thinking chunks if it is an array. only while certain models give us array chunks.
-			const lastResponsePart = this._responseParts
-				.filter(p => p.kind !== 'textEditGroup')
-				.at(-1);
+			const lastResponsePartIndex = this._findLastPartIndexExcludingTextEdits();
+			const lastResponsePart = this._responseParts[lastResponsePartIndex];
 
 			const lastText = lastResponsePart && lastResponsePart.kind === 'thinking'
 				? (Array.isArray(lastResponsePart.value) ? lastResponsePart.value.join('') : (lastResponsePart.value || ''))
@@ -865,8 +870,7 @@ export class Response extends AbstractResponse implements IDisposable {
 				|| !canMergeMarkdownStrings(new MarkdownString(lastText), new MarkdownString(currText))) {
 				this._responseParts.push(progress);
 			} else {
-				const idx = this._responseParts.indexOf(lastResponsePart);
-				this._responseParts[idx] = {
+				this._responseParts[lastResponsePartIndex] = {
 					...lastResponsePart,
 					value: appendMarkdownString(new MarkdownString(lastText), new MarkdownString(currText)).value
 				};
@@ -892,40 +896,53 @@ export class Response extends AbstractResponse implements IDisposable {
 			this._contentChanged(quiet);
 		} else if (progress.kind === 'progressTask') {
 			// Add a new resolving part
-			const responsePosition = this._responseParts.push(progress) - 1;
+			this._responseParts.push(progress);
 			this._contentChanged(quiet);
 
-			const disp = progress.onDidAddProgress(() => {
+			const progressListener = this._store.add(new MutableDisposable<IDisposable>());
+			progressListener.value = progress.onDidAddProgress(() => {
 				this._contentChanged(false);
 			});
 
-			progress.task?.().then((content) => {
-				// Stop listening for progress updates once the task settles
-				disp.dispose();
+			const task = progress.task?.();
+			if (task) {
+				// A provider-controlled task may never settle. Do not let its promise
+				// retain the entire response after the chat/model has been released.
+				const responseRef = new WeakRef(this);
+				const settleTask = (content: string | void) => {
+					const response = responseRef.deref();
+					// The response may have been disposed while the task was pending.
+					if (!response || !progressListener.value) {
+						return;
+					}
+					const responsePosition = response._responseParts.indexOf(progress);
+					if (responsePosition < 0) {
+						return;
+					}
 
-				// Replace the resolving part's content with the resolved response
-				if (typeof content === 'string') {
-					(this._responseParts[responsePosition] as IChatTask).content = new MarkdownString(content);
-				}
-				this._contentChanged(false);
-			});
+					// Replace the resolving part's content with the resolved response
+					if (typeof content === 'string') {
+						progress.content = new MarkdownString(content);
+					}
+					// Completed responses should not retain the task's DeferredPromise
+					// and progress emitter for the lifetime of the chat history.
+					response._responseParts[responsePosition] = progress.toJSON();
+					response._contentChanged(false);
+				};
+				void task.then(settleTask, () => settleTask(undefined)).finally(() => responseRef.deref()?._store.delete(progressListener));
+			}
 
 		} else if (progress.kind === 'toolInvocation') {
-			registerAutorunSelfDisposable(this._store, reader => {
-				progress.state.read(reader); // update repr when state changes
-				this._contentChanged(false);
-
-				if (IChatToolInvocation.isComplete(progress, reader)) {
-					reader.dispose();
-				}
-			});
 			this._responseParts.push(progress);
+			this._toolInvocationsByCallId.set(progress.toolCallId, progress);
+			this._registerToolInvocationStateListener(progress);
 			this._contentChanged(quiet);
 		} else if (progress.kind === 'externalToolInvocationUpdate') {
 			this._handleExternalToolInvocationUpdate(progress);
 			this._contentChanged(quiet);
 		} else {
 			this._responseParts.push(progress);
+			this._indexMutableResponsePart(progress);
 			this._contentChanged(quiet);
 		}
 	}
@@ -955,32 +972,41 @@ export class Response extends AbstractResponse implements IDisposable {
 	}
 
 	private _mergeOrPushTextEditGroup(uri: URI, edits: TextEdit[], done: boolean | undefined, isExternalEdit: boolean | undefined): void {
-		for (const candidate of this._responseParts) {
-			if (candidate.kind === 'textEditGroup' && !candidate.done && isEqual(candidate.uri, uri)) {
-				candidate.edits.push(edits);
-				candidate.done = done;
-				return;
+		const candidate = this._openTextEditGroups.get(uri);
+		if (candidate) {
+			candidate.edits.push(edits);
+			candidate.done = done;
+			if (done) {
+				this._openTextEditGroups.delete(uri);
 			}
+			return;
 		}
-		this._responseParts.push({ kind: 'textEditGroup', uri, edits: [edits], done, isExternalEdit });
+		const group: IChatTextEditGroup = { kind: 'textEditGroup', uri, edits: [edits], done, isExternalEdit };
+		this._responseParts.push(group);
+		if (!done) {
+			this._openTextEditGroups.set(uri, group);
+		}
 	}
 
 	private _mergeOrPushNotebookEditGroup(uri: URI, edits: ICellTextEditOperation[] | ICellEditOperation[], done: boolean | undefined, isExternalEdit: boolean | undefined): void {
-		for (const candidate of this._responseParts) {
-			if (candidate.kind === 'notebookEditGroup' && !candidate.done && isEqual(candidate.uri, uri)) {
-				candidate.edits.push(edits);
-				candidate.done = done;
-				return;
+		const candidate = this._openNotebookEditGroups.get(uri);
+		if (candidate) {
+			candidate.edits.push(edits);
+			candidate.done = done;
+			if (done) {
+				this._openNotebookEditGroups.delete(uri);
 			}
+			return;
 		}
-		this._responseParts.push({ kind: 'notebookEditGroup', uri, edits: [edits], done, isExternalEdit });
+		const group: IChatNotebookEditGroup = { kind: 'notebookEditGroup', uri, edits: [edits], done, isExternalEdit };
+		this._responseParts.push(group);
+		if (!done) {
+			this._openNotebookEditGroups.set(uri, group);
+		}
 	}
 
 	private _handleExternalToolInvocationUpdate(progress: IChatExternalToolInvocationUpdate): void {
-		// Look for existing invocation in the response parts
-		const existingInvocation = this._responseParts.findLast(
-			(part): part is ChatToolInvocation => part.kind === 'toolInvocation' && part.toolCallId === progress.toolCallId
-		);
+		const existingInvocation = this._toolInvocationsByCallId.get(progress.toolCallId) as ChatToolInvocation | undefined;
 
 		if (existingInvocation) {
 			if (progress.toolSpecificData !== undefined) {
@@ -1033,6 +1059,62 @@ export class Response extends AbstractResponse implements IDisposable {
 		}
 
 		this._responseParts.push(invocation);
+		this._toolInvocationsByCallId.set(progress.toolCallId, invocation);
+	}
+
+	private _findLastPartIndexExcludingTextEdits(): number {
+		for (let index = this._responseParts.length - 1; index >= 0; index--) {
+			if (this._responseParts[index].kind !== 'textEditGroup') {
+				return index;
+			}
+		}
+		return -1;
+	}
+
+	private _registerToolInvocationStateListener(progress: IChatToolInvocation): void {
+		const listenerStore = new DisposableStore();
+		this._toolInvocationStateListeners.set(progress.toolCallId, listenerStore);
+		let initialRun = true;
+		registerAutorunSelfDisposable(listenerStore, reader => {
+			const complete = IChatToolInvocation.isComplete(progress, reader);
+			if (!initialRun) {
+				this._contentChanged(false);
+			}
+			initialRun = false;
+
+			if (complete) {
+				reader.dispose();
+				this._toolInvocationStateListeners.deleteAndDispose(progress.toolCallId);
+			}
+		});
+	}
+
+	private _indexMutableResponsePart(part: IChatProgressResponseContent): void {
+		if (part.kind === 'textEditGroup' && !part.done && !this._openTextEditGroups.has(part.uri)) {
+			this._openTextEditGroups.set(part.uri, part);
+		} else if (part.kind === 'notebookEditGroup' && !part.done && !this._openNotebookEditGroups.has(part.uri)) {
+			this._openNotebookEditGroups.set(part.uri, part);
+		} else if (part.kind === 'toolInvocation') {
+			this._toolInvocationsByCallId.set(part.toolCallId, part);
+		}
+	}
+
+	private _clearMutablePartIndexes(): void {
+		this._openTextEditGroups.clear();
+		this._openNotebookEditGroups.clear();
+		this._toolInvocationsByCallId.clear();
+	}
+
+	private _rebuildMutablePartIndexes(): void {
+		this._clearMutablePartIndexes();
+		for (const part of this._responseParts) {
+			this._indexMutableResponsePart(part);
+		}
+		for (const toolCallId of this._toolInvocationStateListeners.keys()) {
+			if (!this._toolInvocationsByCallId.has(toolCallId)) {
+				this._toolInvocationStateListeners.deleteAndDispose(toolCallId);
+			}
+		}
 	}
 
 	protected override computeRepr(): string {

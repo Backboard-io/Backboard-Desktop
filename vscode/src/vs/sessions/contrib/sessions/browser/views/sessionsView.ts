@@ -52,6 +52,7 @@ import { resolveBackboardUserInfo } from '../../../../../workbench/contrib/chat/
 import { isBackboardProduct } from '../../../../../workbench/contrib/chat/common/backboardAuth.js';
 import { IProductService } from '../../../../../platform/product/common/productService.js';
 import { isRecentFolder, IWorkspacesService } from '../../../../../platform/workspaces/common/workspaces.js';
+import { BackboardUsageView } from '../backboardUsage.js';
 
 const $ = DOM.$;
 export const SessionsViewId = 'sessions.workbench.view.sessionsView';
@@ -124,6 +125,7 @@ export class SessionsView extends ViewPane {
 	private groupingContextKey: IContextKey | undefined;
 	private sortingContextKey: IContextKey | undefined;
 	private workspaceGroupCappedContextKey: IContextKey<boolean> | undefined;
+	private usageView: BackboardUsageView | undefined;
 	private readonly filterContextKeys = new Map<string, { key: IContextKey<boolean>; getDefault: () => boolean }>();
 
 	constructor(
@@ -491,7 +493,11 @@ export class SessionsView extends ViewPane {
 				this.instantiationService.createInstance(SkillsLibraryController).showMarketplace(anchor);
 			});
 			this.createSidebarAction(navigation, Codicon.graph, localize('usage', "Usage"), () => {
-				void this.commandService.executeCommand('backboard.openUsage');
+				// Simple mode can run without an extension host, so open the built-in
+				// usage view instead of dispatching the extension-owned command.
+				this.logService.info('[Backboard] Opening the Simple mode usage view.');
+				this.usageView ??= this._register(this.instantiationService.createInstance(BackboardUsageView));
+				this.usageView.show();
 			});
 			this.createSidebarAction(navigation, Codicon.settingsGear, localize('settings', "Settings"), () => {
 				void this.commandService.executeCommand('workbench.action.openSettings');

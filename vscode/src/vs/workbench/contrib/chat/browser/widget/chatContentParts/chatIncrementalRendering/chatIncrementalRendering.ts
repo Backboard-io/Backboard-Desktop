@@ -61,7 +61,10 @@ export class IncrementalDOMMorpher extends Disposable {
 	private _rafScheduled: boolean = false;
 	private _pendingMarkdown: string | undefined;
 	private _rafHandle: number | undefined;
+	private _renderTimerHandle: number | undefined;
 	private _renderCallback: ((newMarkdown: string) => void) | undefined;
+	private _didFinalize = false;
+	private _suppressNextAnimation = false;
 
 	private _buffer: IIncrementalRenderingBuffer;
 	private _animation: IIncrementalRenderingAnimation;
@@ -81,6 +84,7 @@ export class IncrementalDOMMorpher extends Disposable {
 			if (e.affectsConfiguration(ChatConfiguration.IncrementalRenderingBuffering)) {
 				this._buffer.dispose?.();
 				this._buffer = this._createBuffer();
+				this._buffer.seed?.(this._renderedMarkdown);
 			}
 		}));
 	}
@@ -118,7 +122,7 @@ export class IncrementalDOMMorpher extends Disposable {
 	 * also flushes any remaining buffered content for buffers
 	 * that don't handle their own flushing (e.g. ParagraphBuffer).
 	 */
-	updateStreamRate(rate: number, isComplete: boolean): void {
+	updateStreamRate(rate: number, isComplete: boolean, forceFinalRender = false): void {
 		if (this._buffer instanceof WordBuffer) {
 			this._buffer.setRate(rate, isComplete);
 		}
@@ -127,9 +131,26 @@ export class IncrementalDOMMorpher extends Disposable {
 		// ParagraphBuffer), force-render any remaining buffered
 		// content when the stream completes. Without this, content
 		// after the last \n\n boundary is never rendered.
+		if (isComplete && this._didFinalize) {
+			return;
+		}
+		if (isComplete) {
+			this._didFinalize = true;
+		}
+
 		if (isComplete && !this._buffer.handlesFlush && this._lastMarkdown.length > this._renderedMarkdown.length) {
+			this._suppressNextAnimation = true;
 			this._pendingMarkdown = this._lastMarkdown;
-			this._scheduleRender();
+			this._scheduleRender(0, true);
+		} else if (isComplete && this._buffer.handlesFlush
+			&& (forceFinalRender || this._lastMarkdown.length > this._renderedMarkdown.length)) {
+			// Word-buffered streams may already have committed the complete textual
+			// prefix using the lightweight long-response presentation. Force one
+			// completion render only for that transient view. Rich DOM that is already
+			// caught up stays mounted, avoiding a redundant whole-answer rebuild.
+			this._suppressNextAnimation = true;
+			this._pendingMarkdown = this._lastMarkdown;
+			this._scheduleRender(0, true);
 		}
 	}
 
@@ -141,24 +162,10 @@ export class IncrementalDOMMorpher extends Disposable {
 	 */
 	seed(markdown: string, animateInitial?: boolean): void {
 		this._lastMarkdown = markdown;
+		this._didFinalize = false;
 		this._animationStartTime = 0;
-
-		// For drip-feed buffers (word), clear the DOM and let the
-		// buffer reveal content from scratch — the initial
-		// doRenderMarkdown() ran to initialize pipeline state but
-		// the visible content should be built up by the buffer.
-		if (this._buffer.handlesFlush && markdown.length > 0) {
-			this._renderedMarkdown = '';
-			this._revealedChildCount = 0;
-			// Clear the DOM so the buffer starts from empty.
-			while (this._domNode.firstChild) {
-				this._domNode.removeChild(this._domNode.firstChild);
-			}
-			// Schedule the first drip-feed render.
-			this._pendingMarkdown = markdown;
-			this._scheduleRender();
-			return;
-		}
+		this._suppressNextAnimation = false;
+		this._buffer.seed?.(markdown);
 
 		this._renderedMarkdown = markdown;
 		this._revealedChildCount = animateInitial ? 0 : this._domNode.children.length;
@@ -192,7 +199,7 @@ export class IncrementalDOMMorpher extends Disposable {
 			return true;
 		}
 
-		const renderable = this._buffer.getRenderable(newMarkdown, this._renderedMarkdown);
+		const renderable = this._buffer.getRenderable(newMarkdown, this._renderedMarkdown, appended);
 
 		if (renderable.length > this._renderedMarkdown.length) {
 			this._renderedMarkdown = renderable;
@@ -205,17 +212,32 @@ export class IncrementalDOMMorpher extends Disposable {
 
 	// ---- rAF batching ----
 
-	private _scheduleRender(): void {
+	private _scheduleRender(delay = 0, forceImmediate = false): void {
 		if (this._rafScheduled) {
 			return;
 		}
-		this._rafScheduled = true;
 		const win = getWindow(this._domNode);
-		this._rafHandle = win.requestAnimationFrame(() => {
-			this._rafScheduled = false;
-			this._rafHandle = undefined;
-			this._flushRender();
-		});
+		if (this._renderTimerHandle !== undefined) {
+			if (!forceImmediate) {
+				return;
+			}
+			win.clearTimeout(this._renderTimerHandle);
+			this._renderTimerHandle = undefined;
+		}
+		const scheduleFrame = () => {
+			this._renderTimerHandle = undefined;
+			this._rafScheduled = true;
+			this._rafHandle = win.requestAnimationFrame(() => {
+				this._rafScheduled = false;
+				this._rafHandle = undefined;
+				this._flushRender();
+			});
+		};
+		if (delay > 0) {
+			this._renderTimerHandle = win.setTimeout(scheduleFrame, delay);
+		} else {
+			scheduleFrame();
+		}
 	}
 
 	private _flushRender(): void {
@@ -235,7 +257,7 @@ export class IncrementalDOMMorpher extends Disposable {
 				// with the same pending content.
 				if (this._buffer.needsNextFrame) {
 					this._pendingMarkdown = markdown;
-					this._scheduleRender();
+					this._scheduleRender(this._buffer.nextRenderDelay ?? 0);
 				}
 				return;
 			}
@@ -244,13 +266,23 @@ export class IncrementalDOMMorpher extends Disposable {
 
 		this._renderedMarkdown = markdown;
 		this._renderCallback(markdown);
-		this._animateNewChildren();
+		if (this._suppressNextAnimation) {
+			// Completion may replace the lightweight streaming node with rich
+			// markdown. Treat the hydrated DOM as already visible so the whole
+			// answer does not appear to replay from the beginning.
+			this._suppressNextAnimation = false;
+			this._revealedChildCount = this._domNode.children.length;
+			this._animationStartTime = 0;
+			this._batchChildCount = 0;
+		} else {
+			this._animateNewChildren();
+		}
 
 		// If the buffer has more content to reveal, keep the rAF
 		// loop running even though no new tokens arrived.
 		if (this._buffer.needsNextFrame) {
 			this._pendingMarkdown = this._lastMarkdown;
-			this._scheduleRender();
+			this._scheduleRender(this._buffer.nextRenderDelay ?? 0);
 		}
 	}
 
@@ -293,8 +325,13 @@ export class IncrementalDOMMorpher extends Disposable {
 			getWindow(this._domNode).cancelAnimationFrame(this._rafHandle);
 			this._rafHandle = undefined;
 		}
+		if (this._renderTimerHandle !== undefined) {
+			getWindow(this._domNode).clearTimeout(this._renderTimerHandle);
+			this._renderTimerHandle = undefined;
+		}
 		this._rafScheduled = false;
 		this._pendingMarkdown = undefined;
+		this._suppressNextAnimation = false;
 		this._renderCallback = undefined;
 		this._buffer.dispose?.();
 		super.dispose();

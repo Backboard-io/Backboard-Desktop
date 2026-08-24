@@ -10,6 +10,23 @@ import { getCommandOutputSnapshot } from '../../../../terminal/browser/chatTermi
 import { TerminalCapability, type ITerminalCommand } from '../../../../../../platform/terminal/common/capabilities/capabilities.js';
 import { ITerminalLogService } from '../../../../../../platform/terminal/common/terminal.js';
 
+const MAX_PERSISTED_TERMINAL_OUTPUT = 200_000;
+const PERSISTED_TERMINAL_OUTPUT_HEAD = 40_000;
+
+export function limitTerminalCommandOutput(snapshot: NonNullable<IChatTerminalToolInvocationData['terminalCommandOutput']>): NonNullable<IChatTerminalToolInvocationData['terminalCommandOutput']> {
+	if (snapshot.text.length <= MAX_PERSISTED_TERMINAL_OUTPUT) {
+		return snapshot;
+	}
+	const omitted = snapshot.text.length - MAX_PERSISTED_TERMINAL_OUTPUT;
+	const marker = `\r\n\r\n… ${omitted.toLocaleString('en-US')} characters omitted …\r\n\r\n`;
+	const tailLength = MAX_PERSISTED_TERMINAL_OUTPUT - PERSISTED_TERMINAL_OUTPUT_HEAD - marker.length;
+	return {
+		...snapshot,
+		text: snapshot.text.slice(0, PERSISTED_TERMINAL_OUTPUT_HEAD) + marker + snapshot.text.slice(-tailLength),
+		truncated: true,
+	};
+}
+
 export class TerminalCommandArtifactCollector {
 	constructor(
 		@ITerminalLogService private readonly _logService: ITerminalLogService,
@@ -64,10 +81,11 @@ export class TerminalCommandArtifactCollector {
 			return undefined;
 		}
 
-		return getCommandOutputSnapshot(xterm, command, (reason, error) => {
+		const snapshot = await getCommandOutputSnapshot(xterm, command, (reason, error) => {
 			const suffix = reason === 'fallback' ? ' (fallback)' : '';
 			this._logService.debug(`RunInTerminalTool: Failed to snapshot command output${suffix}`, error);
 		});
+		return snapshot ? limitTerminalCommandOutput(snapshot) : undefined;
 	}
 
 	/**
@@ -103,7 +121,7 @@ export class TerminalCommandArtifactCollector {
 					if (lineCount > 0) {
 						const text = await xterm.getRangeAsVT(executedMarker, undefined, true);
 						if (text) {
-							return { text, lineCount };
+							return limitTerminalCommandOutput({ text, lineCount });
 						}
 					}
 				} catch (error) {

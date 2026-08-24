@@ -24,7 +24,6 @@ function buildCorePrompt(context: PromptContext = {}): string {
 		communication(context),
 		clarification(context),
 		autonomy(context),
-		docsLookup(context),
 		taskHandling(context),
 		ATTACHMENTS_GUIDANCE,
 		codingStandards(),
@@ -89,13 +88,6 @@ function autonomy(context: PromptContext): string {
 	return `## Working Autonomously
 
 - No user is available to answer questions, so do not stall waiting for input. Choose the most reasonable interpretation, note it briefly if it matters, and carry the work through to a complete, tested solution.`;
-}
-
-function docsLookup(context: PromptContext): string {
-	if (!hasTool(context, "FetchUrl")) return "";
-	return `## Backboard.io Information
-
-- When the user asks about Backboard itself (commands, configuration, settings, skills, MCP, hooks, custom droids, BYOK, or other Backboard.io-specific behavior), fetch \`https://docs.backboard.io/llms.txt\` before answering if local context is insufficient.`;
 }
 
 function taskHandling(context: PromptContext): string {

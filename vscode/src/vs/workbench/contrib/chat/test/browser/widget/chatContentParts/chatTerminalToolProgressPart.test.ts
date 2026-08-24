@@ -5,11 +5,16 @@
 
 import assert from 'assert';
 import { Emitter } from '../../../../../../../base/common/event.js';
+import { autorun } from '../../../../../../../base/common/observable.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../../base/test/common/utils.js';
 import { runWithFakedTimers } from '../../../../../../../base/test/common/timeTravelScheduler.js';
 import { timeout } from '../../../../../../../base/common/async.js';
 import { TerminalToolAutoExpand, TerminalToolAutoExpandTimeout } from '../../../../browser/widget/chatContentParts/toolInvocationParts/terminalToolAutoExpand.js';
-import { getTerminalOutputViewportHeight } from '../../../../browser/widget/chatContentParts/toolInvocationParts/chatTerminalToolProgressPart.js';
+import { getTerminalInitialExpandedState, getTerminalOutputViewportHeight, resolveStoredTerminalOutputLineCount, shouldAutoExpandTerminalFailure, shouldRenderStoredTerminalOutputFirst } from '../../../../browser/widget/chatContentParts/toolInvocationParts/chatTerminalToolProgressPart.js';
+import { shouldRerenderToolInvocationSubPart } from '../../../../browser/widget/chatContentParts/toolInvocationParts/chatToolInvocationPart.js';
+import { IChatToolInvocation } from '../../../../common/chatService/chatService.js';
+import { ChatToolInvocation } from '../../../../common/model/chatProgressTypes/chatToolInvocation.js';
+import { ToolDataSource } from '../../../../common/tools/languageModelToolsService.js';
 
 suite('ChatTerminalToolProgressPart Auto-Expand Logic', () => {
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
@@ -60,6 +65,100 @@ suite('ChatTerminalToolProgressPart Auto-Expand Logic', () => {
 		assert.strictEqual(getTerminalOutputViewportHeight(480, 200, true), '200px');
 		assert.strictEqual(getTerminalOutputViewportHeight(120, 200, true), '120px');
 		assert.strictEqual(getTerminalOutputViewportHeight(480, 200, false), '');
+	});
+
+	test('Cursor transcript starts commands collapsed until output earns expansion', () => {
+		assert.strictEqual(getTerminalInitialExpandedState(undefined, true, false, false), false, 'running transcript command');
+		assert.strictEqual(getTerminalInitialExpandedState(undefined, true, true, false), false, 'successful transcript command');
+		assert.strictEqual(getTerminalInitialExpandedState(undefined, true, true, true), true, 'failed transcript command');
+		assert.strictEqual(getTerminalInitialExpandedState(undefined, false, false, false), true, 'running stock command');
+		assert.strictEqual(getTerminalInitialExpandedState(true, true, true, false), true, 'stored user state');
+		assert.strictEqual(getTerminalInitialExpandedState(false, true, true, true), false, 'stored collapse wins over automatic failure expansion');
+	});
+
+	test('same-state terminal data replacement rerenders the terminal subpart', () => {
+		const executingState = { type: IChatToolInvocation.StateKind.Executing } as IChatToolInvocation.State;
+		const firstData = { kind: 'terminal', terminalCommandOutput: undefined };
+		const nextData = { kind: 'terminal', terminalCommandOutput: { text: 'streamed output' } };
+		assert.strictEqual(shouldRerenderToolInvocationSubPart({
+			state: executingState,
+			dataKind: 'terminal',
+			data: firstData,
+		}, {
+			state: executingState,
+			dataKind: 'terminal',
+			data: nextData,
+		}), true);
+		assert.strictEqual(shouldRerenderToolInvocationSubPart({
+			state: executingState,
+			dataKind: 'terminal',
+			data: nextData,
+		}, {
+			state: executingState,
+			dataKind: 'terminal',
+			data: nextData,
+		}), false);
+		assert.strictEqual(shouldRerenderToolInvocationSubPart({
+			state: executingState,
+			dataKind: 'terminal',
+			data: nextData,
+		}, {
+			state: { ...executingState },
+			dataKind: 'terminal',
+			data: nextData,
+		}), true, 'an explicit same-type state notification must repaint mutated payloads');
+		assert.strictEqual(shouldRerenderToolInvocationSubPart({
+			state: executingState,
+			dataKind: 'externalEdit',
+			data: { file: 'before.ts' },
+		}, {
+			state: { ...executingState },
+			dataKind: 'externalEdit',
+			data: { file: 'after.ts' },
+		}), false, 'same-kind edit payloads retain the original diff rendering lifecycle');
+	});
+
+	test('same-kind tool data replacement notifies live render observers', () => {
+		const invocation = new ChatToolInvocation({
+			invocationMessage: 'Running command',
+			toolSpecificData: { kind: 'terminal', commandLine: { original: 'printf first' }, language: 'shellscript' },
+		}, {
+			id: 'test-terminal',
+			displayName: 'Terminal',
+			modelDescription: 'Runs a command',
+			source: ToolDataSource.Internal,
+		}, 'call-terminal', undefined, {}, {}, undefined);
+		const observedCommands: string[] = [];
+		store.add(autorun(reader => {
+			invocation.toolSpecificDataKind.read(reader);
+			if (invocation.toolSpecificData?.kind === 'terminal') {
+				observedCommands.push(invocation.toolSpecificData.commandLine.original);
+			}
+		}));
+
+		invocation.toolSpecificData = { kind: 'terminal', commandLine: { original: 'printf second' }, language: 'shellscript' };
+
+		assert.deepStrictEqual(observedCommands, ['printf first', 'printf second']);
+	});
+
+	test('manual terminal disclosure choice prevents failure auto-expansion', () => {
+		assert.strictEqual(shouldAutoExpandTerminalFailure(true, 1, false), true);
+		assert.strictEqual(shouldAutoExpandTerminalFailure(true, 1, true), false);
+		assert.strictEqual(shouldAutoExpandTerminalFailure(true, 0, false), false);
+		assert.strictEqual(shouldAutoExpandTerminalFailure(true, undefined, false), false);
+		assert.strictEqual(shouldAutoExpandTerminalFailure(false, 1, false), false);
+	});
+
+	test('completed restored commands render stored output before stale live handles', () => {
+		assert.strictEqual(shouldRenderStoredTerminalOutputFirst(true, true), true);
+		assert.strictEqual(shouldRenderStoredTerminalOutputFirst(true, false), false, 'running commands keep their live mirror');
+		assert.strictEqual(shouldRenderStoredTerminalOutputFirst(false, true), false);
+	});
+
+	test('restored terminal re-expansion preserves a real output height over stale zero metadata', () => {
+		assert.strictEqual(resolveStoredTerminalOutputLineCount('first\nsecond\nthird', 0, undefined), 3);
+		assert.strictEqual(resolveStoredTerminalOutputLineCount('first\nsecond\nthird', 0, 3), 3);
+		assert.strictEqual(resolveStoredTerminalOutputLineCount('first\nsecond\nthird', 2, 8), 8);
 	});
 
 	test('fast command without data should not auto-expand (finishes before timeout)', () => runWithFakedTimers({ useFakeTimers: true }, async () => {

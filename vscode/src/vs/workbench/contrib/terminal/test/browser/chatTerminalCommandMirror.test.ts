@@ -14,7 +14,7 @@ import { TerminalCapabilityStore } from '../../../../../platform/terminal/common
 import { XtermTerminal } from '../../browser/xterm/xtermTerminal.js';
 import { workbenchInstantiationService } from '../../../../test/browser/workbenchTestServices.js';
 import { TestXtermAddonImporter } from './xterm/xtermTestUtils.js';
-import { computeMaxBufferColumnWidth, vtBoundaryMatches } from '../../browser/chatTerminalCommandMirror.js';
+import { computeMaxBufferColumnWidth, getTerminalSnapshotLineCount, vtBoundaryMatches } from '../../browser/chatTerminalCommandMirror.js';
 
 const defaultTerminalConfig = {
 	fontFamily: 'monospace',
@@ -29,6 +29,13 @@ const defaultTerminalConfig = {
 
 suite('Workbench - ChatTerminalCommandMirror', () => {
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
+
+	test('non-empty snapshots cannot collapse to a stale zero line count', () => {
+		strictEqual(getTerminalSnapshotLineCount('first\nsecond\nthird', 0), 3);
+		strictEqual(getTerminalSnapshotLineCount('first\nsecond\n', 1), 2);
+		strictEqual(getTerminalSnapshotLineCount('first', 8), 8, 'a larger measured wrapped-line count is preserved');
+		strictEqual(getTerminalSnapshotLineCount('', 0), 0);
+	});
 
 	suite('VT mirroring with XtermTerminal', () => {
 		let instantiationService: TestInstantiationService;

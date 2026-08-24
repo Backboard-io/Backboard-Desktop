@@ -317,8 +317,11 @@ import { ExtensionRecommendationsService } from '../workbench/contrib/extensions
 import { IExtensionRecommendationsService } from '../workbench/services/extensionRecommendations/common/extensionRecommendations.js';
 import { IExtensionRecommendationNotificationService } from '../platform/extensionRecommendations/common/extensionRecommendations.js';
 import { NullExtensionRecommendationNotificationService } from './services/extensionRecommendations/common/extensionRecommendationNotificationService.js';
-registerSingleton(IExtensionsWorkbenchService, ExtensionsWorkbenchService, InstantiationType.Eager /* Auto updates extensions */);
-registerSingleton(IExtensionRecommendationsService, ExtensionRecommendationsService, InstantiationType.Eager);
+// The agents workbenches only need these services when the Extensions surface
+// is opened. Keep gallery and recommendation initialization off every Simple
+// and Advanced mode boot.
+registerSingleton(IExtensionsWorkbenchService, ExtensionsWorkbenchService, InstantiationType.Delayed);
+registerSingleton(IExtensionRecommendationsService, ExtensionRecommendationsService, InstantiationType.Delayed);
 registerSingleton(IExtensionRecommendationNotificationService, NullExtensionRecommendationNotificationService, InstantiationType.Delayed);
 
 // Output View

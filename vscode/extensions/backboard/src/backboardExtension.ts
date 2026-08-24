@@ -7,6 +7,7 @@ import * as vscode from 'vscode';
 import * as cp from 'child_process';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
+import * as http from 'http';
 import * as https from 'https';
 import * as os from 'os';
 import * as path from 'path';
@@ -102,9 +103,22 @@ export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(configWatcher.onDidDelete(refreshBackboardState));
 	const panelStateWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(path.dirname(backboardPanelStatePath()), path.basename(backboardPanelStatePath())));
 	const panelThreadsWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(backboardThreadsDir(), '*.json'));
+	let panelHistoryRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 	const refreshPanelHistory = () => {
-		void panelProvider.postPanelStateSnapshot();
+		if (panelHistoryRefreshTimer !== undefined) {
+			clearTimeout(panelHistoryRefreshTimer);
+		}
+		panelHistoryRefreshTimer = setTimeout(() => {
+			panelHistoryRefreshTimer = undefined;
+			void panelProvider.postPanelStateSnapshot();
+		}, 150);
 	};
+	context.subscriptions.push(new vscode.Disposable(() => {
+		if (panelHistoryRefreshTimer !== undefined) {
+			clearTimeout(panelHistoryRefreshTimer);
+			panelHistoryRefreshTimer = undefined;
+		}
+	}));
 	context.subscriptions.push(panelStateWatcher);
 	context.subscriptions.push(panelStateWatcher.onDidCreate(refreshPanelHistory));
 	context.subscriptions.push(panelStateWatcher.onDidChange(refreshPanelHistory));
@@ -705,32 +719,55 @@ function readSharedPanelState(workspace?: string): PanelPersistedState | undefin
 	return mergePanelStates(store.latest, threaded);
 }
 
-async function writeSharedPanelState(state: PanelPersistedState): Promise<void> {
+let sharedPanelStateWriteQueue = Promise.resolve();
+
+function writeSharedPanelState(state: PanelPersistedState): Promise<void> {
+	const write = sharedPanelStateWriteQueue.then(() => writeSharedPanelStateNow(state));
+	sharedPanelStateWriteQueue = write.then(() => undefined, () => undefined);
+	return write;
+}
+
+async function writeSharedPanelStateNow(state: PanelPersistedState): Promise<void> {
 	const persistedState = enrichPanelPersistedState({
 		...state,
 		currentWorkspace: panelStateWorkspace(state),
 	});
+	await writeSharedPanelThreads(persistedState);
+	const compactState = compactPanelPersistedState(persistedState);
 	const existing = readSharedPanelStateStore();
-	const key = panelStateStorageKey(persistedState.currentWorkspace);
-	const byWorkspace = { ...(existing.byWorkspace ?? {}), [key]: persistedState };
+	const key = panelStateStorageKey(compactState.currentWorkspace);
+	const byWorkspace = Object.fromEntries(Object.entries(existing.byWorkspace ?? {}).map(([workspaceKey, workspaceState]) => [workspaceKey, compactPanelPersistedState(workspaceState)]));
+	byWorkspace[key] = compactState;
 	const next: PanelStateStore = {
 		byWorkspace,
-		latest: hasPanelStateContent(persistedState) ? persistedState : existing.latest,
+		latest: hasPanelStateContent(compactState) ? compactState : existing.latest ? compactPanelPersistedState(existing.latest) : undefined,
 	};
 	const statePath = backboardPanelStatePath();
 	logBackboardDocumentDiagnostic('panel_state_write', {
 		statePath,
 		storageKey: key,
-		currentWorkspace: persistedState.currentWorkspace,
-		activeHistoryId: persistedState.activeHistoryId,
-		historyEntryCount: persistedState.historyEntries?.length,
+		currentWorkspace: compactState.currentWorkspace,
+		activeHistoryId: compactState.activeHistoryId,
+		historyEntryCount: compactState.historyEntries?.length,
 	});
 	await fs.promises.mkdir(path.dirname(statePath), { recursive: true });
 	await writeJsonFileAtomic(statePath, next);
 	if (process.platform !== 'win32') {
 		await fs.promises.chmod(statePath, 0o600);
 	}
-	await writeSharedPanelThreads(persistedState);
+}
+
+function compactPanelPersistedState(state: PanelPersistedState): PanelPersistedState {
+	return {
+		...state,
+		historyEntries: Array.isArray(state.historyEntries) ? state.historyEntries.map(entry => {
+			if (!isObjectRecord(entry)) {
+				return entry;
+			}
+			const { html: _html, messages: _messages, outputText: _outputText, toolOutputs: _toolOutputs, checkpoints: _checkpoints, fileChanges: _fileChanges, promptQueue: _promptQueue, ...summary } = entry;
+			return summary;
+		}) : state.historyEntries,
+	};
 }
 
 function enrichPanelPersistedState(state: PanelPersistedState): PanelPersistedState {
@@ -739,8 +776,18 @@ function enrichPanelPersistedState(state: PanelPersistedState): PanelPersistedSt
 	}
 	return {
 		...state,
-		historyEntries: state.historyEntries.map(entry => isObjectRecord(entry) ? enrichPanelThreadEntry(entry) : entry),
+		historyEntries: state.historyEntries.map(entry => isObjectRecord(entry) && hasPanelThreadPayload(entry) ? enrichPanelThreadEntry(entry) : entry),
 	};
+}
+
+function hasPanelThreadPayload(entry: Record<string, unknown>): boolean {
+	return typeof entry.html === 'string'
+		|| Array.isArray(entry.messages)
+		|| typeof entry.outputText === 'string'
+		|| Array.isArray(entry.toolOutputs)
+		|| Array.isArray(entry.checkpoints)
+		|| Array.isArray(entry.fileChanges)
+		|| Array.isArray(entry.promptQueue);
 }
 
 function enrichPanelThreadEntry(entry: Record<string, unknown>): Record<string, unknown> {
@@ -781,15 +828,12 @@ function normalizePanelThreadMessages(entry: Record<string, unknown>, prompt: st
 			}))
 			.filter(message => message.content.trim().length > 0)
 		: [];
-	const htmlMessages = typeof entry.html === 'string'
-		? extractPanelMessages(entry.html)
-		: [];
-	if (htmlMessages.length > existingMessages.length) {
-		return htmlMessages;
-	}
 	if (existingMessages.length) {
 		return existingMessages;
 	}
+	const htmlMessages = typeof entry.html === 'string'
+		? extractPanelMessages(entry.html)
+		: [];
 	if (htmlMessages.length) {
 		return htmlMessages;
 	}
@@ -1045,6 +1089,9 @@ function readPanelHistoryEntry(workspace: string | undefined, id: string | undef
 	return isObjectRecord(entry) ? entry : undefined;
 }
 
+const panelThreadWriteVersions = new Map<string, number>();
+const panelThreadIdSignatures = new Map<string, string>();
+
 async function writeSharedPanelThreads(state: PanelPersistedState): Promise<void> {
 	const entries = Array.isArray(state.historyEntries) ? state.historyEntries : [];
 	const threadsDir = backboardThreadsDir();
@@ -1056,8 +1103,15 @@ async function writeSharedPanelThreads(state: PanelPersistedState): Promise<void
 			continue;
 		}
 		currentIds.add(entry.id);
+		if (!hasPanelThreadPayload(entry)) {
+			continue;
+		}
 		const entryWorkspace = panelEntryWorkspace(entry) ?? workspace;
 		const threadPath = panelThreadPath(entryWorkspace, entry.id);
+		const entryVersion = panelThreadEntryTimestamp(entry);
+		if (panelThreadWriteVersions.get(threadPath) === entryVersion) {
+			continue;
+		}
 		await fs.promises.mkdir(path.dirname(threadPath), { recursive: true });
 		await writeJsonFileAtomic(threadPath, {
 			version: 1,
@@ -1070,8 +1124,14 @@ async function writeSharedPanelThreads(state: PanelPersistedState): Promise<void
 		if (process.platform !== 'win32') {
 			await fs.promises.chmod(threadPath, 0o600);
 		}
+		panelThreadWriteVersions.set(threadPath, entryVersion);
 	}
-	await pruneSharedPanelThreads(state, currentIds);
+	const workspaceKey = workspace ?? 'default';
+	const idSignature = [...currentIds].sort().join('\n');
+	if (panelThreadIdSignatures.get(workspaceKey) !== idSignature) {
+		await pruneSharedPanelThreads(state, currentIds);
+		panelThreadIdSignatures.set(workspaceKey, idSignature);
+	}
 }
 
 async function pruneSharedPanelThreads(state: PanelPersistedState, currentIds: Set<string>): Promise<void> {
@@ -1505,6 +1565,8 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 	private runToken: vscode.CancellationTokenSource | undefined;
 	private activePromptRun: Promise<void> | undefined;
 	private promptRunSerial = 0;
+	private pendingPanelState: PanelPersistedState | undefined;
+	private panelStateSave: Promise<void> | undefined;
 
 	constructor(private readonly bridge: BackboardBridge, private readonly context: vscode.ExtensionContext) {
 	}
@@ -1613,9 +1675,26 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 	}
 
 	private async savePanelState(state: PanelPersistedState): Promise<void> {
-		await writeSharedPanelState(state).catch(error => {
-			backboardToolOutput?.appendLine(`[panel-state] failed to save shared state: ${error instanceof Error ? error.message : String(error)}`);
-		});
+		this.pendingPanelState = state;
+		if (!this.panelStateSave) {
+			this.panelStateSave = this.flushPanelState().finally(() => {
+				this.panelStateSave = undefined;
+				if (this.pendingPanelState) {
+					void this.savePanelState(this.pendingPanelState);
+				}
+			});
+		}
+		await this.panelStateSave;
+	}
+
+	private async flushPanelState(): Promise<void> {
+		while (this.pendingPanelState) {
+			const state = this.pendingPanelState;
+			this.pendingPanelState = undefined;
+			await writeSharedPanelState(state).catch(error => {
+				backboardToolOutput?.appendLine(`[panel-state] failed to save shared state: ${error instanceof Error ? error.message : String(error)}`);
+			});
+		}
 	}
 
 	async postPanelStateSnapshot(): Promise<void> {
@@ -1753,7 +1832,7 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 			// cold tool cache would otherwise serialize a full bridge round trip
 			// before the prompt even reaches the agent.
 			const submitToolsPromise = this.bridge.listTools(settings.mode, token)
-				.then(tools => trimBackboardToolsForRequest(tools, modelContent, settings.webSearch, imageGeneration))
+				.then(tools => trimBackboardToolsForRequest(tools, modelContent, imageGeneration))
 				.catch(() => undefined);
 			await this.bridge.send('sendPrompt', sessionId, {
 				content: modelContent,
@@ -1763,7 +1842,7 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 				model: settings.defaultModel,
 				mode: settings.mode,
 				intensity: settings.intensity,
-				webSearch: settings.webSearch,
+				webSearch: 'Auto',
 				imageGeneration: imageGeneration === 'auto' ? 'auto' : undefined,
 				voiceMode,
 				audioFile: audio,
@@ -1888,6 +1967,10 @@ class BackboardBridge implements vscode.Disposable {
 	}
 
 	dispose(): void {
+		for (const pending of this.pending.values()) {
+			pending.reject(new Error('Backboard bridge disposed.'));
+		}
+		this.pending.clear();
 		this.child?.kill();
 		this.output.dispose();
 	}
@@ -2163,6 +2246,9 @@ class BackboardBridge implements vscode.Disposable {
 			let disposable: vscode.Disposable | undefined;
 			this.pending.set(requestId, {
 				events: [],
+				// Prompt deltas are consumed by the live callback. Retaining every
+				// token until the turn ends makes memory grow with the full response.
+				collectEvents: command !== 'sendPrompt',
 				onEvent,
 				resetTimeout,
 				resolve: events => {
@@ -2406,7 +2492,9 @@ class BackboardBridge implements vscode.Disposable {
 			return;
 		}
 		pending.resetTimeout();
-		pending.events.push(event);
+		if (pending.collectEvents || event.type === 'done') {
+			pending.events.push(event);
+		}
 		void pending.onEvent?.(event);
 		if (event.type === 'done') {
 			this.pending.delete(event.requestId);
@@ -2541,8 +2629,12 @@ function serveCredentialEnv(): Record<string, string> {
 function bridgeInactivityTimeoutMs(command: string): number {
 	switch (command) {
 		case 'submitToolResult':
+			return 2 * 60_000;
 		case 'sendPrompt':
-			return 0;
+			// This is an inactivity timeout, reset by every streamed event. It
+			// permits arbitrarily long active turns without retaining a stalled
+			// request forever when a live child stops producing output.
+			return 5 * 60_000;
 		case 'listModels':
 			return 30_000;
 		default:
@@ -3379,7 +3471,7 @@ function isReadOnlyTool(name: string): boolean {
 	return ['read_file', 'list_dir', 'glob', 'grep', 'codebase_search', 'web_search', 'web_fetch'].includes(name);
 }
 
-function trimBackboardToolsForRequest(tools: unknown[] | undefined, prompt: string, webSearch: string, imageGeneration: string): unknown[] | undefined {
+function trimBackboardToolsForRequest(tools: unknown[] | undefined, prompt: string, imageGeneration: string): unknown[] | undefined {
 	if (!tools?.length) {
 		return tools;
 	}
@@ -3396,9 +3488,6 @@ function trimBackboardToolsForRequest(tools: unknown[] | undefined, prompt: stri
 		}
 		if (name === 'generate_image' || name === 'image_generate') {
 			return imageGeneration === 'auto' || promptMentionsImage(prompt);
-		}
-		if (name === 'web_search' || name === 'web_fetch') {
-			return webSearch !== 'off' || promptNeedsWeb(prompt);
 		}
 		return true;
 	});
@@ -3421,16 +3510,11 @@ function promptMentionsImage(prompt: string): boolean {
 	return /\b(image|picture|photo|draw|drawing|illustration|logo|icon|sprite|visual|render)\b/i.test(prompt);
 }
 
-function promptNeedsWeb(prompt: string): boolean {
-	return /https?:\/\//i.test(prompt) || /\b(web|website|url|online|internet|latest|current|today|docs)\b/i.test(prompt);
-}
-
 function readSettings(): {
 	readonly defaultProvider: string;
 	readonly defaultModel: string;
 	readonly mode: string;
 	readonly intensity: string;
-	readonly webSearch: string;
 	readonly imageGeneration: string;
 	readonly voiceMode: string;
 	readonly mcpFigma: boolean;
@@ -3446,7 +3530,6 @@ function readSettings(): {
 		defaultModel: config.get<string>('defaultModel') || 'deepseek/deepseek-v4-flash',
 		mode: config.get<string>('mode') || 'free',
 		intensity: config.get<string>('intensity') || 'fast',
-		webSearch: config.get<string>('webSearch') || 'off',
 		imageGeneration: config.get<string>('imageGeneration') || 'off',
 		voiceMode: config.get<string>('voiceMode') || 'off',
 		mcpFigma: config.get<boolean>('mcpFigma') ?? false,
@@ -3468,7 +3551,6 @@ function resolveTurnSettings(options: PanelOptions): BackboardSettings {
 		defaultModel: options.model || settings.defaultModel,
 		mode: options.mode || settings.mode,
 		intensity: options.intensity || settings.intensity,
-		webSearch: options.webSearch || settings.webSearch,
 		imageGeneration: options.imageGeneration || settings.imageGeneration,
 		voiceMode: options.voiceMode || settings.voiceMode,
 		mcpFigma: options.mcpFigma ?? settings.mcpFigma,
@@ -3506,7 +3588,6 @@ function asPanelOptions(value: unknown): PanelOptions {
 		model: stringValue(raw.model),
 		mode: stringValue(raw.mode),
 		intensity: stringValue(raw.intensity),
-		webSearch: stringValue(raw.webSearch),
 		imageGeneration: stringValue(raw.imageGeneration),
 		voiceMode: stringValue(raw.voiceMode),
 		mcpFigma: booleanValue(raw.mcpFigma),
@@ -3522,7 +3603,6 @@ async function savePanelOptions(options: PanelOptions): Promise<void> {
 		['defaultModel', options.model],
 		['mode', options.mode],
 		['intensity', options.intensity],
-		['webSearch', options.webSearch],
 		['imageGeneration', options.imageGeneration],
 		['voiceMode', options.voiceMode],
 		['mcpFigma', options.mcpFigma],
@@ -3588,17 +3668,22 @@ async function postUsageSnapshot(bridge: BackboardBridge, webview: vscode.Webvie
 async function fetchUsageSnapshot(bridge: BackboardBridge): Promise<BackboardUsageSnapshot> {
 	const tokenSource = new vscode.CancellationTokenSource();
 	try {
-		const [balance, summary, recent, models] = await Promise.all([
-			bridge.callApi('getBillingBalance', {}, tokenSource.token),
-			bridge.callApi('getUsageSummary', { query: { range: 'period' } }, tokenSource.token),
-			bridge.callApi('getRecentUsage', { query: { page: 1, pageSize: 250 } }, tokenSource.token),
-			bridge.cachedModels(),
+		const api = backboardUsageApiConfig();
+		const [balanceResult, summaryResult, recentResult] = await Promise.all([
+			api ? captureUsageRequest(() => getBackboardUsageJson(api, '/billing/balance', tokenSource.token)) : undefined,
+			api ? captureUsageRequest(() => getBackboardUsageJson(api, '/billing/usage/summary?range=period', tokenSource.token)) : undefined,
+			api ? captureUsageRequest(() => getBackboardRecentUsage(api, tokenSource.token)) : undefined,
 		]);
-		const local = await readLocalUsageSnapshot(models ?? []);
+		logUsageRequestError('balance', balanceResult);
+		logUsageRequestError('summary', summaryResult);
+		logUsageRequestError('recent', recentResult);
+		const needsLocalUsage = !summaryResult?.ok || !recentResult?.ok;
+		const models = needsLocalUsage ? await bridge.cachedModels().catch(() => undefined) : undefined;
+		const local = needsLocalUsage ? await readLocalUsageSnapshot(models ?? []) : undefined;
 		return {
-			balance,
-			summary: hasPricedUsagePayload(summary) ? summary : local.summary,
-			recent: hasPricedUsagePayload(recent) ? recent : local.recent,
+			balance: balanceResult?.ok ? balanceResult.value : {},
+			summary: summaryResult?.ok ? summaryResult.value : local!.summary,
+			recent: recentResult?.ok ? recentResult.value : local!.recent,
 			fetchedAt: Date.now(),
 		};
 	} finally {
@@ -3606,22 +3691,193 @@ async function fetchUsageSnapshot(bridge: BackboardBridge): Promise<BackboardUsa
 	}
 }
 
-function hasPricedUsagePayload(value: unknown): boolean {
-	if (Array.isArray(value)) {
-		return value.some(hasPricedUsagePayload);
+interface BackboardUsageApiConfig {
+	readonly baseUrl: string;
+	readonly headers: Readonly<Record<string, string>>;
+}
+
+type UsageRequestResult = { readonly ok: true; readonly value: unknown } | { readonly ok: false; readonly error: unknown };
+
+function backboardUsageApiConfig(): BackboardUsageApiConfig | undefined {
+	const savedConfig = readBackboardConfigJsonSync();
+	const apiKey = configuredBackboardApiKey();
+	const accessToken = backboardConfigAccessToken(savedConfig);
+	if (!apiKey && !accessToken) {
+		return undefined;
 	}
-	if (!value || typeof value !== 'object') {
+	const configuredUrl = readSettings().config.apiUrl
+		?? stringValueFromRecord(savedConfig.api_url)
+		?? stringValueFromRecord(savedConfig.apiUrl);
+	const env = normalizeBackboardEnv(stringValueFromRecord(savedConfig.env) ?? currentBackboardEnv());
+	const baseUrl = (configuredUrl ?? (env === 'local' ? 'http://localhost:8000' : env === 'prod' ? 'https://app.backboard.io/api' : 'https://dev.app.backboard.io/api')).replace(/\/+$/, '');
+	return {
+		baseUrl,
+		headers: apiKey ? { 'X-API-Key': apiKey } : { 'Authorization': `Bearer ${accessToken}` },
+	};
+}
+
+async function captureUsageRequest(request: () => Promise<unknown>): Promise<UsageRequestResult> {
+	try {
+		return { ok: true, value: await request() };
+	} catch (error) {
+		return { ok: false, error };
+	}
+}
+
+function logUsageRequestError(label: string, result: UsageRequestResult | undefined): void {
+	if (result && !result.ok) {
+		backboardToolOutput?.appendLine(`[usage] ${label}: ${result.error instanceof Error ? result.error.message : String(result.error)}`);
+	}
+}
+
+async function getBackboardRecentUsage(api: BackboardUsageApiConfig, token: vscode.CancellationToken): Promise<unknown> {
+	const pageSize = 100;
+	const maxPages = 100;
+	const pageConcurrency = 8;
+	const firstPayload = await getBackboardUsageJson(api, `/billing/usage/recent?page=1&page_size=${pageSize}`, token);
+	const firstPageEvents = usageEventsFromPayload(firstPayload);
+	if (!firstPageEvents || firstPageEvents.length < pageSize) {
+		return firstPageEvents ? { data: [...firstPageEvents] } : firstPayload;
+	}
+	const events: unknown[] = [...firstPageEvents];
+	const totalPages = usageTotalPages(firstPayload);
+	if (totalPages !== undefined) {
+		if (totalPages > maxPages) {
+			throw new Error(`Backboard usage exceeded ${maxPages * pageSize} events.`);
+		}
+		for (let start = 2; start <= totalPages; start += pageConcurrency) {
+			const pages = Array.from({ length: Math.min(pageConcurrency, totalPages - start + 1) }, (_, index) => start + index);
+			const payloads = await Promise.all(pages.map(page => getBackboardUsageJson(api, `/billing/usage/recent?page=${page}&page_size=${pageSize}`, token)));
+			for (const payload of payloads) {
+				const pageEvents = usageEventsFromPayload(payload);
+				if (!pageEvents) {
+					throw new Error('Backboard usage returned an invalid page.');
+				}
+				events.push(...pageEvents);
+			}
+		}
+		return { data: events };
+	}
+
+	const pageSignatures = new Set<string>();
+	pageSignatures.add(JSON.stringify([firstPageEvents.length, firstPageEvents[0], firstPageEvents[firstPageEvents.length - 1]]));
+	for (let page = 2; page <= maxPages; page++) {
+		const payload = await getBackboardUsageJson(api, `/billing/usage/recent?page=${page}&page_size=${pageSize}`, token);
+		const pageEvents = usageEventsFromPayload(payload);
+		if (!pageEvents) {
+			return { data: events };
+		}
+		if (pageEvents.length === 0) {
+			return { data: events };
+		}
+		const signature = JSON.stringify([pageEvents.length, pageEvents[0], pageEvents[pageEvents.length - 1]]);
+		if (pageSignatures.has(signature)) {
+			throw new Error('Backboard usage pagination repeated a page.');
+		}
+		pageSignatures.add(signature);
+		events.push(...pageEvents);
+		if (pageEvents.length < pageSize || usagePaginationComplete(payload, page, events.length)) {
+			return { data: events };
+		}
+	}
+	throw new Error(`Backboard usage exceeded ${maxPages * pageSize} events.`);
+}
+
+function usageEventsFromPayload(value: unknown): readonly unknown[] | undefined {
+	if (Array.isArray(value)) {
+		return value;
+	}
+	if (!isObjectRecord(value)) {
+		return undefined;
+	}
+	for (const key of ['usage', 'results', 'items', 'events']) {
+		if (Array.isArray(value[key])) {
+			return value[key];
+		}
+	}
+	if (Array.isArray(value.data)) {
+		return value.data;
+	}
+	return isObjectRecord(value.data) ? usageEventsFromPayload(value.data) : undefined;
+}
+
+function usagePaginationComplete(value: unknown, page: number, received: number): boolean {
+	const pagination = usagePagination(value);
+	if (!pagination) {
 		return false;
 	}
-	for (const [key, item] of Object.entries(value)) {
-		if (/cost|spend|amount/i.test(key) && ((typeof item === 'number' && item > 0) || (typeof item === 'string' && Number(item) > 0))) {
-			return true;
-		}
-		if (hasPricedUsagePayload(item)) {
-			return true;
-		}
+	const totalPages = usageNumber(pagination.total_pages) ?? usageNumber(pagination.totalPages) ?? usageNumber(pagination.pages);
+	const total = usageNumber(pagination.total) ?? usageNumber(pagination.total_items) ?? usageNumber(pagination.totalItems) ?? usageNumber(pagination.count);
+	return (totalPages !== undefined && page >= totalPages) || (total !== undefined && received >= total);
+}
+
+function usageTotalPages(value: unknown): number | undefined {
+	const pagination = usagePagination(value);
+	return pagination ? usageNumber(pagination.total_pages) ?? usageNumber(pagination.totalPages) ?? usageNumber(pagination.pages) : undefined;
+}
+
+function usagePagination(value: unknown): Record<string, unknown> | undefined {
+	if (!isObjectRecord(value)) {
+		return undefined;
 	}
-	return false;
+	const data = isObjectRecord(value.data) ? value.data : undefined;
+	return isObjectRecord(value.pagination) ? value.pagination : isObjectRecord(data?.pagination) ? data.pagination : undefined;
+}
+
+function usageNumber(value: unknown): number | undefined {
+	if (typeof value === 'number' && Number.isFinite(value)) {
+		return value;
+	}
+	if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) {
+		return Number(value);
+	}
+	return undefined;
+}
+
+function getBackboardUsageJson(api: BackboardUsageApiConfig, requestPath: string, token: vscode.CancellationToken): Promise<unknown> {
+	return new Promise((resolve, reject) => {
+		const url = new URL(`${api.baseUrl}${requestPath}`);
+		const transport = url.protocol === 'http:' ? http : https;
+		const request = transport.request(url, {
+			method: 'GET',
+			headers: { ...api.headers, 'Accept': 'application/json' },
+		}, response => {
+			const chunks: Buffer[] = [];
+			let length = 0;
+			response.on('data', chunk => {
+				const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+				length += buffer.length;
+				if (length > 20 * 1024 * 1024) {
+					request.destroy(new Error('Backboard usage response was larger than 20 MB.'));
+					return;
+				}
+				chunks.push(buffer);
+			});
+			response.on('end', () => {
+				cancellation.dispose();
+				const text = Buffer.concat(chunks).toString('utf8');
+				if (!response.statusCode || response.statusCode < 200 || response.statusCode >= 300) {
+					reject(new Error(`Backboard usage request returned HTTP ${response.statusCode}: ${text.slice(0, 1000)}`));
+					return;
+				}
+				try {
+					resolve(text.trim() ? JSON.parse(text) : {});
+				} catch {
+					reject(new Error('Backboard usage request returned invalid JSON.'));
+				}
+			});
+		});
+		request.on('error', error => {
+			cancellation.dispose();
+			reject(error);
+		});
+		const cancellation = token.onCancellationRequested(() => request.destroy(new Error('Backboard usage request was cancelled.')));
+		if (token.isCancellationRequested) {
+			request.destroy(new Error('Backboard usage request was cancelled.'));
+			return;
+		}
+		request.end();
+	});
 }
 
 async function postComposerContext(webview: vscode.Webview, kind: 'activeFile' | 'selection'): Promise<void> {
@@ -3692,7 +3948,6 @@ function publicSettings(settings: BackboardSettings): PanelOptions {
 		model: settings.defaultModel,
 		mode: settings.mode,
 		intensity: settings.intensity,
-		webSearch: settings.webSearch,
 		imageGeneration: settings.imageGeneration,
 		voiceMode: settings.voiceMode,
 		mcpFigma: settings.mcpFigma,

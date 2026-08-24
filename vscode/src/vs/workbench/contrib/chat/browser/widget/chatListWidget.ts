@@ -24,10 +24,11 @@ import { ILogService } from '../../../../../platform/log/common/log.js';
 import { asCssVariable, buttonSecondaryBackground, buttonSecondaryForeground, buttonSecondaryHoverBackground } from '../../../../../platform/theme/common/colorRegistry.js';
 import { katexContainerClassName } from '../../../markdown/common/markedKatexExtension.js';
 import { ChatContextKeys } from '../../common/actions/chatContextKeys.js';
-import { IChatFollowup, IChatSendRequestOptions, IChatService } from '../../common/chatService/chatService.js';
+import { ChatRequestQueueKind, IChatFollowup, IChatSendRequestOptions, IChatService } from '../../common/chatService/chatService.js';
 import { ChatAgentLocation, ChatConfiguration, ChatModeKind } from '../../common/constants.js';
+import { isChatPerfLoggingEnabled, logChatPerf } from '../../common/chatPerf.js';
 import { IChatRequestModeInfo } from '../../common/model/chatModel.js';
-import { IChatRequestViewModel, IChatResponseViewModel, IChatViewModel, isRequestVM, isResponseVM } from '../../common/model/chatViewModel.js';
+import { IChatRequestViewModel, IChatResponseViewModel, IChatViewModel, isPendingDividerVM, isRequestVM, isResponseVM } from '../../common/model/chatViewModel.js';
 import { ChatAccessibilityProvider } from '../accessibility/chatAccessibilityProvider.js';
 import { ChatTreeItem, IChatAccessibilityService, IChatCodeBlockInfo, IChatFileTreeInfo, IChatListItemRendererOptions } from '../chat.js';
 import { CodeBlockPart } from './chatContentParts/codeBlockPart.js';
@@ -177,10 +178,14 @@ export class ChatListWidget extends Disposable {
 
 	private readonly _tree: WorkbenchObjectTree<ChatTreeItem, FuzzyScore>;
 	private readonly _renderer: ChatListItemRenderer;
+	private readonly _accessibilityProvider: ChatAccessibilityProvider;
 
 	private _viewModel: IChatViewModel | undefined;
 	private _visible = true;
+	private _renderingSuspended = false;
+	private _suspendedScrollTop: number | undefined;
 	private _lastItem: ChatTreeItem | undefined;
+	private _latestConversationItem: ChatTreeItem | undefined;
 	private _mostRecentlyFocusedItemIndex: number = -1;
 	private _scrollLock: boolean = true;
 	private _suppressAutoScroll: boolean = false;
@@ -254,6 +259,13 @@ export class ChatListWidget extends Disposable {
 		return this._lastItem;
 	}
 
+	/**
+	 * The latest sent request/response, excluding queue-only rows.
+	 */
+	get latestConversationItem(): ChatTreeItem | undefined {
+		return this._latestConversationItem;
+	}
+
 
 
 	//#endregion
@@ -321,6 +333,7 @@ export class ChatListWidget extends Disposable {
 			ChatListDelegate,
 			options.defaultElementHeight ?? 200
 		);
+		this._accessibilityProvider = scopedInstantiationService.createInstance(ChatAccessibilityProvider);
 
 		// Create renderer delegate
 		const rendererDelegate: IChatRendererDelegate = {
@@ -355,6 +368,13 @@ export class ChatListWidget extends Disposable {
 			}
 
 			this._onDidChangeItemHeight.fire(e);
+		}));
+
+		this._register(this._renderer.onDidRequestRerender(element => {
+			if (this._tree.hasElement(element)) {
+				this._tree.rerender(element);
+				this.updateLastItemMinHeight();
+			}
 		}));
 
 		// Handle rerun with agent or command detection internally
@@ -398,7 +418,7 @@ export class ChatListWidget extends Disposable {
 				scrollableElementChangeOptions: isAuxiliaryBarChat ? { verticalScrollbarSize: 8 } : undefined,
 				supportDynamicHeights: true,
 				hideTwistiesOfChildlessElements: true,
-				accessibilityProvider: this.instantiationService.createInstance(ChatAccessibilityProvider),
+				accessibilityProvider: this._accessibilityProvider,
 				keyboardNavigationLabelProvider: {
 					getKeyboardNavigationLabel: (e: ChatTreeItem) =>
 						isRequestVM(e) ? e.message : isResponseVM(e) ? e.response.value : ''
@@ -544,6 +564,9 @@ export class ChatListWidget extends Disposable {
 	 * Set the view model for the list to render.
 	 */
 	setViewModel(viewModel: IChatViewModel | undefined): void {
+		if (this._viewModel !== viewModel) {
+			this._accessibilityProvider.clearCache();
+		}
 		this._viewModel = viewModel;
 		this._renderer.updateViewModel(viewModel);
 	}
@@ -553,22 +576,50 @@ export class ChatListWidget extends Disposable {
 	 * Uses internal state for diff identity calculation.
 	 */
 	refresh(): void {
+		const perfEnabled = isChatPerfLoggingEnabled(this.logService);
+		const startedAt = perfEnabled ? performance.now() : 0;
 		if (!this._viewModel) {
 			this._tree.setChildren(null, []);
 			this._lastItem = undefined;
+			this._latestConversationItem = undefined;
 			this._lastItemIdContextKey.set([]);
+			this._renderer.setVisibleItemRoles(undefined, undefined, undefined);
+			this._container.style.removeProperty('--chat-current-response-min-height');
+			this._previousLastItemMinHeight = null;
+			if (perfEnabled) {
+				logChatPerf(this.logService, 'list.refresh', { items: 0, model: false }, performance.now() - startedAt);
+			}
 			return;
 		}
 
 		const items = this._viewModel.getItems();
 		this._lastItem = items.at(-1);
-		this._lastItemIdContextKey.set(this._lastItem ? [this._lastItem.id] : []);
+		this._latestConversationItem = items.findLast(item => !isPendingDividerVM(item) && !(isRequestVM(item) && !!item.pendingKind));
+		this._lastItemIdContextKey.set(this._latestConversationItem ? [this._latestConversationItem.id] : []);
 
 		const treeItems: ITreeElement<ChatTreeItem>[] = items.map(item => ({
 			element: item,
 			collapsed: false,
 			collapsible: false,
 		}));
+		const lastPhysicalItemId = this._lastItem?.id;
+		const mostRecentResponseId = items.findLast(isResponseVM)?.id;
+		const currentTurnResponseId = isResponseVM(this._latestConversationItem) ? this._latestConversationItem.id : undefined;
+		const latestTurnRequestId = isRequestVM(this._latestConversationItem)
+			? this._latestConversationItem.id
+			: isResponseVM(this._latestConversationItem) ? this._latestConversationItem.requestId : undefined;
+		const sessionIdentity = this._viewModel.model.sessionResource.toString();
+		const pendingPositions = new Map<string, { position: number; total: number }>();
+		for (const kind of [ChatRequestQueueKind.Steering, ChatRequestQueueKind.Queued]) {
+			// System-generated rows are intentionally fixed and have no reorder handle.
+			// The smart tree identity must track the position among actionable rows so
+			// every shifted spinbutton is recreated with fresh aria-value metadata.
+			const actionable = items.filter(item => isRequestVM(item) && item.pendingKind === kind && !item.isSystemInitiated);
+			for (let index = 0; index < actionable.length; index++) {
+				pendingPositions.set(actionable[index].id, { position: index + 1, total: actionable.length });
+			}
+		}
+		const expandedHistoricalResponses = this._renderer.setVisibleItemRoles(mostRecentResponseId, currentTurnResponseId, latestTurnRequestId);
 
 		const editing = this._viewModel.editing;
 
@@ -582,7 +633,19 @@ export class ChatListWidget extends Disposable {
 						// Per-element editing state: only re-render items whose editing role changed
 						const isEditTarget = isRequestVM(element) && editing?.id === element.id;
 						const isBlocked = (isRequestVM(element) || isResponseVM(element)) ? element.shouldBeBlocked.get() : false;
+						const queueRole = isPendingDividerVM(element)
+							? `${element.dividerKind}-${element.pendingCount}-${element.isSystemInitiated ? 'system' : 'user'}`
+							: isRequestVM(element) && element.pendingKind
+								? element.isSystemInitiated
+									? `${element.pendingKind}-system`
+									: `${element.pendingKind}-user-${pendingPositions.get(element.id)?.position ?? 0}-${pendingPositions.get(element.id)?.total ?? 0}`
+								: 'conversation';
+						const queueIdentity = queueRole === 'conversation' ? '' : `_session${sessionIdentity}_queue${queueRole}`;
 						return baseId +
+							// Divider ids are intentionally stable within a session. Include
+							// session and group shape so counts, reorder handles, and recycled
+							// divider templates update when the queue changes or the model swaps.
+							queueIdentity +
 							// If a response is in the process of progressive rendering, we need to ensure that it will
 							// be re-rendered so progressive rendering is restarted, even if the model wasn't updated.
 							`${isResponseVM(element) && element.renderData ? `_${this._visibleChangeCount}` : ''}` +
@@ -599,11 +662,36 @@ export class ChatListWidget extends Disposable {
 							`_setting${this._settingChangeCounter}` +
 							// Rerender request if we got new content references in the response
 							// since this may change how we render the corresponding attachments in the request
-							(isRequestVM(element) && element.contentReferences ? `_${element.contentReferences?.length}` : '');
+							(isRequestVM(element) && element.contentReferences ? `_${element.contentReferences?.length}` : '') +
+							// The renderer owns last-row-only geometry (minimum response height and
+							// checkpoint restore placement). Queueing can change the last item without
+							// changing the previous response model, so include this layout role in the
+							// diff identity and clear stale last-row styling deterministically.
+							`_${element.id === lastPhysicalItemId ? 'last' : 'not-last'}` +
+							// Footer/action emphasis follows the latest response even when a queue
+							// divider and pending prompts appear after it.
+							`_${element.id === mostRecentResponseId ? 'latest-response' : 'not-latest-response'}` +
+							// A newly submitted request turns the previous response into cold
+							// history, even before that request has received its response. Keep the
+							// historical identity stable so later prompts do not churn every old row.
+							`_${isResponseVM(element) && element.id !== currentTurnResponseId ? 'historical-response' : 'current-turn-item'}`;
 					},
 				}
 			});
 		});
+		for (const response of expandedHistoricalResponses) {
+			if (this._tree.hasElement(response)) {
+				this._tree.rerender(response);
+			}
+		}
+		this.updateLastItemMinHeight();
+		if (perfEnabled) {
+			logChatPerf(this.logService, 'list.refresh', {
+				session: this._viewModel.sessionResource.toString(),
+				items: items.length,
+				model: true,
+			}, performance.now() - startedAt);
+		}
 	}
 
 	/**
@@ -653,6 +741,26 @@ export class ChatListWidget extends Disposable {
 	 */
 	rerender(): void {
 		this._tree.rerender();
+	}
+
+	rerenderItems(items: readonly ChatTreeItem[]): void {
+		const perfEnabled = isChatPerfLoggingEnabled(this.logService);
+		const startedAt = perfEnabled ? performance.now() : 0;
+		let mountedItems = 0;
+		for (const item of items) {
+			if (this._tree.hasElement(item)) {
+				mountedItems++;
+				this._tree.rerender(item);
+			}
+		}
+		this.updateLastItemMinHeight();
+		if (perfEnabled) {
+			logChatPerf(this.logService, 'list.rerenderItems', {
+				session: this._viewModel?.sessionResource.toString(),
+				requestedItems: items.length,
+				mountedItems,
+			}, performance.now() - startedAt);
+		}
 	}
 
 	private getItems(): ChatTreeItem[] {
@@ -877,10 +985,50 @@ export class ChatListWidget extends Disposable {
 	/**
 	 * Set the visibility of the list.
 	 */
-	setVisible(visible: boolean): void {
+	setVisible(visible: boolean): boolean {
 		this.updateBackboardTranscriptHostClasses();
 		this._visible = visible;
 		this._renderer.setVisible(visible);
+		if (visible && this._renderingSuspended) {
+			const perfEnabled = isChatPerfLoggingEnabled(this.logService);
+			const startedAt = perfEnabled ? performance.now() : 0;
+			this._renderingSuspended = false;
+			const scrollTop = this._suspendedScrollTop;
+			this._suspendedScrollTop = undefined;
+			this.refresh();
+			if (scrollTop !== undefined) {
+				this._tree.scrollTop = scrollTop;
+			}
+			if (perfEnabled) {
+				logChatPerf(this.logService, 'list.resume', {
+					session: this._viewModel?.sessionResource.toString(),
+					items: this._viewModel?.getItems().length ?? 0,
+					restoredScrollTop: scrollTop !== undefined,
+				}, performance.now() - startedAt, 0);
+			}
+			return true;
+		}
+		return false;
+	}
+
+	/** Release mounted message parts while preserving the logical chat model. */
+	suspendRendering(): void {
+		if (this._renderingSuspended || this._visible) {
+			return;
+		}
+		this._renderingSuspended = true;
+		const perfEnabled = isChatPerfLoggingEnabled(this.logService);
+		const startedAt = perfEnabled ? performance.now() : 0;
+		this._suspendedScrollTop = this._tree.scrollTop;
+		this._renderer.suspendRendering();
+		this._tree.setChildren(null, []);
+		if (perfEnabled) {
+			logChatPerf(this.logService, 'list.suspend', {
+				session: this._viewModel?.sessionResource.toString(),
+				items: this._viewModel?.getItems().length ?? 0,
+				scrollTop: Math.round(this._suspendedScrollTop),
+			}, performance.now() - startedAt, 0);
+		}
 	}
 
 	/**
@@ -905,20 +1053,28 @@ export class ChatListWidget extends Disposable {
 		const contentHeight = this._bodyDimension.height;
 		if (this._renderStyle === 'compact' || this._renderStyle === 'minimal') {
 			this._container.style.removeProperty('--chat-current-response-min-height');
+			this._previousLastItemMinHeight = null;
 		} else {
-			const secondToLastItem = this._viewModel?.getItems().at(-2);
+			const items = this._viewModel?.getItems() ?? [];
+			const lastResponse = items.at(-1);
+			if (!isResponseVM(lastResponse)) {
+				this._container.style.removeProperty('--chat-current-response-min-height');
+				this._previousLastItemMinHeight = null;
+				return;
+			}
+
+			const secondToLastItem = items.at(-2);
 			const maxRequestShownHeight = 200;
 			const secondToLastItemHeight = Math.min(
 				(isRequestVM(secondToLastItem) || isResponseVM(secondToLastItem)) ?
 					secondToLastItem.currentRenderedHeight ?? 150 : 150,
 				maxRequestShownHeight);
 			const lastItemMinHeight = Math.max(contentHeight - (secondToLastItemHeight + 10), 0);
-			this._container.style.setProperty('--chat-current-response-min-height', lastItemMinHeight + 'px');
 			if (lastItemMinHeight !== this._previousLastItemMinHeight) {
 				this._previousLastItemMinHeight = lastItemMinHeight;
-				const lastItem = this._viewModel?.getItems().at(-1);
-				if (lastItem && this._visible && this._tree.hasElement(lastItem)) {
-					this._updateElementHeight(lastItem, undefined);
+				this._container.style.setProperty('--chat-current-response-min-height', lastItemMinHeight + 'px');
+				if (this._visible && this._tree.hasElement(lastResponse)) {
+					this._updateElementHeight(lastResponse, undefined);
 				}
 			}
 		}

@@ -6,11 +6,13 @@
 import { Codicon } from '../../../../../base/common/codicons.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { IMarkdownString } from '../../../../../base/common/htmlContent.js';
-import { Disposable, dispose } from '../../../../../base/common/lifecycle.js';
+import { Disposable, DisposableMap, dispose } from '../../../../../base/common/lifecycle.js';
 import { RunOnceScheduler } from '../../../../../base/common/async.js';
 import { IObservable } from '../../../../../base/common/observable.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { URI } from '../../../../../base/common/uri.js';
+import { fromAgentHostUri } from '../../../../../platform/agentHost/common/agentHostUri.js';
+import { isAgentAtomicWriteTempPath } from '../../../../../platform/agentHost/common/agentIgnoredPaths.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { IChatRequestVariableEntry } from '../attachments/chatVariableEntries.js';
 import { ChatAgentVoteDirection, ChatRequestQueueKind, IChatCodeCitation, IChatContentReference, IChatDisabledClaudeHooksPart, IChatExternalEdit, IChatFollowup, IChatMcpServersStarting, IChatPlanReview, IChatProgressMessage, IChatQuestionCarousel, IChatResponseErrorDetails, IChatTask, IChatUsage, IChatUsedContext } from '../chatService/chatService.js';
@@ -18,7 +20,7 @@ import { getFullyQualifiedId, IChatAgentCommand, IChatAgentData, IChatAgentNameS
 import { IParsedChatRequest } from '../requestParser/chatParserTypes.js';
 import { IChatModel, IChatProgressRenderableResponseContent, IChatRequestDisablement, IChatRequestModel, IChatResponseModel, IChatTextEditGroup, IResponse } from './chatModel.js';
 import { ChatStreamStatsTracker, IChatStreamStats } from './chatStreamStats.js';
-import { countWords } from './chatWordCounter.js';
+import { IncrementalWordCounter } from './chatWordCounter.js';
 
 export function isRequestVM(item: unknown): item is IChatRequestViewModel {
 	return !!item && typeof item === 'object' && 'message' in item;
@@ -32,6 +34,10 @@ export function isPendingDividerVM(item: unknown): item is IChatPendingDividerVi
 	return !!item && typeof item === 'object' && (item as IChatPendingDividerViewModel).kind === 'pendingDivider';
 }
 
+export function shouldRenderPendingDivider(kind: ChatRequestQueueKind, isSystemInitiated: boolean): boolean {
+	return isSystemInitiated || kind === ChatRequestQueueKind.Queued;
+}
+
 export function isChatTreeItem(item: unknown): item is IChatRequestViewModel | IChatResponseViewModel {
 	return isRequestVM(item) || isResponseVM(item);
 }
@@ -42,10 +48,17 @@ export function assertIsResponseVM(item: unknown): asserts item is IChatResponse
 	}
 }
 
-export type IChatViewModelChangeEvent = IChatAddRequestEvent | IChangePlaceholderEvent | IChatSessionInitEvent | IChatSetHiddenEvent | null;
+export type IChatViewModelChangeEvent = IChatAddRequestEvent | IChatItemChangeEvent | IChangePlaceholderEvent | IChatSessionInitEvent | IChatSetHiddenEvent | null;
 
 export interface IChatAddRequestEvent {
 	kind: 'addRequest';
+}
+
+export interface IChatItemChangeEvent {
+	kind: 'changeItem';
+	readonly response: IChatResponseViewModel;
+	readonly request?: IChatRequestViewModel;
+	readonly becameComplete: boolean;
 }
 
 export interface IChangePlaceholderEvent {
@@ -66,7 +79,7 @@ export interface IChatViewModel {
 	readonly onDidDisposeModel: Event<void>;
 	readonly onDidChange: Event<IChatViewModelChangeEvent>;
 	readonly inputPlaceholder?: string;
-	getItems(): (IChatRequestViewModel | IChatResponseViewModel | IChatPendingDividerViewModel)[];
+	getItems(): readonly (IChatRequestViewModel | IChatResponseViewModel | IChatPendingDividerViewModel)[];
 	setInputPlaceholder(text: string): void;
 	resetInputPlaceholder(): void;
 	editing?: IChatRequestViewModel;
@@ -201,6 +214,15 @@ export interface IChatChangesSummaryPart {
 }
 
 /**
+ * Filters internal atomic-save siblings and other watcher noise from both the
+ * transcript and the edited-files recap. The guard also handles old response
+ * data captured before the filesystem watcher learned the temp-file shape.
+ */
+export function isTransientExternalEdit(edit: IChatExternalEdit): boolean {
+	return isAgentAtomicWriteTempPath(fromAgentHostUri(edit.uri).path);
+}
+
+/**
  * Type for content parts rendered by IChatListRenderer (not necessarily in the model)
  */
 export type IChatRendererContent = IChatProgressRenderableResponseContent | IChatReferences | IChatCodeCitations | IChatErrorDetailsPart | IChatChangesSummaryPart | IChatWorkingProgress | IChatMcpServersStarting | IChatQuestionCarousel | IChatPlanReview | IChatDisabledClaudeHooksPart;
@@ -220,7 +242,7 @@ export function getLatestTurnEditedFiles(model: IChatModel): readonly IChatExter
 	}
 	const aggregated = new Map<string, IChatExternalEdit>();
 	for (const part of lastResponse.entireResponse.value) {
-		if (part.kind !== 'externalEdit') {
+		if (part.kind !== 'externalEdit' || isTransientExternalEdit(part)) {
 			continue;
 		}
 		const key = part.uri.toString();
@@ -290,6 +312,7 @@ export interface IChatPendingDividerViewModel {
 	readonly sessionResource: URI;
 	readonly isComplete: true;
 	readonly dividerKind: ChatRequestQueueKind;
+	readonly pendingCount: number;
 	readonly isSystemInitiated?: boolean;
 	currentRenderedHeight: number | undefined;
 }
@@ -311,6 +334,8 @@ export class ChatViewModel extends Disposable implements IChatViewModel {
 	readonly onDidChange = this._onDidChange.event;
 
 	private readonly _items: (ChatRequestViewModel | ChatResponseViewModel)[] = [];
+	private readonly _responseListeners = this._register(new DisposableMap<string>());
+	private _cachedVisibleItems: readonly (IChatRequestViewModel | IChatResponseViewModel | IChatPendingDividerViewModel)[] | undefined;
 
 	private _inputPlaceholder: string | undefined = undefined;
 	get inputPlaceholder(): string | undefined {
@@ -352,8 +377,12 @@ export class ChatViewModel extends Disposable implements IChatViewModel {
 		});
 
 		this._register(_model.onDidDispose(() => this._onDidDisposeModel.fire()));
-		this._register(_model.onDidChangePendingRequests(() => this._onDidChange.fire(null)));
+		this._register(_model.onDidChangePendingRequests(() => {
+			this._cachedVisibleItems = undefined;
+			this._onDidChange.fire(null);
+		}));
 		this._register(_model.onDidChange(e => {
+			this._cachedVisibleItems = undefined;
 			if (e.kind === 'addRequest') {
 				const requestModel = this.instantiationService.createInstance(ChatRequestViewModel, e.request);
 				this._items.push(requestModel);
@@ -374,6 +403,7 @@ export class ChatViewModel extends Disposable implements IChatViewModel {
 					const items = this._items.splice(responseIdx, 1);
 					const item = items[0];
 					if (item instanceof ChatResponseViewModel) {
+						this._responseListeners.deleteAndDispose(item.id);
 						item.dispose();
 					}
 				}
@@ -390,13 +420,26 @@ export class ChatViewModel extends Disposable implements IChatViewModel {
 
 	private onAddResponse(responseModel: IChatResponseModel) {
 		const response = this.instantiationService.createInstance(ChatResponseViewModel, responseModel, this);
-		this._register(response.onDidChange(() => {
-			return this._onDidChange.fire(null);
+		const request = this._items.findLast((item): item is ChatRequestViewModel => isRequestVM(item) && item.id === response.requestId);
+		let contentReferenceCount = response.contentReferences.length;
+		let isComplete = response.isComplete;
+		this._responseListeners.set(response.id, response.onDidChange(() => {
+			const nextContentReferenceCount = response.contentReferences.length;
+			const nextIsComplete = response.isComplete;
+			const becameComplete = !isComplete && nextIsComplete;
+			const requestChanged = nextContentReferenceCount !== contentReferenceCount || nextIsComplete !== isComplete ? request : undefined;
+			contentReferenceCount = nextContentReferenceCount;
+			isComplete = nextIsComplete;
+			this._onDidChange.fire({ kind: 'changeItem', response, request: requestChanged, becameComplete });
 		}));
 		this._items.push(response);
 	}
 
-	getItems(): (IChatRequestViewModel | IChatResponseViewModel | IChatPendingDividerViewModel)[] {
+	getItems(): readonly (IChatRequestViewModel | IChatResponseViewModel | IChatPendingDividerViewModel)[] {
+		if (this._cachedVisibleItems) {
+			return this._cachedVisibleItems;
+		}
+
 		let items: (IChatRequestViewModel | IChatResponseViewModel | IChatPendingDividerViewModel)[] = this._items.filter((item) => {
 			if (item.shouldBeRemovedOnSend && !item.shouldBeRemovedOnSend.afterUndoStop) {
 				return false;
@@ -409,31 +452,30 @@ export class ChatViewModel extends Disposable implements IChatViewModel {
 
 		const pendingRequests = this._model.getPendingRequests();
 		if (pendingRequests.length > 0) {
-			// Separate steering and queued requests
-			const steeringRequests = pendingRequests.filter(p => p.kind === ChatRequestQueueKind.Steering);
-			const queuedRequests = pendingRequests.filter(p => p.kind === ChatRequestQueueKind.Queued);
+			const systemInitiatedRequests = pendingRequests.filter(pending => pending.request.isSystemInitiated);
+			const userPendingRequests = pendingRequests.filter(pending => !pending.request.isSystemInitiated);
 
-			// Add steering requests with their divider first
-			if (steeringRequests.length > 0) {
-				const isSystemInitiated = steeringRequests.every(p => p.request.isSystemInitiated);
-				items.push({ kind: 'pendingDivider', id: 'pending-divider-steering', sessionResource: this._model.sessionResource, isComplete: true, dividerKind: ChatRequestQueueKind.Steering, isSystemInitiated, currentRenderedHeight: undefined });
-				for (const pending of steeringRequests) {
-					const requestVM = this.instantiationService.createInstance(ChatRequestViewModel, pending.request, pending.kind);
-					items.push(requestVM);
+			// Provider-originated work remains a separately labelled system group.
+			if (systemInitiatedRequests.length > 0 && shouldRenderPendingDivider(ChatRequestQueueKind.Steering, true)) {
+				items.push({ kind: 'pendingDivider', id: 'pending-divider-steering', sessionResource: this._model.sessionResource, isComplete: true, dividerKind: ChatRequestQueueKind.Steering, pendingCount: systemInitiatedRequests.length, isSystemInitiated: true, currentRenderedHeight: undefined });
+				for (const pending of systemInitiatedRequests) {
+					items.push(this.instantiationService.createInstance(ChatRequestViewModel, pending.request, pending.kind));
 				}
 			}
 
-			// Add queued requests with their divider
-			if (queuedRequests.length > 0) {
-				items.push({ kind: 'pendingDivider', id: 'pending-divider-queued', sessionResource: this._model.sessionResource, isComplete: true, dividerKind: ChatRequestQueueKind.Queued, currentRenderedHeight: undefined });
-				for (const pending of queuedRequests) {
-					const requestVM = this.instantiationService.createInstance(ChatRequestViewModel, pending.request, pending.kind);
-					items.push(requestVM);
+			// Steering and ordinary queued prompts share one compact staging section.
+			// Their original kinds stay on each row so processing and reordering
+			// semantics remain unchanged.
+			if (userPendingRequests.length > 0 && shouldRenderPendingDivider(ChatRequestQueueKind.Queued, false)) {
+				items.push({ kind: 'pendingDivider', id: 'pending-divider-queued', sessionResource: this._model.sessionResource, isComplete: true, dividerKind: ChatRequestQueueKind.Queued, pendingCount: userPendingRequests.length, currentRenderedHeight: undefined });
+				for (const pending of userPendingRequests) {
+					items.push(this.instantiationService.createInstance(ChatRequestViewModel, pending.request, pending.kind));
 				}
 			}
 		}
 
-		return items;
+		this._cachedVisibleItems = items;
+		return this._cachedVisibleItems;
 	}
 
 
@@ -454,6 +496,7 @@ export class ChatViewModel extends Disposable implements IChatViewModel {
 		super.dispose();
 		dispose(this._items.filter((item): item is ChatResponseViewModel => item instanceof ChatResponseViewModel));
 		this._items.length = 0;
+		this._cachedVisibleItems = undefined;
 	}
 }
 
@@ -576,9 +619,7 @@ export class ChatResponseViewModel extends Disposable implements IChatResponseVi
 	}
 
 	get dataId() {
-		return this._model.id +
-			`_${this._modelChangeCount}` +
-			(this.isLast ? '_last' : '');
+		return `${this._model.id}_${this._modelChangeCount}`;
 	}
 
 	get sessionResource(): URI {
@@ -733,13 +774,21 @@ export class ChatResponseViewModel extends Disposable implements IChatResponseVi
 			this.liveUpdateTracker = this.instantiationService.createInstance(ChatStreamStatsTracker);
 		}
 
+		const liveWordCounter = this.liveUpdateTracker ? new IncrementalWordCounter() : undefined;
 		const wordCountScheduler = this.liveUpdateTracker ? this._register(new RunOnceScheduler(() => {
-			const wordCount = countWords(_model.entireResponse.getMarkdown());
+			const markdown = _model.entireResponse.getMarkdown();
+			// Streaming responses are append-only in the normal path. Avoid scanning
+			// their complete prefix for every token; do one exact validation when the
+			// response completes to cover any uncommon in-place rewrite.
+			liveWordCounter!.update(markdown, !_model.isComplete, _model.isComplete);
+			const wordCount = liveWordCounter!.getNWords(Number.MAX_SAFE_INTEGER).totalWordCount;
 			this.liveUpdateTracker!.update({ totalWordCount: wordCount });
-		}, 0)) : undefined;
+		}, 50)) : undefined;
 
 		this._register(_model.onDidChange(() => {
-			wordCountScheduler?.schedule();
+			if (!wordCountScheduler?.isScheduled()) {
+				wordCountScheduler?.schedule();
+			}
 
 			// new data -> new id, new content to render
 			this._modelChangeCount++;

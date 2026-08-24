@@ -33,6 +33,7 @@ export class SubAgentRunner {
 	async run(params: SubAgentRunParams): Promise<SubAgentResult> {
 		const bus = new EventBus();
 		const session = new Session(shortId("subagent"));
+		let finalStatus: SubAgentResult["status"] = "failed";
 		const detachSessionProjection = session.attach(bus);
 		const childLog = params.trace
 			? new ClientEventLog(params.trace.sessionId, params.trace.clientLogPath)
@@ -46,6 +47,18 @@ export class SubAgentRunner {
 			});
 		}
 		const detachParentProgress = this.attachParentProgressRelay(params, bus);
+		if (
+			params.parentBus &&
+			params.parentToolCallId &&
+			!params.parentSignal.aborted
+		) {
+			params.parentBus.emit({
+				type: "agent:child_start",
+				agentToolCallId: params.parentToolCallId,
+				childSessionId: session.sessionId,
+				prompt: params.prompt.trim(),
+			});
+		}
 
 		const reports: string[] = [];
 		bus.on("assistant:message", (event) => {
@@ -128,6 +141,7 @@ export class SubAgentRunner {
 
 		try {
 			const status = await loop.run(params.prompt.trim(), ctx);
+			finalStatus = status;
 
 			return {
 				report: reports.at(-1) ?? "(the sub-agent produced no output)",
@@ -136,6 +150,17 @@ export class SubAgentRunner {
 				toolRounds: loop.toolRounds,
 			};
 		} finally {
+			if (
+				params.parentBus &&
+				params.parentToolCallId &&
+				!params.parentSignal.aborted
+			) {
+				params.parentBus.emit({
+					type: "agent:child_end",
+					agentToolCallId: params.parentToolCallId,
+					status: finalStatus,
+				});
+			}
 			detachParentProgress();
 			detachSessionProjection();
 			await childLog?.flush();
@@ -150,41 +175,24 @@ export class SubAgentRunner {
 		// The bus is synchronous, so once the parent cancels, a winding-down
 		// child's events must not reach the parent - they would resurrect the
 		// parent's already-committed "Interrupted" row.
-		const detachStart = bus.on("tool:start", (event) => {
+		const lifecycleEvents = new Set([
+			"session:created",
+			"user:message",
+			"turn:start",
+			"turn:end",
+			"turn:cancelled",
+			"agent:child_start",
+			"agent:child_event",
+			"agent:child_end",
+		]);
+		return bus.onAny((event) => {
 			if (params.parentSignal.aborted) return;
+			if (lifecycleEvents.has(event.type)) return;
 			params.parentBus?.emit({
-				type: "agent:child_tool_start",
+				type: "agent:child_event",
 				agentToolCallId: params.parentToolCallId ?? "",
-				call: {
-					id: event.toolCallId,
-					name: event.name,
-					inputSummary: event.inputSummary,
-					status: "running",
-				},
+				event,
 			});
 		});
-		const detachResult = bus.on("tool:result", (event) => {
-			if (params.parentSignal.aborted) return;
-			params.parentBus?.emit({
-				type: "agent:child_tool_result",
-				agentToolCallId: params.parentToolCallId ?? "",
-				childToolCallId: event.toolCallId,
-				status: "done",
-			});
-		});
-		const detachError = bus.on("tool:error", (event) => {
-			if (params.parentSignal.aborted) return;
-			params.parentBus?.emit({
-				type: "agent:child_tool_result",
-				agentToolCallId: params.parentToolCallId ?? "",
-				childToolCallId: event.toolCallId,
-				status: "error",
-			});
-		});
-		return () => {
-			detachStart();
-			detachResult();
-			detachError();
-		};
 	}
 }

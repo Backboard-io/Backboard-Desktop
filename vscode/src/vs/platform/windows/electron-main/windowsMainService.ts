@@ -212,6 +212,7 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 	readonly onDidTriggerSystemContextMenu = this._onDidTriggerSystemContextMenu.event;
 
 	private readonly windows = new Map<number, ICodeWindow>();
+	private agentsWindowWorkspaceReady: Promise<URI> | undefined;
 
 	private readonly windowsStateHandler: WindowsStateHandler;
 
@@ -393,17 +394,7 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 	}
 
 	private async ensureAgentsWindow(openConfig: IOpenConfiguration): Promise<IOpenConfiguration> {
-		const agentSessionsWorkspaceUri = this.environmentMainService.agentSessionsWorkspace;
-		if (!agentSessionsWorkspaceUri) {
-			throw new Error('Agents workspace is not configured');
-		}
-
-		// Ensure the workspace file exists
-		const workspaceExists = await this.fileService.exists(agentSessionsWorkspaceUri);
-		if (!workspaceExists) {
-			const emptyWorkspaceContent = JSON.stringify({ folders: [] }, null, '\t');
-			await this.fileService.writeFile(agentSessionsWorkspaceUri, VSBuffer.fromString(emptyWorkspaceContent));
-		}
+		const agentSessionsWorkspaceUri = await this.getAgentsWindowWorkspace();
 
 		const reuseWindowId = openConfig.forceReuseWindow
 			? openConfig.contextWindowId ?? this.getFocusedWindow()?.id ?? this.getLastActiveWindow()?.id
@@ -420,6 +411,35 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 			forceNewWindow: !openConfig.forceReuseWindow,
 			forceReuseWindow: openConfig.forceReuseWindow,
 		};
+	}
+
+	private getAgentsWindowWorkspace(): Promise<URI> {
+		if (!this.agentsWindowWorkspaceReady) {
+			const ready = this.prepareAgentsWindowWorkspace();
+			this.agentsWindowWorkspaceReady = ready;
+			void ready.catch(() => {
+				// A transient filesystem failure should be retried on the next switch.
+				if (this.agentsWindowWorkspaceReady === ready) {
+					this.agentsWindowWorkspaceReady = undefined;
+				}
+			});
+		}
+
+		return this.agentsWindowWorkspaceReady;
+	}
+
+	private async prepareAgentsWindowWorkspace(): Promise<URI> {
+		const agentSessionsWorkspaceUri = this.environmentMainService.agentSessionsWorkspace;
+		if (!agentSessionsWorkspaceUri) {
+			throw new Error('Agents workspace is not configured');
+		}
+
+		if (!await this.fileService.exists(agentSessionsWorkspaceUri)) {
+			const emptyWorkspaceContent = JSON.stringify({ folders: [] }, null, '\t');
+			await this.fileService.writeFile(agentSessionsWorkspaceUri, VSBuffer.fromString(emptyWorkspaceContent));
+		}
+
+		return agentSessionsWorkspaceUri;
 	}
 
 	async open(openConfig: IOpenConfiguration): Promise<ICodeWindow[]> {
@@ -1772,9 +1792,14 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 		// first and only load the new configuration if that was
 		// not vetoed
 		if (window.isReady) {
+			// Capture the outgoing frame while the renderer runs its unload
+			// participants. Both operations can proceed against the live page, so
+			// overlapping them removes the capture from the mode-switch critical
+			// path in the common case.
+			const transitionSnapshot = window.captureTransitionSnapshot();
 			this.lifecycleMainService.unload(window, UnloadReason.LOAD).then(async veto => {
 				if (!veto) {
-					await this.doOpenInBrowserWindow(window, configuration, options, defaultProfile);
+					await this.doOpenInBrowserWindow(window, configuration, options, defaultProfile, transitionSnapshot);
 				}
 			});
 		} else {
@@ -1784,7 +1809,7 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 		return window;
 	}
 
-	private async doOpenInBrowserWindow(window: ICodeWindow, configuration: INativeWindowConfiguration, options: IOpenBrowserWindowOptions, defaultProfile: IUserDataProfile): Promise<void> {
+	private async doOpenInBrowserWindow(window: ICodeWindow, configuration: INativeWindowConfiguration, options: IOpenBrowserWindowOptions, defaultProfile: IUserDataProfile, transitionSnapshot?: Promise<string | undefined>): Promise<void> {
 
 		// Register window for backups unless the window
 		// is for extension development, where we do not
@@ -1836,9 +1861,9 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 
 		// Hand the frame this window is showing right now to the page about to
 		// replace it, so switching modes doesn't blank the window for the
-		// second or so the incoming workbench takes to boot. No-ops (and costs
-		// nothing) for a window that has never loaded.
-		configuration.transitionSnapshot = await window.captureTransitionSnapshot();
+		// second or so the incoming workbench takes to boot. Start it before the
+		// unload handshake whenever possible so it does not add serial latency.
+		configuration.transitionSnapshot = await (transitionSnapshot ?? window.captureTransitionSnapshot());
 
 		// Load it
 		window.load(configuration);

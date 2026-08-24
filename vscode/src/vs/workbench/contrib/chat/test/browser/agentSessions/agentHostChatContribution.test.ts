@@ -30,7 +30,7 @@ import { IAuthenticationService } from '../../../../../services/authentication/c
 import { ChatEntitlement, IChatEntitlementService } from '../../../../../services/chat/common/chatEntitlementService.js';
 import { IChatAgentData, IChatAgentImplementation, IChatAgentRequest, IChatAgentService } from '../../../common/participants/chatAgents.js';
 import { ChatAgentLocation } from '../../../common/constants.js';
-import { ChatRequestQueueKind, ElicitationState, IChatService, IChatMarkdownContent, IChatProgress, IChatTerminalToolInvocationData, IChatToolInputInvocationData, IChatToolInvocation, IChatToolInvocationSerialized, IChatUsage, ToolConfirmKind } from '../../../common/chatService/chatService.js';
+import { ChatRequestQueueKind, ElicitationState, IChatService, IChatExternalEdit, IChatMarkdownContent, IChatProgress, IChatTerminalToolInvocationData, IChatToolInputInvocationData, IChatToolInvocation, IChatToolInvocationSerialized, IChatUsage, ToolConfirmKind } from '../../../common/chatService/chatService.js';
 import { IChatEditingService } from '../../../common/editing/chatEditingService.js';
 import { IMarkdownString } from '../../../../../../base/common/htmlContent.js';
 import { IChatSessionsService, type IChatSessionRequestHistoryItem, type IChatSessionsExtensionPoint } from '../../../common/chatSessionsService.js';
@@ -4263,6 +4263,134 @@ suite('AgentHostChatContribution', () => {
 			assert.strictEqual(markdownPart!.content.value, 'Partial response so far');
 		});
 
+		test('reconnect emits snapshot and newly completed edit cards exactly once', async () => {
+			const { sessionHandler, agentHostService } = createContribution(disposables);
+
+			const sessionUri = AgentSession.uri('copilot', 'reconnect-completed-edit');
+			const sessionState = makeSessionStateWithActiveTurn(sessionUri.toString());
+			sessionState.activeTurn!.responseParts.push({
+				kind: ResponsePartKind.ToolCall,
+				toolCall: {
+					status: ToolCallStatus.Completed,
+					toolCallId: 'tc-completed-edit',
+					toolName: 'edit_file',
+					displayName: 'Edit File',
+					invocationMessage: 'Editing app.ts',
+					toolInput: '{}',
+					confirmed: ToolCallConfirmationReason.NotNeeded,
+					success: true,
+					pastTenseMessage: 'Edited app.ts',
+					content: [{
+						type: ToolResultContentType.FileEdit,
+						before: {
+							uri: URI.file('/workspace/src/app.ts').toString(),
+							content: { uri: 'agenthost-content:///session/snap/before' },
+						},
+						after: {
+							uri: URI.file('/workspace/src/app.ts').toString(),
+							content: { uri: 'agenthost-content:///session/snap/after' },
+						},
+						diff: { added: 3, removed: 1 },
+					}],
+				},
+			});
+			sessionState.activeTurn!.responseParts.push({
+				kind: ResponsePartKind.ToolCall,
+				toolCall: {
+					status: ToolCallStatus.Running,
+					toolCallId: 'tc-running-edit',
+					toolName: 'edit_file',
+					displayName: 'Edit File',
+					invocationMessage: 'Editing live.ts',
+					toolInput: '{}',
+					confirmed: ToolCallConfirmationReason.NotNeeded,
+				},
+			});
+			agentHostService.sessionStates.set(sessionUri.toString(), sessionState);
+
+			const sessionResource = URI.from({ scheme: 'agent-host-copilot', path: '/reconnect-completed-edit' });
+			const session = await sessionHandler.provideChatSessionContent(sessionResource, CancellationToken.None);
+			disposables.add(toDisposable(() => session.dispose()));
+
+			const assertSingleEditShape = () => {
+				const progress = session.progressObs?.get() ?? [];
+				const toolRows = progress.filter(part =>
+					(part.kind === 'toolInvocation' || part.kind === 'toolInvocationSerialized')
+					&& part.toolCallId === 'tc-completed-edit');
+				const editCards = progress.filter((part): part is IChatExternalEdit => part.kind === 'externalEdit' && part.undoStopId === 'tc-completed-edit');
+				assert.strictEqual(toolRows.length, 1, 'Reconnect observer must not append the completed tool a second time');
+				assert.strictEqual(toolRows[0].kind, 'toolInvocationSerialized');
+				assert.strictEqual(toolRows[0].presentation, 'hidden', 'The diff card replaces the generic completed tool row visually');
+				assert.strictEqual(editCards.length, 1, 'Reconnect observer must not append the completed edit card a second time');
+				assert.deepStrictEqual(editCards[0].diff, { added: 3, removed: 1 });
+			};
+
+			assertSingleEditShape();
+
+			// A tool that was still running in the snapshot must append its diff
+			// exactly once when it completes after the reconnect observer attaches.
+			agentHostService.fireAction({
+				channel: sessionUri.toString(),
+				action: {
+					type: 'chat/toolCallComplete',
+					turnId: 'turn-active',
+					toolCallId: 'tc-running-edit',
+					result: {
+						success: true,
+						pastTenseMessage: 'Edited live.ts',
+						content: [{
+							type: ToolResultContentType.FileEdit,
+							before: {
+								uri: URI.file('/workspace/src/live.ts').toString(),
+								content: { uri: 'agenthost-content:///session/live/before' },
+							},
+							after: {
+								uri: URI.file('/workspace/src/live.ts').toString(),
+								content: { uri: 'agenthost-content:///session/live/after' },
+							},
+							diff: { added: 2, removed: 2 },
+						}],
+					},
+				} as ChatAction,
+				serverSeq: 1,
+				origin: undefined,
+			});
+			const assertSingleLiveEditShape = () => {
+				const progress = session.progressObs?.get() ?? [];
+				const toolRows = progress.filter(part => part.kind === 'toolInvocation' && part.toolCallId === 'tc-running-edit');
+				const editCards = progress.filter((part): part is IChatExternalEdit => part.kind === 'externalEdit' && part.undoStopId === 'tc-running-edit');
+				assert.strictEqual(toolRows.length, 1, 'The adopted live invocation must be completed in place');
+				assert.strictEqual(editCards.length, 1, 'Post-reconnect completion must append one edit card');
+				assert.deepStrictEqual(editCards[0].diff, { added: 2, removed: 2 });
+			};
+			assertSingleLiveEditShape();
+
+			// An unrelated response update reruns the turn graph but must not replay
+			// any completed snapshot content.
+			agentHostService.fireAction({
+				channel: sessionUri.toString(),
+				action: {
+					type: 'chat/responsePart',
+					turnId: 'turn-active',
+					part: { kind: ResponsePartKind.Markdown, id: 'md-after-edit', content: 'Done.' },
+				} as ChatAction,
+				serverSeq: 2,
+				origin: undefined,
+			});
+			assertSingleEditShape();
+			assertSingleLiveEditShape();
+
+			agentHostService.fireAction({
+				channel: sessionUri.toString(),
+				action: { type: 'chat/turnComplete', turnId: 'turn-active' } as ChatAction,
+				serverSeq: 3,
+				origin: undefined,
+			});
+			await Promise.resolve();
+			assertSingleEditShape();
+			assertSingleLiveEditShape();
+		});
+
 		test('provides interruptActiveResponseCallback when reconnecting', async () => {
 			const { sessionHandler, agentHostService } = createContribution(disposables);
 
@@ -4791,6 +4919,81 @@ suite('AgentHostChatContribution', () => {
 			const progress = chatSession.progressObs!.get();
 			const toolInvocations = progress.filter(p => p.kind === 'toolInvocation');
 			assert.strictEqual(toolInvocations.length, 1, 'Tool call should not be duplicated');
+		}));
+
+		test('restored session appends one diff card for a server-initiated edit', () => runWithFakedTimers({ useFakeTimers: true }, async () => {
+			const { sessionHandler, agentHostService } = createContribution(disposables);
+			const backendSession = AgentSession.uri('copilot', 'restored-server-edit');
+			agentHostService.sessionStates.set(backendSession.toString(), {
+				...createSessionState({
+					resource: backendSession.toString(),
+					provider: 'copilot',
+					title: 'Restored',
+					status: SessionStatus.Idle,
+					createdAt: Date.now(),
+					modifiedAt: Date.now(),
+				}),
+				lifecycle: SessionLifecycle.Ready,
+			});
+
+			const sessionResource = URI.from({ scheme: 'agent-host-copilot', path: '/restored-server-edit' });
+			const chatSession = await sessionHandler.provideChatSessionContent(sessionResource, CancellationToken.None);
+			disposables.add(toDisposable(() => chatSession.dispose()));
+
+			const turnId = 'server-edit-turn';
+			agentHostService.fireAction({
+				channel: backendSession.toString(),
+				action: { type: 'chat/turnStarted', turnId, message: { text: 'Edit server.ts', origin: { kind: MessageKind.User } } } as ChatAction,
+				serverSeq: 1,
+				origin: undefined,
+			});
+			await timeout(10);
+			agentHostService.fireAction({
+				channel: backendSession.toString(),
+				action: { type: 'chat/toolCallStart', turnId, toolCallId: 'tc-server-edit', toolName: 'edit_file', displayName: 'Edit File' } as ChatAction,
+				serverSeq: 2,
+				origin: undefined,
+			});
+			agentHostService.fireAction({
+				channel: backendSession.toString(),
+				action: { type: 'chat/toolCallReady', turnId, toolCallId: 'tc-server-edit', invocationMessage: 'Editing server.ts', confirmed: ToolCallConfirmationReason.NotNeeded } as ChatAction,
+				serverSeq: 3,
+				origin: undefined,
+			});
+			agentHostService.fireAction({
+				channel: backendSession.toString(),
+				action: {
+					type: 'chat/toolCallComplete',
+					turnId,
+					toolCallId: 'tc-server-edit',
+					result: {
+						success: true,
+						pastTenseMessage: 'Edited server.ts',
+						content: [{
+							type: ToolResultContentType.FileEdit,
+							before: {
+								uri: URI.file('/workspace/src/server.ts').toString(),
+								content: { uri: 'agenthost-content:///session/server/before' },
+							},
+							after: {
+								uri: URI.file('/workspace/src/server.ts').toString(),
+								content: { uri: 'agenthost-content:///session/server/after' },
+							},
+							diff: { added: 1, removed: 1 },
+						}],
+					},
+				} as ChatAction,
+				serverSeq: 4,
+				origin: undefined,
+			});
+			await timeout(10);
+
+			const progress = chatSession.progressObs!.get();
+			const toolInvocations = progress.filter(part => part.kind === 'toolInvocation' && part.toolCallId === 'tc-server-edit');
+			const editCards = progress.filter((part): part is IChatExternalEdit => part.kind === 'externalEdit' && part.undoStopId === 'tc-server-edit');
+			assert.strictEqual(toolInvocations.length, 1, 'Server edit should keep one tool invocation');
+			assert.strictEqual(editCards.length, 1, 'Server edit should append one diff card');
+			assert.deepStrictEqual(editCards[0].diff, { added: 1, removed: 1 });
 		}));
 
 		test('server-initiated turn picks up markdown arriving with turnStarted', () => runWithFakedTimers({ useFakeTimers: true }, async () => {

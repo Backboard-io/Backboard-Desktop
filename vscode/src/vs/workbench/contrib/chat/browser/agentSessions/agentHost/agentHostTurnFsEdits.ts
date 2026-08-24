@@ -5,6 +5,7 @@
 
 import { posix } from '../../../../../../base/common/path.js';
 import { URI } from '../../../../../../base/common/uri.js';
+import { isIgnoredAgentPath } from '../../../../../../platform/agentHost/common/agentIgnoredPaths.js';
 import { FileChangeType } from '../../../../../../platform/files/common/files.js';
 import { toAgentHostUri } from '../../../../../../platform/agentHost/common/agentHostUri.js';
 import { buildGitBlobUri } from '../../../../../../platform/agentHost/common/gitBlobUri.js';
@@ -157,6 +158,86 @@ export interface IUncoveredTurnEditParams {
 	readonly undoStopId: string;
 }
 
+/** Compact per-path history retained while a turn's file watcher is active. */
+export interface ITurnFileChangeObservation {
+	readonly firstType: FileChangeType;
+	readonly sawAdded: boolean;
+	readonly sawUpdated: boolean;
+	readonly sawDeleted: boolean;
+}
+
+/** Adds one unordered watcher event to a path's compact turn observation. */
+export function accumulateUncoveredTurnFileChange(previous: ITurnFileChangeObservation | undefined, type: FileChangeType): ITurnFileChangeObservation {
+	return {
+		firstType: previous?.firstType ?? type,
+		sawAdded: previous?.sawAdded || type === FileChangeType.ADDED,
+		sawUpdated: previous?.sawUpdated || type === FileChangeType.UPDATED,
+		sawDeleted: previous?.sawDeleted || type === FileChangeType.DELETED,
+	};
+}
+
+/**
+ * Reconciles an accumulated watcher event with the path's state at turn end.
+ *
+ * File watcher event batches do not preserve operation order. In particular,
+ * an atomic replacement may report both delete and add for the real target,
+ * while a sibling scratch file can be created and removed within one turn.
+ * The final filesystem state is authoritative:
+ *
+ * - a path that exists cannot be presented as deleted;
+ * - a path first reported as added but gone at turn end was transient;
+ * - any other missing changed path is a deletion.
+ *
+ * Ignored-path filtering is repeated here because buffered events can outlive
+ * the watcher callback that originally accepted them.
+ */
+export function finalizeUncoveredTurnFileChange(
+	path: string,
+	observation: ITurnFileChangeObservation,
+	existsAtTurnEnd: boolean,
+	existedAtTurnStart?: boolean,
+): FileChangeType | undefined {
+	if (isIgnoredAgentPath(path)) {
+		return undefined;
+	}
+	if (existsAtTurnEnd) {
+		// Some platform watchers report an atomic rewrite of an existing file as
+		// ADDED only. A successful turn-start baseline probe is authoritative in
+		// that ambiguous case; without one, retain the historical create fallback.
+		if (observation.firstType === FileChangeType.ADDED && !observation.sawDeleted && existedAtTurnStart !== undefined) {
+			return existedAtTurnStart ? FileChangeType.UPDATED : FileChangeType.ADDED;
+		}
+		// A delete followed by a final existing path is an atomic replacement;
+		// any other pre-existing path is an update regardless of the watcher's
+		// last unordered event.
+		return observation.firstType === FileChangeType.ADDED && !observation.sawDeleted
+			? FileChangeType.ADDED
+			: FileChangeType.UPDATED;
+	}
+	// A path created during the turn and absent at its end has no net effect.
+	// Anything that existed (or was first observed changing/deleting) and is
+	// now absent is a real deletion.
+	return observation.firstType === FileChangeType.ADDED ? undefined : FileChangeType.DELETED;
+}
+
+/**
+ * Returns the raw `git-blob:` URI for a changed file at the turn-start
+ * commit. Besides hydration, callers use this to distinguish a true create
+ * from an existing tracked file whose atomic replacement was reported as a
+ * lone ADDED event.
+ */
+export function buildUncoveredTurnBeforeContentUri(
+	uri: URI,
+	repo: ITurnRepoInfo | undefined,
+	backendSessionUri: string,
+): URI | undefined {
+	if (!repo || !uri.path.startsWith(`${repo.rootPath}/`)) {
+		return undefined;
+	}
+	const repoRelativePath = uri.path.substring(repo.rootPath.length + 1);
+	return URI.parse(buildGitBlobUri(backendSessionUri, repo.sha, repoRelativePath, uri.path));
+}
+
 /**
  * Builds a fully-hydrated {@link IChatExternalEdit} for an out-of-band file
  * change so the UI renders the same pill + diff card as tool-declared edits:
@@ -173,11 +254,10 @@ export function hydrateUncoveredTurnEdit(params: IUncoveredTurnEditParams): ICha
 
 	const wrap = (value: URI) => toAgentHostUri(value, connectionAuthority);
 
-	let beforeContentUri: URI | undefined;
-	if (editKind !== 'create' && repo && uri.path.startsWith(`${repo.rootPath}/`)) {
-		const repoRelativePath = uri.path.substring(repo.rootPath.length + 1);
-		beforeContentUri = wrap(URI.parse(buildGitBlobUri(backendSessionUri, repo.sha, repoRelativePath, uri.path)));
-	}
+	const rawBeforeContentUri = editKind !== 'create'
+		? buildUncoveredTurnBeforeContentUri(uri, repo, backendSessionUri)
+		: undefined;
+	const beforeContentUri = rawBeforeContentUri ? wrap(rawBeforeContentUri) : undefined;
 	const afterContentUri = editKind !== 'delete' ? wrap(uri) : undefined;
 
 	return {

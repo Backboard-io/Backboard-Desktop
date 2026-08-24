@@ -454,7 +454,17 @@ export function activeTurnToProgress(sessionResource: URI, activeTurn: ActiveTur
 			case ResponsePartKind.ToolCall: {
 				const tc = rp.toolCall;
 				if (tc.status === ToolCallStatus.Completed || tc.status === ToolCallStatus.Cancelled) {
-					parts.push(completedToolCallToSerialized(tc as ICompletedToolCall, undefined, sessionResource, connectionAuthority));
+					const completedTc = tc as ICompletedToolCall;
+					const fileEditParts = completedToolCallToEditParts(completedTc, connectionAuthority);
+					const serialized = completedToolCallToSerialized(completedTc, undefined, sessionResource, connectionAuthority);
+					if (fileEditParts.length > 0) {
+						// Match completed-history rendering: the per-file edit cards are the
+						// visible representation of a completed edit tool, so restoring an
+						// active turn must not also resurrect the redundant generic tool row.
+						serialized.presentation = ToolInvocationPresentation.Hidden;
+					}
+					parts.push(serialized);
+					parts.push(...fileEditParts);
 				} else if (tc.status === ToolCallStatus.Running || tc.status === ToolCallStatus.Streaming || tc.status === ToolCallStatus.PendingConfirmation) {
 					parts.push(toolCallStateToInvocation(tc, undefined, sessionResource, connectionAuthority));
 				}

@@ -11,6 +11,11 @@ suite('WorkbenchThemeService', () => {
 
 	ensureNoDisposablesAreLeakedInTestSuite();
 
+	test('uses Backboard themes as the first-install defaults', () => {
+		assert.strictEqual(ThemeSettingDefaults.COLOR_THEME_DARK, 'Backboard Obsidian');
+		assert.strictEqual(ThemeSettingDefaults.COLOR_THEME_LIGHT, 'Backboard Porcelain');
+	});
+
 	suite('migrateThemeSettingsId', () => {
 
 		test('migrates Default-prefixed theme IDs', () => {

@@ -1648,7 +1648,7 @@ export interface IDynamicChatAgentProps {
 
 export interface IChatAgentProgressShape {
 	$handleProgressChunk(requestId: string, chunks: (IChatProgressDto | [IChatProgressDto, number])[]): Promise<void>;
-	$handleAnchorResolve(requestId: string, handle: string, anchor: Dto<IChatContentInlineReference>): void;
+	$handleAnchorResolve(requestId: string, handle: string, anchor: Dto<IChatContentInlineReference> | undefined): void;
 }
 
 export interface MainThreadChatAgentsShape2 extends IChatAgentProgressShape, IDisposable {
@@ -3895,7 +3895,7 @@ export interface MainThreadChatSessionsShape extends IDisposable {
 	$updateChatSessionInputState(controllerHandle: number, sessionResource: UriComponents, optionGroups: readonly IChatSessionProviderOptionGroup[]): void;
 
 	$handleProgressChunk(handle: number, sessionResource: UriComponents, requestId: string, chunks: (IChatProgressDto | [IChatProgressDto, number])[]): Promise<void>;
-	$handleAnchorResolve(handle: number, sessionResource: UriComponents, requestId: string, requestHandle: string, anchor: Dto<IChatContentInlineReference>): void;
+	$handleAnchorResolve(handle: number, sessionResource: UriComponents, requestId: string, requestHandle: string, anchor: Dto<IChatContentInlineReference> | undefined): void;
 	$handleProgressComplete(handle: number, sessionResource: UriComponents, requestId: string): void;
 }
 

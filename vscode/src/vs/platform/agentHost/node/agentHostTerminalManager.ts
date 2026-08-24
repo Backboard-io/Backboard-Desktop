@@ -663,6 +663,7 @@ export class AgentHostTerminalManager extends Disposable implements IAgentHostTe
 					timestamp,
 					isComplete: false,
 				});
+				managed.contentSize += commandLine.length;
 
 				this._stateManager.dispatchServerAction(managed.uri, {
 					type: ActionType.TerminalCommandExecuted,
@@ -748,18 +749,20 @@ export class AgentHostTerminalManager extends Disposable implements IAgentHostTe
 	}
 
 	private _getContentPartSize(part: TerminalContentPart): number {
-		return part.type === 'command' ? part.output.length : part.value.length;
+		return part.type === 'command' ? part.commandLine.length + part.output.length : part.value.length;
 	}
 
 	/** Trim content parts to stay within the rolling buffer limit. */
 	private _trimContent(managed: IManagedTerminal): void {
 		const maxSize = 100_000;
 		const targetSize = 80_000;
-		if (managed.contentSize <= maxSize) {
+		const maxParts = 1_000;
+		const targetParts = 800;
+		if (managed.contentSize <= maxSize && managed.content.length <= maxParts) {
 			return;
 		}
 		// Drop whole parts from the front while possible
-		while (managed.contentSize > targetSize && managed.content.length > 1) {
+		while ((managed.contentSize > targetSize || managed.content.length > targetParts) && managed.content.length > 1) {
 			const removed = managed.content.shift()!;
 			managed.contentSize -= this._getContentPartSize(removed);
 		}
@@ -768,7 +771,11 @@ export class AgentHostTerminalManager extends Disposable implements IAgentHostTe
 			const head = managed.content[0];
 			const excess = managed.contentSize - targetSize;
 			if (head.type === 'command') {
-				head.output = head.output.slice(excess);
+				const outputExcess = Math.min(excess, head.output.length);
+				head.output = head.output.slice(outputExcess);
+				if (outputExcess < excess) {
+					head.commandLine = head.commandLine.slice(excess - outputExcess);
+				}
 			} else {
 				head.value = head.value.slice(excess);
 			}

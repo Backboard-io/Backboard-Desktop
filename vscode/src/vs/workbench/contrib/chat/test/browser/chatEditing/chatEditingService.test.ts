@@ -4,8 +4,9 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
+import { DeferredPromise } from '../../../../../../base/common/async.js';
 import { Event } from '../../../../../../base/common/event.js';
-import { Disposable, DisposableStore, IDisposable } from '../../../../../../base/common/lifecycle.js';
+import { Disposable, DisposableStore, IDisposable, toDisposable } from '../../../../../../base/common/lifecycle.js';
 import { waitForState } from '../../../../../../base/common/observable.js';
 import { isEqual } from '../../../../../../base/common/resources.js';
 import { assertType } from '../../../../../../base/common/types.js';
@@ -33,12 +34,12 @@ import { TestMcpService } from '../../../../mcp/test/common/testMcpService.js';
 import { IMultiDiffSourceResolver, IMultiDiffSourceResolverService } from '../../../../multiDiffEditor/browser/multiDiffSourceResolverService.js';
 import { NotebookTextModel } from '../../../../notebook/common/model/notebookTextModel.js';
 import { INotebookService } from '../../../../notebook/common/notebookService.js';
-import { ChatEditingService } from '../../../browser/chatEditing/chatEditingServiceImpl.js';
+import { ChatEditingService, ChatExternalEditHydrationQueue, ChatResponsePartAppendCursor } from '../../../browser/chatEditing/chatEditingServiceImpl.js';
 import { ChatSessionsService } from '../../../browser/chatSessions/chatSessions.contribution.js';
 import { ChatAgentService, IChatAgentData, IChatAgentImplementation, IChatAgentService } from '../../../common/participants/chatAgents.js';
-import { ChatEditingSessionState, IChatEditingService, IChatEditingSession, ModifiedFileEntryState } from '../../../common/editing/chatEditingService.js';
-import { ChatModel } from '../../../common/model/chatModel.js';
-import { IChatService } from '../../../common/chatService/chatService.js';
+import { ChatEditingSessionState, IChatEditingService, IChatEditingSession, IStreamingEdits, ModifiedFileEntryState } from '../../../common/editing/chatEditingService.js';
+import { ChatModel, IChatResponseModel, IChatTextEditGroup } from '../../../common/model/chatModel.js';
+import { ChatAgentVoteDirection, IChatExternalEdit, IChatService } from '../../../common/chatService/chatService.js';
 import { ChatService } from '../../../common/chatService/chatServiceImpl.js';
 import { IChatSessionsService } from '../../../common/chatSessionsService.js';
 import { IChatSlashCommandService } from '../../../common/participants/chatSlashCommands.js';
@@ -164,6 +165,287 @@ suite('ChatEditingService', function () {
 
 		session.dispose();
 		modelRef.dispose();
+	});
+
+	test('response edit cursor scans only appended tool parts during long streams', function () {
+		const cursor = new ChatResponsePartAppendCursor<object>();
+		const parts: { kind: 'tool'; id: number }[] = Array.from({ length: 1_000 }, (_, id) => ({ kind: 'tool', id }));
+		let inspectedParts = 0;
+		let result = cursor.take(parts);
+		inspectedParts += result.endIndex - result.startIndex;
+
+		for (let id = 1_000; id < 1_500; id++) {
+			parts.push({ kind: 'tool', id });
+			result = cursor.take(parts);
+			inspectedParts += result.endIndex - result.startIndex;
+		}
+		for (let event = 0; event < 500; event++) {
+			result = cursor.take(parts);
+			inspectedParts += result.endIndex - result.startIndex;
+		}
+
+		assert.deepStrictEqual({
+			inspectedParts,
+			lastEventStart: result.startIndex,
+			lastEventEnd: result.endIndex,
+			lastEventReset: result.didReset,
+		}, {
+			inspectedParts: 1_500,
+			lastEventStart: 1_500,
+			lastEventEnd: 1_500,
+			lastEventReset: false,
+		}, 'Repeated response state events must not turn the observer into a triangular full-history scan');
+
+		const clonedPrefix = parts.map(part => ({ ...part }));
+		result = cursor.take(clonedPrefix);
+		assert.deepStrictEqual(result, { startIndex: 0, endIndex: 1_500, didReset: true }, 'A cloned response prefix should trigger one explicit rebuild');
+		result = cursor.take(clonedPrefix.slice(0, 10));
+		assert.deepStrictEqual(result, { startIndex: 10, endIndex: 10, didReset: true }, 'Truncation should preserve the surviving common prefix');
+	});
+
+	test('response prefix replacement keeps active edits incremental and truncation completes the stream', function () {
+		const modelRef = store.add(chatService.startNewLocalSession(ChatAgentLocation.Chat));
+		const model = modelRef.object as ChatModel;
+		const session = model.editingSession;
+		assertType(session, 'session not created');
+
+		let startCount = 0;
+		let pushCount = 0;
+		let completeCount = 0;
+		let startedInUndoStop: string | undefined;
+		const stream: IStreamingEdits = {
+			pushText: () => pushCount++,
+			pushNotebookCellText: () => assert.fail('Unexpected notebook cell edit'),
+			pushNotebook: () => assert.fail('Unexpected notebook edit'),
+			complete: () => completeCount++,
+		};
+		const originalStartStreamingEdits = session.startStreamingEdits;
+		session.startStreamingEdits = (_resource, _responseModel, inUndoStop) => {
+			startCount++;
+			startedInUndoStop = inUndoStop;
+			return stream;
+		};
+		store.add(toDisposable(() => session.startStreamingEdits = originalStartStreamingEdits));
+
+		const request = model.addRequest({ text: '', parts: [] }, { variables: [] }, 0);
+		assertType(request.response);
+		request.response.addUndoStop({ kind: 'undoStop', id: 'clone-stop' });
+		const uri = URI.from({ scheme: 'test', path: 'cursor-clone.ts' });
+		request.response.updateContent({
+			kind: 'textEdit',
+			uri,
+			edits: [{ range: new Range(1, 1, 1, 1), text: 'first\n' }],
+			done: false,
+		});
+
+		const mutableParts = request.response.response.value as unknown as IChatResponseModel['response']['value'][number][];
+		const editIndex = mutableParts.findIndex(part => part.kind === 'textEditGroup');
+		assert.ok(editIndex >= 0);
+		const existingEdit = mutableParts[editIndex];
+		assertType(existingEdit.kind === 'textEditGroup');
+		mutableParts[editIndex] = {
+			...existingEdit,
+			edits: existingEdit.edits.map(batch => batch.slice()),
+		} satisfies IChatTextEditGroup;
+		request.response.setVote(ChatAgentVoteDirection.Up);
+
+		assert.deepStrictEqual({ startCount, pushCount, completeCount, startedInUndoStop }, {
+			startCount: 1,
+			pushCount: 1,
+			completeCount: 0,
+			startedInUndoStop: 'clone-stop',
+		}, 'Cloning the response prefix must transfer the active URI stream without replaying its edit batches');
+
+		mutableParts.length = editIndex;
+		request.response.setVote(ChatAgentVoteDirection.Down);
+		assert.deepStrictEqual({ startCount, pushCount, completeCount }, {
+			startCount: 1,
+			pushCount: 1,
+			completeCount: 1,
+		}, 'Truncating away an active edit group must complete and release its stream');
+	});
+
+	test('cloned static response prefix does not replay workspace or external edits', async function () {
+		const modelRef = store.add(chatService.startNewLocalSession(ChatAgentLocation.Chat));
+		const model = modelRef.object as ChatModel;
+		const session = model.editingSession;
+		assertType(session, 'session not created');
+
+		let workspaceApplications = 0;
+		let externalHydrations = 0;
+		const hydratableSession = session as IChatEditingSession & {
+			hydrateExternalEdit(responseModel: IChatResponseModel, edit: IChatExternalEdit): Promise<void>;
+		};
+		const originalApplyWorkspaceEdit = session.applyWorkspaceEdit;
+		const originalHydrateExternalEdit = hydratableSession.hydrateExternalEdit;
+		session.applyWorkspaceEdit = () => workspaceApplications++;
+		hydratableSession.hydrateExternalEdit = async () => { externalHydrations++; };
+		store.add(toDisposable(() => {
+			session.applyWorkspaceEdit = originalApplyWorkspaceEdit;
+			hydratableSession.hydrateExternalEdit = originalHydrateExternalEdit;
+		}));
+
+		const request = model.addRequest({ text: '', parts: [] }, { variables: [] }, 0);
+		assertType(request.response);
+		const deletedUri = URI.file('/project/removed.ts');
+		const externalUri = URI.file('/project/changed.ts');
+		const externalEdit = {
+			kind: 'externalEdit' as const,
+			uri: externalUri,
+			editKind: 'edit' as const,
+			beforeContentUri: URI.parse('chat-edit://before/changed.ts'),
+			afterContentUri: URI.parse('chat-edit://after/changed.ts'),
+		};
+		request.response.addUndoStop({ kind: 'undoStop', id: 'static-clone-stop' });
+		request.response.updateContent({ kind: 'workspaceEdit', edits: [{ oldResource: deletedUri }] });
+		request.response.updateContent(externalEdit);
+
+		const waitForCounts = async (workspace: number, external: number) => {
+			for (let attempt = 0; attempt < 100; attempt++) {
+				if (workspaceApplications === workspace && externalHydrations === external) {
+					return;
+				}
+				await new Promise<void>(resolve => setTimeout(resolve, 0));
+			}
+			assert.fail(`Timed out waiting for static edit counts ${workspace}/${external}; got ${workspaceApplications}/${externalHydrations}`);
+		};
+		await waitForCounts(1, 1);
+
+		const mutableParts = request.response.response.value as unknown as IChatResponseModel['response']['value'][number][];
+		for (let index = 0; index < mutableParts.length; index++) {
+			const part = mutableParts[index];
+			if (part.kind === 'workspaceEdit') {
+				mutableParts[index] = { ...part, edits: part.edits.map(edit => ({ ...edit })) };
+			} else if (part.kind === 'externalEdit') {
+				mutableParts[index] = { ...part };
+			} else if (part.kind === 'undoStop') {
+				mutableParts[index] = { ...part };
+			}
+		}
+		request.response.setVote(ChatAgentVoteDirection.Up);
+		for (let attempt = 0; attempt < 10; attempt++) {
+			await Promise.resolve();
+		}
+		assert.deepStrictEqual({ workspaceApplications, externalHydrations }, {
+			workspaceApplications: 1,
+			externalHydrations: 1,
+		}, 'A structural clone should keep the same semantic occurrence keys');
+
+		request.response.updateContent({ kind: 'workspaceEdit', edits: [{ oldResource: deletedUri }] });
+		request.response.updateContent({ ...externalEdit });
+		await waitForCounts(2, 2);
+		assert.deepStrictEqual({ workspaceApplications, externalHydrations }, {
+			workspaceApplications: 2,
+			externalHydrations: 2,
+		}, 'A genuinely repeated identical edit should receive a new occurrence key');
+	});
+
+	test('external edit hydration is capped at two and drains after response completion', async function () {
+		const modelRef = store.add(chatService.startNewLocalSession(ChatAgentLocation.Chat));
+		const model = modelRef.object as ChatModel;
+		const session = model.editingSession;
+		assertType(session, 'session not created');
+
+		type HydratableSession = {
+			hydrateExternalEdit(responseModel: IChatResponseModel, edit: IChatExternalEdit): Promise<void>;
+		};
+		const hydratableSession = session as unknown as HydratableSession;
+		const originalHydrateExternalEdit = hydratableSession.hydrateExternalEdit;
+		const releaseHydration = new DeferredPromise<void>();
+		let hydrationCalls = 0;
+		let activeHydrations = 0;
+		let maxActiveHydrations = 0;
+		const hydratedUris: string[] = [];
+		hydratableSession.hydrateExternalEdit = async (_responseModel, edit) => {
+			hydrationCalls++;
+			hydratedUris.push(edit.uri.path);
+			activeHydrations++;
+			maxActiveHydrations = Math.max(maxActiveHydrations, activeHydrations);
+			await releaseHydration.p;
+			activeHydrations--;
+		};
+		store.add(toDisposable(() => hydratableSession.hydrateExternalEdit = originalHydrateExternalEdit));
+
+		const request = model.addRequest({ text: '', parts: [] }, { variables: [] }, 0);
+		assertType(request.response);
+		const editCount = 120;
+		for (const path of ['/project/src/.!13356!level.js', '/project/src/XXhU77d6', '/project/src/main.js.tmp']) {
+			request.response.updateContent({
+				kind: 'externalEdit',
+				uri: URI.file(path),
+				editKind: 'delete',
+				beforeContentUri: URI.parse(`chat-edit://before${path}`),
+				afterContentUri: URI.parse(`chat-edit://after${path}`),
+			});
+		}
+		for (let index = 0; index < editCount; index++) {
+			request.response.updateContent({
+				kind: 'externalEdit',
+				uri: URI.file(`/project/file-${index}.ts`),
+				editKind: 'edit',
+				beforeContentUri: URI.parse(`chat-edit://before/file-${index}.ts`),
+				afterContentUri: URI.parse(`chat-edit://after/file-${index}.ts`),
+			});
+		}
+
+		const waitFor = async (predicate: () => boolean, message: string): Promise<void> => {
+			for (let attempt = 0; attempt < 200; attempt++) {
+				if (predicate()) {
+					return;
+				}
+				await new Promise<void>(resolve => setTimeout(resolve, 0));
+			}
+			assert.fail(message);
+		};
+		await waitFor(() => hydrationCalls === 2, 'The first bounded hydration pair did not start');
+		assert.deepStrictEqual({ hydrationCalls, activeHydrations, maxActiveHydrations }, {
+			hydrationCalls: 2,
+			activeHydrations: 2,
+			maxActiveHydrations: 2,
+		});
+
+		request.response.complete();
+		releaseHydration.complete();
+		await waitFor(() => hydrationCalls === editCount && activeHydrations === 0, 'The hydration queue did not drain after response completion');
+		assert.deepStrictEqual({ hydrationCalls, activeHydrations, maxActiveHydrations }, {
+			hydrationCalls: editCount,
+			activeHydrations: 0,
+			maxActiveHydrations: 2,
+		});
+		assert.deepStrictEqual(hydratedUris.length, editCount, 'Transient atomic-save rows must not consume hydration work');
+		assert.ok(hydratedUris.every(uri => uri.startsWith('/project/file-')), 'Only renderable external edits should reach the hydration queue');
+	});
+
+	test('disposing the external hydration queue drops pending work', async function () {
+		const releaseHydration = new DeferredPromise<void>();
+		let started = 0;
+		const errors: unknown[] = [];
+		const queue = store.add(new ChatExternalEditHydrationQueue(error => errors.push(error)));
+		for (let index = 0; index < 20; index++) {
+			queue.enqueue(async () => {
+				started++;
+				await releaseHydration.p;
+			});
+		}
+		for (let attempt = 0; attempt < 20 && started < 2; attempt++) {
+			await Promise.resolve();
+		}
+		assert.deepStrictEqual({ started, active: queue.activeTaskCount, pending: queue.pendingTaskCount }, {
+			started: 2,
+			active: 2,
+			pending: 18,
+		});
+
+		queue.dispose();
+		releaseHydration.complete();
+		for (let attempt = 0; attempt < 10; attempt++) {
+			await Promise.resolve();
+		}
+		assert.deepStrictEqual({ started, pending: queue.pendingTaskCount, errors }, {
+			started: 2,
+			pending: 0,
+			errors: [],
+		}, 'Disposal should not launch queued file hydrations after the editing session is gone');
 	});
 
 	test('create session, file entry & isCurrentlyBeingModifiedBy', async function () {

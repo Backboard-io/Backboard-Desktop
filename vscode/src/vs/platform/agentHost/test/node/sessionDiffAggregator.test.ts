@@ -4,11 +4,13 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
+import { timeout } from '../../../../base/common/async.js';
 import { URI } from '../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
+import type { IDiffComputeService, IDiffCountResult } from '../../common/diffComputeService.js';
 import { FileEditKind, type ISessionFileDiff } from '../../common/state/sessionState.js';
 import { encodeString, TestDiffComputeService, TestSessionDatabase } from '../common/sessionTestHelpers.js';
-import { computeSessionDiffs } from '../../node/sessionDiffAggregator.js';
+import { computeSessionDiffs, computeTurnDiffs, MAX_CONCURRENT_SESSION_DIFF_HYDRATIONS } from '../../node/sessionDiffAggregator.js';
 import { parseSessionDbUri } from '../../node/shared/fileEditTracker.js';
 
 const TEST_SESSION_URI = 'session://test-session';
@@ -40,6 +42,55 @@ function simplify(diff: ISessionFileDiff): ISimpleDiff {
 
 function simpleDiff(path: string, added: number, removed: number): ISimpleDiff {
 	return { uri: URI.file(path).toString(), added, removed };
+}
+
+class ConcurrencyTrackingSessionDatabase extends TestSessionDatabase {
+	activeReads = 0;
+	maxActiveReads = 0;
+
+	override async readFileEditContent(toolCallId: string, filePath: string) {
+		this.activeReads++;
+		this.maxActiveReads = Math.max(this.maxActiveReads, this.activeReads);
+		try {
+			await timeout(2);
+			return await super.readFileEditContent(toolCallId, filePath);
+		} finally {
+			this.activeReads--;
+		}
+	}
+
+	resetConcurrency(): void {
+		this.activeReads = 0;
+		this.maxActiveReads = 0;
+	}
+}
+
+class OutOfOrderConcurrencyDiffService implements IDiffComputeService {
+	declare readonly _serviceBrand: undefined;
+	activeDiffs = 0;
+	maxActiveDiffs = 0;
+	readonly completionOrder: number[] = [];
+
+	async computeDiffCounts(_original: string, modified: string): Promise<IDiffCountResult> {
+		const index = Number(/after-(\d+)/.exec(modified)?.[1] ?? 0);
+		this.activeDiffs++;
+		this.maxActiveDiffs = Math.max(this.maxActiveDiffs, this.activeDiffs);
+		try {
+			// Earlier identities finish later, proving result order is independent
+			// from worker completion order.
+			await timeout(20 - index);
+			this.completionOrder.push(index);
+			return { added: index + 1, removed: index };
+		} finally {
+			this.activeDiffs--;
+		}
+	}
+
+	resetConcurrency(): void {
+		this.activeDiffs = 0;
+		this.maxActiveDiffs = 0;
+		this.completionOrder.length = 0;
+	}
 }
 
 suite('computeSessionDiffs', () => {
@@ -360,6 +411,42 @@ suite('computeSessionDiffs', () => {
 
 		assert.strictEqual(result.length, 2);
 		assert.strictEqual(diffService.callCount, 2, 'both files should be diffed in full mode');
+	});
+
+	test('bounds snapshot hydration and diff concurrency while preserving identity order', async () => {
+		const db = new ConcurrencyTrackingSessionDatabase();
+		const itemCount = 12;
+		const expectedPaths: string[] = [];
+		for (let i = 0; i < itemCount; i++) {
+			const path = `/ordered-${String(i).padStart(2, '0')}.txt`;
+			expectedPaths.push(URI.file(path).toString());
+			db.addEdit({
+				turnId: 'bounded-turn',
+				toolCallId: `bounded-${i}`,
+				filePath: path,
+				kind: FileEditKind.Edit,
+				addedLines: undefined,
+				removedLines: undefined,
+				beforeContent: encodeString(`before-${i}`),
+				afterContent: encodeString(`after-${i}`),
+			});
+		}
+
+		const diffService = new OutOfOrderConcurrencyDiffService();
+		const sessionResult = await computeSessionDiffs(TEST_SESSION_URI, db, diffService);
+		assert.strictEqual(db.maxActiveReads, MAX_CONCURRENT_SESSION_DIFF_HYDRATIONS, 'session hydration should fill but not exceed the pool');
+		assert.strictEqual(diffService.maxActiveDiffs, MAX_CONCURRENT_SESSION_DIFF_HYDRATIONS, 'session diffs should fill but not exceed the pool');
+		assert.notStrictEqual(diffService.completionOrder[0], 0, 'test must actually complete diffs out of order');
+		assert.deepStrictEqual(sessionResult.map(getDiffUri), expectedPaths, 'results must retain database identity order');
+		assert.deepStrictEqual(sessionResult.map(result => result.diff), Array.from({ length: itemCount }, (_, i) => ({ added: i + 1, removed: i })));
+
+		db.resetConcurrency();
+		diffService.resetConcurrency();
+		const turnResult = await computeTurnDiffs(TEST_SESSION_URI, db, diffService, 'bounded-turn');
+		assert.strictEqual(db.maxActiveReads, MAX_CONCURRENT_SESSION_DIFF_HYDRATIONS, 'turn hydration should use the same bound');
+		assert.strictEqual(diffService.maxActiveDiffs, MAX_CONCURRENT_SESSION_DIFF_HYDRATIONS, 'turn diffs should use the same bound');
+		assert.deepStrictEqual(turnResult.map(getDiffUri), expectedPaths);
+		assert.deepStrictEqual(turnResult.map(result => result.diff), Array.from({ length: itemCount }, (_, i) => ({ added: i + 1, removed: i })));
 	});
 
 	// ---- Fast-path tests (turn-scoped query optimization) -------------------

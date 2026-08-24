@@ -20,6 +20,7 @@ import { workbenchInstantiationService } from '../../../../../../test/browser/wo
 import { IChatMarkdownAnchorService } from '../../../../browser/widget/chatContentParts/chatMarkdownAnchorService.js';
 import { IChatContentPartRenderContext, InlineTextModelCollection } from '../../../../browser/widget/chatContentParts/chatContentParts.js';
 import { ChatProgressContentPart, ChatWorkingProgressContentPart } from '../../../../browser/widget/chatContentParts/chatProgressContentPart.js';
+import { ChatToolInvocationPart } from '../../../../browser/widget/chatContentParts/toolInvocationParts/chatToolInvocationPart.js';
 import { ChatToolProgressSubPart } from '../../../../browser/widget/chatContentParts/toolInvocationParts/chatToolProgressPart.js';
 import { ChatToolStreamingSubPart, formatStreamingToolInput } from '../../../../browser/widget/chatContentParts/toolInvocationParts/chatToolStreamingSubPart.js';
 import { isMcpToolInvocation } from '../../../../browser/widget/chatContentParts/toolInvocationParts/chatToolPartUtilities.js';
@@ -277,6 +278,91 @@ suite('ChatToolProgressSubPart', () => {
 		assert.strictEqual(formatStreamingToolInput({ path: 'cats.md' }), '{\n  "path": "cats.md"\n}');
 	});
 
+	test('coalesces streamed input bursts without rerendering an unchanged status message', async () => {
+		const partialInput = observableValue<unknown>('partialInput', undefined);
+		const invocation: IChatToolInvocation = {
+			...createToolInvocation({ invocationMessage: 'Generating Write input…', toolId: 'write' }),
+			state: observableValue('streamingState', {
+				type: IChatToolInvocation.StateKind.Streaming,
+				partialInput,
+				streamingMessage: observableValue('streamingMessage', 'Generating Write input…')
+			})
+		};
+		let markdownRenderCount = 0;
+		const countingRenderer: IMarkdownRenderer = {
+			render: (markdown: IMarkdownString, options?: MarkdownRenderOptions, outElement?: HTMLElement): IRenderedMarkdown => {
+				markdownRenderCount++;
+				return mockMarkdownRenderer.render(markdown, options, outElement);
+			}
+		};
+		const part = disposables.add(instantiationService.createInstance(
+			ChatToolStreamingSubPart,
+			invocation,
+			createRenderContext(false),
+			countingRenderer,
+		));
+		const initialMarkdownRenderCount = markdownRenderCount;
+
+		for (let i = 1; i <= 250; i++) {
+			partialInput.set(`{"path":"cats.md","content":"${'x'.repeat(i)}`, undefined);
+		}
+
+		assert.strictEqual(markdownRenderCount, initialMarkdownRenderCount, 'argument deltas must not reparse the unchanged status markdown');
+		await new Promise<void>(resolve => mainWindow.requestAnimationFrame(() => resolve()));
+		assert.strictEqual(
+			part.domNode.querySelector('.chat-tool-streaming-input code')?.textContent,
+			`{"path":"cats.md","content":"${'x'.repeat(250)}`,
+		);
+	});
+
+	test('keeps progress DOM stable across numeric ticks with an unchanged message', () => {
+		const progress = observableValue('progress', { message: undefined, progress: undefined as number | undefined });
+		const tool: IChatToolInvocation = {
+			...createToolInvocation({ invocationMessage: 'Reading files…' }),
+			state: observableValue('state', {
+				type: IChatToolInvocation.StateKind.Executing,
+				parameters: undefined,
+				confirmed: { type: ToolConfirmKind.ConfirmationNotNeeded },
+				progress,
+			}),
+		};
+		const state = tool.state.get();
+		assert.strictEqual(state.type, IChatToolInvocation.StateKind.Executing);
+		if (state.type !== IChatToolInvocation.StateKind.Executing) {
+			return;
+		}
+		const part = disposables.add(instantiationService.createInstance(
+			ChatToolProgressSubPart,
+			tool,
+			createRenderContext(false),
+			mockMarkdownRenderer,
+			new Set<string>(),
+		));
+		const initialProgressNode = part.domNode.firstElementChild;
+
+		for (let i = 1; i <= 250; i++) {
+			progress.set({ message: undefined, progress: i / 250 }, undefined);
+		}
+
+		assert.strictEqual(part.domNode.firstElementChild, initialProgressNode);
+	});
+
+	test('does not mutate subpart codeblocks when merging MCP app codeblocks', () => {
+		const baseCodeblock = { id: 'base' };
+		const mcpCodeblock = { id: 'mcp' };
+		const invocationPart = Object.create(ChatToolInvocationPart.prototype) as ChatToolInvocationPart;
+		Reflect.set(invocationPart, 'subPart', { codeblocks: [baseCodeblock] });
+		Reflect.set(invocationPart, 'mcpAppPart', { value: { codeblocks: [mcpCodeblock] } });
+
+		const firstRead = invocationPart.codeblocks;
+		const secondRead = invocationPart.codeblocks;
+
+		assert.deepStrictEqual(firstRead, [baseCodeblock, mcpCodeblock]);
+		assert.deepStrictEqual(secondRead, [baseCodeblock, mcpCodeblock]);
+		assert.notStrictEqual(firstRead, secondRead);
+		assert.deepStrictEqual(Reflect.get(invocationPart, 'subPart').codeblocks, [baseCodeblock]);
+	});
+
 	test('keeps a clean-chat provider status visibly ticking during silent gaps', () => {
 		const context = createRenderContext(false);
 		context.container.classList.add('backboard-clean-chat');
@@ -316,13 +402,61 @@ suite('ChatToolProgressSubPart', () => {
 			label: part.domNode.querySelector('.chat-working-progress-step > p')?.textContent,
 			stats: part.domNode.querySelector('.chat-working-progress-step > span')?.textContent,
 			loading: !!part.domNode.querySelector('.codicon-loading.codicon-modifier-spin'),
+			compactIndicator: !!part.domNode.querySelector('.chat-cursor-working-indicator'),
+			indicatorHiddenFromScreenReaders: part.domNode.querySelector('.chat-cursor-working-indicator')?.getAttribute('aria-hidden'),
+			shimmer: part.domNode.classList.contains('shimmer-progress'),
+			role: part.domNode.getAttribute('role'),
+			live: part.domNode.getAttribute('aria-live'),
+			atomic: part.domNode.getAttribute('aria-atomic'),
 			reused: part.hasSameContent({ kind: 'working', state: createPendingState() }, [], context.element),
 		}, {
 			cursorRow: true,
 			label: 'Planning next moves',
 			stats: '',
 			loading: false,
+			compactIndicator: true,
+			indicatorHiddenFromScreenReaders: 'true',
+			shimmer: false,
+			role: 'status',
+			live: 'polite',
+			atomic: 'true',
 			reused: true,
+		});
+	});
+
+	test('uses the compact cursor indicator for active provider progress', () => {
+		const context = createRenderContext(false);
+		context.container.classList.add('backboard-clean-chat', 'backboard-cursor-transcript');
+		const part = disposables.add(instantiationService.createInstance(
+			ChatProgressContentPart,
+			{ kind: 'progressMessage', content: new MarkdownString('Loading context…') },
+			mockMarkdownRenderer,
+			context,
+			true,
+			true,
+			undefined,
+			undefined,
+			true,
+		));
+
+		assert.deepStrictEqual({
+			compactRow: part.domNode.classList.contains('chat-cursor-progress-row'),
+			compactIndicator: !!part.domNode.querySelector('.chat-cursor-working-indicator'),
+			indicatorHiddenFromScreenReaders: part.domNode.querySelector('.chat-cursor-working-indicator')?.getAttribute('aria-hidden'),
+			shimmer: part.domNode.classList.contains('shimmer-progress'),
+			spinner: !!part.domNode.querySelector('.codicon-loading.codicon-modifier-spin'),
+			status: part.domNode.textContent,
+			role: part.domNode.getAttribute('role'),
+			live: part.domNode.getAttribute('aria-live'),
+		}, {
+			compactRow: true,
+			compactIndicator: true,
+			indicatorHiddenFromScreenReaders: 'true',
+			shimmer: false,
+			spinner: false,
+			status: 'Loading context…',
+			role: 'status',
+			live: 'polite',
 		});
 	});
 

@@ -211,6 +211,21 @@ export interface IChatInputPartOptions {
 	isSessionsWindow?: boolean;
 }
 
+/**
+ * Resolves where the context usage control belongs for the current chat host.
+ * Backboard composer hosts opt into the overlaid input placement explicitly;
+ * other Sessions-window and compact inputs retain the toolbar placement.
+ */
+export function getChatContextUsageWidgetPlacement(container: HTMLElement, renderStyle: IChatInputPartOptions['renderStyle'], isSessionsWindow: boolean): 'input' | 'toolbar' | 'secondary' {
+	if (container.closest('.backboard-composer')) {
+		return 'input';
+	}
+	if (renderStyle === 'compact' || isSessionsWindow) {
+		return 'toolbar';
+	}
+	return 'secondary';
+}
+
 export interface IWorkingSetEntry {
 	uri: URI;
 }
@@ -3301,16 +3316,21 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		this.contextUsageWidgetContainer = elements.contextUsageWidgetContainer;
 		this.statusToolbarContainer = elements.statusToolbarContainer;
 
-		// Compact chats have no secondary toolbar to hang the context usage off, and
-		// the sessions window deliberately keeps it inside the composer shell rather
-		// than on the row beneath it, so both host it in the composer footer. The
-		// environment flag covers sessions-window widgets whose host doesn't set the
-		// per-widget option (e.g. the Simple window's running-session view).
-		if (this.options.renderStyle === 'compact' || this.options.isSessionsWindow || this.environmentService.isSessionsWindow) {
+		// Only explicit Backboard composer hosts place context usage in the shell's
+		// upper-right corner. Other Sessions-window and compact widgets keep the
+		// standard toolbar placement, even when they share input configuration.
+		const contextUsagePlacement = getChatContextUsageWidgetPlacement(
+			container,
+			this.options.renderStyle,
+			!!this.options.isSessionsWindow || this.environmentService.isSessionsWindow,
+		);
+		if (contextUsagePlacement === 'input') {
+			inputContainer.prepend(this.contextUsageWidgetContainer);
+		} else if (contextUsagePlacement === 'toolbar') {
 			toolbarsContainer.prepend(this.contextUsageWidgetContainer);
 		}
 
-		// Context usage widget — will be positioned in the toolbar after toolbars are created
+		// Create the widget after its host has been placed in the appropriate surface.
 		this.contextUsageWidget = this._register(this.instantiationService.createInstance(ChatContextUsageWidget));
 		this.contextUsageWidget.setChatWidget(widget);
 		this.contextUsageWidget.setModelConfigurationResolver(
@@ -5272,7 +5292,12 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			const inputToolbarWidth = this.cachedInputToolbarWidth = this.inputActionsToolbar.getItemsWidth();
 			const executeToolbarPadding = (this.executeToolbar.getItemsLength() - 1) * toolbarItemGap;
 			const inputToolbarPadding = this.inputActionsToolbar.getItemsLength() ? (this.inputActionsToolbar.getItemsLength() - 1) * toolbarItemGap : 0;
-			const contextUsageWidth = dom.getTotalWidth(this.contextUsageWidgetContainer);
+			const contextUsagePlacement = getChatContextUsageWidgetPlacement(
+				this.container,
+				this.options.renderStyle,
+				!!this.options.isSessionsWindow || this.environmentService.isSessionsWindow,
+			);
+			const contextUsageWidth = contextUsagePlacement === 'input' ? 0 : dom.getTotalWidth(this.contextUsageWidgetContainer);
 			const inputToolbarsPadding = 12; // pdading between input toolbar/execute toolbar/contextUsage.
 			return executeToolbarWidth + executeToolbarPadding + contextUsageWidth + (this.options.renderInputToolbarBelowInput ? 0 : inputToolbarWidth + inputToolbarPadding + inputToolbarsPadding);
 		};

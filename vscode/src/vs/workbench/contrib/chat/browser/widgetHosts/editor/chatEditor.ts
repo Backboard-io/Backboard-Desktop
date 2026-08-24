@@ -5,17 +5,19 @@
 
 import * as dom from '../../../../../../base/browser/dom.js';
 import { renderIcon } from '../../../../../../base/browser/ui/iconLabel/iconLabels.js';
-import { raceCancellationError } from '../../../../../../base/common/async.js';
+import { disposableTimeout, raceCancellationError } from '../../../../../../base/common/async.js';
 import { CancellationToken } from '../../../../../../base/common/cancellation.js';
 import { Codicon } from '../../../../../../base/common/codicons.js';
 import { ThemeIcon } from '../../../../../../base/common/themables.js';
 import { URI } from '../../../../../../base/common/uri.js';
+import { IDisposable, MutableDisposable } from '../../../../../../base/common/lifecycle.js';
 import * as nls from '../../../../../../nls.js';
 import { ITextResourceConfigurationService } from '../../../../../../editor/common/services/textResourceConfiguration.js';
 import { IContextKeyService, IScopedContextKeyService } from '../../../../../../platform/contextkey/common/contextkey.js';
 import { IEditorOptions } from '../../../../../../platform/editor/common/editor.js';
 import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
 import { ServiceCollection } from '../../../../../../platform/instantiation/common/serviceCollection.js';
+import { ILogService } from '../../../../../../platform/log/common/log.js';
 import { IStorageService } from '../../../../../../platform/storage/common/storage.js';
 import { ITelemetryService } from '../../../../../../platform/telemetry/common/telemetry.js';
 import { editorBackground, editorForeground, inputBackground } from '../../../../../../platform/theme/common/colorRegistry.js';
@@ -31,6 +33,7 @@ import { IChatModel, IChatModelInputState, IExportableChatData, ISerializableCha
 import { IChatService } from '../../../common/chatService/chatService.js';
 import { IChatSessionsService, localChatSessionType } from '../../../common/chatSessionsService.js';
 import { ChatAgentLocation, ChatModeKind } from '../../../common/constants.js';
+import { isChatPerfLoggingEnabled, logChatPerf } from '../../../common/chatPerf.js';
 import { clearChatEditor } from '../../actions/chatClear.js';
 import { ChatEditorInput } from './chatEditorInput.js';
 import { ChatWidget } from '../../widget/chatWidget.js';
@@ -53,6 +56,9 @@ export interface IChatEditorViewState {
 	scrollTop: number;
 }
 
+const InactiveChatEditorColdReleaseDelay = 30_000;
+const InactiveChatEditorColdReleaseRetryDelay = 5_000;
+
 export class ChatEditor extends AbstractEditorWithViewState<IChatEditorViewState> {
 	private static readonly VIEW_STATE_KEY = 'chatEditorViewState';
 
@@ -68,6 +74,8 @@ export class ChatEditor extends AbstractEditorWithViewState<IChatEditorViewState
 	private dimension = new dom.Dimension(0, 0);
 	private _loadingContainer: HTMLElement | undefined;
 	private _editorContainer: HTMLElement | undefined;
+	private readonly _inactiveModelRelease = this._register(new MutableDisposable<IDisposable>());
+	private _modelRestoreGeneration = 0;
 
 	constructor(
 		group: IEditorGroup,
@@ -78,6 +86,7 @@ export class ChatEditor extends AbstractEditorWithViewState<IChatEditorViewState
 		@IChatSessionsService private readonly chatSessionsService: IChatSessionsService,
 		@IContextKeyService private readonly contextKeyService: IContextKeyService,
 		@IChatService private readonly chatService: IChatService,
+		@ILogService private readonly logService: ILogService,
 		@ITextResourceConfigurationService textResourceConfigurationService: ITextResourceConfigurationService,
 		@IEditorService editorService: IEditorService,
 		@IEditorGroupsService editorGroupService: IEditorGroupsService,
@@ -144,11 +153,131 @@ export class ChatEditor extends AbstractEditorWithViewState<IChatEditorViewState
 
 	protected override setEditorVisible(visible: boolean): void {
 		super.setEditorVisible(visible);
+		this._inactiveModelRelease.clear();
+		this._modelRestoreGeneration++;
 
 		this.widget?.setVisible(visible);
 
 		if (visible && this.widget) {
+			if (this.input instanceof ChatEditorInput) {
+				this.input.markModelReferenceActive();
+			}
 			this.widget.layout(this.dimension.height, this.dimension.width);
+			void this.restoreReleasedModel(this._modelRestoreGeneration).catch(error => {
+				this.logService.error('[chat editor] Failed to restore released model', error);
+			});
+		} else if (!visible && this.input instanceof ChatEditorInput) {
+			const input = this.input;
+			if (isChatPerfLoggingEnabled(this.logService)) {
+				logChatPerf(this.logService, 'editor.scheduleColdRelease', {
+					session: input.sessionResource?.toString(),
+					delayMs: InactiveChatEditorColdReleaseDelay,
+					eligible: input.canReleaseModelReference(),
+				});
+			}
+			this.scheduleColdModelRelease(input, InactiveChatEditorColdReleaseDelay);
+		}
+	}
+
+	private scheduleColdModelRelease(input: ChatEditorInput, delay: number): void {
+		this._inactiveModelRelease.value = disposableTimeout(() => {
+			this._inactiveModelRelease.clear();
+			const skipReason = this.isVisible()
+				? 'visible'
+				: this.input !== input
+					? 'inputChanged'
+					: undefined;
+			if (skipReason) {
+				if (isChatPerfLoggingEnabled(this.logService)) {
+					logChatPerf(this.logService, 'editor.coldReleaseSkipped', {
+						session: input.sessionResource?.toString(),
+						reason: skipReason,
+					});
+				}
+				return;
+			}
+
+			if (input.needsModelRestore) {
+				// Another inactive-input path already released this reference. Ensure
+				// the hidden widget does not keep the raw model reachable too.
+				this.widget.setModel(undefined);
+				return;
+			}
+
+			if (!input.canReleaseModelReference()) {
+				if (isChatPerfLoggingEnabled(this.logService)) {
+					logChatPerf(this.logService, 'editor.coldReleaseDeferred', {
+						session: input.sessionResource?.toString(),
+						reason: 'notEligible',
+					});
+				}
+				if (input.hasModelReferenceOrPendingResolve) {
+					this.scheduleColdModelRelease(input, InactiveChatEditorColdReleaseRetryDelay);
+				}
+				return;
+			}
+
+			// The widget has already released its rendered DOM after a short hidden
+			// grace period. Drop the final model reference for cold, completed tabs;
+			// ChatModel's own keep-alives protect running, input-blocked, and modified
+			// sessions, while persisted sessions reload on the next activation.
+			const perfEnabled = isChatPerfLoggingEnabled(this.logService);
+			const startedAt = perfEnabled ? performance.now() : 0;
+			this.widget.setModel(undefined);
+			const released = input.releaseModelReference();
+			if (perfEnabled) {
+				logChatPerf(this.logService, 'editor.coldRelease', {
+					session: input.sessionResource?.toString(),
+					released,
+				}, performance.now() - startedAt, 0);
+			}
+			if (!released && input.hasModelReferenceOrPendingResolve) {
+				this.scheduleColdModelRelease(input, InactiveChatEditorColdReleaseRetryDelay);
+			}
+		}, delay);
+	}
+
+	private async restoreReleasedModel(generation: number): Promise<void> {
+		const input = this.input;
+		if (!(input instanceof ChatEditorInput) || !input.needsModelRestore) {
+			return;
+		}
+
+		const perfEnabled = isChatPerfLoggingEnabled(this.logService);
+		const startedAt = perfEnabled ? performance.now() : 0;
+		let outcome = 'empty';
+		this.showLoadingInChatWidget(nls.localize('chatEditor.restoringSession', "Restoring chat..."));
+		try {
+			const editorModel = await input.resolve();
+			if (generation !== this._modelRestoreGeneration || !this.isVisible() || this.input !== input) {
+				// A newer restore of the same input may share this resolve. Never release
+				// its current reference from a stale continuation; only request a delayed
+				// release when this editor no longer owns the visible input.
+				if (!this.isVisible() || this.input !== input) {
+					input.scheduleModelReferenceRelease();
+				}
+				outcome = 'stale';
+				return;
+			}
+			if (editorModel) {
+				this.updateModel(editorModel.model);
+				this.widget.layout(this.dimension.height, this.dimension.width);
+				outcome = 'restored';
+			}
+		} catch (error) {
+			outcome = 'error';
+			throw error;
+		} finally {
+			if (perfEnabled) {
+				logChatPerf(this.logService, 'editor.restore', {
+					session: input.sessionResource?.toString(),
+					outcome,
+					generation,
+				}, performance.now() - startedAt, 0);
+			}
+			if (generation === this._modelRestoreGeneration) {
+				this.hideLoadingInChatWidget();
+			}
 		}
 	}
 
@@ -159,8 +288,12 @@ export class ChatEditor extends AbstractEditorWithViewState<IChatEditorViewState
 	}
 
 	override clearInput(): void {
+		const previousInput = this.input instanceof ChatEditorInput ? this.input : undefined;
+		this._inactiveModelRelease.clear();
+		this._modelRestoreGeneration++;
 		this.widget.setModel(undefined);
 		super.clearInput();
+		previousInput?.scheduleModelReferenceRelease();
 	}
 
 	private showLoadingInChatWidget(message: string): void {
@@ -207,6 +340,14 @@ export class ChatEditor extends AbstractEditorWithViewState<IChatEditorViewState
 	}
 
 	override async setInput(input: ChatEditorInput, options: IChatEditorOptions | undefined, context: IEditorOpenContext, token: CancellationToken): Promise<void> {
+		this._inactiveModelRelease.clear();
+		this._modelRestoreGeneration++;
+		const previousInput = this.input instanceof ChatEditorInput ? this.input : undefined;
+		if (previousInput && previousInput !== input) {
+			previousInput.scheduleModelReferenceRelease();
+		}
+		input.markModelReferenceActive();
+
 		// Show loading indicator early for non-local sessions to prevent layout shifts
 		let isContributedChatSession = false;
 		const chatSessionType = input.getSessionType();
@@ -216,6 +357,11 @@ export class ChatEditor extends AbstractEditorWithViewState<IChatEditorViewState
 		}
 
 		await super.setInput(input, options, context, token);
+		if (!this.isVisible() && this.input === input) {
+			// Inputs can be replaced while their editor group remains hidden, so no
+			// visibility transition will schedule the new model's cold release.
+			this.scheduleColdModelRelease(input, InactiveChatEditorColdReleaseDelay);
+		}
 		if (token.isCancellationRequested) {
 			this.hideLoadingInChatWidget();
 			return;
@@ -273,6 +419,12 @@ export class ChatEditor extends AbstractEditorWithViewState<IChatEditorViewState
 		} catch (error) {
 			this.hideLoadingInChatWidget();
 			throw error;
+		} finally {
+			if (!this.isVisible() && this.input === input) {
+				// Restart the grace period after a slow load finishes so a hidden input
+				// cannot become resident after an earlier pending-load check stopped.
+				this.scheduleColdModelRelease(input, InactiveChatEditorColdReleaseDelay);
+			}
 		}
 	}
 

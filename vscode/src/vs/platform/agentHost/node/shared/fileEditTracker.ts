@@ -4,6 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { decodeHex, encodeHex, VSBuffer } from '../../../../base/common/buffer.js';
+import { Event } from '../../../../base/common/event.js';
+import { Disposable, DisposableSet } from '../../../../base/common/lifecycle.js';
 import { basename } from '../../../../base/common/path.js';
 import { URI } from '../../../../base/common/uri.js';
 import { IFileService } from '../../../files/common/files.js';
@@ -12,7 +14,7 @@ import { IDiffComputeService } from '../../common/diffComputeService.js';
 import { ISessionDatabase } from '../../common/sessionDataService.js';
 import { FileEditKind, ToolResultContentType, type ToolResultFileEditContent } from '../../common/state/sessionState.js';
 import { extractAiChunks } from './editChunkExtractor.js';
-import { IEditSurvivalReporterFactory } from './editSurvivalReporter.js';
+import { type IEditSurvivalReporter, IEditSurvivalReporterFactory } from './editSurvivalReporter.js';
 
 const SESSION_DB_SCHEME = 'session-db';
 
@@ -66,7 +68,7 @@ export function parseSessionDbUri(raw: string): ISessionDbUriFields | undefined 
  * before and after each edit tool invocation, persisting snapshots into the
  * session database.
  */
-export class FileEditTracker {
+export class FileEditTracker extends Disposable {
 
 	/**
 	 * Pending edits keyed by file path. Populated by {@link trackEditStart}
@@ -82,6 +84,13 @@ export class FileEditTracker {
 	 */
 	private readonly _completedEdits = new Map<string, { beforeContent: VSBuffer; beforeExisted: boolean; afterContent: VSBuffer }>();
 
+	/**
+	 * Active edit-survival schedules owned by this session. Reporters remove
+	 * themselves from the set after their final sample; disposing the tracker
+	 * cancels any schedules that remain.
+	 */
+	private readonly _activeSurvivalReporters = this._register(new DisposableSet<IEditSurvivalReporter>());
+
 	constructor(
 		private readonly _sessionUri: string,
 		private readonly _db: ISessionDatabase,
@@ -89,7 +98,13 @@ export class FileEditTracker {
 		@ILogService private readonly _logService: ILogService,
 		@IDiffComputeService private readonly _diffComputeService: IDiffComputeService,
 		@IEditSurvivalReporterFactory private readonly _editSurvivalReporterFactory: IEditSurvivalReporterFactory,
-	) { }
+	) {
+		super();
+	}
+
+	get activeSurvivalReporterCount(): number {
+		return this._activeSurvivalReporters.size;
+	}
 
 	/**
 	 * Call before an edit tool runs. Reads the file's current content
@@ -100,6 +115,9 @@ export class FileEditTracker {
 	 * @param filePath - Absolute path of the file being edited.
 	 */
 	async trackEditStart(filePath: string): Promise<void> {
+		if (this._store.isDisposed) {
+			return;
+		}
 		const snapshotDone = this._readFileWithExistence(filePath);
 		const entry = {
 			beforeContent: VSBuffer.fromString(''),
@@ -129,6 +147,9 @@ export class FileEditTracker {
 		await pending.snapshotDone;
 
 		const afterContent = await this._readFile(filePath);
+		if (this._store.isDisposed) {
+			return;
+		}
 
 		this._completedEdits.set(filePath, {
 			beforeContent: pending.beforeContent,
@@ -164,6 +185,9 @@ export class FileEditTracker {
 	 *   (and surfaces as an empty `modelId` string in telemetry).
 	 */
 	async takeCompletedEdit(turnId: string, toolCallId: string, filePath: string, toolName: string, toolInput: unknown, modelId: string | undefined): Promise<ToolResultFileEditContent | undefined> {
+		if (this._store.isDisposed) {
+			return undefined;
+		}
 		const edit = this._completedEdits.get(filePath);
 		if (!edit) {
 			return undefined;
@@ -187,6 +211,9 @@ export class FileEditTracker {
 	 * database and returns the {@link ToolResultFileEditContent}.
 	 */
 	async recordExplicitEdit(turnId: string, toolCallId: string, filePath: string, beforeText: string, afterText: string, toolName: string, toolInput: unknown, modelId: string | undefined): Promise<ToolResultFileEditContent | undefined> {
+		if (this._store.isDisposed) {
+			return undefined;
+		}
 		const beforeContent = VSBuffer.fromString(beforeText);
 		const afterContent = VSBuffer.fromString(afterText);
 		// A single tool call can report several edits (e.g. a multi-file
@@ -228,17 +255,20 @@ export class FileEditTracker {
 			this._logService.warn(`[FileEditTracker] Failed to persist file edit to database: ${filePath}`, err);
 		}
 
-		this._editSurvivalReporterFactory.launch({
-			sessionUri: this._sessionUri,
-			turnId,
-			toolCallId,
-			filePath,
-			beforeText,
-			afterText,
-			isCreate,
-			modelId,
-			aiChunks: extractAiChunks(toolName, toolInput, filePath),
-		});
+		if (!this._store.isDisposed) {
+			const reporter = this._editSurvivalReporterFactory.launch({
+				sessionUri: this._sessionUri,
+				turnId,
+				toolCallId,
+				filePath,
+				beforeText,
+				afterText,
+				isCreate,
+				modelId,
+				aiChunks: extractAiChunks(toolName, toolInput, filePath),
+			});
+			this._ownSurvivalReporter(reporter);
+		}
 
 		return {
 			type: ToolResultContentType.FileEdit,
@@ -252,6 +282,40 @@ export class FileEditTracker {
 			},
 			diff: addedLines !== undefined ? { added: addedLines, removed: removedLines } : undefined,
 		};
+	}
+
+	/**
+	 * Drops snapshot buffers for a tool that failed or was cancelled before it
+	 * could complete the normal start → complete → take lifecycle.
+	 */
+	discardEdit(filePath: string): void {
+		this._pendingEdits.delete(filePath);
+		this._completedEdits.delete(filePath);
+	}
+
+	/** Drops all unfinished/orphaned snapshots while keeping completed-report telemetry alive. */
+	discardAllEdits(): void {
+		this._pendingEdits.clear();
+		this._completedEdits.clear();
+	}
+
+	private _ownSurvivalReporter(reporter: IEditSurvivalReporter): void {
+		if (reporter.isDisposed) {
+			return;
+		}
+		if (this._store.isDisposed) {
+			reporter.dispose();
+			return;
+		}
+		this._activeSurvivalReporters.add(reporter);
+		Event.once(reporter.onDidDispose)(() => {
+			this._activeSurvivalReporters.deleteAndLeak(reporter);
+		});
+	}
+
+	override dispose(): void {
+		this.discardAllEdits();
+		super.dispose();
 	}
 
 	private async _readFile(filePath: string): Promise<VSBuffer> {

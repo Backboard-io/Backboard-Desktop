@@ -2896,10 +2896,17 @@ export class TerminalInstanceColorProvider implements IXtermColorProvider {
 	constructor(
 		private readonly _target: IReference<TerminalLocation | undefined>,
 		@IViewDescriptorService private readonly _viewDescriptorService: IViewDescriptorService,
+		@IWorkbenchEnvironmentService private readonly _environmentService: IWorkbenchEnvironmentService,
 	) {
 	}
 
 	getBackgroundColor(theme: IColorTheme) {
+		// The sessions terminal is presented as a full panel page whose title bar
+		// is painted with the panel background. Keep xterm's canvas on that same
+		// surface even when the active theme defines a separate terminal color.
+		if (this._environmentService.isSessionsWindow && this._target.object === TerminalLocation.Panel) {
+			return theme.getColor('agentsPanel.background') ?? theme.getColor(PANEL_BACKGROUND);
+		}
 		const terminalBackground = theme.getColor(TERMINAL_BACKGROUND_COLOR);
 		if (terminalBackground) {
 			return terminalBackground;

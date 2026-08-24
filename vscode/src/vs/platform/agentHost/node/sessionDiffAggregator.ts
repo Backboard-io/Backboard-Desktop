@@ -9,6 +9,16 @@ import type { IDiffComputeService } from '../common/diffComputeService.js';
 import { FileEditKind, type ISessionFileDiff } from '../common/state/sessionState.js';
 import { buildSessionDbUri } from './shared/fileEditTracker.js';
 
+/**
+ * Maximum number of file identities whose snapshots may be hydrated and
+ * diffed concurrently. Each task can hold two full file strings plus the
+ * worker's structured-clone payload, so an unbounded Promise.all causes large
+ * edit bursts to retain every file at once while the single diff worker drains.
+ */
+export const MAX_CONCURRENT_SESSION_DIFF_HYDRATIONS = 4;
+
+const textDecoder = new TextDecoder();
+
 function getFileEditUri(diff: ISessionFileDiff): string | undefined {
 	return diff.after?.uri ?? diff.before?.uri;
 }
@@ -52,6 +62,64 @@ interface IFileIdentity {
 	lastFilePath: string;
 	/** The kind of the last edit (Delete means no "after" content). */
 	lastKind: FileEditKind;
+}
+
+/**
+ * Maps items with a small worker pool while preserving input order. Individual
+ * failures intentionally become `undefined`, matching the previous
+ * Promise.allSettled behavior where one unreadable file did not fail the whole
+ * changeset or prevent later files from being processed.
+ */
+async function mapBounded<T, R>(items: readonly T[], fn: (item: T) => Promise<R>): Promise<(R | undefined)[]> {
+	const results: (R | undefined)[] = new Array(items.length);
+	let nextIndex = 0;
+	const worker = async (): Promise<void> => {
+		while (true) {
+			const index = nextIndex++;
+			if (index >= items.length) {
+				return;
+			}
+			try {
+				results[index] = await fn(items[index]);
+			} catch {
+				// Best-effort aggregation: leave this slot empty and continue so a
+				// single failed read/diff does not strand the remaining work.
+			}
+		}
+	};
+	const workerCount = Math.min(MAX_CONCURRENT_SESSION_DIFF_HYDRATIONS, items.length);
+	await Promise.all(Array.from({ length: workerCount }, () => worker()));
+	return results;
+}
+
+async function computeIdentityDiff(
+	sessionUri: string,
+	db: ISessionDatabase,
+	diffService: IDiffComputeService,
+	identity: IFileIdentity,
+): Promise<ISessionFileDiff | undefined> {
+	let beforeText: string;
+	if (identity.firstKind === FileEditKind.Create) {
+		beforeText = '';
+	} else {
+		const content = await db.readFileEditContent(identity.firstToolCallId, identity.firstFilePath);
+		beforeText = content?.beforeContent ? textDecoder.decode(content.beforeContent) : '';
+	}
+
+	let afterText: string;
+	if (identity.lastKind === FileEditKind.Delete) {
+		afterText = '';
+	} else {
+		const content = await db.readFileEditContent(identity.lastToolCallId, identity.lastFilePath);
+		afterText = content?.afterContent ? textDecoder.decode(content.afterContent) : '';
+	}
+
+	if (beforeText === afterText) {
+		return undefined;
+	}
+
+	const counts = await diffService.computeDiffCounts(beforeText, afterText);
+	return createSessionFileDiff(sessionUri, identity, counts.added, counts.removed);
 }
 
 /**
@@ -177,52 +245,29 @@ export async function computeSessionDiffs(
 		? new Map(incremental.previousDiffs.map(d => [getFileEditUri(d), d]))
 		: undefined;
 
-	// Compute diffs for each file identity
-	const results: ISessionFileDiff[] = [];
-	const diffPromises: Promise<void>[] = [];
+	// Pre-seed one result slot per identity so asynchronously-completed diffs
+	// preserve database/identity order rather than completion order.
+	const resultsByIdentity = new Map<string, ISessionFileDiff | undefined>();
+	const identitiesToCompute: { identityKey: string; identity: IFileIdentity }[] = [];
 
 	for (const [identityKey, identity] of identities) {
 		// In incremental slow-path mode, skip recomputation for untouched identities
 		if (touchedIdentityKeys && !touchedIdentityKeys.has(identityKey)) {
 			const uri = URI.file(identity.terminalPath).toString();
 			const prev = previousDiffsMap!.get(uri);
-			if (prev) {
-				results.push(prev);
-			}
+			resultsByIdentity.set(identityKey, prev);
 			// If no previous entry, the file previously had zero net change — skip
 			continue;
 		}
-
-		diffPromises.push((async () => {
-			// Determine "before" text
-			let beforeText: string;
-			if (identity.firstKind === FileEditKind.Create) {
-				beforeText = '';
-			} else {
-				const content = await db.readFileEditContent(identity.firstToolCallId, identity.firstFilePath);
-				beforeText = content?.beforeContent ? new TextDecoder().decode(content.beforeContent) : '';
-			}
-
-			// Determine "after" text
-			let afterText: string;
-			if (identity.lastKind === FileEditKind.Delete) {
-				afterText = '';
-			} else {
-				const content = await db.readFileEditContent(identity.lastToolCallId, identity.lastFilePath);
-				afterText = content?.afterContent ? new TextDecoder().decode(content.afterContent) : '';
-			}
-
-			// Skip files with no net change
-			if (beforeText === afterText) {
-				return;
-			}
-
-			const counts = await diffService.computeDiffCounts(beforeText, afterText);
-			results.push(createSessionFileDiff(sessionUri, identity, counts.added, counts.removed));
-		})());
+		resultsByIdentity.set(identityKey, undefined);
+		identitiesToCompute.push({ identityKey, identity });
 	}
 
-	await Promise.allSettled(diffPromises);
+	const computed = await mapBounded(identitiesToCompute, item => computeIdentityDiff(sessionUri, db, diffService, item.identity));
+	for (let i = 0; i < identitiesToCompute.length; i++) {
+		resultsByIdentity.set(identitiesToCompute[i].identityKey, computed[i]);
+	}
+	const results = [...resultsByIdentity.values()].filter((result): result is ISessionFileDiff => result !== undefined);
 
 	// In fast-path mode, carry over previous diffs for untouched files
 	// (they were not in the identity graph since we only loaded the current turn)
@@ -285,31 +330,7 @@ export async function computeTurnDiffs(
 		}
 	}
 
-	const results: ISessionFileDiff[] = [];
-	const diffPromises: Promise<void>[] = [];
-	for (const identity of identities.values()) {
-		diffPromises.push((async () => {
-			let beforeText: string;
-			if (identity.firstKind === FileEditKind.Create) {
-				beforeText = '';
-			} else {
-				const content = await db.readFileEditContent(identity.firstToolCallId, identity.firstFilePath);
-				beforeText = content?.beforeContent ? new TextDecoder().decode(content.beforeContent) : '';
-			}
-			let afterText: string;
-			if (identity.lastKind === FileEditKind.Delete) {
-				afterText = '';
-			} else {
-				const content = await db.readFileEditContent(identity.lastToolCallId, identity.lastFilePath);
-				afterText = content?.afterContent ? new TextDecoder().decode(content.afterContent) : '';
-			}
-			if (beforeText === afterText) {
-				return;
-			}
-			const counts = await diffService.computeDiffCounts(beforeText, afterText);
-			results.push(createSessionFileDiff(sessionUri, identity, counts.added, counts.removed));
-		})());
-	}
-	await Promise.allSettled(diffPromises);
-	return results;
+	const orderedIdentities = [...identities.values()];
+	const results = await mapBounded(orderedIdentities, identity => computeIdentityDiff(sessionUri, db, diffService, identity));
+	return results.filter((result): result is ISessionFileDiff => result !== undefined);
 }

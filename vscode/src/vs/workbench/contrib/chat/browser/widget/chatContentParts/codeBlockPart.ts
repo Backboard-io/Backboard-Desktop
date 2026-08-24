@@ -110,6 +110,23 @@ export interface ICodeBlockActionContext {
 	readonly chatSessionResource: URI | undefined;
 }
 
+/**
+ * Build the shared action context from the complete Markdown code block text.
+ * The editor model is a rendering detail and can be between layout/render passes
+ * while a response streams; copy and terminal actions must always receive the
+ * source block rather than whatever portion is currently visible in the editor.
+ */
+export function createCodeBlockActionContext(data: ICodeBlockData, languageId: string): ICodeBlockActionContext {
+	return {
+		code: data.text,
+		codeBlockIndex: data.codeBlockIndex,
+		element: data.element,
+		languageId,
+		codemapperUri: data.codemapperUri,
+		chatSessionResource: data.chatSessionResource,
+	};
+}
+
 export interface ICodeBlockRenderOptions {
 	hideToolbar?: boolean;
 	verticalPadding?: number;
@@ -421,7 +438,7 @@ export class CodeBlockPart extends Disposable {
 				// because SR mode is on.
 				dom.hide(this._toolbarElement);
 			} else {
-				this._toolbarElement.style.display = 'block';
+				dom.show(this._toolbarElement);
 				// Screen readers need the toolbar DOM to exist so it can be
 				// announced and navigated, but only create it once render data
 				// is available so pooled or reset instances don't eagerly
@@ -518,6 +535,10 @@ export class CodeBlockPart extends Disposable {
 		}
 		this.layout(width);
 		const toolbarAriaLabel = localize('chat.codeBlockToolbarLabel', "Code block {0}", data.codeBlockIndex + 1);
+		const languageLabel = data.languageId
+			? this.languageService.getLanguageName(this._textModel.getLanguageId()) ?? data.languageId
+			: localize('chat.codeBlockLanguageFallback', "Code");
+		this._toolbarElement.dataset.languageId = languageLabel;
 		if (this.toolbar) {
 			this.toolbar.setAriaLabel(toolbarAriaLabel);
 		} else {
@@ -567,6 +588,18 @@ export class CodeBlockPart extends Disposable {
 	reset() {
 		this.clearWidgets();
 		this.currentCodeBlockData = undefined;
+		if (this.toolbar) {
+			this.toolbar.context = undefined;
+		}
+		this._pendingToolbarContext = undefined;
+		this._pendingToolbarAriaLabel = undefined;
+		this._toolbarElement.classList.remove('force-visibility');
+		delete this._toolbarElement.dataset.languageId;
+		// Pooled editors otherwise retain the complete source of the last large
+		// code block even when no response is using them.
+		this._textModel.setValue('');
+		this.currentScrollWidth = 0;
+		this.lastLayoutWidth = undefined;
 	}
 
 	onDidRemount(): void {
@@ -613,14 +646,7 @@ export class CodeBlockPart extends Disposable {
 			return;
 		}
 
-		const context: ICodeBlockActionContext = {
-			code: textModel.getTextBuffer().getValueInRange(textModel.getFullModelRange(), EndOfLinePreference.TextDefined),
-			codeBlockIndex: data.codeBlockIndex,
-			element: data.element,
-			languageId: textModel.getLanguageId(),
-			codemapperUri: data.codemapperUri,
-			chatSessionResource: data.chatSessionResource
-		};
+		const context = createCodeBlockActionContext(data, textModel.getLanguageId());
 		if (this.toolbar) {
 			this.toolbar.context = context;
 		} else {
@@ -716,6 +742,7 @@ export class CodeCompareBlockPart extends Disposable {
 	private currentHorizontalPadding = 0;
 
 	private lastLayoutWidth: number | undefined;
+	private _renderGeneration = 0;
 
 	constructor(
 		private readonly options: ChatEditorOptions,
@@ -930,6 +957,7 @@ export class CodeCompareBlockPart extends Disposable {
 
 
 	async render(data: ICodeCompareBlockData, width: number, token: CancellationToken) {
+		const renderGeneration = ++this._renderGeneration;
 		this.currentHorizontalPadding = data.horizontalPadding || 0;
 
 		if (data.parentContextKeyService) {
@@ -942,7 +970,10 @@ export class CodeCompareBlockPart extends Disposable {
 			this.layout(width);
 		}
 
-		await this.updateEditor(data, token);
+		await this.updateEditor(data, token, renderGeneration);
+		if (token.isCancellationRequested || renderGeneration !== this._renderGeneration) {
+			return;
+		}
 
 		this.layout(width);
 		this.diffEditor.updateOptions({
@@ -957,7 +988,12 @@ export class CodeCompareBlockPart extends Disposable {
 	}
 
 	reset() {
+		this._renderGeneration++;
 		this.clearWidgets();
+		this.diffEditor.setModel(null);
+		this._lastDiffEditorViewModel.clear();
+		this.toolbar.context = undefined;
+		dom.clearNode(this.messageElement);
 	}
 
 	private clearWidgets() {
@@ -967,7 +1003,7 @@ export class CodeCompareBlockPart extends Disposable {
 		GlyphHoverController.get(this.diffEditor.getModifiedEditor())?.hideGlyphHover();
 	}
 
-	private async updateEditor(data: ICodeCompareBlockData, token: CancellationToken): Promise<void> {
+	private async updateEditor(data: ICodeCompareBlockData, token: CancellationToken, renderGeneration: number): Promise<void> {
 
 		if (!isResponseVM(data.element)) {
 			return;
@@ -1007,7 +1043,7 @@ export class CodeCompareBlockPart extends Disposable {
 		}
 
 		const diffData = await data.diffData;
-		if (token.isCancellationRequested) {
+		if (token.isCancellationRequested || renderGeneration !== this._renderGeneration) {
 			return;
 		}
 
@@ -1016,20 +1052,27 @@ export class CodeCompareBlockPart extends Disposable {
 				original: diffData.original,
 				modified: diffData.modified
 			});
+			let transferredViewModel = false;
+			try {
+				await viewModel.waitForDiff();
 
-			await viewModel.waitForDiff();
+				if (token.isCancellationRequested || renderGeneration !== this._renderGeneration) {
+					return;
+				}
 
-			if (token.isCancellationRequested) {
-				return;
+				const listener = Event.any(diffData.original.onWillDispose, diffData.modified.onWillDispose)(() => {
+					// this a bit weird and basically duplicates https://github.com/microsoft/vscode/blob/7cbcafcbcc88298cfd0238018fbbba8eb6853e/src/vs/editor/browser/widget/diffEditor/diffEditorWidget.ts#L328
+					// which cannot call `setModel(null)` without first complaining
+					this.diffEditor.setModel(null);
+				});
+				this.diffEditor.setModel(viewModel);
+				this._lastDiffEditorViewModel.value = combinedDisposable(listener, viewModel);
+				transferredViewModel = true;
+			} finally {
+				if (!transferredViewModel) {
+					viewModel.dispose();
+				}
 			}
-
-			const listener = Event.any(diffData.original.onWillDispose, diffData.modified.onWillDispose)(() => {
-				// this a bit weird and basically duplicates https://github.com/microsoft/vscode/blob/7cbcafcbcc88298cfdcd0238018fbbba8eb6853e/src/vs/editor/browser/widget/diffEditor/diffEditorWidget.ts#L328
-				// which cannot call `setModel(null)` without first complaining
-				this.diffEditor.setModel(null);
-			});
-			this.diffEditor.setModel(viewModel);
-			this._lastDiffEditorViewModel.value = combinedDisposable(listener, viewModel);
 
 		} else {
 			this.diffEditor.setModel(null);

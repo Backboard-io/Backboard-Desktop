@@ -28,6 +28,7 @@ import { URI } from '../../../../../../../base/common/uri.js';
 import { RunSubagentTool } from '../../../../common/tools/builtinTools/runSubagentTool.js';
 import { CollapsibleListPool } from '../../../../browser/widget/chatContentParts/chatReferencesContentPart.js';
 import { ToolDataSource } from '../../../../common/tools/languageModelToolsService.js';
+import { IChatWidgetService } from '../../../../browser/chat.js';
 
 suite('ChatSubagentContentPart', () => {
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
@@ -42,6 +43,7 @@ suite('ChatSubagentContentPart', () => {
 	let mockListPool: CollapsibleListPool;
 	let mockEditorPool: EditorPool;
 	let announcedToolProgressKeys: Set<string>;
+	let openedSession: URI | undefined;
 
 	function createMockRenderContext(isComplete: boolean = false): IChatContentPartRenderContext {
 		const mockElement: Partial<IChatResponseViewModel> = {
@@ -234,6 +236,14 @@ suite('ChatSubagentContentPart', () => {
 		mockListPool = {} as CollapsibleListPool;
 		mockEditorPool = {} as EditorPool;
 		announcedToolProgressKeys = new Set();
+		openedSession = undefined;
+		instantiationService.stub(IChatWidgetService, {
+			_serviceBrand: undefined,
+			openSession: async (resource: URI) => {
+				openedSession = resource;
+				return undefined;
+			},
+		} as IChatWidgetService);
 	});
 
 	teardown(() => {
@@ -308,6 +318,17 @@ suite('ChatSubagentContentPart', () => {
 			const part = createPart(toolInvocation, context);
 
 			assert.ok(part.domNode.classList.contains('chat-used-context-collapsed'), 'Should be collapsed by default');
+		});
+
+		test('opens the child chat in the chat view', () => {
+			const toolInvocation = createMockToolInvocation({ toolCallId: 'agent-call-1' });
+			const context = createMockRenderContext(false);
+			const part = createPart(toolInvocation, context);
+			const openButton = part.domNode.querySelector('.chat-subagent-open');
+
+			assert.ok(isHTMLElement(openButton), 'Subagent row should expose an open button');
+			openButton.click();
+			assert.strictEqual(openedSession?.toString(), 'chat-session://test/session1/subagent/agent-call-1');
 		});
 	});
 

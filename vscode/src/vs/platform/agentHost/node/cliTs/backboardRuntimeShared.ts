@@ -475,13 +475,6 @@ export function resolveBackboardSessionConfig(rawConfig: Record<string, unknown>
 						],
 						sessionMutable: true,
 					},
-					[BACKBOARD_WEB_SEARCH_CONFIG_KEY]: {
-						type: 'boolean',
-						title: localize('backboard.config.webSearch.title', "Web Search"),
-						description: localize('backboard.config.webSearch.description', "Lets Backboard search the web to answer questions and gather up-to-date context."),
-						default: true,
-						sessionMutable: true,
-					},
 					[BACKBOARD_COMPUTER_USE_CONFIG_KEY]: {
 						type: 'boolean',
 						title: localize('backboard.config.computerUse.title', "Computer Use"),
@@ -524,7 +517,9 @@ function normalizeBackboardConfig(rawConfig: Record<string, unknown> | undefined
 		// Stored configs may predate the removal of the "on" option; it always
 		// behaved as Auto on the wire, so migrate instead of resetting to off.
 		[BACKBOARD_MEMORY_CONFIG_KEY]: oneOf(merged[BACKBOARD_MEMORY_CONFIG_KEY] === 'on' ? 'auto' : merged[BACKBOARD_MEMORY_CONFIG_KEY], ['off', 'auto', 'readonly'], 'off'),
-		[BACKBOARD_WEB_SEARCH_CONFIG_KEY]: booleanOf(merged[BACKBOARD_WEB_SEARCH_CONFIG_KEY], true),
+		// Web search is an automatic model capability, not a composer setting.
+		// Keep it enabled even for sessions that persisted the retired toggle as off.
+		[BACKBOARD_WEB_SEARCH_CONFIG_KEY]: true,
 		[BACKBOARD_COMPUTER_USE_CONFIG_KEY]: booleanOf(merged[BACKBOARD_COMPUTER_USE_CONFIG_KEY], false),
 		[BACKBOARD_BROWSER_USE_CONFIG_KEY]: booleanOf(merged[BACKBOARD_BROWSER_USE_CONFIG_KEY], false),
 		[BACKBOARD_NOTIFICATIONS_CONFIG_KEY]: booleanOf(merged[BACKBOARD_NOTIFICATIONS_CONFIG_KEY], false),
@@ -548,7 +543,7 @@ export function createBackboardTurnSettings(
 		rawMode,
 		intensity: stringConfigValue(values, BACKBOARD_INTENSITY_CONFIG_KEY, 'dynamic'),
 		memory: stringConfigValue(values, BACKBOARD_MEMORY_CONFIG_KEY, 'off'),
-		webSearch: booleanConfigValue(values, BACKBOARD_WEB_SEARCH_CONFIG_KEY, true),
+		webSearch: true,
 		computerUse: booleanConfigValue(values, BACKBOARD_COMPUTER_USE_CONFIG_KEY, false),
 		browserUse: booleanConfigValue(values, BACKBOARD_BROWSER_USE_CONFIG_KEY, false),
 		notifications: booleanConfigValue(values, BACKBOARD_NOTIFICATIONS_CONFIG_KEY, false),

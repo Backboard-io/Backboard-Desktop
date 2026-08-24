@@ -472,7 +472,10 @@ registerAction2(class NewSessionForWorkspaceAction extends Action2 {
 			return;
 		}
 
-		sessionsService.openNewSession();
+		// The section toolbar is an explicit "new session" affordance. Discard a
+		// pending draft first so clicking the workspace's plus button cannot just
+		// reactivate that draft and appear to do nothing.
+		sessionsService.openNewSession({ forceNew: true });
 
 		const session = context.sessions[0];
 		const workspace = session.workspace.get();

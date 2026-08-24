@@ -170,11 +170,11 @@
 		"panelTitle.activeBorder": "#969696",
 		"panelTitle.activeForeground": "#E8E8E8",
 		"panelTitle.inactiveForeground": "#909090",
-		"terminal.background": "#0D0D0D",
+		"terminal.background": "#121212",
 		"terminal.border": "#252525",
 		"terminal.selectionBackground": "#74747452",
 		"terminalCursor.foreground": "#B0B0B0",
-		"terminalCursor.background": "#0D0D0D",
+		"terminalCursor.background": "#121212",
 
 		"statusBar.background": "#111111",
 		"statusBar.foreground": "#B7B7B7",

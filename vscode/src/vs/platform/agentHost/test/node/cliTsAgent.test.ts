@@ -4,11 +4,12 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
+import { URI } from '../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
 import { NullLogService } from '../../../log/common/log.js';
 import { AgentSession, type AgentSignal } from '../../common/agentService.js';
 import { ActionType } from '../../common/state/sessionActions.js';
-import { ResponsePartKind, ToolCallStatus, type ToolCallResponsePart } from '../../common/state/sessionState.js';
+import { buildSubagentSessionUri, ResponsePartKind, ToolCallStatus, type ToolCallResponsePart } from '../../common/state/sessionState.js';
 import { CliTsAgent } from '../../node/cliTs/cliTsAgent.js';
 
 suite('CliTsAgent tool metadata', () => {
@@ -56,6 +57,39 @@ suite('CliTsAgent tool metadata', () => {
 		});
 	});
 
+	test('Agent tool start advertises a named subagent task', () => {
+		const agent = createAgent();
+		const progress: AgentSignal[] = [];
+		store.add(agent.onDidSessionProgress(signal => progress.push(signal)));
+		const sessionUri = AgentSession.uri('backboard', 'subagent-live');
+		const internals = agent as unknown as {
+			_ensureToolCallStart(
+				session: { sessionUri: typeof sessionUri },
+				turn: { turnId: string; startedToolCalls: Set<string>; toolInputSummaries: Map<string, string>; toolInputs: Map<string, { name: string; input: unknown }> },
+				toolCallId: string,
+				toolName: string,
+				inputSummary?: string,
+			): void;
+		};
+		const turn = {
+			turnId: 'turn-subagent',
+			startedToolCalls: new Set<string>(),
+			toolInputSummaries: new Map<string, string>(),
+			toolInputs: new Map([['call-agent', { name: 'agent', input: { subagent_type: 'worker', prompt: 'Inspect the renderer and report back.' } }]]),
+		};
+
+		internals._ensureToolCallStart({ sessionUri }, turn, 'call-agent', 'Subagent', 'Inspect the renderer and report back.');
+
+		const start = progress.find(signal => signal.kind === 'action' && signal.action.type === ActionType.ChatToolCallStart);
+		assert.ok(start?.kind === 'action' && start.action.type === ActionType.ChatToolCallStart);
+		assert.deepStrictEqual(start.action._meta, {
+			source: 'cli-ts',
+			toolKind: 'subagent',
+			subagentAgentName: 'worker',
+			subagentDescription: 'Inspect the renderer and report back.',
+		});
+	});
+
 	test('AskUser lifecycle does not emit a tool-call card', () => {
 		const agent = createAgent();
 		const progress: AgentSignal[] = [];
@@ -85,6 +119,79 @@ suite('CliTsAgent tool metadata', () => {
 		}
 
 		assert.strictEqual(progress.length, 0);
+	});
+
+	test('worker events stream into a reopenable child chat', async () => {
+		const agent = createAgent();
+		const progress: AgentSignal[] = [];
+		store.add(agent.onDidSessionProgress(signal => progress.push(signal)));
+		const sessionUri = AgentSession.uri('backboard', 'worker-parent');
+		const rootTurn = {
+			turnId: 'turn-parent',
+			messageParts: new Map(),
+			streamedText: new Map(),
+			startedToolCalls: new Set(),
+			confirmedToolCalls: new Set(),
+			childToolLines: new Map(),
+			toolSummaries: [],
+			storedParts: [],
+			storedTextParts: new Map(),
+			toolInputs: new Map(),
+			toolInputSummaries: new Map(),
+			pendingCompletions: [] as Promise<void>[],
+			subagentTurns: new Map(),
+			responseText: '',
+			reasoningText: '',
+		};
+		const session = {
+			sessionUri,
+			turn: rootTurn,
+			storedSubagentTurns: new Map(),
+		};
+		const internals = agent as unknown as {
+			_sessions: Map<string, unknown>;
+			_handleAgentEvent(session: unknown, event: unknown): void;
+		};
+		internals._sessions.set(AgentSession.id(sessionUri), session);
+
+		internals._handleAgentEvent(session, {
+			type: 'agent:child_start',
+			agentToolCallId: 'agent-call-1',
+			childSessionId: 'child-turn-1',
+			prompt: 'Inspect the renderer and report what it does.',
+		});
+		internals._handleAgentEvent(session, {
+			type: 'agent:child_event',
+			agentToolCallId: 'agent-call-1',
+			event: { type: 'assistant:delta', turnId: 'child-turn-1', messageId: 'child-message-1', text: 'The renderer groups tool calls.' },
+		});
+		internals._handleAgentEvent(session, {
+			type: 'agent:child_end',
+			agentToolCallId: 'agent-call-1',
+			status: 'completed',
+		});
+		await Promise.allSettled(rootTurn.pendingCompletions);
+
+		const started = progress.find(signal => signal.kind === 'subagent_started');
+		assert.ok(started?.kind === 'subagent_started');
+		assert.strictEqual(started.prompt, 'Inspect the renderer and report what it does.');
+		assert.ok(progress.some(signal => signal.kind === 'action'
+			&& signal.parentToolCallId === 'agent-call-1'
+			&& signal.action.type === ActionType.ChatTurnStarted));
+		assert.ok(progress.some(signal => signal.kind === 'action' && signal.parentToolCallId === 'agent-call-1' && signal.action.type === ActionType.ChatDelta));
+		assert.ok(progress.some(signal => signal.kind === 'action'
+			&& signal.parentToolCallId === 'agent-call-1'
+			&& signal.action.type === ActionType.ChatTurnComplete));
+		assert.ok(progress.some(signal => signal.kind === 'subagent_completed'));
+
+		const childUri = URI.parse(buildSubagentSessionUri(sessionUri.toString(), 'agent-call-1'));
+		const turns = await agent.getSessionMessages(childUri);
+		assert.strictEqual(turns.length, 1);
+		assert.strictEqual(turns[0].message.text, 'Inspect the renderer and report what it does.');
+		assert.strictEqual(turns[0].responseParts[0]?.kind, ResponsePartKind.Markdown);
+		if (turns[0].responseParts[0]?.kind === ResponsePartKind.Markdown) {
+			assert.strictEqual(turns[0].responseParts[0].content, 'The renderer groups tool calls.');
+		}
 	});
 
 	test('stored Execute replay preserves terminal metadata and command output', async () => {
@@ -122,9 +229,34 @@ suite('CliTsAgent tool metadata', () => {
 			status: ToolCallStatus.Completed,
 			toolName: 'Execute',
 			toolInput: 'printf ready',
-			content: [{ type: 'text', text: 'Success\n$ printf ready\nready' }],
+			content: [{ type: 'text', text: 'ready' }],
 			meta: { source: 'cli-ts', toolKind: 'terminal', language: 'shellscript' },
 		});
+	});
+
+	test('stored Execute replay preserves prompt-like stdout when the command is not exact', async () => {
+		const agent = createAgent();
+		const sessionUri = AgentSession.uri('backboard', 'execute-replay-prompt-output');
+		const internals = agent as unknown as { _sessions: Map<string, unknown> };
+		internals._sessions.set(AgentSession.id(sessionUri), {
+			storedTurns: [{
+				prompt: 'Run the whitespace check',
+				response: '',
+				parts: [{
+					kind: 'tool',
+					id: 'call-execute-prompt-output',
+					name: 'Execute',
+					inputSummary: "printf 'a  b'",
+					title: 'Success',
+					detail: "$ printf 'a b'\nreal output",
+				}],
+			}],
+		});
+
+		const turns = await agent.getSessionMessages(sessionUri);
+		const responsePart = turns[0].responseParts[0] as ToolCallResponsePart;
+		if (responsePart.toolCall.status !== ToolCallStatus.Completed) { return; }
+		assert.deepStrictEqual(responsePart.toolCall.content, [{ type: 'text', text: "$ printf 'a b'\nreal output" }]);
 	});
 
 	test('stored AskUser results are omitted from replay', async () => {

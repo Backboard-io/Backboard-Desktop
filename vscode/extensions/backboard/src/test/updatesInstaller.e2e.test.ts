@@ -14,7 +14,23 @@ import { macUpdateInstallerScript } from '../updatesInstaller';
 const sourceApp = process.env.BACKBOARD_UPDATER_E2E_SOURCE_APP;
 const updateDmg = process.env.BACKBOARD_UPDATER_E2E_DMG;
 const expectedVersion = process.env.BACKBOARD_UPDATER_E2E_VERSION;
+const installerModulePath = process.env.BACKBOARD_UPDATER_E2E_INSTALLER_MODULE;
+const appBundleName = process.env.BACKBOARD_UPDATER_E2E_APP_NAME || 'Backboard Studio.app';
+const bundleIdentifier = process.env.BACKBOARD_UPDATER_E2E_BUNDLE_ID || 'io.backboard.studio';
+const testRootParent = process.env.BACKBOARD_UPDATER_E2E_ROOT || os.tmpdir();
 const enabled = process.platform === 'darwin' && Boolean(sourceApp && updateDmg && expectedVersion);
+
+function installerScript(): string {
+	if (!installerModulePath) {
+		return macUpdateInstallerScript();
+	}
+	const legacyModule = require(installerModulePath) as { macUpdateInstallerScript?: () => string };
+	const factory = legacyModule.macUpdateInstallerScript;
+	if (typeof factory !== 'function') {
+		throw new Error(`Missing macUpdateInstallerScript export in ${installerModulePath}`);
+	}
+	return factory();
+}
 
 function childExit(child: ChildProcess, timeoutMs: number): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
 	return new Promise((resolve, reject) => {
@@ -101,15 +117,74 @@ async function waitForPidExit(pid: number, timeoutMs: number): Promise<void> {
 	throw new Error(`Process ${pid} did not exit within ${timeoutMs}ms.`);
 }
 
+function appIsActive(pid: number): boolean {
+	const state = execFileSync('/usr/bin/osascript', ['-l', 'JavaScript', '-', String(pid)], {
+		encoding: 'utf8',
+		input: `ObjC.import('AppKit');
+function run(argv) {
+	const app = $.NSRunningApplication.runningApplicationWithProcessIdentifier(Number(argv[0]));
+	return !app.isNil() && app.active && !app.hidden ? 'active' : 'inactive';
+}
+`
+	}).trim();
+	return state === 'active';
+}
+
+function requestAppTerminate(pid: number): void {
+	try {
+		process.kill(pid, 'SIGTERM');
+	} catch (error) {
+		throw new Error(`Could not request graceful termination of disposable app pid ${pid}: ${String(error)}`);
+	}
+}
+
+async function waitForAppActive(pid: number, timeoutMs: number): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		if (appIsActive(pid)) {
+			return;
+		}
+		await new Promise(resolve => setTimeout(resolve, 250));
+	}
+	throw new Error(`Disposable updated app pid ${pid} was not foreground-active within ${timeoutMs}ms.`);
+}
+
 async function quitDisposableApp(appPath: string, timeoutMs: number): Promise<void> {
 	if (findBundleProcessPids(appPath).length === 0) {
 		return;
 	}
 
-	const exactAppPath = fs.realpathSync(appPath).replaceAll('\\', '\\\\').replaceAll('"', '\\"');
-	execFileSync('/usr/bin/osascript', ['-e', `tell application "${exactAppPath}" to quit`]);
+	const executable = execFileSync('/usr/libexec/PlistBuddy', [
+		'-c',
+		'Print :CFBundleExecutable',
+		path.join(appPath, 'Contents', 'Info.plist')
+	], { encoding: 'utf8' }).trim();
+	const mainPid = findAppPid(fs.realpathSync(path.join(appPath, 'Contents', 'MacOS', executable)));
+	if (mainPid !== undefined) {
+		requestAppTerminate(mainPid);
+	}
 
 	const deadline = Date.now() + timeoutMs;
+	const gracefulDeadline = Math.min(deadline, Date.now() + 5_000);
+	while (Date.now() < gracefulDeadline) {
+		if (findBundleProcessPids(appPath).length === 0) {
+			return;
+		}
+		await new Promise(resolve => setTimeout(resolve, 250));
+	}
+
+	// Repeated test bundles share a bundle identifier, so cleanup must never use
+	// a bundle-wide quit request. The updater's pre-swap graceful-quit assertion
+	// has already completed at this point; signal only this disposable bundle's
+	// exact processes to make teardown deterministic.
+	for (const pid of findBundleProcessPids(appPath)) {
+		try {
+			process.kill(pid, 'SIGTERM');
+		} catch {
+			// The process may have exited between enumeration and signaling.
+		}
+	}
+
 	while (Date.now() < deadline) {
 		if (findBundleProcessPids(appPath).length === 0) {
 			return;
@@ -117,7 +192,7 @@ async function quitDisposableApp(appPath: string, timeoutMs: number): Promise<vo
 		await new Promise(resolve => setTimeout(resolve, 250));
 	}
 
-	throw new Error(`Disposable app did not quit normally within ${timeoutMs}ms; leaving ${appPath} intact for diagnosis.`);
+	throw new Error(`Disposable app processes did not exit within ${timeoutMs}ms; leaving ${appPath} intact for diagnosis.`);
 }
 
 test('gracefully quits, updates, and relaunches a disposable installed-app clone', {
@@ -128,18 +203,20 @@ test('gracefully quits, updates, and relaunches a disposable installed-app clone
 	assert.ok(updateDmg);
 	assert.ok(expectedVersion);
 
-	const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'backboard-updater-e2e.'));
-	const appPath = path.join(testRoot, 'Backboard Studio.app');
+	const testRoot = fs.mkdtempSync(path.join(testRootParent, 'backboard-updater-e2e.'));
+	const appPath = path.join(testRoot, appBundleName);
 	const installerPath = path.join(testRoot, 'install-backboard-update.sh');
 	const statusPath = path.join(testRoot, 'install-backboard-update.status');
 	const logPath = path.join(testRoot, 'install-backboard-update.log');
 	const userDataPath = path.join(testRoot, 'user-data');
 	const extensionsPath = path.join(userDataPath, 'extensions');
 	let initialAppPid: number | undefined;
+	let installer: ChildProcess | undefined;
+	let installerExit: Promise<{ code: number | null; signal: NodeJS.Signals | null }> | undefined;
 
 	try {
 		execFileSync('/usr/bin/ditto', [sourceApp, appPath], { stdio: 'inherit' });
-		fs.writeFileSync(installerPath, macUpdateInstallerScript(), { mode: 0o700 });
+		fs.writeFileSync(installerPath, installerScript(), { mode: 0o700 });
 		fs.mkdirSync(extensionsPath, { recursive: true });
 
 		const executablePath = fs.realpathSync(path.join(appPath, 'Contents', 'MacOS', 'Backboard Studio'));
@@ -156,23 +233,22 @@ test('gracefully quits, updates, and relaunches a disposable installed-app clone
 		await new Promise(resolve => setTimeout(resolve, 5_000));
 		assert.equal(findAppPid(executablePath), initialAppPid, 'Disposable old app exited during its startup hold check.');
 
-		const installer = spawn('/bin/zsh', [
+		installer = spawn('/bin/zsh', [
 			installerPath,
 			updateDmg,
 			appPath,
 			String(initialAppPid),
 			expectedVersion,
 			logPath,
-			'Backboard Studio.app',
-			'io.backboard.studio',
+			appBundleName,
+			bundleIdentifier,
 			statusPath,
 			userDataPath
 		], { stdio: 'ignore' });
-		const installerExit = childExit(installer, 6 * 60 * 1000);
+		installerExit = childExit(installer, 6 * 60 * 1000);
 
 		await waitForReadyStatus(statusPath, logPath, 4 * 60 * 1000);
-		const exactAppPath = fs.realpathSync(appPath).replaceAll('\\', '\\\\').replaceAll('"', '\\"');
-		execFileSync('/usr/bin/osascript', ['-e', `tell application "${exactAppPath}" to quit`]);
+		requestAppTerminate(initialAppPid);
 		await waitForPidExit(initialAppPid, 30_000);
 		const result = await installerExit;
 
@@ -183,8 +259,17 @@ test('gracefully quits, updates, and relaunches a disposable installed-app clone
 		assert.match(log, /Prepared and verified Backboard Studio/);
 		assert.match(log, /Confirmed current Backboard Studio processes exited cleanly/);
 		assert.doesNotMatch(log, /did not quit cleanly/);
+		if (!installerModulePath) {
+			assert.match(log, /Confirmed Electron runtime ready/);
+		}
 		assert.match(log, /Confirmed stable after launch/);
+		if (!installerModulePath) {
+			assert.match(log, /Confirmed active after verified launch/);
+		}
 		assert.match(log, /Installed and launched Backboard Studio/);
+		const relaunchedAppPid = await waitForAppPid(executablePath, 30_000);
+		assert.notEqual(relaunchedAppPid, initialAppPid, 'Updater did not replace the original app process.');
+		await waitForAppActive(relaunchedAppPid, 30_000);
 
 		const installedVersion = execFileSync('/usr/libexec/PlistBuddy', [
 			'-c',
@@ -195,6 +280,15 @@ test('gracefully quits, updates, and relaunches a disposable installed-app clone
 		execFileSync('/usr/bin/codesign', ['--verify', '--deep', '--strict', appPath]);
 		execFileSync('/usr/sbin/spctl', ['--assess', '--type', 'execute', appPath]);
 	} finally {
+		if (installer && installer.exitCode === null && installer.signalCode === null) {
+			installer.kill('SIGTERM');
+			try {
+				await (installerExit ?? childExit(installer, 30_000));
+			} catch {
+				// Preserve the original test failure; exact disposable processes are
+				// handled below and the installer has already received SIGTERM.
+			}
+		}
 		await quitDisposableApp(appPath, 30_000);
 		fs.rmSync(testRoot, { recursive: true, force: true });
 	}

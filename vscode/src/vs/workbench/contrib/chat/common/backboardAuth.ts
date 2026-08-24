@@ -74,7 +74,7 @@ export async function readBackboardConfigJson(fileService: IFileService, configR
 	}
 }
 
-function backboardConfigApiKey(config: BackboardConfigJson): string | undefined {
+export function backboardConfigApiKey(config: BackboardConfigJson): string | undefined {
 	const apiKey = stringValueFromRecord(config.api_key);
 	if (apiKey) {
 		return apiKey;
@@ -83,7 +83,7 @@ function backboardConfigApiKey(config: BackboardConfigJson): string | undefined 
 	return stringValueFromRecord(backboardConfigEnvKeys(config)[env]);
 }
 
-function backboardConfigAccessToken(config: BackboardConfigJson): string | undefined {
+export function backboardConfigAccessToken(config: BackboardConfigJson): string | undefined {
 	const oauth = isObjectRecord(config.oauth) ? config.oauth : undefined;
 	return stringValueFromRecord(oauth?.access_token);
 }
@@ -102,7 +102,7 @@ function backboardConfigEnvKeys(config: BackboardConfigJson): Record<string, str
 	return result;
 }
 
-function normalizeBackboardEnv(env: string | undefined): string {
+export function normalizeBackboardEnv(env: string | undefined): string {
 	switch ((env || 'prod').trim().toLowerCase()) {
 		case '':
 		case 'production':

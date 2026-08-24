@@ -24,25 +24,104 @@ const MAX_BUFFERED_CHARS = 4000;
  * @internal Exported for testing.
  */
 export function lastBlockBoundary(text: string): number {
-	let lastValid = -1;
-	let inFence = false;
+	const scanner = new IncrementalBlockBoundaryScanner();
+	scanner.reset(text);
+	return scanner.lastBoundary;
+}
 
-	for (let i = 0; i < text.length; i++) {
-		// Detect fenced code blocks: ``` or ~~~ at the start of a line.
-		if ((i === 0 || text[i - 1] === '\n') &&
-			((text[i] === '`' && text[i + 1] === '`' && text[i + 2] === '`') ||
-				(text[i] === '~' && text[i + 1] === '~' && text[i + 2] === '~'))) {
-			inFence = !inFence;
-			i += 2; // skip past the triple backtick/tilde
-			continue;
+/**
+ * Stateful scanner for paragraph boundaries outside fenced code blocks.
+ *
+ * Fence markers can be split across stream updates (for example, a seed ending
+ * in `` ` `` followed by an append beginning with `` `` ``). Keeping the short
+ * line-start candidate in the state lets each append inspect only its new
+ * suffix without rescanning the accumulated response.
+ */
+class IncrementalBlockBoundaryScanner {
+	private _activeFenceChar: '`' | '~' | undefined;
+	private _activeFenceLength = 0;
+	private _atLineStart = true;
+	private _pendingFenceChar: '`' | '~' | undefined;
+	private _pendingFenceCount = 0;
+	private _previousCharWasNewline = false;
+	private _lastBoundary = -1;
+	private _length = 0;
+	private _scannedCharacterCount = 0;
+
+	get lastBoundary(): number { return this._lastBoundary; }
+	get length(): number { return this._length; }
+	get scannedCharacterCount(): number { return this._scannedCharacterCount; }
+
+	reset(text: string): void {
+		this._activeFenceChar = undefined;
+		this._activeFenceLength = 0;
+		this._atLineStart = true;
+		this._pendingFenceChar = undefined;
+		this._pendingFenceCount = 0;
+		this._previousCharWasNewline = false;
+		this._lastBoundary = -1;
+		this._length = 0;
+		this.append(text);
+	}
+
+	append(text: string): void {
+		const baseOffset = this._length;
+		for (let index = 0; index < text.length; index++) {
+			this.acceptCharacter(text[index], baseOffset + index);
 		}
-		// Detect block boundary outside code fences.
-		if (!inFence && text[i] === '\n' && text[i + 1] === '\n') {
-			lastValid = i;
+		this._length += text.length;
+		this._scannedCharacterCount += text.length;
+	}
+
+	private acceptCharacter(character: string, absoluteIndex: number): void {
+		if (this._atLineStart && (this._pendingFenceChar || character === '`' || character === '~')) {
+			if (!this._pendingFenceChar) {
+				this._pendingFenceChar = character as '`' | '~';
+				this._pendingFenceCount = 1;
+				this._previousCharWasNewline = false;
+				return;
+			}
+
+			if (character === this._pendingFenceChar) {
+				this._pendingFenceCount++;
+				this._previousCharWasNewline = false;
+				return;
+			}
+
+			this.finishPendingFenceRun();
+			// A fence run contains no newline, so the current character is no
+			// longer at line start and can be processed normally below.
+			this._atLineStart = false;
+		}
+
+		if (character === '\n') {
+			if (!this._activeFenceChar && this._previousCharWasNewline) {
+				this._lastBoundary = absoluteIndex - 1;
+			}
+			this._previousCharWasNewline = true;
+			this._atLineStart = true;
+		} else {
+			this._previousCharWasNewline = false;
+			this._atLineStart = false;
 		}
 	}
 
-	return lastValid;
+	private finishPendingFenceRun(): void {
+		const marker = this._pendingFenceChar;
+		const length = this._pendingFenceCount;
+		this._pendingFenceChar = undefined;
+		this._pendingFenceCount = 0;
+		if (!marker || length < 3) {
+			return;
+		}
+		if (!this._activeFenceChar) {
+			this._activeFenceChar = marker;
+			this._activeFenceLength = length;
+		} else if (marker === this._activeFenceChar && length >= this._activeFenceLength) {
+			this._activeFenceChar = undefined;
+			this._activeFenceLength = 0;
+		}
+	}
 }
 
 /**
@@ -52,9 +131,31 @@ export function lastBlockBoundary(text: string): number {
  */
 export class ParagraphBuffer implements IIncrementalRenderingBuffer {
 	readonly handlesFlush = false;
+	private readonly _scanner = new IncrementalBlockBoundaryScanner();
+	private _lastMarkdown = '';
 
-	getRenderable(fullMarkdown: string, _lastRendered: string): string {
-		const lastBlock = lastBlockBoundary(fullMarkdown);
+	/** @internal Exposes lexical work for focused performance regression tests. */
+	get scannedCharacterCount(): number { return this._scanner.scannedCharacterCount; }
+
+	seed(markdown: string): void {
+		this._lastMarkdown = markdown;
+		this._scanner.reset(markdown);
+	}
+
+	getRenderable(fullMarkdown: string, _lastRendered: string, appendedMarkdown?: string): string {
+		const isKnownAppend = appendedMarkdown !== undefined
+			&& this._scanner.length + appendedMarkdown.length === fullMarkdown.length;
+		if (isKnownAppend) {
+			this._scanner.append(appendedMarkdown);
+		} else if (fullMarkdown !== this._lastMarkdown) {
+			// Standalone callers and rare strategy switches may not supply the
+			// append suffix. Reset restores correctness for rewrites without adding
+			// prefix validation to the normal streaming hot path.
+			this._scanner.reset(fullMarkdown);
+		}
+		this._lastMarkdown = fullMarkdown;
+
+		const lastBlock = this._scanner.lastBoundary;
 		let renderable = lastBlock === -1
 			? fullMarkdown   // no paragraph breaks — single block, render as-is
 			: fullMarkdown.slice(0, lastBlock + 2);

@@ -70,7 +70,7 @@ export class DiffEditorPool extends Disposable {
 		super();
 		this._pool = this._register(new ResourcePool(() => {
 			return instantiationService.createInstance(CodeCompareBlockPart, options, MenuId.ChatCompareBlock, delegate, overflowWidgetsDomNode, this.isSimpleWidget);
-		}));
+		}, { maxIdleSize: 2 }));
 	}
 
 	get(): IDisposableReference<CodeCompareBlockPart> {

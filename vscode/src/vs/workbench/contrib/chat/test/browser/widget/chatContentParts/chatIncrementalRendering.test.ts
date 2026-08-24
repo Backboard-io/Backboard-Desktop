@@ -11,7 +11,7 @@ import { TestConfigurationService } from '../../../../../../../platform/configur
 import { IConfigurationService } from '../../../../../../../platform/configuration/common/configuration.js';
 import { workbenchInstantiationService } from '../../../../../../test/browser/workbenchTestServices.js';
 import { BlockAnimation, ANIMATION_DURATION_MS } from '../../../../browser/widget/chatContentParts/chatIncrementalRendering/animations/blockAnimations.js';
-import { lastBlockBoundary } from '../../../../browser/widget/chatContentParts/chatIncrementalRendering/buffers/paragraphBuffer.js';
+import { lastBlockBoundary, ParagraphBuffer } from '../../../../browser/widget/chatContentParts/chatIncrementalRendering/buffers/paragraphBuffer.js';
 import { WordBuffer } from '../../../../browser/widget/chatContentParts/chatIncrementalRendering/buffers/wordBuffer.js';
 import { IncrementalDOMMorpher } from '../../../../browser/widget/chatContentParts/chatIncrementalRendering/chatIncrementalRendering.js';
 import { ChatConfiguration } from '../../../../common/constants.js';
@@ -103,6 +103,67 @@ suite('lastBlockBoundary', () => {
 		const result = lastBlockBoundary(text);
 		// The last valid boundary should be after the closing ```
 		assert.ok(result > 40, `Expected boundary after both fences, got ${result}`);
+	});
+
+	test('does not close a backtick fence with tilde markers inside it', () => {
+		const text = '````\ninside\n~~~\n\nstill inside\n````\n\nafter';
+		assert.strictEqual(lastBlockBoundary(text), text.lastIndexOf('\n\n'));
+	});
+
+	test('does not close a fence with a shorter run of the same marker', () => {
+		const text = '````\ninside\n```\n\nstill inside\n````\n\nafter';
+		assert.strictEqual(lastBlockBoundary(text), text.lastIndexOf('\n\n'));
+	});
+});
+
+suite('ParagraphBuffer', () => {
+
+	ensureNoDisposablesAreLeakedInTestSuite();
+
+	test('scans only appended suffixes after seed, including split fences', () => {
+		const buffer = new ParagraphBuffer();
+		let markdown = `${'a'.repeat(100_000)}\n\n\``;
+		buffer.seed(markdown);
+		const seededScanCount = buffer.scannedCharacterCount;
+		assert.strictEqual(seededScanCount, markdown.length);
+
+		for (const suffix of ['``\ninside\n\n', 'still fenced\n```', '\n\nafter']) {
+			markdown += suffix;
+			buffer.getRenderable(markdown, '', suffix);
+		}
+
+		assert.strictEqual(
+			buffer.scannedCharacterCount - seededScanCount,
+			'``\ninside\n\nstill fenced\n```\n\nafter'.length,
+			'each streamed character should be scanned exactly once after seeding',
+		);
+		assert.strictEqual(buffer.getRenderable(markdown, ''), markdown.slice(0, markdown.lastIndexOf('\n\n') + 2));
+	});
+
+	test('keeps cross-marker and shorter closers inside a split fence', () => {
+		const buffer = new ParagraphBuffer();
+		let markdown = '``';
+		buffer.seed(markdown);
+		const chunks = ['``\ninside\n~~', '~\n\nstill inside\n```', '\n\ninside again\n``', '``\n\nafter'];
+		for (const chunk of chunks) {
+			markdown += chunk;
+			buffer.getRenderable(markdown, '', chunk);
+		}
+
+		assert.strictEqual(buffer.scannedCharacterCount, markdown.length);
+		assert.strictEqual(buffer.getRenderable(markdown, ''), markdown.slice(0, markdown.lastIndexOf('\n\n') + 2));
+	});
+
+	test('resets scanner state for a non-append replacement', () => {
+		const buffer = new ParagraphBuffer();
+		buffer.seed('before\n\ntrailing');
+		const beforeReset = buffer.scannedCharacterCount;
+		const replacement = '```\ninside\n\ncode\n```\n\nafter';
+
+		const renderable = buffer.getRenderable(replacement, '');
+
+		assert.strictEqual(buffer.scannedCharacterCount - beforeReset, replacement.length);
+		assert.strictEqual(renderable, replacement.slice(0, replacement.lastIndexOf('\n\n') + 2));
 	});
 });
 
@@ -245,6 +306,23 @@ suite('IncrementalDOMMorpher', () => {
 			}
 		});
 
+		test('word buffering preserves already-visible text instead of replaying it', async () => {
+			configService.setUserConfiguration(ChatConfiguration.IncrementalRenderingBuffering, 'word');
+			const domNode = mainWindow.document.createElement('div');
+			const paragraph = domNode.appendChild(mainWindow.document.createElement('p'));
+			paragraph.textContent = 'Already visible response';
+			const rendered: string[] = [];
+			const morpher = createMorpher(domNode);
+			morpher.setRenderCallback(markdown => rendered.push(markdown));
+
+			morpher.seed('Already visible response', false);
+			await new Promise(resolve => mainWindow.requestAnimationFrame(resolve));
+
+			assert.strictEqual(domNode.textContent, 'Already visible response');
+			assert.strictEqual(domNode.firstElementChild, paragraph, 'seeding must not replace the mounted DOM');
+			assert.deepStrictEqual(rendered, [], 'seeding must not schedule a replay render');
+		});
+
 		test('with animateInitial=true animates existing children', () => {
 			const domNode = mainWindow.document.createElement('div');
 			domNode.appendChild(mainWindow.document.createElement('p'));
@@ -320,6 +398,29 @@ suite('IncrementalDOMMorpher', () => {
 
 	suite('updateStreamRate', () => {
 
+		test('coalesces a large synchronous token burst into one render pass', async () => {
+			configService.setUserConfiguration(ChatConfiguration.IncrementalRenderingBuffering, 'word');
+			const morpher = createMorpher();
+			const rendered: string[] = [];
+			morpher.setRenderCallback(md => rendered.push(md));
+			morpher.seed('');
+
+			let content = '';
+			for (let index = 0; index < 2_000; index++) {
+				content += `word${index} `;
+				assert.strictEqual(morpher.tryMorph(content), true);
+			}
+
+			assert.strictEqual(rendered.length, 0, 'token events must not render synchronously');
+			await new Promise(resolve => mainWindow.requestAnimationFrame(resolve));
+			assert.strictEqual(rendered.length, 1, 'one animation frame should coalesce the whole burst');
+
+			morpher.updateStreamRate(100, true);
+			await new Promise(resolve => mainWindow.requestAnimationFrame(resolve));
+			assert.strictEqual(rendered.length, 2, 'completion should perform one final rich render');
+			assert.strictEqual(rendered.at(-1), content);
+		});
+
 		test('flushes remaining buffered content on completion for paragraph buffer', async () => {
 			// Use paragraph buffer (default)
 			configService.setUserConfiguration(ChatConfiguration.IncrementalRenderingBuffering, 'paragraph');
@@ -346,6 +447,47 @@ suite('IncrementalDOMMorpher', () => {
 			// The render callback should now have the full content
 			assert.strictEqual(rendered.length, 2);
 			assert.strictEqual(rendered[1], fullContent);
+		});
+
+		test('final rich hydration does not animate the whole response again', async () => {
+			configService.setUserConfiguration(ChatConfiguration.IncrementalRenderingBuffering, 'word');
+			const domNode = mainWindow.document.createElement('div');
+			domNode.appendChild(mainWindow.document.createElement('div')).textContent = 'streaming text';
+			const morpher = createMorpher(domNode);
+			morpher.setRenderCallback(() => {
+				domNode.replaceChildren(
+					mainWindow.document.createElement('p'),
+					mainWindow.document.createElement('p'),
+				);
+			});
+			morpher.seed('streaming text', false);
+			morpher.tryMorph('streaming text finished');
+
+			morpher.updateStreamRate(100, true);
+			await new Promise(resolve => mainWindow.requestAnimationFrame(resolve));
+
+			for (const child of Array.from(domNode.children)) {
+				assert.strictEqual(
+					(child as HTMLElement).classList.contains('chat-smooth-animate-fade'),
+					false,
+					'final hydration must keep completed text visually stable',
+				);
+			}
+		});
+
+		test('completion does not rebuild rich content that is already caught up', async () => {
+			configService.setUserConfiguration(ChatConfiguration.IncrementalRenderingBuffering, 'word');
+			const domNode = mainWindow.document.createElement('div');
+			domNode.appendChild(mainWindow.document.createElement('p')).textContent = 'complete text';
+			const rendered: string[] = [];
+			const morpher = createMorpher(domNode);
+			morpher.setRenderCallback(markdown => rendered.push(markdown));
+			morpher.seed('complete text', false);
+
+			morpher.updateStreamRate(100, true);
+			await new Promise(resolve => mainWindow.requestAnimationFrame(resolve));
+
+			assert.deepStrictEqual(rendered, [], 'caught-up rich DOM should remain mounted at completion');
 		});
 	});
 });
@@ -487,6 +629,7 @@ suite('WordBuffer', () => {
 		// First flush reveals 1 word, but there are more
 		buffer.filterFlush('word1 word2 word3 word4 word5');
 		assert.strictEqual(buffer.needsNextFrame, true, 'Should need another frame when words remain');
+		assert.ok(buffer.nextRenderDelay > 0, 'Should wait until the next eligible commit instead of polling every animation frame');
 	});
 
 	test('needsNextFrame is false when all words are revealed', () => {

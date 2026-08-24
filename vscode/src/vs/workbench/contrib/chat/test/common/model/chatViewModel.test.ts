@@ -6,9 +6,19 @@
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
 import { URI } from '../../../../../../base/common/uri.js';
-import { IChatExternalEdit } from '../../../common/chatService/chatService.js';
+import { ChatRequestQueueKind, IChatExternalEdit } from '../../../common/chatService/chatService.js';
 import { IChatModel, IChatProgressResponseContent, IChatRequestModel, IChatResponseModel, IResponse } from '../../../common/model/chatModel.js';
-import { getLatestTurnEditedFiles } from '../../../common/model/chatViewModel.js';
+import { getLatestTurnEditedFiles, isTransientExternalEdit, shouldRenderPendingDivider } from '../../../common/model/chatViewModel.js';
+
+suite('pending request presentation', () => {
+	ensureNoDisposablesAreLeakedInTestSuite();
+
+	test('groups user queue rows and preserves system notification headings', () => {
+		assert.strictEqual(shouldRenderPendingDivider(ChatRequestQueueKind.Queued, false), true);
+		assert.strictEqual(shouldRenderPendingDivider(ChatRequestQueueKind.Steering, false), false);
+		assert.strictEqual(shouldRenderPendingDivider(ChatRequestQueueKind.Steering, true), true);
+	});
+});
 
 suite('getLatestTurnEditedFiles', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -48,6 +58,27 @@ suite('getLatestTurnEditedFiles', () => {
 	test('returns undefined when the latest response made no edits', () => {
 		const model = createModel(true, []);
 		assert.strictEqual(getLatestTurnEditedFiles(model), undefined);
+	});
+
+	test('filters narrow atomic-rewrite scratch files from restored diffs and recaps', () => {
+		const tempEdits = [
+			createEdit('/project/src/.!13356!level.js', 'delete', 0, 200),
+			createEdit('/project/XXSf7h6t', 'delete', 0, 20),
+			createEdit('/project/src/XXhU77d6', 'delete', 0, 20),
+			createEdit('/project/src/main.js.tmp', 'delete', 0, 20),
+		];
+		const realEdit = createEdit('/project/src/level.js', 'edit', 3, 1);
+		for (const tempEdit of tempEdits) {
+			assert.strictEqual(isTransientExternalEdit(tempEdit), true, tempEdit.uri.path);
+		}
+		assert.strictEqual(isTransientExternalEdit(realEdit), false);
+		assert.strictEqual(isTransientExternalEdit(createEdit('/project/dist/output.js', 'edit', 1, 1)), false, 'explicit edits to ignored watcher directories remain visible');
+		assert.strictEqual(isTransientExternalEdit(createEdit('/project/src/XXSf7h6t.js', 'edit', 1, 1)), false, 'XX scratch filter requires an exact eight-character basename');
+		assert.strictEqual(isTransientExternalEdit(createEdit('/project/src/main.tmp.js', 'edit', 1, 1)), false, 'plain tmp filter requires the final extension');
+		assert.deepStrictEqual(
+			getLatestTurnEditedFiles(createModel(true, [...tempEdits, realEdit]))?.map(edit => edit.uri.path),
+			['/project/src/level.js'],
+		);
 	});
 
 	test('aggregates one entry per file, summing diff counts', () => {

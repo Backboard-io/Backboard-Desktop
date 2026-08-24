@@ -62,6 +62,10 @@ export class ClaudeSdkMessageRouter extends Disposable {
 			this._editObserver.observeAssistant(message);
 		} else if (message.type === 'user' && turnId !== undefined) {
 			await this._editObserver.observeUser(message, turnId, this._mapperState);
+		} else if (message.type === 'result') {
+			// Cancellation/protocol failure can end a turn without synthetic
+			// tool_result messages for every started edit.
+			this._editObserver.discardPendingEdits();
 		}
 		if (turnId === undefined) {
 			return;

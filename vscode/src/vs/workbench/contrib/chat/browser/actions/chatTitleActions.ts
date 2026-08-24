@@ -201,8 +201,10 @@ export function registerChatTitleActions() {
 
 			let item = args[0];
 			if (isChatEditingActionContext(item)) {
-				// Resolve chat editing action context to the last response VM
-				item = chatWidgetService.getWidgetBySessionResource(item.sessionResource)?.viewModel?.getItems().at(-1);
+				// Queue-only rows can follow the response that owns this editing state.
+				// Resolve the latest response instead of assuming the physical last row
+				// is conversational content.
+				item = chatWidgetService.getWidgetBySessionResource(item.sessionResource)?.viewModel?.getItems().findLast(isResponseVM);
 			}
 			if (!isResponseVM(item)) {
 				return;

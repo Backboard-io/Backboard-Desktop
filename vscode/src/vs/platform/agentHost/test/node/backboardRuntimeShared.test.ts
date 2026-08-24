@@ -51,6 +51,19 @@ suite('Backboard runtime configuration', () => {
 		assert.strictEqual(resolved.values.imageGeneration, false);
 	});
 
+	test('keeps web search automatic and out of composer configuration', () => {
+		const resolved = resolveBackboardSessionConfig({ webSearch: false });
+		assert.strictEqual(resolved.schema.properties?.webSearch, undefined);
+		assert.strictEqual(resolved.values.webSearch, true);
+
+		const settings = createBackboardTurnSettings(
+			{ webSearch: false },
+			undefined,
+			{ id: 'openai/gpt-5.5' },
+		);
+		assert.strictEqual(settings.webSearch, true);
+	});
+
 	test('keeps the image toggle independent from the conversation model', () => {
 		const settings = createBackboardTurnSettings(
 			{ imageGeneration: true },

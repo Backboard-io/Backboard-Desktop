@@ -58,6 +58,78 @@
 	pointer-events: auto !important;
 }
 
+/* Backboard code blocks use a real header rail. Keeping actions in flow means
+ * the first command line remains fully readable, and constraining the editor as
+ * a flex child lets Monaco own horizontal scrolling for long, unwrapped lines. */
+.monaco-workbench .backboard-clean-chat .interactive-result-code-block:not(.compare):has(> .interactive-result-code-block-toolbar) {
+	display: flex;
+	min-width: 0;
+	overflow: hidden;
+	flex-direction: column;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-result-code-block:not(.compare) > .interactive-result-editor {
+	box-sizing: border-box;
+	width: 100%;
+	min-width: 0;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-result-code-block:not(.compare) > .interactive-result-code-block-toolbar {
+	position: static !important;
+	top: auto !important;
+	right: auto !important;
+	z-index: auto !important;
+	box-sizing: border-box;
+	display: flex;
+	order: -1;
+	width: 100% !important;
+	min-height: 28px;
+	align-items: center;
+	justify-content: space-between;
+	padding: 0 4px 0 10px !important;
+	opacity: 1 !important;
+	pointer-events: auto;
+	background: var(--vscode-interactive-result-editor-background-color, var(--vscode-editor-background)) !important;
+	border-bottom: 1px solid var(--vscode-chat-requestBorder);
+	border-radius: 0 !important;
+	box-shadow: none !important;
+	transition: none !important;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-result-code-block:not(.compare) > .interactive-result-code-block-toolbar::before {
+	min-width: 0;
+	overflow: hidden;
+	color: var(--vscode-descriptionForeground);
+	content: attr(data-language-id);
+	font-size: 11px;
+	line-height: 18px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-result-code-block:not(.compare) > .interactive-result-code-block-toolbar > .monaco-action-bar,
+.monaco-workbench .backboard-clean-chat .interactive-result-code-block:not(.compare) > .interactive-result-code-block-toolbar > .monaco-toolbar {
+	position: static !important;
+	top: auto !important;
+	right: auto !important;
+	height: 26px;
+	max-width: none;
+	flex: 0 0 auto;
+	opacity: 0;
+	overflow: visible;
+	pointer-events: none;
+	background: transparent;
+	border: 0;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-result-code-block:not(.compare):hover > .interactive-result-code-block-toolbar > :is(.monaco-action-bar, .monaco-toolbar),
+.monaco-workbench .backboard-clean-chat .interactive-result-code-block:not(.compare).focused > .interactive-result-code-block-toolbar > :is(.monaco-action-bar, .monaco-toolbar),
+.monaco-workbench .backboard-clean-chat .interactive-result-code-block:not(.compare) > .interactive-result-code-block-toolbar:focus-within > :is(.monaco-action-bar, .monaco-toolbar),
+.monaco-workbench .backboard-clean-chat .interactive-result-code-block:not(.compare) > .interactive-result-code-block-toolbar.force-visibility > :is(.monaco-action-bar, .monaco-toolbar) {
+	opacity: 1;
+	pointer-events: auto;
+}
+
 .interactive-item-container .value .rendered-markdown [data-code] {
 	margin: 0 0 16px 0;
 }

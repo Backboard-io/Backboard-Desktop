@@ -9,7 +9,7 @@ import './media/chatViewWelcome.css';
 import * as dom from '../../../../../base/browser/dom.js';
 import { status } from '../../../../../base/browser/ui/aria/aria.js';
 import { IMouseWheelEvent } from '../../../../../base/browser/mouseEvent.js';
-import { disposableTimeout, timeout } from '../../../../../base/common/async.js';
+import { disposableTimeout, RunOnceScheduler, timeout } from '../../../../../base/common/async.js';
 import { CancellationToken, CancellationTokenSource } from '../../../../../base/common/cancellation.js';
 import { Codicon } from '../../../../../base/common/codicons.js';
 import { toErrorMessage } from '../../../../../base/common/errorMessage.js';
@@ -28,7 +28,7 @@ import { MicrotaskDelay } from '../../../../../base/common/symbols.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { isDefined } from '../../../../../base/common/types.js';
 import { URI } from '../../../../../base/common/uri.js';
-import { ChatPerfMark, markChat } from '../../common/chatPerf.js';
+import { ChatPerfMark, isChatPerfLoggingEnabled, logChatPerf, markChat } from '../../common/chatPerf.js';
 import { ICodeEditor } from '../../../../../editor/browser/editorBrowser.js';
 import { ICodeEditorService } from '../../../../../editor/browser/services/codeEditorService.js';
 import { OffsetRange } from '../../../../../editor/common/core/ranges/offsetRange.js';
@@ -66,7 +66,7 @@ import { IChatSessionsService, localChatSessionType } from '../../common/chatSes
 import { IChatSlashCommandService } from '../../common/participants/chatSlashCommands.js';
 import { IChatTodoListService } from '../../common/tools/chatTodoListService.js';
 import { ChatRequestVariableSet, IChatRequestVariableEntry, isPromptFileVariableEntry, isPromptTextVariableEntry, isWorkspaceVariableEntry, PromptFileVariableKind, toPromptFileVariableEntry } from '../../common/attachments/chatVariableEntries.js';
-import { ChatViewModel, IChatResponseViewModel, isRequestVM, isResponseVM } from '../../common/model/chatViewModel.js';
+import { ChatViewModel, IChatItemChangeEvent, IChatResponseViewModel, isRequestVM, isResponseVM } from '../../common/model/chatViewModel.js';
 import { ChatAgentLocation, ChatConfiguration, ChatModeKind, ChatPermissionLevel, ThinkingDisplayMode } from '../../common/constants.js';
 import { IChatGoalSummaryService } from '../chatGoalSummaryService.js';
 import { ILanguageModelToolsService, isToolSet } from '../../common/tools/languageModelToolsService.js';
@@ -272,6 +272,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 
 	private readonly visibilityTimeoutDisposable: MutableDisposable<IDisposable> = this._register(new MutableDisposable());
 	private readonly visibilityAnimationFrameDisposable: MutableDisposable<IDisposable> = this._register(new MutableDisposable());
+	private readonly hiddenRenderingTimeoutDisposable: MutableDisposable<IDisposable> = this._register(new MutableDisposable());
 
 	private readonly inputPartDisposable: MutableDisposable<ChatInputPart> = this._register(new MutableDisposable());
 	private readonly inlineInputPartDisposable: MutableDisposable<ChatInputPart> = this._register(new MutableDisposable());
@@ -336,6 +337,12 @@ export class ChatWidget extends Disposable implements IChatWidget {
 	private readonly _goalBannerDismissListener = this._register(new MutableDisposable<IDisposable>());
 
 	private readonly viewModelDisposables = this._register(new DisposableStore());
+	private readonly _editRequestDisposables = this._register(new MutableDisposable<DisposableStore>());
+	private readonly _pendingResponseRerenderItems = new Set<ChatTreeItem>();
+	private _pendingCompletedResponseRerender = false;
+	private _pendingResponseChangeEventCount = 0;
+	private _pendingResponseRerenderQueuedAt = 0;
+	private readonly _responseRerenderScheduler = this._register(new RunOnceScheduler(() => this.flushResponseItemRerenders(), 50));
 	private _viewModel: ChatViewModel | undefined;
 
 	private set viewModel(viewModel: ChatViewModel | undefined) {
@@ -345,6 +352,11 @@ export class ChatWidget extends Disposable implements IChatWidget {
 
 		const previousSessionResource = this._viewModel?.sessionResource;
 		this.viewModelDisposables.clear();
+		this._responseRerenderScheduler.cancel();
+		this._pendingResponseRerenderItems.clear();
+		this._pendingCompletedResponseRerender = false;
+		this._pendingResponseChangeEventCount = 0;
+		this._pendingResponseRerenderQueuedAt = 0;
 
 		this._viewModel = viewModel;
 		if (viewModel) {
@@ -1048,6 +1060,80 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		}
 	}
 
+	private onDidChangeResponseItems(events: readonly IChatItemChangeEvent[]): void {
+		if (!this._visible || !this.viewModel) {
+			return;
+		}
+
+		for (const event of events) {
+			this._pendingResponseRerenderItems.add(event.response);
+			if (event.request) {
+				this._pendingResponseRerenderItems.add(event.request);
+			}
+			this._pendingCompletedResponseRerender ||= event.becameComplete;
+		}
+		if (isChatPerfLoggingEnabled(this.logService)) {
+			this._pendingResponseChangeEventCount += events.length;
+			if (this._pendingResponseRerenderQueuedAt === 0) {
+				this._pendingResponseRerenderQueuedAt = Date.now();
+			}
+		}
+
+		if (this._pendingCompletedResponseRerender) {
+			this._responseRerenderScheduler.cancel();
+			this.flushResponseItemRerenders();
+		} else if (!this._responseRerenderScheduler.isScheduled()) {
+			const lastContent = events.at(-1)?.response.response.value.at(-1);
+			const activeMarkdownLength = lastContent?.kind === 'markdownContent' ? lastContent.content.value.length : 0;
+			const delay = activeMarkdownLength >= 50_000 ? 400 : activeMarkdownLength >= 15_000 ? 150 : 50;
+			this._responseRerenderScheduler.schedule(delay);
+		}
+	}
+
+	private flushResponseItemRerenders(): void {
+		const completedResponse = this._pendingCompletedResponseRerender;
+		this._pendingCompletedResponseRerender = false;
+		const changeEvents = this._pendingResponseChangeEventCount;
+		this._pendingResponseChangeEventCount = 0;
+		const queuedAt = this._pendingResponseRerenderQueuedAt;
+		this._pendingResponseRerenderQueuedAt = 0;
+		const items = [...this._pendingResponseRerenderItems];
+		this._pendingResponseRerenderItems.clear();
+		if (!items.length || !this._visible || !this.viewModel) {
+			if (changeEvents > 0 && isChatPerfLoggingEnabled(this.logService)) {
+				logChatPerf(this.logService, 'rerender.batchSkipped', {
+					session: this.viewModel?.sessionResource.toString(),
+					changeEvents,
+					items: items.length,
+					visible: this._visible,
+					hasModel: !!this.viewModel,
+				});
+			}
+			return;
+		}
+
+		const perfEnabled = isChatPerfLoggingEnabled(this.logService);
+		const startedAt = perfEnabled ? performance.now() : 0;
+		this._onWillMaybeChangeHeight.fire();
+		this.listWidget.rerenderItems(items);
+
+		if (completedResponse) {
+			if (this._dynamicMessageLayoutData) {
+				this.layoutDynamicChatTreeItemMode();
+			}
+			this.renderFollowups();
+		}
+		if (perfEnabled) {
+			logChatPerf(this.logService, 'rerender.batch', {
+				session: this.viewModel.sessionResource.toString(),
+				changeEvents,
+				items: items.length,
+				completed: completedResponse,
+				queuedMs: queuedAt ? Date.now() - queuedAt : 0,
+			}, performance.now() - startedAt);
+		}
+	}
+
 	/**
 	 * Updates the DOM visibility of welcome view and chat list immediately
 	 */
@@ -1660,6 +1746,9 @@ export class ChatWidget extends Disposable implements IChatWidget {
 	}
 
 	private async renderFollowups(): Promise<void> {
+		// Reply followups are actionable continuations of the completed response.
+		// Hide them while queued work physically follows that response so the user
+		// cannot branch the conversation ahead of already-staged messages.
 		const lastItem = this.listWidget.lastItem;
 		if (lastItem && isResponseVM(lastItem) && lastItem.isComplete) {
 			this.input.renderFollowups(lastItem.replyFollowups, lastItem);
@@ -1684,6 +1773,9 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			return;
 		}
 
+		// Suggestions must stay hidden while queued work follows the response, so
+		// this intentionally checks the physical last row rather than the latest
+		// conversation item.
 		const lastItem = items[items.length - 1];
 		const lastResponseComplete = lastItem && isResponseVM(lastItem) && lastItem.isComplete;
 		if (!lastResponseComplete || lastItem.isCanceled) {
@@ -1868,6 +1960,8 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		// Check if response is complete, not pending confirmation, and has no error
 		const checkIfShouldClear = (): boolean => {
 			const items = viewModel.getItems();
+			// A queued request means this session is not ready to be cleared, even if
+			// the response above it has completed. Keep this as a physical-last check.
 			const lastItem = items[items.length - 1];
 			if (lastItem && isResponseVM(lastItem) && lastItem.model && lastItem.isComplete && !lastItem.model.isPendingConfirmation.get()) {
 				const hasError = Boolean(lastItem.result?.errorDetails);
@@ -1938,15 +2032,32 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		const wasVisible = this._visible;
 		this._visible = visible;
 		this.visibleChangeCount++;
-		this.listWidget.setVisible(visible);
+		// Preserve the pending cold-suspend timer across duplicate hidden-state
+		// notifications. Otherwise a second setVisible(false) within the grace
+		// period cancels suspension permanently and leaves every heavy part alive.
+		if (visible || wasVisible) {
+			this.hiddenRenderingTimeoutDisposable.clear();
+		}
+		if (!visible) {
+			this.visibilityTimeoutDisposable.clear();
+			this.visibilityAnimationFrameDisposable.clear();
+		}
+		this.listWidget.setVisibleChangeCount(this.visibleChangeCount);
+		const resumedRendering = this.listWidget.setVisible(visible);
 		this.input.setVisible(visible);
 
 		if (visible) {
+			if (!wasVisible && isChatPerfLoggingEnabled(this.logService)) {
+				logChatPerf(this.logService, resumedRendering ? 'hidden.resumeCold' : 'hidden.resumeWarm', {
+					session: this.viewModel?.sessionResource.toString(),
+					visibleChangeCount: this.visibleChangeCount,
+				});
+			}
 			if (!wasVisible) {
 				this.visibilityTimeoutDisposable.value = disposableTimeout(() => {
 					// Progressive rendering paused while hidden, so start it up again.
 					// Do it after a timeout because the container is not visible yet (it should be but offsetHeight returns 0 here)
-					if (this._visible) {
+					if (this._visible && !resumedRendering) {
 						this.onDidChangeItems(true);
 					}
 				}, 0);
@@ -1957,6 +2068,27 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			}
 		} else if (wasVisible) {
 			this._onDidHide.fire();
+			const hiddenAt = isChatPerfLoggingEnabled(this.logService) ? Date.now() : 0;
+			if (hiddenAt) {
+				logChatPerf(this.logService, 'hidden.scheduleSuspend', {
+					session: this.viewModel?.sessionResource.toString(),
+					delayMs: 5_000,
+				});
+			}
+			// Fast tab switches keep their DOM warm, but a genuinely inactive editor
+			// should not retain every Monaco editor, xterm mirror, webview, observer,
+			// and content-part listener in a long transcript indefinitely.
+			this.hiddenRenderingTimeoutDisposable.value = disposableTimeout(() => {
+				if (!this._visible) {
+					this.listWidget.suspendRendering();
+					if (hiddenAt) {
+						logChatPerf(this.logService, 'hidden.didSuspend', {
+							session: this.viewModel?.sessionResource.toString(),
+							hiddenMs: Date.now() - hiddenAt,
+						});
+					}
+				}
+			}, 5_000);
 		}
 	}
 
@@ -2045,6 +2177,8 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			if (!requests || !this.viewModel?.sessionResource) {
 				return;
 			}
+			const editRequestDisposables = new DisposableStore();
+			this._editRequestDisposables.value = editRequestDisposables;
 
 			// this will only ever be true if we restored a checkpoint
 			if (this.viewModel?.model.checkpoint) {
@@ -2151,7 +2285,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			this.onDidChangeItems();
 			this.input.inputEditor.focus();
 
-			this._register(this.inputPart.onDidClickOverlay(() => {
+			editRequestDisposables.add(this.inputPart.onDidClickOverlay(() => {
 				if (this.viewModel?.editing && this.configurationService.getValue<string>('chat.editRequests') !== 'input') {
 					this.finishedEditing();
 				}
@@ -2159,11 +2293,11 @@ export class ChatWidget extends Disposable implements IChatWidget {
 
 			// listeners
 			if (!isInput) {
-				this._register(this.inlineInputPart.inputEditor.onDidChangeModelContent(() => {
+				editRequestDisposables.add(this.inlineInputPart.inputEditor.onDidChangeModelContent(() => {
 					this.listWidget.scrollToCurrentItem(currentElement);
 				}));
 
-				this._register(this.inlineInputPart.inputEditor.onDidChangeCursorSelection((e) => {
+				editRequestDisposables.add(this.inlineInputPart.inputEditor.onDidChangeCursorSelection(() => {
 					this.listWidget.scrollToCurrentItem(currentElement);
 				}));
 			}
@@ -2183,6 +2317,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 	}
 
 	finishedEditing(completedEdit?: boolean): void {
+		this._editRequestDisposables.clear();
 		// reset states
 		this.listWidget.suppressAutoScroll = false;
 		const editedRequest = this.listWidget.getTemplateDataForRequestId(this.viewModel?.editing?.id);
@@ -2499,6 +2634,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			if (this.viewModel?.editing) {
 				this.finishedEditing();
 			}
+			this.listWidget.setViewModel(undefined);
 			this.viewModel = undefined;
 			this.updateWorkingProgressBorder();
 			this.onDidChangeItems();
@@ -2572,7 +2708,12 @@ export class ChatWidget extends Disposable implements IChatWidget {
 				this.inputEditor.updateOptions({ placeholder: rightPanelInputPlaceholder ?? this.viewModel.inputPlaceholder });
 			}
 
-			this.onDidChangeItems();
+			const itemChangeEvents = events?.filter((event): event is IChatItemChangeEvent => event?.kind === 'changeItem');
+			if (events && itemChangeEvents?.length && itemChangeEvents.length === events.length) {
+				this.onDidChangeResponseItems(itemChangeEvents);
+			} else {
+				this.onDidChangeItems();
+			}
 			if (events?.some(e => e?.kind === 'addRequest') && this.visible) {
 				this.listWidget.scrollToEnd();
 			}
@@ -2583,6 +2724,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 				this.finishedEditing();
 			}
 			// Disposes the viewmodel and listeners
+			this.listWidget.setViewModel(undefined);
 			this.viewModel = undefined;
 			this.updateWorkingProgressBorder();
 			this.onDidChangeItems();
@@ -3284,7 +3426,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 
 		const inputHeight = this.inputPart.height.get();
 		const lastElementVisible = this.listWidget.isScrolledToBottom;
-		const lastItem = this.listWidget.lastItem;
+		const lastItem = this.listWidget.latestConversationItem;
 
 		const contentHeight = Math.max(0, height - inputHeight - chatSuggestNextWidgetHeight);
 		this.listWidget.layout(contentHeight, width);

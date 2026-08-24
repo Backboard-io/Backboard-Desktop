@@ -36,7 +36,7 @@ export interface IChatViewTitleDelegate {
 
 export class ChatViewTitleControl extends Disposable {
 
-	private static readonly DEFAULT_TITLE = localize('chat', "Chats");
+	private static readonly DEFAULT_TITLE = localize('backboard', "Backboard");
 	private static readonly PICK_AGENT_SESSION_ACTION_ID = 'workbench.action.chat.pickAgentSession';
 	/** Stable ids of actions registered elsewhere; referenced by id to avoid import cycles. */
 	private static readonly NEW_CHAT_COMMAND_ID = 'workbench.action.chat.newChat';
@@ -168,7 +168,7 @@ export class ChatViewTitleControl extends Disposable {
 				command: {
 					id: ChatViewTitleControl.NEW_CHAT_COMMAND_ID,
 					title: localize('chat.newChatTab', "New Chat"),
-					icon: Codicon.edit,
+					icon: Codicon.add,
 				},
 				group: 'navigation',
 				order: 3,
@@ -434,7 +434,10 @@ export class ChatViewTitleControl extends Disposable {
 
 		const label = options.label.trim() || ChatViewTitleControl.DEFAULT_TITLE;
 		const tabTitle = options.historyHeader ? localize('chat.historyHeader.backToChats', "Back to chats: {0}", label) : label;
-		const tabElements = h('div.chat-view-title-tab@root', { role: 'button', tabIndex: 0, title: tabTitle, ariaLabel: tabTitle }, [
+		const isButton = !!(options.permanent || options.historyHeader);
+		const tabElements = h(isButton ? 'button.chat-view-title-tab@root' : 'div.chat-view-title-tab@root', isButton
+			? { type: 'button', title: tabTitle, ariaLabel: tabTitle }
+			: { role: 'button', tabIndex: 0, title: tabTitle, ariaLabel: tabTitle }, [
 			h('span.chat-view-title-tab-icon@icon'),
 			h('span.chat-view-title-tab-label@label'),
 			h('span.codicon.codicon-close.chat-view-title-tab-close@close', { role: 'button', title: localize('chat.closeSessionTab', "Close Tab"), ariaLabel: localize('chat.closeSessionTab', "Close Tab") }),

@@ -38,6 +38,7 @@ export class ForkConversationAction extends Action2 {
 					order: 3,
 					when: ContextKeyExpr.and(
 						ChatContextKeys.isRequest,
+						ChatContextKeys.isPendingRequest.negate(),
 						ChatContextKeys.isFirstRequest.negate(),
 						ContextKeyExpr.or(
 							ContextKeyExpr.or(ChatContextKeys.lockedToCodingAgent.negate(), ChatContextKeyExprs.isAgentHostSession),
@@ -127,6 +128,9 @@ export class ForkConversationAction extends Action2 {
 		}
 
 		if (!item) {
+			return;
+		}
+		if (isRequestVM(item) && item.pendingKind) {
 			return;
 		}
 

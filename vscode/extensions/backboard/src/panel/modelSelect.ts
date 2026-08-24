@@ -49,7 +49,6 @@ export function renderModelSelectScript(iconBase: string): string {
 				model: controls.model.value,
 				mode: controls.mode.value,
 				intensity: controls.intensity.value,
-				webSearch: controls.webSearch.value,
 				imageGeneration: controls.imageGeneration.value,
 				voiceMode: controls.voiceMode.value,
 				mcpFigma: controls.mcpFigma.checked,
@@ -267,19 +266,60 @@ export function renderModelSelectScript(iconBase: string): string {
 		function historyTime(value) {
 			return new Date(value || Date.now()).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 		}
-		function persistPanelState() {
+		const panelStatePersistInterval = 750;
+		const activeHistorySaveInterval = 2_000;
+		let panelStatePersistTimer = undefined;
+		let pendingPanelState = undefined;
+		let activeHistorySaveTimer = undefined;
+		function flushPanelState() {
+			if (panelStatePersistTimer !== undefined) {
+				clearTimeout(panelStatePersistTimer);
+				panelStatePersistTimer = undefined;
+			}
+			if (!pendingPanelState) {
+				return;
+			}
+			const state = pendingPanelState;
+			pendingPanelState = undefined;
+			vscode.postMessage({ type: 'panelState', state });
+		}
+		function persistPanelState(immediate) {
 			panelStateSavedAt = Date.now();
 			const persistedWorkspace = resolvedCurrentWorkspace();
-			const state = {
+			const persistedHistoryEntries = historyEntries.slice(0, 40).map(entry => {
+				if (entry?.id === activeHistoryId) {
+					return entry;
+				}
+				// Only the active thread changes. Sending every saved thread's full
+				// HTML through the webview bridge made each autosave proportional to
+				// the user's entire history. The host merges these summaries with the
+				// per-thread snapshots already on disk.
+				const { html, messages, outputText, toolOutputs, checkpoints, fileChanges, promptQueue: entryPromptQueue, ...summary } = entry;
+				return summary;
+			});
+			pendingPanelState = {
 				activeView,
 				activeHistoryId,
 				promptQueue,
 				currentWorkspace: persistedWorkspace || undefined,
-					historyEntries: historyEntries.slice(0, 40),
-					savedAt: panelStateSavedAt
-				};
-				vscode.postMessage({ type: 'panelState', state });
+				historyEntries: persistedHistoryEntries,
+				savedAt: panelStateSavedAt
+			};
+			if (immediate) {
+				flushPanelState();
+			} else if (panelStatePersistTimer === undefined) {
+				panelStatePersistTimer = setTimeout(flushPanelState, panelStatePersistInterval);
 			}
+		}
+		function scheduleActiveHistorySave() {
+			if (restoringHistory || activeHistorySaveTimer !== undefined) {
+				return;
+			}
+			activeHistorySaveTimer = setTimeout(() => {
+				activeHistorySaveTimer = undefined;
+				saveActiveHistory();
+			}, activeHistorySaveInterval);
+		}
 		function panelSnapshotTimestamp(state) {
 			if (!state || typeof state !== 'object') {
 				return 0;
@@ -350,6 +390,11 @@ export function renderModelSelectScript(iconBase: string): string {
 				return true;
 			}
 			function saveActiveHistory(status) {
+				if (activeHistorySaveTimer !== undefined) {
+					clearTimeout(activeHistorySaveTimer);
+					activeHistorySaveTimer = undefined;
+				}
+				flushPendingTextAppends();
 				if (restoringHistory || !activeHistoryId || (!hasConversationContent() && !promptQueue.length && !fileChanges.length)) {
 					return;
 				}
@@ -366,9 +411,11 @@ export function renderModelSelectScript(iconBase: string): string {
 				if (status) {
 					entry.status = status;
 				}
-			persistPanelState();
-			renderRecentTabs();
-			renderCheckpoints();
+			persistPanelState(!!status);
+			if (status) {
+				renderRecentTabs();
+				renderCheckpoints();
+			}
 		}
 		function renderRecentTabs() {
 			if (!recentTabs) {
@@ -720,11 +767,9 @@ export function renderModelSelectScript(iconBase: string): string {
 		}
 			function syncComposerButtons() {
 			const hasMode = controls.mode.value !== 'free';
-			const hasWeb = controls.webSearch.value === 'Auto';
 			const hasImage = controls.imageGeneration.value === 'auto';
 			setActive(buttons.mode, activePopover === 'reasoning' || hasMode);
 			setActive(buttons.model, activePopover === 'model');
-			setActive(buttons.web, activePopover === 'web' || hasWeb);
 			setActive(buttons.image, activePopover === 'image' || hasImage);
 			setActive(buttons.voice, activePopover === 'voice' || voiceRecording || controls.voiceMode.value !== 'off');
 			buttons.stop.classList.toggle('visible', runInProgress);

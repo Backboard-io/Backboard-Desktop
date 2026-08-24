@@ -1051,3 +1051,42 @@ suite.skip('AgentHostChangesetService', () => {
 		});
 	});
 });
+
+suite('AgentHostChangesetService turn-complete scheduling', () => {
+	const disposables = new DisposableStore();
+
+	teardown(() => disposables.clear());
+	ensureNoDisposablesAreLeakedInTestSuite();
+
+	test('onTurnComplete runs exactly one session changeset recompute', async () => {
+		const session = AgentSession.uri('mock', 'turn-complete-once');
+		const db = new TestSessionDatabase();
+		const stateManager = disposables.add(new AgentHostStateManager(new NullLogService()));
+		stateManager.createSession({
+			resource: session.toString(),
+			provider: 'mock',
+			title: 'Test',
+			status: SessionStatus.Idle,
+			createdAt: Date.now(),
+			modifiedAt: Date.now(),
+		});
+		const service = disposables.add(new AgentHostChangesetService(
+			stateManager,
+			new NullLogService(),
+			createSessionDataService(db),
+			createNoopGitService(),
+			NULL_CHECKPOINT_SERVICE,
+		));
+
+		service.onTurnComplete(session.toString(), 'turn-1');
+		const sessionChangeset = buildSessionChangesetUri(session.toString());
+		for (let i = 0; i < 100 && stateManager.getChangesetState(sessionChangeset)?.status !== ChangesetStatus.Ready; i++) {
+			await timeout(2);
+		}
+		assert.strictEqual(stateManager.getChangesetState(sessionChangeset)?.status, ChangesetStatus.Ready);
+		// A duplicate is queued on the same sequencer key, so give it ample
+		// time to start after the first ready transition before asserting.
+		await timeout(20);
+		assert.strictEqual(db.getAllFileEditsCalls, 1, 'turn completion must enqueue one session recompute');
+	});
+});

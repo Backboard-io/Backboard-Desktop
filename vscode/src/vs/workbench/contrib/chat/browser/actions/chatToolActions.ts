@@ -55,12 +55,12 @@ abstract class ToolConfirmationAction extends Action2 {
 		const widget = context?.sessionResource
 			? chatWidgetService.getWidgetBySessionResource(context.sessionResource)
 			: chatWidgetService.lastFocusedWidget;
-		const lastItem = widget?.viewModel?.getItems().at(-1);
-		if (!isResponseVM(lastItem)) {
+		const latestResponse = widget?.viewModel?.getItems().findLast(isResponseVM);
+		if (!latestResponse) {
 			return;
 		}
 
-		for (const item of lastItem.model.response.value) {
+		for (const item of latestResponse.model.response.value) {
 			const state = item.kind === 'toolInvocation' ? item.state.get() : undefined;
 			if (state?.type === IChatToolInvocation.StateKind.WaitingForConfirmation || state?.type === IChatToolInvocation.StateKind.WaitingForPostApproval) {
 				state.confirm(this.getReason());

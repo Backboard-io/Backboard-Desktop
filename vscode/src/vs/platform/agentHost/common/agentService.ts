@@ -683,6 +683,8 @@ export interface IAgentSubagentStartedSignal {
 	readonly agentName: string;
 	readonly agentDisplayName: string;
 	readonly agentDescription?: string;
+	/** Full delegated request shown as the child chat's user message. */
+	readonly prompt?: string;
 }
 
 /**

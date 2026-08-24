@@ -129,6 +129,22 @@ export type AgentEvent =
 			childToolCallId: string;
 			status: "done" | "error";
 	  }
+	| {
+			type: "agent:child_start";
+			agentToolCallId: string;
+			childSessionId: string;
+			prompt: string;
+	  }
+	| {
+			type: "agent:child_event";
+			agentToolCallId: string;
+			event: AgentEvent;
+	  }
+	| {
+			type: "agent:child_end";
+			agentToolCallId: string;
+			status: TurnStatus;
+	  }
 	| ToolResultEvent
 	| { type: "tool:error"; toolCallId: string; name: string; error: string }
 	| {

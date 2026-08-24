@@ -4,20 +4,18 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { $, addDisposableListener, clearNode, EventHelper } from '../../../../../../base/browser/dom.js';
-import { createTrustedTypesPolicy } from '../../../../../../base/browser/trustedTypes.js';
 import { disposableTimeout } from '../../../../../../base/common/async.js';
 import { Codicon } from '../../../../../../base/common/codicons.js';
 import { Emitter, Event } from '../../../../../../base/common/event.js';
-import { IDisposable, MutableDisposable } from '../../../../../../base/common/lifecycle.js';
+import { IDisposable, MutableDisposable, toDisposable } from '../../../../../../base/common/lifecycle.js';
 import { ThemeIcon } from '../../../../../../base/common/themables.js';
 import { isEqual } from '../../../../../../base/common/resources.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { localize } from '../../../../../../nls.js';
-import { linesDiffComputers } from '../../../../../../editor/common/diff/linesDiffComputers.js';
 import { DetailedLineRangeMapping } from '../../../../../../editor/common/diff/rangeMapping.js';
 import { ILanguageService } from '../../../../../../editor/common/languages/language.js';
-import { tokenizeToString } from '../../../../../../editor/common/languages/textToHtmlTokenizer.js';
 import { IModelService } from '../../../../../../editor/common/services/model.js';
+import { IEditorWorkerService } from '../../../../../../editor/common/services/editorWorker.js';
 import { ITextModelService } from '../../../../../../editor/common/services/resolverService.js';
 import { IClipboardService } from '../../../../../../platform/clipboard/common/clipboardService.js';
 import { IHoverService } from '../../../../../../platform/hover/browser/hover.js';
@@ -32,11 +30,162 @@ import { ChatEditPillElement } from './chatEditPillElement.js';
 import { IChatContentPart } from './chatContentParts.js';
 import './media/chatExternalEditCard.css';
 
-const _tokenizerTrustedTypesPolicy = createTrustedTypesPolicy('chatExternalEditTokenizer', {
-	createHTML(html: string) {
-		return html;
+export interface IChatExternalEditRenderSeed {
+	readonly beforeContent: string;
+	readonly afterContent: string;
+	/** Exact mappings already computed off the UI thread. */
+	readonly changes?: readonly DetailedLineRangeMapping[];
+	/** In-flight exact mappings shared with a text-edit completion. */
+	readonly changesPromise?: Promise<readonly DetailedLineRangeMapping[] | undefined>;
+}
+
+const externalEditRenderSeeds = new WeakMap<IChatExternalEdit, IChatExternalEditRenderSeed>();
+
+interface IBoundedDiffPreviewRow {
+	readonly kind: 'added' | 'removed' | 'context';
+	readonly lineNumber: number;
+	readonly text: string;
+}
+
+interface IBoundedDiffPreview {
+	readonly rows: readonly IBoundedDiffPreviewRow[];
+	readonly truncated: boolean;
+}
+
+function getLineCount(text: string): number {
+	if (!text) {
+		return 0;
 	}
-});
+	let count = 1;
+	let offset = 0;
+	while ((offset = text.indexOf('\n', offset)) !== -1) {
+		count++;
+		offset++;
+	}
+	return count;
+}
+
+function lineRangesEqual(first: string, firstStart: number, firstEnd: number, second: string, secondStart: number, secondEnd: number): boolean {
+	const length = firstEnd - firstStart;
+	if (length !== secondEnd - secondStart) {
+		return false;
+	}
+	for (let index = 0; index < length; index++) {
+		if (first.charCodeAt(firstStart + index) !== second.charCodeAt(secondStart + index)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+/**
+ * Computes a compact unified preview without splitting either full file into
+ * line arrays. Common lines are compared in-place and only the bounded set of
+ * strings that will become DOM rows is materialized.
+ *
+ * @internal Exported for focused allocation/performance regression tests.
+ */
+export function createBoundedDiffPreview(beforeContent: string, afterContent: string, maxRows: number, contextLines: number): IBoundedDiffPreview {
+	const originalLineCount = getLineCount(beforeContent);
+	const modifiedLineCount = getLineCount(afterContent);
+	const sharedLineCount = Math.min(originalLineCount, modifiedLineCount);
+	const leadingStarts: number[] = [];
+	const leadingEnds: number[] = [];
+	let originalOffset = 0;
+	let modifiedOffset = 0;
+	let prefixLength = 0;
+
+	while (prefixLength < sharedLineCount) {
+		const originalNewline = beforeContent.indexOf('\n', originalOffset);
+		const modifiedNewline = afterContent.indexOf('\n', modifiedOffset);
+		const originalEnd = originalNewline === -1 ? beforeContent.length : originalNewline;
+		const modifiedEnd = modifiedNewline === -1 ? afterContent.length : modifiedNewline;
+		if (!lineRangesEqual(beforeContent, originalOffset, originalEnd, afterContent, modifiedOffset, modifiedEnd)) {
+			break;
+		}
+
+		prefixLength++;
+		if (contextLines > 0) {
+			if (leadingStarts.length === contextLines) {
+				leadingStarts.shift();
+				leadingEnds.shift();
+			}
+			leadingStarts.push(modifiedOffset);
+			leadingEnds.push(modifiedEnd);
+		}
+		originalOffset = originalEnd + 1;
+		modifiedOffset = modifiedEnd + 1;
+	}
+
+	let originalEnd = beforeContent.length;
+	let modifiedEnd = afterContent.length;
+	let modifiedSuffixStart = modifiedEnd;
+	let suffixLength = 0;
+	while (suffixLength < sharedLineCount - prefixLength) {
+		const originalStart = beforeContent.lastIndexOf('\n', originalEnd - 1) + 1;
+		const modifiedStart = afterContent.lastIndexOf('\n', modifiedEnd - 1) + 1;
+		if (!lineRangesEqual(beforeContent, originalStart, originalEnd, afterContent, modifiedStart, modifiedEnd)) {
+			break;
+		}
+
+		suffixLength++;
+		modifiedSuffixStart = modifiedStart;
+		originalEnd = Math.max(0, originalStart - 1);
+		modifiedEnd = Math.max(0, modifiedStart - 1);
+	}
+
+	const originalChangedEnd = originalLineCount - suffixLength;
+	const modifiedChangedEnd = modifiedLineCount - suffixLength;
+	const removedCount = originalChangedEnd - prefixLength;
+	const addedCount = modifiedChangedEnd - prefixLength;
+	const leadingCount = Math.min(prefixLength, contextLines);
+	const trailingCount = Math.min(suffixLength, contextLines);
+	const changedBudget = Math.max(0, maxRows - leadingCount - trailingCount);
+	let removedBudget = removedCount > 0 && addedCount > 0
+		? Math.min(removedCount, Math.ceil(changedBudget / 2))
+		: Math.min(removedCount, changedBudget);
+	let addedBudget = Math.min(addedCount, changedBudget - removedBudget);
+	let unclaimedBudget = changedBudget - removedBudget - addedBudget;
+	if (unclaimedBudget > 0) {
+		const extraAdded = Math.min(unclaimedBudget, addedCount - addedBudget);
+		addedBudget += extraAdded;
+		unclaimedBudget -= extraAdded;
+		removedBudget += Math.min(unclaimedBudget, removedCount - removedBudget);
+	}
+
+	const rows: IBoundedDiffPreviewRow[] = [];
+	for (let index = leadingStarts.length - leadingCount; index < leadingStarts.length; index++) {
+		rows.push({
+			kind: 'context',
+			lineNumber: prefixLength - leadingCount + index - (leadingStarts.length - leadingCount) + 1,
+			text: afterContent.slice(leadingStarts[index], leadingEnds[index]),
+		});
+	}
+
+	const appendChangedRows = (content: string, startOffset: number, count: number, kind: 'added' | 'removed' | 'context', firstLineNumber: number): void => {
+		let offset = startOffset;
+		for (let index = 0; index < count; index++) {
+			const newline = content.indexOf('\n', offset);
+			const end = newline === -1 ? content.length : newline;
+			rows.push({ kind, lineNumber: firstLineNumber + index, text: content.slice(offset, end) });
+			offset = end + 1;
+		}
+	};
+	appendChangedRows(beforeContent, originalOffset, removedBudget, 'removed', prefixLength + 1);
+	appendChangedRows(afterContent, modifiedOffset, addedBudget, 'added', prefixLength + 1);
+	appendChangedRows(afterContent, modifiedSuffixStart, trailingCount, 'context', modifiedChangedEnd + 1);
+
+	const totalCandidateRows = leadingCount + removedCount + addedCount + trailingCount;
+	return { rows, truncated: totalCandidateRows > maxRows };
+}
+
+/**
+ * Supplies content already resolved by another renderer. The WeakMap avoids
+ * widening the serialized external-edit protocol with UI-only state.
+ */
+export function seedChatExternalEditRender(edit: IChatExternalEdit, seed: IChatExternalEditRenderSeed): void {
+	externalEditRenderSeeds.set(edit, seed);
+}
 
 /**
  * Renders an {@link IChatExternalEdit} progress part as a static "edit pill".
@@ -70,11 +219,23 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 
 	get domNode(): HTMLElement { return this.element; }
 
+	private static readonly previewRowLimit = 8;
+	private static readonly fullDiffRowLimit = 400;
+	private static readonly retainedContentLimit = 256 * 1024;
 	private diffBody: HTMLElement | undefined;
 	private diffBodyState: 'none' | 'loading' | 'ready' | 'error' = 'none';
+	private diffBodyMode: 'none' | 'preview' | 'full' = 'none';
+	private diffBodyRenderGeneration = 0;
 	private expandChevron: HTMLElement | undefined;
 	private expanded = false;
+	private beforeContentCache: string | undefined;
 	private afterContentCache: string | undefined;
+	private contentHydrationPromise: Promise<readonly [string, string]> | undefined;
+	private fullDiffChanges: readonly DetailedLineRangeMapping[] | undefined;
+	private fullDiffComputed = false;
+	private seededDiffChangesPromise: Promise<readonly DetailedLineRangeMapping[] | undefined> | undefined;
+	private fullDiffHydrationPromise: Promise<{ readonly beforeContent: string; readonly afterContent: string; readonly changes: readonly DetailedLineRangeMapping[] | undefined }> | undefined;
+	private readonly _previewVisibilityObserver = this._register(new MutableDisposable<IDisposable>());
 	private readonly _copyFeedback = this._register(new MutableDisposable<IDisposable>());
 
 	constructor(
@@ -85,9 +246,21 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 		@IHoverService hoverService: IHoverService,
 		@IEditorService private readonly editorService: IEditorService,
 		@ITextModelService private readonly textModelService: ITextModelService,
+		@IEditorWorkerService private readonly editorWorkerService: IEditorWorkerService,
 		@IClipboardService private readonly clipboardService: IClipboardService,
 	) {
 		super(labelService, modelService, languageService, hoverService);
+		const renderSeed = externalEditRenderSeeds.get(edit);
+		if (renderSeed) {
+			externalEditRenderSeeds.delete(edit);
+			this.beforeContentCache = renderSeed.beforeContent;
+			this.afterContentCache = renderSeed.afterContent;
+			if (renderSeed.changes) {
+				this.fullDiffChanges = this.retainRenderableChanges(renderSeed.changes);
+				this.fullDiffComputed = true;
+			}
+			this.seededDiffChangesPromise = renderSeed.changesPromise;
+		}
 
 		this.render(edit);
 		this._register(this.onDidClick(opts => this.openEdit(opts)));
@@ -108,14 +281,39 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 	 * The Cursor-style transcript uses this so a completed edit is immediately
 	 * legible while the chevron still controls the taller, scrollable diff.
 	 */
-	showDiffPreview(): void {
+	showDiffPreview(deferUntilNearViewport = false): void {
 		if (!this.canRenderInlineDiff()) {
 			return;
 		}
 		this.element.classList.add('chat-external-edit-preview');
 		if (this.diffBodyState === 'none') {
-			this.buildDiffBody();
+			if (deferUntilNearViewport && this.observePreviewVisibility()) {
+				return;
+			}
+			void this.buildDiffBody('preview');
 		}
+	}
+
+	private observePreviewVisibility(): boolean {
+		if (this._previewVisibilityObserver.value) {
+			return true;
+		}
+		const targetWindow = this.element.ownerDocument.defaultView;
+		if (!targetWindow?.IntersectionObserver) {
+			return false;
+		}
+		const observer = new targetWindow.IntersectionObserver(entries => {
+			if (!entries.some(entry => entry.isIntersecting || entry.intersectionRatio > 0)) {
+				return;
+			}
+			this._previewVisibilityObserver.clear();
+			if (this.diffBodyState === 'none') {
+				void this.buildDiffBody('preview');
+			}
+		}, { rootMargin: '600px 0px' });
+		observer.observe(this.element);
+		this._previewVisibilityObserver.value = toDisposable(() => observer.disconnect());
+		return true;
 	}
 
 	/** Adds the Codex-style chevron + copy controls turning the pill into a card header. */
@@ -171,6 +369,9 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 
 	private toggleDiffBody(): void {
 		this.expanded = !this.expanded;
+		if (this.expanded) {
+			this._previewVisibilityObserver.clear();
+		}
 		this.element.classList.toggle('chat-external-edit-expanded', this.expanded);
 		if (this.diffBody) {
 			this.diffBody.tabIndex = this.expanded ? 0 : -1;
@@ -180,74 +381,223 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 			this.expandChevron.classList.toggle('codicon-chevron-down', this.expanded);
 			this.expandChevron.ariaExpanded = String(this.expanded);
 		}
-		if (this.expanded && this.diffBodyState === 'none') {
-			this.buildDiffBody();
+		if (this.expanded && (this.diffBodyMode !== 'full' || this.diffBodyState === 'error')) {
+			// The collapsed card intentionally owns only a tiny preview. Hydrate
+			// exact line mappings only after explicit interaction.
+			void this.buildDiffBody('full');
+		} else if (!this.expanded && this.diffBodyMode === 'full') {
+			// Release the hundreds of detailed DOM rows immediately. Resolved
+			// strings and worker mappings stay cached so reopening does no I/O or
+			// diff computation.
+			void this.buildDiffBody('preview');
 		}
 		this._onDidChangeHeight.fire();
 	}
 
-	private async buildDiffBody(): Promise<void> {
+	private async buildDiffBody(mode: 'preview' | 'full'): Promise<void> {
+		const preservePreviewWhileHydrating = mode === 'full'
+			&& this.diffBodyMode === 'preview'
+			&& this.diffBodyState === 'ready';
+		const generation = ++this.diffBodyRenderGeneration;
+		this.diffBodyMode = mode;
 		this.diffBodyState = 'loading';
-		const body = $('.chat-external-edit-diff-body', {
-			role: 'region',
-			tabindex: this.expanded ? '0' : '-1',
-			'aria-label': localize('chat.externalEdit.diffRegion', "File Diff"),
-		});
-		this._register(addDisposableListener(body, 'wheel', (event: WheelEvent) => this.scrollDiffBody(body, event), { passive: false }));
-		body.appendChild($('.chat-external-edit-diff-note', {}, localize('chat.externalEdit.loadingDiff', "Loading diff…")));
-		this.diffBody = body;
-		this.element.appendChild(body);
+		let body = this.diffBody;
+		if (!body) {
+			body = $('.chat-external-edit-diff-body', {
+				role: 'region',
+				tabindex: this.expanded ? '0' : '-1',
+				'aria-label': localize('chat.externalEdit.diffRegion', "File Diff"),
+			});
+			this._register(addDisposableListener(body, 'wheel', (event: WheelEvent) => this.scrollDiffBody(body!, event), { passive: false }));
+			this.diffBody = body;
+			this.element.appendChild(body);
+		} else {
+			body.tabIndex = this.expanded ? 0 : -1;
+			if (!preservePreviewWhileHydrating) {
+				clearNode(body);
+			}
+		}
+		if (!preservePreviewWhileHydrating) {
+			body.dataset.renderMode = `${mode}-loading`;
+			body.appendChild($('.chat-external-edit-diff-note', {}, localize('chat.externalEdit.loadingDiff', "Loading diff…")));
+		}
 		this._onDidChangeHeight.fire();
 
 		try {
-			const [beforeContent, afterContent] = await Promise.all([
-				this.edit.beforeContentUri ? this.resolveContent(this.edit.beforeContentUri) : Promise.resolve(''),
-				this.edit.afterContentUri ? this.resolveContent(this.edit.afterContentUri) : Promise.resolve(''),
-			]);
-			if (this._store.isDisposed || this.diffBody !== body) {
+			const hydration = mode === 'full' && this.edit.beforeContentUri && this.edit.afterContentUri
+				? await this.resolveFullDiffOnce()
+				: undefined;
+			const [beforeContent, afterContent] = hydration
+				? [hydration.beforeContent, hydration.afterContent]
+				: await this.resolveContentsOnce();
+			if (this._store.isDisposed || this.diffBody !== body || generation !== this.diffBodyRenderGeneration) {
 				return;
 			}
-			this.afterContentCache = afterContent;
 
-			const originalLines = beforeContent ? beforeContent.split('\n') : [];
-			const modifiedLines = afterContent ? afterContent.split('\n') : [];
-			const languageId = this.languageService.guessLanguageIdByFilepathOrFirstLine(this.edit.uri, modifiedLines[0]);
-			const [originalTokenizedLines, modifiedTokenizedLines] = await Promise.all([
-				this.tokenizeLines(beforeContent, languageId),
-				this.tokenizeLines(afterContent, languageId),
-			]);
-			const diff = this.edit.beforeContentUri && this.edit.afterContentUri
-				? linesDiffComputers.getDefault().computeDiff(originalLines, modifiedLines, {
-					ignoreTrimWhitespace: false,
-					computeMoves: false,
-					maxComputationTimeMs: 1000,
-				})
-				: undefined;
+			const exactChanges = hydration?.changes ?? (this.fullDiffComputed ? this.fullDiffChanges : undefined);
 
 			clearNode(body);
 			const content = $('.chat-external-edit-diff-content');
 			body.appendChild(content);
+			const maxRows = mode === 'preview' ? ChatExternalEditContentPart.previewRowLimit : ChatExternalEditContentPart.fullDiffRowLimit;
 			if (!this.edit.beforeContentUri) {
-				this.renderOneSidedDiffRows(content, 'added', modifiedLines, modifiedTokenizedLines);
+				if (mode === 'preview') {
+					this.renderOneSidedPreviewRows(content, 'added', afterContent, maxRows);
+				} else {
+					this.renderOneSidedDiffRows(content, 'added', afterContent ? afterContent.split('\n') : [], maxRows, true);
+				}
 			} else if (!this.edit.afterContentUri) {
-				this.renderOneSidedDiffRows(content, 'removed', originalLines, originalTokenizedLines);
-			} else if (!diff || diff.changes.length === 0) {
+				if (mode === 'preview') {
+					this.renderOneSidedPreviewRows(content, 'removed', beforeContent, maxRows);
+				} else {
+					this.renderOneSidedDiffRows(content, 'removed', beforeContent ? beforeContent.split('\n') : [], maxRows, true);
+				}
+			} else if (exactChanges?.length === 0 || beforeContent === afterContent) {
 				content.appendChild($('.chat-external-edit-diff-note', {}, localize('chat.externalEdit.noChanges', "No line changes")));
+			} else if (mode === 'full' && exactChanges) {
+				const originalLines = beforeContent ? beforeContent.split('\n') : [];
+				const modifiedLines = afterContent ? afterContent.split('\n') : [];
+				this.renderDiffRows(content, originalLines, modifiedLines, exactChanges, maxRows, 2, true);
 			} else {
-				this.renderDiffRows(content, originalLines, modifiedLines, originalTokenizedLines, modifiedTokenizedLines, diff.changes);
+				// Completion previews never run the advanced line-diff algorithm on
+				// the UI thread. A linear prefix/suffix window supplies the same
+				// compact red/green UX with work bounded by eight rendered rows.
+				this.renderBoundedPreviewRows(content, beforeContent, afterContent, maxRows, mode === 'preview' ? 1 : 2, mode === 'full');
 			}
 			const renderedRowCount = Array.from(content.children).filter(child => child.classList.contains('chat-external-edit-diff-row')).length;
 			body.classList.toggle('chat-external-edit-diff-overflow', renderedRowCount > 4);
+			body.dataset.renderMode = mode;
 			this.diffBodyState = 'ready';
+			if (mode === 'preview') {
+				this.releaseLargeContentCaches();
+			}
 			this._onDidChangeHeight.fire();
 		} catch {
-			if (this._store.isDisposed || this.diffBody !== body) {
+			if (this._store.isDisposed || this.diffBody !== body || generation !== this.diffBodyRenderGeneration) {
+				return;
+			}
+			if (preservePreviewWhileHydrating) {
+				// A transient full-hydration failure must not erase the already useful
+				// compact preview. Leave it mounted and allow the next expansion to
+				// retry the detailed view.
+				this.diffBodyMode = 'preview';
+				this.diffBodyState = 'ready';
+				body.dataset.renderMode = 'preview';
+				this._onDidChangeHeight.fire();
 				return;
 			}
 			clearNode(body);
 			body.appendChild($('.chat-external-edit-diff-note', {}, localize('chat.externalEdit.diffUnavailable', "Diff unavailable")));
 			this.diffBodyState = 'error';
 			this._onDidChangeHeight.fire();
+		}
+	}
+
+	private releaseLargeContentCaches(): void {
+		const retainedSize = (this.beforeContentCache?.length ?? 0) + (this.afterContentCache?.length ?? 0);
+		if (retainedSize <= ChatExternalEditContentPart.retainedContentLimit) {
+			return;
+		}
+		this.beforeContentCache = undefined;
+		this.afterContentCache = undefined;
+		this.contentHydrationPromise = undefined;
+	}
+
+	private resolveContentsOnce(): Promise<readonly [string, string]> {
+		if ((!this.edit.beforeContentUri || this.beforeContentCache !== undefined)
+			&& (!this.edit.afterContentUri || this.afterContentCache !== undefined)) {
+			return Promise.resolve([this.beforeContentCache ?? '', this.afterContentCache ?? '']);
+		}
+		if (!this.contentHydrationPromise) {
+			const hydration = Promise.all([
+				this.edit.beforeContentUri ? this.resolveContent(this.edit.beforeContentUri) : Promise.resolve(''),
+				this.edit.afterContentUri ? this.resolveContent(this.edit.afterContentUri) : Promise.resolve(''),
+			] as const).then(([beforeContent, afterContent]) => {
+				this.beforeContentCache = beforeContent;
+				this.afterContentCache = afterContent;
+				return [beforeContent, afterContent] as const;
+			});
+			const promise = hydration.finally(() => {
+				if (this.contentHydrationPromise === promise) {
+					this.contentHydrationPromise = undefined;
+				}
+			});
+			this.contentHydrationPromise = promise;
+		}
+		return this.contentHydrationPromise;
+	}
+
+	private resolveFullDiffOnce(): Promise<{ readonly beforeContent: string; readonly afterContent: string; readonly changes: readonly DetailedLineRangeMapping[] | undefined }> {
+		if (this.fullDiffComputed && this.beforeContentCache !== undefined && this.afterContentCache !== undefined) {
+			return Promise.resolve({ beforeContent: this.beforeContentCache, afterContent: this.afterContentCache, changes: this.fullDiffChanges });
+		}
+		if (!this.fullDiffHydrationPromise) {
+			const hydration = this.seededDiffChangesPromise
+				? this.resolveSeededFullDiff()
+				: this.computeFullDiffInWorker();
+			const promise = hydration.finally(() => {
+				if (this.fullDiffHydrationPromise === promise) {
+					this.fullDiffHydrationPromise = undefined;
+				}
+			});
+			this.fullDiffHydrationPromise = promise;
+		}
+		return this.fullDiffHydrationPromise;
+	}
+
+	private async resolveSeededFullDiff(): Promise<{ readonly beforeContent: string; readonly afterContent: string; readonly changes: readonly DetailedLineRangeMapping[] | undefined }> {
+		const promise = this.seededDiffChangesPromise;
+		this.seededDiffChangesPromise = undefined;
+		const changes = await promise;
+		if (changes === undefined) {
+			// A timed-out completion diff remains unresolved. Explicit expansion is
+			// the only path allowed to retry the worker.
+			return this.computeFullDiffInWorker();
+		}
+		this.fullDiffChanges = this.retainRenderableChanges(changes);
+		this.fullDiffComputed = true;
+		const [beforeContent, afterContent] = await this.resolveContentsOnce();
+		return {
+			beforeContent,
+			afterContent,
+			changes: this.fullDiffChanges,
+		};
+	}
+
+	private async computeFullDiffInWorker(): Promise<{ readonly beforeContent: string; readonly afterContent: string; readonly changes: readonly DetailedLineRangeMapping[] | undefined }> {
+		if (!this.edit.beforeContentUri || !this.edit.afterContentUri) {
+			return { beforeContent: this.beforeContentCache ?? '', afterContent: this.afterContentCache ?? '', changes: undefined };
+		}
+		let original: Awaited<ReturnType<ITextModelService['createModelReference']>> | undefined;
+		let modified: Awaited<ReturnType<ITextModelService['createModelReference']>> | undefined;
+		try {
+			await Promise.all([
+				this.textModelService.createModelReference(this.edit.beforeContentUri).then(reference => original = reference),
+				this.textModelService.createModelReference(this.edit.afterContentUri).then(reference => modified = reference),
+			]);
+			if (!original || !modified) {
+				return { beforeContent: this.beforeContentCache ?? '', afterContent: this.afterContentCache ?? '', changes: undefined };
+			}
+			const beforeContent = this.beforeContentCache ?? original.object.textEditorModel.getValue();
+			const afterContent = this.afterContentCache ?? modified.object.textEditorModel.getValue();
+			const computedChanges = this.fullDiffComputed
+				? this.fullDiffChanges
+				: (await this.editorWorkerService.computeDiff(
+					original.object.textEditorModel.uri,
+					modified.object.textEditorModel.uri,
+					{ ignoreTrimWhitespace: false, computeMoves: false, maxComputationTimeMs: 1000 },
+					'advanced',
+				))?.changes;
+			this.beforeContentCache = beforeContent;
+			this.afterContentCache = afterContent;
+			if (computedChanges !== undefined) {
+				this.fullDiffChanges = this.retainRenderableChanges(computedChanges);
+				this.fullDiffComputed = true;
+			}
+			return { beforeContent, afterContent, changes: this.fullDiffChanges };
+		} finally {
+			original?.dispose();
+			modified?.dispose();
 		}
 	}
 
@@ -273,17 +623,6 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 		this._register(disposable);
 	}
 
-	private async tokenizeLines(content: string, languageId: string | null): Promise<readonly string[]> {
-		try {
-			const tokenized = await tokenizeToString(this.languageService, content, languageId);
-			const start = tokenized.indexOf('>') + 1;
-			const end = tokenized.lastIndexOf('</div>');
-			return tokenized.slice(start, end).split('<br/>');
-		} catch {
-			return [];
-		}
-	}
-
 	private async resolveContent(uri: URI): Promise<string> {
 		const reference = await this.textModelService.createModelReference(uri);
 		try {
@@ -293,30 +632,47 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 		}
 	}
 
-	private appendDiffRow(body: HTMLElement, kind: 'added' | 'removed' | 'context', lineNumber: number, text: string, tokenizedText: string | undefined): void {
+	private appendDiffRow(body: HTMLElement, kind: 'added' | 'removed' | 'context', lineNumber: number, text: string): void {
 		const row = $(`.chat-external-edit-diff-row.${kind}`);
 		row.appendChild($('span.chat-external-edit-diff-gutter', {}, String(lineNumber)));
 		if (this.element.classList.contains('chat-external-edit-preview')) {
 			row.appendChild($('span.chat-external-edit-diff-marker', { 'aria-hidden': 'true' }, kind === 'added' ? '+' : kind === 'removed' ? '-' : ''));
 		}
 		const textElement = $('span.chat-external-edit-diff-text');
-		if (tokenizedText !== undefined) {
-			const trustedHtml = _tokenizerTrustedTypesPolicy?.createHTML(tokenizedText) ?? tokenizedText;
-			textElement.innerHTML = trustedHtml as string;
-		} else {
-			textElement.textContent = text;
-		}
+		// Row-level add/remove styling carries the important visual signal. Keep
+		// code as plain text so expanding a large file never tokenizes its entire
+		// contents merely to show at most 400 lines.
+		textElement.textContent = text;
 		row.appendChild(textElement);
 		body.appendChild(row);
 	}
 
-	private renderOneSidedDiffRows(body: HTMLElement, kind: 'added' | 'removed', lines: readonly string[], tokenizedLines: readonly string[]): void {
-		const maxRows = 400;
+	private renderOneSidedDiffRows(body: HTMLElement, kind: 'added' | 'removed', lines: readonly string[], maxRows: number, showTruncationNote: boolean): void {
 		for (let index = 0; index < Math.min(lines.length, maxRows); index++) {
-			this.appendDiffRow(body, kind, index + 1, lines[index], tokenizedLines[index]);
+			this.appendDiffRow(body, kind, index + 1, lines[index]);
 		}
-		if (lines.length > maxRows) {
+		if (showTruncationNote && lines.length > maxRows) {
 			body.appendChild($('.chat-external-edit-diff-note', {}, localize('chat.externalEdit.diffTruncated', "Diff truncated — open the file to see everything")));
+		}
+	}
+
+	private renderOneSidedPreviewRows(body: HTMLElement, kind: 'added' | 'removed', content: string, maxRows: number): void {
+		if (!content) {
+			return;
+		}
+		let offset = 0;
+		for (let index = 0; index < maxRows; index++) {
+			const newline = content.indexOf('\n', offset);
+			const end = newline === -1 ? content.length : newline;
+			this.appendDiffRow(body, kind, index + 1, content.slice(offset, end));
+			if (newline === -1) {
+				break;
+			}
+			offset = newline + 1;
+			if (offset === content.length && index + 1 < maxRows) {
+				this.appendDiffRow(body, kind, index + 2, '');
+				break;
+			}
 		}
 	}
 
@@ -325,18 +681,21 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 	 * added lines (modified numbering), ±2 context lines, and gap dividers
 	 * between non-contiguous hunks — no fake context fill.
 	 */
-	private renderDiffRows(body: HTMLElement, originalLines: string[], modifiedLines: string[], originalTokenizedLines: readonly string[], modifiedTokenizedLines: readonly string[], changes: readonly DetailedLineRangeMapping[]): void {
-		const CONTEXT_LINES = this.element.classList.contains('chat-external-edit-preview') ? 1 : 2;
-		const MAX_ROWS = 400;
+	private renderDiffRows(body: HTMLElement, originalLines: string[], modifiedLines: string[], changes: readonly DetailedLineRangeMapping[], maxRows: number, contextLines: number, showTruncationNote: boolean): void {
 		let renderedRows = 0;
 		let lastRenderedModifiedLine = 0;
+		const stopAtLimit = (): void => {
+			if (showTruncationNote) {
+				body.appendChild($('.chat-external-edit-diff-note', {}, localize('chat.externalEdit.diffTruncated', "Diff truncated — open the file to see everything")));
+			}
+		};
 
-		const appendRow = (kind: 'added' | 'removed' | 'context', lineNumber: number, text: string, tokenizedText: string | undefined): boolean => {
-			if (renderedRows >= MAX_ROWS) {
+		const appendRow = (kind: 'added' | 'removed' | 'context', lineNumber: number, text: string): boolean => {
+			if (renderedRows >= maxRows) {
 				return false;
 			}
 			renderedRows++;
-			this.appendDiffRow(body, kind, lineNumber, text, tokenizedText);
+			this.appendDiffRow(body, kind, lineNumber, text);
 			return true;
 		};
 
@@ -345,35 +704,58 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 			const next: DetailedLineRangeMapping | undefined = changes[i + 1];
 
 			// Leading context, clamped to what was already rendered.
-			const leadStart = Math.max(change.modified.startLineNumber - CONTEXT_LINES, lastRenderedModifiedLine + 1);
+			const leadStart = Math.max(change.modified.startLineNumber - contextLines, lastRenderedModifiedLine + 1);
 			if (lastRenderedModifiedLine > 0 && leadStart > lastRenderedModifiedLine + 1) {
 				body.appendChild($('.chat-external-edit-diff-gap'));
 			}
 			for (let m = leadStart; m < change.modified.startLineNumber; m++) {
-				appendRow('context', m, modifiedLines[m - 1] ?? '', modifiedTokenizedLines[m - 1]);
+				if (!appendRow('context', m, modifiedLines[m - 1] ?? '')) {
+					stopAtLimit();
+					return;
+				}
 			}
 
 			for (let o = change.original.startLineNumber; o < change.original.endLineNumberExclusive; o++) {
-				appendRow('removed', o, originalLines[o - 1] ?? '', originalTokenizedLines[o - 1]);
+				if (!appendRow('removed', o, originalLines[o - 1] ?? '')) {
+					stopAtLimit();
+					return;
+				}
 			}
 			for (let m = change.modified.startLineNumber; m < change.modified.endLineNumberExclusive; m++) {
-				appendRow('added', m, modifiedLines[m - 1] ?? '', modifiedTokenizedLines[m - 1]);
+				if (!appendRow('added', m, modifiedLines[m - 1] ?? '')) {
+					stopAtLimit();
+					return;
+				}
 			}
 
 			// Trailing context, clamped to the file end and the next hunk.
-			let trailEnd = Math.min(change.modified.endLineNumberExclusive + CONTEXT_LINES - 1, modifiedLines.length);
+			let trailEnd = Math.min(change.modified.endLineNumberExclusive + contextLines - 1, modifiedLines.length);
 			if (next) {
 				trailEnd = Math.min(trailEnd, next.modified.startLineNumber - 1);
 			}
 			for (let m = change.modified.endLineNumberExclusive; m <= trailEnd; m++) {
-				appendRow('context', m, modifiedLines[m - 1] ?? '', modifiedTokenizedLines[m - 1]);
+				if (!appendRow('context', m, modifiedLines[m - 1] ?? '')) {
+					stopAtLimit();
+					return;
+				}
 			}
 			lastRenderedModifiedLine = Math.max(lastRenderedModifiedLine, trailEnd, change.modified.endLineNumberExclusive - 1);
+		}
+	}
 
-			if (renderedRows >= MAX_ROWS) {
-				body.appendChild($('.chat-external-edit-diff-note', {}, localize('chat.externalEdit.diffTruncated', "Diff truncated — open the file to see everything")));
-				return;
-			}
+	/**
+	 * Linear compact preview used before the exact worker diff is requested.
+	 * Only common prefix/suffix lines are inspected; changed rows stop at the
+	 * requested DOM limit. This keeps a 100k-line completion off the quadratic
+	 * advanced-diff path while preserving the familiar unified red/green card.
+	 */
+	private renderBoundedPreviewRows(body: HTMLElement, beforeContent: string, afterContent: string, maxRows: number, contextLines: number, showTruncationNote: boolean): void {
+		const preview = createBoundedDiffPreview(beforeContent, afterContent, maxRows, contextLines);
+		for (const row of preview.rows) {
+			this.appendDiffRow(body, row.kind, row.lineNumber, row.text);
+		}
+		if (showTruncationNote && preview.truncated) {
+			body.appendChild($('.chat-external-edit-diff-note', {}, localize('chat.externalEdit.diffTruncated', "Diff truncated — open the file to see everything")));
 		}
 	}
 
@@ -397,6 +779,50 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 		}
 	}
 
+	/** Applies worker-computed mappings and counters without replacing the card DOM. */
+	applyResolvedDiff(changes: readonly DetailedLineRangeMapping[], diff: IEditSessionDiffStats): void {
+		if (this._store.isDisposed) {
+			return;
+		}
+		this.seededDiffChangesPromise = undefined;
+		this.fullDiffChanges = this.retainRenderableChanges(changes);
+		this.fullDiffComputed = true;
+		this.renderDiffStats(diff);
+		this._onDidChangeDiff.fire(diff);
+		this._onDidChangeHeight.fire();
+	}
+
+	/**
+	 * The inline full view can display at most 400 rows and never consumes
+	 * character-level mappings. Retain only enough lightweight line ranges to
+	 * reproduce that view so large historical edits do not pin the worker's
+	 * potentially huge inner-change graph for the lifetime of the thread.
+	 */
+	private retainRenderableChanges(changes: readonly DetailedLineRangeMapping[]): readonly DetailedLineRangeMapping[] {
+		const retained: DetailedLineRangeMapping[] = [];
+		let estimatedRows = 0;
+		for (const change of changes) {
+			retained.push(new DetailedLineRangeMapping(change.original, change.modified, undefined));
+			estimatedRows += Math.max(1, change.original.length + change.modified.length) + 4;
+			if (estimatedRows >= ChatExternalEditContentPart.fullDiffRowLimit) {
+				break;
+			}
+		}
+		return retained;
+	}
+
+	private renderDiffStats(diff: IEditSessionDiffStats): void {
+		this.setDiff(diff, false);
+		const fileName = this.labelService.getUriBasenameLabel(this.edit.uri);
+		const insertionsFragment = diff.added === 1
+			? localize('chat.codeblock.insertions.one', "1 insertion")
+			: localize('chat.codeblock.insertions', "{0} insertions", diff.added);
+		const deletionsFragment = diff.removed === 1
+			? localize('chat.codeblock.deletions.one', "1 deletion")
+			: localize('chat.codeblock.deletions', "{0} deletions", diff.removed);
+		this.setAriaLabel(localize('summary', 'Edited {0}, {1}, {2}', fileName, insertionsFragment, deletionsFragment));
+	}
+
 	private render(edit: IChatExternalEdit): void {
 		this.setUri(edit.uri);
 
@@ -409,15 +835,7 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 			// External edits are already complete when they enter the transcript.
 			// Render their totals immediately instead of replaying a progress
 			// animation every time a restored conversation is opened.
-			this.setDiff(edit.diff, false);
-			const fileName = this.labelService.getUriBasenameLabel(edit.uri);
-			const insertionsFragment = edit.diff.added === 1
-				? localize('chat.codeblock.insertions.one', "1 insertion")
-				: localize('chat.codeblock.insertions', "{0} insertions", edit.diff.added);
-			const deletionsFragment = edit.diff.removed === 1
-				? localize('chat.codeblock.deletions.one', "1 deletion")
-				: localize('chat.codeblock.deletions', "{0} deletions", edit.diff.removed);
-			this.setAriaLabel(localize('summary', 'Edited {0}, {1}, {2}', fileName, insertionsFragment, deletionsFragment));
+			this.renderDiffStats(edit.diff);
 			// Fire the aggregated stats event on the next microtask so
 			// listeners attached immediately after construction (the
 			// `ChatThinkingContentPart.appendItem` path subscribes after

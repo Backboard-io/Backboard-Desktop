@@ -27,6 +27,7 @@
  *   npm run perf:chat-leak -- --iterations 5               # more iterations
  *   npm run perf:chat-leak -- --threshold 5                # 5MB total threshold
  *   npm run perf:chat-leak -- --build 1.115.0              # test a specific build
+ *   npm run perf:chat-leak -- --surface editor              # native chat editor
  */
 
 const fs = require('fs');
@@ -42,6 +43,7 @@ const {
 const {
 	getUserTurns, getModelTurnCount,
 } = require('./common/mock-llm-server.ts');
+const { getChatSurface, normalizeChatSurface, openChatSurface, resetChatSurface } = require('./common/chat-surface');
 
 // -- Config (edit config.jsonc to change defaults) ---------------------------
 
@@ -61,10 +63,12 @@ function parseArgs() {
 		leakThresholdMB: CONFIG.leakThresholdMB ?? 5,
 		/** @type {Record<string, any>} */
 		settingsOverrides: {},
+		surface: normalizeChatSurface(CONFIG.surface ?? 'panel'),
 	};
 	for (let i = 0; i < args.length; i++) {
 		switch (args[i]) {
 			case '--iterations': opts.iterations = parseInt(args[++i], 10); break;
+			case '--surface': opts.surface = normalizeChatSurface(args[++i]); break;
 			case '--messages': case '-n': opts.messages = parseInt(args[++i], 10); break;
 			case '--verbose': opts.verbose = true; break;
 			case '--ci': opts.ci = true; break;
@@ -87,6 +91,7 @@ function parseArgs() {
 					'Options:',
 					'  --iterations <n>    Number of open→work→reset cycles (default: 3)',
 					'  --messages <n>      Messages to send per iteration (default: 5)',
+					'  --surface <kind>     Chat surface: panel (default) or editor',
 					'  --ci                CI mode: write Markdown summary to ci-summary.md',
 					'  --build <path|ver>  Path to VS Code build or version to download',
 					'  --threshold <MB>    Max total residual heap growth in MB (default: 5)',
@@ -119,9 +124,6 @@ function getScenarioIds() {
 
 // -- Helpers -----------------------------------------------------------------
 
-const CHAT_VIEW = 'div[id="workbench.panel.chat"]';
-const CHAT_EDITOR_SEL = `${CHAT_VIEW} .interactive-input-part .monaco-editor[role="code"]`;
-
 /**
  * Measure heap (MB) and DOM node count after forced GC.
  * @param {any} cdp
@@ -139,22 +141,12 @@ async function measure(cdp, page) {
 }
 
 /**
- * Open a new chat session via the command palette.
+ * Open a new chat session on the same surface.
  * @param {import('playwright').Page} page
+ * @param {ReturnType<typeof getChatSurface>} surface
  */
-async function openNewChat(page) {
-	// Use keyboard shortcut to open a new chat (clears previous session)
-	const newChatShortcut = process.platform === 'darwin' ? 'Meta+KeyL' : 'Control+KeyL';
-	await page.keyboard.press(newChatShortcut);
-	await new Promise(r => setTimeout(r, 1000));
-
-	// Verify the chat view is visible and ready
-	await page.waitForSelector(CHAT_VIEW, { timeout: 15_000 });
-	await page.waitForFunction(
-		(sel) => Array.from(document.querySelectorAll(sel)).some(el => el.getBoundingClientRect().width > 0),
-		CHAT_EDITOR_SEL, { timeout: 15_000 },
-	);
-	await new Promise(r => setTimeout(r, 500));
+async function openNewChat(page, surface) {
+	await resetChatSurface(page, surface);
 }
 
 /**
@@ -164,18 +156,19 @@ async function openNewChat(page) {
  * wait for.
  * @param {import('playwright').Page} page
  * @param {{ completionCount: () => number, waitForCompletion: (n: number, ms: number) => Promise<void> }} mockServer
+ * @param {ReturnType<typeof getChatSurface>} surface
  * @param {string} text
  * @param {number} [modelTurns=1] - number of model completions to wait for
  */
-async function sendMessage(page, mockServer, text, modelTurns = 1) {
-	await page.click(CHAT_EDITOR_SEL);
+async function sendMessage(page, mockServer, surface, text, modelTurns = 1) {
+	await page.click(surface.inputEditorSelector);
 	await new Promise(r => setTimeout(r, 200));
 
 	const inputSel = await page.evaluate((editorSel) => {
 		const ed = document.querySelector(editorSel);
 		if (!ed) { throw new Error('no editor'); }
 		return ed.querySelector('.native-edit-context') ? editorSel + ' .native-edit-context' : editorSel + ' textarea';
-	}, CHAT_EDITOR_SEL);
+	}, surface.inputEditorSelector);
 
 	const hasDriver = await page.evaluate(() =>
 		// @ts-ignore
@@ -197,7 +190,7 @@ async function sendMessage(page, mockServer, text, modelTurns = 1) {
 	await page.keyboard.press('Enter');
 	try { await mockServer.waitForCompletion(compBefore + modelTurns, 60_000); } catch { }
 
-	const responseSelector = `${CHAT_VIEW} .interactive-item-container.interactive-response`;
+	const responseSelector = surface.responseSelector;
 	await page.waitForFunction(
 		(sel) => {
 			const responses = document.querySelectorAll(sel);
@@ -221,23 +214,24 @@ async function sendMessage(page, mockServer, text, modelTurns = 1) {
  *
  * @param {import('playwright').Page} page
  * @param {{ completionCount: () => number, waitForCompletion: (n: number, ms: number) => Promise<void> }} mockServer
+ * @param {ReturnType<typeof getChatSurface>} surface
  * @param {string} scenarioId
  * @param {string} label - prefix for the message (e.g. "Warmup" or "Iteration 2")
  */
-async function runScenario(page, mockServer, scenarioId, label) {
+async function runScenario(page, mockServer, surface, scenarioId, label) {
 	const userTurns = getUserTurns(scenarioId);
 	const totalModelTurns = getModelTurnCount(scenarioId);
 
 	if (userTurns.length === 0) {
 		// Content-only or tool-call scenario: one message, wait for all model turns
-		await sendMessage(page, mockServer, `[scenario:${scenarioId}] ${label}`, totalModelTurns);
+		await sendMessage(page, mockServer, surface, `[scenario:${scenarioId}] ${label}`, totalModelTurns);
 	} else {
 		// Multi-turn with user follow-ups: send initial message and wait for
 		// the model turns before the first user turn, then alternate.
 		let modelTurnsSoFar = 0;
 		const firstUserAfter = userTurns[0].afterModelTurn;
 		const turnsBeforeFirstUser = firstUserAfter - modelTurnsSoFar;
-		await sendMessage(page, mockServer, `[scenario:${scenarioId}] ${label}`, turnsBeforeFirstUser);
+		await sendMessage(page, mockServer, surface, `[scenario:${scenarioId}] ${label}`, turnsBeforeFirstUser);
 		modelTurnsSoFar = firstUserAfter;
 
 		for (let u = 0; u < userTurns.length; u++) {
@@ -247,7 +241,7 @@ async function runScenario(page, mockServer, scenarioId, label) {
 			const turnsUntilNext = nextModelStop - modelTurnsSoFar;
 
 			// Send the user follow-up message
-			await sendMessage(page, mockServer, userTurns[u].message, turnsUntilNext);
+			await sendMessage(page, mockServer, surface, userTurns[u].message, turnsUntilNext);
 			modelTurnsSoFar = nextModelStop;
 		}
 	}
@@ -258,10 +252,11 @@ async function runScenario(page, mockServer, scenarioId, label) {
 /**
  * @param {string} electronPath
  * @param {{ url: string, requestCount: () => number, waitForRequests: (n: number, ms: number) => Promise<void>, completionCount: () => number, waitForCompletion: (n: number, ms: number) => Promise<void> }} mockServer
- * @param {{ iterations: number, verbose: boolean, settingsOverrides?: Record<string, any> }}  opts
+ * @param {{ iterations: number, verbose: boolean, settingsOverrides?: Record<string, any>, surface?: 'panel' | 'editor' }}  opts
  */
 async function runLeakCheck(electronPath, mockServer, opts) {
 	const { iterations, verbose } = opts;
+	const chatSurface = getChatSurface(opts.surface ?? 'panel');
 	const { userDataDir, extDir, logsDir } = prepareRunDir('leak-check', mockServer, opts.settingsOverrides);
 	const isDevBuild = !electronPath.includes('.vscode-test');
 
@@ -279,14 +274,8 @@ async function runLeakCheck(electronPath, mockServer, opts) {
 		const cdp = await page.context().newCDPSession(page);
 		await cdp.send('HeapProfiler.enable');
 
-		// Open chat panel
-		const chatShortcut = process.platform === 'darwin' ? 'Control+Meta+KeyI' : 'Control+Alt+KeyI';
-		await page.keyboard.press(chatShortcut);
-		await page.waitForSelector(CHAT_VIEW, { timeout: 15_000 });
-		await page.waitForFunction(
-			(sel) => Array.from(document.querySelectorAll(sel)).some(el => el.getBoundingClientRect().width > 0),
-			CHAT_EDITOR_SEL, { timeout: 15_000 },
-		);
+		// Open the configured panel or native chat editor.
+		await openChatSurface(page, chatSurface);
 
 		// Wait for extension activation
 		const reqsBefore = mockServer.requestCount();
@@ -315,14 +304,14 @@ async function runLeakCheck(electronPath, mockServer, opts) {
 			// Do work: cycle through all scenarios
 			for (let m = 0; m < scenarioIds.length; m++) {
 				const sid = scenarioIds[m];
-				await runScenario(page, mockServer, sid, `Iteration ${iter + 1}`);
+				await runScenario(page, mockServer, chatSurface, sid, `Iteration ${iter + 1}`);
 				if (verbose) {
 					console.log(`    [leak]   Sent ${sid} (${m + 1}/${scenarioIds.length})`);
 				}
 			}
 
 			// Return to clean state: open a new empty chat
-			await openNewChat(page);
+			await openNewChat(page, chatSurface);
 			await new Promise(r => setTimeout(r, 1000));
 
 			// Measure after returning to clean state
@@ -379,6 +368,7 @@ async function main() {
 
 	console.log(`[chat-simulation] Leak check: ${opts.iterations} iterations × ${getScenarioIds().length} scenarios, threshold ${opts.leakThresholdMB}MB total`);
 	console.log(`[chat-simulation] Build: ${electronPath}`);
+	console.log(`[chat-simulation] Chat surface: ${opts.surface}`);
 	console.log('');
 
 	const result = await runLeakCheck(electronPath, mockServer, opts);
@@ -401,6 +391,7 @@ async function main() {
 	const jsonPath = path.join(DATA_DIR, 'chat-simulation-leak-results.json');
 	fs.writeFileSync(jsonPath, JSON.stringify({
 		timestamp: new Date().toISOString(),
+		surface: opts.surface,
 		leakThresholdMB: opts.leakThresholdMB,
 		iterationCount: opts.iterations,
 		scenarioCount: getScenarioIds().length,
@@ -430,7 +421,7 @@ async function main() {
 /**
  * Generate a Markdown summary for CI, matching the perf script pattern.
  * @param {{ baseline: { heapMB: number, domNodes: number }, final: { heapMB: number, domNodes: number }, totalResidualMB: number, totalResidualNodes: number, iterations: { beforeHeapMB: number, afterHeapMB: number, deltaHeapMB: number, beforeDomNodes: number, afterDomNodes: number, deltaDomNodes: number }[] }} result
- * @param {{ leakThresholdMB: number, iterations: number }} opts
+ * @param {{ leakThresholdMB: number, iterations: number, surface?: 'panel' | 'editor' }} opts
  */
 function generateLeakCISummary(result, opts) {
 	const leaked = result.totalResidualMB > opts.leakThresholdMB;
@@ -442,6 +433,7 @@ function generateLeakCISummary(result, opts) {
 	lines.push('|---|---|');
 	lines.push(`| **Verdict** | ${verdict} |`);
 	lines.push(`| **Threshold** | ${opts.leakThresholdMB} MB |`);
+	lines.push(`| **Chat surface** | ${opts.surface ?? 'panel'} |`);
 	lines.push(`| **Iterations** | ${opts.iterations} |`);
 	lines.push(`| **Scenarios per iteration** | ${getScenarioIds().length} |`);
 	lines.push('');

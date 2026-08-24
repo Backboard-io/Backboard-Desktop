@@ -5,7 +5,7 @@
 
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
-import { getNWords, IWordCountResult } from '../../../common/model/chatWordCounter.js';
+import { getNWords, IncrementalWordCounter, IWordCountResult } from '../../../common/model/chatWordCounter.js';
 
 suite('ChatWordCounter', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -110,6 +110,39 @@ suite('ChatWordCounter', () => {
 			];
 
 			cases.forEach(([str, nWords, result]) => doTest(str, nWords, result));
+		});
+	});
+
+	suite('IncrementalWordCounter', () => {
+		function assertMatchesStateless(chunks: readonly string[]): void {
+			const counter = new IncrementalWordCounter();
+			let value = '';
+			for (const chunk of chunks) {
+				value += chunk;
+				counter.update(value);
+				for (let count = 0; count <= 8; count++) {
+					assert.deepStrictEqual(counter.getNWords(count), getNWords(value, count));
+				}
+			}
+		}
+
+		test('matches stateless counting across ordinary appends', () => {
+			assertMatchesStateless(['hello', ' ', 'world', '\n', 'and more']);
+		});
+
+		test('rescans markdown links that span multiple provisional words', () => {
+			assertMatchesStateless(['[hello world](', 'https://example.com', ') after']);
+		});
+
+		test('rescans inline math that spans multiple provisional words', () => {
+			assertMatchesStateless(['before $x +', ' y', '$ after']);
+		});
+
+		test('resets after a non-append update', () => {
+			const counter = new IncrementalWordCounter();
+			counter.update('one two three');
+			counter.update('replacement value');
+			assert.deepStrictEqual(counter.getNWords(1), getNWords('replacement value', 1));
 		});
 	});
 });

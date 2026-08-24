@@ -30,9 +30,11 @@ export interface IChatContentPart extends IDisposable {
 	/**
 	 * Returns true if the other content is equivalent to what is already rendered in this content part.
 	 * Returns false if a rerender is needed.
-	 * followingContent is all the content that will be rendered after this content part (to support progress messages' behavior).
+	 * `content` is the complete render array and `followingContentStart` is the
+	 * first item after this part. Passing the shared array avoids allocating a
+	 * progressively smaller suffix for every part in tool-heavy responses.
 	 */
-	hasSameContent(other: IChatRendererContent, followingContent: IChatRendererContent[], element: ChatTreeItem): boolean;
+	hasSameContent(other: IChatRendererContent, content: IChatRendererContent[], element: ChatTreeItem, followingContentStart?: number): boolean;
 
 	/**
 	 * Called when the content part is mounted to the DOM after being detached

@@ -66,7 +66,8 @@ export class ChatMcpAppModel extends Disposable {
 	 * (enough for webview state to persist across re-renders) without
 	 * touching application storage.
 	 */
-	private static readonly _agentHostOrigins = new Map<string, string>();
+	private static readonly _agentHostOrigins = new Map<string, { readonly origin: string; references: number }>();
+	private _agentHostOriginKey: string | undefined;
 
 	/** Origin store for persistent webview origins per server (local MCP only) */
 	private readonly _originStore: WebviewOriginStore;
@@ -614,12 +615,14 @@ export class ChatMcpAppModel extends Disposable {
 			return this._originStore.getOrigin('mcpApp', this._serverOriginId());
 		}
 		const key = this._serverOriginId();
-		let origin = ChatMcpAppModel._agentHostOrigins.get(key);
-		if (!origin) {
-			origin = generateUuid();
-			ChatMcpAppModel._agentHostOrigins.set(key, origin);
+		this._agentHostOriginKey = key;
+		let entry = ChatMcpAppModel._agentHostOrigins.get(key);
+		if (!entry) {
+			entry = { origin: generateUuid(), references: 0 };
+			ChatMcpAppModel._agentHostOrigins.set(key, entry);
 		}
-		return origin;
+		entry.references++;
+		return entry.origin;
 	}
 
 	/**
@@ -771,8 +774,15 @@ export class ChatMcpAppModel extends Disposable {
 	private async _handleDownloadFile(params: McpApps.McpUiDownloadFileRequest['params']): Promise<McpApps.McpUiDownloadFileResult> {
 		const newParts: IChatCollapsibleIODataPart[] = [];
 		let hadError = false;
+		const existing = this._downloadParts.get();
+		const maxDownloadParts = 64;
 
 		for (const content of params.contents) {
+			if (existing.length + newParts.length >= maxDownloadParts) {
+				hadError = true;
+				this._logService.warn(`[MCP App] Ignoring ui/download-file content after ${maxDownloadParts} resources`);
+				break;
+			}
 			try {
 				if (content.type === 'resource') {
 					// EmbeddedResource — associate inline content with the chat response FS
@@ -797,7 +807,6 @@ export class ChatMcpAppModel extends Disposable {
 		}
 
 		if (newParts.length > 0) {
-			const existing = this._downloadParts.get();
 			this._downloadParts.set([...existing, ...newParts], undefined);
 		}
 
@@ -885,5 +894,12 @@ export class ChatMcpAppModel extends Disposable {
 	public override dispose(): void {
 		this._disposeCts.dispose(true);
 		super.dispose();
+		if (this._agentHostOriginKey) {
+			const entry = ChatMcpAppModel._agentHostOrigins.get(this._agentHostOriginKey);
+			if (entry && --entry.references === 0) {
+				ChatMcpAppModel._agentHostOrigins.delete(this._agentHostOriginKey);
+			}
+			this._agentHostOriginKey = undefined;
+		}
 	}
 }

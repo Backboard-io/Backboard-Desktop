@@ -1,5 +1,6 @@
 import { hasTool, type PromptContext } from "../../../PromptModule.ts";
 import { ATTACHMENTS_GUIDANCE } from "../../../system/attachments.ts";
+import { buildBackboardPlatformPrompt } from "../../../system/backboardPlatform.ts";
 import { browser } from "../../../system/browser.tsx";
 import { computer } from "../../../system/computer.tsx";
 import { getSystemPromptFragment } from "../../../system/profileFragments.tsx";
@@ -17,6 +18,7 @@ export function buildSystemPrompt(options: SystemPromptOptions = {}): string {
 	return [
 		layout.header ? getSystemPromptFragment(layout.header, context) : "",
 		buildOpenAiCorePrompt(context),
+		buildBackboardPlatformPrompt(context),
 		options.computerUseEnabled ? computer.prompt : "",
 		options.browserUseEnabled ? browser.prompt : "",
 		options.startupEnvironmentPrompt,
@@ -83,7 +85,6 @@ ${ATTACHMENTS_GUIDANCE}
 - Before committing or pushing, inspect staged diff and status, check for secrets or generated noise, and only include intended files.
 - Do not amend commits, update git config, or push unless the user explicitly asks.`,
 		clarificationGuidance(context),
-		backboardDocsGuidance(context),
 	]
 		.filter(Boolean)
 		.join("\n\n");
@@ -99,12 +100,4 @@ function clarificationGuidance(context: PromptContext): string {
 	return `## Clarification
 
 - Use ask_user for all clarification questions instead of asking in plain text.`;
-}
-
-function backboardDocsGuidance(context: PromptContext): string {
-	if (!hasTool(context, "FetchUrl")) return "";
-
-	return `## Backboard.io Information
-
-- When the user asks about Backboard commands, configuration, settings, skills, MCP, hooks, custom droids, BYOK, or other Backboard.io-specific behavior, fetch \`https://docs.backboard.io/llms.txt\` before answering if current local context is insufficient.`;
 }

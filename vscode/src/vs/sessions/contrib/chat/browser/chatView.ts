@@ -180,6 +180,24 @@ export class ChatView extends AbstractChatView {
 		this._widget.render(this.element);
 		this._widget.setVisible(true);
 
+		// Session grids can retain several chat leaves while only one or two are
+		// actually inside the horizontally clipped viewport. A visible ChatWidget
+		// subscribes to every streaming/model change and keeps rendering even when
+		// its leaf cannot be seen. Suspend those widgets at the leaf boundary; when
+		// they re-enter, ChatWidget performs one current-state refresh instead of
+		// replaying all of the off-screen updates.
+		const targetWindow = this.element.ownerDocument.defaultView;
+		if (targetWindow && typeof targetWindow.IntersectionObserver === 'function') {
+			const visibilityObserver = new targetWindow.IntersectionObserver(entries => {
+				const entry = entries.find(candidate => candidate.target === this.element);
+				if (entry) {
+					this._widget.setVisible(entry.isIntersecting && entry.intersectionRatio > 0);
+				}
+			});
+			visibilityObserver.observe(this.element);
+			this._register({ dispose: () => visibilityObserver.disconnect() });
+		}
+
 		this._register(this.configurationService.onDidChangeConfiguration(e => {
 			if (e.affectsConfiguration(AGENT_SESSIONS_SCOPED_INPUT_HISTORY_SETTING)) {
 				this._applyHistoryKey();

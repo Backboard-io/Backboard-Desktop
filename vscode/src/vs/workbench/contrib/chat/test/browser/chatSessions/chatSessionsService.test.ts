@@ -4,7 +4,9 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
-import { CancellationToken } from '../../../../../../base/common/cancellation.js';
+import { DeferredPromise } from '../../../../../../base/common/async.js';
+import { CancellationToken, CancellationTokenSource } from '../../../../../../base/common/cancellation.js';
+import { isCancellationError } from '../../../../../../base/common/errors.js';
 import { Emitter, Event } from '../../../../../../base/common/event.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { ContextKeyService } from '../../../../../../platform/contextkey/browser/contextKeyService.js';
@@ -12,7 +14,7 @@ import { IContextKey, RawContextKey } from '../../../../../../platform/contextke
 import { TestConfigurationService } from '../../../../../../platform/configuration/test/common/testConfigurationService.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
 import { ChatSessionsService } from '../../../browser/chatSessions/chatSessions.contribution.js';
-import { ChatSessionOptionsMap, IChatSessionItem, IChatSessionItemController, IChatSessionItemsDelta, IChatSessionsExtensionPoint, ReadonlyChatSessionOptionsMap } from '../../../common/chatSessionsService.js';
+import { ChatSessionOptionsMap, IChatSession, IChatSessionItem, IChatSessionItemController, IChatSessionItemsDelta, IChatSessionsExtensionPoint, ReadonlyChatSessionOptionsMap } from '../../../common/chatSessionsService.js';
 import { workbenchInstantiationService } from '../../../../../test/browser/workbenchTestServices.js';
 
 suite.skip('ChatSessionsService', () => {
@@ -194,6 +196,153 @@ suite('ChatSessionsService - getChatSessionItems availability', () => {
 
 		gatedEnabled.set(false);
 		assert.deepStrictEqual(await resolvedTypes(), [UNGATED_TYPE]);
+	});
+});
+
+suite('ChatSessionsService - getOrCreateChatSession', () => {
+
+	const store = ensureNoDisposablesAreLeakedInTestSuite();
+	const SESSION_TYPE = 'test-session-provider';
+	const sessionResource = URI.from({ scheme: SESSION_TYPE, path: '/session-1' });
+
+	let service: ChatSessionsService;
+
+	setup(() => {
+		const instantiationService = store.add(workbenchInstantiationService(undefined, store));
+		service = store.add(instantiationService.createInstance(ChatSessionsService));
+		store.add(service.registerChatSessionContribution({
+			type: SESSION_TYPE,
+			name: SESSION_TYPE,
+			displayName: SESSION_TYPE,
+			description: '',
+		}));
+	});
+
+	function createSession(onDispose?: () => void): IChatSession {
+		const onWillDispose = store.add(new Emitter<void>());
+		let isDisposed = false;
+		return {
+			sessionResource,
+			onWillDispose: onWillDispose.event,
+			history: [],
+			dispose: () => {
+				if (!isDisposed) {
+					isDisposed = true;
+					onDispose?.();
+					onWillDispose.fire();
+				}
+			},
+		};
+	}
+
+	test('deduplicates concurrent creation for the same resource', async () => {
+		const providerResult = new DeferredPromise<IChatSession>();
+		let providerCalls = 0;
+		store.add(service.registerChatSessionContentProvider(SESSION_TYPE, {
+			provideChatSessionContent: async () => {
+				providerCalls++;
+				return providerResult.p;
+			},
+		}));
+
+		const first = service.getOrCreateChatSession(sessionResource, CancellationToken.None);
+		const second = service.getOrCreateChatSession(sessionResource, CancellationToken.None);
+		await Promise.resolve();
+		assert.strictEqual(providerCalls, 1);
+
+		const session = createSession();
+		await providerResult.complete(session);
+		assert.strictEqual(await first, session);
+		assert.strictEqual(await second, session);
+		assert.strictEqual(providerCalls, 1);
+	});
+
+	test('one caller cancellation does not cancel shared creation', async () => {
+		const providerResult = new DeferredPromise<IChatSession>();
+		const providerTokens: CancellationToken[] = [];
+		let providerCalls = 0;
+		store.add(service.registerChatSessionContentProvider(SESSION_TYPE, {
+			provideChatSessionContent: async (_resource, token) => {
+				providerCalls++;
+				providerTokens.push(token);
+				return providerResult.p;
+			},
+		}));
+
+		const callerCancellation = store.add(new CancellationTokenSource());
+		const first = service.getOrCreateChatSession(sessionResource, callerCancellation.token);
+		const second = service.getOrCreateChatSession(sessionResource, CancellationToken.None);
+		await Promise.resolve();
+		callerCancellation.cancel();
+
+		await assert.rejects(first, error => isCancellationError(error));
+		assert.strictEqual(providerCalls, 1);
+		assert.strictEqual(providerTokens[0].isCancellationRequested, false);
+
+		const session = createSession();
+		await providerResult.complete(session);
+		assert.strictEqual(await second, session);
+	});
+
+	test('disposes a late provider result after all callers cancel and allows a fresh creation', async () => {
+		const providerResults = [new DeferredPromise<IChatSession>(), new DeferredPromise<IChatSession>()];
+		const providerTokens: CancellationToken[] = [];
+		let providerCalls = 0;
+		store.add(service.registerChatSessionContentProvider(SESSION_TYPE, {
+			provideChatSessionContent: async (_resource, token) => {
+				providerTokens.push(token);
+				return providerResults[providerCalls++].p;
+			},
+		}));
+
+		const callerCancellation = store.add(new CancellationTokenSource());
+		const abandonedRequest = service.getOrCreateChatSession(sessionResource, callerCancellation.token);
+		await Promise.resolve();
+		callerCancellation.cancel();
+		await assert.rejects(abandonedRequest, error => isCancellationError(error));
+		assert.strictEqual(providerTokens[0].isCancellationRequested, true);
+
+		const replacementRequest = service.getOrCreateChatSession(sessionResource, CancellationToken.None);
+		await Promise.resolve();
+		assert.strictEqual(providerCalls, 2);
+
+		const abandonedSessionDisposed = new DeferredPromise<void>();
+		await providerResults[0].complete(createSession(() => { void abandonedSessionDisposed.complete(); }));
+		await abandonedSessionDisposed.p;
+
+		// Settling the abandoned operation must not evict its replacement.
+		const deduplicatedReplacementRequest = service.getOrCreateChatSession(sessionResource, CancellationToken.None);
+		assert.strictEqual(providerCalls, 2);
+
+		const replacementSession = createSession();
+		await providerResults[1].complete(replacementSession);
+		assert.strictEqual(await replacementRequest, replacementSession);
+		assert.strictEqual(await deduplicatedReplacementRequest, replacementSession);
+	});
+
+	test('disposing the service disposes cached provider sessions exactly once', async () => {
+		let disposeCalls = 0;
+		store.add(service.registerChatSessionContentProvider(SESSION_TYPE, {
+			provideChatSessionContent: async () => createSession(() => disposeCalls++),
+		}));
+
+		await service.getOrCreateChatSession(sessionResource, CancellationToken.None);
+		service.dispose();
+		service.dispose();
+
+		assert.strictEqual(disposeCalls, 1);
+	});
+
+	test('unregistering a provider disposes its cached sessions', async () => {
+		let disposeCalls = 0;
+		const registration = service.registerChatSessionContentProvider(SESSION_TYPE, {
+			provideChatSessionContent: async () => createSession(() => disposeCalls++),
+		});
+
+		await service.getOrCreateChatSession(sessionResource, CancellationToken.None);
+		registration.dispose();
+
+		assert.strictEqual(disposeCalls, 1);
 	});
 });
 

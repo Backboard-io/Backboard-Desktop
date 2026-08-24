@@ -169,6 +169,8 @@ function isSessionShowMore(item: SessionListItem): item is ISessionShowMore {
 const SHOW_MORE_FOLDERS_LABEL = '__more_folders__';
 const SIMPLE_MORE_SETTLED_LABEL = '__simple_more_settled__';
 const SIMPLE_SETTLED_SECTION_ID = 'simple-settled';
+const SIMPLE_SETTLED_WORKSPACE_SECTION_PREFIX = 'simple-settled-workspace:';
+const SIMPLE_DONE_WORKSPACE_SECTION_PREFIX = 'simple-done-workspace:';
 const SIMPLE_SETTLED_INITIAL_COUNT = 10;
 const SIMPLE_SETTLED_PAGE_COUNT = 25;
 const SIMPLE_AUTO_SETTLE_MS = 3 * 24 * 60 * 60 * 1000;
@@ -389,14 +391,12 @@ class SessionItemRenderer implements ITreeRenderer<SessionListItem, FuzzyScore, 
 			activeDisposables,
 		};
 
-		// The sessions tree is laid out to its full content height, so a large
-		// history can keep hundreds of row templates alive even though only a
-		// handful are visible. Widgets on a row subscribe to global accessibility,
-		// context-key and menu events; creating them for every off-screen row trips
-		// the event leak detector and needlessly retains substantial UI state.
-		// Activate those widgets only while the row intersects the viewport. The
-		// interaction listeners are a fallback for browsers without an observer and
-		// also make hover/focus activation immediate while the observer is pending.
+		// The tree virtualizes rows to the viewport. Keep the richer row widgets
+		// independently visibility-gated as well: list overscan should not retain
+		// toolbars, scoped context services, or status widgets for rows the user
+		// cannot currently see. The interaction listeners are a fallback for
+		// browsers without an observer and make activation immediate while the
+		// observer is pending.
 		this.observeTemplate(template);
 		disposables.add(DOM.addDisposableListener(container, DOM.EventType.MOUSE_ENTER, () => this.activateTemplate(template)));
 		disposables.add(DOM.addDisposableListener(container, DOM.EventType.FOCUS_IN, () => this.activateTemplate(template)));
@@ -803,6 +803,7 @@ class SessionSectionRenderer implements ITreeRenderer<SessionListItem, FuzzyScor
 
 	constructor(
 		private readonly hideSectionCount: boolean,
+		private readonly simpleMode: boolean,
 		private readonly instantiationService: IInstantiationService,
 		private readonly contextKeyService: IContextKeyService,
 	) { }
@@ -834,7 +835,10 @@ class SessionSectionRenderer implements ITreeRenderer<SessionListItem, FuzzyScor
 			return;
 		}
 		this.templatesByElement.set(element, template);
-		template.container.classList.toggle('session-section-settled', element.id === SIMPLE_SETTLED_SECTION_ID);
+		template.container.classList.toggle(
+			'session-section-settled',
+			element.id === SIMPLE_SETTLED_SECTION_ID || (this.simpleMode && element.id === 'archived'),
+		);
 		template.container.classList.toggle('session-section-empty', element.sessions.length === 0);
 		template.label.textContent = element.label;
 		if (this.hideSectionCount) {
@@ -1096,7 +1100,6 @@ export class SessionsList extends Disposable implements ISessionsList {
 	private static readonly WORKSPACE_GROUP_LIMIT_TREATMENT = 'sessions.workspaceGroupLimit';
 
 	private readonly listContainer: HTMLElement;
-	private lastLayoutWidth: number | undefined;
 	private readonly tree: WorkbenchObjectTree<SessionListItem, FuzzyScore>;
 	private readonly treeDelegate: SessionsTreeDelegate;
 	private sessions: ISession[] = [];
@@ -1222,7 +1225,7 @@ export class SessionsList extends Disposable implements ISessionsList {
 		);
 
 		const showMoreRenderer = new SessionShowMoreRenderer();
-		const sectionRenderer = new SessionSectionRenderer(true /* hideSectionCount */, instantiationService, contextKeyService);
+		const sectionRenderer = new SessionSectionRenderer(true /* hideSectionCount */, !!this.options.simpleMode, instantiationService, contextKeyService);
 
 		// Read (don't bind) `IsPhoneLayoutContext` from the parent context so we
 		// observe the workbench's value rather than shadowing it with a fresh
@@ -1266,10 +1269,6 @@ export class SessionsList extends Disposable implements ISessionsList {
 					}
 				},
 				horizontalScrolling: false,
-				// The tree is laid out to its full content height and never
-				// scrolls internally; the surrounding sidebar column owns the
-				// scroll. Let wheel events bubble so hovering the list scrolls
-				// that column instead of being swallowed here.
 				alwaysConsumeMouseWheel: false,
 				multipleSelectionSupport: true,
 				indent: 0,
@@ -1300,19 +1299,13 @@ export class SessionsList extends Disposable implements ISessionsList {
 			}
 		));
 
-		// Sticky scroll must stay off for this tree: it is laid out to its full
-		// content height (the sidebar column owns the scroll), so a sticky
-		// section header is never useful — but any transient internal scroll
-		// offset (reveal, layout lag during expand/collapse) makes the widget
-		// paint its opaque background over the translucent sidebar. The
+		// Sticky scroll stays off for this tree. Section rows already provide the
+		// hierarchy, while the sticky widget paints an opaque background over the
+		// translucent sidebar. The
 		// workbench options factory overwrites `enableStickyScroll` with the
 		// `workbench.tree.enableStickyScroll` setting, so it cannot be passed
 		// via the constructor options above; disable it explicitly instead.
 		this.tree.updateOptions({ enableStickyScroll: false });
-
-		// Keep the container and render viewport in sync with the tree's content
-		// as sections expand/collapse and sessions come and go.
-		this._register(this.tree.onDidChangeContentHeight(() => this.layoutTreeToContentHeight()));
 
 		this._register(this.tree.onDidOpen(e => {
 			const element = e.element;
@@ -1544,7 +1537,18 @@ export class SessionsList extends Disposable implements ISessionsList {
 
 			if (settled.length > 0) {
 				const visibleSettled = this.hasFindPattern ? settled : settled.slice(0, this.simpleSettledVisibleCount);
-				const settledChildren: IObjectTreeElement<SessionListItem>[] = visibleSettled.map(session => ({ element: session }));
+				const settledChildren: IObjectTreeElement<SessionListItem>[] = groupByWorkspace(visibleSettled).map(section => {
+					const workspaceSection: ISessionSection = {
+						...section,
+						id: `${SIMPLE_SETTLED_WORKSPACE_SECTION_PREFIX}${section.id.slice('workspace:'.length)}`,
+					};
+					return {
+						element: workspaceSection,
+						collapsible: true,
+						collapsed: this.getSavedCollapseState(workspaceSection.id) ?? ObjectTreeElementCollapseState.PreserveOrExpanded,
+						children: workspaceSection.sessions.map(session => ({ element: session as SessionListItem })),
+					};
+				});
 				const hiddenSettledCount = settled.length - visibleSettled.length;
 				if (!this.hasFindPattern && hiddenSettledCount > 0) {
 					settledChildren.push({
@@ -1691,6 +1695,19 @@ export class SessionsList extends Disposable implements ISessionsList {
 					...section.sessions.map(session => ({ element: session as SessionListItem })),
 					{ element: { showMore: true as const, kind: 'sessions' as const, mode: 'less' as const, sectionLabel: section.label, remainingCount: 0, legacyFolderView: !!this.options.simpleMode && this.simpleCompact } },
 				];
+			} else if (this.options.simpleMode && section.id === 'archived') {
+				sectionChildren = groupByWorkspace(section.sessions).map(workspace => {
+					const workspaceSection: ISessionSection = {
+						...workspace,
+						id: `${SIMPLE_DONE_WORKSPACE_SECTION_PREFIX}${workspace.id.slice('workspace:'.length)}`,
+					};
+					return {
+						element: workspaceSection,
+						collapsible: true,
+						collapsed: this.getSavedCollapseState(workspaceSection.id) ?? ObjectTreeElementCollapseState.PreserveOrExpanded,
+						children: workspaceSection.sessions.map(session => ({ element: session as SessionListItem })),
+					};
+				});
 			} else {
 				sectionChildren = section.sessions.map(session => ({ element: session as SessionListItem }));
 			}
@@ -1819,20 +1836,11 @@ export class SessionsList extends Disposable implements ISessionsList {
 	}
 
 	layout(height: number, width: number): void {
-		this.lastLayoutWidth = width;
-		this.layoutTreeToContentHeight();
-	}
-
-	/**
-	 * Lays the tree out at its full content height so it never scrolls
-	 * internally: the surrounding sidebar column owns the scroll (keeping the
-	 * pinned search/New-chat items static above it), and the tree's opaque
-	 * sticky-scroll header can never appear over the translucent sidebar.
-	 */
-	private layoutTreeToContentHeight(): void {
-		const contentHeight = this.tree.contentHeight;
-		this.listContainer.style.height = `${contentHeight}px`;
-		this.tree.layout(contentHeight, this.lastLayoutWidth);
+		// A bounded viewport is essential here: WorkbenchObjectTree only recycles
+		// off-screen rows when its render height is the visible height. Expanding it
+		// to contentHeight turns a 15+ session history into hundreds of live DOM
+		// nodes, autoruns, timers, hovers, menus, and scoped services.
+		this.tree.layout(Math.max(0, height), width);
 	}
 
 	focus(): void {

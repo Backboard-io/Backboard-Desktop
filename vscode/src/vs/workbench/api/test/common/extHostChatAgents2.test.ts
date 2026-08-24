@@ -22,6 +22,7 @@ suite('ExtHostChatAgents2', function () {
 
 	test('reports anchor before resolving it', async function () {
 		const sessionDisposables = disposables.add(new DisposableStore());
+		const sessionDisposableCount = () => (sessionDisposables as unknown as { _toDispose: Set<unknown> })._toDispose.size;
 		const events: string[] = [];
 		const progressChunks: IChatProgressDto[] = [];
 		let resolvedHandle: string | undefined;
@@ -55,9 +56,12 @@ suite('ExtHostChatAgents2', function () {
 			CancellationToken.None
 		);
 		const part = new ChatResponseAnchorPart(URI.file('/test/file.ts'), 'TestSymbol');
-		part.resolve = () => Promise.resolve();
+		const anchorResolution = new DeferredPromise<void>();
+		part.resolve = () => anchorResolution.p;
 
 		stream.apiObject.push(part);
+		assert.strictEqual(sessionDisposableCount(), 1);
+		await anchorResolution.complete();
 
 		await Promise.resolve();
 		await Promise.resolve();
@@ -68,5 +72,6 @@ suite('ExtHostChatAgents2', function () {
 		assert.strictEqual(progressChunk.kind, 'inlineReference');
 		assert.ok(progressChunk.resolveId);
 		assert.strictEqual(resolvedHandle, progressChunk.resolveId);
+		assert.strictEqual(sessionDisposableCount(), 0, 'resolved anchors must not remain retained for the session lifetime');
 	});
 });

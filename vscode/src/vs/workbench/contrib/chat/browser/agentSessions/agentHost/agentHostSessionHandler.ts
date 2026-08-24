@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { Limiter } from '../../../../../../base/common/async.js';
 import { encodeBase64, VSBuffer } from '../../../../../../base/common/buffer.js';
 import { CancellationToken, CancellationTokenSource } from '../../../../../../base/common/cancellation.js';
 import { isCancellationError } from '../../../../../../base/common/errors.js';
@@ -26,7 +27,7 @@ import { ChatTruncatedAction } from '../../../../../../platform/agentHost/common
 import { CompletionItemKind as AhpCompletionItemKind, type CompletionItem as AhpCompletionItem } from '../../../../../../platform/agentHost/common/state/protocol/commands.js';
 import { ConfirmationOptionKind, TerminalClaimKind, ToolCallContributorKind, ToolResultContentType, type ConfirmationOption, type ProtectedResourceMetadata, type SessionActiveClient } from '../../../../../../platform/agentHost/common/state/protocol/state.js';
 import { ActionType, ChatTurnStartedAction, isChatAction, type ChatAction, type ClientChatAction, type ClientSessionAction, type ChatInputCompletedAction } from '../../../../../../platform/agentHost/common/state/sessionActions.js';
-import { AHP_AUTH_REQUIRED, ProtocolError } from '../../../../../../platform/agentHost/common/state/sessionProtocol.js';
+import { AhpErrorCodes, AHP_AUTH_REQUIRED, ProtocolError } from '../../../../../../platform/agentHost/common/state/sessionProtocol.js';
 import { buildSubagentSessionUri, getToolSubagentContent, MessageAttachmentKind, MessageKind, PendingMessageKind, ResponsePartKind, ChatInputAnswerState, ChatInputAnswerValueKind, ChatInputQuestionKind, ChatInputResponseKind, StateComponents, ToolCallCancellationReason, ToolCallConfirmationReason, ToolCallStatus, TurnState, buildDefaultChatUri, mergeSessionWithDefaultChat, type ChatState, type ISessionWithDefaultChat, type ClientPluginCustomization, type ICompletedToolCall, type MarkdownResponsePart, type Message, type MessageAttachment, type ModelSelection, type ReasoningResponsePart, type RootState, type ChatInputAnswer, type ChatInputRequest, type SessionState, type ToolCallResponsePart, type ToolCallState, type Turn, type UsageInfo } from '../../../../../../platform/agentHost/common/state/sessionState.js';
 import { ExtensionIdentifier } from '../../../../../../platform/extensions/common/extensions.js';
 import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
@@ -64,7 +65,7 @@ import { IAgentHostSessionWorkingDirectoryResolver } from './agentHostSessionWor
 import { IAgentHostNewSessionFolderService } from './agentHostNewSessionFolderService.js';
 import { fromAgentHostUri, toAgentHostUri } from '../../../../../../platform/agentHost/common/agentHostUri.js';
 import { AGENT_IGNORED_DIRECTORIES, AGENT_IGNORED_FILE_GLOBS, isIgnoredAgentPath } from '../../../../../../platform/agentHost/common/agentIgnoredPaths.js';
-import { hydrateUncoveredTurnEdit, resolveTurnRepoInfo, type ITurnRepoInfo, type ReadTextFn } from './agentHostTurnFsEdits.js';
+import { accumulateUncoveredTurnFileChange, buildUncoveredTurnBeforeContentUri, finalizeUncoveredTurnFileChange, hydrateUncoveredTurnEdit, resolveTurnRepoInfo, type ITurnFileChangeObservation, type ITurnRepoInfo, type ReadTextFn } from './agentHostTurnFsEdits.js';
 import { AgentHostSnapshotController } from './agentHostSnapshotController.js';
 import { toolDataToDefinition } from './agentHostToolUtils.js';
 import { IAgentHostUntitledProvisionalSessionService } from './agentHostUntitledProvisionalSessionService.js';
@@ -96,6 +97,9 @@ function agentHostSessionIcon(provider: string) {
  * - {@link adoptInvocations} carries `ChatToolInvocation` instances that
  *   `activeTurnToProgress` already produced so per-tool setup adopts them
  *   rather than recreating UI handles.
+ * - {@link seededCompletedToolCallIds} prevents completed/cancelled tool calls
+ *   already serialized by the reconnect snapshot from being emitted or
+ *   invoked a second time when the observable graph installs.
  * - {@link seedEmittedLengths} prevents the always-on graph from re-emitting
  *   markdown / reasoning prefixes already covered by the snapshot.
  * - {@link onTurnEnded} fires once when the turn reaches a terminal state.
@@ -107,6 +111,7 @@ interface IObserveTurnOptions {
 	readonly sink: (parts: IChatProgress[]) => void;
 	readonly cancellationToken: CancellationToken;
 	readonly adoptInvocations?: ReadonlyMap<string, ChatToolInvocation>;
+	readonly seededCompletedToolCallIds?: ReadonlySet<string>;
 	readonly seedEmittedLengths?: ReadonlyMap<string, number>;
 	readonly onTurnEnded?: (lastTurn: Turn | undefined) => void;
 	readonly onFileEdits?: (tc: ToolCallState, fileEdits: IToolCallFileEdit[]) => void;
@@ -1253,6 +1258,12 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 			turnId,
 			sink: parts => chatSession.appendProgress(parts),
 			cancellationToken: cts.token,
+			onFileEdits: tc => {
+				const editParts = this._hydrateFileEdits(chatSession.sessionResource, turnId, tc);
+				if (editParts.length > 0) {
+					chatSession.appendProgress(editParts);
+				}
+			},
 			onTurnEnded: () => chatSession.isCompleteObs.set(true, undefined),
 		}));
 	}
@@ -1365,7 +1376,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 		const workspaceFileUris = this._workspaceContextService.getWorkspace().folders
 			.map(f => fromAgentHostUri(f.uri))
 			.filter(u => u.scheme === 'file');
-		const fsChangedUris = new ResourceMap<FileChangeType>();
+		const fsChangedUris = new ResourceMap<ITurnFileChangeObservation>();
 		const toolCallCoveredUris = new ResourceMap<true>();
 		let ignoredChangeCount = 0;
 		this._logService.info(`[AgentHost][FsWatch] Turn ${turnId}: watching ${workspaceFileUris.length} workspace folder(s): ${workspaceFileUris.map(u => u.toString()).join(', ')}`);
@@ -1389,7 +1400,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 		const fsWatchSub = this._fileService.onDidFilesChange(e => {
 			const recordChange = (uri: URI, type: FileChangeType) => {
 				const inWorkspace = workspaceFileUris.some(root =>
-					uri.toString().startsWith(root.toString())
+					extUriBiasedIgnorePathCase.isEqualOrParent(uri, root)
 				);
 				if (!inWorkspace) {
 					return;
@@ -1400,15 +1411,11 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 					ignoredChangeCount++;
 					return;
 				}
-				this._logService.info(`[AgentHost][FsWatch] Change detected: ${uri.toString()} type=${type}`);
-				const prev = fsChangedUris.get(uri);
-				if (prev === undefined) {
-					fsChangedUris.set(uri, type);
-				} else if (type === FileChangeType.DELETED) {
-					fsChangedUris.set(uri, FileChangeType.DELETED);
-				} else if (prev !== FileChangeType.ADDED) {
-					fsChangedUris.set(uri, type);
-				}
+				// Keep per-path diagnostics available without making a noisy edit burst
+				// synchronously format/write hundreds of info-level log entries. The
+				// normal-level turn summary below remains the primary diagnostic.
+				this._logService.trace(`[AgentHost][FsWatch] Change detected: ${uri.toString()} type=${type}`);
+				fsChangedUris.set(uri, accumulateUncoveredTurnFileChange(fsChangedUris.get(uri), type));
 			};
 			for (const uri of e.rawAdded) { recordChange(uri, FileChangeType.ADDED); }
 			for (const uri of e.rawUpdated) { recordChange(uri, FileChangeType.UPDATED); }
@@ -1449,13 +1456,82 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 					this._logService.info(`[AgentHost][FsWatch] Turn ${turnId} ended: fsChangedUris=${fsChangedUris.size} toolCallCoveredUris=${toolCallCoveredUris.size} ignored=${ignoredChangeCount}`);
 					try {
 						const repoInfos = await turnRepoInfoPromise;
-						const extraEdits: IChatProgress[] = [];
-						for (const [uri, changeType] of fsChangedUris) {
+						const candidates: Array<readonly [URI, ITurnFileChangeObservation]> = [];
+						for (const [uri, observation] of fsChangedUris) {
 							if (toolCallCoveredUris.has(uri)) {
 								this._logService.info(`[AgentHost][FsWatch] Skipping ${uri.toString()} (covered by tool call)`);
 								continue;
 							}
-							const repo = repoInfos.find(info => uri.path.startsWith(`${info.rootPath}/`));
+							// Recheck here so buffered changes accepted by an older watcher
+							// path do not leak temporary/build files into the completed turn.
+							if (isIgnoredAgentPath(uri.path)) {
+								ignoredChangeCount++;
+								continue;
+							}
+							candidates.push([uri, observation]);
+						}
+
+						// Stat changed paths concurrently, but cap parallel filesystem work so
+						// a noisy turn cannot fan out hundreds of operations at completion.
+						const statLimiter = new Limiter<{ readonly uri: URI; readonly repo: ITurnRepoInfo | undefined; readonly changeType: FileChangeType | undefined }>(16);
+						// An ambiguous ADDED event can require a git-blob read, which may
+						// transfer the complete turn-start file. Bound those heavier probes
+						// separately so a large edit batch cannot create a memory/IPC burst.
+						const baselineProbeLimiter = new Limiter<unknown>(4);
+						let baselineTrackedCount = 0;
+						let baselineMissingCount = 0;
+						let baselineProbeFailureCount = 0;
+						let finalizedChanges: Array<{ readonly uri: URI; readonly repo: ITurnRepoInfo | undefined; readonly changeType: FileChangeType | undefined }>;
+						try {
+							finalizedChanges = await Promise.all(candidates.map(([uri, observation]) => statLimiter.queue(async () => {
+								const repo = repoInfos.find(info => extUriBiasedIgnorePathCase.isEqualOrParent(uri, URI.file(info.rootPath)));
+								const existsAtTurnEnd = await this._fileService.exists(uri);
+								let existedAtTurnStart: boolean | undefined;
+								// ADDED-only is ambiguous: atomic replacement implementations can
+								// report an existing target exactly like a new file. Probe the pinned
+								// git baseline only for that shape, bounded by the same limiter as
+								// final stats, so real replacements retain their before side/diff.
+								if (existsAtTurnEnd && observation.firstType === FileChangeType.ADDED && !observation.sawDeleted) {
+									const beforeContentUri = buildUncoveredTurnBeforeContentUri(uri, repo, session.toString());
+									if (beforeContentUri) {
+									try {
+										await baselineProbeLimiter.queue(() => this._config.connection.resourceRead(beforeContentUri));
+											existedAtTurnStart = true;
+											baselineTrackedCount++;
+										} catch (err) {
+											if (err instanceof ProtocolError && (err.code === AhpErrorCodes.NotFound || err.code === AhpErrorCodes.ContentNotFound)) {
+												existedAtTurnStart = false;
+												baselineMissingCount++;
+											} else {
+												// A transport/auth failure cannot prove this was a create. Keep
+												// the before side conservatively so a tracked replacement is not
+												// silently reduced to an inaccurate create card.
+												existedAtTurnStart = true;
+												baselineProbeFailureCount++;
+											}
+										}
+									}
+								}
+								return {
+									uri,
+									repo,
+									changeType: finalizeUncoveredTurnFileChange(uri.path, observation, existsAtTurnEnd, existedAtTurnStart),
+								};
+							})));
+						} finally {
+							statLimiter.dispose();
+							baselineProbeLimiter.dispose();
+						}
+						if (baselineTrackedCount || baselineMissingCount || baselineProbeFailureCount) {
+							this._logService.info(`[AgentHost][FsWatch] Turn ${turnId}: ADDED baseline probes tracked=${baselineTrackedCount} new=${baselineMissingCount} failed=${baselineProbeFailureCount}`);
+						}
+
+						const extraEdits: IChatProgress[] = [];
+						for (const { uri, repo, changeType } of finalizedChanges) {
+							if (changeType === undefined) {
+								this._logService.info(`[AgentHost][FsWatch] Skipping transient ${uri.toString()} (absent at turn end)`);
+								continue;
+							}
 							extraEdits.push(hydrateUncoveredTurnEdit({
 								uri,
 								changeType,
@@ -1813,6 +1889,23 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 		observedSubagentToolIds: Set<string>,
 	): void {
 		const initial = part$.get().toolCall;
+		if ((initial.status === ToolCallStatus.Completed || initial.status === ToolCallStatus.Cancelled)
+			&& opts.seededCompletedToolCallIds?.has(initial.toolCallId)) {
+			// `activeTurnToProgress` already supplied the serialized row and any
+			// external-edit cards for this call. Installing the reconnect observer
+			// against the same immutable completed part must not append a second row,
+			// re-emit its edits, or (for client-contributed tools) invoke it again.
+			// A completed subagent can still have a live child session, so retain the
+			// child observer without recreating the parent invocation.
+			if (opts.subAgentInvocationId === undefined
+				&& !observedSubagentToolIds.has(initial.toolCallId)
+				&& (isSubagentTool(initial)
+					|| (initial.status === ToolCallStatus.Completed && !!getToolSubagentContent(initial)))) {
+				observedSubagentToolIds.add(initial.toolCallId);
+				this._observeSubagentSession(opts.sessionResource, opts.backendSession, initial.toolCallId, opts.sink, store, observedSubagentToolIds);
+			}
+			return;
+		}
 		const contributor = initial.contributor;
 		if (contributor?.kind === ToolCallContributorKind.Client && contributor.clientId === this._config.connection.clientId) {
 			this._setupClientToolCall(initial, part$, store, opts);
@@ -2664,9 +2757,12 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 		// Extract live ChatToolInvocation objects from the initial progress
 		// array so per-tool setup adopts the same instances the chat UI holds.
 		const adoptInvocations = new Map<string, ChatToolInvocation>();
+		const seededCompletedToolCallIds = new Set<string>();
 		for (const item of initialProgress) {
 			if (item instanceof ChatToolInvocation) {
 				adoptInvocations.set(item.toolCallId, item);
+			} else if (item.kind === 'toolInvocationSerialized') {
+				seededCompletedToolCallIds.add(item.toolCallId);
 			}
 		}
 
@@ -2693,7 +2789,14 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 			sink: parts => chatSession.appendProgress(parts),
 			cancellationToken: cts.token,
 			adoptInvocations,
+			seededCompletedToolCallIds,
 			seedEmittedLengths,
+			onFileEdits: tc => {
+				const editParts = this._hydrateFileEdits(chatSession.sessionResource, turnId, tc);
+				if (editParts.length > 0) {
+					chatSession.appendProgress(editParts);
+				}
+			},
 			onTurnEnded: () => {
 				chatSession.complete();
 				reconnectStore.dispose();

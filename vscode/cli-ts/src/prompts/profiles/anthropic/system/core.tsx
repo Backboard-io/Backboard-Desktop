@@ -105,11 +105,6 @@ function communication(context: PromptContext): string {
 	lines.push(
 		"- When the task is done, summarize what changed and how you verified it, in 1-4 sentences.",
 	);
-	if (hasTool(context, "FetchUrl")) {
-		lines.push(
-			"- For questions about Backboard itself (commands, configuration, settings), fetch https://docs.backboard.io/llms.txt with fetch_url.",
-		);
-	}
 	return lines.join("\n");
 }
 

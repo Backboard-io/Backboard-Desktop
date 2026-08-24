@@ -31,7 +31,7 @@
 	 * Holds up the frame the window was showing before this load (see
 	 * `INativeWindowConfiguration.transitionSnapshot`) so that switching modes
 	 * doesn't blank the window for the second or so the workbench takes to
-	 * boot. `PartsSplash` cross-fades it away once the workbench has a
+	 * boot. `PartsSplash` removes it once the workbench has a
 	 * laid-out frame of its own.
 	 */
 	function showTransitionSnapshot(configuration: INativeWindowConfiguration) {
@@ -49,7 +49,7 @@
 		snapshot.style.pointerEvents = 'none';
 		snapshot.style.backgroundImage = `url("${configuration.transitionSnapshot}")`;
 		// The window cannot have resized between the capture and this load, so
-		// stretching to the viewport reproduces it pixel for pixel.
+		// stretching the logical-size frame restores the outgoing layout.
 		snapshot.style.backgroundSize = '100% 100%';
 
 		window.document.body.appendChild(snapshot);

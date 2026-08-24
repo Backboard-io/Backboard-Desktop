@@ -53,6 +53,14 @@ export const AGENT_IGNORED_FILE_GLOBS: readonly string[] = [
 	'**/*.tsbuildinfo',
 	'**/.DS_Store',
 	'**/*.log',
+	// Atomic save sibling used by VS Code's disk provider:
+	// `.!<pid>!<target basename>` (for example `.!13356!level.js`).
+	'**/.!*!*',
+	// Atomic rewrite scratch files observed from edit tools. `XX` is a literal
+	// prefix followed by the six alphanumerics produced from an `XXXXXXXX`
+	// mkstemp template; the exact-width glob avoids hiding ordinary `XX…` files.
+	'**/XX[0-9A-Za-z][0-9A-Za-z][0-9A-Za-z][0-9A-Za-z][0-9A-Za-z][0-9A-Za-z]',
+	'**/*.tmp',
 ];
 
 const ignoredSegments = new Set(AGENT_IGNORED_DIRECTORIES);
@@ -68,10 +76,18 @@ const IGNORED_FILE_PATTERN = /(?:\.tsbuildinfo|\/\.DS_Store|\.log)$/;
  *   - `foo.ts.tmp.98222.fde4c15a7895`  (`.tmp.<pid>.<hex>`)
  *   - `foo.ts.98222.1720000000000.fde4c15a7895.tmp` (`.<pid>.<ts>[.<hex>].tmp`)
  *   - `foo.ts.vsctmp` (VS Code's default write postfix)
+ *   - `.!13356!foo.ts` (VS Code's atomic-write sibling)
+ *   - `XXSf7h6t` (mkstemp `XXXXXXXX`: literal `XX` + six random characters)
+ *   - `foo.ts.tmp` (plain atomic-rewrite sibling)
  *   - `.18bf259f3f2fcae3-00000000.bun-build` (bun compile scratch file)
  *   - `binary.cstemp` (macOS `codesign` in-place signing temp)
  */
-const TEMP_WRITE_FILE_PATTERN = /(?:\.tmp\.\d+\.[0-9a-f]+|\.\d+\.\d+(?:\.[0-9a-f]+)?\.tmp|\.vsctmp|\.bun-build|\.cstemp)$/i;
+const TEMP_WRITE_FILE_PATTERN = /(?:\.tmp\.\d+\.[0-9a-f]+|\.\d+\.\d+(?:\.[0-9a-f]+)?\.tmp|\.vsctmp|\.bun-build|\.cstemp|\.tmp|(?:^|\/)\.!\d+![^/]+|(?:^|\/)XX[a-z0-9]{6})$/i;
+
+/** Whether a path is an editor/tool atomic-write sibling rather than a real file. */
+export function isAgentAtomicWriteTempPath(path: string): boolean {
+	return TEMP_WRITE_FILE_PATTERN.test(path);
+}
 
 /**
  * Whether a slash-separated path should not be tracked as a user-visible file
@@ -83,5 +99,5 @@ const TEMP_WRITE_FILE_PATTERN = /(?:\.tmp\.\d+\.[0-9a-f]+|\.\d+\.\d+(?:\.[0-9a-f
 export function isIgnoredAgentPath(path: string): boolean {
 	return path.split('/').some(segment => ignoredSegments.has(segment))
 		|| IGNORED_FILE_PATTERN.test(path)
-		|| TEMP_WRITE_FILE_PATTERN.test(path);
+		|| isAgentAtomicWriteTempPath(path);
 }

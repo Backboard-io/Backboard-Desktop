@@ -153,17 +153,27 @@ function describeWebSearch(query: string, action: WebSearchAction | null): strin
 	return query;
 }
 
-function describeFileChange(changes: readonly FileUpdateChange[]): string {
-	return changes.map(change => {
-		const kind = change.kind.type === 'update' && change.kind.move_path
-			? `rename from ${change.kind.move_path}`
-			: change.kind.type;
-		return `${kind}: ${change.path}`;
-	}).join('\n');
+const MAX_FILE_CHANGE_SUMMARY_ENTRIES = 20;
+const MAX_FILE_CHANGE_PATH_LENGTH = 240;
+
+function truncateFileChangePath(path: string): string {
+	return path.length > MAX_FILE_CHANGE_PATH_LENGTH
+		? `${path.slice(0, MAX_FILE_CHANGE_PATH_LENGTH - 1)}…`
+		: path;
 }
 
-function fileChangeOutput(changes: readonly FileUpdateChange[]): string {
-	return changes.map(change => `${describeFileChange([change])}\n${change.diff}`.trim()).join('\n\n');
+function describeFileChange(changes: readonly FileUpdateChange[]): string {
+	const summary = changes.slice(0, MAX_FILE_CHANGE_SUMMARY_ENTRIES).map(change => {
+		const kind = change.kind.type === 'update' && change.kind.move_path
+			? `rename from ${truncateFileChangePath(change.kind.move_path)}`
+			: change.kind.type;
+		const path = truncateFileChangePath(change.path);
+		return `${kind}: ${path}`;
+	});
+	if (changes.length > MAX_FILE_CHANGE_SUMMARY_ENTRIES) {
+		summary.push(`…and ${changes.length - MAX_FILE_CHANGE_SUMMARY_ENTRIES} more files`);
+	}
+	return summary.join('\n');
 }
 
 function jsonValueToText(value: JsonValue): string {
@@ -386,14 +396,16 @@ export function mapItemStarted(
 	}
 	if (params.item.type === 'fileChange') {
 		const toolCallId = generateUuid();
-		const output = fileChangeOutput(params.item.changes);
+		const summary = describeFileChange(params.item.changes) || 'Apply file changes';
 		state.itemToToolCall.set(params.item.id, {
 			toolCallId,
 			turnId: params.turnId,
 			toolName: 'file_edit',
-			output,
+			// Keep only bounded path metadata. Unified patches are rendered lazily
+			// by the external-edit cards; retaining and redispatching them here made
+			// streaming file changes copy O(total patch bytes²).
+			output: summary,
 		});
-		const summary = describeFileChange(params.item.changes) || 'Apply file changes';
 		return [
 			{
 				type: ActionType.ChatToolCallStart,
@@ -416,12 +428,6 @@ export function mapItemStarted(
 				toolInput: summary,
 				confirmed: ToolCallConfirmationReason.NotNeeded,
 			},
-			...(output ? [{
-				type: ActionType.ChatToolCallContentChanged,
-				turnId: params.turnId,
-				toolCallId,
-				content: [{ type: ToolResultContentType.Text, text: output }],
-			} satisfies SessionAction | ChatAction] : []),
 		];
 	}
 	if (params.item.type === 'mcpToolCall') {
@@ -532,7 +538,11 @@ export function mapFileChangePatchUpdated(
 	if (!entry) {
 		return [];
 	}
-	entry.output = fileChangeOutput(params.changes);
+	const summary = describeFileChange(params.changes);
+	if (summary === entry.output) {
+		return [];
+	}
+	entry.output = summary;
 	return [{
 		type: ActionType.ChatToolCallContentChanged,
 		turnId: entry.turnId,
@@ -549,13 +559,11 @@ export function mapFileChangeOutputDelta(
 	if (!entry) {
 		return [];
 	}
-	entry.output += params.delta;
-	return [{
-		type: ActionType.ChatToolCallContentChanged,
-		turnId: entry.turnId,
-		toolCallId: entry.toolCallId,
-		content: [{ type: ToolResultContentType.Text, text: entry.output }],
-	}];
+	// `delta` is the patch body. The completed external-edit card already owns
+	// that UI, so forwarding each growing prefix duplicates the diff and causes
+	// quadratic transport/state/DOM churn. Path summaries arrive through
+	// `patchUpdated`; output deltas intentionally require no chat action.
+	return [];
 }
 
 export function mapMcpToolCallProgress(
@@ -676,13 +684,10 @@ export function mapItemCompleted(
 			return [];
 		}
 		state.itemToToolCall.delete(params.item.id);
-		const output = fileChangeOutput(params.item.changes) || entry.output;
 		const success = params.item.status === 'completed';
-		const content = output ? [{ type: ToolResultContentType.Text as const, text: output }] : undefined;
 		const result = {
 			success,
 			pastTenseMessage: success ? 'Applied file changes' : 'Failed to apply file changes',
-			content,
 			...(success ? {} : { error: { message: `Patch ${params.item.status}` } }),
 		};
 		return [{

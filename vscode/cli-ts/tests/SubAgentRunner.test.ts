@@ -241,9 +241,9 @@ describe("SubAgentRunner", () => {
 		const parentTodoUpdates: unknown[] = [];
 		const childProgress: unknown[] = [];
 		parentBus.on("todos:updated", (event) => parentTodoUpdates.push(event));
-		parentBus.on("agent:child_tool_start", (event) =>
-			childProgress.push(event),
-		);
+		parentBus.on("agent:child_event", (event) => {
+			if (event.event.type === "tool:start") childProgress.push(event);
+		});
 
 		class TodoClient extends CompletingClient {
 			override async *runMessage(): AsyncIterable<ProviderEvent> {
@@ -286,8 +286,9 @@ describe("SubAgentRunner", () => {
 	it("stops relaying child events once the parent signal is aborted", () => {
 		const parentBus = new EventBus();
 		const relayed: string[] = [];
-		parentBus.on("agent:child_tool_start", () => relayed.push("start"));
-		parentBus.on("agent:child_tool_result", () => relayed.push("result"));
+		parentBus.on("agent:child_event", (event) =>
+			relayed.push(event.event.type),
+		);
 
 		const childBus = new EventBus();
 		const controller = new AbortController();
@@ -317,7 +318,7 @@ describe("SubAgentRunner", () => {
 			name: "Read",
 			inputSummary: "",
 		});
-		expect(relayed).toEqual(["start"]);
+		expect(relayed).toEqual(["tool:start"]);
 
 		// After cancel the winding-down child keeps emitting, but nothing may
 		// reach the parent - it would resurrect the committed "Interrupted" row.
@@ -330,6 +331,6 @@ describe("SubAgentRunner", () => {
 		});
 		detach();
 
-		expect(relayed).toEqual(["start"]);
+		expect(relayed).toEqual(["tool:start"]);
 	});
 });

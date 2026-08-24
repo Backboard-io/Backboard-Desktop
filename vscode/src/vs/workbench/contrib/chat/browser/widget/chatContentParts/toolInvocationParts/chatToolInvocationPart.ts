@@ -34,6 +34,20 @@ import { ChatToolPostExecuteConfirmationPart } from './chatToolPostExecuteConfir
 import { ChatToolProgressSubPart } from './chatToolProgressPart.js';
 import { ChatToolStreamingSubPart } from './chatToolStreamingSubPart.js';
 
+export interface IToolInvocationSubPartRenderIdentity {
+	readonly state: IChatToolInvocation.State;
+	readonly dataKind: string | undefined;
+	readonly data: unknown;
+}
+
+export function shouldRerenderToolInvocationSubPart(previous: IToolInvocationSubPartRenderIdentity, next: IToolInvocationSubPartRenderIdentity): boolean {
+	const stateKindChanged = previous.state.type !== next.state.type;
+	const dataKindChanged = previous.dataKind !== next.dataKind;
+	const terminalPayloadChanged = next.dataKind === 'terminal'
+		&& (previous.state !== next.state || previous.data !== next.data);
+	return stateKindChanged || dataKindChanged || terminalPayloadChanged;
+}
+
 export class ChatToolInvocationPart extends Disposable implements IChatContentPart {
 	public readonly domNode: HTMLElement;
 
@@ -42,11 +56,14 @@ export class ChatToolInvocationPart extends Disposable implements IChatContentPa
 	}
 
 	public get codeblocks(): IChatCodeBlockInfo[] {
-		const codeblocks = this.subPart?.codeblocks ?? [];
-		if (this.mcpAppPart) {
-			codeblocks.push(...this.mcpAppPart.value?.codeblocks ?? []);
-		}
-		return codeblocks;
+		// Sub-parts are allowed to return a stable codeblock array. Never append MCP
+		// entries to that array in-place: this getter is queried repeatedly while the
+		// response is laid out, and mutating it would accumulate duplicates on every
+		// read.
+		return [
+			...(this.subPart?.codeblocks ?? []),
+			...(this.mcpAppPart.value?.codeblocks ?? []),
+		];
 	}
 
 	public get codeblocksPartId(): string | undefined {
@@ -94,12 +111,19 @@ export class ChatToolInvocationPart extends Disposable implements IChatContentPa
 
 		let appData: IObservable<IMcpAppRenderData | undefined> = constObservable(undefined);
 		if (toolInvocation.kind === 'toolInvocation') {
-			const initialState = toolInvocation.state.get().type;
-			const initialDataKind = toolInvocation.toolSpecificDataKind.get();
+			let renderedIdentity: IToolInvocationSubPartRenderIdentity = {
+				state: toolInvocation.state.get(),
+				dataKind: toolInvocation.toolSpecificDataKind.get(),
+				data: toolInvocation.toolSpecificData,
+			};
 			this._register(autorun(reader => {
-				const stateChanged = toolInvocation.state.read(reader).type !== initialState;
-				const dataKindChanged = toolInvocation.toolSpecificDataKind.read(reader) !== initialDataKind;
-				if (stateChanged || dataKindChanged) {
+				const nextIdentity: IToolInvocationSubPartRenderIdentity = {
+					state: toolInvocation.state.read(reader),
+					dataKind: toolInvocation.toolSpecificDataKind.read(reader),
+					data: toolInvocation.toolSpecificData,
+				};
+				if (shouldRerenderToolInvocationSubPart(renderedIdentity, nextIdentity)) {
+					renderedIdentity = nextIdentity;
 					render();
 				}
 			}));

@@ -48,7 +48,9 @@ export class ResourcePool<T extends IDisposable> implements IDisposable {
 	}
 
 	release(item: T): void {
-		this._inUse.delete(item);
+		if (!this._inUse.delete(item)) {
+			return;
+		}
 		this.pool.push(item);
 		this._scheduleTrim();
 	}
@@ -156,7 +158,9 @@ export class KeyedResourcePool<T extends IDisposable> implements IDisposable {
 	}
 
 	release(item: T, key: string): void {
-		this._inUse.delete(item);
+		if (!this._inUse.delete(item)) {
+			return;
+		}
 		this._idle.push(item);
 
 		// Remove old key association if it changed

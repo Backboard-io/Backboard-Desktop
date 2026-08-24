@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { $, addDisposableListener, clearNode, DisposableResizeObserver, disposableWindowInterval, getWindow, hide, scheduleAtNextAnimationFrame } from '../../../../../../base/browser/dom.js';
+import { $, addDisposableListener, clearNode, DisposableResizeObserver, disposableWindowInterval, EventHelper, getWindow, hide, scheduleAtNextAnimationFrame } from '../../../../../../base/browser/dom.js';
 import { alert } from '../../../../../../base/browser/ui/aria/aria.js';
 import { HoverStyle } from '../../../../../../base/browser/ui/hover/hover.js';
 import { DomScrollableElement } from '../../../../../../base/browser/ui/scrollbar/scrollableElement.js';
@@ -40,6 +40,7 @@ import { ChatMessageRole, ILanguageModelsService } from '../../../common/languag
 import './media/chatThinkingContent.css';
 import { IHoverService } from '../../../../../../platform/hover/browser/hover.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../../platform/storage/common/storage.js';
+import { ILogService } from '../../../../../../platform/log/common/log.js';
 import { extractImagesFromToolInvocationOutputDetails } from '../../../common/chatImageExtraction.js';
 import { IChatCollapsibleIODataPart } from './chatToolInputOutputContentPart.js';
 import { ChatThinkingExternalResourceWidget } from './chatThinkingExternalResourcesWidget.js';
@@ -522,7 +523,13 @@ export function getToolActivitySubkind(toolInvocationId: string | undefined, met
 		isToolInvocation ? textFromMarkdown(metadata.pastTenseMessage) : undefined,
 		isToolInvocation ? textFromMarkdown(metadata.originMessage) : undefined,
 	].filter(Boolean).join(' ').toLocaleLowerCase();
-	if (isEditToolId(semanticToolText)) {
+	const isTodoProgressTool = semanticToolText.includes('todo_write')
+		|| semanticToolText.includes('todowrite')
+		|| semanticToolText.includes('task progress');
+	const isFileWriteTool = semanticToolText.includes('write_file')
+		|| semanticToolText.includes('write file')
+		|| semanticToolText.includes('write_to_file');
+	if (!isTodoProgressTool && (isEditToolId(semanticToolText) || isFileWriteTool)) {
 		return 'edit';
 	}
 	if (
@@ -617,8 +624,30 @@ interface IToolActivityGroup {
 	readonly chevron: HTMLElement;
 	readonly body: HTMLElement;
 	readonly items: { toolCallId?: string; subkind: ToolActivitySubkind; fallbackLabel?: string }[];
+	readonly subkindCounts: Record<ToolActivitySubkind, number>;
+	readonly orderedSubkinds: ToolActivitySubkind[];
+	readonly runningToolCallIds: Set<string>;
 	readonly hover: MutableDisposable<IDisposable>;
 	expanded: boolean;
+	removed: boolean;
+}
+
+interface ICursorReasoningDisclosure {
+	readonly label: HTMLElement;
+	readonly labelText: HTMLElement;
+	readonly chevron: HTMLElement;
+	readonly startedAt: number;
+	readonly renderedMarkdown: MutableDisposable<IRenderedMarkdown>;
+	completedAt?: number;
+	expanded: boolean;
+	followTail: boolean;
+	latestContent: string;
+	renderedContent?: string;
+	pendingViewportSync?: IDisposable;
+}
+
+function createToolActivitySubkindCounts(): Record<ToolActivitySubkind, number> {
+	return { read: 0, search: 0, edit: 0, terminal: 0, other: 0 };
 }
 
 function extractTitleFromThinkingContent(content: string): string | undefined {
@@ -627,13 +656,22 @@ function extractTitleFromThinkingContent(content: string): string | undefined {
 }
 
 /** Last non-empty line of the streaming reasoning, stripped of list/heading markers. */
-function lastNonEmptyThinkingLine(content: string): string | undefined {
-	const lines = content.split('\n');
-	for (let i = lines.length - 1; i >= 0; i--) {
-		const line = lines[i].replace(/^[\s#*>-]+/, '').replace(/\*\*/g, '').trim();
+export function lastNonEmptyThinkingLine(content: string): string | undefined {
+	// Streaming reasoning is an accumulated string. Splitting the whole value on
+	// every delta makes tail extraction quadratic and allocates every prior line.
+	// Walk backwards instead; the common case examines only the newest line.
+	let end = content.length;
+	while (end > 0) {
+		const newline = content.lastIndexOf('\n', end - 1);
+		const start = newline + 1;
+		const line = content.slice(start, end).replace(/^[\s#*>-]+/, '').replace(/\*\*/g, '').trim();
 		if (line.length > 0) {
 			return line;
 		}
+		if (newline < 0) {
+			break;
+		}
+		end = newline;
 	}
 	return undefined;
 }
@@ -780,7 +818,6 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 	public readonly codeblocksPartId: undefined;
 
 	private readonly _onDidChangeHeight = this._register(new Emitter<void>());
-	private readonly _asyncRenderCallback = () => this._onDidChangeHeight.fire();
 
 	private id: string | undefined;
 	private content: IChatThinkingPart;
@@ -803,14 +840,23 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 	private titleElapsedSpan: HTMLElement | undefined;
 	private readonly activityGroups: IToolActivityGroup[] = [];
 	private activeActivityGroup: IToolActivityGroup | undefined;
+	private readonly activityGroupByToolCallId = new Map<string, IToolActivityGroup>();
+	private readonly pendingActivityGroupHeaderUpdates = new Set<IToolActivityGroup>();
+	private readonly _pendingActivityGroupHeaderRefresh = this._register(new MutableDisposable<IDisposable>());
 	private autoScrollEnabled: boolean = true;
 	private scrollableElement: DomScrollableElement | undefined;
 	private lastExtractedTitle: string | undefined;
 	private extractedTitles: string[] = [];
+	private readonly extractedTitleSet = new Set<string>();
+	private readonly extractedTitleIndex = new Map<string, number>();
 	private toolInvocationCount: number = 0;
 	private appendedItemCount: number = 0;
 	private isActive: boolean = true;
 	private toolInvocations: (IChatToolInvocation | IChatToolInvocationSerialized)[] = [];
+	private readonly toolInvocationsByCallId = new Map<string, IChatToolInvocation | IChatToolInvocationSerialized>();
+	private readonly activeToolCallIds: string[] = [];
+	private readonly activeToolCallIdSet = new Set<string>();
+	private readonly runningTerminalToolCallIds = new Set<string>();
 	private allThinkingParts: IChatThinkingPart[] = [];
 	private hookCount: number = 0;
 	private singleItemInfo: { element: HTMLElement; originalParent: HTMLElement; originalNextSibling: Node | null; toolInvocation?: IChatToolInvocation | IChatToolInvocationSerialized } | undefined;
@@ -818,12 +864,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 	private hasExpandedOnce: boolean = false;
 	private workingSpinnerElement: HTMLElement | undefined;
 	private workingSpinnerLabel: HTMLElement | undefined;
-	private readonly cursorReasoningDisclosures = new Map<HTMLElement, {
-		readonly label: HTMLElement;
-		readonly labelText: HTMLElement;
-		readonly chevron: HTMLElement;
-		expanded: boolean;
-	}>();
+	private readonly cursorReasoningDisclosures = new Map<HTMLElement, ICursorReasoningDisclosure>();
 	private liveReasoningTail: string | undefined;
 	/** The spinner phrase / active-tool label without the live elapsed suffix. */
 	private workingSpinnerBaseText: string | undefined;
@@ -883,6 +924,47 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		return pool.splice(index, 1)[0];
 	}
 
+	private addExtractedTitle(title: string): void {
+		if (this.extractedTitleSet.has(title)) {
+			return;
+		}
+		this.extractedTitleSet.add(title);
+		this.extractedTitleIndex.set(title, this.extractedTitles.length);
+		this.extractedTitles.push(title);
+	}
+
+	private removeExtractedTitle(title: string): void {
+		const index = this.extractedTitleIndex.get(title);
+		if (index === undefined) {
+			return;
+		}
+		this.extractedTitles.splice(index, 1);
+		this.extractedTitleSet.delete(title);
+		this.extractedTitleIndex.delete(title);
+		// Removals are rare (hidden tools), while streaming title replacements are
+		// frequent. Repair the suffix here so every hot-path replacement stays O(1).
+		for (let i = index; i < this.extractedTitles.length; i++) {
+			this.extractedTitleIndex.set(this.extractedTitles[i], i);
+		}
+	}
+
+	private replaceExtractedTitle(previous: string, next: string): void {
+		const previousIndex = this.extractedTitleIndex.get(previous);
+		if (previousIndex === undefined) {
+			this.addExtractedTitle(next);
+			return;
+		}
+		if (this.extractedTitleSet.has(next)) {
+			this.removeExtractedTitle(previous);
+			return;
+		}
+		this.extractedTitles[previousIndex] = next;
+		this.extractedTitleSet.delete(previous);
+		this.extractedTitleIndex.delete(previous);
+		this.extractedTitleSet.add(next);
+		this.extractedTitleIndex.set(next, previousIndex);
+	}
+
 	constructor(
 		content: IChatThinkingPart,
 		context: IChatContentPartRenderContext,
@@ -896,6 +978,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		@IStorageService private readonly storageService: IStorageService,
 		@IAccessibilityService private readonly accessibilityService: IAccessibilityService,
 		@IContextKeyService contextKeyService: IContextKeyService,
+		@ILogService private readonly logService: ILogService,
 	) {
 		const initialText = extractTextFromPart(content);
 		const extractedTitle = extractTitleFromThinkingContent(initialText)
@@ -924,7 +1007,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		this.currentTitle = extractedTitle;
 		if (extractedTitle !== this.defaultTitle) {
 			this.lastExtractedTitle = extractedTitle;
-			this.extractedTitles.push(extractedTitle);
+			this.addExtractedTitle(extractedTitle);
 		}
 		this.currentThinkingValue = initialText;
 
@@ -1037,6 +1120,14 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			if (isExpanded && !this.shouldAllowExpansion() && (this.streamingCompleted || this.element.isComplete)) {
 				this.setExpanded(false);
 				return;
+			}
+
+			// Restored transcripts are initially measured while the outer Worked fold
+			// is hidden, where every reasoning viewport reports a zero-sized layout.
+			// Measure again once the fold is visible so collapsed Thoughts can follow
+			// their newest lines instead of retaining the stale hidden-state result.
+			if (isExpanded && this.useCursorTranscriptPresentation) {
+				this.scheduleAllCursorReasoningViewportSync();
 			}
 
 			this._externalResourceWidget.setCollapsed(!isExpanded);
@@ -1349,20 +1440,69 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		}
 	}
 
-	private renderMarkdown(content: string, reuseExisting?: boolean): void {
+	private renderMarkdown(content: string, reuseExisting?: boolean, textContainer = this.textContainer): void {
 		// Guard against rendering after disposal to avoid leaking disposables
 		if (this._store.isDisposed) {
 			return;
 		}
+
+		if (this.useCursorTranscriptPresentation && textContainer) {
+			if (content.trim()) {
+				this.ensureCursorReasoningLabel(textContainer);
+			}
+			const disclosure = this.cursorReasoningDisclosures.get(textContainer);
+			if (disclosure) {
+				disclosure.latestContent = content;
+				if (!disclosure.expanded) {
+					return;
+				}
+
+				const renderedContent = disclosure.renderedContent;
+				const canReuse = !!(disclosure.renderedMarkdown.value
+					&& renderedContent !== undefined
+					&& content.startsWith(renderedContent)
+					&& content.length > renderedContent.length);
+				try {
+					this.renderMarkdownInto(content, textContainer, disclosure.renderedMarkdown, canReuse);
+					disclosure.renderedContent = content;
+				} catch (error) {
+					// Deferred rendering runs from a disclosure click, outside the list
+					// renderer's construction-time error boundary. Keep the Thought usable
+					// and render an inert plaintext fallback instead of leaving it blank.
+					this.logService.error('ChatThinkingContentPart#renderMarkdown: failed to render deferred reasoning', error);
+					disclosure.renderedMarkdown.clear();
+					clearNode(textContainer);
+					const fallback = $('div.rendered-markdown.chat-thinking-render-fallback');
+					fallback.textContent = content.trim();
+					textContainer.appendChild(fallback);
+					disclosure.renderedContent = content;
+				}
+				this.scheduleCursorReasoningViewportSync(textContainer);
+				return;
+			}
+		}
+
+		this.renderMarkdownInto(content, textContainer, this._markdownResult, reuseExisting);
+		this.scheduleCursorReasoningViewportSync(textContainer);
+	}
+
+	private renderMarkdownInto(
+		content: string,
+		textContainer: HTMLElement | undefined,
+		markdownResult: MutableDisposable<IRenderedMarkdown>,
+		reuseExisting?: boolean,
+	): void {
 		const cleanedContent = content.trim();
 		if (!cleanedContent) {
-			this._markdownResult.clear();
-			if (this.textContainer) {
-				clearNode(this.textContainer);
+			markdownResult.clear();
+			if (textContainer) {
+				clearNode(textContainer);
 			}
 			return;
 		}
-		this.ensureCursorReasoningLabel();
+		if (textContainer && !this.useCursorTranscriptPresentation) {
+			textContainer.hidden = false;
+		}
 
 		// If the entire content is bolded, strip the bold markers for rendering
 		let contentToRender = cleanedContent;
@@ -1370,19 +1510,25 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			contentToRender = cleanedContent.slice(2, -2);
 		}
 
-		const target = reuseExisting ? this._markdownResult.value?.element : undefined;
+		const target = reuseExisting ? markdownResult.value?.element : undefined;
 
 		const rendered = this.chatContentMarkdownRenderer.render(new MarkdownString(contentToRender), {
 			fillInIncompleteTokens: true,
-			asyncRenderCallback: this._asyncRenderCallback,
+			asyncRenderCallback: () => {
+				if (this._store.isDisposed) {
+					return;
+				}
+				this._onDidChangeHeight.fire();
+				this.scheduleCursorReasoningViewportSync(textContainer);
+			},
 			codeBlockRendererSync: ChatThinkingContentPart._codeBlockRendererSync,
 		}, target);
-		this._markdownResult.value = rendered;
+		markdownResult.value = rendered;
 		if (!target) {
-			if (this.textContainer) {
-				clearNode(this.textContainer);
-				this.textContainer.appendChild(createThinkingIcon(Codicon.circleFilled));
-				this.textContainer.appendChild(rendered.element);
+			if (textContainer) {
+				clearNode(textContainer);
+				textContainer.appendChild(createThinkingIcon(Codicon.circleFilled));
+				textContainer.appendChild(rendered.element);
 			}
 		}
 	}
@@ -1538,19 +1684,12 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		}
 	}
 
-	private updateWorkingSpinnerVisibility(reader?: IReader): void {
+	private updateWorkingSpinnerVisibility(): void {
 		if (!this.wrapper || !this.workingSpinnerElement) {
 			return;
 		}
 
-		const hasRunningTerminalTool = this.toolInvocations.some(toolInvocation => {
-			const terminalData = toolInvocation.toolSpecificData as IChatTerminalToolInvocationData | undefined;
-			if (terminalData?.kind !== 'terminal' || terminalData.terminalCommandState?.exitCode !== undefined) {
-				return false;
-			}
-
-			return !IChatToolInvocation.isComplete(toolInvocation, reader);
-		});
+		const hasRunningTerminalTool = this.runningTerminalToolCallIds.size > 0;
 
 		const isAttached = this.workingSpinnerElement.parentNode === this.wrapper;
 		if (hasRunningTerminalTool && isAttached) {
@@ -1559,6 +1698,18 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		} else if (!hasRunningTerminalTool && !isAttached && !this.streamingCompleted && !this.element.isComplete) {
 			this.wrapper.appendChild(this.workingSpinnerElement);
 			this._onDidChangeHeight.fire();
+		}
+	}
+
+	private updateRunningTerminalTool(toolInvocation: IChatToolInvocation, reader?: IReader): void {
+		const terminalData = toolInvocation.toolSpecificData as IChatTerminalToolInvocationData | undefined;
+		const isRunningTerminal = terminalData?.kind === 'terminal'
+			&& terminalData.terminalCommandState?.exitCode === undefined
+			&& !IChatToolInvocation.isComplete(toolInvocation, reader);
+		if (isRunningTerminal) {
+			this.runningTerminalToolCallIds.add(toolInvocation.toolCallId);
+		} else {
+			this.runningTerminalToolCallIds.delete(toolInvocation.toolCallId);
 		}
 	}
 
@@ -1655,20 +1806,63 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		const label = $('button.chat-thinking-cursor-reasoning-label', {
 			type: 'button',
 			role: 'button',
-			'aria-expanded': 'true',
+			'aria-expanded': 'false',
 		});
 		const labelText = $('span.chat-thinking-cursor-reasoning-label-text');
-		const chevron = $('span.codicon.codicon-chevron-down.chat-thinking-cursor-reasoning-chevron', { 'aria-hidden': 'true' });
+		const chevron = $('span.codicon.codicon-chevron-right.chat-thinking-cursor-reasoning-chevron', { 'aria-hidden': 'true' });
 		label.append(labelText, chevron);
-		const disclosure = { label, labelText, chevron, expanded: true };
+		const disclosure: ICursorReasoningDisclosure = {
+			label,
+			labelText,
+			chevron,
+			startedAt: Date.now(),
+			renderedMarkdown: this._register(new MutableDisposable<IRenderedMarkdown>()),
+			expanded: false,
+			followTail: true,
+			latestContent: textContainer === this.textContainer ? this.currentThinkingValue : '',
+		};
 		this.cursorReasoningDisclosures.set(textContainer, disclosure);
+		this._register(toDisposable(() => {
+			const current = this.cursorReasoningDisclosures.get(textContainer);
+			current?.pendingViewportSync?.dispose();
+			this.cursorReasoningDisclosures.delete(textContainer);
+		}));
 		if (textContainer.parentElement === this.wrapper) {
 			this.wrapper.insertBefore(label, textContainer);
 		}
 		this._register(addDisposableListener(label, 'click', () => {
 			this.setCursorReasoningExpanded(textContainer, !disclosure.expanded);
 		}));
-		this.setCursorReasoningExpanded(textContainer, true, false);
+		this._register(addDisposableListener(textContainer, 'scroll', () => {
+			if (disclosure.expanded) {
+				const remaining = textContainer.scrollHeight - textContainer.clientHeight - textContainer.scrollTop;
+				disclosure.followTail = remaining <= 8;
+			}
+		}));
+		this._register(addDisposableListener(textContainer, 'wheel', (event: WheelEvent) => {
+			if (!disclosure.expanded || event.deltaY === 0) {
+				return;
+			}
+			const deltaScale = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+				? 20
+				: event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+					? textContainer.clientHeight
+					: 1;
+			const maxScrollTop = Math.max(0, textContainer.scrollHeight - textContainer.clientHeight);
+			const nextScrollTop = Math.min(maxScrollTop, Math.max(0, textContainer.scrollTop + event.deltaY * deltaScale));
+			if (nextScrollTop === textContainer.scrollTop) {
+				// Once the Thought reaches the requested edge, let the same gesture
+				// continue through to the outer chat timeline.
+				return;
+			}
+			EventHelper.stop(event, true);
+			textContainer.scrollTop = nextScrollTop;
+		}, { passive: false }));
+		// Let the user watch the active reasoning stream without an extra click.
+		// The viewport is bounded and tail-following, and the outer Worked fold
+		// collapses the whole trace as soon as the response completes.
+		const live = !this.streamingCompleted && !this.element.isComplete;
+		this.setCursorReasoningExpanded(textContainer, live, false);
 		this.updateCursorReasoningLabel();
 		return label;
 	}
@@ -1684,6 +1878,9 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 	}
 
 	private setCursorReasoningExpanded(textContainer: HTMLElement, expanded: boolean, fireHeightChange = true): void {
+		if (this._store.isDisposed) {
+			return;
+		}
 		const disclosure = this.cursorReasoningDisclosures.get(textContainer);
 		if (!disclosure) {
 			return;
@@ -1692,10 +1889,91 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		disclosure.label.ariaExpanded = String(expanded);
 		disclosure.chevron.classList.toggle('codicon-chevron-down', expanded);
 		disclosure.chevron.classList.toggle('codicon-chevron-right', !expanded);
+		if (expanded && disclosure.renderedContent !== disclosure.latestContent) {
+			// Hydrate this exact reasoning segment from its latest snapshot before it
+			// becomes visible. Hidden deltas are overwrite-only, so opening performs
+			// one catch-up render rather than replaying the stream.
+			this.renderMarkdown(disclosure.latestContent, undefined, textContainer);
+		}
+		// A closed Thought contributes no markdown/layout work. Opening it reveals a
+		// bounded viewport rather than allowing a long reasoning trace to expand the
+		// response row by thousands of pixels.
 		textContainer.hidden = !expanded;
+		textContainer.classList.toggle('chat-thinking-cursor-reasoning-preview', expanded);
+		if (expanded) {
+			disclosure.followTail = disclosure.completedAt === undefined && !this.streamingCompleted && !this.element.isComplete;
+			this.scheduleCursorReasoningViewportSync(textContainer);
+		} else {
+			disclosure.pendingViewportSync?.dispose();
+			disclosure.pendingViewportSync = undefined;
+			disclosure.followTail = true;
+			disclosure.renderedMarkdown.clear();
+			disclosure.renderedContent = undefined;
+			clearNode(textContainer);
+			textContainer.classList.remove('chat-thinking-cursor-reasoning-overflowing');
+			textContainer.scrollTop = 0;
+		}
 		if (fireHeightChange) {
 			this._onDidChangeHeight.fire();
 		}
+	}
+
+	private collapseAllCursorReasoning(): void {
+		for (const textContainer of this.cursorReasoningDisclosures.keys()) {
+			this.setCursorReasoningExpanded(textContainer, false, false);
+		}
+	}
+
+	/**
+	 * An open Thought behaves like a small live viewport: it follows the newest
+	 * streamed reasoning while keeping long traces out of the response layout.
+	 * Layout is measured on the next frame so markdown and async renderers have
+	 * committed their latest height before we move the viewport to its tail.
+	 */
+	private scheduleCursorReasoningViewportSync(textContainer = this.textContainer): void {
+		if (!this.useCursorTranscriptPresentation || !textContainer) {
+			return;
+		}
+		const disclosure = this.cursorReasoningDisclosures.get(textContainer);
+		if (!disclosure?.expanded) {
+			return;
+		}
+		disclosure.pendingViewportSync?.dispose();
+		disclosure.pendingViewportSync = scheduleAtNextAnimationFrame(getWindow(textContainer), () => {
+			disclosure.pendingViewportSync = undefined;
+			if (this._store.isDisposed || !disclosure.expanded || textContainer.hidden || !textContainer.classList.contains('chat-thinking-cursor-reasoning-preview')) {
+				return;
+			}
+			const overflowing = textContainer.scrollHeight > textContainer.clientHeight + 1;
+			textContainer.classList.toggle('chat-thinking-cursor-reasoning-overflowing', overflowing);
+			if (!overflowing) {
+				textContainer.scrollTop = 0;
+			} else if (disclosure.followTail) {
+				textContainer.scrollTop = textContainer.scrollHeight;
+			}
+		});
+	}
+
+	private scheduleAllCursorReasoningViewportSync(): void {
+		for (const textContainer of this.cursorReasoningDisclosures.keys()) {
+			this.scheduleCursorReasoningViewportSync(textContainer);
+		}
+	}
+
+	/** Freezes the active reasoning segment before a tool or a new segment starts. */
+	private finishCurrentCursorReasoning(completedAt = Date.now()): void {
+		if (!this.useCursorTranscriptPresentation) {
+			return;
+		}
+		const disclosures = Array.from(this.cursorReasoningDisclosures.values());
+		for (let index = disclosures.length - 1; index >= 0; index--) {
+			const disclosure = disclosures[index];
+			if (disclosure.completedAt === undefined) {
+				disclosure.completedAt = Math.max(disclosure.startedAt, completedAt);
+				break;
+			}
+		}
+		this.updateCursorReasoningLabel();
 	}
 
 	/** Keeps each reasoning section legible inside the outer turn-level work fold. */
@@ -1703,14 +1981,19 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		if (this.cursorReasoningDisclosures.size === 0) {
 			return;
 		}
-		const complete = forceComplete || this.streamingCompleted || this.element.isComplete;
-		const elapsedMs = this.elapsedAtCompletionMs ?? (this.wasStreamingLive ? Date.now() - this.startTimeMs : 0);
-		const label = complete
-			? elapsedMs < 1500
-			? localize('chat.thinking.cursorReasoningBrief', "Thought briefly")
-			: localize('chat.thinking.cursorReasoningElapsed', "Thought {0}", formatThinkingElapsed(elapsedMs))
-			: localize('chat.thinking.cursorReasoningLive', "Thinking");
+		const now = Date.now();
 		for (const disclosure of this.cursorReasoningDisclosures.values()) {
+			if (forceComplete && disclosure.completedAt === undefined) {
+				disclosure.completedAt = Math.max(disclosure.startedAt, now);
+			}
+			const complete = disclosure.completedAt !== undefined || this.streamingCompleted || this.element.isComplete;
+			const canShowMeasuredDuration = this.wasStreamingLive;
+			const elapsedMs = Math.max(0, (disclosure.completedAt ?? now) - disclosure.startedAt);
+			const label = complete
+				? canShowMeasuredDuration
+					? localize('chat.thinking.cursorReasoningElapsed', "Thought {0}", formatThinkingElapsed(elapsedMs))
+					: localize('chat.thinking.cursorReasoning', "Thought")
+				: localize('chat.thinking.cursorReasoningLiveElapsed', "Thinking {0}", formatThinkingElapsed(elapsedMs));
 			disclosure.label.classList.toggle('chat-thinking-cursor-reasoning-live', !complete);
 			disclosure.labelText.textContent = label;
 		}
@@ -1743,14 +2026,15 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 
 	/** Label of the most recent tool invocation that is still running, if any. */
 	private getActiveToolLabel(): string | undefined {
-		for (let i = this.toolInvocations.length - 1; i >= 0; i--) {
-			const toolInvocation = this.toolInvocations[i];
-			if (toolInvocation.kind === 'toolInvocation' && !IChatToolInvocation.isComplete(toolInvocation)) {
-				const label = this.toolLabelsByCallId.get(toolInvocation.toolCallId);
-				if (label) {
-					return label;
-				}
+		// Tool-heavy runs used to scan every completed invocation whenever the
+		// spinner changed. Keep a lazily-pruned stack instead: each finished id is
+		// skipped at most once over the lifetime of the response.
+		while (this.activeToolCallIds.length > 0) {
+			const toolCallId = this.activeToolCallIds[this.activeToolCallIds.length - 1];
+			if (this.activeToolCallIdSet.has(toolCallId)) {
+				return this.toolLabelsByCallId.get(toolCallId);
 			}
+			this.activeToolCallIds.pop();
 		}
 		return undefined;
 	}
@@ -1841,10 +2125,10 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			return;
 		}
 
-			const nativeText = nativeContent.textContent?.trim();
-			const presentation = t3WorkEntryPresentation(metadata, toolCallId, fallbackLabel, nativeText);
-			const isPlanRow = presentation.kind === 'plan';
-			itemWrapper.classList.toggle('chat-thinking-cursor-plan-row', isPlanRow);
+		const nativeText = nativeContent.textContent?.trim();
+		const presentation = t3WorkEntryPresentation(metadata, toolCallId, fallbackLabel, nativeText);
+		const isPlanRow = presentation.kind === 'plan';
+		itemWrapper.classList.toggle('chat-thinking-cursor-plan-row', isPlanRow);
 		const invocation = metadata && (metadata.kind === 'toolInvocation' || metadata.kind === 'toolInvocationSerialized') ? metadata : undefined;
 		const isLiveInvocation = metadata?.kind === 'toolInvocation' && !IChatToolInvocation.isComplete(metadata);
 		const isSyntheticLiveEntry = !metadata && !this.element.isComplete;
@@ -1877,41 +2161,41 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		}
 		nativeContent.classList.add('chat-thinking-work-native-content');
 
-			let details: HTMLElement | undefined;
-			const preferNativeDisclosure = subkind === 'terminal' && nativeContent.childElementCount > 0;
-			if (presentation.planItems?.length) {
-				details = $('.chat-thinking-work-row-details.chat-thinking-plan-details');
-				const list = $('ul.chat-thinking-plan-list');
-				for (const item of presentation.planItems) {
-					const row = $(`li.chat-thinking-plan-item.chat-thinking-plan-item-${item.status}`);
-					const marker = $('span.chat-thinking-plan-item-marker', { 'aria-hidden': 'true' });
-					marker.textContent = item.status === 'completed' ? '✓' : item.status === 'in-progress' ? '→' : '○';
-					const title = $('span.chat-thinking-plan-item-title');
-					title.textContent = item.title;
-					row.append(marker, title);
-					list.appendChild(row);
-				}
-				details.appendChild(list);
-			} else if (presentation.details && !isPassiveCursorRow && !preferNativeDisclosure && !isPendingCursorEdit) {
-				details = $('.chat-thinking-work-row-details');
-				const pre = $('pre.chat-thinking-work-row-details-content');
-				pre.textContent = presentation.details;
-				details.appendChild(pre);
+		let details: HTMLElement | undefined;
+		const preferNativeDisclosure = subkind === 'terminal' && nativeContent.childElementCount > 0;
+		if (presentation.planItems?.length) {
+			details = $('.chat-thinking-work-row-details.chat-thinking-plan-details');
+			const list = $('ul.chat-thinking-plan-list');
+			for (const item of presentation.planItems) {
+				const row = $(`li.chat-thinking-plan-item.chat-thinking-plan-item-${item.status}`);
+				const marker = $('span.chat-thinking-plan-item-marker', { 'aria-hidden': 'true' });
+				marker.textContent = item.status === 'completed' ? '✓' : item.status === 'in-progress' ? '→' : '○';
+				const title = $('span.chat-thinking-plan-item-title');
+				title.textContent = item.title;
+				row.append(marker, title);
+				list.appendChild(row);
 			}
+			details.appendChild(list);
+		} else if (presentation.details && !isPassiveCursorRow && !preferNativeDisclosure && !isPendingCursorEdit) {
+			details = $('.chat-thinking-work-row-details');
+			const pre = $('pre.chat-thinking-work-row-details-content');
+			pre.textContent = presentation.details;
+			details.appendChild(pre);
+		}
 		// Some restored/provider-native tool parts do not expose enough metadata
 		// to synthesize a details block. Keep their real subtree available as the
 		// disclosure body instead of leaving a row that can never be inspected.
-			const hasNativeDisclosure = this.useCursorTranscriptPresentation && !isPlanRow && !isPassiveCursorRow && !isPendingCursorEdit && !details && nativeContent.childElementCount > 0;
+		const hasNativeDisclosure = this.useCursorTranscriptPresentation && !isPlanRow && !isPassiveCursorRow && !isPendingCursorEdit && !details && nativeContent.childElementCount > 0;
 		const hasDisclosure = !!details || hasNativeDisclosure;
 		const disclosure = $('span.chat-thinking-work-row-disclosure', { 'aria-hidden': 'true' });
 		if (hasDisclosure) {
 			disclosure.appendChild(createT3WorkEntryIcon(itemWrapper.ownerDocument, 'chevron'));
 		}
-			const status = $('span.chat-thinking-work-row-status', { 'aria-hidden': 'true' });
-			summary.append(label, disclosure, status);
-			if (isPlanRow) {
-				summary.title = localize('chat.thinking.taskProgressDescription', "Tracks the steps the agent is working through. It does not run commands.");
-			}
+		const status = $('span.chat-thinking-work-row-status', { 'aria-hidden': 'true' });
+		summary.append(label, disclosure, status);
+		if (isPlanRow) {
+			summary.title = localize('chat.thinking.taskProgressDescription', "Tracks the steps the agent is working through. It does not run commands.");
+		}
 		itemWrapper.insertBefore(summary, nativeContent);
 		if (details) {
 			itemWrapper.insertBefore(details, nativeContent);
@@ -2057,21 +2341,28 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			this.appendToWrapper(group.container);
 		}
 		group.items.push({ toolCallId, subkind, fallbackLabel });
-		group.body.appendChild(itemWrapper);
-		if (this.useCursorTranscriptPresentation && group.items.length === 2) {
-			// The header first becomes visible with the second row, so open it for
-			// that initial reveal. After that, preserve the user's disclosure choice
-			// while later streamed tool calls join the same group.
-			group.expanded = true;
+		if (group.subkindCounts[subkind]++ === 0) {
+			group.orderedSubkinds.push(subkind);
 		}
-		this.updateActivityGroupHeader(group);
+		if (toolCallId) {
+			this.activityGroupByToolCallId.set(toolCallId, group);
+			if (this.activeToolCallIdSet.has(toolCallId)) {
+				group.runningToolCallIds.add(toolCallId);
+			}
+		}
+		group.body.appendChild(itemWrapper);
+		// Paint the first row immediately, then collapse synchronous provider
+		// bursts into one header mutation on the next frame. A restored response
+		// with hundreds of reads should not rewrite the same label hundreds of
+		// times before the browser has a chance to paint.
+		this.requestActivityGroupHeaderUpdate(group, group.items.length === 1);
 	}
 
 	private createActivityGroup(category: ToolActivityCategory): IToolActivityGroup {
 		const container = this.useCursorTranscriptPresentation
 			? $('.chat-thinking-group.chat-thinking-work-group.chat-thinking-work-summary-collapsed')
 			: this.useCursorPanelPresentation
-			? $('.chat-thinking-group.chat-thinking-work-group.chat-thinking-work-overflow-collapsed')
+			? $('.chat-thinking-group.chat-thinking-work-group.chat-thinking-work-overflow-collapsed.chat-thinking-group-live')
 			: $('.chat-thinking-group.chat-thinking-group-live');
 		if (this.useCursorTranscriptPresentation) {
 			container.dataset.workCategory = category;
@@ -2107,9 +2398,15 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		}
 
 		const toggle = () => {
+			if (this.useCursorTranscriptPresentation && container.classList.contains('chat-thinking-work-edit-live')) {
+				return;
+			}
+			if (this.useCursorPanelPresentation && group === this.activeActivityGroup && container.classList.contains('chat-thinking-group-live')) {
+				return;
+			}
 			if (this.useCursorTranscriptPresentation || this.useCursorPanelPresentation) {
 				group.expanded = !group.expanded;
-				this.updateActivityGroupHeader(group);
+				this.flushActivityGroupHeader(group);
 				this._onDidChangeHeight.fire();
 				return;
 			}
@@ -2129,9 +2426,67 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 
 		const hover = new MutableDisposable<IDisposable>();
 		this._register(hover);
-		const group: IToolActivityGroup = { category, startedAt: Date.now(), container, header, iconElement, headerLabel, chevron, body, items: [], hover, expanded: false };
+		const group: IToolActivityGroup = {
+			category,
+			startedAt: Date.now(),
+			container,
+			header,
+			iconElement,
+			headerLabel,
+			chevron,
+			body,
+			items: [],
+			subkindCounts: createToolActivitySubkindCounts(),
+			orderedSubkinds: [],
+			runningToolCallIds: new Set(),
+			hover,
+			// Active reads/searches are useful progress, so show their rows while
+			// they run. finishActiveActivityGroup folds them back into Explored N.
+			expanded: this.useCursorTranscriptPresentation && category === 'explore',
+			removed: false,
+		};
 		this.updateActivityGroupHeader(group);
 		return group;
+	}
+
+	private requestActivityGroupHeaderUpdate(group: IToolActivityGroup, immediate = false): void {
+		if (group.removed) {
+			return;
+		}
+		if (immediate) {
+			this.pendingActivityGroupHeaderUpdates.delete(group);
+			if (this.pendingActivityGroupHeaderUpdates.size === 0) {
+				this._pendingActivityGroupHeaderRefresh.clear();
+			}
+			this.updateActivityGroupHeader(group);
+			return;
+		}
+
+		this.pendingActivityGroupHeaderUpdates.add(group);
+		if (this._pendingActivityGroupHeaderRefresh.value) {
+			return;
+		}
+		this._pendingActivityGroupHeaderRefresh.value = scheduleAtNextAnimationFrame(getWindow(this.wrapper), () => {
+			this._pendingActivityGroupHeaderRefresh.clear();
+			const pending = Array.from(this.pendingActivityGroupHeaderUpdates);
+			this.pendingActivityGroupHeaderUpdates.clear();
+			for (const pendingGroup of pending) {
+				if (!pendingGroup.removed) {
+					this.updateActivityGroupHeader(pendingGroup);
+				}
+			}
+		});
+	}
+
+	private flushActivityGroupHeader(group: IToolActivityGroup): void {
+		if (group.removed) {
+			return;
+		}
+		this.pendingActivityGroupHeaderUpdates.delete(group);
+		if (this.pendingActivityGroupHeaderUpdates.size === 0) {
+			this._pendingActivityGroupHeaderRefresh.clear();
+		}
+		this.updateActivityGroupHeader(group);
 	}
 
 	/**
@@ -2148,14 +2503,12 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			this.removeActivityGroup(group);
 			return;
 		}
-		this.updateActivityGroupHeader(group);
 		if (this.useCursorTranscriptPresentation) {
 			group.expanded = false;
-			this.updateActivityGroupHeader(group);
 		} else if (this.useCursorPanelPresentation) {
 			group.expanded = false;
+			group.container.classList.remove('chat-thinking-group-live');
 			group.container.classList.add('chat-thinking-work-overflow-collapsed');
-			this.updateActivityGroupHeader(group);
 		} else {
 			group.container.classList.remove('chat-thinking-group-live');
 			group.container.classList.add('chat-thinking-group-collapsed');
@@ -2163,6 +2516,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			group.chevron.classList.remove('codicon-chevron-down');
 			group.header.ariaExpanded = 'false';
 		}
+		this.flushActivityGroupHeader(group);
 		this._onDidChangeHeight.fire();
 	}
 
@@ -2172,20 +2526,46 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		for (const group of this.activityGroups) {
 			if (this.useCursorTranscriptPresentation) {
 				group.expanded = false;
-				this.updateActivityGroupHeader(group);
+				this.flushActivityGroupHeader(group);
 			} else if (this.useCursorPanelPresentation) {
 				group.expanded = false;
 				group.container.classList.add('chat-thinking-work-overflow-collapsed');
-				this.updateActivityGroupHeader(group);
+				this.flushActivityGroupHeader(group);
 			} else if (!group.container.classList.contains('chat-thinking-group-live')) {
-				this.updateActivityGroupHeader(group);
+				this.flushActivityGroupHeader(group);
 			}
 		}
 	}
 
 	private updateActivityGroupHeader(group: IToolActivityGroup): void {
 		if (this.useCursorTranscriptPresentation) {
-			const showSummary = group.items.length > 1;
+			// Exploration is intentionally summarized from the very first call. A
+			// lone read should say "Explored 1 file" and keep provider details hidden,
+			// never leak a raw "Read 10/120 lines" row into the transcript.
+			const isExploration = group.subkindCounts.read + group.subkindCounts.search > 0;
+			const hasEdits = group.subkindCounts.edit > 0;
+			const runningEditCount = group.items.reduce((count, item) => count + (
+				item.subkind === 'edit'
+					&& !!item.toolCallId
+					&& group.runningToolCallIds.has(item.toolCallId)
+					? 1
+					: 0
+			), 0);
+			const hasRunningEdit = runningEditCount > 0;
+			group.container.classList.toggle('chat-thinking-work-edit-live', hasRunningEdit);
+			group.container.dataset.editCount = String(group.subkindCounts.edit);
+			if (hasRunningEdit) {
+				delete group.header.dataset.editCount;
+				group.header.role = 'status';
+				group.header.tabIndex = -1;
+			} else {
+				delete group.header.dataset.editCount;
+				group.header.role = 'button';
+				group.header.tabIndex = 0;
+			}
+			// Edit/write calls always use their single aggregate header. This keeps a
+			// large batch from mounting one live animation for every pending file.
+			const showSummary = isExploration || hasEdits || group.items.length > 1;
 			group.header.classList.toggle('hidden', !showSummary);
 			group.header.style.display = showSummary ? '' : 'none';
 			const expanded = !showSummary || group.expanded;
@@ -2195,23 +2575,55 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			group.chevron.classList.toggle('codicon-chevron-down', expanded);
 			const label = this.buildActivityGroupLabel(group);
 			group.headerLabel.textContent = label;
-			group.header.ariaExpanded = String(expanded);
-			group.header.ariaLabel = label;
+			if (hasRunningEdit) {
+				group.header.removeAttribute('aria-expanded');
+				group.header.ariaLabel = label;
+			} else {
+				group.header.ariaExpanded = String(expanded);
+				group.header.ariaLabel = label;
+			}
 			return;
 		}
 		if (this.useCursorPanelPresentation) {
-			const showSummary = group.items.length > 1;
+			const isLive = group === this.activeActivityGroup && group.container.classList.contains('chat-thinking-group-live');
+			const showSummary = isLive || group.items.length > 1;
 			group.header.classList.toggle('hidden', !showSummary);
 			group.header.style.display = showSummary ? '' : 'none';
 			group.container.classList.toggle('chat-thinking-work-overflow-collapsed', !group.expanded);
 			group.chevron.classList.toggle('chat-thinking-group-chevron-expanded', group.expanded);
-			group.headerLabel.textContent = this.buildActivityGroupLabel(group);
-			group.header.ariaExpanded = String(group.expanded);
-			group.header.ariaLabel = group.headerLabel.textContent;
+			group.chevron.hidden = isLive;
+			let liveSpinner = group.header.querySelector<HTMLElement>(':scope > .chat-thinking-group-live-spinner');
+			let liveElapsed = group.header.querySelector<HTMLElement>(':scope > .chat-thinking-group-live-elapsed');
+			if (isLive) {
+				liveSpinner ??= group.header.insertBefore(createThinkingIcon(ThemeIcon.modify(Codicon.loading, 'spin')), group.headerLabel);
+				liveSpinner.classList.add('chat-thinking-group-live-spinner');
+				if (!liveElapsed) {
+					liveElapsed = $('span.chat-thinking-group-live-elapsed', { 'aria-hidden': 'true' });
+					group.headerLabel.after(liveElapsed);
+				}
+				group.header.role = 'status';
+				group.header.removeAttribute('aria-live');
+				group.header.removeAttribute('aria-expanded');
+				group.header.tabIndex = -1;
+			} else {
+				liveSpinner?.remove();
+				liveElapsed?.remove();
+				group.header.role = 'button';
+				group.header.removeAttribute('aria-live');
+				group.header.tabIndex = 0;
+			}
+			const label = this.buildActivityGroupLabel(group);
+			group.headerLabel.textContent = label;
+			if (isLive && liveElapsed) {
+				liveElapsed.textContent = localize('chat.thinking.group.liveElapsedSuffix', " · {0}", formatThinkingElapsed(Date.now() - group.startedAt));
+			} else {
+				group.header.ariaExpanded = String(group.expanded);
+			}
+			group.header.ariaLabel = label;
 			return;
 		}
 		const label = this.buildActivityGroupLabel(group);
-		const liveLabel = this.useCursorPanelPresentation && group === this.activeActivityGroup && group.container.classList.contains('chat-thinking-group-live')
+		const liveLabel = group === this.activeActivityGroup && group.container.classList.contains('chat-thinking-group-live')
 			? localize('chat.thinking.group.liveElapsed', "{0} · {1}", label, formatThinkingElapsed(Date.now() - group.startedAt))
 			: label;
 		const truncated = middleTruncate(liveLabel);
@@ -2225,7 +2637,22 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 	}
 
 	private buildActivityGroupLabel(group: IToolActivityGroup): string {
-		if (group.items.length === 1) {
+		const edits = group.subkindCounts.edit;
+		const hasRunningEdit = group.items.some(item => item.subkind === 'edit' && !!item.toolCallId && group.runningToolCallIds.has(item.toolCallId));
+		if (this.useCursorTranscriptPresentation && edits > 0) {
+			if (hasRunningEdit) {
+				return edits === 1
+					? localize('chat.thinking.group.cursor.spawned.one', "Spawned 1 edit")
+					: localize('chat.thinking.group.cursor.spawned', "Spawned {0} edits", edits);
+			}
+			return edits === 1
+				? localize('chat.thinking.group.cursor.edited.one', "Edited 1 file")
+				: localize('chat.thinking.group.cursor.edited', "Edited {0} files", edits);
+		}
+		const singleItemIsCursorExploration = this.useCursorTranscriptPresentation
+			&& group.items.length === 1
+			&& (group.items[0].subkind === 'read' || group.items[0].subkind === 'search');
+		if (group.items.length === 1 && !singleItemIsCursorExploration) {
 			const item = group.items[0];
 			const itemLabel = (item.toolCallId ? this.toolLabelsByCallId.get(item.toolCallId) : undefined) ?? item.fallbackLabel;
 			if (itemLabel) {
@@ -2235,25 +2662,20 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		const total = group.items.length;
 		if (this.useCursorPanelPresentation && !this.useCursorTranscriptPresentation) {
 			const labels: string[] = [];
-			const add = (label: string) => {
-				if (!labels.includes(label)) {
-					labels.push(label);
-				}
-			};
-			for (const item of group.items) {
-				switch (item.subkind) {
-					case 'read': add(localize('chat.thinking.group.readFile', "read a file")); break;
-					case 'search': add(localize('chat.thinking.group.searchedCode', "searched code")); break;
-					case 'edit': add(localize('chat.thinking.group.editedFile', "edited a file")); break;
-					case 'terminal': add(localize('chat.thinking.group.ranCommand', "ran a command")); break;
-					case 'other': add(localize('chat.thinking.group.usedTool', "used a tool")); break;
+			for (const subkind of group.orderedSubkinds) {
+				switch (subkind) {
+					case 'read': labels.push(localize('chat.thinking.group.readFile', "read a file")); break;
+					case 'search': labels.push(localize('chat.thinking.group.searchedCode', "searched code")); break;
+					case 'edit': labels.push(localize('chat.thinking.group.editedFile', "edited a file")); break;
+					case 'terminal': labels.push(localize('chat.thinking.group.ranCommand', "ran a command")); break;
+					case 'other': labels.push(localize('chat.thinking.group.usedTool', "used a tool")); break;
 				}
 			}
 			const summary = labels.join(', ');
 			return summary ? summary.charAt(0).toLocaleUpperCase() + summary.slice(1) : localize('chat.thinking.group.worked', "Worked");
 		}
-		const reads = group.items.filter(item => item.subkind === 'read').length;
-		const searches = group.items.filter(item => item.subkind === 'search').length;
+		const reads = group.subkindCounts.read;
+		const searches = group.subkindCounts.search;
 		if (group.category === ToolActivityCategory.Explore || (this.useCursorTranscriptPresentation && reads + searches > 0)) {
 			if (reads > 0 && searches > 0) {
 				if (reads === 1 && searches === 1) {
@@ -2296,7 +2718,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 	private refreshActivityGroupForTool(toolCallId: string): void {
 		const label = this.toolLabelsByCallId.get(toolCallId);
 		const wrapper = this.toolWrappersByCallId.get(toolCallId);
-		const invocation = this.toolInvocations.find(candidate => candidate.toolCallId === toolCallId);
+		const invocation = this.toolInvocationsByCallId.get(toolCallId);
 		if (wrapper && invocation) {
 			const nativeContent = wrapper.querySelector<HTMLElement>(':scope > .chat-thinking-work-native-content');
 			const presentation = t3WorkEntryPresentation(invocation, toolCallId, label, nativeContent?.textContent?.trim());
@@ -2333,32 +2755,51 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 				}
 			}
 		}
-		for (const group of this.activityGroups) {
-			if (group.items.some(item => item.toolCallId === toolCallId)) {
-				this.updateActivityGroupHeader(group);
-				return;
-			}
+		const group = this.activityGroupByToolCallId.get(toolCallId);
+		if (group) {
+			this.requestActivityGroupHeaderUpdate(group);
 		}
 	}
 
 	/** Drops a removed tool from its group, pruning the group when it empties. */
 	private removeFromActivityGroups(toolCallId: string): void {
-		for (const group of this.activityGroups) {
-			const index = group.items.findIndex(item => item.toolCallId === toolCallId);
-			if (index === -1) {
-				continue;
-			}
-			group.items.splice(index, 1);
-			if (group.items.length === 0 || group.body.childElementCount === 0) {
-				this.removeActivityGroup(group);
-			} else {
-				this.updateActivityGroupHeader(group);
-			}
+		const group = this.activityGroupByToolCallId.get(toolCallId);
+		if (!group) {
 			return;
+		}
+		this.activityGroupByToolCallId.delete(toolCallId);
+		group.runningToolCallIds.delete(toolCallId);
+		const index = group.items.findIndex(item => item.toolCallId === toolCallId);
+		if (index === -1) {
+			return;
+		}
+		const [removedItem] = group.items.splice(index, 1);
+		group.subkindCounts[removedItem.subkind] = Math.max(0, group.subkindCounts[removedItem.subkind] - 1);
+		if (group.subkindCounts[removedItem.subkind] === 0) {
+			const orderedIndex = group.orderedSubkinds.indexOf(removedItem.subkind);
+			if (orderedIndex !== -1) {
+				group.orderedSubkinds.splice(orderedIndex, 1);
+			}
+		}
+		if (group.items.length === 0 || group.body.childElementCount === 0) {
+			this.removeActivityGroup(group);
+		} else {
+			this.requestActivityGroupHeaderUpdate(group);
 		}
 	}
 
 	private removeActivityGroup(group: IToolActivityGroup): void {
+		group.removed = true;
+		this.pendingActivityGroupHeaderUpdates.delete(group);
+		if (this.pendingActivityGroupHeaderUpdates.size === 0) {
+			this._pendingActivityGroupHeaderRefresh.clear();
+		}
+		for (const item of group.items) {
+			if (item.toolCallId && this.activityGroupByToolCallId.get(item.toolCallId) === group) {
+				this.activityGroupByToolCallId.delete(item.toolCallId);
+			}
+		}
+		group.runningToolCallIds.clear();
 		group.hover.clear();
 		group.container.remove();
 		const index = this.activityGroups.indexOf(group);
@@ -2388,11 +2829,25 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 
 		const raw = extractTextFromPart(content);
 		const next = raw;
+		let cursorDisclosure: ICursorReasoningDisclosure | undefined;
+		if (this.useCursorTranscriptPresentation && this.textContainer && next.trim()) {
+			this.ensureCursorReasoningLabel(this.textContainer);
+			cursorDisclosure = this.cursorReasoningDisclosures.get(this.textContainer);
+			if (cursorDisclosure) {
+				cursorDisclosure.latestContent = next;
+			}
+		}
 		if (next === this.currentThinkingValue) {
+			// A visibility change can make a previously deferred snapshot renderable
+			// even though the model value itself did not change.
+			if (cursorDisclosure?.expanded && cursorDisclosure.renderedContent !== next) {
+				this.renderMarkdown(next, undefined, this.textContainer);
+			}
 			return;
 		}
 		const previousValue = this.currentThinkingValue;
-		const reuseExisting = !!(this._markdownResult.value && next.startsWith(previousValue) && next.length > previousValue.length);
+		const reuseExisting = !cursorDisclosure
+			&& !!(this._markdownResult.value && next.startsWith(previousValue) && next.length > previousValue.length);
 		this.currentThinkingValue = next;
 		this.renderMarkdown(next, reuseExisting);
 
@@ -2407,9 +2862,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 
 		const extractedTitle = extractTitleFromThinkingContent(raw);
 		if (extractedTitle && extractedTitle !== this.currentTitle) {
-			if (!this.extractedTitles.includes(extractedTitle)) {
-				this.extractedTitles.push(extractedTitle);
-			}
+			this.addExtractedTitle(extractedTitle);
 			this.lastExtractedTitle = extractedTitle;
 		}
 
@@ -2453,7 +2906,9 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 	public markAsInactive(): void {
 		this.isActive = false;
 		this.elapsedAtCompletionMs ??= Date.now() - this.startTimeMs;
+		this.finishCurrentCursorReasoning();
 		this.updateCursorReasoningLabel(true);
+		this.collapseAllCursorReasoning();
 		this.domNode.classList.remove('chat-thinking-active');
 		this.domNode.classList.remove('chat-thinking-fade-top', 'chat-thinking-fade-bottom');
 		this.processPendingRemovals();
@@ -2483,7 +2938,9 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		this.domNode.classList.remove('chat-thinking-fade-top', 'chat-thinking-fade-bottom');
 		this.streamingCompleted = true;
 		this.elapsedAtCompletionMs ??= Date.now() - this.startTimeMs;
+		this.finishCurrentCursorReasoning();
 		this.updateCursorReasoningLabel(true);
+		this.collapseAllCursorReasoning();
 		this.removeElapsedIndicator();
 		this.collapseAllActivityGroups();
 
@@ -2909,6 +3366,7 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 		this.streamingCompleted = true;
 		this.elapsedAtCompletionMs ??= Date.now() - this.startTimeMs;
 		this.updateCursorReasoningLabel(true);
+		this.collapseAllCursorReasoning();
 		this.removeElapsedIndicator();
 		this.collapseAllActivityGroups();
 
@@ -2945,6 +3403,7 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 		eagerDisposable?: IDisposable,
 	): void {
 		this.processPendingRemovals();
+		this.finishCurrentCursorReasoning();
 
 		// Track tool invocation metadata immediately (for title generation)
 		this.trackToolMetadata(toolInvocationId, toolInvocationOrMarkdown);
@@ -3028,14 +3487,14 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 			// for streaming edit tools that show "Editing files")
 			const label = this.toolLabelsByCallId.get(toolCallId);
 			if (label) {
-				const titleIndex = this.extractedTitles.indexOf(label);
-				if (titleIndex !== -1) {
-					this.extractedTitles.splice(titleIndex, 1);
-				}
+				this.removeExtractedTitle(label);
 			}
 			this.toolInvocations.splice(toolInvocationsIndex, 1);
 		}
 		this.toolLabelsByCallId.delete(toolCallId);
+		this.toolInvocationsByCallId.delete(toolCallId);
+		this.activeToolCallIdSet.delete(toolCallId);
+		this.runningTerminalToolCallIds.delete(toolCallId);
 
 		this._pendingExternalResources.delete(toolCallId);
 		this._externalResourceWidget.removeToolInvocation(toolCallId);
@@ -3100,12 +3559,13 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 			this._externalResourceWidget.removeToolInvocation(toolCallId);
 			const label = this.toolLabelsByCallId.get(toolCallId);
 			if (label) {
-				const titleIndex = this.extractedTitles.indexOf(label);
-				if (titleIndex !== -1) {
-					this.extractedTitles.splice(titleIndex, 1);
-				}
+				this.removeExtractedTitle(label);
 			}
 			this.toolLabelsByCallId.delete(toolCallId);
+			this.toolInvocationsByCallId.delete(toolCallId);
+			this.activeToolCallIdSet.delete(toolCallId);
+			this.runningTerminalToolCallIds.delete(toolCallId);
+			this.removeFromActivityGroups(toolCallId);
 		}
 
 		const toolInvocationsIndex = this.toolInvocations.findIndex(t =>
@@ -3189,11 +3649,11 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 			this.toolInvocations.splice(toolInvocationsIndex, 1);
 		}
 
-		const titleIndex = this.extractedTitles.indexOf(toolLabel);
-		if (titleIndex !== -1) {
-			this.extractedTitles.splice(titleIndex, 1);
-		}
+		this.removeExtractedTitle(toolLabel);
 		this.toolLabelsByCallId.delete(toolCallId);
+		this.toolInvocationsByCallId.delete(toolCallId);
+		this.activeToolCallIdSet.delete(toolCallId);
+		this.runningTerminalToolCallIds.delete(toolCallId);
 		this._pendingExternalResources.delete(toolCallId);
 		this._externalResourceWidget.removeToolInvocation(toolCallId);
 		this.updateWorkingSpinnerVisibility();
@@ -3247,7 +3707,15 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 
 			// Track the displayed label for consistent cleanup
 			const toolCallId = toolInvocationOrMarkdown.toolCallId;
+			this.toolInvocationsByCallId.set(toolCallId, toolInvocationOrMarkdown);
 			this.toolLabelsByCallId.set(toolCallId, toolCallLabel);
+			if (toolInvocationOrMarkdown.kind === 'toolInvocation' && !IChatToolInvocation.isComplete(toolInvocationOrMarkdown) && !this.activeToolCallIdSet.has(toolCallId)) {
+				this.activeToolCallIdSet.add(toolCallId);
+				this.activeToolCallIds.push(toolCallId);
+			}
+			if (toolInvocationOrMarkdown.kind === 'toolInvocation') {
+				this.updateRunningTerminalTool(toolInvocationOrMarkdown);
+			}
 
 			// Render external image pills for serialized (already-completed) tool invocations
 			if (toolInvocationOrMarkdown.kind === 'toolInvocationSerialized') {
@@ -3271,19 +3739,7 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 
 				const updateTitle = (updatedMessage: string) => {
 					if (updatedMessage && updatedMessage !== currentToolLabel) {
-						// replace old title if exists, otherwise add new
-						const oldIndex = this.extractedTitles.indexOf(currentToolLabel);
-						const updatedIndex = this.extractedTitles.indexOf(updatedMessage);
-
-						if (oldIndex !== -1) {
-							if (updatedIndex !== -1 && updatedIndex !== oldIndex) {
-								this.extractedTitles.splice(oldIndex, 1);
-							} else {
-								this.extractedTitles[oldIndex] = updatedMessage;
-							}
-						} else if (updatedIndex === -1) {
-							this.extractedTitles.push(updatedMessage);
-						}
+						this.replaceExtractedTitle(currentToolLabel, updatedMessage);
 						currentToolLabel = updatedMessage;
 						this.toolLabelsByCallId.set(toolCallId, updatedMessage);
 						this.lastExtractedTitle = updatedMessage;
@@ -3312,7 +3768,8 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 					}
 
 					const currentState = toolInvocationOrMarkdown.state.read(reader);
-					this.updateWorkingSpinnerVisibility(reader);
+					this.updateRunningTerminalTool(toolInvocationOrMarkdown, reader);
+					this.updateWorkingSpinnerVisibility();
 
 					// queue item to be removed if it was streaming and presentation is hidden
 					if (isStreaming && currentState.type !== IChatToolInvocation.StateKind.Streaming) {
@@ -3339,6 +3796,9 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 
 					if (currentState.type === IChatToolInvocation.StateKind.Completed ||
 						currentState.type === IChatToolInvocation.StateKind.Cancelled) {
+						this.activeToolCallIdSet.delete(toolCallId);
+						const activityGroup = this.activityGroupByToolCallId.get(toolCallId);
+						activityGroup?.runningToolCallIds.delete(toolCallId);
 						this.refreshActivityGroupForTool(toolCallId);
 						this.updateWorkRowStatus(toolCallId, t3ToolInvocationFailed(toolInvocationOrMarkdown) ? 'cancelled' : 'complete');
 						// Remove tools that should be hidden now or after completion.
@@ -3355,11 +3815,8 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 						// A completed live group must stop advertising itself as active even
 						// when the model emits no follow-up reasoning chunk. This is the gap
 						// that previously left clean chat looking frozen after a file write.
-						if (this.activeActivityGroup?.items.some(item => item.toolCallId === toolCallId)) {
-							const groupStillRunning = this.activeActivityGroup.items.some(item => {
-								const invocation = this.toolInvocations.find(candidate => candidate.toolCallId === item.toolCallId);
-								return invocation?.kind === 'toolInvocation' && !IChatToolInvocation.isComplete(invocation, reader);
-							});
+						if (activityGroup && activityGroup === this.activeActivityGroup) {
+							const groupStillRunning = activityGroup.runningToolCallIds.size > 0;
 							// Cursor keeps a completed exploration run open until a real
 							// reasoning/edit/category boundary arrives. Sequential reads and
 							// searches otherwise finalize one-by-one and can never form the
@@ -3439,9 +3896,7 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 		}
 
 		// Add tool call to extracted titles for LLM title generation
-		if (!this.extractedTitles.includes(toolCallLabel)) {
-			this.extractedTitles.push(toolCallLabel);
-		}
+		this.addExtractedTitle(toolCallLabel);
 
 		this.lastExtractedTitle = toolCallLabel;
 
@@ -3665,6 +4120,7 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 		}
 		this.appendedItemCount++;
 		this.allThinkingParts.push(content);
+		this.finishCurrentCursorReasoning();
 		// A new reasoning section breaks the current activity group so later
 		// tools don't get appended above this text.
 		this.finishActiveActivityGroup();

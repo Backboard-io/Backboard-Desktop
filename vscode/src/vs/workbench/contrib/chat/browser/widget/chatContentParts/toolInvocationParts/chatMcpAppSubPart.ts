@@ -93,7 +93,7 @@ export class ChatMcpAppSubPart extends BaseChatToolInvocationSubPart {
 		const targetWindow = dom.getWindow(this.domNode);
 		const getMaxHeight = () => maxWebviewHeightPct * targetWindow.innerHeight;
 		const maxHeight = observableValue('mcpAppMaxHeight', getMaxHeight());
-		dom.addDisposableListener(targetWindow, 'resize', () => maxHeight.set(getMaxHeight(), undefined));
+		this._register(dom.addDisposableListener(targetWindow, 'resize', () => maxHeight.set(getMaxHeight(), undefined)));
 
 		// Create the model - it will mount the webview to the container
 		this._model = this._register(this._instantiationService.createInstance(

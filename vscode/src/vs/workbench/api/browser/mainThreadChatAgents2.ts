@@ -478,7 +478,17 @@ export class MainThreadChatAgents2 extends Disposable implements MainThreadChatA
 	async $handleProgressChunk(requestId: string, chunks: (IChatProgressDto | [IChatProgressDto, number])[]): Promise<void> {
 		const pendingProgress = this._pendingProgress.get(requestId);
 		if (!pendingProgress) {
-			this._logService.warn(`MainThreadChatAgents2#$handleProgressChunk: No pending progress for requestId ${requestId}`);
+			// A progress task is allowed to finish after the participant's invoke
+			// promise. Its result must still settle the task retained by the model.
+			let handledTaskProgress = false;
+			for (const item of chunks) {
+				if (Array.isArray(item)) {
+					handledTaskProgress = this._handleActiveTaskProgress(requestId, revive(item[0]) as IChatProgress, item[1]) || handledTaskProgress;
+				}
+			}
+			if (!handledTaskProgress) {
+				this._logService.warn(`MainThreadChatAgents2#$handleProgressChunk: No pending progress for requestId ${requestId}`);
+			}
 			return;
 		}
 
@@ -552,22 +562,7 @@ export class MainThreadChatAgents2 extends Disposable implements MainThreadChatA
 					this._activeTasks.set(responsePartId, task);
 					chatProgressParts.push(task);
 				} else if (responsePartHandle !== undefined) {
-					const responsePartId = `${requestId}_${responsePartHandle}`;
-					const task = this._activeTasks.get(responsePartId);
-					switch (revivedProgress.kind) {
-						case 'progressTaskResult':
-							if (task && revivedProgress.content) {
-								task.complete(revivedProgress.content.value);
-								this._activeTasks.delete(responsePartId);
-							} else {
-								task?.complete(undefined);
-							}
-							break;
-						case 'warning':
-						case 'reference':
-							task?.add(revivedProgress);
-							break;
-					}
+					this._handleActiveTaskProgress(requestId, revivedProgress, responsePartHandle);
 				}
 				continue;
 			}
@@ -583,6 +578,32 @@ export class MainThreadChatAgents2 extends Disposable implements MainThreadChatA
 		}
 
 		progress(chatProgressParts);
+	}
+
+	private _handleActiveTaskProgress(requestId: string, progress: IChatProgress, responsePartHandle: number): boolean {
+		const responsePartId = `${requestId}_${responsePartHandle}`;
+		const task = this._activeTasks.get(responsePartId);
+		switch (progress.kind) {
+			case 'progressTaskResult':
+				task?.complete(progress.content?.value);
+				this._activeTasks.delete(responsePartId);
+				return true;
+			case 'warning':
+			case 'reference':
+				task?.add(progress);
+				return true;
+			default:
+				return false;
+		}
+	}
+
+	override dispose(): void {
+		for (const task of this._activeTasks.values()) {
+			task.complete(undefined);
+		}
+		this._activeTasks.clear();
+		this._unresolvedAnchors.clear();
+		super.dispose();
 	}
 
 	$handleAnchorResolve(requestId: string, handle: string, resolveAnchor: Dto<IChatContentInlineReference> | undefined): void {

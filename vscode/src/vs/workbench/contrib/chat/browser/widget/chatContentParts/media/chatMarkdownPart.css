@@ -21,3 +21,34 @@
 		overflow: hidden;
 	}
 }
+.chat-markdown-streaming-plaintext {
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	word-break: break-word;
+}
+
+.chat-codeblock-deferred {
+	contain: content;
+	min-height: 72px;
+	max-height: 240px;
+	overflow: hidden;
+	border: 1px solid var(--vscode-chat-requestBorder, var(--vscode-widget-border));
+	border-radius: 6px;
+	background: var(--vscode-textCodeBlock-background);
+}
+
+.chat-codeblock-deferred-header {
+	padding: 6px 10px;
+	font-size: 12px;
+	color: var(--vscode-descriptionForeground);
+	border-bottom: 1px solid var(--vscode-chat-requestBorder, var(--vscode-widget-border));
+}
+
+.chat-codeblock-deferred-preview {
+	margin: 0;
+	padding: 8px 10px;
+	white-space: pre;
+	overflow: hidden;
+	font-family: var(--monaco-monospace-font);
+	font-size: var(--vscode-editor-font-size, 12px);
+}

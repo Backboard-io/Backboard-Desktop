@@ -1235,7 +1235,8 @@ export class CodeApplication extends Disposable {
 		// Agent Host
 		if (isAgentHostEnabled(this.configurationService)) {
 			const agentHostStarter = new ElectronAgentHostStarter(this.configurationService, this.environmentMainService, this.lifecycleMainService, this.logService);
-			this._register(new AgentHostProcessManager(agentHostStarter, this.logService, this.loggerService));
+			const agentHostProcessManager = this._register(new AgentHostProcessManager(agentHostStarter, this.logService, this.loggerService));
+			agentHostProcessManager.ensureStarted();
 		}
 
 		// External terminal

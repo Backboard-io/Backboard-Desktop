@@ -283,7 +283,7 @@ export class AgentSideEffects extends Disposable {
 		}
 
 		if (signal.kind === 'subagent_started') {
-			this._handleSubagentStarted(sessionKey, signal.toolCallId, signal.agentName, signal.agentDisplayName, signal.agentDescription);
+			this._handleSubagentStarted(sessionKey, signal.toolCallId, signal.agentName, signal.agentDisplayName, signal.agentDescription, signal.prompt);
 			this._drainPendingSubagentSignals(sessionKey, signal.toolCallId);
 			return;
 		}
@@ -431,6 +431,7 @@ export class AgentSideEffects extends Disposable {
 		}
 
 		if (action.type === ActionType.ChatToolCallComplete) {
+			this._toolCallAgents.delete(`${sessionKey}:${action.toolCallId}`);
 			// Drop any events that were buffered for a subagent whose
 			// `subagent_started` never arrived (e.g. the parent tool failed
 			// before the subagent was created). The actual subagent session
@@ -444,16 +445,28 @@ export class AgentSideEffects extends Disposable {
 		}
 
 		if (action.type === ActionType.ChatTurnComplete) {
+			this._clearToolCallAgentsForSession(sessionKey);
 			this._turnTracker.turnCompleted(sessionKey, turnId, 'success');
 			this._runTurnCompleteSideEffects(sessionKey, turnId);
 		}
 
 		if (action.type === ActionType.ChatTurnCancelled) {
+			this._clearToolCallAgentsForSession(sessionKey);
 			this._turnTracker.turnCompleted(sessionKey, turnId, 'cancelled');
 		}
 
 		if (action.type === ActionType.ChatError) {
+			this._clearToolCallAgentsForSession(sessionKey);
 			this._turnTracker.turnCompleted(sessionKey, turnId, 'error');
+		}
+	}
+
+	private _clearToolCallAgentsForSession(sessionKey: string): void {
+		const prefix = `${sessionKey}:`;
+		for (const key of this._toolCallAgents.keys()) {
+			if (key.startsWith(prefix)) {
+				this._toolCallAgents.delete(key);
+			}
 		}
 	}
 
@@ -521,6 +534,7 @@ export class AgentSideEffects extends Disposable {
 		agentName: string,
 		agentDisplayName: string,
 		agentDescription?: string,
+		prompt?: string,
 	): void {
 		const subagentSessionUri = buildSubagentSessionUri(parentSession, toolCallId);
 		const subagentKey = `${parentSession}:${toolCallId}`;
@@ -552,7 +566,7 @@ export class AgentSideEffects extends Disposable {
 		this._stateManager.dispatchServerAction(subagentSessionUri, {
 			type: ActionType.ChatTurnStarted,
 			turnId,
-			message: { text: '', origin: { kind: MessageKind.User } },
+			message: { text: prompt ?? '', origin: { kind: MessageKind.User } },
 		});
 
 		this._subagentSessions.set(subagentKey, subagentSessionUri);

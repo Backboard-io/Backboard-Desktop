@@ -504,7 +504,7 @@ export class CopilotAgentSession extends Disposable {
 		this._register(toDisposable(() => this._databaseRef.dispose()));
 		this._sessionDataDir = sessionDataService.getSessionDataDir(options.sessionUri);
 
-		this._editTracker = this._instantiationService.createInstance(FileEditTracker, options.sessionUri.toString(), this._databaseRef.object);
+		this._editTracker = this._register(this._instantiationService.createInstance(FileEditTracker, options.sessionUri.toString(), this._databaseRef.object));
 
 		this._mcpCustomizations = this._register(new McpCustomizationController({
 			providerId: this.sessionUri.scheme,
@@ -1179,7 +1179,13 @@ export class CopilotAgentSession extends Disposable {
 		this._logService.info(`[Copilot:${this.sessionId}] Aborting session...`);
 		this._denyPendingPermissions();
 		this._drainPendingSteeringFlips();
-		await this._wrapper.session.abort();
+		try {
+			await this._wrapper.session.abort();
+		} finally {
+			// Failed/cancelled edit tools do not receive onPostToolUse, so their
+			// before-snapshots must be released explicitly at the turn boundary.
+			this._editTracker.discardAllEdits();
+		}
 	}
 
 	/**
@@ -2221,6 +2227,10 @@ export class CopilotAgentSession extends Disposable {
 					}
 				} catch (err) {
 					this._logService.warn(`[Copilot:${sessionId}] Failed to take completed edit`, err);
+				} finally {
+					// onPostToolUse only fires for successful executions. This also
+					// cleans up a snapshot when post-tool observation itself failed.
+					this._editTracker.discardEdit(filePath);
 				}
 			}
 
@@ -2270,6 +2280,7 @@ export class CopilotAgentSession extends Disposable {
 
 		this._register(wrapper.onIdle(() => {
 			this._logService.info(`[Copilot:${sessionId}] Session idle`);
+			this._editTracker.discardAllEdits();
 			// Clear any in-progress activity description set during the
 			// turn (e.g. via the `report_intent` tool) — the agent is no
 			// longer doing anything once the turn completes.

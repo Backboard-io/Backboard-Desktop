@@ -683,6 +683,96 @@ suite('Response', () => {
 		assert.strictEqual(notebookEditGroups.length, 1, 'Should have notebookEditGroup for cell edits');
 	});
 
+	test('many interleaved text edits stay consolidated by resource', () => {
+		const response = store.add(new Response([]));
+		const resources = Array.from({ length: 24 }, (_, index) => URI.parse(`file:///workspace/file-${index}.ts`));
+
+		for (let batch = 0; batch < 25; batch++) {
+			for (const uri of resources) {
+				response.updateContent({
+					kind: 'textEdit',
+					uri,
+					edits: [{ range: new Range(batch + 1, 1, batch + 1, 1), text: `edit-${batch}` }],
+					done: batch === 24,
+				}, true);
+			}
+		}
+
+		const groups = response.value.filter(part => part.kind === 'textEditGroup');
+		assert.strictEqual(groups.length, resources.length);
+		assert.ok(groups.every(group => group.edits.length === 25));
+		assert.ok(groups.every(group => group.done));
+	});
+
+	test('many external tool updates reuse their invocation rows', () => {
+		const response = store.add(new Response([]));
+		const toolCallCount = 300;
+
+		for (let index = 0; index < toolCallCount; index++) {
+			response.updateContent({
+				kind: 'externalToolInvocationUpdate',
+				toolCallId: `tool-call-${index}`,
+				toolName: index % 2 === 0 ? 'read_file' : 'write_file',
+				isComplete: false,
+				invocationMessage: `Running tool ${index}`,
+			}, true);
+		}
+
+		for (let index = 0; index < toolCallCount; index++) {
+			response.updateContent({
+				kind: 'externalToolInvocationUpdate',
+				toolCallId: `tool-call-${index}`,
+				toolName: index % 2 === 0 ? 'read_file' : 'write_file',
+				isComplete: true,
+				pastTenseMessage: `Ran tool ${index}`,
+			}, true);
+		}
+
+		assert.strictEqual(response.value.length, toolCallCount);
+		assert.strictEqual(new Set(response.value.map(part => part.kind === 'toolInvocation' ? part.toolCallId : undefined)).size, toolCallCount);
+		assert.ok(response.value.every(part => part.kind === 'toolInvocation' && IChatToolInvocation.isComplete(part)));
+	});
+
+	test('live tool state changes emit once and stop observing after completion', () => {
+		const response = store.add(new Response([]));
+		const state = observableValue<any>('toolState', { type: IChatToolInvocation.StateKind.Streaming });
+		const invocation = {
+			kind: 'toolInvocation',
+			toolCallId: 'live-tool',
+			state,
+		} as Partial<IChatToolInvocation> as IChatToolInvocation;
+		let changes = 0;
+		store.add(response.onDidChangeValue(() => changes++));
+
+		response.updateContent(invocation);
+		assert.strictEqual(changes, 1, 'Adding a tool should emit only after it is present in the response');
+
+		state.set({ type: IChatToolInvocation.StateKind.Completed }, undefined);
+		assert.strictEqual(changes, 2, 'Completion should emit one state update');
+
+		state.set({ type: IChatToolInvocation.StateKind.Executing }, undefined);
+		assert.strictEqual(changes, 2, 'A completed tool should no longer retain a response listener');
+	});
+
+	test('clearing a response releases in-flight tool state listeners', () => {
+		const response = store.add(new Response([]));
+		const state = observableValue<any>('toolState', { type: IChatToolInvocation.StateKind.Streaming });
+		const invocation = {
+			kind: 'toolInvocation',
+			toolCallId: 'abandoned-tool',
+			state,
+		} as Partial<IChatToolInvocation> as IChatToolInvocation;
+		let changes = 0;
+		store.add(response.onDidChangeValue(() => changes++));
+
+		response.updateContent(invocation);
+		response.clear();
+		state.set({ type: IChatToolInvocation.StateKind.Executing }, undefined);
+
+		assert.strictEqual(changes, 1, 'Cleared tools should not continue invalidating the response');
+		assert.strictEqual(response.value.length, 0);
+	});
+
 	test('external terminal tool updates preserve toolSpecificData when completing an existing invocation', () => {
 		const response = store.add(new Response([]));
 		const toolSpecificData: IChatTerminalToolInvocationData = {

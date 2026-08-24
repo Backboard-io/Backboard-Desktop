@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { TimeoutTimer } from '../../../../base/common/async.js';
+import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable, type IDisposable } from '../../../../base/common/lifecycle.js';
 import { extname } from '../../../../base/common/path.js';
 import { URI } from '../../../../base/common/uri.js';
@@ -69,6 +70,19 @@ export interface IEditSurvivalReporterLaunchParams {
 export const IEditSurvivalReporterFactory = createDecorator<IEditSurvivalReporterFactory>('editSurvivalReporterFactory');
 
 /**
+ * A live edit-survival sample schedule.
+ *
+ * Reporters expose their lifecycle so both their creating tracker and the
+ * process-wide factory can stop retaining them once their final sample has
+ * run. `retainedTextChars` is diagnostic/accounting state, not telemetry.
+ */
+export interface IEditSurvivalReporter extends IDisposable {
+	readonly onDidDispose: Event<void>;
+	readonly isDisposed: boolean;
+	readonly retainedTextChars: number;
+}
+
+/**
  * Launches background reporters that sample the on-disk file after a tool
  * edit and emit edit-survival telemetry over the next 15 minutes.
  */
@@ -79,14 +93,21 @@ export interface IEditSurvivalReporterFactory {
 	 * used to cancel sampling early; otherwise the reporter cleans itself
 	 * up after the final 15-minute sample.
 	 */
-	launch(params: IEditSurvivalReporterLaunchParams): IDisposable;
+	launch(params: IEditSurvivalReporterLaunchParams): IEditSurvivalReporter;
 }
+
+const NULL_EDIT_SURVIVAL_REPORTER: IEditSurvivalReporter = Object.freeze({
+	onDidDispose: Event.None,
+	isDisposed: true,
+	retainedTextChars: 0,
+	dispose() { },
+});
 
 /** No-op factory, useful for tests and environments without telemetry. */
 export class NullEditSurvivalReporterFactory implements IEditSurvivalReporterFactory {
 	readonly _serviceBrand: undefined;
-	launch(_params: IEditSurvivalReporterLaunchParams): IDisposable {
-		return { dispose() { } };
+	launch(_params: IEditSurvivalReporterLaunchParams): IEditSurvivalReporter {
+		return NULL_EDIT_SURVIVAL_REPORTER;
 	}
 }
 
@@ -139,21 +160,54 @@ type IEditSurvivalTelemetryClassification = {
  */
 const SAMPLE_SCHEDULE_MS = [0, 5_000, 30_000, 120_000, 300_000, 600_000, 900_000];
 
-class SessionEditSurvivalReporter extends Disposable {
+class SessionEditSurvivalReporter extends Disposable implements IEditSurvivalReporter {
+	private readonly _onDidDispose = this._register(new Emitter<void>());
+	readonly onDidDispose = this._onDidDispose.event;
+
 	private readonly _startTime = Date.now();
 	private _samplesTaken = 0;
+	private _isDisposed = false;
+	private _retainedTextChars: number;
+	private _params: IEditSurvivalReporterLaunchParams | undefined;
 
 	constructor(
-		private readonly _params: IEditSurvivalReporterLaunchParams,
+		params: IEditSurvivalReporterLaunchParams,
 		private readonly _fileService: IFileService,
 		private readonly _logService: ILogService,
 		private readonly _telemetryService: ITelemetryService,
 	) {
 		super();
+		this._params = params;
+		this._retainedTextChars = retainedTextChars(params);
 		this._scheduleNext();
 	}
 
+	get isDisposed(): boolean {
+		return this._isDisposed;
+	}
+
+	get retainedTextChars(): number {
+		return this._retainedTextChars;
+	}
+
+	override dispose(): void {
+		if (this._isDisposed) {
+			return;
+		}
+		this._isDisposed = true;
+		// Drop the potentially multi-megabyte snapshots before notifying owners.
+		// A stale external reference to this disposed reporter must not keep file
+		// contents alive for the remainder of the session.
+		this._params = undefined;
+		this._retainedTextChars = 0;
+		this._onDidDispose.fire();
+		super.dispose();
+	}
+
 	private _scheduleNext(): void {
+		if (this._isDisposed) {
+			return;
+		}
 		if (this._samplesTaken >= SAMPLE_SCHEDULE_MS.length) {
 			this.dispose();
 			return;
@@ -166,6 +220,10 @@ class SessionEditSurvivalReporter extends Disposable {
 	}
 
 	private async _takeSample(): Promise<void> {
+		const params = this._params;
+		if (!params) {
+			return;
+		}
 		const sampleIndex = this._samplesTaken++;
 		const timeDelayMs = SAMPLE_SCHEDULE_MS[sampleIndex];
 
@@ -173,7 +231,7 @@ class SessionEditSurvivalReporter extends Disposable {
 			let currentText: string;
 			let didFileGetDeleted = false;
 			try {
-				const content = await this._fileService.readFile(URI.file(this._params.filePath));
+				const content = await this._fileService.readFile(URI.file(params.filePath));
 				currentText = content.value.toString();
 			} catch (err) {
 				// Only treat genuine "file is gone" as a delete event.
@@ -184,30 +242,33 @@ class SessionEditSurvivalReporter extends Disposable {
 					didFileGetDeleted = true;
 					currentText = '';
 				} else {
-					this._logService.warn(`[EditSurvivalReporter] readFile failed for ${this._params.filePath}, skipping sample: ${err}`);
+					this._logService.warn(`[EditSurvivalReporter] readFile failed for ${params.filePath}, skipping sample: ${err}`);
 					this._scheduleNext();
 					return;
 				}
 			}
+			if (this._isDisposed) {
+				return;
+			}
 
-			const aiChunks = this._params.aiChunks ?? [];
+			const aiChunks = params.aiChunks ?? [];
 			const useChunked = aiChunks.length > 0;
 			const aiCharCount = useChunked ? aiChunks.reduce((sum, c) => sum + c.length, 0) : 0;
 			const scores = didFileGetDeleted
 				? { fourGram: 0, noRevert: 0 }
 				: useChunked
-					? computeChunkedEditSurvival(this._params.beforeText, this._params.afterText, aiChunks, currentText)
-					: computeWholeFileEditSurvival(this._params.beforeText, this._params.afterText, currentText);
+					? computeChunkedEditSurvival(params.beforeText, params.afterText, aiChunks, currentText)
+					: computeWholeFileEditSurvival(params.beforeText, params.afterText, currentText);
 
 			this._telemetryService.publicLog2<IEditSurvivalTelemetryEvent, IEditSurvivalTelemetryClassification>(
 				'agentHost.trackEditSurvival',
 				{
-					provider: AgentSession.provider(this._params.sessionUri) ?? 'unknown',
-					modelId: this._params.modelId ?? '',
-					agentSessionId: AgentSession.id(this._params.sessionUri),
-					turnId: this._params.turnId,
-					toolCallId: this._params.toolCallId,
-					fileExtension: extname(this._params.filePath),
+					provider: AgentSession.provider(params.sessionUri) ?? 'unknown',
+					modelId: params.modelId ?? '',
+					agentSessionId: AgentSession.id(params.sessionUri),
+					turnId: params.turnId,
+					toolCallId: params.toolCallId,
+					fileExtension: extname(params.filePath),
 					survivalRateFourGram: scores.fourGram,
 					survivalRateNoRevert: scores.noRevert,
 					scoringMode: useChunked ? 'chunked' : 'whole-file',
@@ -215,9 +276,9 @@ class SessionEditSurvivalReporter extends Disposable {
 					aiCharCount,
 					timeDelayMs,
 					didFileGetDeleted: didFileGetDeleted ? 1 : 0,
-					isCreate: this._params.isCreate ? 1 : 0,
-					beforeTextLength: this._params.beforeText.length,
-					afterTextLength: this._params.afterText.length,
+					isCreate: params.isCreate ? 1 : 0,
+					beforeTextLength: params.beforeText.length,
+					afterTextLength: params.afterText.length,
 					currentTextLength: didFileGetDeleted ? 0 : currentText.length,
 				},
 			);
@@ -229,35 +290,97 @@ class SessionEditSurvivalReporter extends Disposable {
 				return;
 			}
 		} catch (err) {
-			this._logService.warn(`[EditSurvivalReporter] sample failed for ${this._params.filePath}: ${err}`);
+			this._logService.warn(`[EditSurvivalReporter] sample failed for ${params.filePath}: ${err}`);
 		}
 
-		this._scheduleNext();
+		if (!this._isDisposed) {
+			this._scheduleNext();
+		}
 	}
 }
 
 const MAX_TRACKED_FILE_SIZE_CHARS = 5 * 1024 * 1024;
 
-export class EditSurvivalReporterFactory implements IEditSurvivalReporterFactory {
+/** Maximum live schedules across all sessions in this agent-host process. */
+export const MAX_ACTIVE_EDIT_SURVIVAL_REPORTERS = 32;
+/**
+ * Aggregate snapshot/chunk budget. JavaScript strings can consume two bytes
+ * per character, so this bounds the usual retained payload near 32 MiB.
+ * One oversized-but-individually-valid edit is allowed when the registry is
+ * otherwise empty, preserving telemetry for an ordinary single large edit.
+ */
+export const MAX_EDIT_SURVIVAL_RETAINED_TEXT_CHARS = 16 * 1024 * 1024;
+
+function retainedTextChars(params: IEditSurvivalReporterLaunchParams): number {
+	return params.beforeText.length
+		+ params.afterText.length
+		+ (params.aiChunks?.reduce((sum, chunk) => sum + chunk.length, 0) ?? 0);
+}
+
+export class EditSurvivalReporterFactory extends Disposable implements IEditSurvivalReporterFactory {
 	readonly _serviceBrand: undefined;
+	private readonly _activeReporters = new Map<IEditSurvivalReporter, number>();
+	private _activeRetainedTextChars = 0;
 
 	constructor(
 		@IFileService private readonly _fileService: IFileService,
 		@ILogService private readonly _logService: ILogService,
 		@ITelemetryService private readonly _telemetryService: ITelemetryService,
-	) { }
+	) {
+		super();
+	}
 
-	launch(params: IEditSurvivalReporterLaunchParams): IDisposable {
+	get activeReporterCount(): number {
+		return this._activeReporters.size;
+	}
+
+	get activeRetainedTextChars(): number {
+		return this._activeRetainedTextChars;
+	}
+
+	launch(params: IEditSurvivalReporterLaunchParams): IEditSurvivalReporter {
 		// Skip notebooks for now: scoring against the on-disk JSON
 		// (including output cells) doesn't reflect user intent. We may
 		// revisit with a notebook-aware tracker.
 		if (extname(params.filePath).toLowerCase() === '.ipynb') {
-			return { dispose() { } };
+			return NULL_EDIT_SURVIVAL_REPORTER;
 		}
 		// Skip very large files to avoid putting pressure on memory and perf.
 		if (Math.max(params.beforeText.length, params.afterText.length) > MAX_TRACKED_FILE_SIZE_CHARS) {
-			return { dispose() { } };
+			return NULL_EDIT_SURVIVAL_REPORTER;
 		}
-		return new SessionEditSurvivalReporter(params, this._fileService, this._logService, this._telemetryService);
+
+		const retainedChars = retainedTextChars(params);
+		while (this._activeReporters.size > 0 && (
+			this._activeReporters.size >= MAX_ACTIVE_EDIT_SURVIVAL_REPORTERS
+			|| this._activeRetainedTextChars + retainedChars > MAX_EDIT_SURVIVAL_RETAINED_TEXT_CHARS
+		)) {
+			// Maps preserve insertion order: shed the oldest schedule first.
+			this._activeReporters.keys().next().value?.dispose();
+		}
+
+		const reporter = new SessionEditSurvivalReporter(params, this._fileService, this._logService, this._telemetryService);
+		this._activeReporters.set(reporter, retainedChars);
+		this._activeRetainedTextChars += retainedChars;
+		Event.once(reporter.onDidDispose)(() => this._releaseReporter(reporter));
+		return reporter;
+	}
+
+	private _releaseReporter(reporter: IEditSurvivalReporter): void {
+		const retainedChars = this._activeReporters.get(reporter);
+		if (retainedChars === undefined) {
+			return;
+		}
+		this._activeReporters.delete(reporter);
+		this._activeRetainedTextChars -= retainedChars;
+	}
+
+	override dispose(): void {
+		for (const reporter of [...this._activeReporters.keys()]) {
+			reporter.dispose();
+		}
+		this._activeReporters.clear();
+		this._activeRetainedTextChars = 0;
+		super.dispose();
 	}
 }

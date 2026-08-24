@@ -5,7 +5,10 @@
 
 import * as dom from '../../../../../base/browser/dom.js';
 import { DragAndDropObserver } from '../../../../../base/browser/dom.js';
-import { Disposable, DisposableStore, toDisposable } from '../../../../../base/common/lifecycle.js';
+import { StandardKeyboardEvent } from '../../../../../base/browser/keyboardEvent.js';
+import { KeyCode } from '../../../../../base/common/keyCodes.js';
+import { Disposable, DisposableStore, IDisposable, MutableDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
+import { localize } from '../../../../../nls.js';
 import { ChatRequestQueueKind, IChatService } from '../../common/chatService/chatService.js';
 import { IChatPendingRequest } from '../../common/model/chatModel.js';
 import { IChatRequestViewModel, IChatViewModel } from '../../common/model/chatViewModel.js';
@@ -29,19 +32,20 @@ export class ChatPendingDragController extends Disposable {
 
 	private _dragState: IDragState | undefined;
 	private readonly _insertIndicator: HTMLElement;
+	private readonly _focusRestore = this._register(new MutableDisposable<IDisposable>());
 
 	constructor(
-		listContainer: HTMLElement,
+		private readonly _listContainer: HTMLElement,
 		private readonly _getViewModel: () => IChatViewModel | undefined,
 		@IChatService private readonly _chatService: IChatService,
 	) {
 		super();
 
 		this._insertIndicator = dom.$('.chat-pending-insert-indicator');
-		listContainer.append(this._insertIndicator);
+		this._listContainer.append(this._insertIndicator);
 		this._register(toDisposable(() => this._insertIndicator.remove()));
 
-		this._register(new DragAndDropObserver(listContainer, {
+		this._register(new DragAndDropObserver(this._listContainer, {
 			onDragOver: (e) => this._onDragOver(e),
 			onDragLeave: () => this._hideIndicator(),
 			onDragEnd: () => this._onDragEnd(),
@@ -59,6 +63,12 @@ export class ChatPendingDragController extends Disposable {
 		disposables: DisposableStore,
 	): void {
 		handleEl.setAttribute('draggable', 'true');
+		handleEl.tabIndex = 0;
+		handleEl.setAttribute('role', 'spinbutton');
+		handleEl.setAttribute('aria-label', localize('reorderQueuedMessage', "Reorder queued message: {0}", element.messageText));
+		handleEl.setAttribute('aria-orientation', 'vertical');
+		this._setHandlePosition(element, handleEl);
+		handleEl.title = localize('reorderQueuedMessageHint', "Drag or use the Up and Down arrow keys to reorder");
 
 		disposables.add(dom.addDisposableListener(handleEl, dom.EventType.DRAG_START, (e: DragEvent) => {
 			if (!e.dataTransfer || !element.pendingKind) {
@@ -77,6 +87,52 @@ export class ChatPendingDragController extends Disposable {
 			rowContainer.classList.remove(DRAGGING_CLASS);
 			this._onDragEnd();
 		}));
+
+		disposables.add(dom.addDisposableListener(handleEl, dom.EventType.KEY_DOWN, e => {
+			const event = new StandardKeyboardEvent(e);
+			// The request row itself uses Enter/Space to start editing. A focused
+			// reorder spinbutton owns those keys, so never let them activate the row.
+			if (event.equals(KeyCode.Enter) || event.equals(KeyCode.Space)) {
+				event.preventDefault();
+				event.stopPropagation();
+				return;
+			}
+			if (event.keyCode !== KeyCode.UpArrow && event.keyCode !== KeyCode.DownArrow) {
+				return;
+			}
+
+			event.preventDefault();
+			event.stopPropagation();
+			this._moveByOffset(element, event.keyCode === KeyCode.UpArrow ? -1 : 1);
+		}));
+	}
+
+	private _moveByOffset(element: IChatRequestViewModel, offset: -1 | 1): void {
+		const viewModel = this._getViewModel();
+		if (!viewModel || !element.pendingKind) {
+			return;
+		}
+
+		const pendingRequests = viewModel.model.getPendingRequests();
+		const group = pendingRequests.filter(request => request.kind === element.pendingKind && !request.request.isSystemInitiated);
+		const index = group.findIndex(request => request.request.id === element.id);
+		const target = group[index + offset];
+		if (!target) {
+			return;
+		}
+
+		this._reorder(element, target.request.id, offset < 0, true);
+	}
+
+	private _setHandlePosition(element: IChatRequestViewModel, handleEl: HTMLElement): void {
+		const pendingRequests = this._getViewModel()?.model.getPendingRequests() ?? [];
+		const group = pendingRequests.filter(request => request.kind === element.pendingKind && !request.request.isSystemInitiated);
+		const position = Math.max(0, group.findIndex(request => request.request.id === element.id)) + 1;
+		const total = Math.max(1, group.length);
+		handleEl.setAttribute('aria-valuemin', '1');
+		handleEl.setAttribute('aria-valuemax', String(total));
+		handleEl.setAttribute('aria-valuenow', String(Math.min(position, total)));
+		handleEl.setAttribute('aria-valuetext', localize('queuedMessagePosition', "Position {0} of {1}", Math.min(position, total), total));
 	}
 
 	// --- drag event handlers (delegated on the container) ---
@@ -121,7 +177,7 @@ export class ChatPendingDragController extends Disposable {
 		const midY = rect.top + rect.height / 2;
 		const insertBefore = e.clientY < midY;
 
-		this._reorder(this._dragState.element, target.requestId, insertBefore);
+		this._reorder(this._dragState.element, target.requestId, insertBefore, false);
 		this._dragState = undefined;
 	}
 
@@ -172,7 +228,7 @@ export class ChatPendingDragController extends Disposable {
 
 	// --- reorder logic ---
 
-	private _reorder(draggedElement: IChatRequestViewModel, targetId: string, insertBefore: boolean): void {
+	private _reorder(draggedElement: IChatRequestViewModel, targetId: string, insertBefore: boolean, restoreKeyboardFocus: boolean): void {
 		const viewModel = this._getViewModel();
 		if (!viewModel) {
 			return;
@@ -181,29 +237,38 @@ export class ChatPendingDragController extends Disposable {
 		const pendingRequests = viewModel.model.getPendingRequests();
 		const draggedKind = draggedElement.pendingKind!;
 
-		// Split into the dragged kind's group and the rest (preserving order)
-		const group: IChatPendingRequest[] = [];
+		// Split into the dragged kind's group and the rest (preserving order).
+		// System-generated requests occupy fixed slots inside their kind group and
+		// are never pointer or keyboard targets; only the user-authored subsequence
+		// is reordered.
+		const kindGroup: IChatPendingRequest[] = [];
 		const rest: IChatPendingRequest[] = [];
 		for (const p of pendingRequests) {
-			(p.kind === draggedKind ? group : rest).push(p);
+			(p.kind === draggedKind ? kindGroup : rest).push(p);
 		}
+		const reorderable = kindGroup.filter(p => !p.request.isSystemInitiated);
 
-		// Remove dragged from group
-		const draggedIdx = group.findIndex(p => p.request.id === draggedElement.id);
+		// Remove dragged from the user-authored subsequence.
+		const draggedIdx = reorderable.findIndex(p => p.request.id === draggedElement.id);
 		if (draggedIdx === -1) {
 			return;
 		}
-		const [dragged] = group.splice(draggedIdx, 1);
+		const [dragged] = reorderable.splice(draggedIdx, 1);
 
 		// Find target position and insert
-		let targetIdx = group.findIndex(p => p.request.id === targetId);
+		let targetIdx = reorderable.findIndex(p => p.request.id === targetId);
 		if (targetIdx === -1) {
 			return;
 		}
 		if (!insertBefore) {
 			targetIdx++;
 		}
-		group.splice(targetIdx, 0, dragged);
+		reorderable.splice(targetIdx, 0, dragged);
+
+		let reorderableIndex = 0;
+		const group = kindGroup.map(request => request.request.isSystemInitiated
+			? request
+			: reorderable[reorderableIndex++]);
 
 		// Rebuild full list: steering first, then queued (matching addPendingRequest ordering)
 		const reordered = (draggedKind === ChatRequestQueueKind.Steering
@@ -212,5 +277,12 @@ export class ChatPendingDragController extends Disposable {
 		).map(p => ({ requestId: p.request.id, kind: p.kind }));
 
 		this._chatService.setPendingRequests(viewModel.sessionResource, reordered);
+		if (restoreKeyboardFocus) {
+			this._focusRestore.value = dom.scheduleAtNextAnimationFrame(dom.getWindow(this._listContainer), () => {
+				const movedRow = Array.from(this._listContainer.querySelectorAll<HTMLElement>(`[${PENDING_REQUEST_ID_ATTR}]`))
+					.find(row => row.getAttribute(PENDING_REQUEST_ID_ATTR) === draggedElement.id);
+				movedRow?.querySelector<HTMLElement>('.chat-pending-drag-handle')?.focus({ preventScroll: true });
+			});
+		}
 	}
 }

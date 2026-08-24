@@ -39,6 +39,7 @@ const DEFAULT_MAX_FILES = 5;
 // trying to avoid). 1 MiB strikes a balance between amortizing IPC overhead
 // and keeping per-write allocations modest.
 const MAX_BATCH_BYTES = 1024 * 1024;
+const MAX_PENDING_BYTES = 8 * 1024 * 1024;
 
 // A single AHP protocol message can be enormous (e.g. a `resourceRead` carrying
 // a base64-encoded file, or an `action` carrying a full session snapshot). We
@@ -64,6 +65,8 @@ export class AhpJsonlLogger extends Disposable {
 	private _segment = 0;
 	private _queue = Promise.resolve();
 	private _pending: VSBuffer[] = [];
+	private _pendingBytes = 0;
+	private _droppedEntries = 0;
 	private _drainScheduled = false;
 	private _folderCreated: Promise<IFileStatWithMetadata> | undefined;
 
@@ -106,8 +109,14 @@ export class AhpJsonlLogger extends Disposable {
 			meta.truncated = true;
 			body = stringifyAhpLogEntryTruncated(entry, MAX_LOGGED_STRING_LENGTH);
 		}
-		const line = `${body}\n`;
-		this._pending.push(VSBuffer.fromString(line));
+		const line = VSBuffer.fromString(`${body}\n`);
+		if (this._pendingBytes + line.byteLength > MAX_PENDING_BYTES) {
+			this._droppedEntries++;
+			this._scheduleDrain();
+			return;
+		}
+		this._pending.push(line);
+		this._pendingBytes += line.byteLength;
 		this._scheduleDrain();
 	}
 
@@ -137,6 +146,22 @@ export class AhpJsonlLogger extends Disposable {
 		}
 		const buffers = this._pending;
 		this._pending = [];
+		this._pendingBytes = 0;
+		if (this._droppedEntries > 0) {
+			const droppedEntries = this._droppedEntries;
+			this._droppedEntries = 0;
+			buffers.push(VSBuffer.fromString(`${JSON.stringify({
+				jsonrpc: '2.0',
+				method: '$/ahpLogDropped',
+				params: { count: droppedEntries },
+				_ahpLog: {
+					ts: new Date().toISOString(),
+					dir: 's2c',
+					connectionId: this._options.connectionId,
+					transport: this._options.transport,
+				},
+			})}\n`));
+		}
 
 		// Create folder once and memoize to avoid repeated filesystem calls
 		if (!this._folderCreated) {

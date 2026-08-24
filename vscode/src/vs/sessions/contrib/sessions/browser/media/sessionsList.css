@@ -36,9 +36,8 @@
 	--sessions-row-waiting-fg: var(--vscode-charts-orange, var(--vscode-editorWarning-foreground, #d18616));
 	--sessions-row-waiting-bg: color-mix(in srgb, var(--sessions-row-waiting-fg) 12%, transparent);
 
-	/* The tree is laid out at full content height (the sidebar column owns the
-	 * scroll), so a sticky header is never meaningful here — and its opaque
-	 * background + shadow paint a solid box over the translucent glass.
+	/* A sticky header is not useful here — and its opaque background + shadow
+	 * paint a solid box over the translucent glass.
 	 * Sticky scroll is disabled programmatically in SessionsListControl; this
 	 * guard keeps the box from ever painting if the global
 	 * `workbench.tree.enableStickyScroll` setting re-enables it. */

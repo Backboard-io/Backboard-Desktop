@@ -68,26 +68,13 @@
 		display: flex;
 		flex-direction: column;
 		flex: 1;
-		/* Marketplace's twin lives up in the pinned block; here the Projects
-		 * header and the sessions list scroll away as one column. */
-		overflow-y: auto;
-		overflow-x: hidden;
-		/* Hide the scrollbar entirely. The native macOS overlay scrollbar paints
-		 * a bright white thumb over the translucent glass sidebar while scrolling
-		 * (the scrollbar-width webkit trap); hiding it kills that flash, keeps the
-		 * walls symmetric (no reserved gutter), and the column still scrolls via
-		 * wheel/trackpad. Do NOT add scrollbar-color / ::-webkit-scrollbar-thumb
-		 * styling — with scrollbar-width set, Chromium ignores it and reverts to
-		 * the bright native thumb. */
-		scrollbar-width: none;
-		/* Breathing room so the last row never sits flush against the floor. */
-		padding-bottom: 12px;
+		/* Keep a bounded viewport so the sessions tree can recycle off-screen
+		 * rows. The tree owns vertical scrolling; expanding this column to its
+		 * content height disables virtualization and retains every row widget. */
+		overflow: hidden;
 		gap: 4px;
 		min-width: 0;
-
-		&::-webkit-scrollbar {
-			display: none;
-		}
+		min-height: 0;
 	}
 
 	/* The Projects header must never be squished by the flex column when the
@@ -482,15 +469,13 @@
 	}
 
 	.agent-sessions-control-container {
-		/* Grows to the tree's full content height (kept in sync by
-		 * SessionsList.layoutTreeToContentHeight); the parent column owns the
-		 * scroll, so the list flows together with the Marketplace/Projects
-		 * items above it. Negative top margin cancels the first folder header's
+		/* Fill only the remaining visible height. Negative top margin cancels the
+		 * first folder header's
 		 * group-gap (its 16px margin-top) so it doesn't stack on top of the
 		 * Projects header's own spacing (inter-group gaps further down are
 		 * unaffected). */
-		flex: 0 0 auto;
-		overflow: visible;
+		flex: 1 1 auto;
+		overflow: hidden;
 		min-height: 0;
 		margin-top: -14px;
 	}

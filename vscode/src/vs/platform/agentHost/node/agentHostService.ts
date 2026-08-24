@@ -45,6 +45,16 @@ export class AgentHostProcessManager extends Disposable {
 		}
 	}
 
+	/**
+	 * Starts the agent host before the first renderer requests it so utility
+	 * process startup overlaps the initial window load instead of the first
+	 * switch into Simple or Advanced mode. Idempotent; the lazy request path
+	 * remains as a fallback.
+	 */
+	ensureStarted(): void {
+		this._ensureStarted();
+	}
+
 	private _ensureStarted(): void {
 		if (!this._started) {
 			this._start();

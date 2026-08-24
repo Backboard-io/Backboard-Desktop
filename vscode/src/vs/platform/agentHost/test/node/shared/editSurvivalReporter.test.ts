@@ -9,12 +9,13 @@ import { VSBuffer } from '../../../../../base/common/buffer.js';
 import { DisposableStore } from '../../../../../base/common/lifecycle.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
+import { runWithFakedTimers } from '../../../../../base/test/common/timeTravelScheduler.js';
 import { FileService } from '../../../../files/common/fileService.js';
 import { createFileSystemProviderError, FileSystemProviderErrorCode } from '../../../../files/common/files.js';
 import { InMemoryFileSystemProvider } from '../../../../files/common/inMemoryFilesystemProvider.js';
 import { NullLogService } from '../../../../log/common/log.js';
 import { NullTelemetryServiceShape } from '../../../../telemetry/common/telemetryUtils.js';
-import { EditSurvivalReporterFactory } from '../../../node/shared/editSurvivalReporter.js';
+import { EditSurvivalReporterFactory, MAX_ACTIVE_EDIT_SURVIVAL_REPORTERS, MAX_EDIT_SURVIVAL_RETAINED_TEXT_CHARS } from '../../../node/shared/editSurvivalReporter.js';
 
 class RecordingTelemetryService extends NullTelemetryServiceShape {
 	readonly events: Array<{ name: string; data: unknown }> = [];
@@ -34,7 +35,7 @@ suite('agentHost editSurvivalReporter', () => {
 		fileService = disposables.add(new FileService(new NullLogService()));
 		disposables.add(fileService.registerProvider('file', disposables.add(new InMemoryFileSystemProvider())));
 		telemetry = new RecordingTelemetryService();
-		factory = new EditSurvivalReporterFactory(fileService, new NullLogService(), telemetry);
+		factory = disposables.add(new EditSurvivalReporterFactory(fileService, new NullLogService(), telemetry));
 	});
 
 	teardown(() => {
@@ -125,7 +126,7 @@ suite('agentHost editSurvivalReporter', () => {
 				return Reflect.get(target, prop, receiver);
 			},
 		});
-		const flakyFactory = new EditSurvivalReporterFactory(flakyFileService, new NullLogService(), telemetry);
+		const flakyFactory = disposables.add(new EditSurvivalReporterFactory(flakyFileService, new NullLogService(), telemetry));
 
 		const reporter = flakyFactory.launch({
 			sessionUri: 'claude:/session-flaky',
@@ -212,5 +213,69 @@ suite('agentHost editSurvivalReporter', () => {
 		// Guard against ever putting file contents in the payload.
 		assert.ok(!serialized.includes('SECRET_BEFORE'), 'payload must not contain before text');
 		assert.ok(!serialized.includes('SECRET_AFTER'), 'payload must not contain after text');
+	});
+
+	test('caps concurrent reporters by count and aggregate retained characters', () => {
+		return runWithFakedTimers({ useFakeTimers: true, maxTaskCount: 10_000 }, async () => {
+			const reporters = [];
+			for (let i = 0; i < MAX_ACTIVE_EDIT_SURVIVAL_REPORTERS + 20; i++) {
+				reporters.push(factory.launch({
+					sessionUri: 'claude:/stress',
+					turnId: 'turn-1',
+					toolCallId: `tc-${i}`,
+					filePath: `/workspace/${i}.ts`,
+					beforeText: 'before',
+					afterText: 'after',
+					isCreate: false,
+				}));
+			}
+
+			assert.strictEqual(factory.activeReporterCount, MAX_ACTIVE_EDIT_SURVIVAL_REPORTERS);
+			assert.ok(reporters[0].isDisposed, 'oldest reporter should be evicted at the count cap');
+			assert.strictEqual(reporters[0].retainedTextChars, 0, 'eviction must release retained snapshots');
+
+			const oneMiB = 'x'.repeat(1024 * 1024);
+			for (let i = 0; i < 20; i++) {
+				factory.launch({
+					sessionUri: 'claude:/stress',
+					turnId: 'turn-2',
+					toolCallId: `large-${i}`,
+					filePath: `/workspace/large-${i}.ts`,
+					beforeText: oneMiB,
+					afterText: oneMiB,
+					isCreate: false,
+				});
+			}
+
+			assert.ok(factory.activeRetainedTextChars <= MAX_EDIT_SURVIVAL_RETAINED_TEXT_CHARS);
+			assert.ok(factory.activeReporterCount <= MAX_ACTIVE_EDIT_SURVIVAL_REPORTERS);
+			factory.dispose();
+			assert.strictEqual(factory.activeReporterCount, 0);
+			assert.strictEqual(factory.activeRetainedTextChars, 0);
+		});
+	});
+
+	test('final scheduled sample self-removes reporter and releases snapshot parameters', () => {
+		return runWithFakedTimers({ useFakeTimers: true, maxTaskCount: 10_000 }, async () => {
+			await fileService.writeFile(URI.file('/workspace/lifecycle.ts'), VSBuffer.fromString('after'));
+			const reporter = factory.launch({
+				sessionUri: 'claude:/lifecycle',
+				turnId: 'turn-1',
+				toolCallId: 'tc-lifecycle',
+				filePath: '/workspace/lifecycle.ts',
+				beforeText: 'before',
+				afterText: 'after',
+				isCreate: false,
+			});
+
+			assert.strictEqual(factory.activeReporterCount, 1);
+			assert.ok(reporter.retainedTextChars > 0);
+			await timeout(900_001);
+
+			assert.ok(reporter.isDisposed, 'reporter should dispose after the 15-minute sample');
+			assert.strictEqual(reporter.retainedTextChars, 0, 'disposed reporter must drop before/after text');
+			assert.strictEqual(factory.activeReporterCount, 0, 'self-finished reporter must leave factory registry');
+			assert.strictEqual(factory.activeRetainedTextChars, 0);
+		});
 	});
 });

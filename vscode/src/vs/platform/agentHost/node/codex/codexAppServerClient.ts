@@ -118,6 +118,21 @@ export interface ICodexAppServerTransport {
 }
 
 /**
+ * Resource limits for a {@link CodexAppServerClient} connection.
+ *
+ * These are constructor options rather than protocol-level settings so tests
+ * can exercise the bounds without constructing very large messages.
+ */
+export interface ICodexAppServerClientOptions {
+	/** Maximum time a client request may remain unanswered. Set to `0` to disable. */
+	readonly requestTimeoutMs?: number;
+	/** Maximum UTF-8 byte length of one inbound NDJSON record. */
+	readonly maxInboundLineBytes?: number;
+	/** Maximum bytes retained while waiting for stdin to drain. */
+	readonly maxQueuedWriteBytes?: number;
+}
+
+/**
  * Generic JSON-RPC client over a {@link ICodexAppServerTransport}.
  *
  * The client doesn't know anything about codex's domain — it just
@@ -189,9 +204,22 @@ interface IPendingRequest {
 	resolve(value: unknown): void;
 	reject(reason: unknown): void;
 	readonly method: string;
+	timeout?: ReturnType<typeof setTimeout>;
+}
+
+interface IQueuedWrite {
+	readonly payload: string;
+	readonly byteLength: number;
+	readonly requestId: number | undefined;
 }
 
 const GRACE_KILL_MS = 2_000;
+// MCP tool calls can legitimately take several minutes. This still guarantees
+// abandoned requests are eventually released without imposing a short UI timeout.
+const REQUEST_TIMEOUT_MS = 30 * 60_000;
+const MAX_INBOUND_LINE_BYTES = 64 * 1024 * 1024;
+const MAX_QUEUED_WRITE_BYTES = 8 * 1024 * 1024;
+const INBOUND_LINE_BLOCK_BYTES = 64 * 1024;
 
 export class CodexAppServerClient extends Disposable implements ICodexAppServerClient {
 
@@ -208,43 +236,141 @@ export class CodexAppServerClient extends Disposable implements ICodexAppServerC
 
 	private _exited = false;
 	private _disposed = false;
-	private _buf = '';
+
+	// Build incomplete NDJSON records in fixed-size blocks. Every byte is copied
+	// at most once into a block and once into the final line, avoiding repeated
+	// whole-prefix concatenation for highly fragmented output.
+	private readonly _inboundLineBlocks: string[] = [];
+	private readonly _inboundBlockFragments: string[] = [];
+	private _inboundBlockBytes = 0;
+	private _inboundLineBytes = 0;
+	private _discardingOversizedLine = false;
+
+	private readonly _writeQueue: IQueuedWrite[] = [];
+	private _queuedWriteBytes = 0;
+	private _writeBlocked = false;
+
+	private readonly _requestTimeoutMs: number;
+	private readonly _maxInboundLineBytes: number;
+	private readonly _maxQueuedWriteBytes: number;
 
 	constructor(
 		private readonly _transport: ICodexAppServerTransport,
 		private readonly _onLog?: (level: 'info' | 'warn' | 'error', message: string) => void,
 		private readonly _graceKillMs = GRACE_KILL_MS,
+		options: ICodexAppServerClientOptions = {},
 	) {
 		super();
+		this._requestTimeoutMs = Math.max(0, options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS);
+		this._maxInboundLineBytes = Math.max(1, options.maxInboundLineBytes ?? MAX_INBOUND_LINE_BYTES);
+		this._maxQueuedWriteBytes = Math.max(0, options.maxQueuedWriteBytes ?? MAX_QUEUED_WRITE_BYTES);
 		this._register(this._transport.onExit(e => this._handleExit(e)));
 		this._transport.stdout.setEncoding?.('utf8');
 		this._register(this._listenToStdout());
+		this._register(this._listenToStdinDrain());
 	}
 
 	private _listenToStdout(): IDisposable {
 		const onData = (chunk: string | Buffer) => {
 			const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
-			this._buf += text;
-			let nl: number;
-			while ((nl = this._buf.indexOf('\n')) >= 0) {
-				const line = this._buf.slice(0, nl);
-				this._buf = this._buf.slice(nl + 1);
-				const trimmed = line.trim();
-				if (trimmed.length === 0) {
-					continue;
-				}
-				let parsed: WireMessage;
-				try {
-					parsed = JSON.parse(trimmed) as WireMessage;
-				} catch (err) {
-					this._log('error', `parse error on line: ${trimmed.slice(0, 200)}`);
-					continue;
-				}
-				this._dispatch(parsed);
-			}
+			this._acceptStdoutChunk(text);
 		};
 		this._transport.stdout.on('data', onData);
 		return toDisposable(() => this._transport.stdout.off('data', onData));
+	}
+
+	private _listenToStdinDrain(): IDisposable {
+		const onDrain = () => this._flushWriteQueue();
+		this._transport.stdin.on('drain', onDrain);
+		return toDisposable(() => this._transport.stdin.off('drain', onDrain));
+	}
+
+	private _acceptStdoutChunk(text: string): void {
+		let offset = 0;
+		while (offset < text.length) {
+			const newline = text.indexOf('\n', offset);
+
+			if (this._discardingOversizedLine) {
+				if (newline < 0) {
+					return;
+				}
+				this._discardingOversizedLine = false;
+				offset = newline + 1;
+				continue;
+			}
+
+			if (newline < 0) {
+				if (!this._appendInboundLineFragment(text.slice(offset))) {
+					this._discardingOversizedLine = true;
+					this._log('error', `dropping app-server message larger than ${this._maxInboundLineBytes} bytes`);
+				}
+				return;
+			}
+
+			if (this._appendInboundLineFragment(text.slice(offset, newline))) {
+				this._processInboundLine(this._takeInboundLine());
+			} else {
+				this._log('error', `dropping app-server message larger than ${this._maxInboundLineBytes} bytes`);
+			}
+			offset = newline + 1;
+		}
+	}
+
+	private _appendInboundLineFragment(fragment: string): boolean {
+		if (fragment.length === 0) {
+			return true;
+		}
+		const byteLength = Buffer.byteLength(fragment, 'utf8');
+		if (this._inboundLineBytes + byteLength > this._maxInboundLineBytes) {
+			this._resetInboundLine();
+			return false;
+		}
+		this._inboundBlockFragments.push(fragment);
+		this._inboundBlockBytes += byteLength;
+		this._inboundLineBytes += byteLength;
+		if (this._inboundBlockBytes >= INBOUND_LINE_BLOCK_BYTES) {
+			this._flushInboundBlock();
+		}
+		return true;
+	}
+
+	private _flushInboundBlock(): void {
+		if (this._inboundBlockFragments.length === 1) {
+			this._inboundLineBlocks.push(this._inboundBlockFragments[0]);
+		} else if (this._inboundBlockFragments.length > 1) {
+			this._inboundLineBlocks.push(this._inboundBlockFragments.join(''));
+		}
+		this._inboundBlockFragments.length = 0;
+		this._inboundBlockBytes = 0;
+	}
+
+	private _takeInboundLine(): string {
+		this._flushInboundBlock();
+		const line = this._inboundLineBlocks.length === 0 ? '' :
+			this._inboundLineBlocks.length === 1 ? this._inboundLineBlocks[0] : this._inboundLineBlocks.join('');
+		this._resetInboundLine();
+		return line;
+	}
+
+	private _resetInboundLine(): void {
+		this._inboundLineBlocks.length = 0;
+		this._inboundBlockFragments.length = 0;
+		this._inboundBlockBytes = 0;
+		this._inboundLineBytes = 0;
+	}
+
+	private _processInboundLine(line: string): void {
+		if (!/\S/.test(line)) {
+			return;
+		}
+		let parsed: WireMessage;
+		try {
+			parsed = JSON.parse(line) as WireMessage;
+		} catch (err) {
+			this._log('error', `parse error on line: ${line.slice(0, 200).trim()}`);
+			return;
+		}
+		this._dispatch(parsed);
 	}
 
 	private _dispatch(msg: WireMessage): void {
@@ -262,7 +388,7 @@ export class CodexAppServerClient extends Disposable implements ICodexAppServerC
 				this._log('warn', `unsolicited response id=${msg.id}`);
 				return;
 			}
-			this._pending.delete(id);
+			this._takePendingRequest(id);
 			if (hasKey(msg, { error: true }) && msg.error) {
 				pending.reject(new JsonRpcError(msg.error.code, msg.error.message, msg.error.data));
 			} else {
@@ -331,16 +457,120 @@ export class CodexAppServerClient extends Disposable implements ICodexAppServerC
 		}
 	}
 
-	private _writeMessage(message: unknown): boolean {
+	private _writeMessage(message: unknown, requestId?: number): boolean {
 		if (this._exited || this._disposed) {
 			return false;
 		}
+		let payload: string;
 		try {
-			this._transport.stdin.write(JSON.stringify(message) + '\n');
+			payload = JSON.stringify(message) + '\n';
+		} catch (err) {
+			this._onTransportError.fire(err instanceof Error ? err : new Error(String(err)));
+			return false;
+		}
+
+		if (this._writeBlocked) {
+			return this._queueWrite(payload, requestId);
+		}
+		return this._writeNow(payload);
+	}
+
+	private _writeNow(payload: string): boolean {
+		try {
+			if (!this._transport.stdin.write(payload)) {
+				this._writeBlocked = true;
+			}
 			return true;
 		} catch (err) {
 			this._onTransportError.fire(err instanceof Error ? err : new Error(String(err)));
 			return false;
+		}
+	}
+
+	private _queueWrite(payload: string, requestId: number | undefined): boolean {
+		const byteLength = Buffer.byteLength(payload, 'utf8');
+		if (this._queuedWriteBytes + byteLength > this._maxQueuedWriteBytes) {
+			this._onTransportError.fire(new Error(`codex app-server stdin queue exceeded ${this._maxQueuedWriteBytes} bytes`));
+			return false;
+		}
+		this._writeQueue.push({ payload, byteLength, requestId });
+		this._queuedWriteBytes += byteLength;
+		return true;
+	}
+
+	private _flushWriteQueue(): void {
+		if (this._disposed || this._exited) {
+			this._clearWriteQueue();
+			return;
+		}
+
+		this._writeBlocked = false;
+		while (this._writeQueue.length > 0) {
+			const next = this._writeQueue.shift()!;
+			this._queuedWriteBytes -= next.byteLength;
+			// A timed-out request may still have been waiting for backpressure.
+			if (next.requestId !== undefined && !this._pending.has(next.requestId)) {
+				continue;
+			}
+			if (!this._writeNow(next.payload)) {
+				const error = new JsonRpcError(JsonRpcErrorCode.InternalError, 'write failed; transport closed');
+				if (next.requestId !== undefined) {
+					this._takePendingRequest(next.requestId)?.reject(error);
+				}
+				this._rejectQueuedRequests(error);
+				return;
+			}
+			if (this._writeBlocked) {
+				return;
+			}
+		}
+	}
+
+	private _removeQueuedRequest(id: number): void {
+		const index = this._writeQueue.findIndex(entry => entry.requestId === id);
+		if (index < 0) {
+			return;
+		}
+		const [entry] = this._writeQueue.splice(index, 1);
+		this._queuedWriteBytes -= entry.byteLength;
+	}
+
+	private _rejectQueuedRequests(error: Error): void {
+		const requestIds: number[] = [];
+		for (const entry of this._writeQueue) {
+			if (entry.requestId !== undefined) {
+				requestIds.push(entry.requestId);
+			}
+		}
+		this._clearWriteQueue();
+		for (const id of requestIds) {
+			this._takePendingRequest(id)?.reject(error);
+		}
+	}
+
+	private _clearWriteQueue(): void {
+		this._writeQueue.length = 0;
+		this._queuedWriteBytes = 0;
+		this._writeBlocked = false;
+	}
+
+	private _takePendingRequest(id: number): IPendingRequest | undefined {
+		const pending = this._pending.get(id);
+		if (!pending) {
+			return undefined;
+		}
+		this._pending.delete(id);
+		if (pending.timeout !== undefined) {
+			clearTimeout(pending.timeout);
+			pending.timeout = undefined;
+		}
+		this._removeQueuedRequest(id);
+		return pending;
+	}
+
+	private _rejectAllPending(createError: (id: number, pending: IPendingRequest) => Error): void {
+		for (const [id, pending] of this._pending) {
+			this._takePendingRequest(id)?.reject(createError(id, pending));
 		}
 	}
 
@@ -350,10 +580,9 @@ export class CodexAppServerClient extends Disposable implements ICodexAppServerC
 		}
 		this._exited = true;
 		const reason = `codex app-server exited (code=${e.code}, signal=${e.signal})`;
-		for (const [id, pending] of this._pending) {
-			pending.reject(new JsonRpcError(JsonRpcErrorCode.InternalError, `${reason}; request id=${id} (${pending.method}) aborted`));
-		}
-		this._pending.clear();
+		this._rejectAllPending((id, pending) => new JsonRpcError(JsonRpcErrorCode.InternalError, `${reason}; request id=${id} (${pending.method}) aborted`));
+		this._clearWriteQueue();
+		this._resetInboundLine();
 		this._onExit.fire(e);
 	}
 
@@ -369,11 +598,23 @@ export class CodexAppServerClient extends Disposable implements ICodexAppServerC
 		}
 		const id = this._nextId++;
 		return new Promise<R>((resolve, reject) => {
-			this._pending.set(id, { method, resolve: resolve as (v: unknown) => void, reject });
-			const ok = this._writeMessage({ id, method, params });
+			const pending: IPendingRequest = { method, resolve: resolve as (v: unknown) => void, reject };
+			this._pending.set(id, pending);
+			if (this._requestTimeoutMs > 0) {
+				const timeout = setTimeout(() => {
+					const timedOut = this._takePendingRequest(id);
+					if (timedOut) {
+						timedOut.reject(new JsonRpcError(
+							JsonRpcErrorCode.InternalError,
+							`request id=${id} (${timedOut.method}) timed out after ${this._requestTimeoutMs}ms`,
+						));
+					}
+				}, this._requestTimeoutMs);
+				pending.timeout = timeout;
+			}
+			const ok = this._writeMessage({ id, method, params }, id);
 			if (!ok) {
-				this._pending.delete(id);
-				reject(new JsonRpcError(JsonRpcErrorCode.InternalError, 'write failed; transport closed'));
+				this._takePendingRequest(id)?.reject(new JsonRpcError(JsonRpcErrorCode.InternalError, 'write failed; transport closed'));
 			}
 		});
 	}
@@ -424,10 +665,9 @@ export class CodexAppServerClient extends Disposable implements ICodexAppServerC
 		}
 		this._disposed = true;
 		// Reject anything still pending so callers don't hang.
-		for (const pending of this._pending.values()) {
-			pending.reject(new CancellationError());
-		}
-		this._pending.clear();
+		this._rejectAllPending(() => new CancellationError());
+		this._clearWriteQueue();
+		this._resetInboundLine();
 		// Try a graceful EOF on stdin; if the process doesn't exit in
 		// {@link GRACE_KILL_MS}, SIGKILL.
 		try {

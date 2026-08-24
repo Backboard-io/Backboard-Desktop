@@ -219,7 +219,7 @@ class CollapsibleChangesSummaryListPool extends Disposable {
 		@IThemeService private readonly themeService: IThemeService
 	) {
 		super();
-		this._resourcePool = this._register(new ResourcePool(() => this.listFactory()));
+		this._resourcePool = this._register(new ResourcePool(() => this.listFactory(), { maxIdleSize: 1 }));
 	}
 
 	private listFactory(): IChatFileChangesSummaryListWrapper {

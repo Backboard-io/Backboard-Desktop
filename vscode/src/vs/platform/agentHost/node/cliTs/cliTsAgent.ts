@@ -17,7 +17,7 @@ import { AgentSession, AgentSignal, IAgent, IAgentCreateSessionConfig, IAgentCre
 import { ActionType, type ChatAction, type SessionAction } from '../../common/state/sessionActions.js';
 import type { ResolveSessionConfigResult, SessionConfigCompletionsResult } from '../../common/state/protocol/commands.js';
 import type { ModelSelection, ProtectedResourceMetadata, ToolDefinition } from '../../common/state/protocol/state.js';
-import { ChatInputAnswerValueKind, ChatInputQuestionKind, ChatInputResponseKind, MessageAttachmentKind, MessageKind, ResponsePartKind, SessionStatus, ToolCallCancellationReason, ToolCallConfirmationReason, ToolCallStatus, ToolResultContentType, TurnState, type ChatInputQuestion, type ClientPluginCustomization, type MessageAttachment, type PendingMessage, type SessionInputAnswer, type SessionInputResponseKind, type ToolCallResult, type ToolResultContent, type Turn } from '../../common/state/sessionState.js';
+import { buildSubagentSessionUri, ChatInputAnswerValueKind, ChatInputQuestionKind, ChatInputResponseKind, MessageAttachmentKind, MessageKind, parseSubagentSessionUri, ResponsePartKind, SessionStatus, ToolCallCancellationReason, ToolCallConfirmationReason, ToolCallStatus, ToolResultContentType, TurnState, type ChatInputQuestion, type ClientPluginCustomization, type MessageAttachment, type PendingMessage, type SessionInputAnswer, type SessionInputResponseKind, type ToolCallResult, type ToolResultContent, type Turn } from '../../common/state/sessionState.js';
 import type { ISyncedCustomization } from '../../common/agentPluginManager.js';
 import { IInstantiationService } from '../../../instantiation/common/instantiation.js';
 import { ISessionDatabase, ISessionDataService } from '../../common/sessionDataService.js';
@@ -66,6 +66,8 @@ interface CliTsStoredSession {
 	/** System-prompt handoff used until the fork creates its own backend thread. */
 	readonly forkContext?: string;
 	readonly turns: CliTsStoredTurn[];
+	/** Child conversations keyed by the parent Agent tool call id. */
+	readonly subagents?: Readonly<Record<string, readonly CliTsStoredTurn[]>>;
 }
 
 interface CliTsTurnState {
@@ -92,6 +94,8 @@ interface CliTsTurnState {
 	readonly toolInputSummaries: Map<string, string>;
 	/** In-flight async tool completions (file-edit diff builds), awaited before turn end. */
 	readonly pendingCompletions: Promise<void>[];
+	/** Live child conversations keyed by their parent Agent tool call id. */
+	readonly subagentTurns: Map<string, { readonly prompt: string; readonly turn: CliTsTurnState }>;
 	reasoningPartId?: string;
 	didCreateReasoningPart?: boolean;
 	reasoningText: string;
@@ -123,6 +127,27 @@ interface CliTsSession {
 	/** Public R-CLI AskUser request ids and their ordered IDE question ids. */
 	readonly pendingInputs: Map<string, readonly string[]>;
 	readonly storedTurns: CliTsStoredTurn[];
+	readonly storedSubagentTurns: Map<string, CliTsStoredTurn[]>;
+}
+
+function createTurnState(turnId: string): CliTsTurnState {
+	return {
+		turnId,
+		messageParts: new Map(),
+		streamedText: new Map(),
+		startedToolCalls: new Set(),
+		confirmedToolCalls: new Set(),
+		childToolLines: new Map(),
+		toolSummaries: [],
+		storedParts: [],
+		storedTextParts: new Map(),
+		toolInputs: new Map(),
+		toolInputSummaries: new Map(),
+		pendingCompletions: [],
+		subagentTurns: new Map(),
+		responseText: '',
+		reasoningText: '',
+	};
 }
 
 /**
@@ -354,22 +379,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 		if (!settings.webSearch) {
 			excludedTools.push(CLI_TS_WEB_SEARCH_TOOL_NAME);
 		}
-		const turn: CliTsTurnState = {
-			turnId: effectiveTurnId,
-			messageParts: new Map(),
-			streamedText: new Map(),
-			startedToolCalls: new Set(),
-			confirmedToolCalls: new Set(),
-			childToolLines: new Map(),
-			toolSummaries: [],
-				storedParts: [],
-				storedTextParts: new Map(),
-				toolInputs: new Map(),
-				toolInputSummaries: new Map(),
-				pendingCompletions: [],
-			responseText: '',
-			reasoningText: '',
-		};
+		const turn = createTurnState(effectiveTurnId);
 		session.turn = turn;
 		// Fill the send→first-token gap with an instant status line so the turn
 		// feels responsive the moment the user hits send — well before the model
@@ -455,10 +465,16 @@ export class CliTsAgent extends Disposable implements IAgent {
 	}
 
 	async getSessionMessages(sessionUri: URI): Promise<readonly Turn[]> {
-		const sessionId = AgentSession.id(sessionUri);
+		const parsedSubagent = parseSubagentSessionUri(sessionUri.toString());
+		const rootSessionUri = parsedSubagent ? URI.parse(parsedSubagent.parentSession.toString()) : sessionUri;
+		const sessionId = AgentSession.id(rootSessionUri);
 		const session = this._sessions.get(sessionId);
-		const turns = session?.storedTurns ?? this._readStore().find(entry => entry.id === sessionId)?.turns ?? [];
-		return turns.map((turn, index) => storedTurnToProtocolTurn(sessionId, index, turn));
+		const stored = session ? undefined : this._readStore().find(entry => entry.id === sessionId);
+		const turns = parsedSubagent
+			? session?.storedSubagentTurns?.get(parsedSubagent.toolCallId) ?? stored?.subagents?.[parsedSubagent.toolCallId] ?? []
+			: session?.storedTurns ?? stored?.turns ?? [];
+		const turnIdPrefix = parsedSubagent ? `${sessionId}-subagent-${parsedSubagent.toolCallId}` : sessionId;
+		return turns.map((turn, index) => storedTurnToProtocolTurn(turnIdPrefix, index, turn));
 	}
 
 	async disposeSession(sessionUri: URI): Promise<void> {
@@ -466,10 +482,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 		const session = this._sessions.get(sessionId);
 		if (session) {
 			session.disposed = true;
-			session.proc?.dispose();
-			session.proc = undefined;
-			session.fileEdits?.dbRef.dispose();
-			session.fileEdits = undefined;
+			this._releaseSessionRuntime(session);
 		}
 		this._sessions.delete(sessionId);
 	}
@@ -480,6 +493,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 			return;
 		}
 		session.proc?.notify({ op: 'cancel' });
+		session.fileEdits?.tracker.discardAllEdits();
 		session.pendingInputs.clear();
 	}
 
@@ -606,18 +620,26 @@ export class CliTsAgent extends Disposable implements IAgent {
 
 	async shutdown(): Promise<void> {
 		for (const session of this._sessions.values()) {
-			session.proc?.dispose();
-			session.proc = undefined;
+			this._releaseSessionRuntime(session);
 		}
 		this._sessions.clear();
 	}
 
 	override dispose(): void {
 		for (const session of this._sessions.values()) {
-			session.proc?.dispose();
+			this._releaseSessionRuntime(session);
 		}
 		this._sessions.clear();
 		super.dispose();
+	}
+
+	private _releaseSessionRuntime(session: CliTsSession): void {
+		session.proc?.dispose();
+		session.proc = undefined;
+		session.fileEdits?.tracker.dispose();
+		session.fileEdits?.dbRef.dispose();
+		session.fileEdits = undefined;
+		session.pendingInputs?.clear();
 	}
 
 	// ---- session plumbing ---------------------------------------------------
@@ -652,6 +674,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 			disposed: false,
 			pendingInputs: new Map(),
 			storedTurns: [...(restored?.turns ?? [])],
+			storedSubagentTurns: new Map(Object.entries(restored?.subagents ?? {}).map(([toolCallId, turns]) => [toolCallId, cloneStoredTurns(turns)])),
 		};
 	}
 
@@ -721,8 +744,8 @@ export class CliTsAgent extends Disposable implements IAgent {
 
 	// ---- event translation ---------------------------------------------------
 
-	private _fire(session: URI, action: SessionAction | ChatAction): void {
-		this._onDidSessionProgress.fire({ kind: 'action', session, action });
+	private _fire(session: URI, action: SessionAction | ChatAction, parentToolCallId?: string): void {
+		this._onDidSessionProgress.fire({ kind: 'action', session, action, ...(parentToolCallId ? { parentToolCallId } : {}) });
 	}
 
 	/**
@@ -734,7 +757,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 	 * Deliberately does NOT set `didCreateStatusPart`, so a genuine
 	 * `system:warning` can still take over the line.
 	 */
-	private _fireStatus(session: CliTsSession, turn: CliTsTurnState, label: string): void {
+	private _fireStatus(session: CliTsSession, turn: CliTsTurnState, label: string, parentToolCallId?: string): void {
 		if (turn.lastStatusLabel === label) {
 			return;
 		}
@@ -743,7 +766,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 			type: ActionType.ChatResponsePart,
 			turnId: turn.turnId,
 			part: { kind: ResponsePartKind.SystemNotification, content: label },
-		});
+		}, parentToolCallId);
 	}
 
 	private _handleAgentEvent(session: CliTsSession, event: CliTsAgentEvent): void {
@@ -751,11 +774,96 @@ export class CliTsAgent extends Disposable implements IAgent {
 		if (!turn) {
 			return;
 		}
+		switch (event.type) {
+			case 'agent:child_start': {
+				if (!event.agentToolCallId || event.prompt === undefined) {
+					return;
+				}
+				const childTurn = createTurnState(event.childSessionId ?? generateUuid());
+				turn.subagentTurns.set(event.agentToolCallId, { prompt: event.prompt, turn: childTurn });
+				const description = firstPromptLine(event.prompt);
+				this._onDidSessionProgress.fire({
+					kind: 'subagent_started',
+					session: session.sessionUri,
+					toolCallId: event.agentToolCallId,
+					agentName: 'worker',
+					agentDisplayName: localize('cliTsAgent.subagentName', "Subagent"),
+					agentDescription: description,
+					prompt: event.prompt,
+				});
+				this._fire(session.sessionUri, {
+					type: ActionType.ChatTurnStarted,
+					turnId: childTurn.turnId,
+					message: { text: event.prompt, origin: { kind: MessageKind.User } },
+				}, event.agentToolCallId);
+				return;
+			}
+			case 'agent:child_event': {
+				if (!event.agentToolCallId || !event.event) {
+					return;
+				}
+				const child = turn.subagentTurns.get(event.agentToolCallId);
+				if (!child) {
+					return;
+				}
+				this._handleMappedAgentEvent(session, event.event, child.turn, event.agentToolCallId);
+				return;
+			}
+			case 'agent:child_end': {
+				if (!event.agentToolCallId) {
+					return;
+				}
+				const child = turn.subagentTurns.get(event.agentToolCallId);
+				if (!child) {
+					return;
+				}
+				child.turn.failed = event.status !== 'completed';
+				const completion = (async (): Promise<void> => {
+					await Promise.allSettled(child.turn.pendingCompletions);
+					session.storedSubagentTurns.set(event.agentToolCallId!, [{
+						prompt: child.prompt,
+						response: child.turn.responseText,
+						failed: child.turn.failed,
+						...(child.turn.toolSummaries.length ? { tools: child.turn.toolSummaries } : {}),
+						...(child.turn.storedParts.length ? { parts: child.turn.storedParts } : {}),
+					}]);
+					if (event.status === 'cancelled') {
+						this._fire(session.sessionUri, {
+							type: ActionType.ChatTurnCancelled,
+							turnId: child.turn.turnId,
+						}, event.agentToolCallId);
+					} else if (event.status === 'failed') {
+						this._fire(session.sessionUri, {
+							type: ActionType.ChatError,
+							turnId: child.turn.turnId,
+							error: { errorType: 'BackboardSubagentFailed', message: localize('cliTsAgent.subagentFailed', "The Backboard subagent reported a failed turn.") },
+						}, event.agentToolCallId);
+					} else {
+						this._fire(session.sessionUri, {
+							type: ActionType.ChatTurnComplete,
+							turnId: child.turn.turnId,
+						}, event.agentToolCallId);
+					}
+					this._onDidSessionProgress.fire({
+						kind: 'subagent_completed',
+						session: session.sessionUri,
+						toolCallId: event.agentToolCallId!,
+					});
+				})();
+				turn.pendingCompletions.push(completion);
+				return;
+			}
+		}
+		this._handleMappedAgentEvent(session, event, turn);
+	}
+
+	private _handleMappedAgentEvent(session: CliTsSession, event: CliTsAgentEvent, turn: CliTsTurnState, parentToolCallId?: string): void {
 		const eventToolName = event.name ?? (event.toolCallId ? turn.toolInputs.get(event.toolCallId)?.name : undefined);
 		if (isCliTsToolLifecycleEvent(event.type) && isHiddenCliTsTool(eventToolName)) {
 			return;
 		}
 		const turnId = turn.turnId;
+		const fire = (action: SessionAction | ChatAction): void => this._fire(session.sessionUri, action, parentToolCallId);
 		switch (event.type) {
 			case 'session:created':
 				if (event.threadId) {
@@ -771,21 +879,21 @@ export class CliTsAgent extends Disposable implements IAgent {
 				const label = event.phase === 'generating'
 					? localize('cliTsAgent.status.generating', "Working…")
 					: localize('cliTsAgent.status.preparing', "Preparing…");
-				this._fireStatus(session, turn, label);
+				this._fireStatus(session, turn, label, parentToolCallId);
 				return;
 			}
 			case 'assistant:delta': {
 				if (!event.text || !event.messageId) {
 					return;
 				}
-				const partId = this._ensureMarkdownPart(session, turn, event.messageId);
+				const partId = this._ensureMarkdownPart(session, turn, event.messageId, parentToolCallId);
 				turn.streamedText.set(event.messageId, (turn.streamedText.get(event.messageId) ?? '') + event.text);
 				turn.responseText += event.text;
 				const storedDelta = turn.storedTextParts.get(partId);
 				if (storedDelta) {
 					storedDelta.content += event.text;
 				}
-				this._fire(session.sessionUri, { type: ActionType.ChatDelta, turnId, partId, content: event.text });
+				fire({ type: ActionType.ChatDelta, turnId, partId, content: event.text });
 				return;
 			}
 			case 'assistant:message': {
@@ -796,7 +904,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 				if (event.text === streamed) {
 					return;
 				}
-				const partId = this._ensureMarkdownPart(session, turn, event.messageId);
+				const partId = this._ensureMarkdownPart(session, turn, event.messageId, parentToolCallId);
 				const remainder = event.text.startsWith(streamed) ? event.text.slice(streamed.length) : event.text;
 				if (remainder) {
 					turn.streamedText.set(event.messageId, streamed + remainder);
@@ -805,7 +913,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 					if (storedRemainder) {
 						storedRemainder.content += remainder;
 					}
-					this._fire(session.sessionUri, { type: ActionType.ChatDelta, turnId, partId, content: remainder });
+					fire({ type: ActionType.ChatDelta, turnId, partId, content: remainder });
 				}
 				return;
 			}
@@ -819,7 +927,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 					const storedReasoning: CliTsStoredPart = { kind: 'reasoning', content: '' };
 					turn.storedParts.push(storedReasoning);
 					turn.storedTextParts.set(turn.reasoningPartId, storedReasoning);
-					this._fire(session.sessionUri, {
+					fire({
 						type: ActionType.ChatResponsePart,
 						turnId,
 						part: { kind: ResponsePartKind.Reasoning, id: turn.reasoningPartId, content: '' },
@@ -830,7 +938,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 				if (storedReasoningPart) {
 					storedReasoningPart.content += event.text;
 				}
-				this._fire(session.sessionUri, {
+				fire({
 					type: ActionType.ChatReasoning,
 					turnId,
 					partId: turn.reasoningPartId,
@@ -858,15 +966,15 @@ export class CliTsAgent extends Disposable implements IAgent {
 				// Backboard's early tool events are advisory. If the final
 				// tool_submit_required frame omits one, close its speculative card
 				// instead of leaving a permanent spinner behind.
-				this._fire(session.sessionUri, {
+				fire({
 					type: ActionType.ChatToolCallReady,
 					turnId,
 					toolCallId: event.toolCallId,
 					invocationMessage: toolDisplayName(name),
 					toolInput: '',
-					_meta: cliTsToolMetadata(name),
+					_meta: cliTsToolMetadata(name, turn.toolInputs.get(event.toolCallId)?.input),
 				});
-				this._fire(session.sessionUri, {
+				fire({
 					type: ActionType.ChatToolCallConfirmed,
 					turnId,
 					toolCallId: event.toolCallId,
@@ -883,22 +991,22 @@ export class CliTsAgent extends Disposable implements IAgent {
 				if (!turn.toolInputs.has(event.toolCallId)) {
 					turn.toolInputs.set(event.toolCallId, { name: event.name, input: undefined });
 				}
-				this._ensureToolCallStart(session, turn, event.toolCallId, event.name, event.inputSummary);
+				this._ensureToolCallStart(session, turn, event.toolCallId, event.name, event.inputSummary, parentToolCallId);
 				return;
 			}
 			case 'tool:start': {
 				if (!event.toolCallId || !event.name) {
 					return;
 				}
-				this._ensureToolCallStart(session, turn, event.toolCallId, event.name, event.inputSummary);
-				this._fire(session.sessionUri, {
+				this._ensureToolCallStart(session, turn, event.toolCallId, event.name, event.inputSummary, parentToolCallId);
+				fire({
 					type: ActionType.ChatToolCallReady,
 					turnId,
 					toolCallId: event.toolCallId,
 					invocationMessage: toolInvocationMessage(event.name, event.inputSummary),
 					toolInput: event.inputSummary,
 					confirmed: turn.confirmedToolCalls.has(event.toolCallId) ? ToolCallConfirmationReason.UserAction : ToolCallConfirmationReason.NotNeeded,
-					_meta: cliTsToolMetadata(event.name),
+					_meta: cliTsToolMetadata(event.name, turn.toolInputs.get(event.toolCallId)?.input),
 				});
 				return;
 			}
@@ -907,7 +1015,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 					return;
 				}
 				const text = typeof event.data === 'string' ? event.data : JSON.stringify(event.data);
-				this._fire(session.sessionUri, {
+				fire({
 					type: ActionType.ChatToolCallContentChanged,
 					turnId,
 					toolCallId: event.toolCallId,
@@ -936,7 +1044,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 						lines.set(event.childToolCallId, existing.replace(/ — (running|done|error)$/, ` — ${event.status === 'error' ? 'error' : 'done'}`));
 					}
 				}
-				this._fire(session.sessionUri, {
+				fire({
 					type: ActionType.ChatToolCallContentChanged,
 					turnId,
 					toolCallId: parentId,
@@ -955,7 +1063,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 				}
 				const toolCallId = event.toolCallId;
 				const name = event.name;
-				this._ensureToolCallStart(session, turn, toolCallId, name, event.inputSummary);
+				this._ensureToolCallStart(session, turn, toolCallId, name, event.inputSummary, parentToolCallId);
 				turn.toolSummaries.push(`${toolDisplayName(name)}${event.title ? ` — ${event.title}` : ''}`);
 				const inputSummary = event.inputSummary ?? turn.toolInputSummaries.get(toolCallId);
 				turn.storedParts.push({
@@ -966,15 +1074,25 @@ export class CliTsAgent extends Disposable implements IAgent {
 					...(event.title ? { title: event.title } : {}),
 					...(isCliTsTerminalTool(name) && event.detail ? { detail: event.detail } : {}),
 				});
-				const text = [event.title, event.detail].filter(part => !!part).join('\n');
+				const text = cliTsToolResultText(name, event.title, event.detail, inputSummary);
 				const fileEdits = Array.isArray(event.fileEdits) ? event.fileEdits : [];
 				const completion = (async (): Promise<void> => {
 					const content: ToolResultContent[] = text ? [{ type: ToolResultContentType.Text, text }] : [];
+					const child = turn.subagentTurns.get(toolCallId);
+					if (child) {
+						content.unshift({
+							type: ToolResultContentType.Subagent,
+							resource: buildSubagentSessionUri(session.sessionUri.toString(), toolCallId),
+							title: localize('cliTsAgent.subagentName', "Subagent"),
+							agentName: 'worker',
+							description: firstPromptLine(child.prompt),
+						});
+					}
 					if (fileEdits.length) {
 						const edits = await this._buildFileEditContents(session, turn, toolCallId, name, fileEdits);
 						content.push(...edits);
 					}
-					this._fire(session.sessionUri, {
+					fire({
 						type: ActionType.ChatToolCallComplete,
 						turnId,
 						toolCallId,
@@ -992,7 +1110,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 				if (!event.toolCallId || !event.name) {
 					return;
 				}
-				this._ensureToolCallStart(session, turn, event.toolCallId, event.name, event.inputSummary);
+				this._ensureToolCallStart(session, turn, event.toolCallId, event.name, event.inputSummary, parentToolCallId);
 				const inputSummary = event.inputSummary ?? turn.toolInputSummaries.get(event.toolCallId);
 				turn.storedParts.push({
 					kind: 'tool',
@@ -1003,7 +1121,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 					...(event.error ? { title: event.error.slice(0, 200) } : {}),
 				});
 				const message = event.error ?? localize('cliTsAgent.toolFailedNoDetail', "The tool call failed.");
-				this._fire(session.sessionUri, {
+				fire({
 					type: ActionType.ChatToolCallComplete,
 					turnId,
 					toolCallId: event.toolCallId,
@@ -1050,7 +1168,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 						};
 				});
 				session.pendingInputs.set(request.id, questions.map(question => question.id));
-				this._fire(session.sessionUri, {
+				fire({
 					type: ActionType.ChatInputRequested,
 					request: { id: request.id, message: specs[0]?.question ?? '', questions },
 				});
@@ -1061,7 +1179,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 				if (!usage) {
 					return;
 				}
-				this._fire(session.sessionUri, {
+				fire({
 					type: ActionType.ChatUsage,
 					turnId,
 					usage: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, model: usage.model },
@@ -1078,7 +1196,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 					return;
 				}
 				turn.didCreateStatusPart = true;
-				this._fire(session.sessionUri, {
+				fire({
 					type: ActionType.ChatResponsePart,
 					turnId,
 					part: { kind: ResponsePartKind.SystemNotification, content: localize('cliTsAgent.warning', "Backboard: {0}", event.message) },
@@ -1087,7 +1205,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 			}
 			case 'run:error': {
 				turn.failed = true;
-				this._fire(session.sessionUri, {
+				fire({
 					type: ActionType.ChatError,
 					turnId,
 					error: { errorType: 'BackboardError', message: event.error ?? localize('cliTsAgent.requestFailed', "Backboard request failed.") },
@@ -1099,7 +1217,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 		}
 	}
 
-	private _ensureMarkdownPart(session: CliTsSession, turn: CliTsTurnState, messageId: string): string {
+	private _ensureMarkdownPart(session: CliTsSession, turn: CliTsTurnState, messageId: string, parentToolCallId?: string): string {
 		const existing = turn.messageParts.get(messageId);
 		if (existing) {
 			return existing;
@@ -1113,11 +1231,11 @@ export class CliTsAgent extends Disposable implements IAgent {
 			type: ActionType.ChatResponsePart,
 			turnId: turn.turnId,
 			part: { kind: ResponsePartKind.Markdown, id: partId, content: '' },
-		});
+		}, parentToolCallId);
 		return partId;
 	}
 
-	private _ensureToolCallStart(session: CliTsSession, turn: CliTsTurnState, toolCallId: string, toolName: string, inputSummary?: string): void {
+	private _ensureToolCallStart(session: CliTsSession, turn: CliTsTurnState, toolCallId: string, toolName: string, inputSummary?: string, parentToolCallId?: string): void {
 		if (isHiddenCliTsTool(toolName)) {
 			return;
 		}
@@ -1134,8 +1252,8 @@ export class CliTsAgent extends Disposable implements IAgent {
 			toolCallId,
 			toolName,
 			displayName: toolDisplayName(toolName),
-			_meta: cliTsToolMetadata(toolName),
-		});
+			_meta: cliTsToolMetadata(toolName, turn.toolInputs.get(toolCallId)?.input),
+		}, parentToolCallId);
 		this._fire(session.sessionUri, {
 			type: ActionType.ChatToolCallDelta,
 			turnId: turn.turnId,
@@ -1144,7 +1262,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 			invocationMessage: inputSummary === 'Generating input…'
 				? localize('cliTsAgent.toolGeneratingInput', "Generating {0} input…", toolDisplayName(toolName))
 				: toolInvocationMessage(toolName, inputSummary),
-		});
+		}, parentToolCallId);
 	}
 
 	/**
@@ -1207,6 +1325,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 					threadId: session.threadId,
 					forkContext: session.forkContext,
 					turns: session.storedTurns,
+					subagents: Object.fromEntries(session.storedSubagentTurns),
 				}));
 			const storePath = this._storePath();
 			fs.mkdirSync(path.dirname(storePath), { recursive: true });
@@ -1259,6 +1378,40 @@ function isCliTsTerminalTool(toolName: string): boolean {
 	return toolName.toLocaleLowerCase() === 'execute';
 }
 
+function isCliTsSubagentTool(toolName: string): boolean {
+	const normalized = toolName.replace(/[_-]/g, '').toLocaleLowerCase();
+	return normalized === 'agent' || normalized === 'subagent';
+}
+
+function cliTsToolResultText(toolName: string, title: string | undefined, detail: string | undefined, inputSummary: string | undefined): string {
+	if (!isCliTsTerminalTool(toolName)) {
+		return [title, detail].filter(part => !!part).join('\n');
+	}
+	if (!detail) {
+		return '';
+	}
+
+	// Execute already has structured status and command fields. Keep its result
+	// payload to stdout/stderr only so the terminal disclosure does not repeat
+	// `Success` and `$ command` inside the output body.
+	const command = inputSummary?.trim();
+	if (!command) {
+		return detail;
+	}
+	const lines = detail.split(/\r?\n/);
+	const firstContentIndex = lines.findIndex(line => !!line.trim());
+	if (firstContentIndex >= 0) {
+		const promptMatch = /^\s*[$%❯]\s+(.+)$/.exec(lines[firstContentIndex]);
+		if (promptMatch?.[1].trim() === command) {
+			lines.splice(firstContentIndex, 1);
+			while (lines.length && !lines[0].trim()) {
+				lines.shift();
+			}
+		}
+	}
+	return lines.join('\n');
+}
+
 function isHiddenCliTsTool(toolName: string | undefined): boolean {
 	return toolName?.replace(/[_-]/g, '').toLocaleLowerCase() === 'askuser';
 }
@@ -1273,10 +1426,22 @@ function isCliTsToolLifecycleEvent(eventType: string): boolean {
 		|| eventType === 'tool:retracted';
 }
 
-function cliTsToolMetadata(toolName: string): Record<string, unknown> {
-	return isCliTsTerminalTool(toolName)
-		? { source: 'cli-ts', toolKind: 'terminal', language: 'shellscript' }
-		: { source: 'cli-ts' };
+function cliTsToolMetadata(toolName: string, input?: unknown): Record<string, unknown> {
+	if (isCliTsTerminalTool(toolName)) {
+		return { source: 'cli-ts', toolKind: 'terminal', language: 'shellscript' };
+	}
+	if (isCliTsSubagentTool(toolName)) {
+		const record = input && typeof input === 'object' ? input as { prompt?: unknown; subagent_type?: unknown } : undefined;
+		const prompt = typeof record?.prompt === 'string' ? record.prompt : undefined;
+		const agentName = record?.subagent_type === 'rlm' ? 'rlm' : 'worker';
+		return {
+			source: 'cli-ts',
+			toolKind: 'subagent',
+			subagentAgentName: agentName,
+			...(prompt ? { subagentDescription: firstPromptLine(prompt) } : {}),
+		};
+	}
+	return { source: 'cli-ts' };
 }
 
 function toolInvocationMessage(toolName: string, inputSummary?: string): string {
@@ -1363,7 +1528,7 @@ function storedTurnToProtocolTurn(sessionId: string, index: number, turn: CliTsS
 				}
 			} else if (!isHiddenCliTsTool(part.name)) {
 				const displayName = toolDisplayName(part.name);
-				const resultText = [part.title, part.detail].filter(value => !!value).join('\n');
+				const resultText = cliTsToolResultText(part.name, part.title, part.detail, part.inputSummary);
 				responseParts.push({
 					kind: ResponsePartKind.ToolCall,
 					toolCall: {
@@ -1380,7 +1545,7 @@ function storedTurnToProtocolTurn(sessionId: string, index: number, turn: CliTsS
 							: localize('cliTsAgent.toolFinished', "{0} finished", displayName)),
 						...(resultText ? { content: [{ type: ToolResultContentType.Text, text: resultText }] } : {}),
 						...(part.failed && part.title ? { error: { message: part.title } } : {}),
-						_meta: cliTsToolMetadata(part.name),
+					_meta: cliTsToolMetadata(part.name, isCliTsSubagentTool(part.name) && part.inputSummary ? { prompt: part.inputSummary } : undefined),
 					},
 				});
 			}

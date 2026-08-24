@@ -12,15 +12,17 @@ import { IRenderedMarkdown } from '../../../../../../base/browser/markdownRender
 import { DisposableStore, IDisposable, MutableDisposable } from '../../../../../../base/common/lifecycle.js';
 import { autorun } from '../../../../../../base/common/observable.js';
 import { rcut } from '../../../../../../base/common/strings.js';
+import { URI } from '../../../../../../base/common/uri.js';
 import { localize } from '../../../../../../nls.js';
 import { IHoverService } from '../../../../../../platform/hover/browser/hover.js';
 import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
 import { IConfigurationService } from '../../../../../../platform/configuration/common/configuration.js';
 import { IMarkdownRenderer } from '../../../../../../platform/markdown/browser/markdownRenderer.js';
+import { buildSubagentSessionUri } from '../../../../../../platform/agentHost/common/state/sessionState.js';
 import { IChatHookPart, IChatMarkdownContent, IChatToolInvocation, IChatToolInvocationSerialized } from '../../../common/chatService/chatService.js';
 import { IChatRendererContent } from '../../../common/model/chatViewModel.js';
 import { IRunSubagentToolInputParams } from '../../../common/tools/builtinTools/runSubagentTool.js';
-import { ChatTreeItem } from '../../chat.js';
+import { ChatTreeItem, ChatViewPaneTarget, IChatWidgetService } from '../../chat.js';
 import { ChatCollapsibleContentPart } from './chatCollapsibleContentPart.js';
 import { ChatCollapsibleMarkdownContentPart } from './chatCollapsibleMarkdownContentPart.js';
 import { EditorPool } from './chatContentCodePools.js';
@@ -196,6 +198,7 @@ export class ChatSubagentContentPart extends ChatCollapsibleContentPart implemen
 		@IChatMarkdownAnchorService private readonly chatMarkdownAnchorService: IChatMarkdownAnchorService,
 		@IHoverService hoverService: IHoverService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
+		@IChatWidgetService private readonly chatWidgetService: IChatWidgetService,
 	) {
 		// Extract description, agentName, and prompt from toolInvocation
 		const { description, isDefaultDescription, agentName, prompt, modelName } = ChatSubagentContentPart.extractSubagentInfo(toolInvocation);
@@ -220,6 +223,7 @@ export class ChatSubagentContentPart extends ChatCollapsibleContentPart implemen
 
 		const node = this.domNode;
 		node.classList.add('chat-thinking-box', 'chat-thinking-fixed-mode', 'chat-subagent-part');
+		this.installOpenButton();
 
 		if (!this.element.isComplete) {
 			node.classList.add('chat-thinking-active');
@@ -295,6 +299,29 @@ export class ChatSubagentContentPart extends ChatCollapsibleContentPart implemen
 
 		// Watch for completion and render result
 		this.watchToolCompletion(toolInvocation);
+	}
+
+	private installOpenButton(): void {
+		const header = this._collapseButton?.element.parentElement;
+		if (!header) {
+			return;
+		}
+		const label = localize('chat.subagent.open', 'Open');
+		const button = $('button.chat-subagent-open');
+		button.setAttribute('type', 'button');
+		button.ariaLabel = localize('chat.subagent.openAriaLabel', 'Open subagent chat');
+		button.title = button.ariaLabel;
+		const text = $('span.chat-subagent-open-label');
+		text.textContent = label;
+		button.append(text, $('span.codicon.codicon-arrow-right', { 'aria-hidden': 'true' }));
+		header.appendChild(button);
+
+		this._register(dom.addDisposableListener(button, 'click', event => {
+			event.preventDefault();
+			event.stopPropagation();
+			const childResource = URI.parse(buildSubagentSessionUri(this.context.element.sessionResource.toString(), this.subAgentInvocationId));
+			void this.chatWidgetService.openSession(childResource, ChatViewPaneTarget);
+		}));
 	}
 
 	private getRandomWorkingMessage(): string {

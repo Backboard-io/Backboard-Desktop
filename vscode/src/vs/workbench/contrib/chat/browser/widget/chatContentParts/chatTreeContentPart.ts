@@ -97,7 +97,7 @@ export class TreePool extends Disposable {
 		@IThemeService private readonly themeService: IThemeService,
 	) {
 		super();
-		this._pool = this._register(new ResourcePool(() => this.treeFactory()));
+		this._pool = this._register(new ResourcePool(() => this.treeFactory(), { maxIdleSize: 2 }));
 	}
 
 	private treeFactory(): ITreePoolWrapper {

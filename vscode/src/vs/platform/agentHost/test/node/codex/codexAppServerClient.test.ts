@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
-import { PassThrough } from 'stream';
+import { PassThrough, Writable } from 'stream';
 import { CancellationError } from '../../../../../base/common/errors.js';
 import { Emitter } from '../../../../../base/common/event.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
@@ -21,10 +21,10 @@ import {
 // the client writes, and vice versa. Mirrors the shape of a real spawned
 // process from the client's perspective.
 
-interface IFakePeer {
+interface IFakePeer<TOutbound extends Writable = PassThrough> {
 	readonly transport: ICodexAppServerTransport;
 	/** Lines the client wrote (sent to the server). */
-	readonly outbound: PassThrough;
+	readonly outbound: TOutbound;
 	readonly killCount: number;
 	/** Inject a wire message from server → client. Newline-terminated. */
 	push(message: object): void;
@@ -33,8 +33,8 @@ interface IFakePeer {
 	dispose(): void;
 }
 
-function makeFakePeer(): IFakePeer {
-	const clientStdin = new PassThrough();   // client writes here, peer reads
+function makeFakePeer<TOutbound extends Writable = PassThrough>(providedStdin?: TOutbound): IFakePeer<TOutbound> {
+	const clientStdin = (providedStdin ?? new PassThrough()) as TOutbound;   // client writes here, peer reads
 	const clientStdout = new PassThrough();  // peer writes here, client reads
 	const exitEmitter = new Emitter<{ readonly code: number | null; readonly signal: NodeJS.Signals | null }>();
 	const onceExitListeners: ((e: { readonly code: number | null; readonly signal: NodeJS.Signals | null }) => void)[] = [];
@@ -82,6 +82,26 @@ function makeFakePeer(): IFakePeer {
 			clientStdout.destroy();
 		},
 	};
+}
+
+class BackpressureWritable extends Writable {
+	readonly writes: string[] = [];
+	private readonly _pendingCallbacks: Array<() => void> = [];
+
+	constructor() {
+		super({ highWaterMark: 1 });
+	}
+
+	override _write(chunk: Buffer | string, _encoding: BufferEncoding, callback: (error?: Error | null) => void): void {
+		this.writes.push(typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
+		this._pendingCallbacks.push(callback);
+	}
+
+	releaseNext(): void {
+		const callback = this._pendingCallbacks.shift();
+		assert.ok(callback, 'expected a pending write');
+		callback();
+	}
 }
 
 /**
@@ -363,6 +383,107 @@ suite('CodexAppServerClient', () => {
 			assert.deepStrictEqual(received, [{ thread: { id: 'split' } }]);
 			handle.dispose();
 		} finally {
+			client.dispose();
+			peer.dispose();
+		}
+	});
+
+	test('unanswered requests time out and release their response id', async () => {
+		const peer = makeFakePeer();
+		const logs: { level: string; message: string }[] = [];
+		const client = new CodexAppServerClient(
+			peer.transport,
+			(level, message) => logs.push({ level, message }),
+			undefined,
+			{ requestTimeoutMs: 10 },
+		);
+		try {
+			const responsePromise = client.request('getAuthStatus', { refreshToken: false, includeToken: false });
+			const sent = await readNextMessage(peer.outbound) as { id: number };
+
+			await assert.rejects(responsePromise, (err: unknown) => {
+				assert.ok(err instanceof JsonRpcError, 'expected JsonRpcError');
+				assert.match(err.message, /timed out/);
+				return true;
+			});
+
+			peer.push({ id: sent.id, result: { authMode: 'apikey' } });
+			await new Promise(resolve => setImmediate(resolve));
+			assert.deepStrictEqual(logs, [{ level: 'warn', message: `unsolicited response id=${sent.id}` }]);
+		} finally {
+			client.dispose();
+			peer.dispose();
+		}
+	});
+
+	test('oversized incomplete lines are discarded and framing recovers', async () => {
+		const peer = makeFakePeer();
+		const logs: { level: string; message: string }[] = [];
+		const client = new CodexAppServerClient(
+			peer.transport,
+			(level, message) => logs.push({ level, message }),
+			undefined,
+			{ maxInboundLineBytes: 128 },
+		);
+		try {
+			const received: unknown[] = [];
+			const handle = client.onNotification('thread/started', params => received.push(params));
+			peer.transport.stdout.emit('data', 'x'.repeat(80));
+			peer.transport.stdout.emit('data', 'x'.repeat(80));
+			peer.transport.stdout.emit('data', '\n' + JSON.stringify({ method: 'thread/started', params: { thread: { id: 'recovered' } } }) + '\n');
+			await new Promise(resolve => setImmediate(resolve));
+
+			assert.deepStrictEqual(received, [{ thread: { id: 'recovered' } }]);
+			assert.deepStrictEqual(logs, [{ level: 'error', message: 'dropping app-server message larger than 128 bytes' }]);
+			handle.dispose();
+		} finally {
+			client.dispose();
+			peer.dispose();
+		}
+	});
+
+	test('stdin backpressure queues writes until drain', async () => {
+		const stdin = new BackpressureWritable();
+		const peer = makeFakePeer(stdin);
+		const client = new CodexAppServerClient(peer.transport);
+		try {
+			client.notify('initialized', undefined as never);
+			const responsePromise = client.request('getAuthStatus', { refreshToken: false, includeToken: false });
+			assert.strictEqual(stdin.writes.length, 1, 'second write must wait for drain');
+
+			stdin.releaseNext();
+			await new Promise(resolve => setImmediate(resolve));
+			assert.strictEqual(stdin.writes.length, 2);
+			const sent = JSON.parse(stdin.writes[1]) as { id: number; method: string };
+			assert.strictEqual(sent.method, 'getAuthStatus');
+
+			peer.push({ id: sent.id, result: { authMode: 'apikey' } });
+			assert.deepStrictEqual(await responsePromise, { authMode: 'apikey' });
+			stdin.releaseNext();
+			await new Promise(resolve => setImmediate(resolve));
+		} finally {
+			client.dispose();
+			peer.dispose();
+		}
+	});
+
+	test('stdin backpressure queue is bounded', async () => {
+		const stdin = new BackpressureWritable();
+		const peer = makeFakePeer(stdin);
+		const client = new CodexAppServerClient(peer.transport, undefined, undefined, { maxQueuedWriteBytes: 1 });
+		const transportErrors: Error[] = [];
+		const errorListener = client.onTransportError(error => transportErrors.push(error));
+		try {
+			client.notify('initialized', undefined as never);
+			const responsePromise = client.request('getAuthStatus', { refreshToken: false, includeToken: false });
+			await assert.rejects(responsePromise, /write failed; transport closed/);
+			assert.strictEqual(stdin.writes.length, 1);
+			assert.strictEqual(transportErrors.length, 1);
+			assert.match(transportErrors[0].message, /stdin queue exceeded 1 bytes/);
+			stdin.releaseNext();
+			await new Promise(resolve => setImmediate(resolve));
+		} finally {
+			errorListener.dispose();
 			client.dispose();
 			peer.dispose();
 		}

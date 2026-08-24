@@ -3,8 +3,9 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { disposableTimeout } from '../../../../../../base/common/async.js';
 import { CancellationToken } from '../../../../../../base/common/cancellation.js';
-import { Disposable, MutableDisposable } from '../../../../../../base/common/lifecycle.js';
+import { Disposable, IDisposable, MutableDisposable } from '../../../../../../base/common/lifecycle.js';
 import { revive } from '../../../../../../base/common/marshalling.js';
 import { Schemas } from '../../../../../../base/common/network.js';
 import { isEqual } from '../../../../../../base/common/resources.js';
@@ -15,6 +16,7 @@ import * as nls from '../../../../../../nls.js';
 import { ConfirmResult, IDialogService } from '../../../../../../platform/dialogs/common/dialogs.js';
 import { IConfigurationService } from '../../../../../../platform/configuration/common/configuration.js';
 import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
+import { ILogService } from '../../../../../../platform/log/common/log.js';
 import { registerIcon } from '../../../../../../platform/theme/common/iconRegistry.js';
 import { EditorInputCapabilities, IEditorIdentifier, IEditorSerializer, IUntypedEditorInput, Verbosity } from '../../../../../common/editor.js';
 import { EditorInput, IEditorCloseHandler } from '../../../../../common/editor/editorInput.js';
@@ -22,12 +24,14 @@ import { IChatModelReference, IChatService } from '../../../common/chatService/c
 import { IChatSessionsService, localChatSessionType } from '../../../common/chatSessionsService.js';
 import { ChatAgentLocation, ChatEditorTitleMaxLength, getDefaultNewChatSessionResource, getDefaultNewChatSessionType } from '../../../common/constants.js';
 import { IChatEditingSession, ModifiedFileEntryState } from '../../../common/editing/chatEditingService.js';
+import { isChatPerfLoggingEnabled, logChatPerf } from '../../../common/chatPerf.js';
 import { IChatModel } from '../../../common/model/chatModel.js';
 import { LocalChatSessionUri, getChatSessionType } from '../../../common/model/chatUri.js';
 import { IClearEditingSessionConfirmationOptions } from '../../actions/chatActions.js';
 import type { IChatEditorOptions } from './chatEditor.js';
 
 const ChatEditorIcon = registerIcon('chat-editor-label-icon', ThemeIcon.fromId('backboard-logo'), nls.localize('chatEditorLabelIcon', 'Icon of the chat editor label.'));
+const InactiveChatEditorModelReleaseDelay = 5_000;
 
 export class ChatEditorInput extends EditorInput implements IEditorCloseHandler {
 	static readonly TypeID: string = 'workbench.input.chatSession';
@@ -44,12 +48,106 @@ export class ChatEditorInput extends EditorInput implements IEditorCloseHandler 
 
 	private didTransferOutEditingSession = false;
 	private cachedIcon: ThemeIcon | URI | undefined;
+	private cachedName: string | undefined;
 
 	private readonly modelRef = this._register(new MutableDisposable<IChatModelReference>());
 	private readonly _modelChangeListener = this._register(new MutableDisposable());
+	private readonly _modelAdapter = this._register(new MutableDisposable<ChatEditorModel>());
+	private readonly _inactiveModelRelease = this._register(new MutableDisposable<IDisposable>());
+	private _modelWasReleased = false;
+	private _releaseWhenIdle = false;
+	private _resolvePromise: Promise<ChatEditorModel | null> | undefined;
+	private _modelReferenceGeneration = 0;
 
 	private get model(): IChatModel | undefined {
 		return this.modelRef.value?.object;
+	}
+
+	get needsModelRestore(): boolean {
+		return this._modelWasReleased;
+	}
+
+	get hasModelReferenceOrPendingResolve(): boolean {
+		return !!this.model || !!this._resolvePromise;
+	}
+
+	markModelReferenceActive(): void {
+		this._releaseWhenIdle = false;
+		this._inactiveModelRelease.clear();
+	}
+
+	scheduleModelReferenceRelease(delay = InactiveChatEditorModelReleaseDelay): void {
+		if (this._modelWasReleased || this.isDisposed()) {
+			return;
+		}
+		this._releaseWhenIdle = true;
+		this._inactiveModelRelease.clear();
+		this._scheduleInactiveModelRelease(delay, 'timeout');
+		if (isChatPerfLoggingEnabled(this.logService)) {
+			logChatPerf(this.logService, 'editor.scheduleInactiveInputRelease', {
+				session: this.sessionResource?.toString(),
+				delayMs: delay,
+			});
+		}
+	}
+
+	private _scheduleInactiveModelRelease(delay: number, reason: 'timeout' | 'retry'): void {
+		if (!this._releaseWhenIdle || this._modelWasReleased || this.isDisposed() || this._inactiveModelRelease.value) {
+			return;
+		}
+		this._inactiveModelRelease.value = disposableTimeout(() => {
+			this._inactiveModelRelease.clear();
+			this._tryReleaseInactiveModelReference(reason);
+		}, delay);
+	}
+
+	canReleaseModelReference(): boolean {
+		const model = this.model;
+		if (!model || model.requestInProgress.get() || model.requestNeedsInput.get()) {
+			return false;
+		}
+		return !model.editingSession?.entries.get().some(entry => entry.state.get() === ModifiedFileEntryState.Modified);
+	}
+
+	releaseModelReference(): boolean {
+		if (!this.canReleaseModelReference()) {
+			return false;
+		}
+		this._modelReferenceGeneration++;
+		this._releaseWhenIdle = false;
+		this._inactiveModelRelease.clear();
+		this.cachedName = this.model?.hasCustomTitle ? this.model.title : this.model?.title ? truncate(this.model.title, ChatEditorTitleMaxLength) : this.cachedName;
+		this._modelChangeListener.clear();
+		this._modelAdapter.clear();
+		this.modelRef.clear();
+		this._modelWasReleased = true;
+		return true;
+	}
+
+	private _tryReleaseInactiveModelReference(reason: 'timeout' | 'retry'): void {
+		if (!this._releaseWhenIdle || this.isDisposed()) {
+			return;
+		}
+		const released = this.releaseModelReference();
+		if (isChatPerfLoggingEnabled(this.logService)) {
+			logChatPerf(this.logService, 'editor.inactiveInputRelease', {
+				session: this.sessionResource?.toString(),
+				reason,
+				released,
+			}, undefined);
+		}
+		if (!released && this._releaseWhenIdle) {
+			// A request, user-input pause, or modified edit can make the model
+			// temporarily ineligible. Poll at a low frequency because ChatModel does
+			// not emit a general completion event for every request lifecycle.
+			if (this.model || this._resolvePromise) {
+				this._scheduleInactiveModelRelease(InactiveChatEditorModelReleaseDelay, 'retry');
+			} else {
+				// There is no acquired or pending reference, so there is nothing left
+				// for this release request to own.
+				this._releaseWhenIdle = false;
+			}
+		}
 	}
 
 	static getNewEditorUri(): URI {
@@ -64,6 +162,7 @@ export class ChatEditorInput extends EditorInput implements IEditorCloseHandler 
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@IChatSessionsService private readonly chatSessionsService: IChatSessionsService,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
+		@ILogService private readonly logService: ILogService,
 	) {
 		super();
 
@@ -139,6 +238,9 @@ export class ChatEditorInput extends EditorInput implements IEditorCloseHandler 
 			// Only truncate if the default title is being used (don't truncate custom titles)
 			return this.model.hasCustomTitle ? this.model.title : truncate(this.model.title, ChatEditorTitleMaxLength);
 		}
+		if (this.cachedName) {
+			return this.cachedName;
+		}
 
 		// If we have a sessionId but no resolved model, try to get the title from persisted sessions
 		if (this._sessionResource) {
@@ -213,36 +315,78 @@ export class ChatEditorInput extends EditorInput implements IEditorCloseHandler 
 		return getChatSessionType(this._sessionResource ?? this.resource);
 	}
 
-	override async resolve(): Promise<ChatEditorModel | null> {
+	override resolve(): Promise<ChatEditorModel | null> {
+		this.markModelReferenceActive();
+		if (this.isDisposed()) {
+			return Promise.resolve(null);
+		}
+
+		const existingAdapter = this._getCurrentModelAdapter();
+		if (existingAdapter) {
+			return Promise.resolve(existingAdapter);
+		}
+
+		let resolvePromise = this._resolvePromise;
+		if (!resolvePromise) {
+			resolvePromise = this._resolveModel(this._modelReferenceGeneration);
+			this._resolvePromise = resolvePromise;
+			const onSettled = () => {
+				if (this._resolvePromise !== resolvePromise) {
+					return;
+				}
+				this._resolvePromise = undefined;
+				if (this._releaseWhenIdle) {
+					this._scheduleInactiveModelRelease(InactiveChatEditorModelReleaseDelay, 'retry');
+				}
+			};
+			void resolvePromise.then(onSettled, onSettled);
+		}
+
+		return resolvePromise;
+	}
+
+	private async _resolveModel(resolveGeneration: number): Promise<ChatEditorModel | null> {
 		const searchParams = new URLSearchParams(this.resource.query);
 		const chatSessionType = searchParams.get('chatSessionType');
 		const inputType = chatSessionType ?? this.resource.authority;
 
 		if (this._sessionResource) {
-			this.modelRef.value = await this.chatService.acquireOrLoadSession(this._sessionResource, ChatAgentLocation.Chat, CancellationToken.None, 'ChatEditorInput#resolve');
+			if (!this._setModelReference(await this.chatService.acquireOrLoadSession(this._sessionResource, ChatAgentLocation.Chat, CancellationToken.None, 'ChatEditorInput#resolve'), resolveGeneration)) {
+				return this._getCurrentModelAdapter();
+			}
 
 			if (this.shouldReplaceEmptyLocalSession(this._sessionResource)) {
 				const defaultResource = getDefaultNewChatSessionResource(this.configurationService, this.chatSessionsService);
 				if (getChatSessionType(defaultResource) !== localChatSessionType) {
 					this._sessionResource = defaultResource;
-					this.modelRef.value = await this.chatService.acquireOrLoadSession(defaultResource, ChatAgentLocation.Chat, CancellationToken.None, 'ChatEditorInput#resolveDefaultSession');
+					if (!this._setModelReference(await this.chatService.acquireOrLoadSession(defaultResource, ChatAgentLocation.Chat, CancellationToken.None, 'ChatEditorInput#resolveDefaultSession'), resolveGeneration)) {
+						return this._getCurrentModelAdapter();
+					}
 				}
 			}
 
 			// For local session only, if we find no existing session, create a new one
 			if (!this.model && LocalChatSessionUri.parseLocalSessionId(this._sessionResource)) {
-				this.modelRef.value = this.chatService.startNewLocalSession(ChatAgentLocation.Chat, { canUseTools: true, debugOwner: 'ChatEditorInput#resolveNewLocalSession' });
+				if (!this._setModelReference(this.chatService.startNewLocalSession(ChatAgentLocation.Chat, { canUseTools: true, debugOwner: 'ChatEditorInput#resolveNewLocalSession' }), resolveGeneration)) {
+					return this._getCurrentModelAdapter();
+				}
 			}
 		} else if (!this.options.target) {
 			const defaultResource = getDefaultNewChatSessionResource(this.configurationService, this.chatSessionsService);
 			if (getChatSessionType(defaultResource) === localChatSessionType) {
-				this.modelRef.value = this.chatService.startNewLocalSession(ChatAgentLocation.Chat, { canUseTools: !inputType, debugOwner: 'ChatEditorInput#resolveUntitled' });
+				if (!this._setModelReference(this.chatService.startNewLocalSession(ChatAgentLocation.Chat, { canUseTools: !inputType, debugOwner: 'ChatEditorInput#resolveUntitled' }), resolveGeneration)) {
+					return this._getCurrentModelAdapter();
+				}
 			} else {
 				this._sessionResource = defaultResource;
-				this.modelRef.value = await this.chatService.acquireOrLoadSession(defaultResource, ChatAgentLocation.Chat, CancellationToken.None, 'ChatEditorInput#resolveDefaultUntitled');
+				if (!this._setModelReference(await this.chatService.acquireOrLoadSession(defaultResource, ChatAgentLocation.Chat, CancellationToken.None, 'ChatEditorInput#resolveDefaultUntitled'), resolveGeneration)) {
+					return this._getCurrentModelAdapter();
+				}
 			}
 		} else if (this.options.target.data) {
-			this.modelRef.value = this.chatService.loadSessionFromData(this.options.target.data, 'ChatEditorInput#resolveImportedData');
+			if (!this._setModelReference(this.chatService.loadSessionFromData(this.options.target.data, 'ChatEditorInput#resolveImportedData'), resolveGeneration)) {
+				return this._getCurrentModelAdapter();
+			}
 		}
 
 		if (!this.model || this.isDisposed()) {
@@ -250,6 +394,8 @@ export class ChatEditorInput extends EditorInput implements IEditorCloseHandler 
 		}
 
 		this._sessionResource = this.model.sessionResource;
+		this._modelWasReleased = false;
+		this.cachedName = this.model.hasCustomTitle ? this.model.title : truncate(this.model.title, ChatEditorTitleMaxLength);
 
 		this._trackModelChanges();
 
@@ -261,7 +407,23 @@ export class ChatEditorInput extends EditorInput implements IEditorCloseHandler 
 
 		this._onDidChangeLabel.fire();
 
-		return this._register(new ChatEditorModel(this.model));
+		const modelAdapter = new ChatEditorModel(this.model);
+		this._modelAdapter.value = modelAdapter;
+		return modelAdapter;
+	}
+
+	private _getCurrentModelAdapter(): ChatEditorModel | null {
+		const adapter = this._modelAdapter.value;
+		return this.model && adapter && !adapter.isDisposed() ? adapter : null;
+	}
+
+	private _setModelReference(reference: IChatModelReference | undefined, expectedGeneration?: number): boolean {
+		if (this.isDisposed() || (expectedGeneration !== undefined && expectedGeneration !== this._modelReferenceGeneration)) {
+			reference?.dispose();
+			return false;
+		}
+		this.modelRef.value = reference;
+		return true;
 	}
 
 	private shouldReplaceEmptyLocalSession(sessionResource: URI): boolean {
@@ -276,8 +438,16 @@ export class ChatEditorInput extends EditorInput implements IEditorCloseHandler 
 	 * from an untitled session to a real session.
 	 */
 	updateModel(model: IChatModel): void {
+		this.markModelReferenceActive();
+		this._modelReferenceGeneration++;
+		this._modelAdapter.clear();
 		this._sessionResource = model.sessionResource;
-		this.modelRef.value = this.chatService.acquireExistingSession(model.sessionResource, 'ChatEditorInput#updateModel');
+		this.cachedName = model.hasCustomTitle ? model.title : truncate(model.title, ChatEditorTitleMaxLength);
+		this._setModelReference(this.chatService.acquireExistingSession(model.sessionResource, 'ChatEditorInput#updateModel'));
+		this._modelWasReleased = !this.model;
+		if (this.model) {
+			this._modelAdapter.value = new ChatEditorModel(this.model);
+		}
 		this._trackModelChanges();
 		this.cachedIcon = undefined;
 		this._onDidChangeLabel.fire();
@@ -288,6 +458,9 @@ export class ChatEditorInput extends EditorInput implements IEditorCloseHandler 
 			return;
 		}
 		this._modelChangeListener.value = this.model.onDidChange(() => {
+			if (this.model?.title) {
+				this.cachedName = this.model.hasCustomTitle ? this.model.title : truncate(this.model.title, ChatEditorTitleMaxLength);
+			}
 			this.cachedIcon = undefined;
 			this._onDidChangeLabel.fire();
 		});

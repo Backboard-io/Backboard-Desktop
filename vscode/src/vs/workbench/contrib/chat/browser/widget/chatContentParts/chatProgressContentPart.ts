@@ -63,12 +63,12 @@ export class ChatProgressContentPart extends Disposable implements IChatContentP
 		super();
 		this.currentContent = progress.content;
 
-		const followingContent = context.content.slice(context.contentIndex + 1);
-		this.showSpinner = forceShowSpinner ?? shouldShowSpinner(followingContent, context.element);
+		const followingContentStart = context.contentIndex + 1;
+		this.showSpinner = forceShowSpinner ?? shouldShowSpinner(context.content, context.element, followingContentStart);
 		this.showLiveElapsed = this.showSpinner
 			&& context.container.closest('.backboard-clean-chat') !== null
 			&& !isBackboardCursorTranscript(context.container);
-		this.isHidden = forceShowMessage !== true && followingContent.some(part => part.kind !== 'progressMessage');
+		this.isHidden = forceShowMessage !== true && hasNonProgressContent(context.content, followingContentStart);
 		if (this.isHidden) {
 			// Placeholder, don't show the progress message
 			this.domNode = $('');
@@ -80,10 +80,15 @@ export class ChatProgressContentPart extends Disposable implements IChatContentP
 			alert(stripIcons(renderAsPlaintext(progress.content)));
 		}
 		const isLoadingIcon = icon && ThemeIcon.isEqual(icon, ThemeIcon.modify(Codicon.loading, 'spin'));
+		const useCompactCursorIndicator = this.showSpinner && isBackboardCursorTranscript(context.container);
 		// Even if callers request shimmer, only the active (spinner-visible) progress row should animate.
-		const useShimmer = (shimmer ?? (!icon || isLoadingIcon)) && this.showSpinner;
+		// The editor transcript uses a bounded five-pixel opacity pulse instead of
+		// repainting the entire status label with the shimmer gradient.
+		const useShimmer = (shimmer ?? (!icon || isLoadingIcon)) && this.showSpinner && !useCompactCursorIndicator;
 		// if we have shimmer, don't show spinner
-		const codicon = useShimmer ? Codicon.check : (icon ?? (this.showSpinner ? ThemeIcon.modify(Codicon.loading, 'spin') : Codicon.check));
+		const codicon = useCompactCursorIndicator
+			? Codicon.circleFilled
+			: (useShimmer ? Codicon.check : (icon ?? (this.showSpinner ? ThemeIcon.modify(Codicon.loading, 'spin') : Codicon.check)));
 		const result = this.chatContentMarkdownRenderer.render(progress.content);
 		result.element.classList.add('progress-step');
 		renderFileWidgets(result.element, this.instantiationService, this.chatMarkdownAnchorService, this._fileWidgetStore);
@@ -95,6 +100,15 @@ export class ChatProgressContentPart extends Disposable implements IChatContentP
 		const tooltip: IMarkdownString | undefined = this.createApprovalMessage();
 		const progressPart = this._register(instantiationService.createInstance(ChatProgressSubPart, result.element, codicon, tooltip));
 		this.domNode = progressPart.domNode;
+		if (useCompactCursorIndicator) {
+			this.domNode.classList.add('chat-cursor-progress-row');
+			this.domNode.setAttribute('role', 'status');
+			this.domNode.setAttribute('aria-live', 'polite');
+			this.domNode.setAttribute('aria-atomic', 'true');
+			const indicator = this.domNode.firstElementChild;
+			indicator?.classList.add('chat-cursor-working-indicator');
+			indicator?.setAttribute('aria-hidden', 'true');
+		}
 		if (useShimmer) {
 			this.domNode.classList.add('shimmer-progress');
 		}
@@ -190,15 +204,15 @@ export class ChatProgressContentPart extends Disposable implements IChatContentP
 		this.renderedMessage.value = result;
 	}
 
-	hasSameContent(other: IChatRendererContent, followingContent: IChatRendererContent[], element: ChatTreeItem): boolean {
+	hasSameContent(other: IChatRendererContent, content: IChatRendererContent[], element: ChatTreeItem, followingContentStart = 0): boolean {
 		// Progress parts render render until some other content shows up, then they hide.
 		// When some other content shows up, need to signal to be rerendered as hidden.
-		if (followingContent.some(part => part.kind !== 'progressMessage') && !this.isHidden) {
+		if (hasNonProgressContent(content, followingContentStart) && !this.isHidden) {
 			return false;
 		}
 
 		// Needs rerender when spinner state changes
-		const showSpinner = shouldShowSpinner(followingContent, element);
+		const showSpinner = shouldShowSpinner(content, element, followingContentStart);
 
 		// Needs rerender when content changes
 		if (other.kind === 'progressMessage' && other.content.value !== this.currentContent.value) {
@@ -213,8 +227,17 @@ export class ChatProgressContentPart extends Disposable implements IChatContentP
 	}
 }
 
-function shouldShowSpinner(followingContent: IChatRendererContent[], element: ChatTreeItem): boolean {
-	return isResponseVM(element) && !element.isComplete && followingContent.length === 0;
+function hasNonProgressContent(content: ReadonlyArray<IChatRendererContent>, start: number): boolean {
+	for (let index = start; index < content.length; index++) {
+		if (content[index].kind !== 'progressMessage') {
+			return true;
+		}
+	}
+	return false;
+}
+
+function shouldShowSpinner(content: ReadonlyArray<IChatRendererContent>, element: ChatTreeItem, followingContentStart = 0): boolean {
+	return isResponseVM(element) && !element.isComplete && content.length <= followingContentStart;
 }
 
 
@@ -409,8 +432,17 @@ export class ChatWorkingProgressContentPart extends Disposable implements IChatC
 		this.domNode.classList.toggle('chat-cursor-working-complete', this.useCursorTranscriptPresentation && isComplete);
 
 		if (this.useCursorTranscriptPresentation) {
-			// Cursor uses one quiet text row while pending; the surrounding work
-			// disclosure already communicates that the response is active.
+			// Keep the editor transcript's progress affordance local to one tiny
+			// opacity-animated dot. Shimmering the entire label repaints a much
+			// larger area for every animation frame in long-running responses.
+			if (!isComplete) {
+				iconElement.classList.add('chat-cursor-working-indicator');
+				iconElement.setAttribute('aria-hidden', 'true');
+				append(this.domNode, iconElement);
+				this.domNode.setAttribute('role', 'status');
+				this.domNode.setAttribute('aria-live', 'polite');
+				this.domNode.setAttribute('aria-atomic', 'true');
+			}
 		} else if (this.useT3TimelinePresentation) {
 			this.domNode.classList.add('chat-t3-working-row');
 			iconElement.classList.add('chat-t3-working-dots');
@@ -432,7 +464,7 @@ export class ChatWorkingProgressContentPart extends Disposable implements IChatC
 		append(messageContainer, this.statsElement);
 		append(this.domNode, messageContainer);
 
-		if (!isComplete && !this.useT3TimelinePresentation) {
+		if (!isComplete && !this.useT3TimelinePresentation && !this.useCursorTranscriptPresentation) {
 			this.domNode.classList.add('shimmer-progress');
 		}
 

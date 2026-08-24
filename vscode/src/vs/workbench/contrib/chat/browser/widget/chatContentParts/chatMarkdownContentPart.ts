@@ -8,6 +8,7 @@ import { allowedMarkdownHtmlAttributes, MarkdownRendererMarkedOptions, type Mark
 import { status } from '../../../../../../base/browser/ui/aria/aria.js';
 import { DomScrollableElement } from '../../../../../../base/browser/ui/scrollbar/scrollableElement.js';
 import { wrapTablesWithScrollable } from './chatMarkdownTableScrolling.js';
+import { disposableTimeout } from '../../../../../../base/common/async.js';
 import { coalesce } from '../../../../../../base/common/arrays.js';
 import { findLast } from '../../../../../../base/common/arraysFind.js';
 import { CancellationTokenSource } from '../../../../../../base/common/cancellation.js';
@@ -39,6 +40,7 @@ import { IHoverService } from '../../../../../../platform/hover/browser/hover.js
 import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
 import { ILabelService } from '../../../../../../platform/label/common/label.js';
 import { IMarkdownRenderer } from '../../../../../../platform/markdown/browser/markdownRenderer.js';
+import { ILogService } from '../../../../../../platform/log/common/log.js';
 import { IEditorService, SIDE_GROUP } from '../../../../../services/editor/common/editorService.js';
 import { AccessibilityWorkbenchSettingId } from '../../../../accessibility/browser/accessibilityConfiguration.js';
 import { IAiEditTelemetryService } from '../../../../editTelemetry/browser/telemetry/aiEditTelemetry/aiEditTelemetryService.js';
@@ -65,9 +67,12 @@ import { ChatExtensionsContentPart } from './chatExtensionsContentPart.js';
 import { ChatProgressSubPart } from './chatProgressContentPart.js';
 import { IncrementalDOMMorpher } from './chatIncrementalRendering/chatIncrementalRendering.js';
 import { IChatOutputPartStateCache, IOutputPartState } from './chatOutputPartStateCache.js';
+import { isChatPerfLoggingEnabled, logChatPerf } from '../../../common/chatPerf.js';
 import './media/chatMarkdownPart.css';
 
 const $ = dom.$;
+const LONG_STREAMING_MARKDOWN_PLAINTEXT_THRESHOLD = 15_000;
+const DEFERRED_CODE_BLOCK_RELEASE_DELAY = 15_000;
 
 export interface IChatMarkdownContentPartOptions {
 	readonly codeBlockRenderOptions?: ICodeBlockRenderOptions;
@@ -84,6 +89,178 @@ export interface IChatMarkdownContentPartOptions {
 
 interface IMarkdownPartCodeBlockInfo extends IChatCodeBlockInfo {
 	isStreamingEdit: boolean;
+}
+
+/**
+ * Lightweight placeholder for a code block that is outside the viewport of a
+ * long completed response. Monaco is acquired only when the block approaches
+ * the viewport or receives user interaction.
+ */
+class DeferredCodeBlockPart extends Disposable {
+	private _element: HTMLElement;
+	private _editorRef: IDisposableReference<CodeBlockPart> | undefined;
+	private _width: number;
+	private readonly _observer: IntersectionObserver | undefined;
+	private readonly _dehydrateTimer = this._register(new MutableDisposable<IDisposable>());
+	private readonly _placeholderListeners = this._register(new MutableDisposable<DisposableStore>());
+
+	get element(): HTMLElement { return this._element; }
+	get uri(): URI | undefined { return this._editorRef?.object.uri; }
+
+	constructor(
+		private readonly data: ICodeBlockData,
+		width: number,
+		private readonly editorPool: EditorPool,
+		private readonly onDidChange: () => void,
+		private readonly logService: ILogService,
+	) {
+		super();
+		this._width = width;
+		this._element = this.createPlaceholder();
+
+		const targetWindow = dom.getWindow(this._element);
+		if (typeof targetWindow.IntersectionObserver === 'function') {
+			this._observer = new targetWindow.IntersectionObserver(entries => {
+				const entry = entries.find(candidate => candidate.target === this._element);
+				if (!entry) {
+					return;
+				}
+				if (entry.isIntersecting) {
+					this._dehydrateTimer.clear();
+					this.hydrate('viewport');
+				} else {
+					this.scheduleDehydrate();
+				}
+			}, { rootMargin: '600px 0px' });
+			this._observer.observe(this._element);
+			this._register({ dispose: () => this._observer?.disconnect() });
+		}
+		if (isChatPerfLoggingEnabled(this.logService)) {
+			logChatPerf(this.logService, 'heavy.defer', {
+				session: this.data.chatSessionResource.toString(),
+				item: this.data.element.id,
+				part: 'codeBlock',
+				index: this.data.codeBlockIndex,
+				chars: this.data.text.length,
+			});
+		}
+	}
+
+	private createPlaceholder(height?: number): HTMLElement {
+		const listeners = new DisposableStore();
+		this._placeholderListeners.value = listeners;
+		const element = $('div.interactive-result-code-block.chat-codeblock-deferred');
+		element.tabIndex = 0;
+		element.setAttribute('role', 'group');
+		element.setAttribute('aria-label', localize('chat.codeBlock.lazyLabel', '{0} code block', this.data.languageId || localize('chat.codeBlock.languageUnknown', 'Code')));
+		if (height && Number.isFinite(height)) {
+			element.style.minHeight = `${Math.ceil(height)}px`;
+		}
+		const header = dom.append(element, $('.chat-codeblock-deferred-header'));
+		header.textContent = this.data.languageId || localize('chat.codeBlock.languageUnknown', 'Code');
+		const preview = dom.append(element, $('pre.chat-codeblock-deferred-preview'));
+		preview.textContent = this.data.text.length > 4_000 ? `${this.data.text.slice(0, 4_000)}\n…` : this.data.text;
+
+		listeners.add(dom.addDisposableListener(element, dom.EventType.FOCUS_IN, () => this.hydrate('focus')));
+		listeners.add(dom.addDisposableListener(element, dom.EventType.POINTER_DOWN, () => this.hydrate('pointer'), true));
+		listeners.add(dom.addDisposableListener(element, dom.EventType.MOUSE_ENTER, () => this.hydrate('hover')));
+		return element;
+	}
+
+	private scheduleDehydrate(): void {
+		if (!this._editorRef || this._dehydrateTimer.value) {
+			return;
+		}
+		this._dehydrateTimer.value = disposableTimeout(() => this.dehydrate(), DEFERRED_CODE_BLOCK_RELEASE_DELAY);
+	}
+
+	private dehydrate(): void {
+		this._dehydrateTimer.clear();
+		const ref = this._editorRef;
+		if (!ref || this._store.isDisposed) {
+			return;
+		}
+		if (this._element.contains(this._element.ownerDocument.activeElement)) {
+			this.scheduleDehydrate();
+			return;
+		}
+
+		const perfEnabled = isChatPerfLoggingEnabled(this.logService);
+		const startedAt = perfEnabled ? performance.now() : 0;
+		const oldElement = this._element;
+		const placeholder = this.createPlaceholder(oldElement.getBoundingClientRect().height);
+		this._observer?.unobserve(oldElement);
+		this._element = placeholder;
+		if (oldElement.isConnected) {
+			oldElement.replaceWith(placeholder);
+		}
+		this._observer?.observe(placeholder);
+		this._editorRef = undefined;
+		ref.dispose();
+		this.onDidChange();
+		if (perfEnabled) {
+			logChatPerf(this.logService, 'heavy.dehydrate', {
+				session: this.data.chatSessionResource.toString(),
+				item: this.data.element.id,
+				part: 'codeBlock',
+				index: this.data.codeBlockIndex,
+				chars: this.data.text.length,
+				reason: 'offscreen',
+			}, performance.now() - startedAt, 0);
+		}
+	}
+
+	private hydrate(reason = 'interaction'): void {
+		if (this._editorRef || this._store.isDisposed) {
+			return;
+		}
+		const perfEnabled = isChatPerfLoggingEnabled(this.logService);
+		const startedAt = perfEnabled ? performance.now() : 0;
+		this._dehydrateTimer.clear();
+		const oldElement = this._element;
+		this._observer?.unobserve(oldElement);
+		this._placeholderListeners.clear();
+		const ref = this.editorPool.get(CodeBlockPart.poolKey(this.data.element.id, this.data.codeBlockIndex));
+		this._editorRef = ref;
+		ref.object.render(this.data, this._width);
+		this._element = ref.object.element;
+		if (oldElement.isConnected) {
+			oldElement.replaceWith(this._element);
+		}
+		this._observer?.observe(this._element);
+		this.onDidChange();
+		if (perfEnabled) {
+			logChatPerf(this.logService, 'heavy.hydrate', {
+				session: this.data.chatSessionResource.toString(),
+				item: this.data.element.id,
+				part: 'codeBlock',
+				index: this.data.codeBlockIndex,
+				chars: this.data.text.length,
+				reason,
+			}, performance.now() - startedAt, 0);
+		}
+	}
+
+	focus(): void {
+		this.hydrate('focusCall');
+		this._editorRef?.object.focus();
+	}
+
+	layout(width: number): void {
+		this._width = width;
+		this._editorRef?.object.layout(width);
+	}
+
+	onDidRemount(): void {
+		this._editorRef?.object.onDidRemount();
+		this._observer?.observe(this._element);
+	}
+
+	override dispose(): void {
+		this._editorRef?.dispose();
+		this._editorRef = undefined;
+		super.dispose();
+	}
 }
 
 export class ChatMarkdownContentPart extends Disposable implements IChatContentPart {
@@ -104,7 +281,7 @@ export class ChatMarkdownContentPart extends Disposable implements IChatContentP
 	 */
 	readonly onDidChangeDiff: Event<IEditSessionDiffStats> = this._onDidChangeDiff.event;
 
-	private readonly allRefs: IDisposableReference<CodeBlockPart | ChatOutputCodeBlockPart | CollapsedCodeBlock | MarkdownDiffBlockPart>[] = [];
+	private readonly allRefs: IDisposableReference<CodeBlockPart | DeferredCodeBlockPart | ChatOutputCodeBlockPart | CollapsedCodeBlock | MarkdownDiffBlockPart>[] = [];
 
 	private readonly _codeblocks: IMarkdownPartCodeBlockInfo[] = [];
 	public get codeblocks(): IChatCodeBlockInfo[] {
@@ -115,6 +292,7 @@ export class ChatMarkdownContentPart extends Disposable implements IChatContentP
 
 	/** Incremental rendering morpher — only created when the experiment is enabled. */
 	private _incrementalMorpher: IncrementalDOMMorpher | undefined;
+	private _usingStreamingPlaintext = false;
 
 	constructor(
 		private markdown: IChatMarkdownContent,
@@ -131,6 +309,7 @@ export class ChatMarkdownContentPart extends Disposable implements IChatContentP
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@IAiEditTelemetryService private readonly aiEditTelemetryService: IAiEditTelemetryService,
 		@IChatOutputRendererService private readonly chatOutputRendererService: IChatOutputRendererService,
+		@ILogService private readonly logService: ILogService,
 	) {
 		super();
 
@@ -157,6 +336,55 @@ export class ChatMarkdownContentPart extends Disposable implements IChatContentP
 		// not for completed responses loaded from history — even if
 		// fillInIncompleteTokens is true (e.g. canceled or incomplete responses).
 		const incrementalRenderingEnabled = configurationService.getValue<boolean>(ChatConfiguration.IncrementalRendering);
+		let streamingPlaintextNode: Text | undefined;
+		let streamPerfRenders = 0;
+		let streamPerfDuration = 0;
+		let streamPerfLastLogAt = 0;
+		let streamPerfLastChars = 0;
+		let streamPerfLastMode: string | undefined;
+		const recordMarkdownRenderPerf = (mode: 'markdown' | 'plaintext', durationMs: number, chars: number) => {
+			const streaming = isResponseVM(element) && fillInIncompleteTokens && !element.isComplete && !element.isCanceled;
+			if (!streaming) {
+				streamPerfRenders = 0;
+				streamPerfDuration = 0;
+				logChatPerf(this.logService, 'markdown.final', {
+					session: element.sessionResource.toString(),
+					item: element.id,
+					kind: isResponseVM(element) ? 'response' : 'request',
+					mode,
+					chars,
+					codeBlocks: this._codeblocks.length,
+					domChildren: this.domNode.childElementCount,
+					incremental: !!this._incrementalMorpher,
+				}, durationMs);
+				return;
+			}
+
+			streamPerfRenders++;
+			streamPerfDuration += durationMs;
+			const now = Date.now();
+			if (streamPerfLastLogAt !== 0
+				&& now - streamPerfLastLogAt < 1_000
+				&& chars - streamPerfLastChars < 10_000
+				&& mode === streamPerfLastMode) {
+				return;
+			}
+
+			logChatPerf(this.logService, 'markdown.stream', {
+				session: element.sessionResource.toString(),
+				item: element.id,
+				mode,
+				chars,
+				renders: streamPerfRenders,
+				codeBlocks: this._codeblocks.length,
+				domChildren: this.domNode.childElementCount,
+			}, streamPerfDuration);
+			streamPerfRenders = 0;
+			streamPerfDuration = 0;
+			streamPerfLastLogAt = now;
+			streamPerfLastChars = chars;
+			streamPerfLastMode = mode;
+		};
 		if (incrementalRenderingEnabled && isResponseVM(element) && fillInIncompleteTokens && !element.isComplete) {
 			this._incrementalMorpher = this._register(instantiationService.createInstance(IncrementalDOMMorpher, this.domNode));
 			this._incrementalMorpher.setRenderCallback((newMd) => {
@@ -172,7 +400,11 @@ export class ChatMarkdownContentPart extends Disposable implements IChatContentP
 				content.baseUri = URI.revive(this.markdown.content.baseUri);
 				content.uris = this.markdown.content.uris;
 				this.markdown = { ...this.markdown, content };
-				doRenderMarkdown();
+				if (newMd.length >= LONG_STREAMING_MARKDOWN_PLAINTEXT_THRESHOLD && !element.isComplete) {
+					doRenderStreamingPlaintext(newMd);
+				} else {
+					doRenderMarkdown();
+				}
 				this.markdown = savedMarkdown;
 				// Notify the list that our height changed so it can
 				// update scroll position. The morpher renders via rAF,
@@ -184,10 +416,42 @@ export class ChatMarkdownContentPart extends Disposable implements IChatContentP
 
 		const renderStore = this._register(new MutableDisposable<DisposableStore>());
 
+		const doRenderStreamingPlaintext = (value: string) => {
+			if (this._store.isDisposed) {
+				return;
+			}
+			const perfEnabled = isChatPerfLoggingEnabled(this.logService);
+			const startedAt = perfEnabled ? performance.now() : 0;
+			if (!this._usingStreamingPlaintext) {
+				renderStore.clear();
+				dom.clearNode(this.domNode);
+				this.allRefs.length = 0;
+				this._codeblocks.length = 0;
+				this.mathLayoutParticipants.clear();
+				const plaintext = $('div.chat-markdown-streaming-plaintext');
+				streamingPlaintextNode = this.domNode.ownerDocument.createTextNode('');
+				plaintext.appendChild(streamingPlaintextNode);
+				this.domNode.appendChild(plaintext);
+				this._usingStreamingPlaintext = true;
+			}
+
+			const renderedValue = streamingPlaintextNode?.data ?? '';
+			if (streamingPlaintextNode && value.startsWith(renderedValue)) {
+				streamingPlaintextNode.appendData(value.slice(renderedValue.length));
+			} else if (streamingPlaintextNode) {
+				streamingPlaintextNode.data = value;
+			}
+			if (perfEnabled) {
+				recordMarkdownRenderPerf('plaintext', performance.now() - startedAt, value.length);
+			}
+		};
+
 		const doRenderMarkdown = () => {
 			if (this._store.isDisposed) {
 				return;
 			}
+			const perfEnabled = isChatPerfLoggingEnabled(this.logService);
+			const startedAt = perfEnabled ? performance.now() : 0;
 
 			const previousRenderStore = renderStore.clearAndLeak();
 			const reusableOutputCodeBlockRefs = new Map<string, IDisposableReference<ChatOutputCodeBlockPart>>();
@@ -199,6 +463,8 @@ export class ChatMarkdownContentPart extends Disposable implements IChatContentP
 				}
 			}
 			previousRenderStore?.dispose();
+			this._usingStreamingPlaintext = false;
+			streamingPlaintextNode = undefined;
 
 			// Reset state for re-render
 			const store = new DisposableStore();
@@ -406,24 +672,46 @@ export class ChatMarkdownContentPart extends Disposable implements IChatContentP
 
 			store.add(wrapTablesWithScrollable(this.domNode, layoutParticipants));
 			dispose(reusableOutputCodeBlockRefs.values());
+			if (perfEnabled) {
+				recordMarkdownRenderPerf('markdown', performance.now() - startedAt, this.markdown.content.value.length);
+			}
 		};
 
-		// Always render immediately
-		doRenderMarkdown();
+		// Always mount the text that is already present. A reconstructed
+		// streaming row must never restart its reveal from an empty DOM.
+		if (this._incrementalMorpher
+			&& markdown.content.value.length >= LONG_STREAMING_MARKDOWN_PLAINTEXT_THRESHOLD
+			&& !element.isComplete) {
+			doRenderStreamingPlaintext(markdown.content.value);
+		} else {
+			doRenderMarkdown();
+		}
 
-		// Seed the morpher *after* the initial render so it captures
-		// the correct markdown baseline. Pass `animateInitial: true`
-		// so the initial DOM children receive the entrance animation —
-		// this is important when a markdown part first appears (e.g.
-		// after thinking content) and already contains visible content.
-		this._incrementalMorpher?.seed(markdown.content.value, /* animateInitial */ true);
+		// Seed after mounting and mark the existing DOM as already revealed.
+		// This preserves the current text across row remounts and avoids a
+		// whole-response entrance animation during final rich hydration.
+		this._incrementalMorpher?.seed(markdown.content.value, /* animateInitial */ false);
 
-		if (enableMath && !MarkedKatexSupport.getExtension(dom.getWindow(context.container))) {
-			// KaTeX not yet loaded - load it and re-render when ready
-			MarkedKatexSupport.loadExtension(dom.getWindow(context.container))
-				.then(() => {
-					doRenderMarkdown();
-				})
+			if (enableMath && !MarkedKatexSupport.getExtension(dom.getWindow(context.container))) {
+				// KaTeX not yet loaded - load it and re-render when ready
+				MarkedKatexSupport.loadExtension(dom.getWindow(context.container))
+					.then(() => {
+						if (this._store.isDisposed) {
+							return;
+						}
+						const currentValue = this.markdown.content.value;
+						const stillStreaming = isResponseVM(element) && !element.isComplete && !element.isCanceled;
+						if (this._incrementalMorpher
+							&& stillStreaming
+							&& currentValue.length >= LONG_STREAMING_MARKDOWN_PLAINTEXT_THRESHOLD) {
+							// Loading a deferred enhancement must not tear down the cheap
+							// append-only presentation midway through a long response. KaTeX
+							// will be included by the single rich completion render instead.
+							doRenderStreamingPlaintext(currentValue);
+							return;
+						}
+						doRenderMarkdown();
+					})
 				.catch(e => {
 					console.error('Failed to load MarkedKatexSupport extension:', e);
 				});
@@ -504,7 +792,17 @@ export class ChatMarkdownContentPart extends Disposable implements IChatContentP
 		this._onDidChangeDiff.fire({ added: totalAdded, removed: totalRemoved });
 	}
 
-	private renderCodeBlock(data: ICodeBlockData, currentWidth: number): IDisposableReference<CodeBlockPart> {
+	private renderCodeBlock(data: ICodeBlockData, currentWidth: number): IDisposableReference<CodeBlockPart | DeferredCodeBlockPart> {
+		if (isResponseVM(data.element) && data.element.isComplete && this.markdown.content.value.length >= LONG_STREAMING_MARKDOWN_PLAINTEXT_THRESHOLD) {
+			const codeBlock = new DeferredCodeBlockPart(data, currentWidth, this.editorPool, () => this._onDidChangeHeight.fire(), this.logService);
+			const ref: IDisposableReference<DeferredCodeBlockPart> = {
+				object: codeBlock,
+				isStale: () => false,
+				dispose: () => codeBlock.dispose(),
+			};
+			this.allRefs.push(ref);
+			return ref;
+		}
 		const key = CodeBlockPart.poolKey(data.element.id, data.codeBlockIndex);
 		const ref = this.editorPool.get(key);
 		this.allRefs.push(ref);
@@ -578,12 +876,12 @@ export class ChatMarkdownContentPart extends Disposable implements IChatContentP
 	 * Forward the stream's word-rate estimate to the morpher's buffer.
 	 */
 	updateStreamRate(rate: number, isComplete: boolean): void {
-		this._incrementalMorpher?.updateStreamRate(rate, isComplete);
+		this._incrementalMorpher?.updateStreamRate(rate, isComplete, this._usingStreamingPlaintext);
 	}
 
 	layout(width: number): void {
 		this.allRefs.forEach((ref, index) => {
-			if (ref.object instanceof CodeBlockPart) {
+			if (ref.object instanceof CodeBlockPart || ref.object instanceof DeferredCodeBlockPart) {
 				ref.object.layout(width);
 			} else if (ref.object instanceof ChatOutputCodeBlockPart) {
 				ref.object.layout(width);
@@ -602,7 +900,7 @@ export class ChatMarkdownContentPart extends Disposable implements IChatContentP
 
 	onDidRemount(): void {
 		for (const ref of this.allRefs) {
-			if (ref.object instanceof CodeBlockPart || ref.object instanceof ChatOutputCodeBlockPart) {
+			if (ref.object instanceof CodeBlockPart || ref.object instanceof DeferredCodeBlockPart || ref.object instanceof ChatOutputCodeBlockPart) {
 				ref.object.onDidRemount();
 			}
 		}

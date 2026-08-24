@@ -66,6 +66,7 @@ export interface ToolCacheEntry {
 
 export interface PendingRequest {
 	readonly events: BridgeEvent[];
+	readonly collectEvents: boolean;
 	readonly onEvent?: (event: BridgeEvent) => void | Promise<void>;
 	readonly resetTimeout: () => void;
 	readonly resolve: (events: BridgeEvent[]) => void;
@@ -115,7 +116,6 @@ export interface PanelOptions {
 	readonly model?: string;
 	readonly mode?: string;
 	readonly intensity?: string;
-	readonly webSearch?: string;
 	readonly imageGeneration?: string;
 	readonly voiceMode?: string;
 	readonly mcpFigma?: boolean;

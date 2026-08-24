@@ -39,12 +39,120 @@ import { CellUri, ICellEditOperation } from '../../../notebook/common/notebookCo
 import { INotebookService } from '../../../notebook/common/notebookService.js';
 import { CHAT_EDITING_MULTI_DIFF_SOURCE_RESOLVER_SCHEME, chatEditingAgentSupportsReadonlyReferencesContextKey, chatEditingResourceContextKey, ChatEditingSessionState, IChatEditingService, IChatEditingSession, IChatEditingSessionProvider, IModifiedFileEntry, inChatEditingSessionContextKey, IStreamingEdits, ModifiedFileEntryState, parseChatMultiDiffUri } from '../../common/editing/chatEditingService.js';
 import { ChatModel, ICellTextEditOperation, IChatResponseModel, isCellTextEditOperationArray } from '../../common/model/chatModel.js';
+import { isTransientExternalEdit } from '../../common/model/chatViewModel.js';
 import { IChatService } from '../../common/chatService/chatService.js';
 import { getChatSessionType } from '../../common/model/chatUri.js';
 import { ChatEditorInput } from '../widgetHosts/editor/chatEditorInput.js';
 import { AbstractChatEditingModifiedFileEntry } from './chatEditingModifiedFileEntry.js';
 import { ChatEditingSession } from './chatEditingSession.js';
 import { ChatEditingSnapshotTextModelContentProvider, ChatEditingTextModelContentProvider } from './chatEditingTextModelContentProviders.js';
+
+export interface IChatResponsePartCursorResult {
+	readonly startIndex: number;
+	readonly endIndex: number;
+	readonly didReset: boolean;
+}
+
+/**
+ * Tracks the append-only portion of a streaming response in O(new parts).
+ * A few identity anchors detect the response truncation/full-prefix replacement
+ * paths and pay for a common-prefix reconciliation only on those rare events.
+ */
+export class ChatResponsePartAppendCursor<T> {
+	private snapshot: T[] = [];
+
+	take(parts: readonly T[]): IChatResponsePartCursorResult {
+		const scannedLength = this.snapshot.length;
+		const lastScannedIndex = scannedLength - 1;
+		const middleScannedIndex = lastScannedIndex >>> 1;
+		const hasStablePrefix = parts.length >= scannedLength
+			&& (scannedLength === 0 || (
+				this.snapshot[0] === parts[0]
+				&& this.snapshot[middleScannedIndex] === parts[middleScannedIndex]
+				&& this.snapshot[lastScannedIndex] === parts[lastScannedIndex]
+			));
+
+		if (hasStablePrefix) {
+			for (let index = scannedLength; index < parts.length; index++) {
+				this.snapshot.push(parts[index]);
+			}
+			return { startIndex: scannedLength, endIndex: parts.length, didReset: false };
+		}
+
+		let commonPrefixLength = 0;
+		const maxCommonPrefixLength = Math.min(scannedLength, parts.length);
+		while (commonPrefixLength < maxCommonPrefixLength && this.snapshot[commonPrefixLength] === parts[commonPrefixLength]) {
+			commonPrefixLength++;
+		}
+		this.snapshot = Array.from(parts);
+		return { startIndex: commonPrefixLength, endIndex: parts.length, didReset: true };
+	}
+
+	clear(): void {
+		this.snapshot.length = 0;
+	}
+}
+
+/** Runs expensive external-edit hydration with a small, lifecycle-owned cap. */
+export class ChatExternalEditHydrationQueue extends Disposable {
+	private readonly pending: (() => Promise<void>)[] = [];
+	private pendingHead = 0;
+	private active = 0;
+	private readonly _onDidDrain = this._register(new Emitter<void>());
+	readonly onDidDrain = this._onDidDrain.event;
+
+	constructor(
+		private readonly onError: (error: unknown) => void,
+		private readonly concurrency = 2,
+	) {
+		super();
+	}
+
+	get activeTaskCount(): number { return this.active; }
+	get pendingTaskCount(): number { return this.pending.length - this.pendingHead; }
+	get isIdle(): boolean { return this.active === 0 && this.pendingTaskCount === 0; }
+
+	enqueue(task: () => Promise<void>): void {
+		if (this._store.isDisposed) {
+			return;
+		}
+		this.pending.push(task);
+		this.pump();
+	}
+
+	private pump(): void {
+		while (!this._store.isDisposed && this.active < Math.max(1, this.concurrency) && this.pendingHead < this.pending.length) {
+			const task = this.pending[this.pendingHead++];
+			if (this.pendingHead === this.pending.length) {
+				this.pending.length = 0;
+				this.pendingHead = 0;
+			} else if (this.pendingHead >= 1_024 && this.pendingHead * 2 >= this.pending.length) {
+				this.pending.splice(0, this.pendingHead);
+				this.pendingHead = 0;
+			}
+			this.active++;
+			void Promise.resolve()
+				.then(task)
+				.catch(error => this.onError(error))
+				.finally(() => {
+					this.active--;
+					if (this._store.isDisposed) {
+						return;
+					}
+					this.pump();
+					if (this.isIdle) {
+						this._onDidDrain.fire();
+					}
+				});
+		}
+	}
+
+	override dispose(): void {
+		this.pending.length = 0;
+		this.pendingHead = 0;
+		super.dispose();
+	}
+}
 
 export class ChatEditingService extends Disposable implements IChatEditingService {
 
@@ -231,12 +339,27 @@ export class ChatEditingService extends Disposable implements IChatEditingServic
 	}
 
 	private observerEditsInResponse(requestId: string, responseModel: IChatResponseModel, session: ChatEditingSession, observerDisposables: DisposableStore) {
-		// Sparse array: the indicies are indexes of `responseModel.response.value`
-		// that are edit groups, and then this tracks the edit application for
-		// each of them. Note that text edit groups can be updated
-		// multiple times during the process of response streaming.
-		const enum K { Stream, Workspace, External }
-		const editsSeen: ({ kind: K.Stream; seen: number; stream: IStreamingEdits } | { kind: K.Workspace } | { kind: K.External })[] = [];
+		type ResponsePart = IChatResponseModel['response']['value'][number];
+		type StreamingPart = Extract<ResponsePart, { kind: 'textEditGroup' | 'notebookEditGroup' }>;
+		type StaticEditPart = Extract<ResponsePart, { kind: 'workspaceEdit' | 'externalEdit' }>;
+		interface IActiveStreamingPart {
+			part: StreamingPart;
+			seen: number;
+			stream: IStreamingEdits;
+		}
+
+		const responseObserver = observerDisposables.add(new DisposableStore());
+		const appendCursor = new ChatResponsePartAppendCursor<ResponsePart>();
+		const processedStaticEditKeys = new Set<string>();
+		let staticEditKeysInResponse = new Set<string>();
+		const staticEditOccurrenceCounts = new Map<string, number>();
+		const activeStreamingParts = new Map<string, IActiveStreamingPart>();
+		const hydrationQueue = responseObserver.add(new ChatExternalEditHydrationQueue(error => {
+			this._logService.error('Failed to hydrate external edit into chat editing session', error);
+		}));
+		let currentUndoStop: string | undefined;
+		let responseComplete = false;
+		let responseChangeListener: IDisposable | undefined;
 
 		const initialActiveEditor = this._editorService.activeEditorPane?.input;
 		const editorOpenPromises = new ResourceMap<Promise<void>>();
@@ -261,46 +384,193 @@ export class ChatEditingService extends Disposable implements IChatEditingServic
 			})());
 		};
 
+		const disposeResponseObserverWhenHydrated = () => {
+			if (responseComplete && hydrationQueue.isIdle && !responseObserver.isDisposed) {
+				observerDisposables.delete(responseObserver);
+			}
+		};
+		responseObserver.add(hydrationQueue.onDidDrain(disposeResponseObserverWhenHydrated));
+
 		const onResponseComplete = () => {
-			for (const remaining of editsSeen) {
-				if (remaining?.kind === K.Stream) {
-					remaining.stream.complete();
+			if (responseComplete) {
+				return;
+			}
+			responseComplete = true;
+			if (responseChangeListener) {
+				responseObserver.delete(responseChangeListener);
+				responseChangeListener = undefined;
+			}
+			for (const remaining of activeStreamingParts.values()) {
+				remaining.stream.complete();
+			}
+
+			activeStreamingParts.clear();
+			processedStaticEditKeys.clear();
+			staticEditKeysInResponse.clear();
+			staticEditOccurrenceCounts.clear();
+			appendCursor.clear();
+			editorOpenPromises.clear();
+			disposeResponseObserverWhenHydrated();
+		};
+
+		const streamingPartKey = (part: StreamingPart): string => `${part.kind}\0${part.uri.toString()}`;
+		const staticEditSignature = (part: StaticEditPart, effectiveUndoStop: string): string => part.kind === 'workspaceEdit'
+			? JSON.stringify([
+				part.kind,
+				effectiveUndoStop,
+				part.edits.map(edit => [edit.oldResource?.toString() ?? '', edit.newResource?.toString() ?? '']),
+			])
+			: JSON.stringify([
+				part.kind,
+				part.uri.toString(),
+				part.editKind,
+				part.originalUri?.toString() ?? '',
+				part.beforeContentUri?.toString() ?? '',
+				part.afterContentUri?.toString() ?? '',
+				part.undoStopId ?? '',
+				part.diff?.added ?? -1,
+				part.diff?.removed ?? -1,
+			]);
+		const nextStaticEditKey = (part: StaticEditPart, effectiveUndoStop: string): string => {
+			const signature = staticEditSignature(part, effectiveUndoStop);
+			const occurrence = (staticEditOccurrenceCounts.get(signature) ?? 0) + 1;
+			staticEditOccurrenceCounts.set(signature, occurrence);
+			return JSON.stringify([signature, occurrence]);
+		};
+
+		const processStreamingPart = (part: StreamingPart, undoStop: string | undefined): string | undefined => {
+			// External text/notebook edit groups have already landed on disk and are
+			// represented by externalEdit parts for hydration.
+			if (part.isExternalEdit) {
+				return undefined;
+			}
+
+			const key = streamingPartKey(part);
+			let entry = activeStreamingParts.get(key);
+			if (!entry) {
+				if (openChatEditedFiles) {
+					ensureEditorOpen(part.uri);
+				}
+				entry = {
+					part,
+					seen: 0,
+					stream: session.startStreamingEdits(CellUri.parse(part.uri)?.notebook ?? part.uri, responseModel, undoStop),
+				};
+				activeStreamingParts.set(key, entry);
+			} else {
+				// Response prefix rebuilds can clone the mutable edit group. Keep the
+				// logical URI stream and its append count instead of replaying edits.
+				entry.part = part;
+			}
+
+			const newEdits = part.edits.slice(entry.seen);
+			entry.seen = Math.max(entry.seen, part.edits.length);
+			for (let index = 0; index < newEdits.length; index++) {
+				const edit = newEdits[index];
+				const done = part.done ? index === newEdits.length - 1 : false;
+
+				if (isTextEditOperationArray(edit)) {
+					entry.stream.pushText(edit, done);
+				} else if (isCellTextEditOperationArray(edit)) {
+					for (const edits of Object.values(groupBy(edit, e => e.uri.toString()))) {
+						if (edits) {
+							entry.stream.pushNotebookCellText(edits[0].uri, edits.map(e => e.edit), done);
+						}
+					}
+				} else {
+					entry.stream.pushNotebook(edit, done);
 				}
 			}
 
-			editsSeen.length = 0;
-			editorOpenPromises.clear();
+			if (part.done) {
+				entry.stream.complete();
+				activeStreamingParts.delete(key);
+			}
+			return key;
 		};
 
-		const handleResponseParts = async () => {
+		const handleResponseParts = () => {
 			if (responseModel.isCanceled) {
 				return;
 			}
 
-			let undoStop: undefined | string;
-			for (let i = 0; i < responseModel.response.value.length; i++) {
-				const part = responseModel.response.value[i];
+			const parts = responseModel.response.value;
+			const range = appendCursor.take(parts);
+			let resetStaticEditKeysByIndex: Map<number, string> | undefined;
+			if (range.didReset) {
+				// This is the only structural path that revisits old parts. Rebuild the
+				// positional undo state and semantic occurrence keys in the same pass.
+				// Cloned objects retain their key, while genuinely repeated identical
+				// edits receive the next occurrence and are still applied once.
+				currentUndoStop = undefined;
+				staticEditOccurrenceCounts.clear();
+				resetStaticEditKeysByIndex = new Map<number, string>();
+				const nextStaticEditKeysInResponse = new Set<string>();
+				const presentStreamingKeys = new Set<string>();
+				let positionalUndoStop: string | undefined;
+				for (let index = 0; index < parts.length; index++) {
+					const part = parts[index];
+					if (index === range.startIndex) {
+						currentUndoStop = positionalUndoStop;
+					}
+					if (part.kind === 'undoStop') {
+						positionalUndoStop = part.id;
+					} else if (part.kind === 'workspaceEdit' || part.kind === 'externalEdit') {
+						const key = nextStaticEditKey(part, positionalUndoStop ?? responseModel.requestId);
+						resetStaticEditKeysByIndex.set(index, key);
+						nextStaticEditKeysInResponse.add(key);
+					} else if ((part.kind === 'textEditGroup' || part.kind === 'notebookEditGroup') && !part.isExternalEdit) {
+						presentStreamingKeys.add(streamingPartKey(part));
+					}
+				}
+				if (range.startIndex === parts.length) {
+					currentUndoStop = positionalUndoStop;
+				}
+				for (const oldKey of staticEditKeysInResponse) {
+					if (!nextStaticEditKeysInResponse.has(oldKey)) {
+						processedStaticEditKeys.delete(oldKey);
+					}
+				}
+				staticEditKeysInResponse = nextStaticEditKeysInResponse;
+				for (const [key, entry] of activeStreamingParts) {
+					if (!presentStreamingKeys.has(key)) {
+						entry.stream.complete();
+						activeStreamingParts.delete(key);
+					}
+				}
+			}
+
+			const streamingPartsProcessed = new Set<string>();
+			for (let index = range.startIndex; index < range.endIndex; index++) {
+				const part = parts[index];
 
 				if (part.kind === 'undoStop') {
-					undoStop = part.id;
+					currentUndoStop = part.id;
 					continue;
 				}
 
 				if (part.kind === 'workspaceEdit') {
-					// Track if we've already started processing this workspace edit
-					if (!editsSeen[i]) {
-						editsSeen[i] = { kind: K.Workspace };
-						session.applyWorkspaceEdit(part, responseModel, undoStop ?? responseModel.requestId);
+					const staticEditKey = resetStaticEditKeysByIndex?.get(index)
+						?? nextStaticEditKey(part, currentUndoStop ?? responseModel.requestId);
+					staticEditKeysInResponse.add(staticEditKey);
+					if (!processedStaticEditKeys.has(staticEditKey)) {
+						processedStaticEditKeys.add(staticEditKey);
+						session.applyWorkspaceEdit(part, responseModel, currentUndoStop ?? responseModel.requestId);
 					}
 					continue;
 				}
 
 				if (part.kind === 'externalEdit') {
-					if (!editsSeen[i]) {
-						editsSeen[i] = { kind: K.External };
-						void session.hydrateExternalEdit(responseModel, part).catch(err => {
-							this._logService.error('Failed to hydrate external edit into chat editing session', err);
-						});
+					const staticEditKey = resetStaticEditKeysByIndex?.get(index)
+						?? nextStaticEditKey(part, currentUndoStop ?? responseModel.requestId);
+					staticEditKeysInResponse.add(staticEditKey);
+					if (!processedStaticEditKeys.has(staticEditKey)) {
+						processedStaticEditKeys.add(staticEditKey);
+						// Atomic-save scratch rows are never rendered or recapped. Avoid
+						// spending a bounded hydration slot resolving their snapshot models.
+						if (!isTransientExternalEdit(part)) {
+							hydrationQueue.enqueue(() => session.hydrateExternalEdit(responseModel, part));
+						}
 					}
 					continue;
 				}
@@ -309,70 +579,33 @@ export class ChatEditingService extends Disposable implements IChatEditingServic
 					continue;
 				}
 
-				// Skip external edits - they're already applied on disk
-				if (part.isExternalEdit) {
-					continue;
+				const key = processStreamingPart(part, currentUndoStop);
+				if (key) {
+					streamingPartsProcessed.add(key);
 				}
+			}
 
-				if (openChatEditedFiles) {
-					ensureEditorOpen(part.uri);
-				}
-
-				// get new edits and start editing session
-				let entry = editsSeen[i];
-				if (!entry) {
-					entry = { kind: K.Stream, seen: 0, stream: session.startStreamingEdits(CellUri.parse(part.uri)?.notebook ?? part.uri, responseModel, undoStop) };
-					editsSeen[i] = entry;
-				}
-
-				if (entry.kind !== K.Stream) {
-					continue;
-				}
-
-				const isFirst = entry.seen === 0;
-				const newEdits = part.edits.slice(entry.seen);
-				entry.seen = part.edits.length;
-
-				if (newEdits.length > 0 || isFirst) {
-					for (let i = 0; i < newEdits.length; i++) {
-						const edit = newEdits[i];
-						const done = part.done ? i === newEdits.length - 1 : false;
-
-						if (isTextEditOperationArray(edit)) {
-							entry.stream.pushText(edit, done);
-						} else if (isCellTextEditOperationArray(edit)) {
-							for (const edits of Object.values(groupBy(edit, e => e.uri.toString()))) {
-								if (edits) {
-									entry.stream.pushNotebookCellText(edits[0].uri, edits.map(e => e.edit), done);
-								}
-							}
-						} else {
-							entry.stream.pushNotebook(edit, done);
-						}
-					}
-				}
-
-				if (part.done) {
-					entry.stream.complete();
+			// Mutable text/notebook groups stay at their original response index.
+			// Revisit only these few active objects to consume appended edit batches.
+			for (const [key, entry] of Array.from(activeStreamingParts)) {
+				if (!streamingPartsProcessed.has(key)) {
+					processStreamingPart(entry.part, currentUndoStop);
 				}
 			}
 		};
 
 		if (responseModel.isComplete) {
-			handleResponseParts().then(() => {
-				onResponseComplete();
-			});
+			handleResponseParts();
+			onResponseComplete();
 		} else {
-			const disposable = observerDisposables.add(responseModel.onDidChange(e2 => {
+			responseChangeListener = responseObserver.add(responseModel.onDidChange(e2 => {
 				if (e2.reason === 'undoStop') {
 					session.createSnapshot(requestId, e2.id);
 				} else {
-					handleResponseParts().then(() => {
-						if (responseModel.isComplete) {
-							onResponseComplete();
-							observerDisposables.delete(disposable);
-						}
-					});
+					handleResponseParts();
+					if (responseModel.isComplete) {
+						onResponseComplete();
+					}
 				}
 			}));
 		}

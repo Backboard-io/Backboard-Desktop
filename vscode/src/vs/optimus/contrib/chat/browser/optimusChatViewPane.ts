@@ -18,7 +18,6 @@ import { IAgentCliSetupService } from '../../../../workbench/contrib/chat/browse
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { IKeybindingService } from '../../../../platform/keybinding/common/keybinding.js';
 import { IOpenerService } from '../../../../platform/opener/common/opener.js';
-import { editorBackground } from '../../../../platform/theme/common/colorRegistry.js';
 import { IThemeService } from '../../../../platform/theme/common/themeService.js';
 import { ViewPane, IViewPaneOptions } from '../../../../workbench/browser/parts/views/viewPane.js';
 import { IViewDescriptorService } from '../../../../workbench/common/views.js';
@@ -39,6 +38,7 @@ import { IChatAgentService } from '../../../../workbench/contrib/chat/common/par
 import { ILanguageModelsService } from '../../../../workbench/contrib/chat/common/languageModels.js';
 import { IChatSessionsService, localChatSessionType, SessionType } from '../../../../workbench/contrib/chat/common/chatSessionsService.js';
 import { ISessionsService } from '../../../../sessions/services/sessions/browser/sessionsService.js';
+import { agentsBackground } from '../../../../sessions/common/theme.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { IWorkbenchLayoutService, Parts } from '../../../../workbench/services/layout/browser/layoutService.js';
 
@@ -212,16 +212,16 @@ export class OptimusChatViewPane extends ViewPane {
 					this.agentCliSetupService,
 					() => (this.chatWidget?.viewModel?.model.getRequests().length ?? 0) === 0),
 				supportsChangingModes: false,
-				inputEditorMinLines: 1,
+				inputEditorMinLines: 2,
 				workspacePickerDelegate: this.createWorkspacePickerDelegate(),
 				dndContainer: container,
 			},
 			{
 				listForeground: SIDE_BAR_FOREGROUND,
-				listBackground: editorBackground,
-				overlayBackground: editorBackground,
-				inputEditorBackground: editorBackground,
-				resultEditorBackground: editorBackground,
+				listBackground: agentsBackground,
+				overlayBackground: agentsBackground,
+				inputEditorBackground: agentsBackground,
+				resultEditorBackground: agentsBackground,
 			}
 		));
 		this.chatWidget.render(chatContainer);

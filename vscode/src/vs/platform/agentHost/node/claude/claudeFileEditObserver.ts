@@ -69,11 +69,11 @@ export class ClaudeFileEditObserver extends Disposable {
 		// session's WarmQuery abort — so any in-flight write completes
 		// against an open DB.
 		this._register(dbRef);
-		this._editTracker = instantiationService.createInstance(
+		this._editTracker = this._register(instantiationService.createInstance(
 			FileEditTracker,
 			sessionUri,
 			dbRef.object,
-		);
+		));
 	}
 
 	/**
@@ -138,5 +138,16 @@ export class ClaudeFileEditObserver extends Disposable {
 				this._logService.warn(`[ClaudeFileEditObserver] file edit tracking failed for ${tracked.filePath}: ${err}`);
 			}
 		}
+	}
+
+	/** Release orphaned snapshots when a turn ends without matching tool results. */
+	discardPendingEdits(): void {
+		this._editToolPaths.clear();
+		this._editTracker.discardAllEdits();
+	}
+
+	override dispose(): void {
+		this.discardPendingEdits();
+		super.dispose();
 	}
 }

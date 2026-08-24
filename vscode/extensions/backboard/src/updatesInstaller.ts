@@ -182,6 +182,7 @@ APP_NAME="\${6:-Backboard Studio.app}"
 BUNDLE_IDENTIFIER="\${7:-io.backboard.studio}"
 STATUS_PATH="$8"
 ISOLATED_TEST_USER_DATA_DIR="\${9:-}"
+UPDATE_LOCK_DIR="\${10:-}"
 INSTALLER_PATH="$0"
 APP_PARENT="$(/usr/bin/dirname "$APP_PATH")"
 UPDATE_WORK_DIR="$(/usr/bin/dirname "$INSTALLER_PATH")"
@@ -201,11 +202,102 @@ write_status() {
   /usr/bin/printf '%s\n' "$STATUS_STATE" > "$STATUS_PATH"
 }
 
-app_running() {
+app_running_pid() {
   local target_app="$1"
   local executable
+  local expected_command
+  local real_target_app
+  local real_expected_command
   executable="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$target_app/Contents/Info.plist" 2>/dev/null || true)"
-  [[ -n "$executable" ]] && /usr/bin/pgrep -f "$target_app/Contents/MacOS/$executable" >/dev/null 2>&1
+  if [[ -z "$executable" ]]; then
+    return 1
+  fi
+  expected_command="$target_app/Contents/MacOS/$executable"
+  real_target_app="$(cd "$target_app" 2>/dev/null && /bin/pwd -P || true)"
+  real_expected_command="$real_target_app/Contents/MacOS/$executable"
+  /bin/ps -axo pid=,command= | /usr/bin/awk -v expected="$expected_command" -v real_expected="$real_expected_command" '
+    {
+      pid = $1
+      sub(/^[[:space:]]*[0-9]+[[:space:]]+/, "")
+      if ($0 == expected || index($0, expected " ") == 1 || $0 == real_expected || index($0, real_expected " ") == 1) {
+        print pid
+        exit
+      }
+    }
+  '
+}
+
+app_running() {
+  [[ -n "$(app_running_pid "$1" || true)" ]]
+}
+
+pid_is_exact_app_process() {
+  local target_app="$1"
+  local expected_pid="$2"
+  local executable
+  local expected_command
+  local real_target_app
+  local real_expected_command
+  local actual_command
+  executable="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$target_app/Contents/Info.plist" 2>/dev/null || true)"
+  if [[ -z "$executable" ]]; then
+    return 1
+  fi
+  expected_command="$target_app/Contents/MacOS/$executable"
+  real_target_app="$(cd "$target_app" 2>/dev/null && /bin/pwd -P || true)"
+  real_expected_command="$real_target_app/Contents/MacOS/$executable"
+  actual_command="$(/bin/ps -p "$expected_pid" -o command= 2>/dev/null || true)"
+  [[ "$actual_command" == "$expected_command" || "$actual_command" == "$expected_command "* || "$actual_command" == "$real_expected_command" || "$actual_command" == "$real_expected_command "* ]]
+}
+
+app_version_matches() {
+  local target_app="$1"
+  local expected_version="$2"
+  local actual_version
+  actual_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$target_app/Contents/Info.plist" 2>/dev/null || true)"
+  [[ "$actual_version" == "$expected_version" ]]
+}
+
+electron_runtime_ready() {
+  local target_app="$1"
+  local real_target_app
+  real_target_app="$(cd "$target_app" 2>/dev/null && /bin/pwd -P || true)"
+  if [[ -z "$real_target_app" ]]; then
+    return 1
+  fi
+  /bin/ps -axo command= | /usr/bin/awk -v framework_prefix="$real_target_app/Contents/Frameworks/" '
+    index($0, framework_prefix) == 1 {
+      found = 1
+      exit
+    }
+    END { exit found ? 0 : 1 }
+  '
+}
+
+wait_for_electron_runtime() {
+  local target_app="$1"
+  local expected_pid="$2"
+  local checks="\${3:-240}"
+  local check
+
+  # Release builds can run a compatibility bootstrap before exec'ing Electron.
+  # The bootstrap deliberately preserves the final argv[0] and PID, so process
+  # identity alone cannot distinguish it from the real IDE. Bundle-scoped
+  # Electron helper processes appear only after that handoff is complete.
+  for ((check = 1; check <= checks; check++)); do
+    if ! pid_is_exact_app_process "$target_app" "$expected_pid"; then
+      echo "Updated app pid $expected_pid exited before the Electron runtime became ready ($check/$checks)."
+      return 1
+    fi
+    if electron_runtime_ready "$target_app"; then
+      echo "Confirmed Electron runtime ready: $target_app (pid $expected_pid, check $check/$checks)"
+      return 0
+    fi
+    /bin/sleep 0.25
+  done
+
+  echo "Electron runtime did not become ready for $target_app (pid $expected_pid)."
+  return 1
 }
 
 wait_for_current_app_exit() {
@@ -251,16 +343,27 @@ launch_app() {
   local target_app="$1"
   local bundle_identifier="$2"
   local isolated_user_data_dir="\${3:-}"
+  local launch_mode="\${4:-launchservices}"
   local executable
   local attempt
+  local launched_pid
+
+  LAUNCHED_PID=""
 
   executable="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$target_app/Contents/Info.plist" 2>/dev/null || true)"
   if [[ -z "$executable" || ! -x "$target_app/Contents/MacOS/$executable" ]]; then
     return 1
   fi
 
-  for attempt in {1..10}; do
-    if [[ -n "$isolated_user_data_dir" ]]; then
+  for attempt in {1..3}; do
+    if [[ "$launch_mode" == "direct" ]]; then
+      if [[ -n "$isolated_user_data_dir" ]]; then
+        /bin/mkdir -p "$isolated_user_data_dir/extensions"
+        /usr/bin/nohup "$target_app/Contents/MacOS/$executable" --user-data-dir "$isolated_user_data_dir" --extensions-dir "$isolated_user_data_dir/extensions" >/dev/null 2>&1 &
+      else
+        /usr/bin/nohup "$target_app/Contents/MacOS/$executable" >/dev/null 2>&1 &
+      fi
+    elif [[ -n "$isolated_user_data_dir" ]]; then
       /bin/mkdir -p "$isolated_user_data_dir/extensions"
       /usr/bin/open -n "$target_app" --args --user-data-dir "$isolated_user_data_dir" --extensions-dir "$isolated_user_data_dir/extensions" >/dev/null 2>&1 || true
     else
@@ -271,39 +374,24 @@ launch_app() {
       /usr/bin/open -n "$target_app" >/dev/null 2>&1 || true
     fi
     for _ in {1..20}; do
-      if app_running "$target_app"; then
-        for _ in {1..20}; do
-          if /usr/bin/osascript -e "tell application id \"$bundle_identifier\" to activate" >/dev/null 2>&1; then
-            break
-          fi
-          /bin/sleep 0.25
-        done
-        echo "Confirmed running and activated: $target_app (attempt $attempt)"
+      launched_pid="$(app_running_pid "$target_app" || true)"
+      if [[ -n "$launched_pid" ]]; then
+        LAUNCHED_PID="$launched_pid"
+        echo "Confirmed exact app process running: $target_app (pid $LAUNCHED_PID, mode $launch_mode, attempt $attempt)"
         return 0
       fi
       /bin/sleep 0.25
     done
   done
 
-  if [[ -n "$isolated_user_data_dir" ]]; then
-    /usr/bin/nohup "$target_app/Contents/MacOS/$executable" --user-data-dir "$isolated_user_data_dir" --extensions-dir "$isolated_user_data_dir/extensions" >/dev/null 2>&1 &
-  else
-    /usr/bin/nohup "$target_app/Contents/MacOS/$executable" >/dev/null 2>&1 &
-  fi
-  for _ in {1..40}; do
-    if app_running "$target_app"; then
-      /usr/bin/osascript -e "tell application id \"$bundle_identifier\" to activate" >/dev/null 2>&1 || true
-      echo "Confirmed running after direct launch: $target_app"
-      return 0
-    fi
-    /bin/sleep 0.25
-  done
   return 1
 }
 
 confirm_app_stable() {
   local target_app="$1"
-  local checks="\${2:-30}"
+  local expected_version="$2"
+  local expected_pid="$3"
+  local checks="\${4:-30}"
   local check
 
   # Seeing the process once is not enough to call an update successful. Keep
@@ -311,14 +399,54 @@ confirm_app_stable() {
   # window; native-loader and early utility-process failures surface here.
   for ((check = 1; check <= checks; check++)); do
     /bin/sleep 0.5
-    if ! app_running "$target_app"; then
-      echo "Updated app exited during post-launch stability check ($check/$checks)."
+    if ! app_version_matches "$target_app" "$expected_version"; then
+      echo "Installed app version changed during post-launch stability check ($check/$checks)."
+      return 1
+    fi
+    if ! pid_is_exact_app_process "$target_app" "$expected_pid"; then
+      echo "Updated app pid $expected_pid exited or no longer belongs to the installed bundle during post-launch stability check ($check/$checks)."
       return 1
     fi
   done
 
-  echo "Confirmed stable after launch: $target_app"
+  echo "Confirmed stable after launch: version $expected_version at $target_app (pid $expected_pid)"
   return 0
+}
+
+activate_app() {
+  local target_app="$1"
+  local expected_pid="$2"
+  local attempt
+  local activation_state
+
+  for attempt in {1..12}; do
+    if ! pid_is_exact_app_process "$target_app" "$expected_pid"; then
+      echo "Updated app pid $expected_pid exited before it could be activated."
+      return 1
+    fi
+
+    activation_state="$(/usr/bin/osascript -l JavaScript - "$expected_pid" <<'JXA' 2>/dev/null || true
+ObjC.import('AppKit');
+function run(argv) {
+  const app = $.NSRunningApplication.runningApplicationWithProcessIdentifier(Number(argv[0]));
+  if (app.isNil()) {
+    return 'missing';
+  }
+  app.activateWithOptions($.NSApplicationActivateAllWindows | $.NSApplicationActivateIgnoringOtherApps);
+  delay(0.25);
+  return app.active && !app.hidden ? 'active' : 'inactive';
+}
+JXA
+)"
+    if [[ "$activation_state" == "active" ]]; then
+      echo "Confirmed active after verified launch: $target_app (pid $expected_pid, attempt $attempt)"
+      return 0
+    fi
+    /bin/sleep 0.25
+  done
+
+  echo "Updated app remained healthy but macOS did not bring it to the foreground."
+  return 1
 }
 
 run_elevated() {
@@ -347,6 +475,17 @@ cleanup() {
   /bin/rmdir "$MOUNT_POINT" >/dev/null 2>&1 || true
   if [[ -e "$STAGED_APP" ]]; then
     /bin/rm -rf "$STAGED_APP" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "$UPDATE_LOCK_DIR" ]]; then
+    local lock_parent
+    local log_parent
+    local lock_name
+    lock_parent="$(/usr/bin/dirname "$UPDATE_LOCK_DIR")"
+    log_parent="$(/usr/bin/dirname "$LOG_PATH")"
+    lock_name="$(/usr/bin/basename "$UPDATE_LOCK_DIR")"
+    if [[ "$lock_parent" == "$log_parent" && "$lock_name" == backboard-studio-*-update.lock ]]; then
+      /bin/rm -rf "$UPDATE_LOCK_DIR" >/dev/null 2>&1 || true
+    fi
   fi
 }
 
@@ -395,7 +534,21 @@ else
 fi
 
 register_app "$APP_PATH"
-if ! launch_app "$APP_PATH" "$BUNDLE_IDENTIFIER" "$ISOLATED_TEST_USER_DATA_DIR" || ! confirm_app_stable "$APP_PATH" 30; then
+UPDATE_CONFIRMED=0
+if launch_app "$APP_PATH" "$BUNDLE_IDENTIFIER" "$ISOLATED_TEST_USER_DATA_DIR" launchservices; then
+  if wait_for_electron_runtime "$APP_PATH" "$LAUNCHED_PID" 240 && confirm_app_stable "$APP_PATH" "$VERSION" "$LAUNCHED_PID" 30; then
+    UPDATE_CONFIRMED=1
+  fi
+fi
+if [[ "$UPDATE_CONFIRMED" == "0" ]] && ! app_running "$APP_PATH"; then
+  echo "LaunchServices relaunch did not remain healthy; retrying the exact executable directly."
+  if launch_app "$APP_PATH" "$BUNDLE_IDENTIFIER" "$ISOLATED_TEST_USER_DATA_DIR" direct; then
+    if wait_for_electron_runtime "$APP_PATH" "$LAUNCHED_PID" 240 && confirm_app_stable "$APP_PATH" "$VERSION" "$LAUNCHED_PID" 30; then
+      UPDATE_CONFIRMED=1
+    fi
+  fi
+fi
+if [[ "$UPDATE_CONFIRMED" == "0" ]]; then
   echo "Updated app did not launch successfully or remain stable; restoring the previous version."
   if [[ "$NEEDS_ELEVATION" == "0" ]]; then
     rollback_app "$APP_PATH" "$BACKUP_APP" "$FAILED_APP" "$BUNDLE_IDENTIFIER"
@@ -403,8 +556,20 @@ if ! launch_app "$APP_PATH" "$BUNDLE_IDENTIFIER" "$ISOLATED_TEST_USER_DATA_DIR" 
     run_elevated rollback "$APP_PATH" "$BACKUP_APP" "$FAILED_APP" "$BUNDLE_IDENTIFIER"
   fi
   register_app "$APP_PATH"
-  launch_app "$APP_PATH" "$BUNDLE_IDENTIFIER" "$ISOLATED_TEST_USER_DATA_DIR" || true
+  launch_app "$APP_PATH" "$BUNDLE_IDENTIFIER" "$ISOLATED_TEST_USER_DATA_DIR" launchservices || true
   exit 1
+fi
+
+# The app is deliberately activated only after its signature, version, exact
+# process identity, and cold-start stability have all been confirmed. Starting
+# a process is not enough: without this explicit foreground request macOS can
+# leave the successfully updated IDE running with no visible window.
+if ! activate_app "$APP_PATH" "$LAUNCHED_PID"; then
+  echo "Retrying foreground activation through LaunchServices."
+  /usr/bin/open "$APP_PATH" >/dev/null 2>&1 || true
+  if ! activate_app "$APP_PATH" "$LAUNCHED_PID"; then
+    echo "Installed Backboard Studio $VERSION, but it could not be brought to the foreground automatically."
+  fi
 fi
 
 remove_backup_app "$BACKUP_APP"

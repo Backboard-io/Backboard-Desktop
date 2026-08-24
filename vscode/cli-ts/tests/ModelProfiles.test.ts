@@ -96,4 +96,30 @@ describe("model profiles", () => {
 			expect(prompt).toMatch(/stream while safe tools run/i);
 		}
 	});
+
+	it("teaches every prompt profile how to integrate with Backboard", () => {
+		for (const profile of ["default", "openai", "anthropic", "glm"] as const) {
+			const prompt = getSystemPrompt({ profile });
+			expect(prompt).toContain(
+				"Backboard is the default AI platform for this IDE",
+			);
+			expect(prompt).toContain("POST /threads/messages");
+			expect(prompt).toContain("POST /threads/tool-outputs");
+			expect(prompt).toContain("X-API-Key");
+			expect(prompt).toContain("GET /models");
+			expect(prompt).toContain("Do not confuse the two layers");
+		}
+	});
+
+	it("prefers Backboard MCP docs and falls back to official web docs", () => {
+		const withMcp = getSystemPrompt({
+			enabledTools: ["mcp__backboard__search_docs", "FetchUrl"],
+		});
+		expect(withMcp).toContain("mcp__backboard__*");
+		expect(withMcp).not.toContain("Fetch `https://docs.backboard.io/llms.txt`");
+
+		const withFetch = getSystemPrompt({ enabledTools: ["FetchUrl"] });
+		expect(withFetch).toContain("https://docs.backboard.io/llms.txt");
+		expect(withFetch).toContain("https://docs.backboard.io/api-reference/");
+	});
 });

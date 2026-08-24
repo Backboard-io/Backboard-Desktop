@@ -9,6 +9,7 @@ import { status } from '../../../../../../../base/browser/ui/aria/aria.js';
 import { Codicon } from '../../../../../../../base/common/codicons.js';
 import { IMarkdownString, MarkdownString } from '../../../../../../../base/common/htmlContent.js';
 import { stripIcons } from '../../../../../../../base/common/iconLabels.js';
+import { MutableDisposable } from '../../../../../../../base/common/lifecycle.js';
 import { autorun } from '../../../../../../../base/common/observable.js';
 import { ThemeIcon } from '../../../../../../../base/common/themables.js';
 import { IMarkdownRenderer } from '../../../../../../../platform/markdown/browser/markdownRenderer.js';
@@ -56,6 +57,10 @@ export class ChatToolProgressSubPart extends BaseChatToolInvocationSubPart {
 			return part.domNode;
 		} else {
 			const container = document.createElement('div');
+			const renderedPart = this._register(new MutableDisposable<ChatProgressContentPart>());
+			let lastRenderedContent: IMarkdownString | string | undefined;
+			let lastRenderedMarkdownValue: string | undefined;
+			let hasRendered = false;
 			this._register(autorun(reader => {
 				let progressContent: IMarkdownString | string | undefined;
 				const key = this.getAnnouncementKey('progress');
@@ -78,11 +83,32 @@ export class ChatToolProgressSubPart extends BaseChatToolInvocationSubPart {
 
 				// Don't render anything if there's no meaningful content
 				if (!this.hasMeaningfulContent(progressContent)) {
+					if (hasRendered && lastRenderedContent === undefined) {
+						return;
+					}
+					hasRendered = true;
+					lastRenderedContent = undefined;
+					lastRenderedMarkdownValue = undefined;
+					renderedPart.clear();
 					dom.clearNode(container);
 					return;
 				}
+
+				// Numeric progress updates share the same observable as the message. A
+				// busy tool can publish hundreds of percentage ticks, but this row only
+				// renders the message; rebuilding and reparsing identical markdown for
+				// each tick is pure work. Preserve the existing DOM until the displayed
+				// content actually changes.
+				const markdownValue = typeof progressContent === 'string' ? undefined : progressContent!.value;
+				if (hasRendered && lastRenderedContent === progressContent && lastRenderedMarkdownValue === markdownValue) {
+					return;
+				}
+				hasRendered = true;
+				lastRenderedContent = progressContent;
+				lastRenderedMarkdownValue = markdownValue;
 				const shouldAnnounce = this.toolInvocation.kind === 'toolInvocation' && this.hasMeaningfulContent(progressContent) ? this.computeShouldAnnounce(key) : false;
-				const part = reader.store.add(this.renderProgressContent(progressContent!, shouldAnnounce));
+				const part = this.renderProgressContent(progressContent!, shouldAnnounce);
+				renderedPart.value = part;
 				dom.reset(container, part.domNode);
 			}));
 			return container;

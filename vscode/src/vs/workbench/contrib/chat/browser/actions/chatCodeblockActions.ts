@@ -137,74 +137,80 @@ export class CodeBlockActionRendering extends Disposable implements IWorkbenchCo
 	}
 }
 
-export function registerChatCodeBlockActions() {
-	registerAction2(class CopyCodeBlockAction extends Action2 {
-		constructor() {
-			super({
-				id: 'workbench.action.chat.copyCodeBlock',
-				title: localize2('interactive.copyCodeBlock.label', "Copy"),
-				f1: false,
-				category: CHAT_CATEGORY,
-				icon: Codicon.copy,
-				menu: {
-					id: MenuId.ChatCodeBlock,
-					group: 'navigation',
-					order: 30
+export class CopyCodeBlockAction extends Action2 {
+	constructor() {
+		super({
+			id: 'workbench.action.chat.copyCodeBlock',
+			title: localize2('interactive.copyCodeBlock.label', "Copy"),
+			f1: false,
+			category: CHAT_CATEGORY,
+			icon: Codicon.copy,
+			menu: {
+				id: MenuId.ChatCodeBlock,
+				group: 'navigation',
+				order: 30
+			}
+		});
+	}
+
+	override async run(accessor: ServicesAccessor, ...args: unknown[]): Promise<void> {
+		const context = args[0];
+		if (!isCodeBlockActionContext(context) || isResponseFiltered(context)) {
+			return;
+		}
+
+		const clipboardService = accessor.get(IClipboardService);
+		const response = isResponseVM(context.element) ? context.element : undefined;
+		const chatService = response ? accessor.get(IChatService) : undefined;
+		const aiEditTelemetryService = response ? accessor.get(IAiEditTelemetryService) : undefined;
+		const requestId = response?.requestId;
+		const request = response?.session.getItems().find(item => item.id === requestId && isRequestVM(item)) as IChatRequestViewModel | undefined;
+
+		// ActionRunner drives the Copied feedback from this promise. Do not report
+		// success while the platform clipboard write is still pending.
+		await clipboardService.writeText(context.code);
+
+		if (response && chatService && aiEditTelemetryService) {
+			chatService.notifyUserAction({
+				agentId: response.agent?.id,
+				command: response.slashCommand?.name,
+				sessionResource: response.sessionResource,
+				requestId: response.requestId,
+				result: response.result,
+				action: {
+					kind: 'copy',
+					codeBlockIndex: context.codeBlockIndex,
+					copyKind: ChatCopyKind.Toolbar,
+					copiedCharacters: context.code.length,
+					totalCharacters: context.code.length,
+					copiedText: context.code,
+					copiedLines: context.code.split('\n').length,
+					languageId: context.languageId,
+					totalLines: context.code.split('\n').length,
+					modelId: request?.modelId ?? ''
 				}
 			});
+
+			const codeBlockInfo = response.model.codeBlockInfos?.at(context.codeBlockIndex);
+			aiEditTelemetryService.handleCodeAccepted({
+				acceptanceMethod: 'copyButton',
+				suggestionId: codeBlockInfo?.suggestionId,
+				editDeltaInfo: EditDeltaInfo.fromText(context.code),
+				feature: 'sideBarChat',
+				languageId: context.languageId,
+				modeId: response.model.request?.modeInfo?.telemetryModeId,
+				modelId: request?.modelId,
+				presentation: 'codeBlock',
+				applyCodeBlockSuggestionId: undefined,
+				source: undefined,
+				sourceRequestId: undefined,
+			});
 		}
+	}
+}
 
-		run(accessor: ServicesAccessor, ...args: unknown[]) {
-			const context = args[0];
-			if (!isCodeBlockActionContext(context) || isResponseFiltered(context)) {
-				return;
-			}
-
-			const clipboardService = accessor.get(IClipboardService);
-			const aiEditTelemetryService = accessor.get(IAiEditTelemetryService);
-			clipboardService.writeText(context.code);
-
-			if (isResponseVM(context.element)) {
-				const chatService = accessor.get(IChatService);
-				const requestId = context.element.requestId;
-				const request = context.element.session.getItems().find(item => item.id === requestId && isRequestVM(item)) as IChatRequestViewModel | undefined;
-				chatService.notifyUserAction({
-					agentId: context.element.agent?.id,
-					command: context.element.slashCommand?.name,
-					sessionResource: context.element.sessionResource,
-					requestId: context.element.requestId,
-					result: context.element.result,
-					action: {
-						kind: 'copy',
-						codeBlockIndex: context.codeBlockIndex,
-						copyKind: ChatCopyKind.Toolbar,
-						copiedCharacters: context.code.length,
-						totalCharacters: context.code.length,
-						copiedText: context.code,
-						copiedLines: context.code.split('\n').length,
-						languageId: context.languageId,
-						totalLines: context.code.split('\n').length,
-						modelId: request?.modelId ?? ''
-					}
-				});
-
-				const codeBlockInfo = context.element.model.codeBlockInfos?.at(context.codeBlockIndex);
-				aiEditTelemetryService.handleCodeAccepted({
-					acceptanceMethod: 'copyButton',
-					suggestionId: codeBlockInfo?.suggestionId,
-					editDeltaInfo: EditDeltaInfo.fromText(context.code),
-					feature: 'sideBarChat',
-					languageId: context.languageId,
-					modeId: context.element.model.request?.modeInfo?.telemetryModeId,
-					modelId: request?.modelId,
-					presentation: 'codeBlock',
-					applyCodeBlockSuggestionId: undefined,
-					source: undefined,
-					sourceRequestId: undefined,
-				});
-			}
-		}
-	});
+export function registerChatCodeBlockActions() {
+	registerAction2(CopyCodeBlockAction);
 
 	CopyAction?.addImplementation(50000, 'chat-codeblock', (accessor) => {
 		// get active code editor
@@ -444,6 +450,7 @@ export function registerChatCodeBlockActions() {
 				menu: [{
 					id: MenuId.ChatCodeBlock,
 					group: 'navigation',
+					order: 40,
 					when: ContextKeyExpr.and(
 						ChatContextKeys.inChatSession,
 						ContextKeyExpr.or(...shellLangIds.map(e => ContextKeyExpr.equals(EditorContextKeys.languageId.key, e)))
@@ -533,7 +540,7 @@ export function registerChatCodeBlockActions() {
 		const elementId = curCodeBlockInfo?.elementId;
 		const element = elementId ? widget.viewModel?.getItems().find(item => item.id === elementId) : undefined;
 		const currentResponse = element ??
-			(focusedResponse ?? widget.viewModel?.getItems().reverse().find((item): item is IChatResponseViewModel => isResponseVM(item)));
+			(focusedResponse ?? widget.viewModel?.getItems().findLast((item): item is IChatResponseViewModel => isResponseVM(item)));
 		if (!currentResponse || !isResponseVM(currentResponse)) {
 			return;
 		}

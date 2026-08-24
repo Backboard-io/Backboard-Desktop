@@ -47,13 +47,13 @@ export class ChatQueueMessageAction extends Action2 {
 	constructor() {
 		super({
 			id: ChatQueueMessageAction.ID,
-			title: localize2('chat.queueMessage', "Add to Queue"),
-			tooltip: localize('chat.queueMessage.tooltip', "Queue this message to send after the current request completes"),
-			icon: Codicon.add,
+			title: localize2('chat.queueMessage', "Send"),
+			tooltip: localize('chat.queueMessage.tooltip', "Send after the current response finishes"),
+			icon: Codicon.arrowUp,
 			f1: false,
 			category: CHAT_CATEGORY,
 
-			precondition: ChatContextKeys.inputHasText,
+			precondition: ChatContextKeys.inputHasSendableContent,
 			keybinding: [{
 				when: ContextKeyExpr.and(
 					ChatContextKeys.inChatInput,
@@ -69,11 +69,6 @@ export class ChatQueueMessageAction extends Action2 {
 		const widgetService = accessor.get(IChatWidgetService);
 		const widget = widgetService.lastFocusedWidget;
 		if (!widget?.viewModel) {
-			return;
-		}
-
-		const inputValue = widget.getInput();
-		if (!inputValue.trim()) {
 			return;
 		}
 
@@ -131,7 +126,7 @@ export class ChatRemovePendingRequestAction extends Action2 {
 		super({
 			id: ChatRemovePendingRequestAction.ID,
 			title: localize2('chat.removePendingRequest', "Remove from Queue"),
-			icon: Codicon.close,
+			icon: Codicon.trash,
 			f1: false,
 			category: CHAT_CATEGORY,
 			menu: [{
@@ -175,7 +170,7 @@ export class ChatEditPendingRequestAction extends Action2 {
 			category: CHAT_CATEGORY,
 			menu: [{
 				id: MenuId.ChatMessageTitle,
-				group: 'navigation',
+				group: 'secondary',
 				order: 2,
 				when: ContextKeyExpr.and(
 					ChatContextKeys.isRequest,
@@ -197,64 +192,6 @@ export class ChatEditPendingRequestAction extends Action2 {
 
 		const widget = widgetService.getWidgetBySessionResource(context.sessionResource);
 		widget?.startEditing(context.id);
-	}
-}
-
-export class ChatSendPendingImmediatelyAction extends Action2 {
-	static readonly ID = 'workbench.action.chat.sendPendingImmediately';
-
-	constructor() {
-		super({
-			id: ChatSendPendingImmediatelyAction.ID,
-			title: localize2('chat.sendPendingImmediately', "Send Immediately"),
-			icon: Codicon.newLine,
-			f1: false,
-			category: CHAT_CATEGORY,
-			menu: [{
-				id: MenuId.ChatMessageTitle,
-				group: 'navigation',
-				order: 3,
-				when: ContextKeyExpr.and(
-					ChatContextKeys.isRequest,
-					ChatContextKeys.isPendingRequest
-				)
-			}]
-		});
-	}
-
-	override async run(accessor: ServicesAccessor, ...args: unknown[]): Promise<void> {
-		const chatService = accessor.get(IChatService);
-		const widgetService = accessor.get(IChatWidgetService);
-		const [context] = args;
-
-		if (!isRequestVM(context) || !context.pendingKind) {
-			return;
-		}
-
-		const widget = widgetService.getWidgetBySessionResource(context.sessionResource);
-		const model = widget?.viewModel?.model;
-		if (!model) {
-			return;
-		}
-
-		const pendingRequests = model.getPendingRequests();
-		const targetIndex = pendingRequests.findIndex(r => r.request.id === context.id);
-		if (targetIndex === -1) {
-			return;
-		}
-
-		// Keep the target item's kind (queued vs steering)
-		const targetRequest = pendingRequests[targetIndex];
-
-		// Reorder: move target to front, keep others in their relative order
-		const reordered = [
-			{ requestId: targetRequest.request.id, kind: targetRequest.kind },
-			...pendingRequests.filter((_, i) => i !== targetIndex).map(r => ({ requestId: r.request.id, kind: r.kind }))
-		];
-
-		chatService.setPendingRequests(context.sessionResource, reordered);
-		await chatService.cancelCurrentRequestForSession(context.sessionResource, 'queueRunNext');
-		chatService.processPendingRequests(context.sessionResource);
 	}
 }
 
@@ -299,25 +236,20 @@ export function registerChatQueueActions(): void {
 	registerAction2(ChatSteerWithMessageAction);
 	registerAction2(ChatRemovePendingRequestAction);
 	registerAction2(ChatEditPendingRequestAction);
-	registerAction2(ChatSendPendingImmediatelyAction);
 	registerAction2(ChatRemoveAllPendingRequestsAction);
 
-	// Register the queue submenu in the execute toolbar.
-	// The custom ChatQueuePickerActionItem (registered via IActionViewItemService)
-	// replaces the default rendering with a dropdown that shows hover descriptions.
-	// We still need items in ChatExecuteQueue so the menu system treats it as non-empty.
-	MenuRegistry.appendMenuItem(MenuId.ChatExecuteQueue, {
-		command: { id: ChatQueueMessageAction.ID, title: localize2('chat.queueMessage', "Add to Queue"), icon: Codicon.add },
-		group: 'navigation',
-		order: 1,
-	});
+	// While a response is active, keep the same send-arrow affordance. Sending is
+	// non-destructive: ChatWidget.acceptInput automatically queues the message and
+	// lets the current response finish.
 	MenuRegistry.appendMenuItem(MenuId.ChatExecute, {
-		submenu: MenuId.ChatExecuteQueue,
-		title: localize2('chat.queueSubmenu', "Queue"),
-		icon: Codicon.listOrdered,
+		command: {
+			id: ChatQueueMessageAction.ID,
+			title: localize2('chat.queueMessage', "Send"),
+			icon: Codicon.arrowUp,
+		},
 		when: ContextKeyExpr.and(
 			queuingActionsPresent,
-			ChatContextKeys.inputHasText,
+			ChatContextKeys.inputHasSendableContent,
 		),
 		group: 'navigation',
 		order: 4,

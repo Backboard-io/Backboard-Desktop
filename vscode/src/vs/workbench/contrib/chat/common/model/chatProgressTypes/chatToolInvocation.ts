@@ -37,7 +37,7 @@ export class ChatToolInvocation implements IChatToolInvocation {
 	public isAttachedToThinking: boolean = false;
 
 	private _toolSpecificData?: IChatTerminalToolInvocationData | IChatToolInputInvocationData | IChatExtensionsContent | IChatTodoListContent | IChatSubagentToolInvocationData | IChatSimpleToolInvocationData | IChatSearchToolInvocationData | IChatModifiedFilesConfirmationData | IChatAgentFeedbackReviewConfirmationData;
-	private readonly _toolSpecificDataKind = observableValue<string | undefined>(this, undefined);
+	private readonly _toolSpecificDataKind = observableValue<string | undefined, 'dataChanged' | undefined>(this, undefined);
 	public readonly toolSpecificDataKind: IObservable<string | undefined> = this._toolSpecificDataKind;
 
 	public get toolSpecificData() {
@@ -46,7 +46,14 @@ export class ChatToolInvocation implements IChatToolInvocation {
 
 	public set toolSpecificData(value: typeof this._toolSpecificData) {
 		this._toolSpecificData = value;
-		this._toolSpecificDataKind.set(value?.kind, undefined);
+		if (value?.kind === 'terminal') {
+			// A running terminal can receive a fresh output snapshot without changing
+			// kind. Only terminals need that same-kind remount; other tools retain the
+			// original rendering lifecycle, including edit and diff presentations.
+			this._toolSpecificDataKind.set(value.kind, undefined, 'dataChanged');
+		} else {
+			this._toolSpecificDataKind.set(value?.kind, undefined, undefined);
+		}
 	}
 
 	private readonly _progress = observableValue<{ message?: string | IMarkdownString; progress: number | undefined }>(this, { progress: 0 });

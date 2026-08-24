@@ -29,7 +29,8 @@ describe('macUpdateInstallerScript', () => {
 		const script = macUpdateInstallerScript();
 
 		assert.match(script, /app_running\(\)/);
-		assert.match(script, /pgrep -f "\$target_app\/Contents\/MacOS\/\$executable"/);
+		assert.match(script, /ps -axo pid=,command=/);
+		assert.match(script, /awk -v expected="\$expected_command" -v real_expected="\$real_expected_command"/);
 		assert.match(script, /requesting a graceful quit/);
 		assert.match(script, /tell application id/);
 		assert.match(script, /did not quit cleanly; canceling the update/);
@@ -54,21 +55,53 @@ describe('macUpdateInstallerScript', () => {
 	test('keeps a rollback copy until the updated app is confirmed running', () => {
 		const script = macUpdateInstallerScript();
 		const swapIndex = script.indexOf('swap_staged_app "$APP_PATH"');
-		const launchIndex = script.indexOf('if ! launch_app "$APP_PATH"');
-		const stabilityIndex = script.indexOf('! confirm_app_stable "$APP_PATH" 30');
+		const launchIndex = script.indexOf('if launch_app "$APP_PATH"');
+		const runtimeReadyIndex = script.indexOf('if wait_for_electron_runtime "$APP_PATH"');
+		const stabilityIndex = script.indexOf('confirm_app_stable "$APP_PATH"');
+		const activationIndex = script.indexOf('if ! activate_app "$APP_PATH" "$LAUNCHED_PID"');
 		const removeBackupIndex = script.lastIndexOf('remove_backup_app "$BACKUP_APP"');
 
 		assert.ok(swapIndex >= 0);
 		assert.ok(launchIndex > swapIndex);
+		assert.ok(runtimeReadyIndex > launchIndex);
 		assert.ok(stabilityIndex > launchIndex);
+		assert.ok(stabilityIndex > runtimeReadyIndex);
+		assert.ok(activationIndex > stabilityIndex);
 		assert.ok(removeBackupIndex > stabilityIndex);
+		assert.ok(removeBackupIndex > activationIndex);
 		assert.match(script, /rollback_app "\$APP_PATH"/);
-		assert.match(script, /Confirmed running and activated/);
-		assert.match(script, /Updated app exited during post-launch stability check/);
+		assert.match(script, /Confirmed exact app process running/);
+		assert.match(script, /Confirmed Electron runtime ready/);
+		assert.match(script, /exited or no longer belongs to the installed bundle during post-launch stability check/);
 		assert.match(script, /Confirmed stable after launch/);
+		assert.match(script, /Confirmed active after verified launch/);
 		assert.match(script, /Installed and launched Backboard Studio/);
 		assert.match(script, /xattr -cr "\$app_path"/);
 		assert.doesNotMatch(script, /local status=/);
+	});
+
+	test('waits for the real Electron runtime instead of trusting the bootstrap pid', () => {
+		const script = macUpdateInstallerScript();
+
+		assert.match(script, /electron_runtime_ready\(\)/);
+		assert.match(script, /framework_prefix="\$real_target_app\/Contents\/Frameworks\/"/);
+		assert.match(script, /wait_for_electron_runtime\(\)/);
+		assert.match(script, /pid_is_exact_app_process "\$target_app" "\$expected_pid"/);
+		assert.match(script, /Electron runtime did not become ready/);
+	});
+
+	test('activates the exact verified process through AppKit', () => {
+		const script = macUpdateInstallerScript();
+		const functionStart = script.indexOf('activate_app() {');
+		const functionEnd = script.indexOf('\n}\n\nrun_elevated() {', functionStart);
+		assert.ok(functionStart >= 0);
+		assert.ok(functionEnd > functionStart);
+		const activationFunction = script.slice(functionStart, functionEnd + 2);
+
+		assert.match(activationFunction, /pid_is_exact_app_process "\$target_app" "\$expected_pid"/);
+		assert.match(activationFunction, /NSRunningApplication\.runningApplicationWithProcessIdentifier/);
+		assert.match(activationFunction, /NSApplicationActivateAllWindows/);
+		assert.match(activationFunction, /app\.active && !app\.hidden/);
 	});
 
 	test('forces LaunchServices to open the exact swapped app after a certificate change', () => {
@@ -81,7 +114,17 @@ describe('macUpdateInstallerScript', () => {
 
 		assert.match(launchFunction, /\/usr\/bin\/open -n "\$target_app" --args --user-data-dir/);
 		assert.match(launchFunction, /\/usr\/bin\/open -n "\$target_app" >\/dev\/null/);
+		assert.match(launchFunction, /\/usr\/bin\/nohup "\$target_app\/Contents\/MacOS\/\$executable"/);
 		assert.doesNotMatch(launchFunction, /\/usr\/bin\/open "\$target_app"/);
+	});
+
+	test('releases only the channel-scoped update lock next to the updater log', () => {
+		const script = macUpdateInstallerScript();
+
+		assert.match(script, /UPDATE_LOCK_DIR="\$\{10:-\}"/);
+		assert.match(script, /"\$lock_parent" == "\$log_parent"/);
+		assert.match(script, /"\$lock_name" == backboard-studio-\*-update\.lock/);
+		assert.match(script, /rm -rf "\$UPDATE_LOCK_DIR"/);
 	});
 
 	test('rejects an updated app that exits during the stability window', { skip: process.platform !== 'darwin' }, () => {
@@ -92,12 +135,16 @@ describe('macUpdateInstallerScript', () => {
 		assert.ok(functionEnd > functionStart);
 		const shellFunction = script.slice(functionStart, functionEnd + 2);
 
-		const stable = spawnSync('/bin/zsh', ['-c', `${shellFunction}\napp_running() { return 0; }\nconfirm_app_stable "/Applications/Backboard Studio.app" 1`], { encoding: 'utf8' });
+		const stable = spawnSync('/bin/zsh', ['-c', `${shellFunction}\napp_version_matches() { return 0; }\npid_is_exact_app_process() { return 0; }\nconfirm_app_stable "/Applications/Backboard Studio.app" "3.0.2" "42" 1`], { encoding: 'utf8' });
 		assert.equal(stable.status, 0, stable.stderr);
 		assert.match(stable.stdout, /Confirmed stable after launch/);
 
-		const exited = spawnSync('/bin/zsh', ['-c', `${shellFunction}\napp_running() { return 1; }\nconfirm_app_stable "/Applications/Backboard Studio.app" 1`], { encoding: 'utf8' });
+		const exited = spawnSync('/bin/zsh', ['-c', `${shellFunction}\napp_version_matches() { return 0; }\npid_is_exact_app_process() { return 1; }\nconfirm_app_stable "/Applications/Backboard Studio.app" "3.0.2" "42" 1`], { encoding: 'utf8' });
 		assert.equal(exited.status, 1, exited.stderr);
-		assert.match(exited.stdout, /Updated app exited during post-launch stability check/);
+		assert.match(exited.stdout, /exited or no longer belongs to the installed bundle during post-launch stability check/);
+
+		const wrongVersion = spawnSync('/bin/zsh', ['-c', `${shellFunction}\napp_version_matches() { return 1; }\npid_is_exact_app_process() { return 0; }\nconfirm_app_stable "/Applications/Backboard Studio.app" "3.0.2" "42" 1`], { encoding: 'utf8' });
+		assert.equal(wrongVersion.status, 1, wrongVersion.stderr);
+		assert.match(wrongVersion.stdout, /Installed app version changed during post-launch stability check/);
 	});
 });

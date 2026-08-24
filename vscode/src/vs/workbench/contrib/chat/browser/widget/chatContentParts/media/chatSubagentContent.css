@@ -5,6 +5,40 @@
 
 /* Subagent-specific styles */
 .interactive-session .interactive-response .value .chat-thinking-fixed-mode.chat-subagent-part {
+	> .chat-used-context-label {
+		display: flex;
+		align-items: stretch;
+		gap: 4px;
+
+		> .monaco-button {
+			min-width: 0;
+			flex: 1;
+		}
+	}
+
+	button.chat-subagent-open {
+		display: inline-flex;
+		min-width: 0;
+		align-items: center;
+		justify-content: center;
+		gap: 5px;
+		padding: 4px 8px;
+		border: 0;
+		border-radius: 4px;
+		background: transparent;
+		color: var(--vscode-textLink-foreground);
+		font: inherit;
+		cursor: pointer;
+
+		&:hover {
+			background: var(--vscode-toolbar-hoverBackground);
+		}
+
+		&:focus-visible {
+			outline: 1px solid var(--vscode-focusBorder);
+			outline-offset: -1px;
+		}
+	}
 
 	/* Collapsed + streaming: show only the last item with max-height */
 	&.chat-used-context-collapsed .chat-used-context-list.chat-thinking-collapsible.chat-thinking-streaming {

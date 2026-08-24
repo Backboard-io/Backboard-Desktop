@@ -5,7 +5,7 @@
 
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import { createCodexSessionMapState, extractUserInputText, mapAgentMessageDelta, mapCommandExecutionOutputDelta, mapFileChangePatchUpdated, mapItemCompleted, mapItemStarted, mapMcpToolCallProgress, mapReasoningSummaryPartAdded, mapReasoningSummaryTextDelta, mapReasoningTextDelta, mapTokenUsageUpdated, mapTurnCompleted, mapTurnStarted, resetCodexTurnMapState, turnStateFromStatus } from '../../../node/codex/codexMapAppServerEvents.js';
+import { createCodexSessionMapState, extractUserInputText, mapAgentMessageDelta, mapCommandExecutionOutputDelta, mapFileChangeOutputDelta, mapFileChangePatchUpdated, mapItemCompleted, mapItemStarted, mapMcpToolCallProgress, mapReasoningSummaryPartAdded, mapReasoningSummaryTextDelta, mapReasoningTextDelta, mapTokenUsageUpdated, mapTurnCompleted, mapTurnStarted, resetCodexTurnMapState, turnStateFromStatus } from '../../../node/codex/codexMapAppServerEvents.js';
 import { ActionType } from '../../../common/state/sessionActions.js';
 import { MessageKind, ResponsePartKind, ToolCallConfirmationReason, ToolCallContributorKind, ToolResultContentType, TurnState } from '../../../common/state/sessionState.js';
 
@@ -350,19 +350,66 @@ suite('codexMapAppServerEvents', () => {
 			startTypes: startActions.map(action => action.type),
 			delta: startActions[1],
 			ready: startActions[2],
-			initialContent: startActions[3],
 			patchActions,
 			completeActions,
 			remainingToolCalls: state.itemToToolCall.size,
 		}, {
-			startTypes: [ActionType.ChatToolCallStart, ActionType.ChatToolCallDelta, ActionType.ChatToolCallReady, ActionType.ChatToolCallContentChanged],
+			startTypes: [ActionType.ChatToolCallStart, ActionType.ChatToolCallDelta, ActionType.ChatToolCallReady],
 			delta: { type: ActionType.ChatToolCallDelta, turnId: 'turn_a', toolCallId, content: 'update: src/a.ts' },
 			ready: { type: ActionType.ChatToolCallReady, turnId: 'turn_a', toolCallId, invocationMessage: 'update: src/a.ts', toolInput: 'update: src/a.ts', confirmed: ToolCallConfirmationReason.NotNeeded },
-			initialContent: { type: ActionType.ChatToolCallContentChanged, turnId: 'turn_a', toolCallId, content: [{ type: ToolResultContentType.Text, text: 'update: src/a.ts\n@@ -1 +1 @@\n-old\n+new' }] },
-			patchActions: [{ type: ActionType.ChatToolCallContentChanged, turnId: 'turn_a', toolCallId, content: [{ type: ToolResultContentType.Text, text: 'add: src/b.ts\n+hello' }] }],
-			completeActions: [{ type: ActionType.ChatToolCallComplete, turnId: 'turn_a', toolCallId, result: { success: true, pastTenseMessage: 'Applied file changes', content: [{ type: ToolResultContentType.Text, text: 'update: src/a.ts\n@@ -1 +1 @@\n-old\n+new' }] } }],
+			patchActions: [{ type: ActionType.ChatToolCallContentChanged, turnId: 'turn_a', toolCallId, content: [{ type: ToolResultContentType.Text, text: 'add: src/b.ts' }] }],
+			completeActions: [{ type: ActionType.ChatToolCallComplete, turnId: 'turn_a', toolCallId, result: { success: true, pastTenseMessage: 'Applied file changes' } }],
 			remainingToolCalls: 0,
 		});
+	});
+
+	test('fileChange streaming never retains or redispatches growing patch bodies', () => {
+		const state = createCodexSessionMapState();
+		const hugePatch = `@@ -1 +1 @@\n-${'a'.repeat(512_000)}\n+${'b'.repeat(512_000)}`;
+		mapItemStarted(state, {
+			item: { type: 'fileChange', id: 'file_large', changes: [{ path: 'src/large.ts', kind: { type: 'update', move_path: null }, diff: hugePatch }], status: 'inProgress' } as never,
+			threadId: 'thr_1', turnId: 'turn_large', startedAtMs: 0,
+		});
+
+		const patchActions = mapFileChangePatchUpdated(state, {
+			threadId: 'thr_1', turnId: 'turn_large', itemId: 'file_large',
+			changes: [{ path: 'src/large.ts', kind: { type: 'update', move_path: null }, diff: hugePatch }],
+		});
+		const deltaActions = mapFileChangeOutputDelta(state, {
+			threadId: 'thr_1', turnId: 'turn_large', itemId: 'file_large', delta: hugePatch,
+		});
+		const retained = state.itemToToolCall.get('file_large')?.output ?? '';
+
+		assert.deepStrictEqual({ patchActions, deltaActions, retained, containsPatch: retained.includes('@@') }, {
+			patchActions: [],
+			deltaActions: [],
+			retained: 'update: src/large.ts',
+			containsPatch: false,
+		});
+	});
+
+	test('fileChange summaries bound file count and both rename paths', () => {
+		const state = createCodexSessionMapState();
+		const hugePatch = `@@ -1 +1 @@\n-${'a'.repeat(512_000)}\n+${'b'.repeat(512_000)}`;
+		const changes = Array.from({ length: 25 }, (_, index) => ({
+			path: `destination-${index}/${'d'.repeat(1_000)}`,
+			kind: { type: 'update' as const, move_path: `source-${index}/${'s'.repeat(1_000)}` },
+			diff: hugePatch,
+		}));
+		const startActions = mapItemStarted(state, {
+			item: { type: 'fileChange', id: 'file_many', changes, status: 'inProgress' } as never,
+			threadId: 'thr_1', turnId: 'turn_many', startedAtMs: 0,
+		});
+		const summary = state.itemToToolCall.get('file_many')?.output ?? '';
+		const serializedActions = JSON.stringify(startActions);
+
+		assert.strictEqual(summary.split('\n').length, 21);
+		assert.ok(summary.endsWith('…and 5 more files'));
+		assert.ok(summary.length <= 10_000, `expected bounded summary, got ${summary.length} characters`);
+		assert.ok(!summary.includes('s'.repeat(240)), 'rename source path should be truncated');
+		assert.ok(!summary.includes('d'.repeat(240)), 'destination path should be truncated');
+		assert.ok(!serializedActions.includes('@@'), 'start actions should not contain patch bodies');
+		assert.ok(serializedActions.length <= 32_768, `expected bounded actions, got ${serializedActions.length} characters`);
 	});
 
 	test('mcpToolCall item maps to tool call lifecycle with progress', () => {

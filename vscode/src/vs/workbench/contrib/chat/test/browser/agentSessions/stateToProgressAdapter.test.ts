@@ -8,7 +8,7 @@ import { autorun } from '../../../../../../base/common/observable.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
 import { MessageKind, ToolCallStatus, ToolCallConfirmationReason, ToolResultContentType, TurnState, ResponsePartKind, type ActiveTurn, type ICompletedToolCall, type ToolCallRunningState, type ToolCallStreamingState, type Turn, type ToolCallResponsePart, ToolCallCancellationReason, type Message } from '../../../../../../platform/agentHost/common/state/sessionState.js';
-import { IChatToolInvocation, IChatToolInvocationSerialized, type IChatMarkdownContent, type IChatProgressMessage, type IChatUsage } from '../../../common/chatService/chatService.js';
+import { IChatToolInvocation, IChatToolInvocationSerialized, type IChatExternalEdit, type IChatMarkdownContent, type IChatProgressMessage, type IChatUsage } from '../../../common/chatService/chatService.js';
 import { isToolResultInputOutputDetails, type IToolResultInputOutputDetails, ToolDataSource, ToolInvocationPresentation } from '../../../common/tools/languageModelToolsService.js';
 import { turnsToHistory as rawTurnsToHistory, activeTurnToProgress as rawActiveTurnToProgress, toolCallStateToInvocation as rawToolCallStateToInvocation, finalizeToolInvocation as rawFinalizeToolInvocation, updateRunningToolSpecificData as rawUpdateRunningToolSpecificData } from '../../../browser/agentSessions/agentHost/stateToProgressAdapter.js';
 
@@ -1260,6 +1260,63 @@ suite('stateToProgressAdapter', () => {
 			]), undefined);
 			assert.strictEqual(result.length, 1);
 			assert.strictEqual(result[0].kind, 'toolInvocationSerialized');
+		});
+
+		test('restores completed edit calls as one hidden tool row followed by one diff per file', () => {
+			const completedEdit = createCompletedToolCall({
+				toolCallId: 'tc-edit',
+				toolName: 'edit_file',
+				displayName: 'Edit File',
+				content: [{
+					type: ToolResultContentType.FileEdit,
+					before: {
+						uri: URI.file('/workspace/src/app.ts').toString(),
+						content: { uri: 'agenthost-content:///session/snap/before' },
+					},
+					after: {
+						uri: URI.file('/workspace/src/app.ts').toString(),
+						content: { uri: 'agenthost-content:///session/snap/after' },
+					},
+					diff: { added: 3, removed: 1 },
+				}],
+			});
+			const responsePart = { kind: ResponsePartKind.ToolCall, toolCall: completedEdit } as ToolCallResponsePart;
+
+			const activeProgress = activeTurnToProgress(
+				URI.file('/'),
+				createActiveTurnState([responsePart]),
+				'ssh__workstation',
+			);
+			const serialized = activeProgress[0] as IChatToolInvocationSerialized;
+			const edits = activeProgress.filter((part): part is IChatExternalEdit => part.kind === 'externalEdit');
+
+			assert.strictEqual(activeProgress.length, 2);
+			assert.strictEqual(serialized.kind, 'toolInvocationSerialized');
+			assert.strictEqual(serialized.toolCallId, 'tc-edit');
+			assert.strictEqual(serialized.presentation, ToolInvocationPresentation.Hidden);
+			assert.strictEqual(edits.length, 1, 'The active-turn snapshot must not duplicate a completed edit');
+			assert.strictEqual(edits[0].undoStopId, 'tc-edit');
+			assert.deepStrictEqual(edits[0].diff, { added: 3, removed: 1 });
+			assert.strictEqual(edits[0].uri.scheme, 'vscode-agent-host');
+			assert.strictEqual(edits[0].uri.authority, 'ssh__workstation');
+			assert.strictEqual(edits[0].beforeContentUri?.scheme, 'vscode-agent-host');
+			assert.strictEqual(edits[0].afterContentUri?.scheme, 'vscode-agent-host');
+
+			// When the same protocol turn later moves from the active snapshot to
+			// completed history, that adapter path must keep the same one-card shape.
+			// Consumers replace the active response with history; neither snapshot
+			// contains duplicate externalEdit parts on its own.
+			const history = turnsToHistory(URI.file('/'), [createTurn({ responseParts: [responsePart] })], 'participant');
+			const historyResponse = history[1];
+			assert.strictEqual(historyResponse.type, 'response');
+			if (historyResponse.type !== 'response') {
+				return;
+			}
+			const historySerialized = historyResponse.parts[0] as IChatToolInvocationSerialized;
+			const historyEdits = historyResponse.parts.filter((part): part is IChatExternalEdit => part.kind === 'externalEdit');
+			assert.strictEqual(historySerialized.presentation, ToolInvocationPresentation.Hidden);
+			assert.strictEqual(historyEdits.length, 1, 'Completed history must also contain exactly one card for the file');
+			assert.strictEqual(historyEdits[0].undoStopId, edits[0].undoStopId);
 		});
 
 		test('creates live invocations for running tool calls', () => {

@@ -42,7 +42,7 @@ import { IViewsService } from '../../../../services/views/common/viewsService.js
 import { ChatViewId } from '../chat.js';
 import { ChatViewPane } from '../widgetHosts/viewPane/chatViewPane.js';
 import { AgentSessionProviders, getAgentSessionProvider, getAgentSessionProviderName } from '../agentSessions/agentSessions.js';
-import { BugIndicatingError, isCancellationError } from '../../../../../base/common/errors.js';
+import { BugIndicatingError, CancellationError, isCancellationError } from '../../../../../base/common/errors.js';
 import { IEditorGroupsService } from '../../../../services/editor/common/editorGroupsService.js';
 import { getChatSessionType, isUntitledChatSession, LocalChatSessionUri } from '../../common/model/chatUri.js';
 import { assertNever } from '../../../../../base/common/assert.js';
@@ -247,6 +247,8 @@ const extensionPoint = ExtensionsRegistry.registerExtensionPoint<IChatSessionsEx
 });
 
 class ContributedChatSessionData extends Disposable {
+	private _didDispose = false;
+	private _sessionWillDispose = false;
 
 	private readonly _optionsCache: ChatSessionOptionsMap;
 	public getOption(optionId: string): string | IChatSessionProviderOptionItem | undefined {
@@ -271,9 +273,40 @@ class ContributedChatSessionData extends Disposable {
 		this._optionsCache = new Map(options);
 
 		this._register(this.session.onWillDispose(() => {
-			this.onWillDispose(this.resource);
+			this._sessionWillDispose = true;
+			this.dispose();
 		}));
 	}
+
+	override dispose(): void {
+		if (this._didDispose) {
+			return;
+		}
+
+		this._didDispose = true;
+		try {
+			// The wrapper owns the provider session. Previously, disposing the
+			// wrapper removed only its event subscription, leaving the underlying
+			// extension/runtime session alive after provider removal or service
+			// teardown. Avoid a recursive second call when disposal originated from
+			// the provider session's own onWillDispose event.
+			if (!this._sessionWillDispose) {
+				this.session.dispose();
+			}
+		} finally {
+			super.dispose();
+			this.onWillDispose(this.resource);
+		}
+	}
+}
+
+interface PendingChatSessionCreation {
+	readonly cancellation: CancellationTokenSource;
+	readonly promise: Promise<IChatSession>;
+	readonly state: {
+		waiterCount: number;
+		isSettled: boolean;
+	};
 }
 
 
@@ -316,6 +349,7 @@ export class ChatSessionsService extends Disposable implements IChatSessionsServ
 	private readonly _sessionTypeOptions = new Map<string, IChatSessionProviderOptionGroup[]>();
 
 	private readonly _sessions = new ResourceMap<ContributedChatSessionData>();
+	private readonly _pendingSessionCreations = new ResourceMap<PendingChatSessionCreation>();
 	private readonly _resourceAliases = new ResourceMap<URI>(); // real resource -> untitled resource
 
 	private readonly _customizationsProviders = new Map<string, IChatSessionCustomizationsProvider>();
@@ -1133,16 +1167,54 @@ export class ChatSessionsService extends Disposable implements IChatSessionsServ
 	}
 
 	public async getOrCreateChatSession(sessionResource: URI, token: CancellationToken): Promise<IChatSession> {
-		{
-			const existingSessionData = this._sessions.get(sessionResource);
-			if (existingSessionData) {
-				return existingSessionData.session;
-			}
+		const existingSessionData = this._sessions.get(sessionResource);
+		if (existingSessionData) {
+			return existingSessionData.session;
 		}
 
+		let pendingCreation = this._pendingSessionCreations.get(sessionResource);
+		if (!pendingCreation) {
+			const cancellation = new CancellationTokenSource();
+			const state = {
+				waiterCount: 0,
+				isSettled: false,
+			};
+			const promise = this._createChatSession(sessionResource, cancellation.token).finally(() => {
+				state.isSettled = true;
+				if (this._pendingSessionCreations.get(sessionResource)?.state === state) {
+					this._pendingSessionCreations.delete(sessionResource);
+				}
+				cancellation.dispose();
+			});
+			pendingCreation = { cancellation, promise, state };
+			this._pendingSessionCreations.set(sessionResource, pendingCreation);
+		}
+
+		pendingCreation.state.waiterCount++;
+		try {
+			return await raceCancellationError(pendingCreation.promise, token);
+		} finally {
+			pendingCreation.state.waiterCount--;
+			if (!pendingCreation.state.isSettled && pendingCreation.state.waiterCount === 0) {
+				// No caller can observe this result anymore. Stop sharing the operation so
+				// a future caller can retry, and cancel the provider work. Providers are
+				// allowed to ignore cancellation; _createChatSession disposes a session
+				// that arrives after this point instead of leaving it orphaned.
+				if (this._pendingSessionCreations.get(sessionResource) === pendingCreation) {
+					this._pendingSessionCreations.delete(sessionResource);
+				}
+				pendingCreation.cancellation.cancel();
+			}
+		}
+	}
+
+	private async _createChatSession(sessionResource: URI, token: CancellationToken): Promise<IChatSession> {
 		const sessionType = getChatSessionType(sessionResource);
-		if (!(await raceCancellationError(this.canResolveChatSession(sessionType), token))) {
+		if (!(await this.canResolveChatSession(sessionType))) {
 			throw Error(`Can not find provider for ${sessionResource}`);
+		}
+		if (token.isCancellationRequested) {
+			throw new CancellationError();
 		}
 
 		// Check again after async provider resolution
@@ -1161,6 +1233,9 @@ export class ChatSessionsService extends Disposable implements IChatSessionsServ
 
 		let session: IChatSession;
 		const newSessionOptionGroups = isUntitledChatSession(sessionResource) ? await this.getNewChatSessionInputState(resolvedType, sessionResource) : undefined;
+		if (token.isCancellationRequested) {
+			throw new CancellationError();
+		}
 		if (isUntitledChatSession(sessionResource) && (newSessionOptionGroups || resolvedType.startsWith('agent-host-'))) {
 			const options: ChatSessionOptionsMap = new Map();
 			for (const group of newSessionOptionGroups ?? []) {
@@ -1177,20 +1252,29 @@ export class ChatSessionsService extends Disposable implements IChatSessionsServ
 				dispose: () => { }
 			};
 		} else {
-			session = await raceCancellationError(provider.provideChatSessionContent(sessionResource, token), token);
+			// Await the provider itself rather than racing it with cancellation. A
+			// provider may ignore its token and still resolve; in that case we must
+			// retain the result long enough to dispose it below.
+			session = await provider.provideChatSessionContent(sessionResource, token);
+		}
+
+		// Make sure another session wasn't created while we were awaiting the provider
+		const existingSessionData = this._sessions.get(sessionResource);
+		if (existingSessionData) {
+			if (existingSessionData.session !== session) {
+				session.dispose();
+			}
+			return existingSessionData.session;
+		}
+
+		if (token.isCancellationRequested) {
+			session.dispose();
+			throw new CancellationError();
 		}
 
 		if (session.options) {
 			for (const [optionId, value] of session.options) {
 				this.setSessionOption(sessionResource, optionId, value);
-			}
-		}
-
-		// Make sure another session wasn't created while we were awaiting the provider
-		{
-			const existingSessionData = this._sessions.get(sessionResource);
-			if (existingSessionData) {
-				return existingSessionData.session;
 			}
 		}
 
@@ -1383,6 +1467,18 @@ export class ChatSessionsService extends Disposable implements IChatSessionsServ
 
 	public getContentProviderSchemes(): string[] {
 		return Array.from(this._contentProviders.keys());
+	}
+
+	public override dispose(): void {
+		for (const pending of this._pendingSessionCreations.values()) {
+			pending.cancellation.cancel();
+		}
+		this._pendingSessionCreations.clear();
+		for (const session of [...this._sessions.values()]) {
+			session.dispose();
+		}
+		this._sessions.clear();
+		super.dispose();
 	}
 }
 

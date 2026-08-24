@@ -468,7 +468,6 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 		const buttons = {
 			mode: document.getElementById('modeBtn'),
 			model: document.getElementById('modelBtn'),
-			web: document.getElementById('webBtn'),
 			image: document.getElementById('imageBtn'),
 			voice: document.getElementById('voiceBtn'),
 			stop: document.getElementById('stopBtn'),
@@ -483,7 +482,6 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 			model: document.getElementById('model'),
 			mode: document.getElementById('mode'),
 			intensity: document.getElementById('intensity'),
-			webSearch: document.getElementById('webSearch'),
 			imageGeneration: document.getElementById('imageGeneration'),
 			voiceMode: document.getElementById('voiceMode'),
 			mcpFigma: document.getElementById('mcpFigma'),
@@ -530,6 +528,10 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 		let voiceStream = undefined;
 		let voiceChunks = [];
 		let voiceRecording = false;
+		let conversationScrollFrame = undefined;
+		let pendingConversationScroll = false;
+		let textAppendFrame = undefined;
+		const pendingTextAppends = new Map();
 		${renderModelSelectScript(iconBase.toString())}
 		function modeLabel(value) {
 			return ({ agent: 'Agent', ask: 'Ask', manual: 'Manual', free: 'Full Access' })[value] || value;
@@ -588,12 +590,6 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 			].map(([value, label, meta]) => choice('chooseIntensity', value, label, meta, controls.intensity.value === value, false)).join('');
 			return section('Mode', modes) + section('Reasoning', intensities);
 		}
-		function renderWebPopover() {
-			return section('Web Search', [
-				choice('chooseWeb', 'off', 'Off', '', controls.webSearch.value === 'off', false),
-				choice('chooseWeb', 'Auto', 'Auto', '', controls.webSearch.value === 'Auto', false)
-			].join(''));
-		}
 		function renderImagePopover() {
 			return section('Image', [
 				choice('chooseImage', 'off', 'Off', '', controls.imageGeneration.value === 'off', false),
@@ -629,7 +625,6 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 			const renderers = {
 				model: ['Model', renderModelPopover],
 				reasoning: ['Mode and Reasoning', renderReasoningPopover],
-				web: ['Web', renderWebPopover],
 				image: ['Image', renderImagePopover],
 				voice: ['Voice', renderVoicePopover]
 			};
@@ -738,7 +733,6 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 				renderModels();
 			setSelect(controls.mode, settings.mode || 'free');
 			setSelect(controls.intensity, settings.intensity || 'fast');
-			setSelect(controls.webSearch, settings.webSearch || 'off');
 			setSelect(controls.imageGeneration, settings.imageGeneration || 'off');
 			setSelect(controls.voiceMode, settings.voiceMode || 'off');
 			controls.mcpFigma.checked = !!settings.mcpFigma;
@@ -812,7 +806,6 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 		});
 		buttons.mode.addEventListener('click', event => openPopover('reasoning', event.currentTarget));
 		buttons.model.addEventListener('click', event => openPopover('model', event.currentTarget));
-		buttons.web.addEventListener('click', event => openPopover('web', event.currentTarget));
 		buttons.image.addEventListener('click', event => openPopover('image', event.currentTarget));
 		buttons.voice.addEventListener('click', event => {
 			if (voiceRecording || controls.voiceMode.value === 'stt' || controls.voiceMode.value === 'conversation') {
@@ -1029,8 +1022,6 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 				chooseSelect(controls.mode, value, false);
 			} else if (action === 'chooseIntensity') {
 				chooseSelect(controls.intensity, value, false);
-			} else if (action === 'chooseWeb') {
-				chooseSelect(controls.webSearch, value, true);
 			} else if (action === 'chooseImage') {
 				chooseSelect(controls.imageGeneration, value, true);
 			} else if (action === 'chooseVoice') {
@@ -1091,8 +1082,6 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 				openPopover('model', buttons.model);
 			} else if (action === 'openReasoning') {
 				openPopover('reasoning', buttons.mode);
-			} else if (action === 'openWeb') {
-				openPopover('web', buttons.web);
 			} else if (action === 'openImage') {
 				openPopover('image', buttons.image);
 			} else if (action === 'cancelRun') {
@@ -1170,21 +1159,52 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 		function scrollConversation(force) {
 			const shouldStick = force || runInProgress || isNearConversationBottom();
 			syncEmptyState();
-			saveActiveHistory();
-			if (shouldStick) {
-				const scrollToLatest = () => {
-					log.scrollTop = log.scrollHeight;
-					const last = log.lastElementChild;
-					if (last && last !== emptyState) {
-						last.scrollIntoView({ block: 'end' });
+			scheduleActiveHistorySave();
+			if (!shouldStick) {
+				return;
+			}
+			pendingConversationScroll = true;
+			if (conversationScrollFrame === undefined) {
+				conversationScrollFrame = requestAnimationFrame(() => {
+					conversationScrollFrame = undefined;
+					if (!pendingConversationScroll) {
+						return;
 					}
-				};
-				scrollToLatest();
-				requestAnimationFrame(() => {
-					scrollToLatest();
-					requestAnimationFrame(() => {
-						scrollToLatest();
-					});
+					pendingConversationScroll = false;
+					log.scrollTop = log.scrollHeight;
+				});
+			}
+		}
+		function flushPendingTextAppends() {
+			if (textAppendFrame !== undefined) {
+				cancelAnimationFrame(textAppendFrame);
+				textAppendFrame = undefined;
+			}
+			if (!pendingTextAppends.size) {
+				return false;
+			}
+			for (const [target, text] of pendingTextAppends) {
+				let textNode = target.lastChild;
+				if (!(textNode instanceof Text)) {
+					textNode = document.createTextNode('');
+					target.appendChild(textNode);
+				}
+				textNode.appendData(text);
+			}
+			pendingTextAppends.clear();
+			return true;
+		}
+		function queueTextAppend(target, text) {
+			if (!text) {
+				return;
+			}
+			pendingTextAppends.set(target, (pendingTextAppends.get(target) || '') + text);
+			if (textAppendFrame === undefined) {
+				textAppendFrame = requestAnimationFrame(() => {
+					textAppendFrame = undefined;
+					if (flushPendingTextAppends()) {
+						scrollConversation();
+					}
 				});
 			}
 		}
@@ -1950,8 +1970,7 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 			if (role === 'reasoning') {
 				const activeReasoning = currentReasoningCard && latestTranscriptNode() === currentReasoningCard ? currentReasoningCard : undefined;
 				const target = activeReasoning?.querySelector('.reasoningText') || appendReasoningMessage('');
-				target.textContent += text || '';
-				scrollConversation();
+				queueTextAppend(target, text || '');
 				return;
 			}
 			if (role !== 'assistant') {
@@ -1961,10 +1980,9 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 			const activeAssistant = currentAssistantCard && latestTranscriptNode() === currentAssistantCard ? currentAssistantCard : undefined;
 			const target = activeAssistant?.querySelector('.messageText') || appendMessage('assistant', '');
 			const incoming = text || '';
-			const current = target.textContent || '';
+			const current = (target.textContent || '') + (pendingTextAppends.get(target) || '');
 			const spacer = current && incoming && /[.:!?)]$/.test(current) && /^[A-Z0-9"'(]/.test(incoming) ? ' ' : '';
-			target.textContent += spacer + incoming;
-			scrollConversation();
+			queueTextAppend(target, spacer + incoming);
 		}
 		function renderQuestion(payload) {
 			if (!payload || !payload.id) {
@@ -2264,7 +2282,16 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 			requestAnimationFrame(syncRootHeight);
 		});
 		vscode.postMessage({ type: 'ready' });
-		window.setInterval(() => vscode.postMessage({ type: 'syncPanelState' }), 2000);
+		document.addEventListener('visibilitychange', () => {
+			if (!document.hidden) {
+				vscode.postMessage({ type: 'syncPanelState' });
+			}
+		});
+		window.addEventListener('pagehide', () => {
+			flushPendingTextAppends();
+			saveActiveHistory();
+			flushPanelState();
+		});
 	</script>
 </body>
 </html>`;

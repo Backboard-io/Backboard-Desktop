@@ -4,13 +4,14 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
+import { match } from '../../../../../../base/common/glob.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
 import { FileChangeType } from '../../../../../../platform/files/common/files.js';
 import { fromAgentHostUri } from '../../../../../../platform/agentHost/common/agentHostUri.js';
-import { isIgnoredAgentPath } from '../../../../../../platform/agentHost/common/agentIgnoredPaths.js';
+import { AGENT_IGNORED_FILE_GLOBS, isIgnoredAgentPath } from '../../../../../../platform/agentHost/common/agentIgnoredPaths.js';
 import { parseGitBlobUri } from '../../../../../../platform/agentHost/common/gitBlobUri.js';
-import { findPackedRefSha, hydrateUncoveredTurnEdit, parseGitDirPointer, parseGitHeadContent, resolveRepoHeadSha, resolveTurnRepoInfo, type ReadTextFn } from '../../../browser/agentSessions/agentHost/agentHostTurnFsEdits.js';
+import { accumulateUncoveredTurnFileChange, buildUncoveredTurnBeforeContentUri, finalizeUncoveredTurnFileChange, findPackedRefSha, hydrateUncoveredTurnEdit, parseGitDirPointer, parseGitHeadContent, resolveRepoHeadSha, resolveTurnRepoInfo, type ITurnFileChangeObservation, type ReadTextFn } from '../../../browser/agentSessions/agentHost/agentHostTurnFsEdits.js';
 
 suite('agentHostTurnFsEdits', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -31,6 +32,12 @@ suite('agentHostTurnFsEdits', () => {
 				atomicTmp: isIgnoredAgentPath('/repo/src/AgentController.ts.tmp.98222.fde4c15a7895'),
 				postfixTmp: isIgnoredAgentPath('/repo/src/AgentController.ts.98222.1720000000000.fde4c15a7895.tmp'),
 				vscTmp: isIgnoredAgentPath('/repo/src/AgentController.ts.vsctmp'),
+				vscodeAtomicSibling: isIgnoredAgentPath('/repo/src/.!13356!level.js'),
+				mkstempRootScratch: isIgnoredAgentPath('/repo/XXSf7h6t'),
+				mkstempSecondRootScratch: isIgnoredAgentPath('/repo/XXsFmXbz'),
+				mkstempNestedScratch: isIgnoredAgentPath('/repo/src/XX1Q1uqN'),
+				mkstempSecondNestedScratch: isIgnoredAgentPath('/repo/src/XXhU77d6'),
+				plainTmpScratch: isIgnoredAgentPath('/repo/src/main.js.tmp'),
 				bunBuildTmp: isIgnoredAgentPath('/repo/cli-ts/.18bf259f3f2fcae3-00000000.bun-build'),
 				codesignTmp: isIgnoredAgentPath('/repo/bin/backboard-cli-ts.cstemp'),
 				tsBuildInfo: isIgnoredAgentPath('/repo/extensions/emmet/tsconfig.tsbuildinfo'),
@@ -44,6 +51,12 @@ suite('agentHostTurnFsEdits', () => {
 				normalTmpName: isIgnoredAgentPath('/repo/src/template.ts'),
 				buildInfoLikeName: isIgnoredAgentPath('/repo/src/tsbuildinfoParser.ts'),
 				logLikeName: isIgnoredAgentPath('/repo/src/catalog.ts'),
+				mkstempTooLong: isIgnoredAgentPath('/repo/src/XXSf7h6t0'),
+				mkstempWrongPrefix: isIgnoredAgentPath('/repo/src/AXSf7h6t'),
+				mkstempNonAlphanumeric: isIgnoredAgentPath('/repo/src/XXSf7h6-'),
+				mkstempWithExtension: isIgnoredAgentPath('/repo/src/XXSf7h6t.js'),
+				tmpInsideName: isIgnoredAgentPath('/repo/src/main.tmp.js'),
+				tmpPrefix: isIgnoredAgentPath('/repo/src/.tmpfile'),
 			}, {
 				gitObject: true,
 				gitTmp: true,
@@ -51,6 +64,12 @@ suite('agentHostTurnFsEdits', () => {
 				atomicTmp: true,
 				postfixTmp: true,
 				vscTmp: true,
+				vscodeAtomicSibling: true,
+				mkstempRootScratch: true,
+				mkstempSecondRootScratch: true,
+				mkstempNestedScratch: true,
+				mkstempSecondNestedScratch: true,
+				plainTmpScratch: true,
 				bunBuildTmp: true,
 				codesignTmp: true,
 				tsBuildInfo: true,
@@ -64,6 +83,31 @@ suite('agentHostTurnFsEdits', () => {
 				normalTmpName: false,
 				buildInfoLikeName: false,
 				logLikeName: false,
+				mkstempTooLong: false,
+				mkstempWrongPrefix: false,
+				mkstempNonAlphanumeric: false,
+				mkstempWithExtension: false,
+				tmpInsideName: false,
+				tmpPrefix: false,
+			});
+		});
+
+		test('watcher globs match only the exact mkstemp and tmp sibling shapes', () => {
+			const isExcludedByWatcher = (path: string) => AGENT_IGNORED_FILE_GLOBS.some(pattern => match(pattern, path));
+			assert.deepStrictEqual({
+				mkstempRoot: isExcludedByWatcher('/repo/XXsFmXbz'),
+				mkstempNested: isExcludedByWatcher('/repo/src/XXhU77d6'),
+				plainTmp: isExcludedByWatcher('/repo/src/main.js.tmp'),
+				mkstempTooLong: isExcludedByWatcher('/repo/src/XXSf7h6t0'),
+				mkstempWithExtension: isExcludedByWatcher('/repo/src/XXSf7h6t.js'),
+				tmpInsideName: isExcludedByWatcher('/repo/src/main.tmp.js'),
+			}, {
+				mkstempRoot: true,
+				mkstempNested: true,
+				plainTmp: true,
+				mkstempTooLong: false,
+				mkstempWithExtension: false,
+				tmpInsideName: false,
 			});
 		});
 	});
@@ -84,6 +128,47 @@ suite('agentHostTurnFsEdits', () => {
 				pointer: '/repo/.git/worktrees/session-1',
 				packedHit: SHA,
 				packedMiss: undefined,
+			});
+		});
+	});
+
+	suite('finalizeUncoveredTurnFileChange', () => {
+		test('uses final filesystem state and drops transient or ignored paths', () => {
+			const observe = (...types: FileChangeType[]): ITurnFileChangeObservation => {
+				let result: ITurnFileChangeObservation | undefined;
+				for (const type of types) {
+					result = accumulateUncoveredTurnFileChange(result, type);
+				}
+				return result!;
+			};
+			assert.deepStrictEqual({
+				existingAdded: finalizeUncoveredTurnFileChange('/repo/new.ts', observe(FileChangeType.ADDED), true),
+				trackedAtomicReplacementReportedOnlyAdded: finalizeUncoveredTurnFileChange('/repo/index.html', observe(FileChangeType.ADDED), true, true),
+				newFileReportedAdded: finalizeUncoveredTurnFileChange('/repo/new.ts', observe(FileChangeType.ADDED), true, false),
+				existingUpdated: finalizeUncoveredTurnFileChange('/repo/app.ts', observe(FileChangeType.UPDATED), true),
+				existingAfterDeleteEvent: finalizeUncoveredTurnFileChange('/repo/app.ts', observe(FileChangeType.DELETED), true),
+				atomicDeleteThenAdd: finalizeUncoveredTurnFileChange('/repo/app.ts', observe(FileChangeType.DELETED, FileChangeType.ADDED), true),
+				atomicAddThenDelete: finalizeUncoveredTurnFileChange('/repo/app.ts', observe(FileChangeType.ADDED, FileChangeType.DELETED), true),
+				missingAfterAddEvent: finalizeUncoveredTurnFileChange('/repo/transient.ts', observe(FileChangeType.ADDED), false),
+				transientAddThenDelete: finalizeUncoveredTurnFileChange('/repo/transient.ts', observe(FileChangeType.ADDED, FileChangeType.DELETED), false),
+				missingAfterUpdateEvent: finalizeUncoveredTurnFileChange('/repo/removed.ts', observe(FileChangeType.UPDATED), false),
+				missingAfterDeleteEvent: finalizeUncoveredTurnFileChange('/repo/removed.ts', observe(FileChangeType.DELETED), false),
+				ignoredAtomicSiblingStillPresent: finalizeUncoveredTurnFileChange('/repo/src/.!13356!level.js', observe(FileChangeType.ADDED), true),
+				ignoredAtomicSiblingDeleted: finalizeUncoveredTurnFileChange('/repo/src/.!13356!level.js', observe(FileChangeType.DELETED), false),
+			}, {
+				existingAdded: FileChangeType.ADDED,
+				trackedAtomicReplacementReportedOnlyAdded: FileChangeType.UPDATED,
+				newFileReportedAdded: FileChangeType.ADDED,
+				existingUpdated: FileChangeType.UPDATED,
+				existingAfterDeleteEvent: FileChangeType.UPDATED,
+				atomicDeleteThenAdd: FileChangeType.UPDATED,
+				atomicAddThenDelete: FileChangeType.UPDATED,
+				missingAfterAddEvent: undefined,
+				transientAddThenDelete: undefined,
+				missingAfterUpdateEvent: FileChangeType.DELETED,
+				missingAfterDeleteEvent: FileChangeType.DELETED,
+				ignoredAtomicSiblingStillPresent: undefined,
+				ignoredAtomicSiblingDeleted: undefined,
 			});
 		});
 	});
@@ -147,6 +232,18 @@ suite('agentHostTurnFsEdits', () => {
 				uri: URI.file('/repo/src/app.ts').toString(),
 				undoStopId: 'turn-1',
 			});
+		});
+
+		test('builds the baseline probe URI without exposing it as the edited file label', () => {
+			const changed = URI.file('/repo/style.css');
+			const before = buildUncoveredTurnBeforeContentUri(changed, base.repo, base.backendSessionUri);
+			assert.deepStrictEqual(parseGitBlobUri(before!.toString()), {
+				sessionUri: base.backendSessionUri,
+				sha: SHA,
+				repoRelativePath: 'style.css',
+			});
+			assert.strictEqual(before!.path, changed.path);
+			assert.strictEqual(buildUncoveredTurnBeforeContentUri(URI.file('/elsewhere/style.css'), base.repo, base.backendSessionUri), undefined);
 		});
 
 		test('create omits before content; delete omits after content', () => {

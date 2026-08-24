@@ -152,8 +152,8 @@ export class ChatCollapsibleListContentPart extends ChatCollapsibleContentPart {
 		return list.getHTMLElement().parentElement!;
 	}
 
-	hasSameContent(other: IChatRendererContent, followingContent: IChatRendererContent[], element: ChatTreeItem): boolean {
-		return other.kind === 'references' && other.references.length === this.data.length && (!!followingContent.length === this.hasFollowingContent);
+	hasSameContent(other: IChatRendererContent, content: IChatRendererContent[], element: ChatTreeItem, followingContentStart = 0): boolean {
+		return other.kind === 'references' && other.references.length === this.data.length && (content.length > followingContentStart) === this.hasFollowingContent;
 	}
 }
 
@@ -214,7 +214,7 @@ export class CollapsibleListPool extends Disposable {
 		@ILabelService private readonly labelService: ILabelService,
 	) {
 		super();
-		this._pool = this._register(new ResourcePool(() => this.listFactory()));
+		this._pool = this._register(new ResourcePool(() => this.listFactory(), { maxIdleSize: 2 }));
 	}
 
 	private listFactory(): ICollapsibleListWrapper {

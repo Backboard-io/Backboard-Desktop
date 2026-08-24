@@ -5,9 +5,64 @@
 
 import { mark, clearMarks } from '../../../../base/common/performance.js';
 import { URI } from '../../../../base/common/uri.js';
+import { canLog, ILogService, LogLevel } from '../../../../platform/log/common/log.js';
 import { chatSessionResourceToId } from './model/chatUri.js';
 
 const chatPerfPrefix = 'code/chat/';
+const chatPerfLogPrefix = '[chat-perf]';
+
+/** A synchronous renderer operation that consumes one 60 Hz frame. */
+export const ChatPerfSlowOperationThreshold = 16;
+
+export type ChatPerfDetails = Readonly<Record<string, string | number | boolean | undefined>>;
+
+/**
+ * Renderer diagnostics are intentionally dormant at the normal Info log level.
+ * Callers should guard timers and detail-object construction with this check.
+ */
+export function isChatPerfLoggingEnabled(logService: ILogService): boolean {
+	return canLog(logService.getLevel(), LogLevel.Debug);
+}
+
+/**
+ * Emits grep-friendly renderer diagnostics without logging chat content. Trace
+ * includes all caller-selected samples; Debug only includes lifecycle events and
+ * operations that exceed a frame unless a different threshold is supplied.
+ */
+export function logChatPerf(
+	logService: ILogService,
+	event: string,
+	details: ChatPerfDetails,
+	durationMs?: number,
+	debugThresholdMs = ChatPerfSlowOperationThreshold,
+): void {
+	const level = logService.getLevel();
+	if (!canLog(level, LogLevel.Debug)) {
+		return;
+	}
+
+	const trace = canLog(level, LogLevel.Trace);
+	if (!trace && durationMs !== undefined && durationMs < debugThresholdMs) {
+		return;
+	}
+
+	let message = `${chatPerfLogPrefix} event=${event}`;
+	if (durationMs !== undefined) {
+		message += ` durationMs=${durationMs.toFixed(1)}`;
+	}
+	for (const key in details) {
+		const value = details[key];
+		if (value !== undefined) {
+			message += ` ${key}=${typeof value === 'string' ? JSON.stringify(value) : String(value)}`;
+		}
+	}
+
+	if (trace) {
+		logService.trace(message);
+	} else {
+		logService.debug(message);
+	}
+}
 
 /** Tracks all mark names emitted per session so they can be cleared individually. */
 const chatMarksBySession = new Map<string, Set<string>>();

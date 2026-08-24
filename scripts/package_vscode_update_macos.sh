@@ -38,6 +38,8 @@ DMG_ASSETS_DIR="${DMG_ASSETS_DIR:-${REPO_ROOT}/scripts/dmg-assets}"
 SKIP_NOTARIZATION="${SKIP_NOTARIZATION:-0}"
 SKIP_SIGNING="${SKIP_SIGNING:-0}"
 BACKBOARD_SIGNING_PROFILE="${BACKBOARD_SIGNING_PROFILE:-robert}"
+BACKBOARD_BOOTSTRAP_LAUNCH_DELAY_SECONDS="${BACKBOARD_BOOTSTRAP_LAUNCH_DELAY_SECONDS:-0}"
+BOOTSTRAP_REAL_EXECUTABLE=""
 
 case "${BACKBOARD_SIGNING_PROFILE}" in
   robert)
@@ -457,6 +459,65 @@ fi
 
 prune_release_app
 
+install_bootstrap_launcher() {
+  if [[ "${BACKBOARD_BOOTSTRAP_LAUNCH_DELAY_SECONDS}" == "0" ]]; then
+    return
+  fi
+  if [[ ! "${BACKBOARD_BOOTSTRAP_LAUNCH_DELAY_SECONDS}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "BACKBOARD_BOOTSTRAP_LAUNCH_DELAY_SECONDS must be a positive integer or 0." >&2
+    exit 1
+  fi
+  if (( BACKBOARD_BOOTSTRAP_LAUNCH_DELAY_SECONDS < 25 )); then
+    echo "BACKBOARD_BOOTSTRAP_LAUNCH_DELAY_SECONDS must be at least 25 seconds to outlast the legacy updater health window." >&2
+    exit 1
+  fi
+
+  local info_plist="${APP_PATH}/Contents/Info.plist"
+  local executable_name
+  local executable_path
+  local real_executable_name
+  local support_directory_name
+  local sentinel_name
+  local compiler_arch
+  executable_name="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "${info_plist}")"
+  executable_path="${APP_PATH}/Contents/MacOS/${executable_name}"
+  real_executable_name="${executable_name}.bin"
+  BOOTSTRAP_REAL_EXECUTABLE="${APP_PATH}/Contents/MacOS/${real_executable_name}"
+  support_directory_name="${APP_DISPLAY_NAME}"
+  sentinel_name=".bootstrap-launch-${VERSION}"
+  case "${ARCH}" in
+    aarch64) compiler_arch="arm64" ;;
+    x86_64) compiler_arch="x86_64" ;;
+    *) echo "Cannot build bootstrap launcher for ARCH=${ARCH}" >&2; exit 1 ;;
+  esac
+
+  require_file "${REPO_ROOT}/scripts/macos-release/backboard-bootstrap-launcher.c"
+  require_file "${executable_path}"
+  if [[ -e "${BOOTSTRAP_REAL_EXECUTABLE}" ]]; then
+    echo "Refusing to overwrite existing bootstrap real executable: ${BOOTSTRAP_REAL_EXECUTABLE}" >&2
+    exit 1
+  fi
+
+  echo "Installing per-copy ${BACKBOARD_BOOTSTRAP_LAUNCH_DELAY_SECONDS}s bootstrap launcher"
+  mv "${executable_path}" "${BOOTSTRAP_REAL_EXECUTABLE}"
+  xcrun clang \
+    -arch "${compiler_arch}" \
+    -mmacosx-version-min=12.0 \
+    -O2 \
+    -Wall \
+    -Wextra \
+    -Werror \
+    "-DBACKBOARD_REAL_EXECUTABLE_NAME=\"${real_executable_name}\"" \
+    "-DBACKBOARD_SUPPORT_DIRECTORY_NAME=\"${support_directory_name}\"" \
+    "-DBACKBOARD_BOOTSTRAP_SENTINEL_NAME=\"${sentinel_name}\"" \
+    "-DBACKBOARD_BOOTSTRAP_DELAY_SECONDS=${BACKBOARD_BOOTSTRAP_LAUNCH_DELAY_SECONDS}" \
+    "${REPO_ROOT}/scripts/macos-release/backboard-bootstrap-launcher.c" \
+    -o "${executable_path}"
+  chmod 755 "${executable_path}" "${BOOTSTRAP_REAL_EXECUTABLE}"
+}
+
+install_bootstrap_launcher
+
 # A cross-compiled release can pick up host-architecture binaries: the app
 # installs and launches, then fails the moment it touches an affected module.
 # That shipped undetected before, so the staged bundle is checked here, while
@@ -731,6 +792,10 @@ while IFS= read -r -d '' helper_app; do
 done < <(find "${APP_PATH}/Contents/Frameworks" -maxdepth 1 -type d -name "*.app" -print0 2>/dev/null)
 
 echo "Signing main app"
+if [[ -n "${BOOTSTRAP_REAL_EXECUTABLE}" ]]; then
+  echo "Signing bootstrap real executable"
+  sign_code "${BOOTSTRAP_REAL_EXECUTABLE}" --entitlements "${REPO_ROOT}/vscode/build/azure-pipelines/darwin/app-entitlements.plist"
+fi
 codesign \
   --keychain "${KEYCHAIN_PATH}" \
   --force \

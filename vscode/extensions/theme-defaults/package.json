@@ -32,6 +32,12 @@
         "path": "./themes/backboard-obsidian.json"
       },
       {
+        "id": "Backboard Porcelain",
+        "label": "%backboardPorcelainThemeLabel%",
+        "uiTheme": "vs",
+        "path": "./themes/backboard-porcelain.json"
+      },
+      {
         "id": "Dark+",
         "label": "%darkPlusColorThemeLabel%",
         "uiTheme": "vs-dark",

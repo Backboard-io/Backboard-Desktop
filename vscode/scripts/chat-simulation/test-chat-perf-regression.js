@@ -16,6 +16,7 @@
  *   npm run perf:chat                                 # all scenarios vs 1.115.0
  *   npm run perf:chat -- --runs 10                    # 10 runs per scenario
  *   npm run perf:chat -- --scenario text-only         # single scenario
+ *   npm run perf:chat -- --surface editor              # native chat editor
  *   npm run perf:chat -- --no-baseline                # skip baseline comparison
  *   npm run perf:chat -- --build 1.110.0 --baseline-build 1.115.0
  *   npm run perf:chat -- --resume .chat-simulation-data/2026-04-14/results.json --runs 3
@@ -31,6 +32,7 @@ const {
 } = require('./common/utils');
 const { getUserTurns, getScenarioIds } = require('./common/mock-llm-server.ts');
 const { registerPerfScenarios, getScenarioDescription } = require('./common/perf-scenarios');
+const { getChatSurface, normalizeChatSurface, openChatSurface } = require('./common/chat-surface');
 
 // -- Config (edit config.jsonc to change defaults) ---------------------------
 
@@ -69,10 +71,13 @@ function parseArgs() {
 		/** @type {Record<string, any>} */
 		baselineSettingsOverrides: {},
 		cleanupDiagnostics: false,
+		surface: normalizeChatSurface(CONFIG.surface ?? 'panel'),
+		surfaceExplicit: false,
 	};
 	for (let i = 0; i < args.length; i++) {
 		switch (args[i]) {
 			case '--runs': opts.runs = parseInt(args[++i], 10); break;
+			case '--surface': opts.surface = normalizeChatSurface(args[++i]); opts.surfaceExplicit = true; break;
 			case '--verbose': opts.verbose = true; break;
 			case '--scenario': case '-s': opts.scenarios.push(args[++i]); break;
 			case '--build': case '-b': opts.build = args[++i]; break;
@@ -109,6 +114,7 @@ function parseArgs() {
 					'Options:',
 					'  --runs <n>          Number of runs per scenario (default: 5)',
 					'  --scenario <id>     Scenario to run (repeatable; default: all)',
+					'  --surface <kind>     Chat surface: panel (default) or editor',
 					'  --build <path|ver>  Path to VS Code build, or a version to download',
 					'                       (e.g. "1.110.0", "insiders", commit hash, or local path)',
 					'  --baseline <path>   Compare against a baseline JSON file',
@@ -361,11 +367,12 @@ function exceedsThreshold(threshold, change, absoluteDelta) {
  * @param {string} runDir - timestamped run directory for diagnostics
  * @param {'baseline' | 'test'} role - whether this is a baseline or test run
  * @param {Record<string, any>} [settingsOverrides] - custom VS Code settings
- * @param {{ heapSnapshots?: boolean }} [runOpts] - additional run options
+ * @param {{ heapSnapshots?: boolean, surface?: 'panel' | 'editor' }} [runOpts] - additional run options
  * @returns {Promise<RunMetrics>}
  */
 async function runOnce(electronPath, scenario, mockServer, verbose, runIndex, runDir, role, settingsOverrides, runOpts) {
 	const takeHeapSnapshots = runOpts?.heapSnapshots ?? false;
+	const chatSurface = getChatSurface(runOpts?.surface ?? 'panel');
 	const { userDataDir, extDir, logsDir } = prepareRunDir(runIndex, mockServer, settingsOverrides);
 	const isDevBuild = !electronPath.includes('.vscode-test') && !electronPath.includes('VSCode-');
 	// Extract a clean build label from the path.
@@ -430,21 +437,9 @@ async function runOnce(electronPath, scenario, mockServer, verbose, runIndex, ru
 
 		const metricsBefore = await cdp.send('Performance.getMetrics');
 
-		// Open chat
-		const chatShortcut = process.platform === 'darwin' ? 'Control+Meta+KeyI' : 'Control+Alt+KeyI';
-		await window.keyboard.press(chatShortcut);
-
-		const CHAT_VIEW = 'div[id="workbench.panel.chat"]';
-		const chatEditorSel = `${CHAT_VIEW} .interactive-input-part .monaco-editor[role="code"]`;
-
-		await window.waitForSelector(CHAT_VIEW, { timeout: 15_000 });
-		await window.waitForFunction(
-			(selector) => Array.from(document.querySelectorAll(selector)).some(el => {
-				const rect = el.getBoundingClientRect();
-				return rect.width > 0 && rect.height > 0;
-			}),
-			chatEditorSel, { timeout: 15_000 },
-		);
+		// Open the configured panel or native chat editor.
+		await openChatSurface(window, chatSurface);
+		const chatEditorSel = chatSurface.inputEditorSelector;
 
 		// Dismiss dialogs
 		const dismissDialog = async () => {
@@ -535,7 +530,7 @@ async function runOnce(electronPath, scenario, mockServer, verbose, runIndex, ru
 
 		// Wait for DOM response to settle
 		await dismissDialog();
-		const responseSelector = `${CHAT_VIEW} .interactive-item-container.interactive-response`;
+		const responseSelector = chatSurface.responseSelector;
 		await window.waitForFunction(
 			(sel) => {
 				const responses = document.querySelectorAll(sel);
@@ -599,7 +594,7 @@ async function runOnce(electronPath, scenario, mockServer, verbose, runIndex, ru
 			await window.evaluate((chatViewSel) => {
 				const input = document.querySelector(chatViewSel + ' .interactive-input-part');
 				if (input) { input.scrollIntoView({ block: 'end' }); }
-			}, CHAT_VIEW);
+			}, chatSurface.rootSelector);
 			await new Promise(r => setTimeout(r, 200));
 
 			await window.waitForFunction(
@@ -1096,6 +1091,7 @@ function generateCISummary(jsonReport, baseline, opts) {
 		lines.push(`| **Diff** | ${compareLink} |`);
 	}
 	lines.push(`| **Runs per scenario** | ${opts.runs} |`);
+	lines.push(`| **Chat surface** | ${normalizeChatSurface(jsonReport.surface ?? 'panel')} |`);
 	const overrides = Object.entries(opts.metricThresholds || {}).filter(([, v]) => {
 		const parsed = parseMetricThreshold(v);
 		return parsed.type !== 'fraction' || parsed.value !== opts.threshold;
@@ -1353,10 +1349,22 @@ async function main() {
 		}
 		const prevResults = JSON.parse(fs.readFileSync(opts.resume, 'utf-8'));
 		const prevDir = path.dirname(opts.resume);
+		const resumedSurface = normalizeChatSurface(prevResults.surface ?? 'panel');
+		if (opts.surfaceExplicit && opts.surface !== resumedSurface) {
+			throw new Error(`Cannot resume ${resumedSurface} results with --surface ${opts.surface}.`);
+		}
+		opts.surface = resumedSurface;
 
 		// Find the associated baseline JSON in the same directory
 		const baselineFiles = fs.readdirSync(prevDir).filter((/** @type {string} */ f) => f.startsWith('baseline-') && f.endsWith('.json'));
-		const baselineFile = baselineFiles.length > 0 ? path.join(prevDir, baselineFiles[0]) : null;
+		const baselineFile = baselineFiles.map((/** @type {string} */ file) => path.join(prevDir, file)).find((/** @type {string} */ file) => {
+			try {
+				const report = JSON.parse(fs.readFileSync(file, 'utf-8'));
+				return normalizeChatSurface(report.surface ?? 'panel') === opts.surface;
+			} catch {
+				return false;
+			}
+		}) ?? null;
 		const prevBaseline = baselineFile ? JSON.parse(fs.readFileSync(baselineFile, 'utf-8')) : null;
 
 		// Determine which scenarios to resume (default: all from previous run)
@@ -1375,6 +1383,7 @@ async function main() {
 
 		const runsToAdd = opts.runs;
 		console.log(`[chat-simulation] Resuming from: ${opts.resume}`);
+		console.log(`[chat-simulation] Chat surface: ${opts.surface}`);
 		console.log(`[chat-simulation] Adding ${runsToAdd} runs per scenario`);
 		console.log(`[chat-simulation] Scenarios: ${resumeScenarios.join(', ')}`);
 		if (prevBaseline) {
@@ -1393,7 +1402,7 @@ async function main() {
 				const runIdx = `${scenario}-resume-${prevTestRuns.length + i}`;
 				console.log(`[chat-simulation]     Run ${i + 1}/${runsToAdd}...`);
 				try {
-					const m = await runOnce(testElectron, scenario, mockServer, opts.verbose, runIdx, prevDir, 'test', { ...opts.settingsOverrides, ...opts.testSettingsOverrides }, { heapSnapshots: opts.heapSnapshots });
+					const m = await runOnce(testElectron, scenario, mockServer, opts.verbose, runIdx, prevDir, 'test', { ...opts.settingsOverrides, ...opts.testSettingsOverrides }, { heapSnapshots: opts.heapSnapshots, surface: opts.surface });
 					// Clean up previous run's diagnostics to bound disk usage; keep the latest
 					if (opts.cleanupDiagnostics && prevTestRuns.length > 0) { cleanupRunDiagnostics(prevTestRuns[prevTestRuns.length - 1]); }
 					prevTestRuns.push(m);
@@ -1411,7 +1420,7 @@ async function main() {
 					const runIdx = `baseline-${scenario}-resume-${prevBaseRuns.length + i}`;
 					console.log(`[chat-simulation]     Run ${i + 1}/${runsToAdd}...`);
 					try {
-						const m = await runOnce(baselineElectron, scenario, mockServer, opts.verbose, runIdx, prevDir, 'baseline', { ...opts.settingsOverrides, ...opts.baselineSettingsOverrides }, { heapSnapshots: opts.heapSnapshots });
+						const m = await runOnce(baselineElectron, scenario, mockServer, opts.verbose, runIdx, prevDir, 'baseline', { ...opts.settingsOverrides, ...opts.baselineSettingsOverrides }, { heapSnapshots: opts.heapSnapshots, surface: opts.surface });
 						// Clean up previous run's diagnostics to bound disk usage; keep the latest
 						if (opts.cleanupDiagnostics && prevBaseRuns.length > 0) { cleanupRunDiagnostics(prevBaseRuns[prevBaseRuns.length - 1]); }
 						prevBaseRuns.push(m);
@@ -1435,11 +1444,13 @@ async function main() {
 
 		// Write updated files back
 		prevResults.runsPerScenario = Math.max(prevResults.runsPerScenario || 0, ...Object.values(prevResults.scenarios).map((/** @type {any} */ s) => s.runs));
+		prevResults.surface = opts.surface;
 		prevResults.lastResumed = new Date().toISOString();
 		fs.writeFileSync(opts.resume, JSON.stringify(prevResults, null, 2));
 		console.log(`[chat-simulation] Updated results: ${opts.resume}`);
 
 		if (prevBaseline && baselineFile) {
+			prevBaseline.surface = opts.surface;
 			prevBaseline.lastResumed = new Date().toISOString();
 			fs.writeFileSync(baselineFile, JSON.stringify(prevBaseline, null, 2));
 			// Also update cached baseline
@@ -1516,16 +1527,18 @@ async function main() {
 		const baselineLabel = isBaselineLocalPath
 			? path.basename(path.resolve(opts.baselineBuild))
 			: opts.baselineBuild;
-		const baselineJsonPath = path.join(runDir, `baseline-${baselineLabel}.json`);
+		const surfaceSuffix = opts.surface === 'panel' ? '' : `-${opts.surface}`;
+		const baselineJsonPath = path.join(runDir, `baseline-${baselineLabel}${surfaceSuffix}.json`);
 
 		// Local paths: always run fresh (no caching — the build may have changed)
 		// Version strings: use caching as before
-		const cachedPath = isBaselineLocalPath ? null : path.join(DATA_DIR, `baseline-${baselineLabel}.json`);
+		const cachedPath = isBaselineLocalPath ? null : path.join(DATA_DIR, `baseline-${baselineLabel}${surfaceSuffix}.json`);
 		const cachedBaseline = cachedPath && !opts.noCache && fs.existsSync(cachedPath)
 			? JSON.parse(fs.readFileSync(cachedPath, 'utf-8'))
 			: null;
 
-		if (cachedBaseline?.baselineBuildVersion === opts.baselineBuild) {
+		if (cachedBaseline?.baselineBuildVersion === opts.baselineBuild && normalizeChatSurface(cachedBaseline.surface ?? 'panel') === opts.surface) {
+			cachedBaseline.surface = opts.surface;
 			// Check if the cache covers all requested scenarios
 			const cachedScenarios = new Set(Object.keys(cachedBaseline.scenarios || {}));
 			const missingScenarios = opts.scenarios.filter((/** @type {string} */ s) => !cachedScenarios.has(s));
@@ -1557,7 +1570,7 @@ async function main() {
 					const newResults = [];
 					for (let i = 0; i < runsNeeded; i++) {
 						try {
-							const m = await runOnce(baselineExePath, scenario, mockServer, opts.verbose, `baseline-${scenario}-${existingRuns.length + i}`, runDir, 'baseline', baselineSettings, { heapSnapshots: opts.heapSnapshots });
+							const m = await runOnce(baselineExePath, scenario, mockServer, opts.verbose, `baseline-${scenario}-${existingRuns.length + i}`, runDir, 'baseline', baselineSettings, { heapSnapshots: opts.heapSnapshots, surface: opts.surface });
 							// Clean up previous run's diagnostics to bound disk usage; keep the latest
 							if (opts.cleanupDiagnostics && newResults.length > 0) { cleanupRunDiagnostics(newResults[newResults.length - 1]); }
 							newResults.push(m);
@@ -1588,7 +1601,7 @@ async function main() {
 				const results = [];
 				for (let i = 0; i < opts.runs; i++) {
 					try {
-						const m = await runOnce(baselineExePath, scenario, mockServer, opts.verbose, `baseline-${scenario}-${i}`, runDir, 'baseline', baselineSettings, { heapSnapshots: opts.heapSnapshots });
+						const m = await runOnce(baselineExePath, scenario, mockServer, opts.verbose, `baseline-${scenario}-${i}`, runDir, 'baseline', baselineSettings, { heapSnapshots: opts.heapSnapshots, surface: opts.surface });
 						// Clean up previous run's diagnostics to bound disk usage; keep the latest
 						if (opts.cleanupDiagnostics && results.length > 0) { cleanupRunDiagnostics(results[results.length - 1]); }
 						results.push(m);
@@ -1600,6 +1613,7 @@ async function main() {
 			const baselineReport = {
 				timestamp: new Date().toISOString(),
 				baselineBuildVersion: opts.baselineBuild,
+				surface: opts.surface,
 				platform: process.platform,
 				runsPerScenario: opts.runs,
 				scenarios: /** @type {Record<string, any>} */ ({}),
@@ -1622,6 +1636,7 @@ async function main() {
 	// -- Run benchmarks --------------------------------------------------
 	console.log(`[chat-simulation] Electron: ${electronPath}`);
 	console.log(`[chat-simulation] Build mode: ${buildModeLabel(testBuildMode)}`);
+	console.log(`[chat-simulation] Chat surface: ${opts.surface}`);
 	if (baselineBuildMode) {
 		console.log(`[chat-simulation] Baseline mode: ${buildModeLabel(baselineBuildMode)}`);
 	}
@@ -1671,7 +1686,7 @@ async function main() {
 		for (let i = 0; i < opts.runs; i++) {
 			console.log(`[chat-simulation]   Run ${i + 1}/${opts.runs}...`);
 			try {
-				const metrics = await runOnce(electronPath, scenario, mockServer, opts.verbose, `${scenario}-${i}`, runDir, 'test', testSettings, { heapSnapshots: opts.heapSnapshots });
+				const metrics = await runOnce(electronPath, scenario, mockServer, opts.verbose, `${scenario}-${i}`, runDir, 'test', testSettings, { heapSnapshots: opts.heapSnapshots, surface: opts.surface });
 				// Clean up previous run's diagnostics to bound disk usage; keep the latest
 				if (opts.cleanupDiagnostics && results.length > 0) { cleanupRunDiagnostics(results[results.length - 1]); }
 				results.push(metrics);
@@ -1725,9 +1740,10 @@ async function main() {
 
 	// -- JSON output -----------------------------------------------------
 	const jsonPath = path.join(runDir, 'results.json');
-	const jsonReport = /** @type {{ timestamp: string, platform: NodeJS.Platform, runsPerScenario: number, buildMode: string, mismatchedBuildMode: boolean, scenarios: Record<string, any>, _resultsPath?: string }} */ ({
+	const jsonReport = /** @type {{ timestamp: string, platform: NodeJS.Platform, surface: 'panel' | 'editor', runsPerScenario: number, buildMode: string, mismatchedBuildMode: boolean, scenarios: Record<string, any>, _resultsPath?: string }} */ ({
 		timestamp: new Date().toISOString(),
 		platform: process.platform,
+		surface: opts.surface,
 		runsPerScenario: opts.runs,
 		buildMode: testBuildMode,
 		mismatchedBuildMode: !!isMismatchedBuildMode,
@@ -1766,7 +1782,7 @@ async function main() {
  * Print baseline comparison and exit with code 1 if regressions found.
  * Returns the set of scenario IDs that regressed.
  * @param {Record<string, any>} jsonReport
- * @param {{ threshold: number, metricThresholds?: Record<string, number | string>, baseline?: string, ci?: boolean, resume?: string, build?: string, baselineBuild?: string, runs: number, cleanupDiagnostics?: boolean }} opts
+ * @param {{ threshold: number, metricThresholds?: Record<string, number | string>, baseline?: string, ci?: boolean, resume?: string, build?: string, baselineBuild?: string, runs: number, cleanupDiagnostics?: boolean, surface?: 'panel' | 'editor' }} opts
  * @returns {Promise<Set<string>>}
  */
 async function printComparison(jsonReport, opts) {
@@ -1776,6 +1792,11 @@ async function printComparison(jsonReport, opts) {
 	const regressedScenarios = new Set();
 	if (opts.baseline && fs.existsSync(opts.baseline)) {
 		const baseline = JSON.parse(fs.readFileSync(opts.baseline, 'utf-8'));
+		const reportSurface = normalizeChatSurface(jsonReport.surface ?? 'panel');
+		const baselineSurface = normalizeChatSurface(baseline.surface ?? 'panel');
+		if (reportSurface !== baselineSurface) {
+			throw new Error(`Cannot compare ${reportSurface} results against a ${baselineSurface} baseline.`);
+		}
 		console.log('');
 		console.log(`[chat-simulation] =========== Baseline Comparison (threshold: ${(opts.threshold * 100).toFixed(0)}%) ===========`);
 		console.log(`[chat-simulation] Baseline: ${baseline.baselineBuildVersion || baseline.timestamp}`);

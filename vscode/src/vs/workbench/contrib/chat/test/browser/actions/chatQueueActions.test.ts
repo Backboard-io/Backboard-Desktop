@@ -4,7 +4,9 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
+import { Codicon } from '../../../../../../base/common/codicons.js';
 import { OS } from '../../../../../../base/common/platform.js';
+import { ThemeIcon } from '../../../../../../base/common/themables.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
 import { TestConfigurationService } from '../../../../../../platform/configuration/test/common/testConfigurationService.js';
 import { ContextKeyService } from '../../../../../../platform/contextkey/browser/contextKeyService.js';
@@ -12,9 +14,9 @@ import { KeybindingsRegistry } from '../../../../../../platform/keybinding/commo
 import { KeybindingResolver } from '../../../../../../platform/keybinding/common/keybindingResolver.js';
 import { ResolvedKeybindingItem } from '../../../../../../platform/keybinding/common/resolvedKeybindingItem.js';
 import { USLayoutResolvedKeybinding } from '../../../../../../platform/keybinding/common/usLayoutResolvedKeybinding.js';
+import { isIMenuItem, isISubmenuItem, MenuId, MenuRegistry } from '../../../../../../platform/actions/common/actions.js';
 import { ChatQueueMessageAction, ChatSteerWithMessageAction, registerChatQueueActions } from '../../../browser/actions/chatQueueActions.js';
 import { ChatContextKeys } from '../../../common/actions/chatContextKeys.js';
-import { ChatConfiguration } from '../../../common/constants.js';
 
 // Register actions once so the keybindings appear in KeybindingsRegistry.
 registerChatQueueActions();
@@ -35,12 +37,13 @@ suite('Queue/Steer keybinding resolution', () => {
 		return new KeybindingResolver(items, [], () => { });
 	}
 
-	function lookupForConfig(defaultAction: 'steer' | 'queue') {
-		const config = new TestConfigurationService({ [ChatConfiguration.RequestQueueingDefaultAction]: defaultAction });
+	function lookupQueueKeybinding() {
+		const config = new TestConfigurationService();
 		const ctxService = new ContextKeyService(config);
 		// Simulate the chat input being focused with a request in progress, like the picker does.
 		const overlay = ctxService.createOverlay([
 			[ChatContextKeys.inputHasText.key, true],
+			[ChatContextKeys.inputHasSendableContent.key, true],
 			[ChatContextKeys.inChatInput.key, true],
 			[ChatContextKeys.requestInProgress.key, true],
 		]);
@@ -54,21 +57,24 @@ suite('Queue/Steer keybinding resolution', () => {
 		};
 	}
 
-	test('with default=steer, Enter steers and Alt+Enter queues', () => {
-		const { result, dispose } = lookupForConfig('steer');
+	test('Enter queues while a request is in progress', () => {
+		const { result, dispose } = lookupQueueKeybinding();
 		try {
-			assert.deepStrictEqual(result, { queue: 'alt+Enter', steer: 'Enter' });
+			// The product now exposes queue as the sole in-progress submit mode.
+			// Keep the legacy steer command registered for compatibility, but do
+			// not let it compete for the primary input keybinding.
+			assert.deepStrictEqual(result, { queue: 'Enter', steer: null });
 		} finally {
 			dispose();
 		}
 	});
 
-	test('with default=queue, Enter queues and Alt+Enter steers', () => {
-		const { result, dispose } = lookupForConfig('queue');
-		try {
-			assert.deepStrictEqual(result, { queue: 'Enter', steer: 'alt+Enter' });
-		} finally {
-			dispose();
-		}
+	test('keeps the send arrow and removes the stop-and-send split menu', () => {
+		const executeItems = MenuRegistry.getMenuItems(MenuId.ChatExecute);
+		const queueSubmit = executeItems.find(item => isIMenuItem(item) && item.command.id === ChatQueueMessageAction.ID);
+		assert.ok(queueSubmit && isIMenuItem(queueSubmit), 'queued submit is registered directly in the execute toolbar');
+		assert.ok(ThemeIcon.isThemeIcon(queueSubmit.command.icon));
+		assert.strictEqual(queueSubmit.command.icon.id, Codicon.arrowUp.id);
+		assert.ok(!executeItems.some(item => isISubmenuItem(item) && item.submenu === MenuId.ChatExecuteQueue), 'no queue split-button submenu is registered');
 	});
 });

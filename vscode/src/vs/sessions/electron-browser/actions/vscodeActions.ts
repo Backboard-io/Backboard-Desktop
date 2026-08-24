@@ -42,12 +42,11 @@ import { BACKBOARD_LAST_EDITOR_FOLDER_STORAGE_KEY } from '../../../workbench/con
 const OPEN_WORKSPACE_IN_VSCODE_ACTION_ID = 'agents.openWorkspaceInVSCode';
 
 /**
- * How long to wait for a session that is still resolving its workspace (e.g.
- * looking up its git repository). Short enough that Editor mode never feels
- * stuck, long enough to cover the common case of switching modes moments after
- * opening a session.
+ * A very small grace period for a first-ever switch whose session workspace is
+ * still resolving. Normal round trips use the remembered Editor folder and do
+ * not wait at all; this bound keeps the exceptional path effectively instant.
  */
-const WORKSPACE_RESOLVE_TIMEOUT = 2000;
+const WORKSPACE_RESOLVE_TIMEOUT = 50;
 
 function toFolderUri(session: ISession, sessionsProvidersService: ISessionsProvidersService, remoteAgentHostService: IRemoteAgentHostService): URI | undefined {
 	const rawFolderUri = session.workspace.get()?.folders[0]?.workingDirectory;
@@ -101,20 +100,28 @@ async function getRememberedEditorFolder(storageService: IStorageService, fileSe
  * the app forgetting where the user was — so this tries hard to find a folder
  * before giving up:
  *
- * 1. The session on screen. Its workspace resolves asynchronously, so if it is
- *    still loading we wait briefly rather than treating it as folderless.
- * 2. Failing that, the folder the editor window was on when the user last left
- *    Editor mode. A round trip through Simple/Advanced that never lands on a
- *    session must come back to the project the user was working in.
- * 3. Failing that, the most recently opened session that has a folder. This is
+ * 1. The session on screen, when its workspace is already available.
+ * 2. The folder the editor window was on when the user last left Editor mode.
+ *    In particular, this makes a quick Editor → Simple/Advanced → Editor round
+ *    trip immediate even while the sessions workbench is still resolving.
+ * 3. If there is no remembered folder, briefly wait for the active session's
+ *    workspace rather than treating a first-ever switch as folderless.
+ * 4. Failing that, the most recently opened session that has a folder. This is
  *    what covers a first-ever switch into Editor mode, where nothing has been
  *    remembered yet. Recency is persisted, so it still points somewhere
  *    sensible after a restart.
  */
 async function getFolderUriToOpen(sessionsService: ISessionsService, sessionsProvidersService: ISessionsProvidersService, remoteAgentHostService: IRemoteAgentHostService, storageService: IStorageService, fileService: IFileService): Promise<URI | undefined> {
+	let rememberedFolderPromise: Promise<URI | undefined> | undefined;
+	const getRememberedFolder = () => rememberedFolderPromise ??= getRememberedEditorFolder(storageService, fileService);
 	const activeSession = sessionsService.activeSession.get();
 	if (activeSession) {
 		if (!activeSession.workspace.get() && activeSession.loading.get()) {
+			const rememberedFolderUri = await getRememberedFolder();
+			if (rememberedFolderUri) {
+				return rememberedFolderUri;
+			}
+
 			// Cancelled either way, so a session that never finishes loading
 			// doesn't leave an observer behind on every mode switch.
 			const cts = new CancellationTokenSource();
@@ -129,7 +136,7 @@ async function getFolderUriToOpen(sessionsService: ISessionsService, sessionsPro
 		}
 	}
 
-	const rememberedFolderUri = await getRememberedEditorFolder(storageService, fileService);
+	const rememberedFolderUri = await getRememberedFolder();
 	if (rememberedFolderUri) {
 		return rememberedFolderUri;
 	}

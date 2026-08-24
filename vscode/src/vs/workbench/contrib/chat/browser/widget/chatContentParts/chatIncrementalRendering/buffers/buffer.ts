@@ -21,6 +21,13 @@ export interface IIncrementalRenderingBuffer {
 	readonly handlesFlush: boolean;
 
 	/**
+	 * Establish content that is already visible as the buffer's committed
+	 * baseline. Drip-feed buffers use this when a transcript part is mounted
+	 * with existing text so they do not reveal that text again from zero.
+	 */
+	seed?(markdown: string): void;
+
+	/**
 	 * Determine the renderable prefix of `fullMarkdown`. The returned
 	 * string must be a prefix of `fullMarkdown` (or `fullMarkdown`
 	 * itself). Content beyond the returned prefix stays buffered.
@@ -29,7 +36,7 @@ export interface IIncrementalRenderingBuffer {
 	 * @param lastRendered The markdown last rendered to the DOM.
 	 * @returns The prefix to render now.
 	 */
-	getRenderable(fullMarkdown: string, lastRendered: string): string;
+	getRenderable(fullMarkdown: string, lastRendered: string, appendedMarkdown?: string): string;
 
 	/**
 	 * For buffers that handle flushing themselves (e.g. line buffer
@@ -47,6 +54,13 @@ export interface IIncrementalRenderingBuffer {
 	 * orchestrator re-schedules a render after the current flush.
 	 */
 	readonly needsNextFrame?: boolean;
+
+	/**
+	 * Milliseconds until another render attempt can produce visible output.
+	 * Buffers with a commit cadence use this to avoid a display-rate polling
+	 * loop between eligible commits.
+	 */
+	readonly nextRenderDelay?: number;
 
 	/**
 	 * Called when the buffer is no longer needed.

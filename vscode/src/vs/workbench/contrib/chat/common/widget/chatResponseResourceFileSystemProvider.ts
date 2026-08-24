@@ -31,6 +31,17 @@ export interface IChatResponseResourceFileSystemProvider extends IFileSystemProv
 	associate(sessionResource: URI, data: Uint8Array | { base64: string }, name?: string): URI;
 }
 
+const maxChatResponseResourceBytes = 16 * 1024 * 1024;
+const maxAssociatedSessionBytes = 64 * 1024 * 1024;
+const maxAssociatedGlobalBytes = 256 * 1024 * 1024;
+const maxAssociatedSessionResources = 64;
+const maxAssociatedGlobalResources = 256;
+
+interface IAssociatedResourceData {
+	readonly data: Uint8Array;
+	readonly byteLength: number;
+}
+
 export class ChatResponseResourceFileSystemProvider extends Disposable implements
 	IChatResponseResourceFileSystemProvider,
 	IFileSystemProviderWithFileReadWriteCapability,
@@ -50,10 +61,12 @@ export class ChatResponseResourceFileSystemProvider extends Disposable implement
 		| FileSystemProviderCapabilities.FileReadWrite;
 
 	/** In-memory store for data associated via {@link associate}, keyed by URI. */
-	private readonly _associated = new ResourceMap<Uint8Array | { base64: string }>();
+	private readonly _associated = new ResourceMap<IAssociatedResourceData>();
 
 	/** Tracks which associated URIs belong to which session, for cleanup on dispose. */
 	private readonly _sessionAssociations = new ResourceMap<ResourceSet>();
+	private readonly _sessionAssociationBytes = new ResourceMap<number>();
+	private _associatedBytes = 0;
 
 	constructor(
 		@IChatService private readonly chatService: IChatService,
@@ -65,21 +78,43 @@ export class ChatResponseResourceFileSystemProvider extends Disposable implement
 				const uris = this._sessionAssociations.get(sessionResource);
 				if (uris) {
 					for (const uri of uris) {
-						this._associated.delete(uri);
+						const associated = this._associated.get(uri);
+						if (associated) {
+							this._associatedBytes -= associated.byteLength;
+							this._associated.delete(uri);
+						}
 					}
 					this._sessionAssociations.delete(sessionResource);
+					this._sessionAssociationBytes.delete(sessionResource);
 				}
 			}
 		}));
 	}
 
 	associate(sessionResource: URI, data: Uint8Array | { base64: string }, name?: string): URI {
+		const byteLength = data instanceof Uint8Array ? data.byteLength : Math.ceil(data.base64.length * 3 / 4);
+		const sessionBytes = this._sessionAssociationBytes.get(sessionResource) ?? 0;
+		const sessionResources = this._sessionAssociations.get(sessionResource)?.size ?? 0;
+		if (byteLength > maxChatResponseResourceBytes
+			|| sessionBytes + byteLength > maxAssociatedSessionBytes
+			|| this._associatedBytes + byteLength > maxAssociatedGlobalBytes
+			|| sessionResources >= maxAssociatedSessionResources
+			|| this._associated.size >= maxAssociatedGlobalResources) {
+			throw createFileSystemProviderError('Chat response resource storage limit exceeded', FileSystemProviderErrorCode.FileTooLarge);
+		}
+		// Decode once at association time. Keeping the base64 string until first
+		// read can use substantially more memory than the resulting byte array and
+		// makes the budget underestimate retained heap.
+		const storedData = data instanceof Uint8Array ? data : decodeBase64(data.base64).buffer;
+
 		const id = generateUuid();
 		const uri = URI.from({
 			scheme: ChatResponseResource.scheme,
 			path: `/assoc/${id}` + (name ? `/${name}` : ''),
 		});
-		this._associated.set(uri, data);
+		this._associated.set(uri, { data: storedData, byteLength: storedData.byteLength });
+		this._associatedBytes += storedData.byteLength;
+		this._sessionAssociationBytes.set(sessionResource, sessionBytes + storedData.byteLength);
 
 		let set = this._sessionAssociations.get(sessionResource);
 		if (!set) {
@@ -161,12 +196,7 @@ export class ChatResponseResourceFileSystemProvider extends Disposable implement
 	private lookupURI(uri: URI): Uint8Array | Promise<Uint8Array> {
 		const associated = this._associated.get(uri);
 		if (associated) {
-			if (associated instanceof Uint8Array) {
-				return associated;
-			}
-			const decoded = decodeBase64(associated.base64).buffer;
-			this._associated.set(uri, decoded);
-			return decoded;
+			return associated.data;
 		}
 
 		const { result, index } = this.findMatchingInvocation(uri);
@@ -181,10 +211,33 @@ export class ChatResponseResourceFileSystemProvider extends Disposable implement
 		}
 
 		if (part.type === 'ref') {
-			return this._fileService.readFile(part.uri).then(r => r.value.buffer);
+			return this._fileService.readFile(part.uri, { limits: { size: maxChatResponseResourceBytes } }).then(r => r.value.buffer);
 		}
 
-		return part.isText ? new TextEncoder().encode(part.value) : decodeBase64(part.value).buffer;
+		// Tool-result URIs do not pass through associate(), so enforce the same
+		// per-resource ceiling before allocating a decoded copy. Without this, one
+		// malformed or unexpectedly large tool part can transiently duplicate an
+		// arbitrary-size base64 string and exhaust the renderer heap.
+		if (part.isText) {
+			if (part.value.length > maxChatResponseResourceBytes) {
+				throw createFileSystemProviderError('Chat response resource storage limit exceeded', FileSystemProviderErrorCode.FileTooLarge);
+			}
+			const encoded = new TextEncoder().encode(part.value);
+			if (encoded.byteLength > maxChatResponseResourceBytes) {
+				throw createFileSystemProviderError('Chat response resource storage limit exceeded', FileSystemProviderErrorCode.FileTooLarge);
+			}
+			return encoded;
+		}
+
+		const estimatedByteLength = Math.ceil(part.value.length * 3 / 4);
+		if (estimatedByteLength > maxChatResponseResourceBytes) {
+			throw createFileSystemProviderError('Chat response resource storage limit exceeded', FileSystemProviderErrorCode.FileTooLarge);
+		}
+		const decoded = decodeBase64(part.value).buffer;
+		if (decoded.byteLength > maxChatResponseResourceBytes) {
+			throw createFileSystemProviderError('Chat response resource storage limit exceeded', FileSystemProviderErrorCode.FileTooLarge);
+		}
+		return decoded;
 	}
 }
 

@@ -8,7 +8,6 @@ import * as dom from '../../../../base/browser/dom.js';
 import { Color } from '../../../../base/common/color.js';
 import { Event } from '../../../../base/common/event.js';
 import { DisposableStore, MutableDisposable } from '../../../../base/common/lifecycle.js';
-import { disposableTimeout } from '../../../../base/common/async.js';
 import { editorBackground, foreground } from '../../../../platform/theme/common/colorRegistry.js';
 import { getThemeTypeSelector, IThemeService } from '../../../../platform/theme/common/themeService.js';
 import { DEFAULT_EDITOR_MIN_DIMENSIONS } from '../../../browser/parts/editor/editor.js';
@@ -30,7 +29,6 @@ export class PartsSplash {
 
 	private static readonly _splashElementId = 'monaco-parts-splash';
 	private static readonly _transitionSnapshotElementId = 'monaco-transition-snapshot';
-	private static readonly _transitionSnapshotFadeDuration = 120;
 
 	private readonly _disposables = new DisposableStore();
 
@@ -112,13 +110,13 @@ export class PartsSplash {
 	}
 
 	/**
-	 * Cross-fades away the frozen frame of the previous page that the window
+	 * Removes the frozen frame of the previous page that the window
 	 * bootstrap put up to cover this workbench's boot (see
 	 * `INativeWindowConfiguration.transitionSnapshot`).
 	 *
 	 * Deferred by a frame: this runs from within the first layout, before the
-	 * workbench has painted anything, so fading from here would cross the
-	 * snapshot onto a blank window rather than onto the finished workbench.
+	 * workbench has painted anything, so removing it here would expose a blank
+	 * window rather than the finished workbench.
 	 */
 	private _removeTransitionSnapshot(): void {
 		// eslint-disable-next-line no-restricted-syntax
@@ -128,10 +126,7 @@ export class PartsSplash {
 		}
 
 		this._disposables.add(dom.scheduleAtNextAnimationFrame(mainWindow, () => {
-			element.style.transition = `opacity ${PartsSplash._transitionSnapshotFadeDuration}ms ease-out`;
-			element.style.opacity = '0';
-
-			this._disposables.add(disposableTimeout(() => element.remove(), PartsSplash._transitionSnapshotFadeDuration));
+			element.remove();
 		}));
 	}
 

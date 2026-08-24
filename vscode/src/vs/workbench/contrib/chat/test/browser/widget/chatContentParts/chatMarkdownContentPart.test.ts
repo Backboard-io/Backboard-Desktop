@@ -6,7 +6,7 @@
 import assert from 'assert';
 import { Event } from '../../../../../../../base/common/event.js';
 import { MarkdownString } from '../../../../../../../base/common/htmlContent.js';
-import { DisposableStore } from '../../../../../../../base/common/lifecycle.js';
+import { DisposableStore, toDisposable } from '../../../../../../../base/common/lifecycle.js';
 import { observableValue } from '../../../../../../../base/common/observable.js';
 import { URI } from '../../../../../../../base/common/uri.js';
 import { mainWindow } from '../../../../../../../base/browser/window.js';
@@ -30,6 +30,7 @@ import { ChatConfiguration } from '../../../../common/constants.js';
 import { IAiEditTelemetryService } from '../../../../../editTelemetry/browser/telemetry/aiEditTelemetry/aiEditTelemetryService.js';
 import { IViewDescriptorService } from '../../../../../../common/views.js';
 import { IDisposableReference } from '../../../../browser/widget/chatContentParts/chatCollections.js';
+import { MarkedKatexSupport } from '../../../../../markdown/browser/markedKatexSupport.js';
 
 suite('ChatMarkdownContentPart', () => {
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
@@ -631,5 +632,128 @@ suite('ChatMarkdownContentPart', () => {
 		assert.strictEqual(renderedCodeBlocks.length, 2);
 		assert.strictEqual(renderedCodeBlocks[0].text, 'console');
 		assert.strictEqual(renderedCodeBlocks[1].text, 'console.log("hello");');
+	});
+
+	test('long completed responses defer Monaco code blocks until interaction', () => {
+		const markdown = `${'Long response text. '.repeat(1_000)}\n\n\`\`\`typescript\nconst deferred = true;\n\`\`\``;
+		const part = createMarkdownPart(markdown);
+
+		assert.ok(part.domNode.querySelector('.chat-codeblock-deferred'));
+		assert.strictEqual(renderedCodeBlocks.length, 0, 'offscreen code blocks must not acquire an editor eagerly');
+
+		part.codeblocks[0].focus();
+		assert.strictEqual(renderedCodeBlocks.length, 1, 'interaction should hydrate only the requested code block');
+		assert.strictEqual(renderedCodeBlocks[0].text, 'const deferred = true;');
+	});
+
+	test('mounts existing streaming text immediately without replaying from empty', () => {
+		const configService = instantiationService.get(IConfigurationService) as TestConfigurationService;
+		configService.setUserConfiguration(ChatConfiguration.IncrementalRendering, true);
+		configService.setUserConfiguration(ChatConfiguration.IncrementalRenderingBuffering, 'word');
+		const context = createRenderContext(false);
+		const markdown = 'This response was already visible before the row remounted.';
+
+		const part = createMarkdownPart(markdown, context, true);
+
+		assert.strictEqual(part.domNode.textContent, markdown);
+		assert.strictEqual(part.domNode.querySelector('.chat-smooth-animate-fade'), null);
+	});
+
+	test('keeps caught-up rich text DOM mounted when streaming completes', async () => {
+		const configService = instantiationService.get(IConfigurationService) as TestConfigurationService;
+		configService.setUserConfiguration(ChatConfiguration.IncrementalRendering, true);
+		configService.setUserConfiguration(ChatConfiguration.IncrementalRenderingBuffering, 'word');
+		const context = createRenderContext(false);
+		const part = createMarkdownPart('Stable response text.', context, true);
+		const mountedParagraph = part.domNode.firstElementChild;
+
+		(context.element as { isComplete: boolean }).isComplete = true;
+		part.updateStreamRate(100, true);
+		await new Promise<void>(resolve => mainWindow.requestAnimationFrame(() => resolve()));
+
+		assert.strictEqual(part.domNode.firstElementChild, mountedParagraph);
+		assert.strictEqual(part.domNode.textContent, 'Stable response text.');
+	});
+
+	test('long streaming responses use lightweight text before one final rich render', async () => {
+		const configService = instantiationService.get(IConfigurationService) as TestConfigurationService;
+		configService.setUserConfiguration(ChatConfiguration.IncrementalRendering, true);
+		configService.setUserConfiguration(ChatConfiguration.IncrementalRenderingBuffering, 'word');
+		const context = createRenderContext(false);
+		const markdown = 'x'.repeat(16_000);
+		const part = createMarkdownPart(markdown, context, true);
+
+		assert.ok(part.domNode.querySelector('.chat-markdown-streaming-plaintext'));
+		assert.strictEqual(part.domNode.textContent, markdown, 'existing long text should be visible on the mounting frame');
+
+		(context.element as { isComplete: boolean }).isComplete = true;
+		part.updateStreamRate(100, true);
+		await new Promise<void>(resolve => mainWindow.requestAnimationFrame(() => resolve()));
+
+		assert.strictEqual(part.domNode.querySelector('.chat-markdown-streaming-plaintext'), null);
+		assert.strictEqual(part.domNode.textContent, markdown);
+	});
+
+	test('deferred KaTeX load preserves long streaming plaintext node identity', async () => {
+		const configService = instantiationService.get(IConfigurationService) as TestConfigurationService;
+		configService.setUserConfiguration(ChatConfiguration.IncrementalRendering, true);
+		configService.setUserConfiguration(ChatConfiguration.IncrementalRenderingBuffering, 'word');
+		configService.setUserConfiguration(ChatConfiguration.EnableMath, true);
+		const originalGetExtension = MarkedKatexSupport.getExtension;
+		const originalLoadExtension = MarkedKatexSupport.loadExtension;
+		let resolveKatex!: () => void;
+		const katexLoaded = new Promise<void>(resolve => resolveKatex = resolve);
+		MarkedKatexSupport.getExtension = () => undefined;
+		MarkedKatexSupport.loadExtension = async () => {
+			await katexLoaded;
+			return undefined!;
+		};
+		disposables.add(toDisposable(() => {
+			MarkedKatexSupport.getExtension = originalGetExtension;
+			MarkedKatexSupport.loadExtension = originalLoadExtension;
+		}));
+
+		const context = createRenderContext(false);
+		const markdown = 'x'.repeat(16_000);
+		const part = createMarkdownPart(markdown, context, true);
+		const plaintext = part.domNode.querySelector('.chat-markdown-streaming-plaintext');
+		const textNode = plaintext?.firstChild;
+		assert.ok(textNode instanceof Text);
+
+		resolveKatex();
+		await katexLoaded;
+		await Promise.resolve();
+
+		assert.strictEqual(part.domNode.querySelector('.chat-markdown-streaming-plaintext'), plaintext);
+		assert.strictEqual(plaintext?.firstChild, textNode, 'deferred enhancement must not remount visible streaming text');
+		assert.strictEqual(textNode.data, markdown);
+	});
+
+	test('deferred KaTeX load is a no-op after markdown part disposal', async () => {
+		const configService = instantiationService.get(IConfigurationService) as TestConfigurationService;
+		configService.setUserConfiguration(ChatConfiguration.IncrementalRendering, true);
+		configService.setUserConfiguration(ChatConfiguration.EnableMath, true);
+		const originalGetExtension = MarkedKatexSupport.getExtension;
+		const originalLoadExtension = MarkedKatexSupport.loadExtension;
+		let resolveKatex!: () => void;
+		const katexLoaded = new Promise<void>(resolve => resolveKatex = resolve);
+		MarkedKatexSupport.getExtension = () => undefined;
+		MarkedKatexSupport.loadExtension = async () => {
+			await katexLoaded;
+			return undefined!;
+		};
+		disposables.add(toDisposable(() => {
+			MarkedKatexSupport.getExtension = originalGetExtension;
+			MarkedKatexSupport.loadExtension = originalLoadExtension;
+		}));
+
+		const part = createMarkdownPart('x'.repeat(16_000), createRenderContext(false), true);
+		const mountedChild = part.domNode.firstChild;
+		part.dispose();
+		resolveKatex();
+		await katexLoaded;
+		await Promise.resolve();
+
+		assert.strictEqual(part.domNode.firstChild, mountedChild);
 	});
 });

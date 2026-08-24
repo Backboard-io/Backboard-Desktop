@@ -54,6 +54,18 @@ suite('ResourcePool', () => {
 		assert.strictEqual(createCount, 1);
 	});
 
+	test('ignores duplicate releases', () => {
+		const pool = createPool();
+		const a = pool.get();
+		pool.release(a);
+		pool.release(a);
+
+		const reused = pool.get();
+		const next = pool.get();
+		assert.strictEqual(reused, a);
+		assert.notStrictEqual(next, a, 'the same pooled item must not be handed out twice');
+	});
+
 	test('clear disposes idle items but not in-use items', () => {
 		const pool = createPool();
 		const a = pool.get();
@@ -174,6 +186,18 @@ suite('KeyedResourcePool', () => {
 		const d = pool.get('key1');
 		assert.strictEqual(d, a, 'should return the item released with key1');
 		assert.strictEqual(createCount, 2);
+	});
+
+	test('ignores duplicate keyed releases', () => {
+		const pool = createPool();
+		const a = pool.get('key');
+		pool.release(a, 'key');
+		pool.release(a, 'key');
+
+		const reused = pool.get('key');
+		const next = pool.get('key');
+		assert.strictEqual(reused, a);
+		assert.notStrictEqual(next, a, 'the same keyed item must not be handed out twice');
 	});
 
 	test('keyed get falls back to any idle item when key not found', () => {

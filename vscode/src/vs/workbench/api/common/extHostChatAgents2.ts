@@ -22,7 +22,7 @@ import { ILogService } from '../../../platform/log/common/log.js';
 import { packErrorForTelemetry } from '../../../platform/telemetry/common/errorTelemetry.js';
 import { isChatViewTitleActionContext } from '../../contrib/chat/common/actions/chatActions.js';
 import { IChatAgentRequest, IChatAgentResult, IChatAgentResultTimings, UserSelectedTools } from '../../contrib/chat/common/participants/chatAgents.js';
-import { ChatAgentVoteDirection, IChatContentReference, IChatFollowup, IChatResponseErrorDetails, IChatUserActionEvent, IChatVoteAction } from '../../contrib/chat/common/chatService/chatService.js';
+import { ChatAgentVoteDirection, IChatContentInlineReference, IChatContentReference, IChatFollowup, IChatResponseErrorDetails, IChatUserActionEvent, IChatVoteAction } from '../../contrib/chat/common/chatService/chatService.js';
 import { ChatRequestHooks } from '../../contrib/chat/common/promptSyntax/hookSchema.js';
 import { LocalChatSessionUri } from '../../contrib/chat/common/model/chatUri.js';
 import { ChatAgentLocation } from '../../contrib/chat/common/constants.js';
@@ -135,8 +135,12 @@ export class ChatAgentResponseStream {
 						}
 					};
 
-					Promise.all([progressReporterPromise, task(progressReporter)]).then(([_void, res]) => {
+					void Promise.all([progressReporterPromise, task(progressReporter)]).then(([_void, res]) => {
 						send(typeConvert.ChatTaskResult.from(res), myHandle);
+					}, () => {
+						// Always settle the main-thread task, including when the extension's
+						// asynchronous progress callback rejects.
+						send(typeConvert.ChatTaskResult.from(undefined), myHandle);
 					});
 				} else {
 					send(progress);
@@ -425,13 +429,31 @@ export class ChatAgentResponseStream {
 
 						if (part.resolve) {
 							const cts = new CancellationTokenSource();
-							part.resolve(cts.token)
-								.then(() => {
-									const resolvedDto = typeConvert.ChatResponseAnchorPart.from(part);
-									that._proxy.$handleAnchorResolve(that._request.requestId, dto.resolveId!, resolvedDto);
-								})
-								.then(() => cts.dispose(), () => cts.dispose());
-							that._sessionDisposables.add(toDisposable(() => cts.dispose(true)));
+							let settled = false;
+							let sessionDisposable: ReturnType<typeof toDisposable> | undefined;
+							const settle = (resolvedDto: Dto<IChatContentInlineReference> | undefined) => {
+								if (settled) {
+									return;
+								}
+								settled = true;
+								if (sessionDisposable) {
+									// A resolved anchor no longer needs a session-lifetime
+									// cancellation hook. Removing it releases the closure over
+									// the response part/DTO immediately instead of retaining every
+									// resolved anchor until the entire chat session closes.
+									that._sessionDisposables.delete(sessionDisposable);
+									sessionDisposable = undefined;
+								}
+								that._proxy.$handleAnchorResolve(that._request.requestId, dto.resolveId!, resolvedDto);
+								cts.dispose();
+							};
+							void Promise.resolve(part.resolve(cts.token)).then(() => {
+								settle(typeConvert.ChatResponseAnchorPart.from(part));
+							}, () => settle(undefined));
+							sessionDisposable = that._sessionDisposables.add(toDisposable(() => {
+								cts.dispose(true);
+								settle(undefined);
+							}));
 						}
 					} else if (part instanceof extHostTypes.ChatResponseExternalEditPart) {
 						const p = this.externalEdit(part.uris, part.callback);

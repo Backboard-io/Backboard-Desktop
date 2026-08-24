@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
-import { $ } from '../../../../../../../base/browser/dom.js';
+import { $, addDisposableListener } from '../../../../../../../base/browser/dom.js';
 import { Emitter, Event } from '../../../../../../../base/common/event.js';
 import { DisposableStore, toDisposable } from '../../../../../../../base/common/lifecycle.js';
 import { observableValue } from '../../../../../../../base/common/observable.js';
@@ -13,9 +13,9 @@ import { mainWindow } from '../../../../../../../base/browser/window.js';
 import { workbenchInstantiationService } from '../../../../../../test/browser/workbenchTestServices.js';
 import { IConfigurationService } from '../../../../../../../platform/configuration/common/configuration.js';
 import { TestConfigurationService } from '../../../../../../../platform/configuration/test/common/testConfigurationService.js';
-import { ChatThinkingContentPart, maybePickFunWorkingMessage } from '../../../../browser/widget/chatContentParts/chatThinkingContentPart.js';
+import { ChatThinkingContentPart, lastNonEmptyThinkingLine, maybePickFunWorkingMessage } from '../../../../browser/widget/chatContentParts/chatThinkingContentPart.js';
 import { ChatExternalEditContentPart } from '../../../../browser/widget/chatContentParts/chatExternalEditContentPart.js';
-import { ChatTextEditContentPart, ICodeCompareModelService } from '../../../../browser/widget/chatContentParts/chatTextEditContentPart.js';
+import { ChatTextEditContentPart, ICodeCompareModelService, TextEditGroupHistoryIndex } from '../../../../browser/widget/chatContentParts/chatTextEditContentPart.js';
 import { ChatTerminalThinkingCollapsibleWrapper, getCollapsedTerminalOutputPreview } from '../../../../browser/widget/chatContentParts/toolInvocationParts/chatTerminalToolProgressPart.js';
 import { IChatExternalEdit, IChatMarkdownContent, IChatThinkingPart, IChatToolInvocation, IChatToolInvocationSerialized, ToolConfirmKind } from '../../../../common/chatService/chatService.js';
 import { IChatContentPartRenderContext, InlineTextModelCollection } from '../../../../browser/widget/chatContentParts/chatContentParts.js';
@@ -31,8 +31,11 @@ import { IHoverService } from '../../../../../../../platform/hover/browser/hover
 import { ILanguageModelsService } from '../../../../common/languageModels.js';
 import { ToolDataSource } from '../../../../common/tools/languageModelToolsService.js';
 import { URI } from '../../../../../../../base/common/uri.js';
+import { LineRange } from '../../../../../../../editor/common/core/ranges/lineRange.js';
+import { DetailedLineRangeMapping } from '../../../../../../../editor/common/diff/rangeMapping.js';
+import { IEditorWorkerService } from '../../../../../../../editor/common/services/editorWorker.js';
 import { ITextModelService } from '../../../../../../../editor/common/services/resolverService.js';
-import { IChatTextEditGroup } from '../../../../common/model/chatModel.js';
+import { IChatModel, IChatResponseModel, IChatTextEditGroup } from '../../../../common/model/chatModel.js';
 
 suite('ChatThinkingContentPart', () => {
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
@@ -77,12 +80,24 @@ suite('ChatThinkingContentPart', () => {
 		};
 	}
 
+	function createExactLineChange(originalStart: number, originalEndExclusive: number, modifiedStart: number, modifiedEndExclusive: number): DetailedLineRangeMapping {
+		return new DetailedLineRangeMapping(
+			new LineRange(originalStart, originalEndExclusive),
+			new LineRange(modifiedStart, modifiedEndExclusive),
+			undefined,
+		);
+	}
+
 	setup(() => {
 		disposables = store.add(new DisposableStore());
 		instantiationService = workbenchInstantiationService(undefined, store);
 
 		mockConfigurationService = new TestConfigurationService();
 		instantiationService.stub(IConfigurationService, mockConfigurationService);
+		instantiationService.stub(IEditorWorkerService, {
+			_serviceBrand: undefined,
+			computeDiff: async () => null,
+		} as unknown as IEditorWorkerService);
 
 		// Create a mock markdown renderer
 		mockMarkdownRenderer = {
@@ -144,6 +159,13 @@ suite('ChatThinkingContentPart', () => {
 		});
 
 		assert.strictEqual(maybePickFunWorkingMessage(mockConfigurationService, () => 0), undefined);
+	});
+
+	test('lastNonEmptyThinkingLine reads only the meaningful tail semantics', () => {
+		assert.strictEqual(lastNonEmptyThinkingLine(''), undefined);
+		assert.strictEqual(lastNonEmptyThinkingLine('\n\n  \n'), undefined);
+		assert.strictEqual(lastNonEmptyThinkingLine('first\n> **Newest detail**\n\n'), 'Newest detail');
+		assert.strictEqual(lastNonEmptyThinkingLine('first\r\n- second\r\n'), 'second');
 	});
 
 	suite('ThinkingDisplayMode.Collapsed', () => {
@@ -522,16 +544,30 @@ suite('ChatThinkingContentPart', () => {
 			appendTool(part, createRunningToolInvocation('write', 'Generating Write input…', 'call-write'));
 			const liveGroupHeader = part.domNode.querySelector('.chat-thinking-group-live > .chat-thinking-group-header');
 			const liveGroupLabel = liveGroupHeader?.querySelector('.chat-thinking-group-label')?.textContent ?? '';
-			assert.ok(/^Generating Write input… · \d+s$/.test(liveGroupLabel), 'Live tool status should keep ticking while Backboard generates its arguments');
+			const liveElapsed = liveGroupHeader?.querySelector('.chat-thinking-group-live-elapsed');
+			assert.strictEqual(liveGroupLabel, 'Generating Write input…');
+			assert.ok(/^ · \d+s$/.test(liveElapsed?.textContent ?? ''), 'Visible elapsed time should keep ticking separately from the announced status');
 			assert.deepStrictEqual({
 				role: liveGroupHeader?.getAttribute('role'),
 				live: liveGroupHeader?.getAttribute('aria-live'),
+				tabIndex: (liveGroupHeader as HTMLElement | null)?.tabIndex,
+				expanded: liveGroupHeader?.getAttribute('aria-expanded'),
+				elapsedHidden: liveElapsed?.getAttribute('aria-hidden'),
 				loading: !!liveGroupHeader?.querySelector('.codicon-loading.codicon-modifier-spin'),
 			}, {
 				role: 'status',
-				live: 'polite',
+				live: null,
+				tabIndex: -1,
+				expanded: null,
+				elapsedHidden: 'true',
 				loading: true,
 			});
+
+			const liveGroup = liveGroupHeader?.closest('.chat-thinking-work-group');
+			const collapsedBefore = liveGroup?.classList.contains('chat-thinking-work-overflow-collapsed');
+			(liveGroupHeader as HTMLElement | null)?.click();
+			liveGroupHeader?.dispatchEvent(new mainWindow.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+			assert.strictEqual(liveGroup?.classList.contains('chat-thinking-work-overflow-collapsed'), collapsedBefore, 'A passive live status must not retain hidden mouse/keyboard disclosure behavior');
 		});
 
 		test('completed pill shows elapsed time and step count meta', () => {
@@ -746,7 +782,7 @@ suite('ChatThinkingContentPart', () => {
 			};
 		}
 
-		function createNativeTerminalDisclosure(context: IChatContentPartRenderContext, command: string, output: string) {
+		function createNativeTerminalDisclosure(context: IChatContentPartRenderContext, command: string, output: string, hasError = false, isDenied = false) {
 			const nativeOutput = $('pre.chat-terminal-output-content.cursor-test-native-shell-output', {}, output);
 			const nativeShell = $('div.chat-terminal-output-container.cursor-test-native-shell', {}, nativeOutput);
 			const disclosure = disposables.add(instantiationService.createInstance(
@@ -758,8 +794,11 @@ suite('ChatThinkingContentPart', () => {
 				false,
 				true,
 				false,
+				isDenied,
 				false,
+				hasError,
 				undefined,
+				() => { },
 			));
 			return { disclosure, nativeShell, nativeOutput };
 		}
@@ -772,7 +811,7 @@ suite('ChatThinkingContentPart', () => {
 				text: liveLabel?.textContent,
 				live: liveLabel?.classList.contains('chat-thinking-cursor-reasoning-live'),
 			}, {
-				text: 'Thinking',
+				text: 'Thinking 1s',
 				live: true,
 			});
 
@@ -784,9 +823,32 @@ suite('ChatThinkingContentPart', () => {
 				text: liveLabel?.textContent,
 				live: liveLabel?.classList.contains('chat-thinking-cursor-reasoning-live'),
 			}, {
-				text: 'Thought briefly',
+				text: 'Thought 1s',
 				live: false,
 			});
+		});
+
+		test('measures each reasoning segment instead of repeating the turn duration', () => {
+			const originalNow = Date.now;
+			let now = 1_000;
+			Date.now = () => now;
+			try {
+				const part = createCursorPart('First reasoning segment');
+				now = 5_000;
+				const read = createCursorTool('read_file', 'Read chat.ts', 'call-reasoning-clock');
+				part.appendItem(() => ({ domNode: $('div.cursor-test-clock-read', {}, 'Read chat.ts') }), read.toolId, read);
+				now = 7_000;
+				part.setupThinkingContainer(createThinkingPart('Second reasoning segment', 'cursor-reasoning-clock-2'));
+				now = 9_000;
+				part.markAsInactive();
+
+				assert.deepStrictEqual(
+					Array.from(part.domNode.querySelectorAll<HTMLElement>('.chat-thinking-cursor-reasoning-label-text')).map(label => label.textContent),
+					['Thought 4s', 'Thought 2s'],
+				);
+			} finally {
+				Date.now = originalNow;
+			}
 		});
 
 		test('summarizes mixed exploration while preserving native row order', () => {
@@ -815,6 +877,100 @@ suite('ChatThinkingContentPart', () => {
 				collapsed: true,
 				expanded: 'false',
 				order: ['read-a', 'search', 'read-b'],
+			});
+		});
+
+		test('coalesces a 600-call read, search, and write burst without duplicating or rebuilding rows', async () => {
+			const part = createCursorPart('Inspecting and updating a large workspace');
+			const appendTool = (index: number, kind: 'read' | 'search' | 'write') => {
+				const toolCallId = `call-stress-${kind}-${index}`;
+				const tool = kind === 'read'
+					? createCursorTool('read_file', `Read file-${index}.ts`, toolCallId)
+					: kind === 'search'
+						? createCursorTool('search_code', `Searched for symbol-${index}`, toolCallId)
+						: createCursorTool('write_file', `Wrote file-${index}.ts`, toolCallId);
+				part.appendItem(
+					() => ({ domNode: $('div.cursor-test-stress-row', { 'data-tool-call-id': toolCallId }, tool.invocationMessage as string) }),
+					tool.toolId,
+					tool,
+				);
+			};
+
+			// The first call creates the group synchronously. Every additional call in
+			// this provider burst should reuse it and coalesce its summary refresh.
+			appendTool(0, 'read');
+			const group = part.domNode.querySelector<HTMLElement>('.chat-thinking-work-group');
+			const header = group?.querySelector<HTMLElement>(':scope > .chat-thinking-group-header');
+			const label = header?.querySelector<HTMLElement>(':scope > .chat-thinking-group-label');
+			const body = group?.querySelector<HTMLElement>(':scope > .chat-thinking-group-body');
+			assert.ok(group && header && label && body, 'The first tool should mount one reusable activity group');
+
+			let labelMutationCount = 0;
+			const observer = new mainWindow.MutationObserver(records => labelMutationCount += records.length);
+			observer.observe(label, { childList: true, characterData: true, subtree: true });
+			disposables.add(toDisposable(() => observer.disconnect()));
+
+			for (let index = 1; index < 200; index++) {
+				appendTool(index, 'read');
+			}
+			for (let index = 0; index < 200; index++) {
+				appendTool(index, 'search');
+				appendTool(index, 'write');
+			}
+
+			await new Promise<void>(resolve => mainWindow.requestAnimationFrame(() => resolve()));
+			await Promise.resolve(); // Let MutationObserver deliver the coalesced label change.
+
+			const rows = Array.from(body.querySelectorAll<HTMLElement>('.cursor-test-stress-row'));
+			const rowIds = rows.map(row => row.dataset.toolCallId);
+			assert.deepStrictEqual({
+				groupCount: part.domNode.querySelectorAll('.chat-thinking-work-group').length,
+				rowCount: rows.length,
+				uniqueRowCount: new Set(rowIds).size,
+				firstRow: rowIds[0],
+				lastRow: rowIds.at(-1),
+				label: label.textContent,
+			}, {
+				groupCount: 1,
+				rowCount: 600,
+				uniqueRowCount: 600,
+				firstRow: 'call-stress-read-0',
+				lastRow: 'call-stress-write-199',
+				label: 'Edited 200 files',
+			}, 'One synchronous tool burst should preserve every unique row in one group');
+			assert.ok(labelMutationCount <= 2, `Expected at most 2 label mutations for 599 appends, got ${labelMutationCount}`);
+
+			part.finalizeTitleIfDefault();
+			assert.strictEqual(part.domNode.querySelector('.chat-thinking-work-group'), group, 'Completion should retain the activity group');
+			assert.strictEqual(group.querySelector(':scope > .chat-thinking-group-header'), header, 'Completion should retain the group header');
+			assert.strictEqual(group.querySelector(':scope > .chat-thinking-group-body'), body, 'Completion should retain the 600 completed rows');
+			assert.strictEqual(body.querySelectorAll('.cursor-test-stress-row').length, 600);
+		});
+
+		test('a single live read is visible beneath its exploration summary', () => {
+			const part = createCursorPart('Checking one file');
+			const tool = createCursorTool('read_file', 'Read 10/120 lines', 'call-single-read');
+			part.appendItem(
+				() => ({ domNode: $('div.cursor-test-single-read', {}, 'Read 10/120 lines') }),
+				tool.toolId,
+				tool,
+			);
+
+			const group = part.domNode.querySelector<HTMLElement>('.chat-thinking-work-group');
+			const header = group?.querySelector<HTMLElement>(':scope > .chat-thinking-group-header');
+			assert.ok(group && header, 'Expected a summary even for one read');
+			assert.deepStrictEqual({
+				label: header.querySelector('.chat-thinking-group-label')?.textContent,
+				headerVisible: header.style.display !== 'none',
+				collapsed: group.classList.contains('chat-thinking-work-summary-collapsed'),
+				expanded: header.getAttribute('aria-expanded'),
+				rawReadMounted: group.querySelectorAll('.cursor-test-single-read').length,
+			}, {
+				label: 'Explored 1 file',
+				headerVisible: true,
+				collapsed: false,
+				expanded: 'true',
+				rawReadMounted: 1,
 			});
 		});
 
@@ -867,7 +1023,7 @@ suite('ChatThinkingContentPart', () => {
 			}, 'Second click should collapse the grouped tool-call body again');
 		});
 
-		test('shared passive work rows stay flat under the single group disclosure', () => {
+		test('shared passive work rows stay flat under the single group disclosure', async () => {
 			const part = createCursorPart('Using a skill while exploring the codebase');
 			const entries = [
 				{ entry: createCompletableCursorTool('use_skill', 'Used transcript skill', 'call-a', { skill: 'transcript' }), order: 'other' },
@@ -882,6 +1038,7 @@ suite('ChatThinkingContentPart', () => {
 				);
 				entry.complete();
 			}
+			await new Promise<void>(resolve => mainWindow.requestAnimationFrame(() => resolve()));
 
 			const groups = part.domNode.querySelectorAll<HTMLElement>('.chat-thinking-work-group');
 			const group = groups[0];
@@ -903,7 +1060,7 @@ suite('ChatThinkingContentPart', () => {
 			}, {
 				groupCount: 1,
 				groupRole: 'button',
-				groupExpanded: 'true',
+				groupExpanded: 'false',
 				groupDisclosures: 1,
 				label: 'Explored 1 file, 1 search',
 				order: ['other', 'read', 'search'],
@@ -920,10 +1077,10 @@ suite('ChatThinkingContentPart', () => {
 				expanded: header.getAttribute('aria-expanded'),
 				order: Array.from(group.querySelectorAll<HTMLElement>('.cursor-test-native-row')).map(row => row.dataset.order),
 			}, {
-				collapsed: true,
-				expanded: 'false',
+				collapsed: false,
+				expanded: 'true',
 				order: ['other', 'read', 'search'],
-			}, 'The group header should collapse every flat row without removing them');
+			}, 'The group header should reveal every flat row without removing them');
 
 			header.click();
 			assert.deepStrictEqual({
@@ -931,10 +1088,10 @@ suite('ChatThinkingContentPart', () => {
 				expanded: header.getAttribute('aria-expanded'),
 				rows: group.querySelectorAll('.chat-thinking-tool-wrapper').length,
 			}, {
-				collapsed: false,
-				expanded: 'true',
+				collapsed: true,
+				expanded: 'false',
 				rows: 3,
-			}, 'The same group header should restore all flat rows');
+			}, 'The same group header should hide all flat rows again');
 		});
 
 		test('task progress disclosure explains TodoWrite and reveals its real checklist', () => {
@@ -1019,43 +1176,141 @@ suite('ChatThinkingContentPart', () => {
 			}, 'Missing provider details should produce a flat explanatory row, never an empty rail');
 		});
 
-		test('live edit uses an inert empty diff shell until the invocation completes', () => {
+		test('live TodoWrite has one aggregate working marker for the whole row', () => {
+			const part = createCursorPart('Updating task progress');
+			const progress = createCompletableCursorTool('todo_write', 'TodoWrite', 'call-live-plan');
+			part.appendItem(() => ({ domNode: $('div.cursor-test-live-plan-native', {}, 'TodoWrite') }), progress.tool.toolId, progress.tool);
+
+			const row = part.domNode.querySelector<HTMLElement>('.chat-thinking-cursor-plan-row');
+			assert.ok(row, 'Expected a single aggregate TodoWrite row');
+			assert.strictEqual(row.querySelectorAll(':scope > .chat-thinking-work-row-summary > .chat-thinking-work-row-status-working').length, 1);
+			assert.strictEqual(row.querySelectorAll('.chat-thinking-plan-item .chat-thinking-work-row-status-working').length, 0);
+
+			progress.complete();
+			assert.strictEqual(row.querySelectorAll('.chat-thinking-work-row-status-working').length, 0, 'Completing TodoWrite must stop its aggregate animation');
+		});
+
+		test('live edit delegates its visible loading state to one aggregate empty diff shell', async () => {
 			const part = createCursorPart('Preparing a file edit');
 			const edit = createCompletableCursorTool('edit_file', 'Edit', 'call-pending-edit', { filePath: '/project/src/render.js' });
 			const nativeEdit = $('div.cursor-test-pending-edit-native', {}, 'Edit');
 
 			part.appendItem(() => ({ domNode: nativeEdit }), edit.tool.toolId, edit.tool);
 
+			const group = part.domNode.querySelector<HTMLElement>('.chat-thinking-work-group');
+			const header = group?.querySelector<HTMLElement>(':scope > .chat-thinking-group-header');
 			const row = part.domNode.querySelector<HTMLElement>('.chat-thinking-cursor-edit-row');
-			assert.ok(row, 'Expected the live edit invocation to keep its transcript position');
+			assert.ok(group && header && row, 'Expected one aggregate edit group with its invocation still mounted');
 			assert.deepStrictEqual({
+				liveGroup: group.classList.contains('chat-thinking-work-edit-live'),
+				label: header.querySelector('.chat-thinking-group-label')?.textContent,
+				count: group.dataset.editCount,
+				role: header.getAttribute('role'),
+				ariaLabel: header.getAttribute('aria-label'),
+				ariaExpanded: header.getAttribute('aria-expanded'),
 				pending: row.classList.contains('chat-thinking-cursor-edit-pending'),
 				expandable: row.classList.contains('chat-thinking-work-row-expandable'),
-				role: row.getAttribute('role'),
+				rowRole: row.getAttribute('role'),
 				expanded: row.getAttribute('aria-expanded'),
 				details: row.querySelector('.chat-thinking-work-row-details'),
 				nativeIdentity: row.querySelector('.cursor-test-pending-edit-native') === nativeEdit,
 				statusWorking: row.querySelector('.chat-thinking-work-row-status')?.classList.contains('chat-thinking-work-row-status-working'),
 			}, {
+				liveGroup: true,
+				label: 'Spawned 1 edit',
+				count: '1',
+				role: 'status',
+				ariaLabel: 'Spawned 1 edit',
+				ariaExpanded: null,
 				pending: true,
 				expandable: false,
-				role: null,
+				rowRole: null,
 				expanded: null,
 				details: null,
 				nativeIdentity: true,
 				statusWorking: true,
-			}, 'The waiting diff must not expose the old synthetic Edit disclosure');
+			}, 'The aggregate label and empty diff should own the only visible loading treatment');
 
 			edit.complete();
+			await new Promise<void>(resolve => mainWindow.requestAnimationFrame(() => resolve()));
 			assert.deepStrictEqual({
+				liveGroup: group.classList.contains('chat-thinking-work-edit-live'),
+				label: header.querySelector('.chat-thinking-group-label')?.textContent,
+				count: header.dataset.editCount,
+				role: header.getAttribute('role'),
 				pending: row.classList.contains('chat-thinking-cursor-edit-pending'),
 				nativeIdentity: row.querySelector('.cursor-test-pending-edit-native') === nativeEdit,
 				statusComplete: row.querySelector('.chat-thinking-work-row-status')?.classList.contains('chat-thinking-work-row-status-complete'),
 			}, {
+				liveGroup: false,
+				label: 'Edited 1 file',
+				count: undefined,
+				role: 'button',
 				pending: false,
 				nativeIdentity: true,
 				statusComplete: true,
 			}, 'Completion should remove only the waiting skin while preserving the live tool subtree');
+		});
+
+		test('multiple live edits render one aggregate empty diff with a stable spawned count', async () => {
+			const part = createCursorPart('Applying a batch of edits');
+			const edits = [
+				createCompletableCursorTool('edit_file', 'Edit first', 'call-pending-edit-a', { filePath: '/project/src/a.js' }),
+				createCompletableCursorTool('edit_file', 'Edit second', 'call-pending-edit-b', { filePath: '/project/src/b.js' }),
+				createCompletableCursorTool('edit_file', 'Edit third', 'call-pending-edit-c', { filePath: '/project/src/c.js' }),
+			];
+			for (const [index, edit] of edits.entries()) {
+				part.appendItem(
+					() => ({ domNode: $('div.cursor-test-batch-edit-native', { 'data-index': String(index) }, 'Edit') }),
+					edit.tool.toolId,
+					edit.tool
+				);
+			}
+			await new Promise<void>(resolve => mainWindow.requestAnimationFrame(() => resolve()));
+
+			const groups = part.domNode.querySelectorAll<HTMLElement>('.chat-thinking-work-group');
+			const group = groups[0];
+			const header = group?.querySelector<HTMLElement>(':scope > .chat-thinking-group-header');
+			assert.ok(group && header, 'Expected one aggregate edit group');
+			assert.deepStrictEqual({
+				groups: groups.length,
+				liveCards: part.domNode.querySelectorAll('.chat-thinking-work-edit-live > .chat-thinking-group-header').length,
+				label: header.querySelector('.chat-thinking-group-label')?.textContent,
+				count: group.dataset.editCount,
+				ariaLabel: header.getAttribute('aria-label'),
+				role: header.getAttribute('role'),
+				pendingRowsMounted: group.querySelectorAll('.chat-thinking-cursor-edit-pending').length,
+			}, {
+				groups: 1,
+				liveCards: 1,
+				label: 'Spawned 3 edits',
+				count: '3',
+				ariaLabel: 'Spawned 3 edits',
+				role: 'status',
+				pendingRowsMounted: 3,
+			});
+			header.click();
+			assert.strictEqual(group.classList.contains('chat-thinking-work-summary-collapsed'), true, 'The live status card must not expose the mounted batch rows');
+
+			edits[0].complete();
+			await new Promise<void>(resolve => mainWindow.requestAnimationFrame(() => resolve()));
+			assert.strictEqual(group.dataset.editCount, '3', 'The batch count must not decrement as individual edits settle');
+			assert.strictEqual(group.classList.contains('chat-thinking-work-edit-live'), true);
+
+			edits[1].complete();
+			edits[2].complete();
+			await new Promise<void>(resolve => mainWindow.requestAnimationFrame(() => resolve()));
+			assert.deepStrictEqual({
+				live: group.classList.contains('chat-thinking-work-edit-live'),
+				label: header.querySelector('.chat-thinking-group-label')?.textContent,
+				count: header.dataset.editCount,
+				role: header.getAttribute('role'),
+			}, {
+				live: false,
+				label: 'Edited 3 files',
+				count: undefined,
+				role: 'button',
+			});
 		});
 
 		test('live activity group stays user-collapsed as another tool appends and completes', () => {
@@ -1088,7 +1343,7 @@ suite('ChatThinkingContentPart', () => {
 			}, {
 				collapsed: true,
 				expanded: 'false',
-			}, 'The user should be able to collapse the live group');
+			}, 'The user should be able to collapse the automatically expanded live group');
 
 			const appended = createCompletableCursorTool('use_skill', 'Used transcript skill', 'call-collapse-other');
 			appendTool(appended, 'other');
@@ -1118,26 +1373,184 @@ suite('ChatThinkingContentPart', () => {
 			const reasoningBody = part.domNode.querySelector<HTMLElement>('.chat-thinking-item.markdown-content');
 			assert.ok(disclosure && reasoningBody, 'Expected a completed Thought disclosure and reasoning body');
 
-			assert.strictEqual(reasoningBody.hidden, false, 'Completed reasoning should begin visible before its first disclosure click');
+			assert.deepStrictEqual({
+				expanded: disclosure.getAttribute('aria-expanded'),
+				preview: reasoningBody.classList.contains('chat-thinking-cursor-reasoning-preview'),
+				bodyHidden: reasoningBody.hidden,
+			}, {
+				expanded: 'false',
+				preview: false,
+				bodyHidden: true,
+			}, 'Completed reasoning should begin closed without rendering a body');
 			disclosure.click();
 			assert.deepStrictEqual({
 				role: disclosure.getAttribute('role'),
 				expanded: disclosure.getAttribute('aria-expanded'),
+				preview: reasoningBody.classList.contains('chat-thinking-cursor-reasoning-preview'),
 				bodyHidden: reasoningBody.hidden,
 			}, {
 				role: 'button',
-				expanded: 'false',
-				bodyHidden: true,
-			}, 'Clicking Thought should toggle the reasoning body and accessible disclosure state');
+				expanded: 'true',
+				preview: true,
+				bodyHidden: false,
+			}, 'Clicking Thought should open the bounded reasoning preview');
 
 			disclosure.click();
 			assert.deepStrictEqual({
 				expanded: disclosure.getAttribute('aria-expanded'),
+				preview: reasoningBody.classList.contains('chat-thinking-cursor-reasoning-preview'),
 				bodyHidden: reasoningBody.hidden,
 			}, {
+				expanded: 'false',
+				preview: false,
+				bodyHidden: true,
+			}, 'A second click should remove the reasoning body from layout');
+		});
+
+		test('live Thought opens in a bounded viewport and still supports manual collapse', async () => {
+			const part = createCursorPart('First reasoning line');
+			const disclosure = part.domNode.querySelector<HTMLElement>('.chat-thinking-cursor-reasoning-label');
+			const reasoningBody = part.domNode.querySelector<HTMLElement>('.chat-thinking-item.markdown-content');
+			assert.ok(disclosure && reasoningBody, 'Expected a live Thought disclosure and reasoning viewport');
+
+			let assignedScrollTop = 0;
+			Object.defineProperties(reasoningBody, {
+				clientHeight: { configurable: true, get: () => 48 },
+				scrollHeight: { configurable: true, get: () => 120 },
+				scrollTop: {
+					configurable: true,
+					get: () => assignedScrollTop,
+					set: (value: number) => assignedScrollTop = value,
+				},
+			});
+
+			assert.strictEqual(reasoningBody.hidden, false, 'A live Thought should expose its bounded viewport without an extra click');
+			part.updateThinking(createThinkingPart('First reasoning line\nSecond reasoning line\nThird reasoning line\nNewest reasoning line'));
+			await new Promise<void>(resolve => mainWindow.requestAnimationFrame(() => resolve()));
+			assert.deepStrictEqual({
+				expanded: disclosure.getAttribute('aria-expanded'),
+				preview: reasoningBody.classList.contains('chat-thinking-cursor-reasoning-preview'),
+				hidden: reasoningBody.hidden,
+				overflowing: reasoningBody.classList.contains('chat-thinking-cursor-reasoning-overflowing'),
+				scrollTop: assignedScrollTop,
+			}, {
 				expanded: 'true',
-				bodyHidden: false,
-			}, 'A second click should restore the reasoning disclosure state');
+				preview: true,
+				hidden: false,
+				overflowing: true,
+				scrollTop: 120,
+			}, 'Open streaming reasoning should stay bounded, masked, and follow the newest content');
+
+			let outerWheelEvents = 0;
+			disposables.add(addDisposableListener(part.domNode, 'wheel', () => outerWheelEvents++));
+			assignedScrollTop = 20;
+			reasoningBody.dispatchEvent(new mainWindow.WheelEvent('wheel', { deltaY: 20, bubbles: true, cancelable: true }));
+			assert.deepStrictEqual({ scrollTop: assignedScrollTop, outerWheelEvents }, { scrollTop: 40, outerWheelEvents: 0 },
+				'Thought should consume wheel input while it can scroll in that direction');
+			assignedScrollTop = 72;
+			reasoningBody.dispatchEvent(new mainWindow.WheelEvent('wheel', { deltaY: 20, bubbles: true, cancelable: true }));
+			assert.deepStrictEqual({ scrollTop: assignedScrollTop, outerWheelEvents }, { scrollTop: 72, outerWheelEvents: 1 },
+				'Thought should hand wheel input to the chat after reaching its edge');
+
+			assignedScrollTop = 20;
+			reasoningBody.dispatchEvent(new mainWindow.Event('scroll'));
+			part.updateThinking(createThinkingPart('First reasoning line\nSecond reasoning line\nThird reasoning line\nFourth reasoning line\nFifth reasoning line\nNew content while reviewing'));
+			await new Promise<void>(resolve => mainWindow.requestAnimationFrame(() => resolve()));
+			assert.strictEqual(assignedScrollTop, 20, 'Streaming should not fight a user who scrolls up inside the open Thought preview');
+
+			assignedScrollTop = 72;
+			reasoningBody.dispatchEvent(new mainWindow.Event('scroll'));
+			part.updateThinking(createThinkingPart('First reasoning line\nSecond reasoning line\nThird reasoning line\nFourth reasoning line\nFifth reasoning line\nNewest reasoning line'));
+			await new Promise<void>(resolve => mainWindow.requestAnimationFrame(() => resolve()));
+			assert.strictEqual(assignedScrollTop, 120, 'Returning to the bottom should resume live tail-following');
+
+			disclosure.click();
+			assert.deepStrictEqual({
+				expanded: disclosure.getAttribute('aria-expanded'),
+				preview: reasoningBody.classList.contains('chat-thinking-cursor-reasoning-preview'),
+				hidden: reasoningBody.hidden,
+				overflowing: reasoningBody.classList.contains('chat-thinking-cursor-reasoning-overflowing'),
+				scrollTop: assignedScrollTop,
+			}, {
+				expanded: 'false',
+				preview: false,
+				hidden: true,
+				overflowing: false,
+				scrollTop: 0,
+			}, 'Closing Thought should remove the preview from layout and clear its viewport state');
+
+			disclosure.click();
+			await new Promise<void>(resolve => mainWindow.requestAnimationFrame(() => resolve()));
+			assert.deepStrictEqual({
+				expanded: disclosure.getAttribute('aria-expanded'),
+				preview: reasoningBody.classList.contains('chat-thinking-cursor-reasoning-preview'),
+				hidden: reasoningBody.hidden,
+				overflowing: reasoningBody.classList.contains('chat-thinking-cursor-reasoning-overflowing'),
+				scrollTop: assignedScrollTop,
+			}, {
+				expanded: 'true',
+				preview: true,
+				hidden: false,
+				overflowing: true,
+				scrollTop: 120,
+			}, 'Reopening the same Thought should restore the bounded live preview');
+		});
+
+		test('restored Thought measures its preview only after both disclosures open', async () => {
+			const context = createMockRenderContext(true);
+			context.container.classList.add('backboard-clean-chat', 'backboard-cursor-transcript');
+			const part = disposables.add(instantiationService.createInstance(
+				ChatThinkingContentPart,
+				createThinkingPart('First reasoning line\nSecond reasoning line\nThird reasoning line\nNewest reasoning line', 'restored-overflow-thinking'),
+				context,
+				mockMarkdownRenderer,
+				true
+			));
+			mainWindow.document.body.appendChild(part.domNode);
+			disposables.add(toDisposable(() => part.domNode.remove()));
+
+			const outerDisclosure = part.domNode.querySelector<HTMLElement>('.chat-used-context-label .monaco-button');
+			const thoughtDisclosure = part.domNode.querySelector<HTMLElement>('.chat-thinking-cursor-reasoning-label');
+			const reasoningBody = part.domNode.querySelector<HTMLElement>('.chat-thinking-item.markdown-content');
+			assert.ok(outerDisclosure && thoughtDisclosure && reasoningBody, 'Expected the outer Worked disclosure and restored Thought viewport');
+
+			let assignedScrollTop = 0;
+			Object.defineProperties(reasoningBody, {
+				clientHeight: { configurable: true, get: () => 48 },
+				scrollHeight: { configurable: true, get: () => 120 },
+				scrollTop: {
+					configurable: true,
+					get: () => assignedScrollTop,
+					set: (value: number) => assignedScrollTop = value,
+				},
+			});
+
+			outerDisclosure.click();
+			await new Promise<void>(resolve => mainWindow.requestAnimationFrame(() => resolve()));
+			assert.deepStrictEqual({
+				outerCollapsed: part.domNode.classList.contains('chat-used-context-collapsed'),
+				thoughtHidden: reasoningBody.hidden,
+				overflowing: reasoningBody.classList.contains('chat-thinking-cursor-reasoning-overflowing'),
+			}, {
+				outerCollapsed: false,
+				thoughtHidden: true,
+				overflowing: false,
+			}, 'Opening the outer work fold should leave the inner Thought body closed');
+
+			thoughtDisclosure.click();
+			await new Promise<void>(resolve => mainWindow.requestAnimationFrame(() => resolve()));
+
+			assert.deepStrictEqual({
+				outerCollapsed: part.domNode.classList.contains('chat-used-context-collapsed'),
+				thoughtHidden: reasoningBody.hidden,
+				overflowing: reasoningBody.classList.contains('chat-thinking-cursor-reasoning-overflowing'),
+				scrollTop: assignedScrollTop,
+			}, {
+				outerCollapsed: false,
+				thoughtHidden: false,
+				overflowing: true,
+				scrollTop: 0,
+			}, 'Opening restored completed reasoning should measure a bounded preview from the beginning');
 		});
 
 		test('restored multi-section Thought mounts an independent disclosure for every reasoning block', () => {
@@ -1170,29 +1583,33 @@ suite('ChatThinkingContentPart', () => {
 			}, {
 				disclosures: 3,
 				blocks: 3,
-				text: ['First restored reasoning', 'Second restored reasoning', 'Third restored reasoning'],
+				text: ['', '', ''],
 				adjacent: [true, true, true],
-				expanded: ['true', 'true', 'true'],
-				hidden: [false, false, false],
-			}, 'Every restored reasoning section should be mounted beside its own disclosure');
+				expanded: ['false', 'false', 'false'],
+				hidden: [true, true, true],
+			}, 'Closed restored reasoning should preserve chronology without mounting markdown DOM');
 
 			disclosures[1].click();
 			assert.deepStrictEqual({
 				expanded: disclosures.map(disclosure => disclosure.getAttribute('aria-expanded')),
 				hidden: reasoningBlocks.map(block => block.hidden),
+				text: reasoningBlocks.map(block => block.textContent),
 			}, {
-				expanded: ['true', 'false', 'true'],
-				hidden: [false, true, false],
-			}, 'A restored Thought disclosure should hide only its adjacent reasoning block');
+				expanded: ['false', 'true', 'false'],
+				hidden: [true, false, true],
+				text: ['', 'Second restored reasoning', ''],
+			}, 'A restored Thought disclosure should expand only its adjacent reasoning preview');
 
 			disclosures[1].click();
 			assert.deepStrictEqual({
 				expanded: disclosures.map(disclosure => disclosure.getAttribute('aria-expanded')),
 				hidden: reasoningBlocks.map(block => block.hidden),
+				text: reasoningBlocks.map(block => block.textContent),
 			}, {
-				expanded: ['true', 'true', 'true'],
-				hidden: [false, false, false],
-			}, 'Expanding a restored Thought should restore only its adjacent block');
+				expanded: ['false', 'false', 'false'],
+				hidden: [true, true, true],
+				text: ['', '', ''],
+			}, 'Collapsing a restored Thought should hide only its adjacent reasoning body');
 		});
 
 		test('uninterrupted mixed-category tool calls remain in one activity group', () => {
@@ -1396,20 +1813,26 @@ suite('ChatThinkingContentPart', () => {
 					expanded: labels.map(label => label.getAttribute('aria-expanded')),
 					hidden: reasoningBlocks.map(block => block.hidden),
 					adjacent: labels.map((label, labelIndex) => label.nextElementSibling === reasoningBlocks[labelIndex]),
+					text: reasoningBlocks.map(block => block.textContent),
 				}, {
 					expanded: labels.map((_, labelIndex) => String(labelIndex !== index)),
-					hidden: reasoningBlocks.map((_, blockIndex) => blockIndex === index),
+					hidden: labels.map((_, labelIndex) => labelIndex === index),
 					adjacent: [true, true, true],
-				}, `Thought disclosure ${index + 1} should collapse only its own immediately-following block`);
+					text: labels.map((_, labelIndex) => labelIndex === index
+						? ''
+						: ['Reasoning before the diff', 'Reasoning between the diff and tool', 'Reasoning after the tool'][labelIndex]),
+				}, `Thought disclosure ${index + 1} should close only its own immediately-following live preview`);
 
 				labels[index].click();
 				assert.deepStrictEqual({
 					expanded: labels.map(label => label.getAttribute('aria-expanded')),
 					hidden: reasoningBlocks.map(block => block.hidden),
+					text: reasoningBlocks.map(block => block.textContent),
 				}, {
 					expanded: ['true', 'true', 'true'],
 					hidden: [false, false, false],
-				}, `Thought disclosure ${index + 1} should restore only its own block`);
+					text: ['Reasoning before the diff', 'Reasoning between the diff and tool', 'Reasoning after the tool'],
+				}, `Thought disclosure ${index + 1} should reopen its own live preview`);
 			}
 		});
 
@@ -1471,6 +1894,17 @@ suite('ChatThinkingContentPart', () => {
 				text: 'Reasoning that streamed before the diff',
 				reasoningBeforeDiff: true,
 			});
+
+			label.click();
+			assert.deepStrictEqual({
+				anchorVisible: !orderingAnchor.hidden,
+				text: orderingAnchor.textContent,
+				reasoningBeforeDiff: !!(orderingAnchor.compareDocumentPosition(editRow) & Node.DOCUMENT_POSITION_FOLLOWING),
+			}, {
+				anchorVisible: false,
+				text: '',
+				reasoningBeforeDiff: true,
+			}, 'Closing the live Thought should clear its rendered body while preserving its chronological anchor');
 		});
 
 		test('Cursor terminal preview keeps four output rows and marks overflow', () => {
@@ -1482,6 +1916,66 @@ suite('ChatThinkingContentPart', () => {
 				getCollapsedTerminalOutputPreview('one\ntwo'),
 				{ text: 'one\ntwo', overflowing: false },
 			);
+		});
+
+		test('Cursor terminal preview removes a command echo already shown in its header', () => {
+			const command = 'cd expo-app && npx tsc --noEmit 2>&1 | head -5';
+			assert.deepStrictEqual(
+				getCollapsedTerminalOutputPreview(`Success\n$ ${command}\ntypecheck passed\n`, command),
+				{ text: 'typecheck passed', overflowing: false },
+			);
+			assert.deepStrictEqual(
+				getCollapsedTerminalOutputPreview('Success\n$ cd expo-app && npx tsc --noEmit 2>&1 |\nhead -5\n', command),
+				{ text: 'Success\n$ cd expo-app && npx tsc --noEmit 2>&1 |\nhead -5', overflowing: false },
+			);
+			assert.deepStrictEqual(getCollapsedTerminalOutputPreview('Success', command), { text: 'Success', overflowing: false });
+			assert.deepStrictEqual(
+				getCollapsedTerminalOutputPreview('before\n$ echo foo bar\nafter', 'echo foo bar'),
+				{ text: 'before\n$ echo foo bar\nafter', overflowing: false },
+				'Prompt-looking text later in stdout is real output',
+			);
+			assert.deepStrictEqual(
+				getCollapsedTerminalOutputPreview("$ printf 'a b'\noutput", "printf 'a  b'"),
+				{ text: "$ printf 'a b'\noutput", overflowing: false },
+				'Whitespace inside a quoted argument is semantically meaningful',
+			);
+		});
+
+		test('Cursor terminal disclosure announces failed commands in the stable shell', () => {
+			const context = createMockRenderContext(false);
+			context.container.classList.add('backboard-clean-chat', 'backboard-cursor-transcript');
+			const { disclosure } = createNativeTerminalDisclosure(context, 'npm test', 'failed output', true);
+			context.container.appendChild(disclosure.domNode);
+
+			const button = disclosure.domNode.querySelector<HTMLElement>('.chat-used-context-label .monaco-button');
+			assert.ok(button?.textContent?.includes('Failed npm test'));
+			assert.strictEqual(button?.ariaLabel, 'Failed npm test');
+			assert.ok(button?.querySelector('.codicon-error'));
+		});
+
+		test('Cursor terminal disclosure updates a late-resolved failure', () => {
+			const context = createMockRenderContext(false);
+			context.container.classList.add('backboard-clean-chat', 'backboard-cursor-transcript');
+			const { disclosure } = createNativeTerminalDisclosure(context, 'npm test', 'failed output');
+			context.container.appendChild(disclosure.domNode);
+
+			disclosure.markComplete(true);
+			const button = disclosure.domNode.querySelector<HTMLElement>('.chat-used-context-label .monaco-button');
+			assert.ok(button?.textContent?.includes('Failed npm test'));
+			assert.strictEqual(button?.ariaLabel, 'Failed npm test');
+			assert.ok(button?.querySelector('.codicon-error'));
+		});
+
+		test('Cursor terminal disclosure distinguishes an explicitly denied command', () => {
+			const context = createMockRenderContext(false);
+			context.container.classList.add('backboard-clean-chat', 'backboard-cursor-transcript');
+			const { disclosure } = createNativeTerminalDisclosure(context, 'rm generated.txt', '', false, true);
+			context.container.appendChild(disclosure.domNode);
+
+			const button = disclosure.domNode.querySelector<HTMLElement>('.chat-used-context-label .monaco-button');
+			assert.ok(button?.textContent?.includes('Denied rm generated.txt'));
+			assert.strictEqual(button?.ariaLabel, 'Denied rm generated.txt');
+			assert.ok(button?.querySelector('.codicon-error'));
 		});
 
 		test('Cursor Execute disclosure toggles without replacing the native shell command or output subtree', () => {
@@ -1845,7 +2339,64 @@ suite('ChatThinkingContentPart', () => {
 			});
 		});
 
-		test('Cursor textEditGroup replaces the full compare editor with the same compact diff card', async () => {
+				test('finalized text edit history is indexed once per response and observes live applied state', () => {
+					const targetChange = disposables.add(new Emitter<void>());
+					const createGroup = (index: number): IChatTextEditGroup => ({
+						kind: 'textEditGroup',
+						uri: URI.file(`/project/src/indexed-${index}.ts`),
+						edits: [[]],
+						done: true,
+						state: { sha1: `sha-${index}`, applied: 0 },
+					});
+					const groups = Array.from({ length: 25 }, (_, index) => createGroup(index));
+					const priorGroup = createGroup(100);
+					const laterGroup = createGroup(200);
+					const priorResponse = {
+						response: { value: [priorGroup] },
+						onDidChange: Event.None,
+					} as unknown as IChatResponseModel;
+					const targetResponse = {
+						response: { value: groups },
+						onDidChange: targetChange.event,
+					} as unknown as IChatResponseModel;
+					const laterResponse = {
+						response: { value: [laterGroup] },
+						onDidChange: Event.None,
+					} as unknown as IChatResponseModel;
+					let historyTraversalCount = 0;
+					const chatModel = {
+						getRequests: () => {
+							historyTraversalCount++;
+							return [
+								{ response: priorResponse },
+								{ response: targetResponse },
+								{ response: laterResponse },
+							];
+						},
+					} as unknown as IChatModel;
+					const index = new TextEditGroupHistoryIndex();
+
+					for (const group of groups) {
+						assert.deepStrictEqual(index.getUnappliedGroups(chatModel, targetResponse, group.uri, true), [group]);
+					}
+					assert.strictEqual(historyTraversalCount, 1, 'all finalized file cards should share one history traversal');
+					assert.deepStrictEqual(index.getUnappliedGroups(chatModel, targetResponse, laterGroup.uri, true), [], 'groups after the target response must stay excluded');
+
+					groups[0].state!.applied = 1;
+					assert.deepStrictEqual(index.getUnappliedGroups(chatModel, targetResponse, groups[0].uri, true), [], 'cached live groups must observe applied-state mutation');
+					assert.strictEqual(historyTraversalCount, 1);
+
+					targetChange.fire();
+					assert.deepStrictEqual(index.getUnappliedGroups(chatModel, targetResponse, groups[1].uri, true), [groups[1]]);
+					assert.strictEqual(historyTraversalCount, 2, 'a target response change must invalidate cached membership');
+
+					index.getUnappliedGroups(chatModel, targetResponse, groups[2].uri, false);
+					index.getUnappliedGroups(chatModel, targetResponse, groups[3].uri, false);
+					assert.strictEqual(historyTraversalCount, 4, 'incomplete responses must never reuse a mutable history index');
+					targetChange.fire();
+				});
+
+				test('Cursor textEditGroup replaces the full compare editor with the same compact diff card', async () => {
 			const fileUri = URI.file('/project/src/entities.js');
 			const beforeUri = URI.parse('chat-text-edit://before/entities.js');
 			const afterUri = URI.parse('chat-text-edit://after/entities.js');
@@ -1855,6 +2406,9 @@ suite('ChatThinkingContentPart', () => {
 				[beforeUri.toString(), beforeContent],
 				[afterUri.toString(), afterContent],
 			]);
+			let modelRefDisposeCount = 0;
+			let workerDiffCount = 0;
+			let previewModelResolveCount = 0;
 			instantiationService.stub(ICodeCompareModelService, {
 				_serviceBrand: undefined,
 				createModel: async () => ({
@@ -1863,15 +2417,30 @@ suite('ChatThinkingContentPart', () => {
 						original: { textEditorModel: { uri: beforeUri, getValue: () => beforeContent } },
 						modified: { textEditorModel: { uri: afterUri, getValue: () => afterContent } },
 					},
-					dispose: () => { },
+					dispose: () => modelRefDisposeCount++,
 				}),
 			} as unknown as ICodeCompareModelService);
+			instantiationService.stub(IEditorWorkerService, {
+				_serviceBrand: undefined,
+				computeDiff: async () => {
+					workerDiffCount++;
+					return {
+						changes: [createExactLineChange(2, 4, 2, 4)],
+						identical: false,
+						quitEarly: false,
+						moves: [],
+					};
+				},
+			} as unknown as IEditorWorkerService);
 			instantiationService.stub(ITextModelService, {
 				_serviceBrand: undefined,
-				createModelReference: async (resource: URI) => ({
-					object: { textEditorModel: { getValue: () => contentByUri.get(resource.toString()) ?? '' } },
-					dispose: () => { },
-				}),
+				createModelReference: async (resource: URI) => {
+					previewModelResolveCount++;
+					return {
+						object: { textEditorModel: { uri: resource, getValue: () => contentByUri.get(resource.toString()) ?? '' } },
+						dispose: () => { },
+					};
+				},
 			} as unknown as ITextModelService);
 
 			const context = createMockRenderContext(true);
@@ -1894,6 +2463,8 @@ suite('ChatThinkingContentPart', () => {
 			let reportedStats: IEditSessionDiffStats | undefined;
 			disposables.add(part.onDidChangeDiff(stats => reportedStats = stats));
 			context.container.appendChild(part.domNode);
+			mainWindow.document.body.appendChild(context.container);
+			disposables.add(toDisposable(() => context.container.remove()));
 			for (let attempt = 0; attempt < 100 && !part.domNode.classList.contains('chat-external-edit-preview'); attempt++) {
 				await new Promise<void>(resolve => mainWindow.setTimeout(resolve, 5));
 			}
@@ -1911,6 +2482,8 @@ suite('ChatThinkingContentPart', () => {
 				removed: part.domNode.querySelector('.label-removed')?.textContent,
 				rows: body?.querySelectorAll('.chat-external-edit-diff-content > .chat-external-edit-diff-row').length,
 				overflowFade: body?.classList.contains('chat-external-edit-diff-overflow'),
+				workerDiffCount,
+				previewModelResolveCount,
 				reportedStats,
 			}, {
 				compactCard: true,
@@ -1921,7 +2494,419 @@ suite('ChatThinkingContentPart', () => {
 				removed: '-2',
 				rows: 6,
 				overflowFade: true,
+				workerDiffCount: 1,
+				previewModelResolveCount: 0,
 				reportedStats: { added: 2, removed: 2 },
+			});
+
+				part.dispose();
+					assert.strictEqual(modelRefDisposeCount, 1, 'Disposing the compact card should release compare models immediately');
+				});
+
+				test('Cursor textEditGroup uses one viewport gate and mounts its seeded preview immediately after intersection', async () => {
+					interface IFakeObserverRecord {
+						readonly callback: IntersectionObserverCallback;
+						readonly observer: IntersectionObserver;
+						target: Element | undefined;
+						disconnected: boolean;
+					}
+					const observerRecords: IFakeObserverRecord[] = [];
+					class FakeIntersectionObserver {
+						readonly root = null;
+						readonly rootMargin = '600px 0px';
+						readonly thresholds = [0];
+						private readonly record: IFakeObserverRecord;
+
+						constructor(callback: IntersectionObserverCallback) {
+							this.record = {
+								callback,
+								observer: this as unknown as IntersectionObserver,
+								target: undefined,
+								disconnected: false,
+							};
+							observerRecords.push(this.record);
+						}
+
+						disconnect(): void { this.record.disconnected = true; }
+						observe(target: Element): void { this.record.target = target; }
+						takeRecords(): IntersectionObserverEntry[] { return []; }
+						unobserve(_target: Element): void { }
+					}
+
+					const intersectionObserverDescriptor = Object.getOwnPropertyDescriptor(mainWindow, 'IntersectionObserver');
+					Object.defineProperty(mainWindow, 'IntersectionObserver', {
+						configurable: true,
+						writable: true,
+						value: FakeIntersectionObserver,
+					});
+					disposables.add(toDisposable(() => {
+						if (intersectionObserverDescriptor) {
+							Object.defineProperty(mainWindow, 'IntersectionObserver', intersectionObserverDescriptor);
+						} else {
+							delete (mainWindow as unknown as { IntersectionObserver?: typeof IntersectionObserver }).IntersectionObserver;
+						}
+					}));
+
+					const beforeUri = URI.parse('chat-text-edit://before/viewport.ts');
+					const afterUri = URI.parse('chat-text-edit://after/viewport.ts');
+					const beforeContent = 'const value = 1;';
+					const afterContent = 'const value = 2;';
+					instantiationService.stub(ICodeCompareModelService, {
+						_serviceBrand: undefined,
+						createModel: async () => ({
+							object: {
+								originalSha1: 'before-sha',
+								original: { textEditorModel: { uri: beforeUri, getValue: () => beforeContent } },
+								modified: { textEditorModel: { uri: afterUri, getValue: () => afterContent } },
+							},
+							dispose: () => { },
+						}),
+					} as unknown as ICodeCompareModelService);
+					instantiationService.stub(IEditorWorkerService, {
+						_serviceBrand: undefined,
+						computeDiff: async () => null,
+					} as unknown as IEditorWorkerService);
+
+					const context = createMockRenderContext(true);
+					context.container.classList.add('backboard-clean-chat', 'backboard-cursor-transcript');
+					Object.assign(context.element, { setVote: () => undefined });
+					const part = disposables.add(instantiationService.createInstance(
+						ChatTextEditContentPart,
+						{ kind: 'textEditGroup', uri: URI.file('/project/src/viewport.ts'), edits: [[]], done: true },
+						context,
+						{},
+						{} as DiffEditorPool,
+						500,
+					));
+					context.container.appendChild(part.domNode);
+
+					assert.strictEqual(observerRecords.length, 1, 'the lightweight shell should own one viewport observer');
+					assert.strictEqual(part.domNode.querySelector('.chat-external-edit-diff-body'), null);
+					const outerObserver = observerRecords[0];
+					assert.ok(outerObserver.target);
+					outerObserver.callback([{
+						isIntersecting: true,
+						intersectionRatio: 1,
+						target: outerObserver.target,
+					} as IntersectionObserverEntry], outerObserver.observer);
+
+					for (let attempt = 0; attempt < 100 && !part.domNode.querySelector('.chat-external-edit-diff-row'); attempt++) {
+						await new Promise<void>(resolve => mainWindow.setTimeout(resolve, 0));
+					}
+					assert.deepStrictEqual({
+						observers: observerRecords.length,
+						outerDisconnected: outerObserver.disconnected,
+						rows: part.domNode.querySelectorAll('.chat-external-edit-diff-row').length,
+					}, {
+						observers: 1,
+						outerDisconnected: true,
+						rows: 2,
+					}, 'the proven-near replacement card must not allocate a second observer');
+				});
+
+				test('Cursor textEditGroup mounts its preview before the worker diff and updates the same card', async () => {
+				const fileUri = URI.file('/project/src/deferred-worker.ts');
+				const beforeUri = URI.parse('chat-text-edit://before/deferred-worker.ts');
+				const afterUri = URI.parse('chat-text-edit://after/deferred-worker.ts');
+				const beforeContent = 'const stable = true;\nconst oldA = 1;\nconst oldB = 2;\nconst tail = true;';
+				const afterContent = 'const stable = true;\nconst nextA = 3;\nconst nextB = 4;\nconst tail = true;';
+				let modelRefDisposeCount = 0;
+				let workerDiffCount = 0;
+				let resolveWorkerDiff!: (value: {
+					changes: DetailedLineRangeMapping[];
+					identical: boolean;
+					quitEarly: boolean;
+					moves: never[];
+				}) => void;
+				const workerDiff = new Promise<{
+					changes: DetailedLineRangeMapping[];
+					identical: boolean;
+					quitEarly: boolean;
+					moves: never[];
+				}>(resolve => resolveWorkerDiff = resolve);
+				instantiationService.stub(ICodeCompareModelService, {
+					_serviceBrand: undefined,
+					createModel: async () => ({
+						object: {
+							originalSha1: 'before-sha',
+							original: { textEditorModel: { uri: beforeUri, getValue: () => beforeContent } },
+							modified: { textEditorModel: { uri: afterUri, getValue: () => afterContent } },
+						},
+						dispose: () => modelRefDisposeCount++,
+					}),
+				} as unknown as ICodeCompareModelService);
+				instantiationService.stub(IEditorWorkerService, {
+					_serviceBrand: undefined,
+					computeDiff: () => {
+						workerDiffCount++;
+						return workerDiff;
+					},
+				} as unknown as IEditorWorkerService);
+				instantiationService.stub(ITextModelService, {
+					_serviceBrand: undefined,
+					createModelReference: async () => {
+						throw new Error('Seeded preview should not resolve snapshot models');
+					},
+				} as unknown as ITextModelService);
+
+				const context = createMockRenderContext(true);
+				context.container.classList.add('backboard-clean-chat', 'backboard-cursor-transcript');
+				Object.assign(context.element, { setVote: () => undefined });
+				const part = disposables.add(instantiationService.createInstance(
+					ChatTextEditContentPart,
+					{
+						kind: 'textEditGroup',
+						uri: fileUri,
+						edits: [[]],
+						done: true,
+					},
+					context,
+					{},
+					{} as DiffEditorPool,
+					500,
+				));
+				let reportedStats: IEditSessionDiffStats | undefined;
+				disposables.add(part.onDidChangeDiff(stats => reportedStats = stats));
+				context.container.appendChild(part.domNode);
+				mainWindow.document.body.appendChild(context.container);
+				disposables.add(toDisposable(() => context.container.remove()));
+
+				for (let attempt = 0; attempt < 100 && !part.domNode.querySelector('.chat-external-edit-diff-row'); attempt++) {
+					await new Promise<void>(resolve => mainWindow.setTimeout(resolve, 5));
+				}
+				const cardIdentity = part.domNode;
+				assert.deepStrictEqual({
+					cardMounted: cardIdentity.classList.contains('chat-external-edit-card'),
+					previewRows: cardIdentity.querySelectorAll('.chat-external-edit-diff-row').length,
+					addedCounter: cardIdentity.querySelector('.label-added'),
+					removedCounter: cardIdentity.querySelector('.label-removed'),
+					workerDiffCount,
+					reportedStats,
+				}, {
+					cardMounted: true,
+					previewRows: 6,
+					addedCounter: null,
+					removedCounter: null,
+					workerDiffCount: 1,
+					reportedStats: undefined,
+				}, 'The compact preview must be useful while exact stats are still pending');
+
+				resolveWorkerDiff({
+					changes: [createExactLineChange(2, 4, 2, 4)],
+					identical: false,
+					quitEarly: false,
+					moves: [],
+				});
+				for (let attempt = 0; attempt < 100 && !part.domNode.querySelector('.label-added'); attempt++) {
+					await new Promise<void>(resolve => mainWindow.setTimeout(resolve, 5));
+				}
+
+				assert.deepStrictEqual({
+					sameCard: part.domNode === cardIdentity,
+					added: part.domNode.querySelector('.label-added')?.textContent,
+					removed: part.domNode.querySelector('.label-removed')?.textContent,
+					workerDiffCount,
+					reportedStats,
+				}, {
+					sameCard: true,
+					added: '+2',
+					removed: '-2',
+					workerDiffCount: 1,
+					reportedStats: { added: 2, removed: 2 },
+				}, 'Worker completion should update counters in place without re-rendering the card');
+
+				part.dispose();
+				assert.strictEqual(modelRefDisposeCount, 1);
+			});
+
+			test('Cursor streaming textEditGroup reuses a lightweight shell until the diff is final', async () => {
+			let modelCreateCount = 0;
+			let workerDiffCount = 0;
+			instantiationService.stub(ICodeCompareModelService, {
+				_serviceBrand: undefined,
+				createModel: async () => {
+					modelCreateCount++;
+					throw new Error('streaming diff should not resolve models');
+				},
+			} as unknown as ICodeCompareModelService);
+			instantiationService.stub(IEditorWorkerService, {
+				_serviceBrand: undefined,
+				computeDiff: async () => {
+					workerDiffCount++;
+					return null;
+				},
+			} as unknown as IEditorWorkerService);
+
+			const context = createMockRenderContext(false);
+			context.container.classList.add('backboard-clean-chat', 'backboard-cursor-transcript');
+			Object.assign(context.element, { setVote: () => undefined });
+			const fileUri = URI.file('/project/src/streaming.ts');
+			const part = disposables.add(instantiationService.createInstance(
+				ChatTextEditContentPart,
+				{
+					kind: 'textEditGroup',
+					uri: fileUri,
+					edits: [[]],
+					done: false,
+				},
+				context,
+				{},
+				{} as DiffEditorPool,
+				500,
+			));
+
+			await Promise.resolve();
+			const nextStreamingBatch: IChatTextEditGroup = {
+				kind: 'textEditGroup',
+				uri: fileUri,
+				edits: [[], [], []],
+				done: false,
+			};
+			const completedEdit: IChatTextEditGroup = {
+				...nextStreamingBatch,
+				done: true,
+			};
+
+			assert.deepStrictEqual({
+				label: part.domNode.textContent,
+				modelCreateCount,
+				workerDiffCount,
+				reusesStreamingShell: part.hasSameContent(nextStreamingBatch, [], context.element),
+				rerendersOnceAtCompletion: !part.hasSameContent(completedEdit, [], context.element),
+			}, {
+				label: 'Editing streaming.ts…',
+				modelCreateCount: 0,
+				workerDiffCount: 0,
+				reusesStreamingShell: true,
+				rerendersOnceAtCompletion: true,
+			});
+		});
+
+		test('Cursor external edit caps its collapsed preview and hydrates the full diff on expansion', async () => {
+			const afterUri = URI.parse('chat-edit://after/large-preview.ts');
+			const afterContent = Array.from({ length: 40 }, (_, index) => `export const line${index + 1} = ${index + 1};`).join('\n');
+			let modelResolveCount = 0;
+			instantiationService.stub(ITextModelService, {
+				_serviceBrand: undefined,
+				createModelReference: async () => {
+					modelResolveCount++;
+					return {
+						object: { textEditorModel: { getValue: () => afterContent } },
+						dispose: () => { },
+					};
+				},
+			} as unknown as ITextModelService);
+
+			const part = disposables.add(instantiationService.createInstance(ChatExternalEditContentPart, {
+				kind: 'externalEdit',
+				uri: URI.file('/project/src/large-preview.ts'),
+				editKind: 'create',
+				diff: { added: 40, removed: 0 },
+				afterContentUri: afterUri,
+			}));
+			part.showDiffPreview();
+			for (let attempt = 0; attempt < 100 && part.domNode.querySelector<HTMLElement>('.chat-external-edit-diff-body')?.dataset.renderMode !== 'preview'; attempt++) {
+				await new Promise<void>(resolve => mainWindow.setTimeout(resolve, 5));
+			}
+
+			const body = part.domNode.querySelector<HTMLElement>('.chat-external-edit-diff-body');
+			assert.ok(body);
+			const previewRows = body.querySelectorAll('.chat-external-edit-diff-row').length;
+			part.expandDiffBody();
+			for (let attempt = 0; attempt < 100 && body.dataset.renderMode !== 'full'; attempt++) {
+				await new Promise<void>(resolve => mainWindow.setTimeout(resolve, 5));
+			}
+			const fullRows = body.querySelectorAll('.chat-external-edit-diff-row').length;
+			const expandControl = part.domNode.querySelector<HTMLElement>('.chat-external-edit-expand');
+			assert.ok(expandControl);
+			expandControl.click();
+			for (let attempt = 0; attempt < 100 && body.dataset.renderMode !== 'preview'; attempt++) {
+				await new Promise<void>(resolve => mainWindow.setTimeout(resolve, 5));
+			}
+			const releasedRows = body.querySelectorAll('.chat-external-edit-diff-row').length;
+			part.expandDiffBody();
+			for (let attempt = 0; attempt < 100 && body.dataset.renderMode !== 'full'; attempt++) {
+				await new Promise<void>(resolve => mainWindow.setTimeout(resolve, 5));
+			}
+
+			assert.deepStrictEqual({
+				previewRows,
+				fullRows,
+				releasedRows,
+				reopenedRows: body.querySelectorAll('.chat-external-edit-diff-row').length,
+				renderMode: body.dataset.renderMode,
+				expanded: part.domNode.classList.contains('chat-external-edit-expanded'),
+				modelResolveCount,
+			}, {
+				previewRows: 8,
+				fullRows: 40,
+				releasedRows: 8,
+				reopenedRows: 40,
+				renderMode: 'full',
+				expanded: true,
+				modelResolveCount: 1,
+			});
+		});
+
+		test('Cursor external edit keeps its compact preview when full hydration fails', async () => {
+			const beforeUri = URI.parse('chat-edit://before/resilient-preview.ts');
+			const afterUri = URI.parse('chat-edit://after/resilient-preview.ts');
+			const contentByUri = new Map<string, string>([
+				[beforeUri.toString(), 'export const value = 1;'],
+				[afterUri.toString(), 'export const value = 2;'],
+			]);
+			let modelResolveCount = 0;
+			instantiationService.stub(ITextModelService, {
+				_serviceBrand: undefined,
+				createModelReference: async (resource: URI) => {
+					modelResolveCount++;
+					return {
+						object: { textEditorModel: { uri: resource, getValue: () => contentByUri.get(resource.toString()) ?? '' } },
+						dispose: () => { },
+					};
+				},
+			} as unknown as ITextModelService);
+			instantiationService.stub(IEditorWorkerService, {
+				_serviceBrand: undefined,
+				computeDiff: async () => {
+					throw new Error('transient full hydration failure');
+				},
+			} as unknown as IEditorWorkerService);
+
+			const part = disposables.add(instantiationService.createInstance(ChatExternalEditContentPart, {
+				kind: 'externalEdit',
+				uri: URI.file('/project/src/resilient-preview.ts'),
+				editKind: 'edit',
+				diff: { added: 1, removed: 1 },
+				beforeContentUri: beforeUri,
+				afterContentUri: afterUri,
+			}));
+			part.showDiffPreview();
+			const body = part.domNode.querySelector<HTMLElement>('.chat-external-edit-diff-body');
+			assert.ok(body);
+			for (let attempt = 0; attempt < 100 && body.dataset.renderMode !== 'preview'; attempt++) {
+				await new Promise<void>(resolve => mainWindow.setTimeout(resolve, 5));
+			}
+			const previewRows = body.querySelectorAll('.chat-external-edit-diff-row').length;
+
+			part.expandDiffBody();
+			for (let attempt = 0; attempt < 100 && modelResolveCount < 4; attempt++) {
+				await new Promise<void>(resolve => mainWindow.setTimeout(resolve, 5));
+			}
+			await Promise.resolve();
+
+			assert.deepStrictEqual({
+				renderMode: body.dataset.renderMode,
+				rows: body.querySelectorAll('.chat-external-edit-diff-row').length,
+				unavailable: body.textContent?.includes('Diff unavailable'),
+				expanded: part.domNode.classList.contains('chat-external-edit-expanded'),
+				modelResolveCount,
+			}, {
+				renderMode: 'preview',
+				rows: previewRows,
+				unavailable: false,
+				expanded: true,
+				modelResolveCount: 4,
 			});
 		});
 

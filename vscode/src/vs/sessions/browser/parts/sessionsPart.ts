@@ -496,10 +496,11 @@ export class SessionsPart extends Part {
 	}
 
 	override layout(width: number, height: number, top: number, left: number): void {
-		if (!this.layoutService.isVisible(Parts.SESSIONS_PART)) {
-			return;
-		}
-
+		// The grid is the source of truth for whether this view needs layout. On
+		// an in-place Editor -> Simple reload it can allocate the sessions part
+		// before the layout service's visibility state catches up. Skipping that
+		// allocation leaves the new-chat widget at its 104px construction fallback
+		// until the next window resize, which may never come.
 		this._lastLayout = { width, height, top, left };
 
 		// Compute content dimensions accounting for the border and the header.

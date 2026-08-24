@@ -61,8 +61,8 @@ class AnnounceChatConfirmationAction extends Action2 {
 		// dialogs (via `configureAccessibilityContainer`).
 		let firstConfirmationElement: HTMLElement | undefined;
 
-		const lastResponse = viewModel.getItems()[viewModel.getItems().length - 1];
-		if (isResponseVM(lastResponse)) {
+		const lastResponse = viewModel.getItems().findLast(isResponseVM);
+		if (lastResponse) {
 			// Reveal the response so its confirmation widget is rendered (the
 			// chat list is virtualized — querying before reveal can miss it).
 			pendingWidget.reveal(lastResponse);

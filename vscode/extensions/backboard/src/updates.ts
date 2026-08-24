@@ -26,7 +26,21 @@ const stableUpdateChannel = 'stable';
 const sandboxUpdateChannel = 'sandbox';
 const supportedUpdateChannels = new Set([stableUpdateChannel, sandboxUpdateChannel]);
 const promptedUpdateVersions = new Set<string>();
+const updateLockOwnerFileName = 'owner.json';
+const updateLockMissingOwnerGraceMs = 60_000;
 let backboardUpdateOutput: vscode.OutputChannel | undefined;
+
+interface UpdateInstallLock {
+	readonly directory: string;
+	readonly ownerPath: string;
+}
+
+interface UpdateLockOwner {
+	readonly pid: number;
+	readonly version: string;
+	readonly phase: 'extension' | 'installer';
+	readonly createdAt: string;
+}
 
 export function initializeBackboardUpdates(context: vscode.ExtensionContext, output: vscode.OutputChannel | undefined): void {
 	backboardUpdateOutput = output;
@@ -244,17 +258,39 @@ async function installBackboardUpdate(manifest: UpdateManifest): Promise<void> {
 	}
 
 	backboardUpdateInstallInProgress = true;
+	let installLock: UpdateInstallLock | undefined;
 	try {
-		const updateDirectory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'backboard-studio-update-'));
+		const acquiredInstallLock = await acquireBackboardUpdateInstallLock(appPath, manifest.version);
+		installLock = acquiredInstallLock;
+		const updateDirectory = await backboardUpdateCacheDirectory(appPath, manifest);
 		const dmgPath = path.join(updateDirectory, `Backboard-Studio-${manifest.version}.dmg`);
-		backboardUpdateOutput?.appendLine(`[updates] downloading ${manifest.version} from ${manifest.url}`);
-		await vscode.window.withProgress({
-			location: vscode.ProgressLocation.Notification,
-			title: `Downloading Backboard Studio ${manifest.version}`,
-			cancellable: false
-		}, async progress => {
-			await downloadBackboardUpdate(manifest.url, dmgPath, progress);
-		});
+		let cachedDownloadValid = false;
+		if (fs.existsSync(dmgPath)) {
+			try {
+				await verifyBackboardUpdate(dmgPath, manifest);
+				cachedDownloadValid = true;
+				backboardUpdateOutput?.appendLine(`[updates] reusing verified download for ${manifest.version}`);
+			} catch {
+				await fs.promises.rm(dmgPath, { force: true });
+			}
+		}
+		if (!cachedDownloadValid) {
+			const partialDmgPath = path.join(updateDirectory, `.Backboard-Studio-${manifest.version}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.partial`);
+			backboardUpdateOutput?.appendLine(`[updates] downloading ${manifest.version} from ${manifest.url}`);
+			try {
+				await vscode.window.withProgress({
+					location: vscode.ProgressLocation.Notification,
+					title: `Downloading Backboard Studio ${manifest.version}`,
+					cancellable: false
+				}, async progress => {
+					await downloadBackboardUpdate(manifest.url, partialDmgPath, progress);
+				});
+				await verifyBackboardUpdate(partialDmgPath, manifest);
+				await fs.promises.rename(partialDmgPath, dmgPath);
+			} finally {
+				await fs.promises.rm(partialDmgPath, { force: true });
+			}
+		}
 		await vscode.window.withProgress({
 			location: vscode.ProgressLocation.Notification,
 			title: `Verifying Backboard Studio ${manifest.version}`,
@@ -265,7 +301,7 @@ async function installBackboardUpdate(manifest: UpdateManifest): Promise<void> {
 			location: vscode.ProgressLocation.Notification,
 			title: `Preparing Backboard Studio ${manifest.version}`,
 			cancellable: false
-		}, async () => stageMacBackboardInstaller(dmgPath, appPath, manifest.version));
+		}, async () => stageMacBackboardInstaller(dmgPath, appPath, manifest.version, acquiredInstallLock));
 		backboardUpdateOutput?.appendLine(`[updates] ${manifest.version} is staged and verified; requesting automatic restart`);
 		// Do not await a notification here: waiting for a toast to be dismissed can
 		// delay shutdown indefinitely. The detached, already-prepared installer waits
@@ -273,10 +309,86 @@ async function installBackboardUpdate(manifest: UpdateManifest): Promise<void> {
 		await vscode.commands.executeCommand('workbench.action.quit');
 	} catch (error) {
 		backboardUpdateInstallInProgress = false;
+		if (installLock) {
+			await releaseBackboardUpdateInstallLock(installLock);
+		}
 		const message = error instanceof Error ? error.message : String(error);
 		backboardUpdateOutput?.appendLine(`[updates] install failed: ${message}`);
 		await vscode.window.showWarningMessage(`Could not install Backboard Studio update: ${message}`);
 	}
+}
+
+async function backboardUpdateCacheDirectory(appPath: string, manifest: UpdateManifest): Promise<string> {
+	const appKey = path.basename(appPath, '.app').replace(/[^a-zA-Z0-9._-]/g, '-').toLowerCase();
+	const versionKey = manifest.version.replace(/[^a-zA-Z0-9._-]/g, '_');
+	const digestKey = manifest.sha256?.toLowerCase().replace(/[^a-f0-9]/g, '').slice(0, 16) || 'unverified';
+	const directory = path.join(os.tmpdir(), 'backboard-studio-update-cache', appKey, `${versionKey}-${digestKey}`);
+	await fs.promises.mkdir(directory, { recursive: true, mode: 0o700 });
+	return directory;
+}
+
+function backboardUpdateInstallLockDirectory(appPath: string): string {
+	const appKey = path.basename(appPath, '.app').replace(/[^a-zA-Z0-9._-]/g, '-').toLowerCase();
+	return path.join(os.tmpdir(), `backboard-studio-${appKey}-update.lock`);
+}
+
+async function acquireBackboardUpdateInstallLock(appPath: string, version: string): Promise<UpdateInstallLock> {
+	const directory = backboardUpdateInstallLockDirectory(appPath);
+	const ownerPath = path.join(directory, updateLockOwnerFileName);
+	const lock = { directory, ownerPath };
+	for (let attempt = 0; attempt < 2; attempt++) {
+		try {
+			await fs.promises.mkdir(directory, { mode: 0o700 });
+			await writeBackboardUpdateLockOwner(lock, {
+				pid: process.pid,
+				version,
+				phase: 'extension',
+				createdAt: new Date().toISOString()
+			});
+			return lock;
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+				throw error;
+			}
+			if (!(await backboardUpdateInstallLockIsStale(lock))) {
+				throw new Error('A Backboard Studio update is already downloading or waiting to install. Quit the app once and let that installer finish.');
+			}
+			await fs.promises.rm(directory, { recursive: true, force: true });
+		}
+	}
+	throw new Error('Could not acquire the Backboard Studio update installation lock.');
+}
+
+async function writeBackboardUpdateLockOwner(lock: UpdateInstallLock, owner: UpdateLockOwner): Promise<void> {
+	const temporaryPath = `${lock.ownerPath}.${process.pid}.tmp`;
+	await fs.promises.writeFile(temporaryPath, `${JSON.stringify(owner)}\n`, { mode: 0o600 });
+	await fs.promises.rename(temporaryPath, lock.ownerPath);
+}
+
+async function backboardUpdateInstallLockIsStale(lock: UpdateInstallLock): Promise<boolean> {
+	try {
+		const owner = JSON.parse(await fs.promises.readFile(lock.ownerPath, 'utf8')) as Partial<UpdateLockOwner>;
+		if (typeof owner.pid !== 'number' || !Number.isSafeInteger(owner.pid) || owner.pid <= 0) {
+			return false;
+		}
+		try {
+			process.kill(owner.pid, 0);
+			return false;
+		} catch (error) {
+			return (error as NodeJS.ErrnoException).code === 'ESRCH';
+		}
+	} catch {
+		try {
+			const stat = await fs.promises.stat(lock.directory);
+			return Date.now() - stat.mtimeMs > updateLockMissingOwnerGraceMs;
+		} catch {
+			return true;
+		}
+	}
+}
+
+async function releaseBackboardUpdateInstallLock(lock: UpdateInstallLock): Promise<void> {
+	await fs.promises.rm(lock.directory, { recursive: true, force: true });
 }
 
 function currentMacAppPath(): string | undefined {
@@ -379,16 +491,26 @@ function sha256File(filePath: string): Promise<string> {
 	});
 }
 
-async function stageMacBackboardInstaller(dmgPath: string, appPath: string, version: string): Promise<void> {
+async function stageMacBackboardInstaller(dmgPath: string, appPath: string, version: string, installLock: UpdateInstallLock): Promise<void> {
 	const installerPath = path.join(path.dirname(dmgPath), 'install-backboard-update.sh');
 	const statusPath = path.join(path.dirname(dmgPath), 'install-backboard-update.status');
 	const logPath = path.join(os.tmpdir(), 'backboard-studio-update.log');
 	const appName = path.basename(appPath);
 	const bundleIdentifier = appName === 'Backboard Studio Sandbox.app' ? 'io.backboard.studio.sandbox' : 'io.backboard.studio';
 	await fs.promises.writeFile(installerPath, macUpdateInstallerScript(), { mode: 0o700 });
-	const child = cp.spawn('/bin/zsh', [installerPath, dmgPath, appPath, String(process.pid), version, logPath, appName, bundleIdentifier, statusPath], {
+	await fs.promises.rm(statusPath, { force: true });
+	const child = cp.spawn('/bin/zsh', [installerPath, dmgPath, appPath, String(process.pid), version, logPath, appName, bundleIdentifier, statusPath, '', installLock.directory], {
 		detached: true,
 		stdio: 'ignore'
+	});
+	if (!child.pid) {
+		throw new Error('Could not start the detached Backboard Studio update installer.');
+	}
+	await writeBackboardUpdateLockOwner(installLock, {
+		pid: child.pid,
+		version,
+		phase: 'installer',
+		createdAt: new Date().toISOString()
 	});
 	await waitForMacInstallerReady(child, statusPath, logPath);
 	child.unref();

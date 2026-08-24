@@ -5,7 +5,7 @@
 
 import * as dom from '../../../../../../../base/browser/dom.js';
 import { IMarkdownString, MarkdownString } from '../../../../../../../base/common/htmlContent.js';
-import { IDisposable, toDisposable } from '../../../../../../../base/common/lifecycle.js';
+import { IDisposable, MutableDisposable, toDisposable } from '../../../../../../../base/common/lifecycle.js';
 import { autorun } from '../../../../../../../base/common/observable.js';
 import { IMarkdownRenderer } from '../../../../../../../platform/markdown/browser/markdownRenderer.js';
 import { IInstantiationService } from '../../../../../../../platform/instantiation/common/instantiation.js';
@@ -60,7 +60,11 @@ export class ChatToolStreamingSubPart extends BaseChatToolInvocationSubPart {
 		container.append(messageContainer, inputContainer);
 
 		let pendingFollowScroll: IDisposable | undefined;
-		this._register(toDisposable(() => pendingFollowScroll?.dispose()));
+		let pendingInputRender: IDisposable | undefined;
+		this._register(toDisposable(() => {
+			pendingFollowScroll?.dispose();
+			pendingInputRender?.dispose();
+		}));
 		const followLatestInput = () => {
 			if (pendingFollowScroll) {
 				return;
@@ -71,12 +75,61 @@ export class ChatToolStreamingSubPart extends BaseChatToolInvocationSubPart {
 			});
 		};
 
+		const renderedMessagePart = this._register(new MutableDisposable<ChatProgressContentPart>());
+		let lastRenderedMessage: IMarkdownString | string | undefined;
+		let lastRenderedMarkdownValue: string | undefined;
+		let hasRenderedMessage = false;
+		let latestPartialInput: unknown;
+		let lastObservedPartialInput: unknown;
+		let hasObservedPartialInput = false;
+		let lastRenderedInput: string | undefined;
+		const renderLatestInput = () => {
+			pendingInputRender = undefined;
+			const inputText = formatStreamingToolInput(latestPartialInput);
+			if (inputText === lastRenderedInput) {
+				return;
+			}
+			lastRenderedInput = inputText;
+			container.classList.toggle('has-streaming-input', inputText.length > 0);
+			if (inputText.length > 0) {
+				inputCode.textContent = inputText;
+				dom.show(inputContainer);
+				followLatestInput();
+			} else {
+				inputCode.textContent = '';
+				dom.hide(inputContainer);
+			}
+		};
+		const updateStreamingInput = (input: unknown) => {
+			if (hasObservedPartialInput && Object.is(input, lastObservedPartialInput)) {
+				return;
+			}
+			hasObservedPartialInput = true;
+			lastObservedPartialInput = input;
+			latestPartialInput = input;
+
+			// Show the first useful chunk immediately. Once input is visible, fold a
+			// burst of argument deltas into one DOM/text-format pass per frame. Large
+			// read/write payloads otherwise stringify and replace the growing input on
+			// every token, producing quadratic main-thread work.
+			if (!lastRenderedInput) {
+				renderLatestInput();
+				return;
+			}
+			if (!pendingInputRender) {
+				pendingInputRender = dom.scheduleAtNextAnimationFrame(dom.getWindow(inputContainer), renderLatestInput);
+			}
+		};
+
 		// The status and partial arguments are separate observables. Keep both in
 		// one row so users can see not only that a tool is being prepared, but the
 		// exact payload growing beneath it as the model produces each delta.
 		this._register(autorun(reader => {
 			const currentState = toolInvocation.state.read(reader);
 			if (currentState.type !== IChatToolInvocation.StateKind.Streaming) {
+				pendingInputRender?.dispose();
+				pendingInputRender = undefined;
+				renderedMessagePart.clear();
 				// State changed - clear the container DOM before triggering re-render
 				// This prevents the old streaming message from lingering
 				dom.clearNode(container);
@@ -91,9 +144,17 @@ export class ChatToolStreamingSubPart extends BaseChatToolInvocationSubPart {
 			// Keep the existing progress message for chat hosts that do not project
 			// the invocation into a live activity-group header.
 			const messageText = typeof displayMessage === 'string' ? displayMessage : displayMessage.value;
-			if (!messageText || messageText.trim().length === 0) {
+			const markdownValue = typeof displayMessage === 'string' ? undefined : displayMessage.value;
+			const messageChanged = !hasRenderedMessage
+				|| lastRenderedMessage !== displayMessage
+				|| lastRenderedMarkdownValue !== markdownValue;
+			if (messageChanged && (!messageText || messageText.trim().length === 0)) {
+				hasRenderedMessage = true;
+				lastRenderedMessage = displayMessage;
+				lastRenderedMarkdownValue = markdownValue;
+				renderedMessagePart.clear();
 				dom.clearNode(messageContainer);
-			} else {
+			} else if (messageChanged) {
 				const content: IMarkdownString = typeof displayMessage === 'string'
 					? new MarkdownString().appendText(displayMessage)
 					: displayMessage;
@@ -103,7 +164,7 @@ export class ChatToolStreamingSubPart extends BaseChatToolInvocationSubPart {
 					content
 				};
 
-				const part = reader.store.add(this.instantiationService.createInstance(
+				const part = this.instantiationService.createInstance(
 					ChatProgressContentPart,
 					progressMessage,
 					this.renderer,
@@ -113,21 +174,16 @@ export class ChatToolStreamingSubPart extends BaseChatToolInvocationSubPart {
 					this.getIcon(),
 					toolInvocation,
 					false
-				));
+				);
 
+				hasRenderedMessage = true;
+				lastRenderedMessage = displayMessage;
+				lastRenderedMarkdownValue = markdownValue;
+				renderedMessagePart.value = part;
 				dom.reset(messageContainer, part.domNode);
 			}
 
-			const inputText = formatStreamingToolInput(currentState.partialInput.read(reader));
-			container.classList.toggle('has-streaming-input', inputText.length > 0);
-			if (inputText.length > 0) {
-				inputCode.textContent = inputText;
-				dom.show(inputContainer);
-				followLatestInput();
-			} else {
-				inputCode.textContent = '';
-				dom.hide(inputContainer);
-			}
+			updateStreamingInput(currentState.partialInput.read(reader));
 		}));
 
 		return container;

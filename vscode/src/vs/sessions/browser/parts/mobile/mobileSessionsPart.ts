@@ -3,7 +3,6 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Parts } from '../../../../workbench/services/layout/browser/layoutService.js';
 import { Part } from '../../../../workbench/browser/part.js';
 import { SessionsPart } from '../sessionsPart.js';
 import { isPhoneLayout } from './mobileLayout.js';
@@ -44,10 +43,9 @@ export class MobileSessionsPart extends SessionsPart {
 			return;
 		}
 
-		if (!this.layoutService.isVisible(Parts.SESSIONS_PART)) {
-			return;
-		}
-
+		// As on desktop, trust the grid allocation rather than the separately
+		// updated part-visibility state. Mode switches can deliver those in either
+		// order, and this allocation must not be dropped.
 		this._lastLayout = { width, height, top, left };
 
 		// Full dimensions - no card margins or session-bar subtraction.

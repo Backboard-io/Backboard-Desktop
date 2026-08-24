@@ -27,9 +27,9 @@
  * stylesheet for the same row, which drives the very same VS Code composite bar.
  */
 
-/* Shared tab metrics. Defined on the row itself so both strips inherit them, and
-   unconditionally so the look holds when Backboard is the only panel. */
-.monaco-workbench .part.auxiliarybar > .composite.title {
+/* Shared tab metrics. Defined on the integrated chat row itself so both strips
+   inherit them without restyling unrelated auxiliary-bar views. */
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs {
 	--bb-agent-tab-radius: 6px;
 	--bb-agent-tab-inset: 8px;
 	--bb-agent-tab-gap: 4px;
@@ -41,9 +41,10 @@
    re-activates the chat composite (see `openChatSession` in ChatViewPane), so
    the item is redundant next to the session tabs and Cursor shows no such
    self-tab. Foreign panels (Claude Code, Codex) keep their items.
-   The selector mirrors the shared tab-metrics rule below and appends the
-   attribute, so it always out-ranks that rule's `display: flex`. */
-.monaco-workbench .part.auxiliarybar > .title.has-composite-bar.has-chat-tabs > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item[data-composite-id='workbench.panel.chat'] {
+   Include the same `:not(.icon)` qualifier as the shared tab rule below plus
+   the container id, so this stays more specific than that rule's later
+   `display: flex`. */
+.monaco-workbench .part.auxiliarybar > .title.has-composite-bar.has-chat-tabs > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item[data-composite-id='workbench.panel.chat']:not(.icon) {
 	display: none;
 }
 
@@ -65,7 +66,7 @@
 	order: -1;
 }
 
-.monaco-workbench .part.auxiliarybar > .composite.title {
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs {
 	align-items: center;
 	padding-inline: var(--bb-agent-tab-inset);
 	column-gap: var(--bb-agent-tab-gap);
@@ -74,7 +75,7 @@
 /* The switcher never paints over its neighbours: it shrink-wraps its tabs and
    clips when the row runs out of room (the session strip gives up its space
    first — see the higher flex-shrink on `.chat-view-title-container`). */
-.monaco-workbench .part.auxiliarybar > .title.has-composite-bar > .composite-bar-container {
+.monaco-workbench .part.auxiliarybar > .title.has-composite-bar.has-chat-tabs > .composite-bar-container {
 	align-items: center;
 	display: flex;
 	flex: 0 1 auto;
@@ -82,12 +83,12 @@
 	overflow: hidden;
 }
 
-.monaco-workbench .part.auxiliarybar > .title.has-composite-bar > .composite-bar-container > .composite-bar {
+.monaco-workbench .part.auxiliarybar > .title.has-composite-bar.has-chat-tabs > .composite-bar-container > .composite-bar {
 	box-sizing: border-box;
 	height: 30px;
 }
 
-.monaco-workbench .part.auxiliarybar > .title.has-composite-bar > .composite-bar-container > .composite-bar > .monaco-action-bar:not(.vertical) .actions-container {
+.monaco-workbench .part.auxiliarybar > .title.has-composite-bar.has-chat-tabs > .composite-bar-container > .composite-bar > .monaco-action-bar:not(.vertical) .actions-container {
 	align-items: center;
 	flex-wrap: nowrap;
 	gap: var(--bb-agent-tab-gap);
@@ -96,7 +97,7 @@
 }
 
 /* Actions sit at the far end of the row, after the tabs. */
-.monaco-workbench .part.auxiliarybar > .composite.title > .title-actions {
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs > .title-actions {
 	align-items: center;
 	display: flex;
 	flex-shrink: 0;
@@ -105,14 +106,14 @@
 	padding-left: var(--bb-agent-tab-inset);
 }
 
-.monaco-workbench .part.auxiliarybar > .composite.title > .title-actions .monaco-action-bar:not(.vertical) .action-item {
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs > .title-actions .monaco-action-bar:not(.vertical) .action-item {
 	border-radius: var(--bb-agent-tab-radius);
 	box-sizing: border-box;
 	height: auto;
 	margin: 0;
 }
 
-.monaco-workbench .part.auxiliarybar > .composite.title > .title-actions .monaco-action-bar .action-label {
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs > .title-actions .monaco-action-bar .action-label {
 	border-radius: var(--bb-agent-tab-radius);
 	padding: 4px;
 }
@@ -177,7 +178,7 @@
  * while the rest compress.
  */
 .monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab,
-.monaco-workbench .part.auxiliarybar > .title.has-composite-bar > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(.icon) {
+.monaco-workbench .part.auxiliarybar > .title.has-composite-bar.has-chat-tabs > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(.icon) {
 	display: flex;
 	align-items: center;
 	box-sizing: border-box;
@@ -215,7 +216,7 @@
 }
 
 .monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab-active,
-.monaco-workbench .part.auxiliarybar > .title.has-composite-bar > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(.icon).checked {
+.monaco-workbench .part.auxiliarybar > .title.has-composite-bar.has-chat-tabs > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(.icon).checked {
 	flex: 1 1 auto;
 	min-width: 64px;
 	max-width: 200px;
@@ -231,12 +232,12 @@
 }
 
 .monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab:hover,
-.monaco-workbench .part.auxiliarybar > .title.has-composite-bar > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(.icon):hover {
+.monaco-workbench .part.auxiliarybar > .title.has-composite-bar.has-chat-tabs > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(.icon):hover {
 	color: var(--vscode-panelTitle-activeForeground, var(--vscode-foreground));
 }
 
 .monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab:not(.chat-view-title-tab-active):hover,
-.monaco-workbench .part.auxiliarybar > .title.has-composite-bar > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(.icon):not(.checked):hover {
+.monaco-workbench .part.auxiliarybar > .title.has-composite-bar.has-chat-tabs > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(.icon):not(.checked):hover {
 	background: var(--bb-agent-tab-hover-background);
 }
 
@@ -256,12 +257,12 @@
 /* Cursor's tabs are text-only — no per-tab agent mark on either strip. The
    provider identity reads from the label ("Claude Code", "Codex") alone. */
 .monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab .chat-view-title-tab-icon,
-.monaco-workbench .part.auxiliarybar > .title.has-composite-bar > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item .composite-bar-action-icon {
+.monaco-workbench .part.auxiliarybar > .title.has-composite-bar.has-chat-tabs > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item .composite-bar-action-icon {
 	display: none;
 }
 
 .monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab .chat-view-title-tab-label,
-.monaco-workbench .part.auxiliarybar > .title.has-composite-bar > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(.icon) .action-label {
+.monaco-workbench .part.auxiliarybar > .title.has-composite-bar.has-chat-tabs > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(.icon) .action-label {
 	background: transparent;
 	box-sizing: border-box;
 	flex: 1 1 auto;
@@ -279,8 +280,8 @@
 
 /* The filled pill is the selected state; the underline would repeat it. Keyboard
    focus keeps its own indicator. */
-.monaco-workbench .part.auxiliarybar > .title.has-composite-bar > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(.icon).checked:not(:focus) .active-item-indicator:before,
-.monaco-workbench .part.auxiliarybar > .title.has-composite-bar > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(.icon).checked.clicked:focus .active-item-indicator:before {
+.monaco-workbench .part.auxiliarybar > .title.has-composite-bar.has-chat-tabs > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(.icon).checked:not(:focus) .active-item-indicator:before,
+.monaco-workbench .part.auxiliarybar > .title.has-composite-bar.has-chat-tabs > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(.icon).checked.clicked:focus .active-item-indicator:before {
 	border-top-color: transparent !important;
 }
 
@@ -388,13 +389,13 @@
  * Defined on `.part.auxiliarybar` so both the composite title and the pane body
  * (which are separate DOM subtrees) can read them.
  */
-.monaco-workbench .part.auxiliarybar {
+.monaco-workbench .part.auxiliarybar:has(> .composite.title.has-chat-tabs) {
 	/* Semantic workbench tokens keep the entire right panel native to the
 	   selected VS Code theme, including light and high-contrast themes. */
 	--bb-panel-surface: var(--vscode-sideBar-background, var(--vscode-editor-background));
 	/* The auxiliary bar is intentionally narrow. Keep one compact content rail
 	   instead of stacking the wider full-page chat insets inside this panel. */
-	--bb-editor-panel-gutter: 12px;
+	--bb-editor-panel-gutter: 14px;
 	--bb-composer-surface: var(--vscode-input-background, var(--vscode-editorWidget-background, var(--vscode-editor-background)));
 	--bb-composer-border: var(--vscode-input-border, var(--vscode-widget-border, var(--vscode-contrastBorder, transparent)));
 	/*
@@ -506,17 +507,17 @@
    container, because `.chat-view-title-tabs` clips overflow-y:hidden, which
    would clip any box-shadow/border trick trying to "erase" a container-level
    border under just the active tab. Owning the border per-child avoids that. */
-.monaco-workbench .part.auxiliarybar > .composite.title {
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs {
 	background-color: var(--bb-header-surface);
 }
 
 /* --- Input box: roomy, soft, focus-aware --------------------------------- */
 
-.monaco-workbench .interactive-session .interactive-input-part:not(.compact) {
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session .interactive-input-part:not(.compact) {
 	margin: 0 12px 12px;
 }
 
-.monaco-workbench .interactive-session .interactive-input-part .chat-input-container {
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session .interactive-input-part .chat-input-container {
 	border-radius: 12px;
 	/* Symmetric 8px on all sides — matches the 8px gap `.chat-input-toolbars`
 	   margin-top puts between the editor and the toolbar row, so the spacing
@@ -527,8 +528,8 @@
 	transition: border-color 0.12s ease, box-shadow 0.12s ease;
 }
 
-.monaco-workbench .interactive-session .interactive-input-part .chat-input-container.focused,
-.monaco-workbench .interactive-session .interactive-input-part .chat-input-container:focus-within {
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session .interactive-input-part .chat-input-container.focused,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session .interactive-input-part .chat-input-container:focus-within {
 	box-shadow: 0 1px 5px color-mix(in srgb, var(--vscode-widget-shadow) 48%, transparent);
 }
 
@@ -543,7 +544,7 @@
 	box-shadow: none;
 }
 
-.monaco-workbench .interactive-session .interactive-input-part .interactive-input-editor {
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session .interactive-input-part .interactive-input-editor {
 	min-height: 42px;
 	font-size: 13px;
 	line-height: 1.5;
@@ -551,19 +552,19 @@
 
 /* --- Bottom toolbar: compact and calm ------------------------------------ */
 
-.monaco-workbench .interactive-session .chat-input-toolbars {
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session .chat-input-toolbars {
 	margin-top: 8px;
 }
 
 /* --- Message rows: lighter, cleaner rhythm ------------------------------- */
 
-.monaco-workbench .interactive-session .interactive-item-container {
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session .interactive-item-container {
 	padding-top: 10px;
 	padding-bottom: 10px;
 	border-top-color: transparent;
 }
 
-.monaco-workbench .interactive-session .interactive-item-container .value {
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session .interactive-item-container .value {
 	line-height: 1.55;
 }
 
@@ -796,6 +797,11 @@
 	 * widened, so let the transcript track the panel and composer instead. */
 	--bb-clean-chat-column: 100%;
 	--bb-t3-column: 100%;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-clean-chat .interactive-list.backboard-cursor-transcript {
+	/* One rail for sent messages, queued work, tool cards, and the composer. */
+	--bb-cursor-transcript-gutter: var(--bb-editor-panel-gutter);
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-item-container.interactive-request,
@@ -1193,8 +1199,8 @@
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part {
 	box-sizing: border-box;
-	width: calc(100% - 28px);
-	margin: 0 auto;
+	width: auto;
+	margin: 0 var(--bb-editor-panel-gutter);
 	padding: 0 0 24px;
 }
 
@@ -1623,8 +1629,8 @@
 	}
 }
 
-/* Empty-state title: a plain “Chats” label and exactly the three reference
- * actions (history, settings, new chat), without the active-tab pill. */
+/* Empty-state title: one “Backboard” button and exactly the three reference
+ * actions (history, settings, new chat). */
 .monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs .chat-view-title-container.chat-view-title-empty {
 	flex: 0 0 auto;
 	min-width: 0;
@@ -1642,16 +1648,7 @@
 }
 
 .monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs .chat-view-title-container.chat-view-title-empty .chat-view-title-tab-active {
-	min-width: 0;
-	max-width: none;
-	padding: 3px 2px;
-	background: transparent;
-	color: var(--vscode-descriptionForeground);
-}
-
-.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs .chat-view-title-container.chat-view-title-empty .chat-view-title-tab-label {
-	font-size: 13px;
-	font-weight: 400;
+	cursor: pointer;
 }
 
 /* Opened history: replace the multi-tab strip with the reference's back/title
@@ -1734,7 +1731,8 @@
 
 @container chat-input-part (max-width: 360px) {
 	.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part {
-		width: calc(100% - 20px);
+		width: auto;
+		margin-inline: 10px;
 	}
 
 	.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-empty-home {
