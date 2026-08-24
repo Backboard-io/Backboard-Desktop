@@ -484,7 +484,9 @@ function createTestServices(disposables: DisposableStore, workingDirectoryResolv
 	instantiationService.stub(IChatEntitlementService, { entitlement: ChatEntitlement.Free, quotas: {} } as Partial<IChatEntitlementService> as IChatEntitlementService);
 	instantiationService.stub(IChatAgentService, chatAgentService);
 	instantiationService.stub(IChatWidgetService, chatWidgetService);
-	instantiationService.stub(IFileService, TestFileService);
+	// Stub with an instance, not the class — `_handleTurn` subscribes to
+	// `onDidFilesChange`, whose getter needs the instance's emitter fields.
+	instantiationService.stub(IFileService, disposables.add(new TestFileService()));
 	instantiationService.stub(ILabelService, MockLabelService);
 	instantiationService.stub(IChatSessionsService, {
 		registerChatSessionItemController: () => toDisposable(() => { }),
@@ -500,6 +502,7 @@ function createTestServices(disposables: DisposableStore, workingDirectoryResolv
 		deltaLanguageModelChatProviderDescriptors: () => { },
 		registerLanguageModelProvider: () => toDisposable(() => { }),
 		lookupLanguageModel: (modelId: string) => languageModels?.get(modelId),
+		getLanguageModelIds: () => [...(languageModels?.keys() ?? [])],
 	});
 	instantiationService.stub(IConfigurationService, {
 		onDidChangeConfiguration: Event.None,
@@ -1699,6 +1702,27 @@ suite('AgentHostChatContribution', () => {
 			);
 		}));
 
+		test('live turn re-emits usage when only the context measurement changes', () => runWithFakedTimers({ useFakeTimers: true }, async () => {
+			const { sessionHandler, agentHostService, chatAgentService } = createContribution(disposables);
+
+			const { turnPromise, collected, session, turnId, fire } = await startTurn(sessionHandler, agentHostService, chatAgentService, disposables);
+
+			fire({ type: 'chat/usage', session, turnId, usage: { inputTokens: 1200, outputTokens: 300, _meta: { contextTokens: 45000, contextLimit: 200000 } } } as ChatAction);
+			fire({ type: 'chat/usage', session, turnId, usage: { inputTokens: 1200, outputTokens: 300, _meta: { contextTokens: 52000, contextLimit: 200000 } } } as ChatAction);
+			fire({ type: 'chat/turnComplete', session, turnId } as ChatAction);
+
+			await turnPromise;
+
+			const usageParts = collected.flat().filter((p): p is IChatUsage => p.kind === 'usage');
+			assert.deepStrictEqual(
+				usageParts.map(part => ({ promptTokens: part.promptTokens, completionTokens: part.completionTokens, contextTokens: part.contextTokens, contextLimit: part.contextLimit })),
+				[
+					{ promptTokens: 1200, completionTokens: 300, contextTokens: 45000, contextLimit: 200000 },
+					{ promptTokens: 1200, completionTokens: 300, contextTokens: 52000, contextLimit: 200000 },
+				],
+			);
+		}));
+
 		test('tool_start events become toolInvocation progress', () => runWithFakedTimers({ useFakeTimers: true }, async () => {
 			const { sessionHandler, agentHostService, chatAgentService } = createContribution(disposables);
 
@@ -2885,7 +2909,9 @@ suite('AgentHostChatContribution', () => {
 			const responses = session.history.filter(h => h.type === 'response');
 			assert.deepStrictEqual(
 				responses.map(r => r.details),
-				['Opus 4.7 • 1.5 credits', 'Sonnet 4.6 · 2x', 'Sonnet 4.6 • 1 credit'],
+				// No pricing suffix: commit 71a08772 removed the `name · pricing`
+				// rendering from `toResponseDetails` on purpose.
+				['Opus 4.7 • 1.5 credits', 'Sonnet 4.6', 'Sonnet 4.6 • 1 credit'],
 			);
 
 			const activeResponse = session.history[session.history.length - 1];

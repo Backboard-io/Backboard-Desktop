@@ -24,6 +24,51 @@ suite('CliTsAgent tool metadata', () => {
 		));
 	}
 
+	test('usage event forwards the context measurement via ChatUsage _meta', () => {
+		const agent = createAgent();
+		const progress: AgentSignal[] = [];
+		store.add(agent.onDidSessionProgress(signal => progress.push(signal)));
+		const sessionUri = AgentSession.uri('backboard', 'usage-live');
+		const internals = agent as unknown as {
+			_handleMappedAgentEvent(
+				session: { sessionUri: typeof sessionUri },
+				event: { type: string; usage?: { inputTokens?: number; outputTokens?: number; contextTokens?: number; contextLimit?: number; model?: string } },
+				turn: { turnId: string; toolInputs: Map<string, { name: string; input: unknown }> },
+			): void;
+		};
+		const turn = { turnId: 'turn-usage', toolInputs: new Map<string, { name: string; input: unknown }>() };
+
+		internals._handleMappedAgentEvent({ sessionUri }, {
+			type: 'usage',
+			usage: { inputTokens: 1200, outputTokens: 300, contextTokens: 45_000, contextLimit: 200_000, model: 'anthropic/claude-sonnet-5' },
+		}, turn);
+		internals._handleMappedAgentEvent({ sessionUri }, {
+			type: 'usage',
+			usage: { inputTokens: 10, outputTokens: 2 },
+		}, turn);
+
+		const usages = progress
+			.filter(signal => signal.kind === 'action' && signal.action.type === ActionType.ChatUsage)
+			.map(signal => signal.kind === 'action' ? signal.action : undefined);
+		assert.strictEqual(usages.length, 2);
+		assert.deepStrictEqual(usages[0], {
+			type: ActionType.ChatUsage,
+			turnId: 'turn-usage',
+			usage: {
+				inputTokens: 1200,
+				outputTokens: 300,
+				model: 'anthropic/claude-sonnet-5',
+				_meta: { contextTokens: 45_000, contextLimit: 200_000 },
+			},
+		});
+		// No context measurement → no `_meta` key at all.
+		assert.deepStrictEqual(usages[1], {
+			type: ActionType.ChatUsage,
+			turnId: 'turn-usage',
+			usage: { inputTokens: 10, outputTokens: 2, model: undefined },
+		});
+	});
+
 	test('Execute tool start advertises terminal metadata', () => {
 		const agent = createAgent();
 		const progress: AgentSignal[] = [];
@@ -38,7 +83,7 @@ suite('CliTsAgent tool metadata', () => {
 				inputSummary?: string,
 			): void;
 		};
-		const turn = { turnId: 'turn-execute', startedToolCalls: new Set<string>(), toolInputSummaries: new Map<string, string>() };
+		const turn = { turnId: 'turn-execute', startedToolCalls: new Set<string>(), toolInputSummaries: new Map<string, string>(), toolInputs: new Map<string, { name: string; input: unknown }>() };
 
 		internals._ensureToolCallStart({ sessionUri }, turn, 'call-execute', 'Execute', 'printf ready');
 		internals._ensureToolCallStart({ sessionUri }, turn, 'call-execute', 'Execute', 'printf ready');

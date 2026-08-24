@@ -167,14 +167,36 @@ export interface TurnModelLookup {
 	toResponseDetails(rawModelId: string | undefined, usage: UsageInfo | undefined): string | undefined;
 }
 
+/**
+ * Reads the well-known context-window keys from a usage report's open
+ * `_meta` bag. `contextTokens` is the provider-measured occupancy — a
+ * level with the turn's output already included, never something to add
+ * `outputTokens` on top of. The limit accepts `contextLimit` (cli-ts /
+ * Backboard, Claude) or `modelContextWindow` (codex).
+ */
+function getContextUsageMeta(meta: Record<string, unknown> | undefined): { contextTokens?: number; contextLimit?: number } {
+	const contextTokens = typeof meta?.contextTokens === 'number' && meta.contextTokens > 0 ? meta.contextTokens : undefined;
+	const rawLimit = typeof meta?.contextLimit === 'number' ? meta.contextLimit
+		: typeof meta?.modelContextWindow === 'number' ? meta.modelContextWindow
+			: undefined;
+	const contextLimit = rawLimit !== undefined && rawLimit > 0 ? rawLimit : undefined;
+	return {
+		...(contextTokens !== undefined ? { contextTokens } : {}),
+		...(contextLimit !== undefined ? { contextLimit } : {}),
+	};
+}
+
 export function usageInfoToChatUsage(usage: UsageInfo | undefined): IChatUsage | undefined {
-	if (typeof usage?.inputTokens !== 'number' && typeof usage?.outputTokens !== 'number') {
+	const contextUsage = getContextUsageMeta(usage?._meta);
+	if (typeof usage?.inputTokens !== 'number' && typeof usage?.outputTokens !== 'number'
+		&& contextUsage.contextTokens === undefined && contextUsage.contextLimit === undefined) {
 		return undefined;
 	}
 	return {
 		kind: 'usage',
-		promptTokens: usage.inputTokens ?? 0,
-		completionTokens: usage.outputTokens ?? 0,
+		promptTokens: usage?.inputTokens ?? 0,
+		completionTokens: usage?.outputTokens ?? 0,
+		...contextUsage,
 	};
 }
 
@@ -1192,14 +1214,24 @@ export function updateRunningToolSpecificData(existing: ChatToolInvocation, tc: 
 
 	const subagentContent = getToolSubagentContent(tc);
 	if (subagentContent) {
-		existing.toolSpecificData = {
-			kind: 'subagent',
-			description: getSubagentTaskDescription(tc),
-			agentName: subagentContent.agentName,
-		};
-		// toolSpecificData is a plain property — notify state observers
-		// so ChatSubagentContentPart re-reads the updated metadata.
-		existing.notifyToolSpecificDataChanged();
+		const description = getSubagentTaskDescription(tc);
+		const current = existing.toolSpecificData;
+		// Write only on an actual change: `notifyToolSpecificDataChanged`
+		// re-sets the invocation's state observable, and this function is
+		// called from the session handler's per-tool-call autorun — an
+		// unconditional notify per pass would keep re-triggering it.
+		if (current?.kind !== 'subagent'
+			|| current.description !== description
+			|| current.agentName !== subagentContent.agentName) {
+			existing.toolSpecificData = {
+				kind: 'subagent',
+				description,
+				agentName: subagentContent.agentName,
+			};
+			// toolSpecificData is a plain property — notify state observers
+			// so ChatSubagentContentPart re-reads the updated metadata.
+			existing.notifyToolSpecificDataChanged();
+		}
 		return;
 	}
 

@@ -591,11 +591,58 @@ suite('claudeMapSessionEvents — direct mapper tests', () => {
 						inputTokens: 12,
 						outputTokens: 34,
 						cacheReadTokens: 5,
-						model: 'claude-test'
+						model: 'claude-test',
+						_meta: { contextLimit: 200_000 },
 					},
 				},
 			},
 		]);
+	});
+
+	test('result attaches _meta context occupancy from the last top-level assistant step and consumes it', () => {
+		const state = new ClaudeMapperState();
+
+		// Two top-level steps; the LAST per-step measurement wins. The
+		// result envelope's own usage is cumulative across steps and must
+		// not be used for occupancy.
+		const firstStep = makeAssistantMessage(SESSION_ID, []);
+		firstStep.message.usage.input_tokens = 1_000;
+		firstStep.message.usage.cache_read_input_tokens = 10_000;
+		mapSDKMessageToAgentSignals(firstStep, SESSION, TURN_ID, state, new NullLogService(), r());
+
+		const lastStep = makeAssistantMessage(SESSION_ID, []);
+		lastStep.message.usage.input_tokens = 2_000;
+		lastStep.message.usage.cache_read_input_tokens = 40_000;
+		lastStep.message.usage.cache_creation_input_tokens = 1_000;
+		lastStep.message.usage.output_tokens = 500;
+		mapSDKMessageToAgentSignals(lastStep, SESSION, TURN_ID, state, new NullLogService(), r());
+
+		const result = makeResultSuccess(SESSION_ID);
+		result.modelUsage = {
+			'claude-test': {
+				inputTokens: 3_000,
+				outputTokens: 500,
+				cacheReadInputTokens: 50_000,
+				cacheCreationInputTokens: 1_000,
+				webSearchRequests: 0,
+				costUSD: 0,
+				contextWindow: 200_000,
+				maxOutputTokens: 8192,
+			},
+		};
+
+		const signals = mapSDKMessageToAgentSignals(result, SESSION, TURN_ID, state, new NullLogService(), r());
+		assert.strictEqual(signals.length, 1);
+		const usage = signals[0];
+		assert.ok(usage.kind === 'action' && usage.action.type === ActionType.ChatUsage);
+		assert.deepStrictEqual(usage.action.usage._meta, { contextTokens: 43_500, contextLimit: 200_000 });
+
+		// Consumed on result: a second result in the same session reports
+		// no occupancy (and its empty modelUsage reports no limit).
+		const secondSignals = mapSDKMessageToAgentSignals(makeResultSuccess(SESSION_ID), SESSION, TURN_ID, state, new NullLogService(), r());
+		const secondUsage = secondSignals[0];
+		assert.ok(secondUsage.kind === 'action' && secondUsage.action.type === ActionType.ChatUsage);
+		assert.strictEqual(secondUsage.action.usage._meta, undefined);
 	});
 
 	test('result success without modelUsage omits the model field on ChatUsage', () => {

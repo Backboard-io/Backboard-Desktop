@@ -119,7 +119,7 @@ export interface CliTsAgentEvent {
 		readonly options?: readonly string[];
 	};
 	readonly response?: { readonly id: string; readonly answers?: readonly string[]; readonly decision?: string; readonly answer?: string };
-	readonly usage?: { readonly inputTokens?: number; readonly outputTokens?: number; readonly totalTokens?: number; readonly model?: string; readonly provider?: string };
+	readonly usage?: { readonly inputTokens?: number; readonly outputTokens?: number; readonly totalTokens?: number; readonly contextTokens?: number; readonly contextLimit?: number; readonly model?: string; readonly provider?: string };
 	readonly todos?: readonly unknown[];
 	readonly agentToolCallId?: string;
 	readonly childSessionId?: string;

@@ -310,7 +310,11 @@ export class ChatContextUsageWidget extends Disposable {
 		const maxInputTokens = configuredContextSize ?? modelMetadata?.maxInputTokens;
 		const maxOutputTokens = modelMetadata?.maxOutputTokens;
 
-		const totalContextWindow = (maxInputTokens ?? 0) + (maxOutputTokens ?? 0);
+		// Prefer the window the provider measured for this turn over the
+		// catalog metadata, which can lag or be missing entirely.
+		const totalContextWindow = usage?.contextLimit !== undefined && usage.contextLimit > 0
+			? usage.contextLimit
+			: (maxInputTokens ?? 0) + (maxOutputTokens ?? 0);
 		if (!usage || totalContextWindow <= 0) {
 			if (!this.currentData) {
 				this.hide();
@@ -322,7 +326,11 @@ export class ChatContextUsageWidget extends Disposable {
 		const completionTokens = usage.completionTokens;
 		const promptTokenDetails = usage.promptTokenDetails;
 		const outputBuffer = usage.outputBuffer;
-		const usedTokens = promptTokens + completionTokens;
+		// A measured occupancy is a level with the turn's output already
+		// included — never add completionTokens on top of it.
+		const usedTokens = usage.contextTokens !== undefined && usage.contextTokens > 0
+			? usage.contextTokens
+			: promptTokens + completionTokens;
 		const percentage = (usedTokens / totalContextWindow) * 100;
 
 		// Remaining reserve = whatever the model reserved minus what completions

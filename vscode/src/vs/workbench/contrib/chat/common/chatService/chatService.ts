@@ -165,6 +165,14 @@ export interface IChatUsage {
 	completionTokens: number;
 	outputBuffer?: number;
 	promptTokenDetails?: readonly IChatUsagePromptTokenDetail[];
+	/**
+	 * Provider-measured context-window occupancy in tokens. A level, not a
+	 * sum — the finished turn's output is already included, so consumers
+	 * must not add {@link completionTokens} on top of it.
+	 */
+	contextTokens?: number;
+	/** Context-window size in tokens the provider reported for this turn. */
+	contextLimit?: number;
 	kind: 'usage';
 }
 

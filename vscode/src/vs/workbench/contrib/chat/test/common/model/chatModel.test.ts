@@ -178,6 +178,26 @@ suite('ChatModel', () => {
 		});
 	});
 
+	test('acceptResponseProgress context-only usage change updates usage without inflating the completion counter', async function () {
+		const model = testDisposables.add(instantiationService.createInstance(ChatModel, undefined, { initialLocation: ChatAgentLocation.Chat, canUseTools: true }));
+		const text = 'hello';
+		const request = model.addRequest({ text, parts: [new ChatRequestTextPart(new OffsetRange(0, text.length), new Range(1, text.length, 1, text.length), text)] }, { variables: [] }, 0);
+
+		model.acceptResponseProgress(request, { kind: 'usage', promptTokens: 10, completionTokens: 2 });
+		// Same token counts, new measured occupancy — must not be swallowed…
+		model.acceptResponseProgress(request, { kind: 'usage', promptTokens: 10, completionTokens: 2, contextTokens: 4500, contextLimit: 128000 });
+		// …while an identical report is still deduplicated.
+		model.acceptResponseProgress(request, { kind: 'usage', promptTokens: 10, completionTokens: 2, contextTokens: 4500, contextLimit: 128000 });
+
+		assert.deepStrictEqual({
+			usage: request.response?.usage,
+			completionTokenCount: request.response?.completionTokenCount,
+		}, {
+			usage: { kind: 'usage', promptTokens: 10, completionTokens: 2, contextTokens: 4500, contextLimit: 128000 },
+			completionTokenCount: 2,
+		});
+	});
+
 	test('addCompleteRequest', async function () {
 		const model1 = testDisposables.add(instantiationService.createInstance(ChatModel, undefined, { initialLocation: ChatAgentLocation.Chat, canUseTools: true }));
 

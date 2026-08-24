@@ -1518,17 +1518,26 @@ export class ChatResponseModel extends Disposable implements IChatResponseModel 
 	}
 
 	setUsage(usage: IChatUsage): void {
-		if (this.isSameUsage(usage)) {
+		const currentUsage = this._usageObs.get();
+		const sameLegacyUsage = this.isSameLegacyUsage(usage);
+		if (sameLegacyUsage
+			&& currentUsage?.contextTokens === usage.contextTokens
+			&& currentUsage?.contextLimit === usage.contextLimit) {
 			return;
 		}
 
 		this._usageObs.set(usage, undefined);
-		const previousCompletionTokens = this._completionTokenCountObs.get() ?? 0;
-		this._completionTokenCountObs.set(previousCompletionTokens + usage.completionTokens, undefined);
+		// Only accumulate when the token counts themselves changed — a
+		// context-only update re-reports the same completionTokens and must
+		// not inflate the running counter.
+		if (!sameLegacyUsage) {
+			const previousCompletionTokens = this._completionTokenCountObs.get() ?? 0;
+			this._completionTokenCountObs.set(previousCompletionTokens + usage.completionTokens, undefined);
+		}
 		this._onDidChange.fire(defaultChatResponseModelChangeReason);
 	}
 
-	private isSameUsage(usage: IChatUsage): boolean {
+	private isSameLegacyUsage(usage: IChatUsage): boolean {
 		const currentUsage = this._usageObs.get();
 		return !!currentUsage
 			&& currentUsage.promptTokens === usage.promptTokens
