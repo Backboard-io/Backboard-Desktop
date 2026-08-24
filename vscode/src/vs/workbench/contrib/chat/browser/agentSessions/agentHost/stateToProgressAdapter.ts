@@ -1214,24 +1214,14 @@ export function updateRunningToolSpecificData(existing: ChatToolInvocation, tc: 
 
 	const subagentContent = getToolSubagentContent(tc);
 	if (subagentContent) {
-		const description = getSubagentTaskDescription(tc);
-		const current = existing.toolSpecificData;
-		// Write only on an actual change: `notifyToolSpecificDataChanged`
-		// re-sets the invocation's state observable, and this function is
-		// called from the session handler's per-tool-call autorun — an
-		// unconditional notify per pass would keep re-triggering it.
-		if (current?.kind !== 'subagent'
-			|| current.description !== description
-			|| current.agentName !== subagentContent.agentName) {
-			existing.toolSpecificData = {
-				kind: 'subagent',
-				description,
-				agentName: subagentContent.agentName,
-			};
-			// toolSpecificData is a plain property — notify state observers
-			// so ChatSubagentContentPart re-reads the updated metadata.
-			existing.notifyToolSpecificDataChanged();
-		}
+		existing.toolSpecificData = {
+			kind: 'subagent',
+			description: getSubagentTaskDescription(tc),
+			agentName: subagentContent.agentName,
+		};
+		// toolSpecificData is a plain property — notify state observers
+		// so ChatSubagentContentPart re-reads the updated metadata.
+		existing.notifyToolSpecificDataChanged();
 		return;
 	}
 

@@ -1974,19 +1974,11 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 		// confirmation flips `invocation.state` to `Executing` before the
 		// server echoes Running, and a state-comparison check would
 		// spuriously trigger re-confirmation in that gap.
-		//
-		// `invocation.state` is read with `get()` (untracked) throughout:
-		// this autorun reacts to protocol updates via `part$` only, while
-		// its body writes invocation state (`transitionFromStreaming`,
-		// `updateRunningToolSpecificData` → `notifyToolSpecificDataChanged`,
-		// `didExecuteTool`). A tracked read would make those writes
-		// re-trigger the autorun against its own effects — an infinite
-		// update loop while a running tool call notifies on every pass.
 		let previousStatus: ToolCallStatus | undefined;
 		store.add(autorun(reader => {
 			const tc = part$.read(reader).toolCall;
 			const status = tc.status;
-			if (status === ToolCallStatus.Streaming && invocation.state.get().type === IChatToolInvocation.StateKind.Streaming) {
+			if (status === ToolCallStatus.Streaming && invocation.state.read(reader).type === IChatToolInvocation.StateKind.Streaming) {
 				invocation.updatePartialInput(tc.partialInput ?? '');
 				const streamingMessage = stringOrMarkdownToString(tc.invocationMessage, this._config.connectionAuthority);
 				if (streamingMessage) {
@@ -2009,7 +2001,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 				this._awaitToolConfirmation(confirmInvocation, toolCallId, opts.backendSession, opts.turnId, opts.cancellationToken, tc.options);
 				invocation = confirmInvocation;
 			} else if (status === ToolCallStatus.Running || status === ToolCallStatus.PendingResultConfirmation) {
-				if (status === ToolCallStatus.Running && invocation.state.get().type === IChatToolInvocation.StateKind.Streaming) {
+				if (status === ToolCallStatus.Running && invocation.state.read(reader).type === IChatToolInvocation.StateKind.Streaming) {
 					// AHP created this invocation while the LM was still assembling
 					// its tool arguments. Move the same card into execution once the
 					// authoritative ready/start event arrives, instead of leaving the
