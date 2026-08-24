@@ -143,11 +143,13 @@
 	display: none;
 }
 
-/* macOS native: invisible traffic-light spacer. Hidden in fullscreen or while
- * maximized so the mode menu stays at the top-left edge, and in the phone
- * layout. The traffic lights are OS-drawn and do not scale with the workbench
- * zoom, so the spacer counter-scales with `--zoom-factor` (published by
- * `panelHeader.ts`) to keep a constant physical width at any zoom. */
+/* macOS native: invisible traffic-light spacer. Hidden only in true
+ * fullscreen (where macOS auto-hides the traffic lights) and in the phone
+ * layout — a maximized/zoomed/tiled window still shows them, so the spacer
+ * must stay. The traffic lights are OS-drawn and do not scale with the
+ * workbench zoom, so the spacer counter-scales with `--zoom-factor`
+ * (published by `panelHeader.ts`) to keep a constant physical width at any
+ * zoom. */
 .agent-sessions-workbench.mac .sessions-panel-header .mac-window-controls-spacer {
 	-webkit-app-region: drag;
 	background: transparent;
@@ -162,8 +164,7 @@
 	height: 100%;
 }
 
-.agent-sessions-workbench.fullscreen .sessions-panel-header .mac-window-controls-spacer,
-.agent-sessions-workbench.maximized .sessions-panel-header .mac-window-controls-spacer {
+.agent-sessions-workbench.fullscreen .sessions-panel-header .mac-window-controls-spacer {
 	display: none;
 }
 

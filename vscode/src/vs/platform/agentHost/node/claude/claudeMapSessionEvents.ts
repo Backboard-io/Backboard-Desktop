@@ -58,6 +58,17 @@ export class ClaudeMapperState {
 	private _currentMessageId: string | undefined;
 
 	/**
+	 * Context occupancy (tokens) of the most recent top-level assistant
+	 * step: `input + cache_read + cache_creation + output` of that single
+	 * API call — a level, not a sum. The `result` envelope's usage is
+	 * cumulative across steps (cache reads re-count per step), so the
+	 * last per-step measurement is the only faithful occupancy. Consumed
+	 * (and cleared) by {@link mapResult} so a value can never leak into a
+	 * later turn.
+	 */
+	private _lastTopLevelContextTokens: number | undefined;
+
+	/**
 	 * Phase 8 — file-edit content pre-staged by
 	 * `ClaudeAgentSession._observeUserMessage` and consumed by
 	 * {@link mapUserMessage} when the matching `tool_result` arrives.
@@ -163,6 +174,18 @@ export class ClaudeMapperState {
 			this._completedFileEdits.delete(toolUseId);
 		}
 		return content;
+	}
+
+	/** Record the latest top-level per-step context occupancy. */
+	recordTopLevelContextTokens(tokens: number): void {
+		this._lastTopLevelContextTokens = tokens;
+	}
+
+	/** Consume the last recorded occupancy; cleared on every `result`. */
+	takeTopLevelContextTokens(): number | undefined {
+		const tokens = this._lastTopLevelContextTokens;
+		this._lastTopLevelContextTokens = undefined;
+		return tokens;
 	}
 
 	/**
@@ -291,6 +314,19 @@ function mapAssistantCanonical(
 	registry: SubagentRegistry,
 ): AgentSignal[] {
 	if (parentToolUseId === null) {
+		// Track this step's context occupancy for the turn's usage report:
+		// per-step API usage is the only faithful occupancy measurement —
+		// the `result` envelope's usage is cumulative across steps.
+		const stepUsage = message.message.usage;
+		if (stepUsage) {
+			const contextTokens = (stepUsage.input_tokens ?? 0)
+				+ (stepUsage.cache_read_input_tokens ?? 0)
+				+ (stepUsage.cache_creation_input_tokens ?? 0)
+				+ (stepUsage.output_tokens ?? 0);
+			if (contextTokens > 0) {
+				state.recordTopLevelContextTokens(contextTokens);
+			}
+		}
 		const top: AgentSignal[] = [];
 		for (const block of message.message.content) {
 			if (block.type !== 'tool_use' || !SUBAGENT_SPAWNING_TOOL_NAMES.has(block.name)) {
@@ -418,11 +454,25 @@ function mapResult(
 	registry: SubagentRegistry,
 ): AgentSignal[] {
 	const signals: AgentSignal[] = [];
+	// Consume unconditionally so a non-success result cannot leak this
+	// turn's measurement into the next turn's usage report.
+	const contextTokens = state.takeTopLevelContextTokens();
 	if (message.subtype === 'success') {
 		// `modelUsage` is keyed by model name; pick the first key as the
 		// reported model. Phase 6 turns are single-model; multi-model
 		// attribution is a Phase 7+ concern.
 		const modelKey = Object.keys(message.modelUsage)[0];
+		// Context measurement rides the open `_meta` bag (the protocol dir
+		// is generated): occupancy from the last top-level step, window
+		// from the SDK's per-model usage summary.
+		const contextWindow = modelKey ? message.modelUsage[modelKey]?.contextWindow : undefined;
+		const meta: Record<string, unknown> = {};
+		if (typeof contextTokens === 'number' && contextTokens > 0) {
+			meta.contextTokens = contextTokens;
+		}
+		if (typeof contextWindow === 'number' && contextWindow > 0) {
+			meta.contextLimit = contextWindow;
+		}
 		signals.push({
 			kind: 'action',
 			session,
@@ -434,6 +484,7 @@ function mapResult(
 					outputTokens: message.usage.output_tokens,
 					cacheReadTokens: message.usage.cache_read_input_tokens,
 					...(modelKey ? { model: modelKey } : {}),
+					...(Object.keys(meta).length > 0 ? { _meta: meta } : {}),
 				},
 			},
 		});

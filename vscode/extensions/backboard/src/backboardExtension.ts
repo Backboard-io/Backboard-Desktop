@@ -30,8 +30,11 @@ const backboardOAuthClientId = 'Backboard_oauth_q_cli';
 const backboardOAuthScope = 'openid email profile';
 const backboardOAuthDeviceGrantType = 'urn:ietf:params:oauth:grant-type:device_code';
 const backboardOAuthTimeoutMs = 5 * 60 * 1000;
-const commitMessageModelProvider = 'openrouter';
-const commitMessageModel = 'deepseek/deepseek-v4-flash';
+const commitMessageModelProvider = 'openai';
+const commitMessageModel = 'gpt-4o-mini';
+// One-shot generation: hide the chat tools that survive manual mode so the
+// model cannot spend extra round trips on todo/read ceremony before answering.
+const commitMessageExcludedTools = ['Read', 'Create', 'Grep', 'Glob', 'FetchUrl', 'WebSearch', 'TodoWrite', 'Agent'];
 const maxCommitDiffChars = 60_000;
 let backboardToolOutput: vscode.OutputChannel | undefined;
 
@@ -198,7 +201,8 @@ async function generateBackboardCommitMessage(bridge: BackboardBridge, rootUri: 
 					provider: commitMessageModelProvider,
 					model: commitMessageModel,
 					mode: 'manual',
-					intensity: 'fast'
+					memory: 'off',
+					excludedTools: commitMessageExcludedTools
 				}, event => {
 					if (event.type === 'assistantTextDelta' && event.text) {
 						responseText += event.text;
@@ -2546,10 +2550,18 @@ function buildServeOp(command: string, requestId: string, params: unknown): Reco
 		];
 		// No approval or question UI exists in this panel: run in bypass mode,
 		// hide AskUser, and in manual/ask modes hide write tools entirely
-		// (parity with the old bridge's manual-mode denials).
-		const excludedTools = mode === 'manual' || mode === 'ask'
+		// (parity with the old bridge's manual-mode denials). Callers may
+		// exclude further tools for the turn on top of the mode-derived set.
+		const modeExcludedTools = mode === 'manual' || mode === 'ask'
 			? ['AskUser', 'Write', 'Edit', 'ApplyPatch', 'Execute']
 			: ['AskUser'];
+		const extraExcludedTools = Array.isArray(record.excludedTools)
+			? record.excludedTools.filter((name): name is string => typeof name === 'string')
+			: [];
+		const excludedTools = [...new Set([...modeExcludedTools, ...extraExcludedTools])];
+		// setMemory persists on the serve session, so every submit asserts a
+		// value: the cli-ts default unless the caller overrides for the turn.
+		const memory = typeof record.memory === 'string' ? record.memory : 'auto';
 		const thinking = intensity === 'balanced' ? 'medium' : intensity === 'deep' ? 'high' : intensity === 'fast' ? 'low' : undefined;
 		return {
 			op: 'submit',
@@ -2559,6 +2571,7 @@ function buildServeOp(command: string, requestId: string, params: unknown): Reco
 			model: `${provider}/${model}`,
 			permission: 'bypass',
 			excludedTools,
+			memory,
 			...(thinking ? { thinking } : {}),
 			...(files.length ? { files } : {}),
 		};

@@ -311,6 +311,24 @@ suite('stateToProgressAdapter', () => {
 			);
 		});
 
+		test('maps _meta context measurement onto the usage part', () => {
+			const turn = createTurn({
+				usage: { inputTokens: 1200, outputTokens: 300, _meta: { contextTokens: 45_000, contextLimit: 200_000 } },
+				responseParts: [],
+			});
+
+			const history = turnsToHistory(URI.file('/'), [turn], 'p');
+			const response = history[1];
+			assert.strictEqual(response.type, 'response');
+			if (response.type !== 'response') { return; }
+
+			const usage = response.parts.find((part): part is IChatUsage => part.kind === 'usage');
+			assert.deepStrictEqual(
+				usage && { promptTokens: usage.promptTokens, completionTokens: usage.completionTokens, contextTokens: usage.contextTokens, contextLimit: usage.contextLimit },
+				{ promptTokens: 1200, completionTokens: 300, contextTokens: 45_000, contextLimit: 200_000 },
+			);
+		});
+
 		test('request history includes restored model id', () => {
 			const turn = createTurn({
 				message: message('Use restored model'),
@@ -1203,6 +1221,30 @@ suite('stateToProgressAdapter', () => {
 			assert.deepStrictEqual(
 				{ kind: usage.kind, promptTokens: usage.promptTokens, completionTokens: usage.completionTokens },
 				{ kind: 'usage', promptTokens: 1000, completionTokens: 250 },
+			);
+		});
+
+		test('context-only usage still yields a usage part', () => {
+			const activeTurn = createActiveTurnState();
+			activeTurn.usage = { _meta: { contextTokens: 5_000, contextLimit: 128_000 } };
+
+			const result = activeTurnToProgress(URI.file('/'), activeTurn, undefined);
+			const usage = result[0] as IChatUsage;
+			assert.deepStrictEqual(
+				{ kind: usage.kind, promptTokens: usage.promptTokens, completionTokens: usage.completionTokens, contextTokens: usage.contextTokens, contextLimit: usage.contextLimit },
+				{ kind: 'usage', promptTokens: 0, completionTokens: 0, contextTokens: 5_000, contextLimit: 128_000 },
+			);
+		});
+
+		test('reads the codex modelContextWindow meta key as the context limit', () => {
+			const activeTurn = createActiveTurnState();
+			activeTurn.usage = { inputTokens: 10, outputTokens: 5, _meta: { modelContextWindow: 400_000 } };
+
+			const result = activeTurnToProgress(URI.file('/'), activeTurn, undefined);
+			const usage = result[0] as IChatUsage;
+			assert.deepStrictEqual(
+				{ contextTokens: usage.contextTokens, contextLimit: usage.contextLimit },
+				{ contextTokens: undefined, contextLimit: 400_000 },
 			);
 		});
 

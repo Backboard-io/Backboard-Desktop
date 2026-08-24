@@ -407,12 +407,14 @@
 	overflow: hidden;
 }
 
+/* macOS: the native traffic lights are drawn on top of the web content, so
+   reserve room for them. A maximized (zoomed/tiled) window still shows them;
+   only true fullscreen auto-hides them, so only then is the offset dropped. */
 .monaco-workbench.mac:not(.web) .part.titlebar > .titlebar-container > .titlebar-left > .titlebar-left-toolbar-container {
 	margin-left: 72px;
 }
 
-.monaco-workbench.mac:not(.web).fullscreen .part.titlebar > .titlebar-container > .titlebar-left > .titlebar-left-toolbar-container,
-.monaco-workbench.mac:not(.web).maximized .part.titlebar > .titlebar-container > .titlebar-left > .titlebar-left-toolbar-container {
+.monaco-workbench.mac:not(.web).fullscreen .part.titlebar > .titlebar-container > .titlebar-left > .titlebar-left-toolbar-container {
 	margin-left: 4px;
 }
 

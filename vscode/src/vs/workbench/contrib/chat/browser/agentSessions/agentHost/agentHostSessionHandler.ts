@@ -1762,6 +1762,8 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 					&& lastUsage.promptTokens === usage.promptTokens
 					&& lastUsage.completionTokens === usage.completionTokens
 					&& lastUsage.outputBuffer === usage.outputBuffer
+					&& lastUsage.contextTokens === usage.contextTokens
+					&& lastUsage.contextLimit === usage.contextLimit
 					&& equals(lastUsage.promptTokenDetails, usage.promptTokenDetails)) {
 					return;
 				}

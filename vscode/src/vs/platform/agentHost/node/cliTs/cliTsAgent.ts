@@ -1179,10 +1179,27 @@ export class CliTsAgent extends Disposable implements IAgent {
 				if (!usage) {
 					return;
 				}
+				// Backboard's `context_usage` measurement rides the open `_meta`
+				// bag (the protocol dir is generated and must not grow fields):
+				// `contextTokens` is the thread's measured occupancy — a level
+				// with the turn's output included — and `contextLimit` is the
+				// window the server applied.
+				const meta: Record<string, unknown> = {};
+				if (typeof usage.contextTokens === 'number' && usage.contextTokens > 0) {
+					meta.contextTokens = usage.contextTokens;
+				}
+				if (typeof usage.contextLimit === 'number' && usage.contextLimit > 0) {
+					meta.contextLimit = usage.contextLimit;
+				}
 				fire({
 					type: ActionType.ChatUsage,
 					turnId,
-					usage: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, model: usage.model },
+					usage: {
+						inputTokens: usage.inputTokens,
+						outputTokens: usage.outputTokens,
+						model: usage.model,
+						...(Object.keys(meta).length > 0 ? { _meta: meta } : {}),
+					},
 				});
 				return;
 			}
