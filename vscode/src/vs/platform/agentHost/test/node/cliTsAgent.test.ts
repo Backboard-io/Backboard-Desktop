@@ -9,7 +9,7 @@ import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/c
 import { NullLogService } from '../../../log/common/log.js';
 import { AgentSession, type AgentSignal } from '../../common/agentService.js';
 import { ActionType } from '../../common/state/sessionActions.js';
-import { buildSubagentSessionUri, ResponsePartKind, ToolCallStatus, type ToolCallResponsePart } from '../../common/state/sessionState.js';
+import { buildSubagentSessionUri, ResponsePartKind, ToolCallContributorKind, ToolCallStatus, ToolResultContentType, type ToolCallResponsePart } from '../../common/state/sessionState.js';
 import { CliTsAgent } from '../../node/cliTs/cliTsAgent.js';
 
 suite('CliTsAgent tool metadata', () => {
@@ -328,5 +328,107 @@ suite('CliTsAgent tool metadata', () => {
 		const turns = await agent.getSessionMessages(sessionUri);
 		assert.strictEqual(turns[0].responseParts.length, 1);
 		assert.strictEqual(turns[0].responseParts[0]?.kind, ResponsePartKind.Markdown);
+	});
+
+	test('client tool call carries its contributor and full input, and the completion round-trips', () => {
+		const agent = createAgent();
+		const progress: AgentSignal[] = [];
+		store.add(agent.onDidSessionProgress(signal => progress.push(signal)));
+		const sessionUri = AgentSession.uri('backboard', 'client-tool-live');
+		const notified: unknown[] = [];
+		const session = {
+			sessionUri,
+			sessionId: AgentSession.id(sessionUri),
+			clientTools: { clientId: 'client-1', tools: [{ name: 'open_browser_page' }] },
+			turnAutoApproves: false,
+			pendingClientToolCalls: new Set<string>(),
+			proc: { isRunning: true, notify: (op: unknown) => notified.push(op), dispose: () => { } },
+		};
+		const internals = agent as unknown as {
+			_sessions: Map<string, unknown>;
+			_handleMappedAgentEvent(session: unknown, event: unknown, turn: unknown): void;
+		};
+		internals._sessions.set(session.sessionId, session);
+		const turn = { turnId: 'turn-client', startedToolCalls: new Set<string>(), toolInputSummaries: new Map<string, string>(), toolInputs: new Map<string, { name: string; input: unknown }>() };
+
+		internals._handleMappedAgentEvent(session, {
+			type: 'client_tool:call',
+			toolCallId: 'call-client-1',
+			name: 'open_browser_page',
+			input: { url: 'http://localhost:8765/index.html' },
+		}, turn);
+
+		const actions = progress
+			.filter(signal => signal.kind === 'action')
+			.map(signal => signal.kind === 'action' ? signal.action : undefined);
+		const start = actions.find(action => action?.type === ActionType.ChatToolCallStart);
+		assert.deepStrictEqual(start, {
+			type: ActionType.ChatToolCallStart,
+			turnId: 'turn-client',
+			toolCallId: 'call-client-1',
+			toolName: 'open_browser_page',
+			displayName: 'Open Browser Page',
+			contributor: { kind: ToolCallContributorKind.Client, clientId: 'client-1' },
+			_meta: { source: 'cli-ts' },
+		});
+		const ready = actions.find(action => action?.type === ActionType.ChatToolCallReady);
+		assert.ok(ready && ready.type === ActionType.ChatToolCallReady);
+		assert.strictEqual(ready.toolInput, JSON.stringify({ url: 'http://localhost:8765/index.html' }));
+		assert.strictEqual(ready._meta?.autoApproveBySetting, undefined, 'non-bypass turns must not auto-approve');
+		assert.ok(session.pendingClientToolCalls.has('call-client-1'));
+
+		// The workbench's ChatToolCallComplete routes back through the provider
+		// and answers the parked serve call, images intact.
+		agent.onClientToolCallComplete(sessionUri, 'call-client-1', {
+			success: true,
+			pastTenseMessage: 'Opened page',
+			content: [
+				{ type: ToolResultContentType.Text, text: 'Page ID: page_1' },
+				{ type: ToolResultContentType.EmbeddedResource, data: 'aGk=', contentType: 'image/jpeg' },
+			],
+		});
+		assert.deepStrictEqual(notified, [{
+			op: 'clientToolResult',
+			id: 'call-client-1',
+			result: {
+				success: true,
+				content: [
+					{ type: 'text', text: 'Page ID: page_1' },
+					{ type: 'image', mimeType: 'image/jpeg', dataBase64: 'aGk=' },
+				],
+			},
+		}]);
+		assert.strictEqual(session.pendingClientToolCalls.size, 0);
+
+		// A second completion for the same id (cli-ts's own tool:result echo)
+		// is not forwarded again.
+		agent.onClientToolCallComplete(sessionUri, 'call-client-1', { success: true, pastTenseMessage: 'Opened page' });
+		assert.strictEqual(notified.length, 1);
+	});
+
+	test('a declined client tool call is answered with an error result', () => {
+		const agent = createAgent();
+		const sessionUri = AgentSession.uri('backboard', 'client-tool-denied');
+		const notified: unknown[] = [];
+		const session = {
+			sessionUri,
+			sessionId: AgentSession.id(sessionUri),
+			pendingClientToolCalls: new Set<string>(['call-denied']),
+			proc: { isRunning: true, notify: (op: unknown) => notified.push(op), dispose: () => { } },
+		};
+		const internals = agent as unknown as { _sessions: Map<string, unknown> };
+		internals._sessions.set(session.sessionId, session);
+
+		agent.respondToPermissionRequest('call-denied', false);
+		assert.deepStrictEqual(notified, [{
+			op: 'clientToolResult',
+			id: 'call-denied',
+			error: 'The user declined this tool call.',
+		}]);
+		assert.strictEqual(session.pendingClientToolCalls.size, 0);
+
+		// Approvals and unknown ids leave the pending set alone.
+		agent.respondToPermissionRequest('call-unknown', false);
+		assert.strictEqual(notified.length, 1);
 	});
 });

@@ -813,8 +813,16 @@ export class AgentSideEffects extends Disposable {
 					this._toolCallAgents.delete(toolCallKey);
 					const agent = this._options.agents.get().find(a => a.id === agentId);
 					agent?.respondToPermissionRequest(action.toolCallId, action.approved);
+				} else if (!action.approved) {
+					// Client-executed tool calls have no agent-host-side
+					// confirmation registration, and a pre-execution denial
+					// dispatches no ChatToolCallComplete either. Forward the
+					// denial to the session's provider so a runtime waiting on
+					// the call's result (e.g. cli-ts) is unparked.
+					const agent = this._options.getAgent(channel);
+					agent?.respondToPermissionRequest(action.toolCallId, false);
 				} else {
-					this._logService.warn(`[AgentSideEffects] No agent for tool call confirmation: ${action.toolCallId}`);
+					this._logService.trace(`[AgentSideEffects] No agent registered for tool call confirmation: ${action.toolCallId}`);
 				}
 
 				// When the user chose "Allow in this Session", add the tool

@@ -42,9 +42,16 @@ export interface AccessibilitySnapshot {
 
 export type PlatformAction =
 	| { kind: "openApp"; appName: string }
-	| { kind: "type"; text: string }
-	| { kind: "key"; key: PlatformKey }
-	| { kind: "click"; point: ScreenPoint; button: "left" | "right" | "middle" };
+	| { kind: "type"; text: string; mode?: "insert" | "keys" }
+	| {
+			kind: "key";
+			key: PlatformKey;
+			holdMs?: number;
+			phase?: "down" | "up" | "press";
+	  }
+	| { kind: "click"; point: ScreenPoint; button: "left" | "right" | "middle" }
+	| { kind: "scroll"; point?: ScreenPoint; deltaX: number; deltaY: number }
+	| { kind: "drag"; from: ScreenPoint; to: ScreenPoint; durationMs?: number };
 
 export interface ScreenshotCapture {
 	path: string;

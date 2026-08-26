@@ -29,7 +29,11 @@ describe("AssistantAccumulator", () => {
 		accumulator.finalize();
 
 		expect(events).toEqual([
-			{ type: "assistant:reasoning", turnId: "turn_1", text: "thinking about it" },
+			{
+				type: "assistant:reasoning",
+				turnId: "turn_1",
+				text: "thinking about it",
+			},
 		]);
 		expect(session.getMessages()).toEqual([]);
 	});

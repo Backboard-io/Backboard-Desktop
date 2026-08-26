@@ -41,7 +41,16 @@ export const TypeBrowserToolData: IToolData = {
 			},
 			key: {
 				type: 'string',
-				description: 'A key or key combination to press (e.g., "Enter", "Tab", "Control+c"). One of "text" or "key" must be provided.'
+				description: 'A key or key combination to press (e.g., "Enter", "Tab", "ArrowLeft", "w", "Control+c"). One of "text" or "key" must be provided.'
+			},
+			holdMs: {
+				type: 'number',
+				description: 'Hold the key down for this many milliseconds before releasing (max 10000). Use for game controls that respond to held keys, e.g. holding ArrowRight to move.'
+			},
+			keyAction: {
+				type: 'string',
+				enum: ['press', 'down', 'up'],
+				description: 'For "key": "down" presses without releasing and "up" releases a held key, letting you hold one key across calls while pressing others. Default is "press" (down+up).'
 			},
 			ref: {
 				type: 'string',
@@ -65,10 +74,14 @@ interface ITypeBrowserToolParams {
 	text?: string;
 	submit?: boolean;
 	key?: string;
+	holdMs?: number;
+	keyAction?: 'press' | 'down' | 'up';
 	ref?: string;
 	selector?: string;
 	element?: string;
 }
+
+const MAX_KEY_HOLD_MS = 10_000;
 
 export class TypeBrowserTool implements IToolImpl {
 	constructor(
@@ -82,6 +95,24 @@ export class TypeBrowserTool implements IToolImpl {
 
 		if (params.key) {
 			const key = escapeMarkdownSyntaxTokens(params.key);
+			if (params.keyAction === 'down') {
+				return {
+					invocationMessage: new MarkdownString(localize('browser.holdKey.invocation', "Holding key `{0}` down in {1}", key, link)),
+					pastTenseMessage: new MarkdownString(localize('browser.holdKey.past', "Held key `{0}` down in {1}", key, link)),
+				};
+			}
+			if (params.keyAction === 'up') {
+				return {
+					invocationMessage: new MarkdownString(localize('browser.releaseKey.invocation', "Releasing key `{0}` in {1}", key, link)),
+					pastTenseMessage: new MarkdownString(localize('browser.releaseKey.past', "Released key `{0}` in {1}", key, link)),
+				};
+			}
+			if (params.holdMs && params.holdMs > 0) {
+				return {
+					invocationMessage: new MarkdownString(localize('browser.holdKeyFor.invocation', "Holding key `{0}` for {1}ms in {2}", key, params.holdMs, link)),
+					pastTenseMessage: new MarkdownString(localize('browser.holdKeyFor.past', "Held key `{0}` for {1}ms in {2}", key, params.holdMs, link)),
+				};
+			}
 			if (hasTarget && params.element) {
 				const element = escapeMarkdownSyntaxTokens(params.element);
 				return {
@@ -135,6 +166,24 @@ export class TypeBrowserTool implements IToolImpl {
 
 		// Press key
 		if (params.key) {
+			const keyAction = params.keyAction ?? 'press';
+			// Held keys and split down/up presses target the focused element
+			// (games listen on the document), so they intentionally ignore
+			// element targeting.
+			if (keyAction === 'down') {
+				return playwrightInvoke(this.playwrightService, sessionId, params.pageId, (page, key) => page.keyboard.down(key), params.key);
+			}
+			if (keyAction === 'up') {
+				return playwrightInvoke(this.playwrightService, sessionId, params.pageId, (page, key) => page.keyboard.up(key), params.key);
+			}
+			const holdMs = Math.min(Math.max(params.holdMs ?? 0, 0), MAX_KEY_HOLD_MS);
+			if (holdMs > 0) {
+				return playwrightInvoke(this.playwrightService, sessionId, params.pageId, async (page, key, hold) => {
+					await page.keyboard.down(key);
+					await page.waitForTimeout(hold);
+					await page.keyboard.up(key);
+				}, params.key, holdMs);
+			}
 			if (selector) {
 				return playwrightInvoke(this.playwrightService, sessionId, params.pageId, (page, sel, key) => page.locator(sel).press(key), selector, params.key);
 			}

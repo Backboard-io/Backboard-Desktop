@@ -18,7 +18,7 @@ export const ReadBrowserToolData: IToolData = {
 	toolReferenceName: BrowserChatToolReferenceName.ReadPage,
 	displayName: localize('readBrowserTool.displayName', 'Read Page'),
 	userDescription: localize('readBrowserTool.userDescription', 'Read the content of a browser page'),
-	modelDescription: 'Get a snapshot of the current browser page state. This is better than screenshot.',
+	modelDescription: 'Get an accessibility snapshot of the current browser page state. Prefer this over screenshots for pages with DOM content; canvas-rendered content (games, drawings) is invisible here — use screenshot_page and coordinates for those.',
 	icon: Codicon.fileText,
 	source: ToolDataSource.Internal,
 	inputSchema: {

@@ -141,6 +141,17 @@ describe("BrowserHarnessPlatform", () => {
 				code: "Enter",
 				windowsVirtualKeyCode: 13,
 				modifiers: 4,
+				text: "\r",
+			},
+		});
+		expect(client.calls).toContainEqual({
+			method: "Input.dispatchKeyEvent",
+			params: {
+				type: "keyUp",
+				key: "Enter",
+				code: "Enter",
+				windowsVirtualKeyCode: 13,
+				modifiers: 4,
 			},
 		});
 		expect(client.calls).toContainEqual({
@@ -153,6 +164,119 @@ describe("BrowserHarnessPlatform", () => {
 				clickCount: 1,
 			},
 		});
+	});
+
+	it("holds keys with auto-repeat, preserves character case, and accepts DOM key names", async () => {
+		const client = new FakeBrowserClient();
+		const platform = new BrowserHarnessPlatform(client);
+		const signal = new AbortController().signal;
+
+		await platform.execute(
+			{ kind: "key", key: { key: "w", modifiers: [] } },
+			signal,
+		);
+		await platform.execute(
+			{ kind: "key", key: { key: "ArrowRight", modifiers: [] }, holdMs: 130 },
+			signal,
+		);
+		await platform.execute(
+			{ kind: "key", key: { key: "ArrowUp", modifiers: [] }, phase: "down" },
+			signal,
+		);
+		await platform.execute(
+			{ kind: "key", key: { key: "ArrowUp", modifiers: [] }, phase: "up" },
+			signal,
+		);
+
+		const keyEvents = client.calls
+			.filter((call) => call.method === "Input.dispatchKeyEvent")
+			.map((call) => call.params);
+		expect(keyEvents[0]).toMatchObject({
+			type: "keyDown",
+			key: "w",
+			code: "KeyW",
+			text: "w",
+		});
+		expect(keyEvents[1]).toMatchObject({ type: "keyUp", key: "w" });
+		expect(
+			keyEvents.filter(
+				(event) => event.key === "ArrowRight" && event.autoRepeat === true,
+			).length,
+		).toBeGreaterThanOrEqual(1);
+		const arrowUpEvents = keyEvents.filter((event) => event.key === "ArrowUp");
+		expect(arrowUpEvents.map((event) => event.type)).toEqual([
+			"rawKeyDown",
+			"keyUp",
+		]);
+	});
+
+	it("dispatches scroll wheel and drag sequences in css coordinates", async () => {
+		const client = new FakeBrowserClient();
+		const platform = new BrowserHarnessPlatform(client);
+		const dir = await mkdtemp(join(tmpdir(), "browser-platform-"));
+		tempDirs.push(dir);
+		// Prime screenshotToCssScale = 2 (1px screenshot / 0.5css viewport).
+		await platform.screenshot(
+			join(dir, "screen.png"),
+			new AbortController().signal,
+		);
+
+		await platform.execute(
+			{ kind: "scroll", point: { x: 10, y: 20 }, deltaX: 0, deltaY: 300 },
+			new AbortController().signal,
+		);
+		await platform.execute(
+			{
+				kind: "drag",
+				from: { x: 2, y: 2 },
+				to: { x: 10, y: 10 },
+				durationMs: 32,
+			},
+			new AbortController().signal,
+		);
+
+		expect(client.calls).toContainEqual({
+			method: "Input.dispatchMouseEvent",
+			params: { type: "mouseWheel", x: 5, y: 10, deltaX: 0, deltaY: 300 },
+		});
+		const mouse = client.calls
+			.filter((call) => call.method === "Input.dispatchMouseEvent")
+			.map((call) => call.params);
+		expect(mouse).toContainEqual({
+			type: "mousePressed",
+			x: 1,
+			y: 1,
+			button: "left",
+			clickCount: 1,
+		});
+		expect(mouse).toContainEqual({
+			type: "mouseReleased",
+			x: 5,
+			y: 5,
+			button: "left",
+			clickCount: 1,
+		});
+	});
+
+	it("types as real key events in keys mode", async () => {
+		const client = new FakeBrowserClient();
+		const platform = new BrowserHarnessPlatform(client);
+		await platform.execute(
+			{ kind: "type", text: "hi", mode: "keys" },
+			new AbortController().signal,
+		);
+		const keyEvents = client.calls
+			.filter((call) => call.method === "Input.dispatchKeyEvent")
+			.map((call) => call.params);
+		expect(keyEvents.map((event) => [event.type, event.key])).toEqual([
+			["keyDown", "h"],
+			["keyUp", "h"],
+			["keyDown", "i"],
+			["keyUp", "i"],
+		]);
+		expect(
+			client.calls.some((call) => call.method === "Input.insertText"),
+		).toBe(false);
 	});
 });
 

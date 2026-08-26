@@ -121,7 +121,16 @@ describe("BrowserTool", () => {
 					unknown
 				>
 			).enum,
-		).toEqual(["screenshot", "navigate", "click", "type", "key", "wait"]);
+		).toEqual([
+			"screenshot",
+			"navigate",
+			"click",
+			"type",
+			"key",
+			"scroll",
+			"drag",
+			"wait",
+		]);
 		expect(items.properties as Record<string, unknown>).toHaveProperty("url");
 		expect(items.properties as Record<string, unknown>).toHaveProperty(
 			"elementId",

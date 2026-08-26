@@ -80,7 +80,7 @@ export class BrowserRuntime {
 					return await this.capture(ctx);
 				case "type":
 					await platform.execute(
-						{ kind: "type", text: action.text },
+						{ kind: "type", text: action.text, mode: action.mode },
 						ctx.signal,
 					);
 					return {
@@ -90,13 +90,18 @@ export class BrowserRuntime {
 					};
 				case "key":
 					await platform.execute(
-						{ kind: "key", key: normalizeKey(action.key, action.modifiers) },
+						{
+							kind: "key",
+							key: normalizeKey(action.key, action.modifiers),
+							holdMs: action.holdMs,
+							phase: action.phase,
+						},
 						ctx.signal,
 					);
 					return {
 						success: true,
 						action: action.action,
-						summary: "Pressed key.",
+						summary: keySummary(action),
 					};
 				case "click":
 					await platform.execute(
@@ -104,6 +109,30 @@ export class BrowserRuntime {
 							kind: "click",
 							point: this.resolveTarget(action.target),
 							button: action.button ?? "left",
+						},
+						ctx.signal,
+					);
+					return await this.capture(ctx);
+				case "scroll":
+					await platform.execute(
+						{
+							kind: "scroll",
+							point: action.target
+								? this.resolveTarget(action.target)
+								: undefined,
+							deltaX: action.deltaX ?? 0,
+							deltaY: action.deltaY ?? 0,
+						},
+						ctx.signal,
+					);
+					return await this.capture(ctx);
+				case "drag":
+					await platform.execute(
+						{
+							kind: "drag",
+							from: this.resolveTarget(action.from),
+							to: this.resolveTarget(action.to),
+							durationMs: action.durationMs,
 						},
 						ctx.signal,
 					);
@@ -174,14 +203,30 @@ export class BrowserRuntime {
 	}
 }
 
+/**
+ * Pass the key through with its case preserved: the platform resolves named
+ * keys ("ArrowUp", "ENTER") case-insensitively, and single characters must
+ * keep their case so page handlers checking `event.key === "w"` still match.
+ */
 function normalizeKey(
 	key: string,
 	modifiers?: PlatformKey["modifiers"],
 ): PlatformKey {
 	return {
-		key: key.toUpperCase(),
+		key: key.trim().length > 0 ? key.trim() : key,
 		modifiers: modifiers ?? [],
 	};
+}
+
+function keySummary(action: {
+	key: string;
+	holdMs?: number;
+	phase?: "down" | "up" | "press";
+}): string {
+	if (action.phase === "down") return `Held ${action.key} down.`;
+	if (action.phase === "up") return `Released ${action.key}.`;
+	if (action.holdMs) return `Held ${action.key} for ${action.holdMs}ms.`;
+	return "Pressed key.";
 }
 
 function delay(ms: number, signal: AbortSignal): Promise<void> {

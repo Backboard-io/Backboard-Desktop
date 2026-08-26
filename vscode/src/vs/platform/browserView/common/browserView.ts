@@ -402,6 +402,15 @@ export interface IBrowserViewService {
 	destroyBrowserView(id: string): Promise<void>;
 
 	/**
+	 * Report that a browser view was shared with / unshared from the agent.
+	 * Shared views are exposed to external agent runtimes through the local
+	 * CDP endpoint so they can drive the exact tab the user shared.
+	 * @param id The browser view identifier
+	 * @param shared Whether the view is currently shared with the agent
+	 */
+	setAgentSharedView(id: string, shared: boolean): Promise<void>;
+
+	/**
 	 * Get the state of an existing browser view by ID, or throw if it doesn't exist
 	 * @param id The browser view identifier
 	 * @return The state of the browser view for the given ID

@@ -21,6 +21,7 @@ import { localize } from '../../../nls.js';
 import { INativeHostMainService } from '../../native/electron-main/nativeHostMainService.js';
 import { htmlAttributeEncodeValue } from '../../../base/common/strings.js';
 import { BrowserViewInspectElementId } from './browserViewInspector.js';
+import { IBrowserViewCdpEndpointMainService } from './browserViewCdpEndpointMainService.js';
 import { equals } from '../../../base/common/objects.js';
 
 export const IBrowserViewMainService = createDecorator<IBrowserViewMainService>('browserViewMainService');
@@ -63,7 +64,8 @@ export class BrowserViewMainService extends Disposable implements IBrowserViewMa
 		@IWindowsMainService private readonly windowsMainService: IWindowsMainService,
 		@ITelemetryService private readonly telemetryService: ITelemetryService,
 		@INativeHostMainService private readonly nativeHostMainService: INativeHostMainService,
-		@IApplicationStorageMainService private readonly applicationStorageMainService: IApplicationStorageMainService
+		@IApplicationStorageMainService private readonly applicationStorageMainService: IApplicationStorageMainService,
+		@IBrowserViewCdpEndpointMainService private readonly browserViewCdpEndpointMainService: IBrowserViewCdpEndpointMainService
 	) {
 		super();
 	}
@@ -215,6 +217,14 @@ export class BrowserViewMainService extends Disposable implements IBrowserViewMa
 
 	async destroyBrowserView(id: string): Promise<void> {
 		return this.browserViews.deleteAndDispose(id);
+	}
+
+	async setAgentSharedView(id: string, shared: boolean): Promise<void> {
+		const view = this.browserViews.get(id);
+		if (shared && !view) {
+			return; // Cannot expose a view that no longer exists.
+		}
+		this.browserViewCdpEndpointMainService.setViewShared(id, shared, view?.owner);
 	}
 
 	async layout(id: string, bounds: IBrowserViewBounds): Promise<void> {

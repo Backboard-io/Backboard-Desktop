@@ -1,4 +1,8 @@
 import type { PermissionMode } from "../core/permissions/PermissionMode.ts";
+import type {
+	ClientToolDefinition,
+	ClientToolResultPayload,
+} from "../core/tools/ClientToolBridge.ts";
 
 /** A binary attachment sent by the IDE and staged for the public R-CLI. */
 export interface ServeFileAttachment {
@@ -35,11 +39,24 @@ export type ServeControl =
 			notify?: boolean;
 			/** Enables Backboard's built-in image generation for the turn. */
 			imageGeneration?: boolean;
+			/**
+			 * Tools the IDE client executes on the CLI's behalf (integrated
+			 * browser, tasks, tests, …). Sent on every turn; an empty/absent
+			 * list clears previously registered client tools.
+			 */
+			clientTools?: ClientToolDefinition[];
 	  }
 	| { op: "steer"; requestId?: string; prompt: string }
 	| { op: "warmup"; requestId?: string }
 	| { op: "cancel"; requestId?: string }
 	| { op: "respondInput"; id: string; answers: string[] }
+	| {
+			/** The IDE's answer to a `client_tool:call` event. */
+			op: "clientToolResult";
+			id: string;
+			result?: ClientToolResultPayload;
+			error?: string;
+	  }
 	| { op: "setModel"; requestId?: string; model: string }
 	| { op: "listModels"; requestId: string }
 	| { op: "listTools"; requestId: string }

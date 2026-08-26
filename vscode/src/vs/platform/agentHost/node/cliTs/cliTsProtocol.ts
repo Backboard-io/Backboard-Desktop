@@ -23,6 +23,26 @@ export interface CliTsFileAttachment {
 	readonly dataBase64: string;
 }
 
+/** One IDE-executed tool advertised to the cli-ts model for a turn. */
+export interface CliTsClientToolDefinition {
+	readonly name: string;
+	readonly description?: string;
+	readonly inputSchema?: Record<string, unknown>;
+}
+
+/** One content part of a client tool result sent back to cli-ts. */
+export type CliTsClientToolResultContent =
+	| { readonly type: 'text'; readonly text: string }
+	| { readonly type: 'image'; readonly mimeType: string; readonly dataBase64: string }
+	| { readonly type: 'resource'; readonly mimeType?: string; readonly dataBase64: string };
+
+/** The result payload of a `clientToolResult` op. */
+export interface CliTsClientToolResultPayload {
+	readonly success?: boolean;
+	readonly content?: readonly CliTsClientToolResultContent[];
+	readonly error?: string;
+}
+
 /** One control operation, written to the serve process's stdin as one JSON line. */
 export type CliTsServeControl =
 	| {
@@ -52,11 +72,14 @@ export type CliTsServeControl =
 		readonly notify?: boolean;
 		/** Enables Backboard's built-in image tool for this turn. */
 		readonly imageGeneration?: boolean;
+		/** IDE-executed tools advertised to the model; absent clears them. */
+		readonly clientTools?: readonly CliTsClientToolDefinition[];
 	}
 	| { readonly op: 'steer'; readonly requestId?: string; readonly prompt: string }
 	| { readonly op: 'warmup'; readonly requestId?: string }
 	| { readonly op: 'cancel'; readonly requestId?: string }
 	| { readonly op: 'respondInput'; readonly id: string; readonly answers: readonly string[] }
+	| { readonly op: 'clientToolResult'; readonly id: string; readonly result?: CliTsClientToolResultPayload; readonly error?: string }
 	| { readonly op: 'setModel'; readonly requestId?: string; readonly model: string }
 	| { readonly op: 'listModels'; readonly requestId: string }
 	| { readonly op: 'listTools'; readonly requestId: string }
@@ -97,6 +120,8 @@ export interface CliTsAgentEvent {
 	readonly messageId?: string;
 	readonly toolCallId?: string;
 	readonly name?: string;
+	/** Structured tool input, carried by `client_tool:call` events. */
+	readonly input?: unknown;
 	readonly inputSummary?: string;
 	readonly title?: string;
 	readonly detail?: string;

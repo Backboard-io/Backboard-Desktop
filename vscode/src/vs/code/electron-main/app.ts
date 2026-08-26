@@ -42,6 +42,7 @@ import { ipcBrowserViewChannelName } from '../../platform/browserView/common/bro
 import { ipcBrowserViewGroupChannelName } from '../../platform/browserView/common/browserViewGroup.js';
 import { BrowserViewMainService, IBrowserViewMainService } from '../../platform/browserView/electron-main/browserViewMainService.js';
 import { BrowserViewGroupMainService, IBrowserViewGroupMainService } from '../../platform/browserView/electron-main/browserViewGroupMainService.js';
+import { BrowserViewCdpEndpointMainService, IBrowserViewCdpEndpointMainService } from '../../platform/browserView/electron-main/browserViewCdpEndpointMainService.js';
 import { NativeParsedArgs } from '../../platform/environment/common/argv.js';
 import { IEnvironmentMainService } from '../../platform/environment/electron-main/environmentMainService.js';
 import { isLaunchedFromCli } from '../../platform/environment/node/argvHelper.js';
@@ -163,6 +164,7 @@ export class CodeApplication extends Disposable {
 	private windowsMainService: IWindowsMainService | undefined;
 	private auxiliaryWindowsMainService: IAuxiliaryWindowsMainService | undefined;
 	private nativeHostMainService: INativeHostMainService | undefined;
+	private _browserViewCdpEndpointService: BrowserViewCdpEndpointMainService | undefined;
 
 	constructor(
 		private readonly mainProcessNodeIpcServer: NodeIPCServer,
@@ -1189,6 +1191,11 @@ export class CodeApplication extends Disposable {
 		// Browser View
 		services.set(IBrowserViewMainService, new SyncDescriptor(BrowserViewMainService, undefined, false /* proxied to other processes */));
 		services.set(IBrowserViewGroupMainService, new SyncDescriptor(BrowserViewGroupMainService, undefined, false /* proxied to other processes */));
+		// Constructed eagerly (not via descriptor) because the agent host
+		// starter below needs its endpoint URL before the instantiation
+		// service exists; the group service is late-bound in initChannels.
+		this._browserViewCdpEndpointService = this._register(new BrowserViewCdpEndpointMainService(this.logService));
+		services.set(IBrowserViewCdpEndpointMainService, this._browserViewCdpEndpointService);
 
 		// Keyboard Layout
 		services.set(IKeyboardLayoutMainService, new SyncDescriptor(KeyboardLayoutMainService));
@@ -1234,7 +1241,7 @@ export class CodeApplication extends Disposable {
 
 		// Agent Host
 		if (isAgentHostEnabled(this.configurationService)) {
-			const agentHostStarter = new ElectronAgentHostStarter(this.configurationService, this.environmentMainService, this.lifecycleMainService, this.logService);
+			const agentHostStarter = new ElectronAgentHostStarter(this._browserViewCdpEndpointService, this.configurationService, this.environmentMainService, this.lifecycleMainService, this.logService);
 			const agentHostProcessManager = this._register(new AgentHostProcessManager(agentHostStarter, this.logService, this.loggerService));
 			agentHostProcessManager.ensureStarted();
 		}
@@ -1363,6 +1370,10 @@ export class CodeApplication extends Disposable {
 		const browserViewChannel = ProxyChannel.fromService(accessor.get(IBrowserViewMainService), disposables);
 		mainProcessElectronServer.registerChannel(ipcBrowserViewChannelName, browserViewChannel);
 		sharedProcessClient.then(client => client.registerChannel(ipcBrowserViewChannelName, browserViewChannel));
+
+		// Browser View CDP endpoint: late-bind the group service now that the
+		// instantiation service can produce it (see initServices).
+		this._browserViewCdpEndpointService?.acceptGroupService(accessor.get(IBrowserViewGroupMainService));
 
 		// Browser View Group
 		const browserViewGroupChannel = ProxyChannel.fromService(accessor.get(IBrowserViewGroupMainService), disposables);

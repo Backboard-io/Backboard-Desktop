@@ -13,7 +13,7 @@ describe("translateMacAutomationError", () => {
 	it("maps assistive-access and Apple-events denials to Accessibility guidance", () => {
 		const denials = [
 			"osascript exited with code 1: osascript is not allowed assistive access. (-25211)",
-			'osascript exited with code 1: execution error: Not authorized to send Apple events to System Events. (-1743)',
+			"osascript exited with code 1: execution error: Not authorized to send Apple events to System Events. (-1743)",
 		];
 		for (const message of denials) {
 			expect(translateMacAutomationError(message)).toContain("Accessibility");
@@ -24,6 +24,8 @@ describe("translateMacAutomationError", () => {
 		expect(
 			translateMacAutomationError("screencapture exited with code 1"),
 		).toBeNull();
-		expect(translateMacAutomationError("The operation was aborted.")).toBeNull();
+		expect(
+			translateMacAutomationError("The operation was aborted."),
+		).toBeNull();
 	});
 });

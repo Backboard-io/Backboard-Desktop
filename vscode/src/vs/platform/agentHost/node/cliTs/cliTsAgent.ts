@@ -17,7 +17,7 @@ import { AgentSession, AgentSignal, IAgent, IAgentCreateSessionConfig, IAgentCre
 import { ActionType, type ChatAction, type SessionAction } from '../../common/state/sessionActions.js';
 import type { ResolveSessionConfigResult, SessionConfigCompletionsResult } from '../../common/state/protocol/commands.js';
 import type { ModelSelection, ProtectedResourceMetadata, ToolDefinition } from '../../common/state/protocol/state.js';
-import { buildSubagentSessionUri, ChatInputAnswerValueKind, ChatInputQuestionKind, ChatInputResponseKind, MessageAttachmentKind, MessageKind, parseSubagentSessionUri, ResponsePartKind, SessionStatus, ToolCallCancellationReason, ToolCallConfirmationReason, ToolCallStatus, ToolResultContentType, TurnState, type ChatInputQuestion, type ClientPluginCustomization, type MessageAttachment, type PendingMessage, type SessionInputAnswer, type SessionInputResponseKind, type ToolCallResult, type ToolResultContent, type Turn } from '../../common/state/sessionState.js';
+import { buildSubagentSessionUri, ChatInputAnswerValueKind, ChatInputQuestionKind, ChatInputResponseKind, MessageAttachmentKind, MessageKind, parseSubagentSessionUri, ResponsePartKind, SessionStatus, ToolCallCancellationReason, ToolCallConfirmationReason, ToolCallContributorKind, ToolCallStatus, ToolResultContentType, TurnState, type ChatInputQuestion, type ClientPluginCustomization, type MessageAttachment, type PendingMessage, type SessionInputAnswer, type SessionInputResponseKind, type ToolCallResult, type ToolResultContent, type Turn } from '../../common/state/sessionState.js';
 import type { ISyncedCustomization } from '../../common/agentPluginManager.js';
 import { IInstantiationService } from '../../../instantiation/common/instantiation.js';
 import { ISessionDatabase, ISessionDataService } from '../../common/sessionDataService.js';
@@ -30,7 +30,7 @@ import { BACKBOARD_ACCESS_FULL, BACKBOARD_ACCESS_MANUAL, BACKBOARD_MODE_PLAN, BU
 const CLI_TS_WEB_SEARCH_TOOL_NAME = 'WebSearch';
 import { rgDiskPath } from '../../../../base/node/ripgrep.js';
 import { CliTsServeProcess } from './cliTsProcess.js';
-import type { CliTsAgentEvent, CliTsFileAttachment, CliTsPermissionMode, CliTsTurnStatus } from './cliTsProtocol.js';
+import type { CliTsAgentEvent, CliTsClientToolDefinition, CliTsClientToolResultContent, CliTsClientToolResultPayload, CliTsFileAttachment, CliTsPermissionMode, CliTsTurnStatus } from './cliTsProtocol.js';
 
 const CLI_TS_STORE_VERSION = 1;
 
@@ -124,6 +124,12 @@ interface CliTsSession {
 	turn?: CliTsTurnState;
 	/** Lazily-opened file-edit tracker + its session DB reference. */
 	fileEdits?: { tracker: FileEditTracker; dbRef: IReference<ISessionDatabase> };
+	/** Client tools pushed by the active IDE client via {@link CliTsAgent.setClientTools}. */
+	clientTools?: { readonly clientId: string; readonly tools: readonly ToolDefinition[] };
+	/** Whether the current turn runs with Full Access (client tool calls auto-confirm). */
+	turnAutoApproves?: boolean;
+	/** Client tool calls forwarded to the IDE and awaiting a result. */
+	readonly pendingClientToolCalls: Set<string>;
 	/** Public R-CLI AskUser request ids and their ordered IDE question ids. */
 	readonly pendingInputs: Map<string, readonly string[]>;
 	readonly storedTurns: CliTsStoredTurn[];
@@ -367,6 +373,9 @@ export class CliTsAgent extends Disposable implements IAgent {
 			: settings.accessMode === BACKBOARD_ACCESS_FULL
 				? 'bypass'
 				: 'auto';
+		// Client tool calls surface their confirmation through the workbench
+		// invocation; under Full Access they are stamped auto-approved instead.
+		session.turnAutoApproves = permission === 'bypass';
 		// Build the per-turn tool exclusion list. Plan mode hides write-class
 		// tools from the model entirely (on top of gating); the Web Search
 		// toggle removes the built-in web search tool when disabled. The list
@@ -418,6 +427,9 @@ export class CliTsAgent extends Disposable implements IAgent {
 				notify: settings.notifications,
 				imageGeneration: settings.imageGeneration,
 				excludedTools,
+				// Advertise IDE-executed tools (integrated browser, tasks, …).
+				// Omitting the field clears previously registered client tools.
+				...(session.clientTools ? { clientTools: session.clientTools.tools.map(clientToolDefinitionToWire) } : {}),
 				...(prepared.files.length ? { files: prepared.files } : {}),
 			});
 			const payload = record.payload as { status?: CliTsTurnStatus; threadId?: string | null } | undefined;
@@ -460,6 +472,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 			this._writeStore();
 			session.turn = undefined;
 			session.pendingInputs.clear();
+			session.pendingClientToolCalls.clear();
 			this._fire(session.sessionUri, { type: ActionType.ChatTurnComplete, turnId: effectiveTurnId });
 		}
 	}
@@ -495,6 +508,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 		session.proc?.notify({ op: 'cancel' });
 		session.fileEdits?.tracker.discardAllEdits();
 		session.pendingInputs.clear();
+		session.pendingClientToolCalls.clear();
 	}
 
 	setPendingMessages(sessionUri: URI, steeringMessage: PendingMessage | undefined, _queuedMessages: readonly PendingMessage[]): void {
@@ -539,10 +553,18 @@ export class CliTsAgent extends Disposable implements IAgent {
 	}
 
 	respondToPermissionRequest(requestId: string, approved: boolean): void {
-		// Public R-CLI permission decisions use the same multi-question
-		// input:request channel as AskUser. This method remains only because it is
-		// part of IAgent; no R-CLI request is registered on this channel.
-		this._logService.warn(`[cli-ts] Ignoring legacy permission response for ${requestId} (approved=${approved})`);
+		// The only registrations on this channel are client tool calls the
+		// workbench declined pre-execution: it dispatches no completion for
+		// those, so unpark the serve process with a denial result here.
+		if (!approved) {
+			for (const session of this._sessions.values()) {
+				if (session.pendingClientToolCalls.delete(requestId)) {
+					session.proc?.notify({ op: 'clientToolResult', id: requestId, error: 'The user declined this tool call.' });
+					return;
+				}
+			}
+		}
+		this._logService.info(`[cli-ts] Ignoring permission response for ${requestId} (approved=${approved})`);
 	}
 
 	respondToUserInputRequest(requestId: string, response: SessionInputResponseKind, answers?: Record<string, SessionInputAnswer>): void {
@@ -603,16 +625,31 @@ export class CliTsAgent extends Disposable implements IAgent {
 		return [];
 	}
 
-	setClientTools(_session: URI, _clientId: string | undefined, tools: ToolDefinition[]): void {
-		// cli-ts owns tool execution; client-contributed tools are not routed
-		// through this provider. Log so mismatched expectations are visible.
-		if (tools.length > 0) {
-			this._logService.info(`[cli-ts] Ignoring ${tools.length} client tool(s); the cli-ts runtime executes its own tools.`);
+	setClientTools(session: URI, clientId: string | undefined, tools: ToolDefinition[]): void {
+		const entry = this._sessions.get(AgentSession.id(session));
+		if (!entry || entry.disposed) {
+			return;
 		}
+		if (!clientId || tools.length === 0) {
+			// An empty push clears the previous client's tools (client hand-off).
+			entry.clientTools = undefined;
+			return;
+		}
+		entry.clientTools = { clientId, tools: [...tools] };
+		this._logService.info(`[cli-ts] Registered ${tools.length} client tool(s) for session ${entry.sessionId}; they are advertised on the next turn.`);
 	}
 
-	onClientToolCallComplete(_session: URI, _toolCallId: string, _result: ToolCallResult): void {
-		// No client tools are dispatched by this provider (see setClientTools).
+	onClientToolCallComplete(sessionUri: URI, toolCallId: string, result: ToolCallResult): void {
+		const session = this._sessions.get(AgentSession.id(sessionUri));
+		// Every server-side tool completion also flows through here; only
+		// answer calls this provider actually forwarded to the IDE.
+		if (!session?.pendingClientToolCalls.delete(toolCallId)) {
+			return;
+		}
+		if (!session.proc?.isRunning) {
+			return;
+		}
+		session.proc.notify({ op: 'clientToolResult', id: toolCallId, result: clientToolResultToWire(result) });
 	}
 
 	setCustomizationEnabled(_id: string, _enabled: boolean): void {
@@ -672,6 +709,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 			forkContext: restored?.forkContext,
 			materialized: !!restored,
 			disposed: false,
+			pendingClientToolCalls: new Set(),
 			pendingInputs: new Map(),
 			storedTurns: [...(restored?.turns ?? [])],
 			storedSubagentTurns: new Map(Object.entries(restored?.subagents ?? {}).map(([toolCallId, turns]) => [toolCallId, cloneStoredTurns(turns)])),
@@ -999,6 +1037,13 @@ export class CliTsAgent extends Disposable implements IAgent {
 					return;
 				}
 				this._ensureToolCallStart(session, turn, event.toolCallId, event.name, event.inputSummary, parentToolCallId);
+				if (!parentToolCallId && session.clientTools?.tools.some(tool => tool.name === event.name)) {
+					// Client tools: the summary here is display-clamped, but the
+					// workbench parses `toolInput` as the real parameters. Leave
+					// the call streaming; the authoritative Ready (with the full
+					// JSON input) follows on `client_tool:call`.
+					return;
+				}
 				fire({
 					type: ActionType.ChatToolCallReady,
 					turnId,
@@ -1007,6 +1052,39 @@ export class CliTsAgent extends Disposable implements IAgent {
 					toolInput: event.inputSummary,
 					confirmed: turn.confirmedToolCalls.has(event.toolCallId) ? ToolCallConfirmationReason.UserAction : ToolCallConfirmationReason.NotNeeded,
 					_meta: cliTsToolMetadata(event.name, turn.toolInputs.get(event.toolCallId)?.input),
+				});
+				return;
+			}
+			case 'client_tool:call': {
+				// The serve process parked a client-tool execution and waits for
+				// the IDE to run it. Surface the call with its full JSON input so
+				// the workbench's client-tool path invokes the real tool and
+				// dispatches ChatToolCallComplete (routed back via
+				// onClientToolCallComplete → the clientToolResult op).
+				if (!event.toolCallId || !event.name) {
+					return;
+				}
+				const clientTools = session.clientTools;
+				if (!clientTools || parentToolCallId) {
+					// Not executable here: no registered client, or a sub-agent
+					// call (only the root session holds the active-client slot).
+					// Answer immediately so the serve process does not park.
+					session.proc?.notify({ op: 'clientToolResult', id: event.toolCallId, error: 'No connected IDE client can execute this tool right now.' });
+					return;
+				}
+				this._ensureToolCallStart(session, turn, event.toolCallId, event.name, undefined, parentToolCallId);
+				session.pendingClientToolCalls.add(event.toolCallId);
+				fire({
+					type: ActionType.ChatToolCallReady,
+					turnId,
+					toolCallId: event.toolCallId,
+					invocationMessage: toolInvocationMessage(event.name, undefined),
+					toolInput: JSON.stringify(event.input ?? {}),
+					confirmed: ToolCallConfirmationReason.NotNeeded,
+					_meta: {
+						...cliTsToolMetadata(event.name, event.input),
+						...(session.turnAutoApproves ? { autoApproveBySetting: true } : {}),
+					},
 				});
 				return;
 			}
@@ -1263,12 +1341,18 @@ export class CliTsAgent extends Disposable implements IAgent {
 			return;
 		}
 		turn.startedToolCalls.add(toolCallId);
+		// A tool the active IDE client contributed must be stamped with its
+		// contributor on the very first action: the workbench decides between
+		// executing the call itself and merely rendering it from this state.
+		const clientTools = session.clientTools;
+		const isClientTool = !parentToolCallId && !!clientTools?.tools.some(tool => tool.name === toolName);
 		this._fire(session.sessionUri, {
 			type: ActionType.ChatToolCallStart,
 			turnId: turn.turnId,
 			toolCallId,
 			toolName,
 			displayName: toolDisplayName(toolName),
+			...(isClientTool && clientTools ? { contributor: { kind: ToolCallContributorKind.Client, clientId: clientTools.clientId } } : {}),
 			_meta: cliTsToolMetadata(toolName, turn.toolInputs.get(toolCallId)?.input),
 		}, parentToolCallId);
 		this._fire(session.sessionUri, {
@@ -1354,6 +1438,38 @@ export class CliTsAgent extends Disposable implements IAgent {
 }
 
 // ---- helpers -----------------------------------------------------------------
+
+/** Maps a protocol {@link ToolDefinition} to the cli-ts serve wire shape. */
+function clientToolDefinitionToWire(tool: ToolDefinition): CliTsClientToolDefinition {
+	return {
+		name: tool.name,
+		...(tool.description ? { description: tool.description } : {}),
+		...(tool.inputSchema ? { inputSchema: tool.inputSchema as unknown as Record<string, unknown> } : {}),
+	};
+}
+
+/**
+ * Maps a workbench {@link ToolCallResult} to the serve wire payload. Image
+ * blocks stay images (the Backboard API routes them through vision); other
+ * embedded resources are passed through as opaque base64 resources.
+ */
+function clientToolResultToWire(result: ToolCallResult): CliTsClientToolResultPayload {
+	const content: CliTsClientToolResultContent[] = [];
+	for (const part of result.content ?? []) {
+		if (part.type === ToolResultContentType.Text) {
+			content.push({ type: 'text', text: part.text });
+		} else if (part.type === ToolResultContentType.EmbeddedResource) {
+			content.push(part.contentType.startsWith('image/')
+				? { type: 'image', mimeType: part.contentType, dataBase64: part.data }
+				: { type: 'resource', mimeType: part.contentType, dataBase64: part.data });
+		}
+	}
+	return {
+		success: result.success,
+		...(content.length ? { content } : {}),
+		...(result.error?.message ? { error: result.error.message } : {}),
+	};
+}
 
 function cloneStoredTurns(turns: readonly CliTsStoredTurn[]): CliTsStoredTurn[] {
 	return turns.map(turn => ({

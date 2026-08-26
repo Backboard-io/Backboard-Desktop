@@ -18,6 +18,7 @@ import { Schemas } from '../../../base/common/network.js';
 import { getResolvedShellEnv } from '../../shell/node/shellEnv.js';
 import { NullTelemetryService } from '../../telemetry/common/telemetryUtils.js';
 import { UtilityProcess } from '../../utilityProcess/electron-main/utilityProcess.js';
+import { IBrowserViewCdpEndpointMainService } from '../../browserView/electron-main/browserViewCdpEndpointMainService.js';
 import { IAgentHostConnection, IAgentHostStarter } from '../common/agent.js';
 import { AgentHostClaudeAgentEnabledSettingId, AgentHostCodexAgentBinaryArgsSettingId, AgentHostCodexAgentEnabledSettingId, AgentHostCodexAgentSdkRootSettingId, AgentHostCodexAgentCodexHomeSettingId, AgentHostOTelCaptureContentSettingId, AgentHostOTelDbSpanExporterEnabledSettingId, AgentHostOTelEnabledSettingId, AgentHostOTelExporterTypeSettingId, AgentHostOTelOtlpEndpointSettingId, AgentHostOTelOutfileSettingId, buildAgentHostOTelEnv, buildAgentSdkEnv } from '../common/agentService.js';
 import { deepClone } from '../../../base/common/objects.js';
@@ -35,6 +36,7 @@ export class ElectronAgentHostStarter extends Disposable implements IAgentHostSt
 	readonly onWillShutdown = this._onWillShutdown.event;
 
 	constructor(
+		private readonly _browserViewCdpEndpointService: IBrowserViewCdpEndpointMainService | undefined,
 		@IConfigurationService private readonly _configurationService: IConfigurationService,
 		@IEnvironmentMainService private readonly _environmentMainService: IEnvironmentMainService,
 		@ILifecycleMainService private readonly _lifecycleMainService: ILifecycleMainService,
@@ -90,6 +92,16 @@ export class ElectronAgentHostStarter extends Disposable implements IAgentHostSt
 		}, process.env);
 		const backboardEnv = this._buildBackboardEnv(process.env);
 
+		// Hand the integrated browser's loopback CDP endpoint down so agent
+		// runtimes (cli-ts's `browser` tool) can drive tabs the user shares
+		// with the agent instead of launching their own browser. Best-effort:
+		// without the endpoint the runtimes simply keep their fallback.
+		const browserCdpEnv: Record<string, string> = {};
+		const browserCdpEndpoint = await this._browserViewCdpEndpointService?.ensureStarted();
+		if (browserCdpEndpoint) {
+			browserCdpEnv['BACKBOARD_BROWSER_CDP_WS'] = browserCdpEndpoint;
+		}
+
 		const args = [
 			'--logsPath', this._environmentMainService.logsHome.with({ scheme: Schemas.file }).fsPath,
 			'--user-data-dir', this._environmentMainService.userDataPath,
@@ -113,6 +125,7 @@ export class ElectronAgentHostStarter extends Disposable implements IAgentHostSt
 				...sdkEnv,
 				...otelEnv,
 				...backboardEnv,
+				...browserCdpEnv,
 			}
 		});
 

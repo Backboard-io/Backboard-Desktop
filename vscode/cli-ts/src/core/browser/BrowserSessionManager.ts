@@ -14,6 +14,7 @@ export interface BrowserSessionManagerOptions {
 	fetch?: typeof fetch;
 	executable?: BrowserExecutableOptions;
 	spawn?: typeof Bun.spawn;
+	webSocketFactory?: (url: string) => WebSocket;
 }
 
 const DEFAULT_HTTP_URL = "http://127.0.0.1:9222";
@@ -23,6 +24,7 @@ export class BrowserSessionManager {
 	private readonly fetchImpl: typeof fetch;
 	private readonly spawnImpl: typeof Bun.spawn;
 	private readonly executableOptions?: BrowserExecutableOptions;
+	private readonly webSocketFactory?: (url: string) => WebSocket;
 	private platform: BrowserHarnessPlatform | null = null;
 	private session: BrowserHarnessSession | null = null;
 	private launched: {
@@ -35,10 +37,18 @@ export class BrowserSessionManager {
 		this.fetchImpl = options.fetch ?? fetch;
 		this.spawnImpl = options.spawn ?? Bun.spawn;
 		this.executableOptions = options.executable;
+		this.webSocketFactory = options.webSocketFactory;
 	}
 
 	async getPlatform(signal?: AbortSignal): Promise<BrowserHarnessPlatform> {
 		if (this.platform) return this.platform;
+
+		// The Backboard IDE's integrated browser wins when the user has shared a
+		// page there — the agent then drives the very tab the user is looking
+		// at. Never fatal: with no shared page (or no endpoint) resolution
+		// falls through to the regular discovery/launch path below.
+		const integrated = await this.tryBackboardIntegratedBrowser(signal);
+		if (integrated) return integrated;
 
 		const existing = await this.discoverExistingWebSocketUrl(signal);
 		if (existing.explicit && !existing.webSocketUrl) {
@@ -56,6 +66,44 @@ export class BrowserSessionManager {
 		}
 
 		return await this.launch(signal);
+	}
+
+	private async tryBackboardIntegratedBrowser(
+		signal?: AbortSignal,
+	): Promise<BrowserHarnessPlatform | null> {
+		const webSocketUrl = this.env.backboardBrowserWsUrl;
+		if (!webSocketUrl) return null;
+		const session = new BrowserHarnessSession({
+			webSocketUrl,
+			routePageCommands: true,
+			fetch: this.fetchImpl,
+			...(this.webSocketFactory
+				? { webSocketFactory: this.webSocketFactory }
+				: {}),
+		});
+		try {
+			await session.connect(signal);
+			const targets = await session.call<{
+				targetInfos?: Array<{ targetId?: string; type?: string; url?: string }>;
+			}>("Target.getTargets", {}, signal);
+			const hasSharedPage = (targets.targetInfos ?? []).some(
+				(target) =>
+					target.type === "page" &&
+					!(target.url ?? "").startsWith("chrome://") &&
+					!(target.url ?? "").startsWith("devtools://"),
+			);
+			if (!hasSharedPage) {
+				session.close();
+				return null;
+			}
+			const platform = new BrowserHarnessPlatform(session);
+			this.session = session;
+			this.platform = platform;
+			return platform;
+		} catch {
+			session.close();
+			return null;
+		}
 	}
 
 	async dispose(): Promise<void> {
@@ -111,6 +159,9 @@ export class BrowserSessionManager {
 			webSocketUrl,
 			routePageCommands: true,
 			fetch: this.fetchImpl,
+			...(this.webSocketFactory
+				? { webSocketFactory: this.webSocketFactory }
+				: {}),
 		});
 		try {
 			await session.connect(signal);

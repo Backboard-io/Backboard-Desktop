@@ -23,6 +23,8 @@ const actionNameSchema = z.enum([
 	"click",
 	"type",
 	"key",
+	"scroll",
+	"drag",
 	"wait",
 ]);
 const actionSchema = z.discriminatedUnion("action", [
@@ -41,11 +43,26 @@ const actionSchema = z.discriminatedUnion("action", [
 	z.object({
 		action: z.literal("type"),
 		text: z.string(),
+		mode: z.enum(["insert", "keys"]).optional(),
 	}),
 	z.object({
 		action: z.literal("key"),
 		key: z.string().min(1),
 		modifiers: z.array(keyModifierSchema).optional(),
+		holdMs: z.number().int().min(0).max(10_000).optional(),
+		phase: z.enum(["down", "up", "press"]).optional(),
+	}),
+	z.object({
+		action: z.literal("scroll"),
+		target: targetSchema.optional(),
+		deltaX: z.number().optional(),
+		deltaY: z.number().optional(),
+	}),
+	z.object({
+		action: z.literal("drag"),
+		from: targetSchema,
+		to: targetSchema,
+		durationMs: z.number().int().min(0).max(10_000).optional(),
 	}),
 	z.object({
 		action: z.literal("wait"),
@@ -113,16 +130,53 @@ const publicActionSchema = z.object({
 		.optional(),
 	button: buttonSchema.optional(),
 	text: z.string().describe("Text to type for the type action.").optional(),
+	mode: z
+		.enum(["insert", "keys"])
+		.describe(
+			"For type actions: 'insert' (default) inserts text directly into the focused input; 'keys' dispatches real per-character keydown/keyup events for pages that listen for keyboard input (e.g. games).",
+		)
+		.optional(),
 	key: z
 		.string()
 		.min(1)
 		.describe(
-			"For key actions, pass a key name string such as k, ENTER, TAB, BACKSPACE.",
+			"For key actions, a single character (case preserved, e.g. w) or a key name such as ArrowUp, ArrowLeft, Enter, Tab, Space, Escape, Backspace.",
 		)
 		.optional(),
 	modifiers: z
 		.array(keyModifierSchema)
 		.describe("Optional modifiers for key actions when key is a string.")
+		.optional(),
+	holdMs: z
+		.number()
+		.int()
+		.min(0)
+		.max(10_000)
+		.describe(
+			"For key actions: hold the key down this many ms before releasing, with browser-style auto-repeat. Use for game movement (e.g. hold ArrowRight for 500ms).",
+		)
+		.optional(),
+	phase: z
+		.enum(["down", "up", "press"])
+		.describe(
+			"For key actions: 'down' presses without releasing, 'up' releases a held key, 'press' (default) does both. Pair down/up across actions to hold one key while pressing another.",
+		)
+		.optional(),
+	deltaX: z
+		.number()
+		.describe("For scroll actions: horizontal scroll amount in pixels.")
+		.optional(),
+	deltaY: z
+		.number()
+		.describe(
+			"For scroll actions: vertical scroll amount in pixels (positive scrolls down).",
+		)
+		.optional(),
+	from: publicTargetSchema
+		.describe("For drag actions: where the drag starts (elementId or x/y).")
+		.optional(),
+	to: publicTargetSchema
+		.describe("For drag actions: where the drag ends (elementId or x/y).")
 		.optional(),
 	durationMs: z.number().int().positive().optional(),
 	ms: z
@@ -224,6 +278,10 @@ function browserResultTitle(
 			return "Typed text";
 		case "key":
 			return "Pressed key";
+		case "scroll":
+			return "Scrolled";
+		case "drag":
+			return "Dragged";
 		case "wait":
 			return `Waited ${actions[0].durationMs}ms`;
 		default:
@@ -252,9 +310,19 @@ function normalizeBrowserInput(raw: unknown): unknown {
 					typeof normalized.ms === "number" ? normalized.ms : undefined;
 				if (durationMs !== undefined) return { ...normalized, durationMs };
 			}
-			if (normalized.action === "click" && normalized.target === undefined) {
+			if (
+				(normalized.action === "click" || normalized.action === "scroll") &&
+				normalized.target === undefined
+			) {
 				const target = browserTargetFromFlatFields(normalized);
 				if (target) return { ...normalized, target };
+			}
+			if (normalized.action === "drag") {
+				const from = coerceTarget(normalized.from);
+				const to = coerceTarget(normalized.to);
+				if (from !== normalized.from || to !== normalized.to) {
+					return { ...normalized, from, to };
+				}
 			}
 			return normalized;
 		}),
@@ -271,4 +339,11 @@ function browserTargetFromFlatFields(
 		return { x: input.x, y: input.y };
 	}
 	return null;
+}
+
+/** Reduce a loose public target (elementId/x/y all optional) to a strict one. */
+function coerceTarget(value: unknown): unknown {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+	const strict = browserTargetFromFlatFields(value as Record<string, unknown>);
+	return strict ?? value;
 }

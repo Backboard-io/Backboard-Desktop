@@ -6,6 +6,8 @@ export interface SystemPromptOptions {
 	layout?: SystemPromptLayout;
 	computerUseEnabled?: boolean;
 	browserUseEnabled?: boolean;
+	/** True when the connected IDE contributed client tools this turn. */
+	clientToolsEnabled?: boolean;
 	skillDiscoveryEnabled?: boolean;
 	skillCatalog?: SkillCatalog;
 	activatedSkillsPrompt?: string;

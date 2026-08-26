@@ -39,6 +39,7 @@ import type { Message } from "../session/Message.ts";
 import { userMessage } from "../session/Message.ts";
 import type { Session } from "../session/Session.ts";
 import type { SkillController } from "../skills/SkillController.ts";
+import { ClientProxyTool } from "../tools/ClientToolBridge.ts";
 import { canonicalToolName } from "../tools/names.ts";
 import type { OpenAITool } from "../tools/schema.ts";
 import type { ToolContext } from "../tools/ToolContext.ts";
@@ -379,6 +380,9 @@ export class AgentController {
 					...skillPromptContext,
 					computerUseEnabled: config.isComputerUseEnabled,
 					browserUseEnabled: config.isBrowserUseEnabled,
+					clientToolsEnabled: this.deps.registry
+						.list()
+						.some((tool) => tool instanceof ClientProxyTool),
 					skillDiscoveryEnabled: config.isSkillDiscoveryEnabled,
 					startupEnvironmentPrompt: this.deps.startupEnvironmentPrompt,
 					conversationContext: options.conversationContext,

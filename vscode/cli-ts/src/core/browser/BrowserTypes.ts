@@ -16,11 +16,27 @@ export type BrowserAction =
 	| { action: "screenshot" }
 	| { action: "navigate"; url: string }
 	| { action: "click"; target: BrowserTarget; button?: BrowserMouseButton }
-	| { action: "type"; text: string }
+	| { action: "type"; text: string; mode?: "insert" | "keys" }
 	| {
 			action: "key";
 			key: string;
 			modifiers?: BrowserKeyModifier[];
+			/** Hold the key down for this long before releasing (max 10s). */
+			holdMs?: number;
+			/** "down"/"up" dispatch only that half of the press; default "press". */
+			phase?: "down" | "up" | "press";
+	  }
+	| {
+			action: "scroll";
+			target?: BrowserTarget;
+			deltaX?: number;
+			deltaY?: number;
+	  }
+	| {
+			action: "drag";
+			from: BrowserTarget;
+			to: BrowserTarget;
+			durationMs?: number;
 	  }
 	| { action: "wait"; durationMs: number };
 
