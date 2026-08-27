@@ -18,7 +18,7 @@ export const ClickBrowserToolData: IToolData = {
 	toolReferenceName: BrowserChatToolReferenceName.ClickElement,
 	displayName: localize('clickBrowserTool.displayName', 'Click Element'),
 	userDescription: localize('clickBrowserTool.userDescription', 'Click an element in a browser page'),
-	modelDescription: 'Click on an element in a browser page.',
+	modelDescription: 'Click on an element in a browser page, or click page coordinates for canvas-rendered content that has no elements.',
 	icon: Codicon.cursor,
 	source: ToolDataSource.Internal,
 	inputSchema: {
@@ -36,9 +36,17 @@ export const ClickBrowserToolData: IToolData = {
 				type: 'string',
 				description: 'Playwright selector of the element to click when "ref" is not available.'
 			},
+			x: {
+				type: 'number',
+				description: 'Page x coordinate (CSS pixels) to click when no element can be targeted, e.g. inside a <canvas>. Use together with "y"; coordinates can be read off a screenshot.'
+			},
+			y: {
+				type: 'number',
+				description: 'Page y coordinate (CSS pixels) to click. Use together with "x".'
+			},
 			element: {
 				type: 'string',
-				description: 'Human-readable description of the element to click (e.g., "submit button", "search icon").'
+				description: 'Human-readable description of the click target (e.g., "submit button", "e4 square on the board").'
 			},
 			dblClick: {
 				type: 'boolean',
@@ -51,7 +59,7 @@ export const ClickBrowserToolData: IToolData = {
 			},
 		},
 		required: ['pageId', 'element'],
-		$comment: 'One of "ref" or "selector" is required.',
+		$comment: 'One of "ref", "selector", or "x"+"y" is required.',
 	},
 };
 
@@ -59,6 +67,8 @@ interface IClickBrowserToolParams {
 	pageId: string;
 	ref?: string;
 	selector?: string;
+	x?: number;
+	y?: number;
 	element?: string;
 	dblClick?: boolean;
 	button?: 'left' | 'right' | 'middle';
@@ -104,11 +114,20 @@ export class ClickBrowserTool implements IToolImpl {
 			selector = `aria-ref=${params.ref}`;
 		}
 
-		if (!selector) {
-			return errorResult('Either a "ref" or "selector" parameter is required.');
+		const button = params.button ?? 'left';
+
+		// Coordinate clicks: the only way to hit canvas-rendered content
+		// (games, custom-drawn boards) that exposes no DOM elements.
+		if (!selector && typeof params.x === 'number' && typeof params.y === 'number') {
+			if (params.dblClick) {
+				return playwrightInvoke(this.playwrightService, sessionId, params.pageId, (page, x, y, btn) => page.mouse.dblclick(x, y, { button: btn }), params.x, params.y, button);
+			}
+			return playwrightInvoke(this.playwrightService, sessionId, params.pageId, (page, x, y, btn) => page.mouse.click(x, y, { button: btn }), params.x, params.y, button);
 		}
 
-		const button = params.button ?? 'left';
+		if (!selector) {
+			return errorResult('Either a "ref", a "selector", or "x" and "y" coordinates are required.');
+		}
 
 		if (params.dblClick) {
 			return playwrightInvoke(this.playwrightService, sessionId, params.pageId, (page, sel, btn) => page.locator(sel).dblclick({ button: btn }), selector, button);

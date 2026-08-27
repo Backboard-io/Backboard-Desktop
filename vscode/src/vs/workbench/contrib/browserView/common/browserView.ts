@@ -922,6 +922,13 @@ export class BrowserViewModel extends Disposable implements IBrowserViewModel {
 			this._setSharedWithAgent(false);
 		}
 
+		// Mirror the sharing state into the main process so external agent
+		// runtimes can reach the shared tab over the local CDP endpoint.
+		// Best-effort: the in-process Playwright tools work either way.
+		this.browserViewService.setAgentSharedView(this.id, shared).catch(error => {
+			this.logService.warn('[BrowserViewModel] Failed to update agent CDP endpoint sharing state.', error);
+		});
+
 		return true;
 	}
 
@@ -969,6 +976,7 @@ export class BrowserViewModel extends Disposable implements IBrowserViewModel {
 		// tracked-pages set stays in sync with live views.
 		if (this._sharedWithAgent) {
 			void this.playwrightService.stopTrackingPage(this.id);
+			void this.browserViewService.setAgentSharedView(this.id, false).catch(() => { });
 		}
 
 		// Clean up the browser view when the model is disposed

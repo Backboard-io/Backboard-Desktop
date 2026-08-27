@@ -30,7 +30,7 @@ export const ScreenshotBrowserToolData: IToolData = {
 	toolReferenceName: BrowserChatToolReferenceName.ScreenshotPage,
 	displayName: localize('screenshotBrowserTool.displayName', 'Screenshot Page'),
 	userDescription: localize('screenshotBrowserTool.userDescription', 'Capture a screenshot of a browser page'),
-	modelDescription: `Capture a screenshot of the current browser page. You can't perform actions based on the screenshot; use ${ReadBrowserToolData.id} for actions.`,
+	modelDescription: `Capture a screenshot of the current browser page. Prefer ${ReadBrowserToolData.id} for element-based interaction; for canvas-rendered content (games, drawings) that exposes no elements, use screenshots to observe state and act with coordinate clicks or key presses.`,
 	icon: Codicon.deviceCamera,
 	source: ToolDataSource.Internal,
 	inputSchema: {

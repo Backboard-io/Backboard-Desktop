@@ -1,7 +1,8 @@
 import type { SystemPromptFragmentId } from "../../../../config/modelProfiles/types.ts";
 import type { PromptContext, PromptModule } from "../../../PromptModule.ts";
-import { browser as sharedBrowser } from "../../../system/browser.tsx";
 import { buildBackboardPlatformPrompt } from "../../../system/backboardPlatform.ts";
+import { browser as sharedBrowser } from "../../../system/browser.tsx";
+import { clientTools } from "../../../system/clientTools.tsx";
 import { computer as sharedComputer } from "../../../system/computer.tsx";
 import { SKILL_DISCOVERY_GUIDANCE } from "../../../system/skillDiscovery.tsx";
 import { buildSkillCatalogPrompt } from "../../../system/skills.tsx";
@@ -53,6 +54,7 @@ export function buildSystemPromptWith(
 		buildBackboardPlatformPrompt(promptContext),
 		options.computerUseEnabled ? deps.computer.prompt : "",
 		options.browserUseEnabled ? deps.browser.prompt : "",
+		options.clientToolsEnabled ? clientTools.prompt : "",
 		options.startupEnvironmentPrompt,
 		options.conversationContext,
 		options.skillDiscoveryEnabled ? SKILL_DISCOVERY_GUIDANCE : "",

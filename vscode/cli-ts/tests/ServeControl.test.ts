@@ -58,6 +58,39 @@ describe("parseControlLine", () => {
 		});
 	});
 
+	it("parses client tool definitions and results", () => {
+		const submit = {
+			op: "submit" as const,
+			requestId: "r3",
+			prompt: "play the game",
+			clientTools: [
+				{
+					name: "open_browser_page",
+					description: "Open a page",
+					inputSchema: { type: "object" },
+				},
+			],
+		};
+		expect(parseControlLine(JSON.stringify(submit))).toEqual({
+			ok: true,
+			control: submit,
+		});
+
+		const result = {
+			op: "clientToolResult" as const,
+			id: "call_1",
+			result: { success: true, content: [{ type: "text" as const, text: "ok" }] },
+		};
+		expect(parseControlLine(JSON.stringify(result))).toEqual({
+			ok: true,
+			control: result,
+		});
+		expect(parseControlLine('{"op":"clientToolResult"}')).toMatchObject({
+			ok: false,
+			error: "invalid clientToolResult op: missing id",
+		});
+	});
+
 	it("requires submit fields and input answer arrays", () => {
 		expect(parseControlLine('{"op":"submit","requestId":"r1"}')).toEqual({
 			ok: false,

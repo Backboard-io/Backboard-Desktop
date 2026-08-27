@@ -29,6 +29,7 @@ import { ServerEventLog } from "../core/session/ServerEventLog.ts";
 import { Session } from "../core/session/Session.ts";
 import { SessionStore } from "../core/session/SessionStore.ts";
 import { SkillController } from "../core/skills/SkillController.ts";
+import { ClientToolBridge } from "../core/tools/ClientToolBridge.ts";
 import { ToolRegistry } from "../core/tools/ToolRegistry.ts";
 import { buildStartupEnvironmentPrompt } from "../prompts/system/startupEnvironment.ts";
 import { createAgentClient } from "../providers/createAgentClient.ts";
@@ -133,6 +134,7 @@ export async function runServe(argv: string[]): Promise<void> {
 	);
 	const mcpToolRegistrar = new McpToolRegistrar(registry, bus);
 	mcpToolRegistrar.register({ ...mcp, warnings: [] });
+	const clientToolBridge = new ClientToolBridge(bus, registry);
 	const mcpRefreshTtlMs = 60_000;
 	let lastMcpRefreshAt = Date.now();
 	let mcpRefreshInFlight: Promise<void> | undefined;
@@ -283,6 +285,7 @@ export async function runServe(argv: string[]): Promise<void> {
 	const flush = async (): Promise<void> => {
 		if (disposed) return;
 		disposed = true;
+		clientToolBridge.rejectAll("serve process is shutting down");
 		await controller.dispose();
 		await lsp.shutdown();
 		await mcpManager.close();
@@ -339,6 +342,9 @@ export async function runServe(argv: string[]): Promise<void> {
 						if (control.imageGeneration !== undefined) {
 							config.setImageGenerationEnabled(control.imageGeneration);
 						}
+						// Sent on every turn; an absent list clears prior client
+						// tools so a disconnected surface never leaves stale tools.
+						clientToolBridge.setTools(control.clientTools ?? []);
 					},
 				});
 				writeRecord("serve:turn", control.requestId, {
@@ -373,6 +379,12 @@ export async function runServe(argv: string[]): Promise<void> {
 				return;
 			case "respondInput":
 				controller.provideInput(control.id, control.answers);
+				return;
+			case "clientToolResult":
+				clientToolBridge.provideResult(
+					control.id,
+					control.error ? { error: control.error } : (control.result ?? {}),
+				);
 				return;
 			case "setModel":
 				config.setModel(parseModel(control.model));

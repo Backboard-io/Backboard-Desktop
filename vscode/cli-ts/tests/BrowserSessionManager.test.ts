@@ -75,6 +75,67 @@ describe("BrowserSessionManager", () => {
 	});
 });
 
+describe("BrowserSessionManager integrated endpoint", () => {
+	function scriptedSocket(targetInfos: unknown[]): FakeSocket {
+		const socket = new FakeSocket();
+		const originalSend = socket.send.bind(socket);
+		socket.send = (payload: string): void => {
+			originalSend(payload);
+			const message = JSON.parse(payload) as { id: number; method: string };
+			if (message.method === "Target.getTargets") {
+				queueMicrotask(() =>
+					socket.respond({ id: message.id, result: { targetInfos } }),
+				);
+			}
+		};
+		setTimeout(() => socket.open(), 0);
+		return socket;
+	}
+
+	it("prefers the Backboard integrated endpoint when it exposes a shared page", async () => {
+		let spawned = false;
+		const manager = new BrowserSessionManager({
+			env: { backboardBrowserWsUrl: "ws://127.0.0.1:1234/cdp/token" },
+			webSocketFactory: () =>
+				scriptedSocket([
+					{
+						targetId: "t1",
+						type: "page",
+						url: "http://localhost:8765/index.html",
+					},
+				]) as unknown as WebSocket,
+			fetch: (async () =>
+				new Response("missing", { status: 404 })) as unknown as typeof fetch,
+			spawn: (() => {
+				spawned = true;
+				throw new Error("should not launch");
+			}) as unknown as typeof Bun.spawn,
+		});
+
+		const platform = await manager.getPlatform(new AbortController().signal);
+		expect(platform).toBeDefined();
+		expect(spawned).toBe(false);
+	});
+
+	it("falls through to normal resolution when the endpoint has no shared page", async () => {
+		const manager = new BrowserSessionManager({
+			env: { backboardBrowserWsUrl: "ws://127.0.0.1:1234/cdp/token" },
+			webSocketFactory: () => scriptedSocket([]) as unknown as WebSocket,
+			executable: {
+				canExecute: async () => false,
+				platform: "linux",
+				pathDirs: [],
+			},
+			fetch: (async () =>
+				new Response("missing", { status: 404 })) as unknown as typeof fetch,
+		});
+
+		await expect(
+			manager.getPlatform(new AbortController().signal),
+		).rejects.toThrow(/Could not find Chrome/);
+	});
+});
+
 describe("BrowserHarnessSession", () => {
 	it("closes the CDP socket and rejects pending calls", async () => {
 		const socket = new FakeSocket();

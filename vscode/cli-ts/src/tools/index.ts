@@ -5,6 +5,7 @@ import {
 import { LocalReplExecutor } from "../core/agent/rlm/LocalReplExecutor.ts";
 import { RLMLoop } from "../core/agent/rlm/RLMLoop.ts";
 import { SubAgentRunner } from "../core/agent/SubAgentRunner.ts";
+import { ClientProxyTool } from "../core/tools/ClientToolBridge.ts";
 import type { Tool } from "../core/tools/Tool.ts";
 import { ToolRegistry } from "../core/tools/ToolRegistry.ts";
 import { subagent as subagentPrompt } from "../prompts/system/subagent.tsx";
@@ -88,6 +89,9 @@ function buildAgentTool(deps: DefaultToolDeps, base: Tool[]): AgentTool {
 			const workerBaseTools = deps.config.toolPolicy.visibleTools(registry);
 			for (const tool of workerBaseTools) {
 				if (NON_DELEGATABLE_AGENT_TOOLS.has(tool.agentName)) continue;
+				// Client tools round-trip through the IDE's active-client slot,
+				// which only the root session holds — sub-agents can't use them.
+				if (tool instanceof ClientProxyTool) continue;
 				if (readOnly && !READ_ONLY_AGENT_TOOLS.has(tool.agentName)) continue;
 				tools.push(tool);
 			}

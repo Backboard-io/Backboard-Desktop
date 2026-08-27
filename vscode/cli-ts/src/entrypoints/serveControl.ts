@@ -6,6 +6,7 @@ const KNOWN_OPS = new Set<ServeControl["op"]>([
 	"warmup",
 	"cancel",
 	"respondInput",
+	"clientToolResult",
 	"setModel",
 	"listModels",
 	"listTools",
@@ -71,6 +72,9 @@ export function parseControlLine(line: string): ParsedControlLine | null {
 			) {
 				return missing("answers");
 			}
+			break;
+		case "clientToolResult":
+			if (typeof record.id !== "string") return missing("id");
 			break;
 		case "setModel":
 			if (typeof record.model !== "string") return missing("model");

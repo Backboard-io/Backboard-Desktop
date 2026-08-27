@@ -12,6 +12,13 @@ export interface BrowserEnv {
 	chromePath?: string;
 	browserCdpUrl?: string;
 	browserWsUrl?: string;
+	/**
+	 * CDP WebSocket endpoint of the Backboard IDE's integrated browser
+	 * (loopback, token-authenticated). Set by the IDE when it spawns cli-ts.
+	 * Preferred when it exposes a shared page, but never fatal: when no page
+	 * is shared, resolution falls through to the normal browser discovery.
+	 */
+	backboardBrowserWsUrl?: string;
 	home?: string;
 	localAppData?: string;
 	path?: string;
@@ -113,6 +120,7 @@ export function loadBrowserEnv(
 		chromePath: optionalTrimmed(source.CHROME_PATH),
 		browserCdpUrl: optionalTrimmed(source.BROWSER_CDP_URL),
 		browserWsUrl: optionalTrimmed(source.BROWSER_WS_URL),
+		backboardBrowserWsUrl: optionalTrimmed(source.BACKBOARD_BROWSER_CDP_WS),
 		home: optionalTrimmed(source.HOME),
 		localAppData: optionalTrimmed(source.LOCALAPPDATA),
 		path: source.PATH,

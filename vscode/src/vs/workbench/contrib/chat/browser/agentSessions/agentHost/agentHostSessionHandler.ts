@@ -2206,6 +2206,16 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 				}
 				return;
 			}
+			if (tc.status === ToolCallStatus.Completed) {
+				// The server side settled this call without asking us to run it
+				// (e.g. the runtime denied or errored it pre-execution). Never
+				// invoke it retroactively with placeholder parameters.
+				if (!invoked && !cts.token.isCancellationRequested) {
+					cts.cancel();
+					invocation.didExecuteTool(undefined);
+				}
+				return;
+			}
 			if (invoked || cts.token.isCancellationRequested) {
 				return;
 			}

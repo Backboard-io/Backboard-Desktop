@@ -1,11 +1,13 @@
 import { writeFile } from "node:fs/promises";
 import { BasePlatform } from "../platform/BasePlatform.ts";
-import { pngSize } from "../platform/png.ts";
+import { pngSize, resizeWithCandidates } from "../platform/png.ts";
 import type {
 	AccessibilityElement,
 	AccessibilitySnapshot,
+	ImagePayload,
 	PlatformAction,
 	PlatformKey,
+	ResizePngInput,
 	ScreenBounds,
 	ScreenshotCapture,
 } from "../platform/types.ts";
@@ -114,6 +116,10 @@ export class BrowserHarnessPlatform
 				if (/^(chrome|chromium|browser)$/i.test(action.appName)) return;
 				throw new Error("Browser tool cannot open desktop applications.");
 			case "type":
+				if (action.mode === "keys") {
+					await this.typeAsKeyEvents(action.text, signal);
+					return;
+				}
 				await this.client.call(
 					"Input.insertText",
 					{ text: action.text },
@@ -121,7 +127,7 @@ export class BrowserHarnessPlatform
 				);
 				return;
 			case "key":
-				await this.key(action.key, signal);
+				await this.key(action.key, signal, action.phase, action.holdMs);
 				return;
 			case "click":
 				await this.click(
@@ -131,12 +137,59 @@ export class BrowserHarnessPlatform
 					signal,
 				);
 				return;
+			case "scroll":
+				await this.scroll(action, signal);
+				return;
+			case "drag":
+				await this.drag(action.from, action.to, action.durationMs, signal);
+				return;
 		}
 	}
 
 	async navigate(url: string, signal: AbortSignal): Promise<void> {
 		await this.client.call("Page.enable", {}, signal);
 		await this.client.call("Page.navigate", { url }, signal);
+	}
+
+	/**
+	 * Downscale by re-capturing through CDP with a scaled clip. Without this
+	 * override the {@link BasePlatform} default returns null and a Retina-sized
+	 * screenshot above the byte cap becomes a hard error instead of a smaller
+	 * image (the desktop platforms shell out to sips/System.Drawing instead).
+	 */
+	protected override async resizePng(
+		input: ResizePngInput,
+	): Promise<ImagePayload | null> {
+		const metrics = await this.client.call<LayoutMetricsResult>(
+			"Page.getLayoutMetrics",
+			{},
+			input.signal,
+		);
+		const viewport = metrics.cssVisualViewport ?? metrics.cssLayoutViewport;
+		const cssWidth = viewport?.clientWidth;
+		const cssHeight = viewport?.clientHeight;
+		if (!cssWidth || !cssHeight) return null;
+		return resizeWithCandidates(input, async (width, out) => {
+			const shot = await this.client.call<CaptureResult>(
+				"Page.captureScreenshot",
+				{
+					format: "png",
+					fromSurface: true,
+					clip: {
+						x: 0,
+						y: 0,
+						width: cssWidth,
+						height: cssHeight,
+						scale: width / cssWidth,
+					},
+				},
+				input.signal,
+			);
+			if (typeof shot.data !== "string") {
+				throw new Error("Browser screenshot did not include image data");
+			}
+			await writeFile(out, Buffer.from(shot.data, "base64"));
+		});
 	}
 
 	private async click(
@@ -158,28 +211,165 @@ export class BrowserHarnessPlatform
 		);
 	}
 
-	private async key(key: PlatformKey, signal: AbortSignal): Promise<void> {
+	private async key(
+		key: PlatformKey,
+		signal: AbortSignal,
+		phase: "down" | "up" | "press" = "press",
+		holdMs?: number,
+	): Promise<void> {
 		const code = keyCode(key.key);
 		const modifiers = modifierMask(key.modifiers);
+		const base = {
+			key: code.key,
+			code: code.code,
+			windowsVirtualKeyCode: code.windowsVirtualKeyCode,
+			modifiers,
+		};
+		// Printable keys (and Enter) carry `text` so pages that listen for
+		// keypress/beforeinput see the same event stream a physical keyboard
+		// produces. Pure key-state listeners (games) only need keydown/keyup.
+		const text =
+			code.key.length === 1
+				? code.key
+				: code.key === "Enter"
+					? "\r"
+					: undefined;
+		const down = text
+			? { ...base, type: "keyDown", text }
+			: { ...base, type: "rawKeyDown" };
+		if (phase !== "up") {
+			await this.client.call("Input.dispatchKeyEvent", down, signal);
+		}
+		if (phase === "press" && holdMs && holdMs > 0) {
+			// Emulate the browser's native auto-repeat while the key is held, so
+			// games that step per keydown event keep moving for the whole hold.
+			const deadline = Date.now() + Math.min(holdMs, MAX_KEY_HOLD_MS);
+			while (Date.now() < deadline) {
+				await holdDelay(
+					Math.min(KEY_REPEAT_INTERVAL_MS, deadline - Date.now()),
+					signal,
+				);
+				if (Date.now() >= deadline) break;
+				await this.client.call(
+					"Input.dispatchKeyEvent",
+					{ ...down, autoRepeat: true },
+					signal,
+				);
+			}
+		}
+		if (phase !== "down") {
+			await this.client.call(
+				"Input.dispatchKeyEvent",
+				{ ...base, type: "keyUp" },
+				signal,
+			);
+		}
+	}
+
+	private async typeAsKeyEvents(
+		text: string,
+		signal: AbortSignal,
+	): Promise<void> {
+		for (const char of text) {
+			const isNewline = char === "\n" || char === "\r";
+			await this.key(
+				{ key: isNewline ? "ENTER" : char, modifiers: [] },
+				signal,
+			);
+			await holdDelay(TYPE_KEY_EVENT_DELAY_MS, signal);
+		}
+	}
+
+	private async scroll(
+		action: {
+			point?: { x: number; y: number };
+			deltaX: number;
+			deltaY: number;
+		},
+		signal: AbortSignal,
+	): Promise<void> {
+		let x: number;
+		let y: number;
+		if (action.point) {
+			x = action.point.x / this.screenshotToCssScale;
+			y = action.point.y / this.screenshotToCssScale;
+		} else {
+			const metrics = await this.client.call<LayoutMetricsResult>(
+				"Page.getLayoutMetrics",
+				{},
+				signal,
+			);
+			const viewport = metrics.cssVisualViewport ?? metrics.cssLayoutViewport;
+			x = (viewport?.clientWidth ?? 800) / 2;
+			y = (viewport?.clientHeight ?? 600) / 2;
+		}
 		await this.client.call(
-			"Input.dispatchKeyEvent",
+			"Input.dispatchMouseEvent",
 			{
-				type: "keyDown",
-				key: code.key,
-				code: code.code,
-				windowsVirtualKeyCode: code.windowsVirtualKeyCode,
-				modifiers,
+				type: "mouseWheel",
+				x,
+				y,
+				deltaX: action.deltaX,
+				deltaY: action.deltaY,
 			},
 			signal,
 		);
+	}
+
+	private async drag(
+		from: { x: number; y: number },
+		to: { x: number; y: number },
+		durationMs: number | undefined,
+		signal: AbortSignal,
+	): Promise<void> {
+		const scale = this.screenshotToCssScale;
+		const start = { x: from.x / scale, y: from.y / scale };
+		const end = { x: to.x / scale, y: to.y / scale };
+		const steps = Math.max(
+			2,
+			Math.min(
+				DRAG_MAX_STEPS,
+				Math.round((durationMs ?? 300) / DRAG_STEP_INTERVAL_MS),
+			),
+		);
 		await this.client.call(
-			"Input.dispatchKeyEvent",
+			"Input.dispatchMouseEvent",
+			{ type: "mouseMoved", x: start.x, y: start.y },
+			signal,
+		);
+		await this.client.call(
+			"Input.dispatchMouseEvent",
 			{
-				type: "keyUp",
-				key: code.key,
-				code: code.code,
-				windowsVirtualKeyCode: code.windowsVirtualKeyCode,
-				modifiers,
+				type: "mousePressed",
+				x: start.x,
+				y: start.y,
+				button: "left",
+				clickCount: 1,
+			},
+			signal,
+		);
+		for (let step = 1; step <= steps; step++) {
+			const t = step / steps;
+			await this.client.call(
+				"Input.dispatchMouseEvent",
+				{
+					type: "mouseMoved",
+					x: start.x + (end.x - start.x) * t,
+					y: start.y + (end.y - start.y) * t,
+					button: "left",
+				},
+				signal,
+			);
+			await holdDelay(DRAG_STEP_INTERVAL_MS, signal);
+		}
+		await this.client.call(
+			"Input.dispatchMouseEvent",
+			{
+				type: "mouseReleased",
+				x: end.x,
+				y: end.y,
+				button: "left",
+				clickCount: 1,
 			},
 			signal,
 		);
@@ -251,17 +441,28 @@ function keyCode(key: string): {
 	code: string;
 	windowsVirtualKeyCode: number;
 } {
-	const mapped = KEY_CODES[key.toUpperCase()];
-	if (mapped) return mapped;
+	// Single characters pass through with their case preserved: a game checking
+	// `event.key === "w"` must see "w", not "W". `code`/keyCode still use the
+	// uppercase physical-key identity.
 	if (key.length === 1) {
 		const upper = key.toUpperCase();
 		return {
 			key,
-			code: `Key${upper}`,
+			code: /[a-z]/i.test(key) ? `Key${upper}` : keyCodeForSymbol(key),
 			windowsVirtualKeyCode: upper.charCodeAt(0),
 		};
 	}
-	throw new Error(`Unsupported browser key: ${key}`);
+	const mapped = KEY_CODES[key.toUpperCase()];
+	if (mapped) return mapped;
+	throw new Error(
+		`Unsupported browser key: ${key}. Use a single character or one of: ${Object.keys(KEY_CODES).join(", ")}.`,
+	);
+}
+
+function keyCodeForSymbol(key: string): string {
+	if (/[0-9]/.test(key)) return `Digit${key}`;
+	if (key === " ") return "Space";
+	return key;
 }
 
 const KEY_CODES: Record<
@@ -269,9 +470,12 @@ const KEY_CODES: Record<
 	{ key: string; code: string; windowsVirtualKeyCode: number }
 > = {
 	ENTER: { key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 },
+	RETURN: { key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 },
 	TAB: { key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 },
 	SPACE: { key: " ", code: "Space", windowsVirtualKeyCode: 32 },
+	SPACEBAR: { key: " ", code: "Space", windowsVirtualKeyCode: 32 },
 	ESC: { key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 },
+	ESCAPE: { key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 },
 	BACKSPACE: {
 		key: "Backspace",
 		code: "Backspace",
@@ -282,11 +486,44 @@ const KEY_CODES: Record<
 	DOWN: { key: "ArrowDown", code: "ArrowDown", windowsVirtualKeyCode: 40 },
 	LEFT: { key: "ArrowLeft", code: "ArrowLeft", windowsVirtualKeyCode: 37 },
 	RIGHT: { key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 },
+	ARROWUP: { key: "ArrowUp", code: "ArrowUp", windowsVirtualKeyCode: 38 },
+	ARROWDOWN: { key: "ArrowDown", code: "ArrowDown", windowsVirtualKeyCode: 40 },
+	ARROWLEFT: { key: "ArrowLeft", code: "ArrowLeft", windowsVirtualKeyCode: 37 },
+	ARROWRIGHT: {
+		key: "ArrowRight",
+		code: "ArrowRight",
+		windowsVirtualKeyCode: 39,
+	},
+	SHIFT: { key: "Shift", code: "ShiftLeft", windowsVirtualKeyCode: 16 },
+	CONTROL: { key: "Control", code: "ControlLeft", windowsVirtualKeyCode: 17 },
+	ALT: { key: "Alt", code: "AltLeft", windowsVirtualKeyCode: 18 },
+	META: { key: "Meta", code: "MetaLeft", windowsVirtualKeyCode: 91 },
 	HOME: { key: "Home", code: "Home", windowsVirtualKeyCode: 36 },
 	END: { key: "End", code: "End", windowsVirtualKeyCode: 35 },
 	PAGEUP: { key: "PageUp", code: "PageUp", windowsVirtualKeyCode: 33 },
 	PAGEDOWN: { key: "PageDown", code: "PageDown", windowsVirtualKeyCode: 34 },
 };
+
+const MAX_KEY_HOLD_MS = 10_000;
+const KEY_REPEAT_INTERVAL_MS = 55;
+const TYPE_KEY_EVENT_DELAY_MS = 15;
+const DRAG_STEP_INTERVAL_MS = 16;
+const DRAG_MAX_STEPS = 40;
+
+function holdDelay(ms: number, signal: AbortSignal): Promise<void> {
+	if (ms <= 0) return Promise.resolve();
+	return new Promise((resolve, reject) => {
+		const timer = setTimeout(() => {
+			signal.removeEventListener("abort", onAbort);
+			resolve();
+		}, ms);
+		const onAbort = (): void => {
+			clearTimeout(timer);
+			reject(new Error("aborted"));
+		};
+		signal.addEventListener("abort", onAbort, { once: true });
+	});
+}
 
 const DOM_SNAPSHOT_SCRIPT = `(() => {
 	const selectors = [

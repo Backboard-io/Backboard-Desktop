@@ -162,6 +162,14 @@ export type AgentEvent =
 	  }
 	| { type: "input:request"; request: AskUserRequest }
 	| { type: "input:response"; response: AskUserResponse }
+	// A client-provided tool call awaiting execution by the connected IDE.
+	// The IDE runs the tool and answers with a `clientToolResult` control op.
+	| {
+			type: "client_tool:call";
+			toolCallId: string;
+			name: string;
+			input: unknown;
+	  }
 	| { type: "permission:mode"; mode: PermissionMode }
 	| { type: "todos:updated"; todos: TodoItem[] }
 	| { type: "usage"; usage: UsageInfo }
