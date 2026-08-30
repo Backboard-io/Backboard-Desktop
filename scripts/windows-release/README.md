@@ -14,7 +14,11 @@ Create these resources in the Azure subscription used for Backboard releases:
 4. A Microsoft Entra application and service principal for GitHub Actions.
 5. A federated identity credential with this subject:
 
-   `repo:Backboard-io/Backboard-Desktop:environment:windows-release`
+   `repo:Backboard-io@241341711/Backboard-Desktop@1314090052:environment:windows-release`
+
+   This uses GitHub's immutable organization and repository IDs. Keep the
+   `windows-release` environment name in sync with the workflow and the
+   federated credential.
 
 6. An `Artifact Signing Certificate Profile Signer` role assignment for that
    service principal, scoped to the certificate profile.

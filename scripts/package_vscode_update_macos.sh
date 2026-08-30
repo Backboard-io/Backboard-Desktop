@@ -8,7 +8,10 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
 fi
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VSCODE_ROOT="${REPO_ROOT}/vscode"
+VSCODE_ROOT="${VSCODE_ROOT:-${REPO_ROOT}/backboard}"
+if [[ ! -f "${VSCODE_ROOT}/package.json" && -f "${REPO_ROOT}/vscode/package.json" ]]; then
+  VSCODE_ROOT="${REPO_ROOT}/vscode"
+fi
 
 if [[ -s "${HOME}/.nvm/nvm.sh" ]]; then
   CURRENT_DIR="${PWD}"
@@ -38,6 +41,7 @@ DMG_ASSETS_DIR="${DMG_ASSETS_DIR:-${REPO_ROOT}/scripts/dmg-assets}"
 SKIP_NOTARIZATION="${SKIP_NOTARIZATION:-0}"
 SKIP_SIGNING="${SKIP_SIGNING:-0}"
 BACKBOARD_SIGNING_PROFILE="${BACKBOARD_SIGNING_PROFILE:-robert}"
+BACKBOARD_INSTALL_BOOTSTRAP_LAUNCHER="${BACKBOARD_INSTALL_BOOTSTRAP_LAUNCHER:-0}"
 BACKBOARD_BOOTSTRAP_LAUNCH_DELAY_SECONDS="${BACKBOARD_BOOTSTRAP_LAUNCH_DELAY_SECONDS:-0}"
 BOOTSTRAP_REAL_EXECUTABLE=""
 
@@ -287,7 +291,7 @@ if [[ "${SKIP_SIGNING}" != "1" && "${SKIP_NOTARIZATION}" != "1" ]]; then
   require_file "${ASC_KEY_PATH}"
 fi
 if [[ "${SKIP_SIGNING}" != "1" ]]; then
-  require_file "${REPO_ROOT}/vscode/build/azure-pipelines/darwin/app-entitlements.plist"
+  require_file "${VSCODE_ROOT}/build/azure-pipelines/darwin/app-entitlements.plist"
 fi
 preflight_disk_space
 
@@ -460,14 +464,18 @@ fi
 prune_release_app
 
 install_bootstrap_launcher() {
-  if [[ "${BACKBOARD_BOOTSTRAP_LAUNCH_DELAY_SECONDS}" == "0" ]]; then
-    return
-  fi
-  if [[ ! "${BACKBOARD_BOOTSTRAP_LAUNCH_DELAY_SECONDS}" =~ ^[1-9][0-9]*$ ]]; then
-    echo "BACKBOARD_BOOTSTRAP_LAUNCH_DELAY_SECONDS must be a positive integer or 0." >&2
+  case "${BACKBOARD_INSTALL_BOOTSTRAP_LAUNCHER}" in
+    0|1) ;;
+    *) echo "BACKBOARD_INSTALL_BOOTSTRAP_LAUNCHER must be 0 or 1." >&2; exit 1 ;;
+  esac
+  if [[ ! "${BACKBOARD_BOOTSTRAP_LAUNCH_DELAY_SECONDS}" =~ ^[0-9]+$ ]]; then
+    echo "BACKBOARD_BOOTSTRAP_LAUNCH_DELAY_SECONDS must be a non-negative integer." >&2
     exit 1
   fi
-  if (( BACKBOARD_BOOTSTRAP_LAUNCH_DELAY_SECONDS < 25 )); then
+  if [[ "${BACKBOARD_INSTALL_BOOTSTRAP_LAUNCHER}" == "0" && "${BACKBOARD_BOOTSTRAP_LAUNCH_DELAY_SECONDS}" == "0" ]]; then
+    return
+  fi
+  if (( BACKBOARD_BOOTSTRAP_LAUNCH_DELAY_SECONDS > 0 && BACKBOARD_BOOTSTRAP_LAUNCH_DELAY_SECONDS < 25 )); then
     echo "BACKBOARD_BOOTSTRAP_LAUNCH_DELAY_SECONDS must be at least 25 seconds to outlast the legacy updater health window." >&2
     exit 1
   fi
@@ -498,7 +506,7 @@ install_bootstrap_launcher() {
     exit 1
   fi
 
-  echo "Installing per-copy ${BACKBOARD_BOOTSTRAP_LAUNCH_DELAY_SECONDS}s bootstrap launcher"
+  echo "Installing updater compatibility bootstrap launcher (${BACKBOARD_BOOTSTRAP_LAUNCH_DELAY_SECONDS}s delay)"
   mv "${executable_path}" "${BOOTSTRAP_REAL_EXECUTABLE}"
   xcrun clang \
     -arch "${compiler_arch}" \
@@ -569,6 +577,12 @@ verify_release_architecture() {
 }
 
 verify_release_architecture
+
+# Finder and copy tools can attach com.apple.FinderInfo or resource-fork data to
+# otherwise valid binaries. Developer ID signing rejects that metadata, so scrub
+# it from the disposable package copy before creating any signatures.
+echo "Clearing extended attributes before signing"
+xattr -cr "${APP_PATH}"
 
 # Builds the DMG with `hdiutil makehybrid` + `hdiutil convert` instead of
 # `hdiutil create -srcfolder`. The latter attaches a temp volume at /Volumes and
@@ -782,11 +796,11 @@ done < <(find "${APP_PATH}/Contents/Frameworks" -type d -name "*.framework" -pri
 
 echo "Signing helper apps"
 while IFS= read -r -d '' helper_app; do
-  helper_entitlements="${REPO_ROOT}/vscode/build/azure-pipelines/darwin/helper-entitlements.plist"
+  helper_entitlements="${VSCODE_ROOT}/build/azure-pipelines/darwin/helper-entitlements.plist"
   case "${helper_app}" in
-    *" Helper (GPU).app") helper_entitlements="${REPO_ROOT}/vscode/build/azure-pipelines/darwin/helper-gpu-entitlements.plist" ;;
-    *" Helper (Renderer).app") helper_entitlements="${REPO_ROOT}/vscode/build/azure-pipelines/darwin/helper-renderer-entitlements.plist" ;;
-    *" Helper (Plugin).app") helper_entitlements="${REPO_ROOT}/vscode/build/azure-pipelines/darwin/helper-plugin-entitlements.plist" ;;
+    *" Helper (GPU).app") helper_entitlements="${VSCODE_ROOT}/build/azure-pipelines/darwin/helper-gpu-entitlements.plist" ;;
+    *" Helper (Renderer).app") helper_entitlements="${VSCODE_ROOT}/build/azure-pipelines/darwin/helper-renderer-entitlements.plist" ;;
+    *" Helper (Plugin).app") helper_entitlements="${VSCODE_ROOT}/build/azure-pipelines/darwin/helper-plugin-entitlements.plist" ;;
   esac
   sign_code "${helper_app}" --entitlements "${helper_entitlements}"
 done < <(find "${APP_PATH}/Contents/Frameworks" -maxdepth 1 -type d -name "*.app" -print0 2>/dev/null)
@@ -794,14 +808,14 @@ done < <(find "${APP_PATH}/Contents/Frameworks" -maxdepth 1 -type d -name "*.app
 echo "Signing main app"
 if [[ -n "${BOOTSTRAP_REAL_EXECUTABLE}" ]]; then
   echo "Signing bootstrap real executable"
-  sign_code "${BOOTSTRAP_REAL_EXECUTABLE}" --entitlements "${REPO_ROOT}/vscode/build/azure-pipelines/darwin/app-entitlements.plist"
+  sign_code "${BOOTSTRAP_REAL_EXECUTABLE}" --entitlements "${VSCODE_ROOT}/build/azure-pipelines/darwin/app-entitlements.plist"
 fi
 codesign \
   --keychain "${KEYCHAIN_PATH}" \
   --force \
   --timestamp \
   --options runtime \
-  --entitlements "${REPO_ROOT}/vscode/build/azure-pipelines/darwin/app-entitlements.plist" \
+  --entitlements "${VSCODE_ROOT}/build/azure-pipelines/darwin/app-entitlements.plist" \
   --sign "${IDENTITY_HASH}" \
   "${APP_PATH}" \
   -v

@@ -9,6 +9,67 @@ the Backboard API is the model gateway.** Everything below expands on that.
 
 ---
 
+## Features
+
+### Four work modes
+
+Backboard Desktop ships four distinct window modes over the same workspace, switchable from
+the title bar:
+
+- **Simple** — A streamlined agent workbench. One or more agent sessions side by side, with a
+  sidebar for session navigation and an auxiliary bar for file changes and review. No
+  activity bar, no status bar, no clutter.
+- **Editor** — Full VS Code. Files, terminal, debugger, extensions, and the entire existing
+  workbench. Switch in to edit, switch back to your agents without losing state.
+- **Advanced** — A multi-session command surface for supervising many concurrent agents at
+  once. View sessions as a grid of cards or a kanban board bucketed by status (Running,
+  Needs Attention, Done).
+- **Jarvis** — A cinematic, voice-driven spatial canvas. Free-floating glass cards over a
+  cycling backdrop, with launcher tiles for agents, terminals, browsers, files, and more.
+
+### Agent-first workflow
+
+- **Native Backboard agent** — First-class integration with the Backboard API for
+  completions, tool scheduling, and session management. The agent runs as a child process
+  and communicates over line-delimited JSON.
+- **BYOS agent hosts** — Plug in Claude, Codex, Copilot, or any compatible agent
+  provider. Connect locally, over SSH, through a tunnel, or in WSL.
+- **Tool scheduler with hooks** — Every tool call runs through a hook system (before and
+  after), giving you control over what agents can do and when.
+- **Skills and MCP servers** — Extensible skill system and Model Context Protocol support
+  for connecting to external tools and services.
+
+### Multi-session management
+
+- Run multiple agent sessions concurrently, each with its own workspace, branch, and layout.
+- Per-session layout persistence — auxiliary bar, panel, and editor state are captured and
+  restored as you switch sessions.
+- Session picker in the titlebar shows provider icon, title, workspace name, git branch,
+  and a `+insertions -deletions` diff summary for pending changes.
+- Advanced mode adds filtering, sorting, and grouping across all sessions.
+
+### Integrated development tools
+
+- **Changes view** — See every file the agent touched, with inline diffs and a review
+  strip for accepting or rejecting changes.
+- **Integrated terminal** — Attach a live shell to any session. Jarvis supports up to four
+  terminal slots with their own lifecycle.
+- **Integrated browser** — Open a real browser view inside the IDE for testing web
+  applications.
+- **File editor** — Full Monaco editor available as a modal overlay in Simple mode or as
+  the primary surface in Editor mode.
+
+### Security and credentials
+
+- API keys stored in `~/.backboard_ide/config.json` with `0600` permissions. The agent
+  never reads keys from disk — the host injects them as environment variables.
+- BYOK (bring your own key) for third-party model providers, stored in the OS keychain via
+  `ISecretStorageService`.
+- SSO support for team authentication.
+- Every credential can be overridden via environment variables for CI or local development.
+
+---
+
 ## Repository layout
 
 | Path | What it is |
@@ -226,9 +287,9 @@ list.* It is built at runtime from `ISessionsProvidersService.getProviders()` an
 `ISessionsManagementService.getSessionTypesForFolder(...)`, filtered to agent-host session
 types with Backboard itself excluded. New providers appear automatically, and generic Cloud
 or Local session modes never leak into the picker
-([JARVIS_UNLIMITED_CANVAS_SPEC.md:455](vscode/src/vs/jarvis/JARVIS_UNLIMITED_CANVAS_SPEC.md)).
+([JARVIS_UNLIMITED_CANVAS_SPEC.md:455](backboard/src/vs/jarvis/JARVIS_UNLIMITED_CANVAS_SPEC.md)).
 
-Backends live under [platform/agentHost/node/](vscode/src/vs/platform/agentHost/node/) — one
+Backends live under [platform/agentHost/node/](backboard/src/vs/platform/agentHost/node/) — one
 directory each for `cliTs`, `claude`, `codex`, and `copilot`. Sessions can run
 locally, over SSH, through a tunnel, or in WSL
 (`sshRemoteAgentHostService.ts`, `tunnelAgentHostService.ts`, `wslRemoteAgentHostService.ts`).

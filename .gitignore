@@ -20,7 +20,14 @@ node_modules/
 /VSCode-win32-*/
 /windows-release/
 /vscode/extensions/backboard/bin/
+/backboard/extensions/backboard/bin/
 /vscode/cli-ts/.*.bun-build
+/backboard/cli-ts/.*.bun-build
+
+# The source tree is being renamed from vscode/ to backboard/. Keep local
+# build state ignored from either path while the rename is in progress.
+/vscode/.build/
+/backboard/.build/
 
 # Per-workspace Backboard metadata is local machine state.
 /.backboard/
@@ -37,6 +44,11 @@ node_modules/
 /vscode/pw_session.env
 /vscode/screenshots/
 /vscode/Lefpanelold.md
+/backboard/launch_info*.json
+/backboard/launch_stderr*.log
+/backboard/pw_session.env
+/backboard/screenshots/
+/backboard/Lefpanelold.md
 # @playwright/cli drops a session-artifacts dir (snapshots, console logs)
 # in whatever cwd it runs from — unanchored so it is caught anywhere.
 .playwright-cli/

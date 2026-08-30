@@ -1,0 +1,236 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* ------------------------------------------------------------------------- *
+ * Inactive session chat input state
+ *
+ * When a session column is not the active/focused/selected one, fade out all
+ * of its chat input controls (attach, mode/model pickers, etc.) and keep only
+ * the send button visible in a desaturated state. This reduces visual noise
+ * across the multi-session grid so attention stays on the active session.
+ * ------------------------------------------------------------------------- */
+
+/* Session header, tabs, and chat content are all hosted in this centered
+ * inner container so alignment is controlled in one place. */
+.session-view .session-view-centered-content {
+	height: 100%;
+	margin: 0 auto;
+	box-sizing: border-box;
+}
+
+.session-view {
+	position: relative;
+}
+
+.session-view .session-view-chat-navigation {
+	display: flex;
+	height: 28px;
+	align-items: center;
+	box-sizing: border-box;
+	padding: 2px 8px;
+}
+
+.session-view .session-view-chat-navigation[hidden] {
+	display: none;
+}
+
+.session-view .session-view-chat-back {
+	appearance: none;
+	display: inline-flex;
+	max-width: 200px;
+	height: 24px;
+	min-width: 0;
+	align-items: center;
+	gap: 5px;
+	box-sizing: border-box;
+	padding: 0 7px 0 5px;
+	border: 0;
+	border-radius: 4px;
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+	font: inherit;
+	font-size: 12px;
+	line-height: 20px;
+	cursor: pointer;
+}
+
+.session-view .session-view-chat-back:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+	color: var(--session-view-foreground);
+}
+
+.session-view .session-view-chat-back:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.session-view .session-view-chat-back > .codicon {
+	flex: 0 0 auto;
+	font-size: 12px;
+}
+
+.session-view .session-view-chat-back-label {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.session-view.backboard-auth-gate-active > :not(.backboard-auth-gate-overlay) {
+	filter: blur(4px);
+	opacity: 0.48;
+	pointer-events: none;
+	user-select: none;
+}
+
+.session-view .backboard-auth-gate-overlay {
+	position: absolute;
+	inset: 0;
+	z-index: 50;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 22px;
+	box-sizing: border-box;
+	background: color-mix(in srgb, var(--session-view-background) 38%, transparent);
+}
+
+.session-view .backboard-auth-gate-card {
+	width: min(300px, 100%);
+	display: grid;
+	justify-items: center;
+	gap: 12px;
+	padding: 22px 18px;
+	border: 1px solid var(--vscode-panel-border);
+	border-radius: 8px;
+	background: color-mix(in srgb, var(--session-view-background) 94%, var(--vscode-editor-background));
+	box-shadow: 0 8px 24px color-mix(in srgb, var(--vscode-widget-shadow) 50%, transparent);
+	text-align: center;
+}
+
+.session-view .backboard-auth-gate-logo.codicon.codicon-backboard-logo {
+	width: 52px;
+	height: 52px;
+	color: color-mix(in srgb, var(--session-view-foreground) 62%, var(--vscode-button-background));
+	font-size: 52px;
+}
+
+.session-view .backboard-auth-gate-title {
+	margin: 0;
+	color: var(--session-view-foreground);
+	font-size: 15px;
+	font-weight: 650;
+	line-height: 20px;
+}
+
+.session-view .backboard-auth-gate-description {
+	max-width: 240px;
+	margin: 0;
+	color: var(--vscode-descriptionForeground);
+	font-size: 12px;
+	line-height: 17px;
+}
+
+.session-view .backboard-auth-gate-button {
+	min-height: 30px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0 12px;
+	border: 0;
+	border-radius: 5px;
+	color: var(--vscode-button-foreground);
+	background: var(--vscode-button-background);
+	font-size: 12px;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.session-view .backboard-auth-gate-button:hover {
+	background: var(--vscode-button-hoverBackground);
+}
+
+/* Transitions apply to both active and inactive states so controls fade
+ * smoothly in either direction. Only declared when the user has not requested
+ * reduced motion so we never need to unset them. */
+@media (prefers-reduced-motion: no-preference) {
+	.session-view .chat-composite-bar.session-header-bar,
+	.session-view .interactive-session .interactive-list,
+	.session-view .interactive-session .interactive-list .chat-tool-invocation-part,
+	.session-view .interactive-session .interactive-list .chat-thinking-box,
+	.session-view .interactive-session .interactive-list .chat-footer-toolbar,
+	.session-view .interactive-session .chat-input-toolbars > .chat-input-toolbar,
+	.session-view .interactive-session .chat-secondary-toolbar,
+	.session-view .interactive-session .chat-attachments-container,
+	.session-view .interactive-session .interactive-input-followups {
+		transition: opacity 0.15s ease;
+	}
+
+	.session-view .interactive-session .chat-input-toolbars > .chat-execute-toolbar {
+		transition: filter 0.15s ease, opacity 0.15s ease;
+	}
+}
+
+/* Strongly recede the whole header (title, meta, toolbar) for inactive sessions
+ * so the active session's header stands out, while keeping it legible. */
+.session-view:not(.is-active) .chat-composite-bar.session-header-bar {
+	opacity: 0.6;
+}
+
+/* Recede the chat transcript for inactive sessions so it reads as quiet but
+ * stays legible at a glance. The list as a whole is only lightly dimmed so the
+ * agent's text responses remain readable; non-text content (tool calls) is
+ * dimmed further below to keep the visual hierarchy. */
+.session-view:not(.is-active) .interactive-session .interactive-list {
+	opacity: 0.9;
+}
+
+/* Push tool calls / invocations, thinking sections, and the per-response footer
+ * toolbar further back than plain text responses in inactive sessions. Opacity
+ * nests multiplicatively, so this stacks on top of the list's 0.9 for an
+ * effective ~0.54 while the plain text stays at 0.9. */
+.session-view:not(.is-active) .interactive-session .interactive-list .chat-tool-invocation-part,
+.session-view:not(.is-active) .interactive-session .interactive-list .chat-thinking-box,
+.session-view:not(.is-active) .interactive-session .interactive-list .chat-footer-toolbar {
+	opacity: 0.6;
+}
+
+/* Fully fade out the in-input controls (attach, mode/model/harness pickers,
+ * etc.) for inactive sessions so only the send button remains as a quiet
+ * affordance. */
+.session-view:not(.is-active) .interactive-session .chat-input-toolbars > .chat-input-toolbar {
+	opacity: 0;
+	visibility: hidden;
+	pointer-events: none;
+}
+
+/* Fade out the controls that sit below the input box (secondary toolbar,
+ * attachments row and followups) so the inactive input reads as quiet. */
+.session-view:not(.is-active) .interactive-session .chat-secondary-toolbar,
+.session-view:not(.is-active) .interactive-session .chat-attachments-container,
+.session-view:not(.is-active) .interactive-session .interactive-input-followups {
+	opacity: 0;
+	pointer-events: none;
+}
+
+/* Fade the chat input editor (including placeholder/draft text) for inactive sessions. */
+.session-view:not(.is-active) .interactive-session .chat-editor-container {
+	opacity: 0.6;
+}
+
+/* Fully desaturate the in-flight chat-input border beam in inactive sessions so
+ * it matches the muted treatment of the rest of the inactive input controls.
+ * Relative color syntax zeroes the saturation channel while preserving hue and
+ * lightness — unlike mixing toward a fixed gray, this keeps the accent's
+ * lightness intact so high-contrast themes (white/black accents) still read. */
+.session-view:not(.is-active) .interactive-session .chat-input-container.working {
+	--chat-input-working-border-color1: hsl(from var(--vscode-chat-inputWorkingBorderColor1) h 0% l);
+}
+
+/* Desaturate the send button so it reads as muted while still discoverable. */
+.session-view:not(.is-active) .interactive-session .chat-input-toolbars > .chat-execute-toolbar {
+	filter: grayscale(1);
+	opacity: 0.6;
+}

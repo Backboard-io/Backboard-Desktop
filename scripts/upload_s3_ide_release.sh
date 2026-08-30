@@ -15,7 +15,14 @@ VERIFY_PUBLIC=0
 UPLOAD_LATEST_DMG=1
 PUBLISH_LATEST=1
 FORCE=0
+ALLOW_UNSIGNED_SANDBOX=0
 AWS_PROFILE_NAME="${AWS_PROFILE:-}"
+# Large signed DMGs should survive brief endpoint/network interruptions without
+# restarting the entire multipart transfer. Callers can still override either.
+export AWS_RETRY_MODE="${AWS_RETRY_MODE:-adaptive}"
+export AWS_MAX_ATTEMPTS="${AWS_MAX_ATTEMPTS:-20}"
+UPDATER_TEST_SOURCE_APP="${UPDATER_TEST_SOURCE_APP:-}"
+UPDATER_TEST_INSTALLER_MODULE="${UPDATER_TEST_INSTALLER_MODULE:-}"
 ARCHES=()
 
 usage() {
@@ -47,6 +54,13 @@ Options:
   --dry-run              Print what would upload and still regenerate local manifests.
   --force                Allow overwriting versioned release S3 objects.
   --verify-public        After upload, curl the public versioned manifest and DMG, plus latest when published.
+  --allow-unsigned-sandbox
+                         Permit an unsigned/non-notarized sandbox artifact. Never valid for stable.
+  --updater-test-source-app APP
+                         Previous signed app release to upgrade in the mandatory disposable E2E test.
+                         Required when publishing latest for sandbox or stable.
+  --updater-test-installer-module FILE
+                         Previous release's updatesInstaller.js. Defaults to the module inside APP.
   --versioned-only       Upload only immutable versioned objects for a manual release; do not change latest.
   --no-latest-dmg        Do not upload the duplicate latest DMG object; still updates latest manifest.
   -h, --help             Show this help.
@@ -99,6 +113,18 @@ while [[ $# -gt 0 ]]; do
       VERIFY_PUBLIC=1
       shift
       ;;
+    --allow-unsigned-sandbox)
+      ALLOW_UNSIGNED_SANDBOX=1
+      shift
+      ;;
+    --updater-test-source-app)
+      UPDATER_TEST_SOURCE_APP="$2"
+      shift 2
+      ;;
+    --updater-test-installer-module)
+      UPDATER_TEST_INSTALLER_MODULE="$2"
+      shift 2
+      ;;
     --versioned-only)
       PUBLISH_LATEST=0
       UPLOAD_LATEST_DMG=0
@@ -137,6 +163,22 @@ fi
 
 if [[ "${ASSET}" != "bbide" ]]; then
   echo "Refusing to upload unexpected asset '${ASSET}'. Use ASSET=bbide unless the updater code changed." >&2
+  exit 1
+fi
+
+if [[ "${ALLOW_UNSIGNED_SANDBOX}" -eq 1 && "${CHANNEL}" != "sandbox" ]]; then
+  echo "--allow-unsigned-sandbox is restricted to the sandbox channel." >&2
+  exit 1
+fi
+
+if [[ "${ALLOW_UNSIGNED_SANDBOX}" -eq 1 && "${PUBLISH_LATEST}" -eq 1 ]]; then
+  echo "Unsigned sandbox artifacts may only be uploaded with --versioned-only; refusing to publish latest." >&2
+  exit 1
+fi
+
+if [[ "${PUBLISH_LATEST}" -eq 1 && ( "${CHANNEL}" == "stable" || "${CHANNEL}" == "sandbox" ) && -z "${UPDATER_TEST_SOURCE_APP}" ]]; then
+  echo "Publishing ${CHANNEL} latest requires --updater-test-source-app with the previous signed release." >&2
+  echo "Use --versioned-only for a one-time manual bootstrap that cannot pass the previous updater." >&2
   exit 1
 fi
 
@@ -287,8 +329,62 @@ for arch in "${ARCHES[@]}"; do
   if [[ -n "${EXPECTED_TEAM_ID:-}" ]]; then
     validation_args+=(--expected-team-id "${EXPECTED_TEAM_ID}")
   fi
+  if [[ "${ALLOW_UNSIGNED_SANDBOX}" -eq 1 ]]; then
+    validation_args+=(--allow-unsigned-sandbox)
+  fi
   "${REPO_ROOT}/scripts/validate_macos_release.sh" "${validation_args[@]}"
   echo
+
+  if [[ "${PUBLISH_LATEST}" -eq 1 && ( "${CHANNEL}" == "stable" || "${CHANNEL}" == "sandbox" ) ]]; then
+    if [[ ! -d "${UPDATER_TEST_SOURCE_APP}" ]]; then
+      echo "Updater E2E source app does not exist: ${UPDATER_TEST_SOURCE_APP}" >&2
+      exit 1
+    fi
+
+    previous_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${UPDATER_TEST_SOURCE_APP}/Contents/Info.plist" 2>/dev/null || true)"
+    if [[ -z "${previous_version}" ]]; then
+      echo "Could not read the updater E2E source version from ${UPDATER_TEST_SOURCE_APP}." >&2
+      exit 1
+    fi
+    if [[ "${previous_version}" == "${VERSION}" ]]; then
+      echo "Updater E2E must cross a real version boundary; source and candidate are both ${VERSION}." >&2
+      exit 1
+    fi
+
+    previous_executable="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "${UPDATER_TEST_SOURCE_APP}/Contents/Info.plist" 2>/dev/null || true)"
+    previous_binary="${UPDATER_TEST_SOURCE_APP}/Contents/MacOS/${previous_executable}"
+    if [[ -z "${previous_executable}" || ! -x "${previous_binary}" ]]; then
+      echo "Updater E2E source app executable is missing: ${previous_binary}" >&2
+      exit 1
+    fi
+    previous_binary_info="$(file -b "${previous_binary}")"
+    case "${arch}" in
+      aarch64)
+        [[ "${previous_binary_info}" == *arm64* ]] || { echo "Updater E2E source is not arm64: ${previous_binary_info}" >&2; exit 1; }
+        ;;
+      x86_64)
+        [[ "${previous_binary_info}" == *x86_64* ]] || { echo "Updater E2E source is not x86_64: ${previous_binary_info}" >&2; exit 1; }
+        ;;
+    esac
+
+    updater_installer_module="${UPDATER_TEST_INSTALLER_MODULE}"
+    if [[ -z "${updater_installer_module}" ]]; then
+      updater_installer_module="${UPDATER_TEST_SOURCE_APP}/Contents/Resources/app/extensions/backboard/out/updatesInstaller.js"
+    fi
+    if [[ ! -f "${updater_installer_module}" ]]; then
+      echo "Previous updater installer module is missing: ${updater_installer_module}" >&2
+      exit 1
+    fi
+
+    echo "Running mandatory ${previous_version} -> ${VERSION} updater E2E for ${arch}"
+    "${REPO_ROOT}/scripts/test_macos_updater_e2e.sh" \
+      "${CHANNEL}" \
+      "${UPDATER_TEST_SOURCE_APP}" \
+      "${dmg_path}" \
+      "${VERSION}" \
+      "${updater_installer_module}"
+    echo
+  fi
 
   version_prefix="ide-releases/${CHANNEL}/${VERSION}/${ASSET}"
   latest_prefix="ide-releases/${CHANNEL}/latest/${ASSET}"

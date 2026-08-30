@@ -1,0 +1,131 @@
+{
+  "benchmark": "ide-chat-first-visible-token",
+  "createdAt": "2026-08-28T15:10:07.348Z",
+  "definition": "Elapsed time from writing the IDE submit control to the first non-empty assistant:delta emitted by the CLI harness.",
+  "configuration": {
+    "agentsPerRound": 1,
+    "rounds": 5,
+    "samples": 5,
+    "prompt": "Reply with exactly READY.",
+    "workingDirectory": "/Users/erintomorri/Desktop/t3code/Backboard-Desktop/backboard/cli-ts",
+    "requestedModel": "anthropic/claude-opus-5",
+    "warmup": false
+  },
+  "samples": [
+    {
+      "round": 1,
+      "agent": 1,
+      "model": "anthropic/claude-opus-5",
+      "startupMs": 2624.3,
+      "firstModelOutputMs": 2261,
+      "firstVisibleTokenMs": 2261,
+      "totalResponseMs": 3263.3,
+      "usage": {
+        "inputTokens": 24070,
+        "outputTokens": 4,
+        "totalTokens": 24074,
+        "costUsd": 0.270875,
+        "provider": "anthropic",
+        "model": "claude-opus-5"
+      }
+    },
+    {
+      "round": 2,
+      "agent": 1,
+      "model": "anthropic/claude-opus-5",
+      "startupMs": 2492.9,
+      "firstModelOutputMs": 2717.5,
+      "firstVisibleTokenMs": 2717.5,
+      "totalResponseMs": 3798,
+      "usage": {
+        "inputTokens": 24070,
+        "outputTokens": 4,
+        "totalTokens": 24074,
+        "costUsd": 0.132484,
+        "provider": "anthropic",
+        "model": "claude-opus-5"
+      }
+    },
+    {
+      "round": 3,
+      "agent": 1,
+      "model": "anthropic/claude-opus-5",
+      "startupMs": 2456,
+      "firstModelOutputMs": 2231.9,
+      "firstVisibleTokenMs": 2231.9,
+      "totalResponseMs": 3253,
+      "usage": {
+        "inputTokens": 24070,
+        "outputTokens": 4,
+        "totalTokens": 24074,
+        "costUsd": 0.132484,
+        "provider": "anthropic",
+        "model": "claude-opus-5"
+      }
+    },
+    {
+      "round": 4,
+      "agent": 1,
+      "model": "anthropic/claude-opus-5",
+      "startupMs": 2642.4,
+      "firstModelOutputMs": 2386.3,
+      "firstVisibleTokenMs": 2386.3,
+      "totalResponseMs": 3928.4,
+      "usage": {
+        "inputTokens": 24070,
+        "outputTokens": 4,
+        "totalTokens": 24074,
+        "costUsd": 0.132484,
+        "provider": "anthropic",
+        "model": "claude-opus-5"
+      }
+    },
+    {
+      "round": 5,
+      "agent": 1,
+      "model": "anthropic/claude-opus-5",
+      "startupMs": 1241.5,
+      "firstModelOutputMs": 2144.9,
+      "firstVisibleTokenMs": 2144.9,
+      "totalResponseMs": 3197.6,
+      "usage": {
+        "inputTokens": 24070,
+        "outputTokens": 4,
+        "totalTokens": 24074,
+        "costUsd": 0.132484,
+        "provider": "anthropic",
+        "model": "claude-opus-5"
+      }
+    }
+  ],
+  "summary": {
+    "startupMs": {
+      "min": 1241.5,
+      "p50": 2492.9,
+      "p95": 2638.8,
+      "max": 2642.4,
+      "mean": 2291.4
+    },
+    "firstModelOutputMs": {
+      "min": 2144.9,
+      "p50": 2261,
+      "p95": 2651.3,
+      "max": 2717.5,
+      "mean": 2348.3
+    },
+    "firstVisibleTokenMs": {
+      "min": 2144.9,
+      "p50": 2261,
+      "p95": 2651.3,
+      "max": 2717.5,
+      "mean": 2348.3
+    },
+    "totalResponseMs": {
+      "min": 3197.6,
+      "p50": 3263.3,
+      "p95": 3902.3,
+      "max": 3928.4,
+      "mean": 3488.1
+    }
+  }
+}

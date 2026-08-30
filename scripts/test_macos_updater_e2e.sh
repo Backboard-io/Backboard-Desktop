@@ -17,7 +17,11 @@ EXPECTED_VERSION="$4"
 INSTALLER_MODULE="${5:-}"
 SCRIPT_DIR="$(cd "$(/usr/bin/dirname "$0")" && /bin/pwd -P)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && /bin/pwd -P)"
-TEST_FILE="$REPO_ROOT/vscode/extensions/backboard/out/test/updatesInstaller.e2e.test.js"
+VSCODE_ROOT="${VSCODE_ROOT:-${REPO_ROOT}/backboard}"
+if [[ ! -f "${VSCODE_ROOT}/package.json" && -f "${REPO_ROOT}/vscode/package.json" ]]; then
+  VSCODE_ROOT="${REPO_ROOT}/vscode"
+fi
+TEST_FILE="$VSCODE_ROOT/extensions/backboard/out/test/updatesInstaller.e2e.test.js"
 
 case "$CHANNEL" in
   stable)
@@ -77,6 +81,12 @@ if [[ -n "$INSTALLER_MODULE" ]]; then
   echo "Installer compatibility module: $INSTALLER_MODULE"
 fi
 
+if [[ -x /usr/bin/caffeinate ]]; then
+  TEST_RUNNER=(/usr/bin/caffeinate -dims /usr/bin/env node --test "$TEST_FILE")
+else
+  TEST_RUNNER=(/usr/bin/env node --test "$TEST_FILE")
+fi
+
 BACKBOARD_UPDATER_E2E_SOURCE_APP="$SOURCE_APP" \
 BACKBOARD_UPDATER_E2E_DMG="$UPDATE_DMG" \
 BACKBOARD_UPDATER_E2E_VERSION="$EXPECTED_VERSION" \
@@ -84,7 +94,7 @@ BACKBOARD_UPDATER_E2E_APP_NAME="$APP_NAME" \
 BACKBOARD_UPDATER_E2E_BUNDLE_ID="$BUNDLE_IDENTIFIER" \
 BACKBOARD_UPDATER_E2E_ROOT="$TEST_ROOT" \
 BACKBOARD_UPDATER_E2E_INSTALLER_MODULE="$INSTALLER_MODULE" \
-/usr/bin/env node --test "$TEST_FILE"
+"${TEST_RUNNER[@]}"
 
 SOURCE_IDENTITY_AFTER="$(/usr/bin/stat -f '%d:%i:%m' "$SOURCE_APP")"
 if [[ "$SOURCE_IDENTITY_AFTER" != "$SOURCE_IDENTITY_BEFORE" ]]; then

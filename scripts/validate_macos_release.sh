@@ -13,13 +13,15 @@ ARCH="${ARCH:-aarch64}"
 CHANNEL="${CHANNEL:-stable}"
 DMG_PATH="${DMG_PATH:-}"
 EXPECTED_TEAM_ID="${EXPECTED_TEAM_ID:-}"
+ALLOW_UNSIGNED_SANDBOX=0
 
 usage() {
   cat <<EOF
 Usage:
   $0 --version 2.5.5 --arch aarch64 --channel stable --expected-team-id M4UYB6AG86 --dmg /path/to/Backboard-Studio-aarch64.dmg
 
-Validates a signed and notarized Backboard Studio macOS release before upload.
+Validates a Backboard Studio macOS release before upload. Sandbox releases may
+explicitly opt out of signing checks with --allow-unsigned-sandbox.
 EOF
 }
 
@@ -44,6 +46,10 @@ while [[ $# -gt 0 ]]; do
     --expected-team-id)
       EXPECTED_TEAM_ID="$2"
       shift 2
+      ;;
+    --allow-unsigned-sandbox)
+      ALLOW_UNSIGNED_SANDBOX=1
+      shift
       ;;
     -h|--help)
       usage
@@ -91,6 +97,11 @@ case "${CHANNEL}" in
     ;;
 esac
 
+if [[ "${ALLOW_UNSIGNED_SANDBOX}" -eq 1 && "${CHANNEL}" != "sandbox" ]]; then
+  echo "--allow-unsigned-sandbox is restricted to the sandbox channel." >&2
+  exit 1
+fi
+
 if [[ ! -f "${DMG_PATH}" ]]; then
   echo "Missing DMG: ${DMG_PATH}" >&2
   exit 1
@@ -109,17 +120,21 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "Validating DMG signature and notarization"
-codesign --verify --verbose=2 "${DMG_PATH}"
-if [[ -n "${EXPECTED_TEAM_ID}" ]]; then
-  DMG_TEAM_ID="$(codesign -dvvv "${DMG_PATH}" 2>&1 | awk -F= '/^TeamIdentifier=/ { print $2; exit }')"
-  if [[ "${DMG_TEAM_ID}" != "${EXPECTED_TEAM_ID}" ]]; then
-    echo "DMG signer mismatch: expected team ${EXPECTED_TEAM_ID}, got ${DMG_TEAM_ID:-missing}." >&2
-    exit 1
+if [[ "${ALLOW_UNSIGNED_SANDBOX}" -eq 1 ]]; then
+  echo "Skipping DMG signing and notarization checks for the sandbox artifact"
+else
+  echo "Validating DMG signature and notarization"
+  codesign --verify --verbose=2 "${DMG_PATH}"
+  if [[ -n "${EXPECTED_TEAM_ID}" ]]; then
+    DMG_TEAM_ID="$(codesign -dvvv "${DMG_PATH}" 2>&1 | awk -F= '/^TeamIdentifier=/ { print $2; exit }')"
+    if [[ "${DMG_TEAM_ID}" != "${EXPECTED_TEAM_ID}" ]]; then
+      echo "DMG signer mismatch: expected team ${EXPECTED_TEAM_ID}, got ${DMG_TEAM_ID:-missing}." >&2
+      exit 1
+    fi
   fi
+  xcrun stapler validate "${DMG_PATH}"
+  spctl --assess --type open --context context:primary-signature -vv "${DMG_PATH}"
 fi
-xcrun stapler validate "${DMG_PATH}"
-spctl --assess --type open --context context:primary-signature -vv "${DMG_PATH}"
 
 hdiutil attach "${DMG_PATH}" -mountpoint "${MOUNT_POINT}" -nobrowse -readonly -quiet
 SOURCE_APP="${MOUNT_POINT}/${EXPECTED_APP_NAME}"
@@ -168,16 +183,20 @@ if [[ -f "${APP_BINARY}.bin" ]]; then
   fi
 fi
 
-echo "Validating app signature and Gatekeeper acceptance"
-codesign --verify --deep --strict --verbose=4 "${STAGED_APP}"
-if [[ -n "${EXPECTED_TEAM_ID}" ]]; then
-  APP_TEAM_ID="$(codesign -dvvv "${STAGED_APP}" 2>&1 | awk -F= '/^TeamIdentifier=/ { print $2; exit }')"
-  if [[ "${APP_TEAM_ID}" != "${EXPECTED_TEAM_ID}" ]]; then
-    echo "App signer mismatch: expected team ${EXPECTED_TEAM_ID}, got ${APP_TEAM_ID:-missing}." >&2
-    exit 1
+if [[ "${ALLOW_UNSIGNED_SANDBOX}" -eq 1 ]]; then
+  echo "Skipping app signature and Gatekeeper checks for the sandbox artifact"
+else
+  echo "Validating app signature and Gatekeeper acceptance"
+  codesign --verify --deep --strict --verbose=4 "${STAGED_APP}"
+  if [[ -n "${EXPECTED_TEAM_ID}" ]]; then
+    APP_TEAM_ID="$(codesign -dvvv "${STAGED_APP}" 2>&1 | awk -F= '/^TeamIdentifier=/ { print $2; exit }')"
+    if [[ "${APP_TEAM_ID}" != "${EXPECTED_TEAM_ID}" ]]; then
+      echo "App signer mismatch: expected team ${EXPECTED_TEAM_ID}, got ${APP_TEAM_ID:-missing}." >&2
+      exit 1
+    fi
   fi
+  spctl --assess --type execute -vv "${STAGED_APP}"
 fi
-spctl --assess --type execute -vv "${STAGED_APP}"
 
 UPDATER_JS="${STAGED_APP}/Contents/Resources/app/extensions/backboard/out/updatesInstaller.js"
 if [[ ! -f "${UPDATER_JS}" ]]; then
@@ -222,6 +241,9 @@ echo "  channel: ${CHANNEL}"
 echo "  bundle: ${BUNDLE_IDENTIFIER}"
 if [[ -n "${EXPECTED_TEAM_ID}" ]]; then
   echo "  signing team: ${EXPECTED_TEAM_ID}"
+fi
+if [[ "${ALLOW_UNSIGNED_SANDBOX}" -eq 1 ]]; then
+  echo "  signing: intentionally skipped for sandbox"
 fi
 echo "  sha256: ${DMG_SHA256}"
 echo "  bytes: ${DMG_BYTES}"

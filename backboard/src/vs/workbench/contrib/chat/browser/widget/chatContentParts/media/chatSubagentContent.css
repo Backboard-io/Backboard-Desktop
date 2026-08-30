@@ -1,0 +1,202 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* Subagent-specific styles */
+.interactive-session .interactive-response .value .chat-thinking-fixed-mode.chat-subagent-part {
+	> .chat-used-context-label {
+		display: flex;
+		min-width: 0;
+		align-items: center;
+		gap: 3px;
+
+		> .monaco-button {
+			min-width: 0;
+			flex: 1 1 auto;
+			overflow: hidden;
+		}
+	}
+
+	button.chat-subagent-open {
+		display: inline-flex;
+		width: auto;
+		min-width: 0;
+		max-width: 180px;
+		height: 24px;
+		min-height: 24px;
+		max-height: 24px;
+		flex: 0 1 auto;
+		align-items: center;
+		justify-content: center;
+		gap: 4px;
+		box-sizing: border-box;
+		padding: 0 7px;
+		border: 1px solid transparent;
+		border-radius: 5px;
+		background: transparent;
+		color: var(--vscode-textLink-foreground);
+		font: inherit;
+		font-size: var(--vscode-agents-fontSize-label2);
+		line-height: 18px;
+		white-space: nowrap;
+		cursor: pointer;
+
+		&:hover {
+			background: var(--vscode-toolbar-hoverBackground);
+		}
+
+		&:focus-visible {
+			outline: 1px solid var(--vscode-focusBorder);
+			outline-offset: -1px;
+		}
+	}
+
+	.chat-subagent-open-label {
+		display: none;
+	}
+
+	.chat-subagent-open-icon {
+		display: inline-flex;
+		width: 11px;
+		flex: 0 0 11px;
+		align-items: center;
+		justify-content: center;
+		color: var(--vscode-textLink-foreground);
+		font-size: 11px;
+	}
+
+	.chat-subagent-open-task {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.chat-subagent-open-arrow {
+		display: inline-flex;
+		flex: 0 0 auto;
+		font-size: 10px;
+	}
+
+	.chat-subagent-worker-metadata {
+		display: flex;
+		min-width: 0;
+		flex-wrap: wrap;
+		gap: 4px 10px;
+		padding: 2px 12px 5px 26px;
+		color: var(--vscode-descriptionForeground);
+		font-size: var(--vscode-agents-fontSize-label2);
+		line-height: 16px;
+	}
+
+	.chat-subagent-worker-metadata-item {
+		max-width: 100%;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.chat-subagent-worker-status {
+		color: var(--vscode-testing-iconPassed);
+		font-weight: 600;
+	}
+
+	.chat-subagent-worker-conflict .chat-subagent-worker-status,
+	.chat-subagent-worker-conflicts {
+		color: var(--vscode-testing-iconFailed);
+	}
+
+	.chat-subagent-worker-failed .chat-subagent-worker-status {
+		color: var(--vscode-descriptionForeground);
+	}
+
+	.chat-subagent-worker-integration {
+		color: var(--vscode-textLink-foreground);
+	}
+
+	/* Collapsed + streaming: show only the last item with max-height */
+	&.chat-used-context-collapsed .chat-used-context-list.chat-thinking-collapsible.chat-thinking-streaming {
+		max-height: var(--chat-subagent-last-item-height, 200px);
+		overflow: hidden;
+		display: block;
+	}
+
+	/* Expanded: show all content, no max-height, no scrolling */
+	.chat-used-context-list.chat-thinking-collapsible {
+		max-height: none;
+		overflow: visible;
+	}
+
+	/* Prompt and result section styling */
+	.chat-subagent-section {
+		padding: 4px 12px 4px 18px;
+
+		.chat-used-context {
+			margin-bottom: 0px;
+			margin-left: 2px;
+			padding-left: 2px;
+		}
+
+		/* Hide the border for subagent prompt/result sections */
+		.chat-used-context-list {
+			border: none;
+			padding: 0px 2px;
+		}
+	}
+
+	.chat-thinking-tool-wrapper {
+
+		/* Hide the collapsible button's icon since we use the thinking icon */
+		.codicon:not(.chat-thinking-icon) {
+			display: none;
+		}
+
+		/* renable icons in confirmation widget */
+		.chat-confirmation-widget-container .codicon:not(.codicon-terminal) {
+			display: inline-flex;
+		}
+
+		/* Remove padding from tool invocation part when it displays a confirmation widget */
+		.chat-tool-invocation-part.has-confirmation {
+			padding: 4px;
+		}
+
+		.chat-collapsible-markdown-content {
+			.rendered-markdown {
+				font-size: var(--vscode-chat-font-size-body-s);
+				line-height: 1.5em;
+			}
+		}
+	}
+
+	button.chat-subagent-confirmation-placeholder {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding: 6px 12px 6px 24px;
+		background: none;
+		border: none;
+		outline: none;
+		color: var(--vscode-descriptionForeground);
+		cursor: pointer;
+		font-size: var(--vscode-chat-font-size-body-s);
+		position: relative;
+
+		&::before {
+			content: '\2022';
+			position: absolute;
+			left: 8px;
+			color: var(--vscode-descriptionForeground);
+		}
+
+		&:hover {
+			color: var(--vscode-textLink-foreground);
+		}
+
+		&:focus-visible {
+			outline: 1px solid var(--vscode-focusBorder);
+			outline-offset: 2px;
+		}
+	}
+}

@@ -1,0 +1,63 @@
+{
+  "benchmark": "ide-chat-first-visible-token",
+  "createdAt": "2026-08-28T14:58:20.688Z",
+  "definition": "Elapsed time from writing the IDE submit control to the first non-empty assistant:delta emitted by the CLI harness.",
+  "configuration": {
+    "agentsPerRound": 1,
+    "rounds": 1,
+    "samples": 1,
+    "prompt": "Reply with exactly READY.",
+    "workingDirectory": "/Users/erintomorri/Desktop/t3code/Backboard-Desktop/backboard/cli-ts",
+    "requestedModel": "openai/gpt-5.6-sol",
+    "warmup": false
+  },
+  "samples": [
+    {
+      "round": 1,
+      "agent": 1,
+      "model": "openai/gpt-5.6-sol",
+      "startupMs": 1749.4,
+      "firstModelOutputMs": 2517.4,
+      "firstVisibleTokenMs": 2517.4,
+      "totalResponseMs": 2740.8,
+      "usage": {
+        "inputTokens": 8372,
+        "outputTokens": 5,
+        "totalTokens": 8377,
+        "costUsd": 0.04201,
+        "provider": "openai",
+        "model": "gpt-5.6-sol"
+      }
+    }
+  ],
+  "summary": {
+    "startupMs": {
+      "min": 1749.4,
+      "p50": 1749.4,
+      "p95": 1749.4,
+      "max": 1749.4,
+      "mean": 1749.4
+    },
+    "firstModelOutputMs": {
+      "min": 2517.4,
+      "p50": 2517.4,
+      "p95": 2517.4,
+      "max": 2517.4,
+      "mean": 2517.4
+    },
+    "firstVisibleTokenMs": {
+      "min": 2517.4,
+      "p50": 2517.4,
+      "p95": 2517.4,
+      "max": 2517.4,
+      "mean": 2517.4
+    },
+    "totalResponseMs": {
+      "min": 2740.8,
+      "p50": 2740.8,
+      "p95": 2740.8,
+      "max": 2740.8,
+      "mean": 2740.8
+    }
+  }
+}

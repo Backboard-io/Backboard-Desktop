@@ -1,0 +1,131 @@
+{
+  "benchmark": "ide-chat-first-visible-token",
+  "createdAt": "2026-08-28T14:58:53.578Z",
+  "definition": "Elapsed time from writing the IDE submit control to the first non-empty assistant:delta emitted by the CLI harness.",
+  "configuration": {
+    "agentsPerRound": 1,
+    "rounds": 5,
+    "samples": 5,
+    "prompt": "Reply with exactly READY.",
+    "workingDirectory": "/Users/erintomorri/Desktop/t3code/Backboard-Desktop/backboard/cli-ts",
+    "requestedModel": "openai/gpt-5.6-sol",
+    "warmup": false
+  },
+  "samples": [
+    {
+      "round": 1,
+      "agent": 1,
+      "model": "openai/gpt-5.6-sol",
+      "startupMs": 2204.9,
+      "firstModelOutputMs": 2129.7,
+      "firstVisibleTokenMs": 2129.7,
+      "totalResponseMs": 2614,
+      "usage": {
+        "inputTokens": 8372,
+        "outputTokens": 5,
+        "totalTokens": 8377,
+        "costUsd": 0.04201,
+        "provider": "openai",
+        "model": "gpt-5.6-sol"
+      }
+    },
+    {
+      "round": 2,
+      "agent": 1,
+      "model": "openai/gpt-5.6-sol",
+      "startupMs": 1251,
+      "firstModelOutputMs": 3458.2,
+      "firstVisibleTokenMs": 3458.2,
+      "totalResponseMs": 3598.4,
+      "usage": {
+        "inputTokens": 8372,
+        "outputTokens": 5,
+        "totalTokens": 8377,
+        "costUsd": 0.04201,
+        "provider": "openai",
+        "model": "gpt-5.6-sol"
+      }
+    },
+    {
+      "round": 3,
+      "agent": 1,
+      "model": "openai/gpt-5.6-sol",
+      "startupMs": 1198.2,
+      "firstModelOutputMs": 2457.3,
+      "firstVisibleTokenMs": 2457.3,
+      "totalResponseMs": 2934.1,
+      "usage": {
+        "inputTokens": 8372,
+        "outputTokens": 5,
+        "totalTokens": 8377,
+        "costUsd": 0.04201,
+        "provider": "openai",
+        "model": "gpt-5.6-sol"
+      }
+    },
+    {
+      "round": 4,
+      "agent": 1,
+      "model": "openai/gpt-5.6-sol",
+      "startupMs": 1200.8,
+      "firstModelOutputMs": 1733.9,
+      "firstVisibleTokenMs": 1733.9,
+      "totalResponseMs": 2059.4,
+      "usage": {
+        "inputTokens": 8372,
+        "outputTokens": 5,
+        "totalTokens": 8377,
+        "costUsd": 0.04201,
+        "provider": "openai",
+        "model": "gpt-5.6-sol"
+      }
+    },
+    {
+      "round": 5,
+      "agent": 1,
+      "model": "openai/gpt-5.6-sol",
+      "startupMs": 1208.8,
+      "firstModelOutputMs": 1824,
+      "firstVisibleTokenMs": 1824.1,
+      "totalResponseMs": 1955.8,
+      "usage": {
+        "inputTokens": 8372,
+        "outputTokens": 5,
+        "totalTokens": 8377,
+        "costUsd": 0.04201,
+        "provider": "openai",
+        "model": "gpt-5.6-sol"
+      }
+    }
+  ],
+  "summary": {
+    "startupMs": {
+      "min": 1198.2,
+      "p50": 1208.8,
+      "p95": 2014.1,
+      "max": 2204.9,
+      "mean": 1412.7
+    },
+    "firstModelOutputMs": {
+      "min": 1733.9,
+      "p50": 2129.7,
+      "p95": 3258,
+      "max": 3458.2,
+      "mean": 2320.6
+    },
+    "firstVisibleTokenMs": {
+      "min": 1733.9,
+      "p50": 2129.7,
+      "p95": 3258,
+      "max": 3458.2,
+      "mean": 2320.6
+    },
+    "totalResponseMs": {
+      "min": 1955.8,
+      "p50": 2614,
+      "p95": 3465.5,
+      "max": 3598.4,
+      "mean": 2632.3
+    }
+  }
+}
