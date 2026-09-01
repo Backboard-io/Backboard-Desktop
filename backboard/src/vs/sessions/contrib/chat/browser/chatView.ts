@@ -6,6 +6,7 @@
 import { CancellationTokenSource } from '../../../../base/common/cancellation.js';
 import { MutableDisposable } from '../../../../base/common/lifecycle.js';
 import { URI } from '../../../../base/common/uri.js';
+import { localize } from '../../../../nls.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
@@ -111,6 +112,7 @@ export class ChatView extends AbstractChatView {
 	override readonly kind: ChatViewKind = 'chat';
 
 	private readonly _widget: ChatWidget;
+	private readonly _loadingOverlay: HTMLElement;
 
 	/** Reference to the loaded chat model; disposing releases the model. */
 	private readonly _modelRef = this._register(new MutableDisposable<IChatModelReference>());
@@ -178,6 +180,21 @@ export class ChatView extends AbstractChatView {
 			this._buildStyles(this._isActive)
 		));
 		this._widget.render(this.element);
+		const targetDocument = this.element.ownerDocument;
+		this._loadingOverlay = targetDocument.createElement('div');
+		this._loadingOverlay.className = 'session-chat-loading';
+		this._loadingOverlay.hidden = true;
+		this._loadingOverlay.setAttribute('role', 'status');
+		this._loadingOverlay.setAttribute('aria-live', 'polite');
+		this._loadingOverlay.setAttribute('aria-atomic', 'true');
+		this._loadingOverlay.append(
+			targetDocument.createElement('span'),
+			targetDocument.createElement('span'),
+		);
+		this._loadingOverlay.firstElementChild?.classList.add('codicon', 'codicon-loading', 'codicon-modifier-spin');
+		this._loadingOverlay.firstElementChild?.setAttribute('aria-hidden', 'true');
+		this._loadingOverlay.lastElementChild!.textContent = localize('sessions.loadingChat', 'Loading chat…');
+		this.element.appendChild(this._loadingOverlay);
 		this._widget.setVisible(true);
 
 		// Session grids can retain several chat leaves while only one or two are
@@ -234,6 +251,9 @@ export class ChatView extends AbstractChatView {
 		}
 
 		this._currentChatResource = resource;
+		this._widget.setModel(undefined);
+		this._modelRef.clear();
+		this._loadingOverlay.hidden = false;
 
 		// Cancel any in-flight load for the previous chat and start a fresh one.
 		const cts = new CancellationTokenSource();
@@ -243,24 +263,30 @@ export class ChatView extends AbstractChatView {
 		const loadPromise = this.chatService.acquireOrLoadSession(resource, ChatAgentLocation.Chat, token, 'ChatView').then(ref => {
 			if (token.isCancellationRequested || !ref) {
 				ref?.dispose();
+				if (!token.isCancellationRequested && isEqual(resource, this._currentChatResource)) {
+					this._currentChatResource = undefined;
+					this._loadingOverlay.hidden = true;
+				}
 				return;
 			}
 			this._modelRef.value = ref;
 			this._updateWidgetLockState(getChatSessionType(ref.object.sessionResource));
 			this._widget.setModel(ref.object);
+			this._loadingOverlay.hidden = true;
 		}, err => {
 			if (!token.isCancellationRequested) {
 				this.logService.error('[ChatView] Failed to load chat model for chat', err);
 			}
-			if (resource === this._currentChatResource) { // might have changed while we were waiting, only reset if it is still the same
+			if (this._currentChatResource && isEqual(resource, this._currentChatResource)) { // might have changed while we were waiting, only reset if it is still the same
 				this._currentChatResource = undefined;
+				this._loadingOverlay.hidden = true;
 			}
 		});
 
 		// Surface progress on this leaf's own bar while the chat model loads,
 		// matching how each editor group shows progress independently. The short
 		// delay avoids flashing the bar for fast cached loads.
-		this.showProgressWhile(loadPromise, 800);
+		this.showProgressWhile(loadPromise, 120);
 		return true;
 	}
 

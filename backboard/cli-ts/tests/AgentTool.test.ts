@@ -277,7 +277,7 @@ describe("AgentTool execution", () => {
 					coordinatorCwd: params.coordinatorCwd,
 					repositoryRoot: "/repo",
 					branch: `agent/s/worker/${params.workerId}`,
-					worktreePath: `/workers/${params.workerId}`,
+					worktreePath: `/workers/$&/${params.workerId}`,
 					startingCommit: "start",
 					resultCommit: "result",
 					changedFiles: ["src/result.ts"],
@@ -300,20 +300,20 @@ describe("AgentTool execution", () => {
 		const result = await tool.execute(
 			{
 				prompt:
-					"edit /coordinator/src/result.ts but leave /coordinator-other/reference.ts unchanged",
+					'Project dir: /coordinator project. Edit `/coordinator project/src/result.ts`; inspect "/coordinator project" and (/coordinator project), but leave /coordinator project-other/reference.ts and /coordinator project.extension/reference.ts unchanged.',
 			},
-			ctx(0, { toolCallId: "agent_a", cwd: "/coordinator" }),
+			ctx(0, { toolCallId: "agent_a", cwd: "/coordinator project" }),
 		);
 
-		expect(workerCalls[0]?.parentCwd).toBe("/workers/agent_a");
+		expect(workerCalls[0]?.parentCwd).toBe("/workers/$&/agent_a");
 		expect(workerCalls[0]?.prompt).toBe(
-			"edit /workers/agent_a/src/result.ts but leave /coordinator-other/reference.ts unchanged",
+			'Project dir: /workers/$&/agent_a. Edit `/workers/$&/agent_a/src/result.ts`; inspect "/workers/$&/agent_a" and (/workers/$&/agent_a), but leave /coordinator project-other/reference.ts and /coordinator project.extension/reference.ts unchanged.',
 		);
 		expect(workerCalls[0]?.isolatedWorkspace).toBe(true);
 		expect(workerCalls[0]?.workspace?.branch).toBe("agent/s/worker/agent_a");
 		expect(result.data.worker).toMatchObject({
 			branch: "agent/s/worker/agent_a",
-			worktreePath: "/workers/agent_a",
+			worktreePath: "/workers/$&/agent_a",
 			changedFileCount: 1,
 			status: "Integrated",
 		});

@@ -20,11 +20,12 @@ import type {
 } from "./backboard/types.ts";
 import { byokAdapterFor } from "./byok/registry.ts";
 
-export type ClientSource = "byok" | "backboard";
+export type ClientSource = "byok" | "subscription" | "backboard";
 
 export interface ClientRouterDeps {
 	backboard?: AgentClient;
 	byok?: AgentClient;
+	subscription?: AgentClient;
 	/** The live `/model` selection, used to route requests that carry no thread. */
 	getModel: () => ModelRef;
 	/**
@@ -51,6 +52,9 @@ export class ClientRouter implements AgentClient {
 
 	/** Which backend owns a given model, honouring key-over-SSO precedence. */
 	sourceFor(model: ModelRef = this.deps.getModel()): ClientSource {
+		if (model.provider.trim().toLowerCase() === "openai-subscription") {
+			return "subscription";
+		}
 		if (
 			this.deps.byok &&
 			byokAdapterFor(model.provider) &&
@@ -109,6 +113,7 @@ export class ClientRouter implements AgentClient {
 	}
 
 	sourceForThread(threadId: string): ClientSource {
+		if (threadId.startsWith("sub_")) return "subscription";
 		return threadId.startsWith("byok_") ? "byok" : "backboard";
 	}
 
@@ -143,6 +148,14 @@ export class ClientRouter implements AgentClient {
 			...(this.deps.byok
 				? [{ source: "byok" as const, client: this.deps.byok }]
 				: []),
+			...(this.deps.subscription
+				? [
+						{
+							source: "subscription" as const,
+							client: this.deps.subscription,
+						},
+					]
+				: []),
 			...(backboardClient
 				? [{ source: "backboard" as const, client: backboardClient }]
 				: []),
@@ -161,12 +174,14 @@ export class ClientRouter implements AgentClient {
 			);
 		}
 		let byok: ModelsListResponse | undefined;
+		let subscription: ModelsListResponse | undefined;
 		let backboard: ModelsListResponse | undefined;
 		for (let index = 0; index < results.length; index++) {
 			const result = results[index];
 			const source = clients[index]?.source;
 			if (result?.status !== "fulfilled" || !source) continue;
 			if (source === "byok") byok = result.value;
+			else if (source === "subscription") subscription = result.value;
 			else backboard = result.value;
 		}
 
@@ -175,6 +190,11 @@ export class ClientRouter implements AgentClient {
 		for (const model of byok?.models ?? []) {
 			seen.add(modelKey(model));
 			models.push({ ...model, source: "byok" });
+		}
+		for (const model of subscription?.models ?? []) {
+			if (seen.has(modelKey(model))) continue;
+			seen.add(modelKey(model));
+			models.push({ ...model, source: "subscription" });
 		}
 		for (const model of backboard?.models ?? []) {
 			if (seen.has(modelKey(model))) continue;
@@ -198,9 +218,11 @@ export class ClientRouter implements AgentClient {
 	}
 
 	async listThreads(options?: RequestOptions): Promise<BackboardThread[]> {
-		const clients = [this.deps.byok, this.backboard()].filter(
-			(client): client is AgentClient => client !== undefined,
-		);
+		const clients = [
+			this.deps.byok,
+			this.deps.subscription,
+			this.backboard(),
+		].filter((client): client is AgentClient => client !== undefined);
 		if (clients.length === 0) return [];
 		const results = await Promise.allSettled(
 			clients.map((client) => client.listThreads(options)),
@@ -256,17 +278,26 @@ export class ClientRouter implements AgentClient {
 
 	private clientFor(model: ModelRef): AgentClient {
 		const source = this.sourceFor(model);
-		const client = source === "byok" ? this.deps.byok : this.backboard();
+		const client =
+			source === "byok"
+				? this.deps.byok
+				: source === "subscription"
+					? this.deps.subscription
+					: this.backboard();
 		if (!client) {
 			throw new Error(
-				`No backend can serve ${formatModel(model)}. Sign in with Backboard or add a key with /keys.`,
+				`No backend can serve ${formatModel(model)}. Sign in with Backboard, connect a ChatGPT subscription, or add a key with /keys.`,
 			);
 		}
 		return client;
 	}
 
-	/** BYOK mints thread ids with a `byok_` prefix; Backboard ids never collide. */
+	/** Local clients mint distinct prefixes; Backboard ids never collide. */
 	private forThread(threadId: string): AgentClient {
+		if (threadId.startsWith("sub_")) {
+			if (this.deps.subscription) return this.deps.subscription;
+			throw new Error("This thread requires a connected ChatGPT subscription.");
+		}
 		if (threadId.startsWith("byok_") && this.deps.byok) return this.deps.byok;
 		const backboard = this.backboard();
 		if (!threadId.startsWith("byok_") && backboard) return backboard;

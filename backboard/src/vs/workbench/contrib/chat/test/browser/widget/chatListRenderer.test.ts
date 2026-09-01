@@ -42,6 +42,7 @@ suite('ChatListRenderer', () => {
 	suite('Backboard cursor transcript turn folding', () => {
 		test('packs large subagent fan-out into a stable expandable strip', () => {
 			const container = mainWindow.document.createElement('div');
+			mainWindow.document.body.appendChild(container);
 			const items = Array.from({ length: 12 }, (_, index) => ({
 				node: mainWindow.document.createElement('div'),
 				active: false,
@@ -59,9 +60,18 @@ suite('ChatListRenderer', () => {
 			assert.strictEqual(items.filter(item => !item.node.hidden).length, 12);
 			assert.strictEqual(overflow.textContent, 'Show fewer subagents');
 
+			items[1].node.tabIndex = 0;
+			items[1].node.focus();
+			const observer = new mainWindow.MutationObserver(() => { });
+			observer.observe(strip, { childList: true });
 			syncBackboardSubagentStrip(container, items);
+			const stableSyncMutations = observer.takeRecords();
+			observer.disconnect();
 			assert.strictEqual(container.querySelector(':scope > .chat-subagent-strip'), strip, 'Streaming updates should reuse the strip DOM');
 			assert.strictEqual(items.filter(item => !item.node.hidden).length, 12, 'A rerender should preserve the expanded choice');
+			assert.strictEqual(stableSyncMutations.length, 0, 'An unchanged streaming update must not reparent worker rows');
+			assert.strictEqual(mainWindow.document.activeElement, items[1].node, 'Stable reconciliation must preserve focus inside the active worker row');
+			container.remove();
 		});
 
 		test('labels hidden active subagents without claiming they finished', () => {

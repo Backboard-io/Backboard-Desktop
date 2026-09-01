@@ -157,6 +157,7 @@ async function* streamOpenRouter(
 	if (request.signal) sseRequest.signal = request.signal;
 
 	for await (const chunk of postSseJson(sseRequest)) {
+		let emitted = false;
 		if (chunk.error) {
 			const error = chunk.error as { message?: string };
 			yield {
@@ -186,7 +187,10 @@ async function* streamOpenRouter(
 					error?: { message?: string };
 			  }
 			| undefined;
-		if (!choice) continue;
+		if (!choice) {
+			yield { kind: "activity" };
+			continue;
+		}
 		if (choice.error) {
 			yield {
 				kind: "failed",
@@ -198,6 +202,7 @@ async function* streamOpenRouter(
 
 		const delta = choice.delta;
 		if (delta?.content) {
+			emitted = true;
 			yield { kind: "assistant_delta", text: delta.content };
 		}
 		const reasoningText =
@@ -205,6 +210,7 @@ async function* streamOpenRouter(
 			delta?.reasoning_content ||
 			reasoningDetailText(delta?.reasoning_details);
 		if (reasoningText) {
+			emitted = true;
 			yield { kind: "reasoning_delta", text: reasoningText };
 		}
 		if (Array.isArray(delta?.reasoning_details)) {
@@ -226,9 +232,13 @@ async function* streamOpenRouter(
 			pending.set(index, existing);
 			if (!existing.announced && existing.name) {
 				existing.announced = true;
+				emitted = true;
 				yield { kind: "tool_started", id: existing.id, name: existing.name };
 			}
 		}
+		// Tool JSON, opaque reasoning metadata, usage, and finish frames can all
+		// arrive without display text. They still prove the transport is healthy.
+		if (!emitted) yield { kind: "activity" };
 	}
 
 	if (finishReason === null) {

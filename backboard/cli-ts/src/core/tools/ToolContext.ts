@@ -42,6 +42,14 @@ export interface ToolContext {
 	 * reject paths outside this boundary even when permission mode is bypass.
 	 */
 	isolatedWorkspaceRoot?: string;
+	/**
+	 * Private scratch/cache directory shared by every shell command in one
+	 * isolated worker. It is removed when the worker finishes, so parallel
+	 * commands can reuse package caches without leaking temp directories.
+	 */
+	isolatedScratchRoot?: string;
+	/** Token inherited by every process in one isolated worker. */
+	isolatedProcessToken?: string;
 	bus: EventBus;
 	signal: AbortSignal;
 	askUser: AskUserFn;

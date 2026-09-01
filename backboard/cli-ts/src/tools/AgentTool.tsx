@@ -338,11 +338,17 @@ function rebaseCoordinatorPaths(
 	let rebased = prompt;
 	for (const variant of [...variants].sort((a, b) => b.length - a.length)) {
 		if (!variant) continue;
+		// A coordinator root is commonly embedded in prose (`Project dir:
+		// /path.`), quoted, or wrapped in Markdown. Treat those textual
+		// delimiters as path boundaries while leaving sibling prefixes such as
+		// `/path-other` and `/path.extension` untouched.
 		const expression = new RegExp(
-			`${escapeRegExp(variant)}(?=$|[\\\\/])`,
+			`${escapeRegExp(variant)}(?=$|[\\\\/\\s'"\`)>\\]\\}]|[.,;:!?](?=$|\\s|[\\\\/'"\`)>\\]\\}]))`,
 			process.platform === "win32" ? "gi" : "g",
 		);
-		rebased = rebased.replace(expression, workerCwd);
+		// A path can legally contain `$`; a replacement callback keeps `$&`, `$'`,
+		// and friends from being interpreted as String.replace substitutions.
+		rebased = rebased.replace(expression, () => workerCwd);
 	}
 	return rebased;
 }

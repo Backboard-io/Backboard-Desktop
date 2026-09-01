@@ -31,6 +31,10 @@ export interface ProviderStreamConsumerOptions {
 	generatedMediaDir?: string;
 	/** Test seam for downloading generated media. */
 	fetch?: (url: string) => Promise<Response>;
+	/** Abort and retry a provider attempt that emits no events for this long. */
+	idleTimeoutMs?: number;
+	/** Override the shared provider retry count for latency-sensitive callers. */
+	maxRetries?: number;
 }
 
 interface GeneratedMedia {
@@ -63,17 +67,25 @@ export class ProviderStreamConsumer {
 	) {}
 
 	async consumeWithRetry(
-		createStream: () => AsyncIterable<ProviderEvent>,
+		createStream: (signal: AbortSignal) => AsyncIterable<ProviderEvent>,
 		assistant: AssistantAccumulator,
 		signal: AbortSignal,
 		earlyTools?: EarlyToolSink,
 		onTerminalFailure?: () => Promise<string | null>,
 		onRetry?: (error: unknown) => Promise<void> | void,
 	): Promise<PendingAction | null> {
-		const maxRetries = streamServerErrorRetries();
+		const maxRetries = this.options.maxRetries ?? streamServerErrorRetries();
 		for (let attempt = 0; ; attempt++) {
+			const attemptController = new AbortController();
+			const attemptSignal = AbortSignal.any([signal, attemptController.signal]);
 			try {
-				return await this.consume(createStream(), assistant, earlyTools);
+				return await this.consume(
+					createStream(attemptSignal),
+					assistant,
+					earlyTools,
+					attemptController,
+					signal,
+				);
 			} catch (err) {
 				// Any stream failure resets the early round: it retracts announced
 				// rows and aborts early runs. On a retry the round is reused for
@@ -109,6 +121,8 @@ export class ProviderStreamConsumer {
 					);
 					throw waitError;
 				}
+			} finally {
+				attemptController.abort();
 			}
 		}
 	}
@@ -117,87 +131,114 @@ export class ProviderStreamConsumer {
 		stream: AsyncIterable<ProviderEvent>,
 		assistant: AssistantAccumulator,
 		earlyTools?: EarlyToolSink,
+		attemptController?: AbortController,
+		signal?: AbortSignal,
 	): Promise<PendingAction | null> {
 		let bufferedText = "";
 		const generatedMedia: GeneratedMedia[] = [];
-		for await (const event of stream) {
-			switch (event.kind) {
-				case "thread":
-					this.session.threadId = event.threadId;
-					break;
-				case "assistant_delta":
-					if (event.text) {
-						if (this.options.imageGeneration) bufferedText += event.text;
-						else assistant.appendDelta(event.text);
-					}
-					break;
-				case "reasoning_delta":
-					if (event.text) assistant.appendReasoning(event.text);
-					break;
-				case "tool_started":
-					earlyTools?.announce(event.id, event.name);
-					break;
-				case "tool_ready":
-					earlyTools?.offer({
-						id: event.call.id,
-						name: event.call.name,
-						input: event.call.input,
-					});
-					break;
-				case "usage":
-					this.session.addUsage(event.usage);
-					this.bus.emit({ type: "usage", usage: event.usage });
-					break;
-				case "warning":
-					this.bus.emit({ type: "system:warning", message: event.message });
-					break;
-				case "media": {
-					const media = mediaFromPayload(event.payload);
-					if (media) {
-						await this.addGeneratedMedia(media, generatedMedia);
-					} else {
-						this.bus.emit({
-							type: "system:warning",
-							message: `Backboard sent generated media in an unrecognized shape (keys: ${Object.keys(event.payload).join(", ")}).`,
-						});
-					}
+		const iterator = stream[Symbol.asyncIterator]();
+		let reachedEnd = false;
+		try {
+			while (true) {
+				const next = await this.nextEvent(iterator, attemptController, signal);
+				if (next.done) {
+					reachedEnd = true;
 					break;
 				}
-				case "requires_action": {
-					const calls = event.calls.map((call) => ({
-						id: call.id,
-						name: call.name,
-						input: call.input,
-					}));
-					assistant.finalize(
-						calls,
-						this.options.imageGeneration
-							? normalizeImageResponse(bufferedText, generatedMedia)
-							: undefined,
-					);
-					return { runId: event.runId, calls };
-				}
-				case "failed":
-					throw new ProviderStreamFailure(
-						event.error,
-						event.retryable === true,
-					);
-				case "completed": {
-					const finalText = event.finalText ?? bufferedText;
-					if (this.options.imageGeneration) {
-						// Some providers omit the media event and return the generated
-						// Backboard URL only in final_content. Persist that response too.
-						for (const media of mediaFromResponseText(finalText)) {
-							await this.addGeneratedMedia(media, generatedMedia);
+				const event = next.value;
+				switch (event.kind) {
+					case "activity":
+						break;
+					case "thread":
+						this.session.threadId = event.threadId;
+						break;
+					case "assistant_delta":
+						if (event.text) {
+							if (this.options.imageGeneration) bufferedText += event.text;
+							else assistant.appendDelta(event.text);
 						}
+						break;
+					case "reasoning_delta":
+						if (event.text) assistant.appendReasoning(event.text);
+						break;
+					case "tool_started":
+						earlyTools?.announce(event.id, event.name);
+						break;
+					case "tool_ready":
+						earlyTools?.offer({
+							id: event.call.id,
+							name: event.call.name,
+							input: event.call.input,
+						});
+						break;
+					case "usage":
+						this.session.addUsage(event.usage);
+						this.bus.emit({ type: "usage", usage: event.usage });
+						break;
+					case "warning":
+						this.bus.emit({ type: "system:warning", message: event.message });
+						break;
+					case "media": {
+						const media = mediaFromPayload(event.payload);
+						if (media) {
+							await this.addGeneratedMedia(media, generatedMedia);
+						} else {
+							this.bus.emit({
+								type: "system:warning",
+								message: `Backboard sent generated media in an unrecognized shape (keys: ${Object.keys(event.payload).join(", ")}).`,
+							});
+						}
+						break;
 					}
-					assistant.finalize(
-						[],
-						this.options.imageGeneration
-							? normalizeImageResponse(finalText, generatedMedia)
-							: event.finalText,
-					);
-					return null;
+					case "requires_action": {
+						const calls = event.calls.map((call) => ({
+							id: call.id,
+							name: call.name,
+							input: call.input,
+						}));
+						assistant.finalize(
+							calls,
+							this.options.imageGeneration
+								? normalizeImageResponse(bufferedText, generatedMedia)
+								: undefined,
+						);
+						return { runId: event.runId, calls };
+					}
+					case "failed":
+						throw new ProviderStreamFailure(
+							event.error,
+							event.retryable === true,
+						);
+					case "completed": {
+						const finalText = event.finalText ?? bufferedText;
+						if (this.options.imageGeneration) {
+							// Some providers omit the media event and return the generated
+							// Backboard URL only in final_content. Persist that response too.
+							for (const media of mediaFromResponseText(finalText)) {
+								await this.addGeneratedMedia(media, generatedMedia);
+							}
+						}
+						assistant.finalize(
+							[],
+							this.options.imageGeneration
+								? normalizeImageResponse(finalText, generatedMedia)
+								: event.finalText,
+						);
+						return null;
+					}
+				}
+			}
+		} finally {
+			if (!reachedEnd) {
+				attemptController?.abort();
+				// Cleanup is best-effort after abort. An uncooperative iterator can
+				// leave both next() and return() pending forever; awaiting return here
+				// would defeat the idle watchdog and prevent the retry from starting.
+				try {
+					const cleanup = iterator.return?.();
+					if (cleanup) void cleanup.catch(() => undefined);
+				} catch {
+					// A custom iterator may throw before returning a cleanup promise.
 				}
 			}
 		}
@@ -205,6 +246,55 @@ export class ProviderStreamConsumer {
 			"Provider stream closed unexpectedly before a terminal event.",
 			true,
 		);
+	}
+
+	private async nextEvent(
+		iterator: AsyncIterator<ProviderEvent>,
+		attemptController: AbortController | undefined,
+		signal: AbortSignal | undefined,
+	): Promise<IteratorResult<ProviderEvent>> {
+		const timeoutMs = this.options.idleTimeoutMs;
+		if (signal?.aborted) throw new AbortError();
+		if ((timeoutMs === undefined || timeoutMs <= 0) && !signal) {
+			return iterator.next();
+		}
+
+		let timeout: ReturnType<typeof setTimeout> | undefined;
+		let onAbort: (() => void) | undefined;
+		try {
+			const races: PromiseLike<IteratorResult<ProviderEvent>>[] = [
+				iterator.next(),
+			];
+			if (timeoutMs !== undefined && timeoutMs > 0) {
+				races.push(
+					new Promise<IteratorResult<ProviderEvent>>((_, reject) => {
+						timeout = setTimeout(() => {
+							reject(
+								new ProviderStreamFailure(
+									`Provider stream made no progress for ${timeoutMs}ms.`,
+									true,
+								),
+							);
+							attemptController?.abort();
+						}, timeoutMs);
+						timeout.unref?.();
+					}),
+				);
+			}
+			if (signal) {
+				races.push(
+					new Promise<IteratorResult<ProviderEvent>>((_, reject) => {
+						onAbort = () => reject(new AbortError());
+						signal.addEventListener("abort", onAbort, { once: true });
+						if (signal.aborted) onAbort();
+					}),
+				);
+			}
+			return await Promise.race(races);
+		} finally {
+			if (timeout) clearTimeout(timeout);
+			if (signal && onAbort) signal.removeEventListener("abort", onAbort);
+		}
 	}
 
 	private async addGeneratedMedia(
@@ -283,17 +373,18 @@ function isRetryableProviderStreamFailure(error: unknown): boolean {
 }
 
 async function waitForRetry(ms: number, signal: AbortSignal): Promise<void> {
+	if (signal.aborted) throw new AbortError();
 	if (ms <= 0) return;
 	await new Promise<void>((resolve, reject) => {
-		const timeout = setTimeout(resolve, ms);
-		signal.addEventListener(
-			"abort",
-			() => {
-				clearTimeout(timeout);
-				reject(new AbortError());
-			},
-			{ once: true },
-		);
+		const onAbort = () => {
+			clearTimeout(timeout);
+			reject(new AbortError());
+		};
+		const timeout = setTimeout(() => {
+			signal.removeEventListener("abort", onAbort);
+			resolve();
+		}, ms);
+		signal.addEventListener("abort", onAbort, { once: true });
 	});
 }
 

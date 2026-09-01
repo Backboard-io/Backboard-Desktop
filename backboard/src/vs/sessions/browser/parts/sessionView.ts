@@ -39,6 +39,12 @@ import { ChatResourceNavigationHistory } from './chatResourceNavigationHistory.j
  */
 export interface ISessionViewOptions extends IChatViewOptions { }
 
+export interface IChatResourceViewContext {
+	readonly title: string;
+	readonly agentName?: string;
+	readonly status?: string;
+}
+
 /**
  * A stable single-slot grid leaf that handles switching between concrete
  * chat views internally. `SessionsPart` delegates `openSession(...)` to
@@ -52,7 +58,7 @@ export class SessionView extends Disposable implements ISerializableView {
 
 	static readonly TYPE = 'sessions.sessionView';
 	private static readonly CENTERED_CONTENT_MAX_WIDTH = 950;
-	private static readonly CHAT_NAVIGATION_HEIGHT = 28;
+	private static readonly CHAT_NAVIGATION_HEIGHT = 44;
 	private static readonly ACTIVE_BACKGROUND = asCssVariable(activeSessionViewBackground);
 	private static readonly ACTIVE_FOREGROUND = asCssVariable(activeSessionViewForeground);
 	private static readonly INACTIVE_BACKGROUND = asCssVariable(inactiveSessionViewBackground);
@@ -74,6 +80,8 @@ export class SessionView extends Disposable implements ISerializableView {
 	private readonly _compositeBar: ChatCompositeBar;
 	private readonly _chatNavigationElement: HTMLElement;
 	private readonly _chatBackButton: HTMLButtonElement;
+	private readonly _chatNavigationTitle: HTMLElement;
+	private readonly _chatNavigationMeta: HTMLElement;
 	private readonly _floatingToolbar: SessionViewFloatingToolbar;
 	private readonly _centeredContentContainer: HTMLElement;
 	private _headerInPanel = false;
@@ -90,6 +98,7 @@ export class SessionView extends Disposable implements ISerializableView {
 	private _currentSession: IActiveSession | undefined;
 	private _chatResourceOverride: URI | undefined;
 	private readonly _chatResourceHistory = new ChatResourceNavigationHistory();
+	private readonly _chatResourceContexts = new Map<string, IChatResourceViewContext>();
 	private _hasOpenedSession = false;
 
 	private readonly _sessionIsCreatedKey: IContextKey<boolean>;
@@ -163,14 +172,23 @@ export class SessionView extends Disposable implements ISerializableView {
 
 		this._chatNavigationElement = $('.session-view-chat-navigation');
 		this._chatNavigationElement.hidden = true;
+		this._chatNavigationElement.setAttribute('role', 'navigation');
 		this._chatBackButton = $('button.session-view-chat-back') as HTMLButtonElement;
 		this._chatBackButton.type = 'button';
 		this._chatBackButton.ariaLabel = localize('sessions.backToMainThreadAriaLabel', 'Back to main thread');
 		this._chatBackButton.append(
 			$('span.codicon.codicon-arrow-left', { 'aria-hidden': 'true' }),
-			$('span.session-view-chat-back-label', undefined, localize('sessions.backToMainThread', 'Back to main thread')),
+			$('span.session-view-chat-back-label', undefined, localize('sessions.mainThread', 'Main thread')),
 		);
-		this._chatNavigationElement.appendChild(this._chatBackButton);
+		this._chatNavigationTitle = $('.session-view-chat-navigation-title');
+		this._chatNavigationMeta = $('.session-view-chat-navigation-meta');
+		const identity = $('.session-view-chat-navigation-identity');
+		identity.append(this._chatNavigationTitle, this._chatNavigationMeta);
+		this._chatNavigationElement.append(
+			this._chatBackButton,
+			$('span.session-view-chat-navigation-separator', { 'aria-hidden': 'true' }, '/'),
+			identity,
+		);
 		this._centeredContentContainer.appendChild(this._chatNavigationElement);
 		this._register(addDisposableListener(this._chatBackButton, EventType.CLICK, () => {
 			if (this.navigateToMainThread()) {
@@ -211,6 +229,7 @@ export class SessionView extends Disposable implements ISerializableView {
 		this._currentSession = session;
 		this._chatResourceOverride = undefined;
 		this._chatResourceHistory.reset();
+		this._chatResourceContexts.clear();
 		this._updateChatNavigation();
 		this._sessionObs.set(session, undefined);
 		this._openSessionDisposables.clear();
@@ -230,6 +249,7 @@ export class SessionView extends Disposable implements ISerializableView {
 				// the view after the session's active chat has changed.
 				this._chatResourceOverride = undefined;
 				this._chatResourceHistory.reset();
+				this._chatResourceContexts.clear();
 				this._updateChatNavigation();
 			}
 			if (session === undefined || session.isCreated.read(reader) === false) {
@@ -276,9 +296,12 @@ export class SessionView extends Disposable implements ISerializableView {
 	}
 
 	/** Loads a child chat in this session's existing grid slot. */
-	openChatResource(resource: URI): boolean {
+	openChatResource(resource: URI, context?: IChatResourceViewContext): boolean {
 		const activeChatResource = this._currentSession?.activeChat.get().resource;
 		const currentResource = this._chatResourceOverride ?? activeChatResource;
+		if (context) {
+			this._chatResourceContexts.set(resource.toString(), context);
+		}
 		const opened = this._currentView.value?.setChatResource(resource, this._currentSession?.sessionId) ?? false;
 		if (opened) {
 			// Session status changes re-run the host autorun. Remember the child so
@@ -330,6 +353,7 @@ export class SessionView extends Disposable implements ISerializableView {
 			return false;
 		}
 		this._chatResourceHistory.reset();
+		this._chatResourceContexts.clear();
 		this._updateChatNavigation();
 		return true;
 	}
@@ -342,6 +366,15 @@ export class SessionView extends Disposable implements ISerializableView {
 		const canNavigateBack = this._chatResourceHistory.canGoBack;
 		const didChange = this._chatNavigationElement.hidden === canNavigateBack;
 		this._chatNavigationElement.hidden = !canNavigateBack;
+		if (canNavigateBack) {
+			const context = this._chatResourceOverride ? this._chatResourceContexts.get(this._chatResourceOverride.toString()) : undefined;
+			const title = context?.title.trim() || localize('sessions.subagentChat', 'Subagent chat');
+			const meta = [context?.agentName?.trim(), context?.status?.trim()].filter((value): value is string => !!value).join(' · ');
+			this._chatNavigationTitle.textContent = title;
+			this._chatNavigationTitle.title = title;
+			this._chatNavigationMeta.textContent = meta || localize('sessions.subagent', 'Subagent');
+			this._chatNavigationElement.ariaLabel = localize('sessions.openSubagentContext', 'Main thread, subagent: {0}', title);
+		}
 		if (didChange) {
 			this._onDidChangeCanNavigateBack.fire(canNavigateBack);
 		}

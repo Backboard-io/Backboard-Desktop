@@ -33,6 +33,8 @@ import { LayoutController } from '../../browser/sessionLayoutController.js';
 import { RightWorkbenchCommandId, SESSIONS_RIGHT_WORKBENCH_CONTAINER_ID } from '../../../rightWorkbench/browser/rightWorkbench.js';
 import { TestInstantiationService } from '../../../../../platform/instantiation/test/common/instantiationServiceMock.js';
 import { TestStorageService } from '../../../../../workbench/test/common/workbenchTestServices.js';
+import { IWorkbenchEnvironmentService } from '../../../../../workbench/services/environment/common/environmentService.js';
+import { IFileService } from '../../../../../platform/files/common/files.js';
 
 function makeChange(filePath: string): ISessionFileChange {
 	return { uri: URI.file(filePath), insertions: 1, deletions: 0 };
@@ -113,12 +115,14 @@ suite('LayoutController', () => {
 	let openedViewContainers: string[];
 	let executedCommands: string[];
 	let setPartHiddenCalls: { hidden: boolean; part: Parts }[];
+	let appliedWorkingSets: (IEditorWorkingSet | 'empty')[];
 	let activePaneCompositeId: string | undefined;
 
 	interface ICreateOptions {
 		readonly useModal?: 'off' | 'some' | 'all';
 		readonly workspaceFolders?: readonly { readonly uri: URI }[];
 		readonly layoutState?: readonly object[];
+		readonly isSimpleWindow?: boolean;
 	}
 
 	function createLayoutController(options: ICreateOptions = {}): LayoutController {
@@ -209,9 +213,13 @@ suite('LayoutController', () => {
 
 		instaService.stub(IEditorGroupsService, new class extends mock<IEditorGroupsService>() {
 			override saveWorkingSet(name: string): IEditorWorkingSet { return { id: name, name }; }
-			override async applyWorkingSet() { return true; }
+			override async applyWorkingSet(workingSet: IEditorWorkingSet | 'empty') {
+				appliedWorkingSets.push(workingSet);
+				return true;
+			}
 			override deleteWorkingSet() { }
 		});
+		appliedWorkingSets = [];
 
 			instaService.stub(IWorkspaceContextService, new class extends mock<IWorkspaceContextService>() {
 				override readonly onDidChangeWorkspaceFolders = Event.None;
@@ -219,6 +227,14 @@ suite('LayoutController', () => {
 			});
 			instaService.stub(IWorkspaceEditingService, new class extends mock<IWorkspaceEditingService>() {
 				override async updateFolders() { }
+			});
+			instaService.stub(IWorkbenchEnvironmentService, {
+				isSessionsWindow: true,
+				isJarvisWindow: false,
+				isOptimusWindow: options.isSimpleWindow === false,
+			} as IWorkbenchEnvironmentService);
+			instaService.stub(IFileService, new class extends mock<IFileService>() {
+				override async exists() { return true; }
 			});
 
 			return store.add(instaService.createInstance(LayoutController));
@@ -347,7 +363,7 @@ suite('LayoutController', () => {
 
 	// --- Editor / auxiliary bar invariant ---
 
-	test('does not force auxiliary bar visible when restoring editor working set on session switch', async () => {
+	test('does not restore the main editor working set in Simple mode', async () => {
 		const session = makeSession(URI.parse('session:1'));
 		createLayoutController({
 			useModal: 'some',
@@ -367,12 +383,53 @@ suite('LayoutController', () => {
 		await timeout(0);
 
 		assert.ok(
-			setPartHiddenCalls.some(c => c.part === Parts.EDITOR_PART && c.hidden === false),
-			'editor part should be revealed by the working set restore'
+			!setPartHiddenCalls.some(c => c.part === Parts.EDITOR_PART && c.hidden === false),
+			'Simple mode must not reveal the main editor part'
 		);
+		assert.ok(
+			setPartHiddenCalls.some(c => c.part === Parts.EDITOR_PART && c.hidden === true),
+			'Simple mode should enforce the single-surface layout when the active chat changes'
+		);
+		assert.deepStrictEqual(appliedWorkingSets, [], 'Simple mode must not apply a persisted editor working set');
 		assert.ok(
 			!setPartHiddenCalls.some(c => c.part === Parts.AUXILIARYBAR_PART && c.hidden === false),
 			'auxiliary bar must not be forced visible during working set restore'
+		);
+
+		partVisibility.set(Parts.EDITOR_PART, true);
+		setPartHiddenCalls = [];
+		const currentChat = session.activeChat.get();
+		(session.activeChat as ISettableObservable<IChat>).set({
+			...currentChat,
+			resource: URI.parse('chat:2'),
+		}, undefined);
+		assert.ok(
+			setPartHiddenCalls.some(c => c.part === Parts.EDITOR_PART && c.hidden === true),
+			'Simple mode should hide the main editor again on an in-session chat switch'
+		);
+	});
+
+	test('continues restoring editor working sets in Advanced mode', async () => {
+		const session = makeSession(URI.parse('session:1'));
+		createLayoutController({
+			isSimpleWindow: false,
+			useModal: 'some',
+			workspaceFolders: [{ uri: URI.file('/repo') }],
+			layoutState: [{
+				sessionResource: 'session:1',
+				editorWorkingSet: { id: 'ws-1', name: 'ws-1' },
+			}],
+		});
+		partVisibility.set(Parts.EDITOR_PART, false);
+		setPartHiddenCalls = [];
+
+		activeSessionObs.set(session, undefined);
+		await timeout(0);
+
+		assert.deepStrictEqual(appliedWorkingSets.map(workingSet => workingSet === 'empty' ? workingSet : workingSet.id), ['ws-1']);
+		assert.ok(
+			setPartHiddenCalls.some(call => call.part === Parts.EDITOR_PART && call.hidden === false),
+			'Advanced mode should retain editor working-set restore behavior'
 		);
 	});
 
@@ -546,6 +603,14 @@ suite('LayoutController', () => {
 			});
 			instaService.stub(IWorkspaceEditingService, new class extends mock<IWorkspaceEditingService>() {
 				override async updateFolders() { }
+			});
+			instaService.stub(IWorkbenchEnvironmentService, {
+				isSessionsWindow: true,
+				isJarvisWindow: false,
+				isOptimusWindow: false,
+			} as IWorkbenchEnvironmentService);
+			instaService.stub(IFileService, new class extends mock<IFileService>() {
+				override async exists() { return true; }
 			});
 
 			const controller = store.add(instaService.createInstance(LayoutController));

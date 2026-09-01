@@ -12,6 +12,7 @@ describe("refreshCredentials", () => {
 				authRefreshes++;
 				return {
 					backboard: null,
+					chatgptSubscription: null,
 					providerKeys: [],
 				};
 			},
@@ -54,7 +55,11 @@ describe("refreshCredentials", () => {
 
 		refreshCredentials(
 			{
-				refreshAuth: () => ({ backboard: null, providerKeys: [] }),
+				refreshAuth: () => ({
+					backboard: null,
+					chatgptSubscription: null,
+					providerKeys: [],
+				}),
 			},
 			client,
 		);

@@ -183,6 +183,8 @@ export interface BackboardThread {
  * response or many SSE payloads without changing the agent loop contract.
  */
 export type ProviderEvent =
+	/** Transport made progress without producing anything user-visible yet. */
+	| { kind: "activity" }
 	| { kind: "thread"; threadId: string }
 	| { kind: "assistant_delta"; text: string }
 	| { kind: "reasoning_delta"; text: string }
@@ -243,8 +245,8 @@ export interface ProviderUsage {
 	model?: string;
 }
 
-/** Which backend serves a model: a saved provider key, or Backboard routing. */
-export type ModelSource = "byok" | "backboard";
+/** Which backend serves a model: a saved key, subscription, or Backboard routing. */
+export type ModelSource = "byok" | "subscription" | "backboard";
 
 export interface ModelInfo extends ThinkingModelMetadata {
 	id: string;

@@ -148,6 +148,7 @@ async function* streamOpenAI(
 	if (request.signal) sseRequest.signal = request.signal;
 
 	for await (const chunk of postSseJson(sseRequest)) {
+		let emitted = false;
 		if (chunk.error) {
 			const error = chunk.error as { message?: string };
 			yield {
@@ -175,15 +176,20 @@ async function* streamOpenAI(
 					finish_reason?: string | null;
 			  }
 			| undefined;
-		if (!choice) continue;
+		if (!choice) {
+			yield { kind: "activity" };
+			continue;
+		}
 		if (choice.finish_reason) finishReason = choice.finish_reason;
 
 		const delta = choice.delta;
 		if (delta?.content) {
+			emitted = true;
 			yield { kind: "assistant_delta", text: delta.content };
 		}
 		const reasoningText = delta?.reasoning || delta?.reasoning_content;
 		if (reasoningText) {
+			emitted = true;
 			yield { kind: "reasoning_delta", text: reasoningText };
 		}
 		for (const partial of delta?.tool_calls ?? []) {
@@ -204,9 +210,11 @@ async function* streamOpenAI(
 			// arguments are still streaming.
 			if (!existing.announced && existing.name) {
 				existing.announced = true;
+				emitted = true;
 				yield { kind: "tool_started", id: existing.id, name: existing.name };
 			}
 		}
+		if (!emitted) yield { kind: "activity" };
 	}
 
 	if (finishReason === null) {

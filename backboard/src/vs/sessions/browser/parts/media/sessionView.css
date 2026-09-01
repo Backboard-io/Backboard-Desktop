@@ -26,10 +26,12 @@
 
 .session-view .session-view-chat-navigation {
 	display: flex;
-	height: 28px;
+	height: 44px;
 	align-items: center;
 	box-sizing: border-box;
-	padding: 2px 8px;
+	gap: 8px;
+	padding: 4px 10px;
+	border-bottom: 1px solid color-mix(in srgb, var(--vscode-panel-border) 70%, transparent);
 }
 
 .session-view .session-view-chat-navigation[hidden] {
@@ -39,21 +41,82 @@
 .session-view .session-view-chat-back {
 	appearance: none;
 	display: inline-flex;
-	max-width: 200px;
-	height: 24px;
+	max-width: 132px;
+	height: 28px;
 	min-width: 0;
 	align-items: center;
-	gap: 5px;
+	gap: 6px;
 	box-sizing: border-box;
-	padding: 0 7px 0 5px;
+	padding: 0 8px 0 6px;
 	border: 0;
-	border-radius: 4px;
+	border-radius: var(--vscode-cornerRadius-small);
 	background: transparent;
 	color: var(--vscode-descriptionForeground);
 	font: inherit;
-	font-size: 12px;
+	font-size: var(--vscode-agents-fontSize-label1);
 	line-height: 20px;
 	cursor: pointer;
+}
+
+.session-view .session-view-chat-navigation-separator {
+	flex: 0 0 auto;
+	color: var(--vscode-descriptionForeground);
+	opacity: 0.6;
+}
+
+.session-view .session-view-chat-navigation-identity {
+	display: flex;
+	min-width: 0;
+	flex: 1 1 auto;
+	flex-direction: column;
+	justify-content: center;
+	line-height: 16px;
+}
+
+.session-view .session-view-chat-navigation-title {
+	min-width: 0;
+	overflow: hidden;
+	color: var(--session-view-foreground);
+	font-size: var(--vscode-agents-fontSize-label1);
+	font-weight: var(--vscode-agents-fontWeight-semiBold);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.session-view .session-view-chat-navigation-meta {
+	min-width: 0;
+	overflow: hidden;
+	color: var(--vscode-descriptionForeground);
+	font-size: var(--vscode-agents-fontSize-label2);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.session-view .session-chat-loading {
+	position: absolute;
+	z-index: 9;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	background: var(--session-view-background);
+	color: var(--vscode-descriptionForeground);
+	font-size: var(--vscode-agents-fontSize-label1);
+}
+
+.session-view .session-chat-loading[hidden] {
+	display: none;
+}
+
+.monaco-workbench.monaco-reduce-motion .session-view .session-chat-loading .codicon-modifier-spin {
+	animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.session-view .session-chat-loading .codicon-modifier-spin {
+		animation: none;
+	}
 }
 
 .session-view .session-view-chat-back:hover {

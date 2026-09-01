@@ -150,6 +150,7 @@ async function* streamGoogle(
 	if (request.signal) sseRequest.signal = request.signal;
 
 	for await (const chunk of postSseJson(sseRequest)) {
+		let emitted = false;
 		if (chunk.error) {
 			const error = chunk.error as { message?: string };
 			yield {
@@ -184,6 +185,7 @@ async function* streamGoogle(
 				functionCall?: { name?: string; args?: unknown; id?: string };
 			};
 			if (entry.text) {
+				emitted = true;
 				yield entry.thought
 					? { kind: "reasoning_delta", text: entry.text }
 					: { kind: "assistant_delta", text: entry.text };
@@ -206,10 +208,12 @@ async function* streamGoogle(
 						: {}),
 				};
 				calls.push(call);
+				emitted = true;
 				yield { kind: "tool_started", id: call.id, name: call.name };
 				yield { kind: "tool_ready", call };
 			}
 		}
+		if (!emitted) yield { kind: "activity" };
 	}
 
 	if (finishReason === null) {

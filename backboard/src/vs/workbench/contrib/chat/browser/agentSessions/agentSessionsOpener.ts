@@ -30,6 +30,12 @@ export interface ISessionOpenerParticipant {
 export interface ISessionOpenOptions {
 	readonly sideBySide?: boolean;
 	readonly editorOptions?: IEditorOptions;
+	/** Human-readable identity for a child chat opened inside its parent view. */
+	readonly chatResourceContext?: {
+		readonly title: string;
+		readonly agentName?: string;
+		readonly status?: string;
+	};
 }
 
 class SessionOpenerRegistry {

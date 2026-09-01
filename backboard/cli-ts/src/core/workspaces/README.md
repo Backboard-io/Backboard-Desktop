@@ -22,8 +22,12 @@ filesystem isolation.
 `WorkerWorkspaceManager` records the starting commit before launch. A successful
 worker is captured with `git add -A` and an internal result commit, regardless of
 whether the model committed. `WorkerIntegrationManager` merges successful result
-commits in allocation order. A merge uses a no-commit transaction so cancellation
-can abort or roll back before a late result becomes visible.
+commits in capture-completion order while serializing the coordinator's Git
+mutations. An unfinished worker never reserves an integration slot ahead of a
+ready result. Once a result commit is captured and persisted, cancelling worker
+execution cannot downgrade that completed work or remove its integration
+eligibility. A merge uses a no-commit transaction so interrupted or conflicting
+state remains recoverable.
 
 Conflicts remain in the coordinator checkout with `MERGE_HEAD` intact. The worker
 branch, result commit, and worktree are preserved, and the conflicting paths are
@@ -41,10 +45,14 @@ invents a missing branch or operates on a path that does not match the session's
 deterministic worker path.
 
 Archive and deletion wait for active worker/integration operations. Checkpoint
-refs are removed before clean integrated worktrees. Branches are retained. Dirty,
-failed, cancelled, conflicted, partially integrated, or unowned paths are
-preserved and reported. Unarchive reattaches missing clean worktrees from their
-preserved branches.
+refs are removed before clean integrated worktrees. Branches are retained. A
+failed or cancelled worker with no captured result is removed as soon as Git
+proves both that its worktree is clean and that its branch is still exactly at
+the starting commit. That terminal cleanup is persisted so recovery and
+unarchive do not recreate a no-op worktree. Dirty or manually committed failed
+and cancelled worktrees, plus conflicted, partially integrated, or unowned paths,
+are preserved and reported. Unarchive reattaches missing clean integrated
+worktrees from their preserved branches.
 
 ## Configuration
 

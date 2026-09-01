@@ -221,16 +221,24 @@ for marker in \
 done
 
 COPILOT_EXTENSION="${STAGED_APP}/Contents/Resources/app/extensions/copilot"
-for runtime_file in \
-  'node_modules/source-map-support/source-map-support.js' \
-  'node_modules/source-map/source-map.js' \
-  'node_modules/buffer-from/index.js' \
-  'node_modules/dotenv/lib/main.js'; do
-  if [[ ! -f "${COPILOT_EXTENSION}/${runtime_file}" ]]; then
-    echo "Packaged Copilot extension is missing runtime dependency: ${runtime_file}" >&2
+if [[ -e "${COPILOT_EXTENSION}" ]]; then
+  echo "Packaged app unexpectedly contains the unused Copilot Chat extension." >&2
+  exit 1
+fi
+for unused_copilot_package in \
+  '@github/copilot' \
+  '@github/copilot-sdk'; do
+  if [[ -e "${STAGED_APP}/Contents/Resources/app/node_modules/${unused_copilot_package}" ]]; then
+    echo "Packaged app unexpectedly contains unused package ${unused_copilot_package}." >&2
     exit 1
   fi
 done
+
+MXC_MAC_BINARY="${STAGED_APP}/Contents/Resources/app/node_modules/@microsoft/mxc-sdk/bin/${EXPECTED_MACHINE/x86_64/x64}/mxc-exec-mac"
+if [[ ! -x "${MXC_MAC_BINARY}" ]]; then
+  echo "Packaged app is missing the macOS terminal sandbox runtime: ${MXC_MAC_BINARY}." >&2
+  exit 1
+fi
 
 DMG_SHA256="$(shasum -a 256 "${DMG_PATH}" | awk '{print $1}')"
 DMG_BYTES="$(stat -f%z "${DMG_PATH}")"

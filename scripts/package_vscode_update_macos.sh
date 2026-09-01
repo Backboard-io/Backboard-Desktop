@@ -40,6 +40,7 @@ DMG_FORMAT="${DMG_FORMAT:-ULMO}"
 DMG_ASSETS_DIR="${DMG_ASSETS_DIR:-${REPO_ROOT}/scripts/dmg-assets}"
 SKIP_NOTARIZATION="${SKIP_NOTARIZATION:-0}"
 SKIP_SIGNING="${SKIP_SIGNING:-0}"
+BACKBOARD_KEEP_ALL_LOCALES="${BACKBOARD_KEEP_ALL_LOCALES:-0}"
 BACKBOARD_SIGNING_PROFILE="${BACKBOARD_SIGNING_PROFILE:-robert}"
 BACKBOARD_INSTALL_BOOTSTRAP_LAUNCHER="${BACKBOARD_INSTALL_BOOTSTRAP_LAUNCHER:-0}"
 BACKBOARD_BOOTSTRAP_LAUNCH_DELAY_SECONDS="${BACKBOARD_BOOTSTRAP_LAUNCH_DELAY_SECONDS:-0}"
@@ -349,10 +350,117 @@ prune_release_app() {
 
   echo "Pruning production-only release bloat"
 
+  # Backboard's supported chat/runtime path is the native agent host. The
+  # GitHub.copilot-chat extension is a separate legacy chat stack that starts
+  # its own Copilot CLI/MCP services and is not used by Backboard, Codex, or
+  # Claude agent-host sessions. Do not ship that parallel implementation.
+  rm -rf "${app_resources_path}/extensions/copilot"
+
+  # The current agent-host entrypoint does not register CopilotAgent. Its SDK
+  # packages are therefore unreachable after removing the extension above.
+  # Backboard, Codex, and Claude use their own runtimes.
+  rm -rf \
+    "${app_resources_path}/node_modules/@github/copilot" \
+    "${app_resources_path}/node_modules/@github/copilot-sdk"
+
   # Source maps are useful for debugging, but they are not required for runtime
-  # chat, Copilot contributions, Backboard agent-host, or the right-side AI UI.
+  # chat, Backboard agent-host, or the right-side AI UI.
   find "${app_resources_path}" -type f \( -name "*.map" -o -name "*.d.ts.map" \) -delete
   find "${app_resources_path}" -type f -name "*.tsbuildinfo" -delete
+
+  # Native debug bundles, Python bytecode, and package-manager caches are
+  # build/development inputs. Keep .d.ts files: the TypeScript language service
+  # loads its standard-library declarations at runtime.
+  find "${app_resources_path}" -type f \( -name "*.pyc" -o -name "*.pyo" \) -delete
+  find "${APP_PATH}/Contents" -type d \( \
+    -name "*.dSYM" -o \
+    -name "__pycache__" \
+  \) -prune -exec rm -rf {} +
+  find "${app_resources_path}" -type d -path "*/node_modules/.cache" -prune -exec rm -rf {} +
+
+  # Several dependencies (notably agent SDKs, sharp, ripgrep, and the Microsoft
+  # authentication runtime) vendor binaries for every supported OS
+  # and both Mac architectures. A per-architecture macOS app can only use one
+  # of those variants. Match platform-qualified directory names rather than
+  # generic names such as "linux" so ordinary application resources are not
+  # mistaken for native payloads.
+  local target_npm_arch foreign_npm_arch
+  case "${ARCH}" in
+    aarch64)
+      target_npm_arch="arm64"
+      foreign_npm_arch="x64"
+      ;;
+    x86_64)
+      target_npm_arch="x64"
+      foreign_npm_arch="arm64"
+      ;;
+    *) echo "Cannot prune native payloads for ARCH=${ARCH}" >&2; exit 1 ;;
+  esac
+
+  while IFS= read -r -d '' payload; do
+    rm -rf "${payload}"
+  done < <(find "${app_resources_path}" -type d \( \
+    -name "darwin-${foreign_npm_arch}" -o \
+    -name "${foreign_npm_arch}-darwin" -o \
+    -name "*-darwin-${foreign_npm_arch}" -o \
+    -name "linux-x64" -o \
+    -name "linux-arm" -o \
+    -name "linux-arm64" -o \
+    -name "x64-linux" -o \
+    -name "arm64-linux" -o \
+    -name "*-linux-arm" -o \
+    -name "*-linux-x64" -o \
+    -name "*-linux-arm64" -o \
+    -name "*-linuxmusl-*" -o \
+    -name "win32-x64" -o \
+    -name "win32-arm64" -o \
+    -name "x64-win32" -o \
+    -name "arm64-win32" -o \
+    -name "*-win32-x64" -o \
+    -name "*-win32-arm64" \
+  \) -prune -print0)
+
+  # The build promotes the selected @azure/msal-node-runtime binary pair into
+  # dist/. Its multi-platform source trees are redundant after that copy.
+  find "${app_resources_path}" \
+    -type d \
+    -path "*/@azure/msal-node-runtime/dist/macos" \
+    -prune -exec rm -rf {} +
+  find "${app_resources_path}" \
+    -type d \
+    -path "*/@azure/msal-node-runtime/dist/linux" \
+    -prune -exec rm -rf {} +
+  find "${app_resources_path}" \
+    -type d \
+    -path "*/@azure/msal-node-runtime/dist/win32" \
+    -prune -exec rm -rf {} +
+
+  # MXC includes both CPU architectures and Windows/Linux helpers in every npm
+  # package. macOS only resolves bin/<arch>/mxc-exec-mac; retain exactly that
+  # executable so terminal sandboxing continues to work.
+  local mxc_bin_dir="${app_resources_path}/node_modules/@microsoft/mxc-sdk/bin"
+  local mxc_target_dir="${mxc_bin_dir}/${target_npm_arch}"
+  if [[ -d "${mxc_target_dir}" ]]; then
+    require_file "${mxc_target_dir}/mxc-exec-mac"
+    rm -rf "${mxc_bin_dir}/${foreign_npm_arch}"
+    find "${mxc_target_dir}" -depth -mindepth 1 ! -name "mxc-exec-mac" -delete
+  fi
+
+  # Electron ships localized framework resources for every supported language.
+  # Backboard's compact release defaults to English and Base resources. Set
+  # BACKBOARD_KEEP_ALL_LOCALES=1 when producing a multilingual distribution.
+  case "${BACKBOARD_KEEP_ALL_LOCALES}" in
+    0)
+      while IFS= read -r -d '' locale_dir; do
+        case "$(basename "${locale_dir}")" in
+          Base.lproj|en.lproj|en_*.lproj) ;;
+          *) rm -rf "${locale_dir}" ;;
+        esac
+      done < <(find "${APP_PATH}/Contents" -type d -name "*.lproj" -prune -print0)
+      ;;
+    1) ;;
+    *) echo "BACKBOARD_KEEP_ALL_LOCALES must be 0 or 1." >&2; exit 1 ;;
+  esac
 
   # The Backboard extension only needs package.json, out/, media/, and bin/ in
   # production. Keep Copilot installed; this only removes Backboard source/build
@@ -365,7 +473,11 @@ prune_release_app() {
     "${app_resources_path}/extensions/backboard/.vscodeignore"
 
   after_kb="$(du -sk "${APP_PATH}" | awk '{ print $1 }')"
-  echo "Pruned app payload: $((before_kb - after_kb))K removed"
+  awk -v before="${before_kb}" -v after="${after_kb}" '
+    BEGIN {
+      printf "Pruned app payload: %.1f MiB removed (%.1f MiB -> %.1f MiB)\n", (before - after) / 1024, before / 1024, after / 1024
+    }
+  '
 }
 
 rebuild_backboard_runtime

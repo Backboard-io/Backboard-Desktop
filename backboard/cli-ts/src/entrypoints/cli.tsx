@@ -54,6 +54,10 @@ import { ToolRegistry } from "../core/tools/ToolRegistry.ts";
 import { buildStartupEnvironmentPrompt } from "../prompts/system/startupEnvironment.ts";
 import { BackboardError } from "../providers/backboard/errors.ts";
 import { createAgentClient } from "../providers/createAgentClient.ts";
+import {
+	loginWithChatGptSubscription,
+	logoutChatGptSubscription,
+} from "../providers/subscription/SubscriptionAuth.ts";
 import { createDefaultTools } from "../tools/index.ts";
 import { App } from "../ui/App.tsx";
 import { AuthScreen } from "../ui/AuthScreen.tsx";
@@ -72,6 +76,8 @@ Usage:
   ${APP_COMMAND_NAME} [options]
   ${APP_COMMAND_NAME} login
   ${APP_COMMAND_NAME} logout
+  ${APP_COMMAND_NAME} subscription login
+  ${APP_COMMAND_NAME} subscription logout
 
 Options:
   --model <provider/model>   Model to use (e.g. openai/gpt-5.5)
@@ -89,6 +95,8 @@ Options:
   --fresh                    Create a new Backboard assistant/thread for this run (isolated)
   --login                    Sign in with Backboard
   --logout                   Remove saved Backboard credentials
+  --subscription-login      Connect a ChatGPT subscription
+  --subscription-logout     Disconnect the ChatGPT subscription
   --help                     Show this help
   --version                  Show version
 `;
@@ -101,6 +109,15 @@ async function main(): Promise<void> {
 	}
 	if (earlyFlags.version) {
 		process.stdout.write(`${APP_DISPLAY_NAME} ${APP_VERSION}\n`);
+		return;
+	}
+	if (earlyFlags.subscriptionLogin) {
+		const didLogin = await runSubscriptionLoginCommand();
+		if (!didLogin) process.exitCode = 1;
+		return;
+	}
+	if (earlyFlags.subscriptionLogout) {
+		await runSubscriptionLogoutCommand();
 		return;
 	}
 	if (earlyFlags.login) {
@@ -529,6 +546,28 @@ async function runLoginCommand(): Promise<boolean> {
 
 async function runLogoutCommand(): Promise<void> {
 	process.stdout.write(`${await logoutSavedCredentials()}\n`);
+}
+
+async function runSubscriptionLoginCommand(): Promise<boolean> {
+	process.stdout.write("Starting ChatGPT subscription login...\n");
+	try {
+		const message = await loginWithChatGptSubscription({
+			onAuthUrl: (url) => {
+				process.stdout.write(
+					`If the browser does not open, visit this URL:\n${url}\n\nWaiting for approval...\n`,
+				);
+			},
+		});
+		process.stdout.write(`${message}\n`);
+		return true;
+	} catch (error) {
+		process.stderr.write(`${errorMessage(error)}\n`);
+		return false;
+	}
+}
+
+async function runSubscriptionLogoutCommand(): Promise<void> {
+	process.stdout.write(`${await logoutChatGptSubscription()}\n`);
 }
 
 async function runHeadless(

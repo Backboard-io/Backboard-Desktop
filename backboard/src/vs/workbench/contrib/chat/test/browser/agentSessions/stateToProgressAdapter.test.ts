@@ -1588,7 +1588,7 @@ suite('stateToProgressAdapter', () => {
 
 	suite('updateRunningToolSpecificData', () => {
 
-		test('sets subagent toolSpecificData from content and notifies state observers', () => {
+		test('sets subagent toolSpecificData from content and ignores a structurally identical replay', () => {
 			const tc = createToolCallState({
 				_meta: { toolKind: 'subagent', subagentDescription: 'Find related files' },
 			});
@@ -1599,7 +1599,13 @@ suite('stateToProgressAdapter', () => {
 			const runningTc: ToolCallRunningState = {
 				...tc,
 				status: ToolCallStatus.Running,
-				_meta: { toolKind: 'subagent', subagentDescription: 'Find related files' },
+				_meta: {
+					toolKind: 'subagent',
+					subagentDescription: 'Find related files',
+					subagentWorkerId: 'worker-a',
+					subagentStatus: 'Conflict',
+					subagentConflictingFiles: ['src/shared.ts'],
+				},
 				content: [{
 					type: ToolResultContentType.Subagent,
 					resource: 'copilot://session/subagent/tc-1',
@@ -1609,17 +1615,17 @@ suite('stateToProgressAdapter', () => {
 				}],
 			};
 
-			let stateChanged = false;
+			let stateChanges = 0;
 			const disposable = autorun(r => {
 				invocation.state.read(r);
-				stateChanged = true;
+				stateChanges++;
 			});
-			stateChanged = false; // reset after initial read
+			stateChanges = 0; // reset after initial read
 			const before = invocation.toolSpecificData;
 
 			updateRunningToolSpecificData(invocation, runningTc);
 
-			assert.strictEqual(stateChanged, true, 'state observers should be notified');
+			assert.strictEqual(stateChanges, 1, 'state observers should be notified once');
 			assert.notStrictEqual(invocation.toolSpecificData, before, 'toolSpecificData should be replaced');
 			assert.strictEqual(invocation.toolSpecificData?.kind, 'subagent');
 			if (invocation.toolSpecificData?.kind === 'subagent') {
@@ -1627,7 +1633,91 @@ suite('stateToProgressAdapter', () => {
 				assert.strictEqual(invocation.toolSpecificData.agentName, 'explore');
 				// description is the TASK description from _meta, not the agent description
 				assert.strictEqual(invocation.toolSpecificData.description, 'Find related files');
+				assert.strictEqual(invocation.toolSpecificData.workerId, 'worker-a');
+				assert.deepStrictEqual(invocation.toolSpecificData.conflictingFiles, ['src/shared.ts']);
 			}
+
+			const afterFirstUpdate = invocation.toolSpecificData;
+			stateChanges = 0;
+			updateRunningToolSpecificData(invocation, {
+				...runningTc,
+				_meta: {
+					...runningTc._meta,
+					subagentConflictingFiles: ['src/shared.ts'],
+				},
+				content: [{
+					type: ToolResultContentType.Subagent,
+					resource: 'copilot://session/subagent/tc-1',
+					title: 'Explore',
+					agentName: 'explore',
+					description: 'Explores the codebase',
+				}],
+			});
+
+			assert.strictEqual(stateChanges, 0, 'an identical content replay should not notify observers');
+			assert.strictEqual(invocation.toolSpecificData, afterFirstUpdate, 'an identical content replay should preserve object identity');
+			disposable.dispose();
+		});
+
+		test('refreshes workspace metadata only when its structural value changes', () => {
+			const tc = createToolCallState({
+				_meta: { toolKind: 'subagent', subagentDescription: 'Update shared files' },
+			});
+			const invocation = toolCallStateToInvocation(tc);
+			const runningTc: ToolCallRunningState = {
+				...tc,
+				_meta: {
+					toolKind: 'subagent',
+					subagentDescription: 'Update shared files',
+					subagentAgentName: 'worker',
+					subagentWorkerId: 'worker-b',
+					subagentStatus: 'Conflict',
+					subagentBranch: 'agent/session/worker/worker-b',
+					subagentWorktreePath: '/repo.backboard-workers/session/worker-b',
+					subagentChangedFileCount: 2,
+					subagentStartedAt: '2026-08-25T12:00:00.000Z',
+					subagentFinishedAt: '2026-08-25T12:00:04.000Z',
+					subagentIntegrationResult: 'Conflict in src/shared.ts',
+					subagentConflictingFiles: ['src/shared.ts'],
+				},
+			};
+
+			let stateChanges = 0;
+			const disposable = autorun(r => {
+				invocation.state.read(r);
+				stateChanges++;
+			});
+			stateChanges = 0;
+
+			updateRunningToolSpecificData(invocation, runningTc);
+			assert.strictEqual(stateChanges, 1, 'new workspace metadata should notify observers');
+			const afterFirstUpdate = invocation.toolSpecificData;
+			assert.ok(afterFirstUpdate?.kind === 'subagent');
+			assert.deepStrictEqual(afterFirstUpdate.conflictingFiles, ['src/shared.ts']);
+
+			stateChanges = 0;
+			updateRunningToolSpecificData(invocation, {
+				...runningTc,
+				_meta: {
+					...runningTc._meta,
+					subagentConflictingFiles: ['src/shared.ts'],
+				},
+			});
+			assert.strictEqual(stateChanges, 0, 'equal metadata with a new array instance should not notify observers');
+			assert.strictEqual(invocation.toolSpecificData, afterFirstUpdate, 'equal metadata should preserve object identity');
+
+			stateChanges = 0;
+			updateRunningToolSpecificData(invocation, {
+				...runningTc,
+				_meta: {
+					...runningTc._meta,
+					subagentConflictingFiles: ['src/shared.ts', 'src/other.ts'],
+				},
+			});
+			assert.strictEqual(stateChanges, 1, 'changed array contents should notify observers');
+			assert.notStrictEqual(invocation.toolSpecificData, afterFirstUpdate, 'changed metadata should replace toolSpecificData');
+			assert.ok(invocation.toolSpecificData?.kind === 'subagent');
+			assert.deepStrictEqual(invocation.toolSpecificData.conflictingFiles, ['src/shared.ts', 'src/other.ts']);
 			disposable.dispose();
 		});
 

@@ -15,6 +15,8 @@ export interface CliFlags {
 	fresh?: boolean;
 	login: boolean;
 	logout: boolean;
+	subscriptionLogin: boolean;
+	subscriptionLogout: boolean;
 	help: boolean;
 	version: boolean;
 }
@@ -29,12 +31,24 @@ export function parseFlags(argv: string[]): CliFlags {
 		serve: false,
 		login: false,
 		logout: false,
+		subscriptionLogin: false,
+		subscriptionLogout: false,
 		help: false,
 		version: false,
 	};
 
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
+		if (arg === "subscription" && argv[i + 1] === "login") {
+			flags.subscriptionLogin = true;
+			i++;
+			continue;
+		}
+		if (arg === "subscription" && argv[i + 1] === "logout") {
+			flags.subscriptionLogout = true;
+			i++;
+			continue;
+		}
 		if (arg === "login") {
 			flags.login = true;
 			continue;
@@ -140,6 +154,12 @@ export function parseFlags(argv: string[]): CliFlags {
 				break;
 			case "logout":
 				flags.logout = true;
+				break;
+			case "subscription-login":
+				flags.subscriptionLogin = true;
+				break;
+			case "subscription-logout":
+				flags.subscriptionLogout = true;
 				break;
 			case "help":
 				flags.help = true;

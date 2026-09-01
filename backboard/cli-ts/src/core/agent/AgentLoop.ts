@@ -34,6 +34,9 @@ import { hasStructuralDiagnosticText } from "./ThinkingEvidence.ts";
 import { ToolRoundProcessor } from "./ToolRoundProcessor.ts";
 import { Turn } from "./Turn.ts";
 
+const SUBAGENT_PROVIDER_IDLE_TIMEOUT_MS = 30_000;
+const SUBAGENT_PROVIDER_MAX_RETRIES = 1;
+
 export type CapacityFallbackResolver = (
 	current: ModelRef,
 	attemptedModelKeys: ReadonlySet<string>,
@@ -102,6 +105,12 @@ export class AgentLoop {
 		const consumer = new ProviderStreamConsumer(bus, session, {
 			imageGeneration: this.deps.imageGeneration,
 			generatedMediaDir: this.deps.generatedMediaDir,
+			...(this.deps.requestKind === "subagent"
+				? {
+						idleTimeoutMs: SUBAGENT_PROVIDER_IDLE_TIMEOUT_MS,
+						maxRetries: SUBAGENT_PROVIDER_MAX_RETRIES,
+					}
+				: {}),
 		});
 		const activeModel = { ...this.deps.model };
 		const attemptedModelKeys = new Set([modelKey(activeModel)]);
@@ -198,8 +207,11 @@ export class AgentLoop {
 					{ ...this.deps, model: activeModel },
 					initialThinking,
 				);
-			const createMessageStream = () =>
-				this.deps.client.runMessage(buildMessageRequest(), messageOptions);
+			const createMessageStream = (signal: AbortSignal) =>
+				this.deps.client.runMessage(buildMessageRequest(), {
+					...messageOptions,
+					signal,
+				});
 
 			const early = processor.createEarlyRound(ctx, turn.id);
 			const pending = await consumer.consumeWithRetry(

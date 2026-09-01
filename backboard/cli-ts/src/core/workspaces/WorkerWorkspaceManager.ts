@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { errorMessage } from "../../utils/errors.ts";
 import {
 	type GitRepositoryInfo,
@@ -15,18 +15,6 @@ import type {
 	WorkerWorkspaceRecord,
 	WorkerWorkspaceRunParams,
 } from "./WorkerWorkspaceTypes.ts";
-
-interface IntegrationSubmission {
-	record: WorkerWorkspaceRecord;
-	signal: AbortSignal;
-	onProgress?: (record: WorkerWorkspaceRecord) => void;
-	shouldIntegrate: boolean;
-}
-
-interface IntegrationSlot {
-	resolve: (submission: IntegrationSubmission) => void;
-	result: Promise<WorkerWorkspaceRecord>;
-}
 
 export interface WorkerWorkspaceManagerOptions {
 	parentSessionId: string;
@@ -55,7 +43,6 @@ export class WorkerWorkspaceManager {
 	private readonly records = new Map<string, WorkerWorkspaceRecord>();
 	private readonly activeControllers = new Map<string, AbortController>();
 	private readonly activeOperations = new Set<Promise<unknown>>();
-	private readonly integrationSlots = new Map<string, IntegrationSlot>();
 	private initialization?: Promise<void>;
 	private creationTail: Promise<void> = Promise.resolve();
 	private integrationTail: Promise<void> = Promise.resolve();
@@ -124,19 +111,20 @@ export class WorkerWorkspaceManager {
 	async archive(): Promise<string[]> {
 		await this.initialize();
 		await this.waitForIdle();
-		return this.cleanupIntegratedWorktrees();
+		return this.cleanupWorktrees();
 	}
 
 	async delete(): Promise<string[]> {
 		this.cancelAll();
 		await this.initialize();
 		await this.waitForIdle();
-		return this.cleanupIntegratedWorktrees();
+		return this.cleanupWorktrees();
 	}
 
 	async unarchive(): Promise<WorkerWorkspaceRecord[]> {
 		await this.initialize();
 		for (const record of this.sortedRecords()) {
+			if (record.worktreeDisposition === "removed_clean_terminal") continue;
 			if (
 				record.readOnly ||
 				!record.repositoryRoot ||
@@ -189,17 +177,11 @@ export class WorkerWorkspaceManager {
 		try {
 			result = await run(workspace);
 		} catch (error) {
-			const record = await this.finishWithoutIntegration(
+			await this.finishWithoutIntegration(
 				workspace.record,
 				workspace.signal.aborted ? "cancelled" : "failed",
 				errorMessage(error),
 				params.onProgress,
-			);
-			this.resolveIntegration(
-				record,
-				workspace.signal,
-				params.onProgress,
-				false,
 			);
 			throw error;
 		}
@@ -216,12 +198,6 @@ export class WorkerWorkspaceManager {
 					? "Cancelled before result capture."
 					: undefined,
 				params.onProgress,
-			);
-			this.resolveIntegration(
-				record,
-				workspace.signal,
-				params.onProgress,
-				false,
 			);
 			return { result, workspace: record };
 		}
@@ -255,17 +231,11 @@ export class WorkerWorkspaceManager {
 				signal: workspace.signal,
 			});
 		} catch (error) {
-			const record = await this.finishWithoutIntegration(
+			await this.finishWithoutIntegration(
 				workspace.record,
 				workspace.signal.aborted ? "cancelled" : "failed",
 				errorMessage(error),
 				params.onProgress,
-			);
-			this.resolveIntegration(
-				record,
-				workspace.signal,
-				params.onProgress,
-				false,
 			);
 			throw error;
 		}
@@ -280,17 +250,10 @@ export class WorkerWorkspaceManager {
 			},
 			params.onProgress,
 		);
-		const slot = this.integrationSlots.get(completed.workerId);
-		if (!slot)
-			throw new Error(`Missing integration slot for ${completed.workerId}`);
-		this.resolveIntegration(
+		const integrated = await this.enqueueCapturedResult(
 			completed,
-			workspace.signal,
 			params.onProgress,
-			true,
 		);
-		const integrated = await slot.result;
-		this.records.set(integrated.workerId, integrated);
 		return { result, workspace: integrated };
 	}
 
@@ -327,7 +290,6 @@ export class WorkerWorkspaceManager {
 			};
 		}
 
-		this.reserveIntegrationSlot(record.workerId);
 		let repository: GitRepositoryInfo | null = null;
 		const create = this.creationTail.then(async () => {
 			const existing = await this.git.inspect(
@@ -375,6 +337,7 @@ export class WorkerWorkspaceManager {
 					repositoryRoot: repository.repositoryRoot,
 					branch,
 					worktreePath,
+					worktreeDisposition: "present",
 					startingCommit: repository.head,
 				},
 				params.onProgress,
@@ -400,7 +363,6 @@ export class WorkerWorkspaceManager {
 				errorMessage(error),
 				params.onProgress,
 			);
-			this.resolveIntegration(record, params.signal, params.onProgress, false);
 			throw error;
 		}
 		record = await this.persist(
@@ -415,31 +377,37 @@ export class WorkerWorkspaceManager {
 		};
 	}
 
-	private reserveIntegrationSlot(workerId: string): void {
-		let resolveSubmission: (submission: IntegrationSubmission) => void =
-			() => {};
-		const submission = new Promise<IntegrationSubmission>((resolve) => {
-			resolveSubmission = resolve;
-		});
+	/**
+	 * Adds a durable result to the shared Git mutation queue only after capture.
+	 * This makes integration order match worker completion order: an unfinished
+	 * earlier worker cannot reserve the head of the queue and block ready work.
+	 *
+	 * The execution signal deliberately stops at the capture boundary. Once the
+	 * result commit exists and is persisted, a later Stop must not downgrade the
+	 * completed worker or make its durable result ineligible for integration.
+	 */
+	private enqueueCapturedResult(
+		record: WorkerWorkspaceRecord,
+		onProgress?: (record: WorkerWorkspaceRecord) => void,
+	): Promise<WorkerWorkspaceRecord> {
 		const result = this.integrationTail.then(async () => {
-			const next = await submission;
-			if (!next.shouldIntegrate) return next.record;
 			if (this.integrationBlocked) {
 				return this.persist(
 					{
-						...next.record,
+						...record,
 						integrationStatus: "pending",
 						error:
-							"Integration is waiting for an earlier worker conflict to be resolved.",
+							"Integration is waiting for another worker conflict to be resolved.",
 					},
-					next.onProgress,
+					onProgress,
 				);
 			}
 			const integrated = await this.integration.integrate(
-				next.record,
-				next.signal,
-				next.onProgress,
+				record,
+				undefined,
+				onProgress,
 			);
+			this.records.set(integrated.workerId, integrated);
 			if (integrated.integrationStatus === "conflict") {
 				this.integrationBlocked = true;
 			}
@@ -449,24 +417,7 @@ export class WorkerWorkspaceManager {
 			() => undefined,
 			() => undefined,
 		);
-		this.integrationSlots.set(workerId, {
-			resolve: resolveSubmission,
-			result,
-		});
-	}
-
-	private resolveIntegration(
-		record: WorkerWorkspaceRecord,
-		signal: AbortSignal,
-		onProgress: ((record: WorkerWorkspaceRecord) => void) | undefined,
-		shouldIntegrate: boolean,
-	): void {
-		this.integrationSlots.get(record.workerId)?.resolve({
-			record,
-			signal,
-			onProgress,
-			shouldIntegrate,
-		});
+		return result;
 	}
 
 	private async finishWithoutIntegration(
@@ -487,7 +438,7 @@ export class WorkerWorkspaceManager {
 				// previously known metadata and the original execution error.
 			}
 		}
-		return this.persist(
+		const terminal = await this.persist(
 			{
 				...record,
 				changedFiles,
@@ -498,6 +449,7 @@ export class WorkerWorkspaceManager {
 			},
 			onProgress,
 		);
+		return this.cleanupTransientTerminalWorktree(terminal, onProgress);
 	}
 
 	private async recover(): Promise<void> {
@@ -506,6 +458,7 @@ export class WorkerWorkspaceManager {
 			this.records.set(record.workerId, record);
 			this.nextSequence = Math.max(this.nextSequence, record.sequence + 1);
 			if (record.readOnly) continue;
+			if (record.worktreeDisposition === "removed_clean_terminal") continue;
 			if (!record.repositoryRoot || !record.branch || !record.worktreePath) {
 				record.executionStatus = "failed";
 				record.integrationStatus = "skipped";
@@ -548,6 +501,10 @@ export class WorkerWorkspaceManager {
 				}
 				continue;
 			}
+			if (isTransientTerminalWorker(record)) {
+				await this.cleanupTransientTerminalWorktree(record);
+				continue;
+			}
 			if (
 				record.executionStatus === "creating" ||
 				record.executionStatus === "running"
@@ -573,13 +530,14 @@ export class WorkerWorkspaceManager {
 		}
 
 		if (!this.integrationBlocked) {
-			for (const record of this.sortedRecords()) {
-				if (
-					record.executionStatus !== "completed" ||
-					record.integrationStatus !== "pending"
-				) {
-					continue;
-				}
+			const pending = this.sortedRecords()
+				.filter(
+					(record) =>
+						record.executionStatus === "completed" &&
+						record.integrationStatus === "pending",
+				)
+				.sort(compareCompletionOrder);
+			for (const record of pending) {
 				const integrated = await this.integration.integrate(record);
 				this.records.set(record.workerId, integrated);
 				if (integrated.integrationStatus === "conflict") {
@@ -590,20 +548,28 @@ export class WorkerWorkspaceManager {
 		}
 	}
 
-	private async cleanupIntegratedWorktrees(): Promise<string[]> {
+	private async cleanupWorktrees(): Promise<string[]> {
 		const preserved: string[] = [];
-		for (const record of this.sortedRecords()) {
+		for (const savedRecord of this.sortedRecords()) {
+			let record = savedRecord;
 			if (!record.worktreePath || record.readOnly) continue;
+			if (record.worktreeDisposition === "removed_clean_terminal") continue;
 			if (!this.isOwnedWorktree(record)) {
 				preserved.push(record.worktreePath);
 				continue;
 			}
+			if (isTransientTerminalWorker(record)) {
+				record = await this.cleanupTransientTerminalWorktree(record);
+				if (record.worktreeDisposition === "removed_clean_terminal") continue;
+			}
+			const worktreePath = record.worktreePath;
+			if (!worktreePath) continue;
 			if (
 				record.integrationStatus !== "integrated" ||
 				record.executionStatus !== "completed" ||
 				!record.repositoryRoot
 			) {
-				preserved.push(record.worktreePath);
+				preserved.push(worktreePath);
 				continue;
 			}
 			try {
@@ -615,16 +581,95 @@ export class WorkerWorkspaceManager {
 				const removed = await this.git.removeWorktreeIfClean({
 					repositoryRoot: record.repositoryRoot,
 					coordinatorCwd: record.coordinatorCwd,
-					worktreePath: record.worktreePath,
+					worktreePath,
 				});
-				if (!removed) preserved.push(record.worktreePath);
+				if (!removed) preserved.push(worktreePath);
 			} catch (error) {
-				record.error = `Cleanup preserved worker worktree ${record.worktreePath}: ${errorMessage(error)}`;
+				record.error = `Cleanup preserved worker worktree ${worktreePath}: ${errorMessage(error)}`;
 				await this.persist(record);
-				preserved.push(record.worktreePath);
+				preserved.push(worktreePath);
 			}
 		}
 		return preserved;
+	}
+
+	/**
+	 * Removes a failed/cancelled worker only when there is provably no result to
+	 * recover: no captured result commit, a clean worktree, and HEAD still at the
+	 * worker's starting commit. Dirty or manually committed work is preserved.
+	 */
+	private async cleanupTransientTerminalWorktree(
+		record: WorkerWorkspaceRecord,
+		onProgress?: (record: WorkerWorkspaceRecord) => void,
+	): Promise<WorkerWorkspaceRecord> {
+		if (
+			!isTransientTerminalWorker(record) ||
+			record.worktreeDisposition === "removed_clean_terminal" ||
+			!record.repositoryRoot ||
+			!record.worktreePath ||
+			!record.startingCommit ||
+			!this.isOwnedWorktree(record)
+		) {
+			return record;
+		}
+
+		try {
+			const inspected = await this.git.inspect(record.worktreePath);
+			if (
+				!inspected ||
+				resolve(inspected.repositoryRoot) !== resolve(record.repositoryRoot) ||
+				inspected.head !== record.startingCommit
+			) {
+				return record;
+			}
+			const removed = await this.git.removeWorktreeIfClean({
+				repositoryRoot: record.repositoryRoot,
+				coordinatorCwd: record.coordinatorCwd,
+				worktreePath: record.worktreePath,
+				expectedHead: record.startingCommit,
+			});
+			if (!removed) return record;
+
+			let cleaned = await this.persist(
+				{
+					...record,
+					changedFiles: [],
+					worktreeDisposition: "removed_clean_terminal",
+					worktreeCleanedAt: this.now().toISOString(),
+				},
+				onProgress,
+			);
+			try {
+				await this.git.removeCheckpointRefs(
+					record.repositoryRoot,
+					record.parentSessionId,
+					record.workerId,
+				);
+			} catch (error) {
+				cleaned = await this.persist(
+					{
+						...cleaned,
+						error: appendCleanupError(
+							cleaned.error,
+							`Removed clean terminal worker, but checkpoint cleanup failed: ${errorMessage(error)}`,
+						),
+					},
+					onProgress,
+				);
+			}
+			return cleaned;
+		} catch (error) {
+			return this.persist(
+				{
+					...record,
+					error: appendCleanupError(
+						record.error,
+						`Clean terminal worker was preserved because cleanup failed: ${errorMessage(error)}`,
+					),
+				},
+				onProgress,
+			);
+		}
 	}
 
 	private isOwnedWorktree(record: WorkerWorkspaceRecord): boolean {
@@ -659,6 +704,23 @@ export class WorkerWorkspaceManager {
 	}
 }
 
+function isTransientTerminalWorker(record: WorkerWorkspaceRecord): boolean {
+	return (
+		!record.readOnly &&
+		(record.executionStatus === "failed" ||
+			record.executionStatus === "cancelled") &&
+		record.integrationStatus === "skipped" &&
+		record.resultCommit === undefined
+	);
+}
+
+function appendCleanupError(
+	existing: string | undefined,
+	cleanupError: string,
+): string {
+	return existing ? `${existing}\n${cleanupError}` : cleanupError;
+}
+
 export function workerWorktreePath(
 	repositoryRoot: string,
 	parentSessionId: string,
@@ -686,6 +748,23 @@ function safePathPart(value: string): string {
 function clampMaxWorkers(value: number): number {
 	if (!Number.isFinite(value)) return 4;
 	return Math.max(1, Math.min(4, Math.floor(value)));
+}
+
+function compareCompletionOrder(
+	a: WorkerWorkspaceRecord,
+	b: WorkerWorkspaceRecord,
+): number {
+	const aFinished = a.finishedAt ? Date.parse(a.finishedAt) : Number.NaN;
+	const bFinished = b.finishedAt ? Date.parse(b.finishedAt) : Number.NaN;
+	if (Number.isFinite(aFinished) && Number.isFinite(bFinished)) {
+		const difference = aFinished - bFinished;
+		if (difference !== 0) return difference;
+	} else if (Number.isFinite(aFinished)) {
+		return -1;
+	} else if (Number.isFinite(bFinished)) {
+		return 1;
+	}
+	return a.sequence - b.sequence;
 }
 
 function cloneRecord(record: WorkerWorkspaceRecord): WorkerWorkspaceRecord {

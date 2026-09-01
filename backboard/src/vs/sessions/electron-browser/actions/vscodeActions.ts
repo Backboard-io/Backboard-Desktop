@@ -33,7 +33,7 @@ import { OpenInVSCodeTitleBarWidget } from '../../browser/widget/openInVSCodeWid
 import { IActionViewItemService } from '../../../platform/actions/browser/actionViewItemService.js';
 import { IInstantiationService } from '../../../platform/instantiation/common/instantiation.js';
 import { Disposable } from '../../../base/common/lifecycle.js';
-import { resolveRemoteAuthority } from '../../browser/openInVSCodeUtils.js';
+import { getSessionEditorFolderUri, resolveRemoteAuthority } from '../../browser/openInVSCodeUtils.js';
 import { INativeHostService } from '../../../platform/native/common/native.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../platform/storage/common/storage.js';
 import { BACKBOARD_WORKSPACE_OPEN_ON_STARTUP_STORAGE_KEY } from '../../../workbench/contrib/chat/electron-browser/backboardWorkspace/backboardWorkspaceConstants.js';
@@ -49,7 +49,7 @@ const OPEN_WORKSPACE_IN_VSCODE_ACTION_ID = 'agents.openWorkspaceInVSCode';
 const WORKSPACE_RESOLVE_TIMEOUT = 50;
 
 function toFolderUri(session: ISession, sessionsProvidersService: ISessionsProvidersService, remoteAgentHostService: IRemoteAgentHostService): URI | undefined {
-	const rawFolderUri = session.workspace.get()?.folders[0]?.workingDirectory;
+	const rawFolderUri = getSessionEditorFolderUri(session);
 	if (!rawFolderUri) {
 		return undefined;
 	}

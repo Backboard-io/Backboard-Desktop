@@ -72,9 +72,16 @@ export async function* postSseJson(
 		);
 	}
 
-	for await (const frame of readSseFrames(res.body)) {
+	for await (const frame of readSseFrames(res.body, {
+		includeTransportActivity: true,
+	})) {
 		const data = sseDataPayload(frame);
-		if (data === null) continue;
+		if (data === null) {
+			// Adapters translate an empty payload object into the internal
+			// ProviderEvent activity marker without surfacing anything in the UI.
+			yield {};
+			continue;
+		}
 		// Matched against the extracted payload, never the raw frame: the payload
 		// is JSON, so an assistant message that merely *contains* "data: [DONE]"
 		// (writing about SSE, say) would otherwise end the stream mid-turn and
@@ -93,9 +100,14 @@ export async function* postSseJson(
 				frame,
 			);
 		}
-		if (payload == null) continue;
+		if (payload == null) {
+			yield {};
+			continue;
+		}
 		if (typeof payload === "object" && !Array.isArray(payload)) {
 			yield payload as Record<string, unknown>;
+		} else {
+			yield {};
 		}
 	}
 }

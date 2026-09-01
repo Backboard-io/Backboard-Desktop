@@ -23,7 +23,7 @@ fi
 
 case "${ARCH}" in
   aarch64)
-    GULP_TARGET="vscode-darwin-arm64"
+    GULP_TARGET="vscode-darwin-arm64-min"
     VSAPP_DIR="${REPO_ROOT}/VSCode-darwin-arm64"
     CLI_TARGET="bun-darwin-arm64"
     MSAL_VARIANT="macos/arm64"
@@ -37,7 +37,7 @@ case "${ARCH}" in
     )
     ;;
   x86_64)
-    GULP_TARGET="vscode-darwin-x64"
+    GULP_TARGET="vscode-darwin-x64-min"
     VSAPP_DIR="${REPO_ROOT}/VSCode-darwin-x64"
     CLI_TARGET="bun-darwin-x64"
     MSAL_VARIANT="macos/x64"
@@ -254,4 +254,15 @@ fi
 echo
 echo "Release size report:"
 du -sh "${VSAPP}" "${OUT}/dmg" "${DMG_PATH}"
+INSTALLED_APP="$(find "${OUT}/dmg" -maxdepth 1 -type d -name '*.app' -print -quit)"
+if [[ -n "${INSTALLED_APP}" ]]; then
+  SOURCE_APP_KB="$(du -sk "${VSAPP}" | awk '{ print $1 }')"
+  INSTALLED_APP_KB="$(du -sk "${INSTALLED_APP}" | awk '{ print $1 }')"
+  awk -v source="${SOURCE_APP_KB}" -v installed="${INSTALLED_APP_KB}" '
+    BEGIN {
+      reduction = source > 0 ? (source - installed) * 100 / source : 0
+      printf "Installed app: %.1f MiB (%.1f%% smaller than the assembled app)\n", installed / 1024, reduction
+    }
+  '
+fi
 echo "DMG bytes: $(stat -f%z "${DMG_PATH}")"

@@ -123,9 +123,19 @@ export class Config {
 			this.auth.backboard === null && persistedConfig.model === undefined
 				? keyOnlyDefaultModel(this.auth.providerKeys[0]?.provider)
 				: null;
+		const subscriptionOnlyDefault =
+			this.auth.backboard === null &&
+			this.auth.providerKeys.length === 0 &&
+			this.auth.chatgptSubscription !== null &&
+			persistedConfig.model === undefined
+				? { provider: "openai-subscription", model: "auto" }
+				: null;
 		this.currentModel = this.flags.model
 			? parseModel(this.flags.model)
-			: (persistedConfig.model ?? keyOnlyDefault ?? this.profile.model);
+			: (persistedConfig.model ??
+				subscriptionOnlyDefault ??
+				keyOnlyDefault ??
+				this.profile.model);
 		this.successfulModelRefs = persistedConfig.successfulModels ?? [];
 		this.currentModelProfile = resolveModelProfile(this.currentModel);
 		this.currentFormat = this.flags.format

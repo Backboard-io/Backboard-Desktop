@@ -50,7 +50,7 @@ class SessionsOpenerParticipant implements ISessionOpenerParticipant {
 			?? sessionsManagementService.getSession(ownerResource)
 			?? sessionsManagementService.getSessionForChatResource(ownerResource)?.session;
 		const sessionView = target ? sessionsPartService.getSessionView(target.sessionId) : undefined;
-		if (!sessionView?.openChatResource(chatResource)) {
+		if (!sessionView?.openChatResource(chatResource, openOptions?.chatResourceContext)) {
 			return false;
 		}
 		if (!openOptions?.editorOptions?.preserveFocus) {

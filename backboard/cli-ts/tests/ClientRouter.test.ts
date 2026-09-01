@@ -80,6 +80,7 @@ async function drain(stream: AsyncIterable<ProviderEvent>): Promise<void> {
 function router(options: {
 	backboardClient?: RecordingClient;
 	byokClient?: RecordingClient;
+	subscriptionClient?: RecordingClient;
 	model?: { provider: string; model: string };
 	keyed?: string[];
 	signedIn?: boolean;
@@ -90,6 +91,11 @@ function router(options: {
 			: {}),
 		...(options.byokClient
 			? { byok: options.byokClient as unknown as AgentClient }
+			: {}),
+		...(options.subscriptionClient
+			? {
+					subscription: options.subscriptionClient as unknown as AgentClient,
+				}
 			: {}),
 		getModel: () =>
 			options.model ?? { provider: "anthropic", model: "claude-opus-5" },
@@ -120,6 +126,18 @@ describe("ClientRouter precedence", () => {
 				keyed: ["anthropic"],
 			}).sourceFor({ provider: "anthropic", model: "claude-opus-5" }),
 		).toBe("byok");
+	});
+
+	it("routes the explicit subscription provider to the subscription client", () => {
+		expect(
+			router({
+				backboardClient: backboard(),
+				subscriptionClient: byok(),
+			}).sourceFor({
+				provider: "openai-subscription",
+				model: "gpt-subscription",
+			}),
+		).toBe("subscription");
 	});
 
 	it("falls back to Backboard when no key covers the vendor", () => {
@@ -226,6 +244,18 @@ describe("ClientRouter request routing", () => {
 
 		expect(key.toolOutputs).toHaveLength(1);
 		expect(bb.toolOutputs).toHaveLength(0);
+	});
+
+	it("routes sub_ threads to the subscription client", async () => {
+		const subscription = byok();
+		await drain(
+			router({ subscriptionClient: subscription }).runToolOutputs({
+				thread_id: "sub_abc",
+				tool_outputs: [{ tool_call_id: "1", output: "ok" }],
+			}),
+		);
+
+		expect(subscription.toolOutputs).toHaveLength(1);
 	});
 });
 

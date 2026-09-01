@@ -25,7 +25,7 @@ import { Disposable } from '../../../base/common/lifecycle.js';
 import { IActionViewItemService } from '../../../platform/actions/browser/actionViewItemService.js';
 import { IInstantiationService } from '../../../platform/instantiation/common/instantiation.js';
 import { IWorkbenchContribution } from '../../../workbench/common/contributions.js';
-import { resolveRemoteAuthority } from '../openInVSCodeUtils.js';
+import { getSessionEditorFolderUri, resolveRemoteAuthority } from '../openInVSCodeUtils.js';
 import { OpenInVSCodeTitleBarWidget } from '../widget/openInVSCodeWidget.js';
 
 export class OpenInVSCodeAction extends Action2 {
@@ -74,8 +74,7 @@ export class OpenInVSCodeAction extends Action2 {
 		}
 
 		const workspace = activeSession.workspace.get();
-		const folder = workspace?.folders[0];
-		const rawFolderUri = workspace?.isVirtualWorkspace ? undefined : folder?.workingDirectory;
+		const rawFolderUri = workspace?.isVirtualWorkspace ? undefined : getSessionEditorFolderUri(activeSession);
 
 		if (!rawFolderUri) {
 			await openerService.open(URI.from({ scheme, query: params.toString() }), { openExternal: true });

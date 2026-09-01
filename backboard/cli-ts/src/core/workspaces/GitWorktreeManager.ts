@@ -476,6 +476,8 @@ export class GitWorktreeManager {
 		repositoryRoot: string;
 		coordinatorCwd: string;
 		worktreePath: string;
+		/** Refuse cleanup if the worktree moved from this exact commit. */
+		expectedHead?: string;
 	}): Promise<boolean> {
 		const target = resolve(input.worktreePath);
 		if (
@@ -490,6 +492,10 @@ export class GitWorktreeManager {
 		if (!(await pathExists(target))) {
 			await this.git(input.repositoryRoot, ["worktree", "prune"]);
 			return true;
+		}
+		if (input.expectedHead) {
+			const head = (await this.git(target, ["rev-parse", "HEAD"])).trim();
+			if (head !== input.expectedHead) return false;
 		}
 		if ((await this.changedFiles(target)).length > 0) return false;
 		await this.git(input.repositoryRoot, ["worktree", "remove", target]);

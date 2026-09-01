@@ -20,6 +20,7 @@ export function splitSseFrames(buffer: string): SseSplitResult {
  */
 export async function* readSseFrames(
 	body: ReadableStream<Uint8Array>,
+	options: { includeTransportActivity?: boolean } = {},
 ): AsyncIterable<string> {
 	const reader = body.getReader();
 	const decoder = new TextDecoder();
@@ -33,7 +34,18 @@ export async function* readSseFrames(
 			buffer += decoder.decode(value, { stream: true });
 			const split = splitSseFrames(buffer);
 			buffer = split.rest;
-			yield* split.frames;
+			if (
+				options.includeTransportActivity &&
+				value.byteLength > 0 &&
+				split.frames.length === 0
+			) {
+				// An empty frame is an opt-in transport heartbeat. Provider parsers
+				// already treat frames without data as non-semantic, while this lets a
+				// caller distinguish a live partial SSE frame from a silent socket.
+				yield "";
+			} else {
+				yield* split.frames;
+			}
 			// Buffered chunks resolve on the microtask queue, so a fast stream can
 			// run this loop end-to-end without ever returning to the macrotask
 			// queue - starving stdin and leaving Ctrl+C/Esc unresponsive until the

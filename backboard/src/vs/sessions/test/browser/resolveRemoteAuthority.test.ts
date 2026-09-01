@@ -7,8 +7,10 @@ import assert from 'assert';
 import { decodeHex } from '../../../base/common/buffer.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../base/test/common/utils.js';
 import { IRemoteAgentHostEntry, IRemoteAgentHostService, getEntryAddress, RemoteAgentHostEntryType } from '../../../platform/agentHost/common/remoteAgentHostService.js';
-import { resolveRemoteAuthority, sshAuthorityString } from '../../browser/openInVSCodeUtils.js';
+import { getSessionEditorFolderUri, resolveRemoteAuthority, sshAuthorityString } from '../../browser/openInVSCodeUtils.js';
 import { ISessionsProvidersService } from '../../services/sessions/browser/sessionsProvidersService.js';
+import { ISession } from '../../services/sessions/common/session.js';
+import { URI } from '../../../base/common/uri.js';
 
 suite('resolveRemoteAuthority', () => {
 
@@ -167,6 +169,25 @@ suite('resolveRemoteAuthority', () => {
 			}]) as IRemoteAgentHostService,
 		);
 		assert.strictEqual(result, undefined);
+	});
+});
+
+suite('getSessionEditorFolderUri', () => {
+
+	ensureNoDisposablesAreLeakedInTestSuite();
+
+	test('opens the canonical project instead of the internal task worktree', () => {
+		const projectRoot = URI.file('/repo');
+		const taskWorktree = URI.file('/repo.backboard-worktrees/task');
+		const session = {
+			workspace: {
+				get: () => ({
+					folders: [{ root: projectRoot, workingDirectory: taskWorktree }],
+				}),
+			},
+		} as unknown as ISession;
+
+		assert.strictEqual(getSessionEditorFolderUri(session)?.toString(), projectRoot.toString());
 	});
 });
 

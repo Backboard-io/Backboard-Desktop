@@ -138,7 +138,9 @@ export class ChatSubagentContentPart extends ChatCollapsibleContentPart implemen
 	private _isDefaultDescription: boolean;
 	private readonly _hoverDisposable = this._register(new MutableDisposable());
 	private openButton: HTMLButtonElement | undefined;
-	private openTaskLabel: HTMLElement | undefined;
+	private openButtonLabel: HTMLElement | undefined;
+	private isOpeningChat: boolean = false;
+	private collapseButtonAriaLabel: string | undefined;
 	private workerMetadataContainer: HTMLElement | undefined;
 
 	// Confirmation auto-expand tracking
@@ -161,9 +163,6 @@ export class ChatSubagentContentPart extends ChatCollapsibleContentPart implemen
 	private workingSpinnerLabel: HTMLElement | undefined;
 	private availableMessages: string[] | undefined;
 
-	// Persistent title elements for shimmer
-	private titleShimmerSpan: HTMLElement | undefined;
-	private titleDetailContainer: HTMLElement | undefined;
 	private readonly _titleDetailRendered = this._register(new MutableDisposable<IRenderedMarkdown>());
 
 	/**
@@ -242,8 +241,8 @@ export class ChatSubagentContentPart extends ChatCollapsibleContentPart implemen
 		const rawPrefix = agentName || localize('chat.subagent.prefix', 'Subagent');
 		const prefix = rawPrefix.charAt(0).toUpperCase() + rawPrefix.slice(1);
 		const initialLead = context.element.isComplete
-			? localize('chat.subagent.ran', 'Ran subagent')
-			: localize('chat.subagent.kickedOff', 'Kicked off subagent');
+			? localize('chat.subagent.statusCompleted', 'Completed')
+			: localize('chat.subagent.statusRunning', 'Running');
 		const initialTitle = `${initialLead} · ${prefix}: ${description}`;
 		super(initialTitle, context, undefined, hoverService, configurationService);
 
@@ -256,22 +255,17 @@ export class ChatSubagentContentPart extends ChatCollapsibleContentPart implemen
 
 		const node = this.domNode;
 		node.classList.add('chat-thinking-box', 'chat-thinking-fixed-mode', 'chat-subagent-part');
-		this.installOpenButton();
-		this.renderWorkerMetadata();
 
 		if (!this.element.isComplete) {
 			node.classList.add('chat-thinking-active');
 		}
+		this.installOpenButton();
+		this.renderWorkerMetadata();
 
-		// Apply shimmer to the initial title when still active
-		if (!this.element.isComplete && this._collapseButton) {
-			const labelElement = this._collapseButton.labelElement;
-			labelElement.textContent = '';
-			this.titleShimmerSpan = $('span.chat-thinking-title-shimmer');
-			this.titleShimmerSpan.textContent = initialTitle;
-			labelElement.appendChild(this.titleShimmerSpan);
-			this.appendVisibleModelLabel(labelElement);
-		}
+		// Replace the base label with the stable worker-row anatomy immediately.
+		// The disclosure owns task/status/details; the adjacent action only opens
+		// the child chat, so the two interactions remain distinct.
+		this.updateTitle();
 
 		// Note: wrapper is created lazily in initContent(), so we can't set its style here
 
@@ -287,6 +281,10 @@ export class ChatSubagentContentPart extends ChatCollapsibleContentPart implemen
 				} else {
 					this._collapseButton.icon = Codicon.check;
 				}
+				// The base collapsible restores its constructor-time label whenever
+				// expansion changes. Re-apply the live worker label so a completed or
+				// late-renamed worker is not announced with stale status/task text.
+				this.updateCollapseButtonAria();
 			}
 		}));
 
@@ -340,44 +338,14 @@ export class ChatSubagentContentPart extends ChatCollapsibleContentPart implemen
 		if (!header) {
 			return;
 		}
-		const label = localize('chat.subagent.open', 'Open');
+		const label = localize('chat.subagent.openChat', 'Open chat');
 		const button = $('button.chat-subagent-open') as HTMLButtonElement;
 		button.setAttribute('type', 'button');
-		// Keep the drill-in affordance compact even in hosts that do not load the
-		// content-part stylesheet. The purpose remains visible: an icon-only
-		// circle did not tell users which worker they were opening.
-		button.style.display = 'inline-flex';
-		button.style.width = 'auto';
-		button.style.minWidth = '0';
-		button.style.maxWidth = '180px';
-		button.style.height = '24px';
-		button.style.minHeight = '24px';
-		button.style.maxHeight = '24px';
-		button.style.flex = '0 1 auto';
-		button.style.alignItems = 'center';
-		button.style.justifyContent = 'center';
-		button.style.boxSizing = 'border-box';
-		button.style.gap = '4px';
-		button.style.padding = '0 7px';
-		button.style.border = '1px solid transparent';
-		button.style.borderRadius = '5px';
-		button.style.whiteSpace = 'nowrap';
 		this.openButton = button;
-		const agentIcon = $('span.chat-subagent-open-icon.codicon.codicon-sparkle', { 'aria-hidden': 'true' });
-		agentIcon.style.display = 'inline-flex';
-		agentIcon.style.width = '11px';
-		agentIcon.style.height = '11px';
-		agentIcon.style.alignItems = 'center';
-		agentIcon.style.justifyContent = 'center';
-		agentIcon.style.fontSize = '11px';
-		const text = $('span.chat-subagent-open-label');
-		text.textContent = label;
-		text.hidden = true;
-		this.openTaskLabel = $('span.chat-subagent-open-task');
-		this.openTaskLabel.hidden = false;
+		this.openButtonLabel = $('span.chat-subagent-open-label');
+		this.openButtonLabel.textContent = label;
 		const arrow = $('span.chat-subagent-open-arrow.codicon.codicon-arrow-right', { 'aria-hidden': 'true' });
-		arrow.hidden = false;
-		button.append(agentIcon, text, this.openTaskLabel, arrow);
+		button.append(this.openButtonLabel, arrow);
 		this.updateOpenButton();
 		header.appendChild(button);
 
@@ -389,28 +357,41 @@ export class ChatSubagentContentPart extends ChatCollapsibleContentPart implemen
 	}
 
 	private async openSubagentChat(): Promise<void> {
-		const toolSpecificData = this.toolInvocation.toolSpecificData?.kind === 'subagent' ? this.toolInvocation.toolSpecificData : undefined;
-		const backendResource = toolSpecificData?.resource ? URI.parse(toolSpecificData.resource) : undefined;
-		const backendChild = backendResource ? parseSubagentSessionUri(backendResource) : undefined;
-		const toolCallId = backendChild?.toolCallId ?? this.subAgentInvocationId;
-		// UI and backend session ids can differ, so keep the UI resource as the
-		// source of truth. Unwind an opened child to its UI root before attaching
-		// the backend-provided tool id; otherwise a subagent launched from a child
-		// follow-up would be nested beneath the currently-open child by mistake.
-		let uiParentResource = this.context.element.sessionResource;
-		let parsedUiParent: ReturnType<typeof parseSubagentSessionUri>;
-		while ((parsedUiParent = parseSubagentSessionUri(uiParentResource))) {
-			uiParentResource = parsedUiParent.parentSession;
+		if (this.isOpeningChat) {
+			return;
 		}
-		const childResource = URI.parse(buildSubagentSessionUri(uiParentResource, toolCallId));
+		this.isOpeningChat = true;
+		this.updateOpenButton();
 
 		try {
+			const toolSpecificData = this.toolInvocation.toolSpecificData?.kind === 'subagent' ? this.toolInvocation.toolSpecificData : undefined;
+			const backendResource = toolSpecificData?.resource ? URI.parse(toolSpecificData.resource) : undefined;
+			const backendChild = backendResource ? parseSubagentSessionUri(backendResource) : undefined;
+			const toolCallId = backendChild?.toolCallId ?? this.subAgentInvocationId;
+			// UI and backend session ids can differ, so keep the UI resource as the
+			// source of truth. Unwind an opened child to its UI root before attaching
+			// the backend-provided tool id; otherwise a subagent launched from a child
+			// follow-up would be nested beneath the currently-open child by mistake.
+			let uiParentResource = this.context.element.sessionResource;
+			let parsedUiParent: ReturnType<typeof parseSubagentSessionUri>;
+			while ((parsedUiParent = parseSubagentSessionUri(uiParentResource))) {
+				uiParentResource = parsedUiParent.parentSession;
+			}
+			const childResource = URI.parse(buildSubagentSessionUri(uiParentResource, toolCallId));
+
 			await this.chatSessionsService.activateChatSessionItemProvider(childResource.scheme);
 			const handled = await this.instantiationService.invokeFunction(accessor => openChatResource(
 				accessor,
 				this.context.element.sessionResource,
 				childResource,
-				{ editorOptions: { preserveFocus: false } },
+				{
+					editorOptions: { preserveFocus: false },
+					chatResourceContext: {
+						title: this.description,
+						agentName: toolSpecificData?.agentName,
+						status: this.getWorkerStatusPresentation().label,
+					},
+				},
 			));
 			if (handled) {
 				return;
@@ -424,18 +405,26 @@ export class ChatSubagentContentPart extends ChatCollapsibleContentPart implemen
 			}
 		} catch (error) {
 			this.notificationService.error(localize('chat.subagent.openFailed', 'Failed to open subagent chat: {0}', toErrorMessage(error)));
+		} finally {
+			this.isOpeningChat = false;
+			this.updateOpenButton();
 		}
 	}
 
 	private updateOpenButton(): void {
-		if (!this.openButton || !this.openTaskLabel) {
+		if (!this.openButton || !this.openButtonLabel) {
 			return;
 		}
-		this.openTaskLabel.textContent = this.description;
-		this.openButton.ariaBusy = String(this.isActive);
-		this.openButton.ariaLabel = this.isActive
-			? localize('chat.subagent.openWorkingAriaLabel', 'Open working subagent: {0}', this.description)
-			: localize('chat.subagent.openFinishedAriaLabel', 'Open finished subagent: {0}', this.description);
+		this.openButton.disabled = this.isOpeningChat;
+		this.openButton.ariaBusy = String(this.isOpeningChat);
+		this.openButtonLabel.textContent = this.isOpeningChat
+			? localize('chat.subagent.openingChat', 'Opening…')
+			: localize('chat.subagent.openChat', 'Open chat');
+		this.openButton.ariaLabel = this.isOpeningChat
+			? localize('chat.subagent.openingAriaLabel', 'Opening subagent chat: {0}', this.description)
+			: this.isActive
+				? localize('chat.subagent.openWorkingAriaLabel', 'Open working subagent chat: {0}', this.description)
+				: localize('chat.subagent.openFinishedAriaLabel', 'Open finished subagent chat: {0}', this.description);
 	}
 
 	private renderWorkerMetadata(): void {
@@ -445,6 +434,7 @@ export class ChatSubagentContentPart extends ChatCollapsibleContentPart implemen
 		if (!data?.workerId) {
 			this.workerMetadataContainer?.remove();
 			this.workerMetadataContainer = undefined;
+			this.refreshVisibleWorkerStatus();
 			return;
 		}
 		const container = this.workerMetadataContainer ?? $('.chat-subagent-worker-metadata');
@@ -498,6 +488,7 @@ export class ChatSubagentContentPart extends ChatCollapsibleContentPart implemen
 			this.workerMetadataContainer = container;
 			this.domNode.insertBefore(container, this.domNode.children[1] ?? null);
 		}
+		this.refreshVisibleWorkerStatus();
 	}
 
 	private getRandomWorkingMessage(): string {
@@ -689,10 +680,8 @@ export class ChatSubagentContentPart extends ChatCollapsibleContentPart implemen
 		this.updateOpenButton();
 		const rawName = this.agentName || localize('chat.subagent.prefix', 'Subagent');
 		const prefix = rawName.charAt(0).toUpperCase() + rawName.slice(1);
-		const lifecycleLead = this.isActive
-			? localize('chat.subagent.kickedOff', 'Kicked off subagent')
-			: localize('chat.subagent.ran', 'Ran subagent');
-		const shimmerText = `${lifecycleLead} · ${prefix}: ${this.description}`;
+		const status = this.getWorkerStatusPresentation();
+		const taskText = `${prefix}: ${this.description}`;
 		const toolCallText = this.currentRunningToolMessage && this.isActive ? ` \u2014 ${this.currentRunningToolMessage}` : ``;
 
 		if (!this._collapseButton) {
@@ -700,64 +689,64 @@ export class ChatSubagentContentPart extends ChatCollapsibleContentPart implemen
 		}
 
 		const labelElement = this._collapseButton.labelElement;
-
-		if (!this.isActive) {
-			labelElement.textContent = '';
-			this.titleShimmerSpan = undefined;
-
-			this._titleDetailRendered.clear();
-			this._titleFileWidgetStore.clear();
-			this.titleDetailContainer = undefined;
-
-			const prefixSpan = $('span.chat-subagent-lifecycle');
-			prefixSpan.textContent = `${lifecycleLead} · ${prefix}:`;
-			labelElement.appendChild(prefixSpan);
-
-			const descSpan = $('span.chat-thinking-title-detail-text');
-			descSpan.textContent = ` ${this.description}`;
-			labelElement.appendChild(descSpan);
-			this.appendVisibleModelLabel(labelElement);
-
-			this._collapseButton.element.ariaLabel = shimmerText;
-			this._collapseButton.element.ariaExpanded = String(this.isExpanded());
-			return;
-		}
-
-		// Ensure the persistent shimmer span exists
-		if (!this.titleShimmerSpan || !this.titleShimmerSpan.parentElement) {
-			labelElement.textContent = '';
-			this.titleShimmerSpan = $('span.chat-thinking-title-shimmer');
-			labelElement.appendChild(this.titleShimmerSpan);
-		}
-		this.titleShimmerSpan.textContent = shimmerText;
-
-		// Dispose previous detail rendering
 		this._titleDetailRendered.clear();
 		this._titleFileWidgetStore.clear();
+		labelElement.textContent = '';
 
-		if (!toolCallText) {
-			if (this.titleDetailContainer) {
-				this.titleDetailContainer.remove();
-				this.titleDetailContainer = undefined;
-			}
-		} else {
+		const statusSpan = $('span.chat-subagent-row-status');
+		statusSpan.classList.add(`chat-subagent-row-status-${status.kind}`);
+		statusSpan.dataset.statusKind = status.kind;
+		statusSpan.textContent = status.label;
+		labelElement.appendChild(statusSpan);
+
+		const taskSpan = this.isActive
+			? $('span.chat-thinking-title-shimmer.chat-subagent-task')
+			: $('span.chat-thinking-title-detail-text.chat-subagent-task');
+		taskSpan.textContent = taskText;
+		labelElement.appendChild(taskSpan);
+
+		if (toolCallText) {
 			const result = this.chatContentMarkdownRenderer.render(new MarkdownString(toolCallText));
 			result.element.classList.add('collapsible-title-content', 'chat-thinking-title-detail');
 			renderFileWidgets(result.element, this.instantiationService, this.chatMarkdownAnchorService, this._titleFileWidgetStore);
 			this._titleDetailRendered.value = result;
-
-			if (this.titleDetailContainer) {
-				this.titleDetailContainer.replaceWith(result.element);
-			} else {
-				labelElement.appendChild(result.element);
-			}
-			this.titleDetailContainer = result.element;
+			labelElement.appendChild(result.element);
 		}
 		this.appendVisibleModelLabel(labelElement);
 
-		const fullLabel = `${shimmerText}${toolCallText}`;
-		this._collapseButton.element.ariaLabel = fullLabel;
+		const fullLabel = `${status.label} · ${taskText}${toolCallText}`;
+		this.collapseButtonAriaLabel = fullLabel;
+		this.updateCollapseButtonAria();
+	}
+
+	private updateCollapseButtonAria(): void {
+		if (!this._collapseButton || !this.collapseButtonAriaLabel) {
+			return;
+		}
+		this._collapseButton.element.ariaLabel = this.collapseButtonAriaLabel;
 		this._collapseButton.element.ariaExpanded = String(this.isExpanded());
+	}
+
+	private getWorkerStatusPresentation(): { label: string; kind: string } {
+		const data = this.toolInvocation.toolSpecificData?.kind === 'subagent'
+			? this.toolInvocation.toolSpecificData
+			: undefined;
+		const reportedStatus = data?.workerStatus;
+		const status = !this.isActive && (!reportedStatus || reportedStatus === 'Running')
+			? 'Completed'
+			: reportedStatus ?? (this.isActive ? 'Running' : 'Completed');
+		return { label: localizedWorkerStatus(status), kind: status.toLowerCase() };
+	}
+
+	private refreshVisibleWorkerStatus(): void {
+		const statusSpan = this._collapseButton?.labelElement.querySelector<HTMLElement>('.chat-subagent-row-status');
+		if (!statusSpan) {
+			return;
+		}
+		const status = this.getWorkerStatusPresentation();
+		if (statusSpan.dataset.statusKind !== status.kind || statusSpan.textContent !== status.label) {
+			this.updateTitle();
+		}
 	}
 
 	private appendVisibleModelLabel(labelElement: HTMLElement): void {

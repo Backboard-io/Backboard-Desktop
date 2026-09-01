@@ -150,9 +150,9 @@ export class ToolRoundProcessor {
 				});
 				round = this.createEarlyRound(ctx, turnId);
 				pending = await this.deps.consumer.consumeWithRetry(
-					() =>
+					(signal) =>
 						this.deps.client.runToolOutputs(buildRequest(), {
-							signal: ctx.signal,
+							signal,
 						}),
 					assistant,
 					ctx.signal,

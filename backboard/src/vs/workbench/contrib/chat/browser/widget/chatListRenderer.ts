@@ -343,39 +343,69 @@ export function syncBackboardSubagentStrip(container: HTMLElement, sourceItems: 
 		container.insertBefore(strip, firstTopLevelNode?.parentElement === container ? firstTopLevelNode : null);
 	}
 
-	for (const item of items) {
-		strip.appendChild(item.node);
-	}
-
 	let overflowButton = Array.from(strip.children).find(node => node.classList.contains('chat-subagent-overflow')) as HTMLButtonElement | undefined;
 	if (!overflowButton) {
 		overflowButton = $('button.chat-subagent-overflow', { type: 'button' }) as HTMLButtonElement;
+		strip.appendChild(overflowButton);
+	} else if (overflowButton.nextElementSibling) {
+		// The overflow disclosure is the stable end anchor for worker rows.
+		strip.appendChild(overflowButton);
 	}
-	strip.appendChild(overflowButton);
+
+	const desiredNodes = items.map(item => item.node);
+	const desiredNodeSet = new Set(desiredNodes);
+	for (const child of Array.from(strip.children)) {
+		if (child !== overflowButton && !desiredNodeSet.has(child as HTMLElement)) {
+			child.remove();
+		}
+	}
+	reconcileBackboardTurnNodeOrder(
+		desiredNodes,
+		() => {
+			const first = strip!.firstElementChild as HTMLElement | null;
+			return first && first !== overflowButton ? first : undefined;
+		},
+		node => {
+			const next = node.nextElementSibling as HTMLElement | null;
+			return next && next !== overflowButton ? next : undefined;
+		},
+		(node, before) => strip!.insertBefore(node, before ?? overflowButton!),
+	);
 
 	const applyOverflowState = () => {
 		const expanded = strip!.dataset.expanded === 'true';
 		const overflowItems = items.slice(backboardVisibleSubagentCount);
 		for (let index = 0; index < items.length; index++) {
-			items[index].node.hidden = !expanded && index >= backboardVisibleSubagentCount;
+			const hidden = !expanded && index >= backboardVisibleSubagentCount;
+			if (items[index].node.hidden !== hidden) {
+				items[index].node.hidden = hidden;
+			}
 		}
-		overflowButton!.hidden = overflowItems.length === 0;
-		overflowButton!.ariaExpanded = String(expanded);
+		const overflowHidden = overflowItems.length === 0;
+		if (overflowButton!.hidden !== overflowHidden) {
+			overflowButton!.hidden = overflowHidden;
+		}
+		const ariaExpanded = String(expanded);
+		if (overflowButton!.ariaExpanded !== ariaExpanded) {
+			overflowButton!.ariaExpanded = ariaExpanded;
+		}
+		let label: string;
 		if (expanded) {
-			overflowButton!.textContent = localize('chat.subagent.showFewer', "Show fewer subagents");
-			return;
-		}
-		const activeOverflow = overflowItems.filter(item => item.active).length;
-		if (activeOverflow === 0) {
-			overflowButton!.textContent = overflowItems.length === 1
-				? localize('chat.subagent.oneOtherFinished', "and 1 other subagent finished")
-				: localize('chat.subagent.manyOtherFinished', "and {0} other subagents finished", overflowItems.length);
-		} else if (activeOverflow === overflowItems.length) {
-			overflowButton!.textContent = overflowItems.length === 1
-				? localize('chat.subagent.oneOtherWorking', "and 1 other subagent working")
-				: localize('chat.subagent.manyOtherWorking', "and {0} other subagents working", overflowItems.length);
+			label = localize('chat.subagent.showFewer', "Show fewer subagents");
 		} else {
-			overflowButton!.textContent = localize('chat.subagent.manyOtherMixed', "and {0} other subagents", overflowItems.length);
+			const activeOverflow = overflowItems.filter(item => item.active).length;
+			label = activeOverflow === 0
+				? overflowItems.length === 1
+					? localize('chat.subagent.oneOtherFinished', "and 1 other subagent finished")
+					: localize('chat.subagent.manyOtherFinished', "and {0} other subagents finished", overflowItems.length)
+				: activeOverflow === overflowItems.length
+					? overflowItems.length === 1
+						? localize('chat.subagent.oneOtherWorking', "and 1 other subagent working")
+						: localize('chat.subagent.manyOtherWorking', "and {0} other subagents working", overflowItems.length)
+					: localize('chat.subagent.manyOtherMixed', "and {0} other subagents", overflowItems.length);
+		}
+		if (overflowButton!.textContent !== label) {
+			overflowButton!.textContent = label;
 		}
 	};
 

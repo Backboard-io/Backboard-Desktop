@@ -6233,15 +6233,19 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	line-height: 1.5;
 }
 
-/* T3's subagent CTA is the one work item that keeps a quiet card surface. The
- * native Backboard disclosure remains functional, and its agent + model stay
- * visible without requiring a hover. */
+/* Subagents use one quiet worker card. The wide native control is the inline
+ * disclosure; the small adjacent control is navigation to the child chat. */
 .monaco-workbench .backboard-clean-chat .chat-subagent-part {
 	margin: 4px -4px 8px;
+	overflow: hidden;
+	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 11%, transparent);
+	border-radius: var(--vscode-cornerRadius-large);
+	background: color-mix(in srgb, var(--vscode-foreground) 3%, transparent);
 }
 
 .monaco-workbench .backboard-clean-chat .chat-subagent-part > .chat-used-context-label {
 	gap: 6px;
+	padding: 3px 4px 3px 8px;
 }
 
 .monaco-workbench .backboard-clean-chat .chat-subagent-part > .chat-used-context-label .monaco-button.monaco-icon-button {
@@ -6250,48 +6254,44 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	width: auto;
 	min-width: 0;
 	flex: 1;
-	min-height: 34px;
+	min-height: 32px;
 	align-items: center;
 	gap: 7px;
-	padding: 6px 10px;
-	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 13%, transparent);
-	border-radius: 8px;
-	background: color-mix(in srgb, var(--vscode-foreground) 4%, var(--vscode-editor-background));
-	box-shadow: 0 2px 8px color-mix(in srgb, #000 12%, transparent);
+	padding: 4px 2px;
+	border: 0;
+	border-radius: var(--vscode-cornerRadius-medium);
+	background: transparent;
+	box-shadow: none;
 	color: var(--vscode-foreground);
-	font-size: 13px;
+	font-size: var(--vscode-bodyFontSize);
 	line-height: 20px;
 	transition: background-color 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
 }
 
 .monaco-workbench .backboard-clean-chat .chat-subagent-part > .chat-used-context-label > .chat-subagent-open {
-	min-height: 34px;
-	padding: 6px 10px;
-	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 13%, transparent);
-	border-radius: 8px;
-	background: color-mix(in srgb, var(--vscode-textLink-foreground) 10%, var(--vscode-editor-background));
-	box-shadow: 0 2px 8px color-mix(in srgb, #000 10%, transparent);
-	color: var(--vscode-textLink-foreground);
-	font-size: 12px;
-	font-weight: 500;
-	line-height: 20px;
+	height: 28px;
+	min-height: 28px;
+	max-height: 28px;
+	padding: 0 8px;
+	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 12%, transparent);
+	border-radius: var(--vscode-cornerRadius-small);
+	background: transparent;
+	box-shadow: none;
+	color: var(--vscode-descriptionForeground);
+	font-size: var(--vscode-bodyFontSize-xSmall);
+	font-weight: var(--vscode-agents-fontWeight-medium, 500);
+	line-height: 18px;
 }
 
 .monaco-workbench .backboard-clean-chat .chat-subagent-part > .chat-used-context-label > .chat-subagent-open:hover {
-	border-color: color-mix(in srgb, var(--vscode-textLink-foreground) 32%, transparent);
-	background: color-mix(in srgb, var(--vscode-textLink-foreground) 15%, var(--vscode-editor-background));
-}
-
-@media (max-width: 520px) {
-	.monaco-workbench .backboard-clean-chat .chat-subagent-part > .chat-used-context-label > .chat-subagent-open .chat-subagent-open-label {
-		display: none;
-	}
+	border-color: color-mix(in srgb, var(--vscode-foreground) 22%, transparent);
+	background: color-mix(in srgb, var(--vscode-foreground) 6%, transparent);
+	color: var(--vscode-foreground);
 }
 
 .monaco-workbench .backboard-clean-chat .chat-subagent-part > .chat-used-context-label .monaco-button.monaco-icon-button:hover {
-	border-color: color-mix(in srgb, var(--vscode-foreground) 20%, transparent);
-	background: color-mix(in srgb, var(--vscode-foreground) 7%, var(--vscode-editor-background));
-	box-shadow: 0 3px 10px color-mix(in srgb, #000 15%, transparent);
+	background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
+	box-shadow: none;
 }
 
 .monaco-workbench .backboard-clean-chat .chat-subagent-part > .chat-used-context-label .monaco-button.monaco-icon-button > .codicon:first-child:not(.chat-collapsible-hover-chevron) {
@@ -8821,121 +8821,246 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	visibility: visible;
 }
 
-/* Parallel subagents use the same compact button strip as the native Codex
- * transcript. The task name is the primary target and opens the full child
- * chat; a bounded overflow disclosure prevents a large fan-out from widening
- * or flooding the turn while keeping every agent one click away. */
+/* Parallel subagents use the same card anatomy as terminal invocations: one
+ * compact header, one border and a divided detail body. The disclosure owns
+ * status/task/details; the flat trailing action opens the full child chat. */
 .monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip {
 	display: flex;
 	min-width: 0;
-	align-items: center;
-	flex-wrap: wrap;
+	align-items: stretch;
+	flex-direction: column;
 	gap: 8px;
-	margin: 0 0 10px;
+	margin: 14px 0 10px;
 }
 
 .monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip > .chat-subagent-part {
+	--bb-cursor-terminal-surface: var(--vscode-panel-background, var(--vscode-editor-background));
 	display: block;
 	box-sizing: border-box;
-	width: auto !important;
-	max-width: min(292px, 100%);
+	width: 100% !important;
+	max-width: 100%;
 	margin: 0 !important;
 	padding: 0 !important;
+	overflow: hidden;
+	border: 1px solid var(--bb-cursor-diff-border);
+	border-radius: 8px;
+	background: var(--bb-cursor-terminal-surface);
+	text-align: left;
+}
+
+.monaco-workbench .chat-editor-relative .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip > .chat-subagent-part {
+	--bb-cursor-terminal-surface: var(--vscode-editor-background);
 }
 
 .monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip > .chat-subagent-part:not(.chat-used-context-collapsed) {
 	width: 100% !important;
 	max-width: 100%;
-	flex-basis: 100%;
 }
 
 .monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip > .chat-subagent-part > .chat-used-context-label {
 	display: flex !important;
+	box-sizing: border-box;
+	width: 100%;
+	height: 29px;
 	min-width: 0;
+	min-height: 29px;
+	align-items: center;
 	gap: 0;
+	padding: 0;
+	background: var(--bb-cursor-terminal-surface);
 }
 
 .monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip > .chat-subagent-part > .chat-used-context-label > .monaco-button {
+	display: flex !important;
+	box-sizing: border-box;
+	width: auto !important;
+	height: 29px;
+	min-width: 0;
+	min-height: 29px;
+	margin: 0;
+	padding: 0 0 0 11px;
+	flex: 1 1 auto;
+	align-items: center;
+	gap: 0;
+	overflow: hidden;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+	color: var(--vscode-foreground);
+	font-size: 13px;
+	font-weight: 400;
+	line-height: 14px;
+	text-align: start;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip > .chat-subagent-part > .chat-used-context-label > .monaco-button:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+}
+
+.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip > .chat-subagent-part > .chat-used-context-label > .monaco-button:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: 0;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip > .chat-subagent-part > .chat-used-context-label > .monaco-button > .codicon:first-child:not(.chat-collapsible-hover-chevron) {
 	display: none !important;
+	width: 0;
+	margin: 0;
+	padding: 0;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip > .chat-subagent-part > .chat-used-context-label > .monaco-button :is(.monaco-button-mdlabel, .monaco-button-label) {
+	display: flex;
+	min-width: 0;
+	flex: 1 1 auto;
+	align-items: baseline;
+	gap: 6px;
+	overflow: hidden;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip .chat-subagent-row-status {
+	flex: 0 0 auto;
+	color: var(--bb-cursor-transcript-muted);
+	font-size: 12px;
+	line-height: 20px;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip .chat-subagent-task {
+	min-width: 0;
+	flex: 0 1 auto;
+	overflow: hidden;
+	color: var(--vscode-foreground);
+	font-weight: 400;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip .chat-thinking-title-detail {
+	min-width: 0;
+	flex: 1 1 auto;
+	overflow: hidden;
+	color: var(--vscode-descriptionForeground);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip .chat-subagent-model {
+	margin-left: auto;
+	flex: 0 0 auto;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip .chat-collapsible-hover-chevron {
+	display: inline-flex;
+	width: 14px;
+	height: 20px;
+	margin: 0 8px 0 auto;
+	flex: 0 0 14px;
+	align-items: center;
+	justify-content: center;
+	font-size: 12px;
+	opacity: 0.58;
 }
 
 .monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip > .chat-subagent-part > .chat-used-context-label > .chat-subagent-open {
 	display: inline-flex;
 	box-sizing: border-box;
-	width: 100%;
+	width: auto;
 	min-width: 0;
-	max-width: none;
-	min-height: 36px;
-	justify-content: flex-start;
-	gap: 8px;
-	padding: 6px 10px;
-	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 11%, transparent);
-	border-radius: var(--vscode-cornerRadius-circle);
-	background: color-mix(in srgb, var(--vscode-foreground) 3%, transparent);
+	height: 29px;
+	min-height: 29px;
+	max-height: 29px;
+	flex: 0 0 auto;
+	align-items: center;
+	justify-content: center;
+	gap: 4px;
+	padding: 0 10px;
+	border: 0;
+	border-left: 1px solid var(--bb-cursor-diff-border);
+	border-radius: 0;
+	background: transparent;
 	box-shadow: none;
-	color: var(--vscode-foreground);
-	font-size: var(--vscode-bodyFontSize);
-	font-weight: var(--vscode-agents-fontWeight-regular);
+	color: var(--bb-cursor-transcript-muted);
+	font-size: 12px;
+	font-weight: 400;
 	line-height: 20px;
-	transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease;
+	transition: background-color 140ms ease, color 140ms ease;
 }
 
 .monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip > .chat-subagent-part > .chat-used-context-label > .chat-subagent-open:hover {
-	border-color: color-mix(in srgb, var(--vscode-foreground) 20%, transparent);
-	background: color-mix(in srgb, var(--vscode-foreground) 6%, transparent);
+	background: var(--vscode-toolbar-hoverBackground);
+	color: var(--vscode-foreground);
 }
 
 .monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip > .chat-subagent-part > .chat-used-context-label > .chat-subagent-open:focus-visible {
 	outline: 1px solid var(--vscode-focusBorder);
-	outline-offset: 2px;
+	outline-offset: -1px;
 }
 
 .monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip .chat-subagent-open-label {
-	display: none;
-}
-
-.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip .chat-subagent-open-icon {
-	display: inline-flex;
-	width: 16px;
-	flex: 0 0 16px;
-	align-items: center;
-	justify-content: center;
-	color: var(--vscode-textLink-foreground);
-	font-size: 15px;
-}
-
-.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip .chat-subagent-open-task {
-	display: block;
-	min-width: 0;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
+	display: inline;
 }
 
 .monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip .chat-subagent-open-arrow {
-	margin-left: auto;
+	margin-left: 1px;
 	flex: 0 0 auto;
-	color: var(--vscode-descriptionForeground);
-	font-size: var(--vscode-bodyFontSize-small);
-	opacity: 0.7;
+	color: inherit;
+	font-size: 10px;
+	opacity: 0.72;
 }
 
-.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip > .chat-subagent-part.chat-thinking-active .chat-subagent-open-icon {
-	opacity: 0.68;
-	animation: backboard-cursor-working-pulse 1.6s ease-in-out infinite;
+.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip > .chat-subagent-part > .chat-subagent-worker-metadata {
+	box-sizing: border-box;
+	width: 100%;
+	margin: 0;
+	padding: 6px 11px 0;
+	border-top: 1px solid var(--bb-cursor-diff-border);
+	background: var(--bb-cursor-terminal-surface);
+}
+
+.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip > .chat-subagent-part.chat-used-context-collapsed > .chat-subagent-worker-metadata {
+	display: none;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip > .chat-subagent-part > :is(.chat-used-context-list, .monaco-scrollable-element) {
+	box-sizing: border-box;
+	width: 100%;
+	margin: 0 !important;
+	padding: 0;
+	border: 0;
+	border-top: 1px solid var(--bb-cursor-diff-border);
+	border-radius: 0;
+	background: var(--bb-cursor-terminal-surface);
+}
+
+.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip > .chat-subagent-part:has(> .chat-subagent-worker-metadata) > :is(.chat-used-context-list, .monaco-scrollable-element) {
+	border-top: 0;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip > .chat-subagent-part > .chat-used-context-list,
+.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip > .chat-subagent-part > .monaco-scrollable-element .chat-used-context-list {
+	box-sizing: border-box;
+	width: 100%;
+	margin: 0 !important;
+	padding: 6px 11px 8px !important;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
 }
 
 .monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip > .chat-subagent-overflow {
-	min-height: 36px;
-	padding: 6px 2px;
+	width: fit-content;
+	min-height: 28px;
+	padding: 4px 8px;
 	border: 0;
 	border-radius: var(--vscode-cornerRadius-medium);
 	background: transparent;
 	color: var(--vscode-descriptionForeground);
 	cursor: pointer;
 	font: inherit;
-	font-size: var(--vscode-bodyFontSize);
+	font-size: var(--vscode-bodyFontSize-small);
 	line-height: 20px;
+	text-align: start;
 }
 
 .monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip > .chat-subagent-overflow:hover {
@@ -8947,17 +9072,24 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	outline-offset: 1px;
 }
 
+.monaco-workbench:is(.hc-black, .hc-light) .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip > .chat-subagent-part,
 .monaco-workbench:is(.hc-black, .hc-light) .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip > .chat-subagent-part > .chat-used-context-label > .chat-subagent-open {
 	border-color: var(--vscode-contrastBorder);
 }
 
 @media (max-width: 520px) {
-	.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip {
-		gap: 6px;
+	.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip .chat-subagent-model,
+	.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip .chat-thinking-title-detail {
+		display: none;
 	}
 
-	.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip > .chat-subagent-part {
-		max-width: 100%;
+	.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip .chat-subagent-open-label {
+		display: none;
+	}
+
+	.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip > .chat-subagent-part > .chat-used-context-label > .chat-subagent-open {
+		width: 30px;
+		padding: 0;
 	}
 }
 
@@ -8975,11 +9107,10 @@ have to be updated for changes to the rules above, or to support more deeply nes
 }
 
 @media (prefers-reduced-motion: reduce) {
-	.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-group-chevron,
-	.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-t3-turn-fold-chevron,
-	.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-cursor-working-indicator,
-	.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip .chat-subagent-open-icon,
-	.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .shimmer-progress .rendered-markdown.progress-step > p,
+		.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-group-chevron,
+		.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-t3-turn-fold-chevron,
+		.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-cursor-working-indicator,
+		.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .shimmer-progress .rendered-markdown.progress-step > p,
 	.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-progress-partial-shimmer .chat-progress-shimmer-text,
 	.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-work-row-status-working {
 		transition: none !important;

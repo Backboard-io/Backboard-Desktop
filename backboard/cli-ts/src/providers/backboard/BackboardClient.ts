@@ -372,7 +372,9 @@ export class BackboardClient implements AgentClient {
 			}
 
 			const mapper = new BackboardStreamEventMapper();
-			for await (const frame of readSseFrames(res.body)) {
+			for await (const frame of readSseFrames(res.body, {
+				includeTransportActivity: true,
+			})) {
 				let payload: unknown;
 				try {
 					payload = parseSseFrame(frame);
@@ -387,8 +389,9 @@ export class BackboardClient implements AgentClient {
 					yield failure;
 					return;
 				}
-				if (payload == null) continue;
-				for (const event of mapper.map(payload)) {
+				const mapped = payload == null ? [] : mapper.map(payload);
+				if (mapped.length === 0) mapped.push({ kind: "activity" });
+				for (const event of mapped) {
 					events++;
 					lastEvent = event;
 					yield event;

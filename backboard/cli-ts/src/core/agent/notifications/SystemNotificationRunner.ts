@@ -137,14 +137,14 @@ export class SystemNotificationRunner {
 				// and finalize reuses the results, same as the main turn.
 				const early = this.deps.processor.createEarlyRound(ctx, turnId);
 				const pending = await this.deps.consumer.consumeWithRetry(
-					() =>
+					(signal) =>
 						this.deps.client.runMessage(
 							buildRunMessageRequest(
 								content,
 								requestContext,
 								notification.thinking,
 							),
-							{ signal: ctx.signal },
+							{ signal },
 						),
 					assistant,
 					ctx.signal,

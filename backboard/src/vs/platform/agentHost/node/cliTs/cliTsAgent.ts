@@ -413,12 +413,12 @@ export class CliTsAgent extends Disposable implements IAgent {
 		if (forkedTurns) {
 			this._writeStore();
 		}
-		// Eagerly boot the serve process and warm its backend connection now,
-		// while the composer is open and before the user's first message, so the
-		// process spawn and initial model-catalog request happen during think-time
-		// instead of on the critical path to first token. Best-effort and
-		// idempotent; sendMessage still ensures the process if this was skipped.
-		if (session.workingDirectory && (session.materialized || config.config?.[SessionConfigKey.Isolation] === 'folder')) {
+		// Only durable sessions own a serve process. Composer configuration creates
+		// short-lived provisional sessions as views are attached and detached; a
+		// process for each one turns navigation into a burst of abandoned CLI
+		// processes and model-catalog requests. The first send materializes the
+		// chosen provisional and still ensures its process on the normal path.
+		if (session.workingDirectory && session.materialized) {
 			void this._prewarm(session);
 		}
 		const initialWorkingDirectory = session.materialized
@@ -1805,8 +1805,11 @@ export class CliTsAgent extends Disposable implements IAgent {
 				if (!turn.toolInputs.has(event.toolCallId)) {
 					turn.toolInputs.set(event.toolCallId, { name: event.name, input: undefined });
 				}
+				// Write-capable Agent calls cannot start until the provider finalizes the
+				// whole tool batch. Do not render an actionable/running worker row from
+				// the speculative streamed name; tool:start is the authoritative launch.
 				if (isCliTsSubagentTool(event.name)) {
-					this._ensureSubagentTurn(session, turn, event.toolCallId, subagentPrompt(turn, event.toolCallId, event.inputSummary));
+					return;
 				}
 				this._ensureToolCallStart(session, turn, event.toolCallId, event.name, event.inputSummary, parentToolCallId);
 				return;

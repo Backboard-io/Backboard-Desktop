@@ -6,6 +6,9 @@ import { BackboardClient } from "./backboard/BackboardClient.ts";
 import { ByokClient } from "./byok/ByokClient.ts";
 import { ByokConversationStore } from "./byok/ByokConversationStore.ts";
 import { ClientRouter } from "./ClientRouter.ts";
+import { CodexSubscriptionClient } from "./subscription/CodexSubscriptionClient.ts";
+import { SubscriptionConversationStore } from "./subscription/SubscriptionConversationStore.ts";
+import { SubscriptionMemoryStore } from "./subscription/SubscriptionMemoryStore.ts";
 
 /**
  * Builds the model backend for a run from whatever credentials exist.
@@ -30,10 +33,20 @@ export function createAgentClient(
 		serverLog,
 		new ByokConversationStore(conversationBaseDir),
 	);
+	const subscription = config.auth.chatgptSubscription
+		? new CodexSubscriptionClient({
+				authFile: config.auth.chatgptSubscription.authFile,
+				conversationStore: new SubscriptionConversationStore(
+					conversationBaseDir,
+				),
+				memoryStore: new SubscriptionMemoryStore(conversationBaseDir),
+			})
+		: undefined;
 
 	return new ClientRouter({
 		backboard,
 		byok,
+		...(subscription ? { subscription } : {}),
 		getModel: () => config.model,
 		hasBackboardAuth: () => config.hasBackboardAuth,
 		hasKeyFor: (provider) =>

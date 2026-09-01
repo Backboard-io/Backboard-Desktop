@@ -182,6 +182,17 @@ describe("thinking config", () => {
 				model,
 				metadata: metadata(["effort"]),
 				dynamicEvidence: {
+					phase: "initial",
+					requestKind: "subagent",
+				},
+			}),
+		).toEqual({ effort: "low" });
+		expect(
+			resolveThinking({
+				intent: { kind: "dynamic" },
+				model,
+				metadata: metadata(["effort"]),
+				dynamicEvidence: {
 					phase: "tool_outputs",
 					requestKind: "user",
 					toolRound: {
@@ -197,6 +208,27 @@ describe("thinking config", () => {
 				},
 			}),
 		).toEqual({ effort: "medium" });
+		expect(
+			resolveThinking({
+				intent: { kind: "dynamic" },
+				model,
+				metadata: metadata(["effort"]),
+				dynamicEvidence: {
+					phase: "tool_outputs",
+					requestKind: "subagent",
+					toolRound: {
+						index: 1,
+						readOnlyOnly: false,
+						hadWriteOrExecute: true,
+						hadToolError: false,
+						hadNonZeroExit: false,
+						hadTimeout: false,
+						consecutiveFailureCount: 0,
+						maxUsed: false,
+					},
+				},
+			}),
+		).toEqual({ effort: "low" });
 		expect(
 			resolveThinking({
 				intent: { kind: "dynamic" },

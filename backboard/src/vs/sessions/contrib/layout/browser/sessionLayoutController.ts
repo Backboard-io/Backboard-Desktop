@@ -62,6 +62,7 @@ export class LayoutController extends Disposable {
 	private readonly _workingSetSequencer = new Sequencer();
 	private readonly _useModalConfigObs;
 	private readonly _isOptimusWindow: boolean;
+	private readonly _isSimpleWindow: boolean;
 	constructor(
 
 		@IAgentWorkbenchLayoutService private readonly _layoutService: IAgentWorkbenchLayoutService,
@@ -81,6 +82,7 @@ export class LayoutController extends Disposable {
 		super();
 
 		this._isOptimusWindow = environmentService.isOptimusWindow;
+		this._isSimpleWindow = environmentService.isSessionsWindow && !environmentService.isJarvisWindow && !environmentService.isOptimusWindow;
 
 		this._loadState();
 
@@ -92,6 +94,17 @@ export class LayoutController extends Disposable {
 			const activeSession = this._sessionsService.activeSession.read(reader);
 			return activeSession?.resource;
 		});
+
+		// Simple mode has one work surface: the session view plus its auxiliary
+		// right panel. A persisted editor working set must never bring the shared
+		// main editor area back while the user moves between chats.
+		if (this._isSimpleWindow) {
+			this._register(autorun(reader => {
+				const activeSession = this._sessionsService.activeSession.read(reader);
+				activeSession?.activeChat.read(reader);
+				this._layoutService.setPartHidden(true, Parts.EDITOR_PART);
+			}));
+		}
 
 		const activeSessionHasWorkspaceObs = derived<boolean>(reader => {
 			const activeSession = this._sessionsService.activeSession.read(reader);
@@ -226,35 +239,37 @@ export class LayoutController extends Disposable {
 			return activeSession;
 		});
 
-		this._register(autorun(reader => {
-			const useModalConfig = this._useModalConfigObs.read(reader);
-			if (useModalConfig === 'all') {
-				return;
-			}
-
-			// Session changed (save, apply)
-			reader.store.add(runOnChange(activeSessionForWorkingSet, (session, previousSession) => {
-				// Save working set for previous session (skip for untitled sessions)
-				if (previousSession && previousSession.status.read(undefined) !== SessionStatus.Untitled) {
-					this._saveWorkingSet(previousSession.resource);
+		if (!this._isSimpleWindow) {
+			this._register(autorun(reader => {
+				const useModalConfig = this._useModalConfigObs.read(reader);
+				if (useModalConfig === 'all') {
+					return;
 				}
 
-				// Apply working set for current session.
-				// On initial load (no previous session), only apply if we have a saved working set —
-				// skip applying 'empty' to avoid closing editors that are being restored.
-				if (previousSession || (session && this._workingSets.has(session.resource))) {
-					void this._applyWorkingSet(session?.resource);
-				}
+				// Session changed (save, apply)
+				reader.store.add(runOnChange(activeSessionForWorkingSet, (session, previousSession) => {
+					// Save working set for previous session (skip for untitled sessions)
+					if (previousSession && previousSession.status.read(undefined) !== SessionStatus.Untitled) {
+						this._saveWorkingSet(previousSession.resource);
+					}
+
+					// Apply working set for current session.
+					// On initial load (no previous session), only apply if we have a saved working set —
+					// skip applying 'empty' to avoid closing editors that are being restored.
+					if (previousSession || (session && this._workingSets.has(session.resource))) {
+						void this._applyWorkingSet(session?.resource);
+					}
+				}));
+
+				// Session state changed (archive, delete)
+				reader.store.add(this._sessionManagementService.onDidChangeSessions(e => {
+					const archivedSessions = e.changed.filter(session => session.isArchived.read(undefined));
+					for (const session of [...e.removed, ...archivedSessions]) {
+						this._deleteWorkingSet(session.resource);
+					}
+				}));
 			}));
-
-			// Session state changed (archive, delete)
-			reader.store.add(this._sessionManagementService.onDidChangeSessions(e => {
-				const archivedSessions = e.changed.filter(session => session.isArchived.read(undefined));
-				for (const session of [...e.removed, ...archivedSessions]) {
-					this._deleteWorkingSet(session.resource);
-				}
-			}));
-		}));
+		}
 	}
 
 	// --- Auxiliary bar ---
@@ -345,7 +360,7 @@ export class LayoutController extends Disposable {
 			try {
 				for (const entry of JSON.parse(raw) as ISessionLayoutEntry[]) {
 					const resource = URI.parse(entry.sessionResource);
-					if (entry.editorWorkingSet) {
+					if (!this._isSimpleWindow && entry.editorWorkingSet) {
 						this._workingSets.set(resource, entry.editorWorkingSet);
 					}
 					if (entry.viewState) {
@@ -366,7 +381,7 @@ export class LayoutController extends Disposable {
 				type LegacyEntry = { sessionResource: string; editorWorkingSet?: IEditorWorkingSet; auxiliaryBarState?: { visible: boolean; activeViewContainerId: string | undefined } };
 				for (const entry of JSON.parse(legacyRaw) as LegacyEntry[]) {
 					const resource = URI.parse(entry.sessionResource);
-					if (entry.editorWorkingSet) {
+					if (!this._isSimpleWindow && entry.editorWorkingSet) {
 						this._workingSets.set(resource, entry.editorWorkingSet);
 					}
 					if (entry.auxiliaryBarState) {
@@ -394,7 +409,7 @@ export class LayoutController extends Disposable {
 		}
 
 		// Capture working set for the active session (skip untitled)
-		if (activeSession && activeSession.status.read(undefined) !== SessionStatus.Untitled) {
+		if (!this._isSimpleWindow && activeSession && activeSession.status.read(undefined) !== SessionStatus.Untitled) {
 			this._saveWorkingSet(activeSession.resource);
 		}
 
@@ -412,7 +427,7 @@ export class LayoutController extends Disposable {
 		allResources.forEach((_, resource) => {
 			entries.push({
 				sessionResource: resource.toString(),
-				editorWorkingSet: this._workingSets.get(resource),
+				editorWorkingSet: this._isSimpleWindow ? undefined : this._workingSets.get(resource),
 				viewState: this._viewStateBySession.get(resource),
 			});
 		});
@@ -435,6 +450,10 @@ export class LayoutController extends Disposable {
 	// --- Editor working sets ---
 
 	private async _applyWorkingSet(sessionResource: URI | undefined): Promise<void> {
+		if (this._isSimpleWindow) {
+			return;
+		}
+
 		const preserveFocus = this._layoutService.hasFocus(Parts.PANEL_PART);
 		const workingSet: IEditorWorkingSet | 'empty' = sessionResource
 			? (this._workingSets.get(sessionResource) ?? 'empty')
@@ -480,6 +499,10 @@ export class LayoutController extends Disposable {
 	}
 
 	private _saveWorkingSet(sessionResource: URI): void {
+		if (this._isSimpleWindow) {
+			return;
+		}
+
 		this._deleteWorkingSet(sessionResource);
 
 		if (this._editorService.visibleEditors.length > 0) {

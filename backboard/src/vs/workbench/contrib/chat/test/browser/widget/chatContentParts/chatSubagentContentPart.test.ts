@@ -49,9 +49,10 @@ suite('ChatSubagentContentPart', () => {
 	let announcedToolProgressKeys: Set<string>;
 	let openedSession: URI | undefined;
 	let activatedSessionType: string | undefined;
+	let activationFailure: Error | undefined;
 	let openSessionRevealIfOpened: boolean | undefined;
 	let notificationErrors: string[];
-	let participantOpened: { parent: URI; child: URI } | undefined;
+	let participantOpened: { parent: URI; child: URI; context?: { title: string; agentName?: string; status?: string } } | undefined;
 
 	function createMockRenderContext(isComplete: boolean = false, sessionResource: URI = URI.parse('chat-session://test/session1')): IChatContentPartRenderContext {
 		const mockElement: Partial<IChatResponseViewModel> = {
@@ -246,12 +247,16 @@ suite('ChatSubagentContentPart', () => {
 		announcedToolProgressKeys = new Set();
 		openedSession = undefined;
 		activatedSessionType = undefined;
+		activationFailure = undefined;
 		openSessionRevealIfOpened = undefined;
 		notificationErrors = [];
 		participantOpened = undefined;
 		instantiationService.stub(IChatSessionsService, {
 			_serviceBrand: undefined,
 			activateChatSessionItemProvider: async (sessionType: string) => {
+				if (activationFailure) {
+					throw activationFailure;
+				}
 				activatedSessionType = sessionType;
 			},
 		} as IChatSessionsService);
@@ -359,29 +364,58 @@ suite('ChatSubagentContentPart', () => {
 			});
 			const context = createMockRenderContext(false);
 			const part = createPart(toolInvocation, context);
-			const openButton = part.domNode.querySelector('.chat-subagent-open');
+			const openButton = part.domNode.querySelector<HTMLButtonElement>('.chat-subagent-open');
 
 			assert.ok(isHTMLElement(openButton), 'Subagent row should expose an open button');
-			assert.strictEqual(openButton.querySelector('.chat-subagent-open-task')?.textContent, 'Render leak audit');
-			assert.strictEqual(openButton.getAttribute('aria-busy'), 'true');
+			assert.strictEqual(openButton.querySelector('.chat-subagent-open-label')?.textContent, 'Open chat');
+			assert.ok(getCollapseButtonLabel(getCollapseButton(part)!)?.textContent?.includes('Render leak audit'));
+			assert.strictEqual(openButton.getAttribute('aria-busy'), 'false');
 			assert.strictEqual(openButton.hasAttribute('title'), false, 'Long tasks must not create an obstructive native tooltip');
 			openButton.click();
+			assert.strictEqual(openButton.getAttribute('aria-busy'), 'true', 'Navigation should expose its own pending state');
+			assert.strictEqual(openButton.disabled, true, 'Repeated navigation should be disabled while opening');
+			assert.strictEqual(openButton.querySelector('.chat-subagent-open-label')?.textContent, 'Opening…');
 			await timeout(0);
 			assert.strictEqual(activatedSessionType, 'chat-session');
 			assert.strictEqual(openedSession?.toString(), 'chat-session://test/session1/subagent/backend-agent-call-1');
 			assert.strictEqual(openSessionRevealIfOpened, true);
 			assert.deepStrictEqual(notificationErrors, []);
+			assert.strictEqual(openButton.disabled, false);
 
 			part.markAsInactive();
 			assert.strictEqual(openButton.getAttribute('aria-busy'), 'false');
 			assert.ok(openButton.getAttribute('aria-label')?.includes('finished'));
 		});
 
+		test('recovers the open action when child-chat navigation fails', async () => {
+			activationFailure = new Error('provider activation failed');
+			const part = createPart(createMockToolInvocation({
+				toolSpecificData: {
+					kind: 'subagent',
+					resource: 'chat-session://test/session1/subagent/failing-worker',
+					description: 'Failing navigation worker',
+					agentName: 'worker',
+					prompt: 'Inspect the resource',
+				},
+			}), createMockRenderContext(false));
+			const openButton = part.domNode.querySelector<HTMLButtonElement>('.chat-subagent-open');
+
+			assert.ok(isHTMLElement(openButton));
+			openButton.click();
+			await timeout(0);
+
+			assert.strictEqual(notificationErrors.length, 1, 'Navigation failures should be surfaced to the user');
+			assert.ok(notificationErrors[0].startsWith('Failed to open subagent chat:'));
+			assert.strictEqual(openButton.disabled, false, 'The open action must not remain stuck after navigation fails');
+			assert.strictEqual(openButton.getAttribute('aria-busy'), 'false');
+			assert.strictEqual(openButton.querySelector('.chat-subagent-open-label')?.textContent, 'Open chat');
+		});
+
 		test('lets the Sessions window replace the right-panel chat', async () => {
 			disposables.add(sessionOpenerRegistry.registerParticipant({
 				handleOpenSession: async () => false,
-				handleOpenChatResource: async (_accessor, parent, child) => {
-					participantOpened = { parent, child };
+				handleOpenChatResource: async (_accessor, parent, child, options) => {
+					participantOpened = { parent, child, context: options?.chatResourceContext };
 					return true;
 				},
 			}));
@@ -394,6 +428,11 @@ suite('ChatSubagentContentPart', () => {
 
 			assert.strictEqual(participantOpened?.parent.toString(), 'chat-session://test/session1');
 			assert.strictEqual(participantOpened?.child.toString(), 'chat-session://test/session1/subagent/agent-call-grid');
+			assert.deepStrictEqual(participantOpened?.context, {
+				title: 'Test subagent description',
+				agentName: 'TestAgent',
+				status: 'Running',
+			});
 			assert.strictEqual(openedSession, undefined, 'Handled Sessions-window navigation must not fall back to the hidden Chat view');
 		});
 
@@ -421,7 +460,7 @@ suite('ChatSubagentContentPart', () => {
 			);
 		});
 
-		test('renders the open control as a compact purpose pill', async () => {
+		test('renders a full-width worker using terminal card geometry', async () => {
 			const part = createPart(createMockToolInvocation({
 				toolSpecificData: {
 					kind: 'subagent',
@@ -430,24 +469,42 @@ suite('ChatSubagentContentPart', () => {
 					prompt: 'Inspect the repository',
 				},
 			}), createMockRenderContext(false));
-			const shell = $('.interactive-session', undefined,
-				$('.interactive-response', undefined,
-					$('.value', undefined, part.domNode)));
+			const strip = $('.chat-subagent-strip', undefined, part.domNode);
+			const shell = $('.monaco-workbench', undefined,
+				$('.backboard-clean-chat', undefined,
+					$('.interactive-session.interactive-list.backboard-cursor-transcript', undefined,
+						$('.interactive-response', undefined,
+							$('.value', undefined,
+								$('.chat-t3-turn-work-body', undefined, strip))))));
 			mainWindow.document.body.appendChild(shell);
 			disposables.add(toDisposable(() => shell.remove()));
 			await timeout(0);
 
-			const openButton = part.domNode.querySelector('.chat-subagent-open');
+			const collapseButton = getCollapseButton(part);
+			const openButton = part.domNode.querySelector<HTMLButtonElement>('.chat-subagent-open');
+			assert.ok(collapseButton, 'Worker task should remain an inline disclosure');
 			assert.ok(isHTMLElement(openButton));
-			const styles = mainWindow.getComputedStyle(openButton);
-			assert.strictEqual(openButton.querySelector('.chat-subagent-open-task')?.textContent, 'Inspect a deliberately long repository task without making the agent row tall');
-			assert.strictEqual(styles.height, '24px');
-			assert.ok(parseFloat(styles.width) > 20 && parseFloat(styles.width) <= 180, `Expected a compact purpose pill, got ${styles.width}`);
-			assert.strictEqual(styles.whiteSpace, 'nowrap');
-			const bounds = openButton.getBoundingClientRect();
-			assert.ok(bounds.height >= 23 && bounds.width > bounds.height, `Expected a rounded rectangle rather than a circle, got ${bounds.width}x${bounds.height}`);
-			assert.ok(parseFloat(styles.borderRadius) < bounds.height / 2, `Expected a non-circular pill, got radius ${styles.borderRadius}`);
+			const cardStyles = mainWindow.getComputedStyle(part.domNode);
+			const headerStyles = mainWindow.getComputedStyle(collapseButton.parentElement!);
+			const collapseStyles = mainWindow.getComputedStyle(collapseButton);
+			const openStyles = mainWindow.getComputedStyle(openButton);
+			assert.notStrictEqual(collapseStyles.display, 'none', 'The inline disclosure must remain reachable in the T3 strip');
+			assert.strictEqual(part.domNode.querySelector('.chat-subagent-row-status')?.textContent, 'Running');
+			assert.strictEqual(part.domNode.querySelector('.chat-subagent-task')?.textContent, 'Worker: Inspect a deliberately long repository task without making the agent row tall');
+			assert.strictEqual(openButton.querySelector('.chat-subagent-open-label')?.textContent, 'Open chat');
+			assert.strictEqual(cardStyles.borderRadius, '8px');
+			assert.strictEqual(headerStyles.height, '29px');
+			assert.strictEqual(collapseStyles.height, '29px');
+			assert.strictEqual(openStyles.height, '29px');
+			assert.strictEqual(openStyles.borderTopWidth, '0px', 'The open action must be integrated into the card header, not rendered as a pill');
+			assert.strictEqual(openStyles.borderRadius, '0px');
+			assert.strictEqual(openButton.style.width, '', 'Layout geometry must be stylesheet-owned, not hard-coded inline');
+			assert.strictEqual(openButton.style.maxWidth, '', 'The navigation action must not inherit the old 180px task-pill cap');
+			assert.strictEqual(openStyles.whiteSpace, 'nowrap');
 			assert.ok(openButton.getAttribute('aria-label')?.includes('Inspect a deliberately long repository task'));
+
+			collapseButton.click();
+			assert.strictEqual(part.domNode.classList.contains('chat-used-context-collapsed'), false, 'Clicking the wide task row should expand inline details');
 		});
 	});
 
@@ -707,6 +764,29 @@ suite('ChatSubagentContentPart', () => {
 			const label = getCollapseButtonLabel(button);
 			const text = label?.textContent ?? button.textContent ?? '';
 			assert.ok(text.includes('Searching the codebase'), 'Title should keep custom description after completion');
+		});
+
+		test('expanding after completion keeps the current accessible status and task', () => {
+			const part = createPart(createMockToolInvocation({
+				toolSpecificData: {
+					kind: 'subagent',
+					description: 'Audit accessibility',
+					agentName: 'Reviewer',
+				},
+			}), createMockRenderContext(false));
+			const button = getCollapseButton(part);
+			assert.ok(button, 'Should have collapse button');
+
+			part.markAsInactive();
+			assert.strictEqual(button.getAttribute('aria-label'), 'Completed · Reviewer: Audit accessibility');
+
+			button.click();
+			assert.strictEqual(button.getAttribute('aria-expanded'), 'true');
+			assert.strictEqual(
+				button.getAttribute('aria-label'),
+				'Completed · Reviewer: Audit accessibility',
+				'Expansion must not restore the constructor-time Running label',
+			);
 		});
 
 		test('finalizeTitle should update button icon to check', () => {

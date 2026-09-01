@@ -13,6 +13,8 @@ export type WorkerIntegrationStatus =
 	| "conflict"
 	| "skipped";
 
+export type WorkerWorktreeDisposition = "present" | "removed_clean_terminal";
+
 export interface WorkerWorkspaceRecord {
 	workerId: string;
 	sequence: number;
@@ -26,6 +28,13 @@ export interface WorkerWorkspaceRecord {
 	repositoryRoot?: string;
 	branch?: string;
 	worktreePath?: string;
+	/**
+	 * A terminal no-op worker is removed eagerly and must not be recreated during
+	 * recovery or unarchive. Undefined is treated as `present` for version-1
+	 * records written before this field existed.
+	 */
+	worktreeDisposition?: WorkerWorktreeDisposition;
+	worktreeCleanedAt?: string;
 	startingCommit?: string;
 	resultCommit?: string;
 	changedFiles: string[];
@@ -104,7 +113,10 @@ export function workerProgress(
 		workerId: record.workerId,
 		status,
 		branch: record.branch,
-		worktreePath: record.worktreePath,
+		worktreePath:
+			record.worktreeDisposition === "removed_clean_terminal"
+				? undefined
+				: record.worktreePath,
 		changedFileCount: record.changedFiles.length,
 		startedAt: record.startedAt,
 		finishedAt: record.finishedAt,

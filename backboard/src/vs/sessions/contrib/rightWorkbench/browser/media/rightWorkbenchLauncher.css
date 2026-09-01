@@ -1634,6 +1634,10 @@
 	background: var(--rwb-bg);
 }
 
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host.review-context-hidden {
+	visibility: hidden;
+}
+
 .sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .monaco-editor,
 .sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .monaco-editor-background,
 .sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .margin,

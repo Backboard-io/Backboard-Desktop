@@ -93,6 +93,48 @@ function getSubagentWorkspaceData(tc: { _meta?: Record<string, unknown> }): Part
 	};
 }
 
+function equalStringArrays(left: readonly string[] | undefined, right: readonly string[] | undefined): boolean {
+	if (left === right) {
+		return true;
+	}
+	if (!left || !right || left.length !== right.length) {
+		return false;
+	}
+	return left.every((value, index) => value === right[index]);
+}
+
+/**
+ * `toolSpecificData` is a plain property, so callers must explicitly notify
+ * the invocation after changing it. Keep subagent updates structurally
+ * idempotent so replayed content/status events do not create a render loop.
+ */
+function equalSubagentToolSpecificData(left: IChatSubagentToolInvocationData, right: IChatSubagentToolInvocationData): boolean {
+	return left.resource === right.resource
+		&& left.description === right.description
+		&& left.agentName === right.agentName
+		&& left.prompt === right.prompt
+		&& left.result === right.result
+		&& left.modelName === right.modelName
+		&& left.workerId === right.workerId
+		&& left.workerStatus === right.workerStatus
+		&& left.branch === right.branch
+		&& left.worktreePath === right.worktreePath
+		&& left.changedFileCount === right.changedFileCount
+		&& left.startedAt === right.startedAt
+		&& left.finishedAt === right.finishedAt
+		&& left.integrationResult === right.integrationResult
+		&& equalStringArrays(left.conflictingFiles, right.conflictingFiles);
+}
+
+function setSubagentToolSpecificDataIfChanged(existing: ChatToolInvocation, next: IChatSubagentToolInvocationData): void {
+	const current = existing.toolSpecificData?.kind === 'subagent' ? existing.toolSpecificData : undefined;
+	if (current && equalSubagentToolSpecificData(current, next)) {
+		return;
+	}
+	existing.toolSpecificData = next;
+	existing.notifyToolSpecificDataChanged();
+}
+
 /**
  * Returns MCP App render data for a tool call when it is an MCP call
  * with an `_meta.ui.resourceUri` and a known AHP `mcp://` `channel`.
@@ -1244,16 +1286,13 @@ export function updateRunningToolSpecificData(existing: ChatToolInvocation, tc: 
 
 	const subagentContent = getToolSubagentContent(tc);
 	if (subagentContent) {
-		existing.toolSpecificData = {
+		setSubagentToolSpecificDataIfChanged(existing, {
 			kind: 'subagent',
 			resource: subagentContent.resource,
 			description: getSubagentTaskDescription(tc),
 			agentName: subagentContent.agentName,
 			...getSubagentWorkspaceData(tc),
-		};
-		// toolSpecificData is a plain property — notify state observers
-		// so ChatSubagentContentPart re-reads the updated metadata.
-		existing.notifyToolSpecificDataChanged();
+		});
 		return;
 	}
 
@@ -1263,10 +1302,7 @@ export function updateRunningToolSpecificData(existing: ChatToolInvocation, tc: 
 		const description = getSubagentTaskDescription(tc) ?? existing.toolSpecificData.description;
 		const agentName = getSubagentAgentName(tc) ?? existing.toolSpecificData.agentName;
 		const workspace = getSubagentWorkspaceData(tc);
-		if (description !== existing.toolSpecificData.description || agentName !== existing.toolSpecificData.agentName || Object.keys(workspace).length > 0) {
-			existing.toolSpecificData = { ...existing.toolSpecificData, description, agentName, ...workspace };
-			existing.notifyToolSpecificDataChanged();
-		}
+		setSubagentToolSpecificDataIfChanged(existing, { ...existing.toolSpecificData, description, agentName, ...workspace });
 		return;
 	}
 

@@ -120,6 +120,27 @@ The downloadable app should be much smaller because users do not download:
 - incremental compile cache
 - test/build intermediates
 
+The current macOS packaging step also minimizes the installed (uncompressed)
+`.app`, not just the DMG download. It removes source maps, debug/cache artifacts,
+native binaries for other operating systems and the other Mac CPU architecture,
+and unused Electron localizations. Licenses, TypeScript standard-library
+declarations, and all runtime JavaScript remain in the bundle. Compact
+English-only localization is the default; set `BACKBOARD_KEEP_ALL_LOCALES=1` for
+a multilingual release.
+
+The packaged app also excludes the legacy `GitHub.copilot-chat` extension and
+the unused native Copilot SDK. The current product registers Backboard, Codex,
+and Claude through the native agent host; it does not register a Copilot agent.
+The Backboard, Codex, and Claude runtimes remain in the app.
+
+Release builds use VS Code's official minified (`-min`) packaging target. The
+macOS package also reduces Microsoft's cross-platform MXC sandbox payload to the
+single `mxc-exec-mac` binary matching the release architecture.
+
+Set `SKIP_RELEASE_PRUNE=1` only for a diagnostic build that needs the unpruned
+payload. The build's final size report shows both the staged installed-app size
+and the compressed DMG size; these are deliberately different measurements.
+
 Users should download only the packaged app artifact, such as a macOS `.dmg`, Windows installer, or Linux archive.
 
 In this checkout, the measured size was:

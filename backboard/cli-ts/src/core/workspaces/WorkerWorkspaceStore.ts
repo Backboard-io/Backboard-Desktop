@@ -127,6 +127,11 @@ function isWorkerWorkspaceRecord(
 		typeof record.coordinatorCwd === "string" &&
 		Array.isArray(record.changedFiles) &&
 		record.changedFiles.every((path) => typeof path === "string") &&
+		(record.worktreeDisposition === undefined ||
+			record.worktreeDisposition === "present" ||
+			record.worktreeDisposition === "removed_clean_terminal") &&
+		(record.worktreeCleanedAt === undefined ||
+			typeof record.worktreeCleanedAt === "string") &&
 		typeof record.startedAt === "string" &&
 		typeof record.executionStatus === "string" &&
 		typeof record.integrationStatus === "string"

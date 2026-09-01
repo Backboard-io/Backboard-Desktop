@@ -805,6 +805,10 @@
 
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .new-chat-composer-stack {
 	width: calc(100% - 64px);
+	/* The input below is capped at the same reading width. Keep its positioning
+	 * context capped too so the mascot remains perched on the card when the
+	 * Sessions view grows wider than the composer. */
+	max-width: 950px;
 	--new-chat-card-radius: 22px;
 	transform: translateY(-24px);
 }

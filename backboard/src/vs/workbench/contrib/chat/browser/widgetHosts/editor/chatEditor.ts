@@ -29,6 +29,7 @@ import { EDITOR_DRAG_AND_DROP_BACKGROUND } from '../../../../../common/theme.js'
 import { IEditorGroup, IEditorGroupsService } from '../../../../../services/editor/common/editorGroupsService.js';
 import { IEditorService } from '../../../../../services/editor/common/editorService.js';
 import { ChatContextKeys } from '../../../common/actions/chatContextKeys.js';
+import { isBackboardProduct } from '../../../common/backboardAuth.js';
 import { IChatModel, IChatModelInputState, IExportableChatData, ISerializableChatData } from '../../../common/model/chatModel.js';
 import { IChatService } from '../../../common/chatService/chatService.js';
 import { IChatSessionsService, localChatSessionType } from '../../../common/chatSessionsService.js';
@@ -104,6 +105,10 @@ export class ChatEditor extends AbstractEditorWithViewState<IChatEditorViewState
 		this._editorContainer = parent;
 		// Ensure the container has position relative for the loading overlay
 		parent.classList.add('chat-editor-relative');
+		// Opt the full-page chat editor into the same composer contract used by
+		// Sessions. Besides the shared visuals, ChatInputPart uses this marker to
+		// place context usage inside the shell instead of growing a second row.
+		parent.classList.toggle('backboard-composer', isBackboardProduct());
 		this._scopedContextKeyService = this._register(this.contextKeyService.createScoped(parent));
 		const scopedInstantiationService = this._register(this.instantiationService.createChild(new ServiceCollection([IContextKeyService, this.scopedContextKeyService])));
 		ChatContextKeys.inChatEditor.bindTo(this._scopedContextKeyService).set(true);

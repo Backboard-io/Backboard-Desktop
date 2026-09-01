@@ -1,4 +1,7 @@
 import { describe, expect, it } from "bun:test";
+import { access, mkdtemp, rm, symlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { ApplyPatchTool } from "../src/tools/ApplyPatchTool.tsx";
 import { EditTool } from "../src/tools/EditTool.tsx";
 import { WriteTool } from "../src/tools/WriteTool.tsx";
@@ -52,6 +55,28 @@ describe("isolated worker filesystem boundary", () => {
 				isolatedContext,
 			),
 		).rejects.toThrow("only write inside their Git worktree");
+	});
+
+	it("blocks Write paths that traverse a symlink outside the worktree", async () => {
+		const worker = await mkdtemp(join(tmpdir(), "worker-boundary-"));
+		const outside = await mkdtemp(join(tmpdir(), "worker-boundary-outside-"));
+		try {
+			await symlink(outside, join(worker, "escape"));
+			await expect(
+				new WriteTool().execute(
+					{ file_path: "escape/result.txt", content: "escape" },
+					{
+						...makeContext(new AbortController().signal),
+						cwd: worker,
+						isolatedWorkspaceRoot: worker,
+					},
+				),
+			).rejects.toThrow("only write inside their Git worktree");
+			await expect(access(join(outside, "result.txt"))).rejects.toThrow();
+		} finally {
+			await rm(worker, { recursive: true, force: true });
+			await rm(outside, { recursive: true, force: true });
+		}
 	});
 });
 

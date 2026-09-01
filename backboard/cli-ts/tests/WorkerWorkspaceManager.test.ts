@@ -94,6 +94,133 @@ describe("WorkerWorkspaceManager", () => {
 		);
 	});
 
+	it("integrates captured results in completion order without waiting for an earlier worker", async () => {
+		const fixture = await createRepository();
+		const manager = createManager(fixture, "completion-order");
+		await manager.initialize();
+		const integrationOrder: string[] = [];
+		let markFirstStarted!: () => void;
+		const firstStarted = new Promise<void>((resolve) => {
+			markFirstStarted = resolve;
+		});
+		let releaseFirst!: () => void;
+		const firstGate = new Promise<void>((resolve) => {
+			releaseFirst = resolve;
+		});
+		const progress = (record: WorkerWorkspaceRecord) => {
+			if (record.integrationStatus === "integrating") {
+				integrationOrder.push(record.workerId);
+			}
+		};
+
+		const first = manager.runWorker(
+			{
+				...workerParams("worker-a", fixture.repository, "completion-order"),
+				onProgress: progress,
+			},
+			async (workspace) => {
+				markFirstStarted();
+				await firstGate;
+				await writeFile(join(workspace.cwd, "a.txt"), "worker-a", "utf8");
+				return { status: "completed" };
+			},
+		);
+		await firstStarted;
+		const second = manager.runWorker(
+			{
+				...workerParams("worker-b", fixture.repository, "completion-order"),
+				onProgress: progress,
+			},
+			async (workspace) => {
+				await writeFile(join(workspace.cwd, "b.txt"), "worker-b", "utf8");
+				return { status: "completed" };
+			},
+		);
+
+		let secondIntegratedBeforeRelease = false;
+		let timeout: ReturnType<typeof setTimeout> | undefined;
+		try {
+			secondIntegratedBeforeRelease = await Promise.race([
+				second.then(() => true),
+				new Promise<boolean>((resolve) => {
+					timeout = setTimeout(() => resolve(false), 5_000);
+				}),
+			]);
+			if (secondIntegratedBeforeRelease) {
+				expect(await readFile(join(fixture.repository, "b.txt"), "utf8")).toBe(
+					"worker-b",
+				);
+			}
+		} finally {
+			if (timeout) clearTimeout(timeout);
+			releaseFirst();
+		}
+
+		const [firstOutcome, secondOutcome] = await Promise.all([first, second]);
+		expect(secondIntegratedBeforeRelease).toBe(true);
+		expect(firstOutcome.workspace.sequence).toBe(0);
+		expect(secondOutcome.workspace.sequence).toBe(1);
+		expect(integrationOrder).toEqual(["worker-b", "worker-a"]);
+		expect(firstOutcome.workspace.integrationStatus).toBe("integrated");
+		expect(secondOutcome.workspace.integrationStatus).toBe("integrated");
+	}, 10_000);
+
+	it("keeps a captured result completed and integration-eligible after cancellation", async () => {
+		const fixture = await createRepository();
+		let markCaptured!: () => void;
+		const captured = new Promise<void>((resolve) => {
+			markCaptured = resolve;
+		});
+		let releaseCapture!: () => void;
+		const captureGate = new Promise<void>((resolve) => {
+			releaseCapture = resolve;
+		});
+		const gitManager = new (class extends GitWorktreeManager {
+			override async captureResultCommit(
+				input: Parameters<GitWorktreeManager["captureResultCommit"]>[0],
+			) {
+				const result = await super.captureResultCommit(input);
+				markCaptured();
+				await captureGate;
+				return result;
+			}
+		})();
+		const manager = new WorkerWorkspaceManager({
+			parentSessionId: "cancel-after-capture",
+			store: new WorkerWorkspaceStore(fixture.storePath),
+			git: gitManager,
+		});
+		const controller = new AbortController();
+		const operation = manager.runWorker(
+			{
+				...workerParams("worker-a", fixture.repository, "cancel-after-capture"),
+				signal: controller.signal,
+			},
+			async (workspace) => {
+				await writeFile(
+					join(workspace.cwd, "captured.txt"),
+					"durable result",
+					"utf8",
+				);
+				return { status: "completed" };
+			},
+		);
+
+		await captured;
+		controller.abort();
+		releaseCapture();
+		const outcome = await operation;
+
+		expect(controller.signal.aborted).toBe(true);
+		expect(outcome.workspace.executionStatus).toBe("completed");
+		expect(outcome.workspace.integrationStatus).toBe("integrated");
+		expect(outcome.workspace.resultCommit).toBeDefined();
+		expect(outcome.workspace.error).toBeUndefined();
+		expect(
+			await readFile(join(fixture.repository, "captured.txt"), "utf8"),
+		).toBe("durable result");
+	});
+
 	it("captures staged, unstaged tracked, and untracked worker changes without a model commit", async () => {
 		const fixture = await createRepository();
 		const manager = createManager(fixture, "capture-all");
@@ -340,9 +467,15 @@ describe("WorkerWorkspaceManager", () => {
 				"utf8",
 			),
 		).toBe("result from B\n");
-		expect(a.workspace.integrationStatus).toBe("integrated");
-		expect(b.workspace.integrationStatus).toBe("conflict");
-		expect(b.workspace.conflictingFiles).toEqual(["result.txt"]);
+		const integrated = [a, b].filter(
+			(outcome) => outcome.workspace.integrationStatus === "integrated",
+		);
+		const conflicted = [a, b].filter(
+			(outcome) => outcome.workspace.integrationStatus === "conflict",
+		);
+		expect(integrated).toHaveLength(1);
+		expect(conflicted).toHaveLength(1);
+		expect(conflicted[0]?.workspace.conflictingFiles).toEqual(["result.txt"]);
 
 		await git(fixture.repository, ["rm", "-f", "result.txt"]);
 		await writeFile(
@@ -452,6 +585,89 @@ describe("WorkerWorkspaceManager", () => {
 				.filter((path): path is string => path !== undefined)
 				.sort(),
 		);
+	});
+
+	it("eagerly removes clean failed and cancelled workers and never recreates them", async () => {
+		const fixture = await createRepository();
+		const parentSessionId = "clean-terminal";
+		const manager = createManager(fixture, parentSessionId);
+		await manager.initialize();
+
+		const failed = await manager.runWorker(
+			workerParams("failed", fixture.repository, parentSessionId),
+			async () => ({ status: "failed" }),
+		);
+		const cancelled = await manager.runWorker(
+			workerParams("cancelled", fixture.repository, parentSessionId),
+			async () => ({ status: "cancelled" }),
+		);
+
+		for (const outcome of [failed, cancelled]) {
+			expect(outcome.workspace.changedFiles).toEqual([]);
+			expect(outcome.workspace.resultCommit).toBeUndefined();
+			expect(outcome.workspace.worktreeDisposition).toBe(
+				"removed_clean_terminal",
+			);
+			expect(outcome.workspace.worktreeCleanedAt).toBeDefined();
+			expect(await pathExists(outcome.workspace.worktreePath ?? "")).toBe(
+				false,
+			);
+		}
+		expect(await manager.archive()).toEqual([]);
+		expect(await manager.delete()).toEqual([]);
+
+		const stored = await new WorkerWorkspaceStore(fixture.storePath).load();
+		expect(stored.map((record) => record.worktreeDisposition)).toEqual([
+			"removed_clean_terminal",
+			"removed_clean_terminal",
+		]);
+
+		const restarted = createManager(fixture, parentSessionId);
+		await restarted.initialize();
+		await restarted.unarchive();
+		for (const record of restarted.list()) {
+			expect(record.worktreeDisposition).toBe("removed_clean_terminal");
+			expect(await pathExists(record.worktreePath ?? "")).toBe(false);
+		}
+	});
+
+	it("preserves a clean failed worker when its branch contains committed work", async () => {
+		const fixture = await createRepository();
+		const parentSessionId = "committed-terminal";
+		const manager = createManager(fixture, parentSessionId);
+		await manager.initialize();
+
+		const outcome = await manager.runWorker(
+			workerParams("committed", fixture.repository, parentSessionId),
+			async (workspace) => {
+				await writeFile(
+					join(workspace.cwd, "committed.txt"),
+					"recover me\n",
+					"utf8",
+				);
+				await git(workspace.cwd, ["add", "committed.txt"]);
+				await git(workspace.cwd, [
+					"commit",
+					"--no-gpg-sign",
+					"-m",
+					"worker recovery commit",
+				]);
+				return { status: "failed" };
+			},
+		);
+
+		const committedWorktreePath = outcome.workspace.worktreePath;
+		if (!committedWorktreePath)
+			throw new Error("Expected worker worktree path");
+		expect(outcome.workspace.changedFiles).toEqual([]);
+		expect(outcome.workspace.resultCommit).toBeUndefined();
+		expect(outcome.workspace.worktreeDisposition).toBe("present");
+		expect(await pathExists(committedWorktreePath)).toBe(true);
+		expect(
+			(await git(committedWorktreePath, ["rev-parse", "HEAD"])).trim(),
+		).not.toBe(outcome.workspace.startingCommit);
+		expect(await manager.archive()).toEqual([committedWorktreePath]);
+		expect(await manager.delete()).toEqual([committedWorktreePath]);
 	});
 
 	it("rolls back a staged merge when cancellation arrives during integration", async () => {

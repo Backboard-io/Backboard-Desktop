@@ -7,6 +7,19 @@ import { IRemoteAgentHostService, IRemoteAgentHostSSHConnection, RemoteAgentHost
 import { ISessionsProvidersService } from '../services/sessions/browser/sessionsProvidersService.js';
 import { isAgentHostProvider } from '../common/agentHostSessionsProvider.js';
 import { encodeHex, VSBuffer } from '../../base/common/buffer.js';
+import { ISession } from '../services/sessions/common/session.js';
+import { URI } from '../../base/common/uri.js';
+
+/**
+ * Returns the canonical project folder that Editor mode should open.
+ *
+ * A session's `workingDirectory` can be an internal task worktree. That path is
+ * correct for agent execution, terminals, and changesets, but exposing it as the
+ * editor root makes a mode switch appear to move the user's project.
+ */
+export function getSessionEditorFolderUri(session: ISession): URI | undefined {
+	return session.workspace.get()?.folders[0]?.root;
+}
 
 /**
  * Resolves the VS Code remote authority for the given session provider,

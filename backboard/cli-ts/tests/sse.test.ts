@@ -37,6 +37,26 @@ describe("SSE helpers", () => {
 		expect(frames).toEqual(["data: 1", "data: 2"]);
 	});
 
+	it("optionally surfaces byte progress before an SSE frame is complete", async () => {
+		const body = new ReadableStream<Uint8Array>({
+			start(controller) {
+				const encoder = new TextEncoder();
+				controller.enqueue(encoder.encode('data: {"value"'));
+				controller.enqueue(encoder.encode(": 1}\n\n"));
+				controller.close();
+			},
+		});
+
+		const frames: string[] = [];
+		for await (const frame of readSseFrames(body, {
+			includeTransportActivity: true,
+		})) {
+			frames.push(frame);
+		}
+
+		expect(frames).toEqual(["", 'data: {"value": 1}']);
+	});
+
 	it("does not cancel the reader after natural EOF", async () => {
 		let cancelCount = 0;
 		const body = new ReadableStream<Uint8Array>({

@@ -7,7 +7,7 @@ import './media/rightWorkbenchLauncher.css';
 import { $, addDisposableListener, append, clearNode, Dimension, EventType } from '../../../../base/browser/dom.js';
 import { renderIcon } from '../../../../base/browser/ui/iconLabel/iconLabels.js';
 import { Separator, toAction } from '../../../../base/common/actions.js';
-import { RunOnceScheduler } from '../../../../base/common/async.js';
+import { RunOnceScheduler, Sequencer } from '../../../../base/common/async.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { Color } from '../../../../base/common/color.js';
 import { Codicon } from '../../../../base/common/codicons.js';
@@ -71,6 +71,7 @@ import { WorkbenchCompressibleObjectTree } from '../../../../platform/list/brows
 import { OptimusChatViewPane } from '../../../../optimus/contrib/chat/browser/optimusChatViewPane.js';
 import { buildReviewTreeChildren, IReviewResource, isReviewResource, ReviewTreeDelegate, ReviewTreeElement, ReviewTreeRenderer, ReviewTreeSorter } from './reviewTree.js';
 import { onDidRequestModeEmitter, pendingModeRequest, setPendingModeRequest, type RightWorkbenchMode, type IRightWorkbenchModeRequest, type IRightWorkbenchModeEntry } from './rightWorkbench.js';
+import { createRightWorkbenchReviewContextKey, RightWorkbenchReviewContext } from './rightWorkbenchReviewContext.js';
 
 const enum RightWorkbenchBrowserCommandId {
 	ZoomIn = 'workbench.action.browser.zoomIn',
@@ -159,8 +160,13 @@ export class RightWorkbenchViewPane extends ViewPane {
 	private reviewScmRailElement: HTMLElement | undefined;
 	private reviewListContainer: HTMLElement | undefined;
 	private openedReviewResourceKey: string | undefined;
+	private openedReviewResourceGeneration: number | undefined;
+	private openedReviewResourceAttempt = 0;
 	private pendingReviewOpenResource: IReviewResource | undefined;
 	private reviewOpenTimeout: ReturnType<typeof setTimeout> | undefined;
+	private readonly reviewContext = new RightWorkbenchReviewContext();
+	private readonly reviewOpenSequencer = new Sequencer();
+	private reviewSessionKey: string | undefined;
 	private readonly scmReviewRefreshScheduler = this._register(new RunOnceScheduler(() => this.refreshReviewRail(undefined), 100));
 	private modePicker: HTMLElement | undefined;
 	private modePickerHiddenEditorPane: WebviewEditor | undefined;
@@ -228,22 +234,40 @@ export class RightWorkbenchViewPane extends ViewPane {
 		// session root.
 		this._register(autorun(reader => {
 			const activeSession = this.sessionsService.activeSession.read(reader);
+			const activeChat = this.useSimpleRightWorkbench ? activeSession?.activeChat.read(reader) : undefined;
+			activeChat?.changes.read(reader);
+			const sessionKey = activeSession?.resource.toString();
+			const reviewContextKey = createRightWorkbenchReviewContextKey(sessionKey, activeChat?.resource.toString());
+			const reviewContextChanged = this.reviewContext.transition(reviewContextKey);
+			if (reviewContextChanged) {
+				const sessionChanged = this.reviewSessionKey !== sessionKey;
+				this.reviewSessionKey = sessionKey;
+				this.resetReviewContext(sessionChanged);
+			}
 			if (!activeSession) {
 				return;
 			}
-			activeSession.changes.read(reader);
-			const sessionKey = activeSession.resource.toString();
+			if (!this.useSimpleRightWorkbench) {
+				activeSession.changes.read(reader);
+			}
 			if (this.lastProbedSessionKey !== sessionKey) {
 				this.lastProbedSessionKey = sessionKey;
 				this.initialGitProbeSettled = false;
 			}
-			this.requestGitReviewRefresh(activeSession);
+			if (!this.useSimpleRightWorkbench) {
+				this.requestGitReviewRefresh(activeSession);
+			}
+			if (reviewContextChanged && this.activeMode === 'review') {
+				this.refreshReviewRail(undefined);
+			}
 		}));
 		// The session's working directory may resolve after activation — probe
 		// again when customizations change so late-arriving directories are
 		// still discovered.
 		this._register(this.agentHostCustomizationService.onDidChangeCustomizations(() => {
-			this.requestGitReviewRefresh(this.sessionsService.activeSession.read(undefined));
+			if (!this.useSimpleRightWorkbench) {
+				this.requestGitReviewRefresh(this.sessionsService.activeSession.read(undefined));
+			}
 		}));
 	}
 
@@ -269,6 +293,9 @@ export class RightWorkbenchViewPane extends ViewPane {
 		this.isRightWorkbenchVisible = visible;
 		if (visible) {
 			this.activateSingleSurface();
+			if (this.activeMode === 'review') {
+				this.refreshReviewRail(undefined);
+			}
 			// Restore the active tab's native browser view. The browser editor
 			// lives in the embedded modal editor part, which is not part of the
 			// view-pane visibility chain — it never re-shows the view on its own.
@@ -277,6 +304,10 @@ export class RightWorkbenchViewPane extends ViewPane {
 				void activeInput.model.setVisible(true);
 			}
 		} else {
+			if (this.activeMode === 'review') {
+				this.invalidateReviewSurface();
+				this.queueReviewEditorClose();
+			}
 			// The native WebContentsView paints above all workbench DOM. Hide
 			// every view when the pane goes away (e.g. the New Chat page), or
 			// it keeps floating over whatever replaced us.
@@ -287,10 +318,8 @@ export class RightWorkbenchViewPane extends ViewPane {
 	}
 
 	override dispose(): void {
-		if (this.reviewOpenTimeout !== undefined) {
-			clearTimeout(this.reviewOpenTimeout);
-			this.reviewOpenTimeout = undefined;
-		}
+		this.invalidateReviewSurface();
+		void this.closeEmbeddedEditorPart();
 		super.dispose();
 	}
 
@@ -358,7 +387,13 @@ export class RightWorkbenchViewPane extends ViewPane {
 			return;
 		}
 		if (willChangeTab) {
-			const closed = await this.closeEmbeddedEditorPart();
+			const leavingReview = this.activeMode === 'review';
+			if (leavingReview) {
+				this.invalidateReviewSurface();
+			}
+			const closed = leavingReview
+				? await this.reviewOpenSequencer.queue(() => this.closeEmbeddedEditorPart())
+				: await this.closeEmbeddedEditorPart();
 			if (!closed) {
 				return;
 			}
@@ -372,7 +407,13 @@ export class RightWorkbenchViewPane extends ViewPane {
 
 	private async openNewTab(mode: Exclude<RightWorkbenchMode, 'launcher'>): Promise<void> {
 		this.activateSingleSurface();
-		const closed = await this.closeEmbeddedEditorPart();
+		const leavingReview = this.activeMode === 'review';
+		if (leavingReview) {
+			this.invalidateReviewSurface();
+		}
+		const closed = leavingReview
+			? await this.reviewOpenSequencer.queue(() => this.closeEmbeddedEditorPart())
+			: await this.closeEmbeddedEditorPart();
 		if (!closed) {
 			return;
 		}
@@ -386,7 +427,13 @@ export class RightWorkbenchViewPane extends ViewPane {
 			return;
 		}
 		this.activateSingleSurface();
-		const closed = await this.closeEmbeddedEditorPart();
+		const leavingReview = this.activeMode === 'review';
+		if (leavingReview) {
+			this.invalidateReviewSurface();
+		}
+		const closed = leavingReview
+			? await this.reviewOpenSequencer.queue(() => this.closeEmbeddedEditorPart())
+			: await this.closeEmbeddedEditorPart();
 		if (!closed) {
 			return;
 		}
@@ -450,6 +497,13 @@ export class RightWorkbenchViewPane extends ViewPane {
 	private renderShell(): void {
 		if (!this.root) {
 			return;
+		}
+		if (this.reviewContainer && this.activeMode === 'review') {
+			// Rebuilding Review replaces its embedded host. Invalidate any open
+			// targeting the old host before the DOM is detached so a rail/maximize
+			// toggle cannot let that open release or reveal the replacement.
+			this.invalidateReviewSurface();
+			this.queueReviewEditorClose();
 		}
 
 		this.closeModePicker();
@@ -1068,7 +1122,13 @@ export class RightWorkbenchViewPane extends ViewPane {
 			return;
 		}
 		if (this.activeTabId === tabId) {
-			const closed = await this.closeEmbeddedEditorPart();
+			const leavingReview = this.activeMode === 'review';
+			if (leavingReview) {
+				this.invalidateReviewSurface();
+			}
+			const closed = leavingReview
+				? await this.reviewOpenSequencer.queue(() => this.closeEmbeddedEditorPart())
+				: await this.closeEmbeddedEditorPart();
 			if (!closed) {
 				return;
 			}
@@ -1173,8 +1233,10 @@ export class RightWorkbenchViewPane extends ViewPane {
 		this.reviewFileTitleElement = append(editorHeader, $('span.sessions-right-workbench-review-file-title', {}, localize('rightWorkbench.reviewFile', "Changed file")));
 		const reviewBody = append(editor, $('.sessions-right-workbench-review-editor'));
 		this.embeddedEditorHost = append(reviewBody, $('.sessions-right-workbench-embedded-editor-host'));
+		this.embeddedEditorHost.classList.add('review-context-hidden');
 		this.observeElementResize(this.embeddedEditorHost, () => this.layoutEmbeddedEditorPart());
 		this.openedReviewResourceKey = undefined;
+		this.openedReviewResourceGeneration = undefined;
 
 		const rail = append(workspace, $('.sessions-right-workbench-review-rail'));
 		const scmRail = append(rail, $('.sessions-right-workbench-review-scm-rail'));
@@ -1190,24 +1252,29 @@ export class RightWorkbenchViewPane extends ViewPane {
 	}
 
 	private renderReviewToolbar(container: HTMLElement): void {
-		const activeSession = this.sessionsService.activeSession.read(undefined);
-		const repository = this.getGitReviewRepositories(activeSession)[0];
+		// Simple Review is scoped to the selected chat, not the workspace's Git
+		// repository. Repository actions here can otherwise keep pointing at the
+		// chat/session we just left and make the panel behave like a workbench.
+		const activeSession = this.useSimpleRightWorkbench ? undefined : this.sessionsService.activeSession.read(undefined);
+		const repository = activeSession ? this.getGitReviewRepositories(activeSession)[0] : undefined;
 		const state = repository?.state.read(undefined);
 		const branchName = state?.HEAD?.name;
 		const upstream = state?.HEAD?.upstream;
 
 		const toolbar = append(container, $('.sessions-right-workbench-review-toolbar'));
 		const primary = append(toolbar, $('.sessions-right-workbench-review-toolbar-row.primary'));
-		const branch = append(primary, $('button.sessions-right-workbench-review-branch')) as HTMLButtonElement;
-		branch.type = 'button';
-		append(branch, $('span', {}, localize('rightWorkbench.branch', "Branch")));
-		branch.appendChild(renderIcon(Codicon.chevronDown));
-		branch.disabled = !repository;
-		this.domStore.add(addDisposableListener(branch, EventType.CLICK, () => {
-			if (repository) {
-				void this.commandService.executeCommand('git.checkout', repository.rootUri);
-			}
-		}));
+		if (!this.useSimpleRightWorkbench) {
+			const branch = append(primary, $('button.sessions-right-workbench-review-branch')) as HTMLButtonElement;
+			branch.type = 'button';
+			append(branch, $('span', {}, localize('rightWorkbench.branch', "Branch")));
+			branch.appendChild(renderIcon(Codicon.chevronDown));
+			branch.disabled = !repository;
+			this.domStore.add(addDisposableListener(branch, EventType.CLICK, () => {
+				if (repository) {
+					void this.commandService.executeCommand('git.checkout', repository.rootUri);
+				}
+			}));
+		}
 		this.reviewStatsElement = append(primary, $('span.sessions-right-workbench-review-total-stats'));
 
 		const actions = append(primary, $('.sessions-right-workbench-review-actions'));
@@ -1227,24 +1294,26 @@ export class RightWorkbenchViewPane extends ViewPane {
 			this.isReviewRailVisible = !this.isReviewRailVisible;
 			this.renderShell();
 		}));
-		const commit = append(actions, $('button.sessions-right-workbench-review-commit')) as HTMLButtonElement;
-		commit.type = 'button';
-		commit.appendChild(renderIcon(Codicon.circleOutline));
-		append(commit, $('span', {}, localize('rightWorkbench.commitOrPush', "Commit or push")));
-		commit.appendChild(renderIcon(Codicon.chevronDown));
-		commit.disabled = !repository;
-		this.domStore.add(addDisposableListener(commit, EventType.CLICK, () => {
-			if (repository) {
-				void this.commandService.executeCommand('git.commitAll', repository.rootUri);
-			}
-		}));
+		if (!this.useSimpleRightWorkbench) {
+			const commit = append(actions, $('button.sessions-right-workbench-review-commit')) as HTMLButtonElement;
+			commit.type = 'button';
+			commit.appendChild(renderIcon(Codicon.circleOutline));
+			append(commit, $('span', {}, localize('rightWorkbench.commitOrPush', "Commit or push")));
+			commit.appendChild(renderIcon(Codicon.chevronDown));
+			commit.disabled = !repository;
+			this.domStore.add(addDisposableListener(commit, EventType.CLICK, () => {
+				if (repository) {
+					void this.commandService.executeCommand('git.commitAll', repository.rootUri);
+				}
+			}));
 
-		const secondary = append(toolbar, $('.sessions-right-workbench-review-toolbar-row.secondary'));
-		append(secondary, $('span.sessions-right-workbench-review-branch-name', {}, branchName ?? localize('rightWorkbench.noBranch', "No branch")));
-		if (upstream) {
-			secondary.appendChild(renderIcon(Codicon.arrowRight));
-			append(secondary, $('span.sessions-right-workbench-review-upstream', {}, `${upstream.remote}/${upstream.name}`));
-			secondary.appendChild(renderIcon(Codicon.chevronDown));
+			const secondary = append(toolbar, $('.sessions-right-workbench-review-toolbar-row.secondary'));
+			append(secondary, $('span.sessions-right-workbench-review-branch-name', {}, branchName ?? localize('rightWorkbench.noBranch', "No branch")));
+			if (upstream) {
+				secondary.appendChild(renderIcon(Codicon.arrowRight));
+				append(secondary, $('span.sessions-right-workbench-review-upstream', {}, `${upstream.remote}/${upstream.name}`));
+				secondary.appendChild(renderIcon(Codicon.chevronDown));
+			}
 		}
 	}
 
@@ -1351,6 +1420,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 				activeTab.selectedReviewSourceUri = e.element.sourceUri;
 			}
 			this.openedReviewResourceKey = undefined;
+			this.openedReviewResourceGeneration = undefined;
 			this.openSelectedReviewResource(e.element);
 		}));
 	}
@@ -1403,12 +1473,72 @@ export class RightWorkbenchViewPane extends ViewPane {
 		this.reviewTree.setChildren(null, []);
 	}
 
+	private resetReviewContext(sessionChanged: boolean): void {
+		this.cancelPendingReviewOpen();
+		this.openedReviewResourceKey = undefined;
+		this.openedReviewResourceGeneration = undefined;
+		this.reviewResources = [];
+		this.isSessionChangesLoading = false;
+		this.reviewEmptyIsLoading = false;
+		this.reviewEmptyElement?.remove();
+		this.reviewEmptyElement = undefined;
+		this.embeddedEditorHost?.classList.add('review-context-hidden');
+		this.clearReviewTree();
+
+		for (const tab of this.tabs) {
+			if (tab.mode === 'review') {
+				tab.selectedReviewResourceKey = undefined;
+				tab.selectedReviewSourceUri = undefined;
+			}
+		}
+
+		if (sessionChanged) {
+			this.loadedGitReviewStatsKeys.clear();
+			this.gitReviewStats.clear();
+		}
+
+		if (this.activeMode === 'review') {
+			this.queueReviewEditorClose();
+		}
+	}
+
+	private cancelPendingReviewOpen(): void {
+		if (this.reviewOpenTimeout !== undefined) {
+			clearTimeout(this.reviewOpenTimeout);
+			this.reviewOpenTimeout = undefined;
+		}
+		this.pendingReviewOpenResource = undefined;
+	}
+
+	private invalidateReviewSurface(): void {
+		this.reviewContext.invalidate();
+		this.cancelPendingReviewOpen();
+		this.openedReviewResourceKey = undefined;
+		this.openedReviewResourceGeneration = undefined;
+		this.embeddedEditorHost?.classList.add('review-context-hidden');
+	}
+
+	private queueReviewEditorClose(): void {
+		void this.reviewOpenSequencer.queue(async () => {
+			try {
+				await this.closeEmbeddedEditorPart();
+			} catch {
+				// The modal may already be closing as its owning chat disappears.
+			}
+		});
+	}
+
 	/**
 	 * Returns the active session's changed files, preferring the enabled
 	 * default changeset (as the changes view does) and falling back to the
 	 * session-level change list.
 	 */
 	private getSessionReviewChanges(activeSession: IActiveSession | undefined, reader: IReader | undefined): readonly ISessionFileChange[] {
+		if (this.useSimpleRightWorkbench) {
+			this.isSessionChangesLoading = false;
+			return activeSession?.activeChat.read(reader).changes.read(reader) ?? [];
+		}
+
 		const changesets = activeSession?.changesets.read(reader) ?? [];
 		const selectedChangeset = changesets.find(changeset => changeset.isDefault.read(reader) && changeset.isEnabled.read(reader))
 			?? changesets.find(changeset => changeset.isEnabled.read(reader));
@@ -1433,17 +1563,40 @@ export class RightWorkbenchViewPane extends ViewPane {
 
 		const activeSession = this.sessionsService.activeSession.read(reader);
 		const changes = this.getSessionReviewChanges(activeSession, reader);
+		const generation = this.reviewContext.captureGeneration();
+		if (!this.isRightWorkbenchVisible) {
+			return;
+		}
 		// One tree, three data sources in priority order: SCM resources (richest
 		// decorations), raw git state, then the session's own changesets (works
 		// even when no repository is reachable from this window).
-		const scmResources = this.getScmReviewResources(activeSession);
-		let reviewResources = scmResources.length > 0 ? this.toScmReviewResources(scmResources) : this.getGitReviewResources(activeSession, reader);
-		if (reviewResources.length === 0) {
-			this.reviewResources = [];
-			this.requestGitReviewRefresh(activeSession);
-			reviewResources = this.toSessionReviewResources(changes);
+		let reviewResources: IReviewResource[];
+		if (this.useSimpleRightWorkbench) {
+			// Simple's Diff surface belongs to the selected chat. Workspace-wide SCM
+			// state can still describe the chat we just left while folders are being
+			// switched, so it must not replace the chat's own change list here.
+			reviewResources = this.toSessionReviewResources(changes, generation);
+		} else {
+			const scmResources = this.getScmReviewResources(activeSession);
+			reviewResources = scmResources.length > 0
+				? this.toScmReviewResources(scmResources, generation)
+				: this.getGitReviewResources(activeSession, reader, generation);
+			if (reviewResources.length === 0) {
+				this.requestGitReviewRefresh(activeSession);
+				reviewResources = this.toSessionReviewResources(changes, generation);
+			}
 		}
 		if (reviewResources.length === 0) {
+			// Invalidate an editor open that was already resolving when this chat's
+			// last change disappeared. Hiding the host below prevents even a single
+			// stale paint before the serialized close runs.
+			this.reviewContext.invalidate();
+			this.reviewResources = [];
+			this.cancelPendingReviewOpen();
+			this.openedReviewResourceKey = undefined;
+			this.openedReviewResourceGeneration = undefined;
+			this.embeddedEditorHost?.classList.add('review-context-hidden');
+			this.queueReviewEditorClose();
 			review.classList.add('sessions-right-workbench-review-empty-state');
 			this.clearReviewTree();
 			this.showReviewEmptyState(reviewBody);
@@ -1466,10 +1619,12 @@ export class RightWorkbenchViewPane extends ViewPane {
 			append(this.reviewStatsElement, $('span.additions', {}, `+${additions.toLocaleString()}`));
 			append(this.reviewStatsElement, $('span.deletions', {}, `-${deletions.toLocaleString()}`));
 		}
-		for (const repository of this.getGitReviewRepositories(activeSession)) {
-			this.requestGitReviewStats(repository);
+		if (!this.useSimpleRightWorkbench) {
+			for (const repository of this.getGitReviewRepositories(activeSession)) {
+				this.requestGitReviewStats(repository);
+			}
 		}
-		this.scheduleReviewResourceOpen(selectedReviewResource);
+		this.scheduleReviewResourceOpen(selectedReviewResource, generation);
 	}
 
 	/**
@@ -1478,7 +1633,10 @@ export class RightWorkbenchViewPane extends ViewPane {
 	 * builds the embedded editor part, which would otherwise block the panel's
 	 * first render and make Review feel much slower than its sibling tabs.
 	 */
-	private scheduleReviewResourceOpen(resource: IReviewResource): void {
+	private scheduleReviewResourceOpen(resource: IReviewResource, generation = this.reviewContext.captureGeneration()): void {
+		if (!this.isRightWorkbenchVisible) {
+			return;
+		}
 		this.pendingReviewOpenResource = resource;
 		if (this.reviewOpenTimeout !== undefined) {
 			return;
@@ -1487,13 +1645,19 @@ export class RightWorkbenchViewPane extends ViewPane {
 			this.reviewOpenTimeout = undefined;
 			const pending = this.pendingReviewOpenResource;
 			this.pendingReviewOpenResource = undefined;
-			if (pending && this.activeMode === 'review') {
-				this.openSelectedReviewResource(pending);
+			if (
+				pending &&
+				this.isRightWorkbenchVisible &&
+				this.activeMode === 'review' &&
+				this.reviewContext.isCurrent(generation) &&
+				this.hasCurrentReviewResource(pending)
+			) {
+				this.openSelectedReviewResource(pending, generation);
 			}
 		}, 0);
 	}
 
-	private toSessionReviewResources(changes: readonly ISessionFileChange[]): IReviewResource[] {
+	private toSessionReviewResources(changes: readonly ISessionFileChange[], generation: number): IReviewResource[] {
 		const resources = new Map<string, IReviewResource>();
 		for (const change of changes) {
 			const uri = isIChatSessionFileChange2(change) ? change.uri : change.modifiedUri;
@@ -1512,12 +1676,12 @@ export class RightWorkbenchViewPane extends ViewPane {
 							label: basename(uri),
 							options: { pinned: true, override: DEFAULT_EDITOR_ASSOCIATION.id }
 						};
-						return !!await this.openEditorInEmbeddedHost(input);
+						return !!await this.openReviewEditorInEmbeddedHost(input, generation);
 					}
-					const pane = await this.openEditorInEmbeddedHost({
+					const pane = await this.openReviewEditorInEmbeddedHost({
 						resource: modifiedUri ?? change.originalUri ?? uri,
 						options: { pinned: true, override: DEFAULT_EDITOR_ASSOCIATION.id }
-					});
+					}, generation);
 					return !!pane;
 				},
 			});
@@ -2247,7 +2411,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 		});
 	}
 
-	private getGitReviewResources(activeSession: IActiveSession | undefined, reader: IReader | undefined): IReviewResource[] {
+	private getGitReviewResources(activeSession: IActiveSession | undefined, reader: IReader | undefined, generation: number): IReviewResource[] {
 		const repositories = this.getGitReviewRepositories(activeSession);
 		const resources = new Map<string, IReviewResource>();
 		for (const repository of repositories) {
@@ -2264,13 +2428,13 @@ export class RightWorkbenchViewPane extends ViewPane {
 				continue;
 			}
 			for (const change of state.mergeChanges) {
-				resources.set(change.uri.toString(), this.toGitReviewResource(change, 'merge', localize('rightWorkbench.gitMergeChange', "Merge")));
+				resources.set(change.uri.toString(), this.toGitReviewResource(change, 'merge', localize('rightWorkbench.gitMergeChange', "Merge"), generation));
 			}
 			for (const change of state.indexChanges) {
-				resources.set(change.uri.toString(), this.toGitReviewResource(change, 'staged', localize('rightWorkbench.gitStagedChange', "Staged")));
+				resources.set(change.uri.toString(), this.toGitReviewResource(change, 'staged', localize('rightWorkbench.gitStagedChange', "Staged"), generation));
 			}
 			for (const change of state.workingTreeChanges) {
-				resources.set(change.uri.toString(), this.toGitReviewResource(change, 'modified', localize('rightWorkbench.gitModifiedChange', "Modified")));
+				resources.set(change.uri.toString(), this.toGitReviewResource(change, 'modified', localize('rightWorkbench.gitModifiedChange', "Modified"), generation));
 			}
 			// Untracked-only repositories (never-committed scaffolds) would list
 			// their whole file tree as "changes" — mirror the SCM tier and only
@@ -2278,7 +2442,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 			const hasTrackedChanges = state.mergeChanges.length + state.indexChanges.length + state.workingTreeChanges.length > 0;
 			if (hasTrackedChanges) {
 				for (const change of state.untrackedChanges) {
-					resources.set(change.uri.toString(), this.toGitReviewResource(change, 'untracked', localize('rightWorkbench.gitUntrackedChange', "Untracked")));
+					resources.set(change.uri.toString(), this.toGitReviewResource(change, 'untracked', localize('rightWorkbench.gitUntrackedChange', "Untracked"), generation));
 				}
 			}
 		}
@@ -2336,18 +2500,18 @@ export class RightWorkbenchViewPane extends ViewPane {
 		this.refreshReviewRail(undefined);
 	}
 
-	private toScmReviewResources(resources: readonly ISCMResource[]): IReviewResource[] {
+	private toScmReviewResources(resources: readonly ISCMResource[], generation: number): IReviewResource[] {
 		return resources.map(resource => ({
 			key: this.getScmReviewResourceKey(resource),
 			sourceUri: resource.sourceUri,
 			status: resource.decorations.tooltip ?? resource.resourceGroup.label,
 			additions: this.gitReviewStats.get(resource.sourceUri.toString())?.additions,
 			deletions: this.gitReviewStats.get(resource.sourceUri.toString())?.deletions,
-			open: () => this.openScmReviewResource(resource),
+			open: () => this.openScmReviewResource(resource, generation),
 		}));
 	}
 
-	private toGitReviewResource(change: GitChange, group: string, status: string): IReviewResource {
+	private toGitReviewResource(change: GitChange, group: string, status: string, generation: number): IReviewResource {
 		const stats = this.gitReviewStats.get(change.uri.toString());
 		return {
 			key: this.getGitReviewResourceKey(change, group),
@@ -2355,7 +2519,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 			status,
 			additions: stats?.additions,
 			deletions: stats?.deletions,
-			open: () => this.openGitReviewResource(change),
+			open: () => this.openGitReviewResource(change, generation),
 		};
 	}
 
@@ -2377,23 +2541,53 @@ export class RightWorkbenchViewPane extends ViewPane {
 		return selectedReviewResource;
 	}
 
-	private openSelectedReviewResource(resource: IReviewResource): void {
-		if (this.openedReviewResourceKey === resource.key) {
+	private openSelectedReviewResource(resource: IReviewResource, generation = this.reviewContext.captureGeneration()): void {
+		if (!this.isRightWorkbenchVisible || !this.reviewContext.isCurrent(generation) || !this.hasCurrentReviewResource(resource)) {
+			return;
+		}
+		if (this.openedReviewResourceKey === resource.key && this.openedReviewResourceGeneration === generation) {
 			return;
 		}
 		// Latch the key optimistically so concurrent refreshes don't re-open,
 		// but release it when the open fails or shows nothing (e.g. the git
 		// content provider was not ready yet) so the next refresh retries.
 		this.openedReviewResourceKey = resource.key;
+		this.openedReviewResourceGeneration = generation;
+		const attempt = ++this.openedReviewResourceAttempt;
 		const releaseOnFailure = (opened: boolean) => {
-			if (!opened && this.openedReviewResourceKey === resource.key) {
+			if (
+				!opened &&
+				this.openedReviewResourceAttempt === attempt &&
+				this.openedReviewResourceKey === resource.key &&
+				this.openedReviewResourceGeneration === generation
+			) {
 				this.openedReviewResourceKey = undefined;
+				this.openedReviewResourceGeneration = undefined;
 			}
 		};
-		resource.open().then(releaseOnFailure, () => releaseOnFailure(false));
+		void this.reviewOpenSequencer.queue(async () => {
+			if (!this.isRightWorkbenchVisible || !this.reviewContext.isCurrent(generation) || !this.hasCurrentReviewResource(resource) || this.activeMode !== 'review') {
+				releaseOnFailure(false);
+				return;
+			}
+			try {
+				const opened = await resource.open();
+				if (!this.reviewContext.isCurrent(generation)) {
+					await this.closeEmbeddedEditorPart();
+					return;
+				}
+				releaseOnFailure(opened);
+			} catch {
+				releaseOnFailure(false);
+			}
+		});
 	}
 
-	private async openScmReviewResource(resource: ISCMResource): Promise<boolean> {
+	private hasCurrentReviewResource(resource: IReviewResource): boolean {
+		return this.reviewResources.some(candidate => candidate.key === resource.key);
+	}
+
+	private async openScmReviewResource(resource: ISCMResource, generation: number): Promise<boolean> {
 		if (resource.multiDiffEditorOriginalUri && resource.multiDiffEditorModifiedUri) {
 			const input: IResourceDiffEditorInput = {
 				original: { resource: resource.multiDiffEditorOriginalUri },
@@ -2401,18 +2595,18 @@ export class RightWorkbenchViewPane extends ViewPane {
 				label: basename(resource.sourceUri),
 				options: { pinned: true, override: DEFAULT_EDITOR_ASSOCIATION.id }
 			};
-			return !!await this.openEditorInEmbeddedHost(input);
+			return !!await this.openReviewEditorInEmbeddedHost(input, generation);
 		}
 		// Additions have no original, deletions have no modified side: show
 		// whichever side exists instead of a URI that no longer resolves.
-		const pane = await this.openEditorInEmbeddedHost({
+		const pane = await this.openReviewEditorInEmbeddedHost({
 			resource: resource.multiDiffEditorModifiedUri ?? resource.multiDiffEditorOriginalUri ?? resource.sourceUri,
 			options: { pinned: true, override: DEFAULT_EDITOR_ASSOCIATION.id }
-		});
+		}, generation);
 		return !!pane;
 	}
 
-	private async openGitReviewResource(change: GitChange): Promise<boolean> {
+	private async openGitReviewResource(change: GitChange, generation: number): Promise<boolean> {
 		if (change.originalUri && change.modifiedUri) {
 			const input: IResourceDiffEditorInput = {
 				original: { resource: change.originalUri },
@@ -2420,12 +2614,12 @@ export class RightWorkbenchViewPane extends ViewPane {
 				label: basename(change.uri),
 				options: { pinned: true, override: DEFAULT_EDITOR_ASSOCIATION.id }
 			};
-			return !!await this.openEditorInEmbeddedHost(input);
+			return !!await this.openReviewEditorInEmbeddedHost(input, generation);
 		}
-		const pane = await this.openEditorInEmbeddedHost({
+		const pane = await this.openReviewEditorInEmbeddedHost({
 			resource: change.modifiedUri ?? change.originalUri ?? change.uri,
 			options: { pinned: true, override: DEFAULT_EDITOR_ASSOCIATION.id }
-		});
+		}, generation);
 		return !!pane;
 	}
 
@@ -2471,7 +2665,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 	}
 
 	private showReviewEmptyState(container: HTMLElement): void {
-		const isLoading = !this.initialGitProbeSettled || this.isSessionChangesLoading;
+		const isLoading = this.isSessionChangesLoading || (!this.useSimpleRightWorkbench && !this.initialGitProbeSettled);
 		if (this.reviewEmptyElement && this.reviewEmptyIsLoading === isLoading) {
 			return;
 		}
@@ -2517,18 +2711,27 @@ export class RightWorkbenchViewPane extends ViewPane {
 		});
 	}
 
-	private async openEditorInEmbeddedHost(editor: IUntypedEditorInput, group?: PreferredGroup): Promise<IEditorPane | undefined>;
-	private async openEditorInEmbeddedHost(editor: EditorInput, options?: IEditorOptions, group?: PreferredGroup): Promise<IEditorPane | undefined>;
-	private async openEditorInEmbeddedHost(editor: IUntypedEditorInput | EditorInput, optionsOrGroup?: IEditorOptions | PreferredGroup, _group?: PreferredGroup): Promise<IEditorPane | undefined> {
+	private async openReviewEditorInEmbeddedHost(editor: IUntypedEditorInput, generation: number): Promise<IEditorPane | undefined> {
+		return this.doOpenEditorInEmbeddedHost(editor, undefined, generation);
+	}
+
+	private async doOpenEditorInEmbeddedHost(editor: IUntypedEditorInput | EditorInput, optionsOrGroup?: IEditorOptions | PreferredGroup, reviewGeneration?: number): Promise<IEditorPane | undefined> {
 		const embeddedHost = this.embeddedEditorHost;
-		if (!embeddedHost) {
+		if (!embeddedHost || !this.isReviewEditorOpenCurrent(reviewGeneration, embeddedHost)) {
 			return undefined;
 		}
 
 		await this.ensureEmbeddedEditorPart();
+		if (!this.isReviewEditorOpenCurrent(reviewGeneration, embeddedHost)) {
+			embeddedHost.classList.add('review-context-hidden');
+			await this.closeEmbeddedEditorPart();
+			return undefined;
+		}
+
+		let editorPane: IEditorPane | undefined;
 		if (editor instanceof EditorInput) {
 			const options = this.isEditorOptions(optionsOrGroup) ? optionsOrGroup : undefined;
-			const editorPane = await this.editorService.openEditor(editor, {
+			editorPane = await this.editorService.openEditor(editor, {
 				...options,
 				modal: {
 					...options?.modal,
@@ -2536,26 +2739,42 @@ export class RightWorkbenchViewPane extends ViewPane {
 					maximized: true
 				}
 			}, MODAL_GROUP);
-			this.applyReviewDiffEditorOptions();
-			this.scheduleEmbeddedEditorPartLayout();
-			return editorPane;
+		} else {
+			editorPane = await this.editorService.openEditor({
+				...editor,
+				options: {
+					...editor.options,
+					pinned: editor.options?.pinned ?? true,
+					modal: {
+						...editor.options?.modal,
+						embeddedHost,
+						maximized: true
+					}
+				}
+			}, MODAL_GROUP);
 		}
 
-		const editorPane = await this.editorService.openEditor({
-			...editor,
-			options: {
-				...editor.options,
-				pinned: editor.options?.pinned ?? true,
-				modal: {
-					...editor.options?.modal,
-					embeddedHost,
-					maximized: true
-				}
-			}
-		}, MODAL_GROUP);
+		if (!this.isReviewEditorOpenCurrent(reviewGeneration, embeddedHost)) {
+			embeddedHost.classList.add('review-context-hidden');
+			await this.closeEmbeddedEditorPart();
+			return undefined;
+		}
+
+		if (reviewGeneration !== undefined) {
+			embeddedHost.classList.remove('review-context-hidden');
+		}
 		this.applyReviewDiffEditorOptions();
 		this.scheduleEmbeddedEditorPartLayout();
 		return editorPane;
+	}
+
+	private isReviewEditorOpenCurrent(generation: number | undefined, embeddedHost: HTMLElement): boolean {
+		return generation === undefined || (
+			this.isRightWorkbenchVisible &&
+			this.reviewContext.isCurrent(generation) &&
+			this.activeMode === 'review' &&
+			this.embeddedEditorHost === embeddedHost
+		);
 	}
 
 	private async openEditorInRightWorkbench(editor: IUntypedEditorInput, group?: PreferredGroup): Promise<IEditorPane | undefined>;

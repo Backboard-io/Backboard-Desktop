@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentTraceContext } from "../src/core/agent/AgentTraceStore.ts";
@@ -22,6 +22,7 @@ import type {
 	SubmitToolOutputsRequest,
 } from "../src/providers/backboard/types.ts";
 import { TodoWriteTool } from "../src/tools/TodoWriteTool.tsx";
+import { WriteTool } from "../src/tools/WriteTool.tsx";
 import { TEST_BACKBOARD_ENV, TEST_MODEL } from "./helpers/agent.ts";
 import { TestTool } from "./helpers.ts";
 
@@ -213,6 +214,172 @@ describe("SubAgentRunner", () => {
 		);
 	});
 
+	it("allows a write worker to use relative Write paths in its assigned checkout", async () => {
+		class RelativeWriteClient extends CompletingClient {
+			toolOutputRequests: SubmitToolOutputsRequest[] = [];
+
+			override async *runMessage(): AsyncIterable<ProviderEvent> {
+				yield { kind: "thread", threadId: "thr_write" };
+				yield {
+					kind: "requires_action",
+					runId: "run_write",
+					calls: [
+						{
+							id: "call_write",
+							name: "Write",
+							input: {
+								file_path: "js/result.js",
+								content: "export const result = true;\n",
+							},
+						},
+					],
+				};
+			}
+
+			override async *runToolOutputs(
+				req: SubmitToolOutputsRequest,
+			): AsyncIterable<ProviderEvent> {
+				this.toolOutputRequests.push(req);
+				yield { kind: "assistant_delta", text: "write complete" };
+				yield { kind: "completed" };
+			}
+		}
+
+		const worker = await mkdtemp(join(tmpdir(), "subagent-relative-write-"));
+		try {
+			const client = new RelativeWriteClient();
+			const result = await runnerWith(client, [new WriteTool()]).run({
+				prompt: "write the assigned module",
+				depth: 1,
+				parentCwd: worker,
+				parentSignal: new AbortController().signal,
+				isolatedWorkspace: true,
+				parentPermissions: {
+					mode: "bypass",
+					rules: emptyRuleSet(),
+					interactive: true,
+				},
+			});
+
+			expect(result.status).toBe("completed");
+			expect(client.toolOutputRequests[0]?.tool_outputs[0]?.output).toContain(
+				"Wrote js/result.js",
+			);
+			expect(await readFile(join(worker, "js/result.js"), "utf8")).toBe(
+				"export const result = true;\n",
+			);
+		} finally {
+			await rm(worker, { recursive: true, force: true });
+		}
+	});
+
+	it("reuses one private scratch directory for the worker and removes it afterward", async () => {
+		class TwoRoundClient extends CompletingClient {
+			private round = 0;
+
+			override async *runMessage(): AsyncIterable<ProviderEvent> {
+				yield { kind: "thread", threadId: "thr_scratch" };
+				yield {
+					kind: "requires_action",
+					runId: "run_scratch_0",
+					calls: [{ id: "call_scratch_0", name: "Read", input: {} }],
+				};
+			}
+
+			override async *runToolOutputs(): AsyncIterable<ProviderEvent> {
+				this.round++;
+				if (this.round === 1) {
+					yield {
+						kind: "requires_action",
+						runId: "run_scratch_1",
+						calls: [{ id: "call_scratch_1", name: "Read", input: {} }],
+					};
+					return;
+				}
+				yield { kind: "assistant_delta", text: "done" };
+				yield { kind: "completed" };
+			}
+		}
+
+		const scratchPaths: string[] = [];
+		const probe = new TestTool({ name: "Read", readOnly: true });
+		const original = probe.execute.bind(probe);
+		probe.execute = async (input, ctx) => {
+			expect(ctx.isolatedScratchRoot).toBeString();
+			await access(ctx.isolatedScratchRoot as string);
+			scratchPaths.push(ctx.isolatedScratchRoot as string);
+			return original(input, ctx);
+		};
+
+		await runnerWith(new TwoRoundClient(), [probe]).run({
+			prompt: "inspect twice",
+			depth: 1,
+			parentCwd: process.cwd(),
+			parentSignal: new AbortController().signal,
+			isolatedWorkspace: true,
+			parentPermissions: {
+				mode: "bypass",
+				rules: emptyRuleSet(),
+				interactive: true,
+			},
+		});
+
+		expect(scratchPaths).toHaveLength(2);
+		expect(new Set(scratchPaths).size).toBe(1);
+		await expect(access(scratchPaths[0] as string)).rejects.toThrow();
+	});
+
+	it("ends the child row and removes scratch when a worker loop fails", async () => {
+		class FailingAfterToolClient extends CompletingClient {
+			override async *runMessage(): AsyncIterable<ProviderEvent> {
+				yield { kind: "thread", threadId: "thr_failure" };
+				yield {
+					kind: "requires_action",
+					runId: "run_failure",
+					calls: [{ id: "call_failure", name: "Read", input: {} }],
+				};
+			}
+
+			override async *runToolOutputs(): AsyncIterable<ProviderEvent> {
+				yield { kind: "assistant_delta", text: "" };
+				throw new Error("provider failed after worker setup");
+			}
+		}
+
+		let scratchPath: string | undefined;
+		const probe = new TestTool({ name: "Read", readOnly: true });
+		const original = probe.execute.bind(probe);
+		probe.execute = (input, ctx) => {
+			scratchPath = ctx.isolatedScratchRoot;
+			return original(input, ctx);
+		};
+		const parentBus = new EventBus();
+		const childStatuses: string[] = [];
+		parentBus.on("agent:child_end", (event) =>
+			childStatuses.push(event.status),
+		);
+
+		const result = await runnerWith(new FailingAfterToolClient(), [probe]).run({
+			prompt: "fail after setup",
+			depth: 1,
+			parentCwd: process.cwd(),
+			parentSignal: new AbortController().signal,
+			isolatedWorkspace: true,
+			parentBus,
+			parentToolCallId: "agent_failure",
+			parentPermissions: {
+				mode: "bypass",
+				rules: emptyRuleSet(),
+				interactive: true,
+			},
+		});
+
+		expect(result.status).toBe("failed");
+		expect(childStatuses).toEqual(["failed"]);
+		expect(scratchPath).toBeString();
+		await expect(access(scratchPath as string)).rejects.toThrow();
+	});
+
 	it("runs worker turns without creating a Backboard assistant", async () => {
 		const controller = new AbortController();
 		const client = new CompletingClient();
@@ -285,6 +452,37 @@ describe("SubAgentRunner", () => {
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
+	});
+
+	it("coalesces rapid child text before relaying it to the parent", async () => {
+		class BurstClient extends CompletingClient {
+			override async *runMessage(): AsyncIterable<ProviderEvent> {
+				for (let index = 0; index < 100; index++) {
+					yield { kind: "assistant_delta", text: "x" };
+				}
+				yield { kind: "completed" };
+			}
+		}
+		const parentBus = new EventBus();
+		const relayed: ProviderEvent[] = [];
+		parentBus.on("agent:child_event", (event) => {
+			if (event.event.type === "assistant:delta") {
+				relayed.push({ kind: "assistant_delta", text: event.event.text });
+			}
+		});
+
+		await runnerWith(new BurstClient(), []).run({
+			prompt: "stream a burst",
+			depth: 1,
+			parentCwd: process.cwd(),
+			parentSignal: new AbortController().signal,
+			parentBus,
+			parentToolCallId: "call_burst",
+		});
+
+		expect(relayed).toEqual([
+			{ kind: "assistant_delta", text: "x".repeat(100) },
+		]);
 	});
 
 	it("does not relay child TodoWrite updates to the parent bus", async () => {

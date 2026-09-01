@@ -146,6 +146,25 @@ suite('CliTsAgent tool metadata', () => {
 		}]);
 	});
 
+	test('provisional folder sessions do not prewarm a throwaway CLI process', async () => {
+		const agent = createAgent();
+		let prewarms = 0;
+		const internals = agent as unknown as {
+			_prewarm(session: unknown): Promise<void>;
+		};
+		internals._prewarm = async () => {
+			prewarms++;
+		};
+
+		const created = await agent.createSession({
+			workingDirectory: URI.file('/workspace/provisional-folder'),
+			config: { isolation: 'folder' },
+		});
+
+		assert.strictEqual(created.provisional, true);
+		assert.strictEqual(prewarms, 0);
+	});
+
 	test('worktree materialization creates one isolated checkout before capturing the baseline', async () => {
 		const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'backboard-cli-ts-worktree-'));
 		try {
@@ -1118,6 +1137,53 @@ suite('CliTsAgent tool metadata', () => {
 		if (turns[0].responseParts[0]?.kind === ResponsePartKind.Markdown) {
 			assert.strictEqual(turns[0].responseParts[0].content, 'The renderer groups tool calls.');
 		}
+	});
+
+	test('streamed write workers remain queued until execution actually starts', () => {
+		const agent = createAgent();
+		const progress: AgentSignal[] = [];
+		store.add(agent.onDidSessionProgress(signal => progress.push(signal)));
+		const sessionUri = AgentSession.uri('backboard', 'worker-pending');
+		const session = {
+			sessionUri,
+			turn: {
+				turnId: 'turn-worker-pending',
+				messageParts: new Map(),
+				streamedText: new Map(),
+				startedToolCalls: new Set(),
+				confirmedToolCalls: new Set(),
+				childToolLines: new Map(),
+				toolSummaries: [],
+				storedParts: [],
+				storedTextParts: new Map(),
+				toolInputs: new Map(),
+				toolInputSummaries: new Map(),
+				pendingCompletions: [] as Promise<void>[],
+				subagentTurns: new Map(),
+				responseText: '',
+				reasoningText: '',
+			},
+		};
+		const internals = agent as unknown as {
+			_handleAgentEvent(session: unknown, event: unknown): void;
+		};
+
+		internals._handleAgentEvent(session, {
+			type: 'tool:pending',
+			toolCallId: 'agent-call-pending',
+			name: 'Agent',
+			inputSummary: 'Build the renderer module.',
+		});
+		assert.strictEqual(progress.filter(signal => signal.kind === 'subagent_started').length, 0);
+		assert.strictEqual(progress.filter(signal => signal.kind === 'action').length, 0);
+
+		internals._handleAgentEvent(session, {
+			type: 'tool:start',
+			toolCallId: 'agent-call-pending',
+			name: 'Agent',
+			inputSummary: 'Build the renderer module.',
+		});
+		assert.strictEqual(progress.filter(signal => signal.kind === 'subagent_started').length, 1);
 	});
 
 	test('worker file edits stay attached to the live and reopened child chat', async () => {

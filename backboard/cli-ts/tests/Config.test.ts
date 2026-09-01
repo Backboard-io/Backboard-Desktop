@@ -358,6 +358,19 @@ describe("Config", () => {
 		});
 	});
 
+	it("selects the subscription catalog default for a subscription-only install", async () => {
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
+		await saveBackboardConfig(
+			{ chatgptSubscriptionAuthFile: path.join(homeDir, "chatgpt-auth.json") },
+			homeDir,
+		);
+
+		const config = new Config({ argv: [], homeDir });
+
+		expect(config.modelString).toBe("openai-subscription/auto");
+		await rm(homeDir, { recursive: true, force: true });
+	});
+
 	it("derives model profiles without changing memory profiles", () => {
 		const config = new Config({
 			env,

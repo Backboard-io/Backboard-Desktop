@@ -16,19 +16,28 @@ const PLACEHOLDER_API_KEYS = new Set([
 ]);
 
 export const NO_CREDENTIALS_MESSAGE =
-	"No credentials found. Sign in with Backboard, or add a provider API key.";
+	"No credentials found. Sign in with Backboard, connect a ChatGPT subscription, or add a provider API key.";
+
+export const CHATGPT_SUBSCRIPTION_AUTH_FILE_ENV =
+	"BACKBOARD_CHATGPT_SUBSCRIPTION_AUTH_FILE";
+
+export interface ChatGptSubscriptionAuth {
+	authFile: string;
+}
 
 /**
  * Everything the CLI can authenticate with, in one place.
  *
- * Either credential alone is enough to run: a Backboard sign-in unlocks the
- * routed catalog, and a single saved provider key unlocks that vendor's models
- * directly. Only having neither is fatal, which is what the startup auth screen
- * catches.
+ * Any credential source is enough to run: a Backboard sign-in unlocks the
+ * routed catalog, a ChatGPT subscription unlocks the explicit subscription
+ * provider, and a saved provider key unlocks that vendor's models directly.
+ * Only having none is fatal, which is what the startup auth screen catches.
  */
 export interface AuthState {
 	/** Present when a Backboard key is set in the env or saved config. */
 	backboard: BackboardEnv | null;
+	/** Explicit opt-in to a ChatGPT subscription credential file. */
+	chatgptSubscription: ChatGptSubscriptionAuth | null;
 	/** Saved provider keys that are currently toggled on. */
 	providerKeys: ResolvedProviderKey[];
 }
@@ -42,9 +51,15 @@ export function resolveAuth(options: ResolveAuthOptions = {}): AuthState {
 	const envApiKey = process.env.BACKBOARD_API_KEY;
 	const apiKey = isUsableApiKey(envApiKey) ? envApiKey : fileConfig.apiKey;
 	const apiUrl = resolveApiUrl(fileConfig.apiUrl);
+	const subscriptionAuthFile =
+		process.env[CHATGPT_SUBSCRIPTION_AUTH_FILE_ENV]?.trim() ??
+		fileConfig.chatgptSubscriptionAuthFile;
 
 	return {
 		backboard: apiKey ? { apiKey, apiUrl } : null,
+		chatgptSubscription: subscriptionAuthFile
+			? { authFile: subscriptionAuthFile }
+			: null,
 		// Env vars are deliberately not consulted: a provider key becomes usable
 		// only by being added through the BYOK flow or `/keys`, so what the CLI
 		// bills to is always something the user chose explicitly.
@@ -53,7 +68,11 @@ export function resolveAuth(options: ResolveAuthOptions = {}): AuthState {
 }
 
 export function hasAnyCredentials(auth: AuthState): boolean {
-	return auth.backboard !== null || auth.providerKeys.length > 0;
+	return (
+		auth.backboard !== null ||
+		auth.chatgptSubscription !== null ||
+		auth.providerKeys.length > 0
+	);
 }
 
 /** Builds the provider -> key lookup `ByokClient` and `ClientRouter` use. */

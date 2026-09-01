@@ -43,6 +43,11 @@ export function readBackboardConfig(
 			apiKey: typeof config.apiKey === "string" ? config.apiKey : undefined,
 			apiUrl:
 				typeof config.apiUrl === "string" ? config.apiUrl.trim() : undefined,
+			chatgptSubscriptionAuthFile:
+				typeof config.chatgptSubscriptionAuthFile === "string" &&
+				config.chatgptSubscriptionAuthFile.trim()
+					? config.chatgptSubscriptionAuthFile.trim()
+					: undefined,
 			model: readModelConfig(config),
 			successfulModels: readSuccessfulModels(config),
 			thinking: readThinkingConfig(config),

@@ -136,6 +136,196 @@ describe("ProviderStreamConsumer", () => {
 		expect(sink.resets).toBe(1);
 	});
 
+	it("aborts and retries a provider attempt that stops emitting events", async () => {
+		const consumer = new ProviderStreamConsumer(
+			new EventBus(),
+			new Session("sess_test"),
+			{ idleTimeoutMs: 5, maxRetries: 1 },
+		);
+		let attempts = 0;
+		let abortedAttempts = 0;
+		const result = await consumer.consumeWithRetry(
+			(signal) => {
+				attempts++;
+				if (attempts > 1) {
+					return streamOf([{ kind: "completed", finalText: "recovered" }]);
+				}
+				return (async function* () {
+					await new Promise<void>((resolve) => {
+						signal.addEventListener(
+							"abort",
+							() => {
+								abortedAttempts++;
+								resolve();
+							},
+							{ once: true },
+						);
+					});
+				})();
+			},
+			stubAssistant(),
+			new AbortController().signal,
+		);
+
+		expect(result).toBeNull();
+		expect({ attempts, abortedAttempts }).toEqual({
+			attempts: 2,
+			abortedAttempts: 1,
+		});
+	});
+
+	it("treats non-UI transport activity as watchdog progress", async () => {
+		const consumer = new ProviderStreamConsumer(
+			new EventBus(),
+			new Session("sess_test"),
+			{ idleTimeoutMs: 10, maxRetries: 1 },
+		);
+		let attempts = 0;
+		const result = await consumer.consumeWithRetry(
+			() =>
+				(async function* () {
+					attempts++;
+					// Total generation time is several watchdog windows, but every
+					// silent tool-argument fragment proves the transport is advancing.
+					for (let index = 0; index < 10; index++) {
+						await new Promise((resolve) => setTimeout(resolve, 2));
+						yield { kind: "activity" } as const;
+					}
+					yield { kind: "completed", finalText: "complete" } as const;
+				})(),
+			stubAssistant(),
+			new AbortController().signal,
+		);
+
+		expect(result).toBeNull();
+		expect(attempts).toBe(1);
+	});
+
+	it("retries when a stalled iterator ignores both abort and return", async () => {
+		const consumer = new ProviderStreamConsumer(
+			new EventBus(),
+			new Session("sess_test"),
+			{ idleTimeoutMs: 5, maxRetries: 1 },
+		);
+		let attempts = 0;
+		let returnCalls = 0;
+		const never = new Promise<IteratorResult<ProviderEvent>>(() => {});
+		const result = await consumer.consumeWithRetry(
+			() => {
+				attempts++;
+				if (attempts > 1) {
+					return streamOf([{ kind: "completed", finalText: "recovered" }]);
+				}
+				return {
+					[Symbol.asyncIterator]() {
+						return {
+							next: () => never,
+							return: () => {
+								returnCalls++;
+								return never;
+							},
+						};
+					},
+				};
+			},
+			stubAssistant(),
+			new AbortController().signal,
+		);
+
+		expect(result).toBeNull();
+		expect({ attempts, returnCalls }).toEqual({ attempts: 2, returnCalls: 1 });
+	});
+
+	it("retries when stalled iterator cleanup throws synchronously", async () => {
+		const consumer = new ProviderStreamConsumer(
+			new EventBus(),
+			new Session("sess_test"),
+			{ idleTimeoutMs: 5, maxRetries: 1 },
+		);
+		let attempts = 0;
+		const result = await consumer.consumeWithRetry(
+			() => {
+				attempts++;
+				if (attempts > 1) {
+					return streamOf([{ kind: "completed", finalText: "recovered" }]);
+				}
+				return {
+					[Symbol.asyncIterator]() {
+						return {
+							next: () => new Promise<IteratorResult<ProviderEvent>>(() => {}),
+							return: () => {
+								throw new Error("cleanup failed");
+							},
+						};
+					},
+				};
+			},
+			stubAssistant(),
+			new AbortController().signal,
+		);
+
+		expect(result).toBeNull();
+		expect(attempts).toBe(2);
+	});
+
+	it("cancels promptly when a stalled iterator ignores abort", async () => {
+		const consumer = new ProviderStreamConsumer(
+			new EventBus(),
+			new Session("sess_test"),
+			{ idleTimeoutMs: 60_000, maxRetries: 1 },
+		);
+		const controller = new AbortController();
+		let returnCalls = 0;
+		const never = new Promise<IteratorResult<ProviderEvent>>(() => {});
+		const operation = consumer.consumeWithRetry(
+			() => ({
+				[Symbol.asyncIterator]() {
+					return {
+						next: () => never,
+						return: () => {
+							returnCalls++;
+							return never;
+						},
+					};
+				},
+			}),
+			stubAssistant(),
+			controller.signal,
+		);
+		controller.abort();
+
+		await expect(operation).rejects.toBeInstanceOf(AbortError);
+		expect(returnCalls).toBe(1);
+	});
+
+	it("does not enter retry backoff when retry setup aborts the turn", async () => {
+		const consumer = new ProviderStreamConsumer(
+			new EventBus(),
+			new Session("sess_test"),
+			{ maxRetries: 1 },
+		);
+		const controller = new AbortController();
+		let attempts = 0;
+
+		await expect(
+			consumer.consumeWithRetry(
+				() => {
+					attempts++;
+					return streamOf([
+						{ kind: "failed", error: "retry later", retryable: true },
+					]);
+				},
+				stubAssistant(),
+				controller.signal,
+				undefined,
+				undefined,
+				() => controller.abort(),
+			),
+		).rejects.toBeInstanceOf(AbortError);
+
+		expect(attempts).toBe(1);
+	});
+
 	it("preserves the failed input when cancellation interrupts retry backoff", async () => {
 		const consumer = new ProviderStreamConsumer(
 			new EventBus(),

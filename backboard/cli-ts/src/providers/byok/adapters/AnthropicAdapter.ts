@@ -183,6 +183,7 @@ async function* streamAnthropic(
 			inputTokens = usage.input;
 			cachedTokens = usage.cacheRead;
 			cacheWriteTokens = usage.cacheWrite;
+			yield { kind: "activity" };
 			continue;
 		}
 
@@ -191,7 +192,10 @@ async function* streamAnthropic(
 			const block = event.content_block as
 				| { type?: string; id?: string; name?: string }
 				| undefined;
-			if (index === null || block?.type !== "tool_use") continue;
+			if (index === null || block?.type !== "tool_use") {
+				yield { kind: "activity" };
+				continue;
+			}
 			const pending: PendingToolBlock = {
 				id: block.id ?? `toolu_${index}`,
 				name: block.name ?? "",
@@ -212,7 +216,10 @@ async function* streamAnthropic(
 						partial_json?: string;
 				  }
 				| undefined;
-			if (!delta) continue;
+			if (!delta) {
+				yield { kind: "activity" };
+				continue;
+			}
 			if (delta.type === "text_delta" && delta.text) {
 				yield { kind: "assistant_delta", text: delta.text };
 				continue;
@@ -226,14 +233,21 @@ async function* streamAnthropic(
 				const pending = blocks.get(index);
 				if (pending) pending.json += delta.partial_json ?? "";
 			}
+			yield { kind: "activity" };
 			continue;
 		}
 
 		if (type === "content_block_stop") {
 			const index = numberOf(event.index);
-			if (index === null) continue;
+			if (index === null) {
+				yield { kind: "activity" };
+				continue;
+			}
 			const pending = blocks.get(index);
-			if (!pending) continue;
+			if (!pending) {
+				yield { kind: "activity" };
+				continue;
+			}
 			blocks.delete(index);
 			const input = parseToolInput(pending.json);
 			// A block cut short by the output limit holds half-written JSON.
@@ -243,6 +257,7 @@ async function* streamAnthropic(
 			// arguments are the signal available here.
 			if (input === null) {
 				truncatedCall = true;
+				yield { kind: "activity" };
 				continue;
 			}
 			const call: ProviderToolCall = {
@@ -258,12 +273,17 @@ async function* streamAnthropic(
 		if (type === "message_delta") {
 			const usage = usageOf(event);
 			if (usage.output) outputTokens = usage.output;
+			yield { kind: "activity" };
 			continue;
 		}
 
 		if (type === "message_stop") {
 			messageStopped = true;
+			yield { kind: "activity" };
+			continue;
 		}
+
+		yield { kind: "activity" };
 	}
 
 	if (!messageStopped) {

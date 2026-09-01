@@ -391,6 +391,59 @@ describe("OpenRouter catalog", () => {
 });
 
 describe("OpenRouter streaming", () => {
+	it("surfaces silent tool-argument fragments as transport activity", async () => {
+		stubStreams([
+			[
+				JSON.stringify({
+					choices: [
+						{
+							delta: {
+								tool_calls: [
+									{
+										index: 0,
+										id: "call_1",
+										function: { name: "read_file", arguments: '{"path":' },
+									},
+								],
+							},
+							finish_reason: null,
+						},
+					],
+				}),
+				JSON.stringify({
+					choices: [
+						{
+							delta: {
+								tool_calls: [
+									{
+										index: 0,
+										function: { arguments: '"a.ts"}' },
+									},
+								],
+							},
+							finish_reason: null,
+						},
+					],
+				}),
+				JSON.stringify({
+					choices: [{ delta: {}, finish_reason: "tool_calls" }],
+				}),
+				"[DONE]",
+			],
+		]);
+
+		const events = await collect(client().runMessage(request()));
+		const started = events.findIndex((event) => event.kind === "tool_started");
+		const ready = events.findIndex((event) => event.kind === "tool_ready");
+		const activityBetween = events
+			.slice(started + 1, ready)
+			.filter((event) => event.kind === "activity");
+
+		expect(started).toBeGreaterThanOrEqual(0);
+		expect(ready).toBeGreaterThan(started);
+		expect(activityBetween).toHaveLength(2);
+	});
+
 	it("sends tools, attribution, routing requirements, and reasoning", async () => {
 		const captured = stubStreams([toolTurn()]);
 
