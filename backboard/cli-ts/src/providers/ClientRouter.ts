@@ -22,10 +22,23 @@ import { byokAdapterFor } from "./byok/registry.ts";
 
 export type ClientSource = "byok" | "subscription" | "backboard";
 
+export const CHATGPT_SUBSCRIPTION_PROVIDER = "openai-subscription";
+export const CLAUDE_SUBSCRIPTION_PROVIDER = "anthropic-subscription";
+export const CHATGPT_SUBSCRIPTION_THREAD_PREFIX = "sub_";
+export const CLAUDE_SUBSCRIPTION_THREAD_PREFIX = "claude_sub_";
+
+export interface SubscriptionClientRoute {
+	client: AgentClient;
+	threadPrefix: string;
+}
+
 export interface ClientRouterDeps {
 	backboard?: AgentClient;
 	byok?: AgentClient;
+	/** @deprecated Use `subscriptions.openai-subscription` for new call sites. */
 	subscription?: AgentClient;
+	/** Subscription clients keyed by their explicit model provider id. */
+	subscriptions?: Readonly<Record<string, SubscriptionClientRoute>>;
 	/** The live `/model` selection, used to route requests that carry no thread. */
 	getModel: () => ModelRef;
 	/**
@@ -52,7 +65,10 @@ export class ClientRouter implements AgentClient {
 
 	/** Which backend owns a given model, honouring key-over-SSO precedence. */
 	sourceFor(model: ModelRef = this.deps.getModel()): ClientSource {
-		if (model.provider.trim().toLowerCase() === "openai-subscription") {
+		if (
+			isSubscriptionProvider(model.provider) ||
+			this.subscriptionForProvider(model.provider)
+		) {
 			return "subscription";
 		}
 		if (
@@ -113,7 +129,12 @@ export class ClientRouter implements AgentClient {
 	}
 
 	sourceForThread(threadId: string): ClientSource {
-		if (threadId.startsWith("sub_")) return "subscription";
+		if (
+			this.subscriptionForThread(threadId) ||
+			knownSubscriptionForThread(threadId)
+		) {
+			return "subscription";
+		}
 		return threadId.startsWith("byok_") ? "byok" : "backboard";
 	}
 
@@ -144,20 +165,16 @@ export class ClientRouter implements AgentClient {
 	 */
 	async listModels(options?: RequestOptions): Promise<ModelsListResponse> {
 		const backboardClient = this.backboard();
-		const clients = [
+		const clients: Array<{ source: ClientSource; client: AgentClient }> = [
 			...(this.deps.byok
-				? [{ source: "byok" as const, client: this.deps.byok }]
+				? [{ source: "byok", client: this.deps.byok } as const]
 				: []),
-			...(this.deps.subscription
-				? [
-						{
-							source: "subscription" as const,
-							client: this.deps.subscription,
-						},
-					]
-				: []),
+			...this.subscriptionRoutes().map(({ client }) => ({
+				source: "subscription" as const,
+				client,
+			})),
 			...(backboardClient
-				? [{ source: "backboard" as const, client: backboardClient }]
+				? [{ source: "backboard", client: backboardClient } as const]
 				: []),
 		];
 		if (clients.length === 0) return { models: [], total: 0 };
@@ -173,32 +190,17 @@ export class ClientRouter implements AgentClient {
 				"Failed to list models from every available backend.",
 			);
 		}
-		let byok: ModelsListResponse | undefined;
-		let subscription: ModelsListResponse | undefined;
-		let backboard: ModelsListResponse | undefined;
+		const models: ModelCatalogItem[] = [];
+		const seen = new Set<string>();
 		for (let index = 0; index < results.length; index++) {
 			const result = results[index];
 			const source = clients[index]?.source;
 			if (result?.status !== "fulfilled" || !source) continue;
-			if (source === "byok") byok = result.value;
-			else if (source === "subscription") subscription = result.value;
-			else backboard = result.value;
-		}
-
-		const models: ModelCatalogItem[] = [];
-		const seen = new Set<string>();
-		for (const model of byok?.models ?? []) {
-			seen.add(modelKey(model));
-			models.push({ ...model, source: "byok" });
-		}
-		for (const model of subscription?.models ?? []) {
-			if (seen.has(modelKey(model))) continue;
-			seen.add(modelKey(model));
-			models.push({ ...model, source: "subscription" });
-		}
-		for (const model of backboard?.models ?? []) {
-			if (seen.has(modelKey(model))) continue;
-			models.push({ ...model, source: "backboard" });
+			for (const model of result.value.models) {
+				if (seen.has(modelKey(model))) continue;
+				seen.add(modelKey(model));
+				models.push({ ...model, source });
+			}
 		}
 		return { models, total: models.length };
 	}
@@ -218,11 +220,11 @@ export class ClientRouter implements AgentClient {
 	}
 
 	async listThreads(options?: RequestOptions): Promise<BackboardThread[]> {
-		const clients = [
+		const clients = uniqueClients([
 			this.deps.byok,
-			this.deps.subscription,
+			...this.subscriptionRoutes().map(({ client }) => client),
 			this.backboard(),
-		].filter((client): client is AgentClient => client !== undefined);
+		]);
 		if (clients.length === 0) return [];
 		const results = await Promise.allSettled(
 			clients.map((client) => client.listThreads(options)),
@@ -282,11 +284,11 @@ export class ClientRouter implements AgentClient {
 			source === "byok"
 				? this.deps.byok
 				: source === "subscription"
-					? this.deps.subscription
+					? this.subscriptionForProvider(model.provider)?.client
 					: this.backboard();
 		if (!client) {
 			throw new Error(
-				`No backend can serve ${formatModel(model)}. Sign in with Backboard, connect a ChatGPT subscription, or add a key with /keys.`,
+				`No backend can serve ${formatModel(model)}. Sign in with Backboard, connect the required subscription, or add a key with /keys.`,
 			);
 		}
 		return client;
@@ -294,15 +296,98 @@ export class ClientRouter implements AgentClient {
 
 	/** Local clients mint distinct prefixes; Backboard ids never collide. */
 	private forThread(threadId: string): AgentClient {
-		if (threadId.startsWith("sub_")) {
-			if (this.deps.subscription) return this.deps.subscription;
-			throw new Error("This thread requires a connected ChatGPT subscription.");
+		const subscription = this.subscriptionForThread(threadId);
+		if (subscription) return subscription.client;
+		const knownSubscription = knownSubscriptionForThread(threadId);
+		if (knownSubscription) {
+			throw new Error(
+				`This thread requires a connected ${knownSubscription.label} subscription.`,
+			);
 		}
 		if (threadId.startsWith("byok_") && this.deps.byok) return this.deps.byok;
 		const backboard = this.backboard();
 		if (!threadId.startsWith("byok_") && backboard) return backboard;
 		return this.active();
 	}
+
+	private subscriptionForProvider(
+		provider: string,
+	): SubscriptionClientRoute | undefined {
+		const normalized = normalizeProvider(provider);
+		return this.subscriptionRoutes().find(
+			(route) => route.provider === normalized,
+		);
+	}
+
+	private subscriptionForThread(
+		threadId: string,
+	): (SubscriptionClientRoute & { provider: string }) | undefined {
+		return this.subscriptionRoutes()
+			.sort(
+				(left, right) => right.threadPrefix.length - left.threadPrefix.length,
+			)
+			.find((route) => threadId.startsWith(route.threadPrefix));
+	}
+
+	private subscriptionRoutes(): Array<
+		SubscriptionClientRoute & { provider: string }
+	> {
+		const routes = new Map<
+			string,
+			SubscriptionClientRoute & { provider: string }
+		>();
+		if (this.deps.subscription) {
+			routes.set(CHATGPT_SUBSCRIPTION_PROVIDER, {
+				provider: CHATGPT_SUBSCRIPTION_PROVIDER,
+				client: this.deps.subscription,
+				threadPrefix: CHATGPT_SUBSCRIPTION_THREAD_PREFIX,
+			});
+		}
+		for (const [provider, route] of Object.entries(
+			this.deps.subscriptions ?? {},
+		)) {
+			const normalized = normalizeProvider(provider);
+			if (!normalized || !route.threadPrefix) continue;
+			routes.set(normalized, { provider: normalized, ...route });
+		}
+		return [...routes.values()];
+	}
+}
+
+const KNOWN_SUBSCRIPTIONS = [
+	{
+		provider: CHATGPT_SUBSCRIPTION_PROVIDER,
+		threadPrefix: CHATGPT_SUBSCRIPTION_THREAD_PREFIX,
+		label: "ChatGPT",
+	},
+	{
+		provider: CLAUDE_SUBSCRIPTION_PROVIDER,
+		threadPrefix: CLAUDE_SUBSCRIPTION_THREAD_PREFIX,
+		label: "Claude",
+	},
+] as const;
+
+function isSubscriptionProvider(provider: string): boolean {
+	const normalized = normalizeProvider(provider);
+	return KNOWN_SUBSCRIPTIONS.some(
+		(subscription) => subscription.provider === normalized,
+	);
+}
+
+function knownSubscriptionForThread(threadId: string) {
+	return KNOWN_SUBSCRIPTIONS.find((subscription) =>
+		threadId.startsWith(subscription.threadPrefix),
+	);
+}
+
+function normalizeProvider(provider: string): string {
+	return provider.trim().toLowerCase();
+}
+
+function uniqueClients(clients: Array<AgentClient | undefined>): AgentClient[] {
+	return [
+		...new Set(clients.filter((client): client is AgentClient => !!client)),
+	];
 }
 
 function modelKey(model: ModelCatalogItem): string {

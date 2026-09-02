@@ -6,6 +6,8 @@ export interface BackboardConfigFile {
 	apiUrl?: string;
 	/** Backboard-owned or explicitly imported ChatGPT subscription token file. */
 	chatgptSubscriptionAuthFile?: string;
+	/** Whether Claude Code subscription routing is enabled for this install. */
+	claudeSubscriptionEnabled?: boolean;
 	model?: {
 		provider: string;
 		model: string;

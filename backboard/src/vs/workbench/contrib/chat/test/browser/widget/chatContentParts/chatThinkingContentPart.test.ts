@@ -522,7 +522,7 @@ suite('ChatThinkingContentPart', () => {
 			appendTool(part, createRunningToolInvocation('read_file', 'Reading package.json', 'call-1'));
 
 			const spinnerLabel = part.domNode.querySelector('.chat-thinking-spinner-label');
-			assert.ok(/^Reading package\.json · \d+s$/.test(spinnerLabel?.textContent ?? ''), 'Spinner should show the running tool label and elapsed time');
+			assert.strictEqual(spinnerLabel?.textContent, 'Reading package.json');
 		});
 
 		test('clean chat always exposes a stable reasoning or live tool status', () => {
@@ -539,27 +539,25 @@ suite('ChatThinkingContentPart', () => {
 			disposables.add(toDisposable(() => part.domNode.remove()));
 
 			assert.ok(part.domNode.querySelector('.chat-thinking-spinner-item .codicon-loading.codicon-modifier-spin'), 'Clean chat should render an animated loading icon while reasoning');
-			assert.ok(/^Reasoning · \d+s$/.test(part.domNode.querySelector('.chat-thinking-spinner-label')?.textContent ?? ''), 'Clean chat should use a stable reasoning fallback with elapsed time');
+			assert.strictEqual(part.domNode.querySelector('.chat-thinking-spinner-label')?.textContent, 'Reasoning');
 
 			appendTool(part, createRunningToolInvocation('write', 'Generating Write input…', 'call-write'));
 			const liveGroupHeader = part.domNode.querySelector('.chat-thinking-group-live > .chat-thinking-group-header');
 			const liveGroupLabel = liveGroupHeader?.querySelector('.chat-thinking-group-label')?.textContent ?? '';
-			const liveElapsed = liveGroupHeader?.querySelector('.chat-thinking-group-live-elapsed');
 			assert.strictEqual(liveGroupLabel, 'Generating Write input…');
-			assert.ok(/^ · \d+s$/.test(liveElapsed?.textContent ?? ''), 'Visible elapsed time should keep ticking separately from the announced status');
 			assert.deepStrictEqual({
 				role: liveGroupHeader?.getAttribute('role'),
 				live: liveGroupHeader?.getAttribute('aria-live'),
 				tabIndex: (liveGroupHeader as HTMLElement | null)?.tabIndex,
 				expanded: liveGroupHeader?.getAttribute('aria-expanded'),
-				elapsedHidden: liveElapsed?.getAttribute('aria-hidden'),
+				elapsed: liveGroupHeader?.querySelector('.chat-thinking-group-live-elapsed'),
 				loading: !!liveGroupHeader?.querySelector('.codicon-loading.codicon-modifier-spin'),
 			}, {
 				role: 'status',
 				live: null,
 				tabIndex: -1,
 				expanded: null,
-				elapsedHidden: 'true',
+				elapsed: null,
 				loading: true,
 			});
 
@@ -570,7 +568,7 @@ suite('ChatThinkingContentPart', () => {
 			assert.strictEqual(liveGroup?.classList.contains('chat-thinking-work-overflow-collapsed'), collapsedBefore, 'A passive live status must not retain hidden mouse/keyboard disclosure behavior');
 		});
 
-		test('completed pill shows elapsed time and step count meta', () => {
+		test('completed pill shows step count without elapsed time', () => {
 			mockConfigurationService.setUserConfiguration(ChatConfiguration.ThinkingGenerateTitles, false);
 			const part = createLivePart('**Analyzing**\nreasoning body');
 			appendTool(part, createCompletedToolInvocation('read_file', 'Read a.ts', 'call-1'));
@@ -580,10 +578,10 @@ suite('ChatThinkingContentPart', () => {
 
 			const meta = part.domNode.querySelector('.chat-thinking-title-meta');
 			assert.ok(meta, 'Completed pill should render the meta span');
-			assert.ok(/ · \d+s · 3 steps$/.test(meta.textContent ?? ''), `Meta should read "· <n>s · 3 steps" but was "${meta.textContent}"`);
+			assert.strictEqual(meta.textContent, ' · 3 steps');
 		});
 
-		test('cancelled run finalizes to "Stopped after Ns" with a circle-slash icon', () => {
+		test('cancelled run finalizes to "Stopped" with a circle-slash icon', () => {
 			const part = createLivePart('plain reasoning without a bold title', true);
 			appendTool(part, createCompletedToolInvocation('read_file', 'Read a.ts', 'call-1'));
 			appendTool(part, createCompletedToolInvocation('search_code', 'Searched for foo', 'call-2'));
@@ -592,12 +590,12 @@ suite('ChatThinkingContentPart', () => {
 
 			const label = part.domNode.querySelector('.chat-used-context-label');
 			assert.deepStrictEqual({
-				stopped: /^Stopped after \d+s/.test(label?.textContent ?? ''),
+				stopped: label?.textContent?.includes('Stopped'),
 				slashIcon: !!part.domNode.querySelector('.chat-used-context-label .codicon-circle-slash'),
 			}, {
 				stopped: true,
 				slashIcon: true,
-			}, `Cancelled pill should read "Stopped after Ns" with circle-slash (was "${label?.textContent}")`);
+			}, `Cancelled pill should read "Stopped" with circle-slash (was "${label?.textContent}")`);
 		});
 
 		test('grouped activity pills: consecutive reads summarize as "Explored N files"', () => {
@@ -723,6 +721,21 @@ suite('ChatThinkingContentPart', () => {
 			return part;
 		}
 
+		function createCleanPanelPart(thinkingText: string): ChatThinkingContentPart {
+			const context = createMockRenderContext(false);
+			context.container.classList.add('backboard-clean-chat');
+			const part = disposables.add(instantiationService.createInstance(
+				ChatThinkingContentPart,
+				createThinkingPart(thinkingText),
+				context,
+				mockMarkdownRenderer,
+				false
+			));
+			mainWindow.document.body.appendChild(part.domNode);
+			disposables.add(toDisposable(() => part.domNode.remove()));
+			return part;
+		}
+
 		function createCursorTool(toolId: string, invocationMessage: string, toolCallId: string, terminal = false): IChatToolInvocationSerialized {
 			return {
 				kind: 'toolInvocationSerialized',
@@ -744,7 +757,7 @@ suite('ChatThinkingContentPart', () => {
 			} as IChatToolInvocationSerialized;
 		}
 
-		function createCompletableCursorTool(toolId: string, invocationMessage: string, toolCallId: string, parameters: unknown = {}): { tool: IChatToolInvocation; complete: () => void } {
+		function createCompletableCursorTool(toolId: string, invocationMessage: string, toolCallId: string, parameters: unknown = {}, toolSpecificData?: IChatToolInvocation['toolSpecificData']): { tool: IChatToolInvocation; complete: () => void } {
 			const state = observableValue<IChatToolInvocation.State>('state', {
 				type: IChatToolInvocation.StateKind.Executing,
 				confirmed: { type: ToolConfirmKind.ConfirmationNotNeeded },
@@ -764,7 +777,8 @@ suite('ChatThinkingContentPart', () => {
 				isAttachedToThinking: false,
 				generatedTitle: undefined,
 				state,
-				toolSpecificDataKind: observableValue('toolSpecificDataKind', undefined),
+				toolSpecificData,
+				toolSpecificDataKind: observableValue('toolSpecificDataKind', toolSpecificData?.kind),
 				toJSON: () => ({} as IChatToolInvocationSerialized),
 			} as IChatToolInvocation;
 
@@ -803,6 +817,28 @@ suite('ChatThinkingContentPart', () => {
 			return { disclosure, nativeShell, nativeOutput };
 		}
 
+		function appendNativeCoreRead(part: ChatThinkingContentPart, suffix: string): HTMLElement {
+			const coreTool = {
+				...createCursorTool('read', 'Read renderer.ts', `call-core-read-${suffix}`),
+				toolSpecificData: {
+					kind: 'coreTool',
+					toolKind: 'read',
+					input: { path: '/workspace/renderer.ts' },
+					output: { content: 'renderer contents' },
+				},
+			} as IChatToolInvocationSerialized;
+			const detailsId = `core-tool-native-details-${suffix}`;
+			const nativeToggle = $('button.chat-core-tool-card-header', {
+				type: 'button',
+				'aria-expanded': 'false',
+				'aria-controls': detailsId,
+			}, 'Read file renderer.ts');
+			const nativeDetails = $(`div#${detailsId}.chat-core-tool-card-details`, { hidden: true }, 'renderer contents');
+			const nativeCard = $('section.chat-core-tool-card.chat-core-tool-card-read', {}, nativeToggle, nativeDetails);
+			part.appendItem(() => ({ domNode: nativeCard }), coreTool.toolId, coreTool);
+			return nativeCard;
+		}
+
 		test('shows a stable live reasoning label and finalizes it in place', () => {
 			const part = createCursorPart('Reasoning about the implementation');
 			const liveLabel = part.domNode.querySelector<HTMLElement>('.chat-thinking-cursor-reasoning-label');
@@ -811,7 +847,7 @@ suite('ChatThinkingContentPart', () => {
 				text: liveLabel?.textContent,
 				live: liveLabel?.classList.contains('chat-thinking-cursor-reasoning-live'),
 			}, {
-				text: 'Thinking 1s',
+				text: 'Thinking',
 				live: true,
 			});
 
@@ -823,12 +859,12 @@ suite('ChatThinkingContentPart', () => {
 				text: liveLabel?.textContent,
 				live: liveLabel?.classList.contains('chat-thinking-cursor-reasoning-live'),
 			}, {
-				text: 'Thought 1s',
+				text: 'Thought',
 				live: false,
 			});
 		});
 
-		test('measures each reasoning segment instead of repeating the turn duration', () => {
+		test('reasoning segments omit elapsed durations', () => {
 			const originalNow = Date.now;
 			let now = 1_000;
 			Date.now = () => now;
@@ -844,7 +880,7 @@ suite('ChatThinkingContentPart', () => {
 
 				assert.deepStrictEqual(
 					Array.from(part.domNode.querySelectorAll<HTMLElement>('.chat-thinking-cursor-reasoning-label-text')).map(label => label.textContent),
-					['Thought 4s', 'Thought 2s'],
+					['Thought', 'Thought'],
 				);
 			} finally {
 				Date.now = originalNow;
@@ -936,7 +972,7 @@ suite('ChatThinkingContentPart', () => {
 				uniqueRowCount: 600,
 				firstRow: 'call-stress-read-0',
 				lastRow: 'call-stress-write-199',
-				label: 'Edited 200 files',
+				label: 'Updated 200 files',
 			}, 'One synchronous tool burst should preserve every unique row in one group');
 			assert.ok(labelMutationCount <= 2, `Expected at most 2 label mutations for 599 appends, got ${labelMutationCount}`);
 
@@ -1148,6 +1184,112 @@ suite('ChatThinkingContentPart', () => {
 			});
 		});
 
+		test('core TodoWrite snapshots replace the previous rich card across clean transcript updates', () => {
+			const part = createCursorPart('Tracking the smoke test');
+			const createCoreTodo = (toolCallId: string, completed: boolean): IChatToolInvocationSerialized => ({
+				...createCursorTool('todo_write', 'TodoWrite', toolCallId),
+				toolSpecificData: {
+					kind: 'coreTool',
+					toolKind: 'todo',
+					input: { todos: [{ content: 'Smoke test', status: completed ? 'completed' : 'in_progress' }] },
+				},
+			});
+
+			const initialCard = $('section.chat-core-tool-card.chat-core-tool-card-todo', {}, '0 of 1 complete');
+			part.appendItem(() => ({ domNode: initialCard }), 'todo_write', createCoreTodo('call-todo-initial', false));
+			part.setupThinkingContainer(createThinkingPart('Finishing the smoke test', 'cursor-todo-followup'));
+
+			const finalCard = $('section.chat-core-tool-card.chat-core-tool-card-todo', {}, '1 of 1 complete');
+			part.appendItem(() => ({ domNode: finalCard }), 'todo_write', createCoreTodo('call-todo-final', true));
+
+			assert.deepStrictEqual({
+				cards: part.domNode.querySelectorAll('.chat-core-tool-card-todo').length,
+				visibleCard: part.domNode.querySelector('.chat-core-tool-card-todo')?.textContent,
+				supersededGroups: part.domNode.querySelectorAll('.chat-thinking-work-group-todo-superseded').length,
+				activeGroups: part.domNode.querySelectorAll('.chat-thinking-work-group:not(.chat-thinking-work-group-todo-superseded)').length,
+			}, {
+				cards: 1,
+				visibleCard: '1 of 1 complete',
+				supersededGroups: 0,
+				activeGroups: 0,
+			});
+		});
+
+		test('clean panels keep core tool native disclosures out of synthetic rows and activity groups', () => {
+			const hosts = [
+				{ name: 'transcript', part: createCursorPart('Reading the transcript renderer') },
+				{ name: 'panel', part: createCleanPanelPart('Reading the panel renderer') },
+			];
+
+			assert.deepStrictEqual(hosts.map(({ name, part }) => {
+				const nativeCard = appendNativeCoreRead(part, name);
+				const nativeToggle = nativeCard.querySelector('.chat-core-tool-card-header');
+				const row = nativeCard.closest<HTMLElement>('.chat-thinking-tool-wrapper');
+				assert.ok(row, `Expected the ${name} core card to stay mounted in its chronological tool row`);
+				return {
+					name,
+					coreRow: row.classList.contains('chat-thinking-core-tool-row'),
+					directNativeCard: row.querySelector(':scope > .chat-core-tool-card') === nativeCard,
+					nativeHeaders: row.querySelectorAll('.chat-core-tool-card > .chat-core-tool-card-header').length,
+					nativeExpanded: nativeToggle?.getAttribute('aria-expanded'),
+					syntheticSummary: row.querySelector(':scope > .chat-thinking-work-row-summary'),
+					syntheticDetails: row.querySelector(':scope > .chat-thinking-work-row-details'),
+					outerExpandable: row.classList.contains('chat-thinking-work-row-expandable'),
+					outerRole: row.getAttribute('role'),
+					outerExpanded: row.getAttribute('aria-expanded'),
+					activityGroupAncestor: row.closest('.chat-thinking-work-group'),
+					activityGroupHeaders: part.domNode.querySelectorAll('.chat-thinking-group-header').length,
+				};
+			}), [
+				{
+					name: 'transcript',
+					coreRow: true,
+					directNativeCard: true,
+					nativeHeaders: 1,
+					nativeExpanded: 'false',
+					syntheticSummary: null,
+					syntheticDetails: null,
+					outerExpandable: false,
+					outerRole: 'listitem',
+					outerExpanded: null,
+					activityGroupAncestor: null,
+					activityGroupHeaders: 0,
+				},
+				{
+					name: 'panel',
+					coreRow: true,
+					directNativeCard: true,
+					nativeHeaders: 1,
+					nativeExpanded: 'false',
+					syntheticSummary: null,
+					syntheticDetails: null,
+					outerExpandable: false,
+					outerRole: 'listitem',
+					outerExpanded: null,
+					activityGroupAncestor: null,
+					activityGroupHeaders: 0,
+				},
+			]);
+		});
+
+		test('consecutive core reads share one compact panel and reasoning starts a new panel', () => {
+			const part = createCursorPart('Reading related files');
+			const first = appendNativeCoreRead(part, 'stack-first');
+			const second = appendNativeCoreRead(part, 'stack-second');
+
+			const firstStack = first.closest<HTMLElement>('.chat-core-tool-stack-read');
+			assert.ok(firstStack, 'Expected adjacent reads to be wrapped in a shared panel');
+			assert.strictEqual(second.closest('.chat-core-tool-stack-read'), firstStack);
+			assert.strictEqual(firstStack.querySelectorAll(':scope > .chat-thinking-core-tool-row').length, 2);
+			assert.strictEqual(firstStack.getAttribute('role'), 'list');
+			assert.strictEqual(firstStack.getAttribute('aria-label'), 'Read files');
+
+			part.setupThinkingContainer(createThinkingPart('Considering the next file', 'cursor-read-stack-break'));
+			const third = appendNativeCoreRead(part, 'stack-third');
+			assert.notStrictEqual(third.closest('.chat-core-tool-stack-read'), firstStack, 'A reasoning row must end the compact read run');
+			assert.strictEqual(part.domNode.querySelectorAll('.chat-core-tool-stack-read').length, 2);
+		});
+
 		test('task progress without checklist data never exposes an empty native disclosure', () => {
 			const part = createCursorPart('Tracking work');
 			const planTool = createCursorTool('todo_write', 'TodoWrite', 'call-plan-without-items');
@@ -1217,10 +1359,10 @@ suite('ChatThinkingContentPart', () => {
 				statusWorking: row.querySelector('.chat-thinking-work-row-status')?.classList.contains('chat-thinking-work-row-status-working'),
 			}, {
 				liveGroup: true,
-				label: 'Spawned 1 edit',
+				label: 'Updating 1 file',
 				count: '1',
 				role: 'status',
-				ariaLabel: 'Spawned 1 edit',
+				ariaLabel: 'Updating 1 file',
 				ariaExpanded: null,
 				pending: true,
 				expandable: false,
@@ -1236,6 +1378,9 @@ suite('ChatThinkingContentPart', () => {
 			assert.deepStrictEqual({
 				liveGroup: group.classList.contains('chat-thinking-work-edit-live'),
 				label: header.querySelector('.chat-thinking-group-label')?.textContent,
+				headerHidden: header.classList.contains('hidden'),
+				headerDisplay: header.style.display,
+				bodyVisible: !group.classList.contains('chat-thinking-work-summary-collapsed'),
 				count: header.dataset.editCount,
 				role: header.getAttribute('role'),
 				pending: row.classList.contains('chat-thinking-cursor-edit-pending'),
@@ -1243,7 +1388,10 @@ suite('ChatThinkingContentPart', () => {
 				statusComplete: row.querySelector('.chat-thinking-work-row-status')?.classList.contains('chat-thinking-work-row-status-complete'),
 			}, {
 				liveGroup: false,
-				label: 'Edited 1 file',
+				label: 'Updated 1 file',
+				headerHidden: true,
+				headerDisplay: 'none',
+				bodyVisible: true,
 				count: undefined,
 				role: 'button',
 				pending: false,
@@ -1283,9 +1431,9 @@ suite('ChatThinkingContentPart', () => {
 			}, {
 				groups: 1,
 				liveCards: 1,
-				label: 'Spawned 3 edits',
+				label: 'Updating 3 files',
 				count: '3',
-				ariaLabel: 'Spawned 3 edits',
+				ariaLabel: 'Updating 3 files',
 				role: 'status',
 				pendingRowsMounted: 3,
 			});
@@ -1307,10 +1455,69 @@ suite('ChatThinkingContentPart', () => {
 				role: header.getAttribute('role'),
 			}, {
 				live: false,
-				label: 'Edited 3 files',
+				label: 'Updated 3 files',
 				count: undefined,
 				role: 'button',
 			});
+		});
+
+		test('provider mutation batches keep one disclosure, preserve every diff, and never merge rounds', async () => {
+			const part = createCursorPart('Applying direct writes');
+			const batchId = 'turn-1:mutation:write-a';
+			const writes = ['a', 'b', 'c'].map(name => createCompletableCursorTool(
+				'write',
+				`Write ${name}.ts`,
+				`write-${name}`,
+				{ file_path: `${name}.ts` },
+				{ kind: 'mutation', batchId, expectedFileCount: 3 },
+			));
+			for (const write of writes) {
+				part.appendItem(() => ({ domNode: $('div.cursor-test-mutation-tool', {}, 'Write') }), write.tool.toolId, write.tool);
+			}
+
+			let groups = part.domNode.querySelectorAll<HTMLElement>('.chat-thinking-work-mutation-batch');
+			assert.strictEqual(groups.length, 1);
+			assert.strictEqual(groups[0].querySelector('.chat-thinking-group-label')?.textContent, 'Updating 3 files');
+			assert.strictEqual(part.hasMutationActivityGroup(batchId), true);
+
+			for (const write of writes) {
+				write.complete();
+			}
+			const diffs = ['a', 'b', 'c'].map(name => $('div.chat-external-edit-card.cursor-test-mutation-diff', { 'data-file': name }, `Changed ${name}.ts`));
+			for (const [index, name] of ['a', 'b', 'c'].entries()) {
+				const edit: IChatExternalEdit = {
+					kind: 'externalEdit',
+					uri: URI.file(`/project/${name}.ts`),
+					editKind: 'edit',
+					undoStopId: `write-${name}`,
+					mutationBatchId: batchId,
+					mutationBatchFileCount: 3,
+				};
+				part.appendItem(() => ({ domNode: diffs[index] }), `external-${name}`, edit);
+			}
+			await new Promise<void>(resolve => mainWindow.requestAnimationFrame(() => resolve()));
+
+			groups = part.domNode.querySelectorAll<HTMLElement>('.chat-thinking-work-mutation-batch');
+			assert.strictEqual(groups.length, 1);
+			assert.strictEqual(groups[0].querySelector('.chat-thinking-group-label')?.textContent, 'Updated 3 files');
+			assert.deepStrictEqual(
+				Array.from(groups[0].querySelectorAll<HTMLElement>('.cursor-test-mutation-diff')).map(node => node.dataset.file),
+				['a', 'b', 'c'],
+			);
+
+			const nextBatch = 'turn-1:mutation:write-next';
+			const nextEdit: IChatExternalEdit = {
+				kind: 'externalEdit',
+				uri: URI.file('/project/next.ts'),
+				editKind: 'create',
+				undoStopId: 'write-next',
+				mutationBatchId: nextBatch,
+				mutationBatchFileCount: 1,
+			};
+			part.appendItem(() => ({ domNode: $('div.chat-external-edit-card.cursor-test-next-mutation-diff', {}, 'Created next.ts') }), 'external-next', nextEdit);
+			groups = part.domNode.querySelectorAll<HTMLElement>('.chat-thinking-work-mutation-batch');
+			assert.strictEqual(groups.length, 2, 'Separate provider mutation responses must never merge');
+			assert.strictEqual(groups[1].querySelector('.chat-thinking-group-label')?.textContent, 'Updated 1 file');
 		});
 
 		test('live activity group stays user-collapsed as another tool appends and completes', () => {

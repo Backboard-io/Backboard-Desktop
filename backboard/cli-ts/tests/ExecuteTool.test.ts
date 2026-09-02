@@ -3,10 +3,40 @@ import { spawnSync } from "node:child_process";
 import { access, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { EventBus } from "../src/core/bus/EventBus.ts";
 import { ExecuteTool } from "../src/tools/ExecuteTool.tsx";
 import { makeContext } from "./helpers.ts";
 
 describe("ExecuteTool process management", () => {
+	it("streams a live terminal transcript and retains the full result", async () => {
+		const bus = new EventBus();
+		const streamed: string[] = [];
+		bus.on("tool:progress", (event) => {
+			if (
+				event.data &&
+				typeof event.data === "object" &&
+				(event.data as { kind?: unknown }).kind === "terminal-output"
+			) {
+				streamed.push((event.data as { text: string }).text);
+			}
+		});
+		const result = await new ExecuteTool().execute(
+			{ command: "printf first; sleep 0.1; printf second" },
+			{
+				...makeContext(new AbortController().signal, bus),
+				toolCallId: "execute-stream",
+			},
+		);
+
+		expect(streamed.join("")).toBe("firstsecond");
+		expect(result.terminalOutput).toEqual({
+			text: "firstsecond",
+			exitCode: 0,
+			timedOut: false,
+			truncated: false,
+		});
+	});
+
 	it("rejects a command cwd outside an isolated worker worktree", async () => {
 		const tool = new ExecuteTool();
 		await expect(

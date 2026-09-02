@@ -76,6 +76,13 @@ describe("SubscriptionAuth", () => {
 				models: [{ slug: "gpt-native", priority: 1 }],
 			});
 		}) as typeof fetch;
+		let callbackResponse:
+			| {
+					body: string;
+					cacheControl: string | null;
+					referrerPolicy: string | null;
+			  }
+			| undefined;
 
 		await loginWithChatGptSubscription({
 			homeDir,
@@ -90,7 +97,12 @@ describe("SubscriptionAuth", () => {
 					"state",
 					authUrl.searchParams.get("state") ?? "",
 				);
-				await fetch(callback);
+				const response = await fetch(callback);
+				callbackResponse = {
+					body: await response.text(),
+					cacheControl: response.headers.get("cache-control"),
+					referrerPolicy: response.headers.get("referrer-policy"),
+				};
 			},
 		});
 
@@ -102,6 +114,16 @@ describe("SubscriptionAuth", () => {
 			chatgptSubscriptionAuthFile: authFile,
 			model: { provider: "openai-subscription", model: "gpt-native" },
 		});
+		expect(callbackResponse?.cacheControl).toBe("no-store");
+		expect(callbackResponse?.referrerPolicy).toBe("no-referrer");
+		expect(callbackResponse?.body).toContain(
+			'history.replaceState(null, "", "/auth/complete")',
+		);
+		expect(callbackResponse?.body).toContain("window.close()");
+		expect(callbackResponse?.body).toContain(
+			'window.location.replace("https://backboard.io")',
+		);
+		expect(callbackResponse?.body).not.toContain("authorization-code");
 		await rm(homeDir, { recursive: true, force: true });
 	});
 });

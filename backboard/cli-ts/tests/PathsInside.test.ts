@@ -23,4 +23,12 @@ describe("pathsInsideCwd", () => {
 		// A genuinely-inside path still passes.
 		expect(pathsInsideCwd(["real/new.txt"], root)).toBe(true);
 	});
+
+	it("does not auto-authorize a dangling symlink as an ordinary new file", async () => {
+		const root = await mkdtemp(join(tmpdir(), "cwd-dangling-"));
+		const outside = await mkdtemp(join(tmpdir(), "outside-dangling-"));
+		await symlink(join(outside, "not-created.txt"), join(root, "link.txt"));
+
+		expect(pathsInsideCwd(["link.txt"], root)).toBe(false);
+	});
 });

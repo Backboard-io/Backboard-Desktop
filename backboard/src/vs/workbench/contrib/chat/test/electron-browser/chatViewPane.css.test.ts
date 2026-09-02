@@ -97,6 +97,9 @@ suite('ChatViewPane CSS', () => {
 		const terminalLeadingIcon = ruleBody(chatCss, `${transcriptRoot} .chat-thinking-cursor-terminal-row .chat-terminal-thinking-collapsible > .chat-used-context-label .monaco-button > .codicon:first-child:not(.chat-collapsible-hover-chevron)`);
 		const terminalLabel = ruleBody(chatCss, `${transcriptRoot} .chat-thinking-cursor-terminal-row .chat-terminal-thinking-collapsible > .chat-used-context-label :is(.monaco-button-mdlabel, .monaco-button-label)`);
 		const terminalCode = ruleBody(chatCss, `${transcriptRoot} .chat-thinking-cursor-terminal-row .chat-terminal-thinking-collapsible > .chat-used-context-label :is(.monaco-button-mdlabel, .monaco-button-label) code`);
+		const expandedTerminalButton = ruleBody(chatCss, `${transcriptRoot} .chat-thinking-cursor-terminal-row .chat-terminal-thinking-collapsible:not(.chat-used-context-collapsed) > .chat-used-context-label .monaco-button`);
+		const expandedTerminalLabel = ruleBody(chatCss, `${transcriptRoot} .chat-thinking-cursor-terminal-row .chat-terminal-thinking-collapsible:not(.chat-used-context-collapsed) > .chat-used-context-label :is(.monaco-button-mdlabel, .monaco-button-label)`);
+		const expandedTerminalCode = ruleBody(chatCss, `${transcriptRoot} .chat-thinking-cursor-terminal-row .chat-terminal-thinking-collapsible:not(.chat-used-context-collapsed) > .chat-used-context-label :is(.monaco-button-mdlabel, .monaco-button-label) code`);
 		const terminalChevron = ruleBody(chatCss, `${transcriptRoot} .chat-thinking-cursor-terminal-row .chat-terminal-thinking-collapsible > .chat-used-context-label .chat-collapsible-hover-chevron`);
 		const terminalPreview = ruleBody(chatCss, `${transcriptRoot} .chat-thinking-cursor-terminal-row .chat-terminal-collapsed-output-preview`);
 		const expandedTerminalContent = ruleBody(chatCss, `${transcriptRoot} .chat-thinking-cursor-terminal-row .chat-terminal-thinking-collapsible:not(.chat-used-context-collapsed) > .chat-terminal-thinking-content`);
@@ -121,6 +124,14 @@ suite('ChatViewPane CSS', () => {
 		assert.match(terminalLabel, /text-overflow:\s*ellipsis/);
 		assert.match(terminalLabel, /white-space:\s*nowrap/);
 		assert.match(terminalCode, /white-space:\s*nowrap/);
+		assert.match(expandedTerminalButton, /height:\s*auto/);
+		assert.match(expandedTerminalButton, /align-items:\s*flex-start/);
+		assert.match(expandedTerminalLabel, /overflow:\s*visible/);
+		assert.match(expandedTerminalLabel, /text-overflow:\s*clip/);
+		assert.match(expandedTerminalLabel, /white-space:\s*normal/);
+		assert.match(expandedTerminalLabel, /overflow-wrap:\s*anywhere/);
+		assert.match(expandedTerminalCode, /white-space:\s*pre-wrap/);
+		assert.match(expandedTerminalCode, /overflow-wrap:\s*anywhere/);
 		assert.match(terminalChevron, /opacity:\s*0\.58/);
 		assert.match(terminalPreview, /height:\s*auto/);
 		assert.match(terminalPreview, /max-height:\s*82px/);

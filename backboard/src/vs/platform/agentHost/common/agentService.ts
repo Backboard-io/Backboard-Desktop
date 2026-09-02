@@ -506,6 +506,17 @@ export interface AuthenticateResult {
 	readonly authenticated: boolean;
 }
 
+/** A provider-owned command that does not belong to a specific session. */
+export interface IAgentCommandParams {
+	readonly provider: AgentProvider;
+	readonly command: string;
+}
+
+/** User-facing result returned by a provider-owned command. */
+export interface IAgentCommandResult {
+	readonly message: string;
+}
+
 /**
  * Canonical {@link ProtectedResourceMetadata} for the GitHub Copilot
  * resource. Shared between every agent provider that consumes a GitHub
@@ -846,6 +857,9 @@ export interface IAgent {
 	/** Available models from this provider. */
 	readonly models: IObservable<readonly IAgentModelInfo[]>;
 
+	/** Run a provider-owned account/setup command outside a session. */
+	executeCommand?(command: string): Promise<IAgentCommandResult>;
+
 	/** List persisted sessions from this provider. */
 	listSessions(): Promise<IAgentSessionMetadata[]>;
 
@@ -996,6 +1010,9 @@ export interface IAgentService {
 	 * bearer token delivery.
 	 */
 	authenticate(params: AuthenticateParams): Promise<AuthenticateResult>;
+
+	/** Run a provider-owned account/setup command outside a session. */
+	executeAgentCommand?(params: IAgentCommandParams): Promise<IAgentCommandResult>;
 
 	/** Return a bearer token previously supplied via {@link authenticate}. */
 	getAuthToken(request: IAgentHostAuthTokenRequest): string | undefined;
@@ -1330,6 +1347,9 @@ export interface IAgentHostService extends IAgentConnection {
 
 	readonly onAgentHostExit: Event<number>;
 	readonly onAgentHostStart: Event<void>;
+
+	/** Run a command on a provider hosted by this local agent host. */
+	executeAgentCommand(params: IAgentCommandParams): Promise<IAgentCommandResult>;
 
 	/**
 	 * `true` while we are in the middle of authenticating against the local

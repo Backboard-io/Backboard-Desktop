@@ -134,6 +134,22 @@ suite('AgentService (node dispatcher)', () => {
 			// No throw - success
 		});
 
+		test('routes provider-owned account commands outside a session', async () => {
+			const commands: string[] = [];
+			Object.assign(copilotAgent, {
+				executeCommand: async (command: string) => {
+					commands.push(command);
+					return { message: 'connected' };
+				},
+			});
+			service.registerProvider(copilotAgent);
+
+			const result = await service.executeAgentCommand({ provider: 'copilot', command: 'subscription.login' });
+
+			assert.deepStrictEqual(commands, ['subscription.login']);
+			assert.deepStrictEqual(result, { message: 'connected' });
+		});
+
 		test('throws on duplicate provider registration', () => {
 			service.registerProvider(copilotAgent);
 			const duplicate = new MockAgent('copilot');

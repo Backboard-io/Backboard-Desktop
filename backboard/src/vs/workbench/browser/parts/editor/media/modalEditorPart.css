@@ -50,6 +50,35 @@
 	}
 }
 
+/** Full-window editor: edge-to-edge content with editor-provided navigation. */
+.monaco-modal-editor-block.full-window {
+	background: var(--vscode-editor-background);
+
+	.modal-editor-resizable {
+		inset: 0;
+	}
+
+	.modal-editor-shadow {
+		border-radius: 0;
+		box-shadow: none;
+	}
+
+	.modal-editor-part {
+		grid-template-rows: 1fr;
+		border: 0;
+		border-radius: 0;
+	}
+
+	.modal-editor-header {
+		display: none;
+	}
+
+	.modal-editor-part > .content {
+		grid-row: 1;
+		grid-column: 1;
+	}
+}
+
 /** Modal Editor Container */
 .monaco-modal-editor-block .modal-editor-part {
 	display: grid;

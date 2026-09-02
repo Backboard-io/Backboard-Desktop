@@ -2278,6 +2278,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 							modelDescription: entry.modelDescription,
 							isFile: entry.kind === 'file',
 							isDirectory: entry.kind === 'directory',
+							_meta: entry._meta,
 						});
 					}
 				}

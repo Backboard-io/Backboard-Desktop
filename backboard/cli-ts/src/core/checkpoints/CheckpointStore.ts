@@ -9,7 +9,7 @@ import {
 	unlinkTolerant,
 } from "../../utils/fs.ts";
 import { shortId } from "../../utils/id.ts";
-import { withPathLocks } from "../../utils/pathLocks.ts";
+import { canonicalPhysicalPath, withPathLocks } from "../../utils/pathLocks.ts";
 import { isProcessAlive } from "../../utils/process.ts";
 import { EventBus } from "../bus/EventBus.ts";
 import { JsonlWriter } from "../session/JsonlWriter.ts";
@@ -46,6 +46,8 @@ const BEGIN_SKIP_FRESH_MS = 2_000;
 export interface CheckpointCallContext {
 	turnId?: string;
 	toolCallId?: string;
+	/** Number of concurrently executable calls in this provider tool batch. */
+	mutationBatchSize?: number;
 }
 
 export interface RecordPreImageOptions {
@@ -57,6 +59,20 @@ export interface RecordPreImageOptions {
 	 * must refuse a write they could not revert.
 	 */
 	requireRevertible?: boolean;
+}
+
+export interface RecordPreImageRequest {
+	absPath: string;
+	opts?: RecordPreImageOptions;
+	/** Per-request identity used when several tool calls share one batch flush. */
+	toolCallId?: string;
+}
+
+export interface RecordPostImageRequest {
+	absPath: string;
+	contentIfInMemory?: Uint8Array;
+	/** Per-request identity used when several tool calls share one batch flush. */
+	toolCallId?: string;
 }
 
 /**
@@ -76,6 +92,16 @@ export interface CheckpointRecorder {
 		ctx: CheckpointCallContext,
 		contentIfInMemory?: Uint8Array,
 	): Promise<void>;
+	/** Captures a mutation phase with one ordered durability flush. */
+	recordPreImages?(
+		requests: readonly RecordPreImageRequest[],
+		ctx: CheckpointCallContext,
+	): Promise<void>;
+	/** Records a completed mutation phase with one ordered durability flush. */
+	recordPostImages?(
+		requests: readonly RecordPostImageRequest[],
+		ctx: CheckpointCallContext,
+	): Promise<void>;
 	revertToolCall(toolCallId: string): Promise<void>;
 	/** Snapshots the workspace before a shell command (never throws). */
 	beginShellCapture(cwd: string, ctx: CheckpointCallContext): Promise<void>;
@@ -83,7 +109,47 @@ export interface CheckpointRecorder {
 	endShellCapture(ctx: CheckpointCallContext): Promise<void>;
 	/** One-shot warning when shell capture disabled itself, else null. */
 	captureWarning(): string | null;
+	/** Awaits durability of all checkpoint records enqueued so far. */
+	flush?(): Promise<void>;
 	scopedToTurn(turnId: string): CheckpointRecorder;
+}
+
+export async function recordPreImageBatch(
+	recorder: CheckpointRecorder | undefined,
+	requests: readonly RecordPreImageRequest[],
+	ctx: CheckpointCallContext,
+): Promise<void> {
+	if (!recorder || requests.length === 0) return;
+	if (recorder.recordPreImages) {
+		await recorder.recordPreImages(requests, ctx);
+		return;
+	}
+	for (const request of requests) {
+		await recorder.recordPreImage(
+			request.absPath,
+			{ ...ctx, toolCallId: request.toolCallId ?? ctx.toolCallId },
+			request.opts,
+		);
+	}
+}
+
+export async function recordPostImageBatch(
+	recorder: CheckpointRecorder | undefined,
+	requests: readonly RecordPostImageRequest[],
+	ctx: CheckpointCallContext,
+): Promise<void> {
+	if (!recorder || requests.length === 0) return;
+	if (recorder.recordPostImages) {
+		await recorder.recordPostImages(requests, ctx);
+		return;
+	}
+	for (const request of requests) {
+		await recorder.recordPostImage(
+			request.absPath,
+			{ ...ctx, toolCallId: request.toolCallId ?? ctx.toolCallId },
+			request.contentIfInMemory,
+		);
+	}
 }
 
 export function scopeCheckpointRecorder(
@@ -95,11 +161,20 @@ export function scopeCheckpointRecorder(
 			recorder.recordPreImage(absPath, { ...ctx, turnId }, opts),
 		recordPostImage: (absPath, ctx, contentIfInMemory) =>
 			recorder.recordPostImage(absPath, { ...ctx, turnId }, contentIfInMemory),
+		recordPreImages: async (requests, ctx) => {
+			await recordPreImageBatch(recorder, requests, { ...ctx, turnId });
+		},
+		recordPostImages: async (requests, ctx) => {
+			await recordPostImageBatch(recorder, requests, { ...ctx, turnId });
+		},
 		revertToolCall: (toolCallId) => recorder.revertToolCall(toolCallId),
 		beginShellCapture: (cwd, ctx) =>
 			recorder.beginShellCapture(cwd, { ...ctx, turnId }),
 		endShellCapture: (ctx) => recorder.endShellCapture({ ...ctx, turnId }),
 		captureWarning: () => recorder.captureWarning(),
+		...(recorder.flush
+			? { flush: () => recorder.flush?.() ?? Promise.resolve() }
+			: {}),
 		scopedToTurn: () => scoped,
 	};
 	return scoped;
@@ -117,6 +192,11 @@ interface DiskState {
 	hash?: string;
 	mode?: number;
 }
+
+type PendingPreImageRecord =
+	| Omit<PreImageJournalRecord, "seq" | "ts">
+	| Omit<SkipJournalRecord, "seq" | "ts">;
+type PendingPostImageRecord = Omit<PostImageJournalRecord, "seq" | "ts">;
 
 /**
  * Write-ahead pre-image journal + content-addressed blob store powering
@@ -219,27 +299,51 @@ export class CheckpointStore implements CheckpointRecorder {
 		ctx: CheckpointCallContext,
 		opts?: RecordPreImageOptions,
 	): Promise<void> {
-		const path = resolve(absPath);
-		const turnId = ctx.turnId ?? "detached";
-		const toolCallId = ctx.toolCallId ?? "unknown";
-		const tool = opts?.tool ?? "unknown";
-		this.ensureTurn(turnId);
+		await this.recordPreImages([{ absPath, opts }], ctx);
+	}
 
+	async recordPreImages(
+		requests: readonly RecordPreImageRequest[],
+		ctx: CheckpointCallContext,
+	): Promise<void> {
+		if (requests.length === 0) return;
+		const turnId = ctx.turnId ?? "detached";
+		this.ensureTurn(turnId);
+		const records = await Promise.all(
+			requests.map((request) => this.capturePreImage(request, ctx, turnId)),
+		);
+		// Write-ahead durability: every pre-image in the phase reaches disk
+		// before the first mutation. One plural call becomes one ordered JSONL
+		// append; failed records never enter the in-memory durable indexes.
+		await this.appendCapturedBatch(records);
+	}
+
+	private async capturePreImage(
+		request: RecordPreImageRequest,
+		ctx: CheckpointCallContext,
+		turnId: string,
+	): Promise<PendingPreImageRecord> {
+		const path = await canonicalPhysicalPath(request.absPath);
+		const toolCallId = request.toolCallId ?? ctx.toolCallId ?? "unknown";
+		const tool = request.opts?.tool ?? "unknown";
+		const createdDirs = request.opts?.createdDirs?.length
+			? await Promise.all(
+					request.opts.createdDirs.map((dir) => canonicalPhysicalPath(dir)),
+				)
+			: undefined;
 		const stats = await lstatOrNull(path);
 		if (!stats) {
-			this.append({
+			return {
 				type: "pre",
 				turnId,
 				toolCallId,
 				tool,
 				path,
 				existed: false,
-				...(opts?.createdDirs?.length
-					? { createdDirs: opts.createdDirs.map((dir) => resolve(dir)) }
-					: {}),
-			});
+				...(createdDirs ? { createdDirs } : {}),
+			};
 		} else if (!stats.isFile()) {
-			this.append({
+			return {
 				type: "pre",
 				turnId,
 				toolCallId,
@@ -247,27 +351,27 @@ export class CheckpointStore implements CheckpointRecorder {
 				path,
 				existed: true,
 				unsupported: true,
-			});
+			};
 		} else if (stats.size > MAX_CAPTURE_BYTES) {
-			if (opts?.requireRevertible) {
+			if (request.opts?.requireRevertible) {
 				throw new Error(
 					`Pre-image of ${path} is not capturable (${stats.size} bytes ` +
 						`exceeds the ${MAX_CAPTURE_BYTES}-byte cap), so the write could ` +
 						"not be rolled back; aborting before any modification",
 				);
 			}
-			this.append({
+			return {
 				type: "skip",
 				turnId,
 				toolCallId,
 				path,
 				reason: "too_large",
 				size: stats.size,
-			});
+			};
 		} else {
 			const content = await readFile(path);
 			const hash = await this.blobs.put(content);
-			this.append({
+			return {
 				type: "pre",
 				turnId,
 				toolCallId,
@@ -277,11 +381,8 @@ export class CheckpointStore implements CheckpointRecorder {
 				hash,
 				size: stats.size,
 				mode: stats.mode & 0o777,
-			});
+			};
 		}
-		// Write-ahead durability: the journal entry (and blob) must be on disk
-		// before the tool mutates the file. Flush errors abort the tool call.
-		await this.journal.flush();
 	}
 
 	/**
@@ -294,25 +395,36 @@ export class CheckpointStore implements CheckpointRecorder {
 		ctx: CheckpointCallContext,
 		contentIfInMemory?: Uint8Array,
 	): Promise<void> {
-		const path = resolve(absPath);
+		await this.recordPostImages([{ absPath, contentIfInMemory }], ctx);
+	}
+
+	async recordPostImages(
+		requests: readonly RecordPostImageRequest[],
+		ctx: CheckpointCallContext,
+	): Promise<void> {
+		if (requests.length === 0) return;
 		const turnId = ctx.turnId ?? "detached";
 		this.ensureTurn(turnId);
-
-		let postHash: string | null;
-		if (contentIfInMemory) {
-			postHash = sha256Hex(contentIfInMemory);
-		} else {
-			const stats = await lstatOrNull(path);
-			postHash = stats?.isFile() ? sha256Hex(await readFile(path)) : null;
-		}
-		this.append({
-			type: "post",
-			turnId,
-			toolCallId: ctx.toolCallId ?? "unknown",
-			path,
-			postHash,
-		});
-		await this.journal.flush();
+		const records = await Promise.all(
+			requests.map(async (request): Promise<PendingPostImageRecord> => {
+				const path = await canonicalPhysicalPath(request.absPath);
+				let postHash: string | null;
+				if (request.contentIfInMemory) {
+					postHash = sha256Hex(request.contentIfInMemory);
+				} else {
+					const stats = await lstatOrNull(path);
+					postHash = stats?.isFile() ? sha256Hex(await readFile(path)) : null;
+				}
+				return {
+					type: "post",
+					turnId,
+					toolCallId: request.toolCallId ?? ctx.toolCallId ?? "unknown",
+					path,
+					postHash,
+				};
+			}),
+		);
+		await this.appendCapturedBatch(records);
 	}
 
 	/**
@@ -929,14 +1041,35 @@ export class CheckpointStore implements CheckpointRecorder {
 			type: T;
 		},
 	): void {
-		const full = {
+		const full = this.materializeRecord(record);
+		this.commitRecord(full);
+		this.journal.write(full);
+	}
+
+	/**
+	 * Persists a complete capture phase before exposing any of its records to
+	 * checkpoint queries or rollback indexes. JsonlWriter serializes this single
+	 * batch append with ordinary event records and preserves their seq order.
+	 */
+	private async appendCapturedBatch(
+		records: readonly (PendingPreImageRecord | PendingPostImageRecord)[],
+	): Promise<void> {
+		const fullRecords = records.map((record) => this.materializeRecord(record));
+		await this.journal.writeBatch(fullRecords);
+		for (const record of fullRecords) this.commitRecord(record);
+	}
+
+	private materializeRecord(record: object): JournalRecord {
+		return {
 			...record,
 			seq: this.seq++,
 			ts: new Date().toISOString(),
-		} as unknown as JournalRecord;
+		} as JournalRecord;
+	}
+
+	private commitRecord(full: JournalRecord): void {
 		this.records.push(full);
 		this.indexRecord(full);
-		this.journal.write(full);
 	}
 
 	private ensureTurn(turnId: string): void {

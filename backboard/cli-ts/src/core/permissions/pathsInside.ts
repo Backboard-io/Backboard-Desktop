@@ -1,5 +1,6 @@
 import { realpathSync } from "node:fs";
 import path from "node:path";
+import { findDanglingSymlink } from "../../utils/pathSafety.ts";
 
 /** realpath of the nearest existing ancestor (target may not exist yet). */
 function nearestRealpath(target: string): string | undefined {
@@ -26,6 +27,10 @@ export function pathsInsideCwd(paths: string[], cwd: string): boolean {
 	return paths.every((candidate) => {
 		const abs = path.resolve(root, candidate);
 		if (abs !== root && !abs.startsWith(root + path.sep)) return false;
+		// Never auto-authorize a write through a dangling link. realpath() cannot
+		// distinguish that case from an ordinary new file, but writeFile() follows
+		// the link and can create its target somewhere authorization did not inspect.
+		if (findDanglingSymlink(abs)) return false;
 		if (rootReal === undefined) return true;
 		const absReal = nearestRealpath(abs);
 		if (absReal === undefined) return true;

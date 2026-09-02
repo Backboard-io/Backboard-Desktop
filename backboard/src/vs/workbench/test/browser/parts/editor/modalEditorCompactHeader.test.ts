@@ -11,19 +11,21 @@ import { IModalEditorOptions, IModalEditorOptionsProvider, isModalEditorOptionsP
 const MODAL_HEADER_HEIGHT = 33; // matches fallback in modalEditorPart.ts
 
 /**
- * Mirrors the compact-header reconciliation in `ModalEditorPart.create`:
+ * Mirrors the per-editor class reconciliation in `ModalEditorPart.create`:
  *
  *   const editorModalOptions = isModalEditorOptionsProvider(activeEditor)
  *       ? activeEditor.getModalEditorOptions()
  *       : undefined;
  *   modalElement.classList.toggle('compact-header', !!editorModalOptions?.compactHeader);
+ *   modalElement.classList.toggle('full-window', !!editorModalOptions?.fullWindow);
  *
  * and the sash height resolution which prefers the measured header height
  * over the fallback constant.
  */
-function applyCompactHeaderClass(modalElement: { classList: DOMTokenList }, activeEditor: unknown): void {
+function applyModalEditorClasses(modalElement: { classList: DOMTokenList }, activeEditor: unknown): void {
 	const editorModalOptions = isModalEditorOptionsProvider(activeEditor) ? activeEditor.getModalEditorOptions() : undefined;
 	modalElement.classList.toggle('compact-header', !!editorModalOptions?.compactHeader);
+	modalElement.classList.toggle('full-window', !!editorModalOptions?.fullWindow);
 }
 
 function resolveHeaderHeight(headerElement: { offsetHeight: number }): number {
@@ -35,7 +37,7 @@ class TestEditor implements IModalEditorOptionsProvider {
 	getModalEditorOptions(): IModalEditorOptions | undefined { return this.options; }
 }
 
-suite('Modal Editor Compact Header', () => {
+suite('Modal Editor Per-Editor Options', () => {
 
 	const disposables = new DisposableStore();
 
@@ -55,28 +57,41 @@ suite('Modal Editor Compact Header', () => {
 		const modalElement = document.createElement('div');
 
 		// No active editor → class not set
-		applyCompactHeaderClass(modalElement, undefined);
+		applyModalEditorClasses(modalElement, undefined);
 		assert.strictEqual(modalElement.classList.contains('compact-header'), false);
 
 		// Editor that doesn't implement the provider → class not set
-		applyCompactHeaderClass(modalElement, { /* not a provider */ });
+		applyModalEditorClasses(modalElement, { /* not a provider */ });
 		assert.strictEqual(modalElement.classList.contains('compact-header'), false);
 
 		// Provider returning undefined → class not set
-		applyCompactHeaderClass(modalElement, new TestEditor(undefined));
+		applyModalEditorClasses(modalElement, new TestEditor(undefined));
 		assert.strictEqual(modalElement.classList.contains('compact-header'), false);
 
 		// Provider opting out → class not set
-		applyCompactHeaderClass(modalElement, new TestEditor({ compactHeader: false }));
+		applyModalEditorClasses(modalElement, new TestEditor({ compactHeader: false }));
 		assert.strictEqual(modalElement.classList.contains('compact-header'), false);
 
 		// Provider opting in → class set
-		applyCompactHeaderClass(modalElement, new TestEditor({ compactHeader: true }));
+		applyModalEditorClasses(modalElement, new TestEditor({ compactHeader: true }));
 		assert.strictEqual(modalElement.classList.contains('compact-header'), true);
 
 		// Switching back to a non-compact editor clears the class
-		applyCompactHeaderClass(modalElement, new TestEditor({ compactHeader: false }));
+		applyModalEditorClasses(modalElement, new TestEditor({ compactHeader: false }));
 		assert.strictEqual(modalElement.classList.contains('compact-header'), false);
+	});
+
+	test('full-window class toggles based on active editor options', () => {
+		const modalElement = document.createElement('div');
+
+		applyModalEditorClasses(modalElement, undefined);
+		assert.strictEqual(modalElement.classList.contains('full-window'), false);
+
+		applyModalEditorClasses(modalElement, new TestEditor({ fullWindow: true }));
+		assert.strictEqual(modalElement.classList.contains('full-window'), true);
+
+		applyModalEditorClasses(modalElement, new TestEditor({ fullWindow: false }));
+		assert.strictEqual(modalElement.classList.contains('full-window'), false);
 	});
 
 	test('header height prefers measured offsetHeight over fallback constant', () => {

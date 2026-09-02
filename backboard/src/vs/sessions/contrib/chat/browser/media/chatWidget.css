@@ -162,7 +162,7 @@
 	gap: 0;
 	padding: 0;
 	overflow: visible;
-	--new-chat-card-radius: 20px;
+	--new-chat-card-radius: var(--bb-simple-sent-composer-radius, 15px);
 }
 
 .new-chat-composer-stack > .interactive-session {
@@ -981,12 +981,12 @@
 }
 
 .new-chat-composer-stack > .interactive-session .chat-input-container {
-	min-height: 110px;
-	padding: 10px 12px;
+	min-height: var(--bb-simple-sent-composer-min-height, 58px);
+	padding: var(--bb-simple-sent-composer-padding, 5px 8px);
 	display: flex;
 	flex-direction: column;
 	justify-content: flex-start;
-	gap: 6px;
+	gap: var(--bb-simple-sent-composer-gap, 2px);
 	overflow: hidden;
 	position: relative;
 }
@@ -1035,7 +1035,7 @@
 	display: flex;
 	padding: 0 2px;
 	flex: 0 0 auto;
-	min-height: 44px;
+	min-height: var(--bb-simple-sent-composer-editor-min-height, 22px);
 	width: 100%;
 	position: relative;
 	z-index: 2;
@@ -1043,7 +1043,7 @@
 
 .new-chat-composer-stack > .interactive-session .interactive-input-editor {
 	flex: 1 1 auto;
-	min-height: 44px;
+	min-height: var(--bb-simple-sent-composer-editor-min-height, 22px);
 	width: 100%;
 	position: relative;
 	z-index: 2;
@@ -1051,7 +1051,7 @@
 
 .new-chat-composer-stack > .interactive-session .interactive-input-editor .monaco-editor,
 .new-chat-composer-stack > .interactive-session .interactive-input-editor .overflow-guard {
-	min-height: 44px;
+	min-height: var(--bb-simple-sent-composer-editor-min-height, 22px);
 	position: relative;
 	z-index: 2;
 }
@@ -1066,6 +1066,14 @@
 
 .new-chat-composer-stack > .interactive-session .chat-input-toolbar .monaco-action-bar .actions-container {
 	width: 100%;
+}
+
+/* The sent-chat composer treats Add + Access and Model + Mic + Send as two
+ * clean control clusters without hairline separators. The new-task composer
+ * uses the same toolbar, but does not carry the sent view's
+ * `.backboard-composer` host class, so mirror that separator suppression here. */
+.new-chat-composer-stack > .interactive-session .chat-input-toolbar .monaco-action-bar .actions-container > .action-item + .action-item::before {
+	display: none;
 }
 
 .new-chat-composer-stack > .interactive-session .chat-input-toolbars > .chat-execute-toolbar {

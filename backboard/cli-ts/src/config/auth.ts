@@ -16,13 +16,20 @@ const PLACEHOLDER_API_KEYS = new Set([
 ]);
 
 export const NO_CREDENTIALS_MESSAGE =
-	"No credentials found. Sign in with Backboard, connect a ChatGPT subscription, or add a provider API key.";
+	"No credentials found. Sign in with Backboard, connect a ChatGPT or Claude subscription, or add a provider API key.";
 
 export const CHATGPT_SUBSCRIPTION_AUTH_FILE_ENV =
 	"BACKBOARD_CHATGPT_SUBSCRIPTION_AUTH_FILE";
 
+export const CLAUDE_SUBSCRIPTION_ENV = "BACKBOARD_CLAUDE_SUBSCRIPTION";
+
 export interface ChatGptSubscriptionAuth {
 	authFile: string;
+}
+
+/** Claude Code owns and refreshes its subscription credentials. */
+export interface ClaudeSubscriptionAuth {
+	enabled: true;
 }
 
 /**
@@ -38,6 +45,8 @@ export interface AuthState {
 	backboard: BackboardEnv | null;
 	/** Explicit opt-in to a ChatGPT subscription credential file. */
 	chatgptSubscription: ChatGptSubscriptionAuth | null;
+	/** Explicit opt-in to the locally authenticated Claude Code subscription. */
+	claudeSubscription: ClaudeSubscriptionAuth | null;
 	/** Saved provider keys that are currently toggled on. */
 	providerKeys: ResolvedProviderKey[];
 }
@@ -54,12 +63,16 @@ export function resolveAuth(options: ResolveAuthOptions = {}): AuthState {
 	const subscriptionAuthFile =
 		process.env[CHATGPT_SUBSCRIPTION_AUTH_FILE_ENV]?.trim() ??
 		fileConfig.chatgptSubscriptionAuthFile;
+	const claudeSubscriptionEnabled =
+		fileConfig.claudeSubscriptionEnabled === true ||
+		isEnabledFlag(process.env[CLAUDE_SUBSCRIPTION_ENV]);
 
 	return {
 		backboard: apiKey ? { apiKey, apiUrl } : null,
 		chatgptSubscription: subscriptionAuthFile
 			? { authFile: subscriptionAuthFile }
 			: null,
+		claudeSubscription: claudeSubscriptionEnabled ? { enabled: true } : null,
 		// Env vars are deliberately not consulted: a provider key becomes usable
 		// only by being added through the BYOK flow or `/keys`, so what the CLI
 		// bills to is always something the user chose explicitly.
@@ -71,6 +84,7 @@ export function hasAnyCredentials(auth: AuthState): boolean {
 	return (
 		auth.backboard !== null ||
 		auth.chatgptSubscription !== null ||
+		auth.claudeSubscription !== null ||
 		auth.providerKeys.length > 0
 	);
 }
@@ -88,4 +102,8 @@ export function providerKeyResolver(
 function isUsableApiKey(value: string | undefined): value is string {
 	const trimmed = value?.trim();
 	return Boolean(trimmed && !PLACEHOLDER_API_KEYS.has(trimmed));
+}
+
+function isEnabledFlag(value: string | undefined): boolean {
+	return ["1", "true", "yes", "on"].includes(value?.trim().toLowerCase() ?? "");
 }

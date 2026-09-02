@@ -53,6 +53,8 @@ export interface IModelPickerSetupCandidate {
 	readonly icon?: ThemeIcon;
 	/** Short row description, e.g. "Sign in to use your Claude Pro/Max subscription". */
 	readonly description?: string;
+	/** Action badge shown on the row. Defaults to Install. */
+	readonly actionLabel?: string;
 }
 
 export interface IModelPickerDelegate {

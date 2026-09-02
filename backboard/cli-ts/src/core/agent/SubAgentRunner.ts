@@ -1,10 +1,11 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { shortId } from "../../utils/id.ts";
 import { EventBus } from "../bus/EventBus.ts";
 import type { AgentEvent } from "../bus/events.ts";
 import { emptyRuleSet } from "../permissions/PermissionRules.ts";
+import type { PermissionContext } from "../permissions/types.ts";
 import { ClientEventLog } from "../session/ClientEventLog.ts";
 import { Session } from "../session/Session.ts";
 import {
@@ -122,9 +123,10 @@ export class SubAgentRunner {
 				bus,
 				tools: toolSchemas,
 				systemPrompt: params.isolatedWorkspace
-					? `${this.deps.systemPrompt}\n\nYou are running in an isolated native Git worktree at ${params.parentCwd}. This path is authoritative even if delegated prose names a different project directory. Prefer workspace-relative paths and use this worktree as the root for every file and terminal operation. Modify files only with Write, Edit, or ApplyPatch—not shell redirection, mkdir, installers, formatters, or other shell commands that mutate the checkout. Execute is read-only for the checkout; only its private scratch/cache is writable. Never read from or write to the coordinator checkout or another worker worktree.`
+					? `${this.deps.systemPrompt}\n\nYou are running in an isolated native Git worktree at ${params.parentCwd}. This path is authoritative even if delegated prose names a different project directory. Prefer workspace-relative paths and use this worktree as the root for every file and terminal operation. Modify files only with Write, Edit, or ApplyPatch—not shell redirection, mkdir, installers, formatters, or other shell commands that mutate the checkout. Execute is read-only for the checkout; only its private scratch/cache is writable. Never read from or write to the coordinator checkout or another worker worktree. Backboard automatically collects and integrates successful file-tool edits into the coordinator workspace after you finish. In your final report, describe completed edits and verification; never tell the parent to copy, merge, cherry-pick, or open files from this private worktree.`
 					: this.deps.systemPrompt,
 				model,
+				openRouterProvider: this.deps.getOpenRouterProvider?.(),
 				memory: this.deps.memory,
 				memoryProfile: this.deps.memoryProfile,
 				thinking,
@@ -168,18 +170,7 @@ export class SubAgentRunner {
 				// locked-down context (not undefined) so a missing parent can't
 				// disable the gate.
 				permissions: params.parentPermissions
-					? {
-							...params.parentPermissions,
-							// Full Access applies to the coordinator, not permission to escape a
-							// worker worktree. Auto mode keeps safe commands available while
-							// denying outside-workspace writes in a headless worker.
-							mode:
-								params.isolatedWorkspace &&
-								params.parentPermissions.mode === "bypass"
-									? "auto"
-									: params.parentPermissions.mode,
-							interactive: false,
-						}
+					? delegatedPermissions(params, params.parentPermissions)
 					: { mode: "manual", rules: emptyRuleSet(), interactive: false },
 			};
 
@@ -209,20 +200,27 @@ export class SubAgentRunner {
 					() => {},
 				);
 			}
+			// Stop projection and make the private transcript durable before
+			// announcing completion. The host reads the log on child_end; emitting
+			// first allowed it to cache a valid but truncated JSONL transcript.
+			detachParentProgress();
+			detachSessionProjection();
+			await childLog?.flush();
 			if (
+				!params.deferParentEnd &&
 				params.parentBus &&
-				params.parentToolCallId &&
-				!params.parentSignal.aborted
+				params.parentToolCallId
 			) {
+				// Cancellation suppresses child content/progress, not this one
+				// lifecycle-only terminal edge. Detached AgentSpawn workers can be
+				// cancelled after the parent turn has already finished; without an end
+				// event their persisted row remains "Running" forever.
 				params.parentBus.emit({
 					type: "agent:child_end",
 					agentToolCallId: params.parentToolCallId,
 					status: finalStatus,
 				});
 			}
-			detachParentProgress();
-			detachSessionProjection();
-			await childLog?.flush();
 			if (isolatedScratchRoot) {
 				await rm(isolatedScratchRoot, { recursive: true, force: true }).catch(
 					() => {},
@@ -267,7 +265,7 @@ export class SubAgentRunner {
 			parentBus.emit({
 				type: "agent:child_event",
 				agentToolCallId: parentToolCallId,
-				event,
+				event: projectChildEventToCoordinator(event, params),
 			});
 		};
 		const flush = (): void => {
@@ -327,4 +325,135 @@ export class SubAgentRunner {
 			flush();
 		};
 	}
+}
+
+/**
+ * Keep private worker checkout paths out of the parent transcript. The child
+ * log retains its original event; only the projected parent event uses the
+ * coordinator identity so opening a diff can never navigate the editor into a
+ * disposable hidden worktree.
+ */
+function projectChildEventToCoordinator(
+	event: AgentEvent,
+	params: SubAgentRunParams,
+): AgentEvent {
+	if (!params.isolatedWorkspace || !params.permissionCwd) return event;
+	const workerRoot = resolve(params.parentCwd);
+	const coordinatorRoot = resolve(params.permissionCwd);
+	const text = (value: string): string =>
+		replaceRootVariants(value, workerRoot, coordinatorRoot);
+	const filePath = (value: string): string => {
+		const absolute = resolve(workerRoot, value);
+		const workerRelative = relative(workerRoot, absolute);
+		return isInsideRoot(workerRelative)
+			? resolve(coordinatorRoot, workerRelative)
+			: text(value);
+	};
+
+	switch (event.type) {
+		case "assistant:delta":
+		case "assistant:reasoning":
+		case "assistant:message":
+			return { ...event, text: text(event.text) };
+		case "tool:pending":
+		case "tool:start":
+			return { ...event, inputSummary: text(event.inputSummary) };
+		case "tool:result":
+			return {
+				...event,
+				title: text(event.title),
+				...(event.detail ? { detail: text(event.detail) } : {}),
+				...(event.detailLines
+					? {
+							detailLines: event.detailLines.map((line) => ({
+								...line,
+								displayValue: text(line.displayValue),
+							})),
+						}
+					: {}),
+				...(event.fileEdits
+					? {
+							fileEdits: event.fileEdits.map((edit) => ({
+								...edit,
+								path: filePath(edit.path),
+							})),
+						}
+					: {}),
+				...(event.terminalOutput
+					? {
+							terminalOutput: {
+								...event.terminalOutput,
+								text: text(event.terminalOutput.text),
+							},
+						}
+					: {}),
+			};
+		case "tool:error":
+			return { ...event, error: text(event.error) };
+		case "system:warning":
+			return { ...event, message: text(event.message) };
+		case "run:error":
+			return { ...event, error: text(event.error) };
+		default:
+			return event;
+	}
+}
+
+function isInsideRoot(relativePath: string): boolean {
+	return (
+		!isAbsolute(relativePath) &&
+		relativePath !== ".." &&
+		!relativePath.startsWith(`..${sep}`)
+	);
+}
+
+function replaceRootVariants(
+	value: string,
+	workerRoot: string,
+	coordinatorRoot: string,
+): string {
+	let projected = value;
+	for (const [worker, coordinator] of [
+		[workerRoot, coordinatorRoot],
+		[workerRoot.replaceAll("\\", "/"), coordinatorRoot.replaceAll("\\", "/")],
+		[workerRoot.replaceAll("/", "\\"), coordinatorRoot.replaceAll("/", "\\")],
+	] as const) {
+		if (worker) projected = projected.replaceAll(worker, coordinator);
+	}
+	return projected;
+}
+
+function delegatedPermissions(
+	params: SubAgentRunParams,
+	parent: PermissionContext,
+): NonNullable<ToolContext["permissions"]> {
+	if (!params.isolatedWorkspace) return { ...parent, interactive: false };
+	const coordinatorCwd = resolve(params.permissionCwd ?? params.parentCwd);
+	const workerCwd = resolve(params.parentCwd);
+	return {
+		...parent,
+		// The parent Agent/AgentSpawn call was the interactive approval boundary.
+		// Inside its isolated checkout, ordinary file edits can now proceed while
+		// inherited deny/ask rules remain authoritative.
+		mode:
+			parent.mode === "manual"
+				? "acceptEdits"
+				: parent.mode === "bypass"
+					? "auto"
+					: parent.mode,
+		interactive: false,
+		ruleCwd: parent.ruleCwd ?? coordinatorCwd,
+		mapPathForRules: (absolutePath) => {
+			const workerRelative = relative(workerCwd, resolve(absolutePath));
+			if (
+				isAbsolute(workerRelative) ||
+				workerRelative === ".." ||
+				workerRelative.startsWith(`..${sep}`)
+			) {
+				return parent.mapPathForRules?.(absolutePath) ?? resolve(absolutePath);
+			}
+			const parentPath = resolve(coordinatorCwd, workerRelative);
+			return parent.mapPathForRules?.(parentPath) ?? parentPath;
+		},
+	};
 }

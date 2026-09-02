@@ -449,6 +449,12 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 	private readonly _pendingMessageSubscriptions = this._register(new DisposableResourceMap());
 	/** Per-session subscription watching for server-initiated turns. */
 	private readonly _serverTurnWatchers = this._register(new DisposableResourceMap());
+	/**
+	 * Detached child observers outlive the provider turn that launched them.
+	 * They remain scoped to the visible parent chat session, so closing that
+	 * session still releases every child subscription immediately.
+	 */
+	private readonly _detachedSubagentObservers = this._register(new DisposableResourceMap<DisposableStore>());
 	/** Historical turns with file edits, pending hydration into the editing session. */
 	private readonly _pendingHistoryTurns = new ResourceMap<readonly Turn[]>();
 	/** Turn IDs dispatched by this client, used to distinguish server-originated turns. */
@@ -756,6 +762,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 				this._activeSessions.delete(sessionResource);
 				this._pendingMessageSubscriptions.deleteAndDispose(sessionResource);
 				this._serverTurnWatchers.deleteAndDispose(sessionResource);
+				this._detachedSubagentObservers.deleteAndDispose(sessionResource);
 				this._pendingHistoryTurns.delete(sessionResource);
 				this._releaseSessionSubscription(resolvedSession.toString());
 			},
@@ -2038,6 +2045,32 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 				return;
 			}
 			observedSubagentToolIds.add(toolCallId);
+			if (tc._meta?.subagentDetached === true) {
+				let sessionObservers = this._detachedSubagentObservers.get(opts.sessionResource);
+				if (!sessionObservers) {
+					sessionObservers = new DisposableStore();
+					this._detachedSubagentObservers.set(opts.sessionResource, sessionObservers);
+				}
+				const childObserver = sessionObservers.add(new DisposableStore());
+				this._observeSubagentSession(
+					opts.sessionResource,
+					opts.backendSession,
+					toolCallId,
+					opts.sink,
+					childObserver,
+					observedSubagentToolIds,
+					status => {
+						const current = invocation.toolSpecificData;
+						if (current?.kind === 'subagent' && current.detached) {
+							invocation.toolSpecificData = { ...current, workerStatus: status };
+							invocation.notifyToolSpecificDataChanged();
+						}
+						// Avoid tearing down observable listeners during their own delivery.
+						queueMicrotask(() => sessionObservers?.delete(childObserver));
+					},
+				);
+				return;
+			}
 			this._observeSubagentSession(opts.sessionResource, opts.backendSession, toolCallId, opts.sink, store, observedSubagentToolIds);
 		};
 
@@ -2774,6 +2807,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 		emitProgress: (parts: IChatProgress[]) => void,
 		disposables: DisposableStore,
 		observedSet: Set<string>,
+		onTerminal?: (status: 'Completed' | 'Failed' | 'Cancelled') => void,
 	): void {
 		const childSessionUri = buildSubagentSessionUri(parentSession.toString(), parentToolCallId);
 		const childUri = URI.parse(childSessionUri);
@@ -2795,6 +2829,31 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 				}
 				return mergeSessionWithDefaultChat(session, childChatState$.read(reader));
 			});
+
+			if (onTerminal) {
+				let terminalDelivered = false;
+				disposables.add(autorun(reader => {
+					if (terminalDelivered) {
+						return;
+					}
+					const state = childState$.read(reader);
+					if (!state || state.activeTurn || state.turns.length === 0) {
+						return;
+					}
+					const lastTurn = state.turns[state.turns.length - 1];
+					const status = lastTurn.state === TurnState.Complete
+						? 'Completed'
+						: lastTurn.state === TurnState.Cancelled
+							? 'Cancelled'
+							: lastTurn.state === TurnState.Error
+								? 'Failed'
+								: undefined;
+					if (status) {
+						terminalDelivered = true;
+						onTerminal(status);
+					}
+				}));
+			}
 
 			// All turn ids observed in the child session: completed turns
 			// plus any active turn that is not also already in `turns`. Each

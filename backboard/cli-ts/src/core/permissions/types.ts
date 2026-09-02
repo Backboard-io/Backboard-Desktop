@@ -26,4 +26,8 @@ export interface PermissionContext {
 	rules: RuleSet;
 	/** False in headless mode and sub-agents: an `ask` auto-denies. */
 	interactive: boolean;
+	/** Original workspace root against which inherited path rules are resolved. */
+	ruleCwd?: string;
+	/** Maps an isolated worker path back to its coordinator identity for rules. */
+	mapPathForRules?: (absolutePath: string) => string;
 }

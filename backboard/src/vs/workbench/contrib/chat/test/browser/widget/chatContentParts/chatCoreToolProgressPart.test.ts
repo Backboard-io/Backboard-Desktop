@@ -1,0 +1,495 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+import assert from 'assert';
+import { observableValue } from '../../../../../../../base/common/observable.js';
+import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../../base/test/common/utils.js';
+import { getBackboardCoreToolKind, getCoreToolSpecificData } from '../../../../browser/agentSessions/agentHost/stateToProgressAdapter.js';
+import { ChatCoreToolProgressPart, createCoreToolCardViewModel } from '../../../../browser/widget/chatContentParts/toolInvocationParts/chatCoreToolProgressPart.js';
+import { shouldRerenderToolInvocationSubPart } from '../../../../browser/widget/chatContentParts/toolInvocationParts/chatToolInvocationPart.js';
+import { IChatCoreToolInvocationData, IChatToolInvocation, IChatToolInvocationSerialized, ToolConfirmKind } from '../../../../common/chatService/chatService.js';
+import { ToolDataSource } from '../../../../common/tools/languageModelToolsService.js';
+
+suite('ChatCoreToolProgressPart', () => {
+	const store = ensureNoDisposablesAreLeakedInTestSuite();
+
+	function createPart(data: IChatCoreToolInvocationData, options: {
+		isComplete?: boolean;
+		isConfirmed?: IChatToolInvocationSerialized['isConfirmed'];
+		pastTenseMessage?: string;
+		resultDetails?: IChatToolInvocationSerialized['resultDetails'];
+	} = {}): ChatCoreToolProgressPart {
+		const serializedInvocation: IChatToolInvocationSerialized = {
+			presentation: undefined,
+			toolSpecificData: data,
+			originMessage: undefined,
+			invocationMessage: `Running ${data.toolKind}`,
+			pastTenseMessage: options.pastTenseMessage ?? `Ran ${data.toolKind}`,
+			resultDetails: options.resultDetails,
+			isConfirmed: options.isConfirmed ?? { type: ToolConfirmKind.ConfirmationNotNeeded },
+			isComplete: options.isComplete ?? true,
+			toolCallId: `call-${data.toolKind}`,
+			toolId: data.toolKind,
+			source: ToolDataSource.Internal,
+			kind: 'toolInvocationSerialized',
+		};
+		const invocation: IChatToolInvocation | IChatToolInvocationSerialized = options.isComplete === false ? {
+			presentation: undefined,
+			toolSpecificData: data,
+			toolSpecificDataKind: observableValue('toolSpecificDataKind', data.kind),
+			originMessage: undefined,
+			invocationMessage: `Running ${data.toolKind}`,
+			pastTenseMessage: options.pastTenseMessage,
+			state: observableValue('state', {
+				type: IChatToolInvocation.StateKind.Executing,
+				parameters: data.input,
+				confirmed: { type: ToolConfirmKind.ConfirmationNotNeeded },
+				progress: observableValue('progress', { progress: undefined }),
+			}),
+			toolCallId: `call-${data.toolKind}`,
+			toolId: data.toolKind,
+			source: ToolDataSource.Internal,
+			isAttachedToThinking: false,
+			kind: 'toolInvocation',
+			toJSON: () => serializedInvocation,
+		} : serializedInvocation;
+		return store.add(new ChatCoreToolProgressPart(invocation, data));
+	}
+
+	test('recognizes the explicit cli-ts core-tool kind table', () => {
+		const toolKinds = [
+			'read',
+			'grep',
+			'glob',
+			'fetchUrl',
+			'webSearch',
+			'todo',
+			'computer',
+			'browser',
+			'findSkill',
+			'findMcp',
+		] as const;
+
+		assert.deepStrictEqual(
+			toolKinds.map(backboardToolKind => getBackboardCoreToolKind({ _meta: { source: 'cli-ts', backboardToolKind } })),
+			toolKinds,
+		);
+
+		const viewModels = toolKinds.map(toolKind => createCoreToolCardViewModel({
+			kind: 'coreTool',
+			toolKind,
+			input: 42,
+			output: ['malformed'],
+		}));
+		assert.deepStrictEqual({
+			toolKinds: viewModels.map(viewModel => viewModel.toolKind),
+			haveTitles: viewModels.every(viewModel => viewModel.title.length > 0),
+			haveIcons: viewModels.every(viewModel => viewModel.icon.id.length > 0),
+			failed: viewModels.map(viewModel => viewModel.failed),
+		}, {
+			toolKinds,
+			haveTitles: true,
+			haveIcons: true,
+			failed: toolKinds.map(() => false),
+		});
+	});
+
+	test('requires the cli-ts source marker and a recognized string kind', () => {
+		assert.deepStrictEqual([
+			getBackboardCoreToolKind({}),
+			getBackboardCoreToolKind({ _meta: { backboardToolKind: 'read' } }),
+			getBackboardCoreToolKind({ _meta: { source: 'mcp', backboardToolKind: 'read' } }),
+			getBackboardCoreToolKind({ _meta: { source: 'cli-ts' } }),
+			getBackboardCoreToolKind({ _meta: { source: 'cli-ts', backboardToolKind: 1 } }),
+			getBackboardCoreToolKind({ _meta: { source: 'cli-ts', backboardToolKind: 'unknown' } }),
+		], [undefined, undefined, undefined, undefined, undefined, undefined]);
+	});
+
+	test('builds reload-safe data and tolerates malformed JSON input', () => {
+		assert.deepStrictEqual(getCoreToolSpecificData({
+			_meta: { source: 'cli-ts', backboardToolKind: 'read' },
+			toolInput: '{not-json',
+			structuredContent: {
+				backboardTool: { text: 'contents', uiTruncated: true },
+			},
+		}), {
+			kind: 'coreTool',
+			toolKind: 'read',
+			input: '{not-json',
+			output: { text: 'contents', uiTruncated: true },
+			uiTruncated: true,
+		});
+	});
+
+	test('normalizes malformed card fields without exposing unsafe links', () => {
+		const viewModel = createCoreToolCardViewModel({
+			kind: 'coreTool',
+			toolKind: 'webSearch',
+			input: ['unexpected'],
+			output: {
+				results: [null, 'unexpected', { title: 'Safe result', url: 'javascript:alert(1)' }],
+				success: 'not-a-boolean',
+			},
+		});
+
+		assert.deepStrictEqual({
+			toolKind: viewModel.toolKind,
+			items: viewModel.items?.map(item => ({ title: item.title, href: item.href })),
+			failed: viewModel.failed,
+			uiTruncated: viewModel.uiTruncated,
+		}, {
+			toolKind: 'webSearch',
+			items: [{ title: 'Safe result', href: undefined }],
+			failed: false,
+			uiTruncated: false,
+		});
+	});
+
+	test('gives every core tool a distinct compact summary and useful detail shape', () => {
+		const cards: IChatCoreToolInvocationData[] = [
+			{ kind: 'coreTool', toolKind: 'read', input: { path: '/workspace/read.ts' }, output: { content: 'read body' } },
+			{ kind: 'coreTool', toolKind: 'grep', input: { pattern: 'TODO' }, output: { matches: '/workspace/read.ts:1: TODO' } },
+			{ kind: 'coreTool', toolKind: 'glob', input: { patterns: ['**/*.ts'] }, output: { files: ['a.ts', 'b.ts'] } },
+			{ kind: 'coreTool', toolKind: 'fetchUrl', input: { url: 'https://example.com/api' }, output: { text: 'response body' } },
+			{ kind: 'coreTool', toolKind: 'webSearch', input: { query: 'native tool cards' }, output: { results: [{ title: 'First result', url: 'https://example.com/result' }] } },
+			{ kind: 'coreTool', toolKind: 'todo', output: { todos: [{ content: 'Done', status: 'completed' }, { content: 'Next', status: 'in_progress' }] } },
+			{ kind: 'coreTool', toolKind: 'computer', input: { actions: [{ action: 'click' }] }, output: { results: [{ success: true }] } },
+			{ kind: 'coreTool', toolKind: 'browser', input: { actions: [{ action: 'navigate', url: 'https://example.com/docs' }] }, output: { results: [{ success: true }] } },
+			{ kind: 'coreTool', toolKind: 'findSkill', input: { skill: 'testing' }, output: { candidates: [{ name: 'test-helper' }] } },
+			{ kind: 'coreTool', toolKind: 'findMcp', input: { server: 'issues' }, output: { candidates: [{ title: 'GitHub' }] } },
+		];
+
+		assert.deepStrictEqual(cards.map(data => {
+			const viewModel = createCoreToolCardViewModel(data);
+			return {
+				toolKind: viewModel.toolKind,
+				title: viewModel.title,
+				summary: viewModel.summary,
+				detail: viewModel.preview?.text ?? viewModel.items?.map(item => item.title).join('|'),
+			};
+		}), [
+			{ toolKind: 'read', title: 'Read file', summary: '/workspace/read.ts', detail: 'read body' },
+			{ toolKind: 'grep', title: 'Search file contents', summary: 'TODO', detail: '/workspace/read.ts:1: TODO' },
+			{ toolKind: 'glob', title: 'Find files', summary: '**/*.ts', detail: 'a.ts|b.ts' },
+			{ toolKind: 'fetchUrl', title: 'Fetch URL', summary: 'example.com/api', detail: 'response body' },
+			{ toolKind: 'webSearch', title: 'Search the web', summary: 'native tool cards', detail: 'First result' },
+			{ toolKind: 'todo', title: 'Task progress', summary: '1 of 2 complete', detail: 'Done|Next' },
+			{ toolKind: 'computer', title: 'Computer actions', summary: '1 action', detail: 'Click' },
+			{ toolKind: 'browser', title: 'Browser actions', summary: 'example.com/docs', detail: 'Navigate' },
+			{ toolKind: 'findSkill', title: 'Find a skill', summary: 'testing', detail: 'test-helper' },
+			{ toolKind: 'findMcp', title: 'Find an MCP server', summary: 'issues', detail: 'GitHub' },
+		]);
+	});
+
+	test('keeps verbose results behind one compact native disclosure without a metric grid', () => {
+		const verboseMarker = 'VERBOSE_RESULT_ONLY';
+		const part = createPart({
+			kind: 'coreTool',
+			toolKind: 'read',
+			input: { path: '/workspace/read.ts', offset: 5, limit: 100 },
+			output: { content: `${verboseMarker}\nconst answer = 42;`, totalLines: 240 },
+		});
+		const disclosure = part.domNode.querySelector<HTMLButtonElement>(':scope > button.chat-core-tool-card-header');
+		const controlledId = disclosure?.getAttribute('aria-controls');
+		const details = controlledId ? part.domNode.querySelector<HTMLElement>(`#${controlledId}`) : undefined;
+
+		assert.deepStrictEqual({
+			root: part.domNode.classList.contains('chat-core-tool-card'),
+			type: disclosure?.type,
+			expanded: disclosure?.getAttribute('aria-expanded'),
+			hasControlledId: !!controlledId,
+			controlsDetails: details?.classList.contains('chat-core-tool-card-details'),
+			detailsHidden: details?.hidden,
+			summary: disclosure?.querySelector('.chat-core-tool-card-summary')?.textContent,
+			subtitle: disclosure?.querySelector('.chat-core-tool-card-subtitle')?.textContent,
+			verboseInSummary: disclosure?.textContent?.includes(verboseMarker),
+			verboseInDetails: details?.textContent?.includes(verboseMarker),
+			metricGrids: part.domNode.querySelectorAll('dl').length,
+		}, {
+			root: true,
+			type: 'button',
+			expanded: 'false',
+			hasControlledId: true,
+			controlsDetails: true,
+			detailsHidden: true,
+			summary: '/workspace/read.ts',
+			subtitle: 'Starts at: 5 · Limit: 100',
+			verboseInSummary: false,
+			verboseInDetails: true,
+			metricGrids: 0,
+		});
+
+		disclosure?.click();
+		assert.deepStrictEqual({ expanded: disclosure?.getAttribute('aria-expanded'), detailsHidden: details?.hidden }, { expanded: 'true', detailsHidden: false });
+		disclosure?.click();
+		assert.deepStrictEqual({ expanded: disclosure?.getAttribute('aria-expanded'), detailsHidden: details?.hidden }, { expanded: 'false', detailsHidden: true });
+	});
+
+	test('shows empty-result copy and counts only after a successful completion', () => {
+		const running = createPart({
+			kind: 'coreTool',
+			toolKind: 'read',
+			input: { path: '/workspace/running.ts' },
+			output: { totalLines: 240 },
+		}, { isComplete: false });
+		const errored = createPart({
+			kind: 'coreTool',
+			toolKind: 'grep',
+			input: { pattern: 'needle' },
+			output: { matchCount: 8 },
+		}, {
+			resultDetails: {
+				input: '{"pattern":"needle"}',
+				output: [{ type: 'embed', value: 'Search failed', isText: true }],
+				isError: true,
+			},
+		});
+		const cancelled = createPart({
+			kind: 'coreTool',
+			toolKind: 'glob',
+			input: { patterns: ['**/*.ts'] },
+			output: { count: 4, files: [] },
+		}, { isConfirmed: { type: ToolConfirmKind.Denied } });
+
+		assert.deepStrictEqual([running, errored, cancelled].map(part => ({
+			outcome: ['running', 'error', 'cancelled'].find(outcome => part.domNode.classList.contains(`chat-core-tool-card-${outcome}`)),
+			subtitle: part.domNode.querySelector('.chat-core-tool-card-subtitle')?.textContent,
+			count: part.domNode.querySelector('.chat-core-tool-card-count')?.textContent,
+			alert: part.domNode.querySelector('[role="alert"]')?.textContent,
+		})), [
+			{ outcome: 'running', subtitle: undefined, count: undefined, alert: undefined },
+			{ outcome: 'error', subtitle: undefined, count: undefined, alert: 'Search failed' },
+			{ outcome: 'cancelled', subtitle: undefined, count: undefined, alert: undefined },
+		]);
+		assert.strictEqual([running, errored, cancelled].some(part => /read successfully|no matching lines|no files matched/i.test(part.domNode.textContent ?? '')), false);
+		assert.strictEqual(errored.domNode.querySelector('[role="alert"]')?.classList.contains('chat-core-tool-card-error-message'), true);
+		assert.strictEqual(errored.domNode.classList.contains('chat-core-tool-card-error-message'), false, 'Error message styling must not apply to the whole card');
+	});
+
+	test('keeps failed reads to one compact row while preserving the full diagnostic', () => {
+		const rawError = "Error: ENOENT: no such file or directory, stat '/workspace/missing.html'";
+		const part = createPart({
+			kind: 'coreTool',
+			toolKind: 'read',
+			input: { path: '/workspace/missing.html' },
+			output: { success: false, error: rawError },
+		});
+		const alert = part.domNode.querySelector<HTMLElement>('[role="alert"]');
+
+		assert.deepStrictEqual({
+			subtitle: part.domNode.querySelector('.chat-core-tool-card-subtitle')?.textContent,
+			subtitleIsError: part.domNode.querySelector('.chat-core-tool-card-subtitle')?.classList.contains('chat-core-tool-card-subtitle-error'),
+			statusTitle: part.domNode.querySelector('.chat-core-tool-card-status')?.getAttribute('title'),
+			alert: alert?.textContent,
+			alertIsVisuallyHidden: alert?.classList.contains('chat-core-tool-card-visually-hidden'),
+		}, {
+			subtitle: 'File not found',
+			subtitleIsError: true,
+			statusTitle: rawError,
+			alert: rawError,
+			alertIsVisuallyHidden: true,
+		});
+	});
+
+	test('uses the provider completion message for unsuccessful discovery outcomes', () => {
+		const findSkill = createPart({
+			kind: 'coreTool',
+			toolKind: 'findSkill',
+			input: { skill: 'release helper' },
+			output: { candidates: [] },
+		}, { pastTenseMessage: 'Skill activation was declined' });
+		const findMcp = createPart({
+			kind: 'coreTool',
+			toolKind: 'findMcp',
+			input: { server: 'issue tracker' },
+			output: { candidates: [] },
+		}, { pastTenseMessage: 'MCP server is unavailable' });
+
+		assert.deepStrictEqual([findSkill, findMcp].map(part => part.domNode.querySelector('.chat-core-tool-card-subtitle')?.textContent), [
+			'Skill activation was declined',
+			'MCP server is unavailable',
+		]);
+		assert.strictEqual(findSkill.domNode.textContent?.includes('No matching skill was found.'), false);
+		assert.strictEqual(findMcp.domNode.textContent?.includes('No matching MCP server was found.'), false);
+	});
+
+	test('renders redacted image reads as useful metadata without requiring image bytes', () => {
+		const part = createPart({
+			kind: 'coreTool',
+			toolKind: 'read',
+			input: { path: '/workspace/screenshot.png' },
+			output: {
+				filePath: '/workspace/screenshot.png',
+				contentType: 'image',
+				mimeType: 'image/png',
+				sizeBytes: 2_048,
+			},
+		});
+		const viewModel = createCoreToolCardViewModel({
+			kind: 'coreTool',
+			toolKind: 'read',
+			output: { contentType: 'image', mimeType: 'image/png', sizeBytes: 2_048 },
+		});
+
+		assert.deepStrictEqual({
+			metrics: viewModel.metrics?.map(metric => ({ label: metric.label, value: metric.value })),
+			subtitle: part.domNode.querySelector('.chat-core-tool-card-subtitle')?.textContent,
+			images: part.domNode.querySelectorAll('img').length,
+			hasDisclosure: !!part.domNode.querySelector('[aria-expanded]'),
+		}, {
+			metrics: [{ label: 'Type', value: 'PNG image' }, { label: 'Size', value: '2 KB' }],
+			subtitle: 'Type: PNG image · Size: 2 KB',
+			images: 0,
+			hasDisclosure: false,
+		});
+	});
+
+	test('shows redacted automation metadata and marks an unexecuted final action skipped', () => {
+		const part = createPart({
+			kind: 'coreTool',
+			toolKind: 'computer',
+			input: {
+				actions: [
+					{ action: 'click', target: { elementId: 'submit' }, button: 'left' },
+					{ action: 'type', target: { x: 12, y: 34 }, textLength: 8, mode: 'replace' },
+				],
+			},
+			output: {
+				results: [{
+					success: true,
+					verification: 'passed',
+					observation: {
+						appName: 'Backboard',
+						windowTitle: 'Agent task',
+						imageSize: { width: 1_280, height: 720 },
+						elementCount: 17,
+						imageMediaType: 'image/png',
+						screenshotPath: '/redacted/screenshot.png',
+					},
+				}],
+			},
+		});
+		part.domNode.querySelector<HTMLButtonElement>('.chat-core-tool-card-header')?.click();
+		const rows = [...part.domNode.querySelectorAll('.chat-core-tool-card-item')];
+
+		assert.deepStrictEqual(rows.map(row => ({
+			title: row.querySelector('.chat-core-tool-card-item-title')?.textContent,
+			detail: row.querySelector('.chat-core-tool-card-item-detail')?.textContent,
+			state: row.querySelector('.chat-core-tool-card-visually-hidden')?.textContent,
+			markerHidden: row.querySelector('.chat-core-tool-card-item-marker')?.getAttribute('aria-hidden'),
+		})), [
+			{
+				title: 'Click',
+				detail: 'Element submit · left · Verified · Backboard · Agent task · 1280×720 · 17 elements · PNG image · /redacted/screenshot.png',
+				state: 'Completed',
+				markerHidden: 'true',
+			},
+			{
+				title: 'Type text',
+				detail: '(12, 34) · 8 characters · replace',
+				state: 'Skipped',
+				markerHidden: 'true',
+			},
+		]);
+		assert.strictEqual(part.domNode.querySelectorAll('img').length, 0);
+	});
+
+	test('uses descriptive compact count labels without redundant group semantics', () => {
+		const parts = [
+			createPart({ kind: 'coreTool', toolKind: 'read', output: { totalLines: 240 } }),
+			createPart({ kind: 'coreTool', toolKind: 'grep', output: { matchCount: 8 } }),
+			createPart({ kind: 'coreTool', toolKind: 'glob', output: { files: ['a.ts', 'b.ts'] } }),
+			createPart({ kind: 'coreTool', toolKind: 'fetchUrl', input: { url: 'https://example.com' }, output: { status: 200 } }),
+			createPart({ kind: 'coreTool', toolKind: 'webSearch', output: { results: [{ title: 'One' }] } }),
+			createPart({ kind: 'coreTool', toolKind: 'findMcp', output: { toolNames: ['read', 'write', 'search'] } }),
+		];
+
+		assert.deepStrictEqual(parts.map(part => ({
+			count: part.domNode.querySelector('.chat-core-tool-card-count')?.textContent,
+			countLabel: part.domNode.querySelector('.chat-core-tool-card-count')?.getAttribute('aria-label'),
+			groupRoles: part.domNode.querySelectorAll('[role="group"]').length,
+		})), [
+			{ count: '240 lines', countLabel: 'Lines: 240', groupRoles: 0 },
+			{ count: '8 matches', countLabel: 'Matches: 8', groupRoles: 0 },
+			{ count: '2 files', countLabel: 'Files: 2', groupRoles: 0 },
+			{ count: 'HTTP 200', countLabel: 'HTTP status: 200', groupRoles: 0 },
+			{ count: '1 result', countLabel: 'Results: 1', groupRoles: 0 },
+			{ count: '3 tools', countLabel: 'Tools: 3', groupRoles: 0 },
+		]);
+	});
+
+	test('provides accessible text for task item states', () => {
+		const part = createPart({
+			kind: 'coreTool',
+			toolKind: 'todo',
+			output: {
+				todos: [
+					{ content: 'Queued', status: 'pending' },
+					{ content: 'Working', status: 'in_progress' },
+					{ content: 'Finished', status: 'completed' },
+				],
+			},
+		});
+		part.domNode.querySelector<HTMLButtonElement>('.chat-core-tool-card-header')?.click();
+
+		assert.deepStrictEqual([...part.domNode.querySelectorAll('.chat-core-tool-card-item')].map(row => ({
+			title: row.querySelector('.chat-core-tool-card-item-title')?.textContent,
+			state: row.querySelector('.chat-core-tool-card-visually-hidden')?.textContent,
+			markerHidden: row.querySelector('.chat-core-tool-card-item-marker')?.getAttribute('aria-hidden'),
+		})), [
+			{ title: 'Queued', state: 'Pending', markerHidden: 'true' },
+			{ title: 'Working', state: 'In progress', markerHidden: 'true' },
+			{ title: 'Finished', state: 'Completed', markerHidden: 'true' },
+		]);
+	});
+
+	test('prefers reconciled todo output over the requested input state', () => {
+		const viewModel = createCoreToolCardViewModel({
+			kind: 'coreTool',
+			toolKind: 'todo',
+			input: { todos: [{ content: 'Inspect renderer', status: 'pending' }] },
+			output: { todos: [{ content: 'Inspect renderer', status: 'completed' }] },
+		});
+
+		assert.strictEqual(viewModel.items?.[0]?.state, 'complete');
+		assert.strictEqual(viewModel.summary, '1 of 1 complete');
+	});
+
+	test('does not claim the existing terminal or Write render paths', () => {
+		assert.deepStrictEqual([
+			getCoreToolSpecificData({
+				_meta: { source: 'cli-ts', toolKind: 'terminal', backboardToolKind: 'terminal' },
+				toolInput: '{"command":"pwd"}',
+			}),
+			getCoreToolSpecificData({
+				_meta: { source: 'cli-ts', toolKind: 'edit', backboardToolKind: 'write' },
+				toolInput: '{"path":"notes.md"}',
+			}),
+		], [undefined, undefined]);
+	});
+
+	test('rerenders live core-tool and terminal payload replacements only', () => {
+		const state = { type: IChatToolInvocation.StateKind.Executing } as IChatToolInvocation.State;
+		const rerendersForReplacement = (dataKind: string, previousData: object, nextData: object) => shouldRerenderToolInvocationSubPart({
+			state,
+			dataKind,
+			data: previousData,
+		}, {
+			state,
+			dataKind,
+			data: nextData,
+		});
+
+		assert.deepStrictEqual({
+			coreTool: rerendersForReplacement('coreTool', { output: 'before' }, { output: 'after' }),
+			terminal: rerendersForReplacement('terminal', { output: 'before' }, { output: 'after' }),
+			generic: rerendersForReplacement('generic', { output: 'before' }, { output: 'after' }),
+		}, {
+			coreTool: true,
+			terminal: true,
+			generic: false,
+		});
+	});
+});

@@ -5,6 +5,8 @@ import {
 	type PromptContext,
 	type PromptModule,
 } from "../../../PromptModule.ts";
+import { agentSpawn } from "../../../tools/agentSpawn.tsx";
+import { agentWait } from "../../../tools/agentWait.tsx";
 
 const read = definePrompt(buildReadPrompt(), buildReadPrompt);
 const write = definePrompt(buildWritePrompt(), buildWritePrompt);
@@ -36,6 +38,8 @@ export const toolPrompts: Record<string, PromptModule> = {
 	computer,
 	browser,
 	agent,
+	agent_spawn: agentSpawn,
+	agent_wait: agentWait,
 };
 
 function buildReadPrompt(context: PromptContext = {}): string {
@@ -62,7 +66,8 @@ Behavior:
 function buildWritePrompt(context: PromptContext = {}): string {
 	return `Write complete file contents.
 
-Use this for new files or intentional full-file replacement.${hasTool(context, "Edit") ? " Prefer edit for small changes to existing files." : ""}${hasTool(context, "ApplyPatch") ? " Prefer apply_patch when you need a reviewable patch or multiple file operations." : ""}
+Use this primarily for new files. For an existing file, do not use write unless nearly all content must be replaced and a targeted edit or patch cannot express the change.${hasTool(context, "Edit") ? " Batch targeted changes into one edit call instead." : ""}${hasTool(context, "ApplyPatch") ? " Prefer apply_patch for reviewable or multi-file changes." : ""}
+Re-emitting a large existing file delays execution because the complete content must be generated before the write can begin.
 
 Behavior:
 - Creates missing parent directories when possible.
@@ -353,9 +358,11 @@ Actions: screenshot, navigate, click, type, key, wait.`.trim();
 }
 
 function buildAgentPrompt(): string {
-	return `Delegate an isolated investigation or analysis task to a sub-agent.
+	return `Delegate an isolated investigation or implementation task to a sub-agent and block until its final report is ready. Use AgentSpawn plus a later AgentWait when useful parent work can continue before the result is needed.
 
-Use this when parallel exploration would save time, the question is broad enough to isolate, or a large input needs distillation. The sub-agent returns only a final report; its intermediate steps are not visible to the user.
+Optimize for wall-clock completion time, not agent count. Use direct file tools for ordinary coding, known changes across roughly 1-10 files, tightly coupled work, and edits to shared core files. Batch independent direct tool calls in one assistant turn instead of delegating them merely because several files are involved.
+
+Always honor an explicit user request for sub-agents. Otherwise, delegate only when independent research or two to four coarse workstreams have clear non-overlapping ownership and their parallel model-time savings should exceed worker startup and integration overhead. Prefer read-only workers for independent investigation. The sub-agent returns only a final report; its intermediate steps are not visible to the user.
 
 For parallel work, issue multiple Agent calls in the same assistant turn instead of waiting for one result before spawning the next. Set \`read_only: true\` for investigation-only workers; the runtime enforces non-mutating tools and may start them while this response is still streaming.
 

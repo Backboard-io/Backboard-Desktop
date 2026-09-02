@@ -29,9 +29,10 @@ export interface WorkerWorkspaceRecord {
 	branch?: string;
 	worktreePath?: string;
 	/**
-	 * A terminal no-op worker is removed eagerly and must not be recreated during
-	 * recovery or unarchive. Undefined is treated as `present` for version-1
-	 * records written before this field existed.
+	 * A clean terminal worker is removed eagerly and must not be recreated during
+	 * recovery or unarchive. This covers failed/cancelled no-op workers and
+	 * successfully integrated workers. Undefined is treated as `present` for
+	 * version-1 records written before this field existed.
 	 */
 	worktreeDisposition?: WorkerWorktreeDisposition;
 	worktreeCleanedAt?: string;
@@ -76,6 +77,14 @@ export interface WorkerWorkspaceRunParams {
 	coordinatorCwd: string;
 	signal: AbortSignal;
 	onProgress?: (record: WorkerWorkspaceRecord) => void;
+	onTiming?: (
+		phase:
+			| "worker_queued"
+			| "worktree_ready"
+			| "result_capture"
+			| "integration",
+		durationMs: number,
+	) => void;
 }
 
 export interface PreparedWorkerWorkspace {

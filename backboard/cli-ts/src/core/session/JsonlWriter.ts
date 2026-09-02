@@ -9,27 +9,49 @@ import { appendLine } from "../../utils/fs.ts";
  */
 export class JsonlWriter {
 	private tail: Promise<void>;
+	private failed = false;
+	private firstError: unknown;
 
 	constructor(private readonly filePath: string) {
-		this.tail = ensureAppendBoundary(filePath);
-		this.observeTail();
+		// Keep the serialization queue usable after an I/O error so later records
+		// remain ordered and observable, while retaining the first failure as a
+		// sticky durability error that every writeBatch()/flush() reports.
+		this.tail = ensureAppendBoundary(filePath).catch((error) => {
+			this.rememberFailure(error);
+		});
 	}
 
 	write(record: object): void {
-		const line = JSON.stringify(record);
-		this.tail = this.tail.then(
-			() => appendLine(this.filePath, line),
-			() => appendLine(this.filePath, line),
-		);
-		this.observeTail();
+		void this.writeBatch([record]).catch(() => undefined);
+	}
+
+	/** Appends a JSONL group with one ordered filesystem append operation. */
+	writeBatch(records: readonly object[]): Promise<void> {
+		if (records.length === 0) return this.waitForDurability();
+		const lines = records.map((record) => JSON.stringify(record)).join("\n");
+		this.tail = this.tail.then(async () => {
+			try {
+				await appendLine(this.filePath, lines);
+			} catch (error) {
+				this.rememberFailure(error);
+			}
+		});
+		return this.waitForDurability();
 	}
 
 	async flush(): Promise<void> {
-		await this.tail;
+		await this.waitForDurability();
 	}
 
-	private observeTail(): void {
-		void this.tail.catch(() => undefined);
+	private async waitForDurability(): Promise<void> {
+		await this.tail;
+		if (this.failed) throw this.firstError;
+	}
+
+	private rememberFailure(error: unknown): void {
+		if (this.failed) return;
+		this.failed = true;
+		this.firstError = error;
 	}
 }
 

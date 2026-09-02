@@ -6,8 +6,9 @@
 import { CancellationToken } from '../../../../../../base/common/cancellation.js';
 import { Emitter } from '../../../../../../base/common/event.js';
 import { Disposable } from '../../../../../../base/common/lifecycle.js';
-import { ConfigSchema, SessionModelInfo } from '../../../../../../platform/agentHost/common/state/sessionState.js';
+import { localize } from '../../../../../../nls.js';
 import { readAgentModelPricingMeta } from '../../../../../../platform/agentHost/common/agentModelPricing.js';
+import { ConfigSchema, SessionModelInfo } from '../../../../../../platform/agentHost/common/state/sessionState.js';
 import { nullExtensionDescription } from '../../../../../services/extensions/common/extensions.js';
 import { ChatAgentLocation } from '../../../common/constants.js';
 import { ILanguageModelChatMetadataAndIdentifier, ILanguageModelChatProvider, ILanguageModelConfigurationSchema } from '../../../common/languageModels.js';
@@ -69,15 +70,40 @@ export class AgentHostLanguageModelProvider extends Disposable implements ILangu
 				const multiplierNumeric = pricing.multiplierNumeric;
 				const rawPricing = typeof m._meta?.pricing === 'string' && m._meta.pricing.trim() !== '' ? m._meta.pricing : undefined;
 				const upstreamProviderLabel = typeof m._meta?.upstreamProviderLabel === 'string' && m._meta.upstreamProviderLabel.trim() !== '' ? m._meta.upstreamProviderLabel : undefined;
+				const isChatGptSubscription = m._meta?.upstreamProvider === 'openai-subscription';
+				const chatGptSubscriptionConnected = m._meta?.chatGptSubscriptionConnected === true;
+				const isClaudeSubscription = m._meta?.upstreamProvider === 'anthropic-subscription';
+				const claudeSubscriptionConnected = m._meta?.claudeSubscriptionConnected === true;
+				const modelDescription = typeof m._meta?.modelDescription === 'string' && m._meta.modelDescription.trim() !== '' ? m._meta.modelDescription : undefined;
+				const openRouterProviders = Array.isArray(m._meta?.openRouterProviders)
+					? m._meta.openRouterProviders.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+					: [];
+				const detail = openRouterProviders.length === 1
+					? localize('agentHostLanguageModelProvider.openRouterSingleProvider', "OpenRouter · {0}", openRouterProviders[0])
+					: openRouterProviders.length > 1
+						? localize('agentHostLanguageModelProvider.openRouterProviderCount', "OpenRouter · {0} providers", openRouterProviders.length)
+						: upstreamProviderLabel;
 				return {
 					identifier: `${this._vendor}:${m.id}`,
 					metadata: {
 						extension: nullExtensionDescription.identifier,
 						name: m.name,
+						tooltip: modelDescription,
 						id: m.id,
 						vendor: this._vendor,
 						version: '1.0',
-						detail: upstreamProviderLabel,
+						detail,
+							auth: isChatGptSubscription
+							? {
+								providerLabel: 'ChatGPT',
+								...(chatGptSubscriptionConnected ? { accountLabel: localize('agentHostLanguageModelProvider.connected', "Connected") } : {}),
+							}
+							: isClaudeSubscription
+								? {
+									providerLabel: 'Claude',
+									...(claudeSubscriptionConnected ? { accountLabel: localize('agentHostLanguageModelProvider.connected', "Connected") } : {}),
+								}
+								: undefined,
 						family: m.id,
 						maxInputTokens: m.maxContextWindow ?? 0,
 						maxOutputTokens: 0,
@@ -131,7 +157,9 @@ export class AgentHostLanguageModelProvider extends Disposable implements ILangu
 	private static _groupForConfigKey(key: string): string | undefined {
 		switch (key) {
 			case 'thinkingLevel': return 'navigation';
+			case 'intensity': return 'navigation';
 			case 'contextTier': return 'tokens';
+			case 'openRouterProvider': return 'routing';
 			default: return undefined;
 		}
 	}

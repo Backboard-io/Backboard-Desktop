@@ -16,6 +16,7 @@ const genericScale: Record<ThinkingLevel, number> = {
 	low: 1024,
 	medium: 4096,
 	high: 8192,
+	xhigh: 16384,
 	max: 24576,
 };
 
@@ -23,6 +24,7 @@ const anthropicLegacyScale: Record<ThinkingLevel, number> = {
 	low: 2048,
 	medium: 8192,
 	high: 16384,
+	xhigh: 16384,
 	max: 16384,
 };
 

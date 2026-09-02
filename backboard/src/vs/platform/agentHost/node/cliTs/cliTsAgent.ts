@@ -13,7 +13,7 @@ import { URI } from '../../../../base/common/uri.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
 import { localize } from '../../../../nls.js';
 import { ILogService } from '../../../log/common/log.js';
-import { AgentSession, AgentSignal, IAgent, IAgentCreateSessionConfig, IAgentCreateSessionResult, IAgentDescriptor, IAgentMaterializeSessionEvent, IAgentModelInfo, IAgentResolveSessionConfigParams, IAgentSessionConfigCompletionsParams, IAgentSessionMetadata } from '../../common/agentService.js';
+import { AgentSession, AgentSignal, IAgent, IAgentCommandResult, IAgentCreateSessionConfig, IAgentCreateSessionResult, IAgentDescriptor, IAgentMaterializeSessionEvent, IAgentModelInfo, IAgentResolveSessionConfigParams, IAgentSessionConfigCompletionsParams, IAgentSessionMetadata } from '../../common/agentService.js';
 import { SessionConfigKey } from '../../common/sessionConfigKeys.js';
 import { ActionType, type ChatAction, type SessionAction } from '../../common/state/sessionActions.js';
 import type { ResolveSessionConfigResult, SessionConfigCompletionsResult } from '../../common/state/protocol/commands.js';
@@ -24,34 +24,184 @@ import { IInstantiationService } from '../../../instantiation/common/instantiati
 import { IAgentHostCheckpointService } from '../../common/agentHostCheckpointService.js';
 import { type IFileEditRecord, ISessionDatabase, ISessionDataService } from '../../common/sessionDataService.js';
 import { buildSessionDbUri, FileEditTracker } from '../shared/fileEditTracker.js';
+import { isClaudeLoggedIn } from '../shared/agentLoginProbes.js';
 import { IAgentConfigurationService } from '../agentConfigurationService.js';
 import { IAgentHostGitService, META_DIFF_BASE_BRANCH } from '../agentHostGitService.js';
-import { BACKBOARD_ACCESS_FULL, BACKBOARD_ACCESS_MANUAL, BACKBOARD_MODE_PLAN, BUNDLED_BACKBOARD_MODELS, backboardModelInfos, backboardMultitaskSystemContext, bridgeConfig, createBackboardTurnSettings, fallbackModel, isBridgeModel, resolveBackboardSessionConfig } from './backboardRuntimeShared.js';
+import { BACKBOARD_ACCESS_FULL, BACKBOARD_ACCESS_MANUAL, BACKBOARD_MODE_PLAN, BUNDLED_CHATGPT_SUBSCRIPTION_MODELS, BUNDLED_CLAUDE_SUBSCRIPTION_MODELS, backboardModelInfos, backboardMultitaskSystemContext, bridgeConfig, createBackboardTurnSettings, fallbackModel, isBridgeModel, resolveBackboardSessionConfig } from './backboardRuntimeShared.js';
 
 /** cli-ts tool name excluded from the turn when Web Search is toggled off. */
 const CLI_TS_WEB_SEARCH_TOOL_NAME = 'WebSearch';
 import { rgDiskPath } from '../../../../base/node/ripgrep.js';
-import { CliTsServeProcess } from './cliTsProcess.js';
+import { CliTsServeProcess, runCliTsCommand } from './cliTsProcess.js';
 import type { CliTsAgentEvent, CliTsClientToolDefinition, CliTsClientToolResultContent, CliTsClientToolResultPayload, CliTsFileAttachment, CliTsPermissionMode, CliTsTurnStatus } from './cliTsProtocol.js';
 
 const CLI_TS_STORE_VERSION = 1;
+const CHATGPT_SUBSCRIPTION_PROVIDER = 'openai-subscription';
+const CHATGPT_SUBSCRIPTION_LOGIN_COMMAND = 'chatgptSubscription.login';
+const CLAUDE_SUBSCRIPTION_PROVIDER = 'anthropic-subscription';
+const CLAUDE_SUBSCRIPTION_LOGIN_COMMAND = 'claudeSubscription.login';
+const CLAUDE_SUBSCRIPTION_ENABLE_COMMAND = 'claudeSubscription.enable';
 const CLI_TS_META_WORKTREE_BRANCH = 'backboard.worktree.branchName';
 const CLI_TS_META_WORKTREE_PATH = 'backboard.worktree.path';
 const CLI_TS_META_WORKTREE_REPOSITORY_ROOT = 'backboard.worktree.repositoryRoot';
+
+function jwtExpiration(token: string): number | undefined {
+	const encoded = token.split('.')[1];
+	if (!encoded) {
+		return undefined;
+	}
+	try {
+		const payload = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')) as { exp?: unknown };
+		return typeof payload.exp === 'number' && Number.isFinite(payload.exp) ? payload.exp * 1000 : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/** Whether Backboard can use or refresh its configured ChatGPT login. */
+export function hasUsableChatGptSubscriptionLogin(homeDir = os.homedir(), now = Date.now()): boolean {
+	try {
+		const envAuthFile = process.env['BACKBOARD_CHATGPT_SUBSCRIPTION_AUTH_FILE']?.trim();
+		let configuredAuthFile = '';
+		try {
+			const config = JSON.parse(fs.readFileSync(path.join(homeDir, '.backboard', 'config.json'), 'utf8')) as { chatgptSubscriptionAuthFile?: unknown };
+			configuredAuthFile = typeof config.chatgptSubscriptionAuthFile === 'string' ? config.chatgptSubscriptionAuthFile.trim() : '';
+		} catch {
+			// An explicit env override remains usable on a fresh install with no config.
+		}
+		const authFile = envAuthFile || configuredAuthFile;
+		if (!authFile) {
+			return false;
+		}
+		const auth = JSON.parse(fs.readFileSync(authFile, 'utf8')) as { tokens?: { access_token?: unknown; refresh_token?: unknown } };
+		const accessToken = auth.tokens?.access_token;
+		if (typeof accessToken !== 'string' || !accessToken) {
+			return false;
+		}
+		const expiresAt = jwtExpiration(accessToken);
+		return expiresAt === undefined || expiresAt > now || (typeof auth.tokens?.refresh_token === 'string' && !!auth.tokens.refresh_token);
+	} catch {
+		return false;
+	}
+}
+
+export function isChatGptSubscriptionModel(modelId: string | undefined): boolean {
+	return modelId?.startsWith(`${CHATGPT_SUBSCRIPTION_PROVIDER}/`) ?? false;
+}
+
+/** Publishes connection state without exposing any ChatGPT credential data. */
+export function withChatGptSubscriptionConnectionState(
+	models: readonly IAgentModelInfo[],
+	connected: boolean,
+): IAgentModelInfo[] {
+	return models.map(model => isChatGptSubscriptionModel(model.id)
+		? { ...model, _meta: { ...model._meta, chatGptSubscriptionConnected: connected } }
+		: model);
+}
+
+export function isClaudeSubscriptionModel(modelId: string | undefined): boolean {
+	return modelId?.startsWith(`${CLAUDE_SUBSCRIPTION_PROVIDER}/`) ?? false;
+}
+
+function providerFromModelId(modelId: string | undefined): string | undefined {
+	if (!modelId) {
+		return undefined;
+	}
+	const separator = modelId.indexOf('/');
+	return separator > 0 ? modelId.slice(0, separator).trim().toLowerCase() : undefined;
+}
+
+/**
+ * Provider threads are backend-native and cannot be resumed by a different
+ * provider. Subscription prefixes remain authoritative even after restoring a
+ * session whose previous picker selection is no longer available.
+ */
+export function requiresProviderThreadHandoff(threadId: string | undefined, previousModelId: string | undefined, nextModelId: string | undefined): boolean {
+	if (!threadId) {
+		return false;
+	}
+	const nextProvider = providerFromModelId(nextModelId);
+	if (!nextProvider) {
+		return false;
+	}
+	const threadProvider = threadId.startsWith('claude_sub_')
+		? CLAUDE_SUBSCRIPTION_PROVIDER
+		: threadId.startsWith('sub_')
+			? CHATGPT_SUBSCRIPTION_PROVIDER
+			: undefined;
+	if (threadProvider) {
+		return threadProvider !== nextProvider;
+	}
+	const previousProvider = providerFromModelId(previousModelId);
+	if (previousProvider) {
+		return previousProvider !== nextProvider;
+	}
+	// Backboard and BYOK threads never use a subscription prefix, so a restored
+	// unprefixed thread cannot be adopted by either subscription transport.
+	return nextProvider === CHATGPT_SUBSCRIPTION_PROVIDER || nextProvider === CLAUDE_SUBSCRIPTION_PROVIDER;
+}
+
+/** Fail fast when Claude Code's renewable first-party login is unavailable. */
+export async function assertUsableClaudeSubscriptionLogin(
+	probe: () => Promise<boolean> = isClaudeLoggedIn,
+): Promise<void> {
+	if (!await probe()) {
+		throw new Error(localize(
+			'cliTsAgent.claudeSubscription.loginRequired',
+			"Claude sign-in expired or is missing. Open the model selector, choose Claude, then select Connect or Reconnect Claude.",
+		));
+	}
+}
+
+/** Publishes connection state without exposing any Claude credential data. */
+export function withClaudeSubscriptionConnectionState(
+	models: readonly IAgentModelInfo[],
+	connected: boolean,
+): IAgentModelInfo[] {
+	return models.map(model => isClaudeSubscriptionModel(model.id)
+		? { ...model, _meta: { ...model._meta, claudeSubscriptionConnected: connected } }
+		: model);
+}
+
+function withSubscriptionConnectionStates(
+	models: readonly IAgentModelInfo[],
+	chatGptConnected: boolean,
+	claudeConnected: boolean,
+): IAgentModelInfo[] {
+	return withClaudeSubscriptionConnectionState(
+		withChatGptSubscriptionConnectionState(models, chatGptConnected),
+		claudeConnected,
+	);
+}
 
 /**
  * One ordered, restorable piece of a completed turn's response. Markdown and
  * reasoning content accumulates during the live turn (hence mutable); tool
  * parts capture the compact completion facts needed to rebuild a real
- * completed tool-call pill. Execute detail is retained because its upstream
- * formatter already caps the command/output preview used by terminal replay.
+ * completed tool-call pill. Execute keeps both its compact CLI detail and the
+ * complete bounded terminal transcript used by the IDE terminal card.
  */
 type CliTsWorkerWorkspace = NonNullable<CliTsAgentEvent['workspace']>;
+
+type CliTsBackboardToolKind = 'read' | 'grep' | 'glob' | 'fetchUrl' | 'webSearch' | 'todo' | 'computer' | 'browser' | 'findSkill' | 'findMcp';
+
+interface CliTsToolUiState {
+	readonly kind: CliTsBackboardToolKind;
+	readonly input?: Record<string, unknown>;
+	readonly result?: Record<string, unknown>;
+}
+
+interface CliTsMutationBatch {
+	readonly id: string;
+	readonly expectedFileCount: number;
+}
 
 type CliTsStoredPart =
 	| { readonly kind: 'markdown'; content: string }
 	| { readonly kind: 'reasoning'; content: string }
-	| { readonly kind: 'tool'; readonly id: string; readonly name: string; readonly inputSummary?: string; readonly title?: string; readonly detail?: string; readonly failed?: boolean; readonly workspace?: CliTsWorkerWorkspace; fileEdits?: readonly ToolResultFileEditContent[] };
+	| { readonly kind: 'tool'; readonly id: string; readonly name: string; readonly inputSummary?: string; readonly title?: string; readonly detail?: string; readonly terminalOutput?: CliTsTerminalOutput; readonly toolUi?: CliTsToolUiState; readonly mutationBatch?: CliTsMutationBatch; readonly failed?: boolean; readonly workspace?: CliTsWorkerWorkspace; fileEdits?: readonly ToolResultFileEditContent[] };
+
+type CliTsTerminalOutput = NonNullable<CliTsAgentEvent['terminalOutput']>;
 
 interface CliTsStoredTurn {
 	readonly prompt: string;
@@ -75,6 +225,13 @@ interface CliTsRuntimeFileEdit {
 interface CliTsRuntimeSubagentRecovery {
 	readonly turn: CliTsStoredTurn;
 	readonly fileEdits: readonly CliTsRuntimeFileEdit[];
+	/** Private worker checkout identity recovered beside the raw child JSONL. */
+	readonly pathMapping?: CliTsRuntimePathMapping;
+}
+
+interface CliTsRuntimePathMapping {
+	readonly workerRoot: string;
+	readonly coordinatorRoot: string;
 }
 
 interface CliTsStoredSession {
@@ -96,6 +253,8 @@ interface CliTsStoredSession {
 	readonly threadId?: string;
 	/** System-prompt handoff used until the fork creates its own backend thread. */
 	readonly forkContext?: string;
+	/** Prior provider transcript retained in every prompt after a backend handoff. */
+	readonly providerHandoffContext?: string;
 	readonly turns: CliTsStoredTurn[];
 	/** Child conversations keyed by the parent Agent tool call id. */
 	readonly subagents?: Readonly<Record<string, readonly CliTsStoredTurn[]>>;
@@ -108,6 +267,14 @@ interface CliTsSubagentTurnState {
 }
 
 type CliTsSubagentCompletionStatus = Extract<CliTsTurnStatus, 'completed' | 'failed' | 'cancelled'>;
+
+const subagentUiProjectionIntervalMs = 100;
+
+interface CliTsWorkerProjectionState {
+	lastEmittedAt: number;
+	workspace: CliTsWorkerWorkspace;
+	timer?: ReturnType<typeof setTimeout>;
+}
 
 interface CliTsWorktree {
 	readonly path: URI;
@@ -140,12 +307,22 @@ interface CliTsTurnState {
 	readonly toolInputs: Map<string, { name: string; input: unknown }>;
 	/** Final display summaries captured before result events omit their inputs. */
 	readonly toolInputSummaries: Map<string, string>;
+	/** One stable provider-response mutation batch per direct write call. */
+	readonly mutationBatches: Map<string, CliTsMutationBatch>;
+	/** Provisional shared batch used while a provider is still streaming mutation inputs. */
+	pendingMutationBatch?: CliTsMutationBatch;
+	/** Bounded native-UI inputs/results keyed by tool call id. */
+	readonly toolUi: Map<string, CliTsToolUiState>;
+	/** Incremental terminal transcript per running Execute call. */
+	readonly terminalOutputs: Map<string, string>;
 	/** In-flight async tool completions (file-edit diff builds), awaited before turn end. */
 	readonly pendingCompletions: Promise<void>[];
 	/** Live child conversations keyed by their parent Agent tool call id. */
 	readonly subagentTurns: Map<string, CliTsSubagentTurnState>;
 	/** Latest isolated-workspace state per parent Agent tool call. */
 	readonly workerWorkspaces: Map<string, CliTsWorkerWorkspace>;
+	/** child_end received before an isolated AgentSpawn workspace is authoritative. */
+	readonly pendingSubagentEndStatuses: Map<string, CliTsSubagentCompletionStatus>;
 	reasoningPartId?: string;
 	didCreateReasoningPart?: boolean;
 	reasoningText: string;
@@ -170,11 +347,21 @@ interface CliTsSession {
 	title?: string;
 	threadId?: string;
 	forkContext?: string;
+	providerHandoffContext?: string;
+	pendingProviderHandoff?: boolean;
 	materialized: boolean;
 	disposed: boolean;
 	archived?: boolean;
 	proc?: CliTsServeProcess;
 	turn?: CliTsTurnState;
+	/**
+	 * Parent turns that still own a detached child after their provider turn has
+	 * completed. Tool-call ids are session-unique, so lifecycle events can use
+	 * this map instead of accidentally attaching to whichever turn is active now.
+	 */
+	subagentTurnOwners: Map<string, CliTsTurnState>;
+	/** Prevents duplicate late lifecycle records from falling through to a newer turn. */
+	completedSubagentToolCallIds: Set<string>;
 	/** Lazily-opened file-edit tracker + its session DB reference. */
 	fileEdits?: { tracker: FileEditTracker; dbRef: IReference<ISessionDatabase> };
 	/** New-session baseline capture, awaited before the first tool can mutate the workspace. */
@@ -211,9 +398,13 @@ function createTurnState(turnId: string, prompt: string): CliTsTurnState {
 		storedTextParts: new Map(),
 		toolInputs: new Map(),
 		toolInputSummaries: new Map(),
+		mutationBatches: new Map(),
+		toolUi: new Map(),
+		terminalOutputs: new Map(),
 		pendingCompletions: [],
 		subagentTurns: new Map(),
 		workerWorkspaces: new Map(),
+		pendingSubagentEndStatuses: new Map(),
 		responseText: '',
 		reasoningText: '',
 	};
@@ -240,20 +431,31 @@ export class CliTsAgent extends Disposable implements IAgent {
 	readonly onDidMaterializeSession = this._onDidMaterializeSession.event;
 
 	/**
-	 * Starts as the compiled-in bundled list, immediately overlaid with the
-	 * disk-cached list from the previous run (see constructor), and finally
-	 * replaced with the backend's live list once a serve process is up. The
-	 * picker therefore shows real models at window start instead of waiting
-	 * out a network round-trip.
+	 * Starts with the locally-authenticated ChatGPT and Claude subscription routes,
+	 * immediately hydrates the previous live Backboard API result from disk,
+	 * and refreshes from the backend once a serve process is up. API catalog
+	 * providers such as OpenRouter are never supplemented from a compiled list.
 	 */
-	private readonly _models = observableValue<readonly IAgentModelInfo[]>('cliTsModels', backboardModelInfos(BUNDLED_BACKBOARD_MODELS));
+	private readonly _models = observableValue<readonly IAgentModelInfo[]>(
+		'cliTsModels',
+		withSubscriptionConnectionStates(
+			backboardModelInfos(BUNDLED_CHATGPT_SUBSCRIPTION_MODELS, BUNDLED_CLAUDE_SUBSCRIPTION_MODELS),
+			hasUsableChatGptSubscriptionLogin(),
+			false,
+		),
+	);
 	readonly models: IObservable<readonly IAgentModelInfo[]> = this._models;
 
 	private readonly _sessions = new Map<string, CliTsSession>();
 	/** Full historical child turns recovered from cli-ts's per-agent event logs. */
 	private readonly _runtimeSubagentTurnCache = new Map<string, Promise<CliTsRuntimeSubagentRecovery | undefined>>();
+	/** Coalesces worker lifecycle projection without delaying durable runtime state. */
+	private readonly _workerProjectionStates = new WeakMap<CliTsTurnState, Map<string, CliTsWorkerProjectionState>>();
 	private _modelsRefreshed = false;
 	private _rgDir: Promise<string | undefined> | undefined;
+	private _chatGptSubscriptionLoginPromise: Promise<void> | undefined;
+	private _claudeSubscriptionEnablePromise: Promise<void> | undefined;
+	private _claudeSubscriptionConnected = false;
 
 	constructor(
 		@ILogService private readonly _logService: ILogService,
@@ -265,6 +467,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 	) {
 		super();
 		this._hydrateModelsFromCache();
+		void this._refreshClaudeSubscriptionConnectionState();
 	}
 
 	private _modelsCachePath(): string {
@@ -290,7 +493,11 @@ export class CliTsAgent extends Disposable implements IAgent {
 			}
 			const models = (Array.isArray(raw.models) ? raw.models : []).filter(isBridgeModel);
 			if (models.length) {
-				this._models.set(backboardModelInfos(models, BUNDLED_BACKBOARD_MODELS), undefined);
+				this._models.set(withSubscriptionConnectionStates(
+					backboardModelInfos(models, BUNDLED_CHATGPT_SUBSCRIPTION_MODELS, BUNDLED_CLAUDE_SUBSCRIPTION_MODELS),
+					hasUsableChatGptSubscriptionLogin(),
+					this._claudeSubscriptionConnected,
+				), undefined);
 			}
 		} catch {
 			// First run or unreadable cache — the bundled fallback stays.
@@ -343,6 +550,87 @@ export class CliTsAgent extends Disposable implements IAgent {
 			displayName: localize('cliTsAgent.displayName', "Backboard"),
 			description: localize('cliTsAgent.description', "Backboard agent backed by the cli-ts runtime"),
 		};
+	}
+
+	async executeCommand(command: string): Promise<IAgentCommandResult> {
+		switch (command) {
+			case CHATGPT_SUBSCRIPTION_LOGIN_COMMAND:
+				await this._ensureChatGptSubscriptionLogin(true);
+				return {
+					message: localize('cliTsAgent.chatGptSubscription.connected', "ChatGPT subscription connected to the Backboard harness."),
+				};
+			case CLAUDE_SUBSCRIPTION_LOGIN_COMMAND:
+				throw new Error(localize(
+					'cliTsAgent.claudeSubscription.interactiveLoginRequired',
+					"Claude sign-in requires an interactive terminal. Open the model selector, choose Claude, then select Connect or Reconnect Claude.",
+				));
+			case CLAUDE_SUBSCRIPTION_ENABLE_COMMAND:
+				await this._enableClaudeSubscription();
+				return {
+					message: localize('cliTsAgent.claudeSubscription.connected', "Claude subscription connected to the Backboard harness."),
+				};
+			default:
+				throw new Error(`Unsupported Backboard command: ${command}`);
+		}
+	}
+
+	private async _ensureChatGptSubscriptionLogin(force: boolean): Promise<void> {
+		if (!force && hasUsableChatGptSubscriptionLogin()) {
+			return;
+		}
+		this._chatGptSubscriptionLoginPromise ??= runCliTsCommand(this._logService, ['subscription', 'login'])
+			.then(() => {
+				this._restartServeProcessesForSubscriptionLogin();
+				this._models.set(withChatGptSubscriptionConnectionState(this._models.get(), true), undefined);
+				this._modelsRefreshed = false;
+			})
+			.finally(() => {
+				this._chatGptSubscriptionLoginPromise = undefined;
+			});
+		await this._chatGptSubscriptionLoginPromise;
+	}
+
+	private async _enableClaudeSubscription(): Promise<void> {
+		await this._requireClaudeSubscriptionLogin();
+		this._claudeSubscriptionEnablePromise ??= runCliTsCommand(this._logService, ['claude-subscription', 'enable'])
+			.then(() => {
+				this._restartServeProcessesForSubscriptionLogin();
+				this._setClaudeSubscriptionConnectionState(true);
+				this._modelsRefreshed = false;
+			})
+			.finally(() => {
+				this._claudeSubscriptionEnablePromise = undefined;
+			});
+		await this._claudeSubscriptionEnablePromise;
+	}
+
+	private async _requireClaudeSubscriptionLogin(): Promise<void> {
+		try {
+			await assertUsableClaudeSubscriptionLogin();
+			this._setClaudeSubscriptionConnectionState(true);
+		} catch (error) {
+			this._setClaudeSubscriptionConnectionState(false);
+			throw error;
+		}
+	}
+
+	private async _refreshClaudeSubscriptionConnectionState(): Promise<void> {
+		this._setClaudeSubscriptionConnectionState(await isClaudeLoggedIn());
+	}
+
+	private _setClaudeSubscriptionConnectionState(connected: boolean): void {
+		this._claudeSubscriptionConnected = connected;
+		this._models.set(withClaudeSubscriptionConnectionState(this._models.get(), connected), undefined);
+	}
+
+	private _restartServeProcessesForSubscriptionLogin(): void {
+		// Every serve process constructs its provider router at startup. Drop only
+		// those subprocesses so the next turn sees the updated subscription login
+		// without losing IDE session state.
+		for (const session of this._sessions.values()) {
+			session.proc?.dispose();
+			session.proc = undefined;
+		}
 	}
 
 	async createSession(config: IAgentCreateSessionConfig = {}): Promise<IAgentCreateSessionResult> {
@@ -413,12 +701,18 @@ export class CliTsAgent extends Disposable implements IAgent {
 		if (forkedTurns) {
 			this._writeStore();
 		}
-		// Only durable sessions own a serve process. Composer configuration creates
-		// short-lived provisional sessions as views are attached and detached; a
-		// process for each one turns navigation into a burst of abandoned CLI
-		// processes and model-catalog requests. The first send materializes the
-		// chosen provisional and still ensures its process on the normal path.
-		if (session.workingDirectory && session.materialized) {
+		// Durable sessions retain their serve process. The first provisional
+		// session also starts one short-lived catalog refresh so model-specific
+		// options (notably OpenRouter upstreams) exist before the first send.
+		// `_modelsRefreshed` ensures subsequent provisional composers do not fan
+		// out extra processes or requests.
+		const configuredIsolation = session.config?.[SessionConfigKey.Isolation]
+			?? this._configurationService.getSessionConfigValues(session.sessionUri.toString())?.[SessionConfigKey.Isolation];
+		// A provisional worktree session will immediately discard a process started
+		// against the source checkout. Skip that wasted startup; folder sessions can
+		// still prewarm the model catalog while their composer is open.
+		const canPrewarm = session.materialized || configuredIsolation !== 'worktree';
+		if (session.workingDirectory && canPrewarm && (session.materialized || !this._modelsRefreshed)) {
 			void this._prewarm(session);
 		}
 		const initialWorkingDirectory = session.materialized
@@ -443,9 +737,23 @@ export class CliTsAgent extends Disposable implements IAgent {
 		}
 		try {
 			const rgDir = await this._resolveRgDir();
+			// Stop can arrive while the asynchronous runtime lookup is in flight.
+			// Re-check after that await so a provisional-session prewarm cannot start
+			// a serve process behind a cancelled first send.
+			if (session.disposed || session.cancelBeforeSubmit || session.proc?.isRunning) {
+				return;
+			}
 			const proc = this._ensureProcess(session, rgDir);
 			proc.start();
-			this._refreshModelsOnce(session);
+			const refresh = this._refreshModelsOnce(session);
+			if (!session.materialized && refresh) {
+				void refresh.finally(() => {
+					if (!session.materialized && session.proc === proc) {
+						proc.dispose();
+						session.proc = undefined;
+					}
+				});
+			}
 		} catch (error) {
 			this._logService.info(`[cli-ts] pre-warm skipped for ${session.sessionId}: ${error instanceof Error ? error.message : String(error)}`);
 		}
@@ -498,6 +806,9 @@ export class CliTsAgent extends Disposable implements IAgent {
 		if (session.archived) {
 			throw new Error(`Cannot send to archived Backboard session: ${session.sessionUri.toString()}`);
 		}
+		if (session.pendingProviderHandoff) {
+			this._prepareProviderHandoff(session, session.model?.id);
+		}
 		const effectiveTurnId = turnId ?? generateUuid();
 		session.cancelBeforeSubmit = false;
 		session.modifiedAt = Date.now();
@@ -547,8 +858,16 @@ export class CliTsAgent extends Disposable implements IAgent {
 		// exists (ChatTurnStarted was reduced before sendMessage), so it renders
 		// on the first frame.
 		this._fireStatus(session, turn, localize('cliTsAgent.status.preparing', "Preparing…"));
-
 		try {
+			if (settings.provider === CHATGPT_SUBSCRIPTION_PROVIDER) {
+				if (!hasUsableChatGptSubscriptionLogin()) {
+					this._fireStatus(session, turn, localize('cliTsAgent.status.waitingForChatGptLogin', "Waiting for ChatGPT sign-in…"));
+				}
+				await this._ensureChatGptSubscriptionLogin(false);
+			} else if (settings.provider === CLAUDE_SUBSCRIPTION_PROVIDER) {
+				this._fireStatus(session, turn, localize('cliTsAgent.status.checkingClaudeLogin', "Checking Claude sign-in…"));
+				await this._requireClaudeSubscriptionLogin();
+			}
 			// Resolve folder/worktree isolation from the latest live config before
 			// starting a process or capturing the session baseline. The checkpoint
 			// baseline is immutable once recorded, so capturing the provisional source
@@ -568,11 +887,15 @@ export class CliTsAgent extends Disposable implements IAgent {
 				return;
 			}
 			this._logService.info(`[cli-ts] turn_start session=${session.sessionId} model=${settings.provider}/${settings.model} permission=${permission} cwd=${session.workingDirectory?.fsPath ?? '(missing)'}`);
+			const inheritedConversationContext = [
+				session.providerHandoffContext,
+				!session.threadId ? session.forkContext : undefined,
+			].filter((value): value is string => !!value).join('\n\n') || undefined;
 			const record = await proc.request({
 				op: 'submit',
 				requestId: proc.nextRequestId(),
 				prompt: prepared.prompt,
-				...(!session.threadId && session.forkContext ? { forkContext: session.forkContext } : {}),
+				...(inheritedConversationContext ? { forkContext: inheritedConversationContext } : {}),
 				...(systemContext ? { systemContext } : {}),
 				// Resume the persisted backend thread so a fresh serve process
 				// (window reload, crash, binary update) keeps the conversation's
@@ -590,6 +913,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 				browserUse: settings.browserUse,
 				notify: settings.notifications,
 				imageGeneration: settings.imageGeneration,
+				openRouterProvider: settings.openRouterProvider,
 				excludedTools,
 				// Advertise IDE-executed tools (integrated browser, tasks, …).
 				// Omitting the field clears previously registered client tools.
@@ -622,6 +946,12 @@ export class CliTsAgent extends Disposable implements IAgent {
 				error: { errorType: 'BackboardSendFailed', message },
 			});
 		} finally {
+			// A provider-turn boundary only closes blocking Agent children. Detached
+			// AgentSpawn workers retain their session owner across both normal completion
+			// and Stop; cli-ts emits their lifecycle-only terminal edge after its durable
+			// task/workspace result settles. Disposal is the sole fallback that cannot
+			// receive a later event because the serve process is being released.
+			this._cancelUnfinishedSubagents(session, turn, session.disposed);
 			// Let in-flight file-edit diff builds finish so their
 			// ChatToolCallComplete actions land before the turn is marked done.
 			await Promise.allSettled(turn.pendingCompletions);
@@ -661,11 +991,14 @@ export class CliTsAgent extends Disposable implements IAgent {
 			// durable stream retains reasoning, output, titles, and exact writes.
 			const ownsChild = !!storedChildTurns?.length || summaryFallback.length > 0;
 			const runtimeRecovery = ownsChild
-				? await this._readRuntimeSubagentRecovery(parsedSubagent.toolCallId)
+				? await this._readRuntimeSubagentRecovery(sessionId, parsedSubagent.toolCallId)
 				: undefined;
 			if (runtimeRecovery) {
-				await this._persistRuntimeRecoveryFileEdits(rootSessionUri, runtimeRecovery);
-				turns = [runtimeRecovery.turn];
+				const workspace = subagentWorkspaceFromTurns(parentTurns, parsedSubagent.toolCallId);
+				const projectedRecovery = projectRuntimeSubagentRecovery(runtimeRecovery, runtimeRecovery.pathMapping
+					?? runtimePathMapping(workspace?.worktreePath, session?.workingDirectory?.fsPath ?? stored?.cwd));
+				await this._persistRuntimeRecoveryFileEdits(rootSessionUri, projectedRecovery);
+				turns = [runtimeRecoveryTurnWithFileEdits(rootSessionUri.toString(), projectedRecovery)];
 			} else {
 				turns = storedChildTurns?.length ? storedChildTurns : summaryFallback;
 			}
@@ -924,10 +1257,49 @@ export class CliTsAgent extends Disposable implements IAgent {
 
 	async changeModel(sessionUri: URI, model: ModelSelection): Promise<void> {
 		const session = this._session(sessionUri);
+		const previousModelId = session.model?.id;
 		session.model = model;
+		if (isChatGptSubscriptionModel(model.id)) {
+			await this._ensureChatGptSubscriptionLogin(false);
+		} else if (isClaudeSubscriptionModel(model.id)) {
+			await this._requireClaudeSubscriptionLogin();
+		}
+		const previousProvider = providerFromModelId(previousModelId);
+		const nextProvider = providerFromModelId(model.id);
+		const providerChanged = !!previousProvider && !!nextProvider && previousProvider !== nextProvider;
+		if (session.turn && providerChanged) {
+			// Let the in-flight provider finish cleanly. sendMessage is sequenced
+			// behind it and performs the handoff before the next request starts.
+			session.pendingProviderHandoff = true;
+			this._logService.info(`[cli-ts] deferred provider handoff until the active turn completes session=${session.sessionId} from=${previousModelId} to=${model.id}`);
+			return;
+		}
+		if (requiresProviderThreadHandoff(session.threadId, previousModelId, model.id)) {
+			this._prepareProviderHandoff(session, model.id, previousModelId);
+			return;
+		}
 		if (session.proc?.isRunning && model.id) {
 			session.proc.notify({ op: 'setModel', model: model.id });
 		}
+	}
+
+	private _prepareProviderHandoff(session: CliTsSession, nextModelId: string | undefined, previousModelId?: string): void {
+		session.pendingProviderHandoff = false;
+		if (!session.threadId) {
+			return;
+		}
+		// A remote thread belongs to the backend that created it. Preserve the
+		// visible IDE conversation, but start a fresh remote thread and seed every
+		// new-provider prompt with the completed transcript. Restarting the serve
+		// process also clears R-CLI's in-memory copy of the old provider thread id.
+		session.providerHandoffContext = buildProviderHandoffConversationContext(session.storedTurns);
+		session.forkContext = undefined;
+		session.threadId = undefined;
+		session.proc?.dispose();
+		session.proc = undefined;
+		session.modifiedAt = Date.now();
+		this._writeStore();
+		this._logService.info(`[cli-ts] prepared provider handoff session=${session.sessionId} from=${previousModelId ?? '(bound provider thread)'} to=${nextModelId ?? '(selected provider)'}`);
 	}
 
 	respondToPermissionRequest(requestId: string, approved: boolean): void {
@@ -1124,10 +1496,13 @@ export class CliTsAgent extends Disposable implements IAgent {
 			title: restored?.title,
 			threadId: restored?.threadId,
 			forkContext: restored?.forkContext,
+			providerHandoffContext: restored?.providerHandoffContext,
 			materialized: !!restored && restored.materialized !== false,
 			disposed: false,
 			pendingClientToolCalls: new Set(),
 			pendingInputs: new Map(),
+			subagentTurnOwners: new Map(),
+			completedSubagentToolCallIds: new Set(),
 			storedTurns: [...(restored?.turns ?? [])],
 			storedSubagentTurns: new Map(Object.entries(restored?.subagents ?? {}).map(([toolCallId, turns]) => [toolCallId, cloneStoredTurns(turns)])),
 		};
@@ -1254,11 +1629,10 @@ export class CliTsAgent extends Disposable implements IAgent {
 		const config = { ...(session.config ?? {}), ...(liveConfig ?? {}) };
 		const configuredIsolation = config[SessionConfigKey.Isolation];
 		let repository: { repositoryRoot: URI; sourceRepositoryRoot: URI } | undefined;
-		const isolation = configuredIsolation === 'folder'
-			? 'folder'
-			: configuredIsolation === 'worktree'
-				? 'worktree'
-				: (repository = await this._getWorktreeRepositoryInfo(sourceWorkingDirectory)) ? 'worktree' : 'folder';
+		// Direct folder mutation is the fast default. A worktree is created only
+		// when the user explicitly selected isolation for this top-level session;
+		// subagents keep their own hidden application-owned worktrees.
+		const isolation = configuredIsolation === 'worktree' ? 'worktree' : 'folder';
 		this._throwIfDisposed(session);
 
 		if (isolation === 'worktree') {
@@ -1413,8 +1787,11 @@ export class CliTsAgent extends Disposable implements IAgent {
 	}
 
 	private _ensureProcess(session: CliTsSession, rgDir?: string, workingDirectory = session.workingDirectory): CliTsServeProcess {
-		if (session.proc?.isRunning) {
+		if (session.proc?.isRunning && !session.proc.isInvocationStale) {
 			return session.proc;
+		}
+		if (session.proc?.isInvocationStale) {
+			this._logService.info(`[cli-ts] restarting session ${session.sessionId} because the CLI executable changed on disk.`);
 		}
 		session.proc?.dispose();
 		const proc = new CliTsServeProcess(this._logService, {
@@ -1469,19 +1846,23 @@ export class CliTsAgent extends Disposable implements IAgent {
 		return this._rgDir;
 	}
 
-	private _refreshModelsOnce(session: CliTsSession): void {
+	private _refreshModelsOnce(session: CliTsSession): Promise<void> | undefined {
 		if (this._modelsRefreshed || !session.proc?.isRunning) {
-			return;
+			return undefined;
 		}
 		this._modelsRefreshed = true;
 		const proc = session.proc;
-		proc.request({ op: 'listModels', requestId: proc.nextRequestId() }).then(record => {
+		return proc.request({ op: 'listModels', requestId: proc.nextRequestId() }).then(record => {
 			const payload = record.payload as { models?: unknown[] } | undefined;
 			const models = (payload?.models ?? []).filter(isBridgeModel);
 			if (models.length) {
-				// The bundled snapshot acts as a floor so a partial live result
-				// (e.g. one upstream provider erroring) never shrinks the picker.
-				const infos = backboardModelInfos(models, BUNDLED_BACKBOARD_MODELS);
+				// The Backboard API is authoritative for catalog providers. Only the
+				// Locally-authenticated subscription routes are supplemented.
+				const infos = withSubscriptionConnectionStates(
+					backboardModelInfos(models, BUNDLED_CHATGPT_SUBSCRIPTION_MODELS, BUNDLED_CLAUDE_SUBSCRIPTION_MODELS),
+					hasUsableChatGptSubscriptionLogin(),
+					this._claudeSubscriptionConnected,
+				);
 				this._models.set(infos.length ? infos : [fallbackModel()], undefined);
 				// Persist for instant hydration on the next window start.
 				this._persistModelsCache(models);
@@ -1531,44 +1912,76 @@ export class CliTsAgent extends Disposable implements IAgent {
 		}
 		child.turn.failed = status !== 'completed';
 		child.completion = (async (): Promise<void> => {
-			await Promise.allSettled(child.turn.pendingCompletions);
-			let storedTurn: CliTsStoredTurn = {
-				prompt: child.prompt,
-				response: child.turn.responseText,
-				failed: child.turn.failed,
-				...(child.turn.toolSummaries.length ? { tools: child.turn.toolSummaries } : {}),
-				...(child.turn.storedParts.length ? { parts: child.turn.storedParts } : {}),
-			};
-			const runtimeRecovery = await this._readRuntimeSubagentRecovery(toolCallId);
-			if (runtimeRecovery) {
-				await this._attachRuntimeRecoveryFileEdits(session, child.turn, runtimeRecovery, toolCallId);
-				storedTurn = { ...runtimeRecovery.turn, failed: child.turn.failed };
+			try {
+				await Promise.allSettled(child.turn.pendingCompletions);
+				let storedTurn: CliTsStoredTurn = {
+					prompt: child.prompt,
+					response: child.turn.responseText,
+					failed: child.turn.failed,
+					...(child.turn.toolSummaries.length ? { tools: child.turn.toolSummaries } : {}),
+					...(child.turn.storedParts.length ? { parts: child.turn.storedParts } : {}),
+				};
+				// Restored/legacy session-shaped callers may predate the explicit
+				// `sessionId` field. The URI remains the canonical identity, and using
+				// it here also keeps late child completion scoped to its actual parent.
+				const runtimeSessionId = session.sessionId || AgentSession.id(session.sessionUri);
+				const runtimeRecovery = await this._readRuntimeSubagentRecovery(runtimeSessionId, toolCallId);
+				if (runtimeRecovery) {
+					const workspace = parentTurn.workerWorkspaces?.get(toolCallId);
+					const projectedRecovery = projectRuntimeSubagentRecovery(runtimeRecovery, runtimeRecovery.pathMapping
+						?? runtimePathMapping(workspace?.worktreePath, session.workingDirectory?.fsPath));
+					await this._attachRuntimeRecoveryFileEdits(session, child.turn, projectedRecovery, toolCallId);
+					storedTurn = { ...projectedRecovery.turn, failed: child.turn.failed };
+				}
+				session.storedSubagentTurns.set(toolCallId, [storedTurn]);
+				if (status === 'cancelled') {
+					this._fire(session.sessionUri, {
+						type: ActionType.ChatTurnCancelled,
+						turnId: child.turn.turnId,
+					}, toolCallId);
+				} else if (status === 'failed') {
+					this._fire(session.sessionUri, {
+						type: ActionType.ChatError,
+						turnId: child.turn.turnId,
+						error: { errorType: 'BackboardSubagentFailed', message: localize('cliTsAgent.subagentFailed', "The Backboard subagent reported a failed turn.") },
+					}, toolCallId);
+				} else {
+					this._fire(session.sessionUri, {
+						type: ActionType.ChatTurnComplete,
+						turnId: child.turn.turnId,
+					}, toolCallId);
+				}
+				this._onDidSessionProgress.fire({
+					kind: 'subagent_completed',
+					session: session.sessionUri,
+					toolCallId,
+				});
+				// A detached worker can finish after _sendMessage has already persisted
+				// and released its parent turn. Flush this lifecycle boundary here so
+				// reopening either the parent or child never depends on another message.
+				session.modifiedAt = Date.now();
+				this._writeStore();
+			} finally {
+				if (session.subagentTurnOwners?.get(toolCallId) === parentTurn) {
+					session.subagentTurnOwners.delete(toolCallId);
+				}
+				(session.completedSubagentToolCallIds ??= new Set()).add(toolCallId);
 			}
-			session.storedSubagentTurns.set(toolCallId, [storedTurn]);
-			if (status === 'cancelled') {
-				this._fire(session.sessionUri, {
-					type: ActionType.ChatTurnCancelled,
-					turnId: child.turn.turnId,
-				}, toolCallId);
-			} else if (status === 'failed') {
-				this._fire(session.sessionUri, {
-					type: ActionType.ChatError,
-					turnId: child.turn.turnId,
-					error: { errorType: 'BackboardSubagentFailed', message: localize('cliTsAgent.subagentFailed', "The Backboard subagent reported a failed turn.") },
-				}, toolCallId);
-			} else {
-				this._fire(session.sessionUri, {
-					type: ActionType.ChatTurnComplete,
-					turnId: child.turn.turnId,
-				}, toolCallId);
-			}
-			this._onDidSessionProgress.fire({
-				kind: 'subagent_completed',
-				session: session.sessionUri,
-				toolCallId,
-			});
 		})();
 		parentTurn.pendingCompletions.push(child.completion);
+	}
+
+	private _cancelUnfinishedSubagents(session: CliTsSession, parentTurn: CliTsTurnState, includeDetached: boolean): void {
+		for (const [toolCallId, child] of parentTurn.subagentTurns) {
+			if (child.completion) {
+				continue;
+			}
+			const toolName = parentTurn.toolInputs.get(toolCallId)?.name;
+			if (!includeDetached && toolName && isCliTsDetachedSubagentTool(toolName)) {
+				continue;
+			}
+			this._completeSubagentTurn(session, parentTurn, toolCallId, 'cancelled');
+		}
 	}
 
 	/**
@@ -1580,10 +1993,14 @@ export class CliTsAgent extends Disposable implements IAgent {
 	private _ensureSubagentTurn(session: CliTsSession, parentTurn: CliTsTurnState, toolCallId: string, prompt: string, childTurnId?: string): CliTsSubagentTurnState {
 		const existing = parentTurn.subagentTurns.get(toolCallId);
 		if (existing) {
+			if (!existing.completion) {
+				(session.subagentTurnOwners ??= new Map()).set(toolCallId, parentTurn);
+			}
 			return existing;
 		}
 		const child = { prompt, turn: createTurnState(childTurnId ?? generateUuid(), prompt) };
 		parentTurn.subagentTurns.set(toolCallId, child);
+		(session.subagentTurnOwners ??= new Map()).set(toolCallId, parentTurn);
 		const description = firstPromptLine(prompt);
 		this._onDidSessionProgress.fire({
 			kind: 'subagent_started',
@@ -1602,14 +2019,33 @@ export class CliTsAgent extends Disposable implements IAgent {
 		return child;
 	}
 
+	private _resolveSubagentOwner(session: CliTsSession, toolCallId: string): CliTsTurnState | undefined {
+		const owner = session.subagentTurnOwners?.get(toolCallId);
+		if (owner) {
+			return owner;
+		}
+		// Duplicate status/end records can trail the terminal child event. Never
+		// reinterpret those as a child belonging to a newer provider turn.
+		if (session.completedSubagentToolCallIds?.has(toolCallId)) {
+			return undefined;
+		}
+		return session.turn;
+	}
+
 	private _handleAgentEvent(session: CliTsSession, event: CliTsAgentEvent): void {
-		const turn = session.turn;
-		if (!turn) {
+		// Performance records are already durable in the cli-ts event stream. They
+		// must never become transcript parts or child-session activity.
+		if (event.type === 'performance:timing') {
+			this._logService.trace(`[performance:timing] ${JSON.stringify({ phase: event.phase, durationMs: event.durationMs, toolCallId: event.toolCallId, workerId: event.workerId, fileCount: event.fileCount })}`);
 			return;
 		}
 		switch (event.type) {
 			case 'agent:child_start': {
 				if (!event.agentToolCallId || event.prompt === undefined) {
+					return;
+				}
+				const turn = this._resolveSubagentOwner(session, event.agentToolCallId);
+				if (!turn) {
 					return;
 				}
 				this._ensureSubagentTurn(session, turn, event.agentToolCallId, event.prompt, event.childSessionId);
@@ -1622,16 +2058,30 @@ export class CliTsAgent extends Disposable implements IAgent {
 				if (!event.agentToolCallId || !event.workspace) {
 					return;
 				}
+				const turn = this._resolveSubagentOwner(session, event.agentToolCallId);
+				if (!turn) {
+					return;
+				}
 				this._ensureSubagentTurn(session, turn, event.agentToolCallId, subagentPrompt(turn, event.agentToolCallId));
-				this._updateSubagentWorkspace(session, turn, event.agentToolCallId, event.workspace);
+				const workspace = this._updateSubagentWorkspace(session, turn, event.agentToolCallId, event.workspace);
+				const pendingStatus = cliTsPendingSubagentEndStatuses(turn).get(event.agentToolCallId);
+				const authoritativeStatus = cliTsWorkspaceCompletionStatus(workspace);
+				if (pendingStatus && authoritativeStatus) {
+					cliTsPendingSubagentEndStatuses(turn).delete(event.agentToolCallId);
+					this._completeSubagentTurn(session, turn, event.agentToolCallId, authoritativeStatus);
+				}
 				return;
 			}
 			case 'agent:child_event': {
 				if (!event.agentToolCallId || !event.event) {
 					return;
 				}
+				const turn = this._resolveSubagentOwner(session, event.agentToolCallId);
+				if (!turn) {
+					return;
+				}
 				const child = turn.subagentTurns.get(event.agentToolCallId);
-				if (!child) {
+				if (!child || child.completion) {
 					return;
 				}
 				this._handleMappedAgentEvent(session, event.event, child.turn, event.agentToolCallId);
@@ -1641,16 +2091,91 @@ export class CliTsAgent extends Disposable implements IAgent {
 				if (!event.agentToolCallId) {
 					return;
 				}
+				const turn = this._resolveSubagentOwner(session, event.agentToolCallId);
+				if (!turn) {
+					return;
+				}
 				const status = event.status === 'completed' || event.status === 'cancelled' ? event.status : 'failed';
-				this._completeSubagentTurn(session, turn, event.agentToolCallId, status);
+				const toolName = turn.toolInputs.get(event.agentToolCallId)?.name;
+				const workspace = turn.workerWorkspaces?.get(event.agentToolCallId);
+				const authoritativeStatus = workspace ? cliTsWorkspaceCompletionStatus(workspace) : undefined;
+				if (toolName && isCliTsDetachedSubagentTool(toolName) && workspace && !authoritativeStatus) {
+					// AgentSpawn's private model turn ends before durable capture and
+					// integration settle. Keep the child active until the lifecycle-only
+					// terminal workspace projection arrives; this lets an integrated result
+					// win a concurrent Stop instead of sealing the row as Cancelled.
+					cliTsPendingSubagentEndStatuses(turn).set(event.agentToolCallId, status);
+					return;
+				}
+				this._completeSubagentTurn(session, turn, event.agentToolCallId, authoritativeStatus ?? status);
 				return;
 			}
+		}
+		const turn = session.turn;
+		if (!turn) {
+			return;
 		}
 		this._handleMappedAgentEvent(session, event, turn);
 	}
 
-	private _updateSubagentWorkspace(session: CliTsSession, turn: CliTsTurnState, toolCallId: string, workspace: CliTsWorkerWorkspace): void {
-		turn.workerWorkspaces.set(toolCallId, workspace);
+	private _updateSubagentWorkspace(session: CliTsSession, turn: CliTsTurnState, toolCallId: string, workspace: CliTsWorkerWorkspace): CliTsWorkerWorkspace {
+		const previous = turn.workerWorkspaces?.get(toolCallId);
+		// Terminal cleanup intentionally stops publishing the private worktree path.
+		// Retain it only in durable hidden metadata so raw child-archive edits can
+		// still be projected onto coordinator paths after restart.
+		const mergedWorkspace: CliTsWorkerWorkspace = {
+			...previous,
+			...workspace,
+			...(workspace.worktreePath || !previous?.worktreePath ? {} : { worktreePath: previous.worktreePath }),
+		};
+		turn.workerWorkspaces.set(toolCallId, mergedWorkspace);
+		const storedPartIndex = turn.storedParts.findIndex(part => part.kind === 'tool' && part.id === toolCallId);
+		if (storedPartIndex >= 0) {
+			const storedPart = turn.storedParts[storedPartIndex];
+			if (storedPart?.kind === 'tool') {
+				turn.storedParts[storedPartIndex] = { ...storedPart, workspace: mergedWorkspace };
+			}
+		}
+		let states = this._workerProjectionStates.get(turn);
+		if (!states) {
+			states = new Map();
+			this._workerProjectionStates.set(turn, states);
+		}
+		let state = states.get(toolCallId);
+		if (!state) {
+			state = { lastEmittedAt: 0, workspace: mergedWorkspace };
+			states.set(toolCallId, state);
+		} else {
+			state.workspace = mergedWorkspace;
+		}
+
+		const terminal = mergedWorkspace.status !== 'Running' && mergedWorkspace.status !== 'Integrating';
+		const elapsed = Date.now() - state.lastEmittedAt;
+		if (terminal || state.lastEmittedAt === 0 || elapsed >= subagentUiProjectionIntervalMs) {
+			if (state.timer) {
+				clearTimeout(state.timer);
+				state.timer = undefined;
+			}
+			this._emitSubagentWorkspace(session, turn, toolCallId, state);
+		} else if (!state.timer) {
+			state.timer = setTimeout(() => {
+				state!.timer = undefined;
+				this._emitSubagentWorkspace(session, turn, toolCallId, state!);
+			}, subagentUiProjectionIntervalMs - elapsed);
+		}
+		if (terminal && session.turn !== turn) {
+			// Terminal status is an important detached lifecycle boundary. Persist
+			// the owning historical response even if child_end is delayed or lost.
+			session.modifiedAt = Date.now();
+			this._writeStore();
+		}
+		return mergedWorkspace;
+	}
+
+	private _emitSubagentWorkspace(session: CliTsSession, turn: CliTsTurnState, toolCallId: string, state: CliTsWorkerProjectionState): void {
+		const projectionStartedAt = performance.now();
+		state.lastEmittedAt = Date.now();
+		const workspace = state.workspace;
 		const lines = turn.childToolLines.get(toolCallId);
 		const activity = lines ? [...lines.values()] : [];
 		activity.unshift(workerWorkspaceStatusLine(workspace));
@@ -1664,9 +2189,18 @@ export class CliTsAgent extends Disposable implements IAgent {
 				...workerWorkspaceMetadata(workspace),
 			},
 		});
+		this._logService.trace(`[performance:timing] ${JSON.stringify({ phase: 'ui_event_projection', durationMs: Math.max(0, performance.now() - projectionStartedAt), toolCallId, workerId: workspace.workerId })}`);
 	}
 
 	private _handleMappedAgentEvent(session: CliTsSession, event: CliTsAgentEvent, turn: CliTsTurnState, parentToolCallId?: string): void {
+		// Older in-memory turn shapes predate native tool UI data.
+		const toolUiByCall = (turn as { readonly toolUi?: Map<string, CliTsToolUiState> }).toolUi;
+		if (event.toolCallId) {
+			const toolUi = cliTsToolUiState(event.toolUi);
+			if (toolUi && toolUiByCall) {
+				toolUiByCall.set(event.toolCallId, mergeCliTsToolUiState(toolUiByCall.get(event.toolCallId), toolUi));
+			}
+		}
 		const eventToolName = event.name ?? (event.toolCallId ? turn.toolInputs.get(event.toolCallId)?.name : undefined);
 		if (isCliTsToolLifecycleEvent(event.type) && isHiddenCliTsTool(eventToolName)) {
 			return;
@@ -1767,7 +2301,23 @@ export class CliTsAgent extends Disposable implements IAgent {
 				turn.reasoningPartId = undefined;
 				// Capture structured inputs so file-edit completions can attach
 				// diffs and edit-survival telemetry. Per-call events follow.
-				for (const call of event.calls ?? []) {
+				const calls = event.calls ?? [];
+				const mutationCalls = calls.filter(call => isCliTsMutationTool(call.name));
+				if (mutationCalls.length > 0) {
+					const provisionalBatch = mutationCalls
+						.map(call => cliTsMutationBatches(turn).get(call.id))
+						.find((batch): batch is CliTsMutationBatch => !!batch)
+						?? turn.pendingMutationBatch;
+					const mutationBatch: CliTsMutationBatch = {
+						id: provisionalBatch?.id ?? `${turn.turnId}:mutation:${mutationCalls[0].id}`,
+						expectedFileCount: cliTsMutationFileCount(mutationCalls),
+					};
+					for (const call of mutationCalls) {
+						cliTsMutationBatches(turn).set(call.id, mutationBatch);
+					}
+				}
+				turn.pendingMutationBatch = undefined;
+				for (const call of calls) {
 					turn.toolInputs.set(call.id, { name: call.name, input: call.input });
 				}
 				return;
@@ -1786,7 +2336,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 					toolCallId: event.toolCallId,
 					invocationMessage: toolDisplayName(name),
 					toolInput: '',
-					_meta: cliTsToolMetadata(name, turn.toolInputs.get(event.toolCallId)?.input),
+					_meta: cliTsToolMetadata(name, turn.toolInputs.get(event.toolCallId)?.input, toolUiByCall?.get(event.toolCallId)?.kind, cliTsMutationBatches(turn).get(event.toolCallId)),
 				});
 				fire({
 					type: ActionType.ChatToolCallConfirmed,
@@ -1808,8 +2358,20 @@ export class CliTsAgent extends Disposable implements IAgent {
 				// Write-capable Agent calls cannot start until the provider finalizes the
 				// whole tool batch. Do not render an actionable/running worker row from
 				// the speculative streamed name; tool:start is the authoritative launch.
-				if (isCliTsSubagentTool(event.name)) {
+				if (isCliTsSubagentLauncherTool(event.name)) {
 					return;
+				}
+				// A large Write payload can spend a long time streaming before the
+				// provider emits tool:requested. Give every advisory mutation in that
+				// response one provisional batch now so the UI can mount exactly one
+				// aggregate loading shell during input generation. tool:requested keeps
+				// the id and replaces the provisional count with the authoritative one.
+				if (isCliTsMutationTool(event.name) && !cliTsMutationBatches(turn).has(event.toolCallId)) {
+					const mutationBatch = turn.pendingMutationBatch ??= {
+						id: `${turn.turnId}:mutation:${event.toolCallId}`,
+						expectedFileCount: 1,
+					};
+					cliTsMutationBatches(turn).set(event.toolCallId, mutationBatch);
 				}
 				this._ensureToolCallStart(session, turn, event.toolCallId, event.name, event.inputSummary, parentToolCallId);
 				return;
@@ -1818,7 +2380,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 				if (!event.toolCallId || !event.name) {
 					return;
 				}
-				if (isCliTsSubagentTool(event.name)) {
+				if (isCliTsSubagentLauncherTool(event.name)) {
 					this._ensureSubagentTurn(session, turn, event.toolCallId, subagentPrompt(turn, event.toolCallId, event.inputSummary));
 				}
 				this._ensureToolCallStart(session, turn, event.toolCallId, event.name, event.inputSummary, parentToolCallId);
@@ -1834,9 +2396,9 @@ export class CliTsAgent extends Disposable implements IAgent {
 					turnId,
 					toolCallId: event.toolCallId,
 					invocationMessage: toolInvocationMessage(event.name, event.inputSummary),
-					toolInput: event.inputSummary,
+					toolInput: cliTsReadyToolInput(event.inputSummary, toolUiByCall?.get(event.toolCallId)),
 					confirmed: turn.confirmedToolCalls.has(event.toolCallId) ? ToolCallConfirmationReason.UserAction : ToolCallConfirmationReason.NotNeeded,
-					_meta: cliTsToolMetadata(event.name, turn.toolInputs.get(event.toolCallId)?.input),
+					_meta: cliTsToolMetadata(event.name, turn.toolInputs.get(event.toolCallId)?.input, toolUiByCall?.get(event.toolCallId)?.kind, cliTsMutationBatches(turn).get(event.toolCallId)),
 				});
 				return;
 			}
@@ -1867,7 +2429,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 					toolInput: JSON.stringify(event.input ?? {}),
 					confirmed: ToolCallConfirmationReason.NotNeeded,
 					_meta: {
-						...cliTsToolMetadata(event.name, event.input),
+						...cliTsToolMetadata(event.name, event.input, undefined, cliTsMutationBatches(turn).get(event.toolCallId)),
 						...(session.turnAutoApproves ? { autoApproveBySetting: true } : {}),
 					},
 				});
@@ -1877,7 +2439,13 @@ export class CliTsAgent extends Disposable implements IAgent {
 				if (!event.toolCallId || event.data === undefined) {
 					return;
 				}
-				const text = typeof event.data === 'string' ? event.data : JSON.stringify(event.data);
+				const terminalChunk = cliTsTerminalProgressText(event.data);
+				const text = terminalChunk === undefined
+					? typeof event.data === 'string' ? event.data : JSON.stringify(event.data)
+					: `${turn.terminalOutputs.get(event.toolCallId) ?? ''}${terminalChunk}`;
+				if (terminalChunk !== undefined) {
+					turn.terminalOutputs.set(event.toolCallId, text);
+				}
 				fire({
 					type: ActionType.ChatToolCallContentChanged,
 					turnId,
@@ -1949,34 +2517,42 @@ export class CliTsAgent extends Disposable implements IAgent {
 				}
 				const toolCallId = event.toolCallId;
 				const name = event.name;
-				const child = isCliTsSubagentTool(name)
+				const detachedSubagent = isCliTsDetachedSubagentTool(name);
+				const child = isCliTsSubagentLauncherTool(name)
 					? this._ensureSubagentTurn(session, turn, toolCallId, subagentPrompt(turn, toolCallId, event.inputSummary))
 					: turn.subagentTurns.get(toolCallId);
-				if (child && event.detail?.trim()) {
+				if (child && !detachedSubagent && event.detail?.trim()) {
 					this._handleMappedAgentEvent(session, {
 						type: 'assistant:message',
 						messageId: `${toolCallId}-result`,
 						text: event.detail,
 					}, child.turn, toolCallId);
 				}
-				if (child) {
+				if (child && !detachedSubagent) {
 					this._completeSubagentTurn(session, turn, toolCallId, 'completed');
 				}
 				this._ensureToolCallStart(session, turn, toolCallId, name, event.inputSummary, parentToolCallId);
 				turn.toolSummaries.push(`${toolDisplayName(name)}${event.title ? ` — ${event.title}` : ''}`);
 				const inputSummary = event.inputSummary ?? turn.toolInputSummaries.get(toolCallId);
 				const workspace = turn.workerWorkspaces?.get(toolCallId);
+				const toolUi = toolUiByCall?.get(toolCallId);
+				const terminalOutput = isCliTsTerminalTool(name)
+					? event.terminalOutput ?? terminalOutputFromProgress(turn.terminalOutputs.get(toolCallId))
+					: undefined;
 				const storedToolPart: Extract<CliTsStoredPart, { kind: 'tool' }> = {
 					kind: 'tool',
 					id: toolCallId,
 					name,
 					...(inputSummary ? { inputSummary } : {}),
 					...(event.title ? { title: event.title } : {}),
-					...((isCliTsTerminalTool(name) || isCliTsSubagentTool(name)) && event.detail ? { detail: event.detail } : {}),
+					...((isCliTsTerminalTool(name) || (isCliTsSubagentLauncherTool(name) && !detachedSubagent)) && event.detail ? { detail: event.detail } : {}),
+					...(terminalOutput ? { terminalOutput } : {}),
+					...(toolUi ? { toolUi } : {}),
+					...(cliTsMutationBatches(turn).get(toolCallId) ? { mutationBatch: cliTsMutationBatches(turn).get(toolCallId) } : {}),
 					...(workspace ? { workspace } : {}),
 				};
 				turn.storedParts.push(storedToolPart);
-				const text = cliTsToolResultText(name, event.title, event.detail, inputSummary);
+				const text = terminalOutput?.text ?? cliTsToolResultText(name, event.title, event.detail, inputSummary);
 				const fileEdits = Array.isArray(event.fileEdits) ? event.fileEdits : [];
 				const completion = (async (): Promise<void> => {
 					const content: ToolResultContent[] = text ? [{ type: ToolResultContentType.Text, text }] : [];
@@ -1998,10 +2574,12 @@ export class CliTsAgent extends Disposable implements IAgent {
 						type: ActionType.ChatToolCallComplete,
 						turnId,
 						toolCallId,
+						_meta: cliTsToolCompletionMetadata(name, terminalOutput, toolUi?.kind, cliTsMutationBatches(turn).get(toolCallId)),
 						result: {
 							success: true,
 							pastTenseMessage: event.title ?? localize('cliTsAgent.toolFinished', "{0} finished", toolDisplayName(name)),
 							content: content.length ? content : undefined,
+							...(toolUi?.result ? { structuredContent: { backboardTool: toolUi.result } } : {}),
 						},
 					});
 				})();
@@ -2012,7 +2590,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 				if (!event.toolCallId || !event.name) {
 					return;
 				}
-				const child = isCliTsSubagentTool(event.name)
+				const child = isCliTsSubagentLauncherTool(event.name)
 					? this._ensureSubagentTurn(session, turn, event.toolCallId, subagentPrompt(turn, event.toolCallId, event.inputSummary))
 					: turn.subagentTurns.get(event.toolCallId);
 				if (child) {
@@ -2021,6 +2599,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 				this._ensureToolCallStart(session, turn, event.toolCallId, event.name, event.inputSummary, parentToolCallId);
 				const inputSummary = event.inputSummary ?? turn.toolInputSummaries.get(event.toolCallId);
 				const workspace = turn.workerWorkspaces?.get(event.toolCallId);
+				const toolUi = toolUiByCall?.get(event.toolCallId);
 				turn.storedParts.push({
 					kind: 'tool',
 					id: event.toolCallId,
@@ -2028,6 +2607,8 @@ export class CliTsAgent extends Disposable implements IAgent {
 					failed: true,
 					...(inputSummary ? { inputSummary } : {}),
 					...(event.error ? { title: event.error.slice(0, 200) } : {}),
+					...(toolUi ? { toolUi } : {}),
+					...(cliTsMutationBatches(turn).get(event.toolCallId) ? { mutationBatch: cliTsMutationBatches(turn).get(event.toolCallId) } : {}),
 					...(workspace ? { workspace } : {}),
 				});
 				const message = event.error ?? localize('cliTsAgent.toolFailedNoDetail', "The tool call failed.");
@@ -2035,6 +2616,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 					type: ActionType.ChatToolCallComplete,
 					turnId,
 					toolCallId: event.toolCallId,
+					_meta: cliTsToolMetadata(event.name, turn.toolInputs.get(event.toolCallId)?.input, toolUi?.kind, cliTsMutationBatches(turn).get(event.toolCallId)),
 					result: {
 						success: false,
 						pastTenseMessage: localize('cliTsAgent.toolFailed', "{0} failed", toolDisplayName(event.name)),
@@ -2185,7 +2767,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 			toolName,
 			displayName: toolDisplayName(toolName),
 			...(isClientTool && clientTools ? { contributor: { kind: ToolCallContributorKind.Client, clientId: clientTools.clientId } } : {}),
-			_meta: cliTsToolMetadata(toolName, turn.toolInputs.get(toolCallId)?.input),
+			_meta: cliTsToolMetadata(toolName, turn.toolInputs.get(toolCallId)?.input, (turn as { readonly toolUi?: Map<string, CliTsToolUiState> }).toolUi?.get(toolCallId)?.kind, cliTsMutationBatches(turn).get(toolCallId)),
 		}, parentToolCallId);
 		this._fire(session.sessionUri, {
 			type: ActionType.ChatToolCallDelta,
@@ -2231,62 +2813,85 @@ export class CliTsAgent extends Disposable implements IAgent {
 		return path.join(os.homedir(), '.backboard_ide', 'cli-ts-sessions.json');
 	}
 
-	private _readRuntimeSubagentRecovery(toolCallId: string): Promise<CliTsRuntimeSubagentRecovery | undefined> {
-		let cached = this._runtimeSubagentTurnCache.get(toolCallId);
+	private _readRuntimeSubagentRecovery(sessionId: string, toolCallId: string): Promise<CliTsRuntimeSubagentRecovery | undefined> {
+		const cacheKey = `${sessionId}\0${toolCallId}`;
+		let cached = this._runtimeSubagentTurnCache.get(cacheKey);
 		if (!cached) {
-			cached = this._findAndReadRuntimeSubagentRecovery(toolCallId);
-			this._runtimeSubagentTurnCache.set(toolCallId, cached);
+			cached = this._findAndReadRuntimeSubagentRecovery(sessionId, toolCallId);
+			this._runtimeSubagentTurnCache.set(cacheKey, cached);
 			void cached.then(result => {
 				// A fallback parent completion can race the runtime's final archive
 				// flush. Do not permanently cache that transient miss.
 				if (!result) {
-					this._runtimeSubagentTurnCache.delete(toolCallId);
+					this._runtimeSubagentTurnCache.delete(cacheKey);
 				}
-			}, () => this._runtimeSubagentTurnCache.delete(toolCallId));
+			}, () => this._runtimeSubagentTurnCache.delete(cacheKey));
 		}
 		return cached;
 	}
 
-	private async _findAndReadRuntimeSubagentRecovery(toolCallId: string): Promise<CliTsRuntimeSubagentRecovery | undefined> {
-		// The id becomes one path segment below `agents`; reject separators and
-		// traversal before touching the runtime archive.
-		if (!/^[A-Za-z0-9._-]+$/.test(toolCallId) || toolCallId === '.' || toolCallId === '..') {
+	private async _findAndReadRuntimeSubagentRecovery(sessionId: string, toolCallId: string): Promise<CliTsRuntimeSubagentRecovery | undefined> {
+		// Both ids become path segments; reject separators and traversal before
+		// touching the runtime archive. Runtime sessions are created with this same
+		// stable IDE session id, so direct lookup avoids cross-session first-match
+		// recovery when providers reuse ids such as `call_1`.
+		if (!isSafeRuntimePathSegment(sessionId) || !isSafeRuntimePathSegment(toolCallId)) {
 			return undefined;
 		}
-		const sessionsRoot = path.join(os.homedir(), '.backboard_ide', 'cli-ts-sessions', '.backboard', 'sessions');
+		const sessionsRoot = this._runtimeSessionsRoot();
+		const agentDirectory = path.join(sessionsRoot, sessionId, 'agents', toolCallId);
 		try {
-			const entries = await fs.promises.readdir(sessionsRoot, { withFileTypes: true });
-			for (const entry of entries) {
-				if (!entry.isDirectory()) {
-					continue;
-				}
-				const agentDirectory = path.join(sessionsRoot, entry.name, 'agents', toolCallId);
-				try {
-					return await this._readRuntimeSubagentRecoveryFromDirectory(agentDirectory);
-				} catch (error) {
-					if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-						this._logService.warn(`[cli-ts] Failed to recover subagent ${toolCallId}: ${error instanceof Error ? error.message : String(error)}`);
-					}
-				}
-			}
+			return await this._readRuntimeSubagentRecoveryFromDirectory(agentDirectory, { sessionId, toolCallId });
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-				this._logService.warn(`[cli-ts] Failed to inspect runtime subagent archive: ${error instanceof Error ? error.message : String(error)}`);
+				this._logService.warn(`[cli-ts] Failed to recover subagent ${toolCallId} for ${sessionId}: ${error instanceof Error ? error.message : String(error)}`);
 			}
 		}
 		return undefined;
 	}
 
-	private async _readRuntimeSubagentRecoveryFromDirectory(agentDirectory: string): Promise<CliTsRuntimeSubagentRecovery | undefined> {
-		const [metaRaw, eventsRaw] = await Promise.all([
+	private _runtimeSessionsRoot(): string {
+		return path.join(os.homedir(), '.backboard_ide', 'cli-ts-sessions', '.backboard', 'sessions');
+	}
+
+	private async _readRuntimeSubagentRecoveryFromDirectory(agentDirectory: string, expected?: { readonly sessionId: string; readonly toolCallId: string }): Promise<CliTsRuntimeSubagentRecovery | undefined> {
+		const [metaRaw, eventsRaw, pathMapping] = await Promise.all([
 			fs.promises.readFile(path.join(agentDirectory, 'meta.json'), 'utf8'),
 			fs.promises.readFile(path.join(agentDirectory, 'client.jsonl'), 'utf8'),
+			this._readRuntimeWorkerPathMapping(agentDirectory),
 		]);
 		const meta: unknown = JSON.parse(metaRaw);
+		if (expected && (!meta || typeof meta !== 'object'
+			|| (meta as { sessionId?: unknown }).sessionId !== expected.sessionId
+			|| (meta as { toolCallId?: unknown }).toolCallId !== expected.toolCallId)) {
+			this._logService.warn(`[cli-ts] Ignoring mismatched runtime subagent archive for ${expected.sessionId}/${expected.toolCallId}.`);
+			return undefined;
+		}
 		const prompt = meta && typeof meta === 'object' && typeof (meta as { prompt?: unknown }).prompt === 'string'
 			? (meta as { prompt: string }).prompt
 			: localize('cliTsAgent.subagentFallbackPrompt', "Subagent task");
-		return runtimeSubagentRecoveryFromEvents(prompt, eventsRaw);
+		const recovery = runtimeSubagentRecoveryFromEvents(prompt, eventsRaw);
+		return recovery && pathMapping ? { ...recovery, pathMapping } : recovery;
+	}
+
+	private async _readRuntimeWorkerPathMapping(agentDirectory: string): Promise<CliTsRuntimePathMapping | undefined> {
+		try {
+			const workerId = path.basename(agentDirectory);
+			const sessionDirectory = path.resolve(agentDirectory, '..', '..');
+			const parsed = JSON.parse(await fs.promises.readFile(path.join(sessionDirectory, 'workers.json'), 'utf8')) as {
+				workers?: readonly { workerId?: unknown; parentToolCallId?: unknown; worktreePath?: unknown; coordinatorCwd?: unknown }[];
+			};
+			const worker = parsed.workers?.find(candidate => candidate.workerId === workerId || candidate.parentToolCallId === workerId);
+			return runtimePathMapping(
+				typeof worker?.worktreePath === 'string' ? worker.worktreePath : undefined,
+				typeof worker?.coordinatorCwd === 'string' ? worker.coordinatorCwd : undefined,
+			);
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+				this._logService.trace(`[cli-ts] Runtime worker path metadata unavailable for ${path.basename(agentDirectory)}: ${error instanceof Error ? error.message : String(error)}`);
+			}
+			return undefined;
+		}
 	}
 
 	private async _attachRuntimeRecoveryFileEdits(session: CliTsSession, childTurn: CliTsTurnState, recovery: CliTsRuntimeSubagentRecovery, parentToolCallId: string): Promise<void> {
@@ -2298,7 +2903,9 @@ export class CliTsAgent extends Disposable implements IAgent {
 			if (part?.kind === 'tool') {
 				part.fileEdits = fileEdits;
 			}
-			const text = cliTsToolResultText(recovered.toolName, recovered.title, recovered.detail, part?.kind === 'tool' ? part.inputSummary : undefined);
+			const text = part?.kind === 'tool' && part.terminalOutput
+				? part.terminalOutput.text
+				: cliTsToolResultText(recovered.toolName, recovered.title, recovered.detail, part?.kind === 'tool' ? part.inputSummary : undefined);
 			this._fire(session.sessionUri, {
 				type: ActionType.ChatToolCallComplete,
 				turnId: childTurn.turnId,
@@ -2331,7 +2938,9 @@ export class CliTsAgent extends Disposable implements IAgent {
 						turnId: `subagent-${tool.toolCallId}`,
 						toolCallId: tool.toolCallId,
 						filePath: edit.path,
-						kind: edit.before.length === 0 && edit.after.length > 0 ? FileEditKind.Create : FileEditKind.Edit,
+						kind: edit.before.length === 0 && edit.after.length > 0
+							? FileEditKind.Create
+							: edit.before.length > 0 && edit.after.length === 0 ? FileEditKind.Delete : FileEditKind.Edit,
 						addedLines: undefined,
 						removedLines: undefined,
 						beforeContent: new TextEncoder().encode(edit.before),
@@ -2394,6 +3003,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 					materialized: session.materialized,
 					threadId: session.threadId,
 					forkContext: session.forkContext,
+					providerHandoffContext: session.providerHandoffContext,
 					// Persist the active turn as an error-state snapshot. Graceful shutdown
 					// replaces it with the final partial response, while a crash or forced
 					// quit still leaves a reopenable chat containing the exact prompt.
@@ -2470,13 +3080,27 @@ function activeTurnToStoredTurn(turn: CliTsTurnState): CliTsStoredTurn {
 }
 
 function buildForkConversationContext(turns: readonly CliTsStoredTurn[]): string {
+	return buildConversationHandoffContext(
+		turns,
+		'This chat was branched from an earlier conversation.',
+	);
+}
+
+function buildProviderHandoffConversationContext(turns: readonly CliTsStoredTurn[]): string {
+	return buildConversationHandoffContext(
+		turns,
+		'The user changed model providers while keeping this chat.',
+	);
+}
+
+function buildConversationHandoffContext(turns: readonly CliTsStoredTurn[], reason: string): string {
 	const transcript = turns.map(turn => ({
 		user: turn.prompt,
 		assistant: turn.response,
 		...(turn.failed ? { responseFailed: true } : {}),
 	}));
 	return [
-		'This chat was branched from an earlier conversation. Treat the JSON transcript below as authoritative prior user/assistant history, then answer the current user message as the next turn. Do not mention this handoff unless the user asks about it.',
+		`${reason} Treat the JSON transcript below as authoritative prior user/assistant history, then answer the current user message as the next turn. Do not mention this handoff unless the user asks about it.`,
 		'<prior_conversation_json>',
 		JSON.stringify(transcript),
 		'</prior_conversation_json>',
@@ -2535,7 +3159,7 @@ function fallbackSubagentTurns(parentTurns: readonly CliTsStoredTurn[], toolCall
 	for (const parentTurn of parentTurns) {
 		const part = parentTurn.parts?.find(candidate => candidate.kind === 'tool'
 			&& candidate.id === toolCallId
-			&& isCliTsSubagentTool(candidate.name));
+			&& isCliTsSubagentLauncherTool(candidate.name));
 		if (!part || part.kind !== 'tool') {
 			continue;
 		}
@@ -2550,6 +3174,129 @@ function fallbackSubagentTurns(parentTurns: readonly CliTsStoredTurn[], toolCall
 		}];
 	}
 	return [];
+}
+
+function subagentWorkspaceFromTurns(parentTurns: readonly CliTsStoredTurn[], toolCallId: string): CliTsWorkerWorkspace | undefined {
+	for (let turnIndex = parentTurns.length - 1; turnIndex >= 0; turnIndex--) {
+		const part = parentTurns[turnIndex].parts?.find(candidate => candidate.kind === 'tool' && candidate.id === toolCallId);
+		if (part?.kind === 'tool' && part.workspace) {
+			return part.workspace;
+		}
+	}
+	return undefined;
+}
+
+function runtimePathMapping(workerRoot: string | undefined, coordinatorRoot: string | undefined): CliTsRuntimePathMapping | undefined {
+	if (!workerRoot?.trim() || !coordinatorRoot?.trim()) {
+		return undefined;
+	}
+	return { workerRoot: path.resolve(workerRoot), coordinatorRoot: path.resolve(coordinatorRoot) };
+}
+
+function isSafeRuntimePathSegment(value: string): boolean {
+	return /^[A-Za-z0-9._-]+$/.test(value) && value !== '.' && value !== '..';
+}
+
+/**
+ * Projects raw private child-archive paths onto the coordinator checkout. The
+ * JSONL stays untouched for recovery; only IDE persistence and transcript data
+ * receive the stable path users can actually open after worker cleanup.
+ */
+function projectRuntimeSubagentRecovery(recovery: CliTsRuntimeSubagentRecovery, mapping: CliTsRuntimePathMapping | undefined): CliTsRuntimeSubagentRecovery {
+	if (!mapping) {
+		return recovery;
+	}
+	const workerRoot = path.resolve(mapping.workerRoot);
+	const coordinatorRoot = path.resolve(mapping.coordinatorRoot);
+	const replaceText = (value: string): string => {
+		let projected = value;
+		const variants = new Map<string, string>([
+			[workerRoot, coordinatorRoot],
+			[workerRoot.replaceAll('\\', '/'), coordinatorRoot.replaceAll('\\', '/')],
+			[workerRoot.replaceAll('/', '\\'), coordinatorRoot.replaceAll('/', '\\')],
+		]);
+		for (const [worker, coordinator] of [...variants].sort(([left], [right]) => right.length - left.length)) {
+			projected = projected.replaceAll(worker, coordinator);
+		}
+		return projected;
+	};
+	const projectFilePath = (value: string): string => {
+		const absolute = path.resolve(workerRoot, value);
+		const relative = path.relative(workerRoot, absolute);
+		const insideWorker = !path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`);
+		return insideWorker ? path.resolve(coordinatorRoot, relative) : replaceText(value);
+	};
+	const projectUnknown = (value: unknown): unknown => {
+		if (typeof value === 'string') {
+			return replaceText(value);
+		}
+		if (Array.isArray(value)) {
+			return value.map(projectUnknown);
+		}
+		if (value && typeof value === 'object') {
+			return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, projectUnknown(child)]));
+		}
+		return value;
+	};
+	const projectPart = (part: CliTsStoredPart): CliTsStoredPart => {
+		if (part.kind === 'markdown' || part.kind === 'reasoning') {
+			return { ...part, content: replaceText(part.content) };
+		}
+		return {
+			...part,
+			...(part.inputSummary ? { inputSummary: replaceText(part.inputSummary) } : {}),
+			...(part.title ? { title: replaceText(part.title) } : {}),
+			...(part.detail ? { detail: replaceText(part.detail) } : {}),
+			...(part.terminalOutput ? { terminalOutput: { ...part.terminalOutput, text: replaceText(part.terminalOutput.text) } } : {}),
+		};
+	};
+	return {
+		turn: {
+			...recovery.turn,
+			prompt: replaceText(recovery.turn.prompt),
+			response: replaceText(recovery.turn.response),
+			...(recovery.turn.tools ? { tools: recovery.turn.tools.map(replaceText) } : {}),
+			...(recovery.turn.parts ? { parts: recovery.turn.parts.map(projectPart) } : {}),
+		},
+		fileEdits: recovery.fileEdits.map(tool => ({
+			...tool,
+			toolInput: projectUnknown(tool.toolInput),
+			...(tool.title ? { title: replaceText(tool.title) } : {}),
+			...(tool.detail ? { detail: replaceText(tool.detail) } : {}),
+			edits: tool.edits.map(edit => ({ ...edit, path: projectFilePath(edit.path) })),
+		})),
+		pathMapping: mapping,
+	};
+}
+
+/**
+ * Pins reopened runtime diffs to the freshly projected coordinator records.
+ * Older builds may already have persisted a duplicate private-worker path for
+ * the same tool call; embedding the authoritative set prevents generic DB
+ * hydration from reattaching that stale, deleted checkout.
+ */
+function runtimeRecoveryTurnWithFileEdits(sessionUri: string, recovery: CliTsRuntimeSubagentRecovery): CliTsStoredTurn {
+	const byToolCall = new Map<string, ToolResultFileEditContent[]>();
+	for (const tool of recovery.fileEdits) {
+		byToolCall.set(tool.toolCallId, tool.edits.map(edit => storedFileEditContent(sessionUri, {
+			turnId: `subagent-${tool.toolCallId}`,
+			toolCallId: tool.toolCallId,
+			filePath: edit.path,
+			kind: edit.before.length === 0 && edit.after.length > 0
+				? FileEditKind.Create
+				: edit.before.length > 0 && edit.after.length === 0 ? FileEditKind.Delete : FileEditKind.Edit,
+			addedLines: undefined,
+			removedLines: undefined,
+		})));
+	}
+	return {
+		...recovery.turn,
+		...(recovery.turn.parts ? {
+			parts: recovery.turn.parts.map(part => part.kind === 'tool' && byToolCall.has(part.id) && !part.fileEdits?.length
+				? { ...part, fileEdits: byToolCall.get(part.id) }
+				: part),
+		} : {}),
+	};
 }
 
 /**
@@ -2588,6 +3335,10 @@ function runtimeSubagentRecoveryFromEvents(prompt: string, eventsRaw: string): C
 		}
 		const current = toolParts.get(event.toolCallId);
 		const name = event.name ?? current?.part.name ?? requestedToolNames.get(event.toolCallId) ?? 'Tool';
+		const incomingToolUi = cliTsToolUiState(event.toolUi);
+		const toolUi = incomingToolUi
+			? mergeCliTsToolUiState(current?.part.toolUi, incomingToolUi)
+			: current?.part.toolUi;
 		const next: ToolPart = {
 			kind: 'tool',
 			id: event.toolCallId,
@@ -2595,6 +3346,8 @@ function runtimeSubagentRecoveryFromEvents(prompt: string, eventsRaw: string): C
 			...(event.inputSummary || current?.part.inputSummary ? { inputSummary: event.inputSummary || current?.part.inputSummary } : {}),
 			...(terminal && event.title ? { title: event.title } : current?.part.title ? { title: current.part.title } : {}),
 			...(terminal && event.detail ? { detail: event.detail } : current?.part.detail ? { detail: current.part.detail } : {}),
+			...(terminal && event.terminalOutput ? { terminalOutput: event.terminalOutput } : current?.part.terminalOutput ? { terminalOutput: current.part.terminalOutput } : {}),
+			...(toolUi ? { toolUi } : {}),
 			...((terminal && (event.type === 'tool:error' || event.status === 'error')) || current?.part.failed ? { failed: true } : {}),
 		};
 		if (current) {
@@ -2722,6 +3475,16 @@ function isCliTsSubagentTool(toolName: string): boolean {
 	return normalized === 'agent' || normalized === 'subagent';
 }
 
+/** A non-blocking worker launcher whose tool result is only a durable handle. */
+function isCliTsDetachedSubagentTool(toolName: string): boolean {
+	return toolName.replace(/[_-]/g, '').toLocaleLowerCase() === 'agentspawn';
+}
+
+/** Tools that own a child session. AgentWait is deliberately excluded. */
+function isCliTsSubagentLauncherTool(toolName: string): boolean {
+	return isCliTsSubagentTool(toolName) || isCliTsDetachedSubagentTool(toolName);
+}
+
 function cliTsToolResultText(toolName: string, title: string | undefined, detail: string | undefined, inputSummary: string | undefined): string {
 	if (!isCliTsTerminalTool(toolName)) {
 		return [title, detail].filter(part => !!part).join('\n');
@@ -2751,6 +3514,99 @@ function cliTsToolResultText(toolName: string, title: string | undefined, detail
 	return lines.join('\n');
 }
 
+function cliTsTerminalProgressText(data: unknown): string | undefined {
+	if (!data || typeof data !== 'object') {
+		return undefined;
+	}
+	const progress = data as { kind?: unknown; text?: unknown };
+	return progress.kind === 'terminal-output' && typeof progress.text === 'string'
+		? progress.text
+		: undefined;
+}
+
+function terminalOutputFromProgress(text: string | undefined): CliTsTerminalOutput | undefined {
+	return text === undefined ? undefined : { text };
+}
+
+const CLI_TS_TOOL_UI_MAX_JSON_CHARS = 512_000;
+const CLI_TS_BACKBOARD_TOOL_KINDS = new Set<CliTsBackboardToolKind>([
+	'read',
+	'grep',
+	'glob',
+	'fetchUrl',
+	'webSearch',
+	'todo',
+	'computer',
+	'browser',
+	'findSkill',
+	'findMcp',
+]);
+
+function cliTsToolUiState(value: unknown): CliTsToolUiState | undefined {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) {
+		return undefined;
+	}
+	const candidate = value as { kind?: unknown; input?: unknown; result?: unknown };
+	if (typeof candidate.kind !== 'string' || !CLI_TS_BACKBOARD_TOOL_KINDS.has(candidate.kind as CliTsBackboardToolKind)) {
+		return undefined;
+	}
+	const input = boundedCliTsToolUiRecord(candidate.input);
+	const result = boundedCliTsToolUiRecord(candidate.result);
+	return {
+		kind: candidate.kind as CliTsBackboardToolKind,
+		...(input ? { input } : {}),
+		...(result ? { result } : {}),
+	};
+}
+
+function boundedCliTsToolUiRecord(value: unknown): Record<string, unknown> | undefined {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) {
+		return undefined;
+	}
+	try {
+		const serialized = JSON.stringify(value);
+		if (serialized.length > CLI_TS_TOOL_UI_MAX_JSON_CHARS) {
+			return undefined;
+		}
+		const parsed = JSON.parse(serialized) as unknown;
+		return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+			? parsed as Record<string, unknown>
+			: undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+function mergeCliTsToolUiState(existing: CliTsToolUiState | undefined, incoming: CliTsToolUiState): CliTsToolUiState {
+	if (!existing || existing.kind !== incoming.kind) {
+		return incoming;
+	}
+	return {
+		kind: incoming.kind,
+		...(incoming.input ?? existing.input ? { input: incoming.input ?? existing.input } : {}),
+		...(incoming.result ?? existing.result ? { result: incoming.result ?? existing.result } : {}),
+	};
+}
+
+function cliTsReadyToolInput(inputSummary: string | undefined, toolUi: CliTsToolUiState | undefined): string {
+	if (!toolUi?.input) {
+		return inputSummary ?? '';
+	}
+	try {
+		return JSON.stringify(toolUi.input);
+	} catch {
+		return inputSummary ?? '';
+	}
+}
+
+function cliTsToolCompletionMetadata(toolName: string, terminalOutput: CliTsTerminalOutput | undefined, backboardToolKind?: CliTsBackboardToolKind, mutationBatch?: CliTsMutationBatch): Record<string, unknown> {
+	return {
+		...cliTsToolMetadata(toolName, undefined, backboardToolKind, mutationBatch),
+		...(terminalOutput?.exitCode !== undefined ? { terminalExitCode: terminalOutput.exitCode } : {}),
+		...(terminalOutput?.truncated ? { terminalOutputTruncated: true } : {}),
+	};
+}
+
 function isHiddenCliTsTool(toolName: string | undefined): boolean {
 	return toolName?.replace(/[_-]/g, '').toLocaleLowerCase() === 'askuser';
 }
@@ -2765,11 +3621,84 @@ function isCliTsToolLifecycleEvent(eventType: string): boolean {
 		|| eventType === 'tool:retracted';
 }
 
-function cliTsToolMetadata(toolName: string, input?: unknown): Record<string, unknown> {
+function isCliTsMutationTool(toolName: string | undefined): boolean {
+	const normalized = toolName?.replace(/[_-]/g, '').toLocaleLowerCase();
+	return normalized === 'write'
+		|| normalized === 'writefile'
+		|| normalized === 'writetofile'
+		|| normalized === 'edit'
+		|| normalized === 'editfile'
+		|| normalized === 'applypatch';
+}
+
+function cliTsMutationBatches(turn: CliTsTurnState): Map<string, CliTsMutationBatch> {
+	const compatible = turn as unknown as { mutationBatches?: Map<string, CliTsMutationBatch> };
+	return compatible.mutationBatches ??= new Map<string, CliTsMutationBatch>();
+}
+
+function cliTsPendingSubagentEndStatuses(turn: CliTsTurnState): Map<string, CliTsSubagentCompletionStatus> {
+	const compatible = turn as unknown as { pendingSubagentEndStatuses?: Map<string, CliTsSubagentCompletionStatus> };
+	return compatible.pendingSubagentEndStatuses ??= new Map<string, CliTsSubagentCompletionStatus>();
+}
+
+/**
+ * Maps durable workspace authority onto the child turn state. A captured write
+ * with changes is not final while it is merely waiting to integrate.
+ */
+function cliTsWorkspaceCompletionStatus(workspace: CliTsWorkerWorkspace): CliTsSubagentCompletionStatus | undefined {
+	switch (workspace.status) {
+		case 'Integrated':
+			return 'completed';
+		case 'Conflict':
+		case 'Failed':
+			return 'failed';
+		case 'Cancelled':
+			return 'cancelled';
+		case 'Completed':
+			if (workspace.integrationResult === 'Not integrated') {
+				return 'failed';
+			}
+			return workspace.changedFileCount === 0 ? 'completed' : undefined;
+		case 'Running':
+		case 'Integrating':
+			return undefined;
+	}
+}
+
+/** Exact when mutation inputs expose paths; unknown calls retain one slot. */
+function cliTsMutationFileCount(calls: readonly { readonly id: string; readonly name: string; readonly input: unknown }[]): number {
+	const paths = new Set<string>();
+	let unknownCalls = 0;
+	for (const call of calls) {
+		const input = call.input && typeof call.input === 'object' ? call.input as Record<string, unknown> : undefined;
+		const normalized = call.name.replace(/[_-]/g, '').toLocaleLowerCase();
+		if (normalized === 'applypatch') {
+			const patch = typeof input?.patch === 'string' ? input.patch : undefined;
+			const matches = patch ? Array.from(patch.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)) : [];
+			if (matches.length) {
+				for (const match of matches) {
+					paths.add(match[1].trim());
+				}
+			} else {
+				unknownCalls++;
+			}
+			continue;
+		}
+		const filePath = typeof input?.file_path === 'string' ? input.file_path.trim() : '';
+		if (filePath) {
+			paths.add(filePath);
+		} else {
+			unknownCalls++;
+		}
+	}
+	return Math.max(1, paths.size + unknownCalls);
+}
+
+function cliTsToolMetadata(toolName: string, input?: unknown, backboardToolKind?: CliTsBackboardToolKind, mutationBatch?: CliTsMutationBatch): Record<string, unknown> {
 	if (isCliTsTerminalTool(toolName)) {
 		return { source: 'cli-ts', toolKind: 'terminal', language: 'shellscript' };
 	}
-	if (isCliTsSubagentTool(toolName)) {
+	if (isCliTsSubagentLauncherTool(toolName)) {
 		const record = input && typeof input === 'object' ? input as { prompt?: unknown; subagent_type?: unknown } : undefined;
 		const prompt = typeof record?.prompt === 'string' ? record.prompt : undefined;
 		const agentName = record?.subagent_type === 'rlm' ? 'rlm' : 'worker';
@@ -2777,10 +3706,18 @@ function cliTsToolMetadata(toolName: string, input?: unknown): Record<string, un
 			source: 'cli-ts',
 			toolKind: 'subagent',
 			subagentAgentName: agentName,
+			...(isCliTsDetachedSubagentTool(toolName) ? { subagentDetached: true } : {}),
 			...(prompt ? { subagentDescription: firstPromptLine(prompt) } : {}),
 		};
 	}
-	return { source: 'cli-ts' };
+	return {
+		source: 'cli-ts',
+		...(backboardToolKind ? { backboardToolKind } : {}),
+		...(mutationBatch ? {
+			mutationBatchId: mutationBatch.id,
+			mutationBatchFileCount: mutationBatch.expectedFileCount,
+		} : {}),
+	};
 }
 
 function workerWorkspaceMetadata(workspace: CliTsWorkerWorkspace): Record<string, unknown> {
@@ -2789,10 +3726,7 @@ function workerWorkspaceMetadata(workspace: CliTsWorkerWorkspace): Record<string
 		subagentStatus: workspace.status,
 		subagentChangedFileCount: workspace.changedFileCount,
 		subagentStartedAt: workspace.startedAt,
-		...(workspace.branch ? { subagentBranch: workspace.branch } : {}),
-		...(workspace.worktreePath ? { subagentWorktreePath: workspace.worktreePath } : {}),
 		...(workspace.finishedAt ? { subagentFinishedAt: workspace.finishedAt } : {}),
-		...(workspace.integrationResult ? { subagentIntegrationResult: workspace.integrationResult } : {}),
 		...(workspace.conflictingFiles ? { subagentConflictingFiles: workspace.conflictingFiles } : {}),
 	};
 }
@@ -2800,7 +3734,7 @@ function workerWorkspaceMetadata(workspace: CliTsWorkerWorkspace): Record<string
 function workerWorkspaceStatusLine(workspace: CliTsWorkerWorkspace): string {
 	switch (workspace.status) {
 		case 'Running':
-			return localize('cliTsAgent.workerRunning', "Worker running in {0}", workspace.worktreePath ?? 'the coordinator workspace');
+			return localize('cliTsAgent.workerRunning', "Worker running");
 		case 'Integrating':
 			return localize('cliTsAgent.workerIntegrating', "Integrating worker changes…");
 		case 'Integrated':
@@ -2810,7 +3744,7 @@ function workerWorkspaceStatusLine(workspace: CliTsWorkerWorkspace): string {
 		case 'Completed':
 			return localize('cliTsAgent.workerCompleted', "Worker completed with {0} changed files", workspace.changedFileCount);
 		case 'Failed':
-			return localize('cliTsAgent.workerFailed', "Worker failed; its worktree was preserved");
+			return localize('cliTsAgent.workerFailed', "Worker failed; recovery data was preserved");
 		case 'Cancelled':
 			return localize('cliTsAgent.workerCancelled', "Worker cancelled; late integration is disabled");
 	}
@@ -2924,7 +3858,8 @@ function storedTurnToProtocolTurn(sessionId: string, index: number, turn: CliTsS
 				}
 			} else if (!isHiddenCliTsTool(part.name)) {
 				const displayName = toolDisplayName(part.name);
-				const resultText = cliTsToolResultText(part.name, part.title, part.detail, part.inputSummary);
+				const toolUi = cliTsToolUiState(part.toolUi);
+				const resultText = part.terminalOutput?.text ?? cliTsToolResultText(part.name, part.title, part.detail, part.inputSummary);
 				const content: ToolResultContent[] = [];
 				if (resultText) {
 					content.push({ type: ToolResultContentType.Text, text: resultText });
@@ -2940,16 +3875,19 @@ function storedTurnToProtocolTurn(sessionId: string, index: number, turn: CliTsS
 						toolName: part.name,
 						displayName,
 						invocationMessage: toolInvocationMessage(part.name, part.inputSummary),
-						toolInput: part.inputSummary,
+						toolInput: cliTsReadyToolInput(part.inputSummary, toolUi),
 						confirmed: ToolCallConfirmationReason.NotNeeded,
 						success: !part.failed,
 						pastTenseMessage: part.title ?? (part.failed
 							? localize('cliTsAgent.toolFailed', "{0} failed", displayName)
 							: localize('cliTsAgent.toolFinished', "{0} finished", displayName)),
 						...(content.length ? { content } : {}),
+						...(toolUi?.result ? { structuredContent: { backboardTool: toolUi.result } } : {}),
 						...(part.failed && part.title ? { error: { message: part.title } } : {}),
 						_meta: {
-							...cliTsToolMetadata(part.name, isCliTsSubagentTool(part.name) && part.inputSummary ? { prompt: part.inputSummary } : undefined),
+							...cliTsToolMetadata(part.name, isCliTsSubagentLauncherTool(part.name) && part.inputSummary ? { prompt: part.inputSummary } : undefined, toolUi?.kind, part.mutationBatch),
+							...(part.terminalOutput?.exitCode !== undefined ? { terminalExitCode: part.terminalOutput.exitCode } : {}),
+							...(part.terminalOutput?.truncated ? { terminalOutputTruncated: true } : {}),
 							...(part.workspace ? workerWorkspaceMetadata(part.workspace) : {}),
 						},
 					},

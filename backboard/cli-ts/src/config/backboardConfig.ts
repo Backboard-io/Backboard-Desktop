@@ -48,6 +48,10 @@ export function readBackboardConfig(
 				config.chatgptSubscriptionAuthFile.trim()
 					? config.chatgptSubscriptionAuthFile.trim()
 					: undefined,
+			claudeSubscriptionEnabled:
+				typeof config.claudeSubscriptionEnabled === "boolean"
+					? config.claudeSubscriptionEnabled
+					: undefined,
 			model: readModelConfig(config),
 			successfulModels: readSuccessfulModels(config),
 			thinking: readThinkingConfig(config),

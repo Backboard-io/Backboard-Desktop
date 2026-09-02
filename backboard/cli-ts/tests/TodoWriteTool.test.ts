@@ -28,6 +28,7 @@ describe("TodoWriteTool", () => {
 		const result = await tool.execute(input, ctx);
 
 		expect(result.data.count).toBe(2);
+		expect(result.data.todos).toEqual(emittedTodos);
 		expect(emittedTodos[0]).toEqual({
 			id: "todo_existing",
 			content: "Plan work",

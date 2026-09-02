@@ -7,94 +7,168 @@ import {
 	type WorkerWorkspaceStoreData,
 } from "./WorkerWorkspaceTypes.ts";
 
-/** Durable, atomically replaced worker metadata with in-process write ordering. */
+export interface WorkerWorkspaceStoreWriteOptions {
+	/** Flushes this state to disk before returning. Defaults to true. */
+	durable?: boolean;
+}
+
+export interface WorkerWorkspaceStoreOptions {
+	/** Coalescing window for intermediate lifecycle states. */
+	debounceMs?: number;
+}
+
+/** Durable worker metadata with in-memory mutation and coalesced atomic writes. */
 export class WorkerWorkspaceStore {
-	private tail: Promise<void> = Promise.resolve();
+	private readonly debounceMs: number;
+	private readonly records = new Map<string, WorkerWorkspaceRecord>();
+	private loadPromise?: Promise<void>;
+	private flushPromise?: Promise<void>;
+	private debounceTimer?: ReturnType<typeof setTimeout>;
+	private changeVersion = 0;
+	private persistedVersion = 0;
 	private nextTemporaryId = 0;
 
-	constructor(readonly filePath: string) {}
+	constructor(
+		readonly filePath: string,
+		options: WorkerWorkspaceStoreOptions = {},
+	) {
+		this.debounceMs = Math.max(0, options.debounceMs ?? 75);
+	}
 
 	async load(): Promise<WorkerWorkspaceRecord[]> {
-		await this.tail;
+		await this.ensureLoaded();
+		return this.snapshot();
+	}
+
+	async upsert(
+		record: WorkerWorkspaceRecord,
+		options: WorkerWorkspaceStoreWriteOptions = {},
+	): Promise<void> {
+		await this.ensureLoaded();
+		this.records.set(record.workerId, cloneWorkerRecord(record));
+		this.markChanged();
+		await this.finishMutation(options);
+	}
+
+	/** Persists one lifecycle boundary for several workers with one store write. */
+	async upsertMany(
+		records: readonly WorkerWorkspaceRecord[],
+		options: WorkerWorkspaceStoreWriteOptions = {},
+	): Promise<void> {
+		if (records.length === 0) return;
+		await this.ensureLoaded();
+		for (const record of records) {
+			this.records.set(record.workerId, cloneWorkerRecord(record));
+		}
+		this.markChanged();
+		await this.finishMutation(options);
+	}
+
+	async replace(
+		records: readonly WorkerWorkspaceRecord[],
+		options: WorkerWorkspaceStoreWriteOptions = {},
+	): Promise<void> {
+		await this.ensureLoaded();
+		this.records.clear();
+		for (const record of records) {
+			this.records.set(record.workerId, cloneWorkerRecord(record));
+		}
+		this.markChanged();
+		await this.finishMutation(options);
+	}
+
+	async remove(
+		workerId: string,
+		options: WorkerWorkspaceStoreWriteOptions = {},
+	): Promise<void> {
+		await this.ensureLoaded();
+		if (!this.records.delete(workerId)) return;
+		this.markChanged();
+		await this.finishMutation(options);
+	}
+
+	async flush(): Promise<void> {
+		await this.ensureLoaded();
+		this.clearDebounceTimer();
+		while (this.persistedVersion < this.changeVersion) {
+			this.flushPromise ??= this.drainWrites().finally(() => {
+				this.flushPromise = undefined;
+			});
+			await this.flushPromise;
+		}
+	}
+
+	private async ensureLoaded(): Promise<void> {
+		this.loadPromise ??= this.loadNow();
+		await this.loadPromise;
+	}
+
+	private async loadNow(): Promise<void> {
+		let workers: WorkerWorkspaceRecord[] = [];
 		try {
 			const parsed = JSON.parse(await readFile(this.filePath, "utf8")) as {
 				version?: unknown;
 				workers?: unknown;
 			};
 			if (
-				parsed.version !== WORKER_WORKSPACE_STORE_VERSION ||
-				!Array.isArray(parsed.workers)
-			) {
-				return [];
-			}
-			return parsed.workers
-				.filter(isWorkerWorkspaceRecord)
-				.map(cloneWorkerRecord);
-		} catch (error) {
-			if ((error as { code?: string }).code === "ENOENT") return [];
-			throw error;
-		}
-	}
-
-	async upsert(record: WorkerWorkspaceRecord): Promise<void> {
-		return this.mutate((workers) => {
-			const index = workers.findIndex(
-				(candidate) => candidate.workerId === record.workerId,
-			);
-			if (index >= 0) workers[index] = cloneWorkerRecord(record);
-			else workers.push(cloneWorkerRecord(record));
-		});
-	}
-
-	async replace(records: readonly WorkerWorkspaceRecord[]): Promise<void> {
-		return this.queueWrite(records.map(cloneWorkerRecord));
-	}
-
-	async remove(workerId: string): Promise<void> {
-		return this.mutate((workers) => {
-			const index = workers.findIndex(
-				(candidate) => candidate.workerId === workerId,
-			);
-			if (index >= 0) workers.splice(index, 1);
-		});
-	}
-
-	async flush(): Promise<void> {
-		await this.tail;
-	}
-
-	private async mutate(
-		change: (workers: WorkerWorkspaceRecord[]) => void,
-	): Promise<void> {
-		const operation = this.tail.then(async () => {
-			const workers = await this.loadWithoutWaiting();
-			change(workers);
-			await this.writeNow(workers);
-		});
-		this.tail = operation;
-		await operation;
-	}
-
-	private async queueWrite(records: WorkerWorkspaceRecord[]): Promise<void> {
-		const operation = this.tail.then(() => this.writeNow(records));
-		this.tail = operation;
-		await operation;
-	}
-
-	private async loadWithoutWaiting(): Promise<WorkerWorkspaceRecord[]> {
-		try {
-			const parsed = JSON.parse(await readFile(this.filePath, "utf8")) as {
-				version?: unknown;
-				workers?: unknown;
-			};
-			return parsed.version === WORKER_WORKSPACE_STORE_VERSION &&
+				parsed.version === WORKER_WORKSPACE_STORE_VERSION &&
 				Array.isArray(parsed.workers)
-				? parsed.workers.filter(isWorkerWorkspaceRecord).map(cloneWorkerRecord)
-				: [];
+			) {
+				workers = parsed.workers
+					.filter(isWorkerWorkspaceRecord)
+					.map(cloneWorkerRecord);
+			}
 		} catch (error) {
-			if ((error as { code?: string }).code === "ENOENT") return [];
-			throw error;
+			if ((error as { code?: string }).code !== "ENOENT") throw error;
 		}
+		for (const worker of workers) {
+			this.records.set(worker.workerId, worker);
+		}
+	}
+
+	private markChanged(): void {
+		this.changeVersion++;
+	}
+
+	private async finishMutation(
+		options: WorkerWorkspaceStoreWriteOptions,
+	): Promise<void> {
+		if (options.durable ?? true) {
+			await this.flush();
+			return;
+		}
+		this.scheduleFlush();
+	}
+
+	private scheduleFlush(): void {
+		if (this.debounceTimer) return;
+		this.debounceTimer = setTimeout(() => {
+			this.debounceTimer = undefined;
+			void this.flush().catch(() => {
+				// A later lifecycle-boundary flush retries and surfaces the failure.
+			});
+		}, this.debounceMs);
+		this.debounceTimer.unref?.();
+	}
+
+	private clearDebounceTimer(): void {
+		if (!this.debounceTimer) return;
+		clearTimeout(this.debounceTimer);
+		this.debounceTimer = undefined;
+	}
+
+	private async drainWrites(): Promise<void> {
+		while (this.persistedVersion < this.changeVersion) {
+			const targetVersion = this.changeVersion;
+			await this.writeNow(this.snapshot());
+			this.persistedVersion = targetVersion;
+		}
+	}
+
+	private snapshot(): WorkerWorkspaceRecord[] {
+		return [...this.records.values()]
+			.sort((a, b) => a.sequence - b.sequence)
+			.map(cloneWorkerRecord);
 	}
 
 	private async writeNow(records: WorkerWorkspaceRecord[]): Promise<void> {

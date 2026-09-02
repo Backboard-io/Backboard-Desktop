@@ -544,30 +544,37 @@ export class AgentSideEffects extends Disposable {
 			return;
 		}
 
-		this._logService.info(`[AgentSideEffects] Creating subagent session: ${subagentSessionUri} (parent=${parentSession}, toolCallId=${toolCallId})`);
 		const parentState = this._stateManager.getSessionState(parentSession);
+		const existingState = this._stateManager.getSessionState(subagentSessionUri);
+		if (!existingState) {
+			this._logService.info(`[AgentSideEffects] Creating subagent session: ${subagentSessionUri} (parent=${parentSession}, toolCallId=${toolCallId})`);
+			// Create the subagent session silently (restoreSession skips notification).
+			this._stateManager.restoreSession(
+				{
+					resource: subagentSessionUri,
+					provider: 'subagent',
+					title: agentDisplayName,
+					status: SessionStatus.Idle,
+					createdAt: Date.now(),
+					modifiedAt: Date.now(),
+					...(parentState?.summary.project ? { project: parentState.summary.project } : {}),
+				},
+				[],
+			);
 
-		// Create the subagent session silently (restoreSession skips notification)
-		this._stateManager.restoreSession(
-			{
-				resource: subagentSessionUri,
-				provider: 'subagent',
-				title: agentDisplayName,
-				status: SessionStatus.Idle,
-				createdAt: Date.now(),
-				modifiedAt: Date.now(),
-				...(parentState?.summary.project ? { project: parentState.summary.project } : {}),
-			},
-			[],
-		);
-
-		// Start a turn on the subagent session
-		const turnId = generateUuid();
-		this._stateManager.dispatchServerAction(subagentSessionUri, {
-			type: ActionType.ChatTurnStarted,
-			turnId,
-			message: { text: prompt ?? '', origin: { kind: MessageKind.User } },
-		});
+			const turnId = generateUuid();
+			this._stateManager.dispatchServerAction(subagentSessionUri, {
+				type: ActionType.ChatTurnStarted,
+				turnId,
+				message: { text: prompt ?? '', origin: { kind: MessageKind.User } },
+			});
+		} else {
+			// A host reconnect can rebuild this transient routing map while the
+			// restored child session is still present. Reuse that exact session;
+			// restoring it again produces a duplicate-session failure and loses the
+			// user's ability to reopen the running worker.
+			this._logService.trace(`[AgentSideEffects] Reusing existing subagent session: ${subagentSessionUri}`);
+		}
 
 		this._subagentSessions.set(subagentKey, subagentSessionUri);
 
@@ -577,7 +584,8 @@ export class AgentSideEffects extends Disposable {
 		if (parentTurnId) {
 			const parentState = this._stateManager.getSessionState(parentSession);
 			const existingContent = this._getRunningToolCallContent(parentState, parentTurnId, toolCallId);
-			const mergedContent = [
+			const alreadyAdvertised = existingContent.some(content => content.type === ToolResultContentType.Subagent && content.resource === subagentSessionUri);
+			const mergedContent = alreadyAdvertised ? existingContent : [
 				...existingContent,
 				{
 					type: ToolResultContentType.Subagent as const,

@@ -770,6 +770,20 @@ suite('stateToProgressAdapter', () => {
 
 	suite('toolCallStateToInvocation', () => {
 
+		test('maps stable cli-ts mutation batch metadata onto live invocations', () => {
+			const invocation = toolCallStateToInvocation(createToolCallState({
+				toolCallId: 'write-a',
+				toolName: 'Write',
+				_meta: { source: 'cli-ts', mutationBatchId: 'turn-1:mutation:write-a', mutationBatchFileCount: 3 },
+			}));
+
+			assert.deepStrictEqual(invocation.toolSpecificData, {
+				kind: 'mutation',
+				batchId: 'turn-1:mutation:write-a',
+				expectedFileCount: 3,
+			});
+		});
+
 		test('creates a visible streaming invocation while tool input is generated', () => {
 			const tc: ToolCallStreamingState = {
 				toolCallId: 'tc-streaming',
@@ -907,7 +921,7 @@ suite('stateToProgressAdapter', () => {
 
 		test('sets subagent toolSpecificData from _meta for subagent toolKind', () => {
 			const tc = createToolCallState({
-				_meta: { toolKind: 'subagent', subagentDescription: 'Review code', subagentAgentName: 'code-reviewer' },
+				_meta: { toolKind: 'subagent', subagentDescription: 'Review code', subagentAgentName: 'code-reviewer', subagentDetached: true },
 			});
 
 			const invocation = toolCallStateToInvocation(tc);
@@ -916,6 +930,7 @@ suite('stateToProgressAdapter', () => {
 			if (invocation.toolSpecificData.kind === 'subagent') {
 				assert.strictEqual(invocation.toolSpecificData.description, 'Review code');
 				assert.strictEqual(invocation.toolSpecificData.agentName, 'code-reviewer');
+				assert.strictEqual(invocation.toolSpecificData.detached, true);
 			}
 		});
 
@@ -970,6 +985,7 @@ suite('stateToProgressAdapter', () => {
 				confirmed: ToolCallConfirmationReason.NotNeeded,
 				success: true,
 				pastTenseMessage: 'Ran echo hi',
+				_meta: { terminalExitCode: 7, terminalOutputTruncated: true },
 				content: [
 					{ type: ToolResultContentType.Terminal, resource: 'agenthost-terminal:///t4', title: 'Terminal' },
 					{ type: ToolResultContentType.Text, text: 'output text' },
@@ -978,9 +994,10 @@ suite('stateToProgressAdapter', () => {
 
 			assert.ok(invocation.toolSpecificData);
 			assert.strictEqual(invocation.toolSpecificData.kind, 'terminal');
-			const termData = invocation.toolSpecificData as { kind: 'terminal'; terminalCommandOutput: { text: string }; terminalCommandState: { exitCode: number } };
+			const termData = invocation.toolSpecificData as { kind: 'terminal'; terminalCommandOutput: { text: string; truncated?: boolean }; terminalCommandState: { exitCode: number } };
 			assert.strictEqual(termData.terminalCommandOutput.text, 'output text');
-			assert.strictEqual(termData.terminalCommandState.exitCode, 0);
+			assert.strictEqual(termData.terminalCommandOutput.truncated, true);
+			assert.strictEqual(termData.terminalCommandState.exitCode, 7);
 			assert.strictEqual(IChatToolInvocation.resultDetails(invocation), undefined);
 		});
 
@@ -1356,6 +1373,7 @@ suite('stateToProgressAdapter', () => {
 				toolCallId: 'tc-edit',
 				toolName: 'edit_file',
 				displayName: 'Edit File',
+				_meta: { source: 'cli-ts', mutationBatchId: 'turn-1:mutation:tc-edit', mutationBatchFileCount: 2 },
 				content: [{
 					type: ToolResultContentType.FileEdit,
 					before: {
@@ -1382,9 +1400,12 @@ suite('stateToProgressAdapter', () => {
 			assert.strictEqual(activeProgress.length, 2);
 			assert.strictEqual(serialized.kind, 'toolInvocationSerialized');
 			assert.strictEqual(serialized.toolCallId, 'tc-edit');
+			assert.deepStrictEqual(serialized.toolSpecificData, { kind: 'mutation', batchId: 'turn-1:mutation:tc-edit', expectedFileCount: 2 });
 			assert.strictEqual(serialized.presentation, ToolInvocationPresentation.Hidden);
 			assert.strictEqual(edits.length, 1, 'The active-turn snapshot must not duplicate a completed edit');
 			assert.strictEqual(edits[0].undoStopId, 'tc-edit');
+			assert.strictEqual(edits[0].mutationBatchId, 'turn-1:mutation:tc-edit');
+			assert.strictEqual(edits[0].mutationBatchFileCount, 2);
 			assert.deepStrictEqual(edits[0].diff, { added: 3, removed: 1 });
 			assert.strictEqual(edits[0].uri.scheme, 'vscode-agent-host');
 			assert.strictEqual(edits[0].uri.authority, 'ssh__workstation');
@@ -1406,6 +1427,7 @@ suite('stateToProgressAdapter', () => {
 			assert.strictEqual(historySerialized.presentation, ToolInvocationPresentation.Hidden);
 			assert.strictEqual(historyEdits.length, 1, 'Completed history must also contain exactly one card for the file');
 			assert.strictEqual(historyEdits[0].undoStopId, edits[0].undoStopId);
+			assert.strictEqual(historyEdits[0].mutationBatchId, edits[0].mutationBatchId);
 		});
 
 		test('creates live invocations for running tool calls', () => {

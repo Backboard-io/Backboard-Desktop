@@ -1548,6 +1548,12 @@ export interface IXtermTerminal extends IDisposable {
 }
 
 export interface IDetachedXtermTerminal extends IXtermTerminal {
+	/** The element xterm is currently attached to, when mounted. */
+	readonly element: HTMLElement | undefined;
+
+	/** Current terminal row count. */
+	readonly rows: number;
+
 	/** Fires when the terminal scrollback viewport changes. */
 	readonly onDidScroll: Event<number>;
 

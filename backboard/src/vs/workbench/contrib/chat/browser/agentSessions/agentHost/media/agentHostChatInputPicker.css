@@ -316,23 +316,6 @@
 	text-overflow: ellipsis;
 }
 
-.backboard-access-picker-learn-more {
-	flex: none;
-	color: inherit;
-	text-decoration: underline;
-	text-underline-offset: 2px;
-	cursor: pointer;
-}
-
-.backboard-access-picker-learn-more:hover {
-	color: var(--vscode-textLink-activeForeground);
-}
-
-.backboard-access-picker-learn-more:focus-visible {
-	outline: 1px solid var(--vscode-focusBorder);
-	outline-offset: 2px;
-}
-
 .backboard-access-picker-list {
 	display: flex;
 	flex-direction: column;

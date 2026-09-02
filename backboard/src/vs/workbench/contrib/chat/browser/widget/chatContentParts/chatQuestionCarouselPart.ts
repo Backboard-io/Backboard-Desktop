@@ -185,8 +185,10 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 			this._collapseButton = collapseButton;
 		}
 
-		// Close/skip button (X) - placed in header row, only shown when allowSkip is true
-		if (carousel.allowSkip) {
+		// Multi-question flows keep the header close action because their footer is
+		// also navigation. A single question gets one explicit Dismiss action in
+		// the footer instead of showing both an X and a duplicate keyboard hint.
+		if (carousel.allowSkip && carousel.questions.length > 1) {
 			this._closeButtonContainer = dom.$('.chat-question-close-container');
 			const skipAllTitle = localize('chat.questionCarousel.skipAllTitle', 'Skip all questions');
 			const skipAllButton = interactiveStore.add(new Button(this._closeButtonContainer, { ...defaultButtonStyles, secondary: true, supportIcons: true }));
@@ -1001,7 +1003,15 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 			this._footerRow.appendChild(leftControls);
 
 			const rightControls = dom.$('.chat-question-footer-right');
-			this.renderDismissHint(rightControls);
+			if (this.carousel.allowSkip) {
+				const dismissLabel = localize('chat.questionCarousel.dismiss', 'Dismiss');
+				const dismissButton = interactiveStore.add(new Button(rightControls, { ...defaultButtonStyles, secondary: true }));
+				dismissButton.element.classList.add('chat-question-dismiss-button');
+				dismissButton.label = dismissLabel;
+				dismissButton.element.setAttribute('aria-keyshortcuts', 'Escape');
+				dismissButton.element.setAttribute('aria-label', localize('chat.questionCarousel.dismissWithEscape', 'Dismiss (Escape)'));
+				interactiveStore.add(dismissButton.onDidClick(() => this.ignore()));
+			}
 
 			const hint = dom.$('span.chat-question-submit-hint');
 			hint.textContent = isMacintosh

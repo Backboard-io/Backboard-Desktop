@@ -2038,8 +2038,7 @@
 	outline: none !important;
 }
 
-/* T3 Code-inspired Settings surface for Simple Mode. Keep the standard Settings
- * presentation unchanged in the Editor and Advanced modes. */
+/* Codex-inspired Settings surface, hosted in the full-window modal editor part. */
 .settings-toc-icon {
 	display: none;
 }
@@ -2049,13 +2048,16 @@
 	--t3-settings-sidebar-background: color-mix(in srgb, var(--vscode-editor-background) 97%, var(--vscode-foreground) 3%);
 	--t3-settings-foreground: var(--vscode-foreground);
 	--t3-settings-muted-foreground: var(--vscode-descriptionForeground);
+	--t3-settings-sidebar-foreground: var(--vscode-foreground);
 	--t3-settings-border: color-mix(in srgb, var(--vscode-foreground) 6%, transparent);
+	--t3-settings-card-background: color-mix(in srgb, var(--vscode-editor-background) 96%, var(--vscode-foreground) 4%);
+	--t3-settings-card-border: color-mix(in srgb, var(--vscode-foreground) 10%, transparent);
 	--t3-settings-input-background: color-mix(in srgb, var(--vscode-editor-background) 92%, var(--vscode-foreground) 8%);
 	--t3-settings-input-border: color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
 	--t3-settings-hover-background: color-mix(in srgb, var(--vscode-foreground) 4%, transparent);
 	--t3-settings-selected-background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
 	--t3-settings-primary: var(--vscode-focusBorder);
-	--t3-settings-sidebar-width: 256px;
+	--t3-settings-sidebar-width: 320px;
 	display: block;
 	height: 100%;
 	margin: 0;
@@ -2069,6 +2071,25 @@
 	box-shadow: none;
 }
 
+.monaco-workbench.vs-dark .settings-editor.t3-settings-experience {
+	--t3-settings-background: color-mix(in srgb, var(--vscode-editor-background) 95%, var(--vscode-foreground) 5%);
+	--t3-settings-sidebar-background: color-mix(in srgb, var(--vscode-editor-background) 72%, var(--vscode-foreground) 28%);
+	--t3-settings-sidebar-foreground: color-mix(in srgb, var(--vscode-foreground) 86%, var(--vscode-editor-background) 14%);
+	--t3-settings-card-background: color-mix(in srgb, var(--vscode-editor-background) 88%, var(--vscode-foreground) 12%);
+	--t3-settings-card-border: color-mix(in srgb, var(--vscode-foreground) 12%, transparent);
+	--t3-settings-input-background: color-mix(in srgb, var(--vscode-editor-background) 82%, var(--vscode-foreground) 18%);
+	--t3-settings-input-border: color-mix(in srgb, var(--vscode-foreground) 12%, transparent);
+	--t3-settings-hover-background: color-mix(in srgb, var(--vscode-foreground) 7%, transparent);
+	--t3-settings-selected-background: color-mix(in srgb, var(--vscode-foreground) 12%, transparent);
+	background-color: color-mix(in srgb, var(--vscode-editor-background) 95%, var(--vscode-foreground) 5%);
+}
+
+.monaco-workbench.hc-black .settings-editor.t3-settings-experience,
+.monaco-workbench.hc-light .settings-editor.t3-settings-experience {
+	--t3-settings-card-background: var(--vscode-editor-background);
+	--t3-settings-card-border: var(--vscode-contrastBorder);
+}
+
 .settings-editor.t3-settings-experience > .settings-header {
 	display: none;
 	height: 0;
@@ -2078,84 +2099,33 @@
 	position: relative;
 	z-index: 3;
 	display: flex;
-	height: 52px;
-	min-height: 52px;
+	height: 40px;
+	min-height: 40px;
 	box-sizing: border-box;
-	border-bottom: 1px solid var(--t3-settings-border);
-	background: var(--t3-settings-background);
-}
-
-.settings-editor.t3-settings-experience .t3-settings-topbar-sidebar {
-	width: var(--t3-settings-sidebar-width);
-	min-width: var(--t3-settings-sidebar-width);
-	height: 52px;
-	box-sizing: border-box;
-	border-right: 1px solid var(--t3-settings-border);
-	background: var(--t3-settings-sidebar-background);
-}
-
-.settings-editor.t3-settings-experience .t3-settings-sidebar-brand {
-	display: flex;
-	height: 100%;
-	align-items: center;
-	gap: 8px;
-	box-sizing: border-box;
-	padding: 0 14px;
-	color: var(--t3-settings-foreground);
-}
-
-.settings-editor.t3-settings-experience .t3-settings-sidebar-brand-mark {
-	width: 22px;
-	height: 22px;
-	flex: 0 0 22px;
-	background: currentColor;
-	-webkit-mask: url("../../../welcomeGettingStarted/browser/media/backboard_mark.svg") center / contain no-repeat;
-	mask: url("../../../welcomeGettingStarted/browser/media/backboard_mark.svg") center / contain no-repeat;
-}
-
-.settings-editor.t3-settings-experience .t3-settings-sidebar-brand-name {
-	overflow: hidden;
-	font-size: 14px;
-	font-weight: 600;
-	line-height: 20px;
-	letter-spacing: -0.01em;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-.settings-editor.t3-settings-experience .t3-settings-breadcrumb {
-	display: flex;
-	min-width: 0;
-	flex: 1 1 auto;
-	align-items: center;
-	gap: 8px;
-	padding: 0 20px;
-	font-size: 14px;
-	font-weight: 500;
-	line-height: 20px;
-	white-space: nowrap;
-}
-
-.settings-editor.t3-settings-experience .t3-settings-breadcrumb-parent,
-.settings-editor.t3-settings-experience .t3-settings-breadcrumb-separator {
-	color: var(--t3-settings-muted-foreground);
-}
-
-.settings-editor.t3-settings-experience .t3-settings-breadcrumb-current {
-	overflow: hidden;
-	color: var(--t3-settings-foreground);
-	text-overflow: ellipsis;
+	border: 0;
+	background: linear-gradient(to right, var(--t3-settings-sidebar-background) 0 var(--t3-settings-sidebar-width), var(--t3-settings-background) var(--t3-settings-sidebar-width));
+	-webkit-app-region: drag;
 }
 
 .settings-editor.t3-settings-experience > .settings-body {
-	height: calc(100% - 52px);
+	height: calc(100% - 40px);
 	background: var(--t3-settings-background);
+	-webkit-app-region: no-drag;
 }
 
 .settings-editor.t3-settings-experience > .settings-body > .monaco-split-view2 {
 	height: 100%;
 	margin: 0;
 	background: var(--t3-settings-background);
+}
+
+.monaco-workbench.vs-dark .settings-editor.t3-settings-experience > .settings-body,
+.monaco-workbench.vs-dark .settings-editor.t3-settings-experience > .settings-body > .monaco-split-view2,
+.monaco-workbench.vs-dark .settings-editor.t3-settings-experience > .settings-body .settings-tree-container,
+.monaco-workbench.vs-dark .settings-editor.t3-settings-experience > .settings-body .settings-tree-container .monaco-list,
+.monaco-workbench.vs-dark .settings-editor.t3-settings-experience > .settings-body .settings-tree-container .monaco-list-rows,
+.monaco-workbench.vs-dark .settings-editor.t3-settings-experience > .settings-body .settings-tree-container .monaco-scrollable-element {
+	background-color: color-mix(in srgb, var(--vscode-editor-background) 95%, var(--vscode-foreground) 5%) !important;
 }
 
 .settings-editor.t3-settings-experience > .settings-body > .monaco-split-view2 .sash.vertical::before {
@@ -2165,17 +2135,34 @@
 }
 
 .settings-editor.t3-settings-experience > .settings-body .settings-toc-container {
-	min-width: 256px;
+	display: flex;
+	min-width: 320px;
+	min-height: 0;
 	height: 100%;
+	flex-direction: column;
+	overflow: hidden;
 	border: 0;
 	background: var(--t3-settings-sidebar-background) !important;
 	box-shadow: none;
+	pointer-events: auto;
+}
+
+.monaco-workbench.vs-dark .settings-editor.t3-settings-experience > .settings-body .settings-toc-container,
+.monaco-workbench.vs-dark .settings-editor.t3-settings-experience > .settings-body .settings-toc-wrapper,
+.monaco-workbench.vs-dark .settings-editor.t3-settings-experience > .settings-body .settings-toc-container .monaco-list,
+.monaco-workbench.vs-dark .settings-editor.t3-settings-experience > .settings-body .settings-toc-container .monaco-list-rows,
+.monaco-workbench.vs-dark .settings-editor.t3-settings-experience > .settings-body .settings-toc-container .monaco-scrollable-element {
+	background-color: color-mix(in srgb, var(--vscode-editor-background) 72%, var(--vscode-foreground) 28%) !important;
 }
 
 .settings-editor.t3-settings-experience .settings-sidebar-header {
 	padding: 8px;
 	border: 0;
 	background: transparent;
+}
+
+.settings-editor.t3-settings-experience .t3-settings-sidebar-navigation {
+	margin-bottom: 8px;
 }
 
 .settings-editor.t3-settings-experience .settings-sidebar-header > .settings-account,
@@ -2196,14 +2183,14 @@
 	overflow: hidden;
 	border: 0;
 	border-radius: 8px;
-	background: transparent;
+	background: color-mix(in srgb, var(--t3-settings-sidebar-background) 90%, var(--t3-settings-foreground) 10%);
 	color: var(--t3-settings-muted-foreground);
 	transition: background-color 120ms ease, color 120ms ease;
 }
 
 .settings-editor.t3-settings-experience .settings-sidebar-header > .search-container:hover,
 .settings-editor.t3-settings-experience .settings-sidebar-header > .search-container:focus-within {
-	background: var(--t3-settings-hover-background);
+	background: color-mix(in srgb, var(--t3-settings-sidebar-background) 86%, var(--t3-settings-foreground) 14%);
 	color: var(--t3-settings-foreground);
 }
 
@@ -2237,6 +2224,10 @@
 	box-shadow: none !important;
 }
 
+.settings-editor.t3-settings-experience .settings-sidebar-header > .search-container:not(.has-query) > .suggest-input-container {
+	padding-right: 12px;
+}
+
 .settings-editor.t3-settings-experience .settings-sidebar-header > .search-container .suggest-input-placeholder {
 	margin: 0;
 	color: var(--t3-settings-muted-foreground) !important;
@@ -2248,6 +2239,17 @@
 .settings-editor.t3-settings-experience .settings-sidebar-header > .search-container .monaco-editor .view-line {
 	font-family: inherit !important;
 	font-size: 14px !important;
+}
+
+.settings-editor.t3-settings-experience .settings-sidebar-header > .search-container .monaco-editor,
+.settings-editor.t3-settings-experience .settings-sidebar-header > .search-container .monaco-editor-background,
+.settings-editor.t3-settings-experience .settings-sidebar-header > .search-container .monaco-scrollable-element,
+.settings-editor.t3-settings-experience .settings-sidebar-header > .search-container .monaco-editor .margin {
+	background: transparent !important;
+}
+
+.monaco-workbench.vs-dark .settings-editor.t3-settings-experience > .settings-body .settings-toc-container .settings-sidebar-header > .search-container .monaco-scrollable-element {
+	background: transparent !important;
 }
 
 .settings-editor.t3-settings-experience .settings-sidebar-header > .search-container > .search-container-widgets {
@@ -2292,40 +2294,30 @@
 }
 
 .settings-editor.t3-settings-experience .t3-settings-search-shortcut {
-	position: absolute;
-	z-index: 2;
-	right: 8px;
-	top: 6px;
-	display: inline-flex;
-	min-width: 20px;
-	height: 20px;
-	align-items: center;
-	justify-content: center;
-	box-sizing: border-box;
-	padding: 0 6px;
-	border: 1px solid var(--t3-settings-border);
-	border-radius: 6px;
-	background: var(--t3-settings-selected-background);
-	color: var(--t3-settings-muted-foreground);
-	font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-	font-size: 11px;
-	font-weight: 500;
-	line-height: 18px;
-	pointer-events: none;
-}
-
-.settings-editor.t3-settings-experience .settings-sidebar-header > .search-container.has-query .t3-settings-search-shortcut {
 	display: none;
 }
 
 .settings-editor.t3-settings-experience > .settings-body .settings-toc-wrapper {
 	flex: 1 1 auto;
+	width: 100%;
 	min-height: 0;
 	height: auto;
 	margin: 0;
 	padding: 0 8px 8px;
+	box-sizing: border-box;
+	overflow: hidden;
 	border: 0;
 	background: var(--t3-settings-sidebar-background) !important;
+}
+
+.settings-editor.t3-settings-experience .t3-settings-sidebar-section-label {
+	flex: 0 0 auto;
+	box-sizing: border-box;
+	padding: 4px 15px;
+	color: color-mix(in srgb, var(--t3-settings-sidebar-foreground) 62%, transparent);
+	font-size: 12px;
+	font-weight: 400;
+	line-height: 18px;
 }
 
 .settings-editor.t3-settings-experience > .settings-body .settings-toc-container .monaco-list,
@@ -2340,7 +2332,7 @@
 	border-radius: 8px;
 	outline: 0 !important;
 	background: transparent;
-	color: var(--t3-settings-muted-foreground);
+	color: var(--t3-settings-sidebar-foreground);
 	box-shadow: none !important;
 }
 
@@ -2351,6 +2343,20 @@
 	box-sizing: border-box;
 	padding-left: 10px;
 	padding-right: 8px;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-toc-container .monaco-list-row[aria-level="3"]::before {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: 17px;
+	width: 1px;
+	background: color-mix(in srgb, var(--t3-settings-sidebar-foreground) 14%, transparent);
+	content: '';
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-toc-container .monaco-list-row[aria-level="3"] .monaco-tl-contents {
+	padding-left: 28px;
 }
 
 .settings-editor.t3-settings-experience > .settings-body .settings-toc-container .monaco-list-row .monaco-tl-twistie {
@@ -2365,7 +2371,7 @@
 	align-items: center;
 	justify-content: center;
 	margin-right: 8px;
-	color: var(--t3-settings-muted-foreground);
+	color: inherit;
 	font-size: 16px;
 	line-height: 16px;
 }
@@ -2373,9 +2379,25 @@
 .settings-editor.t3-settings-experience > .settings-body .settings-toc-container .monaco-list-row .settings-toc-entry {
 	color: inherit;
 	font-size: 14px;
-	font-weight: 500;
+	font-weight: 400;
 	line-height: 32px;
 	letter-spacing: -0.005em;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-toc-container .monaco-list-row[aria-level="2"][aria-expanded="true"] .settings-toc-entry {
+	font-weight: 500;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-toc-container .monaco-list-row[aria-level="3"]:not(.selected) {
+	color: color-mix(in srgb, var(--t3-settings-sidebar-foreground) 82%, var(--t3-settings-sidebar-background) 18%);
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-toc-container .monaco-list-row[aria-level="3"] .settings-toc-icon {
+	width: 14px;
+	height: 14px;
+	flex-basis: 14px;
+	font-size: 14px;
+	line-height: 14px;
 }
 
 .settings-editor.t3-settings-experience > .settings-body .settings-toc-container .monaco-list-row .settings-toc-count {
@@ -2398,12 +2420,6 @@
 	font-weight: 500;
 }
 
-.settings-editor.t3-settings-experience .t3-settings-sidebar-footer {
-	flex: 0 0 auto;
-	padding: 8px;
-	background: var(--t3-settings-sidebar-background);
-}
-
 .settings-editor.t3-settings-experience .t3-settings-back-button {
 	display: flex;
 	width: 100%;
@@ -2411,7 +2427,7 @@
 	align-items: center;
 	gap: 8px;
 	box-sizing: border-box;
-	padding: 0 10px;
+	padding: 0 8px;
 	border: 0;
 	border-radius: 8px;
 	outline: 0;
@@ -2419,7 +2435,7 @@
 	color: var(--t3-settings-muted-foreground);
 	font: inherit;
 	font-size: 14px;
-	font-weight: 500;
+	font-weight: 400;
 	text-align: left;
 	cursor: pointer;
 }
@@ -2438,6 +2454,8 @@
 }
 
 .settings-editor.t3-settings-experience > .settings-body .settings-tree-container {
+	container-name: t3-settings-pane;
+	container-type: inline-size;
 	height: 100%;
 	margin: 0;
 	padding: 0;
@@ -2462,7 +2480,7 @@
 .settings-editor.t3-settings-experience > .settings-body .settings-tree-container .monaco-list-row .monaco-tl-contents,
 .settings-editor.t3-settings-experience > .settings-body .settings-tree-container .monaco-list-row .monaco-tl-contents.group-title {
 	width: 100%;
-	max-width: 960px;
+	max-width: 832px;
 	margin: 0 auto;
 	box-sizing: border-box;
 	padding-right: 32px;
@@ -2473,50 +2491,83 @@
 	height: 64px;
 	box-sizing: border-box;
 	margin: 0;
-	padding: 28px 16px 12px;
+	padding: 32px 0 12px;
 	overflow: visible;
 	border: 0;
 	background: transparent !important;
 	color: var(--t3-settings-foreground);
-	font-size: 18px;
-	font-weight: 600;
-	line-height: 24px;
-	letter-spacing: -0.025em;
+	font-size: 14px;
+	font-weight: 500;
+	line-height: 20px;
+	letter-spacing: 0;
 }
 
 .settings-editor.t3-settings-experience > .settings-body .settings-tree-container .settings-group-title-label.settings-group-first {
-	padding-top: 36px;
+	padding: 26px 0 10px;
+	font-size: 22px;
+	font-weight: 500;
+	line-height: 28px;
+	letter-spacing: -0.02em;
 }
 
-.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .settings-group-title-label.settings-group-level-1,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .settings-group-title-label.settings-group-level-1 {
+	padding: 26px 0 10px;
+	font-size: 22px;
+	font-weight: 500;
+	line-height: 28px;
+	letter-spacing: -0.02em;
+}
+
 .settings-editor.t3-settings-experience > .settings-body .settings-tree-container .settings-group-title-label.settings-group-level-2,
 .settings-editor.t3-settings-experience > .settings-body .settings-tree-container .settings-group-title-label.settings-group-level-3 {
-	font-size: 18px;
-	line-height: 24px;
+	padding: 32px 0 12px;
+	font-size: 14px;
+	font-weight: 500;
+	line-height: 20px;
+	letter-spacing: 0;
 }
 
 .settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-contents,
 .settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-bool .setting-item-contents,
 .settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-list .setting-item-contents {
 	display: grid;
-	grid-template-columns: minmax(0, 1fr) minmax(160px, auto);
+	grid-template-columns: minmax(0, 1fr) minmax(120px, 180px);
 	column-gap: 32px;
 	align-items: center;
 	box-sizing: border-box;
-	min-height: 64px;
-	padding: 12px 16px;
-	border: 0;
-	border-radius: 12px;
-	background: transparent !important;
+	height: 100%;
+	min-height: 60px;
+	padding: 11px 16px;
+	border-inline: 1px solid var(--t3-settings-card-border);
+	border-radius: 0;
+	background: var(--t3-settings-card-background) !important;
+	box-shadow: inset 0 -1px var(--t3-settings-card-border);
 }
 
-.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .monaco-list-row.focused .settings-row-inner-container,
-.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .monaco-list-row:not(.focused) .settings-row-inner-container:hover,
-.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .monaco-list:focus-within .monaco-list-row.focused .setting-item-contents {
-	border: 0;
-	outline: 0 !important;
-	background: transparent !important;
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-list > .setting-item-contents {
+	grid-template-columns: minmax(0, 1fr) minmax(240px, 320px);
+	column-gap: 24px;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .monaco-list-row:has(> .monaco-tl-row > .monaco-tl-contents.group-title) + .monaco-list-row > .monaco-tl-row > .monaco-tl-contents.setting-item .setting-item-contents {
+	border-top: 1px solid var(--t3-settings-card-border);
+	border-start-start-radius: 12px;
+	border-start-end-radius: 12px;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .monaco-list-row[data-last-element="true"] > .monaco-tl-row > .monaco-tl-contents.setting-item .setting-item-contents,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .monaco-list-row:has(+ .monaco-list-row > .monaco-tl-row > .monaco-tl-contents.group-title) > .monaco-tl-row > .monaco-tl-contents.setting-item .setting-item-contents {
+	border-bottom: 1px solid var(--t3-settings-card-border);
+	border-end-start-radius: 12px;
+	border-end-end-radius: 12px;
 	box-shadow: none;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .monaco-list-row.focused .setting-item-contents,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .monaco-list-row:not(.focused) .setting-item-contents:hover,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .monaco-list:focus-within .monaco-list-row.focused .setting-item-contents {
+	outline: 0 !important;
+	background: color-mix(in srgb, var(--t3-settings-card-background) 94%, var(--t3-settings-foreground) 6%) !important;
 }
 
 .settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-contents .setting-item-title {
@@ -2536,6 +2587,27 @@
 	letter-spacing: -0.005em;
 }
 
+.settings-editor.t3-settings-experience:not(.search-mode) > .settings-body .settings-tree-container .setting-item-contents .setting-item-category {
+	display: none;
+}
+
+.settings-editor.t3-settings-experience.search-mode > .settings-body .settings-tree-container .setting-item-cat-label-container {
+	display: flex;
+	min-width: 0;
+	flex-direction: column;
+	gap: 1px;
+}
+
+.settings-editor.t3-settings-experience.search-mode > .settings-body .settings-tree-container .setting-item-contents .setting-item-category {
+	overflow: hidden;
+	color: var(--t3-settings-muted-foreground);
+	font-size: 11px;
+	font-weight: 400;
+	line-height: 15px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
 .settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-contents .setting-item-description {
 	grid-column: 1;
 	min-width: 0;
@@ -2544,17 +2616,26 @@
 	color: var(--t3-settings-muted-foreground);
 	font-size: 13px;
 	font-weight: 400;
-	line-height: 1.45;
+	line-height: 1.35;
 	opacity: 1;
 }
 
 .settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-contents .setting-item-value,
 .settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-bool .setting-item-bool-control {
+	min-width: 0;
+	max-width: 100%;
 	grid-column: 2;
 	grid-row: 1 / span 2;
 	align-self: center;
 	justify-content: flex-end;
 	margin: 0;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-bool > .setting-item-contents > .setting-item-value-description > .setting-item-bool-control {
+	display: flex;
+	width: 100%;
+	align-items: center;
+	justify-content: flex-end;
 }
 
 .settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-bool .setting-item-value-description {
@@ -2577,29 +2658,47 @@
 
 .settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-text .setting-item-value > .setting-item-control,
 .settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-number .setting-item-value > .setting-item-control {
-	width: min(320px, 100%);
-	max-width: 320px;
+	width: min(180px, 100%);
+	min-width: 0;
+	max-width: 180px;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-text > .setting-item-contents {
+	grid-template-columns: minmax(0, 1fr) minmax(320px, 400px);
+	column-gap: 24px;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-text .setting-item-value > .setting-item-control {
+	width: min(400px, 100%);
+	max-width: 400px;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-text .setting-item-control > .monaco-inputbox,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-number .setting-item-control > .monaco-inputbox {
+	width: 100%;
+	min-width: 0;
+	max-width: 100%;
 }
 
 .settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-enum .setting-item-value > .setting-item-control {
-	width: min(220px, 100%);
-	min-width: 144px;
-	max-width: 220px;
+	width: min(180px, 100%);
+	min-width: 120px;
+	max-width: 180px;
 }
 
 .settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-enum .setting-item-value > .setting-item-control > .select-container,
 .settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-enum .setting-item-value > .setting-item-control > select,
-.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-contents .monaco-select-box {
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-enum .setting-item-value .monaco-select-box {
 	width: 100% !important;
-	min-width: 144px;
+	min-width: 120px;
 }
 
-.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-contents .monaco-select-box,
-.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-control input,
-.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-control textarea,
-.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-contents .edit-in-settings-button,
-.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-list-widget .setting-list-object-list-row.select-container {
-	min-height: 32px;
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-enum .setting-item-value .monaco-select-box,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-text > .setting-item-contents > .setting-item-value input,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-text > .setting-item-contents > .setting-item-value textarea,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-number > .setting-item-contents > .setting-item-value input,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-contents .edit-in-settings-button {
+	min-height: 30px;
 	box-sizing: border-box;
 	border: 1px solid var(--t3-settings-input-border);
 	border-radius: 8px;
@@ -2611,15 +2710,22 @@
 	box-shadow: none;
 }
 
-.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-contents .monaco-select-box,
-.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-control input,
-.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-control textarea {
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-enum .setting-item-value .monaco-select-box,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-text > .setting-item-contents > .setting-item-value input,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-text > .setting-item-contents > .setting-item-value textarea,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-number > .setting-item-contents > .setting-item-value input {
 	padding-inline: 11px;
 }
 
-.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-contents .monaco-select-box {
-	padding-right: 34px;
-	line-height: 30px;
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-enum .setting-item-value .monaco-select-box {
+	box-sizing: border-box;
+	padding: 0 32px 0 11px;
+	overflow: hidden;
+	line-height: normal;
+	text-align: left;
+	text-align-last: auto;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-contents .edit-in-settings-button {
@@ -2631,37 +2737,247 @@
 	text-decoration: none;
 }
 
-.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-contents .monaco-select-box:hover,
-.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-control input:hover,
-.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-control textarea:hover,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-enum .setting-item-value .monaco-select-box:hover,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-text > .setting-item-contents > .setting-item-value input:hover,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-text > .setting-item-contents > .setting-item-value textarea:hover,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-number > .setting-item-contents > .setting-item-value input:hover,
 .settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-contents .edit-in-settings-button:hover {
 	border-color: color-mix(in srgb, var(--t3-settings-foreground) 16%, transparent);
 	background: var(--t3-settings-input-background);
 }
 
-.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-contents .monaco-select-box:focus,
-.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-control input:focus,
-.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-control textarea:focus,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-enum .setting-item-value .monaco-select-box:focus,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-text > .setting-item-contents > .setting-item-value input:focus,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-text > .setting-item-contents > .setting-item-value textarea:focus,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-number > .setting-item-contents > .setting-item-value input:focus,
 .settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-contents .edit-in-settings-button:focus,
-.settings-editor.t3-settings-experience .monaco-inputbox.synthetic-focus,
-.settings-editor.t3-settings-experience .monaco-inputbox:focus-within,
-.settings-editor.t3-settings-experience .monaco-select-box.synthetic-focus,
-.settings-editor.t3-settings-experience .monaco-select-box:focus-within {
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-text > .setting-item-contents > .setting-item-value .monaco-inputbox.synthetic-focus,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-text > .setting-item-contents > .setting-item-value .monaco-inputbox:focus-within,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-number > .setting-item-contents > .setting-item-value .monaco-inputbox.synthetic-focus,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-number > .setting-item-contents > .setting-item-value .monaco-inputbox:focus-within,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-enum .setting-item-value .monaco-select-box.synthetic-focus,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-enum .setting-item-value .monaco-select-box:focus-within {
 	border-color: var(--t3-settings-primary) !important;
 	outline: none !important;
 	box-shadow: 0 0 0 3px color-mix(in srgb, var(--t3-settings-primary) 16%, transparent) !important;
 }
 
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-list > .setting-item-contents > .setting-item-value,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-list > .setting-item-contents > .setting-item-value > .setting-item-control,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-list .setting-list-widget,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-list .setting-list-include-exclude-widget,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-list .setting-list-object-widget,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-list .setting-list-row,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-list .setting-list-edit-row {
+	min-width: 0;
+	max-width: 100%;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-list > .setting-item-contents > .setting-item-value {
+	width: 320px;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-list > .setting-item-contents > .setting-item-value > .setting-item-control,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-list .setting-list-widget,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-list .setting-list-include-exclude-widget,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-list .setting-list-object-widget {
+	width: 100%;
+	box-sizing: border-box;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-list .setting-list-object-widget .setting-list-row-header,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-list .setting-list-object-widget .setting-list-row:not(.setting-list-edit-row) {
+	display: grid !important;
+	grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+	width: 100%;
+	box-sizing: border-box;
+	align-items: center;
+	padding: 0 8px !important;
+	border-radius: 6px;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-list .setting-list-object-widget .setting-list-row-header {
+	background: color-mix(in srgb, var(--t3-settings-input-background) 82%, transparent);
+	color: var(--t3-settings-muted-foreground);
+	font-size: 12px;
+	font-weight: 500;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-list .setting-list-object-widget .setting-list-object-row:nth-child(odd):not(:hover):not(:focus):not(.selected) {
+	background: transparent;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-list .setting-list-object-widget .setting-list-row-header .setting-list-object-key,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-list .setting-list-object-widget .setting-list-row-header .setting-list-object-value,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-list .setting-list-object-widget .setting-list-row:not(.setting-list-edit-row) .setting-list-object-key,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-list .setting-list-object-widget .setting-list-row:not(.setting-list-edit-row) .setting-list-object-value {
+	width: auto;
+	min-width: 0;
+	margin: 0;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-list .setting-list-object-widget .setting-list-row:not(.setting-list-edit-row) .setting-list-object-key {
+	padding-right: 8px;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-list .setting-list-object-widget .setting-list-row:not(.setting-list-edit-row) .setting-list-object-value {
+	padding-right: 40px;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-list .setting-list-value,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-list .setting-list-sibling,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-list .setting-list-object-key,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-list .setting-list-object-value,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-list .setting-list-object-value-container {
+	min-width: 0;
+	box-sizing: border-box;
+	flex-shrink: 1;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-list .setting-list-sibling {
+	margin-left: 0;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-list .setting-list-object-list-row.select-container {
+	width: min(320px, 100%);
+	max-width: 100%;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-list .setting-list-new-row {
+	display: flex;
+	justify-content: flex-end;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-list .monaco-text-button.setting-list-addButton {
+	display: inline-flex;
+	height: 28px;
+	min-height: 28px;
+	align-items: center;
+	justify-content: center;
+	box-sizing: border-box;
+	margin: 6px 0 0;
+	padding: 0 10px;
+	border: 1px solid var(--t3-settings-input-border) !important;
+	border-radius: 7px;
+	background: var(--t3-settings-input-background) !important;
+	color: var(--t3-settings-foreground) !important;
+	font: inherit;
+	font-size: 12px;
+	line-height: 16px;
+	text-align: center;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-list .monaco-text-button.setting-list-ok-button,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-list .monaco-text-button.setting-list-cancel-button {
+	display: inline-flex;
+	height: 24px;
+	min-height: 24px;
+	align-items: center;
+	justify-content: center;
+	box-sizing: border-box;
+	padding: 0 8px;
+	border: 1px solid var(--t3-settings-input-border) !important;
+	border-radius: 6px;
+	background: var(--t3-settings-input-background) !important;
+	color: var(--t3-settings-foreground) !important;
+	font: inherit;
+	font-size: 12px;
+	line-height: 16px;
+	text-align: center;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-list .monaco-text-button.setting-list-addButton:hover,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-list .monaco-text-button.setting-list-ok-button:hover,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-list .monaco-text-button.setting-list-cancel-button:hover {
+	background: color-mix(in srgb, var(--t3-settings-input-background) 88%, var(--t3-settings-foreground) 12%) !important;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-complex .setting-item-value > .setting-item-control {
+	width: min(180px, 100%);
+	min-width: 0;
+	max-width: 180px;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-contents .edit-in-settings-button {
+	max-width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-text:has(textarea) > .setting-item-contents {
+	grid-template-columns: minmax(0, 1fr);
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-text:has(textarea) > .setting-item-contents > .setting-item-value {
+	width: 100%;
+	grid-column: 1;
+	grid-row: auto;
+	justify-content: stretch;
+	margin-top: 9px;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-text:has(textarea) > .setting-item-contents > .setting-item-value > .setting-item-control {
+	width: 100%;
+	max-width: none;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-extension-toggle > .setting-item-contents {
+	grid-template-columns: minmax(0, 1fr) auto auto;
+	column-gap: 8px;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-extension-toggle > .setting-item-contents > .setting-item-value {
+	display: none;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-extension-toggle .setting-item-extension-toggle-button,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-extension-toggle .setting-item-extension-dismiss-button {
+	min-height: 30px;
+	align-self: center;
+	grid-row: 1 / span 2;
+	box-sizing: border-box;
+	margin-left: 0;
+	padding: 0 12px;
+	border: 1px solid var(--t3-settings-input-border) !important;
+	border-radius: 8px;
+	background: var(--t3-settings-input-background) !important;
+	color: var(--t3-settings-foreground) !important;
+	font-size: 13px;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-extension-toggle .setting-item-extension-toggle-button {
+	grid-column: 2;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-extension-toggle .setting-item-extension-dismiss-button {
+	grid-column: 3;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-contents .setting-item-validation-message,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-contents .setting-item-deprecation-message {
+	min-width: 0;
+	max-width: 100%;
+	grid-column: 1 / -1;
+	overflow-wrap: anywhere;
+}
+
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-description,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-markdown,
+.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-markdown code {
+	overflow-wrap: anywhere;
+}
+
 .settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-bool .setting-value-checkbox {
 	position: relative;
-	width: 30px;
-	height: 18px;
+	width: 32px;
+	height: 20px;
 	margin: 0;
 	padding: 0;
 	border: 0;
 	border-radius: 999px;
 	outline: none;
-	background: var(--t3-settings-input-background);
+	background-color: var(--t3-settings-input-background) !important;
 	box-shadow: inset 0 0 0 1px var(--t3-settings-input-border);
 	transition: background-color 140ms ease, box-shadow 140ms ease;
 }
@@ -2675,8 +2991,8 @@
 	position: absolute;
 	top: 2px;
 	left: 2px;
-	width: 14px;
-	height: 14px;
+	width: 16px;
+	height: 16px;
 	border-radius: 50%;
 	background: var(--t3-settings-foreground);
 	box-shadow: 0 1px 2px color-mix(in srgb, #000 24%, transparent);
@@ -2684,7 +3000,7 @@
 }
 
 .settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-bool .setting-value-checkbox.checked {
-	background: var(--t3-settings-primary);
+	background-color: var(--t3-settings-primary) !important;
 	box-shadow: none;
 }
 
@@ -2704,10 +3020,6 @@
 	font-size: 14px;
 }
 
-.settings-editor.t3-settings-experience.narrow-width .t3-settings-topbar-sidebar {
-	display: none;
-}
-
 .settings-editor.t3-settings-experience.narrow-width > .settings-body .settings-tree-container .monaco-list-row .monaco-tl-contents,
 .settings-editor.t3-settings-experience.narrow-width > .settings-body .settings-tree-container .monaco-list-row .monaco-tl-contents.group-title {
 	display: block;
@@ -2716,10 +3028,75 @@
 }
 
 .settings-editor.t3-settings-experience.narrow-width > .settings-body .settings-tree-container .setting-item-contents {
-	display: block;
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
 }
 
 .settings-editor.t3-settings-experience.narrow-width > .settings-body .settings-tree-container .setting-item-contents .setting-item-value {
-	justify-content: flex-start;
+	width: 100%;
+	max-width: none;
+	grid-column: 1;
+	grid-row: auto;
+	justify-content: stretch;
 	margin-top: 9px;
+}
+
+.settings-editor.t3-settings-experience.narrow-width > .settings-body .settings-tree-container .setting-item-text .setting-item-value > .setting-item-control,
+.settings-editor.t3-settings-experience.narrow-width > .settings-body .settings-tree-container .setting-item-number .setting-item-value > .setting-item-control,
+.settings-editor.t3-settings-experience.narrow-width > .settings-body .settings-tree-container .setting-item-enum .setting-item-value > .setting-item-control,
+.settings-editor.t3-settings-experience.narrow-width > .settings-body .settings-tree-container .setting-item-list .setting-item-value > .setting-item-control {
+	width: 100%;
+	min-width: 0;
+	max-width: none;
+}
+
+.settings-editor.t3-settings-experience.narrow-width > .settings-body .settings-tree-container .setting-item-enum .setting-item-value .monaco-select-box {
+	min-width: 0;
+}
+
+.settings-editor.t3-settings-experience.narrow-width > .settings-body .settings-tree-container .setting-item.setting-item-bool > .setting-item-contents {
+	grid-template-columns: minmax(0, 1fr) auto;
+	column-gap: 16px;
+}
+
+.settings-editor.t3-settings-experience.narrow-width > .settings-body .settings-tree-container .setting-item.setting-item-bool > .setting-item-contents > .setting-item-value-description > .setting-item-bool-control {
+	grid-column: 2;
+	grid-row: 1 / span 2;
+	margin-top: 0;
+}
+
+.settings-editor.t3-settings-experience.narrow-width > .settings-body .settings-tree-container .setting-item-extension-toggle > .setting-item-contents {
+	grid-template-columns: minmax(0, 1fr);
+}
+
+.settings-editor.t3-settings-experience.narrow-width > .settings-body .settings-tree-container .setting-item-extension-toggle .setting-item-extension-toggle-button,
+.settings-editor.t3-settings-experience.narrow-width > .settings-body .settings-tree-container .setting-item-extension-toggle .setting-item-extension-dismiss-button {
+	width: fit-content;
+	max-width: 100%;
+	grid-column: 1;
+	grid-row: auto;
+	justify-self: start;
+	margin-top: 8px;
+}
+
+@container t3-settings-pane (max-width: 700px) {
+	.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-text > .setting-item-contents,
+	.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-list > .setting-item-contents {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-text > .setting-item-contents > .setting-item-value,
+	.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item-list > .setting-item-contents > .setting-item-value {
+		width: 100%;
+		max-width: none;
+		grid-column: 1;
+		grid-row: auto;
+		justify-content: stretch;
+		margin-top: 10px;
+	}
+
+	.settings-editor.t3-settings-experience > .settings-body .settings-tree-container .setting-item.setting-item-text .setting-item-value > .setting-item-control {
+		width: 100%;
+		max-width: none;
+	}
 }

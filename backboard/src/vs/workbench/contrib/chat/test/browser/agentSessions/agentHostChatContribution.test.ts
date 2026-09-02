@@ -3306,6 +3306,82 @@ suite('AgentHostChatContribution', () => {
 			});
 		});
 
+		test('maps ChatGPT subscription connection state onto auth metadata', async () => {
+			const provider = disposables.add(new AgentHostLanguageModelProvider('agent-host-backboard', 'agent-host-backboard'));
+			provider.updateModels([
+				{
+					provider: 'backboard',
+					id: 'openai-subscription/gpt-5.6-sol',
+					name: 'GPT-5.6 Sol',
+					supportsVision: true,
+					_meta: {
+						upstreamProvider: 'openai-subscription',
+						upstreamProviderLabel: 'OpenAI (ChatGPT Subscription)',
+						chatGptSubscriptionConnected: true,
+					},
+				},
+			]);
+
+			const models = await provider.provideLanguageModelChatInfo({}, CancellationToken.None);
+
+			assert.strictEqual(models[0].metadata.detail, 'OpenAI (ChatGPT Subscription)');
+			assert.deepStrictEqual(models[0].metadata.auth, { providerLabel: 'ChatGPT', accountLabel: 'Connected' });
+		});
+
+		test('maps Claude subscription connection state onto auth metadata', async () => {
+			const provider = disposables.add(new AgentHostLanguageModelProvider('agent-host-backboard', 'agent-host-backboard'));
+			provider.updateModels([
+				{
+					provider: 'backboard',
+					id: 'anthropic-subscription/sonnet',
+					name: 'Claude Sonnet',
+					supportsVision: true,
+					_meta: {
+						upstreamProvider: 'anthropic-subscription',
+						upstreamProviderLabel: 'Anthropic (Claude Subscription)',
+						claudeSubscriptionConnected: true,
+					},
+				},
+			]);
+
+			const models = await provider.provideLanguageModelChatInfo({}, CancellationToken.None);
+
+			assert.strictEqual(models[0].metadata.detail, 'Anthropic (Claude Subscription)');
+			assert.deepStrictEqual(models[0].metadata.auth, { providerLabel: 'Claude', accountLabel: 'Connected' });
+		});
+
+		test('maps live OpenRouter routes onto provider detail and routing configuration', async () => {
+			const provider = disposables.add(new AgentHostLanguageModelProvider('agent-host-backboard', 'agent-host-backboard'));
+			provider.updateModels([{
+				provider: 'backboard',
+				id: 'openrouter/deepseek/deepseek-chat-v3.1',
+				name: 'DeepSeek Chat V3.1',
+				supportsVision: false,
+				_meta: {
+					upstreamProvider: 'openrouter',
+					upstreamProviderLabel: 'OpenRouter',
+					openRouterProviders: ['DeepInfra', 'Novita'],
+				},
+				configSchema: {
+					type: 'object',
+					properties: {
+						openRouterProvider: {
+							type: 'string',
+							title: 'OpenRouter provider',
+							default: 'auto',
+							enum: ['auto', 'DeepInfra', 'Novita'],
+							enumLabels: ['Auto', 'DeepInfra', 'Novita'],
+						},
+					},
+				},
+			}]);
+
+			const models = await provider.provideLanguageModelChatInfo({}, CancellationToken.None);
+
+			assert.strictEqual(models[0].metadata.detail, 'OpenRouter · 2 providers');
+			assert.strictEqual(models[0].metadata.configurationSchema?.properties?.openRouterProvider.group, 'routing');
+		});
+
 		test('filters out disabled models', async () => {
 			const provider = disposables.add(new AgentHostLanguageModelProvider('agent-host-copilot', 'agent-host-copilot'));
 			provider.updateModels([
@@ -5575,6 +5651,62 @@ suite('AgentHostChatContribution', () => {
 
 			assert.ok(child, 'child tool invocation fired after subscription should be forwarded');
 			assert.strictEqual(child!.subAgentInvocationId, parentToolCallId, 'child should be tagged for grouping');
+		}));
+
+		test('detached child completion updates its parent invocation after the provider turn ends', () => runWithFakedTimers({ useFakeTimers: true }, async () => {
+			const { sessionHandler, agentHostService, chatAgentService } = createContribution(disposables);
+			const { turnPromise, collected, session, turnId, fire } = await startTurn(sessionHandler, agentHostService, chatAgentService, disposables);
+			const parentToolCallId = 'tc-agent-spawn';
+			const childSessionUri = buildSubagentSessionUri(session.toString(), parentToolCallId);
+
+			fire({
+				type: 'chat/toolCallStart', session, turnId,
+				toolCallId: parentToolCallId, toolName: 'AgentSpawn', displayName: 'AgentSpawn',
+				_meta: {
+					toolKind: 'subagent',
+					subagentDetached: true,
+					subagentDescription: 'Audit the renderer',
+					subagentStatus: 'Running',
+				},
+			} as ChatAction);
+			fire({
+				type: 'chat/toolCallReady', session, turnId,
+				toolCallId: parentToolCallId, invocationMessage: 'Starting worker',
+				confirmed: 'not-needed',
+			} as ChatAction);
+			await timeout(50);
+
+			fire({
+				type: 'chat/toolCallComplete', session, turnId, toolCallId: parentToolCallId,
+				result: { success: true, pastTenseMessage: 'Started worker', content: [{ type: 'text', text: 'Worker handle ready' }] },
+			} as ChatAction);
+			fire({ type: 'chat/turnComplete', session, turnId } as ChatAction);
+			await turnPromise;
+
+			const invocation = collected.flat().find((part): part is IChatToolInvocation =>
+				part.kind === 'toolInvocation' && part.toolCallId === parentToolCallId);
+			assert.ok(invocation);
+			assert.strictEqual(invocation.toolSpecificData?.kind, 'subagent');
+			if (invocation.toolSpecificData?.kind === 'subagent') {
+				assert.strictEqual(invocation.toolSpecificData.detached, true);
+				assert.strictEqual(invocation.toolSpecificData.workerStatus, 'Running', 'The handle acknowledgement must not complete the worker');
+			}
+
+			const fireChild = (action: SessionAction | ChatAction) => {
+				agentHostService.fireAction({ channel: childSessionUri, action, serverSeq: 2000, origin: undefined });
+			};
+			fireChild({
+				type: 'chat/turnStarted',
+				turnId: 'detached-child-turn',
+				message: { text: 'Audit the renderer', origin: { kind: MessageKind.User } },
+			} as ChatAction);
+			fireChild({ type: 'chat/turnComplete', turnId: 'detached-child-turn' } as ChatAction);
+			await timeout(50);
+
+			assert.strictEqual(invocation.toolSpecificData?.kind, 'subagent');
+			if (invocation.toolSpecificData?.kind === 'subagent') {
+				assert.strictEqual(invocation.toolSpecificData.workerStatus, 'Completed', 'Late child lifecycle must update the existing parent row');
+			}
 		}));
 
 		test('parent subagent agentName is updated when subagent content arrives later', () => runWithFakedTimers({ useFakeTimers: true }, async () => {

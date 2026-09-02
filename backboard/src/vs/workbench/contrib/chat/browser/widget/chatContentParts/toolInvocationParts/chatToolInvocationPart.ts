@@ -19,6 +19,7 @@ import { IChatContentPart, IChatContentPartRenderContext } from '../chatContentP
 import { CollapsibleListPool } from '../chatReferencesContentPart.js';
 import { ExtensionsInstallConfirmationWidgetSubPart } from './chatExtensionsInstallToolSubPart.js';
 import { ChatInputOutputMarkdownProgressPart } from './chatInputOutputMarkdownProgressPart.js';
+import { ChatCoreToolProgressPart } from './chatCoreToolProgressPart.js';
 import { ChatMcpAppSubPart, IMcpAppRenderData } from './chatMcpAppSubPart.js';
 import { ChatResultListSubPart } from './chatResultListSubPart.js';
 import { ChatSimpleToolProgressPart } from './chatSimpleToolProgressPart.js';
@@ -43,9 +44,70 @@ export interface IToolInvocationSubPartRenderIdentity {
 export function shouldRerenderToolInvocationSubPart(previous: IToolInvocationSubPartRenderIdentity, next: IToolInvocationSubPartRenderIdentity): boolean {
 	const stateKindChanged = previous.state.type !== next.state.type;
 	const dataKindChanged = previous.dataKind !== next.dataKind;
-	const terminalPayloadChanged = next.dataKind === 'terminal'
+	const livePayloadChanged = (next.dataKind === 'terminal' || next.dataKind === 'coreTool')
 		&& (previous.state !== next.state || previous.data !== next.data);
-	return stateKindChanged || dataKindChanged || terminalPayloadChanged;
+	return stateKindChanged || dataKindChanged || livePayloadChanged;
+}
+
+interface ICoreToolRerenderState {
+	readonly expanded: boolean | undefined;
+	readonly focusedElementIndex: number | undefined;
+}
+
+function captureCoreToolRerenderState(domNode: HTMLElement): ICoreToolRerenderState | undefined {
+	if (!domNode.classList.contains('chat-core-tool-card')) {
+		return undefined;
+	}
+
+	const disclosure = getCoreToolDisclosure(domNode);
+	const focusableElements = getCoreToolFocusableElements(domNode);
+	const focusedElementIndex = focusableElements.indexOf(domNode.ownerDocument.activeElement as HTMLElement);
+	return {
+		expanded: disclosure ? disclosure.ariaExpanded === 'true' : undefined,
+		focusedElementIndex: focusedElementIndex >= 0 ? focusedElementIndex : undefined,
+	};
+}
+
+function restoreCoreToolRerenderState(domNode: HTMLElement, state: ICoreToolRerenderState): void {
+	if (!domNode.classList.contains('chat-core-tool-card')) {
+		return;
+	}
+
+	const disclosure = getCoreToolDisclosure(domNode);
+	if (disclosure && state.expanded !== undefined && (disclosure.ariaExpanded === 'true') !== state.expanded) {
+		disclosure.click();
+	}
+
+	if (state.focusedElementIndex !== undefined) {
+		const focusableElements = getCoreToolFocusableElements(domNode);
+		(focusableElements[state.focusedElementIndex] ?? disclosure)?.focus();
+	}
+}
+
+function getCoreToolFocusableElements(domNode: HTMLElement): HTMLElement[] {
+	const focusableElements: HTMLElement[] = [];
+	const collect = (parent: Element) => {
+		for (const child of parent.children) {
+			if (!dom.isHTMLElement(child)) {
+				continue;
+			}
+			if (child.tabIndex >= 0) {
+				focusableElements.push(child);
+			}
+			collect(child);
+		}
+	};
+	collect(domNode);
+	return focusableElements;
+}
+
+function getCoreToolDisclosure(domNode: HTMLElement): HTMLButtonElement | undefined {
+	for (const child of domNode.children) {
+		if (dom.isHTMLButtonElement(child) && child.classList.contains('chat-core-tool-card-header') && child.hasAttribute('aria-expanded')) {
+			return child;
+		}
+	}
+	return undefined;
 }
 
 export class ChatToolInvocationPart extends Disposable implements IChatContentPart {
@@ -147,8 +209,13 @@ export class ChatToolInvocationPart extends Disposable implements IChatContentPa
 		const partStore = this._register(new DisposableStore());
 		let subPartDomNode: HTMLElement = document.createElement('div');
 		this.domNode.appendChild(subPartDomNode);
+		let coreToolExpanded: boolean | undefined;
 
 		const render = () => {
+			const previousCoreToolState = captureCoreToolRerenderState(subPartDomNode);
+			if (previousCoreToolState?.expanded !== undefined) {
+				coreToolExpanded = previousCoreToolState.expanded;
+			}
 			partStore.clear();
 
 			if (toolInvocation.presentation === ToolInvocationPresentation.Hidden || (toolInvocation.presentation === ToolInvocationPresentation.HiddenAfterComplete && IChatToolInvocation.isComplete(toolInvocation))) {
@@ -160,6 +227,14 @@ export class ChatToolInvocationPart extends Disposable implements IChatContentPa
 			this.subPart = partStore.add(this.createToolInvocationSubPart());
 			subPartDomNode.replaceWith(this.subPart.domNode);
 			subPartDomNode = this.subPart.domNode;
+			if (subPartDomNode.classList.contains('chat-core-tool-card')) {
+				restoreCoreToolRerenderState(subPartDomNode, {
+					expanded: coreToolExpanded,
+					focusedElementIndex: previousCoreToolState?.focusedElementIndex,
+				});
+			} else {
+				coreToolExpanded = undefined;
+			}
 
 			// Add class when displaying a confirmation widget
 			const isConfirmation = this.subPart instanceof ToolConfirmationSubPart ||
@@ -231,6 +306,10 @@ export class ChatToolInvocationPart extends Disposable implements IChatContentPa
 
 		if (this.toolInvocation.toolSpecificData?.kind === 'terminal') {
 			return this.instantiationService.createInstance(ChatTerminalToolProgressPart, this.toolInvocation, this.toolInvocation.toolSpecificData, this.context, this.renderer, this.editorPool, this.currentWidthDelegate, this.codeBlockStartIndex);
+		}
+
+		if (this.toolInvocation.toolSpecificData?.kind === 'coreTool') {
+			return this.instantiationService.createInstance(ChatCoreToolProgressPart, this.toolInvocation, this.toolInvocation.toolSpecificData);
 		}
 
 		if (this.toolInvocation.toolSpecificData?.kind === 'resources' && this.toolInvocation.toolSpecificData.values.length > 0) {

@@ -896,9 +896,11 @@
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-title-row {
+	box-sizing: border-box;
+	min-height: 32px;
 	align-items: center;
 	gap: 4px;
-	padding: 6px 8px 6px 10px;
+	padding: 4px 8px 4px 10px;
 	border-bottom-color: color-mix(in srgb, var(--vscode-foreground) 10%, transparent);
 }
 
@@ -931,14 +933,14 @@
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-description {
-	padding: 8px 10px 4px;
+	padding: 10px 10px 6px;
 	color: var(--vscode-foreground);
 	font-size: var(--vscode-agents-fontSize-body1);
 	line-height: 18px;
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-input-container {
-	padding: 2px 8px 6px;
+	padding: 0 8px 8px;
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-input-container::after {
@@ -946,15 +948,22 @@
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-list {
-	gap: 0;
+	gap: 4px;
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-list .chat-question-list-item {
 	box-sizing: border-box;
-	min-height: 26px;
+	min-height: 30px;
 	gap: 8px;
-	padding: 4px 6px;
+	padding: 5px 8px;
+	border-color: color-mix(in srgb, var(--vscode-foreground) 10%, transparent);
 	border-radius: var(--vscode-cornerRadius-medium);
+	background: transparent;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-list .chat-question-list-item:hover {
+	border-color: color-mix(in srgb, var(--vscode-foreground) 20%, transparent);
+	background: color-mix(in srgb, var(--vscode-foreground) 4%, transparent);
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-list .chat-question-list-label {
@@ -966,9 +975,10 @@
  * but replace their visual numbering with a conventional radio marker. */
 .monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-list-number {
 	position: relative;
-	width: 12px;
-	height: 12px;
+	width: 14px;
+	height: 14px;
 	border-color: color-mix(in srgb, var(--vscode-foreground) 48%, transparent);
+	border-radius: 50%;
 	background: transparent;
 	color: transparent;
 	font-size: 0;
@@ -996,7 +1006,8 @@
 .monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-list-item.selected,
 .monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-list:focus .chat-question-list-item.selected,
 .monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-list-item.selected:hover {
-	background: color-mix(in srgb, var(--vscode-focusBorder) 10%, transparent);
+	border-color: color-mix(in srgb, var(--vscode-focusBorder) 58%, transparent);
+	background: color-mix(in srgb, var(--vscode-focusBorder) 8%, transparent);
 	color: var(--vscode-foreground);
 }
 
@@ -1012,8 +1023,9 @@
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-freeform {
 	gap: 0;
-	margin-top: 2px;
+	margin-top: 4px;
 	padding: 0 6px;
+	background: transparent;
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-freeform-number {
@@ -1033,13 +1045,24 @@
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-footer-row {
 	box-sizing: border-box;
-	min-height: 30px;
+	min-height: 34px;
 	padding: 4px 6px;
 	border-top-color: color-mix(in srgb, var(--vscode-foreground) 10%, transparent);
+	background: transparent;
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-footer-left {
 	gap: 6px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-footer-left:empty {
+	display: none;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-footer-right {
+	width: 100%;
+	flex: 1 1 auto;
+	gap: 8px;
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .chat-question-nav-arrows {
@@ -1063,9 +1086,19 @@
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .monaco-button.chat-question-submit-button {
-	height: 24px;
+	height: 26px;
 	padding-inline: 9px;
 	border-radius: var(--vscode-cornerRadius-medium);
+	font-size: var(--vscode-agents-fontSize-label1);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-question-carousel-container .monaco-button.chat-question-dismiss-button {
+	width: auto;
+	min-width: 0;
+	max-width: max-content;
+	flex: 0 0 auto;
+	padding-inline: 6px;
+	background: transparent !important;
 	font-size: var(--vscode-agents-fontSize-label1);
 }
 

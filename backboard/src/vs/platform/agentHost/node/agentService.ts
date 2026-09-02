@@ -20,7 +20,7 @@ import { FileChangeType, FileOperationError, FileOperationResult, FileSystemProv
 import { InstantiationService } from '../../instantiation/common/instantiationService.js';
 import { ServiceCollection } from '../../instantiation/common/serviceCollection.js';
 import { ILogService } from '../../log/common/log.js';
-import { AgentProvider, AgentSession, GITHUB_COPILOT_PROTECTED_RESOURCE, IAgent, IAgentCreateSessionConfig, IAgentHostAuthTokenRequest, IAgentMaterializeSessionEvent, IAgentResolveSessionConfigParams, IAgentService, IAgentSessionConfigCompletionsParams, IAgentSessionMetadata, AuthenticateParams, AuthenticateResult, IMcpNotification } from '../common/agentService.js';
+import { AgentProvider, AgentSession, GITHUB_COPILOT_PROTECTED_RESOURCE, IAgent, IAgentCommandParams, IAgentCommandResult, IAgentCreateSessionConfig, IAgentHostAuthTokenRequest, IAgentMaterializeSessionEvent, IAgentResolveSessionConfigParams, IAgentService, IAgentSessionConfigCompletionsParams, IAgentSessionMetadata, AuthenticateParams, AuthenticateResult, IMcpNotification } from '../common/agentService.js';
 import { ISessionDataService, SESSION_ATTACHMENTS_DIRNAME } from '../common/sessionDataService.js';
 import { buildDefaultChangesetCatalogue, parseChangesetUri } from '../common/changesetUri.js';
 import { ActionType, ActionEnvelope, INotification, type ChatAction, type IRootConfigChangedAction, type SessionAction, type TerminalAction, type ClientAnnotationsAction } from '../common/state/sessionActions.js';
@@ -359,6 +359,17 @@ export class AgentService extends Disposable implements IAgentService {
 
 	async authenticate(params: AuthenticateParams): Promise<AuthenticateResult> {
 		return this._authService.authenticate(params, this._providers.values());
+	}
+
+	async executeAgentCommand(params: IAgentCommandParams): Promise<IAgentCommandResult> {
+		const provider = this._providers.get(params.provider);
+		if (!provider) {
+			throw new Error(`No agent provider registered for: ${params.provider}`);
+		}
+		if (!provider.executeCommand) {
+			throw new Error(`Agent provider ${params.provider} does not support account commands.`);
+		}
+		return provider.executeCommand(params.command);
 	}
 
 	getAuthToken(request: IAgentHostAuthTokenRequest): string | undefined {

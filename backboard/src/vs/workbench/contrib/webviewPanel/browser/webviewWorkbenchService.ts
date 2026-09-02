@@ -10,7 +10,7 @@ import { isCancellationError } from '../../../../base/common/errors.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Iterable } from '../../../../base/common/iterator.js';
 import { combinedDisposable, Disposable, IDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
-import { EditorActivation } from '../../../../platform/editor/common/editor.js';
+import { EditorActivation, IModalEditorOptions } from '../../../../platform/editor/common/editor.js';
 import { createDecorator, IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { IThemeService } from '../../../../platform/theme/common/themeService.js';
 import { GroupIdentifier } from '../../../common/editor.js';
@@ -25,6 +25,7 @@ import { WebviewIconPath, WebviewInput, WebviewInputInitInfo } from './webviewEd
 export interface IWebViewShowOptions {
 	readonly group?: IEditorGroup | GroupIdentifier | ACTIVE_GROUP_TYPE | SIDE_GROUP_TYPE | MODAL_GROUP_TYPE;
 	readonly preserveFocus?: boolean;
+	readonly modalOptions?: IModalEditorOptions;
 }
 
 export const IWebviewWorkbenchService = createDecorator<IWebviewWorkbenchService>('webviewEditorService');
@@ -279,7 +280,7 @@ export class WebviewEditorService extends Disposable implements IWebviewWorkbenc
 		showOptions: IWebViewShowOptions,
 	): WebviewInput {
 		const webview = this._webviewService.createWebviewOverlay(webviewInitInfo);
-		const webviewInput = this._instantiationService.createInstance(WebviewInput, { viewType, name: title, providedId: webviewInitInfo.providedViewType, iconPath }, webview);
+		const webviewInput = this._instantiationService.createInstance(WebviewInput, { viewType, name: title, providedId: webviewInitInfo.providedViewType, iconPath, modalOptions: showOptions.modalOptions }, webview);
 		this._editorService.openEditor(webviewInput, {
 			pinned: true,
 			preserveFocus: showOptions.preserveFocus,

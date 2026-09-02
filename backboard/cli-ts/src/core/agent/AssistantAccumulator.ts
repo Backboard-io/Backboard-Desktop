@@ -38,11 +38,16 @@ export interface AssistantAccumulatorDeps {
 	 * exchange is bookkeeping (e.g. a todo reconciliation reply).
 	 */
 	suppressAllMessages?: () => boolean;
+	/** Maximum visible reasoning update rate. Defaults to 10 updates/second. */
+	reasoningFlushIntervalMs?: number;
 }
 
 export class AssistantAccumulator {
 	private current: AssistantSegment | null = null;
 	private nextIndex = 0;
+	private pendingReasoning = "";
+	private reasoningFlushTimer: ReturnType<typeof setTimeout> | undefined;
+	private lastReasoningFlushAt: number | undefined;
 
 	constructor(
 		private readonly turnId: string,
@@ -52,6 +57,9 @@ export class AssistantAccumulator {
 	) {}
 
 	appendDelta(text: string): void {
+		// Keep the visible think -> answer ordering deterministic when reasoning
+		// chunks were coalesced to protect the renderer from provider token floods.
+		this.flushReasoning();
 		const segment = this.ensureSegment();
 		segment.text += text;
 		if (segment.buffered || segment.hidden) return;
@@ -69,14 +77,44 @@ export class AssistantAccumulator {
 	 * so it bypasses the segment buffering above.
 	 */
 	appendReasoning(text: string): void {
-		this.bus.emit({
-			type: "assistant:reasoning",
-			turnId: this.turnId,
-			text,
-		});
+		if (!text) return;
+		const interval = Math.max(0, this.deps.reasoningFlushIntervalMs ?? 100);
+		const now = performance.now();
+		if (
+			this.pendingReasoning.length === 0 &&
+			(this.lastReasoningFlushAt === undefined ||
+				now - this.lastReasoningFlushAt >= interval)
+		) {
+			this.emitReasoning(text, now);
+			return;
+		}
+
+		this.pendingReasoning += text;
+		if (this.reasoningFlushTimer) return;
+		const elapsed =
+			this.lastReasoningFlushAt === undefined
+				? interval
+				: now - this.lastReasoningFlushAt;
+		this.reasoningFlushTimer = setTimeout(
+			() => this.flushReasoning(),
+			Math.max(0, interval - elapsed),
+		);
+	}
+
+	/** Flushes buffered reasoning before a tool, answer, retry, or turn boundary. */
+	flushReasoning(): void {
+		if (this.reasoningFlushTimer) {
+			clearTimeout(this.reasoningFlushTimer);
+			this.reasoningFlushTimer = undefined;
+		}
+		if (!this.pendingReasoning) return;
+		const text = this.pendingReasoning;
+		this.pendingReasoning = "";
+		this.emitReasoning(text, performance.now());
 	}
 
 	finalize(toolCalls: ToolCallRef[] = [], finalText?: string): void {
+		this.flushReasoning();
 		if (!this.current && !finalText) return;
 		const segment = this.ensureSegment();
 		if (segment.finalized) return;
@@ -107,6 +145,7 @@ export class AssistantAccumulator {
 	}
 
 	discardPartial(): void {
+		this.flushReasoning();
 		if (this.current?.finalized === false) {
 			this.current = null;
 		}
@@ -124,5 +163,14 @@ export class AssistantAccumulator {
 		this.nextIndex++;
 		this.current = segment;
 		return segment;
+	}
+
+	private emitReasoning(text: string, now: number): void {
+		this.lastReasoningFlushAt = now;
+		this.bus.emit({
+			type: "assistant:reasoning",
+			turnId: this.turnId,
+			text,
+		});
 	}
 }

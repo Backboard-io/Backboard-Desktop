@@ -669,13 +669,6 @@ export class AgentHostChatInputPicker extends Disposable {
 				const header = dom.append(root, dom.$('.backboard-access-picker-header'));
 				const heading = dom.append(header, dom.$('span.backboard-access-picker-heading'));
 				heading.textContent = localize('agentHostChatInputPicker.access.heading', "How should Backboard actions be approved?");
-				const learnMore = dom.append(header, dom.$('a.backboard-access-picker-learn-more')) as HTMLAnchorElement;
-				learnMore.href = PERMISSION_MODE_LEARN_MORE_URL;
-				learnMore.textContent = localize('agentHostChatInputPicker.access.learnMore', "Learn more");
-				store.add(dom.addDisposableListener(learnMore, dom.EventType.CLICK, e => {
-					dom.EventHelper.stop(e, true);
-					void this._openerService.open(URI.parse(PERMISSION_MODE_LEARN_MORE_URL));
-				}));
 
 				const list = dom.append(root, dom.$('.backboard-access-picker-list'));
 				list.role = 'listbox';

@@ -144,7 +144,7 @@ The provider ships a rich set of session-scoped UI in `browser/`:
 | File | Responsibility |
 |------|----------------|
 | `agentHostSessionConfigPicker.ts` | The per-session config picker (isolation, branch, and host-declared dynamic properties) backed by the dynamic-session-config API; includes `media/agentHostSessionConfigPicker.css`. |
-| `agentHostAgentPicker.ts` | Custom-agent picker for a session. |
+| `agentHostAgentPicker.ts` | Custom-agent picker for new-session configuration. It is intentionally not contributed to the running-session composer. |
 | `agentHostModePicker.ts` | Agent mode enum picker (extends a shared `AgentHostSessionEnumPicker`). |
 | `agentHostModelPicker.ts` | `getAgentHostModels` — filters language models by the session resource scheme. |
 | `agentHostClaudePermissionModePicker.ts` | Claude-specific permission-mode picker. |

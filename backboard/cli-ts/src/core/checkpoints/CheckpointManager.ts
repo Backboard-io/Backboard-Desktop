@@ -7,7 +7,9 @@ import {
 	type CheckpointCallContext,
 	type CheckpointRecorder,
 	CheckpointStore,
+	type RecordPostImageRequest,
 	type RecordPreImageOptions,
+	type RecordPreImageRequest,
 	scopeCheckpointRecorder,
 } from "./CheckpointStore.ts";
 import type {
@@ -98,6 +100,20 @@ export class CheckpointManager implements CheckpointRecorder {
 		contentIfInMemory?: Uint8Array,
 	): Promise<void> {
 		return this.active.recordPostImage(absPath, ctx, contentIfInMemory);
+	}
+
+	recordPreImages(
+		requests: readonly RecordPreImageRequest[],
+		ctx: CheckpointCallContext,
+	): Promise<void> {
+		return this.active.recordPreImages(requests, ctx);
+	}
+
+	recordPostImages(
+		requests: readonly RecordPostImageRequest[],
+		ctx: CheckpointCallContext,
+	): Promise<void> {
+		return this.active.recordPostImages(requests, ctx);
 	}
 
 	revertToolCall(toolCallId: string): Promise<void> {

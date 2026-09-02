@@ -1,4 +1,6 @@
 import type { PromptModule } from "../../../PromptModule.ts";
+import { agentSpawn } from "../../../tools/agentSpawn.tsx";
+import { agentWait } from "../../../tools/agentWait.tsx";
 import { agent } from "./agent.tsx";
 import { applyPatch } from "./applyPatch.tsx";
 import { askUser } from "./askUser.tsx";
@@ -30,4 +32,6 @@ export const toolPrompts: Record<string, PromptModule> = {
 	computer,
 	browser,
 	agent,
+	agent_spawn: agentSpawn,
+	agent_wait: agentWait,
 };

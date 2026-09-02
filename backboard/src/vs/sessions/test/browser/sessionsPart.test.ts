@@ -8,6 +8,8 @@ import { SessionsPart } from '../../browser/parts/sessionsPart.js';
 import { Parts } from '../../../workbench/services/layout/browser/layoutService.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../base/test/common/utils.js';
 import { SessionsService } from '../../services/sessions/browser/sessionsService.js';
+import { URI } from '../../../base/common/uri.js';
+import { chatResourceNavigationRegistry } from '../../services/chatView/browser/chatResourceNavigationRegistry.js';
 
 suite('Sessions - Sessions Part', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -43,8 +45,9 @@ suite('Sessions - Sessions Part', () => {
 
 	test('Back returns to a parent chat before traversing session history', async () => {
 		let sessionHistoryCalls = 0;
+		const rootResource = URI.parse('chat-session://test/session-1');
 		const service = {
-			activeSession: { get: () => ({ sessionId: 'session-1' }) },
+			activeSession: { get: () => ({ sessionId: 'session-1', activeChat: { get: () => ({ resource: rootResource }) } }) },
 			sessionsPartService: {
 				getSessionView: () => ({ navigateBack: () => true }),
 			},
@@ -60,8 +63,9 @@ suite('Sessions - Sessions Part', () => {
 
 	test('Back falls through to session history outside a subagent chat', async () => {
 		let sessionHistoryCalls = 0;
+		const rootResource = URI.parse('chat-session://test/session-1');
 		const service = {
-			activeSession: { get: () => ({ sessionId: 'session-1' }) },
+			activeSession: { get: () => ({ sessionId: 'session-1', activeChat: { get: () => ({ resource: rootResource }) } }) },
 			sessionsPartService: {
 				getSessionView: () => ({ navigateBack: () => false }),
 			},
@@ -73,5 +77,39 @@ suite('Sessions - Sessions Part', () => {
 		await SessionsService.prototype.openPreviousSession.call(service as unknown as SessionsService);
 
 		assert.strictEqual(sessionHistoryCalls, 1);
+	});
+
+	test('Back returns through an Editor chat participant before the hidden SessionsPart', async () => {
+		const rootResource = URI.parse('chat-session://test/session-1');
+		let editorBackCalls = 0;
+		let sessionViewBackCalls = 0;
+		let sessionHistoryCalls = 0;
+		const registration = chatResourceNavigationRegistry.registerParticipant({
+			canHandleChatResource: resource => resource.toString() === rootResource.toString(),
+			openChatResource: async () => false,
+			navigateBack: async () => {
+				editorBackCalls++;
+				return true;
+			},
+		});
+		const service = {
+			activeSession: { get: () => ({ sessionId: 'session-1', activeChat: { get: () => ({ resource: rootResource }) } }) },
+			sessionsPartService: {
+				getSessionView: () => ({ navigateBack: () => { sessionViewBackCalls++; return true; } }),
+			},
+			_navigation: {
+				goBack: async () => { sessionHistoryCalls++; },
+			},
+		};
+
+		try {
+			await SessionsService.prototype.openPreviousSession.call(service as unknown as SessionsService);
+		} finally {
+			registration.dispose();
+		}
+
+		assert.strictEqual(editorBackCalls, 1);
+		assert.strictEqual(sessionViewBackCalls, 0);
+		assert.strictEqual(sessionHistoryCalls, 0);
 	});
 });

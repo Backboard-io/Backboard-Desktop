@@ -1,7 +1,11 @@
 import type { PermissionMode } from "../permissions/PermissionMode.ts";
 import type { AgentToolOutput } from "../tools/AgentToolOutput.ts";
-import type { FileEditPreview } from "../tools/ToolResult.ts";
+import type {
+	FileEditPreview,
+	TerminalToolResult,
+} from "../tools/ToolResult.ts";
 import type { ToolResultDetailLine } from "../tools/ToolResultDetail.ts";
+import type { BackboardToolUiData } from "../tools/ToolUiData.ts";
 import type { WorkerWorkspaceProgress } from "../workspaces/WorkerWorkspaceTypes.ts";
 
 export type TurnStatus =
@@ -22,6 +26,7 @@ interface ToolPendingEvent {
 	toolCallId: string;
 	name: string;
 	inputSummary: string;
+	toolUi?: BackboardToolUiData;
 }
 
 interface ToolStartEvent {
@@ -30,6 +35,7 @@ interface ToolStartEvent {
 	name: string;
 	inputSummary: string;
 	agentMode?: "worker" | "rlm";
+	toolUi?: BackboardToolUiData;
 }
 
 interface ToolResultEvent {
@@ -40,7 +46,15 @@ interface ToolResultEvent {
 	detail?: string;
 	detailLines?: ToolResultDetailLine[];
 	fileEdits?: FileEditPreview[];
+	terminalOutput?: TerminalToolResult;
 	agentOutput?: AgentToolOutput;
+	toolUi?: BackboardToolUiData;
+}
+
+/** Incremental terminal bytes emitted while an Execute tool is running. */
+export interface TerminalToolProgressData {
+	kind: "terminal-output";
+	text: string;
 }
 
 export interface AgentChildToolCall {
@@ -86,6 +100,22 @@ export interface AskUserResponse {
 	/** One answer per question, aligned by index with `request.questions`. */
 	answers: string[];
 }
+
+export type PerformanceTimingPhase =
+	| "provider_tool_announcement"
+	| "provider_tool_batch_finalize"
+	| "permission_wait"
+	| "mutation_prepare"
+	| "checkpoint_pre_flush"
+	| "filesystem_commit"
+	| "checkpoint_post_flush"
+	| "diagnostics"
+	| "worker_queued"
+	| "worktree_ready"
+	| "worker_model"
+	| "result_capture"
+	| "integration"
+	| "ui_event_projection";
 
 /**
  * The single source of truth for everything that happens in a run. The agent
@@ -181,6 +211,14 @@ export type AgentEvent =
 	| { type: "permission:mode"; mode: PermissionMode }
 	| { type: "todos:updated"; todos: TodoItem[] }
 	| { type: "usage"; usage: UsageInfo }
+	| {
+			type: "performance:timing";
+			phase: PerformanceTimingPhase;
+			durationMs: number;
+			toolCallId?: string;
+			workerId?: string;
+			fileCount?: number;
+	  }
 	| { type: "system:warning"; message: string }
 	| { type: "run:error"; error: string };
 

@@ -11,7 +11,9 @@ export const agent: PromptModule = definePrompt(
 );
 
 function buildAgentPrompt(context: PromptContext = {}): string {
-	return `Launch a subagent to handle a complex, multi-step task on its own.
+	return `Launch a subagent and block until its final report is ready. Use AgentSpawn plus a later AgentWait when useful parent work can continue before the result is needed.
+
+  Optimize for wall-clock completion time, not agent count. Always honor an explicit user request for subagents. Otherwise, use direct file tools for ordinary coding and delegate only independent research or two to four coarse workstreams with clear non-overlapping ownership when parallel model-time savings should exceed startup and integration overhead. Prefer read-only workers for research.
 
   Required inputs:
   - subagent_type: which subagent to run. "worker" (default) runs a tool-using sub-agent over the project; "rlm" analyzes the prompt and provided variables in a JavaScript REPL.
@@ -56,7 +58,7 @@ function whenNotToUse(context: PromptContext): string {
 		hasTool(context, "Grep") && hasTool(context, "Glob")
 			? '  - To find a specific definition like "class Foo", use the grep/glob tools.'
 			: "",
-		"  - When the work spans 1-10 known files, use the file tools directly instead of spawning a subagent.",
+		"  - For ordinary coding, 1-10 known files, tightly coupled work, or shared core files, batch direct file tools instead of spawning a subagent merely to perform writes.",
 	].filter(Boolean);
 	return `  When NOT to use the Agent tool:\n${lines.join("\n")}`;
 }

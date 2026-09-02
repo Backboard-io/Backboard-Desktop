@@ -49,6 +49,7 @@ export interface CreateLoopOptions {
 	memoryProfile: MemoryProfile;
 	workspaceId?: string;
 	imageGeneration?: boolean;
+	openRouterProvider?: string;
 	generatedMediaDir?: string;
 	thinking?: ThinkingConfig | null;
 	thinkingResolver?: RuntimeThinkingResolver;
@@ -114,6 +115,7 @@ export class AgentLoopFactory {
 			memoryProfile: options.memoryProfile,
 			workspaceId: options.workspaceId,
 			imageGeneration: options.imageGeneration,
+			openRouterProvider: options.openRouterProvider,
 			generatedMediaDir: options.generatedMediaDir,
 			thinking: options.thinking,
 			thinkingResolver: options.thinkingResolver,

@@ -310,14 +310,96 @@ export function reconcileBackboardTurnNodeOrder<T>(
 export interface IBackboardSubagentStripItem {
 	readonly node: HTMLElement;
 	readonly active: boolean;
+	readonly status?: string;
+	readonly needsAttention?: boolean;
 }
 
-const backboardVisibleSubagentCount = 3;
+export const backboardSubagentSummaryThrottleMs = 100;
+
+interface IBackboardSubagentSummaryState {
+	lastAppliedAt: number;
+	pendingLabel?: string;
+	pendingStatus?: string;
+	timer?: number;
+}
+
+const backboardSubagentSummaryStates = new WeakMap<HTMLElement, IBackboardSubagentSummaryState>();
+
+/** Builds the single visible lifecycle summary for a parallel worker group. */
+export function getBackboardSubagentSummary(items: readonly Pick<IBackboardSubagentStripItem, 'active' | 'status'>[]): { label: string; status: string } {
+	const running = items.filter(item => item.active || item.status === 'running' || item.status === 'integrating').length;
+	const failed = items.filter(item => item.status === 'failed' || item.status === 'cancelled' || item.status === 'conflict').length;
+	const complete = Math.max(0, items.length - running - failed);
+	const parts = [items.length === 1
+		? localize('chat.subagent.summary.oneWorker', "1 worker")
+		: localize('chat.subagent.summary.workers', "{0} workers", items.length)];
+	if (running) {
+		parts.push(running === 1
+			? localize('chat.subagent.summary.oneRunning', "1 running")
+			: localize('chat.subagent.summary.running', "{0} running", running));
+	}
+	if (complete) {
+		parts.push(complete === 1
+			? localize('chat.subagent.summary.oneComplete', "1 complete")
+			: localize('chat.subagent.summary.complete', "{0} complete", complete));
+	}
+	if (failed) {
+		parts.push(failed === 1
+			? localize('chat.subagent.summary.oneNeedsAttention', "1 needs attention")
+			: localize('chat.subagent.summary.needsAttention', "{0} need attention", failed));
+	}
+	return {
+		label: parts.join(' · '),
+		status: failed ? 'attention' : running ? 'running' : 'complete',
+	};
+}
+
+function updateBackboardSubagentSummary(strip: HTMLElement, summaryButton: HTMLButtonElement, labelElement: HTMLElement, statusElement: HTMLElement, summary: { label: string; status: string }): void {
+	const window = dom.getWindow(strip);
+	let state = backboardSubagentSummaryStates.get(strip);
+	if (!state) {
+		state = { lastAppliedAt: 0 };
+		backboardSubagentSummaryStates.set(strip, state);
+	}
+	state.pendingLabel = summary.label;
+	state.pendingStatus = summary.status;
+
+	const applyPending = () => {
+		state!.timer = undefined;
+		state!.lastAppliedAt = Date.now();
+		if (state!.pendingLabel !== undefined && labelElement.textContent !== state!.pendingLabel) {
+			labelElement.textContent = state!.pendingLabel;
+		}
+		const visibleLabel = state!.pendingLabel ?? labelElement.textContent ?? '';
+		summaryButton.ariaLabel = strip.dataset.expanded === 'true'
+			? localize('chat.subagent.summary.collapseWithStatus', "Hide worker details: {0}", visibleLabel)
+			: localize('chat.subagent.summary.expandWithStatus', "Show worker details: {0}", visibleLabel);
+		const pendingStatus = state!.pendingStatus;
+		if (pendingStatus && statusElement.dataset.status !== pendingStatus) {
+			statusElement.dataset.status = pendingStatus;
+			statusElement.className = `chat-subagent-summary-status chat-subagent-summary-status-${pendingStatus}`;
+		}
+		state!.pendingLabel = undefined;
+		state!.pendingStatus = undefined;
+	};
+
+	const elapsed = Date.now() - state.lastAppliedAt;
+	if (state.lastAppliedAt === 0 || elapsed >= backboardSubagentSummaryThrottleMs) {
+		if (state.timer !== undefined) {
+			window.clearTimeout(state.timer);
+			state.timer = undefined;
+		}
+		applyPending();
+	} else if (state.timer === undefined) {
+		state.timer = window.setTimeout(applyPending, backboardSubagentSummaryThrottleMs - elapsed);
+	}
+}
 
 /**
- * Packs parallel subagents into the same compact, expandable strip used by the
- * Backboard transcript. The strip is reconciled in place so streamed tokens do
- * not repeatedly detach its buttons or reset the user's expanded choice.
+ * Packs parallel subagents behind one compact aggregate disclosure. Worker
+ * details stay mounted for confirmations and durable child navigation, but are
+ * hidden until requested; streamed lifecycle churn updates the visible summary
+ * at most ten times per second and never reparents already-stable rows.
  */
 export function syncBackboardSubagentStrip(container: HTMLElement, sourceItems: readonly IBackboardSubagentStripItem[]): void {
 	const seen = new Set<HTMLElement>();
@@ -343,77 +425,58 @@ export function syncBackboardSubagentStrip(container: HTMLElement, sourceItems: 
 		container.insertBefore(strip, firstTopLevelNode?.parentElement === container ? firstTopLevelNode : null);
 	}
 
-	let overflowButton = Array.from(strip.children).find(node => node.classList.contains('chat-subagent-overflow')) as HTMLButtonElement | undefined;
-	if (!overflowButton) {
-		overflowButton = $('button.chat-subagent-overflow', { type: 'button' }) as HTMLButtonElement;
-		strip.appendChild(overflowButton);
-	} else if (overflowButton.nextElementSibling) {
-		// The overflow disclosure is the stable end anchor for worker rows.
-		strip.appendChild(overflowButton);
+	let summaryButton = strip.querySelector<HTMLButtonElement>(':scope > .chat-subagent-summary');
+	let summaryStatus = summaryButton?.querySelector<HTMLElement>('.chat-subagent-summary-status');
+	let summaryLabel = summaryButton?.querySelector<HTMLElement>('.chat-subagent-summary-label');
+	if (!summaryButton || !summaryStatus || !summaryLabel) {
+		summaryButton = $('button.chat-subagent-summary', { type: 'button' }) as HTMLButtonElement;
+		summaryStatus = $('span.chat-subagent-summary-status', { 'aria-hidden': 'true' });
+		summaryLabel = $('span.chat-subagent-summary-label');
+		const chevron = $('span.chat-subagent-summary-chevron.codicon.codicon-chevron-right', { 'aria-hidden': 'true' });
+		summaryButton.append(summaryStatus, summaryLabel, chevron);
+		strip.prepend(summaryButton);
+	}
+	let itemsContainer = strip.querySelector<HTMLElement>(':scope > .chat-subagent-items');
+	if (!itemsContainer) {
+		itemsContainer = $('.chat-subagent-items');
+		strip.appendChild(itemsContainer);
 	}
 
 	const desiredNodes = items.map(item => item.node);
 	const desiredNodeSet = new Set(desiredNodes);
-	for (const child of Array.from(strip.children)) {
-		if (child !== overflowButton && !desiredNodeSet.has(child as HTMLElement)) {
+	for (const child of Array.from(itemsContainer.children)) {
+		if (!desiredNodeSet.has(child as HTMLElement)) {
 			child.remove();
 		}
 	}
 	reconcileBackboardTurnNodeOrder(
 		desiredNodes,
-		() => {
-			const first = strip!.firstElementChild as HTMLElement | null;
-			return first && first !== overflowButton ? first : undefined;
-		},
-		node => {
-			const next = node.nextElementSibling as HTMLElement | null;
-			return next && next !== overflowButton ? next : undefined;
-		},
-		(node, before) => strip!.insertBefore(node, before ?? overflowButton!),
+		() => itemsContainer!.firstElementChild as HTMLElement | undefined,
+		node => node.nextElementSibling as HTMLElement | undefined,
+		(node, before) => itemsContainer!.insertBefore(node, before ?? null),
 	);
 
-	const applyOverflowState = () => {
+	const applyExpandedState = () => {
 		const expanded = strip!.dataset.expanded === 'true';
-		const overflowItems = items.slice(backboardVisibleSubagentCount);
-		for (let index = 0; index < items.length; index++) {
-			const hidden = !expanded && index >= backboardVisibleSubagentCount;
-			if (items[index].node.hidden !== hidden) {
-				items[index].node.hidden = hidden;
-			}
-		}
-		const overflowHidden = overflowItems.length === 0;
-		if (overflowButton!.hidden !== overflowHidden) {
-			overflowButton!.hidden = overflowHidden;
-		}
-		const ariaExpanded = String(expanded);
-		if (overflowButton!.ariaExpanded !== ariaExpanded) {
-			overflowButton!.ariaExpanded = ariaExpanded;
-		}
-		let label: string;
-		if (expanded) {
-			label = localize('chat.subagent.showFewer', "Show fewer subagents");
-		} else {
-			const activeOverflow = overflowItems.filter(item => item.active).length;
-			label = activeOverflow === 0
-				? overflowItems.length === 1
-					? localize('chat.subagent.oneOtherFinished', "and 1 other subagent finished")
-					: localize('chat.subagent.manyOtherFinished', "and {0} other subagents finished", overflowItems.length)
-				: activeOverflow === overflowItems.length
-					? overflowItems.length === 1
-						? localize('chat.subagent.oneOtherWorking', "and 1 other subagent working")
-						: localize('chat.subagent.manyOtherWorking', "and {0} other subagents working", overflowItems.length)
-					: localize('chat.subagent.manyOtherMixed', "and {0} other subagents", overflowItems.length);
-		}
-		if (overflowButton!.textContent !== label) {
-			overflowButton!.textContent = label;
-		}
+		itemsContainer!.hidden = !expanded;
+		summaryButton!.ariaExpanded = String(expanded);
+		const visibleLabel = summaryLabel!.textContent ?? '';
+		summaryButton!.ariaLabel = expanded
+			? localize('chat.subagent.summary.collapseWithStatus', "Hide worker details: {0}", visibleLabel)
+			: localize('chat.subagent.summary.expandWithStatus', "Show worker details: {0}", visibleLabel);
+		summaryButton!.querySelector('.chat-subagent-summary-chevron')?.classList.toggle('codicon-chevron-right', !expanded);
+		summaryButton!.querySelector('.chat-subagent-summary-chevron')?.classList.toggle('codicon-chevron-down', expanded);
 	};
 
-	overflowButton.onclick = () => {
+	if (items.some(item => item.needsAttention)) {
+		strip.dataset.expanded = 'true';
+	}
+	summaryButton.onclick = () => {
 		strip!.dataset.expanded = strip!.dataset.expanded === 'true' ? 'false' : 'true';
-		applyOverflowState();
+		applyExpandedState();
 	};
-	applyOverflowState();
+	applyExpandedState();
+	updateBackboardSubagentSummary(strip, summaryButton, summaryLabel, summaryStatus, getBackboardSubagentSummary(items));
 }
 
 export function resolveBackboardTurnExpandedState(
@@ -437,13 +500,18 @@ export function shouldRenderBackboardEditStandalone(kind: IChatRendererContent['
 	return backboardTranscript && (kind === 'textEditGroup' || kind === 'externalEdit');
 }
 
+export function isBackboardMutationBatchEdit(content: IChatRendererContent, backboardTranscript: boolean): boolean {
+	return backboardTranscript && content.kind === 'externalEdit' && typeof content.mutationBatchId === 'string';
+}
+
 /** A newly mounted standalone edit is a chronological boundary between work groups. */
 export function shouldSplitBackboardThinkingBeforeEdit(
 	kind: IChatRendererContent['kind'],
 	backboardTranscript: boolean,
 	sameEditAlreadyRendered: boolean,
+	mutationBatchEdit = false,
 ): boolean {
-	return !sameEditAlreadyRendered && shouldRenderBackboardEditStandalone(kind, backboardTranscript);
+	return !mutationBatchEdit && !sameEditAlreadyRendered && shouldRenderBackboardEditStandalone(kind, backboardTranscript);
 }
 
 /** Mirrors T3 Code's compact duration formatting for turn-fold labels. */
@@ -2364,10 +2432,11 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 				&& context.container.closest('.part.auxiliarybar') !== null
 				&& !isBackboardCursorTranscript(context.container);
 			const backboardTranscript = isBackboardCursorTranscript(context.container);
-			const renderEditStandalone = shouldRenderBackboardEditStandalone(partToRender.kind, backboardTranscript);
+			const mutationBatchEdit = isBackboardMutationBatchEdit(partToRender, backboardTranscript);
+			const renderEditStandalone = !mutationBatchEdit && shouldRenderBackboardEditStandalone(partToRender.kind, backboardTranscript);
 			const sameEditAlreadyRendered = alreadyRenderedPart instanceof ChatTextEditContentPart
 				|| alreadyRenderedPart instanceof ChatExternalEditContentPart;
-			if (shouldSplitBackboardThinkingBeforeEdit(partToRender.kind, backboardTranscript, sameEditAlreadyRendered)) {
+			if (shouldSplitBackboardThinkingBeforeEdit(partToRender.kind, backboardTranscript, sameEditAlreadyRendered, mutationBatchEdit)) {
 				// A later tool must create a new Thinking root. Otherwise the old root
 				// would own tools from both sides of this standalone diff and no top-level
 				// DOM sort could reproduce tool -> diff -> later-tool response order.
@@ -2551,7 +2620,12 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 
 		syncBackboardSubagentStrip(body, renderedParts
 			.filter((part): part is ChatSubagentContentPart => part instanceof ChatSubagentContentPart)
-			.map(part => ({ node: part.domNode, active: part.getIsActive() })));
+			.map(part => ({
+				node: part.domNode,
+				active: part.getIsActive(),
+				status: part.getWorkerStatusKind(),
+				needsAttention: part.hasToolsWaitingForConfirmation,
+			})));
 
 		turn.dataset.turnState = complete ? 'complete' : 'active';
 		turn.classList.toggle('chat-t3-turn-work-active', !complete);
@@ -2970,7 +3044,10 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		// Finalize all active subagent parts (there can be multiple parallel subagents)
 		// Skip subagents that still have tools waiting for confirmation
 		for (const part of templateData.renderedParts) {
-			if (part instanceof ChatSubagentContentPart && part.getIsActive() && !part.hasToolsWaitingForConfirmation) {
+			if (part instanceof ChatSubagentContentPart
+				&& part.getIsActive()
+				&& !part.hasToolsWaitingForConfirmation
+				&& !part.shouldRemainActiveAfterParentTurn()) {
 				part.markAsInactive();
 			}
 		}
@@ -4120,14 +4197,16 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		// into that title. Backboard keeps the compact card standalone so the
 		// completed diff is not hidden behind a second nested disclosure.
 		const collapsedToolsMode = this.configService.getValue<CollapsedToolsDisplayMode>('chat.agent.thinking.collapsedTools');
-		if (!shouldRenderBackboardEditStandalone(content.kind, isBackboardCursorTranscript(context.container))
+		const backboardTranscript = isBackboardCursorTranscript(context.container);
+		const mutationBatchEdit = isBackboardMutationBatchEdit(content, backboardTranscript);
+		if ((mutationBatchEdit || !shouldRenderBackboardEditStandalone(content.kind, backboardTranscript))
 			&& isResponseVM(context.element)
-			&& collapsedToolsMode !== CollapsedToolsDisplayMode.Off
-			&& this.shouldPinPart(content, context.element)) {
+			&& (mutationBatchEdit || collapsedToolsMode !== CollapsedToolsDisplayMode.Off)
+			&& (mutationBatchEdit || this.shouldPinPart(content, context.element))) {
 			// Stable id per part so the thinking part can dedup if it sees us twice.
 			const partId = `externalEdit-${content.uri.toString()}-${content.undoStopId ?? ''}`;
 			const lastThinking = this.getLastThinkingPart(templateData.renderedParts);
-			if (!lastThinking && collapsedToolsMode === CollapsedToolsDisplayMode.Always) {
+			if (!lastThinking && (mutationBatchEdit || collapsedToolsMode === CollapsedToolsDisplayMode.Always)) {
 				const thinkingPart = this.renderThinkingPart({ kind: 'thinking' }, context, templateData);
 				if (thinkingPart instanceof ChatThinkingContentPart) {
 					// New thinking part owns the edit pill via eagerDisposable.

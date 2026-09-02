@@ -497,6 +497,86 @@
 	min-width: 0;
 }
 
+.sessions-right-workbench-editor-chat .optimus-chat-navigation {
+	display: flex;
+	flex: 0 0 44px;
+	height: 44px;
+	min-width: 0;
+	align-items: center;
+	gap: 8px;
+	box-sizing: border-box;
+	padding: 4px 10px;
+	border-bottom: 1px solid color-mix(in srgb, var(--rwb-border) 70%, transparent);
+	background: var(--rwb-bg);
+}
+
+.sessions-right-workbench-editor-chat .optimus-chat-navigation[hidden] {
+	display: none;
+}
+
+.sessions-right-workbench-editor-chat .optimus-chat-back {
+	appearance: none;
+	display: inline-flex;
+	max-width: 132px;
+	height: 28px;
+	min-width: 0;
+	align-items: center;
+	gap: 6px;
+	box-sizing: border-box;
+	padding: 0 8px 0 6px;
+	border: 0;
+	border-radius: var(--vscode-cornerRadius-small);
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+	font: inherit;
+	font-size: var(--vscode-agents-fontSize-label1);
+	cursor: pointer;
+}
+
+.sessions-right-workbench-editor-chat .optimus-chat-back:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+	color: var(--vscode-foreground);
+}
+
+.sessions-right-workbench-editor-chat .optimus-chat-back:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.sessions-right-workbench-editor-chat .optimus-chat-back-label,
+.sessions-right-workbench-editor-chat .optimus-chat-navigation-title,
+.sessions-right-workbench-editor-chat .optimus-chat-navigation-meta {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sessions-right-workbench-editor-chat .optimus-chat-navigation-separator {
+	flex: 0 0 auto;
+	color: var(--vscode-descriptionForeground);
+	opacity: 0.6;
+}
+
+.sessions-right-workbench-editor-chat .optimus-chat-navigation-identity {
+	display: flex;
+	min-width: 0;
+	flex: 1 1 auto;
+	flex-direction: column;
+	justify-content: center;
+	line-height: 16px;
+}
+
+.sessions-right-workbench-editor-chat .optimus-chat-navigation-title {
+	color: var(--vscode-foreground);
+	font-size: var(--vscode-agents-fontSize-label1);
+	font-weight: var(--vscode-agents-fontWeight-semiBold);
+}
+
+.sessions-right-workbench-editor-chat .optimus-chat-navigation-meta {
+	color: var(--vscode-descriptionForeground);
+	font-size: var(--vscode-agents-fontSize-label2);
+}
+
 .sessions-right-workbench-editor-chat .chat-view-title-tabs {
 	padding: 4px 6px;
 	mask-image: none;

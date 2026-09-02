@@ -123,12 +123,25 @@ export interface SendMessageRequest {
 	memory_profile?: MemoryProfile;
 	metadata?: Record<string, unknown>;
 	thinking?: ThinkingConfig | null;
+	/** OpenRouter upstream-routing controls. Omitted to use OpenRouter's automatic routing. */
+	openrouter?: OpenRouterRequestOptions;
 	tools?: OpenAITool[];
 	/** `"auto"` enables Backboard's built-in image generation for the turn. */
 	image_generation?: string;
 	image_model_provider?: string;
 	image_model_name?: string;
 	stream?: boolean;
+}
+
+export interface OpenRouterRequestOptions {
+	providers?: string[];
+	allow_fallbacks?: boolean;
+	sort?: "price" | "throughput" | "latency";
+	ignore?: string[];
+	max_price?: number;
+	allowed_models?: string[];
+	excluded_models?: string[];
+	cost_tier?: string;
 }
 
 export interface SubmitToolOutputsRequest {
@@ -263,12 +276,48 @@ export interface ModelCatalogItem {
 	name: string;
 	provider: string;
 	model_type: string;
+	/** Provider-authoritative human-readable model name. */
+	display_name?: string;
+	/** Provider-authoritative capability summary. */
+	description?: string;
+	/** Canonical model id that an alias currently resolves to. */
+	resolved_model?: string;
+	/** Explicit effort levels accepted by this model. */
+	supported_effort_levels?: string[];
+	supports_adaptive_thinking?: boolean;
 	last_updated?: string | number | null;
 	max_output_tokens?: number | null;
 	supports_thinking?: boolean | null;
 	thinking_controls?: ThinkingModelMetadata["thinking_controls"];
 	source?: ModelSource;
 	context_limit?: number | null;
+	/** Live OpenRouter serving routes returned by Backboard's billing catalog. */
+	openrouter_providers?: OpenRouterModelProvider[];
+}
+
+export interface OpenRouterModelProvider {
+	model: string;
+	upstream_provider: string;
+	tag?: string | null;
+	quantization?: string | null;
+	input_cost_per_1m_tokens?: number | null;
+	cached_input_cost_per_1m_tokens?: number | null;
+	cache_write_input_cost_per_1m_tokens?: number | null;
+	output_cost_per_1m_tokens?: number | null;
+	context_limit?: number | null;
+	max_output_tokens?: number | null;
+	supports_tools?: boolean | null;
+	supports_thinking?: boolean | null;
+	supports_json_output?: boolean | null;
+	supports_caching?: boolean | null;
+	uptime_30m?: number | null;
+}
+
+export interface OpenRouterModelProvidersResponse {
+	total: number;
+	pricing_note?: string;
+	price_ranges?: unknown[];
+	data: OpenRouterModelProvider[];
 }
 
 export type ModelThinkingMetadataResponse = ThinkingModelMetadata;

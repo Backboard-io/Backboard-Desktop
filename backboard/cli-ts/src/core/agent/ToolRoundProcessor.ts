@@ -149,6 +149,15 @@ export class ToolRoundProcessor {
 						: { thinking: continuationThinking }),
 				});
 				round = this.createEarlyRound(ctx, turnId);
+				// The initial send path already emits this phase, but continuations
+				// previously went visually blank while the model generated a large
+				// tool payload. Restore an ephemeral heartbeat immediately after the
+				// prior tools finish; real reasoning, text, or a tool row replaces it.
+				this.deps.bus.emit({
+					type: "turn:status",
+					turnId,
+					phase: "generating",
+				});
 				pending = await this.deps.consumer.consumeWithRetry(
 					(signal) =>
 						this.deps.client.runToolOutputs(buildRequest(), {

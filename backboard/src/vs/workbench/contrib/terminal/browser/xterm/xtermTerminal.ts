@@ -122,6 +122,8 @@ export class XtermTerminal extends Disposable implements IXtermTerminal, IDetach
 	get progressState(): IProgressState { return this._progressState; }
 	get buffer() { return this.raw.buffer; }
 	get cols() { return this.raw.cols; }
+	get rows() { return this.raw.rows; }
+	get element() { return this.raw.element; }
 
 	// Always on addons
 	private _markNavigationAddon: MarkNavigationAddon;

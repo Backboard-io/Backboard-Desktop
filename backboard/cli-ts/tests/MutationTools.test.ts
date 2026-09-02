@@ -1,8 +1,11 @@
 import { describe, expect, it } from "bun:test";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EventBus } from "../src/core/bus/EventBus.ts";
+import type { CheckpointRecorder } from "../src/core/checkpoints/CheckpointStore.ts";
+import { ALLOW_ONCE } from "../src/core/permissions/PermissionPrompter.ts";
+import { parseRuleSet } from "../src/core/permissions/PermissionRules.ts";
 import type { ToolContext } from "../src/core/tools/ToolContext.ts";
 import { ToolRegistry } from "../src/core/tools/ToolRegistry.ts";
 import { ToolScheduler } from "../src/core/tools/ToolScheduler.ts";
@@ -26,6 +29,260 @@ async function tempDir(): Promise<string> {
 }
 
 describe("mutation tools", () => {
+	it("approves and starts three disjoint writes as one parallel round", async () => {
+		const cwd = await tempDir();
+		let prompts = 0;
+		let activeCaptures = 0;
+		let maxActiveCaptures = 0;
+		let preBatches = 0;
+		let postBatches = 0;
+		const checkpoints: CheckpointRecorder = {
+			recordPreImage: async () => {},
+			recordPostImage: async () => {},
+			recordPreImages: async (requests) => {
+				preBatches++;
+				activeCaptures += requests.length;
+				maxActiveCaptures = Math.max(maxActiveCaptures, activeCaptures);
+				await Bun.sleep(20);
+				activeCaptures -= requests.length;
+			},
+			recordPostImages: async () => {
+				postBatches++;
+			},
+			revertToolCall: async () => {},
+			beginShellCapture: async () => {},
+			endShellCapture: async () => {},
+			captureWarning: () => null,
+			scopedToTurn() {
+				return this;
+			},
+		};
+		const ctx: ToolContext = {
+			...context(cwd),
+			checkpoints,
+			permissions: {
+				mode: "manual",
+				rules: parseRuleSet({}),
+				interactive: true,
+			},
+			askUser: async () => {
+				prompts++;
+				return ALLOW_ONCE;
+			},
+		};
+		const scheduler = new ToolScheduler(
+			new ToolRegistry([new WriteTool()]),
+			ctx.bus,
+		);
+
+		const outputs = await scheduler.run(
+			["a.txt", "b.txt", "c.txt"].map((file, index) => ({
+				id: `write_${index}`,
+				name: "Write",
+				input: { file_path: file, content: file },
+			})),
+			ctx,
+		);
+
+		expect({
+			prompts,
+			preBatches,
+			postBatches,
+			maxActiveCaptures,
+			errors: outputs.filter((output) => output.metadata?.error).length,
+			contents: await Promise.all(
+				["a.txt", "b.txt", "c.txt"].map((file) =>
+					readFile(join(cwd, file), "utf8"),
+				),
+			),
+		}).toEqual({
+			prompts: 1,
+			preBatches: 1,
+			postBatches: 1,
+			maxActiveCaptures: 3,
+			errors: 0,
+			contents: ["a.txt", "b.txt", "c.txt"],
+		});
+	});
+
+	it("runs one round-wide diagnostic sweep after every disjoint write commits", async () => {
+		const cwd = await tempDir();
+		const ctx = context(cwd);
+		const files = ["a.txt", "b.txt", "c.txt"];
+		let active = 0;
+		let maxActive = 0;
+		let allCommittedAtFirstTouch = false;
+		let diagnosticsTimings = 0;
+		ctx.bus.on("performance:timing", (event) => {
+			if (event.phase === "diagnostics") diagnosticsTimings++;
+		});
+		ctx.lsp = {
+			enabled: true,
+			touchFile: async () => {
+				if (active === 0) {
+					allCommittedAtFirstTouch = (
+						await Promise.all(
+							files.map(
+								async (file) =>
+									(await readFile(join(cwd, file), "utf8")) === file,
+							),
+						)
+					).every(Boolean);
+				}
+				active++;
+				maxActive = Math.max(maxActive, active);
+				await Bun.sleep(20);
+				active--;
+			},
+			diagnosticsForFile: () => [],
+		} as unknown as ToolContext["lsp"];
+		const scheduler = new ToolScheduler(
+			new ToolRegistry([new WriteTool()]),
+			ctx.bus,
+		);
+
+		const outputs = await scheduler.run(
+			files.map((file, index) => ({
+				id: `diagnostic_write_${index}`,
+				name: "Write",
+				input: { file_path: file, content: file },
+			})),
+			ctx,
+		);
+
+		expect({
+			allCommittedAtFirstTouch,
+			diagnosticsTimings,
+			maxActive,
+			errors: outputs.filter((output) => output.metadata?.error).length,
+		}).toEqual({
+			allCommittedAtFirstTouch: true,
+			diagnosticsTimings: 1,
+			maxActive: 3,
+			errors: 0,
+		});
+	});
+
+	it("does not deadlock a valid mutation behind a peer that fails before capture", async () => {
+		const cwd = await tempDir();
+		await symlink(join(cwd, "missing-target.txt"), join(cwd, "dangling.txt"));
+		const ctx = context(cwd);
+		ctx.checkpoints = {
+			recordPreImage: async () => {},
+			recordPostImage: async () => {},
+			recordPreImages: async () => {},
+			recordPostImages: async () => {},
+			revertToolCall: async () => {},
+			beginShellCapture: async () => {},
+			endShellCapture: async () => {},
+			captureWarning: () => null,
+			scopedToTurn() {
+				return this;
+			},
+		};
+		const scheduler = new ToolScheduler(
+			new ToolRegistry([new WriteTool()]),
+			ctx.bus,
+		);
+
+		const outputs = await Promise.race([
+			scheduler.run(
+				[
+					{
+						id: "valid_write",
+						name: "Write",
+						input: { file_path: "valid.txt", content: "complete" },
+					},
+					{
+						id: "invalid_write",
+						name: "Write",
+						input: { file_path: "dangling.txt", content: "blocked" },
+					},
+				],
+				ctx,
+			),
+			Bun.sleep(1_000).then(() => {
+				throw new Error("mutation batch deadlocked");
+			}),
+		]);
+
+		expect({
+			content: await readFile(join(cwd, "valid.txt"), "utf8"),
+			errors: outputs.filter((output) => output.metadata?.error).length,
+		}).toEqual({ content: "complete", errors: 1 });
+	});
+
+	it("does not deadlock a disjoint checkpoint cohort across a transitive overlap", async () => {
+		const cwd = await tempDir();
+		await Promise.all([
+			writeFile(join(cwd, "x.txt"), "x0\n", "utf8"),
+			writeFile(join(cwd, "y.txt"), "y0\n", "utf8"),
+		]);
+		const ctx = context(cwd);
+		ctx.checkpoints = {
+			recordPreImage: async () => {},
+			recordPostImage: async () => {},
+			recordPreImages: async () => {},
+			recordPostImages: async () => {},
+			revertToolCall: async () => {},
+			beginShellCapture: async () => {},
+			endShellCapture: async () => {},
+			captureWarning: () => null,
+			scopedToTurn() {
+				return this;
+			},
+		};
+		const scheduler = new ToolScheduler(
+			new ToolRegistry([new WriteTool(), new ApplyPatchTool(), new EditTool()]),
+			ctx.bus,
+		);
+		const patch = [
+			"*** Begin Patch",
+			"*** Update File: x.txt",
+			"@@",
+			"-x1",
+			"+x2",
+			"*** Update File: y.txt",
+			"@@",
+			"-y0",
+			"+y1",
+			"*** End Patch",
+		].join("\n");
+
+		const outputs = await Promise.race([
+			scheduler.run(
+				[
+					{
+						id: "write_x",
+						name: "Write",
+						input: { file_path: "x.txt", content: "x1\n" },
+					},
+					{
+						id: "patch_xy",
+						name: "ApplyPatch",
+						input: { patch },
+					},
+					{
+						id: "edit_y",
+						name: "Edit",
+						input: {
+							file_path: "y.txt",
+							edits: [{ old_str: "y1", new_str: "y2" }],
+						},
+					},
+				],
+				ctx,
+			),
+			Bun.sleep(1_000).then(() => {
+				throw new Error("transitive mutation batch deadlocked");
+			}),
+		]);
+
+		expect(outputs.every((output) => !output.metadata?.error)).toBe(true);
+		expect(await readFile(join(cwd, "x.txt"), "utf8")).toBe("x2\n");
+		expect(await readFile(join(cwd, "y.txt"), "utf8")).toBe("y2\n");
+	});
+
 	it("writes full file contents", async () => {
 		const cwd = await tempDir();
 		const tool = new WriteTool();
@@ -45,6 +302,40 @@ describe("mutation tools", () => {
 				after: "hello\nworld\n",
 			},
 		]);
+	});
+
+	it("rolls back a write when post-image durability fails", async () => {
+		const cwd = await tempDir();
+		const ctx = context(cwd);
+		ctx.checkpoints = checkpointRecorderWithFailingPostFlush();
+
+		await expect(
+			new WriteTool().execute(
+				{ file_path: "nested/file.txt", content: "must not remain" },
+				ctx,
+			),
+		).rejects.toThrow("post-image flush failed");
+		await expect(
+			readFile(join(cwd, "nested/file.txt"), "utf8"),
+		).rejects.toThrow();
+	});
+
+	it("rolls back an edit when post-image durability fails", async () => {
+		const cwd = await tempDir();
+		await writeFile(join(cwd, "file.txt"), "before\n", "utf8");
+		const ctx = context(cwd);
+		ctx.checkpoints = checkpointRecorderWithFailingPostFlush();
+
+		await expect(
+			new EditTool().execute(
+				{
+					file_path: "file.txt",
+					edits: [{ old_str: "before", new_str: "after" }],
+				},
+				ctx,
+			),
+		).rejects.toThrow("post-image flush failed");
+		expect(await readFile(join(cwd, "file.txt"), "utf8")).toBe("before\n");
 	});
 
 	it("applies multiple multiline edits and legacy single edits", async () => {
@@ -264,6 +555,95 @@ describe("mutation tools", () => {
 		expect(await readFile(join(cwd, "file.txt"), "utf8")).toBe("c\n");
 	});
 
+	it("revalidates chained same-file patches in scheduler order", async () => {
+		const cwd = await tempDir();
+		await writeFile(join(cwd, "file.txt"), "a\n", "utf8");
+		const scheduler = new ToolScheduler(
+			new ToolRegistry([new ApplyPatchTool()]),
+			new EventBus(),
+		);
+		const patch = (before: string, after: string) =>
+			[
+				"*** Begin Patch",
+				"*** Update File: file.txt",
+				"@@",
+				`-${before}`,
+				`+${after}`,
+				"*** End Patch",
+			].join("\n");
+
+		const outputs = await scheduler.run(
+			[
+				{
+					id: "patch_1",
+					name: "ApplyPatch",
+					input: { patch: patch("a", "b") },
+				},
+				{
+					id: "patch_2",
+					name: "ApplyPatch",
+					input: { patch: patch("b", "c") },
+				},
+			],
+			context(cwd),
+		);
+
+		expect({
+			errors: outputs.filter((output) => output.metadata?.error).length,
+			content: await readFile(join(cwd, "file.txt"), "utf8"),
+		}).toEqual({ errors: 0, content: "c\n" });
+	});
+
+	it("releases the file lock before post-write diagnostics", async () => {
+		const cwd = await tempDir();
+		await writeFile(join(cwd, "file.txt"), "a\n", "utf8");
+		let diagnosticsStarted!: () => void;
+		const started = new Promise<void>((resolve) => {
+			diagnosticsStarted = resolve;
+		});
+		let releaseDiagnostics!: () => void;
+		const release = new Promise<void>((resolve) => {
+			releaseDiagnostics = resolve;
+		});
+		const firstContext = context(cwd);
+		firstContext.lsp = {
+			enabled: true,
+			touchFile: async () => {
+				diagnosticsStarted();
+				await release;
+			},
+			diagnosticsForFile: () => [],
+		} as unknown as ToolContext["lsp"];
+		const tool = new EditTool();
+
+		const first = tool.execute(
+			{
+				file_path: "file.txt",
+				edits: [{ old_str: "a", new_str: "b" }],
+			},
+			firstContext,
+		);
+		await started;
+		const second = tool.execute(
+			{
+				file_path: "file.txt",
+				edits: [{ old_str: "b", new_str: "c" }],
+			},
+			context(cwd),
+		);
+		const completedBeforeRelease = await Promise.race([
+			second.then(() => true),
+			Bun.sleep(200).then(() => false),
+		]);
+		releaseDiagnostics();
+		await Promise.all([first, second]);
+
+		expect({
+			completedBeforeRelease,
+			content: await readFile(join(cwd, "file.txt"), "utf8"),
+		}).toEqual({ completedBeforeRelease: true, content: "c\n" });
+	});
+
 	it("applies large patches and appends add-only updates to empty files", async () => {
 		const cwd = await tempDir();
 		await writeFile(join(cwd, "empty.txt"), "", "utf8");
@@ -302,6 +682,47 @@ describe("mutation tools", () => {
 		expect(await readFile(join(cwd, "added.txt"), "utf8")).toBe(
 			"created\nfile\n",
 		);
+	});
+
+	it("runs one multi-file patch diagnostic sweep concurrently", async () => {
+		const cwd = await tempDir();
+		await Promise.all([
+			writeFile(join(cwd, "a.txt"), "old\n", "utf8"),
+			writeFile(join(cwd, "b.txt"), "old\n", "utf8"),
+		]);
+		let active = 0;
+		let maxActive = 0;
+		const ctx = context(cwd);
+		ctx.lsp = {
+			enabled: true,
+			touchFile: async () => {
+				active++;
+				maxActive = Math.max(maxActive, active);
+				await Bun.sleep(20);
+				active--;
+			},
+			diagnosticsForFile: () => [],
+		} as unknown as ToolContext["lsp"];
+
+		await new ApplyPatchTool().execute(
+			{
+				patch: [
+					"*** Begin Patch",
+					"*** Update File: a.txt",
+					"@@",
+					"-old",
+					"+new",
+					"*** Update File: b.txt",
+					"@@",
+					"-old",
+					"+new",
+					"*** End Patch",
+				].join("\n"),
+			},
+			ctx,
+		);
+
+		expect(maxActive).toBe(2);
 	});
 
 	it("returns compact diff detail lines for applied patches", async () => {
@@ -496,3 +917,19 @@ describe("mutation tools", () => {
 		);
 	});
 });
+
+function checkpointRecorderWithFailingPostFlush(): CheckpointRecorder {
+	return {
+		recordPreImage: async () => {},
+		recordPostImage: async () => {
+			throw new Error("post-image flush failed");
+		},
+		revertToolCall: async () => {},
+		beginShellCapture: async () => {},
+		endShellCapture: async () => {},
+		captureWarning: () => null,
+		scopedToTurn() {
+			return this;
+		},
+	};
+}

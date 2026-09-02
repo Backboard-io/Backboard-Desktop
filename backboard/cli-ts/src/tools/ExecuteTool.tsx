@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import type { Readable } from "node:stream";
 import { z } from "zod";
+import type { TerminalToolProgressData } from "../core/bus/events.ts";
 import { isDangerousCommand } from "../core/permissions/dangerousCommands.ts";
 import { pathsInsideCwd } from "../core/permissions/pathsInside.ts";
 import { isSafeCommand } from "../core/permissions/safeCommands.ts";
@@ -42,6 +43,8 @@ import {
 	EXECUTE_FIRE_AND_FORGET_LOG_PREFIX,
 	EXECUTE_MAX_OUTPUT,
 	EXECUTE_OUTPUT_PREVIEW_LINES,
+	EXECUTE_TERMINAL_OUTPUT_MAX,
+	EXECUTE_TERMINAL_PROGRESS_FLUSH_MS,
 } from "./ExecuteTool.constants.ts";
 
 const schema = z.object({
@@ -194,12 +197,59 @@ export class ExecuteTool extends Tool<Input, Output> {
 
 			let stdout = "";
 			let stderr = "";
+			let terminalOutput = "";
+			let terminalOutputTruncated = false;
+			let pendingTerminalProgress = "";
+			let terminalProgressTimer: ReturnType<typeof setTimeout> | undefined;
 			let timedOut = false;
 			let abortPending = false;
 			let exitCode: number | null = null;
 			let settled = false;
 			let escalation: ReturnType<typeof setTimeout> | undefined;
 			let closeGrace: ReturnType<typeof setTimeout> | undefined;
+
+			const flushTerminalProgress = (): void => {
+				if (terminalProgressTimer) {
+					clearTimeout(terminalProgressTimer);
+					terminalProgressTimer = undefined;
+				}
+				if (!pendingTerminalProgress || !ctx.toolCallId) return;
+				const data: TerminalToolProgressData = {
+					kind: "terminal-output",
+					text: pendingTerminalProgress,
+				};
+				pendingTerminalProgress = "";
+				ctx.bus.emit({
+					type: "tool:progress",
+					toolCallId: ctx.toolCallId,
+					data,
+				});
+			};
+
+			const queueTerminalProgress = (text: string): void => {
+				if (!text || !ctx.toolCallId) return;
+				pendingTerminalProgress += text;
+				if (terminalProgressTimer) return;
+				terminalProgressTimer = setTimeout(
+					flushTerminalProgress,
+					EXECUTE_TERMINAL_PROGRESS_FLUSH_MS,
+				);
+				terminalProgressTimer.unref?.();
+			};
+
+			const appendTerminalOutput = (text: string): void => {
+				if (!text || terminalOutputTruncated) return;
+				const remaining = EXECUTE_TERMINAL_OUTPUT_MAX - terminalOutput.length;
+				const retained = text.slice(0, Math.max(remaining, 0));
+				terminalOutput += retained;
+				queueTerminalProgress(retained);
+				if (retained.length < text.length) {
+					terminalOutputTruncated = true;
+					const marker = `\n[terminal output truncated after ${EXECUTE_TERMINAL_OUTPUT_MAX} characters]\n`;
+					terminalOutput += marker;
+					queueTerminalProgress(marker);
+				}
+			};
 
 			const signalTree = (signal: NodeJS.Signals) =>
 				killProcessTree(child, signal);
@@ -238,6 +288,7 @@ export class ExecuteTool extends Tool<Input, Output> {
 				settled = true;
 				clearTimeout(timer);
 				if (closeGrace) clearTimeout(closeGrace);
+				flushTerminalProgress();
 				ctx.signal.removeEventListener("abort", onAbort);
 				// Detach from a surviving background child's pipes without killing it.
 				detachStream(child.stdout);
@@ -258,16 +309,20 @@ export class ExecuteTool extends Tool<Input, Output> {
 			};
 
 			child.stdout?.on("data", (chunk) => {
-				stdout += chunk.toString();
+				const text = chunk.toString();
+				stdout += text;
 				if (stdout.length > EXECUTE_MAX_OUTPUT) {
 					stdout = stdout.slice(0, EXECUTE_MAX_OUTPUT);
 				}
+				appendTerminalOutput(text);
 			});
 			child.stderr?.on("data", (chunk) => {
-				stderr += chunk.toString();
+				const text = chunk.toString();
+				stderr += text;
 				if (stderr.length > EXECUTE_MAX_OUTPUT) {
 					stderr = stderr.slice(0, EXECUTE_MAX_OUTPUT);
 				}
+				appendTerminalOutput(text);
 			});
 
 			const resolveResult = (): void => {
@@ -282,14 +337,20 @@ export class ExecuteTool extends Tool<Input, Output> {
 						stderr,
 						timedOut,
 					};
-					resolvePromise(
-						ok(
+					resolvePromise({
+						...ok(
 							out,
 							buildOutput(out),
 							formatResultTitle(out),
 							buildExecuteDetail(input.command, out),
 						),
-					);
+						terminalOutput: {
+							text: terminalOutput,
+							exitCode: out.exitCode,
+							timedOut: out.timedOut,
+							truncated: terminalOutputTruncated,
+						},
+					});
 				});
 			};
 
@@ -340,9 +401,14 @@ export class ExecuteTool extends Tool<Input, Output> {
 			if (pid === undefined)
 				throw new Error("background command did not start");
 			const output = `started background command\npid: ${pid}\nlog path: ${logPath}`;
-			return Promise.resolve(
-				ok({ pid, logPath, fireAndForget: true }, output, `Started PID ${pid}`),
-			);
+			return Promise.resolve({
+				...ok(
+					{ pid, logPath, fireAndForget: true },
+					output,
+					`Started PID ${pid}`,
+				),
+				terminalOutput: { text: output, exitCode: 0 },
+			});
 		} finally {
 			closeSync(stdoutFd);
 			closeSync(stderrFd);

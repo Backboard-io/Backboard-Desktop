@@ -1,10 +1,19 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+	access,
+	mkdir,
+	mkdtemp,
+	readFile,
+	rename,
+	rm,
+	writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import {
+	GitCommandError,
 	GitWorktreeManager,
 	runGitCommand,
 	workerBranchName,
@@ -19,6 +28,38 @@ import type { WorkerWorkspaceRecord } from "../src/core/workspaces/WorkerWorkspa
 const execFileAsync = promisify(execFile);
 const roots: string[] = [];
 
+class CoalescingGitWorktreeManager extends GitWorktreeManager {
+	readonly expectedCaptures: number;
+	batchIntegrations = 0;
+	private captures = 0;
+	private releaseCaptures!: () => void;
+	private readonly captureGate = new Promise<void>((resolve) => {
+		this.releaseCaptures = resolve;
+	});
+
+	constructor(expectedCaptures: number) {
+		super();
+		this.expectedCaptures = expectedCaptures;
+	}
+
+	override async captureResultCommit(
+		input: Parameters<GitWorktreeManager["captureResultCommit"]>[0],
+	) {
+		const result = await super.captureResultCommit(input);
+		this.captures++;
+		if (this.captures === this.expectedCaptures) this.releaseCaptures();
+		await this.captureGate;
+		return result;
+	}
+
+	override async integrateBatch(
+		input: Parameters<GitWorktreeManager["integrateBatch"]>[0],
+	) {
+		if (input.results.length > 1) this.batchIntegrations++;
+		return super.integrateBatch(input);
+	}
+}
+
 afterEach(async () => {
 	await Promise.all(
 		roots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
@@ -26,6 +67,60 @@ afterEach(async () => {
 });
 
 describe("WorkerWorkspaceManager", () => {
+	it("serializes Git registry updates while materializing checkouts concurrently", async () => {
+		const root = await mkdtemp(join(tmpdir(), "backboard-registry-test-"));
+		roots.push(root);
+		const repository = join(root, "repo");
+		await mkdir(repository);
+		let activeRegistry = 0;
+		let maxActiveRegistry = 0;
+		let activeCheckouts = 0;
+		let maxActiveCheckouts = 0;
+		let releaseCheckouts!: () => void;
+		const checkoutGate = new Promise<void>((resolve) => {
+			releaseCheckouts = resolve;
+		});
+		const gitManager = new GitWorktreeManager(async (_cwd, args) => {
+			if (args.includes("show-ref")) {
+				throw new GitCommandError("missing branch", args, "", "", 1);
+			}
+			if (args.includes("worktree") && args.includes("add")) {
+				activeRegistry++;
+				maxActiveRegistry = Math.max(maxActiveRegistry, activeRegistry);
+				await Bun.sleep(15);
+				activeRegistry--;
+				return { stdout: "", stderr: "" };
+			}
+			if (args.includes("reset")) {
+				activeCheckouts++;
+				maxActiveCheckouts = Math.max(maxActiveCheckouts, activeCheckouts);
+				if (activeCheckouts === 3) releaseCheckouts();
+				await checkoutGate;
+				activeCheckouts--;
+			}
+			return { stdout: "", stderr: "" };
+		});
+
+		await Promise.race([
+			Promise.all(
+				["a", "b", "c"].map((worker) =>
+					gitManager.createWorktree({
+						repositoryRoot: repository,
+						path: join(root, `worker-${worker}`),
+						branch: `agent/test/worker/${worker}`,
+						startCommit: "base",
+					}),
+				),
+			),
+			Bun.sleep(1_000).then(() => {
+				throw new Error("checkout materialization did not run concurrently");
+			}),
+		]);
+
+		expect(maxActiveRegistry).toBe(1);
+		expect(maxActiveCheckouts).toBe(3);
+	});
+
 	it("uses readable, collision-safe Git branch and worktree names", async () => {
 		const fixture = await createRepository();
 		const slashBranch = workerBranchName("session", "worker/a");
@@ -43,8 +138,29 @@ describe("WorkerWorkspaceManager", () => {
 			`refs/heads/${spaceBranch}`,
 		]);
 		expect(
-			workerWorktreePath(fixture.repository, "session", "worker/a"),
-		).not.toBe(workerWorktreePath(fixture.repository, "session", "worker a"));
+			workerWorktreePath(
+				fixture.repository,
+				"session",
+				"worker/a",
+				fixture.worktreeRoot,
+			),
+		).not.toBe(
+			workerWorktreePath(
+				fixture.repository,
+				"session",
+				"worker a",
+				fixture.worktreeRoot,
+			),
+		);
+		const hiddenPath = workerWorktreePath(
+			fixture.repository,
+			"session",
+			"worker-a",
+			fixture.worktreeRoot,
+		);
+		expect(hiddenPath.startsWith(`${fixture.worktreeRoot}/`)).toBe(true);
+		expect(hiddenPath).not.toContain(".backboard-workers");
+		expect(hiddenPath).not.toContain(`${fixture.repository}.backboard-workers`);
 	});
 
 	it("runs isolated workers concurrently and integrates non-conflicting commits", async () => {
@@ -92,6 +208,181 @@ describe("WorkerWorkspaceManager", () => {
 		expect(await readFile(join(fixture.repository, "b.txt"), "utf8")).toBe(
 			"worker-b",
 		);
+	});
+
+	it("integrates three ready disjoint results in one coordinator commit", async () => {
+		const fixture = await createRepository();
+		const gitManager = new CoalescingGitWorktreeManager(3);
+		const manager = new WorkerWorkspaceManager({
+			parentSessionId: "batch-three",
+			store: new WorkerWorkspaceStore(fixture.storePath),
+			git: gitManager,
+			worktreeRoot: fixture.worktreeRoot,
+		});
+		const countBefore = Number(
+			(
+				await git(fixture.repository, [
+					"rev-list",
+					"--count",
+					"--first-parent",
+					"HEAD",
+				])
+			).trim(),
+		);
+		const launch = (workerId: string, path: string) =>
+			manager.runWorker(
+				workerParams(workerId, fixture.repository, "batch-three"),
+				async (workspace) => {
+					await writeFile(join(workspace.cwd, path), workerId, "utf8");
+					return { status: "completed" };
+				},
+			);
+
+		const outcomes = await Promise.all([
+			launch("worker-a", "a.txt"),
+			launch("worker-b", "b.txt"),
+			launch("worker-c", "c.txt"),
+		]);
+		const countAfter = Number(
+			(
+				await git(fixture.repository, [
+					"rev-list",
+					"--count",
+					"--first-parent",
+					"HEAD",
+				])
+			).trim(),
+		);
+
+		expect(gitManager.batchIntegrations).toBe(1);
+		expect(countAfter - countBefore).toBe(1);
+		expect(
+			outcomes.map(({ workspace }) => workspace.integrationStatus),
+		).toEqual(["integrated", "integrated", "integrated"]);
+		expect(await readFile(join(fixture.repository, "a.txt"), "utf8")).toBe(
+			"worker-a",
+		);
+		expect(await readFile(join(fixture.repository, "b.txt"), "utf8")).toBe(
+			"worker-b",
+		);
+		expect(await readFile(join(fixture.repository, "c.txt"), "utf8")).toBe(
+			"worker-c",
+		);
+		await manager.waitForIdle();
+	});
+
+	it("shares repository inspection while keeping Git worktree registration safe", async () => {
+		const fixture = await createRepository();
+		const gitManager = new (class extends GitWorktreeManager {
+			inspectCalls = 0;
+
+			override async inspect(cwd: string, signal?: AbortSignal) {
+				this.inspectCalls++;
+				return super.inspect(cwd, signal);
+			}
+		})();
+		const manager = new WorkerWorkspaceManager({
+			parentSessionId: "shared-inspection",
+			store: new WorkerWorkspaceStore(fixture.storePath),
+			git: gitManager,
+			worktreeRoot: fixture.worktreeRoot,
+		});
+		let active = 0;
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const launch = (workerId: string) =>
+			manager.runWorker(
+				workerParams(workerId, fixture.repository, "shared-inspection"),
+				async (workspace) => {
+					active++;
+					await gate;
+					await writeFile(join(workspace.cwd, `${workerId}.txt`), workerId);
+					active--;
+					return { status: "completed" };
+				},
+			);
+
+		const first = launch("worker-a");
+		const second = launch("worker-b");
+		await waitFor(() => active === 2);
+		release();
+		await Promise.all([first, second]);
+
+		expect(gitManager.inspectCalls).toBe(1);
+	});
+
+	it("expires the shared repository snapshot after one launch burst", async () => {
+		const fixture = await createRepository();
+		const gitManager = new (class extends GitWorktreeManager {
+			inspectCalls = 0;
+
+			override async inspect(cwd: string, signal?: AbortSignal) {
+				this.inspectCalls++;
+				return super.inspect(cwd, signal);
+			}
+		})();
+		const manager = new WorkerWorkspaceManager({
+			parentSessionId: "snapshot-expiry",
+			store: new WorkerWorkspaceStore(fixture.storePath),
+			git: gitManager,
+			worktreeRoot: fixture.worktreeRoot,
+		});
+
+		await manager.runWorker(
+			workerParams("worker-a", fixture.repository, "snapshot-expiry"),
+			async () => ({ status: "completed" }),
+		);
+		await manager.runWorker(
+			workerParams("worker-b", fixture.repository, "snapshot-expiry"),
+			async () => ({ status: "completed" }),
+		);
+
+		expect(gitManager.inspectCalls).toBe(2);
+		await manager.waitForIdle();
+	});
+
+	it("creates disjoint worker worktrees concurrently before model execution", async () => {
+		const fixture = await createRepository();
+		let activeCreations = 0;
+		let maxActiveCreations = 0;
+		const gitManager = new (class extends GitWorktreeManager {
+			override async createWorktree(
+				input: Parameters<GitWorktreeManager["createWorktree"]>[0],
+			): Promise<void> {
+				activeCreations++;
+				maxActiveCreations = Math.max(maxActiveCreations, activeCreations);
+				try {
+					await Bun.sleep(20);
+					await super.createWorktree(input);
+				} finally {
+					activeCreations--;
+				}
+			}
+		})();
+		const manager = new WorkerWorkspaceManager({
+			parentSessionId: "parallel-creation",
+			store: new WorkerWorkspaceStore(fixture.storePath),
+			git: gitManager,
+			worktreeRoot: fixture.worktreeRoot,
+		});
+		const launch = (workerId: string) =>
+			manager.runWorker(
+				workerParams(workerId, fixture.repository, "parallel-creation"),
+				async (workspace) => {
+					await writeFile(join(workspace.cwd, `${workerId}.txt`), workerId);
+					return { status: "completed" };
+				},
+			);
+
+		await Promise.all([
+			launch("worker-a"),
+			launch("worker-b"),
+			launch("worker-c"),
+		]);
+
+		expect(maxActiveCreations).toBe(3);
 	});
 
 	it("integrates captured results in completion order without waiting for an earlier worker", async () => {
@@ -165,6 +456,118 @@ describe("WorkerWorkspaceManager", () => {
 		expect(secondOutcome.workspace.integrationStatus).toBe("integrated");
 	}, 10_000);
 
+	it("rolls back one worker conflict and integrates an unrelated ready result", async () => {
+		const fixture = await createRepository();
+		await writeFile(join(fixture.repository, "shared.txt"), "base\n", "utf8");
+		await git(fixture.repository, ["add", "shared.txt"]);
+		await git(fixture.repository, ["commit", "--no-gpg-sign", "-m", "shared"]);
+		const manager = createManager(fixture, "isolated-conflict");
+		const releases = new Map<string, () => void>();
+		const gates = new Map<string, Promise<void>>();
+		const started = new Set<string>();
+		for (const workerId of ["worker-a", "worker-b", "worker-c"]) {
+			gates.set(
+				workerId,
+				new Promise<void>((resolve) => {
+					releases.set(workerId, resolve);
+				}),
+			);
+		}
+		const launch = (workerId: string, file: string, content: string) =>
+			manager.runWorker(
+				workerParams(workerId, fixture.repository, "isolated-conflict"),
+				async (workspace) => {
+					started.add(workerId);
+					await gates.get(workerId);
+					await writeFile(join(workspace.cwd, file), content, "utf8");
+					return { status: "completed" };
+				},
+			);
+
+		const first = launch("worker-a", "shared.txt", "from a\n");
+		const conflicted = launch("worker-b", "shared.txt", "from b\n");
+		const unrelated = launch("worker-c", "unrelated.txt", "from c\n");
+		await waitFor(() => started.size === 3);
+		releases.get("worker-a")?.();
+		expect((await first).workspace.integrationStatus).toBe("integrated");
+		releases.get("worker-b")?.();
+		const conflictOutcome = await conflicted;
+		expect(conflictOutcome.workspace.integrationStatus).toBe("conflict");
+		expect(conflictOutcome.workspace.conflictingFiles).toEqual(["shared.txt"]);
+		expect(
+			await new GitWorktreeManager().mergeInProgress(fixture.repository),
+		).toBe(false);
+		releases.get("worker-c")?.();
+		const unrelatedOutcome = await unrelated;
+
+		expect(unrelatedOutcome.workspace.integrationStatus).toBe("integrated");
+		expect(
+			await readFile(join(fixture.repository, "unrelated.txt"), "utf8"),
+		).toBe("from c\n");
+	}, 10_000);
+
+	it("isolates one conflict after a ready batch aborts", async () => {
+		const fixture = await createRepository();
+		await writeFile(join(fixture.repository, "shared.txt"), "base\n", "utf8");
+		await git(fixture.repository, ["add", "shared.txt"]);
+		await git(fixture.repository, ["commit", "--no-gpg-sign", "-m", "shared"]);
+		const gitManager = new CoalescingGitWorktreeManager(2);
+		const manager = new WorkerWorkspaceManager({
+			parentSessionId: "batch-conflict",
+			store: new WorkerWorkspaceStore(fixture.storePath),
+			git: gitManager,
+			worktreeRoot: fixture.worktreeRoot,
+		});
+		let ready = 0;
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const launch = (workerId: string, path: string, content: string) =>
+			manager.runWorker(
+				workerParams(workerId, fixture.repository, "batch-conflict"),
+				async (workspace) => {
+					await writeFile(join(workspace.cwd, path), content, "utf8");
+					ready++;
+					await gate;
+					return { status: "completed" };
+				},
+			);
+		const conflicted = launch("worker-a", "shared.txt", "worker\n");
+		const unrelated = launch("worker-b", "unrelated.txt", "unrelated\n");
+		await waitFor(() => ready === 2);
+		await writeFile(
+			join(fixture.repository, "shared.txt"),
+			"coordinator\n",
+			"utf8",
+		);
+		await git(fixture.repository, ["add", "shared.txt"]);
+		await git(fixture.repository, [
+			"commit",
+			"--no-gpg-sign",
+			"-m",
+			"coordinator conflict",
+		]);
+		release();
+
+		const [conflictOutcome, unrelatedOutcome] = await Promise.all([
+			conflicted,
+			unrelated,
+		]);
+
+		expect(gitManager.batchIntegrations).toBe(1);
+		expect(conflictOutcome.workspace.integrationStatus).toBe("conflict");
+		expect(unrelatedOutcome.workspace.integrationStatus).toBe("integrated");
+		expect(await readFile(join(fixture.repository, "shared.txt"), "utf8")).toBe(
+			"coordinator\n",
+		);
+		expect(
+			await readFile(join(fixture.repository, "unrelated.txt"), "utf8"),
+		).toBe("unrelated\n");
+		expect(await gitManager.mergeInProgress(fixture.repository)).toBe(false);
+		await manager.waitForIdle();
+	}, 10_000);
+
 	it("keeps a captured result completed and integration-eligible after cancellation", async () => {
 		const fixture = await createRepository();
 		let markCaptured!: () => void;
@@ -189,6 +592,7 @@ describe("WorkerWorkspaceManager", () => {
 			parentSessionId: "cancel-after-capture",
 			store: new WorkerWorkspaceStore(fixture.storePath),
 			git: gitManager,
+			worktreeRoot: fixture.worktreeRoot,
 		});
 		const controller = new AbortController();
 		const operation = manager.runWorker(
@@ -248,12 +652,11 @@ describe("WorkerWorkspaceManager", () => {
 		expect(outcome.workspace.resultCommit).not.toBe(
 			outcome.workspace.startingCommit,
 		);
-		expect(
-			await git(outcome.workspace.worktreePath ?? "", [
-				"status",
-				"--porcelain=v1",
-			]),
-		).toBe("");
+		await manager.waitForIdle();
+		expect(await pathExists(outcome.workspace.worktreePath ?? "")).toBe(false);
+		expect(manager.list()[0]?.worktreeDisposition).toBe(
+			"removed_clean_terminal",
+		);
 		expect(await readFile(join(fixture.repository, "base.txt"), "utf8")).toBe(
 			"modified\n",
 		);
@@ -263,6 +666,111 @@ describe("WorkerWorkspaceManager", () => {
 		expect(
 			await readFile(join(fixture.repository, "untracked.txt"), "utf8"),
 		).toBe("untracked\n");
+	});
+
+	it("rejects known throwaway artifacts before result capture", async () => {
+		const fixture = await createRepository();
+		const manager = createManager(fixture, "artifact-guard");
+
+		await expect(
+			manager.runWorker(
+				workerParams("worker-a", fixture.repository, "artifact-guard"),
+				async (workspace) => {
+					await writeFile(join(workspace.cwd, "result.txt"), "keep", "utf8");
+					await writeFile(
+						join(workspace.cwd, "testfile.txt"),
+						"throwaway",
+						"utf8",
+					);
+					return { status: "completed" };
+				},
+			),
+		).rejects.toThrow("temporary verification artifacts");
+
+		const failed = manager.list()[0];
+		expect(failed).toMatchObject({
+			executionStatus: "failed",
+			integrationStatus: "skipped",
+		});
+		expect(failed?.changedFiles).toEqual(["result.txt", "testfile.txt"]);
+		await expect(
+			readFile(join(fixture.repository, "result.txt"), "utf8"),
+		).rejects.toThrow();
+		await expect(
+			readFile(join(fixture.repository, "testfile.txt"), "utf8"),
+		).rejects.toThrow();
+	});
+
+	it("rejects expanded scratch artifacts but allows an existing tracked name", async () => {
+		const fixture = await createRepository();
+		await writeFile(
+			join(fixture.repository, "verify-data.json"),
+			'{"value":1}\n',
+			"utf8",
+		);
+		await git(fixture.repository, ["add", "verify-data.json"]);
+		await git(fixture.repository, [
+			"commit",
+			"--no-gpg-sign",
+			"-m",
+			"tracked verification data",
+		]);
+		const manager = createManager(fixture, "artifact-scope");
+
+		const allowed = await manager.runWorker(
+			workerParams("allowed", fixture.repository, "artifact-scope"),
+			async (workspace) => {
+				await writeFile(
+					join(workspace.cwd, "verify-data.json"),
+					'{"value":2}\n',
+					"utf8",
+				);
+				return { status: "completed" };
+			},
+		);
+		expect(allowed.workspace.integrationStatus).toBe("integrated");
+
+		await expect(
+			manager.runWorker(
+				workerParams("rejected", fixture.repository, "artifact-scope"),
+				async (workspace) => {
+					await writeFile(
+						join(workspace.cwd, "scratch-results.csv"),
+						"temporary,data\n",
+						"utf8",
+					);
+					return { status: "completed" };
+				},
+			),
+		).rejects.toThrow("scratch-results.csv");
+		expect(
+			await readFile(join(fixture.repository, "verify-data.json"), "utf8"),
+		).toBe('{"value":2}\n');
+		await manager.waitForIdle();
+	});
+
+	it("captures both sides of a rename for integration ownership", async () => {
+		const fixture = await createRepository();
+		const manager = createManager(fixture, "rename-ownership");
+
+		const outcome = await manager.runWorker(
+			workerParams("worker-a", fixture.repository, "rename-ownership"),
+			async (workspace) => {
+				await rename(
+					join(workspace.cwd, "base.txt"),
+					join(workspace.cwd, "renamed.txt"),
+				);
+				return { status: "completed" };
+			},
+		);
+
+		expect(outcome.workspace.changedFiles).toEqual(["base.txt", "renamed.txt"]);
+		await expect(
+			readFile(join(fixture.repository, "base.txt"), "utf8"),
+		).rejects.toThrow();
+		expect(
+			await readFile(join(fixture.repository, "renamed.txt"), "utf8"),
+		).toBe("base\n");
 	});
 
 	it("enforces the configured concurrent worker limit", async () => {
@@ -304,6 +812,8 @@ describe("WorkerWorkspaceManager", () => {
 		const manager = new WorkerWorkspaceManager({
 			parentSessionId: "auto-git",
 			store: new WorkerWorkspaceStore(join(root, "state", "workers.json")),
+			autoInitializeGit: true,
+			worktreeRoot: join(root, "hidden-worktrees"),
 		});
 		const outcome = await manager.runWorker(
 			workerParams("worker-a", project, "auto-git"),
@@ -344,6 +854,8 @@ describe("WorkerWorkspaceManager", () => {
 		const manager = new WorkerWorkspaceManager({
 			parentSessionId: "auto-git-race",
 			store: new WorkerWorkspaceStore(join(root, "state", "workers.json")),
+			autoInitializeGit: true,
+			worktreeRoot: join(root, "hidden-worktrees"),
 		});
 		let active = 0;
 		let maxActive = 0;
@@ -393,15 +905,15 @@ describe("WorkerWorkspaceManager", () => {
 		expect(await readFile(join(project, "worker-b.txt"), "utf8")).toBe(
 			"worker-b",
 		);
-	});
+	}, 15_000);
 
-	it("still rejects non-Git writes when automatic initialization is disabled", async () => {
+	it("rejects non-Git writes by default without creating repository metadata", async () => {
 		const root = await mkdtemp(join(tmpdir(), "backboard-non-git-test-"));
 		roots.push(root);
 		const manager = new WorkerWorkspaceManager({
 			parentSessionId: "non-git",
 			store: new WorkerWorkspaceStore(join(root, "state", "workers.json")),
-			autoInitializeGit: false,
+			worktreeRoot: join(root, "hidden-worktrees"),
 		});
 		let ran = false;
 
@@ -412,6 +924,58 @@ describe("WorkerWorkspaceManager", () => {
 			}),
 		).rejects.toThrow("Git is required for isolated parallel writes");
 		expect(ran).toBe(false);
+		await expect(access(join(root, ".git"))).rejects.toThrow();
+	});
+
+	it("rejects dirty write workers without mutating user state but allows read-only work", async () => {
+		const fixture = await createRepository();
+		await writeFile(
+			join(fixture.repository, "base.txt"),
+			"dirty tracked\n",
+			"utf8",
+		);
+		await writeFile(
+			join(fixture.repository, "untracked.txt"),
+			"dirty untracked\n",
+			"utf8",
+		);
+		const manager = createManager(fixture, "dirty-routing");
+		let writeRan = false;
+
+		await expect(
+			manager.runWorker(
+				workerParams("write-worker", fixture.repository, "dirty-routing"),
+				async () => {
+					writeRan = true;
+					return { status: "completed" };
+				},
+			),
+		).rejects.toThrow("Use the main agent's direct file tools");
+		expect(writeRan).toBe(false);
+		expect(await readFile(join(fixture.repository, "base.txt"), "utf8")).toBe(
+			"dirty tracked\n",
+		);
+		expect(
+			await readFile(join(fixture.repository, "untracked.txt"), "utf8"),
+		).toBe("dirty untracked\n");
+		expect(await git(fixture.repository, ["status", "--porcelain=v1"])).toBe(
+			" M base.txt\n?? untracked.txt\n",
+		);
+
+		const readOnly = await manager.runWorker(
+			{
+				...workerParams("read-worker", fixture.repository, "dirty-routing"),
+				readOnly: true,
+			},
+			async (workspace) => {
+				expect(workspace.cwd).toBe(fixture.repository);
+				expect(await readFile(join(workspace.cwd, "base.txt"), "utf8")).toBe(
+					"dirty tracked\n",
+				);
+				return { status: "completed" };
+			},
+		);
+		expect(readOnly.workspace.integrationStatus).toBe("not_required");
 	});
 
 	it("keeps same-path edits isolated, preserves conflicts, and restores integrated history", async () => {
@@ -444,6 +1008,7 @@ describe("WorkerWorkspaceManager", () => {
 		await waitFor(() => active === 2);
 		release();
 		const [a, b] = await Promise.all([first, second]);
+		await manager.waitForIdle();
 		const windowA = windows.get("worker-a");
 		const windowB = windows.get("worker-b");
 
@@ -456,16 +1021,10 @@ describe("WorkerWorkspaceManager", () => {
 		expect(a.workspace.worktreePath).not.toBe(b.workspace.worktreePath);
 		expect(a.workspace.branch).not.toBe(b.workspace.branch);
 		expect(
-			await readFile(
-				join(a.workspace.worktreePath ?? "", "result.txt"),
-				"utf8",
-			),
+			await readWorkerCommitFile(fixture.repository, a.workspace, "result.txt"),
 		).toBe("result from A\n");
 		expect(
-			await readFile(
-				join(b.workspace.worktreePath ?? "", "result.txt"),
-				"utf8",
-			),
+			await readWorkerCommitFile(fixture.repository, b.workspace, "result.txt"),
 		).toBe("result from B\n");
 		const integrated = [a, b].filter(
 			(outcome) => outcome.workspace.integrationStatus === "integrated",
@@ -477,20 +1036,22 @@ describe("WorkerWorkspaceManager", () => {
 		expect(conflicted).toHaveLength(1);
 		expect(conflicted[0]?.workspace.conflictingFiles).toEqual(["result.txt"]);
 
+		await expect(
+			git(fixture.repository, [
+				"merge",
+				"--no-ff",
+				"--no-commit",
+				conflicted[0]?.workspace.resultCommit ?? "",
+			]),
+		).rejects.toThrow();
 		await git(fixture.repository, ["rm", "-f", "result.txt"]);
 		await writeFile(
 			join(fixture.repository, "worker-a-result.txt"),
-			await readFile(
-				join(a.workspace.worktreePath ?? "", "result.txt"),
-				"utf8",
-			),
+			await readWorkerCommitFile(fixture.repository, a.workspace, "result.txt"),
 		);
 		await writeFile(
 			join(fixture.repository, "worker-b-result.txt"),
-			await readFile(
-				join(b.workspace.worktreePath ?? "", "result.txt"),
-				"utf8",
-			),
+			await readWorkerCommitFile(fixture.repository, b.workspace, "result.txt"),
 		);
 		await git(fixture.repository, ["add", "-A"]);
 		await git(fixture.repository, [
@@ -499,6 +1060,15 @@ describe("WorkerWorkspaceManager", () => {
 			"-m",
 			"Resolve worker result names",
 		]);
+		expect(
+			await new GitWorktreeManager().isAncestor(
+				fixture.repository,
+				conflicted[0]?.workspace.resultCommit ?? "",
+			),
+		).toBe(true);
+		expect(
+			await new GitWorktreeManager().mergeInProgress(fixture.repository),
+		).toBe(false);
 
 		const restarted = createManager(fixture, "acceptance");
 		await restarted.initialize();
@@ -726,6 +1296,451 @@ describe("WorkerWorkspaceManager", () => {
 		);
 	});
 
+	it("does not touch a staged coordinator index when integration must wait", async () => {
+		const fixture = await createRepository();
+		const startingCommit = (
+			await git(fixture.repository, ["rev-parse", "HEAD"])
+		).trim();
+		await git(fixture.repository, ["checkout", "-b", "staged-index-worker"]);
+		await writeFile(join(fixture.repository, "worker.txt"), "worker\n", "utf8");
+		await git(fixture.repository, ["add", "worker.txt"]);
+		await git(fixture.repository, [
+			"commit",
+			"--no-gpg-sign",
+			"-m",
+			"worker result",
+		]);
+		const resultCommit = (
+			await git(fixture.repository, ["rev-parse", "HEAD"])
+		).trim();
+		await git(fixture.repository, ["checkout", "main"]);
+		await writeFile(
+			join(fixture.repository, "staged.txt"),
+			"user staged\n",
+			"utf8",
+		);
+		await git(fixture.repository, ["add", "staged.txt"]);
+		const headBefore = (
+			await git(fixture.repository, ["rev-parse", "HEAD"])
+		).trim();
+		const manager = new GitWorktreeManager();
+
+		await expect(
+			manager.integrate({
+				coordinatorCwd: fixture.repository,
+				startingCommit,
+				resultCommit,
+			}),
+		).rejects.toThrow("coordinator index contains staged changes");
+		expect((await git(fixture.repository, ["rev-parse", "HEAD"])).trim()).toBe(
+			headBefore,
+		);
+		expect(
+			await git(fixture.repository, ["diff", "--cached", "--name-only"]),
+		).toBe("staged.txt\n");
+		expect(await manager.mergeInProgress(fixture.repository)).toBe(false);
+	});
+
+	it("treats an already-integrated result commit as an idempotent success", async () => {
+		const fixture = await createRepository();
+		const startingCommit = (
+			await git(fixture.repository, ["rev-parse", "HEAD"])
+		).trim();
+		await git(fixture.repository, ["checkout", "-b", "idempotent-worker"]);
+		await writeFile(
+			join(fixture.repository, "idempotent.txt"),
+			"worker result",
+			"utf8",
+		);
+		await git(fixture.repository, ["add", "idempotent.txt"]);
+		await git(fixture.repository, [
+			"commit",
+			"--no-gpg-sign",
+			"-m",
+			"idempotent result",
+		]);
+		const resultCommit = (
+			await git(fixture.repository, ["rev-parse", "HEAD"])
+		).trim();
+		await git(fixture.repository, ["checkout", "main"]);
+		const manager = new GitWorktreeManager();
+
+		const first = await manager.integrate({
+			coordinatorCwd: fixture.repository,
+			startingCommit,
+			resultCommit,
+		});
+		const second = await manager.integrate({
+			coordinatorCwd: fixture.repository,
+			startingCommit,
+			resultCommit,
+		});
+
+		expect(first.status).toBe("integrated");
+		expect(second).toEqual({
+			status: "integrated",
+			commit: first.commit,
+			conflictingFiles: [],
+		});
+		expect(
+			await readFile(join(fixture.repository, "idempotent.txt"), "utf8"),
+		).toBe("worker result");
+	});
+
+	it("recovers pending metadata after the worker merge already committed", async () => {
+		const fixture = await createRepository();
+		const sessionId = "committed-before-metadata";
+		const workerId = "worker-a";
+		const gitManager = new GitWorktreeManager();
+		const startingCommit = (
+			await git(fixture.repository, ["rev-parse", "HEAD"])
+		).trim();
+		const branch = workerBranchName(sessionId, workerId);
+		const worktreePath = workerWorktreePath(
+			fixture.repository,
+			sessionId,
+			workerId,
+			fixture.worktreeRoot,
+		);
+		await gitManager.createWorktree({
+			repositoryRoot: fixture.repository,
+			path: worktreePath,
+			branch,
+			startCommit: startingCommit,
+		});
+		await writeFile(join(worktreePath, "recovered.txt"), "recovered", "utf8");
+		const captured = await gitManager.captureResultCommit({
+			worktreePath,
+			workerId,
+			startingCommit,
+		});
+		await gitManager.integrate({
+			coordinatorCwd: fixture.repository,
+			startingCommit,
+			resultCommit: captured.resultCommit,
+		});
+		const store = new WorkerWorkspaceStore(fixture.storePath);
+		await store.replace([
+			record({
+				workerId,
+				parentSessionId: sessionId,
+				coordinatorCwd: fixture.repository,
+				repositoryRoot: fixture.repository,
+				branch,
+				worktreePath,
+				worktreeDisposition: "present",
+				startingCommit,
+				resultCommit: captured.resultCommit,
+				changedFiles: captured.changedFiles,
+				executionStatus: "completed",
+				integrationStatus: "pending",
+				finishedAt: new Date(1).toISOString(),
+			}),
+		]);
+		const manager = new WorkerWorkspaceManager({
+			parentSessionId: sessionId,
+			store,
+			worktreeRoot: fixture.worktreeRoot,
+		});
+
+		await manager.initialize();
+		expect(manager.list()[0]?.integrationStatus).toBe("integrated");
+		expect(
+			await readFile(join(fixture.repository, "recovered.txt"), "utf8"),
+		).toBe("recovered");
+		await manager.waitForIdle();
+	});
+
+	it("terminalizes interrupted read-only workers during restart recovery", async () => {
+		const fixture = await createRepository();
+		const sessionId = "read-only-recovery";
+		const store = new WorkerWorkspaceStore(fixture.storePath);
+		await store.replace([
+			record({
+				workerId: "interrupted",
+				sequence: 0,
+				parentSessionId: sessionId,
+				readOnly: true,
+				coordinatorCwd: fixture.repository,
+				executionStatus: "running",
+				integrationStatus: "not_required",
+			}),
+			record({
+				workerId: "already-complete",
+				sequence: 1,
+				parentSessionId: sessionId,
+				readOnly: true,
+				coordinatorCwd: fixture.repository,
+				executionStatus: "completed",
+				integrationStatus: "not_required",
+				finishedAt: new Date(1).toISOString(),
+			}),
+		]);
+		const manager = new WorkerWorkspaceManager({
+			parentSessionId: sessionId,
+			store,
+			worktreeRoot: fixture.worktreeRoot,
+		});
+
+		await manager.initialize();
+		const interrupted = manager
+			.list()
+			.find(({ workerId }) => workerId === "interrupted");
+		const completed = manager
+			.list()
+			.find(({ workerId }) => workerId === "already-complete");
+		expect(interrupted).toMatchObject({
+			executionStatus: "failed",
+			integrationStatus: "not_required",
+		});
+		expect(interrupted?.finishedAt).toBeDefined();
+		expect(interrupted?.error).toContain("interrupted");
+		expect(completed?.executionStatus).toBe("completed");
+	});
+
+	it("recovers a result commit created before running metadata was updated", async () => {
+		const fixture = await createRepository();
+		const sessionId = "captured-before-metadata";
+		const workerId = "worker-a";
+		const gitManager = new GitWorktreeManager();
+		const startingCommit = (
+			await git(fixture.repository, ["rev-parse", "HEAD"])
+		).trim();
+		const branch = workerBranchName(sessionId, workerId);
+		const worktreePath = workerWorktreePath(
+			fixture.repository,
+			sessionId,
+			workerId,
+			fixture.worktreeRoot,
+		);
+		await gitManager.createWorktree({
+			repositoryRoot: fixture.repository,
+			path: worktreePath,
+			branch,
+			startCommit: startingCommit,
+		});
+		await writeFile(
+			join(worktreePath, "crash-recovered.txt"),
+			"recovered",
+			"utf8",
+		);
+		const captured = await gitManager.captureResultCommit({
+			worktreePath,
+			workerId,
+			startingCommit,
+		});
+		const store = new WorkerWorkspaceStore(fixture.storePath);
+		await store.replace([
+			record({
+				workerId,
+				parentSessionId: sessionId,
+				coordinatorCwd: fixture.repository,
+				repositoryRoot: fixture.repository,
+				branch,
+				worktreePath,
+				worktreeDisposition: "present",
+				startingCommit,
+				executionStatus: "running",
+				integrationStatus: "pending",
+			}),
+		]);
+		const manager = new WorkerWorkspaceManager({
+			parentSessionId: sessionId,
+			store,
+			worktreeRoot: fixture.worktreeRoot,
+		});
+
+		await manager.initialize();
+		const recovered = manager.list()[0];
+		expect(recovered).toMatchObject({
+			executionStatus: "completed",
+			integrationStatus: "integrated",
+			resultCommit: captured.resultCommit,
+			changedFiles: ["crash-recovered.txt"],
+		});
+		expect(
+			await readFile(join(fixture.repository, "crash-recovered.txt"), "utf8"),
+		).toBe("recovered");
+		await manager.waitForIdle();
+	});
+
+	it("batch integrates all ready recovered results in one restart commit", async () => {
+		const fixture = await createRepository();
+		const sessionId = "restart-batch";
+		const gitManager = new (class extends GitWorktreeManager {
+			batchIntegrations = 0;
+
+			override async integrateBatch(
+				input: Parameters<GitWorktreeManager["integrateBatch"]>[0],
+			) {
+				this.batchIntegrations++;
+				return super.integrateBatch(input);
+			}
+		})();
+		const startingCommit = (
+			await git(fixture.repository, ["rev-parse", "HEAD"])
+		).trim();
+		const records: WorkerWorkspaceRecord[] = [];
+		for (const [sequence, workerId] of [
+			"worker-a",
+			"worker-b",
+			"worker-c",
+		].entries()) {
+			const branch = workerBranchName(sessionId, workerId);
+			const worktreePath = workerWorktreePath(
+				fixture.repository,
+				sessionId,
+				workerId,
+				fixture.worktreeRoot,
+			);
+			await gitManager.createWorktree({
+				repositoryRoot: fixture.repository,
+				path: worktreePath,
+				branch,
+				startCommit: startingCommit,
+			});
+			await writeFile(join(worktreePath, `${workerId}.txt`), workerId, "utf8");
+			const captured = await gitManager.captureResultCommit({
+				worktreePath,
+				workerId,
+				startingCommit,
+			});
+			records.push(
+				record({
+					workerId,
+					sequence,
+					parentSessionId: sessionId,
+					coordinatorCwd: fixture.repository,
+					repositoryRoot: fixture.repository,
+					branch,
+					worktreePath,
+					worktreeDisposition: "present",
+					startingCommit,
+					resultCommit: captured.resultCommit,
+					changedFiles: captured.changedFiles,
+					executionStatus: "completed",
+					integrationStatus: "pending",
+					finishedAt: new Date(sequence + 1).toISOString(),
+				}),
+			);
+		}
+		const store = new WorkerWorkspaceStore(fixture.storePath);
+		await store.replace(records);
+		const countBefore = Number(
+			(
+				await git(fixture.repository, [
+					"rev-list",
+					"--count",
+					"--first-parent",
+					"HEAD",
+				])
+			).trim(),
+		);
+		const manager = new WorkerWorkspaceManager({
+			parentSessionId: sessionId,
+			store,
+			git: gitManager,
+			worktreeRoot: fixture.worktreeRoot,
+		});
+
+		await manager.initialize();
+		const countAfter = Number(
+			(
+				await git(fixture.repository, [
+					"rev-list",
+					"--count",
+					"--first-parent",
+					"HEAD",
+				])
+			).trim(),
+		);
+
+		expect(gitManager.batchIntegrations).toBe(1);
+		expect(countAfter - countBefore).toBe(1);
+		expect(
+			manager.list().map(({ integrationStatus }) => integrationStatus),
+		).toEqual(["integrated", "integrated", "integrated"]);
+		await manager.waitForIdle();
+	});
+
+	it("aborts and retries an interrupted multi-worker merge on restart", async () => {
+		const fixture = await createRepository();
+		const sessionId = "interrupted-batch";
+		const gitManager = new GitWorktreeManager();
+		const startingCommit = (
+			await git(fixture.repository, ["rev-parse", "HEAD"])
+		).trim();
+		const records: WorkerWorkspaceRecord[] = [];
+		for (const [sequence, workerId] of ["worker-a", "worker-b"].entries()) {
+			const branch = workerBranchName(sessionId, workerId);
+			const worktreePath = workerWorktreePath(
+				fixture.repository,
+				sessionId,
+				workerId,
+				fixture.worktreeRoot,
+			);
+			await gitManager.createWorktree({
+				repositoryRoot: fixture.repository,
+				path: worktreePath,
+				branch,
+				startCommit: startingCommit,
+			});
+			await writeFile(join(worktreePath, `${workerId}.txt`), workerId, "utf8");
+			const captured = await gitManager.captureResultCommit({
+				worktreePath,
+				workerId,
+				startingCommit,
+			});
+			records.push(
+				record({
+					workerId,
+					sequence,
+					parentSessionId: sessionId,
+					coordinatorCwd: fixture.repository,
+					repositoryRoot: fixture.repository,
+					branch,
+					worktreePath,
+					worktreeDisposition: "present",
+					startingCommit,
+					resultCommit: captured.resultCommit,
+					changedFiles: captured.changedFiles,
+					executionStatus: "completed",
+					integrationStatus: "integrating",
+					finishedAt: new Date(sequence + 1).toISOString(),
+				}),
+			);
+		}
+		await git(fixture.repository, [
+			"merge",
+			"--no-ff",
+			"--no-commit",
+			...records.map((record) => record.resultCommit ?? ""),
+		]);
+		expect(await gitManager.mergeInProgress(fixture.repository)).toBe(true);
+		const store = new WorkerWorkspaceStore(fixture.storePath);
+		await store.replace(records);
+		const manager = new WorkerWorkspaceManager({
+			parentSessionId: sessionId,
+			store,
+			git: gitManager,
+			worktreeRoot: fixture.worktreeRoot,
+		});
+
+		await manager.initialize();
+
+		expect(await gitManager.mergeInProgress(fixture.repository)).toBe(false);
+		expect(
+			manager.list().map(({ integrationStatus }) => integrationStatus),
+		).toEqual(["integrated", "integrated"]);
+		expect(
+			await readFile(join(fixture.repository, "worker-a.txt"), "utf8"),
+		).toBe("worker-a");
+		expect(
+			await readFile(join(fixture.repository, "worker-b.txt"), "utf8"),
+		).toBe("worker-b");
+		await manager.waitForIdle();
+	});
+
 	it("recovers partial creation from a preserved branch without inventing missing branches", async () => {
 		const fixture = await createRepository();
 		const store = new WorkerWorkspaceStore(fixture.storePath);
@@ -736,11 +1751,13 @@ describe("WorkerWorkspaceManager", () => {
 			fixture.repository,
 			"recovery",
 			"partial",
+			fixture.worktreeRoot,
 		);
 		const missingPath = workerWorktreePath(
 			fixture.repository,
 			"recovery",
 			"missing",
+			fixture.worktreeRoot,
 		);
 		await store.replace([
 			record({
@@ -766,6 +1783,7 @@ describe("WorkerWorkspaceManager", () => {
 			parentSessionId: "recovery",
 			store,
 			git: new GitWorktreeManager(),
+			worktreeRoot: fixture.worktreeRoot,
 		});
 		await manager.initialize();
 		const restored = manager.list();
@@ -780,34 +1798,70 @@ describe("WorkerWorkspaceManager", () => {
 		).toBe(false);
 	});
 
+	it("never recreates a legacy adjacent worker path during recovery", async () => {
+		const fixture = await createRepository();
+		const sessionId = "legacy-recovery";
+		const workerId = "worker-a";
+		const head = (await git(fixture.repository, ["rev-parse", "HEAD"])).trim();
+		const branch = workerBranchName(sessionId, workerId);
+		await git(fixture.repository, ["branch", branch, head]);
+		const legacyRoot = join(
+			dirname(fixture.repository),
+			`${basename(fixture.repository)}.backboard-workers`,
+		);
+		const legacyPath = join(legacyRoot, sessionId, workerId);
+		const store = new WorkerWorkspaceStore(fixture.storePath);
+		await store.replace([
+			record({
+				workerId,
+				parentSessionId: sessionId,
+				coordinatorCwd: fixture.repository,
+				repositoryRoot: fixture.repository,
+				branch,
+				worktreePath: legacyPath,
+				worktreeDisposition: "present",
+				startingCommit: head,
+				executionStatus: "running",
+				integrationStatus: "pending",
+			}),
+		]);
+		const manager = new WorkerWorkspaceManager({
+			parentSessionId: sessionId,
+			store,
+			worktreeRoot: fixture.worktreeRoot,
+		});
+
+		await manager.initialize();
+
+		expect(manager.list()[0]?.executionStatus).toBe("failed");
+		await expect(access(legacyPath)).rejects.toThrow();
+		await expect(access(legacyRoot)).rejects.toThrow();
+	});
+
 	it("removes checkpoint refs before clean integrated worktrees and never targets the primary repository", async () => {
 		const fixture = await createRepository();
 		const manager = createManager(fixture, "cleanup");
 		await manager.initialize();
+		const checkpointRef =
+			"refs/agents/cleanup/workers/clean-worker/checkpoints/turn/0";
 		const outcome = await manager.runWorker(
 			workerParams("clean-worker", fixture.repository, "cleanup"),
 			async (workspace) => {
 				await writeFile(join(workspace.cwd, "clean.txt"), "clean", "utf8");
+				await git(workspace.cwd, ["update-ref", checkpointRef, "HEAD"]);
 				return { status: "completed" };
 			},
 		);
-		const checkpointRef =
-			"refs/agents/cleanup/workers/clean-worker/checkpoints/turn/0";
-		await git(fixture.repository, [
-			"update-ref",
-			checkpointRef,
-			outcome.workspace.resultCommit ?? "HEAD",
-		]);
-		expect(
-			await git(outcome.workspace.worktreePath ?? "", [
-				"status",
-				"--porcelain=v1",
-			]),
-		).toBe("");
-
+		await manager.waitForIdle();
 		const preserved = await manager.archive();
 		expect(preserved).toEqual([]);
 		expect(await pathExists(outcome.workspace.worktreePath ?? "")).toBe(false);
+		expect(
+			await branchExists(
+				fixture.repository,
+				outcome.workspace.branch ?? "missing-worker-branch",
+			),
+		).toBe(false);
 		await expect(
 			git(fixture.repository, ["rev-parse", "--verify", checkpointRef]),
 		).rejects.toThrow();
@@ -820,7 +1874,7 @@ describe("WorkerWorkspaceManager", () => {
 		).rejects.toThrow("Refusing to remove");
 	});
 
-	it("recreates an archived clean worker from its preserved branch", async () => {
+	it("does not recreate an eagerly cleaned integrated worker", async () => {
 		const fixture = await createRepository();
 		const manager = createManager(fixture, "unarchive");
 		await manager.initialize();
@@ -836,11 +1890,9 @@ describe("WorkerWorkspaceManager", () => {
 		expect(await manager.archive()).toEqual([]);
 		expect(await pathExists(worktreePath)).toBe(false);
 		const restored = await manager.unarchive();
-		expect(await pathExists(worktreePath)).toBe(true);
-		expect(await git(worktreePath, ["branch", "--show-current"])).toBe(
-			"agent/unarchive/worker/worker-a\n",
-		);
+		expect(await pathExists(worktreePath)).toBe(false);
 		expect(restored[0]?.integrationStatus).toBe("integrated");
+		expect(restored[0]?.worktreeDisposition).toBe("removed_clean_terminal");
 	});
 
 	it("preserves unowned paths from tampered persisted metadata", async () => {
@@ -866,6 +1918,7 @@ describe("WorkerWorkspaceManager", () => {
 		const manager = new WorkerWorkspaceManager({
 			parentSessionId: "tampered",
 			store,
+			worktreeRoot: fixture.worktreeRoot,
 		});
 
 		await manager.initialize();
@@ -884,6 +1937,7 @@ describe("WorkerWorkspaceManager", () => {
 			fixture.repository,
 			"dirty-recovery",
 			"worker-a",
+			fixture.worktreeRoot,
 		);
 		await git(fixture.repository, ["branch", branch, head]);
 		await mkdir(worktreePath, { recursive: true });
@@ -906,6 +1960,7 @@ describe("WorkerWorkspaceManager", () => {
 		const manager = new WorkerWorkspaceManager({
 			parentSessionId: "dirty-recovery",
 			store,
+			worktreeRoot: fixture.worktreeRoot,
 		});
 
 		await manager.initialize();
@@ -930,6 +1985,28 @@ describe("WorkerWorkspaceManager", () => {
 		};
 		expect(raw.workers).toHaveLength(40);
 		expect(new Set(raw.workers.map((worker) => worker.workerId)).size).toBe(40);
+	});
+
+	it("coalesces intermediate metadata in memory until an explicit durable flush", async () => {
+		const fixture = await createRepository();
+		const store = new WorkerWorkspaceStore(fixture.storePath, {
+			debounceMs: 60_000,
+		});
+		await Promise.all(
+			Array.from({ length: 20 }, (_, index) =>
+				store.upsert(record({ workerId: `worker-${index}`, sequence: index }), {
+					durable: false,
+				}),
+			),
+		);
+
+		expect(await pathExists(fixture.storePath)).toBe(false);
+		expect(await store.load()).toHaveLength(20);
+		await store.flush();
+		const persisted = JSON.parse(await readFile(fixture.storePath, "utf8")) as {
+			workers: WorkerWorkspaceRecord[];
+		};
+		expect(persisted.workers).toHaveLength(20);
 	});
 });
 
@@ -977,6 +2054,7 @@ function createManager(
 		store: new WorkerWorkspaceStore(fixture.storePath),
 		git: new GitWorktreeManager(),
 		maxWorkers,
+		worktreeRoot: fixture.worktreeRoot,
 	});
 }
 
@@ -984,6 +2062,7 @@ interface RepositoryFixture {
 	root: string;
 	repository: string;
 	storePath: string;
+	worktreeRoot: string;
 }
 
 async function createRepository(): Promise<RepositoryFixture> {
@@ -996,7 +2075,12 @@ async function createRepository(): Promise<RepositoryFixture> {
 	await writeFile(join(repository, "base.txt"), "base\n", "utf8");
 	await git(repository, ["add", "base.txt"]);
 	await git(repository, ["commit", "--no-gpg-sign", "-m", "initial"]);
-	return { root, repository, storePath: join(root, "state", "workers.json") };
+	return {
+		root,
+		repository,
+		storePath: join(root, "state", "workers.json"),
+		worktreeRoot: join(root, "hidden-worktrees"),
+	};
 }
 
 async function git(cwd: string, args: string[]): Promise<string> {
@@ -1006,6 +2090,17 @@ async function git(cwd: string, args: string[]): Promise<string> {
 		maxBuffer: 32 * 1024 * 1024,
 	});
 	return result.stdout;
+}
+
+async function readWorkerCommitFile(
+	repository: string,
+	workspace: WorkerWorkspaceRecord,
+	path: string,
+): Promise<string> {
+	if (!workspace.resultCommit) {
+		throw new Error(`Worker ${workspace.workerId} has no result commit`);
+	}
+	return git(repository, ["show", `${workspace.resultCommit}:${path}`]);
 }
 
 async function branchExists(

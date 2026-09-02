@@ -460,7 +460,7 @@ suite('ChatSubagentContentPart', () => {
 			);
 		});
 
-		test('renders a full-width worker using terminal card geometry', async () => {
+		test('renders compact worker details inside the aggregate disclosure', async () => {
 			const part = createPart(createMockToolInvocation({
 				toolSpecificData: {
 					kind: 'subagent',
@@ -469,7 +469,9 @@ suite('ChatSubagentContentPart', () => {
 					prompt: 'Inspect the repository',
 				},
 			}), createMockRenderContext(false));
-			const strip = $('.chat-subagent-strip', undefined, part.domNode);
+			const strip = $('.chat-subagent-strip', undefined,
+				$('button.chat-subagent-summary'),
+				$('.chat-subagent-items', undefined, part.domNode));
 			const shell = $('.monaco-workbench', undefined,
 				$('.backboard-clean-chat', undefined,
 					$('.interactive-session.interactive-list.backboard-cursor-transcript', undefined,
@@ -492,10 +494,10 @@ suite('ChatSubagentContentPart', () => {
 			assert.strictEqual(part.domNode.querySelector('.chat-subagent-row-status')?.textContent, 'Running');
 			assert.strictEqual(part.domNode.querySelector('.chat-subagent-task')?.textContent, 'Worker: Inspect a deliberately long repository task without making the agent row tall');
 			assert.strictEqual(openButton.querySelector('.chat-subagent-open-label')?.textContent, 'Open chat');
-			assert.strictEqual(cardStyles.borderRadius, '8px');
+			assert.strictEqual(cardStyles.borderRadius, '0px');
 			assert.strictEqual(headerStyles.height, '29px');
 			assert.strictEqual(collapseStyles.height, '29px');
-			assert.strictEqual(openStyles.height, '29px');
+			assert.strictEqual(openStyles.height, '28px');
 			assert.strictEqual(openStyles.borderTopWidth, '0px', 'The open action must be integrated into the card header, not rendered as a pill');
 			assert.strictEqual(openStyles.borderRadius, '0px');
 			assert.strictEqual(openButton.style.width, '', 'Layout geometry must be stylesheet-owned, not hard-coded inline');
@@ -505,6 +507,31 @@ suite('ChatSubagentContentPart', () => {
 
 			collapseButton.click();
 			assert.strictEqual(part.domNode.classList.contains('chat-used-context-collapsed'), false, 'Clicking the wide task row should expand inline details');
+		});
+
+		test('keeps branches, worktree paths, and commit ids out of worker details', () => {
+			const part = createPart(createMockToolInvocation({
+				toolSpecificData: {
+					kind: 'subagent',
+					description: 'Update the renderer',
+					agentName: 'worker',
+					prompt: 'Update the renderer',
+					workerId: 'worker-1',
+					workerStatus: 'Integrated',
+					branch: 'agent/internal-worker-branch',
+					worktreePath: '/private/worktrees/worker-1',
+					changedFileCount: 2,
+					startedAt: '2026-09-01T12:00:00.000Z',
+					finishedAt: '2026-09-01T12:00:02.000Z',
+					integrationResult: 'Integrated as deadbeef',
+				},
+			}), createMockRenderContext(true));
+			const metadata = part.domNode.querySelector('.chat-subagent-worker-metadata')?.textContent ?? '';
+
+			assert.strictEqual(metadata.includes('2 changed files'), true);
+			assert.strictEqual(metadata.includes('agent/internal-worker-branch'), false);
+			assert.strictEqual(metadata.includes('/private/worktrees/worker-1'), false);
+			assert.strictEqual(metadata.includes('deadbeef'), false);
 		});
 	});
 
@@ -668,6 +695,96 @@ suite('ChatSubagentContentPart', () => {
 			assert.strictEqual(part.getIsActive(), true, 'Should start as active');
 		});
 
+		test('AgentSpawn handle completion stays active until child lifecycle is terminal', () => {
+			const toolInvocation = createMockToolInvocation({
+				stateType: IChatToolInvocation.StateKind.Completed,
+				toolSpecificData: {
+					kind: 'subagent',
+					description: 'Run detached renderer audit',
+					agentName: 'worker',
+					detached: true,
+					workerId: 'spawn-1',
+					workerStatus: 'Running',
+				},
+			});
+			const part = createPart(toolInvocation, createMockRenderContext(true));
+
+			assert.strictEqual(part.getIsActive(), true, 'The immediate AgentSpawn tool result is only a handle acknowledgement');
+			assert.strictEqual(part.shouldRemainActiveAfterParentTurn(), true);
+			assert.strictEqual(part.domNode.querySelector('.chat-subagent-row-status')?.textContent, 'Running');
+
+			(toolInvocation as { toolSpecificData: IChatSubagentToolInvocationData }).toolSpecificData = {
+				kind: 'subagent',
+				description: 'Run detached renderer audit',
+				agentName: 'worker',
+				detached: true,
+				workerId: 'spawn-1',
+				workerStatus: 'Integrated',
+				changedFileCount: 2,
+			};
+			(toolInvocation.state as ReturnType<typeof observableValue<IChatToolInvocation.State>>)
+				.set(createState(IChatToolInvocation.StateKind.Completed), undefined);
+
+			assert.strictEqual(part.shouldRemainActiveAfterParentTurn(), false);
+			assert.strictEqual(part.getIsActive(), false, 'Terminal child lifecycle should complete the detached row');
+			assert.strictEqual(part.domNode.querySelector('.chat-subagent-row-status')?.textContent, 'Integrated');
+		});
+
+		test('Stop cancellation terminalizes the compact AgentSpawn row', () => {
+			const toolInvocation = createMockToolInvocation({
+				stateType: IChatToolInvocation.StateKind.Completed,
+				toolSpecificData: {
+					kind: 'subagent',
+					description: 'Run detached renderer audit',
+					agentName: 'worker',
+					detached: true,
+					workerId: 'spawn-cancelled',
+					workerStatus: 'Running',
+				},
+			});
+			const part = createPart(toolInvocation, createMockRenderContext(true));
+			assert.strictEqual(part.getIsActive(), true);
+
+			(toolInvocation as { toolSpecificData: IChatSubagentToolInvocationData }).toolSpecificData = {
+				kind: 'subagent',
+				description: 'Run detached renderer audit',
+				agentName: 'worker',
+				detached: true,
+				workerId: 'spawn-cancelled',
+				workerStatus: 'Cancelled',
+			};
+			(toolInvocation.state as ReturnType<typeof observableValue<IChatToolInvocation.State>>)
+				.set(createState(IChatToolInvocation.StateKind.Completed), undefined);
+
+			assert.strictEqual(part.shouldRemainActiveAfterParentTurn(), false);
+			assert.strictEqual(part.getIsActive(), false);
+			assert.strictEqual(part.domNode.querySelector('.chat-subagent-row-status')?.textContent, 'Cancelled');
+			assert.strictEqual(part.domNode.querySelector('.chat-subagent-worker-metadata')?.classList.contains('chat-subagent-worker-failed'), true);
+		});
+
+		test('rejected AgentSpawn terminalizes the compact row as failed', () => {
+			const toolInvocation = createMockToolInvocation({
+				stateType: IChatToolInvocation.StateKind.Completed,
+				toolSpecificData: {
+					kind: 'subagent', description: 'Run rejected worker', agentName: 'worker',
+					detached: true, workerId: 'spawn-rejected', workerStatus: 'Running',
+				},
+			});
+			const part = createPart(toolInvocation, createMockRenderContext(true));
+			assert.strictEqual(part.getIsActive(), true);
+
+			(toolInvocation as { toolSpecificData: IChatSubagentToolInvocationData }).toolSpecificData = {
+				kind: 'subagent', description: 'Run rejected worker', agentName: 'worker',
+				detached: true, workerId: 'spawn-rejected', workerStatus: 'Failed',
+			};
+			(toolInvocation.state as ReturnType<typeof observableValue<IChatToolInvocation.State>>)
+				.set(createState(IChatToolInvocation.StateKind.Completed), undefined);
+
+			assert.strictEqual(part.getIsActive(), false);
+			assert.strictEqual(part.domNode.querySelector('.chat-subagent-row-status')?.textContent, 'Failed');
+			assert.strictEqual(part.domNode.querySelector('.chat-subagent-worker-metadata')?.classList.contains('chat-subagent-worker-failed'), true);
+		});
+
 		test('markAsInactive should update isActive state', () => {
 			const toolInvocation = createMockToolInvocation();
 			const context = createMockRenderContext(false);
@@ -826,6 +943,33 @@ suite('ChatSubagentContentPart', () => {
 
 			// Should already be inactive since it's serialized
 			assert.strictEqual(part.getIsActive(), false, 'Serialized invocation should be inactive');
+		});
+
+		test('restored detached worker uses durable child status instead of handle completion', () => {
+			const running = createPart(createMockSerializedToolInvocation({
+				toolSpecificData: {
+					kind: 'subagent',
+					description: 'Detached task',
+					detached: true,
+					workerId: 'spawn-restored',
+					workerStatus: 'Running',
+					result: 'Worker started with handle spawn-restored.',
+				},
+			}), createMockRenderContext(true));
+			const completed = createPart(createMockSerializedToolInvocation({
+				toolSpecificData: {
+					kind: 'subagent',
+					description: 'Detached task',
+					detached: true,
+					workerId: 'spawn-restored',
+					workerStatus: 'Integrated',
+					result: 'Worker started with handle spawn-restored.',
+				},
+			}), createMockRenderContext(true));
+
+			assert.strictEqual(running.getIsActive(), true);
+			assert.strictEqual(completed.getIsActive(), false);
+			assert.strictEqual(running.domNode.textContent?.includes('Worker started with handle'), false, 'Handle prose should not render as a child result');
 		});
 	});
 

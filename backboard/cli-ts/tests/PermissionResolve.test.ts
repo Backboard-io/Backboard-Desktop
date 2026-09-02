@@ -17,7 +17,10 @@ import {
 	parseRule,
 	parseRuleSet,
 } from "../src/core/permissions/PermissionRules.ts";
-import { resolveToolPermission } from "../src/core/permissions/resolveToolPermission.ts";
+import {
+	resolveToolPermission,
+	resolveToolPermissions,
+} from "../src/core/permissions/resolveToolPermission.ts";
 import { loadPermissionSettings } from "../src/core/permissions/settings.ts";
 import type { PermissionContext } from "../src/core/permissions/types.ts";
 import { Tool } from "../src/core/tools/Tool.ts";
@@ -225,6 +228,61 @@ describe("resolveToolPermission", () => {
 		expect(loadPermissionSettings(cwd).allow).toEqual([
 			"mutate(cargo build:*)",
 		]);
+	});
+
+	it("prompts once for a batch and persists each exact always-rule scope", async () => {
+		const cwd = await tempProject();
+		const permissions: PermissionContext = {
+			mode: "manual",
+			rules: parseRuleSet({}),
+			interactive: true,
+		};
+		let prompts = 0;
+		let question = "";
+		const ctx = {
+			...makeCtx({ cwd, permissions }),
+			askUser: async (value: string) => {
+				prompts++;
+				question = value;
+				return ALLOW_ALWAYS;
+			},
+		};
+
+		const results = await resolveToolPermissions(
+			[
+				{ tool, input: { command: "cargo build --release" } },
+				{ tool, input: { command: "cargo test --workspace" } },
+				{ tool, input: { command: "rm generated.txt" } },
+			],
+			ctx,
+		);
+
+		expect({
+			prompts,
+			question,
+			results,
+			inMemory: permissions.rules.allow.map((rule) => rule.raw),
+			persisted: loadPermissionSettings(cwd).allow,
+		}).toEqual({
+			prompts: 1,
+			question: [
+				"Allow these 3 actions?",
+				"1. Mutate: cargo build --release",
+				"2. Mutate: cargo test --workspace",
+				"3. Mutate: rm generated.txt",
+			].join("\n"),
+			results: [{ allowed: true }, { allowed: true }, { allowed: true }],
+			inMemory: [
+				"mutate(cargo build:*)",
+				"mutate(cargo test:*)",
+				"mutate(rm generated.txt)",
+			],
+			persisted: [
+				"mutate(cargo build:*)",
+				"mutate(cargo test:*)",
+				"mutate(rm generated.txt)",
+			],
+		});
 	});
 
 	it("deny answer reports the user's decision", async () => {

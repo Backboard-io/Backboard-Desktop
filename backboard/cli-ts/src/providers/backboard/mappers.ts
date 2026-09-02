@@ -30,6 +30,18 @@ export function mapToolCall(call: RawToolCall): ProviderToolCall {
 export class BackboardStreamEventMapper {
 	private accumulatedContent = "";
 	private accumulatedReasoning = "";
+	private readonly streamedToolCalls = new Map<
+		number,
+		{ id?: string; name: string; announced: boolean }
+	>();
+	private readonly knownToolNames: ReadonlyMap<string, string>;
+	private readonly provisionalToolCallPrefix = `backboard_stream_${nextStreamMapperId++}`;
+
+	constructor(knownToolNames: readonly string[] = []) {
+		this.knownToolNames = new Map(
+			knownToolNames.map((name) => [name.toLowerCase(), name]),
+		);
+	}
 
 	map(payload: unknown): ProviderEvent[] {
 		const result = mapStreamPayload(
@@ -39,8 +51,88 @@ export class BackboardStreamEventMapper {
 		);
 		this.accumulatedContent = result.accumulatedContent;
 		this.accumulatedReasoning = result.accumulatedReasoning;
+		result.events.push(...this.mapRawToolCallDeltas(payload));
 		return result.events;
 	}
+
+	/**
+	 * Backboard normally emits `tool_call_start`, but some OpenRouter models do
+	 * not expose a real call id until their (potentially very large) arguments
+	 * are complete. The transport still forwards their raw OpenAI-compatible
+	 * `choices[].delta.tool_calls` chunks. Recognize the tool name there and
+	 * publish a UI-only provisional start so a large Write shows its loading
+	 * shell while the file body is being generated instead of minutes later.
+	 *
+	 * The authoritative `tool_submit_required` call keeps its real id. The
+	 * early-tool round retracts this synthetic row during reconciliation; the
+	 * agent-host mutation batch keeps both ids under one visual Write shell.
+	 */
+	private mapRawToolCallDeltas(payload: unknown): ProviderEvent[] {
+		if (!isRecord(payload) || this.knownToolNames.size === 0) return [];
+		const events: ProviderEvent[] = [];
+		for (const root of nestedStreamRoots(payload)) {
+			const choices = Array.isArray(root.choices) ? root.choices : [];
+			for (const choice of choices) {
+				if (!isRecord(choice) || !isRecord(choice.delta)) continue;
+				const calls = Array.isArray(choice.delta.tool_calls)
+					? choice.delta.tool_calls
+					: Array.isArray(choice.delta.toolCalls)
+						? choice.delta.toolCalls
+						: [];
+				for (let fallbackIndex = 0; fallbackIndex < calls.length; fallbackIndex++) {
+					const call = calls[fallbackIndex];
+					if (!isRecord(call)) continue;
+					const indexValue = call.index;
+					const index =
+						typeof indexValue === "number" && Number.isInteger(indexValue)
+							? indexValue
+							: fallbackIndex;
+					const existing = this.streamedToolCalls.get(index) ?? {
+						name: "",
+						announced: false,
+					};
+					const id = stringField(call, "id");
+					if (id) existing.id = id;
+					const fn = isRecord(call.function) ? call.function : call;
+					const nameFragment = stringField(fn, "name");
+					if (nameFragment) {
+						existing.name = appendStreamedName(existing.name, nameFragment);
+					}
+					this.streamedToolCalls.set(index, existing);
+					const knownName = this.knownToolNames.get(existing.name.toLowerCase());
+					if (!existing.announced && knownName) {
+						existing.announced = true;
+						events.push({
+							kind: "tool_started",
+							id:
+								existing.id ??
+								`${this.provisionalToolCallPrefix}_${index}`,
+							name: knownName,
+						});
+					}
+				}
+			}
+		}
+		return events;
+	}
+}
+
+let nextStreamMapperId = 0;
+
+function nestedStreamRoots(payload: Record<string, unknown>): Record<string, unknown>[] {
+	const roots = [payload];
+	for (const key of ["data", "chunk"]) {
+		const nested = payload[key];
+		if (isRecord(nested)) roots.push(nested);
+	}
+	return roots;
+}
+
+function appendStreamedName(current: string, fragment: string): string {
+	if (!current) return fragment;
+	if (fragment.startsWith(current)) return fragment;
+	if (current.endsWith(fragment)) return current;
+	return current + fragment;
 }
 
 export function mapStreamPayloadToEvents(payload: unknown): ProviderEvent[] {

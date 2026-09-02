@@ -156,5 +156,6 @@ function verification(context: PromptContext): string {
 "Done" is a claim about behavior, not effort. Before finishing:
 - Learn how this project checks itself — lint, typecheck, tests — from its docs, scripts, or CI config, and run all of them, unless the user asked you to skip them.
 - Exercise your change at least once: run the test that covers it, or the code path itself. Compiling is not proof.
+- Keep ad-hoc verification scripts and other throwaway artifacts out of the project. Prefer inline commands or the operating system's temporary directory; if a workspace file is unavoidable, remove it before finishing.
 - If anything fails, you are not done — return to "When things break" and keep going.`;
 }

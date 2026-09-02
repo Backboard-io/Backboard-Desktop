@@ -8,7 +8,11 @@ import {
 	type SubAgentRunParams,
 } from "../src/core/agent/SubAgentRunner.ts";
 import { EventBus } from "../src/core/bus/EventBus.ts";
-import { emptyRuleSet } from "../src/core/permissions/PermissionRules.ts";
+import type { AgentEvent } from "../src/core/bus/events.ts";
+import {
+	emptyRuleSet,
+	parseRuleSet,
+} from "../src/core/permissions/PermissionRules.ts";
 import type { OpenAITool } from "../src/core/tools/schema.ts";
 import type { Tool } from "../src/core/tools/Tool.ts";
 import {
@@ -90,6 +94,36 @@ class RepeatingToolCallClient extends CompletingClient {
 			runId: `run_${round}`,
 			calls: [{ id: `call_${round}`, name: "Read", input: {} }],
 		};
+	}
+}
+
+class RelativeWriteClient extends CompletingClient {
+	toolOutputRequests: SubmitToolOutputsRequest[] = [];
+
+	override async *runMessage(): AsyncIterable<ProviderEvent> {
+		yield { kind: "thread", threadId: "thr_write" };
+		yield {
+			kind: "requires_action",
+			runId: "run_write",
+			calls: [
+				{
+					id: "call_write",
+					name: "Write",
+					input: {
+						file_path: "js/result.js",
+						content: "export const result = true;\n",
+					},
+				},
+			],
+		};
+	}
+
+	override async *runToolOutputs(
+		req: SubmitToolOutputsRequest,
+	): AsyncIterable<ProviderEvent> {
+		this.toolOutputRequests.push(req);
+		yield { kind: "assistant_delta", text: "write complete" };
+		yield { kind: "completed" };
 	}
 }
 
@@ -212,39 +246,15 @@ describe("SubAgentRunner", () => {
 		expect(client.messageRequests[0]?.system_prompt).toContain(
 			"isolated native Git worktree at /repo.backboard-workers/session/worker-a",
 		);
+		expect(client.messageRequests[0]?.system_prompt).toContain(
+			"automatically collects and integrates successful file-tool edits",
+		);
+		expect(client.messageRequests[0]?.system_prompt).toContain(
+			"never tell the parent to copy, merge, cherry-pick, or open files",
+		);
 	});
 
-	it("allows a write worker to use relative Write paths in its assigned checkout", async () => {
-		class RelativeWriteClient extends CompletingClient {
-			toolOutputRequests: SubmitToolOutputsRequest[] = [];
-
-			override async *runMessage(): AsyncIterable<ProviderEvent> {
-				yield { kind: "thread", threadId: "thr_write" };
-				yield {
-					kind: "requires_action",
-					runId: "run_write",
-					calls: [
-						{
-							id: "call_write",
-							name: "Write",
-							input: {
-								file_path: "js/result.js",
-								content: "export const result = true;\n",
-							},
-						},
-					],
-				};
-			}
-
-			override async *runToolOutputs(
-				req: SubmitToolOutputsRequest,
-			): AsyncIterable<ProviderEvent> {
-				this.toolOutputRequests.push(req);
-				yield { kind: "assistant_delta", text: "write complete" };
-				yield { kind: "completed" };
-			}
-		}
-
+	it("allows a parent-approved manual write worker to use relative paths", async () => {
 		const worker = await mkdtemp(join(tmpdir(), "subagent-relative-write-"));
 		try {
 			const client = new RelativeWriteClient();
@@ -255,7 +265,7 @@ describe("SubAgentRunner", () => {
 				parentSignal: new AbortController().signal,
 				isolatedWorkspace: true,
 				parentPermissions: {
-					mode: "bypass",
+					mode: "manual",
 					rules: emptyRuleSet(),
 					interactive: true,
 				},
@@ -270,6 +280,40 @@ describe("SubAgentRunner", () => {
 			);
 		} finally {
 			await rm(worker, { recursive: true, force: true });
+		}
+	});
+
+	it("maps inherited absolute deny rules from a worker to the coordinator", async () => {
+		const coordinator = await mkdtemp(join(tmpdir(), "subagent-coordinator-"));
+		const worker = await mkdtemp(join(tmpdir(), "subagent-denied-worker-"));
+		try {
+			const client = new RelativeWriteClient();
+			const result = await runnerWith(client, [new WriteTool()]).run({
+				prompt: "write the assigned module",
+				depth: 1,
+				parentCwd: worker,
+				permissionCwd: coordinator,
+				parentSignal: new AbortController().signal,
+				isolatedWorkspace: true,
+				parentPermissions: {
+					mode: "manual",
+					rules: parseRuleSet({
+						deny: [`write(=${join(coordinator, "js/result.js")})`],
+					}),
+					interactive: true,
+				},
+			});
+
+			expect(result.status).toBe("completed");
+			expect(client.toolOutputRequests[0]?.tool_outputs[0]?.output).toContain(
+				"Denied by permission rule",
+			);
+			await expect(access(join(worker, "js/result.js"))).rejects.toThrow();
+		} finally {
+			await Promise.all([
+				rm(coordinator, { recursive: true, force: true }),
+				rm(worker, { recursive: true, force: true }),
+			]);
 		}
 	});
 
@@ -422,12 +466,19 @@ describe("SubAgentRunner", () => {
 			const client = new CompletingClient();
 			const runner = runnerWith(client, []);
 			const clientLogPath = join(dir, "agents", "call_worker", "client.jsonl");
+			const parentBus = new EventBus();
+			let durableLogAtChildEnd: Promise<string> | undefined;
+			parentBus.on("agent:child_end", () => {
+				durableLogAtChildEnd = readFile(clientLogPath, "utf8");
+			});
 
 			await runner.run({
 				prompt: "summarize",
 				depth: 1,
 				parentCwd: dir,
 				parentSignal: new AbortController().signal,
+				parentBus,
+				parentToolCallId: "call_worker",
 				trace: {
 					sessionId: "sess_parent",
 					context: new AgentTraceContext({
@@ -449,6 +500,14 @@ describe("SubAgentRunner", () => {
 				"assistant:message",
 			);
 			expect(records.map((record) => record.type)).toContain("turn:end");
+			expect(durableLogAtChildEnd).toBeDefined();
+			const recordsVisibleAtEnd = (await durableLogAtChildEnd)
+				?.split("\n")
+				.filter(Boolean)
+				.map((line) => JSON.parse(line) as { type: string });
+			expect(recordsVisibleAtEnd?.map((record) => record.type)).toContain(
+				"turn:end",
+			);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
@@ -581,5 +640,103 @@ describe("SubAgentRunner", () => {
 		detach();
 
 		expect(relayed).toEqual(["tool:start"]);
+	});
+
+	it("still emits the lifecycle-only child end edge after cancellation", async () => {
+		const controller = new AbortController();
+		class CancellingClient extends CompletingClient {
+			override async *runMessage(): AsyncIterable<ProviderEvent> {
+				controller.abort();
+				yield { kind: "completed" };
+			}
+		}
+		const parentBus = new EventBus();
+		const statuses: string[] = [];
+		const childEvents: AgentEvent[] = [];
+		parentBus.on("agent:child_end", (event) => statuses.push(event.status));
+		parentBus.on("agent:child_event", (event) => childEvents.push(event.event));
+
+		await runnerWith(new CancellingClient(), []).run({
+			prompt: "cancel",
+			depth: 1,
+			parentCwd: process.cwd(),
+			parentSignal: controller.signal,
+			parentBus,
+			parentToolCallId: "agent_cancelled",
+		});
+
+		expect(statuses).toHaveLength(1);
+		expect(childEvents).toEqual([]);
+	});
+
+	it("defers the terminal edge until isolated workspace integration settles", async () => {
+		const parentBus = new EventBus();
+		const statuses: string[] = [];
+		parentBus.on("agent:child_end", (event) => statuses.push(event.status));
+
+		await runnerWith(new CompletingClient(), []).run({
+			prompt: "finish the model work",
+			depth: 1,
+			parentCwd: process.cwd(),
+			permissionCwd: process.cwd(),
+			parentSignal: new AbortController().signal,
+			parentBus,
+			parentToolCallId: "agent_deferred",
+			isolatedWorkspace: true,
+			deferParentEnd: true,
+		});
+
+		expect(statuses).toEqual([]);
+	});
+
+	it("projects private worker edit paths onto the coordinator checkout", () => {
+		const parentBus = new EventBus();
+		const relayed: AgentEvent[] = [];
+		parentBus.on("agent:child_event", (event) => relayed.push(event.event));
+		const childBus = new EventBus();
+		const runner = runnerWith(new CompletingClient(), []);
+		const detach = (
+			runner as unknown as {
+				attachParentProgressRelay: (
+					params: SubAgentRunParams,
+					bus: EventBus,
+				) => () => void;
+			}
+		).attachParentProgressRelay(
+			{
+				prompt: "edit",
+				depth: 1,
+				parentCwd: "/private/worktrees/worker-a",
+				permissionCwd: "/coordinator/project",
+				parentSignal: new AbortController().signal,
+				parentBus,
+				parentToolCallId: "agent_1",
+				isolatedWorkspace: true,
+			},
+			childBus,
+		);
+
+		childBus.emit({
+			type: "tool:result",
+			toolCallId: "write_1",
+			name: "Write",
+			title: "Wrote /private/worktrees/worker-a/src/a.ts",
+			detail: "Updated /private/worktrees/worker-a/src/a.ts",
+			fileEdits: [
+				{
+					path: "/private/worktrees/worker-a/src/a.ts",
+					before: "",
+					after: "export {};\n",
+				},
+			],
+		});
+		detach();
+
+		const result = relayed[0];
+		expect(result?.type).toBe("tool:result");
+		if (result?.type !== "tool:result") throw new Error("missing tool result");
+		expect(result.fileEdits?.[0]?.path).toBe("/coordinator/project/src/a.ts");
+		expect(result.title).toBe("Wrote /coordinator/project/src/a.ts");
+		expect(result.detail).toBe("Updated /coordinator/project/src/a.ts");
 	});
 });

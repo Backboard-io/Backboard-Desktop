@@ -10,12 +10,11 @@ import { ICommandService } from '../../../../../platform/commands/common/command
 import { SyncDescriptor } from '../../../../../platform/instantiation/common/descriptors.js';
 import { ServiceCollection } from '../../../../../platform/instantiation/common/serviceCollection.js';
 import { IURLService } from '../../../../../platform/url/common/url.js';
-import { DEFAULT_EDITOR_ASSOCIATION, isEditorInput, IUntypedEditorInput } from '../../../../common/editor.js';
+import { DEFAULT_EDITOR_ASSOCIATION, EditorInputCapabilities, isEditorInput, IUntypedEditorInput } from '../../../../common/editor.js';
 import { EditorInput } from '../../../../common/editor/editorInput.js';
 import { IJSONEditingService } from '../../../configuration/common/jsonEditing.js';
 import { TestJSONEditingService } from '../../../configuration/test/common/testServices.js';
-import { IEditorService, PreferredGroup } from '../../../editor/common/editorService.js';
-import { IEditorGroupsService } from '../../../editor/common/editorGroupsService.js';
+import { IEditorService, MODAL_GROUP, PreferredGroup } from '../../../editor/common/editorService.js';
 import { PreferencesService } from '../../browser/preferencesService.js';
 import { IPreferencesService, ISettingsEditorOptions } from '../../common/preferences.js';
 import { IRemoteAgentService } from '../../../remote/common/remoteAgentService.js';
@@ -25,6 +24,7 @@ import { IEditorOptions } from '../../../../../platform/editor/common/editor.js'
 suite('PreferencesService', () => {
 	let testInstantiationService: ITestInstantiationService;
 	let testObject: PreferencesService;
+	let lastOpenEditorInput: EditorInput | undefined;
 	let lastOpenEditorOptions: IEditorOptions | undefined;
 	let lastOpenEditorGroup: PreferredGroup | undefined;
 	const disposables = ensureNoDisposablesAreLeakedInTestSuite();
@@ -38,6 +38,7 @@ suite('PreferencesService', () => {
 				lastOpenEditorGroup = group;
 				// openEditor takes ownership of the input
 				if (isEditorInput(editor)) {
+					lastOpenEditorInput = editor;
 					editor.dispose();
 				}
 				return undefined;
@@ -56,12 +57,13 @@ suite('PreferencesService', () => {
 		const instantiationService = disposables.add(testInstantiationService.createChild(collection));
 		testObject = disposables.add(instantiationService.createInstance(PreferencesService));
 	});
-	test('options are preserved and settings open in the main editor part', async () => {
+	test('options are preserved and settings open in the modal editor part', async () => {
 		await testObject.openSettings({ jsonEditor: false, query: 'test query' });
 		const options = lastOpenEditorOptions as ISettingsEditorOptions;
 		assert.strictEqual(options.focusSearch, true);
 		assert.strictEqual(options.override, DEFAULT_EDITOR_ASSOCIATION.id);
 		assert.strictEqual(options.query, 'test query');
-		assert.strictEqual(lastOpenEditorGroup, testInstantiationService.invokeFunction(accessor => accessor.get(IEditorGroupsService).mainPart.activeGroup));
+		assert.strictEqual(lastOpenEditorGroup, MODAL_GROUP);
+		assert.strictEqual(lastOpenEditorInput?.hasCapability(EditorInputCapabilities.RequiresModal), true);
 	});
 });

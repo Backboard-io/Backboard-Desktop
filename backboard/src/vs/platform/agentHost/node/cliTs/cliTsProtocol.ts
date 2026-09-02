@@ -16,6 +16,23 @@
 /** Permission modes exposed by the public Backboard R-CLI. */
 export type CliTsPermissionMode = 'manual' | 'acceptEdits' | 'auto' | 'bypass';
 
+/** Critical-path phase names emitted by cli-ts for structured performance logs. */
+export type CliTsPerformanceTimingPhase =
+	| 'provider_tool_announcement'
+	| 'provider_tool_batch_finalize'
+	| 'permission_wait'
+	| 'mutation_prepare'
+	| 'checkpoint_pre_flush'
+	| 'filesystem_commit'
+	| 'checkpoint_post_flush'
+	| 'diagnostics'
+	| 'worker_queued'
+	| 'worktree_ready'
+	| 'worker_model'
+	| 'result_capture'
+	| 'integration'
+	| 'ui_event_projection';
+
 /** A binary attachment sent with a submit op; serve persists it and points the agent at it. */
 export interface CliTsFileAttachment {
 	readonly fileName: string;
@@ -74,6 +91,8 @@ export type CliTsServeControl =
 		readonly notify?: boolean;
 		/** Enables Backboard's built-in image tool for this turn. */
 		readonly imageGeneration?: boolean;
+		/** Pins an OpenRouter upstream; absent uses automatic routing. */
+		readonly openRouterProvider?: string;
 		/** IDE-executed tools advertised to the model; absent clears them. */
 		readonly clientTools?: readonly CliTsClientToolDefinition[];
 	}
@@ -120,7 +139,7 @@ export interface CliTsAgentEvent {
 	readonly threadId?: string | null;
 	readonly text?: string;
 	/** Coarse pre-content turn phase, carried by `turn:status` events. */
-	readonly phase?: 'preparing' | 'generating';
+	readonly phase?: 'preparing' | 'generating' | CliTsPerformanceTimingPhase;
 	readonly turnId?: string;
 	readonly messageId?: string;
 	readonly toolCallId?: string;
@@ -131,11 +150,25 @@ export interface CliTsAgentEvent {
 	readonly title?: string;
 	readonly detail?: string;
 	readonly detailLines?: readonly unknown[];
+	/** Bounded, JSON-safe native UI payload emitted only by whitelisted core tools. */
+	readonly toolUi?: {
+		readonly kind?: unknown;
+		readonly input?: unknown;
+		readonly result?: unknown;
+	};
+	readonly terminalOutput?: {
+		readonly text: string;
+		readonly exitCode?: number;
+		readonly timedOut?: boolean;
+		readonly truncated?: boolean;
+	};
 	readonly fileEdits?: readonly { readonly path: string; readonly before: string; readonly after: string }[];
 	readonly error?: string;
 	readonly message?: string;
 	readonly status?: CliTsTurnStatus | 'done' | 'error';
 	readonly durationMs?: number;
+	readonly workerId?: string;
+	readonly fileCount?: number;
 	readonly calls?: readonly { readonly id: string; readonly name: string; readonly input: unknown }[];
 	readonly data?: unknown;
 	readonly request?: {

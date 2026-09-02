@@ -61,6 +61,12 @@ export function loadPermissionSettings(cwd: string): PermissionSettings {
 }
 
 export function appendAllowRule(cwd: string, rule: string): void {
+	appendAllowRules(cwd, [rule]);
+}
+
+/** Persists a permission round's exact allow scopes with one atomic rewrite. */
+export function appendAllowRules(cwd: string, rules: readonly string[]): void {
+	if (rules.length === 0) return;
 	const file = readSettingsFile(cwd);
 	const block =
 		file.permissions &&
@@ -69,7 +75,9 @@ export function appendAllowRule(cwd: string, rule: string): void {
 			? (file.permissions as Record<string, unknown>)
 			: {};
 	const allow = stringArray(block.allow);
-	if (!allow.includes(rule)) allow.push(rule);
+	for (const rule of rules) {
+		if (!allow.includes(rule)) allow.push(rule);
+	}
 	file.permissions = { ...block, allow };
 	try {
 		const dest = settingsPath(cwd);

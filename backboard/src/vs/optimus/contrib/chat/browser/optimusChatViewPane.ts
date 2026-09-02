@@ -3,14 +3,15 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { $, append } from '../../../../base/browser/dom.js';
+import { $, addDisposableListener, append, EventType } from '../../../../base/browser/dom.js';
 import { CancellationToken, CancellationTokenSource } from '../../../../base/common/cancellation.js';
-import { MutableDisposable } from '../../../../base/common/lifecycle.js';
+import { MutableDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
 import { autorun } from '../../../../base/common/observable.js';
+import { isEqual } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
-import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
+import { IContextKey, IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
 import { IContextMenuService } from '../../../../platform/contextview/browser/contextView.js';
 import { IHoverService } from '../../../../platform/hover/browser/hover.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
@@ -41,6 +42,10 @@ import { ISessionsService } from '../../../../sessions/services/sessions/browser
 import { agentsBackground } from '../../../../sessions/common/theme.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { IWorkbenchLayoutService, Parts } from '../../../../workbench/services/layout/browser/layoutService.js';
+import { localize } from '../../../../nls.js';
+import { CanGoBackFromSubagentContext } from '../../../../sessions/common/contextkeys.js';
+import { ChatResourceNavigationHistory } from '../../../../sessions/browser/parts/chatResourceNavigationHistory.js';
+import { chatResourceNavigationRegistry, IChatResourceNavigationContext, IChatResourceNavigationParticipant } from '../../../../sessions/services/chatView/browser/chatResourceNavigationRegistry.js';
 
 export const OptimusChatViewId = 'optimus.workbench.view.chat';
 
@@ -50,10 +55,13 @@ export const OptimusChatViewId = 'optimus.workbench.view.chat';
  * ChatWidget host instead of the Sessions/NewChatWidget onboarding surface so
  * model selection, send enablement, tools, and composer controls match Editor.
  */
-export class OptimusChatViewPane extends ViewPane {
+export class OptimusChatViewPane extends ViewPane implements IChatResourceNavigationParticipant {
 
 	private chatWidget: ChatWidget | undefined;
 	private chatTitleControl: ChatViewTitleControl | undefined;
+	private chatNavigationElement: HTMLElement | undefined;
+	private chatNavigationTitle: HTMLElement | undefined;
+	private chatNavigationMeta: HTMLElement | undefined;
 	private lastBodyWidth = 0;
 	private lastBodyHeight = 0;
 	private readonly modelRef = this._register(new MutableDisposable<IChatModelReference>());
@@ -61,6 +69,9 @@ export class OptimusChatViewPane extends ViewPane {
 	private readonly modelChangeListener = this._register(new MutableDisposable());
 	private currentResourceKey: string | undefined;
 	private resetComposerAfterSubmittedAgent = false;
+	private readonly chatResourceHistory = new ChatResourceNavigationHistory();
+	private readonly chatResourceContexts = new Map<string, IChatResourceNavigationContext>();
+	private readonly canGoBackFromSubagentKey: IContextKey<boolean>;
 
 	constructor(
 		options: IViewPaneOptions,
@@ -86,6 +97,14 @@ export class OptimusChatViewPane extends ViewPane {
 		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
 	) {
 		super(options, keybindingService, contextMenuService, configurationService, contextKeyService, viewDescriptorService, instantiationService, openerService, themeService, hoverService);
+		this.canGoBackFromSubagentKey = CanGoBackFromSubagentContext.bindTo(contextKeyService);
+		this.canGoBackFromSubagentKey.set(false);
+		this._register(chatResourceNavigationRegistry.registerParticipant(this));
+		this._register(toDisposable(() => {
+			if (this.chatResourceHistory.canGoBack) {
+				this.canGoBackFromSubagentKey.set(false);
+			}
+		}));
 	}
 
 	/**
@@ -162,11 +181,29 @@ export class OptimusChatViewPane extends ViewPane {
 			container,
 			{
 				focusChat: () => this.chatWidget?.focusInput(),
-				openChatSession: async sessionResource => { await this.loadChatResource(sessionResource); },
+				openChatSession: async sessionResource => { await this.loadRootChatResource(sessionResource); },
 				openNewChat: () => { void this.showNewChat(); },
 			}
 		));
 		this._register(this.chatTitleControl.onDidChangeHeight(() => this.layoutChatView()));
+
+		this.chatNavigationElement = append(container, $('.optimus-chat-navigation'));
+		this.chatNavigationElement.hidden = true;
+		this.chatNavigationElement.setAttribute('role', 'navigation');
+		const backButton = append(this.chatNavigationElement, $('button.optimus-chat-back')) as HTMLButtonElement;
+		backButton.type = 'button';
+		backButton.ariaLabel = localize('optimus.backToMainThreadAriaLabel', 'Back to main thread');
+		backButton.append(
+			$('span.codicon.codicon-arrow-left', { 'aria-hidden': 'true' }),
+			$('span.optimus-chat-back-label', undefined, localize('optimus.mainThread', 'Main thread')),
+		);
+		append(this.chatNavigationElement, $('span.optimus-chat-navigation-separator', { 'aria-hidden': 'true' }, '/'));
+		const identity = append(this.chatNavigationElement, $('.optimus-chat-navigation-identity'));
+		this.chatNavigationTitle = append(identity, $('.optimus-chat-navigation-title'));
+		this.chatNavigationMeta = append(identity, $('.optimus-chat-navigation-meta'));
+		this._register(addDisposableListener(backButton, EventType.CLICK, () => {
+			void this.navigateToMainThread();
+		}));
 
 		this.workspacePicker = this._register(this.instantiationService.createInstance(WorkspacePicker));
 		this.workspacePicker.setLocalOnly(true);
@@ -273,7 +310,7 @@ export class OptimusChatViewPane extends ViewPane {
 			const active = this.sessionsService.activeSession.read(reader);
 			const chat = active?.activeChat.read(reader);
 			if (chat) {
-				this.loadChatResource(chat.resource).catch(err => this.logService.error('[OptimusChatViewPane] Failed to load active chat', err));
+				this.loadRootChatResource(chat.resource).catch(err => this.logService.error('[OptimusChatViewPane] Failed to load active chat', err));
 			} else {
 				this.showBackboardNewChat(CancellationToken.None).catch(err => this.logService.error('[OptimusChatViewPane] Failed to show new chat', err));
 			}
@@ -321,7 +358,8 @@ export class OptimusChatViewPane extends ViewPane {
 		if (this.chatWidget && this.lastBodyWidth > 0 && this.lastBodyHeight > 0) {
 			const rowHeight = this.folderRowVisible && !this.folderRowEmbedded ? OptimusChatViewPane.FOLDER_ROW_HEIGHT : 0;
 			const titleHeight = this.chatTitleControl?.getHeight() ?? 0;
-			this.chatWidget.layout(Math.max(0, this.lastBodyHeight - titleHeight - rowHeight), this.lastBodyWidth);
+			const navigationHeight = this.chatResourceHistory.canGoBack ? 44 : 0;
+			this.chatWidget.layout(Math.max(0, this.lastBodyHeight - titleHeight - navigationHeight - rowHeight), this.lastBodyWidth);
 		}
 	}
 
@@ -377,7 +415,95 @@ export class OptimusChatViewPane extends ViewPane {
 			}
 		}
 
+		await this.loadRootChatResource(resource, token);
+	}
+
+	private async loadRootChatResource(resource: URI, token: CancellationToken = CancellationToken.None): Promise<void> {
 		await this.loadChatResource(resource, token);
+		if (!token.isCancellationRequested && this.currentResourceKey === resource.toString()) {
+			this.resetChatResourceNavigation();
+		}
+	}
+
+	canHandleChatResource(parentSessionResource: URI): boolean {
+		const currentResource = this.currentResourceKey ? URI.parse(this.currentResourceKey) : undefined;
+		return !!currentResource && (
+			isEqual(currentResource, parentSessionResource)
+			|| (!!this.chatResourceHistory.root && isEqual(this.chatResourceHistory.root, parentSessionResource))
+		);
+	}
+
+	async openChatResource(parentSessionResource: URI, chatResource: URI, context?: IChatResourceNavigationContext): Promise<boolean> {
+		if (!this.canHandleChatResource(parentSessionResource) || !this.currentResourceKey) {
+			return false;
+		}
+
+		const previousResource = URI.parse(this.currentResourceKey);
+		await this.loadChatResource(chatResource);
+		if (this.currentResourceKey !== chatResource.toString()) {
+			return false;
+		}
+
+		this.chatResourceHistory.recordOpen(previousResource, chatResource);
+		if (context) {
+			this.chatResourceContexts.set(chatResource.toString(), context);
+		}
+		this.updateChatResourceNavigation();
+		this.chatWidget?.focusInput();
+		return true;
+	}
+
+	async navigateBack(parentSessionResource: URI): Promise<boolean> {
+		const previousResource = this.chatResourceHistory.previous;
+		if (!previousResource || !this.canHandleChatResource(parentSessionResource)) {
+			return false;
+		}
+
+		await this.loadChatResource(previousResource);
+		if (this.currentResourceKey !== previousResource.toString()) {
+			return false;
+		}
+
+		this.chatResourceHistory.commitBack();
+		this.updateChatResourceNavigation();
+		return true;
+	}
+
+	private async navigateToMainThread(): Promise<void> {
+		const rootResource = this.chatResourceHistory.root;
+		if (!rootResource) {
+			return;
+		}
+
+		await this.loadChatResource(rootResource);
+		if (this.currentResourceKey === rootResource.toString()) {
+			this.resetChatResourceNavigation();
+			this.chatWidget?.focusInput();
+		}
+	}
+
+	private resetChatResourceNavigation(): void {
+		this.chatResourceHistory.reset();
+		this.chatResourceContexts.clear();
+		this.updateChatResourceNavigation();
+	}
+
+	private updateChatResourceNavigation(): void {
+		const canGoBack = this.chatResourceHistory.canGoBack;
+		if (this.chatNavigationElement) {
+			this.chatNavigationElement.hidden = !canGoBack;
+		}
+		this.canGoBackFromSubagentKey.set(canGoBack);
+		if (canGoBack && this.currentResourceKey && this.chatNavigationElement && this.chatNavigationTitle && this.chatNavigationMeta) {
+			const context = this.chatResourceContexts.get(this.currentResourceKey);
+			const title = context?.title.trim() || localize('optimus.subagentChat', 'Subagent chat');
+			const meta = [context?.agentName?.trim(), context?.status?.trim()].filter((value): value is string => !!value).join(' · ');
+			this.chatNavigationTitle.textContent = title;
+			this.chatNavigationTitle.title = title;
+			this.chatNavigationMeta.textContent = meta || localize('optimus.subagent', 'Subagent');
+			this.chatNavigationElement.ariaLabel = localize('optimus.openSubagentContext', 'Main thread, subagent: {0}', title);
+		}
+		this.layoutChatView();
 	}
 
 	private async loadChatResource(resource: URI, token: CancellationToken = CancellationToken.None): Promise<void> {

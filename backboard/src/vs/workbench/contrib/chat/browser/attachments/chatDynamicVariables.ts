@@ -220,7 +220,7 @@ export class ChatDynamicVariableModel extends Disposable implements IChatWidgetC
 	}
 
 	private clearCapabilityDecorations(): void {
-		if (this.capabilityDecorationModel && this.capabilityDecorationIds.length > 0) {
+		if (this.capabilityDecorationModel && !this.capabilityDecorationModel.isDisposed() && this.capabilityDecorationIds.length > 0) {
 			this.capabilityDecorationModel.deltaDecorations(this.capabilityDecorationIds, []);
 		}
 		this.capabilityDecorationIds = [];

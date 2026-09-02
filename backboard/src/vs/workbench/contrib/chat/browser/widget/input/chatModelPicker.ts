@@ -140,6 +140,19 @@ function getProviderGroupForModel(
 	modelToGroup: Map<string, IProviderGroupInfo>,
 	languageModelsService: ILanguageModelsService,
 ): IProviderGroupInfo {
+	// Agent-host harnesses can expose several upstream backends through one
+	// session provider. Their model metadata carries the real backend label so
+	// the picker can keep subscription models visibly separate from API-billed
+	// OpenAI and other Backboard routes.
+	const upstreamProvider = model.metadata.targetChatSessionType?.startsWith('agent-host-')
+		? model.metadata.detail?.trim()
+		: undefined;
+	if (upstreamProvider) {
+		return {
+			vendor: `${model.metadata.vendor}:${upstreamProvider}`,
+			groupName: upstreamProvider,
+		};
+	}
 	const info = modelToGroup.get(model.identifier);
 	if (info) {
 		return info;
@@ -445,19 +458,19 @@ function createSetupItems(
 	if (!candidates.length || !onSetup) {
 		return [];
 	}
-	const installLabel = localize('chat.modelPicker.install', "Install");
 	const items: IActionListItem<IActionWidgetDropdownAction>[] = [{
 		kind: ActionListItemKind.Separator,
 		label: localize('chat.modelPicker.bringYourOwnSubscription', "Bring Your Own Subscription"),
 	}];
 	for (const candidate of candidates) {
+		const actionLabel = candidate.actionLabel ?? localize('chat.modelPicker.install', "Install");
 		items.push({
 			item: {
 				id: `setup.${candidate.id}`,
 				enabled: true,
 				checked: false,
 				class: undefined,
-				tooltip: localize('chat.modelPicker.installTooltip', "Install {0}", candidate.label),
+				tooltip: localize('chat.modelPicker.setupTooltip', "{0} {1}", actionLabel, candidate.label),
 				label: candidate.label,
 				description: candidate.description,
 				run: () => onSetup(candidate.id),
@@ -465,8 +478,8 @@ function createSetupItems(
 			kind: ActionListItemKind.Action,
 			label: candidate.label,
 			description: candidate.description,
-			ariaDescription: candidate.description ? `${installLabel}, ${candidate.description}` : installLabel,
-			badge: installLabel,
+			ariaDescription: candidate.description ? `${actionLabel}, ${candidate.description}` : actionLabel,
+			badge: actionLabel,
 			group: { title: '', icon: candidate.icon ?? ThemeIcon.fromId(Codicon.cloudDownload.id) },
 			hideIcon: false,
 			className: 'chat-model-picker-setup',

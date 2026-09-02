@@ -19,6 +19,8 @@ export interface RunMessageRequestContext {
 	workspaceId?: string;
 	/** Enables Backboard's built-in image generation for the turn. */
 	imageGeneration?: boolean;
+	/** Pins an OpenRouter upstream; undefined leaves routing automatic. */
+	openRouterProvider?: string;
 	/**
 	 * Extra metadata merged into the request. The server persists it on the
 	 * stored message and returns it on resume, so injected notifications tag
@@ -50,6 +52,14 @@ export function buildRunMessageRequest(
 		memory_profile: context.memoryProfile,
 		...(Object.keys(metadata).length > 0 ? { metadata } : {}),
 		...(thinking === undefined ? {} : { thinking }),
+		...(context.model.provider === "openrouter" && context.openRouterProvider
+			? {
+					openrouter: {
+						providers: [context.openRouterProvider],
+						allow_fallbacks: false,
+					},
+				}
+			: {}),
 		...(context.imageGeneration
 			? {
 					image_generation: "auto",

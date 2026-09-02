@@ -78,6 +78,7 @@ export class Config {
 	private skillDiscoveryEnabled = false;
 	private notifyEnabled = false;
 	private imageGenerationEnabled = false;
+	private openRouterProvider: string | undefined;
 	private verboseEnabled = true;
 	private readonly currentMemoryProfile: MemoryProfile;
 	private currentThinking: ThinkingIntent | null | undefined;
@@ -130,10 +131,19 @@ export class Config {
 			persistedConfig.model === undefined
 				? { provider: "openai-subscription", model: "auto" }
 				: null;
+		const claudeSubscriptionOnlyDefault =
+			this.auth.backboard === null &&
+			this.auth.providerKeys.length === 0 &&
+			this.auth.chatgptSubscription === null &&
+			this.auth.claudeSubscription !== null &&
+			persistedConfig.model === undefined
+				? { provider: "anthropic-subscription", model: "default" }
+				: null;
 		this.currentModel = this.flags.model
 			? parseModel(this.flags.model)
 			: (persistedConfig.model ??
 				subscriptionOnlyDefault ??
+				claudeSubscriptionOnlyDefault ??
 				keyOnlyDefault ??
 				this.profile.model);
 		this.successfulModelRefs = persistedConfig.successfulModels ?? [];
@@ -300,6 +310,18 @@ export class Config {
 
 	setImageGenerationEnabled(enabled: boolean): void {
 		this.imageGenerationEnabled = enabled;
+	}
+
+	get selectedOpenRouterProvider(): string | undefined {
+		return this.openRouterProvider;
+	}
+
+	setOpenRouterProvider(provider: string | undefined): void {
+		const normalized = provider?.trim();
+		this.openRouterProvider =
+			normalized && normalized.toLowerCase() !== "auto"
+				? normalized
+				: undefined;
 	}
 
 	get isVerbose(): boolean {

@@ -20,6 +20,68 @@ interface PendingServeRequest {
 	readonly reject: (error: Error) => void;
 }
 
+export interface CliTsInvocation {
+	readonly command: string;
+	readonly args: readonly string[];
+}
+
+function resolveBunCommand(): string | undefined {
+	const envBunPath = process.env['BACKBOARD_BUN_PATH']?.trim() || process.env['BUN_PATH']?.trim();
+	if (envBunPath && fs.existsSync(envBunPath)) {
+		return envBunPath;
+	}
+
+	const executable = process.platform === 'win32' ? 'bun.exe' : 'bun';
+	const candidates = [
+		process.env['BUN_INSTALL'] ? join(process.env['BUN_INSTALL'], 'bin', executable) : undefined,
+		join(os.homedir(), '.bun', 'bin', executable),
+		join(process.cwd(), 'node_modules', '.bin', executable),
+		'/opt/homebrew/bin/bun',
+		'/usr/local/bin/bun',
+	].filter((candidate): candidate is string => !!candidate);
+
+	for (const candidate of candidates) {
+		if (fs.existsSync(candidate)) {
+			return candidate;
+		}
+	}
+
+	const pathValue = process.env['PATH'] ?? '';
+	const pathSeparator = process.platform === 'win32' ? ';' : ':';
+	for (const dir of pathValue.split(pathSeparator)) {
+		if (!dir) {
+			continue;
+		}
+		const candidate = join(dir, executable);
+		if (fs.existsSync(candidate)) {
+			return candidate;
+		}
+	}
+
+	return undefined;
+}
+
+/**
+ * Stable identity for the executable used by a serve process. Size joins mtime
+ * because some build/copy tools preserve timestamps, while the resolved command
+ * and args detect a runtime override changing underneath an existing session.
+ */
+export function cliTsInvocationFingerprint(invocation: CliTsInvocation): string {
+	let file: { mtimeMs: number; size: number } | undefined;
+	try {
+		const stat = fs.statSync(invocation.command);
+		file = { mtimeMs: stat.mtimeMs, size: stat.size };
+	} catch {
+		// Resolution/spawn will report a missing command normally. Keeping the
+		// command in the fingerprint still detects a changed env override.
+	}
+	return JSON.stringify({
+		command: invocation.command,
+		args: invocation.args,
+		file,
+	});
+}
+
 /** Returns the CPU architecture encoded in a native executable header. */
 export function detectCliTsExecutableArchitecture(header: Buffer, platform: NodeJS.Platform): NodeJS.Architecture | undefined {
 	if (platform === 'darwin' && header.length >= 8) {
@@ -71,6 +133,66 @@ function isCliTsExecutableCompatible(path: string): boolean {
 	}
 }
 
+/**
+ * Resolves how to start cli-ts, shared by persistent serve processes and
+ * one-shot account commands such as ChatGPT subscription login.
+ */
+export function resolveCliTsInvocation(logService: ILogService): CliTsInvocation {
+	const envPath = process.env['BACKBOARD_CLI_TS_PATH']?.trim() || process.env['VSCODE_BACKBOARD_CLI_TS_PATH']?.trim();
+	if (envPath) {
+		return { command: envPath, args: [] };
+	}
+	const executable = process.platform === 'win32' ? 'backboard-cli-ts.exe' : 'backboard-cli-ts';
+	const appRoot = dirname(FileAccess.asFileUri('').fsPath);
+	const candidates = [
+		join(appRoot, 'extensions', 'backboard', 'bin', executable),
+		join(process.cwd(), 'extensions', 'backboard', 'bin', executable),
+	];
+	for (const candidate of candidates) {
+		if (fs.existsSync(candidate)) {
+			if (isCliTsExecutableCompatible(candidate)) {
+				return { command: candidate, args: [] };
+			}
+			logService.warn(`[cli-ts] skipping packaged binary for the wrong CPU architecture: ${candidate} (host=${process.platform}-${process.arch})`);
+		}
+	}
+	const devEntrypoint = join(appRoot, 'cli-ts', 'src', 'entrypoints', 'cli.tsx');
+	if (fs.existsSync(devEntrypoint)) {
+		const bunPath = resolveBunCommand();
+		if (bunPath) {
+			return { command: bunPath, args: ['run', devEntrypoint] };
+		}
+
+		throw new Error(`cli-ts dev entrypoint exists at ${devEntrypoint}, but Bun is not available. Install Bun, set BACKBOARD_BUN_PATH to a Bun executable, or build the packaged cli-ts binary with: npm --prefix extensions/backboard run package-cli-ts`);
+	}
+	throw new Error(`cli-ts binary not found. Build it with: npm --prefix extensions/backboard run package-cli-ts (looked at ${candidates.join(', ')})`);
+}
+
+/** Runs a one-shot cli-ts command using the same executable as IDE sessions. */
+export function runCliTsCommand(logService: ILogService, args: readonly string[]): Promise<string> {
+	const invocation = resolveCliTsInvocation(logService);
+	return new Promise<string>((resolve, reject) => {
+		const child = spawn(invocation.command, [...invocation.args, ...args], {
+			cwd: process.cwd(),
+			env: { ...process.env, ...cliTsCredentialEnv() },
+			stdio: ['ignore', 'pipe', 'pipe'],
+		});
+		let stdout = '';
+		let stderr = '';
+		child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
+		child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+		child.once('error', reject);
+		child.once('exit', code => {
+			if (code === 0) {
+				resolve(stdout.trim());
+				return;
+			}
+			const detail = stderr.trim() || stdout.trim() || `exit code ${code ?? 'unknown'}`;
+			reject(new Error(`Backboard CLI command failed: ${detail}`));
+		});
+	});
+}
+
 export interface CliTsServeProcessOptions {
 	/** Stable IDE session id used for durable cli-ts worker metadata. */
 	readonly sessionId?: string;
@@ -100,6 +222,8 @@ export class CliTsServeProcess extends Disposable {
 	private readonly stderrTail: string[] = [];
 	/** The binary/command that was spawned, for actionable error messages. */
 	private spawnedCommand = '';
+	/** On-disk identity of the executable at spawn time. */
+	private spawnedInvocationFingerprint: string | undefined;
 
 	constructor(
 		private readonly logService: ILogService,
@@ -110,6 +234,14 @@ export class CliTsServeProcess extends Disposable {
 
 	get isRunning(): boolean {
 		return this.child !== null && !this.exited;
+	}
+
+	/** True when a rebuild or path override replaced the running executable. */
+	get isInvocationStale(): boolean {
+		if (!this.isRunning || !this.spawnedInvocationFingerprint) {
+			return false;
+		}
+		return cliTsInvocationFingerprint(this.resolveCliTsInvocation()) !== this.spawnedInvocationFingerprint;
 	}
 
 	/** Starts the serve subprocess without submitting a turn. */
@@ -169,6 +301,7 @@ export class CliTsServeProcess extends Disposable {
 			throw new Error(`The session's working directory no longer exists: ${this.options.workingDirectory}. Start a new session from an existing folder.`);
 		}
 		const invocation = this.resolveCliTsInvocation();
+		this.spawnedInvocationFingerprint = cliTsInvocationFingerprint(invocation);
 		const args = [...invocation.args, '--serve'];
 		if (this.options.workingDirectory) {
 			args.push('--cwd', this.options.workingDirectory);
@@ -303,71 +436,8 @@ export class CliTsServeProcess extends Disposable {
 	 *  2. The packaged binary `extensions/backboard/bin/backboard-cli-ts(.exe)`.
 	 *  3. Dev fallback: `<resolved bun> run <appRoot>/cli-ts/src/entrypoints/cli.tsx`.
 	 */
-	private resolveCliTsInvocation(): { command: string; args: string[] } {
-		const envPath = process.env['BACKBOARD_CLI_TS_PATH']?.trim() || process.env['VSCODE_BACKBOARD_CLI_TS_PATH']?.trim();
-		if (envPath) {
-			return { command: envPath, args: [] };
-		}
-		const executable = process.platform === 'win32' ? 'backboard-cli-ts.exe' : 'backboard-cli-ts';
-		const appRoot = dirname(FileAccess.asFileUri('').fsPath);
-		const candidates = [
-			join(appRoot, 'extensions', 'backboard', 'bin', executable),
-			join(process.cwd(), 'extensions', 'backboard', 'bin', executable),
-		];
-		for (const candidate of candidates) {
-			if (fs.existsSync(candidate)) {
-				if (isCliTsExecutableCompatible(candidate)) {
-					return { command: candidate, args: [] };
-				}
-				this.logService.warn(`[cli-ts] skipping packaged binary for the wrong CPU architecture: ${candidate} (host=${process.platform}-${process.arch})`);
-			}
-		}
-		const devEntrypoint = join(appRoot, 'cli-ts', 'src', 'entrypoints', 'cli.tsx');
-		if (fs.existsSync(devEntrypoint)) {
-			const bunPath = this.resolveBunCommand();
-			if (bunPath) {
-				return { command: bunPath, args: ['run', devEntrypoint] };
-			}
-
-			throw new Error(`cli-ts dev entrypoint exists at ${devEntrypoint}, but Bun is not available. Install Bun, set BACKBOARD_BUN_PATH to a Bun executable, or build the packaged cli-ts binary with: npm --prefix extensions/backboard run package-cli-ts`);
-		}
-		throw new Error(`cli-ts binary not found. Build it with: npm --prefix extensions/backboard run package-cli-ts (looked at ${candidates.join(', ')})`);
-	}
-
-	private resolveBunCommand(): string | undefined {
-		const envBunPath = process.env['BACKBOARD_BUN_PATH']?.trim() || process.env['BUN_PATH']?.trim();
-		if (envBunPath && fs.existsSync(envBunPath)) {
-			return envBunPath;
-		}
-
-		const executable = process.platform === 'win32' ? 'bun.exe' : 'bun';
-		const candidates = [
-			process.env['BUN_INSTALL'] ? join(process.env['BUN_INSTALL'], 'bin', executable) : undefined,
-			join(os.homedir(), '.bun', 'bin', executable),
-			join(process.cwd(), 'node_modules', '.bin', executable),
-			'/opt/homebrew/bin/bun',
-			'/usr/local/bin/bun',
-		].filter((candidate): candidate is string => !!candidate);
-
-		for (const candidate of candidates) {
-			if (fs.existsSync(candidate)) {
-				return candidate;
-			}
-		}
-
-		const pathValue = process.env['PATH'] ?? '';
-		const pathSeparator = process.platform === 'win32' ? ';' : ':';
-		for (const dir of pathValue.split(pathSeparator)) {
-			if (!dir) {
-				continue;
-			}
-			const candidate = join(dir, executable);
-			if (fs.existsSync(candidate)) {
-				return candidate;
-			}
-		}
-
-		return undefined;
+	private resolveCliTsInvocation(): CliTsInvocation {
+		return resolveCliTsInvocation(this.logService);
 	}
 }
 

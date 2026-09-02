@@ -498,6 +498,16 @@ export class ChatListWidget extends Disposable {
 
 		// Handle scroll events (fire public event and manage scroll-down button)
 		this._register(this._tree.onDidScroll((e) => {
+			// Scroll lock follows a streaming response only until the user moves the
+			// viewport away from the bottom. An upward move is always user intent,
+			// even when it lands in the same event as a streaming height update. Other
+			// standalone scrollTop changes cover touch, keyboard, and scrollbar input.
+			if (this._scrollLock
+				&& e.scrollTopChanged
+				&& (e.scrollTop < e.oldScrollTop || (!e.heightChanged && !e.scrollHeightChanged))
+				&& !this.isScrolledToBottom) {
+				this._scrollLock = false;
+			}
 			this._onDidScroll.fire(e);
 			this.updateScrollDownButtonVisibility();
 		}));
@@ -747,13 +757,15 @@ export class ChatListWidget extends Disposable {
 		const perfEnabled = isChatPerfLoggingEnabled(this.logService);
 		const startedAt = perfEnabled ? performance.now() : 0;
 		let mountedItems = 0;
-		for (const item of items) {
-			if (this._tree.hasElement(item)) {
-				mountedItems++;
-				this._tree.rerender(item);
+		this._withPersistedAutoScroll(() => {
+			for (const item of items) {
+				if (this._tree.hasElement(item)) {
+					mountedItems++;
+					this._tree.rerender(item);
+				}
 			}
-		}
-		this.updateLastItemMinHeight();
+			this.updateLastItemMinHeight();
+		});
 		if (perfEnabled) {
 			logChatPerf(this.logService, 'list.rerenderItems', {
 				session: this._viewModel?.sessionResource.toString(),
@@ -876,7 +888,11 @@ export class ChatListWidget extends Disposable {
 			fn();
 			return;
 		}
-		const wasScrolledToBottom = this.isScrolledToBottom;
+		// Agent/tool workflows opt into scroll lock. A newly rendered tool card can
+		// increase the row height before its measured-height event arrives, making
+		// the list appear no longer at the bottom. Keep following until a user scroll
+		// event releases the lock; returning to the bottom naturally resumes follow.
+		const wasScrolledToBottom = this.isScrolledToBottom || this._scrollLock;
 		fn();
 		if (wasScrolledToBottom) {
 			this.scrollToEnd();

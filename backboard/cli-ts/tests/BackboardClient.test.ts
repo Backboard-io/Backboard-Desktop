@@ -80,6 +80,42 @@ describe("BackboardClient streaming transport", () => {
 		});
 	});
 
+	it("announces a streamed Write before its arguments finish", async () => {
+		globalThis.fetch = (async () =>
+			new Response(
+				[
+					{
+						type: "provider_chunk",
+						choices: [{ delta: { tool_calls: [{ index: 0, function: { name: "Wr", arguments: '{"file_path":' } }] } }],
+					},
+					{
+						type: "provider_chunk",
+						choices: [{ delta: { tool_calls: [{ index: 0, function: { name: "ite", arguments: '"large.ts"' } }] } }],
+					},
+				].map(payload => `data: ${JSON.stringify(payload)}\n\n`).join(""),
+				{ status: 200 },
+			)) as unknown as typeof fetch;
+
+		const client = new BackboardClient({
+			apiKey: "test",
+			apiUrl: "https://api.example.test",
+		});
+		const events = [];
+		for await (const event of client.runMessage({
+			content: "write a large file",
+			tools: [{
+				type: "function",
+				function: { name: "Write", description: "Write a file", parameters: {} },
+			}],
+		})) {
+			events.push(event);
+		}
+
+		expect(events.filter(event => event.kind === "tool_started")).toEqual([
+			expect.objectContaining({ kind: "tool_started", name: "Write" }),
+		]);
+	});
+
 	it("wraps stream read failures with endpoint context", async () => {
 		globalThis.fetch = (async () =>
 			new Response(

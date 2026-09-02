@@ -8,13 +8,12 @@ import { Disposable, DisposableStore, IDisposable, MutableDisposable } from '../
 import { autorun } from '../../../../../base/common/observable.js';
 import * as nls from '../../../../../nls.js';
 import { IActionViewItemService } from '../../../../../platform/actions/browser/actionViewItemService.js';
-import { Action2, MenuId, registerAction2 } from '../../../../../platform/actions/common/actions.js';
+import { Action2, registerAction2 } from '../../../../../platform/actions/common/actions.js';
 import { agentHostAgentPickerStorageKey, resolveAgentHostAgent } from '../../../../../platform/agentHost/common/customAgents.js';
 import { ContextKeyExpr } from '../../../../../platform/contextkey/common/contextkey.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../../../workbench/common/contributions.js';
 import { IChatWidgetService } from '../../../../../workbench/contrib/chat/browser/chat.js';
-import { ChatContextKeyExprs, ChatContextKeys } from '../../../../../workbench/contrib/chat/common/actions/chatContextKeys.js';
 import { ChatMode, IChatMode } from '../../../../../workbench/contrib/chat/common/chatModes.js';
 import { IChatService } from '../../../../../workbench/contrib/chat/common/chatService/chatService.js';
 import { logChangesToStateModel } from '../../../../../workbench/contrib/chat/common/model/chatModel.js';
@@ -22,7 +21,6 @@ import { ChatModeKind } from '../../../../../workbench/contrib/chat/common/const
 import { Menus } from '../../../../browser/menus.js';
 import { IAgentHostSessionsProvider, isAgentHostProvider, LOCAL_AGENT_HOST_PROVIDER_ID, REMOTE_AGENT_HOST_PROVIDER_RE } from '../../../../common/agentHostSessionsProvider.js';
 import { ActiveSessionProviderIdContext, IsPhoneLayoutContext } from '../../../../common/contextkeys.js';
-import { IsSessionsWindowContext } from '../../../../../workbench/common/contextkeys.js';
 import { ISessionsProvidersService } from '../../../../services/sessions/browser/sessionsProvidersService.js';
 import { ISession, ISessionAgentRef, SessionStatus } from '../../../../services/sessions/common/session.js';
 import { ISessionsService } from '../../../../services/sessions/browser/sessionsService.js';
@@ -45,21 +43,12 @@ registerAction2(class extends Action2 {
 			id: 'sessions.agentHost.agentPicker',
 			title: nls.localize2('agentHostAgentPicker', "Agent"),
 			f1: false,
-			menu: [{
+			menu: {
 				id: Menus.NewSessionConfig,
 				group: 'navigation',
 				order: -1,
 				when: ContextKeyExpr.and(IsActiveSessionAgentHost, IsPhoneLayoutContext.negate()),
-			}, {
-				// Running-session input bar — only inside the dedicated
-				// Agents Window. The regular VS Code chat editor uses the
-				// built-in mode picker for Agent Host custom agents.
-				id: MenuId.ChatInput,
-				group: 'navigation',
-				order: 1,
-				// Hide the agent picker while a delegation (continue in) target is pending.
-				when: ContextKeyExpr.and(ChatContextKeyExprs.isAgentHostSession, IsSessionsWindowContext, IsPhoneLayoutContext.negate(), ChatContextKeys.hasPendingDelegationTarget.negate()),
-			}],
+			},
 		});
 	}
 	override async run(): Promise<void> { /* handled by action view item */ }
@@ -151,7 +140,6 @@ class AgentHostAgentPickerContribution extends Disposable implements IWorkbenchC
 		};
 
 		this._register(actionViewItemService.register(Menus.NewSessionConfig, 'sessions.agentHost.agentPicker', factory));
-		this._register(actionViewItemService.register(MenuId.ChatInput, 'sessions.agentHost.agentPicker', factory));
 	}
 
 	private _getProvider(session: ISession | undefined, sessionsProvidersService: ISessionsProvidersService): IAgentHostSessionsProvider | undefined {

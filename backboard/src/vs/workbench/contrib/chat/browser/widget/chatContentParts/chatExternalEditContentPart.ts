@@ -883,6 +883,8 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 			other.beforeContentUri?.toString() === this.edit.beforeContentUri?.toString() &&
 			other.afterContentUri?.toString() === this.edit.afterContentUri?.toString() &&
 			other.undoStopId === this.edit.undoStopId &&
+			other.mutationBatchId === this.edit.mutationBatchId &&
+			other.mutationBatchFileCount === this.edit.mutationBatchFileCount &&
 			(other.diff?.added ?? 0) === (this.edit.diff?.added ?? 0) &&
 			(other.diff?.removed ?? 0) === (this.edit.diff?.removed ?? 0)
 		);

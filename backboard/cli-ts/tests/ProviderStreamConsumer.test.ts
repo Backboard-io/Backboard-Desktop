@@ -13,6 +13,8 @@ import type { ProviderEvent } from "../src/providers/backboard/types.ts";
 function stubAssistant(): AssistantAccumulator {
 	return {
 		appendDelta: () => {},
+		appendReasoning: () => {},
+		flushReasoning: () => {},
 		finalize: () => {},
 		discardPartial: () => {},
 	} as unknown as AssistantAccumulator;
@@ -37,6 +39,65 @@ async function* streamOf(
 }
 
 describe("ProviderStreamConsumer", () => {
+	it("records provider tool-batch finalization timing", async () => {
+		const bus = new EventBus();
+		const timings = new Map<string, number[]>();
+		bus.on("performance:timing", (event) => {
+			const recorded = timings.get(event.phase) ?? [];
+			recorded.push(event.durationMs);
+			timings.set(event.phase, recorded);
+		});
+		const consumer = new ProviderStreamConsumer(bus, new Session("sess_test"));
+		const result = await consumer.consumeWithRetry(
+			() =>
+				streamOf([
+					{ kind: "tool_started", id: "call_1", name: "Read" },
+					{
+						kind: "requires_action",
+						runId: "run_1",
+						calls: [{ id: "call_1", name: "Read", input: {} }],
+					},
+				]),
+			stubAssistant(),
+			new AbortController().signal,
+		);
+
+		expect(result?.calls.map((call) => call.id)).toEqual(["call_1"]);
+		expect(timings.get("provider_tool_announcement")).toHaveLength(1);
+		expect(timings.get("provider_tool_batch_finalize")).toHaveLength(1);
+		expect(
+			timings.get("provider_tool_announcement")?.[0],
+		).toBeGreaterThanOrEqual(0);
+		expect(
+			timings.get("provider_tool_batch_finalize")?.[0],
+		).toBeGreaterThanOrEqual(0);
+	});
+
+	it("measures the whole silent wait when no advisory tool start arrives", async () => {
+		const bus = new EventBus();
+		const phases: string[] = [];
+		bus.on("performance:timing", (event) => phases.push(event.phase));
+		const consumer = new ProviderStreamConsumer(bus, new Session("sess_test"));
+
+		await consumer.consumeWithRetry(
+			() =>
+				streamOf([
+					{
+						kind: "requires_action",
+						runId: "run_1",
+						calls: [{ id: "call_1", name: "Write", input: {} }],
+					},
+				]),
+			stubAssistant(),
+			new AbortController().signal,
+		);
+
+		expect(phases).toEqual([
+			"provider_tool_announcement",
+			"provider_tool_batch_finalize",
+		]);
+	});
+
 	it("resets the early round on a terminal (non-retryable) stream failure", async () => {
 		const consumer = new ProviderStreamConsumer(
 			new EventBus(),
@@ -364,6 +425,7 @@ describe("ProviderStreamConsumer", () => {
 		const assistant = {
 			appendDelta: (text: string) => deltas.push(text),
 			appendReasoning: () => {},
+			flushReasoning: () => {},
 			finalize: (_calls: unknown[], text?: string) => {
 				finalizedText = text ?? "";
 			},
@@ -430,6 +492,7 @@ describe("ProviderStreamConsumer", () => {
 		const assistant = {
 			appendDelta: () => {},
 			appendReasoning: () => {},
+			flushReasoning: () => {},
 			finalize: (_calls: unknown[], text?: string) => {
 				finalizedText = text ?? "";
 			},

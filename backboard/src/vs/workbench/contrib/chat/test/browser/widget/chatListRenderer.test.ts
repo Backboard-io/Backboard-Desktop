@@ -4,12 +4,16 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
+import { timeout } from '../../../../../../base/common/async.js';
 import { mainWindow } from '../../../../../../base/browser/window.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
+import { URI } from '../../../../../../base/common/uri.js';
 import {
 	getBackboardTurnChronologicalWorkNodes,
 	getBackboardTurnFinalContentIndexes,
+	getBackboardSubagentSummary,
 	hasBackboardTurnWorkContent,
+	isBackboardMutationBatchEdit,
 	reconcileBackboardTurnNodeOrder,
 	resolveBackboardTurnExpandedState,
 	syncBackboardSubagentStrip,
@@ -40,25 +44,29 @@ suite('ChatListRenderer', () => {
 	});
 
 	suite('Backboard cursor transcript turn folding', () => {
-		test('packs large subagent fan-out into a stable expandable strip', () => {
+		test('packs parallel subagents behind one stable aggregate disclosure', () => {
 			const container = mainWindow.document.createElement('div');
 			mainWindow.document.body.appendChild(container);
 			const items = Array.from({ length: 12 }, (_, index) => ({
 				node: mainWindow.document.createElement('div'),
-				active: false,
+				active: index < 2,
+				status: index < 2 ? 'running' : 'complete',
 			}));
 
 			syncBackboardSubagentStrip(container, items);
 			const strip = container.querySelector<HTMLElement>(':scope > .chat-subagent-strip');
-			const overflow = strip?.querySelector<HTMLButtonElement>(':scope > .chat-subagent-overflow');
+			const summary = strip?.querySelector<HTMLButtonElement>(':scope > .chat-subagent-summary');
+			const details = strip?.querySelector<HTMLElement>(':scope > .chat-subagent-items');
 			assert.ok(strip);
-			assert.ok(overflow);
-			assert.strictEqual(items.filter(item => !item.node.hidden).length, 3);
-			assert.strictEqual(overflow.textContent, 'and 9 other subagents finished');
+			assert.ok(summary);
+			assert.ok(details);
+			assert.strictEqual(summary.querySelector('.chat-subagent-summary-label')?.textContent, '12 workers · 2 running · 10 complete');
+			assert.strictEqual(details.hidden, true);
+			assert.strictEqual(summary.ariaExpanded, 'false');
 
-			overflow.click();
-			assert.strictEqual(items.filter(item => !item.node.hidden).length, 12);
-			assert.strictEqual(overflow.textContent, 'Show fewer subagents');
+			summary.click();
+			assert.strictEqual(details.hidden, false);
+			assert.strictEqual(summary.ariaExpanded, 'true');
 
 			items[1].node.tabIndex = 0;
 			items[1].node.focus();
@@ -68,22 +76,36 @@ suite('ChatListRenderer', () => {
 			const stableSyncMutations = observer.takeRecords();
 			observer.disconnect();
 			assert.strictEqual(container.querySelector(':scope > .chat-subagent-strip'), strip, 'Streaming updates should reuse the strip DOM');
-			assert.strictEqual(items.filter(item => !item.node.hidden).length, 12, 'A rerender should preserve the expanded choice');
+			assert.strictEqual(details.hidden, false, 'A rerender should preserve the expanded choice');
 			assert.strictEqual(stableSyncMutations.length, 0, 'An unchanged streaming update must not reparent worker rows');
 			assert.strictEqual(mainWindow.document.activeElement, items[1].node, 'Stable reconciliation must preserve focus inside the active worker row');
 			container.remove();
 		});
 
-		test('labels hidden active subagents without claiming they finished', () => {
-			const container = mainWindow.document.createElement('div');
-			const items = Array.from({ length: 5 }, (_, index) => ({
-				node: mainWindow.document.createElement('div'),
-				active: index >= 3,
-			}));
+		test('summarizes running, completed, and failed workers without internal details', () => {
+			assert.deepStrictEqual(getBackboardSubagentSummary([
+				{ active: true, status: 'running' },
+				{ active: false, status: 'integrated' },
+				{ active: false, status: 'conflict' },
+			]), {
+				label: '3 workers · 1 running · 1 complete · 1 needs attention',
+				status: 'attention',
+			});
+		});
 
-			syncBackboardSubagentStrip(container, items);
-			const overflow = container.querySelector<HTMLButtonElement>('.chat-subagent-overflow');
-			assert.strictEqual(overflow?.textContent, 'and 2 other subagents working');
+		test('throttles the visible worker summary to ten updates per second', async () => {
+			const container = mainWindow.document.createElement('div');
+			const node = mainWindow.document.createElement('div');
+			mainWindow.document.body.appendChild(container);
+			syncBackboardSubagentStrip(container, [{ node, active: true, status: 'running' }]);
+			const label = container.querySelector<HTMLElement>('.chat-subagent-summary-label');
+			assert.strictEqual(label?.textContent, '1 worker · 1 running');
+
+			syncBackboardSubagentStrip(container, [{ node, active: false, status: 'integrated' }]);
+			assert.strictEqual(label?.textContent, '1 worker · 1 running', 'Rapid lifecycle churn should not immediately mutate the visible row');
+			await timeout(110);
+			assert.strictEqual(label?.textContent, '1 worker · 1 complete');
+			container.remove();
 		});
 
 		test('stable timeline performs no moves and a late diff needs one insertion', () => {
@@ -147,7 +169,8 @@ suite('ChatListRenderer', () => {
 				shouldSplitBackboardThinkingBeforeEdit('externalEdit', true, false),
 				shouldSplitBackboardThinkingBeforeEdit('externalEdit', true, true),
 				shouldSplitBackboardThinkingBeforeEdit('externalEdit', false, false),
-			], [true, true, false, false], 'Only a newly mounted standalone Backboard edit should split the active Thought root');
+				shouldSplitBackboardThinkingBeforeEdit('externalEdit', true, false, true),
+			], [true, true, false, false, false], 'Only a newly mounted standalone Backboard edit should split the active Thought root');
 		});
 
 		test('keeps final assistant text outside while folding trailing work and support', () => {
@@ -227,6 +250,20 @@ suite('ChatListRenderer', () => {
 				shouldRenderBackboardEditStandalone('toolInvocation', true),
 				shouldRenderBackboardEditStandalone('textEditGroup', false),
 			], [true, true, false, false]);
+		});
+
+		test('recognizes only explicitly batched Backboard external edits for mutation grouping', () => {
+			const batched = {
+				kind: 'externalEdit' as const,
+				uri: URI.file('/workspace/a.ts'),
+				editKind: 'edit' as const,
+				mutationBatchId: 'turn-1:mutation:write-a',
+			};
+			assert.deepStrictEqual([
+				isBackboardMutationBatchEdit(batched, true),
+				isBackboardMutationBatchEdit({ ...batched, mutationBatchId: undefined }, true),
+				isBackboardMutationBatchEdit(batched, false),
+			], [true, false, false]);
 		});
 	});
 });

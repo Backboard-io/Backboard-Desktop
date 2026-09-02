@@ -391,6 +391,12 @@ export interface IModalEditorPartOptions {
 export interface IModalEditorOptions {
 
 	/**
+	 * When true, the modal editor fills the window and hides its generic chrome.
+	 * The editor is responsible for providing an in-content close or back action.
+	 */
+	readonly fullWindow?: boolean;
+
+	/**
 	 * When true, the modal editor renders a simplified header:
 	 * uses the editor background, hides the title icon, removes the
 	 * bottom border and uses a slightly taller fixed height. Useful

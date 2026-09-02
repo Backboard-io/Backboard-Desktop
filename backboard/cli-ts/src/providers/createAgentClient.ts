@@ -5,7 +5,16 @@ import type { AgentClient } from "./AgentClient.ts";
 import { BackboardClient } from "./backboard/BackboardClient.ts";
 import { ByokClient } from "./byok/ByokClient.ts";
 import { ByokConversationStore } from "./byok/ByokConversationStore.ts";
-import { ClientRouter } from "./ClientRouter.ts";
+import {
+	CHATGPT_SUBSCRIPTION_PROVIDER,
+	CHATGPT_SUBSCRIPTION_THREAD_PREFIX,
+	CLAUDE_SUBSCRIPTION_PROVIDER,
+	CLAUDE_SUBSCRIPTION_THREAD_PREFIX,
+	ClientRouter,
+	type SubscriptionClientRoute,
+} from "./ClientRouter.ts";
+import { ClaudeSubscriptionClient } from "./subscription/ClaudeSubscriptionClient.ts";
+import { ClaudeSubscriptionConversationStore } from "./subscription/ClaudeSubscriptionConversationStore.ts";
 import { CodexSubscriptionClient } from "./subscription/CodexSubscriptionClient.ts";
 import { SubscriptionConversationStore } from "./subscription/SubscriptionConversationStore.ts";
 import { SubscriptionMemoryStore } from "./subscription/SubscriptionMemoryStore.ts";
@@ -33,7 +42,7 @@ export function createAgentClient(
 		serverLog,
 		new ByokConversationStore(conversationBaseDir),
 	);
-	const subscription = config.auth.chatgptSubscription
+	const chatGptSubscription = config.auth.chatgptSubscription
 		? new CodexSubscriptionClient({
 				authFile: config.auth.chatgptSubscription.authFile,
 				conversationStore: new SubscriptionConversationStore(
@@ -42,11 +51,33 @@ export function createAgentClient(
 				memoryStore: new SubscriptionMemoryStore(conversationBaseDir),
 			})
 		: undefined;
+	const claudeSubscription = config.auth.claudeSubscription
+		? new ClaudeSubscriptionClient({
+				cwd: config.cwd,
+				conversationStore: new ClaudeSubscriptionConversationStore(
+					conversationBaseDir,
+				),
+				memoryStore: new SubscriptionMemoryStore(conversationBaseDir),
+			})
+		: undefined;
+	const subscriptions: Record<string, SubscriptionClientRoute> = {};
+	if (chatGptSubscription) {
+		subscriptions[CHATGPT_SUBSCRIPTION_PROVIDER] = {
+			client: chatGptSubscription,
+			threadPrefix: CHATGPT_SUBSCRIPTION_THREAD_PREFIX,
+		};
+	}
+	if (claudeSubscription) {
+		subscriptions[CLAUDE_SUBSCRIPTION_PROVIDER] = {
+			client: claudeSubscription,
+			threadPrefix: CLAUDE_SUBSCRIPTION_THREAD_PREFIX,
+		};
+	}
 
 	return new ClientRouter({
 		backboard,
 		byok,
-		...(subscription ? { subscription } : {}),
+		...(Object.keys(subscriptions).length > 0 ? { subscriptions } : {}),
 		getModel: () => config.model,
 		hasBackboardAuth: () => config.hasBackboardAuth,
 		hasKeyFor: (provider) =>

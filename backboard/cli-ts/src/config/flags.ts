@@ -17,6 +17,10 @@ export interface CliFlags {
 	logout: boolean;
 	subscriptionLogin: boolean;
 	subscriptionLogout: boolean;
+	claudeSubscriptionLogin: boolean;
+	claudeSubscriptionEnable: boolean;
+	claudeSubscriptionLogout: boolean;
+	claudeSubscriptionStatus: boolean;
 	help: boolean;
 	version: boolean;
 }
@@ -33,6 +37,10 @@ export function parseFlags(argv: string[]): CliFlags {
 		logout: false,
 		subscriptionLogin: false,
 		subscriptionLogout: false,
+		claudeSubscriptionLogin: false,
+		claudeSubscriptionEnable: false,
+		claudeSubscriptionLogout: false,
+		claudeSubscriptionStatus: false,
 		help: false,
 		version: false,
 	};
@@ -46,6 +54,26 @@ export function parseFlags(argv: string[]): CliFlags {
 		}
 		if (arg === "subscription" && argv[i + 1] === "logout") {
 			flags.subscriptionLogout = true;
+			i++;
+			continue;
+		}
+		if (arg === "claude-subscription" && argv[i + 1] === "login") {
+			flags.claudeSubscriptionLogin = true;
+			i++;
+			continue;
+		}
+		if (arg === "claude-subscription" && argv[i + 1] === "enable") {
+			flags.claudeSubscriptionEnable = true;
+			i++;
+			continue;
+		}
+		if (arg === "claude-subscription" && argv[i + 1] === "logout") {
+			flags.claudeSubscriptionLogout = true;
+			i++;
+			continue;
+		}
+		if (arg === "claude-subscription" && argv[i + 1] === "status") {
+			flags.claudeSubscriptionStatus = true;
 			i++;
 			continue;
 		}
@@ -160,6 +188,15 @@ export function parseFlags(argv: string[]): CliFlags {
 				break;
 			case "subscription-logout":
 				flags.subscriptionLogout = true;
+				break;
+			case "claude-subscription-login":
+				flags.claudeSubscriptionLogin = true;
+				break;
+			case "claude-subscription-enable":
+				flags.claudeSubscriptionEnable = true;
+				break;
+			case "claude-subscription-logout":
+				flags.claudeSubscriptionLogout = true;
 				break;
 			case "help":
 				flags.help = true;

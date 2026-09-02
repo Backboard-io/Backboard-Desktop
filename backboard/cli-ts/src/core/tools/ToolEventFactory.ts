@@ -2,8 +2,9 @@ import type { AgentEvent, ToolCallRef } from "../bus/events.ts";
 import { requireAgentToolOutput } from "./AgentToolOutputGuard.ts";
 import { clampSummary, genericInputSummary } from "./inputSummary.ts";
 import type { Tool } from "./Tool.ts";
-import type { FileEditPreview } from "./ToolResult.ts";
+import type { FileEditPreview, TerminalToolResult } from "./ToolResult.ts";
 import type { ToolResultDetailLine } from "./ToolResultDetail.ts";
+import { backboardToolUiInput, backboardToolUiResult } from "./ToolUiData.ts";
 
 export function toolStartEvent(
 	ref: ToolCallRef,
@@ -14,12 +15,14 @@ export function toolStartEvent(
 	const name = tool?.displayName ?? ref.name;
 	const agentMode =
 		tool?.agentName === "agent" ? agentModeFromInput(input) : undefined;
+	const toolUi = tool ? backboardToolUiInput(tool.agentName, input) : undefined;
 	return {
 		type: "tool:start",
 		toolCallId: ref.id,
 		name,
 		inputSummary,
 		...(agentMode ? { agentMode } : {}),
+		...(toolUi ? { toolUi } : {}),
 	};
 }
 
@@ -29,11 +32,13 @@ export function toolPendingEvent(
 	input?: unknown,
 	tool?: Tool,
 ): AgentEvent {
+	const toolUi = tool ? backboardToolUiInput(tool.agentName, input) : undefined;
 	return {
 		type: "tool:pending",
 		toolCallId,
 		name: displayName,
 		inputSummary: summarizeToolInput(input, tool),
+		...(toolUi ? { toolUi } : {}),
 	};
 }
 
@@ -42,11 +47,15 @@ export function toolErrorStartEvent(
 	displayName: string | undefined,
 	tool?: Tool,
 ): AgentEvent {
+	const toolUi = tool
+		? backboardToolUiInput(tool.agentName, ref.input)
+		: undefined;
 	return {
 		type: "tool:start",
 		toolCallId: ref.id,
 		name: displayName ?? ref.name,
 		inputSummary: summarizeToolInput(ref.input, tool),
+		...(toolUi ? { toolUi } : {}),
 	};
 }
 
@@ -59,13 +68,16 @@ function agentModeFromInput(input: unknown): "worker" | "rlm" | undefined {
 export function toolResultEvent(
 	ref: ToolCallRef,
 	tool: Tool,
+	input: unknown,
 	output: unknown,
 	title: string,
 	detail?: string,
 	detailLines?: ToolResultDetailLine[],
 	fileEdits?: FileEditPreview[],
+	terminalOutput?: TerminalToolResult,
 ): AgentEvent {
 	const name = tool.displayName;
+	const toolUi = backboardToolUiResult(tool.agentName, input, output);
 	if (tool.agentName === "agent") {
 		return {
 			type: "tool:result",
@@ -75,6 +87,7 @@ export function toolResultEvent(
 			...(detail ? { detail } : {}),
 			...(detailLines ? { detailLines } : {}),
 			agentOutput: requireAgentToolOutput(output),
+			...(toolUi ? { toolUi } : {}),
 		};
 	}
 	return {
@@ -85,6 +98,8 @@ export function toolResultEvent(
 		...(detail ? { detail } : {}),
 		...(detailLines ? { detailLines } : {}),
 		...(fileEdits?.length ? { fileEdits } : {}),
+		...(terminalOutput ? { terminalOutput } : {}),
+		...(toolUi ? { toolUi } : {}),
 	};
 }
 

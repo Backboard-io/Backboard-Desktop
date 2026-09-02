@@ -1,4 +1,6 @@
 export const EXECUTE_MAX_OUTPUT = 40_000;
+export const EXECUTE_TERMINAL_OUTPUT_MAX = 80_000;
+export const EXECUTE_TERMINAL_PROGRESS_FLUSH_MS = 32;
 export const EXECUTE_DEFAULT_TIMEOUT_SECONDS = 90;
 export const EXECUTE_FIRE_AND_FORGET_LOG_PREFIX = "backboard-execute-";
 // How many lines of the command / of each output stream to surface in the

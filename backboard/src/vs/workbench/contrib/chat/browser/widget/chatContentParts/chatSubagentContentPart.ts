@@ -446,12 +446,9 @@ export class ChatSubagentContentPart extends ChatCollapsibleContentPart implemen
 		if (data.workerStatus) {
 			items.push({ label: localizedWorkerStatus(data.workerStatus), className: 'chat-subagent-worker-status' });
 		}
-		if (data.branch) {
-			items.push({ label: localize('chat.subagent.workerBranch', 'Branch: {0}', data.branch), title: data.branch });
-		}
-		if (data.worktreePath) {
-			items.push({ label: localize('chat.subagent.workerWorktree', 'Worktree: {0}', data.worktreePath), title: data.worktreePath });
-		}
+		// Branches, worktree paths, and integration commit ids are implementation
+		// details. Keeping them out of the transcript prevents an isolated worker
+		// checkout from looking like a project the user should open or manage.
 		if (data.changedFileCount !== undefined) {
 			items.push({
 				label: data.changedFileCount === 1
@@ -462,9 +459,6 @@ export class ChatSubagentContentPart extends ChatCollapsibleContentPart implemen
 		const elapsed = workerElapsedSeconds(data.startedAt, data.finishedAt);
 		if (elapsed !== undefined) {
 			items.push({ label: localize('chat.subagent.workerElapsed', 'Elapsed: {0}s', elapsed) });
-		}
-		if (data.integrationResult) {
-			items.push({ label: data.integrationResult, className: 'chat-subagent-worker-integration' });
 		}
 		if (data.conflictingFiles?.length) {
 			items.push({
@@ -622,6 +616,25 @@ export class ChatSubagentContentPart extends ChatCollapsibleContentPart implemen
 
 	public getIsActive(): boolean {
 		return this.isActive;
+	}
+
+	/**
+	 * A detached launcher completing only means its durable handle was returned;
+	 * the child remains live until worker lifecycle metadata reaches a terminal
+	 * state. Parent-turn finalization must not turn that handle acknowledgement
+	 * into a false "Completed" worker row.
+	 */
+	public shouldRemainActiveAfterParentTurn(): boolean {
+		const data = this.toolInvocation.toolSpecificData?.kind === 'subagent'
+			? this.toolInvocation.toolSpecificData
+			: undefined;
+		return data?.detached === true
+			&& (!data.workerStatus || data.workerStatus === 'Running' || data.workerStatus === 'Integrating');
+	}
+
+	/** Compact lifecycle value consumed by the aggregate worker disclosure. */
+	public getWorkerStatusKind(): string {
+		return this.getWorkerStatusPresentation().kind;
 	}
 
 	public get hasToolsWaitingForConfirmation(): boolean {
@@ -931,7 +944,7 @@ export class ChatSubagentContentPart extends ChatCollapsibleContentPart implemen
 						.filter((part): part is { kind: 'text'; value: string } => part.kind === 'text')
 						.map(part => part.value);
 
-					if (textParts.length > 0) {
+					if (textParts.length > 0 && !this.shouldRemainActiveAfterParentTurn()) {
 						this.renderResultText(textParts.join('\n'));
 					}
 
@@ -948,8 +961,11 @@ export class ChatSubagentContentPart extends ChatCollapsibleContentPart implemen
 					}
 					this.renderWorkerMetadata();
 
-					// Mark as inactive when the tool completes
-					this.markAsInactive();
+					// AgentSpawn returns a handle immediately. Its parent invocation is
+					// complete, but only child lifecycle status can finish the worker.
+					if (!this.shouldRemainActiveAfterParentTurn()) {
+						this.markAsInactive();
+					}
 				} else if (wasStreaming && state.type !== IChatToolInvocation.StateKind.Streaming) {
 					wasStreaming = false;
 					// Update things that change when tool is done streaming
@@ -987,11 +1003,16 @@ export class ChatSubagentContentPart extends ChatCollapsibleContentPart implemen
 					this.renderWorkerMetadata();
 				}
 			}));
-		} else if (toolInvocation.toolSpecificData?.kind === 'subagent' && toolInvocation.toolSpecificData.result) {
-			// Render the persisted result for serialized invocations
-			this.renderResultText(toolInvocation.toolSpecificData.result);
-			// Already complete, mark as inactive
-			this.markAsInactive();
+		} else if (toolInvocation.toolSpecificData?.kind === 'subagent') {
+			// Render the persisted result for serialized invocations. Detached
+			// handle acknowledgements stay hidden while the child is still live.
+			if (!this.shouldRemainActiveAfterParentTurn()) {
+				if (toolInvocation.toolSpecificData.result) {
+					this.renderResultText(toolInvocation.toolSpecificData.result);
+				}
+				// Already complete, mark as inactive
+				this.markAsInactive();
+			}
 		}
 	}
 

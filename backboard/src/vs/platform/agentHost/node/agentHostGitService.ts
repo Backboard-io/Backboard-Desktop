@@ -206,6 +206,7 @@ export function getBranchCompletions(branches: readonly string[], options?: { re
 
 export class AgentHostGitService implements IAgentHostGitService {
 	declare readonly _serviceBrand: undefined;
+	private readonly _defaultBranchCache = new Map<string, { readonly expiresAt: number; readonly value: Promise<string | undefined> }>();
 
 	constructor(
 		@IFileService private readonly _fileService: IFileService,
@@ -224,8 +225,23 @@ export class AgentHostGitService implements IAgentHostGitService {
 	}
 
 	async getDefaultBranch(workingDirectory: URI): Promise<string | undefined> {
+		const key = workingDirectory.fsPath;
+		const cached = this._defaultBranchCache.get(key);
+		const now = Date.now();
+		if (cached && cached.expiresAt > now) {
+			return cached.value;
+		}
+
+		const value = this._resolveDefaultBranch(workingDirectory);
+		this._defaultBranchCache.set(key, { expiresAt: now + 30_000, value });
+		return value;
+	}
+
+	private async _resolveDefaultBranch(workingDirectory: URI): Promise<string | undefined> {
 		// Try to read the default branch from the remote HEAD reference
-		const remoteRef = (await this._runGit(workingDirectory, ['symbolic-ref', 'refs/remotes/origin/HEAD']))?.trim();
+		// A missing origin/HEAD is normal for local repositories and must not emit a
+		// warning every time session metadata refreshes.
+		const remoteRef = (await this._runGit(workingDirectory, ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'], { logFailure: false }))?.trim();
 		if (remoteRef) {
 			if (!remoteRef.startsWith('refs/remotes/origin/')) {
 				return remoteRef;
@@ -598,7 +614,7 @@ export class AgentHostGitService implements IAgentHostGitService {
 		] = await Promise.all([
 			this._runGit(workingDirectory, ['status', '-b', '--porcelain=v2']),
 			this._runGit(workingDirectory, ['remote', '-v']),
-			this._runGit(workingDirectory, ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD']),
+			this._runGit(workingDirectory, ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'], { logFailure: false }),
 		]);
 
 		const status = parseGitStatusV2(statusOutput);
@@ -638,7 +654,7 @@ export class AgentHostGitService implements IAgentHostGitService {
 		return stripUndefined(result);
 	}
 
-	private _runGit(workingDirectory: URI, args: readonly string[], options?: { readonly timeout?: number; readonly throwOnError?: boolean; readonly env?: Record<string, string>; readonly maxBuffer?: number }): Promise<string | undefined> {
+	private _runGit(workingDirectory: URI, args: readonly string[], options?: { readonly timeout?: number; readonly throwOnError?: boolean; readonly logFailure?: boolean; readonly env?: Record<string, string>; readonly maxBuffer?: number }): Promise<string | undefined> {
 		this._logService.trace(`[agentHostGitService] > git ${args.join(' ')}`);
 
 		return new Promise((resolve, reject) => {
@@ -657,7 +673,7 @@ export class AgentHostGitService implements IAgentHostGitService {
 					// stderr is summarized in the thrown error message to keep
 					// it readable; log the full unmodified output here so the
 					// raw progress/diagnostic text is still available.
-					if (stderr) {
+					if (stderr && options?.logFailure !== false) {
 						this._logService.warn(`[agentHostGitService] > git ${args.join(' ')} failed; full stderr:\n${stderr}`);
 					}
 					if (options?.throwOnError) {

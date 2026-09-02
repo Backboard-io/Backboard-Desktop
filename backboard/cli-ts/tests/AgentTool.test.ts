@@ -317,9 +317,177 @@ describe("AgentTool execution", () => {
 			changedFileCount: 1,
 			status: "Integrated",
 		});
+		expect(result.forLLM).toContain(
+			"already present in the coordinator workspace at /coordinator project",
+		);
+		expect(result.forLLM).toContain(
+			"Do not copy, merge, cherry-pick, re-apply, or read files from the private worker worktree",
+		);
+		expect(result.forLLM).not.toContain("Worktree: /workers/$&/agent_a");
+		expect(result.data.report).toContain(
+			"Integration: completed in coordinator workspace",
+		);
+		expect(result.data.report).not.toContain("Worktree:");
+		expect(result.data.report).not.toContain("Branch:");
+	});
+
+	it("treats unfinished write integration as failure without exposing private paths", async () => {
+		for (const integrationStatus of ["pending", "skipped"] as const) {
+			const workspaceManager: NonNullable<AgentToolDeps["workspaceManager"]> = {
+				list: () => [],
+				runWorker: async (params, run) => {
+					const record: WorkerWorkspaceRecord = {
+						workerId: params.workerId,
+						sequence: 0,
+						parentSessionId: params.parentSessionId,
+						parentToolCallId: params.parentToolCallId,
+						taskPrompt: params.taskPrompt,
+						readOnly: false,
+						coordinatorCwd: "/coordinator",
+						repositoryRoot: "/repo",
+						branch: "agent/private/result",
+						worktreePath: "/private/worktrees/result",
+						startingCommit: "start",
+						resultCommit: "result",
+						changedFiles: ["src/result.ts"],
+						startedAt: new Date(0).toISOString(),
+						finishedAt: new Date(1).toISOString(),
+						executionStatus: "completed",
+						integrationStatus,
+						error: "Coordinator index is busy; result remains recoverable.",
+					};
+					return {
+						result: await run({
+							record,
+							cwd: record.worktreePath as string,
+							isolated: true,
+							signal: params.signal,
+						}),
+						workspace: record,
+					};
+				},
+			};
+			const { tool } = makeTool({ workspaceManager });
+			const result = await tool.execute(
+				{ prompt: "edit files" },
+				ctx(0, { toolCallId: `agent_${integrationStatus}` }),
+			);
+
+			expect(result.data.status).toBe("failed");
+			expect(result.forLLM).toContain("Error: Agent worker failed");
+			expect(result.forLLM).toContain("result remains recoverable");
+			expect(result.forLLM).not.toContain("agent/private/result");
+			expect(result.forLLM).not.toContain("/private/worktrees/result");
+			expect(result.data.report).not.toContain("Branch:");
+			expect(result.data.report).not.toContain("Worktree:");
+		}
+	});
+
+	it("projects terminal integration authority after cancellation", async () => {
+		const bus = new EventBus();
+		const statuses: string[] = [];
+		const ends: string[] = [];
+		bus.on("agent:child_status", (event) =>
+			statuses.push(event.workspace.status),
+		);
+		bus.on("agent:child_end", (event) => ends.push(event.status));
+		const controller = new AbortController();
+		controller.abort();
+		const workspaceManager: NonNullable<AgentToolDeps["workspaceManager"]> = {
+			list: () => [],
+			runWorker: async (params, run) => {
+				const record: WorkerWorkspaceRecord = {
+					workerId: params.workerId,
+					sequence: 0,
+					parentSessionId: params.parentSessionId,
+					parentToolCallId: params.parentToolCallId,
+					taskPrompt: params.taskPrompt,
+					readOnly: false,
+					coordinatorCwd: "/coordinator",
+					repositoryRoot: "/repo",
+					startingCommit: "start",
+					resultCommit: "result",
+					changedFiles: ["src/result.ts"],
+					startedAt: new Date(0).toISOString(),
+					finishedAt: new Date(1).toISOString(),
+					executionStatus: "completed",
+					integrationStatus: "integrated",
+				};
+				params.onProgress?.(record);
+				return {
+					result: await run({
+						record,
+						cwd: "/private/worker",
+						isolated: true,
+						signal: params.signal,
+					}),
+					workspace: record,
+				};
+			},
+		};
+		const { tool } = makeTool({ workspaceManager });
+
+		const result = await tool.execute(
+			{ prompt: "edit files" },
+			ctx(0, {
+				bus,
+				signal: controller.signal,
+				toolCallId: "agent_capture_wins",
+			}),
+		);
+
+		expect(result.data.status).toBe("completed");
+		expect(statuses).toEqual(["Integrated"]);
+		expect(ends).toEqual(["completed"]);
+	});
+
+	it("defers WWM-owned read-only completion until its durable outcome", async () => {
+		const bus = new EventBus();
+		const ends: string[] = [];
+		bus.on("agent:child_end", (event) => ends.push(event.status));
+		const workspaceManager: NonNullable<AgentToolDeps["workspaceManager"]> = {
+			list: () => [],
+			runWorker: async (params, run) => {
+				const record: WorkerWorkspaceRecord = {
+					workerId: params.workerId,
+					sequence: 0,
+					parentSessionId: params.parentSessionId,
+					parentToolCallId: params.parentToolCallId,
+					taskPrompt: params.taskPrompt,
+					readOnly: true,
+					coordinatorCwd: "/coordinator",
+					changedFiles: [],
+					startedAt: new Date(0).toISOString(),
+					finishedAt: new Date(1).toISOString(),
+					executionStatus: "completed",
+					integrationStatus: "not_required",
+				};
+				return {
+					result: await run({
+						record,
+						cwd: record.coordinatorCwd,
+						isolated: false,
+						signal: params.signal,
+					}),
+					workspace: record,
+				};
+			},
+		};
+		const { tool } = makeTool({ workspaceManager });
+
+		const result = await tool.execute(
+			{ prompt: "inspect files", read_only: true },
+			ctx(0, { bus, toolCallId: "agent_read_only" }),
+		);
+
+		expect(result.data.status).toBe("completed");
+		expect(ends).toEqual(["completed"]);
 	});
 
 	it("rejects a write worker when Git isolation is unavailable", async () => {
+		const bus = new EventBus();
+		const ends: string[] = [];
+		bus.on("agent:child_end", (event) => ends.push(event.status));
 		const workspaceManager: NonNullable<AgentToolDeps["workspaceManager"]> = {
 			list: () => [],
 			runWorker: async () => {
@@ -331,12 +499,13 @@ describe("AgentTool execution", () => {
 		const { tool, workerCalls } = makeTool({ workspaceManager });
 		const result = await tool.execute(
 			{ prompt: "edit files" },
-			ctx(0, { toolCallId: "agent_non_git" }),
+			ctx(0, { bus, toolCallId: "agent_non_git" }),
 		);
 
 		expect(result.data.status).toBe("rejected");
 		expect(result.forLLM).toContain("Git is required");
 		expect(workerCalls).toHaveLength(0);
+		expect(ends).toEqual(["failed"]);
 	});
 
 	it("runs the worker for explicit worker subagent_type", async () => {

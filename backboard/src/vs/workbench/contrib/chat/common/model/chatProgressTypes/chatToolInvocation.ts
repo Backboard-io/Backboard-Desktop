@@ -8,7 +8,7 @@ import { IMarkdownString } from '../../../../../../base/common/htmlContent.js';
 import { IObservable, ISettableObservable, observableValue } from '../../../../../../base/common/observable.js';
 import { ThemeIcon } from '../../../../../../base/common/themables.js';
 import { localize } from '../../../../../../nls.js';
-import { ConfirmedReason, IChatAgentFeedbackReviewConfirmationData, IChatExtensionsContent, IChatModifiedFilesConfirmationData, IChatSearchToolInvocationData, IChatSimpleToolInvocationData, IChatSubagentToolInvocationData, IChatTodoListContent, IChatToolInputInvocationData, IChatToolInvocation, IChatToolInvocationSerialized, ToolConfirmKind, type IChatTerminalToolInvocationData } from '../../chatService/chatService.js';
+import { ConfirmedReason, IChatAgentFeedbackReviewConfirmationData, IChatCoreToolInvocationData, IChatExtensionsContent, IChatModifiedFilesConfirmationData, IChatMutationToolInvocationData, IChatSearchToolInvocationData, IChatSimpleToolInvocationData, IChatSubagentToolInvocationData, IChatTodoListContent, IChatToolInputInvocationData, IChatToolInvocation, IChatToolInvocationSerialized, ToolConfirmKind, type IChatTerminalToolInvocationData } from '../../chatService/chatService.js';
 import { IPreparedToolInvocation, isToolResultOutputDetails, IToolConfirmationMessages, IToolData, IToolProgressStep, IToolResult, ToolDataSource } from '../../tools/languageModelToolsService.js';
 
 export interface IStreamingToolCallOptions {
@@ -36,7 +36,7 @@ export class ChatToolInvocation implements IChatToolInvocation {
 	public readonly chatRequestId?: string;
 	public isAttachedToThinking: boolean = false;
 
-	private _toolSpecificData?: IChatTerminalToolInvocationData | IChatToolInputInvocationData | IChatExtensionsContent | IChatTodoListContent | IChatSubagentToolInvocationData | IChatSimpleToolInvocationData | IChatSearchToolInvocationData | IChatModifiedFilesConfirmationData | IChatAgentFeedbackReviewConfirmationData;
+	private _toolSpecificData?: IChatTerminalToolInvocationData | IChatToolInputInvocationData | IChatExtensionsContent | IChatTodoListContent | IChatSubagentToolInvocationData | IChatSimpleToolInvocationData | IChatSearchToolInvocationData | IChatCoreToolInvocationData | IChatMutationToolInvocationData | IChatModifiedFilesConfirmationData | IChatAgentFeedbackReviewConfirmationData;
 	private readonly _toolSpecificDataKind = observableValue<string | undefined, 'dataChanged' | undefined>(this, undefined);
 	public readonly toolSpecificDataKind: IObservable<string | undefined> = this._toolSpecificDataKind;
 
@@ -46,10 +46,10 @@ export class ChatToolInvocation implements IChatToolInvocation {
 
 	public set toolSpecificData(value: typeof this._toolSpecificData) {
 		this._toolSpecificData = value;
-		if (value?.kind === 'terminal') {
-			// A running terminal can receive a fresh output snapshot without changing
-			// kind. Only terminals need that same-kind remount; other tools retain the
-			// original rendering lifecycle, including edit and diff presentations.
+		if (value?.kind === 'terminal' || value?.kind === 'coreTool') {
+			// Running terminals and built-in tool cards can receive a fresh output
+			// snapshot without changing kind. Notify their renderers so live progress
+			// does not freeze on the first payload.
 			this._toolSpecificDataKind.set(value.kind, undefined, 'dataChanged');
 		} else {
 			this._toolSpecificDataKind.set(value?.kind, undefined, undefined);

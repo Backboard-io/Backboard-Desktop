@@ -2209,6 +2209,36 @@ suite('AgentSideEffects', () => {
 			}
 		});
 
+		test('subagent_started reuses an existing restored child after routing state reconnects', () => {
+			setupSession();
+			startTurn('turn-1');
+			disposables.add(sideEffects.registerProgressListener(agent));
+			agent.fireProgress({ kind: 'action', session: sessionUri, action: { type: ActionType.ChatToolCallStart, turnId: 'turn-1', toolCallId: 'tc-restored', toolName: 'runSubagent', displayName: 'Run Subagent', contributor: undefined, _meta: { toolKind: undefined, language: undefined } } });
+			agent.fireProgress({ kind: 'action', session: sessionUri, action: { type: ActionType.ChatToolCallReady, turnId: 'turn-1', toolCallId: 'tc-restored', invocationMessage: 'Delegating...', toolInput: undefined, confirmed: ToolCallConfirmationReason.NotNeeded } });
+			const started = { kind: 'subagent_started' as const, session: sessionUri, toolCallId: 'tc-restored', agentName: 'helper', agentDisplayName: 'Helper', agentDescription: 'Helps' };
+
+			agent.fireProgress(started);
+			const subagentUri = buildSubagentSessionUri(sessionUri.toString(), 'tc-restored');
+			const initialTurnId = stateManager.getSessionState(subagentUri)?.activeTurn?.id;
+			const internals = sideEffects as unknown as { _subagentSessions: Map<string, string> };
+			internals._subagentSessions.clear();
+			agent.fireProgress(started);
+
+			const parentTool = stateManager.getSessionState(sessionUri.toString())?.activeTurn?.responseParts.find(
+				part => part.kind === ResponsePartKind.ToolCall && part.toolCall.toolCallId === 'tc-restored',
+			);
+			const subagentContent = parentTool?.kind === ResponsePartKind.ToolCall && parentTool.toolCall.status === ToolCallStatus.Running
+				? parentTool.toolCall.content?.filter(content => content.type === ToolResultContentType.Subagent)
+				: undefined;
+			assert.deepStrictEqual({
+				turnId: stateManager.getSessionState(subagentUri)?.activeTurn?.id,
+				subagentContentCount: subagentContent?.length,
+			}, {
+				turnId: initialTurnId,
+				subagentContentCount: 1,
+			});
+		});
+
 		test('events with parentToolCallId route to subagent session', () => {
 			setupSession();
 			startTurn('turn-1');

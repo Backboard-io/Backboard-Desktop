@@ -154,6 +154,34 @@ You can keep both a Backboard login and provider keys. When the same provider
 is available through both, the enabled direct key takes precedence for that
 provider's models.
 
+## Use a Claude subscription
+
+R-CLI can use an existing Claude.ai subscription through the official Claude
+Code transport while retaining Backboard's agent loop, permissions,
+checkpoints, tools, and IDE UI. Install Claude Code, then connect it with:
+
+```sh
+backboard claude-subscription login
+```
+
+The official Claude Code CLI opens Anthropic's sign-in flow and owns its OAuth
+credentials and refresh lifecycle. Backboard stores only an enable flag and
+checks that the active login is a first-party `claude.ai` login before every
+turn. API-key, custom endpoint, Bedrock, Vertex, and Foundry overrides are not
+used by the `anthropic-subscription` route.
+
+Check the connection or disconnect it from Backboard with:
+
+```sh
+backboard claude-subscription status --json
+backboard claude-subscription logout
+```
+
+Disconnecting does not sign Claude Code itself out. In Backboard Studio, the
+same flow is available from the **Claude Subscription** section of the model
+picker. Select a model such as `anthropic-subscription/sonnet`; if the login
+expires, use **Reconnect Claude** there.
+
 ## Start your first session
 
 Run `backboard` from the project you want it to work on:

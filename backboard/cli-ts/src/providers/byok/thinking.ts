@@ -53,12 +53,12 @@ export function thinkingBudgetTokens(
 	});
 }
 
-/** OpenAI takes a named effort; "max" has no wire equivalent, so it maps to high. */
+/** This OpenAI adapter tops out at high, so deeper generic levels clamp to it. */
 export function thinkingEffort(
 	thinking: ThinkingConfig | null | undefined,
 ): "low" | "medium" | "high" | null {
 	const requested = thinkingLevel(thinking);
-	return requested === "max" ? "high" : requested;
+	return requested === "xhigh" || requested === "max" ? "high" : requested;
 }
 
 /**

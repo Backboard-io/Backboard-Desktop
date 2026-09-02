@@ -12,7 +12,6 @@ import { IAgentModelInfo } from '../../common/agentService.js';
 import { createAgentModelPricingMeta } from '../../common/agentModelPricing.js';
 import type { ResolveSessionConfigResult } from '../../common/state/protocol/commands.js';
 import type { ModelSelection } from '../../common/state/protocol/state.js';
-import { BUNDLED_CATALOG_MODELS } from './backboardBundledModels.js';
 
 /**
  * Backboard runtime configuration, model-catalog, and session-config helpers
@@ -34,18 +33,20 @@ const HIDDEN_MODEL_PROVIDERS = new Set(['featherless', 'elevenlabs', 'eleven-lab
 const SANDBOX_PROVIDER_ORDER = new Map<string, number>([
 	['aws-bedrock', 0],
 	['anthropic', 1],
-	['openai', 2],
-	['google', 3],
-	['xai', 4],
-	['x-ai', 4],
-	['cohere', 5],
-	['cerebras', 6],
-	['mistral', 7],
-	['deepseek', 8],
-	['openrouter', 9],
-	['lmstudio', 10],
-	['lm-studio', 10],
-	['ollama', 11],
+	['anthropic-subscription', 2],
+	['openai', 3],
+	['openai-subscription', 4],
+	['google', 5],
+	['xai', 6],
+	['x-ai', 6],
+	['cohere', 7],
+	['cerebras', 8],
+	['mistral', 9],
+	['deepseek', 10],
+	['openrouter', 11],
+	['lmstudio', 12],
+	['lm-studio', 12],
+	['ollama', 13],
 ]);
 
 const BACKBOARD_INTENSITY_CONFIG_KEY = 'intensity';
@@ -55,6 +56,7 @@ const BACKBOARD_COMPUTER_USE_CONFIG_KEY = 'computerUse';
 const BACKBOARD_BROWSER_USE_CONFIG_KEY = 'browserUse';
 const BACKBOARD_NOTIFICATIONS_CONFIG_KEY = 'notifications';
 const BACKBOARD_IMAGE_GENERATION_CONFIG_KEY = 'imageGeneration';
+export const BACKBOARD_OPENROUTER_PROVIDER_CONFIG_KEY = 'openRouterProvider';
 export const BACKBOARD_MODE_PLAN = 'plan';
 export const BACKBOARD_MODE_MULTITASK = 'multitask';
 
@@ -81,6 +83,17 @@ export interface BridgeModel {
 	readonly modelType?: string;
 	readonly model_type?: string;
 	readonly displayName?: string;
+	readonly display_name?: string;
+	readonly description?: string;
+	readonly resolved_model?: string;
+	readonly supported_effort_levels?: readonly string[];
+	readonly supports_adaptive_thinking?: boolean;
+	readonly supports_thinking?: boolean | null;
+	readonly thinking_controls?: {
+		readonly supported?: boolean;
+		readonly allowed_fields?: readonly string[];
+		readonly defaults_only?: boolean;
+	} | null;
 	readonly contextLimit?: number;
 	readonly context_limit?: number | null;
 	readonly supportsVision?: boolean;
@@ -112,14 +125,36 @@ export interface BridgeModel {
 	readonly cacheWriteCostPer1mTokens?: number | string;
 	readonly cacheWritePricePerMillion?: number | string;
 	readonly cache_write_input_cost_per_1m_tokens?: number | string | null;
+	readonly openrouter_providers?: readonly BridgeOpenRouterProvider[];
 }
 
-/**
- * Full model-catalog snapshot generated at build time (see
- * `cli-ts/scripts/refresh-bundled-models.ts`), so the picker offers the
- * complete catalog on first launch instead of a short hand-picked list.
- */
-export const BUNDLED_BACKBOARD_MODELS: readonly BridgeModel[] = BUNDLED_CATALOG_MODELS;
+export interface BridgeOpenRouterProvider {
+	readonly upstream_provider: string;
+	readonly input_cost_per_1m_tokens?: number | null;
+	readonly output_cost_per_1m_tokens?: number | null;
+	readonly context_limit?: number | null;
+	readonly supports_tools?: boolean | null;
+	readonly uptime_30m?: number | null;
+}
+
+/** Local ChatGPT subscription routes are not part of Backboard's API catalog. */
+export const BUNDLED_CHATGPT_SUBSCRIPTION_MODELS: readonly BridgeModel[] = [
+	{ provider: 'openai-subscription', name: 'gpt-5.6-sol', displayName: 'GPT-5.6 Sol', modelType: 'llm', supportsVision: true },
+	{ provider: 'openai-subscription', name: 'gpt-5.6-terra', displayName: 'GPT-5.6 Terra', modelType: 'llm', supportsVision: true },
+	{ provider: 'openai-subscription', name: 'gpt-5.6-luna', displayName: 'GPT-5.6 Luna', modelType: 'llm', supportsVision: true },
+	{ provider: 'openai-subscription', name: 'gpt-5.5', displayName: 'GPT-5.5', modelType: 'llm', supportsVision: true },
+	{ provider: 'openai-subscription', name: 'gpt-5.4', displayName: 'GPT-5.4', modelType: 'llm', supportsVision: true },
+	{ provider: 'openai-subscription', name: 'gpt-5.4-mini', displayName: 'GPT-5.4 Mini', modelType: 'llm', supportsVision: true },
+];
+
+/** Local Claude Code subscription routes are not part of Backboard's API catalog. */
+export const BUNDLED_CLAUDE_SUBSCRIPTION_MODELS: readonly BridgeModel[] = [
+	{ provider: 'anthropic-subscription', name: 'default', displayName: 'Claude Default (Opus 5)', resolved_model: 'claude-opus-5[1m]', modelType: 'llm', contextLimit: 1_000_000, supportsVision: true, supported_effort_levels: ['low', 'medium', 'high', 'xhigh', 'max'] },
+	{ provider: 'anthropic-subscription', name: 'opus[1m]', displayName: 'Claude Opus 5 (1M)', resolved_model: 'claude-opus-5[1m]', modelType: 'llm', contextLimit: 1_000_000, supportsVision: true, supported_effort_levels: ['low', 'medium', 'high', 'xhigh', 'max'] },
+	{ provider: 'anthropic-subscription', name: 'claude-fable-5-1[1m]', displayName: 'Claude Fable 5.1 (1M)', resolved_model: 'claude-fable-5-1', modelType: 'llm', contextLimit: 1_000_000, supportsVision: true, supported_effort_levels: ['low', 'medium', 'high', 'xhigh', 'max'] },
+	{ provider: 'anthropic-subscription', name: 'sonnet', displayName: 'Claude Sonnet 5', resolved_model: 'claude-sonnet-5', modelType: 'llm', contextLimit: 200_000, supportsVision: true, supported_effort_levels: ['low', 'medium', 'high', 'xhigh', 'max'] },
+	{ provider: 'anthropic-subscription', name: 'haiku', displayName: 'Claude Haiku 4.5', resolved_model: 'claude-haiku-4-5-20251001', modelType: 'llm', contextLimit: 200_000, supportsVision: true, supported_effort_levels: [] },
+];
 
 interface BackboardConfigJson {
 	readonly env?: unknown;
@@ -150,6 +185,8 @@ export interface BackboardTurnSettings {
 	readonly notifications: boolean;
 	/** Whether Backboard's built-in image generation is enabled this turn. */
 	readonly imageGeneration: boolean;
+	/** A user-pinned OpenRouter serving provider; undefined keeps automatic routing. */
+	readonly openRouterProvider?: string;
 	readonly config: Record<string, unknown>;
 }
 
@@ -200,6 +237,8 @@ function providerLabel(provider: string | undefined): string {
 			return 'AWS Bedrock';
 		case 'anthropic':
 			return 'Anthropic';
+		case 'anthropic-subscription':
+			return 'Claude Subscription';
 		case 'cerebras':
 			return 'Cerebras';
 		case 'cohere':
@@ -217,6 +256,8 @@ function providerLabel(provider: string | undefined): string {
 			return 'Ollama';
 		case 'openai':
 			return 'OpenAI';
+		case 'openai-subscription':
+			return 'OpenAI (ChatGPT Subscription)';
 		case 'openai-compatible':
 			return 'OpenAI Compatible';
 		case 'openrouter':
@@ -267,17 +308,112 @@ function toAgentModelInfo(model: BridgeModel): IAgentModelInfo {
 		outputCost,
 	});
 	const contextLimit = model.contextLimit ?? model.context_limit;
+	const openRouterProviders = normalizeOpenRouterProviders(model.openrouter_providers);
+	const configSchema = openRouterProviders.length
+		? openRouterProviderConfigSchema(openRouterProviders)
+		: claudeSubscriptionConfigSchema(model);
 	return {
 		provider: 'backboard',
 		id,
-		name: model.displayName || model.name,
+		name: model.display_name || model.displayName || model.name,
 		maxContextWindow: typeof contextLimit === 'number' ? contextLimit : undefined,
 		supportsVision: model.supportsVision ?? model.supports_vision ?? inferBackboardModelSupportsVision(model),
+		...(configSchema ? { configSchema } : {}),
 		_meta: {
 			upstreamProvider: normalizeProviderKey(model.provider),
 			upstreamProviderLabel: providerLabel(model.provider),
 			pricing: modelPriceLabel(model),
+			...(model.description ? { modelDescription: model.description } : {}),
+			...(model.resolved_model ? { resolvedModel: model.resolved_model } : {}),
+			...(model.supported_effort_levels ? { supportedEffortLevels: [...model.supported_effort_levels] } : {}),
+			...(model.supports_adaptive_thinking !== undefined ? { supportsAdaptiveThinking: model.supports_adaptive_thinking } : {}),
+			...(openRouterProviders.length ? {
+				openRouterProviders: openRouterProviders.map(provider => provider.upstream_provider),
+				openRouterProviderCount: openRouterProviders.length,
+			} : {}),
 			...(pricingMeta ?? {}),
+		},
+	};
+}
+
+const CLAUDE_EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+
+function claudeSubscriptionConfigSchema(model: BridgeModel): IAgentModelInfo['configSchema'] | undefined {
+	if (normalizeProviderKey(model.provider) !== 'anthropic-subscription') {
+		return undefined;
+	}
+	const levels = (model.supported_effort_levels ?? [])
+		.filter((level): level is typeof CLAUDE_EFFORT_LEVELS[number] => (CLAUDE_EFFORT_LEVELS as readonly string[]).includes(level));
+	if (levels.length === 0) {
+		return undefined;
+	}
+	const labels: Record<typeof CLAUDE_EFFORT_LEVELS[number], string> = {
+		low: localize('backboard.claude.effort.low', "Low"),
+		medium: localize('backboard.claude.effort.medium', "Medium"),
+		high: localize('backboard.claude.effort.high', "High"),
+		xhigh: localize('backboard.claude.effort.xhigh', "X-High"),
+		max: localize('backboard.claude.effort.max', "Max"),
+	};
+	const descriptions: Record<typeof CLAUDE_EFFORT_LEVELS[number], string> = {
+		low: localize('backboard.claude.effort.low.description', "Fastest response for short, scoped work."),
+		medium: localize('backboard.claude.effort.medium.description', "Lower token use for routine work."),
+		high: localize('backboard.claude.effort.high.description', "Balanced capability and token use; Claude's default."),
+		xhigh: localize('backboard.claude.effort.xhigh.description', "Deeper reasoning for difficult coding and agentic work."),
+		max: localize('backboard.claude.effort.max.description', "Maximum reasoning depth for the most demanding tasks."),
+	};
+	return {
+		type: 'object',
+		properties: {
+			[BACKBOARD_INTENSITY_CONFIG_KEY]: {
+				type: 'string',
+				title: localize('backboard.claude.effort.title', "Reasoning effort"),
+				description: localize('backboard.claude.effort.description', "Controls Claude's adaptive reasoning effort for this model."),
+				default: levels.includes('high') ? 'high' : levels[0],
+				enum: levels,
+				enumLabels: levels.map(level => labels[level]),
+				enumDescriptions: levels.map(level => descriptions[level]),
+			},
+		},
+	};
+}
+
+function normalizeOpenRouterProviders(providers: readonly BridgeOpenRouterProvider[] | undefined): BridgeOpenRouterProvider[] {
+	const byName = new Map<string, BridgeOpenRouterProvider>();
+	for (const provider of providers ?? []) {
+		const name = provider.upstream_provider?.trim();
+		if (name && !byName.has(name.toLowerCase())) {
+			byName.set(name.toLowerCase(), { ...provider, upstream_provider: name });
+		}
+	}
+	return [...byName.values()].sort((a, b) => a.upstream_provider.localeCompare(b.upstream_provider));
+}
+
+function openRouterProviderConfigSchema(providers: readonly BridgeOpenRouterProvider[]): NonNullable<IAgentModelInfo['configSchema']> {
+	const providerDescription = (provider: BridgeOpenRouterProvider): string => {
+		const details: string[] = [];
+		if (typeof provider.input_cost_per_1m_tokens === 'number' && typeof provider.output_cost_per_1m_tokens === 'number') {
+			details.push(`${formatModelPrice(provider.input_cost_per_1m_tokens)} in, ${formatModelPrice(provider.output_cost_per_1m_tokens)} out`);
+		}
+		if (typeof provider.uptime_30m === 'number') {
+			details.push(localize('backboard.openRouterProvider.uptime', "{0}% uptime (30m)", provider.uptime_30m.toFixed(2)));
+		}
+		return details.join(' · ');
+	};
+	return {
+		type: 'object',
+		properties: {
+			[BACKBOARD_OPENROUTER_PROVIDER_CONFIG_KEY]: {
+				type: 'string',
+				title: localize('backboard.openRouterProvider.title', "OpenRouter provider"),
+				description: localize('backboard.openRouterProvider.description', "Choose the upstream that serves this model, or let OpenRouter route automatically."),
+				default: 'auto',
+				enum: ['auto', ...providers.map(provider => provider.upstream_provider)],
+				enumLabels: [localize('backboard.openRouterProvider.auto', "Auto"), ...providers.map(provider => provider.upstream_provider)],
+				enumDescriptions: [
+					localize('backboard.openRouterProvider.auto.description', "Let OpenRouter choose the serving provider."),
+					...providers.map(providerDescription),
+				],
+			},
 		},
 	};
 }
@@ -372,8 +508,20 @@ export function isBridgeModel(value: unknown): value is BridgeModel {
 function mergeBridgeModels(...modelSets: readonly (readonly BridgeModel[])[]): BridgeModel[] {
 	const byId = new Map<string, BridgeModel>();
 	for (const models of modelSets) {
+		const existingSubscriptionProviders = new Set(
+			[...byId.values()]
+				.map(model => normalizeProviderKey(model.provider))
+				.filter(provider => provider.endsWith('-subscription')),
+		);
 		for (const model of models) {
-			const key = `${normalizeProviderKey(model.provider)}/${model.name}`;
+			const provider = normalizeProviderKey(model.provider);
+			const key = `${provider}/${model.name}`;
+			// Subscription catalogs are account-specific. Once a live set has
+			// supplied a provider, later bundled sets are fallback-only and must not
+			// add aliases that the user's plan did not advertise.
+			if (existingSubscriptionProviders.has(provider) && !byId.has(key)) {
+				continue;
+			}
 			if (!byId.has(key)) {
 				byId.set(key, model);
 			}
@@ -417,7 +565,7 @@ function supplementalBridgeModels(models: readonly BridgeModel[]): BridgeModel[]
 
 export function resolveBackboardSessionConfig(rawConfig: Record<string, unknown> | undefined, repository?: BackboardRepositoryConfig): ResolveSessionConfigResult {
 	const isolation = repository
-		? oneOf(rawConfig?.[SessionConfigKey.Isolation], ['folder', 'worktree'], 'worktree')
+		? oneOf(rawConfig?.[SessionConfigKey.Isolation], ['folder', 'worktree'], 'folder')
 		: 'folder';
 	const branch = repository
 		? isolation === 'worktree'
@@ -437,7 +585,7 @@ export function resolveBackboardSessionConfig(rawConfig: Record<string, unknown>
 						type: 'string',
 						title: localize('backboard.config.isolation.title', "Isolation"),
 						description: localize('backboard.config.isolation.description', "Where Backboard should make changes."),
-						default: repository ? 'worktree' : 'folder',
+						default: 'folder',
 						enum: repository ? ['folder', 'worktree'] : ['folder'],
 						enumLabels: repository
 							? [localize('backboard.config.isolation.folder', "Folder"), localize('backboard.config.isolation.worktree', "Worktree")]
@@ -587,6 +735,15 @@ export function createBackboardTurnSettings(
 	const parsedModel = parseModelSelection(model) ?? parseModelSelection({ id: DEFAULT_MODEL_ID })!;
 	const rawMode = stringConfigValue(values, SessionConfigKey.Mode, BACKBOARD_ACCESS_DEFAULT);
 	const imageGeneration = booleanConfigValue(values, BACKBOARD_IMAGE_GENERATION_CONFIG_KEY, false);
+	const configuredOpenRouterProvider = stringValueFromRecord(model?.config?.[BACKBOARD_OPENROUTER_PROVIDER_CONFIG_KEY]);
+	const configuredModelIntensity = stringValueFromRecord(model?.config?.[BACKBOARD_INTENSITY_CONFIG_KEY]);
+	const intensity = configuredModelIntensity
+		? normalizeBackboardIntensity(configuredModelIntensity)
+		: parsedModel.provider === 'anthropic-subscription'
+			? /(?:^|[-_/])haiku(?:$|[-_/\[])/i.test(parsedModel.model)
+				? 'default'
+				: 'high'
+			: stringConfigValue(values, BACKBOARD_INTENSITY_CONFIG_KEY, 'medium');
 	return {
 		provider: parsedModel.provider,
 		model: parsedModel.model,
@@ -596,13 +753,16 @@ export function createBackboardTurnSettings(
 				? BACKBOARD_ACCESS_DEFAULT
 				: rawMode,
 		rawMode,
-		intensity: stringConfigValue(values, BACKBOARD_INTENSITY_CONFIG_KEY, 'medium'),
+		intensity,
 		memory: stringConfigValue(values, BACKBOARD_MEMORY_CONFIG_KEY, 'off'),
 		webSearch: true,
 		computerUse: booleanConfigValue(values, BACKBOARD_COMPUTER_USE_CONFIG_KEY, false),
 		browserUse: booleanConfigValue(values, BACKBOARD_BROWSER_USE_CONFIG_KEY, false),
 		notifications: booleanConfigValue(values, BACKBOARD_NOTIFICATIONS_CONFIG_KEY, false),
 		imageGeneration,
+		...(parsedModel.provider === 'openrouter' && configuredOpenRouterProvider && configuredOpenRouterProvider !== 'auto'
+			? { openRouterProvider: configuredOpenRouterProvider }
+			: {}),
 		config: bridgeConfig(),
 	};
 }
@@ -629,7 +789,7 @@ function normalizeBackboardIntensity(value: unknown): string {
 		case 'balanced': return 'medium';
 		case 'fast': return 'low';
 		case 'deep': return 'high';
-		default: return oneOf(value, ['off', 'low', 'medium', 'high', 'max'], 'medium');
+		default: return oneOf(value, ['off', 'low', 'medium', 'high', 'xhigh', 'max'], 'medium');
 	}
 }
 

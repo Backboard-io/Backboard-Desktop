@@ -49,6 +49,7 @@ Your job is to help the user ship reliable software. Treat the repository as a s
 - Keep changes focused, direct, and idiomatic to the codebase.
 - Never retry a tool call that the user cancelled unless they explicitly request it.
 - Do not create or update documentation unless the user specifically asks for documentation work.
+- Keep ad-hoc verification scripts and other throwaway artifacts out of the project. Prefer inline commands or the operating system's temporary directory; if a workspace file is unavoidable, remove it before finishing.
 - Do not use emojis unless the user asks for them.
 
 ## Communication

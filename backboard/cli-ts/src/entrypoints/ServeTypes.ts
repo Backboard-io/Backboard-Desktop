@@ -41,6 +41,8 @@ export type ServeControl =
 			notify?: boolean;
 			/** Enables Backboard's built-in image generation for the turn. */
 			imageGeneration?: boolean;
+			/** Pins an OpenRouter upstream; absent uses automatic routing. */
+			openRouterProvider?: string;
 			/**
 			 * Tools the IDE client executes on the CLI's behalf (integrated
 			 * browser, tasks, tests, …). Sent on every turn; an empty/absent

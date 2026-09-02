@@ -4,7 +4,11 @@ import os from "node:os";
 import path from "node:path";
 import { EventBus } from "../src/core/bus/EventBus.ts";
 import { CheckpointManager } from "../src/core/checkpoints/CheckpointManager.ts";
-import { CheckpointStore } from "../src/core/checkpoints/CheckpointStore.ts";
+import {
+	CheckpointStore,
+	recordPostImageBatch,
+	recordPreImageBatch,
+} from "../src/core/checkpoints/CheckpointStore.ts";
 import { SessionStore } from "../src/core/session/SessionStore.ts";
 
 async function createSession(
@@ -23,6 +27,49 @@ async function createSession(
 }
 
 describe("CheckpointManager", () => {
+	it("forwards multi-file capture phases to one production-store batch", async () => {
+		const cwd = await mkdtemp(path.join(os.tmpdir(), "checkpoint-manager-"));
+		const session = await createSession(cwd, "sess_batch");
+		const manager = new CheckpointManager(new EventBus(), session.paths, cwd);
+		const files = [path.join(cwd, "a.txt"), path.join(cwd, "b.txt")];
+		await Promise.all(files.map((file) => writeFile(file, "before", "utf8")));
+
+		const active = (
+			manager as unknown as {
+				active: {
+					journal: { writeBatch(records: readonly object[]): Promise<void> };
+				};
+			}
+		).active;
+		const writeBatch = active.journal.writeBatch.bind(active.journal);
+		const batchSizes: number[] = [];
+		active.journal.writeBatch = async (records) => {
+			batchSizes.push(records.length);
+			await writeBatch(records);
+		};
+
+		const context = { turnId: "turn_batch", toolCallId: "tool_batch" };
+		await recordPreImageBatch(
+			manager,
+			files.map((absPath) => ({ absPath, opts: { tool: "ApplyPatch" } })),
+			context,
+		);
+		await Promise.all(files.map((file) => writeFile(file, "after", "utf8")));
+		await recordPostImageBatch(
+			manager,
+			files.map((absPath) => ({
+				absPath,
+				contentIfInMemory: Buffer.from("after"),
+			})),
+			context,
+		);
+
+		// The first singleton is the lazily-created turn record; each plural
+		// capture phase itself is one filesystem append.
+		expect(batchSizes).toEqual([1, 2, 2]);
+		await manager.dispose();
+	});
+
 	it("switches checkpoint history with the resumed local session", async () => {
 		const cwd = await mkdtemp(path.join(os.tmpdir(), "checkpoint-manager-"));
 		const first = await createSession(cwd, "sess_first");

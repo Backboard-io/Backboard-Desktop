@@ -81,6 +81,10 @@ function router(options: {
 	backboardClient?: RecordingClient;
 	byokClient?: RecordingClient;
 	subscriptionClient?: RecordingClient;
+	subscriptions?: Record<
+		string,
+		{ client: RecordingClient; threadPrefix: string }
+	>;
 	model?: { provider: string; model: string };
 	keyed?: string[];
 	signedIn?: boolean;
@@ -95,6 +99,19 @@ function router(options: {
 		...(options.subscriptionClient
 			? {
 					subscription: options.subscriptionClient as unknown as AgentClient,
+				}
+			: {}),
+		...(options.subscriptions
+			? {
+					subscriptions: Object.fromEntries(
+						Object.entries(options.subscriptions).map(([provider, route]) => [
+							provider,
+							{
+								client: route.client as unknown as AgentClient,
+								threadPrefix: route.threadPrefix,
+							},
+						]),
+					),
 				}
 			: {}),
 		getModel: () =>
@@ -136,6 +153,23 @@ describe("ClientRouter precedence", () => {
 			}).sourceFor({
 				provider: "openai-subscription",
 				model: "gpt-subscription",
+			}),
+		).toBe("subscription");
+	});
+
+	it("routes the explicit Claude provider to its subscription client", () => {
+		expect(
+			router({
+				backboardClient: backboard(),
+				subscriptions: {
+					"anthropic-subscription": {
+						client: byok(),
+						threadPrefix: "claude_sub_",
+					},
+				},
+			}).sourceFor({
+				provider: "anthropic-subscription",
+				model: "sonnet",
 			}),
 		).toBe("subscription");
 	});
@@ -257,6 +291,25 @@ describe("ClientRouter request routing", () => {
 
 		expect(subscription.toolOutputs).toHaveLength(1);
 	});
+
+	it("routes claude_sub_ threads to the Claude subscription client", async () => {
+		const claude = byok();
+		await drain(
+			router({
+				subscriptions: {
+					"anthropic-subscription": {
+						client: claude,
+						threadPrefix: "claude_sub_",
+					},
+				},
+			}).runToolOutputs({
+				thread_id: "claude_sub_abc",
+				tool_outputs: [{ tool_call_id: "1", output: "ok" }],
+			}),
+		);
+
+		expect(claude.toolOutputs).toHaveLength(1);
+	});
 });
 
 describe("ClientRouter catalog", () => {
@@ -281,6 +334,36 @@ describe("ClientRouter catalog", () => {
 		expect(result.models).toEqual([
 			{ ...anthropicModel, source: "byok" },
 			{ ...openaiModel, source: "backboard" },
+		]);
+	});
+
+	it("merges multiple subscription catalogs", async () => {
+		const chatGptModel = {
+			name: "auto",
+			provider: "openai-subscription",
+			model_type: "llm",
+		};
+		const claudeModel = {
+			name: "sonnet",
+			provider: "anthropic-subscription",
+			model_type: "llm",
+		};
+		const result = await router({
+			subscriptions: {
+				"openai-subscription": {
+					client: byok([chatGptModel]),
+					threadPrefix: "sub_",
+				},
+				"anthropic-subscription": {
+					client: byok([claudeModel]),
+					threadPrefix: "claude_sub_",
+				},
+			},
+		}).listModels();
+
+		expect(result.models).toEqual([
+			{ ...chatGptModel, source: "subscription" },
+			{ ...claudeModel, source: "subscription" },
 		]);
 	});
 

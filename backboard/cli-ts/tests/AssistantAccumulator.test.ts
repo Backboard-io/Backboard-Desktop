@@ -9,6 +9,7 @@ const toolCall: ToolCallRef = { id: "call_1", name: "TodoWrite", input: {} };
 function makeAccumulator(deps?: {
 	suppressFinalMessage?: () => boolean;
 	suppressAllMessages?: () => boolean;
+	reasoningFlushIntervalMs?: number;
 }) {
 	const bus = new EventBus();
 	const session = new Session("sess_test");
@@ -36,6 +37,30 @@ describe("AssistantAccumulator", () => {
 			},
 		]);
 		expect(session.getMessages()).toEqual([]);
+	});
+
+	it("coalesces rapid reasoning and flushes it before the next boundary", () => {
+		const { accumulator, events } = makeAccumulator({
+			reasoningFlushIntervalMs: 1_000,
+		});
+		accumulator.appendReasoning("first");
+		accumulator.appendReasoning(" second");
+		accumulator.appendReasoning(" third");
+
+		expect(events).toHaveLength(1);
+		accumulator.finalize();
+		expect(events).toEqual([
+			{
+				type: "assistant:reasoning",
+				turnId: "turn_1",
+				text: "first",
+			},
+			{
+				type: "assistant:reasoning",
+				turnId: "turn_1",
+				text: " second third",
+			},
+		]);
 	});
 
 	it("streams deltas and finalizes into a shown message by default", () => {

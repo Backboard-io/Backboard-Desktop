@@ -9,6 +9,7 @@ import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../base/test/comm
 import { ChatResourceNavigationHistory } from '../../browser/parts/chatResourceNavigationHistory.js';
 import { SessionView } from '../../browser/parts/sessionView.js';
 import { IChat } from '../../services/sessions/common/session.js';
+import { ChatResourceNavigationRegistry } from '../../services/chatView/browser/chatResourceNavigationRegistry.js';
 
 suite('Sessions - Chat Resource Navigation History', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -54,6 +55,30 @@ suite('Sessions - Chat Resource Navigation History', () => {
 		assert.strictEqual(history.canGoBack, false);
 	});
 
+	test('routes opens and Back to the newest chat surface that owns the parent', async () => {
+		const registry = new ChatResourceNavigationRegistry();
+		const parent = URI.parse('chat-session://test/parent');
+		const child = URI.parse('chat-session://test/parent/subagent/child');
+		const calls: string[] = [];
+		const first = registry.registerParticipant({
+			canHandleChatResource: () => true,
+			openChatResource: async () => { calls.push('first-open'); return true; },
+			navigateBack: async () => { calls.push('first-back'); return true; },
+		});
+		const second = registry.registerParticipant({
+			canHandleChatResource: resource => resource.toString() === parent.toString(),
+			openChatResource: async (_parent, resource) => { calls.push(`second-open:${resource.toString()}`); return true; },
+			navigateBack: async () => { calls.push('second-back'); return true; },
+		});
+
+		assert.strictEqual(await registry.openChatResource(parent, child), true);
+		assert.strictEqual(await registry.navigateBack(parent), true);
+		assert.deepStrictEqual(calls, [`second-open:${child.toString()}`, 'second-back']);
+
+		second.dispose();
+		first.dispose();
+	});
+
 	test('session view restores the top-level parent model', () => {
 		const history = new ChatResourceNavigationHistory();
 		const parent = URI.parse('chat-session://test/parent');
@@ -91,6 +116,7 @@ suite('Sessions - Chat Resource Navigation History', () => {
 		let restoredResource: URI | undefined;
 		const target = {
 			_chatResourceHistory: history,
+			_chatResourceContexts: new Map(),
 			_chatResourceOverride: grandchild,
 			_currentSession: { sessionId: 'session-1', activeChat: { get: () => parentChat } },
 			_currentView: {
@@ -121,6 +147,7 @@ suite('Sessions - Chat Resource Navigation History', () => {
 		const loaded: string[] = [];
 		const target = {
 			_chatResourceHistory: history,
+			_chatResourceContexts: new Map(),
 			_chatResourceOverride: grandchild,
 			_currentSession: {
 				sessionId: 'session-1',

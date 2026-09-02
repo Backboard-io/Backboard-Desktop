@@ -33,6 +33,7 @@ type Input = z.infer<typeof schema>;
 
 interface Output {
 	count: number;
+	todos: TodoItem[];
 }
 
 /**
@@ -81,6 +82,6 @@ export class TodoWriteTool extends Tool<Input, Output> {
 		ctx.bus.emit({ type: "todos:updated", todos });
 
 		const readback = formatTodoReadback(todos);
-		return ok({ count: todos.length }, readback, readback);
+		return ok({ count: todos.length, todos }, readback, readback);
 	}
 }

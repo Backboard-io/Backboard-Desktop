@@ -15,7 +15,7 @@ import { AGENT_HOST_SCHEME, toAgentHostUri } from '../../../../../../platform/ag
 import { getAgentFeedbackAttachmentMetadata, isAgentFeedbackAttachment } from '../../../../../../platform/agentHost/common/agentFeedbackAttachments.js';
 import { isViewUnreviewedCommentsTool } from '../../../../../../platform/agentHost/common/agentFeedbackAnnotations.js';
 import { MessageAttachmentKind, type FileEdit, type MessageAttachment, type StringOrMarkdown, type TextRange } from '../../../../../../platform/agentHost/common/state/protocol/state.js';
-import { type ChatExternalEditKind, type ChatMcpAppData, type IChatAgentFeedbackReviewConfirmationData, type IChatExternalEdit, type IChatModifiedFilesConfirmationData, type IChatProgress, type IChatResponseErrorDetails, type IChatSearchToolInvocationData, type IChatSubagentToolInvocationData, type IChatTerminalToolInvocationData, type IChatToolInputInvocationData, type IChatToolInvocationSerialized, type IChatUsage, ToolConfirmKind } from '../../../common/chatService/chatService.js';
+import { type ChatCoreToolKind, type ChatExternalEditKind, type ChatMcpAppData, type IChatAgentFeedbackReviewConfirmationData, type IChatCoreToolInvocationData, type IChatExternalEdit, type IChatModifiedFilesConfirmationData, type IChatMutationToolInvocationData, type IChatProgress, type IChatResponseErrorDetails, type IChatSearchToolInvocationData, type IChatSubagentToolInvocationData, type IChatTerminalToolInvocationData, type IChatToolInputInvocationData, type IChatToolInvocationSerialized, type IChatUsage, ToolConfirmKind } from '../../../common/chatService/chatService.js';
 import { type IChatSessionHistoryItem } from '../../../common/chatSessionsService.js';
 import { ChatToolInvocation } from '../../../common/model/chatProgressTypes/chatToolInvocation.js';
 import { type IChatRequestVariableData } from '../../../common/model/chatModel.js';
@@ -81,6 +81,7 @@ function getSubagentWorkspaceData(tc: { _meta?: Record<string, unknown> }): Part
 		? meta.subagentConflictingFiles.filter((file): file is string => typeof file === 'string')
 		: undefined;
 	return {
+		...(meta.subagentDetached === true ? { detached: true } : {}),
 		...(typeof meta.subagentWorkerId === 'string' ? { workerId: meta.subagentWorkerId } : {}),
 		...(workerStatus ? { workerStatus } : {}),
 		...(typeof meta.subagentBranch === 'string' ? { branch: meta.subagentBranch } : {}),
@@ -115,6 +116,7 @@ function equalSubagentToolSpecificData(left: IChatSubagentToolInvocationData, ri
 		&& left.prompt === right.prompt
 		&& left.result === right.result
 		&& left.modelName === right.modelName
+		&& left.detached === right.detached
 		&& left.workerId === right.workerId
 		&& left.workerStatus === right.workerStatus
 		&& left.branch === right.branch
@@ -133,6 +135,78 @@ function setSubagentToolSpecificDataIfChanged(existing: ChatToolInvocation, next
 	}
 	existing.toolSpecificData = next;
 	existing.notifyToolSpecificDataChanged();
+}
+
+const BACKBOARD_CORE_TOOL_KINDS: ReadonlySet<ChatCoreToolKind> = new Set([
+	'read',
+	'grep',
+	'glob',
+	'fetchUrl',
+	'webSearch',
+	'todo',
+	'computer',
+	'browser',
+	'findSkill',
+	'findMcp',
+]);
+
+/**
+ * Returns the explicit built-in tool UI hint produced by cli-ts. Requiring the
+ * source marker prevents an extension or MCP server with a coincidentally
+ * matching display name from being routed to Backboard's native cards.
+ */
+export function getBackboardCoreToolKind(tc: { readonly _meta?: Record<string, unknown> }): ChatCoreToolKind | undefined {
+	if (tc._meta?.source !== 'cli-ts') {
+		return undefined;
+	}
+	const toolKind = tc._meta.backboardToolKind;
+	return typeof toolKind === 'string' && BACKBOARD_CORE_TOOL_KINDS.has(toolKind as ChatCoreToolKind)
+		? toolKind as ChatCoreToolKind
+		: undefined;
+}
+
+export function getMutationToolSpecificData(tc: { readonly _meta?: Record<string, unknown> }): IChatMutationToolInvocationData | undefined {
+	if (tc._meta?.source !== 'cli-ts' || typeof tc._meta.mutationBatchId !== 'string') {
+		return undefined;
+	}
+	const count = tc._meta.mutationBatchFileCount;
+	return {
+		kind: 'mutation',
+		batchId: tc._meta.mutationBatchId,
+		expectedFileCount: typeof count === 'number' && Number.isFinite(count) && count > 0 ? Math.floor(count) : 1,
+	};
+}
+
+function parseCoreToolInput(toolInput: string | undefined): unknown {
+	if (!toolInput) {
+		return undefined;
+	}
+	try {
+		return JSON.parse(toolInput);
+	} catch {
+		return toolInput;
+	}
+}
+
+/** Builds the reload-safe payload consumed by the dedicated core-tool cards. */
+export function getCoreToolSpecificData(tc: {
+	readonly _meta?: Record<string, unknown>;
+	readonly toolInput?: string;
+	readonly structuredContent?: Record<string, unknown>;
+}): IChatCoreToolInvocationData | undefined {
+	const toolKind = getBackboardCoreToolKind(tc);
+	if (!toolKind) {
+		return undefined;
+	}
+	const structured = tc.structuredContent?.backboardTool;
+	const uiTruncated = !!(structured && typeof structured === 'object' && (structured as { uiTruncated?: unknown }).uiTruncated === true);
+	return {
+		kind: 'coreTool',
+		toolKind,
+		input: parseCoreToolInput(tc.toolInput),
+		...(structured !== undefined ? { output: structured } : {}),
+		...(uiTruncated ? { uiTruncated: true } : {}),
+	};
 }
 
 /**
@@ -596,7 +670,15 @@ function getTerminalOutput(tc: ToolCallState) {
 	// so a lone `\n` only advances the row without resetting the column (producing a
 	// staircase). SDK terminal tools return plain text with `\n` line endings, so
 	// normalize to `\r\n` here. The replace is idempotent on already-CRLF input.
-	return { text: text.replace(/\r?\n/g, '\r\n') };
+	return {
+		text: text.replace(/\r?\n/g, '\r\n'),
+		...(tc._meta?.terminalOutputTruncated === true ? { truncated: true } : {}),
+	};
+}
+
+function getTerminalExitCode(tc: ToolCallState | ICompletedToolCall): number | undefined {
+	const exitCode = tc._meta?.terminalExitCode;
+	return typeof exitCode === 'number' && Number.isInteger(exitCode) ? exitCode : undefined;
 }
 
 function getTerminalLanguage(tc: ToolCallState) {
@@ -847,14 +929,18 @@ export function completedToolCallToSerialized(tc: ICompletedToolCall, subAgentIn
 		};
 	}
 
-	let toolSpecificData: IChatTerminalToolInvocationData | IChatSearchToolInvocationData | IChatToolInputInvocationData | undefined;
+	let toolSpecificData: IChatTerminalToolInvocationData | IChatSearchToolInvocationData | IChatToolInputInvocationData | IChatCoreToolInvocationData | IChatMutationToolInvocationData | undefined;
 	if (isTerminal) {
 		toolSpecificData = {
 			...buildTerminalToolSpecificData(tc, sessionResource),
-			terminalCommandState: { exitCode: isSuccess ? 0 : 1 },
+			terminalCommandState: { exitCode: getTerminalExitCode(tc) ?? (isSuccess ? 0 : 1) },
 		};
+	} else if (getBackboardCoreToolKind(tc)) {
+		toolSpecificData = getCoreToolSpecificData(tc);
 	} else if (getToolKind(tc) === 'search') {
 		toolSpecificData = { kind: 'search' };
+	} else if (getMutationToolSpecificData(tc)) {
+		toolSpecificData = getMutationToolSpecificData(tc);
 	} else {
 		const mcpAppData = getMcpAppData(tc, sessionResource);
 		if (mcpAppData) {
@@ -867,7 +953,9 @@ export function completedToolCallToSerialized(tc: ICompletedToolCall, subAgentIn
 	const pastTenseMsg = isSuccess
 		? stringOrMarkdownToString(tc.pastTenseMessage, connectionAuthority) ?? invocationMsg
 		: invocationMsg;
-	const resultDetails = (!toolSpecificData || toolSpecificData.kind === 'input' && toolSpecificData.mcpAppData)
+	const resultDetails = (!toolSpecificData
+		|| toolSpecificData.kind === 'input' && toolSpecificData.mcpAppData
+		|| toolSpecificData.kind === 'coreTool' && !isSuccess)
 		&& (tc.status !== ToolCallStatus.Completed || getToolFileEdits(tc).length === 0)
 		? getToolInputOutputDetails(tc, !isSuccess, getToolErrorString(tc), !!(toolSpecificData?.kind === 'input' && toolSpecificData.mcpAppData), connectionAuthority)
 		: undefined;
@@ -913,7 +1001,7 @@ export function completedToolCallToEditParts(tc: ICompletedToolCall, connectionA
 	}
 	const parts: IChatProgress[] = [];
 	for (const edit of fileEdits) {
-		const part = fileEditToExternalEdit(edit, tc.toolCallId, connectionAuthority);
+		const part = fileEditToExternalEdit(edit, tc.toolCallId, connectionAuthority, getMutationToolSpecificData(tc));
 		if (part) {
 			parts.push(part);
 		}
@@ -927,7 +1015,7 @@ export function completedToolCallToEditParts(tc: ICompletedToolCall, connectionA
  * URIs are wrapped through {@link toAgentHostUri} so that remote-resource
  * lookups resolve through the agent host file system provider.
  */
-function fileEditToExternalEdit(edit: FileEdit, undoStopId: string, connectionAuthority: string): IChatExternalEdit | undefined {
+function fileEditToExternalEdit(edit: FileEdit, undoStopId: string, connectionAuthority: string, mutation?: IChatMutationToolInvocationData): IChatExternalEdit | undefined {
 	const rawFileUri = edit.after?.uri ? URI.parse(edit.after.uri) : edit.before?.uri ? URI.parse(edit.before.uri) : undefined;
 	if (!rawFileUri) {
 		return undefined;
@@ -957,6 +1045,7 @@ function fileEditToExternalEdit(edit: FileEdit, undoStopId: string, connectionAu
 		afterContentUri: edit.after?.content.uri ? toAgentHostUri(URI.parse(edit.after.content.uri), connectionAuthority) : undefined,
 		diff,
 		undoStopId,
+		...(mutation ? { mutationBatchId: mutation.batchId, mutationBatchFileCount: mutation.expectedFileCount } : {}),
 	};
 }
 
@@ -1263,8 +1352,12 @@ export function toolCallStateToInvocation(tc: ToolCallState, subAgentInvocationI
 			agentName: subagentContent?.agentName ?? getSubagentAgentName(tc),
 			...getSubagentWorkspaceData(tc),
 		};
+	} else if (getBackboardCoreToolKind(tc)) {
+		invocation.toolSpecificData = getCoreToolSpecificData(tc);
 	} else if (getToolKind(tc) === 'search') {
 		invocation.toolSpecificData = { kind: 'search' };
+	} else if (getMutationToolSpecificData(tc)) {
+		invocation.toolSpecificData = getMutationToolSpecificData(tc);
 	}
 
 	return invocation;
@@ -1306,6 +1399,16 @@ export function updateRunningToolSpecificData(existing: ChatToolInvocation, tc: 
 		return;
 	}
 
+	const mutationData = getMutationToolSpecificData(tc);
+	if (mutationData) {
+		const existingMutation = existing.toolSpecificData?.kind === 'mutation' ? existing.toolSpecificData : undefined;
+		if (!existingMutation || existingMutation.batchId !== mutationData.batchId || existingMutation.expectedFileCount !== mutationData.expectedFileCount) {
+			existing.toolSpecificData = mutationData;
+			existing.notifyToolSpecificDataChanged();
+		}
+		return;
+	}
+
 	// Refresh terminal toolSpecificData as streaming text content arrives
 	// (or when terminal toolSpecificData was not set up-front because the
 	// tool transitioned through the Streaming state before reaching
@@ -1324,6 +1427,12 @@ export function updateRunningToolSpecificData(existing: ChatToolInvocation, tc: 
 			existing.toolSpecificData = next;
 			existing.notifyToolSpecificDataChanged();
 		}
+		return;
+	}
+
+	const coreToolData = getCoreToolSpecificData(tc);
+	if (coreToolData) {
+		existing.toolSpecificData = coreToolData;
 	}
 }
 
@@ -1390,12 +1499,19 @@ export function finalizeToolInvocation(invocation: ChatToolInvocation, tc: ToolC
 		}
 	}
 
+	if (!isTerminal && invocation.toolSpecificData?.kind !== 'subagent') {
+		const coreToolData = getCoreToolSpecificData(tc);
+		if (coreToolData) {
+			invocation.toolSpecificData = coreToolData;
+		}
+	}
+
 	if (isTerminal && (isCompleted || isCancelled)) {
 		const existing = invocation.toolSpecificData?.kind === 'terminal' ? invocation.toolSpecificData : undefined;
 		invocation.presentation = undefined;
 		invocation.toolSpecificData = {
 			...buildTerminalToolSpecificData(tc, backendSession, existing),
-			terminalCommandState: { exitCode: isCompleted && tc.success ? 0 : 1 },
+			terminalCommandState: { exitCode: getTerminalExitCode(tc) ?? (isCompleted && tc.success ? 0 : 1) },
 		};
 	} else if (isCompleted && tc.pastTenseMessage) {
 		invocation.pastTenseMessage = stringOrMarkdownToString(tc.pastTenseMessage, connectionAuthority);
@@ -1427,6 +1543,7 @@ export function finalizeToolInvocation(invocation: ChatToolInvocation, tc: ToolC
 	const hasMcpAppData = invocation.toolSpecificData?.kind === 'input' && !!invocation.toolSpecificData.mcpAppData;
 	const resultDetails = !isTerminal
 		&& invocation.toolSpecificData?.kind !== 'subagent'
+		&& (invocation.toolSpecificData?.kind !== 'coreTool' || isFailure)
 		&& getToolKind(tc) !== 'search'
 		&& fileEdits.length === 0
 		? getToolInputOutputDetails(tc, isFailure, errorString, hasMcpAppData, connectionAuthority)

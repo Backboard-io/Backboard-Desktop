@@ -1,4 +1,5 @@
 import type { Config } from "../config/Config.ts";
+import type { AgentTaskManager } from "../core/agent/AgentTaskManager.ts";
 import type { RLMLoop } from "../core/agent/rlm/RLMLoop.ts";
 import type { JSONObject } from "../core/agent/rlm/RLMTypes.ts";
 import type { SubAgentRunner } from "../core/agent/SubAgentRunner.ts";
@@ -43,4 +44,5 @@ export interface DefaultToolDeps {
 	getMcpRegistrar?: () => McpRegistrar | undefined;
 	checkpoints?: CheckpointRecorder;
 	workerWorkspaceManager?: WorkerWorkspaceManager;
+	agentTaskManager?: AgentTaskManager;
 }

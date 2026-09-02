@@ -10,6 +10,8 @@ import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../base/test/comm
 import { Codicon } from '../../../base/common/codicons.js';
 import { IChat, ISession, ISessionWorkspace, SessionStatus } from '../../../sessions/services/sessions/common/session.js';
 import { collectOptimusFolderCandidates, filterAndSortOptimusSessions, getOptimusDashboardBucket, IOptimusDashboardFilters, IOptimusSessionSummary } from '../../common/optimusSessions.js';
+import { OptimusChatViewPane } from '../../contrib/chat/browser/optimusChatViewPane.js';
+import { ChatResourceNavigationHistory } from '../../../sessions/browser/parts/chatResourceNavigationHistory.js';
 
 function workspace(uri: URI, workingDirectory = uri): ISessionWorkspace {
 	return {
@@ -133,5 +135,45 @@ suite('Optimus contribution', () => {
 			filterAndSortOptimusSessions(summaries, filters, 'updated-desc', true, now).map(summary => summary.key),
 			['unread', 'read'],
 		);
+	});
+
+	test('editor chat returns to the main thread without changing workspace or composer state', async () => {
+		const parent = URI.parse('chat-session://test/parent');
+		const child = URI.parse('chat-session://test/parent/subagent/child');
+		const grandchild = URI.parse('chat-session://test/parent/subagent/child/subagent/grandchild');
+		const history = new ChatResourceNavigationHistory();
+		history.recordOpen(parent, child);
+		history.recordOpen(child, grandchild);
+		const loaded: string[] = [];
+		const workspaceIdentity = { uri: URI.file('/workspace/main') };
+		const composerState = { text: 'keep this draft' };
+		const target = Object.assign(Object.create(OptimusChatViewPane.prototype), {
+			chatResourceHistory: history,
+			chatResourceContexts: new Map(),
+			currentResourceKey: grandchild.toString(),
+			workspaceIdentity,
+			composerState,
+			canGoBackFromSubagentKey: { set: () => { } },
+			layoutChatView: () => { },
+			chatWidget: { focusInput: () => { } },
+			loadChatResource: async (resource: URI) => {
+				loaded.push(resource.toString());
+				target.currentResourceKey = resource.toString();
+			},
+		});
+
+		await (target as unknown as { navigateToMainThread(): Promise<void> }).navigateToMainThread();
+
+		assert.deepStrictEqual({
+			loaded,
+			canGoBack: history.canGoBack,
+			workspaceIdentity: target.workspaceIdentity,
+			composerState: target.composerState,
+		}, {
+			loaded: [parent.toString()],
+			canGoBack: false,
+			workspaceIdentity,
+			composerState,
+		});
 	});
 });

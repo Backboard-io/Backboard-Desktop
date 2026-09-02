@@ -16,7 +16,7 @@ import { URI } from '../../../../base/common/uri.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
-import { AgentHostEnabledSettingId, AgentHostIpcChannels, IAgentCreateSessionConfig, IAgentHostInspectInfo, IAgentHostService, IAgentHostSocketInfo, IAgentResolveSessionConfigParams, IAgentSessionConfigCompletionsParams, IAgentSessionMetadata, AuthenticateParams, AuthenticateResult, isAgentHostEnabled, IMcpNotification } from '../../../../platform/agentHost/common/agentService.js';
+import { AgentHostEnabledSettingId, AgentHostIpcChannels, IAgentCommandParams, IAgentCommandResult, IAgentCreateSessionConfig, IAgentHostInspectInfo, IAgentHostService, IAgentHostSocketInfo, IAgentResolveSessionConfigParams, IAgentSessionConfigCompletionsParams, IAgentSessionMetadata, AuthenticateParams, AuthenticateResult, isAgentHostEnabled, IMcpNotification } from '../../../../platform/agentHost/common/agentService.js';
 import { AgentHostIpcChannelTransport } from '../../../../platform/agentHost/browser/agentHostIpcChannelTransport.js';
 import { RemoteAgentHostProtocolClient } from '../../../../platform/agentHost/browser/remoteAgentHostProtocolClient.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
@@ -137,6 +137,10 @@ export class EditorRemoteAgentHostServiceClient extends Disposable implements IA
 
 	async restartAgentHost(): Promise<void> {
 		// The remote owns the agent host process lifecycle.
+	}
+
+	async executeAgentCommand(_params: IAgentCommandParams): Promise<IAgentCommandResult> {
+		throw REMOTE_NOT_SUPPORTED('executeAgentCommand');
 	}
 
 	async startWebSocketServer(): Promise<IAgentHostSocketInfo> {

@@ -24,6 +24,7 @@ export type SubAgentToolFactory = (opts: {
 export interface SubAgentRunnerDeps {
 	client: AgentClient;
 	getModel: () => ModelRef;
+	getOpenRouterProvider?: () => string | undefined;
 	memory: MemoryMode;
 	memoryProfile: MemoryProfile;
 	getThinking: () => Promise<ThinkingConfig | null | undefined>;
@@ -42,12 +43,19 @@ export interface SubAgentRunParams {
 	/** True when the worker must not receive workspace-mutating tools. */
 	readOnly?: boolean;
 	parentCwd: string;
+	/** Coordinator root corresponding to parentCwd before worker rebasing. */
+	permissionCwd?: string;
 	parentSignal: AbortSignal;
 	/** True when write tools run in a dedicated native Git worktree. */
 	isolatedWorkspace?: boolean;
 	workspace?: WorkerWorkspaceProgress;
 	parentBus?: EventBus;
 	parentToolCallId?: string;
+	/**
+	 * An isolated workspace coordinator owns the authoritative terminal edge:
+	 * model EOF is provisional until result capture/integration has settled.
+	 */
+	deferParentEnd?: boolean;
 	/**
 	 * The user turn the spawning tool call belongs to. Sub-agent file edits
 	 * are journaled under this turn so they fold into the parent checkpoint

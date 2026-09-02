@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { EventBus } from "../src/core/bus/EventBus.ts";
@@ -125,6 +125,25 @@ describe("switchable session event logs", () => {
 
 		expect(unhandled).toBeUndefined();
 		await expect(writer.flush()).rejects.toBeDefined();
+	});
+
+	it("retains the first append failure after later records can be written", async () => {
+		const root = await mkdtemp(path.join(os.tmpdir(), "jsonl-sticky-error-"));
+		const file = path.join(root, "events.jsonl");
+		const writer = new JsonlWriter(file);
+		await writer.writeBatch([{ sequence: 0 }, { sequence: 0.5 }]);
+
+		await rm(file);
+		await mkdir(file);
+		await expect(
+			writer.writeBatch([{ sequence: 1 }, { sequence: 1.5 }]),
+		).rejects.toBeDefined();
+
+		await rm(file, { recursive: true });
+		await writeFile(file, "", "utf8");
+		writer.write({ sequence: 2 });
+		await expect(writer.flush()).rejects.toBeDefined();
+		expect(await readFile(file, "utf8")).toContain('"sequence":2');
 	});
 
 	it("queues records emitted during activation for the new log", async () => {

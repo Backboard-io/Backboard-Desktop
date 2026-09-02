@@ -479,10 +479,12 @@ async function startCallbackServer(state: string): Promise<{
 		const finish = (status: number, message: string, error?: Error): void => {
 			response.writeHead(status, {
 				"Content-Type": "text/html; charset=utf-8",
+				"Cache-Control": "no-store",
+				"Referrer-Policy": "no-referrer",
+				"Content-Security-Policy":
+					"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'",
 			});
-			response.end(
-				`<!doctype html><title>Backboard login</title><p>${message}</p>`,
-			);
+			response.end(oauthCallbackHtml(message, error === undefined));
 			if (settled) return;
 			settled = true;
 			if (error) rejectCode(error);
@@ -535,6 +537,39 @@ async function startCallbackServer(state: string): Promise<{
 	}, LOGIN_TIMEOUT_MS);
 	void code.finally(() => clearTimeout(timeout)).catch(() => undefined);
 	return { server, port, code };
+}
+
+function oauthCallbackHtml(message: string, success: boolean): string {
+	const escapedMessage = message
+		.replaceAll("&", "&amp;")
+		.replaceAll("<", "&lt;")
+		.replaceAll(">", "&gt;")
+		.replaceAll('"', "&quot;")
+		.replaceAll("'", "&#39;");
+	const completionScript = success
+		? `<script>
+			history.replaceState(null, "", "/auth/complete");
+			window.close();
+			setTimeout(() => {
+				if (!window.closed) window.location.replace("https://backboard.io");
+			}, 300);
+		</script>`
+		: "";
+	return `<!doctype html>
+	<html lang="en">
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<title>Backboard sign-in</title>
+		<style>
+			html { color-scheme: dark; font: 15px -apple-system, BlinkMacSystemFont, sans-serif; }
+			body { min-height: 100vh; margin: 0; display: grid; place-items: center; background: #111214; color: #f5f5f5; }
+			main { max-width: 360px; padding: 28px; text-align: center; }
+			p { margin: 0; color: #c8c8c8; line-height: 1.5; }
+		</style>
+	</head>
+	<body><main><p>${escapedMessage}</p></main>${completionScript}</body>
+	</html>`;
 }
 
 async function listen(server: Server, port: number): Promise<void> {

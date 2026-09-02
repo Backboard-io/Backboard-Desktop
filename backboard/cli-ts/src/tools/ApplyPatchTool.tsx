@@ -1,6 +1,13 @@
-import { readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { lstat, readFile, unlink, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { z } from "zod";
+import {
+	type RecordPostImageRequest,
+	type RecordPreImageRequest,
+	recordPostImageBatch,
+	recordPreImageBatch,
+} from "../core/checkpoints/CheckpointStore.ts";
+import { measurePerformance } from "../core/performance/PerformanceTiming.ts";
 import { pathsInsideCwd } from "../core/permissions/pathsInside.ts";
 import type {
 	PermissionCheckContext,
@@ -19,7 +26,7 @@ import type { PromptContext } from "../prompts/PromptModule.ts";
 import { getToolPrompt } from "../prompts/tools/index.tsx";
 import { ensureDir, fileExists } from "../utils/fs.ts";
 import { withPathLocks } from "../utils/pathLocks.ts";
-import { collectDiagnosticsFeedback } from "./fileEdits/diagnosticsFeedback.ts";
+import { collectDiagnosticsFeedbackForFiles } from "./fileEdits/diagnosticsFeedback.ts";
 import { buildEditDiffDetailLines } from "./fileEdits/diffPreview.ts";
 import {
 	applyPatchUpdate,
@@ -39,6 +46,28 @@ interface Output {
 	files: string[];
 	operations: number;
 }
+
+type PatchAction =
+	| { kind: "write"; path: string; content: string }
+	| { kind: "delete"; path: string };
+
+type PathSnapshot =
+	| { kind: "missing" }
+	| { kind: "file"; content: string; fingerprint: string }
+	| { kind: "other"; fingerprint: string };
+
+interface PreparedPatch {
+	actions: PatchAction[];
+	fileEdits: FileEditPreview[];
+	detailLines: ToolResultDetailLine[];
+	addedLines: number;
+	removedLines: number;
+	snapshots: Map<string, PathSnapshot>;
+}
+
+type OptimisticPatch =
+	| { snapshots: Map<string, PathSnapshot>; plan: PreparedPatch }
+	| { snapshots: Map<string, PathSnapshot>; plan?: undefined; error: unknown };
 
 /** Every path a patch would touch, or null when it does not parse. */
 function patchPaths(patch: string): string[] | null {
@@ -129,150 +158,375 @@ export class ApplyPatchTool extends Tool<Input, Output> {
 			.flatMap(operationPaths)
 			.map((path) => resolve(ctx.cwd, path));
 		assertInsideIsolatedWorkspace(ctx, resolvedPaths);
+		const prepared = await measurePerformance(
+			ctx.bus,
+			"mutation_prepare",
+			{
+				toolCallId: ctx.toolCallId,
+				fileCount: new Set(resolvedPaths).size,
+			},
+			async () => await preparePatch(operations, ctx.cwd),
+		);
 
-		return await withPathLocks(resolvedPaths, async () => {
-			const actions: Array<
-				| { kind: "write"; path: string; content: string }
-				| { kind: "delete"; path: string }
-			> = [];
-			const fileEdits: FileEditPreview[] = [];
-			const detailLines: ToolResultDetailLine[] = [];
-			let addedLines = 0;
-			let removedLines = 0;
-			for (const operation of operations) {
-				const filePath = resolve(ctx.cwd, operation.path);
-				if (operation.kind === "add") {
-					if (await fileExists(filePath)) {
-						throw new Error(`File already exists: ${operation.path}`);
-					}
-					const content = contentFromAddedLines(operation.lines, "\n");
-					actions.push({
-						kind: "write",
-						path: filePath,
-						content,
-					});
-					fileEdits.push({ path: filePath, before: "", after: content });
-					addedLines += operation.lines.length;
-					detailLines.push(
-						...prefixDetailLineKeys(
-							operation.path,
-							buildEditDiffDetailLines(operation.path, "", content),
-						),
-					);
-					continue;
-				}
-
-				if (operation.kind === "delete") {
-					const original = await readRegularFile(filePath, operation.path);
-					actions.push({ kind: "delete", path: filePath });
-					fileEdits.push({ path: filePath, before: original, after: "" });
-					removedLines += countContentLines(original);
-					detailLines.push(
-						...prefixDetailLineKeys(
-							operation.path,
-							buildEditDiffDetailLines(operation.path, original, ""),
-						),
-					);
-					continue;
-				}
-
-				const original = await readFile(filePath, "utf8");
-				const content = applyPatchUpdate(
-					original,
-					operation.hunks,
-					operation.path,
-				);
-				const outputPath = operation.movePath
-					? resolve(ctx.cwd, operation.movePath)
-					: filePath;
-				if (operation.movePath && (await fileExists(outputPath))) {
-					throw new Error(`File already exists: ${operation.movePath}`);
-				}
-				actions.push({
-					kind: "write",
-					path: outputPath,
-					content,
-				});
-				fileEdits.push({
-					path: outputPath,
-					before: operation.movePath ? "" : original,
-					after: content,
-				});
-				if (operation.movePath) {
-					actions.push({ kind: "delete", path: filePath });
-					fileEdits.push({ path: filePath, before: original, after: "" });
-				}
-				for (const hunk of operation.hunks) {
-					addedLines += hunk.addedLineCount;
-					removedLines += hunk.removedLineCount;
-				}
-				const displayPath = operation.movePath ?? operation.path;
-				detailLines.push(
-					...prefixDetailLineKeys(
-						displayPath,
-						buildEditDiffDetailLines(displayPath, original, content),
-					),
-				);
+		await ctx.mutationLockTurn?.wait();
+		const committed = await withPathLocks(resolvedPaths, async () => {
+			ctx.mutationLockTurn?.advance();
+			// Preparation is optimistic. Re-check snapshots under the sorted path
+			// locks, and only rebuild if an earlier same-path call won the race.
+			const snapshotsAreCurrent = await patchSnapshotsAreCurrent(
+				prepared.snapshots,
+			);
+			let plan: PreparedPatch;
+			if (snapshotsAreCurrent) {
+				if (!prepared.plan) throw prepared.error;
+				plan = prepared.plan;
+			} else {
+				const currentSnapshots = await capturePatchSnapshots(resolvedPaths);
+				plan = buildPatchPlan(operations, ctx.cwd, currentSnapshots);
 			}
+			const preImages = await patchPreImages(plan, this.name);
+			await measurePerformance(
+				ctx.bus,
+				"checkpoint_pre_flush",
+				{ toolCallId: ctx.toolCallId, fileCount: preImages.length },
+				async () =>
+					await (ctx.mutationCheckpointBatch?.recordPreImages(preImages, ctx) ??
+						recordPreImageBatch(ctx.checkpoints, preImages, ctx)),
+			);
 
-			// Pre-image every touched path before the first disk op (a move's
-			// source and destination are both journaled before either changes),
-			// then apply; a mid-loop failure rolls the whole patch back so it
-			// behaves atomically. requireRevertible refuses paths whose pre-image
-			// cannot be captured (over the size cap) before anything is mutated,
-			// so the rollback guarantee stays honest.
-			for (const action of actions) {
-				await ctx.checkpoints?.recordPreImage(action.path, ctx, {
-					tool: this.name,
-					requireRevertible: true,
-				});
-			}
 			try {
-				for (const action of actions) {
-					if (action.kind === "delete") {
-						await unlink(action.path);
-						await ctx.checkpoints?.recordPostImage(action.path, ctx);
-						continue;
-					}
-					await ensureDir(dirname(action.path));
-					await writeFile(action.path, action.content, "utf8");
-					await ctx.checkpoints?.recordPostImage(
-						action.path,
-						ctx,
-						Buffer.from(action.content, "utf8"),
-					);
-				}
+				await measurePerformance(
+					ctx.bus,
+					"filesystem_commit",
+					{ toolCallId: ctx.toolCallId, fileCount: preImages.length },
+					async () => await applyPatchActions(plan.actions),
+				);
+				const postImages = patchPostImages(plan.actions);
+				await measurePerformance(
+					ctx.bus,
+					"checkpoint_post_flush",
+					{ toolCallId: ctx.toolCallId, fileCount: postImages.length },
+					async () =>
+						await (ctx.mutationCheckpointBatch?.recordPostImages(
+							postImages,
+							ctx,
+						) ?? recordPostImageBatch(ctx.checkpoints, postImages, ctx)),
+				);
 			} catch (error) {
-				await ctx.checkpoints?.revertToolCall(ctx.toolCallId ?? "unknown");
+				await rollbackPatch(plan, ctx);
 				throw error;
 			}
-
-			const writtenPaths = [
-				...new Set(
-					actions
-						.filter((action) => action.kind === "write")
-						.map((action) => action.path),
-				),
-			];
-			let diagnostics = "";
-			for (const path of writtenPaths) {
-				diagnostics += await collectDiagnosticsFeedback(ctx, path);
-			}
-
-			const result = ok(
-				{
-					files: [...new Set(operations.flatMap(operationPaths))],
-					operations: operations.length,
-				},
-				`Applied patch to ${operations.length} operation(s)${diagnostics}`,
-				lineSummary(addedLines, removedLines),
-				undefined,
-				detailLines,
-			);
-			result.fileEdits = fileEdits;
-			return result;
+			return plan;
 		});
+
+		const writtenPaths = finalWrittenPaths(committed.actions);
+		const diagnostics = await collectDiagnosticsFeedbackForFiles(
+			ctx,
+			writtenPaths,
+		);
+		const result = ok(
+			{
+				files: [...new Set(operations.flatMap(operationPaths))],
+				operations: operations.length,
+			},
+			`Applied patch to ${operations.length} operation(s)${diagnostics}`,
+			lineSummary(committed.addedLines, committed.removedLines),
+			undefined,
+			committed.detailLines,
+		);
+		result.fileEdits = committed.fileEdits;
+		return result;
 	}
+}
+
+async function preparePatch(
+	operations: readonly PatchOperation[],
+	cwd: string,
+): Promise<OptimisticPatch> {
+	const paths = operations
+		.flatMap(operationPaths)
+		.map((path) => resolve(cwd, path));
+	const snapshots = await capturePatchSnapshots(paths);
+	try {
+		return { snapshots, plan: buildPatchPlan(operations, cwd, snapshots) };
+	} catch (error) {
+		// As with Edit, a queued same-path patch may make this operation valid
+		// before it acquires the lock. Preserve the optimistic work but defer the
+		// snapshot-dependent error until the locked revalidation.
+		return { snapshots, error };
+	}
+}
+
+function buildPatchPlan(
+	operations: readonly PatchOperation[],
+	cwd: string,
+	snapshots: Map<string, PathSnapshot>,
+): PreparedPatch {
+	const actions: PatchAction[] = [];
+	const fileEdits: FileEditPreview[] = [];
+	const detailLines: ToolResultDetailLine[] = [];
+	let addedLines = 0;
+	let removedLines = 0;
+	for (const operation of operations) {
+		const filePath = resolve(cwd, operation.path);
+		const snapshot = snapshots.get(filePath) ?? { kind: "missing" };
+		if (operation.kind === "add") {
+			if (snapshot.kind !== "missing") {
+				throw new Error(`File already exists: ${operation.path}`);
+			}
+			const content = contentFromAddedLines(operation.lines, "\n");
+			actions.push({ kind: "write", path: filePath, content });
+			fileEdits.push({ path: filePath, before: "", after: content });
+			addedLines += operation.lines.length;
+			detailLines.push(
+				...prefixDetailLineKeys(
+					operation.path,
+					buildEditDiffDetailLines(operation.path, "", content),
+				),
+			);
+			continue;
+		}
+
+		const original = regularSnapshotContent(snapshot, operation.path);
+		if (operation.kind === "delete") {
+			actions.push({ kind: "delete", path: filePath });
+			fileEdits.push({ path: filePath, before: original, after: "" });
+			removedLines += countContentLines(original);
+			detailLines.push(
+				...prefixDetailLineKeys(
+					operation.path,
+					buildEditDiffDetailLines(operation.path, original, ""),
+				),
+			);
+			continue;
+		}
+
+		const content = applyPatchUpdate(original, operation.hunks, operation.path);
+		const outputPath = operation.movePath
+			? resolve(cwd, operation.movePath)
+			: filePath;
+		if (
+			operation.movePath &&
+			(snapshots.get(outputPath) ?? { kind: "missing" }).kind !== "missing"
+		) {
+			throw new Error(`File already exists: ${operation.movePath}`);
+		}
+		actions.push({ kind: "write", path: outputPath, content });
+		fileEdits.push({
+			path: outputPath,
+			before: operation.movePath ? "" : original,
+			after: content,
+		});
+		if (operation.movePath) {
+			actions.push({ kind: "delete", path: filePath });
+			fileEdits.push({ path: filePath, before: original, after: "" });
+		}
+		for (const hunk of operation.hunks) {
+			addedLines += hunk.addedLineCount;
+			removedLines += hunk.removedLineCount;
+		}
+		const displayPath = operation.movePath ?? operation.path;
+		detailLines.push(
+			...prefixDetailLineKeys(
+				displayPath,
+				buildEditDiffDetailLines(displayPath, original, content),
+			),
+		);
+	}
+	return {
+		actions,
+		fileEdits,
+		detailLines,
+		addedLines,
+		removedLines,
+		snapshots,
+	};
+}
+
+async function capturePatchSnapshots(
+	paths: readonly string[],
+): Promise<Map<string, PathSnapshot>> {
+	const uniquePaths = [...new Set(paths)];
+	const entries = await Promise.all(
+		uniquePaths.map(
+			async (path): Promise<[string, PathSnapshot]> => [
+				path,
+				await capturePatchSnapshot(path),
+			],
+		),
+	);
+	return new Map(entries);
+}
+
+async function capturePatchSnapshot(path: string): Promise<PathSnapshot> {
+	for (let attempt = 0; attempt < 3; attempt++) {
+		const before = await lstatOrMissing(path);
+		if (!before) return { kind: "missing" };
+		const fingerprint = statFingerprint(before);
+		if (!before.isFile()) return { kind: "other", fingerprint };
+		try {
+			const content = await readFile(path, "utf8");
+			const after = await lstatOrMissing(path);
+			if (after?.isFile() && statFingerprint(after) === fingerprint) {
+				return { kind: "file", content, fingerprint };
+			}
+		} catch (error) {
+			if ((error as { code?: string }).code !== "ENOENT") throw error;
+		}
+	}
+	throw new Error(`File changed repeatedly while preparing patch: ${path}`);
+}
+
+async function patchSnapshotsAreCurrent(
+	snapshots: ReadonlyMap<string, PathSnapshot>,
+): Promise<boolean> {
+	const matches = await Promise.all(
+		[...snapshots].map(async ([path, snapshot]) => {
+			const current = await lstatOrMissing(path);
+			if (!current) return snapshot.kind === "missing";
+			if (snapshot.kind === "missing") return false;
+			return statFingerprint(current) === snapshot.fingerprint;
+		}),
+	);
+	return matches.every(Boolean);
+}
+
+async function lstatOrMissing(
+	path: string,
+): Promise<Awaited<ReturnType<typeof lstat>> | null> {
+	try {
+		return await lstat(path);
+	} catch (error) {
+		if ((error as { code?: string }).code === "ENOENT") return null;
+		throw error;
+	}
+}
+
+function statFingerprint(info: Awaited<ReturnType<typeof lstat>>): string {
+	return [
+		info.dev,
+		info.ino,
+		info.mode,
+		info.size,
+		info.mtimeMs,
+		info.ctimeMs,
+	].join(":");
+}
+
+function regularSnapshotContent(
+	snapshot: PathSnapshot,
+	displayPath: string,
+): string {
+	if (snapshot.kind === "file") return snapshot.content;
+	if (snapshot.kind === "other") throw new Error(`Not a file: ${displayPath}`);
+	throw new Error(`File does not exist: ${displayPath}`);
+}
+
+async function patchPreImages(
+	plan: PreparedPatch,
+	tool: string,
+): Promise<RecordPreImageRequest[]> {
+	const paths = [...new Set(plan.actions.map((action) => action.path))];
+	return await Promise.all(
+		paths.map(async (path) => {
+			const createdDirs =
+				plan.snapshots.get(path)?.kind === "missing"
+					? await missingAncestorDirs(dirname(path))
+					: [];
+			return {
+				absPath: path,
+				opts: {
+					tool,
+					requireRevertible: true,
+					...(createdDirs.length > 0 ? { createdDirs } : {}),
+				},
+			};
+		}),
+	);
+}
+
+function patchPostImages(
+	actions: readonly PatchAction[],
+): RecordPostImageRequest[] {
+	const final = new Map<string, RecordPostImageRequest>();
+	for (const action of actions) {
+		final.set(
+			action.path,
+			action.kind === "write"
+				? {
+						absPath: action.path,
+						contentIfInMemory: Buffer.from(action.content, "utf8"),
+					}
+				: { absPath: action.path },
+		);
+	}
+	return [...final.values()];
+}
+
+async function applyPatchActions(
+	actions: readonly PatchAction[],
+): Promise<void> {
+	for (const action of actions) {
+		if (action.kind === "delete") {
+			await unlink(action.path);
+			continue;
+		}
+		await ensureDir(dirname(action.path));
+		await writeFile(action.path, action.content, "utf8");
+	}
+}
+
+async function rollbackPatch(
+	plan: PreparedPatch,
+	ctx: ToolContext,
+): Promise<void> {
+	if (ctx.checkpoints) {
+		try {
+			await ctx.checkpoints.revertToolCall(ctx.toolCallId ?? "unknown");
+			return;
+		} catch {
+			// Fall through to the in-memory snapshots. The checkpoint is the
+			// durable recovery path, but an I/O failure there must not knowingly
+			// leave a half-applied patch in this live process.
+		}
+	}
+	const paths = [
+		...new Set(plan.actions.map((action) => action.path)),
+	].reverse();
+	for (const path of paths) {
+		const snapshot = plan.snapshots.get(path);
+		if (!snapshot || snapshot.kind === "other") continue;
+		if (snapshot.kind === "missing") {
+			try {
+				await unlink(path);
+			} catch (error) {
+				if ((error as { code?: string }).code !== "ENOENT") throw error;
+			}
+			continue;
+		}
+		await ensureDir(dirname(path));
+		await writeFile(path, snapshot.content, "utf8");
+	}
+}
+
+function finalWrittenPaths(actions: readonly PatchAction[]): string[] {
+	const final = new Map<string, PatchAction["kind"]>();
+	for (const action of actions) final.set(action.path, action.kind);
+	return [...final]
+		.filter(([, kind]) => kind === "write")
+		.map(([path]) => path);
+}
+
+async function missingAncestorDirs(dir: string): Promise<string[]> {
+	const missing: string[] = [];
+	let current = dir;
+	while (!(await fileExists(current))) {
+		missing.push(current);
+		const parent = dirname(current);
+		if (parent === current) break;
+		current = parent;
+	}
+	return missing;
 }
 
 function prefixDetailLineKeys(
@@ -283,15 +537,6 @@ function prefixDetailLineKeys(
 		...line,
 		key: `${filePath}:${line.key}`,
 	}));
-}
-
-async function readRegularFile(
-	filePath: string,
-	displayPath: string,
-): Promise<string> {
-	const info = await stat(filePath);
-	if (!info.isFile()) throw new Error(`Not a file: ${displayPath}`);
-	return await readFile(filePath, "utf8");
 }
 
 function countContentLines(content: string): number {

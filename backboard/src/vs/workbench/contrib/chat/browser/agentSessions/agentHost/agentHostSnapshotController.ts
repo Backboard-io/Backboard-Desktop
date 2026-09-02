@@ -6,11 +6,13 @@
 import { Sequencer } from '../../../../../../base/common/async.js';
 import { VSBuffer } from '../../../../../../base/common/buffer.js';
 import { Emitter, Event } from '../../../../../../base/common/event.js';
-import { Disposable } from '../../../../../../base/common/lifecycle.js';
+import { Disposable, DisposableStore } from '../../../../../../base/common/lifecycle.js';
 import { Schemas } from '../../../../../../base/common/network.js';
 import { constObservable, derived, derivedOpts, IObservable, IReader, observableValue, transaction } from '../../../../../../base/common/observable.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { ITextModel } from '../../../../../../editor/common/model.js';
+import { IEditorWorkerService } from '../../../../../../editor/common/services/editorWorker.js';
+import { IModelService } from '../../../../../../editor/common/services/model.js';
 import { toAgentHostUri } from '../../../../../../platform/agentHost/common/agentHostUri.js';
 import { FileEditKind, ToolCallStatus, type ToolCallState } from '../../../../../../platform/agentHost/common/state/sessionState.js';
 import { IFileService } from '../../../../../../platform/files/common/files.js';
@@ -27,10 +29,24 @@ import { fileEditsToExternalEdits, type IToolCallFileEdit } from './stateToProgr
  */
 interface IAgentHostCheckpoint {
 	readonly requestId: string;
-	readonly edits: IToolCallFileEdit[];
+	readonly edits: ITrackedToolCallFileEdit[];
 	/** Tool-call IDs whose edits have already been folded into `edits`. */
 	readonly seenToolCallIds: Set<string>;
 }
+
+interface ITrackedToolCallFileEdit extends IToolCallFileEdit {
+	/** The stored count is only a fast provisional sum until the retained
+	 * first-before/latest-after snapshots have been diffed directly. */
+	readonly needsDiffRecompute?: boolean;
+}
+
+interface IResolvedDiffCounts {
+	readonly added: number;
+	readonly removed: number;
+	readonly identical: boolean;
+}
+
+let nextMergedDiffModelId = 0;
 
 /**
  * A thin {@link IChatEditingSession} for agent host sessions. The agent host
@@ -44,9 +60,11 @@ interface IAgentHostCheckpoint {
  * - {@link getSnapshotUri} / {@link getSnapshotContents} (so checkpoint diff
  *   viewers can resolve historical content)
  *
- * Everything else is a no-op / empty observable / `undefined`. In particular:
+ * The compact changed-files summary compares the retained first-before and
+ * latest-after snapshots when repeated tool calls touch one file. Everything
+ * else is a no-op / empty observable / `undefined`. In particular:
  * - `entries` is always empty → the global accept/reject UI doesn't appear
- * - no diff computation, no multi-diff editor, no streaming-edits APIs
+ * - no multi-diff editor and no streaming-edits APIs
  *
  * Undo/redo granularity is per-request: every request occupies one checkpoint
  * regardless of how many tool calls it ran. The `stopId` parameters on
@@ -84,6 +102,9 @@ export class AgentHostSnapshotController extends Disposable implements IChatEdit
 
 	private readonly _checkpoints: IAgentHostCheckpoint[] = [];
 	private readonly _currentCheckpointIndex = observableValue<number>(this, -1);
+	private readonly _diffRevision = observableValue<number>(this, 0);
+	private readonly _resolvedMergedDiffs = new Map<string, IResolvedDiffCounts>();
+	private readonly _pendingMergedDiffs = new Set<string>();
 	private readonly _undoRedoSequencer = new Sequencer();
 
 	constructor(
@@ -91,6 +112,8 @@ export class AgentHostSnapshotController extends Disposable implements IChatEdit
 		private readonly _connectionAuthority: string,
 		@ILogService private readonly _logService: ILogService,
 		@IFileService private readonly _fileService: IFileService,
+		@IModelService private readonly _modelService: IModelService,
+		@IEditorWorkerService private readonly _editorWorkerService: IEditorWorkerService,
 	) {
 		super();
 	}
@@ -154,7 +177,7 @@ export class AgentHostSnapshotController extends Disposable implements IChatEdit
 		const authority = this._connectionAuthority;
 		for (const edit of fileEdits) {
 			const resource = toAgentHostUri(edit.resource, authority);
-			const entry: IToolCallFileEdit = {
+			const entry: ITrackedToolCallFileEdit = {
 				kind: edit.kind,
 				resource,
 				originalResource: edit.originalResource ? toAgentHostUri(edit.originalResource, authority) : undefined,
@@ -177,6 +200,7 @@ export class AgentHostSnapshotController extends Disposable implements IChatEdit
 				cp.edits[existingIdx] = mergeFileEdit(cp.edits[existingIdx], entry);
 			}
 		}
+		this._invalidateDiffs();
 	}
 
 	// ---- Snapshots ----------------------------------------------------------
@@ -315,8 +339,9 @@ export class AgentHostSnapshotController extends Disposable implements IChatEdit
 	getEntryDiffBetweenRequests(_uri: URI, _startRequestId: string, _stopRequestId: string): IObservable<IEditSessionEntryDiff | undefined> { return constObservable(undefined); }
 	getDiffsForFilesInSession(): IObservable<readonly IEditSessionEntryDiff[]> {
 		return derived(this, reader => {
+			this._diffRevision.read(reader);
 			const currentIdx = this._currentCheckpointIndex.read(reader);
-			const merged = new Map<string, IToolCallFileEdit>();
+			const merged = new Map<string, ITrackedToolCallFileEdit>();
 			for (let i = 0; i <= currentIdx; i++) {
 				const checkpoint = this._checkpoints[i];
 				if (!checkpoint) {
@@ -327,16 +352,17 @@ export class AgentHostSnapshotController extends Disposable implements IChatEdit
 					merged.set(edit.resource.toString(), existing ? mergeFileEdit(existing, edit) : edit);
 				}
 			}
-			return [...merged.values()].map(edit => this._toEntryDiff(edit));
+			return [...merged.values()].map(edit => this._toEntryDiff(edit)).filter(diff => !diff.identical);
 		});
 	}
 	getDiffsForFilesInRequest(requestId: string): IObservable<readonly IEditSessionEntryDiff[]> {
-		return derived(this, () => {
+		return derived(this, reader => {
+			this._diffRevision.read(reader);
 			const checkpoint = this._checkpoints.find(cp => cp.requestId === requestId);
 			if (!checkpoint) {
 				return [];
 			}
-			return checkpoint.edits.map(edit => this._toEntryDiff(edit));
+			return checkpoint.edits.map(edit => this._toEntryDiff(edit)).filter(diff => !diff.identical);
 		});
 	}
 	getDiffForSession(): IObservable<IEditSessionDiffStats> {
@@ -444,18 +470,79 @@ export class AgentHostSnapshotController extends Disposable implements IChatEdit
 		await Promise.all(ops);
 	}
 
-	private _toEntryDiff(edit: IToolCallFileEdit): IEditSessionEntryDiff {
+	private _toEntryDiff(edit: ITrackedToolCallFileEdit): IEditSessionEntryDiff {
+		let counts = diffCounts(edit);
+		if (edit.needsDiffRecompute) {
+			const key = mergedDiffKey(edit);
+			if (key) {
+				counts = this._resolvedMergedDiffs.get(key) ?? counts;
+				if (!this._resolvedMergedDiffs.has(key)) {
+					this._resolveMergedDiff(key, edit);
+				}
+			}
+		}
 		return {
 			originalURI: edit.beforeContentUri ?? edit.originalResource ?? edit.resource,
 			modifiedURI: edit.afterContentUri ?? edit.resource,
 			resource: edit.resource,
-			added: edit.diff?.added ?? 0,
-			removed: edit.diff?.removed ?? 0,
+			added: counts.added,
+			removed: counts.removed,
 			quitEarly: false,
-			identical: false,
+			identical: counts.identical,
 			isFinal: true,
 			isBusy: false,
 		};
+	}
+
+	private _resolveMergedDiff(key: string, edit: ITrackedToolCallFileEdit): void {
+		if (this._pendingMergedDiffs.has(key)) {
+			return;
+		}
+		this._pendingMergedDiffs.add(key);
+		void this._computeMergedDiff(edit).then(counts => {
+			this._resolvedMergedDiffs.set(key, counts ?? diffCounts(edit));
+			this._invalidateDiffs();
+		}).catch(err => {
+			this._logService.warn('[AgentHostSnapshotController] Failed to compute merged file diff', err);
+			this._resolvedMergedDiffs.set(key, diffCounts(edit));
+		}).finally(() => this._pendingMergedDiffs.delete(key));
+	}
+
+	private async _computeMergedDiff(edit: ITrackedToolCallFileEdit): Promise<IResolvedDiffCounts | undefined> {
+		const [beforeContent, afterContent] = await Promise.all([
+			edit.beforeContentUri ? this._fileService.readFile(edit.beforeContentUri).then(content => content.value.toString()) : '',
+			edit.afterContentUri ? this._fileService.readFile(edit.afterContentUri).then(content => content.value.toString()) : '',
+		]);
+		const modelId = nextMergedDiffModelId++;
+		const models = new DisposableStore();
+		try {
+			const originalUri = URI.from({ scheme: 'agent-host-merged-diff', path: `/${modelId}/before` });
+			const modifiedUri = URI.from({ scheme: 'agent-host-merged-diff', path: `/${modelId}/after` });
+			models.add(this._modelService.createModel(beforeContent, null, originalUri, true));
+			models.add(this._modelService.createModel(afterContent, null, modifiedUri, true));
+			const result = await this._editorWorkerService.computeDiff(
+				originalUri,
+				modifiedUri,
+				{ ignoreTrimWhitespace: false, computeMoves: false, maxComputationTimeMs: 3000 },
+				'advanced',
+			);
+			if (!result) {
+				return undefined;
+			}
+			let added = 0;
+			let removed = 0;
+			for (const change of result.changes) {
+				removed += change.original.endLineNumberExclusive - change.original.startLineNumber;
+				added += change.modified.endLineNumberExclusive - change.modified.startLineNumber;
+			}
+			return { added, removed, identical: result.identical };
+		} finally {
+			models.dispose();
+		}
+	}
+
+	private _invalidateDiffs(): void {
+		transaction(tx => this._diffRevision.set(this._diffRevision.get() + 1, tx));
 	}
 }
 
@@ -469,7 +556,7 @@ export class AgentHostSnapshotController extends Disposable implements IChatEdit
  * still keep the entry so the file is restored to "absent" on undo, but
  * `_writeCheckpointContent` will skip the write since both URIs are absent.
  */
-function mergeFileEdit(prev: IToolCallFileEdit, next: IToolCallFileEdit): IToolCallFileEdit {
+function mergeFileEdit(prev: ITrackedToolCallFileEdit, next: ITrackedToolCallFileEdit): ITrackedToolCallFileEdit {
 	const startsAbsent = prev.kind === FileEditKind.Create;
 	const endsAbsent = next.kind === FileEditKind.Delete;
 
@@ -494,6 +581,24 @@ function mergeFileEdit(prev: IToolCallFileEdit, next: IToolCallFileEdit): IToolC
 		beforeContentUri: prev.beforeContentUri,
 		afterContentUri: next.afterContentUri,
 		undoStopId: prev.undoStopId,
-		diff: next.diff ?? prev.diff,
+		// This sum keeps the compact summary informative until the async worker
+		// compares the retained snapshots. It is not treated as authoritative:
+		// repeated edits can add and later remove the same lines.
+		diff: {
+			added: (prev.diff?.added ?? 0) + (next.diff?.added ?? 0),
+			removed: (prev.diff?.removed ?? 0) + (next.diff?.removed ?? 0),
+		},
+		needsDiffRecompute: true,
 	};
+}
+
+function mergedDiffKey(edit: ITrackedToolCallFileEdit): string | undefined {
+	if (!edit.needsDiffRecompute) {
+		return undefined;
+	}
+	return `${edit.beforeContentUri?.toString() ?? '<absent>'}\0${edit.afterContentUri?.toString() ?? '<absent>'}`;
+}
+
+function diffCounts(edit: ITrackedToolCallFileEdit): IResolvedDiffCounts {
+	return { added: edit.diff?.added ?? 0, removed: edit.diff?.removed ?? 0, identical: false };
 }

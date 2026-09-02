@@ -101,6 +101,33 @@ describe("ClientToolBridge", () => {
 		});
 	});
 
+	it("accepts an IDE result delivered synchronously from the call event", async () => {
+		const bus = new EventBus();
+		const registry = new ToolRegistry();
+		const bridge = new ClientToolBridge(bus, registry);
+		bridge.setTools([OPEN_PAGE]);
+		bus.on("client_tool:call", (event) => {
+			bridge.provideResult(event.toolCallId, {
+				success: true,
+				content: [{ type: "text", text: "Opened immediately" }],
+			});
+		});
+
+		const tool = registry.get("open_browser_page") as ClientProxyTool;
+		const result = await tool.execute(
+			{ url: "http://localhost:8765" },
+			{
+				...makeContext(new AbortController().signal, bus),
+				toolCallId: "call_sync",
+			},
+		);
+
+		expect(result.data).toMatchObject({
+			success: true,
+			output: "Opened immediately",
+		});
+	});
+
 	it("turns an IDE error payload into a thrown tool error", async () => {
 		const bus = new EventBus();
 		const registry = new ToolRegistry();

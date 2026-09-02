@@ -43,4 +43,33 @@ describe("buildRunMessageRequest", () => {
 		expect(on.image_model_provider).toBe("google");
 		expect(on.image_model_name).toBe("gemini-3.1-flash-image");
 	});
+
+	it("pins a selected OpenRouter upstream and otherwise leaves routing automatic", () => {
+		const context = {
+			session: new Session("sess_test"),
+			tools: [],
+			systemPrompt: "system",
+			model: { provider: "openrouter", model: "deepseek/deepseek-chat-v3.1" },
+			memory: "off" as const,
+			memoryProfile: "code" as const,
+		};
+
+		expect(buildRunMessageRequest("hello", context).openrouter).toBeUndefined();
+		expect(
+			buildRunMessageRequest("hello", {
+				...context,
+				openRouterProvider: "DeepInfra",
+			}).openrouter,
+		).toEqual({
+			providers: ["DeepInfra"],
+			allow_fallbacks: false,
+		});
+		expect(
+			buildRunMessageRequest("hello", {
+				...context,
+				model: { provider: "openai", model: "gpt-5.5" },
+				openRouterProvider: "DeepInfra",
+			}).openrouter,
+		).toBeUndefined();
+	});
 });

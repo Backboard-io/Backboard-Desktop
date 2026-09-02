@@ -33,6 +33,18 @@ export interface ClientToolResultPayload {
 }
 
 const CLIENT_TOOL_TIMEOUT_MS = 300_000;
+const INTERACTIVE_BROWSER_TOOL_TIMEOUT_MS = 60_000;
+
+function clientToolTimeoutMs(name: string): number {
+	// Opening a browser page is normally a sub-second IDE operation, but it can
+	// wait on an approval card. Five silent minutes made a missed/hidden card
+	// look like a frozen agent. Fail this interactive hop promptly so the model
+	// can fall back to headless verification; keep the longer ceiling for IDE
+	// tasks whose legitimate execution can take several minutes.
+	return name === "openBrowserPage" || name === "open_browser_page"
+		? INTERACTIVE_BROWSER_TOOL_TIMEOUT_MS
+		: CLIENT_TOOL_TIMEOUT_MS;
+}
 
 interface PendingClientCall {
 	resolve: (payload: ClientToolResultPayload) => void;
@@ -103,16 +115,16 @@ export class ClientToolBridge {
 		ctx: ToolContext,
 	): Promise<ClientToolResultPayload> {
 		const toolCallId = ctx.toolCallId ?? shortId("ctc");
-		this.bus.emit({ type: "client_tool:call", toolCallId, name, input });
 		return await new Promise<ClientToolResultPayload>((resolve, reject) => {
+			const timeoutMs = clientToolTimeoutMs(name);
 			const timer = setTimeout(() => {
 				finish();
 				reject(
 					new Error(
-						`The IDE did not answer the "${name}" tool call within ${CLIENT_TOOL_TIMEOUT_MS / 1000}s.`,
+						`The IDE did not complete the "${name}" tool call within ${timeoutMs / 1000}s. It may still be waiting for approval; continue without it and do not retry automatically.`,
 					),
 				);
-			}, CLIENT_TOOL_TIMEOUT_MS);
+			}, timeoutMs);
 			const onAbort = (): void => {
 				finish();
 				reject(new Error("aborted"));
@@ -137,6 +149,10 @@ export class ClientToolBridge {
 					reject(err);
 				},
 			});
+			// Register before emitting. An in-process IDE adapter or test harness can
+			// answer synchronously from its event listener; emitting first would lose
+			// that response and leave the call parked until its timeout.
+			this.bus.emit({ type: "client_tool:call", toolCallId, name, input });
 		});
 	}
 

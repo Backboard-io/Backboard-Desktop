@@ -83,6 +83,26 @@ describe("isolated worker filesystem boundary", () => {
 describe("WriteTool permissions", () => {
 	const tool = new WriteTool();
 
+	it("refuses to create the target of a dangling symlink", async () => {
+		const root = await mkdtemp(join(tmpdir(), "write-dangling-"));
+		const outside = await mkdtemp(join(tmpdir(), "write-dangling-outside-"));
+		try {
+			const target = join(outside, "created.txt");
+			await symlink(target, join(root, "link.txt"));
+
+			await expect(
+				tool.execute(
+					{ file_path: "link.txt", content: "must not escape" },
+					{ ...makeContext(new AbortController().signal), cwd: root },
+				),
+			).rejects.toThrow("dangling symbolic link");
+			await expect(access(target)).rejects.toThrow();
+		} finally {
+			await rm(root, { recursive: true, force: true });
+			await rm(outside, { recursive: true, force: true });
+		}
+	});
+
 	it("allows cwd writes in acceptEdits", () => {
 		expect(
 			tool.checkPermissions(

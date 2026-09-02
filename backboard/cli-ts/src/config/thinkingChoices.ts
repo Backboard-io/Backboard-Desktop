@@ -19,6 +19,7 @@ const LEVEL_CHOICES: ThinkingChoice[] = [
 	{ label: "Low", value: { kind: "level", level: "low" } },
 	{ label: "Medium", value: { kind: "level", level: "medium" } },
 	{ label: "High", value: { kind: "level", level: "high" } },
+	{ label: "X-High", value: { kind: "level", level: "xhigh" } },
 	{ label: "Max", value: { kind: "level", level: "max" } },
 ];
 

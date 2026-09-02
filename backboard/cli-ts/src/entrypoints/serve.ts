@@ -8,6 +8,8 @@ import {
 	parseThinking,
 } from "../config/defaults.ts";
 import { AgentController } from "../core/agent/AgentController.ts";
+import { AgentTaskManager } from "../core/agent/AgentTaskManager.ts";
+import { AgentTaskStore } from "../core/agent/AgentTaskStore.ts";
 import { EventBus } from "../core/bus/EventBus.ts";
 import { CheckpointManager } from "../core/checkpoints/CheckpointManager.ts";
 import { CheckpointStore } from "../core/checkpoints/CheckpointStore.ts";
@@ -88,6 +90,11 @@ export async function runServe(argv: string[]): Promise<void> {
 		maxWorkers: parseMaxWorkers(process.env.BACKBOARD_MAX_PARALLEL_WORKERS),
 	});
 	await workerWorkspaceManager.initialize();
+	const agentTaskManager = new AgentTaskManager({
+		store: new AgentTaskStore(join(store.paths.root, "agent-tasks.json")),
+		workerWorkspaces: workerWorkspaceManager,
+	});
+	await agentTaskManager.initialize();
 
 	const bus = new EventBus();
 	const clientLog = new ClientEventLog(sessionId, store.paths.clientLog);
@@ -145,6 +152,7 @@ export async function runServe(argv: string[]): Promise<void> {
 			skillController,
 			getMcpRegistrar: () => mcpController,
 			workerWorkspaceManager,
+			agentTaskManager,
 		}),
 	);
 	const mcpToolRegistrar = new McpToolRegistrar(registry, bus);
@@ -239,6 +247,7 @@ export async function runServe(argv: string[]): Promise<void> {
 			replacedThreadId = threadId ?? undefined;
 		},
 		getTranscriptPath: () => store.paths.clientLog,
+		agentTasks: agentTaskManager,
 	});
 
 	const selectSkillsByName = async (names: string[]): Promise<void> => {
@@ -364,6 +373,7 @@ export async function runServe(argv: string[]): Promise<void> {
 						if (control.imageGeneration !== undefined) {
 							config.setImageGenerationEnabled(control.imageGeneration);
 						}
+						config.setOpenRouterProvider(control.openRouterProvider);
 						// Sent on every turn; an absent list clears prior client
 						// tools so a disconnected surface never leaves stale tools.
 						clientToolBridge.setTools(control.clientTools ?? []);

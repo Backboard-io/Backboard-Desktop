@@ -3,11 +3,12 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { Codicon } from '../../../../../base/common/codicons.js';
+import { Event } from '../../../../../base/common/event.js';
 import { DisposableStore } from '../../../../../base/common/lifecycle.js';
+import { isWindows } from '../../../../../base/common/platform.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { URI } from '../../../../../base/common/uri.js';
-import { Event } from '../../../../../base/common/event.js';
-import { isWindows } from '../../../../../base/common/platform.js';
 import { localize } from '../../../../../nls.js';
 import { IAgentHostService } from '../../../../../platform/agentHost/common/agentService.js';
 import type { RootState } from '../../../../../platform/agentHost/common/state/protocol/state.js';
@@ -25,12 +26,14 @@ import { IPathService } from '../../../../services/path/common/pathService.js';
 
 /** An agent CLI the user can set up with one click from the session-type picker. */
 export interface IAgentCliSetupCandidate {
-	/** Bare agent-host provider id ('claude' | 'codex'). */
+	/** Bare agent-host provider or account-route id. */
 	readonly id: string;
 	readonly label: string;
 	readonly icon: ThemeIcon;
 	/** Short row description shown in the picker. */
 	readonly description: string;
+	/** Action badge shown on the row. Defaults to Install. */
+	readonly actionLabel?: string;
 }
 
 /** The vendor's Node-less installer command, per shell family. */
@@ -85,11 +88,39 @@ interface IAgentCliSetupDefinition extends IAgentCliSetupCandidate {
  */
 const SETUP_DEFINITIONS: readonly IAgentCliSetupDefinition[] = [];
 
+export const CHATGPT_SUBSCRIPTION_SETUP_ID = 'backboard';
+export const CLAUDE_SUBSCRIPTION_SETUP_ID = 'backboard.claudeSubscription';
+
+const CHATGPT_SUBSCRIPTION_SETUP: IAgentCliSetupCandidate = {
+	id: CHATGPT_SUBSCRIPTION_SETUP_ID,
+	label: localize('agentSetup.chatgptSubscription.label', "ChatGPT Subscription"),
+	icon: Codicon.openai,
+	description: localize('agentSetup.chatgptSubscription.description', "Connect or reconnect ChatGPT to use subscription models through the Backboard harness."),
+	actionLabel: localize('agentSetup.chatgptSubscription.action', "Connect"),
+};
+
+const CLAUDE_SUBSCRIPTION_SETUP: IAgentCliSetupCandidate & { readonly pasteBackSignIn: true } = {
+	id: CLAUDE_SUBSCRIPTION_SETUP_ID,
+	label: localize('agentSetup.claudeSubscription.label', "Claude Subscription"),
+	icon: Codicon.sparkle,
+	description: localize('agentSetup.claudeSubscription.description', "Connect or reconnect Claude Code to use subscription models through the Backboard harness."),
+	actionLabel: localize('agentSetup.claudeSubscription.action', "Connect"),
+	pasteBackSignIn: true,
+};
+
 /** Matches the vendor OAuth URL in CLI sign-in output. */
-const SIGN_IN_URL_RE = /https:\/\/\S*(?:oauth|authorize)\S*/i;
+const SIGN_IN_URL_RE = /https:\/\/[^\s\x1b]*(?:oauth|authorize)[^\s\x1b]*/i;
 
 const INSTALL_TIMEOUT_MS = 10 * 60_000;
 const REGISTRATION_TIMEOUT_MS = 10_000;
+
+/** Official Claude Code login with a fallback for its native user install. */
+export function claudeSubscriptionLoginShellCommand(windows = isWindows): string {
+	if (windows) {
+		return '$claude = Get-Command claude -ErrorAction SilentlyContinue; if ($claude) { & $claude.Source auth login --claudeai } elseif (Test-Path "$env:USERPROFILE\\.local\\bin\\claude.exe") { & "$env:USERPROFILE\\.local\\bin\\claude.exe" auth login --claudeai } elseif (Test-Path "$env:USERPROFILE\\.local\\bin\\claude.cmd") { & "$env:USERPROFILE\\.local\\bin\\claude.cmd" auth login --claudeai } else { Write-Error "Claude Code is not installed or was not found on PATH"; exit 127 }';
+	}
+	return 'if command -v claude >/dev/null 2>&1; then claude auth login --claudeai; elif [ -x "$HOME/.local/bin/claude" ]; then "$HOME/.local/bin/claude" auth login --claudeai; else echo "Claude Code is not installed or was not found on PATH" >&2; exit 127; fi';
+}
 
 export const IAgentCliSetupService = createDecorator<IAgentCliSetupService>('agentCliSetupService');
 
@@ -128,9 +159,14 @@ export class AgentCliSetupService implements IAgentCliSetupService {
 	) { }
 
 	getSetupCandidates(registeredTypeIds: ReadonlySet<string>): IAgentCliSetupCandidate[] {
-		// Only offer agents we can install without Node — on Windows that
-		// excludes vendors with no Node-less PowerShell installer.
-		return SETUP_DEFINITIONS.filter(d => !registeredTypeIds.has(d.id) && (!isWindows || d.install.win32 !== undefined));
+		// Subscription rows remain available as reconnect actions. Installable
+		// agents disappear once registered; on Windows, vendors without a
+		// Node-less PowerShell installer are excluded.
+		return [
+			CHATGPT_SUBSCRIPTION_SETUP,
+			CLAUDE_SUBSCRIPTION_SETUP,
+			...SETUP_DEFINITIONS.filter(d => !registeredTypeIds.has(d.id) && (!isWindows || d.install.win32 !== undefined)),
+		];
 	}
 
 	/**
@@ -154,6 +190,36 @@ export class AgentCliSetupService implements IAgentCliSetupService {
 	}
 
 	async beginSetup(id: string): Promise<void> {
+		if (id === CHATGPT_SUBSCRIPTION_SETUP.id) {
+			if (this._inFlight.has(id)) {
+				return;
+			}
+			this._inFlight.add(id);
+			try {
+				await this._runChatGptSubscriptionSetup();
+			} catch (err) {
+				this._logService.error('[AgentCliSetup] ChatGPT subscription login failed', err);
+				this._notificationService.error(localize('agentSetup.chatgptSubscription.failed', "ChatGPT could not be connected: {0}", err instanceof Error ? err.message : String(err)));
+			} finally {
+				this._inFlight.delete(id);
+			}
+			return;
+		}
+		if (id === CLAUDE_SUBSCRIPTION_SETUP.id) {
+			if (this._inFlight.has(id)) {
+				return;
+			}
+			this._inFlight.add(id);
+			try {
+				await this._runClaudeSubscriptionSetup();
+			} catch (err) {
+				this._logService.error('[AgentCliSetup] Claude subscription login failed', err);
+				this._notificationService.error(localize('agentSetup.claudeSubscription.failed', "Claude could not be connected: {0}", err instanceof Error ? err.message : String(err)));
+			} finally {
+				this._inFlight.delete(id);
+			}
+			return;
+		}
 		const definition = SETUP_DEFINITIONS.find(d => d.id === id);
 		if (!definition || this._inFlight.has(id)) {
 			return;
@@ -166,6 +232,62 @@ export class AgentCliSetupService implements IAgentCliSetupService {
 			this._notificationService.error(localize('agentSetup.failed', "{0} could not be installed: {1}", definition.label, err instanceof Error ? err.message : String(err)));
 		} finally {
 			this._inFlight.delete(id);
+		}
+	}
+
+	private async _runChatGptSubscriptionSetup(): Promise<void> {
+		const { confirmed } = await this._dialogService.confirm({
+			message: localize('agentSetup.chatgptSubscription.confirmTitle', "Connect ChatGPT subscription?"),
+			detail: localize('agentSetup.chatgptSubscription.confirmDetail', "Backboard will open ChatGPT in your browser and store its own renewable login. OpenAI model requests will continue to run through the Backboard CLI harness."),
+			primaryButton: localize('agentSetup.chatgptSubscription.connectButton', "Connect"),
+		});
+		if (!confirmed) {
+			return;
+		}
+
+		const result = await this._progressService.withProgress({
+			location: ProgressLocation.Notification,
+			title: localize('agentSetup.chatgptSubscription.connecting', "Connecting ChatGPT subscription…"),
+			sticky: true,
+		}, () => this._agentHostService.executeAgentCommand({
+			provider: 'backboard',
+			command: 'chatgptSubscription.login',
+		}));
+		this._notificationService.info(result.message);
+	}
+
+	private async _runClaudeSubscriptionSetup(): Promise<void> {
+		const { confirmed } = await this._dialogService.confirm({
+			message: localize('agentSetup.claudeSubscription.confirmTitle', "Connect Claude subscription?"),
+			detail: localize('agentSetup.claudeSubscription.confirmDetail', "Backboard will ask the installed Claude Code CLI to open Anthropic's sign-in flow. Claude model requests will use the Claude Code transport while Backboard remains responsible for its harness tools."),
+			primaryButton: localize('agentSetup.claudeSubscription.connectButton', "Connect"),
+		});
+		if (!confirmed) {
+			return;
+		}
+
+		const command = claudeSubscriptionLoginShellCommand();
+		const outcome = await this._progressService.withProgress({
+			location: ProgressLocation.Notification,
+			title: localize('agentSetup.claudeSubscription.connecting', "Connecting Claude subscription…"),
+			sticky: true,
+		}, async () => {
+			const exitCode = await this._runHidden(CLAUDE_SUBSCRIPTION_SETUP, command);
+			if (exitCode !== 0) {
+				return { exitCode };
+			}
+			const result = await this._agentHostService.executeAgentCommand({
+				provider: 'backboard',
+				command: 'claudeSubscription.enable',
+			});
+			return { exitCode, result };
+		});
+		if (outcome.exitCode !== 0) {
+			this._notificationService.error(localize('agentSetup.claudeSubscription.exitFailed', "Claude sign-in did not complete (exit code {0}). Try Connect Claude again, or run this in a terminal: {1}", outcome.exitCode, command));
+			return;
+		}
+		if (outcome.result) {
+			this._notificationService.info(outcome.result.message);
 		}
 	}
 
@@ -222,7 +344,7 @@ export class AgentCliSetupService implements IAgentCliSetupService {
 	 * the output for the OAuth URL, opens it in the browser, and forwards
 	 * the code the user pastes into a quick input.
 	 */
-	private async _runHidden(definition: IAgentCliSetupDefinition, command: string): Promise<number> {
+	private async _runHidden(definition: Pick<IAgentCliSetupDefinition, 'label' | 'pasteBackSignIn'>, command: string): Promise<number> {
 		const userHome = await this._pathService.userHome();
 		const instance = await this._terminalService.createTerminal({
 			config: { cwd: userHome, hideFromUser: true },
@@ -232,12 +354,13 @@ export class AgentCliSetupService implements IAgentCliSetupService {
 			if (definition.pasteBackSignIn) {
 				this._wireSignInPasteBack(definition, instance, store);
 			}
+			const exitPromise = Event.toPromise(instance.onExit);
 			// `exit` after the command so the hidden shell terminates and
 			// surfaces the command's status as the terminal exit code.
 			instance.sendText(`${command}; exit`, true);
 
 			const exit = await Promise.race([
-				Event.toPromise(instance.onExit),
+				exitPromise,
 				new Promise<number>(resolve => {
 					const timer = setTimeout(() => resolve(124), INSTALL_TIMEOUT_MS);
 					store.add({ dispose: () => clearTimeout(timer) });
@@ -251,11 +374,11 @@ export class AgentCliSetupService implements IAgentCliSetupService {
 	}
 
 	/**
-	 * Claude's `setup-token` sign-in prints an OAuth URL and waits for the
+	 * Claude's official `auth login --claudeai` flow prints an OAuth URL and waits for the
 	 * user to paste a code back. Surface that as: open the browser to the
 	 * URL, then a single quick-input box for the code — no terminal shown.
 	 */
-	private _wireSignInPasteBack(definition: IAgentCliSetupDefinition, instance: ITerminalInstance, store: DisposableStore): void {
+	private _wireSignInPasteBack(definition: Pick<IAgentCliSetupDefinition, 'label'>, instance: ITerminalInstance, store: DisposableStore): void {
 		let output = '';
 		let handled = false;
 		store.add(instance.onData(chunk => {

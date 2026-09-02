@@ -1,4 +1,4 @@
-export type ThinkingLevel = "low" | "medium" | "high" | "max";
+export type ThinkingLevel = "low" | "medium" | "high" | "xhigh" | "max";
 
 export type ThinkingIntent =
 	| { kind: "default" }

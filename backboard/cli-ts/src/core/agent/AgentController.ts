@@ -51,6 +51,7 @@ import type {
 	SubmitOptions,
 } from "./AgentControllerTypes.ts";
 import { AgentLoopFactory } from "./AgentLoopFactory.ts";
+import type { AgentTaskManager } from "./AgentTaskManager.ts";
 import { AgentTraceContext } from "./AgentTraceStore.ts";
 import { AssistantSessionBinding } from "./AssistantSessionBinding.ts";
 import { capacityFallbackCandidates, modelKey } from "./RuntimeRecovery.ts";
@@ -86,6 +87,7 @@ export interface AgentControllerDeps {
 	 */
 	transcriptPath?: string;
 	getTranscriptPath?: () => string;
+	agentTasks?: Pick<AgentTaskManager, "cancelAll" | "waitForIdle">;
 }
 
 /**
@@ -198,6 +200,8 @@ export class AgentController {
 	}
 
 	async dispose(): Promise<void> {
+		this.deps.agentTasks?.cancelAll();
+		await this.deps.agentTasks?.waitForIdle();
 		// Pair SessionEnd with SessionStart: only fire it if the session started.
 		if (this.sessionHooksStarted) {
 			await this.runTerminalHook((signal) =>
@@ -434,6 +438,7 @@ export class AgentController {
 				workspaceId:
 					config.memory === "off" ? undefined : config.getWorkspaceId(),
 				imageGeneration: config.isImageGenerationEnabled,
+				openRouterProvider: config.selectedOpenRouterProvider,
 				generatedMediaDir: join(config.cwd, "generated-images"),
 				thinking: undefined,
 				thinkingResolver,
@@ -682,6 +687,7 @@ export class AgentController {
 	/** Cancels the active turn, aborting in-flight requests and tools. */
 	cancel(options: CancelOptions = {}): void {
 		this.abortController?.abort();
+		this.deps.agentTasks?.cancelAll();
 		this.rejectPendingAsks();
 		if (options.clearQueue) this.clearQueuedSubmits();
 	}

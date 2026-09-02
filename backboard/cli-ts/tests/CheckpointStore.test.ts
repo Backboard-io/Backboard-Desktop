@@ -19,6 +19,7 @@ import {
 	MAX_CAPTURE_BYTES,
 } from "../src/core/checkpoints/CheckpointStore.ts";
 import type { SessionPaths } from "../src/core/session/SessionStore.ts";
+import { canonicalPhysicalPath } from "../src/utils/pathLocks.ts";
 
 let root: string;
 let work: string;
@@ -94,7 +95,7 @@ describe("CheckpointStore", () => {
 
 		const result = await undoLatest(store);
 
-		expect(result.deleted).toEqual([file]);
+		expect(result.deleted).toEqual([await canonicalPhysicalPath(file)]);
 		expect(existsSync(file)).toBe(false);
 		expect(existsSync(dirB)).toBe(false); // empty createdDir pruned
 		expect(existsSync(dirA)).toBe(true); // non-empty createdDir kept
@@ -119,6 +120,193 @@ describe("CheckpointStore", () => {
 		await undoLatest(store);
 
 		expect(await readFile(file, "utf8")).toBe("v0");
+	});
+
+	it("captures multi-file pre/post phases durably and restores the batch", async () => {
+		const { bus, store, paths } = makeStore();
+		const fileA = join(work, "a.txt");
+		const fileB = join(work, "b.txt");
+		await Promise.all([
+			writeFile(fileA, "a0", "utf8"),
+			writeFile(fileB, "b0", "utf8"),
+		]);
+
+		startTurn(bus, "t1");
+		await store.recordPreImages(
+			[
+				{ absPath: fileA, opts: { tool: "ApplyPatch" } },
+				{ absPath: fileB, opts: { tool: "ApplyPatch" } },
+			],
+			ctx("t1", "c1"),
+		);
+		await Promise.all([
+			writeFile(fileA, "a1", "utf8"),
+			writeFile(fileB, "b1", "utf8"),
+		]);
+		await store.recordPostImages(
+			[
+				{ absPath: fileA, contentIfInMemory: Buffer.from("a1") },
+				{ absPath: fileB, contentIfInMemory: Buffer.from("b1") },
+			],
+			ctx("t1", "c1"),
+		);
+		endTurn(bus, "t1");
+		await store.flush();
+
+		const records = (
+			await readFile(join(paths.checkpoints, "journal.jsonl"), "utf8")
+		)
+			.trim()
+			.split("\n")
+			.map((line) => JSON.parse(line) as { type: string; path?: string });
+		await undoLatest(store);
+
+		expect({
+			phaseOrder: records
+				.filter((record) => ["pre", "post"].includes(record.type))
+				.map((record) => `${record.type}:${record.path}`),
+			contents: await Promise.all([
+				readFile(fileA, "utf8"),
+				readFile(fileB, "utf8"),
+			]),
+		}).toEqual({
+			phaseOrder: [
+				`pre:${await canonicalPhysicalPath(fileA)}`,
+				`pre:${await canonicalPhysicalPath(fileB)}`,
+				`post:${await canonicalPhysicalPath(fileA)}`,
+				`post:${await canonicalPhysicalPath(fileB)}`,
+			],
+			contents: ["a0", "b0"],
+		});
+	});
+
+	it("persists each explicit plural capture phase as one journal batch", async () => {
+		const { bus, store } = makeStore();
+		const files = ["a.txt", "b.txt", "c.txt"].map((name) => join(work, name));
+		const journal = (
+			store as unknown as {
+				journal: { writeBatch(records: readonly object[]): Promise<void> };
+			}
+		).journal;
+		const writeBatch = journal.writeBatch.bind(journal);
+		const batchSizes: number[] = [];
+		journal.writeBatch = async (records) => {
+			batchSizes.push(records.length);
+			await writeBatch(records);
+		};
+
+		startTurn(bus, "t1");
+		await store.recordPreImages(
+			files.map((absPath, index) => ({
+				absPath,
+				toolCallId: `c${index}`,
+				opts: { tool: "Write" },
+			})),
+			{ turnId: "t1" },
+		);
+		expect(batchSizes).toEqual([1, 3]);
+
+		await Promise.all(
+			files.map(async (file, index) => {
+				const content = Buffer.from(`value ${index}`);
+				await writeFile(file, content);
+				return content;
+			}),
+		);
+		await store.recordPostImages(
+			files.map((absPath, index) => ({
+				absPath,
+				toolCallId: `c${index}`,
+				contentIfInMemory: Buffer.from(`value ${index}`),
+			})),
+			{ turnId: "t1" },
+		);
+		expect(batchSizes).toEqual([1, 3, 3]);
+		expect(
+			(
+				store as unknown as {
+					records: Array<{ type: string; toolCallId?: string }>;
+				}
+			).records
+				.filter((record) => record.type === "pre" || record.type === "post")
+				.map((record) => `${record.type}:${record.toolCallId}`),
+		).toEqual(["pre:c0", "pre:c1", "pre:c2", "post:c0", "post:c1", "post:c2"]);
+	});
+
+	it("does not index a plural pre-image batch whose journal append fails", async () => {
+		const { bus, store } = makeStore();
+		const seed = join(work, "seed.txt");
+		await writeFile(seed, "seed", "utf8");
+		startTurn(bus, "t1");
+		await store.recordPreImage(seed, ctx("t1", "seed"), { tool: "Edit" });
+
+		const internals = store as unknown as {
+			records: Array<{ type: string; toolCallId?: string }>;
+			journal: { writeBatch(records: readonly object[]): Promise<void> };
+		};
+		const beforeCount = internals.records.length;
+		internals.journal.writeBatch = async () => {
+			throw new Error("pre batch append failed");
+		};
+
+		await expect(
+			store.recordPreImages(
+				["a.txt", "b.txt"].map((name, index) => ({
+					absPath: join(work, name),
+					toolCallId: `failed-pre-${index}`,
+					opts: { tool: "Write" },
+				})),
+				{ turnId: "t1" },
+			),
+		).rejects.toThrow("pre batch append failed");
+
+		expect(internals.records).toHaveLength(beforeCount);
+		expect(
+			internals.records.some((record) =>
+				record.toolCallId?.startsWith("failed-pre-"),
+			),
+		).toBe(false);
+	});
+
+	it("does not index a plural post-image batch whose journal append fails", async () => {
+		const { bus, store } = makeStore();
+		const files = [join(work, "a.txt"), join(work, "b.txt")];
+		await Promise.all(files.map((file) => writeFile(file, "before", "utf8")));
+		startTurn(bus, "t1");
+		await store.recordPreImages(
+			files.map((absPath, index) => ({
+				absPath,
+				toolCallId: `call-${index}`,
+				opts: { tool: "Write" },
+			})),
+			{ turnId: "t1" },
+		);
+		await Promise.all(files.map((file) => writeFile(file, "after", "utf8")));
+
+		const internals = store as unknown as {
+			records: Array<{ type: string; toolCallId?: string }>;
+			journal: { writeBatch(records: readonly object[]): Promise<void> };
+		};
+		const beforeCount = internals.records.length;
+		internals.journal.writeBatch = async () => {
+			throw new Error("post batch append failed");
+		};
+
+		await expect(
+			store.recordPostImages(
+				files.map((absPath, index) => ({
+					absPath,
+					toolCallId: `call-${index}`,
+					contentIfInMemory: Buffer.from("after"),
+				})),
+				{ turnId: "t1" },
+			),
+		).rejects.toThrow("post batch append failed");
+
+		expect(internals.records).toHaveLength(beforeCount);
+		expect(
+			internals.records.filter((record) => record.type === "post"),
+		).toHaveLength(0);
 	});
 
 	it("undoes an ApplyPatch move: source recreated, destination deleted", async () => {
@@ -168,11 +356,13 @@ describe("CheckpointStore", () => {
 
 		const skippedResult = await store.restore(plan, { skipDiverged: true });
 		expect(skippedResult.restored).toEqual([]);
-		expect(skippedResult.skipped).toEqual([{ path: file, reason: "diverged" }]);
+		expect(skippedResult.skipped).toEqual([
+			{ path: await canonicalPhysicalPath(file), reason: "diverged" },
+		]);
 		expect(await readFile(file, "utf8")).toBe("hand edited");
 
 		const forcedResult = await store.restore(plan, { skipDiverged: false });
-		expect(forcedResult.restored).toEqual([file]);
+		expect(forcedResult.restored).toEqual([await canonicalPhysicalPath(file)]);
 		expect(await readFile(file, "utf8")).toBe("v0");
 	});
 
@@ -303,19 +493,27 @@ describe("CheckpointStore", () => {
 
 		const checkpoints = store.listCheckpoints();
 		expect(checkpoints).toHaveLength(1);
-		expect(checkpoints[0]?.skippedFiles).toEqual([file]);
+		expect(checkpoints[0]?.skippedFiles).toEqual([
+			await canonicalPhysicalPath(file),
+		]);
 
 		const plan = await store.planRestore("t1");
 		expect(plan.entries).toEqual([
-			{ path: file, action: "skip-too-large", diverged: false },
+			{
+				path: await canonicalPhysicalPath(file),
+				action: "skip-too-large",
+				diverged: false,
+			},
 		]);
 
 		const result = await store.restore(plan, { skipDiverged: false });
-		expect(result.skipped).toEqual([{ path: file, reason: "too_large" }]);
+		expect(result.skipped).toEqual([
+			{ path: await canonicalPhysicalPath(file), reason: "too_large" },
+		]);
 		expect(await readFile(file, "utf8")).toBe("shrunk"); // untouched
 	}, 30_000);
 
-	it("never clobbers symlinks: captured as unsupported and skipped on restore", async () => {
+	it("canonicalizes a symlink capture and restores its target without clobbering the link", async () => {
 		const { bus, store } = makeStore();
 		const target = join(work, "target.txt");
 		const link = join(work, "link.txt");
@@ -324,18 +522,54 @@ describe("CheckpointStore", () => {
 
 		startTurn(bus, "t1");
 		await store.recordPreImage(link, ctx("t1", "c1"), { tool: "Edit" });
-		await store.recordPostImage(link, ctx("t1", "c1"));
+		await writeFile(link, "changed", "utf8");
+		await store.recordPostImage(link, ctx("t1", "c1"), Buffer.from("changed"));
 		endTurn(bus, "t1");
 
 		const plan = await store.planRestore("t1");
 		expect(plan.entries).toEqual([
-			{ path: link, action: "skip-unsupported", diverged: false },
+			expect.objectContaining({
+				path: await canonicalPhysicalPath(target),
+				action: "write",
+				diverged: false,
+			}),
 		]);
 
-		const result = await store.restore(plan, { skipDiverged: false });
-		expect(result.skipped).toEqual([{ path: link, reason: "unsupported" }]);
+		await store.restore(plan, { skipDiverged: false });
 		expect(lstatSync(link).isSymbolicLink()).toBe(true);
 		expect(await readFile(target, "utf8")).toBe("real");
+	});
+
+	it("composes real and symlink aliases as one path when undoing a turn", async () => {
+		const { bus, store } = makeStore();
+		const target = join(work, "target.txt");
+		const link = join(work, "link.txt");
+		await writeFile(target, "v0", "utf8");
+		await symlink(target, link);
+
+		startTurn(bus, "t1");
+		await store.recordPreImage(target, ctx("t1", "real-edit"), {
+			tool: "Edit",
+		});
+		await writeFile(target, "v1", "utf8");
+		await store.recordPostImage(
+			target,
+			ctx("t1", "real-edit"),
+			Buffer.from("v1"),
+		);
+		await store.recordPreImage(link, ctx("t1", "alias-edit"), { tool: "Edit" });
+		await writeFile(link, "v2", "utf8");
+		await store.recordPostImage(
+			link,
+			ctx("t1", "alias-edit"),
+			Buffer.from("v2"),
+		);
+		endTurn(bus, "t1");
+
+		await undoLatest(store);
+
+		expect(await readFile(target, "utf8")).toBe("v0");
+		expect(lstatSync(link).isSymbolicLink()).toBe(true);
 	});
 
 	it("rolls back a mid-loop ApplyPatch failure via revertToolCall", async () => {
@@ -382,7 +616,7 @@ describe("CheckpointStore", () => {
 			"t1",
 		]);
 		expect(checkpoints[0]?.label).toBe("second change");
-		expect(checkpoints[0]?.files).toEqual([file]);
+		expect(checkpoints[0]?.files).toEqual([await canonicalPhysicalPath(file)]);
 
 		expect(store.undoTarget()).toBe("t2");
 		await undoLatest(store);
@@ -420,7 +654,7 @@ describe("CheckpointStore", () => {
 		const checkpoints = store.listCheckpoints();
 		expect(checkpoints).toHaveLength(1);
 		expect(checkpoints[0]?.id).toBe("parent");
-		expect(checkpoints[0]?.files).toEqual([file]);
+		expect(checkpoints[0]?.files).toEqual([await canonicalPhysicalPath(file)]);
 
 		await undoLatest(store);
 		expect(await readFile(file, "utf8")).toBe("v0");
@@ -467,9 +701,9 @@ describe("CheckpointStore", () => {
 		});
 
 		const result = await undoLatest(store);
-		expect(result.restored).toEqual([fileB]);
+		expect(result.restored).toEqual([await canonicalPhysicalPath(fileB)]);
 		expect(result.skipped).toHaveLength(1);
-		expect(result.skipped[0]?.path).toBe(fileA);
+		expect(result.skipped[0]?.path).toBe(await canonicalPhysicalPath(fileA));
 		expect(result.skipped[0]?.reason).toMatch(/^error: /);
 		expect(await readFile(fileB, "utf8")).toBe("b0");
 		expect(await readFile(fileA, "utf8")).toBe("a1"); // untouched
@@ -500,12 +734,14 @@ describe("CheckpointStore", () => {
 		await writeFile(file, "hand edited", "utf8");
 		const skipping = await store.restore(plan, { skipDiverged: true });
 		expect(skipping.restored).toEqual([]);
-		expect(skipping.skipped).toEqual([{ path: file, reason: "diverged" }]);
+		expect(skipping.skipped).toEqual([
+			{ path: await canonicalPhysicalPath(file), reason: "diverged" },
+		]);
 		expect(await readFile(file, "utf8")).toBe("hand edited");
 
 		// "Revert all" still clobbers, as the user explicitly asked.
 		const forced = await store.restore(plan, { skipDiverged: false });
-		expect(forced.restored).toEqual([file]);
+		expect(forced.restored).toEqual([await canonicalPhysicalPath(file)]);
 		expect(await readFile(file, "utf8")).toBe("v0");
 	});
 

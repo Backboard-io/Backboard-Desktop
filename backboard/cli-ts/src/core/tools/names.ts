@@ -14,6 +14,8 @@ const BUILTIN_AGENT_NAMES: Record<string, string> = {
 	Computer: "computer",
 	Browser: "browser",
 	Agent: "agent",
+	AgentSpawn: "agent_spawn",
+	AgentWait: "agent_wait",
 	FindSkill: "find_skill",
 	FindMcp: "find_mcp",
 };

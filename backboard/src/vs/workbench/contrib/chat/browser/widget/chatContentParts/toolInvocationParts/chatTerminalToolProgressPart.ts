@@ -5,7 +5,6 @@
 
 import { h } from '../../../../../../../base/browser/dom.js';
 import { createPixelSpinner } from '../../../../../../../base/browser/ui/pixelSpinner/pixelSpinner.js';
-import { onUnexpectedError } from '../../../../../../../base/common/errors.js';
 import { isMarkdownString, MarkdownString } from '../../../../../../../base/common/htmlContent.js';
 import { IConfigurationService } from '../../../../../../../platform/configuration/common/configuration.js';
 import { IInstantiationService } from '../../../../../../../platform/instantiation/common/instantiation.js';
@@ -1846,18 +1845,6 @@ class ChatTerminalToolOutputSection extends Disposable {
 		} else {
 			this._showEmptyMessage(localize('chat.terminalOutputCommandMissing', 'Command information is not available.'));
 		}
-		this._layoutOutput(1);
-	}
-
-	private _renderOpenFailure(error: unknown): void {
-		if (this._store.isDisposed || !this._shouldBeExpanded) {
-			return;
-		}
-		console.error('Terminal output failed to open:', error);
-		onUnexpectedError(error);
-		this._disposeLiveMirror();
-		this._disposeSnapshotMirror();
-		this._showEmptyMessage(localize('chat.terminalOutputOpenFailed', 'Terminal output could not be opened.'));
 		this._layoutOutput(1);
 	}
 

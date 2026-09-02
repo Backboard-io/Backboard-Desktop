@@ -13,6 +13,7 @@ import { ISessionOpenerParticipant, ISessionOpenOptions, sessionOpenerRegistry }
 import { ISessionsManagementService } from '../../../services/sessions/common/sessionsManagement.js';
 import { ISessionsPartService } from '../../../services/sessions/browser/sessionsPartService.js';
 import { ISessionsService } from '../../../services/sessions/browser/sessionsService.js';
+import { chatResourceNavigationRegistry } from '../../../services/chatView/browser/chatResourceNavigationRegistry.js';
 
 /**
  * Routes session open requests in the Agents window through the
@@ -38,6 +39,13 @@ class SessionsOpenerParticipant implements ISessionOpenerParticipant {
 	async handleOpenChatResource(accessor: ServicesAccessor, parentSessionResource: URI, chatResource: URI, openOptions?: ISessionOpenOptions): Promise<boolean> {
 		const sessionsManagementService = accessor.get(ISessionsManagementService);
 		const sessionsPartService = accessor.get(ISessionsPartService);
+		// Editor mode hosts its chat in the right workbench rather than in the
+		// SessionsPart. Give that visible surface first refusal so the child and
+		// its back-stack stay in the panel where the user clicked Open chat.
+		if (await chatResourceNavigationRegistry.openChatResource(parentSessionResource, chatResource, openOptions?.chatResourceContext)) {
+			return true;
+		}
+
 		let ownerResource = parentSessionResource;
 		let parsedParent: ReturnType<typeof parseSubagentSessionUri>;
 		while ((parsedParent = parseSubagentSessionUri(ownerResource))) {

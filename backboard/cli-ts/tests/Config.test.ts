@@ -371,6 +371,65 @@ describe("Config", () => {
 		await rm(homeDir, { recursive: true, force: true });
 	});
 
+	it("selects Claude's recommended live default for a Claude-subscription-only install", async () => {
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
+		await saveBackboardConfig({ claudeSubscriptionEnabled: true }, homeDir);
+
+		const config = new Config({ argv: [], homeDir });
+
+		expect(config.modelString).toBe("anthropic-subscription/default");
+		await rm(homeDir, { recursive: true, force: true });
+	});
+
+	it("enables the Claude subscription through the environment", async () => {
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
+		const original = process.env.BACKBOARD_CLAUDE_SUBSCRIPTION;
+		try {
+			process.env.BACKBOARD_CLAUDE_SUBSCRIPTION = "true";
+			await withBackboardEnv({}, () => {
+				const config = new Config({ argv: [], homeDir });
+				expect(config.auth.claudeSubscription).toEqual({ enabled: true });
+				expect(config.modelString).toBe("anthropic-subscription/default");
+			});
+		} finally {
+			setEnv("BACKBOARD_CLAUDE_SUBSCRIPTION", original);
+			await rm(homeDir, { recursive: true, force: true });
+		}
+	});
+
+	it("keeps ChatGPT as the deterministic default when both subscriptions are enabled", async () => {
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
+		await saveBackboardConfig(
+			{
+				chatgptSubscriptionAuthFile: path.join(homeDir, "chatgpt-auth.json"),
+				claudeSubscriptionEnabled: true,
+			},
+			homeDir,
+		);
+
+		const config = new Config({ argv: [], homeDir });
+
+		expect(config.modelString).toBe("openai-subscription/auto");
+		await rm(homeDir, { recursive: true, force: true });
+	});
+
+	it("honors a saved selection when both subscriptions are enabled", async () => {
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
+		await saveBackboardConfig(
+			{
+				chatgptSubscriptionAuthFile: path.join(homeDir, "chatgpt-auth.json"),
+				claudeSubscriptionEnabled: true,
+				model: { provider: "anthropic-subscription", model: "opus" },
+			},
+			homeDir,
+		);
+
+		const config = new Config({ argv: [], homeDir });
+
+		expect(config.modelString).toBe("anthropic-subscription/opus");
+		await rm(homeDir, { recursive: true, force: true });
+	});
+
 	it("derives model profiles without changing memory profiles", () => {
 		const config = new Config({
 			env,
@@ -709,6 +768,15 @@ describe("Config", () => {
 	it("parses logout as a command or flag", () => {
 		expect(parseFlags(["logout"]).logout).toBe(true);
 		expect(parseFlags(["--logout"]).logout).toBe(true);
+	});
+
+	it("parses non-interactive Claude subscription enable commands", () => {
+		expect(
+			parseFlags(["claude-subscription", "enable"]).claudeSubscriptionEnable,
+		).toBe(true);
+		expect(
+			parseFlags(["--claude-subscription-enable"]).claudeSubscriptionEnable,
+		).toBe(true);
 	});
 
 	it("defaults LSP off and parses the LSP flag", () => {

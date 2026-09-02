@@ -98,6 +98,32 @@ describe("prompt tool gating", () => {
 		expect(prompt).not.toContain("numbered multi-line string");
 	});
 
+	it("routes ordinary writes directly and reserves agents for profitable parallel work", () => {
+		for (const profile of ["default", "anthropic", "openai"] as const) {
+			const prompt = getToolPrompt("Agent", {
+				profile,
+				enabledTools: ["Agent", "Read", "Write", "Edit", "Grep", "Glob"],
+			});
+			expect(prompt).toMatch(/wall-clock completion time/i);
+			expect(prompt).toMatch(/explicit user request/i);
+			expect(prompt).toMatch(/non-overlapping ownership/i);
+			expect(prompt).toMatch(/direct file tools/i);
+			expect(prompt).toMatch(/same assistant (message|turn)/i);
+		}
+	});
+
+	it("keeps large existing files off the full-file Write path", () => {
+		for (const profile of ["default", "anthropic", "openai"] as const) {
+			const prompt = getToolPrompt("Write", {
+				profile,
+				enabledTools: ["Write", "Edit", "ApplyPatch"],
+			});
+			expect(prompt).toMatch(/existing file/i);
+			expect(prompt).toMatch(/delays execution/i);
+			expect(prompt).toMatch(/targeted|batch changes/i);
+		}
+	});
+
 	it("includes the todo reminder segment only when provided", () => {
 		expect(
 			getSystemPrompt({ todoReminderPrompt: TODO_NOT_CALLED_REMINDER }),

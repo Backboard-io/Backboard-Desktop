@@ -39,7 +39,7 @@
 		}
 
 		/* Keep the header a single line: the detail segment ellipsizes while
-		   the shimmer prefix and trailing elapsed/steps/diff stay visible. */
+		   the shimmer prefix and trailing steps/diff stay visible. */
 		.monaco-button-mdlabel {
 			font-size: var(--vscode-chat-font-size-body-s);
 			display: flex;
@@ -75,7 +75,6 @@
 				white-space: pre;
 			}
 
-			.chat-thinking-title-elapsed,
 			.chat-thinking-title-meta,
 			.chat-thinking-title-diff {
 				flex: none;
@@ -478,13 +477,10 @@
 		}
 	}
 
-	/* Muted metadata at the end of the header: "· 8s", "· 24s · 6 steps".
-	   Tabular figures keep the live timer from jittering as digits tick. */
-	.chat-thinking-title-elapsed,
+	/* Muted step metadata at the end of the header. */
 	.chat-thinking-title-meta {
 		opacity: 0.6;
 		white-space: pre;
-		font-variant-numeric: tabular-nums;
 		font-weight: normal;
 	}
 

@@ -44,7 +44,7 @@ export function parseThinking(
 	}
 
 	throw new Error(
-		"thinking must be one of: off, default, low, medium, high, max, dynamic, or a token budget",
+		"thinking must be one of: off, default, low, medium, high, xhigh, max, dynamic, or a token budget",
 	);
 }
 
@@ -169,8 +169,15 @@ function isThinkingLevel(value: string): value is ThinkingLevel {
 
 function clampEffort(
 	level: ThinkingLevel,
-	maxEffort: Exclude<ThinkingLevel, "max"> | undefined,
+	maxEffort: ThinkingLevel | undefined,
 ): ThinkingLevel {
-	if (level !== "max" || maxEffort === undefined) return level;
-	return maxEffort;
+	if (maxEffort === undefined) return level;
+	const order: readonly ThinkingLevel[] = [
+		"low",
+		"medium",
+		"high",
+		"xhigh",
+		"max",
+	];
+	return order.indexOf(level) > order.indexOf(maxEffort) ? maxEffort : level;
 }

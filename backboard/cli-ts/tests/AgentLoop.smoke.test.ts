@@ -7,6 +7,7 @@ import { AgentController } from "../src/core/agent/AgentController.ts";
 import { FINAL_VERIFICATION_MIN_TOOL_CALLS } from "../src/core/agent/notifications/FinalVerificationNotification.ts";
 import { EventBus } from "../src/core/bus/EventBus.ts";
 import type { AgentEvent } from "../src/core/bus/events.ts";
+import type { CheckpointRecorder } from "../src/core/checkpoints/CheckpointStore.ts";
 import { emptyRuleSet } from "../src/core/permissions/PermissionRules.ts";
 import type { PermissionContext } from "../src/core/permissions/types.ts";
 import { assistantMessage, userMessage } from "../src/core/session/Message.ts";
@@ -201,6 +202,7 @@ function controllerWith(
 		onThreadReplaced?: (threadId: string | null) => void;
 		finalVerificationNudge?: boolean;
 		todoReconciliation?: boolean;
+		checkpoints?: CheckpointRecorder;
 	} = {},
 ): {
 	ctrl: AgentController;
@@ -232,6 +234,7 @@ function controllerWith(
 		...(options.todoReconciliation !== undefined
 			? { todoReconciliation: options.todoReconciliation }
 			: {}),
+		...(options.checkpoints ? { checkpoints: options.checkpoints } : {}),
 	});
 	return { ctrl, events, session, config };
 }
@@ -298,6 +301,62 @@ describe("AgentController loop (mocked Backboard)", () => {
 		expect(types).toContain("assistant:message");
 		expect(types).not.toContain("assistant:message:discard");
 		expect(types[types.length - 1]).toBe("turn:end");
+		expect(
+			events
+				.filter((event) => event.type === "turn:status")
+				.map((event) => event.phase),
+		).toEqual(["preparing", "generating", "generating"]);
+	});
+
+	it("does not resolve a completed turn before checkpoint finalization is durable", async () => {
+		const client = new FakeClient(
+			[
+				{ kind: "thread", threadId: "thr_1" },
+				{ kind: "assistant_delta", text: "done" },
+				{ kind: "completed" },
+			],
+			[],
+		);
+		let releaseFlush!: () => void;
+		const flushGate = new Promise<void>((resolve) => {
+			releaseFlush = resolve;
+		});
+		let flushStarted!: () => void;
+		const started = new Promise<void>((resolve) => {
+			flushStarted = resolve;
+		});
+		const checkpoints: CheckpointRecorder = {
+			recordPreImage: async () => {},
+			recordPostImage: async () => {},
+			revertToolCall: async () => {},
+			beginShellCapture: async () => {},
+			endShellCapture: async () => {},
+			captureWarning: () => null,
+			flush: async () => {
+				flushStarted();
+				await flushGate;
+			},
+			scopedToTurn() {
+				return this;
+			},
+		};
+		const { ctrl, events } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+			[],
+			{ checkpoints },
+		);
+
+		let resolved = false;
+		const submission = ctrl.submit("do it").then((status) => {
+			resolved = true;
+			return status;
+		});
+		await started;
+		expect(events.at(-1)?.type).toBe("turn:end");
+		expect(resolved).toBe(false);
+		releaseFlush();
+		expect(await submission).toBe("completed");
 	});
 
 	it("starts a safe tool mid-stream when tool_call_ready arrives early", async () => {

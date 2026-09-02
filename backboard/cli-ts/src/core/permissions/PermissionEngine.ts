@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 import type { Tool } from "../tools/Tool.ts";
 import { findMatch, type PermissionRule } from "./PermissionRules.ts";
 import type { PermissionContext } from "./types.ts";
@@ -35,20 +35,32 @@ export function decidePermission(
 ): EngineDecision {
 	const content = tool.permissionContent(input);
 	const rawPaths = tool.permissionPaths(input);
-	const paths = rawPaths?.map((path) => resolve(cwd, path));
+	const executionPaths = rawPaths?.map((path) => resolve(cwd, path));
+	const paths = executionPaths?.map((path) =>
+		pctx.mapPathForRules ? pctx.mapPathForRules(path) : path,
+	);
+	const ruleCwd = pctx.ruleCwd ?? cwd;
+	const contentCandidates = permissionContentCandidates(
+		tool,
+		input,
+		content,
+		rawPaths,
+		paths,
+		ruleCwd,
+	);
 	const denyRules = paths
-		? normalizedPathRules(pctx.rules.deny, cwd)
+		? normalizedPathRules(pctx.rules.deny, ruleCwd)
 		: pctx.rules.deny;
 	const askRules = paths
-		? normalizedPathRules(pctx.rules.ask, cwd)
+		? normalizedPathRules(pctx.rules.ask, ruleCwd)
 		: pctx.rules.ask;
 	const allowRules = paths
-		? normalizedPathRules(pctx.rules.allow, cwd)
+		? normalizedPathRules(pctx.rules.allow, ruleCwd)
 		: pctx.rules.allow;
 	const name = tool.agentName;
 	const strictManual = pctx.mode === "manual" && pctx.interactive;
 
-	const denyRule = findMatch(denyRules, name, content, paths);
+	const denyRule = findFirstMatch(denyRules, name, contentCandidates, paths);
 	if (denyRule) {
 		return {
 			behavior: "deny",
@@ -56,7 +68,7 @@ export function decidePermission(
 		};
 	}
 
-	const askRule = findMatch(askRules, name, content, paths);
+	const askRule = findFirstMatch(askRules, name, contentCandidates, paths);
 	if (askRule) {
 		return content === undefined
 			? { behavior: "ask" }
@@ -78,7 +90,13 @@ export function decidePermission(
 		return { behavior: "allow", reason: "bypass mode" };
 	}
 
-	const allowRule = findMatch(allowRules, name, content, paths, true);
+	const allowRule = findFirstMatch(
+		allowRules,
+		name,
+		contentCandidates,
+		paths,
+		true,
+	);
 	if (allowRule) {
 		return {
 			behavior: "allow",
@@ -89,4 +107,63 @@ export function decidePermission(
 	return content === undefined
 		? { behavior: "ask" }
 		: { behavior: "ask", content };
+}
+
+function findFirstMatch(
+	rules: PermissionRule[],
+	toolName: string,
+	contents: readonly (string | undefined)[],
+	paths?: readonly string[],
+	requireAllPaths = false,
+): PermissionRule | null {
+	for (const content of contents) {
+		const match = findMatch(rules, toolName, content, paths, requireAllPaths);
+		if (match) return match;
+	}
+	return null;
+}
+
+/**
+ * Exact path rules retain both the model-facing spelling and the coordinator
+ * identity. This lets relative grants keep working in a hidden worktree while
+ * absolute deny/ask rules still protect their original coordinator files.
+ */
+function permissionContentCandidates(
+	tool: Tool,
+	input: unknown,
+	content: string | undefined,
+	rawPaths: readonly string[] | undefined,
+	mappedPaths: readonly string[] | undefined,
+	ruleCwd: string,
+): Array<string | undefined> {
+	const candidates = new Set<string | undefined>([content]);
+	if (
+		!rawPaths?.length ||
+		!mappedPaths?.length ||
+		!tool.permissionContentIsPaths(
+			input as Parameters<typeof tool.permissionContentIsPaths>[0],
+		)
+	) {
+		return [...candidates];
+	}
+	const preserveRelative = rawPaths.map((path, index) =>
+		isAbsolute(path) ? (mappedPaths[index] ?? path) : path,
+	);
+	const coordinatorRelative = mappedPaths.map((path) =>
+		relative(ruleCwd, path),
+	);
+	const encoded =
+		rawPaths.length === 1 && content === rawPaths[0]
+			? (paths: readonly string[]) => paths[0]
+			: encodePathList;
+	candidates.add(encoded(preserveRelative));
+	candidates.add(encoded(mappedPaths));
+	candidates.add(encoded(coordinatorRelative));
+	return [...candidates];
+}
+
+function encodePathList(paths: readonly string[]): string {
+	return paths
+		.map((path) => path.replaceAll("\\", "\\\\").replaceAll(" ", "\\ "))
+		.join(" ");
 }

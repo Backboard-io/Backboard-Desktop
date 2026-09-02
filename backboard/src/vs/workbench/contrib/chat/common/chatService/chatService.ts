@@ -400,6 +400,10 @@ export interface IChatExternalEdit {
 	diff?: { added: number; removed: number };
 	/** Optional undo-stop id (typically the tool call id) for grouping. */
 	undoStopId?: string;
+	/** Stable direct-mutation group for one provider response round. */
+	mutationBatchId?: string;
+	/** Expected distinct file count while the mutation round is still running. */
+	mutationBatchFileCount?: number;
 }
 
 export interface IChatConfirmation {
@@ -629,6 +633,12 @@ export interface IChatTerminalToolInvocationData {
 	sandboxPrerequisiteFailure?: string;
 }
 
+export interface IChatMutationToolInvocationData {
+	readonly kind: 'mutation';
+	readonly batchId: string;
+	readonly expectedFileCount: number;
+}
+
 /**
  * @deprecated This is the old API shape, we should support this for a while before removing it so
  * we don't break existing chats
@@ -709,7 +719,7 @@ export type ConfirmedReason =
 
 export interface IChatToolInvocation {
 	readonly presentation: IPreparedToolInvocation['presentation'];
-	readonly toolSpecificData?: IChatTerminalToolInvocationData | ILegacyChatTerminalToolInvocationData | IChatToolInputInvocationData | IChatExtensionsContent | IChatPullRequestContent | IChatTodoListContent | IChatSubagentToolInvocationData | IChatSimpleToolInvocationData | IChatSearchToolInvocationData | IChatToolResourcesInvocationData | IChatModifiedFilesConfirmationData | IChatAgentFeedbackReviewConfirmationData;
+	readonly toolSpecificData?: IChatTerminalToolInvocationData | ILegacyChatTerminalToolInvocationData | IChatToolInputInvocationData | IChatExtensionsContent | IChatPullRequestContent | IChatTodoListContent | IChatSubagentToolInvocationData | IChatSimpleToolInvocationData | IChatSearchToolInvocationData | IChatCoreToolInvocationData | IChatMutationToolInvocationData | IChatToolResourcesInvocationData | IChatModifiedFilesConfirmationData | IChatAgentFeedbackReviewConfirmationData;
 	/**
 	 * Observable that tracks the `kind` of `toolSpecificData`. Used by the
 	 * tool invocation part to re-render when the kind changes (e.g. from
@@ -987,7 +997,7 @@ export interface IToolResultOutputDetailsSerialized {
  */
 export interface IChatToolInvocationSerialized {
 	presentation: IPreparedToolInvocation['presentation'];
-	toolSpecificData?: IChatTerminalToolInvocationData | IChatToolInputInvocationData | IChatExtensionsContent | IChatPullRequestContent | IChatTodoListContent | IChatSubagentToolInvocationData | IChatSimpleToolInvocationData | IChatSearchToolInvocationData | IChatToolResourcesInvocationData | IChatModifiedFilesConfirmationData | IChatAgentFeedbackReviewConfirmationData;
+	toolSpecificData?: IChatTerminalToolInvocationData | IChatToolInputInvocationData | IChatExtensionsContent | IChatPullRequestContent | IChatTodoListContent | IChatSubagentToolInvocationData | IChatSimpleToolInvocationData | IChatSearchToolInvocationData | IChatCoreToolInvocationData | IChatMutationToolInvocationData | IChatToolResourcesInvocationData | IChatModifiedFilesConfirmationData | IChatAgentFeedbackReviewConfirmationData;
 	invocationMessage: string | IMarkdownString;
 	originMessage: string | IMarkdownString | undefined;
 	pastTenseMessage: string | IMarkdownString | undefined;
@@ -1045,6 +1055,8 @@ export interface IChatSubagentToolInvocationData {
 	prompt?: string;
 	result?: string;
 	modelName?: string;
+	/** The launcher returned a handle while this child continued independently. */
+	detached?: boolean;
 	/** Durable isolated-worker state, when the subagent owns a Git worktree. */
 	workerId?: string;
 	workerStatus?: 'Running' | 'Completed' | 'Failed' | 'Cancelled' | 'Integrating' | 'Integrated' | 'Conflict';
@@ -1070,7 +1082,7 @@ export interface IChatExternalToolInvocationUpdate {
 	errorMessage?: string;
 	invocationMessage?: string | IMarkdownString;
 	pastTenseMessage?: string | IMarkdownString;
-	toolSpecificData?: IChatTerminalToolInvocationData | IChatToolInputInvocationData | IChatExtensionsContent | IChatTodoListContent | IChatSubagentToolInvocationData | IChatModifiedFilesConfirmationData;
+	toolSpecificData?: IChatTerminalToolInvocationData | IChatToolInputInvocationData | IChatExtensionsContent | IChatTodoListContent | IChatSubagentToolInvocationData | IChatCoreToolInvocationData | IChatMutationToolInvocationData | IChatModifiedFilesConfirmationData;
 	subagentInvocationId?: string;
 	resultDetails?: IToolResultInputOutputDetails;
 }
@@ -1093,6 +1105,31 @@ export interface IChatSimpleToolInvocationData {
 export interface IChatSearchToolInvocationData {
 	readonly kind: 'search';
 }
+
+/**
+ * Structured, display-safe data for Backboard's built-in tools. The agent host
+ * bounds both input and output before they reach this type so chat rendering
+ * stays responsive and the payload can be persisted with session history.
+ */
+export interface IChatCoreToolInvocationData {
+	readonly kind: 'coreTool';
+	readonly toolKind: ChatCoreToolKind;
+	readonly input?: unknown;
+	readonly output?: unknown;
+	readonly uiTruncated?: boolean;
+}
+
+export type ChatCoreToolKind =
+	| 'read'
+	| 'grep'
+	| 'glob'
+	| 'fetchUrl'
+	| 'webSearch'
+	| 'todo'
+	| 'computer'
+	| 'browser'
+	| 'findSkill'
+	| 'findMcp';
 
 export interface IChatToolResourcesInvocationData {
 	readonly kind: 'resources';

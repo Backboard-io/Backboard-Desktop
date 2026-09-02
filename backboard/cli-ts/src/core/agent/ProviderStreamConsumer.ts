@@ -10,6 +10,7 @@ import type { ProviderEvent } from "../../providers/backboard/types.ts";
 import { errorMessage } from "../../utils/errors.ts";
 import type { EventBus } from "../bus/EventBus.ts";
 import type { ToolCallRef } from "../bus/events.ts";
+import { emitPerformanceTiming } from "../performance/PerformanceTiming.ts";
 import type { Session } from "../session/Session.ts";
 import { AbortError } from "../tools/ToolAbort.ts";
 import type { EarlyToolSink } from "../tools/ToolScheduler.ts";
@@ -100,6 +101,9 @@ export class ProviderStreamConsumer {
 					!isRetryableProviderStreamFailure(err) ||
 					attempt >= maxRetries;
 				if (terminal) {
+					// Do not leave the coalescing timer able to publish reasoning after
+					// the turn has already failed or been cancelled.
+					assistant.flushReasoning();
 					if (!(err instanceof AbortError) && !signal.aborted) {
 						await preserveProviderContext(
 							this.bus,
@@ -136,6 +140,18 @@ export class ProviderStreamConsumer {
 	): Promise<PendingAction | null> {
 		let bufferedText = "";
 		const generatedMedia: GeneratedMedia[] = [];
+		const providerRoundStartedAt = performance.now();
+		let toolBatchStartedAt: number | undefined;
+		const markToolAnnouncement = (): number => {
+			if (toolBatchStartedAt !== undefined) return toolBatchStartedAt;
+			toolBatchStartedAt = performance.now();
+			emitPerformanceTiming(
+				this.bus,
+				"provider_tool_announcement",
+				providerRoundStartedAt,
+			);
+			return toolBatchStartedAt;
+		};
 		const iterator = stream[Symbol.asyncIterator]();
 		let reachedEnd = false;
 		try {
@@ -162,9 +178,13 @@ export class ProviderStreamConsumer {
 						if (event.text) assistant.appendReasoning(event.text);
 						break;
 					case "tool_started":
+						assistant.flushReasoning();
+						markToolAnnouncement();
 						earlyTools?.announce(event.id, event.name);
 						break;
 					case "tool_ready":
+						assistant.flushReasoning();
+						markToolAnnouncement();
 						earlyTools?.offer({
 							id: event.call.id,
 							name: event.call.name,
@@ -191,6 +211,15 @@ export class ProviderStreamConsumer {
 						break;
 					}
 					case "requires_action": {
+						// Some providers still omit the advisory start/ready frames. Record
+						// that entire silent generation interval instead of reporting only
+						// the final few milliseconds after a late tool announcement.
+						const finalizedBatchStartedAt = markToolAnnouncement();
+						emitPerformanceTiming(
+							this.bus,
+							"provider_tool_batch_finalize",
+							finalizedBatchStartedAt,
+						);
 						const calls = event.calls.map((call) => ({
 							id: call.id,
 							name: call.name,

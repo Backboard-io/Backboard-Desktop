@@ -128,7 +128,12 @@ describe("Backboard model catalog", () => {
 
 		expect(result.models).toHaveLength(4);
 		expect(result.total).toBe(4);
-		expect(requestedUrls).toHaveLength(4);
+		expect(requestedUrls).toHaveLength(5);
+		expect(
+			requestedUrls.some(
+				(url) => new URL(url).pathname === "/billing/models/providers",
+			),
+		).toBe(true);
 		expect(
 			requestedUrls.some(
 				(url) => new URL(url).pathname === "/models/providers",
@@ -159,6 +164,58 @@ describe("Backboard model catalog", () => {
 				.sort(),
 		).toEqual(["0", "2"]);
 		expect(requestedInit?.method).toBe("GET");
+	});
+
+	it("joins OpenRouter models with their live serving providers", async () => {
+		globalThis.fetch = (async (input) => {
+			const url = new URL(String(input));
+			if (url.pathname === "/models/providers") {
+				return new Response(
+					JSON.stringify({ providers: ["openrouter"], total: 1 }),
+				);
+			}
+			if (url.pathname === "/billing/models/providers") {
+				return new Response(
+					JSON.stringify({
+						total: 2,
+						data: [
+							{
+								model: "deepseek/deepseek-chat-v3.1",
+								upstream_provider: "DeepInfra",
+							},
+							{
+								model: "deepseek/deepseek-chat-v3.1",
+								upstream_provider: "Novita",
+							},
+						],
+					}),
+				);
+			}
+			return new Response(
+				JSON.stringify({
+					models: [
+						{
+							name: "~deepseek/deepseek-chat-v3.1",
+							provider: "openrouter",
+							model_type: "llm",
+						},
+					],
+					total: 1,
+				}),
+			);
+		}) as typeof fetch;
+
+		const client = new BackboardClient({
+			apiKey: "test-key",
+			apiUrl: "https://api.backboard.test",
+		});
+		const result = await client.listModels();
+
+		expect(
+			result.models[0]?.openrouter_providers?.map(
+				(route) => route.upstream_provider,
+			),
+		).toEqual(["DeepInfra", "Novita"]);
 	});
 
 	it("caches normalized results per client", async () => {

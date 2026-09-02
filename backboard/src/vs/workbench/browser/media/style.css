@@ -136,6 +136,42 @@ body {
 	--vscode-shadow-depth-y: 0 5px 10px -4px rgba(0, 0, 0, 0.04);
 }
 
+/* Native overflow regions should use the same visual language as Monaco's
+   custom scrollable elements instead of falling back to bright OS scrollbars. */
+.monaco-workbench * {
+	scrollbar-color: var(--vscode-scrollbarSlider-background) transparent;
+	scrollbar-width: thin;
+}
+
+.monaco-workbench *::-webkit-scrollbar {
+	width: 8px;
+	height: 8px;
+}
+
+.monaco-workbench *::-webkit-scrollbar-corner,
+.monaco-workbench *::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+.monaco-workbench *::-webkit-scrollbar-thumb {
+	min-width: 24px;
+	min-height: 24px;
+	border: 2px solid transparent;
+	border-radius: var(--vscode-cornerRadius-circle);
+	background: var(--vscode-scrollbarSlider-background);
+	background-clip: padding-box;
+}
+
+.monaco-workbench *::-webkit-scrollbar-thumb:hover {
+	background: var(--vscode-scrollbarSlider-hoverBackground);
+	background-clip: padding-box;
+}
+
+.monaco-workbench *::-webkit-scrollbar-thumb:active {
+	background: var(--vscode-scrollbarSlider-activeBackground);
+	background-clip: padding-box;
+}
+
 /* Disable panel/part shadows when the setting is off (preserves floating modals, notifications, etc.) */
 .monaco-workbench.no-shadows .part.titlebar,
 .monaco-workbench.no-shadows .part.activitybar,

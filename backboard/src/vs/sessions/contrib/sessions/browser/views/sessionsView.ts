@@ -286,20 +286,10 @@ export class SessionsView extends ViewPane {
 				this.sessionsControl?.setSimpleCompact(this.simpleCompact);
 			}));
 
-			const newChatButton = DOM.append(searchRow, $('button.agent-sessions-simple-icon-button')) as HTMLButtonElement;
-			newChatButton.type = 'button';
-			const newChatLabel = localize('newChat', "New chat");
-			newChatButton.title = newChatLabel;
-			newChatButton.setAttribute('aria-label', newChatLabel);
-			newChatButton.appendChild(renderIcon(Codicon.edit));
-			this._register(DOM.addDisposableListener(newChatButton, DOM.EventType.CLICK, e => {
-				e.preventDefault();
-				this.startNewChat();
-			}));
-
+			this.createSidebarAction(primaryActions, Codicon.edit, localize('newChat', "New chat"), () => this.startNewChat());
 			this.createProjectFilterRow(primaryActions);
 		} else if (!phoneLayout) {
-			headerLabel.textContent = localize('backboardBrand', "Backboard");
+			headerLabel.textContent = '';
 
 			const collapseButton = DOM.append(headerActions, $('button.agent-sessions-collapse-button')) as HTMLButtonElement;
 			collapseButton.type = 'button';

@@ -21,6 +21,7 @@ import type {
 	ModelCatalogItem,
 	ModelsListResponse,
 	ModelThinkingMetadataResponse,
+	OpenRouterModelProvidersResponse,
 	ProviderEvent,
 	ProvidersListResponse,
 	SendMessageRequest,
@@ -187,7 +188,12 @@ export class BackboardClient implements AgentClient {
 		const body = options.attachmentFilePaths?.length
 			? messageFormData({ ...req, stream: true }, options.attachmentFilePaths)
 			: { ...req, stream: true };
-		yield* this.postStream("/threads/messages", body, options);
+		yield* this.postStream(
+			"/threads/messages",
+			body,
+			options,
+			req.tools?.map((tool) => tool.function.name),
+		);
 	}
 
 	async *runToolOutputs(
@@ -200,6 +206,7 @@ export class BackboardClient implements AgentClient {
 				`/threads/${encodeURIComponent(threadId)}/runs/${encodeURIComponent(runId)}/submit-tool-outputs?stream=true`,
 				{ ...body, stream: true },
 				options,
+				req.tools?.map((tool) => tool.function.name),
 			);
 			return;
 		}
@@ -207,11 +214,15 @@ export class BackboardClient implements AgentClient {
 			"/threads/tool-outputs",
 			{ ...req, stream: true },
 			options,
+			req.tools?.map((tool) => tool.function.name),
 		);
 	}
 
 	async listModels(options: RequestOptions = {}): Promise<ModelsListResponse> {
-		const providers = await this.listModelProviders(options);
+		const [providers, openRouterRoutes] = await Promise.all([
+			this.listModelProviders(options),
+			this.listOpenRouterModelProviders(options).catch(() => undefined),
+		]);
 		const pages = await Promise.all(
 			providers.map((provider) =>
 				this.listModelPages(
@@ -221,10 +232,43 @@ export class BackboardClient implements AgentClient {
 				),
 			),
 		);
+		const routesByModel = new Map<
+			string,
+			OpenRouterModelProvidersResponse["data"]
+		>();
+		for (const route of openRouterRoutes?.data ?? []) {
+			const routes = routesByModel.get(route.model) ?? [];
+			routes.push(route);
+			routesByModel.set(route.model, routes);
+		}
+		const models = pages
+			.flatMap((page) => page.models)
+			.map((model) => {
+				if (model.provider.toLowerCase() !== "openrouter") return model;
+				const modelId = model.name
+					.replace(/^~/, "")
+					.replace(/^openrouter\//, "");
+				const openrouterProviders = routesByModel.get(modelId);
+				return openrouterProviders?.length
+					? { ...model, openrouter_providers: openrouterProviders }
+					: model;
+			});
 		return {
-			models: pages.flatMap((page) => page.models),
+			models,
 			total: pages.reduce((sum, page) => sum + page.total, 0),
 		};
+	}
+
+	/** Lists the real upstreams OpenRouter can use, independently of model publisher namespaces. */
+	async listOpenRouterModelProviders(
+		options: RequestOptions = {},
+		model?: string,
+	): Promise<OpenRouterModelProvidersResponse> {
+		const query = model ? `?model=${encodeURIComponent(model)}` : "";
+		return this.get<OpenRouterModelProvidersResponse>(
+			`/billing/models/providers${query}`,
+			options,
+		);
 	}
 
 	async getModelThinkingMetadata(
@@ -316,6 +360,7 @@ export class BackboardClient implements AgentClient {
 		path: string,
 		body: unknown,
 		options: RequestOptions,
+		knownToolNames: readonly string[] = [],
 	): AsyncIterable<ProviderEvent> {
 		const isForm = body instanceof FormData;
 		const headers = this.headers();
@@ -371,7 +416,7 @@ export class BackboardClient implements AgentClient {
 				);
 			}
 
-			const mapper = new BackboardStreamEventMapper();
+			const mapper = new BackboardStreamEventMapper(knownToolNames);
 			for await (const frame of readSseFrames(res.body, {
 				includeTransportActivity: true,
 			})) {

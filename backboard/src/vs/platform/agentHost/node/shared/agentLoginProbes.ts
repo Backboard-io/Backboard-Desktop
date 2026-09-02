@@ -14,9 +14,9 @@ import { delimiter, join } from '../../../../base/common/path.js';
  * agent as a one-click setup row (install + vendor sign-in) instead of
  * surfacing raw "not logged in" errors on the first message.
  *
- * These check login *state* without reading any secret material: file
- * existence, or the CLI's own status command (which reports a boolean,
- * never the credentials themselves).
+ * These check login *state* without reading any secret material. Claude uses
+ * the CLI's own status command, which reports account metadata but never the
+ * credentials themselves.
  */
 
 /** Locate a binary in PATH plus the well-known user install dirs. */
@@ -46,32 +46,34 @@ function findBinary(name: string): string | undefined {
 	return undefined;
 }
 
+/** Whether Claude's public status payload represents a Claude.ai subscription. */
+export function isClaudeSubscriptionAuthStatus(value: unknown): boolean {
+	if (!value || typeof value !== 'object') {
+		return false;
+	}
+	const status = value as { loggedIn?: unknown; authMethod?: unknown; apiProvider?: unknown };
+	return status.loggedIn === true && status.authMethod === 'claude.ai' && status.apiProvider === 'firstParty';
+}
+
 /**
- * Whether the user has logged the Claude CLI into their subscription.
- * Fast path: the plaintext credential file (Linux / opt-out installs).
- * Authoritative path: `claude auth status`, which reports the CLI's own
- * view of its login state as JSON — covering every storage backend
- * (keychain, credential file, enterprise helpers) without guessing names.
+ * Whether the user has logged the Claude CLI into a Claude.ai subscription.
+ * `claude auth status --json` is authoritative across every credential
+ * backend. Requiring the Claude.ai/first-party fields prevents an Anthropic
+ * API key or a cloud-provider login from being mislabeled as a subscription.
  */
 export async function isClaudeLoggedIn(): Promise<boolean> {
 	const claude = findBinary('claude');
 	if (!claude) {
 		return false;
 	}
-	try {
-		fs.accessSync(join(homedir(), '.claude', '.credentials.json'), fs.constants.R_OK);
-		return true;
-	} catch {
-		// fall through to the CLI probe
-	}
 	return new Promise<boolean>(resolve => {
-		execFile(claude, ['auth', 'status'], { timeout: 10_000 }, (err, stdout) => {
+		execFile(claude, ['auth', 'status', '--json'], { timeout: 10_000 }, (err, stdout) => {
 			if (err) {
 				resolve(false);
 				return;
 			}
 			try {
-				resolve(JSON.parse(stdout).loggedIn === true);
+				resolve(isClaudeSubscriptionAuthStatus(JSON.parse(stdout)));
 			} catch {
 				resolve(false);
 			}

@@ -25,8 +25,11 @@ import { ChatToolProgressSubPart } from '../../../../browser/widget/chatContentP
 import { ChatToolStreamingSubPart, formatStreamingToolInput } from '../../../../browser/widget/chatContentParts/toolInvocationParts/chatToolStreamingSubPart.js';
 import { isMcpToolInvocation } from '../../../../browser/widget/chatContentParts/toolInvocationParts/chatToolPartUtilities.js';
 import { DiffEditorPool, EditorPool } from '../../../../browser/widget/chatContentParts/chatContentCodePools.js';
+import { CollapsibleListPool } from '../../../../browser/widget/chatContentParts/chatReferencesContentPart.js';
 import { IChatToolInvocation, IChatToolInvocationSerialized, ToolConfirmKind } from '../../../../common/chatService/chatService.js';
+import { ChatToolInvocation } from '../../../../common/model/chatProgressTypes/chatToolInvocation.js';
 import { IChatResponseViewModel, IChatWorkingProgress } from '../../../../common/model/chatViewModel.js';
+import { IChatTodoListService } from '../../../../common/tools/chatTodoListService.js';
 import { ILanguageModelToolsService, ToolDataSource, type ToolDataSource as ToolDataSourceType } from '../../../../common/tools/languageModelToolsService.js';
 
 suite('ChatToolProgressSubPart', () => {
@@ -127,6 +130,13 @@ suite('ChatToolProgressSubPart', () => {
 			_serviceBrand: undefined,
 			onDidPrepareToolCallBecomeUnresponsive: Event.None,
 		} as unknown as ILanguageModelToolsService);
+		instantiationService.stub(IChatTodoListService, {
+			_serviceBrand: undefined,
+			onDidUpdateTodos: Event.None,
+			getTodos: () => [],
+			setTodos: () => { },
+			migrateTodos: () => { },
+		});
 
 		mockMarkdownRenderer = {
 			render: (markdown: IMarkdownString, _options?: MarkdownRenderOptions, outElement?: HTMLElement): IRenderedMarkdown => {
@@ -361,6 +371,81 @@ suite('ChatToolProgressSubPart', () => {
 		assert.deepStrictEqual(secondRead, [baseCodeblock, mcpCodeblock]);
 		assert.notStrictEqual(firstRead, secondRead);
 		assert.deepStrictEqual(Reflect.get(invocationPart, 'subPart').codeblocks, [baseCodeblock]);
+	});
+
+	test('preserves core-tool disclosure state and focus across live payload rerenders', () => {
+		const invocation = new ChatToolInvocation({
+			invocationMessage: 'Reading file',
+			toolSpecificData: {
+				kind: 'coreTool',
+				toolKind: 'read',
+				input: { path: '/workspace/read.ts' },
+				output: { content: 'first snapshot' },
+			},
+		}, {
+			id: 'read',
+			displayName: 'Read',
+			modelDescription: 'Reads a file',
+			source: ToolDataSource.Internal,
+		}, 'call-read', undefined, {}, {}, undefined);
+		const part = disposables.add(instantiationService.createInstance(
+			ChatToolInvocationPart,
+			invocation,
+			createRenderContext(false),
+			mockMarkdownRenderer,
+			{} as CollapsibleListPool,
+			{} as EditorPool,
+			() => 500,
+			undefined,
+			0,
+		));
+		mainWindow.document.body.appendChild(part.domNode);
+		disposables.add({ dispose: () => part.domNode.remove() });
+
+		const firstDisclosure = part.domNode.querySelector<HTMLButtonElement>('.chat-core-tool-card-header');
+		assert.ok(firstDisclosure);
+		firstDisclosure.click();
+		firstDisclosure.focus();
+
+		invocation.toolSpecificData = {
+			kind: 'coreTool',
+			toolKind: 'read',
+			input: { path: '/workspace/read.ts' },
+			output: { content: 'second snapshot' },
+		};
+		const expandedDisclosure = part.domNode.querySelector<HTMLButtonElement>('.chat-core-tool-card-header');
+		const expandedDetails = part.domNode.querySelector<HTMLElement>('.chat-core-tool-card-details');
+		assert.ok(expandedDisclosure);
+		assert.notStrictEqual(expandedDisclosure, firstDisclosure);
+		assert.deepStrictEqual({
+			expanded: expandedDisclosure.ariaExpanded,
+			detailsHidden: expandedDetails?.hidden,
+			focused: mainWindow.document.activeElement === expandedDisclosure,
+		}, {
+			expanded: 'true',
+			detailsHidden: false,
+			focused: true,
+		});
+
+		expandedDisclosure.click();
+		expandedDisclosure.focus();
+		invocation.toolSpecificData = {
+			kind: 'coreTool',
+			toolKind: 'read',
+			input: { path: '/workspace/read.ts' },
+			output: { content: 'third snapshot' },
+		};
+		const collapsedDisclosure = part.domNode.querySelector<HTMLButtonElement>('.chat-core-tool-card-header');
+		const collapsedDetails = part.domNode.querySelector<HTMLElement>('.chat-core-tool-card-details');
+		assert.deepStrictEqual({
+			expanded: collapsedDisclosure?.ariaExpanded,
+			detailsHidden: collapsedDetails?.hidden,
+			focused: mainWindow.document.activeElement === collapsedDisclosure,
+		}, {
+			expanded: 'false',
+			detailsHidden: true,
+			focused: true,
+		});
 	});
 
 	test('keeps a clean-chat provider status visibly ticking during silent gaps', () => {

@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { $, addDisposableListener, clearNode, DisposableResizeObserver, disposableWindowInterval, EventHelper, getWindow, hide, scheduleAtNextAnimationFrame } from '../../../../../../base/browser/dom.js';
+import { $, addDisposableListener, clearNode, DisposableResizeObserver, disposableWindowInterval, EventHelper, getWindow, hide, isHTMLElement, scheduleAtNextAnimationFrame } from '../../../../../../base/browser/dom.js';
 import { alert } from '../../../../../../base/browser/ui/aria/aria.js';
 import { HoverStyle } from '../../../../../../base/browser/ui/hover/hover.js';
 import { DomScrollableElement } from '../../../../../../base/browser/ui/scrollbar/scrollableElement.js';
@@ -510,6 +510,9 @@ export function getToolActivitySubkind(toolInvocationId: string | undefined, met
 		return 'edit';
 	}
 	const isToolInvocation = metadata && (metadata.kind === 'toolInvocation' || metadata.kind === 'toolInvocationSerialized');
+	if (isToolInvocation && metadata.toolSpecificData?.kind === 'mutation') {
+		return 'edit';
+	}
 	if (isToolInvocation && metadata.toolSpecificData?.kind === 'terminal') {
 		return 'terminal';
 	}
@@ -595,20 +598,6 @@ export function middleTruncate(value: string, maxLength = 64): string {
 	return `${value.slice(0, headLength)}…${value.slice(value.length - tailLength)}`;
 }
 
-/** Formats a duration for the working header / completed pill, e.g. "8s", "1m 12s". */
-export function formatThinkingElapsed(elapsedMs: number): string {
-	const totalSeconds = Math.max(1, Math.round(elapsedMs / 1000));
-	if (totalSeconds < 60) {
-		return localize('chat.thinking.elapsed.seconds', "{0}s", totalSeconds);
-	}
-	const minutes = Math.floor(totalSeconds / 60);
-	const seconds = totalSeconds % 60;
-	if (seconds === 0) {
-		return localize('chat.thinking.elapsed.minutes', "{0}m", minutes);
-	}
-	return localize('chat.thinking.elapsed.minutesSeconds', "{0}m {1}s", minutes, seconds);
-}
-
 /**
  * One Codex-style activity group: consecutive same-category tool rows wrapped
  * under a summary header. Clean chat hosts expose that header as a live status
@@ -627,7 +616,10 @@ interface IToolActivityGroup {
 	readonly subkindCounts: Record<ToolActivitySubkind, number>;
 	readonly orderedSubkinds: ToolActivitySubkind[];
 	readonly runningToolCallIds: Set<string>;
+	readonly editFileKeys: Set<string>;
 	readonly hover: MutableDisposable<IDisposable>;
+	mutationBatchId?: string;
+	expectedEditFileCount: number;
 	expanded: boolean;
 	removed: boolean;
 }
@@ -834,13 +826,11 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 	private readonly useCursorPanelPresentation: boolean;
 	private readonly useCursorTranscriptPresentation: boolean;
 	private readonly _collapseAnimation = this._register(new MutableDisposable<DisposableStore>());
-	private readonly startTimeMs: number;
-	private elapsedAtCompletionMs: number | undefined;
 	private readonly _elapsedTimer = this._register(new MutableDisposable<IDisposable>());
-	private titleElapsedSpan: HTMLElement | undefined;
 	private readonly activityGroups: IToolActivityGroup[] = [];
 	private activeActivityGroup: IToolActivityGroup | undefined;
 	private readonly activityGroupByToolCallId = new Map<string, IToolActivityGroup>();
+	private readonly activityGroupByMutationBatchId = new Map<string, IToolActivityGroup>();
 	private readonly pendingActivityGroupHeaderUpdates = new Set<IToolActivityGroup>();
 	private readonly _pendingActivityGroupHeaderRefresh = this._register(new MutableDisposable<IDisposable>());
 	private autoScrollEnabled: boolean = true;
@@ -872,6 +862,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 	private readonly toolWrappersByCallId = new Map<string, HTMLElement>();
 	private readonly toolIconsByCallId = new Map<string, HTMLElement>();
 	private readonly toolLabelsByCallId = new Map<string, string>();
+	private latestCoreTodoWrapper: HTMLElement | undefined;
 	private readonly toolDisposables = this._register(new DisposableMap<string, DisposableStore>());
 	private readonly ownedToolParts = new Map<string, IDisposable>();
 	private pendingRemovals: { toolCallId: string; toolLabel: string }[] = [];
@@ -1002,7 +993,6 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		this.fixedScrollingMode = !this.useCursorPanelPresentation && configuredMode === ThinkingDisplayMode.FixedScrolling;
 		this.streamThenCollapseMode = configuredMode === ThinkingDisplayMode.StreamThenCollapse;
 		this.wasStreamingLive = !this.streamingCompleted && !this.element.isComplete;
-		this.startTimeMs = Date.now();
 
 		this.currentTitle = extractedTitle;
 		if (extractedTitle !== this.defaultTitle) {
@@ -1034,21 +1024,14 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		const node = this.domNode;
 		node.classList.add('chat-thinking-box');
 
-		// Tick a subtle elapsed indicator in the header while streaming live.
+		// Refresh live reasoning tails while streaming quietly.
 		if (this.wasStreamingLive) {
 			this._elapsedTimer.value = disposableWindowInterval(getWindow(node), () => {
 				if (this.streamingCompleted || this.element.isComplete) {
 					this._elapsedTimer.clear();
 					return;
 				}
-				this.updateElapsedIndicator();
 				this.applyLiveReasoningTail();
-				// Keep the in-thinking spinner ticking too, so it never looks
-				// frozen on a static phrase while the model reasons silently.
-				this.renderWorkingSpinnerLabel();
-				if (this.activeActivityGroup) {
-					this.updateActivityGroupHeader(this.activeActivityGroup);
-				}
 			}, 1000);
 		}
 
@@ -1544,13 +1527,11 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		labelElement.textContent = '';
 
 		// Cursor keeps the completed turn fold deliberately quiet in the editor's
-		// right panel: "Worked for 39s". Generated summaries, step counts, and
+		// right panel. Generated summaries, step counts, and
 		// aggregate diff stats remain useful in the larger chat surfaces, but make
 		// this narrow transcript header feel busier than the reference UI.
 		if (this.useCursorPanelPresentation && !this.isCanceledResponse()) {
-			const panelTitle = this.wasStreamingLive
-				? localize('chat.thinking.workedFor', "Worked for {0}", formatThinkingElapsed(this.getElapsedMs()))
-				: localize('chat.thinking.finished', 'Worked');
+			const panelTitle = localize('chat.thinking.finished', 'Worked');
 			labelElement.textContent = panelTitle;
 			this._collapseButton.element.ariaLabel = panelTitle;
 			return;
@@ -1575,12 +1556,8 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 
 		let ariaLabel = title;
 
-		// Summarize the work: elapsed time (live runs only) and step count.
-		// Skipped for cancelled runs whose title already carries the duration.
+		// Summarize multi-step work without adding a ticking duration to the UI.
 		const metaFragments: string[] = [];
-		if (this.wasStreamingLive && !this.isCanceledResponse()) {
-			metaFragments.push(formatThinkingElapsed(this.getElapsedMs()));
-		}
 		if (this.appendedItemCount > 1) {
 			metaFragments.push(localize('chat.thinking.steps', "{0} steps", this.appendedItemCount));
 		}
@@ -1684,6 +1661,33 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		}
 	}
 
+	/**
+	 * Consecutive Read calls form one compact transcript panel. Each native card
+	 * stays mounted and owns its disclosure/lifecycle; the stack only removes the
+	 * repeated outer borders and vertical gaps between adjacent calls.
+	 */
+	private appendCoreReadRow(itemWrapper: HTMLElement): void {
+		if (!this.wrapper) {
+			return;
+		}
+
+		const previousContent = this.workingSpinnerElement?.parentNode === this.wrapper
+			? this.workingSpinnerElement.previousElementSibling
+			: this.wrapper.lastElementChild;
+		let stack = isHTMLElement(previousContent) && previousContent.classList.contains('chat-core-tool-stack-read')
+			? previousContent
+			: undefined;
+		if (!stack) {
+			stack = $('.chat-core-tool-stack.chat-core-tool-stack-read');
+			stack.setAttribute('role', 'list');
+			stack.setAttribute('aria-label', localize('chat.thinking.readFiles', 'Read files'));
+			this.appendToWrapper(stack);
+		}
+
+		itemWrapper.setAttribute('role', 'listitem');
+		stack.appendChild(itemWrapper);
+	}
+
 	private updateWorkingSpinnerVisibility(): void {
 		if (!this.wrapper || !this.workingSpinnerElement) {
 			return;
@@ -1779,11 +1783,6 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			this.domNode.classList.remove('chat-thinking-collapsing');
 			this.domNode.classList.add('chat-thinking-just-collapsed');
 		}));
-	}
-
-	/** Elapsed time to display: frozen at completion, live otherwise. */
-	private getElapsedMs(): number {
-		return this.elapsedAtCompletionMs ?? (Date.now() - this.startTimeMs);
 	}
 
 	/**
@@ -1987,41 +1986,16 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 				disclosure.completedAt = Math.max(disclosure.startedAt, now);
 			}
 			const complete = disclosure.completedAt !== undefined || this.streamingCompleted || this.element.isComplete;
-			const canShowMeasuredDuration = this.wasStreamingLive;
-			const elapsedMs = Math.max(0, (disclosure.completedAt ?? now) - disclosure.startedAt);
 			const label = complete
-				? canShowMeasuredDuration
-					? localize('chat.thinking.cursorReasoningElapsed', "Thought {0}", formatThinkingElapsed(elapsedMs))
-					: localize('chat.thinking.cursorReasoning', "Thought")
-				: localize('chat.thinking.cursorReasoningLiveElapsed', "Thinking {0}", formatThinkingElapsed(elapsedMs));
+				? localize('chat.thinking.cursorReasoning', "Thought")
+				: localize('chat.thinking.cursorReasoningLive', "Thinking");
 			disclosure.label.classList.toggle('chat-thinking-cursor-reasoning-live', !complete);
 			disclosure.labelText.textContent = label;
 		}
 	}
 
-	/**
-	 * Keeps a subtle "· 8s" indicator at the end of the header label while
-	 * streaming. The label element is rewritten by title updates, so this
-	 * re-appends the span whenever it got detached.
-	 */
-	private updateElapsedIndicator(): void {
-		if (!this._collapseButton || this.streamingCompleted || !this.wasStreamingLive) {
-			return;
-		}
-		if (!this.titleElapsedSpan) {
-			this.titleElapsedSpan = $('span.chat-thinking-title-elapsed');
-		}
-		const labelElement = this._collapseButton.labelElement;
-		if (this.titleElapsedSpan.parentElement !== labelElement) {
-			labelElement.appendChild(this.titleElapsedSpan);
-		}
-		this.titleElapsedSpan.textContent = ` · ${formatThinkingElapsed(this.getElapsedMs())}`;
-	}
-
 	private removeElapsedIndicator(): void {
 		this._elapsedTimer.clear();
-		this.titleElapsedSpan?.remove();
-		this.titleElapsedSpan = undefined;
 	}
 
 	/** Label of the most recent tool invocation that is still running, if any. */
@@ -2057,7 +2031,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			: this.getRandomWorkingMessage(category);
 	}
 
-	/** Records the current spinner phrase (or active-tool label) and repaints it with the live elapsed. */
+	/** Records and repaints the current spinner phrase or active-tool label. */
 	private setWorkingSpinnerBase(text: string): void {
 		this.workingSpinnerBaseText = text;
 		this.renderWorkingSpinnerLabel();
@@ -2082,28 +2056,12 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		}
 	}
 
-	/**
-	 * Repaints the working spinner as "<phrase> · <elapsed>" while the run is
-	 * live, so the row always shows the ticking elapsed time — it never sits
-	 * frozen on a static phrase when the model is reasoning silently with
-	 * nothing to stream. The phrase (a running tool's label, e.g. "Reading
-	 * package.json", or a category phrase) is preserved; only the trailing
-	 * elapsed is refreshed on each 1s timer tick. Once complete, the suffix is
-	 * dropped so finalized rows read cleanly.
-	 */
+	/** Repaints the working spinner without a visible elapsed-time suffix. */
 	private renderWorkingSpinnerLabel(): void {
 		if (!this.workingSpinnerLabel) {
 			return;
 		}
-		const base = this.workingSpinnerBaseText ?? '';
-		if (this.wasStreamingLive && !this.streamingCompleted && !this.element.isComplete) {
-			const elapsed = formatThinkingElapsed(this.getElapsedMs());
-			this.workingSpinnerLabel.textContent = base
-				? localize('chat.thinking.spinnerElapsed', "{0} · {1}", base, elapsed)
-				: elapsed;
-		} else {
-			this.workingSpinnerLabel.textContent = base;
-		}
+		this.workingSpinnerLabel.textContent = this.workingSpinnerBaseText ?? '';
 	}
 
 	// --- Codex-style activity groups -------------------------------------------------
@@ -2126,10 +2084,11 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		}
 
 		const nativeText = nativeContent.textContent?.trim();
+		const invocation = metadata && (metadata.kind === 'toolInvocation' || metadata.kind === 'toolInvocationSerialized') ? metadata : undefined;
+		const hasRichNativeCard = invocation?.toolSpecificData?.kind === 'coreTool';
 		const presentation = t3WorkEntryPresentation(metadata, toolCallId, fallbackLabel, nativeText);
 		const isPlanRow = presentation.kind === 'plan';
 		itemWrapper.classList.toggle('chat-thinking-cursor-plan-row', isPlanRow);
-		const invocation = metadata && (metadata.kind === 'toolInvocation' || metadata.kind === 'toolInvocationSerialized') ? metadata : undefined;
 		const isLiveInvocation = metadata?.kind === 'toolInvocation' && !IChatToolInvocation.isComplete(metadata);
 		const isSyntheticLiveEntry = !metadata && !this.element.isComplete;
 		const isPendingCursorEdit = this.useCursorTranscriptPresentation
@@ -2144,6 +2103,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		].filter(Boolean).join(' ').toLocaleLowerCase();
 		const isPassiveCursorRow = this.useCursorTranscriptPresentation
 			&& !presentation.failed
+			&& !hasRichNativeCard
 			&& (subkind === 'read' || subkind === 'search' || passiveSemanticText.includes('skill'));
 		const summary = $('.chat-thinking-work-row-summary');
 		itemWrapper.querySelector<HTMLElement>(':scope > .chat-thinking-icon')?.remove();
@@ -2162,7 +2122,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		nativeContent.classList.add('chat-thinking-work-native-content');
 
 		let details: HTMLElement | undefined;
-		const preferNativeDisclosure = subkind === 'terminal' && nativeContent.childElementCount > 0;
+		const preferNativeDisclosure = (subkind === 'terminal' || hasRichNativeCard) && nativeContent.childElementCount > 0;
 		if (presentation.planItems?.length) {
 			details = $('.chat-thinking-work-row-details.chat-thinking-plan-details');
 			const list = $('ul.chat-thinking-plan-list');
@@ -2185,7 +2145,8 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		// Some restored/provider-native tool parts do not expose enough metadata
 		// to synthesize a details block. Keep their real subtree available as the
 		// disclosure body instead of leaving a row that can never be inspected.
-		const hasNativeDisclosure = this.useCursorTranscriptPresentation && !isPlanRow && !isPassiveCursorRow && !isPendingCursorEdit && !details && nativeContent.childElementCount > 0;
+		const supportsNativeDisclosure = hasRichNativeCard ? this.useCursorPanelPresentation : this.useCursorTranscriptPresentation;
+		const hasNativeDisclosure = supportsNativeDisclosure && !isPlanRow && !isPassiveCursorRow && !isPendingCursorEdit && !details && nativeContent.childElementCount > 0;
 		const hasDisclosure = !!details || hasNativeDisclosure;
 		const disclosure = $('span.chat-thinking-work-row-disclosure', { 'aria-hidden': 'true' });
 		if (hasDisclosure) {
@@ -2209,6 +2170,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 
 		itemWrapper.classList.add('chat-thinking-work-row-expandable');
 		itemWrapper.classList.toggle('chat-thinking-work-row-native-expandable', hasNativeDisclosure);
+		itemWrapper.classList.toggle('chat-thinking-work-row-rich-native', hasRichNativeCard);
 		itemWrapper.tabIndex = 0;
 		itemWrapper.role = 'button';
 		itemWrapper.ariaExpanded = 'false';
@@ -2286,6 +2248,48 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			this.appendToWrapper(itemWrapper);
 			return;
 		}
+		const isCoreTool = !!metadata
+			&& (metadata.kind === 'toolInvocation' || metadata.kind === 'toolInvocationSerialized')
+			&& metadata.toolSpecificData?.kind === 'coreTool';
+		const coreToolKind = isCoreTool && metadata.toolSpecificData?.kind === 'coreTool'
+			? metadata.toolSpecificData.toolKind
+			: undefined;
+		const isCoreTodo = isCoreTool
+			&& coreToolKind === 'todo';
+		if (isCoreTodo) {
+			// TodoWrite is a snapshot update, not a new independent result. Keep the
+			// newest card mounted so initial/in-progress/final updates do not stack.
+			const previousBody = this.latestCoreTodoWrapper?.parentElement;
+			this.latestCoreTodoWrapper?.remove();
+			if (previousBody?.classList.contains('chat-thinking-group-body') && previousBody.childElementCount === 0) {
+				previousBody.parentElement?.classList.add('chat-thinking-work-group-todo-superseded');
+			}
+			this.latestCoreTodoWrapper = itemWrapper;
+		}
+		if ((this.useCursorPanelPresentation || this.useCursorTranscriptPresentation) && isCoreTool) {
+			// Core tools already own a compact header, lifecycle status, and optional
+			// details disclosure. Mount that native card directly: wrapping it in a
+			// generic work row or activity group creates two competing summaries and
+			// two chevrons for one call.
+			if (itemWrapper.firstElementChild?.classList.contains('chat-thinking-icon')) {
+				itemWrapper.firstElementChild.remove();
+			}
+			itemWrapper.classList.remove(
+				'chat-thinking-cursor-read-row',
+				'chat-thinking-cursor-search-row',
+				'chat-thinking-cursor-edit-row',
+				'chat-thinking-cursor-terminal-row',
+				'chat-thinking-cursor-other-row',
+			);
+			itemWrapper.classList.add('chat-thinking-core-tool-row');
+			this.finishActiveActivityGroup();
+			if (coreToolKind === 'read') {
+				this.appendCoreReadRow(itemWrapper);
+			} else {
+				this.appendToWrapper(itemWrapper);
+			}
+			return;
+		}
 		const preserveNativeTool = this.useCursorTranscriptPresentation
 			&& !!metadata
 			&& (metadata.kind === 'toolInvocation' || metadata.kind === 'toolInvocationSerialized')
@@ -2303,7 +2307,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		if (preserveNativeTool) {
 			itemWrapper.classList.add('chat-thinking-cursor-actionable-row');
 		}
-		if (this.useCursorPanelPresentation && !preserveNativeTool && !preserveNativeTerminal) {
+		if (this.useCursorPanelPresentation && !preserveNativeTool && !preserveNativeTerminal && metadata?.kind !== 'externalEdit') {
 			this.prepareWorkRow(itemWrapper, toolCallId, fallbackLabel, metadata, subkind);
 		}
 		// A shell card already owns a complete disclosure hierarchy: one command
@@ -2327,18 +2331,35 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			return;
 		}
 		const category = toolActivityCategoryOf(subkind);
-		let group = this.activeActivityGroup;
+		const mutation = metadata && (metadata.kind === 'toolInvocation' || metadata.kind === 'toolInvocationSerialized') && metadata.toolSpecificData?.kind === 'mutation'
+			? metadata.toolSpecificData
+			: metadata?.kind === 'externalEdit' && metadata.mutationBatchId
+				? { batchId: metadata.mutationBatchId, expectedFileCount: metadata.mutationBatchFileCount ?? 1 }
+				: undefined;
+		let group = mutation ? this.activityGroupByMutationBatchId.get(mutation.batchId) : this.activeActivityGroup;
 		// T3 treats every uninterrupted run of work entries as one group,
 		// regardless of whether the individual calls read, edit, search, or run a
 		// command. A commentary/reasoning row ends the run. Keep the existing
 		// category summaries for other VS Code chat surfaces, but use Cursor's
 		// provider-neutral work-log grouping in Backboard's right transcript.
-		if (!group || (!this.useCursorTranscriptPresentation && group.category !== category) || group.container.parentElement !== this.wrapper) {
+		if (!group
+			|| (!this.useCursorTranscriptPresentation && group.category !== category)
+			|| (this.useCursorTranscriptPresentation && !mutation && !!group.mutationBatchId)
+			|| group.container.parentElement !== this.wrapper) {
 			this.finishActiveActivityGroup();
 			group = this.createActivityGroup(category);
+			if (mutation) {
+				group.mutationBatchId = mutation.batchId;
+				group.expectedEditFileCount = mutation.expectedFileCount;
+				group.container.classList.add('chat-thinking-work-mutation-batch');
+				this.activityGroupByMutationBatchId.set(mutation.batchId, group);
+			}
 			this.activeActivityGroup = group;
 			this.activityGroups.push(group);
 			this.appendToWrapper(group.container);
+		} else if (mutation) {
+			group.expectedEditFileCount = Math.max(group.expectedEditFileCount, mutation.expectedFileCount);
+			this.activeActivityGroup = group;
 		}
 		group.items.push({ toolCallId, subkind, fallbackLabel });
 		if (group.subkindCounts[subkind]++ === 0) {
@@ -2350,7 +2371,11 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 				group.runningToolCallIds.add(toolCallId);
 			}
 		}
+		if (metadata?.kind === 'externalEdit') {
+			group.editFileKeys.add(metadata.uri.toString());
+		}
 		group.body.appendChild(itemWrapper);
+		group.container.classList.remove('chat-thinking-work-group-todo-superseded');
 		// Paint the first row immediately, then collapse synchronous provider
 		// bursts into one header mutation on the next frame. A restored response
 		// with hundreds of reads should not rewrite the same label hundreds of
@@ -2439,7 +2464,9 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			subkindCounts: createToolActivitySubkindCounts(),
 			orderedSubkinds: [],
 			runningToolCallIds: new Set(),
+			editFileKeys: new Set(),
 			hover,
+			expectedEditFileCount: 0,
 			// Active reads/searches are useful progress, so show their rows while
 			// they run. finishActiveActivityGroup folds them back into Explored N.
 			expanded: this.useCursorTranscriptPresentation && category === 'explore',
@@ -2543,7 +2570,6 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			// lone read should say "Explored 1 file" and keep provider details hidden,
 			// never leak a raw "Read 10/120 lines" row into the transcript.
 			const isExploration = group.subkindCounts.read + group.subkindCounts.search > 0;
-			const hasEdits = group.subkindCounts.edit > 0;
 			const runningEditCount = group.items.reduce((count, item) => count + (
 				item.subkind === 'edit'
 					&& !!item.toolCallId
@@ -2563,9 +2589,10 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 				group.header.role = 'button';
 				group.header.tabIndex = 0;
 			}
-			// Edit/write calls always use their single aggregate header. This keeps a
-			// large batch from mounting one live animation for every pending file.
-			const showSummary = isExploration || hasEdits || group.items.length > 1;
+			// Pending edits use one aggregate loading shell, and multi-file batches
+			// keep one summary. A completed single-file edit renders its diff directly
+			// instead of hiding it behind a redundant "Updated 1 file" disclosure.
+			const showSummary = isExploration || hasRunningEdit || group.items.length > 1;
 			group.header.classList.toggle('hidden', !showSummary);
 			group.header.style.display = showSummary ? '' : 'none';
 			const expanded = !showSummary || group.expanded;
@@ -2593,39 +2620,30 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			group.chevron.classList.toggle('chat-thinking-group-chevron-expanded', group.expanded);
 			group.chevron.hidden = isLive;
 			let liveSpinner = group.header.querySelector<HTMLElement>(':scope > .chat-thinking-group-live-spinner');
-			let liveElapsed = group.header.querySelector<HTMLElement>(':scope > .chat-thinking-group-live-elapsed');
 			if (isLive) {
 				liveSpinner ??= group.header.insertBefore(createThinkingIcon(ThemeIcon.modify(Codicon.loading, 'spin')), group.headerLabel);
 				liveSpinner.classList.add('chat-thinking-group-live-spinner');
-				if (!liveElapsed) {
-					liveElapsed = $('span.chat-thinking-group-live-elapsed', { 'aria-hidden': 'true' });
-					group.headerLabel.after(liveElapsed);
-				}
 				group.header.role = 'status';
 				group.header.removeAttribute('aria-live');
 				group.header.removeAttribute('aria-expanded');
 				group.header.tabIndex = -1;
 			} else {
 				liveSpinner?.remove();
-				liveElapsed?.remove();
+				group.header.querySelector(':scope > .chat-thinking-group-live-elapsed')?.remove();
 				group.header.role = 'button';
 				group.header.removeAttribute('aria-live');
 				group.header.tabIndex = 0;
 			}
 			const label = this.buildActivityGroupLabel(group);
 			group.headerLabel.textContent = label;
-			if (isLive && liveElapsed) {
-				liveElapsed.textContent = localize('chat.thinking.group.liveElapsedSuffix', " · {0}", formatThinkingElapsed(Date.now() - group.startedAt));
-			} else {
+			if (!isLive) {
 				group.header.ariaExpanded = String(group.expanded);
 			}
 			group.header.ariaLabel = label;
 			return;
 		}
 		const label = this.buildActivityGroupLabel(group);
-		const liveLabel = group === this.activeActivityGroup && group.container.classList.contains('chat-thinking-group-live')
-			? localize('chat.thinking.group.liveElapsed', "{0} · {1}", label, formatThinkingElapsed(Date.now() - group.startedAt))
-			: label;
+		const liveLabel = label;
 		const truncated = middleTruncate(liveLabel);
 		group.headerLabel.textContent = truncated;
 		group.header.ariaLabel = liveLabel;
@@ -2639,15 +2657,25 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 	private buildActivityGroupLabel(group: IToolActivityGroup): string {
 		const edits = group.subkindCounts.edit;
 		const hasRunningEdit = group.items.some(item => item.subkind === 'edit' && !!item.toolCallId && group.runningToolCallIds.has(item.toolCallId));
+		if (this.useCursorTranscriptPresentation && group.mutationBatchId) {
+			const fileCount = Math.max(1, group.editFileKeys.size || group.expectedEditFileCount);
+			return hasRunningEdit
+				? fileCount === 1
+					? localize('chat.thinking.group.cursor.updating.one', "Updating 1 file")
+					: localize('chat.thinking.group.cursor.updating', "Updating {0} files", fileCount)
+				: fileCount === 1
+					? localize('chat.thinking.group.cursor.updated.one', "Updated 1 file")
+					: localize('chat.thinking.group.cursor.updated', "Updated {0} files", fileCount);
+		}
 		if (this.useCursorTranscriptPresentation && edits > 0) {
 			if (hasRunningEdit) {
 				return edits === 1
-					? localize('chat.thinking.group.cursor.spawned.one', "Spawned 1 edit")
-					: localize('chat.thinking.group.cursor.spawned', "Spawned {0} edits", edits);
+					? localize('chat.thinking.group.cursor.updatingLegacy.one', "Updating 1 file")
+					: localize('chat.thinking.group.cursor.updatingLegacy', "Updating {0} files", edits);
 			}
 			return edits === 1
-				? localize('chat.thinking.group.cursor.edited.one', "Edited 1 file")
-				: localize('chat.thinking.group.cursor.edited', "Edited {0} files", edits);
+				? localize('chat.thinking.group.cursor.updatedLegacy.one', "Updated 1 file")
+				: localize('chat.thinking.group.cursor.updatedLegacy', "Updated {0} files", edits);
 		}
 		const singleItemIsCursorExploration = this.useCursorTranscriptPresentation
 			&& group.items.length === 1
@@ -2714,6 +2742,10 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		}
 	}
 
+	public hasMutationActivityGroup(batchId: string): boolean {
+		return this.activityGroupByMutationBatchId.has(batchId);
+	}
+
 	/** Refreshes the group header that owns the given tool (labels stream in late). */
 	private refreshActivityGroupForTool(toolCallId: string): void {
 		const label = this.toolLabelsByCallId.get(toolCallId);
@@ -2757,6 +2789,13 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		}
 		const group = this.activityGroupByToolCallId.get(toolCallId);
 		if (group) {
+			const mutation = invocation?.toolSpecificData?.kind === 'mutation' ? invocation.toolSpecificData : undefined;
+			if (mutation && !group.mutationBatchId) {
+				group.mutationBatchId = mutation.batchId;
+				group.expectedEditFileCount = mutation.expectedFileCount;
+				group.container.classList.add('chat-thinking-work-mutation-batch');
+				this.activityGroupByMutationBatchId.set(mutation.batchId, group);
+			}
 			this.requestActivityGroupHeaderUpdate(group);
 		}
 	}
@@ -2798,6 +2837,9 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			if (item.toolCallId && this.activityGroupByToolCallId.get(item.toolCallId) === group) {
 				this.activityGroupByToolCallId.delete(item.toolCallId);
 			}
+		}
+		if (group.mutationBatchId && this.activityGroupByMutationBatchId.get(group.mutationBatchId) === group) {
+			this.activityGroupByMutationBatchId.delete(group.mutationBatchId);
 		}
 		group.runningToolCallIds.clear();
 		group.hover.clear();
@@ -2905,7 +2947,6 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 
 	public markAsInactive(): void {
 		this.isActive = false;
-		this.elapsedAtCompletionMs ??= Date.now() - this.startTimeMs;
 		this.finishCurrentCursorReasoning();
 		this.updateCursorReasoningLabel(true);
 		this.collapseAllCursorReasoning();
@@ -2937,7 +2978,6 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		this.domNode.classList.remove('chat-thinking-persistent-streaming');
 		this.domNode.classList.remove('chat-thinking-fade-top', 'chat-thinking-fade-bottom');
 		this.streamingCompleted = true;
-		this.elapsedAtCompletionMs ??= Date.now() - this.startTimeMs;
 		this.finishCurrentCursorReasoning();
 		this.updateCursorReasoningLabel(true);
 		this.collapseAllCursorReasoning();
@@ -2987,11 +3027,9 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			return;
 		}
 
-		// Cancelled runs get a static "Stopped after Ns" title — no LLM call.
+		// Cancelled runs get a static title — no LLM call.
 		if (this.isCanceledResponse()) {
-			const title = this.wasStreamingLive
-				? localize('chat.thinking.stoppedAfter', "Stopped after {0}", formatThinkingElapsed(this.getElapsedMs()))
-				: localize('chat.thinking.stopped', "Stopped");
+			const title = localize('chat.thinking.stopped', "Stopped");
 			this.currentTitle = title;
 			this.setFinalizedTitle(title);
 			return;
@@ -3349,11 +3387,8 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 	}
 
 	private setFallbackTitle(): void {
-		this.elapsedAtCompletionMs ??= Date.now() - this.startTimeMs;
-
-		// The step count is shown in the title meta ("· 12s · 6 steps"), so the
-		// fallback label stays plain to avoid repeating it. "Worked" mirrors
-		// T3 Code's turn fold ("Worked for 12s") with the duration in the meta.
+		// The step count remains in the title meta, so the fallback label stays
+		// plain and avoids repeating it.
 		const finalLabel = localize('chat.thinking.finished', 'Worked');
 
 		this.currentTitle = finalLabel;
@@ -3364,7 +3399,6 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 		this.domNode.classList.remove('chat-thinking-active');
 		this.domNode.classList.remove('chat-thinking-persistent-streaming');
 		this.streamingCompleted = true;
-		this.elapsedAtCompletionMs ??= Date.now() - this.startTimeMs;
 		this.updateCursorReasoningLabel(true);
 		this.collapseAllCursorReasoning();
 		this.removeElapsedIndicator();
@@ -4007,7 +4041,7 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 
 		// Cursor keeps file diffs as full transcript cards and uses the native
 		// terminal disclosure so live output and tool actions remain available.
-		if (this.useCursorTranscriptPresentation && (isMarkdownEdit || isExternalEdit || isTextEdit)) {
+		if (this.useCursorTranscriptPresentation && (isMarkdownEdit || (isExternalEdit && !toolInvocationOrMarkdown.mutationBatchId) || isTextEdit)) {
 			this.finishActiveActivityGroup();
 			itemWrapper.classList.add('chat-thinking-cursor-edit-row');
 			this.appendToWrapper(itemWrapper);
@@ -4186,7 +4220,6 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 			this._titleDetailRendered.clear();
 			this._titleFileWidgetStore.clear();
 			this.currentTitle = title;
-			this.updateElapsedIndicator();
 			return;
 		}
 
@@ -4230,8 +4263,6 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 		this._collapseButton.element.ariaLabel = thinkingLabel;
 		this._collapseButton.element.ariaExpanded = String(this.isExpanded());
 
-		// Title updates rebuild the label; keep the elapsed tick at the end.
-		this.updateElapsedIndicator();
 	}
 
 	hasSameContent(other: IChatRendererContent, _followingContent: IChatRendererContent[], _element: ChatTreeItem): boolean {

@@ -24,6 +24,7 @@ import { VisibleSessions } from './visibleSessions.js';
 import { IContextKey, IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
 import { ISessionsPartService } from './sessionsPartService.js';
 import { ActiveSessionProviderIdContext, ActiveSessionTypeContext, IsActiveSessionArchivedContext, ActiveSessionWorkspaceIsVirtualContext, IsNewChatSessionContext } from '../../../common/contextkeys.js';
+import { chatResourceNavigationRegistry } from '../../chatView/browser/chatResourceNavigationRegistry.js';
 
 const ACTIVE_SESSION_STATES_KEY = 'agentSessions.activeSessionStates';
 
@@ -1072,6 +1073,10 @@ export class SessionsService extends Disposable implements ISessionsService {
 
 	async openPreviousSession(): Promise<void> {
 		const activeSession = this.activeSession.get();
+		const activeChatResource = activeSession?.activeChat.get().resource;
+		if (activeChatResource && await chatResourceNavigationRegistry.navigateBack(activeChatResource)) {
+			return;
+		}
 		if (this.sessionsPartService.getSessionView(activeSession?.sessionId)?.navigateBack()) {
 			return;
 		}

@@ -163,6 +163,20 @@ export class ModalEditorPart {
 		modalElement.classList.toggle('embedded', isEmbedded);
 		modalHost.appendChild(modalElement);
 		disposables.add(toDisposable(() => modalElement.remove()));
+		let fullWindow = false;
+		let windowDimmed = false;
+		const setWindowDimmed = (dimmed: boolean) => {
+			if (isEmbedded || windowDimmed === dimmed) {
+				return;
+			}
+			windowDimmed = dimmed;
+			this.hostService.setWindowDimmed(mainWindow, dimmed);
+		};
+		disposables.add(toDisposable(() => {
+			if (!isEmbedded) {
+				this.hostService.setWindowDimmed(mainWindow, false);
+			}
+		}));
 
 		disposables.add(addDisposableListener(modalElement, EventType.MOUSE_DOWN, e => {
 			if (isEmbedded) {
@@ -432,16 +446,18 @@ export class ModalEditorPart {
 			const { top: topPx, left: leftPx } = resizableElement.domNode.style;
 			const sidebarWidth = sidebarResult?.getWidth() ?? 0;
 			const headerHeight = headerElement.offsetHeight;
+			const borderSize = fullWindow ? 0 : MODAL_BORDER_SIZE;
+			const borderWidth = fullWindow ? 0 : MODAL_BORDER_WIDTH;
 
 			editorPart.layout(
-				Math.max(0, modalWidth - MODAL_BORDER_SIZE - sidebarWidth),
-				modalHeight - MODAL_BORDER_SIZE - headerHeight,
-				parseFloat(topPx) + MODAL_BORDER_WIDTH + headerHeight,
-				parseFloat(leftPx) + MODAL_BORDER_WIDTH + sidebarWidth,
+				Math.max(0, modalWidth - borderSize - sidebarWidth),
+				Math.max(0, modalHeight - borderSize - headerHeight),
+				parseFloat(topPx) + borderWidth + headerHeight,
+				parseFloat(leftPx) + borderWidth + sidebarWidth,
 			);
 
 			if (sizeChanged) {
-				sidebarResult?.layout(modalHeight - MODAL_BORDER_SIZE - headerHeight);
+				sidebarResult?.layout(modalHeight - borderSize - headerHeight);
 			}
 		};
 
@@ -450,8 +466,8 @@ export class ModalEditorPart {
 		const dragDisposables = disposables.add(new DisposableStore());
 		let didDrag = false;
 		disposables.add(addDisposableListener(headerElement, EventType.POINTER_DOWN, e => {
-			if (editorPart.maximized) {
-				return; // no drag when maximized
+			if (editorPart.maximized || fullWindow) {
+				return; // no drag when maximized or filling the window
 			}
 
 			if (e.button !== 0) {
@@ -673,6 +689,9 @@ export class ModalEditorPart {
 			if (isEmbedded) {
 				width = containerDimension.width;
 				height = availableHeight;
+			} else if (fullWindow) {
+				width = containerDimension.width;
+				height = containerDimension.height;
 			} else if (editorPart.maximized) {
 				const verticalPadding = Math.max(titleBarOffset /* keep away from title bar to prevent clipping issues with WCO */, MODAL_MAXIMIZED_PADDING);
 				width = Math.max(containerDimension.width - MODAL_MAXIMIZED_PADDING, 0);
@@ -685,7 +704,7 @@ export class ModalEditorPart {
 				height = defaultSize.height;
 			}
 
-			height = Math.min(height, availableHeight); // Ensure the modal never exceeds available height (below the title bar)
+			height = Math.min(height, fullWindow ? containerDimension.height : availableHeight); // Full-window editors include the titlebar region.
 
 			// On first layout, clamp sidebar width if it would leave the editor too narrow
 			if (isFirstLayout) {
@@ -694,16 +713,16 @@ export class ModalEditorPart {
 			}
 
 			// Update resizable element size and constraints
-			resizableElement.maxSize = new Dimension(containerDimension.width, availableHeight);
+			resizableElement.maxSize = new Dimension(containerDimension.width, fullWindow ? containerDimension.height : availableHeight);
 			resizableElement.preferredSize = defaultSize;
 			resizableElement.layout(height, width);
 
 			// Enable/disable sashes based on maximized state
-			const canResize = !isEmbedded && !editorPart.maximized;
+			const canResize = !isEmbedded && !editorPart.maximized && !fullWindow;
 			resizableElement.enableSashes(canResize, canResize, canResize, canResize);
 
 			// Position: use custom position if available (clamped to bounds), otherwise center
-			if (isEmbedded) {
+			if (isEmbedded || fullWindow) {
 				resizableElement.domNode.style.left = '0px';
 				resizableElement.domNode.style.top = '0px';
 			} else if (!editorPart.maximized && editorPart.position) {
@@ -730,15 +749,12 @@ export class ModalEditorPart {
 		disposables.add(Event.runAndSubscribe(modalEditorService.onDidActiveEditorChange, () => {
 			const activeEditor = editorPart.activeGroup.activeEditor;
 			const editorModalOptions = isModalEditorOptionsProvider(activeEditor) ? activeEditor.getModalEditorOptions() : undefined;
+			fullWindow = !!editorModalOptions?.fullWindow;
 			modalElement.classList.toggle('compact-header', !!editorModalOptions?.compactHeader);
+			modalElement.classList.toggle('full-window', fullWindow);
+			setWindowDimmed(!fullWindow);
 			layoutModal();
 		}));
-
-		// Dim window controls to match the modal overlay
-		if (!isEmbedded) {
-			this.hostService.setWindowDimmed(mainWindow, true);
-			disposables.add(toDisposable(() => this.hostService.setWindowDimmed(mainWindow, false)));
-		}
 
 		// Focus
 		editorPart.activeGroup.focus();

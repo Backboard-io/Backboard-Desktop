@@ -118,8 +118,6 @@ import { ImplicitContextAttachmentWidget } from '../../attachments/implicitConte
 import { IChatWidget, IChatWidgetViewModelChangeEvent, ISessionTypePickerDelegate, isIChatResourceViewContext, isIChatViewViewContext, IWorkspacePickerDelegate } from '../../chat.js';
 import { ITerminalChatService } from '../../../../terminal/browser/terminal.js';
 import { ChatEditingShowChangesAction, ViewPreviousEditsAction } from '../../chatEditing/chatEditingActions.js';
-import { MultiDiffEditorInput } from '../../../../multiDiffEditor/browser/multiDiffEditorInput.js';
-import { MultiDiffEditorItem } from '../../../../multiDiffEditor/browser/multiDiffSourceResolverService.js';
 import { resizeImage } from '../../chatImageUtils.js';
 import { ChatSessionPickerActionItem, IChatSessionPickerDelegate } from '../../chatSessions/chatSessionPickerActionItem.js';
 import { AgentHostChatInputPicker, AgentHostChatInputPickerActionViewItem } from '../../agentSessions/agentHost/agentHostChatInputPicker.js';
@@ -590,8 +588,6 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 
 	private readonly _chatEditsActionsDisposables: DisposableStore = this._register(new DisposableStore());
 	private readonly _chatEditsDisposables: DisposableStore = this._register(new DisposableStore());
-	private readonly _onDidChangeExternalEditState = this._register(new Emitter<void>());
-	private readonly _externalEditStates = new Map<string, 'accepted' | 'undone'>();
 	private readonly _renderingChatEdits = this._register(new MutableDisposable());
 	private readonly _renderingBackgroundTerminals = this._register(new MutableDisposable<DisposableStore>());
 	private _backgroundTerminalsExpanded = false;
@@ -1152,6 +1148,14 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 				return !sessionType || sessionType === localChatSessionType || isAgentHostTarget(sessionType);
 			},
 			showAutoModel: () => this._showAutoModel(),
+			getSetupCandidates: () => {
+				const sessionType = this.getCurrentSessionType();
+				const candidate = sessionType
+					? this.options.sessionTypePickerDelegate?.getSetupCandidateForProvider?.(sessionType as AgentSessionTarget)
+					: undefined;
+				return candidate ? [candidate] : [];
+			},
+			runSetup: id => this.options.sessionTypePickerDelegate?.runSetup?.(id),
 			modelConfiguration: this._modelConfigStore,
 		};
 	}
@@ -1314,15 +1318,55 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 					.map(variable => getBackboardCapabilityOptionId(variable.id))
 					.filter(isDefined)
 			);
+			const isEditingRequest = this.currentlyEditingInputKey?.get() === true || this.container.closest('.chat-edit-input-container') !== null;
 			for (const option of selectedOptions) {
 				if (!existingOptionIds.has(option.id)) {
-					this.insertBackboardCapabilityToken(dynamicVariableModel, option);
+					if (!isEditingRequest || !this.restoreBackboardCapabilityTokenReference(dynamicVariableModel, option)) {
+						this.insertBackboardCapabilityToken(dynamicVariableModel, option);
+					}
 					existingOptionIds.add(option.id);
 				}
 			}
 		} finally {
 			this.isSyncingBackboardCapabilityTokens = false;
 		}
+	}
+
+	private restoreBackboardCapabilityTokenReference(dynamicVariableModel: ChatDynamicVariableModel, option: IAgentHostGenericConfigOption): boolean {
+		const model = this._inputEditor.getModel();
+		if (!model) {
+			return false;
+		}
+
+		const value = model.getValue();
+		const tokenText = getBackboardActiveOptionLabel(option);
+		let tokenStartOffset = value.indexOf(tokenText);
+		while (tokenStartOffset >= 0) {
+			const tokenEndOffset = tokenStartOffset + tokenText.length;
+			const hasLeadingBoundary = tokenStartOffset === 0 || /\s/.test(value.charAt(tokenStartOffset - 1));
+			const hasTrailingBoundary = tokenEndOffset === value.length || /\s/.test(value.charAt(tokenEndOffset));
+			if (hasLeadingBoundary && hasTrailingBoundary) {
+				const tokenStart = model.getPositionAt(tokenStartOffset);
+				const tokenEnd = model.getPositionAt(tokenEndOffset);
+				dynamicVariableModel.addReference({
+					id: getBackboardCapabilityVariableId(option.id),
+					range: Range.fromPositions(tokenStart, tokenEnd),
+					fullName: tokenText,
+					icon: getBackboardGenericOptionIcon(option.id),
+					modelDescription: option.description,
+					data: option.valueLabel ?? option.activationValue ?? tokenText,
+					_meta: {
+						backboardCapability: true,
+						backboardCapabilityId: option.id,
+						backboardCapabilityValue: option.valueLabel,
+					},
+				});
+				return true;
+			}
+			tokenStartOffset = value.indexOf(tokenText, tokenStartOffset + tokenText.length);
+		}
+
+		return false;
 	}
 
 	private insertBackboardCapabilityToken(dynamicVariableModel: ChatDynamicVariableModel, option: IAgentHostGenericConfigOption): void {
@@ -4612,14 +4656,13 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		const currentModel = this._widget?.viewModel?.model;
 		const externalEdits = observableFromEvent(
 			this,
-			Event.any(currentModel?.onDidChange ?? Event.None, this._onDidChangeExternalEditState.event),
+			currentModel?.onDidChange ?? Event.None,
 			() => {
 				const turnId = currentModel?.getRequests().at(-1)?.id;
 				if (!currentModel || !turnId || this.isExternalEditSummaryDismissed(turnId)) {
 					return [] as readonly IChatExternalEdit[];
 				}
-				return (getLatestTurnEditedFiles(currentModel) ?? [])
-					.filter(edit => this.getExternalEditState(edit) !== 'accepted');
+				return getLatestTurnEditedFiles(currentModel) ?? [];
 			},
 		);
 
@@ -4687,7 +4730,6 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 					continue;
 				}
 				seenEntries.add(edit.uri);
-				const isUndone = this.getExternalEditState(edit) === 'undone';
 				entries.push({
 					reference: edit.uri,
 					state: ModifiedFileEntryState.Modified,
@@ -4698,25 +4740,6 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 						isDeletion: edit.editKind === 'delete',
 						originalUri: edit.beforeContentUri ?? edit.originalUri,
 					},
-					actions: [{
-						id: 'accept',
-						label: localize('chatEditingSession.acceptExternalEdit', "Accept changes"),
-						icon: Codicon.check,
-						run: () => this.acceptExternalEdit(edit),
-					}, {
-						id: isUndone ? 'redo' : 'undo',
-						label: isUndone
-							? localize('chatEditingSession.redoExternalEdit', "Redo changes")
-							: localize('chatEditingSession.undoExternalEdit', "Undo changes"),
-						icon: isUndone ? Codicon.redo : Codicon.discard,
-						disabled: isUndone && !edit.afterContentUri && edit.editKind !== 'delete',
-						run: () => this.toggleExternalEdit(edit),
-					}, {
-						id: 'diff',
-						label: localize('chatEditingSession.reviewExternalEdit', "Review changes"),
-						icon: Codicon.diffSingle,
-						run: () => this.reviewExternalEdits([edit]),
-					}],
 				});
 			}
 
@@ -5018,104 +5041,6 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 
 	private externalEditDismissalStorageKey(sessionResource: URI): string {
 		return `chat.externalEditSummary.dismissed.${encodeURIComponent(sessionResource.toString())}`;
-	}
-
-	private async reviewExternalEdits(edits: readonly IChatExternalEdit[]): Promise<void> {
-		const resources = edits
-			.filter(edit => edit.beforeContentUri || edit.afterContentUri)
-			.map(edit => new MultiDiffEditorItem(edit.beforeContentUri, edit.afterContentUri, edit.uri));
-		if (resources.length === 0) {
-			return;
-		}
-
-		const source = URI.parse(`multi-diff-editor:external-edits-${Date.now()}-${Math.random()}`);
-		const input = this.instantiationService.createInstance(
-			MultiDiffEditorInput,
-			source,
-			localize('chatEditingSession.externalEditsReview', "Agent changes"),
-			resources,
-			false,
-		);
-		await this.editorService.openEditor(input);
-	}
-
-	private getExternalEditStateKey(edit: IChatExternalEdit): string {
-		return [
-			edit.undoStopId ?? '',
-			edit.editKind,
-			edit.originalUri?.toString() ?? '',
-			edit.uri.toString(),
-			edit.beforeContentUri?.toString() ?? '',
-			edit.afterContentUri?.toString() ?? '',
-		].join('\0');
-	}
-
-	private getExternalEditState(edit: IChatExternalEdit): 'accepted' | 'undone' | undefined {
-		return this._externalEditStates.get(this.getExternalEditStateKey(edit));
-	}
-
-	private async acceptExternalEdit(edit: IChatExternalEdit): Promise<void> {
-		if (this.getExternalEditState(edit) === 'undone' && !await this.redoExternalEdit(edit)) {
-			return;
-		}
-		this._externalEditStates.set(this.getExternalEditStateKey(edit), 'accepted');
-		this._onDidChangeExternalEditState.fire();
-	}
-
-	private async toggleExternalEdit(edit: IChatExternalEdit): Promise<void> {
-		const key = this.getExternalEditStateKey(edit);
-		if (this._externalEditStates.get(key) === 'undone') {
-			if (await this.redoExternalEdit(edit)) {
-				this._externalEditStates.delete(key);
-				this._onDidChangeExternalEditState.fire();
-			}
-			return;
-		}
-
-		if (await this.undoExternalEdit(edit)) {
-			this._externalEditStates.set(key, 'undone');
-			this._onDidChangeExternalEditState.fire();
-		}
-	}
-
-	private async undoExternalEdit(edit: IChatExternalEdit): Promise<boolean> {
-		if (edit.editKind === 'create') {
-			if (await this.fileService.exists(edit.uri)) {
-				await this.fileService.del(edit.uri);
-			}
-			return true;
-		}
-		if (!edit.beforeContentUri) {
-			return false;
-		}
-
-		const before = await this.fileService.readFile(edit.beforeContentUri);
-		const restoreUri = edit.originalUri ?? edit.uri;
-		await this.fileService.writeFile(restoreUri, before.value);
-		if (edit.editKind === 'rename' && !isEqual(restoreUri, edit.uri) && await this.fileService.exists(edit.uri)) {
-			await this.fileService.del(edit.uri);
-		}
-		return true;
-	}
-
-	private async redoExternalEdit(edit: IChatExternalEdit): Promise<boolean> {
-		if (edit.editKind === 'delete') {
-			const deletedUri = edit.originalUri ?? edit.uri;
-			if (await this.fileService.exists(deletedUri)) {
-				await this.fileService.del(deletedUri);
-			}
-			return true;
-		}
-		if (!edit.afterContentUri) {
-			return false;
-		}
-
-		const after = await this.fileService.readFile(edit.afterContentUri);
-		await this.fileService.writeFile(edit.uri, after.value);
-		if (edit.editKind === 'rename' && edit.originalUri && !isEqual(edit.originalUri, edit.uri) && await this.fileService.exists(edit.originalUri)) {
-			await this.fileService.del(edit.originalUri);
-		}
-		return true;
 	}
 
 	async renderFollowups(items: IChatFollowup[] | undefined, response: IChatResponseViewModel | undefined): Promise<void> {

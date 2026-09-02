@@ -60,6 +60,7 @@ export interface AgentLoopDeps {
 	memoryProfile: MemoryProfile;
 	workspaceId?: string;
 	imageGeneration?: boolean;
+	openRouterProvider?: string;
 	generatedMediaDir?: string;
 	thinking: ThinkingConfig | null | undefined;
 	thinkingResolver?: RuntimeThinkingResolver;
@@ -98,6 +99,18 @@ export class AgentLoop {
 	async run(content: string, ctx: ToolContext): Promise<TurnStatus> {
 		const { bus, session } = this.deps;
 		const turn = new Turn(this.deps.turnId, this.deps.turnStartedAt);
+		const finishTurn = async (status: TurnStatus): Promise<void> => {
+			bus.emit({
+				type: "turn:end",
+				turnId: turn.id,
+				status,
+				durationMs: turn.durationMs(),
+			});
+			// turn:end appends the checkpoint finalize marker synchronously. Do not
+			// let the provider turn report completion until that marker and every
+			// preceding mutation record have crossed the durability boundary.
+			await ctx.checkpoints?.flush?.();
+		};
 		if (!this.deps.turnAlreadyStarted) {
 			bus.emit({ type: "turn:start", turnId: turn.id });
 		}
@@ -266,12 +279,7 @@ export class AgentLoop {
 				// context (no-op if nothing streamed yet).
 				assistant.finalize();
 				bus.emit({ type: "turn:cancelled", turnId: turn.id });
-				bus.emit({
-					type: "turn:end",
-					turnId: turn.id,
-					status: "cancelled",
-					durationMs: turn.durationMs(),
-				});
+				await finishTurn("cancelled");
 				return "cancelled";
 			}
 			turn.status = "failed";
@@ -279,21 +287,11 @@ export class AgentLoop {
 				type: "run:error",
 				error: errorMessage(err),
 			});
-			bus.emit({
-				type: "turn:end",
-				turnId: turn.id,
-				status: "failed",
-				durationMs: turn.durationMs(),
-			});
+			await finishTurn("failed");
 			return "failed";
 		}
 
-		bus.emit({
-			type: "turn:end",
-			turnId: turn.id,
-			status: turn.status,
-			durationMs: turn.durationMs(),
-		});
+		await finishTurn(turn.status);
 		return turn.status;
 	}
 

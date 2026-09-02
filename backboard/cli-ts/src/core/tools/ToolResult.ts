@@ -7,6 +7,14 @@ export interface FileEditPreview {
 	after: string;
 }
 
+/** Full terminal transcript retained for rich IDE rendering. */
+export interface TerminalToolResult {
+	text: string;
+	exitCode?: number;
+	timedOut?: boolean;
+	truncated?: boolean;
+}
+
 /**
  * The outcome of a tool execution.
  * - `data` is the structured result used for UI rendering.
@@ -20,6 +28,7 @@ export interface ToolResult<O = unknown> {
 	detail?: string;
 	detailLines?: ToolResultDetailLine[];
 	fileEdits?: FileEditPreview[];
+	terminalOutput?: TerminalToolResult;
 }
 
 export function ok<O>(

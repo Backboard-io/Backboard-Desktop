@@ -52,6 +52,7 @@ describe("parseControlLine", () => {
 			browserUse: true,
 			notify: true,
 			imageGeneration: true,
+			openRouterProvider: "DeepInfra",
 		};
 		expect(parseControlLine(JSON.stringify(control))).toEqual({
 			ok: true,

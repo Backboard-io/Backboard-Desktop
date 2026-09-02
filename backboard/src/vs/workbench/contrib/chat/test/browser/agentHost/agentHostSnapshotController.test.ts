@@ -4,11 +4,17 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
+import { timeout } from '../../../../../../base/common/async.js';
 import { VSBuffer } from '../../../../../../base/common/buffer.js';
 import { DisposableStore } from '../../../../../../base/common/lifecycle.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { mock } from '../../../../../../base/test/common/mock.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
+import { DefaultLinesDiffComputer } from '../../../../../../editor/common/diff/defaultLinesDiffComputer/defaultLinesDiffComputer.js';
+import { IEditorWorkerService } from '../../../../../../editor/common/services/editorWorker.js';
+import { IModelService } from '../../../../../../editor/common/services/model.js';
+import { TestEditorWorkerService } from '../../../../../../editor/test/common/services/testEditorWorkerService.js';
+import { createModelServices } from '../../../../../../editor/test/common/testTextModel.js';
 import { ToolCallConfirmationReason, ToolCallStatus, ToolResultContentType } from '../../../../../../platform/agentHost/common/state/protocol/state.js';
 import type { ToolCallCompletedState } from '../../../../../../platform/agentHost/common/state/sessionState.js';
 import { IFileContent, IFileService } from '../../../../../../platform/files/common/files.js';
@@ -81,11 +87,32 @@ function makeMockFileService(contentMap: Map<string, string>): IFileService {
 
 function createController(store: DisposableStore, contentMap: Map<string, string>): AgentHostSnapshotController {
 	const sessionResource = URI.from({ scheme: 'agent-host-copilot', path: '/test-session' });
+	const modelService = createModelServices(store).get(IModelService);
+	const editorWorkerService: IEditorWorkerService = new class extends TestEditorWorkerService {
+		override async computeDiff(original: URI, modified: URI) {
+			const originalModel = modelService.getModel(original);
+			const modifiedModel = modelService.getModel(modified);
+			assert.ok(originalModel && modifiedModel);
+			const result = new DefaultLinesDiffComputer().computeDiff(
+				originalModel.getLinesContent(),
+				modifiedModel.getLinesContent(),
+				{ ignoreTrimWhitespace: false, computeMoves: false, maxComputationTimeMs: 3000 },
+			);
+			return {
+				changes: result.changes,
+				moves: result.moves,
+				identical: result.changes.length === 0,
+				quitEarly: result.hitTimeout,
+			};
+		}
+	};
 	const controller = new AgentHostSnapshotController(
 		sessionResource,
 		'local',
 		new NullLogService(),
 		makeMockFileService(contentMap),
+		modelService,
+		editorWorkerService,
 	);
 	store.add(controller);
 	return controller;
@@ -293,21 +320,63 @@ suite('AgentHostSnapshotController', () => {
 		const afterB = URI.file('/snap/after-b').toString();
 		const file = URI.file('/file.ts').toString();
 		const contentMap = new Map([
-			[beforeA, 'v0'], [afterA, 'v1'],
-			[beforeB, 'v1'], [afterB, 'v2'],
-			[file, 'v2'],
+			[beforeA, 'keep\nold-one\nold-two'],
+			[afterA, 'keep\nmiddle-one\nmiddle-two\nmiddle-three'],
+			[beforeB, 'keep\nmiddle-one\nmiddle-two\nmiddle-three'],
+			[afterB, 'keep\nfinal-one'],
+			[file, 'keep\nfinal-one'],
 		]);
 		const controller = createController(store, contentMap);
 		controller.addToolCallEdits('req-1', makeToolCall({
 			toolCallId: 'tc-1', filePath: '/file.ts',
-			beforeURI: beforeA, afterURI: afterA,
+			beforeURI: beforeA, afterURI: afterA, added: 3, removed: 2,
 		}));
 		controller.addToolCallEdits('req-1', makeToolCall({
 			toolCallId: 'tc-2', filePath: '/file.ts',
-			beforeURI: beforeB, afterURI: afterB,
+			beforeURI: beforeB, afterURI: afterB, added: 1, removed: 3,
 		}));
+
+		// While the exact first-before/latest-after diff runs in the worker, the
+		// summary uses the operation sum instead of silently dropping tc-1.
+		const sessionDiffs = controller.getDiffsForFilesInSession();
+		assert.deepStrictEqual(sessionDiffs.get().map(diff => ({ added: diff.added, removed: diff.removed })), [
+			{ added: 4, removed: 5 },
+		]);
+		await timeout(0);
+		// The completed worker result is the true net session diff, not the last
+		// tool call's +1/-3 and not the provisional +4/-5 operation sum.
+		assert.deepStrictEqual(sessionDiffs.get().map(diff => ({ added: diff.added, removed: diff.removed })), [
+			{ added: 1, removed: 2 },
+		]);
 		await controller.restoreSnapshot('req-1', undefined);
-		assert.strictEqual(contentMap.get(file), 'v0');
+		assert.strictEqual(contentMap.get(file), 'keep\nold-one\nold-two');
+	});
+
+	test('a file reverted by a later tool call is omitted from the net diff', async () => {
+		const beforeA = URI.file('/snap/revert-before-a').toString();
+		const afterA = URI.file('/snap/revert-after-a').toString();
+		const beforeB = URI.file('/snap/revert-before-b').toString();
+		const afterB = URI.file('/snap/revert-after-b').toString();
+		const contentMap = new Map([
+			[beforeA, 'original'],
+			[afterA, 'changed'],
+			[beforeB, 'changed'],
+			[afterB, 'original'],
+		]);
+		const controller = createController(store, contentMap);
+		controller.addToolCallEdits('req-1', makeToolCall({
+			toolCallId: 'tc-1', filePath: '/file.ts',
+			beforeURI: beforeA, afterURI: afterA, added: 1, removed: 1,
+		}));
+		controller.addToolCallEdits('req-1', makeToolCall({
+			toolCallId: 'tc-2', filePath: '/file.ts',
+			beforeURI: beforeB, afterURI: afterB, added: 1, removed: 1,
+		}));
+
+		const sessionDiffs = controller.getDiffsForFilesInSession();
+		assert.strictEqual(sessionDiffs.get().length, 1);
+		await timeout(0);
+		assert.deepStrictEqual(sessionDiffs.get(), []);
 	});
 
 	test('hasEditsInRequest reflects added tool call edits', () => {

@@ -275,8 +275,7 @@ export class PreferencesService extends Disposable implements IPreferencesServic
 			...options,
 			focusSearch: true
 		};
-		const group = this.getSettingsEditorGroupFromOptions(options);
-		return this.editorService.openEditor(input, validateSettingsEditorOptions(options), group);
+		return this.editorService.openEditor(input, validateSettingsEditorOptions(options), MODAL_GROUP);
 	}
 
 	openApplicationSettings(options: IOpenSettingsOptions = {}): Promise<IEditorPane | undefined> {

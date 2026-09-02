@@ -174,6 +174,18 @@ suite('ChatQuestionCarouselPart', () => {
 			assert.strictEqual(collapseButton, null);
 		});
 
+		test('uses one explicit footer dismiss action for a single question', () => {
+			const carousel = createMockCarousel([
+				{ id: 'q1', type: 'text', title: 'Question 1' }
+			], true);
+			createWidget(carousel);
+
+			assert.strictEqual(widget.domNode.querySelector('.chat-question-close'), null, 'single-question prompt should not duplicate dismiss in the header');
+			const dismissButton = widget.domNode.querySelector('.chat-question-dismiss-button');
+			assert.ok(dismissButton, 'single-question prompt should expose a footer dismiss action');
+			assert.strictEqual(dismissButton?.getAttribute('aria-keyshortcuts'), 'Escape');
+		});
+
 		test('renders collapse button to the right of close button', () => {
 			const carousel = createMockCarousel([
 				{ id: 'q1', type: 'text', title: 'Question 1' },

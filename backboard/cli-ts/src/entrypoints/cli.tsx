@@ -9,6 +9,7 @@ import {
 import { Config } from "../config/Config.ts";
 import { parseFlags } from "../config/flags.ts";
 import { AgentController } from "../core/agent/AgentController.ts";
+import { AgentTaskManager } from "../core/agent/AgentTaskManager.ts";
 import { AttachmentManager } from "../core/attachments/AttachmentManager.ts";
 import { sweepStaleClipboardImages } from "../core/attachments/clipboardImage.ts";
 import {
@@ -55,6 +56,13 @@ import { buildStartupEnvironmentPrompt } from "../prompts/system/startupEnvironm
 import { BackboardError } from "../providers/backboard/errors.ts";
 import { createAgentClient } from "../providers/createAgentClient.ts";
 import {
+	disconnectClaudeSubscription,
+	enableClaudeSubscription,
+	isClaudeAiSubscriptionStatus,
+	loginWithClaudeSubscription,
+	readClaudeSubscriptionStatus,
+} from "../providers/subscription/ClaudeSubscriptionAuth.ts";
+import {
 	loginWithChatGptSubscription,
 	logoutChatGptSubscription,
 } from "../providers/subscription/SubscriptionAuth.ts";
@@ -78,6 +86,10 @@ Usage:
   ${APP_COMMAND_NAME} logout
   ${APP_COMMAND_NAME} subscription login
   ${APP_COMMAND_NAME} subscription logout
+  ${APP_COMMAND_NAME} claude-subscription login
+  ${APP_COMMAND_NAME} claude-subscription enable
+  ${APP_COMMAND_NAME} claude-subscription logout
+  ${APP_COMMAND_NAME} claude-subscription status --json
 
 Options:
   --model <provider/model>   Model to use (e.g. openai/gpt-5.5)
@@ -97,6 +109,9 @@ Options:
   --logout                   Remove saved Backboard credentials
   --subscription-login      Connect a ChatGPT subscription
   --subscription-logout     Disconnect the ChatGPT subscription
+  --claude-subscription-login   Connect a Claude subscription through Claude Code
+  --claude-subscription-enable  Enable an already-authenticated Claude subscription
+  --claude-subscription-logout  Disconnect Claude from Backboard
   --help                     Show this help
   --version                  Show version
 `;
@@ -118,6 +133,24 @@ async function main(): Promise<void> {
 	}
 	if (earlyFlags.subscriptionLogout) {
 		await runSubscriptionLogoutCommand();
+		return;
+	}
+	if (earlyFlags.claudeSubscriptionLogin) {
+		const didLogin = await runClaudeSubscriptionLoginCommand();
+		if (!didLogin) process.exitCode = 1;
+		return;
+	}
+	if (earlyFlags.claudeSubscriptionEnable) {
+		const didEnable = await runClaudeSubscriptionEnableCommand();
+		if (!didEnable) process.exitCode = 1;
+		return;
+	}
+	if (earlyFlags.claudeSubscriptionLogout) {
+		await runClaudeSubscriptionLogoutCommand();
+		return;
+	}
+	if (earlyFlags.claudeSubscriptionStatus) {
+		await runClaudeSubscriptionStatusCommand();
 		return;
 	}
 	if (earlyFlags.login) {
@@ -270,6 +303,7 @@ async function main(): Promise<void> {
 		},
 	});
 	const skillController = new SkillController({ cwd: config.cwd, bus });
+	const agentTaskManager = new AgentTaskManager();
 	registry = new ToolRegistry(
 		createDefaultTools({
 			client,
@@ -281,6 +315,7 @@ async function main(): Promise<void> {
 			skillController,
 			// Lazy: mcpController is declared below (it needs `registry`), resolved at call time.
 			getMcpRegistrar: () => mcpController,
+			agentTaskManager,
 		}),
 	);
 	const mcpToolRegistrar = new McpToolRegistrar(registry, bus);
@@ -379,6 +414,7 @@ async function main(): Promise<void> {
 		permissions,
 		getTranscriptPath: () =>
 			sessionPathsForRoot(sessionLifecycle.current().sessionRoot).clientLog,
+		agentTasks: agentTaskManager,
 	});
 	const attachmentManager = new AttachmentManager();
 	sweepStaleClipboardImages();
@@ -568,6 +604,52 @@ async function runSubscriptionLoginCommand(): Promise<boolean> {
 
 async function runSubscriptionLogoutCommand(): Promise<void> {
 	process.stdout.write(`${await logoutChatGptSubscription()}\n`);
+}
+
+async function runClaudeSubscriptionLoginCommand(): Promise<boolean> {
+	process.stdout.write(
+		"Starting Claude subscription login with Claude Code...\n",
+	);
+	try {
+		process.stdout.write(`${await loginWithClaudeSubscription()}\n`);
+		return true;
+	} catch (error) {
+		process.stderr.write(`${errorMessage(error)}\n`);
+		return false;
+	}
+}
+
+async function runClaudeSubscriptionEnableCommand(): Promise<boolean> {
+	try {
+		process.stdout.write(`${await enableClaudeSubscription()}\n`);
+		return true;
+	} catch (error) {
+		process.stderr.write(`${errorMessage(error)}\n`);
+		return false;
+	}
+}
+
+async function runClaudeSubscriptionLogoutCommand(): Promise<void> {
+	process.stdout.write(`${await disconnectClaudeSubscription()}\n`);
+}
+
+async function runClaudeSubscriptionStatusCommand(): Promise<void> {
+	try {
+		const status = await readClaudeSubscriptionStatus();
+		process.stdout.write(
+			`${JSON.stringify({
+				connected: isClaudeAiSubscriptionStatus(status),
+				loggedIn: status.loggedIn,
+				authMethod: status.authMethod,
+				apiProvider: status.apiProvider,
+				executable: status.executable,
+			})}\n`,
+		);
+	} catch (error) {
+		process.stdout.write(
+			`${JSON.stringify({ connected: false, error: errorMessage(error) })}\n`,
+		);
+	}
 }
 
 async function runHeadless(

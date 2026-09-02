@@ -113,9 +113,56 @@ interface ITOCEntryTemplate {
 
 function getSettingsSectionIcon(element: SettingsTreeGroupElement): ThemeIcon {
 	const section = `${element.id} ${element.label}`.toLowerCase();
+	const editorSectionIcons: Record<string, ThemeIcon> = {
+		'editor': Codicon.edit,
+		'editor/cursor': Codicon.cursor,
+		'editor/find': Codicon.search,
+		'editor/font': Codicon.symbolText,
+		'editor/format': Codicon.wand,
+		'editor/diffEditor': Codicon.diff,
+		'editor/multiDiffEditor': Codicon.diffMultiple,
+		'editor/minimap': Codicon.map,
+		'editor/suggestions': Codicon.lightbulb,
+		'editor/files': Codicon.files,
+	};
+	const editorSectionIcon = editorSectionIcons[element.id];
+	if (editorSectionIcon) {
+		return editorSectionIcon;
+	}
 
+	const featureSectionIcons: Record<string, ThemeIcon> = {
+		'features/accessibilitySignals': Codicon.bellDot,
+		'features/accessibility': Codicon.person,
+		'features/explorer': Codicon.files,
+		'features/search': Codicon.search,
+		'features/debug': Codicon.debugAlt,
+		'features/testing': Codicon.beaker,
+		'features/scm': Codicon.sourceControl,
+		'features/extensions': Codicon.extensions,
+		'features/terminal': Codicon.terminal,
+		'features/task': Codicon.tasklist,
+		'features/problems': Codicon.warning,
+		'features/output': Codicon.output,
+		'features/comments': Codicon.commentDiscussion,
+		'features/remote': Codicon.remote,
+		'features/timeline': Codicon.history,
+		'features/notebook': Codicon.notebook,
+		'features/mergeEditor': Codicon.merge,
+		'features/issueReporter': Codicon.issues,
+	};
+	const featureSectionIcon = featureSectionIcons[element.id];
+	if (featureSectionIcon) {
+		return featureSectionIcon;
+	}
+
+	if (section.includes('commonly used')) {
+		return Codicon.star;
+	}
 	if (section.includes('keyboard') || section.includes('keybinding')) {
 		return Codicon.keyboard;
+	}
+	if (section.includes('text editor')) {
+		return Codicon.edit;
 	}
 	if (section.includes('appearance') || section.includes('theme') || section.includes('color')) {
 		return Codicon.symbolColor;
@@ -131,6 +178,21 @@ function getSettingsSectionIcon(element: SettingsTreeGroupElement): ThemeIcon {
 	}
 	if (section.includes('archive')) {
 		return Codicon.archive;
+	}
+	if (section.includes('security')) {
+		return Codicon.shield;
+	}
+	if (section.includes('window')) {
+		return Codicon.window;
+	}
+	if (section.includes('workbench')) {
+		return Codicon.layout;
+	}
+	if (section.includes('feature')) {
+		return Codicon.sparkle;
+	}
+	if (section.includes('application')) {
+		return Codicon.package;
 	}
 	if (section.includes('extension')) {
 		return Codicon.extensions;

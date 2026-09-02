@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { access, readdir, rmdir } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { access, readdir, readFile, realpath, rmdir } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 export interface GitRepositoryInfo {
 	coordinatorRoot: string;
@@ -26,6 +26,11 @@ export interface GitIntegrationResult {
 	conflictingFiles: string[];
 }
 
+export interface GitIntegrationBatchEntry {
+	startingCommit: string;
+	resultCommit: string;
+}
+
 export interface GitCommandResult {
 	stdout: string;
 	stderr: string;
@@ -36,6 +41,13 @@ export type GitCommandRunner = (
 	args: readonly string[],
 	options?: { signal?: AbortSignal; env?: NodeJS.ProcessEnv },
 ) => Promise<GitCommandResult>;
+
+// Git's linked-worktree registry is shared by every checkout of a repository.
+// Concurrent `git worktree add/remove/prune` processes can observe half-written
+// admin directories even when their branches and paths are disjoint. Keep only
+// that small metadata phase serialized; checkout materialization happens after
+// the lock and remains parallel.
+const worktreeRegistryTails = new Map<string, Promise<void>>();
 
 export class GitCommandError extends Error {
 	constructor(
@@ -180,29 +192,40 @@ export class GitWorktreeManager {
 		startCommit: string;
 		signal?: AbortSignal;
 	}): Promise<void> {
-		if (
-			await this.branchExists(input.repositoryRoot, input.branch, input.signal)
-		) {
-			throw new Error(
-				`Worker branch already exists and is not owned by this worker: ${input.branch}`,
+		await withWorktreeRegistryLock(input.repositoryRoot, async () => {
+			input.signal?.throwIfAborted();
+			if (
+				await this.branchExists(
+					input.repositoryRoot,
+					input.branch,
+					input.signal,
+				)
+			) {
+				throw new Error(
+					`Worker branch already exists and is not owned by this worker: ${input.branch}`,
+				);
+			}
+			if (await pathExists(input.path)) {
+				throw new Error(`Worker worktree path already exists: ${input.path}`);
+			}
+			await this.git(
+				input.repositoryRoot,
+				[
+					"worktree",
+					"add",
+					"--no-checkout",
+					"--no-track",
+					"-b",
+					input.branch,
+					input.path,
+					input.startCommit,
+				],
+				input.signal,
 			);
-		}
-		if (await pathExists(input.path)) {
-			throw new Error(`Worker worktree path already exists: ${input.path}`);
-		}
+		});
 		await this.git(
-			input.repositoryRoot,
-			[
-				"-c",
-				"checkout.workers=0",
-				"worktree",
-				"add",
-				"--no-track",
-				"-b",
-				input.branch,
-				input.path,
-				input.startCommit,
-			],
+			input.path,
+			["-c", "checkout.workers=0", "reset", "--hard", input.startCommit],
 			input.signal,
 		);
 	}
@@ -224,26 +247,42 @@ export class GitWorktreeManager {
 				`Cannot recreate worker worktree because branch is missing: ${input.branch}`,
 			);
 		}
-		const registered = (
-			await this.listWorktrees(input.repositoryRoot, input.signal)
-		).some((path) => resolve(path) === resolve(input.path));
-		if (registered && (await pathExists(input.path))) return;
+		let materialize = false;
+		await withWorktreeRegistryLock(input.repositoryRoot, async () => {
+			input.signal?.throwIfAborted();
+			const targetPath = await canonicalPath(input.path);
+			const registeredPaths = await Promise.all(
+				(await this.listWorktrees(input.repositoryRoot, input.signal)).map(
+					canonicalPath,
+				),
+			);
+			const registered = registeredPaths.includes(targetPath);
+			if (registered && (await pathExists(input.path))) return;
 
-		await this.git(input.repositoryRoot, ["worktree", "prune"], input.signal);
-		if (await pathExists(input.path)) {
-			const entries = await readdir(input.path);
-			if (entries.length > 0) {
-				throw new Error(
-					`Saved worker path exists outside Git's worktree registry and is not empty: ${input.path}`,
-				);
+			await this.git(input.repositoryRoot, ["worktree", "prune"], input.signal);
+			if (await pathExists(input.path)) {
+				const entries = await readdir(input.path);
+				if (entries.length > 0) {
+					throw new Error(
+						`Saved worker path exists outside Git's worktree registry and is not empty: ${input.path}`,
+					);
+				}
+				await rmdir(input.path);
 			}
-			await rmdir(input.path);
+			await this.git(
+				input.repositoryRoot,
+				["worktree", "add", "--no-checkout", input.path, input.branch],
+				input.signal,
+			);
+			materialize = true;
+		});
+		if (materialize) {
+			await this.git(
+				input.path,
+				["-c", "checkout.workers=0", "reset", "--hard"],
+				input.signal,
+			);
 		}
-		await this.git(
-			input.repositoryRoot,
-			["-c", "checkout.workers=0", "worktree", "add", input.path, input.branch],
-			input.signal,
-		);
 	}
 
 	async captureResultCommit(input: {
@@ -252,6 +291,8 @@ export class GitWorktreeManager {
 		startingCommit: string;
 		signal?: AbortSignal;
 	}): Promise<GitResultCommit> {
+		const alreadyCaptured = await this.inspectCapturedResult(input);
+		if (alreadyCaptured) return alreadyCaptured;
 		const changedFiles = await this.changedFiles(
 			input.worktreePath,
 			input.signal,
@@ -262,6 +303,17 @@ export class GitWorktreeManager {
 				resultCommit: input.startingCommit,
 				changedFiles,
 			};
+		}
+		const throwawayArtifacts = await this.knownThrowawayArtifacts(
+			input.worktreePath,
+			changedFiles,
+			input.startingCommit,
+			input.signal,
+		);
+		if (throwawayArtifacts.length > 0) {
+			throw new Error(
+				`Worker left temporary verification artifacts in its checkout: ${throwawayArtifacts.join(", ")}. Remove them or move them to the operating system's temporary directory before completing the worker.`,
+			);
 		}
 
 		await this.git(input.worktreePath, ["add", "-A", "--", "."], input.signal);
@@ -280,14 +332,73 @@ export class GitWorktreeManager {
 			],
 			input.signal,
 		);
+		// The result commit is the durability boundary. Once Git has created it,
+		// cancellation must not prevent the small metadata reads needed to surface
+		// and integrate that recoverable commit.
 		const resultCommit = (
-			await this.git(input.worktreePath, ["rev-parse", "HEAD"], input.signal)
+			await this.git(input.worktreePath, ["rev-parse", "HEAD"])
 		).trim();
+		const committedFiles = await this.changedFilesBetween(
+			input.worktreePath,
+			input.startingCommit,
+			resultCommit,
+		);
+		const committedThrowawayArtifacts = await this.knownThrowawayArtifacts(
+			input.worktreePath,
+			committedFiles,
+			input.startingCommit,
+		);
+		if (committedThrowawayArtifacts.length > 0) {
+			throw new Error(
+				`Worker left temporary verification artifacts in its checkout: ${committedThrowawayArtifacts.join(", ")}. Remove them or move them to the operating system's temporary directory before completing the worker.`,
+			);
+		}
 		return {
 			startingCommit: input.startingCommit,
 			resultCommit,
-			changedFiles,
+			changedFiles: committedFiles,
 		};
+	}
+
+	/** Finds a clean worker result whose branch advanced before metadata persisted. */
+	async inspectCapturedResult(input: {
+		worktreePath: string;
+		startingCommit: string;
+		signal?: AbortSignal;
+	}): Promise<GitResultCommit | null> {
+		let resultCommit: string;
+		try {
+			resultCommit = (
+				await this.git(input.worktreePath, ["rev-parse", "HEAD"], input.signal)
+			).trim();
+		} catch (error) {
+			if (error instanceof GitCommandError) return null;
+			throw error;
+		}
+		if (resultCommit === input.startingCommit) return null;
+		if (
+			(await this.changedFiles(input.worktreePath, input.signal)).length > 0
+		) {
+			return null;
+		}
+		const changedFiles = await this.changedFilesBetween(
+			input.worktreePath,
+			input.startingCommit,
+			resultCommit,
+			input.signal,
+		);
+		const throwawayArtifacts = await this.knownThrowawayArtifacts(
+			input.worktreePath,
+			changedFiles,
+			input.startingCommit,
+			input.signal,
+		);
+		if (throwawayArtifacts.length > 0) {
+			throw new Error(
+				`Worker left temporary verification artifacts in its checkout: ${throwawayArtifacts.join(", ")}. Remove them or move them to the operating system's temporary directory before completing the worker.`,
+			);
+		}
+		return { startingCommit: input.startingCommit, resultCommit, changedFiles };
 	}
 
 	async integrate(input: {
@@ -296,7 +407,40 @@ export class GitWorktreeManager {
 		resultCommit: string;
 		signal?: AbortSignal;
 	}): Promise<GitIntegrationResult> {
-		if (input.startingCommit === input.resultCommit) {
+		return this.integrateBatch({
+			coordinatorCwd: input.coordinatorCwd,
+			results: [
+				{
+					startingCommit: input.startingCommit,
+					resultCommit: input.resultCommit,
+				},
+			],
+			signal: input.signal,
+		});
+	}
+
+	/** Integrates several independently captured heads in one merge commit. */
+	async integrateBatch(input: {
+		coordinatorCwd: string;
+		results: readonly GitIntegrationBatchEntry[];
+		signal?: AbortSignal;
+	}): Promise<GitIntegrationResult> {
+		const candidates = [
+			...new Set(
+				input.results
+					.filter((result) => result.startingCommit !== result.resultCommit)
+					.map((result) => result.resultCommit),
+			),
+		];
+		const ancestorChecks = await Promise.all(
+			candidates.map((commit) =>
+				this.isAncestor(input.coordinatorCwd, commit, input.signal),
+			),
+		);
+		const resultCommits = candidates.filter(
+			(_, index) => !ancestorChecks[index],
+		);
+		if (resultCommits.length === 0) {
 			return {
 				status: "integrated",
 				commit: (
@@ -310,13 +454,33 @@ export class GitWorktreeManager {
 			};
 		}
 		if (await this.mergeInProgress(input.coordinatorCwd, input.signal)) {
-			return {
-				status: "conflict",
-				conflictingFiles: await this.conflictingFiles(
-					input.coordinatorCwd,
-					input.signal,
-				),
-			};
+			let abortedWorkerMerge = false;
+			for (const resultCommit of resultCommits) {
+				if (
+					await this.abortWorkerIntegration(input.coordinatorCwd, resultCommit)
+				) {
+					abortedWorkerMerge = true;
+					break;
+				}
+			}
+			if (!abortedWorkerMerge) {
+				return {
+					status: "conflict",
+					conflictingFiles: await this.conflictingFiles(
+						input.coordinatorCwd,
+						input.signal,
+					),
+				};
+			}
+		}
+		const stagedFiles = await this.stagedFiles(
+			input.coordinatorCwd,
+			input.signal,
+		);
+		if (stagedFiles.length > 0) {
+			throw new Error(
+				`Worker integration is pending because the coordinator index contains staged changes (${stagedFiles.join(", ")}). Commit or unstage those changes, then retry; Backboard did not stash, reset, or modify them.`,
+			);
 		}
 		const headBefore = (
 			await this.git(input.coordinatorCwd, ["rev-parse", "HEAD"], input.signal)
@@ -324,7 +488,7 @@ export class GitWorktreeManager {
 		try {
 			await this.git(
 				input.coordinatorCwd,
-				["merge", "--no-ff", "--no-commit", input.resultCommit],
+				["merge", "--no-ff", "--no-commit", ...resultCommits],
 				input.signal,
 				{ GIT_MERGE_AUTOEDIT: "no" },
 			);
@@ -381,8 +545,12 @@ export class GitWorktreeManager {
 			);
 			if (
 				conflictingFiles.length > 0 ||
-				(await this.mergeInProgress(input.coordinatorCwd))
+				(await this.mergeInProgress(input.coordinatorCwd)) ||
+				resultCommits.length > 1
 			) {
+				// Preserve the worker result commit, but release the coordinator from
+				// this worker's failed transaction so unrelated results can integrate.
+				await this.abortIntegration(input.coordinatorCwd, headBefore);
 				return { status: "conflict", conflictingFiles };
 			}
 			throw error;
@@ -419,6 +587,29 @@ export class GitWorktreeManager {
 		return parsePorcelainPaths(output);
 	}
 
+	/** Both sides of renames are returned so overlap locks cover every path. */
+	async changedFilesBetween(
+		cwd: string,
+		startingCommit: string,
+		resultCommit: string,
+		signal?: AbortSignal,
+	): Promise<string[]> {
+		const output = await this.git(
+			cwd,
+			[
+				"diff",
+				"--name-only",
+				"--no-renames",
+				"-z",
+				startingCommit,
+				resultCommit,
+				"--",
+			],
+			signal,
+		);
+		return [...new Set(output.split("\0").filter(Boolean))].sort();
+	}
+
 	async conflictingFiles(cwd: string, signal?: AbortSignal): Promise<string[]> {
 		const output = await this.git(
 			cwd,
@@ -428,14 +619,42 @@ export class GitWorktreeManager {
 		return output.split("\0").filter(Boolean).sort();
 	}
 
+	async stagedFiles(cwd: string, signal?: AbortSignal): Promise<string[]> {
+		const output = await this.git(
+			cwd,
+			["diff", "--cached", "--name-only", "--no-renames", "-z", "--"],
+			signal,
+		);
+		return [...new Set(output.split("\0").filter(Boolean))].sort();
+	}
+
 	async mergeInProgress(cwd: string, signal?: AbortSignal): Promise<boolean> {
 		try {
-			await this.git(cwd, ["rev-parse", "--verify", "MERGE_HEAD"], signal);
+			await access(await this.mergeHeadPath(cwd, signal));
 			return true;
 		} catch (error) {
-			if (error instanceof GitCommandError) return false;
+			if (
+				error instanceof GitCommandError ||
+				(error as { code?: string }).code === "ENOENT"
+			) {
+				return false;
+			}
 			throw error;
 		}
+	}
+
+	/** Aborts only a merge containing this worker result in MERGE_HEAD. */
+	async abortWorkerIntegration(
+		cwd: string,
+		resultCommit: string,
+	): Promise<boolean> {
+		if (!(await this.mergeInProgress(cwd))) return false;
+		const mergeHeads = (await readFile(await this.mergeHeadPath(cwd), "utf8"))
+			.split(/\s+/g)
+			.filter(Boolean);
+		if (!mergeHeads.includes(resultCommit)) return false;
+		await this.git(cwd, ["merge", "--abort"]);
+		return true;
 	}
 
 	async isAncestor(
@@ -472,6 +691,38 @@ export class GitWorktreeManager {
 		}
 	}
 
+	/** Deletes one exact worker branch only after its result is retained by HEAD. */
+	async deleteIntegratedWorkerBranch(input: {
+		repositoryRoot: string;
+		coordinatorCwd: string;
+		branch: string;
+		resultCommit: string;
+	}): Promise<boolean> {
+		const ref = `refs/heads/${input.branch}`;
+		let current: string;
+		try {
+			current = (
+				await this.git(input.repositoryRoot, ["rev-parse", "--verify", ref])
+			).trim();
+		} catch (error) {
+			if (error instanceof GitCommandError) return true;
+			throw error;
+		}
+		if (
+			current !== input.resultCommit ||
+			!(await this.isAncestor(input.coordinatorCwd, input.resultCommit))
+		) {
+			return false;
+		}
+		await this.git(input.repositoryRoot, [
+			"update-ref",
+			"-d",
+			ref,
+			input.resultCommit,
+		]);
+		return true;
+	}
+
 	async removeWorktreeIfClean(input: {
 		repositoryRoot: string;
 		coordinatorCwd: string;
@@ -490,7 +741,9 @@ export class GitWorktreeManager {
 			);
 		}
 		if (!(await pathExists(target))) {
-			await this.git(input.repositoryRoot, ["worktree", "prune"]);
+			await withWorktreeRegistryLock(input.repositoryRoot, async () =>
+				this.git(input.repositoryRoot, ["worktree", "prune"]),
+			);
 			return true;
 		}
 		if (input.expectedHead) {
@@ -498,7 +751,9 @@ export class GitWorktreeManager {
 			if (head !== input.expectedHead) return false;
 		}
 		if ((await this.changedFiles(target)).length > 0) return false;
-		await this.git(input.repositoryRoot, ["worktree", "remove", target]);
+		await withWorktreeRegistryLock(input.repositoryRoot, async () =>
+			this.git(input.repositoryRoot, ["worktree", "remove", target]),
+		);
 		return true;
 	}
 
@@ -514,6 +769,70 @@ export class GitWorktreeManager {
 				env: extraEnv ? { ...process.env, ...extraEnv } : undefined,
 			})
 		).stdout;
+	}
+
+	private async mergeHeadPath(
+		cwd: string,
+		signal?: AbortSignal,
+	): Promise<string> {
+		const path = (
+			await this.git(cwd, ["rev-parse", "--git-path", "MERGE_HEAD"], signal)
+		).trim();
+		return isAbsolute(path) ? path : resolve(cwd, path);
+	}
+
+	private async knownThrowawayArtifacts(
+		worktreePath: string,
+		changedFiles: readonly string[],
+		startingCommit: string,
+		signal?: AbortSignal,
+	): Promise<string[]> {
+		const matches = await Promise.all(
+			changedFiles.map(async (path) => {
+				if (
+					!THROWAWAY_ARTIFACT_PATTERNS.some((pattern) =>
+						pattern.test(basename(path)),
+					) ||
+					!(await pathExists(join(worktreePath, path)))
+				) {
+					return undefined;
+				}
+				// Existing tracked files can legitimately have these names. Reject only
+				// throwaway-looking files newly introduced by this worker result.
+				const trackedAtStart = await this.git(
+					worktreePath,
+					["ls-tree", "-z", "--name-only", startingCommit, "--", path],
+					signal,
+				);
+				return trackedAtStart.split("\0").includes(path) ? undefined : path;
+			}),
+		);
+		return matches.filter((path): path is string => path !== undefined).sort();
+	}
+}
+
+async function withWorktreeRegistryLock<T>(
+	repositoryRoot: string,
+	run: () => Promise<T>,
+): Promise<T> {
+	const key = resolve(repositoryRoot);
+	const predecessor = worktreeRegistryTails.get(key) ?? Promise.resolve();
+	let release!: () => void;
+	const ticket = new Promise<void>((resolvePromise) => {
+		release = resolvePromise;
+	});
+	const tail = predecessor.catch(() => {}).then(() => ticket);
+	worktreeRegistryTails.set(key, tail);
+	await predecessor.catch(() => {});
+	try {
+		return await run();
+	} finally {
+		release();
+		void tail.finally(() => {
+			if (worktreeRegistryTails.get(key) === tail) {
+				worktreeRegistryTails.delete(key);
+			}
+		});
 	}
 }
 
@@ -559,6 +878,20 @@ async function pathExists(path: string): Promise<boolean> {
 		return true;
 	} catch (error) {
 		if ((error as { code?: string }).code === "ENOENT") return false;
+		throw error;
+	}
+}
+
+const THROWAWAY_ARTIFACT_PATTERNS = [
+	/^\.?(?:verify|verification|scratch|tmp|temp|test[-_.]?file)(?:[-_.].*)?\.(?:[cm]?[jt]sx?|py|sh|bash|zsh|fish|rb|php|pl|lua|ps1|jsonl?|ya?ml|toml|csv|tsv|txt|log|sql|mdx?|xml|ini|conf|cfg|env|out)$/i,
+	/^\.?backboard[-_.](?:tmp|temp|verify|verification|scratch)(?:[-_.].*)?\.(?:[cm]?[jt]sx?|py|sh|bash|zsh|fish|rb|php|pl|lua|ps1|jsonl?|ya?ml|toml|csv|tsv|txt|log|sql|mdx?|xml|ini|conf|cfg|env|out)$/i,
+];
+
+async function canonicalPath(path: string): Promise<string> {
+	try {
+		return await realpath(path);
+	} catch (error) {
+		if ((error as { code?: string }).code === "ENOENT") return resolve(path);
 		throw error;
 	}
 }

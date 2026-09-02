@@ -9,6 +9,7 @@ import { ThemeIcon } from '../../../../base/common/themables.js';
 import { URI } from '../../../../base/common/uri.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
 import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
+import { IModalEditorOptions, IModalEditorOptionsProvider } from '../../../../platform/editor/common/editor.js';
 import { isDark } from '../../../../platform/theme/common/theme.js';
 import { IThemeService } from '../../../../platform/theme/common/themeService.js';
 import { EditorInputCapabilities, GroupIdentifier, IUntypedEditorInput, Verbosity } from '../../../common/editor.js';
@@ -20,9 +21,10 @@ export interface WebviewInputInitInfo {
 	readonly providedId: string | undefined;
 	readonly name: string;
 	readonly iconPath: WebviewIconPath | undefined;
+	readonly modalOptions?: IModalEditorOptions;
 }
 
-export class WebviewInput extends EditorInput {
+export class WebviewInput extends EditorInput implements IModalEditorOptionsProvider {
 
 	public static typeId = 'workbench.editors.webviewInput';
 
@@ -43,6 +45,7 @@ export class WebviewInput extends EditorInput {
 	private _webviewTitle: string;
 	private _iconPath?: WebviewIconPath;
 	private _group?: GroupIdentifier;
+	private readonly _modalOptions: IModalEditorOptions | undefined;
 
 	private _webview: IOverlayWebview;
 
@@ -70,12 +73,17 @@ export class WebviewInput extends EditorInput {
 
 		this._webviewTitle = init.name;
 		this._iconPath = init.iconPath;
+		this._modalOptions = init.modalOptions;
 		this._webview = webview;
 
 		this._register(_themeService.onDidColorThemeChange(() => {
 			// Potentially update icon
 			this._onDidChangeLabel.fire();
 		}));
+	}
+
+	public getModalEditorOptions(): IModalEditorOptions | undefined {
+		return this._modalOptions;
 	}
 
 	override dispose() {

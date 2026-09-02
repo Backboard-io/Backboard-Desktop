@@ -18,7 +18,7 @@ import { IStorageService, StorageScope } from '../../../../../platform/storage/c
 import { AccessibilityVerbositySettingId } from '../../../accessibility/browser/accessibilityConfiguration.js';
 import { migrateLegacyTerminalToolSpecificData } from '../../common/chat.js';
 import { ChatContextKeys } from '../../common/actions/chatContextKeys.js';
-import { IChatAgentFeedbackReviewConfirmationData, IChatExtensionsContent, IChatModifiedFilesConfirmationData, IChatPullRequestContent, IChatSearchToolInvocationData, IChatSimpleToolInvocationData, IChatSubagentToolInvocationData, IChatTerminalToolInvocationData, IChatTodoListContent, IChatToolInputInvocationData, IChatToolInvocation, IChatToolResourcesInvocationData, ILegacyChatTerminalToolInvocationData, IToolResultOutputDetailsSerialized, isLegacyChatTerminalToolInvocationData } from '../../common/chatService/chatService.js';
+import { IChatAgentFeedbackReviewConfirmationData, IChatCoreToolInvocationData, IChatExtensionsContent, IChatModifiedFilesConfirmationData, IChatMutationToolInvocationData, IChatPullRequestContent, IChatSearchToolInvocationData, IChatSimpleToolInvocationData, IChatSubagentToolInvocationData, IChatTerminalToolInvocationData, IChatTodoListContent, IChatToolInputInvocationData, IChatToolInvocation, IChatToolResourcesInvocationData, ILegacyChatTerminalToolInvocationData, IToolResultOutputDetailsSerialized, isLegacyChatTerminalToolInvocationData } from '../../common/chatService/chatService.js';
 import { isResponseVM } from '../../common/model/chatViewModel.js';
 import { IToolResultInputOutputDetails, IToolResultOutputDetails, isToolResultInputOutputDetails, isToolResultOutputDetails, toolContentToA11yString } from '../../common/tools/languageModelToolsService.js';
 import { ChatTreeItem, IChatWidget, IChatWidgetService } from '../chat.js';
@@ -60,7 +60,7 @@ export class ChatResponseAccessibleView implements IAccessibleViewImplementation
 	}
 }
 
-type ToolSpecificData = IChatTerminalToolInvocationData | ILegacyChatTerminalToolInvocationData | IChatToolInputInvocationData | IChatExtensionsContent | IChatPullRequestContent | IChatTodoListContent | IChatSubagentToolInvocationData | IChatSimpleToolInvocationData | IChatSearchToolInvocationData | IChatToolResourcesInvocationData | IChatModifiedFilesConfirmationData | IChatAgentFeedbackReviewConfirmationData;
+type ToolSpecificData = IChatTerminalToolInvocationData | ILegacyChatTerminalToolInvocationData | IChatToolInputInvocationData | IChatExtensionsContent | IChatPullRequestContent | IChatTodoListContent | IChatSubagentToolInvocationData | IChatSimpleToolInvocationData | IChatSearchToolInvocationData | IChatCoreToolInvocationData | IChatMutationToolInvocationData | IChatToolResourcesInvocationData | IChatModifiedFilesConfirmationData | IChatAgentFeedbackReviewConfirmationData;
 type ResultDetails = Array<URI | Location> | IToolResultInputOutputDetails | IToolResultOutputDetails | IToolResultOutputDetailsSerialized;
 
 export const CHAT_ACCESSIBLE_VIEW_INCLUDE_THINKING_STORAGE_KEY = 'chat.accessibleView.includeThinking';
@@ -141,6 +141,14 @@ export function getToolSpecificDataDescription(toolSpecificData: ToolSpecificDat
 			const inputText = toolSpecificData.input;
 			const outputText = toolSpecificData.output;
 			return localize('simpleToolInvocation', "Input: {0}, Output: {1}", inputText, outputText);
+		}
+		case 'coreTool': {
+			const input = toolSpecificData.input === undefined ? '' : JSON.stringify(toolSpecificData.input);
+			const output = toolSpecificData.output === undefined ? '' : JSON.stringify(toolSpecificData.output);
+			if (input && output) {
+				return localize('coreToolInputOutput', "{0} tool. Input: {1}. Output: {2}", toolSpecificData.toolKind, input, output);
+			}
+			return localize('coreToolDescription', "{0} tool. {1}", toolSpecificData.toolKind, input || output);
 		}
 		case 'modifiedFilesConfirmation': {
 			if (toolSpecificData.modifiedFiles.length === 0) {

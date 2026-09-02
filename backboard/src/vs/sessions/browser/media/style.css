@@ -1315,6 +1315,10 @@
 	padding-bottom: 8px;
 }
 
+.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .interactive-item-container.interactive-request {
+	padding-top: 8px;
+}
+
 /* The composer keeps the same gutters as the transcript above it. */
 .agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .interactive-input-part {
 	padding-left: 32px;
@@ -1535,19 +1539,21 @@
 /* Once a transcript exists, match the right panel's compact reply state. */
 :is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session:not(.chat-composer-empty) .chat-input-container,
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .chat-editor-relative .interactive-session:not(.chat-composer-empty) .chat-input-container {
-	min-height: 58px;
-	padding: 5px 8px;
-	gap: 2px;
-	border-radius: 15px;
+	min-height: var(--bb-simple-sent-composer-min-height, 58px);
+	padding: var(--bb-simple-sent-composer-padding, 5px 8px);
+	gap: var(--bb-simple-sent-composer-gap, 2px);
+	border-radius: var(--bb-simple-sent-composer-radius, 15px);
 }
 
 /* A draft uses the same compact shell as a reply. The full window contributes
  * width, not a separate hero-card height. */
 :is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container,
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .chat-editor-relative .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container {
-	border-radius: 22px;
+	min-height: var(--bb-simple-sent-composer-min-height, 58px);
+	padding: var(--bb-simple-sent-composer-padding, 5px 8px);
+	gap: var(--bb-simple-sent-composer-gap, 2px);
+	border-radius: var(--bb-simple-sent-composer-radius, 15px);
 	box-shadow: none;
-	padding: 10px 12px;
 }
 
 /* The inline edit box inside a sent request shares `.chat-input-container` but
@@ -1557,6 +1563,13 @@
 	border-radius: 12px;
 	box-shadow: none;
 	padding: 0 6px 6px;
+}
+
+/* Editing a sent request still blocks the surrounding transcript and the main
+ * composer, but it should not paint a dark spotlight over them. */
+:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session :is(.chat-row-disabled-overlay.disabled, .chat-input-overlay.disabled) {
+	background-color: transparent;
+	opacity: 1;
 }
 
 /* Room for the taller controls between the editor and the footer row. The

@@ -1,7 +1,11 @@
 import { z } from "zod";
 import type { JSONValue } from "../core/agent/rlm/RLMTypes.ts";
 import type { SubAgentResult } from "../core/agent/SubAgentRunner.ts";
-import type { PermissionDecision } from "../core/permissions/types.ts";
+import { measurePerformance } from "../core/performance/PerformanceTiming.ts";
+import type {
+	PermissionCheckContext,
+	PermissionDecision,
+} from "../core/permissions/types.ts";
 import type { OpenAITool } from "../core/tools/schema.ts";
 import { Tool } from "../core/tools/Tool.ts";
 import type { ToolContext } from "../core/tools/ToolContext.ts";
@@ -129,14 +133,26 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 		return true;
 	}
 
-	// Spawning is orchestration, not a direct effect: the sub-agent inherits the
-	// permission context and its own tool calls are gated individually, so the
-	// spawn itself auto-allows (else a non-interactive sub-agent can't delegate).
-	override checkPermissions(): PermissionDecision | undefined {
-		return {
-			behavior: "allow",
-			reason: "sub-agent tools are gated individually",
-		};
+	override permissionContent(input: AgentToolInput): string {
+		return input.read_only === true || input.subagent_type === "rlm"
+			? "read-only worker"
+			: "write worker";
+	}
+
+	override checkPermissions(
+		input: AgentToolInput,
+		ctx: PermissionCheckContext,
+	): PermissionDecision | undefined {
+		if (input.read_only === true || input.subagent_type === "rlm") {
+			return { behavior: "allow", reason: "read-only sub-agent" };
+		}
+		if (ctx.mode === "acceptEdits" || ctx.mode === "auto") {
+			return {
+				behavior: "allow",
+				reason: `worker edits allowed (${ctx.mode})`,
+			};
+		}
+		return undefined;
 	}
 
 	override async execute(
@@ -197,6 +213,21 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 
 		let result: SubAgentResult;
 		let workspaceRecord: WorkerWorkspaceRecord | undefined;
+		// A workspace manager owns the worker lifecycle even when preparation
+		// rejects before the runner callback is entered (for example a dirty or
+		// non-Git coordinator). Claim the terminal edge up front so detached
+		// AgentSpawn tasks cannot remain visually active forever on that path.
+		const deferredParentEnd = this.deps.workspaceManager !== undefined;
+		let parentEndEmitted = false;
+		const emitParentEnd = (status: string): void => {
+			if (!deferredParentEnd || parentEndEmitted || !ctx.toolCallId) return;
+			parentEndEmitted = true;
+			ctx.bus.emit({
+				type: "agent:child_end",
+				agentToolCallId: ctx.toolCallId,
+				status: terminalTurnStatus(status),
+			});
+		};
 		const workerTrace =
 			trace && traceContext
 				? {
@@ -210,17 +241,19 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 			signal: AbortSignal;
 			isolated: boolean;
 			workspace?: WorkerWorkspaceRecord;
-		}): Promise<SubAgentResult> =>
-			this.deps.runner.run({
+		}): Promise<SubAgentResult> => {
+			return this.deps.runner.run({
 				prompt: options.isolated
 					? rebaseCoordinatorPaths(input.prompt, ctx.cwd, options.cwd)
 					: input.prompt,
 				depth,
 				readOnly: input.read_only === true,
 				parentCwd: options.cwd,
+				permissionCwd: ctx.cwd,
 				parentSignal: options.signal,
 				parentBus: ctx.bus,
 				parentToolCallId: ctx.toolCallId,
+				deferParentEnd: deferredParentEnd,
 				parentTurnId: ctx.turnId,
 				checkpoints: options.isolated ? undefined : ctx.checkpoints,
 				parentPermissions: ctx.permissions,
@@ -230,6 +263,7 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 					? workerProgress(options.workspace)
 					: undefined,
 			});
+		};
 		try {
 			if (this.deps.workspaceManager) {
 				const workerId = ctx.toolCallId ?? `worker-${Date.now().toString(36)}`;
@@ -243,12 +277,19 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 						coordinatorCwd: ctx.cwd,
 						signal: ctx.signal,
 						onProgress: (record) => {
-							if (!ctx.toolCallId || ctx.signal.aborted) return;
+							if (!ctx.toolCallId) return;
+							const terminal = isTerminalWorkerRecord(record);
+							// Once cancelled, suppress noisy progress but preserve durable
+							// terminal authority. Capture/integration can legitimately win a
+							// cancellation race, and the UI must be able to reconcile a row
+							// already marked Cancelled with the integrated result.
+							if (ctx.signal.aborted && !terminal) return;
 							ctx.bus.emit({
 								type: "agent:child_status",
 								agentToolCallId: ctx.toolCallId,
 								workspace: workerProgress(record),
 							});
+							if (ctx.signal.aborted) return;
 							const running =
 								this.deps.workspaceManager
 									?.list()
@@ -261,14 +302,29 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 								ctx.bus.emit({ type: "agent:parallel_status", count: running });
 							}
 						},
+						onTiming: (phase, durationMs) => {
+							ctx.bus.emit({
+								type: "performance:timing",
+								phase,
+								durationMs,
+								toolCallId: ctx.toolCallId,
+								workerId,
+							});
+						},
 					},
 					(workspace) =>
-						run({
-							cwd: workspace.cwd,
-							signal: workspace.signal,
-							isolated: workspace.isolated,
-							workspace: workspace.record,
-						}),
+						measurePerformance(
+							ctx.bus,
+							"worker_model",
+							{ toolCallId: ctx.toolCallId, workerId },
+							() =>
+								run({
+									cwd: workspace.cwd,
+									signal: workspace.signal,
+									isolated: workspace.isolated,
+									workspace: workspace.record,
+								}),
+						),
 				);
 				result = outcome.result;
 				workspaceRecord = outcome.workspace;
@@ -281,6 +337,7 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 			}
 		} catch (err) {
 			await trace?.writeError(err);
+			emitParentEnd(ctx.signal.aborted ? "cancelled" : "failed");
 			if (err instanceof WorkerWorkspaceUnavailableError) {
 				return ok(
 					{
@@ -299,10 +356,8 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 		const progress = workspaceRecord
 			? workerProgress(workspaceRecord)
 			: undefined;
-		const status =
-			workspaceRecord?.integrationStatus === "conflict"
-				? "conflict"
-				: result.status;
+		const status = authoritativeWorkerStatus(result, workspaceRecord);
+		emitParentEnd(status);
 		return ok(
 			{
 				mode: "worker",
@@ -312,7 +367,7 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 				...(progress ? { worker: progress } : {}),
 				...(tracePath ? { tracePath } : {}),
 			},
-			workerReportForLLM(result, workspaceRecord),
+			workerReportForLLM(result, workspaceRecord, status),
 			agentTitle(status, result.toolRounds),
 		);
 	}
@@ -368,10 +423,55 @@ function agentTitle(status: string, rounds: number): string {
 function workerReportForLLM(
 	result: SubAgentResult,
 	workspace?: WorkerWorkspaceRecord,
+	authoritativeStatus: string = result.status,
 ): string {
+	if (workspace?.integrationStatus === "integrated") {
+		const changed = `${workspace.changedFiles.length} ${pluralize(
+			workspace.changedFiles.length,
+			"changed file",
+		)}`;
+		return [
+			`Integration completed successfully: ${changed} from this worker ${workspace.changedFiles.length === 1 ? "is" : "are"} already present in the coordinator workspace at ${workspace.coordinatorCwd}.`,
+			"Do not copy, merge, cherry-pick, re-apply, or read files from the private worker worktree. Any contrary instruction in the worker's own report is obsolete.",
+			`Worker report:\n${result.report}`,
+			"Authoritative status: integrated. Continue only from the coordinator workspace.",
+		].join("\n\n");
+	}
 	const report = workerReport(result, workspace);
-	if (result.status === "completed") return report;
-	return `Error: Agent worker ${result.status} after ${result.toolRounds} rounds: ${report}`;
+	if (authoritativeStatus === "completed") return report;
+	return `Error: Agent worker ${authoritativeStatus} after ${result.toolRounds} rounds: ${report}`;
+}
+
+function authoritativeWorkerStatus(
+	result: SubAgentResult,
+	workspace?: WorkerWorkspaceRecord,
+): string {
+	if (!workspace || workspace.readOnly) return result.status;
+	if (workspace.integrationStatus === "integrated") return "completed";
+	if (workspace.integrationStatus === "conflict") return "conflict";
+	if (
+		workspace.integrationStatus === "pending" ||
+		workspace.integrationStatus === "integrating" ||
+		workspace.integrationStatus === "skipped"
+	) {
+		return "failed";
+	}
+	return result.status;
+}
+
+function isTerminalWorkerRecord(record: WorkerWorkspaceRecord): boolean {
+	return (
+		record.executionStatus !== "creating" &&
+		record.executionStatus !== "running"
+	);
+}
+
+function terminalTurnStatus(
+	status: string,
+): "completed" | "failed" | "cancelled" {
+	if (status === "completed" || status === "integrated") return "completed";
+	if (status === "cancelled") return "cancelled";
+	return "failed";
 }
 
 function workerReport(
@@ -383,13 +483,14 @@ function workerReport(
 		workspace.repositoryInitializedByBackboard
 			? "Git repository initialized automatically"
 			: undefined,
-		workspace.branch ? `Branch: ${workspace.branch}` : undefined,
-		workspace.worktreePath ? `Worktree: ${workspace.worktreePath}` : undefined,
 		`Changed files: ${workspace.changedFiles.length}`,
-		`Integration: ${workspace.integrationStatus}`,
+		workspace.integrationStatus === "integrated"
+			? "Integration: completed in coordinator workspace"
+			: `Integration: ${workspace.integrationStatus}`,
 		workspace.conflictingFiles?.length
 			? `Conflicts: ${workspace.conflictingFiles.join(", ")}`
 			: undefined,
+		workspace.error ? `Error: ${workspace.error}` : undefined,
 	]
 		.filter((line): line is string => line !== undefined)
 		.join("\n");

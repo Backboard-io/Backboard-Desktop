@@ -52,6 +52,7 @@ function operatingPrinciples(): string {
 - Treat a failed tool call as feedback: choose a safer next step and keep working. Do not give up at the first obstacle.
 - Never retry a tool call the user cancelled unless they explicitly ask you to.
 - Do not create or update documentation or README files unless the user specifically asks.
+- Keep ad-hoc verification scripts and other throwaway artifacts out of the project. Prefer inline commands or the operating system's temporary directory; if a workspace file is unavoidable, remove it before finishing.
 - Do not use emojis unless the user asks for them.`;
 }
 

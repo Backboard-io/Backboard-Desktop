@@ -91,6 +91,9 @@ describe("createDefaultTools", () => {
 
 		if (!agent) throw new Error("expected Agent tool");
 		expect(agent.isConcurrencySafe({ prompt: "x" })).toBe(true);
+		expect(tools.map((tool) => tool.agentName)).toEqual(
+			expect.arrayContaining(["agent", "agent_spawn", "agent_wait"]),
+		);
 	});
 
 	it("propagates excluded tools to worker subagents", async () => {
@@ -115,6 +118,12 @@ describe("createDefaultTools", () => {
 		expect(result.data.status).toBe("completed");
 		expect(toolNames(client.messageRequests[0]?.tools ?? [])).not.toContain(
 			"Execute",
+		);
+		expect(toolNames(client.messageRequests[0]?.tools ?? [])).not.toContain(
+			"agent_spawn",
+		);
+		expect(toolNames(client.messageRequests[0]?.tools ?? [])).not.toContain(
+			"agent_wait",
 		);
 	});
 
@@ -170,26 +179,14 @@ describe("createDefaultTools", () => {
 		);
 	});
 
-	it("propagates excluded tools to worker-spawned workers", async () => {
+	it("does not advertise recursive Agent calls inside worker sessions", async () => {
 		const config = new Config({
 			env: TEST_BACKBOARD_ENV,
-			argv: ["--excluded-tools", "Execute"],
+			argv: [],
 		});
 		const client = new FakeClient([
 			{ kind: "thread", threadId: "thr_worker_parent" },
-			{
-				kind: "requires_action",
-				runId: "run_parent",
-				calls: [
-					{
-						id: "call_agent",
-						name: "Agent",
-						input: { prompt: "nested inspect", subagent_type: "worker" },
-					},
-				],
-			},
-			{ kind: "thread", threadId: "thr_worker_child" },
-			{ kind: "assistant_delta", text: "nested report" },
+			{ kind: "assistant_delta", text: "worker report" },
 			{ kind: "completed" },
 		]);
 		const tools = createDefaultTools({
@@ -201,12 +198,15 @@ describe("createDefaultTools", () => {
 		if (!agent) throw new Error("expected Agent tool");
 		await agent.execute({ prompt: "inspect" }, context());
 
-		expect(client.messageRequests).toHaveLength(2);
+		expect(client.messageRequests).toHaveLength(1);
 		expect(toolNames(client.messageRequests[0]?.tools ?? [])).not.toContain(
-			"Execute",
+			"Agent",
 		);
-		expect(toolNames(client.messageRequests[1]?.tools ?? [])).not.toContain(
-			"Execute",
+		expect(toolNames(client.messageRequests[0]?.tools ?? [])).not.toContain(
+			"agent_spawn",
+		);
+		expect(toolNames(client.messageRequests[0]?.tools ?? [])).not.toContain(
+			"agent_wait",
 		);
 	});
 

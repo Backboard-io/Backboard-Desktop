@@ -121,6 +121,79 @@ describe("mapStreamPayloadToEvents", () => {
 		]);
 	});
 
+	it("announces a known tool from raw provider deltas before its arguments finish", () => {
+		const mapper = new BackboardStreamEventMapper(["write", "read"]);
+
+		expect(
+			mapper.map({
+				type: "provider_chunk",
+				choices: [
+					{
+						delta: {
+							tool_calls: [
+								{ index: 0, function: { name: "wr", arguments: '{"path":' } },
+							],
+						},
+					},
+				],
+			}),
+		).toEqual([]);
+
+		const announced = mapper.map({
+			type: "provider_chunk",
+			choices: [
+				{
+					delta: {
+						tool_calls: [
+							{ index: 0, function: { name: "ite", arguments: '"a.ts"' } },
+						],
+					},
+				},
+			],
+		});
+
+		expect(announced).toHaveLength(1);
+		expect(announced[0]).toMatchObject({ kind: "tool_started", name: "write" });
+		if (announced[0]?.kind === "tool_started") {
+			expect(announced[0].id.startsWith("backboard_stream_")).toBe(true);
+		}
+		expect(
+			mapper.map({
+				type: "provider_chunk",
+				choices: [
+					{
+						delta: {
+							tool_calls: [
+								{ index: 0, function: { arguments: ',"content":"large body"}' } },
+							],
+						},
+					},
+				],
+			}),
+		).toEqual([]);
+	});
+
+	it("uses the provider call id when raw tool deltas expose it early", () => {
+		const mapper = new BackboardStreamEventMapper(["Write"]);
+
+		expect(
+			mapper.map({
+				type: "provider_chunk",
+				data: {
+					choices: [
+						{
+							delta: {
+								tool_calls: [
+									{ index: 0, id: "call_real", function: { name: "Write" } },
+								],
+							},
+						},
+					],
+				},
+			}),
+		).toEqual([{ kind: "tool_started", id: "call_real", name: "Write" }]);
+	});
+
 	it("normalizes accumulated content streaming into deltas", () => {
 		const mapper = new BackboardStreamEventMapper();
 

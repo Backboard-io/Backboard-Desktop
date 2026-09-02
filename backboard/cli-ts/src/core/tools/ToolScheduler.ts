@@ -51,6 +51,10 @@ export interface ToolCallRoundOptions {
 
 type SettledOutput = { output: ToolOutput } | { error: unknown };
 
+type ExecutionBatchItem =
+	| { kind: "early"; settled: Promise<SettledOutput> }
+	| { kind: "entry"; entry: ExecutablePlanEntry };
+
 interface EarlyExecution {
 	/** The parsed input the call actually ran with, for reconciliation
 	 * against the authoritative list in finalize(). */
@@ -207,11 +211,29 @@ export class ToolCallRound implements EarlyToolSink {
 		}
 		const outputs: ToolOutput[] = [];
 		this.completedOutputs = outputs;
-		let batch: Array<() => Promise<ToolOutput>> = [];
+		let batch: ExecutionBatchItem[] = [];
 
 		const flushBatch = async (): Promise<void> => {
 			if (batch.length === 0) return;
-			const results = await Promise.allSettled(batch.map((start) => start()));
+			const entries = batch.flatMap((item) =>
+				item.kind === "entry" ? [item.entry] : [],
+			);
+			const entryOutputs =
+				entries.length > 0
+					? this.runTrackedBatch(entries, ctx)
+					: Promise.resolve([]);
+			let entryIndex = 0;
+			const starts = batch.map((item): Promise<ToolOutput> => {
+				if (item.kind === "early") return unwrapSettled(item.settled);
+				const index = entryIndex++;
+				return entryOutputs.then((values) => {
+					const output = values[index];
+					if (!output)
+						throw new Error("Tool batch completed without an output");
+					return output;
+				});
+			});
+			const results = await Promise.allSettled(starts);
 			for (const result of results) {
 				if (result.status === "fulfilled") outputs.push(result.value);
 			}
@@ -228,12 +250,12 @@ export class ToolCallRound implements EarlyToolSink {
 
 			const early = this.takeMatchingEarlyExecution(entry);
 			if (early) {
-				batch.push(() => unwrapSettled(early.settled));
+				batch.push({ kind: "early", settled: early.settled });
 				continue;
 			}
 
 			if (entry.concurrencySafe) {
-				batch.push(() => this.runTracked(entry, ctx));
+				batch.push({ kind: "entry", entry });
 				continue;
 			}
 
@@ -279,6 +301,16 @@ export class ToolCallRound implements EarlyToolSink {
 		return this.invocationRunner.run(entry, ctx).then((output) => {
 			if (epoch === this.epoch) this.settledIds.add(entry.ref.id);
 			return output;
+		});
+	}
+
+	private runTrackedBatch(
+		entries: readonly ExecutablePlanEntry[],
+		ctx: ToolContext,
+	): Promise<ToolOutput[]> {
+		const epoch = this.epoch;
+		return this.invocationRunner.runBatch(entries, ctx, (entry) => {
+			if (epoch === this.epoch) this.settledIds.add(entry.ref.id);
 		});
 	}
 

@@ -97,6 +97,14 @@ describe("model profiles", () => {
 		}
 	});
 
+	it("keeps throwaway verification artifacts out of every prompt profile", () => {
+		for (const profile of ["default", "openai", "anthropic", "glm"] as const) {
+			const prompt = getSystemPrompt({ profile, enabledTools: ["Execute"] });
+			expect(prompt).toMatch(/throwaway artifacts out of the project/i);
+			expect(prompt).toMatch(/remove it before finishing/i);
+		}
+	});
+
 	it("teaches every prompt profile how to integrate with Backboard", () => {
 		for (const profile of ["default", "openai", "anthropic", "glm"] as const) {
 			const prompt = getSystemPrompt({ profile });

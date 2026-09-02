@@ -38,6 +38,14 @@
 	--sessions-codex-surface-border: var(--codex-border-strong);
 	--sessions-codex-muted-foreground: var(--codex-text-secondary);
 	--sessions-panel-divider-color: var(--codex-border);
+	/* The new-task composer and the composer shown after the first send are the
+	 * same control. Keep their compact shell geometry on one token contract so
+	 * the landing page cannot drift back into a separate oversized hero card. */
+	--bb-simple-sent-composer-min-height: 58px;
+	--bb-simple-sent-composer-editor-min-height: 22px;
+	--bb-simple-sent-composer-padding: 6px 12px 10px;
+	--bb-simple-sent-composer-gap: 2px;
+	--bb-simple-sent-composer-radius: 16px;
 	color: var(--codex-text-primary);
 }
 
@@ -809,7 +817,7 @@
 	 * context capped too so the mascot remains perched on the card when the
 	 * Sessions view grows wider than the composer. */
 	max-width: 950px;
-	--new-chat-card-radius: 22px;
+	--new-chat-card-radius: var(--bb-simple-sent-composer-radius);
 	transform: translateY(-24px);
 }
 
@@ -823,10 +831,11 @@
 
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container {
 	height: auto;
-	min-height: 110px;
-	padding: 10px 12px;
-	border: 1px solid color-mix(in srgb, var(--codex-text-primary) 10%, transparent) !important;
-	border-radius: 22px !important;
+	min-height: var(--bb-simple-sent-composer-min-height);
+	padding: var(--bb-simple-sent-composer-padding);
+	gap: var(--bb-simple-sent-composer-gap);
+	border: 1px solid var(--codex-border-strong) !important;
+	border-radius: var(--bb-simple-sent-composer-radius) !important;
 	background: var(--codex-composer) !important;
 	box-shadow: none;
 }
@@ -835,7 +844,7 @@
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .new-chat-composer-stack > .interactive-session .interactive-input-editor,
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .new-chat-composer-stack > .interactive-session .interactive-input-editor .monaco-editor,
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .new-chat-composer-stack > .interactive-session .interactive-input-editor .overflow-guard {
-	min-height: 44px;
+	min-height: var(--bb-simple-sent-composer-editor-min-height);
 }
 
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background,
@@ -946,9 +955,9 @@ html body .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.j
 }
 
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session > .interactive-input-part .chat-input-container {
-	padding: 6px 12px 10px;
+	padding: var(--bb-simple-sent-composer-padding);
 	border: 1px solid var(--codex-border-strong) !important;
-	border-radius: 16px;
+	border-radius: var(--bb-simple-sent-composer-radius);
 	background: var(--codex-composer);
 	box-shadow: 0 1px 2px var(--vscode-widget-shadow);
 }

@@ -2,6 +2,7 @@ import {
 	createRuntimeThinkingResolver,
 	resolveRuntimeThinking,
 } from "../config/thinkingRuntime.ts";
+import { AgentTaskManager } from "../core/agent/AgentTaskManager.ts";
 import { LocalReplExecutor } from "../core/agent/rlm/LocalReplExecutor.ts";
 import { RLMLoop } from "../core/agent/rlm/RLMLoop.ts";
 import { SubAgentRunner } from "../core/agent/SubAgentRunner.ts";
@@ -9,6 +10,7 @@ import { ClientProxyTool } from "../core/tools/ClientToolBridge.ts";
 import type { Tool } from "../core/tools/Tool.ts";
 import { ToolRegistry } from "../core/tools/ToolRegistry.ts";
 import { subagent as subagentPrompt } from "../prompts/system/subagent.tsx";
+import { AgentSpawnTool } from "./AgentSpawnTool.tsx";
 import { AgentTool } from "./AgentTool.tsx";
 import {
 	DEFAULT_AGENT_MAX_DEPTH,
@@ -16,6 +18,7 @@ import {
 	READ_ONLY_AGENT_TOOLS,
 } from "./AgentToolConstants.ts";
 import type { DefaultToolDeps } from "./AgentToolTypes.ts";
+import { AgentWaitTool } from "./AgentWaitTool.tsx";
 import { ApplyPatchTool } from "./ApplyPatchTool.tsx";
 import { AskUserTool } from "./AskUserTool.tsx";
 import { BrowserTool } from "./BrowserTool.tsx";
@@ -58,7 +61,14 @@ function createBaseTools(): Tool[] {
 export function createDefaultTools(deps?: DefaultToolDeps): Tool[] {
 	const base = createBaseTools();
 	if (!deps) return base;
-	const tools: Tool[] = [...base, buildAgentTool(deps, base)];
+	const agent = buildAgentTool(deps, base);
+	const agentTasks = deps.agentTaskManager ?? new AgentTaskManager();
+	const tools: Tool[] = [
+		...base,
+		agent,
+		new AgentSpawnTool(agent, agentTasks),
+		new AgentWaitTool(agentTasks),
+	];
 	if (deps.skillController) {
 		tools.push(new FindSkillTool(deps.skillController));
 	}
@@ -69,11 +79,10 @@ export function createDefaultTools(deps?: DefaultToolDeps): Tool[] {
 }
 
 function buildAgentTool(deps: DefaultToolDeps, base: Tool[]): AgentTool {
-	const holder: { tool?: AgentTool } = {};
-
 	const runner = new SubAgentRunner({
 		client: deps.client,
 		getModel: () => deps.config.model,
+		getOpenRouterProvider: () => deps.config.selectedOpenRouterProvider,
 		memory: deps.config.memory,
 		memoryProfile: deps.config.memoryProfile,
 		getThinking: () => resolveRuntimeThinking(deps.config, deps.client),
@@ -82,9 +91,7 @@ function buildAgentTool(deps: DefaultToolDeps, base: Tool[]): AgentTool {
 		systemPrompt: subagentPrompt.prompt,
 		toolFactory: ({ readOnly }) => {
 			const tools: Tool[] = [];
-			const availableTools = (deps.getTools?.() ?? base).filter(
-				(tool) => tool !== holder.tool,
-			);
+			const availableTools = deps.getTools?.() ?? base;
 			const registry = new ToolRegistry([...availableTools]);
 			const workerBaseTools = deps.config.toolPolicy.visibleTools(registry);
 			for (const tool of workerBaseTools) {
@@ -94,13 +101,6 @@ function buildAgentTool(deps: DefaultToolDeps, base: Tool[]): AgentTool {
 				if (tool instanceof ClientProxyTool) continue;
 				if (readOnly && !READ_ONLY_AGENT_TOOLS.has(tool.agentName)) continue;
 				tools.push(tool);
-			}
-			if (
-				!readOnly &&
-				holder.tool &&
-				deps.config.isToolEnabled(holder.tool.agentName)
-			) {
-				tools.push(holder.tool);
 			}
 			return tools;
 		},
@@ -121,6 +121,5 @@ function buildAgentTool(deps: DefaultToolDeps, base: Tool[]): AgentTool {
 				executor: new LocalReplExecutor(),
 			}),
 	});
-	holder.tool = agent;
 	return agent;
 }

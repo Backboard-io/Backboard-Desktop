@@ -15,7 +15,7 @@ import { IInstantiationService } from '../../instantiation/common/instantiation.
 import { IConfigurationService } from '../../configuration/common/configuration.js';
 import { IEnvironmentService } from '../../environment/common/environment.js';
 import { ILogService } from '../../log/common/log.js';
-import { AgentHostAhpJsonlLoggingSettingId, AgentHostIpcChannels, IAgentCreateSessionConfig, IAgentHostInspectInfo, IAgentHostService, IAgentResolveSessionConfigParams, IAgentService, IAgentSessionConfigCompletionsParams, IAgentSessionMetadata, AuthenticateParams, AuthenticateResult, IAgentHostSocketInfo, IConnectionTrackerService, isAgentHostEnabled, IMcpNotification } from '../common/agentService.js';
+import { AgentHostAhpJsonlLoggingSettingId, AgentHostIpcChannels, IAgentCommandParams, IAgentCommandResult, IAgentCreateSessionConfig, IAgentHostInspectInfo, IAgentHostService, IAgentResolveSessionConfigParams, IAgentService, IAgentSessionConfigCompletionsParams, IAgentSessionMetadata, AuthenticateParams, AuthenticateResult, IAgentHostSocketInfo, IConnectionTrackerService, isAgentHostEnabled, IMcpNotification } from '../common/agentService.js';
 import { AhpJsonlLogger } from '../common/ahpJsonlLogger.js';
 import { wrapAgentServiceWithAhpLogging } from './localAhpJsonlLogging.js';
 import { AgentSubscriptionManager, type IActiveSubscriptionInfo, type IAgentSubscription } from '../common/state/agentSubscription.js';
@@ -225,6 +225,12 @@ export class LocalAgentHostServiceClient extends Disposable implements IAgentHos
 
 	authenticate(params: AuthenticateParams): Promise<AuthenticateResult> {
 		return this._proxy.authenticate(params);
+	}
+	executeAgentCommand(params: IAgentCommandParams): Promise<IAgentCommandResult> {
+		if (!this._proxy.executeAgentCommand) {
+			return Promise.reject(new Error('The local agent host does not support provider commands.'));
+		}
+		return this._proxy.executeAgentCommand(params);
 	}
 	listSessions(): Promise<IAgentSessionMetadata[]> {
 		return this._proxy.listSessions();

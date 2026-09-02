@@ -131,6 +131,7 @@ function providerIconForSessionType(sessionType: string): ThemeIcon | undefined 
 interface ISessionProviderPresentation {
 	readonly icon: ThemeIcon;
 	readonly label: string;
+	readonly showInSimple?: boolean;
 }
 
 /**
@@ -147,7 +148,7 @@ function providerPresentationForSession(session: ISession, sessionsProvidersServ
 		return { icon: Codicon.openai, label: localize('sessionProvider.openAI', "OpenAI") };
 	}
 	if (sessionType === 'local' || sessionType.includes('backboard') || sessionType.includes('copilot')) {
-		return { icon: ThemeIcon.fromId('backboard-logo'), label: localize('sessionProvider.backboard', "Backboard") };
+		return { icon: ThemeIcon.fromId('backboard-logo'), label: localize('sessionProvider.backboard', "Backboard"), showInSimple: false };
 	}
 
 	const provider = sessionsProvidersService.getProvider(session.providerId);
@@ -534,9 +535,15 @@ class SessionItemRenderer implements ITreeRenderer<SessionListItem, FuzzyScore, 
 		const providerPresentation = providerPresentationForSession(element, this.sessionsProvidersService);
 		template.simpleAgentIcon.className = `session-simple-agent-icon ${ThemeIcon.asClassName(providerPresentation.icon)}`;
 		template.simpleAgentLabel.textContent = providerPresentation.label;
-		template.simpleProvider.classList.toggle('hidden', !this.options.simpleMode);
-		template.simpleProvider.title = localize('sessionProvider.tooltip', "Provider: {0}", providerPresentation.label);
-		template.simpleProvider.setAttribute('aria-label', template.simpleProvider.title);
+		const showSimpleProvider = this.options.simpleMode && providerPresentation.showInSimple !== false;
+		template.simpleProvider.classList.toggle('hidden', !showSimpleProvider);
+		if (showSimpleProvider) {
+			template.simpleProvider.title = localize('sessionProvider.tooltip', "Provider: {0}", providerPresentation.label);
+			template.simpleProvider.setAttribute('aria-label', template.simpleProvider.title);
+		} else {
+			template.simpleProvider.removeAttribute('title');
+			template.simpleProvider.removeAttribute('aria-label');
+		}
 		const branchName = workspace?.folders[0]?.gitRepository?.branchName?.trim();
 		template.simpleBranch.textContent = this.options.simpleMode && !simpleSettled ? branchName ?? '' : '';
 		template.simpleBranch.classList.toggle('no-branch', !branchName || simpleSettled);

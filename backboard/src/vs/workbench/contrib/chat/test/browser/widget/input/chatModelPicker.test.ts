@@ -14,6 +14,7 @@ import { GalleryMcpServerStatus, IGalleryMcpServer } from '../../../../../../../
 import { McpServerType } from '../../../../../../../platform/mcp/common/mcpPlatformTypes.js';
 import { StateType } from '../../../../../../../platform/update/common/update.js';
 import { buildModelPickerItems, getControlModelsForEntitlement, getModelPickerAccessibilityProvider } from '../../../../browser/widget/input/chatModelPicker.js';
+import { buildCombinedModelSections, COMBINED_MODEL_SECTION_CHATGPT, COMBINED_MODEL_SECTION_CLAUDE, COMBINED_MODEL_SECTION_RECOMMENDED, formatModelLabel, formatModelProviderDetail, isChatGptSubscriptionConnected, isClaudeSubscriptionConnected, modelsForCombinedModelSection, providerIconKeyForCombinedModelSection } from '../../../../browser/widget/input/combinedModelProviderPickerActionItem.js';
 import { buildMcpMarketplaceItems, buildSkillsLibraryItems, createMcpMarketplaceItemsFromCatalog, getHiddenMcpMarketplaceCatalogEntries, IMcpMarketplaceCatalogEntry, mcpItemMatchesInstalledServer, McpMarketplaceModalItem, resolveMcpMarketplaceItems, parseSkillsShHtml, splitSkillsShId } from '../../../../browser/widget/input/skillsLibrary.js';
 import { IModelPickerSetupCandidate } from '../../../../browser/widget/input/modelPickerActionItem.js';
 import { filterModelsForSession } from '../../../../browser/widget/input/chatModelSelectionLogic.js';
@@ -54,6 +55,104 @@ function createModel(id: string, name: string, vendor = 'copilot'): ILanguageMod
 function createAutoModel(): ILanguageModelChatMetadataAndIdentifier {
 	return createModel('auto', 'Auto', 'copilot');
 }
+
+suite('combined model provider sections', () => {
+
+	ensureNoDisposablesAreLeakedInTestSuite();
+
+	test('preserves canonical GPT family names', () => {
+		assert.strictEqual(formatModelLabel('gpt-5.6-sol'), 'GPT-5.6 Sol');
+		assert.strictEqual(formatModelLabel('GPT-5.6 Terra'), 'GPT-5.6 Terra');
+		assert.strictEqual(formatModelLabel('openai-subscription/gpt-5.4-mini'), 'GPT-5.4 Mini');
+		assert.strictEqual(formatModelLabel('gpt-4o'), 'GPT-4o');
+	});
+
+	test('maps catalog providers to their branded icons', () => {
+		assert.strictEqual(providerIconKeyForCombinedModelSection(COMBINED_MODEL_SECTION_RECOMMENDED), 'backboard');
+		assert.strictEqual(providerIconKeyForCombinedModelSection(COMBINED_MODEL_SECTION_CHATGPT), 'open-ai');
+		assert.strictEqual(providerIconKeyForCombinedModelSection(COMBINED_MODEL_SECTION_CLAUDE), 'claude');
+		assert.strictEqual(providerIconKeyForCombinedModelSection('provider:anthropic'), 'anthropic');
+		assert.strictEqual(providerIconKeyForCombinedModelSection('provider:aws-bedrock'), 'bedrock');
+		assert.strictEqual(providerIconKeyForCombinedModelSection('provider:cerebras'), 'cerebras');
+		assert.strictEqual(providerIconKeyForCombinedModelSection('provider:cohere'), 'cohere');
+		assert.strictEqual(providerIconKeyForCombinedModelSection('provider:google'), 'google');
+		assert.strictEqual(providerIconKeyForCombinedModelSection('provider:openai'), 'open-ai');
+		assert.strictEqual(providerIconKeyForCombinedModelSection('provider:openrouter'), 'open-router');
+		assert.strictEqual(providerIconKeyForCombinedModelSection('provider:xai'), 'x-ai');
+	});
+
+	test('removes redundant Anthropic model prefixes', () => {
+		assert.strictEqual(formatModelLabel('anthropic.claude-opus-5'), 'Claude Opus 5');
+		assert.strictEqual(formatModelLabel('us.anthropic.claude-sonnet-4-6'), 'Claude Sonnet 4.6');
+	});
+
+	test('uses the API-supplied serving-provider detail for OpenRouter models', () => {
+		const openRouterModel = {
+			...createModel('openrouter/z-ai/glm-4.7', 'z-ai/glm-4.7', 'agent-host-backboard'),
+			metadata: {
+				...createModel('openrouter/z-ai/glm-4.7', 'z-ai/glm-4.7', 'agent-host-backboard').metadata,
+				detail: 'OpenRouter · 5 providers',
+			},
+		};
+		assert.strictEqual(formatModelProviderDetail(openRouterModel), 'OpenRouter · 5 providers');
+		assert.strictEqual(formatModelProviderDetail(openRouterModel, 'DeepInfra'), 'OpenRouter · DeepInfra');
+	});
+
+	test('keeps ChatGPT subscription models in a dedicated section', () => {
+		const chatGpt = {
+			...createModel('openai-subscription/gpt-5.6-sol', 'GPT-5.6 Sol', 'agent-host-backboard'),
+			metadata: {
+				...createModel('openai-subscription/gpt-5.6-sol', 'GPT-5.6 Sol', 'agent-host-backboard').metadata,
+				detail: 'OpenAI (ChatGPT Subscription)',
+				auth: { providerLabel: 'ChatGPT', accountLabel: 'Connected' },
+			},
+		};
+		const models = [
+			chatGpt,
+			{ ...createModel('anthropic/claude-fable-5', 'Claude Fable 5', 'agent-host-backboard'), metadata: { ...createModel('anthropic/claude-fable-5', 'Claude Fable 5', 'agent-host-backboard').metadata, detail: 'Anthropic' } },
+			{ ...createModel('openai/gpt-5.6-sol', 'GPT-5.6 Sol', 'agent-host-backboard'), metadata: { ...createModel('openai/gpt-5.6-sol', 'GPT-5.6 Sol', 'agent-host-backboard').metadata, detail: 'OpenAI' } },
+		];
+
+		const sections = buildCombinedModelSections(models);
+		const chatGptSection = sections.find(section => section.id === COMBINED_MODEL_SECTION_CHATGPT);
+
+		assert.deepStrictEqual(chatGptSection, { id: COMBINED_MODEL_SECTION_CHATGPT, label: 'ChatGPT', modelCount: 1, kind: 'subscription' });
+		assert.strictEqual(sections.filter(section => section.label === 'OpenAI (ChatGPT Subscription)').length, 0);
+		assert.deepStrictEqual(modelsForCombinedModelSection(models, COMBINED_MODEL_SECTION_CHATGPT), [chatGpt]);
+		assert.strictEqual(isChatGptSubscriptionConnected(models), true);
+	});
+
+	test('keeps Claude subscription models separate from Anthropic API models', () => {
+		const claude = {
+			...createModel('anthropic-subscription/sonnet', 'Claude Sonnet', 'agent-host-backboard'),
+			metadata: {
+				...createModel('anthropic-subscription/sonnet', 'Claude Sonnet', 'agent-host-backboard').metadata,
+				detail: 'Anthropic (Claude Subscription)',
+				auth: { providerLabel: 'Claude', accountLabel: 'Connected' },
+			},
+		};
+		const anthropic = {
+			...createModel('anthropic/claude-sonnet-5', 'Claude Sonnet 5', 'agent-host-backboard'),
+			metadata: {
+				...createModel('anthropic/claude-sonnet-5', 'Claude Sonnet 5', 'agent-host-backboard').metadata,
+				detail: 'Anthropic',
+			},
+		};
+		const models = [claude, anthropic];
+
+		const sections = buildCombinedModelSections(models);
+
+		assert.deepStrictEqual(sections.find(section => section.id === COMBINED_MODEL_SECTION_CLAUDE), {
+			id: COMBINED_MODEL_SECTION_CLAUDE,
+			label: 'Claude',
+			modelCount: 1,
+			kind: 'subscription',
+		});
+		assert.deepStrictEqual(modelsForCombinedModelSection(models, COMBINED_MODEL_SECTION_CLAUDE), [claude]);
+		assert.strictEqual(formatModelProviderDetail(claude), 'Claude subscription');
+		assert.strictEqual(isClaudeSubscriptionConnected(models), true);
+	});
+});
 
 function getActionItems(items: IActionListItem<IActionWidgetDropdownAction>[]): IActionListItem<IActionWidgetDropdownAction>[] {
 	return items.filter(i => i.kind === ActionListItemKind.Action);

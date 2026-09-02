@@ -5,7 +5,7 @@ export interface ThinkingProfile {
 	readonly id: string;
 	readonly fields: readonly ThinkingRequestField[];
 	readonly budgetPolicyId?: BudgetPolicyId;
-	readonly maxEffort?: Exclude<ThinkingLevel, "max">;
+	readonly maxEffort?: ThinkingLevel;
 	readonly nativeAdaptive?: boolean;
 }
 

@@ -4,8 +4,11 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
-import { detectCliTsExecutableArchitecture } from '../../node/cliTs/cliTsProcess.js';
+import { cliTsInvocationFingerprint, detectCliTsExecutableArchitecture } from '../../node/cliTs/cliTsProcess.js';
 
 suite('cli-ts process', () => {
 
@@ -59,5 +62,19 @@ suite('cli-ts process', () => {
 
 	test('leaves scripts and unknown executable formats to the normal spawn path', () => {
 		assert.strictEqual(detectCliTsExecutableArchitecture(Buffer.from('#!/bin/sh\n'), 'darwin'), undefined);
+	});
+
+	test('detects a rebuilt cli executable at the same path', () => {
+		const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-ts-fingerprint-'));
+		const executable = path.join(directory, 'backboard-cli-ts');
+		try {
+			fs.writeFileSync(executable, 'old');
+			const before = cliTsInvocationFingerprint({ command: executable, args: [] });
+			fs.writeFileSync(executable, 'new-build');
+			const after = cliTsInvocationFingerprint({ command: executable, args: [] });
+			assert.notStrictEqual(after, before);
+		} finally {
+			fs.rmSync(directory, { recursive: true, force: true });
+		}
 	});
 });
