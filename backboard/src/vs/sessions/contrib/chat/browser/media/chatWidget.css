@@ -208,9 +208,13 @@
 
 .new-chat-octopus {
 	position: absolute;
-	/* Perch outside the card, just left of its right edge. */
-	right: 128px;
-	top: -36px;
+	/* Stand on the card's top edge, near its right corner. The host is
+	 * re-parented by NewChatWidget into the card's own wrapper
+	 * (.interactive-input-and-side-toolbar), so anchoring to its bottom edge
+	 * tracks the visible composer instead of the invisible stack spacing above
+	 * it; the 2px overlap plants the tentacles on the card's border. */
+	right: 40px;
+	bottom: calc(100% - 2px);
 	line-height: 0;
 	pointer-events: none;
 	z-index: 3;
@@ -218,7 +222,7 @@
 
 .new-chat-octopus .octo-sprite {
 	/* 24x20 canvas at 2px per sprite pixel (the head is 16x9; the padding
-	 * columns and top rows host the giant flip-off fist and finger). */
+	 * columns and top rows host the sleep Z's and the raised flip finger). */
 	width: 48px;
 	height: 40px;
 	shape-rendering: crispEdges;

@@ -12,6 +12,13 @@
 	left: 0;
 	/* z-index for modal editors: above titlebar (2500) but below quick input (2550) and dialogs (2575) */
 	z-index: 2540;
+	/* The modal block spans the entire window and visually covers the titlebar
+	 * and header drag regions. Electron computes the native window drag region
+	 * from `-webkit-app-region` values and ignores stacking, so without an
+	 * explicit no-drag here those regions keep capturing the mouse across the
+	 * whole modal — including webview content such as the usage page's "Back
+	 * to app" button, which then drags the window instead of receiving clicks. */
+	-webkit-app-region: no-drag;
 	/* Never allow content to escape above the title bar */
 	overflow: hidden;
 	background: rgba(0, 0, 0, 0.5);

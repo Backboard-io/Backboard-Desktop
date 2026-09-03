@@ -3,14 +3,17 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { asCSSUrl } from '../../../../base/browser/cssValue.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { KeyCode, KeyMod } from '../../../../base/common/keyCodes.js';
+import { Disposable } from '../../../../base/common/lifecycle.js';
+import { URI } from '../../../../base/common/uri.js';
 import { ServicesAccessor } from '../../../../editor/browser/editorExtensions.js';
 import { localize, localize2 } from '../../../../nls.js';
 import { Action2, registerAction2 } from '../../../../platform/actions/common/actions.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { ConfigurationScope, Extensions as ConfigurationExtensions, IConfigurationRegistry } from '../../../../platform/configuration/common/configurationRegistry.js';
-import { registerWorkbenchContribution2, WorkbenchPhase } from '../../../../workbench/common/contributions.js';
+import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../../workbench/common/contributions.js';
 import { ISessionsService } from '../../../services/sessions/browser/sessionsService.js';
 import { BranchChatSessionAction } from './branchChatSessionAction.js';
 import { RunScriptContribution } from './runScriptAction.js';
@@ -141,10 +144,59 @@ class ClearSimpleModeBackgroundImageAction extends Action2 {
 registerAction2(ChooseSimpleModeBackgroundImageAction);
 registerAction2(ClearSimpleModeBackgroundImageAction);
 
+/**
+ * Applies the Simple mode background image at the workbench level instead of
+ * leaving it to whichever chat view happens to be alive. Session views are
+ * created, replaced, and rebound while the user interacts (draft graduation,
+ * session switches, grid reconciliation), so per-view application could miss
+ * an update whenever no rendered view was subscribed at that moment — the
+ * picker accepted a file but the canvas never changed. The workbench root is
+ * always present, so the marker class and the image URL are owned here; the
+ * new-task canvas only advertises its own transparency hook.
+ */
+class SimpleModeBackgroundWorkbenchContribution extends Disposable implements IWorkbenchContribution {
+
+	static readonly ID = 'workbench.contrib.simpleModeBackground';
+
+	constructor(
+		@ISimpleModeBackgroundService private readonly simpleModeBackgroundService: ISimpleModeBackgroundService,
+	) {
+		super();
+
+		this.applyBackground(this.simpleModeBackgroundService.backgroundImage);
+		this._register(this.simpleModeBackgroundService.onDidChangeBackgroundImage(resource => this.applyBackground(resource)));
+	}
+
+	private applyBackground(resource: URI | undefined): void {
+		// This contribution also registers in non-sessions windows, and it can
+		// run before the sessions workbench has rendered; only the sessions
+		// workbench paints the image, so resolve the root lazily.
+		const workbench = document.querySelector<HTMLElement>('.monaco-workbench.agent-sessions-workbench');
+		if (!workbench) {
+			return;
+		}
+
+		workbench.classList.toggle('sessions-chat-custom-background', !!resource);
+		if (resource) {
+			// Make every accepted picker result a distinct CSS value so a cached
+			// image is repainted when it is selected again.
+			const versionedResource = resource.with({ fragment: `backboard-background-${this.simpleModeBackgroundService.backgroundImageRevision}` });
+			workbench.style.setProperty('--new-chat-background-image', asCSSUrl(versionedResource));
+		} else {
+			workbench.style.removeProperty('--new-chat-background-image');
+		}
+	}
+}
+
 // register actions
 registerAction2(BranchChatSessionAction);
 
 // register workbench contributions
+// BlockRestore is the earliest phase that runs after the sessions workbench
+// has rendered (BlockStartup precedes `renderWorkbench`), so the persisted
+// image lands without waiting for idle and without missing the first paint by
+// much.
+registerWorkbenchContribution2(SimpleModeBackgroundWorkbenchContribution.ID, SimpleModeBackgroundWorkbenchContribution, WorkbenchPhase.BlockRestore);
 registerWorkbenchContribution2(RunScriptContribution.ID, RunScriptContribution, WorkbenchPhase.AfterRestored);
 registerWorkbenchContribution2(SessionsOpenerParticipantContribution.ID, SessionsOpenerParticipantContribution, WorkbenchPhase.BlockStartup);
 registerWorkbenchContribution2(RegisterDefaultSessionTaskRunnersContribution.ID, RegisterDefaultSessionTaskRunnersContribution, WorkbenchPhase.BlockStartup);

@@ -4,7 +4,6 @@
  *--------------------------------------------------------------------------------------------*/
 
 import './media/chatWidget.css';
-import { asCSSUrl } from '../../../../base/browser/cssValue.js';
 import * as dom from '../../../../base/browser/dom.js';
 import { renderIcon } from '../../../../base/browser/ui/iconLabel/iconLabels.js';
 import { CancellationTokenSource } from '../../../../base/common/cancellation.js';
@@ -280,9 +279,9 @@ export class NewChatWidget extends Disposable {
 	private readonly _loadCts = this._register(new MutableDisposable<CancellationTokenSource>());
 	private _currentChatResource: URI | undefined;
 	private _chatWidgetContent: HTMLElement | undefined;
-	private _backgroundVariableHost: HTMLElement | undefined;
 	private _composerStackElement: HTMLElement | undefined;
 	private _composerWorkspaceRowElement: HTMLElement | undefined;
+	private _octopusElement: HTMLElement | undefined;
 	/** Set once the composer has seeded (or confirmed) a default workspace so it never re-seeds after an explicit clear. See {@link _ensureComposerHasWorkspace}. */
 	private _defaultWorkspaceHandled = false;
 	/**
@@ -498,19 +497,19 @@ export class NewChatWidget extends Disposable {
 		const chatWidgetContainer = dom.append(element, dom.$('.new-chat-widget-container'));
 		const chatWidgetContent = dom.append(chatWidgetContainer, dom.$('.new-chat-widget-content'));
 		this._chatWidgetContent = chatWidgetContent;
-		this._backgroundVariableHost = chatWidgetContent.closest<HTMLElement>('.monaco-workbench') ?? chatWidgetContent.ownerDocument.documentElement;
 		this._applyBackgroundImage(this.simpleModeBackgroundService.backgroundImage);
 
 		this._renderMiddleSection(chatWidgetContent);
 		const composerStack = dom.append(chatWidgetContent, dom.$('.new-chat-composer-stack'));
 		this._composerStackElement = composerStack;
-		this._renderPixelOctopus(composerStack);
+		this._octopusElement = this._renderPixelOctopus(composerStack);
 		// The workspace picker trigger lives inside the middle heading (the
 		// heading is the dropdown), so the composer workspace row is only needed
 		// on web as a host for the no-agent-host empty state.
 		const emptyStateContainer = isWeb ? this._renderComposerWorkspaceRow(composerStack) : undefined;
 		this._widget.render(composerStack);
 		this._placeWorkspaceRowBelowInput(composerStack);
+		this._perchOctopusOnComposer(composerStack);
 		// On web (vscode.dev / insiders.vscode.dev) the workspace picker is
 		// scoped to the currently selected agent host. When no hosts are
 		// known there is nothing for the user to pick, so swap the picker
@@ -543,20 +542,15 @@ export class NewChatWidget extends Disposable {
 		chatWidgetContainer.classList.add('revealed');
 	}
 
+	/**
+	 * Hooks this new-task canvas into the workbench-level background. The image
+	 * URL and the workbench marker class are applied by the Simple mode
+	 * background contribution on the workbench root, which is always alive —
+	 * this node only advertises that the transparency chain should reveal the
+	 * image underneath the new-task canvas while it is rendered.
+	 */
 	private _applyBackgroundImage(resource: URI | undefined): void {
-		if (!this._chatWidgetContent) {
-			return;
-		}
-
-		this._chatWidgetContent.classList.toggle('has-custom-background', !!resource);
-		if (resource) {
-			// The fragment changes with each selection so Chromium repaints even if
-			// the user re-selects a file that was already cached as the background.
-			const versionedResource = resource.with({ fragment: `backboard-background-${this.simpleModeBackgroundService.backgroundImageRevision}` });
-			this._backgroundVariableHost?.style.setProperty('--new-chat-background-image', asCSSUrl(versionedResource));
-		} else {
-			this._backgroundVariableHost?.style.removeProperty('--new-chat-background-image');
-		}
+		this._chatWidgetContent?.classList.toggle('has-custom-background', !!resource);
 	}
 
 	private _renderHeaderBreadcrumb(container: HTMLElement): void {
@@ -759,6 +753,21 @@ export class NewChatWidget extends Disposable {
 		}
 	}
 
+	/**
+	 * Moves the octopus mascot into the composer card's immediate wrapper
+	 * (`.interactive-input-and-side-toolbar`) so its `bottom: 100%` anchoring
+	 * hugs the visible card. The input part stacks several zero-height widget
+	 * containers above the card; anchoring the mascot to the outer stack would
+	 * leave a visible gap between mascot and composer.
+	 */
+	private _perchOctopusOnComposer(composerStack: HTMLElement): void {
+		const octopus = this._octopusElement;
+		const anchor = composerStack.querySelector('.interactive-input-and-side-toolbar');
+		if (octopus && anchor) {
+			anchor.appendChild(octopus);
+		}
+	}
+
 	private _renderMiddleSection(container: HTMLElement): void {
 		// Prefer the part-provided header slot so the workspace controls sit in
 		// the sessions header row — the same spot the session's own toolbar takes
@@ -796,7 +805,7 @@ export class NewChatWidget extends Disposable {
 	 * merged into horizontal run rects to keep the node count low and
 	 * avoid hairline seams when the sprite scales.
 	 */
-	private _renderPixelOctopus(container: HTMLElement): void {
+	private _renderPixelOctopus(container: HTMLElement): HTMLElement {
 		const host = dom.append(container, dom.$('.new-chat-octopus'));
 		host.setAttribute('aria-hidden', 'true');
 		const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -847,6 +856,7 @@ export class NewChatWidget extends Disposable {
 		appendFrame('octo-flip-waggle', OCTOPUS_FLIP_WAGGLE, OCTOPUS_FLIP_ROW, OCTOPUS_CANVAS_PAD);
 		appendFrame('octo-eyelids', OCTOPUS_EYELIDS, OCTOPUS_ROW_PAD + OCTOPUS_EYE_ROW, OCTOPUS_CANVAS_PAD);
 		host.appendChild(svg);
+		return host;
 	}
 
 	/**

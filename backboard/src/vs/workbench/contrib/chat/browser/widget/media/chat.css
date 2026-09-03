@@ -6004,8 +6004,8 @@ have to be updated for changes to the rules above, or to support more deeply nes
 }
 
 .monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-group-chevron {
-	font-size: 11px;
-	opacity: 0.7;
+	font-size: 12px;
+	opacity: 0.72;
 }
 
 /* T3 Code work log, ported from its MIT-licensed MessagesTimeline. A run of
@@ -6082,13 +6082,13 @@ have to be updated for changes to the rules above, or to support more deeply nes
 
 .monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group > .chat-thinking-group-header > .chat-thinking-group-chevron {
 	display: inline-flex;
-	width: 20px;
+	width: 16px;
 	height: 20px;
-	flex: 0 0 20px;
+	flex: 0 0 16px;
 	align-items: center;
 	justify-content: center;
-	font-size: 14px;
-	opacity: 0.7;
+	font-size: 12px;
+	opacity: 0.72;
 }
 
 /* Each work entry is T3's 12px one-line row: a 20px tool glyph, a truncating
@@ -6204,13 +6204,15 @@ have to be updated for changes to the rules above, or to support more deeply nes
 .monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-used-context-label .chat-collapsible-hover-chevron {
 	order: 2;
 	display: inline-flex;
+	box-sizing: border-box;
 	width: 16px;
 	height: 20px;
-	margin-left: auto;
+	flex: 0 0 16px;
+	margin: 0 0 0 auto;
 	align-items: center;
 	justify-content: center;
 	font-size: 12px;
-	opacity: 0.7;
+	opacity: 0.72;
 }
 
 /* Expanded tool details use T3's quiet left rail and selectable 11px mono
@@ -6968,8 +6970,8 @@ have to be updated for changes to the rules above, or to support more deeply nes
 }
 
 .monaco-workbench .backboard-clean-chat .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button {
-	display: inline-flex;
-	width: auto;
+	display: flex;
+	width: 100%;
 	min-height: 20px;
 	align-items: center;
 	gap: 4px;
@@ -6986,11 +6988,6 @@ have to be updated for changes to the rules above, or to support more deeply nes
 .monaco-workbench .backboard-clean-chat .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button:hover {
 	color: var(--vscode-foreground);
 	background: transparent;
-}
-
-.monaco-workbench .backboard-clean-chat .chat-thinking-box > .chat-used-context-label .chat-collapsible-hover-chevron {
-	font-size: 14px;
-	opacity: 0.8;
 }
 
 /* WorkGroupSection: T3's compact 12px / 20px rows. */
@@ -7149,6 +7146,47 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	opacity: 1;
 }
 
+/* Every collapsible tool row shares one disclosure spec: a 16x20 slot holding
+ * the 12px glyph, pinned to the row's trailing edge. The chevrons form one
+ * column no matter which renderer produced the row. */
+.monaco-workbench .backboard-clean-chat .chat-collapsible-hover-chevron {
+	display: inline-flex;
+	box-sizing: border-box;
+	width: 16px;
+	height: 20px;
+	flex: 0 0 16px;
+	align-items: center;
+	justify-content: center;
+	margin: 0 0 0 auto;
+	font-size: 12px;
+	opacity: 0.72;
+}
+
+/* Tool input/output collapsibles (provider-native tools without a rich card)
+ * are transcript rows too: the title spans the row and its chevron pins to
+ * the same trailing column as every other tool row. */
+.monaco-workbench .backboard-clean-chat .chat-tool-invocation-part .chat-confirmation-widget-container,
+.monaco-workbench .backboard-clean-chat .chat-tool-invocation-part .chat-confirmation-widget {
+	width: 100%;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-tool-invocation-part .chat-confirmation-widget .chat-confirmation-widget-title.monaco-button {
+	width: 100%;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-tool-invocation-part .chat-confirmation-widget .chat-confirmation-widget-title .chat-collapsible-hover-chevron {
+	display: inline-flex;
+	box-sizing: border-box;
+	width: 16px;
+	height: 20px;
+	flex: 0 0 16px;
+	align-items: center;
+	justify-content: center;
+	margin: 0 0 0 auto;
+	font-size: 12px;
+	opacity: 0.72;
+}
+
 .monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-thinking-work-row-status-working {
 	animation: backboard-work-status-pulse 1.4s ease-in-out infinite;
 }
@@ -7217,16 +7255,16 @@ have to be updated for changes to the rules above, or to support more deeply nes
 
 .monaco-workbench .backboard-clean-chat .chat-thinking-work-group .chat-thinking-group-chevron-t3 {
 	display: inline-flex;
-	width: 20px;
+	width: 16px;
 	height: 20px;
-	flex: 0 0 20px;
+	flex: 0 0 16px;
 	align-items: center;
 	justify-content: center;
 }
 
 .monaco-workbench .backboard-clean-chat .chat-thinking-work-group .chat-thinking-group-chevron-t3 .chat-thinking-work-row-svg {
-	width: 14px;
-	height: 14px;
+	width: 12px;
+	height: 12px;
 	transition: transform 200ms ease;
 }
 
@@ -7862,8 +7900,8 @@ have to be updated for changes to the rules above, or to support more deeply nes
 /* Inner reasoning sections retain their own quiet time label instead of
  * repeating the outer Worked-for label. */
 .monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-cursor-reasoning-label {
-	display: inline-flex;
-	width: fit-content;
+	display: flex;
+	width: 100%;
 	min-height: 22px;
 	margin: 0 0 2px;
 	align-items: center;
@@ -7896,9 +7934,10 @@ have to be updated for changes to the rules above, or to support more deeply nes
 
 .monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-cursor-reasoning-chevron {
 	display: inline-flex;
-	width: 14px;
+	width: 16px;
 	height: 20px;
-	flex: 0 0 14px;
+	flex: 0 0 16px;
+	margin-left: auto;
 	align-items: center;
 	justify-content: center;
 	font-size: 12px;
@@ -7973,7 +8012,7 @@ have to be updated for changes to the rules above, or to support more deeply nes
 
 .monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-box .chat-thinking-work-group > .chat-thinking-group-header {
 	display: flex;
-	width: fit-content;
+	width: 100%;
 	min-height: 24px;
 	align-items: center;
 	gap: 5px;
@@ -7994,9 +8033,10 @@ have to be updated for changes to the rules above, or to support more deeply nes
 
 .monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-work-group > .chat-thinking-group-header > .chat-thinking-group-chevron-cursor {
 	display: inline-flex;
-	width: 14px;
+	width: 16px;
 	height: 20px;
-	flex: 0 0 14px;
+	flex: 0 0 16px;
+	margin-left: auto;
 	align-items: center;
 	justify-content: center;
 	font-size: 12px;
@@ -8322,7 +8362,7 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	align-items: center;
 	justify-content: flex-start;
 	gap: 0;
-	padding: 6px var(--bb-cursor-terminal-inline-inset);
+	padding: 6px 0 6px var(--bb-cursor-terminal-inline-inset);
 	border: 0;
 	border-radius: 0;
 	background: transparent;
@@ -8418,10 +8458,17 @@ have to be updated for changes to the rules above, or to support more deeply nes
 }
 
 .monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-cursor-terminal-row .chat-terminal-thinking-collapsible > .chat-used-context-label .chat-collapsible-hover-chevron {
+	display: inline-flex;
+	box-sizing: border-box;
 	visibility: visible;
 	order: 1;
-	margin-right: 0;
-	margin-left: auto;
+	width: 16px;
+	height: 20px;
+	flex: 0 0 16px;
+	align-items: center;
+	justify-content: center;
+	margin: 0 0 0 auto;
+	font-size: 12px;
 	opacity: 0.58;
 }
 
@@ -8868,6 +8915,9 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	height: 12px;
 	flex: 0 0 12px;
 	margin-inline: 1px;
+	/* Optical centering: the 13px/20px label glyphs ride low in their line
+	 * box, so a purely geometric flex centre leaves the spinner reading low. */
+	margin-top: -2px;
 	border: 1.5px solid currentColor;
 	border-right-color: transparent;
 	border-radius: 50%;
@@ -9051,10 +9101,10 @@ have to be updated for changes to the rules above, or to support more deeply nes
 
 .monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip .chat-collapsible-hover-chevron {
 	display: inline-flex;
-	width: 14px;
+	width: 16px;
 	height: 20px;
-	margin: 0 8px 0 auto;
-	flex: 0 0 14px;
+	margin: 0 0 0 auto;
+	flex: 0 0 16px;
 	align-items: center;
 	justify-content: center;
 	font-size: 12px;
@@ -9430,13 +9480,13 @@ have to be updated for changes to the rules above, or to support more deeply nes
 .monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-core-tool-stack-read > .chat-core-tool-stack-header {
 	display: flex;
 	box-sizing: border-box;
-	width: fit-content;
+	width: 100%;
 	max-width: 100%;
 	min-height: 24px;
 	align-items: center;
 	gap: 5px;
 	margin: 0;
-	padding: 0 4px 0 0;
+	padding: 0;
 	border: 0;
 	border-radius: 4px;
 	background: transparent;
@@ -9457,12 +9507,25 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	outline-offset: 1px;
 }
 
-.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-core-tool-stack-read > .chat-core-tool-stack-header > .chat-core-tool-stack-icon,
-.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-core-tool-stack-read > .chat-core-tool-stack-header > .chat-core-tool-stack-chevron {
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-core-tool-stack-read > .chat-core-tool-stack-header > .chat-core-tool-stack-icon {
 	display: inline-flex;
 	width: 14px;
 	height: 20px;
 	flex: 0 0 14px;
+	align-items: center;
+	justify-content: center;
+	font-size: 12px;
+	opacity: 0.72;
+}
+
+/* The stack chevron keeps the shared disclosure column: the shared 16px
+ * slot pinned to the row's trailing edge. */
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-core-tool-stack-read > .chat-core-tool-stack-header > .chat-core-tool-stack-chevron {
+	display: inline-flex;
+	width: 16px;
+	height: 20px;
+	flex: 0 0 16px;
+	margin-left: auto;
 	align-items: center;
 	justify-content: center;
 	font-size: 12px;
@@ -9539,7 +9602,7 @@ have to be updated for changes to the rules above, or to support more deeply nes
 
 .monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-cursor-terminal-row .chat-terminal-thinking-collapsible > .chat-used-context-label .monaco-button {
 	min-height: 30px;
-	padding: 5px var(--bb-cursor-terminal-inline-inset);
+	padding: 5px 0 5px var(--bb-cursor-terminal-inline-inset);
 	background: color-mix(in srgb, var(--vscode-foreground) 3%, transparent);
 }
 
@@ -9547,6 +9610,9 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	display: flex;
 	align-items: baseline;
 	gap: 6px;
+	/* The chevron owns the row's trailing edge; keep wrapped command text on
+	 * the card's 11px inset instead. */
+	padding-right: var(--bb-cursor-terminal-inline-inset);
 	color: var(--vscode-foreground);
 	font-family: var(--monaco-monospace-font);
 	font-size: 12px;

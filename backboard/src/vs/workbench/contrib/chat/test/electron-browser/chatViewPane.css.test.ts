@@ -119,7 +119,7 @@ suite('ChatViewPane CSS', () => {
 		assert.match(terminalGutterReset, /padding:\s*0\s*!important/);
 		assert.match(terminalButton, /justify-content:\s*flex-start/);
 		assert.match(terminalButton, /gap:\s*0/);
-		assert.match(terminalButton, /padding:\s*6px var\(--bb-cursor-terminal-inline-inset\)/);
+		assert.match(terminalButton, /padding:\s*6px 0 6px var\(--bb-cursor-terminal-inline-inset\)/);
 		assert.match(terminalLeadingIcon, /display:\s*none\s*!important/);
 		assert.match(terminalLeadingIcon, /width:\s*0/);
 		assert.match(terminalLabel, /display:\s*-webkit-box/);
@@ -148,6 +148,10 @@ suite('ChatViewPane CSS', () => {
 		assert.match(expandedTerminalLabel, /line-clamp:\s*unset/);
 		assert.match(expandedTerminalCode, /white-space:\s*pre-wrap/);
 		assert.match(expandedTerminalCode, /overflow-wrap:\s*anywhere/);
+		assert.match(terminalChevron, /width:\s*16px/);
+		assert.match(terminalChevron, /height:\s*20px/);
+		assert.match(terminalChevron, /flex:\s*0 0 16px/);
+		assert.match(terminalChevron, /font-size:\s*12px/);
 		assert.match(terminalChevron, /opacity:\s*0\.58/);
 		assert.match(terminalPreview, /height:\s*auto/);
 		assert.match(terminalPreview, /max-height:\s*82px/);
@@ -165,6 +169,68 @@ suite('ChatViewPane CSS', () => {
 		assert.match(terminalXterm, /margin:\s*0/);
 		assert.match(terminalXterm, /padding:\s*0/);
 		assert.match(terminalXterm, /background:\s*var\(--bb-cursor-terminal-surface\)\s*!important/);
+	});
+
+	test('uses one disclosure chevron spec across tool-call rows', () => {
+		const transcriptRoot = '.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript';
+
+		// The shared spec: every collapsible tool row pins a 16x20 slot holding
+		// the 12px glyph to the row's trailing edge.
+		const canonical = ruleBody(chatCss, '.monaco-workbench .backboard-clean-chat .chat-collapsible-hover-chevron {');
+		assert.match(canonical, /width:\s*16px/);
+		assert.match(canonical, /height:\s*20px/);
+		assert.match(canonical, /flex:\s*0 0 16px/);
+		assert.match(canonical, /margin:\s*0 0 0 auto/);
+		assert.match(canonical, /font-size:\s*12px/);
+
+		const workRowChevron = ruleBody(chatCss, '.monaco-workbench .backboard-clean-chat .chat-thinking-box .chat-thinking-work-group .chat-used-context-label .chat-collapsible-hover-chevron');
+		assert.match(workRowChevron, /width:\s*16px/);
+		assert.match(workRowChevron, /height:\s*20px/);
+		assert.match(workRowChevron, /flex:\s*0 0 16px/);
+		assert.match(workRowChevron, /font-size:\s*12px/);
+
+		const subagentChevron = ruleBody(chatCss, '.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip .chat-collapsible-hover-chevron');
+		assert.match(subagentChevron, /width:\s*16px/);
+		assert.match(subagentChevron, /height:\s*20px/);
+		assert.match(subagentChevron, /flex:\s*0 0 16px/);
+		assert.match(subagentChevron, /margin:\s*0 0 0 auto/);
+		assert.match(subagentChevron, /font-size:\s*12px/);
+
+		// Tool input/output collapsibles span the row so their chevron lands
+		// in the same trailing column as every other tool row.
+		const toolWidgetTitle = ruleBody(chatCss, '.monaco-workbench .backboard-clean-chat .chat-tool-invocation-part .chat-confirmation-widget .chat-confirmation-widget-title.monaco-button');
+		assert.match(toolWidgetTitle, /width:\s*100%/);
+		const toolWidgetChevron = ruleBody(chatCss, '.monaco-workbench .backboard-clean-chat .chat-tool-invocation-part .chat-confirmation-widget .chat-confirmation-widget-title .chat-collapsible-hover-chevron');
+		assert.match(toolWidgetChevron, /width:\s*16px/);
+		assert.match(toolWidgetChevron, /height:\s*20px/);
+		assert.match(toolWidgetChevron, /flex:\s*0 0 16px/);
+		assert.match(toolWidgetChevron, /margin:\s*0 0 0 auto/);
+		assert.match(toolWidgetChevron, /font-size:\s*12px/);
+
+		// Group headers and reasoning disclosures are full rows, so their
+		// chevrons pin to the same trailing column instead of trailing text.
+		const groupHeader = ruleBody(chatCss, `${transcriptRoot} .chat-thinking-box .chat-thinking-work-group > .chat-thinking-group-header {`);
+		assert.match(groupHeader, /width:\s*100%/);
+		const groupChevron = ruleBody(chatCss, `${transcriptRoot} .chat-thinking-work-group > .chat-thinking-group-header > .chat-thinking-group-chevron-cursor`);
+		assert.match(groupChevron, /width:\s*16px/);
+		assert.match(groupChevron, /flex:\s*0 0 16px/);
+		assert.match(groupChevron, /margin-left:\s*auto/);
+		assert.match(groupChevron, /font-size:\s*12px/);
+		const reasoningChevron = ruleBody(chatCss, `${transcriptRoot} .chat-thinking-cursor-reasoning-chevron`);
+		assert.match(reasoningChevron, /width:\s*16px/);
+		assert.match(reasoningChevron, /flex:\s*0 0 16px/);
+		assert.match(reasoningChevron, /margin-left:\s*auto/);
+		const stackChevron = ruleBody(chatCss, `${transcriptRoot} .chat-core-tool-stack-read > .chat-core-tool-stack-header > .chat-core-tool-stack-chevron {`);
+		assert.match(stackChevron, /width:\s*16px/);
+		assert.match(stackChevron, /flex:\s*0 0 16px/);
+		assert.match(stackChevron, /margin-left:\s*auto/);
+
+		// Core tool cards share the disclosure slot dimensions.
+		const coreToolCss = readFileSync(join(process.cwd(), 'src/vs/workbench/contrib/chat/browser/widget/chatContentParts/media/chatCoreToolProgressPart.css'), 'utf8');
+		const coreDisclosure = ruleBody(coreToolCss, 'Shared disclosure slot: same 16x20 / 12px spec as every other tool-row');
+		assert.match(coreDisclosure, /width:\s*16px/);
+		assert.match(coreDisclosure, /height:\s*20px/);
+		assert.match(coreDisclosure, /font-size:\s*12px/);
 	});
 
 	test('keeps terminal tool output scrollback reachable', () => {

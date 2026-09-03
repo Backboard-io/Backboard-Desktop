@@ -5,6 +5,7 @@ import type {
 	PermissionCheckContext,
 	PermissionDecision,
 } from "../permissions/types.ts";
+import { coerceScalarStrings } from "./coerceInput.ts";
 import { toAgentToolName } from "./names.ts";
 import { type OpenAITool, toOpenAITool } from "./schema.ts";
 import type { ToolContext } from "./ToolContext.ts";
@@ -120,7 +121,12 @@ export abstract class Tool<I = unknown, O = unknown> {
 	}
 
 	parseInput(raw: unknown): I {
-		return this.inputSchema.parse(stripNullProps(raw));
+		// Models (especially via OpenRouter) quote scalar args, e.g.
+		// `ignore_case: "true"` or `limit: "2400"`; coerce those back to the
+		// advertised types before strict validation rejects the whole call.
+		return this.inputSchema.parse(
+			stripNullProps(coerceScalarStrings(this.inputSchema, raw)),
+		);
 	}
 
 	toJSONSchema(context: PromptContext = {}): OpenAITool {

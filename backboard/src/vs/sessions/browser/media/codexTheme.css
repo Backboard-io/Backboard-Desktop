@@ -363,6 +363,20 @@
 	display: none;
 }
 
+/* Running threads still surface the live throbber: it takes the card's
+ * top-left slot (where the folder glyph sits) so active work is visible at a
+ * glance, while settled cards keep the quiet Codex look. */
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-card .session-icon.session-icon-in-progress {
+	display: flex;
+	left: 9px;
+	top: 9px;
+	transform: none;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-card.in-progress .session-provider-icon {
+	visibility: hidden;
+}
+
 .monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-card .session-main {
 	display: block;
 	width: 100%;
@@ -513,6 +527,12 @@
 
 .monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-compact .session-icon {
 	display: none;
+}
+
+/* Compact rows hide the folder glyph but keep its layout width; the running
+ * throbber seats in that reserved slot so titles stay aligned. */
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-compact .session-icon.session-icon-in-progress {
+	display: flex;
 }
 
 .monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .simple-session-compact .session-title-row {
@@ -750,8 +770,12 @@
 
 /* A user-selected image belongs only to Simple mode's top-level new-task
  * canvas. Paint it beneath the full workbench grid so the 48px top panel can
- * span the entire window while the sidebar body remains opaque. */
-.monaco-workbench.agent-sessions-workbench.shell-gradient-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background)::after {
+ * span the entire window while the sidebar body remains opaque. The underlay
+ * is keyed off the workbench marker class owned by the Simple mode background
+ * contribution — not off a rendered canvas — so a new selection always lands
+ * even while session views are being rebound; the transparency rules below
+ * still require the new-task canvas itself before anything shows through. */
+.monaco-workbench.agent-sessions-workbench.shell-gradient-background.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light)::after {
 	content: '';
 	position: absolute;
 	inset: 0;

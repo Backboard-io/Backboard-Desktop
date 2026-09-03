@@ -570,7 +570,8 @@
 	top: 0;
 	bottom: 0;
 	left: 0;
-	width: var(--combined-thinking-progress, 0%);
+	/* Track the native range thumb: its center travels (100% - thumb) + half thumb. */
+	width: calc(var(--combined-thinking-progress, 0) * (100% - 24px) + 12px);
 	border-radius: 999px;
 	background: linear-gradient(105deg, #347cf0 0%, #347cf0 38%, #5b9dfb 50%, #347cf0 62%, #347cf0 100%);
 	background-size: 220% 100%;

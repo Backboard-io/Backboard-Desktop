@@ -16,8 +16,6 @@ import { ServiceCollection } from '../../../../platform/instantiation/common/ser
 import { EDITOR_DRAG_AND_DROP_BACKGROUND } from '../../../../workbench/common/theme.js';
 import { IAgentCliSetupService } from '../../../../workbench/contrib/chat/browser/agentSessions/agentCliSetup.js';
 import { ChatWidget } from '../../../../workbench/contrib/chat/browser/widget/chatWidget.js';
-import { ISimpleModeBackgroundService } from './simpleModeBackgroundService.js';
-import { asCSSUrl } from '../../../../base/browser/cssValue.js';
 import { createBackboardSessionTypePickerDelegate } from '../../../../workbench/contrib/chat/browser/widget/input/backboardSessionTypePickerDelegate.js';
 import { IChatModelReference, IChatService } from '../../../../workbench/contrib/chat/common/chatService/chatService.js';
 import { ChatAgentLocation, ChatModeKind } from '../../../../workbench/contrib/chat/common/constants.js';
@@ -138,19 +136,10 @@ export class ChatView extends AbstractChatView {
 		@ILogService private readonly logService: ILogService,
 		@ICommandService commandService: ICommandService,
 		@IAgentCliSetupService agentCliSetupService: IAgentCliSetupService,
-		@ISimpleModeBackgroundService private readonly simpleModeBackgroundService: ISimpleModeBackgroundService,
 	) {
 		super();
 
 		this.element.classList.add('chat-view-chat', 'backboard-clean-chat', 'backboard-composer');
-		// The Simple mode background image continues behind open sessions. The
-		// workbench root carries the image and a marker class so the transcript
-		// surfaces can go translucent while the composer keeps its own surface.
-		this._applyBackgroundImage();
-		this._register(this.simpleModeBackgroundService.onDidChangeBackgroundImage(() => {
-			this._appliedBackgroundImage = undefined;
-			this._applyBackgroundImage();
-		}));
 
 		const scopedContextKeyService = this._register(contextKeyService.createScoped(this.element));
 		const scopedInstantiationService = this._register(instantiationService.createChild(
@@ -231,29 +220,6 @@ export class ChatView extends AbstractChatView {
 				this._applyHistoryKey();
 			}
 		}));
-	}
-
-	private _appliedBackgroundImage: string | undefined;
-
-	private _applyBackgroundImage(): void {
-		const resource = this.simpleModeBackgroundService.backgroundImage;
-		const key = resource?.toString() ?? '';
-		// The view element is attached after construction, so the first layout
-		// pass is the earliest moment the workbench root can be found.
-		const workbench = this.element.closest<HTMLElement>('.monaco-workbench');
-		if (!workbench || this._appliedBackgroundImage === key) {
-			return;
-		}
-		this._appliedBackgroundImage = key;
-		workbench.classList.toggle('sessions-chat-custom-background', !!resource);
-		if (resource) {
-			// Make every accepted picker result a distinct CSS value so a cached
-			// image is repainted when it is selected again.
-			const versionedResource = resource.with({ fragment: `backboard-background-${this.simpleModeBackgroundService.backgroundImageRevision}` });
-			workbench.style.setProperty('--new-chat-background-image', asCSSUrl(versionedResource));
-		} else {
-			workbench.style.removeProperty('--new-chat-background-image');
-		}
 	}
 
 	private _buildStyles(active: boolean) {
@@ -348,7 +314,6 @@ export class ChatView extends AbstractChatView {
 	}
 
 	protected override doLayout(width: number, height: number, _top: number, _left: number): void {
-		this._applyBackgroundImage();
 		this._widget.layout(height, width);
 	}
 

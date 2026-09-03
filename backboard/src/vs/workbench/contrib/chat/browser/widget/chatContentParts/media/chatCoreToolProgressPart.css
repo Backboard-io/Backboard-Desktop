@@ -175,9 +175,11 @@ button.chat-core-tool-card-header:focus-visible {
 	white-space: nowrap;
 }
 
+/* Shared disclosure slot: same 16x20 / 12px spec as every other tool-row
+ * chevron so stacked cards line up with work rows and terminal headers. */
 .chat-core-tool-card-disclosure {
-	width: 14px;
-	height: 18px;
+	width: 16px;
+	height: 20px;
 	color: var(--vscode-descriptionForeground);
 	font-size: 12px;
 	transition: transform 100ms ease;

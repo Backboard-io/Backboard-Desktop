@@ -726,7 +726,7 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 				slider.title = localize('combinedPicker.reasoningValue', "Reasoning: {0}", label);
 				dotElements.forEach((dot, dotIndex) => dot.classList.toggle('active', dotIndex <= safeIndex));
 				const progress = option.values.length > 1 ? safeIndex / (option.values.length - 1) : 0;
-				sliderShell.style.setProperty('--combined-thinking-progress', `${progress * 100}%`);
+				sliderShell.style.setProperty('--combined-thinking-progress', `${progress}`);
 			};
 			let appliedIndex = initialIndex;
 			let applyQueue: Promise<void> = Promise.resolve();
