@@ -280,3 +280,9 @@ div.chat-terminal-content-part.progress-step > div.chat-terminal-output-containe
 	display: inline;
 	white-space: nowrap;
 }
+
+/* The second command node is reserved for the full expanded transcript header.
+ * Other terminal presentations continue to use their compact label. */
+.chat-terminal-command-full {
+	display: none;
+}

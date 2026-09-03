@@ -53,6 +53,7 @@ function renderCollapsible(context: ComponentFixtureContext, commandText: string
 	const wrapper = disposableStore.add(instantiationService.createInstance(
 		ChatTerminalThinkingCollapsibleWrapper,
 		commandText,
+		commandText,
 		isSandboxWrapped,
 		contentElement,
 		createMockContext(),

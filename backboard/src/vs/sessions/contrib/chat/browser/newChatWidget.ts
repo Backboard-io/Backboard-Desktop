@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import './media/chatWidget.css';
+import { asCSSUrl } from '../../../../base/browser/cssValue.js';
 import * as dom from '../../../../base/browser/dom.js';
 import { renderIcon } from '../../../../base/browser/ui/iconLabel/iconLabels.js';
 import { CancellationTokenSource } from '../../../../base/common/cancellation.js';
@@ -47,6 +48,7 @@ import { activeSessionViewBackground, activeSessionViewForeground, agentsPanelBa
 import { IPathService } from '../../../../workbench/services/path/common/pathService.js';
 import { HiddenItemStrategy, MenuWorkbenchToolBar } from '../../../../platform/actions/browser/toolbar.js';
 import { Menus } from '../../../browser/menus.js';
+import { ISimpleModeBackgroundService } from './simpleModeBackgroundService.js';
 
 // #region --- New Chat Widget ---
 
@@ -278,6 +280,7 @@ export class NewChatWidget extends Disposable {
 	private readonly _loadCts = this._register(new MutableDisposable<CancellationTokenSource>());
 	private _currentChatResource: URI | undefined;
 	private _chatWidgetContent: HTMLElement | undefined;
+	private _backgroundVariableHost: HTMLElement | undefined;
 	private _composerStackElement: HTMLElement | undefined;
 	private _composerWorkspaceRowElement: HTMLElement | undefined;
 	/** Set once the composer has seeded (or confirmed) a default workspace so it never re-seeds after an explicit clear. See {@link _ensureComposerHasWorkspace}. */
@@ -328,6 +331,7 @@ export class NewChatWidget extends Disposable {
 		@IFileService private readonly fileService: IFileService,
 		@IPathService private readonly pathService: IPathService,
 		@IAgentCliSetupService private readonly agentCliSetupService: IAgentCliSetupService,
+		@ISimpleModeBackgroundService private readonly simpleModeBackgroundService: ISimpleModeBackgroundService,
 	) {
 		super();
 		// Track the live instance for the test-only reset command.
@@ -405,6 +409,7 @@ export class NewChatWidget extends Disposable {
 			await this._onWorkspaceSelected(this._workspacePicker.selectedFolderUri);
 			this._widget.focusInput();
 		}));
+		this._register(this.simpleModeBackgroundService.onDidChangeBackgroundImage(resource => this._applyBackgroundImage(resource)));
 	}
 
 	private _createWorkspacePickerDelegate(): IWorkspacePickerDelegate {
@@ -493,6 +498,8 @@ export class NewChatWidget extends Disposable {
 		const chatWidgetContainer = dom.append(element, dom.$('.new-chat-widget-container'));
 		const chatWidgetContent = dom.append(chatWidgetContainer, dom.$('.new-chat-widget-content'));
 		this._chatWidgetContent = chatWidgetContent;
+		this._backgroundVariableHost = chatWidgetContent.closest<HTMLElement>('.monaco-workbench') ?? chatWidgetContent.ownerDocument.documentElement;
+		this._applyBackgroundImage(this.simpleModeBackgroundService.backgroundImage);
 
 		this._renderMiddleSection(chatWidgetContent);
 		const composerStack = dom.append(chatWidgetContent, dom.$('.new-chat-composer-stack'));
@@ -534,6 +541,19 @@ export class NewChatWidget extends Disposable {
 		this._ensureComposerHasWorkspace();
 
 		chatWidgetContainer.classList.add('revealed');
+	}
+
+	private _applyBackgroundImage(resource: URI | undefined): void {
+		if (!this._chatWidgetContent) {
+			return;
+		}
+
+		this._chatWidgetContent.classList.toggle('has-custom-background', !!resource);
+		if (resource) {
+			this._backgroundVariableHost?.style.setProperty('--new-chat-background-image', asCSSUrl(resource));
+		} else {
+			this._backgroundVariableHost?.style.removeProperty('--new-chat-background-image');
+		}
 	}
 
 	private _renderHeaderBreadcrumb(container: HTMLElement): void {

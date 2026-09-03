@@ -74,7 +74,7 @@ const MIN_EMPTY_OUTPUT_HEIGHT = 34;
 /**
  * Maximum number of rows to display in the terminal output view before scrolling.
  */
-const MAX_OUTPUT_ROWS = 10;
+const MAX_OUTPUT_ROWS = 14;
 
 /**
  * Maximum number of retries when waiting for terminal output to appear.
@@ -118,6 +118,11 @@ export function getTerminalInitialExpandedState(storedExpanded: boolean | undefi
 	// reveal only meaningful, long-running output. Other chat presentations keep
 	// the existing behavior of opening an active command immediately.
 	return hasError || (!useCursorTranscriptPresentation && !isComplete);
+}
+
+/** Choose the label text without reintroducing a provider's abbreviated summary. */
+export function getTerminalCollapsibleLabel(compactCommand: string, fullCommand: string, useCursorTranscriptPresentation: boolean): string {
+	return useCursorTranscriptPresentation ? fullCommand : compactCommand;
 }
 
 function removeEchoedTerminalCommand(lines: string[], commandText: string | undefined): void {
@@ -173,9 +178,16 @@ export function getCollapsedTerminalOutputPreview(output: string | undefined, co
 	return { text: visibleLines.join('\n'), overflowing };
 }
 
+
 export function getTerminalOutputViewportHeight(contentHeight: number, maxHeight: number, useCursorTranscriptPresentation: boolean): string {
+	// Cursor transcript cards deliberately reserve the full expanded viewport.
+	// Without this, a short command result collapses the terminal to just a few
+	// rows and makes the output area jump as a streaming command grows.
+	if (useCursorTranscriptPresentation) {
+		return `${maxHeight}px`;
+	}
 	const clampedHeight = Math.min(contentHeight, maxHeight);
-	return useCursorTranscriptPresentation || clampedHeight < maxHeight ? `${clampedHeight}px` : '';
+	return clampedHeight < maxHeight ? `${clampedHeight}px` : '';
 }
 
 export function calculateTerminalOutputContentHeight(
@@ -186,7 +198,7 @@ export function calculateTerminalOutputContentHeight(
 	emptyStateHeight: number = MIN_EMPTY_OUTPUT_HEIGHT,
 ): number {
 	// Add buffer to prevent bottom cropping from xterm pixel rounding and scrollbar space
-	const BUFFER_PX = Math.ceil(rowHeight * 0.5);
+	const BUFFER_PX = padding === 0 && !isEmptyState ? 0 : Math.ceil(rowHeight * 0.5);
 	const terminalHeight = (Math.max(lineCount, MIN_OUTPUT_ROWS) * rowHeight) + padding + BUFFER_PX;
 	return isEmptyState ? Math.max(terminalHeight, MIN_EMPTY_OUTPUT_HEIGHT, emptyStateHeight) : terminalHeight;
 }
@@ -472,7 +484,12 @@ export class ChatTerminalToolProgressPart extends BaseChatToolInvocationSubPart 
 		this._titleElement = elements.title;
 		this._terminalContentElement = elements.container;
 
-		const command = (terminalData.commandLine.forDisplay ?? terminalData.commandLine.userEdited ?? terminalData.commandLine.toolEdited ?? terminalData.commandLine.original).trimStart();
+		// `forDisplay` is intentionally compact and may already contain a literal
+		// ellipsis (not a CSS truncation). Retain the effective command so the
+		// Cursor transcript can reveal every character that was submitted to the
+		// shell, while other terminal presentations can keep their compact label.
+		const command = (terminalData.commandLine.userEdited ?? terminalData.commandLine.toolEdited ?? terminalData.commandLine.original).trimStart();
+		const compactCommand = (terminalData.presentationOverrides?.commandLine ?? terminalData.commandLine.forDisplay ?? command).trimStart();
 		this._commandText = command;
 		this._terminalOutputContextKey = ChatContextKeys.inChatTerminalToolOutput.bindTo(this._contextKeyService);
 
@@ -605,7 +622,8 @@ export class ChatTerminalToolProgressPart extends BaseChatToolInvocationSubPart 
 		this._usesCollapsibleWrapper = this._isInThinkingContainer || isSimpleTerminal;
 
 		if (this._usesCollapsibleWrapper) {
-			this.domNode = this._createCollapsibleWrapper(progressPart.domNode, displayCommand, toolInvocation, context);
+			const collapsibleLabel = getTerminalCollapsibleLabel(compactCommand, command, this._useCursorTranscriptPresentation);
+			this.domNode = this._createCollapsibleWrapper(progressPart.domNode, collapsibleLabel, command, toolInvocation, context);
 		} else {
 			this.domNode = progressPart.domNode;
 		}
@@ -674,7 +692,7 @@ export class ChatTerminalToolProgressPart extends BaseChatToolInvocationSubPart 
 		}
 	}
 
-	private _createCollapsibleWrapper(contentElement: HTMLElement, commandText: string, toolInvocation: IChatToolInvocation | IChatToolInvocationSerialized, context: IChatContentPartRenderContext): HTMLElement {
+	private _createCollapsibleWrapper(contentElement: HTMLElement, compactCommandText: string, fullCommandText: string, toolInvocation: IChatToolInvocation | IChatToolInvocationSerialized, context: IChatContentPartRenderContext): HTMLElement {
 		// A background terminal may have its tool invocation marked complete (the
 		// tool returned) while the terminal command is still running. Detect this
 		// so the wrapper shows "Running … in background" instead of "Ran …".
@@ -697,7 +715,8 @@ export class ChatTerminalToolProgressPart extends BaseChatToolInvocationSubPart 
 
 		const wrapper = this._register(this._instantiationService.createInstance(
 			ChatTerminalThinkingCollapsibleWrapper,
-			commandText,
+			compactCommandText,
+			fullCommandText,
 			this._terminalData.commandLine.isSandboxWrapped === true,
 			contentElement,
 			context,
@@ -1462,7 +1481,7 @@ class ChatTerminalToolOutputSection extends Disposable {
 		this._mirrorBackgroundColorProvider = this._useCursorTranscriptPresentation
 			? theme => {
 				const isInEditor = ChatContextKeys.inChatEditor.getValue(this._contextKeyService);
-					return theme.getColor(isInEditor ? editorBackground : PANEL_BACKGROUND) ?? theme.getColor(editorBackground);
+				return theme.getColor(isInEditor ? editorBackground : PANEL_BACKGROUND) ?? theme.getColor(editorBackground);
 			}
 			: undefined;
 
@@ -1637,16 +1656,15 @@ class ChatTerminalToolOutputSection extends Disposable {
 			}
 			this._isAtBottom = this._computeIsAtBottom();
 		}));
-		// Capture vertical gestures before the surrounding chat list. Terminal
-		// history is stored in xterm's buffer, so scrolling the outer DOM element
-		// alone cannot reveal earlier output.
+		// The terminal's bounded viewport owns output scrolling. Capture wheel
+		// gestures so the chat does not move while the user reads terminal history.
 		this._register(dom.addDisposableListener(this.domNode, dom.EventType.MOUSE_WHEEL, event => {
 			// Always prevent scrolling the chat list when mouse is over terminal output
 			if (this.isExpanded) {
 				event.preventDefault();
 				event.stopPropagation();
 			}
-			
+
 			// Try to scroll the terminal if we have delta
 			if (!this.isExpanded || !event.deltaY || event.ctrlKey || event.metaKey || event.shiftKey) {
 				return;
@@ -1947,20 +1965,7 @@ class ChatTerminalToolOutputSection extends Disposable {
 				return;
 			}
 
-			const scrollableDomNode = this._scrollableContainer.getDomNode();
-			const rowHeight = this._computeRowHeightPx();
-			const padding = this._getOutputPadding();
-			// Add buffer to max height to match the buffer in content height calculation
-			const BUFFER_PX = Math.ceil(rowHeight * 0.5);
-			const maxHeight = rowHeight * MAX_OUTPUT_ROWS + padding + BUFFER_PX;
-			const contentHeight = this._getOutputContentHeight(lineCount, rowHeight, padding);
-			const viewportHeight = getTerminalOutputViewportHeight(contentHeight, maxHeight, this._useCursorTranscriptPresentation);
-			scrollableDomNode.style.height = viewportHeight;
-			if (this._useCursorTranscriptPresentation) {
-				this.domNode.style.height = viewportHeight;
-			} else {
-				this.domNode.style.removeProperty('height');
-			}
+			this._applyOutputViewportHeight(lineCount);
 			this._scrollableContainer.scanDomNode();
 		} catch (error) {
 			// Log error but don't throw - layout should never fail
@@ -1975,17 +1980,17 @@ class ChatTerminalToolOutputSection extends Disposable {
 			if (!this._mirrorsReadyForResize) {
 				return;
 			}
-			
+
 			// Check if we have any mirrors to resize
 			if (!this._mirror && !this._snapshotMirror) {
 				return;
 			}
-			
+
 			// Check if output body exists
 			if (!this._outputBody) {
 				return;
 			}
-			
+
 			// Check if element is connected to DOM (safely)
 			let isConnected = true;
 			try {
@@ -1998,55 +2003,84 @@ class ChatTerminalToolOutputSection extends Disposable {
 			if (!isConnected) {
 				return;
 			}
-			
+
 			// Get client width safely
 			const clientWidth = this._outputBody.clientWidth;
 			if (!clientWidth || clientWidth <= 0) {
 				return;
 			}
-			
+
 			// Calculate available width
 			const padding = this._getOutputHorizontalPadding();
 			const availableWidth = clientWidth - padding;
 			if (availableWidth <= 0) {
 				return;
 			}
-			
+
 			// Get font metrics
 			const window = dom.getActiveWindow();
 			const font = this._terminalConfigurationService.getFont(window);
 			const hasCharWidth = isNumber(font.charWidth) && font.charWidth > 0;
 			const hasFontSize = isNumber(font.fontSize) && font.fontSize > 0;
 			const charWidth = (hasCharWidth ? font.charWidth : (hasFontSize ? font.fontSize * 0.6 : 1)) ?? 1;
-			
+
 			if (!charWidth || charWidth <= 0) {
 				return;
 			}
-			
+
 			// Calculate columns
 			const columns = getTerminalColumnCountForWidth(availableWidth, charWidth);
-			
+
+			const requestedRows = this._useCursorTranscriptPresentation
+				? Math.min(Math.max(this._lastRenderedLineCount ?? MIN_OUTPUT_ROWS, MIN_OUTPUT_ROWS), MAX_OUTPUT_ROWS)
+				: undefined;
+			let renderedRows = 0;
+
 			// Resize live mirror if it exists
 			if (this._mirror) {
 				try {
-					this._mirror.resizeToColumns(columns);
+					renderedRows = Math.max(renderedRows, this._mirror.resizeToColumns(columns, requestedRows) ?? 0);
 				} catch {
 					// Silently ignore individual mirror resize failures
 				}
 			}
-			
+
 			// Resize snapshot mirror if it exists
 			if (this._snapshotMirror) {
 				try {
-					this._snapshotMirror.resizeToColumns(columns);
+					renderedRows = Math.max(renderedRows, this._snapshotMirror.resizeToColumns(columns, requestedRows) ?? 0);
 				} catch {
 					// Silently ignore individual mirror resize failures
 				}
+			}
+
+			// Resizing to the card width can create additional wrapped rows. Record
+			// them so the bounded viewport and its xterm scrollback stay in sync.
+			if (this._useCursorTranscriptPresentation && renderedRows > (this._lastRenderedLineCount ?? 0)) {
+				this._lastRenderedLineCount = renderedRows;
+				this._applyOutputViewportHeight(renderedRows);
+				this._scrollableContainer?.scanDomNode();
 			}
 		} catch {
 			// Absolute last resort - silently ignore any errors
 			// This ensures the method never throws
 		}
+	}
+
+	private _applyOutputViewportHeight(lineCount: number): void {
+		if (!this._scrollableContainer) {
+			return;
+		}
+		const scrollableDomNode = this._scrollableContainer.getDomNode();
+		const rowHeight = this._computeRowHeightPx();
+		const padding = this._getOutputPadding();
+		// Add buffer to max height to match the buffer in content height calculation
+		const BUFFER_PX = Math.ceil(rowHeight * 0.5);
+		const maxHeight = rowHeight * MAX_OUTPUT_ROWS + padding + BUFFER_PX;
+		const contentHeight = this._getOutputContentHeight(lineCount, rowHeight, padding);
+		const viewportHeight = getTerminalOutputViewportHeight(contentHeight, maxHeight, this._useCursorTranscriptPresentation);
+		scrollableDomNode.style.height = viewportHeight;
+		this.domNode.style.removeProperty('height');
 	}
 
 	private _getOutputHorizontalPadding(): number {
@@ -2143,7 +2177,8 @@ class ChatTerminalToolOutputSection extends Disposable {
 
 export class ChatTerminalThinkingCollapsibleWrapper extends ChatCollapsibleContentPart {
 	private readonly _terminalContentElement: HTMLElement;
-	private readonly _commandText: string;
+	private readonly _compactCommandText: string;
+	private readonly _fullCommandText: string;
 	private readonly _isSandboxWrapped: boolean;
 	private readonly _useCursorTranscriptPresentation: boolean;
 	private _isComplete: boolean;
@@ -2156,7 +2191,8 @@ export class ChatTerminalThinkingCollapsibleWrapper extends ChatCollapsibleConte
 	private _showLinkElement: HTMLElement | undefined;
 
 	constructor(
-		commandText: string,
+		compactCommandText: string,
+		fullCommandText: string,
 		isSandboxWrapped: boolean,
 		contentElement: HTMLElement,
 		context: IChatContentPartRenderContext,
@@ -2172,20 +2208,21 @@ export class ChatTerminalThinkingCollapsibleWrapper extends ChatCollapsibleConte
 		@IConfigurationService configurationService: IConfigurationService,
 	) {
 		const title = isSkipped
-			? localize('chat.terminal.skipped.plain', "Skipped {0}", commandText)
+			? localize('chat.terminal.skipped.plain', "Skipped {0}", compactCommandText)
 			: isDenied
-				? localize('chat.terminal.denied.plain', "Denied {0}", commandText)
+				? localize('chat.terminal.denied.plain', "Denied {0}", compactCommandText)
 				: isRunningInBackground
-					? localize('chat.terminal.runningInBackground.plain', "Running {0} in background", commandText)
+					? localize('chat.terminal.runningInBackground.plain', "Running {0} in background", compactCommandText)
 					: hasError
-						? localize('chat.terminal.failed.plain', "Failed {0}", commandText)
+						? localize('chat.terminal.failed.plain', "Failed {0}", compactCommandText)
 						: isComplete
-							? localize('chat.terminal.ran.plain', "Ran {0}", commandText)
-							: localize('chat.terminal.running.plain', "Running {0}", commandText);
+							? localize('chat.terminal.ran.plain', "Ran {0}", compactCommandText)
+							: localize('chat.terminal.running.plain', "Running {0}", compactCommandText);
 		super(title, context, undefined, hoverService, configurationService);
 
 		this._terminalContentElement = contentElement;
-		this._commandText = commandText;
+		this._compactCommandText = compactCommandText;
+		this._fullCommandText = fullCommandText;
 		this._isSandboxWrapped = isSandboxWrapped;
 		this._useCursorTranscriptPresentation = isBackboardCursorTranscript(context.container);
 		this._isComplete = isComplete;
@@ -2236,12 +2273,9 @@ export class ChatTerminalThinkingCollapsibleWrapper extends ChatCollapsibleConte
 			const suffixText = this._isRunningInBackground
 				? localize('chat.terminal.sandbox.backgroundSuffix', " in sandbox (background)")
 				: localize('chat.terminal.sandbox.suffix', " in sandbox");
-			labelElement.appendChild(document.createTextNode(prefixText));
-			const codeElement = document.createElement('code');
-			codeElement.textContent = this._commandText;
-			codeElement.title = this._commandText;
-			labelElement.appendChild(codeElement);
-			labelElement.appendChild(document.createTextNode(suffixText));
+			labelElement.appendChild(this._createStatusText(prefixText, this._isComplete && !this._hasError));
+			this._appendCommandText(labelElement);
+			labelElement.appendChild(this._createStatusText(suffixText, false));
 			return;
 		}
 
@@ -2254,16 +2288,38 @@ export class ChatTerminalThinkingCollapsibleWrapper extends ChatCollapsibleConte
 					: this._isComplete
 						? localize('chat.terminal.ran.prefix', "Ran ")
 						: localize('chat.terminal.running.prefix', "Running ");
-		const ranText = document.createTextNode(prefixText);
-		const codeElement = document.createElement('code');
-		codeElement.textContent = this._commandText;
-		codeElement.title = this._commandText;
-
-		labelElement.appendChild(ranText);
-		labelElement.appendChild(codeElement);
+		labelElement.appendChild(this._createStatusText(prefixText, this._isComplete && !this._hasError));
+		this._appendCommandText(labelElement);
 		if (this._isRunningInBackground) {
-			labelElement.appendChild(document.createTextNode(localize('chat.terminal.backgroundSuffix', " in background")));
+			labelElement.appendChild(this._createStatusText(localize('chat.terminal.backgroundSuffix', " in background"), false));
 		}
+	}
+
+	/**
+	 * The status words ("Ran", "Failed", "in sandbox") stay in the accessible
+	 * label, but wrapping them lets a transcript hide the neutral "Ran" prefix
+	 * and present the row as a prompt line instead.
+	 */
+	private _createStatusText(text: string, isNeutralCompletion: boolean): HTMLElement {
+		const element = document.createElement('span');
+		element.className = 'chat-terminal-status-text';
+		element.classList.toggle('chat-terminal-status-text-neutral', isNeutralCompletion);
+		element.textContent = text;
+		return element;
+	}
+
+	private _appendCommandText(labelElement: HTMLElement): void {
+		const compactCodeElement = document.createElement('code');
+		compactCodeElement.className = 'chat-terminal-command-compact';
+		compactCodeElement.textContent = this._compactCommandText;
+		compactCodeElement.title = this._compactCommandText;
+		labelElement.appendChild(compactCodeElement);
+
+		const fullCodeElement = document.createElement('code');
+		fullCodeElement.className = 'chat-terminal-command-full';
+		fullCodeElement.textContent = this._fullCommandText;
+		fullCodeElement.title = this._fullCommandText;
+		labelElement.appendChild(fullCodeElement);
 	}
 
 	private _updateShowLink(): void {
@@ -2311,12 +2367,12 @@ export class ChatTerminalThinkingCollapsibleWrapper extends ChatCollapsibleConte
 				? Codicon.error
 				: this._useCursorTranscriptPresentation ? Codicon.terminal : Codicon.check;
 		this.setTitle(this._isSkipped
-			? localize('chat.terminal.skipped.plain', "Skipped {0}", this._commandText)
+			? localize('chat.terminal.skipped.plain', "Skipped {0}", this._compactCommandText)
 			: this._isDenied
-				? localize('chat.terminal.denied.plain', "Denied {0}", this._commandText)
+				? localize('chat.terminal.denied.plain', "Denied {0}", this._compactCommandText)
 				: hasError
-					? localize('chat.terminal.failed.plain', "Failed {0}", this._commandText)
-					: localize('chat.terminal.ran.plain', "Ran {0}", this._commandText));
+					? localize('chat.terminal.failed.plain', "Failed {0}", this._compactCommandText)
+					: localize('chat.terminal.ran.plain', "Ran {0}", this._compactCommandText));
 		this._setCodeFormattedTitle();
 		this._updateShowLink();
 	}

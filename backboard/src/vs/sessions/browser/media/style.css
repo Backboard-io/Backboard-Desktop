@@ -227,6 +227,12 @@
 	box-sizing: border-box;
 }
 
+/* The sessions panel also owns the line on the opposite side of the sidebar.
+ * Remove only that left divider in Simple mode; the right-panel divider stays. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.phone-layout) > .monaco-grid-view > .monaco-grid-branch-node > .monaco-split-view2.vertical > .monaco-scrollable-element > .split-view-container > .split-view-view:has(> .monaco-grid-branch-node .part.sidebar) > .monaco-grid-branch-node > .monaco-split-view2.horizontal > .monaco-scrollable-element > .split-view-container > .split-view-view:has(> .monaco-grid-branch-node .part.sessionspart)::after {
+	border-left: 0 !important;
+}
+
 /**
  * Sidebar/agents-panel separator, keyed directly off the sidebar part's own
  * grid wrapper rather than a fixed branch depth: the grid nests sidebar vs.
@@ -245,14 +251,15 @@
 	box-sizing: border-box;
 }
 
-/* Simple mode treats the left panel as a resizable surface resting above the
- * workspace. Its rounded right edge and short cast shadow create the overlap;
- * the split-view sash remains in its own higher layer, so the resize target is
- * unchanged. Keep the window-facing left edge square against the shell. */
+/* Simple mode treats the left panel as a resizable rounded surface resting
+ * above the workspace. Keep the shared edge completely unpainted. */
 .monaco-workbench.agent-sessions-workbench:not(.jarvis-window):not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sidebar) {
 	z-index: 1;
 	overflow: visible !important;
 	background: var(--sessions-main-region-background) !important;
+	border-right: 0 !important;
+	box-shadow: none !important;
+	outline: 0 !important;
 }
 
 .monaco-workbench.agent-sessions-workbench:not(.jarvis-window):not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sidebar)::after {
@@ -263,9 +270,43 @@
 	position: relative;
 	z-index: 1;
 	overflow: hidden;
-	border-right: 1px solid var(--sessions-panel-divider-color);
+	border-right: 0 !important;
 	border-radius: 0 14px 14px 0 !important;
-	box-shadow: 5px 0 18px -10px color-mix(in srgb, var(--vscode-widget-shadow, #000) 58%, transparent);
+	/* A broad, offset shadow gives the opaque rail separation from a custom
+	 * image without reintroducing the hard one-pixel divider. */
+	box-shadow: 10px 0 28px -12px color-mix(in srgb, #000 62%, transparent) !important;
+	outline: 0 !important;
+}
+
+/* Keep the resize hit target, but do not paint a second edge over the sidebar.
+ * The sidebar's own border radius is the only visible boundary. */
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window):not(.phone-layout) .monaco-split-view2.horizontal:has(.part.sidebar) > .sash-container > .monaco-sash.vertical {
+	background: transparent !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window):not(.phone-layout) .monaco-split-view2.horizontal:has(.part.sidebar) > .sash-container > .monaco-sash.vertical::before,
+.monaco-workbench.agent-sessions-workbench:not(.jarvis-window):not(.phone-layout) .monaco-split-view2.horizontal:has(.part.sidebar) > .sash-container > .monaco-sash.vertical::after {
+	display: none !important;
+}
+
+/* When the primary sidebar is collapsed, the remaining left rail is the
+ * Activity Bar. Its stock bordered pseudo-element and nosidebar shadow paint
+ * the same vertical divider independently of the sidebar and resize sash. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.phone-layout) .part.activitybar {
+	border-right: 0 !important;
+	box-shadow: none !important;
+	outline: 0 !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.phone-layout) .activitybar.left.bordered::before {
+	display: none !important;
+}
+
+/* The sessions panel's grid wrapper insets its own one-pixel divider on this
+ * same shared edge (the box-shadow form used elsewhere between parts). Drop
+ * it as well: the invisible resize sash is the only thing left on the edge. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sessionspart) {
+	box-shadow: none !important;
 }
 
 .monaco-workbench.hc-black.agent-sessions-workbench:not(.jarvis-window):not(.phone-layout) .part.sidebar,
@@ -1166,6 +1207,14 @@
 	background: var(--vscode-sash-hoverBorder, var(--vscode-focusBorder)) !important;
 }
 
+/* Simple mode keeps layout sashes interactive without drawing their active
+ * vertical/horizontal rails. Scope this to workbench grid sashes so resizers
+ * inside editors, browsers, and other embedded widgets retain their feedback. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.phone-layout) .monaco-grid-view .monaco-grid-branch-node > .monaco-split-view2 > .sash-container > .monaco-sash::before {
+	display: none !important;
+	background: transparent !important;
+}
+
 .agent-sessions-workbench .monaco-sash:not(.disabled) > .orthogonal-drag-handle {
 	border-radius: var(--vscode-sash-size);
 }
@@ -1536,6 +1585,22 @@
 		0 0 0 2px color-mix(in srgb, var(--vscode-agentsChatInput-focusBorder, var(--vscode-focusBorder)) 20%, transparent);
 }
 
+/* Lift the Simple-mode composer off image backgrounds with a soft drop shadow.
+ * Keep this out of the Advanced and Jarvis composer variants, which retain
+ * their existing chrome. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .chat-input-container {
+	box-shadow:
+		0 14px 30px -14px color-mix(in srgb, #000 50%, transparent),
+		0 4px 10px -6px color-mix(in srgb, #000 30%, transparent);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .chat-input-container.focused {
+	box-shadow:
+		0 0 0 2px color-mix(in srgb, var(--vscode-agentsChatInput-focusBorder, var(--vscode-focusBorder)) 20%, transparent),
+		0 14px 30px -14px color-mix(in srgb, #000 50%, transparent),
+		0 4px 10px -6px color-mix(in srgb, #000 30%, transparent);
+}
+
 /* Once a transcript exists, match the right panel's compact reply state. */
 :is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session:not(.chat-composer-empty) .chat-input-container,
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .chat-editor-relative .interactive-session:not(.chat-composer-empty) .chat-input-container {
@@ -1553,7 +1618,9 @@
 	padding: var(--bb-simple-sent-composer-padding, 5px 8px);
 	gap: var(--bb-simple-sent-composer-gap, 2px);
 	border-radius: var(--bb-simple-sent-composer-radius, 15px);
-	box-shadow: none;
+	/* No shadow declaration here: Simple mode inherits the soft drop shadow
+	 * from the composer shell rules above, while the Advanced right panel
+	 * falls back to the flat shell. */
 }
 
 /* The inline edit box inside a sent request shares `.chat-input-container` but

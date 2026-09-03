@@ -13,6 +13,7 @@ import { IFileService } from '../../../../platform/files/common/files.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { IRequestService } from '../../../../platform/request/common/request.js';
 import { IEditorService, MODAL_GROUP } from '../../../../workbench/services/editor/common/editorService.js';
+import { IEditorGroupsService } from '../../../../workbench/services/editor/common/editorGroupsService.js';
 import { IPathService } from '../../../../workbench/services/path/common/pathService.js';
 import { WebviewInput } from '../../../../workbench/contrib/webviewPanel/browser/webviewEditorInput.js';
 import { IWebviewWorkbenchService } from '../../../../workbench/contrib/webviewPanel/browser/webviewWorkbenchService.js';
@@ -60,6 +61,7 @@ export class BackboardUsageView extends Disposable {
 		@IRequestService private readonly requestService: IRequestService,
 		@ILogService private readonly logService: ILogService,
 		@IEditorService private readonly editorService: IEditorService,
+		@IEditorGroupsService private readonly editorGroupsService: IEditorGroupsService,
 	) {
 		super();
 	}
@@ -90,8 +92,13 @@ export class BackboardUsageView extends Disposable {
 		this.inputDisposables.add(input.webview.onMessage(event => {
 			if (event.message?.type === 'ready' || event.message?.type === 'refresh') {
 				void this.load();
-			} else if (event.message?.type === 'back' && input.group !== undefined) {
-				void this.editorService.closeEditor({ editor: input, groupId: input.group });
+			} else if (event.message?.type === 'back') {
+				const modalEditorPart = this.editorGroupsService.activeModalEditorPart;
+				if (modalEditorPart) {
+					void modalEditorPart.close();
+				} else if (input.group !== undefined) {
+					void this.editorService.closeEditor({ editor: input, groupId: input.group });
+				}
 			}
 		}));
 		this.inputDisposables.add(input.onWillDispose(() => {
@@ -463,7 +470,8 @@ function usageHtml(): string {
 		function renderChart(value) { const rows = aggregate(value.events.filter(event => event.date), 'day'), svg = byId('chart'); byId('chart-title').textContent = state.mode === 'cost' ? 'Daily cost' : 'Daily tokens'; if (!rows.length) { svg.innerHTML = ''; byId('chart-empty').classList.add('visible'); return; } byId('chart-empty').classList.remove('visible'); const values = rows.map(row => state.mode === 'cost' ? row.cost : row.tokens), max = Math.max(...values, 1), left = 48, right = 668, top = 18, bottom = 194, x = index => rows.length === 1 ? (left + right) / 2 : left + index / (rows.length - 1) * (right - left), y = item => bottom - item / max * (bottom - top), points = values.map((item, index) => [x(index), y(item)]), line = points.map((point, index) => (index ? 'L' : 'M') + point[0] + ',' + point[1]).join(' '), area = line + ' L' + points.at(-1)[0] + ',' + bottom + ' L' + points[0][0] + ',' + bottom + ' Z'; const grid = [0, .5, 1].map(fraction => '<line class="grid" x1="' + left + '" x2="' + right + '" y1="' + y(max * fraction) + '" y2="' + y(max * fraction) + '"></line><text class="axis" x="0" y="' + (y(max * fraction) + 3) + '">' + (state.mode === 'cost' ? money(max * fraction) : compact(max * fraction)) + '</text>').join(''); const labels = [...new Set([0, Math.floor((rows.length - 1) / 2), rows.length - 1])].map(index => '<text class="axis" x="' + x(index) + '" y="216" text-anchor="middle">' + new Date(rows[index].label + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + '</text>').join(''); svg.innerHTML = grid + '<path class="area" d="' + area + '"></path><path class="line" d="' + line + '"></path>' + labels; }
 		function renderMetrics(value) { const total = value.input + value.output; const metrics = [['Processed tokens', compact(total), compact(value.input) + ' input'], ['Output', compact(value.output), total ? percent(value.output / total) + ' of tokens' : 'No output reported'], ['Cached input', compact(value.cached), value.cached ? percent(value.cached / Math.max(1, value.input)) + ' of input' : 'Not reported'], ['Usage events', compact(value.count), state.range + '-day view'], ['Balance', money(value.balance), 'Available credit']]; byId('metrics').innerHTML = metrics.map(metric => '<div class="metric"><div class="muted">' + metric[0] + '</div><div class="metric-value">' + metric[1] + '</div><div class="muted">' + metric[2] + '</div></div>').join(''); }
 		function renderTable(value) { const rows = aggregate(value.events, state.breakdown), total = rows.reduce((sum, row) => sum + row.cost, 0); byId('first-column').textContent = state.breakdown === 'day' ? 'Day' : 'Model'; byId('table').style.display = rows.length ? 'table' : 'none'; byId('table-empty').classList.toggle('visible', !rows.length); byId('rows').innerHTML = rows.map(row => '<tr><td>' + escapeHtml(state.breakdown === 'day' && row.label !== 'Undated' ? new Date(row.label + 'T00:00:00').toLocaleDateString() : row.label) + '</td><td>' + money(row.cost) + '</td><td>' + percent(total ? row.cost / total : 0) + '</td><td>' + compact(row.tokens) + '</td></tr>').join(''); }
-		document.addEventListener('click', event => { const button = event.target.closest('button'); if (!button) return; if (button.id === 'back') { vscode.postMessage({ type: 'back' }); return; } if (button.dataset.range) state.range = Number(button.dataset.range); else if (button.dataset.mode) state.mode = button.dataset.mode; else if (button.dataset.breakdown) state.breakdown = button.dataset.breakdown; else if (button.id === 'refresh' && !state.loading) { state.loading = true; vscode.postMessage({ type: 'refresh' }); } render(); });
+		byId('back').addEventListener('click', () => vscode.postMessage({ type: 'back' }));
+		document.addEventListener('click', event => { const button = event.target.closest('button'); if (!button || button.id === 'back') return; if (button.dataset.range) state.range = Number(button.dataset.range); else if (button.dataset.mode) state.mode = button.dataset.mode; else if (button.dataset.breakdown) state.breakdown = button.dataset.breakdown; else if (button.id === 'refresh' && !state.loading) { state.loading = true; vscode.postMessage({ type: 'refresh' }); } render(); });
 		window.addEventListener('message', event => { const message = event.data; if (message.type === 'loading') { state.loading = true; byId('status').className = 'status visible'; byId('status').textContent = 'Loading Backboard usage…'; } else if (message.type === 'snapshot') { state.snapshot = message.snapshot; state.loading = false; byId('status').className = 'status'; } else if (message.type === 'error') { state.loading = false; byId('status').className = 'status visible error'; byId('status').textContent = message.message || 'Could not load usage.'; } render(); });
 		vscode.postMessage({ type: 'ready' }); render();
 	</script>

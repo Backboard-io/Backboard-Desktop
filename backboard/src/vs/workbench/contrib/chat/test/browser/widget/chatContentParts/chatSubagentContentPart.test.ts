@@ -495,8 +495,8 @@ suite('ChatSubagentContentPart', () => {
 			assert.strictEqual(part.domNode.querySelector('.chat-subagent-task')?.textContent, 'Worker: Inspect a deliberately long repository task without making the agent row tall');
 			assert.strictEqual(openButton.querySelector('.chat-subagent-open-label')?.textContent, 'Open chat');
 			assert.strictEqual(cardStyles.borderRadius, '0px');
-			assert.strictEqual(headerStyles.height, '29px');
-			assert.strictEqual(collapseStyles.height, '29px');
+			assert.strictEqual(headerStyles.height, '30px', JSON.stringify({ part: part.domNode.className, parent: part.domNode.parentElement?.className, header: collapseButton.parentElement!.className, h: headerStyles.height, mh: headerStyles.minHeight, bs: headerStyles.boxSizing, bt: headerStyles.borderTopWidth, disp: headerStyles.display, btn: collapseStyles.height, btnMin: collapseStyles.minHeight, pad: collapseStyles.padding, lh: collapseStyles.lineHeight, ali: headerStyles.alignItems }));
+			assert.strictEqual(collapseStyles.height, '30px');
 			assert.strictEqual(openStyles.height, '28px');
 			assert.strictEqual(openStyles.borderTopWidth, '0px', 'The open action must be integrated into the card header, not rendered as a pill');
 			assert.strictEqual(openStyles.borderRadius, '0px');

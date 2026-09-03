@@ -199,7 +199,7 @@ interface CliTsMutationBatch {
 type CliTsStoredPart =
 	| { readonly kind: 'markdown'; content: string }
 	| { readonly kind: 'reasoning'; content: string }
-	| { readonly kind: 'tool'; readonly id: string; readonly name: string; readonly inputSummary?: string; readonly title?: string; readonly detail?: string; readonly terminalOutput?: CliTsTerminalOutput; readonly toolUi?: CliTsToolUiState; readonly mutationBatch?: CliTsMutationBatch; readonly failed?: boolean; readonly workspace?: CliTsWorkerWorkspace; fileEdits?: readonly ToolResultFileEditContent[] };
+	| { readonly kind: 'tool'; readonly id: string; readonly name: string; readonly inputSummary?: string; readonly terminalCommand?: string; readonly title?: string; readonly detail?: string; readonly terminalOutput?: CliTsTerminalOutput; readonly toolUi?: CliTsToolUiState; readonly mutationBatch?: CliTsMutationBatch; readonly failed?: boolean; readonly workspace?: CliTsWorkerWorkspace; fileEdits?: readonly ToolResultFileEditContent[] };
 
 type CliTsTerminalOutput = NonNullable<CliTsAgentEvent['terminalOutput']>;
 
@@ -2396,7 +2396,11 @@ export class CliTsAgent extends Disposable implements IAgent {
 					turnId,
 					toolCallId: event.toolCallId,
 					invocationMessage: toolInvocationMessage(event.name, event.inputSummary),
-					toolInput: cliTsReadyToolInput(event.inputSummary, toolUiByCall?.get(event.toolCallId)),
+					toolInput: cliTsReadyToolInput(
+						event.inputSummary,
+						toolUiByCall?.get(event.toolCallId),
+						isCliTsTerminalTool(event.name) ? cliTsTerminalCommand(turn.toolInputs.get(event.toolCallId)?.input) : undefined,
+					),
 					confirmed: turn.confirmedToolCalls.has(event.toolCallId) ? ToolCallConfirmationReason.UserAction : ToolCallConfirmationReason.NotNeeded,
 					_meta: cliTsToolMetadata(event.name, turn.toolInputs.get(event.toolCallId)?.input, toolUiByCall?.get(event.toolCallId)?.kind, cliTsMutationBatches(turn).get(event.toolCallId)),
 				});
@@ -2536,6 +2540,9 @@ export class CliTsAgent extends Disposable implements IAgent {
 				const inputSummary = event.inputSummary ?? turn.toolInputSummaries.get(toolCallId);
 				const workspace = turn.workerWorkspaces?.get(toolCallId);
 				const toolUi = toolUiByCall?.get(toolCallId);
+				const terminalCommand = isCliTsTerminalTool(name)
+					? cliTsTerminalCommand(turn.toolInputs.get(toolCallId)?.input)
+					: undefined;
 				const terminalOutput = isCliTsTerminalTool(name)
 					? event.terminalOutput ?? terminalOutputFromProgress(turn.terminalOutputs.get(toolCallId))
 					: undefined;
@@ -2544,6 +2551,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 					id: toolCallId,
 					name,
 					...(inputSummary ? { inputSummary } : {}),
+					...(terminalCommand !== undefined ? { terminalCommand } : {}),
 					...(event.title ? { title: event.title } : {}),
 					...((isCliTsTerminalTool(name) || (isCliTsSubagentLauncherTool(name) && !detachedSubagent)) && event.detail ? { detail: event.detail } : {}),
 					...(terminalOutput ? { terminalOutput } : {}),
@@ -2600,12 +2608,16 @@ export class CliTsAgent extends Disposable implements IAgent {
 				const inputSummary = event.inputSummary ?? turn.toolInputSummaries.get(event.toolCallId);
 				const workspace = turn.workerWorkspaces?.get(event.toolCallId);
 				const toolUi = toolUiByCall?.get(event.toolCallId);
+				const terminalCommand = isCliTsTerminalTool(event.name)
+					? cliTsTerminalCommand(turn.toolInputs.get(event.toolCallId)?.input)
+					: undefined;
 				turn.storedParts.push({
 					kind: 'tool',
 					id: event.toolCallId,
 					name: event.name,
 					failed: true,
 					...(inputSummary ? { inputSummary } : {}),
+					...(terminalCommand !== undefined ? { terminalCommand } : {}),
 					...(event.error ? { title: event.error.slice(0, 200) } : {}),
 					...(toolUi ? { toolUi } : {}),
 					...(cliTsMutationBatches(turn).get(event.toolCallId) ? { mutationBatch: cliTsMutationBatches(turn).get(event.toolCallId) } : {}),
@@ -3245,6 +3257,7 @@ function projectRuntimeSubagentRecovery(recovery: CliTsRuntimeSubagentRecovery, 
 		return {
 			...part,
 			...(part.inputSummary ? { inputSummary: replaceText(part.inputSummary) } : {}),
+			...(part.terminalCommand !== undefined ? { terminalCommand: replaceText(part.terminalCommand) } : {}),
 			...(part.title ? { title: replaceText(part.title) } : {}),
 			...(part.detail ? { detail: replaceText(part.detail) } : {}),
 			...(part.terminalOutput ? { terminalOutput: { ...part.terminalOutput, text: replaceText(part.terminalOutput.text) } } : {}),
@@ -3339,11 +3352,15 @@ function runtimeSubagentRecoveryFromEvents(prompt: string, eventsRaw: string): C
 		const toolUi = incomingToolUi
 			? mergeCliTsToolUiState(current?.part.toolUi, incomingToolUi)
 			: current?.part.toolUi;
+		const terminalCommand = isCliTsTerminalTool(name)
+			? cliTsTerminalCommand(requestedToolInputs.get(event.toolCallId)) ?? current?.part.terminalCommand
+			: undefined;
 		const next: ToolPart = {
 			kind: 'tool',
 			id: event.toolCallId,
 			name,
 			...(event.inputSummary || current?.part.inputSummary ? { inputSummary: event.inputSummary || current?.part.inputSummary } : {}),
+			...(terminalCommand !== undefined ? { terminalCommand } : {}),
 			...(terminal && event.title ? { title: event.title } : current?.part.title ? { title: current.part.title } : {}),
 			...(terminal && event.detail ? { detail: event.detail } : current?.part.detail ? { detail: current.part.detail } : {}),
 			...(terminal && event.terminalOutput ? { terminalOutput: event.terminalOutput } : current?.part.terminalOutput ? { terminalOutput: current.part.terminalOutput } : {}),
@@ -3470,6 +3487,23 @@ function isCliTsTerminalTool(toolName: string): boolean {
 	return toolName.toLocaleLowerCase() === 'execute';
 }
 
+/**
+ * `inputSummary` is intentionally abbreviated by cli-ts for the compact tool
+ * row. Terminal cards need the actual shell command, however, so recover it
+ * from the structured `tool:requested` payload before that information is
+ * lost at the protocol boundary.
+ */
+function cliTsTerminalCommand(input: unknown): string | undefined {
+	if (typeof input === 'string') {
+		return input;
+	}
+	if (!input || typeof input !== 'object' || Array.isArray(input)) {
+		return undefined;
+	}
+	const command = (input as { command?: unknown }).command;
+	return typeof command === 'string' ? command : undefined;
+}
+
 function isCliTsSubagentTool(toolName: string): boolean {
 	const normalized = toolName.replace(/[_-]/g, '').toLocaleLowerCase();
 	return normalized === 'agent' || normalized === 'subagent';
@@ -3588,7 +3622,10 @@ function mergeCliTsToolUiState(existing: CliTsToolUiState | undefined, incoming:
 	};
 }
 
-function cliTsReadyToolInput(inputSummary: string | undefined, toolUi: CliTsToolUiState | undefined): string {
+function cliTsReadyToolInput(inputSummary: string | undefined, toolUi: CliTsToolUiState | undefined, terminalCommand?: string): string {
+	if (terminalCommand !== undefined) {
+		return JSON.stringify({ command: terminalCommand });
+	}
 	if (!toolUi?.input) {
 		return inputSummary ?? '';
 	}
@@ -3875,7 +3912,7 @@ function storedTurnToProtocolTurn(sessionId: string, index: number, turn: CliTsS
 						toolName: part.name,
 						displayName,
 						invocationMessage: toolInvocationMessage(part.name, part.inputSummary),
-						toolInput: cliTsReadyToolInput(part.inputSummary, toolUi),
+						toolInput: cliTsReadyToolInput(part.inputSummary, toolUi, part.terminalCommand),
 						confirmed: ToolCallConfirmationReason.NotNeeded,
 						success: !part.failed,
 						pastTenseMessage: part.title ?? (part.failed

@@ -463,7 +463,7 @@ suite('ChatToolProgressSubPart', () => {
 			true,
 		));
 
-		assert.ok(/^· \d+s$/.test(part.domNode.querySelector('.chat-progress-elapsed')?.textContent ?? ''));
+		assert.strictEqual(part.domNode.querySelector('.chat-progress-elapsed'), null, 'Progress rows never show elapsed time');
 	});
 
 	test('keeps cursor transcript pending work at Planning next moves across rerenders', () => {

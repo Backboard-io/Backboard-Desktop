@@ -88,7 +88,7 @@ suite('ChatViewPane CSS', () => {
 		assert.match(chatCss, /\.chat-pending-message\s*\{/);
 	});
 
-	test('uses the real disclosure label and content-sized terminal preview', () => {
+	test('caps collapsed command labels and reveals full expanded commands', () => {
 		const transcriptRoot = '.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript';
 		const terminalCard = ruleBody(chatCss, `${transcriptRoot} .chat-thinking-tool-wrapper.chat-thinking-cursor-terminal-row`);
 		const editorTerminalCard = ruleBody(chatCss, '.monaco-workbench .chat-editor-relative .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-tool-wrapper.chat-thinking-cursor-terminal-row');
@@ -99,6 +99,7 @@ suite('ChatViewPane CSS', () => {
 		const terminalCode = ruleBody(chatCss, `${transcriptRoot} .chat-thinking-cursor-terminal-row .chat-terminal-thinking-collapsible > .chat-used-context-label :is(.monaco-button-mdlabel, .monaco-button-label) code`);
 		const expandedTerminalButton = ruleBody(chatCss, `${transcriptRoot} .chat-thinking-cursor-terminal-row .chat-terminal-thinking-collapsible:not(.chat-used-context-collapsed) > .chat-used-context-label .monaco-button`);
 		const expandedTerminalLabel = ruleBody(chatCss, `${transcriptRoot} .chat-thinking-cursor-terminal-row .chat-terminal-thinking-collapsible:not(.chat-used-context-collapsed) > .chat-used-context-label :is(.monaco-button-mdlabel, .monaco-button-label)`);
+		const collapsedTerminalLabel = ruleBody(chatCss, `${transcriptRoot} .chat-thinking-cursor-terminal-row .chat-terminal-thinking-collapsible.chat-used-context-collapsed > .chat-used-context-label :is(.monaco-button-mdlabel, .monaco-button-label)`);
 		const expandedTerminalCode = ruleBody(chatCss, `${transcriptRoot} .chat-thinking-cursor-terminal-row .chat-terminal-thinking-collapsible:not(.chat-used-context-collapsed) > .chat-used-context-label :is(.monaco-button-mdlabel, .monaco-button-label) code`);
 		const terminalChevron = ruleBody(chatCss, `${transcriptRoot} .chat-thinking-cursor-terminal-row .chat-terminal-thinking-collapsible > .chat-used-context-label .chat-collapsible-hover-chevron`);
 		const terminalPreview = ruleBody(chatCss, `${transcriptRoot} .chat-thinking-cursor-terminal-row .chat-terminal-collapsed-output-preview`);
@@ -118,18 +119,33 @@ suite('ChatViewPane CSS', () => {
 		assert.match(terminalGutterReset, /padding:\s*0\s*!important/);
 		assert.match(terminalButton, /justify-content:\s*flex-start/);
 		assert.match(terminalButton, /gap:\s*0/);
-		assert.match(terminalButton, /padding:\s*0 var\(--bb-cursor-terminal-inline-inset\)/);
+		assert.match(terminalButton, /padding:\s*6px var\(--bb-cursor-terminal-inline-inset\)/);
 		assert.match(terminalLeadingIcon, /display:\s*none\s*!important/);
 		assert.match(terminalLeadingIcon, /width:\s*0/);
-		assert.match(terminalLabel, /text-overflow:\s*ellipsis/);
-		assert.match(terminalLabel, /white-space:\s*nowrap/);
-		assert.match(terminalCode, /white-space:\s*nowrap/);
+		assert.match(terminalLabel, /display:\s*-webkit-box/);
+		assert.match(terminalLabel, /max-height:\s*36px/);
+		assert.match(terminalLabel, /text-overflow:\s*clip/);
+		assert.match(terminalLabel, /white-space:\s*normal/);
+		assert.match(terminalLabel, /overflow-wrap:\s*anywhere/);
+		assert.match(terminalLabel, /-webkit-line-clamp:\s*2/);
+		assert.match(terminalLabel, /line-clamp:\s*2/);
+		assert.match(terminalCode, /white-space:\s*normal/);
+		assert.match(terminalCode, /overflow-wrap:\s*anywhere/);
+		assert.match(collapsedTerminalLabel, /display:\s*-webkit-box/);
+		assert.match(collapsedTerminalLabel, /max-height:\s*60px/);
+		assert.match(collapsedTerminalLabel, /overflow:\s*hidden/);
+		assert.match(collapsedTerminalLabel, /-webkit-line-clamp:\s*3/);
+		assert.match(collapsedTerminalLabel, /line-clamp:\s*3/);
 		assert.match(expandedTerminalButton, /height:\s*auto/);
 		assert.match(expandedTerminalButton, /align-items:\s*flex-start/);
+		assert.match(expandedTerminalLabel, /display:\s*flex/);
+		assert.match(expandedTerminalLabel, /max-height:\s*none/);
 		assert.match(expandedTerminalLabel, /overflow:\s*visible/);
 		assert.match(expandedTerminalLabel, /text-overflow:\s*clip/);
 		assert.match(expandedTerminalLabel, /white-space:\s*normal/);
 		assert.match(expandedTerminalLabel, /overflow-wrap:\s*anywhere/);
+		assert.match(expandedTerminalLabel, /-webkit-line-clamp:\s*unset/);
+		assert.match(expandedTerminalLabel, /line-clamp:\s*unset/);
 		assert.match(expandedTerminalCode, /white-space:\s*pre-wrap/);
 		assert.match(expandedTerminalCode, /overflow-wrap:\s*anywhere/);
 		assert.match(terminalChevron, /opacity:\s*0\.58/);
@@ -152,11 +168,15 @@ suite('ChatViewPane CSS', () => {
 	});
 
 	test('keeps terminal tool output scrollback reachable', () => {
+		const transcriptRoot = '.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript';
 		const terminalToolCss = readFileSync(join(process.cwd(), 'src/vs/workbench/contrib/chat/browser/widget/chatContentParts/media/chatTerminalToolProgressPart.css'), 'utf8');
 		const terminalScrollbar = ruleBody(terminalToolCss, '.chat-terminal-output-container .xterm-scrollable-element .xterm-scrollbar');
+		const transcriptScrollbar = ruleBody(chatCss, `${transcriptRoot} .chat-thinking-cursor-terminal-row .chat-terminal-output-container.expanded .xterm-scrollable-element .xterm-scrollbar`);
 
 		assert.match(terminalScrollbar, /display:\s*block/);
 		assert.doesNotMatch(terminalScrollbar, /display:\s*none/);
+		assert.match(transcriptScrollbar, /display:\s*block/);
+		assert.doesNotMatch(transcriptScrollbar, /display:\s*none/);
 	});
 
 	test('hides closed Thoughts and bounds open previews while indenting exploration details', () => {

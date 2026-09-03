@@ -43,6 +43,39 @@ suite('Sessions - Sessions Part', () => {
 		assert.deepStrictEqual(gridLayoutArgs, [1196, 796, 0, 300]);
 	});
 
+	test('clears relocated session headers when a draft replaces the active session', () => {
+		let titleSlotClears = 0;
+		let toolbarSlotClears = 0;
+		let openedDraft = false;
+		let restoredHeader = false;
+		const slot = {
+			boundSessionId: 'session-1' as string | undefined,
+			view: {
+				openSession: (session: undefined) => { openedDraft = session === undefined; },
+				element: { classList: { toggle: () => undefined } },
+				setActive: () => undefined,
+				mountHeaderIntoPanel: () => undefined,
+				restoreHeaderToView: () => { restoredHeader = true; },
+			},
+		};
+		const part = {
+			_gridWidget: { hasMaximizedView: () => false },
+			_slots: [slot],
+			_newSessionViewOptions: () => ({}),
+			_headerSessionTitleSlot: { replaceChildren: () => { titleSlotClears++; } },
+			_headerSessionToolbarSlot: { replaceChildren: () => { toolbarSlotClears++; } },
+			_updateContextKeys: () => undefined,
+			_updateSubagentNavigationContext: () => undefined,
+		};
+
+		SessionsPart.prototype.updateVisibleSessions.call(part as unknown as SessionsPart, [undefined], undefined);
+
+		assert.strictEqual(openedDraft, true);
+		assert.strictEqual(restoredHeader, true);
+		assert.strictEqual(titleSlotClears, 1);
+		assert.strictEqual(toolbarSlotClears, 1);
+	});
+
 	test('Back returns to a parent chat before traversing session history', async () => {
 		let sessionHistoryCalls = 0;
 		const rootResource = URI.parse('chat-session://test/session-1');

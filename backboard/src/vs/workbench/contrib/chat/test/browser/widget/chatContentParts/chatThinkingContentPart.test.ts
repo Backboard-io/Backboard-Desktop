@@ -802,6 +802,7 @@ suite('ChatThinkingContentPart', () => {
 			const disclosure = disposables.add(instantiationService.createInstance(
 				ChatTerminalThinkingCollapsibleWrapper,
 				command,
+				command,
 				false,
 				nativeShell,
 				context,
@@ -1280,9 +1281,19 @@ suite('ChatThinkingContentPart', () => {
 			const firstStack = first.closest<HTMLElement>('.chat-core-tool-stack-read');
 			assert.ok(firstStack, 'Expected adjacent reads to be wrapped in a shared panel');
 			assert.strictEqual(second.closest('.chat-core-tool-stack-read'), firstStack);
-			assert.strictEqual(firstStack.querySelectorAll(':scope > .chat-thinking-core-tool-row').length, 2);
-			assert.strictEqual(firstStack.getAttribute('role'), 'list');
-			assert.strictEqual(firstStack.getAttribute('aria-label'), 'Read files');
+			const stackBody = firstStack.querySelector<HTMLElement>(':scope > .chat-core-tool-stack-body');
+			assert.ok(stackBody, 'Expected the shared panel to keep its reads in a body element');
+			assert.strictEqual(stackBody.querySelectorAll(':scope > .chat-thinking-core-tool-row').length, 2);
+			assert.strictEqual(stackBody.getAttribute('role'), 'list');
+			assert.strictEqual(stackBody.getAttribute('aria-label'), 'Read files');
+			const stackHeader = firstStack.querySelector<HTMLElement>(':scope > .chat-core-tool-stack-header');
+			assert.ok(stackHeader, 'Expected the shared panel to expose one summary row');
+			assert.strictEqual(stackHeader.textContent, 'Read 2 files');
+			assert.strictEqual(stackHeader.getAttribute('aria-expanded'), 'false');
+			assert.ok(!firstStack.classList.contains('chat-core-tool-stack-expanded'), 'Reads start folded behind their summary row');
+			stackHeader.click();
+			assert.strictEqual(stackHeader.getAttribute('aria-expanded'), 'true');
+			assert.ok(firstStack.classList.contains('chat-core-tool-stack-expanded'));
 
 			part.setupThinkingContainer(createThinkingPart('Considering the next file', 'cursor-read-stack-break'));
 			const third = appendNativeCoreRead(part, 'stack-third');
@@ -2546,64 +2557,64 @@ suite('ChatThinkingContentPart', () => {
 			});
 		});
 
-				test('finalized text edit history is indexed once per response and observes live applied state', () => {
-					const targetChange = disposables.add(new Emitter<void>());
-					const createGroup = (index: number): IChatTextEditGroup => ({
-						kind: 'textEditGroup',
-						uri: URI.file(`/project/src/indexed-${index}.ts`),
-						edits: [[]],
-						done: true,
-						state: { sha1: `sha-${index}`, applied: 0 },
-					});
-					const groups = Array.from({ length: 25 }, (_, index) => createGroup(index));
-					const priorGroup = createGroup(100);
-					const laterGroup = createGroup(200);
-					const priorResponse = {
-						response: { value: [priorGroup] },
-						onDidChange: Event.None,
-					} as unknown as IChatResponseModel;
-					const targetResponse = {
-						response: { value: groups },
-						onDidChange: targetChange.event,
-					} as unknown as IChatResponseModel;
-					const laterResponse = {
-						response: { value: [laterGroup] },
-						onDidChange: Event.None,
-					} as unknown as IChatResponseModel;
-					let historyTraversalCount = 0;
-					const chatModel = {
-						getRequests: () => {
-							historyTraversalCount++;
-							return [
-								{ response: priorResponse },
-								{ response: targetResponse },
-								{ response: laterResponse },
-							];
-						},
-					} as unknown as IChatModel;
-					const index = new TextEditGroupHistoryIndex();
+		test('finalized text edit history is indexed once per response and observes live applied state', () => {
+			const targetChange = disposables.add(new Emitter<void>());
+			const createGroup = (index: number): IChatTextEditGroup => ({
+				kind: 'textEditGroup',
+				uri: URI.file(`/project/src/indexed-${index}.ts`),
+				edits: [[]],
+				done: true,
+				state: { sha1: `sha-${index}`, applied: 0 },
+			});
+			const groups = Array.from({ length: 25 }, (_, index) => createGroup(index));
+			const priorGroup = createGroup(100);
+			const laterGroup = createGroup(200);
+			const priorResponse = {
+				response: { value: [priorGroup] },
+				onDidChange: Event.None,
+			} as unknown as IChatResponseModel;
+			const targetResponse = {
+				response: { value: groups },
+				onDidChange: targetChange.event,
+			} as unknown as IChatResponseModel;
+			const laterResponse = {
+				response: { value: [laterGroup] },
+				onDidChange: Event.None,
+			} as unknown as IChatResponseModel;
+			let historyTraversalCount = 0;
+			const chatModel = {
+				getRequests: () => {
+					historyTraversalCount++;
+					return [
+						{ response: priorResponse },
+						{ response: targetResponse },
+						{ response: laterResponse },
+					];
+				},
+			} as unknown as IChatModel;
+			const index = new TextEditGroupHistoryIndex();
 
-					for (const group of groups) {
-						assert.deepStrictEqual(index.getUnappliedGroups(chatModel, targetResponse, group.uri, true), [group]);
-					}
-					assert.strictEqual(historyTraversalCount, 1, 'all finalized file cards should share one history traversal');
-					assert.deepStrictEqual(index.getUnappliedGroups(chatModel, targetResponse, laterGroup.uri, true), [], 'groups after the target response must stay excluded');
+			for (const group of groups) {
+				assert.deepStrictEqual(index.getUnappliedGroups(chatModel, targetResponse, group.uri, true), [group]);
+			}
+			assert.strictEqual(historyTraversalCount, 1, 'all finalized file cards should share one history traversal');
+			assert.deepStrictEqual(index.getUnappliedGroups(chatModel, targetResponse, laterGroup.uri, true), [], 'groups after the target response must stay excluded');
 
-					groups[0].state!.applied = 1;
-					assert.deepStrictEqual(index.getUnappliedGroups(chatModel, targetResponse, groups[0].uri, true), [], 'cached live groups must observe applied-state mutation');
-					assert.strictEqual(historyTraversalCount, 1);
+			groups[0].state!.applied = 1;
+			assert.deepStrictEqual(index.getUnappliedGroups(chatModel, targetResponse, groups[0].uri, true), [], 'cached live groups must observe applied-state mutation');
+			assert.strictEqual(historyTraversalCount, 1);
 
-					targetChange.fire();
-					assert.deepStrictEqual(index.getUnappliedGroups(chatModel, targetResponse, groups[1].uri, true), [groups[1]]);
-					assert.strictEqual(historyTraversalCount, 2, 'a target response change must invalidate cached membership');
+			targetChange.fire();
+			assert.deepStrictEqual(index.getUnappliedGroups(chatModel, targetResponse, groups[1].uri, true), [groups[1]]);
+			assert.strictEqual(historyTraversalCount, 2, 'a target response change must invalidate cached membership');
 
-					index.getUnappliedGroups(chatModel, targetResponse, groups[2].uri, false);
-					index.getUnappliedGroups(chatModel, targetResponse, groups[3].uri, false);
-					assert.strictEqual(historyTraversalCount, 4, 'incomplete responses must never reuse a mutable history index');
-					targetChange.fire();
-				});
+			index.getUnappliedGroups(chatModel, targetResponse, groups[2].uri, false);
+			index.getUnappliedGroups(chatModel, targetResponse, groups[3].uri, false);
+			assert.strictEqual(historyTraversalCount, 4, 'incomplete responses must never reuse a mutable history index');
+			targetChange.fire();
+		});
 
-				test('Cursor textEditGroup replaces the full compare editor with the same compact diff card', async () => {
+		test('Cursor textEditGroup replaces the full compare editor with the same compact diff card', async () => {
 			const fileUri = URI.file('/project/src/entities.js');
 			const beforeUri = URI.parse('chat-text-edit://before/entities.js');
 			const afterUri = URI.parse('chat-text-edit://after/entities.js');
@@ -2706,227 +2717,227 @@ suite('ChatThinkingContentPart', () => {
 				reportedStats: { added: 2, removed: 2 },
 			});
 
-				part.dispose();
-					assert.strictEqual(modelRefDisposeCount, 1, 'Disposing the compact card should release compare models immediately');
-				});
+			part.dispose();
+			assert.strictEqual(modelRefDisposeCount, 1, 'Disposing the compact card should release compare models immediately');
+		});
 
-				test('Cursor textEditGroup uses one viewport gate and mounts its seeded preview immediately after intersection', async () => {
-					interface IFakeObserverRecord {
-						readonly callback: IntersectionObserverCallback;
-						readonly observer: IntersectionObserver;
-						target: Element | undefined;
-						disconnected: boolean;
-					}
-					const observerRecords: IFakeObserverRecord[] = [];
-					class FakeIntersectionObserver {
-						readonly root = null;
-						readonly rootMargin = '600px 0px';
-						readonly thresholds = [0];
-						private readonly record: IFakeObserverRecord;
+		test('Cursor textEditGroup uses one viewport gate and mounts its seeded preview immediately after intersection', async () => {
+			interface IFakeObserverRecord {
+				readonly callback: IntersectionObserverCallback;
+				readonly observer: IntersectionObserver;
+				target: Element | undefined;
+				disconnected: boolean;
+			}
+			const observerRecords: IFakeObserverRecord[] = [];
+			class FakeIntersectionObserver {
+				readonly root = null;
+				readonly rootMargin = '600px 0px';
+				readonly thresholds = [0];
+				private readonly record: IFakeObserverRecord;
 
-						constructor(callback: IntersectionObserverCallback) {
-							this.record = {
-								callback,
-								observer: this as unknown as IntersectionObserver,
-								target: undefined,
-								disconnected: false,
-							};
-							observerRecords.push(this.record);
-						}
-
-						disconnect(): void { this.record.disconnected = true; }
-						observe(target: Element): void { this.record.target = target; }
-						takeRecords(): IntersectionObserverEntry[] { return []; }
-						unobserve(_target: Element): void { }
-					}
-
-					const intersectionObserverDescriptor = Object.getOwnPropertyDescriptor(mainWindow, 'IntersectionObserver');
-					Object.defineProperty(mainWindow, 'IntersectionObserver', {
-						configurable: true,
-						writable: true,
-						value: FakeIntersectionObserver,
-					});
-					disposables.add(toDisposable(() => {
-						if (intersectionObserverDescriptor) {
-							Object.defineProperty(mainWindow, 'IntersectionObserver', intersectionObserverDescriptor);
-						} else {
-							delete (mainWindow as unknown as { IntersectionObserver?: typeof IntersectionObserver }).IntersectionObserver;
-						}
-					}));
-
-					const beforeUri = URI.parse('chat-text-edit://before/viewport.ts');
-					const afterUri = URI.parse('chat-text-edit://after/viewport.ts');
-					const beforeContent = 'const value = 1;';
-					const afterContent = 'const value = 2;';
-					instantiationService.stub(ICodeCompareModelService, {
-						_serviceBrand: undefined,
-						createModel: async () => ({
-							object: {
-								originalSha1: 'before-sha',
-								original: { textEditorModel: { uri: beforeUri, getValue: () => beforeContent } },
-								modified: { textEditorModel: { uri: afterUri, getValue: () => afterContent } },
-							},
-							dispose: () => { },
-						}),
-					} as unknown as ICodeCompareModelService);
-					instantiationService.stub(IEditorWorkerService, {
-						_serviceBrand: undefined,
-						computeDiff: async () => null,
-					} as unknown as IEditorWorkerService);
-
-					const context = createMockRenderContext(true);
-					context.container.classList.add('backboard-clean-chat', 'backboard-cursor-transcript');
-					Object.assign(context.element, { setVote: () => undefined });
-					const part = disposables.add(instantiationService.createInstance(
-						ChatTextEditContentPart,
-						{ kind: 'textEditGroup', uri: URI.file('/project/src/viewport.ts'), edits: [[]], done: true },
-						context,
-						{},
-						{} as DiffEditorPool,
-						500,
-					));
-					context.container.appendChild(part.domNode);
-
-					assert.strictEqual(observerRecords.length, 1, 'the lightweight shell should own one viewport observer');
-					assert.strictEqual(part.domNode.querySelector('.chat-external-edit-diff-body'), null);
-					const outerObserver = observerRecords[0];
-					assert.ok(outerObserver.target);
-					outerObserver.callback([{
-						isIntersecting: true,
-						intersectionRatio: 1,
-						target: outerObserver.target,
-					} as IntersectionObserverEntry], outerObserver.observer);
-
-					for (let attempt = 0; attempt < 100 && !part.domNode.querySelector('.chat-external-edit-diff-row'); attempt++) {
-						await new Promise<void>(resolve => mainWindow.setTimeout(resolve, 0));
-					}
-					assert.deepStrictEqual({
-						observers: observerRecords.length,
-						outerDisconnected: outerObserver.disconnected,
-						rows: part.domNode.querySelectorAll('.chat-external-edit-diff-row').length,
-					}, {
-						observers: 1,
-						outerDisconnected: true,
-						rows: 2,
-					}, 'the proven-near replacement card must not allocate a second observer');
-				});
-
-				test('Cursor textEditGroup mounts its preview before the worker diff and updates the same card', async () => {
-				const fileUri = URI.file('/project/src/deferred-worker.ts');
-				const beforeUri = URI.parse('chat-text-edit://before/deferred-worker.ts');
-				const afterUri = URI.parse('chat-text-edit://after/deferred-worker.ts');
-				const beforeContent = 'const stable = true;\nconst oldA = 1;\nconst oldB = 2;\nconst tail = true;';
-				const afterContent = 'const stable = true;\nconst nextA = 3;\nconst nextB = 4;\nconst tail = true;';
-				let modelRefDisposeCount = 0;
-				let workerDiffCount = 0;
-				let resolveWorkerDiff!: (value: {
-					changes: DetailedLineRangeMapping[];
-					identical: boolean;
-					quitEarly: boolean;
-					moves: never[];
-				}) => void;
-				const workerDiff = new Promise<{
-					changes: DetailedLineRangeMapping[];
-					identical: boolean;
-					quitEarly: boolean;
-					moves: never[];
-				}>(resolve => resolveWorkerDiff = resolve);
-				instantiationService.stub(ICodeCompareModelService, {
-					_serviceBrand: undefined,
-					createModel: async () => ({
-						object: {
-							originalSha1: 'before-sha',
-							original: { textEditorModel: { uri: beforeUri, getValue: () => beforeContent } },
-							modified: { textEditorModel: { uri: afterUri, getValue: () => afterContent } },
-						},
-						dispose: () => modelRefDisposeCount++,
-					}),
-				} as unknown as ICodeCompareModelService);
-				instantiationService.stub(IEditorWorkerService, {
-					_serviceBrand: undefined,
-					computeDiff: () => {
-						workerDiffCount++;
-						return workerDiff;
-					},
-				} as unknown as IEditorWorkerService);
-				instantiationService.stub(ITextModelService, {
-					_serviceBrand: undefined,
-					createModelReference: async () => {
-						throw new Error('Seeded preview should not resolve snapshot models');
-					},
-				} as unknown as ITextModelService);
-
-				const context = createMockRenderContext(true);
-				context.container.classList.add('backboard-clean-chat', 'backboard-cursor-transcript');
-				Object.assign(context.element, { setVote: () => undefined });
-				const part = disposables.add(instantiationService.createInstance(
-					ChatTextEditContentPart,
-					{
-						kind: 'textEditGroup',
-						uri: fileUri,
-						edits: [[]],
-						done: true,
-					},
-					context,
-					{},
-					{} as DiffEditorPool,
-					500,
-				));
-				let reportedStats: IEditSessionDiffStats | undefined;
-				disposables.add(part.onDidChangeDiff(stats => reportedStats = stats));
-				context.container.appendChild(part.domNode);
-				mainWindow.document.body.appendChild(context.container);
-				disposables.add(toDisposable(() => context.container.remove()));
-
-				for (let attempt = 0; attempt < 100 && !part.domNode.querySelector('.chat-external-edit-diff-row'); attempt++) {
-					await new Promise<void>(resolve => mainWindow.setTimeout(resolve, 5));
-				}
-				const cardIdentity = part.domNode;
-				assert.deepStrictEqual({
-					cardMounted: cardIdentity.classList.contains('chat-external-edit-card'),
-					previewRows: cardIdentity.querySelectorAll('.chat-external-edit-diff-row').length,
-					addedCounter: cardIdentity.querySelector('.label-added'),
-					removedCounter: cardIdentity.querySelector('.label-removed'),
-					workerDiffCount,
-					reportedStats,
-				}, {
-					cardMounted: true,
-					previewRows: 6,
-					addedCounter: null,
-					removedCounter: null,
-					workerDiffCount: 1,
-					reportedStats: undefined,
-				}, 'The compact preview must be useful while exact stats are still pending');
-
-				resolveWorkerDiff({
-					changes: [createExactLineChange(2, 4, 2, 4)],
-					identical: false,
-					quitEarly: false,
-					moves: [],
-				});
-				for (let attempt = 0; attempt < 100 && !part.domNode.querySelector('.label-added'); attempt++) {
-					await new Promise<void>(resolve => mainWindow.setTimeout(resolve, 5));
+				constructor(callback: IntersectionObserverCallback) {
+					this.record = {
+						callback,
+						observer: this as unknown as IntersectionObserver,
+						target: undefined,
+						disconnected: false,
+					};
+					observerRecords.push(this.record);
 				}
 
-				assert.deepStrictEqual({
-					sameCard: part.domNode === cardIdentity,
-					added: part.domNode.querySelector('.label-added')?.textContent,
-					removed: part.domNode.querySelector('.label-removed')?.textContent,
-					workerDiffCount,
-					reportedStats,
-				}, {
-					sameCard: true,
-					added: '+2',
-					removed: '-2',
-					workerDiffCount: 1,
-					reportedStats: { added: 2, removed: 2 },
-				}, 'Worker completion should update counters in place without re-rendering the card');
+				disconnect(): void { this.record.disconnected = true; }
+				observe(target: Element): void { this.record.target = target; }
+				takeRecords(): IntersectionObserverEntry[] { return []; }
+				unobserve(_target: Element): void { }
+			}
 
-				part.dispose();
-				assert.strictEqual(modelRefDisposeCount, 1);
+			const intersectionObserverDescriptor = Object.getOwnPropertyDescriptor(mainWindow, 'IntersectionObserver');
+			Object.defineProperty(mainWindow, 'IntersectionObserver', {
+				configurable: true,
+				writable: true,
+				value: FakeIntersectionObserver,
 			});
+			disposables.add(toDisposable(() => {
+				if (intersectionObserverDescriptor) {
+					Object.defineProperty(mainWindow, 'IntersectionObserver', intersectionObserverDescriptor);
+				} else {
+					delete (mainWindow as unknown as { IntersectionObserver?: typeof IntersectionObserver }).IntersectionObserver;
+				}
+			}));
 
-			test('Cursor streaming textEditGroup reuses a lightweight shell until the diff is final', async () => {
+			const beforeUri = URI.parse('chat-text-edit://before/viewport.ts');
+			const afterUri = URI.parse('chat-text-edit://after/viewport.ts');
+			const beforeContent = 'const value = 1;';
+			const afterContent = 'const value = 2;';
+			instantiationService.stub(ICodeCompareModelService, {
+				_serviceBrand: undefined,
+				createModel: async () => ({
+					object: {
+						originalSha1: 'before-sha',
+						original: { textEditorModel: { uri: beforeUri, getValue: () => beforeContent } },
+						modified: { textEditorModel: { uri: afterUri, getValue: () => afterContent } },
+					},
+					dispose: () => { },
+				}),
+			} as unknown as ICodeCompareModelService);
+			instantiationService.stub(IEditorWorkerService, {
+				_serviceBrand: undefined,
+				computeDiff: async () => null,
+			} as unknown as IEditorWorkerService);
+
+			const context = createMockRenderContext(true);
+			context.container.classList.add('backboard-clean-chat', 'backboard-cursor-transcript');
+			Object.assign(context.element, { setVote: () => undefined });
+			const part = disposables.add(instantiationService.createInstance(
+				ChatTextEditContentPart,
+				{ kind: 'textEditGroup', uri: URI.file('/project/src/viewport.ts'), edits: [[]], done: true },
+				context,
+				{},
+				{} as DiffEditorPool,
+				500,
+			));
+			context.container.appendChild(part.domNode);
+
+			assert.strictEqual(observerRecords.length, 1, 'the lightweight shell should own one viewport observer');
+			assert.strictEqual(part.domNode.querySelector('.chat-external-edit-diff-body'), null);
+			const outerObserver = observerRecords[0];
+			assert.ok(outerObserver.target);
+			outerObserver.callback([{
+				isIntersecting: true,
+				intersectionRatio: 1,
+				target: outerObserver.target,
+			} as IntersectionObserverEntry], outerObserver.observer);
+
+			for (let attempt = 0; attempt < 100 && !part.domNode.querySelector('.chat-external-edit-diff-row'); attempt++) {
+				await new Promise<void>(resolve => mainWindow.setTimeout(resolve, 0));
+			}
+			assert.deepStrictEqual({
+				observers: observerRecords.length,
+				outerDisconnected: outerObserver.disconnected,
+				rows: part.domNode.querySelectorAll('.chat-external-edit-diff-row').length,
+			}, {
+				observers: 1,
+				outerDisconnected: true,
+				rows: 2,
+			}, 'the proven-near replacement card must not allocate a second observer');
+		});
+
+		test('Cursor textEditGroup mounts its preview before the worker diff and updates the same card', async () => {
+			const fileUri = URI.file('/project/src/deferred-worker.ts');
+			const beforeUri = URI.parse('chat-text-edit://before/deferred-worker.ts');
+			const afterUri = URI.parse('chat-text-edit://after/deferred-worker.ts');
+			const beforeContent = 'const stable = true;\nconst oldA = 1;\nconst oldB = 2;\nconst tail = true;';
+			const afterContent = 'const stable = true;\nconst nextA = 3;\nconst nextB = 4;\nconst tail = true;';
+			let modelRefDisposeCount = 0;
+			let workerDiffCount = 0;
+			let resolveWorkerDiff!: (value: {
+				changes: DetailedLineRangeMapping[];
+				identical: boolean;
+				quitEarly: boolean;
+				moves: never[];
+			}) => void;
+			const workerDiff = new Promise<{
+				changes: DetailedLineRangeMapping[];
+				identical: boolean;
+				quitEarly: boolean;
+				moves: never[];
+			}>(resolve => resolveWorkerDiff = resolve);
+			instantiationService.stub(ICodeCompareModelService, {
+				_serviceBrand: undefined,
+				createModel: async () => ({
+					object: {
+						originalSha1: 'before-sha',
+						original: { textEditorModel: { uri: beforeUri, getValue: () => beforeContent } },
+						modified: { textEditorModel: { uri: afterUri, getValue: () => afterContent } },
+					},
+					dispose: () => modelRefDisposeCount++,
+				}),
+			} as unknown as ICodeCompareModelService);
+			instantiationService.stub(IEditorWorkerService, {
+				_serviceBrand: undefined,
+				computeDiff: () => {
+					workerDiffCount++;
+					return workerDiff;
+				},
+			} as unknown as IEditorWorkerService);
+			instantiationService.stub(ITextModelService, {
+				_serviceBrand: undefined,
+				createModelReference: async () => {
+					throw new Error('Seeded preview should not resolve snapshot models');
+				},
+			} as unknown as ITextModelService);
+
+			const context = createMockRenderContext(true);
+			context.container.classList.add('backboard-clean-chat', 'backboard-cursor-transcript');
+			Object.assign(context.element, { setVote: () => undefined });
+			const part = disposables.add(instantiationService.createInstance(
+				ChatTextEditContentPart,
+				{
+					kind: 'textEditGroup',
+					uri: fileUri,
+					edits: [[]],
+					done: true,
+				},
+				context,
+				{},
+				{} as DiffEditorPool,
+				500,
+			));
+			let reportedStats: IEditSessionDiffStats | undefined;
+			disposables.add(part.onDidChangeDiff(stats => reportedStats = stats));
+			context.container.appendChild(part.domNode);
+			mainWindow.document.body.appendChild(context.container);
+			disposables.add(toDisposable(() => context.container.remove()));
+
+			for (let attempt = 0; attempt < 100 && !part.domNode.querySelector('.chat-external-edit-diff-row'); attempt++) {
+				await new Promise<void>(resolve => mainWindow.setTimeout(resolve, 5));
+			}
+			const cardIdentity = part.domNode;
+			assert.deepStrictEqual({
+				cardMounted: cardIdentity.classList.contains('chat-external-edit-card'),
+				previewRows: cardIdentity.querySelectorAll('.chat-external-edit-diff-row').length,
+				addedCounter: cardIdentity.querySelector('.label-added'),
+				removedCounter: cardIdentity.querySelector('.label-removed'),
+				workerDiffCount,
+				reportedStats,
+			}, {
+				cardMounted: true,
+				previewRows: 6,
+				addedCounter: null,
+				removedCounter: null,
+				workerDiffCount: 1,
+				reportedStats: undefined,
+			}, 'The compact preview must be useful while exact stats are still pending');
+
+			resolveWorkerDiff({
+				changes: [createExactLineChange(2, 4, 2, 4)],
+				identical: false,
+				quitEarly: false,
+				moves: [],
+			});
+			for (let attempt = 0; attempt < 100 && !part.domNode.querySelector('.label-added'); attempt++) {
+				await new Promise<void>(resolve => mainWindow.setTimeout(resolve, 5));
+			}
+
+			assert.deepStrictEqual({
+				sameCard: part.domNode === cardIdentity,
+				added: part.domNode.querySelector('.label-added')?.textContent,
+				removed: part.domNode.querySelector('.label-removed')?.textContent,
+				workerDiffCount,
+				reportedStats,
+			}, {
+				sameCard: true,
+				added: '+2',
+				removed: '-2',
+				workerDiffCount: 1,
+				reportedStats: { added: 2, removed: 2 },
+			}, 'Worker completion should update counters in place without re-rendering the card');
+
+			part.dispose();
+			assert.strictEqual(modelRefDisposeCount, 1);
+		});
+
+		test('Cursor streaming textEditGroup reuses a lightweight shell until the diff is final', async () => {
 			let modelCreateCount = 0;
 			let workerDiffCount = 0;
 			instantiationService.stub(ICodeCompareModelService, {

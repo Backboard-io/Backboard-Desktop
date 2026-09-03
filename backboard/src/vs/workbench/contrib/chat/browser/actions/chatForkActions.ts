@@ -12,6 +12,7 @@ import { localize, localize2 } from '../../../../../nls.js';
 import { Action2, MenuId } from '../../../../../platform/actions/common/actions.js';
 import { ContextKeyExpr } from '../../../../../platform/contextkey/common/contextkey.js';
 import { IInstantiationService, ServicesAccessor } from '../../../../../platform/instantiation/common/instantiation.js';
+import { ILogService } from '../../../../../platform/log/common/log.js';
 import { ChatContextKeyExprs, ChatContextKeys } from '../../common/actions/chatContextKeys.js';
 import { IChatService, ResponseModelState } from '../../common/chatService/chatService.js';
 import type { ISerializableChatData } from '../../common/model/chatModel.js';
@@ -50,12 +51,26 @@ export class ForkConversationAction extends Action2 {
 		});
 	}
 
-	async run(accessor: ServicesAccessor, ...args: unknown[]) {
+	override async run(accessor: ServicesAccessor, ...args: unknown[]): Promise<void> {
+		const logService = accessor.get(ILogService);
+		try {
+			return await this._runDiag(accessor, ...args);
+		} catch (err) {
+			logService.error(`[ForkDiag] run error: ${err instanceof Error ? err.stack ?? err.message : String(err)}`);
+			throw err;
+		}
+	}
+
+	async _runDiag(accessor: ServicesAccessor, ...args: unknown[]) {
+		const logService = accessor.get(ILogService);
 		const chatWidgetService = accessor.get(IChatWidgetService);
 		const instantiationService = accessor.get(IInstantiationService);
 		const chatService = accessor.get(IChatService);
 		const chatSessionsService = accessor.get(IChatSessionsService);
 		const forkedTitlePrefix = localize('chat.forked.titlePrefix', "Forked: ");
+		const arg0 = args[0] as Record<string, unknown> | undefined;
+		logService.info(`[ForkDiag] run start isUri=${URI.isUri(args[0])} isTreeItem=${isChatTreeItem(args[0])} arg0Id=${arg0 && typeof arg0 === 'object' ? String((arg0 as { id?: unknown }).id) : typeof args[0]}`);
+		const diag = (msg: string) => logService.info(`[ForkDiag] ${msg}`);
 
 		// When invoked via /fork slash command, args[0] is a URI (sessionResource).
 		// Fork at the last request in that session.
@@ -123,33 +138,40 @@ export class ForkConversationAction extends Action2 {
 						? arg.item
 						: undefined;
 		const widget = (item && chatWidgetService.getWidgetBySessionResource(item.sessionResource)) || chatWidgetService.lastFocusedWidget;
+		diag(`item resolved isRequest=${isRequestVM(item)} isResponse=${isResponseVM(item)} widget=${!!widget} lastFocused=${!!chatWidgetService.lastFocusedWidget}`);
 		if (!isResponseVM(item) && !isRequestVM(item)) {
 			item = widget?.getFocus();
 		}
 
 		if (!item) {
+			diag('bail: no item');
 			return;
 		}
 		if (isRequestVM(item) && item.pendingKind) {
+			diag('bail: pending request');
 			return;
 		}
 
 		const sessionResource = widget?.viewModel?.sessionResource ?? (isChatTreeItem(item) ? item.sessionResource : undefined);
 		if (!sessionResource) {
+			diag('bail: no sessionResource');
 			return;
 		}
 
 		// Get all requests and find the target request index
 		const targetRequestId = isRequestVM(item) ? item.id : isResponseVM(item) ? item.requestId : undefined;
 		if (!targetRequestId) {
+			diag('bail: no targetRequestId');
 			return;
 		}
 
 		// Check if this is a contributed session that supports forking
 		const contentProviderSchemes = chatSessionsService.getContentProviderSchemes();
+		diag(`session=${sessionResource.toString()} targetType=${getChatSessionType(sessionResource)} schemes=${contentProviderSchemes.join(',')} targetRequestId=${targetRequestId}`);
 		if (contentProviderSchemes.includes(getChatSessionType(sessionResource))) {
 			const contributedSession = await chatSessionsService.getOrCreateChatSession(sessionResource, CancellationToken.None);
 			let request = contributedSession.history.find((entry): entry is IChatSessionRequestHistoryItem => entry.type === 'request' && entry.id === targetRequestId);
+			diag(`contributed path historyLen=${contributedSession.history.length} requestFound=${!!request} historyIds=${contributedSession.history.filter(h => h.type === 'request').map(h => (h as IChatSessionRequestHistoryItem).id).join(',')}`);
 			if (!request) {
 				const chatModel = chatService.getSession(sessionResource);
 				const serializedData = chatModel?.toJSON();
@@ -172,6 +194,7 @@ export class ForkConversationAction extends Action2 {
 
 		const chatModel = chatService.getSession(sessionResource);
 		if (!chatModel) {
+			diag('bail: no chatModel');
 			return;
 		}
 
@@ -196,6 +219,7 @@ export class ForkConversationAction extends Action2 {
 			targetIndex = isRequestItem ? Math.max(0, requestIndex - 1) : requestIndex;
 		}
 		if (targetIndex < 0) {
+			diag('bail: targetIndex < 0');
 			return;
 		}
 
@@ -224,13 +248,16 @@ export class ForkConversationAction extends Action2 {
 		const modelRef = chatService.loadSessionFromData(forkedData, 'ChatForkActions#forkSession');
 
 		if (!modelRef) {
+			diag('bail: no modelRef');
 			return;
 		}
 
 		// Navigate to the new session in the chat view pane
 		try {
 			const newSessionResource = modelRef.object.sessionResource;
+			diag(`opening forked session ${newSessionResource.toString()}`);
 			await this._openForkedSession(instantiationService, chatModel.sessionResource, newSessionResource);
+			diag('forked session opened');
 		} finally {
 			modelRef.dispose();
 		}
@@ -239,6 +266,7 @@ export class ForkConversationAction extends Action2 {
 	protected async _openForkedSession(instantiationService: IInstantiationService, parentSessionResource: URI, forkedSessionResource: URI): Promise<void> {
 		await instantiationService.invokeFunction(async accessor => {
 			const chatWidgetService = accessor.get(IChatWidgetService);
+			accessor.get(ILogService).info(`[ForkDiag] base _openForkedSession ${forkedSessionResource.toString()}`);
 			await chatWidgetService.openSession(forkedSessionResource, ChatViewPaneTarget);
 		});
 	}
@@ -254,8 +282,12 @@ export class ForkConversationAction extends Action2 {
 
 		const forkPromise = (async () => {
 			const cts = new CancellationTokenSource();
+			const diagLog = (msg: string) => { try { /* best effort */ console.info(msg); } catch { /* noop */ } };
+			diagLog(`[ForkDiag] forkContributedChatSession start key=${pendingKey}`);
 			try {
-				const forkedItem = await chatSessionsService.forkChatSession(sourceSessionResource, request, cts.token);
+				const forkedItem = await chatSessionsService.forkChatSession(sourceSessionResource, request, cts.token).catch(err => {
+					throw new Error(`[ForkDiag] forkChatSession failed: ${err instanceof Error ? err.message : String(err)}`);
+				});
 				const open = () => this._openForkedSession(instantiationService, sourceSessionResource, forkedItem.resource);
 				if (openForkedSessionImmediately) {
 					await open();

@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { Codicon } from '../../../../base/common/codicons.js';
 import { KeyCode, KeyMod } from '../../../../base/common/keyCodes.js';
 import { ServicesAccessor } from '../../../../editor/browser/editorExtensions.js';
 import { localize, localize2 } from '../../../../nls.js';
@@ -41,6 +42,7 @@ import { Registry } from '../../../../platform/registry/common/platform.js';
 import { EditorAreaFocusContext } from '../../../../workbench/common/contextkeys.js';
 import { IWorkbenchEnvironmentService } from '../../../../workbench/services/environment/common/environmentService.js';
 import { NEW_SESSION_ACTION_ID } from '../common/constants.js';
+import { ISimpleModeBackgroundService, SimpleModeBackgroundImageSetContext, SimpleModeBackgroundService } from './simpleModeBackgroundService.js';
 
 const OPTIMUS_NEW_SESSION_COMMAND_ID = 'optimus.newSession';
 
@@ -97,6 +99,47 @@ class NewChatInSessionsWindowAction extends Action2 {
 
 registerAction2(NewChatInSessionsWindowAction);
 
+class ChooseSimpleModeBackgroundImageAction extends Action2 {
+
+	static readonly ID = 'sessions.simpleMode.chooseBackgroundImage';
+
+	constructor() {
+		super({
+			id: ChooseSimpleModeBackgroundImageAction.ID,
+			title: localize2('simpleModeBackground.choose', "Choose Simple Mode Background Image…"),
+			category: CHAT_CATEGORY,
+			icon: Codicon.fileMedia,
+			f1: true,
+		});
+	}
+
+	override async run(accessor: ServicesAccessor): Promise<void> {
+		await accessor.get(ISimpleModeBackgroundService).chooseBackgroundImage();
+	}
+}
+
+class ClearSimpleModeBackgroundImageAction extends Action2 {
+
+	static readonly ID = 'sessions.simpleMode.clearBackgroundImage';
+
+	constructor() {
+		super({
+			id: ClearSimpleModeBackgroundImageAction.ID,
+			title: localize2('simpleModeBackground.clear', "Clear Simple Mode Background Image"),
+			category: CHAT_CATEGORY,
+			icon: Codicon.trash,
+			f1: true,
+			precondition: SimpleModeBackgroundImageSetContext,
+		});
+	}
+
+	override run(accessor: ServicesAccessor): void {
+		accessor.get(ISimpleModeBackgroundService).clearBackgroundImage();
+	}
+}
+
+registerAction2(ChooseSimpleModeBackgroundImageAction);
+registerAction2(ClearSimpleModeBackgroundImageAction);
 
 // register actions
 registerAction2(BranchChatSessionAction);
@@ -114,6 +157,7 @@ registerSingleton(ISessionsTasksService, SessionsTasksService, InstantiationType
 registerSingleton(IAICustomizationWorkspaceService, SessionsAICustomizationWorkspaceService, InstantiationType.Delayed);
 registerSingleton(ICustomizationHarnessService, SessionsCustomizationHarnessService, InstantiationType.Delayed);
 registerSingleton(IChatViewFactory, ChatViewFactory, InstantiationType.Delayed);
+registerSingleton(ISimpleModeBackgroundService, SimpleModeBackgroundService, InstantiationType.Delayed);
 
 // register accessibility help
 AccessibleViewRegistry.register(new SessionsChatAccessibilityHelp());

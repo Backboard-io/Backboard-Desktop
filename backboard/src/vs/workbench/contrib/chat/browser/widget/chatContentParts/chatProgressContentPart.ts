@@ -65,9 +65,8 @@ export class ChatProgressContentPart extends Disposable implements IChatContentP
 
 		const followingContentStart = context.contentIndex + 1;
 		this.showSpinner = forceShowSpinner ?? shouldShowSpinner(context.content, context.element, followingContentStart);
-		this.showLiveElapsed = this.showSpinner
-			&& context.container.closest('.backboard-clean-chat') !== null
-			&& !isBackboardCursorTranscript(context.container);
+		// Progress rows never show elapsed time; the label alone carries the state.
+		this.showLiveElapsed = false;
 		this.isHidden = forceShowMessage !== true && hasNonProgressContent(context.content, followingContentStart);
 		if (this.isHidden) {
 			// Placeholder, don't show the progress message
@@ -517,9 +516,9 @@ export class ChatWorkingProgressContentPart extends Disposable implements IChatC
 				return;
 			}
 			this.setWorkingLabel(this.useT3TimelinePresentation
-				? localize('chat.t3WorkingFor', "Working for")
+				? localize('chat.t3Working', "Working")
 				: this.computeLiveLabel(elapsedMs));
-			this.statsElement.textContent = formatWorkingElapsed(elapsedMs);
+			this.statsElement.textContent = '';
 		};
 		tick();
 		this.workingTimer.value = disposableWindowInterval(getWindow(this.domNode), tick, 1000);

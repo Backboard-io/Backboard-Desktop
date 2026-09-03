@@ -514,23 +514,6 @@ export function shouldSplitBackboardThinkingBeforeEdit(
 	return !mutationBatchEdit && !sameEditAlreadyRendered && shouldRenderBackboardEditStandalone(kind, backboardTranscript);
 }
 
-/** Mirrors T3 Code's compact duration formatting for turn-fold labels. */
-function formatT3TurnDuration(durationMs: number): string {
-	if (!Number.isFinite(durationMs) || durationMs < 0) {
-		return '1s';
-	}
-	const totalSeconds = Math.max(1, Math.round(durationMs / 1_000));
-	if (totalSeconds < 60) {
-		return `${totalSeconds}s`;
-	}
-	const minutes = Math.floor(totalSeconds / 60);
-	const seconds = totalSeconds % 60;
-	if (seconds === 0) {
-		return `${minutes}m`;
-	}
-	return `${minutes}m ${seconds}s`;
-}
-
 function upvoteAnimationSettingToEnum(value: string | undefined): ClickAnimation | undefined {
 	switch (value) {
 		case 'confetti': return ClickAnimation.Confetti;
@@ -2269,9 +2252,9 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		}
 
 		if (element.isCanceled) {
-				if (this.isLayoutTracingEnabled) {
-					this.traceLayout('doNextProgressiveRender', `canceled, index=${index}`);
-				}
+			if (this.isLayoutTracingEnabled) {
+				this.traceLayout('doNextProgressiveRender', `canceled, index=${index}`);
+			}
 			element.renderData = undefined;
 			this.renderChatResponseBasic(element, index, templateData);
 			return true;
@@ -2288,15 +2271,15 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		if (contentIsAlreadyRendered) {
 			if (contentForThisTurn.moreContentAvailable) {
 				// The content that we want to render in this turn is already rendered, but there is more content to render on the next tick
-					if (this.isLayoutTracingEnabled) {
-						this.traceLayout('doNextProgressiveRender', 'not rendering any new content this tick, but more available');
-					}
+				if (this.isLayoutTracingEnabled) {
+					this.traceLayout('doNextProgressiveRender', 'not rendering any new content this tick, but more available');
+				}
 				return false;
 			} else if (element.isComplete) {
 				// All content is rendered, and response is done, so do a normal render
-					if (this.isLayoutTracingEnabled) {
-						this.traceLayout('doNextProgressiveRender', `END progressive render, index=${index} and clearing renderData, response is complete`);
-					}
+				if (this.isLayoutTracingEnabled) {
+					this.traceLayout('doNextProgressiveRender', `END progressive render, index=${index} and clearing renderData, response is complete`);
+				}
 				element.renderData = undefined;
 				this.renderChatResponseBasic(element, index, templateData);
 				return true;
@@ -2636,42 +2619,15 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			storedExpansion,
 		);
 
-		const elapsedMs = element.model.elapsedMs
-			?? (element.model.completedAt !== undefined
-				? Math.max(0, element.model.completedAt - element.confirmationAdjustedTimestamp.get())
-				: Math.max(0, Date.now() - element.confirmationAdjustedTimestamp.get()));
-		const duration = elapsedMs === undefined ? undefined : formatT3TurnDuration(elapsedMs);
+		// The fold names the phase only. Durations are deliberately absent from
+		// the transcript, so nothing here ticks while the turn runs.
 		foldLabel.textContent = element.isCanceled
-			? duration
-				? localize('chat.t3TurnFold.stoppedAfter', "You stopped after {0}", duration)
-				: localize('chat.t3TurnFold.stopped', "You stopped this response")
+			? localize('chat.t3TurnFold.stopped', "You stopped this response")
 			: complete
-				? duration
-					? localize('chat.t3TurnFold.workedFor', "Worked for {0}", duration)
-					: localize('chat.t3TurnFold.worked', "Worked")
-				: localize('chat.t3TurnFold.workingFor', "Working for {0}", duration ?? '1s');
-
-		if (!complete && !this.backboardTurnDurationTimers.has(element.id)) {
-			const window = dom.getWindow(turn);
-			let timer: IDisposable | undefined;
-			const handle = window.setInterval(() => {
-				if (!turn!.isConnected || turn!.dataset.turnState !== 'active') {
-					window.clearInterval(handle);
-					if (this.backboardTurnDurationTimers.get(element.id) === timer) {
-						this.backboardTurnDurationTimers.delete(element.id);
-					}
-					timer = undefined;
-					return;
-				}
-				const liveDuration = formatT3TurnDuration(Date.now() - element.confirmationAdjustedTimestamp.get());
-				foldLabel.textContent = localize('chat.t3TurnFold.workingFor', "Working for {0}", liveDuration);
-			}, 1_000);
-			timer = toDisposable(() => window.clearInterval(handle));
-			this.backboardTurnDurationTimers.set(element.id, timer);
-		} else if (complete) {
-			this.backboardTurnDurationTimers.get(element.id)?.dispose();
-			this.backboardTurnDurationTimers.delete(element.id);
-		}
+				? localize('chat.t3TurnFold.worked', "Worked")
+				: localize('chat.t3TurnFold.working', "Working");
+		this.backboardTurnDurationTimers.get(element.id)?.dispose();
+		this.backboardTurnDurationTimers.delete(element.id);
 
 		const applyExpandedState = (expanded: boolean) => {
 			turn!.classList.toggle('chat-t3-turn-work-expanded', expanded);

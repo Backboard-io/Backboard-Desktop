@@ -130,7 +130,7 @@ interface IDetachedTerminalCommandMirror {
 	scrollByLines(lines: number): boolean;
 	scrollToBottom(): void;
 	isAtBottom(): boolean | undefined;
-	resizeToColumns(columns: number): void;
+	resizeToColumns(columns: number, rows?: number): number | undefined;
 }
 
 const enum ChatTerminalMirrorMetrics {
@@ -401,21 +401,34 @@ export class DetachedTerminalCommandMirror extends Disposable implements IDetach
 		return this._detachedTerminal?.xterm.isScrolledToBottom();
 	}
 
-	public resizeToColumns(columns: number): void {
+	public resizeToColumns(columns: number, rows?: number): number | undefined {
 		const xterm = this._detachedTerminal?.xterm;
 		const nextCols = Math.max(1, Math.floor(columns));
-		if (!xterm || nextCols === xterm.cols) {
-			return;
+		if (!xterm) {
+			return undefined;
 		}
 		// Only resize if xterm is properly initialized
 		if (!xterm.element || !xterm.element.isConnected) {
-			return;
+			return undefined;
 		}
 		try {
-			xterm.resize(nextCols, xterm.rows);
+			if (nextCols !== xterm.cols) {
+				xterm.resize(nextCols, xterm.rows);
+			}
+			if (rows !== undefined) {
+				// Keep the requested viewport size. xterm retains the remaining lines as
+				// scrollback, which lets a terminal tool card expose long output without
+				// growing to the full transcript height.
+				const nextRows = Math.max(1, Math.ceil(rows));
+				if (nextRows !== xterm.rows) {
+					xterm.resize(nextCols, nextRows);
+				}
+			}
+			return xterm.rows;
 		} catch (error) {
 			// xterm may not be ready or may be disposed; ignore resize failures
 			console.warn('Failed to resize xterm in DetachedTerminalCommandMirror:', error);
+			return undefined;
 		}
 	}
 
@@ -804,21 +817,31 @@ export class DetachedTerminalSnapshotMirror extends Disposable {
 		return this._resolvedTerminal?.xterm.isScrolledToBottom();
 	}
 
-	public resizeToColumns(columns: number): void {
+	public resizeToColumns(columns: number, rows?: number): number | undefined {
 		const xterm = this._resolvedTerminal?.xterm;
 		const nextCols = Math.max(1, Math.floor(columns));
-		if (!xterm || nextCols === xterm.cols) {
-			return;
+		if (!xterm) {
+			return undefined;
 		}
 		// Only resize if xterm is properly initialized
 		if (!xterm.element || !xterm.element.isConnected) {
-			return;
+			return undefined;
 		}
 		try {
-			xterm.resize(nextCols, xterm.rows);
+			if (nextCols !== xterm.cols) {
+				xterm.resize(nextCols, xterm.rows);
+			}
+			if (rows !== undefined) {
+				const nextRows = Math.max(1, Math.ceil(rows));
+				if (nextRows !== xterm.rows) {
+					xterm.resize(nextCols, nextRows);
+				}
+			}
+			return xterm.rows;
 		} catch (error) {
 			// xterm may not be ready or may be disposed; ignore resize failures
 			console.warn('Failed to resize xterm in DetachedTerminalSnapshotMirror:', error);
+			return undefined;
 		}
 	}
 

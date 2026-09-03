@@ -339,6 +339,13 @@ export class SessionsPart extends Part {
 				slot.view.restoreHeaderToView();
 			}
 		}
+		if (!relocateSlot) {
+			// A New thread view owns the new-chat header slots, not the relocated
+			// session header slots. Clear any previous session title/toolbar that
+			// survived a view transition so it cannot overlap the draft breadcrumb.
+			this._headerSessionTitleSlot?.replaceChildren();
+			this._headerSessionToolbarSlot?.replaceChildren();
+		}
 
 		// Exit the grid's maximized state when the active session lands in a
 		// different slot than the maximized one. Opening a session into the

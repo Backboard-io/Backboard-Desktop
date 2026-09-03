@@ -137,6 +137,12 @@ export function getToolInvocationIcon(toolId: string, registeredIcon?: ThemeIcon
 	return Codicon.tools;
 }
 
+/**
+ * Read stacks are rebuilt whenever the transcript re-renders a response, so the
+ * user's open/closed choice is remembered per stack, keyed by its first read.
+ */
+const readStackExpansionByAnchor = new WeakMap<object, boolean>();
+
 export function createThinkingIcon(icon: ThemeIcon): HTMLElement {
 	const iconElement = $('span.chat-thinking-icon');
 	iconElement.classList.add(...ThemeIcon.asClassNameArray(icon));
@@ -1666,7 +1672,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 	 * stays mounted and owns its disclosure/lifecycle; the stack only removes the
 	 * repeated outer borders and vertical gaps between adjacent calls.
 	 */
-	private appendCoreReadRow(itemWrapper: HTMLElement): void {
+	private appendCoreReadRow(itemWrapper: HTMLElement, anchor?: object): void {
 		if (!this.wrapper) {
 			return;
 		}
@@ -1679,13 +1685,45 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			: undefined;
 		if (!stack) {
 			stack = $('.chat-core-tool-stack.chat-core-tool-stack-read');
-			stack.setAttribute('role', 'list');
-			stack.setAttribute('aria-label', localize('chat.thinking.readFiles', 'Read files'));
+			const header = $('button.chat-core-tool-stack-header', { type: 'button', 'aria-expanded': 'false' });
+			const icon = $('span.codicon.codicon-file.chat-core-tool-stack-icon', { 'aria-hidden': 'true' });
+			const label = $('span.chat-core-tool-stack-label');
+			const chevron = $('span.codicon.codicon-chevron-right.chat-core-tool-stack-chevron', { 'aria-hidden': 'true' });
+			header.append(icon, label, chevron);
+			const body = $('.chat-core-tool-stack-body');
+			body.setAttribute('role', 'list');
+			body.setAttribute('aria-label', localize('chat.thinking.readFiles', 'Read files'));
+			stack.append(header, body);
+			const currentStack = stack;
+			const stackAnchor = anchor;
+			const applyExpanded = (expanded: boolean) => {
+				currentStack.classList.toggle('chat-core-tool-stack-expanded', expanded);
+				header.ariaExpanded = String(expanded);
+				chevron.classList.toggle('codicon-chevron-right', !expanded);
+				chevron.classList.toggle('codicon-chevron-down', expanded);
+			};
+			applyExpanded(!!stackAnchor && readStackExpansionByAnchor.get(stackAnchor) === true);
+			this._register(addDisposableListener(header, 'click', () => {
+				const expanded = !currentStack.classList.contains('chat-core-tool-stack-expanded');
+				applyExpanded(expanded);
+				if (stackAnchor) {
+					readStackExpansionByAnchor.set(stackAnchor, expanded);
+				}
+				this._onDidChangeHeight.fire();
+			}));
 			this.appendToWrapper(stack);
 		}
 
 		itemWrapper.setAttribute('role', 'listitem');
-		stack.appendChild(itemWrapper);
+		const body = stack.querySelector<HTMLElement>(':scope > .chat-core-tool-stack-body') ?? stack;
+		body.appendChild(itemWrapper);
+		const count = body.childElementCount;
+		const label = stack.querySelector<HTMLElement>(':scope > .chat-core-tool-stack-header > .chat-core-tool-stack-label');
+		if (label) {
+			label.textContent = count === 1
+				? localize('chat.thinking.readFiles.one', "Read 1 file")
+				: localize('chat.thinking.readFiles.many', "Read {0} files", count);
+		}
 	}
 
 	private updateWorkingSpinnerVisibility(): void {
@@ -2284,7 +2322,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			itemWrapper.classList.add('chat-thinking-core-tool-row');
 			this.finishActiveActivityGroup();
 			if (coreToolKind === 'read') {
-				this.appendCoreReadRow(itemWrapper);
+				this.appendCoreReadRow(itemWrapper, metadata);
 			} else {
 				this.appendToWrapper(itemWrapper);
 			}
@@ -2387,8 +2425,8 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		const container = this.useCursorTranscriptPresentation
 			? $('.chat-thinking-group.chat-thinking-work-group.chat-thinking-work-summary-collapsed')
 			: this.useCursorPanelPresentation
-			? $('.chat-thinking-group.chat-thinking-work-group.chat-thinking-work-overflow-collapsed.chat-thinking-group-live')
-			: $('.chat-thinking-group.chat-thinking-group-live');
+				? $('.chat-thinking-group.chat-thinking-work-group.chat-thinking-work-overflow-collapsed.chat-thinking-group-live')
+				: $('.chat-thinking-group.chat-thinking-group-live');
 		if (this.useCursorTranscriptPresentation) {
 			container.dataset.workCategory = category;
 		}
@@ -2400,8 +2438,8 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		const chevron = this.useCursorTranscriptPresentation
 			? $('span.codicon.codicon-chevron-down.chat-thinking-group-chevron.chat-thinking-group-chevron-cursor', { 'aria-hidden': 'true' })
 			: this.useCursorPanelPresentation
-			? $('span.chat-thinking-group-chevron.chat-thinking-group-chevron-t3', { 'aria-hidden': 'true' })
-			: $('span.codicon.codicon-chevron-right.chat-thinking-group-chevron', { 'aria-hidden': 'true' });
+				? $('span.chat-thinking-group-chevron.chat-thinking-group-chevron-t3', { 'aria-hidden': 'true' })
+				: $('span.codicon.codicon-chevron-right.chat-thinking-group-chevron', { 'aria-hidden': 'true' });
 		if (this.useCursorPanelPresentation) {
 			if (this.useCursorTranscriptPresentation) {
 				header.append(iconElement, headerLabel, chevron);

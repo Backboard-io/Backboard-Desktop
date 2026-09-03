@@ -225,9 +225,25 @@ function upstreamProviderId(model: ILanguageModelChatMetadataAndIdentifier): str
 	return slash > 0 ? model.metadata.id.slice(0, slash).toLowerCase() : model.metadata.vendor.toLowerCase();
 }
 
+function isSubscriptionModel(model: ILanguageModelChatMetadataAndIdentifier): boolean {
+	const providerId = upstreamProviderId(model);
+	return providerId === 'openai-subscription' || providerId === 'anthropic-subscription';
+}
+
+function isAvailableInRecommendedSection(model: ILanguageModelChatMetadataAndIdentifier): boolean {
+	return !isSubscriptionModel(model) || !!model.metadata.auth?.accountLabel;
+}
+
+function recommendedModels(models: readonly ILanguageModelChatMetadataAndIdentifier[]): ILanguageModelChatMetadataAndIdentifier[] {
+	const recommended = models
+		.filter(model => RECOMMENDED_BACKBOARD_MODEL_PRIORITY.has(model.metadata.id) && isAvailableInRecommendedSection(model))
+		.sort((a, b) => (RECOMMENDED_BACKBOARD_MODEL_PRIORITY.get(a.metadata.id) ?? Number.MAX_SAFE_INTEGER) - (RECOMMENDED_BACKBOARD_MODEL_PRIORITY.get(b.metadata.id) ?? Number.MAX_SAFE_INTEGER));
+	return recommended.length ? recommended : models.filter(isAvailableInRecommendedSection);
+}
+
 /** Builds the stable left-rail sections for the Backboard model catalog. */
 export function buildCombinedModelSections(models: readonly ILanguageModelChatMetadataAndIdentifier[]): ICombinedModelSection[] {
-	const recommendedCount = models.filter(model => RECOMMENDED_BACKBOARD_MODEL_PRIORITY.has(model.metadata.id)).length;
+	const recommendedCount = recommendedModels(models).length;
 	const providers = new Map<string, { label: string; count: number }>();
 	for (const model of models) {
 		const id = upstreamProviderId(model);
@@ -242,7 +258,7 @@ export function buildCombinedModelSections(models: readonly ILanguageModelChatMe
 		{
 			id: COMBINED_MODEL_SECTION_RECOMMENDED,
 			label: localize('combinedPicker.recommended', "Recommended"),
-			modelCount: recommendedCount || models.length,
+			modelCount: recommendedCount,
 			kind: 'library',
 		},
 		{
@@ -286,19 +302,20 @@ export function buildCombinedModelSections(models: readonly ILanguageModelChatMe
 	return sections;
 }
 
-/** Returns the models represented by one left-rail section. */
+/** Returns the models represented by one left-rail section, or the full catalog during a search. */
 export function modelsForCombinedModelSection(
 	models: readonly ILanguageModelChatMetadataAndIdentifier[],
 	sectionId: string,
+	includeAllModels = false,
 ): ILanguageModelChatMetadataAndIdentifier[] {
+	if (includeAllModels) {
+		return [...models];
+	}
 	if (sectionId === COMBINED_MODEL_SECTION_ALL) {
 		return [...models];
 	}
 	if (sectionId === COMBINED_MODEL_SECTION_RECOMMENDED) {
-		const recommended = models
-			.filter(model => RECOMMENDED_BACKBOARD_MODEL_PRIORITY.has(model.metadata.id))
-			.sort((a, b) => (RECOMMENDED_BACKBOARD_MODEL_PRIORITY.get(a.metadata.id) ?? Number.MAX_SAFE_INTEGER) - (RECOMMENDED_BACKBOARD_MODEL_PRIORITY.get(b.metadata.id) ?? Number.MAX_SAFE_INTEGER));
-		return recommended.length ? recommended : [...models];
+		return recommendedModels(models);
 	}
 	if (sectionId.startsWith('provider:')) {
 		const providerId = sectionId.slice('provider:'.length);
@@ -573,9 +590,9 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 		searchRow.appendChild(renderIcon(Codicon.search));
 		const search = dom.append(searchRow, dom.$('input.combined-model-provider-search-input')) as HTMLInputElement;
 		search.type = 'text';
-		search.placeholder = localize('combinedPicker.searchPlaceholder', "Search models…");
+		search.placeholder = localize('combinedPicker.searchAllModelsPlaceholder', "Search all models…");
 		search.value = this._searchValue;
-		search.setAttribute('aria-label', localize('combinedPicker.searchPlaceholder', "Search models…"));
+		search.setAttribute('aria-label', localize('combinedPicker.searchAllModelsPlaceholder', "Search all models…"));
 
 		const list = dom.append(pane, dom.$('.combined-model-provider-list'));
 		const footer = dom.append(pane, dom.$('.combined-model-provider-footer'));
@@ -733,10 +750,7 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 
 		const currentSection = () => sections.find(section => section.id === this._railSection) ?? sections[0];
 		const updateSearchPlaceholder = () => {
-			const section = currentSection();
-			search.placeholder = section
-				? localize('combinedPicker.searchSectionPlaceholder', "Search {0} models…", section.label)
-				: localize('combinedPicker.searchPlaceholder', "Search models…");
+			search.placeholder = localize('combinedPicker.searchAllModelsPlaceholder', "Search all models…");
 			search.setAttribute('aria-label', search.placeholder);
 		};
 
@@ -796,13 +810,13 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 			const section = currentSection();
 			const query = this._searchValue.trim().toLowerCase();
 			const models = showingBackboard && section
-				? modelsForCombinedModelSection(allModels, section.id)
+				? modelsForCombinedModelSection(allModels, section.id, !!query)
 				: allModels;
 			const filtered = filterAndRankModels(models, query);
 
-			// The search placeholder already names the active section. Only the
-			// subscription view needs supporting copy, so ordinary providers can
-			// flow directly into their model list without a duplicate title card.
+			// Search results span the full catalog. Only the unfiltered subscription
+			// views need supporting copy, so ordinary providers can flow directly
+			// into their model list without a duplicate title card.
 			if (section?.id === COMBINED_MODEL_SECTION_CHATGPT && !query) {
 				const header = dom.append(list, dom.$('.combined-model-provider-section-header'));
 				const headerMain = dom.append(header, dom.$('.combined-model-provider-section-header-main'));
@@ -854,9 +868,9 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 				const selectedRoutingLabel = routingIndex >= 0 && String(routingOption?.currentValue).toLowerCase() !== 'auto'
 					? routingOption?.labels[routingIndex]
 					: undefined;
-				const detail = section?.id === COMBINED_MODEL_SECTION_CLAUDE
+				const detail = section?.id === COMBINED_MODEL_SECTION_CLAUDE && !query
 					? undefined
-					: section?.kind === 'library' || upstreamProviderId(model) === 'openrouter'
+					: !!query || section?.kind === 'library' || upstreamProviderId(model) === 'openrouter'
 						? formatModelProviderDetail(model, selectedRoutingLabel)
 						: undefined;
 				if (detail) {

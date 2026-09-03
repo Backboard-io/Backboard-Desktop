@@ -408,8 +408,8 @@ a.chat-core-tool-card-item-title:hover {
 	.chat-thinking-core-tool-row:has(.chat-core-tool-card-glob),
 	.chat-thinking-cursor-plan-row
 ) {
-	width: calc(100% + 5px);
-	margin-inline: -5px 0;
+	width: 100%;
+	margin-inline: 0;
 }
 
 @media (prefers-reduced-motion: reduce) {

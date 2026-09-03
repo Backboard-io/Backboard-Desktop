@@ -10,7 +10,7 @@ import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../../ba
 import { runWithFakedTimers } from '../../../../../../../base/test/common/timeTravelScheduler.js';
 import { timeout } from '../../../../../../../base/common/async.js';
 import { TerminalToolAutoExpand, TerminalToolAutoExpandTimeout } from '../../../../browser/widget/chatContentParts/toolInvocationParts/terminalToolAutoExpand.js';
-import { calculateTerminalOutputContentHeight, getTerminalInitialExpandedState, getTerminalOutputViewportHeight, getTerminalWheelScrollLines, resolveStoredTerminalOutputLineCount, shouldAutoExpandTerminalFailure, shouldRenderStoredTerminalOutputFirst } from '../../../../browser/widget/chatContentParts/toolInvocationParts/chatTerminalToolProgressPart.js';
+import { calculateTerminalOutputContentHeight, getTerminalCollapsibleLabel, getTerminalInitialExpandedState, getTerminalOutputViewportHeight, getTerminalWheelScrollLines, resolveStoredTerminalOutputLineCount, shouldAutoExpandTerminalFailure, shouldRenderStoredTerminalOutputFirst } from '../../../../browser/widget/chatContentParts/toolInvocationParts/chatTerminalToolProgressPart.js';
 import { shouldRerenderToolInvocationSubPart } from '../../../../browser/widget/chatContentParts/toolInvocationParts/chatToolInvocationPart.js';
 import { IChatToolInvocation } from '../../../../common/chatService/chatService.js';
 import { ChatToolInvocation } from '../../../../common/model/chatProgressTypes/chatToolInvocation.js';
@@ -61,10 +61,15 @@ suite('ChatTerminalToolProgressPart Auto-Expand Logic', () => {
 		hasRealOutputValue = false;
 	});
 
-	test('Cursor transcript keeps an explicit capped viewport so long output can scroll', () => {
+	test('Cursor transcript keeps a stable terminal viewport for scrollback', () => {
 		assert.strictEqual(getTerminalOutputViewportHeight(480, 200, true), '200px');
-		assert.strictEqual(getTerminalOutputViewportHeight(120, 200, true), '120px');
+		assert.strictEqual(getTerminalOutputViewportHeight(120, 200, true), '200px');
 		assert.strictEqual(getTerminalOutputViewportHeight(480, 200, false), '');
+	});
+
+	test('Cursor transcript disclosures retain the full terminal command', () => {
+		assert.strictEqual(getTerminalCollapsibleLabel('python3 -c "…', 'python3 -c "print(\'full command\')"', true), 'python3 -c "print(\'full command\')"');
+		assert.strictEqual(getTerminalCollapsibleLabel('python3 -c "…', 'python3 -c "print(\'full command\')"', false), 'python3 -c "…');
 	});
 
 	test('terminal status rows include their line box and vertical padding', () => {
@@ -76,7 +81,7 @@ suite('ChatTerminalToolProgressPart Auto-Expand Logic', () => {
 	test('terminal wheel gestures map to xterm scrollback lines', () => {
 		assert.strictEqual(getTerminalWheelScrollLines(36, 0, 18), 2, 'pixel wheel down');
 		assert.strictEqual(getTerminalWheelScrollLines(-4, 1, 18), -4, 'line wheel up');
-		assert.strictEqual(getTerminalWheelScrollLines(1, 2, 18), 10, 'page wheel down');
+		assert.strictEqual(getTerminalWheelScrollLines(1, 2, 18), 14, 'page wheel down');
 		assert.strictEqual(getTerminalWheelScrollLines(0, 0, 18), 0);
 	});
 

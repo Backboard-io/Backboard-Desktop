@@ -1155,6 +1155,7 @@ suite('CliTsAgent tool metadata', () => {
 		const progress: AgentSignal[] = [];
 		store.add(agent.onDidSessionProgress(signal => progress.push(signal)));
 		const sessionUri = AgentSession.uri('backboard', 'execute-output');
+		const command = 'printf output && printf "\\nall done\\n"';
 		const turn = {
 			turnId: 'turn-execute-output',
 			messageParts: new Map(),
@@ -1163,9 +1164,9 @@ suite('CliTsAgent tool metadata', () => {
 			confirmedToolCalls: new Set<string>(),
 			childToolLines: new Map<string, Map<string, string>>(),
 			toolSummaries: [] as string[],
-			storedParts: [] as Array<{ kind: string; terminalOutput?: unknown }>,
+			storedParts: [] as Array<{ kind: string; terminalCommand?: string; terminalOutput?: unknown }>,
 			storedTextParts: new Map(),
-			toolInputs: new Map([['execute-full-output', { name: 'Execute', input: { command: 'printf output' } }]]),
+			toolInputs: new Map([['execute-full-output', { name: 'Execute', input: { command } }]]),
 			toolInputSummaries: new Map<string, string>(),
 			terminalOutputs: new Map<string, string>(),
 			pendingCompletions: [] as Promise<void>[],
@@ -1183,7 +1184,7 @@ suite('CliTsAgent tool metadata', () => {
 			type: 'tool:start',
 			toolCallId: 'execute-full-output',
 			name: 'Execute',
-			inputSummary: 'printf output',
+			inputSummary: 'printf output …',
 		}, turn);
 		internals._handleMappedAgentEvent(session, {
 			type: 'tool:progress',
@@ -1208,6 +1209,10 @@ suite('CliTsAgent tool metadata', () => {
 		}, turn);
 		await Promise.allSettled(turn.pendingCompletions);
 
+		const ready = progress.find(signal => signal.kind === 'action' && signal.action.type === ActionType.ChatToolCallReady);
+		assert.ok(ready?.kind === 'action' && ready.action.type === ActionType.ChatToolCallReady);
+		assert.ok(ready.action.toolInput);
+		assert.deepStrictEqual(JSON.parse(ready.action.toolInput), { command });
 		const contentChanges = progress.filter(signal => signal.kind === 'action' && signal.action.type === ActionType.ChatToolCallContentChanged);
 		const latestContentChange = contentChanges.at(-1);
 		assert.ok(latestContentChange?.kind === 'action' && latestContentChange.action.type === ActionType.ChatToolCallContentChanged);
@@ -1225,6 +1230,7 @@ suite('CliTsAgent tool metadata', () => {
 			text: 'first\nsecond\nthird\nverification failed',
 			exitCode: 7,
 		});
+		assert.strictEqual(turn.storedParts[0]?.terminalCommand, command);
 	});
 
 	test('core tool UI data maps to actions and survives stored-turn replay', async () => {
@@ -2630,7 +2636,8 @@ suite('CliTsAgent tool metadata', () => {
 					kind: 'tool',
 					id: 'call-execute-restored',
 					name: 'Execute',
-					inputSummary: 'printf ready',
+					inputSummary: 'printf ready …',
+					terminalCommand: 'printf ready && printf "\\nsecond\\nthird\\n"',
 					title: 'Success',
 					detail: '$ printf ready\nready\n… +2 more',
 					terminalOutput: { text: 'ready\nsecond\nthird', exitCode: 0 },
@@ -2652,7 +2659,7 @@ suite('CliTsAgent tool metadata', () => {
 		}, {
 			status: ToolCallStatus.Completed,
 			toolName: 'Execute',
-			toolInput: 'printf ready',
+			toolInput: JSON.stringify({ command: 'printf ready && printf "\\nsecond\\nthird\\n"' }),
 			content: [{ type: 'text', text: 'ready\nsecond\nthird' }],
 			meta: { source: 'cli-ts', toolKind: 'terminal', language: 'shellscript', terminalExitCode: 0 },
 		});

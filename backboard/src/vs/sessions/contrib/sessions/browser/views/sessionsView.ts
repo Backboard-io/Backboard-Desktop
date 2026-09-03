@@ -53,6 +53,7 @@ import { isBackboardProduct } from '../../../../../workbench/contrib/chat/common
 import { IProductService } from '../../../../../platform/product/common/productService.js';
 import { isRecentFolder, IWorkspacesService } from '../../../../../platform/workspaces/common/workspaces.js';
 import { BackboardUsageView } from '../backboardUsage.js';
+import { ISimpleModeBackgroundService } from '../../../chat/browser/simpleModeBackgroundService.js';
 
 const $ = DOM.$;
 export const SessionsViewId = 'sessions.workbench.view.sessionsView';
@@ -153,6 +154,7 @@ export class SessionsView extends ViewPane {
 		@ILogService private readonly logService: ILogService,
 		@IProductService private readonly productService: IProductService,
 		@IWorkspacesService private readonly workspacesService: IWorkspacesService,
+		@ISimpleModeBackgroundService private readonly simpleModeBackgroundService: ISimpleModeBackgroundService,
 	) {
 		super(options, keybindingService, contextMenuService, configurationService, contextKeyService, viewDescriptorService, instantiationService, openerService, themeService, hoverService);
 
@@ -479,6 +481,30 @@ export class SessionsView extends ViewPane {
 		const footer = DOM.append(container, $('.agent-sessions-footer'));
 		if (simpleMode) {
 			const navigation = DOM.append(footer, $('.agent-sessions-footer-navigation'));
+			this.createSidebarAction(navigation, Codicon.fileMedia, localize('background', "Background"), anchor => {
+				this.contextMenuService.showContextMenu({
+					getAnchor: () => anchor,
+					getActions: () => {
+						const hasBackground = !!this.simpleModeBackgroundService.backgroundImage;
+						return [
+							toAction({
+								id: 'sessions.simpleMode.chooseBackgroundImage',
+								label: hasBackground
+									? localize('changeBackgroundImage', "Change Background Image…")
+									: localize('chooseBackgroundImage', "Choose Background Image…"),
+								run: () => this.simpleModeBackgroundService.chooseBackgroundImage(),
+							}),
+							...(hasBackground ? [
+								toAction({
+									id: 'sessions.simpleMode.clearBackgroundImage',
+									label: localize('clearBackgroundImage', "Clear Background Image"),
+									run: () => this.simpleModeBackgroundService.clearBackgroundImage(),
+								}),
+							] : []),
+						];
+					},
+				});
+			}, true);
 			this.createSidebarAction(navigation, Codicon.extensions, localize('marketplace', "Marketplace"), anchor => {
 				this.instantiationService.createInstance(SkillsLibraryController).showMarketplace(anchor);
 			});
@@ -576,11 +602,14 @@ export class SessionsView extends ViewPane {
 		});
 	}
 
-	private createSidebarAction(container: HTMLElement, icon: ThemeIcon, label: string, run: (anchor: HTMLElement) => void): void {
+	private createSidebarAction(container: HTMLElement, icon: ThemeIcon, label: string, run: (anchor: HTMLElement) => void, hasPopup = false): void {
 		const button = DOM.append(container, $('button.agent-sessions-sidebar-action')) as HTMLButtonElement;
 		button.type = 'button';
 		button.title = label;
 		button.setAttribute('aria-label', label);
+		if (hasPopup) {
+			button.setAttribute('aria-haspopup', 'menu');
+		}
 		const iconElement = DOM.append(button, $('span.agent-sessions-sidebar-action-icon'));
 		iconElement.appendChild(renderIcon(icon));
 		DOM.append(button, $('span.agent-sessions-sidebar-action-label', undefined, label));

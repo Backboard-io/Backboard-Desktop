@@ -60,18 +60,6 @@ function localizedWorkerStatus(status: 'Running' | 'Completed' | 'Failed' | 'Can
 	}
 }
 
-function workerElapsedSeconds(startedAt: string | undefined, finishedAt: string | undefined): number | undefined {
-	if (!startedAt) {
-		return undefined;
-	}
-	const started = Date.parse(startedAt);
-	const finished = finishedAt ? Date.parse(finishedAt) : Date.now();
-	if (!Number.isFinite(started) || !Number.isFinite(finished)) {
-		return undefined;
-	}
-	return Math.max(0, Math.round((finished - started) / 1000));
-}
-
 /**
  * Represents a lazy tool item that will be created when the subagent section is expanded.
  */
@@ -455,10 +443,6 @@ export class ChatSubagentContentPart extends ChatCollapsibleContentPart implemen
 					? localize('chat.subagent.workerChangedFile', '1 changed file')
 					: localize('chat.subagent.workerChangedFiles', '{0} changed files', data.changedFileCount),
 			});
-		}
-		const elapsed = workerElapsedSeconds(data.startedAt, data.finishedAt);
-		if (elapsed !== undefined) {
-			items.push({ label: localize('chat.subagent.workerElapsed', 'Elapsed: {0}s', elapsed) });
 		}
 		if (data.conflictingFiles?.length) {
 			items.push({

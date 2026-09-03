@@ -748,6 +748,141 @@
 
 /* ---- New task ----------------------------------------------------------- */
 
+/* A user-selected image belongs only to Simple mode's top-level new-task
+ * canvas. Paint it beneath the full workbench grid so the 48px top panel can
+ * span the entire window while the sidebar body remains opaque. */
+.monaco-workbench.agent-sessions-workbench.shell-gradient-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background)::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+	z-index: 0;
+	pointer-events: none;
+	background-color: var(--codex-canvas) !important;
+	background-image:
+		linear-gradient(
+			to bottom,
+			color-mix(in srgb, var(--codex-canvas) 28%, transparent),
+			color-mix(in srgb, var(--codex-canvas) 40%, transparent)
+		),
+		var(--new-chat-background-image) !important;
+	background-position: center, center !important;
+	background-repeat: no-repeat, no-repeat !important;
+	background-size: cover, cover !important;
+}
+
+/* The grid wrappers normally paint solid region colors. Make only the wrappers
+ * over the active background transparent so the shared underlay can reach the
+ * draft and the full-width top panel. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background) .monaco-grid-view .split-view-view:has(> .part.sessionspart),
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background) .monaco-grid-view .split-view-view:has(> .part.sidebar),
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background) .monaco-grid-view .split-view-view:has(> .monaco-grid-branch-node .part.sidebar),
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background) .monaco-grid-view .split-view-view:has(> .part.auxiliarybar),
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background) .monaco-grid-view .split-view-view:has(> .monaco-grid-branch-node .part.auxiliarybar) {
+	background: transparent !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background) .part.sidebar {
+	background:
+		linear-gradient(
+			to bottom,
+			transparent 0,
+			transparent 48px,
+			var(--sessions-sidebar-region-background) 48px,
+			var(--sessions-sidebar-region-background) 100%
+		) !important;
+}
+
+/* The sidebar owns its title controls and should read as one solid panel, not
+ * as an empty transparent notch in the shared top strip. The image continues
+ * beneath the center and right headers only. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background) .part.sidebar::before {
+	content: '';
+	position: absolute;
+	inset: 0 0 auto;
+	z-index: 0;
+	height: 48px;
+	pointer-events: none;
+	background: var(--sessions-sidebar-region-background);
+}
+
+/* Reveal the part-level image through the new-task view only. Existing chat
+ * slots keep their normal opaque canvas if they are visible beside the draft. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart:has(.new-chat-widget-content.has-custom-background),
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart:has(.new-chat-widget-content.has-custom-background) > .content,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart:has(.new-chat-widget-content.has-custom-background) .session-view:has(.new-chat-widget-content.has-custom-background),
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart:has(.new-chat-widget-content.has-custom-background) .session-view:has(.new-chat-widget-content.has-custom-background) .session-view-content,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart:has(.new-chat-widget-content.has-custom-background) .sessions-chat-widget:not(.new-chat-in-session),
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart:has(.new-chat-widget-content.has-custom-background) .new-chat-widget-container,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart:has(.new-chat-widget-content.has-custom-background) .new-chat-widget-content.has-custom-background {
+	background: transparent !important;
+}
+
+/* Leave the center header completely unpainted so it joins the transparent
+ * right launcher. The left header remains part of the solid sidebar. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart:has(.new-chat-widget-content.has-custom-background) > .sessions-panel-header.sessions-part-header {
+	background: transparent !important;
+	-webkit-backdrop-filter: none;
+	backdrop-filter: none;
+}
+
+/* Continue the same full-window crop into the right-side launcher's empty
+ * canvas. Actual Browser, Terminal, Files, and Diff surfaces keep their normal
+ * opaque backgrounds after they open, and the launcher cards remain raised
+ * readable controls above the image. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background) .part.auxiliarybar,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background) .part.auxiliarybar > .content,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background) .part.auxiliarybar > .content .pane-body,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background) .part.auxiliarybar .pane-composite-part,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background) .part.auxiliarybar .composite,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background) .part.auxiliarybar .composite > .content,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background) .part.auxiliarybar .pane,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background) .part.auxiliarybar .monaco-scrollable-element,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background) .part.auxiliarybar .monaco-split-view2,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background) .part.auxiliarybar .split-view-container,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background) .part.auxiliarybar .split-view-view,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-mode-launcher {
+	background: transparent !important;
+	background-color: transparent !important;
+}
+
+/* The launcher has no native auxiliary-bar title row, so its transparent top
+ * strip needs an explicit Electron drag target. Open surfaces render their own
+ * header below and receive the same behavior without covering their buttons. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-shell.sessions-right-workbench-mode-launcher::before {
+	content: '';
+	position: absolute;
+	inset: 0 0 auto;
+	z-index: 2;
+	height: 48px;
+	-webkit-app-region: drag;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-header {
+	-webkit-app-region: drag;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-right-workbench-header :is(button, input, .sessions-right-workbench-tab, .sessions-right-workbench-tab-add, .sessions-right-workbench-icon-button) {
+	-webkit-app-region: no-drag;
+}
+
+/* The shared interactive-session wrapper normally blends into the solid
+ * canvas. Let the image show through that wrapper while the actual input card
+ * keeps its lifted opaque surface from the composer rules below. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .new-chat-widget-content.has-custom-background .new-chat-composer-stack > .interactive-session {
+	background: transparent !important;
+}
+
+/* Preserve the strict solid surfaces expected by high-contrast themes. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):is(.hc-black, .hc-light) .part.sessionspart:has(.new-chat-widget-content.has-custom-background) {
+	background: var(--codex-canvas) !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):is(.hc-black, .hc-light) .part.sessionspart:has(.new-chat-widget-content.has-custom-background) > .sessions-panel-header.sessions-part-header {
+	background: var(--codex-canvas) !important;
+	-webkit-backdrop-filter: none;
+	backdrop-filter: none;
+}
+
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .sessions-panel-header .new-chat-header-breadcrumb {
 	display: inline-flex;
 	align-items: center;
@@ -837,7 +972,11 @@
 	border: 1px solid var(--codex-border-strong) !important;
 	border-radius: var(--bb-simple-sent-composer-radius) !important;
 	background: var(--codex-composer) !important;
-	box-shadow: none;
+	/* Soft drop shadow lifting the card off the backdrop, mirroring the
+	 * composer shell rules in style.css. */
+	box-shadow:
+		0 14px 30px -14px color-mix(in srgb, #000 50%, transparent),
+		0 4px 10px -6px color-mix(in srgb, #000 30%, transparent);
 }
 
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .new-chat-composer-stack > .interactive-session .chat-editor-container,
@@ -873,15 +1012,23 @@ html body .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.j
 
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .new-chat-composer-stack > .interactive-session .chat-input-container.focused {
 	border-color: color-mix(in srgb, var(--codex-text-primary) 24%, transparent) !important;
-	box-shadow: 0 0 0 2px color-mix(in srgb, var(--vscode-focusBorder) 18%, transparent);
+	box-shadow:
+		0 0 0 2px color-mix(in srgb, var(--vscode-focusBorder) 18%, transparent),
+		0 14px 30px -14px color-mix(in srgb, #000 50%, transparent),
+		0 4px 10px -6px color-mix(in srgb, #000 30%, transparent);
 }
 
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container {
-	box-shadow: none;
+	box-shadow:
+		0 14px 30px -14px color-mix(in srgb, #000 50%, transparent),
+		0 4px 10px -6px color-mix(in srgb, #000 30%, transparent);
 }
 
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window).vs-dark .new-chat-composer-stack > .interactive-session .chat-input-container.focused {
-	box-shadow: 0 0 0 2px color-mix(in srgb, var(--vscode-focusBorder) 18%, transparent);
+	box-shadow:
+		0 0 0 2px color-mix(in srgb, var(--vscode-focusBorder) 18%, transparent),
+		0 14px 30px -14px color-mix(in srgb, #000 50%, transparent),
+		0 4px 10px -6px color-mix(in srgb, #000 30%, transparent);
 }
 
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):is(.hc-black, .hc-light) .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container,
@@ -1396,4 +1543,156 @@ html body .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.j
 	.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .new-chat-middle-section {
 		padding-bottom: 26px;
 	}
+}
+
+/* ---- Open sessions keep the custom background ---------------------------- */
+
+/* While a session is open the same image sits beneath the chat. The scrim is
+ * heavier than on the new-task canvas so prose and cards stay readable. */
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) > .monaco-grid-view {
+	position: relative;
+	z-index: 1;
+	background: transparent !important;
+}
+
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat)::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+	z-index: 0;
+	pointer-events: none;
+	background-color: var(--codex-canvas) !important;
+	background-image:
+		linear-gradient(
+			to bottom,
+			color-mix(in srgb, var(--codex-canvas) 70%, transparent),
+			color-mix(in srgb, var(--codex-canvas) 80%, transparent)
+		),
+		var(--new-chat-background-image) !important;
+	background-position: center, center !important;
+	background-repeat: no-repeat, no-repeat !important;
+	background-size: cover, cover !important;
+}
+
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .monaco-grid-view .split-view-view:has(> .part.sessionspart),
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .monaco-grid-view .split-view-view:has(> .part.sidebar),
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .monaco-grid-view .split-view-view:has(> .monaco-grid-branch-node .part.sidebar),
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .monaco-grid-view .split-view-view:has(> .part.auxiliarybar),
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .monaco-grid-view .split-view-view:has(> .monaco-grid-branch-node .part.auxiliarybar),
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.sessionspart,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.sessionspart .chat-view-chat,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.sessionspart .chat-view-chat .interactive-session,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.sessionspart .chat-view-chat .interactive-list,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.sessionspart .chat-view-chat .interactive-list .monaco-list {
+	background: transparent !important;
+}
+
+/* The sidebar stays a solid panel below its 48px title strip, exactly as on
+ * the new-task canvas. */
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.sidebar {
+	background:
+		linear-gradient(
+			to bottom,
+			transparent 0,
+			transparent 48px,
+			var(--sessions-sidebar-region-background) 48px,
+			var(--sessions-sidebar-region-background) 100%
+		) !important;
+}
+
+/* The transparent strip in the sidebar gradient is only there to keep the
+ * shared layout geometry aligned. Paint its own opaque cap so the chat image
+ * never shows through the sidebar's controls. */
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.sidebar::before {
+	content: '';
+	position: absolute;
+	inset: 0 0 auto;
+	z-index: 0;
+	height: 48px;
+	pointer-events: none;
+	background: var(--sessions-sidebar-region-background);
+}
+
+/* Every solid layer between the workbench underlay and the transcript goes
+ * clear while a session shows the custom background: the part, its content
+ * wrapper, the session view, the chat widget shell and the panel header. The
+ * composer keeps its own lifted surface. */
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.sessionspart > .content,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.sessionspart .session-view,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.sessionspart .session-view-content,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.sessionspart .sessions-chat-widget,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.sessionspart .chat-view-chat > .interactive-session,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.sessionspart .chat-view-chat .interactive-list .monaco-list-rows,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.sessionspart .chat-view-chat .interactive-list .monaco-scrollable-element {
+	background: transparent !important;
+	background-color: transparent !important;
+}
+
+/* The image is an underlay only. Give the live chat its own stacking context
+ * so a view swap cannot leave the transcript or composer behind the canvas. */
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.sessionspart .chat-view-chat {
+	position: relative;
+	z-index: 1;
+	isolation: isolate;
+}
+
+/* The active chat header shares the canvas with the transcript. Its contents
+ * remain available, but the row itself does not add a separate visual surface
+ * over the selected image. */
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.sessionspart > .sessions-panel-header.sessions-part-header {
+	background: transparent !important;
+	-webkit-backdrop-filter: none;
+	backdrop-filter: none;
+}
+
+/* The relocated breadcrumb is itself a chat-composite bar, whose base style
+ * paints the session canvas. Clear that inner layer as well; otherwise it
+ * leaves the opaque rectangle shown in the header even when its host is
+ * transparent. */
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .sessions-header-session-title-slot .chat-composite-bar.session-header-bar {
+	background: transparent !important;
+	background-color: transparent !important;
+}
+
+/* On the image-backed header, breadcrumbs are plain text rather than a muted
+ * surface. The latter reads as a stray dark chip once the bar is transparent. */
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .sessions-header-session-title-slot .chat-composite-bar-meta-workspace {
+	background: transparent !important;
+	border-color: transparent !important;
+	color: color-mix(in srgb, var(--codex-text-primary) 76%, transparent) !important;
+}
+
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .sessions-header-session-title-slot .chat-composite-bar-meta-row::after {
+	color: color-mix(in srgb, var(--codex-text-primary) 48%, transparent);
+}
+
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .sessions-header-session-title-slot .chat-composite-bar-session-title-text {
+	color: var(--codex-text-primary) !important;
+}
+
+/* The normal transcript scroll fade assumes an opaque panel. With the image
+ * exposed, it becomes a conspicuous black band below the header instead. */
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.sessionspart .chat-view-chat .interactive-list .monaco-scrollable-element > .shadow.top {
+	background: transparent !important;
+	box-shadow: none !important;
+}
+
+/* Transcript rows and the right launcher canvas let the image through, as on
+ * the new-task canvas; opened Browser/Terminal/Files/Diff surfaces stay opaque. */
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.sessionspart .chat-view-chat .interactive-list .monaco-list-row,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.sessionspart .chat-view-chat .interactive-list .interactive-item-container,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.auxiliarybar,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.auxiliarybar > .content,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.auxiliarybar > .content .pane-body,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.auxiliarybar .pane-composite-part,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.auxiliarybar .composite,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.auxiliarybar .composite > .content,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.auxiliarybar .pane,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.auxiliarybar .monaco-scrollable-element,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.auxiliarybar .monaco-split-view2,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.auxiliarybar .split-view-container,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.auxiliarybar .split-view-view,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.jarvis-window):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-mode-launcher {
+	background: transparent !important;
+	background-color: transparent !important;
 }

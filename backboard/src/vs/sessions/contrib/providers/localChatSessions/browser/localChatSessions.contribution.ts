@@ -68,6 +68,7 @@ registerAction2(class extends ForkConversationAction {
 			const sessionsService = accessor.get(ISessionsService);
 			const logService = accessor.get(ILogService);
 
+			logService.info(`[ForkDiag] sessions-window _openForkedSession parent=${parentSessionResource.toString()} forked=${forkedSessionResource.toString()}`);
 			const parentSession = sessionsManagementService.getSession(parentSessionResource);
 			if (!parentSession) {
 				logService.error(`Parent session ${parentSessionResource.toString()} not found when forking conversation`);

@@ -152,6 +152,49 @@ suite('combined model provider sections', () => {
 		assert.strictEqual(formatModelProviderDetail(claude), 'Claude subscription');
 		assert.strictEqual(isClaudeSubscriptionConnected(models), true);
 	});
+
+	test('only recommends connected subscription models', () => {
+		const unconnectedChatGpt = createModel('openai-subscription/gpt-5.6-sol', 'GPT-5.6 Sol', 'agent-host-backboard');
+		const connectedChatGpt = {
+			...createModel('openai-subscription/gpt-5.6-terra', 'GPT-5.6 Terra', 'agent-host-backboard'),
+			metadata: {
+				...createModel('openai-subscription/gpt-5.6-terra', 'GPT-5.6 Terra', 'agent-host-backboard').metadata,
+				auth: { providerLabel: 'ChatGPT', accountLabel: 'Connected' },
+			},
+		};
+		const unconnectedClaude = createModel('anthropic-subscription/default', 'Claude Default', 'agent-host-backboard');
+		const connectedClaude = {
+			...createModel('anthropic-subscription/sonnet', 'Claude Sonnet', 'agent-host-backboard'),
+			metadata: {
+				...createModel('anthropic-subscription/sonnet', 'Claude Sonnet', 'agent-host-backboard').metadata,
+				auth: { providerLabel: 'Claude', accountLabel: 'Connected' },
+			},
+		};
+		const recommendedApiModel = createModel('openai/gpt-5.6-sol', 'GPT-5.6 Sol', 'agent-host-backboard');
+		const models = [unconnectedChatGpt, connectedChatGpt, unconnectedClaude, connectedClaude, recommendedApiModel];
+
+		const recommended = modelsForCombinedModelSection(models, COMBINED_MODEL_SECTION_RECOMMENDED);
+		const recommendedSection = buildCombinedModelSections(models).find(section => section.id === COMBINED_MODEL_SECTION_RECOMMENDED);
+		const onlyUnconnectedSubscriptionModels = modelsForCombinedModelSection(
+			[unconnectedChatGpt, unconnectedClaude],
+			COMBINED_MODEL_SECTION_RECOMMENDED,
+		);
+
+		assert.deepStrictEqual(recommended, [connectedChatGpt, connectedClaude, recommendedApiModel]);
+		assert.strictEqual(recommendedSection?.modelCount, recommended.length);
+		assert.deepStrictEqual(onlyUnconnectedSubscriptionModels, []);
+	});
+
+	test('searches the full catalog from Recommended', () => {
+		const recommended = createModel('openai/gpt-5.6-sol', 'GPT-5.6 Sol', 'agent-host-backboard');
+		const catalogOnlyModel = createModel('ollama/llama-3.3', 'Llama 3.3', 'agent-host-backboard');
+		const models = [recommended, catalogOnlyModel];
+
+		assert.deepStrictEqual(
+			modelsForCombinedModelSection(models, COMBINED_MODEL_SECTION_RECOMMENDED, true),
+			models,
+		);
+	});
 });
 
 function getActionItems(items: IActionListItem<IActionWidgetDropdownAction>[]): IActionListItem<IActionWidgetDropdownAction>[] {
