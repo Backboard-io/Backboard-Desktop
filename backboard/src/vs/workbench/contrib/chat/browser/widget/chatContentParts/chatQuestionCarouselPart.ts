@@ -65,6 +65,7 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 	private _questionContainer: HTMLElement | undefined;
 	private _headerActionsContainer: HTMLElement | undefined;
 	private _closeButtonContainer: HTMLElement | undefined;
+	private _singleQuestionActionsContainer: HTMLElement | undefined;
 	private _footerRow: HTMLElement | undefined;
 	private _stepIndicator: HTMLElement | undefined;
 	private _submitHint: HTMLElement | undefined;
@@ -186,8 +187,8 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 		}
 
 		// Multi-question flows keep the header close action because their footer is
-		// also navigation. A single question gets one explicit Dismiss action in
-		// the footer instead of showing both an X and a duplicate keyboard hint.
+		// also navigation. A single question gets its explicit actions in that same
+		// header, rather than splitting the prompt and its answer controls apart.
 		if (carousel.allowSkip && carousel.questions.length > 1) {
 			this._closeButtonContainer = dom.$('.chat-question-close-container');
 			const skipAllTitle = localize('chat.questionCarousel.skipAllTitle', 'Skip all questions');
@@ -792,6 +793,9 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 			if (this._collapseButton) {
 				this._headerActionsContainer.appendChild(this._collapseButton.element);
 			}
+			if (this._singleQuestionActionsContainer) {
+				this._headerActionsContainer.appendChild(this._singleQuestionActionsContainer);
+			}
 			titleRow.appendChild(this._headerActionsContainer);
 		}
 
@@ -842,7 +846,7 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 		if (!isSingleQuestion) {
 			this.renderFooter();
 		} else {
-			this.renderSingleQuestionFooter();
+			this.renderSingleQuestionHeaderActions();
 		}
 
 		let relayoutScheduled = false;
@@ -985,27 +989,20 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 	}
 
 	/**
-	 * Renders a simplified footer with just a submit button for single-question multi-select carousels.
+	 * Renders the actions for a one-question prompt in its title row. Keeping
+	 * them with the question avoids a disconnected footer beneath the answer.
 	 */
-	private renderSingleQuestionFooter(): void {
-		if (!this._footerRow) {
+	private renderSingleQuestionHeaderActions(): void {
+		if (!this._singleQuestionActionsContainer) {
 			const interactiveStore = this._interactiveUIStore.value;
-			if (!interactiveStore) {
+			if (!interactiveStore || !this._headerActionsContainer) {
 				return;
 			}
 
-			this._footerRow = dom.$('.chat-question-footer-row');
-
-			// Spacer to push controls to the right
-			const leftControls = dom.$('.chat-question-footer-left.chat-question-carousel-nav');
-			leftControls.setAttribute('role', 'navigation');
-			leftControls.setAttribute('aria-label', localize('chat.questionCarousel.navigation', 'Question navigation'));
-			this._footerRow.appendChild(leftControls);
-
-			const rightControls = dom.$('.chat-question-footer-right');
+			const actions = dom.$('.chat-question-single-actions');
 			if (this.carousel.allowSkip) {
 				const dismissLabel = localize('chat.questionCarousel.dismiss', 'Dismiss');
-				const dismissButton = interactiveStore.add(new Button(rightControls, { ...defaultButtonStyles, secondary: true }));
+				const dismissButton = interactiveStore.add(new Button(actions, { ...defaultButtonStyles, secondary: true }));
 				dismissButton.element.classList.add('chat-question-dismiss-button');
 				dismissButton.label = dismissLabel;
 				dismissButton.element.setAttribute('aria-keyshortcuts', 'Escape');
@@ -1013,22 +1010,16 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 				interactiveStore.add(dismissButton.onDidClick(() => this.ignore()));
 			}
 
-			const hint = dom.$('span.chat-question-submit-hint');
-			hint.textContent = isMacintosh
-				? localize('chat.questionCarousel.submitHintMac', '\u2318\u23CE to submit')
-				: localize('chat.questionCarousel.submitHintOther', 'Ctrl+Enter to submit');
-			rightControls.appendChild(hint);
-			this._submitHint = hint;
-
-			const submitButton = interactiveStore.add(new Button(rightControls, { ...defaultButtonStyles }));
+			const submitButton = interactiveStore.add(new Button(actions, { ...defaultButtonStyles }));
 			submitButton.element.classList.add('chat-question-submit-button');
 			submitButton.label = localize('chat.questionCarousel.answerLabel', 'Answer');
 			interactiveStore.add(submitButton.onDidClick(() => this.submit()));
 			this._submitButton = submitButton;
 
-			this._footerRow.appendChild(rightControls);
-			this.domNode.append(this._footerRow);
+			this._singleQuestionActionsContainer = actions;
 		}
+
+		this._headerActionsContainer?.appendChild(this._singleQuestionActionsContainer);
 	}
 
 	/**

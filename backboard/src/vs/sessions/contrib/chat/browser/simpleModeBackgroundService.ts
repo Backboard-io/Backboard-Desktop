@@ -26,6 +26,8 @@ export interface ISimpleModeBackgroundService {
 	readonly _serviceBrand: undefined;
 
 	readonly backgroundImage: URI | undefined;
+	/** Increments whenever the background is applied, including a re-selection of the same file. */
+	readonly backgroundImageRevision: number;
 	readonly onDidChangeBackgroundImage: Event<URI | undefined>;
 
 	chooseBackgroundImage(): Promise<void>;
@@ -46,9 +48,15 @@ export class SimpleModeBackgroundService extends Disposable implements ISimpleMo
 
 	private readonly backgroundImageSetContext: IContextKey<boolean>;
 	private _backgroundImage: URI | undefined;
+	private _backgroundImageRevision = 0;
+	private pendingChooseBackgroundImage: Promise<void> | undefined;
 
 	get backgroundImage(): URI | undefined {
 		return this._backgroundImage;
+	}
+
+	get backgroundImageRevision(): number {
+		return this._backgroundImageRevision;
 	}
 
 	constructor(
@@ -67,7 +75,24 @@ export class SimpleModeBackgroundService extends Disposable implements ISimpleMo
 		)(() => this.restoreBackgroundImage()));
 	}
 
-	async chooseBackgroundImage(): Promise<void> {
+	chooseBackgroundImage(): Promise<void> {
+		// Native file pickers are asynchronous. Keep a second click from opening a
+		// competing picker whose later result can overwrite the newer selection.
+		if (this.pendingChooseBackgroundImage) {
+			return this.pendingChooseBackgroundImage;
+		}
+
+		let request: Promise<void>;
+		request = this.doChooseBackgroundImage().finally(() => {
+			if (this.pendingChooseBackgroundImage === request) {
+				this.pendingChooseBackgroundImage = undefined;
+			}
+		});
+		this.pendingChooseBackgroundImage = request;
+		return request;
+	}
+
+	private async doChooseBackgroundImage(): Promise<void> {
 		const selected = await this.fileDialogService.showOpenDialog({
 			title: localize('simpleModeBackground.chooseTitle', "Choose a Simple Mode Background Image"),
 			openLabel: localize('simpleModeBackground.useImage', "Use Image"),
@@ -85,7 +110,9 @@ export class SimpleModeBackgroundService extends Disposable implements ISimpleMo
 			return;
 		}
 
-		this.setBackgroundImage(resource);
+		// Force an update when the same file is picked again. This is useful after
+		// replacing an image on disk and prevents the canvas from appearing stuck.
+		this.setBackgroundImage(resource, true);
 		this.storageService.store(
 			SIMPLE_MODE_BACKGROUND_IMAGE_STORAGE_KEY,
 			resource.toString(),
@@ -113,12 +140,13 @@ export class SimpleModeBackgroundService extends Disposable implements ISimpleMo
 		}
 	}
 
-	private setBackgroundImage(resource: URI | undefined): void {
-		if (this._backgroundImage?.toString() === resource?.toString()) {
+	private setBackgroundImage(resource: URI | undefined, force = false): void {
+		if (!force && this._backgroundImage?.toString() === resource?.toString()) {
 			return;
 		}
 
 		this._backgroundImage = resource;
+		this._backgroundImageRevision++;
 		this.backgroundImageSetContext.set(!!resource);
 		this._onDidChangeBackgroundImage.fire(resource);
 	}

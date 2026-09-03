@@ -175,6 +175,47 @@
 	}
 }
 
+/* A single-question prompt keeps its actions beside its title. This is a
+ * compact action group, not a second footer/card below the answer controls. */
+.interactive-session .chat-question-carousel-container .chat-question-header-actions .chat-question-single-actions {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	flex-shrink: 0;
+}
+
+.interactive-session .chat-question-carousel-container .chat-question-header-actions .monaco-button.chat-question-dismiss-button {
+	height: 24px;
+	min-width: auto;
+	padding: 0 7px;
+	border: 0 !important;
+	border-radius: 5px;
+	background: transparent !important;
+	color: var(--vscode-descriptionForeground) !important;
+	box-shadow: none !important;
+}
+
+.interactive-session .chat-question-carousel-container .chat-question-header-actions .monaco-button.chat-question-dismiss-button:hover:not(.disabled) {
+	color: var(--vscode-foreground) !important;
+	background: var(--vscode-toolbar-hoverBackground) !important;
+}
+
+.interactive-session .chat-question-carousel-container .chat-question-header-actions .monaco-button.chat-question-submit-button {
+	height: 24px;
+	min-width: auto;
+	padding: 0 9px;
+	border: 0 !important;
+	border-radius: 5px;
+	background: var(--vscode-button-background) !important;
+	color: var(--vscode-button-foreground) !important;
+	font-weight: var(--vscode-agents-fontWeight-semiBold);
+	box-shadow: none !important;
+}
+
+.interactive-session .chat-question-carousel-container .chat-question-header-actions .monaco-button.chat-question-submit-button:hover:not(.disabled) {
+	background: var(--vscode-button-hoverBackground) !important;
+}
+
 .interactive-session .chat-question-carousel-container.chat-question-carousel-collapsed {
 	.chat-question-carousel-content {
 		.chat-question-description,

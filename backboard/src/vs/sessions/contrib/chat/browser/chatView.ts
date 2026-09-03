@@ -247,7 +247,12 @@ export class ChatView extends AbstractChatView {
 		this._appliedBackgroundImage = key;
 		workbench.classList.toggle('sessions-chat-custom-background', !!resource);
 		if (resource) {
-			workbench.style.setProperty('--new-chat-background-image', asCSSUrl(resource));
+			// Make every accepted picker result a distinct CSS value so a cached
+			// image is repainted when it is selected again.
+			const versionedResource = resource.with({ fragment: `backboard-background-${this.simpleModeBackgroundService.backgroundImageRevision}` });
+			workbench.style.setProperty('--new-chat-background-image', asCSSUrl(versionedResource));
+		} else {
+			workbench.style.removeProperty('--new-chat-background-image');
 		}
 	}
 

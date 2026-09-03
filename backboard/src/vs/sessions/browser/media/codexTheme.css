@@ -1696,3 +1696,130 @@ html body .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.j
 	background: transparent !important;
 	background-color: transparent !important;
 }
+
+/* ---- Simple-mode questions ---------------------------------------------
+ * Keep a question as one lifted surface. Choices and the optional free-form
+ * response belong to that surface; they should not each look like their own
+ * card inside it. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .chat-question-carousel-container {
+	max-height: min(320px, 40vh);
+	margin: 10px 0;
+	border: 1px solid color-mix(in srgb, var(--codex-text-primary) 15%, transparent);
+	border-radius: 10px;
+	background: color-mix(in srgb, var(--codex-canvas) 94%, #000);
+	box-shadow: 0 5px 16px color-mix(in srgb, #000 22%, transparent);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .chat-question-carousel-container .chat-question-title-row {
+	min-height: 30px;
+	padding: 4px 10px;
+	background: transparent;
+	border-bottom-color: color-mix(in srgb, var(--codex-text-primary) 10%, transparent);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .chat-question-carousel-container .chat-question-header-actions {
+	gap: 5px;
+	opacity: 1;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .chat-question-carousel-container .chat-question-header-actions .monaco-button.chat-question-dismiss-button,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .chat-question-carousel-container .chat-question-header-actions .monaco-button.chat-question-submit-button {
+	height: 23px;
+	border-radius: 6px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .chat-question-carousel-container .chat-question-description {
+	padding: 8px 10px 4px;
+	font-size: 13px;
+	line-height: 18px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .chat-question-carousel-container .chat-question-input-container {
+	padding: 2px 10px 7px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .chat-question-carousel-container .chat-question-list {
+	gap: 0;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .chat-question-carousel-container .chat-question-list-item {
+	min-height: 29px;
+	padding: 4px 6px;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .chat-question-carousel-container .chat-question-list-item:hover {
+	border-color: transparent;
+	background: color-mix(in srgb, var(--codex-text-primary) 4%, transparent);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .chat-question-carousel-container .chat-question-list-item.selected,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .chat-question-carousel-container .chat-question-list:focus .chat-question-list-item.selected {
+	border-color: transparent;
+	background: color-mix(in srgb, var(--vscode-focusBorder) 8%, transparent);
+	box-shadow: none;
+}
+
+/* Options are choices, not numbered mini-buttons. Keep shortcuts in the DOM,
+ * but render the single-select affordance as a compact radio marker. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .chat-question-carousel-container .chat-question-list-item:not(.multi-select) .chat-question-list-number {
+	position: relative;
+	width: 14px;
+	height: 14px;
+	border-color: color-mix(in srgb, var(--codex-text-primary) 48%, transparent);
+	border-radius: 50%;
+	background: transparent;
+	color: transparent;
+	font-size: 0;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .chat-question-carousel-container .chat-question-list-item.selected:not(.multi-select) .chat-question-list-number {
+	border-color: var(--vscode-focusBorder);
+	background: var(--vscode-focusBorder);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .chat-question-carousel-container .chat-question-list-item.selected:not(.multi-select) .chat-question-list-number::after {
+	position: absolute;
+	inset: 3px;
+	border-radius: 50%;
+	background: var(--vscode-editor-background);
+	content: '';
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .chat-question-carousel-container .chat-question-freeform {
+	min-height: 30px;
+	margin-top: 4px;
+	padding: 0;
+	border: 0;
+	border-top: 1px solid color-mix(in srgb, var(--codex-text-primary) 9%, transparent);
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .chat-question-carousel-container .chat-question-freeform:focus-within {
+	border-color: var(--vscode-focusBorder);
+	box-shadow: none;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .chat-question-carousel-container .chat-question-freeform-textarea {
+	min-height: 29px;
+	padding: 4px 6px;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	resize: none !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .chat-question-carousel-container .chat-question-freeform-textarea::-webkit-resizer {
+	display: none;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .chat-question-carousel-container .chat-question-footer-row {
+	min-height: 32px;
+	padding: 3px 7px;
+	border-top-color: color-mix(in srgb, var(--codex-text-primary) 10%, transparent);
+	background: transparent;
+}

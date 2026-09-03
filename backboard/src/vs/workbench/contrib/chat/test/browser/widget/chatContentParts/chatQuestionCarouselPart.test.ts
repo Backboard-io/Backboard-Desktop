@@ -174,16 +174,20 @@ suite('ChatQuestionCarouselPart', () => {
 			assert.strictEqual(collapseButton, null);
 		});
 
-		test('uses one explicit footer dismiss action for a single question', () => {
+		test('keeps single-question actions in the title row', () => {
 			const carousel = createMockCarousel([
 				{ id: 'q1', type: 'text', title: 'Question 1' }
 			], true);
 			createWidget(carousel);
 
-			assert.strictEqual(widget.domNode.querySelector('.chat-question-close'), null, 'single-question prompt should not duplicate dismiss in the header');
-			const dismissButton = widget.domNode.querySelector('.chat-question-dismiss-button');
-			assert.ok(dismissButton, 'single-question prompt should expose a footer dismiss action');
+			const titleRow = widget.domNode.querySelector('.chat-question-title-row');
+			assert.ok(titleRow, 'title row should exist');
+			const dismissButton = titleRow?.querySelector('.chat-question-dismiss-button');
+			const submitButton = titleRow?.querySelector('.chat-question-submit-button');
+			assert.ok(dismissButton, 'single-question prompt should expose dismiss in the title row');
+			assert.ok(submitButton, 'single-question prompt should expose answer in the title row');
 			assert.strictEqual(dismissButton?.getAttribute('aria-keyshortcuts'), 'Escape');
+			assert.strictEqual(widget.domNode.querySelector('.chat-question-footer-row'), null, 'single-question prompt should not render a detached footer');
 		});
 
 		test('renders collapse button to the right of close button', () => {
@@ -649,7 +653,8 @@ suite('ChatQuestionCarouselPart', () => {
 	suite('Accessibility', () => {
 		test('navigation area has proper role and aria-label', () => {
 			const carousel = createMockCarousel([
-				{ id: 'q1', type: 'text', title: 'Question 1' }
+				{ id: 'q1', type: 'text', title: 'Question 1' },
+				{ id: 'q2', type: 'text', title: 'Question 2' }
 			]);
 			createWidget(carousel);
 

@@ -550,7 +550,10 @@ export class NewChatWidget extends Disposable {
 
 		this._chatWidgetContent.classList.toggle('has-custom-background', !!resource);
 		if (resource) {
-			this._backgroundVariableHost?.style.setProperty('--new-chat-background-image', asCSSUrl(resource));
+			// The fragment changes with each selection so Chromium repaints even if
+			// the user re-selects a file that was already cached as the background.
+			const versionedResource = resource.with({ fragment: `backboard-background-${this.simpleModeBackgroundService.backgroundImageRevision}` });
+			this._backgroundVariableHost?.style.setProperty('--new-chat-background-image', asCSSUrl(versionedResource));
 		} else {
 			this._backgroundVariableHost?.style.removeProperty('--new-chat-background-image');
 		}
