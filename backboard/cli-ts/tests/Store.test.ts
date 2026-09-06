@@ -9,6 +9,31 @@ import { initialState } from "../src/state/AppState.ts";
 import { reduce, transcriptFromMessages } from "../src/state/Store.ts";
 
 describe("Store reducer", () => {
+	it("renders typed execution failure while keeping the rich result", () => {
+		let state = reduce(initialState("test"), {
+			type: "tool:start",
+			toolCallId: "failed",
+			name: "Execute",
+			inputSummary: "bun test",
+		});
+		state = reduce(state, {
+			type: "tool:result",
+			toolCallId: "failed",
+			name: "Execute",
+			title: "exit 1",
+			detail: "test diagnostics",
+			execution: {
+				exitCode: 1,
+				outcome: "failure",
+				failureCategory: "execution",
+			},
+		});
+		expect(state.transcript[0]).toMatchObject({
+			status: "error",
+			detail: "test diagnostics",
+		});
+	});
+
 	it("omits empty assistant placeholders from hydrated transcripts", () => {
 		const transcript = transcriptFromMessages([
 			userMessage("hi"),

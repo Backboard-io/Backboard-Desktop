@@ -1,0 +1,32 @@
+[
+	{
+		"type": "tool_call_start",
+		"tool_call_id": "fixture_call_1",
+		"name": "glob"
+	},
+	{
+		"type": "tool_call_ready",
+		"tool_call": {
+			"id": "fixture_call_1",
+			"type": "function",
+			"function": {
+				"name": "glob",
+				"arguments": "{\"patterns\":[\"src/**/*.ts\"]}"
+			}
+		}
+	},
+	{
+		"type": "tool_submit_required",
+		"run_id": "fixture_run",
+		"tool_calls": [
+			{
+				"id": "fixture_call_1",
+				"type": "function",
+				"function": {
+					"name": "grep",
+					"arguments": "{\"patterns\":[\"src/**/*.ts\"]}"
+				}
+			}
+		]
+	}
+]

@@ -1362,12 +1362,13 @@ export class SkillsLibraryController {
 	@IWorkspaceContextService private readonly _workspaceService: IWorkspaceContextService,
 	) { }
 
-	renderEmbeddedMarketplace(container: HTMLElement): DisposableStore {
+	renderEmbeddedMarketplace(container: HTMLElement, simpleMode = false): DisposableStore {
 		dom.clearNode(container);
 		return this.createMarketplaceSession({
 			host: container,
 			ownerDocument: container.ownerDocument,
 			embedded: true,
+			simpleMode,
 		});
 	}
 
@@ -1391,11 +1392,12 @@ export class SkillsLibraryController {
 		});
 	}
 
-	private createMarketplaceSession(options: { readonly host: HTMLElement; readonly ownerDocument: Document; readonly embedded: boolean }): DisposableStore {
-		const { embedded, host, ownerDocument } = options;
+	private createMarketplaceSession(options: { readonly host: HTMLElement; readonly ownerDocument: Document; readonly embedded: boolean; readonly simpleMode?: boolean }): DisposableStore {
+		const { embedded, host, ownerDocument, simpleMode = false } = options;
 		const store = new DisposableStore();
-		let activeMarketplacePage: SkillsMarketplacePage = 'skills';
-		let activeCategory: SkillsLibraryCategory = 'all';
+		const simpleRenderStore = store.add(new DisposableStore());
+		let activeMarketplacePage: SkillsMarketplacePage = simpleMode ? 'mcp' : 'skills';
+		let activeCategory: SkillsLibraryCategory = simpleMode ? 'installed' : 'all';
 		let activeMcpCategory: McpMarketplaceCategory = 'all';
 		let installedFilter: InstalledSkillFilter = 'all';
 		let recentlyRemovedInstalled: IRecentlyRemovedSkill[] = [];
@@ -1428,8 +1430,9 @@ export class SkillsLibraryController {
 			? dom.append(host, dom.$('.skills-library-embedded'))
 			: dom.append(host, dom.$('.skills-library-overlay'));
 		const modal = dom.append(root, dom.$(embedded ? '.skills-library-modal.skills-library-modal-embedded' : '.skills-library-modal'));
+		root.classList.toggle('skills-library-simple', simpleMode);
 		const header = dom.append(modal, dom.$('.skills-library-header'));
-		header.classList.toggle('skills-library-header-embedded', embedded);
+		header.classList.toggle('skills-library-header-embedded', embedded && !simpleMode);
 		const pageTabs = dom.append(header, dom.$('.skills-library-page-tabs'));
 		const titleBlock = dom.append(header, dom.$('.skills-library-title-block'));
 		const title = dom.append(titleBlock, dom.$('h2'));
@@ -1442,13 +1445,13 @@ export class SkillsLibraryController {
 			placeholder: localize('chat.skillsLibrary.searchPlaceholder', "Search Marketplace"),
 			'aria-label': localize('chat.skillsLibrary.searchAria', "Search Marketplace"),
 		})) as HTMLInputElement;
-		const embeddedFilterButton = embedded ? dom.append(searchBox, dom.$('button.skills-library-embedded-filter-action', {
+		const embeddedFilterButton = embedded && !simpleMode ? dom.append(searchBox, dom.$('button.skills-library-embedded-filter-action', {
 			type: 'button',
 			'aria-haspopup': 'menu',
 		}, renderIcon(Codicon.filter))) : undefined;
 		const closeButton = embedded ? undefined : dom.append(header, dom.$('button.skills-library-close', { type: 'button', 'aria-label': localize('chat.skillsLibrary.close', "Close") }, renderIcon(Codicon.close)));
 		const body = dom.append(modal, dom.$('.skills-library-body'));
-		body.classList.toggle('skills-library-body-embedded', embedded);
+		body.classList.toggle('skills-library-body-embedded', embedded && !simpleMode);
 		const sidebar = dom.append(body, dom.$('.skills-library-sidebar'));
 		const content = dom.append(body, dom.$('.skills-library-content'));
 
@@ -1617,23 +1620,29 @@ export class SkillsLibraryController {
 		}));
 
 		const openMcpServerOptionsFromMarketplace = (server: IWorkbenchLocalMcpServer): void => {
-			close();
+			if (!simpleMode) {
+				close();
+			}
 			setTimeout(() => void this.openMcpServerOptions(server), 0);
 		};
 
 		const openMcpServerOutputFromMarketplace = (server: IWorkbenchLocalMcpServer): void => {
-			close();
+			if (!simpleMode) {
+				close();
+			}
 			setTimeout(() => void this.openMcpServerOutput(server), 0);
 		};
 
 		const openMcpServerConfigurationFromMarketplace = (server: IWorkbenchLocalMcpServer): void => {
-			close();
+			if (!simpleMode) {
+				close();
+			}
 			setTimeout(() => void this.openMcpServerConfiguration(server), 0);
 		};
 
 		const renderPageTabs = (): void => {
 			dom.clearNode(pageTabs);
-			for (const page of SKILLS_MARKETPLACE_PAGES) {
+			for (const page of simpleMode ? [...SKILLS_MARKETPLACE_PAGES].reverse() : SKILLS_MARKETPLACE_PAGES) {
 				const button = dom.append(pageTabs, dom.$('button.skills-library-page-tab', {
 					type: 'button',
 					'aria-pressed': String(activeMarketplacePage === page.id),
@@ -1644,10 +1653,13 @@ export class SkillsLibraryController {
 						return;
 					}
 					activeMarketplacePage = page.id;
+					query = '';
+					search.value = '';
+					searchRevision++;
 					clearRecentlyRemovedInstalled();
 					clearRecentlyRemovedMcps();
 					activeOfficialOwner = undefined;
-					void refreshActiveView();
+					void (simpleMode && page.id === 'skills' && state.loading ? refresh() : refreshActiveView());
 				}));
 			}
 		};
@@ -1760,7 +1772,7 @@ export class SkillsLibraryController {
 		};
 
 		const renderEmbeddedResultsHeader = (): void => {
-			if (!embedded) {
+			if (!embedded || simpleMode) {
 				return;
 			}
 			const categoryLabel = getActiveEmbeddedCategoryLabel();
@@ -1775,15 +1787,24 @@ export class SkillsLibraryController {
 		};
 
 		const render = (): void => {
+			simpleRenderStore.clear();
 			renderPageTabs();
 			renderHeading();
 			renderSidebar();
 			dom.clearNode(content);
 			renderEmbeddedResultsHeader();
+			root.classList.toggle('skills-library-showing-skills', activeMarketplacePage === 'skills');
 			body.classList.toggle('skills-library-body-mcp', activeMarketplacePage === 'mcp');
 			if (activeMarketplacePage === 'mcp') {
 				renderMcpContent();
 				return;
+			}
+			if (simpleMode) {
+				const tabs = dom.append(content, dom.$('.simple-mcp-scope'));
+				for (const [id, label] of [['installed', localize('simpleSkills.installed', "Installed")], ['all', localize('simpleSkills.browse', "Browse skills")]] as const) {
+					const button = dom.append(tabs, dom.$('button', { type: 'button', 'aria-pressed': String(activeCategory === id) }, label));
+					simpleRenderStore.add(dom.addDisposableListener(button, dom.EventType.CLICK, () => { activeCategory = id; void refreshActiveView(); }));
+				}
 			}
 			if (state.loading) {
 				content.classList.add('skills-library-content-centered');
@@ -1793,6 +1814,10 @@ export class SkillsLibraryController {
 			content.classList.remove('skills-library-content-centered');
 			if (state.error && activeCategory !== 'installed') {
 				dom.append(content, dom.$('.skills-library-error', undefined, localize('chat.skillsLibrary.errorDetail', "Unable to load skills: {0}", formatSkillsLibraryError(state.error))));
+			}
+			if (simpleMode && activeCategory === 'installed') {
+				renderInstalledContent();
+				return;
 			}
 			const normalizedQuery = query.trim();
 			if (state.searchError) {
@@ -1838,9 +1863,9 @@ export class SkillsLibraryController {
 
 		const renderHeading = (): void => {
 			if (activeMarketplacePage === 'mcp') {
-				title.textContent = localize('chat.skillsLibrary.mcpTitle', "MCP");
-				subtitle.textContent = localize('chat.skillsLibrary.mcpSubtitle', "Browse and install MCP servers.");
-				search.placeholder = embedded
+				title.textContent = simpleMode ? localize('simpleMcp.title', "MCPs") : localize('chat.skillsLibrary.mcpTitle', "MCP");
+				subtitle.textContent = simpleMode ? localize('simpleMcp.subtitle', "Work with Backboard across your favorite tools") : localize('chat.skillsLibrary.mcpSubtitle', "Browse and install MCP servers.");
+				search.placeholder = embedded && !simpleMode
 					? localize('chat.skillsLibrary.searchMcpMarketplacePlaceholder', "Search MCP Servers in Marketplace")
 					: localize('chat.skillsLibrary.searchMcpPlaceholder', "Search MCPs");
 				search.setAttribute('aria-label', localize('chat.skillsLibrary.searchMcpAria', "Search MCP servers"));
@@ -1864,7 +1889,7 @@ export class SkillsLibraryController {
 			if (mcpState.error && activeMcpCategory !== 'installed') {
 				dom.append(content, dom.$('.skills-library-error', undefined, localize('chat.skillsLibrary.mcpErrorDetail', "Unable to load MCP registry: {0}", mcpState.error)));
 			}
-			if (activeMcpCategory === 'installed') {
+			if (activeMcpCategory === 'installed' && !simpleMode) {
 				renderInstalledMcpContent();
 				return;
 			}
@@ -1873,7 +1898,59 @@ export class SkillsLibraryController {
 				query,
 				recentlyRemovedIds: recentlyRemovedMcps.map(removed => getMcpServerKey(removed.server)),
 			});
-			renderMcpItems(items);
+			if (simpleMode) {
+				renderSimpleMcpContent(items);
+			} else {
+				renderMcpItems(items);
+			}
+		};
+
+		const renderSimpleMcpContent = (items: readonly McpMarketplaceModalItem[]): void => {
+			const installedHeading = dom.append(content, dom.$('.simple-mcp-section-heading'));
+			dom.append(installedHeading, dom.$('h3', undefined, localize('simpleMcp.installed', "Installed")));
+			const strip = dom.append(content, dom.$('.simple-mcp-installed'));
+			for (const server of getVisibleInstalledMcps()) {
+				const button = dom.append(strip, dom.$('button.simple-mcp-installed-icon', { type: 'button', 'aria-label': server.displayName ?? server.name }));
+				renderMcpLogo(button, findMcpItemForInstalledServer(mcpState.items, server) ?? server);
+				simpleRenderStore.add(dom.addDisposableListener(button, dom.EventType.CLICK, () => void this.openMcpServerOptions(server)));
+			}
+			if (!strip.childElementCount) {
+				dom.append(strip, dom.$('span.simple-mcp-empty', undefined, localize('simpleMcp.empty', "Your installed MCPs will appear here.")));
+			}
+			const tabs = dom.append(content, dom.$('.simple-mcp-scope'));
+			for (const [id, label] of [['all', localize('simpleMcp.public', "Public")], ['installed', localize('simpleMcp.personal', "Personal")]] as const) {
+				const button = dom.append(tabs, dom.$('button', { type: 'button', 'aria-pressed': String(activeMcpCategory === id) }, label));
+				simpleRenderStore.add(dom.addDisposableListener(button, dom.EventType.CLICK, () => { activeMcpCategory = id; render(); }));
+			}
+			if (activeMcpCategory === 'installed') {
+				renderInstalledMcpContent();
+				return;
+			}
+			const catalog = items.filter(isMcpMarketplaceItem);
+			const popularIds = ['gmail', 'github', 'google-drive', 'slack', 'outlook', 'canva'];
+			const popular = catalog.filter(item => popularIds.includes(item.id)).sort((a, b) => popularIds.indexOf(a.id) - popularIds.indexOf(b.id));
+			const featured = popular.length ? popular : catalog.slice(0, 6);
+			const sections = query.trim()
+				? [[localize('simpleMcp.results', "Search results"), catalog] as const]
+				: [[localize('simpleMcp.popular', "Popular"), featured] as const, [localize('simpleMcp.discover', "Discover more"), catalog.filter(item => !featured.includes(item))] as const];
+			for (const [label, entries] of sections) {
+				if (!entries.length) { continue; }
+				dom.append(content, dom.$('h3.simple-mcp-section-title', undefined, label));
+				const grid = dom.append(content, dom.$('.simple-mcp-catalog'));
+				for (const item of entries) {
+					const row = dom.append(grid, dom.$('.simple-mcp-row'));
+					renderMcpLogo(row, item);
+					const text = dom.append(row, dom.$('.simple-mcp-copy'));
+					dom.append(text, dom.$('div.simple-mcp-name', undefined, item.label));
+					dom.append(text, dom.$('div.simple-mcp-description', undefined, item.description));
+					const installed = findInstalledMcp(mcpState.installed, item);
+					const busy = isInstallingMcp(item);
+					const button = dom.append(row, dom.$('button.simple-mcp-icon-button', { type: 'button', 'aria-label': installed ? localize('simpleMcp.configure', "Configure {0}", item.label) : localize('simpleMcp.install', "Install {0}", item.label) }, renderIcon(busy ? Codicon.loading : installed ? Codicon.gear : Codicon.add))) as HTMLButtonElement;
+					button.disabled = busy;
+					simpleRenderStore.add(dom.addDisposableListener(button, dom.EventType.CLICK, () => installed ? void this.openMcpServerOptions(installed) : void runInstallMcp(item)));
+				}
+			}
+			if (!catalog.length) { renderMcpItems([]); }
 		};
 
 		const renderMcpItems = (items: readonly McpMarketplaceModalItem[]): void => {
@@ -1925,7 +2002,10 @@ export class SkillsLibraryController {
 				? item.logoUrl
 				: item.icon?.dark ?? item.icon?.light;
 			if (iconUrl) {
-				dom.append(parent, dom.$('img.skills-library-mcp-logo', { src: iconUrl, alt: '' }));
+				const logo = dom.append(parent, dom.$('img.skills-library-mcp-logo', { src: iconUrl, alt: '' }));
+				(simpleMode ? simpleRenderStore : store).add(dom.addDisposableListener(logo, 'error', () => {
+					logo.replaceWith(dom.$('span.skills-library-mcp-logo.fallback', undefined, renderIcon(Codicon.package)));
+				}));
 				return;
 			}
 			dom.append(parent, dom.$('span.skills-library-mcp-logo.fallback', undefined, renderIcon(Codicon.package)));
@@ -2526,6 +2606,10 @@ export class SkillsLibraryController {
 				render();
 				return;
 			}
+			if (simpleMode && activeCategory === 'installed') {
+				render();
+				return;
+			}
 			if (query.trim().length >= 2) {
 				await updateSearch();
 				return;
@@ -2569,6 +2653,16 @@ export class SkillsLibraryController {
 		};
 
 		const refresh = async (): Promise<void> => {
+			if (simpleMode) {
+				try {
+					const installed = await this.getInstalledSkills(CancellationToken.None);
+					state = { ...state, installed: filterLocallyRemovedInstalled(installed), loading: false, error: undefined };
+				} catch (err) {
+					state = { ...state, loading: false, error: err?.message ?? String(err) };
+				}
+				await refreshActiveView();
+				return;
+			}
 			try {
 				const [remote, installed] = await Promise.all([
 					listSkillsShDirectory(this._sharedWebContentExtractorService, CancellationToken.None),
@@ -2597,9 +2691,17 @@ export class SkillsLibraryController {
 			await refreshActiveView();
 		};
 
+		if (simpleMode) {
+			const actions = dom.append(header, dom.$('.simple-mcp-toolbar'));
+			const add = dom.append(actions, dom.$('button.simple-mcp-add', { type: 'button' }, localize('simpleMcp.add', "Add"), renderIcon(Codicon.chevronDown)));
+			store.add(dom.addDisposableListener(add, dom.EventType.CLICK, async () => {
+				await this._commandService.executeCommand(McpCommandIds.AddConfiguration);
+				await refreshMcp();
+			}));
+		}
 		render();
 		search.focus();
-		void refresh();
+		void (simpleMode ? refreshMcp() : refresh());
 		return store;
 	}
 

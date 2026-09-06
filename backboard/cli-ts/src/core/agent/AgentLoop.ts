@@ -6,7 +6,11 @@ import type {
 	ThinkingConfig,
 	ThinkingRequestKind,
 } from "../../config/defaults.ts";
-import type { RuntimeThinkingResolver } from "../../config/thinkingRuntime.ts";
+import { fingerprint } from "../../config/runtimeIdentity.ts";
+import {
+	createRuntimeThinkingResolver,
+	type RuntimeThinkingResolver,
+} from "../../config/thinkingRuntime.ts";
 import type {
 	AgentClient,
 	RunMessageOptions,
@@ -22,7 +26,6 @@ import type { ToolScheduler } from "../tools/ToolScheduler.ts";
 import { AssistantAccumulator } from "./AssistantAccumulator.ts";
 import { finalVerificationNotification } from "./notifications/FinalVerificationNotification.ts";
 import { SystemNotificationRunner } from "./notifications/SystemNotificationRunner.ts";
-import { todoReconciliationNotification } from "./notifications/TodoReconciliationNotification.ts";
 import { ProviderStreamConsumer } from "./ProviderStreamConsumer.ts";
 import { buildRunMessageRequest } from "./RunMessageRequestBuilder.ts";
 import {
@@ -30,7 +33,10 @@ import {
 	isThinkingCompatibilityError,
 	modelKey,
 } from "./RuntimeRecovery.ts";
-import { hasStructuralDiagnosticText } from "./ThinkingEvidence.ts";
+import {
+	hasStructuralDiagnosticText,
+	isRoutineTask,
+} from "./ThinkingEvidence.ts";
 import { ToolRoundProcessor } from "./ToolRoundProcessor.ts";
 import { Turn } from "./Turn.ts";
 
@@ -126,6 +132,7 @@ export class AgentLoop {
 				: {}),
 		});
 		const activeModel = { ...this.deps.model };
+		let activeThinkingResolver = this.deps.thinkingResolver;
 		const attemptedModelKeys = new Set([modelKey(activeModel)]);
 		let forceThinkingOff = false;
 		let thinkingWarningEmitted = false;
@@ -135,7 +142,7 @@ export class AgentLoop {
 			thinkingWarningEmitted = true;
 			bus.emit({
 				type: "system:warning",
-				message: `Thinking was disabled for this model so the turn could continue (${reason}).`,
+				message: `Requested thinking controls could not be used (${reason}); the turn will use the provider fallback. Models may still reason internally.`,
 			});
 			await this.deps.onThinkingDisabled?.(reason);
 		};
@@ -147,21 +154,18 @@ export class AgentLoop {
 			consumer,
 			tools: this.deps.tools,
 			resolveThinking: (evidence) =>
-				forceThinkingOff ? null : this.resolveThinking(evidence),
+				forceThinkingOff
+					? null
+					: this.resolveThinking(evidence, activeThinkingResolver, activeModel),
 			onThinkingDisabled: disableThinking,
 			requestKind: this.deps.requestKind ?? "user",
 			maxToolRounds: this.deps.maxToolRounds,
 		});
 		this.executedToolRounds = 0;
 
+		// Plans are maintained alongside substantive work. No post-answer model
+		// request is issued only to reconcile todo metadata.
 		const notificationDefinitions = [
-			// Resolve the plan first: loop the todo reminder until the agent has
-			// closed every todo, then let verification review the finished work and
-			// produce the shown summary. Studio disables both hidden follow-up passes
-			// so the answer the user watches stream is always the final answer.
-			...(this.deps.todoReconciliation === false
-				? []
-				: [todoReconciliationNotification()]),
 			finalVerificationNotification(this.deps.finalVerificationNudge ?? false),
 		];
 		const notifications = new SystemNotificationRunner(
@@ -170,6 +174,17 @@ export class AgentLoop {
 				session,
 				consumer,
 				processor,
+				resolveThinking: () =>
+					forceThinkingOff
+						? null
+						: this.resolveThinking(
+								{
+									phase: "tool_outputs",
+									requestKind: this.deps.requestKind ?? "user",
+								},
+								activeThinkingResolver,
+								activeModel,
+							),
 				tools: this.deps.tools,
 				systemPrompt: this.deps.systemPrompt,
 				refreshSystemPrompt: this.deps.refreshSystemPrompt,
@@ -184,7 +199,7 @@ export class AgentLoop {
 		);
 
 		// Until the notification passes start, a final (no-tool-call) answer that
-		// follows at least one tool round is only a preview of what a superseding
+		// has evidence of unverified mutations is only a preview of what a superseding
 		// notification is about to re-answer - buffer it so it's discarded instead
 		// of shown, and the notification pass's answer becomes the only summary.
 		let notificationsStarted = false;
@@ -196,11 +211,17 @@ export class AgentLoop {
 		});
 
 		try {
-			let initialThinking = this.resolveThinking({
-				phase: "initial",
-				requestKind: this.deps.requestKind ?? "user",
-				hasDiagnosticText: hasStructuralDiagnosticText(content),
-			});
+			if (ctx.signal.aborted) throw new AbortError();
+			let initialThinking = this.resolveThinking(
+				{
+					phase: "initial",
+					requestKind: this.deps.requestKind ?? "user",
+					hasDiagnosticText: hasStructuralDiagnosticText(content),
+					routineTask: isRoutineTask(content),
+				},
+				activeThinkingResolver,
+				activeModel,
+			);
 			if (
 				initialThinking === null &&
 				this.deps.thinkingResolver?.intent !== undefined &&
@@ -253,10 +274,28 @@ export class AgentLoop {
 					activeModel.provider = fallback.provider;
 					activeModel.model = fallback.model;
 					attemptedModelKeys.add(modelKey(activeModel));
-					// Thinking metadata belongs to the original model. The next turn can
-					// resolve controls for the fallback normally after it becomes active.
-					initialThinking = null;
-					forceThinkingOff = true;
+					// Re-resolve the user's intent against the fallback's capabilities.
+					if (activeThinkingResolver) {
+						activeThinkingResolver = await createRuntimeThinkingResolver(
+							{
+								model: activeModel,
+								thinkingIntent: activeThinkingResolver.intent,
+							},
+							this.deps.client,
+						);
+						initialThinking = this.resolveThinking(
+							{
+								phase: "initial",
+								requestKind: this.deps.requestKind ?? "user",
+								routineTask: isRoutineTask(content),
+								hasDiagnosticText: hasStructuralDiagnosticText(content),
+							},
+							activeThinkingResolver,
+							activeModel,
+						);
+					} else
+						initialThinking = this.deps.thinking === null ? null : undefined;
+					forceThinkingOff = false;
 					bus.emit({
 						type: "system:warning",
 						message: `Model unavailable; retrying with ${activeModel.provider}/${activeModel.model}.`,
@@ -297,10 +336,36 @@ export class AgentLoop {
 
 	private resolveThinking(
 		evidence: DynamicThinkingEvidence,
+		resolver = this.deps.thinkingResolver,
+		model = this.deps.model,
 	): ThinkingConfig | null | undefined {
-		if (this.deps.thinkingResolver) {
-			return this.deps.thinkingResolver.resolve(evidence);
-		}
-		return this.deps.thinking;
+		const resolved = resolver ? resolver.resolve(evidence) : this.deps.thinking;
+		const intent = resolver?.intent;
+		this.deps.bus.emit({
+			type: "thinking:resolved",
+			phase: evidence.phase,
+			...model,
+			intent: intent ?? (intent === null ? "off" : "unspecified"),
+			resolved: resolved === undefined ? "provider-default" : resolved,
+			reason:
+				intent?.kind !== "dynamic"
+					? "fixed-or-provider-default"
+					: evidence.toolRound?.hadSemanticFailure
+						? "failed-validation"
+						: evidence.hasDiagnosticText
+							? "user-diagnostics"
+							: evidence.phase === "tool_outputs"
+								? "routine-continuation"
+								: evidence.routineTask
+									? "routine-task"
+									: "task-default",
+			...(evidence.phase === "initial"
+				? {
+						promptHash: fingerprint(this.deps.systemPrompt),
+						schemaHash: fingerprint(this.deps.tools),
+					}
+				: {}),
+		});
+		return resolved;
 	}
 }

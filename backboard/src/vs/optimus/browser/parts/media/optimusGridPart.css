@@ -13,6 +13,9 @@
 	overflow: hidden;
 	container-type: inline-size;
 	container-name: optimus-workspace;
+	/* Window controls share the compact dashboard toolbar. */
+	box-sizing: border-box;
+	padding-top: 0;
 
 	/* Design tokens carried over from the original Optimus window styling. */
 	--optimus-card: var(--vscode-editorWidget-background, var(--vscode-sideBar-background));
@@ -20,10 +23,8 @@
 	--optimus-border-subtle: color-mix(in srgb, var(--optimus-border) 62%, transparent);
 	--optimus-muted: var(--vscode-descriptionForeground);
 	--optimus-focus: var(--vscode-focusBorder);
-	--optimus-success: var(--vscode-charts-green);
 	--optimus-danger: var(--vscode-charts-red);
 	--optimus-warning: var(--vscode-charts-yellow);
-	--optimus-shadow: color-mix(in srgb, var(--vscode-widget-shadow, var(--vscode-foreground)) 28%, transparent);
 }
 
 .agent-sessions-workbench .part.titlebar.optimus-titlebar .titlebar-container,
@@ -126,9 +127,7 @@
 }
 
 .optimus-window-chrome-button,
-.optimus-window-chrome-mode,
-.optimus-window-nav-button,
-.optimus-window-command-center {
+.optimus-window-chrome-mode {
 	pointer-events: auto;
 	-webkit-app-region: no-drag;
 	border: 0;
@@ -137,8 +136,7 @@
 }
 
 /* Panel toggles: standard toolbar action look (22px codicon buttons). */
-.optimus-window-chrome-button,
-.optimus-window-nav-button {
+.optimus-window-chrome-button {
 	width: 24px;
 	height: 24px;
 	border-radius: 5px;
@@ -150,13 +148,11 @@
 }
 
 /* Icon buttons brighten on hover instead of gaining a fill. */
-.optimus-window-chrome-button,
-.optimus-window-nav-button {
+.optimus-window-chrome-button {
 	opacity: 0.75;
 }
 
-.optimus-window-chrome-button:hover,
-.optimus-window-nav-button:hover:not(:disabled) {
+.optimus-window-chrome-button:hover {
 	background: transparent;
 	opacity: 1;
 	color: var(--vscode-foreground);
@@ -170,117 +166,6 @@
 
 .optimus-window-chrome-button.checked:hover {
 	background: transparent;
-}
-
-.optimus-window-navigation {
-	display: flex;
-	align-items: center;
-	gap: 4px;
-	flex: 0 0 auto;
-}
-
-/* Treat arrows + command search as one navigation instrument and pin its
-   optical centre to the window, independent of the mode and panel controls. */
-.optimus-window-navigation-cluster {
-	position: absolute;
-	top: 0;
-	left: calc(var(--optimus-sidebar-width) + ((100% - var(--optimus-sidebar-width) - var(--optimus-right-workbench-width)) / 2));
-	height: 32px;
-	width: min(660px, max(180px, calc(100% - var(--optimus-sidebar-width) - var(--optimus-right-workbench-width) - 210px)));
-	max-width: calc(100% - var(--optimus-sidebar-width) - var(--optimus-right-workbench-width) - 24px);
-	transform: translateX(-50%);
-	display: flex;
-	align-items: center;
-	gap: 6px;
-	pointer-events: none;
-}
-
-.optimus-window-navigation-cluster > * {
-	pointer-events: auto;
-}
-
-.optimus-window-nav-button {
-	border: 0;
-	background: transparent;
-	color: var(--vscode-icon-foreground);
-	cursor: pointer;
-}
-
-.optimus-window-nav-button:disabled {
-	opacity: 0.3;
-	cursor: default;
-}
-
-.optimus-window-command-center {
-	display: flex;
-	align-items: center;
-	gap: 7px;
-	width: auto;
-	min-width: 180px;
-	flex: 1 1 auto;
-	height: 24px;
-	box-sizing: border-box;
-	padding: 0 5px 0 9px;
-	border: 1px solid color-mix(in srgb, var(--optimus-border) 72%, transparent);
-	border-radius: 6px;
-	background: color-mix(in srgb, var(--vscode-input-background) 88%, var(--vscode-foreground) 12%);
-	color: var(--vscode-input-foreground);
-}
-
-.optimus-window-command-center:focus-within {
-	border-color: color-mix(in srgb, var(--vscode-focusBorder) 68%, var(--optimus-border));
-}
-
-.optimus-window-command-icon {
-	flex: 0 0 auto;
-	font-size: 13px;
-	color: var(--vscode-input-placeholderForeground);
-}
-
-.optimus-window-command-input {
-	min-width: 0;
-	flex: 1;
-	border: 0;
-	outline: 0;
-	background: transparent;
-	color: inherit;
-	font: inherit;
-	font-size: 12px;
-}
-
-.optimus-window-command-input::placeholder {
-	color: var(--vscode-input-placeholderForeground);
-}
-
-.optimus-window-command-input::-webkit-search-cancel-button {
-	display: none;
-}
-
-.optimus-window-command-shortcuts {
-	display: flex;
-	align-items: center;
-	gap: 3px;
-	flex: 0 0 auto;
-}
-
-.optimus-window-command-key {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	min-width: 17px;
-	height: 17px;
-	box-sizing: border-box;
-	padding: 0 3px;
-	border: 1px solid color-mix(in srgb, var(--optimus-border) 68%, transparent);
-	border-radius: 3px;
-	background: color-mix(in srgb, var(--vscode-foreground) 6%, transparent);
-	color: var(--vscode-descriptionForeground);
-	font-size: 10px;
-	line-height: 1;
-}
-
-.optimus-window-command-key.codicon {
-	font-size: 10px;
 }
 
 .optimus-window-actions {
@@ -313,14 +198,10 @@
 	background-color: var(--vscode-toolbar-hoverBackground);
 }
 
-.optimus-window-chrome-button:focus,
 .optimus-window-chrome-button:focus-visible,
-.optimus-window-chrome-mode:focus,
-.optimus-window-chrome-mode:focus-visible,
-.optimus-window-nav-button:focus,
-.optimus-window-nav-button:focus-visible {
-	outline: none;
-	box-shadow: none;
+.optimus-window-chrome-mode:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
 }
 
 .optimus-window-chrome-mode-icon {
@@ -349,14 +230,6 @@
 	.optimus-window-chrome {
 		padding-left: 78px;
 	}
-
-	.optimus-window-command-shortcuts {
-		display: none;
-	}
-
-	.optimus-window-navigation-cluster {
-		width: min(480px, max(160px, calc(100% - var(--optimus-sidebar-width) - var(--optimus-right-workbench-width) - 180px)));
-	}
 }
 
 @media (max-width: 980px) {
@@ -372,19 +245,8 @@
 	}
 
 	.optimus-window-chrome-mode-label,
-	.optimus-window-chrome-mode-chevron,
-	.optimus-window-command-shortcuts,
-	.optimus-window-navigation {
+	.optimus-window-chrome-mode-chevron {
 		display: none;
-	}
-
-	.optimus-window-navigation-cluster {
-		position: static;
-		transform: none;
-		width: auto;
-		max-width: none;
-		min-width: 0;
-		flex: 1 1 auto;
 	}
 
 	.optimus-window-actions {
@@ -399,7 +261,7 @@
 	display: flex;
 	flex-direction: column;
 	gap: 8px;
-	padding: 42px 14px 10px;
+	padding: 10px 14px;
 	border-bottom: 1px solid var(--optimus-border-subtle);
 }
 
@@ -453,8 +315,7 @@
 
 /* Icon-only toolbar buttons (Display, Reset filters). The label moves to the
  * tooltip/aria-label so the toolbar carries symbols rather than a row of
- * competing text buttons; square so they read as a set with the codicon
- * controls in the window chrome above them. */
+ * competing text buttons. */
 .optimus-dashboard-icon-button {
 	display: inline-flex;
 	align-items: center;
@@ -553,35 +414,40 @@
 	outline-offset: 1px;
 }
 
-/* Flat, workbench-density cards: 1px borders and hover tints instead of
-   drop shadows, matching editor widgets and list rows. */
+/* Square cards share a single border, forming one continuous surface. */
 .optimus-card {
 	display: flex;
 	flex-direction: column;
 	min-height: 0;
 	min-width: 0;
-	border: 1px solid var(--optimus-border);
-	border-radius: 6px;
+	box-sizing: border-box;
+	border: 0;
+	border-right: 1px solid var(--optimus-border);
+	border-bottom: 1px solid var(--optimus-border);
+	border-radius: 0;
 	background: var(--optimus-card);
 	cursor: pointer;
-	outline: none;
+	outline: 1px solid color-mix(in srgb, var(--vscode-foreground) 22%, var(--optimus-border));
+	outline-offset: -1px;
 	overflow: hidden;
-	transition: border-color .12s ease, background .12s ease;
+	contain: layout style;
+	margin: 0;
+	padding: 0;
+	align-self: stretch;
 }
 
 .optimus-card:hover {
-	border-color: color-mix(in srgb, var(--optimus-focus) 35%, var(--optimus-border));
-	background: color-mix(in srgb, var(--vscode-list-hoverBackground) 35%, var(--optimus-card));
-}
-
-.optimus-card:focus-visible {
-	outline: 1px solid var(--optimus-focus);
-	outline-offset: -1px;
+	background: color-mix(in srgb, var(--vscode-foreground) 3%, var(--optimus-card));
 }
 
 .optimus-card.active {
-	border-color: var(--optimus-focus);
-	box-shadow: 0 0 0 1px color-mix(in srgb, var(--optimus-focus) 30%, transparent);
+	background: color-mix(in srgb, var(--vscode-foreground) 9%, var(--optimus-card));
+}
+
+.optimus-card:focus-visible,
+.optimus-card.active {
+	outline: 1px solid var(--optimus-focus);
+	outline-offset: -1px;
 }
 
 .optimus-card-content {
@@ -597,7 +463,9 @@
 	gap: 6px;
 	min-width: 0;
 	flex-shrink: 0;
-	padding: 8px 10px;
+	min-height: 30px;
+	box-sizing: border-box;
+	padding: 4px 7px 4px 9px;
 	border-bottom: 1px solid var(--optimus-border-subtle);
 }
 
@@ -625,11 +493,15 @@
 	pointer-events: auto;
 }
 
-.optimus-card-delete:hover,
-.optimus-card-delete:focus-visible {
+.optimus-card-delete:hover {
 	background: transparent;
 	color: var(--optimus-danger);
 	outline: none;
+}
+
+.optimus-card-delete:focus-visible {
+	outline: 1px solid var(--optimus-focus);
+	outline-offset: -1px;
 }
 
 /* Quiet workbench status language: a codicon (spinner while running, plain
@@ -649,7 +521,7 @@
 }
 
 .optimus-card-status-icon.done {
-	color: var(--optimus-success);
+	color: var(--optimus-muted);
 }
 
 .optimus-card-status-icon.error {
@@ -662,7 +534,7 @@
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	font-size: 13px;
+	font-size: 12px;
 	font-weight: 600;
 	line-height: 18px;
 }
@@ -672,8 +544,15 @@
 	max-width: 110px;
 	overflow: hidden;
 	white-space: nowrap;
-	font-size: 11px;
+	font-size: 9px;
+	font-weight: 500;
+	letter-spacing: .02em;
+	text-transform: uppercase;
 	color: var(--optimus-muted);
+}
+
+.optimus-card-status-label.running {
+	color: color-mix(in srgb, var(--vscode-charts-blue, var(--optimus-focus)) 82%, var(--vscode-foreground));
 }
 
 .optimus-card-status-label.needs-input {
@@ -691,491 +570,13 @@
 	white-space: pre-wrap;
 	word-break: break-word;
 	font-family: var(--monaco-monospace-font);
-	font-size: 11px;
-	line-height: 1.55;
-	color: var(--optimus-muted);
-	padding: 8px 12px;
-}
-
-/* Embedded read-only chat transcript: the real chat list renderer without
-   the composer — the right panel is the only place to type. Clicks anywhere
-   on the card open the chat, so present the transcript as a passive surface. */
-.optimus-card-chat {
-	flex: 1;
-	min-height: 0;
-	min-width: 0;
-	position: relative;
-	overflow: hidden;
-	cursor: pointer;
-	/* The transcript stays pinned to the newest turn, so older content clips
-	   at the top; a short fade makes the cut-off read as intentional. */
-	-webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 24px);
-	mask-image: linear-gradient(to bottom, transparent 0, #000 24px);
-}
-
-/* Compact mirror: hide checkpoint affordances ("Checkpoint Restored · Redo",
-   "Start Over" / "Restore Checkpoint" strips) — meaningful in the full chat,
-   pure noise in a small card. */
-.optimus-card-chat .checkpoint-restore-container,
-.optimus-card-chat .checkpoint-container {
-	display: none !important;
-}
-
-/* The chat renders in a monaco tree; the full chat hides the (unused)
-   twistie gutter via a rule scoped to its .interactive-list wrapper, which
-   the card's bare list lacks — without this, all rows indent 30px. */
-.optimus-card-chat .monaco-list .monaco-tl-twistie {
-	display: none !important;
-}
-
-/* Same conversation presentation as the full chat (see the
-   .interactive-session-scoped bubble rules in chat.css, which the bare list
-   cannot inherit without dragging in the whole chat-widget cascade): user
-   messages render as right-aligned bubbles, answers stay plain. */
-.optimus-card-chat .interactive-item-container.interactive-request {
-	align-items: flex-end;
-}
-
-.optimus-card-chat .interactive-item-container.interactive-request .value {
-	display: flex !important;
-	flex-direction: column !important;
-	align-items: flex-end !important;
-}
-
-.optimus-card-chat .interactive-item-container.interactive-request .value .rendered-markdown {
-	background-color: var(--vscode-chat-requestBubbleBackground);
-	border-radius: var(--vscode-cornerRadius-xLarge, 12px);
-	padding: 8px 12px;
-	max-width: 90%;
-	margin-left: auto;
-	width: fit-content;
-	margin-bottom: 5px;
-	position: relative;
-}
-
-/* The question renderer normally inherits its layout from `.interactive-session`.
-   Cards intentionally host a bare chat list, so without a scoped compact
-   treatment the question falls back to unstyled HTML (including a white
-   textarea and a full-width submit button). This is a tile-native version of
-   the same live widget: two-column choices, a dark input, and a quiet action
-   rail. Unlike the rest of the transcript, these controls remain interactive. */
-.optimus-card-chat:has(.chat-question-carousel-container) {
-	-webkit-mask-image: none;
-	mask-image: none;
-}
-
-.optimus-card-chat .chat-question-carousel-container {
-	display: flex;
-	flex-direction: column;
-	position: relative;
-	max-height: none;
-	margin: 4px 8px 8px;
-	border: 1px solid color-mix(in srgb, var(--optimus-warning) 24%, var(--optimus-border));
-	border-radius: 7px;
-	background: color-mix(in srgb, var(--optimus-warning) 4%, var(--optimus-card));
-	color: var(--vscode-foreground);
-	overflow: hidden;
-	container-type: inline-size;
-	cursor: default;
-}
-
-.optimus-card-chat .chat-question-carousel-content,
-.optimus-card-chat .chat-question-header-row {
-	display: flex;
-	flex-direction: column;
-	min-height: 0;
-}
-
-.optimus-card-chat .chat-question-title-row {
-	display: flex;
-	align-items: flex-start;
-	gap: 6px;
-	min-width: 0;
-	padding: 7px 8px 7px 10px;
-	border-bottom: 1px solid var(--optimus-border-subtle);
-}
-
-.optimus-card-chat .chat-question-title {
-	display: -webkit-box;
-	flex: 1;
-	min-width: 0;
-	margin: 0;
-	overflow: hidden;
-	-webkit-box-orient: vertical;
-	-webkit-line-clamp: 2;
-	font-size: 12px;
-	font-weight: 600;
-	line-height: 16px;
-	word-break: break-word;
-}
-
-.optimus-card-chat .chat-question-title .rendered-markdown p {
-	margin: 0;
-}
-
-/* The long preamble duplicates the title in card-sized asks. Keep the actual
-   question, which is both denser and the label announced by the controls. */
-.optimus-card-chat .chat-question-carousel-message {
-	display: none;
-}
-
-.optimus-card-chat .chat-question-header-actions {
-	display: flex;
-	align-items: center;
-	gap: 2px;
-	flex-shrink: 0;
-}
-
-.optimus-card-chat .monaco-button.chat-question-close,
-.optimus-card-chat .monaco-button.chat-question-collapse-toggle,
-.optimus-card-chat .monaco-button.chat-question-focus-terminal,
-.optimus-card-chat .monaco-button.chat-question-nav-arrow {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	min-width: 20px;
-	width: 20px;
-	height: 20px;
-	padding: 0;
-	border: 0 !important;
-	border-radius: 4px;
-	box-shadow: none !important;
-	background: transparent !important;
-	color: var(--vscode-icon-foreground) !important;
-}
-
-.optimus-card-chat .monaco-button.chat-question-close:hover:not(.disabled),
-.optimus-card-chat .monaco-button.chat-question-collapse-toggle:hover:not(.disabled),
-.optimus-card-chat .monaco-button.chat-question-focus-terminal:hover:not(.disabled),
-.optimus-card-chat .monaco-button.chat-question-nav-arrow:hover:not(.disabled) {
-	background: var(--vscode-toolbar-hoverBackground) !important;
-}
-
-.optimus-card-chat .chat-question-description {
-	display: -webkit-box;
-	padding: 4px 10px 0;
-	overflow: hidden;
-	-webkit-box-orient: vertical;
-	-webkit-line-clamp: 2;
 	font-size: 10.5px;
-	line-height: 14px;
+	line-height: 1.48;
 	color: var(--optimus-muted);
+	padding: 7px 11px;
 }
 
-.optimus-card-chat .chat-question-input-scrollable {
-	flex: 0 1 auto;
-	min-height: 0;
-	overflow-y: auto;
-	overscroll-behavior: contain;
-}
-
-.optimus-card-chat .chat-question-input-container {
-	display: flex;
-	flex-direction: column;
-	gap: 5px;
-	min-width: 0;
-	padding: 6px 8px;
-}
-
-.optimus-card-chat .chat-question-input-container::after {
-	display: none;
-}
-
-.optimus-card-chat .chat-question-list {
-	display: grid;
-	grid-template-columns: repeat(2, minmax(0, 1fr));
-	gap: 4px;
-	min-width: 0;
-	padding: 0;
-	outline: none;
-}
-
-.optimus-card-chat .chat-question-list-item {
-	display: flex;
-	align-items: center;
-	gap: 6px;
-	min-width: 0;
-	min-height: 28px;
-	box-sizing: border-box;
-	padding: 4px 6px;
-	border: 1px solid color-mix(in srgb, var(--optimus-border) 82%, transparent);
-	border-radius: 5px;
-	background: color-mix(in srgb, var(--vscode-foreground) 3%, transparent);
-	cursor: pointer;
-	user-select: none;
-}
-
-.optimus-card-chat .chat-question-list-item:hover {
-	border-color: color-mix(in srgb, var(--optimus-warning) 42%, var(--optimus-border));
-	background: color-mix(in srgb, var(--optimus-warning) 7%, transparent);
-}
-
-.optimus-card-chat .chat-question-list-item:focus,
-.optimus-card-chat .chat-question-list:focus {
-	outline: none;
-}
-
-.optimus-card-chat .chat-question-list:focus .chat-question-list-item.selected,
-.optimus-card-chat .chat-question-list-item.selected {
-	border-color: color-mix(in srgb, var(--optimus-warning) 58%, var(--optimus-border));
-	background: color-mix(in srgb, var(--optimus-warning) 13%, transparent);
-	color: var(--vscode-foreground);
-}
-
-.optimus-card-chat .chat-question-list-number {
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	width: 17px;
-	height: 17px;
-	box-sizing: border-box;
-	border: 1px solid var(--optimus-muted);
-	border-radius: 50%;
-	font-size: 9px;
-	font-weight: 600;
-	line-height: 1;
-	color: var(--optimus-muted);
-	flex-shrink: 0;
-}
-
-.optimus-card-chat .chat-question-list-item.selected .chat-question-list-number {
-	border-color: var(--optimus-warning);
-	background: var(--optimus-warning);
-	color: var(--vscode-editor-background);
-}
-
-.optimus-card-chat .chat-question-list-label {
-	display: flex;
-	align-items: baseline;
-	gap: 4px;
-	min-width: 0;
-	flex: 1;
-	overflow: hidden;
-	font-size: 10.5px;
-	line-height: 14px;
-	white-space: nowrap;
-	text-overflow: ellipsis;
-}
-
-.optimus-card-chat .chat-question-list-label-title {
-	font-weight: 600;
-	flex-shrink: 0;
-}
-
-.optimus-card-chat .chat-question-list-label-desc {
-	min-width: 0;
-	flex: 1;
-	overflow: hidden;
-	color: var(--optimus-muted);
-	white-space: nowrap;
-	text-overflow: ellipsis;
-}
-
-.optimus-card-chat .chat-question-list-indicator,
-.optimus-card-chat .chat-question-list-checkbox {
-	display: none;
-}
-
-.optimus-card-chat .chat-question-freeform {
-	display: grid;
-	grid-template-columns: 17px minmax(0, 1fr);
-	align-items: center;
-	gap: 6px;
-	min-width: 0;
-	margin: 0;
-	padding: 0 1px;
-}
-
-.optimus-card-chat .chat-question-freeform-number {
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	width: 17px;
-	height: 17px;
-	font-size: 12px;
-	color: var(--optimus-muted);
-}
-
-.optimus-card-chat .chat-question-freeform-textarea {
-	width: 100%;
-	min-width: 0;
-	min-height: 28px;
-	max-height: 60px;
-	box-sizing: border-box;
-	padding: 5px 7px;
-	border: 1px solid color-mix(in srgb, var(--optimus-border) 86%, transparent);
-	border-radius: 5px;
-	outline: none;
-	resize: none;
-	background: color-mix(in srgb, var(--vscode-input-background) 92%, var(--vscode-foreground) 8%);
-	color: var(--vscode-input-foreground);
-	font-family: var(--vscode-chat-font-family, inherit);
-	font-size: 10.5px;
-	line-height: 16px;
-	overflow-y: hidden;
-}
-
-.optimus-card-chat .chat-question-freeform-textarea:focus {
-	border-color: var(--optimus-warning);
-	box-shadow: 0 0 0 1px color-mix(in srgb, var(--optimus-warning) 30%, transparent);
-}
-
-.optimus-card-chat .chat-question-freeform-textarea::placeholder {
-	color: var(--vscode-input-placeholderForeground);
-}
-
-.optimus-card-chat .chat-question-validation-message {
-	padding: 0 9px 5px;
-	font-size: 10px;
-	line-height: 13px;
-	color: var(--vscode-editorWarning-foreground);
-}
-
-.optimus-card-chat .chat-question-footer-row {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	gap: 6px;
-	min-height: 31px;
-	box-sizing: border-box;
-	padding: 4px 7px;
-	border-top: 1px solid var(--optimus-border-subtle);
-}
-
-.optimus-card-chat .chat-question-footer-left,
-.optimus-card-chat .chat-question-footer-right,
-.optimus-card-chat .chat-question-nav-arrows {
-	display: flex;
-	align-items: center;
-	gap: 3px;
-}
-
-.optimus-card-chat .chat-question-footer-right {
-	margin-left: auto;
-}
-
-.optimus-card-chat .chat-question-step-indicator {
-	font-size: 10px;
-	color: var(--optimus-muted);
-}
-
-.optimus-card-chat .chat-question-dismiss-hint,
-.optimus-card-chat .chat-question-submit-hint {
-	display: none;
-}
-
-.optimus-card-chat .monaco-button.chat-question-submit-button {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	width: auto;
-	min-width: 0;
-	height: 23px;
-	padding: 0 9px;
-	border: 0 !important;
-	border-radius: 5px;
-	background: color-mix(in srgb, var(--optimus-warning) 82%, var(--vscode-button-background)) !important;
-	color: var(--vscode-editor-background) !important;
-	font-size: 10.5px;
-	font-weight: 600;
-}
-
-.optimus-card-chat .monaco-button.chat-question-submit-button:hover:not(.disabled) {
-	background: var(--optimus-warning) !important;
-}
-
-.optimus-card-chat .chat-question-carousel-collapsed .chat-question-description,
-.optimus-card-chat .chat-question-carousel-collapsed .chat-question-input-scrollable,
-.optimus-card-chat .chat-question-carousel-collapsed .chat-question-validation-message,
-.optimus-card-chat .chat-question-carousel-collapsed .chat-question-footer-row {
-	display: none;
-}
-
-@container (max-width: 330px) {
-	.optimus-card-chat .chat-question-list {
-		grid-template-columns: 1fr;
-	}
-}
-
-/* Cards preview the conversation plus streamed thinking (kept for the live
-   "everything is streaming" feel); standalone tool calls, progress, references
-   and confirmations stay hidden. The right panel renders everything. Deny-list
-   (not allow-list) so unknown part types — including the markdown answer in
-   whatever wrapper it uses — always stay visible. The thinking box's root node
-   is `.chat-used-context.chat-thinking-box` (ChatCollapsibleContentPart), so it
-   must be exempted from the used-context rule. */
-.optimus-card-chat .interactive-response .value > .chat-tool-invocation-part,
-.optimus-card-chat .interactive-response .value > .chat-used-context:not(.chat-thinking-box),
-.optimus-card-chat .interactive-response .value > .chat-used-context-list,
-.optimus-card-chat .interactive-response .value > .progress-step,
-.optimus-card-chat .interactive-response .value > .shimmer-progress,
-.optimus-card-chat .interactive-response .value > .chat-confirmation-widget-container {
-	display: none !important;
-}
-
-/* Collapsible-part plumbing the thinking box needs inside cards. These mirror
-   the `.interactive-session`-scoped rules in chat.css (cards intentionally do
-   not carry that container class — it breaks the card list layout). */
-.optimus-card-chat .chat-used-context.chat-used-context-collapsed .chat-used-context-list {
-	display: none;
-}
-
-.optimus-card-chat .chat-used-context {
-	display: flex;
-	flex-direction: column;
-	gap: 2px;
-	line-height: 1.5em;
-}
-
-.optimus-card-chat .chat-used-context-label {
-	font-size: 13px;
-	font-family: var(--vscode-chat-font-family, inherit);
-	color: var(--vscode-descriptionForeground);
-	user-select: none;
-}
-
-.optimus-card-chat .chat-used-context-label .monaco-button {
-	display: inline-flex;
-	width: fit-content;
-	border: none;
-	border-radius: 4px;
-	gap: 0;
-	text-align: initial;
-	justify-content: initial;
-	padding: 2px 6px 2px 2px;
-	margin-left: -2px;
-	font-size: var(--vscode-chat-font-size-body-s);
-	line-height: unset;
-}
-
-.optimus-card-chat .chat-used-context:not(.chat-used-context-collapsed) .chat-used-context-label .monaco-button,
-.optimus-card-chat .chat-used-context-label .monaco-button:hover {
-	color: var(--vscode-foreground);
-}
-
-.optimus-card-chat .chat-used-context-label .monaco-button .codicon {
-	font-size: 12px;
-	color: var(--vscode-icon-foreground) !important;
-}
-
-/* Hide the leading icon on collapsible parts, as chat.css does by default */
-.optimus-card-chat .chat-used-context-label .monaco-icon-button > .codicon:first-child:not(.chat-collapsible-hover-chevron):not(.codicon-error):not(.codicon-warning) {
-	display: none;
-}
-
-.optimus-card-chat .chat-thinking-box .chat-used-context-list {
-	border: none;
-	margin-bottom: 0;
-}
-
-.optimus-card-footer-left {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-	min-width: 0;
-}
-
-/* Workspace chip: folder icon + name, given room before the diff badge. */
+/* Workspace label truncates while the timestamp stays visible. */
 .optimus-card-folder {
 	display: flex;
 	align-items: center;
@@ -1186,7 +587,7 @@
 }
 
 .optimus-card-folder.no-folder {
-	display: none;
+	color: var(--optimus-muted);
 }
 
 .optimus-card-folder .codicon-folder {
@@ -1201,33 +602,28 @@
 	min-width: 0;
 }
 
-.optimus-card-changes:not(:empty)::before {
-	content: '·';
-	color: var(--optimus-muted);
-}
-
 .optimus-card-footer {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
 	gap: 8px;
+	align-items: center;
 	flex-shrink: 0;
-	padding: 8px 12px;
+	min-height: 28px;
+	box-sizing: border-box;
+	padding: 4px 9px;
 	border-top: 1px solid var(--optimus-border-subtle);
-	font-size: 11px;
-	line-height: 15px;
+	font-size: 10px;
+	line-height: 14px;
 	color: var(--optimus-muted);
 }
 
-.optimus-card-changes,
 .optimus-card-time {
-	overflow: hidden;
-	text-overflow: ellipsis;
+	text-align: right;
 	white-space: nowrap;
 }
 
 .optimus-card.empty {
-	border-style: dashed;
+	border-style: solid;
 	background: transparent;
 	box-shadow: none;
 }
@@ -1288,298 +684,6 @@
 	box-sizing: border-box;
 }
 
-/* --- Diff badge (SCM-style +N −N) --------------------------------------- */
-
-.optimus-card-changes {
-	display: flex;
-	align-items: center;
-	gap: 6px;
-	flex-shrink: 0;
-}
-
-.optimus-card-diff-files {
-	color: var(--optimus-muted);
-}
-
-.optimus-card-diff-added {
-	color: var(--vscode-gitDecoration-addedResourceForeground, var(--optimus-success));
-}
-
-.optimus-card-diff-removed {
-	color: var(--vscode-gitDecoration-deletedResourceForeground, var(--optimus-danger));
-}
-
-/* --- Loading skeleton ----------------------------------------------------
-   Shimmer bars while a card waits for its transcript; the status-description
-   fallback replaces them the moment it has text. */
-
-.optimus-card.loading .optimus-card-feed:empty {
-	padding: 12px;
-}
-
-.optimus-card.loading .optimus-card-feed:empty::before,
-.optimus-card.loading .optimus-card-feed:empty::after {
-	content: '';
-	display: block;
-	height: 10px;
-	border-radius: 3px;
-	margin-bottom: 10px;
-	background: linear-gradient(90deg,
-		color-mix(in srgb, var(--vscode-foreground) 6%, transparent) 25%,
-		color-mix(in srgb, var(--vscode-foreground) 12%, transparent) 50%,
-		color-mix(in srgb, var(--vscode-foreground) 6%, transparent) 75%);
-	background-size: 200% 100%;
-	animation: optimus-shimmer 1.4s ease-in-out infinite;
-}
-
-.optimus-card.loading .optimus-card-feed:empty::after {
-	width: 62%;
-}
-
-@keyframes optimus-shimmer {
-	0% { background-position: 200% 0; }
-	100% { background-position: -200% 0; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-	.optimus-card.loading .optimus-card-feed:empty::before,
-	.optimus-card.loading .optimus-card-feed:empty::after {
-		animation: none;
-	}
-}
-
-/* --- Board ---------------------------------------------------------------
-   Three Devin-style status columns sharing the existing Advanced cards. */
-
-.optimus-kanban {
-	display: flex;
-	flex: 1;
-	min-height: 0;
-	min-width: 0;
-	gap: 12px;
-	padding: 12px 14px 14px;
-	overflow-x: auto;
-}
-
-.optimus-grid-content.view-list .optimus-kanban {
-	display: none;
-}
-
-.optimus-kanban-column {
-	flex: 1 1 0;
-	min-width: 250px;
-	min-height: 0;
-	display: flex;
-	flex-direction: column;
-	background: color-mix(in srgb, var(--vscode-foreground) 2.5%, transparent);
-	border: 1px solid color-mix(in srgb, var(--optimus-border) 48%, transparent);
-	border-radius: 8px;
-	padding: 4px;
-}
-
-.optimus-kanban-column-header {
-	display: flex;
-	align-items: center;
-	gap: 7px;
-	flex-shrink: 0;
-	padding: 6px 8px 8px;
-	font-size: 12px;
-	font-weight: 600;
-	color: var(--vscode-foreground);
-	border-bottom: 1px solid color-mix(in srgb, var(--optimus-border) 40%, transparent);
-	margin-bottom: 6px;
-}
-
-.optimus-kanban-column-icon {
-	font-size: 14px;
-	color: var(--optimus-muted);
-}
-
-.optimus-kanban-column.running .optimus-kanban-column-icon {
-	color: var(--vscode-charts-blue, var(--optimus-focus));
-}
-
-.optimus-kanban-column.blocked .optimus-kanban-column-icon {
-	color: var(--optimus-warning);
-}
-
-.optimus-kanban-column.ready .optimus-kanban-column-icon {
-	color: var(--optimus-success);
-}
-
-.optimus-kanban-column-count {
-	font-weight: 400;
-	color: var(--optimus-muted);
-}
-
-.optimus-kanban-column-list {
-	flex: 1;
-	min-height: 0;
-	overflow-y: auto;
-	display: flex;
-	flex-direction: column;
-	gap: 10px;
-	padding: 4px;
-}
-
-.optimus-kanban-column-list .optimus-card {
-	flex: 0 0 auto;
-	height: 240px;
-}
-
-/* --- Compact List -------------------------------------------------------- */
-
-.optimus-session-list {
-	display: none;
-	flex: 1;
-	min-height: 0;
-	overflow-y: auto;
-	padding: 8px 14px 18px;
-}
-
-.optimus-grid-content.view-list .optimus-session-list {
-	display: block;
-}
-
-.optimus-session-list-group {
-	display: flex;
-	align-items: center;
-	gap: 7px;
-	height: 34px;
-	padding: 8px 8px 4px;
-	box-sizing: border-box;
-	color: var(--optimus-muted);
-	font-size: 11px;
-	font-weight: 600;
-	text-transform: uppercase;
-	letter-spacing: .04em;
-}
-
-.optimus-session-list-group .codicon {
-	font-size: 12px;
-}
-
-.optimus-session-list-group-count {
-	margin-left: auto;
-	font-weight: 400;
-}
-
-.optimus-session-list-item {
-	border-bottom: 1px solid var(--optimus-border-subtle);
-}
-
-.optimus-session-list-item:first-child,
-.optimus-session-list-group + .optimus-session-list-item {
-	border-top: 1px solid var(--optimus-border-subtle);
-}
-
-.optimus-session-list-row {
-	display: grid;
-	grid-template-columns: 8px minmax(180px, 1fr) minmax(90px, auto) 92px 18px;
-	align-items: center;
-	gap: 10px;
-	width: 100%;
-	min-height: 58px;
-	box-sizing: border-box;
-	padding: 8px 10px;
-	border: 0;
-	background: transparent;
-	color: var(--vscode-foreground);
-	font-family: inherit;
-	text-align: left;
-	cursor: pointer;
-}
-
-.optimus-session-list-row:hover {
-	background: var(--vscode-list-hoverBackground);
-}
-
-.optimus-session-list-row.active {
-	background: color-mix(in srgb, var(--vscode-list-activeSelectionBackground) 45%, transparent);
-}
-
-.optimus-session-list-row:focus-visible {
-	outline: 1px solid var(--optimus-focus);
-	outline-offset: -1px;
-}
-
-.optimus-session-list-unread {
-	width: 6px;
-	height: 6px;
-	border-radius: 50%;
-	background: var(--vscode-charts-blue, var(--optimus-focus));
-}
-
-.optimus-session-list-unread.hidden {
-	visibility: hidden;
-}
-
-.optimus-session-list-main {
-	min-width: 0;
-}
-
-.optimus-session-list-title {
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-	font-size: 13px;
-	font-weight: 600;
-	line-height: 18px;
-}
-
-.optimus-session-list-metadata {
-	display: flex;
-	align-items: center;
-	gap: 5px;
-	min-width: 0;
-	margin-top: 2px;
-	overflow: hidden;
-	color: var(--optimus-muted);
-	font-size: 11px;
-	white-space: nowrap;
-}
-
-.optimus-session-list-metadata > span {
-	overflow: hidden;
-	text-overflow: ellipsis;
-}
-
-.optimus-session-list-separator {
-	flex: 0 0 auto;
-}
-
-.optimus-session-list-status {
-	display: flex;
-	align-items: center;
-	gap: 6px;
-	font-size: 11px;
-	color: var(--optimus-muted);
-}
-
-.optimus-session-list-status.running {
-	color: var(--vscode-charts-blue, var(--optimus-focus));
-}
-
-.optimus-session-list-status.blocked {
-	color: var(--optimus-warning);
-}
-
-.optimus-session-list-status.ready {
-	color: var(--optimus-success);
-}
-
-.optimus-session-list-time {
-	color: var(--optimus-muted);
-	font-size: 11px;
-	text-align: right;
-	white-space: nowrap;
-}
-
-.optimus-session-list-open {
-	color: var(--optimus-muted);
-	font-size: 13px;
-}
-
 /* --- First-run empty state ----------------------------------------------- */
 
 .optimus-empty-state {
@@ -1590,14 +694,7 @@
 	justify-content: center;
 }
 
-.optimus-grid-content.empty .optimus-kanban,
-.optimus-grid-content.empty .optimus-session-list,
-.optimus-grid-content.no-results .optimus-kanban,
-.optimus-grid-content.no-results .optimus-session-list {
-	display: none;
-}
-
-.optimus-grid-content.empty .optimus-empty-state {
+.optimus-grid-content.view-board.empty .optimus-empty-state {
 	display: flex;
 }
 
@@ -1612,7 +709,7 @@
 	color: var(--optimus-muted);
 }
 
-.optimus-grid-content.no-results .optimus-no-results {
+.optimus-grid-content.view-board.no-results .optimus-no-results {
 	display: flex;
 }
 
@@ -1693,8 +790,7 @@
 
 /* Drop highlight while dragging a session from the sidebar over the board. */
 .optimus-grid-content.drop-target .optimus-grid,
-.optimus-grid-content.drop-target .optimus-kanban,
-.optimus-grid-content.drop-target .optimus-session-list {
+.optimus-grid-content.drop-target .optimus-kanban {
 	outline: 2px dashed color-mix(in srgb, var(--optimus-focus) 55%, transparent);
 	outline-offset: -8px;
 	border-radius: 8px;
@@ -1735,276 +831,183 @@
 	outline-offset: -1px;
 }
 
-@media (max-width: 760px) {
-	.optimus-dashboard-primary {
-		align-items: flex-start;
-		flex-direction: column;
-	}
-
-	.optimus-dashboard-controls {
-		width: 100%;
-		margin-left: 0;
-	}
-
-	.optimus-dashboard-reset {
-		display: none;
-	}
-
-	.optimus-session-list-row {
-		grid-template-columns: 8px minmax(120px, 1fr) 82px 18px;
-	}
-
-	.optimus-session-list-status {
-		display: none;
-	}
-}
-
-/* --- Devin-aligned dashboard and focused workspace ----------------------- */
-
-/* The reference dashboard is intentionally flat: the status columns are
-   positions on one canvas, not three bordered panels. */
+/* --- Command center layout ---------------------------------------------- */
 .optimus-dashboard-header {
-	gap: 10px;
-	padding: 48px 14px 11px;
-	background: var(--sessions-main-region-background, var(--vscode-agents-background, var(--vscode-editor-background)));
-	border-bottom-color: color-mix(in srgb, var(--optimus-border) 72%, transparent);
+	padding: 5px 8px;
+	background: var(--sessions-main-region-background, var(--vscode-editor-background));
 }
 
 .optimus-dashboard-primary {
-	min-height: 32px;
-}
-
-.optimus-dashboard-primary {
-	align-items: center;
+	min-height: 28px;
+	gap: 8px;
+	flex-wrap: wrap;
 }
 
 .optimus-dashboard-filter-controls {
 	display: flex;
 	align-items: center;
-	gap: 8px;
+	gap: 6px;
 	min-width: 0;
+	flex: 1;
+}
+
+.optimus-dashboard-controls {
+	gap: 4px;
+}
+
+.optimus-dashboard-reset[hidden] {
+	display: none;
+}
+
+.optimus-dashboard-button,
+.optimus-dashboard-filter-chip,
+.optimus-view-switcher,
+.optimus-view-switcher-segment {
+	border-radius: 2px;
 }
 
 .optimus-dashboard-button {
-	height: 32px;
-	gap: 7px;
-	padding: 0 11px;
-	border-color: color-mix(in srgb, var(--optimus-border) 70%, transparent);
-	border-radius: 7px;
-	font-size: 13px;
+	font-size: 11px;
+	padding: 0 6px;
 }
 
-.optimus-dashboard-button > .codicon {
-	font-size: 14px;
+.optimus-dashboard-filter-chip {
+	border-color: var(--optimus-border);
+	background: transparent;
 }
 
-.optimus-dashboard-filter-button {
-	border-color: color-mix(in srgb, var(--optimus-border) 52%, transparent);
+.optimus-dashboard-filter-chips {
+	flex-wrap: nowrap;
+	overflow-x: auto;
 }
 
-.optimus-dashboard-filter-button > .codicon {
-	color: var(--vscode-foreground);
+.optimus-dashboard-filter-chip {
+	flex: 0 0 auto;
 }
 
 .optimus-dashboard-results {
 	display: none;
 }
 
-.optimus-dashboard-reset {
-	margin-left: auto;
-	padding-right: 4px;
-	font-size: 13px;
-}
-
-.optimus-view-switcher {
+/* The same transcript card in both views, with no gaps or doubled seams. */
+.optimus-grid {
+	display: none;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	grid-template-rows: repeat(3, minmax(160px, 1fr));
+	grid-auto-rows: minmax(160px, 1fr);
+	align-content: stretch;
 	gap: 0;
-	padding: 2px;
-	border-radius: 8px;
-	background: color-mix(in srgb, var(--vscode-foreground) 6%, transparent);
+	padding: 0;
+	flex: 1;
+	min-width: 0;
+	min-height: 0;
+	border-left: 1px solid var(--optimus-border);
+	overflow-y: auto;
 }
 
-.optimus-view-switcher-segment {
-	padding: 5px 14px;
-	border-radius: 6px;
-	font-size: 13px;
-	line-height: 18px;
-}
-
-.optimus-view-switcher-segment.active {
-	background: color-mix(in srgb, var(--vscode-foreground) 12%, transparent);
-	font-weight: 500;
+.optimus-grid-content.view-board .optimus-grid {
+	display: grid;
 }
 
 .optimus-kanban {
 	display: grid;
-	grid-template-columns: repeat(3, minmax(220px, 1fr));
-	gap: 24px;
-	padding: 8px 14px 16px;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	min-width: 0;
+	flex: 1;
+	min-height: 0;
+	gap: 0;
+	padding: 0;
+	border-left: 1px solid var(--optimus-border);
 	overflow-x: auto;
 }
 
+.optimus-grid-content.view-board .optimus-kanban {
+	display: none;
+}
+
 .optimus-kanban-column {
-	min-width: 220px;
-	padding: 0;
-	border: 0;
-	border-radius: 0;
-	background: transparent;
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	min-height: 0;
+	position: relative;
 }
 
 .optimus-kanban-column-header {
-	height: 28px;
-	box-sizing: border-box;
+	display: flex;
+	align-items: center;
+	flex: 0 0 30px;
 	gap: 6px;
-	margin: 0;
-	padding: 4px 0 8px;
-	border: 0;
-	font-size: 12px;
+	padding: 0 9px;
+	border-right: 1px solid var(--optimus-border);
+	border-bottom: 1px solid var(--optimus-border);
+	font-size: 11px;
 	font-weight: 600;
 }
 
 .optimus-kanban-column-icon {
-	font-size: 13px;
+	font-size: 12px;
+	color: var(--optimus-muted);
+}
+
+.optimus-kanban-column-count {
+	margin-left: auto;
+	font-weight: 400;
+	color: var(--optimus-muted);
 }
 
 .optimus-kanban-column-list {
-	gap: 8px;
+	display: flex;
+	flex-direction: column;
+	flex: 1;
+	min-height: 0;
+	gap: 0;
 	padding: 0;
+	overflow-y: auto;
 }
 
-/* Kanban uses the same rich session tiles as List. Columns remain independently
-   scrollable, while each tile keeps its live transcript, status and workspace
-   footer visible instead of collapsing to a title-only summary. */
 .optimus-kanban-column-list .optimus-card {
-	height: 320px;
-	border-color: var(--optimus-border);
-	border-radius: 7px;
-	background: color-mix(in srgb, var(--optimus-card) 94%, var(--vscode-foreground) 2%);
+	flex: 0 0 216px;
 }
 
-.optimus-kanban-column-list .optimus-card:hover {
-	border-color: color-mix(in srgb, var(--optimus-border) 72%, transparent);
-	background: color-mix(in srgb, var(--vscode-list-hoverBackground) 46%, var(--optimus-card));
+.optimus-kanban-empty {
+	display: none;
+	position: absolute;
+	top: 48px;
+	left: 10px;
+	font-size: 11px;
+	color: var(--optimus-muted);
 }
 
-/* The board reacts to its own workbench part, rather than the outer window.
-   This is what keeps it usable while the sidebar or right tools panel resize. */
-@container optimus-workspace (max-width: 1020px) {
-	.optimus-kanban {
-		grid-template-columns: repeat(2, minmax(220px, 1fr));
-		gap: 16px;
-		padding-inline: 12px;
-		overflow-x: hidden;
-		overflow-y: auto;
+.optimus-kanban-column.empty .optimus-kanban-empty {
+	display: block;
+}
+
+@container optimus-workspace (max-width: 840px) {
+	.optimus-grid {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
 		align-content: start;
-	}
-
-	.optimus-kanban-column {
-		min-width: 0;
-		min-height: 280px;
-		height: min(52vh, 560px);
-	}
-
-	.optimus-kanban-column-list .optimus-card {
-		height: clamp(240px, 34vh, 320px);
+		grid-template-rows: none;
+		grid-auto-rows: 216px;
 	}
 }
 
-@container optimus-workspace (max-width: 720px) {
-	.optimus-dashboard-header {
-		gap: 8px;
-		padding: 42px 10px 9px;
-	}
-
-	.optimus-dashboard-primary {
-		align-items: stretch;
-		min-height: 0;
-	}
-
-	.optimus-dashboard-primary {
-		flex-direction: column;
-		gap: 8px;
-	}
-
-	.optimus-dashboard-controls,
-	.optimus-dashboard-filter-controls {
-		width: 100%;
-		margin-left: 0;
+@container optimus-workspace (max-width: 560px) {
+	.optimus-grid {
+		grid-template-columns: minmax(0, 1fr);
 	}
 
 	.optimus-dashboard-filter-controls {
-		flex-wrap: wrap;
+		flex: 0 1 auto;
 	}
 
 	.optimus-dashboard-filter-chips {
-		order: 3;
-		width: 100%;
-	}
-
-	.optimus-dashboard-reset {
 		display: none;
-	}
-
-	.optimus-kanban {
-		grid-template-columns: minmax(0, 1fr);
-		gap: 14px;
-		padding: 8px 10px 14px;
-	}
-
-	.optimus-kanban-column {
-		min-height: 300px;
-		height: min(62vh, 600px);
-	}
-}
-
-@container optimus-workspace (max-width: 460px) {
-	.optimus-dashboard-controls {
-		flex-wrap: wrap;
-	}
-
-	.optimus-dashboard-controls > .optimus-dashboard-button {
-		flex: 1 1 auto;
-		justify-content: center;
 	}
 
 	.optimus-empty-hero {
 		width: calc(100% - 20px);
-	}
-}
-
-/* List is the original Advanced six-card board, as requested. */
-.optimus-grid {
-	display: none;
-	grid-template-columns: repeat(3, minmax(0, 1fr));
-	grid-template-rows: repeat(2, minmax(0, 1fr));
-	gap: 14px;
-	padding: 14px;
-	flex: 1;
-	min-width: 0;
-	min-height: 0;
-	overflow: hidden;
-}
-
-.optimus-grid-content.view-list .optimus-grid {
-	display: grid;
-}
-
-@container optimus-workspace (max-width: 1020px) {
-	.optimus-grid {
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		grid-template-rows: repeat(3, minmax(220px, 1fr));
-		gap: 12px;
-		padding: 12px;
-		overflow-y: auto;
-	}
-}
-
-@container optimus-workspace (max-width: 460px) {
-	.optimus-grid {
-		grid-template-columns: minmax(0, 1fr);
-		grid-template-rows: none;
-		grid-auto-rows: minmax(240px, 52vh);
-		gap: 10px;
-		padding: 10px;
+		padding: 24px 12px;
 	}
 }
 
@@ -2012,10 +1015,18 @@
 	display: none;
 	align-items: center;
 	justify-content: center;
-	gap: 8px;
-	padding: 0 0 9px;
+	gap: 4px;
+	min-height: 28px;
+	flex: 0 0 auto;
+	white-space: nowrap;
+	-webkit-app-region: no-drag;
+	box-sizing: border-box;
+	padding: 0 4px;
+	border: 0;
+	background: transparent;
 	color: var(--optimus-muted);
-	font-size: 11px;
+	font-size: 10.5px;
+	letter-spacing: .01em;
 }
 
 .optimus-grid-pager button {
@@ -2038,10 +1049,8 @@
 	cursor: default;
 }
 
-.optimus-grid-content.empty .optimus-kanban,
-.optimus-grid-content.empty .optimus-grid,
-.optimus-grid-content.no-results .optimus-kanban,
-.optimus-grid-content.no-results .optimus-grid {
+.optimus-grid-content.view-board.empty .optimus-grid,
+.optimus-grid-content.view-board.no-results .optimus-grid {
 	display: none;
 }
 
@@ -2055,16 +1064,38 @@
 	overflow: hidden;
 }
 
-/* The window chrome is a fixed 32px overlay across the whole window, and it is
- * opaque from the sidebar edge rightwards. The dashboard clears it with its own
- * top inset (see `.optimus-dashboard-header`); the focused session header has to
- * do the same, or the session title and its toolbar — settings, terminal, pin,
- * close — render underneath the chrome and are unreachable. Margin rather than
- * padding: the shared `.sessions-panel-header` owns this element's height. */
 .optimus-focused-session-header {
 	flex: 0 0 auto;
 	min-height: 32px;
-	margin-top: 32px;
+	margin-top: 0;
+}
+
+.optimus-focused-dashboard-button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 5px;
+	height: 26px;
+	padding: 0 6px;
+	font-family: inherit;
+	white-space: nowrap;
+	border: 0;
+	border-radius: 5px;
+	background: transparent;
+	color: var(--vscode-icon-foreground);
+	cursor: pointer;
+	font-size: 11px;
+	-webkit-app-region: no-drag;
+}
+
+.optimus-focused-dashboard-button:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+	color: var(--vscode-foreground);
+}
+
+.optimus-focused-dashboard-button:focus-visible {
+	outline: 1px solid var(--optimus-focus);
+	outline-offset: -1px;
 }
 
 .optimus-focused-session-body {
@@ -2093,10 +1124,135 @@
 	display: flex;
 }
 
-/* The fixed 32px Optimus chrome sits above the workbench grid. The right
-   workbench has no native title row, so reserve that strip inside its own
-   flex box rather than letting its tabs and embedded tools render under the
-   titlebar controls. */
 .agent-sessions-workbench.optimus-window .sessions-right-workbench-shell {
-	padding-top: 32px;
+	padding-top: 0;
+}
+
+.optimus-grid-pager button:focus-visible {
+	outline: 1px solid var(--optimus-focus);
+	outline-offset: -1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.optimus-grid-content .codicon-modifier-spin {
+		animation: none;
+	}
+}
+
+/* Native scrollbars should read like the rest of the command surface. Keep
+ * wheel chaining at transcript boundaries so the agent wall remains reachable. */
+.optimus-grid,
+.optimus-kanban,
+.optimus-kanban-column-list,
+.optimus-card-feed {
+	scrollbar-width: auto;
+	/* Let Chromium use the custom thumb geometry below. A non-auto
+	 * scrollbar-color overrides the WebKit scrollbar rules. */
+	scrollbar-color: auto;
+	overscroll-behavior: auto;
+	color-scheme: dark;
+}
+
+.optimus-grid::-webkit-scrollbar,
+.optimus-kanban::-webkit-scrollbar,
+.optimus-kanban-column-list::-webkit-scrollbar,
+.optimus-card-feed::-webkit-scrollbar {
+	width: 8px;
+	height: 8px;
+	background: transparent;
+}
+
+.optimus-grid::-webkit-scrollbar-thumb,
+.optimus-kanban::-webkit-scrollbar-thumb,
+.optimus-kanban-column-list::-webkit-scrollbar-thumb,
+.optimus-card-feed::-webkit-scrollbar-thumb {
+	background: var(--vscode-scrollbarSlider-background);
+	background-clip: padding-box;
+	border: 2px solid transparent;
+	border-radius: 8px;
+	min-height: 24px;
+}
+
+.optimus-grid::-webkit-scrollbar-track,
+.optimus-grid::-webkit-scrollbar-corner,
+.optimus-kanban::-webkit-scrollbar-track,
+.optimus-kanban::-webkit-scrollbar-corner,
+.optimus-kanban-column-list::-webkit-scrollbar-track,
+.optimus-kanban-column-list::-webkit-scrollbar-corner,
+.optimus-card-feed::-webkit-scrollbar-corner,
+.optimus-card-feed::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+.monaco-workbench:is(.vs, .hc-light) :is(.optimus-grid, .optimus-kanban, .optimus-kanban-column-list, .optimus-card-feed) {
+	color-scheme: light;
+}
+
+.optimus-grid::-webkit-scrollbar-thumb:hover,
+.optimus-kanban::-webkit-scrollbar-thumb:hover,
+.optimus-kanban-column-list::-webkit-scrollbar-thumb:hover,
+.optimus-card-feed::-webkit-scrollbar-thumb:hover {
+	background-color: var(--vscode-scrollbarSlider-hoverBackground);
+}
+
+/* Soft surfaces retain the compact layout without hard perimeter outlines. */
+.optimus-grid-content :is(.optimus-grid, .optimus-kanban) {
+	gap: 8px;
+	padding: 8px;
+	border: 0;
+	box-sizing: border-box;
+}
+
+.optimus-grid-content .optimus-kanban-column-list {
+	gap: 8px;
+	padding: 4px 2px 8px;
+}
+
+.optimus-grid-content .optimus-card {
+	margin: 0;
+	border: 0;
+	border-radius: 10px !important;
+	outline: none;
+	box-shadow: 0 2px 8px rgb(0 0 0 / 18%);
+}
+
+.optimus-grid-content .optimus-card:focus-visible {
+	outline: 2px solid var(--optimus-focus);
+	outline-offset: -2px;
+}
+
+.optimus-grid-content .optimus-card-footer {
+	border-top: 0;
+}
+
+.optimus-grid-content :is(.optimus-dashboard-button, .optimus-dashboard-filter-chip, .optimus-view-switcher, .optimus-view-switcher-segment) {
+	border: 0;
+	border-radius: 7px !important;
+}
+
+.optimus-grid-content .optimus-dashboard-button {
+	background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
+}
+
+.optimus-grid-content .optimus-dashboard-button:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+}
+
+.optimus-grid-content .optimus-view-switcher-segment.active {
+	outline: none;
+	box-shadow: 0 1px 4px rgb(0 0 0 / 18%);
+}
+
+.optimus-grid-content .optimus-view-switcher-segment:focus-visible {
+	outline: 2px solid var(--optimus-focus);
+	outline-offset: -2px;
+}
+
+.optimus-grid-content .optimus-kanban-column-header {
+	border: 0;
+	border-radius: 7px;
+}
+
+.monaco-workbench:is(.hc-black, .hc-light) .optimus-grid-content .optimus-card {
+	border: 1px solid var(--vscode-contrastBorder);
 }

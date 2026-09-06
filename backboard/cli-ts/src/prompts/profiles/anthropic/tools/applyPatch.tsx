@@ -24,12 +24,7 @@ Patch format:
 - Close a hunk with \`*** End of File\` when the matched lines sit at the very end of the file.
 - Give each update hunk enough context to be unambiguous. A hunk of only added lines appends to the end of the file unless you anchor it with \`@@ <context>\`.
 - The entire patch is validated before a single write, so a bad operation never lands halfway.
-
-### Parameters
-
-| Name | Type | Required | Description |
-| --- | --- | --- | --- |
-| \`patch\` | \`string\` | yes | The complete patch text to apply |`.trim();
+`.trim();
 }
 
 function usageGuidance(context: PromptContext): string {

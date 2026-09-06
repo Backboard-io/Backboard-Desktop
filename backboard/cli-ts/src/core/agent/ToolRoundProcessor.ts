@@ -2,7 +2,6 @@ import type {
 	DynamicThinkingEvidence,
 	ThinkingConfig,
 } from "../../config/defaults.ts";
-import { DYNAMIC_THINKING_MAX_FAILURE_THRESHOLD } from "../../config/thinking.constants.ts";
 import type { AgentClient } from "../../providers/AgentClient.ts";
 import type { SubmitToolOutputsRequest } from "../../providers/backboard/types.ts";
 import type { EventBus } from "../bus/EventBus.ts";
@@ -17,6 +16,7 @@ import type {
 	ToolScheduler,
 } from "../tools/ToolScheduler.ts";
 import type { AssistantAccumulator } from "./AssistantAccumulator.ts";
+import { CompletionEvidenceTracker } from "./CompletionEvidence.ts";
 import type {
 	PendingAction,
 	ProviderStreamConsumer,
@@ -41,7 +41,13 @@ export interface ToolRoundProcessorDeps {
 }
 
 export class ToolRoundProcessor {
-	private readonly answered = new Set<string>();
+	private readonly answered = new Map<string, string>();
+	private readonly completion = new CompletionEvidenceTracker();
+	private readonly unavailableTools = new Set<string>();
+
+	get completionEvidence() {
+		return this.completion.snapshot;
+	}
 	private consecutiveFailureCount = 0;
 	private maxUsed = false;
 	private rounds = 0;
@@ -75,15 +81,37 @@ export class ToolRoundProcessor {
 		assistant: AssistantAccumulator,
 		ctx: ToolContext,
 		initialRound: ToolCallRound,
+		maxAdditionalRounds?: number,
 	): Promise<void> {
 		let round = initialRound;
+		const startingRounds = this.rounds;
 		try {
 			while (pending) {
+				if (
+					maxAdditionalRounds !== undefined &&
+					this.rounds - startingRounds >= maxAdditionalRounds
+				) {
+					throw new Error(
+						"Verification tool-round budget exhausted; remaining work needs a visible follow-up.",
+					);
+				}
+				for (const call of pending.calls) {
+					const previous = this.answered.get(call.id);
+					if (
+						previous !== undefined &&
+						previous !== this.deps.scheduler.callIdentity(call)
+					) {
+						throw new Error(
+							`Tool protocol error: already answered call ${call.id} changed identity.`,
+						);
+					}
+				}
 				const newCalls = pending.calls.filter(
 					(call) => !this.answered.has(call.id),
 				);
 				if (newCalls.length === 0) return;
-				for (const call of newCalls) this.answered.add(call.id);
+				for (const call of newCalls)
+					this.answered.set(call.id, this.deps.scheduler.callIdentity(call));
 
 				if (
 					this.deps.maxToolRounds !== undefined &&
@@ -117,6 +145,14 @@ export class ToolRoundProcessor {
 								tool_call_id: call.id,
 								output:
 									"Error: Tool execution was interrupted before results were submitted.",
+								metadata: {
+									name: call.name,
+									readOnly: false,
+									error: true,
+									failureCategory: "cancelled",
+									cancelled: true,
+									retryable: false,
+								},
 							},
 					);
 					this.recordToolMessage(newCalls, outputs);
@@ -136,6 +172,17 @@ export class ToolRoundProcessor {
 					throw error;
 				}
 				this.recordToolMessage(newCalls, outputs);
+				this.completion.observe(outputs);
+				for (const output of outputs) {
+					if (output.metadata?.failureCategory === "unavailable") {
+						const name = output.metadata.name.toLowerCase();
+						this.unavailableTools.add(name);
+						if (name === "grep" || name === "glob") {
+							this.unavailableTools.add("grep");
+							this.unavailableTools.add("glob");
+						}
+					}
+				}
 
 				let continuationThinking = this.resolveContinuationThinking(outputs);
 				const runId = pending.runId;
@@ -143,7 +190,10 @@ export class ToolRoundProcessor {
 					thread_id: this.deps.session.threadId ?? "",
 					...(runId ? { run_id: runId } : {}),
 					tool_outputs: outputs.map(toBackboardToolOutput),
-					tools: this.deps.tools,
+					tools: this.deps.tools?.filter(
+						(tool) =>
+							!this.unavailableTools.has(tool.function.name.toLowerCase()),
+					),
 					...(continuationThinking === undefined
 						? {}
 						: { thinking: continuationThinking }),
@@ -206,16 +256,11 @@ export class ToolRoundProcessor {
 			consecutiveFailureCount: this.consecutiveFailureCount,
 			maxUsed: this.maxUsed,
 		};
-		const shouldMarkMaxUsed =
-			roundFailure &&
-			this.consecutiveFailureCount >= DYNAMIC_THINKING_MAX_FAILURE_THRESHOLD &&
-			!this.maxUsed;
 		const continuationThinking = this.deps.resolveThinking({
 			phase: "tool_outputs",
 			requestKind: this.deps.requestKind,
 			toolRound: roundEvidence,
 		});
-		if (shouldMarkMaxUsed) this.maxUsed = true;
 		return continuationThinking;
 	}
 
@@ -229,9 +274,8 @@ export class ToolRoundProcessor {
 				toolCallId: call.id,
 				name: call.name,
 				output: output?.output ?? "",
-				isError:
-					output?.metadata?.error === true ||
-					(output?.output ?? "").startsWith("Error:"),
+				isError: output?.metadata?.error === true,
+				execution: output?.metadata,
 			};
 		});
 		this.deps.session.addMessage(toolMessage(results));

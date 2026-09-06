@@ -230,7 +230,6 @@ suite('LayoutController', () => {
 			});
 			instaService.stub(IWorkbenchEnvironmentService, {
 				isSessionsWindow: true,
-				isJarvisWindow: false,
 				isOptimusWindow: options.isSimpleWindow === false,
 			} as IWorkbenchEnvironmentService);
 			instaService.stub(IFileService, new class extends mock<IFileService>() {
@@ -606,7 +605,6 @@ suite('LayoutController', () => {
 			});
 			instaService.stub(IWorkbenchEnvironmentService, {
 				isSessionsWindow: true,
-				isJarvisWindow: false,
 				isOptimusWindow: false,
 			} as IWorkbenchEnvironmentService);
 			instaService.stub(IFileService, new class extends mock<IFileService>() {

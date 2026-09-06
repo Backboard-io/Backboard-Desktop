@@ -198,6 +198,21 @@ export interface BackboardThread {
 export type ProviderEvent =
 	/** Transport made progress without producing anything user-visible yet. */
 	| { kind: "activity" }
+	/** Bounded structural metadata only; never model text or raw provider payloads. */
+	| {
+			kind: "provider_diagnostic";
+			provider: string;
+			phase: string;
+			details: Record<string, unknown>;
+	  }
+	| {
+			kind: "thinking_resolved";
+			requested: ThinkingConfig | null | undefined;
+			effective: Record<string, unknown>;
+			reason: string;
+			model: string;
+			provider: string;
+	  }
 	| { kind: "thread"; threadId: string }
 	| { kind: "assistant_delta"; text: string }
 	| { kind: "reasoning_delta"; text: string }

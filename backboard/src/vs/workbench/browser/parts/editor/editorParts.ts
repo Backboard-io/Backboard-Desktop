@@ -16,7 +16,7 @@ import { distinct } from '../../../../base/common/arrays.js';
 import { AuxiliaryEditorPart, IAuxiliaryEditorPartOpenOptions } from './auxiliaryEditorPart.js';
 import { ModalEditorPart } from './modalEditorPart.js';
 import { MultiWindowParts } from '../../part.js';
-import { DeferredPromise } from '../../../../base/common/async.js';
+import { DeferredPromise, Sequencer } from '../../../../base/common/async.js';
 import { IStorageService, IStorageValueChangeEvent, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { IThemeService } from '../../../../platform/theme/common/themeService.js';
 import { IAuxiliaryWindowOpenOptions, IAuxiliaryWindowService } from '../../../services/auxiliaryWindow/browser/auxiliaryWindowService.js';
@@ -118,7 +118,7 @@ export class EditorParts extends MultiWindowParts<EditorPart, IEditorPartsMement
 	//#region Scoped Instantiation Services
 
 	private readonly mapPartToInstantiationService = new Map<number /* window ID */, IInstantiationService>();
-	private modalPartInstantiationService: IInstantiationService | undefined;
+	private readonly modalPartInstantiationServices = new Map<IEditorPart, IInstantiationService>();
 
 	getScopedInstantiationService(part: IEditorPart): IInstantiationService {
 
@@ -144,8 +144,9 @@ export class EditorParts extends MultiWindowParts<EditorPart, IEditorPartsMement
 		}
 
 		// Modal Part (if opened)
-		if (part === this.modalEditorPart && this.modalPartInstantiationService) {
-			return this.modalPartInstantiationService;
+		const modalPartInstantiationService = this.modalPartInstantiationServices.get(part);
+		if (modalPartInstantiationService) {
+			return modalPartInstantiationService;
 		}
 
 		return this.mapPartToInstantiationService.get(part.windowId) ?? this.instantiationService;
@@ -178,7 +179,11 @@ export class EditorParts extends MultiWindowParts<EditorPart, IEditorPartsMement
 	//#region Modal Editor Part
 
 	private modalEditorPart: IModalEditorPart | undefined;
-	get activeModalEditorPart(): IModalEditorPart | undefined { return this.modalEditorPart; }
+	private readonly embeddedEditorParts = new Map<HTMLElement, IModalEditorPart>();
+	private readonly modalEditorCreation = new Sequencer();
+	get activeModalEditorPart(): IModalEditorPart | undefined {
+		return this.modalEditorPart ?? Array.from(this.embeddedEditorParts.values()).find(part => part.activeGroup === this.activeGroup) ?? this.embeddedEditorParts.values().next().value;
+	}
 
 	private modalEditorMaximized = false;
 	private modalEditorSize: IDimension | undefined;
@@ -187,15 +192,21 @@ export class EditorParts extends MultiWindowParts<EditorPart, IEditorPartsMement
 	private modalEditorSidebarHidden: boolean | undefined;
 
 	async createModalEditorPart(options?: IModalEditorPartOptions): Promise<IModalEditorPart> {
+		return this.modalEditorCreation.queue(() => this.doCreateModalEditorPart(options));
+	}
 
-		// Reuse existing modal editor part if it exists
-		if (this.modalEditorPart) {
-			this.modalEditorPart.updateOptions(options);
+	private async doCreateModalEditorPart(options?: IModalEditorPartOptions): Promise<IModalEditorPart> {
+		const embeddedHost = options?.embeddedHost as HTMLElement | undefined;
+		const existing = embeddedHost ? this.embeddedEditorParts.get(embeddedHost) : this.modalEditorPart;
 
-			return this.modalEditorPart;
+		// Each embedded surface owns its editors. Standalone dialogs such as
+		// Settings must never reuse or reparent one of those surfaces.
+		if (existing) {
+			existing.updateOptions(options);
+			return existing;
 		}
 
-		const { part, instantiationService, disposables } = await this.instantiationService.createInstance(ModalEditorPart, this).create({
+		const { part, instantiationService, disposables } = await this.instantiationService.createInstance(ModalEditorPart, this).create(embeddedHost ? options : {
 			...options,
 			maximized: options?.maximized ?? this.modalEditorMaximized,
 			size: options?.size ?? this.modalEditorSize,
@@ -208,11 +219,20 @@ export class EditorParts extends MultiWindowParts<EditorPart, IEditorPartsMement
 		});
 
 		// Keep instantiation service and reference to reuse
-		this.modalEditorPart = part;
-		this.modalPartInstantiationService = instantiationService;
+		if (embeddedHost) {
+			this.embeddedEditorParts.set(embeddedHost, part);
+		} else {
+			this.modalEditorPart = part;
+		}
+		this.modalPartInstantiationServices.set(part, instantiationService);
 
 		// Remember state on dispose to restore when opening next time
 		disposables.add(toDisposable(() => {
+			this.modalPartInstantiationServices.delete(part);
+			if (embeddedHost) {
+				this.embeddedEditorParts.delete(embeddedHost);
+				return;
+			}
 			this.modalEditorMaximized = part.maximized;
 			this.modalEditorSize = part.size;
 			this.modalEditorPosition = part.position;
@@ -221,7 +241,6 @@ export class EditorParts extends MultiWindowParts<EditorPart, IEditorPartsMement
 				this.modalEditorSidebarHidden = part.sidebarHidden || undefined;
 			}
 
-			this.modalPartInstantiationService = undefined;
 			this.modalEditorPart = undefined;
 		}));
 

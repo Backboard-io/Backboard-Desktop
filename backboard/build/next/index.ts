@@ -98,7 +98,6 @@ const desktopWorkerEntryPoints = [
 const desktopEntryPoints = [
 	'vs/workbench/workbench.desktop.main',
 	'vs/sessions/sessions.desktop.main',
-	'vs/jarvis/jarvis.desktop.main',
 	'vs/optimus/optimus.desktop.main',
 	'vs/workbench/contrib/debug/node/telemetryApp',
 	'vs/platform/files/node/watcher/watcherMain',
@@ -113,7 +112,6 @@ const codeEntryPoints = [
 	'vs/code/electron-utility/sharedProcess/sharedProcessMain',
 	'vs/code/electron-browser/workbench/workbench',
 	'vs/sessions/electron-browser/sessions',
-	'vs/jarvis/electron-browser/jarvis',
 	'vs/optimus/electron-browser/optimus',
 ];
 
@@ -219,8 +217,6 @@ function getCssBundleEntryPointsForTarget(target: BuildTarget): Set<string> {
 					'vs/code/electron-browser/workbench/workbench',
 					'vs/sessions/sessions.desktop.main',
 					'vs/sessions/electron-browser/sessions',
-					'vs/jarvis/jarvis.desktop.main',
-					'vs/jarvis/electron-browser/jarvis',
 					'vs/optimus/optimus.desktop.main',
 					'vs/optimus/electron-browser/optimus',
 				]);
@@ -257,6 +253,7 @@ const commonResourcePatterns = [
 	'vs/workbench/contrib/chat/browser/media/*.svg',
 	'vs/workbench/contrib/chat/browser/widget/media/**/*.svg',
 	'vs/sessions/contrib/chat/browser/media/*.svg',
+	'vs/sessions/contrib/chat/browser/media/backgrounds/*.jpeg',
 	'vs/sessions/contrib/welcome/browser/media/themePreviews/*.svg'
 ];
 
@@ -269,8 +266,6 @@ const desktopResourcePatterns = [
 		'vs/code/electron-browser/workbench/workbench-dev.html',
 		'vs/sessions/electron-browser/sessions.html',
 		'vs/sessions/electron-browser/sessions-dev.html',
-		'vs/jarvis/electron-browser/jarvis.html',
-		'vs/jarvis/electron-browser/jarvis-dev.html',
 		'vs/optimus/electron-browser/optimus.html',
 		'vs/optimus/electron-browser/optimus-dev.html',
 		'vs/workbench/services/extensions/worker/webWorkerExtensionHostIframe.html',
@@ -278,10 +273,6 @@ const desktopResourcePatterns = [
 
 	// Webview pre scripts
 	'vs/workbench/contrib/webview/browser/pre/*.js',
-
-	// Backboard standalone window media
-	'vs/jarvis/browser/media/jarvis.css',
-	'vs/jarvis/browser/media/jarvis-background.mp4',
 
 	// Shell scripts
 	'vs/base/node/*.sh',

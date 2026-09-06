@@ -15,6 +15,7 @@ import { promisify } from "node:util";
 import {
 	GitCommandError,
 	GitWorktreeManager,
+	parsePorcelainPaths,
 	runGitCommand,
 	workerBranchName,
 } from "../src/core/workspaces/GitWorktreeManager.ts";
@@ -67,6 +68,123 @@ afterEach(async () => {
 });
 
 describe("WorkerWorkspaceManager", () => {
+	it("keeps both rename paths and unusual delimiters in Git status and worktree inventories", async () => {
+		expect(
+			parsePorcelainPaths("R  new\nname.ts\0old\tname.ts\0?? other.ts\0"),
+		).toEqual(["new\nname.ts", "old\tname.ts", "other.ts"]);
+		const manager = new GitWorktreeManager(async () => ({
+			stdout:
+				"worktree /repo/line\nbreak\0HEAD abc\0\0worktree /other/path\0HEAD def\0\0",
+			stderr: "",
+		}));
+		expect(await manager.listWorktrees("/repo")).toEqual([
+			"/repo/line\nbreak",
+			"/other/path",
+		]);
+	});
+
+	it("does not turn Git execution failures or cancellations into absent refs or no repository", async () => {
+		const manager = new GitWorktreeManager(async (_cwd, args) => {
+			throw new GitCommandError(
+				"permission",
+				args,
+				"",
+				"Permission denied",
+				128,
+			);
+		});
+		await expect(manager.inspect("/repo")).rejects.toThrow("permission");
+		await expect(manager.branchExists("/repo", "branch")).rejects.toThrow(
+			"permission",
+		);
+		await expect(manager.isAncestor("/repo", "commit")).rejects.toThrow(
+			"permission",
+		);
+		const abort = new AbortController();
+		abort.abort();
+		const cancelled = new GitWorktreeManager(async (_cwd, args) => {
+			throw new GitCommandError("cancelled", args, "", "", 1);
+		});
+		await expect(
+			cancelled.branchExists("/repo", "branch", abort.signal),
+		).rejects.toThrow("cancelled");
+		await expect(
+			cancelled.isAncestor("/repo", "commit", abort.signal),
+		).rejects.toThrow("cancelled");
+	});
+
+	it("never invokes a read-only worker that was already cancelled", async () => {
+		const fixture = await createRepository();
+		const manager = createManager(fixture, "cancelled-read");
+		const abort = new AbortController();
+		abort.abort();
+		let ran = false;
+		await expect(
+			manager.runWorker(
+				{
+					...workerParams("read", fixture.repository, "cancelled-read"),
+					readOnly: true,
+					signal: abort.signal,
+				},
+				async () => {
+					ran = true;
+					return { status: "completed" };
+				},
+			),
+		).rejects.toThrow();
+		expect(ran).toBe(false);
+		expect(manager.list()).toEqual([]);
+	});
+
+	it("cancels one pending shared inspection without blocking or cancelling its peer", async () => {
+		const fixture = await createRepository();
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		let inspecting = false;
+		const gitManager = new (class extends GitWorktreeManager {
+			override async inspect(cwd: string, signal?: AbortSignal) {
+				inspecting = true;
+				await gate;
+				return super.inspect(cwd, signal);
+			}
+		})();
+		const manager = new WorkerWorkspaceManager({
+			parentSessionId: "cancelled-inspection",
+			store: new WorkerWorkspaceStore(fixture.storePath),
+			git: gitManager,
+			worktreeRoot: fixture.worktreeRoot,
+		});
+		const abort = new AbortController();
+		let ranCancelled = false;
+		const first = manager.runWorker(
+			{
+				...workerParams("first", fixture.repository, "cancelled-inspection"),
+				signal: abort.signal,
+			},
+			async () => {
+				ranCancelled = true;
+				return { status: "completed" };
+			},
+		);
+		// Attach the rejection observer before aborting a live operation.
+		const rejected = first.then(
+			() => undefined,
+			(error: unknown) => error,
+		);
+		const second = manager.runWorker(
+			workerParams("second", fixture.repository, "cancelled-inspection"),
+			async () => ({ status: "completed" }),
+		);
+		await waitFor(() => inspecting);
+		abort.abort();
+		expect(await rejected).toBeDefined();
+		expect(ranCancelled).toBe(false);
+		release();
+		expect((await second).workspace.integrationStatus).toBe("integrated");
+		await manager.waitForIdle();
+	});
 	it("serializes Git registry updates while materializing checkouts concurrently", async () => {
 		const root = await mkdtemp(join(tmpdir(), "backboard-registry-test-"));
 		roots.push(root);
@@ -119,6 +237,49 @@ describe("WorkerWorkspaceManager", () => {
 
 		expect(maxActiveRegistry).toBe(1);
 		expect(maxActiveCheckouts).toBe(3);
+	});
+
+	it("serializes branch pruning against sibling worker registration", async () => {
+		const fixture = await createRepository();
+		let deletionStarted!: () => void;
+		const started = new Promise<void>((resolve) => {
+			deletionStarted = resolve;
+		});
+		let releaseDeletion!: () => void;
+		const gate = new Promise<void>((resolve) => {
+			releaseDeletion = resolve;
+		});
+		let registrationStarted = false;
+		const gitManager = new GitWorktreeManager(async (_cwd, args) => {
+			if (args[0] === "rev-parse") return { stdout: "result", stderr: "" };
+			if (args[0] === "show-ref")
+				throw new GitCommandError("missing", args, "", "", 1);
+			if (args[0] === "update-ref") {
+				deletionStarted();
+				await gate;
+			}
+			if (args[0] === "worktree") registrationStarted = true;
+			return { stdout: "", stderr: "" };
+		});
+		const deletion = gitManager.deleteIntegratedWorkerBranch({
+			repositoryRoot: fixture.repository,
+			coordinatorCwd: fixture.repository,
+			branch: "agent/session/worker/old",
+			resultCommit: "result",
+		});
+		await started;
+		const creation = gitManager.createWorktree({
+			repositoryRoot: fixture.repository,
+			path: join(fixture.root, "new"),
+			branch: "agent/session/worker/new",
+			startCommit: "result",
+		});
+		await Bun.sleep(10);
+		expect(registrationStarted).toBe(false);
+		releaseDeletion();
+		expect(await deletion).toBe(true);
+		await creation;
+		expect(registrationStarted).toBe(true);
 	});
 
 	it("uses readable, collision-safe Git branch and worktree names", async () => {
@@ -907,11 +1068,12 @@ describe("WorkerWorkspaceManager", () => {
 		);
 	}, 15_000);
 
-	it("rejects non-Git writes by default without creating repository metadata", async () => {
+	it("rejects private snapshot storage inside the coordinator without creating repository metadata", async () => {
 		const root = await mkdtemp(join(tmpdir(), "backboard-non-git-test-"));
 		roots.push(root);
 		const manager = new WorkerWorkspaceManager({
 			parentSessionId: "non-git",
+			snapshotMutation: async (_record, _paths, apply) => apply(),
 			store: new WorkerWorkspaceStore(join(root, "state", "workers.json")),
 			worktreeRoot: join(root, "hidden-worktrees"),
 		});
@@ -922,12 +1084,12 @@ describe("WorkerWorkspaceManager", () => {
 				ran = true;
 				return { status: "completed" };
 			}),
-		).rejects.toThrow("Git is required for isolated parallel writes");
+		).rejects.toThrow("Private snapshot storage must be outside");
 		expect(ran).toBe(false);
 		await expect(access(join(root, ".git"))).rejects.toThrow();
 	});
 
-	it("rejects dirty write workers without mutating user state but allows read-only work", async () => {
+	it("snapshots dirty worker inputs without mutating coordinator Git state and allows read-only work", async () => {
 		const fixture = await createRepository();
 		await writeFile(
 			join(fixture.repository, "base.txt"),
@@ -939,19 +1101,30 @@ describe("WorkerWorkspaceManager", () => {
 			"dirty untracked\n",
 			"utf8",
 		);
-		const manager = createManager(fixture, "dirty-routing");
+		const manager = new WorkerWorkspaceManager({
+			parentSessionId: "dirty-routing",
+			store: new WorkerWorkspaceStore(fixture.storePath),
+			worktreeRoot: fixture.worktreeRoot,
+			snapshotMutation: async (_record, _paths, apply) => apply(),
+		});
 		let writeRan = false;
 
-		await expect(
-			manager.runWorker(
-				workerParams("write-worker", fixture.repository, "dirty-routing"),
-				async () => {
-					writeRan = true;
-					return { status: "completed" };
-				},
-			),
-		).rejects.toThrow("Use the main agent's direct file tools");
-		expect(writeRan).toBe(false);
+		const snapshot = await manager.runWorker(
+			workerParams("write-worker", fixture.repository, "dirty-routing"),
+			async (workspace) => {
+				writeRan = true;
+				expect(await readFile(join(workspace.cwd, "base.txt"), "utf8")).toBe(
+					"dirty tracked\n",
+				);
+				expect(
+					await readFile(join(workspace.cwd, "untracked.txt"), "utf8"),
+				).toBe("dirty untracked\n");
+				return { status: "completed" };
+			},
+		);
+		expect(writeRan).toBe(true);
+		expect(snapshot.workspace.backend).toBe("snapshot");
+		expect(snapshot.workspace.integrationStatus).toBe("integrated");
 		expect(await readFile(join(fixture.repository, "base.txt"), "utf8")).toBe(
 			"dirty tracked\n",
 		);
@@ -1714,6 +1887,8 @@ describe("WorkerWorkspaceManager", () => {
 			"merge",
 			"--no-ff",
 			"--no-commit",
+			"--message",
+			`Backboard worker integration\n\nBackboard-Worker-Integration: ${records.map((record) => record.resultCommit).join(" ")}`,
 			...records.map((record) => record.resultCommit ?? ""),
 		]);
 		expect(await gitManager.mergeInProgress(fixture.repository)).toBe(true);

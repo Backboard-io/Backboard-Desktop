@@ -62,12 +62,9 @@ export class SidebarPart extends AbstractPaneCompositePart {
 
 	//#region IView
 
-	// The header row (traffic-light spacer ~70px, the "Simple" mode switcher, the
-	// sidebar toggle, and the back/forward navigation ≈ 260px total) must always
-	// fit within the sidebar's rendered area so the forward arrow never clips on
-	// resize; below this the sidebar snaps closed. Web also hosts an additional
-	// host filter combo, so it needs a touch more room.
-	readonly minimumWidth: number = isWeb ? 300 : 290;
+	// Keep the three mode segments, traffic lights, sidebar toggle and
+	// navigation visible at the sidebar's minimum width.
+	readonly minimumWidth: number = isWeb ? 360 : 350;
 	readonly maximumWidth: number = Number.POSITIVE_INFINITY;
 	readonly minimumHeight: number = 0;
 	readonly maximumHeight: number = Number.POSITIVE_INFINITY;
@@ -144,15 +141,15 @@ export class SidebarPart extends AbstractPaneCompositePart {
 
 		// Header strip with the window-left controls (traffic-light spacer and
 		// the sidebar toggle), absorbed from the former integrated chrome bar.
-		// The Optimus window renders its own fixed chrome overlay with the mode
-		// selector and panel toggles, so its header stays empty (drag region and
-		// spacing only) to avoid mounting duplicate controls.
+		// Optimus mounts its mode selector and close-panel button into this
+		// header through its chrome contribution; reserve native control space
+		// here without creating duplicate menu toolbars.
 		// The controls render in the left section on every platform — on macOS
 		// directly after the traffic-light spacer, which is the same top-left
 		// position the Editor and Advanced windows give their mode switchers,
 		// so the control does not jump around when switching modes.
 		this.panelHeader = this._register(this.instantiationService.createInstance(SessionsPanelHeader, parent, this.environmentService.isOptimusWindow
-			? { classes: ['sidebar-part-header'] }
+			? { classes: ['sidebar-part-header'], windowControls: { left: true } }
 			: {
 				classes: ['sidebar-part-header'],
 				left: [{ menuId: Menus.TitleBarLeftLayout, telemetrySource: 'sidebarPanelHeader.left' }],

@@ -8,6 +8,7 @@ import { RefCounted } from '../diffEditor/utils.js';
 import { IDiffEditorOptions } from '../../../common/config/editorOptions.js';
 import { ITextModel } from '../../../common/model.js';
 import { ContextKeyValue } from '../../../../platform/contextkey/common/contextkey.js';
+import { URI } from '../../../../base/common/uri.js';
 
 export interface IMultiDiffEditorModel {
 	readonly documents: IValueWithChangeEvent<readonly RefCounted<IDocumentDiffItem>[] | 'loading'>;
@@ -15,6 +16,8 @@ export interface IMultiDiffEditorModel {
 }
 
 export interface IDocumentDiffItem {
+	/** Workspace resource to label when the models are virtual snapshots. */
+	readonly displayUri?: URI;
 	/**
 	 * undefined if the file was created.
 	 */

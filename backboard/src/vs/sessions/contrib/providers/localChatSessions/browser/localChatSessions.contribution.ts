@@ -87,12 +87,14 @@ registerAction2(class extends ForkConversationAction {
 							resolve(true);
 						}
 					});
+					if (sessionsManagementService.getSession(forkedSessionResource)) {
+						resolve(true);
+					}
 				}), 30_000);
 				listener?.dispose();
 
 				if (!appeared) {
-					logService.error(`Forked session ${forkedSessionResource.toString()} did not appear within timeout`);
-					return;
+					throw new Error(localize('chat.fork.openTimeout', "The fork was created but could not be opened yet. Open it from the session list."));
 				}
 			}
 			await sessionsService.openSession(forkedSessionResource);

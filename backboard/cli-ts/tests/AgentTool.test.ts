@@ -1,5 +1,13 @@
 import { describe, expect, it } from "bun:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import {
+	lstat,
+	mkdir,
+	mkdtemp,
+	readFile,
+	realpath,
+	rm,
+	symlink,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentTraceContext } from "../src/core/agent/AgentTraceStore.ts";
@@ -79,6 +87,29 @@ function makeTool(
 }
 
 describe("AgentTool schema and flags", () => {
+	it("accepts a bounded cosmetic name and forwards it without changing the delegated prompt", async () => {
+		const { tool, workerCalls } = makeTool();
+		const input = tool.parseInput({
+			name: " Search ",
+			prompt: "Inspect source",
+		});
+		expect(input.name).toBe("Search");
+		for (const name of ["", " ", "x".repeat(81), "two\nlines"])
+			expect(() =>
+				tool.parseInput({ name, prompt: "Inspect source" }),
+			).toThrow();
+		expect(
+			(
+				tool.toJSONSchema().function.parameters as {
+					properties: Record<string, unknown>;
+				}
+			).properties.name,
+		).toMatchObject({ type: "string", maxLength: 80 });
+		await tool.execute(input, ctx(0));
+		expect(workerCalls[0]?.name).toBe("Search");
+		expect(workerCalls[0]?.prompt).toBe("Inspect source");
+	});
+
 	it("requires prompt and defaults subagent_type to worker behavior", () => {
 		const { tool } = makeTool();
 		expect(() => tool.parseInput({})).toThrow();
@@ -191,6 +222,114 @@ describe("AgentTool schema and flags", () => {
 });
 
 describe("AgentTool execution", () => {
+	it("preserves a project subfolder and its permission scope in a private snapshot", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "agent-subfolder-"));
+		try {
+			const source = join(dir, "source");
+			const requested = join(source, "apps", "web app");
+			const workerRoot = join(dir, "worker");
+			await Promise.all([
+				mkdir(requested, { recursive: true }),
+				mkdir(workerRoot),
+			]);
+			const record: WorkerWorkspaceRecord = {
+				workerId: "worker",
+				sequence: 0,
+				parentSessionId: "s",
+				taskPrompt: "edit",
+				readOnly: false,
+				coordinatorCwd: source,
+				worktreePath: workerRoot,
+				backend: "snapshot",
+				snapshotNotice:
+					"Private snapshot excludes ignored files and Git metadata.",
+				changedFiles: [],
+				startedAt: "now",
+				executionStatus: "completed",
+				integrationStatus: "integrated",
+			};
+			const workspaceManager: NonNullable<AgentToolDeps["workspaceManager"]> = {
+				list: () => [record],
+				runWorker: async (params, run) => ({
+					result: await run({
+						record,
+						cwd: workerRoot,
+						isolated: true,
+						signal: params.signal,
+					}),
+					workspace: record,
+				}),
+			};
+			const { tool, workerCalls } = makeTool({ workspaceManager });
+			await tool.execute(
+				{ prompt: `Edit ${requested}/feature.ts` },
+				ctx(0, { cwd: requested }),
+			);
+			const expected = join(await realpath(workerRoot), "apps", "web app");
+			expect(workerCalls[0]?.parentCwd).toBe(expected);
+			expect(workerCalls[0]?.permissionCwd).toBe(requested);
+			expect(workerCalls[0]?.prompt).toContain(`Edit ${expected}/feature.ts`);
+			expect(workerCalls[0]?.prompt).toContain(
+				record.snapshotNotice ?? "missing notice",
+			);
+			expect((await lstat(expected)).isDirectory()).toBe(true);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("rejects coordinator escapes and private subfolder symlinks before model start", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "agent-subfolder-rejection-"));
+		try {
+			const source = join(dir, "source");
+			const requested = join(source, "nested");
+			const outside = join(dir, "outside");
+			const workerRoot = join(dir, "worker");
+			await Promise.all([
+				mkdir(requested, { recursive: true }),
+				mkdir(outside),
+				mkdir(workerRoot),
+			]);
+			await symlink(outside, join(workerRoot, "nested"));
+			const record: WorkerWorkspaceRecord = {
+				workerId: "worker",
+				sequence: 0,
+				parentSessionId: "s",
+				taskPrompt: "edit",
+				readOnly: false,
+				coordinatorCwd: source,
+				worktreePath: workerRoot,
+				changedFiles: [],
+				startedAt: "now",
+				executionStatus: "completed",
+				integrationStatus: "integrated",
+			};
+			const workspaceManager: NonNullable<AgentToolDeps["workspaceManager"]> = {
+				list: () => [record],
+				runWorker: async (params, run) => ({
+					result: await run({
+						record,
+						cwd: workerRoot,
+						isolated: true,
+						signal: params.signal,
+					}),
+					workspace: record,
+				}),
+			};
+			const { tool, workerCalls } = makeTool({ workspaceManager });
+			for (const cwd of [outside, requested]) {
+				const result = await tool.execute({ prompt: "edit" }, ctx(0, { cwd }));
+				expect(result.execution).toMatchObject({
+					failureCategory: "unavailable",
+					mutated: false,
+				});
+			}
+			expect(workerCalls).toHaveLength(0);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
 	it("runs the worker by default and passes the full prompt with depth+1", async () => {
 		const { tool, workerCalls } = makeTool();
 		const result = await tool.execute({ prompt: "investigate" }, ctx(0));
@@ -370,7 +509,10 @@ describe("AgentTool execution", () => {
 			const { tool } = makeTool({ workspaceManager });
 			const result = await tool.execute(
 				{ prompt: "edit files" },
-				ctx(0, { toolCallId: `agent_${integrationStatus}` }),
+				ctx(0, {
+					toolCallId: `agent_${integrationStatus}`,
+					cwd: "/coordinator",
+				}),
 			);
 
 			expect(result.data.status).toBe("failed");
@@ -387,12 +529,11 @@ describe("AgentTool execution", () => {
 		const bus = new EventBus();
 		const statuses: string[] = [];
 		const ends: string[] = [];
-		bus.on("agent:child_status", (event) =>
-			statuses.push(event.workspace.status),
-		);
+		bus.on("agent:worker_update", (event) => {
+			if (event.worker.workspace?.status && statuses.at(-1) !== event.worker.workspace.status) statuses.push(event.worker.workspace.status);
+		});
 		bus.on("agent:child_end", (event) => ends.push(event.status));
 		const controller = new AbortController();
-		controller.abort();
 		const workspaceManager: NonNullable<AgentToolDeps["workspaceManager"]> = {
 			list: () => [],
 			runWorker: async (params, run) => {
@@ -413,16 +554,17 @@ describe("AgentTool execution", () => {
 					executionStatus: "completed",
 					integrationStatus: "integrated",
 				};
+				const result = await run({
+					record,
+					cwd: "/private/worker",
+					isolated: true,
+					signal: params.signal,
+				});
+				// Cancellation races durable integration after model work. It must
+				// not authorize a fresh model start with an already-aborted signal.
+				controller.abort();
 				params.onProgress?.(record);
-				return {
-					result: await run({
-						record,
-						cwd: "/private/worker",
-						isolated: true,
-						signal: params.signal,
-					}),
-					workspace: record,
-				};
+				return { result, workspace: record };
 			},
 		};
 		const { tool } = makeTool({ workspaceManager });
@@ -433,6 +575,7 @@ describe("AgentTool execution", () => {
 				bus,
 				signal: controller.signal,
 				toolCallId: "agent_capture_wins",
+				cwd: "/coordinator",
 			}),
 		);
 
@@ -497,13 +640,25 @@ describe("AgentTool execution", () => {
 			},
 		};
 		const { tool, workerCalls } = makeTool({ workspaceManager });
+		let starts = 0;
 		const result = await tool.execute(
 			{ prompt: "edit files" },
 			ctx(0, { bus, toolCallId: "agent_non_git" }),
+			() => {
+				starts++;
+			},
 		);
 
 		expect(result.data.status).toBe("rejected");
 		expect(result.forLLM).toContain("Git is required");
+		expect(result.forLLM).toContain("same workspace backend");
+		expect(result.execution).toMatchObject({
+			outcome: "failure",
+			failureCategory: "unavailable",
+			retryable: false,
+			mutated: false,
+		});
+		expect(starts).toBe(0);
 		expect(workerCalls).toHaveLength(0);
 		expect(ends).toEqual(["failed"]);
 	});

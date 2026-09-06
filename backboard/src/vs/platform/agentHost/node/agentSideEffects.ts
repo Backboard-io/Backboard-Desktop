@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { RunOnceScheduler } from '../../../base/common/async.js';
 import { Disposable, DisposableStore, IDisposable } from '../../../base/common/lifecycle.js';
 import { equals } from '../../../base/common/objects.js';
 import { autorun, IObservable, IReader } from '../../../base/common/observable.js';
@@ -32,6 +33,7 @@ import {
 	SessionStatus,
 	ToolCallStatus,
 	ToolResultContentType,
+	type MessageAttachment,
 	type URI as ProtocolURI,
 	type ISessionWithDefaultChat,
 	type ErrorInfo,
@@ -116,6 +118,15 @@ export class AgentSideEffects extends Disposable {
 	private readonly _telemetryReporter: AgentHostTelemetryReporter;
 	private readonly _turnTracker: AgentHostTurnTracker;
 	private readonly _titleController: AgentHostSessionTitleController;
+	private readonly _sessionsAwaitingQueueDrain = new Set<ProtocolURI>();
+	private readonly _sessionsWithInFlightSend = new Set<ProtocolURI>();
+	private readonly _queuedMessageDrainScheduler = this._register(new RunOnceScheduler(() => {
+		const sessions = [...this._sessionsAwaitingQueueDrain];
+		this._sessionsAwaitingQueueDrain.clear();
+		for (const session of sessions) {
+			this._tryConsumeNextQueuedMessage(session);
+		}
+	}, 0));
 
 	constructor(
 		private readonly _stateManager: AgentHostStateManager,
@@ -140,6 +151,12 @@ export class AgentSideEffects extends Disposable {
 		this._register(autorun(reader => {
 			const agents = this._options.agents.read(reader);
 			this._publishAgentInfos(agents, reader);
+			// A queued message may have arrived while its provider was still
+			// registering or restoring. Re-check idle queues whenever the provider
+			// set changes so those messages resume without another user action.
+			for (const session of this._stateManager.getSessionUris()) {
+				this._scheduleQueuedMessageDrain(session);
+			}
 		}));
 
 		// Server-dispatched ChatToolCallComplete actions (e.g. from
@@ -147,14 +164,25 @@ export class AgentSideEffects extends Disposable {
 		// handleAction, so the agent's SDK deferred never resolves.
 		// Listen for these envelopes and notify the agent directly.
 		this._register(this._stateManager.onDidEmitEnvelope(envelope => {
+			const sessionChannel = isAhpChatChannel(envelope.channel) ? (parseDefaultChatUri(envelope.channel) ?? envelope.channel) : envelope.channel;
 			if (!envelope.origin && envelope.action.type === ActionType.ChatToolCallComplete) {
 				const action = envelope.action;
 				// Chat-action envelopes are emitted on the chat channel URI;
 				// agents are keyed by session URI, so resolve back to the
 				// owning session before notifying the agent.
-				const sessionChannel = isAhpChatChannel(envelope.channel) ? (parseDefaultChatUri(envelope.channel) ?? envelope.channel) : envelope.channel;
 				const agent = this._options.getAgent(sessionChannel);
 				agent?.onClientToolCallComplete(URI.parse(sessionChannel), action.toolCallId, action.result);
+			}
+
+			// Terminal actions can originate from the provider, a send failure,
+			// or host recovery code. Drain on all of them so queued messages do
+			// not depend on one particular completion path. Deferring by one tick
+			// also lets the provider finish unwinding its current send before the
+			// next one begins.
+			if (!envelope.origin && (envelope.action.type === ActionType.ChatTurnComplete
+				|| envelope.action.type === ActionType.ChatTurnCancelled
+				|| envelope.action.type === ActionType.ChatError)) {
+				this._scheduleQueuedMessageDrain(sessionChannel);
 			}
 		}));
 	}
@@ -495,7 +523,7 @@ export class AgentSideEffects extends Disposable {
 		} else {
 			this._changesets.onTurnComplete(sessionKey, turnId);
 		}
-		this._tryConsumeNextQueuedMessage(sessionKey);
+		this._scheduleQueuedMessageDrain(sessionKey);
 		this._options.onTurnComplete(sessionKey);
 	}
 
@@ -802,16 +830,7 @@ export class AgentSideEffects extends Disposable {
 				this._telemetryReporter.userMessageSent(agent.id, channel, state, 'direct', attachments);
 				const { model, permissionLevel } = this._getTurnTelemetryContext(state);
 				this._turnTracker.turnStarted(agent.id, channel, action.turnId, model, permissionLevel);
-				agent.sendMessage(URI.parse(channel), action.message.text, attachments, action.turnId).catch(err => {
-					const errCode = (err as { code?: number })?.code;
-					this._logService.error(`[AgentSideEffects] sendMessage failed for session=${channel}: code=${errCode}, message=${err instanceof Error ? err.message : String(err)}, type=${err?.constructor?.name}`, err);
-					this._stateManager.dispatchServerAction(channel, {
-						type: ActionType.ChatError,
-						turnId: action.turnId,
-						error: buildSendFailedError(err),
-					});
-					this._turnTracker.turnCompleted(channel, action.turnId, 'error');
-				});
+				this._sendAgentMessage(agent, channel, action.message.text, attachments, action.turnId, 'direct');
 				break;
 			}
 			case ActionType.ChatToolCallConfirmed: {
@@ -850,9 +869,13 @@ export class AgentSideEffects extends Disposable {
 				// Cancel all subagent sessions for this parent
 				this.cancelSubagentSessions(channel);
 				const agent = this._options.getAgent(channel);
-				agent?.abortSession(URI.parse(channel)).catch(err => {
-					this._logService.error('[AgentSideEffects] abortSession failed', err);
-				});
+				if (agent) {
+					agent.abortSession(URI.parse(channel)).catch(err => {
+						this._logService.error('[AgentSideEffects] abortSession failed', err);
+					}).finally(() => this._scheduleQueuedMessageDrain(channel));
+				} else {
+					this._scheduleQueuedMessageDrain(channel);
+				}
 				break;
 			}
 			case ActionType.SessionModelChanged: {
@@ -1004,10 +1027,8 @@ export class AgentSideEffects extends Disposable {
 			turnId,
 		});
 		// This turn was completed via a direct server dispatch rather than
-		// `_runTurnCompleteSideEffects`, so drain any messages queued behind
-		// the rename ourselves; otherwise they would stall until the next
-		// unrelated state change re-triggers consumption.
-		this._tryConsumeNextQueuedMessage(channel);
+		// `_runTurnCompleteSideEffects`. The terminal-envelope listener schedules
+		// the next queued message without re-entering the current dispatch.
 		return true;
 	}
 
@@ -1057,6 +1078,59 @@ export class AgentSideEffects extends Disposable {
 	}
 
 	/**
+	 * Coalesces terminal events and drains queues outside the provider's current
+	 * completion callback. Multiple completion/error signals for one turn are
+	 * common, so a single next-tick pass avoids duplicate or re-entrant sends.
+	 */
+	private _scheduleQueuedMessageDrain(session: ProtocolURI): void {
+		if (this._store.isDisposed) {
+			return;
+		}
+		this._sessionsAwaitingQueueDrain.add(session);
+		this._queuedMessageDrainScheduler.schedule();
+	}
+
+	/** Sends one turn and releases its queue only after the provider call settles. */
+	private _sendAgentMessage(
+		agent: IAgent,
+		session: ProtocolURI,
+		text: string,
+		attachments: readonly MessageAttachment[] | undefined,
+		turnId: string,
+		source: 'direct' | 'queued',
+	): void {
+		this._sessionsWithInFlightSend.add(session);
+		let sendPromise: Promise<void>;
+		try {
+			sendPromise = agent.sendMessage(URI.parse(session), text, attachments, turnId);
+		} catch (err) {
+			this._handleSendMessageFailure(session, turnId, source, err);
+			this._sessionsWithInFlightSend.delete(session);
+			this._scheduleQueuedMessageDrain(session);
+			return;
+		}
+
+		sendPromise.catch(err => {
+			this._handleSendMessageFailure(session, turnId, source, err);
+		}).finally(() => {
+			this._sessionsWithInFlightSend.delete(session);
+			this._scheduleQueuedMessageDrain(session);
+		});
+	}
+
+	private _handleSendMessageFailure(session: ProtocolURI, turnId: string, source: 'direct' | 'queued', err: unknown): void {
+		const errCode = (err as { code?: number })?.code;
+		const errType = err instanceof Error ? err.constructor.name : typeof err;
+		this._logService.error(`[AgentSideEffects] sendMessage failed (${source}) for session=${session}: code=${errCode}, message=${err instanceof Error ? err.message : String(err)}, type=${errType}`, err);
+		this._stateManager.dispatchServerAction(session, {
+			type: ActionType.ChatError,
+			turnId,
+			error: buildSendFailedError(err),
+		});
+		this._turnTracker.turnCompleted(session, turnId, 'error');
+	}
+
+	/**
 	 * Consumes the next queued message by dispatching a server-initiated
 	 * `ChatTurnStarted` action with `queuedMessageId` set. The reducer
 	 * atomically creates the active turn and removes the message from the
@@ -1064,6 +1138,12 @@ export class AgentSideEffects extends Disposable {
 	 * consumed when the next `idle` event fires.
 	 */
 	private _tryConsumeNextQueuedMessage(session: ProtocolURI): void {
+		// A provider may emit a terminal action before its send promise has
+		// settled. Wait for the promise boundary so late events from the old turn
+		// cannot be applied to the newly dequeued turn.
+		if (this._sessionsWithInFlightSend.has(session)) {
+			return;
+		}
 		// Bail if there's already an active turn
 		if (this._stateManager.getActiveTurnId(session)) {
 			return;
@@ -1074,6 +1154,14 @@ export class AgentSideEffects extends Disposable {
 		}
 
 		const msg = state.queuedMessages[0];
+		const agent = this._options.getAgent(session);
+		if (!agent) {
+			// Keep the message queued. Provider registration/restoration can be
+			// transient, and consuming it into a synthetic no-agent error would
+			// silently discard the user's remaining queue.
+			this._logService.trace(`[AgentSideEffects] Waiting for an agent before draining queued message ${msg.id} for ${session}`);
+			return;
+		}
 		const turnId = generateUuid();
 
 		// Per-turn streaming part tracking is owned by the agent (reset
@@ -1094,29 +1182,12 @@ export class AgentSideEffects extends Disposable {
 		}
 
 		// Send the message to the agent backend
-		const agent = this._options.getAgent(session);
-		if (!agent) {
-			this._stateManager.dispatchServerAction(session, {
-				type: ActionType.ChatError,
-				turnId,
-				error: { errorType: 'noAgent', message: 'No agent found for session' },
-			});
-			return;
-		}
 		const attachments = msg.message.attachments;
 		const queuedState = this._stateManager.getSessionState(session);
 		this._telemetryReporter.userMessageSent(agent.id, session, queuedState, 'queued', attachments);
 		const { model, permissionLevel } = this._getTurnTelemetryContext(queuedState);
 		this._turnTracker.turnStarted(agent.id, session, turnId, model, permissionLevel);
-		agent.sendMessage(URI.parse(session), msg.message.text, attachments, turnId).catch(err => {
-			this._logService.error('[AgentSideEffects] sendMessage failed (queued)', err);
-			this._stateManager.dispatchServerAction(session, {
-				type: ActionType.ChatError,
-				turnId,
-				error: buildSendFailedError(err),
-			});
-			this._turnTracker.turnCompleted(session, turnId, 'error');
-		});
+		this._sendAgentMessage(agent, session, msg.message.text, attachments, turnId, 'queued');
 	}
 
 
@@ -1129,6 +1200,8 @@ export class AgentSideEffects extends Disposable {
 
 
 	override dispose(): void {
+		this._sessionsAwaitingQueueDrain.clear();
+		this._sessionsWithInFlightSend.clear();
 		this._toolCallAgents.clear();
 		super.dispose();
 	}

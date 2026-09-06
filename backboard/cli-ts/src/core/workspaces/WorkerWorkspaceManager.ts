@@ -9,6 +9,10 @@ import {
 	workerBranchName,
 } from "./GitWorktreeManager.ts";
 import { WorkerIntegrationManager } from "./WorkerIntegrationManager.ts";
+import {
+	PrivateSnapshotWorkspace,
+	type SnapshotMutation,
+} from "./PrivateSnapshotWorkspace.ts";
 import type { WorkerWorkspaceStore } from "./WorkerWorkspaceStore.ts";
 import type {
 	PreparedWorkerWorkspace,
@@ -24,6 +28,8 @@ export interface WorkerWorkspaceManagerOptions {
 	maxWorkers?: number;
 	/** Explicit opt-in for initializing and baselining a non-Git folder. */
 	autoInitializeGit?: boolean;
+	/** Durable coordinator checkpoint wrapper required for private snapshot writes. */
+	snapshotMutation?: SnapshotMutation;
 	/** Hidden application-owned root for native worker worktrees. */
 	worktreeRoot?: string;
 	now?: () => Date;
@@ -33,6 +39,7 @@ interface RepositorySnapshot {
 	repository: GitRepositoryInfo;
 	initializedByWorkerId?: string;
 	dirtyFiles: string[];
+	backend?: "snapshot";
 }
 
 interface PendingIntegration {
@@ -57,6 +64,7 @@ export class WorkerWorkspaceUnavailableError extends Error {
 export class WorkerWorkspaceManager {
 	private readonly git: GitWorktreeManager;
 	private readonly integration: WorkerIntegrationManager;
+	private readonly snapshots: PrivateSnapshotWorkspace;
 	private readonly maxWorkers: number;
 	private readonly autoInitializeGit: boolean;
 	private readonly worktreeRoot: string;
@@ -69,6 +77,10 @@ export class WorkerWorkspaceManager {
 		string,
 		Promise<RepositorySnapshot>
 	>();
+	private readonly snapshotWaiters = new Map<
+		string,
+		{ controller: AbortController; listeners: Map<AbortSignal, () => void> }
+	>();
 	private initialization?: Promise<void>;
 	private integrationTail: Promise<void> = Promise.resolve();
 	private readonly pendingIntegrations: PendingIntegration[] = [];
@@ -77,11 +89,19 @@ export class WorkerWorkspaceManager {
 
 	constructor(private readonly options: WorkerWorkspaceManagerOptions) {
 		this.git = options.git ?? new GitWorktreeManager();
-		this.integration = new WorkerIntegrationManager(this.git, options.store);
 		this.maxWorkers = clampMaxWorkers(options.maxWorkers ?? 4);
 		this.autoInitializeGit = options.autoInitializeGit ?? false;
 		this.worktreeRoot = resolve(
 			options.worktreeRoot ?? defaultWorkerWorktreeRoot(),
+		);
+		this.snapshots = new PrivateSnapshotWorkspace(
+			this.worktreeRoot,
+			options.snapshotMutation,
+		);
+		this.integration = new WorkerIntegrationManager(
+			this.git,
+			options.store,
+			this.snapshots,
 		);
 		this.now = options.now ?? (() => new Date());
 	}
@@ -96,7 +116,9 @@ export class WorkerWorkspaceManager {
 		run: (workspace: PreparedWorkerWorkspace) => Promise<T>,
 	): Promise<WorkerRunOutcome<T>> {
 		const queuedAt = performance.now();
+		params.signal.throwIfAborted();
 		await this.initialize();
+		params.signal.throwIfAborted();
 		if (params.parentSessionId !== this.options.parentSessionId) {
 			throw new WorkerWorkspaceUnavailableError(
 				`Worker session mismatch: expected ${this.options.parentSessionId}, received ${params.parentSessionId}.`,
@@ -215,6 +237,7 @@ export class WorkerWorkspaceManager {
 		const workspace = await this.prepare(params);
 		let result: T;
 		try {
+			workspace.signal.throwIfAborted();
 			result = await run(workspace);
 		} catch (error) {
 			await this.finishWithoutIntegration(
@@ -329,6 +352,7 @@ export class WorkerWorkspaceManager {
 		const sequence = this.nextSequence++;
 		let record: WorkerWorkspaceRecord = {
 			workerId: params.workerId,
+			...(params.name ? { name: params.name } : {}),
 			sequence,
 			parentSessionId: params.parentSessionId,
 			parentToolCallId: params.parentToolCallId,
@@ -359,13 +383,12 @@ export class WorkerWorkspaceManager {
 
 		const worktreeStartedAt = performance.now();
 		try {
-			const snapshot = await this.repositorySnapshot(params);
+			const snapshot = await waitForRepositorySnapshot(
+				this.repositorySnapshot(params),
+				params.signal,
+			);
+			params.signal.throwIfAborted();
 			const repository = snapshot.repository;
-			if (snapshot.dirtyFiles.length > 0) {
-				throw new WorkerWorkspaceUnavailableError(
-					`Write-capable workers require a clean coordinator snapshot so they never run against stale or incomplete files. The coordinator has uncommitted changes in ${summarizePaths(snapshot.dirtyFiles)}. Use the main agent's direct file tools for this dirty workspace, or commit/unstage and clean these paths before spawning write workers; Backboard did not stash, reset, or modify them.`,
-				);
-			}
 			if (snapshot.initializedByWorkerId === params.workerId) {
 				record = await this.persist(
 					{ ...record, repositoryInitializedByBackboard: true },
@@ -392,6 +415,10 @@ export class WorkerWorkspaceManager {
 					worktreePath,
 					worktreeDisposition: "present",
 					startingCommit: repository.head,
+					backend: snapshot.backend,
+					snapshotNotice: snapshot.backend
+						? "This is a private snapshot of current coordinator source files. Git metadata, ignored untracked files, and dependency/cache folders are excluded. Tracked files retain current staged/unstaged bytes. Ignored dependencies are unavailable here; report a validation limitation if they are required. Do not edit the coordinator directly. Results integrate only where coordinator files still match their snapshot preimages."
+						: undefined,
 				},
 				params.onProgress,
 			);
@@ -433,23 +460,50 @@ export class WorkerWorkspaceManager {
 	): Promise<RepositorySnapshot> {
 		const key = resolve(params.coordinatorCwd);
 		const cached = this.repositorySnapshots.get(key);
-		if (cached) return cached;
+		if (cached) {
+			this.trackSnapshotWaiter(key, params.signal);
+			return cached;
+		}
+		const controller = new AbortController();
+		this.snapshotWaiters.set(key, { controller, listeners: new Map() });
+		this.trackSnapshotWaiter(key, params.signal);
+		const createSnapshot = async (cwd: string) => {
+			if (!this.options.snapshotMutation)
+				throw new WorkerWorkspaceUnavailableError(
+					"Private worker snapshots require a coordinator checkpoint transaction. This runtime must configure snapshotMutation before starting write workers.",
+				);
+			return this.snapshots.create(cwd, controller.signal);
+		};
 
 		const snapshot = (async (): Promise<RepositorySnapshot> => {
 			// Do not snapshot a coordinator while its single Git writer is advancing
 			// HEAD. Workers already sharing an earlier snapshot keep that batch base.
 			await this.integrationTail;
-			const existing = await this.git.inspect(params.coordinatorCwd);
+			const existing = await this.git.inspect(
+				params.coordinatorCwd,
+				controller.signal,
+			);
 			if (existing) {
+				const dirtyFiles = await this.git.changedFiles(
+					existing.coordinatorRoot,
+				);
+				if (dirtyFiles.length)
+					return {
+						repository: await createSnapshot(existing.coordinatorRoot),
+						dirtyFiles,
+						backend: "snapshot",
+					};
 				return {
 					repository: existing,
-					dirtyFiles: await this.git.changedFiles(existing.coordinatorRoot),
+					dirtyFiles,
 				};
 			}
 			if (!this.autoInitializeGit) {
-				throw new WorkerWorkspaceUnavailableError(
-					"Git is required for isolated parallel writes. Automatic repository initialization is disabled, so this worker was not started.",
-				);
+				return {
+					repository: await createSnapshot(params.coordinatorCwd),
+					dirtyFiles: [],
+					backend: "snapshot",
+				};
 			}
 			try {
 				const ensured = await this.git.ensureRepository(params.coordinatorCwd);
@@ -469,6 +523,10 @@ export class WorkerWorkspaceManager {
 			}
 		})();
 		this.repositorySnapshots.set(key, snapshot);
+		void snapshot.then(
+			() => this.releaseSnapshotWaiters(key, controller),
+			() => this.releaseSnapshotWaiters(key, controller),
+		);
 		// The promise is shared only by launches already in this inspection burst.
 		// Once it settles, a later worker must observe the then-current coordinator
 		// HEAD even when the earlier worker failed, cancelled, or produced no changes.
@@ -485,6 +543,36 @@ export class WorkerWorkspaceManager {
 			},
 		);
 		return snapshot;
+	}
+
+	private trackSnapshotWaiter(key: string, signal: AbortSignal): void {
+		const state = this.snapshotWaiters.get(key);
+		if (!state || state.listeners.has(signal)) return;
+		const cancel = () => {
+			state.listeners.delete(signal);
+			if (
+				state.listeners.size === 0 &&
+				this.snapshotWaiters.get(key) === state
+			) {
+				this.repositorySnapshots.delete(key);
+				this.snapshotWaiters.delete(key);
+				state.controller.abort();
+			}
+		};
+		state.listeners.set(signal, cancel);
+		signal.addEventListener("abort", cancel, { once: true });
+		if (signal.aborted) cancel();
+	}
+
+	private releaseSnapshotWaiters(
+		key: string,
+		controller: AbortController,
+	): void {
+		const state = this.snapshotWaiters.get(key);
+		if (!state || state.controller !== controller) return;
+		for (const [signal, listener] of state.listeners)
+			signal.removeEventListener("abort", listener);
+		this.snapshotWaiters.delete(key);
 	}
 
 	/**
@@ -752,6 +840,8 @@ export class WorkerWorkspaceManager {
 	private async cleanupRemovedWorkerRefs(
 		record: WorkerWorkspaceRecord,
 	): Promise<void> {
+		// Private immutable result commits remain the recovery source for file deltas.
+		if (record.backend === "snapshot") return;
 		if (
 			!record.repositoryRoot ||
 			!record.branch ||
@@ -861,6 +951,7 @@ export class WorkerWorkspaceManager {
 				},
 				onProgress,
 			);
+			if (record.backend === "snapshot") return current;
 			const branchDeleted = await this.git.deleteIntegratedWorkerBranch({
 				repositoryRoot: record.repositoryRoot,
 				coordinatorCwd: record.coordinatorCwd,
@@ -975,6 +1066,13 @@ export class WorkerWorkspaceManager {
 		if (!record.repositoryRoot || !record.branch || !record.worktreePath) {
 			return false;
 		}
+		if (
+			record.backend === "snapshot" &&
+			!resolve(record.repositoryRoot).startsWith(
+				`${join(this.worktreeRoot, "snapshots")}/`,
+			)
+		)
+			return false;
 		return (
 			record.parentSessionId === this.options.parentSessionId &&
 			record.branch ===
@@ -1012,8 +1110,12 @@ export class WorkerWorkspaceManager {
 		onProgress?: (record: WorkerWorkspaceRecord) => void,
 		durable = true,
 	): Promise<WorkerWorkspaceRecord> {
-		this.records.set(record.workerId, record);
 		await this.options.store.upsert(record, { durable });
+		if (
+			(this.records.get(record.workerId)?.revision ?? 0) <=
+			(record.revision ?? 0)
+		)
+			this.records.set(record.workerId, record);
 		onProgress?.(cloneRecord(record));
 		return record;
 	}
@@ -1021,6 +1123,29 @@ export class WorkerWorkspaceManager {
 	private sortedRecords(): WorkerWorkspaceRecord[] {
 		return [...this.records.values()].sort((a, b) => a.sequence - b.sequence);
 	}
+}
+
+/** One cancelled launch must not cancel the repository inspection shared by its peers. */
+async function waitForRepositorySnapshot<T>(
+	pending: Promise<T>,
+	signal: AbortSignal,
+): Promise<T> {
+	signal.throwIfAborted();
+	return new Promise<T>((resolveWait, rejectWait) => {
+		const cancel = () =>
+			rejectWait(signal.reason ?? new DOMException("Aborted", "AbortError"));
+		signal.addEventListener("abort", cancel, { once: true });
+		void pending.then(
+			(value) => {
+				signal.removeEventListener("abort", cancel);
+				resolveWait(value);
+			},
+			(error) => {
+				signal.removeEventListener("abort", cancel);
+				rejectWait(error);
+			},
+		);
+	});
 }
 
 function isTransientTerminalWorker(record: WorkerWorkspaceRecord): boolean {
@@ -1038,12 +1163,6 @@ function appendCleanupError(
 	cleanupError: string,
 ): string {
 	return existing ? `${existing}\n${cleanupError}` : cleanupError;
-}
-
-function summarizePaths(paths: readonly string[]): string {
-	const visible = paths.slice(0, 8).join(", ");
-	const hidden = paths.length - 8;
-	return hidden > 0 ? `${visible}, and ${hidden} more` : visible;
 }
 
 export function workerWorktreePath(
@@ -1114,11 +1233,5 @@ function compareCompletionOrder(
 }
 
 function cloneRecord(record: WorkerWorkspaceRecord): WorkerWorkspaceRecord {
-	return {
-		...record,
-		changedFiles: [...record.changedFiles],
-		conflictingFiles: record.conflictingFiles
-			? [...record.conflictingFiles]
-			: undefined,
-	};
+	return structuredClone(record);
 }

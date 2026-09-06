@@ -4,6 +4,7 @@ import type {
 } from "../../../config/defaults.ts";
 import type { TodoItem } from "../../bus/events.ts";
 import type { OpenAITool } from "../../tools/schema.ts";
+import type { CompletionEvidence } from "../CompletionEvidence.ts";
 
 /**
  * Metadata key stamped on an injected notification's request message. The
@@ -24,6 +25,7 @@ export interface SystemNotificationContext {
 	executedRounds: number;
 	executedToolCalls: number;
 	todos: readonly TodoItem[];
+	completionEvidence?: CompletionEvidence;
 }
 
 /**
@@ -68,8 +70,7 @@ export interface SystemNotification {
 	 * How many times this notification may fire in one turn. The runner
 	 * repeats while `shouldFire` stays true, stopping early if a pass produces
 	 * the same `content` as the previous one (the model didn't move the state
-	 * the notification reacts to). Defaults to 1 (fire once). The todo reminder
-	 * sets this above 1 to loop until every todo is closed.
+	 * the notification reacts to). Defaults to 1 (fire once).
 	 */
 	readonly maxRepeats?: number;
 
@@ -82,9 +83,9 @@ export interface SystemNotification {
 	restrictTools?(tools: readonly OpenAITool[]): OpenAITool[];
 
 	/**
-	 * Thinking override for the injected request: `null` disables thinking
-	 * (bookkeeping turns should not burn reasoning tokens); omit to keep the
-	 * provider default.
+	 * Thinking override for the injected request: `null` requests the provider's
+	 * off setting; omit to keep its default. Capabilities determine the actual
+	 * setting, independently of whether reasoning is displayed.
 	 */
 	readonly thinking?: ThinkingConfig | null;
 }

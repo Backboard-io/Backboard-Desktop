@@ -27,14 +27,22 @@ export function parseUnifiedDiff(diffText: string): { before: string; after: str
 	const lines = diffText.split('\n');
 	const beforeLines: string[] = [];
 	const afterLines: string[] = [];
+	let inHunk = false;
 
 	for (const line of lines) {
-		if (line.startsWith('- ')) {
-			beforeLines.push(line.substring(2));
-		} else if (line.startsWith('-')) {
+		if (line.startsWith('diff ')) {
+			inHunk = false;
+			continue;
+		}
+		if (line.startsWith('@@')) {
+			inHunk = true;
+			continue;
+		}
+		if (line.startsWith('\\ No newline at end of file') || (!inHunk && /^(?:--- |\+\+\+ |index |(?:new|deleted) file mode |(?:old|new) mode |(?:similarity|dissimilarity) index |(?:rename|copy) (?:from|to) )/.test(line))) {
+			continue;
+		}
+		if (line.startsWith('-')) {
 			beforeLines.push(line.substring(1));
-		} else if (line.startsWith('+ ')) {
-			afterLines.push(line.substring(2));
 		} else if (line.startsWith('+')) {
 			afterLines.push(line.substring(1));
 		} else if (line.startsWith(' ')) {
@@ -42,7 +50,7 @@ export function parseUnifiedDiff(diffText: string): { before: string; after: str
 			const content = line.substring(1);
 			beforeLines.push(content);
 			afterLines.push(content);
-		} else if (!line.startsWith('@@') && !line.startsWith('---') && !line.startsWith('+++') && !line.startsWith('diff ')) {
+		} else {
 			// Regular line without prefix - treat as context
 			beforeLines.push(line);
 			afterLines.push(line);

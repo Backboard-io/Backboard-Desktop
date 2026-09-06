@@ -29,6 +29,7 @@ interface IWorkbenchTestHarness {
 	setEditorMaximized(maximized: boolean): void;
 	setEditorHidden(hidden: boolean): void;
 	setAuxiliaryBarHidden(hidden: boolean): void;
+	setAuxiliaryBarMaximized(maximized: boolean): boolean;
 	_savePartVisibility(): void;
 }
 
@@ -41,6 +42,9 @@ suite('Sessions - Workbench', () => {
 	const savePartVisibility = Reflect.get(Workbench.prototype, '_savePartVisibility') as (this: IWorkbenchTestHarness) => void;
 	const setEditorHidden = Reflect.get(Workbench.prototype, 'setEditorHidden') as (this: IEditorSplitTestHarness, hidden: boolean) => void;
 	const applyEditorSplitSize = Reflect.get(Workbench.prototype, '_applyEditorSplitSize') as (this: IEditorSplitTestHarness) => void;
+	const setAuxiliaryBarMaximized = Reflect.get(Workbench.prototype, 'setAuxiliaryBarMaximized') as (this: IAuxiliaryBarMaximizeTestHarness, maximized: boolean) => boolean;
+	const requestVisibleAuxiliaryBar = Reflect.get(Workbench.prototype, 'setAuxiliaryBarHidden') as (this: IVisibleAuxiliaryBarTestHarness, hidden: boolean) => void;
+	const normalizeSimpleAuxiliaryBarWidth = Reflect.get(Workbench.prototype, 'normalizeSimpleAuxiliaryBarWidth') as (this: ISimpleAuxiliaryBarWidthTestHarness, ensureComfortableWidth?: boolean) => void;
 	const createDesktopGridDescriptor = Reflect.get(Workbench.prototype, 'createDesktopGridDescriptor') as (this: IGridDescriptorTestHarness, width: number, height: number) => {
 		root: { data: unknown[] };
 	};
@@ -91,6 +95,50 @@ suite('Sessions - Workbench', () => {
 				sessionsWidth: number;
 			};
 		};
+	}
+
+	interface IAuxiliaryBarMaximizeTestHarness {
+		readonly partsAnimationScheduler: { cancel(): void };
+		readonly mainContainer: { classList: { remove(name: string): void } };
+		readonly sideBarPartView: object;
+		readonly sessionsPartView: object;
+		readonly editorPartView: object;
+		readonly auxiliaryBarPartView: object;
+		readonly panelPartView: object;
+		readonly workbenchGrid: {
+			isViewMaximized(view: object): boolean;
+			isViewVisible(view: object): boolean;
+			maximizeView(view: object, excludeViews: readonly object[]): void;
+		};
+		readonly _onDidChangeAuxiliaryBarMaximized: { fire(): void };
+		_auxiliaryBarLastNonMaximizedVisibility: {
+			sidebar: boolean;
+			sessions: boolean;
+			editor: boolean;
+			auxiliaryBar: boolean;
+			panel: boolean;
+		} | undefined;
+		isAuxiliaryBarMaximized(): boolean;
+		finishPartsAnimation(): void;
+	}
+
+	interface IVisibleAuxiliaryBarTestHarness {
+		partVisibility: { auxiliaryBar: boolean };
+		normalizeSimpleAuxiliaryBarWidth(ensureComfortableWidth?: boolean): void;
+	}
+
+	interface ISimpleAuxiliaryBarWidthTestHarness {
+		readonly auxiliaryBarPartView: object;
+		readonly sideBarPartView: object;
+		readonly workbenchGrid: {
+			isViewMaximized(view: object): boolean;
+			exitMaximizedView(): void;
+			getViewSize(view: object): { width: number; height: number };
+			resizeView(view: object, size: { width: number; height: number }): void;
+		};
+		readonly _mainContainerDimension: { width: number; height: number };
+		readonly _isOptimusWindow: boolean;
+		partVisibility: { sidebar: boolean; auxiliaryBar: boolean; editor: boolean };
 	}
 
 	function createEditorSplitHarness(rightWorkColumnWidth: number, overrides?: Partial<Pick<IEditorSplitTestHarness, 'partVisibility' | '_hasAppliedInitialEditorSplit'>>): IEditorSplitTestHarness {
@@ -229,6 +277,134 @@ suite('Sessions - Workbench', () => {
 		]);
 	});
 
+	test('preserves the simple canvas when restoring a narrow desktop grid', () => {
+		const workbench: IGridDescriptorTestHarness & { _isOptimusWindow: boolean; } = {
+			_isOptimusWindow: false,
+			partVisibility: {
+				sidebar: false,
+				auxiliaryBar: true,
+				editor: false,
+				panel: false,
+				sessions: true,
+			},
+			_savedPartSizes: { sessions: 100, auxiliaryBar: 560 },
+			layoutPolicy: {
+				viewportClass: { get: () => 'desktop' },
+				getPartSizes: width => ({
+					sideBarSize: 300,
+					auxiliaryBarSize: 340,
+					panelSize: 300,
+					sessionsWidth: width,
+				}),
+			},
+		};
+		const descriptor = createDesktopGridDescriptor.call(workbench, 660, 880) as {
+			root: { data: [unknown, { size: number }, unknown, { size: number }] };
+		};
+
+		assert.deepStrictEqual({
+			sessionsWidth: descriptor.root.data[1].size,
+			auxiliaryBarWidth: descriptor.root.data[3].size,
+		}, {
+			sessionsWidth: 300,
+			auxiliaryBarWidth: 360,
+		});
+	});
+
+	test('finishes a panel transition before maximizing the auxiliary bar', () => {
+		const events: string[] = [];
+		const sideBarPartView = {};
+		const sessionsPartView = {};
+		const editorPartView = {};
+		const auxiliaryBarPartView = {};
+		const panelPartView = {};
+		const workbench = Object.create(Workbench.prototype) as IAuxiliaryBarMaximizeTestHarness;
+		Object.assign(workbench, {
+			partsAnimationScheduler: { cancel: () => events.push('cancel-animation') },
+			mainContainer: { classList: { remove: () => events.push('remove-animation-class') } },
+			sideBarPartView,
+			sessionsPartView,
+			editorPartView,
+			auxiliaryBarPartView,
+			panelPartView,
+			workbenchGrid: {
+				isViewMaximized: () => false,
+				isViewVisible: () => true,
+				maximizeView: () => events.push('maximize'),
+			},
+			_onDidChangeAuxiliaryBarMaximized: { fire: () => events.push('fire-change') },
+		});
+
+		assert.strictEqual(setAuxiliaryBarMaximized.call(workbench, true), true);
+		assert.deepStrictEqual(events, ['cancel-animation', 'remove-animation-class', 'maximize', 'fire-change']);
+	});
+
+	test('rebalances the simple tool pane when an already-visible mode is requested', () => {
+		const calls: (boolean | undefined)[] = [];
+		const workbench: IVisibleAuxiliaryBarTestHarness = {
+			partVisibility: { auxiliaryBar: true },
+			normalizeSimpleAuxiliaryBarWidth: ensureComfortableWidth => calls.push(ensureComfortableWidth),
+		};
+
+		requestVisibleAuxiliaryBar.call(workbench, false);
+
+		assert.deepStrictEqual(calls, [true]);
+	});
+
+	test('keeps a 300px simple canvas when a stale tool width is restored', () => {
+		const auxiliaryBarPartView = {};
+		const sideBarPartView = {};
+		const resizes: { width: number; height: number }[] = [];
+		const workbench: ISimpleAuxiliaryBarWidthTestHarness = {
+			auxiliaryBarPartView,
+			sideBarPartView,
+			_mainContainerDimension: { width: 660, height: 880 },
+			_isOptimusWindow: false,
+			partVisibility: { sidebar: false, auxiliaryBar: true, editor: false },
+			workbenchGrid: {
+				isViewMaximized: () => false,
+				exitMaximizedView: () => { },
+				getViewSize: view => view === auxiliaryBarPartView
+					? { width: 560, height: 880 }
+					: { width: 0, height: 880 },
+				resizeView: (_view, size) => resizes.push(size),
+			},
+		};
+
+		normalizeSimpleAuxiliaryBarWidth.call(workbench, true);
+
+		assert.deepStrictEqual(resizes, [{ width: 360, height: 880 }]);
+	});
+
+	test('restores a maximized simple tool pane when another mode is requested', () => {
+		const auxiliaryBarPartView = {};
+		const sideBarPartView = {};
+		const events: string[] = [];
+		let maximized = true;
+		const workbench: ISimpleAuxiliaryBarWidthTestHarness = {
+			auxiliaryBarPartView,
+			sideBarPartView,
+			_mainContainerDimension: { width: 660, height: 880 },
+			_isOptimusWindow: false,
+			partVisibility: { sidebar: false, auxiliaryBar: true, editor: false },
+			workbenchGrid: {
+				isViewMaximized: () => maximized,
+				exitMaximizedView: () => {
+					maximized = false;
+					events.push('restore');
+				},
+				getViewSize: view => view === auxiliaryBarPartView
+					? { width: 560, height: 880 }
+					: { width: 0, height: 880 },
+				resizeView: (_view, size) => events.push(`resize:${size.width}`),
+			},
+		};
+
+		normalizeSimpleAuxiliaryBarWidth.call(workbench, true);
+
+		assert.deepStrictEqual(events, ['restore', 'resize:360']);
+	});
+
 	function createWorkbenchHarness(): IWorkbenchTestHarness {
 		const workbench: IWorkbenchTestHarness = {
 			partVisibility: {
@@ -251,6 +427,7 @@ suite('Sessions - Workbench', () => {
 			setEditorMaximized: () => { },
 			setEditorHidden: () => { },
 			setAuxiliaryBarHidden: () => { },
+			setAuxiliaryBarMaximized: () => false,
 			_savePartVisibility: () => { },
 		};
 		workbench.setEditorHidden = hidden => {
@@ -258,6 +435,18 @@ suite('Sessions - Workbench', () => {
 		};
 		return workbench;
 	}
+
+	test('restores maximized layout before checking auxiliary bar visibility on close', () => {
+		const workbench = createWorkbenchHarness();
+		const calls: boolean[] = [];
+		workbench.setAuxiliaryBarMaximized = maximized => {
+			calls.push(maximized);
+			workbench.partVisibility.auxiliaryBar = false;
+			return true;
+		};
+		setAuxiliaryBarHidden.call(workbench, true);
+		assert.deepStrictEqual(calls, [false]);
+	});
 
 	test('restores attached editor maximized state when the auxiliary bar stays visible', () => {
 		const maximizedStates: boolean[] = [];

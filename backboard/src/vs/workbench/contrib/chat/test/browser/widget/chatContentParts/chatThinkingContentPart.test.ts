@@ -860,9 +860,21 @@ suite('ChatThinkingContentPart', () => {
 				text: liveLabel?.textContent,
 				live: liveLabel?.classList.contains('chat-thinking-cursor-reasoning-live'),
 			}, {
-				text: 'Thought',
+				text: 'Thoughts',
 				live: false,
 			});
+		});
+
+		test('a finished reasoning segment closes when a tool starts and can be reopened', () => {
+			const part = createCursorPart('Inspect the relevant code');
+			const label = part.domNode.querySelector<HTMLElement>('.chat-thinking-cursor-reasoning-label')!;
+			const body = part.domNode.querySelector<HTMLElement>('.chat-thinking-item.markdown-content')!;
+			assert.strictEqual(label.ariaExpanded, 'true');
+			const read = createCursorTool('read_file', 'Read chat.ts', 'call-auto-close');
+			part.appendItem(() => ({ domNode: $('div', {}, 'Read chat.ts') }), read.toolId, read);
+			assert.deepStrictEqual({ expanded: label.ariaExpanded, hidden: body.hidden }, { expanded: 'false', hidden: true });
+			label.click();
+			assert.deepStrictEqual({ expanded: label.ariaExpanded, hidden: body.hidden }, { expanded: 'true', hidden: false });
 		});
 
 		test('reasoning segments omit elapsed durations', () => {
@@ -881,7 +893,7 @@ suite('ChatThinkingContentPart', () => {
 
 				assert.deepStrictEqual(
 					Array.from(part.domNode.querySelectorAll<HTMLElement>('.chat-thinking-cursor-reasoning-label-text')).map(label => label.textContent),
-					['Thought', 'Thought'],
+					['Thoughts', 'Thoughts'],
 				);
 			} finally {
 				Date.now = originalNow;
@@ -915,6 +927,62 @@ suite('ChatThinkingContentPart', () => {
 				expanded: 'false',
 				order: ['read-a', 'search', 'read-b'],
 			});
+		});
+
+		test('anchors a worker between the tools before and after its launch', () => {
+			const part = createCursorPart('Launching a worker');
+			const before = createCursorTool('read_file', 'Read before.ts', 'before-worker');
+			part.appendItem(() => ({ domNode: $('div', {}, 'before') }), before.toolId, before);
+			const pill = $('div.chat-subagent-part');
+			part.appendSubagentPill(pill);
+			const after = createCursorTool('read_file', 'Read after.ts', 'after-worker');
+			part.appendItem(() => ({ domNode: $('div', {}, 'after') }), after.toolId, after);
+			part.finalizeTitleIfDefault();
+			assert.ok(pill.previousElementSibling?.classList.contains('chat-thinking-work-group'));
+			assert.ok(pill.nextElementSibling?.classList.contains('chat-thinking-work-group'));
+			assert.strictEqual(pill.closest('.chat-thinking-work-group'), null);
+		});
+
+		test('opening a browser remains a visible plain row between collapsed tool groups', () => {
+			const part = createCursorPart('Opening a browser');
+			const label = 'OpenBrowserPage: {"url":"https://example.com","forceNew":true}';
+			const tool = createCursorTool('openBrowserPage', label, 'browser-open');
+			part.appendItem(() => ({ domNode: $('div.chat-tool-io', {}, $('button', {}, 'Open browser')) }), tool.toolId, tool);
+			part.finalizeTitleIfDefault();
+			const row = part.domNode.querySelector('.chat-browser-open-row');
+			assert.ok(row);
+			assert.strictEqual(row.querySelector('.chat-browser-open-label')?.textContent, label);
+			assert.strictEqual(row.closest('.chat-thinking-work-group'), null);
+			assert.strictEqual(row.getAttribute('aria-expanded'), null);
+			assert.strictEqual(row.querySelector<HTMLElement>('.chat-tool-io')?.hidden, true);
+		});
+
+		test('structured activity preserves native input and output inside the collapsed summary', () => {
+			const part = createCursorPart('Checking browser elements');
+			const tool = createCursorTool('readPage', 'ReadPage: {"pageId":"page-1"}', 'read-page');
+			const native = $('div.chat-tool-io', {}, $('span.chat-tool-io-input-header', {}, '{"pageId":"page-1"}'));
+			part.appendItem(() => ({ domNode: native }), tool.toolId, tool);
+			part.finalizeTitleIfDefault();
+			assert.strictEqual(part.domNode.querySelector('.chat-browser-open-row'), null);
+			assert.strictEqual(native.hidden, false);
+			assert.ok(native.closest('.chat-thinking-io-tool-row'));
+			assert.ok(native.closest('.chat-thinking-work-summary-collapsed'));
+		});
+
+		test('keeps native MCP input/output behind a collapsed activity summary', () => {
+			const part = createCursorPart('Running a browser check');
+			const native = $('div.chat-tool-io', {}, $('button', {}, 'Ran Playwright code'));
+			const content = $('div.chat-tool-invocation-part', {}, native);
+			const tool = createCursorTool('mcp__playwright', 'Run Playwright code', 'call-mcp-io');
+			part.appendItem(() => ({ domNode: content }), tool.toolId, tool);
+			part.finalizeTitleIfDefault();
+			assert.strictEqual(part.domNode.querySelector('.chat-thinking-io-tool-row .chat-tool-io'), native);
+			const group = native.closest('.chat-thinking-work-group');
+			assert.ok(group && group.classList.contains('chat-thinking-work-summary-collapsed'));
+			const header = group.querySelector<HTMLElement>('.chat-thinking-group-header')!;
+			header.click();
+			assert.strictEqual(header.getAttribute('aria-expanded'), 'true');
+			assert.strictEqual(part.domNode.querySelectorAll('.chat-tool-io').length, 1);
 		});
 
 		test('coalesces a 600-call read, search, and write burst without duplicating or rebuilding rows', async () => {
@@ -984,7 +1052,7 @@ suite('ChatThinkingContentPart', () => {
 			assert.strictEqual(body.querySelectorAll('.cursor-test-stress-row').length, 600);
 		});
 
-		test('a single live read is visible beneath its exploration summary', () => {
+		test('a single live read starts collapsed beneath its exploration summary', () => {
 			const part = createCursorPart('Checking one file');
 			const tool = createCursorTool('read_file', 'Read 10/120 lines', 'call-single-read');
 			part.appendItem(
@@ -1005,8 +1073,8 @@ suite('ChatThinkingContentPart', () => {
 			}, {
 				label: 'Explored 1 file',
 				headerVisible: true,
-				collapsed: false,
-				expanded: 'true',
+				collapsed: true,
+				expanded: 'false',
 				rawReadMounted: 1,
 			});
 		});
@@ -1546,6 +1614,7 @@ suite('ChatThinkingContentPart', () => {
 			const group = part.domNode.querySelector<HTMLElement>('.chat-thinking-work-group');
 			const header = group?.querySelector<HTMLElement>('.chat-thinking-group-header');
 			assert.ok(group && header, 'Expected a live multi-tool activity group');
+			header.click(); // Open the initially collapsed group before testing a manual collapse.
 			assert.deepStrictEqual({
 				collapsed: group.classList.contains('chat-thinking-work-summary-collapsed'),
 				expanded: header.getAttribute('aria-expanded'),
@@ -2003,6 +2072,10 @@ suite('ChatThinkingContentPart', () => {
 			const toolRow = nativeTool.closest<HTMLElement>('.chat-thinking-cursor-read-row');
 			assert.ok(wrapper && editRow && toolRow, 'Expected chronological reasoning, diff, and tool transcript rows');
 			const precedes = (left: Node, right: Node) => !!(left.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_FOLLOWING);
+			assert.deepStrictEqual(labels.map(label => label.ariaExpanded), ['false', 'false', 'true']);
+			// Finished segments hydrate in their original position when reopened.
+			labels[0].click();
+			labels[1].click();
 
 			assert.deepStrictEqual({
 				labels: labels.length,

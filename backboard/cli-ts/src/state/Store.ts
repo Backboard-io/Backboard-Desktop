@@ -9,6 +9,7 @@ import {
 	genericInputSummary,
 } from "../core/tools/inputSummary.ts";
 import { toDisplayToolName } from "../core/tools/names.ts";
+import { executionFailed } from "../core/tools/ToolFailure.ts";
 import { shortId } from "../utils/id.ts";
 import { clampFlushLengthForOpenTable } from "../utils/markdownTable.ts";
 import type {
@@ -203,7 +204,7 @@ export function reduce(state: AppState, event: AgentEvent): AppState {
 			if (isToolCommittedTerminal(state, event.toolCallId)) return state;
 			const next = updateTool(state, event.toolCallId, (t) => ({
 				...t,
-				status: "done",
+				status: executionFailed(event.execution) ? "error" : "done",
 				title: event.title,
 				agentMode: event.agentOutput?.mode ?? t.agentMode,
 				detail: event.agentOutput

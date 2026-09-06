@@ -2,6 +2,18 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { access, readdir, readFile, realpath, rmdir } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import {
+	captureCoordinatorFiles,
+	captureIntegrationTree,
+} from "./IntegrationFileSnapshots.ts";
+import type { WorkerIntegrationChangeBytes } from "./WorkerWorkspaceTypes.ts";
+
+export type CaptureGitIntegration = (capture: {
+	baseCommit: string;
+	afterTree: string;
+	changes: WorkerIntegrationChangeBytes[];
+	signal?: AbortSignal;
+}) => Promise<void>;
 
 export interface GitRepositoryInfo {
 	coordinatorRoot: string;
@@ -24,6 +36,8 @@ export interface GitIntegrationResult {
 	status: "integrated" | "conflict";
 	commit?: string;
 	conflictingFiles: string[];
+	baseCommit?: string;
+	tree?: string;
 }
 
 export interface GitIntegrationBatchEntry {
@@ -62,6 +76,13 @@ export class GitCommandError extends Error {
 	}
 }
 
+/** A transaction that may contain user state must stay available for review. */
+class WorkerIntegrationPreservedError extends Error {}
+
+const INTEGRATION_MARKER = "Backboard-Worker-Integration:";
+const COMMIT_GUARD_FAILURE =
+	"Backboard worker commit refused: coordinator HEAD or staged paths changed; merge and index preserved.";
+
 /** Native Git worktree operations. Every invocation uses argv, never a shell. */
 export class GitWorktreeManager {
 	constructor(private readonly runCommand: GitCommandRunner = runGitCommand) {}
@@ -85,7 +106,14 @@ export class GitWorktreeManager {
 			};
 		} catch (error) {
 			if (signal?.aborted) throw error;
-			if (error instanceof GitCommandError) return null;
+			if (
+				error instanceof GitCommandError &&
+				error.exitCode === 128 &&
+				/not a git repository|ambiguous argument ['"]HEAD['"]|unknown revision.*HEAD|Needed a single revision/i.test(
+					error.stderr,
+				)
+			)
+				return null;
 			throw error;
 		}
 	}
@@ -158,11 +186,11 @@ export class GitWorktreeManager {
 	): Promise<string[]> {
 		const output = await this.git(
 			repositoryRoot,
-			["worktree", "list", "--porcelain"],
+			["worktree", "list", "--porcelain", "-z"],
 			signal,
 		);
 		return output
-			.split(/\r?\n/g)
+			.split("\0")
 			.filter((line) => line.startsWith("worktree "))
 			.map((line) => line.slice("worktree ".length));
 	}
@@ -180,7 +208,9 @@ export class GitWorktreeManager {
 			);
 			return true;
 		} catch (error) {
-			if (error instanceof GitCommandError) return false;
+			if (signal?.aborted) throw error;
+			if (error instanceof GitCommandError && error.exitCode === 1)
+				return false;
 			throw error;
 		}
 	}
@@ -406,6 +436,7 @@ export class GitWorktreeManager {
 		startingCommit: string;
 		resultCommit: string;
 		signal?: AbortSignal;
+		captureChanges?: CaptureGitIntegration;
 	}): Promise<GitIntegrationResult> {
 		return this.integrateBatch({
 			coordinatorCwd: input.coordinatorCwd,
@@ -416,6 +447,7 @@ export class GitWorktreeManager {
 				},
 			],
 			signal: input.signal,
+			captureChanges: input.captureChanges,
 		});
 	}
 
@@ -424,6 +456,7 @@ export class GitWorktreeManager {
 		coordinatorCwd: string;
 		results: readonly GitIntegrationBatchEntry[];
 		signal?: AbortSignal;
+		captureChanges?: CaptureGitIntegration;
 	}): Promise<GitIntegrationResult> {
 		const candidates = [
 			...new Set(
@@ -441,6 +474,8 @@ export class GitWorktreeManager {
 			(_, index) => !ancestorChecks[index],
 		);
 		if (resultCommits.length === 0) {
+			for (const candidate of candidates)
+				await this.finishCommittedIntegration(input.coordinatorCwd, candidate);
 			return {
 				status: "integrated",
 				commit: (
@@ -485,94 +520,358 @@ export class GitWorktreeManager {
 		const headBefore = (
 			await this.git(input.coordinatorCwd, ["rev-parse", "HEAD"], input.signal)
 		).trim();
+		const branchBefore = await this.headReference(
+			input.coordinatorCwd,
+			input.signal,
+		);
+		const allowedPaths = new Set(
+			(
+				await Promise.all(
+					input.results.map((result) =>
+						this.changedFilesBetween(
+							input.coordinatorCwd,
+							result.startingCommit,
+							result.resultCommit,
+							input.signal,
+						),
+					),
+				)
+			).flat(),
+		);
+		let commitAttempted = false;
+		const before = input.captureChanges
+			? await captureCoordinatorFiles(
+					input.coordinatorCwd,
+					[...allowedPaths],
+					input.signal,
+				)
+			: undefined;
 		try {
 			await this.git(
 				input.coordinatorCwd,
-				["merge", "--no-ff", "--no-commit", ...resultCommits],
+				[
+					"merge",
+					"--no-ff",
+					"--no-commit",
+					"--message",
+					`Backboard worker integration\n\n${INTEGRATION_MARKER} ${resultCommits.join(" ")}`,
+					...resultCommits,
+				],
 				input.signal,
 				{ GIT_MERGE_AUTOEDIT: "no" },
 			);
+			await this.assertIntegrationState(
+				input.coordinatorCwd,
+				headBefore,
+				branchBefore,
+				allowedPaths,
+			);
 			if (input.signal?.aborted) {
-				await this.abortIntegration(input.coordinatorCwd, headBefore);
+				await this.abortIntegration(
+					input.coordinatorCwd,
+					headBefore,
+					branchBefore,
+					resultCommits,
+					allowedPaths,
+				);
 				throw new Error("Worker integration was cancelled before commit.");
 			}
-			try {
-				await this.git(
-					input.coordinatorCwd,
-					[
-						"-c",
-						"user.name=Backboard Coordinator",
-						"-c",
-						"user.email=workers@backboard.local",
-						"commit",
-						"--no-edit",
-						"--no-gpg-sign",
-						"--no-verify",
-					],
-					input.signal,
-				);
-			} catch (error) {
-				if (input.signal?.aborted) {
-					await this.abortIntegration(input.coordinatorCwd, headBefore);
-				}
-				throw error;
-			}
-			if (input.signal?.aborted) {
-				await this.abortIntegration(input.coordinatorCwd, headBefore);
-				throw new Error(
-					"Worker integration was cancelled after commit and rolled back.",
-				);
-			}
+			commitAttempted = true;
+			const committed = await this.commitIntegration(
+				input.coordinatorCwd,
+				headBefore,
+				branchBefore,
+				resultCommits,
+				allowedPaths,
+				input.signal,
+				input.captureChanges && before
+					? async (afterTree) => {
+							await input.captureChanges!({
+								baseCommit: headBefore,
+								afterTree,
+								changes: await captureIntegrationTree(
+									input.coordinatorCwd,
+									afterTree,
+									[...allowedPaths],
+									before,
+									input.signal,
+								),
+								signal: input.signal,
+							});
+						}
+					: undefined,
+			);
+			// Commit is a durability boundary. A late Stop must not reset that commit,
+			// especially if another actor has advanced HEAD after Git released its lock.
 			return {
 				status: "integrated",
-				commit: (
-					await this.git(
-						input.coordinatorCwd,
-						["rev-parse", "HEAD"],
-						input.signal,
-					)
-				).trim(),
+				commit: committed.commit,
+				baseCommit: headBefore,
+				tree: committed.tree,
 				conflictingFiles: [],
 			};
 		} catch (error) {
+			if (error instanceof WorkerIntegrationPreservedError) throw error;
+			// Git can finish the commit just before its subprocess reports cancellation.
+			if (
+				commitAttempted &&
+				(
+					await Promise.all(
+						resultCommits.map((commit) =>
+							this.isAncestor(input.coordinatorCwd, commit),
+						),
+					)
+				).every(Boolean)
+			) {
+				for (const commit of resultCommits)
+					await this.finishCommittedIntegration(input.coordinatorCwd, commit);
+				return {
+					status: "integrated",
+					commit: (
+						await this.git(input.coordinatorCwd, ["rev-parse", "HEAD"])
+					).trim(),
+					conflictingFiles: [],
+				};
+			}
 			if (input.signal?.aborted) {
-				await this.abortIntegration(input.coordinatorCwd, headBefore);
+				await this.abortIntegration(
+					input.coordinatorCwd,
+					headBefore,
+					branchBefore,
+					resultCommits,
+					allowedPaths,
+				);
 				throw error;
 			}
 			const conflictingFiles = await this.conflictingFiles(
 				input.coordinatorCwd,
-				undefined,
 			);
 			if (
 				conflictingFiles.length > 0 ||
 				(await this.mergeInProgress(input.coordinatorCwd)) ||
 				resultCommits.length > 1
 			) {
-				// Preserve the worker result commit, but release the coordinator from
-				// this worker's failed transaction so unrelated results can integrate.
-				await this.abortIntegration(input.coordinatorCwd, headBefore);
+				await this.abortIntegration(
+					input.coordinatorCwd,
+					headBefore,
+					branchBefore,
+					resultCommits,
+					allowedPaths,
+				);
 				return { status: "conflict", conflictingFiles };
 			}
 			throw error;
 		}
 	}
 
-	private async abortIntegration(
+	private async assertIntegrationState(
 		coordinatorCwd: string,
 		headBefore: string,
+		branchBefore: string | null,
+		allowedPaths: ReadonlySet<string>,
 	): Promise<void> {
-		if (await this.mergeInProgress(coordinatorCwd)) {
-			await this.git(coordinatorCwd, ["merge", "--abort"]);
-			return;
-		}
 		const current = (
 			await this.git(coordinatorCwd, ["rev-parse", "HEAD"])
 		).trim();
-		if (current !== headBefore) {
-			// Only rolls back the just-created integration commit. --merge keeps
-			// unrelated local working-tree edits intact and refuses unsafe overlap.
-			await this.git(coordinatorCwd, ["reset", "--merge", headBefore]);
+		const unexpected = (await this.stagedFiles(coordinatorCwd)).filter(
+			(path) => !allowedPaths.has(path),
+		);
+		if (
+			current !== headBefore ||
+			(await this.headReference(coordinatorCwd)) !== branchBefore ||
+			unexpected.length > 0
+		) {
+			throw new WorkerIntegrationPreservedError(
+				`${COMMIT_GUARD_FAILURE}${unexpected.length ? ` Additional staged paths: ${unexpected.join(", ")}.` : ""}`,
+			);
 		}
+	}
+
+	/** Commit one verified tree; never reread a possibly changed coordinator index. */
+	private async commitIntegration(
+		coordinatorCwd: string,
+		headBefore: string,
+		branchBefore: string | null,
+		resultCommits: readonly string[],
+		allowedPaths: ReadonlySet<string>,
+		signal?: AbortSignal,
+		captureChanges?: (tree: string) => Promise<void>,
+	): Promise<{ commit: string; tree: string }> {
+		const tree = (
+			await this.git(coordinatorCwd, ["write-tree"], signal)
+		).trim();
+		const committedPaths = await this.changedFilesBetween(
+			coordinatorCwd,
+			headBefore,
+			tree,
+			signal,
+		);
+		if (committedPaths.some((path) => !allowedPaths.has(path))) {
+			throw new WorkerIntegrationPreservedError(COMMIT_GUARD_FAILURE);
+		}
+		await captureChanges?.(tree);
+		signal?.throwIfAborted();
+		const commit = (
+			await this.git(
+				coordinatorCwd,
+				[
+					"-c",
+					"user.name=Backboard Coordinator",
+					"-c",
+					"user.email=workers@backboard.local",
+					"commit-tree",
+					"--no-gpg-sign",
+					tree,
+					"-p",
+					headBefore,
+					...resultCommits.flatMap((parent) => ["-p", parent]),
+					"-m",
+					`Backboard worker integration\n\n${INTEGRATION_MARKER} ${resultCommits.join(" ")}`,
+				],
+				signal,
+			)
+		).trim();
+		signal?.throwIfAborted();
+		if ((await this.headReference(coordinatorCwd)) !== branchBefore)
+			throw new WorkerIntegrationPreservedError(
+				"Coordinator branch changed during worker integration; merge and index preserved.",
+			);
+		// Compare-and-swap refuses to rewind or overwrite an externally advanced HEAD.
+		await this.git(
+			coordinatorCwd,
+			[
+				"update-ref",
+				...(branchBefore === null ? ["--no-deref"] : []),
+				"-m",
+				"Backboard worker integration",
+				branchBefore ?? "HEAD",
+				commit,
+				headBefore,
+			],
+			signal,
+		);
+		if ((await this.headReference(coordinatorCwd)) !== branchBefore)
+			throw new WorkerIntegrationPreservedError(
+				"Coordinator branch changed after worker commit publication; workspace preserved for review.",
+			);
+		// HEAD now durably retains every worker parent. Quit clears only merge metadata;
+		// staged user changes arriving after write-tree remain untouched in the index.
+		for (const resultCommit of resultCommits)
+			await this.finishCommittedIntegration(coordinatorCwd, resultCommit);
+		return { commit, tree };
+	}
+
+	/** Find the actual published merge rather than a possibly newer coordinator HEAD. */
+	async findIntegrationCommit(
+		cwd: string,
+		resultCommit: string,
+		baseCommit: string,
+		afterTree?: string,
+	): Promise<string | undefined> {
+		const history = (
+			await this.git(cwd, [
+				"log",
+				"--first-parent",
+				"--max-count=1024",
+				"--format=%H%x00%P%x00%T",
+				"HEAD",
+			])
+		).trim();
+		for (const line of history.split("\n")) {
+			const [commit, parentText, tree] = line.split("\0");
+			const parents = parentText?.split(" ") ?? [];
+			if (
+				parents[0] === baseCommit &&
+				parents.includes(resultCommit) &&
+				(!afterTree || tree === afterTree)
+			)
+				return commit;
+		}
+		return undefined;
+	}
+
+	private async abortIntegration(
+		coordinatorCwd: string,
+		headBefore: string,
+		branchBefore: string | null,
+		resultCommits: readonly string[],
+		allowedPaths: ReadonlySet<string>,
+	): Promise<void> {
+		await this.assertIntegrationState(
+			coordinatorCwd,
+			headBefore,
+			branchBefore,
+			allowedPaths,
+		);
+		if (!(await this.mergeInProgress(coordinatorCwd))) return;
+		const mergeHeads = await this.ownedMergeHeads(coordinatorCwd);
+		if (
+			!mergeHeads ||
+			mergeHeads.some((head) => !resultCommits.includes(head))
+		) {
+			throw new WorkerIntegrationPreservedError(
+				"Coordinator merge changed during worker integration; preserved for manual review.",
+			);
+		}
+		await this.git(coordinatorCwd, ["merge", "--abort"]);
+	}
+
+	private async headReference(
+		cwd: string,
+		signal?: AbortSignal,
+	): Promise<string | null> {
+		try {
+			return (
+				await this.git(cwd, ["symbolic-ref", "--quiet", "HEAD"], signal)
+			).trim();
+		} catch (error) {
+			if (signal?.aborted) throw error;
+			if (error instanceof GitCommandError && error.exitCode === 1) return null;
+			throw error;
+		}
+	}
+
+	private async ownedMergeHeads(cwd: string): Promise<string[] | undefined> {
+		try {
+			const mergePath = await this.mergeHeadPath(cwd);
+			const mergeHeads = (await readFile(mergePath, "utf8"))
+				.split(/\s+/g)
+				.filter(Boolean);
+			const message = await readFile(
+				join(dirname(mergePath), "MERGE_MSG"),
+				"utf8",
+			);
+			const marked = message
+				.split(/\r?\n/)
+				.find((line) => line.startsWith(`${INTEGRATION_MARKER} `));
+			const markedHeads = marked
+				?.slice(INTEGRATION_MARKER.length + 1)
+				.split(" ");
+			return markedHeads &&
+				mergeHeads.every((head) => markedHeads.includes(head))
+				? mergeHeads
+				: undefined;
+		} catch (error) {
+			if ((error as { code?: string }).code === "ENOENT") return undefined;
+			throw error;
+		}
+	}
+
+	/** Finish a crash between publishing the durable commit and clearing its merge state. */
+	async finishCommittedIntegration(
+		cwd: string,
+		resultCommit: string,
+	): Promise<void> {
+		if (!(await this.mergeInProgress(cwd))) return;
+		const heads = await this.ownedMergeHeads(cwd);
+		if (!heads?.includes(resultCommit)) return;
+		if (
+			!(
+				await Promise.all(heads.map((head) => this.isAncestor(cwd, head)))
+			).every(Boolean)
+		)
+			return;
+		await this.git(cwd, ["merge", "--quit"]);
 	}
 
 	async changedFiles(
@@ -583,6 +882,7 @@ export class GitWorktreeManager {
 			worktreePath,
 			["status", "--porcelain=v1", "-z", "--untracked-files=all"],
 			signal,
+			{ GIT_OPTIONAL_LOCKS: "0" },
 		);
 		return parsePorcelainPaths(output);
 	}
@@ -649,10 +949,22 @@ export class GitWorktreeManager {
 		resultCommit: string,
 	): Promise<boolean> {
 		if (!(await this.mergeInProgress(cwd))) return false;
-		const mergeHeads = (await readFile(await this.mergeHeadPath(cwd), "utf8"))
-			.split(/\s+/g)
-			.filter(Boolean);
-		if (!mergeHeads.includes(resultCommit)) return false;
+		const mergeHeads = await this.ownedMergeHeads(cwd);
+		if (!mergeHeads?.includes(resultCommit)) return false;
+		const allowed = new Set(
+			(
+				await Promise.all(
+					mergeHeads.map(async (head) => {
+						const base = (
+							await this.git(cwd, ["merge-base", "HEAD", head])
+						).trim();
+						return this.changedFilesBetween(cwd, base, head);
+					}),
+				)
+			).flat(),
+		);
+		if ((await this.stagedFiles(cwd)).some((path) => !allowed.has(path)))
+			return false;
 		await this.git(cwd, ["merge", "--abort"]);
 		return true;
 	}
@@ -670,7 +982,9 @@ export class GitWorktreeManager {
 			);
 			return true;
 		} catch (error) {
-			if (error instanceof GitCommandError) return false;
+			if (signal?.aborted) throw error;
+			if (error instanceof GitCommandError && error.exitCode === 1)
+				return false;
 			throw error;
 		}
 	}
@@ -714,12 +1028,16 @@ export class GitWorktreeManager {
 		) {
 			return false;
 		}
-		await this.git(input.repositoryRoot, [
-			"update-ref",
-			"-d",
-			ref,
-			input.resultCommit,
-		]);
+		// Ref deletion can prune parent directories shared with a sibling worker's
+		// branch creation. Use the registry lock, retaining the expected-oid guard.
+		await withWorktreeRegistryLock(input.repositoryRoot, () =>
+			this.git(input.repositoryRoot, [
+				"update-ref",
+				"-d",
+				ref,
+				input.resultCommit,
+			]),
+		);
 		return true;
 	}
 
@@ -851,7 +1169,10 @@ export function parsePorcelainPaths(output: string): string[] {
 		if (!entry || entry.length < 4) continue;
 		const status = entry.slice(0, 2);
 		paths.push(entry.slice(3));
-		if (status.includes("R") || status.includes("C")) index++;
+		if (status.includes("R") || status.includes("C")) {
+			const source = entries[++index];
+			if (source) paths.push(source);
+		}
 	}
 	return [...new Set(paths)].sort();
 }

@@ -9,15 +9,7 @@ import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase 
 import { IViewDescriptor, IViewDescriptorService, ViewContainerLocation, ViewVisibilityState } from '../../../common/views.js';
 import { ChatViewContainerId } from './chat.js';
 
-/**
- * An agent panel contributed by a marketplace extension — Claude Code, Codex — that
- * shares the right (auxiliary) bar with Backboard chat.
- *
- * Each one stays its own view container, a *peer* of the chat container rather than
- * a pane nested inside it. That is what makes the right bar behave like a set of
- * tabs: the auxiliary bar's composite bar lists every container that lives there,
- * and the selected one owns the whole surface.
- */
+/** Marketplace agent panels keep their own activity icons and left sidebar views. */
 interface IAgentPanelContainer {
 
 	/** Container the extension contributes to the secondary side bar (the modern path). */
@@ -48,32 +40,21 @@ const agentPanelContainers: readonly IAgentPanelContainer[] = [
 const agentPanelContainerIds = new Set(agentPanelContainers.flatMap(panel => [panel.containerId, panel.fallbackContainerId]));
 const agentPanelViewIds = new Set(agentPanelContainers.flatMap(panel => panel.viewIds));
 
-/**
- * Whether the container is a known agent panel. Those belong on the right *next to*
- * chat, so they never count as the user having claimed the right bar for something
- * else (see `ChatPanelResilienceContribution`).
- */
+/** Whether this is a known marketplace agent panel, including legacy container IDs. */
 export function isAgentPanelContainer(containerId: string): boolean {
 	return agentPanelContainerIds.has(containerId);
 }
 
 /**
- * Keeps installed agent panels on the right, as tabs beside Backboard chat.
- *
- * Two jobs:
- *   1. Adopt: an agent panel that contributed itself to the activity bar (older
- *      extension versions, or hosts without secondary side bar support) is moved to
- *      the right once, then never again — a later move by the user sticks.
- *   2. Repair: an earlier build merged the Codex webview *into* the chat container,
- *      which stacked it under Backboard chat as a collapsible pane instead of giving
- *      it its own tab. That arrangement is persisted per profile, so it has to be
- *      actively undone by sending those views back to their own container.
+ * Moves installed agent panels into the primary sidebar and repairs profiles
+ * whose webviews were previously merged into Backboard chat. Migration is
+ * recorded per container so later explicit layout changes remain user controlled.
  */
 export class AgentPanelContainersContribution extends Disposable implements IWorkbenchContribution {
 
 	static readonly ID = 'workbench.contrib.agentPanelContainers';
 
-	private static readonly ADOPTED_STORAGE_KEY = 'agentPanels.adoptedContainers';
+	private static readonly ADOPTED_STORAGE_KEY = 'agentPanels.primarySidebarContainers.v1';
 
 	private readonly adopted: Set<string>;
 	private updating = false;
@@ -132,7 +113,7 @@ export class AgentPanelContainersContribution extends Disposable implements IWor
 		}
 	}
 
-	/** Moves an agent panel that is not on the right yet over to the right, once per container. */
+	/** Migrates both modern and legacy extension containers to the left sidebar. */
 	private adoptAgentPanelContainers(): void {
 		if (!this.viewDescriptorService.canMoveViews()) {
 			return;
@@ -148,8 +129,8 @@ export class AgentPanelContainersContribution extends Disposable implements IWor
 				continue; // not installed
 			}
 
-			if (this.viewDescriptorService.getViewContainerLocation(container) !== ViewContainerLocation.AuxiliaryBar) {
-				this.viewDescriptorService.moveViewContainerToLocation(container, ViewContainerLocation.AuxiliaryBar, undefined, AgentPanelContainersContribution.ID);
+			if (this.viewDescriptorService.getViewContainerLocation(container) !== ViewContainerLocation.Sidebar) {
+				this.viewDescriptorService.moveViewContainerToLocation(container, ViewContainerLocation.Sidebar, undefined, AgentPanelContainersContribution.ID);
 			}
 
 			this.markAdopted(containerId);

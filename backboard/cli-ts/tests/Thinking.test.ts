@@ -207,7 +207,7 @@ describe("thinking config", () => {
 					},
 				},
 			}),
-		).toEqual({ effort: "medium" });
+		).toEqual({ effort: "low" });
 		expect(
 			resolveThinking({
 				intent: { kind: "dynamic" },
@@ -249,7 +249,7 @@ describe("thinking config", () => {
 					},
 				},
 			}),
-		).toEqual({ effort: "max" });
+		).toEqual({ effort: "low" });
 		expect(
 			resolveThinking({
 				intent: { kind: "dynamic" },
@@ -314,7 +314,7 @@ describe("thinking config", () => {
 		);
 		expect(
 			resolver.resolve({ phase: "tool_outputs", requestKind: "user" }),
-		).toEqual({ max_tokens: 4096, exclude_reasoning: false });
+		).toEqual({ max_tokens: 1024, exclude_reasoning: false });
 	});
 
 	it("runtime resolver skips metadata lookup when thinking is off", async () => {

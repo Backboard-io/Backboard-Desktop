@@ -10,3 +10,17 @@ const DIAGNOSTIC_PATTERNS: readonly RegExp[] = [
 	/\bexit code:\s*[1-9]\d*\b/i,
 	/```[\s\S]{0,2000}\bexit code:\s*[1-9]\d*\b[\s\S]{0,2000}```/i,
 ];
+
+/** Conservative fast path for explicitly narrow work; uncertainty keeps medium. */
+export function isRoutineTask(content: string): boolean {
+	if (
+		content.length > 800 ||
+		/\b(debug|architect|design|investigat|analy[sz]|security|migrat|race|deadlock|performance)\w*/i.test(
+			content,
+		)
+	)
+		return false;
+	return /\b(read|show|list|find|locate|search|grep|glob|rename|typo|spelling|format)\b/i.test(
+		content,
+	);
+}

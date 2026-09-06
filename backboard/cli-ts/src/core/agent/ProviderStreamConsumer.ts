@@ -7,6 +7,8 @@ import {
 	streamServerErrorRetries,
 } from "../../providers/backboard/streamRetry.ts";
 import type { ProviderEvent } from "../../providers/backboard/types.ts";
+import { ToolCallProtocolGuard } from "../../providers/ToolCallProtocolGuard.ts";
+import { RetryableToolProtocolError } from "../../providers/ToolProtocolError.ts";
 import { errorMessage } from "../../utils/errors.ts";
 import type { EventBus } from "../bus/EventBus.ts";
 import type { ToolCallRef } from "../bus/events.ts";
@@ -53,7 +55,7 @@ interface PersistedGeneratedMedia {
 class ProviderStreamFailure extends Error {
 	constructor(
 		message: string,
-		readonly retryable: boolean,
+		readonly retryable?: boolean,
 	) {
 		super(message);
 		this.name = "ProviderStreamFailure";
@@ -76,7 +78,9 @@ export class ProviderStreamConsumer {
 		onRetry?: (error: unknown) => Promise<void> | void,
 	): Promise<PendingAction | null> {
 		const maxRetries = this.options.maxRetries ?? streamServerErrorRetries();
+		let protocolRetryUsed = false;
 		for (let attempt = 0; ; attempt++) {
+			if (signal.aborted) throw new AbortError();
 			const attemptController = new AbortController();
 			const attemptSignal = AbortSignal.any([signal, attemptController.signal]);
 			try {
@@ -95,11 +99,14 @@ export class ProviderStreamConsumer {
 				// one, and a stranded pending row would pin the live region
 				// forever.
 				earlyTools?.reset();
+				const safeProtocolRetry = err instanceof RetryableToolProtocolError;
+				if (safeProtocolRetry) assistant.discardPartial();
 				const terminal =
 					err instanceof AbortError ||
 					signal.aborted ||
-					!isRetryableProviderStreamFailure(err) ||
-					attempt >= maxRetries;
+					protocolRetryUsed ||
+					(!safeProtocolRetry &&
+						(!isRetryableProviderStreamFailure(err) || attempt >= maxRetries));
 				if (terminal) {
 					// Do not leave the coalescing timer able to publish reasoning after
 					// the turn has already failed or been cancelled.
@@ -111,7 +118,19 @@ export class ProviderStreamConsumer {
 							"cancelled provider context",
 						);
 					}
-					throw err;
+					throw signal.aborted ? new AbortError() : err;
+				}
+				if (safeProtocolRetry) {
+					// Only an adapter that withheld its final tool batch may opt in.
+					// Keep this single replay independent of transport retry budgets,
+					// and do not change model/thinking settings for a protocol fault.
+					protocolRetryUsed = true;
+					this.bus.emit({
+						type: "system:warning",
+						message:
+							"Retrying inconsistent tool response once. Unfinished reads were cancelled.",
+					});
+					continue;
 				}
 				await onRetry?.(err);
 				assistant.discardPartial();
@@ -138,9 +157,12 @@ export class ProviderStreamConsumer {
 		attemptController?: AbortController,
 		signal?: AbortSignal,
 	): Promise<PendingAction | null> {
+		const toolProtocol = new ToolCallProtocolGuard();
 		let bufferedText = "";
 		const generatedMedia: GeneratedMedia[] = [];
 		const providerRoundStartedAt = performance.now();
+		let firstEvent = true;
+		let firstVisible = true;
 		let toolBatchStartedAt: number | undefined;
 		const markToolAnnouncement = (): number => {
 			if (toolBatchStartedAt !== undefined) return toolBatchStartedAt;
@@ -161,10 +183,46 @@ export class ProviderStreamConsumer {
 					reachedEnd = true;
 					break;
 				}
-				const event = next.value;
+				const event = toolProtocol.accept(next.value);
+				if (
+					firstEvent &&
+					event.kind !== "thinking_resolved" &&
+					event.kind !== "provider_diagnostic"
+				) {
+					firstEvent = false;
+					emitPerformanceTiming(
+						this.bus,
+						"provider_first_event",
+						providerRoundStartedAt,
+					);
+				}
+				if (
+					firstVisible &&
+					(event.kind === "assistant_delta" ||
+						event.kind === "reasoning_delta" ||
+						event.kind === "tool_started" ||
+						event.kind === "tool_ready")
+				) {
+					firstVisible = false;
+					emitPerformanceTiming(
+						this.bus,
+						"provider_first_visible",
+						providerRoundStartedAt,
+					);
+				}
 				switch (event.kind) {
 					case "activity":
 						break;
+					case "provider_diagnostic": {
+						const { kind: _kind, ...diagnostic } = event;
+						this.bus.emit({ type: "provider:diagnostic", ...diagnostic });
+						break;
+					}
+					case "thinking_resolved": {
+						const { kind: _kind, ...setting } = event;
+						this.bus.emit({ type: "thinking:wire", ...setting });
+						break;
+					}
 					case "thread":
 						this.session.threadId = event.threadId;
 						break;
@@ -234,10 +292,7 @@ export class ProviderStreamConsumer {
 						return { runId: event.runId, calls };
 					}
 					case "failed":
-						throw new ProviderStreamFailure(
-							event.error,
-							event.retryable === true,
-						);
+						throw new ProviderStreamFailure(event.error, event.retryable);
 					case "completed": {
 						const finalText = event.finalText ?? bufferedText;
 						if (this.options.imageGeneration) {
@@ -258,6 +313,11 @@ export class ProviderStreamConsumer {
 				}
 			}
 		} finally {
+			emitPerformanceTiming(
+				this.bus,
+				"provider_stream_total",
+				providerRoundStartedAt,
+			);
 			if (!reachedEnd) {
 				attemptController?.abort();
 				// Cleanup is best-effort after abort. An uncooperative iterator can
@@ -392,11 +452,18 @@ export async function preserveProviderContext(
 }
 
 function isRetryableProviderStreamFailure(error: unknown): boolean {
+	if (
+		error &&
+		typeof error === "object" &&
+		"category" in error &&
+		error.category === "protocol"
+	)
+		return false;
 	if (isModelAvailabilityError(error) || isThinkingCompatibilityError(error)) {
 		return true;
 	}
 	if (error instanceof ProviderStreamFailure) {
-		return error.retryable || isRetryableStreamServerError(error);
+		return error.retryable ?? isRetryableStreamServerError(error);
 	}
 	return isRetryableStreamServerError(error);
 }

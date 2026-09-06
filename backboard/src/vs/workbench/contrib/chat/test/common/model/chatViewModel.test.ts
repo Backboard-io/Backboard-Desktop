@@ -66,6 +66,7 @@ suite('getLatestTurnEditedFiles', () => {
 			createEdit('/project/XXSf7h6t', 'delete', 0, 20),
 			createEdit('/project/src/XXhU77d6', 'delete', 0, 20),
 			createEdit('/project/src/main.js.tmp', 'delete', 0, 20),
+			createEdit('/project/src/.backboard-write-73364876-b55a-46b9-9e05-42929fbee6ac', 'delete', 0, 20),
 		];
 		const realEdit = createEdit('/project/src/level.js', 'edit', 3, 1);
 		for (const tempEdit of tempEdits) {
@@ -75,6 +76,7 @@ suite('getLatestTurnEditedFiles', () => {
 		assert.strictEqual(isTransientExternalEdit(createEdit('/project/dist/output.js', 'edit', 1, 1)), false, 'explicit edits to ignored watcher directories remain visible');
 		assert.strictEqual(isTransientExternalEdit(createEdit('/project/src/XXSf7h6t.js', 'edit', 1, 1)), false, 'XX scratch filter requires an exact eight-character basename');
 		assert.strictEqual(isTransientExternalEdit(createEdit('/project/src/main.tmp.js', 'edit', 1, 1)), false, 'plain tmp filter requires the final extension');
+		assert.strictEqual(isTransientExternalEdit(createEdit('/project/src/.backboard-write-notes', 'edit', 1, 1)), false, 'worker scratch filter requires its complete UUID shape');
 		assert.deepStrictEqual(
 			getLatestTurnEditedFiles(createModel(true, [...tempEdits, realEdit]))?.map(edit => edit.uri.path),
 			['/project/src/level.js'],

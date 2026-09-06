@@ -7,6 +7,8 @@ import assert from 'assert';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { createHash } from 'crypto';
+import type { CliTsAgentEvent, CliTsWorkerState, CliTsWorkerIntegrationChange } from '../../node/cliTs/cliTsProtocol.js';
 import { URI } from '../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
 import { NullLogService } from '../../../log/common/log.js';
@@ -14,10 +16,11 @@ import { AgentSession, type AgentSignal } from '../../common/agentService.js';
 import { ActionType } from '../../common/state/sessionActions.js';
 import { buildSubagentSessionUri, FileEditKind, ResponsePartKind, ToolCallContributorKind, ToolCallStatus, ToolResultContentType, TurnState, type ToolCallResponsePart, type ToolResultFileEditContent } from '../../common/state/sessionState.js';
 import { AgentHostCheckpointService } from '../../node/agentHostCheckpointService.js';
-import { assertUsableClaudeSubscriptionLogin, CliTsAgent, getBackboardWorktreeBranchName, getBackboardWorktreesRoot, hasUsableChatGptSubscriptionLogin, isChatGptSubscriptionModel, isClaudeSubscriptionModel, requiresProviderThreadHandoff, withChatGptSubscriptionConnectionState, withClaudeSubscriptionConnectionState } from '../../node/cliTs/cliTsAgent.js';
+import { assertUsableClaudeSubscriptionLogin, CliTsAgent, cliTsToolExecutionFailed, getBackboardWorktreeBranchName, getBackboardWorktreesRoot, hasUsableChatGptSubscriptionLogin, isChatGptSubscriptionModel, isClaudeSubscriptionModel, requiresProviderThreadHandoff, withChatGptSubscriptionConnectionState, withClaudeSubscriptionConnectionState } from '../../node/cliTs/cliTsAgent.js';
 import { SessionDatabase } from '../../node/sessionDatabase.js';
-import { parseSessionDbUri } from '../../node/shared/fileEditTracker.js';
-import { createSessionDataService } from '../common/sessionTestHelpers.js';
+import { FileEditTracker, parseSessionDbUri } from '../../node/shared/fileEditTracker.js';
+import { NullEditSurvivalReporterFactory } from '../../node/shared/editSurvivalReporter.js';
+import { createSessionDataService, TestDiffComputeService } from '../common/sessionTestHelpers.js';
 
 suite('CliTsAgent tool metadata', () => {
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
@@ -32,6 +35,13 @@ suite('CliTsAgent tool metadata', () => {
 			gitService as never,
 		));
 	}
+
+	test('distinguishes successful no-match and partial searches from execution failure', () => {
+		assert.strictEqual(cliTsToolExecutionFailed({ type: 'tool:result', execution: { exitCode: 1, outcome: 'no_match' } }), false);
+		assert.strictEqual(cliTsToolExecutionFailed({ type: 'tool:result', execution: { outcome: 'partial' } }), false);
+		assert.strictEqual(cliTsToolExecutionFailed({ type: 'tool:result', execution: { exitCode: 2 } }), true);
+		assert.strictEqual(cliTsToolExecutionFailed({ type: 'tool:result', execution: { cancelled: true } }), true);
+	});
 
 	test('recognizes renewable and missing ChatGPT subscription logins', () => {
 		const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'backboard-subscription-login-'));
@@ -996,6 +1006,103 @@ suite('CliTsAgent tool metadata', () => {
 		}
 	});
 
+	for (const scenario of ['run-error', 'send-rejection', 'run-error-then-rejection', 'failed-payload', 'completed'] as const) {
+		test(`${scenario} preserves the visible turn outcome through durable reopen`, async () => {
+			const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'backboard-cli-ts-turn-error-'));
+			try {
+				const storePath = path.join(tempRoot, 'sessions.json');
+				const agent = createAgent({}, {}, {}, { getSessionConfigValues: () => ({ isolation: 'folder' }) });
+				const progress: AgentSignal[] = [];
+				store.add(agent.onDidSessionProgress(signal => progress.push(signal)));
+				const internals = agent as unknown as {
+					_storePath(): string;
+					_materialize(session: { materialized: boolean }): Promise<void>;
+					_resolveRgDir(): Promise<string | undefined>;
+					_refreshModelsOnce(): void;
+					_ensureProcess(session: unknown): unknown;
+					_handleAgentEvent(session: unknown, event: unknown): void;
+				};
+				internals._storePath = () => storePath;
+				internals._materialize = async session => { session.materialized = true; };
+				internals._resolveRgDir = async () => undefined;
+				internals._refreshModelsOnce = () => { };
+				internals._ensureProcess = session => ({
+					nextRequestId: () => 'fixture-request',
+					request: async () => {
+						internals._handleAgentEvent(session, { type: 'assistant:reasoning', text: 'Synthetic pending work.' });
+						if (scenario === 'run-error' || scenario === 'run-error-then-rejection') {
+							internals._handleAgentEvent(session, { type: 'run:error', error: 'Provider response contained inconsistent tool calls.' });
+						}
+						if (scenario === 'send-rejection' || scenario === 'run-error-then-rejection') {
+							throw new Error('The serve process closed before completing the request.');
+						}
+						return { payload: { status: scenario === 'completed' ? 'completed' : 'failed' } };
+					},
+				});
+				const sessionUri = AgentSession.uri('backboard', `durable-${scenario}`);
+				await agent.createSession({ session: sessionUri, workingDirectory: URI.file(tempRoot), model: { id: 'google/gemini-3-pro' } });
+				await agent.sendMessage(sessionUri, 'Inspect the requested behavior.');
+
+				const persisted = JSON.parse(fs.readFileSync(storePath, 'utf8')) as { sessions: Array<{ turns: Array<{ failed?: boolean; error?: { errorType: string; message: string } }> }> };
+				const expectedMessage = scenario === 'run-error' || scenario === 'run-error-then-rejection'
+					? 'Provider response contained inconsistent tool calls.'
+					: scenario === 'send-rejection'
+						? 'The serve process closed before completing the request.'
+						: scenario === 'failed-payload' ? 'The Backboard agent reported a failed turn.' : undefined;
+				assert.strictEqual(persisted.sessions[0].turns[0].error?.message, expectedMessage);
+				const liveErrors = progress.filter(signal => signal.kind === 'action' && signal.action.type === ActionType.ChatError);
+				assert.strictEqual(liveErrors.length, expectedMessage ? 1 : 0, 'A later generic failure must not duplicate the original visible error');
+				const reopened = createAgent();
+				(reopened as unknown as { _storePath(): string })._storePath = () => storePath;
+				const turns = await reopened.getSessionMessages(sessionUri);
+				assert.strictEqual(turns[0].state, expectedMessage ? TurnState.Error : TurnState.Complete);
+				assert.strictEqual(turns[0].error?.message, expectedMessage);
+				assert.strictEqual(turns[0].responseParts[0].kind, ResponsePartKind.Reasoning, 'An error remains visible even when reasoning is the only transcript part');
+				if (turns[0].error) {
+					assert.deepStrictEqual(Object.keys(turns[0].error).sort(), ['errorType', 'message']);
+				}
+			} finally {
+				fs.rmSync(tempRoot, { recursive: true, force: true });
+			}
+		});
+	}
+
+	test('an error-only child archive preserves its failure without a markdown or tool part', async () => {
+		const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'backboard-cli-ts-child-error-'));
+		try {
+			fs.writeFileSync(path.join(tempRoot, 'meta.json'), JSON.stringify({ prompt: 'Inspect a source file.' }));
+			fs.writeFileSync(path.join(tempRoot, 'client.jsonl'), [
+				{ payload: { type: 'run:error', error: 'The provider connection ended unexpectedly.' } },
+				{ payload: { type: 'turn:end', status: 'failed' } },
+			].map(record => JSON.stringify(record)).join('\n'));
+			const agent = createAgent();
+			const recovery = await (agent as unknown as {
+				_readRuntimeSubagentRecoveryFromDirectory(directory: string): Promise<{ turn: { failed?: boolean; error?: { message: string }; parts: unknown[] } } | undefined>;
+			})._readRuntimeSubagentRecoveryFromDirectory(tempRoot);
+			assert.strictEqual(recovery?.turn.failed, true);
+			assert.strictEqual(recovery?.turn.error?.message, 'The provider connection ended unexpectedly.');
+			assert.deepStrictEqual(recovery?.turn.parts, []);
+		} finally {
+			fs.rmSync(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test('legacy failed turns receive a visible error without inventing its original cause', async () => {
+		const agent = createAgent();
+		const sessionUri = AgentSession.uri('backboard', 'legacy-failed-turn');
+		(agent as unknown as { _sessions: Map<string, unknown> })._sessions.set(AgentSession.id(sessionUri), {
+			storedTurns: [
+				{ prompt: 'Inspect the task', response: '', failed: true, parts: [{ kind: 'reasoning', content: 'Synthetic pending work.' }] },
+				{ prompt: 'Retry', response: '', failed: true, error: { message: 42 } },
+			],
+		});
+		const turns = await agent.getSessionMessages(sessionUri);
+		for (const turn of turns) {
+			assert.strictEqual(turn.state, TurnState.Error);
+			assert.strictEqual(turn.error?.message, 'This Backboard response failed. The original error details were not saved.');
+		}
+	});
+
 	test('in-flight first turns survive shutdown and legacy zero-turn sessions remain openable', async () => {
 		const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'backboard-cli-ts-interrupted-turn-'));
 		try {
@@ -1164,7 +1271,7 @@ suite('CliTsAgent tool metadata', () => {
 			confirmedToolCalls: new Set<string>(),
 			childToolLines: new Map<string, Map<string, string>>(),
 			toolSummaries: [] as string[],
-			storedParts: [] as Array<{ kind: string; terminalCommand?: string; terminalOutput?: unknown }>,
+			storedParts: [] as Array<{ kind: string; terminalCommand?: string; terminalOutput?: unknown; failed?: boolean }>,
 			storedTextParts: new Map(),
 			toolInputs: new Map([['execute-full-output', { name: 'Execute', input: { command } }]]),
 			toolInputSummaries: new Map<string, string>(),
@@ -1220,9 +1327,13 @@ suite('CliTsAgent tool metadata', () => {
 		const completion = progress.findLast(signal => signal.kind === 'action' && signal.action.type === ActionType.ChatToolCallComplete);
 		assert.ok(completion?.kind === 'action' && completion.action.type === ActionType.ChatToolCallComplete);
 		assert.deepStrictEqual({
+			success: completion.action.result.success,
+			failed: turn.storedParts[0]?.failed,
 			meta: completion.action._meta,
 			content: completion.action.result.content,
 		}, {
+			success: false,
+			failed: true,
 			meta: { source: 'cli-ts', toolKind: 'terminal', language: 'shellscript', terminalExitCode: 7 },
 			content: [{ type: ToolResultContentType.Text, text: 'first\nsecond\nthird\nverification failed' }],
 		});
@@ -1509,7 +1620,7 @@ suite('CliTsAgent tool metadata', () => {
 
 		internals._handleAgentEvent(session, {
 			type: 'tool:requested',
-			calls: [{ id: 'agent-isolated', name: 'Agent', input: { prompt: 'Implement the renderer change.' } }],
+			calls: [{ id: 'agent-isolated', name: 'Agent', input: { name: 'Search', prompt: 'Implement the renderer change.' } }],
 		});
 		internals._handleAgentEvent(session, {
 			type: 'tool:start',
@@ -1523,6 +1634,7 @@ suite('CliTsAgent tool metadata', () => {
 			prompt: 'Implement the renderer change.',
 			workspace: {
 				workerId: 'agent-isolated',
+				name: 'Search',
 				status: 'Running',
 				branch: 'agent/isolated-worker-history/worker/agent-isolated',
 				worktreePath: '/repo.backboard-workers/isolated-worker-history/agent-isolated',
@@ -1581,7 +1693,7 @@ suite('CliTsAgent tool metadata', () => {
 		assert.deepStrictEqual(liveUpdate.action._meta, {
 			source: 'cli-ts',
 			toolKind: 'subagent',
-			subagentAgentName: 'worker',
+			subagentAgentName: 'Search',
 			subagentDescription: 'Implement the renderer change.',
 			subagentWorkerId: 'agent-isolated',
 			subagentStatus: 'Integrated',
@@ -1600,6 +1712,11 @@ suite('CliTsAgent tool metadata', () => {
 		const tool = restored[0]?.responseParts.find((part): part is ToolCallResponsePart => part.kind === ResponsePartKind.ToolCall);
 		assert.ok(tool?.toolCall._meta);
 		assert.strictEqual(tool.toolCall._meta.subagentStatus, 'Integrated');
+		assert.strictEqual(tool.toolCall._meta.subagentAgentName, 'Search');
+		const namedStart = progress.find(signal => signal.kind === 'subagent_started');
+		assert.ok(namedStart?.kind === 'subagent_started');
+		assert.strictEqual(namedStart.agentName, 'Search');
+		assert.strictEqual(namedStart.agentDisplayName, 'Search');
 		assert.strictEqual(tool.toolCall._meta.subagentBranch, undefined);
 		assert.strictEqual(tool.toolCall._meta.subagentWorktreePath, undefined);
 		assert.strictEqual(tool.toolCall._meta.subagentIntegrationResult, undefined);
@@ -2165,8 +2282,7 @@ suite('CliTsAgent tool metadata', () => {
 		const spawnComplete = progress.find(signal => signal.kind === 'action'
 			&& signal.action.type === ActionType.ChatToolCallComplete
 			&& signal.action.toolCallId === 'spawn-1');
-		assert.ok(spawnComplete?.kind === 'action' && spawnComplete.action.type === ActionType.ChatToolCallComplete);
-		assert.strictEqual(spawnComplete.action._meta?.subagentDetached, true);
+		assert.strictEqual(spawnComplete, undefined, 'successful handle delivery keeps the frontend launcher active');
 
 		// The provider turn is now historical and an unrelated next turn is active.
 		// Detached child events must retain the original owner rather than attach to
@@ -2201,6 +2317,10 @@ suite('CliTsAgent tool metadata', () => {
 		await Promise.allSettled(ownerTurn.pendingCompletions);
 
 		assert.strictEqual(progress.filter(signal => signal.kind === 'subagent_completed').length, 1);
+		const finalSpawnComplete = progress.find(signal => signal.kind === 'action'
+			&& signal.action.type === ActionType.ChatToolCallComplete && signal.action.toolCallId === 'spawn-1');
+		assert.ok(finalSpawnComplete?.kind === 'action' && finalSpawnComplete.action.type === ActionType.ChatToolCallComplete);
+		assert.strictEqual(finalSpawnComplete.action._meta?.subagentDetached, true);
 		assert.ok(progress.some(signal => signal.kind === 'action'
 			&& signal.parentToolCallId === 'spawn-1'
 			&& signal.action.type === ActionType.ChatTurnComplete));
@@ -2230,6 +2350,275 @@ suite('CliTsAgent tool metadata', () => {
 		assert.strictEqual(childTurns[0]?.responseParts[0]?.kind, ResponsePartKind.Markdown);
 		if (childTurns[0]?.responseParts[0]?.kind === ResponsePartKind.Markdown) {
 			assert.strictEqual(childTurns[0].responseParts[0].content, 'Detached work finished.');
+		}
+	});
+
+	test('isolated child edits remain proposals until integration and recovery preserves failure', async () => {
+		const agent = createAgent();
+		const progress: AgentSignal[] = [];
+		store.add(agent.onDidSessionProgress(signal => progress.push(signal)));
+		const sessionUri = AgentSession.uri('backboard', 'isolated-edit-gate');
+		const workspace = { status: 'Running', worktreePath: '/private/worker', workerId: 'worker', changedFileCount: 1 };
+		const owner = { workerWorkspaces: new Map([['worker', workspace]]) };
+		const session = { sessionUri, subagentTurnOwners: new Map([['worker', owner]]) };
+		const childTurn = {
+			turnId: 'child-turn', messageParts: new Map(), streamedText: new Map(),
+			startedToolCalls: new Set(), confirmedToolCalls: new Set(), childToolLines: new Map(),
+			toolSummaries: [], storedParts: [], storedTextParts: new Map(), toolInputs: new Map(),
+			toolInputSummaries: new Map(), toolUi: new Map(), terminalOutputs: new Map(),
+			pendingCompletions: [] as Promise<void>[], subagentTurns: new Map(), workerWorkspaces: new Map(),
+			responseText: '', reasoningText: '',
+		};
+		const fileEdit: ToolResultFileEditContent = {
+			type: ToolResultContentType.FileEdit,
+			before: { uri: URI.file('/repo/file.ts').toString(), content: { uri: 'session-db://before' } },
+			after: { uri: URI.file('/repo/file.ts').toString(), content: { uri: 'session-db://after' } },
+			diff: { added: 1, removed: 1 },
+		};
+		const internals = agent as unknown as {
+			_handleMappedAgentEvent(session: unknown, event: unknown, turn: unknown, parentToolCallId: string): void;
+			_attachRuntimeRecoveryFileEdits(session: unknown, turn: unknown, recovery: unknown, parentToolCallId: string): Promise<void>;
+			_buildFileEditContents(): Promise<ToolResultFileEditContent[]>;
+		};
+		let recordedEdits = 0;
+		internals._buildFileEditContents = async () => { recordedEdits++; return [fileEdit]; };
+		for (const status of ['Running', 'Completed', 'Integrating', 'Conflict', 'Cancelled', 'Failed', 'Integrated']) {
+			workspace.status = status;
+			internals._handleMappedAgentEvent(session, {
+				type: 'tool:result', toolCallId: `write-${status}`, name: 'Write', title: 'Wrote file',
+				fileEdits: [{ path: '/repo/file.ts', before: 'before', after: 'after' }],
+			}, childTurn, 'worker');
+			await Promise.all(childTurn.pendingCompletions);
+			const completion = progress.findLast(signal => signal.kind === 'action' && signal.action.type === ActionType.ChatToolCallComplete);
+			assert.ok(completion?.kind === 'action' && completion.action.type === ActionType.ChatToolCallComplete);
+			if (completion?.kind === 'action' && completion.action.type === ActionType.ChatToolCallComplete) {
+				assert.strictEqual(completion.action.result.content?.some(content => content.type === ToolResultContentType.FileEdit) ?? false, status === 'Integrated');
+			}
+		}
+		assert.strictEqual(recordedEdits, 1, 'only integrated edits enter the coordinator tracker');
+		await internals._attachRuntimeRecoveryFileEdits(session, childTurn, {
+			turn: { prompt: 'Edit', response: '', parts: [{ kind: 'tool', id: 'failed-edit', name: 'Edit', failed: true }] },
+			fileEdits: [{ toolCallId: 'failed-edit', toolName: 'Edit', toolInput: {}, title: 'Partially edited before failure', edits: [{ path: '/repo/file.ts', before: 'before', after: 'partial' }] }],
+		}, 'worker');
+		const failed = progress.findLast(signal => signal.kind === 'action' && signal.action.type === ActionType.ChatToolCallComplete);
+		assert.ok(failed?.kind === 'action' && failed.action.type === ActionType.ChatToolCallComplete);
+		if (failed?.kind === 'action' && failed.action.type === ActionType.ChatToolCallComplete) {
+			assert.strictEqual(failed.action.result.success, false);
+			assert.deepStrictEqual(failed.action.result.content?.filter(content => content.type === ToolResultContentType.FileEdit), [fileEdit]);
+		}
+	});
+
+	test('authoritative batch children reject stale revisions and complete independently after durable results', async () => {
+		const agent = createAgent();
+		const progress: AgentSignal[] = [];
+		store.add(agent.onDidSessionProgress(signal => progress.push(signal)));
+		const sessionUri = AgentSession.uri('backboard', 'batch-revisions');
+		const turn = {
+			turnId: 'batch-turn', prompt: 'Delegate independent tasks', messageParts: new Map(), streamedText: new Map(),
+			startedToolCalls: new Set(), confirmedToolCalls: new Set(), childToolLines: new Map(), toolSummaries: [],
+			storedParts: [] as Array<{ kind: string; id?: string; workspace?: { status: string }; worker?: CliTsWorkerState }>,
+			storedTextParts: new Map(), toolInputs: new Map(), toolInputSummaries: new Map(), toolUi: new Map(), terminalOutputs: new Map(),
+			pendingCompletions: [] as Promise<void>[], subagentTurns: new Map(), workerWorkspaces: new Map(), responseText: '', reasoningText: '',
+		};
+		const session = { sessionId: 'batch-revisions', sessionUri, turn: turn as typeof turn | undefined, storedTurns: [{ prompt: turn.prompt, response: '', parts: turn.storedParts }], storedSubagentTurns: new Map(), subagentTurnOwners: new Map(), completedSubagentToolCallIds: new Set() };
+		const internals = agent as unknown as { _sessions: Map<string, unknown>; _writeStore(): void; _readRuntimeSubagentRecovery(): Promise<unknown>; _handleAgentEvent(session: unknown, event: CliTsAgentEvent): void };
+		internals._sessions.set('batch-revisions', session);
+		internals._writeStore = () => { };
+		internals._readRuntimeSubagentRecovery = async () => ({ turn: { prompt: 'Worker task', response: 'Recorded child answer' }, fileEdits: [{ toolCallId: 'private-write', toolName: 'Write', toolInput: {}, edits: [{ path: '/repo/shared.txt', before: 'Private base', after: 'Private proposal' }] }], isolatedWorkspace: true, workerIntegrationStatus: 'integrated' });
+		const worker = (handle: string, revision: number, overrides: Partial<CliTsWorkerState> = {}): CliTsWorkerState => ({ handle, sessionId: 'batch-revisions', prompt: `Work on ${handle}`, name: handle, revision, executionStatus: 'queued', integrationStatus: 'not_required', status: 'queued', readOnly: true, createdAt: '2026-09-05T12:00:00Z', ...overrides });
+		const update = (state: CliTsWorkerState) => internals._handleAgentEvent(session, { type: 'agent:worker_update', agentToolCallId: state.handle, parentBatchToolCallId: 'batch-call', worker: state });
+		update(worker('Alpha', 1));
+		update(worker('Beta', 1));
+		update(worker('Gamma', 1));
+		update(worker('Alpha', 3, { executionStatus: 'running', status: 'running' }));
+		update(worker('Alpha', 2, { executionStatus: 'failed', status: 'failed', error: 'Stale failure' }));
+		update(worker('Alpha', 3, { executionStatus: 'failed', status: 'failed', error: 'Contradictory duplicate' }));
+		update(worker('Alpha', 4, { sessionId: 'other-session', executionStatus: 'failed', status: 'failed' }));
+		internals._handleAgentEvent(session, { type: 'agent:child_status', agentToolCallId: 'Alpha', workspace: { workerId: 'Alpha', status: 'Failed', changedFileCount: 0, startedAt: '2026-09-05T12:00:00Z' } });
+		update(worker('Beta', 2, { status: 'running', executionStatus: 'completed', integrationStatus: 'integrated', readOnly: false }));
+		internals._handleAgentEvent(session, { type: 'agent:child_end', agentToolCallId: 'Beta', status: 'completed' });
+		assert.deepStrictEqual(turn.storedParts.map(part => [part.id, part.worker?.revision, part.workspace?.status]), [['Alpha', 3, 'Running'], ['Beta', 2, 'Integrating'], ['Gamma', 1, 'Queued']]);
+		assert.strictEqual(progress.filter(signal => signal.kind === 'subagent_completed').length, 0);
+		// Finishing the parent/batch does not finish any of its individual handles.
+		session.turn = undefined;
+		update(worker('Alpha', 4, { status: 'completed', executionStatus: 'completed' }));
+		update(worker('Beta', 3, { status: 'completed', executionStatus: 'completed', integrationStatus: 'integrated', readOnly: false, persistenceError: 'Could not save worker result' }));
+		update(worker('Gamma', 2, { status: 'cancelled', executionStatus: 'cancelled' }));
+		await Promise.allSettled(turn.pendingCompletions);
+		update(worker('Alpha', 3, { status: 'running', executionStatus: 'running' }));
+		assert.deepStrictEqual(progress.filter(signal => signal.kind === 'subagent_started').map(signal => signal.toolCallId), ['Alpha', 'Beta', 'Gamma']);
+		assert.deepStrictEqual(progress.filter(signal => signal.kind === 'action' && signal.action.type === ActionType.ChatToolCallComplete).map(signal => signal.kind === 'action' && signal.action.type === ActionType.ChatToolCallComplete ? [signal.action.toolCallId, signal.action.result.success] : undefined), [['Alpha', true], ['Beta', false], ['Gamma', false]]);
+		assert.strictEqual(progress.some(signal => signal.kind === 'action' && signal.action.type === ActionType.ChatToolCallStart && signal.action.toolName === 'apply_worker_changes'), false, 'Modern missing exact records must not publish private proposals');
+		const beta = await agent.getSessionMessages(URI.parse(buildSubagentSessionUri(sessionUri.toString(), 'Beta')));
+		assert.deepStrictEqual([beta[0]?.state, beta[0]?.error?.message], [TurnState.Error, 'Could not save worker result']);
+		const parent = await agent.getSessionMessages(sessionUri);
+		assert.deepStrictEqual(parent[0].responseParts.filter(part => part.kind === ResponsePartKind.ToolCall).map(part => part.kind === ResponsePartKind.ToolCall ? part.toolCall._meta?.subagentRevision : undefined), [4, 3, 2]);
+	});
+
+	test('reopen uses newer task revisions without comparing independent workspace revisions', async () => {
+		const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'backboard-task-recovery-'));
+		try {
+			const agent = createAgent();
+			const sessionUri = AgentSession.uri('backboard', 'task-recovery');
+			const original: CliTsWorkerState = { handle: 'worker', sessionId: 'task-recovery', prompt: 'Recover worker', name: 'Alpha', revision: 2, status: 'running', executionStatus: 'running', integrationStatus: 'pending', readOnly: false, createdAt: '2026-09-05T12:00:00Z', workspace: { workerId: 'worker', revision: 900, status: 'Running', changedFileCount: 0, startedAt: '2026-09-05T12:00:00Z' } };
+			const session = { sessionId: 'task-recovery', sessionUri, storedTurns: [{ prompt: 'Delegate work', response: '', parts: [{ kind: 'tool', id: 'worker', name: 'AgentSpawn', worker: original, workspace: original.workspace }] }], storedSubagentTurns: new Map([['worker', [{ prompt: original.prompt, response: '', failed: false }]]]) };
+			const internals = agent as unknown as { _runtimeSessionsRoot(): string; _readRuntimeSubagentRecovery(): Promise<undefined>; _sessions: Map<string, unknown> };
+			internals._runtimeSessionsRoot = () => tempRoot;
+			internals._readRuntimeSubagentRecovery = async () => undefined;
+			internals._sessions.set('task-recovery', session);
+			fs.mkdirSync(path.join(tempRoot, 'task-recovery'), { recursive: true });
+			const taskFile = path.join(tempRoot, 'task-recovery', 'agent-tasks.json');
+			const recovered: CliTsWorkerState = { ...original, revision: 3, status: 'interrupted', executionStatus: 'interrupted', integrationStatus: 'skipped', error: 'The worker was interrupted during restart.', workspace: { ...original.workspace!, revision: 1, status: 'Failed' } };
+			fs.writeFileSync(taskFile, JSON.stringify({ version: 1, tasks: [recovered, { ...recovered, sessionId: 'other-session', revision: 999, error: 'Wrong session' }] }));
+			const parent = await agent.getSessionMessages(sessionUri);
+			const parentTool = parent[0].responseParts[0];
+			assert.ok(parentTool.kind === ResponsePartKind.ToolCall);
+			assert.deepStrictEqual([parentTool.toolCall._meta?.subagentRevision, parentTool.toolCall._meta?.subagentStatus], [3, 'Failed']);
+			// A stale snapshot read after the newer record must not regress the UI.
+			fs.writeFileSync(taskFile, JSON.stringify({ version: 1, tasks: [original] }));
+			const child = await agent.getSessionMessages(URI.parse(buildSubagentSessionUri(sessionUri.toString(), 'worker')));
+			assert.deepStrictEqual([child[0]?.state, child[0]?.error?.message], [TurnState.Error, recovered.error]);
+		} finally {
+			fs.rmSync(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test('integration review consumes verified coordinator bytes and preserves empty-file existence', async () => {
+		const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'backboard-integration-review-'));
+		try {
+			const database = store.add(await SessionDatabase.open(':memory:'));
+			await database.createTurn('exact-integration-turn');
+			const sessionUri = AgentSession.uri('backboard', 'exact-integration');
+			const tracker = store.add(new FileEditTracker(sessionUri.toString(), database, {} as never, new NullLogService(), new TestDiffComputeService(), new NullEditSurvivalReporterFactory()));
+			const agent = createAgent();
+			const blobs = path.join(tempRoot, 'exact-integration', 'worker-integrations', 'blobs');
+			fs.mkdirSync(blobs, { recursive: true });
+			const snapshot = (bytes: Uint8Array) => {
+				const sha256 = createHash('sha256').update(bytes).digest('hex');
+				const contentPath = path.join(blobs, sha256);
+				fs.writeFileSync(contentPath, bytes);
+				return { contentPath, sha256, byteLength: bytes.length, mode: 0o100644 };
+			};
+			const coordinator = path.join(tempRoot, 'coordinator');
+			const bytesBefore = Buffer.from('Other worker\noriginal\n');
+			const bytesAfter = Buffer.from('Other worker\nupdated\n');
+			const changes: CliTsWorkerIntegrationChange[] = [
+				{ filePath: path.join(coordinator, 'shared.txt'), before: snapshot(bytesBefore), after: snapshot(bytesAfter) },
+				{ filePath: path.join(coordinator, 'new-empty.txt'), after: snapshot(Buffer.alloc(0)) },
+				{ filePath: path.join(coordinator, 'removed-empty.txt'), before: snapshot(Buffer.alloc(0)) },
+				{ filePath: path.join(coordinator, 'binary.bin'), before: snapshot(Buffer.from([0, 255, 1])), after: snapshot(Buffer.from([0, 254, 2])) },
+			];
+			const turn = { turnId: 'exact-integration-turn', storedParts: [] as unknown[], toolSummaries: [], toolInputs: new Map(), toolInputSummaries: new Map(), startedToolCalls: new Set() };
+			const session = { sessionId: 'exact-integration', sessionUri, workingDirectory: URI.file(coordinator), fileEdits: { tracker } };
+			const internals = agent as unknown as { _runtimeSessionsRoot(): string; _publishWorkerIntegrationEdits(session: unknown, turn: unknown, id: string, recovery: unknown, changes: readonly CliTsWorkerIntegrationChange[]): Promise<void> };
+			internals._runtimeSessionsRoot = () => tempRoot;
+			await internals._publishWorkerIntegrationEdits(session, turn, 'worker', { fileEdits: [{ edits: [{ path: changes[0].filePath, before: 'private proposal before', after: 'private proposal after' }] }] }, changes);
+			const toolId = 'worker-integration:worker';
+			const stored = await database.readFileEditContent(toolId, changes[0].filePath);
+			assert.deepStrictEqual([Buffer.from(stored!.beforeContent!), Buffer.from(stored!.afterContent!)], [bytesBefore, bytesAfter]);
+			assert.deepStrictEqual((await database.getFileEdits([toolId])).map(record => record.kind), [FileEditKind.Edit, FileEditKind.Create, FileEditKind.Delete, FileEditKind.Edit]);
+			const binary = await database.readFileEditContent(toolId, changes[3].filePath);
+			assert.deepStrictEqual([...binary!.afterContent!], [0, 254, 2]);
+			// An exact empty record proves no changes; a bad hash is never repaired
+			// by relabeling the worker's private snapshot as coordinator output.
+			await internals._publishWorkerIntegrationEdits(session, turn, 'no-changes', { fileEdits: [{ edits: [{ path: changes[0].filePath, before: 'a', after: 'b' }] }] }, []);
+			await internals._publishWorkerIntegrationEdits(session, turn, 'bad-hash', undefined, [{ ...changes[0], after: { ...changes[0].after!, sha256: '0'.repeat(64) } }]);
+			assert.deepStrictEqual(await database.getFileEdits(['worker-integration:no-changes', 'worker-integration:bad-hash']), []);
+			assert.strictEqual(turn.storedParts.length, 1);
+		} finally {
+			fs.rmSync(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test('worker integration publishes one parent review with net snapshots and persisted counts', async () => {
+		const database = store.add(await SessionDatabase.open(':memory:'));
+		await database.createTurn('parent-integration-turn');
+		const sessionUri = AgentSession.uri('backboard', 'parent-integration-review');
+		const counts = new TestDiffComputeService();
+		const tracker = store.add(new FileEditTracker(sessionUri.toString(), database, {} as never, new NullLogService(), counts, new NullEditSurvivalReporterFactory()));
+		const agent = createAgent();
+		const progress: AgentSignal[] = [];
+		store.add(agent.onDidSessionProgress(signal => progress.push(signal)));
+		const turn = {
+			turnId: 'parent-integration-turn', storedParts: [] as unknown[], toolSummaries: [],
+			toolInputs: new Map(), toolInputSummaries: new Map(), startedToolCalls: new Set(),
+		};
+		const session = { sessionUri, fileEdits: { tracker }, model: { id: 'fixture-model' } };
+		const recovery = {
+			fileEdits: [
+				{ edits: [{ path: '/repo/worker.mjs', before: '', after: 'first' }] },
+				{ edits: [{ path: '/repo/worker.mjs', before: 'first', after: 'one\ntwo\nthree' }] },
+				{ edits: [{ path: '/repo/unchanged.mjs', before: 'same', after: 'same' }] },
+			],
+		};
+		const internals = agent as unknown as {
+			_publishWorkerIntegrationEdits(session: unknown, turn: unknown, id: string, recovery: unknown): Promise<void>;
+		};
+		await Promise.all([
+			internals._publishWorkerIntegrationEdits(session, turn, 'worker-a', recovery),
+			internals._publishWorkerIntegrationEdits(session, turn, 'worker-a', recovery),
+		]);
+		await internals._publishWorkerIntegrationEdits(session, turn, 'worker-a', recovery);
+		const completed = progress.filter(signal => signal.kind === 'action' && signal.action.type === ActionType.ChatToolCallComplete);
+		assert.strictEqual(completed.length, 1);
+		const completion = completed[0];
+		assert.ok(completion?.kind === 'action' && completion.action.type === ActionType.ChatToolCallComplete);
+		if (completion?.kind === 'action' && completion.action.type === ActionType.ChatToolCallComplete) {
+			assert.strictEqual(completion.parentToolCallId, undefined, 'the parent observes the integration independently of the completed child writes');
+			assert.strictEqual(completion.action.toolCallId, 'worker-integration:worker-a');
+			assert.deepStrictEqual(completion.action.result.content?.map(item => item.type === ToolResultContentType.FileEdit ? item.diff : undefined), [{ added: 3, removed: 0 }]);
+		}
+		const records = await database.getFileEdits(['worker-integration:worker-a']);
+		assert.deepStrictEqual(records.map(record => ({ path: record.filePath, kind: record.kind, added: record.addedLines, removed: record.removedLines })), [{ path: '/repo/worker.mjs', kind: FileEditKind.Create, added: 3, removed: 0 }]);
+		assert.strictEqual(counts.callCount, 1);
+		assert.strictEqual(turn.storedParts.length, 1, 'recovery keeps one deterministic integration result');
+	});
+
+	test('successful detached launch completes the frontend only at integration, while startup failure completes immediately', async () => {
+		for (const startupFailed of [false, true]) {
+			const agent = createAgent();
+			const progress: AgentSignal[] = [];
+			store.add(agent.onDidSessionProgress(signal => progress.push(signal)));
+			const sessionUri = AgentSession.uri('backboard', `deferred-launch-${startupFailed}`);
+			const turn = {
+				turnId: 'parent-turn', messageParts: new Map(), streamedText: new Map(),
+				startedToolCalls: new Set(), confirmedToolCalls: new Set(), childToolLines: new Map(),
+				toolSummaries: [], storedParts: [], storedTextParts: new Map(), toolInputs: new Map(),
+				toolInputSummaries: new Map(), pendingCompletions: [] as Promise<void>[], subagentTurns: new Map(),
+				workerWorkspaces: new Map(), responseText: '', reasoningText: '',
+			};
+			const session = { sessionUri, turn, storedSubagentTurns: new Map() };
+			const internals = agent as unknown as {
+				_handleAgentEvent(session: unknown, event: unknown): void;
+				_readRuntimeSubagentRecovery(): Promise<undefined>;
+			};
+			internals._readRuntimeSubagentRecovery = async () => undefined;
+			const emit = (event: object) => internals._handleAgentEvent(session, event);
+			const completions = () => progress.filter(signal => signal.kind === 'action' && signal.parentToolCallId === undefined
+				&& signal.action.type === ActionType.ChatToolCallComplete && signal.action.toolCallId === 'worker-launch');
+			emit({ type: 'tool:requested', calls: [{ id: 'worker-launch', name: 'AgentSpawn', input: { prompt: 'Create a file.' } }] });
+			emit({ type: 'tool:start', toolCallId: 'worker-launch', name: 'AgentSpawn' });
+			if (!startupFailed) {
+				emit({ type: 'agent:child_start', agentToolCallId: 'worker-launch', prompt: 'Create a file.', workspace: { workerId: 'worker-launch', status: 'Running', worktreePath: '/private/worker' } });
+			}
+			emit({ type: 'tool:result', toolCallId: 'worker-launch', name: 'AgentSpawn', title: startupFailed ? 'Worker unavailable' : 'Worker launched',
+				...(startupFailed ? { execution: { outcome: 'error', failureCategory: 'unavailable' } } : {}) });
+			await Promise.allSettled(turn.pendingCompletions);
+			assert.strictEqual(completions().length, startupFailed ? 1 : 0, 'returning a handle must not finish the live worker card');
+			if (!startupFailed) {
+				// The private model ending is not a durable integration outcome.
+				emit({ type: 'agent:child_end', agentToolCallId: 'worker-launch', status: 'completed' });
+				await Promise.allSettled(turn.pendingCompletions);
+				assert.strictEqual(completions().length, 0);
+				emit({ type: 'agent:child_status', agentToolCallId: 'worker-launch', workspace: { workerId: 'worker-launch', status: 'Integrated', changedFileCount: 1 } });
+				await Promise.allSettled(turn.pendingCompletions);
+			}
+			const completion = completions()[0];
+			assert.ok(completion?.kind === 'action' && completion.action.type === ActionType.ChatToolCallComplete);
+			if (completion?.kind === 'action' && completion.action.type === ActionType.ChatToolCallComplete) {
+				assert.strictEqual(completion.action.result.success, !startupFailed);
+			}
+			assert.strictEqual(completions().length, 1);
 		}
 	});
 
@@ -2326,12 +2715,15 @@ suite('CliTsAgent tool metadata', () => {
 			toolCallId: 'agent-call-public',
 			name: 'Subagent',
 			title: 'Completed in 2 rounds',
-			detail: 'The renderer preserves and displays every child activity item.',
 		});
 		await Promise.allSettled(rootTurn.pendingCompletions);
 
 		assert.strictEqual(progress.filter(signal => signal.kind === 'subagent_started').length, 1);
 		assert.strictEqual(progress.filter(signal => signal.kind === 'subagent_completed').length, 1);
+		const finalDeltaIndex = progress.findIndex(signal => signal.kind === 'action' && signal.parentToolCallId === 'agent-call-public'
+			&& signal.action.type === ActionType.ChatDelta && signal.action.content === 'The renderer preserves and displays every child activity item.');
+		const childCompleteIndex = progress.findIndex(signal => signal.kind === 'action' && signal.parentToolCallId === 'agent-call-public' && signal.action.type === ActionType.ChatTurnComplete);
+		assert.ok(finalDeltaIndex >= 0 && childCompleteIndex > finalDeltaIndex, 'the live child receives its durable answer before completion');
 		const childUri = URI.parse(buildSubagentSessionUri(sessionUri.toString(), 'agent-call-public'));
 		const turns = await agent.getSessionMessages(childUri);
 		assert.strictEqual(turns.length, 1);
@@ -2475,12 +2867,13 @@ suite('CliTsAgent tool metadata', () => {
 		}
 	});
 
-	test('reopened child archives remap private worker edits onto coordinator paths', async () => {
+	test('reopened snapshot child archives map edits onto the actual coordinator, not the private Git repository', async () => {
 		const fixtureRoot = fs.mkdtempSync(`${os.tmpdir()}/cli-ts-subagent-path-recovery-`);
 		const database = store.add(new SessionDatabase(':memory:'));
 		try {
 			const coordinatorRoot = path.join(fixtureRoot, 'coordinator');
 			const workerRoot = path.join(fixtureRoot, 'hidden-workers', 'worker-path-recovery');
+			const privateRepositoryRoot = path.join(fixtureRoot, 'private-snapshots', 'repository');
 			const coordinatorFile = path.join(coordinatorRoot, 'src', 'renderer.ts');
 			const workerFile = path.join(workerRoot, 'src', 'renderer.ts');
 			const sessionDirectory = path.join(fixtureRoot, 'session');
@@ -2495,8 +2888,11 @@ suite('CliTsAgent tool metadata', () => {
 				workers: [{
 					workerId: 'agent-path-recovery',
 					parentToolCallId: 'agent-path-recovery',
+					backend: 'snapshot',
+					repositoryRoot: privateRepositoryRoot,
 					worktreePath: workerRoot,
 					coordinatorCwd: coordinatorRoot,
+					integrationStatus: 'pending',
 				}],
 			}), 'utf8');
 			const events = [
@@ -2524,8 +2920,11 @@ suite('CliTsAgent tool metadata', () => {
 			};
 			const rawRecovery = await internals._readRuntimeSubagentRecoveryFromDirectory(agentDirectory) as {
 				fileEdits: Array<{ edits: Array<{ path: string }> }>;
+				workerIntegrationStatus?: string;
+				pathMapping?: { workerRoot: string; coordinatorRoot: string };
 			};
 			assert.strictEqual(rawRecovery.fileEdits[0].edits[0].path, workerFile, 'raw archive data remains unchanged');
+			assert.deepStrictEqual(rawRecovery.pathMapping, { workerRoot, coordinatorRoot });
 			// Simulate a previous buggy reopen that persisted the disposable worker
 			// identity. The authoritative projected turn must not rehydrate this row.
 			await database.storeFileEdit({
@@ -2534,22 +2933,37 @@ suite('CliTsAgent tool metadata', () => {
 				beforeContent: new TextEncoder().encode('before'), afterContent: new TextEncoder().encode('after'),
 			});
 			internals._readRuntimeSubagentRecovery = async () => rawRecovery;
+			const workspace = {
+				workerId: 'agent-path-recovery', status: 'Integrated', changedFileCount: 1,
+				startedAt: '2026-09-01T00:00:00.000Z', finishedAt: '2026-09-01T00:00:01.000Z',
+			};
 			internals._sessions.set(AgentSession.id(sessionUri), {
 				workingDirectory: URI.file(coordinatorRoot),
 				storedTurns: [{
 					prompt: 'Delegate the renderer update.', response: '', parts: [{
 						kind: 'tool', id: 'agent-path-recovery', name: 'AgentSpawn',
 						inputSummary: 'Update the renderer.', title: 'Worker started',
-						workspace: {
-							workerId: 'agent-path-recovery', status: 'Integrated', changedFileCount: 1,
-							startedAt: '2026-09-01T00:00:00.000Z', finishedAt: '2026-09-01T00:00:01.000Z',
-						},
+						workspace,
 					}],
 				}],
 				storedSubagentTurns: new Map(),
 			});
 
 			const childUri = URI.parse(buildSubagentSessionUri(sessionUri.toString(), 'agent-path-recovery'));
+			for (const status of ['Running', 'Completed', 'Integrating', 'Conflict', 'Failed', 'Cancelled']) {
+				workspace.status = status;
+				const unintegrated = await agent.getSessionMessages(childUri);
+				if (status === 'Conflict' || status === 'Failed' || status === 'Cancelled') {
+					assert.strictEqual(unintegrated[0]?.state, TurnState.Error, `${status} must not reopen as a successful worker`);
+				}
+				const write = unintegrated[0]?.responseParts.find((part): part is ToolCallResponsePart => part.kind === ResponsePartKind.ToolCall);
+				assert.ok(write?.toolCall.status === ToolCallStatus.Completed);
+				if (write?.toolCall.status === ToolCallStatus.Completed) {
+					assert.strictEqual(write.toolCall.content?.some(content => content.type === ToolResultContentType.FileEdit) ?? false, false, `${status} must not advertise coordinator edits`);
+				}
+			}
+			assert.deepStrictEqual((await database.getFileEdits(['child-write-path'])).map(record => record.filePath), [workerFile], 'unintegrated recovery must not create coordinator records');
+			workspace.status = 'Integrated';
 			const turns = await agent.getSessionMessages(childUri);
 			const write = turns[0]?.responseParts.find((part): part is ToolCallResponsePart => part.kind === ResponsePartKind.ToolCall);
 			assert.ok(write?.toolCall.status === ToolCallStatus.Completed);
@@ -2559,11 +2973,17 @@ suite('CliTsAgent tool metadata', () => {
 			assert.strictEqual(write.toolCall.pastTenseMessage, `Wrote ${coordinatorFile}`);
 			const edit = write.toolCall.content?.find((content): content is ToolResultFileEditContent => content.type === ToolResultContentType.FileEdit);
 			assert.strictEqual(edit?.after?.uri, URI.file(coordinatorFile).toString());
+			assert.strictEqual(JSON.stringify(turns).includes(privateRepositoryRoot), false, 'private snapshot repository must not become a displayed edit path');
 			assert.strictEqual(turns[0].responseParts.some(part => part.kind === ResponsePartKind.Markdown && part.content.includes(workerRoot)), false);
 			const persisted = await database.getFileEdits(['child-write-path']);
 			assert.deepStrictEqual(new Set(persisted.map(record => record.filePath)), new Set([workerFile, coordinatorFile]));
 			assert.strictEqual(write.toolCall.content?.filter(content => content.type === ToolResultContentType.FileEdit).length, 1, 'stale private DB rows must not re-enter the transcript');
 			assert.strictEqual(rawRecovery.fileEdits[0].edits[0].path, workerFile, 'projection must not mutate cached raw recovery');
+			workspace.status = 'Running';
+			rawRecovery.workerIntegrationStatus = 'integrated';
+			const authoritative = await agent.getSessionMessages(childUri);
+			const authoritativeWrite = authoritative[0]?.responseParts.find((part): part is ToolCallResponsePart => part.kind === ResponsePartKind.ToolCall);
+			assert.ok(authoritativeWrite?.toolCall.status === ToolCallStatus.Completed && authoritativeWrite.toolCall.content?.some(content => content.type === ToolResultContentType.FileEdit), 'durable workers.json integration also authorizes recovered edits');
 		} finally {
 			fs.rmSync(fixtureRoot, { recursive: true, force: true });
 		}

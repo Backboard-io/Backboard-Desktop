@@ -659,15 +659,46 @@ export class ChatMarkdownContentPart extends Disposable implements IChatContentP
 					continue;
 				}
 
-				const scrollable = new DomScrollableElement(katexBlock.cloneNode(true) as HTMLElement, {
+				const math = katexBlock.cloneNode(true) as HTMLElement;
+				math.setAttribute('role', 'region');
+				math.setAttribute('aria-label', localize('chat.math.expression', "Mathematical expression"));
+				const scrollable = new DomScrollableElement(math, {
 					vertical: ScrollbarVisibility.Hidden,
 					horizontal: ScrollbarVisibility.Auto,
 				});
 				store.add(scrollable);
+				scrollable.getDomNode().classList.add('chat-math-scrollable');
 				katexBlock.replaceWith(scrollable.getDomNode());
 
-				layoutParticipants.value.add(() => { scrollable.scanDomNode(); });
-				scrollable.scanDomNode();
+				const layout = () => {
+					scrollable.scanDomNode();
+					math.tabIndex = math.scrollWidth > math.clientWidth ? 0 : -1;
+				};
+				layoutParticipants.value.add(layout);
+				store.add(dom.addDisposableListener(math, 'keydown', event => {
+					if (math.tabIndex < 0 || event.altKey || event.ctrlKey || event.metaKey) {
+						return;
+					}
+					const current = scrollable.getScrollPosition().scrollLeft;
+					const next = event.key === 'ArrowRight' ? current + 48
+						: event.key === 'ArrowLeft' ? current - 48
+							: event.key === 'Home' ? 0
+								: event.key === 'End' ? math.scrollWidth : undefined;
+					if (next !== undefined) {
+						event.preventDefault();
+						event.stopPropagation();
+						scrollable.setScrollPosition({ scrollLeft: next });
+					}
+				}));
+				layout();
+			}
+			if (this.mathLayoutParticipants.size) {
+				void MarkedKatexSupport.ensureKatexStyles(dom.getWindow(this.domNode)).then(() => this.domNode.ownerDocument.fonts.ready).then(() => {
+					if (!store.isDisposed) {
+						this.mathLayoutParticipants.forEach(layout => layout());
+						this._onDidChangeHeight.fire();
+					}
+				});
 			}
 
 			store.add(wrapTablesWithScrollable(this.domNode, layoutParticipants));
@@ -866,7 +897,13 @@ export class ChatMarkdownContentPart extends Disposable implements IChatContentP
 			// Update the stored markdown so hasSameContent() returns true
 			// for subsequent diffs with the same content, allowing the
 			// progressive render to detect "caught up" and "complete" states.
-			this.markdown = newMarkdown;
+			this.markdown = {
+				...newMarkdown,
+				content: {
+					...newMarkdown.content,
+					baseUri: newMarkdown.content.baseUri ?? this.markdown.content.baseUri,
+				},
+			};
 		}
 
 		return success;

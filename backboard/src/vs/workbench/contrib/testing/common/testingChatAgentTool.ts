@@ -3,8 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { disposableTimeout, RunOnceScheduler } from '../../../../base/common/async.js';
-import { CancellationToken } from '../../../../base/common/cancellation.js';
+import { disposableTimeout, raceCancellationError, raceTimeout, RunOnceScheduler } from '../../../../base/common/async.js';
+import { CancellationToken, CancellationTokenSource } from '../../../../base/common/cancellation.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { Emitter } from '../../../../base/common/event.js';
 import { MarkdownString } from '../../../../base/common/htmlContent.js';
@@ -129,8 +129,21 @@ export class RunTestTool implements IToolImpl {
 		let group = (mode === 'coverage' ? TestRunProfileBitset.Coverage : TestRunProfileBitset.Run);
 		const coverageFiles = (mode === 'coverage' ? (params.coverageFiles && params.coverageFiles.length ? params.coverageFiles : undefined) : undefined);
 
-		const testFiles = await this._getFileTestsToRun(params, progress);
-		const testCases = await this._getTestCasesToRun(params, testFiles, progress);
+		// Providers can leave expansion pending forever. Bound discovery separately
+		// from execution so a stalled provider cannot leave a permanent chat spinner.
+		const discoveryCancellation = new CancellationTokenSource(token);
+		let testCases: IncrementalTestCollectionItem[] | undefined;
+		try {
+			const discovery = this._getFileTestsToRun(params, progress)
+				.then(testFiles => discoveryCancellation.token.isCancellationRequested ? [] : this._getTestCasesToRun(params, testFiles, progress));
+			testCases = await raceTimeout(raceCancellationError(discovery, discoveryCancellation.token), 30_000, () => discoveryCancellation.cancel());
+		} finally {
+			discoveryCancellation.dispose();
+		}
+		if (!testCases) {
+			const message = localize('runTestTool.discoveryTimeout', 'Test discovery timed out after 30 seconds. Check that the test provider is configured and responding, then try again. No tests were run.');
+			return { content: [{ kind: 'text', value: message }], toolResultError: message };
+		}
 		if (!testCases.length) {
 			return {
 				content: [{ kind: 'text', value: 'No tests found in the files. Ensure the correct absolute paths are passed to the tool.' }],

@@ -5,6 +5,51 @@ import {
 } from "../src/core/tools/ToolUiData.ts";
 
 describe("ToolUiData", () => {
+	it("keeps search completeness separate from UI preview truncation", () => {
+		const metadata = {
+			truncated: true,
+			returnedCount: 2,
+			limit: 2,
+			limitUnit: "records",
+			limitReason: "head_limit",
+			totalKnown: false,
+			countUnit: "lines",
+		};
+		const grep = backboardToolUiResult(
+			"grep",
+			{ pattern: "needle" },
+			{
+				matches: "line one\nline two",
+				matchCount: 1,
+				matchCountUnit: "matching_lines",
+				...metadata,
+			},
+		);
+		expect(grep?.result).toMatchObject({
+			matchCount: 1,
+			matchCountUnit: "matching_lines",
+			...metadata,
+		});
+		expect(grep?.result?.uiTruncated).toBeUndefined();
+		const glob = backboardToolUiResult(
+			"glob",
+			{ patterns: ["*"] },
+			{
+				files: ["one", "two"],
+				count: 2,
+				...metadata,
+				countUnit: "files",
+				limitReason: "file_limit",
+			},
+		);
+		expect(glob?.result).toMatchObject({
+			...metadata,
+			countUnit: "files",
+			limitReason: "file_limit",
+		});
+		expect(glob?.result?.totalCount).toBeUndefined();
+	});
+
 	it("emits bounded read previews with a uniform truncation marker", () => {
 		const content = Array.from(
 			{ length: 100 },

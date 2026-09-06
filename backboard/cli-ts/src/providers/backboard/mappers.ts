@@ -1,3 +1,5 @@
+import { toolInputFingerprint } from "../../core/tools/ToolCallIdentity.ts";
+import { ToolCallProtocolGuard } from "../ToolCallProtocolGuard.ts";
 import { BACKBOARD_STREAM_EVENTS } from "./constants.ts";
 import { isRetryableStreamServerErrorMessage } from "./streamRetry.ts";
 import type {
@@ -15,7 +17,9 @@ export function parseArguments(raw: string): unknown {
 	try {
 		return JSON.parse(raw);
 	} catch {
-		return { __raw: raw };
+		throw new Error(
+			"Tool protocol error: function arguments are not valid JSON",
+		);
 	}
 }
 
@@ -27,7 +31,18 @@ export function mapToolCall(call: RawToolCall): ProviderToolCall {
 	};
 }
 
+export interface ToolMappingTrace {
+	phase: "mapped" | "raw";
+	event: string;
+	id?: string;
+	index?: number;
+	name?: string;
+	inputFingerprint?: string;
+	argumentBytes?: number;
+}
+
 export class BackboardStreamEventMapper {
+	private readonly guard = new ToolCallProtocolGuard();
 	private accumulatedContent = "";
 	private accumulatedReasoning = "";
 	private readonly streamedToolCalls = new Map<
@@ -35,9 +50,14 @@ export class BackboardStreamEventMapper {
 		{ id?: string; name: string; announced: boolean }
 	>();
 	private readonly knownToolNames: ReadonlyMap<string, string>;
-	private readonly provisionalToolCallPrefix = `backboard_stream_${nextStreamMapperId++}`;
+	private readonly provisionalToolCallPrefix =
+		`backboard_stream_${nextStreamMapperId++}`;
 
-	constructor(knownToolNames: readonly string[] = []) {
+	constructor(
+		knownToolNames: readonly string[] = [],
+		private readonly trace?: (event: ToolMappingTrace) => void,
+		private readonly traceRaw = false,
+	) {
 		this.knownToolNames = new Map(
 			knownToolNames.map((name) => [name.toLowerCase(), name]),
 		);
@@ -52,7 +72,27 @@ export class BackboardStreamEventMapper {
 		this.accumulatedContent = result.accumulatedContent;
 		this.accumulatedReasoning = result.accumulatedReasoning;
 		result.events.push(...this.mapRawToolCallDeltas(payload));
-		return result.events;
+		return result.events.map((event) => {
+			const calls =
+				event.kind === "tool_started"
+					? [{ id: event.id, name: event.name }]
+					: event.kind === "tool_ready"
+						? [event.call]
+						: event.kind === "requires_action"
+							? event.calls
+							: [];
+			for (const call of calls)
+				this.trace?.({
+					phase: "mapped",
+					event: event.kind,
+					id: call.id,
+					name: call.name,
+					...("input" in call
+						? { inputFingerprint: toolInputFingerprint(call.input) }
+						: {}),
+				});
+			return this.guard.accept(event);
+		});
 	}
 
 	/**
@@ -73,13 +113,22 @@ export class BackboardStreamEventMapper {
 		for (const root of nestedStreamRoots(payload)) {
 			const choices = Array.isArray(root.choices) ? root.choices : [];
 			for (const choice of choices) {
-				if (!isRecord(choice) || !isRecord(choice.delta)) continue;
+				if (
+					!isRecord(choice) ||
+					!isRecord(choice.delta) ||
+					(typeof choice.index === "number" && choice.index !== 0)
+				)
+					continue;
 				const calls = Array.isArray(choice.delta.tool_calls)
 					? choice.delta.tool_calls
 					: Array.isArray(choice.delta.toolCalls)
 						? choice.delta.toolCalls
 						: [];
-				for (let fallbackIndex = 0; fallbackIndex < calls.length; fallbackIndex++) {
+				for (
+					let fallbackIndex = 0;
+					fallbackIndex < calls.length;
+					fallbackIndex++
+				) {
 					const call = calls[fallbackIndex];
 					if (!isRecord(call)) continue;
 					const indexValue = call.index;
@@ -92,21 +141,46 @@ export class BackboardStreamEventMapper {
 						announced: false,
 					};
 					const id = stringField(call, "id");
+					if (id && existing.id && existing.id !== id) {
+						events.push({
+							kind: "failed",
+							error:
+								"Tool protocol error: a raw tool-call index changed its real ID",
+							retryable: false,
+						});
+						continue;
+					}
 					if (id) existing.id = id;
 					const fn = isRecord(call.function) ? call.function : call;
 					const nameFragment = stringField(fn, "name");
+					const argumentsFragment = stringField(fn, "arguments");
+					if (this.traceRaw)
+						this.trace?.({
+							phase: "raw",
+							event: "tool_delta",
+							index,
+							...(id ? { id } : {}),
+							...(nameFragment ? { name: nameFragment } : {}),
+							...(argumentsFragment
+								? {
+										inputFingerprint: toolInputFingerprint(argumentsFragment),
+										argumentBytes: new TextEncoder().encode(argumentsFragment)
+											.byteLength,
+									}
+								: {}),
+						});
 					if (nameFragment) {
 						existing.name = appendStreamedName(existing.name, nameFragment);
 					}
 					this.streamedToolCalls.set(index, existing);
-					const knownName = this.knownToolNames.get(existing.name.toLowerCase());
+					const knownName = this.knownToolNames.get(
+						existing.name.toLowerCase(),
+					);
 					if (!existing.announced && knownName) {
 						existing.announced = true;
 						events.push({
 							kind: "tool_started",
-							id:
-								existing.id ??
-								`${this.provisionalToolCallPrefix}_${index}`,
+							id: existing.id ?? `${this.provisionalToolCallPrefix}_${index}`,
 							name: knownName,
 						});
 					}
@@ -119,7 +193,9 @@ export class BackboardStreamEventMapper {
 
 let nextStreamMapperId = 0;
 
-function nestedStreamRoots(payload: Record<string, unknown>): Record<string, unknown>[] {
+function nestedStreamRoots(
+	payload: Record<string, unknown>,
+): Record<string, unknown>[] {
 	const roots = [payload];
 	for (const key of ["data", "chunk"]) {
 		const nested = payload[key];
@@ -207,7 +283,15 @@ function mapStreamPayload(
 			// Advisory early-execution event; malformed frames are dropped.
 			const rawCall = (payload as Record<string, unknown>).tool_call;
 			if (isRawToolCall(rawCall)) {
-				events.push({ kind: "tool_ready", call: mapToolCall(rawCall) });
+				try {
+					events.push({ kind: "tool_ready", call: mapToolCall(rawCall) });
+				} catch {
+					events.push({
+						kind: "failed",
+						error: "Tool protocol error: ready arguments are not valid JSON",
+						retryable: false,
+					});
+				}
 			}
 			return { events, accumulatedContent, accumulatedReasoning };
 		}
@@ -215,10 +299,25 @@ function mapStreamPayload(
 			const rawCalls: unknown[] = Array.isArray(payload.tool_calls)
 				? payload.tool_calls
 				: [];
-			const calls = rawCalls
-				.filter(isRawToolCall)
-				.map((call) => mapToolCall(call));
-			if (calls.length === 0) {
+			let calls: ProviderToolCall[];
+			try {
+				calls = rawCalls.filter(isRawToolCall).map((call) => mapToolCall(call));
+			} catch {
+				events.push({
+					kind: "failed",
+					error: "Tool protocol error: final arguments are not valid JSON",
+					retryable: false,
+				});
+				return { events, accumulatedContent, accumulatedReasoning };
+			}
+			if (rawCalls.length !== calls.length) {
+				events.push({
+					kind: "failed",
+					error:
+						"Tool protocol error: malformed final tool call; refusing a partial batch",
+					retryable: false,
+				});
+			} else if (calls.length === 0) {
 				events.push(
 					failedEvent("Backboard requested tool outputs without tool calls"),
 				);
@@ -384,8 +483,10 @@ export function isRawToolCall(value: unknown): value is RawToolCall {
 	const fn = value.function;
 	return (
 		typeof value.id === "string" &&
+		value.id.length > 0 &&
 		isRecord(fn) &&
 		typeof fn.name === "string" &&
+		fn.name.length > 0 &&
 		typeof fn.arguments === "string"
 	);
 }

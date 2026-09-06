@@ -2,6 +2,7 @@ import { join } from "node:path";
 import type { Config } from "../../config/Config.ts";
 import type { ModelRef } from "../../config/defaults.ts";
 import { qSessionDir } from "../../config/paths.ts";
+import { fingerprint, PROMPT_VERSION } from "../../config/runtimeIdentity.ts";
 import { createRuntimeThinkingResolver } from "../../config/thinkingRuntime.ts";
 import { toPromptProfileId } from "../../prompts/profiles/ids.ts";
 import { getSystemPrompt } from "../../prompts/system/index.tsx";
@@ -657,6 +658,16 @@ export class AgentController {
 		// stale too; a new one is resolved on the next turn.
 		this.deps.session.assistantId = null;
 		return result;
+	}
+
+	/** Hashes only; prompt contents and schemas can contain private instructions. */
+	get runtimePromptIdentity() {
+		return {
+			promptVersion: PROMPT_VERSION,
+			promptHash: fingerprint(this.baseSystemPrompt()),
+			schemaHash: fingerprint(this.baseTools()),
+			scope: "startup-base",
+		};
 	}
 
 	private baseSystemPrompt(): string {

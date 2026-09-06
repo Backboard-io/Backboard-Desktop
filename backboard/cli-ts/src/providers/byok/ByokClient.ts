@@ -19,6 +19,7 @@ import type {
 	SendMessageRequest,
 	SubmitToolOutputsRequest,
 } from "../backboard/types.ts";
+import { ToolCallProtocolGuard } from "../ToolCallProtocolGuard.ts";
 import { loadAttachments } from "./attachments.ts";
 import type {
 	ByokConversationStore,
@@ -357,7 +358,8 @@ export class ByokClient implements AgentClient {
 		});
 
 		try {
-			for await (const event of adapter.stream(
+			const protocol = new ToolCallProtocolGuard();
+			for await (const rawEvent of adapter.stream(
 				{
 					model: thread.model,
 					systemPrompt: thread.systemPrompt,
@@ -369,9 +371,14 @@ export class ByokClient implements AgentClient {
 				},
 				key,
 			)) {
+				const event = protocol.accept(rawEvent);
 				events++;
 				if (event.kind === "assistant_delta") text += event.text;
-				if (event.kind === "tool_ready") calls.push(event.call);
+				if (
+					event.kind === "tool_ready" &&
+					!calls.some((call) => call.id === event.call.id)
+				)
+					calls.push(event.call);
 				if (event.kind === "completed") {
 					terminal = true;
 					if (event.finalText) text = event.finalText;
@@ -379,6 +386,7 @@ export class ByokClient implements AgentClient {
 					if (warning) yield { kind: "warning", message: warning };
 				}
 				if (event.kind === "requires_action") {
+					calls.splice(0, calls.length, ...event.calls);
 					terminal = true;
 					providerMetadata = event.providerMetadata;
 					const warning = await commit();
@@ -389,6 +397,7 @@ export class ByokClient implements AgentClient {
 					error = event.error;
 				}
 				yield event;
+				if (event.kind === "failed") return;
 			}
 			if (!terminal) {
 				throw new ByokError(

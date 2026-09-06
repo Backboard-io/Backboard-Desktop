@@ -20,7 +20,7 @@ import { IWorkbenchEnvironmentService } from '../../../../workbench/services/env
 import { IWorkbenchLayoutService, Parts } from '../../../../workbench/services/layout/browser/layoutService.js';
 import { Menus } from '../../../browser/menus.js';
 import { SessionsCategories } from '../../../common/categories.js';
-import { CanGoBackContext, CanGoBackFromSubagentContext, CanGoForwardContext, ChatSessionProviderIdContext, MultipleSessionsVisibleContext, SessionIsArchivedContext, SessionIsCreatedContext, SessionIsMaximizedContext, SessionIsStickyContext, SessionsFocusContext, SessionsWelcomeVisibleContext } from '../../../common/contextkeys.js';
+import { CanGoBackContext, CanGoBackFromSubagentContext, CanGoForwardContext, ChatSessionProviderIdContext, MultipleSessionsVisibleContext, SessionIsCreatedContext, SessionIsMaximizedContext, SessionIsStickyContext, SessionsFocusContext, SessionsWelcomeVisibleContext } from '../../../common/contextkeys.js';
 import { ANY_AGENT_HOST_PROVIDER_RE } from '../../../common/agentHostSessionsProvider.js';
 import { IActiveSession } from '../../../services/sessions/common/sessionsManagement.js';
 import { ISessionsService } from '../../../services/sessions/browser/sessionsService.js';
@@ -397,12 +397,6 @@ registerAction2(class TogglePinSessionAction extends Action2 {
 				icon: Codicon.pinned,
 				title: localize('chatCompositeBar.unpin', "Unpin Session"),
 			},
-			menu: {
-				id: Menus.SessionBarToolbar,
-				group: '1_session',
-				order: 10,
-				when: ContextKeyExpr.and(SessionIsCreatedContext, SessionIsArchivedContext.negate()),
-			},
 		});
 	}
 
@@ -457,11 +451,6 @@ registerAction2(class CloseSessionAction extends Action2 {
 			title: localize2('chatCompositeBar.close', "Close"),
 			icon: Codicon.close,
 			menu: [{
-				id: Menus.SessionBarToolbar,
-				when: ContextKeyExpr.or(SessionIsCreatedContext, MultipleSessionsVisibleContext),
-				group: '1_session',
-				order: 30,
-			}, {
 				id: Menus.SessionHeaderContext,
 				when: ContextKeyExpr.or(SessionIsCreatedContext, MultipleSessionsVisibleContext),
 				group: '1_view',

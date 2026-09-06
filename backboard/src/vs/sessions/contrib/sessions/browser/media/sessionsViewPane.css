@@ -774,3 +774,9 @@
 	outline: 1px dashed var(--vscode-contrastActiveBorder, var(--vscode-contrastBorder));
 	outline-offset: -1px;
 }
+
+.agent-sessions-simple-actions .agent-sessions-sidebar-action.active {
+	background: var(--vscode-list-activeSelectionBackground);
+	color: var(--vscode-list-activeSelectionForeground);
+	border-radius: 9px;
+}

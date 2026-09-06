@@ -149,6 +149,18 @@ async function* streamAnthropic(
 	if (request.tools.length > 0) body.tools = toAnthropicTools(request.tools);
 	applyAnthropicThinking(body, request, maxTokens);
 
+	yield {
+		kind: "thinking_resolved",
+		requested: request.thinking,
+		effective: {
+			thinking: body.thinking ?? "provider-default",
+			output_config: body.output_config,
+		},
+		provider: "anthropic",
+		model: request.model,
+		reason: "anthropic-model-capability-mapping",
+	};
+
 	const blocks = new Map<number, PendingToolBlock>();
 	const toolCalls: ProviderToolCall[] = [];
 	let inputTokens = 0;
@@ -196,9 +208,18 @@ async function* streamAnthropic(
 				yield { kind: "activity" };
 				continue;
 			}
+			if (!block.id || !block.name || blocks.has(index)) {
+				yield {
+					kind: "failed",
+					error:
+						"Tool protocol error: missing block identity or repeated active block index",
+					retryable: false,
+				};
+				return;
+			}
 			const pending: PendingToolBlock = {
-				id: block.id ?? `toolu_${index}`,
-				name: block.name ?? "",
+				id: block.id,
+				name: block.name,
 				json: "",
 			};
 			blocks.set(index, pending);
@@ -231,7 +252,15 @@ async function* streamAnthropic(
 			// signature_delta is opaque continuation state, not display text.
 			if (delta.type === "input_json_delta" && index !== null) {
 				const pending = blocks.get(index);
-				if (pending) pending.json += delta.partial_json ?? "";
+				if (!pending) {
+					yield {
+						kind: "failed",
+						error: "Tool protocol error: input delta has no active tool block",
+						retryable: false,
+					};
+					return;
+				}
+				pending.json += delta.partial_json ?? "";
 			}
 			yield { kind: "activity" };
 			continue;

@@ -44,9 +44,9 @@ interface CheckpointArrival<TRequest> {
 }
 
 /**
- * An explicit participant barrier for one disjoint mutation wave. Every
- * pre-image is captured and flushed in one recorder call before any wave
- * member mutates; post-images use the same ordered boundary after commits.
+ * Coalesces ready captures for one disjoint mutation wave. Each participant
+ * awaits its durable pre-images before writing and its post-images before
+ * releasing its locks. Never wait for a peer that may be blocked on those locks.
  */
 class CheckpointMutationBatch implements MutationCheckpointBatch {
 	private readonly pre: ParticipantPhase<RecordPreImageRequest>;
@@ -173,13 +173,16 @@ class RoundMutationDiagnosticsBatch implements MutationDiagnosticsBatch {
 
 class ParticipantPhase<TRequest> {
 	private readonly participants: ReadonlySet<string>;
-	private readonly participantOrder: readonly string[];
-	private readonly arrivals = new Map<string, CheckpointArrival<TRequest>>();
-	private readonly settled = new Set<string>();
-	private readonly operation: Promise<void>;
-	private resolveOperation!: () => void;
-	private rejectOperation!: (error: unknown) => void;
-	private started = false;
+	private readonly pending = new Map<
+		string,
+		{
+			arrival: CheckpointArrival<TRequest>;
+			resolve: () => void;
+			reject: (error: unknown) => void;
+		}
+	>();
+	private readonly operations = new Map<string, Promise<void>>();
+	private scheduled = false;
 
 	constructor(
 		participants: readonly string[],
@@ -187,56 +190,58 @@ class ParticipantPhase<TRequest> {
 			arrivals: ReadonlyMap<string, CheckpointArrival<TRequest>>,
 		) => Promise<void>,
 	) {
-		this.participantOrder = [...participants];
 		this.participants = new Set(participants);
-		this.operation = new Promise<void>((resolvePromise, rejectPromise) => {
-			this.resolveOperation = resolvePromise;
-			this.rejectOperation = rejectPromise;
-		});
 	}
 
-	async arrive(
+	arrive(
 		toolCallId: string,
 		arrival: CheckpointArrival<TRequest>,
 	): Promise<void> {
-		this.assertParticipant(toolCallId);
-		if (!this.arrivals.has(toolCallId)) this.arrivals.set(toolCallId, arrival);
-		this.startIfReady();
-		await this.operation;
-	}
-
-	settle(toolCallId: string): void {
-		if (!this.participants.has(toolCallId) || this.arrivals.has(toolCallId)) {
-			return;
-		}
-		this.settled.add(toolCallId);
-		this.startIfReady();
-	}
-
-	private startIfReady(): void {
-		if (
-			this.started ||
-			this.arrivals.size + this.settled.size < this.participants.size
-		) {
-			return;
-		}
-		this.started = true;
-		const orderedArrivals = new Map(
-			this.participantOrder.flatMap((participant) => {
-				const arrival = this.arrivals.get(participant);
-				return arrival ? [[participant, arrival] as const] : [];
-			}),
-		);
-		void this.run(orderedArrivals).then(
-			() => this.resolveOperation(),
-			(error) => this.rejectOperation(error),
-		);
-	}
-
-	private assertParticipant(toolCallId: string): void {
 		if (!this.participants.has(toolCallId)) {
 			throw new Error(`Unknown mutation checkpoint participant: ${toolCallId}`);
 		}
+		const existing = this.operations.get(toolCallId);
+		if (existing) return existing;
+		const operation = new Promise<void>((resolve, reject) => {
+			this.pending.set(toolCallId, { arrival, resolve, reject });
+		});
+		this.operations.set(toolCallId, operation);
+		if (!this.scheduled) {
+			this.scheduled = true;
+			// Coalesce this event-loop turn, without a peer barrier. A worker
+			// integration (or another session's patch) can reserve several paths
+			// between two calls in this wave. Waiting for both calls while holding
+			// either path would create a lock/checkpoint cycle.
+			setImmediate(() => this.flushReady());
+		}
+		return operation;
+	}
+
+	settle(_toolCallId: string): void {
+		// An absent/failed participant cannot hold up a ready capture.
+	}
+
+	private flushReady(): void {
+		this.scheduled = false;
+		const pending = new Map(this.pending);
+		this.pending.clear();
+		const ordered = new Map(
+			[...this.participants].flatMap((id) => {
+				const item = pending.get(id);
+				return item ? [[id, item.arrival] as const] : [];
+			}),
+		);
+		// The recorder orders journal appends; disjoint captures can perform
+		// their filesystem reads concurrently. Each caller still awaits durability.
+		const operation = this.run(ordered);
+		void operation.then(
+			() => {
+				for (const item of pending.values()) item.resolve();
+			},
+			(error) => {
+				for (const item of pending.values()) item.reject(error);
+			},
+		);
 	}
 }
 

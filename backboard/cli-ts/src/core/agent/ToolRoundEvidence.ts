@@ -7,40 +7,28 @@ export function summarizeToolRound(
 	ToolRoundThinkingEvidence,
 	"index" | "consecutiveFailureCount" | "maxUsed"
 > {
-	const hadToolError = outputs.some(
-		(output) =>
-			output.metadata?.error === true || output.output.startsWith("Error:"),
-	);
-	const hadNonZeroExit = outputs.some((output) =>
-		hasNonZeroExitCode(output.output),
-	);
-	const hadTimeout = outputs.some((output) =>
-		output.output.includes("[timed out]"),
-	);
-	const hadWriteOrExecute = outputs.some(
-		(output) =>
-			output.metadata?.readOnly === false ||
-			output.metadata?.name.toLowerCase() === "execute",
-	);
-	const readOnlyOnly =
-		outputs.length > 0 &&
-		outputs.every((output) => output.metadata?.readOnly === true);
 	return {
-		readOnlyOnly,
-		hadWriteOrExecute,
-		hadToolError,
-		hadNonZeroExit,
-		hadTimeout,
+		readOnlyOnly:
+			outputs.length > 0 && outputs.every((o) => o.metadata?.readOnly === true),
+		hadWriteOrExecute: outputs.some((o) => o.metadata?.readOnly === false),
+		hadToolError: outputs.some((o) => o.metadata?.error === true),
+		hadNonZeroExit: outputs.some(
+			(o) =>
+				typeof o.metadata?.exitCode === "number" &&
+				o.metadata.exitCode !== 0 &&
+				o.metadata.outcome !== "no_match" &&
+				o.metadata.outcome !== "partial",
+		),
+		hadTimeout: outputs.some((o) => o.metadata?.timedOut === true),
+		// Mechanical failures need a repair or a blocker, not more reasoning.
+		hadSemanticFailure: outputs.some(
+			(o) =>
+				o.metadata?.failureCategory === "execution" &&
+				o.metadata?.validation === "failed",
+		),
 	};
 }
 
 export function toolRoundFailed(outputs: ToolOutput[]): boolean {
-	const summary = summarizeToolRound(outputs);
-	return summary.hadToolError || summary.hadNonZeroExit || summary.hadTimeout;
-}
-
-function hasNonZeroExitCode(output: string): boolean {
-	const match = /\bexit code:\s*(\d+)\b/i.exec(output);
-	if (!match?.[1]) return false;
-	return Number(match[1]) !== 0;
+	return summarizeToolRound(outputs).hadSemanticFailure === true;
 }

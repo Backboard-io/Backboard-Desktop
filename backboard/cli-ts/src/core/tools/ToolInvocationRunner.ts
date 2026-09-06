@@ -4,11 +4,18 @@ import {
 	type GateResult,
 	resolveToolPermissions,
 } from "../permissions/resolveToolPermission.ts";
+import { isSafeCommand } from "../permissions/safeCommands.ts";
 import { createMutationExecutionMetadata } from "./MutationBatchCoordinator.ts";
 import { throwIfAborted } from "./ToolAbort.ts";
 import type { MutationLockTurn, ToolContext } from "./ToolContext.ts";
 import { toolResultEvent, toolStartEvent } from "./ToolEventFactory.ts";
 import type { ExecutablePlanEntry } from "./ToolExecutionPlanner.ts";
+import {
+	executionFailed,
+	isValidationCommand,
+	type ToolExecutionMetadata,
+	toolFailureMetadata,
+} from "./ToolFailure.ts";
 import {
 	mergeHookContext,
 	normalizeAbort,
@@ -156,7 +163,12 @@ export class ToolInvocationRunner {
 				output: {
 					tool_call_id: ref.id,
 					output: message,
-					metadata: { name: ref.name, readOnly: false, error: true },
+					metadata: {
+						name: entry.tool.name,
+						readOnly: false,
+						error: true,
+						...toolFailureMetadata(err),
+					},
 				},
 			};
 		}
@@ -174,9 +186,11 @@ export class ToolInvocationRunner {
 					tool_call_id: ref.id,
 					output: message,
 					metadata: {
-						name: ref.name,
+						name: entry.tool.name,
 						readOnly: entry.tool.isReadOnly(hookInput),
 						error: true,
+						failureCategory: "permission",
+						retryable: false,
 					},
 				},
 			};
@@ -199,9 +213,11 @@ export class ToolInvocationRunner {
 				tool_call_id: ref.id,
 				output: message,
 				metadata: {
-					name: ref.name,
+					name: entry.tool.name,
 					readOnly: entry.tool.isReadOnly(hookInput),
 					error: true,
+					failureCategory: "permission",
+					retryable: false,
 				},
 			};
 		}
@@ -214,25 +230,82 @@ export class ToolInvocationRunner {
 			});
 			// A completion after cancel stays silent; its output is discarded.
 			throwIfAborted(ctx.signal);
+			const execution: ToolExecutionMetadata = {
+				...(result.terminalOutput && {
+					exitCode: result.terminalOutput.exitCode,
+					timedOut: result.terminalOutput.timedOut,
+				}),
+				...result.execution,
+			};
+			const command = (hookInput as { command?: unknown } | null)?.command;
+			if (
+				entry.tool.isReadOnly(hookInput) ||
+				(entry.tool.name.toLowerCase() === "execute" &&
+					typeof command === "string" &&
+					isSafeCommand(command))
+			) {
+				execution.mutated = false;
+			}
+			if (entry.tool.agentName === "agent") {
+				const status = (result.data as { status?: string } | null)?.status;
+				if (
+					status &&
+					!["completed", "integrated", "running"].includes(status)
+				) {
+					execution.failureCategory =
+						status === "cancelled"
+							? "cancelled"
+							: status === "rejected"
+								? "unavailable"
+								: "execution";
+					execution.cancelled = status === "cancelled";
+					execution.retryable = false;
+				}
+			}
+			const failed = executionFailed(execution);
+			execution.outcome = failed ? "failure" : (execution.outcome ?? "success");
+			if (failed && !execution.failureCategory) {
+				execution.failureCategory = execution.cancelled
+					? "cancelled"
+					: execution.timedOut
+						? "timeout"
+						: execution.exitCode === 127
+							? "unavailable"
+							: execution.exitCode === 126
+								? "permission"
+								: "execution";
+			}
+			if (
+				entry.tool.name.toLowerCase() === "execute" &&
+				isValidationCommand(hookInput) &&
+				typeof execution.exitCode === "number"
+			) {
+				execution.validation = failed ? "failed" : "passed";
+			}
 			const post = await this.hooks.applyPostToolHooks(
 				ref,
 				hookInput,
 				result.forLLM,
-				false,
+				failed,
 				ctx,
 			);
 			// The post-hook await is another suspension point - a cancel that
 			// lands while it runs must not emit tool:result or tool:error.
 			throwIfAborted(ctx.signal);
 			if (post.denied) {
-				this.emitError(ref.id, entry.tool.displayName, post.output);
+				this.emitError(ref.id, entry.tool.displayName, post.output, {
+					failureCategory: "permission",
+					retryable: false,
+				});
 				return {
 					tool_call_id: ref.id,
 					output: post.output,
 					metadata: {
-						name: ref.name,
+						name: entry.tool.name,
 						readOnly: entry.tool.isReadOnly(hookInput),
 						error: true,
+						failureCategory: "permission",
+						retryable: false,
 					},
 				};
 			}
@@ -252,15 +325,17 @@ export class ToolInvocationRunner {
 					result.detailLines,
 					result.fileEdits,
 					result.terminalOutput,
+					execution,
 				),
 			);
 			return {
 				tool_call_id: ref.id,
 				output,
 				metadata: {
-					name: ref.name,
+					name: entry.tool.name,
 					readOnly: entry.tool.isReadOnly(hookInput),
-					error: false,
+					error: failed,
+					...execution,
 				},
 			};
 		} catch (err) {
@@ -277,25 +352,37 @@ export class ToolInvocationRunner {
 			const message = post.denied
 				? post.output
 				: mergeHookContext(post.output, preToolContext, post.additionalContext);
-			this.emitError(ref.id, entry.tool.displayName, message);
+			this.emitError(
+				ref.id,
+				entry.tool.displayName,
+				message,
+				toolFailureMetadata(err),
+			);
 			return {
 				tool_call_id: ref.id,
 				output: message,
 				metadata: {
-					name: ref.name,
+					name: entry.tool.name,
 					readOnly: entry.tool.isReadOnly(hookInput),
 					error: true,
+					...toolFailureMetadata(err),
 				},
 			};
 		}
 	}
 
-	private emitError(toolCallId: string, name: string, error: string): void {
+	private emitError(
+		toolCallId: string,
+		name: string,
+		error: string,
+		execution?: ToolExecutionMetadata,
+	): void {
 		this.bus.emit({
 			type: "tool:error",
 			toolCallId,
 			name,
 			error,
+			execution,
 		});
 	}
 }

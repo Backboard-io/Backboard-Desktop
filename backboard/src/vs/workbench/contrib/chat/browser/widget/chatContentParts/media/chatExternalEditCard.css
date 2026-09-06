@@ -72,6 +72,7 @@
 	}
 
 	&:hover .chat-external-edit-copy,
+	&:focus-within .chat-external-edit-copy,
 	&.chat-external-edit-expanded .chat-external-edit-copy,
 	.chat-external-edit-copy:focus-visible {
 		opacity: 1;
@@ -91,8 +92,15 @@
 		overflow-y: auto;
 		overflow-x: auto;
 		font-family: var(--monaco-monospace-font);
-		font-size: 11px;
+		font-size: 12px;
 		line-height: 1.6;
+		tab-size: 4;
+		scrollbar-width: thin;
+
+		&:focus-visible {
+			outline: 1px solid var(--vscode-focusBorder);
+			outline-offset: -1px;
+		}
 	}
 
 	&.chat-external-edit-expanded .chat-external-edit-diff-body {
@@ -101,6 +109,8 @@
 
 	.chat-external-edit-diff-row {
 		display: flex;
+		width: max-content;
+		min-width: 100%;
 		align-items: stretch;
 		white-space: pre;
 
@@ -111,6 +121,23 @@
 			text-align: right;
 			color: var(--vscode-editorLineNumber-foreground);
 			user-select: none;
+			font-variant-numeric: tabular-nums;
+		}
+
+		.chat-external-edit-diff-marker {
+			flex: 0 0 16px;
+			width: 16px;
+			text-align: center;
+			user-select: none;
+			font-weight: 600;
+		}
+
+		&.added .chat-external-edit-diff-marker {
+			color: var(--vscode-chat-linesAddedForeground);
+		}
+
+		&.removed .chat-external-edit-diff-marker {
+			color: var(--vscode-chat-linesRemovedForeground);
 		}
 
 		.chat-external-edit-diff-text {

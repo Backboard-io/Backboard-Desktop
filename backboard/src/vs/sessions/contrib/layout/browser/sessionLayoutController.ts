@@ -82,7 +82,7 @@ export class LayoutController extends Disposable {
 		super();
 
 		this._isOptimusWindow = environmentService.isOptimusWindow;
-		this._isSimpleWindow = environmentService.isSessionsWindow && !environmentService.isJarvisWindow && !environmentService.isOptimusWindow;
+		this._isSimpleWindow = environmentService.isSessionsWindow && !environmentService.isOptimusWindow;
 
 		this._loadState();
 

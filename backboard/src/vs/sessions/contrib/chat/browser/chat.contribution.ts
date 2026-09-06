@@ -43,6 +43,7 @@ import { AGENT_SESSIONS_SCOPED_INPUT_HISTORY_SETTING } from './sessionsChatHisto
 import '../../sessions/browser/mobile/mobileOverlayContribution.js';
 import { Registry } from '../../../../platform/registry/common/platform.js';
 import { EditorAreaFocusContext } from '../../../../workbench/common/contextkeys.js';
+import { IWorkbenchLayoutService } from '../../../../workbench/services/layout/browser/layoutService.js';
 import { IWorkbenchEnvironmentService } from '../../../../workbench/services/environment/common/environmentService.js';
 import { NEW_SESSION_ACTION_ID } from '../common/constants.js';
 import { ISimpleModeBackgroundService, SimpleModeBackgroundImageSetContext, SimpleModeBackgroundService } from './simpleModeBackgroundService.js';
@@ -160,6 +161,7 @@ class SimpleModeBackgroundWorkbenchContribution extends Disposable implements IW
 
 	constructor(
 		@ISimpleModeBackgroundService private readonly simpleModeBackgroundService: ISimpleModeBackgroundService,
+		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
 	) {
 		super();
 
@@ -168,13 +170,9 @@ class SimpleModeBackgroundWorkbenchContribution extends Disposable implements IW
 	}
 
 	private applyBackground(resource: URI | undefined): void {
-		// This contribution also registers in non-sessions windows, and it can
-		// run before the sessions workbench has rendered; only the sessions
-		// workbench paints the image, so resolve the root lazily.
-		const workbench = document.querySelector<HTMLElement>('.monaco-workbench.agent-sessions-workbench');
-		if (!workbench) {
-			return;
-		}
+		// The layout root exists before its classes are attached during startup.
+		// Applying directly also restores the image before the first chat renders.
+		const workbench = this.layoutService.mainContainer;
 
 		workbench.classList.toggle('sessions-chat-custom-background', !!resource);
 		if (resource) {

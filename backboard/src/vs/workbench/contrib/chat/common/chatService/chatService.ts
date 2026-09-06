@@ -1057,9 +1057,13 @@ export interface IChatSubagentToolInvocationData {
 	modelName?: string;
 	/** The launcher returned a handle while this child continued independently. */
 	detached?: boolean;
+	/** The cli-ts host emits child terminal state only after durable integration finishes. */
+	terminalAfterIntegration?: boolean;
 	/** Durable isolated-worker state, when the subagent owns a Git worktree. */
 	workerId?: string;
-	workerStatus?: 'Running' | 'Completed' | 'Failed' | 'Cancelled' | 'Integrating' | 'Integrated' | 'Conflict';
+	/** Monotonic durable task revision; older projections cannot overwrite it. */
+	workerRevision?: number;
+	workerStatus?: 'Queued' | 'Running' | 'Completed' | 'Failed' | 'Cancelled' | 'Integrating' | 'Integrated' | 'Conflict';
 	branch?: string;
 	worktreePath?: string;
 	changedFileCount?: number;

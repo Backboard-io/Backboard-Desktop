@@ -3,20 +3,19 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import '../browser/parts/media/optimusChrome.css';
+import { $, addDisposableListener, append, EventHelper, EventType, getWindow } from '../../base/browser/dom.js';
 import { Codicon } from '../../base/common/codicons.js';
-import { $, addDisposableListener, append, EventHelper, EventType } from '../../base/browser/dom.js';
 import { Event } from '../../base/common/event.js';
-import { Disposable } from '../../base/common/lifecycle.js';
+import { Disposable, toDisposable } from '../../base/common/lifecycle.js';
 import { URI, UriComponents } from '../../base/common/uri.js';
 import { localize, localize2 } from '../../nls.js';
 import { Action2, registerAction2 } from '../../platform/actions/common/actions.js';
-import { toAction } from '../../base/common/actions.js';
 import { ServicesAccessor } from '../../platform/instantiation/common/instantiation.js';
 import { SyncDescriptor } from '../../platform/instantiation/common/descriptors.js';
 import { Registry } from '../../platform/registry/common/platform.js';
 import { registerIcon } from '../../platform/theme/common/iconRegistry.js';
 import { ICommandService } from '../../platform/commands/common/commands.js';
-import { IContextMenuService } from '../../platform/contextview/browser/contextView.js';
 import { ViewPaneContainer } from '../../workbench/browser/parts/views/viewPaneContainer.js';
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../workbench/common/contributions.js';
 import { IViewContainersRegistry, IViewDescriptor, IViewsRegistry, ViewContainer, ViewContainerLocation, Extensions as ViewContainerExtensions, WindowEnablement } from '../../workbench/common/views.js';
@@ -28,7 +27,7 @@ import { getOptimusChatPanelWidth } from '../../sessions/browser/layoutPolicy.js
 import { ISessionsManagementService } from '../../sessions/services/sessions/common/sessionsManagement.js';
 import { ISessionsService } from '../../sessions/services/sessions/browser/sessionsService.js';
 import { RightWorkbenchCommandId } from '../../sessions/contrib/rightWorkbench/browser/rightWorkbench.js';
-import { OPTIMUS_CLOSE_SESSION_COMMAND_ID, OPTIMUS_DELETE_SESSION_COMMAND_ID, OPTIMUS_FOCUS_SESSION_COMMAND_ID, OPTIMUS_NEW_SESSION_COMMAND_ID, OPTIMUS_SET_SEARCH_QUERY_COMMAND_ID, OPTIMUS_SHOW_DASHBOARD_COMMAND_ID, OPTIMUS_SHOW_DASHBOARD_CONTENT_COMMAND_ID, OPTIMUS_SHOW_FOCUSED_SESSION_CONTENT_COMMAND_ID } from '../browser/parts/optimusGridPart.js';
+import { OPTIMUS_CLOSE_SESSION_COMMAND_ID, OPTIMUS_DELETE_SESSION_COMMAND_ID, OPTIMUS_FOCUS_SESSION_COMMAND_ID, OPTIMUS_NEW_SESSION_COMMAND_ID, OPTIMUS_SHOW_DASHBOARD_COMMAND_ID, OPTIMUS_SHOW_DASHBOARD_CONTENT_COMMAND_ID, OPTIMUS_SHOW_FOCUSED_SESSION_CONTENT_COMMAND_ID } from '../browser/parts/optimusGridPart.js';
 
 // Toolbar/context-menu actions used by the reused SessionsView. In the Simple
 // window these are imported by its sessions.contribution; the Optimus manifest
@@ -73,16 +72,8 @@ viewsRegistry.registerViews([optimusSessionsViewDescriptor], optimusSessionsView
 //#endregion
 
 
-// The sessions-window variants of the mode-switching commands (registered in
-// sessions.desktop.contribution, which is part of the Optimus manifest). The
-// editor-workbench `workbench.action.openAgentsWindow` command is gated on
-// NOT being a sessions window, so it cannot be used from here. Both commands
-// transform the CURRENT window in place (Simple reuses the window for the
-// agents workspace; Editor opens the active session's folder in it) — mode
-// switching moves one window between modes rather than juggling windows.
 const OPEN_SIMPLE_WINDOW_COMMAND_ID = 'agents.openAgentsWindow';
 const OPEN_EDITOR_WINDOW_COMMAND_ID = 'agents.openSessionInVSCode';
-
 
 //#region --- actions
 
@@ -116,7 +107,7 @@ async function revealOptimusWorkspace(layoutService: IWorkbenchLayoutService, co
 async function revealOptimusEditorTools(layoutService: IWorkbenchLayoutService, commandService: ICommandService): Promise<void> {
 	showOptimusCenter(layoutService);
 	layoutService.setAuxiliaryBarMaximized(false);
-	await commandService.executeCommand(RightWorkbenchCommandId.OpenFiles, { editorSidebar: true });
+	await commandService.executeCommand(RightWorkbenchCommandId.OpenEditor);
 	setOptimusRightPanelWidth(layoutService);
 }
 
@@ -310,66 +301,58 @@ class OptimusChromeContribution extends Disposable implements IWorkbenchContribu
 	static readonly ID = 'workbench.contrib.optimusChrome';
 
 	private readonly chrome: HTMLElement;
+	private readonly modeButton: HTMLElement;
+	private readonly panelActions: HTMLElement;
 	private readonly sidebarButton: HTMLButtonElement;
 	private readonly secondaryButton: HTMLButtonElement;
-	private readonly backButton: HTMLButtonElement;
 
 	constructor(
 		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
 		@ICommandService private readonly commandService: ICommandService,
-		@IContextMenuService private readonly contextMenuService: IContextMenuService,
 	) {
 		super();
 
 		this.layoutService.mainContainer.querySelector('.optimus-window-chrome')?.remove();
-		const chrome = append(this.layoutService.mainContainer, $('div.optimus-window-chrome'));
+		const chrome = $('div.optimus-window-chrome.optimus-inline-chrome');
 		this.chrome = chrome;
+		this._register(toDisposable(() => chrome.remove()));
 
-		const modeButton = append(chrome, $('button.optimus-window-chrome-mode')) as HTMLButtonElement;
-		modeButton.type = 'button';
-		modeButton.title = localize('optimusChrome.mode', "Switch Backboard mode");
-		modeButton.setAttribute('aria-haspopup', 'menu');
-		modeButton.setAttribute('aria-expanded', 'false');
-		append(modeButton, $('span.optimus-window-chrome-mode-icon.codicon.codicon-layout'));
-		append(modeButton, $('span.optimus-window-chrome-mode-label')).textContent = localize('optimusChrome.advanced', "Advanced");
-		append(modeButton, $('span.optimus-window-chrome-mode-chevron.codicon.codicon-chevron-down'));
+		const modeButton = this.modeButton = append(chrome, $('div.backboard-mode-segments'));
+		this._register(toDisposable(() => modeButton.remove()));
+		modeButton.setAttribute('role', 'group');
+		modeButton.setAttribute('aria-label', localize('optimusChrome.mode', "Switch Backboard mode"));
+		for (const mode of [
+			{ label: localize('optimusChrome.agent', "Simple"), command: OPEN_SIMPLE_WINDOW_COMMAND_ID, active: false },
+			{ label: localize('optimusChrome.editor', "Editor"), command: OPEN_EDITOR_WINDOW_COMMAND_ID, active: false },
+			{ label: localize('optimusChrome.advanced', "Advanced"), command: '', active: true },
+		]) {
+			const button = append(modeButton, $('button.backboard-mode-segment'));
+			button.setAttribute('type', 'button');
+			button.textContent = mode.label;
+			button.setAttribute('aria-pressed', String(mode.active));
+			this._register(addDisposableListener(button, EventType.CLICK, event => {
+				EventHelper.stop(event, true);
+				if (!mode.active) {
+					void this.commandService.executeCommand(mode.command);
+				}
+			}));
+		}
 
-		const navigationCluster = append(chrome, $('div.optimus-window-navigation-cluster'));
-		const navigation = append(navigationCluster, $('div.optimus-window-navigation'));
-		this.backButton = append(navigation, $('button.optimus-window-nav-button.codicon.codicon-arrow-left')) as HTMLButtonElement;
-		this.backButton.type = 'button';
-		this.backButton.setAttribute('aria-label', localize('optimusChrome.backToSessions', "Back to Sessions"));
-		this._register(addDisposableListener(this.backButton, EventType.CLICK, e => {
-			EventHelper.stop(e, true);
-			this.commandService.executeCommand(OPTIMUS_SHOW_DASHBOARD_COMMAND_ID);
-		}));
-
-		const commandCenter = append(navigationCluster, $('div.optimus-window-command-center'));
-		append(commandCenter, $('span.codicon.codicon-search.optimus-window-command-icon'));
-		const commandInput = append(commandCenter, $('input.optimus-window-command-input')) as HTMLInputElement;
-		commandInput.type = 'search';
-		commandInput.placeholder = localize('optimusChrome.search.placeholder', "Search sessions...");
-		commandInput.setAttribute('aria-label', localize('optimusChrome.search.ariaLabel', "Search Sessions"));
-		this._register(addDisposableListener(commandInput, EventType.INPUT, () => {
-			this.commandService.executeCommand(OPTIMUS_SET_SEARCH_QUERY_COMMAND_ID, commandInput.value);
-		}));
-		const shortcuts = append(commandCenter, $('div.optimus-window-command-shortcuts'));
-		append(shortcuts, $('span.optimus-window-command-key')).textContent = '⌘';
-		append(shortcuts, $('span.optimus-window-command-key')).textContent = 'A';
-
-		const actions = append(chrome, $('div.optimus-window-actions'));
+		const actions = this.panelActions = append(chrome, $('div.optimus-window-actions'));
 		this.sidebarButton = append(actions, $('button.optimus-window-chrome-button.optimus-window-chrome-sidebar.codicon'));
 		this.sidebarButton.type = 'button';
 		this.sidebarButton.title = localize('optimusChrome.toggleSidebar', "Toggle left panel");
 		this.sidebarButton.setAttribute('aria-label', this.sidebarButton.title);
 
-		// No view-mode button here: the dashboard's own Board / List switcher is
+		// No view-mode button here: the dashboard's own Board / Kanban switcher is
 		// the labelled control for that, and duplicating it in the chrome gave
 		// two affordances for one piece of state.
 		this.secondaryButton = append(actions, $('button.optimus-window-chrome-button.optimus-window-chrome-secondary.codicon')) as HTMLButtonElement;
 		this.secondaryButton.type = 'button';
 		this.secondaryButton.title = localize('optimusChrome.toggleRightPanel', "Toggle right panel");
 		this.secondaryButton.setAttribute('aria-label', this.secondaryButton.title);
+		this._register(toDisposable(() => this.sidebarButton.remove()));
+		this._register(toDisposable(() => this.secondaryButton.remove()));
 
 		this._register(addDisposableListener(this.sidebarButton, EventType.CLICK, e => {
 			EventHelper.stop(e, true);
@@ -385,42 +368,71 @@ class OptimusChromeContribution extends Disposable implements IWorkbenchContribu
 				void revealOptimusEditorTools(this.layoutService, this.commandService);
 			}
 		}));
-		this._register(addDisposableListener(modeButton, EventType.CLICK, e => {
-			EventHelper.stop(e, true);
-			modeButton.setAttribute('aria-expanded', 'true');
-			this.contextMenuService.showContextMenu({
-				getAnchor: () => modeButton,
-				// Same order as the Simple window's mode switcher menu.
-				getActions: () => [
-					toAction({
-						id: 'optimus.mode.editor',
-						label: localize('optimusChrome.editor', "Editor"),
-						run: () => this.commandService.executeCommand(OPEN_EDITOR_WINDOW_COMMAND_ID),
-					}),
-					toAction({
-						id: 'optimus.mode.advanced',
-						label: localize('optimusChrome.advanced', "Advanced"),
-						checked: true,
-						run: () => undefined,
-					}),
-					toAction({
-						id: 'optimus.mode.simple',
-						label: localize('optimusChrome.simple', "Simple"),
-						run: () => this.commandService.executeCommand(OPEN_SIMPLE_WINDOW_COMMAND_ID),
-					}),
-				],
-				onHide: () => modeButton.setAttribute('aria-expanded', 'false'),
-			});
-		}));
 
 		this._register(this.layoutService.onDidChangePartVisibility(() => this.updateState()));
 		this._register(this.layoutService.onDidLayoutMainContainer(() => this.updateState()));
 		this._register(this.layoutService.onDidChangeAuxiliaryBarMaximized(() => this.updateState()));
+		const dashboard = this.layoutService.mainContainer.querySelector('.optimus-grid-content');
+		if (dashboard) {
+			// Follow dashboard/focused navigation only, never streamed transcript DOM.
+			const observer = new (getWindow(this.layoutService.mainContainer).MutationObserver)(() => this.mountControls());
+			observer.observe(dashboard, { attributes: true, attributeFilter: ['class'] });
+			this._register(toDisposable(() => observer.disconnect()));
+		}
+		const panel = this.layoutService.mainContainer.querySelector('.part.auxiliarybar');
+		if (panel) {
+			const observer = new (getWindow(panel).MutationObserver)(records => {
+				// Reattach after tool headers are rebuilt, ignoring transcript updates.
+				if (!this.secondaryButton.isConnected || records.some(record => [...record.addedNodes].some(node =>
+					node.nodeType === 1 && (node as Element).matches('.sessions-right-workbench-editor-activity, .sessions-right-workbench-header')))) {
+					this.mountControls();
+				}
+			});
+			observer.observe(panel, { childList: true, subtree: true });
+			this._register(toDisposable(() => observer.disconnect()));
+		}
 		this.updateState();
+	}
+
+	private mountControls(): void {
+		const root = this.layoutService.mainContainer;
+		const target = root.querySelector(this.isFocusedSession()
+			? '.optimus-focused-session-header .sessions-panel-header-right'
+			: '.optimus-dashboard-controls');
+		if (target && this.chrome.parentElement !== target) {
+			target.appendChild(this.chrome);
+		}
+		const sidebarVisible = this.layoutService.isVisible(Parts.SIDEBAR_PART);
+		const rightVisible = this.layoutService.isVisible(Parts.AUXILIARYBAR_PART);
+		const modeTarget = sidebarVisible ? root.querySelector('.sidebar-part-header .sessions-panel-header-left') : undefined;
+		if (modeTarget) {
+			if (this.modeButton.parentElement !== modeTarget) {
+				modeTarget.appendChild(this.modeButton);
+			}
+		} else if (this.modeButton.parentElement !== this.chrome) {
+			this.chrome.insertBefore(this.modeButton, this.panelActions);
+		}
+		const placePanelButton = (button: HTMLButtonElement, visible: boolean, selector: string, closeLabel: string, openLabel: string): void => {
+			const header = visible ? root.querySelector(selector) : undefined;
+			const destination = header ?? this.panelActions;
+			if (button.parentElement !== destination) {
+				destination.appendChild(button);
+			}
+			button.classList.toggle('optimus-panel-close', !!header);
+			button.title = visible ? closeLabel : openLabel;
+			button.setAttribute('aria-label', button.title);
+			button.setAttribute('aria-expanded', String(visible));
+		};
+		placePanelButton(this.sidebarButton, sidebarVisible, '.sidebar-part-header .sessions-panel-header-right',
+			localize('optimusChrome.closeLeft', "Close Left Panel"), localize('optimusChrome.openLeft', "Open Left Panel"));
+		placePanelButton(this.secondaryButton, rightVisible, '.part.auxiliarybar .sessions-right-workbench-editor-activity, .part.auxiliarybar .sessions-right-workbench-header',
+			localize('optimusChrome.closeRight', "Close Right Panel"), localize('optimusChrome.openRight', "Open Right Panel"));
+		this.chrome.style.display = this.modeButton.parentElement === this.chrome || this.panelActions.childElementCount > 0 ? '' : 'none';
 	}
 
 	private updateState(): void {
 		const sidebarVisible = this.layoutService.isVisible(Parts.SIDEBAR_PART);
+		this.layoutService.mainContainer.classList.toggle('optimus-sidebar-hidden', !sidebarVisible);
 		const sidebarWidth = sidebarVisible ? this.layoutService.getSize(Parts.SIDEBAR_PART).width : 0;
 		this.chrome.style.setProperty('--optimus-sidebar-width', `${sidebarWidth}px`);
 		this.chrome.classList.toggle('sidebar-visible', sidebarVisible);
@@ -430,12 +442,13 @@ class OptimusChromeContribution extends Disposable implements IWorkbenchContribu
 		const rightPanelVisible = this.layoutService.isVisible(Parts.AUXILIARYBAR_PART);
 		const rightPanelWidth = rightPanelVisible ? this.layoutService.getSize(Parts.AUXILIARYBAR_PART).width : 0;
 		this.chrome.style.setProperty('--optimus-right-workbench-width', `${rightPanelWidth}px`);
-		this.secondaryButton.classList.toggle('codicon-layout-sidebar-right', rightPanelVisible);
+		this.secondaryButton.classList.remove('codicon-layout-sidebar-right');
+		this.secondaryButton.classList.toggle('codicon-close', rightPanelVisible);
 		this.secondaryButton.classList.toggle('codicon-layout-sidebar-right-off', !rightPanelVisible);
 		this.secondaryButton.classList.toggle('checked', rightPanelVisible);
 		const focusedSession = this.isFocusedSession();
 		this.chrome.classList.toggle('focused-session', focusedSession);
-		this.backButton.disabled = !focusedSession;
+		this.mountControls();
 	}
 
 	private isFocusedSession(): boolean {
@@ -443,11 +456,8 @@ class OptimusChromeContribution extends Disposable implements IWorkbenchContribu
 	}
 }
 
-// BlockRestore, not AfterRestored: the window chrome is part of the frame, not
-// something loaded into it. Built on idle after `Restored` it visibly drops in
-// on top of an already-painted window every time the mode is switched. It only
-// touches `mainContainer` and the layout/context-key services, all of which are
-// available this early.
+// The dashboard toolbar exists at BlockRestore; mount its controls before
+// idle work so switching modes does not produce a second chrome row.
 registerWorkbenchContribution2(OptimusChromeContribution.ID, OptimusChromeContribution, WorkbenchPhase.BlockRestore);
 
 //#endregion

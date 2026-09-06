@@ -42,6 +42,7 @@ export interface ToolRoundThinkingEvidence {
 	hadToolError: boolean;
 	hadNonZeroExit: boolean;
 	hadTimeout: boolean;
+	hadSemanticFailure?: boolean;
 	consecutiveFailureCount: number;
 	maxUsed: boolean;
 }
@@ -50,6 +51,7 @@ export interface DynamicThinkingEvidence {
 	phase: ThinkingRequestPhase;
 	requestKind: ThinkingRequestKind;
 	hasDiagnosticText?: boolean;
+	routineTask?: boolean;
 	toolRound?: ToolRoundThinkingEvidence;
 }
 

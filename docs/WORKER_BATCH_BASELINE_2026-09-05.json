@@ -1,0 +1,942 @@
+{
+  "scope": "Frozen pre-batch runtime. Entry-point-only instrumentation made model delay configurable, collected existing performance:timing events, and removed a false assertion that zero-delay provider lifetimes must overlap. Runtime module body unchanged. Source checkout contains unrelated uncommitted edits; SHA is provenance, not complete source identity.",
+  "capturedAt": "2026-09-05",
+  "sourceHead": "ab2cdcc1f589a56b7c9d7f955a79b4cc6d78b259",
+  "bundleSha256": "dc66dbd16e9cbb18cfb18ed2816c48f54a254daa23538c9415024514896e0ea0",
+  "zeroDelay": {
+    "scope": "Offline replay: actual AgentSpawn/AgentWait, child loops, Write tools, clean Git worktrees plus private non-Git/dirty-folder snapshots, integration, durable task stores and snapshot undo; synthetic provider delays, no network or installed-app changes. Clean-Git serial/parallel comparator, not a before/after live-model claim.",
+    "workerCount": 3,
+    "modelDelayMs": 0,
+    "results": [
+      {
+        "mode": "serial",
+        "workspaceKind": "clean-git",
+        "elapsedMs": 4637.688709,
+        "phaseMs": {
+          "worker_queued": {
+            "samples": [
+              0.04258299999992232,
+              0.04737500000010186,
+              0.060124999999970896
+            ],
+            "total": 0.15008299999999508,
+            "maximum": 0.060124999999970896
+          },
+          "worktree_ready": {
+            "samples": [
+              438.14020800000003,
+              314.93899999999985,
+              179.94279199999983
+            ],
+            "total": 933.0219999999997,
+            "maximum": 438.14020800000003
+          },
+          "worker_model": {
+            "samples": [
+              458.27362500000015,
+              175.8941249999998,
+              127.7856670000001
+            ],
+            "total": 761.9534170000001,
+            "maximum": 458.27362500000015
+          },
+          "result_capture": {
+            "samples": [
+              434.27204099999994,
+              320.93820800000003,
+              157.91037499999948
+            ],
+            "total": 913.1206239999995,
+            "maximum": 434.27204099999994
+          },
+          "integration": {
+            "samples": [
+              822.1034580000003,
+              599.5780419999996,
+              397.9513340000003
+            ],
+            "total": 1819.6328340000002,
+            "maximum": 822.1034580000003
+          }
+        },
+        "maxActiveProviderRequests": 1,
+        "providerRequests": 6,
+        "integratedWorkers": 3,
+        "undoVerified": false,
+        "undoCount": 0
+      },
+      {
+        "mode": "parallel",
+        "workspaceKind": "clean-git",
+        "elapsedMs": 1443.6840409999995,
+        "phaseMs": {
+          "worker_queued": {
+            "samples": [
+              0.01712500000030559,
+              0.030624999999417923,
+              0.03949999999986176
+            ],
+            "total": 0.08724999999958527,
+            "maximum": 0.03949999999986176
+          },
+          "worktree_ready": {
+            "samples": [
+              119.54437499999949,
+              163.10533399999986,
+              208.45750000000044
+            ],
+            "total": 491.1072089999998,
+            "maximum": 208.45750000000044
+          },
+          "worker_model": {
+            "samples": [
+              104.48070800000005,
+              103.06862499999988,
+              111.8441670000002
+            ],
+            "total": 319.39350000000013,
+            "maximum": 111.8441670000002
+          },
+          "result_capture": {
+            "samples": [
+              126.25258399999984,
+              128.93608399999994,
+              124.8730000000005
+            ],
+            "total": 380.0616680000003,
+            "maximum": 128.93608399999994
+          },
+          "integration": {
+            "samples": [
+              353.2290840000005,
+              871.7562500000004,
+              822.0383750000001
+            ],
+            "total": 2047.023709000001,
+            "maximum": 871.7562500000004
+          }
+        },
+        "maxActiveProviderRequests": 1,
+        "providerRequests": 6,
+        "integratedWorkers": 3,
+        "undoVerified": false,
+        "undoCount": 0
+      },
+      {
+        "mode": "parallel",
+        "workspaceKind": "clean-git",
+        "elapsedMs": 2238.3229580000007,
+        "phaseMs": {
+          "worker_queued": {
+            "samples": [
+              0.01749999999992724,
+              0.06987500000013824,
+              0.08525000000008731
+            ],
+            "total": 0.1726250000001528,
+            "maximum": 0.08525000000008731
+          },
+          "worktree_ready": {
+            "samples": [
+              122.16541699999925,
+              182.91712499999994,
+              250.55429100000038
+            ],
+            "total": 555.6368329999996,
+            "maximum": 250.55429100000038
+          },
+          "worker_model": {
+            "samples": [
+              140.50304100000085,
+              136.0373329999993,
+              229.7764159999997
+            ],
+            "total": 506.31678999999986,
+            "maximum": 229.7764159999997
+          },
+          "result_capture": {
+            "samples": [
+              258.34100000000035,
+              276.09370899999976,
+              237.03295900000012
+            ],
+            "total": 771.4676680000002,
+            "maximum": 276.09370899999976
+          },
+          "integration": {
+            "samples": [
+              860.439875,
+              1481.5040000000008,
+              1357.7848749999994
+            ],
+            "total": 3699.72875,
+            "maximum": 1481.5040000000008
+          }
+        },
+        "maxActiveProviderRequests": 1,
+        "providerRequests": 6,
+        "integratedWorkers": 3,
+        "undoVerified": false,
+        "undoCount": 0
+      },
+      {
+        "mode": "serial",
+        "workspaceKind": "clean-git",
+        "elapsedMs": 3274.630874999999,
+        "phaseMs": {
+          "worker_queued": {
+            "samples": [
+              0.006333999999696971,
+              0.008208999999624211,
+              0.013542000000597909
+            ],
+            "total": 0.02808499999991909,
+            "maximum": 0.013542000000597909
+          },
+          "worktree_ready": {
+            "samples": [
+              148.0764590000017,
+              134.43608400000085,
+              161.6436250000006
+            ],
+            "total": 444.15616800000316,
+            "maximum": 161.6436250000006
+          },
+          "worker_model": {
+            "samples": [
+              117.74329100000068,
+              107.43833300000006,
+              146.92833299999984
+            ],
+            "total": 372.1099570000006,
+            "maximum": 146.92833299999984
+          },
+          "result_capture": {
+            "samples": [
+              116.67937499999971,
+              121.61441700000069,
+              276.72462500000074
+            ],
+            "total": 515.0184170000011,
+            "maximum": 276.72462500000074
+          },
+          "integration": {
+            "samples": [
+              379.8646659999995,
+              408.14454099999966,
+              810.3514999999989
+            ],
+            "total": 1598.360706999998,
+            "maximum": 810.3514999999989
+          }
+        },
+        "maxActiveProviderRequests": 1,
+        "providerRequests": 6,
+        "integratedWorkers": 3,
+        "undoVerified": false,
+        "undoCount": 0
+      },
+      {
+        "mode": "serial",
+        "workspaceKind": "clean-git",
+        "elapsedMs": 3855.302540999999,
+        "phaseMs": {
+          "worker_queued": {
+            "samples": [
+              0.038125000000945874,
+              0.029624999999214197,
+              0.009040999999342603
+            ],
+            "total": 0.07679099999950267,
+            "maximum": 0.038125000000945874
+          },
+          "worktree_ready": {
+            "samples": [
+              261.03158299999996,
+              241.7811669999992,
+              138.4175409999989
+            ],
+            "total": 641.230290999998,
+            "maximum": 261.03158299999996
+          },
+          "worker_model": {
+            "samples": [
+              170.93425000000025,
+              123.01037499999984,
+              106.97220899999957
+            ],
+            "total": 400.91683399999965,
+            "maximum": 170.93425000000025
+          },
+          "result_capture": {
+            "samples": [
+              246.4483340000006,
+              142.47908300000017,
+              108.67941699999938
+            ],
+            "total": 497.60683400000016,
+            "maximum": 246.4483340000006
+          },
+          "integration": {
+            "samples": [
+              869.9251670000012,
+              410.7648339999996,
+              762.1516670000001
+            ],
+            "total": 2042.841668000001,
+            "maximum": 869.9251670000012
+          }
+        },
+        "maxActiveProviderRequests": 1,
+        "providerRequests": 6,
+        "integratedWorkers": 3,
+        "undoVerified": false,
+        "undoCount": 0
+      },
+      {
+        "mode": "parallel",
+        "workspaceKind": "clean-git",
+        "elapsedMs": 4182.422624999999,
+        "phaseMs": {
+          "worker_queued": {
+            "samples": [
+              0.02704200000152923,
+              0.1405830000003334,
+              0.1602920000004815
+            ],
+            "total": 0.32791700000234414,
+            "maximum": 0.1602920000004815
+          },
+          "worktree_ready": {
+            "samples": [
+              200.23091600000043,
+              286.2614579999972,
+              376.5939580000013
+            ],
+            "total": 863.086331999999,
+            "maximum": 376.5939580000013
+          },
+          "worker_model": {
+            "samples": [
+              192.51720800000112,
+              175.28483300000153,
+              163.0480000000025
+            ],
+            "total": 530.8500410000051,
+            "maximum": 192.51720800000112
+          },
+          "result_capture": {
+            "samples": [
+              197.23616599999878,
+              174.62845899999957,
+              166.30825000000186
+            ],
+            "total": 538.1728750000002,
+            "maximum": 197.23616599999878
+          },
+          "integration": {
+            "samples": [
+              456.0567919999994,
+              2977.3764580000025,
+              2907.378166999999
+            ],
+            "total": 6340.811417000001,
+            "maximum": 2977.3764580000025
+          }
+        },
+        "maxActiveProviderRequests": 1,
+        "providerRequests": 6,
+        "integratedWorkers": 3,
+        "undoVerified": false,
+        "undoCount": 0
+      },
+      {
+        "mode": "parallel",
+        "workspaceKind": "non-git",
+        "elapsedMs": 3637.3955000000024,
+        "phaseMs": {
+          "worker_queued": {
+            "samples": [
+              0.07283299999835435,
+              8.716582999997627,
+              8.755750000000262
+            ],
+            "total": 17.545165999996243,
+            "maximum": 8.755750000000262
+          },
+          "worktree_ready": {
+            "samples": [
+              649.6370419999985,
+              735.2590409999975,
+              890.4462920000005
+            ],
+            "total": 2275.3423749999965,
+            "maximum": 890.4462920000005
+          },
+          "worker_model": {
+            "samples": [
+              218.4176669999979,
+              1044.3972500000018,
+              1408.5142080000005
+            ],
+            "total": 2671.329125,
+            "maximum": 1408.5142080000005
+          },
+          "result_capture": {
+            "samples": [
+              1455.832459000001,
+              912.4467909999985,
+              623.3249589999978
+            ],
+            "total": 2991.6042089999974,
+            "maximum": 1455.832459000001
+          },
+          "integration": {
+            "samples": [
+              465.02458399999887,
+              474.9510829999999,
+              479.59766599999784
+            ],
+            "total": 1419.5733329999966,
+            "maximum": 479.59766599999784
+          }
+        },
+        "maxActiveProviderRequests": 1,
+        "providerRequests": 6,
+        "integratedWorkers": 3,
+        "undoVerified": true,
+        "undoCount": 3
+      },
+      {
+        "mode": "parallel",
+        "workspaceKind": "dirty-git",
+        "elapsedMs": 1158.671875,
+        "phaseMs": {
+          "worker_queued": {
+            "samples": [
+              0.0994589999972959,
+              0.11083299999882001,
+              0.13850000000093132
+            ],
+            "total": 0.34879199999704724,
+            "maximum": 0.13850000000093132
+          },
+          "worktree_ready": {
+            "samples": [
+              475.143291999997,
+              528.4380420000016,
+              589.0244170000005
+            ],
+            "total": 1592.6057509999991,
+            "maximum": 589.0244170000005
+          },
+          "worker_model": {
+            "samples": [
+              124.75937500000146,
+              124.66124999999738,
+              142.24037500000122
+            ],
+            "total": 391.66100000000006,
+            "maximum": 142.24037500000122
+          },
+          "result_capture": {
+            "samples": [
+              171.51566699999967,
+              166.32716699999946,
+              203.82116699999824
+            ],
+            "total": 541.6640009999974,
+            "maximum": 203.82116699999824
+          },
+          "integration": {
+            "samples": [
+              94.72166699999798,
+              168.94287500000064,
+              126.77020799999809
+            ],
+            "total": 390.4347499999967,
+            "maximum": 168.94287500000064
+          }
+        },
+        "maxActiveProviderRequests": 1,
+        "providerRequests": 6,
+        "integratedWorkers": 3,
+        "undoVerified": true,
+        "undoCount": 3
+      }
+    ],
+    "medianMs": {
+      "serial": 3855.302540999999,
+      "parallel": 2238.3229580000007
+    },
+    "reductionPercent": 41.94170407649984
+  },
+  "delay300": {
+    "scope": "Offline replay: actual AgentSpawn/AgentWait, child loops, Write tools, clean Git worktrees plus private non-Git/dirty-folder snapshots, integration, durable task stores and snapshot undo; synthetic provider delays, no network or installed-app changes. Clean-Git serial/parallel comparator, not a before/after live-model claim.",
+    "workerCount": 3,
+    "modelDelayMs": 300,
+    "results": [
+      {
+        "mode": "serial",
+        "workspaceKind": "clean-git",
+        "elapsedMs": 3517.7045,
+        "phaseMs": {
+          "worker_queued": {
+            "samples": [
+              0.1875,
+              0.03674999999998363,
+              0.015292000000044936
+            ],
+            "total": 0.23954200000002857,
+            "maximum": 0.1875
+          },
+          "worktree_ready": {
+            "samples": [
+              127.81258400000002,
+              214.561917,
+              169.82508300000018
+            ],
+            "total": 512.1995840000002,
+            "maximum": 214.561917
+          },
+          "worker_model": {
+            "samples": [
+              424.138292,
+              407.7404999999999,
+              399.56183299999975
+            ],
+            "total": 1231.4406249999997,
+            "maximum": 424.138292
+          },
+          "result_capture": {
+            "samples": [
+              113.78033300000004,
+              122.79491600000006,
+              106.57783300000028
+            ],
+            "total": 343.1530820000004,
+            "maximum": 122.79491600000006
+          },
+          "integration": {
+            "samples": [
+              436.6139999999999,
+              369.9610839999996,
+              361.8744579999998
+            ],
+            "total": 1168.4495419999994,
+            "maximum": 436.6139999999999
+          }
+        },
+        "maxActiveProviderRequests": 1,
+        "providerRequests": 6,
+        "integratedWorkers": 3,
+        "undoVerified": false,
+        "undoCount": 0
+      },
+      {
+        "mode": "parallel",
+        "workspaceKind": "clean-git",
+        "elapsedMs": 1897.9672920000003,
+        "phaseMs": {
+          "worker_queued": {
+            "samples": [
+              0.012749999999869033,
+              0.0255419999998594,
+              0.035667000000103144
+            ],
+            "total": 0.07395899999983158,
+            "maximum": 0.035667000000103144
+          },
+          "worktree_ready": {
+            "samples": [
+              122.73579100000006,
+              161.61362499999996,
+              205.4135000000001
+            ],
+            "total": 489.76291600000013,
+            "maximum": 205.4135000000001
+          },
+          "worker_model": {
+            "samples": [
+              411.246208,
+              410.5364589999999,
+              418.20770799999946
+            ],
+            "total": 1239.9903749999994,
+            "maximum": 418.20770799999946
+          },
+          "result_capture": {
+            "samples": [
+              147.0430409999999,
+              143.79679099999976,
+              127.99695799999972
+            ],
+            "total": 418.8367899999994,
+            "maximum": 147.0430409999999
+          },
+          "integration": {
+            "samples": [
+              357.4715409999999,
+              967.1776669999999,
+              932.4629170000007
+            ],
+            "total": 2257.1121250000006,
+            "maximum": 967.1776669999999
+          }
+        },
+        "maxActiveProviderRequests": 3,
+        "providerRequests": 6,
+        "integratedWorkers": 3,
+        "undoVerified": false,
+        "undoCount": 0
+      },
+      {
+        "mode": "parallel",
+        "workspaceKind": "clean-git",
+        "elapsedMs": 1860.7246669999995,
+        "phaseMs": {
+          "worker_queued": {
+            "samples": [
+              0.03220899999996618,
+              0.05741699999998673,
+              0.07387500000004366
+            ],
+            "total": 0.16350099999999657,
+            "maximum": 0.07387500000004366
+          },
+          "worktree_ready": {
+            "samples": [
+              181.7793329999995,
+              224.00654200000008,
+              266.369334
+            ],
+            "total": 672.1552089999996,
+            "maximum": 266.369334
+          },
+          "worker_model": {
+            "samples": [
+              407.8798339999994,
+              407.5635000000002,
+              412.9241670000001
+            ],
+            "total": 1228.3675009999997,
+            "maximum": 412.9241670000001
+          },
+          "result_capture": {
+            "samples": [
+              139.54483299999993,
+              136.27429100000063,
+              128.63416600000073
+            ],
+            "total": 404.4532900000013,
+            "maximum": 139.54483299999993
+          },
+          "integration": {
+            "samples": [
+              337.81425000000036,
+              901.0129999999999,
+              861.0864160000001
+            ],
+            "total": 2099.9136660000004,
+            "maximum": 901.0129999999999
+          }
+        },
+        "maxActiveProviderRequests": 3,
+        "providerRequests": 6,
+        "integratedWorkers": 3,
+        "undoVerified": false,
+        "undoCount": 0
+      },
+      {
+        "mode": "serial",
+        "workspaceKind": "clean-git",
+        "elapsedMs": 3315.4415419999996,
+        "phaseMs": {
+          "worker_queued": {
+            "samples": [
+              0.008041999999477412,
+              0.01020799999969313,
+              0.007875000001149601
+            ],
+            "total": 0.026125000000320142,
+            "maximum": 0.01020799999969313
+          },
+          "worktree_ready": {
+            "samples": [
+              137.67733299999963,
+              146.29525000000103,
+              138.7809159999997
+            ],
+            "total": 422.7534990000004,
+            "maximum": 146.29525000000103
+          },
+          "worker_model": {
+            "samples": [
+              422.1212920000007,
+              412.0523749999993,
+              414.0430840000008
+            ],
+            "total": 1248.2167510000008,
+            "maximum": 422.1212920000007
+          },
+          "result_capture": {
+            "samples": [
+              126.75458299999991,
+              132.15600000000086,
+              113.29937500000051
+            ],
+            "total": 372.2099580000013,
+            "maximum": 132.15600000000086
+          },
+          "integration": {
+            "samples": [
+              354.8494580000006,
+              402.6414590000004,
+              376.16991600000074
+            ],
+            "total": 1133.6608330000017,
+            "maximum": 402.6414590000004
+          }
+        },
+        "maxActiveProviderRequests": 1,
+        "providerRequests": 6,
+        "integratedWorkers": 3,
+        "undoVerified": false,
+        "undoCount": 0
+      },
+      {
+        "mode": "serial",
+        "workspaceKind": "clean-git",
+        "elapsedMs": 3065.480834,
+        "phaseMs": {
+          "worker_queued": {
+            "samples": [
+              0.009749999999257852,
+              0.009083000000828179,
+              0.010166999998546089
+            ],
+            "total": 0.02899999999863212,
+            "maximum": 0.010166999998546089
+          },
+          "worktree_ready": {
+            "samples": [
+              123.91212500000074,
+              128.41575000000012,
+              127.69029199999932
+            ],
+            "total": 380.0181670000002,
+            "maximum": 128.41575000000012
+          },
+          "worker_model": {
+            "samples": [
+              407.0962500000005,
+              421.1413329999996,
+              418.10791699999936
+            ],
+            "total": 1246.3454999999994,
+            "maximum": 421.1413329999996
+          },
+          "result_capture": {
+            "samples": [
+              100.82741600000008,
+              108.95999999999913,
+              106.09375
+            ],
+            "total": 315.8811659999992,
+            "maximum": 108.95999999999913
+          },
+          "integration": {
+            "samples": [
+              315.46458300000086,
+              318.9693329999991,
+              363.6802090000001
+            ],
+            "total": 998.1141250000001,
+            "maximum": 363.6802090000001
+          }
+        },
+        "maxActiveProviderRequests": 1,
+        "providerRequests": 6,
+        "integratedWorkers": 3,
+        "undoVerified": false,
+        "undoCount": 0
+      },
+      {
+        "mode": "parallel",
+        "workspaceKind": "clean-git",
+        "elapsedMs": 2021.5402499999982,
+        "phaseMs": {
+          "worker_queued": {
+            "samples": [
+              0.027957999998761807,
+              0.030999999999039574,
+              0.034916999999040854
+            ],
+            "total": 0.09387499999684223,
+            "maximum": 0.034916999999040854
+          },
+          "worktree_ready": {
+            "samples": [
+              145.1175000000003,
+              258.05987500000083,
+              299.9283340000002
+            ],
+            "total": 703.1057090000013,
+            "maximum": 299.9283340000002
+          },
+          "worker_model": {
+            "samples": [
+              409.73170799999934,
+              407.3873749999984,
+              404.47220899999957
+            ],
+            "total": 1221.5912919999973,
+            "maximum": 409.73170799999934
+          },
+          "result_capture": {
+            "samples": [
+              127.57195800000045,
+              125.22783299999901,
+              124.26499999999942
+            ],
+            "total": 377.0647909999989,
+            "maximum": 127.57195800000045
+          },
+          "integration": {
+            "samples": [
+              404.6869169999991,
+              1041.1498749999992,
+              1003.3358340000013
+            ],
+            "total": 2449.1726259999996,
+            "maximum": 1041.1498749999992
+          }
+        },
+        "maxActiveProviderRequests": 3,
+        "providerRequests": 6,
+        "integratedWorkers": 3,
+        "undoVerified": false,
+        "undoCount": 0
+      },
+      {
+        "mode": "parallel",
+        "workspaceKind": "non-git",
+        "elapsedMs": 1053.7566250000018,
+        "phaseMs": {
+          "worker_queued": {
+            "samples": [
+              0.017374999999447027,
+              0.03537499999947613,
+              0.04020899999886751
+            ],
+            "total": 0.09295899999779067,
+            "maximum": 0.04020899999886751
+          },
+          "worktree_ready": {
+            "samples": [
+              254.20108299999993,
+              300.5165420000012,
+              345.8692090000004
+            ],
+            "total": 900.5868340000015,
+            "maximum": 345.8692090000004
+          },
+          "worker_model": {
+            "samples": [
+              419.20908399999826,
+              412.62583299999824,
+              403.5190840000032
+            ],
+            "total": 1235.3540009999997,
+            "maximum": 419.20908399999826
+          },
+          "result_capture": {
+            "samples": [
+              122.773541999999,
+              119.83083400000032,
+              119.18762499999866
+            ],
+            "total": 361.792000999998,
+            "maximum": 122.773541999999
+          },
+          "integration": {
+            "samples": [
+              63.59558299999844,
+              91.5757909999993,
+              109.55975000000035
+            ],
+            "total": 264.7311239999981,
+            "maximum": 109.55975000000035
+          }
+        },
+        "maxActiveProviderRequests": 3,
+        "providerRequests": 6,
+        "integratedWorkers": 3,
+        "undoVerified": true,
+        "undoCount": 3
+      },
+      {
+        "mode": "parallel",
+        "workspaceKind": "dirty-git",
+        "elapsedMs": 1110.2438340000008,
+        "phaseMs": {
+          "worker_queued": {
+            "samples": [
+              0.02570900000137044,
+              0.07141699999920093,
+              0.08841600000232575
+            ],
+            "total": 0.1855420000028971,
+            "maximum": 0.08841600000232575
+          },
+          "worktree_ready": {
+            "samples": [
+              309.68741600000067,
+              353.2803329999988,
+              393.68812499999694
+            ],
+            "total": 1056.6558739999964,
+            "maximum": 393.68812499999694
+          },
+          "worker_model": {
+            "samples": [
+              417.1399999999994,
+              410.0456669999985,
+              414.74112500000047
+            ],
+            "total": 1241.9267919999984,
+            "maximum": 417.1399999999994
+          },
+          "result_capture": {
+            "samples": [
+              142.17304100000183,
+              145.27200000000084,
+              142.5631659999999
+            ],
+            "total": 430.0082070000026,
+            "maximum": 145.27200000000084
+          },
+          "integration": {
+            "samples": [
+              73.02433299999757,
+              101.71529200000077,
+              100.06683300000077
+            ],
+            "total": 274.8064579999991,
+            "maximum": 101.71529200000077
+          }
+        },
+        "maxActiveProviderRequests": 3,
+        "providerRequests": 6,
+        "integratedWorkers": 3,
+        "undoVerified": true,
+        "undoCount": 3
+      }
+    ],
+    "medianMs": {
+      "serial": 3315.4415419999996,
+      "parallel": 1897.9672920000003
+    },
+    "reductionPercent": 42.753709635457035
+  }
+}

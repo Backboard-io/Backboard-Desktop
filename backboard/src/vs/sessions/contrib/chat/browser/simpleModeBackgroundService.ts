@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { onUnexpectedError } from '../../../../base/common/errors.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { URI } from '../../../../base/common/uri.js';
@@ -11,6 +12,8 @@ import { IContextKey, IContextKeyService, RawContextKey } from '../../../../plat
 import { IFileDialogService } from '../../../../platform/dialogs/common/dialogs.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
+
+import { simpleModeBackgroundPresets } from './simpleModeBackgroundPresets.js';
 
 const SIMPLE_MODE_BACKGROUND_IMAGE_STORAGE_KEY = 'sessions.simpleMode.backgroundImage';
 
@@ -31,6 +34,7 @@ export interface ISimpleModeBackgroundService {
 	readonly onDidChangeBackgroundImage: Event<URI | undefined>;
 
 	chooseBackgroundImage(): Promise<void>;
+	selectPresetBackground(id: string): void;
 	clearBackgroundImage(): void;
 }
 
@@ -67,9 +71,16 @@ export class SimpleModeBackgroundService extends Disposable implements ISimpleMo
 		super();
 
 		this.backgroundImageSetContext = SimpleModeBackgroundImageSetContext.bindTo(contextKeyService);
+		// Share the preference across mode profiles, preserving existing selections.
+		if (this.storageService.get(SIMPLE_MODE_BACKGROUND_IMAGE_STORAGE_KEY, StorageScope.APPLICATION) === undefined) {
+			const legacy = this.storageService.get(SIMPLE_MODE_BACKGROUND_IMAGE_STORAGE_KEY, StorageScope.PROFILE);
+			if (legacy !== undefined) {
+				this.storageService.store(SIMPLE_MODE_BACKGROUND_IMAGE_STORAGE_KEY, legacy, StorageScope.APPLICATION, StorageTarget.MACHINE);
+			}
+		}
 		this.restoreBackgroundImage();
 		this._register(this.storageService.onDidChangeValue(
-			StorageScope.PROFILE,
+			StorageScope.APPLICATION,
 			SIMPLE_MODE_BACKGROUND_IMAGE_STORAGE_KEY,
 			this._store
 		)(() => this.restoreBackgroundImage()));
@@ -94,7 +105,7 @@ export class SimpleModeBackgroundService extends Disposable implements ISimpleMo
 
 	private async doChooseBackgroundImage(): Promise<void> {
 		const selected = await this.fileDialogService.showOpenDialog({
-			title: localize('simpleModeBackground.chooseTitle', "Choose a Simple Mode Background Image"),
+			title: localize('simpleModeBackground.chooseTitle', "Choose a Background Image"),
 			openLabel: localize('simpleModeBackground.useImage', "Use Image"),
 			canSelectFiles: true,
 			canSelectFolders: false,
@@ -113,23 +124,40 @@ export class SimpleModeBackgroundService extends Disposable implements ISimpleMo
 		// Force an update when the same file is picked again. This is useful after
 		// replacing an image on disk and prevents the canvas from appearing stuck.
 		this.setBackgroundImage(resource, true);
-		this.storageService.store(
-			SIMPLE_MODE_BACKGROUND_IMAGE_STORAGE_KEY,
-			resource.toString(),
-			StorageScope.PROFILE,
-			StorageTarget.MACHINE
-		);
+		this.persistBackgroundImage(resource.toString());
+	}
+
+	selectPresetBackground(id: string): void {
+		const preset = simpleModeBackgroundPresets.find(preset => preset.id === id);
+		if (!preset) {
+			return;
+		}
+		this.setBackgroundImage(preset.resource, true);
+		// Store a stable id so packaged images still resolve after an app update.
+		this.persistBackgroundImage(`preset:${id}`);
 	}
 
 	clearBackgroundImage(): void {
 		this.setBackgroundImage(undefined);
-		this.storageService.remove(SIMPLE_MODE_BACKGROUND_IMAGE_STORAGE_KEY, StorageScope.PROFILE);
+		// An explicit default prevents another profile reviving a legacy image.
+		this.persistBackgroundImage('');
+	}
+
+	private persistBackgroundImage(value: string): void {
+		this.storageService.store(SIMPLE_MODE_BACKGROUND_IMAGE_STORAGE_KEY, value, StorageScope.APPLICATION, StorageTarget.MACHINE);
+		// Commit explicit appearance choices without waiting for idle or shutdown.
+		void this.storageService.flush().catch(onUnexpectedError);
 	}
 
 	private restoreBackgroundImage(): void {
-		const stored = this.storageService.get(SIMPLE_MODE_BACKGROUND_IMAGE_STORAGE_KEY, StorageScope.PROFILE);
+		const stored = this.storageService.get(SIMPLE_MODE_BACKGROUND_IMAGE_STORAGE_KEY, StorageScope.APPLICATION);
 		if (!stored) {
 			this.setBackgroundImage(undefined);
+			return;
+		}
+
+		if (stored.startsWith('preset:')) {
+			this.setBackgroundImage(simpleModeBackgroundPresets.find(preset => preset.id === stored.slice(7))?.resource);
 			return;
 		}
 

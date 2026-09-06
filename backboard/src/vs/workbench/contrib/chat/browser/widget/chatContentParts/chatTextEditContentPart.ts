@@ -158,7 +158,7 @@ export class ChatTextEditContentPart extends Disposable implements IChatContentP
 			}
 			this._compactDiffVisibilityObserver.clear();
 			this.startCompactDiffRender(element, chatTextEdit);
-		}, { rootMargin: '600px 0px' });
+		}, { rootMargin: '200px 0px' });
 		observer.observe(this._domNode);
 		this._compactDiffVisibilityObserver.value = toDisposable(() => observer.disconnect());
 	}

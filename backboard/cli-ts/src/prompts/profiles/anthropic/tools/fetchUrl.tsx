@@ -56,12 +56,7 @@ PERFORMANCE TIP: when the user gives several URLs, fetch them with parallel call
 Do NOT use this tool for:
 - URLs the user did not explicitly provide${webSearchLine(context)}
 - Any URL matching the failure patterns above
-
-### Parameters
-
-| Name | Type | Required | Description |
-| --- | --- | --- | --- |
-| \`url\` | \`string\` | yes | The URL to scrape content from |`.trim();
+`.trim();
 }
 
 function webSearchLine(context: PromptContext): string {

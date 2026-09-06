@@ -39,6 +39,7 @@ import { IWorkbenchLayoutService, Parts } from '../../../services/layout/browser
 import { mainWindow } from '../../../../base/browser/window.js';
 import { localize } from '../../../../nls.js';
 import { Codicon } from '../../../../base/common/codicons.js';
+import { generateUuid } from '../../../../base/common/uuid.js';
 import { CLOSE_MODAL_EDITOR_COMMAND_ID, MOVE_MODAL_EDITOR_TO_MAIN_COMMAND_ID, MOVE_MODAL_EDITOR_TO_WINDOW_COMMAND_ID, NAVIGATE_MODAL_EDITOR_NEXT_COMMAND_ID, NAVIGATE_MODAL_EDITOR_PREVIOUS_COMMAND_ID, TOGGLE_MODAL_EDITOR_MAXIMIZED_COMMAND_ID, TOGGLE_MODAL_EDITOR_SIDEBAR_COMMAND_ID } from './editorCommands.js';
 import { IModalEditorNavigation, IModalEditorPartOptions, IModalEditorSidebar, isModalEditorOptionsProvider } from '../../../../platform/editor/common/editor.js';
 
@@ -160,6 +161,8 @@ export class ModalEditorPart {
 
 		// Modal container
 		const modalElement = $('.monaco-modal-editor-block');
+		// Wait for the first editor's layout options before painting the modal.
+		modalElement.style.visibility = 'hidden';
 		modalElement.classList.toggle('embedded', isEmbedded);
 		modalHost.appendChild(modalElement);
 		disposables.add(toDisposable(() => modalElement.remove()));
@@ -225,10 +228,10 @@ export class ModalEditorPart {
 		const shadowElement = resizableElement.domNode.appendChild($('.modal-editor-shadow'));
 
 		// Editor part container
-		const titleId = 'modal-editor-title';
+		const titleId = `modal-editor-title-${generateUuid()}`;
 		const editorPartContainer = $('.part.editor.modal-editor-part', {
-			role: 'dialog',
-			'aria-modal': 'true',
+			role: isEmbedded ? 'region' : 'dialog',
+			'aria-modal': isEmbedded ? undefined : 'true',
 			'aria-labelledby': titleId,
 		});
 		shadowElement.appendChild(editorPartContainer);
@@ -748,12 +751,16 @@ export class ModalEditorPart {
 		// for any header size change.
 		disposables.add(Event.runAndSubscribe(modalEditorService.onDidActiveEditorChange, () => {
 			const activeEditor = editorPart.activeGroup.activeEditor;
+			if (!activeEditor) {
+				return;
+			}
 			const editorModalOptions = isModalEditorOptionsProvider(activeEditor) ? activeEditor.getModalEditorOptions() : undefined;
 			fullWindow = !!editorModalOptions?.fullWindow;
 			modalElement.classList.toggle('compact-header', !!editorModalOptions?.compactHeader);
 			modalElement.classList.toggle('full-window', fullWindow);
 			setWindowDimmed(!fullWindow);
 			layoutModal();
+			modalElement.style.visibility = '';
 		}));
 
 		// Focus
@@ -886,6 +893,7 @@ class ModalEditorPartImpl extends EditorPart implements IModalEditorPart {
 	readonly onDidChangeNavigation = this._onDidChangeNavigation.event;
 
 	private _maximized: boolean;
+	readonly isEmbedded: boolean;
 	get maximized(): boolean { return this._maximized; }
 
 	private _size: IDimension | undefined;
@@ -938,6 +946,7 @@ class ModalEditorPartImpl extends EditorPart implements IModalEditorPart {
 		super(editorPartsView, `workbench.parts.modalEditor.${id}`, localize('modalEditorPart', "Modal Editor Area"), windowId, instantiationService, themeService, configurationService, storageService, layoutService, hostService, contextKeyService);
 
 		this._maximized = options?.maximized ?? false;
+		this.isEmbedded = !!options?.embeddedHost;
 		this._size = options?.size;
 		this._position = options?.position;
 		this._navigation = options?.navigation;

@@ -1,7 +1,14 @@
 import type { EventBus } from "../bus/EventBus.ts";
 import type { ToolCallRef } from "../bus/events.ts";
 import type { HookController } from "../hooks/index.ts";
+import { canonicalToolName } from "./names.ts";
 import { AbortError, isAbortError } from "./ToolAbort.ts";
+import {
+	canonicalToolInput,
+	sameToolCallIdentity,
+	type ToolCallIdentity,
+	toolInputFingerprint,
+} from "./ToolCallIdentity.ts";
 import type { ToolContext } from "./ToolContext.ts";
 import { toolErrorStartEvent, toolPendingEvent } from "./ToolEventFactory.ts";
 import {
@@ -10,6 +17,7 @@ import {
 	type PlanEntry,
 	ToolExecutionPlanner,
 } from "./ToolExecutionPlanner.ts";
+import type { ToolFailureCategory } from "./ToolFailure.ts";
 import { ToolHookPipeline } from "./ToolHookPipeline.ts";
 import { ToolInvocationRunner } from "./ToolInvocationRunner.ts";
 import type { ToolRegistry } from "./ToolRegistry.ts";
@@ -26,6 +34,14 @@ export interface ToolOutputMetadata {
 	name: string;
 	readOnly: boolean;
 	error: boolean;
+	failureCategory?: ToolFailureCategory;
+	exitCode?: number;
+	timedOut?: boolean;
+	cancelled?: boolean;
+	retryable?: boolean;
+	validation?: "passed" | "failed";
+	mutated?: boolean;
+	outcome?: "success" | "no_match" | "partial" | "failure";
 }
 
 /**
@@ -58,7 +74,7 @@ type ExecutionBatchItem =
 interface EarlyExecution {
 	/** The parsed input the call actually ran with, for reconciliation
 	 * against the authoritative list in finalize(). */
-	input: unknown;
+	identity: ToolCallIdentity;
 	settled: Promise<SettledOutput>;
 	/** Aborts this execution alone - fired when finalize() discards it so the
 	 * orphan can't race the authoritative re-run on the same transcript row. */
@@ -102,6 +118,16 @@ export class ToolScheduler {
 		return this.createRound(ctx).finalize(calls);
 	}
 
+	callIdentity(call: ToolCallRef): string {
+		const entry = this.planner.build([call])[0];
+		return canonicalToolInput({
+			name: canonicalToolName(
+				entry && "tool" in entry ? entry.tool.name : call.name,
+			),
+			input: entry && "input" in entry ? entry.input : call.input,
+		});
+	}
+
 	createRound(
 		ctx: ToolContext,
 		options: ToolCallRoundOptions = {},
@@ -135,6 +161,12 @@ export class ToolScheduler {
  * row abandoned by a stream retry or absent from the authoritative list.
  */
 export class ToolCallRound implements EarlyToolSink {
+	private readonly roundId = `tool_round_${nextRoundId++}`;
+	private readonly announcedNames = new Map<string, string>();
+	private readonly identityConflicts = new Set<string>();
+	private finalization:
+		| { signature: string; promise: Promise<ToolOutput[]> }
+		| undefined;
 	private readonly announced = new Set<string>();
 	private readonly offered = new Map<string, PlanEntry>();
 	private readonly inFlight = new Map<string, EarlyExecution>();
@@ -151,6 +183,8 @@ export class ToolCallRound implements EarlyToolSink {
 	// keeps its late settledIds.add from poisoning the next attempt, where the
 	// same call id may be re-announced and must stay retractable.
 	private epoch = 0;
+	private attemptAbort = new AbortController();
+	private finalizedSuccessfully = false;
 	private earlyStartBlocked = false;
 
 	constructor(
@@ -163,7 +197,27 @@ export class ToolCallRound implements EarlyToolSink {
 	) {}
 
 	announce(id: string, name: string): void {
-		if (this.options.skip?.(id) || this.announced.has(id)) return;
+		if (this.options.skip?.(id) || this.ctx.signal.aborted || this.finalization)
+			return;
+		const previous = this.announcedNames.get(id);
+		if (previous && canonicalToolName(previous) !== canonicalToolName(name)) {
+			if (this.offered.has(id)) {
+				this.identityConflicts.add(id);
+				this.inFlight.get(id)?.abort.abort();
+			}
+			this.traceIdentity(
+				id,
+				name,
+				"mismatch",
+				undefined,
+				previous,
+				"announced tool name changed",
+			);
+			return;
+		}
+		if (this.announced.has(id)) return;
+		this.traceIdentity(id, name, "announce");
+		this.announcedNames.set(id, name);
 		this.announced.add(id);
 		const tool = this.registry.get(name);
 		this.bus.emit(
@@ -172,10 +226,58 @@ export class ToolCallRound implements EarlyToolSink {
 	}
 
 	offer(call: ToolCallRef): void {
-		if (this.options.skip?.(call.id) || this.offered.has(call.id)) return;
+		if (
+			this.options.skip?.(call.id) ||
+			this.ctx.signal.aborted ||
+			this.finalization
+		)
+			return;
+		const previousName = this.offered.get(call.id)?.ref.name;
+		if (
+			previousName &&
+			canonicalToolName(previousName) !== canonicalToolName(call.name)
+		) {
+			this.identityConflicts.add(call.id);
+			this.inFlight.get(call.id)?.abort.abort();
+			this.traceIdentity(
+				call.id,
+				call.name,
+				"mismatch",
+				call.input,
+				previousName,
+				"ready tool name changed",
+			);
+		}
+		this.announcedNames.set(call.id, call.name);
+		const previous = this.offered.get(call.id);
+		if (previous) {
+			const updated = this.planner.build([call])[0];
+			if (
+				updated &&
+				!("errorOutput" in updated) &&
+				!("errorOutput" in previous) &&
+				canonicalToolInput(previous.input) !== canonicalToolInput(updated.input)
+			) {
+				this.traceIdentity(
+					call.id,
+					call.name,
+					"mismatch",
+					updated.input,
+					previous.ref.name,
+					"duplicate ready event changed validated arguments; awaiting final input",
+				);
+			}
+			return;
+		}
 		const entry = this.planner.build([call])[0];
 		if (!entry) return;
 		this.offered.set(call.id, entry);
+		this.traceIdentity(
+			call.id,
+			call.name,
+			"ready",
+			"input" in entry ? entry.input : call.input,
+		);
 		// Re-emitting pending is safe: the store upserts by id, filling in the
 		// input summary on a row announced with the name alone.
 		this.emitPending(entry);
@@ -189,7 +291,10 @@ export class ToolCallRound implements EarlyToolSink {
 		// orphan would execute concurrently with the retry's run while its
 		// events keep mutating the transcript row.
 		this.cleanup();
+		this.attemptAbort = new AbortController();
+		this.finalizedSuccessfully = false;
 		this.completedOutputs = [];
+		this.finalization = undefined;
 		this.earlyStartBlocked = false;
 	}
 
@@ -197,9 +302,75 @@ export class ToolCallRound implements EarlyToolSink {
 		return this.completedOutputs;
 	}
 
-	async finalize(calls: ToolCallRef[]): Promise<ToolOutput[]> {
-		const ctx = this.ctx;
+	finalize(calls: ToolCallRef[]): Promise<ToolOutput[]> {
 		const plan = this.planner.build(calls);
+		const signature = canonicalToolInput(
+			plan.map((entry) => ({
+				id: entry.ref.id,
+				name: canonicalToolName(entry.ref.name),
+				input: "input" in entry ? entry.input : entry.ref.input,
+			})),
+		);
+		if (this.finalization) {
+			return this.finalization.signature === signature
+				? this.finalization.promise
+				: Promise.reject(
+						new Error(
+							"Tool protocol error: finalized call list changed within one round",
+						),
+					);
+		}
+		const ids = new Set<string>();
+		for (const entry of plan) {
+			if (ids.has(entry.ref.id)) {
+				this.reset();
+				return Promise.reject(
+					new Error("Tool protocol error: duplicate call ID in final list"),
+				);
+			}
+			ids.add(entry.ref.id);
+		}
+		const promise = this.finalizePlan(plan);
+		this.finalization = { signature, promise };
+		return promise;
+	}
+
+	private async finalizePlan(entries: PlanEntry[]): Promise<ToolOutput[]> {
+		const ctx = {
+			...this.ctx,
+			signal: AbortSignal.any([this.ctx.signal, this.attemptAbort.signal]),
+		};
+		const plan = entries.map((entry): PlanEntry => {
+			const previous = this.offered.get(entry.ref.id)?.ref.name;
+			this.traceIdentity(
+				entry.ref.id,
+				entry.ref.name,
+				"final",
+				"input" in entry ? entry.input : entry.ref.input,
+			);
+			if (
+				this.identityConflicts.has(entry.ref.id) ||
+				(previous &&
+					canonicalToolName(previous) !== canonicalToolName(entry.ref.name))
+			) {
+				this.traceIdentity(
+					entry.ref.id,
+					entry.ref.name,
+					"mismatch",
+					entry.ref.input,
+					previous,
+					"final tool name disagrees with stream",
+				);
+				return {
+					ref: entry.ref,
+					concurrencySafe: false,
+					errorOutput:
+						"Tool protocol error: the tool name changed for this call ID. No final call was executed; submit a new call with a consistent ID, name, and arguments.",
+					failureCategory: "protocol",
+				};
+			}
+			return entry;
+		});
 		// Announce every call in the round up front so the UI can show the
 		// whole batch immediately - without this, a call queued behind a
 		// slow batch stays invisible until the scheduler reaches it.
@@ -270,6 +441,7 @@ export class ToolCallRound implements EarlyToolSink {
 		await flushBatch();
 		// Retract any streamed row the authoritative list never confirmed so
 		// the UI can drop it; its settled promise can never reject unhandled.
+		this.finalizedSuccessfully = true;
 		this.cleanup(new Set(plan.map((entry) => entry.ref.id)));
 		return outputs;
 	}
@@ -281,10 +453,15 @@ export class ToolCallRound implements EarlyToolSink {
 	 * rows, and drop per-attempt state.
 	 */
 	private cleanup(confirmed?: Set<string>): void {
+		// Completed spawns intentionally outlive their tool round; their parent
+		// cancellation signal and task manager still own their lifecycle.
+		if (!this.finalizedSuccessfully) this.attemptAbort.abort();
 		for (const early of this.inFlight.values()) early.abort.abort();
 		this.retractAnnounced(confirmed);
 		this.inFlight.clear();
 		this.settledIds.clear();
+		this.announcedNames.clear();
+		this.identityConflicts.clear();
 		this.epoch++;
 	}
 
@@ -299,7 +476,15 @@ export class ToolCallRound implements EarlyToolSink {
 	): Promise<ToolOutput> {
 		const epoch = this.epoch;
 		return this.invocationRunner.run(entry, ctx).then((output) => {
-			if (epoch === this.epoch) this.settledIds.add(entry.ref.id);
+			if (epoch === this.epoch) {
+				this.settledIds.add(entry.ref.id);
+				this.traceIdentity(
+					entry.ref.id,
+					entry.tool.agentName,
+					"result",
+					entry.input,
+				);
+			}
 			return output;
 		});
 	}
@@ -310,7 +495,15 @@ export class ToolCallRound implements EarlyToolSink {
 	): Promise<ToolOutput[]> {
 		const epoch = this.epoch;
 		return this.invocationRunner.runBatch(entries, ctx, (entry) => {
-			if (epoch === this.epoch) this.settledIds.add(entry.ref.id);
+			if (epoch === this.epoch) {
+				this.settledIds.add(entry.ref.id);
+				this.traceIdentity(
+					entry.ref.id,
+					entry.tool.agentName,
+					"result",
+					entry.input,
+				);
+			}
 		});
 	}
 
@@ -331,11 +524,20 @@ export class ToolCallRound implements EarlyToolSink {
 		// whichever settles last would own the visible row.
 		if (
 			"errorOutput" in entry ||
-			JSON.stringify(early.input) !== JSON.stringify(entry.input)
+			!sameToolCallIdentity(early.identity, this.identityFor(entry))
 		) {
 			early.abort.abort();
+			this.traceIdentity(
+				entry.ref.id,
+				entry.ref.name,
+				"mismatch",
+				"input" in entry ? entry.input : entry.ref.input,
+				early.identity.name,
+				"early result discarded: identity or validated input changed",
+			);
 			return undefined;
 		}
+		this.traceIdentity(entry.ref.id, entry.ref.name, "reuse", entry.input);
 		return early;
 	}
 
@@ -367,6 +569,7 @@ export class ToolCallRound implements EarlyToolSink {
 			if (!entry) return;
 			if (
 				"errorOutput" in entry ||
+				this.identityConflicts.has(id) ||
 				!entry.concurrencySafe ||
 				!entry.tool.isReadOnly(entry.input)
 			) {
@@ -382,7 +585,7 @@ export class ToolCallRound implements EarlyToolSink {
 				signal: AbortSignal.any([this.ctx.signal, abort.signal]),
 			};
 			this.inFlight.set(id, {
-				input: entry.input,
+				identity: this.identityFor(entry),
 				abort,
 				settled: this.runTracked(entry, earlyCtx).then(
 					(output): SettledOutput => {
@@ -399,6 +602,44 @@ export class ToolCallRound implements EarlyToolSink {
 				),
 			});
 		}
+	}
+
+	private identityFor(entry: ExecutablePlanEntry): ToolCallIdentity {
+		return {
+			sessionId: this.ctx.sessionId,
+			turnId: this.ctx.turnId,
+			roundId: this.roundId,
+			attempt: this.epoch,
+			name: entry.tool.agentName,
+			input: canonicalToolInput(entry.input),
+		};
+	}
+
+	private traceIdentity(
+		id: string,
+		name: string,
+		phase: "announce" | "ready" | "final" | "reuse" | "mismatch" | "result",
+		input?: unknown,
+		previousName?: string,
+		reason?: string,
+	): void {
+		this.bus.emit({
+			type: "tool:identity",
+			sessionId: this.ctx.sessionId,
+			turnId: this.ctx.turnId,
+			roundId: this.roundId,
+			attempt: this.epoch,
+			toolCallId: id,
+			phase,
+			name: canonicalToolName(name),
+			...(input === undefined
+				? {}
+				: { inputFingerprint: toolInputFingerprint(input) }),
+			...(previousName
+				? { previousName: canonicalToolName(previousName) }
+				: {}),
+			...(reason ? { reason } : {}),
+		});
 	}
 
 	private emitPending(entry: PlanEntry): void {
@@ -436,10 +677,17 @@ export class ToolCallRound implements EarlyToolSink {
 		return {
 			tool_call_id: entry.ref.id,
 			output: entry.errorOutput,
-			metadata: { name: entry.ref.name, readOnly: false, error: true },
+			metadata: {
+				name: entry.ref.name,
+				readOnly: false,
+				error: true,
+				failureCategory: entry.failureCategory ?? "invalid_argument",
+			},
 		};
 	}
 }
+
+let nextRoundId = 0;
 
 async function unwrapSettled(
 	settled: Promise<SettledOutput>,

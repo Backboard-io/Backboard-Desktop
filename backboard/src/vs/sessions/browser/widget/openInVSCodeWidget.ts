@@ -7,12 +7,11 @@ import '../media/openInVSCode.css';
 import { $, addDisposableListener, append, EventHelper, EventType } from '../../../base/browser/dom.js';
 import { getDefaultHoverDelegate } from '../../../base/browser/ui/hover/hoverDelegateFactory.js';
 import { BaseActionViewItem, IBaseActionViewItemOptions } from '../../../base/browser/ui/actionbar/actionViewItems.js';
-import { IAction, toAction } from '../../../base/common/actions.js';
+import { IAction } from '../../../base/common/actions.js';
 import { localize } from '../../../nls.js';
 import { ICommandService } from '../../../platform/commands/common/commands.js';
 import { IHoverService } from '../../../platform/hover/browser/hover.js';
 import { IKeybindingService } from '../../../platform/keybinding/common/keybinding.js';
-import { IContextMenuService } from '../../../platform/contextview/browser/contextView.js';
 import { IWorkbenchEnvironmentService } from '../../../workbench/services/environment/common/environmentService.js';
 
 /**
@@ -28,7 +27,6 @@ export class OpenInVSCodeTitleBarWidget extends BaseActionViewItem {
 		private readonly openAdvancedCommandId: string | undefined,
 		@IHoverService private readonly hoverService: IHoverService,
 		@IKeybindingService private readonly keybindingService: IKeybindingService,
-		@IContextMenuService private readonly contextMenuService: IContextMenuService,
 		@ICommandService private readonly commandService: ICommandService,
 		@IWorkbenchEnvironmentService private readonly environmentService: IWorkbenchEnvironmentService,
 	) {
@@ -45,70 +43,25 @@ export class OpenInVSCodeTitleBarWidget extends BaseActionViewItem {
 		this._register(this.hoverService.setupManagedHover(getDefaultHoverDelegate('element'), container, hoverText));
 		container.classList.toggle('optimus-mode', this.environmentService.isOptimusWindow);
 
-		const triggerButton = append(container, $('button.open-in-vscode-titlebar-widget-trigger'));
-		triggerButton.setAttribute('aria-haspopup', 'menu');
-		triggerButton.setAttribute('aria-expanded', 'false');
-		const currentIcon = append(triggerButton, $('span.open-in-vscode-titlebar-widget-icon.codicon'));
-		currentIcon.setAttribute('aria-hidden', 'true');
-		const currentLabel = append(triggerButton, $('span.open-in-vscode-titlebar-widget-label'));
-		const chevron = append(triggerButton, $('span.open-in-vscode-titlebar-widget-chevron.codicon.codicon-chevron-down'));
-		chevron.setAttribute('aria-hidden', 'true');
-
-		const isOptimusWindow = this.environmentService.isOptimusWindow;
-		const currentModeLabel = isOptimusWindow
-			? localize('openInVSCodeSwitcher.advanced', "Advanced")
-			: localize('openInVSCodeSwitcher.agents', "Simple");
-
-		const showMenu = () => {
-			const actions = [
-				toAction({
-					id: 'agents.action.mode.editor',
-					label: localize('openInVSCodeSwitcher.editor', "Editor"),
-					run: () => this.action.run(),
-				}),
-			];
-
-			if (this.openAdvancedCommandId) {
-				actions.push(toAction({
-					id: 'agents.action.mode.advanced',
-					label: localize('openInVSCodeSwitcher.advanced', "Advanced"),
-					checked: isOptimusWindow,
-					run: () => this.commandService.executeCommand(this.openAdvancedCommandId!),
-				}));
-			}
-
-			actions.push(toAction({
-					id: 'agents.action.mode.agents',
-					label: localize('openInVSCodeSwitcher.agents', "Simple"),
-					checked: !isOptimusWindow,
-					run: () => {
-						if (this.openSimpleCommandId) {
-							return this.commandService.executeCommand(this.openSimpleCommandId);
-						}
-						return undefined;
-					},
-				}));
-
-			triggerButton.setAttribute('aria-expanded', 'true');
-			this.contextMenuService.showContextMenu({
-				getAnchor: () => triggerButton,
-				getActions: () => actions,
-				onHide: () => triggerButton.setAttribute('aria-expanded', 'false'),
-			});
-		};
-
-		currentIcon.className = `open-in-vscode-titlebar-widget-icon codicon ${isOptimusWindow ? 'codicon-layout' : 'codicon-window'}`;
-		currentLabel.textContent = currentModeLabel;
-
-		this._register(addDisposableListener(triggerButton, EventType.CLICK, event => {
-			EventHelper.stop(event, true);
-			showMenu();
-		}));
-		this._register(addDisposableListener(triggerButton, EventType.KEY_DOWN, event => {
-			if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown') {
+		const segments = append(container, $('.backboard-mode-segments'));
+		segments.setAttribute('role', 'group');
+		segments.setAttribute('aria-label', hoverText);
+		const modes = [
+			{ label: localize('openInVSCodeSwitcher.agentTab', "Simple"), active: !this.environmentService.isOptimusWindow, run: () => this.openSimpleCommandId ? this.commandService.executeCommand(this.openSimpleCommandId) : undefined },
+			{ label: localize('openInVSCodeSwitcher.editor', "Editor"), active: false, run: () => this.action.run() },
+			{ label: localize('openInVSCodeSwitcher.advanced', "Advanced"), active: this.environmentService.isOptimusWindow, run: () => this.openAdvancedCommandId ? this.commandService.executeCommand(this.openAdvancedCommandId) : undefined },
+		];
+		for (const mode of modes) {
+			const button = append(segments, $('button.backboard-mode-segment'));
+			button.setAttribute('type', 'button');
+			button.textContent = mode.label;
+			button.setAttribute('aria-pressed', String(mode.active));
+			this._register(addDisposableListener(button, EventType.CLICK, event => {
 				EventHelper.stop(event, true);
-				showMenu();
-			}
-		}));
+				if (!mode.active) {
+					void mode.run();
+				}
+			}));
+		}
 	}
 }

@@ -13,6 +13,7 @@ import { FuzzyScore } from '../../../../../base/common/filters.js';
 import { Disposable, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { ScrollbarVisibility, ScrollEvent } from '../../../../../base/common/scrollable.js';
 import { URI } from '../../../../../base/common/uri.js';
+import { IAccessibilityService } from '../../../../../platform/accessibility/common/accessibility.js';
 import { MenuId } from '../../../../../platform/actions/common/actions.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { IContextKey, IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
@@ -280,6 +281,7 @@ export class ChatListWidget extends Disposable {
 		@ILogService private readonly logService: ILogService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@IChatAccessibilityService private readonly chatAccessibilityService: IChatAccessibilityService,
+		@IAccessibilityService private readonly accessibilityService: IAccessibilityService,
 	) {
 		super();
 
@@ -412,9 +414,9 @@ export class ChatListWidget extends Disposable {
 				alwaysConsumeMouseWheel: false,
 				// The editor's right-panel chat is narrow enough that an auto-hiding
 				// scrollbar is easy to miss. Keep a slim rail present there and make
-				// wheel/trackpad movement feel continuous without changing other chats.
+				// wheel movement feel continuous across chat hosts.
 				verticalScrollMode: isAuxiliaryBarChat ? ScrollbarVisibility.Visible : ScrollbarVisibility.Auto,
-				smoothScrolling: isAuxiliaryBarChat,
+				smoothScrolling: !this.accessibilityService.isMotionReduced(),
 				scrollableElementChangeOptions: isAuxiliaryBarChat ? { verticalScrollbarSize: 8 } : undefined,
 				supportDynamicHeights: true,
 				hideTwistiesOfChildlessElements: true,
@@ -445,6 +447,9 @@ export class ChatListWidget extends Disposable {
 				}
 			}
 		));
+		this._register(this.accessibilityService.onDidChangeReducedMotion(() => {
+			this._tree.updateOptions({ smoothScrolling: !this.accessibilityService.isMotionReduced() });
+		}));
 		// WorkbenchObjectTree initializes the host class list, so restore the
 		// transcript markers after the tree has mounted.
 		this.updateBackboardTranscriptHostClasses();

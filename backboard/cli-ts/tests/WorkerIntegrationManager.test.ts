@@ -21,6 +21,25 @@ afterEach(async () => {
 });
 
 describe("WorkerIntegrationManager", () => {
+	it("keeps an already captured worker eligible when integration is cancelled", async () => {
+		const fixture = await createFixture();
+		const git = new FakeGit({
+			status: "integrated",
+			commit: "unused",
+			conflictingFiles: [],
+		});
+		const manager = new WorkerIntegrationManager(git, fixture.store);
+		const abort = new AbortController();
+		abort.abort();
+		const result = await manager.integrate(record(), abort.signal);
+		expect(result).toMatchObject({
+			executionStatus: "completed",
+			integrationStatus: "pending",
+			resultCommit: "result",
+		});
+		expect(git.integrations).toEqual([]);
+	});
+
 	it("persists integrating and integrated states around a successful merge", async () => {
 		const fixture = await createFixture();
 		const git = new FakeGit({

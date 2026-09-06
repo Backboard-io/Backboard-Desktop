@@ -81,6 +81,7 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 	readonly priority = LayoutPriority.Low;
 
 	private configuration: IAuxiliaryBarPartConfiguration;
+	private lastLayoutHadTitle: boolean | undefined;
 	private readonly visibleViewContainersTracker: VisibleViewContainersTracker;
 
 	constructor(
@@ -99,10 +100,13 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 		@IMenuService menuService: IMenuService,
 		@IConfigurationService private readonly configurationService: IConfigurationService
 	) {
+		let currentPart: AuxiliaryBarPart | undefined;
 		super(
 			Parts.AUXILIARYBAR_PART,
 			{
-				hasTitle: true,
+				get hasTitle() {
+					return currentPart?.hasCompositeTitle() ?? true;
+				},
 				trailingSeparator: true,
 				borderWidth: () => (this.getColor(SIDE_BAR_BORDER) || this.getColor(contrastBorder)) ? 1 : 0,
 			},
@@ -129,6 +133,13 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 			extensionService,
 			menuService,
 		);
+
+		currentPart = this;
+		this._register(this.onDidCompositeOpen.event(() => this.relayoutForTitleVisibility()));
+		// GridView skips child layout when the outer bounds have not changed.
+		// Sending the first message restores the title without resizing the grid,
+		// so the content must give that space back even on a same-size layout.
+		this._register(layoutService.onDidLayoutMainContainer(() => this.relayoutForTitleVisibility()));
 
 		// Track visible view containers for auto-hide and for the agent panel switcher
 		this.visibleViewContainersTracker = this._register(instantiationService.createInstance(VisibleViewContainersTracker, ViewContainerLocation.AuxiliaryBar));
@@ -168,6 +179,25 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 		if (autoHide && (this.configuration.position === ActivityBarPosition.TOP || this.configuration.position === ActivityBarPosition.BOTTOM)) {
 			this.onDidChangeActivityBarLocation();
 		}
+	}
+
+	private hasCompositeTitle(): boolean {
+		return !(this.getActivePaneComposite()?.getId() === 'workbench.panel.chat'
+			&& this.element?.querySelector('.backboard-composer .chat-composer-empty'));
+	}
+
+	private relayoutForTitleVisibility(): void {
+		if (this.lastLayoutHadTitle !== this.hasCompositeTitle() && this.dimension && this.contentPosition) {
+			this.layout(this.dimension.width, this.dimension.height, this.contentPosition.top, this.contentPosition.left);
+		}
+	}
+
+	override layout(width: number, height: number, top: number, left: number): void {
+		if (!this.layoutService.isVisible(Parts.AUXILIARYBAR_PART)) {
+			return;
+		}
+		this.lastLayoutHadTitle = this.hasCompositeTitle();
+		super.layout(width, height, top, left);
 	}
 
 	private resolveConfiguration(): IAuxiliaryBarPartConfiguration {

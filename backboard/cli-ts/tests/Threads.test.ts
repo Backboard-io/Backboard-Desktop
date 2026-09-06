@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { readFileSync } from "node:fs";
 import { FINAL_VERIFICATION_NUDGE } from "../src/prompts/finalVerification.ts";
 import {
 	PLAN_UP_TO_DATE_REPLY,
@@ -113,6 +114,39 @@ describe("Backboard thread helpers", () => {
 			"user",
 			"assistant",
 		]);
+	});
+
+	it("preserves recovery filtering for the retired exact verification prompt", () => {
+		const legacy = readFileSync(
+			new URL(
+				"./fixtures/harness/legacy-final-verification.txt",
+				import.meta.url,
+			),
+			"utf8",
+		);
+		const thread = threadWithMessages([
+			{
+				role: "user",
+				content: legacy,
+				metadata_: { backboard_workspace_id: "ws_legacy" },
+			},
+			{
+				role: "user",
+				content: legacy.replace("silently review", "please explain"),
+			},
+		]);
+		const restored = backboardThreadToMessages(thread);
+		expect(restored).toHaveLength(1);
+		expect((restored[0] as { text: string }).text).toContain("please explain");
+	});
+
+	it("keeps metadata-free user text that only resembles a reminder", () => {
+		const content = "<system-reminder> please read this note";
+		const messages = backboardThreadToMessages(
+			threadWithMessages([{ role: "user", content }]),
+		);
+		expect(messages).toHaveLength(1);
+		expect((messages[0] as { text: string }).text).toBe(content);
 	});
 
 	it("keeps a genuine user message that carries metadata even if it looks injected", () => {

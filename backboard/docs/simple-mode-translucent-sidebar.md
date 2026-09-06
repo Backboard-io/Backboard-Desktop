@@ -59,7 +59,7 @@ Layers ④ and ⑤ are set up in the **main process**:
 
 > **Advanced (Optimus) note:** the *window* gets the vibrancy material too, but
 > the *page* never paints alpha there (see §4), so the material is invisible
-> and the artifact family cannot show. Jarvis windows get no vibrancy at all.
+> and the artifact family cannot show.
 
 ---
 
@@ -103,7 +103,7 @@ Card Appearance" section) unless noted.
    .agent-sessions-workbench
    .shell-gradient-background
    .mac:not(.optimus-window)             transparent          ◄── the hole
-   :not(.jarvis-window)…                 (base rule paints
+   …                 (base rule paints
       │                                   --sessions-main-region-background;
       │                                   the .mac Simple rule overrides
       │                                   it to `transparent`)
@@ -140,8 +140,8 @@ Key deliberate decisions encoded here:
 - **Escape hatches to opaque:** `prefers-reduced-transparency`, `hc-black`,
   `hc-light`, non-mac, web — all collapse the sidebar to an opaque
   `sideBar.background`.
-- **Advanced/Jarvis are excluded by CSS**, with this exact justification in
-  the source comment: *"the Advanced (Optimus) and Jarvis windows scroll dense
+- **Advanced are excluded by CSS**, with this exact justification in
+  the source comment: *"the Advanced (Optimus) windows scroll dense
   content beside the panel, and **painting alpha over the native vibrancy
   there smears while scrolling**"*. The authors had already met the
   scroll-smear failure mode and chose opacity for those windows. The Simple
@@ -295,7 +295,7 @@ Everything that defends the pipeline today, in firing order:
 | Parts-splash save | skip native bg write when `hasVibrancy` (fail closed on missing window) | `nativeHostMainService.ts` |
 | Reduced transparency | fully opaque sidebar + root | `style.css` media query |
 | High contrast / non-mac / web | opaque (never enters the alpha path) | `style.css` root markers |
-| Advanced/Jarvis | page paints opaque everywhere (CSS `:not()` markers) — material present but invisible | `style.css` |
+| Advanced | page paints opaque everywhere (CSS `:not()` markers) — material present but invisible | `style.css` |
 
 Known *unguarded* moments (all tolerable **iff** the backing is alpha 1/255,
 because clears then happen naturally): modal/menu teardown while the window
@@ -331,8 +331,8 @@ Ordered from least to most invasive; stop at the first one that holds:
 | `src/vs/platform/windows/electron-main/windows.ts` | `VIBRANCY_CLEAR_BACKGROUND` constant + creation-time vibrancy options |
 | `src/vs/platform/windows/electron-main/windowImpl.ts` | `AGENTS_WINDOW_VIBRANCY`, `reapplyVibrancy`, `invalidateVibrancyRepaint`, reuse/load handling |
 | `src/vs/platform/native/electron-main/nativeHostMainService.ts` | splash-save `hasVibrancy` guard |
-| `src/vs/sessions/browser/media/style.css` | all sidebar translucency CSS, tint values, opt-outs, Advanced/Jarvis exclusion |
-| `src/vs/sessions/browser/workbench.ts` | root marker classes (`agent-sessions-workbench`, `optimus-window`, `jarvis-window`, `shell-gradient-background`) |
+| `src/vs/sessions/browser/media/style.css` | all sidebar translucency CSS, tint values, opt-outs, Advanced exclusion |
+| `src/vs/sessions/browser/workbench.ts` | root marker classes (`agent-sessions-workbench`, `optimus-window`, `shell-gradient-background`) |
 | `src/vs/workbench/contrib/chat/browser/agentSessions/` | the sessions list that scrolls inside the band |
 | `src/vs/base/browser/ui/list/listView.ts` | `transformOptimization` layer + synthetic scrolling |
 | `src/vs/platform/list/browser/listService.ts` | `workbench.list.smoothScrolling` (agents-window default: on) |

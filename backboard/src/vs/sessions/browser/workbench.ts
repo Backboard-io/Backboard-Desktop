@@ -7,7 +7,7 @@ import '../../workbench/browser/style.js';
 import './media/style.css';
 import './media/chatMarkdown.css';
 import './media/t3Theme.css';
-import { Disposable, DisposableStore, IDisposable, toDisposable } from '../../base/common/lifecycle.js';
+import { Disposable, DisposableMap, DisposableStore, IDisposable, toDisposable } from '../../base/common/lifecycle.js';
 import { Emitter, Event, setGlobalLeakWarningThreshold } from '../../base/common/event.js';
 import { getActiveDocument, getActiveElement, getClientArea, getWindowId, getWindows, IDimension, isAncestorUsingFlowTo, isHTMLElement, size, Dimension, runWhenWindowIdle, scheduleAtNextAnimationFrame } from '../../base/browser/dom.js';
 import { DeferredPromise, RunOnceScheduler } from '../../base/common/async.js';
@@ -75,6 +75,7 @@ import {
 import { getOptimusChatPanelWidth, IPartVisibilityDefaults, SessionsLayoutPolicy } from './layoutPolicy.js';
 import { MobileNavigationStack } from './mobileNavigationStack.js';
 import { SessionsPanelHeader } from './parts/panelHeader.js';
+import { PanelEdgePreview } from './parts/panelEdgePreview.js';
 import { MobileTitlebarPart } from './parts/mobile/mobileTitlebarPart.js';
 import { IMobileVisualViewport } from './parts/mobile/mobileVisualViewport.js';
 import { autorun } from '../../base/common/observable.js';
@@ -84,6 +85,8 @@ import { ISessionsSetUpService } from './sessionsSetUpService.js';
 
 const SESSIONS_FILES_CONTAINER_ID = 'workbench.sessions.auxiliaryBar.filesContainer';
 const SESSIONS_BROWSER_VIEW_CONTAINER_ID = 'workbench.sessions.auxiliaryBar.browserContainer';
+const SIMPLE_SESSIONS_MINIMUM_WIDTH = 300;
+const SIMPLE_AUXILIARY_BAR_MINIMUM_WIDTH = 120;
 
 //#region Workbench Options
 
@@ -291,8 +294,9 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 	private readonly parts = new Map<string, Part>();
 	private workbenchGrid!: SerializableGrid<ISerializableView>;
 
-	/** Removes the transient `.parts-animating` class after a side/auxiliary bar toggle finishes animating. */
-	private readonly partsAnimationScheduler = this._register(new RunOnceScheduler(() => this.mainContainer.classList.remove(LayoutClasses.PARTS_ANIMATING), 240));
+	/** Removes the transient `.parts-animating` class after a panel toggle finishes animating. */
+	private readonly partsAnimationScheduler = this._register(new RunOnceScheduler(() => this.mainContainer.classList.remove(LayoutClasses.PARTS_ANIMATING), 300));
+	private readonly partCompositeHideSchedulers = this._register(new DisposableMap<Parts, RunOnceScheduler>());
 
 	private titleBarPartView!: ISerializableView;
 	private sideBarPartView!: ISerializableView;
@@ -358,13 +362,6 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 	 * editors to modal overlays / the right-workbench instead.
 	 */
 	private _isOptimusWindow = false;
-
-	/**
-	 * `true` only for the Jarvis window, the infinite-canvas agent surface. Like
-	 * the advanced (Optimus) window it shows the auxiliary bar / right panel and
-	 * keeps the editor and panel parts hidden behind the canvas center part.
-	 */
-	private _isJarvisWindow = false;
 
 	//#endregion
 
@@ -752,9 +749,6 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 	 * visibly rearranging itself once the window has already painted.
 	 */
 	private getInitialPartVisibilityDefaults(): IPartVisibilityDefaults {
-		if (this._isJarvisWindow && this.layoutPolicy.viewportClass.get() !== 'phone') {
-			return this.layoutPolicy.getJarvisPartVisibilityDefaults();
-		}
 		if (this._isOptimusWindow && this.layoutPolicy.viewportClass.get() !== 'phone') {
 			return this.layoutPolicy.getOptimusPartVisibilityDefaults();
 		}
@@ -1098,10 +1092,8 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		this.instantiationService = accessor.get(IInstantiationService);
 		this.storageService = accessor.get(IStorageService);
 		this._isOptimusWindow = accessor.get(IWorkbenchEnvironmentService).isOptimusWindow;
-		this._isJarvisWindow = accessor.get(IWorkbenchEnvironmentService).isJarvisWindow;
 		// Root marker classes let CSS scope treatments per window mode.
 		this.mainContainer.classList.toggle('optimus-window', this._isOptimusWindow);
-		this.mainContainer.classList.toggle('jarvis-window', this._isJarvisWindow);
 		accessor.get(ITitleService);
 
 		// Register layout listeners
@@ -1116,8 +1108,8 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		// The simple Sessions window never auto-reveals the main editor
 		// area: editors there open as modal overlays, so revealing the
 		// (empty) main editor part would surface the workbench watermark.
-		// Only the advanced (Optimus) and Jarvis windows follow editor opens.
-		if (this._isOptimusWindow || this._isJarvisWindow) {
+		// Only the advanced (Optimus) windows follow editor opens.
+		if (this._isOptimusWindow) {
 			this._register(this.editorService.onWillOpenEditor(e => {
 				if (this._editorPartAutoVisibilitySuppressionCount > 0) {
 					return;
@@ -1268,6 +1260,12 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 			{ fromJSON },
 			{ proportionalLayout: false }
 		);
+		// Older builds persisted the right pane's maximized grid state. Simple mode
+		// no longer exposes that control, so restore the split once during startup
+		// instead of leaving users trapped in a maximized surface.
+		if (!this._isOptimusWindow && workbenchGrid.isViewMaximized(this.auxiliaryBarPartView)) {
+			workbenchGrid.exitMaximizedView();
+		}
 
 		this.mainContainer.prepend(workbenchGrid.element);
 		this.mainContainer.setAttribute('role', 'application');
@@ -1318,6 +1316,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 	}
 
 	createWorkbenchManagement(instantiationService: IInstantiationService): void {
+		this._register(instantiationService.createInstance(PanelEdgePreview, this.mainContainer));
 		// Welcome — must be created early in layout so the widget can gate
 		// other UI until sign-in / chat setup is complete.
 		instantiationService.invokeFunction(accessor => accessor.get(ISessionsSetUpService));
@@ -1358,7 +1357,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		// The Codex-style Simple shell uses a compact navigation rail. Older
 		// builds persisted the previous 360px default, so clamp that restored
 		// value here while still allowing the user to resize after launch.
-		const sideBarSize = (!this._isOptimusWindow && !this._isJarvisWindow)
+		const sideBarSize = !this._isOptimusWindow
 			? Math.min(restoredSideBarSize, 300)
 			: restoredSideBarSize;
 		const panelSize = this._savedPartSizes.panel
@@ -1381,15 +1380,25 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 			: (this.partVisibility.auxiliaryBar && this.partVisibility.editor)
 				? Math.min(rightSectionWidth, Math.max(420, rightSectionWidth < 900 ? Math.floor(rightSectionWidth * 0.72) : Math.max(560, Math.floor(rightSectionWidth * 0.48))))
 				: 300;
-		const rightWorkColumnWidth = Math.min(rightSectionWidth, Math.max(minimumRightWorkColumnWidth, preferredRightWorkColumnWidth));
+		// Simple mode must never restore a stale right-pane width that reduces the
+		// chat canvas to a strip. Keep its documented 300px minimum whenever the
+		// viewport can accommodate it; on narrower windows, shrink the tool pane
+		// down to its actual grid minimum first.
+		const preserveSimpleSessionsWidth = !this._isOptimusWindow && this.partVisibility.sessions && !this.partVisibility.editor;
+		const maximumRightWorkColumnWidth = preserveSimpleSessionsWidth
+			? Math.min(rightSectionWidth, Math.max(SIMPLE_AUXILIARY_BAR_MINIMUM_WIDTH, rightSectionWidth - SIMPLE_SESSIONS_MINIMUM_WIDTH))
+			: rightSectionWidth;
+		const rightWorkColumnWidth = Math.min(maximumRightWorkColumnWidth, Math.max(minimumRightWorkColumnWidth, preferredRightWorkColumnWidth));
 		const effectiveRightWorkColumnWidth = (this.partVisibility.auxiliaryBar || this.partVisibility.editor) ? rightWorkColumnWidth : 0;
 		// Prefer the saved chat bar width so the user's preferred chat bar size
 		// is preserved across reloads. Fall back to the remainder of the right
 		// section, which the grid distributes proportionally when the saved
 		// sizes don't fit the current container.
-		const sessionsWidth = (this._savedPartSizes.sessions !== undefined && !this._isOptimusWindow)
-			? Math.max(0, Math.min(this._savedPartSizes.sessions, rightSectionWidth - effectiveRightWorkColumnWidth))
-			: Math.max(0, rightSectionWidth - effectiveRightWorkColumnWidth);
+		const sessionsWidth = preserveSimpleSessionsWidth
+			? Math.max(0, rightSectionWidth - effectiveRightWorkColumnWidth)
+			: (this._savedPartSizes.sessions !== undefined && !this._isOptimusWindow)
+				? Math.max(0, Math.min(this._savedPartSizes.sessions, rightSectionWidth - effectiveRightWorkColumnWidth))
+				: Math.max(0, rightSectionWidth - effectiveRightWorkColumnWidth);
 
 		const visiblePanelSize = this.partVisibility.panel ? panelSize : 0;
 		const topRightHeight = Math.max(0, contentHeight - visiblePanelSize);
@@ -1555,6 +1564,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 
 		// Layout the grid widget
 		this.workbenchGrid.layout(gridWidth, gridHeight);
+		this.normalizeSimpleAuxiliaryBarWidth();
 		this.layoutMobileSidebar();
 
 		// Emit as event
@@ -1763,7 +1773,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 	}
 
 	/**
-	 * Starts a brief geometry animation for a side/auxiliary bar toggle. Adds the
+	 * Starts a brief geometry animation for a side or bottom panel toggle. Adds the
 	 * `.parts-animating` class (which enables the CSS transition and keeps the
 	 * toggling part rendered), commits the current sizes as the transition start
 	 * frame with a forced reflow, and schedules the class removal. Must be called
@@ -1778,51 +1788,102 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		this.partsAnimationScheduler.schedule();
 	}
 
+	private finishPartsAnimation(): void {
+		this.partsAnimationScheduler.cancel();
+		this.mainContainer.classList.remove(LayoutClasses.PARTS_ANIMATING);
+	}
+
+	/**
+	 * Pane composites do a synchronous DOM build the first time they are opened.
+	 * Build that content while the grid view is still collapsed, then start the
+	 * reveal. Otherwise the main-thread work consumes the first frames of the CSS
+	 * transition and an opening panel appears to jump straight to full size.
+	 */
+	private preparePartOpenAnimation(part: SINGLE_WINDOW_PARTS, prepare: () => Promise<unknown>, reveal: () => void): void {
+		this.partCompositeHideSchedulers.get(part)?.cancel();
+		try {
+			// openPaneComposite performs its expensive initial DOM construction before
+			// returning its promise. Run that work before the transition's first frame,
+			// but reveal synchronously so layout callers can immediately use the part.
+			void prepare().catch(onUnexpectedError);
+		} catch (error) {
+			onUnexpectedError(error);
+		}
+
+		this.beginPartsAnimation();
+		reveal();
+	}
+
+	/** Keep the active composite painted until the closing geometry settles. */
+	private schedulePartCompositeHide(part: SINGLE_WINDOW_PARTS, location: ViewContainerLocation): void {
+		let scheduler = this.partCompositeHideSchedulers.get(part);
+		if (!scheduler) {
+			scheduler = new RunOnceScheduler(() => {
+				if (!this.isVisible(part) && this.paneCompositeService.getActivePaneComposite(location)) {
+					this.paneCompositeService.hideActivePaneComposite(location);
+				}
+			}, 300);
+			this.partCompositeHideSchedulers.set(part, scheduler);
+		}
+
+		scheduler.schedule();
+	}
+
 	private setSideBarHidden(hidden: boolean): void {
 		if (this.partVisibility.sidebar === !hidden) {
 			return;
 		}
 
-		this.beginPartsAnimation();
-
 		const sidebarSizeBeforeToggle = this.sideBarPartView ? this.workbenchGrid.getViewSize(this.sideBarPartView) : undefined;
 		const sessionsSizeBeforeToggle = this.sessionsPartView ? this.workbenchGrid.getViewSize(this.sessionsPartView) : undefined;
+		const showSidebar = () => {
+			this.mainContainer.classList.remove(LayoutClasses.SIDEBAR_HIDDEN);
+			this.workbenchGrid.setViewVisible(this.sideBarPartView, true);
 
-		this.partVisibility.sidebar = !hidden;
-		this.mainContainer.classList.toggle(LayoutClasses.SIDEBAR_HIDDEN, hidden);
-
-		// Propagate to grid
-		this.workbenchGrid.setViewVisible(
-			this.sideBarPartView,
-			!hidden,
-		);
-
-		// Re-opening restores the sidebar's last visible width, which may be at (or
-		// near) the narrow minimum. Bump it up to a comfortable width on open so the
-		// header row — traffic lights, mode switcher, toggle and navigation — isn't
-		// cramped against the window controls.
-		if (!hidden && this.sideBarPartView) {
-			const restored = this.workbenchGrid.getViewSize(this.sideBarPartView);
-			const comfortableOpenWidth = 300;
-			if (restored.width > 0 && restored.width < comfortableOpenWidth) {
-				this.workbenchGrid.resizeView(this.sideBarPartView, { width: comfortableOpenWidth, height: restored.height });
+			// Re-opening restores the sidebar's last visible width, which may be at (or
+			// near) the narrow minimum. Bump it up to a comfortable width on open so the
+			// header row — traffic lights, mode switcher, toggle and navigation — isn't
+			// cramped against the window controls.
+			if (this.sideBarPartView) {
+				const restored = this.workbenchGrid.getViewSize(this.sideBarPartView);
+				const comfortableOpenWidth = 300;
+				if (restored.width > 0 && restored.width < comfortableOpenWidth) {
+					this.workbenchGrid.resizeView(this.sideBarPartView, { width: comfortableOpenWidth, height: restored.height });
+				}
 			}
-		}
 
-		this.rebalanceSessionsAfterSidebarToggle(hidden, sidebarSizeBeforeToggle, sessionsSizeBeforeToggle);
+			this.rebalanceSessionsAfterSidebarToggle(false, sidebarSizeBeforeToggle, sessionsSizeBeforeToggle);
+			this.layout();
+			this.layoutMobileSidebar();
+		};
 
-		// If sidebar becomes hidden, also hide the current active pane composite
-		if (hidden && this.paneCompositeService.getActivePaneComposite(ViewContainerLocation.Sidebar)) {
-			this.paneCompositeService.hideActivePaneComposite(ViewContainerLocation.Sidebar);
-		}
-
-		// If sidebar becomes visible, show last active Viewlet or default viewlet
-		if (!hidden && !this.paneCompositeService.getActivePaneComposite(ViewContainerLocation.Sidebar)) {
+		if (!hidden) {
+			// Mark the part logically visible before preparing its composite so
+			// openPaneComposite does not recursively reveal the grid view itself.
+			this.partVisibility.sidebar = true;
 			const viewletToOpen = this.paneCompositeService.getLastActivePaneCompositeId(ViewContainerLocation.Sidebar) ??
 				this.viewDescriptorService.getDefaultViewContainer(ViewContainerLocation.Sidebar)?.id;
-			if (viewletToOpen) {
-				this.paneCompositeService.openPaneComposite(viewletToOpen, ViewContainerLocation.Sidebar);
-			}
+			const prepare = viewletToOpen && !this.paneCompositeService.getActivePaneComposite(ViewContainerLocation.Sidebar)
+				? () => this.paneCompositeService.openPaneComposite(viewletToOpen, ViewContainerLocation.Sidebar)
+				: () => Promise.resolve();
+
+			this.preparePartOpenAnimation(Parts.SIDEBAR_PART, prepare, showSidebar);
+			this._savePartVisibility();
+			return;
+		}
+
+		this.beginPartsAnimation();
+
+		this.partVisibility.sidebar = false;
+		this.mainContainer.classList.add(LayoutClasses.SIDEBAR_HIDDEN);
+
+		// Propagate to grid
+		this.workbenchGrid.setViewVisible(this.sideBarPartView, false);
+		this.rebalanceSessionsAfterSidebarToggle(true, sidebarSizeBeforeToggle, sessionsSizeBeforeToggle);
+
+		// Keep the populated pane painted as its shell closes, then tear it down.
+		if (this.paneCompositeService.getActivePaneComposite(ViewContainerLocation.Sidebar)) {
+			this.schedulePartCompositeHide(Parts.SIDEBAR_PART, ViewContainerLocation.Sidebar);
 		}
 
 		this.layout();
@@ -1852,11 +1913,20 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 	}
 
 	private setAuxiliaryBarHidden(hidden: boolean): void {
-		if (this.partVisibility.auxiliaryBar === !hidden) {
-			return;
+		// Restore the chat grid before hiding its maximized inspection surface.
+		if (hidden) {
+			this.setAuxiliaryBarMaximized(false);
 		}
 
-		this.beginPartsAnimation();
+		if (this.partVisibility.auxiliaryBar === !hidden) {
+			// Mode commands call setPartHidden(false) even when the right pane is
+			// already visible. Use that shared path to repair stale restored widths
+			// for Browser, Files, Terminal and Diff alike.
+			if (!hidden) {
+				this.normalizeSimpleAuxiliaryBarWidth(true);
+			}
+			return;
+		}
 
 		if (hidden) {
 			this._restoreAttachedEditorMaximizedOnShow = false;
@@ -1866,35 +1936,15 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 			}
 		}
 
-		this.partVisibility.auxiliaryBar = !hidden;
-		this.mainContainer.classList.toggle(LayoutClasses.AUXILIARYBAR_HIDDEN, hidden);
+		const showAuxiliaryBar = () => {
+			this.mainContainer.classList.remove(LayoutClasses.AUXILIARYBAR_HIDDEN);
+			this.workbenchGrid.setViewVisible(this.auxiliaryBarPartView, true);
 
-		// Propagate to grid
-		this.workbenchGrid.setViewVisible(
-			this.auxiliaryBarPartView,
-			!hidden,
-		);
-
-		// If auxiliary bar becomes hidden, also hide the current active pane composite
-		if (hidden && this.paneCompositeService.getActivePaneComposite(ViewContainerLocation.AuxiliaryBar)) {
-			this.paneCompositeService.hideActivePaneComposite(ViewContainerLocation.AuxiliaryBar);
-		}
-
-		// If auxiliary bar becomes visible, show last active pane composite or default
-		if (!hidden && !this.paneCompositeService.getActivePaneComposite(ViewContainerLocation.AuxiliaryBar)) {
-			const paneCompositeToOpen = this.paneCompositeService.getLastActivePaneCompositeId(ViewContainerLocation.AuxiliaryBar) ??
-				this.viewDescriptorService.getDefaultViewContainer(ViewContainerLocation.AuxiliaryBar)?.id;
-			if (paneCompositeToOpen) {
-				this.paneCompositeService.openPaneComposite(paneCompositeToOpen, ViewContainerLocation.AuxiliaryBar);
-			}
-		}
-
-		if (!hidden) {
 			// Simple mode has one right-hand inspection surface. Never reintroduce
 			// the main editor beside it: an empty editor becomes a thin watermark
 			// sliver, and an occupied editor turns the right side into two cramped
-			// IDE columns. Optimus/Jarvis retain the full-workbench restore policy.
-			if (!this._isOptimusWindow && !this._isJarvisWindow) {
+			// IDE columns. Optimus retains the full-workbench restore policy.
+			if (!this._isOptimusWindow) {
 				this._restoreEditorOnAuxiliaryBarShow = false;
 				if (this.partVisibility.editor) {
 					this.setEditorHidden(true);
@@ -1913,22 +1963,74 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 				}
 			}
 
-			// A stale auxiliary-bar width from the old editor+rail split can leave
-			// the right workbench as a clipped icon sliver. In Simple mode it is a
-			// single Codex-style inspection panel, so give it a useful opening width.
-			if (!this._isOptimusWindow && !this._isJarvisWindow && !this.partVisibility.editor) {
-				const currentSize = this.workbenchGrid.getViewSize(this.auxiliaryBarPartView);
-				if (currentSize.width < 400) {
-					const comfortableWidth = Math.min(560, Math.max(460, Math.floor(this._mainContainerDimension.width * 0.34)));
-					this.workbenchGrid.resizeView(this.auxiliaryBarPartView, {
-						width: comfortableWidth,
-						height: currentSize.height
-					});
-				}
-			}
+			this.normalizeSimpleAuxiliaryBarWidth(true);
+		};
+
+		if (!hidden) {
+			this.partVisibility.auxiliaryBar = true;
+			const paneCompositeToOpen = this.paneCompositeService.getLastActivePaneCompositeId(ViewContainerLocation.AuxiliaryBar) ??
+				this.viewDescriptorService.getDefaultViewContainer(ViewContainerLocation.AuxiliaryBar)?.id;
+			const prepare = paneCompositeToOpen && !this.paneCompositeService.getActivePaneComposite(ViewContainerLocation.AuxiliaryBar)
+				? () => this.paneCompositeService.openPaneComposite(paneCompositeToOpen, ViewContainerLocation.AuxiliaryBar)
+				: () => Promise.resolve();
+
+			this.preparePartOpenAnimation(Parts.AUXILIARYBAR_PART, prepare, showAuxiliaryBar);
+			this._savePartVisibility();
+			return;
+		}
+
+		this.beginPartsAnimation();
+		this.partVisibility.auxiliaryBar = false;
+		this.mainContainer.classList.add(LayoutClasses.AUXILIARYBAR_HIDDEN);
+		this.workbenchGrid.setViewVisible(this.auxiliaryBarPartView, false);
+
+		if (this.paneCompositeService.getActivePaneComposite(ViewContainerLocation.AuxiliaryBar)) {
+			this.schedulePartCompositeHide(Parts.AUXILIARYBAR_PART, ViewContainerLocation.AuxiliaryBar);
 		}
 
 		this._savePartVisibility();
+	}
+
+	private normalizeSimpleAuxiliaryBarWidth(ensureComfortableWidth = false): void {
+		if (
+			!this.workbenchGrid ||
+			!this.auxiliaryBarPartView ||
+			this._isOptimusWindow ||
+			this.partVisibility.editor ||
+			!this.partVisibility.auxiliaryBar
+		) {
+			return;
+		}
+
+		if (this.workbenchGrid.isViewMaximized(this.auxiliaryBarPartView)) {
+			// A mode click is also the recovery path for windows that were maximized
+			// before the header control was removed. Passive window layouts still
+			// preserve an explicitly requested command-palette maximization.
+			if (!ensureComfortableWidth) {
+				return;
+			}
+			this.workbenchGrid.exitMaximizedView();
+		}
+
+		const currentSize = this.workbenchGrid.getViewSize(this.auxiliaryBarPartView);
+		const sidebarWidth = this.partVisibility.sidebar && this.sideBarPartView
+			? this.workbenchGrid.getViewSize(this.sideBarPartView).width
+			: 0;
+		const availableWidth = Math.max(0, this._mainContainerDimension.width - sidebarWidth);
+		const maximumWidth = Math.min(
+			availableWidth,
+			Math.max(SIMPLE_AUXILIARY_BAR_MINIMUM_WIDTH, availableWidth - SIMPLE_SESSIONS_MINIMUM_WIDTH)
+		);
+		const comfortableWidth = Math.min(560, Math.max(460, Math.floor(this._mainContainerDimension.width * 0.34)));
+		const requestedWidth = ensureComfortableWidth && currentSize.width < 400 ? comfortableWidth : currentSize.width;
+		const targetWidth = Math.min(requestedWidth, maximumWidth);
+
+		if (targetWidth >= 0 && targetWidth !== currentSize.width) {
+			this.workbenchGrid.resizeView(this.auxiliaryBarPartView, {
+				width: targetWidth,
+				height: currentSize.height
+			});
+		}
 	}
 
 	private setEditorHidden(hidden: boolean): void {
@@ -1982,7 +2084,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 	 * (Optimus) window is a full workbench and is exempt.
 	 */
 	private enforceNoEmptyMainEditor(): void {
-		if (this._isOptimusWindow || this._isJarvisWindow || !this.partVisibility.editor) {
+		if (this._isOptimusWindow || !this.partVisibility.editor) {
 			return;
 		}
 
@@ -2028,19 +2130,32 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		}
 
 		const panelHadFocus = !hidden || this.hasFocus(Parts.PANEL_PART);
+		const showPanel = () => {
+			this.mainContainer.classList.remove(LayoutClasses.PANEL_HIDDEN);
+			this.workbenchGrid.setViewVisible(this.panelPartView, true);
+			this.focusPart(Parts.PANEL_PART);
+		};
 
-		this.partVisibility.panel = !hidden;
-		this.mainContainer.classList.toggle(LayoutClasses.PANEL_HIDDEN, hidden);
+		if (!hidden) {
+			this.partVisibility.panel = true;
+			const panelToOpen = this.paneCompositeService.getLastActivePaneCompositeId(ViewContainerLocation.Panel) ??
+				this.viewDescriptorService.getDefaultViewContainer(ViewContainerLocation.Panel)?.id;
+			const prepare = panelToOpen && !this.paneCompositeService.getActivePaneComposite(ViewContainerLocation.Panel)
+				? () => this.paneCompositeService.openPaneComposite(panelToOpen, ViewContainerLocation.Panel)
+				: () => Promise.resolve();
 
-		// Propagate to grid
-		this.workbenchGrid.setViewVisible(
-			this.panelPartView,
-			!hidden,
-		);
+			this.preparePartOpenAnimation(Parts.PANEL_PART, prepare, showPanel);
+			return;
+		}
+
+		this.beginPartsAnimation();
+		this.partVisibility.panel = false;
+		this.mainContainer.classList.add(LayoutClasses.PANEL_HIDDEN);
+		this.workbenchGrid.setViewVisible(this.panelPartView, false);
 
 		// If panel becomes hidden, also hide the current active pane composite
-		if (hidden && this.paneCompositeService.getActivePaneComposite(ViewContainerLocation.Panel)) {
-			this.paneCompositeService.hideActivePaneComposite(ViewContainerLocation.Panel);
+		if (this.paneCompositeService.getActivePaneComposite(ViewContainerLocation.Panel)) {
+			this.schedulePartCompositeHide(Parts.PANEL_PART, ViewContainerLocation.Panel);
 
 			// Focus the chat bar when hiding the panel if it had focus
 			if (panelHadFocus) {
@@ -2048,18 +2163,6 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 			}
 		}
 
-		// If panel becomes visible, show last active panel or default and focus it
-		if (!hidden) {
-			if (!this.paneCompositeService.getActivePaneComposite(ViewContainerLocation.Panel)) {
-				const panelToOpen = this.paneCompositeService.getLastActivePaneCompositeId(ViewContainerLocation.Panel) ??
-					this.viewDescriptorService.getDefaultViewContainer(ViewContainerLocation.Panel)?.id;
-				if (panelToOpen) {
-					this.paneCompositeService.openPaneComposite(panelToOpen, ViewContainerLocation.Panel);
-				}
-			}
-
-			this.focusPart(Parts.PANEL_PART);
-		}
 	}
 
 	private setSessionsHidden(hidden: boolean): void {
@@ -2195,6 +2298,14 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		if (!this.workbenchGrid || maximized === this.isAuxiliaryBarMaximized()) {
 			return false;
 		}
+
+		// The maximize button can be used while the auxiliary bar's opening
+		// transition is still active. Letting that width transition carry into
+		// GridView's maximized layout leaves a shrinking strip of the chat canvas
+		// beside the tool surface. Finish the open animation before applying the
+		// maximized geometry so the Browser/Terminal surface reaches the edge in a
+		// single frame.
+		this.finishPartsAnimation();
 
 		if (maximized) {
 			// Match Codex's full-width side panel: consume the main workspace,

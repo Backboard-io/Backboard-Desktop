@@ -13,12 +13,6 @@ export const webSearch: PromptModule = definePrompt(
       - Creative generation (writing, poetry, etc.)
       - Mathematical calculations or problem-solving
       - Code generation or debugging unrelated to web resources
-      - Finding code files in a repository in factory
-
-### Parameters
-
-| Name | Type | Required | Description |
-| --- | --- | --- | --- |
-| \`query\` | \`string\` | yes | The search query string |
-| \`max_results\` | \`number\` | no | Max results to return (default 8, maximum 20) |`.trim(),
+      - Finding code files in the local repository
+`.trim(),
 );

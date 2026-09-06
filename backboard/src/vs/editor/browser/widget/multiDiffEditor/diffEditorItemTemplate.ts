@@ -6,7 +6,7 @@ import { addDisposableListener, EventType, h } from '../../../../base/browser/do
 import { Button } from '../../../../base/browser/ui/button/button.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
-import { autorun, derived, globalTransaction, observableValue } from '../../../../base/common/observable.js';
+import { autorun, derived, globalTransaction, observableFromEvent, observableValue } from '../../../../base/common/observable.js';
 import { createActionViewItem } from '../../../../platform/actions/browser/menuEntryActionViewItem.js';
 import { MenuWorkbenchToolBar } from '../../../../platform/actions/browser/toolbar.js';
 import { MenuId } from '../../../../platform/actions/common/actions.js';
@@ -103,7 +103,11 @@ export class DiffEditorItemTemplate extends Disposable implements IPooledObject<
 						// eslint-disable-next-line local/code-no-any-casts, @typescript-eslint/no-explicit-any
 						h('div.title.original.show-file-icons@secondaryPath', [] as any),
 					]),
-					h('div.actions@actions'),
+					h('div.change-counts', [
+					h('span.additions@additions'),
+					h('span.deletions@deletions'),
+				]),
+				h('div.actions@actions'),
 				]),
 			]),
 
@@ -246,6 +250,7 @@ export class DiffEditorItemTemplate extends Disposable implements IPooledObject<
 				scrollBeyondLastLine: false,
 				hideUnchangedRegions: {
 					enabled: true,
+					...options.hideUnchangedRegions,
 				},
 				scrollbar: {
 					vertical: 'hidden',
@@ -268,16 +273,14 @@ export class DiffEditorItemTemplate extends Disposable implements IPooledObject<
 			return;
 		}
 
-		const value = data.viewModel.documentDiffItem;
-
 		globalTransaction(tx => {
-			this._resourceLabel?.setUri(data.viewModel.modifiedUri ?? data.viewModel.originalUri!, { strikethrough: data.viewModel.modifiedUri === undefined });
+			this._resourceLabel?.setUri(data.viewModel.documentDiffItem.displayUri ?? data.viewModel.modifiedUri ?? data.viewModel.originalUri!, { strikethrough: data.viewModel.modifiedUri === undefined });
 
 			let isRenamed = false;
 			let isDeleted = false;
 			let isAdded = false;
 			let flag = '';
-			if (data.viewModel.modifiedUri && data.viewModel.originalUri && data.viewModel.modifiedUri.path !== data.viewModel.originalUri.path) {
+			if (!data.viewModel.documentDiffItem.displayUri && data.viewModel.modifiedUri && data.viewModel.originalUri && data.viewModel.modifiedUri.path !== data.viewModel.originalUri.path) {
 				flag = 'R';
 				isRenamed = true;
 			} else if (!data.viewModel.modifiedUri) {
@@ -293,17 +296,26 @@ export class DiffEditorItemTemplate extends Disposable implements IPooledObject<
 			this._elements.status.innerText = flag;
 
 			this._resourceLabel2?.setUri(isRenamed ? data.viewModel.originalUri : undefined, { strikethrough: true });
+			this._elements.secondaryPath.style.display = isRenamed ? '' : 'none';
 
 			this._dataStore.clear();
 			this._viewModel.set(data.viewModel, tx);
 			this.editor.setDiffModel(data.viewModel.diffEditorViewModelRef, tx);
-			this.editor.updateOptions(updateOptions(value.options ?? {}));
+			this.editor.updateOptions(updateOptions(data.viewModel.options.get()));
 		});
-		if (value.onOptionsDidChange) {
-			this._dataStore.add(value.onOptionsDidChange(() => {
-				this.editor.updateOptions(updateOptions(value.options ?? {}));
-			}));
-		}
+		this._dataStore.add(autorun(reader => this.editor.updateOptions(updateOptions(data.viewModel.options.read(reader)))));
+		const diffResult = observableFromEvent(this._dataStore, this.editor.onDidUpdateDiff, () => this.editor.getDiffComputationResult());
+		this._dataStore.add(autorun(reader => {
+			const diff = diffResult.read(reader);
+			let additions = 0;
+			let deletions = 0;
+			for (const mapping of diff?.changes2 ?? []) {
+				additions += mapping.modified.length;
+				deletions += mapping.original.length;
+			}
+			this._elements.additions.textContent = diff ? `+${additions}` : '';
+			this._elements.deletions.textContent = diff ? `−${deletions}` : '';
+		}));
 		data.viewModel.isAlive.recomputeInitiallyAndOnChange(this._dataStore, value => {
 			if (!value) {
 				this.setData(undefined);

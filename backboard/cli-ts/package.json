@@ -20,6 +20,8 @@
 		"test:terminal-bench:oracle": "bun run scripts/terminal-bench.ts oracle",
 		"test:terminal-bench:run": "bun run scripts/terminal-bench.ts run",
 		"test:terminal-bench:storage": "bun run scripts/terminal-bench.ts storage",
+		"test:harness-performance": "bun run scripts/harness-performance-benchmark.ts",
+		"test:parallel-workers": "bun run scripts/parallel-worker-benchmark.ts",
 		"test:agent-eval": "bun run scripts/agent-eval.ts",
 		"test:chat-ttft": "bun run scripts/chat-first-token-benchmark.ts",
 		"test:skillsbench": "bun run scripts/skillsbench-eval.ts",
@@ -42,6 +44,7 @@
 		"@modelcontextprotocol/sdk": "^1.29.0",
 		"ink": "^7.0.5",
 		"ink-text-input": "^6.0.0",
+		"pngjs": "5.0.0",
 		"qrcode": "^1.5.4",
 		"react": "^19.2.0",
 		"react-devtools-core": "^6.1.1",
@@ -56,6 +59,7 @@
 	"devDependencies": {
 		"@biomejs/biome": "^2.5.0",
 		"@types/bun": "^1.1.10",
+		"@types/pngjs": "^6.0.5",
 		"@types/qrcode": "^1.5.6",
 		"@types/react": "^19.2.0",
 		"typescript": "^5.6.3"

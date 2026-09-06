@@ -14,6 +14,7 @@ import type {
 	PermissionDecision,
 } from "../core/permissions/types.ts";
 import { Tool } from "../core/tools/Tool.ts";
+import { throwIfAborted } from "../core/tools/ToolAbort.ts";
 import type { ToolContext } from "../core/tools/ToolContext.ts";
 import {
 	type FileEditPreview,
@@ -153,6 +154,7 @@ export class ApplyPatchTool extends Tool<Input, Output> {
 		input: Input,
 		ctx: ToolContext,
 	): Promise<ToolResult<Output>> {
+		throwIfAborted(ctx.signal);
 		const operations = parsePatch(input.patch);
 		const resolvedPaths = operations
 			.flatMap(operationPaths)
@@ -169,55 +171,66 @@ export class ApplyPatchTool extends Tool<Input, Output> {
 		);
 
 		await ctx.mutationLockTurn?.wait();
-		const committed = await withPathLocks(resolvedPaths, async () => {
-			ctx.mutationLockTurn?.advance();
-			// Preparation is optimistic. Re-check snapshots under the sorted path
-			// locks, and only rebuild if an earlier same-path call won the race.
-			const snapshotsAreCurrent = await patchSnapshotsAreCurrent(
-				prepared.snapshots,
-			);
-			let plan: PreparedPatch;
-			if (snapshotsAreCurrent) {
-				if (!prepared.plan) throw prepared.error;
-				plan = prepared.plan;
-			} else {
-				const currentSnapshots = await capturePatchSnapshots(resolvedPaths);
-				plan = buildPatchPlan(operations, ctx.cwd, currentSnapshots);
-			}
-			const preImages = await patchPreImages(plan, this.name);
-			await measurePerformance(
-				ctx.bus,
-				"checkpoint_pre_flush",
-				{ toolCallId: ctx.toolCallId, fileCount: preImages.length },
-				async () =>
-					await (ctx.mutationCheckpointBatch?.recordPreImages(preImages, ctx) ??
-						recordPreImageBatch(ctx.checkpoints, preImages, ctx)),
-			);
-
-			try {
+		const mutation = withPathLocks(
+			resolvedPaths,
+			async () => {
+				throwIfAborted(ctx.signal);
+				// Preparation is optimistic. Re-check snapshots under the sorted path
+				// locks, and only rebuild if an earlier same-path call won the race.
+				const snapshotsAreCurrent = await patchSnapshotsAreCurrent(
+					prepared.snapshots,
+				);
+				let plan: PreparedPatch;
+				if (snapshotsAreCurrent) {
+					if (!prepared.plan) throw prepared.error;
+					plan = prepared.plan;
+				} else {
+					const currentSnapshots = await capturePatchSnapshots(resolvedPaths);
+					plan = buildPatchPlan(operations, ctx.cwd, currentSnapshots);
+				}
+				const preImages = await patchPreImages(plan, this.name);
 				await measurePerformance(
 					ctx.bus,
-					"filesystem_commit",
+					"checkpoint_pre_flush",
 					{ toolCallId: ctx.toolCallId, fileCount: preImages.length },
-					async () => await applyPatchActions(plan.actions),
-				);
-				const postImages = patchPostImages(plan.actions);
-				await measurePerformance(
-					ctx.bus,
-					"checkpoint_post_flush",
-					{ toolCallId: ctx.toolCallId, fileCount: postImages.length },
 					async () =>
-						await (ctx.mutationCheckpointBatch?.recordPostImages(
-							postImages,
+						await (ctx.mutationCheckpointBatch?.recordPreImages(
+							preImages,
 							ctx,
-						) ?? recordPostImageBatch(ctx.checkpoints, postImages, ctx)),
+						) ?? recordPreImageBatch(ctx.checkpoints, preImages, ctx)),
 				);
-			} catch (error) {
-				await rollbackPatch(plan, ctx);
-				throw error;
-			}
-			return plan;
-		});
+
+				throwIfAborted(ctx.signal);
+				try {
+					await measurePerformance(
+						ctx.bus,
+						"filesystem_commit",
+						{ toolCallId: ctx.toolCallId, fileCount: preImages.length },
+						async () => await applyPatchActions(plan.actions),
+					);
+					const postImages = patchPostImages(plan.actions);
+					await measurePerformance(
+						ctx.bus,
+						"checkpoint_post_flush",
+						{ toolCallId: ctx.toolCallId, fileCount: postImages.length },
+						async () =>
+							await (ctx.mutationCheckpointBatch?.recordPostImages(
+								postImages,
+								ctx,
+							) ?? recordPostImageBatch(ctx.checkpoints, postImages, ctx)),
+					);
+				} catch (error) {
+					await rollbackPatch(plan, ctx);
+					throw error;
+				}
+				return plan;
+			},
+			ctx.signal,
+		);
+		// withPathLocks reserves in invocation order before yielding. A blocked
+		// path must not hold up registration of later independent writes.
+		ctx.mutationLockTurn?.advance();
+		const committed = await mutation;
 
 		const writtenPaths = finalWrittenPaths(committed.actions);
 		const diagnostics = await collectDiagnosticsFeedbackForFiles(

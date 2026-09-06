@@ -36,6 +36,9 @@ export function coerceScalarStrings(
 function objectShape(
 	schema: z.ZodTypeAny,
 ): Record<string, z.ZodTypeAny> | undefined {
+	// Object-level refinements (e.g. Glob's required pattern choice) preserve
+	// the field schema and must receive the same scalar repair as plain objects.
+	if (schema instanceof z.ZodEffects) return objectShape(schema.innerType());
 	return schema instanceof z.ZodObject ? schema.shape : undefined;
 }
 

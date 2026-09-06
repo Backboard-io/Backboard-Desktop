@@ -522,6 +522,8 @@ export interface IAuxiliaryEditorPart extends IEditorPart {
 }
 
 export interface IModalEditorPart extends IEditorPart {
+	/** Whether this editor belongs to an embedded surface instead of a dialog. */
+	readonly isEmbedded: boolean;
 
 	/**
 	 * Modal container of the editor part.
@@ -673,8 +675,8 @@ export interface IEditorGroupsService extends IEditorGroupsContainer {
 	 * Creates a modal editor part that shows in a modal overlay
 	 * on top of the main workbench window.
 	 *
-	 * If a modal part already exists, it will be returned
-	 * instead of creating a new one.
+	 * Reuses the existing standalone modal, or the editor part belonging to
+	 * the requested embedded host. Embedded parts never share the standalone modal.
 	 */
 	createModalEditorPart(options?: IModalEditorPartOptions): Promise<IModalEditorPart>;
 

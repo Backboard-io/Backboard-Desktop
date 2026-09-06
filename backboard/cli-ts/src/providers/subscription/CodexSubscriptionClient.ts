@@ -2,6 +2,12 @@ import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import type { MemoryProfile, ThinkingConfig } from "../../config/defaults.ts";
 import type { OpenAITool } from "../../core/tools/schema.ts";
+import {
+	canonicalToolInput,
+	toolInputFingerprint,
+} from "../../core/tools/ToolCallIdentity.ts";
+import { canonicalToolName } from "../../core/tools/names.ts";
+import { RetryableToolProtocolError } from "../ToolProtocolError.ts";
 import { errorMessage } from "../../utils/errors.ts";
 import type {
 	AgentClient,
@@ -95,12 +101,18 @@ function convertTools(tools: OpenAITool[] | undefined): JsonObject[] {
 	}));
 }
 
-function reasoningConfig(
+export function reasoningConfig(
 	thinking: ThinkingConfig | null | undefined,
 ): JsonObject {
+	// Omission preserves the service default. Codex's reasoning-only endpoint
+	// has no portable off switch; report that limitation in wire diagnostics.
+	if (thinking === undefined || (thinking && !("effort" in thinking)))
+		return { summary: "auto" };
 	const effort =
-		thinking && "effort" in thinking && thinking.effort !== "max"
-			? thinking.effort
+		thinking && "effort" in thinking
+			? thinking.effort === "max"
+				? "high"
+				: thinking.effort
 			: "low";
 	return { effort, summary: "auto" };
 }
@@ -142,21 +154,75 @@ async function userMessage(
 }
 
 function toolCallFromItem(item: JsonObject): ProviderToolCall | null {
+	if (item.type !== "function_call") return null;
 	if (
-		item.type !== "function_call" ||
 		typeof item.call_id !== "string" ||
+		!item.call_id ||
 		typeof item.name !== "string" ||
+		!item.name ||
 		typeof item.arguments !== "string"
 	) {
-		return null;
+		throw new Error("Tool protocol error: malformed function call item");
 	}
 	let input: unknown;
 	try {
 		input = JSON.parse(item.arguments);
 	} catch {
-		input = {};
+		throw new Error(
+			"Tool protocol error: function call arguments are not valid JSON",
+		);
 	}
 	return { id: item.call_id, name: item.name, input };
+}
+
+function callIdentity(call: ProviderToolCall): string {
+	return canonicalToolInput({
+		id: call.id,
+		name: canonicalToolName(call.name),
+		input: call.input,
+	});
+}
+
+/** Payload-free disagreement evidence; argument values never enter diagnostics. */
+function callDiagnostic(call: ProviderToolCall): JsonObject {
+	return {
+		id: call.id.slice(0, 160),
+		name: call.name.slice(0, 80),
+		inputHash: toolInputFingerprint(call.input),
+	};
+}
+
+/** Fixed keys keep unexpected item types and their payloads out of session logs. */
+function completionOutputShape(response: unknown): JsonObject {
+	const output = isObject(response) ? response.output : undefined;
+	const itemTypes = {
+		function_call: 0,
+		reasoning: 0,
+		message: 0,
+		other: 0,
+		invalid: 0,
+	};
+	if (Array.isArray(output)) {
+		for (const item of output) {
+			if (!isObject(item)) itemTypes.invalid++;
+			else if (item.type === "function_call") itemTypes.function_call++;
+			else if (item.type === "reasoning") itemTypes.reasoning++;
+			else if (item.type === "message") itemTypes.message++;
+			else itemTypes.other++;
+		}
+	}
+	return {
+		outputShape:
+			output === undefined
+				? "absent"
+				: !Array.isArray(output)
+					? "invalid"
+					: output.length === 0
+						? "empty"
+						: "nonempty",
+		itemCount: Array.isArray(output) ? output.length : null,
+		itemTypes,
+	};
 }
 
 function usageFromResponse(response: JsonObject): ProviderUsage | null {
@@ -489,6 +555,21 @@ export class CodexSubscriptionClient implements AgentClient {
 		options: RequestOptions,
 		attempt: StreamAttemptState,
 	): AsyncIterable<ProviderEvent> {
+		yield {
+			kind: "thinking_resolved",
+			requested: thinking,
+			effective: reasoningConfig(thinking),
+			provider: "openai-subscription",
+			model: thread.model,
+			reason:
+				thinking === null
+					? "off-not-represented-by-codex-adapter-using-low"
+					: thinking && "effort" in thinking && thinking.effort === "max"
+						? "max-unsupported-clamped-to-high"
+						: thinking === undefined
+							? "provider-default"
+							: "requested-setting",
+		};
 		for (let retry = 0; retry <= this.retryLimit; retry++) {
 			let response: Response;
 			try {
@@ -524,6 +605,9 @@ export class CodexSubscriptionClient implements AgentClient {
 			if (!response.body) throw new Error("Codex endpoint returned no stream.");
 
 			const calls: ProviderToolCall[] = [];
+			const readyIdentities = new Map<string, string>();
+			const inputStart = thread.input.length;
+			const doneItems = new Map<string, string>();
 			let finalText = "";
 			let terminal = false;
 			let observableOutput = false;
@@ -533,6 +617,7 @@ export class CodexSubscriptionClient implements AgentClient {
 				for await (const frame of readSseFrames(response.body, {
 					includeTransportActivity: true,
 				})) {
+					options.signal?.throwIfAborted();
 					const event = parseSseFrame(frame);
 					if (!isObject(event)) {
 						yield { kind: "activity" };
@@ -562,13 +647,30 @@ export class CodexSubscriptionClient implements AgentClient {
 						isObject(event.item)
 					) {
 						observableOutput = true;
-						thread.input.push(event.item);
 						const call = toolCallFromItem(event.item);
+						const key = call
+							? `call:${call.id}`
+							: typeof event.item.id === "string"
+								? `item:${event.item.id}`
+								: undefined;
+						const fingerprint = call
+							? callIdentity(call)
+							: canonicalToolInput(event.item);
+						if (key && doneItems.has(key)) {
+							if (doneItems.get(key) !== fingerprint)
+								throw new Error(
+									"Tool protocol error: completed output item changed identity or arguments",
+								);
+							continue;
+						}
+						if (key) doneItems.set(key, fingerprint);
+						thread.input.push(event.item);
 						if (call) {
 							calls.push(call);
+							readyIdentities.set(call.id, callIdentity(call));
 							emitted = true;
 							yield { kind: "tool_started", id: call.id, name: call.name };
-							yield { kind: "tool_ready", call };
+							yield { kind: "tool_ready", call: structuredClone(call) };
 						}
 					}
 					if (event.type === "response.failed") {
@@ -590,6 +692,83 @@ export class CodexSubscriptionClient implements AgentClient {
 					}
 					if (event.type === "response.completed") {
 						terminal = true;
+						const outputShape = completionOutputShape(event.response);
+						yield {
+							kind: "provider_diagnostic",
+							provider: "openai-subscription",
+							phase: "completed",
+							details: { ...outputShape, completedToolCount: calls.length },
+						};
+						options.signal?.throwIfAborted();
+						if (outputShape.outputShape === "invalid")
+							throw new Error(
+								"Tool protocol error: malformed completed output list",
+							);
+						// Codex emits authoritative output_item.done events and may end
+						// with a compact completion summary. Its reference client does
+						// not read completed.output. An absent/empty list cannot retract
+						// validated done items; a populated list must still agree below.
+						if (
+							isObject(event.response) &&
+							Array.isArray(event.response.output) &&
+							event.response.output.length > 0
+						) {
+							const items = event.response.output;
+							if (!items.every(isObject))
+								throw new Error(
+									"Tool protocol error: malformed completed output list",
+								);
+							const finalCalls = items.flatMap((item) => {
+								const call = toolCallFromItem(item);
+								return call ? [call] : [];
+							});
+							const finalIds = new Set(finalCalls.map((call) => call.id));
+							if (finalIds.size !== finalCalls.length)
+								throw new Error(
+									"Tool protocol error: duplicate final function call ID",
+								);
+							for (const ready of calls) {
+								const final = finalCalls.find((call) => call.id === ready.id);
+								if (
+									!final ||
+									readyIdentities.get(ready.id) !== callIdentity(final)
+								) {
+									yield {
+										kind: "warning",
+										message: `Tool protocol disagreement: ${JSON.stringify({
+											provider: "openai-subscription",
+											phase: "completed",
+											reason: !final
+												? "missing_call"
+												: canonicalToolName(ready.name) !==
+														canonicalToolName(final.name)
+													? "changed_name"
+													: "changed_arguments",
+											ready: callDiagnostic(ready),
+											final: final ? callDiagnostic(final) : null,
+											readyCount: calls.length,
+											finalCount: finalCalls.length,
+											...outputShape,
+										})}`,
+									};
+									// No final batch has escaped this adapter. The consumer can
+									// abort/retract speculative reads and retry once, never mutations.
+									throw new RetryableToolProtocolError(
+										"Tool protocol error: completed response disagrees with ready function call",
+									);
+								}
+							}
+							for (const call of finalCalls) {
+								if (!calls.some((ready) => ready.id === call.id))
+									yield { kind: "tool_ready", call: structuredClone(call) };
+							}
+							calls.splice(0, calls.length, ...finalCalls);
+							thread.input.splice(
+								inputStart,
+								thread.input.length - inputStart,
+								...items,
+							);
+						}
 						thread.messages.push({
 							role: "assistant",
 							content: finalText,

@@ -21,6 +21,17 @@ import { AGENT_HOST_SCHEME } from '../../../../../platform/agentHost/common/agen
 const BACKBOARD_GENERATED_IMAGE_HOST = 'backboard-prod.s3.ca-central-1.amazonaws.com';
 const BACKBOARD_GENERATED_IMAGE_PATH = '/generated-images/';
 
+/** Resolve agent-authored relative media against its session, not the app page. */
+export function withChatMarkdownBaseUri(markdown: IMarkdownString, workingDirectory: URI | undefined): IMarkdownString {
+	if (markdown.baseUri || !workingDirectory) {
+		return markdown;
+	}
+	return {
+		...markdown,
+		baseUri: workingDirectory.with({ path: `${workingDirectory.path.replace(/\/$/, '')}/` }),
+	};
+}
+
 /**
  * Keep chat's remote-image privacy boundary intact while allowing images
  * produced by Backboard itself. Restricting both host and path prevents an

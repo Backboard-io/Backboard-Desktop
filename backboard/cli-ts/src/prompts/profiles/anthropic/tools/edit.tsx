@@ -20,13 +20,7 @@ Writing reliable edits:
 - Keep the exact indentation (tabs or spaces) of the original.
 - Bundle edits to one file into a single call when they are independent of each other; two edits in one call must not overlap the same text.
 ${newFileGuidance(context)}
-
-### Parameters
-
-| Name | Type | Required | Description |
-| --- | --- | --- | --- |
-| \`file_path\` | \`string\` | yes | The path to the file to edit |
-| \`edits\` | \`array\` | yes | One or more edits, each with old_str, new_str, and optional replace_all, all matched against the same file snapshot |`.trim();
+`.trim();
 }
 
 function readFirst(context: PromptContext): string {

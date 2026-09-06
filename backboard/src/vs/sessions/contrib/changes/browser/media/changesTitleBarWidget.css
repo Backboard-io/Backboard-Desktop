@@ -10,3 +10,9 @@
 .agent-sessions-workbench .titlebar-session-actions-container .monaco-action-bar .actions-container > .action-item:has(.codicon[class*="codicon-vscode"]) + .action-item {
 	margin-left: 0;
 }
+
+/* The open panel owns its close control. Use the actual layout class instead
+ * of the toolbar's scoped context key, which can lag behind session switches. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.noauxiliarybar) .part.sessionspart .monaco-action-bar .action-item:has(:is(.codicon-agent-secondary-sidebar-toggle-closed, .codicon-agent-secondary-sidebar-toggle-open)) {
+	display: none;
+}

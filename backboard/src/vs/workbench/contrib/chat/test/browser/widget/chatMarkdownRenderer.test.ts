@@ -8,7 +8,7 @@ import { MarkdownString } from '../../../../../../base/common/htmlContent.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { assertSnapshot } from '../../../../../../base/test/common/snapshot.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
-import { ChatContentMarkdownRenderer, isBackboardGeneratedImage } from '../../../browser/widget/chatContentMarkdownRenderer.js';
+import { ChatContentMarkdownRenderer, isBackboardGeneratedImage, withChatMarkdownBaseUri } from '../../../browser/widget/chatContentMarkdownRenderer.js';
 import { workbenchInstantiationService } from '../../../../../test/browser/workbenchTestServices.js';
 
 suite('ChatMarkdownRenderer', () => {
@@ -24,6 +24,33 @@ suite('ChatMarkdownRenderer', () => {
 		const md = new MarkdownString('a');
 		const result = store.add(testRenderer.render(md));
 		await assertSnapshot(result.element.textContent);
+	});
+
+	test('resolves local images and file links against the session directory', () => {
+		const markdown = new MarkdownString('![Pattern](render-smoke/pattern.png) [Report](render-smoke/report.md)');
+		const content = withChatMarkdownBaseUri(markdown, URI.file('/workspace/project'));
+		const rendered = store.add(testRenderer.render(content));
+		const image = rendered.element.querySelector('img');
+		assert.deepStrictEqual({
+			imagePath: image ? URI.parse(image.src).path : undefined,
+			link: rendered.element.querySelector('a')?.dataset.href,
+			originalBase: markdown.baseUri,
+		}, {
+			imagePath: '/workspace/project/render-smoke/pattern.png',
+			link: 'file:///workspace/project/render-smoke/report.md',
+			originalBase: undefined,
+		});
+	});
+
+	test('preserves explicit markdown bases and remote image restrictions', () => {
+		const markdown = new MarkdownString('![Remote](https://example.com/tracker.png)');
+		markdown.baseUri = URI.file('/workspace/report.md');
+		const content = withChatMarkdownBaseUri(markdown, URI.file('/different/session'));
+		const rendered = store.add(testRenderer.render(content));
+		assert.deepStrictEqual({
+			preserved: content === markdown,
+			remoteImages: rendered.element.querySelectorAll('img').length,
+		}, { preserved: true, remoteImages: 0 });
 	});
 
 	test('plain text fast path preserves rendered markdown shape', () => {

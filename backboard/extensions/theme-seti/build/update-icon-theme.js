@@ -337,7 +337,7 @@ exports.update = function () {
 		};
 
 		const path = './icons/vs-seti-icon-theme.json';
-		fs.writeFileSync(path, JSON.stringify(res, null, '\t'));
+		fs.writeFileSync(path, JSON.stringify(require('./backboard-icons')(res), null, '\t'));
 		console.log('written ' + path);
 	}
 
@@ -472,6 +472,5 @@ exports.update = function () {
 if (path.basename(process.argv[1]) === 'update-icon-theme.js') {
 	exports.copyFont().then(() => exports.update());
 }
-
 
 

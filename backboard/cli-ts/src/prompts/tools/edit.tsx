@@ -20,13 +20,7 @@ Each 'old_str' may span multiple lines and must match the file text exactly. If 
 Each 'old_str' must be unique in the file, or 'replace_all' must be true.
 Provide larger 'old_str' values with surrounding context to narrow down the exact match.
 All edits are matched against the same snapshot of the file (as last read) and applied atomically: either every edit applies or none do. Edits in one call must not overlap the same text.
-
-### Parameters
-
-| Name | Type | Required | Description |
-| --- | --- | --- | --- |
-| \`file_path\` | \`string\` | yes | The path to the file to edit |
-| \`edits\` | \`array\` | yes | One or more edits, each with old_str, new_str, and optional replace_all, all matched against the same file snapshot |`.trim();
+`.trim();
 }
 
 function newFileGuidance(context: PromptContext): string {

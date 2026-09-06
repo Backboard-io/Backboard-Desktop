@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { ThemeIcon } from '../../../../base/common/themables.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { localize, localize2 } from '../../../../nls.js';
 import { Action2, MenuId, MenuRegistry, registerAction2 } from '../../../../platform/actions/common/actions.js';
@@ -23,9 +24,6 @@ const maximizeIcon = registerIcon('auxiliarybar-maximize', Codicon.screenFull, l
 const closeIcon = registerIcon('auxiliarybar-close', Codicon.close, localize('closeIcon', 'Icon to close the secondary side bar.'));
 
 const auxiliaryBarRightIcon = registerIcon('auxiliarybar-right-layout-icon', Codicon.layoutSidebarRight, localize('toggleAuxiliaryIconRight', 'Icon to toggle the secondary side bar off in its right position.'));
-const auxiliaryBarRightOffIcon = registerIcon('auxiliarybar-right-off-layout-icon', Codicon.layoutSidebarRightOff, localize('toggleAuxiliaryIconRightOn', 'Icon to toggle the secondary side bar on in its right position.'));
-const auxiliaryBarLeftIcon = registerIcon('auxiliarybar-left-layout-icon', Codicon.layoutSidebarLeft, localize('toggleAuxiliaryIconLeft', 'Icon to toggle the secondary side bar in its left position.'));
-const auxiliaryBarLeftOffIcon = registerIcon('auxiliarybar-left-off-layout-icon', Codicon.layoutSidebarLeftOff, localize('toggleAuxiliaryIconLeftOn', 'Icon to toggle the secondary side bar on in its left position.'));
 
 export class ToggleAuxiliaryBarAction extends Action2 {
 
@@ -158,16 +156,29 @@ registerAction2(class FocusAuxiliaryBarAction extends Action2 {
 	}
 });
 
+// Keep a conventional panel toggle beside the bottom-panel control as well.
+MenuRegistry.appendMenuItem(MenuId.LayoutControlMenu, {
+	command: {
+		id: ToggleAuxiliaryBarAction.ID,
+		title: localize('toggleRightPanel', "Toggle Right Panel"),
+		icon: Codicon.layoutSidebarRightOff,
+		toggled: { condition: AuxiliaryBarVisibleContext, icon: Codicon.layoutSidebarRight }
+	},
+	group: 'navigation',
+	order: 2,
+	when: IsAuxiliaryWindowContext.negate()
+});
+
 MenuRegistry.appendMenuItems([
 	{
-		id: MenuId.LayoutControlMenu,
+		id: MenuId.TitleBarAdjacentCenter,
 		item: {
 			group: 'navigation',
 			command: {
 				id: ToggleAuxiliaryBarAction.ID,
 				title: localize('toggleSecondarySideBar', "Toggle Secondary Side Bar"),
-				toggled: { condition: AuxiliaryBarVisibleContext, icon: auxiliaryBarLeftIcon },
-				icon: auxiliaryBarLeftOffIcon,
+				toggled: { condition: AuxiliaryBarVisibleContext, icon: ThemeIcon.fromId('backboard-logo') },
+				icon: ThemeIcon.fromId('backboard-logo'),
 			},
 			when: ContextKeyExpr.and(
 				IsAuxiliaryWindowContext.negate(),
@@ -179,14 +190,14 @@ MenuRegistry.appendMenuItems([
 			order: 0
 		}
 	}, {
-		id: MenuId.LayoutControlMenu,
+		id: MenuId.TitleBarAdjacentCenter,
 		item: {
 			group: 'navigation',
 			command: {
 				id: ToggleAuxiliaryBarAction.ID,
 				title: localize('toggleSecondarySideBar', "Toggle Secondary Side Bar"),
-				toggled: { condition: AuxiliaryBarVisibleContext, icon: auxiliaryBarRightIcon },
-				icon: auxiliaryBarRightOffIcon,
+				toggled: { condition: AuxiliaryBarVisibleContext, icon: ThemeIcon.fromId('backboard-logo') },
+				icon: ThemeIcon.fromId('backboard-logo'),
 			},
 			when: ContextKeyExpr.and(
 				IsAuxiliaryWindowContext.negate(),

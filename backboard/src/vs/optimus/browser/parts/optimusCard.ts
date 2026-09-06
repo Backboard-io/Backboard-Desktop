@@ -3,24 +3,20 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { $, append, clearNode, EventHelper, EventType, addDisposableListener, getWindow, scheduleAtNextAnimationFrame } from '../../../base/browser/dom.js';
-import { disposableTimeout, IntervalTimer } from '../../../base/common/async.js';
-import { CancellationTokenSource } from '../../../base/common/cancellation.js';
+import { $, append, EventHelper, EventType, addDisposableListener } from '../../../base/browser/dom.js';
+import { IntervalTimer, Limiter, RunOnceScheduler } from '../../../base/common/async.js';
 import { fromNow } from '../../../base/common/date.js';
 import { Emitter, Event } from '../../../base/common/event.js';
 import { Disposable, DisposableStore, MutableDisposable, toDisposable } from '../../../base/common/lifecycle.js';
 import { autorun } from '../../../base/common/observable.js';
 import { basename, isEqual } from '../../../base/common/resources.js';
 import { URI } from '../../../base/common/uri.js';
+import { LRUCache } from '../../../base/common/map.js';
+import { IChatModel, IChatResponseModel, IChatProgressResponseContent } from '../../../workbench/contrib/chat/common/model/chatModel.js';
 import { localize } from '../../../nls.js';
-import { IContextKeyService } from '../../../platform/contextkey/common/contextkey.js';
-import { IInstantiationService } from '../../../platform/instantiation/common/instantiation.js';
-import { ILogService } from '../../../platform/log/common/log.js';
-import { ServiceCollection } from '../../../platform/instantiation/common/serviceCollection.js';
-import { ChatListWidget } from '../../../workbench/contrib/chat/browser/widget/chatListWidget.js';
-import { ChatViewModel } from '../../../workbench/contrib/chat/common/model/chatViewModel.js';
+import { IChatService } from '../../../workbench/contrib/chat/common/chatService/chatService.js';
+import { CancellationTokenSource } from '../../../base/common/cancellation.js';
 import { ChatAgentLocation } from '../../../workbench/contrib/chat/common/constants.js';
-import { IChatModelReference, IChatService } from '../../../workbench/contrib/chat/common/chatService/chatService.js';
 import { IActiveSession } from '../../../sessions/services/sessions/common/sessionsManagement.js';
 import { ISession, SessionStatus } from '../../../sessions/services/sessions/common/session.js';
 
@@ -38,11 +34,11 @@ export type OptimusCardAction =
 
 function statusLabel(status: SessionStatus): string {
 	switch (status) {
-		case SessionStatus.InProgress: return localize('optimus.card.running', "Running");
+		case SessionStatus.InProgress: return localize('optimus.card.running', "Live");
 		case SessionStatus.NeedsInput: return localize('optimus.card.needsInput', "Needs Input");
 		case SessionStatus.Completed: return localize('optimus.card.done', "Done");
 		case SessionStatus.Error: return localize('optimus.card.error', "Error");
-		default: return localize('optimus.card.new', "New");
+		default: return localize('optimus.card.idle', "Idle");
 	}
 }
 
@@ -72,8 +68,8 @@ function statusIconClass(status: SessionStatus): string {
 
 /**
  * One compact task-slot card in the Optimus grid. Renders the bound session's
- * status, title, a read-only embedded chat transcript (the same ChatWidget
- * rendering the Simple window uses), changed-file stats and last-activity
+ * status, title, bounded plain-text activity from already-running chats,
+ * last-activity
  * timestamp. An unbound card renders a "start a task" placeholder.
  */
 export class OptimusCard extends Disposable {
@@ -84,23 +80,25 @@ export class OptimusCard extends Disposable {
 	private readonly statusText: HTMLElement;
 	private readonly titleEl: HTMLElement;
 	private readonly feedEl: HTMLElement;
-	private readonly chatEl: HTMLElement;
 	private readonly folderEl: HTMLElement;
 	private readonly folderLabelEl: HTMLElement;
-	private readonly changesEl: HTMLElement;
 	private readonly timeEl: HTMLElement;
 	private readonly placeholderEl: HTMLElement;
 	private readonly contentEl: HTMLElement;
 	private readonly deleteButton: HTMLButtonElement;
 
-	/** Lazily created read-only transcript list, reused across rebinds. */
-	private chatList: ChatListWidget | undefined;
-
-	/** Disposables tied to the currently bound session; cleared on rebind. */
+	/** Bounded text only: never retain chat models or full render trees. */
+	private static readonly historyQueue = new Limiter<void>(2);
+	private static readonly activityCache = new LRUCache<string, string>(200);
 	private readonly bindStore = this._register(new DisposableStore());
-	/** Disposables tied to the currently attached chat view model. */
-	private readonly viewModelStore = this._register(new DisposableStore());
-	private readonly modelRef = this._register(new MutableDisposable<IChatModelReference>());
+	private readonly previewStore = this._register(new DisposableStore());
+	private readonly responseListener = this._register(new MutableDisposable());
+	private readonly previewScheduler = this._register(new RunOnceScheduler(() => this.updatePreview(), 250));
+	private previewModel: IChatModel | undefined;
+	private previewResponse: IChatResponseModel | undefined;
+	private followTail = true;
+	private previewLoading = false;
+	private previewFailed = false;
 
 	private _session: IOptimusCardSessionModel | undefined;
 	get session(): IOptimusCardSessionModel | undefined { return this._session; }
@@ -117,9 +115,6 @@ export class OptimusCard extends Disposable {
 	constructor(
 		container: HTMLElement,
 		@IChatService private readonly chatService: IChatService,
-		@IInstantiationService private readonly instantiationService: IInstantiationService,
-		@IContextKeyService private readonly contextKeyService: IContextKeyService,
-		@ILogService private readonly logService: ILogService,
 	) {
 		super();
 
@@ -139,15 +134,15 @@ export class OptimusCard extends Disposable {
 		this.deleteButton.setAttribute('aria-label', this.deleteButton.title);
 
 		this.feedEl = append(this.contentEl, $('.optimus-card-feed'));
-		this.chatEl = append(this.contentEl, $('.optimus-card-chat'));
-		this.chatEl.style.display = 'none';
+		this._register(addDisposableListener(this.feedEl, EventType.SCROLL, () => {
+			this.followTail = this.feedEl.scrollHeight - this.feedEl.scrollTop - this.feedEl.clientHeight < 16;
+		}));
 
 		const footer = append(this.contentEl, $('.optimus-card-footer'));
-		const footerLeft = append(footer, $('.optimus-card-footer-left'));
-		this.folderEl = append(footerLeft, $('.optimus-card-folder'));
+		this.folderEl = append(footer, $('.optimus-card-folder'));
 		append(this.folderEl, $('span.codicon.codicon-folder'));
 		this.folderLabelEl = append(this.folderEl, $('span.optimus-card-folder-label'));
-		this.changesEl = append(footerLeft, $('.optimus-card-changes'));
+
 		this.timeEl = append(footer, $('.optimus-card-time'));
 
 		this.placeholderEl = append(this.element, $('.optimus-card-placeholder'));
@@ -164,19 +159,13 @@ export class OptimusCard extends Disposable {
 			}
 		};
 
-		// Most of the embedded transcript is a passive preview: clicking it opens
-		// the focused chat. Question carousels are the exception. They are the
-		// real chat controls (not a screenshot), so keep their options, freeform
-		// input and submit/skip actions interactive directly on the tile.
+		// The entire read-only preview opens the existing focused session.
 		let mouseDownPosition: { x: number; y: number } | undefined;
 		this._register(addDisposableListener(this.element, EventType.MOUSE_DOWN, event => {
 			mouseDownPosition = { x: event.clientX, y: event.clientY };
 		}, true));
 		this._register(addDisposableListener(this.element, EventType.CLICK, event => {
 			if ((event.target as HTMLElement).closest('.optimus-card-delete')) {
-				return;
-			}
-			if ((event.target as HTMLElement).closest('.chat-question-carousel-container')) {
 				return;
 			}
 			if (mouseDownPosition && (Math.abs(event.clientX - mouseDownPosition.x) > 4 || Math.abs(event.clientY - mouseDownPosition.y) > 4)) {
@@ -186,14 +175,11 @@ export class OptimusCard extends Disposable {
 			firePrimaryAction();
 		}, true));
 		this._register(addDisposableListener(this.element, EventType.KEY_DOWN, event => {
-			if ((event.target as HTMLElement).closest('.chat-question-carousel-container')) {
-				return;
-			}
-			if (event.key === 'Enter' || event.key === ' ') {
+			if (!(event.target as HTMLElement).closest('.optimus-card-delete') && (event.key === 'Enter' || event.key === ' ')) {
 				EventHelper.stop(event, true);
 				firePrimaryAction();
 			}
-		}));
+		}, true));
 		this._register(addDisposableListener(this.deleteButton, EventType.CLICK, event => {
 			EventHelper.stop(event, true);
 			if (this._session) {
@@ -201,15 +187,6 @@ export class OptimusCard extends Disposable {
 			}
 		}));
 
-		// Grid tracks resize as cards come and go and the transcript often
-		// attaches before the part's first layout pass, so keep the embedded
-		// list sized from the card's actual dimensions.
-		const ResizeObserverCtor = getWindow(this.element).ResizeObserver;
-		if (ResizeObserverCtor) {
-			const resizeObserver = new ResizeObserverCtor(() => this.layout());
-			resizeObserver.observe(this.element);
-			this._register(toDisposable(() => resizeObserver.disconnect()));
-		}
 
 		this.bind(undefined, false);
 	}
@@ -221,12 +198,10 @@ export class OptimusCard extends Disposable {
 	bind(session: IOptimusCardSessionModel | undefined, isActive: boolean): void {
 		// Rebinding to the same session (the sessions service refreshes its
 		// list frequently, and visible-session wrappers are recreated per
-		// emit) must not tear down the attached transcript or cancel an
-		// in-flight chat load. Compare by stable keys — object identity is
-		// NOT stable across refreshes — and only update the model reference
-		// and highlight.
+		// emit) must not reset the activity subscription. Preserve it when the
+		// session and chat are unchanged; update just the wrapper and highlight.
 		if (session && this._session
-			&& this._session.session.sessionId === session.session.sessionId
+			&& this._session.session === session.session
 			&& isEqual(this._session.chatResource, session.chatResource)) {
 			this._session = session;
 			this.element.classList.toggle('active', isActive);
@@ -237,20 +212,25 @@ export class OptimusCard extends Disposable {
 		this._status = undefined;
 		this.lastUpdatedAt = undefined;
 		this.bindStore.clear();
-		this.viewModelStore.clear();
-		this.modelRef.clear();
-		this.chatList?.refresh();
-		this.chatEl.style.display = 'none';
+		this.previewStore.clear();
+		this.responseListener.clear();
+		this.previewScheduler.cancel();
+		this.previewModel = undefined;
+		this.previewResponse = undefined;
+		this.followTail = true;
+		this.previewLoading = false;
+		this.previewFailed = false;
 		this.feedEl.style.display = '';
-		this.element.classList.remove('loading');
 
 		this.element.classList.toggle('active', isActive && !!session);
 		this.element.classList.toggle('empty', !session);
+		this.element.classList.remove('running', 'needs-input', 'done', 'error', 'idle');
 		this.contentEl.style.display = session ? '' : 'none';
 		this.placeholderEl.style.display = session ? 'none' : '';
 		this.deleteButton.style.display = session ? '' : 'none';
 
 		if (!session) {
+			this.element.setAttribute('aria-label', localize('optimus.card.start', "Start a Task"));
 			return;
 		}
 
@@ -260,7 +240,6 @@ export class OptimusCard extends Disposable {
 		this.bindStore.add(autorun(reader => {
 			const title = sessionModel.title.read(reader);
 			const status = sessionModel.status.read(reader);
-			const updatedAt = sessionModel.updatedAt.read(reader);
 
 			this._status = status;
 			this.titleEl.textContent = title || localize('optimus.card.untitled', "Untitled");
@@ -268,44 +247,25 @@ export class OptimusCard extends Disposable {
 			this.statusText.textContent = statusLabel(status);
 			this.statusText.className = `optimus-card-status-label ${statusClass(status)}`;
 			this.statusDot.className = `optimus-card-status-icon codicon ${statusIconClass(status)} ${statusClass(status)}`;
+			this.element.classList.remove('running', 'needs-input', 'done', 'error', 'idle');
+			this.element.classList.add(statusClass(status));
 
-			// Folder this agent operates on, bottom-left with a folder icon.
+			this.element.setAttribute('aria-label', localize('optimus.card.open', "{0}, {1}. Open Session", this.titleEl.textContent, statusLabel(status)));
+		}));
+
+		this.bindStore.add(autorun(reader => {
+			// Workspace and provider metadata do not depend on streamed output.
 			const workspace = sessionModel.workspace.read(reader);
 			const folderUri = workspace?.folders[0]?.workingDirectory;
-			this.folderLabelEl.textContent = folderUri ? basename(folderUri) : '';
-			this.folderEl.classList.toggle('no-folder', !folderUri);
+			this.folderLabelEl.textContent = workspace?.label || (folderUri ? basename(folderUri) : localize('optimus.card.noFolder', "No Workspace"));
+			this.folderEl.classList.toggle('no-folder', !workspace);
 			this.folderEl.title = folderUri?.fsPath ?? '';
 
-			// Diff stats sourced the same way as the Simple window's sessions
-			// list: prefer the provider's changes summary, fall back to summing
-			// the per-file changes of the live changeset. Rendered as an
-			// SCM-style +N −N badge; quietly absent while nothing changed.
-			const changesSummary = sessionModel.changesSummary?.read(reader);
-			const changes = sessionModel.changes.read(reader);
-			let additions = 0, deletions = 0;
-			if (changesSummary) {
-				additions = changesSummary.additions;
-				deletions = changesSummary.deletions;
-			} else {
-				for (const change of changes) {
-					additions += change.insertions;
-					deletions += change.deletions;
-				}
-			}
-			const files = changesSummary?.files || changes.length;
-			clearNode(this.changesEl);
-			if (additions > 0 || deletions > 0 || files > 0) {
-				if (files > 0) {
-					append(this.changesEl, $('span.optimus-card-diff-files')).textContent = localize('optimus.card.files', "{0} files", files);
-				}
-				append(this.changesEl, $('span.optimus-card-diff-added')).textContent = `+${additions}`;
-				append(this.changesEl, $('span.optimus-card-diff-removed')).textContent = `−${deletions}`;
-				this.changesEl.title = localize('optimus.card.changesTitle', "{0} changed files: {1} additions, {2} deletions", files, additions, deletions);
-			} else {
-				this.changesEl.title = '';
-			}
 
-			this.lastUpdatedAt = updatedAt;
+		}));
+
+		this.bindStore.add(autorun(reader => {
+			this.lastUpdatedAt = sessionModel.updatedAt.read(reader);
 			this.updateRelativeTime();
 		}));
 
@@ -313,168 +273,114 @@ export class OptimusCard extends Disposable {
 		const timeTicker = this.bindStore.add(new IntervalTimer());
 		timeTicker.cancelAndSet(() => this.updateRelativeTime(), 30_000);
 
-		// Read-only transcript: every card in the grid is an OPEN chat, so it
-		// loads its transcript eagerly (same path as the right panel) and
-		// mirrors it live. Closed chats never reach the grid — the grid part
-		// filters them out via its persisted closed set.
-		if (this.tryAttachChat(session.chatResource)) {
-			this.logService.info(`[OptimusDiag] card attached existing model for ${session.chatResource.toString()}`);
-		} else {
-			this.logService.info(`[OptimusDiag] card loading ${session.chatResource.toString()} (status=${sessionModel.status.get()})`);
-
-			// Skeleton shimmer until the transcript (or a description) arrives.
-			this.element.classList.add('loading');
-
-			// Status-description fallback, shown only until a model attaches.
-			this.bindStore.add(autorun(reader => {
-				const description = sessionModel.description.read(reader);
-				if (!this.modelRef.value) {
-					this.feedEl.textContent = description?.value ?? '';
-				}
-			}));
-
-			const cts = new CancellationTokenSource();
-			this.bindStore.add(toDisposable(() => cts.dispose(true)));
-			this.chatService.acquireOrLoadSession(session.chatResource, ChatAgentLocation.Chat, cts.token, 'OptimusCard').then(ref => {
-				if (!ref) {
-					this.logService.info(`[OptimusDiag] card load returned NO MODEL for ${session.chatResource.toString()}`);
+		// Watching an existing model is read-only. Opening the dashboard must
+		// avoid owning a full chat renderer or keeping inactive models alive.
+		this.bindStore.add(autorun(reader => {
+			sessionModel.description.read(reader);
+			sessionModel.status.read(reader);
+			this.schedulePreview();
+		}));
+		this.bindStore.add(this.chatService.onDidCreateModel(model => {
+			if (isEqual(model.sessionResource, session.chatResource)) {
+				this.attachPreview(model);
+			}
+		}));
+		const model = this.chatService.getSession(session.chatResource);
+		if (model) {
+			this.attachPreview(model);
+		}
+		this.updatePreview();
+		if (!model && !OptimusCard.activityCache.has(session.chatResource.toString())) {
+			this.previewLoading = true;
+			this.updatePreview();
+			const cancellation = new CancellationTokenSource();
+			this.bindStore.add(toDisposable(() => cancellation.dispose(true)));
+			// Read historical previews two at a time, only for the visible page.
+			// Release the loaded history immediately after extracting bounded text.
+			void OptimusCard.historyQueue.queue(async () => {
+				if (cancellation.token.isCancellationRequested) {
 					return;
 				}
-				if (cts.token.isCancellationRequested || !isEqual(this._session?.chatResource, session.chatResource) || this.modelRef.value) {
-					// Cancelled, rebound elsewhere, or already attached via
-					// the model-creation listener — drop the extra reference.
-					ref.dispose();
-					return;
+				try {
+					const ref = await this.chatService.acquireOrLoadSession(session.chatResource, ChatAgentLocation.Chat, cancellation.token, 'OptimusCard#preview');
+					try {
+						if (ref && !cancellation.token.isCancellationRequested) {
+							this.attachPreview(ref.object);
+							this.updatePreview();
+						}
+					} finally {
+						ref?.dispose();
+					}
+				} catch {
+					if (!cancellation.token.isCancellationRequested && !this.previewResponse) {
+						this.previewFailed = true;
+					}
+				} finally {
+					if (!cancellation.token.isCancellationRequested) {
+						this.previewLoading = false;
+						this.updatePreview();
+					}
 				}
-				this.logService.info(`[OptimusDiag] card load OK requests=${ref.object.getRequests().length} for ${session.chatResource.toString()}`);
-				this.attachChat(ref);
-			}, err => {
-				this.logService.error(`[OptimusDiag] card load FAILED for ${session.chatResource.toString()}`, err);
 			});
-
-			// Also attach whenever a model for this chat is (re)created. Keep
-			// listening for the whole bind so the card always re-attaches to
-			// the latest model. IMPORTANT: defer the acquire by a tick —
-			// onDidCreateModel fires from inside the model store's acquire()
-			// BEFORE it records the creating reference; acquiring
-			// synchronously here re-enters acquire(), the outer call then
-			// overwrites our reference entry, and the model gets disposed
-			// under the card as soon as the creator releases its reference.
-			this.bindStore.add(this.chatService.onDidCreateModel(model => {
-				if (!isEqual(model.sessionResource, session.chatResource)) {
-					return;
-				}
-				this.bindStore.add(disposableTimeout(() => {
-					if (!this.modelRef.value && this.tryAttachChat(session.chatResource)) {
-						this.logService.info(`[OptimusDiag] card attached on model creation for ${session.chatResource.toString()}`);
-					}
-				}, 0));
-			}));
 		}
 	}
 
-	private tryAttachChat(chatResource: URI): boolean {
-		const ref = this.chatService.acquireExistingSession(chatResource, 'OptimusCard');
-		if (!ref) {
-			return false;
+	private schedulePreview(): void {
+		if (!this.previewScheduler.isScheduled()) {
+			this.previewScheduler.schedule();
 		}
-		this.attachChat(ref);
-		return true;
 	}
 
-	private attachChat(ref: IChatModelReference): void {
-		this.viewModelStore.clear();
-		this.modelRef.value = ref;
-		const list = this.ensureChatList();
-
-		const viewModel = this.viewModelStore.add(this.instantiationService.createInstance(ChatViewModel, ref.object, undefined));
-		list.setViewModel(viewModel);
-		this.viewModelStore.add(toDisposable(() => {
-			list.setViewModel(undefined);
-			list.refresh();
-		}));
-
-		// Refresh the transcript on every (microtask-accumulated) model change
-		// and keep it pinned to the newest turn — the list's own scroll lock
-		// releases when the user scrolls up.
-		this.viewModelStore.add(Event.runAndSubscribe(Event.accumulate(viewModel.onDidChange, 0), () => {
-			list.refresh();
-		}));
-		this.viewModelStore.add(viewModel.onDidDisposeModel(() => {
-			this.logService.info(`[OptimusDiag] card model DISPOSED for ${ref.object.sessionResource.toString()}`);
-			this.viewModelStore.clear();
-		}));
-
-		this.element.classList.remove('loading');
-		this.feedEl.style.display = 'none';
-		this.chatEl.style.display = '';
-		// Lay out now and once more after the browser has applied the display
-		// change, so the tree gets real dimensions even when attaching during
-		// startup before the first grid layout pass.
-		this.layout();
-		this.viewModelStore.add(scheduleAtNextAnimationFrame(getWindow(this.element), () => {
-			this.layout();
-			this.chatList?.scrollToEnd();
-		}));
-		list.scrollToEnd();
-
-		// Diagnostic: dump what actually rendered a moment after attach.
-		const resourceKey = ref.object.sessionResource.toString();
-		this.viewModelStore.add(disposableTimeout(() => {
-			const rows = this.chatEl.querySelectorAll('.interactive-item-container').length;
-			const textLength = (this.chatEl.textContent ?? '').length;
-			// Indent probe: for every response row, where does its visible
-			// content start relative to the card, and in which wrapper?
-			const cardLeft = this.chatEl.getBoundingClientRect().left;
-			const rowInfos: string[] = [];
-			for (const row of this.chatEl.querySelectorAll('.interactive-item-container.interactive-response')) {
-				const children: string[] = [];
-				for (const child of (row.querySelector(':scope > .value') ?? row).children) {
-					const rect = child.getBoundingClientRect();
-					if (rect.width === 0 && rect.height === 0) {
-						continue;
-					}
-					children.push(`${child.className.toString().split(' ').slice(0, 2).join('.')}@${Math.round(rect.left - cardLeft)}(${Math.round(rect.width)}w,"${(child.textContent ?? '').slice(0, 25).replace(/\s+/g, ' ')}")`);
-				}
-				rowInfos.push(children.join(' | ') || '(empty)');
+	private attachPreview(model: IChatModel): void {
+		if (this.previewModel === model) {
+			return;
+		}
+		this.previewStore.clear();
+		this.responseListener.clear();
+		this.previewModel = model;
+		this.previewResponse = undefined;
+		const watchResponse = (): void => {
+			const response = model.lastRequest?.response;
+			if (response !== this.previewResponse) {
+				this.previewResponse = response;
+				this.responseListener.value = response?.onDidChange(() => this.schedulePreview());
 			}
-			this.logService.info(`[OptimusDiag] card DOM ${resourceKey}: chatEl=${this.chatEl.clientWidth}x${this.chatEl.clientHeight} contentHeight=${this.chatList?.contentHeight} rows=${rows} textLen=${textLength} responses: ${rowInfos.join(' || ')}`);
-		}, 2000));
+			this.schedulePreview();
+		};
+		this.previewStore.add(model.onDidChange(watchResponse));
+		this.previewStore.add(model.onDidDispose(() => {
+			this.previewStore.clear();
+			this.responseListener.clear();
+			this.previewModel = undefined;
+			this.previewResponse = undefined;
+		}));
+		watchResponse();
 	}
 
-	/**
-	 * Create the embedded read-only transcript list on first use. This is the
-	 * same renderer the real chat uses (markdown, tool calls, code blocks)
-	 * but without the composer, toolbars, or chat-widget-service
-	 * registration, so cards stay cheap and don't hijack window-level chat
-	 * state. A scoped context key service keeps its context keys local.
-	 */
-	private ensureChatList(): ChatListWidget {
-		if (this.chatList) {
-			return this.chatList;
+	private updatePreview(): void {
+		const session = this._session;
+		if (!session) {
+			return;
 		}
-
-		const scopedContextKeyService = this._register(this.contextKeyService.createScoped(this.chatEl));
-		const scopedInstantiationService = this._register(this.instantiationService.createChild(
-			new ServiceCollection([IContextKeyService, scopedContextKeyService])
-		));
-
-		this.chatList = this._register(scopedInstantiationService.createInstance(
-			ChatListWidget,
-			this.chatEl,
-			{
-				location: ChatAgentLocation.Chat,
-				renderStyle: 'minimal' as const,
-				rendererOptions: {
-					renderTextEditsAsSummary: () => true,
-					referencesExpandedWhenEmptyResponse: false,
-					// Cards are compact read-only mirrors: no per-message
-					// footer toolbars (copy/vote), they only add noise.
-					noFooter: true,
-				},
+		const key = session.chatResource.toString();
+		const activity = getOptimusActivityPreview(this.previewResponse?.response.value ?? []);
+		if (activity) {
+			OptimusCard.activityCache.set(key, activity);
+		}
+		const description = session.session.description.get()?.value;
+		const text = activity || OptimusCard.activityCache.get(key) || description?.slice(-1600)
+			|| (session.session.status.get() === SessionStatus.InProgress
+				? localize('optimus.card.working', "Working…")
+				: this.previewLoading ? localize('optimus.card.loadingPreview', "Loading transcript…")
+				: this.previewFailed ? localize('optimus.card.previewUnavailable', "Transcript unavailable")
+				: localize('optimus.card.emptyPreview', "No transcript yet"));
+		if (this.feedEl.textContent !== text) {
+			const follow = this.followTail;
+			this.feedEl.textContent = text;
+			if (follow) {
+				this.feedEl.scrollTop = this.feedEl.scrollHeight;
 			}
-		));
-		return this.chatList;
+		}
 	}
 
 	private updateRelativeTime(): void {
@@ -486,19 +392,39 @@ export class OptimusCard extends Disposable {
 		this.timeEl.title = this.lastUpdatedAt.toLocaleString();
 	}
 
-	/** Re-layout the embedded transcript list to the card's current size. */
-	layout(): void {
-		if (!this.chatList || this.chatEl.style.display === 'none') {
-			return;
-		}
-		const height = this.chatEl.clientHeight;
-		const width = this.chatEl.clientWidth;
-		if (height > 0 && width > 0) {
-			this.chatList.layout(height, width);
-		}
-	}
 
 	focus(): void {
 		this.element.focus();
 	}
+}
+
+/** Extract recent activity without markdown rendering or walking the full history. */
+export function getOptimusActivityPreview(parts: readonly IChatProgressResponseContent[]): string {
+	const snippets: string[] = [];
+	let remaining = 1600;
+	for (let index = parts.length - 1; index >= Math.max(0, parts.length - 16) && remaining > 0; index--) {
+		const part = parts[index];
+		let text = '';
+		switch (part.kind) {
+			case 'markdownContent':
+			case 'progressMessage':
+				text = part.content.value;
+				break;
+			case 'thinking':
+				text = part.generatedTitle || (Array.isArray(part.value) ? part.value.slice(-2).map(value => value.slice(-800)).join('\n') : part.value) || '';
+				break;
+			case 'toolInvocation':
+			case 'toolInvocationSerialized': {
+				const message = part.invocationMessage;
+				text = localize('optimus.card.toolActivity', "Tool: {0}", typeof message === 'string' ? message : message.value);
+				break;
+			}
+		}
+		text = text.slice(-remaining).trim();
+		if (text) {
+			snippets.unshift(text);
+			remaining -= text.length + 2;
+		}
+	}
+	return snippets.join('\n\n');
 }

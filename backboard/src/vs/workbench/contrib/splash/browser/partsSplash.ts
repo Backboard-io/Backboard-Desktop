@@ -45,7 +45,6 @@ export class PartsSplash {
 	) {
 		Event.once(_layoutService.onDidLayoutMainContainer)(() => {
 			this._removePartsSplash();
-			this._removeTransitionSnapshot();
 			perf.mark('code/didRemovePartsSplash');
 		}, undefined, this._disposables);
 
@@ -54,6 +53,7 @@ export class PartsSplash {
 			lastIdleSchedule.value = dom.runWhenWindowIdle(mainWindow, () => this._savePartsSplash(), 2500);
 		};
 		lifecycleService.when(LifecyclePhase.Restored).then(() => {
+			this._removeTransitionSnapshot();
 			Event.any(Event.filter(onDidChangeFullscreen, windowId => windowId === mainWindow.vscodeWindowId), editorGroupsService.mainPart.onDidLayout, _themeService.onDidColorThemeChange)(savePartsSplashSoon, undefined, this._disposables);
 			savePartsSplashSoon();
 		});
@@ -114,9 +114,9 @@ export class PartsSplash {
 	 * bootstrap put up to cover this workbench's boot (see
 	 * `INativeWindowConfiguration.transitionSnapshot`).
 	 *
-	 * Deferred by a frame: this runs from within the first layout, before the
-	 * workbench has painted anything, so removing it here would expose a blank
-	 * window rather than the finished workbench.
+	 * Wait for restoration, then two animation frames: the sessions workbench
+	 * reveals itself in an animation-frame callback too. Removing the cover
+	 * after that paint avoids exposing the boot-hidden or partially restored UI.
 	 */
 	private _removeTransitionSnapshot(): void {
 		// eslint-disable-next-line no-restricted-syntax
@@ -126,7 +126,7 @@ export class PartsSplash {
 		}
 
 		this._disposables.add(dom.scheduleAtNextAnimationFrame(mainWindow, () => {
-			element.remove();
+			this._disposables.add(dom.scheduleAtNextAnimationFrame(mainWindow, () => element.remove()));
 		}));
 	}
 

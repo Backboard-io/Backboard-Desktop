@@ -61,6 +61,9 @@ export const AGENT_IGNORED_FILE_GLOBS: readonly string[] = [
 	// mkstemp template; the exact-width glob avoids hiding ordinary `XX…` files.
 	'**/XX[0-9A-Za-z][0-9A-Za-z][0-9A-Za-z][0-9A-Za-z][0-9A-Za-z][0-9A-Za-z]',
 	'**/*.tmp',
+	// Durable worker integration writes a sibling with this exact UUID shape.
+	// Ordinary dotfiles and user files sharing only the prefix stay visible.
+	`**/.backboard-write-${'[0-9a-f]'.repeat(8)}-${'[0-9a-f]'.repeat(4)}-4${'[0-9a-f]'.repeat(3)}-[89ab]${'[0-9a-f]'.repeat(3)}-${'[0-9a-f]'.repeat(12)}`,
 ];
 
 const ignoredSegments = new Set(AGENT_IGNORED_DIRECTORIES);
@@ -81,8 +84,9 @@ const IGNORED_FILE_PATTERN = /(?:\.tsbuildinfo|\/\.DS_Store|\.log)$/;
  *   - `foo.ts.tmp` (plain atomic-rewrite sibling)
  *   - `.18bf259f3f2fcae3-00000000.bun-build` (bun compile scratch file)
  *   - `binary.cstemp` (macOS `codesign` in-place signing temp)
+ *   - `.backboard-write-<UUID v4>` (durable worker integration sibling)
  */
-const TEMP_WRITE_FILE_PATTERN = /(?:\.tmp\.\d+\.[0-9a-f]+|\.\d+\.\d+(?:\.[0-9a-f]+)?\.tmp|\.vsctmp|\.bun-build|\.cstemp|\.tmp|(?:^|\/)\.!\d+![^/]+|(?:^|\/)XX[a-z0-9]{6})$/i;
+const TEMP_WRITE_FILE_PATTERN = /(?:\.tmp\.\d+\.[0-9a-f]+|\.\d+\.\d+(?:\.[0-9a-f]+)?\.tmp|\.vsctmp|\.bun-build|\.cstemp|\.tmp|(?:^|\/)\.!\d+![^/]+|(?:^|\/)XX[a-z0-9]{6}|(?:^|\/)\.backboard-write-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i;
 
 /** Whether a path is an editor/tool atomic-write sibling rather than a real file. */
 export function isAgentAtomicWriteTempPath(path: string): boolean {

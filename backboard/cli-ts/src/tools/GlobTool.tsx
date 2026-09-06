@@ -1,6 +1,14 @@
-import { spawn } from "node:child_process";
-import { resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import { z } from "zod";
+import { resolveRipgrep } from "../core/search/ripgrep.ts";
+import { SearchError } from "../core/search/SearchError.ts";
+import {
+	displaySearchPath,
+	inspectSearchPath,
+	runSearch,
+	type SearchMetadata,
+	searchLimitNote,
+} from "../core/search/searchRunner.ts";
 import {
 	asString,
 	asStringArray,
@@ -16,7 +24,6 @@ import type { ToolContext } from "../core/tools/ToolContext.ts";
 import { ok, type ToolResult } from "../core/tools/ToolResult.ts";
 import type { PromptContext } from "../prompts/PromptModule.ts";
 import { getToolPrompt } from "../prompts/tools/index.tsx";
-import { pluralize } from "../utils/string.ts";
 
 const schema = z
 	.object({
@@ -24,13 +31,26 @@ const schema = z
 		// contracts document only `patterns`.
 		pattern: z
 			.string()
+			.min(1)
+			.refine(
+				(value) => !value.startsWith("!"),
+				"Use excludePatterns for exclusions",
+			)
 			.optional()
 			.describe("Deprecated alias for patterns; prefer patterns."),
 		// A bare string is coerced to a one-element array in parseInput; the
 		// schema stays a plain array because the Backboard API rejects
 		// properties without a top-level "type" (anyOf alone is not accepted).
 		patterns: z
-			.array(z.string())
+			.array(
+				z
+					.string()
+					.min(1)
+					.refine(
+						(value) => !value.startsWith("!"),
+						"Use excludePatterns for exclusions",
+					),
+			)
 			.optional()
 			.describe(
 				'One or more glob patterns combined with OR logic. Examples: ["*.ts"], ["src/**/*.tsx", "src/**/*.css"]. A bare string is also accepted.',
@@ -39,12 +59,26 @@ const schema = z
 			.string()
 			.optional()
 			.describe(
-				"Base directory to search in. If not specified, searches in the current working directory.",
+				"Base directory or explicit file to search. Defaults to the current working directory. Explicit files are returned directly under ripgrep path rules.",
 			),
 		excludePatterns: z
 			.array(z.string())
 			.optional()
-			.describe("Glob patterns to exclude from results."),
+			.describe(
+				'Unsigned glob patterns to exclude, e.g. ["node_modules/**"]. A single leading ! is also accepted for compatibility.',
+			),
+		hidden: z
+			.boolean()
+			.optional()
+			.describe(
+				"Include hidden files/directories. Defaults to false; explicit positive globs or file paths can include hidden files under ripgrep rules.",
+			),
+		no_ignore: z
+			.boolean()
+			.optional()
+			.describe(
+				"Disable ignore-file rules for this scoped search. Defaults to false. Does not enable hidden files by itself.",
+			),
 	})
 	.refine((input) => input.pattern || (input.patterns?.length ?? 0) > 0, {
 		message: "Provide patterns",
@@ -52,9 +86,10 @@ const schema = z
 
 type Input = z.infer<typeof schema>;
 
-interface Output {
+interface Output extends SearchMetadata {
 	files: string[];
 	count: number;
+	countUnit: "files";
 }
 
 const MAX_RESULTS = 1000;
@@ -84,39 +119,87 @@ export class GlobTool extends Tool<Input, Output> {
 		// Tolerate a bare string (or JSON-encoded array) for `patterns`.
 		if (typeof raw === "object" && raw !== null && "patterns" in raw) {
 			const record = raw as Record<string, unknown>;
-			return super.parseInput({
+			raw = {
 				...record,
 				patterns: normalizePatterns(record.patterns),
-			});
+			};
 		}
-		return super.parseInput(raw);
+		const input = super.parseInput(raw);
+		// Normalize before early-execution identity comparison, not only at spawn.
+		return {
+			...input,
+			...(input.excludePatterns
+				? { excludePatterns: input.excludePatterns.map(normalizeExclusion) }
+				: {}),
+		};
 	}
 
 	override async execute(
 		input: Input,
 		ctx: ToolContext,
 	): Promise<ToolResult<Output>> {
-		const cwd = input.path ? resolve(ctx.cwd, input.path) : ctx.cwd;
+		const searchPath = input.path ? resolve(ctx.cwd, input.path) : ctx.cwd;
+		const pathType = await inspectSearchPath(searchPath, ctx.signal);
+		const cwd = pathType === "directory" ? searchPath : dirname(searchPath);
+		const executable = await resolveRipgrep({ signal: ctx.signal });
 		const patterns = [...(input.patterns ?? [])];
 		if (input.pattern) patterns.unshift(input.pattern);
-		const files = await runRipgrepFiles(
+		if (!patterns.length)
+			throw new SearchError(
+				'Provide at least one glob, e.g. {"patterns":["src/**/*.ts"]}.',
+				"invalid_argument",
+				"GLOB_PATTERNS_REQUIRED",
+			);
+		const args = ["--no-config", "--files", "--null", "--color=never"];
+		for (const pattern of patterns) args.push("--glob", pattern);
+		for (const pattern of input.excludePatterns ?? [])
+			args.push("--glob", `!${normalizeExclusion(pattern)}`);
+		if (input.hidden) args.push("--hidden");
+		if (input.no_ignore) args.push("--no-ignore");
+		// Explicit files retain rg's documented file-path precedence over glob/ignore rules.
+		if (pathType === "file")
+			args.push(
+				"--",
+				`.${process.platform === "win32" ? "\\" : "/"}${basename(searchPath)}`,
+			);
+		const { records, exitCode, ...metadata } = await runSearch({
+			executablePath: executable.path,
+			args,
 			cwd,
-			patterns,
-			input.excludePatterns ?? [],
-			ctx,
-		);
-
-		const body = files.length ? files.join("\n") : "No files matched";
-		return ok(
-			{ files, count: files.length },
+			signal: ctx.signal,
+			delimiter: "\0",
+			maxRecords: MAX_RESULTS,
+			recordLimitReason: "file_limit",
+			maxOutputBytes: 256_000,
+			mapRecord: (file) => [{ text: displaySearchPath(file), value: file }],
+		});
+		const files = records.map((record) => record.value);
+		const rendered = records.map((record) => record.text).join("\n");
+		const body = metadata.truncated
+			? [rendered, searchLimitNote(metadata)].filter(Boolean).join("\n")
+			: rendered || "No files matched";
+		const result = ok<Output>(
+			{ files, count: files.length, countUnit: "files", ...metadata },
 			body,
-			files.length === 0
-				? "No files matched"
-				: `Found ${files.length} ${pluralize(files.length, "file")}`,
-			buildOutputPreview(files.join("\n"), {
+			metadata.truncated
+				? `Returned ${files.length} files (partial; total unknown)`
+				: files.length === 0
+					? "No files matched"
+					: `Found ${files.length} ${files.length === 1 ? "file" : "files"}`,
+			buildOutputPreview(rendered, {
 				maxLines: BROWSING_PREVIEW_LINES,
 			}),
 		);
+		result.execution = {
+			outcome: metadata.truncated
+				? "partial"
+				: files.length === 0
+					? "no_match"
+					: "success",
+			...(exitCode !== null ? { exitCode } : {}),
+			retryable: false,
+		};
+		return result;
 	}
 }
 
@@ -132,49 +215,14 @@ function normalizePatterns(patterns: unknown): unknown {
 	return [patterns];
 }
 
-function runRipgrepFiles(
-	cwd: string,
-	patterns: string[],
-	excludePatterns: string[],
-	ctx: ToolContext,
-): Promise<string[]> {
-	return new Promise((resolvePromise, reject) => {
-		if (ctx.signal.aborted) return reject(new Error("aborted"));
-		const args = ["--files", "--color=never"];
-		for (const pattern of patterns) args.push("--glob", pattern);
-		for (const pattern of excludePatterns) args.push("--glob", `!${pattern}`);
-		const child = spawn("rg", args, { cwd, signal: ctx.signal });
-		const files: string[] = [];
-		let remainder = "";
-		let stderr = "";
-		let capped = false;
-		child.stdout?.on("data", (chunk) => {
-			if (capped) return;
-			const lines = `${remainder}${chunk.toString()}`.split("\n");
-			remainder = lines.pop() ?? "";
-			for (const line of lines) {
-				if (line) files.push(line);
-				if (files.length >= MAX_RESULTS) {
-					capped = true;
-					child.kill("SIGTERM");
-					break;
-				}
-			}
-		});
-		child.stderr?.on("data", (chunk) => {
-			stderr += chunk.toString();
-		});
-		child.on("error", (err) => reject(err));
-		child.on("close", (code, signal) => {
-			if (!capped && code !== 0 && code !== 1) {
-				const status = signal
-					? `signal ${signal}`
-					: `exit ${code ?? "unknown"}`;
-				reject(new Error(stderr || `ripgrep failed (${status})`));
-				return;
-			}
-			if (!capped && remainder) files.push(remainder);
-			resolvePromise(files.slice(0, MAX_RESULTS));
-		});
-	});
+function normalizeExclusion(pattern: string): string {
+	const unsigned = pattern.startsWith("!") ? pattern.slice(1) : pattern;
+	if (!unsigned || unsigned.startsWith("!")) {
+		throw new SearchError(
+			'Use unsigned excludePatterns, e.g. {"patterns":["**/*.ts"],"excludePatterns":["node_modules/**"]}.',
+			"invalid_argument",
+			"GLOB_EXCLUSION_INVALID",
+		);
+	}
+	return unsigned;
 }

@@ -10,7 +10,7 @@ import { ProgressBar } from '../../../base/browser/ui/progressbar/progressbar.js
 import { IAction, Separator, SubmenuAction, toAction } from '../../../base/common/actions.js';
 import { RunOnceScheduler } from '../../../base/common/async.js';
 import { Emitter, Event } from '../../../base/common/event.js';
-import { DisposableStore } from '../../../base/common/lifecycle.js';
+import { DisposableStore, MutableDisposable } from '../../../base/common/lifecycle.js';
 import { autorun, observableValue } from '../../../base/common/observable.js';
 import { assertReturnsDefined } from '../../../base/common/types.js';
 import { defaultProgressBarStyles } from '../../../platform/theme/browser/defaultStyles.js';
@@ -42,9 +42,8 @@ export const OPTIMUS_SHOW_FOCUSED_SESSION_CONTENT_COMMAND_ID = 'optimus.showFocu
 export const OPTIMUS_SHOW_DASHBOARD_CONTENT_COMMAND_ID = 'optimus.showDashboardContent';
 export const OPTIMUS_TOGGLE_VIEW_MODE_COMMAND_ID = 'optimus.toggleViewMode';
 export const OPTIMUS_SET_VIEW_MODE_COMMAND_ID = 'optimus.setViewMode';
-export const OPTIMUS_SET_SEARCH_QUERY_COMMAND_ID = 'optimus.setSearchQuery';
 
-export type OptimusViewMode = 'board' | 'list';
+export type OptimusViewMode = 'board' | 'kanban';
 
 /** Current dashboard presentation, exposed for keyboard commands and chrome. */
 export const OPTIMUS_VIEW_MODE_CONTEXT_KEY = new RawContextKey<OptimusViewMode>('optimusViewMode', 'board');
@@ -79,14 +78,6 @@ interface IOptimusDashboardDisplayState {
  */
 const OPEN_SESSIONS_STORAGE_KEY = 'optimus.openSessions';
 
-/**
- * Ceiling on open cards. Every card mirrors a live transcript, and
- * Claude/Codex cards additionally hold their per-session CLI process, so an
- * unbounded board degrades the whole window. Opening beyond the cap evicts
- * the oldest-opened card that is not active or visible.
- */
-const MAX_OPEN_CARDS = 15;
-
 interface ICardEntry {
 	readonly card: OptimusCard;
 	readonly store: DisposableStore;
@@ -110,8 +101,10 @@ export class OptimusGridPart extends Part {
 	override readonly minimumHeight: number = 0;
 	override readonly maximumHeight: number = Number.POSITIVE_INFINITY;
 
-	/** Six card slots per page (3×2); later sessions paginate. */
-	private static readonly PAGE_SIZE = 6;
+	/** Kanban shows up to ten agents in each of its three status lanes. */
+	private static readonly KANBAN_ROWS_PER_PAGE = 10;
+	/** Board is a three-column, ten-row card wall. */
+	private static readonly GRID_PAGE_SIZE = 9;
 
 	private readonly cardEntries = new Map<string, ICardEntry>();
 	private contentAreaEl: HTMLElement | undefined;
@@ -128,7 +121,7 @@ export class OptimusGridPart extends Part {
 	private focusedHeaderTypePickerSlot: HTMLElement | undefined;
 	private focusedHeaderTitleSlot: HTMLElement | undefined;
 	private focusedHeaderToolbarSlot: HTMLElement | undefined;
-	private focusedSessionView: SessionView | undefined;
+	private readonly focusedSessionView = this._register(new MutableDisposable<SessionView>());
 	private focusedMode = false;
 	private readonly renderSessionTypePickerInControls = observableValue<boolean>(this, false);
 	private readonly boardColumns = new Map<OptimusDashboardBucket, IBoardColumn>();
@@ -136,20 +129,21 @@ export class OptimusGridPart extends Part {
 	private viewMode: OptimusViewMode = 'board';
 	private readonly viewModeContextKey;
 	/** Watches bound sessions' dashboard fields so filtering and sorting stay live. */
-	private readonly statusWatchStore = this._register(new DisposableStore());
+	private readonly sessionWatches = new Map<string, { readonly session: ISession; readonly store: DisposableStore }>();
 	private readonly filterChipStore = this._register(new DisposableStore());
-	private readonly refreshScheduler = this._register(new RunOnceScheduler(() => this.refreshCards(), 50));
+	private readonly refreshScheduler = this._register(new RunOnceScheduler(() => this.refreshCards(), 250));
 	private progressBar: ProgressBar | undefined;
 	private progressIndicator: IProgressIndicator | undefined;
 	private displayButton: HTMLButtonElement | undefined;
 	private filterButton: HTMLButtonElement | undefined;
+	private resetButton: HTMLButtonElement | undefined;
+	private controlsState = '';
 	private filterCountElement: HTMLElement | undefined;
 	private filterChipsElement: HTMLElement | undefined;
 	private resultsElement: HTMLElement | undefined;
 	private lastModels: readonly IOptimusCardSessionModel[] = [];
 	private visibleSessions: readonly (IActiveSession | undefined)[] = [];
 	private activeSession: IActiveSession | undefined;
-	private query = '';
 	private readonly filteredBuckets = new Set<OptimusDashboardBucket>();
 	private timeRange: OptimusDashboardTimeRange = 'all';
 	private archiveFilter: OptimusDashboardArchiveFilter = 'exclude';
@@ -197,7 +191,8 @@ export class OptimusGridPart extends Part {
 			// Malformed storage: start with an empty board.
 		}
 
-		this.viewMode = this.storageService.get(VIEW_MODE_STORAGE_KEY, StorageScope.PROFILE) === 'list' ? 'list' : 'board';
+		const storedViewMode = this.storageService.get(VIEW_MODE_STORAGE_KEY, StorageScope.PROFILE);
+		this.viewMode = storedViewMode === 'kanban' || storedViewMode === 'list' ? 'kanban' : 'board';
 		try {
 			const displayState = JSON.parse(this.storageService.get(DASHBOARD_DISPLAY_STORAGE_KEY, StorageScope.PROFILE, '{}')) as Partial<IOptimusDashboardDisplayState>;
 			if (displayState.sort && ['updated-desc', 'updated-asc', 'created-desc', 'created-asc', 'title-asc', 'title-desc'].includes(displayState.sort)) {
@@ -213,16 +208,15 @@ export class OptimusGridPart extends Part {
 		this.viewModeContextKey = OPTIMUS_VIEW_MODE_CONTEXT_KEY.bindTo(contextKeyService);
 		this.viewModeContextKey.set(this.viewMode);
 		this._register(CommandsRegistry.registerCommand(OPTIMUS_TOGGLE_VIEW_MODE_COMMAND_ID, () => this.toggleViewMode()));
-		this._register(CommandsRegistry.registerCommand(OPTIMUS_SET_VIEW_MODE_COMMAND_ID, (_accessor, mode: unknown) => this.setViewMode(mode === 'list' ? 'list' : 'board')));
-		this._register(CommandsRegistry.registerCommand(OPTIMUS_SET_SEARCH_QUERY_COMMAND_ID, (_accessor, query: unknown) => this.setSearchQuery(typeof query === 'string' ? query : '')));
+		this._register(CommandsRegistry.registerCommand(OPTIMUS_SET_VIEW_MODE_COMMAND_ID, (_accessor, mode: unknown) => this.setViewMode(mode === 'kanban' || mode === 'list' ? 'kanban' : 'board')));
 		this._register(CommandsRegistry.registerCommand(OPTIMUS_SHOW_FOCUSED_SESSION_CONTENT_COMMAND_ID, (_accessor, session: IActiveSession | undefined) => this.showFocusedSession(session)));
 		this._register(CommandsRegistry.registerCommand(OPTIMUS_SHOW_DASHBOARD_CONTENT_COMMAND_ID, () => this.showDashboardContent()));
 
-		this._register(this.sessionsManagementService.onDidChangeSessions(() => this.refreshCards()));
+		this._register(this.sessionsManagementService.onDidChangeSessions(() => this.scheduleRefresh()));
 	}
 
 	private toggleViewMode(): void {
-		this.setViewMode(this.viewMode === 'board' ? 'list' : 'board');
+		this.setViewMode(this.viewMode === 'board' ? 'kanban' : 'board');
 	}
 
 	private setViewMode(mode: OptimusViewMode): void {
@@ -232,9 +226,8 @@ export class OptimusGridPart extends Part {
 		this.viewMode = mode;
 		this.storageService.store(VIEW_MODE_STORAGE_KEY, this.viewMode, StorageScope.PROFILE, StorageTarget.USER);
 		this.viewModeContextKey.set(this.viewMode);
-		this.contentAreaEl?.classList.toggle('view-list', this.viewMode === 'list');
-		this.pageIndex = 0;
-		this.refreshCards();
+		this.contentAreaEl?.classList.toggle('view-board', this.viewMode === 'board');
+		this.resetPage();
 	}
 
 	private showFocusedSession(session: IActiveSession | undefined): void {
@@ -248,32 +241,37 @@ export class OptimusGridPart extends Part {
 		if (!host) {
 			return;
 		}
-		if (!this.focusedSessionView) {
-			this.focusedSessionView = this._register(this.instantiationService.createInstance(SessionView));
-			host.appendChild(this.focusedSessionView.element);
-		}
 		this.focusedMode = true;
 		this.contentAreaEl?.classList.add('focused-session');
-		this.focusedSessionView.element.classList.add('is-active');
-		this.focusedSessionView.setActive(true);
-		this.focusedSessionView.openSession(session, {
+		this.refreshScheduler.cancel();
+		this.disposeDashboardCards();
+		this.clearSessionWatches();
+		if (!this.focusedSessionView.value) {
+			this.focusedSessionView.value = this.instantiationService.createInstance(SessionView);
+			host.appendChild(this.focusedSessionView.value.element);
+		}
+		this.focusedSessionView.value.element.classList.add('is-active');
+		this.focusedSessionView.value.setActive(true);
+		this.focusedSessionView.value.openSession(session, {
 			renderSessionTypePickerInControls: this.renderSessionTypePickerInControls,
 			headerTypePickerSlot: this.focusedHeaderTypePickerSlot,
 			headerToolbarSlot: this.focusedHeaderToolbarSlot,
 		});
 		if (session && this.focusedHeaderTitleSlot && this.focusedHeaderToolbarSlot) {
-			this.focusedSessionView.mountHeaderIntoPanel(this.focusedHeaderTitleSlot, this.focusedHeaderToolbarSlot);
+			this.focusedSessionView.value.mountHeaderIntoPanel(this.focusedHeaderTitleSlot, this.focusedHeaderToolbarSlot);
 		} else {
-			this.focusedSessionView.restoreHeaderToView();
+			this.focusedSessionView.value.restoreHeaderToView();
 		}
 		this.layoutFocusedSession();
-		this.focusedSessionView.focus();
+		this.focusedSessionView.value.focus();
 	}
 
 	private showDashboardContent(): void {
 		this.focusedMode = false;
 		this.contentAreaEl?.classList.remove('focused-session');
-		this.focusedSessionView?.setActive(false);
+		this.focusedSessionView.value?.setActive(false);
+		this.focusedSessionView.value?.element.remove();
+		this.focusedSessionView.clear();
 		this.refreshCards();
 	}
 
@@ -299,33 +297,7 @@ export class OptimusGridPart extends Part {
 			return;
 		}
 		this.openSessions.add(key);
-		this.enforceOpenCardLimit();
 		this.persistOpenSessions();
-	}
-
-	/** Evicts the oldest-opened, not-currently-visible cards beyond the cap. */
-	private enforceOpenCardLimit(): void {
-		if (this.openSessions.size <= MAX_OPEN_CARDS) {
-			return;
-		}
-		const protectedKeys = new Set<string>();
-		if (this.activeSession) {
-			protectedKeys.add(this.activeSession.resource.toString());
-		}
-		for (const session of this.visibleSessions) {
-			if (session) {
-				protectedKeys.add(session.resource.toString());
-			}
-		}
-		// Set preserves insertion order: the first entries are the oldest opens.
-		for (const key of this.openSessions) {
-			if (this.openSessions.size <= MAX_OPEN_CARDS) {
-				break;
-			}
-			if (!protectedKeys.has(key)) {
-				this.openSessions.delete(key);
-			}
-		}
 	}
 
 	override create(parent: HTMLElement): void {
@@ -337,15 +309,15 @@ export class OptimusGridPart extends Part {
 	protected override createContentArea(parent: HTMLElement): HTMLElement {
 		const contentArea = append(parent, $('.content.optimus-grid-content'));
 		this.contentAreaEl = contentArea;
-		contentArea.classList.toggle('view-list', this.viewMode === 'list');
+		contentArea.classList.toggle('view-board', this.viewMode === 'board');
 
 		this.progressBar = this._register(new ProgressBar(contentArea, defaultProgressBarStyles));
 		this.progressBar.hide();
 
 		this.createDashboardToolbar(contentArea);
 
-		// Board: one column per Devin-style status bucket. The card instances are
-		// the existing Advanced-mode cards and move between these columns live.
+		// Kanban: three live status lanes. The alternative Board presentation uses
+		// the same card instances in the flat 3×10 grid below.
 		this.boardContainer = append(contentArea, $('.optimus-kanban.optimus-board'));
 		for (const bucket of BOARD_BUCKETS) {
 			const element = append(this.boardContainer, $(`.optimus-kanban-column.${bucket.key}`));
@@ -354,13 +326,16 @@ export class OptimusGridPart extends Part {
 			append(header, $('span.optimus-kanban-column-label')).textContent = bucket.label;
 			const countEl = append(header, $('span.optimus-kanban-column-count'));
 			const listEl = append(element, $('.optimus-kanban-column-list'));
+			listEl.setAttribute('role', 'group');
+			listEl.setAttribute('aria-label', bucket.label);
+			const empty = append(element, $('.optimus-kanban-empty'));
+			empty.textContent = localize('optimus.lane.empty', "No Agents on This Page");
 			this.boardColumns.set(bucket.key, { element, listEl, countEl });
 		}
 
-		// "List" intentionally restores the original Advanced presentation: six
-		// full task cards in a paginated 3×2 grid, rather than compact table rows.
+		// Board keeps the same rich cards in a flat, paginated 3×10 grid.
 		this.gridContainer = append(contentArea, $('.optimus-grid'));
-		this.gridContainer.setAttribute('role', 'list');
+		this.gridContainer.setAttribute('role', 'group');
 		this.gridContainer.setAttribute('aria-label', localize('optimus.list.ariaLabel', "Sessions"));
 
 		// First-run hero shown instead of a lone dashed placeholder card.
@@ -393,27 +368,41 @@ export class OptimusGridPart extends Part {
 		}));
 		this.placeholderCard = placeholder;
 
-		this.pagerElement = append(contentArea, $('.optimus-grid-pager'));
+		this.pagerElement = append(contentArea.querySelector<HTMLElement>('.optimus-dashboard-controls')!, $('.optimus-grid-pager'));
 		this.pagerPrevious = append(this.pagerElement, $('button.codicon.codicon-chevron-left')) as HTMLButtonElement;
 		this.pagerPrevious.type = 'button';
-		this.pagerPrevious.title = localize('optimus.pager.previous', "Previous page");
+		this.pagerPrevious.title = localize('optimus.pager.previous', "Previous Page");
+		this.pagerPrevious.setAttribute('aria-label', this.pagerPrevious.title);
 		this.pagerLabel = append(this.pagerElement, $('span.optimus-grid-pager-label'));
 		this.pagerNext = append(this.pagerElement, $('button.codicon.codicon-chevron-right')) as HTMLButtonElement;
 		this.pagerNext.type = 'button';
-		this.pagerNext.title = localize('optimus.pager.next', "Next page");
+		this.pagerNext.title = localize('optimus.pager.next', "Next Page");
+		this.pagerNext.setAttribute('aria-label', this.pagerNext.title);
+		this.pagerLabel.setAttribute('aria-live', 'polite');
 		this._register(addDisposableListener(this.pagerPrevious, EventType.CLICK, () => {
 			this.pageIndex = Math.max(0, this.pageIndex - 1);
 			this.refreshCards();
+			this.resetPageScroll();
 		}));
 		this._register(addDisposableListener(this.pagerNext, EventType.CLICK, () => {
 			this.pageIndex++;
 			this.refreshCards();
+			this.resetPageScroll();
 		}));
 
 		this.focusedSessionHost = append(contentArea, $('.optimus-focused-session'));
 		const focusedHeader = append(this.focusedSessionHost, $('.sessions-panel-header.sessions-part-header.optimus-focused-session-header'));
 		append(focusedHeader, $('.titlebar-drag-region'));
 		const focusedHeaderLeft = append(focusedHeader, $('.sessions-panel-header-left'));
+		const dashboardButton = append(focusedHeaderLeft, $('button.optimus-focused-dashboard-button')) as HTMLButtonElement;
+		dashboardButton.type = 'button';
+		dashboardButton.title = localize('optimus.focused.backToAgents', "Back to Agents");
+		dashboardButton.setAttribute('aria-label', dashboardButton.title);
+		append(dashboardButton, $('.codicon.codicon-arrow-left'));
+		append(dashboardButton, $('span')).textContent = dashboardButton.title;
+		this._register(addDisposableListener(dashboardButton, EventType.CLICK, () => {
+			this.commandService.executeCommand(OPTIMUS_SHOW_DASHBOARD_COMMAND_ID);
+		}));
 		this.focusedHeaderTypePickerSlot = append(focusedHeaderLeft, $('.sessions-header-type-picker-slot'));
 		const focusedHeaderCenter = append(focusedHeader, $('.sessions-panel-header-center'));
 		this.focusedHeaderTitleSlot = append(focusedHeaderCenter, $('.sessions-header-session-title-slot'));
@@ -481,12 +470,8 @@ export class OptimusGridPart extends Part {
 			this.viewSwitcherButtons.set(mode, button);
 		};
 		addViewButton('board', localize('optimus.dashboard.board', "Board"));
-		addViewButton('list', localize('optimus.dashboard.list', "List"));
+		addViewButton('kanban', localize('optimus.dashboard.kanban', "Kanban"));
 
-		// Search lives once, in the window chrome's command centre — it is
-		// always on screen (including the focused session, where this toolbar
-		// is hidden), so a second field here was a mirror of the same state
-		// rather than a second capability.
 		const filterControls = append(primaryRow, $('.optimus-dashboard-filter-controls'));
 		this.filterButton = append(filterControls, $('button.optimus-dashboard-button.optimus-dashboard-filter-button')) as HTMLButtonElement;
 		this.filterButton.type = 'button';
@@ -510,27 +495,13 @@ export class OptimusGridPart extends Part {
 		append(this.displayButton, $('.codicon.codicon-chevron-down'));
 		this._register(addDisposableListener(this.displayButton, EventType.CLICK, () => this.showDisplayMenu()));
 
-		const resetButton = append(controls, $('button.optimus-dashboard-reset.optimus-dashboard-icon-button')) as HTMLButtonElement;
+		const resetButton = this.resetButton = append(controls, $('button.optimus-dashboard-reset.optimus-dashboard-icon-button')) as HTMLButtonElement;
 		resetButton.type = 'button';
 		const resetLabel = localize('optimus.dashboard.resetFilters', "Reset filters");
 		resetButton.title = resetLabel;
 		resetButton.setAttribute('aria-label', resetLabel);
 		append(resetButton, $('.codicon.codicon-clear-all'));
 		this._register(addDisposableListener(resetButton, EventType.CLICK, () => this.resetFilters()));
-	}
-
-	/** The single search field, owned by the window chrome's command centre. */
-	private getChromeSearchInput(): HTMLInputElement | null {
-		return this.element?.ownerDocument.querySelector<HTMLInputElement>('.optimus-window-command-input') ?? null;
-	}
-
-	private setSearchQuery(query: string, source?: HTMLInputElement): void {
-		this.query = query;
-		const chromeInput = this.getChromeSearchInput();
-		if (chromeInput && chromeInput !== source) {
-			chromeInput.value = query;
-		}
-		this.refreshCards();
 	}
 
 	private showDisplayMenu(): void {
@@ -541,7 +512,7 @@ export class OptimusGridPart extends Part {
 		const setSort = (sort: OptimusDashboardSort): void => {
 			this.sortMode = sort;
 			this.persistDisplayState();
-			this.refreshCards();
+			this.resetPage();
 		};
 		const sortAction = (id: string, label: string, sort: OptimusDashboardSort): IAction => toAction({
 			id,
@@ -556,7 +527,7 @@ export class OptimusGridPart extends Part {
 			run: () => {
 				this.groupMode = group;
 				this.persistDisplayState();
-				this.refreshCards();
+				this.resetPage();
 			},
 		});
 
@@ -571,7 +542,7 @@ export class OptimusGridPart extends Part {
 					run: () => {
 						this.unreadFirst = !this.unreadFirst;
 						this.persistDisplayState();
-						this.refreshCards();
+						this.resetPage();
 					},
 				}),
 				new Separator(),
@@ -603,7 +574,7 @@ export class OptimusGridPart extends Part {
 			} else {
 				this.filteredBuckets.add(bucket);
 			}
-			this.refreshCards();
+			this.resetPage();
 		};
 		const timeAction = (id: string, label: string, range: OptimusDashboardTimeRange): IAction => toAction({
 			id,
@@ -611,7 +582,7 @@ export class OptimusGridPart extends Part {
 			checked: this.timeRange === range,
 			run: () => {
 				this.timeRange = range;
-				this.refreshCards();
+				this.resetPage();
 			},
 		});
 		const archiveAction = (id: string, label: string, filter: OptimusDashboardArchiveFilter): IAction => toAction({
@@ -620,7 +591,7 @@ export class OptimusGridPart extends Part {
 			checked: this.archiveFilter === filter,
 			run: () => {
 				this.archiveFilter = filter;
-				this.refreshCards();
+				this.resetPage();
 			},
 		});
 		const providers = [...new Set(this.lastModels.map(model => model.session.providerId))].sort((a, b) => a.localeCompare(b));
@@ -631,7 +602,7 @@ export class OptimusGridPart extends Part {
 			} else {
 				values.add(value);
 			}
-			this.refreshCards();
+			this.resetPage();
 		};
 		const providerActions = providers.map(provider => toAction({
 			id: `optimus.dashboard.provider.${provider}`,
@@ -692,22 +663,17 @@ export class OptimusGridPart extends Part {
 	}
 
 	private resetFilters(): void {
-		this.query = '';
-		const chromeInput = this.getChromeSearchInput();
-		if (chromeInput) {
-			chromeInput.value = '';
-		}
 		this.filteredBuckets.clear();
 		this.timeRange = 'all';
 		this.archiveFilter = 'exclude';
 		this.filteredProviders.clear();
 		this.filteredWorkspaces.clear();
-		this.refreshCards();
+		this.resetPage();
 	}
 
 	private getDashboardFilters(): IOptimusDashboardFilters {
 		return {
-			query: this.query,
+			query: '',
 			buckets: [...this.filteredBuckets],
 			timeRange: this.timeRange,
 			archive: this.archiveFilter,
@@ -733,8 +699,11 @@ export class OptimusGridPart extends Part {
 
 	private filterAndSortModels(models: readonly IOptimusCardSessionModel[]): IOptimusCardSessionModel[] {
 		const modelByKey = new Map(models.map(model => [model.session.resource.toString(), model]));
-		return filterAndSortOptimusSessions(models.map(model => this.toSessionSummary(model)), this.getDashboardFilters(), this.sortMode, this.unreadFirst)
+		const sorted = filterAndSortOptimusSessions(models.map(model => this.toSessionSummary(model)), this.getDashboardFilters(), this.sortMode, this.unreadFirst)
 			.map(summary => assertReturnsDefined(modelByKey.get(summary.key)));
+		return this.groupMode === 'workspace'
+			? sorted.sort((a, b) => (a.session.workspace.get()?.label ?? '').localeCompare(b.session.workspace.get()?.label ?? ''))
+			: sorted;
 	}
 
 	private getFilterCount(): number {
@@ -746,19 +715,27 @@ export class OptimusGridPart extends Part {
 	}
 
 	private updateDashboardControls(total: number, filtered: number): void {
+		const state = JSON.stringify([this.viewMode, total, filtered, this.getDashboardFilters()]);
+		if (state === this.controlsState) {
+			return;
+		}
+		this.controlsState = state;
 		for (const [mode, button] of this.viewSwitcherButtons) {
 			button.classList.toggle('active', this.viewMode === mode);
 			button.setAttribute('aria-pressed', String(this.viewMode === mode));
 		}
 		const filterCount = this.getFilterCount();
+		if (this.resetButton) {
+			this.resetButton.hidden = filterCount === 0;
+		}
 		if (this.filterCountElement) {
 			this.filterCountElement.textContent = filterCount > 0 ? String(filterCount) : '';
 			this.filterCountElement.classList.toggle('empty', filterCount === 0);
 		}
 		if (this.resultsElement) {
 			this.resultsElement.textContent = total === filtered
-				? localize('optimus.dashboard.results.total', "{0} sessions", total)
-				: localize('optimus.dashboard.results.filtered', "{0} of {1} sessions", filtered, total);
+				? localize('optimus.dashboard.results.total', "{0} agents", total)
+				: localize('optimus.dashboard.results.filtered', "{0} of {1} agents", filtered, total);
 		}
 		this.renderFilterChips();
 	}
@@ -778,7 +755,7 @@ export class OptimusGridPart extends Part {
 			chip.setAttribute('aria-label', localize('optimus.dashboard.removeFilter', "Remove Filter: {0}", label));
 			this.filterChipStore.add(addDisposableListener(chip, EventType.CLICK, () => {
 				remove();
-				this.refreshCards();
+				this.resetPage();
 			}));
 		};
 		for (const bucket of BOARD_BUCKETS) {
@@ -840,7 +817,7 @@ export class OptimusGridPart extends Part {
 
 	focusSession(session: IActiveSession | undefined): void {
 		if (this.focusedMode) {
-			this.focusedSessionView?.focus();
+			this.focusedSessionView.value?.focus();
 			return;
 		}
 		if (!session) {
@@ -897,8 +874,92 @@ export class OptimusGridPart extends Part {
 		entry.store.dispose();
 	}
 
+	/**
+	 * Keep transcript widgets scoped to the current page. Session metadata stays
+	 * cheap and fully filterable, while navigating between pages releases chat
+	 * models, observers, and render trees from the page that just left view.
+	 */
+	private disposeCardsOutsidePage(visibleKeys: ReadonlySet<string>): void {
+		for (const [key, entry] of [...this.cardEntries]) {
+			if (!visibleKeys.has(key)) {
+				this.disposeCardEntry(key, entry);
+			}
+		}
+	}
+
+	private disposeDashboardCards(): void {
+		this.disposeCardsOutsidePage(new Set());
+	}
+
+	/** Coalesce metadata changes without letting a busy stream postpone refresh forever. */
+	private scheduleRefresh(): void {
+		if (!this.focusedMode && !this.refreshScheduler.isScheduled()) {
+			this.refreshScheduler.schedule();
+		}
+	}
+
+	private resetPage(): void {
+		this.pageIndex = 0;
+		this.refreshCards();
+		this.resetPageScroll();
+	}
+
+	private resetPageScroll(): void {
+		if (this.gridContainer) {
+			this.gridContainer.scrollTop = 0;
+		}
+		for (const column of this.boardColumns.values()) {
+			column.listEl.scrollTop = 0;
+		}
+	}
+
+	private clearSessionWatches(): void {
+		for (const watch of this.sessionWatches.values()) {
+			watch.store.dispose();
+		}
+		this.sessionWatches.clear();
+	}
+
+	/** Keep only lightweight, keyed metadata subscriptions for off-page sessions. */
+	private reconcileSessionWatches(models: readonly IOptimusCardSessionModel[]): void {
+		const byKey = new Map(models.map(model => [model.session.resource.toString(), model]));
+		for (const [key, watch] of this.sessionWatches) {
+			if (byKey.get(key)?.session !== watch.session) {
+				watch.store.dispose();
+				this.sessionWatches.delete(key);
+			}
+		}
+		for (const [key, model] of byKey) {
+			if (this.sessionWatches.has(key)) {
+				continue;
+			}
+			const store = new DisposableStore();
+			this.sessionWatches.set(key, { session: model.session, store });
+			let initialRun = true;
+			store.add(autorun(reader => {
+				const session = model.session;
+				const status = session.status.read(reader);
+				session.title.read(reader);
+				session.workspace.read(reader);
+				session.isArchived.read(reader);
+				session.isRead.read(reader);
+				session.mainChat.read(reader);
+				model.activeSession?.activeChat.read(reader);
+				// A live card updates its own timestamp. Re-sorting the wall on every
+				// streamed token churns pages; refresh its order when the turn ends.
+				if (status !== SessionStatus.InProgress) {
+					session.updatedAt.read(reader);
+				}
+				if (!initialRun) {
+					this.scheduleRefresh();
+				}
+				initialRun = false;
+			}));
+		}
+	}
+
 	private refreshCards(): void {
-		if (!this.boardContainer || !this.gridContainer) {
+		if (this.focusedMode || !this.boardContainer || !this.gridContainer) {
 			return;
 		}
 
@@ -916,56 +977,43 @@ export class OptimusGridPart extends Part {
 			}
 		}
 
-		// The sessions service does not emit for every observable mutation. Watch
-		// the fields that influence dashboard search, filters, ordering, and rows.
-		this.statusWatchStore.clear();
-		let initialRun = true;
-		this.statusWatchStore.add(autorun(reader => {
-			for (const model of allModels) {
-				model.session.status.read(reader);
-				model.session.title.read(reader);
-				model.session.updatedAt.read(reader);
-				model.session.workspace.read(reader);
-				model.session.isArchived.read(reader);
-				model.session.isRead.read(reader);
-			}
-			for (const session of this.visibleSessions) {
-				session?.status.read(reader);
-			}
-			this.activeSession?.status.read(reader);
-			if (initialRun) {
-				initialRun = false;
-				return;
-			}
-			this.refreshScheduler.schedule();
-		}));
+		this.reconcileSessionWatches(allModels);
 
-		if (this.viewMode === 'board') {
-			this.refreshBoard(filteredModels);
+		if (this.viewMode === 'kanban') {
+			this.refreshKanban(filteredModels);
 			return;
 		}
 
 		this.refreshGrid(filteredModels);
 	}
 
-	private refreshBoard(models: readonly IOptimusCardSessionModel[]): void {
-		const visibleKeys = new Set(models.map(model => model.session.resource.toString()));
-		for (const [key, entry] of this.cardEntries) {
-			entry.card.element.style.display = visibleKeys.has(key) ? '' : 'none';
-		}
-
+	private refreshKanban(models: readonly IOptimusCardSessionModel[]): void {
 		const buckets = new Map<OptimusDashboardBucket, IOptimusCardSessionModel[]>(BOARD_BUCKETS.map(bucket => [bucket.key, []]));
 		for (const model of models) {
 			buckets.get(getOptimusDashboardBucket(model.session.status.get()))!.push(model);
 		}
+		const totalPages = Math.max(1, ...[...buckets.values()].map(bucketModels => Math.ceil(bucketModels.length / OptimusGridPart.KANBAN_ROWS_PER_PAGE)));
+		this.pageIndex = Math.min(Math.max(0, this.pageIndex), totalPages - 1);
+		const pageStart = this.pageIndex * OptimusGridPart.KANBAN_ROWS_PER_PAGE;
+		const pageBuckets = new Map<OptimusDashboardBucket, readonly IOptimusCardSessionModel[]>();
+		const visibleKeys = new Set<string>();
+		for (const [bucketKey, bucketModels] of buckets) {
+			const pageModels = bucketModels.slice(pageStart, pageStart + OptimusGridPart.KANBAN_ROWS_PER_PAGE);
+			pageBuckets.set(bucketKey, pageModels);
+			for (const model of pageModels) {
+				visibleKeys.add(model.session.resource.toString());
+			}
+		}
+		this.disposeCardsOutsidePage(visibleKeys);
 
-		for (const [bucketKey, models] of buckets) {
+		for (const [bucketKey, bucketModels] of buckets) {
 			const column = assertReturnsDefined(this.boardColumns.get(bucketKey));
-			column.countEl.textContent = String(models.length);
-			column.element.classList.toggle('empty', models.length === 0);
+			const pageModels = assertReturnsDefined(pageBuckets.get(bucketKey));
+			column.countEl.textContent = String(bucketModels.length);
+			column.element.classList.toggle('empty', pageModels.length === 0);
 
 			let previousElement: HTMLElement | undefined;
-			for (const model of models) {
+			for (const model of pageModels) {
 				const key = model.session.resource.toString();
 				const entry = this.cardEntries.get(key) ?? this.createCardEntry(key);
 				entry.card.element.style.display = '';
@@ -975,7 +1023,6 @@ export class OptimusGridPart extends Part {
 				const expectedPrevious = previousElement ?? null;
 				if (element.parentElement !== column.listEl || element.previousElementSibling !== expectedPrevious) {
 					column.listEl.insertBefore(element, expectedPrevious ? expectedPrevious.nextElementSibling : column.listEl.firstElementChild);
-					entry.card.layout();
 				}
 				previousElement = element;
 			}
@@ -983,23 +1030,18 @@ export class OptimusGridPart extends Part {
 		if (this.placeholderCard) {
 			this.placeholderCard.element.style.display = 'none';
 		}
-		this.updatePager(1);
-		this.layoutCards();
+		this.updatePager(totalPages, models.length);
 	}
 
 	private refreshGrid(allModels: readonly IOptimusCardSessionModel[]): void {
 		const gridContainer = assertReturnsDefined(this.gridContainer);
-		const totalItems = allModels.length + 1;
-		const totalPages = Math.max(1, Math.ceil(totalItems / OptimusGridPart.PAGE_SIZE));
+		const totalPages = Math.max(1, Math.ceil(allModels.length / OptimusGridPart.GRID_PAGE_SIZE));
 		this.pageIndex = Math.min(Math.max(0, this.pageIndex), totalPages - 1);
-		const pageStart = this.pageIndex * OptimusGridPart.PAGE_SIZE;
-		const models = allModels.slice(pageStart, pageStart + OptimusGridPart.PAGE_SIZE);
-		const placeholderOnThisPage = allModels.length >= pageStart && allModels.length < pageStart + OptimusGridPart.PAGE_SIZE;
+		const pageStart = this.pageIndex * OptimusGridPart.GRID_PAGE_SIZE;
+		const models = allModels.slice(pageStart, pageStart + OptimusGridPart.GRID_PAGE_SIZE);
+		const placeholderOnThisPage = allModels.length > 0 && this.pageIndex === totalPages - 1 && models.length < OptimusGridPart.GRID_PAGE_SIZE;
 		const visibleKeys = new Set(models.map(model => model.session.resource.toString()));
-
-		for (const [key, entry] of this.cardEntries) {
-			entry.card.element.style.display = visibleKeys.has(key) ? '' : 'none';
-		}
+		this.disposeCardsOutsidePage(visibleKeys);
 
 		let previousElement: HTMLElement | undefined;
 		for (const model of models) {
@@ -1011,7 +1053,6 @@ export class OptimusGridPart extends Part {
 			const expectedPrevious = previousElement ?? null;
 			if (element.parentElement !== gridContainer || element.previousElementSibling !== expectedPrevious) {
 				gridContainer.insertBefore(element, expectedPrevious ? expectedPrevious.nextElementSibling : gridContainer.firstElementChild);
-				entry.card.layout();
 			}
 			previousElement = element;
 		}
@@ -1022,31 +1063,24 @@ export class OptimusGridPart extends Part {
 				gridContainer.appendChild(this.placeholderCard.element);
 			}
 		}
-		this.updatePager(totalPages);
-		this.layoutCards();
+		this.updatePager(totalPages, allModels.length);
 	}
 
-	private updatePager(totalPages: number): void {
+	private updatePager(totalPages: number, totalAgents: number): void {
 		if (!this.pagerElement || !this.pagerLabel || !this.pagerPrevious || !this.pagerNext) {
 			return;
 		}
-		this.pagerElement.style.display = this.viewMode === 'list' && totalPages > 1 ? '' : 'none';
-		this.pagerLabel.textContent = localize('optimus.pager.label', "{0} of {1}", this.pageIndex + 1, totalPages);
+		this.pagerElement.style.display = totalAgents > 0 ? 'flex' : 'none';
+		this.pagerLabel.textContent = localize('optimus.pager.label', "Page {0} of {1} · {2} agents", this.pageIndex + 1, totalPages, totalAgents);
 		this.pagerPrevious.disabled = this.pageIndex === 0;
 		this.pagerNext.disabled = this.pageIndex >= totalPages - 1;
 	}
 
-	private layoutCards(): void {
-		for (const entry of this.cardEntries.values()) {
-			entry.card.layout();
-		}
-	}
-
 	private layoutFocusedSession(): void {
-		if (!this.focusedMode || !this.focusedSessionBody || !this.focusedSessionView) {
+		if (!this.focusedMode || !this.focusedSessionBody || !this.focusedSessionView.value) {
 			return;
 		}
-		this.focusedSessionView.layout(this.focusedSessionBody.clientWidth, this.focusedSessionBody.clientHeight, 0, 0);
+		this.focusedSessionView.value.layout(this.focusedSessionBody.clientWidth, this.focusedSessionBody.clientHeight, 0, 0);
 	}
 
 	getSessionView(sessionId: string | undefined): SessionView | undefined {
@@ -1054,7 +1088,7 @@ export class OptimusGridPart extends Part {
 			return undefined;
 		}
 		if (sessionId === undefined || this.activeSession?.sessionId === sessionId) {
-			return this.focusedSessionView;
+			return this.focusedSessionView.value;
 		}
 		return undefined;
 	}
@@ -1161,7 +1195,6 @@ export class OptimusGridPart extends Part {
 	override layout(width: number, height: number, top: number, left: number): void {
 		super.layout(width, height, top, left);
 		super.layoutContents(width, height);
-		this.layoutCards();
 		this.layoutFocusedSession();
 	}
 
@@ -1172,6 +1205,7 @@ export class OptimusGridPart extends Part {
 	}
 
 	override dispose(): void {
+		this.clearSessionWatches();
 		for (const [key, entry] of [...this.cardEntries]) {
 			this.disposeCardEntry(key, entry);
 		}

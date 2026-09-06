@@ -1,9 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { AssistantAccumulator } from "../src/core/agent/AssistantAccumulator.ts";
-import {
-	FINAL_VERIFICATION_MIN_TOOL_CALLS,
-	finalVerificationNotification,
-} from "../src/core/agent/notifications/FinalVerificationNotification.ts";
+import { finalVerificationNotification } from "../src/core/agent/notifications/FinalVerificationNotification.ts";
 import type {
 	SystemNotification,
 	SystemNotificationContext,
@@ -12,11 +9,10 @@ import {
 	SystemNotificationRunner,
 	type SystemNotificationRunnerDeps,
 } from "../src/core/agent/notifications/SystemNotificationRunner.ts";
-import { todoReconciliationNotification } from "../src/core/agent/notifications/TodoReconciliationNotification.ts";
-import type { TodoItem } from "../src/core/bus/events.ts";
+import { EventBus } from "../src/core/bus/EventBus.ts";
+import type { AgentEvent } from "../src/core/bus/events.ts";
 import type { ToolContext } from "../src/core/tools/ToolContext.ts";
 import { FINAL_VERIFICATION_NUDGE } from "../src/prompts/finalVerification.ts";
-import { PLAN_UP_TO_DATE_REPLY } from "../src/prompts/todoReminders.ts";
 
 function notification(
 	overrides: Partial<SystemNotification> & { id: string },
@@ -55,6 +51,11 @@ function makeRunner(
 		executedToolCalls: options.calls ?? 20,
 	};
 	const sent: string[] = [];
+	const events: AgentEvent[] = [];
+	const bus = new EventBus();
+	bus.onAny((event) => events.push(event));
+	let resets = 0;
+	const roundBudgets: (number | undefined)[] = [];
 	const requests: Record<string, unknown>[] = [];
 	const deps = {
 		client: {
@@ -82,8 +83,20 @@ function makeRunner(
 			get executedToolCalls() {
 				return counters.executedToolCalls;
 			},
-			createEarlyRound: () => ({}),
-			process: async () => {
+			createEarlyRound: () => ({
+				reset: () => {
+					resets++;
+				},
+			}),
+			process: async (
+				_pending: unknown,
+				_turnId: string,
+				_assistant: unknown,
+				_ctx: ToolContext,
+				_early: unknown,
+				budget?: number,
+			) => {
+				roundBudgets.push(budget);
 				counters.executedRounds += 1;
 				counters.executedToolCalls += options.callsPerProcess ?? 1;
 			},
@@ -98,7 +111,7 @@ function makeRunner(
 		requestKind: "user",
 	} as unknown as SystemNotificationRunnerDeps;
 	const runner = new SystemNotificationRunner(deps, notifications);
-	const ctx = { signal: new AbortController().signal } as ToolContext;
+	const ctx = { signal: new AbortController().signal, bus } as ToolContext;
 	const assistant = {
 		discardPartial: () => {},
 	} as unknown as AssistantAccumulator;
@@ -107,11 +120,43 @@ function makeRunner(
 		sent,
 		requests,
 		counters,
+		events,
+		roundBudgets,
+		get resets() {
+			return resets;
+		},
 		run: () => runner.runPending("turn_1", assistant, ctx),
 	};
 }
 
 describe("SystemNotificationRunner", () => {
+	it("bounds notification tool rounds and records timing without prompt content", async () => {
+		const made = makeRunner([notification({ id: "bounded" })]);
+		await made.run();
+		expect(made.roundBudgets).toEqual([3]);
+		const spans = made.events.filter(
+			(event) => event.type === "notification:run",
+		);
+		expect(spans.map((event) => event.stage)).toEqual(["start", "end"]);
+		expect(spans[1]?.durationMs).toBeGreaterThanOrEqual(0);
+		expect(JSON.stringify(spans)).not.toContain("content:bounded");
+		expect(made.resets).toBe(1);
+	});
+
+	it("resets a notification's early tools even when initial consumption fails", async () => {
+		const made = makeRunner(
+			[notification({ id: "flaky", supersedesFinalAnswer: true })],
+			{ failFor: ["flaky"] },
+		);
+		await expect(made.run()).rejects.toThrow("provider rejected");
+		expect(made.resets).toBe(1);
+		expect(
+			made.events
+				.filter((event) => event.type === "notification:run")
+				.map((event) => event.stage),
+		).toEqual(["start", "end"]);
+	});
+
 	it("reports a superseding final answer only when a superseding notification would fire", () => {
 		const firing = makeRunner([
 			notification({ id: "a", supersedesFinalAnswer: true }),
@@ -355,7 +400,12 @@ describe("finalVerificationNotification", () => {
 	): SystemNotificationContext => ({
 		requestKind: "user",
 		executedRounds: 1,
-		executedToolCalls: FINAL_VERIFICATION_MIN_TOOL_CALLS,
+		executedToolCalls: 1,
+		completionEvidence: {
+			successfulMutations: 1,
+			unvalidatedMutations: 1,
+			validationFailed: false,
+		},
 		todos: [],
 		...overrides,
 	});
@@ -367,7 +417,7 @@ describe("finalVerificationNotification", () => {
 		expect(nudge.content(context())).toBe(FINAL_VERIFICATION_NUDGE);
 	});
 
-	it("fires only for substantial enabled user turns", () => {
+	it("fires only for enabled user turns with unvalidated mutations", () => {
 		expect(finalVerificationNotification(true).shouldFire(context())).toBe(
 			true,
 		);
@@ -381,78 +431,19 @@ describe("finalVerificationNotification", () => {
 		).toBe(false);
 		expect(
 			finalVerificationNotification(true).shouldFire(
-				context({ executedRounds: 0 }),
+				context({ completionEvidence: undefined }),
 			),
 		).toBe(false);
 		expect(
 			finalVerificationNotification(true).shouldFire(
 				context({
-					executedToolCalls: FINAL_VERIFICATION_MIN_TOOL_CALLS - 1,
+					completionEvidence: {
+						successfulMutations: 1,
+						unvalidatedMutations: 0,
+						validationFailed: false,
+					},
 				}),
 			),
 		).toBe(false);
-	});
-});
-
-describe("todoReconciliationNotification", () => {
-	const openTodos: TodoItem[] = [
-		{ id: "todo_1", content: "Ship feature", status: "completed" },
-		{ id: "todo_2", content: "Write tests", status: "in_progress" },
-		{ id: "todo_3", content: "Update docs", status: "pending" },
-	];
-
-	const context = (
-		overrides: Partial<SystemNotificationContext> = {},
-	): SystemNotificationContext => ({
-		requestKind: "user",
-		executedRounds: 1,
-		executedToolCalls: 3,
-		todos: openTodos,
-		...overrides,
-	});
-
-	it("hides its response, does not supersede, and loops until todos close", () => {
-		const reminder = todoReconciliationNotification();
-		expect(reminder.id).toBe("todo-reconciliation");
-		expect(reminder.supersedesFinalAnswer).toBe(false);
-		expect(reminder.hidesResponse).toBe(true);
-		expect(reminder.maxRepeats).toBeGreaterThan(1);
-	});
-
-	it("disables thinking and offers the full tool set so the agent can finish the work", () => {
-		const reminder = todoReconciliationNotification();
-		expect(reminder.thinking).toBeNull();
-		// No tool restriction: an agent that stopped early should be able to
-		// complete remaining work, not just record it.
-		expect(reminder.restrictTools).toBeUndefined();
-	});
-
-	it("fires only for user turns that did work and left todos open", () => {
-		const reminder = todoReconciliationNotification();
-		expect(reminder.shouldFire(context())).toBe(true);
-		expect(reminder.shouldFire(context({ requestKind: "subagent" }))).toBe(
-			false,
-		);
-		expect(reminder.shouldFire(context({ executedToolCalls: 0 }))).toBe(false);
-		expect(reminder.shouldFire(context({ todos: [] }))).toBe(false);
-		expect(
-			reminder.shouldFire(
-				context({
-					todos: [{ id: "todo_1", content: "Done", status: "completed" }],
-				}),
-			),
-		).toBe(false);
-	});
-
-	it("lists only open items and demands a TodoWrite call or the exact sentinel", () => {
-		const text = todoReconciliationNotification().content(context());
-		expect(text).toContain("<system-reminder>");
-		expect(text).toContain("1. [in_progress] Write tests");
-		expect(text).toContain("2. [pending] Update docs");
-		expect(text).not.toContain("Ship feature");
-		expect(text).toContain(`reply exactly: ${PLAN_UP_TO_DATE_REPLY}`);
-		expect(text).toContain(
-			"Do not reference this system reminder in any user-facing messages.",
-		);
 	});
 });

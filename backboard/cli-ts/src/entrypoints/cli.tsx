@@ -8,6 +8,7 @@ import {
 } from "../config/branding.ts";
 import { Config } from "../config/Config.ts";
 import { parseFlags } from "../config/flags.ts";
+import { runtimeIdentity } from "../config/runtimeIdentity.ts";
 import { AgentController } from "../core/agent/AgentController.ts";
 import { AgentTaskManager } from "../core/agent/AgentTaskManager.ts";
 import { AttachmentManager } from "../core/attachments/AttachmentManager.ts";
@@ -41,6 +42,7 @@ import {
 	isKnownPermissionMode,
 	PERMISSION_MODES,
 } from "../core/permissions/index.ts";
+import { resolveRipgrep } from "../core/search/ripgrep.ts";
 import { ClientEventLog } from "../core/session/ClientEventLog.ts";
 import { JsonEventStream } from "../core/session/JsonEventStream.ts";
 import { ServerEventLog } from "../core/session/ServerEventLog.ts";
@@ -101,6 +103,7 @@ Options:
   --profile <name>           Profile to load (default: coding)
   --cwd <path>               Working directory
   --print <prompt>           Run a single prompt non-interactively
+  --runtime-info             Print non-secret build and search capability diagnostics
   --serve                    Run as Backboard Studio's persistent NDJSON host
   --permission-mode <mode>   manual | acceptEdits | auto (prompt only for risky) | bypass (default: manual)
   --lsp                      Enable language-server diagnostics for this run
@@ -117,6 +120,20 @@ Options:
 `;
 async function main(): Promise<void> {
 	const argv = process.argv.slice(2);
+	if (argv.includes("--runtime-info")) {
+		const [identity, ripgrep] = await Promise.all([
+			runtimeIdentity(),
+			resolveRipgrep().then(
+				(value) => value,
+				() => ({
+					available: false,
+					reason: "Set BACKBOARD_RIPGREP_PATH or restore rg on PATH.",
+				}),
+			),
+		]);
+		process.stdout.write(`${JSON.stringify({ ...identity, ripgrep })}\n`);
+		return;
+	}
 	const earlyFlags = parseFlags(argv);
 	if (earlyFlags.help) {
 		process.stdout.write(HELP);

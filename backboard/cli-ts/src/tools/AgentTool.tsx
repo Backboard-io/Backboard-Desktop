@@ -1,3 +1,8 @@
+import { randomUUID } from "node:crypto";
+import { AgentTaskManager } from "../core/agent/AgentTaskManager.ts";
+import type { Stats } from "node:fs";
+import { lstat, mkdir, realpath } from "node:fs/promises";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { z } from "zod";
 import type { JSONValue } from "../core/agent/rlm/RLMTypes.ts";
 import type { SubAgentResult } from "../core/agent/SubAgentRunner.ts";
@@ -8,6 +13,7 @@ import type {
 } from "../core/permissions/types.ts";
 import type { OpenAITool } from "../core/tools/schema.ts";
 import { Tool } from "../core/tools/Tool.ts";
+import { throwIfAborted } from "../core/tools/ToolAbort.ts";
 import type { ToolContext } from "../core/tools/ToolContext.ts";
 import { ok, type ToolResult } from "../core/tools/ToolResult.ts";
 import { WorkerWorkspaceUnavailableError } from "../core/workspaces/WorkerWorkspaceManager.ts";
@@ -23,6 +29,7 @@ import type {
 	AgentToolInput,
 	AgentToolOutput,
 } from "./AgentToolTypes.ts";
+import { agentDisplayNameSchema } from "./AgentToolTypes.ts";
 
 const jsonValueSchema = z.custom<JSONValue>((value) => {
 	const seen = new WeakSet<object>();
@@ -53,6 +60,7 @@ const jsonValueSchema = z.custom<JSONValue>((value) => {
 }, "variables must contain only JSON-serializable values");
 
 const schema = z.object({
+	name: agentDisplayNameSchema,
 	subagent_type: z
 		.enum(["worker", "rlm"])
 		.optional()
@@ -100,7 +108,9 @@ export type {
  */
 export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 	readonly name = "Agent";
+	readonly reportsWorkerStart = true;
 	readonly inputSchema = schema;
+	private readonly tasks: AgentTaskManager;
 
 	override get displayName(): string {
 		return "Subagent";
@@ -108,6 +118,7 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 
 	constructor(private readonly deps: AgentToolDeps) {
 		super();
+		this.tasks = deps.taskManager ?? new AgentTaskManager();
 	}
 
 	override prompt(context: PromptContext = {}): string {
@@ -158,7 +169,19 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 	override async execute(
 		input: AgentToolInput,
 		ctx: ToolContext,
+		onStarted?: () => void | Promise<void>,
 	): Promise<ToolResult<AgentToolOutput>> {
+		// Agent is the blocking compatibility view over the same durable engine.
+		if (!ctx.workerLifecycle) {
+			const handle = ctx.toolCallId ?? `worker-${randomUUID()}`;
+			await this.tasks.spawn({ handle, input, ctx, reportsWorkerStart: true, run: (workerInput, workerContext, started) => this.execute(workerInput, workerContext, async () => { await started(); await onStarted?.(); }) });
+			const [task] = await this.tasks.wait([handle], ctx.sessionId, new AbortController().signal);
+			// The execution retains ctx.signal. Joining drains its cancelled cleanup
+			// and any already-durable integration before returning the captured outcome.
+			if (!task?.result) throw new Error(task?.error ?? "Worker finished without a captured result.");
+			const { data, forLLM, title, detail } = task.result;
+			return { ...ok(data, forLLM, title, detail), ...(task.execution ? { execution: task.execution } : {}) };
+		}
 		const subagentType = input.subagent_type ?? "worker";
 		const depth = (ctx.agentDepth ?? 0) + 1;
 		const traceContext = ctx.trace;
@@ -172,21 +195,31 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 		if (depth > this.deps.maxDepth) {
 			const report =
 				"Agent recursion depth limit reached. Complete this work directly instead of spawning another sub-agent.";
-			return ok(
-				{
-					mode: subagentType,
+			return {
+				...ok(
+					{
+						mode: subagentType,
+						report,
+						status: "rejected",
+						rounds: 0,
+						...(tracePath ? { tracePath } : {}),
+					},
 					report,
-					status: "rejected",
-					rounds: 0,
-					...(tracePath ? { tracePath } : {}),
+					"Rejected · depth limit reached",
+				),
+				execution: {
+					outcome: "failure",
+					failureCategory: "unavailable",
+					retryable: false,
+					mutated: false,
 				},
-				report,
-				"Rejected · depth limit reached",
-			);
+			};
 		}
 
 		if (subagentType === "rlm") {
 			try {
+				throwIfAborted(ctx.signal);
+				await onStarted?.();
 				const result = await this.deps.createRLMLoop().run({
 					prompt: input.prompt,
 					signal: ctx.signal,
@@ -206,7 +239,7 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 					agentTitle(result.status, result.rounds),
 				);
 			} catch (err) {
-				await trace?.writeError(err);
+				await trace?.writeError(err).catch(() => undefined);
 				throw err;
 			}
 		}
@@ -217,10 +250,10 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 		// rejects before the runner callback is entered (for example a dirty or
 		// non-Git coordinator). Claim the terminal edge up front so detached
 		// AgentSpawn tasks cannot remain visually active forever on that path.
-		const deferredParentEnd = this.deps.workspaceManager !== undefined;
+		const deferredParentEnd = this.deps.workspaceManager !== undefined || ctx.workerLifecycle !== undefined;
 		let parentEndEmitted = false;
 		const emitParentEnd = (status: string): void => {
-			if (!deferredParentEnd || parentEndEmitted || !ctx.toolCallId) return;
+			if (ctx.workerLifecycle || !deferredParentEnd || parentEndEmitted || !ctx.toolCallId) return;
 			parentEndEmitted = true;
 			ctx.bus.emit({
 				type: "agent:child_end",
@@ -236,19 +269,34 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 						clientLogPath: trace.paths.clientLog,
 					}
 				: undefined;
-		const run = (options: {
+		const run = async (options: {
 			cwd: string;
 			signal: AbortSignal;
 			isolated: boolean;
 			workspace?: WorkerWorkspaceRecord;
 		}): Promise<SubAgentResult> => {
+			throwIfAborted(options.signal);
+			const workerCwd =
+				options.isolated && options.workspace
+					? await scopedWorkerCwd(
+							ctx.cwd,
+							options.workspace.coordinatorCwd,
+							options.cwd,
+						)
+					: options.cwd;
+			throwIfAborted(options.signal);
+			await onStarted?.();
+			const delegatedPrompt = options.isolated
+				? rebaseCoordinatorPaths(input.prompt, ctx.cwd, workerCwd)
+				: input.prompt;
 			return this.deps.runner.run({
-				prompt: options.isolated
-					? rebaseCoordinatorPaths(input.prompt, ctx.cwd, options.cwd)
-					: input.prompt,
+				...(input.name ? { name: input.name } : {}),
+				prompt: options.workspace?.snapshotNotice
+					? `${delegatedPrompt}\n\nWorkspace preparation: ${options.workspace.snapshotNotice}`
+					: delegatedPrompt,
 				depth,
 				readOnly: input.read_only === true,
-				parentCwd: options.cwd,
+				parentCwd: workerCwd,
 				permissionCwd: ctx.cwd,
 				parentSignal: options.signal,
 				parentBus: ctx.bus,
@@ -270,6 +318,7 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 				const outcome = await this.deps.workspaceManager.runWorker(
 					{
 						workerId,
+						...(input.name ? { name: input.name } : {}),
 						parentSessionId: ctx.sessionId,
 						parentToolCallId: ctx.toolCallId,
 						taskPrompt: input.prompt,
@@ -277,6 +326,7 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 						coordinatorCwd: ctx.cwd,
 						signal: ctx.signal,
 						onProgress: (record) => {
+							if (ctx.workerLifecycle) { ctx.workerLifecycle.onWorkspaceProgress(record); return; }
 							if (!ctx.toolCallId) return;
 							const terminal = isTerminalWorkerRecord(record);
 							// Once cancelled, suppress noisy progress but preserve durable
@@ -336,20 +386,29 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 				});
 			}
 		} catch (err) {
-			await trace?.writeError(err);
 			emitParentEnd(ctx.signal.aborted ? "cancelled" : "failed");
+			await trace?.writeError(err).catch(() => undefined);
 			if (err instanceof WorkerWorkspaceUnavailableError) {
-				return ok(
-					{
-						mode: "worker",
-						report: err.message,
-						status: "rejected",
-						rounds: 0,
-						...(tracePath ? { tracePath } : {}),
+				const report = `${err.message}\n\nAgent and AgentSpawn use the same workspace backend. Switching between them or retrying unchanged workspace conditions will not fix this failure. Continue permitted work directly, or report the specific prerequisite that must change before another write worker can start.`;
+				return {
+					...ok(
+						{
+							mode: "worker",
+							report,
+							status: "rejected",
+							rounds: 0,
+							...(tracePath ? { tracePath } : {}),
+						},
+						report,
+						"Rejected · isolated workspace unavailable",
+					),
+					execution: {
+						outcome: "failure",
+						failureCategory: "unavailable",
+						retryable: false,
+						mutated: false,
 					},
-					err.message,
-					"Rejected · isolated workspace unavailable",
-				);
+				};
 			}
 			throw err;
 		}
@@ -371,6 +430,53 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 			agentTitle(status, result.toolRounds),
 		);
 	}
+}
+
+/** Preserve the requested project subfolder without widening permission scope. */
+async function scopedWorkerCwd(
+	requestedCwd: string,
+	coordinatorRoot: string,
+	workerRoot: string,
+): Promise<string> {
+	if (resolve(requestedCwd) === resolve(coordinatorRoot)) return workerRoot;
+	const [root, requested] = await Promise.all([
+		realpath(coordinatorRoot),
+		realpath(requestedCwd),
+	]);
+	const subfolder = relative(root, requested);
+	if (
+		isAbsolute(subfolder) ||
+		subfolder === ".." ||
+		subfolder.startsWith(`..${sep}`)
+	) {
+		throw new WorkerWorkspaceUnavailableError(
+			"The requested worker directory is outside its coordinator workspace. Use a directory within the current workspace before starting another worker.",
+		);
+	}
+	let directory = await realpath(workerRoot);
+	// Git does not preserve empty directories. Create only the requested path
+	// inside this private checkout, refusing symlinks at every component.
+	for (const component of subfolder.split(sep).filter(Boolean)) {
+		directory = join(directory, component);
+		let entry: Stats;
+		try {
+			entry = await lstat(directory);
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+			try {
+				await mkdir(directory, { mode: 0o700 });
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+			}
+			entry = await lstat(directory);
+		}
+		if (entry.isSymbolicLink() || !entry.isDirectory()) {
+			throw new WorkerWorkspaceUnavailableError(
+				"The worker subfolder contains a symlink or non-directory component. No model was started; the private workspace needs repair.",
+			);
+		}
+	}
+	return directory;
 }
 
 /**
@@ -515,6 +621,14 @@ function agentToolParameters(): Record<string, unknown> {
 	return {
 		type: "object",
 		properties: {
+			name: {
+				type: "string",
+				minLength: 1,
+				maxLength: 80,
+				pattern: "^[^\\r\\n]+$",
+				description:
+					"Optional short display label for this worker, such as Search. Does not change task identity.",
+			},
 			subagent_type: {
 				type: "string",
 				enum: ["worker", "rlm"],

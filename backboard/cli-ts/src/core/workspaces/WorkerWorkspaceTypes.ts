@@ -15,14 +15,41 @@ export type WorkerIntegrationStatus =
 
 export type WorkerWorktreeDisposition = "present" | "removed_clean_terminal";
 
+export interface WorkerIntegrationContent {
+	contentPath: string;
+	sha256: string;
+	byteLength: number;
+	mode: number;
+}
+
+/** Exact coordinator delta; an absent side means the file did not exist. */
+export interface WorkerIntegrationChange {
+	filePath: string;
+	before?: WorkerIntegrationContent;
+	after?: WorkerIntegrationContent;
+}
+
+/** Private capture boundary shared by native Git and snapshot integration. */
+export interface WorkerIntegrationChangeBytes {
+	filePath: string;
+	before?: { content: Buffer; mode: number };
+	after?: { content: Buffer; mode: number };
+}
+
 export interface WorkerWorkspaceRecord {
 	workerId: string;
+	/** Monotonic workspace-store revision. Absent only in legacy records. */
+	revision?: number;
+	name?: string;
 	sequence: number;
 	parentSessionId: string;
 	parentToolCallId?: string;
 	taskPrompt: string;
 	readOnly: boolean;
 	coordinatorCwd: string;
+	/** Private baseline for plain folders or current dirty repository bytes. */
+	backend?: "snapshot";
+	snapshotNotice?: string;
 	/** Backboard created the local repository/baseline needed for isolation. */
 	repositoryInitializedByBackboard?: boolean;
 	repositoryRoot?: string;
@@ -46,11 +73,25 @@ export interface WorkerWorkspaceRecord {
 	integrationStatus: WorkerIntegrationStatus;
 	integratedAt?: string;
 	integrationCommit?: string;
+	/** Durable pre-commit/apply capture; never presented as an applied edit. */
+	integrationPlan?: {
+		resultCommit: string;
+		baseCommit?: string;
+		afterTree?: string;
+		changes: WorkerIntegrationChange[];
+	};
+	/** Undefined means no exact capture is available; [] is a verified no-op. */
+	integrationChanges?: WorkerIntegrationChange[];
 	error?: string;
 }
 
 export interface WorkerWorkspaceProgress {
 	workerId: string;
+	revision?: number;
+	executionStatus?: WorkerExecutionStatus;
+	integrationStatus?: WorkerIntegrationStatus;
+	integrationChanges?: WorkerIntegrationChange[];
+	name?: string;
 	status:
 		| "Running"
 		| "Completed"
@@ -70,6 +111,7 @@ export interface WorkerWorkspaceProgress {
 
 export interface WorkerWorkspaceRunParams {
 	workerId: string;
+	name?: string;
 	parentSessionId: string;
 	parentToolCallId?: string;
 	taskPrompt: string;
@@ -120,6 +162,14 @@ export function workerProgress(
 
 	return {
 		workerId: record.workerId,
+		revision: record.revision ?? 0,
+		executionStatus: record.executionStatus,
+		integrationStatus: record.integrationStatus,
+		integrationChanges:
+			record.integrationStatus === "integrated"
+				? structuredClone(record.integrationChanges)
+				: undefined,
+		...(record.name ? { name: record.name } : {}),
 		status,
 		branch: record.branch,
 		worktreePath:

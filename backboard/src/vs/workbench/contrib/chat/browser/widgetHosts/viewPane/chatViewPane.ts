@@ -775,12 +775,8 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 
 		let newSessionsContainerVisible: boolean;
 		if (isBackboardProduct()) {
-			// Backboard's sessions surface is a Cursor-style drawer: it is only
-			// visible in the explicit side-by-side orientation and never replaces
-			// the empty composer as a stacked welcome view.
-			newSessionsContainerVisible =
-				this.sessionsViewerOrientation === AgentSessionsViewerOrientation.SideBySide &&
-				!!this.lastDimensions && this.lastDimensions.width >= ChatViewPane.SESSIONS_SIDEBAR_VIEW_MIN_WIDTH;
+			// History is available from the title toolbar; no embedded sessions drawer.
+			newSessionsContainerVisible = false;
 		} else if (!this.configurationService.getValue<boolean>(ChatConfiguration.ChatViewSessionsEnabled)) {
 			newSessionsContainerVisible = false; // disabled in settings
 		} else {
@@ -1053,6 +1049,16 @@ referencesExpandedWhenEmptyResponse: false,
 	//#endregion
 
 	private registerControlsListeners(sessionsControl: AgentSessionsControl, chatWidget: ChatWidget, welcomeController: ChatViewWelcomeController): void {
+
+		// Include the first loaded state: the parent may still reserve the old title height.
+		let lastEmptyState: boolean | undefined;
+		this._register(chatWidget.onDidChangeEmptyState(() => {
+			const empty = chatWidget.isEmpty();
+			if (lastEmptyState !== empty) {
+				lastEmptyState = empty;
+				this.layoutService.layout();
+			}
+		}));
 
 		// Sessions control visibility is impacted by multiple things:
 		// - chat widget being in empty state or showing a chat

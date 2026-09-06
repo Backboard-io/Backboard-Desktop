@@ -7,6 +7,7 @@ import {
 	BackboardError,
 	BackboardTransportError,
 } from "../src/providers/backboard/errors.ts";
+import workerIdentityMismatch from "./fixtures/backboard-worker-identity-mismatch.json";
 
 const originalFetch = globalThis.fetch;
 
@@ -15,6 +16,27 @@ afterEach(() => {
 });
 
 describe("BackboardClient streaming transport", () => {
+	it("stops a corrupted continuation without resubmitting previously consumed outputs", async () => {
+		let posts = 0;
+		globalThis.fetch = (async () => {
+			posts++;
+			return new Response(workerIdentityMismatch.map(frame => `data: ${JSON.stringify(frame)}\n\n`).join(""));
+		}) as unknown as typeof fetch;
+		const client = new BackboardClient({ apiKey: "test", apiUrl: "https://api.example.test" });
+		const events = [];
+		for await (const event of client.runToolOutputs({
+			thread_id: "synthetic_thread", run_id: "synthetic_run",
+			tool_outputs: [{ tool_call_id: "previous_successful_call", output: "ok" }], tools: [],
+		})) events.push(event);
+		expect(posts).toBe(1);
+		expect(events.filter(event => event.kind === "requires_action" || event.kind === "completed")).toEqual([]);
+		expect(events.at(-1)).toEqual({
+			kind: "failed",
+			error: expect.stringContaining("changed tool name from agent_spawn to glob"),
+			retryable: false,
+		});
+	});
+
 	it("lists and fetches threads", async () => {
 		const requestedUrls: string[] = [];
 		globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
@@ -86,13 +108,37 @@ describe("BackboardClient streaming transport", () => {
 				[
 					{
 						type: "provider_chunk",
-						choices: [{ delta: { tool_calls: [{ index: 0, function: { name: "Wr", arguments: '{"file_path":' } }] } }],
+						choices: [
+							{
+								delta: {
+									tool_calls: [
+										{
+											index: 0,
+											function: { name: "Wr", arguments: '{"file_path":' },
+										},
+									],
+								},
+							},
+						],
 					},
 					{
 						type: "provider_chunk",
-						choices: [{ delta: { tool_calls: [{ index: 0, function: { name: "ite", arguments: '"large.ts"' } }] } }],
+						choices: [
+							{
+								delta: {
+									tool_calls: [
+										{
+											index: 0,
+											function: { name: "ite", arguments: '"large.ts"' },
+										},
+									],
+								},
+							},
+						],
 					},
-				].map(payload => `data: ${JSON.stringify(payload)}\n\n`).join(""),
+				]
+					.map((payload) => `data: ${JSON.stringify(payload)}\n\n`)
+					.join(""),
 				{ status: 200 },
 			)) as unknown as typeof fetch;
 
@@ -103,15 +149,21 @@ describe("BackboardClient streaming transport", () => {
 		const events = [];
 		for await (const event of client.runMessage({
 			content: "write a large file",
-			tools: [{
-				type: "function",
-				function: { name: "Write", description: "Write a file", parameters: {} },
-			}],
+			tools: [
+				{
+					type: "function",
+					function: {
+						name: "Write",
+						description: "Write a file",
+						parameters: {},
+					},
+				},
+			],
 		})) {
 			events.push(event);
 		}
 
-		expect(events.filter(event => event.kind === "tool_started")).toEqual([
+		expect(events.filter((event) => event.kind === "tool_started")).toEqual([
 			expect.objectContaining({ kind: "tool_started", name: "Write" }),
 		]);
 	});
@@ -203,7 +255,9 @@ describe("BackboardClient attachment endpoints", () => {
 			events.push(event);
 		}
 
-		expect(events).toEqual([]);
+		expect(
+			events.filter((event) => event.kind !== "thinking_resolved"),
+		).toEqual([]);
 		expect(requestedUrl).toBe("https://api.example.test/threads/messages");
 		expect(requestedMethod).toBe("POST");
 		expect(requestedHeaders?.get("X-API-Key")).toBe("test");

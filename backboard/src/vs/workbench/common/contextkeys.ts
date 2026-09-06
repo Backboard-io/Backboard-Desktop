@@ -36,7 +36,6 @@ export const IsSessionsWindowContext = new RawContextKey<boolean>('isSessionsWin
 
 export const IsOptimusWindowContext = new RawContextKey<boolean>('isOptimusWindow', false, localize('isOptimusWindow', "Whether the current window is an Optimus (Advanced) window."));
 
-export const IsJarvisWindowContext = new RawContextKey<boolean>('isJarvisWindow', false, localize('isJarvisWindow', "Whether the current window is a Jarvis window."));
 
 export const HasWebFileSystemAccess = new RawContextKey<boolean>('hasWebFileSystemAccess', false, true); // Support for FileSystemAccess web APIs (https://wicg.github.io/file-system-access)
 

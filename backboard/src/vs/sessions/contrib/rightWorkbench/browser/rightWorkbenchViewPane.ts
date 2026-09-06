@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import './media/rightWorkbenchLauncher.css';
+import './media/rightWorkbenchSimple.css';
 import { $, addDisposableListener, append, clearNode, Dimension, EventType } from '../../../../base/browser/dom.js';
 import { renderIcon } from '../../../../base/browser/ui/iconLabel/iconLabels.js';
 import { Separator, toAction } from '../../../../base/common/actions.js';
@@ -46,11 +47,12 @@ import { BrowserEditorInput } from '../../../../workbench/contrib/browserView/co
 import { IBrowserViewModel, IBrowserViewWorkbenchService } from '../../../../workbench/contrib/browserView/common/browserView.js';
 import { BrowserEditor } from '../../../../workbench/contrib/browserView/electron-browser/browserEditor.js';
 import { WebviewEditor } from '../../../../workbench/contrib/webviewPanel/browser/webviewEditor.js';
+import { MultiDiffEditor } from '../../../../workbench/contrib/multiDiffEditor/browser/multiDiffEditor.js';
 import { ExtensionState, IExtension, IExtensionsWorkbenchService } from '../../../../workbench/contrib/extensions/common/extensions.js';
 import { ExtensionsViewPaneContainer } from '../../../../workbench/contrib/extensions/browser/extensionsViewlet.js';
 import { IViewDescriptorService } from '../../../../workbench/common/views.js';
 import { MODAL_GROUP, PreferredGroup } from '../../../../workbench/services/editor/common/editorService.js';
-import { IEditorGroupsService } from '../../../../workbench/services/editor/common/editorGroupsService.js';
+import { IEditorGroupsService, IModalEditorPart } from '../../../../workbench/services/editor/common/editorGroupsService.js';
 import { IEditorService } from '../../../../workbench/services/editor/common/editorService.js';
 import { IWorkbenchLayoutService, Parts } from '../../../../workbench/services/layout/browser/layoutService.js';
 import { IWorkbenchEnvironmentService } from '../../../../workbench/services/environment/common/environmentService.js';
@@ -72,6 +74,7 @@ import { OptimusChatViewPane } from '../../../../optimus/contrib/chat/browser/op
 import { buildReviewTreeChildren, IReviewResource, isReviewResource, ReviewTreeDelegate, ReviewTreeElement, ReviewTreeRenderer, ReviewTreeSorter } from './reviewTree.js';
 import { onDidRequestModeEmitter, pendingModeRequest, setPendingModeRequest, type RightWorkbenchMode, type IRightWorkbenchModeRequest, type IRightWorkbenchModeEntry } from './rightWorkbench.js';
 import { createRightWorkbenchReviewContextKey, RightWorkbenchReviewContext } from './rightWorkbenchReviewContext.js';
+import { RightWorkbenchBrowserSuggestions, normalizeRightWorkbenchUrl } from './rightWorkbenchBrowserSuggestions.js';
 
 const enum RightWorkbenchBrowserCommandId {
 	ZoomIn = 'workbench.action.browser.zoomIn',
@@ -108,10 +111,13 @@ interface IRightWorkbenchTabState {
 
 export class RightWorkbenchViewPane extends ViewPane {
 
+	private readonly tabOpenSequencer = new Sequencer();
 	private readonly domStore = this._register(new DisposableStore());
 	private readonly modePickerStore = this._register(new DisposableStore());
 	private root: HTMLElement | undefined;
 	private embeddedEditorHost: HTMLElement | undefined;
+	private embeddedEditorPart: IModalEditorPart | undefined;
+	private readonly embeddedEditorPartStore = this._register(new DisposableStore());
 	private filesExplorer: ViewPane | undefined;
 	private filesExplorerContainer: HTMLElement | undefined;
 	private extensionsViewPane: ExtensionsViewPaneContainer | undefined;
@@ -121,6 +127,8 @@ export class RightWorkbenchViewPane extends ViewPane {
 	private reviewEmptyElement: HTMLElement | undefined;
 	private filePathElement: HTMLElement | undefined;
 	private fileEmptyElement: HTMLElement | undefined;
+	private fileSourceButton: HTMLButtonElement | undefined;
+	private fileOpenButton: HTMLButtonElement | undefined;
 	private readonly tabs: IRightWorkbenchTabState[] = [];
 	private activeTabId: string | undefined;
 	private readonly tabStores = this._register(new DisposableMap<string, DisposableStore>());
@@ -173,6 +181,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 	private isRightWorkbenchVisible = false;
 	private editorSidebarEnabled = false;
 	private editorSidebarFolderUri: URI | undefined;
+	private compactPanelPreviousWidth: number | undefined;
 
 	private get activeTab(): IRightWorkbenchTabState | undefined {
 		return this.tabs.find(tab => tab.id === this.activeTabId);
@@ -187,7 +196,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 	}
 
 	private get useSimpleRightWorkbench(): boolean {
-		return !this.environmentService.isOptimusWindow && !this.environmentService.isJarvisWindow;
+		return !this.environmentService.isOptimusWindow;
 	}
 
 	constructor(
@@ -221,9 +230,11 @@ export class RightWorkbenchViewPane extends ViewPane {
 	) {
 		super(options, keybindingService, contextMenuService, configurationService, contextKeyService, viewDescriptorService, instantiationService, openerService, themeService, hoverService);
 		this.editorSidebarFolderUri = this.readStoredEditorSidebarFolder();
+		this.reviewLoadFullFiles = !this.useSimpleRightWorkbench;
+		this.reviewWordDiffs = this.useSimpleRightWorkbench;
 		this._register(onDidRequestModeEmitter.event(request => { void this.openMode(request); }));
 		this._register(this.layoutService.onDidChangePartVisibility(e => {
-			if ((e.partId === Parts.EDITOR_PART || e.partId === Parts.PANEL_PART) && e.visible) {
+			if (e.partId === Parts.EDITOR_PART && e.visible) {
 				this.enforceSingleSurfaceLayout();
 			}
 		}));
@@ -320,6 +331,9 @@ export class RightWorkbenchViewPane extends ViewPane {
 	override dispose(): void {
 		this.invalidateReviewSurface();
 		void this.closeEmbeddedEditorPart();
+		for (const tab of this.tabs) {
+			this.disposeTabResources(tab);
+		}
 		super.dispose();
 	}
 
@@ -363,7 +377,6 @@ export class RightWorkbenchViewPane extends ViewPane {
 	private activateSingleSurface(): void {
 		this.layoutService.setPartHidden(false, Parts.AUXILIARYBAR_PART);
 		this.layoutService.setPartHidden(true, Parts.EDITOR_PART);
-		this.layoutService.setPartHidden(true, Parts.PANEL_PART);
 	}
 
 	private enforceSingleSurfaceLayout(): void {
@@ -373,7 +386,11 @@ export class RightWorkbenchViewPane extends ViewPane {
 		this.activateSingleSurface();
 	}
 
-	private async openMode(request: RightWorkbenchMode | IRightWorkbenchModeRequest): Promise<void> {
+	private openMode(request: RightWorkbenchMode | IRightWorkbenchModeRequest): Promise<void> {
+		return this.tabOpenSequencer.queue(() => this.doOpenMode(request));
+	}
+
+	private async doOpenMode(request: RightWorkbenchMode | IRightWorkbenchModeRequest): Promise<void> {
 		const modeRequest = typeof request === 'string' ? { mode: request } : request;
 		this.activateSingleSurface();
 		const existing = modeRequest.mode === 'launcher' ? undefined : this.findTabForRequest(modeRequest);
@@ -405,7 +422,11 @@ export class RightWorkbenchViewPane extends ViewPane {
 		}
 	}
 
-	private async openNewTab(mode: Exclude<RightWorkbenchMode, 'launcher'>): Promise<void> {
+	private openNewTab(mode: Exclude<RightWorkbenchMode, 'launcher'>): Promise<void> {
+		return this.tabOpenSequencer.queue(() => this.doOpenNewTab(mode));
+	}
+
+	private async doOpenNewTab(mode: Exclude<RightWorkbenchMode, 'launcher'>): Promise<void> {
 		this.activateSingleSurface();
 		const leavingReview = this.activeMode === 'review';
 		if (leavingReview) {
@@ -422,7 +443,11 @@ export class RightWorkbenchViewPane extends ViewPane {
 		this.renderShell();
 	}
 
-	private async openTab(tabId: string): Promise<void> {
+	private openTab(tabId: string): Promise<void> {
+		return this.tabOpenSequencer.queue(() => this.doOpenTab(tabId));
+	}
+
+	private async doOpenTab(tabId: string): Promise<void> {
 		if (tabId === this.activeTabId || !this.tabs.some(tab => tab.id === tabId)) {
 			return;
 		}
@@ -499,9 +524,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 			return;
 		}
 		if (this.reviewContainer && this.activeMode === 'review') {
-			// Rebuilding Review replaces its embedded host. Invalidate any open
-			// targeting the old host before the DOM is detached so a rail/maximize
-			// toggle cannot let that open release or reveal the replacement.
+			// Invalidate pending Review opens before rebuilding its surrounding UI.
 			this.invalidateReviewSurface();
 			this.queueReviewEditorClose();
 		}
@@ -510,7 +533,6 @@ export class RightWorkbenchViewPane extends ViewPane {
 		this.domStore.clear();
 		clearNode(this.root);
 		this.tabLabelElements.clear();
-		this.embeddedEditorHost = undefined;
 		this.filesExplorer = undefined;
 		this.filesExplorerContainer = undefined;
 		this.extensionsViewPane = undefined;
@@ -528,11 +550,14 @@ export class RightWorkbenchViewPane extends ViewPane {
 		this.reviewFileTitleElement = undefined;
 		this.filePathElement = undefined;
 		this.fileEmptyElement = undefined;
+		this.fileSourceButton = undefined;
+		this.fileOpenButton = undefined;
 		this.browserUrlInput = undefined;
 		this.browserBackButton = undefined;
 		this.browserForwardButton = undefined;
 		this.browserRefreshButton = undefined;
 		this.root.className = `sessions-right-workbench-shell sessions-right-workbench-mode-${this.activeMode}`;
+		this.root.classList.toggle('sessions-right-workbench-simple', this.useSimpleRightWorkbench);
 		this.root.classList.toggle('sessions-right-workbench-has-file', !this.useEditorSidebar && this.activeMode === 'files' && !!this.activeTab?.selectedFile);
 		this.root.classList.toggle('sessions-right-workbench-files-tree-hidden', this.activeMode === 'files' && !this.isFilesTreeVisible);
 
@@ -602,7 +627,9 @@ export class RightWorkbenchViewPane extends ViewPane {
 
 	private renderEditorActivityBar(container: HTMLElement): void {
 		const activityBar = append(container, $('.sessions-right-workbench-editor-activity'));
-		for (const entry of this.getEditorModeEntries()) {
+		const entries = this.getEditorModeEntries();
+		const primaryModes = new Set<RightWorkbenchMode>(['editor', 'files', 'review', 'terminal']);
+		for (const entry of entries.filter(entry => primaryModes.has(entry.mode))) {
 			const button = append(activityBar, $('button.sessions-right-workbench-editor-activity-button')) as HTMLButtonElement;
 			button.type = 'button';
 			button.title = entry.label;
@@ -611,6 +638,24 @@ export class RightWorkbenchViewPane extends ViewPane {
 			button.appendChild(renderIcon(entry.icon));
 			this.domStore.add(addDisposableListener(button, EventType.CLICK, () => { void this.openMode(entry.mode); }));
 		}
+		const more = append(activityBar, $('button.sessions-right-workbench-editor-activity-button')) as HTMLButtonElement;
+		more.type = 'button';
+		more.title = localize('rightWorkbench.moreTools', "More tools");
+		more.ariaLabel = more.title;
+		more.setAttribute('aria-haspopup', 'menu');
+		more.classList.toggle('active', !primaryModes.has(this.activeMode));
+		more.appendChild(renderIcon(Codicon.ellipsis));
+		this.domStore.add(addDisposableListener(more, EventType.CLICK, () => {
+			this.contextMenuService.showContextMenu({
+				getAnchor: () => more,
+				getActions: () => entries.filter(entry => !primaryModes.has(entry.mode)).map(entry => toAction({
+					id: `rightWorkbench.more.${entry.mode}`,
+					label: entry.label,
+					checked: this.activeMode === entry.mode,
+					run: () => this.openMode(entry.mode),
+				})),
+			});
+		}));
 	}
 
 	private renderEditorSectionHeader(container: HTMLElement): void {
@@ -628,15 +673,6 @@ export class RightWorkbenchViewPane extends ViewPane {
 		append(folder, $('span.sessions-right-workbench-editor-folder-label', {}, folderLabel));
 		folder.appendChild(renderIcon(Codicon.chevronDown));
 		this.domStore.add(addDisposableListener(folder, EventType.CLICK, () => this.showEditorFolderMenu(folder)));
-		const isMaximized = this.layoutService.isAuxiliaryBarMaximized();
-		const maximizeLabel = isMaximized
-			? localize('rightWorkbench.restorePanelWidth', "Restore Panel Width")
-			: localize('rightWorkbench.expandPanel', "Expand Panel");
-		const maximize = this.renderIconButton(header, isMaximized ? Codicon.screenNormal : Codicon.screenFull, maximizeLabel);
-		this.domStore.add(addDisposableListener(maximize, EventType.CLICK, () => {
-			this.layoutService.toggleMaximizedAuxiliaryBar();
-			this.renderShell();
-		}));
 	}
 
 	private readStoredEditorSidebarFolder(): URI | undefined {
@@ -757,6 +793,8 @@ export class RightWorkbenchViewPane extends ViewPane {
 	private renderModeHeader(container: HTMLElement): void {
 		const header = append(container, $('.sessions-right-workbench-header'));
 		const tabs = append(header, $('.sessions-right-workbench-tabs'));
+		tabs.setAttribute('role', 'tablist');
+		tabs.ariaLabel = localize('rightWorkbench.tabs', "Panel tabs");
 		this.tabLabelElements.clear();
 		for (let index = 0; index < this.tabs.length; index++) {
 			if (index > 0) {
@@ -765,7 +803,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 			const tab = this.tabs[index];
 			this.renderTab(tabs, tab);
 		}
-		const add = append(tabs, $('button.sessions-right-workbench-tab-add')) as HTMLButtonElement;
+		const add = append(header, $('button.sessions-right-workbench-tab-add')) as HTMLButtonElement;
 		add.type = 'button';
 		add.ariaLabel = localize('rightWorkbench.openModePicker', "Open Mode Picker");
 		add.setAttribute('aria-haspopup', 'menu');
@@ -779,17 +817,31 @@ export class RightWorkbenchViewPane extends ViewPane {
 		activeTabElement?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 
 		const controls = append(header, $('.sessions-right-workbench-frame-controls'));
-		const isMaximized = this.layoutService.isAuxiliaryBarMaximized();
-		const maximizeLabel = isMaximized
-			? localize('rightWorkbench.restorePanelWidth', "Restore Panel Width")
-			: localize('rightWorkbench.expandPanel', "Expand Panel");
-		const maximize = this.renderIconButton(controls, isMaximized ? Codicon.screenNormal : Codicon.screenFull, maximizeLabel);
-		this.domStore.add(addDisposableListener(maximize, EventType.CLICK, () => {
-			this.layoutService.toggleMaximizedAuxiliaryBar();
-			this.renderShell();
-		}));
-
-		if (this.activeMode === 'files') {
+		if (this.useSimpleRightWorkbench) {
+			const maximize = this.renderIconButton(controls, Codicon.screenFull, localize('rightWorkbench.expand', "Expand panel"));
+			const updateMaximize = () => {
+				const expanded = this.layoutService.isAuxiliaryBarMaximized();
+				clearNode(maximize);
+				maximize.appendChild(renderIcon(expanded ? Codicon.screenNormal : Codicon.screenFull));
+				maximize.ariaLabel = maximize.title = expanded ? localize('rightWorkbench.restore', "Restore panel") : localize('rightWorkbench.expand', "Expand panel");
+				maximize.setAttribute('aria-pressed', String(expanded));
+			};
+			updateMaximize();
+			this.domStore.add(this.layoutService.onDidChangeAuxiliaryBarMaximized(updateMaximize));
+			this.domStore.add(addDisposableListener(maximize, EventType.CLICK, () => this.layoutService.toggleMaximizedAuxiliaryBar()));
+			const compact = this.renderIconButton(controls, Codicon.layoutPanel, localize('rightWorkbench.compactPanel', "Toggle compact panel"));
+			compact.setAttribute('aria-pressed', String(this.compactPanelPreviousWidth !== undefined));
+			this.domStore.add(addDisposableListener(compact, EventType.CLICK, () => {
+				this.layoutService.setAuxiliaryBarMaximized(false);
+				const size = this.layoutService.getSize(Parts.AUXILIARYBAR_PART);
+				const width = this.compactPanelPreviousWidth ?? 400;
+				this.compactPanelPreviousWidth = this.compactPanelPreviousWidth === undefined ? size.width : undefined;
+				this.layoutService.setSize(Parts.AUXILIARYBAR_PART, { ...size, width });
+				compact.setAttribute('aria-pressed', String(this.compactPanelPreviousWidth !== undefined));
+			}));
+		}
+		this.renderPanelCloseButton(controls);
+		if (this.activeMode === 'files' && !this.useSimpleRightWorkbench) {
 			const filesToggleLabel = this.isFilesTreeVisible
 				? localize('rightWorkbench.closeFiles', "Close Files")
 				: localize('rightWorkbench.openFiles', "Open Files");
@@ -803,13 +855,19 @@ export class RightWorkbenchViewPane extends ViewPane {
 	}
 
 	private renderTab(container: HTMLElement, tab: IRightWorkbenchTabState): void {
-		const element = append(container, $('button.sessions-right-workbench-tab')) as HTMLButtonElement;
-		element.type = 'button';
+		const element = append(container, $('.sessions-right-workbench-tab'));
+		element.setAttribute('role', 'tab');
+		element.setAttribute('aria-selected', String(this.activeTabId === tab.id));
+		element.tabIndex = this.activeTabId === tab.id ? 0 : -1;
+		element.dataset.tabId = tab.id;
+		element.title = this.getTabInstanceLabel(tab);
 		element.classList.toggle('active', this.activeTabId === tab.id);
 		element.appendChild(renderIcon(this.getModeIcon(tab.mode)));
 		const label = append(element, $('span.sessions-right-workbench-tab-label', {}, this.getTabInstanceLabel(tab)));
 		this.tabLabelElements.set(tab.id, label);
-		const close = append(element, $('span.sessions-right-workbench-tab-close')) as HTMLElement;
+		const close = append(element, $('button.sessions-right-workbench-tab-close')) as HTMLButtonElement;
+		close.type = 'button';
+		close.tabIndex = -1;
 		close.title = localize('rightWorkbench.closeTab', "Close");
 		close.ariaLabel = localize('rightWorkbench.closeTab', "Close");
 		close.appendChild(renderIcon(Codicon.close));
@@ -818,6 +876,28 @@ export class RightWorkbenchViewPane extends ViewPane {
 			void this.closeTab(tab.id);
 		}));
 		this.domStore.add(addDisposableListener(element, EventType.CLICK, () => { void this.openTab(tab.id); }));
+		this.domStore.add(addDisposableListener(element, EventType.AUXCLICK, event => {
+			if (event.button === 1) {
+				event.preventDefault();
+				void this.closeTab(tab.id);
+			}
+		}));
+		this.domStore.add(addDisposableListener(element, EventType.KEY_DOWN, event => {
+			const index = this.tabs.indexOf(tab);
+			const next = event.key === 'ArrowRight' ? this.tabs[(index + 1) % this.tabs.length]
+				: event.key === 'ArrowLeft' ? this.tabs[(index + this.tabs.length - 1) % this.tabs.length]
+					: event.key === 'Home' ? this.tabs[0] : event.key === 'End' ? this.tabs.at(-1) : undefined;
+			if (next) {
+				event.preventDefault();
+				void this.openTab(next.id).then(() => this.root?.querySelector<HTMLElement>(`[data-tab-id="${next.id}"]`)?.focus());
+			} else if (event.key === 'Delete' || event.key === 'Backspace') {
+				event.preventDefault();
+				void this.closeTab(tab.id).then(() => this.root?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus());
+			} else if (event.key === 'Enter' || event.key === ' ') {
+				event.preventDefault();
+				void this.openTab(tab.id);
+			}
+		}));
 	}
 
 	private refreshTabLabels(): void {
@@ -825,6 +905,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 			const label = this.tabLabelElements.get(tab.id);
 			if (label) {
 				label.textContent = this.getTabInstanceLabel(tab);
+				label.parentElement!.title = tab.selectedFile?.fsPath ?? this.getTabInstanceLabel(tab);
 			}
 		}
 	}
@@ -864,7 +945,20 @@ export class RightWorkbenchViewPane extends ViewPane {
 		return button;
 	}
 
+	private renderPanelCloseButton(container: HTMLElement): void {
+		const close = this.renderIconButton(container, Codicon.layoutSidebarRight, localize('rightWorkbench.hidePanel', "Hide Right Panel"));
+		this.domStore.add(addDisposableListener(close, EventType.CLICK, () => {
+			this.layoutService.setPartHidden(true, Parts.AUXILIARYBAR_PART);
+			this.layoutService.focusPart(Parts.SESSIONS_PART);
+		}));
+	}
+
 	private renderLauncher(container: HTMLElement): void {
+		if (this.useSimpleRightWorkbench) {
+			const header = append(container, $('.sessions-right-workbench-header'));
+			append(header, $('.sessions-right-workbench-tabs'));
+			this.renderPanelCloseButton(append(header, $('.sessions-right-workbench-frame-controls')));
+		}
 		const center = append(container, $('.sessions-right-workbench-launcher-center'));
 		if (this.useSimpleRightWorkbench) {
 			center.tabIndex = 0;
@@ -929,7 +1023,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 		// Webview editors (for example Markdown previews) render in an overlay
 		// outside this DOM subtree. Temporarily release that overlay so it cannot
 		// paint through the mode picker, then restore it when the picker closes.
-		const activeEditorPane = this.editorGroupsService.activeModalEditorPart?.activeGroup.activeEditorPane;
+		const activeEditorPane = this.embeddedEditorPart?.activeGroup.activeEditorPane;
 		if (activeEditorPane instanceof WebviewEditor) {
 			activeEditorPane.setVisible(false);
 			this.modePickerHiddenEditorPane = activeEditorPane;
@@ -1004,10 +1098,10 @@ export class RightWorkbenchViewPane extends ViewPane {
 			];
 		}
 		return [
-			{ mode: 'browser', icon: Codicon.globe, label: localize('rightWorkbench.browser', "Browser"), shortcut: 'B' },
+			{ mode: 'review', icon: Codicon.diffMultiple, label: localize('rightWorkbench.review', "Review"), shortcut: 'D' },
 			{ mode: 'terminal', icon: Codicon.terminal, label: localize('rightWorkbench.terminal', "Terminal"), shortcut: 'T' },
 			{ mode: 'files', icon: Codicon.folder, label: localize('rightWorkbench.files', "Files"), shortcut: 'F' },
-			{ mode: 'review', icon: Codicon.diffMultiple, label: localize('rightWorkbench.diff', "Diff"), shortcut: 'D' },
+			{ mode: 'browser', icon: Codicon.globe, label: localize('rightWorkbench.browser', "Browser"), shortcut: 'B' },
 		];
 	}
 
@@ -1063,9 +1157,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 
 	private getModePickerEntries(): readonly IRightWorkbenchModeEntry[] {
 		const entries = this.getModeEntries();
-		return this.tabs.some(tab => tab.mode === 'review')
-			? entries.filter(entry => entry.mode !== 'review')
-			: entries;
+		return entries.filter(entry => entry.mode !== 'review' || !this.tabs.some(tab => tab.mode === entry.mode));
 	}
 
 	private getModeIcon(mode: RightWorkbenchMode): ThemeIcon {
@@ -1096,9 +1188,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 			case 'editor':
 				return localize('rightWorkbench.editor', "Editor");
 			case 'review':
-				return this.useSimpleRightWorkbench
-					? localize('rightWorkbench.diff', "Diff")
-					: localize('rightWorkbench.review', "Review");
+				return localize('rightWorkbench.review', "Review");
 			case 'browser':
 				return localize('rightWorkbench.newTab', "New tab");
 			case 'files':
@@ -1116,7 +1206,11 @@ export class RightWorkbenchViewPane extends ViewPane {
 		}
 	}
 
-	private async closeTab(tabId: string): Promise<void> {
+	private closeTab(tabId: string): Promise<void> {
+		return this.tabOpenSequencer.queue(() => this.doCloseTab(tabId));
+	}
+
+	private async doCloseTab(tabId: string): Promise<void> {
 		const index = this.tabs.findIndex(tab => tab.id === tabId);
 		if (index === -1) {
 			return;
@@ -1164,25 +1258,22 @@ export class RightWorkbenchViewPane extends ViewPane {
 		const address = append(nav, $('.sessions-right-workbench-browser-address'));
 		const url = append(address, $('input.sessions-right-workbench-browser-url')) as HTMLInputElement;
 		this.browserUrlInput = url;
-		url.placeholder = localize('rightWorkbench.browserUrlPlaceholder', "Enter a URL");
+		url.placeholder = localize('rightWorkbench.browserSearchPlaceholder', "Search or enter a URL");
+		url.ariaLabel = url.placeholder;
 		url.type = 'text';
 		url.spellcheck = false;
 		url.value = tab.browserInput?.url ?? tab.browserUrl ?? '';
 		this.domStore.add(addDisposableListener(this.browserBackButton, EventType.CLICK, () => { void tab.browserInput?.model?.goBack(); }));
 		this.domStore.add(addDisposableListener(this.browserForwardButton, EventType.CLICK, () => { void tab.browserInput?.model?.goForward(); }));
 		this.domStore.add(addDisposableListener(this.browserRefreshButton, EventType.CLICK, () => { void tab.browserInput?.model?.reload(); }));
-		this.domStore.add(addDisposableListener(url, EventType.KEY_DOWN, event => {
-			if (event.key === 'Enter') {
-				void this.setBrowserUrl(tab, url.value);
-			}
-		}));
+		this.domStore.add(new RightWorkbenchBrowserSuggestions(address, url, () => [...this.browserViewWorkbenchService.getKnownBrowserViews().values()], value => { void this.setBrowserUrl(tab, value); }));
 		const go = this.renderIconButton(address, Codicon.arrowRight, localize('rightWorkbench.browserGo', "Open URL"));
 		this.domStore.add(addDisposableListener(go, EventType.CLICK, () => { void this.setBrowserUrl(tab, url.value); }));
 		const browserMoreButton = this.renderIconButton(nav, Codicon.kebabVertical, localize('rightWorkbench.browserMore', "More Actions"));
 		this.domStore.add(addDisposableListener(browserMoreButton, EventType.CLICK, () => this.showBrowserActionsMenu(browserMoreButton)));
 
 		const content = append(container, $('.sessions-right-workbench-browser-content'));
-		this.embeddedEditorHost = append(content, $('.sessions-right-workbench-embedded-editor-host'));
+		this.embeddedEditorHost = this.attachEmbeddedEditorHost(content);
 		this.observeElementResize(this.embeddedEditorHost, () => this.layoutEmbeddedEditorPart());
 		const currentUrl = tab.browserUrl ?? tab.browserInput?.url;
 		if (!currentUrl && tab.browserViewId && !tab.browserInput) {
@@ -1201,6 +1292,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 			empty.appendChild(renderIcon(Codicon.globe));
 			append(empty, $('h2', {}, localize('rightWorkbench.startBrowsing', "Start browsing")));
 			append(empty, $('p', {}, localize('rightWorkbench.enterUrlToOpenPage', "Enter a URL to open a page")));
+			url.focus();
 			// A view opened by id may resolve its URL asynchronously — swap
 			// the empty state for the page as soon as it arrives instead of
 			// leaving a blank surface behind.
@@ -1232,7 +1324,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 		const editorHeader = append(editor, $('.sessions-right-workbench-review-file-header'));
 		this.reviewFileTitleElement = append(editorHeader, $('span.sessions-right-workbench-review-file-title', {}, localize('rightWorkbench.reviewFile', "Changed file")));
 		const reviewBody = append(editor, $('.sessions-right-workbench-review-editor'));
-		this.embeddedEditorHost = append(reviewBody, $('.sessions-right-workbench-embedded-editor-host'));
+		this.embeddedEditorHost = this.attachEmbeddedEditorHost(reviewBody);
 		this.embeddedEditorHost.classList.add('review-context-hidden');
 		this.observeElementResize(this.embeddedEditorHost, () => this.layoutEmbeddedEditorPart());
 		this.openedReviewResourceKey = undefined;
@@ -1263,6 +1355,9 @@ export class RightWorkbenchViewPane extends ViewPane {
 
 		const toolbar = append(container, $('.sessions-right-workbench-review-toolbar'));
 		const primary = append(toolbar, $('.sessions-right-workbench-review-toolbar-row.primary'));
+		if (this.useSimpleRightWorkbench) {
+			append(primary, $('span.sessions-right-workbench-review-scope', {}, localize('rightWorkbench.thisThread', "This thread")));
+		}
 		if (!this.useSimpleRightWorkbench) {
 			const branch = append(primary, $('button.sessions-right-workbench-review-branch')) as HTMLButtonElement;
 			branch.type = 'button';
@@ -1287,13 +1382,46 @@ export class RightWorkbenchViewPane extends ViewPane {
 			}
 			this.refreshReviewRail(undefined);
 		}));
-		this.renderIconButton(actions, Codicon.search, localize('rightWorkbench.openChangedFile', "Open changed file"));
+		const search = this.renderIconButton(actions, Codicon.search, localize('rightWorkbench.openChangedFile', "Find Changed File"));
+		this.domStore.add(addDisposableListener(search, EventType.CLICK, () => {
+			if (!this.isReviewRailVisible) {
+				this.isReviewRailVisible = true;
+				this.renderShell();
+			}
+			this.reviewContainer?.querySelector<HTMLInputElement>('.sessions-right-workbench-review-filter input')?.focus();
+		}));
 		const railToggle = this.renderIconButton(actions, Codicon.layoutSidebarRight, localize('rightWorkbench.toggleChangedFiles', "Toggle changed files"));
 		railToggle.classList.toggle('active', this.isReviewRailVisible);
 		this.domStore.add(addDisposableListener(railToggle, EventType.CLICK, () => {
 			this.isReviewRailVisible = !this.isReviewRailVisible;
 			this.renderShell();
 		}));
+		if (this.useSimpleRightWorkbench) {
+			const commit = append(actions, $('button.sessions-right-workbench-review-commit')) as HTMLButtonElement;
+			commit.type = 'button';
+			commit.appendChild(renderIcon(Codicon.gitCommit));
+			append(commit, $('span', {}, localize('rightWorkbench.commitOrPush', "Commit or push")));
+			commit.appendChild(renderIcon(Codicon.chevronDown));
+			commit.setAttribute('aria-haspopup', 'menu');
+			const getRoot = () => {
+				const folder = this.sessionsService.activeSession.get()?.workspace.get()?.folders[0];
+				return folder?.gitRepository ? folder.workingDirectory : undefined;
+			};
+			commit.disabled = !getRoot();
+			this.domStore.add(addDisposableListener(commit, EventType.CLICK, () => {
+				const root = getRoot();
+				if (!root) {
+					return;
+				}
+				this.contextMenuService.showContextMenu({
+					getAnchor: () => commit,
+					getActions: () => [
+						toAction({ id: 'rightWorkbench.commit', label: localize('rightWorkbench.commitChanges', "Commit…"), run: () => this.commandService.executeCommand('git.commit', root) }),
+						toAction({ id: 'rightWorkbench.push', label: localize('rightWorkbench.pushChanges', "Push"), run: () => this.commandService.executeCommand('git.push', root) }),
+					]
+				});
+			}));
+		}
 		if (!this.useSimpleRightWorkbench) {
 			const commit = append(actions, $('button.sessions-right-workbench-review-commit')) as HTMLButtonElement;
 			commit.type = 'button';
@@ -1348,7 +1476,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 				}),
 				toAction({
 					id: 'sessions.rightWorkbench.review.wordDiffs',
-					label: this.reviewWordDiffs ? localize('rightWorkbench.disableWordDiffs', "Disable word diffs") : localize('rightWorkbench.enableWordDiffs', "Enable word diffs"),
+					label: this.reviewWordDiffs ? localize('rightWorkbench.hideChangeIndicators', "Hide change indicators") : localize('rightWorkbench.showChangeIndicators', "Show change indicators"),
 					run: () => toggle('reviewWordDiffs'),
 				}),
 				toAction({
@@ -1361,7 +1489,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 					label: localize('rightWorkbench.copyGitApply', "Copy git apply command"),
 					run: () => anchor.ownerDocument.defaultView?.navigator.clipboard.writeText('git diff | git apply'),
 				}),
-			],
+			].filter(action => !this.useSimpleRightWorkbench || (action.id !== 'sessions.rightWorkbench.review.richPreview' && action.id !== 'sessions.rightWorkbench.review.copyGitApply')),
 			getMenuClassName: () => 'sessions-right-workbench-review-options-menu',
 		});
 	}
@@ -1371,12 +1499,13 @@ export class RightWorkbenchViewPane extends ViewPane {
 		filter.appendChild(renderIcon(Codicon.search));
 		const filterInput = append(filter, $('input')) as HTMLInputElement;
 		filterInput.type = 'text';
+		filterInput.setAttribute('aria-label', localize('rightWorkbench.filterChangedFiles', "Filter Changed Files"));
 		filterInput.placeholder = localize('rightWorkbench.filterFiles', "Filter files...");
 		filterInput.value = this.reviewFilterValue;
 		this.domStore.add(addDisposableListener(filterInput, EventType.INPUT, () => {
 			this.reviewFilterValue = filterInput.value.trim().toLocaleLowerCase();
 			const filtered = this.getFilteredReviewResources();
-			const selected = filtered[0];
+			const selected = this.reviewResources.length ? this.getSelectedReviewResource(this.reviewResources) : undefined;
 			this.updateReviewTree(filtered, selected?.key ?? '');
 		}));
 		const header = append(container, $('.sessions-right-workbench-review-scm-header'));
@@ -1404,8 +1533,8 @@ export class RightWorkbenchViewPane extends ViewPane {
 				identityProvider: {
 					getId: (element: ReviewTreeElement) => isReviewResource(element) ? element.key : element.uri.toString(),
 				},
-				indent: 8,
-				compressionEnabled: true,
+				indent: this.useSimpleRightWorkbench ? 4 : 8,
+				compressionEnabled: !this.useSimpleRightWorkbench,
 				sorter: new ReviewTreeSorter(),
 			}
 		));
@@ -1586,6 +1715,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 				reviewResources = this.toSessionReviewResources(changes, generation);
 			}
 		}
+		this.updateReviewSummary(reviewResources);
 		if (reviewResources.length === 0) {
 			// Invalidate an editor open that was already resolving when this chat's
 			// last change disappeared. Hiding the host below prevents even a single
@@ -1605,6 +1735,11 @@ export class RightWorkbenchViewPane extends ViewPane {
 		review.classList.remove('sessions-right-workbench-review-empty-state');
 		this.reviewEmptyElement?.remove();
 		this.reviewEmptyElement = undefined;
+		// A stacked review must reopen when its file set changes, even when the
+		// selected file stays the same.
+		if (this.useSimpleRightWorkbench && (this.reviewResources.length !== reviewResources.length || this.reviewResources.some((resource, index) => resource.key !== reviewResources[index].key))) {
+			this.openedReviewResourceKey = undefined;
+		}
 		this.reviewResources = reviewResources;
 		const selectedReviewResource = this.getSelectedReviewResource(reviewResources);
 		const filteredResources = this.getFilteredReviewResources();
@@ -1612,19 +1747,27 @@ export class RightWorkbenchViewPane extends ViewPane {
 		if (this.reviewFileTitleElement) {
 			this.reviewFileTitleElement.textContent = basename(selectedReviewResource.sourceUri);
 		}
-		if (this.reviewStatsElement) {
-			const additions = reviewResources.reduce((sum, resource) => sum + (resource.additions ?? 0), 0);
-			const deletions = reviewResources.reduce((sum, resource) => sum + (resource.deletions ?? 0), 0);
-			clearNode(this.reviewStatsElement);
-			append(this.reviewStatsElement, $('span.additions', {}, `+${additions.toLocaleString()}`));
-			append(this.reviewStatsElement, $('span.deletions', {}, `-${deletions.toLocaleString()}`));
-		}
+
 		if (!this.useSimpleRightWorkbench) {
 			for (const repository of this.getGitReviewRepositories(activeSession)) {
 				this.requestGitReviewStats(repository);
 			}
 		}
 		this.scheduleReviewResourceOpen(selectedReviewResource, generation);
+	}
+
+	private updateReviewSummary(resources: readonly IReviewResource[]): void {
+		if (!this.reviewStatsElement) {
+			return;
+		}
+		const additions = resources.reduce((sum, resource) => sum + (resource.additions ?? 0), 0);
+		const deletions = resources.reduce((sum, resource) => sum + (resource.deletions ?? 0), 0);
+		clearNode(this.reviewStatsElement);
+		append(this.reviewStatsElement, $('span.files', {}, resources.length === 1
+			? localize('rightWorkbench.oneChangedFile', "1 file changed")
+			: localize('rightWorkbench.changedFileCount', "{0} files changed", resources.length.toLocaleString())));
+		append(this.reviewStatsElement, $('span.additions', {}, `+${additions.toLocaleString()}`));
+		append(this.reviewStatsElement, $('span.deletions', {}, `-${deletions.toLocaleString()}`));
 	}
 
 	/**
@@ -1659,6 +1802,12 @@ export class RightWorkbenchViewPane extends ViewPane {
 
 	private toSessionReviewResources(changes: readonly ISessionFileChange[], generation: number): IReviewResource[] {
 		const resources = new Map<string, IReviewResource>();
+		const multiDiffResources = changes.map(change => ({
+			original: { resource: change.originalUri },
+			modified: { resource: isIChatSessionFileChange2(change) ? change.modifiedUri ?? change.uri : change.modifiedUri },
+			goToFileResource: isIChatSessionFileChange2(change) ? change.uri : change.modifiedUri,
+		}));
+		const multiDiffSource = URI.from({ scheme: 'right-workbench-review', path: `/${generation}`, query: JSON.stringify(multiDiffResources) });
 		for (const change of changes) {
 			const uri = isIChatSessionFileChange2(change) ? change.uri : change.modifiedUri;
 			resources.set(uri.toString(), {
@@ -1669,6 +1818,15 @@ export class RightWorkbenchViewPane extends ViewPane {
 				deletions: change.deletions,
 				open: async () => {
 					const modifiedUri = isIChatSessionFileChange2(change) ? change.modifiedUri ?? change.uri : change.modifiedUri;
+					if (this.useSimpleRightWorkbench) {
+						return !!await this.openReviewEditorInEmbeddedHost({
+							multiDiffSource,
+							resources: multiDiffResources,
+							label: localize('rightWorkbench.threadChanges', "Thread changes"),
+							isTransient: true,
+							options: { pinned: true, viewState: { revealData: { resource: { original: change.originalUri, modified: modifiedUri } } } },
+						}, generation);
+					}
 					if (change.originalUri && modifiedUri) {
 						const input: IResourceDiffEditorInput = {
 							original: { resource: change.originalUri },
@@ -1739,7 +1897,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 		const selectedFile = this.activeTab?.selectedFile;
 		const files = append(container, $('.sessions-right-workbench-files'));
 		const editor = append(files, $('.sessions-right-workbench-file-editor'));
-		const fileHeader = append(editor, $('.sessions-right-workbench-file-path'));
+		const fileHeader = append(this.useSimpleRightWorkbench ? files : editor, $('.sessions-right-workbench-file-path'));
 		const folderName = this.workspaceContextService.getWorkspace().folders[0]?.name;
 		if (folderName) {
 			append(fileHeader, $('span.sessions-right-workbench-file-workspace', {}, folderName));
@@ -1748,6 +1906,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 		this.filePathElement = append(fileHeader, $('span.sessions-right-workbench-file-name', {}, selectedFile ? basename(selectedFile) : '/'));
 		const fileActions = append(fileHeader, $('.sessions-right-workbench-file-actions'));
 		const source = append(fileActions, $('button.sessions-right-workbench-file-action')) as HTMLButtonElement;
+		this.fileSourceButton = source;
 		source.type = 'button';
 		source.textContent = localize('rightWorkbench.viewSource', "View source");
 		this.domStore.add(addDisposableListener(source, EventType.CLICK, () => {
@@ -1765,6 +1924,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 			this.renderShell();
 		}));
 		const open = append(fileActions, $('button.sessions-right-workbench-file-open')) as HTMLButtonElement;
+		this.fileOpenButton = open;
 		open.type = 'button';
 		open.appendChild(renderIcon(Codicon.package));
 		append(open, $('span', {}, localize('rightWorkbench.open', "Open")));
@@ -1772,11 +1932,19 @@ export class RightWorkbenchViewPane extends ViewPane {
 		this.domStore.add(addDisposableListener(open, EventType.CLICK, () => {
 			const resource = this.activeTab?.mode === 'files' ? this.activeTab.selectedFile : undefined;
 			if (resource) {
-				void this.commandService.executeCommand('revealFileInOS', resource);
+				this.contextMenuService.showContextMenu({
+					getAnchor: () => open,
+					getActions: () => [toAction({
+						id: 'rightWorkbench.revealFile',
+						label: localize('rightWorkbench.revealFile', "Reveal File in Finder"),
+						run: () => this.commandService.executeCommand('revealFileInOS', resource)
+					})]
+				});
 			}
 		}));
+		this.updateFileActions();
 		const editorBody = append(editor, $('.sessions-right-workbench-file-editor-body'));
-		this.embeddedEditorHost = append(editorBody, $('.sessions-right-workbench-embedded-editor-host'));
+		this.embeddedEditorHost = this.attachEmbeddedEditorHost(editorBody);
 		this.observeElementResize(this.embeddedEditorHost, () => this.layoutEmbeddedEditorPart());
 		if (!selectedFile) {
 			const empty = append(editorBody, $('.sessions-right-workbench-file-empty'));
@@ -1797,6 +1965,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 		filter.appendChild(renderIcon(Codicon.search));
 		const input = append(filter, $('input')) as HTMLInputElement;
 		input.placeholder = localize('rightWorkbench.filterFiles', "Filter files...");
+		input.ariaLabel = input.placeholder;
 		input.type = 'text';
 		const explorerHost = append(tree, $('.sessions-right-workbench-file-explorer-host'));
 		this.renderFilesExplorer(explorerHost);
@@ -2031,7 +2200,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 		this.domStore.add(addDisposableListener(reveal, EventType.CLICK, () => {
 			void this.commandService.executeCommand('revealFileInOS', resource);
 		}));
-		this.embeddedEditorHost = append(preview, $('.sessions-right-workbench-embedded-editor-host'));
+		this.embeddedEditorHost = this.attachEmbeddedEditorHost(preview);
 		this.observeElementResize(this.embeddedEditorHost, () => this.layoutEmbeddedEditorPart());
 		void this.openSelectedFile(resource);
 	}
@@ -2240,7 +2409,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 
 	private renderTerminal(container: HTMLElement): void {
 		const terminal = append(container, $('.sessions-right-workbench-terminal'));
-		this.embeddedEditorHost = append(terminal, $('.sessions-right-workbench-embedded-editor-host'));
+		this.embeddedEditorHost = this.attachEmbeddedEditorHost(terminal);
 		this.observeElementResize(this.embeddedEditorHost, () => this.layoutEmbeddedEditorPart());
 		void this.ensureTerminalEditor();
 	}
@@ -2674,10 +2843,12 @@ export class RightWorkbenchViewPane extends ViewPane {
 		const empty = append(container, $('.sessions-right-workbench-review-empty'));
 		this.reviewEmptyElement = empty;
 		empty.appendChild(renderIcon(isLoading ? ThemeIcon.modify(Codicon.loading, 'spin') : Codicon.diffMultiple));
-		append(empty, $('h2', {}, localize('rightWorkbench.review', "Review")));
+		append(empty, $('h2', {}, isLoading ? localize('rightWorkbench.loadingReview', "Loading Changes") : localize('rightWorkbench.noChangesTitle', "No Changes Yet")));
 		append(empty, $('p', {}, isLoading
 			? localize('rightWorkbench.loadingChanges', "Looking for changes...")
-			: localize('rightWorkbench.noChanges', "No changes to review.")));
+			: this.useSimpleRightWorkbench
+				? localize('rightWorkbench.noThreadChanges', "Files edited in this thread will appear here for review.")
+				: localize('rightWorkbench.noChanges', "No changes to review.")));
 	}
 
 	private createFilesEditorService(): IEditorService {
@@ -2709,6 +2880,19 @@ export class RightWorkbenchViewPane extends ViewPane {
 				override: previewMarkdown ? 'vscode.markdown.preview.editor' : DEFAULT_EDITOR_ASSOCIATION.id
 			}
 		});
+	}
+
+	private updateFileActions(): void {
+		const tab = this.activeTab;
+		if (this.fileSourceButton) {
+			this.fileSourceButton.hidden = !tab?.selectedFile?.path.toLowerCase().endsWith('.md');
+			this.fileSourceButton.textContent = tab?.fileViewSource
+				? localize('rightWorkbench.viewPreview', "View preview")
+				: localize('rightWorkbench.viewSource', "View source");
+		}
+		if (this.fileOpenButton) {
+			this.fileOpenButton.hidden = !tab?.selectedFile;
+		}
 	}
 
 	private async openReviewEditorInEmbeddedHost(editor: IUntypedEditorInput, generation: number): Promise<IEditorPane | undefined> {
@@ -2797,10 +2981,16 @@ export class RightWorkbenchViewPane extends ViewPane {
 			}
 			this.root?.classList.toggle('sessions-right-workbench-has-file', this.activeMode === 'files');
 			if (this.filePathElement) {
-				this.filePathElement.textContent = basename(resource);
+				const folder = this.workspaceContextService.getWorkspaceFolder(resource)?.uri
+					?? this.sessionsService.activeSession.get()?.workspace.get()?.folders[0]?.workingDirectory;
+				this.filePathElement.textContent = folder && resource.path.startsWith(`${folder.path}/`)
+					? resource.path.slice(folder.path.length + 1).replaceAll('/', ' › ')
+					: basename(resource);
+				this.filePathElement.title = resource.fsPath;
 			}
 			this.fileEmptyElement?.remove();
 			this.fileEmptyElement = undefined;
+			this.updateFileActions();
 		}
 
 		await this.ensureEmbeddedEditorPart();
@@ -2850,7 +3040,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 
 	private layoutEmbeddedEditorPart(): void {
 		const embeddedHost = this.embeddedEditorHost;
-		const activeModalPart = this.editorGroupsService.activeModalEditorPart;
+		const activeModalPart = this.embeddedEditorPart;
 		if (!embeddedHost || !activeModalPart) {
 			return;
 		}
@@ -2892,19 +3082,22 @@ export class RightWorkbenchViewPane extends ViewPane {
 			return;
 		}
 		const embeddedHost = this.embeddedEditorHost;
-		const control = this.editorGroupsService.activeModalEditorPart?.activeGroup.activeEditorPane?.getControl();
-		if (!embeddedHost || !isDiffEditor(control)) {
+		const pane = this.embeddedEditorPart?.activeGroup.activeEditorPane;
+		const control = pane?.getControl();
+		if (!embeddedHost || (!isDiffEditor(control) && !(pane instanceof MultiDiffEditor))) {
 			return;
 		}
-		const renderSideBySide = embeddedHost.clientWidth >= REVIEW_DIFF_SIDE_BY_SIDE_MIN_WIDTH;
+		const renderSideBySide = !this.useSimpleRightWorkbench && embeddedHost.clientWidth >= REVIEW_DIFF_SIDE_BY_SIDE_MIN_WIDTH;
 		const options: IDiffEditorOptions = {
 			renderSideBySide,
 			useInlineViewWhenSpaceIsLimited: true,
 			renderSideBySideInlineBreakpoint: REVIEW_DIFF_SIDE_BY_SIDE_MIN_WIDTH,
-			compactMode: !renderSideBySide,
+			compactMode: false,
 			enableSplitViewResizing: renderSideBySide,
-			lineNumbersMinChars: 2,
-			lineDecorationsWidth: 4,
+			fontSize: 13,
+			lineHeight: 22,
+			lineNumbersMinChars: 3,
+			lineDecorationsWidth: 6,
 			scrollBeyondLastLine: false,
 			renderOverviewRuler: false,
 			overviewRulerLanes: 0,
@@ -2913,7 +3106,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 			folding: false,
 			renderLineHighlight: 'none',
 			roundedSelection: false,
-			padding: { top: 8, bottom: 24 },
+			padding: { top: 4, bottom: 4 },
 			diffWordWrap: this.reviewWordWrap ? 'on' : 'off',
 			ignoreTrimWhitespace: this.reviewHideWhitespace,
 			renderIndicators: this.reviewWordDiffs,
@@ -2925,10 +3118,14 @@ export class RightWorkbenchViewPane extends ViewPane {
 			},
 			experimental: {
 				showMoves: false,
-				useTrueInlineView: true
+				useTrueInlineView: false
 			}
 		};
-		control.updateOptions(options);
+		if (pane instanceof MultiDiffEditor) {
+			pane.viewModel?.editorOptions.set(options, undefined);
+		} else if (isDiffEditor(control)) {
+			control.updateOptions(options);
+		}
 	}
 
 	private observeElementResize(element: HTMLElement, callback: () => void): void {
@@ -3009,23 +3206,15 @@ export class RightWorkbenchViewPane extends ViewPane {
 	}
 
 	private normalizeBrowserUrl(value: string): string | undefined {
-		const trimmed = value.trim();
-		if (!trimmed) {
-			return undefined;
-		}
-		const explicitUrlMatch = /[a-zA-Z][a-zA-Z\d+\-.]*:\/\/[^\s"'<>]+/.exec(trimmed);
-		if (explicitUrlMatch) {
-			return explicitUrlMatch[0];
-		}
-		const localhostMatch = /(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?::\d{2,5})?(?:\/[^\s"'<>]*)?/i.exec(trimmed);
-		if (localhostMatch) {
-			return `http://${localhostMatch[0]}`;
-		}
-		const portMatch = /(?:^|\s):?(?<port>\d{2,5})(?<path>\/[^\s"'<>]*)?(?:\s|$)/.exec(trimmed);
-		if (portMatch?.groups) {
-			return `http://localhost:${portMatch.groups.port}${portMatch.groups.path ?? ''}`;
-		}
-		return `https://${trimmed.replace(/^[<("'`]+|[>)"'`,.]+$/g, '')}`;
+		return normalizeRightWorkbenchUrl(value);
+	}
+
+	private attachEmbeddedEditorHost(container: HTMLElement): HTMLElement {
+		// Keep the owning host stable across toolbar/tree rebuilds so the editor
+		// part retains its identity and any unsaved content.
+		this.embeddedEditorHost ??= $('.sessions-right-workbench-embedded-editor-host');
+		this.embeddedEditorHost.classList.toggle('review-context-hidden', this.activeMode === 'review');
+		return append(container, this.embeddedEditorHost);
 	}
 
 	private async ensureEmbeddedEditorPart(): Promise<void> {
@@ -3034,25 +3223,32 @@ export class RightWorkbenchViewPane extends ViewPane {
 			return;
 		}
 
-		const activeModalPart = this.editorGroupsService.activeModalEditorPart;
-		if (activeModalPart) {
-			const modalElement = activeModalPart.modalElement as HTMLElement;
-			modalElement.classList.add('embedded');
-			if (modalElement.parentElement !== embeddedHost) {
-				embeddedHost.appendChild(modalElement);
-			}
-			activeModalPart.updateOptions({ embeddedHost, maximized: true });
-			return;
-		}
-
-		await this.editorGroupsService.createModalEditorPart({
+		const part = await this.editorGroupsService.createModalEditorPart({
 			embeddedHost,
 			maximized: true
 		});
+		if (this.embeddedEditorPart !== part) {
+			this.embeddedEditorPartStore.clear();
+			this.embeddedEditorPart = part;
+			this.embeddedEditorPartStore.add(Event.once(part.onWillClose)(() => {
+				if (this.embeddedEditorPart === part) {
+					this.embeddedEditorPart = undefined;
+				}
+			}));
+		}
 	}
 
 	private async closeEmbeddedEditorPart(): Promise<boolean> {
-		const activeModalPart = this.editorGroupsService.activeModalEditorPart;
+		// The tab owns its running shell. Closing the temporary editor host
+		// must detach the terminal rather than terminate that shell.
+		const terminal = this.activeTab?.terminalInstance;
+		if (terminal && !terminal.isDisposed) {
+			this.terminalEditorService.detachInstance(terminal);
+		}
+		if (this.activeTab?.browserInput?.model) {
+			void this.activeTab.browserInput.model.setVisible(false);
+		}
+		const activeModalPart = this.embeddedEditorPart;
 		if (!activeModalPart) {
 			return true;
 		}
@@ -3072,7 +3268,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 		await this.ensureEmbeddedEditorPart();
 		if (!tab.terminalInstance || tab.terminalInstance.isDisposed) {
 			const terminalInstance = await this.terminalService.createTerminal({
-				cwd: this.useEditorSidebar ? this.getEditorSidebarFolderUri() : undefined,
+				cwd: this.useEditorSidebar ? this.getEditorSidebarFolderUri() : this.sessionsService.activeSession.get()?.workspace.get()?.folders[0]?.workingDirectory,
 				location: {
 					viewColumn: MODAL_GROUP,
 					modal: { embeddedHost }
@@ -3105,6 +3301,12 @@ export class RightWorkbenchViewPane extends ViewPane {
 			return;
 		}
 		store.clear();
+		// Browser tabs outlive the modal editor used to display them.
+		store.add(input.onBeforeDispose(event => {
+			if (this.tabs.includes(tab)) {
+				event.veto();
+			}
+		}));
 		store.add(input.onWillDispose(() => {
 			if (tab.browserInput === input) {
 				tab.browserInput = undefined;

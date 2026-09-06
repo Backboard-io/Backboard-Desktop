@@ -53,6 +53,7 @@ export interface ICoreToolCardViewModel {
 	readonly useCompletionMessage?: boolean;
 	readonly hasOutput: boolean;
 	readonly uiTruncated: boolean;
+	readonly resultTruncated?: boolean;
 	readonly failed: boolean;
 	readonly errorMessage?: string;
 }
@@ -69,6 +70,7 @@ export function createCoreToolCardViewModel(data: IChatCoreToolInvocationData): 
 			|| output.uiTruncated === true
 			|| output.previewTruncated === true
 			|| output.resultsTruncated === true,
+		resultTruncated: (data.toolKind === 'grep' || data.toolKind === 'glob') && output.truncated === true,
 		...outputFailure(output),
 	};
 
@@ -84,7 +86,7 @@ export function createCoreToolCardViewModel(data: IChatCoreToolInvocationData): 
 			const sizeBytes = firstNumber(output, ['sizeBytes']);
 			return {
 				...common,
-				title: localize('chat.coreTool.read.title', "Read file"),
+				title: localize('chat.coreTool.read.label', "Read"),
 				summary: filePath,
 				icon: Codicon.file,
 				metrics: compactMetrics([
@@ -112,24 +114,29 @@ export function createCoreToolCardViewModel(data: IChatCoreToolInvocationData): 
 			const glob = firstString(input, ['glob']);
 			const matches = firstString(output, ['matches', 'text']);
 			const matchCount = firstNumber(output, ['matchCount', 'count']);
+			const returnedCount = firstNumber(output, ['returnedCount']);
+			const count = common.resultTruncated ? returnedCount ?? matchCount : matchCount;
+			const files = output.matchCountUnit === 'files' || output.countUnit === 'files';
 			return {
 				...common,
-				title: localize('chat.coreTool.grep.title', "Search file contents"),
+				title: localize('chat.coreTool.grep.label', "Search"),
 				summary: pattern,
 				icon: Codicon.search,
 				metrics: compactMetrics([
-					matchCount !== undefined ? {
-						label: localize('chat.coreTool.matches', "Matches"),
-						value: String(matchCount),
-						compactValue: matchCount === 1
-							? localize('chat.coreTool.matches.one', "1 match")
-							: localize('chat.coreTool.matches.other', "{0} matches", matchCount),
+					count !== undefined ? {
+						label: common.resultTruncated
+							? (files ? localize('chat.coreTool.filesReturned', "Files returned") : localize('chat.coreTool.linesReturned', "Lines returned"))
+							: (files ? localize('chat.coreTool.files', "Files") : localize('chat.coreTool.matches', "Matches")),
+						value: String(count),
+						compactValue: common.resultTruncated ? localize('chat.coreTool.countShown', "{0} shown", count)
+							: files ? (count === 1 ? localize('chat.coreTool.files.one', "1 file") : localize('chat.coreTool.files.other', "{0} files", count))
+								: count === 1 ? localize('chat.coreTool.matches.one', "1 match") : localize('chat.coreTool.matches.other', "{0} matches", count),
 						isCount: true,
 					} : undefined,
 					path ? { label: localize('chat.coreTool.scope', "Scope"), value: path } : undefined,
 					glob ? { label: localize('chat.coreTool.filter', "Filter"), value: glob } : undefined,
 				]),
-				preview: matches ? textPreview(localize('chat.coreTool.grep.results', "Matching lines"), matches) : undefined,
+				preview: matches ? textPreview(files ? localize('chat.coreTool.grep.files', "Matching files") : localize('chat.coreTool.grep.results', "Matching lines"), matches) : undefined,
 				emptyMessage: !matches ? localize('chat.coreTool.grep.empty', "No matching lines were returned.") : undefined,
 			};
 		}
@@ -150,7 +157,7 @@ export function createCoreToolCardViewModel(data: IChatCoreToolInvocationData): 
 					{
 						label: localize('chat.coreTool.files', "Files"),
 						value: String(count),
-						compactValue: count === 1
+						compactValue: common.resultTruncated ? localize('chat.coreTool.countShown', "{0} shown", count) : count === 1
 							? localize('chat.coreTool.files.one', "1 file")
 							: localize('chat.coreTool.files.other', "{0} files", count),
 						isCount: true,
@@ -168,7 +175,7 @@ export function createCoreToolCardViewModel(data: IChatCoreToolInvocationData): 
 			const text = firstString(output, ['text', 'content']);
 			return {
 				...common,
-				title: localize('chat.coreTool.fetchUrl.title', "Fetch URL"),
+				title: localize('chat.coreTool.fetchUrl.label', "Fetch"),
 				summary: displayUrl(url),
 				icon: Codicon.globe,
 				metrics: status !== undefined ? [{
@@ -187,7 +194,7 @@ export function createCoreToolCardViewModel(data: IChatCoreToolInvocationData): 
 			const results = recordArray(output.results);
 			return {
 				...common,
-				title: localize('chat.coreTool.webSearch.title', "Search the web"),
+				title: localize('chat.coreTool.webSearch.label', "Web search"),
 				summary: query,
 				icon: Codicon.globe,
 				metrics: [{
@@ -221,7 +228,7 @@ export function createCoreToolCardViewModel(data: IChatCoreToolInvocationData): 
 			return {
 				...common,
 				title: localize('chat.coreTool.todo.title', "Task progress"),
-				summary: items.length ? localize('chat.coreTool.todo.summary', "{0} of {1} complete", completeCount, items.length) : undefined,
+				summary: items.length ? localize('chat.coreTool.todo.progress', "{0} / {1} tasks done", completeCount, items.length) : undefined,
 				icon: Codicon.checklist,
 				metrics: items.length ? [{ label: localize('chat.coreTool.tasks', "Tasks"), value: String(items.length) }] : undefined,
 				items,
@@ -355,7 +362,8 @@ export class ChatCoreToolProgressPart extends BaseChatToolInvocationSubPart {
 		const rendered = renderCoreToolCard(createCoreToolCardViewModel(data), invocationOutcome(toolInvocation));
 		this.domNode = rendered.domNode;
 		if (rendered.disclosureButton && rendered.details) {
-			this._register(addDisposableListener(rendered.disclosureButton, 'click', () => {
+			this._register(addDisposableListener(rendered.disclosureButton, 'click', event => {
+				event.stopPropagation();
 				const expanded = rendered.disclosureButton!.ariaExpanded !== 'true';
 				rendered.disclosureButton!.ariaExpanded = String(expanded);
 				rendered.details!.hidden = !expanded;
@@ -403,7 +411,7 @@ interface IRenderedCoreToolCard {
 function renderCoreToolCard(view: ICoreToolCardViewModel, invocation: IInvocationPresentation): IRenderedCoreToolCard {
 	const outcome: InvocationOutcome = invocation.kind === 'complete' && view.failed ? 'error' : invocation.kind;
 	const errorMessage = invocation.error ?? view.errorMessage;
-	const hasDetails = !!view.items?.length || !!view.preview || view.uiTruncated;
+	const hasDetails = !!view.items?.length || !!view.preview || view.uiTruncated || view.resultTruncated;
 	const showResultState = outcome === 'complete' && view.hasOutput;
 	const cardId = `chat-core-tool-card-${++coreToolCardIdPool}`;
 	const titleId = `${cardId}-title`;
@@ -414,9 +422,12 @@ function renderCoreToolCard(view: ICoreToolCardViewModel, invocation: IInvocatio
 		: undefined;
 	const card = document.createElement('section');
 	card.classList.add('chat-core-tool-card', `chat-core-tool-card-${view.toolKind}`, `chat-core-tool-card-${outcome}`);
+	card.classList.toggle('chat-core-tool-card-partial', view.resultTruncated === true);
 
 	const header = document.createElement(hasDetails ? 'button' : 'div');
 	header.classList.add('chat-core-tool-card-header');
+	// Full paths and scope remain available when the compact row truncates.
+	header.title = [view.title, view.summary, ...view.metrics?.map(metric => `${metric.label}: ${metric.value}`) ?? []].filter(Boolean).join(' · ');
 	if (hasDetails) {
 		const button = header as HTMLButtonElement;
 		button.type = 'button';
@@ -439,7 +450,7 @@ function renderCoreToolCard(view: ICoreToolCardViewModel, invocation: IInvocatio
 	if (view.summary) {
 		const summary = document.createElement('span');
 		summary.classList.add('chat-core-tool-card-summary');
-		summary.textContent = view.summary;
+		summary.textContent = view.toolKind === 'read' ? view.summary.split(/[\\/]/).pop() || view.summary : view.summary;
 		titleLine.appendChild(summary);
 	}
 	heading.appendChild(titleLine);
@@ -577,6 +588,12 @@ function renderCoreToolCard(view: ICoreToolCardViewModel, invocation: IInvocatio
 		truncated.textContent = localize('chat.coreTool.truncated', "Showing a shortened preview");
 		details.appendChild(truncated);
 	}
+	if (details && view.resultTruncated) {
+		const partial = document.createElement('div');
+		partial.classList.add('chat-core-tool-card-truncated', 'chat-core-tool-card-partial-note');
+		partial.textContent = localize('chat.coreTool.partialResults', "Partial results — the search reached its limit. Narrow the search to see more.");
+		details.appendChild(partial);
+	}
 
 	if (details) {
 		card.appendChild(details);
@@ -613,8 +630,10 @@ function coreToolHeaderAriaLabel(view: ICoreToolCardViewModel, subtitle: string 
 function outputFailure(output: Record<string, unknown>): Pick<ICoreToolCardViewModel, 'failed' | 'errorMessage'> {
 	const results = recordArray(output.results);
 	const failedResult = results.find(result => result.success === false || !!firstString(result, ['error']));
-	const errorMessage = firstString(output, ['error', 'message']) ?? (failedResult ? firstString(failedResult, ['error', 'summary']) : undefined);
-	return { failed: output.success === false || !!failedResult || !!errorMessage, errorMessage };
+	const error = firstString(output, ['error']);
+	const failed = output.success === false || !!failedResult || !!error;
+	const errorMessage = failed ? error ?? firstString(output, ['message']) ?? (failedResult ? firstString(failedResult, ['error', 'summary']) : undefined) : undefined;
+	return { failed, errorMessage };
 }
 
 function outputTextFromResultDetails(details: unknown): string | undefined {

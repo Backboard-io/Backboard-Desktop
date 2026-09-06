@@ -1,10 +1,14 @@
-import { readFile, rename, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { atomicWriteDurable } from "../../utils/atomicWriteDurable.ts";
 import { ensureDir } from "../../utils/fs.ts";
 import {
 	WORKER_WORKSPACE_STORE_VERSION,
 	type WorkerWorkspaceRecord,
 	type WorkerWorkspaceStoreData,
+	type WorkerIntegrationChange,
+	type WorkerIntegrationChangeBytes,
 } from "./WorkerWorkspaceTypes.ts";
 
 export interface WorkerWorkspaceStoreWriteOptions {
@@ -26,7 +30,7 @@ export class WorkerWorkspaceStore {
 	private debounceTimer?: ReturnType<typeof setTimeout>;
 	private changeVersion = 0;
 	private persistedVersion = 0;
-	private nextTemporaryId = 0;
+	private readonly blobWrites = new Map<string, Promise<void>>();
 
 	constructor(
 		readonly filePath: string,
@@ -45,6 +49,7 @@ export class WorkerWorkspaceStore {
 		options: WorkerWorkspaceStoreWriteOptions = {},
 	): Promise<void> {
 		await this.ensureLoaded();
+		this.assignRevision(record);
 		this.records.set(record.workerId, cloneWorkerRecord(record));
 		this.markChanged();
 		await this.finishMutation(options);
@@ -57,7 +62,9 @@ export class WorkerWorkspaceStore {
 	): Promise<void> {
 		if (records.length === 0) return;
 		await this.ensureLoaded();
+		for (const record of records) this.assertCurrentRevision(record);
 		for (const record of records) {
+			this.assignRevision(record);
 			this.records.set(record.workerId, cloneWorkerRecord(record));
 		}
 		this.markChanged();
@@ -69,6 +76,7 @@ export class WorkerWorkspaceStore {
 		options: WorkerWorkspaceStoreWriteOptions = {},
 	): Promise<void> {
 		await this.ensureLoaded();
+		for (const record of records) this.assignRevision(record);
 		this.records.clear();
 		for (const record of records) {
 			this.records.set(record.workerId, cloneWorkerRecord(record));
@@ -96,6 +104,90 @@ export class WorkerWorkspaceStore {
 			});
 			await this.flushPromise;
 		}
+	}
+
+	/** Persist immutable, exact bytes before a coordinator mutation can commit. */
+	async captureIntegrationChanges(
+		changes: readonly WorkerIntegrationChangeBytes[],
+		signal?: AbortSignal,
+	): Promise<WorkerIntegrationChange[]> {
+		const result: WorkerIntegrationChange[] = [];
+		for (const change of changes) {
+			signal?.throwIfAborted();
+			if (
+				change.before?.mode === change.after?.mode &&
+				((change.before === undefined && change.after === undefined) ||
+					change.before?.content.equals(
+						change.after?.content ?? Buffer.alloc(0),
+					))
+			)
+				continue;
+			const entry: WorkerIntegrationChange = { filePath: change.filePath };
+			for (const side of ["before", "after"] as const) {
+				signal?.throwIfAborted();
+				const value = change[side];
+				if (!value) continue;
+				const sha256 = createHash("sha256").update(value.content).digest("hex");
+				const contentPath = join(
+					dirname(this.filePath),
+					"worker-integrations",
+					"blobs",
+					sha256,
+				);
+				let writing = this.blobWrites.get(contentPath);
+				if (!writing) {
+					writing = this.writeBlob(contentPath, value.content).finally(() =>
+						this.blobWrites.delete(contentPath),
+					);
+					this.blobWrites.set(contentPath, writing);
+				}
+				await writing;
+				entry[side] = {
+					contentPath,
+					sha256,
+					byteLength: value.content.length,
+					mode: value.mode,
+				};
+			}
+			result.push(entry);
+		}
+		return result;
+	}
+
+	private async writeBlob(path: string, content: Buffer): Promise<void> {
+		await ensureDir(dirname(path));
+		try {
+			if (!(await readFile(path)).equals(content))
+				throw new Error(
+					"Worker integration content failed its immutable hash check.",
+				);
+			return;
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+		}
+		await atomicWriteDurable(path, content);
+	}
+
+	private assertCurrentRevision(record: WorkerWorkspaceRecord): void {
+		if (
+			record.revision !== undefined &&
+			(!Number.isSafeInteger(record.revision) || record.revision < 0)
+		)
+			throw new Error("Invalid worker workspace revision.");
+		const current = this.records.get(record.workerId)?.revision ?? 0;
+		if (record.revision !== undefined && record.revision < current)
+			throw new Error(
+				`Stale worker workspace revision for ${record.workerId}: ${record.revision} < ${current}.`,
+			);
+	}
+
+	private assignRevision(record: WorkerWorkspaceRecord): void {
+		this.assertCurrentRevision(record);
+		record.revision =
+			Math.max(
+				this.records.get(record.workerId)?.revision ?? 0,
+				record.revision ?? 0,
+			) + 1;
 	}
 
 	private async ensureLoaded(): Promise<void> {
@@ -177,13 +269,10 @@ export class WorkerWorkspaceStore {
 			version: WORKER_WORKSPACE_STORE_VERSION,
 			workers: records,
 		};
-		const temporaryPath = `${this.filePath}.tmp-${process.pid}-${this.nextTemporaryId++}`;
-		await writeFile(
-			temporaryPath,
+		await atomicWriteDurable(
+			this.filePath,
 			`${JSON.stringify(data, null, 2)}\n`,
-			"utf8",
 		);
-		await rename(temporaryPath, this.filePath);
 	}
 }
 
@@ -194,6 +283,8 @@ function isWorkerWorkspaceRecord(
 	const record = value as Partial<WorkerWorkspaceRecord>;
 	return (
 		typeof record.workerId === "string" &&
+		(record.revision === undefined ||
+			(Number.isSafeInteger(record.revision) && record.revision >= 0)) &&
 		typeof record.sequence === "number" &&
 		typeof record.parentSessionId === "string" &&
 		typeof record.taskPrompt === "string" &&
@@ -215,11 +306,5 @@ function isWorkerWorkspaceRecord(
 function cloneWorkerRecord(
 	record: WorkerWorkspaceRecord,
 ): WorkerWorkspaceRecord {
-	return {
-		...record,
-		changedFiles: [...record.changedFiles],
-		conflictingFiles: record.conflictingFiles
-			? [...record.conflictingFiles]
-			: undefined,
-	};
+	return structuredClone({ ...record, revision: record.revision ?? 0 });
 }

@@ -111,6 +111,7 @@ export class XtermTerminal extends Disposable implements IXtermTerminal, IDetach
 	private _core: IXtermCore;
 	private readonly _xtermAddonLoader: XtermAddonImporter;
 	private readonly _xtermColorProvider: IXtermColorProvider;
+	private _transparentBackground = false;
 	private readonly _capabilities: ITerminalCapabilityStore;
 
 	private static _suggestedRendererType: 'dom' | undefined = undefined;
@@ -269,7 +270,7 @@ export class XtermTerminal extends Disposable implements IXtermTerminal, IDetach
 				kittyKeyboard: config.enableKittyKeyboardProtocol,
 				win32InputMode: config.enableWin32InputMode,
 			},
-			allowTransparency: config.enableImages,
+			allowTransparency: config.enableImages || this._transparentBackground,
 			windowOptions: {
 				getWinSizePixels: true,
 				getCellSizePixels: true,
@@ -574,7 +575,7 @@ export class XtermTerminal extends Disposable implements IXtermTerminal, IDetach
 		this.raw.options.wordSeparator = config.wordSeparators;
 		this.raw.options.ignoreBracketedPasteMode = config.ignoreBracketedPasteMode;
 		this.raw.options.rescaleOverlappingGlyphs = config.rescaleOverlappingGlyphs;
-		this.raw.options.allowTransparency = config.enableImages;
+		this.raw.options.allowTransparency = config.enableImages || this._transparentBackground;
 		this.raw.options.vtExtensions = {
 			kittyKeyboard: config.enableKittyKeyboardProtocol,
 			win32InputMode: config.enableWin32InputMode,
@@ -1038,7 +1039,7 @@ export class XtermTerminal extends Disposable implements IXtermTerminal, IDetach
 		const selectionForegroundColor = theme.getColor(TERMINAL_SELECTION_FOREGROUND_COLOR) || undefined;
 
 		return {
-			background: backgroundColor?.toString(),
+			background: this._transparentBackground ? '#00000000' : backgroundColor?.toString(),
 			foreground: foregroundColor?.toString(),
 			cursor: cursorColor?.toString(),
 			cursorAccent: cursorAccentColor?.toString(),
@@ -1070,6 +1071,16 @@ export class XtermTerminal extends Disposable implements IXtermTerminal, IDetach
 
 	private _updateTheme(theme?: IColorTheme): void {
 		this.raw.options.theme = this.getXtermTheme(theme);
+	}
+
+	/** Lets an embedded terminal reveal its host surface without changing user settings. */
+	setTransparentBackground(enabled: boolean): void {
+		if (this._transparentBackground === enabled) {
+			return;
+		}
+		this._transparentBackground = enabled;
+		this.raw.options.allowTransparency = enabled || this._terminalConfigurationService.config.enableImages;
+		this._updateTheme();
 	}
 
 	/**

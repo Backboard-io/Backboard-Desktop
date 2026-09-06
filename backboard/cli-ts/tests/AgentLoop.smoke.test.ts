@@ -4,7 +4,6 @@ import os from "node:os";
 import path from "node:path";
 import { Config } from "../src/config/Config.ts";
 import { AgentController } from "../src/core/agent/AgentController.ts";
-import { FINAL_VERIFICATION_MIN_TOOL_CALLS } from "../src/core/agent/notifications/FinalVerificationNotification.ts";
 import { EventBus } from "../src/core/bus/EventBus.ts";
 import type { AgentEvent } from "../src/core/bus/events.ts";
 import type { CheckpointRecorder } from "../src/core/checkpoints/CheckpointStore.ts";
@@ -295,9 +294,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 		expect(types).toContain("tool:requested");
 		expect(types).toContain("tool:start");
 		expect(types).toContain("tool:result");
-		// The final-verification nudge only fires after a tool-heavy turn
-		// (FINAL_VERIFICATION_MIN_TOOL_CALLS); this run made a single call, so
-		// the final answer is shown directly instead of being superseded.
+		// A read-only round needs no separate verification request or buffered final.
 		expect(types).toContain("assistant:message");
 		expect(types).not.toContain("assistant:message:discard");
 		expect(types[types.length - 1]).toBe("turn:end");
@@ -455,7 +452,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 			startupEnvironmentPrompt,
 		);
 	});
-	it("sends a hidden final verification nudge after tool work", async () => {
+	it("sends one visible verification phase for unvalidated mutations", async () => {
 		class FinalVerificationClient extends FakeClient {
 			constructor() {
 				super(
@@ -473,11 +470,12 @@ describe("AgentController loop (mocked Backboard)", () => {
 					yield {
 						kind: "requires_action",
 						runId: "run_1",
-						// Enough calls to cross FINAL_VERIFICATION_MIN_TOOL_CALLS.
-						calls: Array.from(
-							{ length: FINAL_VERIFICATION_MIN_TOOL_CALLS },
-							(_, index) => ({ id: `c${index + 1}`, name: "Echo", input: {} }),
-						),
+						// A successful mutation without validation needs a focused check.
+						calls: Array.from({ length: 1 }, (_, index) => ({
+							id: `c${index + 1}`,
+							name: "Echo",
+							input: {},
+						})),
 					};
 					return;
 				}
@@ -488,7 +486,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 		const client = new FinalVerificationClient();
 		const { ctrl } = controllerWith(
 			client,
-			new TestTool({ name: "Echo", readOnly: true }),
+			new TestTool({ name: "Echo", readOnly: false }),
 			["--final-verification"],
 		);
 
@@ -497,18 +495,117 @@ describe("AgentController loop (mocked Backboard)", () => {
 		expect(status).toBe("completed");
 		expect(client.messageRequests.map((request) => request.content)).toEqual([
 			"do it",
-			expect.stringContaining("Before finalizing"),
+			expect.stringContaining(
+				"changes without sufficient successful validation",
+			),
 		]);
 		expect(client.messageRequests[1]?.content).toContain(
-			"Required files, output formats, command behavior, and stated acceptance criteria are satisfied",
+			"Briefly tell the user",
 		);
-		expect(client.messageRequests[1]?.content).toContain(
-			"Relevant validators or tests were run",
-		);
-		expect(client.messageRequests[1]?.content).toContain(
-			"respond with a concise final answer using Markdown section headings",
-		);
+		expect(client.messageRequests[1]?.content).toContain("focused check");
 		expect(client.toolOutputRequests).toHaveLength(1);
+	});
+
+	it("streams a long read-only investigation without verification or todo cleanup inference", async () => {
+		const client = new FakeClient(
+			[
+				{ kind: "thread", threadId: "thr_read" },
+				{
+					kind: "requires_action",
+					runId: null,
+					calls: Array.from({ length: 40 }, (_, index) => ({
+						id: `read-${index}`,
+						name: "Read",
+						input: {},
+					})),
+				},
+			],
+			[
+				{
+					kind: "assistant_delta",
+					text: "Investigation complete; deployment is still pending.",
+				},
+				{ kind: "completed" },
+			],
+		);
+		const { ctrl, events, session } = controllerWith(
+			client,
+			new TestTool({ name: "Read", readOnly: true }),
+			["--final-verification"],
+			{ todoReconciliation: true },
+		);
+		const todos = [
+			{
+				id: "requested",
+				content: "Deploy after review",
+				status: "pending" as const,
+			},
+		];
+		session.setTodos(todos);
+		expect(
+			await ctrl.submit(
+				"Investigate the source; preserve the deployment plan.",
+			),
+		).toBe("completed");
+		expect(client.messageRequests).toHaveLength(1);
+		expect(client.toolOutputRequests).toHaveLength(1);
+		expect(session.todos).toEqual(todos);
+		expect(
+			events.filter((event) => event.type === "assistant:delta"),
+		).toHaveLength(1);
+		expect(
+			events.some((event) => event.type === "assistant:message:discard"),
+		).toBe(false);
+	});
+
+	it("finishes a validated narrow change without a second review request", async () => {
+		class ValidatedClient extends FakeClient {
+			override async *runToolOutputs(
+				req: SubmitToolOutputsRequest,
+			): AsyncIterable<ProviderEvent> {
+				this.toolOutputRequests.push(req);
+				if (this.toolOutputRequests.length === 1) {
+					yield {
+						kind: "requires_action",
+						runId: null,
+						calls: [{ id: "check", name: "Check", input: {} }],
+					};
+				} else {
+					yield { kind: "assistant_delta", text: "Fixed and verified." };
+					yield { kind: "completed" };
+				}
+			}
+		}
+		const client = new ValidatedClient(
+			[
+				{ kind: "thread", threadId: "thr_edit" },
+				{
+					kind: "requires_action",
+					runId: null,
+					calls: [{ id: "edit", name: "Patch", input: {} }],
+				},
+			],
+			[],
+		);
+		const check = new (class extends TestTool {
+			override async execute(...args: Parameters<TestTool["execute"]>) {
+				return {
+					...(await super.execute(...args)),
+					execution: { validation: "passed" as const },
+				};
+			}
+		})({ name: "Check", readOnly: true });
+		const { ctrl, events } = controllerWith(
+			client,
+			[new TestTool({ name: "Patch", readOnly: false }), check],
+			["--final-verification"],
+		);
+		expect(await ctrl.submit("Fix the typo and verify it.")).toBe("completed");
+		expect(client.messageRequests).toHaveLength(1);
+		expect(client.toolOutputRequests).toHaveLength(2);
+		expect(
+			events.some((event) => event.type === "assistant:message:discard"),
+		).toBe(false);
 	});
 
 	it("lets the host disable final verification even when config enables it", async () => {
@@ -528,21 +625,18 @@ describe("AgentController loop (mocked Backboard)", () => {
 				yield {
 					kind: "requires_action",
 					runId: "run_1",
-					calls: Array.from(
-						{ length: FINAL_VERIFICATION_MIN_TOOL_CALLS },
-						(_, index) => ({
-							id: `c${index + 1}`,
-							name: "Echo",
-							input: {},
-						}),
-					),
+					calls: Array.from({ length: 1 }, (_, index) => ({
+						id: `c${index + 1}`,
+						name: "Echo",
+						input: {},
+					})),
 				};
 			}
 		}
 		const client = new NoNudgeClient();
 		const { ctrl } = controllerWith(
 			client,
-			new TestTool({ name: "Echo", readOnly: true }),
+			new TestTool({ name: "Echo", readOnly: false }),
 			["--final-verification"],
 			{ finalVerificationNudge: false },
 		);
@@ -638,7 +732,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 		expect(client.messageRequests.map((request) => request.model_name)).toEqual(
 			["gpt-5.5", "z-ai/glm-5.3"],
 		);
-		expect(client.messageRequests[1]?.thinking).toBeNull();
+		expect(client.messageRequests[1]).not.toHaveProperty("thinking");
 		expect(config.modelString).toBe("openrouter/z-ai/glm-5.3");
 		expect(
 			events.some(
@@ -1083,7 +1177,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 
 		expect(client.messageRequests[0]?.thinking).toEqual({ effort: "medium" });
 		expect(client.toolOutputRequests[0]?.thinking).toEqual({
-			effort: "medium",
+			effort: "low",
 		});
 		expect(client.modelThinkingMetadataCount).toBe(1);
 		expect(client.listModelsCount).toBe(0);
@@ -1166,7 +1260,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 		expect(client.toolOutputRequests[0]?.thinking).toBeNull();
 	});
 
-	it("does not thrash max during persistent dynamic failures", async () => {
+	it("keeps mechanical failures at low effort across repeated rounds", async () => {
 		class MultiRoundClient extends FakeClient {
 			private round = 0;
 
@@ -1235,11 +1329,11 @@ describe("AgentController loop (mocked Backboard)", () => {
 		await ctrl.submit("do it");
 
 		expect(client.toolOutputRequests.map((req) => req.thinking)).toEqual([
-			{ effort: "high" },
-			{ effort: "max" },
-			{ effort: "medium" },
-			{ effort: "high" },
-			{ effort: "max" },
+			{ effort: "low" },
+			{ effort: "low" },
+			{ effort: "low" },
+			{ effort: "low" },
+			{ effort: "low" },
 		]);
 	});
 
@@ -1706,10 +1800,11 @@ describe("AgentController attachment file paths", () => {
 					yield {
 						kind: "requires_action",
 						runId: "run_1",
-						calls: Array.from(
-							{ length: FINAL_VERIFICATION_MIN_TOOL_CALLS },
-							(_, index) => ({ id: `c${index + 1}`, name: "Echo", input: {} }),
-						),
+						calls: Array.from({ length: 1 }, (_, index) => ({
+							id: `c${index + 1}`,
+							name: "Echo",
+							input: {},
+						})),
 					};
 					return;
 				}
@@ -1720,12 +1815,13 @@ describe("AgentController attachment file paths", () => {
 		const client = new ToolThenNudgeClient();
 		const { ctrl } = controllerWith(
 			client,
-			new TestTool({ name: "Echo", readOnly: true }),
+			new TestTool({ name: "Echo", readOnly: false }),
 			["--final-verification"],
 		);
 
 		await ctrl.submit("do it", { attachmentFilePaths: ["/tmp/a.png"] });
 
+		expect(client.messageRequests).toHaveLength(2);
 		// First request carries the files; the nudge (second) must not.
 		expect(client.messageAttachmentPaths[0]).toEqual(["/tmp/a.png"]);
 		expect(client.messageAttachmentPaths[1]).toBeUndefined();

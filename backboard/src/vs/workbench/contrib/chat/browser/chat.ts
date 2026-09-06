@@ -261,6 +261,10 @@ export interface IChatListItemRendererOptions {
 }
 
 export interface IChatWidgetViewOptions {
+	/** Use the Editor panel's recent chats and centered mark for an empty chat. */
+	useBackboardPanelEmptyHome?: boolean;
+	/** Host navigation for the Editor-style empty home. */
+	panelEmptyHomeNavigation?: { openSession(resource: URI): Promise<void>; openHistory(): void };
 	autoScroll?: boolean | ((mode: ChatModeKind) => boolean);
 	renderInputOnTop?: boolean;
 	renderFollowups?: boolean;

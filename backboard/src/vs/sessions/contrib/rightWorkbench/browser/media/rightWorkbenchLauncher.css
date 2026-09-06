@@ -1100,7 +1100,9 @@
 	box-sizing: border-box;
 	border: 1px solid var(--rwb-border-strong);
 	border-radius: var(--vscode-cornerRadius-large);
-	background: var(--rwb-chrome-soft);
+	/* Popups need their own opaque surface when the panel chrome is transparent. */
+	background: var(--vscode-menu-background, var(--vscode-editorWidget-background));
+	color: var(--vscode-menu-foreground, var(--rwb-foreground));
 	box-shadow: 0 10px 28px var(--vscode-widget-shadow, transparent);
 }
 
@@ -1392,9 +1394,17 @@
 
 .sessions-right-workbench-review-total-stats {
 	display: inline-flex;
+	align-items: center;
+	flex-wrap: wrap;
 	gap: 6px;
-	margin-left: 10px;
-	font-size: 13px;
+	min-width: 0;
+	font-size: 12px;
+	font-variant-numeric: tabular-nums;
+}
+
+.sessions-right-workbench-review-total-stats .files {
+	margin-right: 6px;
+	color: var(--rwb-foreground);
 }
 
 .sessions-right-workbench-review-total-stats .additions {
@@ -2290,4 +2300,40 @@
 .agent-sessions-workbench .part.auxiliarybar .split-view-view {
 	background: var(--rwb-bg) !important;
 	background-color: var(--rwb-bg) !important;
+}
+
+/* Match the Advanced chat shell and header to the shared chat surface. */
+.monaco-workbench.optimus-window .sessions-right-workbench-editor-chat,
+.monaco-workbench.optimus-window .optimus-chat-view {
+	--rwb-bg: var(--vscode-sideBar-background, var(--vscode-editor-background));
+}
+
+/* Advanced keeps the workspace in the header instead of a session tab strip. */
+.optimus-chat-folder-header {
+	background: var(--rwb-bg, var(--vscode-sideBar-background));
+	display: flex;
+	align-items: center;
+	flex: 0 0 34px;
+	min-width: 0;
+	padding: 0 8px;
+	box-sizing: border-box;
+	border-bottom: 1px solid var(--rwb-border);
+}
+.optimus-chat-folder-header .optimus-chat-header-folder.new-session-workspace-picker-container {
+	display: flex;
+	align-items: center;
+	width: auto;
+	margin: 0;
+	padding: 0;
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+}
+.optimus-chat-editor-host .agent-sessions-history-modal-panel {
+	--agent-sessions-history-surface: var(--vscode-editorWidget-background);
+	border: 1px solid var(--vscode-widget-border, var(--rwb-border));
+	border-radius: 6px;
+}
+.optimus-chat-editor-host .agent-sessions-history-modal-body .monaco-list-rows {
+	background: var(--agent-sessions-history-surface) !important;
 }

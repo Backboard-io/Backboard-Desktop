@@ -1,3 +1,4 @@
+import type { ToolExecutionMetadata } from "./ToolFailure.ts";
 import type { ToolResultDetailLine } from "./ToolResultDetail.ts";
 
 /** Before/after text retained so Backboard Studio can render inline diffs. */
@@ -29,6 +30,7 @@ export interface ToolResult<O = unknown> {
 	detailLines?: ToolResultDetailLine[];
 	fileEdits?: FileEditPreview[];
 	terminalOutput?: TerminalToolResult;
+	execution?: ToolExecutionMetadata;
 }
 
 export function ok<O>(

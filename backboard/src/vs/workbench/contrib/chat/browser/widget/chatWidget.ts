@@ -15,6 +15,7 @@ import { Codicon } from '../../../../../base/common/codicons.js';
 import { toErrorMessage } from '../../../../../base/common/errorMessage.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { hash } from '../../../../../base/common/hash.js';
+import { generateUuid } from '../../../../../base/common/uuid.js';
 import { IMarkdownString, MarkdownString } from '../../../../../base/common/htmlContent.js';
 import { Iterable } from '../../../../../base/common/iterator.js';
 import { Disposable, DisposableStore, IDisposable, MutableDisposable, thenIfNotDisposed } from '../../../../../base/common/lifecycle.js';
@@ -1399,8 +1400,8 @@ export class ChatWidget extends Disposable implements IChatWidget {
 
 	private usesBackboardPanelEmptyHome(): boolean {
 		return isBackboardProduct()
-			&& isIChatViewViewContext(this.viewContext)
-			&& this.viewContext.viewId === ChatViewId;
+			&& (this.viewOptions.useBackboardPanelEmptyHome === true
+				|| (isIChatViewViewContext(this.viewContext) && this.viewContext.viewId === ChatViewId));
 	}
 
 	private renderBackboardPanelEmptyHome(): void {
@@ -1417,6 +1418,19 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		const recent = dom.append(home, $('section.backboard-panel-recent-chats', {
 			'aria-label': localize('chat.emptyHome.recentChats', "Recent chats"),
 		}));
+		const actions = dom.append(recent, $('.backboard-panel-home-actions'));
+		for (const action of [
+			{ icon: Codicon.add, label: localize('chat.emptyHome.newChat', "New Chat"), command: 'workbench.action.chat.newChat' },
+			{ icon: Codicon.settingsGear, label: localize('chat.emptyHome.settings', "Settings"), command: 'workbench.action.openSettings' },
+			{ icon: Codicon.history, label: localize('chat.emptyHome.history', "Chat History"), command: 'workbench.action.chat.openBackboardHistory' },
+		]) {
+			const button = dom.append(actions, $('button.backboard-panel-home-action', { type: 'button', title: action.label, 'aria-label': action.label }));
+			button.classList.add(...ThemeIcon.asClassNameArray(action.icon));
+			this.backboardEmptyHomeDisposables.add(dom.addDisposableListener(button, dom.EventType.CLICK, () => {
+				void this.instantiationService.invokeFunction(accessor => accessor.get(ICommandService).executeCommand(action.command));
+			}));
+		}
+
 		const list = dom.append(recent, $('.backboard-panel-recent-chat-list'));
 
 		for (const session of sessions.slice(0, 3)) {
@@ -1431,7 +1445,11 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			dom.append(row, $('span.backboard-panel-recent-chat-time', undefined, timeLabel));
 			this.backboardEmptyHomeDisposables.add(dom.addDisposableListener(row, dom.EventType.CLICK, event => {
 				dom.EventHelper.stop(event, true);
-				void this.instantiationService.invokeFunction(openSession, session);
+				if (this.viewOptions.panelEmptyHomeNavigation) {
+					void this.viewOptions.panelEmptyHomeNavigation.openSession(session.resource);
+				} else {
+					void this.instantiationService.invokeFunction(openSession, session);
+				}
 			}));
 		}
 
@@ -1442,14 +1460,23 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		viewAll.textContent = localize('chat.emptyHome.viewAllChatsWithCount', "View all ({0})", sessions.length);
 		this.backboardEmptyHomeDisposables.add(dom.addDisposableListener(viewAll, dom.EventType.CLICK, event => {
 			dom.EventHelper.stop(event, true);
-			void this.instantiationService.invokeFunction(accessor => accessor.get(ICommandService).executeCommand('workbench.action.chat.history', { excludeSubscriptionSessions: true }));
+			if (this.viewOptions.panelEmptyHomeNavigation) {
+				this.viewOptions.panelEmptyHomeNavigation.openHistory();
+			} else {
+				void this.instantiationService.invokeFunction(accessor => accessor.get(ICommandService).executeCommand('workbench.action.chat.history', { excludeSubscriptionSessions: true }));
+			}
 		}));
 
-		this.renderBackboardPanelAnimatedMark(home);
+		const welcome = dom.append(home, $('.backboard-panel-welcome-copy'));
+		dom.append(welcome, $('div.backboard-panel-welcome-title', undefined, localize('chat.emptyHome.brand', "BACKBOARD STUDIO")));
+		dom.append(welcome, $('div.backboard-panel-welcome-subtitle', undefined, localize('chat.emptyHome.prompt', "What would you like to build?")));
+
+		this.renderBackboardPanelAnimatedMark(welcome);
 	}
 
 	private renderBackboardPanelAnimatedMark(parent: HTMLElement): void {
 		const mark = dom.append(parent, $('.backboard-panel-empty-mark', { 'aria-hidden': 'true' }));
+		const idPrefix = `backboard-panel-${generateUuid()}`;
 		const svgNamespace = 'http://www.w3.org/2000/svg';
 		const createSvgElement = (tagName: string): SVGElement => mark.ownerDocument.createElementNS(svgNamespace, tagName) as SVGElement;
 		const setAttributes = (element: SVGElement, attributes: Record<string, string>): SVGElement => {
@@ -1477,7 +1504,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		svg.classList.add('backboard-panel-water-mark');
 
 		const definitions = createSvgElement('defs');
-		const waterGradientId = 'backboard-panel-water-gradient';
+		const waterGradientId = `${idPrefix}-water-gradient`;
 		const waterGradient = setAttributes(createSvgElement('linearGradient'), {
 			id: waterGradientId,
 			x1: '0',
@@ -1499,7 +1526,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		}
 		definitions.appendChild(waterGradient);
 
-		const glintGradientId = 'backboard-panel-water-glint';
+		const glintGradientId = `${idPrefix}-water-glint`;
 		const glintGradient = setAttributes(createSvgElement('linearGradient'), {
 			id: glintGradientId,
 			x1: '0',
@@ -1520,7 +1547,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		}
 		definitions.appendChild(glintGradient);
 
-		const textureFilterId = 'backboard-panel-water-texture';
+		const textureFilterId = `${idPrefix}-water-texture`;
 		const textureFilter = setAttributes(createSvgElement('filter'), {
 			id: textureFilterId,
 			x: '-12%',
@@ -1547,7 +1574,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		svg.appendChild(definitions);
 
 		for (const [index, strand] of strands.entries()) {
-			const clipId = `backboard-panel-water-clip-${index}`;
+			const clipId = `${idPrefix}-water-clip-${index}`;
 			const clipPath = setAttributes(createSvgElement('clipPath'), { id: clipId });
 			clipPath.appendChild(createStrand(strand));
 			definitions.appendChild(clipPath);

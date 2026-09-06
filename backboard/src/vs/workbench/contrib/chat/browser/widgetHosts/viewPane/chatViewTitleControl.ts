@@ -25,6 +25,7 @@ import { AgentSessionsPicker } from '../../agentSessions/agentSessionsPicker.js'
 import { IAgentSession } from '../../agentSessions/agentSessionsModel.js';
 import { IAgentSessionsService } from '../../agentSessions/agentSessionsService.js';
 import { openSession } from '../../agentSessions/agentSessionsOpener.js';
+import { parseSubagentSessionUri } from '../../../../../../platform/agentHost/common/state/sessionState.js';
 import { Codicon } from '../../../../../../base/common/codicons.js';
 import { ThemeIcon } from '../../../../../../base/common/themables.js';
 
@@ -72,6 +73,9 @@ export class ChatViewTitleControl extends Disposable {
 	}
 
 	private model: IChatModel | undefined;
+	private lastDisplayedSession: IChatModel['sessionResource'] | undefined;
+	private readonly subagentReturnSessions = new Map<string, IChatModel['sessionResource']>();
+	private returningToSession: string | undefined;
 	private modelDisposables = this._register(new MutableDisposable());
 
 	private navigationToolbar?: MenuWorkbenchToolBar;
@@ -238,6 +242,15 @@ export class ChatViewTitleControl extends Disposable {
 	}
 
 	update(model: IChatModel | undefined): void {
+		const resource = model?.sessionResource;
+		if (resource && resource.toString() !== this.lastDisplayedSession?.toString()) {
+			// Loading can temporarily clear the model; retain the last real source.
+			if (parseSubagentSessionUri(resource) && this.lastDisplayedSession && this.returningToSession !== resource.toString()) {
+				this.subagentReturnSessions.set(resource.toString(), this.lastDisplayedSession);
+			}
+			this.returningToSession = undefined;
+			this.lastDisplayedSession = resource;
+		}
 		this.model = model;
 
 		this.modelDisposables.value = model?.onDidChange(e => {
@@ -336,6 +349,8 @@ export class ChatViewTitleControl extends Disposable {
 			&& previousSessionResourceKey
 			&& currentSessionResourceKey
 			&& this.openSessionTabs.has(previousSessionResourceKey)
+			&& !parseSubagentSessionUri(this.openSessionTabs.get(previousSessionResourceKey)!.resource)
+			&& currentSessionResource && !parseSubagentSessionUri(currentSessionResource)
 			&& !this.agentSessionsService.model.sessions.some(session => session.resource.toString() === previousSessionResourceKey)
 		) {
 			const index = this.tabOrder.indexOf(previousSessionResourceKey);
@@ -376,7 +391,9 @@ export class ChatViewTitleControl extends Disposable {
 				this.tabOrder.unshift(resourceKey);
 			}
 		}
-		this.tabOrder = this.tabOrder.filter(resourceKey => !this.closedSessionTabs.has(resourceKey) && this.openSessionTabs.has(resourceKey));
+		// Returning from a child is navigation, not a draft resource rename.
+		// Deduplicate existing entries too, including tabs retained before this fix.
+		this.tabOrder = [...new Set(this.tabOrder)].filter(resourceKey => !this.closedSessionTabs.has(resourceKey) && this.openSessionTabs.has(resourceKey));
 		if (currentSessionResourceKey && !currentIsEmptyDraft && !this.tabOrder.includes(currentSessionResourceKey)) {
 			this.tabOrder.unshift(currentSessionResourceKey);
 		}
@@ -392,7 +409,11 @@ export class ChatViewTitleControl extends Disposable {
 			permanent: true,
 		});
 
-		for (const resourceKey of this.tabOrder.slice(0, ChatViewTitleControl.MAX_HISTORY_TABS)) {
+		// The history header represents one active conversation, not the tab history.
+		const visibleSessionKeys = currentSessionResourceKey && !currentIsEmptyDraft
+			? [currentSessionResourceKey]
+			: this.tabOrder.slice(0, ChatViewTitleControl.MAX_HISTORY_TABS);
+		for (const resourceKey of visibleSessionKeys) {
 			const session = sessionsByResource.get(resourceKey);
 			const tab = this.openSessionTabs.get(resourceKey);
 			if (!session && !tab) {
@@ -464,7 +485,12 @@ export class ChatViewTitleControl extends Disposable {
 		this.tabDisposables.add(addDisposableListener(tab, EventType.CLICK, e => {
 			e.preventDefault();
 			e.stopPropagation();
-			if (options.permanent || options.historyHeader) {
+			if (options.historyHeader && this.model && parseSubagentSessionUri(this.model.sessionResource)) {
+				const resource = this.model.sessionResource;
+				const parent = this.subagentReturnSessions.get(resource.toString()) ?? parseSubagentSessionUri(resource)!.parentSession;
+				this.returningToSession = parent.toString();
+				void this.delegate.openChatSession(parent);
+			} else if (options.permanent || options.historyHeader) {
 				this.delegate.openNewChat();
 			} else if (options.session) {
 				void this.instantiationService.invokeFunction(openSession, options.session);

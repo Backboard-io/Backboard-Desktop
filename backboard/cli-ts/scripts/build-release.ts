@@ -4,6 +4,7 @@ import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { APP_VERSION } from "../src/config/branding.ts";
+import { buildIdentityArgs } from "./buildIdentity.ts";
 
 // Cross-compiles the CLI for every platform the production install
 // channel (app/routers/cli_installer.py) knows how to serve, names each
@@ -132,6 +133,7 @@ async function buildTarget(target: Target): Promise<string> {
 		"bun",
 		"build",
 		"--compile",
+		...(await buildIdentityArgs()),
 		`--target=${target.bunTarget}`,
 		"--minify",
 		"--sourcemap=none",
@@ -143,7 +145,7 @@ async function buildTarget(target: Target): Promise<string> {
 	const oauthClientId = process.env.BACKBOARD_OAUTH_CLIENT_ID?.trim();
 	if (oauthClientId) {
 		command.splice(
-			4,
+			3,
 			0,
 			"--define",
 			`process.env.BACKBOARD_OAUTH_CLIENT_ID=${JSON.stringify(oauthClientId)}`,

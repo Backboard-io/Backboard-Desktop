@@ -349,7 +349,7 @@ MenuRegistry.appendMenuItems([
 			order: 2
 		}
 	}, {
-		id: MenuId.LayoutControlMenu,
+		id: MenuId.TitleBarLeft,
 		item: {
 			group: 'navigation',
 			command: {
@@ -365,10 +365,10 @@ MenuRegistry.appendMenuItems([
 					ContextKeyExpr.equals('config.workbench.layoutControl.type', 'both')),
 				ContextKeyExpr.equals('config.workbench.sideBar.location', 'left')
 			),
-			order: 0
+			order: 10
 		}
 	}, {
-		id: MenuId.LayoutControlMenu,
+		id: MenuId.TitleBarLeft,
 		item: {
 			group: 'navigation',
 			command: {
@@ -384,7 +384,7 @@ MenuRegistry.appendMenuItems([
 					ContextKeyExpr.equals('config.workbench.layoutControl.type', 'both')),
 				ContextKeyExpr.equals('config.workbench.sideBar.location', 'right')
 			),
-			order: 2
+			order: 10
 		}
 	}
 ]);

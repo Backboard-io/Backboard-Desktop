@@ -486,7 +486,10 @@ export class AgentHostChatInputPicker extends Disposable {
 		dom.clearNode(trigger);
 
 		const isBackboardAccessMode = isBackboardAccessModeSchema(this._property, schema);
-		if (!isBackboardAccessMode) {
+		trigger.classList.toggle('backboard-access-mode-trigger', isBackboardAccessMode);
+		if (isBackboardAccessMode) {
+			dom.append(trigger, dom.$('span.backboard-access-hand-icon', { 'aria-hidden': 'true' }));
+		} else {
 			const icon = getConfigIcon(this._property, value);
 			if (icon) {
 				dom.append(trigger, renderIcon(icon));
@@ -677,6 +680,8 @@ export class AgentHostChatInputPicker extends Disposable {
 					const row = dom.append(list, dom.$('button.backboard-access-picker-row')) as HTMLButtonElement;
 					row.type = 'button';
 					row.role = 'option';
+					row.title = item.description ?? item.label;
+					row.setAttribute('aria-label', item.description ? `${item.label}. ${item.description}` : item.label);
 					row.setAttribute('aria-selected', String(selected));
 					row.classList.toggle('selected', selected);
 					row.classList.toggle('warning', item.emphasis === 'warning');
@@ -919,6 +924,9 @@ export class AgentHostChatInputPickerActionViewItem extends BaseActionViewItem {
 	override render(container: HTMLElement): void {
 		this._picker.render(container);
 	}
+
+	getEnumInfo() { return this._picker.getEnumInfo(); }
+	setValue(value: string): void { this._picker.setValue(value); }
 
 	show(anchor?: HTMLElement): void {
 		this._picker.show(anchor);

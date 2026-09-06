@@ -101,7 +101,7 @@ export class ChatCollapsibleInputOutputContentPart extends Disposable {
 	) {
 		super();
 
-		const container = dom.h('.chat-confirmation-widget-container');
+		const container = dom.h('.chat-confirmation-widget-container.chat-tool-io');
 		const titleEl = dom.h('.chat-confirmation-widget-title-inner');
 		const elements = dom.h('.chat-confirmation-widget');
 		this.domNode = container.root;
@@ -120,6 +120,24 @@ export class ChatCollapsibleInputOutputContentPart extends Disposable {
 		const btn = this._register(new ButtonWithIcon(elements.root, {}));
 		btn.element.classList.add('chat-confirmation-widget-title', 'monaco-text-button');
 		btn.labelElement.append(titleEl.root);
+		const inputHeader = dom.$('span.chat-tool-io-input-header');
+		inputHeader.textContent = input.data;
+		try {
+			const parsed: unknown = JSON.parse(input.data);
+			if (parsed && typeof parsed === 'object' && 'code' in parsed && typeof parsed.code === 'string') {
+				inputHeader.textContent = parsed.code;
+			} else if (parsed && typeof parsed === 'object') {
+				container.root.classList.add('chat-tool-io-activity');
+				const label = (typeof title === 'string' ? title : title.value).replace(/:\s*\{[\s\S]*$/, '');
+				inputHeader.textContent = label;
+			}
+		} catch {
+			// Plain code and text already make an appropriate prompt header.
+		}
+		btn.element.title = `${typeof title === 'string' ? title : title.value}\n${input.data}`;
+		btn.labelElement.appendChild(inputHeader);
+		const activityIcon = dom.$('span.chat-io-activity-icon', { 'aria-hidden': 'true' });
+		btn.labelElement.before(activityIcon);
 
 		// Add hover chevron indicator on the right (decorative, hide from screen readers)
 		const hoverChevron = dom.$('span.chat-collapsible-hover-chevron.codicon.codicon-chevron-right');
@@ -136,6 +154,10 @@ export class ChatCollapsibleInputOutputContentPart extends Disposable {
 			elements.root.classList.toggle('collapsed', !value);
 
 			const isInProgress = !output && !isError;
+			const activityThemeIcon = isError ? Codicon.error : isInProgress ? ThemeIcon.modify(Codicon.loading, 'spin') : input.languageId === 'javascript' ? Codicon.code : Codicon.tools;
+			activityIcon.className = 'chat-io-activity-icon';
+			activityIcon.classList.add(...ThemeIcon.asClassNameArray(activityThemeIcon));
+			btn.element.setAttribute('aria-expanded', String(value));
 			if (isError) {
 				btn.icon = Codicon.error;
 			} else {
@@ -164,6 +186,9 @@ export class ChatCollapsibleInputOutputContentPart extends Disposable {
 			if (!e.defaultPrevented) {
 				const value = expanded.get();
 				expanded.set(!value, undefined);
+				if (!value) {
+					this.layout(this.context.currentWidth.get());
+				}
 				e.preventDefault();
 			}
 		};
@@ -189,11 +214,11 @@ export class ChatCollapsibleInputOutputContentPart extends Disposable {
 	}
 
 	private createMessageContents() {
-		const contents = dom.h('div', [
+		const contents = dom.h('div.chat-tool-io-details', [
 			dom.h('h3@inputTitle'),
-			dom.h('div@input'),
+			dom.h('div.chat-tool-io-input@input'),
 			dom.h('h3@outputTitle'),
-			dom.h('div@output'),
+			dom.h('div.chat-tool-io-output@output'),
 		]);
 
 		const { input, output } = this;
@@ -241,7 +266,12 @@ export class ChatCollapsibleInputOutputContentPart extends Disposable {
 	}
 
 	layout(width: number): void {
-		this._editorReferences.forEach(r => r.object.layout(width));
-		this._outputSubPart?.layout(width);
+		// The card's border and padding reduce the space available to embedded
+		// editors. Using the transcript width lets their backgrounds and content
+		// extend beyond the rounded output surface.
+		const inputWidth = this.domNode.querySelector<HTMLElement>('.chat-tool-io-input')?.clientWidth || width;
+		const outputWidth = this.domNode.querySelector<HTMLElement>('.chat-tool-io-output')?.clientWidth || width;
+		this._editorReferences.forEach(r => r.object.layout(inputWidth));
+		this._outputSubPart?.layout(outputWidth);
 	}
 }

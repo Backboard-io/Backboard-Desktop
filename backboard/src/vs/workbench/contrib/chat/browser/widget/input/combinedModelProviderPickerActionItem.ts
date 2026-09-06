@@ -387,6 +387,7 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 		trigger.tabIndex = 0;
 		trigger.setAttribute('role', 'button');
 		trigger.setAttribute('aria-haspopup', 'true');
+		dom.append(trigger, dom.$('span.combined-model-provider-brain', { 'aria-hidden': 'true' }));
 		this._triggerLabel = dom.append(trigger, dom.$('span.combined-model-provider-trigger-label'));
 		this._triggerThinking = dom.append(trigger, dom.$('span.combined-model-provider-trigger-thinking'));
 		dom.append(trigger, dom.$(`span.combined-model-provider-trigger-chevron${ThemeIcon.asCSSSelector(Codicon.chevronDown)}`));
@@ -510,10 +511,10 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 			this._overlay.clear();
 			return;
 		}
-		this._show();
+		this.show();
 	}
 
-	private _show(): void {
+	public show(): void {
 		const anchor = this.element ?? this._pickerOptions.getOverflowAnchor?.();
 		if (!anchor) {
 			return;

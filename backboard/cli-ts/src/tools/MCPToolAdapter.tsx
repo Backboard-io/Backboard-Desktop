@@ -87,7 +87,7 @@ export class McpToolAdapter extends Tool<
 			"isError" in result && result.isError === true
 				? `MCP ${this.definition.serverName}.${this.definition.toolName} returned an error`
 				: `MCP ${this.definition.serverName}.${this.definition.toolName}`;
-		return ok(
+		const output = ok(
 			{
 				serverName: this.definition.serverName,
 				toolName: this.definition.toolName,
@@ -96,6 +96,17 @@ export class McpToolAdapter extends Tool<
 			formatMcpResult(this.definition, result),
 			title,
 		);
+		return {
+			...output,
+			execution:
+				result.isError === true
+					? {
+							failureCategory: "execution",
+							retryable: false,
+							outcome: "failure",
+						}
+					: { outcome: "success" },
+		};
 	}
 }
 

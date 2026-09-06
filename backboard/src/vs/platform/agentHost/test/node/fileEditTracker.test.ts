@@ -160,15 +160,28 @@ suite('FileEditTracker', () => {
 		const created = records.find(r => r.toolCallId === 'tc-create');
 		assert.deepStrictEqual({
 			diff: fileEdit.diff,
+			hasBefore: fileEdit.before !== undefined,
 			kind: created?.kind,
 			addedLines: created?.addedLines,
 			removedLines: created?.removedLines,
 		}, {
 			diff: { added: 1, removed: 0 },
+			hasBefore: false,
 			kind: 'create',
 			addedLines: 1,
 			removedLines: 0,
 		});
+	});
+
+	test('editing an existing empty file keeps its before snapshot and edit kind', async () => {
+		const resource = URI.file('/workspace/existing-empty.txt');
+		await fileService.writeFile(resource, VSBuffer.fromString(''));
+		await tracker.trackEditStart(resource.fsPath);
+		await fileService.writeFile(resource, VSBuffer.fromString('content'));
+		await tracker.completeEdit(resource.fsPath);
+		const edit = await tracker.takeCompletedEdit('turn-1', 'existing-empty', resource.fsPath, 'Write', {}, 'fixture');
+		const records = await db.getFileEdits(['existing-empty']);
+		assert.deepStrictEqual({ hasBefore: edit?.before !== undefined, kind: records[0]?.kind }, { hasBefore: true, kind: 'edit' });
 	});
 
 	test('before and after content can be read from database', async () => {

@@ -2,6 +2,7 @@ import type { AgentEvent, ToolCallRef } from "../bus/events.ts";
 import { requireAgentToolOutput } from "./AgentToolOutputGuard.ts";
 import { clampSummary, genericInputSummary } from "./inputSummary.ts";
 import type { Tool } from "./Tool.ts";
+import type { ToolExecutionMetadata } from "./ToolFailure.ts";
 import type { FileEditPreview, TerminalToolResult } from "./ToolResult.ts";
 import type { ToolResultDetailLine } from "./ToolResultDetail.ts";
 import { backboardToolUiInput, backboardToolUiResult } from "./ToolUiData.ts";
@@ -75,12 +76,14 @@ export function toolResultEvent(
 	detailLines?: ToolResultDetailLine[],
 	fileEdits?: FileEditPreview[],
 	terminalOutput?: TerminalToolResult,
+	execution?: ToolExecutionMetadata,
 ): AgentEvent {
 	const name = tool.displayName;
 	const toolUi = backboardToolUiResult(tool.agentName, input, output);
 	if (tool.agentName === "agent") {
 		return {
 			type: "tool:result",
+			execution,
 			toolCallId: ref.id,
 			name,
 			title,
@@ -92,6 +95,7 @@ export function toolResultEvent(
 	}
 	return {
 		type: "tool:result",
+		execution,
 		toolCallId: ref.id,
 		name,
 		title,

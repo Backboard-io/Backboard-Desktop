@@ -172,21 +172,6 @@ export class SessionsLayoutPolicy extends Disposable {
 	}
 
 	/**
-	 * The Jarvis window is a single unlimited canvas. Tool, file, browser and
-	 * agent surfaces live as cards inside the sessions part, so the workbench's
-	 * docked side parts stay out of the initial composition.
-	 */
-	getJarvisPartVisibilityDefaults(): IPartVisibilityDefaults {
-		return {
-			sidebar: false,
-			auxiliaryBar: false,
-			panel: false,
-			sessions: true,
-			editor: false
-		};
-	}
-
-	/**
 	 * Returns the default part sizes for the given viewport dimensions.
 	 * If no viewport class is supplied the current observed class is used.
 	 *

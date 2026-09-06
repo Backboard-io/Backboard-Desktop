@@ -11,9 +11,9 @@ the Backboard API is the model gateway.** Everything below expands on that.
 
 ## Features
 
-### Four work modes
+### Three work modes
 
-Backboard Desktop ships four distinct window modes over the same workspace, switchable from
+Backboard Desktop ships three distinct window modes over the same workspace, switchable from
 the title bar:
 
 - **Simple** — A streamlined agent workbench. One or more agent sessions side by side, with a
@@ -24,8 +24,6 @@ the title bar:
 - **Advanced** — A multi-session command surface for supervising many concurrent agents at
   once. View sessions as a grid of cards or a kanban board bucketed by status (Running,
   Needs Attention, Done).
-- **Jarvis** — A cinematic, voice-driven spatial canvas. Free-floating glass cards over a
-  cycling backdrop, with launcher tiles for agents, terminals, browsers, files, and more.
 
 ### Agent-first workflow
 
@@ -52,8 +50,7 @@ the title bar:
 
 - **Changes view** — See every file the agent touched, with inline diffs and a review
   strip for accepting or rejecting changes.
-- **Integrated terminal** — Attach a live shell to any session. Jarvis supports up to four
-  terminal slots with their own lifecycle.
+- **Integrated terminal** — Attach a live shell to any session.
 - **Integrated browser** — Open a real browser view inside the IDE for testing web
   applications.
 - **File editor** — Full Monaco editor available as a modal overlay in Simple mode or as
@@ -87,7 +84,6 @@ Inside `vscode/src/vs/`, beyond the stock VS Code layers (`base`, `platform`, `e
 | --- | --- |
 | [sessions/](vscode/src/vs/sessions/) | The **Agents Window** — the Simple mode workbench. Its own layout, parts, and session-provider model. |
 | [optimus/](vscode/src/vs/optimus/) | The **Advanced** window — a grid/kanban of many concurrent sessions. |
-| [jarvis/](vscode/src/vs/jarvis/) | The **Jarvis** canvas — a cinematic, voice-driven surface with free-floating glass cards. |
 | [platform/agentHost/](vscode/src/vs/platform/agentHost/) | The agent host: process management, changesets, checkpoints, git integration, and one subdirectory per agent backend (`cliTs`, `claude`, `codex`, `copilot`). |
 
 Layering rule: `vs/sessions` may import from `vs/workbench` and below, but **`vs/workbench`
@@ -158,23 +154,19 @@ cd vscode/cli-ts && bun install
 
 ---
 
-## The four modes
+## The three modes
 
-The app is really four different windows over the same workspace. Internally they are window
-*kinds* — `'editor' | 'agents' | 'jarvis' | 'optimus'`
-([jarvisBridge.ts:109](vscode/src/vs/jarvis/electron-browser/jarvisBridge.ts#L109)).
+The app provides three window modes over the same workspace.
 
 | Mode | Window kind | Layer | For |
 | --- | --- | --- | --- |
 | **Simple** | `agents` | `vs/sessions` | Talking to one or a few agents. The default agent experience. |
 | **Editor** | `editor` | `vs/workbench` | Ordinary VS Code. Files, terminal, debugger, extensions. |
 | **Advanced** | `optimus` | `vs/optimus` | Supervising many concurrent sessions at once. |
-| **Jarvis** | `jarvis` | `vs/jarvis` | Voice-driven, spatial canvas. |
 
-The title-bar switcher exposes three of them — Editor, Advanced, Simple — in a fixed order so
+The title-bar switcher exposes all three modes — Editor, Advanced, Simple — in a fixed order so
 each keeps its position regardless of which window you are in
 ([backboardModeSwitcherActions.ts:174-193](vscode/src/vs/workbench/contrib/chat/electron-browser/backboardModeSwitcher/backboardModeSwitcherActions.ts#L174-L193)).
-Jarvis is the fourth kind and is reached through the Jarvis bridge rather than that menu.
 
 You can also boot straight into Simple mode:
 
@@ -254,26 +246,6 @@ Commands: `optimus.newSession`, `optimus.focusSession`, `optimus.deleteSession`,
 `optimus.closeSession`, `optimus.toggleViewMode`, `optimus.setViewMode`. The current mode is
 exposed as the `optimusViewMode` context key so chrome buttons mirror it.
 
-### Jarvis — the canvas
-
-A cinematic surface of free-floating glass cards over a cycling backdrop, driven by voice as
-much as by clicks. The launcher offers six tiles:
-
-| Tile | Does |
-| --- | --- |
-| Backboard Agent | Starts a native Backboard coding agent |
-| **BYOS Agent** | Pick any connected non-Backboard agent provider |
-| Terminal | Attaches a live shell to a glass card |
-| Browser | Opens a real integrated browser view |
-| File | Opens a file and reveals the editor |
-| Backdrop | Cycles the canvas worlds |
-
-Jarvis runs its own main-process bridge (`IJarvisBridge`) over dedicated IPC channels for
-terminal I/O, workspace-folder selection, window-kind switching, voice transcription
-(`vscode:jarvisVoiceTranscribe`), and natural-language command interpretation
-(`vscode:jarvisInterpretCommand`). It manages four terminal slots with their own lifecycle
-and tab bar. See [JARVIS.md](vscode/src/vs/jarvis/JARVIS.md).
-
 ---
 
 ## BYOS — Bring Your Own Session
@@ -281,13 +253,6 @@ and tab bar. See [JARVIS.md](vscode/src/vs/jarvis/JARVIS.md).
 BYOS is how non-Backboard agents plug in. Backboard's own agent is the native, first-class
 path; **BYOS is everything else** — Claude, Codex, and any future external or
 remote agent host.
-
-The important design point: *BYOS is a presentation category, not a hard-coded provider
-list.* It is built at runtime from `ISessionsProvidersService.getProviders()` and
-`ISessionsManagementService.getSessionTypesForFolder(...)`, filtered to agent-host session
-types with Backboard itself excluded. New providers appear automatically, and generic Cloud
-or Local session modes never leak into the picker
-([JARVIS_UNLIMITED_CANVAS_SPEC.md:455](backboard/src/vs/jarvis/JARVIS_UNLIMITED_CANVAS_SPEC.md)).
 
 Backends live under [platform/agentHost/node/](backboard/src/vs/platform/agentHost/node/) — one
 directory each for `cliTs`, `claude`, `codex`, and `copilot`. Sessions can run

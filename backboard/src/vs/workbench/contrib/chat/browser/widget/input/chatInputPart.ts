@@ -3,6 +3,16 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { ICommandService } from '../../../../../../platform/commands/common/commands.js';
+import { openChatEdit } from '../chatEditNavigation.js';
+import { IChatSlashCommandService } from '../../../common/participants/chatSlashCommands.js';
+import { IFileDialogService } from '../../../../../../platform/dialogs/common/dialogs.js';
+import { ISearchService } from '../../../../../services/search/common/search.js';
+import { searchFilesAndFolders } from '../../../../search/browser/searchChatContext.js';
+import { VSBuffer } from '../../../../../../base/common/buffer.js';
+import { IAgentPluginService } from '../../../common/plugins/agentPluginService.js';
+import { isContributionEnabled } from '../../../common/enablement.js';
+
 import * as dom from '../../../../../../base/browser/dom.js';
 import { addDisposableListener } from '../../../../../../base/browser/dom.js';
 import { DEFAULT_FONT_FAMILY } from '../../../../../../base/browser/fonts.js';
@@ -17,7 +27,7 @@ import { equals as arraysEqual } from '../../../../../../base/common/arrays.js';
 import { DeferredPromise, RunOnceScheduler } from '../../../../../../base/common/async.js';
 import { IStringDictionary } from '../../../../../../base/common/collections.js';
 import { isDefined } from '../../../../../../base/common/types.js';
-import { CancellationToken } from '../../../../../../base/common/cancellation.js';
+import { CancellationToken, CancellationTokenSource } from '../../../../../../base/common/cancellation.js';
 import { Codicon } from '../../../../../../base/common/codicons.js';
 import { getErrorMessage } from '../../../../../../base/common/errors.js';
 import { Emitter, Event } from '../../../../../../base/common/event.js';
@@ -28,7 +38,7 @@ import { Disposable, DisposableMap, DisposableStore, IDisposable, MutableDisposa
 import { ResourceSet } from '../../../../../../base/common/map.js';
 import { MarshalledId } from '../../../../../../base/common/marshallingIds.js';
 import { Schemas } from '../../../../../../base/common/network.js';
-import { mixin } from '../../../../../../base/common/objects.js';
+import { equals as objectsEqual, mixin } from '../../../../../../base/common/objects.js';
 import { autorun, constObservable, derived, derivedOpts, IObservable, ISettableObservable, observableFromEvent, observableValue } from '../../../../../../base/common/observable.js';
 import { isMacintosh } from '../../../../../../base/common/platform.js';
 import { isEqual } from '../../../../../../base/common/resources.js';
@@ -61,7 +71,6 @@ import { MenuId, MenuItemAction } from '../../../../../../platform/actions/commo
 import { IActionWidgetService } from '../../../../../../platform/actionWidget/browser/actionWidget.js';
 import { IActionWidgetDropdownAction, IActionWidgetDropdownActionProvider, IActionWidgetDropdownOptions } from '../../../../../../platform/actionWidget/browser/actionWidgetDropdown.js';
 import { IConfigurationService } from '../../../../../../platform/configuration/common/configuration.js';
-import { ICommandService } from '../../../../../../platform/commands/common/commands.js';
 import { ContextKeyExpr, IContextKey, IContextKeyService, RawContextKey } from '../../../../../../platform/contextkey/common/contextkey.js';
 import { IContextViewService } from '../../../../../../platform/contextview/browser/contextView.js';
 import { FileOperationResult, IFileService, toFileOperationResult } from '../../../../../../platform/files/common/files.js';
@@ -91,7 +100,7 @@ import { AccessibilityCommandId } from '../../../../accessibility/common/accessi
 import { getSimpleCodeEditorWidgetOptions, getSimpleEditorOptions, setupSimpleEditorSelectionStyling } from '../../../../codeEditor/browser/simpleEditorOptions.js';
 import { IChatViewTitleActionContext } from '../../../common/actions/chatActions.js';
 import { ChatContextKeys } from '../../../common/actions/chatContextKeys.js';
-import { ChatRequestVariableSet, getImageAttachmentLimit, IChatRequestVariableEntry, isBrowserViewVariableEntry, isElementVariableEntry, isExplicitFileOrImageVariableEntry, isImageVariableEntry, isNotebookOutputVariableEntry, isPasteVariableEntry, isPromptFileVariableEntry, isPromptTextVariableEntry, isSCMHistoryItemChangeRangeVariableEntry, isSCMHistoryItemChangeVariableEntry, isSCMHistoryItemVariableEntry, isStringVariableEntry, OmittedState } from '../../../common/attachments/chatVariableEntries.js';
+import { PromptFileVariableKind, toPromptFileVariableEntry, ChatRequestVariableSet, getImageAttachmentLimit, IChatRequestVariableEntry, isBrowserViewVariableEntry, isElementVariableEntry, isExplicitFileOrImageVariableEntry, isImageVariableEntry, isNotebookOutputVariableEntry, isPasteVariableEntry, isPromptFileVariableEntry, isPromptTextVariableEntry, isSCMHistoryItemChangeRangeVariableEntry, isSCMHistoryItemChangeVariableEntry, isSCMHistoryItemVariableEntry, isStringVariableEntry, OmittedState } from '../../../common/attachments/chatVariableEntries.js';
 import { ChatMode, getModeNameForTelemetry, IChatMode, IChatModes, IChatModeService } from '../../../common/chatModes.js';
 import { IChatExternalEdit, IChatFollowup, IChatPlanReview, IChatQuestionCarousel, IChatToolInvocation } from '../../../common/chatService/chatService.js';
 import { IChatSessionProviderOptionGroup, IChatSessionProviderOptionItem, IChatSessionsService, isAgentHostTarget, isIChatSessionFileChange2, localChatSessionType, SessionType } from '../../../common/chatSessionsService.js';
@@ -115,8 +124,8 @@ import { IChatAttachmentWidgetRegistry } from '../../attachments/chatAttachmentW
 import { DefaultChatAttachmentWidget, ElementChatAttachmentWidget, FileAttachmentWidget, ImageAttachmentWidget, BrowserViewAttachmentWidget, NotebookCellOutputChatAttachmentWidget, PasteAttachmentWidget, PromptFileAttachmentWidget, PromptTextAttachmentWidget, SCMHistoryItemAttachmentWidget, SCMHistoryItemChangeAttachmentWidget, SCMHistoryItemChangeRangeAttachmentWidget, TerminalCommandAttachmentWidget, ToolSetOrToolItemAttachmentWidget } from '../../attachments/chatAttachmentWidgets.js';
 import { ChatImplicitContexts } from '../../attachments/chatImplicitContext.js';
 import { ImplicitContextAttachmentWidget } from '../../attachments/implicitContextAttachment.js';
-import { IChatWidget, IChatWidgetViewModelChangeEvent, ISessionTypePickerDelegate, isIChatResourceViewContext, isIChatViewViewContext, IWorkspacePickerDelegate } from '../../chat.js';
-import { ITerminalChatService } from '../../../../terminal/browser/terminal.js';
+import { IChatWidgetService, IChatWidget, IChatWidgetViewModelChangeEvent, ISessionTypePickerDelegate, isIChatResourceViewContext, isIChatViewViewContext, IWorkspacePickerDelegate } from '../../chat.js';
+import { ITerminalService, ITerminalChatService } from '../../../../terminal/browser/terminal.js';
 import { ChatEditingShowChangesAction, ViewPreviousEditsAction } from '../../chatEditing/chatEditingActions.js';
 import { resizeImage } from '../../chatImageUtils.js';
 import { ChatSessionPickerActionItem, IChatSessionPickerDelegate } from '../../chatSessions/chatSessionPickerActionItem.js';
@@ -470,6 +479,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	private chatSessionHasTargetedModels: IContextKey<boolean>;
 	private chatSessionIsExternalAgent: IContextKey<boolean>;
 	private modelWidget: ModelPickerActionItem | undefined;
+	private combinedModelWidget: CombinedModelProviderPickerActionItem | undefined;
 	private modeWidget: ModePickerActionItem | undefined;
 	private permissionWidget: PermissionPickerActionItem | undefined;
 	private readonly permissionWidgetDisposeListener = this._register(new MutableDisposable<IDisposable>());
@@ -660,6 +670,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		@ILogService private readonly logService: ILogService,
 		@IFileService private readonly fileService: IFileService,
 		@IEditorService private readonly editorService: IEditorService,
+		@ICommandService private readonly commandService: ICommandService,
 		@IThemeService private readonly themeService: IThemeService,
 		@ITextModelService private readonly textModelResolverService: ITextModelService,
 		@IStorageService private readonly storageService: IStorageService,
@@ -1096,7 +1107,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			this._showCombinedPhonePickerSheet();
 			return;
 		}
-		this.modelWidget?.show();
+		if (this.combinedModelWidget) { this.combinedModelWidget.show(); } else { this.modelWidget?.show(); }
 	}
 
 	public openModePicker(): void {
@@ -1277,142 +1288,41 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		return dynamicVariableModel?.variables.filter(variable => getBackboardCapabilityOptionId(variable.id) !== undefined) ?? [];
 	}
 
-	/**
-	 * Reflect the backend capability state in the actual Monaco text model. The
-	 * text is registered as a dynamic variable, so it is parsed and rendered as
-	 * part of the prompt instead of living in a sibling DOM lane beside it.
-	 */
+	private readonly capabilityChipDisposables = this._register(new DisposableStore());
+	private capabilityChips: HTMLElement | undefined;
+
 	private syncBackboardCapabilityTokensFromOptions(): void {
-		if (this.isSyncingBackboardCapabilityTokens || !this.hasBackboardConfigResolved()) {
+		if (this.isSyncingBackboardCapabilityTokens || !this.hasBackboardConfigResolved() || !this.inputContainer) {
 			return;
 		}
-
-		const dynamicVariableModel = this._widget?.getContrib<ChatDynamicVariableModel>(ChatDynamicVariableModel.ID);
-		const editorModel = this._inputEditor?.getModel();
-		if (!dynamicVariableModel || !editorModel) {
-			return;
-		}
-
-		const options = this.getBackboardGenericConfigOptions();
-		const optionsById = new Map(options.map(option => [option.id, option]));
-		const selectedOptions = options.filter(option => option.composerSelected);
-		const selectedOptionIds = new Set(selectedOptions.map(option => option.id));
-		const capabilityVariables = this.getBackboardCapabilityVariables();
-
+		// Migrate existing draft tokens without changing the selected backend options.
 		this.isSyncingBackboardCapabilityTokens = true;
 		try {
-			// A capability switched off in the settings menu must disappear from
-			// the prompt as well. Work from the end so earlier ranges stay stable.
-			const staleVariables = capabilityVariables
-				.filter(variable => {
-					const optionId = getBackboardCapabilityOptionId(variable.id);
-					return optionId !== undefined && (!optionsById.has(optionId) || !selectedOptionIds.has(optionId));
-				})
-				.sort((a, b) => editorModel.getOffsetAt(Range.getStartPosition(b.range)) - editorModel.getOffsetAt(Range.getStartPosition(a.range)));
-			for (const variable of staleVariables) {
+			for (const variable of [...this.getBackboardCapabilityVariables()].reverse()) {
 				this.removeBackboardCapabilityToken(variable.range);
-			}
-
-			const existingOptionIds = new Set(
-				this.getBackboardCapabilityVariables()
-					.map(variable => getBackboardCapabilityOptionId(variable.id))
-					.filter(isDefined)
-			);
-			const isEditingRequest = this.currentlyEditingInputKey?.get() === true || this.container.closest('.chat-edit-input-container') !== null;
-			for (const option of selectedOptions) {
-				if (!existingOptionIds.has(option.id)) {
-					if (!isEditingRequest || !this.restoreBackboardCapabilityTokenReference(dynamicVariableModel, option)) {
-						this.insertBackboardCapabilityToken(dynamicVariableModel, option);
-					}
-					existingOptionIds.add(option.id);
-				}
 			}
 		} finally {
 			this.isSyncingBackboardCapabilityTokens = false;
 		}
-	}
-
-	private restoreBackboardCapabilityTokenReference(dynamicVariableModel: ChatDynamicVariableModel, option: IAgentHostGenericConfigOption): boolean {
-		const model = this._inputEditor.getModel();
-		if (!model) {
-			return false;
+		this.capabilityChipDisposables.clear();
+		if (!this.capabilityChips) {
+			this.capabilityChips = dom.$('.backboard-capability-chips');
+			this.inputContainer.insertBefore(this.capabilityChips, this.editorContainer);
 		}
-
-		const value = model.getValue();
-		const tokenText = getBackboardActiveOptionLabel(option);
-		let tokenStartOffset = value.indexOf(tokenText);
-		while (tokenStartOffset >= 0) {
-			const tokenEndOffset = tokenStartOffset + tokenText.length;
-			const hasLeadingBoundary = tokenStartOffset === 0 || /\s/.test(value.charAt(tokenStartOffset - 1));
-			const hasTrailingBoundary = tokenEndOffset === value.length || /\s/.test(value.charAt(tokenEndOffset));
-			if (hasLeadingBoundary && hasTrailingBoundary) {
-				const tokenStart = model.getPositionAt(tokenStartOffset);
-				const tokenEnd = model.getPositionAt(tokenEndOffset);
-				dynamicVariableModel.addReference({
-					id: getBackboardCapabilityVariableId(option.id),
-					range: Range.fromPositions(tokenStart, tokenEnd),
-					fullName: tokenText,
-					icon: getBackboardGenericOptionIcon(option.id),
-					modelDescription: option.description,
-					data: option.valueLabel ?? option.activationValue ?? tokenText,
-					_meta: {
-						backboardCapability: true,
-						backboardCapabilityId: option.id,
-						backboardCapabilityValue: option.valueLabel,
-					},
-				});
-				return true;
-			}
-			tokenStartOffset = value.indexOf(tokenText, tokenStartOffset + tokenText.length);
+		dom.clearNode(this.capabilityChips);
+		const selected = this.getBackboardGenericConfigOptions().filter(option => option.composerSelected && option.id !== 'notifications' && option.id !== 'notify');
+		this.capabilityChips.style.display = selected.length ? '' : 'none';
+		for (const option of selected) {
+			const label = getBackboardActiveOptionLabel(option);
+			const chip = dom.append(this.capabilityChips, dom.$('button.backboard-capability-chip', { type: 'button', 'aria-label': localize('backboardCapability.remove', "Remove {0}", label) })) as HTMLButtonElement;
+			dom.append(chip, dom.$('span.codicon.codicon-add', { 'aria-hidden': 'true' }));
+			dom.append(chip, dom.$('span', undefined, label));
+			chip.disabled = option.deactivationValue === undefined;
+			this.capabilityChipDisposables.add(dom.addDisposableListener(chip, 'click', event => {
+				event.stopPropagation();
+				if (option.deactivationValue !== undefined) { option.setValue(option.deactivationValue); }
+			}));
 		}
-
-		return false;
-	}
-
-	private insertBackboardCapabilityToken(dynamicVariableModel: ChatDynamicVariableModel, option: IAgentHostGenericConfigOption): void {
-		const model = this._inputEditor.getModel();
-		if (!model) {
-			return;
-		}
-
-		let position = this._inputEditor.getPosition() ?? getLastPosition(model);
-		const containingVariable = this.getBackboardCapabilityVariables().find(variable => Range.containsPosition(variable.range, position));
-		if (containingVariable) {
-			position = Range.getEndPosition(containingVariable.range);
-		}
-
-		const value = model.getValue();
-		const insertionOffset = model.getOffsetAt(position);
-		const leadingSpace = insertionOffset > 0 && !/\s/.test(value.charAt(insertionOffset - 1)) ? ' ' : '';
-		const trailingSpace = insertionOffset >= value.length || !/\s/.test(value.charAt(insertionOffset)) ? ' ' : '';
-		const tokenText = getBackboardActiveOptionLabel(option);
-		const insertedText = `${leadingSpace}${tokenText}${trailingSpace}`;
-		if (!this._inputEditor.executeEdits(BACKBOARD_CAPABILITY_EDIT_SOURCE, [{
-			range: Range.fromPositions(position),
-			text: insertedText,
-		}])) {
-			return;
-		}
-
-		const tokenStartOffset = insertionOffset + leadingSpace.length;
-		const tokenEndOffset = tokenStartOffset + tokenText.length;
-		const tokenStart = model.getPositionAt(tokenStartOffset);
-		const tokenEnd = model.getPositionAt(tokenEndOffset);
-		dynamicVariableModel.addReference({
-			id: getBackboardCapabilityVariableId(option.id),
-			range: Range.fromPositions(tokenStart, tokenEnd),
-			fullName: tokenText,
-			icon: getBackboardGenericOptionIcon(option.id),
-			modelDescription: option.description ?? localize('backboardCapability.enabled', "{0} is enabled for this chat turn.", tokenText),
-			data: option.valueLabel ?? option.activationValue ?? tokenText,
-			_meta: {
-				backboardCapability: true,
-				backboardCapabilityId: option.id,
-				backboardCapabilityValue: option.valueLabel,
-			},
-		});
-
-		this._inputEditor.setPosition(model.getPositionAt(insertionOffset + insertedText.length));
 	}
 
 	private removeBackboardCapabilityToken(range: IRange): void {
@@ -3593,7 +3503,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 					// In the Sessions window, fold the provider (session type) and
 					// model pickers into one combined chip with a provider rail.
 					if (this.options.isSessionsWindow && this.options.sessionTypePickerDelegate?.setActiveSessionProvider) {
-						return this.instantiationService.createInstance(
+						return this.combinedModelWidget = this.instantiationService.createInstance(
 							CombinedModelProviderPickerActionItem,
 							action,
 							itemDelegate,
@@ -4739,6 +4649,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 						diffMeta: { added: edit.diff?.added ?? 0, removed: edit.diff?.removed ?? 0 },
 						isDeletion: edit.editKind === 'delete',
 						originalUri: edit.beforeContentUri ?? edit.originalUri,
+						modifiedUri: edit.afterContentUri,
 					},
 				});
 			}
@@ -4814,6 +4725,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 				diffMeta: { added: diff.added, removed: diff.removed },
 				isDeletion: false,
 				originalUri: diff.originalURI,
+				modifiedUri: diff.modifiedURI,
 			}
 		});
 	}
@@ -4931,8 +4843,8 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			button.label = buttonLabel;
 			button.element.setAttribute('aria-label', localize('chatEditingSession.ariaLabelWithCounts', '{0}, {1} lines added, {2} lines removed', buttonLabel, added, removed));
 
-			this._workingSetLinesAddedSpan.value.textContent = `+${added}`;
-			this._workingSetLinesRemovedSpan.value.textContent = `-${removed}`;
+			this._workingSetLinesAddedSpan.value.textContent = `+${added.toLocaleString()}`;
+			this._workingSetLinesRemovedSpan.value.textContent = `-${removed.toLocaleString()}`;
 
 			dom.setVisibility(shouldShowEditingSession, this.chatEditingSessionWidgetContainer);
 		}));
@@ -4961,6 +4873,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		this._chatEditsActionsDisposables.add(autorun(reader => {
 			const collapsed = this._workingSetCollapsed.read(reader);
 			button.icon = collapsed ? Codicon.chevronRight : Codicon.chevronDown;
+			button.element.setAttribute('aria-expanded', String(!collapsed));
 			workingSetContainer.classList.toggle('collapsed', collapsed);
 		}));
 
@@ -4976,21 +4889,10 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 					const modifiedFileUri = e.element.reference;
 					const originalUri = e.element.options?.originalUri;
 
-					if (e.element.options?.isDeletion && originalUri) {
-						await this.editorService.openEditor({
-							resource: originalUri, // instead of modified, because modified will not exist
-							options: e.editorOptions
-						}, e.sideBySide ? SIDE_GROUP : ACTIVE_GROUP);
-						return;
-					}
-
-					// If there's a originalUri, open as diff editor
-					if (originalUri) {
-						await this.editorService.openEditor({
-							original: { resource: originalUri },
-							modified: { resource: modifiedFileUri },
-							options: e.editorOptions
-						}, e.sideBySide ? SIDE_GROUP : ACTIVE_GROUP);
+					if (originalUri || e.element.options?.modifiedUri) {
+						await openChatEdit(this.editorService, this.commandService, modifiedFileUri,
+							originalUri, e.element.options?.isDeletion ? undefined : e.element.options?.modifiedUri ?? modifiedFileUri,
+							!!e.element.options?.isDeletion, { editorOptions: e.editorOptions, openToSide: e.sideBySide });
 						return;
 					}
 
@@ -5015,6 +4917,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			dom.append(innerContainer, workingSetContainer);
 		}
 
+		let renderedEntries: readonly IChatCollapsibleListItem[] | undefined;
 		store.add(autorun(reader => {
 			const editEntries = editSessionEntriesObs.read(reader);
 			const sessionFileEntries = sessionEntriesObs.read(reader);
@@ -5023,6 +4926,11 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			// we can combine these two arrays since local chat sessions use edit session
 			// entries, while background chat sessions use session file changes.
 			const allEntries = editEntries.concat(sessionFileEntries);
+			// Streaming can recompute equivalent entries; preserve rows, focus and scroll.
+			if (renderedEntries && arraysEqual(renderedEntries, allEntries, objectsEqual)) {
+				return;
+			}
+			renderedEntries = allEntries;
 
 			const maxItemsShown = 6;
 			const itemsShown = Math.min(allEntries.length, maxItemsShown);
@@ -5378,10 +5286,6 @@ class HiddenRenderedActionViewItem extends BaseActionViewItem {
 const BACKBOARD_CAPABILITY_VARIABLE_PREFIX = 'backboard-capability:';
 const BACKBOARD_CAPABILITY_EDIT_SOURCE = 'backboardCapabilityToken';
 
-function getBackboardCapabilityVariableId(optionId: string): string {
-	return `${BACKBOARD_CAPABILITY_VARIABLE_PREFIX}${optionId}`;
-}
-
 function getBackboardCapabilityOptionId(variableId: string): string | undefined {
 	return variableId.startsWith(BACKBOARD_CAPABILITY_VARIABLE_PREFIX)
 		? variableId.slice(BACKBOARD_CAPABILITY_VARIABLE_PREFIX.length)
@@ -5443,17 +5347,88 @@ function getBackboardActiveOptionLabel(option: IAgentHostGenericConfigOption): s
 }
 
 class BackboardComposerOptionsActionViewItem extends ActionWidgetDropdownActionViewItem {
+	private readonly flowDisposables = this._register(new DisposableStore());
+	private drawerOpen = false;
+
+	override render(container: HTMLElement): void {
+		super.render(container);
+		const toggle = () => {
+			if (this.drawerOpen) { this.flowDisposables.clear(); } else { this.showDrawer(); }
+		};
+		this._register(dom.addDisposableListener(container, 'mousedown', event => {
+			if (event.button === 0) {
+				event.preventDefault();
+				event.stopImmediatePropagation();
+			}
+		}, true));
+		this._register(dom.addDisposableListener(container, 'click', event => {
+			event.preventDefault();
+			event.stopImmediatePropagation();
+			toggle();
+		}, true));
+		this._register(dom.addDisposableListener(container, 'keydown', event => {
+			if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown') {
+				event.preventDefault();
+				event.stopImmediatePropagation();
+				toggle();
+			}
+		}, true));
+	}
+
+	private showDrawer(focusId?: string): void {
+		const body = this.openFlow(localize('composer.add', "Add Context"), true);
+		this.flowDisposables.add(this.inputPart.onDidChangeBackboardGenericConfigOptions(() => {
+			const active = body.ownerDocument.activeElement;
+			this.showDrawer(active instanceof HTMLElement ? active.dataset.actionId : undefined);
+		}));
+		let pluginsHeadingShown = false;
+		let previousCategory = 0;
+		for (const action of this.getActions().sort((a, b) => (a.category?.order ?? 0) - (b.category?.order ?? 0))) {
+			const category = action.category?.order ?? 0;
+			if (category !== previousCategory || action.id === 'backboardComposerAdd.files') {
+				dom.append(body, dom.$('.backboard-composer-menu-separator', { role: 'separator' }));
+			}
+			previousCategory = category;
+			if (action.id.startsWith('backboardComposerAdd.plugin.') && !pluginsHeadingShown) {
+				dom.append(body, dom.$('.backboard-composer-drawer-heading', undefined, localize('composer.plugins', "Plugins")));
+				pluginsHeadingShown = true;
+			}
+			const button = this.flowButton(body, '', async () => {
+				await action.run();
+				if (body.isConnected) { this.showDrawer(action.id); }
+			});
+			button.classList.add('backboard-composer-drawer-option');
+			button.dataset.actionId = action.id;
+			button.setAttribute('role', 'menuitem');
+			button.disabled = !action.enabled;
+			button.title = action.tooltip || action.label;
+			if (action.icon) { dom.append(button, dom.$(`span${ThemeIcon.asCSSSelector(action.icon)}`, { 'aria-hidden': 'true' })); }
+			dom.append(button, dom.$('span', undefined, action.label));
+			dom.append(button, dom.$('span.backboard-composer-drawer-value', undefined, typeof action.description === 'string' ? action.description : action.description?.value ?? ''));
+			if (focusId === action.id) { button.focus(); }
+		}
+		if (!focusId) { body.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus(); }
+	}
 	constructor(
-		private readonly sourceAction: MenuItemAction,
+		sourceAction: MenuItemAction,
 		private readonly inputPart: ChatInputPart,
-		private readonly pickerOptions: IChatInputPickerOptions,
+		pickerOptions: IChatInputPickerOptions,
 		private readonly menuKind: 'add' | 'options',
 		@IActionWidgetService actionWidgetService: IActionWidgetService,
 		@IKeybindingService keybindingService: IKeybindingService,
 		@IContextKeyService contextKeyService: IContextKeyService,
 		@ITelemetryService telemetryService: ITelemetryService,
 		@IContextViewService private readonly contextViewService: IContextViewService,
-		@ICommandService private readonly commandService: ICommandService,
+		@IFileService private readonly fileService: IFileService,
+		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
+		@IAgentPluginService private readonly pluginService: IAgentPluginService,
+		@IFileDialogService private readonly fileDialogService: IFileDialogService,
+		@ISearchService private readonly searchService: ISearchService,
+		@IConfigurationService private readonly composerConfigurationService: IConfigurationService,
+		@IChatSessionsService private readonly composerSessionsService: IChatSessionsService,
+		@ITerminalService private readonly terminalService: ITerminalService,
+		@IChatSlashCommandService private readonly slashCommandService: IChatSlashCommandService,
+		@IChatWidgetService private readonly composerWidgetService: IChatWidgetService,
 	) {
 		const isAddMenu = menuKind === 'add';
 		const actionProvider: IActionWidgetDropdownActionProvider = {
@@ -5469,7 +5444,7 @@ class BackboardComposerOptionsActionViewItem extends ActionWidgetDropdownActionV
 			// Give the menu a comfortable minimum width so short lists don't look
 			// cramped and the current value never gets clipped by the anchor.
 			listOptions: isAddMenu
-				? { minWidth: 360, maxWidth: 480, inlineDescription: true }
+				? { minWidth: 260, maxWidth: 300, inlineDescription: true, className: 'backboard-composer-add-menu' }
 				: { minWidth: 240 },
 		};
 		super(sourceAction, options, actionWidgetService, keybindingService, contextKeyService, telemetryService);
@@ -5478,22 +5453,35 @@ class BackboardComposerOptionsActionViewItem extends ActionWidgetDropdownActionV
 	private getActions(): IActionWidgetDropdownAction[] {
 		const actions: IActionWidgetDropdownAction[] = [];
 		if (this.menuKind === 'add') {
-			actions.push({
-				id: 'backboardComposerAdd.filesAndFolders',
-				label: localize('backboardComposerAdd.filesAndFolders', "Files and folders"),
-				description: localize('backboardComposerAdd.filesAndFolders.description', "Attach files, folders, or editor context"),
-				class: undefined,
-				tooltip: localize('backboardComposerAdd.filesAndFolders.tooltip', "Choose files and folders to attach"),
-				icon: Codicon.attach,
-				category: { label: localize('backboardComposerAdd.category', "Add"), order: 0, showHeader: true },
-				enabled: true,
-				run: () => this.sourceAction.run(this.pickerOptions.actionContext),
-			});
+			const entries = [
+				{ id: 'upload', label: localize('composer.upload', "Upload file"), icon: Codicon.attach, run: () => this.uploadFiles() },
+				{ id: 'files', label: localize('composer.filesOnly', "Files"), icon: Codicon.code, run: () => this.showContextPicker('file') },
+				{ id: 'directories', label: localize('composer.directories', "Directories"), icon: Codicon.folder, run: () => this.showContextPicker('directory') },
+				{ id: 'conversations', label: localize('composer.conversations', "Conversations"), icon: Codicon.comment, run: () => this.showContextPicker('conversation') },
+				{ id: 'terminal', label: localize('composer.terminal', "Terminal"), icon: Codicon.terminal, run: () => this.showContextPicker('terminal') },
+				{ id: 'commands', label: localize('composer.commands', "Slash commands"), icon: Codicon.edit, run: () => this.showContextPicker('command') },
+			];
+			for (const entry of entries) {
+				actions.push({ ...entry, id: `backboardComposerAdd.${entry.id}`, class: undefined, tooltip: entry.label,
+					category: { label: localize('composer.context', "Context"), order: 0, showHeader: false }, enabled: true });
+			}
 		}
+		if (this.menuKind === 'add') {
+			const pluginsCategory = { label: localize('composer.plugins', "Plugins"), order: 2, showHeader: false };
+			for (const plugin of this.pluginService.plugins.get().filter(plugin => isContributionEnabled(plugin.enablement.get()))) {
+				actions.push({
+					id: `backboardComposerAdd.plugin.${plugin.uri}`, label: plugin.label,
+					icon: Codicon.extensions, class: undefined, tooltip: plugin.label, category: pluginsCategory, enabled: true,
+					run: () => this.openNestedPicker(() => this.showResourceList(plugin.label, plugin.commands.get())),
+				});
+			}
+		}
+
 		const featuresCategory = this.menuKind === 'add'
-			? { label: localize('backboardComposerAdd.featuresCategory', "Features"), order: 1, showHeader: true }
+			? { label: localize('backboardComposerAdd.featuresCategory', "Features"), order: 1, showHeader: false }
 			: undefined;
 		const genericOptions = this.inputPart.getBackboardGenericConfigOptions()
+			.filter(option => option.id !== 'notifications' && option.id !== 'notify')
 			.filter(option => this.menuKind !== 'add' || (!isBackboardReasoningOption(option) && option.id !== SessionConfigKey.Mode));
 		for (const option of genericOptions) {
 			const combined = option.valueLabel
@@ -5508,17 +5496,17 @@ class BackboardComposerOptionsActionViewItem extends ActionWidgetDropdownActionV
 				// dimmed segment so long values are never clipped by the title's
 				// ellipsis, and the menu reads like a settings list.
 				label: option.label,
-				description: this.menuKind === 'add' ? (option.description ?? option.valueLabel) : option.valueLabel,
+				description: option.valueLabel,
 				class: undefined,
 				tooltip: option.description ?? combined,
 				icon: this.getGenericOptionIcon(option.id),
 				category: featuresCategory,
 				enabled: true,
 				run: () => option.activationValue !== undefined
-					? option.setValue(option.activationValue)
+					? option.setValue(option.composerSelected && option.deactivationValue !== undefined ? option.deactivationValue : option.activationValue)
 					: this.openNestedPicker(() => isReasoningSlider
 						? this.showReasoningSlider(option)
-						: option.show(this.inputPart.getBackboardOptionsAnchor())),
+						: this.showEnumOption(option)),
 			});
 		}
 		if (genericOptions.length === 0) {
@@ -5540,20 +5528,266 @@ class BackboardComposerOptionsActionViewItem extends ActionWidgetDropdownActionV
 				run: () => undefined,
 			});
 		}
-		if (this.menuKind === 'add') {
-			actions.push({
-				id: 'backboardComposerAdd.settings',
-				label: localize('backboardComposerAdd.settings', "Settings"),
-				description: localize('backboardComposerAdd.settings.description', "Configure Backboard and chat preferences"),
-				class: undefined,
-				tooltip: localize('backboardComposerAdd.settings.tooltip', "Open Settings"),
-				icon: Codicon.settingsGear,
-				category: { label: localize('backboardComposerAdd.settingsCategory', "Settings"), order: 2, showHeader: true },
-				enabled: true,
-				run: () => this.commandService.executeCommand('workbench.action.openSettings'),
-			});
-		}
+
 		return actions;
+	}
+
+	private showEnumOption(option: IAgentHostGenericConfigOption): void {
+		const body = this.openFlow(option.label);
+		this.flowButton(body, localize('composer.back', "Back"), () => this.showDrawer());
+		const info = option.getEnumInfo();
+		if (info) {
+			for (const [index, value] of info.values.entries()) {
+				const button = this.flowButton(body, info.labels[index], () => {
+					option.setValue(value);
+					for (const sibling of body.querySelectorAll('[aria-pressed]')) { sibling.setAttribute('aria-pressed', 'false'); }
+					button.setAttribute('aria-pressed', 'true');
+				});
+				button.setAttribute('aria-pressed', String(value === info.current));
+			}
+		}
+	}
+
+	private openFlow(title: string, menu = false): HTMLElement {
+		this.flowDisposables.clear();
+		this.drawerOpen = true;
+		this.element?.setAttribute('aria-expanded', 'true');
+		this.flowDisposables.add(toDisposable(() => {
+			this.drawerOpen = false;
+			this.element?.setAttribute('aria-expanded', 'false');
+		}));
+		const anchor = this.element ?? this.inputPart.getBackboardOptionsAnchor();
+		const host = anchor?.closest<HTMLElement>('.interactive-input-part');
+		const root = dom.append(host ?? anchor!, dom.$('.backboard-composer-flow', { role: menu ? 'menu' : 'dialog', 'aria-label': title }));
+		root.classList.toggle('backboard-composer-context-menu', menu);
+		if (host) { host.insertBefore(root, host.firstChild); }
+		const position = () => {
+			if (!anchor || !host) { return; }
+			const bounds = anchor.getBoundingClientRect();
+			const parent = host.getBoundingClientRect();
+			root.style.left = `${Math.max(0, bounds.left - parent.left)}px`;
+			root.style.bottom = `${parent.bottom - bounds.top + 6}px`;
+		};
+		position();
+		this.flowDisposables.add(dom.addDisposableListener(dom.getWindow(root), 'resize', () => this.flowDisposables.clear()));
+		this.flowDisposables.add(dom.addDisposableListener(root.ownerDocument, 'pointerdown', event => {
+			if (!root.contains(event.target as Node) && !anchor?.contains(event.target as Node)) { this.flowDisposables.clear(); }
+		}, true));
+		this.flowDisposables.add(dom.addDisposableListener(root, 'keydown', event => {
+			const buttons = Array.from(root.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')).filter(button => button.offsetParent !== null);
+			const index = buttons.indexOf(root.ownerDocument.activeElement as HTMLButtonElement);
+			let next: number | undefined;
+			if (event.key === 'ArrowDown') { next = (index + 1) % buttons.length; }
+			if (event.key === 'ArrowUp') { next = (index - 1 + buttons.length) % buttons.length; }
+			if (event.key === 'Home') { next = 0; }
+			if (event.key === 'End') { next = buttons.length - 1; }
+			if (next !== undefined) { event.preventDefault(); event.stopPropagation(); buttons[next]?.focus(); }
+			if (event.key === 'Tab') { this.flowDisposables.clear(); this.inputPart.focus(); }
+		}));
+		this.flowDisposables.add(toDisposable(() => root.remove()));
+		const header = dom.append(root, dom.$('.backboard-composer-flow-header'));
+		dom.append(header, dom.$('strong', undefined, title));
+		this.flowButton(header, localize('composer.close', "Close"), () => { this.flowDisposables.clear(); this.inputPart.focus(); });
+		this.flowDisposables.add(dom.addDisposableListener(root, 'keydown', event => {
+			if ((event as KeyboardEvent).key === 'Escape') { event.stopPropagation(); this.flowDisposables.clear(); this.inputPart.focus(); }
+		}));
+		const body = dom.append(root, dom.$('.backboard-composer-flow-body'));
+		return body;
+	}
+
+	private flowButton(parent: HTMLElement, label: string, run: () => unknown): HTMLButtonElement {
+		const button = dom.append(parent, dom.$('button', { type: 'button' }, label)) as HTMLButtonElement;
+		this.flowDisposables.add(dom.addDisposableListener(button, 'click', event => { event.stopPropagation(); void run(); }));
+		return button;
+	}
+
+	private flowField(parent: HTMLElement, label: string, multiline = false): HTMLInputElement | HTMLTextAreaElement {
+		const wrapper = dom.append(parent, dom.$('label', undefined, label));
+		const field = dom.append(wrapper, dom.$(multiline ? 'textarea' : 'input', { 'aria-label': label })) as HTMLInputElement | HTMLTextAreaElement;
+		return field;
+	}
+
+	private showResourceList(title: string, resources: readonly { name: string; description?: string; uri: URI }[]): void {
+		const body = this.openFlow(title);
+		if (!resources.length) { dom.append(body, dom.$('p', undefined, localize('composer.resources.empty', "No skills or commands are installed here yet."))); }
+		for (const resource of resources) {
+			const button = this.flowButton(body, resource.name, () => {
+				this.inputPart.attachmentModel.addContext(toPromptFileVariableEntry(resource.uri, PromptFileVariableKind.Instruction));
+				this.flowDisposables.clear(); this.inputPart.focus();
+			});
+			button.title = resource.description ?? resource.name;
+			this.flowButton(body, localize('composer.skill.edit', "Edit {0}", resource.name), () => this.editSkill(resource.uri, resource.name));
+		}
+	}
+
+	private async editSkill(uri: URI, name: string): Promise<void> {
+		const body = this.openFlow(name);
+		const text = this.flowField(body, localize('composer.skill.source', "Skill instructions"), true);
+		const status = dom.append(body, dom.$('p.backboard-composer-flow-status', { role: 'status' }));
+		try {
+			const original = await this.fileService.readFile(uri);
+			if (!body.isConnected) { return; }
+			text.value = original.value.toString();
+			this.flowButton(body, localize('composer.skill.saveChanges', "Save changes"), async () => {
+				try {
+					await this.fileService.writeFile(uri, VSBuffer.fromString(text.value), { mtime: original.mtime, etag: original.etag });
+					status.textContent = localize('composer.saved', "Saved");
+				} catch (error) { status.textContent = String(error); }
+			});
+			text.focus();
+		} catch (error) { status.textContent = String(error); }
+	}
+
+	private async uploadFiles(): Promise<void> {
+		this.flowDisposables.clear();
+		const files = await this.fileDialogService.showOpenDialog({ canSelectMany: true, canSelectFiles: true, canSelectFolders: false });
+		for (const file of files ?? []) { await this.inputPart.attachmentModel.addFile(file); }
+		this.inputPart.focus();
+	}
+
+
+	private showUsageDetails(): void {
+		if (!this.inputPart.showContextUsageDetails()) {
+			const body = this.openFlow(localize('composer.usage', "Context Usage"));
+			dom.append(body, dom.$('p.backboard-composer-flow-status', { role: 'status' }, localize('composer.usage.empty', "Context usage is available after starting a conversation.")));
+			body.parentElement?.querySelector<HTMLButtonElement>('button')?.focus();
+		}
+	}
+
+	private showContextPicker(kind: 'file' | 'directory' | 'conversation' | 'terminal' | 'command'): void {
+		const body = this.openFlow(localize('composer.selectContext', "Select Context"));
+		const root = body.parentElement!;
+		root.classList.add('backboard-composer-inline-picker');
+		const host = root.parentElement;
+		const editorBounds = this.inputPart.inputEditor.getDomNode()?.getBoundingClientRect();
+		if (host && editorBounds) { root.style.bottom = `${host.getBoundingClientRect().bottom - editorBounds.top + 6}px`; }
+		const editor = this.inputPart.inputEditor;
+		const model = editor.getModel();
+		const selection = editor.getSelection();
+		if (!model || !selection) { this.flowDisposables.clear(); return; }
+		const prefix = kind === 'command' ? '/' : `@${kind}:`;
+		const offset = model.getOffsetAt(selection.getStartPosition());
+		editor.executeEdits('backboardComposer', [{ range: selection, text: prefix }]);
+		this.inputPart.focus();
+		SuggestController.get(editor)?.cancelSuggestWidget();
+		let queryEnd = offset + prefix.length;
+		let selected = 0;
+		let generation = 0;
+		const resultsStore = this.flowDisposables.add(new DisposableStore());
+		const request = this.flowDisposables.add(new MutableDisposable<CancellationTokenSource>());
+		const refresh = async () => {
+			const current = ++generation;
+			request.value?.cancel();
+			request.value = new CancellationTokenSource();
+			const token = request.value.token;
+			const position = editor.getPosition();
+			if (!position) { return; }
+			queryEnd = model.getOffsetAt(position);
+			const typed = model.getValue().slice(offset, queryEnd);
+			if (!typed.startsWith(prefix) || typed.includes('\n')) { this.flowDisposables.clear(); return; }
+			const query = typed.slice(prefix.length);
+			resultsStore.clear();
+			dom.clearNode(body);
+			const status = dom.append(body, dom.$('p.backboard-composer-flow-status', { role: 'status' }, localize('composer.searching', "Searching…")));
+			type Pick = { label: string; description?: string; timestamp?: number; insertText?: string; runAfterSelection?: () => Promise<void>; icon: ThemeIcon; attach: () => void | Promise<void> };
+			const picks: Pick[] = [];
+			try {
+				if (kind === 'file' || kind === 'directory') {
+					for (const folder of this.workspaceContextService.getWorkspace().folders) {
+						let resources: URI[];
+						if (query) {
+							const found = await searchFilesAndFolders(folder.uri, query, true, token, undefined, this.composerConfigurationService, this.searchService);
+							resources = kind === 'file' ? found.files : found.folders;
+						} else {
+							const stat = await this.fileService.resolve(folder.uri);
+							resources = (stat.children ?? []).filter(child => !['.git', '.DS_Store', 'node_modules'].includes(child.name)).filter(child => kind === 'directory' ? child.isDirectory : !child.isDirectory).map(child => child.resource);
+							if (kind === 'directory') { resources.unshift(folder.uri); }
+						}
+						for (const uri of resources.slice(0, 100)) {
+							picks.push({ label: uri.path.split('/').pop() ?? uri.path, description: uri.path, icon: kind === 'file' ? Codicon.file : Codicon.folder,
+								attach: async () => { if (kind === 'file') { await this.inputPart.attachmentModel.addFile(uri); } else { this.inputPart.attachmentModel.addFolder(uri); } } });
+						}
+					}
+				} else if (kind === 'conversation') {
+					for await (const group of this.composerSessionsService.getChatSessionItems(undefined, token)) {
+						for (const item of group.items) {
+							if (!item.label.toLowerCase().includes(query.toLowerCase()) || isEqual(item.resource, this.composerWidgetService.getWidgetByInputUri(model.uri)?.viewModel?.sessionResource)) { continue; }
+							picks.push({ label: item.label, timestamp: item.timing.lastRequestEnded ?? item.timing.created, description: new Date(item.timing.lastRequestEnded ?? item.timing.created).toLocaleString(), icon: Codicon.comment,
+								attach: () => this.inputPart.attachmentModel.addContext({ kind: 'sessionReference', id: item.resource.toString(), name: item.label, value: item.resource, icon: Codicon.comment }) });
+						}
+					}
+				} else if (kind === 'command') {
+					const widget = this.composerWidgetService.getWidgetByInputUri(model.uri);
+					const sessionType = widget?.viewModel ? getChatSessionType(widget.viewModel.sessionResource) : SessionType.AgentHostBackboard;
+					const localCommands = [
+						{ name: 'model', detail: localize('composer.command.model', "Open model selector"), run: async () => { this.inputPart.openModelPicker(); } },
+						{ name: 'mode', detail: localize('composer.command.mode', "Open mode selector"), run: async () => { this.inputPart.openPermissionPicker(); } },
+						{ name: 'context', detail: localize('composer.command.context', "Show context window usage"), run: async () => { this.showUsageDetails(); } },
+						{ name: 'session-stats', detail: localize('composer.command.stats', "Show session statistics"), run: async () => { this.showUsageDetails(); } },
+					];
+					for (const command of localCommands) {
+						if (command.name.includes(query.toLowerCase())) {
+							picks.push({ label: `/${command.name}`, description: command.detail, icon: Codicon.edit, attach: () => {}, runAfterSelection: command.run });
+						}
+					}
+					for (const command of this.slashCommandService.getCommands(widget?.location ?? ChatAgentLocation.Chat, this.inputPart.currentModeKind)) {
+						if (!command.command.toLowerCase().includes(query.toLowerCase()) || !this.slashCommandService.hasCommand(command.command, sessionType)) { continue; }
+						if (command.when && !widget?.scopedContextKeyService.contextMatchesRules(command.when)) { continue; }
+						if (/skill|rule|codemap|^git$/i.test(command.command)) { continue; }
+						picks.push({ label: `/${command.command}`, description: command.detail, insertText: `/${command.command} `, icon: Codicon.edit, attach: () => {} });
+					}
+				} else {
+					for (const terminal of this.terminalService.instances) {
+						if (!terminal.title.toLowerCase().includes(query.toLowerCase())) { continue; }
+						picks.push({ label: terminal.title, icon: Codicon.terminal, attach: () => {
+							const lines: string[] = [];
+							for (const line of terminal.xterm?.getBufferReverseIterator() ?? []) {
+								lines.push(line);
+								if (lines.length >= 2000) { break; }
+							}
+							this.inputPart.attachmentModel.addContext({ kind: 'generic', id: `terminal:${terminal.instanceId}`, name: terminal.title, value: lines.reverse().join('\n'), icon: Codicon.terminal });
+						} });
+					}
+				}
+				if (!body.isConnected || token.isCancellationRequested || current !== generation) { return; }
+				status.textContent = picks.length ? '' : localize('composer.noMatches', "No matches found");
+				if (kind === 'conversation') { picks.sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0)); }
+				selected = 0;
+				for (const pick of picks) {
+					const button = dom.append(body, dom.$('button.backboard-composer-context-result', { type: 'button', role: 'option', 'aria-selected': String(body.querySelectorAll('button').length === 0) })) as HTMLButtonElement;
+					dom.append(button, dom.$(`span${ThemeIcon.asCSSSelector(pick.icon)}`, { 'aria-hidden': 'true' }));
+					const label = dom.append(button, dom.$('span.backboard-composer-result-label'));
+					dom.append(label, dom.$('span', undefined, pick.label));
+					if ((kind === 'conversation' || kind === 'command') && pick.description) { dom.append(label, dom.$('small', undefined, pick.description)); }
+					button.title = pick.description ?? pick.label;
+					resultsStore.add(dom.addDisposableListener(button, 'mousedown', event => event.preventDefault()));
+					resultsStore.add(dom.addDisposableListener(button, 'click', async () => {
+						try {
+							await pick.attach();
+							if (!body.isConnected) { return; }
+							this.flowDisposables.clear();
+							editor.executeEdits('backboardComposer', [{ range: Range.fromPositions(model.getPositionAt(offset), model.getPositionAt(queryEnd)), text: pick.insertText ?? '' }]);
+							this.inputPart.focus();
+							await pick.runAfterSelection?.();
+						} catch (error) { status.textContent = String(error); }
+					}));
+				}
+			} catch (error) { if (body.isConnected && !token.isCancellationRequested) { status.textContent = String(error); } }
+		};
+		body.setAttribute('role', 'listbox');
+		this.flowDisposables.add(editor.onDidChangeModelContent(() => { void refresh(); }));
+		this.flowDisposables.add(dom.addDisposableListener(editor.getDomNode()!, 'keydown', event => {
+			const buttons = Array.from(body.querySelectorAll<HTMLButtonElement>('button'));
+			if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); this.flowDisposables.clear(); return; }
+			if (!['ArrowDown', 'ArrowUp', 'Enter', 'Tab'].includes(event.key)) { return; }
+			event.preventDefault(); event.stopImmediatePropagation();
+			if (!buttons.length) { return; }
+			if (event.key === 'Enter' || event.key === 'Tab') { buttons[selected]?.click(); return; }
+			selected = (selected + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length;
+			buttons.forEach((button, index) => button.setAttribute('aria-selected', String(index === selected)));
+			buttons[selected]?.scrollIntoView({ block: 'nearest' });
+		}, true));
+		void refresh();
 	}
 
 	private openNestedPicker(open: () => void): void {
@@ -5631,6 +5865,15 @@ class BackboardComposerOptionsActionViewItem extends ActionWidgetDropdownActionV
 	}
 
 	private getGenericOptionIcon(property: string): ThemeIcon {
+		if (this.menuKind === 'add') {
+			switch (property) {
+				case 'memory': case 'memoryMode': return Codicon.database;
+				case 'computerUse': case 'cua': return Codicon.deviceDesktop;
+				case 'browserUse': case 'browser': case 'webSearch': case 'web': return Codicon.globe;
+				case 'notifications': case 'notify': return Codicon.bell;
+				case 'imageGeneration': case 'images': return Codicon.fileMedia;
+			}
+		}
 		return getBackboardGenericOptionIcon(property);
 	}
 

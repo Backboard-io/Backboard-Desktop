@@ -52,6 +52,9 @@ export class TitlebarPart extends Part implements ITitlebarPart {
 	readonly maximumWidth: number = Number.POSITIVE_INFINITY;
 
 	get minimumHeight(): number {
+		if (this.environmentService.isOptimusWindow) {
+			return 0;
+		}
 		const wcoEnabled = isWeb && isWCOEnabled();
 		let value = DEFAULT_CUSTOM_TITLEBAR_HEIGHT;
 		if (wcoEnabled) {
@@ -159,10 +162,9 @@ export class TitlebarPart extends Part implements ITitlebarPart {
 		this.element.classList.toggle('optimus-titlebar', this.environmentService.isOptimusWindow);
 
 		if (this.environmentService.isOptimusWindow) {
-			// Optimus owns its persistent mode and layout chrome separately so
-			// collapsing panels cannot remove the controls. Keep the workbench
-			// titlebar structurally present, but do not mount the legacy sessions
-			// titlebar widgets that would duplicate the Optimus chrome.
+			// Optimus hosts mode and layout controls in its dashboard/session
+			// toolbar. Keep the titlebar part registered at zero height without
+			// mounting duplicate window chrome.
 			this.rootContainer = append(parent, $('div.optimus-titlebar-placeholder'));
 			return this.element;
 		}

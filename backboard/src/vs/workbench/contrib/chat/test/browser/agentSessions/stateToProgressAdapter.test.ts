@@ -1609,6 +1609,32 @@ suite('stateToProgressAdapter', () => {
 	});
 
 	suite('updateRunningToolSpecificData', () => {
+		test('refreshes detached lifecycle and display name after launcher completion without losing result', () => {
+			const tc = createCompletedToolCall({
+				toolName: 'AgentSpawn',
+				_meta: { source: 'cli-ts', toolKind: 'subagent', subagentDetached: true, subagentStatus: 'Running', subagentWorkerId: 'worker-1', subagentTerminalAfterIntegration: true },
+			});
+			assert.ok(tc.status === ToolCallStatus.Completed);
+			const invocation = toolCallStateToInvocation(tc);
+			finalizeToolInvocation(invocation, tc);
+			assert.ok(invocation.toolSpecificData?.kind === 'subagent');
+			invocation.toolSpecificData = { ...invocation.toolSpecificData, result: 'Worker handle ready', prompt: 'Private task instructions' };
+			updateRunningToolSpecificData(invocation, {
+				...tc,
+				_meta: { ...tc._meta, subagentStatus: 'Integrated', subagentAgentName: 'Prompt completion', subagentChangedFileCount: 2 },
+				content: [{ type: ToolResultContentType.Subagent, resource: 'copilot://session/subagent/tc-1', title: 'Subagent', agentName: 'worker' }],
+			});
+			assert.strictEqual(invocation.state.get().type, IChatToolInvocation.StateKind.Completed);
+			assert.ok(invocation.toolSpecificData?.kind === 'subagent');
+			assert.strictEqual(invocation.toolSpecificData.workerStatus, 'Integrated');
+			assert.strictEqual(invocation.toolSpecificData.agentName, 'Prompt completion');
+			assert.strictEqual(invocation.toolSpecificData.detached, true);
+			assert.strictEqual(invocation.toolSpecificData.terminalAfterIntegration, true);
+			assert.strictEqual(invocation.toolSpecificData.changedFileCount, 2);
+			assert.strictEqual(invocation.toolSpecificData.result, 'Worker handle ready');
+			assert.strictEqual(invocation.toolSpecificData.prompt, 'Private task instructions');
+		});
+
 
 		test('sets subagent toolSpecificData from content and ignores a structurally identical replay', () => {
 			const tc = createToolCallState({
@@ -1679,6 +1705,22 @@ suite('stateToProgressAdapter', () => {
 			assert.strictEqual(stateChanges, 0, 'an identical content replay should not notify observers');
 			assert.strictEqual(invocation.toolSpecificData, afterFirstUpdate, 'an identical content replay should preserve object identity');
 			disposable.dispose();
+		});
+
+		test('keeps newer worker authority when delayed status or content arrives', () => {
+			const tc = createToolCallState({ _meta: { source: 'cli-ts', toolKind: 'subagent', subagentWorkerId: 'worker-a', subagentStatus: 'Queued', subagentRevision: 1 } });
+			const invocation = toolCallStateToInvocation(tc);
+			assert.ok(invocation.toolSpecificData?.kind === 'subagent');
+			assert.strictEqual(invocation.toolSpecificData.workerStatus, 'Queued');
+			const update = (revision: number | undefined, status: string) => updateRunningToolSpecificData(invocation, { ...tc, status: ToolCallStatus.Running, _meta: { ...tc._meta, subagentRevision: revision, subagentStatus: status } });
+			update(3, 'Integrating');
+			const authoritative = invocation.toolSpecificData;
+			update(2, 'Completed');
+			update(undefined, 'Failed');
+			assert.strictEqual(invocation.toolSpecificData, authoritative);
+			update(4, 'Integrated');
+			assert.ok(invocation.toolSpecificData?.kind === 'subagent');
+			assert.deepStrictEqual([invocation.toolSpecificData.workerRevision, invocation.toolSpecificData.workerStatus], [4, 'Integrated']);
 		});
 
 		test('refreshes workspace metadata only when its structural value changes', () => {

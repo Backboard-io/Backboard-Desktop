@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { contextWindowFor } from "../../../core/context/ContextWindow.ts";
 import type {
 	ModelCatalogItem,
@@ -131,6 +132,15 @@ async function* streamGoogle(
 		body.tools = [{ functionDeclarations: declarations }];
 	}
 
+	yield {
+		kind: "thinking_resolved",
+		requested: request.thinking,
+		effective: { thinkingConfig: thinkingConfig ?? "provider-default" },
+		provider: "google",
+		model: request.model,
+		reason: "google-model-capability-mapping",
+	};
+
 	const calls: ProviderToolCall[] = [];
 	let usage = {
 		inputTokens: 0,
@@ -139,6 +149,7 @@ async function* streamGoogle(
 		cachedTokens: 0,
 	};
 	let callIndex = 0;
+	const fallbackCallPrefix = `gemini_call_${randomUUID()}_`;
 	let finishReason: string | null = null;
 
 	const sseRequest: Parameters<typeof postSseJson>[0] = {
@@ -197,7 +208,7 @@ async function* streamGoogle(
 				// the *same* tool in one round, where matching a result back by
 				// name alone cannot tell them apart.
 				const call: ProviderToolCall = {
-					id: entry.functionCall.id ?? `gemini_call_${callIndex++}`,
+					id: entry.functionCall.id ?? `${fallbackCallPrefix}${callIndex++}`,
 					name: entry.functionCall.name,
 					input: entry.functionCall.args ?? {},
 					// Gemini 3 signs the part that holds a function call and rejects

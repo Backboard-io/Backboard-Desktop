@@ -7,7 +7,7 @@ import { registerAction2 } from '../../platform/actions/common/actions.js';
 import { registerWorkbenchContribution2, WorkbenchPhase } from '../../workbench/common/contributions.js';
 import { EnvironmentTitleBarContribution } from '../browser/actions/environmentTitleBarWidget.js';
 import { VibrancyRepaintContribution } from './vibrancyRepaint.contribution.js';
-import { OpenSessionInVSCodeAction, OpenSessionInVSCodeNewWindowAction, OpenInVSCodeWidgetContribution, OpenAgentsWindowAction, OpenJarvisWindowAction, OpenOptimusWindowAction, OpenVSCodeWindowAction, OpenWorkspaceInVSCodeAction } from './actions/vscodeActions.js';
+import { OpenSessionInVSCodeAction, OpenSessionInVSCodeNewWindowAction, OpenInVSCodeWidgetContribution, OpenAgentsWindowAction, OpenOptimusWindowAction, OpenVSCodeWindowAction, OpenWorkspaceInVSCodeAction } from './actions/vscodeActions.js';
 
 // Actions
 (function registerActions(): void {
@@ -16,7 +16,6 @@ import { OpenSessionInVSCodeAction, OpenSessionInVSCodeNewWindowAction, OpenInVS
 	registerAction2(OpenWorkspaceInVSCodeAction);
 	registerAction2(OpenVSCodeWindowAction);
 	registerAction2(OpenAgentsWindowAction);
-	registerAction2(OpenJarvisWindowAction);
 	registerAction2(OpenOptimusWindowAction);
 })();
 

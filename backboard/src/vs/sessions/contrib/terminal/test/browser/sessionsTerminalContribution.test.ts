@@ -15,7 +15,7 @@ import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/tes
 import { mock } from '../../../../../base/test/common/mock.js';
 import { TestInstantiationService } from '../../../../../platform/instantiation/test/common/instantiationServiceMock.js';
 import { NullLogService, ILogService } from '../../../../../platform/log/common/log.js';
-import { ITerminalInstance, ITerminalService } from '../../../../../workbench/contrib/terminal/browser/terminal.js';
+import { ITerminalGroupService, ITerminalInstance, ITerminalService } from '../../../../../workbench/contrib/terminal/browser/terminal.js';
 import { ITerminalCapabilityStore, ICommandDetectionCapability, TerminalCapability } from '../../../../../platform/terminal/common/capabilities/capabilities.js';
 import { toAgentHostUri } from '../../../../../platform/agentHost/common/agentHostUri.js';
 import { AgentSessionProviders } from '../../../../../workbench/contrib/chat/browser/agentSessions/agentSessions.js';
@@ -28,6 +28,9 @@ import { IContextKeyService } from '../../../../../platform/contextkey/common/co
 import { MockContextKeyService } from '../../../../../platform/keybinding/test/common/mockKeybindingService.js';
 import { IViewsService } from '../../../../../workbench/services/views/common/viewsService.js';
 import { IActiveSession, ISessionsChangeEvent, ISessionsManagementService } from '../../../../services/sessions/common/sessionsManagement.js';
+import { CommandsRegistry } from '../../../../../platform/commands/common/commands.js';
+import { ITelemetryService } from '../../../../../platform/telemetry/common/telemetry.js';
+import { IWorkbenchLayoutService, Parts } from '../../../../../workbench/services/layout/browser/layoutService.js';
 import { ISessionsService } from '../../../../services/sessions/browser/sessionsService.js';
 
 const HOME_DIR = URI.file('/home/user');
@@ -1211,3 +1214,39 @@ suite('SessionsTerminalContribution', () => {
 function tick(): Promise<void> {
 	return new Promise(resolve => setTimeout(resolve, 0));
 }
+
+
+suite('Session terminal header toggle', () => {
+	const store = ensureNoDisposablesAreLeakedInTestSuite();
+
+	for (const visible of [false, true]) {
+		test(visible ? 'closes the chat terminal panel' : 'opens the chat terminal while an editor terminal is active', async () => {
+			const instantiation = store.add(new TestInstantiationService());
+			const calls: string[] = [];
+			const panelTerminal = new class extends mock<ITerminalInstance>() { }();
+			const editorTerminal = new class extends mock<ITerminalInstance>() { }();
+			instantiation.stub(ITelemetryService, new class extends mock<ITelemetryService>() {
+				override publicLog2(): void { }
+			}());
+			instantiation.stub(IWorkbenchLayoutService, new class extends mock<IWorkbenchLayoutService>() {
+				override isVisible(): boolean { return visible; }
+				override setPartHidden(hidden: boolean, part: Parts): void { calls.push(`${part}:${hidden}`); }
+			}());
+			instantiation.stub(IViewsService, new class extends mock<IViewsService>() {
+				override isViewVisible(): boolean { return visible; }
+			}());
+			instantiation.stub(ITerminalService, new class extends mock<ITerminalService>() {
+				override activeInstance = editorTerminal;
+				override setActiveInstance(instance: ITerminalInstance): void { calls.push(instance === panelTerminal ? 'activate-panel-terminal' : 'activate-editor-terminal'); }
+			}());
+			instantiation.stub(ITerminalGroupService, new class extends mock<ITerminalGroupService>() {
+				override activeInstance = panelTerminal;
+				override async showPanel(focus?: boolean): Promise<void> { calls.push(`show-panel:${focus}`); }
+			}());
+			await instantiation.invokeFunction(accessor => CommandsRegistry.getCommand('agentSession.openInTerminal')!.handler(accessor));
+			assert.deepStrictEqual(calls, visible
+				? [`${Parts.PANEL_PART}:true`]
+				: [`${Parts.PANEL_PART}:false`, 'activate-panel-terminal', 'show-panel:true']);
+		});
+	}
+});

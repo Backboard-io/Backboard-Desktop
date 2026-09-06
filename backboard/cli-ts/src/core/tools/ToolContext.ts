@@ -1,3 +1,4 @@
+import type { WorkerWorkspaceRecord } from "../workspaces/WorkerWorkspaceTypes.ts";
 import type { AgentTraceStore } from "../agent/AgentTraceStore.ts";
 import type { EventBus } from "../bus/EventBus.ts";
 import type { AskUserQuestionSpec, TodoItem } from "../bus/events.ts";
@@ -43,6 +44,8 @@ export interface MutationLockTurn {
  * `askUser` bridge round-trips an interactive question through the UI.
  */
 export interface ToolContext {
+	/** Internal worker-engine sink; never a provider-supplied tool argument. */
+	workerLifecycle?: { onWorkspaceProgress(record: WorkerWorkspaceRecord): void };
 	sessionId: string;
 	turnId?: string;
 	toolCallId?: string;

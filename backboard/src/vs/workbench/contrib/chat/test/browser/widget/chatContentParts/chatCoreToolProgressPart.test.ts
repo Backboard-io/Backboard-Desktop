@@ -11,9 +11,86 @@ import { ChatCoreToolProgressPart, createCoreToolCardViewModel } from '../../../
 import { shouldRerenderToolInvocationSubPart } from '../../../../browser/widget/chatContentParts/toolInvocationParts/chatToolInvocationPart.js';
 import { IChatCoreToolInvocationData, IChatToolInvocation, IChatToolInvocationSerialized, ToolConfirmKind } from '../../../../common/chatService/chatService.js';
 import { ToolDataSource } from '../../../../common/tools/languageModelToolsService.js';
+import '../../../../browser/widget/media/chat.css';
 
 suite('ChatCoreToolProgressPart', () => {
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
+
+	test('actual tool headers keep their icon rail and fit narrow transcripts', () => {
+		const host = document.createElement('div');
+		host.className = 'monaco-workbench';
+		const panel = host.appendChild(document.createElement('div'));
+		panel.className = 'backboard-clean-chat';
+		const transcript = panel.appendChild(document.createElement('div'));
+		transcript.className = 'interactive-list backboard-cursor-transcript';
+		document.body.appendChild(host);
+		try {
+			const tools: IChatCoreToolInvocationData[] = [
+				{ kind: 'coreTool', toolKind: 'grep', input: { pattern: 'a long search expression that must not push the icon or count outside the row' }, output: { matches: 'example' } },
+				{ kind: 'coreTool', toolKind: 'webSearch', input: { query: 'long browser search query with several words and extra details' }, output: { results: [] } },
+				{ kind: 'coreTool', toolKind: 'fetchUrl', input: { url: 'https://example.com/a/very/long/path/that/continues/across/the/header' }, output: { text: 'page content' } },
+				{ kind: 'coreTool', toolKind: 'read', input: { path: '/workspace/long/directory/name/example.ts' }, output: { content: 'export const value = 1;' } },
+				{ kind: 'coreTool', toolKind: 'todo', input: { todos: [] }, output: { todos: [] } },
+			];
+			for (const width of [280, 480, 760]) {
+				host.style.width = `${width}px`;
+				for (const data of tools) {
+					const part = createPart(data);
+					transcript.replaceChildren(part.domNode);
+					const header = part.domNode.querySelector<HTMLElement>('.chat-core-tool-card-header')!;
+					const icon = header.querySelector<HTMLElement>('.chat-core-tool-card-icon')!;
+					const row = header.getBoundingClientRect();
+					const glyph = icon.getBoundingClientRect();
+					assert.deepStrictEqual({
+						height: row.height,
+						iconWidth: glyph.width,
+						iconInset: glyph.x - row.x,
+						centerOffset: glyph.y + glyph.height / 2 - row.y - row.height / 2,
+						fits: header.scrollWidth <= header.clientWidth + 1,
+					}, { height: 24, iconWidth: 16, iconInset: 0, centerOffset: 0, fits: true }, `${data.toolKind} at ${width}px`);
+				}
+			}
+		} finally {
+			host.remove();
+		}
+	});
+
+	test('web and search chevrons toggle repeatedly without triggering parent disclosures', () => {
+		const data: IChatCoreToolInvocationData[] = [
+			{ kind: 'coreTool', toolKind: 'grep', input: { pattern: 'hello' }, output: { matches: 'hello world' } },
+			{ kind: 'coreTool', toolKind: 'fetchUrl', input: { url: 'https://example.com' }, output: { text: 'page content' } },
+			{ kind: 'coreTool', toolKind: 'webSearch', input: { query: 'example' }, output: { results: [{ title: 'Example', url: 'https://example.com' }] } },
+		];
+		assert.deepStrictEqual(data.map(input => {
+			const part = createPart(input);
+			let parentClicks = 0;
+			part.domNode.addEventListener('click', () => parentClicks++);
+			const header = part.domNode.querySelector<HTMLButtonElement>('.chat-core-tool-card-header')!;
+			const arrow = header.querySelector<HTMLElement>('.chat-core-tool-card-disclosure')!;
+			const details = part.domNode.querySelector<HTMLElement>('.chat-core-tool-card-details')!;
+			arrow.click();
+			const open = header.ariaExpanded === 'true' && !details.hidden;
+			arrow.click();
+			return { open, closed: header.ariaExpanded === 'false' && details.hidden, parentClicks };
+		}), data.map(() => ({ open: true, closed: true, parentClicks: 0 })));
+	});
+
+	test('shows capped searches as partial results, with the returned record count', () => {
+		const part = createPart({ kind: 'coreTool', toolKind: 'grep', input: { pattern: 'needle' }, output: {
+			matches: 'before\nneedle\nafter', matchCount: 1, returnedCount: 3, countUnit: 'lines', truncated: true, totalKnown: false,
+		} });
+		part.domNode.querySelector<HTMLButtonElement>('button')?.click();
+		assert.deepStrictEqual({
+			count: part.domNode.querySelector('.chat-core-tool-card-count')?.textContent,
+			partial: part.domNode.classList.contains('chat-core-tool-card-partial'),
+			note: part.domNode.querySelector('.chat-core-tool-card-partial-note')?.textContent,
+		}, { count: '3 shown', partial: true, note: 'Partial results — the search reached its limit. Narrow the search to see more.' });
+	});
+
+	test('does not treat a successful output message as a tool error', () => {
+		const view = createCoreToolCardViewModel({ kind: 'coreTool', toolKind: 'glob', input: {}, output: { success: true, message: 'No matches', files: [], count: 0 } });
+		assert.deepStrictEqual({ failed: view.failed, error: view.errorMessage }, { failed: false, error: undefined });
+	});
 
 	function createPart(data: IChatCoreToolInvocationData, options: {
 		isComplete?: boolean;
@@ -170,12 +247,12 @@ suite('ChatCoreToolProgressPart', () => {
 				detail: viewModel.preview?.text ?? viewModel.items?.map(item => item.title).join('|'),
 			};
 		}), [
-			{ toolKind: 'read', title: 'Read file', summary: '/workspace/read.ts', detail: 'read body' },
-			{ toolKind: 'grep', title: 'Search file contents', summary: 'TODO', detail: '/workspace/read.ts:1: TODO' },
+			{ toolKind: 'read', title: 'Read', summary: '/workspace/read.ts', detail: 'read body' },
+			{ toolKind: 'grep', title: 'Search', summary: 'TODO', detail: '/workspace/read.ts:1: TODO' },
 			{ toolKind: 'glob', title: 'Find files', summary: '**/*.ts', detail: 'a.ts|b.ts' },
-			{ toolKind: 'fetchUrl', title: 'Fetch URL', summary: 'example.com/api', detail: 'response body' },
-			{ toolKind: 'webSearch', title: 'Search the web', summary: 'native tool cards', detail: 'First result' },
-			{ toolKind: 'todo', title: 'Task progress', summary: '1 of 2 complete', detail: 'Done|Next' },
+			{ toolKind: 'fetchUrl', title: 'Fetch', summary: 'example.com/api', detail: 'response body' },
+			{ toolKind: 'webSearch', title: 'Web search', summary: 'native tool cards', detail: 'First result' },
+			{ toolKind: 'todo', title: 'Task progress', summary: '1 / 2 tasks done', detail: 'Done|Next' },
 			{ toolKind: 'computer', title: 'Computer actions', summary: '1 action', detail: 'Click' },
 			{ toolKind: 'browser', title: 'Browser actions', summary: 'example.com/docs', detail: 'Navigate' },
 			{ toolKind: 'findSkill', title: 'Find a skill', summary: 'testing', detail: 'test-helper' },
@@ -203,6 +280,7 @@ suite('ChatCoreToolProgressPart', () => {
 			controlsDetails: details?.classList.contains('chat-core-tool-card-details'),
 			detailsHidden: details?.hidden,
 			summary: disclosure?.querySelector('.chat-core-tool-card-summary')?.textContent,
+			fullPathInTooltip: disclosure?.title.includes('/workspace/read.ts'),
 			subtitle: disclosure?.querySelector('.chat-core-tool-card-subtitle')?.textContent,
 			verboseInSummary: disclosure?.textContent?.includes(verboseMarker),
 			verboseInDetails: details?.textContent?.includes(verboseMarker),
@@ -214,7 +292,8 @@ suite('ChatCoreToolProgressPart', () => {
 			hasControlledId: true,
 			controlsDetails: true,
 			detailsHidden: true,
-			summary: '/workspace/read.ts',
+			summary: 'read.ts',
+			fullPathInTooltip: true,
 			subtitle: 'Starts at: 5 · Limit: 100',
 			verboseInSummary: false,
 			verboseInDetails: true,
@@ -454,7 +533,7 @@ suite('ChatCoreToolProgressPart', () => {
 		});
 
 		assert.strictEqual(viewModel.items?.[0]?.state, 'complete');
-		assert.strictEqual(viewModel.summary, '1 of 1 complete');
+		assert.strictEqual(viewModel.summary, '1 / 1 tasks done');
 	});
 
 	test('does not claim the existing terminal or Write render paths', () => {

@@ -1,13 +1,9 @@
 import { FINAL_VERIFICATION_NUDGE } from "../../../prompts/finalVerification.ts";
 import type { SystemNotification } from "./SystemNotification.ts";
 
-export const FINAL_VERIFICATION_MIN_TOOL_CALLS = 17; // min number of individual tool calls before verification nudge fires.
-
 /**
- * The verification nudge: after a substantial user turn (at least one tool
- * round and FINAL_VERIFICATION_MIN_TOOL_CALLS calls), ask the model to review
- * the work against the request before finalizing. Supersedes the pre-nudge
- * final answer so only the verified summary is shown.
+ * One visible verification phase for successful changes lacking validation.
+ * Read/search volume and plan metadata never justify another model request.
  */
 export function finalVerificationNotification(
 	enabled: boolean,
@@ -16,11 +12,16 @@ export function finalVerificationNotification(
 		id: "final-verification",
 		supersedesFinalAnswer: true,
 		hidesResponse: false,
-		shouldFire: (context) =>
-			enabled &&
-			context.requestKind === "user" &&
-			context.executedRounds > 0 &&
-			context.executedToolCalls >= FINAL_VERIFICATION_MIN_TOOL_CALLS,
+		shouldFire: (context) => {
+			const evidence = context.completionEvidence;
+			return (
+				enabled &&
+				context.requestKind === "user" &&
+				evidence !== undefined &&
+				evidence.successfulMutations > 0 &&
+				(evidence.unvalidatedMutations > 0 || evidence.validationFailed)
+			);
+		},
 		content: () => FINAL_VERIFICATION_NUDGE,
 	};
 }

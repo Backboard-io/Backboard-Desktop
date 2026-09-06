@@ -58,6 +58,8 @@ export class ChangesTitleBarContribution extends Disposable implements IWorkbenc
 			// NB: no IsAuxiliaryWindowContext gate — the floating toolbar only
 			// renders in the sessions window, and that key spuriously flips true
 			// when the right panel/editor opens, which would hide this toggle.
+			// Keep the toggle mounted while the panel is open too, so closing or
+			// switching sessions never removes the way back into the panel.
 			when: SessionsWelcomeVisibleContext.toNegated(),
 		}));
 
@@ -111,7 +113,7 @@ registerAction2(class extends Action2 {
 				title: localize('hideRightPanel', "Hide Right Panel"),
 				tooltip: TOGGLE_SECONDARY_SIDEBAR_TOOLTIP,
 			},
-			precondition: IsAuxiliaryWindowContext.toNegated(),
+			f1: true,
 		});
 	}
 

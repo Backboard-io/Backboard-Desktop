@@ -618,6 +618,9 @@
 }
 
 .new-chat-middle-title .new-chat-middle-title-picker .sessions-chat-picker-slot.sessions-chat-workspace-picker .action-label {
+	appearance: none;
+	border: 0;
+	background: transparent;
 	display: inline-flex;
 	align-items: baseline;
 	gap: 2px;
@@ -977,18 +980,18 @@
  * enough specificity (and are scoped to the new-chat composer) to override those
  * theme rules and adopt the region background instead, leaving the card defined
  * only by its border. */
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .new-chat-composer-stack > .interactive-session,
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .chat-editor-relative .new-chat-composer-stack > .interactive-session {
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.sessionspart .new-chat-composer-stack > .interactive-session,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .chat-editor-relative .new-chat-composer-stack > .interactive-session {
 	background: var(--session-view-background, var(--sessions-main-region-background, var(--vscode-editor-background)));
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container,
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .chat-editor-relative .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container {
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.sessionspart .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .chat-editor-relative .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container {
 	background-color: var(--session-view-background, var(--sessions-main-region-background, var(--vscode-editor-background)));
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background,
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .margin {
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.sessionspart .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.sessionspart .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .margin {
 	background-color: var(--session-view-background, var(--sessions-main-region-background, var(--vscode-editor-background))) !important;
 }
 

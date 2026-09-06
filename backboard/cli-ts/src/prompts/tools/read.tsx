@@ -30,14 +30,7 @@ ${doNotUseWhen(context)}
 - Use offset and limit to read specific portions of huge files.
 - For PNG, JPEG/JPG, WebP, GIF, BMP, TIFF/TIF, AVIF, HEIC/HEIF, and ICO files, returns image content instead of text.
 - Requires absolute file paths.
-
-### Parameters
-
-| Name | Type | Required | Description |
-| --- | --- | --- | --- |
-| \`file_path\` | \`string\` | yes | The absolute path to the file to read (must be absolute, not relative) |
-| \`offset\` | \`number\` | no | The line number to start reading from (0-based, defaults to 0) |
-| \`limit\` | \`number\` | no | The maximum number of lines to read (defaults to 2400) |`.trim();
+`.trim();
 }
 
 function doNotUseWhen(context: PromptContext): string {

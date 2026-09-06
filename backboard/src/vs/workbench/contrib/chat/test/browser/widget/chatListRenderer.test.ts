@@ -4,16 +4,19 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
-import { timeout } from '../../../../../../base/common/async.js';
 import { mainWindow } from '../../../../../../base/browser/window.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
 import { URI } from '../../../../../../base/common/uri.js';
+import { IChatToolInvocationSerialized } from '../../../common/chatService/chatService.js';
 import {
+	formatBackboardWorkTimer,
+	isBackboardWorkerWait,
 	getBackboardTurnChronologicalWorkNodes,
 	getBackboardTurnFinalContentIndexes,
 	getBackboardSubagentSummary,
 	hasBackboardTurnWorkContent,
 	isBackboardMutationBatchEdit,
+	isBackboardPersistentSubagentContent,
 	reconcileBackboardTurnNodeOrder,
 	resolveBackboardTurnExpandedState,
 	syncBackboardSubagentStrip,
@@ -24,6 +27,21 @@ import {
 
 suite('ChatListRenderer', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
+
+	test('work timer formats live and completed durations', () => {
+		assert.deepStrictEqual([
+			formatBackboardWorkTimer(0, false),
+			formatBackboardWorkTimer(608000, false),
+			formatBackboardWorkTimer(608000, true),
+			formatBackboardWorkTimer(-100, true),
+		], ['Working for 0s', 'Working for 10m 8s', 'Worked for 10m 8s', 'Worked for 0s']);
+	});
+
+	test('worker wait chrome is suppressed without suppressing other tools', () => {
+		assert.deepStrictEqual(['AgentWait', 'backboard_agent_wait', 'WaitForWorkers', 'AgentSpawn', 'Fetch'].map(toolId =>
+			isBackboardWorkerWait({ kind: 'toolInvocationSerialized', toolId } as IChatToolInvocationSerialized)
+		), [true, true, true, false, false]);
+	});
 
 	suite('shouldScheduleInitialHeightChange', () => {
 		test('only schedules first measurement updates when needed to avoid clipping', () => {
@@ -44,7 +62,7 @@ suite('ChatListRenderer', () => {
 	});
 
 	suite('Backboard cursor transcript turn folding', () => {
-		test('packs parallel subagents behind one stable aggregate disclosure', () => {
+		test('keeps parallel worker pills visible without a disclosure', () => {
 			const container = mainWindow.document.createElement('div');
 			mainWindow.document.body.appendChild(container);
 			const items = Array.from({ length: 12 }, (_, index) => ({
@@ -58,15 +76,9 @@ suite('ChatListRenderer', () => {
 			const summary = strip?.querySelector<HTMLButtonElement>(':scope > .chat-subagent-summary');
 			const details = strip?.querySelector<HTMLElement>(':scope > .chat-subagent-items');
 			assert.ok(strip);
-			assert.ok(summary);
+			assert.strictEqual(summary, null);
 			assert.ok(details);
-			assert.strictEqual(summary.querySelector('.chat-subagent-summary-label')?.textContent, '12 workers · 2 running · 10 complete');
-			assert.strictEqual(details.hidden, true);
-			assert.strictEqual(summary.ariaExpanded, 'false');
-
-			summary.click();
 			assert.strictEqual(details.hidden, false);
-			assert.strictEqual(summary.ariaExpanded, 'true');
 
 			items[1].node.tabIndex = 0;
 			items[1].node.focus();
@@ -90,23 +102,50 @@ suite('ChatListRenderer', () => {
 			]), {
 				label: '3 workers · 1 running · 1 complete · 1 needs attention',
 				status: 'attention',
+				detail: '3 workers · 1 running · 1 complete · 1 needs attention',
 			});
 		});
 
-		test('throttles the visible worker summary to ten updates per second', async () => {
-			const container = mainWindow.document.createElement('div');
-			const node = mainWindow.document.createElement('div');
-			mainWindow.document.body.appendChild(container);
-			syncBackboardSubagentStrip(container, [{ node, active: true, status: 'running' }]);
-			const label = container.querySelector<HTMLElement>('.chat-subagent-summary-label');
-			assert.strictEqual(label?.textContent, '1 worker · 1 running');
-
-			syncBackboardSubagentStrip(container, [{ node, active: false, status: 'integrated' }]);
-			assert.strictEqual(label?.textContent, '1 worker · 1 running', 'Rapid lifecycle churn should not immediately mutate the visible row');
-			await timeout(110);
-			assert.strictEqual(label?.textContent, '1 worker · 1 complete');
-			container.remove();
+		test('names one or several completed agents and preserves honest lifecycle detail', () => {
+			assert.deepStrictEqual(getBackboardSubagentSummary([{ label: 'Prompt completion', active: false, status: 'integrated' }]), {
+				label: 'Prompt completion updated', status: 'complete', detail: '1 worker · 1 complete',
+			});
+			assert.strictEqual(getBackboardSubagentSummary([
+				{ label: 'Prompt completion', active: false, status: 'integrated' },
+				{ label: 'Search', active: false, status: 'completed' },
+				{ label: 'Tool identity', active: false, status: 'completed' },
+			]).label, 'Prompt completion, Search and Tool identity updated');
+			const running = getBackboardSubagentSummary([
+				{ label: 'Alpha', active: true, status: 'integrated' },
+				{ label: 'Beta', active: false, status: 'running' },
+			]);
+			assert.deepStrictEqual(running, { label: 'Alpha and Beta working', status: 'running', detail: '2 workers · 1 running · 1 complete' });
+			assert.deepStrictEqual(getBackboardSubagentSummary([{ label: 'Search', active: true, status: 'failed' }]), {
+				label: 'Search needs attention', status: 'attention', detail: '1 worker · 1 needs attention',
+			});
 		});
+
+		test('worker pills remain visible outside the collapsed work log', () => {
+			const turn = mainWindow.document.createElement('div');
+			const body = mainWindow.document.createElement('div');
+			body.hidden = true;
+			turn.appendChild(body);
+			const node = mainWindow.document.createElement('div');
+			body.appendChild(node);
+			syncBackboardSubagentStrip(turn, [{ node, active: false, status: 'integrated' }]);
+			assert.strictEqual(node.closest('[hidden]'), null);
+			assert.strictEqual(turn.querySelector('.chat-subagent-summary'), null);
+			assert.strictEqual(body.hidden, true);
+		});
+
+		test('collapsed work keeps the parent and shared child row references but not ordinary tools', () => {
+			const invocation = { kind: 'toolInvocationSerialized', toolCallId: 'worker-id', toolSpecificData: { kind: 'subagent' } } as IChatToolInvocationSerialized;
+			assert.strictEqual(isBackboardPersistentSubagentContent(invocation), true);
+			assert.strictEqual(isBackboardPersistentSubagentContent({ ...invocation, toolSpecificData: undefined, subAgentInvocationId: 'worker-id' }), true);
+			assert.strictEqual(isBackboardPersistentSubagentContent({ ...invocation, toolSpecificData: undefined }), false);
+			assert.strictEqual(isBackboardPersistentSubagentContent(undefined), false);
+		});
+
 
 		test('stable timeline performs no moves and a late diff needs one insertion', () => {
 			const reconcile = (current: string[], desired: string[]) => {
@@ -216,7 +255,7 @@ suite('ChatListRenderer', () => {
 			], [false, true, true, false, true]);
 		});
 
-		test('restores explicit outer-fold state and otherwise collapses completed work', () => {
+		test('restores explicit outer-fold state and otherwise keeps completed activity visible', () => {
 			assert.deepStrictEqual([
 				resolveBackboardTurnExpandedState(true, true),
 				resolveBackboardTurnExpandedState(true, false),
@@ -224,23 +263,23 @@ suite('ChatListRenderer', () => {
 				resolveBackboardTurnExpandedState(true, undefined),
 				resolveBackboardTurnExpandedState(false, false),
 				resolveBackboardTurnExpandedState(false, undefined),
-			], [true, false, false, false, false, true]);
+			], [true, false, true, true, false, true]);
 		});
 
-		test('collapses the current turn when its live run completes', () => {
+		test('keeps the current transcript stable when its live run completes', () => {
 			assert.deepStrictEqual([
 				resolveBackboardTurnExpandedState(true, undefined),
 				resolveBackboardTurnExpandedState(true, undefined),
 				resolveBackboardTurnExpandedState(true, undefined),
-			], [false, false, false]);
+			], [true, true, true]);
 		});
 
-		test('requires a fresh explicit expansion after a response becomes history', () => {
+		test('keeps history visible while respecting an explicit collapse', () => {
 			assert.deepStrictEqual([
 				resolveBackboardTurnExpandedState(true, undefined),
 				resolveBackboardTurnExpandedState(true, false),
 				resolveBackboardTurnExpandedState(true, true),
-			], [false, false, true]);
+			], [true, false, true]);
 		});
 
 		test('keeps Backboard diff cards outside the nested Thought disclosure', () => {

@@ -208,6 +208,7 @@ export class MultiDiffEditorInput extends EditorInput implements ILanguageSuppor
 			const uri = (r.modifiedUri ?? r.originalUri)!;
 			const result: IDocumentDiffItemWithMultiDiffEditorItem = {
 				multiDiffEditorItem: r,
+				displayUri: r.goToFileUri && (r.goToFileUri.scheme !== uri.scheme || r.goToFileUri.path !== uri.path) ? r.goToFileUri : undefined,
 				original: original?.object.textEditorModel,
 				modified: modified?.object.textEditorModel,
 				contextKeys: r.contextKeys,

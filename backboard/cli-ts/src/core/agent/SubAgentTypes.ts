@@ -38,6 +38,7 @@ export interface SubAgentRunnerDeps {
 }
 
 export interface SubAgentRunParams {
+	name?: string;
 	prompt: string;
 	depth: number;
 	/** True when the worker must not receive workspace-mutating tools. */

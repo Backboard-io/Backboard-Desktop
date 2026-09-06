@@ -111,6 +111,8 @@ export interface CheckpointRecorder {
 	captureWarning(): string | null;
 	/** Awaits durability of all checkpoint records enqueued so far. */
 	flush?(): Promise<void>;
+	/** Finalizes a standalone background integration after durable post-images. */
+	finishCapture?(turnId: string): Promise<void>;
 	scopedToTurn(turnId: string): CheckpointRecorder;
 }
 
@@ -174,6 +176,9 @@ export function scopeCheckpointRecorder(
 		captureWarning: () => recorder.captureWarning(),
 		...(recorder.flush
 			? { flush: () => recorder.flush?.() ?? Promise.resolve() }
+			: {}),
+		...(recorder.finishCapture
+			? { finishCapture: () => recorder.finishCapture!(turnId) }
 			: {}),
 		scopedToTurn: () => scoped,
 	};
@@ -279,6 +284,11 @@ export class CheckpointStore implements CheckpointRecorder {
 	/** Awaits durability of every journal record enqueued so far. */
 	async flush(): Promise<void> {
 		await this.journal.flush();
+	}
+
+	async finishCapture(turnId: string): Promise<void> {
+		this.finalizeTurn(turnId, "ok");
+		await this.flush();
 	}
 
 	dispose(): void {

@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import '../media/sessionsViewPane.css';
+import { SimpleMcpPage } from '../simpleMcpPage.js';
 import * as DOM from '../../../../../base/browser/dom.js';
 import { renderIcon } from '../../../../../base/browser/ui/iconLabel/iconLabels.js';
 import { onUnexpectedError } from '../../../../../base/common/errors.js';
@@ -53,7 +54,7 @@ import { isBackboardProduct } from '../../../../../workbench/contrib/chat/common
 import { IProductService } from '../../../../../platform/product/common/productService.js';
 import { isRecentFolder, IWorkspacesService } from '../../../../../platform/workspaces/common/workspaces.js';
 import { BackboardUsageView } from '../backboardUsage.js';
-import { ISimpleModeBackgroundService } from '../../../chat/browser/simpleModeBackgroundService.js';
+import { SimpleModeBackgroundPicker } from '../../../chat/browser/simpleModeBackgroundPicker.js';
 
 const $ = DOM.$;
 export const SessionsViewId = 'sessions.workbench.view.sessionsView';
@@ -101,6 +102,8 @@ export const SessionsViewSortingContext = new RawContextKey<string>('sessionsVie
 export const IsWorkspaceGroupCappedContext = new RawContextKey<boolean>('sessionsViewPane.workspaceGroupCapped', true);
 
 export class SessionsView extends ViewPane {
+
+	private mcpPage: SimpleMcpPage | undefined;
 
 	private viewPaneContainer: HTMLElement | undefined;
 	private sessionsControlContainer: HTMLElement | undefined;
@@ -154,7 +157,6 @@ export class SessionsView extends ViewPane {
 		@ILogService private readonly logService: ILogService,
 		@IProductService private readonly productService: IProductService,
 		@IWorkspacesService private readonly workspacesService: IWorkspacesService,
-		@ISimpleModeBackgroundService private readonly simpleModeBackgroundService: ISimpleModeBackgroundService,
 	) {
 		super(options, keybindingService, contextMenuService, configurationService, contextKeyService, viewDescriptorService, instantiationService, openerService, themeService, hoverService);
 
@@ -213,6 +215,7 @@ export class SessionsView extends ViewPane {
 	 * the grid instead of navigating the window away from the dashboard.
 	 */
 	private startNewChat(): void {
+		this.mcpPage?.hide();
 		logSessionsInteraction(this.telemetryService, 'newSession');
 		if (this.environmentService.isOptimusWindow) {
 			void this.commandService.executeCommand(OPTIMUS_NEW_SESSION_COMMAND_ID);
@@ -225,9 +228,8 @@ export class SessionsView extends ViewPane {
 		const phoneLayout = isPhoneLayout(this.layoutService);
 		// Advanced (Optimus) shares Simple's sidebar chrome: the compact search
 		// row, the folder/thread-card toggle, the project filter and the footer
-		// navigation (Marketplace / Usage / Settings). Jarvis keeps the denser
-		// stacked-action chrome, so it stays out of Simple mode.
-		const simpleMode = !phoneLayout && !this.environmentService.isJarvisWindow;
+		// navigation (Marketplace / Usage / Settings).
+		const simpleMode = !phoneLayout;
 		const sessionsContainer = DOM.append(parent, $('.agent-sessions-container'));
 
 		// Sessions section (top, fills available space)
@@ -289,6 +291,17 @@ export class SessionsView extends ViewPane {
 			}));
 
 			this.createSidebarAction(primaryActions, Codicon.edit, localize('newChat', "New chat"), () => this.startNewChat());
+			const mcpPage = this.mcpPage = this._register(this.instantiationService.createInstance(SimpleMcpPage));
+			this.createSidebarAction(primaryActions, Codicon.extensions, localize('simpleMcps', "MCPs"), anchor => mcpPage.show(anchor));
+			const mcpButton = primaryActions.lastElementChild;
+			this._register(mcpPage.onDidChangeVisibility(selected => {
+				mcpButton?.classList.toggle('active', selected);
+				if (selected) {
+					mcpButton?.setAttribute('aria-current', 'page');
+				} else {
+					mcpButton?.removeAttribute('aria-current');
+				}
+			}));
 			this.createProjectFilterRow(primaryActions);
 		} else if (!phoneLayout) {
 			headerLabel.textContent = '';
@@ -356,6 +369,7 @@ export class SessionsView extends ViewPane {
 			simpleCompact: () => this.simpleCompact,
 			findWidgetContainer,
 			onSessionOpen: (resource, preserveFocus, sideBySide) => {
+				this.mcpPage?.hide();
 				const onOpened = () => {
 					if (isWeb && isPhoneLayout(this.layoutService)) {
 						this.layoutService.setPartHidden(true, Parts.SIDEBAR_PART);
@@ -377,6 +391,15 @@ export class SessionsView extends ViewPane {
 
 		// Bottom-pinned footer: update button (above) + signed-in user identity.
 		this.createFooter(sessionsSection, simpleMode);
+
+		// Footer/profile and header changes can resize the flex viewport without
+		// a workbench layout event. Keep the virtual tree inside its visible bounds
+		// so the last folder and session rows remain fully scrollable.
+		const listContainer = this.sessionsControlContainer;
+		const listResizeObserver = this._register(new DOM.DisposableResizeObserver('SessionsView.listViewport', () => {
+			sessionsControl.layout(listContainer.clientHeight, listContainer.clientWidth);
+		}, DOM.getWindow(listContainer)));
+		this._register(listResizeObserver.observe(listContainer));
 
 		// Toggle header label/actions visibility when find widget opens/closes
 		this._register(sessionsControl.onDidChangeFindOpenState(open => {
@@ -481,34 +504,12 @@ export class SessionsView extends ViewPane {
 		const footer = DOM.append(container, $('.agent-sessions-footer'));
 		if (simpleMode) {
 			const navigation = DOM.append(footer, $('.agent-sessions-footer-navigation'));
+			const backgroundPicker = this._register(this.instantiationService.createInstance(SimpleModeBackgroundPicker));
 			this.createSidebarAction(navigation, Codicon.fileMedia, localize('background', "Background"), anchor => {
-				this.contextMenuService.showContextMenu({
-					getAnchor: () => anchor,
-					getActions: () => {
-						const hasBackground = !!this.simpleModeBackgroundService.backgroundImage;
-						return [
-							toAction({
-								id: 'sessions.simpleMode.chooseBackgroundImage',
-								label: hasBackground
-									? localize('changeBackgroundImage', "Change Background Image…")
-									: localize('chooseBackgroundImage', "Choose Background Image…"),
-								run: () => this.simpleModeBackgroundService.chooseBackgroundImage(),
-							}),
-							...(hasBackground ? [
-								toAction({
-									id: 'sessions.simpleMode.clearBackgroundImage',
-									label: localize('clearBackgroundImage', "Clear Background Image"),
-									run: () => this.simpleModeBackgroundService.clearBackgroundImage(),
-								}),
-							] : []),
-						];
-					},
-				});
+				backgroundPicker.toggle(anchor);
 			}, true);
-			this.createSidebarAction(navigation, Codicon.extensions, localize('marketplace', "Marketplace"), anchor => {
-				this.instantiationService.createInstance(SkillsLibraryController).showMarketplace(anchor);
-			});
-			this.createSidebarAction(navigation, Codicon.graph, localize('usage', "Usage"), () => {
+
+			this.createSidebarAction(navigation, Codicon.graphLine, localize('usage', "Usage"), () => {
 				// Simple mode can run without an extension host, so open the built-in
 				// usage view instead of dispatching the extension-owned command.
 				this.logService.info('[Backboard] Opening the Simple mode usage view.');
@@ -521,34 +522,32 @@ export class SessionsView extends ViewPane {
 		}
 
 		// Signed-in user identity card.
-		const user = DOM.append(footer, $('.agent-sessions-user'));
+		const user = DOM.append(footer, $('.agent-sessions-user.visible'));
 		const avatar = DOM.append(user, $('span.agent-sessions-user-avatar'));
 		const text = DOM.append(user, $('.agent-sessions-user-text'));
 		const nameEl = DOM.append(text, $('span.agent-sessions-user-name'));
 		const subtitleEl = DOM.append(text, $('span.agent-sessions-user-subtitle'));
+		nameEl.textContent = localize('backboardProfilePlaceholder', "Backboard Studio");
+		avatar.classList.add('agent-sessions-user-logo');
+		avatar.setAttribute('aria-hidden', 'true');
+		avatar.appendChild(renderIcon(ThemeIcon.fromId('backboard-logo')));
 
-		// Update affordance: a small icon pinned to the right of the identity row,
-		// shown only while `backboard.updateAvailable` is set by the Backboard
-		// extension; clicking it installs the staged update.
-		const updateButton = DOM.append(user, $('button.agent-sessions-update-icon')) as HTMLButtonElement;
+		// Keep the update control independent of the optional account identity.
+		const updateButton = DOM.append(footer, $('button.agent-sessions-update-pill')) as HTMLButtonElement;
 		updateButton.type = 'button';
-		const updateLabel = localize('backboardUpdateAvailable', "Update available");
-		updateButton.title = updateLabel;
-		updateButton.setAttribute('aria-label', updateLabel);
-		updateButton.appendChild(renderIcon(Codicon.cloudDownload));
 		this._register(DOM.addDisposableListener(updateButton, DOM.EventType.CLICK, e => {
 			e.preventDefault();
 			e.stopPropagation();
-			this.commandService.executeCommand('backboard.installAvailableUpdate').catch(onUnexpectedError);
+			const command = this.scopedContextKeyService.getContextKeyValue<boolean>('backboard.updateCancellable')
+				? 'backboard.cancelUpdate' : 'backboard.installAvailableUpdate';
+			this.commandService.executeCommand(command).catch(onUnexpectedError);
 		}));
 
 		// Windows has no application menu — macOS hosts About, Settings and
 		// Themes under the "Backboard Studio" app menu — so surface those
 		// entries behind a cog button beside the identity card.
 		if (isWindows) {
-			// Sibling of the identity card, not a child: the card stays at
-			// opacity 0 until the signed-in user resolves, and the cog must
-			// remain usable even when no user is signed in.
+			// Keep the app menu beside the account identity.
 			const appMenuButton = DOM.append(footer, $('button.agent-sessions-app-menu-icon')) as HTMLButtonElement;
 			appMenuButton.type = 'button';
 			const appMenuLabel = localize('backboardAppMenu', "Settings and More");
@@ -574,13 +573,19 @@ export class SessionsView extends ViewPane {
 		}
 
 		const UPDATE_CONTEXT_KEY = 'backboard.updateAvailable';
+		const UPDATE_CANCELLABLE_CONTEXT_KEY = 'backboard.updateCancellable';
 		const syncUpdateButton = () => {
+			const cancellable = this.scopedContextKeyService.getContextKeyValue<boolean>(UPDATE_CANCELLABLE_CONTEXT_KEY) === true;
+			const label = cancellable ? localize('stopBackboardUpdate', "Stop") : localize('updateBackboard', "Update");
+			updateButton.textContent = label;
+			updateButton.title = label;
+			updateButton.setAttribute('aria-label', label);
 			const available = this.scopedContextKeyService.getContextKeyValue<boolean>(UPDATE_CONTEXT_KEY) === true;
-			footer.classList.toggle('has-update', available);
+			footer.classList.toggle('has-update', available || cancellable);
 		};
 		syncUpdateButton();
 		this._register(this.scopedContextKeyService.onDidChangeContext(e => {
-			if (e.affectsSome(new Set([UPDATE_CONTEXT_KEY]))) {
+			if (e.affectsSome(new Set([UPDATE_CONTEXT_KEY, UPDATE_CANCELLABLE_CONTEXT_KEY]))) {
 				syncUpdateButton();
 			}
 		}));
@@ -589,6 +594,7 @@ export class SessionsView extends ViewPane {
 				return;
 			}
 			nameEl.textContent = info.name;
+			avatar.classList.remove('agent-sessions-user-logo');
 			avatar.textContent = initialsFromName(info.name);
 			const subtitle = info.plan ?? info.email;
 			if (subtitle) {

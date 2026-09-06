@@ -389,7 +389,8 @@
  * Defined on `.part.auxiliarybar` so both the composite title and the pane body
  * (which are separate DOM subtrees) can read them.
  */
-.monaco-workbench .part.auxiliarybar:has(> .composite.title.has-chat-tabs) {
+.monaco-workbench .part.auxiliarybar:has(> .composite.title.has-chat-tabs),
+.monaco-workbench.optimus-window .part.auxiliarybar:has(.optimus-chat-view) {
 	/* Semantic workbench tokens keep the entire right panel native to the
 	   selected VS Code theme, including light and high-contrast themes. */
 	--bb-panel-surface: var(--vscode-sideBar-background, var(--vscode-editor-background));
@@ -1287,7 +1288,7 @@
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part .interactive-input-editor {
 	min-width: 0;
 	flex: 1 1 auto;
-	min-height: 44px;
+	min-height: 32px;
 	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", system-ui, Ubuntu, "Droid Sans", sans-serif;
 	font-size: 13px;
 	line-height: 20px;
@@ -1814,3 +1815,622 @@
 
 /* The shared Cursor transcript skin lives in chat.css so every Backboard
  * ChatWidget host uses the editor panel experience. */
+
+/* The empty chat no longer needs a Backboard tab when it owns this panel. */
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs .chat-view-title-container.chat-view-title-empty {
+	display: none;
+}
+
+/* Blue currents retain definition against a light canvas without a white glow. */
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-panel-empty-mark {
+	opacity: 1;
+	filter: drop-shadow(0 3px 7px rgba(23, 92, 140, 0.12));
+}
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-panel-water-strand-base {
+	fill: #276b92;
+	opacity: 0.38;
+}
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-panel-water-glint {
+	mix-blend-mode: normal;
+	opacity: 0.3;
+}
+
+
+/* Light composer: a quiet raised surface with readable, responsive controls. */
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-composer {
+	--bb-composer-border: #d5d9df;
+	--bb-composer-control-hover: #edf2f8;
+	--bb-composer-model-foreground: #344054;
+	--vscode-icon-foreground: #596579;
+	--vscode-descriptionForeground: #596579;
+	--vscode-input-placeholderForeground: #667085;
+}
+
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part .chat-input-container {
+	border-radius: 18px !important;
+	box-shadow: 0 2px 8px rgba(25, 40, 65, 0.05);
+	transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part .chat-input-container:focus-within {
+	border-color: #87aee1 !important;
+	box-shadow: 0 0 0 2px rgba(23, 105, 210, 0.09), 0 2px 8px rgba(25, 40, 65, 0.05);
+}
+
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .combined-model-provider-trigger {
+	background: transparent !important;
+	color: #344054;
+}
+
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .combined-model-provider-trigger:is(:hover, [aria-expanded='true']) {
+	background: #e7edf5 !important;
+}
+
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label:is(.codicon-arrow-up, .codicon-newline, .codicon-stop-circle) {
+	background: #1769d2;
+	color: #fff !important;
+}
+
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label:is(.codicon-arrow-up, .codicon-newline, .codicon-stop-circle):hover {
+	background: #125bb8;
+}
+
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item.disabled > .action-label:is(.codicon-arrow-up, .codicon-newline) {
+	background: #e8ecf1;
+	color: #667085 !important;
+	opacity: 1;
+}
+
+.monaco-workbench.vs.monaco-reduce-motion .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part .chat-input-container {
+	transition: none;
+}
+
+
+/* Home actions sit beside the recent list; the empty title strip has no chrome. */
+.monaco-workbench .part.auxiliarybar:has(.chat-composer-empty) > .composite.title.has-chat-tabs {
+	display: none !important;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chats {
+	position: relative;
+	padding-right: 38px;
+	min-height: 96px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-home-actions {
+	position: absolute;
+	top: 0;
+	right: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-home-action {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 28px;
+	padding: 0;
+	border: 0;
+	border-radius: 6px;
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+	cursor: pointer;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-home-action:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+	color: var(--vscode-foreground);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-home-action:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: 1px;
+}
+
+/* Compact Codex proportions: comfortable draft area, one aligned control row. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part {
+	margin-inline: 12px;
+	padding-bottom: 12px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part .chat-input-container {
+	min-height: 80px;
+	padding: 10px 10px 8px;
+	gap: 6px;
+	border-radius: 22px !important;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session:not(.chat-composer-empty) .interactive-input-part .chat-input-container {
+	min-height: 72px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .combined-model-provider-trigger {
+	border-radius: 14px !important;
+	padding-inline: 9px !important;
+}
+
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-composer {
+	--bb-composer-border: #e2e1df;
+}
+
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part .chat-input-container {
+	box-shadow: 0 2px 8px rgba(30, 35, 40, 0.04);
+}
+
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part .chat-input-container:focus-within {
+	border-color: #c4cfdd !important;
+	box-shadow: 0 0 0 2px rgba(23, 105, 210, 0.05);
+}
+
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-picker-item .action-label.model-picker-split {
+	border-radius: 14px !important;
+	overflow: hidden;
+}
+
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-picker-item .action-label.model-picker-split {
+	background: transparent;
+	color: #344054;
+}
+
+@container chat-input-part (max-width: 380px) {
+	.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .model-picker-name:has(.model-picker-provider-icon) .chat-input-picker-label,
+	.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .backboard-access-mode-trigger .agent-host-chat-input-picker-label {
+		display: none;
+	}
+
+	.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .model-picker-name .model-picker-provider-icon {
+		display: inline-block;
+	}
+
+	.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .backboard-access-mode-trigger {
+		min-width: 28px;
+		justify-content: center;
+	}
+}
+
+
+/* Anchor the prompt to a consistent inset at every panel width. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part {
+	margin: 0 12px;
+	padding: 0 0 8px;
+	flex-shrink: 0;
+}
+
+/* An oversized, cropped outline of our mark sits behind the home content. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-empty-home {
+	position: relative;
+	isolation: isolate;
+	overflow: hidden;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chats {
+	z-index: 1;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-empty-mark {
+	position: absolute;
+	left: 58%;
+	top: 60%;
+	width: max(150%, 700px);
+	height: max(165%, 940px);
+	margin: 0;
+	transform: translate(-50%, -50%) rotate(-24deg);
+	filter: none;
+	opacity: 0.08;
+	color: var(--vscode-foreground);
+	z-index: 0;
+}
+
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-panel-empty-mark {
+	filter: none;
+	opacity: 0.07;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-water-strand-base {
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 1;
+	vector-effect: non-scaling-stroke;
+	opacity: 1;
+}
+
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-panel-water-strand-base {
+	fill: none;
+	opacity: 1;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-water-mark > g {
+	display: none;
+}
+
+
+
+@container chat-input-part (max-width: 420px) {
+	.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .combined-model-provider-trigger {
+		min-width: 0;
+		max-width: 100%;
+	}
+
+	/* Keep the selected model discoverable while resizing. Drop the secondary
+	 * reasoning label first; the model name can ellipsize in the remaining space. */
+
+	.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .combined-model-provider-trigger-chevron {
+		flex: 0 0 auto;
+	}
+}
+
+/* A soft, anchored Add menu with full-width rounded hover rows. */
+.monaco-workbench .action-widget:has(.backboard-composer-add-menu) {
+	border-radius: 12px !important;
+	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 12%, transparent);
+	box-shadow: 0 12px 36px rgba(0, 0, 0, 0.16), 0 2px 8px rgba(0, 0, 0, 0.06);
+	padding: 6px;
+	overflow: hidden;
+	max-width: calc(100vw - 24px);
+}
+
+.monaco-workbench .backboard-composer-add-menu .monaco-list-row {
+	border-radius: 9px !important;
+}
+
+.monaco-workbench .backboard-composer-add-menu .monaco-list-row.action {
+	padding-inline: 9px;
+}
+
+.monaco-workbench .backboard-composer-add-menu .description {
+	color: var(--vscode-descriptionForeground);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-welcome-copy {
+	align-self: center;
+	justify-self: center;
+	text-align: center;
+	z-index: 1;
+	padding: 24px;
+	pointer-events: none;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-welcome-title {
+	font-size: 18px;
+	font-weight: 700;
+	line-height: 24px;
+	letter-spacing: 0.6px;
+	color: var(--vscode-foreground);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-welcome-subtitle {
+	margin-top: 3px;
+	font-size: 13px;
+	font-weight: 500;
+	line-height: 20px;
+	letter-spacing: 0;
+	color: var(--vscode-foreground);
+	opacity: 0.88;
+}
+
+/* Restore the flowing blue currents while keeping the background restrained. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-water-mark > g {
+	display: initial;
+	opacity: 0.35;
+}
+
+.monaco-workbench.monaco-reduce-motion .part.auxiliarybar .chat-viewpane .backboard-panel-water-current,
+.monaco-workbench.monaco-reduce-motion .part.auxiliarybar .chat-viewpane .backboard-panel-water-glint {
+	animation: none;
+}
+
+/* Context menus stay anchored to the composer without changing its layout. */
+.monaco-workbench .interactive-input-part:has(> .backboard-composer-flow) { position: relative; }
+.monaco-workbench .backboard-composer .chat-input-container { position: relative; }
+.monaco-workbench .backboard-composer-flow {
+	position: absolute;
+	margin: 0;
+	z-index: 100;
+	box-sizing: border-box;
+	width: 224px;
+	max-width: calc(100% - 16px);
+	max-height: min(440px, 65vh);
+	display: flex;
+	flex-direction: column;
+	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 10%, transparent);
+	border-radius: 10px !important;
+	background: var(--vscode-editorWidget-background);
+	color: var(--vscode-foreground);
+	box-shadow: 0 8px 24px #00000020, 0 2px 6px #00000010;
+	overflow: hidden;
+	font: 13px/1.5 var(--vscode-font-family);
+	transform-origin: bottom left;
+	animation: backboard-context-enter 120ms cubic-bezier(.16, 1, .3, 1);
+}
+@keyframes backboard-context-enter {
+	from { opacity: 0; transform: translateY(4px) scale(.97); }
+	to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.monaco-workbench.monaco-reduce-motion .backboard-composer-flow { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+	.monaco-workbench .backboard-composer-flow { animation: none; }
+}
+.monaco-workbench .backboard-composer-context-menu > .backboard-composer-flow-header,
+.monaco-workbench .backboard-composer-inline-picker > .backboard-composer-flow-header { display: none; }
+.monaco-workbench .backboard-composer-inline-picker { width: 288px; }
+.monaco-workbench .backboard-composer-flow .backboard-composer-menu-separator {
+	border-top: 1px solid color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
+	margin: 4px 6px;
+}
+.monaco-workbench .backboard-composer-flow .backboard-composer-context-result {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	background: transparent;
+	min-height: 29px;
+	flex-shrink: 0;
+	padding: 4px 8px;
+}
+.backboard-composer-result-label { display: flex; flex-direction: column; min-width: 0; }
+.backboard-composer-result-label > :is(span, small) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.backboard-composer-result-label small { font-size: 11px; color: var(--vscode-descriptionForeground); }
+.backboard-composer-context-result > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.monaco-workbench .backboard-composer-flow .backboard-composer-context-result[aria-selected="true"] {
+	background: var(--vscode-list-hoverBackground);
+}
+.monaco-workbench .backboard-composer-flow-status:empty { display: none; }
+.monaco-workbench .backboard-composer-flow-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	padding: 6px 12px 0;
+	color: var(--vscode-descriptionForeground);
+	flex-shrink: 0;
+}
+.monaco-workbench .backboard-composer-flow-header strong { font-weight: 400; }
+.monaco-workbench .backboard-composer-flow-header button { padding: 2px 6px; font-size: 11px; }
+.monaco-workbench .backboard-composer-flow-body {
+	display: flex;
+	flex-direction: column;
+	gap: 0;
+	padding: 4px;
+	overflow: auto;
+	min-height: 0;
+	scrollbar-width: thin;
+	scrollbar-color: color-mix(in srgb, var(--vscode-foreground) 15%, transparent) transparent;
+}
+
+.monaco-workbench .backboard-composer-flow .backboard-composer-drawer-option {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-shrink: 0;
+	border: 0;
+	min-height: 28px;
+	padding: 4px 8px;
+	border-radius: 5px !important;
+	background: transparent;
+	font-size: 13px;
+	line-height: 20px;
+}
+
+.backboard-composer-drawer-value { margin-left: auto; font-size: 11px; color: var(--vscode-descriptionForeground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.backboard-composer-drawer-heading { padding: 12px 6px 4px; color: var(--vscode-descriptionForeground); }
+.backboard-composer-drawer-option > .codicon { flex: 0 0 14px; font-size: 14px; }
+.backboard-composer-drawer-option > span:not(.backboard-composer-drawer-value) { flex-shrink: 0; }
+
+.backboard-capability-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.monaco-workbench .backboard-capability-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 1px 5px;
+	border: 1px dashed color-mix(in srgb, var(--vscode-foreground) 20%, transparent);
+	border-radius: 3px;
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+	font: italic 11px/16px var(--vscode-font-family);
+	cursor: pointer;
+}
+.backboard-capability-chip .codicon { font-size: 12px; }
+.backboard-capability-chip:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
+.monaco-workbench .backboard-composer-flow label { display: flex; flex-direction: column; gap: 5px; }
+.monaco-workbench .backboard-composer-flow :is(input, textarea) {
+	box-sizing: border-box;
+	width: 100%;
+	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 18%, transparent);
+	border-radius: 8px !important;
+	background: var(--vscode-input-background);
+	color: var(--vscode-input-foreground);
+	padding: 8px 10px;
+	font: inherit;
+}
+.monaco-workbench .backboard-composer-flow textarea { min-height: 92px; resize: vertical; }
+.monaco-workbench .backboard-composer-flow button {
+	border: 0;
+	border-radius: 8px !important;
+	padding: 7px 10px;
+	background: var(--vscode-toolbar-hoverBackground);
+	color: var(--vscode-foreground);
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+.monaco-workbench .backboard-composer-flow button:hover { background: var(--vscode-list-hoverBackground); }
+.monaco-workbench .backboard-composer-flow :is(button, input, textarea):focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+.monaco-workbench .backboard-composer-flow-status { margin: 0; color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; }
+
+/* Reuse the actual animated mark as a quiet, cropped background watermark. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-welcome-copy {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+}
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-empty-mark,
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-panel-empty-mark {
+	position: static;
+	order: -1;
+	width: 36px;
+	height: 48px;
+	margin: 0 0 14px;
+	transform: none;
+	opacity: 0.85;
+	filter: none;
+}
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-water-strand-base {
+	fill: #72a5c6;
+	stroke: none;
+	opacity: 0.3;
+}
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-panel-water-strand-base { fill: #276b92; opacity: 0.4; }
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-water-mark > g { opacity: 0.8; }
+
+/* Keep onboarding's flowing layers visible in the centered identity mark. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-welcome-copy .backboard-panel-water-mark > g {
+	display: initial;
+	opacity: 1;
+}
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-panel-welcome-copy .backboard-panel-water-mark,
+.monaco-workbench.hc-light .part.auxiliarybar .chat-viewpane .backboard-panel-welcome-copy .backboard-panel-water-mark {
+	filter: saturate(1.25) brightness(0.62);
+}
+
+/* Quiet labels and consistent unboxed icons in the composer Add menu. */
+.monaco-workbench .backboard-composer-add-menu .monaco-list-row.action .codicon {
+	font-size: 16px;
+	color: var(--vscode-descriptionForeground);
+	background: transparent;
+}
+.monaco-workbench .backboard-composer-add-menu .monaco-list-row.action .description {
+	margin-left: auto;
+	padding-left: 16px;
+	font-size: 11px;
+	text-align: right;
+}
+
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chats { padding-right: 46px; }
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-home-actions {
+	border-left: 1px solid var(--vscode-widget-border, color-mix(in srgb, var(--vscode-foreground) 14%, transparent));
+	padding-left: 8px;
+}
+
+/* One clear identity mark above the welcome text, with no animated backdrop. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-welcome-copy > .backboard-panel-empty-mark {
+	width: 54px;
+	height: 72px;
+	margin-bottom: 20px;
+	opacity: 1;
+}
+
+/* Editor composer proportions and controls across Simple, Editor and Advanced. */
+/* Reserve the full control height; the 28px model/send controls previously
+ * overflowed a 24px toolbar and were cropped by its overflow boundary. */
+:is(.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer, .monaco-workbench.agent-sessions-workbench, .monaco-workbench) .interactive-session .interactive-input-part {
+	--bb-composer-control-size: 28px;
+}
+:is(.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer, .monaco-workbench.agent-sessions-workbench, .monaco-workbench) .interactive-session .chat-input-toolbars {
+	flex: 0 0 28px;
+	height: 28px;
+	min-height: 28px;
+	align-items: center;
+}
+:is(.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer, .monaco-workbench.agent-sessions-workbench, .monaco-workbench) .interactive-session .chat-input-toolbars :is(.chat-input-toolbar, .chat-execute-toolbar, .monaco-action-bar, .actions-container, .action-item) {
+	min-height: 28px;
+	box-sizing: border-box;
+	align-items: center;
+}
+
+:is(.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer, .monaco-workbench.agent-sessions-workbench, .monaco-workbench) .interactive-session .interactive-input-part .chat-input-container {
+	border-radius: 22px !important;
+	padding: 8px 8px 6px !important;
+	gap: 4px !important;
+	min-height: 80px;
+	background: var(--vscode-editorWidget-background) !important;
+	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 14%, transparent) !important;
+	box-shadow: 0 2px 8px #0000000a !important;
+}
+:is(.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-composer, .monaco-workbench.vs.agent-sessions-workbench, .monaco-workbench.vs) .interactive-session .interactive-input-part .chat-input-container {
+	background: #fff !important;
+}
+:is(.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer, .monaco-workbench.agent-sessions-workbench, .monaco-workbench) .interactive-session .interactive-input-part .chat-input-container:focus-within {
+	border-color: color-mix(in srgb, var(--vscode-focusBorder) 45%, var(--vscode-editorWidget-background)) !important;
+	box-shadow: 0 0 0 2px #1769d20d !important;
+}
+:is(.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer, .monaco-workbench.agent-sessions-workbench, .monaco-workbench) .interactive-session .chat-input-toolbars .combined-model-provider-trigger {
+	height: 28px !important;
+	border-radius: 14px !important;
+	padding: 0 4px !important;
+	gap: 4px;
+	background: transparent !important;
+	border: 0 !important;
+	box-shadow: none !important;
+}
+:is(.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer, .monaco-workbench.agent-sessions-workbench, .monaco-workbench) .interactive-session .combined-model-provider-trigger-thinking {
+	display: inline !important;
+	flex: 0 0 auto !important;
+}
+:is(.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer, .monaco-workbench.agent-sessions-workbench, .monaco-workbench) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label:is(.codicon-arrow-up, .codicon-newline, .codicon-stop-circle) {
+	width: 28px !important;
+	height: 28px !important;
+	min-width: 28px !important;
+	padding: 0 !important;
+	border-radius: 50% !important;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: #1769d2 !important;
+	color: #fff !important;
+}
+:is(.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer, .monaco-workbench.agent-sessions-workbench, .monaco-workbench) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item.disabled > .action-label:is(.codicon-arrow-up, .codicon-newline) {
+	background: color-mix(in srgb, var(--vscode-foreground) 10%, var(--vscode-editorWidget-background)) !important;
+	color: var(--vscode-descriptionForeground) !important;
+	opacity: 1 !important;
+}
+
+/* Consistent gaps and optical centering without expanding the control row. */
+.monaco-workbench .interactive-session .chat-input-toolbars {
+	column-gap: 4px;
+}
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbars .monaco-action-bar .actions-container {
+	gap: 4px;
+}
+.monaco-workbench .interactive-session .chat-input-toolbars .combined-model-provider-trigger-chevron {
+	margin: 0;
+	width: 12px;
+	flex: 0 0 12px;
+	text-align: center;
+}
+.monaco-workbench .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label:is(.codicon-arrow-up, .codicon-newline, .codicon-stop-circle)::before {
+	font-size: 16px;
+	line-height: 16px;
+	width: 16px;
+	height: 16px;
+	margin: 0;
+	transform: none;
+	color: inherit;
+	opacity: 1;
+}
+.monaco-workbench .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item.disabled > .action-label:is(.codicon-arrow-up, .codicon-newline)::before {
+	color: var(--vscode-descriptionForeground) !important;
+}
+
+/* Light-blue onboarding flow, with deeper blue definition on light themes. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-welcome-copy .backboard-panel-water-mark {
+	filter: none !important;
+}
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-water-mark linearGradient:first-child stop {
+	stop-color: #A6DEFA;
+}
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-water-mark linearGradient:first-child stop:is(:first-child, :last-child) {
+	stop-color: #77BCE5;
+}
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-water-mark linearGradient:first-child stop:nth-child(3) {
+	stop-color: #428FBE;
+}
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-water-strand-base {
+	fill: #6BB1DB;
+	opacity: 1;
+}
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-panel-welcome-copy .backboard-panel-water-mark {
+	filter: saturate(1.15) brightness(0.86) !important;
+}

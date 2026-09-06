@@ -12,6 +12,7 @@ import type {
 	PermissionDecision,
 } from "../core/permissions/types.ts";
 import { Tool } from "../core/tools/Tool.ts";
+import { throwIfAborted } from "../core/tools/ToolAbort.ts";
 import type { ToolContext } from "../core/tools/ToolContext.ts";
 import { ok, type ToolResult } from "../core/tools/ToolResult.ts";
 import { assertInsideIsolatedWorkspace } from "../core/tools/WorkspaceBoundary.ts";
@@ -80,6 +81,7 @@ export class WriteTool extends Tool<Input, Output> {
 		input: Input,
 		ctx: ToolContext,
 	): Promise<ToolResult<Output>> {
+		throwIfAborted(ctx.signal);
 		assertInsideIsolatedWorkspace(ctx, [input.file_path]);
 		const prepared = await measurePerformance(
 			ctx.bus,
@@ -95,34 +97,26 @@ export class WriteTool extends Tool<Input, Output> {
 			},
 		);
 		await ctx.mutationLockTurn?.wait();
-		const before = await withPathLocks([prepared.filePath], async () => {
-			ctx.mutationLockTurn?.advance();
-			const filePath = prepared.filePath;
-			// Recheck after acquiring the lock so a link swapped in after permission
-			// resolution cannot redirect this write to an unvalidated target.
-			assertNoDanglingSymlink(filePath);
-			const existed = await fileExists(filePath);
-			const beforeBytes = existed ? await readFile(filePath) : undefined;
-			const before = beforeBytes?.toString("utf8") ?? "";
-			// Journal the pre-image (and any directories this write is about to
-			// create, so undo can prune them) before touching disk.
-			const createdDirs = await missingAncestorDirs(dirname(filePath));
-			await measurePerformance(
-				ctx.bus,
-				"checkpoint_pre_flush",
-				{ toolCallId: ctx.toolCallId, fileCount: 1 },
-				async () =>
-					await (ctx.mutationCheckpointBatch?.recordPreImages(
-						[
-							{
-								absPath: filePath,
-								opts: { createdDirs, tool: this.name },
-							},
-						],
-						ctx,
-					) ??
-						recordPreImageBatch(
-							ctx.checkpoints,
+		const mutation = withPathLocks(
+			[prepared.filePath],
+			async () => {
+				throwIfAborted(ctx.signal);
+				const filePath = prepared.filePath;
+				// Recheck after acquiring the lock so a link swapped in after permission
+				// resolution cannot redirect this write to an unvalidated target.
+				assertNoDanglingSymlink(filePath);
+				const existed = await fileExists(filePath);
+				const beforeBytes = existed ? await readFile(filePath) : undefined;
+				const before = beforeBytes?.toString("utf8") ?? "";
+				// Journal the pre-image (and any directories this write is about to
+				// create, so undo can prune them) before touching disk.
+				const createdDirs = await missingAncestorDirs(dirname(filePath));
+				await measurePerformance(
+					ctx.bus,
+					"checkpoint_pre_flush",
+					{ toolCallId: ctx.toolCallId, fileCount: 1 },
+					async () =>
+						await (ctx.mutationCheckpointBatch?.recordPreImages(
 							[
 								{
 									absPath: filePath,
@@ -130,46 +124,63 @@ export class WriteTool extends Tool<Input, Output> {
 								},
 							],
 							ctx,
-						)),
-			);
-			try {
-				await measurePerformance(
-					ctx.bus,
-					"filesystem_commit",
-					{ toolCallId: ctx.toolCallId, fileCount: 1 },
-					async () => {
-						await ensureDir(dirname(filePath));
-						await writeFile(filePath, prepared.content);
-					},
-				);
-				await measurePerformance(
-					ctx.bus,
-					"checkpoint_post_flush",
-					{ toolCallId: ctx.toolCallId, fileCount: 1 },
-					async () =>
-						await (ctx.mutationCheckpointBatch?.recordPostImages(
-							[{ absPath: filePath, contentIfInMemory: prepared.content }],
-							ctx,
 						) ??
-							recordPostImageBatch(
+							recordPreImageBatch(
 								ctx.checkpoints,
-								[{ absPath: filePath, contentIfInMemory: prepared.content }],
+								[
+									{
+										absPath: filePath,
+										opts: { createdDirs, tool: this.name },
+									},
+								],
 								ctx,
 							)),
 				);
-			} catch (error) {
+				throwIfAborted(ctx.signal);
 				try {
-					await restoreWrite(filePath, beforeBytes, createdDirs);
-				} catch (rollbackError) {
-					throw new AggregateError(
-						[error, rollbackError],
-						`Write failed and ${filePath} could not be rolled back`,
+					await measurePerformance(
+						ctx.bus,
+						"filesystem_commit",
+						{ toolCallId: ctx.toolCallId, fileCount: 1 },
+						async () => {
+							await ensureDir(dirname(filePath));
+							await writeFile(filePath, prepared.content);
+						},
 					);
+					await measurePerformance(
+						ctx.bus,
+						"checkpoint_post_flush",
+						{ toolCallId: ctx.toolCallId, fileCount: 1 },
+						async () =>
+							await (ctx.mutationCheckpointBatch?.recordPostImages(
+								[{ absPath: filePath, contentIfInMemory: prepared.content }],
+								ctx,
+							) ??
+								recordPostImageBatch(
+									ctx.checkpoints,
+									[{ absPath: filePath, contentIfInMemory: prepared.content }],
+									ctx,
+								)),
+					);
+				} catch (error) {
+					try {
+						await restoreWrite(filePath, beforeBytes, createdDirs);
+					} catch (rollbackError) {
+						throw new AggregateError(
+							[error, rollbackError],
+							`Write failed and ${filePath} could not be rolled back`,
+						);
+					}
+					throw error;
 				}
-				throw error;
-			}
-			return before;
-		});
+				return before;
+			},
+			ctx.signal,
+		);
+		// withPathLocks reserves in invocation order before yielding. A blocked
+		// path must not hold up registration of later independent writes.
+		ctx.mutationLockTurn?.advance();
+		const before = await mutation;
 
 		const diagnostics = await collectDiagnosticsFeedback(
 			ctx,

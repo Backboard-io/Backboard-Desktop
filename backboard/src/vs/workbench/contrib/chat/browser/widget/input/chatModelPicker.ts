@@ -1404,6 +1404,8 @@ export class ModelPickerWidget extends Disposable {
 			nameChildren.push(this._badgeIcon);
 		}
 		dom.reset(this._nameButton, ...nameChildren);
+		this._nameButton.setAttribute('aria-label', fullLabel);
+		this._nameButton.title = fullLabel;
 
 		// The combined configuration button is only shown in UBB mode.
 		// In PRU mode, configuration is accessed via per-model toolbar actions in the picker dropdown.

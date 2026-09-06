@@ -32,6 +32,7 @@ import type {
 	SubmitToolOutputsRequest,
 } from "../backboard/types.ts";
 import { loadAttachments } from "../byok/attachments.ts";
+import { ToolCallProtocolGuard } from "../ToolCallProtocolGuard.ts";
 import { jsonSchemaToZodRawShape } from "./ClaudeJsonSchemaToZod.ts";
 import {
 	assertClaudeSubscriptionLogin,
@@ -638,6 +639,12 @@ export class ClaudeSubscriptionClient implements AgentClient {
 					}
 					const calls = content.flatMap(toolCallFromBlock);
 					if (calls.length > 0) {
+						const guarded = new ToolCallProtocolGuard().accept({
+							kind: "requires_action",
+							runId: null,
+							calls,
+						});
+						if (guarded.kind === "failed") throw new Error(guarded.error);
 						active.currentCalls = calls;
 						thread.messages.push({
 							role: "assistant",

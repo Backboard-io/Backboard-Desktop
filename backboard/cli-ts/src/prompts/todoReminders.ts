@@ -4,7 +4,7 @@ import type { TodoItem } from "../core/bus/events.ts";
  * System-prompt segment shown until the session's first TodoWrite call, so
  * the model starts tracking non-trivial work without being asked.
  */
-export const TODO_NOT_CALLED_REMINDER = `IMPORTANT: TodoWrite was not called yet. You must call it for any non-trivial task requested by the user. It would benefit overall performance. Make sure to keep the todo list up to date with the state of the conversation. Performance tip: call the TodoWrite tool in parallel with other tool calls to save the user's time and tokens.`;
+export const TODO_NOT_CALLED_REMINDER = `TodoWrite was not called yet. Use it if the user requests a plan or substantial work has dependencies worth tracking. Skip it for short tasks; tool-call count alone does not justify a plan. Update necessary plans alongside substantive work and preserve unfinished items accurately.`;
 
 export const PLAN_UP_TO_DATE_REPLY = "Plan is up-to-date.";
 

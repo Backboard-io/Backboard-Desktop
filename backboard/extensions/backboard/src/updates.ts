@@ -11,6 +11,7 @@ import * as http from 'http';
 import * as https from 'https';
 import * as os from 'os';
 import * as path from 'path';
+import { pipeline } from 'stream/promises';
 import { deprecatedBridgeDetail, deprecatedBridgeDownloadAction, deprecatedBridgeTitle, getReplacementDownloadUrl, replacementManifestBaseUrl, shouldShowDeprecatedBridgeNotice, shouldUseReplacementManifest } from './migrationNotice';
 import { macUpdateInstallerScript } from './updatesInstaller';
 
@@ -63,7 +64,8 @@ export function initializeBackboardUpdates(context: vscode.ExtensionContext, out
 	updateBackboardUpdateCheckStatusItem(false);
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.checkForUpdates', () => checkBackboardUpdates(true)));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.installAvailableUpdate', () => installAvailableBackboardUpdate()));
-	startBackboardUpdateChecks(context);
+	context.subscriptions.push(vscode.commands.registerCommand('backboard.cancelUpdate', () => backboardUpdateCancellation?.abort()));
+	context.subscriptions.push({ dispose: () => backboardUpdateCancellation?.abort() });
 }
 
 function showDeprecatedBridgeNotice(context: vscode.ExtensionContext): boolean {
@@ -114,28 +116,11 @@ function showDeprecatedBridgeNotice(context: vscode.ExtensionContext): boolean {
 }
 
 let backboardUpdateInstallInProgress = false;
+let backboardUpdateCancellation: AbortController | undefined;
 let backboardUpdateCheckInProgress = false;
 let availableBackboardUpdate: UpdateManifest | undefined;
 let backboardUpdateStatusItem: vscode.StatusBarItem | undefined;
 let backboardUpdateCheckStatusItem: vscode.StatusBarItem | undefined;
-function startBackboardUpdateChecks(context: vscode.ExtensionContext): void {
-	if (!vscode.workspace.getConfiguration('backboard').get<boolean>('updates.enabled', true)) {
-		return;
-	}
-
-	const initialTimer = setTimeout(() => {
-		void checkBackboardUpdates(false);
-	}, 10_000);
-	context.subscriptions.push({ dispose: () => clearTimeout(initialTimer) });
-
-	const configuredMinutes = vscode.workspace.getConfiguration('backboard').get<number>('updates.checkIntervalMinutes', 360);
-	const intervalMinutes = Number.isFinite(configuredMinutes) ? Math.max(15, configuredMinutes) : 360;
-	const timer = setInterval(() => {
-		void checkBackboardUpdates(false);
-	}, intervalMinutes * 60 * 1000);
-	context.subscriptions.push({ dispose: () => clearInterval(timer) });
-}
-
 async function checkBackboardUpdates(manual: boolean): Promise<void> {
 	if (backboardUpdateCheckInProgress) {
 		if (manual) {
@@ -147,6 +132,7 @@ async function checkBackboardUpdates(manual: boolean): Promise<void> {
 	backboardUpdateCheckInProgress = true;
 	updateBackboardUpdateCheckStatusItem(manual);
 	let checkLock: UpdateInstallLock | undefined;
+	let checkFinished = false;
 	try {
 		checkLock = await acquireBackboardUpdateCheckLock();
 		if (!checkLock) {
@@ -166,12 +152,17 @@ async function checkBackboardUpdates(manual: boolean): Promise<void> {
 
 		backboardUpdateOutput?.appendLine(`[updates] checking ${manifestUrl}`);
 		const manifest = await fetchBackboardUpdateManifest(manifestUrl);
+		await releaseBackboardUpdateInstallLock(checkLock);
+		checkLock = undefined;
+		checkFinished = true;
+		backboardUpdateCheckInProgress = false;
+		updateBackboardUpdateCheckStatusItem(false);
 		const currentVersion = readCurrentAppVersion();
 		backboardUpdateOutput?.appendLine(`[updates] current=${currentVersion} remote=${manifest.version}`);
 		if (!isNewerVersion(manifest.version, currentVersion)) {
 			await setAvailableBackboardUpdate(undefined);
 			if (manual) {
-				await vscode.window.showInformationMessage(`Backboard Studio is up to date. Current version: ${currentVersion}.`);
+				vscode.window.setStatusBarMessage(`Backboard Studio is up to date (${currentVersion}).`, 4000);
 			}
 			return;
 		}
@@ -204,14 +195,16 @@ async function checkBackboardUpdates(manual: boolean): Promise<void> {
 		const message = error instanceof Error ? error.message : String(error);
 		backboardUpdateOutput?.appendLine(`[updates] ${message}`);
 		if (manual) {
-			await vscode.window.showWarningMessage(`Could not check for Backboard Studio updates: ${message}`);
+			void vscode.window.showWarningMessage(`Could not check for Backboard Studio updates: ${message}`);
 		}
 	} finally {
 		if (checkLock) {
 			await releaseBackboardUpdateInstallLock(checkLock);
 		}
-		backboardUpdateCheckInProgress = false;
-		updateBackboardUpdateCheckStatusItem(false);
+		if (!checkFinished) {
+			backboardUpdateCheckInProgress = false;
+			updateBackboardUpdateCheckStatusItem(false);
+		}
 	}
 }
 
@@ -226,7 +219,7 @@ function updateBackboardUpdateCheckStatusItem(checking: boolean): void {
 		backboardUpdateCheckStatusItem.text = '$(sync) Check Updates';
 		backboardUpdateCheckStatusItem.tooltip = 'Check S3 for a Backboard Studio update';
 	}
-	backboardUpdateCheckStatusItem.show();
+	backboardUpdateCheckStatusItem.hide();
 }
 
 async function setAvailableBackboardUpdate(manifest: UpdateManifest | undefined): Promise<void> {
@@ -241,7 +234,7 @@ async function setAvailableBackboardUpdate(manifest: UpdateManifest | undefined)
 	}
 	backboardUpdateStatusItem.text = `$(cloud-download) Update ${manifest.version}`;
 	backboardUpdateStatusItem.tooltip = `Install Backboard Studio ${manifest.version}`;
-	backboardUpdateStatusItem.show();
+	backboardUpdateStatusItem.hide();
 }
 
 async function installAvailableBackboardUpdate(): Promise<void> {
@@ -276,63 +269,102 @@ async function installBackboardUpdate(manifest: UpdateManifest): Promise<void> {
 	}
 
 	backboardUpdateInstallInProgress = true;
+	const cancellation = new AbortController();
+	backboardUpdateCancellation = cancellation;
+	const { signal } = cancellation;
 	let installLock: UpdateInstallLock | undefined;
+	let installerOwnsLock = false;
 	try {
+		await vscode.commands.executeCommand('setContext', 'backboard.updateCancellable', true);
+		if (backboardUpdateStatusItem) {
+			backboardUpdateStatusItem.text = vscode.l10n.t('$(debug-stop) Stop Update');
+			backboardUpdateStatusItem.tooltip = vscode.l10n.t('Stop downloading or verifying the update');
+			backboardUpdateStatusItem.command = 'backboard.cancelUpdate';
+		}
+		signal.throwIfAborted();
 		const acquiredInstallLock = await acquireBackboardUpdateInstallLock(appPath, manifest.version);
 		installLock = acquiredInstallLock;
 		const updateDirectory = await backboardUpdateCacheDirectory(appPath, manifest);
 		const dmgPath = path.join(updateDirectory, `Backboard-Studio-${manifest.version}.dmg`);
-		let cachedDownloadValid = false;
-		if (fs.existsSync(dmgPath)) {
+		await vscode.window.withProgress({
+			location: vscode.ProgressLocation.Notification,
+			title: vscode.l10n.t('Preparing Backboard Studio {0}', manifest.version),
+			cancellable: true
+		}, async (progress, token) => {
+			const subscription = token.onCancellationRequested(() => cancellation.abort());
 			try {
-				await verifyBackboardUpdate(dmgPath, manifest);
-				cachedDownloadValid = true;
-				backboardUpdateOutput?.appendLine(`[updates] reusing verified download for ${manifest.version}`);
-			} catch {
-				await fs.promises.rm(dmgPath, { force: true });
-			}
-		}
-		if (!cachedDownloadValid) {
-			const partialDmgPath = path.join(updateDirectory, `.Backboard-Studio-${manifest.version}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.partial`);
-			backboardUpdateOutput?.appendLine(`[updates] downloading ${manifest.version} from ${manifest.url}`);
-			try {
-				await vscode.window.withProgress({
-					location: vscode.ProgressLocation.Notification,
-					title: `Downloading Backboard Studio ${manifest.version}`,
-					cancellable: false
-				}, async progress => {
-					await downloadBackboardUpdate(manifest.url, partialDmgPath, progress);
-				});
-				await verifyBackboardUpdate(partialDmgPath, manifest);
-				await fs.promises.rename(partialDmgPath, dmgPath);
+				if (token.isCancellationRequested) {
+					cancellation.abort();
+				}
+				signal.throwIfAborted();
+				let cachedDownloadValid = false;
+				if (fs.existsSync(dmgPath)) {
+					try {
+						progress.report({ message: vscode.l10n.t('Verifying downloaded update…') });
+						await verifyBackboardUpdate(dmgPath, manifest, signal);
+						cachedDownloadValid = true;
+					} catch (error) {
+						signal.throwIfAborted();
+						await fs.promises.rm(dmgPath, { force: true });
+					}
+				}
+				if (!cachedDownloadValid) {
+					const partialDmgPath = path.join(updateDirectory, `.Backboard-Studio-${manifest.version}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.partial`);
+					try {
+						progress.report({ message: vscode.l10n.t('Downloading update…') });
+						await downloadBackboardUpdate(manifest.url, partialDmgPath, progress, signal);
+						progress.report({ message: vscode.l10n.t('Verifying downloaded update…') });
+						await verifyBackboardUpdate(partialDmgPath, manifest, signal);
+						signal.throwIfAborted();
+						await fs.promises.rename(partialDmgPath, dmgPath);
+					} finally {
+						await fs.promises.rm(partialDmgPath, { force: true });
+					}
+				}
 			} finally {
-				await fs.promises.rm(partialDmgPath, { force: true });
+				subscription.dispose();
 			}
+		});
+		signal.throwIfAborted();
+		const installAction = vscode.l10n.t('Install and Restart');
+		const choice = await vscode.window.showInformationMessage(
+			vscode.l10n.t('Backboard Studio {0} is ready to install.', manifest.version),
+			{ modal: true, detail: vscode.l10n.t('Installing will close Backboard Studio and restart it. You can cancel now and keep working. Once installation begins, it cannot be stopped.') },
+			installAction
+		);
+		if (choice !== installAction) {
+			cancellation.abort();
 		}
+		signal.throwIfAborted();
+		// This is the commit point: the user has explicitly chosen to restart.
+		backboardUpdateCancellation = undefined;
+		await vscode.commands.executeCommand('setContext', 'backboard.updateCancellable', false);
 		await vscode.window.withProgress({
 			location: vscode.ProgressLocation.Notification,
-			title: `Verifying Backboard Studio ${manifest.version}`,
-			cancellable: false
-		}, async () => verifyBackboardUpdate(dmgPath, manifest));
-		backboardUpdateOutput?.appendLine(`[updates] download verified for ${manifest.version}`);
-		await vscode.window.withProgress({
-			location: vscode.ProgressLocation.Notification,
-			title: `Preparing Backboard Studio ${manifest.version}`,
+			title: vscode.l10n.t('Installing Backboard Studio {0}', manifest.version),
 			cancellable: false
 		}, async () => stageMacBackboardInstaller(dmgPath, appPath, manifest.version, acquiredInstallLock));
-		backboardUpdateOutput?.appendLine(`[updates] ${manifest.version} is staged and verified; requesting automatic restart`);
-		// Do not await a notification here: waiting for a toast to be dismissed can
-		// delay shutdown indefinitely. The detached, already-prepared installer waits
-		// for this process to exit, swaps the app, validates it again, and relaunches it.
+		installerOwnsLock = true;
 		await vscode.commands.executeCommand('workbench.action.quit');
 	} catch (error) {
-		backboardUpdateInstallInProgress = false;
-		if (installLock) {
+		if (signal.aborted) {
+			backboardUpdateOutput?.appendLine('[updates] update stopped by the user; installed app unchanged');
+		} else {
+			const message = error instanceof Error ? error.message : String(error);
+			backboardUpdateOutput?.appendLine(`[updates] install failed: ${message}`);
+			await vscode.window.showWarningMessage(`Could not install Backboard Studio update: ${message}`);
+		}
+	} finally {
+		backboardUpdateCancellation = undefined;
+		backboardUpdateInstallInProgress = installerOwnsLock;
+		if (installLock && !installerOwnsLock) {
 			await releaseBackboardUpdateInstallLock(installLock);
 		}
-		const message = error instanceof Error ? error.message : String(error);
-		backboardUpdateOutput?.appendLine(`[updates] install failed: ${message}`);
-		await vscode.window.showWarningMessage(`Could not install Backboard Studio update: ${message}`);
+		await vscode.commands.executeCommand('setContext', 'backboard.updateCancellable', false);
+		if (backboardUpdateStatusItem) {
+			backboardUpdateStatusItem.command = 'backboard.installAvailableUpdate';
+		}
+		await setAvailableBackboardUpdate(availableBackboardUpdate);
 	}
 }
 
@@ -453,91 +485,63 @@ function isSupportedMacBackboardAppName(appName: string): boolean {
 	return appName === 'Backboard Studio.app' || appName === 'Backboard Studio Sandbox.app';
 }
 
-function downloadBackboardUpdate(rawUrl: string, destination: string, progress: vscode.Progress<{ message?: string; increment?: number }>): Promise<void> {
-	return new Promise((resolve, reject) => {
-		const request = downloadWithRedirects(rawUrl, destination, progress, 5, resolve, reject);
-		request.on('error', reject);
-	});
-}
-
-function downloadWithRedirects(
-	rawUrl: string,
-	destination: string,
-	progress: vscode.Progress<{ message?: string; increment?: number }>,
-	redirectLimit: number,
-	resolve: () => void,
-	reject: (error: Error) => void
-): http.ClientRequest {
+async function downloadBackboardUpdate(rawUrl: string, destination: string, progress: vscode.Progress<{ message?: string; increment?: number }>, signal: AbortSignal, redirectLimit = 5): Promise<void> {
+	signal.throwIfAborted();
 	const url = new URL(rawUrl);
 	const client = url.protocol === 'http:' ? http : https;
-	const request = client.get(url, { headers: { 'User-Agent': `Backboard-Studio/${readCurrentAppVersion()}` } }, response => {
-		const statusCode = response.statusCode ?? 0;
-		const location = response.headers.location;
-		if (statusCode >= 300 && statusCode < 400 && location && redirectLimit > 0) {
-			response.resume();
-			const nextRequest = downloadWithRedirects(new URL(location, url).toString(), destination, progress, redirectLimit - 1, resolve, reject);
-			nextRequest.on('error', reject);
-			return;
-		}
-		if (statusCode < 200 || statusCode >= 300) {
-			response.resume();
-			reject(new Error(`Update download failed with HTTP ${statusCode}.`));
-			return;
-		}
-
-		const expectedBytes = Number(response.headers['content-length']) || undefined;
-		let downloadedBytes = 0;
-		let lastPercent = 0;
-		const file = fs.createWriteStream(destination, { mode: 0o600 });
-		response.on('data', chunk => {
-			const size = Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk);
-			downloadedBytes += size;
-			if (expectedBytes) {
-				const percent = Math.min(100, Math.floor((downloadedBytes / expectedBytes) * 100));
-				if (percent > lastPercent) {
-					progress.report({ increment: percent - lastPercent, message: `${percent}%` });
-					lastPercent = percent;
-				}
-			} else {
-				progress.report({ message: `${Math.round(downloadedBytes / 1024 / 1024)} MB` });
-			}
-		});
-		response.pipe(file);
-		file.on('finish', () => file.close(error => {
-			if (error) {
-				reject(error);
-			} else {
-				resolve();
-			}
-		}));
-		file.on('error', error => {
-			response.destroy();
-			reject(error);
-		});
+	const response = await new Promise<http.IncomingMessage>((resolve, reject) => {
+		const request = client.get(url, { signal, headers: { 'User-Agent': `Backboard-Studio/${readCurrentAppVersion()}` } }, resolve);
+		request.setTimeout(120_000, () => request.destroy(new Error('Update download timed out.')));
+		request.on('error', reject);
 	});
-	request.setTimeout(120_000, () => {
-		request.destroy(new Error('Update download timed out.'));
+	const statusCode = response.statusCode ?? 0;
+	const location = response.headers.location;
+	if (statusCode >= 300 && statusCode < 400 && location && redirectLimit > 0) {
+		response.destroy();
+		return downloadBackboardUpdate(new URL(location, url).toString(), destination, progress, signal, redirectLimit - 1);
+	}
+	if (statusCode < 200 || statusCode >= 300) {
+		response.destroy();
+		throw new Error(`Update download failed with HTTP ${statusCode}.`);
+	}
+	const expectedBytes = Number(response.headers['content-length']) || undefined;
+	let downloadedBytes = 0;
+	let lastPercent = 0;
+	response.on('data', chunk => {
+		downloadedBytes += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk);
+		if (expectedBytes) {
+			const percent = Math.min(100, Math.floor((downloadedBytes / expectedBytes) * 100));
+			if (percent > lastPercent) {
+				progress.report({ increment: percent - lastPercent, message: `${percent}%` });
+				lastPercent = percent;
+			}
+		} else {
+			progress.report({ message: `${Math.round(downloadedBytes / 1024 / 1024)} MB` });
+		}
 	});
-	return request;
+	// pipeline closes both streams before rejecting, so cancellation can safely
+	// remove the partial file and release the lock before another attempt starts.
+	await pipeline(response, fs.createWriteStream(destination, { mode: 0o600 }), { signal });
 }
 
-async function verifyBackboardUpdate(dmgPath: string, manifest: UpdateManifest): Promise<void> {
+async function verifyBackboardUpdate(dmgPath: string, manifest: UpdateManifest, signal: AbortSignal): Promise<void> {
+	signal.throwIfAborted();
 	const stat = await fs.promises.stat(dmgPath);
 	if (manifest.size_bytes !== undefined && stat.size !== manifest.size_bytes) {
 		throw new Error(`Downloaded update size mismatch. Expected ${manifest.size_bytes} bytes, got ${stat.size}.`);
 	}
 	if (manifest.sha256) {
-		const actualSha256 = await sha256File(dmgPath);
+		const actualSha256 = await sha256File(dmgPath, signal);
 		if (actualSha256.toLowerCase() !== manifest.sha256.toLowerCase()) {
 			throw new Error(`Downloaded update SHA-256 mismatch. Expected ${manifest.sha256}, got ${actualSha256}.`);
 		}
 	}
 }
 
-function sha256File(filePath: string): Promise<string> {
+function sha256File(filePath: string, signal: AbortSignal): Promise<string> {
 	return new Promise((resolve, reject) => {
 		const hash = crypto.createHash('sha256');
-		const stream = fs.createReadStream(filePath);
+		const stream = fs.createReadStream(filePath, { signal });
 		stream.on('data', chunk => hash.update(chunk));
 		stream.on('error', reject);
 		stream.on('end', () => resolve(hash.digest('hex')));

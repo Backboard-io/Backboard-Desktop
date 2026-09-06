@@ -72,10 +72,26 @@
 	opacity: 0.72;
 }
 
-/* macOS desktop: the native traffic lights center ~4px below the titlebar's
-   midline; shift the titlebar contents down so the mode switcher and the
-   right-side layout controls sit on the same line as them (matches the Simple
-   and Advanced window header strips). */
+/* Keep the 24px controls centered in the titlebar's content box. */
 .monaco-workbench.mac:not(.web) .part.titlebar > .titlebar-container {
-	padding-top: 4px;
+	padding-top: 0;
+}
+
+.monaco-workbench .backboard-update-pill {
+	appearance: none;
+	border: 0;
+	border-radius: 12px;
+	padding: 0 12px;
+	height: 24px;
+	font: 600 12px/24px var(--vscode-font-family);
+	background: #1769d2;
+	color: #ffffff;
+	cursor: pointer;
+	-webkit-app-region: no-drag;
+}
+
+.monaco-workbench .backboard-update-pill:hover { background: #125bb8; }
+.monaco-workbench .backboard-update-pill:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: 2px;
 }

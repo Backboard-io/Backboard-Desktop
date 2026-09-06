@@ -5,20 +5,21 @@
 import type * as marked from '../../../../base/common/marked/marked.js';
 import { htmlAttributeEncodeValue } from '../../../../base/common/strings.js';
 
-export const mathInlineRegExp = /(?<![a-zA-Z0-9])(?<dollars>\${1,2})(?!\.|\(["'])((?:\\.|[^\\\n])*?(?:\\.|[^\\\n\$]))\k<dollars>(?![a-zA-Z0-9])/; // Non-standard, but ensure opening $ is not preceded and closing $ is not followed by word/number characters, opening $ not followed by ., (", ('
+// Keep dollar boundaries conservative for shell snippets and currency. Explicit
+// LaTeX delimiters are tokenized here, never rewritten inside fenced/inline code.
+export const mathInlineRegExp = /(?<![a-zA-Z0-9])(?<dollars>\${1,2})(?!\.|\(["'])((?:\\.|[^\\\n])*?(?:\\.|[^\\\n\$]))\k<dollars>(?![a-zA-Z0-9])|\\\((?<parenText>(?:\\.|[^\\\n])*?)\\\)|\\\[(?<displayText>[\s\S]+?)\\\]/;
 export const katexContainerClassName = 'vscode-katex-container';
 export const katexContainerLatexAttributeName = 'data-latex';
 
-const inlineRule = new RegExp('^' + mathInlineRegExp.source);
+const inlineRule = new RegExp('^(?:' + mathInlineRegExp.source + ')');
 
 export namespace MarkedKatexExtension {
 	type KatexOptions = import('katex').KatexOptions;
 
 	// From https://github.com/UziTech/marked-katex-extension/blob/main/src/index.js
-	// From https://github.com/UziTech/marked-katex-extension/blob/main/src/index.js
 	export interface MarkedKatexOptions extends KatexOptions { }
 
-	const blockRule = /^(\${1,2})\n((?:\\[^]|[^\\])+?)\n\1(?:\n|$)/;
+	const blockRule = /^(\${1,2})\r?\n((?:\\[^]|[^\\])+?)\r?\n\1(?:\r?\n|$)|^\\\[(?<displayText>[\s\S]+?)\\\][ \t]*(?:\r?\n|$)/;
 
 	export function extension(katex: typeof import('katex').default, options: MarkedKatexOptions = {}): marked.MarkedExtension {
 		return {
@@ -43,8 +44,8 @@ export namespace MarkedKatexExtension {
 				// This ensures we can always retrieve the source even if the annotation element is not present
 				out = `<span class="${katexContainerClassName}" ${katexContainerLatexAttributeName}="${htmlAttributeEncodeValue(token.text)}">${html}</span>`;
 			} catch {
-				// On failure, just use the original text including the wrapping $ or $$
-				out = token.raw;
+				// Keep invalid or still-streaming source readable, never interpret it as HTML.
+				out = `<code class="vscode-katex-error">${htmlAttributeEncodeValue(token.raw)}</code>`;
 			}
 			return out + (isBlock ? '\n' : '');
 		};
@@ -56,23 +57,7 @@ export namespace MarkedKatexExtension {
 			name: 'inlineKatex',
 			level: 'inline',
 			start(src: string) {
-				let index;
-				let indexSrc = src;
-
-				while (indexSrc) {
-					index = indexSrc.indexOf('$');
-					if (index === -1) {
-						return;
-					}
-
-					const possibleKatex = indexSrc.substring(index);
-					if (possibleKatex.match(ruleReg)) {
-						return index;
-					}
-
-					indexSrc = indexSrc.substring(index + 1).replace(/^\$+/, '');
-				}
-				return;
+				return src.match(mathInlineRegExp)?.index;
 			},
 			tokenizer(src: string, tokens: marked.Token[]) {
 				const match = src.match(ruleReg);
@@ -80,8 +65,8 @@ export namespace MarkedKatexExtension {
 					return {
 						type: 'inlineKatex',
 						raw: match[0],
-						text: match[2].trim(),
-						displayMode: match[1].length === 2,
+						text: (match.groups?.parenText ?? match.groups?.displayText ?? match[2]).trim(),
+						displayMode: match.groups?.displayText !== undefined || match[1]?.length === 2,
 					};
 				}
 				return;
@@ -103,8 +88,8 @@ export namespace MarkedKatexExtension {
 					return {
 						type: 'blockKatex',
 						raw: match[0],
-						text: match[2].trim(),
-						displayMode: match[1].length === 2,
+						text: (match.groups?.displayText ?? match[2]).trim(),
+						displayMode: match.groups?.displayText !== undefined || match[1]?.length === 2,
 					};
 				}
 				return;

@@ -11,7 +11,10 @@ import type {
 } from "../AgentClient.ts";
 import { MODEL_PAGE_LIMIT } from "./constants.ts";
 import { BackboardError, BackboardTransportError } from "./errors.ts";
-import { BackboardStreamEventMapper } from "./mappers.ts";
+import {
+	BackboardStreamEventMapper,
+	type ToolMappingTrace,
+} from "./mappers.ts";
 import { isSelectableProvider } from "./modelCatalog.ts";
 import { parseSseFrame, readSseFrames } from "./sse.ts";
 import type {
@@ -368,6 +371,7 @@ export class BackboardClient implements AgentClient {
 		const started = Date.now();
 		let status = 0;
 		let events = 0;
+		const toolIdentityTrace: ToolMappingTrace[] = [];
 		let lastEvent: ProviderEvent | null = null;
 		let error: string | undefined;
 		let errorLogged = false;
@@ -381,6 +385,25 @@ export class BackboardClient implements AgentClient {
 				: body,
 		});
 
+		const requestedThinking = isForm
+			? undefined
+			: (body as { thinking?: SendMessageRequest["thinking"] }).thinking;
+		yield {
+			kind: "thinking_resolved",
+			requested: requestedThinking,
+			effective: {
+				thinking:
+					requestedThinking === undefined ? "omitted" : requestedThinking,
+				upstreamEffective: "unknown",
+			},
+			provider: "backboard",
+			model: isForm
+				? "request-model"
+				: String(
+						(body as { model_name?: string }).model_name ?? "thread-model",
+					),
+			reason: "backboard-wire-setting-upstream-mapping-not-observable",
+		};
 		try {
 			const res = await fetch(`${this.env.apiUrl}${path}`, {
 				method: "POST",
@@ -416,7 +439,19 @@ export class BackboardClient implements AgentClient {
 				);
 			}
 
-			const mapper = new BackboardStreamEventMapper(knownToolNames);
+			const mapper = new BackboardStreamEventMapper(
+				knownToolNames,
+				(trace) => {
+					// Bounded metadata only. Raw argument text and private reasoning are never captured.
+					if (
+						trace.phase === "raw" &&
+						process.env.BACKBOARD_TRACE_TOOL_FRAMES !== "1"
+					)
+						return;
+					if (toolIdentityTrace.length < 256) toolIdentityTrace.push(trace);
+				},
+				process.env.BACKBOARD_TRACE_TOOL_FRAMES === "1",
+			);
 			for await (const frame of readSseFrames(res.body, {
 				includeTransportActivity: true,
 			})) {
@@ -439,7 +474,12 @@ export class BackboardClient implements AgentClient {
 				for (const event of mapped) {
 					events++;
 					lastEvent = event;
+					if (event.kind === "failed") error = event.error;
 					yield event;
+					// A terminal protocol rejection cannot be followed by a successful
+					// completion or another final batch, even for direct client consumers.
+					// Reposting a consumed remote run has no documented idempotency contract.
+					if (event.kind === "failed") return;
 				}
 			}
 		} catch (err) {
@@ -459,7 +499,7 @@ export class BackboardClient implements AgentClient {
 					endpoint: path,
 					method: "POST",
 					status,
-					body: { stream: true, events, lastEvent },
+					body: { stream: true, events, lastEvent, toolIdentityTrace },
 					latencyMs: Date.now() - started,
 					...(error ? { error } : {}),
 				});

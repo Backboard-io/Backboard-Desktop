@@ -38,10 +38,15 @@ export class EditorPool extends Disposable {
 		let stale = false;
 		return {
 			object: codeBlock,
-			isStale: () => stale,
+			isStale: () => stale || this._store.isDisposed,
 			dispose: createSingleCallFunction(() => {
-				codeBlock.reset();
 				stale = true;
+				// The renderer can dispose its pool before the transcript releases
+				// its references. Those editors (and their models) are already gone.
+				if (this._store.isDisposed) {
+					return;
+				}
+				codeBlock.reset();
 				this._pool.release(codeBlock, key);
 			})
 		};
@@ -78,10 +83,15 @@ export class DiffEditorPool extends Disposable {
 		let stale = false;
 		return {
 			object: codeBlock,
-			isStale: () => stale,
+			isStale: () => stale || this._store.isDisposed,
 			dispose: createSingleCallFunction(() => {
-				codeBlock.reset();
 				stale = true;
+				// The renderer can dispose its pool before the transcript releases
+				// its references. Those editors (and their models) are already gone.
+				if (this._store.isDisposed) {
+					return;
+				}
+				codeBlock.reset();
 				this._pool.release(codeBlock);
 			})
 		};

@@ -48,8 +48,9 @@ const subagentWorkingMessages = [
 	localize('chat.subagent.working.5', 'Evaluating'),
 ];
 
-function localizedWorkerStatus(status: 'Running' | 'Completed' | 'Failed' | 'Cancelled' | 'Integrating' | 'Integrated' | 'Conflict'): string {
+function localizedWorkerStatus(status: 'Queued' | 'Running' | 'Completed' | 'Failed' | 'Cancelled' | 'Integrating' | 'Integrated' | 'Conflict'): string {
 	switch (status) {
+		case 'Queued': return localize('chat.subagent.statusQueued', 'Queued');
 		case 'Running': return localize('chat.subagent.statusRunning', 'Running');
 		case 'Completed': return localize('chat.subagent.statusCompleted', 'Completed');
 		case 'Failed': return localize('chat.subagent.statusFailed', 'Failed');
@@ -337,6 +338,26 @@ export class ChatSubagentContentPart extends ChatCollapsibleContentPart implemen
 		this.updateOpenButton();
 		header.appendChild(button);
 
+		// In the compact transcript the worker itself is the navigation pill.
+		// Capture before the base disclosure listener; confirmations can still
+		// reveal their content programmatically when they need attention.
+		this._register(dom.addDisposableListener(this._collapseButton!.element, 'click', event => {
+			if (!this.domNode.closest('.backboard-clean-chat')) {
+				return;
+			}
+			event.preventDefault();
+			event.stopImmediatePropagation();
+			void this.openSubagentChat();
+		}, true));
+
+		this._register(dom.addDisposableListener(this._collapseButton!.element, 'keydown', event => {
+			if (this.domNode.closest('.backboard-clean-chat') && (event.key === 'Enter' || event.key === ' ')) {
+				event.preventDefault();
+				event.stopImmediatePropagation();
+				void this.openSubagentChat();
+			}
+		}, true));
+
 		this._register(dom.addDisposableListener(button, 'click', event => {
 			event.preventDefault();
 			event.stopPropagation();
@@ -613,7 +634,7 @@ export class ChatSubagentContentPart extends ChatCollapsibleContentPart implemen
 			? this.toolInvocation.toolSpecificData
 			: undefined;
 		return data?.detached === true
-			&& (!data.workerStatus || data.workerStatus === 'Running' || data.workerStatus === 'Integrating');
+			&& (!data.workerStatus || data.workerStatus === 'Queued' || data.workerStatus === 'Running' || data.workerStatus === 'Integrating');
 	}
 
 	/** Compact lifecycle value consumed by the aggregate worker disclosure. */
@@ -647,7 +668,23 @@ export class ChatSubagentContentPart extends ChatCollapsibleContentPart implemen
 		return localize('chat.subagent.prefix', 'Subagent');
 	}
 
+	/** Prefer an explicit display name; do not turn a long delegated prompt into a title. */
+	public getSummaryLabel(): string | undefined {
+		const name = this.agentName?.trim();
+		if (name && !/^(worker|subagent|agent|rlm)$/i.test(name)) {
+			return rcut(name, 80);
+		}
+		const description = this.description.trim();
+		if (!this._isDefaultDescription && description.length <= 60 && !/[\r\n]/.test(description)) {
+			return description;
+		}
+		return undefined;
+	}
+
 	public markAsInactive(): void {
+		if (this.shouldRemainActiveAfterParentTurn()) {
+			return;
+		}
 		this.isActive = false;
 		this.domNode.classList.remove('chat-thinking-active');
 		if (this._collapseButton) {
@@ -690,6 +727,10 @@ export class ChatSubagentContentPart extends ChatCollapsibleContentPart implemen
 		this._titleFileWidgetStore.clear();
 		labelElement.textContent = '';
 
+		const avatar = $('span.chat-subagent-avatar', { 'aria-hidden': 'true' });
+		avatar.classList.add('codicon', this.isActive ? 'chat-subagent-avatar-running' : 'codicon-sparkle');
+		labelElement.appendChild(avatar);
+
 		const statusSpan = $('span.chat-subagent-row-status');
 		statusSpan.classList.add(`chat-subagent-row-status-${status.kind}`);
 		statusSpan.dataset.statusKind = status.kind;
@@ -699,7 +740,11 @@ export class ChatSubagentContentPart extends ChatCollapsibleContentPart implemen
 		const taskSpan = this.isActive
 			? $('span.chat-thinking-title-shimmer.chat-subagent-task')
 			: $('span.chat-thinking-title-detail-text.chat-subagent-task');
-		taskSpan.textContent = taskText;
+		const nameSpan = $('span.chat-subagent-name');
+		nameSpan.textContent = prefix;
+		const descriptionSpan = $('span.chat-subagent-description');
+		descriptionSpan.textContent = `: ${this.description}`;
+		taskSpan.append(nameSpan, descriptionSpan);
 		labelElement.appendChild(taskSpan);
 
 		if (toolCallText) {
@@ -721,7 +766,11 @@ export class ChatSubagentContentPart extends ChatCollapsibleContentPart implemen
 			return;
 		}
 		this._collapseButton.element.ariaLabel = this.collapseButtonAriaLabel;
-		this._collapseButton.element.ariaExpanded = String(this.isExpanded());
+		if (this.domNode.closest('.backboard-clean-chat')) {
+			this._collapseButton.element.removeAttribute('aria-expanded');
+		} else {
+			this._collapseButton.element.ariaExpanded = String(this.isExpanded());
+		}
 	}
 
 	private getWorkerStatusPresentation(): { label: string; kind: string } {
@@ -729,9 +778,7 @@ export class ChatSubagentContentPart extends ChatCollapsibleContentPart implemen
 			? this.toolInvocation.toolSpecificData
 			: undefined;
 		const reportedStatus = data?.workerStatus;
-		const status = !this.isActive && (!reportedStatus || reportedStatus === 'Running')
-			? 'Completed'
-			: reportedStatus ?? (this.isActive ? 'Running' : 'Completed');
+		const status = reportedStatus ?? (this.isActive ? 'Running' : 'Completed');
 		return { label: localizedWorkerStatus(status), kind: status.toLowerCase() };
 	}
 
@@ -934,6 +981,9 @@ export class ChatSubagentContentPart extends ChatCollapsibleContentPart implemen
 
 					// Update description and model name from toolSpecificData (set during invoke())
 					if (toolInvocation.toolSpecificData?.kind === 'subagent') {
+						if (toolInvocation.toolSpecificData.agentName) {
+							this.agentName = toolInvocation.toolSpecificData.agentName;
+						}
 						if (toolInvocation.toolSpecificData.description) {
 							this.description = toolInvocation.toolSpecificData.description;
 							this._isDefaultDescription = false;
@@ -949,6 +999,10 @@ export class ChatSubagentContentPart extends ChatCollapsibleContentPart implemen
 					// complete, but only child lifecycle status can finish the worker.
 					if (!this.shouldRemainActiveAfterParentTurn()) {
 						this.markAsInactive();
+					} else {
+						this.isActive = true;
+						this.domNode.classList.add('chat-thinking-active');
+						this.updateTitle();
 					}
 				} else if (wasStreaming && state.type !== IChatToolInvocation.StateKind.Streaming) {
 					wasStreaming = false;

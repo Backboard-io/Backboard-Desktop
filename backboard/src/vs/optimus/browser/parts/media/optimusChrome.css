@@ -1,0 +1,109 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* Mode and panel controls share the dashboard/session toolbar, with no
+ * separate window-wide navigation strip. */
+.agent-sessions-workbench.optimus-window .optimus-window-chrome.optimus-inline-chrome {
+	position: static;
+	flex: 0 0 auto;
+	width: auto;
+	height: 28px;
+	padding: 0;
+	gap: 4px;
+	z-index: auto;
+	background: transparent;
+	border: 0;
+	-webkit-app-region: no-drag;
+}
+
+.optimus-window-chrome.optimus-inline-chrome::before,
+.optimus-window-chrome.optimus-inline-chrome::after {
+	display: none;
+}
+
+.optimus-inline-chrome .optimus-window-actions {
+	gap: 2px;
+	margin: 0;
+}
+
+/* Keep the labelled mode menu visible, including in compact windows. */
+.agent-sessions-workbench.optimus-window .optimus-window-chrome-mode {
+	display: inline-flex;
+	width: auto;
+	flex: 0 0 auto;
+	padding: 0 7px;
+}
+
+.agent-sessions-workbench.optimus-window :is(.optimus-window-chrome-mode-label, .optimus-window-chrome-mode-chevron) {
+	display: inline;
+}
+
+.agent-sessions-workbench.optimus-window .optimus-panel-close {
+	flex: 0 0 auto;
+	margin-left: auto;
+	position: relative;
+	z-index: 1;
+	-webkit-app-region: no-drag;
+}
+
+.agent-sessions-workbench.optimus-window .part.auxiliarybar > .title > .optimus-panel-close {
+	order: 100;
+	margin-right: 6px;
+}
+
+.optimus-window .optimus-dashboard-header {
+	-webkit-app-region: drag;
+}
+
+.optimus-window .optimus-dashboard-header button,
+.optimus-window .optimus-dashboard-filter-chips {
+	-webkit-app-region: no-drag;
+}
+
+/* Native window buttons now share the toolbar's vertical space. */
+.agent-sessions-workbench.optimus-window.mac.optimus-sidebar-hidden:not(.fullscreen) :is(.optimus-dashboard-header, .optimus-focused-session-header) {
+	padding-left: 80px;
+}
+
+.agent-sessions-workbench.optimus-window:is(.windows, .linux) :is(.optimus-dashboard-header, .optimus-focused-session-header) {
+	padding-right: calc(100vw - env(titlebar-area-width, 100vw) + 8px);
+}
+
+/* Keep both Advanced panels rounded in the dashboard and focused sessions.
+ * Clip nested opaque views as well as the panel's own background. */
+.monaco-workbench.agent-sessions-workbench.optimus-window:not(.phone-layout) .monaco-grid-view :is(.part.sidebar, .part.auxiliarybar) {
+	border-radius: 14px !important;
+	overflow: hidden !important;
+}
+
+.monaco-workbench.agent-sessions-workbench.optimus-window:not(.phone-layout) .split-view-view:has(> .part.auxiliarybar)::after {
+	display: none;
+}
+
+/* Separate rounded panels with soft shadows, not hairline perimeter borders. */
+.monaco-workbench.agent-sessions-workbench.optimus-window:not(.phone-layout):not(.hc-black):not(.hc-light) :is(.part.sidebar, .part.auxiliarybar) {
+	border: 0 !important;
+	outline: 0 !important;
+}
+
+.monaco-workbench.agent-sessions-workbench.optimus-window:not(.phone-layout):not(.hc-black):not(.hc-light) .part.sidebar {
+	box-shadow: 8px 0 22px -6px rgb(0 0 0 / 45%) !important;
+}
+
+.monaco-workbench.agent-sessions-workbench.optimus-window:not(.phone-layout):not(.hc-black):not(.hc-light) .part.auxiliarybar {
+	box-shadow: -8px 0 22px -6px rgb(0 0 0 / 45%) !important;
+}
+
+.monaco-workbench.agent-sessions-workbench.optimus-window:not(.phone-layout) .monaco-grid-view .split-view-view:is(:has(> .part.sidebar), :has(> .part.auxiliarybar)) {
+	overflow: visible !important;
+	z-index: 2;
+	box-shadow: none !important;
+}
+
+/* A square, opaque grid wrapper otherwise fills in the rounded cutouts. */
+.monaco-workbench.agent-sessions-workbench.optimus-window:not(.phone-layout) .monaco-grid-view .split-view-view:is(:has(> .part.sidebar), :has(> .part.auxiliarybar)) {
+	border-radius: 14px !important;
+	background: transparent !important;
+}

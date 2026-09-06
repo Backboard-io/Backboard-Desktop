@@ -1,6 +1,14 @@
-import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 import { z } from "zod";
+import { resolveRipgrep } from "../core/search/ripgrep.ts";
+import {
+	displaySearchPath,
+	inspectSearchPath,
+	runSearch,
+	type SearchMetadata,
+	type SearchRecord,
+	searchLimitNote,
+} from "../core/search/searchRunner.ts";
 import {
 	asString,
 	relativizePath,
@@ -48,6 +56,18 @@ const schema = z.object({
 		.string()
 		.optional()
 		.describe("Ripgrep file type filter. Examples: js, py, rust, cpp."),
+	hidden: z
+		.boolean()
+		.optional()
+		.describe(
+			"Include hidden files/directories. Defaults to false; an explicit glob or file path can still include hidden files under ripgrep rules.",
+		),
+	no_ignore: z
+		.boolean()
+		.optional()
+		.describe(
+			"Disable ignore-file rules for this scoped search. Defaults to false. Does not enable hidden files by itself.",
+		),
 	context_before: z
 		.number()
 		.int()
@@ -96,15 +116,18 @@ const schema = z.object({
 		.min(1)
 		.optional()
 		.describe(
-			"Limit output to the first N lines. Works with both output modes.",
+			"Stop at N returned lines (including context) or file paths. A reached limit produces a partial result with unknown total. Output also has a 40,000-byte bound.",
 		),
 });
 
 type Input = z.infer<typeof schema>;
 
-interface Output {
+interface Output extends SearchMetadata {
 	matches: string;
+	/** Returned matching lines, excluding context; file_paths mode counts returned files. */
 	matchCount: number;
+	matchCountUnit: "matching_lines" | "files";
+	countUnit: "lines" | "files";
 }
 
 const MAX_OUTPUT = 40_000;
@@ -138,17 +161,23 @@ export class GrepTool extends Tool<Input, Output> {
 		ctx: ToolContext,
 	): Promise<ToolResult<Output>> {
 		const searchPath = input.path ? resolve(ctx.cwd, input.path) : ctx.cwd;
+		await inspectSearchPath(searchPath, ctx.signal);
+		const executable = await resolveRipgrep({ signal: ctx.signal });
 		const outputMode = input.output_mode ?? "content";
-		const args = ["--no-heading", "--color=never"];
+		const args = ["--no-config", "--color=never"];
+		// A small limit must receive early matches even when the rest of a large
+		// file has none; rg's block buffering otherwise delays the first record.
+		if (input.head_limit !== undefined) args.push("--line-buffered");
 		if (!input.fixed_string) args.push("--engine=auto");
-		if (outputMode === "file_paths") args.push("--files-with-matches");
-		if (outputMode === "content" && input.line_numbers !== false) {
-			args.push("--line-number");
-		}
+		if (outputMode === "file_paths")
+			args.push("--files-with-matches", "--null");
+		else args.push("--json");
 		if (input.fixed_string) args.push("--fixed-strings");
 		if (input.ignore_case) args.push("--ignore-case");
 		if (input.glob) args.push("--glob", input.glob);
 		if (input.type) args.push("--type", input.type);
+		if (input.hidden) args.push("--hidden");
+		if (input.no_ignore) args.push("--no-ignore");
 		if (input.multiline) args.push("--multiline", "--multiline-dotall");
 		if (input.context !== undefined) {
 			args.push("--context", String(input.context));
@@ -160,67 +189,105 @@ export class GrepTool extends Tool<Input, Output> {
 				args.push("--after-context", String(input.context_after));
 			}
 		}
-		args.push("--regexp", input.pattern, searchPath);
+		args.push("--regexp", input.pattern, "--", searchPath);
 
-		const { stdout, stderr, code } = await run("rg", args, ctx);
-
-		// rg exit code 1 = no matches (not an error); >1 = real error.
-		if (code !== 0 && code !== 1) {
-			const detail = stderr.trim();
-			throw new Error(
-				detail
-					? `ripgrep failed (exit ${code}): ${detail}`
-					: `ripgrep failed (exit ${code})`,
-			);
-		}
-
-		let limited = stdout;
-		let truncationNote = "";
-		if (input.head_limit !== undefined && limited) {
-			const lines = limited.trimEnd().split("\n");
-			if (lines.length > input.head_limit) {
-				limited = `${lines.slice(0, input.head_limit).join("\n")}\n`;
-				truncationNote = `[output truncated to first ${input.head_limit} lines by head_limit]\n`;
-			}
-		}
-		const trimmed =
-			limited.length > MAX_OUTPUT ? limited.slice(0, MAX_OUTPUT) : limited;
-		const matchCount = trimmed ? trimmed.trimEnd().split("\n").length : 0;
-		const summary =
-			matchCount === 0 ? "No matches found" : trimmed + truncationNote;
-
-		return ok(
-			{ matches: summary, matchCount },
-			summary,
-			matchCount === 0
+		const { records, exitCode, ...metadata } = await runSearch({
+			executablePath: executable.path,
+			args,
+			cwd: ctx.cwd,
+			signal: ctx.signal,
+			delimiter: outputMode === "file_paths" ? "\0" : "\n",
+			maxRecords: input.head_limit ?? Number.MAX_SAFE_INTEGER,
+			recordLimitReason: "head_limit",
+			maxOutputBytes: MAX_OUTPUT,
+			mapRecord: (record) =>
+				outputMode === "file_paths"
+					? [{ text: displaySearchPath(record), value: true }]
+					: contentRecords(record, input.line_numbers !== false),
+		});
+		const rendered = records.map((record) => record.text).join("\n");
+		const matchCount = records.filter((record) => record.value).length;
+		const summary = metadata.truncated
+			? [rendered, searchLimitNote(metadata)].filter(Boolean).join("\n")
+			: rendered || "No matches found";
+		const noun = outputMode === "file_paths" ? "files" : "lines";
+		const title = metadata.truncated
+			? `Returned ${records.length} ${noun} (partial; total unknown)`
+			: records.length === 0
 				? "No matches found"
-				: `Found ${matchCount} match${matchCount === 1 ? "" : "es"}`,
-			buildOutputPreview(trimmed, { maxLines: BROWSING_PREVIEW_LINES }),
+				: `Returned ${records.length} ${noun}`;
+		const result = ok<Output>(
+			{
+				matches: summary,
+				matchCount,
+				matchCountUnit:
+					outputMode === "file_paths" ? "files" : "matching_lines",
+				countUnit: noun,
+				...metadata,
+			},
+			summary,
+			title,
+			buildOutputPreview(rendered, { maxLines: BROWSING_PREVIEW_LINES }),
 		);
+		result.execution = {
+			outcome: metadata.truncated
+				? "partial"
+				: records.length === 0
+					? "no_match"
+					: "success",
+			...(exitCode !== null ? { exitCode } : {}),
+			retryable: false,
+		};
+		return result;
 	}
 }
 
-function run(
-	cmd: string,
-	args: string[],
-	ctx: ToolContext,
-): Promise<{ stdout: string; stderr: string; code: number }> {
-	return new Promise((resolvePromise, reject) => {
-		if (ctx.signal.aborted) return reject(new Error("aborted"));
-		const child = spawn(cmd, args, { signal: ctx.signal });
-		let stdout = "";
-		let stderr = "";
-		child.stdout?.on("data", (c) => {
-			stdout += c.toString();
-			if (stdout.length > MAX_OUTPUT * 2) child.kill("SIGTERM");
-		});
-		child.stderr?.on("data", (c) => {
-			stderr += c.toString();
-			if (stderr.length > MAX_OUTPUT) stderr = stderr.slice(0, MAX_OUTPUT);
-		});
-		child.on("error", (err) => reject(err));
-		child.on("close", (code) =>
-			resolvePromise({ stdout, stderr, code: code ?? 1 }),
-		);
-	});
+interface RipgrepText {
+	text?: string;
+	bytes?: string;
+}
+
+interface RipgrepEvent {
+	type: string;
+	data: {
+		path: RipgrepText;
+		lines: RipgrepText;
+		line_number: number;
+		submatches: { start: number; end: number }[];
+	};
+}
+
+function decodeText(value: RipgrepText): string {
+	if (typeof value.text === "string") return value.text;
+	if (typeof value.bytes === "string")
+		return Buffer.from(value.bytes, "base64").toString("utf8");
+	throw new Error("Missing ripgrep text");
+}
+
+/** JSON keeps filenames separate from content and identifies true matching lines. */
+function* contentRecords(
+	record: string,
+	lineNumbers: boolean,
+): Iterable<SearchRecord<boolean>> {
+	const event = JSON.parse(record) as RipgrepEvent;
+	if (event.type !== "match" && event.type !== "context") return;
+	const path = displaySearchPath(decodeText(event.data.path));
+	const lines = decodeText(event.data.lines).replace(/\n$/, "").split("\n");
+	let byteOffset = 0;
+	for (const [index, text] of lines.entries()) {
+		const byteEnd = byteOffset + Buffer.byteLength(text) + 1;
+		const matched =
+			event.type === "match" &&
+			event.data.submatches.some(
+				(match) =>
+					match.start < byteEnd &&
+					(match.end > byteOffset || match.start === byteOffset),
+			);
+		const separator = matched ? ":" : "-";
+		yield {
+			text: `${path}${separator}${lineNumbers ? `${event.data.line_number + index}${separator}` : ""}${text}`,
+			value: matched,
+		};
+		byteOffset = byteEnd;
+	}
 }

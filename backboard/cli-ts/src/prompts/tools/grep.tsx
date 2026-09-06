@@ -5,78 +5,35 @@ import {
 	type PromptModule,
 } from "../PromptModule.ts";
 
+/** Sanitized examples contract-tested against the actual tool parser. */
+export const GREP_EXAMPLES = [
+	{ pattern: "foo(", path: "src", fixed_string: true, head_limit: 20 },
+	{
+		pattern: "class|interface",
+		path: "src",
+		glob: "*.ts",
+		output_mode: "content",
+		line_numbers: true,
+		context: 2,
+	},
+];
+
 export const grep: PromptModule = definePrompt(
 	buildGrepPrompt(),
 	buildGrepPrompt,
 );
 
 function buildGrepPrompt(context: PromptContext = {}): string {
-	return `## Grep
+	return `Search file contents with ripgrep. The schema defines parameters and types.
 
-High-performance file content search using ripgrep.
+${hasTool(context, "Read") ? "Read a known path directly when its contents or line range will answer the question. " : ""}${hasTool(context, "Glob") ? "Use Glob for path discovery. " : ""}Start in the narrowest relevant directory with a specific pattern, then widen only when results are insufficient. Stop once you have the evidence needed for the task. Batch independent searches when useful.
 
-### Use When
+Use fixed_string for literal code containing regex metacharacters; regex mode preserves ripgrep semantics. Use output_mode=file_paths for candidate files, or content with line_numbers and limited context for inspection. Do not reinterpret a regex error as no matches.
 
-- You need to search inside files by literal text or regex.
-- You need to locate definitions, call sites, logs, traces, or config keys.
-- You need matching lines with context before reading or editing files.
+head_limit stops collection at the requested number of returned records. Output is also bounded by bytes; truncated results are partial and do not establish absence elsewhere. Returned record counts are not total matches, especially with context. Narrow the search before requesting more output.
 
-${doNotUseWhen(context)}
+Default ignore rules remain enabled. hidden includes hidden files; no_ignore includes ignored files. Explicit paths or positive globs can include hidden/ignored files according to ripgrep's rules. Enable these controls only for a scoped search when needed.
 
-### Search Strategy
-
-- Start broad enough to avoid missing alternate spellings, then narrow.
-- Prefer regex alternation for traces and behavioral logs, for example \`tool.*use|tool_not_used\` instead of only \`tool_use\`.
-- Use file type and glob filters to control scope rather than hardcoding one path too early.${hasTool(context, "Read") ? '\n- Use output_mode="file_paths" when you only need candidate files, then Read the relevant files.' : ""}
-- Use context or line_numbers for content investigations where surrounding code matters.
-
-### Performance
-
-- Make multiple speculative Grep calls in parallel when exploring unrelated patterns.
-- Search from the narrowest safe directory, but avoid over-narrowing before you understand the code layout.
-
-Supports ripgrep parameters:
-- Pattern matching with regex support
-- File type filtering with type
-- Glob pattern filtering with glob
-- Case-insensitive search with ignore_case
-- Context lines with context_before, context_after, and context
-- Line numbers with line_numbers
-- Multiline mode with multiline
-- Custom search directories with path
-
-Output modes:
-- file_paths: Returns only matching file paths
-- content: Returns matching lines with optional context, line numbers, and formatting
-
-### Parameters
-
-| Name | Type | Required | Description |
-| --- | --- | --- | --- |
-| \`pattern\` | \`string\` | yes | A search pattern to match in file contents. Can be a literal string or a regular expression. Supports ripgrep regex syntax. |
-| \`path\` | \`string\` | no | Path to a file or directory to search in. If not specified, searches in the current working directory. |
-| \`glob\` | \`string\` | no | Glob pattern to filter files. Example: "*.js" for JavaScript files. |
-| \`output_mode\` | \`string enum: content, file_paths\` | no | "file_paths" returns only matching file paths, "content" returns matching lines with optional context and line numbers. |
-| \`ignore_case\` | \`boolean\` | no | Perform case-insensitive matching. |
-| \`type\` | \`string\` | no | Ripgrep file type filter. Examples: js, py, rust, cpp. |
-| \`context_before\` | \`number\` | no | Number of lines to show before each match. Only works with output_mode="content". |
-| \`context_after\` | \`number\` | no | Number of lines to show after each match. Only works with output_mode="content". |
-| \`context\` | \`number\` | no | Number of lines to show before and after each match. Only works with output_mode="content". |
-| \`line_numbers\` | \`boolean\` | no | Show line numbers in output. Only works with output_mode="content". |
-| \`multiline\` | \`boolean\` | no | Enable multiline mode where . matches newlines and patterns can span lines. |`.trim();
-}
-
-function doNotUseWhen(context: PromptContext): string {
-	const lines = [
-		hasTool(context, "Glob")
-			? "- You need to discover files by path only. Use Glob."
-			: "",
-		hasTool(context, "Read")
-			? "- You already know the exact file path and line range. Use Read."
-			: "",
-		hasTool(context, "Execute")
-			? "- You are tempted to run shell grep/find in Execute for repository search. Use this tool instead."
-			: "",
-	].filter(Boolean);
-	return lines.length > 0 ? `### Do Not Use When\n\n${lines.join("\n")}` : "";
+Examples:
+${GREP_EXAMPLES.map((example) => JSON.stringify(example)).join("\n")}`;
 }

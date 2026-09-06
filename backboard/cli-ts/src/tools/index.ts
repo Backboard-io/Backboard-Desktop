@@ -1,3 +1,5 @@
+import { AgentSpawnBatchTool } from "./AgentSpawnBatchTool.tsx";
+import { AgentCancelTool } from "./AgentCancelTool.tsx";
 import {
 	createRuntimeThinkingResolver,
 	resolveRuntimeThinking,
@@ -61,12 +63,14 @@ function createBaseTools(): Tool[] {
 export function createDefaultTools(deps?: DefaultToolDeps): Tool[] {
 	const base = createBaseTools();
 	if (!deps) return base;
-	const agent = buildAgentTool(deps, base);
-	const agentTasks = deps.agentTaskManager ?? new AgentTaskManager();
+	const agentTasks = deps.agentTaskManager ?? new AgentTaskManager({ workerWorkspaces: deps.workerWorkspaceManager });
+	const agent = buildAgentTool({ ...deps, agentTaskManager: agentTasks }, base);
 	const tools: Tool[] = [
 		...base,
 		agent,
 		new AgentSpawnTool(agent, agentTasks),
+		new AgentSpawnBatchTool(agent, agentTasks),
+		new AgentCancelTool(agentTasks),
 		new AgentWaitTool(agentTasks),
 	];
 	if (deps.skillController) {
@@ -112,6 +116,7 @@ function buildAgentTool(deps: DefaultToolDeps, base: Tool[]): AgentTool {
 
 	const agent = new AgentTool({
 		runner,
+		taskManager: deps.agentTaskManager,
 		maxDepth: DEFAULT_AGENT_MAX_DEPTH,
 		workspaceManager: deps.workerWorkspaceManager,
 		createRLMLoop: () =>

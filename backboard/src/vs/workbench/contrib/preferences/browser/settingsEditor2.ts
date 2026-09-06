@@ -1014,7 +1014,7 @@ export class SettingsEditor2 extends EditorPane {
 			orientation: Orientation.HORIZONTAL,
 			proportionalLayout: true
 		}));
-		const defaultTocWidth = 384;
+		const defaultTocWidth = SettingsEditor2.TOC_RESET_WIDTH;
 		const startingWidth = defaultTocWidth;
 		this.rootElement.style.setProperty('--t3-settings-sidebar-width', `${startingWidth}px`);
 		this.splitView.addView({
@@ -1040,7 +1040,7 @@ export class SettingsEditor2 extends EditorPane {
 			}
 		}, Sizing.Distribute, undefined, true);
 		this._register(this.splitView.onDidSashReset(() => {
-			const preferredTocWidth = Math.min(520, Math.max(SettingsEditor2.TOC_RESET_WIDTH, Math.round(this.bodyContainer.clientWidth * 0.265)));
+			const preferredTocWidth = Math.min(360, Math.max(SettingsEditor2.TOC_RESET_WIDTH, Math.round(this.bodyContainer.clientWidth * 0.18)));
 			this.splitView.resizeView(0, preferredTocWidth);
 		}));
 		const borderColor = this.theme.getColor(settingsSashBorder)!;
@@ -2164,7 +2164,7 @@ export class SettingsEditor2 extends EditorPane {
 		// showing up at the minimum size whenever the Settings editor
 		// opens for the first time.
 		this.splitView.layout(this.bodyContainer.clientWidth, listHeight);
-		const preferredTocWidth = Math.min(520, Math.max(SettingsEditor2.TOC_RESET_WIDTH, Math.round(this.bodyContainer.clientWidth * 0.265)));
+		const preferredTocWidth = Math.min(360, Math.max(SettingsEditor2.TOC_RESET_WIDTH, Math.round(this.bodyContainer.clientWidth * 0.18)));
 		if (!this.didApplyInitialTocWidth && this.bodyContainer.clientWidth > 0) {
 			this.didApplyInitialTocWidth = true;
 			this.splitView.resizeView(0, preferredTocWidth);

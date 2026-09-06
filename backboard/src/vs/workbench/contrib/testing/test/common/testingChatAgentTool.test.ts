@@ -4,11 +4,13 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
-import { CancellationToken } from '../../../../../base/common/cancellation.js';
+import { CancellationToken, CancellationTokenSource } from '../../../../../base/common/cancellation.js';
+import { isCancellationError } from '../../../../../base/common/errors.js';
 import { Event } from '../../../../../base/common/event.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { upcastPartial } from '../../../../../base/test/common/mock.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
+import { runWithFakedTimers } from '../../../../../base/test/common/timeTravelScheduler.js';
 import { Range } from '../../../../../editor/common/core/range.js';
 import { Position } from '../../../../../editor/common/core/position.js';
 import { NullTelemetryService } from '../../../../../platform/telemetry/common/telemetryUtils.js';
@@ -20,7 +22,7 @@ import { FileCoverage, ICoverageAccessor, TestCoverage } from '../../common/test
 import { LiveTestResult } from '../../common/testResult.js';
 import { ITestResultService } from '../../common/testResultService.js';
 import { IMainThreadTestCollection, ITestService } from '../../common/testService.js';
-import { CoverageDetails, DetailType, IBranchCoverage, IDeclarationCoverage, IFileCoverage, IStatementCoverage, ResolvedTestRunRequest, TestMessageType, TestResultState, TestRunProfileBitset } from '../../common/testTypes.js';
+import { CoverageDetails, DetailType, IBranchCoverage, IDeclarationCoverage, IFileCoverage, IStatementCoverage, IncrementalTestCollectionItem, ResolvedTestRunRequest, TestMessageType, TestResultState, TestRunProfileBitset } from '../../common/testTypes.js';
 import { ITestProfileService } from '../../common/testProfileService.js';
 import { observableValue } from '../../../../../base/common/observable.js';
 import { VSBuffer } from '../../../../../base/common/buffer.js';
@@ -32,6 +34,7 @@ suite('Workbench - RunTestTool', () => {
 
 	let insertCounter = 0;
 	let tool: RunTestTool;
+	let testRoots: IncrementalTestCollectionItem[];
 
 	const noopProgress = {
 		report: (_update: IToolProgressStep) => { },
@@ -169,10 +172,11 @@ suite('Workbench - RunTestTool', () => {
 
 	setup(() => {
 		insertCounter = 0;
+		testRoots = [];
 
 		const mockTestService = upcastPartial<ITestService>({
 			collection: upcastPartial<IMainThreadTestCollection>({
-				rootItems: [],
+				rootItems: testRoots,
 				rootIds: [],
 				expand: () => Promise.resolve(),
 				getNodeById: () => undefined,
@@ -180,6 +184,7 @@ suite('Workbench - RunTestTool', () => {
 			}),
 			runTests: () => Promise.resolve(upcastPartial({})),
 			cancelTestRun: () => { },
+			onDidProcessDiff: Event.None,
 		});
 
 		const mockResultService = upcastPartial<ITestResultService>({
@@ -209,6 +214,26 @@ suite('Workbench - RunTestTool', () => {
 	});
 
 	suite('invoke', () => {
+		test('times out when a test provider stays busy during discovery', () => runWithFakedTimers({}, async () => {
+			testRoots.push(upcastPartial<IncrementalTestCollectionItem>({ item: upcastPartial<IncrementalTestCollectionItem['item']>({ extId: 'busy', label: 'suite', busy: true }) }));
+			const result = await tool.invoke(
+				upcastPartial<IToolInvocation>({ parameters: { testNames: ['missing'] } }),
+				noopCountTokens, noopProgress, CancellationToken.None,
+			);
+			assert.match(String(result.toolResultError), /discovery timed out after 30 seconds/);
+		}));
+
+		test('cancels discovery while the provider stays busy', async () => {
+			testRoots.push(upcastPartial<IncrementalTestCollectionItem>({ item: upcastPartial<IncrementalTestCollectionItem['item']>({ extId: 'busy', label: 'suite', busy: true }) }));
+			const cancellation = ds.add(new CancellationTokenSource());
+			const result = tool.invoke(
+				upcastPartial<IToolInvocation>({ parameters: { testNames: ['missing'] } }),
+				noopCountTokens, noopProgress, cancellation.token,
+			);
+			cancellation.cancel();
+			await assert.rejects(result, isCancellationError);
+		});
+
 		test('returns error when no tests found', async () => {
 			const result = await tool.invoke(
 				upcastPartial<IToolInvocation>({ parameters: { files: ['/nonexistent/test.ts'] } }),

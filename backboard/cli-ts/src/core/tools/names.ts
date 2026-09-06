@@ -15,6 +15,8 @@ const BUILTIN_AGENT_NAMES: Record<string, string> = {
 	Browser: "browser",
 	Agent: "agent",
 	AgentSpawn: "agent_spawn",
+	AgentSpawnBatch: "agent_spawn_batch",
+	AgentCancel: "agent_cancel",
 	AgentWait: "agent_wait",
 	FindSkill: "find_skill",
 	FindMcp: "find_mcp",

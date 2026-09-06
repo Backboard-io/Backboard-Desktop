@@ -42,7 +42,6 @@ export interface IWindowsMainService {
 	openExistingWindow(window: ICodeWindow, openConfig: IOpenConfiguration): void;
 
 	openAgentsWindow(openConfig: IOpenConfiguration, folderUri?: URI, sessionResource?: URI): Promise<ICodeWindow[]>;
-	openJarvisWindow(openConfig: IOpenConfiguration): Promise<ICodeWindow[]>;
 	openOptimusWindow(openConfig: IOpenConfiguration): Promise<ICodeWindow[]>;
 
 	sendToFocused(channel: string, ...args: unknown[]): void;
@@ -110,7 +109,6 @@ export interface IOpenConfiguration extends IBaseOpenConfiguration {
 	readonly gotoLineMode?: boolean;
 	readonly initialStartup?: boolean;
 	readonly noRecentEntry?: boolean;
-	readonly jarvisWindow?: boolean;
 	readonly optimusWindow?: boolean;
 	/**
 	 * The remote authority to use when windows are opened with either

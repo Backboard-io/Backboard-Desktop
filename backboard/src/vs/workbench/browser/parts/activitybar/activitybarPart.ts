@@ -42,13 +42,13 @@ import { SwitchCompositeViewAction } from '../compositeBarActions.js';
 
 export class ActivitybarPart extends Part {
 
-	static readonly ACTION_HEIGHT = 48;
+	static readonly ACTION_HEIGHT = 42;
 	static readonly COMPACT_ACTION_HEIGHT = 32;
 
-	static readonly ACTIVITYBAR_WIDTH = 48;
+	static readonly ACTIVITYBAR_WIDTH = 42;
 	static readonly COMPACT_ACTIVITYBAR_WIDTH = 36;
 
-	static readonly ICON_SIZE = 24;
+	static readonly ICON_SIZE = 20;
 	static readonly COMPACT_ICON_SIZE = 16;
 
 	static readonly pinnedViewContainersKey = 'workbench.activity.pinnedViewlets2';
@@ -130,11 +130,11 @@ export class ActivitybarPart extends Part {
 			activityHoverOptions: {
 				position: () => this.layoutService.getSideBarPosition() === Position.LEFT ? HoverPosition.RIGHT : HoverPosition.LEFT,
 			},
-			excludedViewContainerIds: ['workbench.view.explorer', 'workbench.view.search', 'workbench.view.scm', 'workbench.view.extensions', 'workbench.view.debug', 'copilot-chat'],
+			excludedViewContainerIds: ['copilot-chat'],
 			preventLoopNavigation: true,
 			recomputeSizes: false,
 			fillExtraContextMenuActions: (actions, e?: MouseEvent | GestureEvent) => { },
-			compositeSize: 52,
+			compositeSize: actionHeight,
 			colors: (theme: IColorTheme) => ({
 				activeForegroundColor: theme.getColor(ACTIVITY_BAR_FOREGROUND),
 				inactiveForegroundColor: theme.getColor(ACTIVITY_BAR_INACTIVE_FOREGROUND),

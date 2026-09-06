@@ -79,5 +79,34 @@ suite('Markdown Katex Support Test', () => {
 		assert.ok(!rendered.element.innerHTML.includes('katex'));
 		await assertSnapshot(rendered.element.innerHTML);
 	});
-});
 
+	test('renders explicit LaTeX delimiters, matrices, and aligned display equations', async () => {
+		const rendered = await renderMarkdownWithKatex(String.raw`Inline \(\frac{a}{b}\) and display:
+\[
+\begin{aligned}
+A &= \begin{bmatrix}1 & 2 \\ 3 & 4\end{bmatrix} \\
+f(x) &= \int_0^x t^2\,dt
+\end{aligned}
+\]
+`);
+		assert.deepStrictEqual({
+			math: rendered.element.querySelectorAll('.katex').length,
+			display: rendered.element.querySelectorAll('.katex-display').length,
+			errors: rendered.element.querySelectorAll('.vscode-katex-error').length,
+			source: rendered.element.querySelector('.vscode-katex-container')?.getAttribute('data-latex'),
+		}, { math: 2, display: 1, errors: 0, source: '\\frac{a}{b}' });
+	});
+
+	test('leaves code, escaped delimiters, currency, and unfinished math literal', async () => {
+		const rendered = await renderMarkdownWithKatex('`\\(x\\)`\n\n```latex\n\\[x\\]\n```\n\nCosts $5 and $10. Unfinished \\(x. Escaped \\\\(y\\\\).');
+		assert.strictEqual(rendered.element.querySelectorAll('.katex').length, 0);
+	});
+
+	test('invalid LaTeX stays readable without interpreting embedded HTML', async () => {
+		const rendered = await renderMarkdownWithKatex(String.raw`\(\notACommand{<img src=x>}\)`);
+		assert.deepStrictEqual({
+			fallback: rendered.element.querySelector('.vscode-katex-error')?.textContent,
+			images: rendered.element.querySelectorAll('img').length,
+		}, { fallback: String.raw`\(\notACommand{<img src=x>}\)`, images: 0 });
+	});
+});

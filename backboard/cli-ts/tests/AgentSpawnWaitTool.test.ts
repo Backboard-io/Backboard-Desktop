@@ -12,11 +12,13 @@ import type { ToolContext } from "../src/core/tools/ToolContext.ts";
 import { ToolRegistry } from "../src/core/tools/ToolRegistry.ts";
 import { ok, type ToolResult } from "../src/core/tools/ToolResult.ts";
 import { ToolScheduler } from "../src/core/tools/ToolScheduler.ts";
+import { WorkerWorkspaceUnavailableError } from "../src/core/workspaces/WorkerWorkspaceManager.ts";
 import type { WorkerWorkspaceRecord } from "../src/core/workspaces/WorkerWorkspaceTypes.ts";
 import {
 	type AgentExecutionTool,
 	AgentSpawnTool,
 } from "../src/tools/AgentSpawnTool.tsx";
+import { AgentTool } from "../src/tools/AgentTool.tsx";
 import type { AgentToolOutput } from "../src/tools/AgentToolTypes.ts";
 import { AgentWaitTool } from "../src/tools/AgentWaitTool.tsx";
 
@@ -42,9 +44,11 @@ interface PendingWorker {
 function controlledAgent(): {
 	agent: AgentExecutionTool;
 	starts: string[];
+	waitStarted: (handle: string) => Promise<void>;
 	complete: (handle: string, report?: string, status?: string) => void;
 } {
 	const starts: string[] = [];
+	const waiters = new Map<string, () => void>();
 	const pending = new Map<string, PendingWorker>();
 	return {
 		agent: {
@@ -52,6 +56,7 @@ function controlledAgent(): {
 				const handle = ctx.toolCallId;
 				if (!handle) throw new Error("missing handle");
 				starts.push(handle);
+				waiters.get(handle)?.();
 				return await new Promise<ToolResult<AgentToolOutput>>(
 					(resolve, reject) => {
 						const onAbort = () => {
@@ -69,6 +74,7 @@ function controlledAgent(): {
 			},
 		},
 		starts,
+		waitStarted: (handle) => starts.includes(handle) ? Promise.resolve() : new Promise<void>(resolve => { waiters.set(handle, resolve); }),
 		complete: (handle, report = `report:${handle}`, status = "completed") => {
 			const worker = pending.get(handle);
 			if (!worker) throw new Error(`worker is not running: ${handle}`);
@@ -91,10 +97,87 @@ function controlledAgent(): {
 }
 
 describe("AgentSpawnTool and AgentWaitTool", () => {
+	it("accepts and forwards the same bounded display-name contract as Agent", async () => {
+		const manager = new AgentTaskManager();
+		let receivedName: string | undefined;
+		const spawn = new AgentSpawnTool(
+			{
+				execute: async (input) => {
+					receivedName = input.name;
+					return ok(
+						{ mode: "worker", report: "done", status: "completed", rounds: 1 },
+						"done",
+						"done",
+					);
+				},
+			},
+			manager,
+		);
+		for (const name of ["", "x".repeat(81), "two\nlines"])
+			expect(() =>
+				spawn.parseInput({ name, prompt: "Inspect source" }),
+			).toThrow();
+		const input = spawn.parseInput({
+			name: " Search ",
+			prompt: "Inspect source",
+		});
+		await spawn.execute(input, context({ toolCallId: "named-worker" }));
+		await manager.waitForIdle();
+		expect(receivedName).toBe("Search");
+		expect(manager.list()[0]?.name).toBe("Search");
+	});
+
+	it("keeps preparation failures queued instead of claiming a worker started", async () => {
+		const manager = new AgentTaskManager();
+		let modelStarts = 0;
+		const agent = new AgentTool({
+			maxDepth: 1,
+			runner: {
+				run: async () => {
+					modelStarts++;
+					throw new Error("model must not start");
+				},
+			},
+			createRLMLoop: () => {
+				throw new Error("not RLM");
+			},
+			workspaceManager: {
+				list: () => [],
+				runWorker: async () => {
+					throw new WorkerWorkspaceUnavailableError(
+						"Synthetic private snapshot capability is unavailable.",
+					);
+				},
+			},
+		});
+		const spawn = new AgentSpawnTool(agent, manager);
+		const input = { prompt: "Implement an independently owned file" };
+		const ctx = context({ toolCallId: "worker_preparation" });
+		const result = await spawn.execute(input, ctx);
+		expect(result.data.status).toBe("queued");
+		expect(result.title).toBe("Worker queued");
+		expect(result.forLLM).toContain("model execution has not started");
+		const joined = await new AgentWaitTool(manager).execute(
+			{ handles: ["worker_preparation"] },
+			ctx,
+		);
+		expect(joined.data.tasks[0]?.startedAt).toBeUndefined();
+		expect(joined.execution?.failureCategory).toBe("unavailable");
+		expect(joined.forLLM).toContain("same workspace backend");
+		const replay = await spawn.execute(input, ctx);
+		expect(replay.data.status).toBe("failed");
+		expect(replay.execution).toMatchObject({
+			outcome: "failure",
+			failureCategory: "unavailable",
+			mutated: false,
+		});
+		expect(modelStarts).toBe(0);
+		await manager.waitForIdle();
+	});
+
 	it("emits JSON Schema numeric exclusive bounds for Codex", () => {
-		const parameters = new AgentWaitTool(
-			new AgentTaskManager(),
-		).toJSONSchema().function.parameters;
+		const parameters = new AgentWaitTool(new AgentTaskManager()).toJSONSchema()
+			.function.parameters;
 		const properties = parameters.properties as Record<string, unknown>;
 		const timeout = properties.timeout_ms as Record<string, unknown>;
 
@@ -118,11 +201,13 @@ describe("AgentSpawnTool and AgentWaitTool", () => {
 
 		expect(result.data).toEqual({
 			handle: "worker_immediate",
-			status: "running",
+			status: "queued",
 		});
+		await worker.waitStarted("worker_immediate");
 		expect(worker.starts).toEqual(["worker_immediate"]);
 		expect(manager.list()[0]?.status).toBe("running");
 
+		await worker.waitStarted("worker_immediate");
 		worker.complete("worker_immediate");
 		await manager.waitForIdle();
 	});
@@ -252,6 +337,7 @@ describe("AgentSpawnTool and AgentWaitTool", () => {
 			spawn.execute({ prompt: "fast" }, context({ toolCallId: "worker_fast" })),
 			spawn.execute({ prompt: "slow" }, context({ toolCallId: "worker_slow" })),
 		]);
+		await worker.waitStarted("worker_fast");
 		worker.complete("worker_fast", "fast result");
 
 		const first = await wait.execute({ handles: ["worker_fast"] }, context());
@@ -267,6 +353,7 @@ describe("AgentSpawnTool and AgentWaitTool", () => {
 			manager.list().find((task) => task.handle === "worker_slow")?.status,
 		).toBe("running");
 
+		await worker.waitStarted("worker_slow");
 		worker.complete("worker_slow");
 		await manager.waitForIdle();
 	});
@@ -281,6 +368,7 @@ describe("AgentSpawnTool and AgentWaitTool", () => {
 			context({ toolCallId: "worker_cancel" }),
 		);
 
+		await worker.waitStarted("worker_cancel");
 		manager.cancelAll();
 		const result = await wait.execute(
 			{ handles: ["worker_cancel"] },
@@ -296,9 +384,12 @@ describe("AgentSpawnTool and AgentWaitTool", () => {
 
 	it("keeps an integrated result completed when cancellation races final bookkeeping", async () => {
 		const manager = new AgentTaskManager();
+		let markStarted!: () => void;
+		const started = new Promise<void>(resolve => { markStarted = resolve; });
 		const agent: AgentExecutionTool = {
 			execute: async (_input, ctx) =>
 				await new Promise<ToolResult<AgentToolOutput>>((resolve) => {
+					markStarted();
 					ctx.signal.addEventListener(
 						"abort",
 						() =>
@@ -324,6 +415,7 @@ describe("AgentSpawnTool and AgentWaitTool", () => {
 			context({ toolCallId: "worker_capture_race" }),
 		);
 
+		await started;
 		manager.cancelAll();
 		const [record] = await manager.wait(
 			["worker_capture_race"],
@@ -359,6 +451,7 @@ describe("AgentSpawnTool and AgentWaitTool", () => {
 				{ prompt: `return ${workerStatus}` },
 				context({ toolCallId: handle }),
 			);
+			await worker.waitStarted(handle);
 			worker.complete(handle, `${workerStatus} report`, workerStatus);
 			const [task] = await manager.wait(
 				[handle],
@@ -393,6 +486,7 @@ describe("AgentSpawnTool and AgentWaitTool", () => {
 			),
 		).rejects.toThrow("another session");
 
+		await worker.waitStarted("worker_session");
 		worker.complete("worker_session");
 		await manager.waitForIdle();
 	});
@@ -422,6 +516,7 @@ describe("AgentTaskStore recovery", () => {
 				{ prompt: "durable task", read_only: true },
 				context({ toolCallId: "worker_durable" }),
 			);
+			await worker.waitStarted("worker_durable");
 			worker.complete("worker_durable", "durable result");
 			await first.waitForIdle();
 

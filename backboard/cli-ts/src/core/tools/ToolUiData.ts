@@ -187,6 +187,8 @@ function safeToolResult(
 			return compact({
 				matches: preview.value,
 				matchCount: integer(value.matchCount, 0),
+				matchCountUnit: text(value.matchCountUnit, 32),
+				...searchMetadata(value),
 				uiTruncated: preview.truncated || undefined,
 				previewTruncated: preview.truncated || undefined,
 			});
@@ -202,6 +204,7 @@ function safeToolResult(
 			return compact({
 				files,
 				count: integer(value.count, 0) ?? source.length,
+				...searchMetadata(value),
 				uiTruncated: uiTruncated || undefined,
 				previewTruncated: uiTruncated || undefined,
 			});
@@ -596,6 +599,22 @@ function mcpCandidates(value: unknown): Record<string, unknown>[] {
 				requiredEnv: stringArray(candidate.requiredEnv, 32, 256) ?? [],
 			}),
 		];
+	});
+}
+
+function searchMetadata(
+	value: Record<string, unknown>,
+): Record<string, unknown> {
+	return compact({
+		truncated: boolean(value.truncated),
+		returnedCount: integer(value.returnedCount, 0),
+		countUnit: text(value.countUnit, 32),
+		limit: integer(value.limit, 0),
+		limitUnit: text(value.limitUnit, 16),
+		limitReason:
+			value.limitReason === null ? null : text(value.limitReason, 32),
+		totalKnown: boolean(value.totalKnown),
+		totalCount: integer(value.totalCount, 0),
 	});
 }
 

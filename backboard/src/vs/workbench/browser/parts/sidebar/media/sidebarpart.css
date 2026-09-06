@@ -69,7 +69,9 @@
 }
 
 .monaco-workbench .part.sidebar > .title > .title-label h2 {
-	text-transform: uppercase;
+	text-transform: none;
+	font-size: 12px;
+	font-weight: 600;
 }
 
 .monaco-workbench .viewlet .collapsible.header .title {
@@ -171,4 +173,15 @@
 
 .monaco-workbench .sidebar.pane-composite-part > .title.has-composite-bar > .title-actions .monaco-action-bar .action-item {
 	max-width: 150px;
+}
+
+/* Dense, quiet explorer chrome; tree layout and keyboard navigation stay native. */
+.monaco-workbench:not(.agent-sessions-workbench) .part.sidebar .pane-header,
+.monaco-workbench:not(.agent-sessions-workbench) .part.sidebar .pane-header > .title {
+	text-transform: none;
+	font-size: 12px;
+}
+
+.monaco-workbench:not(.agent-sessions-workbench) .part.sidebar .monaco-list-row {
+	border-radius: 0;
 }

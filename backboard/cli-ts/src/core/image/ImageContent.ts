@@ -11,7 +11,10 @@
  * emit a single, consistent shape.
  */
 
+import { PNG } from "pngjs";
+
 /** Canonical wire-protocol field keys. Defined once, referenced everywhere. */
+
 export const IMAGE_PAYLOAD_BASE64_KEY = "__image_base64" as const;
 export const IMAGE_PAYLOAD_MEDIA_TYPE_KEY = "__image_media_type" as const;
 
@@ -41,6 +44,9 @@ export class ImageContent {
 		base64: string,
 		mediaType: M,
 	): ImageContentPayload<M> {
+		if (mediaType === "image/png") {
+			base64 = normalizeSmallPng(base64);
+		}
 		return {
 			[IMAGE_PAYLOAD_BASE64_KEY]: base64,
 			[IMAGE_PAYLOAD_MEDIA_TYPE_KEY]: mediaType,
@@ -64,4 +70,42 @@ export class ImageContent {
 			] === "string"
 		);
 	}
+}
+
+/** Vision requires each side >= 8px and area >= 512px; preserve the source file. */
+function normalizeSmallPng(base64: string): string {
+	// Inspect just the PNG header so normal screenshots avoid another full decode.
+	const header = Buffer.from(base64.slice(0, 32), "base64");
+	if (
+		header.length < 24 ||
+		header.readUInt32BE(0) !== 0x89504e47 ||
+		header.toString("ascii", 12, 16) !== "IHDR"
+	)
+		return base64;
+	const width = header.readUInt32BE(16);
+	const height = header.readUInt32BE(20);
+	if (width >= 8 && height >= 8 && width * height >= 512) return base64;
+	if (!width || !height) throw new Error("Invalid PNG dimensions");
+	const scale = Math.ceil(
+		Math.max(8 / width, 8 / height, Math.sqrt(512 / (width * height))),
+	);
+	const targetWidth = width * scale;
+	const targetHeight = height * scale;
+	if (targetWidth * targetHeight > 16_000_000)
+		throw new Error("PNG is too large to resize for vision");
+	const source = PNG.sync.read(Buffer.from(base64, "base64"));
+	const target = new PNG({ width: targetWidth, height: targetHeight });
+	for (let y = 0; y < targetHeight; y++) {
+		for (let x = 0; x < targetWidth; x++) {
+			const sourceOffset =
+				(Math.floor(y / scale) * width + Math.floor(x / scale)) * 4;
+			source.data.copy(
+				target.data,
+				(y * targetWidth + x) * 4,
+				sourceOffset,
+				sourceOffset + 4,
+			);
+		}
+	}
+	return PNG.sync.write(target).toString("base64");
 }

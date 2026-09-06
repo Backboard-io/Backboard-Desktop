@@ -12,11 +12,10 @@ import { localize, localize2 } from '../../../../nls.js';
 import { Action2, registerAction2 } from '../../../../platform/actions/common/actions.js';
 import { AGENT_HOST_SCHEME, fromAgentHostUri } from '../../../../platform/agentHost/common/agentHostUri.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
-import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { IWorkbenchContribution, getWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../../workbench/common/contributions.js';
 import { IAgentHostTerminalService } from '../../../../workbench/contrib/terminal/browser/agentHostTerminalService.js';
-import { ITerminalInstance, ITerminalService, IXtermColorProvider } from '../../../../workbench/contrib/terminal/browser/terminal.js';
+import { ITerminalGroupService, ITerminalInstance, ITerminalService, IXtermColorProvider } from '../../../../workbench/contrib/terminal/browser/terminal.js';
 import { TERMINAL_BACKGROUND_COLOR } from '../../../../workbench/contrib/terminal/common/terminalColorRegistry.js';
 import { PANEL_BACKGROUND } from '../../../../workbench/common/theme.js';
 import { agentsPanelBackground } from '../../../common/theme.js';
@@ -33,7 +32,8 @@ import { ContextKeyExpr, IContextKeyService, RawContextKey } from '../../../../p
 import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry.js';
 import { logSessionsInteraction } from '../../../common/sessionsTelemetry.js';
 import { IViewsService } from '../../../../workbench/services/views/common/viewsService.js';
-import { ITerminalProfileService, TERMINAL_VIEW_ID, TerminalCommandId } from '../../../../workbench/contrib/terminal/common/terminal.js';
+import { TerminalLocation } from '../../../../platform/terminal/common/terminal.js';
+import { ITerminalProfileService, TERMINAL_VIEW_ID } from '../../../../workbench/contrib/terminal/common/terminal.js';
 import { ISessionTaskRunnerRegistry } from '../../chat/browser/sessionTaskRunner.js';
 import { AgentHostSessionTaskRunner } from './agentHostSessionTaskRunner.js';
 import { IWorkbenchLayoutService, Parts } from '../../../../workbench/services/layout/browser/layoutService.js';
@@ -710,8 +710,21 @@ class OpenSessionInTerminalAction extends Action2 {
 		const telemetryService = _accessor.get(ITelemetryService);
 		logSessionsInteraction(telemetryService, 'openTerminal');
 
-		_accessor.get(IWorkbenchLayoutService).setPartHidden(false, Parts.PANEL_PART);
-		await _accessor.get(ICommandService).executeCommand(TerminalCommandId.Focus);
+		const layoutService = _accessor.get(IWorkbenchLayoutService);
+		const viewsService = _accessor.get(IViewsService);
+		if (layoutService.isVisible(Parts.PANEL_PART) && viewsService.isViewVisible(TERMINAL_VIEW_ID)) {
+			layoutService.setPartHidden(true, Parts.PANEL_PART);
+			return;
+		}
+
+		layoutService.setPartHidden(false, Parts.PANEL_PART);
+		// The global active terminal can belong to the right panel's editor.
+		// This toggle always opens the panel terminal beneath the chat.
+		const terminalService = _accessor.get(ITerminalService);
+		const terminalGroupService = _accessor.get(ITerminalGroupService);
+		const instance = terminalGroupService.activeInstance ?? await terminalService.createTerminal({ location: TerminalLocation.Panel });
+		terminalService.setActiveInstance(instance);
+		await terminalGroupService.showPanel(true);
 	}
 }
 

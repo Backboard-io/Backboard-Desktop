@@ -1,14 +1,24 @@
 import { describe, expect, it } from "bun:test";
-import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AssistantAccumulator } from "../src/core/agent/AssistantAccumulator.ts";
+import { z } from "zod";
+import { AssistantAccumulator } from "../src/core/agent/AssistantAccumulator.ts";
 import { ProviderStreamConsumer } from "../src/core/agent/ProviderStreamConsumer.ts";
 import { EventBus } from "../src/core/bus/EventBus.ts";
 import { Session } from "../src/core/session/Session.ts";
+import { Tool } from "../src/core/tools/Tool.ts";
 import { AbortError } from "../src/core/tools/ToolAbort.ts";
-import type { EarlyToolSink } from "../src/core/tools/ToolScheduler.ts";
+import type { ToolContext } from "../src/core/tools/ToolContext.ts";
+import { ToolRegistry } from "../src/core/tools/ToolRegistry.ts";
+import { ok } from "../src/core/tools/ToolResult.ts";
+import {
+	type EarlyToolSink,
+	ToolScheduler,
+} from "../src/core/tools/ToolScheduler.ts";
 import type { ProviderEvent } from "../src/providers/backboard/types.ts";
+import { CodexSubscriptionClient } from "../src/providers/subscription/CodexSubscriptionClient.ts";
+import { RetryableToolProtocolError } from "../src/providers/ToolProtocolError.ts";
 
 function stubAssistant(): AssistantAccumulator {
 	return {
@@ -39,6 +49,354 @@ async function* streamOf(
 }
 
 describe("ProviderStreamConsumer", () => {
+	it("logs structural provider diagnostics without treating them as visible or first provider output", async () => {
+		const bus = new EventBus();
+		const phases: string[] = [];
+		const diagnostics: unknown[] = [];
+		const warnings: unknown[] = [];
+		bus.on("performance:timing", (event) => phases.push(event.phase));
+		bus.on("provider:diagnostic", (event) => diagnostics.push(event));
+		bus.on("system:warning", (event) => warnings.push(event));
+		const consumer = new ProviderStreamConsumer(bus, new Session("fixture"));
+		const details = {
+			outputShape: "empty",
+			itemCount: 0,
+			completedToolCount: 1,
+		};
+		await consumer.consumeWithRetry(
+			() =>
+				(async function* (): AsyncIterable<ProviderEvent> {
+					yield {
+						kind: "provider_diagnostic",
+						provider: "openai-subscription",
+						phase: "completed",
+						details,
+					};
+					expect(phases).toEqual([]);
+					yield { kind: "completed", finalText: "" };
+				})(),
+			stubAssistant(),
+			new AbortController().signal,
+		);
+		expect({ diagnostics, warnings, phases }).toEqual({
+			diagnostics: [
+				{
+					type: "provider:diagnostic",
+					provider: "openai-subscription",
+					phase: "completed",
+					details,
+				},
+			],
+			warnings: [],
+			phases: ["provider_first_event", "provider_stream_total"],
+		});
+	});
+
+	it("retries a safe pre-final protocol failure once after aborting reads and discarding partial text", async () => {
+		const bus = new EventBus();
+		const session = new Session("fixture");
+		const assistant = new AssistantAccumulator("turn", bus, session);
+		const warnings: string[] = [];
+		const discarded: string[] = [];
+		const outputs: string[] = [];
+		const retracted: string[] = [];
+		bus.on("system:warning", (event) => warnings.push(event.message));
+		bus.on("assistant:message:discard", (event) =>
+			discarded.push(event.messageId),
+		);
+		bus.on("tool:result", (event) => outputs.push(event.toolCallId));
+		bus.on("tool:retracted", (event) => retracted.push(event.toolCallId));
+		let markReadStarted!: () => void;
+		const readStarted = new Promise<void>((resolve) => {
+			markReadStarted = resolve;
+		});
+		let readSignal: AbortSignal | undefined;
+		class PendingRead extends Tool {
+			readonly name = "PendingRead";
+			readonly inputSchema = z.object({});
+			async execute(_input: unknown, ctx: ToolContext) {
+				readSignal = ctx.signal;
+				markReadStarted();
+				await new Promise<void>((resolve) =>
+					ctx.signal.addEventListener("abort", () => resolve(), { once: true }),
+				);
+				return ok({}, "stale read must not be submitted", "Stale read");
+			}
+		}
+		const context: ToolContext = {
+			sessionId: "fixture",
+			turnId: "turn",
+			cwd: process.cwd(),
+			bus,
+			signal: new AbortController().signal,
+			askUser: async () => "noop",
+		};
+		const round = new ToolScheduler(
+			new ToolRegistry([new PendingRead()]),
+			bus,
+		).createRound(context);
+		let attempts = 0;
+		let retrySetupCalls = 0;
+		const consumer = new ProviderStreamConsumer(bus, session, {
+			maxRetries: 0,
+		});
+		const result = await consumer.consumeWithRetry(
+			() => {
+				attempts++;
+				if (attempts > 1) {
+					expect(readSignal?.aborted).toBe(true);
+					return streamOf([
+						{ kind: "completed", finalText: "Recovered answer" },
+					]);
+				}
+				return (async function* (): AsyncIterable<ProviderEvent> {
+					yield { kind: "assistant_delta", text: "Discarded partial answer" };
+					yield {
+						kind: "tool_ready",
+						call: { id: "stale", name: "PendingRead", input: {} },
+					};
+					await readStarted;
+					throw new RetryableToolProtocolError("fixture name disagreement");
+				})();
+			},
+			assistant,
+			context.signal,
+			round,
+			undefined,
+			() => {
+				retrySetupCalls++;
+			},
+		);
+		round.reset();
+		expect(result).toBeNull();
+		expect(attempts).toBe(2);
+		expect(retrySetupCalls).toBe(0);
+		expect(discarded).toEqual(["turn:assistant:0"]);
+		expect(retracted).toEqual(["stale"]);
+		expect(outputs).toEqual([]);
+		expect(warnings).toHaveLength(1);
+		expect(warnings[0]).toContain("Retrying inconsistent tool response once");
+		expect(warnings[0]).not.toContain("fixture name disagreement");
+		expect(
+			session
+				.getMessages()
+				.map((message) => ("text" in message ? message.text : undefined)),
+		).toEqual(["Recovered answer"]);
+	});
+
+	it("caps safe protocol recovery at two attempts despite a larger general retry budget", async () => {
+		let attempts = 0;
+		let discards = 0;
+		const sink = new RecordingSink();
+		const assistant = stubAssistant();
+		assistant.discardPartial = () => {
+			discards++;
+		};
+		const consumer = new ProviderStreamConsumer(
+			new EventBus(),
+			new Session("fixture"),
+			{ maxRetries: 50 },
+		);
+		await expect(
+			consumer.consumeWithRetry(
+				() =>
+					(async function* (): AsyncIterable<ProviderEvent> {
+						attempts++;
+						yield { kind: "assistant_delta", text: "partial" };
+						throw new RetryableToolProtocolError(
+							"repeated fixture disagreement",
+						);
+					})(),
+				assistant,
+				new AbortController().signal,
+				sink,
+			),
+		).rejects.toBeInstanceOf(RetryableToolProtocolError);
+		expect({ attempts, discards, resets: sink.resets }).toEqual({
+			attempts: 2,
+			discards: 2,
+			resets: 2,
+		});
+	});
+
+	it("does not create a replay request when cancellation arrives during protocol recovery", async () => {
+		const bus = new EventBus();
+		const controller = new AbortController();
+		bus.on("system:warning", () => controller.abort());
+		let attempts = 0;
+		const sink = new RecordingSink();
+		const consumer = new ProviderStreamConsumer(bus, new Session("fixture"));
+		await expect(
+			consumer.consumeWithRetry(
+				() =>
+					(async function* (): AsyncIterable<ProviderEvent> {
+						attempts++;
+						yield { kind: "tool_started", id: "stale", name: "Read" };
+						throw new RetryableToolProtocolError("fixture disagreement");
+					})(),
+				stubAssistant(),
+				controller.signal,
+				sink,
+			),
+		).rejects.toBeInstanceOf(AbortError);
+		expect(attempts).toBe(1);
+		expect(sink.resets).toBe(1);
+	});
+
+	it("does not retry arbitrary protocol errors or explicit non-retryable failures", async () => {
+		for (const error of [
+			Object.assign(new Error("remote protocol error"), {
+				category: "protocol",
+				retryable: true,
+				safeToRetryBeforeTools: true,
+			}),
+			undefined,
+		]) {
+			let attempts = 0;
+			const consumer = new ProviderStreamConsumer(
+				new EventBus(),
+				new Session("fixture"),
+				{ maxRetries: 5 },
+			);
+			await expect(
+				consumer.consumeWithRetry(
+					() =>
+						(async function* (): AsyncIterable<ProviderEvent> {
+							attempts++;
+							if (error) throw error;
+							yield {
+								kind: "failed",
+								error: "remote protocol error",
+								retryable: false,
+							};
+						})(),
+					stubAssistant(),
+					new AbortController().signal,
+				),
+			).rejects.toThrow("remote protocol error");
+			expect(attempts).toBe(1);
+		}
+	});
+
+	it("replays the subscription adapter with unchanged input after ready/completed disagreement", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "consumer-subscription-retry-"));
+		try {
+			const authFile = join(dir, "auth.json");
+			await writeFile(
+				authFile,
+				JSON.stringify({
+					tokens: {
+						access_token: "offline-test-token",
+						account_id: "offline-test-account",
+					},
+				}),
+			);
+			const requests: Record<string, unknown>[] = [];
+			const item = {
+				type: "function_call",
+				call_id: "fixture",
+				name: "read",
+				arguments: '{"file_path":"fixture.ts"}',
+			};
+			const client = new CodexSubscriptionClient({
+				authFile,
+				fetchImpl: (async (_url, init) => {
+					requests.push(
+						JSON.parse(String(init?.body)) as Record<string, unknown>,
+					);
+					const events = [
+						{ type: "response.output_item.done", item },
+						{
+							type: "response.completed",
+							response: {
+								output: [
+									{
+										...item,
+										...(requests.length === 1 ? { name: "write" } : {}),
+									},
+								],
+								usage: {},
+							},
+						},
+					];
+					return new Response(
+						events
+							.map((event) => `data: ${JSON.stringify(event)}\n\n`)
+							.join(""),
+						{ headers: { "Content-Type": "text/event-stream" } },
+					);
+				}) as typeof fetch,
+			});
+			const consumer = new ProviderStreamConsumer(
+				new EventBus(),
+				new Session("fixture"),
+				{ maxRetries: 0 },
+			);
+			const result = await consumer.consumeWithRetry(
+				(signal) =>
+					client.runMessage(
+						{
+							content: "offline replay fixture",
+							model_name: "gpt-test",
+							thinking: { effort: "medium" },
+						},
+						{ signal },
+					),
+				stubAssistant(),
+				new AbortController().signal,
+				new RecordingSink(),
+			);
+			expect(requests).toHaveLength(2);
+			expect(requests[1]?.input).toEqual(requests[0]?.input);
+			expect(requests[1]?.reasoning).toEqual(requests[0]?.reasoning);
+			expect(result?.calls).toEqual([
+				{ id: "fixture", name: "read", input: { file_path: "fixture.ts" } },
+			]);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("rejects name disagreement before assistant call persistence and does not retry", async () => {
+		const sink = new RecordingSink();
+		let attempts = 0;
+		let finalized = false;
+		const assistant = stubAssistant();
+		assistant.finalize = () => {
+			finalized = true;
+		};
+		const consumer = new ProviderStreamConsumer(
+			new EventBus(),
+			new Session("fixture"),
+		);
+		await expect(
+			consumer.consumeWithRetry(
+				() => {
+					attempts++;
+					return streamOf([
+						{
+							kind: "tool_ready",
+							call: { id: "same", name: "glob", input: {} },
+						},
+						{
+							kind: "requires_action",
+							runId: null,
+							calls: [{ id: "same", name: "grep", input: {} }],
+						},
+					]);
+				},
+				assistant,
+				new AbortController().signal,
+				sink,
+			),
+		).rejects.toThrow("Tool protocol error");
+		expect({ attempts, finalized, resets: sink.resets }).toEqual({
+			attempts: 1,
+			finalized: false,
+			resets: 1,
+		});
+	});
+
 	it("records provider tool-batch finalization timing", async () => {
 		const bus = new EventBus();
 		const timings = new Map<string, number[]>();
@@ -93,8 +451,10 @@ describe("ProviderStreamConsumer", () => {
 		);
 
 		expect(phases).toEqual([
+			"provider_first_event",
 			"provider_tool_announcement",
 			"provider_tool_batch_finalize",
+			"provider_stream_total",
 		]);
 	});
 

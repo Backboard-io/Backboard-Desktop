@@ -10,6 +10,7 @@ import { StandardKeyboardEvent } from '../../../../../base/browser/keyboardEvent
 import { Disposable, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { KeyCode } from '../../../../../base/common/keyCodes.js';
 import { Codicon } from '../../../../../base/common/codicons.js';
+import { URI } from '../../../../../base/common/uri.js';
 import { localize } from '../../../../../nls.js';
 import { MenuWorkbenchToolBar } from '../../../../../platform/actions/browser/toolbar.js';
 import { MenuId, MenuRegistry } from '../../../../../platform/actions/common/actions.js';
@@ -19,7 +20,7 @@ import { IWorkbenchLayoutService } from '../../../../services/layout/browser/lay
 import { ACTION_ID_NEW_CHAT } from '../actions/chatActions.js';
 import { IChatWidgetService } from '../chat.js';
 import { AgentSessionsControl } from './agentSessionsControl.js';
-import { AgentSessionsFilter, AgentSessionsGrouping } from './agentSessionsFilter.js';
+import { AgentSessionsFilter, AgentSessionsGrouping, AgentSessionsSorting } from './agentSessionsFilter.js';
 import { IAgentSessionsService } from './agentSessionsService.js';
 import { openSession } from './agentSessionsOpener.js';
 import { isSubscriptionAgentSessionProvider } from './agentSessions.js';
@@ -52,13 +53,13 @@ export class AgentSessionsHistoryModal extends Disposable {
 		super();
 	}
 
-	show(options?: { readonly excludeSubscriptionSessions?: boolean }): void {
+	show(options?: { readonly excludeSubscriptionSessions?: boolean; readonly chatContainer?: HTMLElement; readonly openSession?: (resource: URI) => Promise<void> }): void {
 		const excludeSubscriptionSessions = options?.excludeSubscriptionSessions === true;
 		const targetWindow = getActiveWindow();
 		const activeChatWidget = this.chatWidgetService.lastFocusedWidget;
-		const chatContainer = activeChatWidget?.domNode.isConnected && activeChatWidget.domNode.ownerDocument.defaultView === targetWindow
+		const chatContainer = options?.chatContainer ?? (activeChatWidget?.domNode.isConnected && activeChatWidget.domNode.ownerDocument.defaultView === targetWindow
 			? activeChatWidget.domNode
-			: undefined;
+			: undefined);
 		const modalHost = chatContainer ?? this.layoutService.getContainer(targetWindow);
 		const previousFocus = targetWindow.document.activeElement;
 		const overlay = append(modalHost, $('.agent-sessions-history-modal-backdrop'));
@@ -142,7 +143,8 @@ export class AgentSessionsHistoryModal extends Disposable {
 
 		const filter = this._register(this.instantiationService.createInstance(AgentSessionsFilter, {
 			filterMenuId: AgentSessionsHistoryFilterSubMenu,
-			groupResults: () => AgentSessionsGrouping.Capped,
+			sortResults: () => options?.openSession ? AgentSessionsSorting.Updated : undefined,
+			groupResults: () => options?.openSession ? AgentSessionsGrouping.Date : AgentSessionsGrouping.Capped,
 			overrideExclude: session => excludeSubscriptionSessions && isSubscriptionAgentSessionProvider(session.providerType) ? true : undefined,
 		}));
 		const toolbar = this._register(this.instantiationService.createInstance(MenuWorkbenchToolBar, toolbarContainer, AgentSessionsHistoryToolbar, {
@@ -155,7 +157,7 @@ export class AgentSessionsHistoryModal extends Disposable {
 			overrideStyles: {},
 			getHoverPosition: () => HoverPosition.RIGHT,
 			trackActiveEditorSession: () => false,
-			collapseOlderSections: () => true,
+			collapseOlderSections: () => !options?.openSession,
 			hideSectionCount: true,
 			hideSessionBadge: true,
 			compactShowMore: true,
@@ -163,6 +165,11 @@ export class AgentSessionsHistoryModal extends Disposable {
 			showDiffFileCount: false,
 			findWidgetContainer: searchWidgetContainer,
 			overrideSessionOpen: async (resource, openOptions) => {
+				if (options?.openSession) {
+					await options.openSession(resource);
+					this.dispose();
+					return;
+				}
 				const session = this.agentSessionsService.model.getSession(resource);
 				if (session) {
 					await this.instantiationService.invokeFunction(openSession, session, openOptions);

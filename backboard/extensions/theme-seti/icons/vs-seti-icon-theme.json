@@ -5,7 +5,8 @@
 		"- icon colors: https://github.com/jesseweed/seti-ui/blob/master/styles/ui-variables.less",
 		"- file associations: https://github.com/jesseweed/seti-ui/blob/master/styles/components/icons/mapping.less",
 		"If you want to provide a fix or improvement, please create a pull request against the jesseweed/seti-ui repository.",
-		"Once accepted there, we are happy to receive an update request."
+		"Once accepted there, we are happy to receive an update request.",
+		"Backboard icon overrides are maintained in build/backboard-icons.js and icons/backboard/."
 	],
 	"fonts": [
 		{
@@ -327,12 +328,10 @@
 			"fontColor": "#519aba"
 		},
 		"_default_light": {
-			"fontCharacter": "\\E023",
-			"fontColor": "#bfc2c1"
+			"iconPath": "./backboard/file-light.svg"
 		},
 		"_default": {
-			"fontCharacter": "\\E023",
-			"fontColor": "#d4d7d6"
+			"iconPath": "./backboard/file.svg"
 		},
 		"_docker_light": {
 			"fontCharacter": "\\E025",
@@ -463,12 +462,10 @@
 			"fontColor": "#cc3e44"
 		},
 		"_git_light": {
-			"fontCharacter": "\\E034",
-			"fontColor": "#3b4b52"
+			"iconPath": "./backboard/git-light.svg"
 		},
 		"_git": {
-			"fontCharacter": "\\E034",
-			"fontColor": "#41535b"
+			"iconPath": "./backboard/git.svg"
 		},
 		"_github_light": {
 			"fontCharacter": "\\E037",
@@ -799,12 +796,10 @@
 			"fontColor": "#cc3e44"
 		},
 		"_json_light": {
-			"fontCharacter": "\\E055",
-			"fontColor": "#b7b73b"
+			"iconPath": "./backboard/json-light.svg"
 		},
 		"_json": {
-			"fontCharacter": "\\E055",
-			"fontColor": "#cbcb41"
+			"iconPath": "./backboard/json.svg"
 		},
 		"_json_1_light": {
 			"fontCharacter": "\\E055",
@@ -847,12 +842,10 @@
 			"fontColor": "#519aba"
 		},
 		"_license_light": {
-			"fontCharacter": "\\E05A",
-			"fontColor": "#b7b73b"
+			"iconPath": "./backboard/license-light.svg"
 		},
 		"_license": {
-			"fontCharacter": "\\E05A",
-			"fontColor": "#cbcb41"
+			"iconPath": "./backboard/license.svg"
 		},
 		"_license_1_light": {
 			"fontCharacter": "\\E05A",
@@ -935,12 +928,10 @@
 			"fontColor": "#519aba"
 		},
 		"_markdown_light": {
-			"fontCharacter": "\\E060",
-			"fontColor": "#498ba7"
+			"iconPath": "./backboard/markdown-light.svg"
 		},
 		"_markdown": {
-			"fontCharacter": "\\E060",
-			"fontColor": "#519aba"
+			"iconPath": "./backboard/markdown.svg"
 		},
 		"_maven_light": {
 			"fontCharacter": "\\E061",
@@ -1522,12 +1513,10 @@
 			"fontColor": "#519aba"
 		},
 		"_yml_light": {
-			"fontCharacter": "\\E0A7",
-			"fontColor": "#9068b0"
+			"iconPath": "./backboard/yaml-light.svg"
 		},
 		"_yml": {
-			"fontCharacter": "\\E0A7",
-			"fontColor": "#a074c4"
+			"iconPath": "./backboard/yaml.svg"
 		},
 		"_zig_light": {
 			"fontCharacter": "\\E0A8",
@@ -1552,6 +1541,90 @@
 		"_zip_1": {
 			"fontCharacter": "\\E0A9",
 			"fontColor": "#6d8086"
+		},
+		"_backboard_folder": {
+			"iconPath": "./backboard/folder.svg"
+		},
+		"_backboard_file": {
+			"iconPath": "./backboard/file.svg"
+		},
+		"_backboard_markdown": {
+			"iconPath": "./backboard/markdown.svg"
+		},
+		"_backboard_json": {
+			"iconPath": "./backboard/json.svg"
+		},
+		"_backboard_yaml": {
+			"iconPath": "./backboard/yaml.svg"
+		},
+		"_backboard_git": {
+			"iconPath": "./backboard/git.svg"
+		},
+		"_backboard_package": {
+			"iconPath": "./backboard/package.svg"
+		},
+		"_backboard_pnpm": {
+			"iconPath": "./backboard/pnpm.svg"
+		},
+		"_backboard_license": {
+			"iconPath": "./backboard/license.svg"
+		},
+		"_backboard_folder_light": {
+			"iconPath": "./backboard/folder-light.svg"
+		},
+		"_backboard_file_light": {
+			"iconPath": "./backboard/file-light.svg"
+		},
+		"_backboard_markdown_light": {
+			"iconPath": "./backboard/markdown-light.svg"
+		},
+		"_backboard_json_light": {
+			"iconPath": "./backboard/json-light.svg"
+		},
+		"_backboard_yaml_light": {
+			"iconPath": "./backboard/yaml-light.svg"
+		},
+		"_backboard_git_light": {
+			"iconPath": "./backboard/git-light.svg"
+		},
+		"_backboard_package_light": {
+			"iconPath": "./backboard/package-light.svg"
+		},
+		"_backboard_pnpm_light": {
+			"iconPath": "./backboard/pnpm-light.svg"
+		},
+		"_backboard_license_light": {
+			"iconPath": "./backboard/license-light.svg"
+		},
+		"_backboard_folder-apps": {
+			"iconPath": "./backboard/folder-apps.svg"
+		},
+		"_backboard_folder-assets": {
+			"iconPath": "./backboard/folder-assets.svg"
+		},
+		"_backboard_folder-docs": {
+			"iconPath": "./backboard/folder-docs.svg"
+		},
+		"_backboard_folder-vscode": {
+			"iconPath": "./backboard/folder-vscode.svg"
+		},
+		"_backboard_folder-scripts": {
+			"iconPath": "./backboard/folder-scripts.svg"
+		},
+		"_backboard_folder-apps_light": {
+			"iconPath": "./backboard/folder-apps-light.svg"
+		},
+		"_backboard_folder-assets_light": {
+			"iconPath": "./backboard/folder-assets-light.svg"
+		},
+		"_backboard_folder-docs_light": {
+			"iconPath": "./backboard/folder-docs-light.svg"
+		},
+		"_backboard_folder-vscode_light": {
+			"iconPath": "./backboard/folder-vscode-light.svg"
+		},
+		"_backboard_folder-scripts_light": {
+			"iconPath": "./backboard/folder-scripts-light.svg"
 		}
 	},
 	"file": "_default",
@@ -1793,7 +1866,13 @@
 		"cer": "_lock",
 		"crt": "_lock",
 		"pem": "_lock",
-		"ds_store": "_ignored"
+		"ds_store": "_ignored",
+		"md": "_backboard_markdown",
+		"markdown": "_backboard_markdown",
+		"json": "_backboard_json",
+		"jsonc": "_backboard_json",
+		"yaml": "_backboard_yaml",
+		"yml": "_backboard_yaml"
 	},
 	"fileNames": {
 		"mix": "_hex",
@@ -1888,7 +1967,7 @@
 		"compiling.md": "_license_1",
 		"contributing": "_license_2",
 		"contributing.txt": "_license_2",
-		"contributing.md": "_license_2",
+		"contributing.md": "_backboard_markdown",
 		"qmakefile": "_makefile_1",
 		"omakefile": "_makefile_2",
 		"cmakelists.txt": "_makefile_3",
@@ -1896,7 +1975,15 @@
 		"todo": "_todo",
 		"todo.txt": "_todo",
 		"todo.md": "_todo",
-		"npm-debug.log": "_npm_ignored"
+		"npm-debug.log": "_npm_ignored",
+		"package.json": "_backboard_package",
+		"package-lock.json": "_backboard_package",
+		"pnpm-lock.yaml": "_backboard_pnpm",
+		"pnpm-workspace.yaml": "_backboard_pnpm",
+		".env": "_backboard_file",
+		".env.example": "_backboard_file",
+		".gitignore": "_backboard_git",
+		".gitattributes": "_backboard_git"
 	},
 	"languageIds": {
 		"bat": "_windows",
@@ -2223,7 +2310,13 @@
 			"cer": "_lock_light",
 			"crt": "_lock_light",
 			"pem": "_lock_light",
-			"ds_store": "_ignored_light"
+			"ds_store": "_ignored_light",
+			"md": "_backboard_markdown_light",
+			"markdown": "_backboard_markdown_light",
+			"json": "_backboard_json_light",
+			"jsonc": "_backboard_json_light",
+			"yaml": "_backboard_yaml_light",
+			"yml": "_backboard_yaml_light"
 		},
 		"languageIds": {
 			"bat": "_windows_light",
@@ -2402,13 +2495,57 @@
 			"compiling.md": "_license_1_light",
 			"contributing": "_license_2_light",
 			"contributing.txt": "_license_2_light",
-			"contributing.md": "_license_2_light",
+			"contributing.md": "_backboard_markdown_light",
 			"qmakefile": "_makefile_1_light",
 			"omakefile": "_makefile_2_light",
 			"cmakelists.txt": "_makefile_3_light",
 			"procfile": "_heroku_light",
-			"npm-debug.log": "_npm_ignored_light"
+			"npm-debug.log": "_npm_ignored_light",
+			"package.json": "_backboard_package_light",
+			"package-lock.json": "_backboard_package_light",
+			"pnpm-lock.yaml": "_backboard_pnpm_light",
+			"pnpm-workspace.yaml": "_backboard_pnpm_light",
+			".env": "_backboard_file_light",
+			".env.example": "_backboard_file_light",
+			".gitignore": "_backboard_git_light",
+			".gitattributes": "_backboard_git_light"
+		},
+		"folder": "_backboard_folder_light",
+		"folderExpanded": "_backboard_folder_light",
+		"rootFolder": "_backboard_folder_light",
+		"rootFolderExpanded": "_backboard_folder_light",
+		"folderNames": {
+			"apps": "_backboard_folder-apps_light",
+			"assets": "_backboard_folder-assets_light",
+			"docs": "_backboard_folder-docs_light",
+			".vscode": "_backboard_folder-vscode_light",
+			"scripts": "_backboard_folder-scripts_light"
+		},
+		"folderNamesExpanded": {
+			"apps": "_backboard_folder-apps_light",
+			"assets": "_backboard_folder-assets_light",
+			"docs": "_backboard_folder-docs_light",
+			".vscode": "_backboard_folder-vscode_light",
+			"scripts": "_backboard_folder-scripts_light"
 		}
 	},
-	"version": "https://github.com/jesseweed/seti-ui/commit/2d6c5e68b4ded73c92dac291845ee44e1182d511"
+	"version": "https://github.com/jesseweed/seti-ui/commit/2d6c5e68b4ded73c92dac291845ee44e1182d511",
+	"folder": "_backboard_folder",
+	"folderExpanded": "_backboard_folder",
+	"rootFolder": "_backboard_folder",
+	"rootFolderExpanded": "_backboard_folder",
+	"folderNames": {
+		"apps": "_backboard_folder-apps",
+		"assets": "_backboard_folder-assets",
+		"docs": "_backboard_folder-docs",
+		".vscode": "_backboard_folder-vscode",
+		"scripts": "_backboard_folder-scripts"
+	},
+	"folderNamesExpanded": {
+		"apps": "_backboard_folder-apps",
+		"assets": "_backboard_folder-assets",
+		"docs": "_backboard_folder-docs",
+		".vscode": "_backboard_folder-vscode",
+		"scripts": "_backboard_folder-scripts"
+	}
 }

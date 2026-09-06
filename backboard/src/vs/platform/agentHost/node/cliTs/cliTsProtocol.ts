@@ -18,6 +18,9 @@ export type CliTsPermissionMode = 'manual' | 'acceptEdits' | 'auto' | 'bypass';
 
 /** Critical-path phase names emitted by cli-ts for structured performance logs. */
 export type CliTsPerformanceTimingPhase =
+	| 'provider_first_event'
+	| 'provider_first_visible'
+	| 'provider_stream_total'
 	| 'provider_tool_announcement'
 	| 'provider_tool_batch_finalize'
 	| 'permission_wait'
@@ -156,6 +159,16 @@ export interface CliTsAgentEvent {
 		readonly input?: unknown;
 		readonly result?: unknown;
 	};
+	/** Typed execution state; tool output prose is never a success/failure signal. */
+	readonly execution?: {
+		readonly failureCategory?: string;
+		readonly exitCode?: number;
+		readonly timedOut?: boolean;
+		readonly cancelled?: boolean;
+		readonly retryable?: boolean;
+		readonly validation?: 'passed' | 'failed';
+		readonly outcome?: 'success' | 'no_match' | 'partial' | 'failure';
+	};
 	readonly terminalOutput?: {
 		readonly text: string;
 		readonly exitCode?: number;
@@ -185,6 +198,9 @@ export interface CliTsAgentEvent {
 	readonly usage?: { readonly inputTokens?: number; readonly outputTokens?: number; readonly totalTokens?: number; readonly contextTokens?: number; readonly contextLimit?: number; readonly model?: string; readonly provider?: string };
 	readonly todos?: readonly unknown[];
 	readonly agentToolCallId?: string;
+	readonly parentBatchToolCallId?: string;
+	readonly worker?: CliTsWorkerState;
+	readonly agentName?: string;
 	readonly childSessionId?: string;
 	readonly prompt?: string;
 	readonly event?: CliTsAgentEvent;
@@ -193,7 +209,12 @@ export interface CliTsAgentEvent {
 	readonly count?: number;
 	readonly workspace?: {
 		readonly workerId: string;
-		readonly status: 'Running' | 'Completed' | 'Failed' | 'Cancelled' | 'Integrating' | 'Integrated' | 'Conflict';
+		readonly revision?: number;
+		readonly name?: string;
+		readonly status: 'Queued' | 'Running' | 'Completed' | 'Failed' | 'Cancelled' | 'Integrating' | 'Integrated' | 'Conflict';
+		readonly executionStatus?: CliTsWorkerState['executionStatus'];
+		readonly integrationStatus?: CliTsWorkerState['integrationStatus'];
+		readonly integrationChanges?: readonly CliTsWorkerIntegrationChange[];
 		readonly branch?: string;
 		readonly worktreePath?: string;
 		readonly changedFileCount: number;
@@ -202,6 +223,41 @@ export interface CliTsAgentEvent {
 		readonly integrationResult?: string;
 		readonly conflictingFiles?: readonly string[];
 	};
+}
+
+/** Durable task-manager authority, independent of the worker checkout revision. */
+export interface CliTsWorkerState {
+	readonly handle: string;
+	readonly sessionId: string;
+	readonly turnId?: string;
+	readonly parentBatchToolCallId?: string;
+	readonly prompt: string;
+	readonly name?: string;
+	readonly revision: number;
+	readonly executionStatus: 'queued' | 'preparing' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
+	readonly integrationStatus: 'not_required' | 'pending' | 'integrating' | 'integrated' | 'conflict' | 'skipped';
+	readonly status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
+	readonly readOnly: boolean;
+	readonly createdAt: string;
+	readonly startedAt?: string;
+	readonly finishedAt?: string;
+	readonly workspace?: CliTsAgentEvent['workspace'];
+	readonly error?: string;
+	readonly persistenceError?: string;
+}
+
+/** Immutable bytes captured on the coordinator inside the integration transaction. */
+export interface CliTsWorkerIntegrationSnapshot {
+	readonly contentPath: string;
+	readonly sha256: string;
+	readonly byteLength: number;
+	readonly mode: number;
+}
+
+export interface CliTsWorkerIntegrationChange {
+	readonly filePath: string;
+	readonly before?: CliTsWorkerIntegrationSnapshot;
+	readonly after?: CliTsWorkerIntegrationSnapshot;
 }
 
 /** Payload of a `serve:tools` response. */

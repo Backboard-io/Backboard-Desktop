@@ -829,7 +829,7 @@ suite('AgentSideEffects', () => {
 
 	suite('queued message consumption', () => {
 
-		test('auto-starts turn from queued message on idle', () => {
+		test('auto-starts turn from queued message after the provider completion unwinds', async () => {
 			setupSession();
 			disposables.add(sideEffects.registerProgressListener(agent));
 
@@ -858,6 +858,9 @@ suite('AgentSideEffects', () => {
 
 			const turnComplete = envelopes.find(e => e.action.type === ActionType.ChatTurnComplete);
 			assert.ok(turnComplete, 'should dispatch session/turnComplete');
+			assert.strictEqual(agent.sendMessageCalls.length, 0, 'should not start the next send re-entrantly');
+
+			await new Promise(resolve => setTimeout(resolve, 10));
 
 			const turnStarted = envelopes.find(e => e.action.type === ActionType.ChatTurnStarted);
 			assert.ok(turnStarted, 'should dispatch session/turnStarted for queued message');
@@ -871,11 +874,12 @@ suite('AgentSideEffects', () => {
 			assert.strictEqual(state?.queuedMessages, undefined);
 		});
 
-		test('intercepts queued /rename and drains the message queued behind it', () => {
+		test('intercepts queued /rename and drains the message queued behind it', async () => {
 			setupSession();
 			// `/rename` persists the new title, so use a side effects instance
 			// whose `openDatabase` returns a real database (the suite default
 			// throws).
+			sideEffects.dispose();
 			const renameSideEffects = createTestSideEffects(disposables, stateManager, {
 				getAgent: () => agent,
 				agents: agentList,
@@ -906,6 +910,7 @@ suite('AgentSideEffects', () => {
 				kind: 'action', session: sessionUri,
 				action: { type: ActionType.ChatTurnComplete, turnId: 'turn-1' },
 			});
+			await new Promise(resolve => setTimeout(resolve, 20));
 
 			// The `/rename` must not reach the agent; only the message behind it does
 			assert.strictEqual(agent.sendMessageCalls.length, 1);
@@ -915,6 +920,126 @@ suite('AgentSideEffects', () => {
 			const state = stateManager.getSessionState(sessionUri.toString());
 			assert.strictEqual(state?.queuedMessages, undefined);
 			assert.strictEqual(state?.summary.title, 'Queued Title');
+		});
+
+		test('continues the queue after a turn errors', async () => {
+			setupSession();
+			disposables.add(sideEffects.registerProgressListener(agent));
+			startTurn('turn-1');
+			const setAction = {
+				type: ActionType.ChatPendingMessageSet as const,
+				kind: PendingMessageKind.Queued,
+				id: 'q-after-error',
+				message: { text: 'continue after error', origin: { kind: MessageKind.User } },
+			};
+			stateManager.dispatchClientAction(sessionUri.toString(), setAction, { clientId: 'test', clientSeq: 1 });
+			sideEffects.handleAction(sessionUri.toString(), setAction);
+
+			agent.fireProgress({
+				kind: 'action', session: sessionUri,
+				action: { type: ActionType.ChatError, turnId: 'turn-1', error: { errorType: 'test', message: 'failed' } },
+			});
+
+			assert.strictEqual(agent.sendMessageCalls.length, 0, 'should defer the next send until the failed turn unwinds');
+			await new Promise(resolve => setTimeout(resolve, 10));
+			assert.strictEqual(agent.sendMessageCalls.length, 1);
+			assert.strictEqual(agent.sendMessageCalls[0].prompt, 'continue after error');
+		});
+
+		test('waits for a failed provider send to settle before draining', async () => {
+			setupSession();
+			disposables.add(sideEffects.registerProgressListener(agent));
+			const originalSendMessage = agent.sendMessage.bind(agent);
+			let settleFirstSend: (() => void) | undefined;
+			const firstSendSettled = new Promise<void>(resolve => settleFirstSend = resolve);
+			let isFirstSend = true;
+			agent.sendMessage = async (...args) => {
+				await originalSendMessage(...args);
+				if (isFirstSend) {
+					isFirstSend = false;
+					await firstSendSettled;
+				}
+			};
+
+			const turnAction: ChatAction = {
+				type: ActionType.ChatTurnStarted,
+				turnId: 'turn-1',
+				message: { text: 'first message', origin: { kind: MessageKind.User } },
+			};
+			stateManager.dispatchClientAction(sessionUri.toString(), turnAction, { clientId: 'test', clientSeq: 1 });
+			sideEffects.handleAction(sessionUri.toString(), turnAction);
+
+			const queuedAction = {
+				type: ActionType.ChatPendingMessageSet as const,
+				kind: PendingMessageKind.Queued,
+				id: 'q-after-inflight-error',
+				message: { text: 'after settled error', origin: { kind: MessageKind.User } },
+			};
+			stateManager.dispatchClientAction(sessionUri.toString(), queuedAction, { clientId: 'test', clientSeq: 2 });
+			sideEffects.handleAction(sessionUri.toString(), queuedAction);
+
+			agent.fireProgress({
+				kind: 'action', session: sessionUri,
+				action: { type: ActionType.ChatError, turnId: 'turn-1', error: { errorType: 'test', message: 'failed' } },
+			});
+			await new Promise(resolve => setTimeout(resolve, 10));
+			assert.strictEqual(agent.sendMessageCalls.length, 1, 'queue must wait while the failed provider call is still settling');
+
+			settleFirstSend?.();
+			await new Promise(resolve => setTimeout(resolve, 10));
+			assert.strictEqual(agent.sendMessageCalls.length, 2);
+			assert.strictEqual(agent.sendMessageCalls[1].prompt, 'after settled error');
+		});
+
+		test('continues the queue after the user cancels a turn', async () => {
+			setupSession();
+			startTurn('turn-1');
+			const setAction = {
+				type: ActionType.ChatPendingMessageSet as const,
+				kind: PendingMessageKind.Queued,
+				id: 'q-after-cancel',
+				message: { text: 'continue after cancel', origin: { kind: MessageKind.User } },
+			};
+			stateManager.dispatchClientAction(sessionUri.toString(), setAction, { clientId: 'test', clientSeq: 1 });
+			sideEffects.handleAction(sessionUri.toString(), setAction);
+
+			const cancelAction = { type: ActionType.ChatTurnCancelled as const, turnId: 'turn-1' };
+			stateManager.dispatchClientAction(sessionUri.toString(), cancelAction, { clientId: 'test', clientSeq: 2 });
+			sideEffects.handleAction(sessionUri.toString(), cancelAction);
+
+			await new Promise(resolve => setTimeout(resolve, 10));
+			assert.strictEqual(agent.sendMessageCalls.length, 1);
+			assert.strictEqual(agent.sendMessageCalls[0].prompt, 'continue after cancel');
+		});
+
+		test('keeps an idle message queued until its provider is available', async () => {
+			sideEffects.dispose();
+			const availableAgents = observableValue<readonly IAgent[]>('availableAgents', []);
+			let providerAvailable = false;
+			const retryingSideEffects = createTestSideEffects(disposables, stateManager, {
+				getAgent: () => providerAvailable ? agent : undefined,
+				agents: availableAgents,
+				sessionDataService: createNullSessionDataService(),
+				onTurnComplete: () => { },
+			});
+			setupSession();
+			const setAction = {
+				type: ActionType.ChatPendingMessageSet as const,
+				kind: PendingMessageKind.Queued,
+				id: 'q-provider-retry',
+				message: { text: 'wait for provider', origin: { kind: MessageKind.User } },
+			};
+			stateManager.dispatchClientAction(sessionUri.toString(), setAction, { clientId: 'test', clientSeq: 1 });
+			retryingSideEffects.handleAction(sessionUri.toString(), setAction);
+
+			assert.strictEqual(stateManager.getSessionState(sessionUri.toString())?.queuedMessages?.[0].id, 'q-provider-retry');
+			assert.strictEqual(agent.sendMessageCalls.length, 0);
+
+			providerAvailable = true;
+			availableAgents.set([agent], undefined);
+			await new Promise(resolve => setTimeout(resolve, 10));
+			assert.strictEqual(agent.sendMessageCalls.length, 1);
+			assert.strictEqual(agent.sendMessageCalls[0].prompt, 'wait for provider');
 		});
 
 		test('does not consume queued message while a turn is active', () => {

@@ -109,6 +109,23 @@ suite('XtermTerminal', () => {
 		strictEqual(xterm.raw.rows, 30);
 	});
 
+	test('host transparency survives theme refresh and restores the original background', () => {
+		const originalBackground = xterm.getXtermTheme().background;
+		xterm.setTransparentBackground(true);
+		xterm.updateConfig();
+		xterm.updateTheme();
+		deepStrictEqual({
+			transparent: xterm.raw.options.allowTransparency,
+			background: xterm.raw.options.theme?.background,
+		}, { transparent: true, background: '#00000000' });
+
+		xterm.setTransparentBackground(false);
+		deepStrictEqual({
+			transparent: xterm.raw.options.allowTransparency,
+			background: xterm.raw.options.theme?.background,
+		}, { transparent: false, background: originalBackground });
+	});
+
 	suite('getContentsAsText', () => {
 		test('should return all buffer contents when no markers provided', async () => {
 			await write('line 1\r\nline 2\r\nline 3\r\nline 4\r\nline 5');

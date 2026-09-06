@@ -637,10 +637,6 @@
 	],
 	"sessions": [
 		{
-			"name": "vs/jarvis",
-			"project": "vscode-sessions"
-		},
-		{
 			"name": "vs/optimus",
 			"project": "vscode-sessions"
 		},
@@ -718,6 +714,10 @@
 		},
 		{
 			"name": "vs/sessions/contrib/providers/remoteAgentHost",
+			"project": "vscode-sessions"
+		},
+		{
+			"name": "vs/sessions/contrib/rightWorkbench",
 			"project": "vscode-sessions"
 		},
 		{

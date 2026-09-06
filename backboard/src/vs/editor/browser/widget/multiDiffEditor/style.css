@@ -149,3 +149,7 @@
 		}
 	}
 }
+
+.monaco-component.multiDiffEditor .change-counts {
+	display: none;
+}

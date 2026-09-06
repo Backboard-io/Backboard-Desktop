@@ -73,7 +73,7 @@ function getSubagentWorkspaceData(tc: { _meta?: Record<string, unknown> }): Part
 		return {};
 	}
 	const status = meta.subagentStatus;
-	const workerStatus = status === 'Running' || status === 'Completed' || status === 'Failed'
+	const workerStatus = status === 'Queued' || status === 'Running' || status === 'Completed' || status === 'Failed'
 		|| status === 'Cancelled' || status === 'Integrating' || status === 'Integrated' || status === 'Conflict'
 		? status
 		: undefined;
@@ -82,7 +82,9 @@ function getSubagentWorkspaceData(tc: { _meta?: Record<string, unknown> }): Part
 		: undefined;
 	return {
 		...(meta.subagentDetached === true ? { detached: true } : {}),
+		...(meta.source === 'cli-ts' && meta.subagentTerminalAfterIntegration === true ? { terminalAfterIntegration: true } : {}),
 		...(typeof meta.subagentWorkerId === 'string' ? { workerId: meta.subagentWorkerId } : {}),
+		...(typeof meta.subagentRevision === 'number' && Number.isSafeInteger(meta.subagentRevision) && meta.subagentRevision > 0 ? { workerRevision: meta.subagentRevision } : {}),
 		...(workerStatus ? { workerStatus } : {}),
 		...(typeof meta.subagentBranch === 'string' ? { branch: meta.subagentBranch } : {}),
 		...(typeof meta.subagentWorktreePath === 'string' ? { worktreePath: meta.subagentWorktreePath } : {}),
@@ -117,7 +119,9 @@ function equalSubagentToolSpecificData(left: IChatSubagentToolInvocationData, ri
 		&& left.result === right.result
 		&& left.modelName === right.modelName
 		&& left.detached === right.detached
+		&& left.terminalAfterIntegration === right.terminalAfterIntegration
 		&& left.workerId === right.workerId
+		&& left.workerRevision === right.workerRevision
 		&& left.workerStatus === right.workerStatus
 		&& left.branch === right.branch
 		&& left.worktreePath === right.worktreePath
@@ -130,6 +134,10 @@ function equalSubagentToolSpecificData(left: IChatSubagentToolInvocationData, ri
 
 function setSubagentToolSpecificDataIfChanged(existing: ChatToolInvocation, next: IChatSubagentToolInvocationData): void {
 	const current = existing.toolSpecificData?.kind === 'subagent' ? existing.toolSpecificData : undefined;
+	if (current?.workerRevision !== undefined && (next.workerId !== current.workerId
+		|| next.workerRevision === undefined || next.workerRevision < current.workerRevision)) {
+		return;
+	}
 	if (current && equalSubagentToolSpecificData(current, next)) {
 		return;
 	}
@@ -1367,11 +1375,18 @@ export function toolCallStateToInvocation(tc: ToolCallState, subAgentInvocationI
  * Updates a running tool invocation's `toolSpecificData` based on the
  * protocol tool call state. Handles terminal and subagent content detection.
  *
- * Called from the session handler when a tool transitions to Running state
- * to set the initial `toolSpecificData`, or when content changes arrive.
+ * Called when tool content changes. Detached worker metadata can continue
+ * changing after its launcher has completed; other completed tools stay final.
  */
 export function updateRunningToolSpecificData(existing: ChatToolInvocation, tc: ToolCallState, sessionResource: URI, connectionAuthority: string): void {
-	if (tc.status !== ToolCallStatus.Running) {
+	if (tc.status !== ToolCallStatus.Running && !(tc.status === ToolCallStatus.Completed && existing.toolSpecificData?.kind === 'subagent')) {
+		return;
+	}
+	const currentWorker = existing.toolSpecificData?.kind === 'subagent' ? existing.toolSpecificData : undefined;
+	const incomingRevision = tc._meta?.subagentRevision;
+	if (currentWorker?.workerRevision !== undefined && (typeof incomingRevision !== 'number'
+		|| incomingRevision < currentWorker.workerRevision
+		|| (incomingRevision === currentWorker.workerRevision && tc._meta?.subagentStatus !== currentWorker.workerStatus))) {
 		return;
 	}
 	existing.invocationMessage = stringOrMarkdownToString(tc.invocationMessage, connectionAuthority) ?? existing.invocationMessage;
@@ -1380,10 +1395,11 @@ export function updateRunningToolSpecificData(existing: ChatToolInvocation, tc: 
 	const subagentContent = getToolSubagentContent(tc);
 	if (subagentContent) {
 		setSubagentToolSpecificDataIfChanged(existing, {
+			...(existing.toolSpecificData?.kind === 'subagent' ? existing.toolSpecificData : {}),
 			kind: 'subagent',
 			resource: subagentContent.resource,
-			description: getSubagentTaskDescription(tc),
-			agentName: subagentContent.agentName,
+			description: getSubagentTaskDescription(tc) ?? (existing.toolSpecificData?.kind === 'subagent' ? existing.toolSpecificData.description : undefined),
+			agentName: getSubagentAgentName(tc) ?? subagentContent.agentName ?? (existing.toolSpecificData?.kind === 'subagent' ? existing.toolSpecificData.agentName : undefined),
 			...getSubagentWorkspaceData(tc),
 		});
 		return;

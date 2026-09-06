@@ -1,5 +1,8 @@
 import { describe, expect, it } from "bun:test";
+import { GLOB_EXAMPLES } from "../src/prompts/tools/glob.tsx";
+import { GREP_EXAMPLES } from "../src/prompts/tools/grep.tsx";
 import { ExecuteTool } from "../src/tools/ExecuteTool.tsx";
+import { GlobTool } from "../src/tools/GlobTool.tsx";
 import { GrepTool } from "../src/tools/GrepTool.tsx";
 import { ReadTool } from "../src/tools/ReadTool.tsx";
 
@@ -65,5 +68,74 @@ describe("tool input scalar coercion", () => {
 		expect(() =>
 			new ReadTool().parseInput({ file_path: "a", offset: "1.5" }),
 		).toThrow();
+	});
+
+	it("repairs refined Glob scalar fields without making false truthy", () => {
+		const input = new GlobTool().parseInput({
+			patterns: "*.ts",
+			hidden: "false",
+			no_ignore: "true",
+		});
+		expect(input).toMatchObject({
+			patterns: ["*.ts"],
+			hidden: false,
+			no_ignore: true,
+		});
+	});
+
+	it("accepts omitted null options without changing legitimate literal strings", () => {
+		expect(
+			new GrepTool().parseInput({
+				pattern: "false",
+				path: null,
+				head_limit: null,
+			}),
+		).toEqual({ pattern: "false" });
+		expect(
+			new GlobTool().parseInput({
+				patterns: ["123"],
+				path: null,
+				excludePatterns: null,
+			}),
+		).toEqual({ patterns: ["123"] });
+	});
+
+	it("preserves Glob array/string/JSON-array and legacy pattern compatibility", () => {
+		const tool = new GlobTool();
+		for (const patterns of [["*.ts"], "*.ts", '["*.ts"]']) {
+			expect(tool.parseInput({ patterns }).patterns).toEqual(["*.ts"]);
+		}
+		expect(tool.parseInput({ pattern: "*.ts" }).pattern).toBe("*.ts");
+		// A character class is a literal glob, not a malformed serialization to guess at.
+		expect(tool.parseInput({ patterns: "[abc].ts" }).patterns).toEqual([
+			"[abc].ts",
+		]);
+	});
+
+	it("rejects missing, ambiguous and unsafe search arguments", () => {
+		const tool = new GlobTool();
+		for (const input of [
+			{},
+			{ patterns: [] },
+			{ patterns: "" },
+			{ patterns: [4] },
+			{ patterns: ["!*.ts"] },
+			{ patterns: ["*"], excludePatterns: ["!!node_modules/**"] },
+			{ patterns: ["*"], hidden: "yes" },
+		]) {
+			expect(() => tool.parseInput(input)).toThrow();
+		}
+		for (const value of ["NaN", "Infinity", "0x10", "1; rm", "1.5", "0", -1]) {
+			expect(() =>
+				new GrepTool().parseInput({ pattern: "needle", head_limit: value }),
+			).toThrow();
+		}
+	});
+
+	it("keeps every shared search prompt example valid against its single schema source", () => {
+		for (const input of GREP_EXAMPLES)
+			expect(() => new GrepTool().parseInput(input)).not.toThrow();
+		for (const input of GLOB_EXAMPLES)
+			expect(() => new GlobTool().parseInput(input)).not.toThrow();
 	});
 });

@@ -15,11 +15,44 @@
 		line-height: normal;
 	}
 
+	.katex {
+		font-size: 1.08em;
+	}
+
 	.katex-display .katex {
 		margin: auto;
 		width: fit-content;
-		overflow: hidden;
+		min-width: max-content;
+		overflow: visible;
+		font-size: 1.12em;
 	}
+}
+
+.chat-markdown-part .chat-math-scrollable {
+	box-sizing: border-box;
+	max-width: 100%;
+	margin-block: 14px;
+	border: 1px solid var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 8%, transparent));
+	border-radius: 8px;
+	background: color-mix(in srgb, var(--vscode-textCodeBlock-background) 45%, transparent);
+}
+
+.chat-markdown-part .chat-math-scrollable .katex-display {
+	box-sizing: border-box;
+	margin: 0;
+	padding: 16px 12px;
+	line-height: normal;
+}
+
+.chat-markdown-part .chat-math-scrollable:focus-within {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: 2px;
+}
+
+.chat-markdown-part .vscode-katex-error {
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	font-size: 0.9em;
 }
 .chat-markdown-streaming-plaintext {
 	white-space: pre-wrap;

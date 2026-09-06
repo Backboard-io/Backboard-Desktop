@@ -65,7 +65,7 @@ async function handleModalEditorPart(group: IEditorGroup, editor: EditorInputWit
 	}
 
 	// Try to close the modal editor part unless preserveFocus is set
-	if (!options?.preserveFocus) {
+	if (!options?.preserveFocus && !modalEditorPart.isEmbedded) {
 		await modalEditorPart.close();
 	}
 

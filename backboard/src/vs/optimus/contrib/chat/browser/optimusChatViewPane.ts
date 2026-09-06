@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import '../../../../workbench/contrib/chat/browser/widget/media/chatPanelCursorLook.css';
 import { $, addDisposableListener, append, EventType } from '../../../../base/browser/dom.js';
 import { CancellationToken, CancellationTokenSource } from '../../../../base/common/cancellation.js';
 import { MutableDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
@@ -22,11 +23,11 @@ import { IOpenerService } from '../../../../platform/opener/common/opener.js';
 import { IThemeService } from '../../../../platform/theme/common/themeService.js';
 import { ViewPane, IViewPaneOptions } from '../../../../workbench/browser/parts/views/viewPane.js';
 import { IViewDescriptorService } from '../../../../workbench/common/views.js';
-import { SIDE_BAR_FOREGROUND } from '../../../../workbench/common/theme.js';
+import { SIDE_BAR_BACKGROUND, SIDE_BAR_FOREGROUND } from '../../../../workbench/common/theme.js';
 import { IWorkspacePickerDelegate, IWorkspacePickerItem } from '../../../../workbench/contrib/chat/browser/chat.js';
 import { IAgentHostNewSessionFolderService } from '../../../../workbench/contrib/chat/browser/agentSessions/agentHost/agentHostNewSessionFolderService.js';
 import { ChatWidget } from '../../../../workbench/contrib/chat/browser/widget/chatWidget.js';
-import { ChatViewTitleControl } from '../../../../workbench/contrib/chat/browser/widgetHosts/viewPane/chatViewTitleControl.js';
+import { AgentSessionsHistoryModal } from '../../../../workbench/contrib/chat/browser/agentSessions/agentSessionsHistoryModal.js';
 import { createBackboardSessionTypePickerDelegate } from '../../../../workbench/contrib/chat/browser/widget/input/backboardSessionTypePickerDelegate.js';
 import { ChatAgentLocation, ChatModeKind } from '../../../../workbench/contrib/chat/common/constants.js';
 import { getChatSessionType, isUntitledChatSession } from '../../../../workbench/contrib/chat/common/model/chatUri.js';
@@ -39,7 +40,6 @@ import { IChatAgentService } from '../../../../workbench/contrib/chat/common/par
 import { ILanguageModelsService } from '../../../../workbench/contrib/chat/common/languageModels.js';
 import { IChatSessionsService, localChatSessionType, SessionType } from '../../../../workbench/contrib/chat/common/chatSessionsService.js';
 import { ISessionsService } from '../../../../sessions/services/sessions/browser/sessionsService.js';
-import { agentsBackground } from '../../../../sessions/common/theme.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { IWorkbenchLayoutService, Parts } from '../../../../workbench/services/layout/browser/layoutService.js';
 import { localize } from '../../../../nls.js';
@@ -58,7 +58,7 @@ export const OptimusChatViewId = 'optimus.workbench.view.chat';
 export class OptimusChatViewPane extends ViewPane implements IChatResourceNavigationParticipant {
 
 	private chatWidget: ChatWidget | undefined;
-	private chatTitleControl: ChatViewTitleControl | undefined;
+	private readonly historyModal = this._register(new MutableDisposable<AgentSessionsHistoryModal>());
 	private chatNavigationElement: HTMLElement | undefined;
 	private chatNavigationTitle: HTMLElement | undefined;
 	private chatNavigationMeta: HTMLElement | undefined;
@@ -168,24 +168,17 @@ export class OptimusChatViewPane extends ViewPane implements IChatResourceNaviga
 	protected override renderBody(container: HTMLElement): void {
 		super.renderBody(container);
 
-		// `optimus-chat-view` scopes this panel's own layout; `backboard-composer`
-		// opts its composer into the shared shell (backboardComposer.css) so it
-		// reads the same as the Simple window's and the Editor window's.
-		container.classList.add('optimus-chat-view', 'chat-viewpane', 'backboard-clean-chat', 'backboard-composer');
+		// Keep the Editor host hierarchy so its full panel styles apply, including
+		// the recent-chat welcome surface and bottom-anchored composer.
+		container.classList.add('optimus-chat-view', 'chat-viewpane');
 
-		// Use the Editor chat's own title control instead of recreating its tabs
-		// and action cluster. Keeping it inside this pane gives Advanced the same
-		// New Agent/history workflow without switching workbench windows.
-		this.chatTitleControl = this._register(this.instantiationService.createInstance(
-			ChatViewTitleControl,
-			container,
-			{
-				focusChat: () => this.chatWidget?.focusInput(),
-				openChatSession: async sessionResource => { await this.loadRootChatResource(sessionResource); },
-				openNewChat: () => { void this.showNewChat(); },
-			}
-		));
-		this._register(this.chatTitleControl.onDidChangeHeight(() => this.layoutChatView()));
+		const header = append(container, $('.optimus-chat-folder-header'));
+		this.folderRow = append(header, $('.optimus-chat-header-folder.new-session-workspace-picker-container'));
+		const openHistory = () => {
+			const modal = this.instantiationService.createInstance(AgentSessionsHistoryModal);
+			this.historyModal.value = modal;
+			modal.show({ excludeSubscriptionSessions: true, chatContainer: this.chatWidget?.domNode, openSession: resource => this.loadRootChatResource(resource) });
+		};
 
 		this.chatNavigationElement = append(container, $('.optimus-chat-navigation'));
 		this.chatNavigationElement.hidden = true;
@@ -219,12 +212,14 @@ export class OptimusChatViewPane extends ViewPane implements IChatResourceNaviga
 			this.chatWidget?.focusInput();
 		}));
 
-		const chatContainer = append(container, $('.optimus-chat-editor-host'));
+		const chatContainer = append(container, $('.optimus-chat-editor-host.backboard-chat-controls.backboard-clean-chat.backboard-composer'));
 		this.chatWidget = this._register(this.instantiationService.createInstance(
 			ChatWidget,
 			ChatAgentLocation.Chat,
 			{ viewId: OptimusChatViewId },
 			{
+				useBackboardPanelEmptyHome: true,
+				panelEmptyHomeNavigation: { openSession: resource => this.loadRootChatResource(resource), openHistory },
 				autoScroll: mode => mode !== ChatModeKind.Ask,
 				renderFollowups: true,
 				supportsFileReferences: true,
@@ -255,27 +250,16 @@ export class OptimusChatViewPane extends ViewPane implements IChatResourceNaviga
 			},
 			{
 				listForeground: SIDE_BAR_FOREGROUND,
-				listBackground: agentsBackground,
-				overlayBackground: agentsBackground,
-				inputEditorBackground: agentsBackground,
-				resultEditorBackground: agentsBackground,
+				listBackground: SIDE_BAR_BACKGROUND,
+				overlayBackground: SIDE_BAR_BACKGROUND,
+				inputEditorBackground: SIDE_BAR_BACKGROUND,
+				resultEditorBackground: SIDE_BAR_BACKGROUND,
 			}
 		));
 		this.chatWidget.render(chatContainer);
 		this.chatWidget.setVisible(this.isBodyVisible());
 
-		// Visible folder chip under the composer: shows/picks the folder the
-		// composed task runs in. (The composer toolbar's own workspace-picker
-		// slot is a hidden dropdown anchor by design, so the chip is rendered
-		// here as its own row, like the Simple window's new-chat surface.)
-		const inputPart = chatContainer.querySelector<HTMLElement>('.interactive-input-part');
-		this.folderRow = append(inputPart ?? container, $('.optimus-chat-folder-row'));
-		this.folderRowEmbedded = !!inputPart;
 		this.workspacePicker.render(this.folderRow);
-		// Folder choice only applies to NEW chats — an existing session's
-		// working directory is fixed at creation. Hidden until the untitled
-		// composer is showing (see updateFolderRowVisibility).
-		this.folderRow.style.display = 'none';
 
 		// The folder locks in the moment the first message is committed. Remember
 		// that this submission came from the launch composer before hiding the
@@ -288,7 +272,7 @@ export class OptimusChatViewPane extends ViewPane implements IChatResourceNaviga
 				this.resetComposerAfterSubmittedAgent = true;
 				this.folderRowVisible = false;
 				if (this.folderRow) {
-					this.folderRow.style.display = 'none';
+					this.folderRow.inert = true;
 				}
 				this.layoutChatView();
 			}
@@ -330,11 +314,7 @@ export class OptimusChatViewPane extends ViewPane implements IChatResourceNaviga
 		this.layoutChatView();
 	}
 
-	/** Height of the folder row under the composer (see optimusGridPart.css). */
-	private static readonly FOLDER_ROW_HEIGHT = 30;
-
 	private folderRow: HTMLElement | undefined;
-	private folderRowEmbedded = false;
 	private folderRowVisible = false;
 
 	private updateFolderRowVisibility(resource: URI | undefined): void {
@@ -349,17 +329,16 @@ export class OptimusChatViewPane extends ViewPane implements IChatResourceNaviga
 		}
 		this.folderRowVisible = visible;
 		if (this.folderRow) {
-			this.folderRow.style.display = visible ? '' : 'none';
+			this.folderRow.inert = !visible;
 		}
 		this.layoutChatView();
 	}
 
 	private layoutChatView(): void {
 		if (this.chatWidget && this.lastBodyWidth > 0 && this.lastBodyHeight > 0) {
-			const rowHeight = this.folderRowVisible && !this.folderRowEmbedded ? OptimusChatViewPane.FOLDER_ROW_HEIGHT : 0;
-			const titleHeight = this.chatTitleControl?.getHeight() ?? 0;
+			const titleHeight = 34;
 			const navigationHeight = this.chatResourceHistory.canGoBack ? 44 : 0;
-			this.chatWidget.layout(Math.max(0, this.lastBodyHeight - titleHeight - navigationHeight - rowHeight), this.lastBodyWidth);
+			this.chatWidget.layout(Math.max(0, this.lastBodyHeight - titleHeight - navigationHeight), this.lastBodyWidth);
 		}
 	}
 
@@ -592,7 +571,6 @@ export class OptimusChatViewPane extends ViewPane implements IChatResourceNaviga
 		this.modelChangeListener.value = ref ? ref.object.onDidChange(() => this.updateFolderRowVisibility(ref.object.sessionResource)) : undefined;
 		this.updateFolderRowVisibility(ref?.object.sessionResource);
 		this.chatWidget?.setModel(ref?.object);
-		this.chatTitleControl?.update(ref?.object);
 
 		// Reflect the loaded chat's folder in the composer's folder chip; for
 		// untitled chats the chip keeps the user's (or last) selection, which

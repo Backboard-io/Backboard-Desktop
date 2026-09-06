@@ -48,14 +48,23 @@
 	outline-offset: 2px;
 }
 
+/* The context-view host receives focus on open. Its square workbench outline
+ * must not frame the rounded dialog; actionable rows retain keyboard focus. */
+.monaco-workbench .context-view:has(> .sessions-environment-popup):focus {
+	outline: none;
+}
+
 .sessions-environment-popup {
-	width: 300px;
-	padding: 14px;
-	border: 1px solid var(--vscode-widget-border);
-	border-radius: 14px;
+	width: 302px;
+	max-width: calc(100vw - 24px);
+	max-height: calc(100vh - 70px);
+	overflow-y: auto;
+	padding: 10px 6px;
+	border: 1px solid var(--vscode-widget-border, transparent);
+	border-radius: 20px;
 	background: var(--vscode-menu-background);
 	color: var(--vscode-menu-foreground);
-	box-shadow: 0 10px 26px var(--vscode-widget-shadow);
+	box-shadow: 0 12px 36px var(--vscode-widget-shadow);
 	box-sizing: border-box;
 }
 
@@ -63,27 +72,31 @@
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	margin-bottom: 10px;
+	padding: 4px 8px 7px;
 }
 
 .sessions-environment-popup-title,
 .sessions-environment-popup-section {
 	color: var(--vscode-descriptionForeground);
-	font-size: 12px;
-	font-weight: 500;
+	font-size: 13px;
+	font-weight: 400;
 }
 
-.sessions-environment-popup-row,
-.sessions-environment-popup-source {
+.sessions-environment-popup-section {
+	display: block;
+	padding: 6px 8px 8px;
+}
+
+.sessions-environment-popup-row {
 	all: unset;
-	display: grid;
-	grid-template-columns: 22px minmax(0, 1fr) auto;
+	display: flex;
 	align-items: center;
 	width: 100%;
-	min-height: 34px;
-	gap: 8px;
-	padding: 0 4px;
-	border-radius: 7px;
+	min-height: 31px;
+	gap: 10px;
+	padding: 5px 8px;
+	border-radius: 6px;
+	font: inherit;
 	color: var(--vscode-menu-foreground);
 	box-sizing: border-box;
 }
@@ -93,61 +106,74 @@
 }
 
 .sessions-environment-popup-row:not(:disabled):hover {
-	background: var(--vscode-menu-selectionBackground);
-	color: var(--vscode-menu-selectionForeground);
+	background: var(--vscode-list-hoverBackground);
 }
 
-.sessions-environment-popup-row.muted,
-.sessions-environment-popup-row:disabled {
+.sessions-environment-popup-row:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+	background: var(--vscode-list-hoverBackground);
+}
+
+.sessions-environment-popup-row.muted {
 	color: var(--vscode-descriptionForeground);
 }
 
-.sessions-environment-popup-row > .codicon,
-.sessions-environment-popup-source > .codicon {
+.sessions-environment-popup-row > .codicon {
+	flex: 0 0 16px;
 	font-size: 16px;
-	justify-self: center;
-	color: var(--vscode-icon-foreground);
 	opacity: 0.9;
 }
 
-.sessions-environment-popup-row-label,
-.sessions-environment-popup-source-label {
+.sessions-environment-popup-row-label {
+	flex: 1 1 auto;
 	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 	font-size: 13px;
-	font-weight: 500;
+	font-weight: 400;
 }
 
-.sessions-environment-popup-row-value,
-.sessions-environment-popup-source-value {
+.sessions-environment-popup-row-value {
+	flex: 0 1 auto;
+	max-width: 42%;
 	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 	color: var(--vscode-descriptionForeground);
-	font-size: 11px;
+	font-size: 12px;
 }
 
-.sessions-environment-popup-source {
-	grid-template-columns: 22px minmax(0, 1fr);
-	grid-template-rows: 20px 18px;
-	column-gap: 10px;
-	min-height: 38px;
+.sessions-environment-popup-stats {
+	display: inline-flex;
+	flex: 0 0 auto;
+	gap: 5px;
+	font-size: 13px;
+	font-variant-numeric: tabular-nums;
 }
 
-.sessions-environment-popup-source > .codicon {
-	grid-row: 1 / 3;
+.sessions-environment-popup-stats .additions {
+	color: var(--vscode-gitDecoration-addedResourceForeground);
 }
 
-.sessions-environment-popup-source-value {
-	grid-column: 2;
+.sessions-environment-popup-stats .deletions {
+	color: var(--vscode-gitDecoration-deletedResourceForeground);
+}
+
+.sessions-environment-popup-row-trailing {
+	display: flex;
+	flex: 0 0 14px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.sessions-environment-popup-row-trailing .codicon {
+	font-size: 14px;
 }
 
 .sessions-environment-popup-separator {
 	height: 1px;
-	margin: 10px 0;
-	background: var(--vscode-widget-border);
-	opacity: 0.7;
+	margin: 12px 8px 8px;
+	background: var(--vscode-widget-border, var(--vscode-menu-separatorBackground));
 }

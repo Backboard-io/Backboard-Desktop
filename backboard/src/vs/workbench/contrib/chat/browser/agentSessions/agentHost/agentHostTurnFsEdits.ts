@@ -196,8 +196,9 @@ export function finalizeUncoveredTurnFileChange(
 	observation: ITurnFileChangeObservation,
 	existsAtTurnEnd: boolean,
 	existedAtTurnStart?: boolean,
+	isDirectoryAtTurnEnd = false,
 ): FileChangeType | undefined {
-	if (isIgnoredAgentPath(path)) {
+	if (isIgnoredAgentPath(path) || isDirectoryAtTurnEnd) {
 		return undefined;
 	}
 	if (existsAtTurnEnd) {

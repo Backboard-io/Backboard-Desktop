@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { resolveAgentHostForkIndex } from './agentHostFork.js';
 import { Limiter } from '../../../../../../base/common/async.js';
 import { encodeBase64, VSBuffer } from '../../../../../../base/common/buffer.js';
 import { CancellationToken, CancellationTokenSource } from '../../../../../../base/common/cancellation.js';
@@ -31,7 +32,7 @@ import { AhpErrorCodes, AHP_AUTH_REQUIRED, ProtocolError } from '../../../../../
 import { buildSubagentSessionUri, getToolSubagentContent, parseSubagentSessionUri, MessageAttachmentKind, MessageKind, PendingMessageKind, ResponsePartKind, ChatInputAnswerState, ChatInputAnswerValueKind, ChatInputQuestionKind, ChatInputResponseKind, StateComponents, ToolCallCancellationReason, ToolCallConfirmationReason, ToolCallStatus, TurnState, buildDefaultChatUri, mergeSessionWithDefaultChat, type ChatState, type ISessionWithDefaultChat, type ClientPluginCustomization, type ICompletedToolCall, type MarkdownResponsePart, type Message, type MessageAttachment, type ModelSelection, type ReasoningResponsePart, type RootState, type ChatInputAnswer, type ChatInputRequest, type SessionState, type ToolCallResponsePart, type ToolCallState, type Turn, type UsageInfo } from '../../../../../../platform/agentHost/common/state/sessionState.js';
 import { ExtensionIdentifier } from '../../../../../../platform/extensions/common/extensions.js';
 import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
-import { FileChangeType, IFileService } from '../../../../../../platform/files/common/files.js';
+import { FileChangeType, FileOperationResult, IFileService, toFileOperationResult } from '../../../../../../platform/files/common/files.js';
 import { ILogService } from '../../../../../../platform/log/common/log.js';
 import { IOpenerService } from '../../../../../../platform/opener/common/opener.js';
 import { IWorkspaceContextService } from '../../../../../../platform/workspace/common/workspace.js';
@@ -1576,13 +1577,21 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 						try {
 							finalizedChanges = await Promise.all(candidates.map(([uri, observation]) => statLimiter.queue(async () => {
 								const repo = repoInfos.find(info => extUriBiasedIgnorePathCase.isEqualOrParent(uri, URI.file(info.rootPath)));
-								const existsAtTurnEnd = await this._fileService.exists(uri);
+								// Existence alone includes mkdir events. Only files belong in the
+								// review; a permission/transport failure is not evidence of deletion.
+								const stat = await this._fileService.stat(uri).catch(error => {
+									if (error instanceof Error && toFileOperationResult(error) === FileOperationResult.FILE_NOT_FOUND) {
+										return undefined;
+									}
+									throw error;
+								});
+								const existsAtTurnEnd = stat !== undefined;
 								let existedAtTurnStart: boolean | undefined;
 								// ADDED-only is ambiguous: atomic replacement implementations can
 								// report an existing target exactly like a new file. Probe the pinned
 								// git baseline only for that shape, bounded by the same limiter as
 								// final stats, so real replacements retain their before side/diff.
-								if (existsAtTurnEnd && observation.firstType === FileChangeType.ADDED && !observation.sawDeleted) {
+								if (existsAtTurnEnd && !stat?.isDirectory && observation.firstType === FileChangeType.ADDED && !observation.sawDeleted) {
 									const beforeContentUri = buildUncoveredTurnBeforeContentUri(uri, repo, session.toString());
 									if (beforeContentUri) {
 									try {
@@ -1606,7 +1615,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 								return {
 									uri,
 									repo,
-									changeType: finalizeUncoveredTurnFileChange(uri.path, observation, existsAtTurnEnd, existedAtTurnStart),
+									changeType: finalizeUncoveredTurnFileChange(uri.path, observation, existsAtTurnEnd, existedAtTurnStart, stat?.isDirectory),
 								};
 							})));
 						} finally {
@@ -1620,7 +1629,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 						const extraEdits: IChatProgress[] = [];
 						for (const { uri, repo, changeType } of finalizedChanges) {
 							if (changeType === undefined) {
-								this._logService.info(`[AgentHost][FsWatch] Skipping transient ${uri.toString()} (absent at turn end)`);
+								this._logService.trace(`[AgentHost][FsWatch] Skipping transient, directory, or ignored path ${uri.toString()}`);
 								continue;
 							}
 							extraEdits.push(hydrateUncoveredTurnEdit({
@@ -2062,8 +2071,14 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 					status => {
 						const current = invocation.toolSpecificData;
 						if (current?.kind === 'subagent' && current.detached) {
-							invocation.toolSpecificData = { ...current, workerStatus: status };
-							invocation.notifyToolSpecificDataChanged();
+							// A child model turn can finish before durable integration.
+							// Explicit worker lifecycle metadata owns that final state.
+							const hasTerminalWorkerStatus = current.workerStatus === 'Integrated' || current.workerStatus === 'Completed'
+								|| current.workerStatus === 'Failed' || current.workerStatus === 'Cancelled' || current.workerStatus === 'Conflict';
+							if (!current.workerId || !current.workerStatus || (!hasTerminalWorkerStatus && (status !== 'Completed' || current.terminalAfterIntegration))) {
+								invocation.toolSpecificData = { ...current, workerStatus: status };
+								invocation.notifyToolSpecificDataChanged();
+							}
 						}
 						// Avoid tearing down observable listeners during their own delivery.
 						queueMicrotask(() => sessionObservers?.delete(childObserver));
@@ -2143,6 +2158,9 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 				if (fileEdits.length > 0) {
 					opts.onFileEdits?.(tc, fileEdits);
 				}
+			}
+			if (status === ToolCallStatus.Completed && invocation.toolSpecificData?.kind === 'subagent') {
+				updateRunningToolSpecificData(invocation, tc, opts.backendSession, this._config.connectionAuthority);
 			}
 
 			tryObserveSubagent(tc);
@@ -2737,6 +2755,9 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 			for (let j = subagentInsertions.length - 1; j >= 0; j--) {
 				const { index, toolCallId } = subagentInsertions[j];
 				const childSessionUri = buildSubagentSessionUri(parentSessionStr, toolCallId);
+				// The parent integration result owns coordinator review/undo. Child
+				// history still shows its tools, but must not count the same edits twice.
+				const hasIntegrationResult = item.parts.some(part => part.kind === 'toolInvocationSerialized' && part.toolCallId === `worker-integration:${toolCallId}`);
 
 				try {
 					const childSub = this._ensureSessionSubscription(childSessionUri);
@@ -2767,7 +2788,9 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 											serialized.presentation = ToolInvocationPresentation.Hidden;
 										}
 										innerParts.push(serialized);
-										innerParts.push(...fileEditParts);
+										if (!hasIntegrationResult) {
+											innerParts.push(...fileEditParts);
+										}
 									}
 								}
 							}
@@ -3075,24 +3098,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 		// which uses `requestIndex - 1`. If no request is provided, fork
 		// the entire session.
 		const protocolState = this._getSessionState(backendSession.toString());
-		let turnIndex: number | undefined;
-		if (request) {
-			const requestIdx = protocolState?.turns.findIndex(t => t.id === request.id);
-			if (requestIdx === undefined || requestIdx < 0) {
-				throw new Error(`Cannot fork: turn for request ${request.id} not found in protocol state`);
-			}
-			// Fork before this request — keep turns [0..requestIdx-1]
-			turnIndex = requestIdx - 1;
-			if (turnIndex < 0) {
-				throw new Error('Cannot fork: cannot fork before the first request');
-			}
-		} else if (protocolState?.turns.length) {
-			turnIndex = protocolState.turns.length - 1;
-		}
-
-		if (turnIndex === undefined) {
-			throw new Error('Cannot fork: no turns to fork from');
-		}
+		const turnIndex = resolveAgentHostForkIndex(protocolState?.turns ?? [], protocolState?.activeTurn?.id, request?.id);
 
 		const turnId = protocolState!.turns[turnIndex].id;
 		const chatModel = this._chatService.getSession(sessionResource);
@@ -3199,10 +3205,13 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 		}
 
 		// Start syncing the chat model's pending requests to the protocol
-		this._ensurePendingMessageSubscription(sessionResource, session);
+		const targetResource = fork
+			? URI.from({ scheme: this._config.sessionType, path: `/${AgentSession.id(session)}` })
+			: sessionResource;
+		this._ensurePendingMessageSubscription(targetResource, session);
 
-		// Start watching for server-initiated turns on this session
-		this._watchForServerInitiatedTurns(session, sessionResource);
+		// A fork's events belong to the new chat, never to the source widget.
+		this._watchForServerInitiatedTurns(session, targetResource);
 
 		return session;
 	}

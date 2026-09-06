@@ -6,12 +6,10 @@
 import './experiments/agentSessionsExperiments.contribution.js';
 import { Codicon } from '../../../../../base/common/codicons.js';
 import { localize, localize2 } from '../../../../../nls.js';
-import { ContextKeyExpr } from '../../../../../platform/contextkey/common/contextkey.js';
 import { registerSingleton, InstantiationType } from '../../../../../platform/instantiation/common/extensions.js';
 import { Registry } from '../../../../../platform/registry/common/platform.js';
 import { Extensions as QuickAccessExtensions, IQuickAccessRegistry } from '../../../../../platform/quickinput/common/quickAccess.js';
 import { ChatContextKeys } from '../../common/actions/chatContextKeys.js';
-import { AgentSessionsViewerOrientation, AgentSessionsViewerPosition } from './agentSessions.js';
 import { IAgentSessionsService, AgentSessionsService } from './agentSessionsService.js';
 import { LocalAgentsSessionsController } from './localAgentSessionsController.js';
 import { registerWorkbenchContribution2, WorkbenchPhase } from '../../../../common/contributions.js';
@@ -63,99 +61,13 @@ MenuRegistry.appendMenuItem(MenuId.AgentSessionsToolbar, {
 	icon: Codicon.filter,
 } satisfies ISubmenuItem);
 
-MenuRegistry.appendMenuItem(MenuId.AgentSessionsToolbar, {
-	command: {
-		id: ShowAgentSessionsSidebar.ID,
-		title: ShowAgentSessionsSidebar.TITLE,
-		icon: Codicon.layoutSidebarRightOff,
-	},
-	group: 'navigation',
-	order: 5,
-	when: ContextKeyExpr.and(
-		ChatContextKeys.agentSessionsViewerOrientation.isEqualTo(AgentSessionsViewerOrientation.Stacked),
-		ChatContextKeys.agentSessionsViewerPosition.isEqualTo(AgentSessionsViewerPosition.Right)
-	)
-});
 
-MenuRegistry.appendMenuItem(MenuId.AgentSessionsToolbar, {
-	command: {
-		id: ShowAgentSessionsSidebar.ID,
-		title: ShowAgentSessionsSidebar.TITLE,
-		icon: Codicon.layoutSidebarLeftOff,
-	},
-	group: 'navigation',
-	order: 5,
-	when: ContextKeyExpr.and(
-		ChatContextKeys.agentSessionsViewerOrientation.isEqualTo(AgentSessionsViewerOrientation.Stacked),
-		ChatContextKeys.agentSessionsViewerPosition.isEqualTo(AgentSessionsViewerPosition.Left)
-	)
-});
 
-MenuRegistry.appendMenuItem(MenuId.AgentSessionsToolbar, {
-	command: {
-		id: HideAgentSessionsSidebar.ID,
-		title: HideAgentSessionsSidebar.TITLE,
-		icon: Codicon.layoutSidebarRight,
-	},
-	group: 'navigation',
-	order: 5,
-	when: ContextKeyExpr.and(
-		ChatContextKeys.agentSessionsViewerOrientation.isEqualTo(AgentSessionsViewerOrientation.SideBySide),
-		ChatContextKeys.agentSessionsViewerPosition.isEqualTo(AgentSessionsViewerPosition.Right)
-	)
-});
 
-MenuRegistry.appendMenuItem(MenuId.AgentSessionsToolbar, {
-	command: {
-		id: HideAgentSessionsSidebar.ID,
-		title: HideAgentSessionsSidebar.TITLE,
-		icon: Codicon.layoutSidebarLeft,
-	},
-	group: 'navigation',
-	order: 5,
-	when: ContextKeyExpr.and(
-		ChatContextKeys.agentSessionsViewerOrientation.isEqualTo(AgentSessionsViewerOrientation.SideBySide),
-		ChatContextKeys.agentSessionsViewerPosition.isEqualTo(AgentSessionsViewerPosition.Left)
-	)
-});
 
 // --- Sessions Title Toolbar
 
-// Keep the sessions drawer opener at the trailing edge of the chat title row.
-// The drawer owns its own collapse control once it is open.
-MenuRegistry.appendMenuItem(MenuId.ChatViewSessionTitleToolbar, {
-	command: {
-		id: ShowAgentSessionsSidebar.ID,
-		title: ShowAgentSessionsSidebar.TITLE,
-		icon: Codicon.layoutSidebarLeftOff,
-	},
-	group: 'navigation',
-	order: 4,
-	when: ContextKeyExpr.and(
-		ContextKeyExpr.or(
-			ChatContextKeys.agentSessionsViewerVisible.negate(),
-			ChatContextKeys.agentSessionsViewerOrientation.isEqualTo(AgentSessionsViewerOrientation.Stacked),
-		),
-		ChatContextKeys.agentSessionsViewerPosition.isEqualTo(AgentSessionsViewerPosition.Left)
-	)
-});
 
-MenuRegistry.appendMenuItem(MenuId.ChatViewSessionTitleToolbar, {
-	command: {
-		id: ShowAgentSessionsSidebar.ID,
-		title: ShowAgentSessionsSidebar.TITLE,
-		icon: Codicon.layoutSidebarRightOff,
-	},
-	group: 'navigation',
-	order: 4,
-	when: ContextKeyExpr.and(
-		ContextKeyExpr.or(
-			ChatContextKeys.agentSessionsViewerVisible.negate(),
-			ChatContextKeys.agentSessionsViewerOrientation.isEqualTo(AgentSessionsViewerOrientation.Stacked),
-		),
-		ChatContextKeys.agentSessionsViewerPosition.isEqualTo(AgentSessionsViewerPosition.Right)
-	)
-});
 
 //#endregion
 

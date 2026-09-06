@@ -110,24 +110,6 @@ export class OpenAgentsWindowAction extends Action2 {
 	}
 }
 
-export class OpenJarvisWindowAction extends Action2 {
-
-	static readonly ID = 'workbench.action.openJarvisWindow';
-
-	constructor() {
-		super({
-			id: OpenJarvisWindowAction.ID,
-			title: localize2('openJarvisWindow', "Open Jarvis"),
-			category: localize2('jarvis', "Jarvis"),
-			f1: true,
-		});
-	}
-
-	async run(accessor: ServicesAccessor): Promise<void> {
-		await accessor.get(INativeHostService).openJarvisWindow();
-	}
-}
-
 export class OpenOptimusWindowAction extends Action2 {
 
 	static readonly ID = 'workbench.action.openOptimusWindow';

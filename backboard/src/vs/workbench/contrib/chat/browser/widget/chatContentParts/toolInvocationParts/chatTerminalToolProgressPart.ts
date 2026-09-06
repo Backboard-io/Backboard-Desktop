@@ -2258,6 +2258,7 @@ export class ChatTerminalThinkingCollapsibleWrapper extends ChatCollapsibleConte
 		}
 
 		const labelElement = this._collapseButton.labelElement;
+		labelElement.classList.toggle('chat-terminal-command-label', this._useCursorTranscriptPresentation);
 		labelElement.textContent = '';
 
 		if (this._isSandboxWrapped) {

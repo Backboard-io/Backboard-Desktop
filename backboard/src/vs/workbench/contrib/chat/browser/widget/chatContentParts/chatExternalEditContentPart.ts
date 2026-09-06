@@ -17,11 +17,14 @@ import { ILanguageService } from '../../../../../../editor/common/languages/lang
 import { IModelService } from '../../../../../../editor/common/services/model.js';
 import { IEditorWorkerService } from '../../../../../../editor/common/services/editorWorker.js';
 import { ITextModelService } from '../../../../../../editor/common/services/resolverService.js';
+import { ICommandService } from '../../../../../../platform/commands/common/commands.js';
+import { onUnexpectedError } from '../../../../../../base/common/errors.js';
+import { openChatEdit } from '../chatEditNavigation.js';
 import { IClipboardService } from '../../../../../../platform/clipboard/common/clipboardService.js';
 import { IHoverService } from '../../../../../../platform/hover/browser/hover.js';
 import { ILabelService } from '../../../../../../platform/label/common/label.js';
 import { IOpenEditorOptions } from '../../../../../../platform/editor/browser/editor.js';
-import { IEditorService, SIDE_GROUP } from '../../../../../services/editor/common/editorService.js';
+import { IEditorService } from '../../../../../services/editor/common/editorService.js';
 import { IChatExternalEdit } from '../../../common/chatService/chatService.js';
 import { IEditSessionDiffStats } from '../../../common/editing/chatEditingService.js';
 import { IChatRendererContent } from '../../../common/model/chatViewModel.js';
@@ -248,6 +251,7 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 		@ITextModelService private readonly textModelService: ITextModelService,
 		@IEditorWorkerService private readonly editorWorkerService: IEditorWorkerService,
 		@IClipboardService private readonly clipboardService: IClipboardService,
+		@ICommandService private readonly commandService: ICommandService,
 	) {
 		super(labelService, modelService, languageService, hoverService);
 		const renderSeed = externalEditRenderSeeds.get(edit);
@@ -310,7 +314,7 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 			if (this.diffBodyState === 'none') {
 				void this.buildDiffBody('preview');
 			}
-		}, { rootMargin: '600px 0px' });
+		}, { rootMargin: '200px 0px' });
 		observer.observe(this.element);
 		this._previewVisibilityObserver.value = toDisposable(() => observer.disconnect());
 		return true;
@@ -635,9 +639,7 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 	private appendDiffRow(body: HTMLElement, kind: 'added' | 'removed' | 'context', lineNumber: number, text: string): void {
 		const row = $(`.chat-external-edit-diff-row.${kind}`);
 		row.appendChild($('span.chat-external-edit-diff-gutter', {}, String(lineNumber)));
-		if (this.element.classList.contains('chat-external-edit-preview')) {
-			row.appendChild($('span.chat-external-edit-diff-marker', { 'aria-hidden': 'true' }, kind === 'added' ? '+' : kind === 'removed' ? '-' : ''));
-		}
+		row.appendChild($('span.chat-external-edit-diff-marker', { 'aria-hidden': 'true' }, kind === 'added' ? '+' : kind === 'removed' ? '-' : ''));
 		const textElement = $('span.chat-external-edit-diff-text');
 		// Row-level add/remove styling carries the important visual signal. Keep
 		// code as plain text so expanding a large file never tokenizes its entire
@@ -855,21 +857,10 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 		}
 	}
 
-	private openEdit({ editorOptions: options, openToSide }: IOpenEditorOptions): void {
-		const group = openToSide ? SIDE_GROUP : undefined;
-		if (this.edit.beforeContentUri && this.edit.afterContentUri) {
-			this.editorService.openEditor({
-				original: { resource: this.edit.beforeContentUri },
-				modified: { resource: this.edit.afterContentUri },
-				options,
-			}, group);
-		} else if (this.edit.editKind === 'delete' && this.edit.beforeContentUri) {
-			// The file no longer exists on disk; show the pre-deletion
-			// content from the snapshot instead of opening the missing URI.
-			this.editorService.openEditor({ resource: this.edit.beforeContentUri, options }, group);
-		} else if (this.edit.editKind !== 'delete') {
-			this.editorService.openEditor({ resource: this.edit.uri, options }, group);
-		}
+	private openEdit(options: IOpenEditorOptions): void {
+		void openChatEdit(this.editorService, this.commandService, this.edit.uri,
+			this.edit.beforeContentUri, this.edit.afterContentUri,
+			this.edit.editKind === 'delete', options).catch(onUnexpectedError);
 	}
 
 	hasSameContent(other: IChatRendererContent, _followingContent: IChatRendererContent[], _element: ChatTreeItem): boolean {

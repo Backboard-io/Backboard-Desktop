@@ -13,5 +13,15 @@
 	"lightColorThemeLabel": "Light (Visual Studio)",
 	"hcColorThemeLabel": "Dark High Contrast",
 	"lightHcColorThemeLabel": "Light High Contrast",
-	"minimalIconThemeLabel": "Minimal (Visual Studio Code)"
+	"minimalIconThemeLabel": "Minimal (Visual Studio Code)",
+	"backboardLinenThemeLabel": "Backboard Linen",
+	"backboardSageThemeLabel": "Backboard Sage",
+	"backboardMistThemeLabel": "Backboard Mist",
+	"backboardMidnightThemeLabel": "Backboard Midnight",
+	"backboardForestThemeLabel": "Backboard Forest",
+	"backboardEmberThemeLabel": "Backboard Ember",
+	"backboardBloomThemeLabel": "Backboard Bloom",
+	"backboardParchmentThemeLabel": "Backboard Parchment",
+	"backboardNeonThemeLabel": "Backboard Neon",
+	"backboardAubergineThemeLabel": "Backboard Aubergine"
 }

@@ -63,6 +63,7 @@ export class SubAgentRunner {
 		) {
 			params.parentBus.emit({
 				type: "agent:child_start",
+				...(params.name ? { agentName: params.name } : {}),
 				agentToolCallId: params.parentToolCallId,
 				childSessionId: session.sessionId,
 				prompt: params.prompt.trim(),
@@ -238,6 +239,12 @@ export class SubAgentRunner {
 		// child's events must not reach the parent - they would resurrect the
 		// parent's already-committed "Interrupted" row.
 		const lifecycleEvents = new Set([
+			// Diagnostics stay in the child log; they are not transcript rows.
+			"thinking:resolved",
+			"thinking:wire",
+			"tool:identity",
+			"runtime:identity",
+			"notification:run",
 			"session:created",
 			"user:message",
 			"turn:start",

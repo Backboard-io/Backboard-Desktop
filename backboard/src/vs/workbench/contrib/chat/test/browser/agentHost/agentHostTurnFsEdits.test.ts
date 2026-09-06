@@ -24,6 +24,17 @@ suite('agentHostTurnFsEdits', () => {
 	}
 
 	suite('isIgnoredAgentPath', () => {
+		test('filters only the owned worker UUID sibling, including restored review rows', () => {
+			const owned = '/repo/src/.backboard-write-73364876-b55a-46b9-9e05-42929fbee6ac';
+			const userFiles = ['/repo/src/.backboard-write-notes', `${owned}.ts`, '/repo/.env', '/repo/.backboard-write-73364876-b55a-16b9-9e05-42929fbee6ac'];
+			assert.deepStrictEqual({
+				owned: isIgnoredAgentPath(owned),
+				watcher: AGENT_IGNORED_FILE_GLOBS.some(pattern => match(pattern, owned)),
+				userFiles: userFiles.map(isIgnoredAgentPath),
+				userWatcher: userFiles.map(path => AGENT_IGNORED_FILE_GLOBS.some(pattern => match(pattern, path))),
+			}, { owned: true, watcher: true, userFiles: [false, false, false, false], userWatcher: [false, false, false, false] });
+		});
+
 		test('flags VCS internals and build output, keeps normal files', () => {
 			assert.deepStrictEqual({
 				gitObject: isIgnoredAgentPath('/repo/.git/objects/84/18b716db4a948a0b53c14417a85c23fbfbe1'),
@@ -133,6 +144,16 @@ suite('agentHostTurnFsEdits', () => {
 	});
 
 	suite('finalizeUncoveredTurnFileChange', () => {
+		test('does not present mkdir events or removed worker siblings as file edits', () => {
+			const added = accumulateUncoveredTurnFileChange(undefined, FileChangeType.ADDED);
+			const deleted = accumulateUncoveredTurnFileChange(undefined, FileChangeType.DELETED);
+			assert.deepStrictEqual({
+				directory: finalizeUncoveredTurnFileChange('/repo/new-directory', added, true, false, true),
+				file: finalizeUncoveredTurnFileChange('/repo/new-directory/app.ts', added, true, false, false),
+				missedTempCreate: finalizeUncoveredTurnFileChange('/repo/.backboard-write-40604691-bee8-4425-8fd2-8319221acf3c', deleted, false),
+			}, { directory: undefined, file: FileChangeType.ADDED, missedTempCreate: undefined });
+		});
+
 		test('uses final filesystem state and drops transient or ignored paths', () => {
 			const observe = (...types: FileChangeType[]): ITurnFileChangeObservation => {
 				let result: ITurnFileChangeObservation | undefined;

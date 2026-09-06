@@ -36,6 +36,10 @@ describe("mutation tools", () => {
 		let maxActiveCaptures = 0;
 		let preBatches = 0;
 		let postBatches = 0;
+		let releaseCaptures!: () => void;
+		const captureGate = new Promise<void>((resolve) => {
+			releaseCaptures = resolve;
+		});
 		const checkpoints: CheckpointRecorder = {
 			recordPreImage: async () => {},
 			recordPostImage: async () => {},
@@ -43,7 +47,8 @@ describe("mutation tools", () => {
 				preBatches++;
 				activeCaptures += requests.length;
 				maxActiveCaptures = Math.max(maxActiveCaptures, activeCaptures);
-				await Bun.sleep(20);
+				if (activeCaptures === 3) releaseCaptures();
+				await captureGate;
 				activeCaptures -= requests.length;
 			},
 			recordPostImages: async () => {
@@ -86,8 +91,6 @@ describe("mutation tools", () => {
 
 		expect({
 			prompts,
-			preBatches,
-			postBatches,
 			maxActiveCaptures,
 			errors: outputs.filter((output) => output.metadata?.error).length,
 			contents: await Promise.all(
@@ -97,12 +100,16 @@ describe("mutation tools", () => {
 			),
 		}).toEqual({
 			prompts: 1,
-			preBatches: 1,
-			postBatches: 1,
 			maxActiveCaptures: 3,
 			errors: 0,
 			contents: ["a.txt", "b.txt", "c.txt"],
 		});
+		// Ready calls coalesce, but a slow/blocked peer must not become a
+		// checkpoint barrier while other writers hold file locks.
+		expect(preBatches).toBeGreaterThanOrEqual(1);
+		expect(preBatches).toBeLessThanOrEqual(3);
+		expect(postBatches).toBeGreaterThanOrEqual(1);
+		expect(postBatches).toBeLessThanOrEqual(3);
 	});
 
 	it("runs one round-wide diagnostic sweep after every disjoint write commits", async () => {

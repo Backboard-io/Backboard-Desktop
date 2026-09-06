@@ -22,6 +22,7 @@ import { EditorService } from '../../browser/editorService.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
 import { TestStorageService } from '../../../../test/common/workbenchTestServices.js';
 import { Memento } from '../../../../common/memento.js';
+import { mainWindow } from '../../../../../base/browser/window.js';
 
 suite('Modal Editor Group', () => {
 
@@ -186,6 +187,51 @@ suite('Modal Editor Group', () => {
 		assert.strictEqual(modalPart1.activeGroup.id, modalPart2.activeGroup.id);
 
 		await modalPart1.close();
+	});
+
+	test('standalone settings-style opens preserve an embedded review and its host', async () => {
+		const instantiationService = workbenchInstantiationService({ contextKeyService: instantiationService => instantiationService.createInstance(MockScopableContextKeyService) }, disposables);
+		instantiationService.invokeFunction(accessor => Registry.as<IEditorFactoryRegistry>(EditorExtensions.EditorFactory).start(accessor));
+		const parts = await createEditorParts(instantiationService, disposables);
+		instantiationService.stub(IEditorGroupsService, parts);
+		const editorService = disposables.add(instantiationService.createInstance(EditorService, undefined));
+		instantiationService.stub(IEditorService, editorService);
+		const configuration = instantiationService.get(IConfigurationService) as TestConfigurationService;
+		await configuration.setUserConfiguration('workbench.editor.useModal', 'some');
+		const host = mainWindow.document.createElement('div');
+		const review = await parts.createModalEditorPart({ embeddedHost: host, maximized: true });
+		const reviewInput = createTestFileEditorInput(URI.file('review.ts'), TEST_EDITOR_INPUT_ID);
+		await editorService.openEditor(reviewInput, { modal: { embeddedHost: host }, pinned: true }, MODAL_GROUP);
+		const settingsInput = createTestFileEditorInput(URI.file('settings'), TEST_EDITOR_INPUT_ID);
+		await editorService.openEditor(settingsInput, { pinned: true }, MODAL_GROUP);
+		const settings = parts.activeModalEditorPart!;
+		assert.deepStrictEqual({
+			separateParts: settings !== review,
+			reviewInput: review.activeGroup.activeEditor,
+			settingsInput: settings.activeGroup.activeEditor,
+			reviewHost: (review.modalElement as HTMLElement).parentElement === host,
+			settingsEmbedded: settings.isEmbedded,
+		}, { separateParts: true, reviewInput, settingsInput, reviewHost: true, settingsEmbedded: false });
+		await settings.close();
+		assert.strictEqual(review.activeGroup.activeEditor, reviewInput);
+		assert.strictEqual(await parts.createModalEditorPart({ embeddedHost: host }), review);
+		await review.close();
+	});
+
+	test('concurrent requests reuse only the same embedded host', async () => {
+		const instantiationService = workbenchInstantiationService({ contextKeyService: instantiationService => instantiationService.createInstance(MockScopableContextKeyService) }, disposables);
+		instantiationService.invokeFunction(accessor => Registry.as<IEditorFactoryRegistry>(EditorExtensions.EditorFactory).start(accessor));
+		const parts = await createEditorParts(instantiationService, disposables);
+		instantiationService.stub(IEditorGroupsService, parts);
+		const host = mainWindow.document.createElement('div');
+		const [first, same, other] = await Promise.all([
+			parts.createModalEditorPart({ embeddedHost: host }),
+			parts.createModalEditorPart({ embeddedHost: host }),
+			parts.createModalEditorPart({ embeddedHost: mainWindow.document.createElement('div') }),
+		]);
+		assert.deepStrictEqual({ same: first === same, different: first !== other }, { same: true, different: true });
+		await first.close();
+		await other.close();
 	});
 
 	test('modal editor part singleton is reset after close', async () => {

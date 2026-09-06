@@ -2,11 +2,13 @@ import { isAbsolute, relative, resolve, sep } from "node:path";
 import { errorMessage } from "../../utils/errors.ts";
 import { canonicalLockPath, withPathLocks } from "../../utils/pathLocks.ts";
 import type {
+	CaptureGitIntegration,
 	GitIntegrationResult,
 	GitWorktreeManager,
 } from "./GitWorktreeManager.ts";
 import type { WorkerWorkspaceStore } from "./WorkerWorkspaceStore.ts";
 import type { WorkerWorkspaceRecord } from "./WorkerWorkspaceTypes.ts";
+import type { PrivateSnapshotWorkspace } from "./PrivateSnapshotWorkspace.ts";
 
 interface PreparedIntegration {
 	record: WorkerWorkspaceRecord;
@@ -19,6 +21,7 @@ export class WorkerIntegrationManager {
 	constructor(
 		private readonly git: GitWorktreeManager,
 		private readonly store: WorkerWorkspaceStore,
+		private readonly snapshots?: PrivateSnapshotWorkspace,
 	) {}
 
 	async integrate(
@@ -45,6 +48,20 @@ export class WorkerIntegrationManager {
 		const prepared: PreparedIntegration[] = [];
 
 		for (const record of records) {
+			if (record.integrationStatus === "integrated") {
+				results.set(record.workerId, record);
+				continue;
+			}
+			if (
+				record.backend !== "snapshot" &&
+				record.integrationPlan &&
+				record.resultCommit &&
+				(await this.git.isAncestor(record.coordinatorCwd, record.resultCommit))
+			) {
+				const recovered = await this.reconcile(record);
+				results.set(record.workerId, recovered);
+				continue;
+			}
 			if (
 				record.executionStatus !== "completed" ||
 				!record.startingCommit ||
@@ -59,8 +76,7 @@ export class WorkerIntegrationManager {
 			if (signal?.aborted) {
 				results.set(record.workerId, {
 					...record,
-					executionStatus: "cancelled",
-					integrationStatus: "skipped",
+					integrationStatus: "pending",
 					error: "Cancelled before integration.",
 				});
 				continue;
@@ -104,16 +120,20 @@ export class WorkerIntegrationManager {
 		record: WorkerWorkspaceRecord,
 	): Promise<WorkerWorkspaceRecord> {
 		if (!record.resultCommit) return record;
+		if (record.backend === "snapshot") return this.integrate(record);
 		if (await this.git.isAncestor(record.coordinatorCwd, record.resultCommit)) {
+			await this.git.finishCommittedIntegration(
+				record.coordinatorCwd,
+				record.resultCommit,
+			);
 			const info = await this.git.inspect(record.coordinatorCwd);
-			return this.persist({
-				...record,
-				integrationStatus: "integrated",
-				integrationCommit: info?.head,
-				integratedAt: record.integratedAt ?? new Date().toISOString(),
-				conflictingFiles: undefined,
-				error: undefined,
-			});
+			return this.persist(
+				await this.completedRecord(record, {
+					status: "integrated",
+					commit: info?.head,
+					conflictingFiles: [],
+				}),
+			);
 		}
 		if (await this.git.mergeInProgress(record.coordinatorCwd)) {
 			// A crash can leave a one-head or octopus worker merge staged. Abort only
@@ -153,27 +173,73 @@ export class WorkerIntegrationManager {
 	): Promise<WorkerWorkspaceRecord[]> {
 		const first = wave[0];
 		if (!first) return [];
+		if (wave.some((item) => item.record.backend === "snapshot")) {
+			return Promise.all(
+				wave.map(async ({ record }) => {
+					if (record.backend !== "snapshot")
+						return (
+							await this.integrateWave(
+								wave.filter((item) => item.record === record),
+								signal,
+							)
+						)[0]!;
+					try {
+						signal?.throwIfAborted();
+						if (!this.snapshots)
+							throw new Error(
+								"Private snapshot integration is unavailable; result preserved.",
+							);
+						const result = await this.snapshots.integrate(
+							record,
+							async (changes) => {
+								record.integrationPlan = {
+									resultCommit: record.resultCommit!,
+									changes: await this.store.captureIntegrationChanges(changes),
+								};
+								await this.store.upsert(record);
+							},
+						);
+						return result.status === "integrated"
+							? await this.completedRecord(record, result)
+							: conflictedRecord(record, result);
+					} catch (error) {
+						return {
+							...record,
+							integrationStatus: "pending" as const,
+							error: errorMessage(error),
+						};
+					}
+				}),
+			);
+		}
 		const ownedPaths = [...new Set(wave.flatMap((item) => item.ownedPaths))];
 		try {
-			const batchResult = await withPathLocks(ownedPaths, () =>
-				wave.length === 1
-					? this.git.integrate({
-							coordinatorCwd: first.record.coordinatorCwd,
-							startingCommit: first.record.startingCommit ?? "",
-							resultCommit: first.record.resultCommit ?? "",
-							signal,
-						})
-					: this.git.integrateBatch({
-							coordinatorCwd: first.record.coordinatorCwd,
-							results: wave.map(({ record }) => ({
-								startingCommit: record.startingCommit ?? "",
-								resultCommit: record.resultCommit ?? "",
-							})),
-							signal,
-						}),
+			const batchResult = await withPathLocks(
+				ownedPaths,
+				() =>
+					wave.length === 1
+						? this.git.integrate({
+								coordinatorCwd: first.record.coordinatorCwd,
+								startingCommit: first.record.startingCommit ?? "",
+								resultCommit: first.record.resultCommit ?? "",
+								signal,
+								captureChanges: this.captureGitChanges(wave),
+							})
+						: this.git.integrateBatch({
+								coordinatorCwd: first.record.coordinatorCwd,
+								results: wave.map(({ record }) => ({
+									startingCommit: record.startingCommit ?? "",
+									resultCommit: record.resultCommit ?? "",
+								})),
+								signal,
+								captureChanges: this.captureGitChanges(wave),
+							}),
+				signal,
 			);
 			if (batchResult.status === "integrated") {
-				return wave.map(({ record }) => integratedRecord(record, batchResult));
+				return Promise.all(
+					wave.map(({ record }) => this.completedRecord(record, batchResult)),
+				);
 			}
 			if (wave.length === 1) {
 				return [conflictedRecord(first.record, batchResult)];
@@ -184,8 +250,7 @@ export class WorkerIntegrationManager {
 		} catch (error) {
 			return wave.map(({ record }) => ({
 				...record,
-				...(signal?.aborted ? { executionStatus: "cancelled" as const } : {}),
-				integrationStatus: signal?.aborted ? "skipped" : "pending",
+				integrationStatus: "pending",
 				error: errorMessage(error),
 			}));
 		}
@@ -198,24 +263,27 @@ export class WorkerIntegrationManager {
 		const completed: WorkerWorkspaceRecord[] = [];
 		for (const item of wave) {
 			try {
-				const result = await withPathLocks(item.ownedPaths, () =>
-					this.git.integrate({
-						coordinatorCwd: item.record.coordinatorCwd,
-						startingCommit: item.record.startingCommit ?? "",
-						resultCommit: item.record.resultCommit ?? "",
-						signal,
-					}),
+				const result = await withPathLocks(
+					item.ownedPaths,
+					() =>
+						this.git.integrate({
+							coordinatorCwd: item.record.coordinatorCwd,
+							startingCommit: item.record.startingCommit ?? "",
+							resultCommit: item.record.resultCommit ?? "",
+							signal,
+							captureChanges: this.captureGitChanges([item]),
+						}),
+					signal,
 				);
 				completed.push(
 					result.status === "integrated"
-						? integratedRecord(item.record, result)
+						? await this.completedRecord(item.record, result)
 						: conflictedRecord(item.record, result),
 				);
 			} catch (error) {
 				completed.push({
 					...item.record,
-					...(signal?.aborted ? { executionStatus: "cancelled" as const } : {}),
-					integrationStatus: signal?.aborted ? "skipped" : "pending",
+					integrationStatus: "pending",
 					error: errorMessage(error),
 				});
 			}
@@ -223,12 +291,66 @@ export class WorkerIntegrationManager {
 		return completed;
 	}
 
+	private captureGitChanges(
+		wave: readonly PreparedIntegration[],
+	): CaptureGitIntegration {
+		return async ({ baseCommit, afterTree, changes, signal }) => {
+			const captured = await this.store.captureIntegrationChanges(
+				changes,
+				signal,
+			);
+			for (const item of wave) {
+				const paths = new Set(item.ownedPaths);
+				item.record.integrationPlan = {
+					resultCommit: item.record.resultCommit!,
+					baseCommit,
+					afterTree,
+					changes: captured.filter((change) => paths.has(change.filePath)),
+				};
+			}
+			await this.store.upsertMany(wave.map((item) => item.record));
+		};
+	}
+
+	private async completedRecord(
+		record: WorkerWorkspaceRecord,
+		result: GitIntegrationResult,
+	): Promise<WorkerWorkspaceRecord> {
+		const plan = record.integrationPlan;
+		let integrationChanges = record.integrationChanges;
+		let commit = result.commit;
+		if (plan && plan.resultCommit === record.resultCommit) {
+			if (
+				record.backend === "snapshot" ||
+				(plan.baseCommit === result.baseCommit &&
+					plan.afterTree === result.tree)
+			) {
+				integrationChanges = plan.changes;
+			} else if (plan.baseCommit) {
+				const actual = await this.git.findIntegrationCommit(
+					record.coordinatorCwd,
+					record.resultCommit!,
+					plan.baseCommit,
+					plan.afterTree,
+				);
+				// A user may have integrated a different tree manually. Never describe
+				// our prepared-but-uncommitted plan as their actual coordinator changes.
+				integrationChanges = actual ? plan.changes : undefined;
+				if (actual) commit = actual;
+			}
+		} else if (record.changedFiles.length === 0) integrationChanges = [];
+		return {
+			...integratedRecord(record, { ...result, commit }),
+			integrationChanges: structuredClone(integrationChanges),
+		};
+	}
+
 	private async persist(
 		record: WorkerWorkspaceRecord,
 		onProgress?: (record: WorkerWorkspaceRecord) => void,
 	): Promise<WorkerWorkspaceRecord> {
 		await this.store.upsert(record);
-		onProgress?.(record);
+		onProgress?.(structuredClone(record));
 		return record;
 	}
 
@@ -238,7 +360,7 @@ export class WorkerIntegrationManager {
 	): Promise<void> {
 		if (records.length === 0) return;
 		await this.store.upsertMany(records);
-		for (const record of records) onProgress?.(record);
+		for (const record of records) onProgress?.(structuredClone(record));
 	}
 }
 

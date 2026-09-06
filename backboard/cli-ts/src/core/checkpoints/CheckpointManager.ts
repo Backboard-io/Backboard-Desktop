@@ -58,6 +58,10 @@ export class CheckpointManager implements CheckpointRecorder {
 		await this.active.flush();
 	}
 
+	finishCapture(turnId: string): Promise<void> {
+		return this.active.finishCapture(turnId);
+	}
+
 	async dispose(): Promise<void> {
 		await this.active.flush();
 		this.active.dispose();

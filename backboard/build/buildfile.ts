@@ -29,7 +29,6 @@ export const workbenchDesktop = [
 	createModuleDescription('vs/workbench/api/node/extensionHostProcess'),
 	createModuleDescription('vs/workbench/workbench.desktop.main'),
 	createModuleDescription('vs/sessions/sessions.desktop.main'),
-	createModuleDescription('vs/jarvis/jarvis.desktop.main'),
 	createModuleDescription('vs/optimus/optimus.desktop.main')
 ];
 
@@ -50,7 +49,6 @@ export const code = [
 	createModuleDescription('vs/code/electron-utility/sharedProcess/sharedProcessMain'),
 	createModuleDescription('vs/code/electron-browser/workbench/workbench'),
 	createModuleDescription('vs/sessions/electron-browser/sessions'),
-	createModuleDescription('vs/jarvis/electron-browser/jarvis'),
 	createModuleDescription('vs/optimus/electron-browser/optimus'),
 ];
 

@@ -21,7 +21,7 @@ import { FuzzyScore } from '../../../../../base/common/filters.js';
 import { MarkdownString } from '../../../../../base/common/htmlContent.js';
 import { Iterable } from '../../../../../base/common/iterator.js';
 import { KeyCode } from '../../../../../base/common/keyCodes.js';
-import { Disposable, DisposableMap, DisposableStore, IDisposable, dispose, toDisposable } from '../../../../../base/common/lifecycle.js';
+import { Disposable, DisposableMap, DisposableStore, MutableDisposable, IDisposable, dispose, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { ResourceMap } from '../../../../../base/common/map.js';
 import { ScrollEvent } from '../../../../../base/common/scrollable.js';
 import { FileAccess, Schemas } from '../../../../../base/common/network.js';
@@ -64,7 +64,8 @@ import { ClickAnimation } from '../../../../../base/browser/ui/animations/animat
 import { MarkHelpfulActionId } from '../actions/chatTitleActions.js';
 import { ChatTreeItem, IChatCodeBlockInfo, IChatFileTreeInfo, IChatListItemRendererOptions, IChatWidgetService } from '../chat.js';
 import { ChatAgentHover, getChatAgentHoverOptions } from './chatAgentHover.js';
-import { ChatContentMarkdownRenderer } from './chatContentMarkdownRenderer.js';
+import { IAgentHostSessionWorkingDirectoryResolver } from '../agentSessions/agentHost/agentHostSessionWorkingDirectoryResolver.js';
+import { ChatContentMarkdownRenderer, withChatMarkdownBaseUri } from './chatContentMarkdownRenderer.js';
 import { ChatAgentCommandContentPart } from './chatContentParts/chatAgentCommandContentPart.js';
 import { ChatAnonymousRateLimitedPart } from './chatContentParts/chatAnonymousRateLimitedPart.js';
 import { ChatAttachmentsContentPart } from './chatContentParts/chatAttachmentsContentPart.js';
@@ -155,6 +156,7 @@ export interface IChatListItemTemplate {
 	readonly instantiationService: IInstantiationService;
 	readonly templateDisposables: IDisposable;
 	readonly elementDisposables: DisposableStore;
+	readonly heightMeasurement?: MutableDisposable<IDisposable>;
 	readonly agentHover: ChatAgentHover;
 	readonly requestHover: HTMLElement;
 	readonly disabledOverlay: HTMLElement;
@@ -191,6 +193,20 @@ const lastItemResponseClassName = 'chat-last-item-response';
 function isBackboardCursorTranscript(container: HTMLElement): boolean {
 	return container.closest('.backboard-cursor-transcript') !== null
 		|| (container.closest('.part.auxiliarybar') !== null && container.closest('.backboard-chat-controls') !== null);
+}
+
+export function formatBackboardWorkTimer(elapsedMs: number, complete: boolean): string {
+	const seconds = Math.max(0, Math.floor(elapsedMs / 1000));
+	const duration = seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+	return complete ? localize('chat.workedFor', "Worked for {0}", duration) : localize('chat.workingFor', "Working for {0}", duration);
+}
+
+export function isBackboardWorkerWait(content: IChatRendererContent): boolean {
+	if (content.kind !== 'toolInvocation' && content.kind !== 'toolInvocationSerialized') {
+		return false;
+	}
+	const id = content.toolId.toLowerCase().replace(/[^a-z]/g, '');
+	return /(?:agentwait|waitforworkers|waitworkers)$/.test(id);
 }
 
 type BackboardTurnRenderedNodeRole = 'none' | 'work' | 'terminal' | 'terminalSupport';
@@ -311,23 +327,15 @@ export interface IBackboardSubagentStripItem {
 	readonly node: HTMLElement;
 	readonly active: boolean;
 	readonly status?: string;
+	readonly label?: string;
 	readonly needsAttention?: boolean;
 }
 
-export const backboardSubagentSummaryThrottleMs = 100;
-
-interface IBackboardSubagentSummaryState {
-	lastAppliedAt: number;
-	pendingLabel?: string;
-	pendingStatus?: string;
-	timer?: number;
-}
-
-const backboardSubagentSummaryStates = new WeakMap<HTMLElement, IBackboardSubagentSummaryState>();
-
 /** Builds the single visible lifecycle summary for a parallel worker group. */
-export function getBackboardSubagentSummary(items: readonly Pick<IBackboardSubagentStripItem, 'active' | 'status'>[]): { label: string; status: string } {
-	const running = items.filter(item => item.active || item.status === 'running' || item.status === 'integrating').length;
+export function getBackboardSubagentSummary(items: readonly Pick<IBackboardSubagentStripItem, 'active' | 'status' | 'label'>[]): { label: string; status: string; detail: string } {
+	// Lifecycle metadata outranks the launcher invocation's completion state.
+	const terminal = new Set(['failed', 'cancelled', 'conflict', 'completed', 'complete', 'integrated']);
+	const running = items.filter(item => !terminal.has(item.status ?? '') && (item.active || item.status === 'queued' || item.status === 'running' || item.status === 'integrating')).length;
 	const failed = items.filter(item => item.status === 'failed' || item.status === 'cancelled' || item.status === 'conflict').length;
 	const complete = Math.max(0, items.length - running - failed);
 	const parts = [items.length === 1
@@ -348,59 +356,31 @@ export function getBackboardSubagentSummary(items: readonly Pick<IBackboardSubag
 			? localize('chat.subagent.summary.oneNeedsAttention', "1 needs attention")
 			: localize('chat.subagent.summary.needsAttention', "{0} need attention", failed));
 	}
+	const detail = parts.join(' · ');
+	const names = items.map(item => item.label?.trim()).filter((name): name is string => !!name);
+	let label = detail;
+	if (names.length === items.length && new Set(names).size === names.length && names.length > 0) {
+		const visibleNames = names.slice(0, 3);
+		if (names.length > 3) {
+			visibleNames.push(localize('chat.subagent.summary.otherAgents', "{0} others", names.length - 3));
+		}
+		const joined = visibleNames.length === 1 ? visibleNames[0] : localize('chat.subagent.summary.names', "{0} and {1}", visibleNames.slice(0, -1).join(', '), visibleNames[visibleNames.length - 1]);
+		label = failed
+			? names.length === 1
+				? localize('chat.subagent.summary.namedAttention', "{0} needs attention", joined)
+				: localize('chat.subagent.summary.namedAttentionMany', "{0} need attention", joined)
+			: running
+				? localize('chat.subagent.summary.namedWorking', "{0} working", joined)
+				: localize('chat.subagent.summary.namedUpdated', "{0} updated", joined);
+	}
 	return {
-		label: parts.join(' · '),
+		label,
 		status: failed ? 'attention' : running ? 'running' : 'complete',
+		detail,
 	};
 }
 
-function updateBackboardSubagentSummary(strip: HTMLElement, summaryButton: HTMLButtonElement, labelElement: HTMLElement, statusElement: HTMLElement, summary: { label: string; status: string }): void {
-	const window = dom.getWindow(strip);
-	let state = backboardSubagentSummaryStates.get(strip);
-	if (!state) {
-		state = { lastAppliedAt: 0 };
-		backboardSubagentSummaryStates.set(strip, state);
-	}
-	state.pendingLabel = summary.label;
-	state.pendingStatus = summary.status;
-
-	const applyPending = () => {
-		state!.timer = undefined;
-		state!.lastAppliedAt = Date.now();
-		if (state!.pendingLabel !== undefined && labelElement.textContent !== state!.pendingLabel) {
-			labelElement.textContent = state!.pendingLabel;
-		}
-		const visibleLabel = state!.pendingLabel ?? labelElement.textContent ?? '';
-		summaryButton.ariaLabel = strip.dataset.expanded === 'true'
-			? localize('chat.subagent.summary.collapseWithStatus', "Hide worker details: {0}", visibleLabel)
-			: localize('chat.subagent.summary.expandWithStatus', "Show worker details: {0}", visibleLabel);
-		const pendingStatus = state!.pendingStatus;
-		if (pendingStatus && statusElement.dataset.status !== pendingStatus) {
-			statusElement.dataset.status = pendingStatus;
-			statusElement.className = `chat-subagent-summary-status chat-subagent-summary-status-${pendingStatus}`;
-		}
-		state!.pendingLabel = undefined;
-		state!.pendingStatus = undefined;
-	};
-
-	const elapsed = Date.now() - state.lastAppliedAt;
-	if (state.lastAppliedAt === 0 || elapsed >= backboardSubagentSummaryThrottleMs) {
-		if (state.timer !== undefined) {
-			window.clearTimeout(state.timer);
-			state.timer = undefined;
-		}
-		applyPending();
-	} else if (state.timer === undefined) {
-		state.timer = window.setTimeout(applyPending, backboardSubagentSummaryThrottleMs - elapsed);
-	}
-}
-
-/**
- * Packs parallel subagents behind one compact aggregate disclosure. Worker
- * details stay mounted for confirmations and durable child navigation, but are
- * hidden until requested; streamed lifecycle churn updates the visible summary
- * at most ten times per second and never reparents already-stable rows.
- */
+/** Keeps each worker visible and preserves its DOM across streaming updates. */
 export function syncBackboardSubagentStrip(container: HTMLElement, sourceItems: readonly IBackboardSubagentStripItem[]): void {
 	const seen = new Set<HTMLElement>();
 	const items = sourceItems.filter(item => {
@@ -425,17 +405,6 @@ export function syncBackboardSubagentStrip(container: HTMLElement, sourceItems: 
 		container.insertBefore(strip, firstTopLevelNode?.parentElement === container ? firstTopLevelNode : null);
 	}
 
-	let summaryButton = strip.querySelector<HTMLButtonElement>(':scope > .chat-subagent-summary');
-	let summaryStatus = summaryButton?.querySelector<HTMLElement>('.chat-subagent-summary-status');
-	let summaryLabel = summaryButton?.querySelector<HTMLElement>('.chat-subagent-summary-label');
-	if (!summaryButton || !summaryStatus || !summaryLabel) {
-		summaryButton = $('button.chat-subagent-summary', { type: 'button' }) as HTMLButtonElement;
-		summaryStatus = $('span.chat-subagent-summary-status', { 'aria-hidden': 'true' });
-		summaryLabel = $('span.chat-subagent-summary-label');
-		const chevron = $('span.chat-subagent-summary-chevron.codicon.codicon-chevron-right', { 'aria-hidden': 'true' });
-		summaryButton.append(summaryStatus, summaryLabel, chevron);
-		strip.prepend(summaryButton);
-	}
 	let itemsContainer = strip.querySelector<HTMLElement>(':scope > .chat-subagent-items');
 	if (!itemsContainer) {
 		itemsContainer = $('.chat-subagent-items');
@@ -456,27 +425,11 @@ export function syncBackboardSubagentStrip(container: HTMLElement, sourceItems: 
 		(node, before) => itemsContainer!.insertBefore(node, before ?? null),
 	);
 
-	const applyExpandedState = () => {
-		const expanded = strip!.dataset.expanded === 'true';
-		itemsContainer!.hidden = !expanded;
-		summaryButton!.ariaExpanded = String(expanded);
-		const visibleLabel = summaryLabel!.textContent ?? '';
-		summaryButton!.ariaLabel = expanded
-			? localize('chat.subagent.summary.collapseWithStatus', "Hide worker details: {0}", visibleLabel)
-			: localize('chat.subagent.summary.expandWithStatus', "Show worker details: {0}", visibleLabel);
-		summaryButton!.querySelector('.chat-subagent-summary-chevron')?.classList.toggle('codicon-chevron-right', !expanded);
-		summaryButton!.querySelector('.chat-subagent-summary-chevron')?.classList.toggle('codicon-chevron-down', expanded);
-	};
-
-	if (items.some(item => item.needsAttention)) {
-		strip.dataset.expanded = 'true';
+	itemsContainer.hidden = false;
+	for (const item of items) {
+		item.node.querySelector(':scope > .chat-used-context-label > .monaco-button')?.removeAttribute('aria-expanded');
 	}
-	summaryButton.onclick = () => {
-		strip!.dataset.expanded = strip!.dataset.expanded === 'true' ? 'false' : 'true';
-		applyExpandedState();
-	};
-	applyExpandedState();
-	updateBackboardSubagentSummary(strip, summaryButton, summaryLabel, summaryStatus, getBackboardSubagentSummary(items));
+
 }
 
 export function resolveBackboardTurnExpandedState(
@@ -489,10 +442,14 @@ export function resolveBackboardTurnExpandedState(
 	if (!complete) {
 		return true;
 	}
-	// Streaming work is visible by default, but completion always returns it to
-	// the compact Worked disclosure. Only an explicit user choice survives a
-	// rerender or restoration of the completed response.
-	return false;
+	// Completion must not make the transcript disappear or move the reader's
+	// place. Individual tools own their details; collapsing a turn is explicit.
+	return true;
+}
+
+/** Worker rows (including child tool references to the same row) survive the work fold. */
+export function isBackboardPersistentSubagentContent(content: IChatRendererContent | undefined): boolean {
+	return !!content && (content.kind === 'toolInvocation' || content.kind === 'toolInvocationSerialized') && isSubagentToolInvocation(content);
 }
 
 /** Backboard keeps edit cards legible beside, rather than inside, Thought. */
@@ -614,6 +571,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		@IChatWidgetService private readonly chatWidgetService: IChatWidgetService,
 		@IChatEntitlementService private readonly chatEntitlementService: IChatEntitlementService,
 		@IChatService private readonly chatService: IChatService,
+		@IAgentHostSessionWorkingDirectoryResolver private readonly workingDirectoryResolver: IAgentHostSessionWorkingDirectoryResolver,
 		@IAccessibilitySignalService private readonly accessibilitySignalService: IAccessibilitySignalService,
 		@IAccessibilityService private readonly accessibilityService: IAccessibilityService,
 		@IWorkbenchEnvironmentService private readonly environmentService: IWorkbenchEnvironmentService,
@@ -701,6 +659,22 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			return;
 		}
 
+		// Several tool completions can invalidate one row in the same frame. Read
+		// its geometry once after those writes, rather than forcing layout per part.
+		if (measuredHeight === undefined && template.heightMeasurement && template.currentElement !== this._elementBeingRendered) {
+			if (!template.heightMeasurement.value) {
+				const element = template.currentElement;
+				template.heightMeasurement.value = dom.scheduleAtNextAnimationFrame(dom.getWindow(template.rowContainer), () => {
+					template.heightMeasurement?.clear();
+					if (template.currentElement === element && template.rowContainer.isConnected) {
+						this.fireItemHeightChange(template, template.rowContainer.getBoundingClientRect().height);
+					}
+				});
+			}
+			return;
+		}
+		// ResizeObserver already measured this row; cancel the redundant read.
+		template.heightMeasurement?.clear();
 		const height = measuredHeight ?? template.rowContainer.getBoundingClientRect().height;
 		if (height === 0 || !height) {
 			return;
@@ -853,6 +827,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			}
 		}
 		for (const template of this._templates) {
+			template.heightMeasurement?.clear();
 			template.elementDisposables.clear();
 			this.clearRenderedParts(template);
 		}
@@ -1052,7 +1027,8 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		}));
 		const connectionObserver = document.createElement('connection-observer') as dom.ConnectionObserverElement;
 		dom.append(container, connectionObserver);
-		const template: IChatListItemTemplate = { header, avatarContainer, requestHover, username, detail, value, rowContainer, elementDisposables, templateDisposables, contextKeyService, instantiationService: scopedInstantiationService, agentHover, titleToolbar, footerToolbar, footerDetailsContainer, disabledOverlay, checkpointToolbar, checkpointRestoreToolbar, checkpointContainer, checkpointRestoreContainer };
+		const heightMeasurement = templateDisposables.add(new MutableDisposable<IDisposable>());
+		const template: IChatListItemTemplate = { heightMeasurement, header, avatarContainer, requestHover, username, detail, value, rowContainer, elementDisposables, templateDisposables, contextKeyService, instantiationService: scopedInstantiationService, agentHover, titleToolbar, footerToolbar, footerDetailsContainer, disabledOverlay, checkpointToolbar, checkpointRestoreToolbar, checkpointContainer, checkpointRestoreContainer };
 
 		connectionObserver.onDidDisconnect = () => {
 			template.renderedPartsMounted = false;
@@ -2333,7 +2309,8 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			}
 
 			const alreadyRenderedPart = templateData.renderedParts?.[contentIndex];
-			if (collapsedFinalContentIndexes && !collapsedFinalContentIndexes.has(contentIndex)) {
+			if (collapsedFinalContentIndexes && !collapsedFinalContentIndexes.has(contentIndex)
+				&& !isBackboardPersistentSubagentContent(contentForThisTurn[contentIndex])) {
 				collapsedPartsSkipped++;
 				// Completed work folds are usually collapsed. Do not rebuild missing
 				// thinking/tool/terminal/webview parts merely for the folding pass to
@@ -2488,8 +2465,8 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 	/**
 	 * Backboard's provider emits commentary, reasoning, and tool calls as several
 	 * native chat parts inside one response. T3 presents those parts as one turn:
-	 * the live work log is expanded while running, then the whole log collapses
-	 * behind one "Worked for …" row while the final assistant message stays out.
+	 * the work log stays expanded after completion, with an optional Activity
+	 * disclosure, while the final assistant message stays outside the fold.
 	 * Completed collapsed work releases its native renderers; expanding the fold
 	 * requests a targeted rerender that reconstructs only that response.
 	 */
@@ -2531,8 +2508,9 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			turn = $('.chat-t3-turn-work.chat-t3-turn-work-expanded');
 			foldButton = $('button.chat-t3-turn-fold', { type: 'button' }) as HTMLButtonElement;
 			foldLabel = $('span.chat-t3-turn-fold-label');
-			const chevron = $('span.chat-t3-turn-fold-chevron', { 'aria-hidden': 'true' });
-			foldButton.append(foldLabel, chevron);
+			const icon = $('span.codicon.codicon-history.chat-t3-turn-fold-icon', { 'aria-hidden': 'true' });
+			const chevron = $('span.codicon.codicon-chevron-right.chat-t3-turn-fold-chevron', { 'aria-hidden': 'true' });
+			foldButton.append(icon, foldLabel, chevron);
 			body = $('.chat-t3-turn-work-body');
 			turn.append(foldButton, body);
 			value.insertBefore(turn, value.firstElementChild);
@@ -2601,14 +2579,22 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			(node, before) => body.insertBefore(node, before ?? null),
 		);
 
-		syncBackboardSubagentStrip(body, renderedParts
-			.filter((part): part is ChatSubagentContentPart => part instanceof ChatSubagentContentPart)
-			.map(part => ({
-				node: part.domNode,
-				active: part.getIsActive(),
-				status: part.getWorkerStatusKind(),
-				needsAttention: part.hasToolsWaitingForConfirmation,
-			})));
+		// Place worker pills at their first launch in the chronological chat body.
+		const workerContainers = new Map<HTMLElement, IBackboardSubagentStripItem[]>();
+		for (const part of renderedParts) {
+			if (!(part instanceof ChatSubagentContentPart)) {
+				continue;
+			}
+			const parent = part.domNode.closest('.chat-subagent-strip')?.parentElement ?? part.domNode.parentElement;
+			const host = parent && parent !== value ? parent : body;
+			const items = workerContainers.get(host) ?? [];
+			items.push({ node: part.domNode, active: part.getIsActive(), status: part.getWorkerStatusKind(), label: part.getSummaryLabel(), needsAttention: part.hasToolsWaitingForConfirmation });
+			workerContainers.set(host, items);
+		}
+		for (const [host, items] of workerContainers) {
+			syncBackboardSubagentStrip(host, items);
+		}
+
 
 		turn.dataset.turnState = complete ? 'complete' : 'active';
 		turn.classList.toggle('chat-t3-turn-work-active', !complete);
@@ -2619,15 +2605,20 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			storedExpansion,
 		);
 
-		// The fold names the phase only. Durations are deliberately absent from
-		// the transcript, so nothing here ticks while the turn runs.
-		foldLabel.textContent = element.isCanceled
-			? localize('chat.t3TurnFold.stopped', "You stopped this response")
-			: complete
-				? localize('chat.t3TurnFold.worked', "Worked")
-				: localize('chat.t3TurnFold.working', "Working");
 		this.backboardTurnDurationTimers.get(element.id)?.dispose();
 		this.backboardTurnDurationTimers.delete(element.id);
+		const updateTimer = () => {
+			const elapsed = complete
+				? element.model.elapsedMs ?? Math.max(0, (element.model.completedAt ?? element.confirmationAdjustedTimestamp.get()) - element.confirmationAdjustedTimestamp.get())
+				: Math.max(0, Date.now() - element.confirmationAdjustedTimestamp.get());
+			foldLabel.textContent = formatBackboardWorkTimer(elapsed, complete);
+		};
+		updateTimer();
+		if (!complete) {
+			const window = dom.getWindow(turn);
+			const timer = window.setInterval(updateTimer, 1000);
+			this.backboardTurnDurationTimers.set(element.id, toDisposable(() => window.clearInterval(timer)));
+		}
 
 		const applyExpandedState = (expanded: boolean) => {
 			turn!.classList.toggle('chat-t3-turn-work-expanded', expanded);
@@ -2641,7 +2632,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			}
 			let disposedParts = 0;
 			for (let index = 0; index < renderedParts.length; index++) {
-				if (finalContentIndexSet.has(index)) {
+				if (finalContentIndexSet.has(index) || isBackboardPersistentSubagentContent(contentForThisTurn[index])) {
 					continue;
 				}
 				const part = renderedParts[index];
@@ -3038,6 +3029,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			() => this._currentLayoutWidth.get(),
 			this._announcedToolProgressKeys,
 		);
+		this.getLastThinkingPart(templateData.renderedParts)?.appendSubagentPill(subagentPart.domNode);
 		// Enable carousel mode before appendToolInvocation creates an inline part.
 		this.maybeRouteSubagentToolToCarousel(toolInvocation, subagentPart, context, templateData, codeBlockStartIndex);
 
@@ -3139,6 +3131,9 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 
 	private renderChatContentPart(content: IChatRendererContent, templateData: IChatListItemTemplate, context: IChatContentPartRenderContext): IChatContentPart | undefined {
 		try {
+			if (isBackboardCursorTranscript(context.container) && isBackboardWorkerWait(content)) {
+				return this.renderNoContent(other => isBackboardWorkerWait(other));
+			}
 			// if we get an empty thinking part, mark thinking as finished
 			if (content.kind === 'thinking' && (Array.isArray(content.value) ? content.value.length === 0 : content.value === '')) {
 				const lastThinking = this.getLastThinkingPart(templateData.renderedParts);
@@ -4200,6 +4195,12 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 
 	private renderMarkdown(markdown: IChatMarkdownContent, templateData: IChatListItemTemplate, context: IChatContentPartRenderContext): IChatContentPart {
 		const element = context.element;
+		if (isBackboardCursorTranscript(templateData.rowContainer)) {
+			markdown = {
+				...markdown,
+				content: withChatMarkdownBaseUri(markdown.content, this.chatService.getSession(element.sessionResource)?.workingDirectory ?? this.workingDirectoryResolver.resolve(element.sessionResource)),
+			};
+		}
 		const isBlankMarkdown = !markdown.content.value.trim();
 		// Don't finalize thinking if the markdown has an incomplete codeblock with a
 		// vscode_codeblock_uri tag — the isEdit annotation may not have arrived yet.
@@ -4378,6 +4379,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		if (this.isLayoutTracingEnabled) {
 			this.traceLayout('disposeElement', `Disposing element, index=${index}`);
 		}
+		templateData.heightMeasurement?.clear();
 		templateData.elementDisposables.clear();
 
 		if (templateData.currentElement && this.templateDataByRequestId.get(templateData.currentElement.id) === templateData) {

@@ -45,10 +45,5 @@ PERFORMANCE TIP: When the user provides multiple URLs, make parallel FetchUrl ca
 DO NOT use this tool for:
 - URLs not explicitly provided by the user${hasTool(context, "WebSearch") ? "\n- Web searching. Use WebSearch instead." : ""}
 - Any URL matching the failure patterns above
-
-### Parameters
-
-| Name | Type | Required | Description |
-| --- | --- | --- | --- |
-| \`url\` | \`string\` | yes | The URL to scrape content from |`.trim();
+`.trim();
 }

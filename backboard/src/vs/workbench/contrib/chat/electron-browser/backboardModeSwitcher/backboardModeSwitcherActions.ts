@@ -6,16 +6,15 @@ import './media/backboardModeSwitcher.css';
 import { $, addDisposableListener, append, EventHelper, EventType } from '../../../../../base/browser/dom.js';
 import { BaseActionViewItem, IBaseActionViewItemOptions } from '../../../../../base/browser/ui/actionbar/actionViewItems.js';
 import { getDefaultHoverDelegate } from '../../../../../base/browser/ui/hover/hoverDelegateFactory.js';
-import { IAction, toAction } from '../../../../../base/common/actions.js';
+import { IAction } from '../../../../../base/common/actions.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { localize, localize2 } from '../../../../../nls.js';
 import { IActionViewItemService } from '../../../../../platform/actions/browser/actionViewItemService.js';
-import { Action2, MenuId } from '../../../../../platform/actions/common/actions.js';
+import { Action2, MenuId, registerAction2 } from '../../../../../platform/actions/common/actions.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { ContextKeyExpr } from '../../../../../platform/contextkey/common/contextkey.js';
-import { IContextMenuService } from '../../../../../platform/contextview/browser/contextView.js';
 import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
-import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
+import { IInstantiationService, ServicesAccessor } from '../../../../../platform/instantiation/common/instantiation.js';
 import { IKeybindingService } from '../../../../../platform/keybinding/common/keybinding.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
 import { ToggleTitleBarConfigAction } from '../../../../browser/parts/titlebar/titlebarActions.js';
@@ -73,9 +72,8 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 	private static readonly STORAGE_PREFIX = 'backboard.editorMode.panelClosed.';
 	private static readonly PANEL_PARTS = [Parts.SIDEBAR_PART, Parts.PANEL_PART, Parts.AUXILIARYBAR_PART] as const;
 
-	private triggerButton: HTMLButtonElement | undefined;
-	private currentIcon: HTMLElement | undefined;
-	private currentLabel: HTMLElement | undefined;
+	private agentButton: HTMLButtonElement | undefined;
+	private editorButton: HTMLButtonElement | undefined;
 
 	private suppressVisibilityTracking = false;
 
@@ -87,7 +85,6 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 		@ICommandService private readonly commandService: ICommandService,
 		@IEditorService private readonly editorService: IEditorService,
 		@IBackboardWorkspaceService private readonly workspaceService: IBackboardWorkspaceService,
-		@IContextMenuService private readonly contextMenuService: IContextMenuService,
 		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
 		@IStorageService private readonly storageService: IStorageService,
 		@IPaneCompositePartService private readonly paneCompositeService: IPaneCompositePartService,
@@ -104,20 +101,37 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 		container.setAttribute('aria-label', hoverText);
 		this._register(this.hoverService.setupManagedHover(getDefaultHoverDelegate('element'), container, hoverText));
 
-		this.triggerButton = append(container, $('button.backboard-mode-titlebar-widget-trigger'));
-		this.triggerButton.setAttribute('aria-haspopup', 'menu');
-		this.triggerButton.setAttribute('aria-expanded', 'false');
-		this.currentIcon = append(this.triggerButton, $('span.backboard-mode-titlebar-widget-icon.codicon'));
-		this.currentIcon.setAttribute('aria-hidden', 'true');
-		this.currentLabel = append(this.triggerButton, $('span.backboard-mode-titlebar-widget-label'));
-		const chevron = append(this.triggerButton, $('span.backboard-mode-titlebar-widget-chevron.codicon.codicon-chevron-down'));
-		chevron.setAttribute('aria-hidden', 'true');
-
-		this._register(addDisposableListener(this.triggerButton, EventType.CLICK, e => {
+		const segments = append(container, $('.backboard-mode-segments'));
+		segments.setAttribute('role', 'group');
+		segments.setAttribute('aria-label', hoverText);
+		this.agentButton = append(segments, $('button.backboard-mode-segment'));
+		this.agentButton.type = 'button';
+		this.agentButton.textContent = localize('backboardModeSwitcher.agentTab', "Simple");
+		this.editorButton = append(segments, $('button.backboard-mode-segment'));
+		this.editorButton.type = 'button';
+		this.editorButton.textContent = localize('backboardModeSwitcher.editor', "Editor");
+		this._register(addDisposableListener(this.agentButton, EventType.CLICK, e => {
 			EventHelper.stop(e, true);
-			this.showMenu();
+			if (!this.isAgentsActive()) {
+				this.openAgents();
+			}
 		}));
-		this._register(addDisposableListener(this.triggerButton, EventType.KEY_DOWN, e => this.handleKeyDown(e)));
+		this._register(addDisposableListener(this.editorButton, EventType.CLICK, e => {
+			EventHelper.stop(e, true);
+			if (!this.isEditorModeActive()) {
+				this.openEditor();
+			}
+		}));
+
+		const advancedButton = append(segments, $('button.backboard-mode-segment'));
+		advancedButton.setAttribute('type', 'button');
+		advancedButton.textContent = localize('backboardModeSwitcher.advanced', "Advanced");
+		advancedButton.setAttribute('aria-pressed', 'false');
+		this._register(addDisposableListener(advancedButton, EventType.CLICK, e => {
+			EventHelper.stop(e, true);
+			this.openAdvanced();
+		}));
+
 		this._register(this.editorService.onDidActiveEditorChange(() => this.updateState()));
 		this._register(this.workspaceService.onDidChangeVisibility(() => this.updateState()));
 		this._register(this.layoutService.onDidChangePartVisibility(e => this.handlePartVisibilityChange(e)));
@@ -151,48 +165,6 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 
 	private isPanelClosedByUser(part: string): boolean {
 		return this.storageService.get(BackboardModeTitleBarWidget.STORAGE_PREFIX + part, StorageScope.PROFILE, '0') === '1';
-	}
-
-	private handleKeyDown(event: KeyboardEvent): void {
-		if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown') {
-			EventHelper.stop(event, true);
-			this.showMenu();
-		}
-	}
-
-	private showMenu(): void {
-		if (!this.triggerButton) {
-			return;
-		}
-
-		const agentsActive = this.isAgentsActive();
-		this.triggerButton.setAttribute('aria-expanded', 'true');
-		this.contextMenuService.showContextMenu({
-			getAnchor: () => this.triggerButton!,
-			// Same order as the Simple and Advanced windows' mode switcher menus,
-			// so each mode keeps a fixed position no matter which window is active.
-			getActions: () => [
-				toAction({
-					id: 'workbench.action.mode.editor',
-					label: localize('backboardModeSwitcher.editor', "Editor"),
-					checked: !agentsActive,
-					run: () => this.openEditor(),
-				}),
-				toAction({
-					id: 'workbench.action.mode.advanced',
-					label: localize('backboardModeSwitcher.advanced', "Advanced"),
-					checked: false,
-					run: () => this.openAdvanced(),
-				}),
-				toAction({
-					id: 'workbench.action.mode.agents',
-					label: localize('backboardModeSwitcher.agents', "Simple"),
-					checked: agentsActive,
-					run: () => this.openAgents(),
-				}),
-			],
-			onHide: () => this.triggerButton?.setAttribute('aria-expanded', 'false'),
-		});
 	}
 
 	private openAgents(): void {
@@ -257,13 +229,50 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 
 	private updateState(): void {
 		const agentsActive = this.isAgentsActive();
-		this.currentIcon?.classList.toggle('codicon-window', !agentsActive);
-		this.currentIcon?.classList.toggle('codicon-layout', false);
-		this.currentIcon?.classList.toggle('codicon-robot', agentsActive);
-		const label = agentsActive
-			? localize('backboardModeSwitcher.agents', "Simple")
-			: localize('backboardModeSwitcher.editor', "Editor");
-		this.currentLabel?.replaceChildren(label);
+		this.agentButton?.setAttribute('aria-pressed', String(agentsActive));
+		this.editorButton?.setAttribute('aria-pressed', String(!agentsActive));
+	}
+}
+
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: 'workbench.action.backboardCheckForUpdates',
+			title: localize2('backboardCheckForUpdates', "Check for Updates…"),
+			menu: [{ id: MenuId.GlobalActivity, group: '7_update', order: 1 }]
+		});
+	}
+	run(accessor: ServicesAccessor): Promise<void> {
+		return accessor.get(ICommandService).executeCommand('backboard.checkForUpdates');
+	}
+});
+
+const updatePillActions = [
+	{ id: 'workbench.action.backboardUpdate', command: 'backboard.installAvailableUpdate', title: localize2('backboardUpdate', "Update"), when: ContextKeyExpr.and(ContextKeyExpr.has('backboard.updateAvailable'), ContextKeyExpr.not('backboard.updateCancellable')) },
+	{ id: 'workbench.action.backboardCancelUpdate', command: 'backboard.cancelUpdate', title: localize2('backboardCancelUpdate', "Stop Update"), when: ContextKeyExpr.has('backboard.updateCancellable') }
+];
+
+for (const item of updatePillActions) {
+	registerAction2(class extends Action2 {
+		constructor() {
+			super({ id: item.id, title: item.title, menu: [{ id: MenuId.TitleBar, group: 'navigation', order: 100, when: item.when }] });
+		}
+		run(accessor: ServicesAccessor): Promise<void> {
+			return accessor.get(ICommandService).executeCommand(item.command);
+		}
+	});
+}
+
+class BackboardUpdateTitleBarWidget extends BaseActionViewItem {
+	override render(container: HTMLElement): void {
+		super.render(container);
+		const button = append(container, $('button.backboard-update-pill'));
+		button.setAttribute('type', 'button');
+		button.textContent = this.action.label;
+		this._register(addDisposableListener(button, EventType.CLICK, event => {
+			EventHelper.stop(event, true);
+			void this.action.run();
+		}));
 	}
 }
 
@@ -276,6 +285,9 @@ export class BackboardModeSwitcherContribution extends Disposable implements IWo
 		@IInstantiationService instantiationService: IInstantiationService,
 	) {
 		super();
+		for (const item of updatePillActions) {
+			this._register(actionViewItemService.register(MenuId.TitleBar, item.id, (action, options) => new BackboardUpdateTitleBarWidget(undefined, action, options), undefined));
+		}
 		this._register(actionViewItemService.register(MenuId.TitleBarLeft, BACKBOARD_MODE_SWITCHER_COMMAND_ID, (action, options) => {
 			return instantiationService.createInstance(BackboardModeTitleBarWidget, action, options);
 		}, undefined));

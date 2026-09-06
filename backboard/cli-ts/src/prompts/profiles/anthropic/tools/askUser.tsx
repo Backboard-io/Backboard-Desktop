@@ -14,13 +14,5 @@ Writing good questions:
 - If you have not already laid out the context and trade-offs, put that context in the question text so the choice stands on its own. Keep option labels short but make the question self-explanatory.
 
 The user moves with ←/→ between questions and ↑/↓ to choose, and must confirm every question before the answers are submitted — so lead each option list with a safe default.
-
-### Parameters
-
-| Name | Type | Required | Description |
-| --- | --- | --- | --- |
-| \`questions\` | \`array\` | yes | 1-4 related questions to ask together |
-| \`questions[].header\` | \`string\` | yes | Short title (2-4 words) shown in the breadcrumb |
-| \`questions[].question\` | \`string\` | yes | The question to ask the user |
-| \`questions[].options\` | \`array\` | yes | 1-4 mutually exclusive options (2-4 recommended) |`.trim(),
+`.trim(),
 );

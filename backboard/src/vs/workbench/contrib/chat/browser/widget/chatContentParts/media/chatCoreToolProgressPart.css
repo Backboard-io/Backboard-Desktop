@@ -4,13 +4,14 @@
  *--------------------------------------------------------------------------------------------*/
 
 .chat-core-tool-card {
+	container-type: inline-size;
 	--bb-core-tool-border: var(--bb-cursor-diff-border, var(--vscode-chat-requestBorder));
 	--bb-core-tool-surface: var(--bb-cursor-diff-surface, var(--vscode-editor-background));
 	display: block;
 	box-sizing: border-box;
 	width: 100%;
 	min-width: 0;
-	margin: 3px 0;
+	margin: 5px 0;
 	overflow: hidden;
 	border: 1px solid var(--bb-core-tool-border);
 	border-radius: 8px;
@@ -129,6 +130,7 @@ button.chat-core-tool-card-header:focus-visible {
 }
 
 .chat-core-tool-card-count {
+	grid-column: -4 / -3;
 	max-width: 100px;
 	overflow: hidden;
 	color: var(--vscode-descriptionForeground);
@@ -140,6 +142,7 @@ button.chat-core-tool-card-header:focus-visible {
 }
 
 .chat-core-tool-card-status {
+	grid-column: -3 / -2;
 	width: 16px;
 	height: 18px;
 	color: var(--vscode-descriptionForeground);
@@ -178,6 +181,7 @@ button.chat-core-tool-card-header:focus-visible {
 /* Shared disclosure slot: same 16x20 / 12px spec as every other tool-row
  * chevron so stacked cards line up with work rows and terminal headers. */
 .chat-core-tool-card-disclosure {
+	grid-column: -2 / -1;
 	width: 16px;
 	height: 20px;
 	color: var(--vscode-descriptionForeground);
@@ -205,6 +209,7 @@ button.chat-core-tool-card-header:focus-visible {
 	max-height: 360px;
 	padding: 4px 0;
 	overflow: auto;
+	scrollbar-width: thin;
 	border-top: 1px solid var(--bb-core-tool-border);
 	background: var(--bb-core-tool-surface);
 }
@@ -327,8 +332,10 @@ a.chat-core-tool-card-item-title:hover {
 	background: transparent;
 	color: var(--vscode-editor-foreground);
 	font-family: var(--monaco-monospace-font);
-	font-size: 11px;
-	line-height: 17px;
+	font-size: 12px;
+	line-height: 19px;
+	tab-size: 4;
+	scrollbar-width: thin;
 	white-space: pre;
 }
 
@@ -343,6 +350,47 @@ a.chat-core-tool-card-item-title:hover {
 	color: var(--vscode-descriptionForeground);
 	font-size: 11px;
 	font-style: italic;
+}
+
+.chat-core-tool-card-partial-note {
+	margin: 4px 8px;
+	padding: 7px 9px;
+	border-radius: 4px;
+	background: color-mix(in srgb, var(--vscode-editorWarning-foreground) 8%, transparent);
+	color: var(--vscode-foreground);
+	font-style: normal;
+}
+
+.chat-core-tool-card-item:hover {
+	background: color-mix(in srgb, var(--vscode-foreground) 3%, transparent);
+}
+
+.monaco-workbench:is(.hc-black, .hc-light) .chat-core-tool-card {
+	border-color: var(--vscode-contrastBorder);
+}
+
+/* Respond to the chat column, not the width of the entire desktop window. */
+@container (max-width: 380px) {
+	.chat-core-tool-card-heading,
+	.chat-core-tool-card-title-line {
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 0;
+		width: 100%;
+	}
+
+	.chat-core-tool-card-summary {
+		flex: none;
+		max-width: 100%;
+	}
+
+	.chat-core-tool-card-subtitle:not(.chat-core-tool-card-subtitle-error) {
+		display: none;
+	}
+
+	.chat-core-tool-card-subtitle-error::before {
+		content: none;
+	}
 }
 
 /* A core card owns its header and disclosure; clean chat must not inset or decorate it as a generic work row. */

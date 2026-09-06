@@ -69,6 +69,9 @@ export const vscodeWebResourceIncludes = [
 	// Accessibility Signals
 	'out-build/vs/platform/accessibilitySignal/browser/media/*.mp3',
 
+	// Bundled background carousel
+	'out-build/vs/sessions/contrib/chat/browser/media/backgrounds/*.jpeg',
+
 	// Welcome
 	'out-build/vs/workbench/contrib/welcomeGettingStarted/browser/media/**/*.{svg,png}',
 	'out-build/vs/workbench/contrib/welcomeGettingStarted/common/media/**/*.{svg,png}',

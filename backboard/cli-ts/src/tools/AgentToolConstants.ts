@@ -7,6 +7,8 @@ export const NON_DELEGATABLE_AGENT_TOOLS: ReadonlySet<string> = new Set([
 	// The coordinator remains free to launch 2-4 siblings in one provider batch.
 	"agent",
 	"agent_spawn",
+	"agent_spawn_batch",
+	"agent_cancel",
 	"agent_wait",
 	"ask_user",
 	"browser",

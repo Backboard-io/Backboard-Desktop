@@ -147,6 +147,11 @@ export class AssistantAccumulator {
 	discardPartial(): void {
 		this.flushReasoning();
 		if (this.current?.finalized === false) {
+			this.bus.emit({
+				type: "assistant:message:discard",
+				turnId: this.turnId,
+				messageId: this.current.id,
+			});
 			this.current = null;
 		}
 	}

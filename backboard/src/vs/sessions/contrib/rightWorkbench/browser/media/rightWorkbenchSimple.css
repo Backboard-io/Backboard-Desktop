@@ -1,0 +1,424 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* Simple mode uses one quiet canvas and a compact strip shared by every tool. */
+.sessions-right-workbench-simple:not(.sessions-right-workbench-mode-launcher) {
+	border: 1px solid var(--rwb-border-strong);
+	border-radius: 12px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-header {
+	height: 44px;
+	min-height: 44px;
+	padding: 0 8px;
+	gap: 4px;
+	/* Let the single panel surface continue through the title strip. */
+	background: transparent;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-tabs {
+	flex: 0 1 auto;
+	gap: 2px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-tab {
+	flex: 0 1 156px;
+	min-width: 64px;
+	max-width: 168px;
+	height: 28px;
+	padding: 0 8px;
+	gap: 8px;
+	border-radius: 8px;
+	font-size: 13px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-tab > .codicon {
+	font-size: 14px;
+	flex-shrink: 0;
+}
+
+.sessions-right-workbench-tab-close {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 18px;
+	height: 18px;
+	padding: 0;
+	border: 0;
+	border-radius: 4px;
+	background: transparent;
+	color: inherit;
+	cursor: pointer;
+}
+
+.sessions-right-workbench-tab-close:hover {
+	background: var(--rwb-hover);
+	color: var(--rwb-foreground);
+}
+
+.sessions-right-workbench-tab:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.sessions-right-workbench-header > .sessions-right-workbench-tab-add {
+	flex: 0 0 28px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-frame-controls {
+	margin-left: auto;
+	padding-left: 8px;
+	flex-shrink: 0;
+	gap: 6px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-icon-button {
+	width: 28px;
+	height: 28px;
+	border-radius: 8px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-files,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-review-workspace {
+	grid-template-columns: minmax(0, 1fr) clamp(180px, 32%, 280px);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-file-editor {
+	display: flex;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple.sessions-right-workbench-files-tree-hidden .sessions-right-workbench-files,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-review-workspace.rail-hidden {
+	grid-template-columns: minmax(0, 1fr);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-file-tree {
+	border-left: 1px solid var(--rwb-border);
+}
+
+.sessions-right-workbench-simple .sessions-right-workbench-file-path {
+	min-height: 40px;
+	height: 40px;
+	padding: 0 12px;
+	grid-column: 1 / -1;
+	grid-row: 1;
+}
+
+.sessions-right-workbench-simple .sessions-right-workbench-files {
+	grid-template-rows: 40px minmax(0, 1fr);
+}
+
+.sessions-right-workbench-simple .sessions-right-workbench-file-editor,
+.sessions-right-workbench-simple .sessions-right-workbench-file-tree {
+	grid-row: 2;
+}
+
+.sessions-right-workbench-simple .sessions-right-workbench-review-file-header,
+.sessions-right-workbench-simple .sessions-right-workbench-review-total-stats .files {
+	display: none;
+}
+
+.sessions-right-workbench-review-scope {
+	margin-right: 12px;
+	white-space: nowrap;
+	font-size: 13px;
+}
+
+.sessions-right-workbench-simple .sessions-right-workbench-review-toolbar-row.primary {
+	min-height: 40px;
+	height: 40px;
+}
+
+.sessions-right-workbench-simple .sessions-right-workbench-file-actions {
+	flex-shrink: 0;
+}
+
+.sessions-right-workbench-file-action[hidden],
+.sessions-right-workbench-file-open[hidden] {
+	display: none;
+}
+
+.sessions-right-workbench-simple .sessions-right-workbench-browser-address {
+	position: relative;
+	border: 1px solid var(--rwb-border-strong);
+	border-radius: 10px;
+	background: transparent;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-browser-nav {
+	grid-template-columns: 24px 24px 24px minmax(0, 1fr) 24px;
+	gap: 6px;
+	padding: 0 12px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-browser-url {
+	text-align: left;
+	font-size: 13px;
+	padding: 0 8px;
+	border: 0;
+	box-shadow: none;
+	background: transparent;
+}
+
+.sessions-right-workbench-browser-address:focus-within {
+	border-color: var(--vscode-focusBorder);
+}
+
+.sessions-right-workbench-browser-suggestions {
+	position: absolute;
+	top: calc(100% + 4px);
+	left: 0;
+	right: 0;
+	z-index: 100;
+	padding: 4px;
+	border: 1px solid var(--rwb-border-strong);
+	border-radius: 12px;
+	background: var(--vscode-menu-background, var(--rwb-bg));
+	box-shadow: 0 8px 24px var(--vscode-widget-shadow);
+}
+
+.sessions-right-workbench-browser-suggestions[hidden] {
+	display: none;
+}
+
+.sessions-right-workbench-browser-suggestion {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	height: 36px;
+	padding: 0 8px;
+	border-radius: 8px;
+	cursor: pointer;
+	font-size: 13px;
+}
+
+.sessions-right-workbench-browser-suggestion:hover,
+.sessions-right-workbench-browser-suggestion[aria-selected="true"] {
+	background: var(--rwb-hover);
+}
+
+.sessions-right-workbench-browser-suggestion .title,
+.sessions-right-workbench-browser-suggestion .url {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sessions-right-workbench-browser-suggestion .title {
+	flex: 0 1 auto;
+}
+
+.sessions-right-workbench-browser-suggestion .url {
+	flex: 1 2 auto;
+	color: var(--rwb-muted);
+}
+
+.sessions-right-workbench-browser-suggestion .remove {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 22px;
+	height: 22px;
+	padding: 0;
+	border: 0;
+	border-radius: 5px;
+	background: transparent;
+	color: var(--rwb-muted);
+	cursor: pointer;
+}
+
+.sessions-right-workbench-browser-suggestion .remove:hover {
+	background: var(--rwb-selection);
+}
+
+@container (max-width: 480px) {
+	.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-files,
+	.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-review-workspace {
+		grid-template-columns: minmax(0, 1fr) 160px;
+	}
+	.sessions-right-workbench-simple .sessions-right-workbench-file-workspace {
+		display: none;
+	}
+}
+
+/* Keep the virtualized editor's 40px header geometry, with a compact 32px row. */
+.sessions-right-workbench-simple .multiDiffEditor {
+	--vscode-multiDiffEditor-background: var(--rwb-bg);
+	--vscode-multiDiffEditor-headerBackground: color-mix(in srgb, var(--vscode-editor-background) 94%, var(--vscode-editor-foreground));
+	--vscode-multiDiffEditor-border: var(--rwb-border);
+	--vscode-diffEditor-insertedLineBackground: rgba(46, 160, 87, 0.18);
+	--vscode-diffEditor-removedLineBackground: rgba(239, 68, 52, 0.18);
+	--vscode-diffEditor-insertedTextBackground: rgba(46, 160, 87, 0.22);
+	--vscode-diffEditor-removedTextBackground: rgba(239, 68, 52, 0.22);
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .multiDiffEntry .header-content {
+	box-sizing: border-box;
+	height: 32px;
+	margin-top: 8px;
+	padding: 0 8px;
+	border-color: var(--rwb-border);
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .multiDiffEntry .file-path .title.modified {
+	min-width: 0;
+	flex: 1;
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .monaco-icon-label-container {
+	display: flex;
+	align-items: baseline;
+	min-width: 0;
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .monaco-icon-description-container {
+	order: -1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .monaco-icon-label .label-description {
+	margin-left: 0;
+	font-size: inherit;
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .label-description:not(:empty)::after {
+	content: '/';
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .change-counts {
+	display: flex;
+	gap: 5px;
+	flex-shrink: 0;
+	margin-left: 8px;
+	font-size: 12px;
+	font-variant-numeric: tabular-nums;
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .change-counts .additions {
+	color: var(--vscode-gitDecoration-addedResourceForeground);
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .change-counts .deletions {
+	color: var(--vscode-gitDecoration-deletedResourceForeground);
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .multiDiffEntry .actions {
+	padding: 0 0 0 4px;
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .multiDiffEntry .status:empty {
+	display: none;
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .monaco-icon-name-container {
+	flex-shrink: 0;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-simple .multiDiffEditor .multiDiffEntry .header .header-content {
+	background: color-mix(in srgb, var(--vscode-editor-background) 92%, var(--vscode-editor-foreground));
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .monaco-icon-description-container {
+	flex: 0 1 auto;
+}
+
+/* Reveal the shared wallpaper without adding a second tint inside the panel. */
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.hc-black):not(.hc-light) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple {
+	--rwb-bg: transparent;
+	--rwb-chrome-soft: transparent;
+	--vscode-editor-background: transparent;
+	--vscode-editorPane-background: transparent;
+	--vscode-multiDiffEditor-background: transparent;
+	--vscode-sideBar-background: transparent;
+	background: transparent !important;
+
+}
+
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.hc-black):not(.hc-light) .part.auxiliarybar .sessions-right-workbench-simple :is(
+	.sessions-right-workbench-header,
+	.sessions-right-workbench-body,
+	.sessions-right-workbench-review,
+	.sessions-right-workbench-files,
+	.sessions-right-workbench-terminal,
+	.sessions-right-workbench-browser-chrome,
+	.sessions-right-workbench-browser-content,
+	.sessions-right-workbench-review-workspace,
+	.sessions-right-workbench-review-toolbar,
+	.sessions-right-workbench-review-rail,
+	.sessions-right-workbench-review-scm-rail,
+	.sessions-right-workbench-review-scm-list,
+	.monaco-list,
+	.monaco-tree,
+	.sessions-right-workbench-file-tree,
+	.sessions-right-workbench-file-editor,
+	.sessions-right-workbench-file-editor-body,
+	.sessions-right-workbench-embedded-editor-host,
+	.monaco-modal-editor-block.embedded,
+	.modal-editor-resizable,
+	.modal-editor-shadow,
+	.part.editor,
+	.editor-group-container,
+	.editor-container,
+	.editor-instance,
+	.multiDiffEditor,
+	.multiDiffEntry > .header,
+	.monaco-list-rows
+) {
+	background-color: transparent !important;
+	background-image: none !important;
+}
+
+/* The empty review canvas and its embedded editor use the panel surface. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-simple .multiDiffEditor {
+	background: var(--rwb-bg) !important;
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .multiDiffEntry .header .header-content {
+	border-bottom: 1px solid var(--rwb-border);
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .collapse-button a {
+	border: 0;
+	border-radius: 4px;
+	padding: 2px;
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .collapse-button a:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: 1px;
+}
+
+/* Keep controls above tab content without painting a square over wallpaper. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-frame-controls {
+	background: transparent;
+	-webkit-app-region: no-drag;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-frame-controls .sessions-right-workbench-icon-button {
+	padding: 0;
+	background: transparent;
+	border: 0;
+	border-radius: 8px;
+	-webkit-app-region: no-drag;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-frame-controls .sessions-right-workbench-icon-button:hover {
+	background: var(--rwb-hover);
+	color: var(--rwb-foreground);
+}
+
+.sessions-right-workbench-simple .sessions-right-workbench-frame-controls .sessions-right-workbench-icon-button:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -2px;
+}
+
+/* Chat and right panel share one image, tint, and blur on the window underlay. */
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.hc-black):not(.hc-light) .part.auxiliarybar {
+	backdrop-filter: none;
+	-webkit-backdrop-filter: none;
+}

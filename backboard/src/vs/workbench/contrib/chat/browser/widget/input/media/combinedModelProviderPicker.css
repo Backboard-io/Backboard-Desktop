@@ -780,3 +780,13 @@
 		display: none;
 	}
 }
+
+/* Shared by compact model pickers in every chat host. */
+.combined-model-provider-brain {
+	display: none;
+	width: 16px;
+	height: 16px;
+	flex: 0 0 16px;
+	background: currentColor;
+	mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 18V5a3 3 0 0 0-5.8-1A4 4 0 0 0 3 10a4 4 0 0 0 .5 7.5A4 4 0 0 0 12 18Zm0 0V5a3 3 0 0 1 5.8-1A4 4 0 0 1 21 10a4 4 0 0 1-.5 7.5A4 4 0 0 1 12 18M8 8a4 4 0 0 1-5 2m13-2a4 4 0 0 0 5 2M8 14a4 4 0 0 0-4.5 3.5M16 14a4 4 0 0 1 4.5 3.5'/%3E%3C/svg%3E") center / contain no-repeat;
+}

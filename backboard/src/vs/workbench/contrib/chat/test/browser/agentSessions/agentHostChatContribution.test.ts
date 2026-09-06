@@ -5709,6 +5709,37 @@ suite('AgentHostChatContribution', () => {
 			}
 		}));
 
+		for (const terminalAfterIntegration of [false, true]) {
+			test(`child completion ${terminalAfterIntegration ? 'honors' : 'does not assume'} the integration contract`, () => runWithFakedTimers({ useFakeTimers: true }, async () => {
+				const { sessionHandler, agentHostService, chatAgentService } = createContribution(disposables);
+				const { turnPromise, collected, session, turnId, fire } = await startTurn(sessionHandler, agentHostService, chatAgentService, disposables);
+				const parentToolCallId = 'tc-durable-worker';
+				const childSessionUri = buildSubagentSessionUri(session.toString(), parentToolCallId);
+				fire({
+					type: 'chat/toolCallStart', session, turnId, toolCallId: parentToolCallId, toolName: 'AgentSpawn', displayName: 'AgentSpawn',
+					_meta: { source: 'cli-ts', toolKind: 'subagent', subagentDetached: true, subagentWorkerId: 'worker-1', subagentStatus: 'Integrating', subagentTerminalAfterIntegration: terminalAfterIntegration },
+				} as ChatAction);
+				fire({ type: 'chat/toolCallReady', session, turnId, toolCallId: parentToolCallId, invocationMessage: 'Starting worker', confirmed: 'not-needed' } as ChatAction);
+				await timeout(50);
+				fire({
+					type: 'chat/toolCallComplete', session, turnId, toolCallId: parentToolCallId,
+					result: { success: true, pastTenseMessage: 'Worker queued', content: [{ type: 'text', text: 'Worker handle ready' }] },
+				} as ChatAction);
+				fire({ type: 'chat/turnComplete', session, turnId } as ChatAction);
+				await turnPromise;
+				const invocation = collected.flat().find((part): part is IChatToolInvocation => part.kind === 'toolInvocation' && part.toolCallId === parentToolCallId);
+				assert.ok(invocation);
+				const fireChild = (action: SessionAction | ChatAction) => {
+					agentHostService.fireAction({ channel: childSessionUri, action, serverSeq: 3000, origin: undefined });
+				};
+				fireChild({ type: 'chat/turnStarted', turnId: 'child-turn', message: { text: 'Write the file', origin: { kind: MessageKind.User } } } as ChatAction);
+				fireChild({ type: 'chat/turnComplete', turnId: 'child-turn' } as ChatAction);
+				await timeout(50);
+				assert.ok(invocation.toolSpecificData?.kind === 'subagent');
+				assert.strictEqual(invocation.toolSpecificData.workerStatus, terminalAfterIntegration ? 'Completed' : 'Integrating', 'Integration status must come from the durable worker lifecycle');
+			}));
+		}
+
 		test('parent subagent agentName is updated when subagent content arrives later', () => runWithFakedTimers({ useFakeTimers: true }, async () => {
 			// Repro for the missing-agent-name bug: when the parent task tool
 			// fires without `subagentAgentName` in `_meta` (e.g. the agent host

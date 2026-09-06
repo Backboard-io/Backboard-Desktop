@@ -1,9 +1,6 @@
 import { contextWindowFor } from "../../../core/context/ContextWindow.ts";
-import type {
-	ModelCatalogItem,
-	ProviderEvent,
-	ProviderToolCall,
-} from "../../backboard/types.ts";
+import type { ModelCatalogItem, ProviderEvent } from "../../backboard/types.ts";
+import { ToolCallDeltaAccumulator } from "../../ToolCallDeltaAccumulator.ts";
 import { unexpectedStreamEndMessage } from "../ByokError.ts";
 import type {
 	ByokMessage,
@@ -24,12 +21,6 @@ interface OpenAIModelsResponse {
 }
 
 /** A tool call assembled across `delta.tool_calls` chunks, keyed by index. */
-interface PendingToolCall {
-	id: string;
-	name: string;
-	args: string;
-	announced: boolean;
-}
 
 export const openaiAdapter: ProviderAdapter = {
 	id: "openai",
@@ -130,7 +121,25 @@ async function* streamOpenAI(
 		body.reasoning_effort = effort;
 	}
 
-	const pending = new Map<number, PendingToolCall>();
+	yield {
+		kind: "thinking_resolved",
+		requested: request.thinking,
+		effective: {
+			reasoning_effort: body.reasoning_effort ?? "provider-default",
+		},
+		provider: "openai",
+		model: request.model,
+		reason:
+			request.tools.length > 0 && requiresDisabledToolReasoning(request.model)
+				? "chat-completions-tool-compatibility-requires-none"
+				: effort
+					? "requested-setting"
+					: "provider-default",
+	};
+
+	const pending = new ToolCallDeltaAccumulator(
+		request.tools.map((tool) => tool.function.name),
+	);
 	let finishReason: string | null = null;
 	let usage = {
 		inputTokens: 0,
@@ -192,27 +201,10 @@ async function* streamOpenAI(
 			emitted = true;
 			yield { kind: "reasoning_delta", text: reasoningText };
 		}
-		for (const partial of delta?.tool_calls ?? []) {
-			const index = partial.index ?? 0;
-			const existing = pending.get(index) ?? {
-				id: partial.id ?? `call_${index}`,
-				name: "",
-				args: "",
-				announced: false,
-			};
-			if (partial.id) existing.id = partial.id;
-			if (partial.function?.name) existing.name += partial.function.name;
-			if (partial.function?.arguments) {
-				existing.args += partial.function.arguments;
-			}
-			pending.set(index, existing);
-			// Announce as soon as the name is known so the row renders while the
-			// arguments are still streaming.
-			if (!existing.announced && existing.name) {
-				existing.announced = true;
-				emitted = true;
-				yield { kind: "tool_started", id: existing.id, name: existing.name };
-			}
+		for (const event of pending.add(delta?.tool_calls ?? [])) {
+			emitted = true;
+			yield event;
+			if (event.kind === "failed") return;
 		}
 		if (!emitted) yield { kind: "activity" };
 	}
@@ -242,20 +234,13 @@ async function* streamOpenAI(
 		};
 		return;
 	}
-	const calls: ProviderToolCall[] = [];
-	if (!truncated) {
-		for (const partial of [...pending.entries()]
-			.sort(([left], [right]) => left - right)
-			.map(([, value]) => value)) {
-			const call: ProviderToolCall = {
-				id: partial.id,
-				name: partial.name,
-				input: parseArguments(partial.args),
-			};
-			calls.push(call);
-			yield { kind: "tool_ready", call };
-		}
+	const finalCalls = pending.finish();
+	if ("error" in finalCalls) {
+		yield { kind: "failed", error: finalCalls.error, retryable: false };
+		return;
 	}
+	const calls = finalCalls.calls;
+	for (const call of calls) yield { kind: "tool_ready", call };
 
 	const finalUsage = {
 		...usage,
@@ -298,16 +283,6 @@ function readUsage(usage: Record<string, unknown>): {
 
 function numberOf(value: unknown): number {
 	return typeof value === "number" && Number.isFinite(value) ? value : 0;
-}
-
-function parseArguments(args: string): unknown {
-	const trimmed = args.trim();
-	if (!trimmed) return {};
-	try {
-		return JSON.parse(trimmed);
-	} catch {
-		return {};
-	}
 }
 
 function toOpenAIMessages(request: ByokStreamRequest): unknown[] {

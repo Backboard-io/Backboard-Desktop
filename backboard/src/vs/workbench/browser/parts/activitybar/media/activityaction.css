@@ -228,3 +228,25 @@
 	left: auto;
 	right: 0;
 }
+
+/* Paint rounded activity tiles behind both font glyphs and masked extension
+ * icons. The icon's background is its mask colour, so never paint the tile there. */
+.monaco-workbench:not(.hc-black):not(.hc-light) .activitybar > .content :not(.monaco-menu) > .monaco-action-bar .active-item-indicator {
+	z-index: 0;
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .activitybar > .content :not(.monaco-menu) > .monaco-action-bar .action-item:is(.checked, :hover, :focus) .active-item-indicator::before {
+	content: "";
+	position: absolute;
+	inset: 5px;
+	width: auto;
+	height: auto;
+	border: 0;
+	border-radius: 6px;
+	background: var(--vscode-toolbar-hoverBackground);
+}
+
+.monaco-workbench:not(.hc-black):not(.hc-light) .activitybar > .content :not(.monaco-menu) > .monaco-action-bar .action-item:focus-visible .active-item-indicator::before {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}

@@ -19,6 +19,9 @@ import { localize, localize2 } from '../../../nls.js';
 import { IActionViewItemService } from '../../../platform/actions/browser/actionViewItemService.js';
 import { Action2, MenuRegistry, registerAction2 } from '../../../platform/actions/common/actions.js';
 import { ICommandService } from '../../../platform/commands/common/commands.js';
+import { INotificationService } from '../../../platform/notification/common/notification.js';
+import { IQuickInputService } from '../../../platform/quickinput/common/quickInput.js';
+import { IOpenerService } from '../../../platform/opener/common/opener.js';
 import { ILogService } from '../../../platform/log/common/log.js';
 import { ContextKeyExpr } from '../../../platform/contextkey/common/contextkey.js';
 import { IContextViewService } from '../../../platform/contextview/browser/contextView.js';
@@ -35,7 +38,7 @@ import { Menus } from '../menus.js';
 import { isAgentHostProvider } from '../../common/agentHostSessionsProvider.js';
 import { IsPhoneLayoutContext, SessionsWelcomeVisibleContext } from '../../common/contextkeys.js';
 import { ISessionsService } from '../../services/sessions/browser/sessionsService.js';
-import { ISession, ISessionFolder, ISessionWorkspace } from '../../services/sessions/common/session.js';
+import { ISession, ISessionChangesSummary, ISessionFolder, ISessionWorkspace } from '../../services/sessions/common/session.js';
 import { ISessionsProvidersService } from '../../services/sessions/browser/sessionsProvidersService.js';
 import { RightWorkbenchCommandId } from '../../contrib/rightWorkbench/browser/rightWorkbench.js';
 
@@ -63,7 +66,10 @@ interface IEnvironmentRow {
 	readonly muted?: boolean;
 	readonly command?: string;
 	/** Custom click behavior. Takes precedence over {@link command}. */
-	readonly run?: () => void;
+	readonly run?: () => void | Promise<unknown>;
+	readonly trailingIcon?: ThemeIcon;
+	readonly description?: string;
+	readonly summary?: ISessionChangesSummary;
 }
 
 interface IResolvedGitInfo {
@@ -107,6 +113,9 @@ export class EnvironmentTitleBarWidget extends BaseActionViewItem {
 		@IUriIdentityService private readonly uriIdentityService: IUriIdentityService,
 		@ISessionsProvidersService private readonly sessionsProvidersService: ISessionsProvidersService,
 		@ILogService private readonly logService: ILogService,
+		@INotificationService private readonly notificationService: INotificationService,
+		@IQuickInputService private readonly quickInputService: IQuickInputService,
+		@IOpenerService private readonly openerService: IOpenerService,
 	) {
 		super(undefined, action, options);
 	}
@@ -156,6 +165,8 @@ export class EnvironmentTitleBarWidget extends BaseActionViewItem {
 			return;
 		}
 
+		this.requestedGitRepositoryKeys.clear();
+		this.failedGitRepositoryKeys.clear();
 		this.triggerButton.setAttribute('aria-expanded', 'true');
 		this.contextViewService.showContextView({
 			getAnchor: () => this.triggerButton!,
@@ -230,10 +241,12 @@ export class EnvironmentTitleBarWidget extends BaseActionViewItem {
 			return;
 		}
 		this.gitStatusTick.read(reader);
+		const focusedRow = container.querySelector<HTMLElement>(':focus')?.dataset.row;
 		this.contentStore.clear();
 		clearNode(container);
-
 		const popup = append(container, $('.sessions-environment-popup'));
+		popup.setAttribute('role', 'dialog');
+		popup.setAttribute('aria-label', localize('environmentPopupTitle', "Environment"));
 		const header = append(popup, $('.sessions-environment-popup-header'));
 		append(header, $('span.sessions-environment-popup-title', undefined, localize('environmentPopupTitle', "Environment")));
 
@@ -263,7 +276,12 @@ export class EnvironmentTitleBarWidget extends BaseActionViewItem {
 		const gitKey = this.getGitInfoKey(folder, providerWorkingDirectory);
 		const branchName = gitInfo?.branchName ?? gitRepository?.branchName ?? providerBranchName;
 		const upstreamBranchName = gitInfo?.upstreamBranchName ?? gitRepository?.upstreamBranchName;
-		const changesSummary = activeSession.changesSummary?.read(reader);
+		const changes = activeSession.activeChat.read(reader).changes.read(reader);
+		const changesSummary = changes.length ? {
+			files: changes.length,
+			additions: changes.reduce((sum, change) => sum + change.insertions, 0),
+			deletions: changes.reduce((sum, change) => sum + change.deletions, 0),
+		} : undefined;
 		const changesValue = changesSummary
 			? localize('environmentChangesSummary', "{0} files  +{1} -{2}", changesSummary.files, changesSummary.additions, changesSummary.deletions)
 			: this.getGitChangesLabel(gitInfo) ?? localize('environmentNoChanges', "No changes");
@@ -271,13 +289,17 @@ export class EnvironmentTitleBarWidget extends BaseActionViewItem {
 		this.renderRow(popup, {
 			icon: Codicon.diffMultiple,
 			label: localize('environmentChanges', "Changes"),
-			value: changesValue,
+			value: changesSummary ? undefined : localize('environmentNoSessionChanges', "No changes yet"),
+			summary: changesSummary,
+			description: changesSummary ? changesValue : localize('environmentReviewSession', "Review changes in this thread"),
 			command: RightWorkbenchCommandId.OpenReview,
 		});
 		this.renderRow(popup, {
 			icon: Codicon.deviceDesktop,
 			label: workspace?.group ?? localize('environmentLocal', "Local"),
 			value: this.getWorkspaceLabel(workspace, folder),
+			trailingIcon: Codicon.chevronDown,
+			run: () => this.showWorkspaceActions(workspace),
 		});
 		this.renderRow(popup, {
 			icon: Codicon.gitBranch,
@@ -286,45 +308,57 @@ export class EnvironmentTitleBarWidget extends BaseActionViewItem {
 			muted: !branchName,
 			// The git extension's checkout command resolves the repository from
 			// the passed root Uri and shows its own branch quick pick.
-			run: gitRootUri && branchName ? () => { void this.commandService.executeCommand('git.checkout', gitRootUri); } : undefined,
+			run: gitRootUri ? () => this.commandService.executeCommand('git.checkout', gitRootUri) : undefined,
+			trailingIcon: gitRootUri ? Codicon.chevronDown : undefined,
+			description: upstreamBranchName,
 		});
 
 		const outgoingChanges = gitInfo?.outgoingChanges ?? gitRepository?.outgoingChanges;
 		const incomingChanges = gitInfo?.incomingChanges ?? gitRepository?.incomingChanges;
-		let syncActionLabel = localize('environmentCommitOrPush', "Commit or Push");
-		let syncRun: (() => void) | undefined;
-		if (gitRootUri) {
-			if (gitInfo?.uncommittedChanges) {
-				syncActionLabel = localize('environmentCommit', "Commit");
-				syncRun = () => { void this.commandService.executeCommand('git.commitAll', gitRootUri); };
-			} else if (outgoingChanges) {
-				syncActionLabel = localize('environmentPush', "Push");
-				syncRun = () => { void this.commandService.executeCommand('git.push', gitRootUri); };
-			}
-		}
 		this.renderRow(popup, {
-			icon: Codicon.circleOutline,
-			label: syncActionLabel,
+			icon: Codicon.gitCommit,
+			label: localize('environmentCommitOrPush', "Commit or Push"),
 			value: this.getSyncLabel(outgoingChanges, incomingChanges),
-			muted: !syncRun,
-			run: syncRun,
+			muted: !gitRootUri,
+			trailingIcon: gitRootUri ? Codicon.chevronDown : undefined,
+			run: gitRootUri ? () => this.showGitActions(gitRootUri, gitInfo) : undefined,
 		});
 
+		const github = gitRepository?.gitHubInfo.read(reader);
+		const pullRequest = !gitInfo?.branchName || gitInfo.branchName === gitRepository?.branchName ? github?.pullRequest : undefined;
 		const hasGitHubRemote = gitInfo?.hasGitHubRemote ?? gitRepository?.hasGitHubRemote;
 		const checkingGitHubRemote = hasGitHubRemote === undefined && !liveRepository && !!gitKey && !this.failedGitRepositoryKeys.has(gitKey);
 		this.renderRow(popup, {
-			icon: Codicon.github,
-			label: checkingGitHubRemote
-				? localize('environmentGitHubRemoteChecking', "Checking GitHub Remote...")
-				: hasGitHubRemote
-					? localize('environmentGitHubRemote', "GitHub Remote Connected")
-					: localize('environmentGitHubRemoteMissing', "GitHub Remote Not Detected"),
-			muted: !hasGitHubRemote,
+			icon: pullRequest?.icon ?? Codicon.gitPullRequest,
+			label: pullRequest
+				? localize('environmentPullRequest', "Pull Request #{0}", pullRequest.number)
+				: checkingGitHubRemote
+					? localize('environmentPullRequestChecking', "Checking Pull Request…")
+					: localize('environmentPullRequestUnavailable', "Pull Request Status Unavailable"),
+			muted: !pullRequest,
+			trailingIcon: pullRequest ? Codicon.linkExternal : undefined,
+			run: pullRequest ? () => this.openerService.open(pullRequest.uri, { openExternal: true }) : undefined,
+		});
+		const headCommit = liveRepository?.state.read(reader).HEAD?.commit;
+		this.renderRow(popup, {
+			icon: Codicon.gitCompare,
+			label: localize('environmentCompareBranch', "Compare Branch"),
+			trailingIcon: Codicon.linkExternal,
+			muted: !(github && branchName) && !headCommit,
+			run: github && branchName ? () => this.openerService.open(URI.from({
+				scheme: 'https', authority: 'github.com',
+				path: `/${github.owner}/${github.repo}/compare/${branchName}`,
+			}), { openExternal: true }) : gitRootUri && headCommit
+				? () => this.commandService.executeCommand('git.graph.compareRef', gitRootUri, { id: headCommit, displayId: branchName })
+				: undefined,
 		});
 
 		append(popup, $('.sessions-environment-popup-separator'));
 		append(popup, $('span.sessions-environment-popup-section', undefined, localize('environmentSources', "Sources")));
-		this.renderSourceRows(popup, workspace);
+		this.renderSourceRows(popup, workspace, reader);
+		if (focusedRow) {
+			Array.from(popup.querySelectorAll<HTMLElement>('[data-row]')).find(row => row.dataset.row === focusedRow)?.focus();
+		}
 	}
 
 	private getProviderBranchName(session: ISession): string | undefined {
@@ -356,28 +390,66 @@ export class EnvironmentTitleBarWidget extends BaseActionViewItem {
 	}
 
 	private renderRow(container: HTMLElement, row: IEnvironmentRow): void {
-		const run = row.run ?? (row.command ? () => { void this.commandService.executeCommand(row.command!); } : undefined);
+		const run = row.run ?? (row.command ? () => this.commandService.executeCommand(row.command!) : undefined);
 		const element = append(container, $('button.sessions-environment-popup-row')) as HTMLButtonElement;
+		element.type = 'button';
+		element.dataset.row = String(container.querySelectorAll('[data-row]').length);
 		element.classList.toggle('muted', !!row.muted);
+		element.classList.toggle('has-summary', !!row.summary);
 		element.disabled = !run;
 		element.appendChild(renderIcon(row.icon));
-
-		const label = append(element, $('span.sessions-environment-popup-row-label'));
-		label.textContent = row.label;
-		if (row.value) {
-			const value = append(element, $('span.sessions-environment-popup-row-value'));
-			value.textContent = row.value;
+		append(element, $('span.sessions-environment-popup-row-label', undefined, row.label));
+		if (row.summary) {
+			const stats = append(element, $('span.sessions-environment-popup-stats'));
+			append(stats, $('span.additions', undefined, `+${row.summary.additions.toLocaleString()}`));
+			append(stats, $('span.deletions', undefined, `-${row.summary.deletions.toLocaleString()}`));
+			element.setAttribute('aria-label', localize('environmentChangeCounts', "{0} files changed, {1} lines added, {2} lines removed", row.summary.files, row.summary.additions, row.summary.deletions));
+		} else if (row.value) {
+			append(element, $('span.sessions-environment-popup-row-value', undefined, row.value));
 		}
-
+		if (row.trailingIcon) {
+			const trailing = append(element, $('span.sessions-environment-popup-row-trailing'));
+			trailing.appendChild(renderIcon(row.trailingIcon));
+		}
+		this.contentStore.add(this.hoverService.setupManagedHover(getDefaultHoverDelegate('element'), element, row.description ?? [row.label, row.value].filter(Boolean).join(' — ')));
 		if (run) {
 			this.contentStore.add(addDisposableListener(element, EventType.CLICK, () => {
 				this.contextViewService.hideContextView();
-				run();
+				void this.runAction(run);
 			}));
 		}
 	}
 
-	private renderSourceRows(container: HTMLElement, workspace: ISessionWorkspace | undefined): void {
+	private async runAction(run: () => void | Promise<unknown>): Promise<void> {
+		try {
+			await run();
+		} catch (error) {
+			this.notificationService.error(error instanceof Error ? error : String(error));
+		}
+	}
+
+	private async showWorkspaceActions(workspace: ISessionWorkspace | undefined): Promise<void> {
+		const selected = await this.quickInputService.pick([
+			{ label: localize('environmentBrowseFiles', "Browse Files"), description: workspace?.label, command: RightWorkbenchCommandId.OpenFiles },
+			{ label: localize('environmentOpenTerminal', "Open Terminal"), description: workspace?.folders[0]?.workingDirectory.fsPath, command: RightWorkbenchCommandId.OpenTerminal },
+		], { placeHolder: localize('environmentWorkspaceActions', "Open a surface in this environment") });
+		if (selected) {
+			await this.commandService.executeCommand(selected.command);
+		}
+	}
+
+	private async showGitActions(root: URI, info: IResolvedGitInfo | undefined): Promise<void> {
+		const selected = await this.quickInputService.pick([
+			{ label: localize('environmentCommit', "Commit Changes"), description: this.getGitChangesLabel(info), command: 'git.commitAll' },
+			{ label: localize('environmentPush', "Push"), description: this.getSyncLabel(info?.outgoingChanges, info?.incomingChanges), command: 'git.push' },
+			{ label: localize('environmentPull', "Pull"), command: 'git.pull' },
+		], { placeHolder: localize('environmentGitActions', "Choose a Git action for {0}", info?.branchName ?? basename(root)) });
+		if (selected) {
+			await this.commandService.executeCommand(selected.command, root);
+		}
+	}
+
+	private renderSourceRows(container: HTMLElement, workspace: ISessionWorkspace | undefined, reader: IReader): void {
 		if (!workspace?.folders.length) {
 			this.renderRow(container, {
 				icon: Codicon.folder,
@@ -386,17 +458,23 @@ export class EnvironmentTitleBarWidget extends BaseActionViewItem {
 			});
 			return;
 		}
-
 		for (const folder of workspace.folders) {
-			const row = append(container, $('.sessions-environment-popup-source'));
-			row.appendChild(renderIcon(folder.gitRepository ? Codicon.repo : Codicon.folder));
-			const label = append(row, $('span.sessions-environment-popup-source-label'));
-			label.textContent = folder.gitRepository?.gitHubInfo.get()
-				? `${folder.gitRepository.gitHubInfo.get()!.owner}/${folder.gitRepository.gitHubInfo.get()!.repo}`
-				: folder.name || basename(folder.workingDirectory);
-			const value = append(row, $('span.sessions-environment-popup-source-value'));
-			value.textContent = folder.description ?? folder.workingDirectory.fsPath;
+			const github = folder.gitRepository?.gitHubInfo.read(reader);
+			this.renderRow(container, {
+				icon: folder.gitRepository ? Codicon.repo : Codicon.folder,
+				label: github ? `${github.owner}/${github.repo}` : folder.name || basename(folder.workingDirectory),
+				description: folder.workingDirectory.fsPath,
+				run: async () => {
+					await this.commandService.executeCommand(RightWorkbenchCommandId.OpenFiles);
+					await this.commandService.executeCommand('revealInExplorer', folder.workingDirectory);
+				},
+			});
 		}
+		this.renderRow(container, {
+			icon: Codicon.files,
+			label: localize('environmentViewAll', "View All Files"),
+			command: RightWorkbenchCommandId.OpenFiles,
+		});
 	}
 
 	private getWorkspaceLabel(workspace: ISessionWorkspace | undefined, folder: ISessionFolder | undefined): string | undefined {
@@ -537,7 +615,7 @@ export class EnvironmentTitleBarWidget extends BaseActionViewItem {
 			upstreamBranchName: upstream ? `${upstream.remote}/${upstream.name}` : undefined,
 			outgoingChanges: state.HEAD?.ahead,
 			incomingChanges: state.HEAD?.behind,
-			uncommittedChanges: state.mergeChanges.length + state.indexChanges.length + state.workingTreeChanges.length + state.untrackedChanges.length,
+			uncommittedChanges: new Set([...state.mergeChanges, ...state.indexChanges, ...state.workingTreeChanges, ...state.untrackedChanges].map(change => change.uri.toString())).size,
 			hasGitHubRemote: state.remotes.some(remote => [remote.fetchUrl, remote.pushUrl].some(url => !!url && /github\.com/i.test(url))),
 		};
 	}

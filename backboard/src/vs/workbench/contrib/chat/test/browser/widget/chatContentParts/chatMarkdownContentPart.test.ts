@@ -101,11 +101,13 @@ suite('ChatMarkdownContentPart', () => {
 		};
 	}
 
-	function createMarkdownPart(markdownText: string, context?: IChatContentPartRenderContext, fillInIncompleteTokens = false): ChatMarkdownContentPart {
+	function createMarkdownPart(markdownText: string, context?: IChatContentPartRenderContext, fillInIncompleteTokens = false, baseUri?: URI): ChatMarkdownContentPart {
 		const ctx = context ?? createRenderContext();
+		const content = new MarkdownString(markdownText);
+		content.baseUri = baseUri;
 		return store.add(instantiationService.createInstance(
 			ChatMarkdownContentPart,
-			{ kind: 'markdownContent', content: new MarkdownString(markdownText) },
+			{ kind: 'markdownContent', content },
 			ctx,
 			editorPool,
 			fillInIncompleteTokens,
@@ -116,6 +118,29 @@ suite('ChatMarkdownContentPart', () => {
 			{}, // rendererOptions
 		));
 	}
+
+	test('wide display math scrolls with the keyboard and preserves copyable source', async () => {
+		const configService = instantiationService.get(IConfigurationService) as TestConfigurationService;
+		configService.setUserConfiguration(ChatConfiguration.EnableMath, true);
+		await MarkedKatexSupport.loadExtension(mainWindow);
+		const formula = Array.from({ length: 30 }, (_, i) => `x_{${i}}`).join(' + ');
+		const part = createMarkdownPart(`\\[${formula}\\]`);
+		part.domNode.style.width = '240px';
+		mainWindow.document.body.appendChild(part.domNode);
+		store.add(toDisposable(() => part.domNode.remove()));
+		await mainWindow.document.fonts.ready;
+		part.layout(240);
+		const math = part.domNode.querySelector<HTMLElement>('.katex-display');
+		assert.ok(math);
+		math.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+		assert.deepStrictEqual({
+			focusable: math.tabIndex,
+			scrolled: math.scrollLeft > 0,
+			source: part.domNode.querySelector('.vscode-katex-container')?.getAttribute('data-latex'),
+		}, { focusable: 0, scrolled: true, source: formula });
+		math.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true, cancelable: true }));
+		assert.strictEqual(math.scrollLeft, 0);
+	});
 
 	function createMarkdownPartWithInlineReferences(markdownText: string, inlineReferences: Record<string, IChatContentInlineReference>, context?: IChatContentPartRenderContext, fillInIncompleteTokens = false): ChatMarkdownContentPart {
 		const ctx = context ?? createRenderContext();
@@ -229,6 +254,20 @@ suite('ChatMarkdownContentPart', () => {
 		assert.strictEqual(part.codeblocks.length, 0);
 		assert.strictEqual(renderedCodeBlocks.length, 0);
 		assert.ok(part.domNode.textContent?.includes('Hello, world!'));
+	});
+
+	test('keeps the session image base when a streaming update omits metadata', async () => {
+		const config = instantiationService.get(IConfigurationService) as TestConfigurationService;
+		config.setUserConfiguration(ChatConfiguration.IncrementalRendering, true);
+		const markdown = '![First](first.png)';
+		const part = createMarkdownPart(markdown, createRenderContext(false), true, URI.file('/workspace/session/'));
+		part.tryIncrementalUpdate({ kind: 'markdownContent', content: new MarkdownString(`${markdown}\n\n![Next](next.png)`) });
+		part.updateStreamRate(1000, true);
+		await new Promise<void>(resolve => mainWindow.requestAnimationFrame(() => resolve()));
+		assert.deepStrictEqual(Array.from(part.domNode.querySelectorAll('img'), image => URI.parse(image.src).path), [
+			'/workspace/session/first.png',
+			'/workspace/session/next.png',
+		]);
 	});
 
 	test('renders a single code block and passes text to CodeBlockPart', () => {

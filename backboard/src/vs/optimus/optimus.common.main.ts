@@ -17,5 +17,6 @@ import '../sessions/sessions.shared.main.js';
 import './browser/optimusPaneCompositePartService.js';
 import './browser/parts/optimusSessionsParts.js';
 import './contrib/optimus.contribution.js';
+import './contrib/optimusBackground.contribution.js';
 
 //#endregion

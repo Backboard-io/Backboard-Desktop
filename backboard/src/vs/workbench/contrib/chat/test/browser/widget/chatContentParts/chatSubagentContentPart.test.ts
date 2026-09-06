@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
+import '../../../../browser/widget/media/chat.css';
 import { $, isHTMLElement } from '../../../../../../../base/browser/dom.js';
 import { timeout } from '../../../../../../../base/common/async.js';
 import { Event } from '../../../../../../../base/common/event.js';
@@ -460,7 +461,7 @@ suite('ChatSubagentContentPart', () => {
 			);
 		});
 
-		test('renders compact worker details inside the aggregate disclosure', async () => {
+		test('renders a worker pill that opens its child chat without expanding', async () => {
 			const part = createPart(createMockToolInvocation({
 				toolSpecificData: {
 					kind: 'subagent',
@@ -470,14 +471,14 @@ suite('ChatSubagentContentPart', () => {
 				},
 			}), createMockRenderContext(false));
 			const strip = $('.chat-subagent-strip', undefined,
-				$('button.chat-subagent-summary'),
 				$('.chat-subagent-items', undefined, part.domNode));
 			const shell = $('.monaco-workbench', undefined,
 				$('.backboard-clean-chat', undefined,
 					$('.interactive-session.interactive-list.backboard-cursor-transcript', undefined,
 						$('.interactive-response', undefined,
 							$('.value', undefined,
-								$('.chat-t3-turn-work-body', undefined, strip))))));
+								$('.chat-t3-turn-work', undefined, $('.chat-t3-turn-work-body', { hidden: true }), strip))))));
+			shell.style.setProperty('--vscode-foreground', '#cccccc');
 			mainWindow.document.body.appendChild(shell);
 			disposables.add(toDisposable(() => shell.remove()));
 			await timeout(0);
@@ -486,6 +487,11 @@ suite('ChatSubagentContentPart', () => {
 			const openButton = part.domNode.querySelector<HTMLButtonElement>('.chat-subagent-open');
 			assert.ok(collapseButton, 'Worker task should remain an inline disclosure');
 			assert.ok(isHTMLElement(openButton));
+			// The browser runner loads imported styles asynchronously. Wait for the
+			// row stylesheet before checking geometry; module evaluation alone does not await it.
+			for (let attempt = 0; attempt < 100 && mainWindow.getComputedStyle(part.domNode).borderRadius !== '999px'; attempt++) {
+				await timeout(10);
+			}
 			const cardStyles = mainWindow.getComputedStyle(part.domNode);
 			const headerStyles = mainWindow.getComputedStyle(collapseButton.parentElement!);
 			const collapseStyles = mainWindow.getComputedStyle(collapseButton);
@@ -494,19 +500,20 @@ suite('ChatSubagentContentPart', () => {
 			assert.strictEqual(part.domNode.querySelector('.chat-subagent-row-status')?.textContent, 'Running');
 			assert.strictEqual(part.domNode.querySelector('.chat-subagent-task')?.textContent, 'Worker: Inspect a deliberately long repository task without making the agent row tall');
 			assert.strictEqual(openButton.querySelector('.chat-subagent-open-label')?.textContent, 'Open chat');
-			assert.strictEqual(cardStyles.borderRadius, '0px');
-			assert.strictEqual(headerStyles.height, '30px', JSON.stringify({ part: part.domNode.className, parent: part.domNode.parentElement?.className, header: collapseButton.parentElement!.className, h: headerStyles.height, mh: headerStyles.minHeight, bs: headerStyles.boxSizing, bt: headerStyles.borderTopWidth, disp: headerStyles.display, btn: collapseStyles.height, btnMin: collapseStyles.minHeight, pad: collapseStyles.padding, lh: collapseStyles.lineHeight, ali: headerStyles.alignItems }));
-			assert.strictEqual(collapseStyles.height, '30px');
-			assert.strictEqual(openStyles.height, '28px');
-			assert.strictEqual(openStyles.borderTopWidth, '0px', 'The open action must be integrated into the card header, not rendered as a pill');
-			assert.strictEqual(openStyles.borderRadius, '0px');
-			assert.strictEqual(openButton.style.width, '', 'Layout geometry must be stylesheet-owned, not hard-coded inline');
-			assert.strictEqual(openButton.style.maxWidth, '', 'The navigation action must not inherit the old 180px task-pill cap');
-			assert.strictEqual(openStyles.whiteSpace, 'nowrap');
-			assert.ok(openButton.getAttribute('aria-label')?.includes('Inspect a deliberately long repository task'));
-
+			assert.strictEqual(cardStyles.borderRadius, '999px');
+			assert.strictEqual(cardStyles.borderTopWidth, '1px');
+			assert.strictEqual(openStyles.display, 'none');
+			assert.ok(part.domNode.querySelector('.chat-subagent-avatar'));
+			assert.notStrictEqual(headerStyles.display, 'none');
 			collapseButton.click();
-			assert.strictEqual(part.domNode.classList.contains('chat-used-context-collapsed'), false, 'Clicking the wide task row should expand inline details');
+			await timeout(0);
+			assert.ok(openedSession, 'Clicking the pill opens the child chat');
+			assert.strictEqual(part.domNode.classList.contains('chat-used-context-collapsed'), true);
+			openedSession = undefined;
+			collapseButton.dispatchEvent(new mainWindow.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+			await timeout(0);
+			assert.ok(openedSession, 'Keyboard activation opens the same child chat');
+
 		});
 
 		test('keeps branches, worktree paths, and commit ids out of worker details', () => {
@@ -536,6 +543,16 @@ suite('ChatSubagentContentPart', () => {
 	});
 
 	suite('Title extraction', () => {
+		test('summary prefers explicit names and only short single-line legacy descriptions', () => {
+			const make = (agentName: string, description: string) => createPart(createMockToolInvocation({
+				toolSpecificData: { kind: 'subagent', agentName, description },
+			}), createMockRenderContext(false));
+			assert.strictEqual(make('Prompt completion', 'Long delegated instructions '.repeat(5)).getSummaryLabel(), 'Prompt completion');
+			assert.strictEqual(make('worker', 'Search').getSummaryLabel(), 'Search');
+			assert.strictEqual(make('worker', 'Read every file and update the runtime to improve streaming reliability.').getSummaryLabel(), undefined);
+			assert.strictEqual(make('worker', 'Search\nDo more work').getSummaryLabel(), undefined);
+		});
+
 		test('should extract title with agent name from toolSpecificData', () => {
 			const toolInvocation = createMockToolInvocation({
 				toolSpecificData: {
@@ -712,6 +729,8 @@ suite('ChatSubagentContentPart', () => {
 			assert.strictEqual(part.getIsActive(), true, 'The immediate AgentSpawn tool result is only a handle acknowledgement');
 			assert.strictEqual(part.shouldRemainActiveAfterParentTurn(), true);
 			assert.strictEqual(part.domNode.querySelector('.chat-subagent-row-status')?.textContent, 'Running');
+			part.markAsInactive();
+			assert.strictEqual(part.getIsActive(), true, 'Parent completion must not override an authoritative running child');
 
 			(toolInvocation as { toolSpecificData: IChatSubagentToolInvocationData }).toolSpecificData = {
 				kind: 'subagent',

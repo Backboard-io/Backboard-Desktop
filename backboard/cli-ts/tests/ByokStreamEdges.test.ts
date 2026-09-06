@@ -275,6 +275,32 @@ describe("OpenAI tool reasoning compatibility", () => {
 });
 
 describe("Gemini abnormal finishes", () => {
+	it("keeps id-less calls unique across simultaneous workers and later rounds", async () => {
+		stubStream([`data: ${JSON.stringify({ candidates: [{
+			content: { parts: [
+				{ functionCall: { name: "read_file", args: { path: "a.ts" } } },
+				{ functionCall: { name: "read_file", args: { path: "b.ts" } } },
+				{ functionCall: { id: "provider-owned-id", name: "read_file", args: { path: "c.ts" } } },
+			] }, finishReason: "STOP",
+		}] })}`]);
+		const run = () => collect(client().runMessage(request("google", "gemini-2.5-flash")));
+		const streams = await Promise.all([run(), run()]);
+		streams.push(await run());
+		const localIds: string[] = [];
+		for (const events of streams) {
+			const ready = events.flatMap(event => event.kind === "tool_ready" ? [event.call] : []);
+			const final = events.find(event => event.kind === "requires_action");
+			expect(final).toMatchObject({ kind: "requires_action", calls: ready });
+			expect(ready[2]?.id).toBe("provider-owned-id");
+			for (const call of ready.slice(0, 2)) {
+				expect(call.id).toMatch(/^gemini_call_[a-f0-9-]+_\d+$/);
+				localIds.push(call.id);
+			}
+		}
+		expect(localIds).toHaveLength(6);
+		expect(new Set(localIds).size).toBe(6);
+	});
+
 	it("streams thought parts as reasoning instead of answer text", async () => {
 		stubStream([
 			`data: ${JSON.stringify({

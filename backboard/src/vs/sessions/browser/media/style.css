@@ -35,8 +35,8 @@
 /* T3's full sans stack, applied to the Simple window. Monaco surfaces (the
  * code editor, code blocks) keep their own configured mono face — matching
  * T3, whose `--font-mono` starts at the macOS-native SF Mono. The Advanced
- * and Jarvis windows keep the product's system font. */
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) {
+ * windows keep the product's system font. */
+.monaco-workbench.agent-sessions-workbench {
 	font-family: 'DM Sans Variable', 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
 }
 
@@ -76,13 +76,13 @@
 
 /* Simple mode uses the darker shell surface for the left sidebar while the
  * middle workspace and right auxiliary panel share the panel surface.
- * Advanced and Jarvis keep their existing assignments. */
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) {
+ * Advanced keeps its existing assignments. */
+.monaco-workbench.agent-sessions-workbench {
 	--sessions-sidebar-region-background: var(--vscode-agents-background, var(--vscode-editor-background));
 	--sessions-main-region-background: var(--vscode-agentsPanel-background, var(--vscode-editor-background));
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.auxiliarybar {
+.monaco-workbench.agent-sessions-workbench .part.auxiliarybar {
 	--sessions-main-region-background: var(--vscode-agentsPanel-background, var(--vscode-editor-background));
 }
 
@@ -228,9 +228,10 @@
 }
 
 /* The sessions panel also owns the line on the opposite side of the sidebar.
- * Remove only that left divider in Simple mode; the right-panel divider stays. */
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.phone-layout) > .monaco-grid-view > .monaco-grid-branch-node > .monaco-split-view2.vertical > .monaco-scrollable-element > .split-view-container > .split-view-view:has(> .monaco-grid-branch-node .part.sidebar) > .monaco-grid-branch-node > .monaco-split-view2.horizontal > .monaco-scrollable-element > .split-view-container > .split-view-view:has(> .monaco-grid-branch-node .part.sessionspart)::after {
+ * Rounded sidebars must not leave a straight divider behind their corners. */
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout) > .monaco-grid-view > .monaco-grid-branch-node > .monaco-split-view2.vertical > .monaco-scrollable-element > .split-view-container > .split-view-view:has(> .monaco-grid-branch-node .part.sidebar) > .monaco-grid-branch-node > .monaco-split-view2.horizontal > .monaco-scrollable-element > .split-view-container > .split-view-view:has(> .monaco-grid-branch-node .part.sessionspart)::after {
 	border-left: 0 !important;
+	border-right: 0 !important;
 }
 
 /**
@@ -251,9 +252,9 @@
 	box-sizing: border-box;
 }
 
-/* Simple mode treats the left panel as a resizable rounded surface resting
- * above the workspace. Keep the shared edge completely unpainted. */
-.monaco-workbench.agent-sessions-workbench:not(.jarvis-window):not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sidebar) {
+/* Keep the simple-mode sidebar flat against the workspace, including its
+ * header edge, without an overlapping shadow. */
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sidebar) {
 	z-index: 1;
 	overflow: visible !important;
 	background: var(--sessions-main-region-background) !important;
@@ -262,55 +263,52 @@
 	outline: 0 !important;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.jarvis-window):not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sidebar)::after {
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sidebar)::after {
 	display: none;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.jarvis-window):not(.phone-layout) .part.sidebar {
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout) .part.sidebar {
 	position: relative;
 	z-index: 1;
 	overflow: hidden;
 	border-right: 0 !important;
-	border-radius: 0 14px 14px 0 !important;
-	/* A broad, offset shadow gives the opaque rail separation from a custom
-	 * image without reintroducing the hard one-pixel divider. */
-	box-shadow: 10px 0 28px -12px color-mix(in srgb, #000 62%, transparent) !important;
+	border-radius: 0 !important;
+	box-shadow: none !important;
 	outline: 0 !important;
 }
 
-/* Keep the resize hit target, but do not paint a second edge over the sidebar.
- * The sidebar's own border radius is the only visible boundary. */
-.monaco-workbench.agent-sessions-workbench:not(.jarvis-window):not(.phone-layout) .monaco-split-view2.horizontal:has(.part.sidebar) > .sash-container > .monaco-sash.vertical {
+/* Keep the resize hit target without painting another edge over the sidebar. */
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout) .monaco-split-view2.horizontal:has(.part.sidebar) > .sash-container > .monaco-sash.vertical {
 	background: transparent !important;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.jarvis-window):not(.phone-layout) .monaco-split-view2.horizontal:has(.part.sidebar) > .sash-container > .monaco-sash.vertical::before,
-.monaco-workbench.agent-sessions-workbench:not(.jarvis-window):not(.phone-layout) .monaco-split-view2.horizontal:has(.part.sidebar) > .sash-container > .monaco-sash.vertical::after {
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout) .monaco-split-view2.horizontal:has(.part.sidebar) > .sash-container > .monaco-sash.vertical::before,
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout) .monaco-split-view2.horizontal:has(.part.sidebar) > .sash-container > .monaco-sash.vertical::after {
 	display: none !important;
 }
 
 /* When the primary sidebar is collapsed, the remaining left rail is the
  * Activity Bar. Its stock bordered pseudo-element and nosidebar shadow paint
  * the same vertical divider independently of the sidebar and resize sash. */
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.phone-layout) .part.activitybar {
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout) .part.activitybar {
 	border-right: 0 !important;
 	box-shadow: none !important;
 	outline: 0 !important;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.phone-layout) .activitybar.left.bordered::before {
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout) .activitybar.left.bordered::before {
 	display: none !important;
 }
 
 /* The sessions panel's grid wrapper insets its own one-pixel divider on this
  * same shared edge (the box-shadow form used elsewhere between parts). Drop
  * it as well: the invisible resize sash is the only thing left on the edge. */
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sessionspart) {
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sessionspart) {
 	box-shadow: none !important;
 }
 
-.monaco-workbench.hc-black.agent-sessions-workbench:not(.jarvis-window):not(.phone-layout) .part.sidebar,
-.monaco-workbench.hc-light.agent-sessions-workbench:not(.jarvis-window):not(.phone-layout) .part.sidebar {
+.monaco-workbench.hc-black.agent-sessions-workbench:not(.phone-layout) .part.sidebar,
+.monaco-workbench.hc-light.agent-sessions-workbench:not(.phone-layout) .part.sidebar {
 	box-shadow: none;
 }
 
@@ -646,24 +644,15 @@
 		opacity 140ms ease-out;
 }
 
-/* ---------------------------------------------------------------------------
- * Opening the sessions side/auxiliary bar rebuilds its pane composite
- * synchronously, which briefly blocks the main thread. Two things make an
- * animated OPEN look bad here specifically:
- *   1. A width-based reveal (see part.css) runs on the main thread, so it
- *      freezes during the rebuild and reads as a janky pop.
- *   2. These panels use a translucent (frosted-glass) background. Animating a
- *      compositor property (transform/opacity) promotes the panel to its own
- *      layer, whose backing store Chromium initializes opaque white before the
- *      translucent content paints — a white flash.
- * So on OPEN we simply SNAP the panel in (no transition, no layer promotion):
- * no jank, no flash. CLOSE keeps the smooth width transition from part.css —
- * it has no rebuild, so no main-thread block, and width does not promote a
- * layer, so no flash. Scoped to open via `:not(.nosidebar)` / `:not(.noauxiliarybar)`.
- * ------------------------------------------------------------------------- */
-.agent-sessions-workbench.parts-animating:not(.phone-layout):not(.nosidebar) .monaco-grid-view .split-view-view:has(> .part.sidebar),
-.agent-sessions-workbench.parts-animating:not(.phone-layout):not(.noauxiliarybar) .monaco-grid-view .split-view-view:has(> .part.auxiliarybar) {
-	transition: none !important;
+/* The Simple/Advanced root grid has a branch for the chat + terminal column.
+ * Animate those immediate root children too so that column and the editor move
+ * with a side panel instead of snapping to their final width ahead of it. */
+.agent-sessions-workbench.parts-animating:not(:has(.monaco-sash.active)):not(.phone-layout) > .monaco-grid-view > .monaco-grid-branch-node > .monaco-split-view2 > .monaco-scrollable-element > .split-view-container > .split-view-view {
+	transition:
+		width 280ms cubic-bezier(0.22, 1, 0.36, 1),
+		height 280ms cubic-bezier(0.22, 1, 0.36, 1),
+		left 280ms cubic-bezier(0.22, 1, 0.36, 1),
+		top 280ms cubic-bezier(0.22, 1, 0.36, 1) !important;
 }
 
 .agent-sessions-workbench .part.sessionspart > .title {
@@ -1210,7 +1199,7 @@
 /* Simple mode keeps layout sashes interactive without drawing their active
  * vertical/horizontal rails. Scope this to workbench grid sashes so resizers
  * inside editors, browsers, and other embedded widgets retain their feedback. */
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window):not(.phone-layout) .monaco-grid-view .monaco-grid-branch-node > .monaco-split-view2 > .sash-container > .monaco-sash::before {
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .monaco-grid-branch-node > .monaco-split-view2 > .sash-container > .monaco-sash::before {
 	display: none !important;
 	background: transparent !important;
 }
@@ -1353,23 +1342,23 @@
  * conversation is on screen at once, and the transcript runs in a narrower
  * column than the shared 20px gutters set above — still full-panel width
  * rather than a hard reading-column cap, just pulled further off the edges. */
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .interactive-item-container,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session > .chat-suggest-next-widget {
+.agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container,
+.agent-sessions-workbench .part.sessionspart .interactive-session > .chat-suggest-next-widget {
 	padding-left: 32px;
 	padding-right: 32px;
 }
 
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .interactive-item-container {
+.agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container {
 	padding-top: 0;
 	padding-bottom: 8px;
 }
 
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .interactive-item-container.interactive-request {
+.agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container.interactive-request {
 	padding-top: 8px;
 }
 
 /* The composer keeps the same gutters as the transcript above it. */
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .interactive-input-part {
+.agent-sessions-workbench .part.sessionspart .interactive-session .interactive-input-part {
 	padding-left: 32px;
 	padding-right: 32px;
 }
@@ -1378,29 +1367,29 @@
  * Smaller type and a tighter rhythm so more of the conversation fits on
  * screen: 13px prose on snugger lines, a slimmer prompt bubble, narrower
  * gutters, and a shorter composer shell. */
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .interactive-item-container .value .rendered-markdown {
+.agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container .value .rendered-markdown {
 	font-size: 13px;
 	line-height: 1.45;
 }
 
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown {
+.agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown {
 	font-size: 13px;
 	margin-bottom: 4px;
 	padding: 7px 10px;
 	border-radius: 12px;
 }
 
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .interactive-item-container,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session > .chat-suggest-next-widget {
+.agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container,
+.agent-sessions-workbench .part.sessionspart .interactive-session > .chat-suggest-next-widget {
 	padding-left: 20px;
 	padding-right: 20px;
 }
 
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .interactive-item-container {
+.agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container {
 	padding-bottom: 4px;
 }
 
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .chat-view-chat.backboard-clean-chat.backboard-composer .interactive-session .interactive-input-part {
+.agent-sessions-workbench .part.sessionspart .chat-view-chat.backboard-clean-chat.backboard-composer .interactive-session .interactive-input-part {
 	/* Match the code editor's sent-chat composer box model exactly. The inset
 	 * belongs to the composer's width, not inner padding, so Monaco and the
 	 * footer controls receive the same content width in both hosts. */
@@ -1409,17 +1398,17 @@
 	padding: 0 0 10px;
 }
 
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .interactive-input-part .chat-input-container {
+.agent-sessions-workbench .part.sessionspart .interactive-session .interactive-input-part .chat-input-container {
 	padding: 2px 10px 6px;
 }
 
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .interactive-input-part .chat-input-toolbars {
+.agent-sessions-workbench .part.sessionspart .interactive-session .interactive-input-part .chat-input-toolbars {
 	margin-top: 4px;
 }
 
 /* …except the inline edit box inside a sent request, which is already inset by
  * the row it lives in. */
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .chat-edit-input-container .interactive-input-part {
+.agent-sessions-workbench .part.sessionspart .interactive-session .chat-edit-input-container .interactive-input-part {
 	padding-left: 0;
 	padding-right: 0;
 }
@@ -1430,7 +1419,7 @@
  * entrance; neutralise all of those so Simple mode streams like T3. The
  * `animationend` cleanup listener never fires once the animation is gone, so
  * the class lingers on the element — the resets below make that harmless. */
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart :is(
+.agent-sessions-workbench .part.sessionspart :is(
 	.chat-smooth-animate-fade,
 	.chat-smooth-animate-rise,
 	.chat-smooth-animate-blur,
@@ -1448,13 +1437,13 @@
  * not a permanent row under the reply. The response details (model name,
  * credits) stay visible on every completed response, so only the action
  * buttons are gated. */
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-item-container.interactive-response .chat-footer-toolbar .monaco-action-bar {
+.agent-sessions-workbench .part.sessionspart .interactive-item-container.interactive-response .chat-footer-toolbar .monaco-action-bar {
 	opacity: 0;
 	transition: opacity 200ms;
 }
 
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-item-container.interactive-response:hover .chat-footer-toolbar .monaco-action-bar,
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-item-container.interactive-response:focus-within .chat-footer-toolbar .monaco-action-bar {
+.agent-sessions-workbench .part.sessionspart .interactive-item-container.interactive-response:hover .chat-footer-toolbar .monaco-action-bar,
+.agent-sessions-workbench .part.sessionspart .interactive-item-container.interactive-response:focus-within .chat-footer-toolbar .monaco-action-bar {
 	opacity: 1;
 }
 
@@ -1483,7 +1472,7 @@
  * every context the composer renders in — the session host (`.part.sessionspart`)
  * and the editor host (`.chat-editor-relative`), and any request/working state —
  * so it never falls back to the darker default. */
-.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) {
+.agent-sessions-workbench {
 	--sessions-codex-surface-background: var(--sessions-main-region-background, var(--vscode-editor-background));
 }
 
@@ -1566,11 +1555,11 @@
  * send button. Colours stay on theme tokens, so this block holds in light
  * themes too. Scoped to the Simple
  * window and the Advanced window's right chat panel (`.optimus-chat-view`,
- * via the `:is()` host lists); the rest of Advanced and Jarvis keep the
+ * via the `:is()` host lists); the rest of Advanced keeps the
  * stock composer. */
 
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-container,
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .chat-editor-relative .interactive-session .chat-input-container {
+:is(.monaco-workbench.agent-sessions-workbench .part.sessionspart, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-container,
+.monaco-workbench.agent-sessions-workbench .chat-editor-relative .interactive-session .chat-input-container {
 	border-radius: 22px;
 	box-shadow: none;
 	min-height: 110px;
@@ -1579,22 +1568,22 @@
 }
 
 /* Keep the drop shadow underneath the focus ring. */
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-container.focused,
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .chat-editor-relative .interactive-session .chat-input-container.focused {
+:is(.monaco-workbench.agent-sessions-workbench .part.sessionspart, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-container.focused,
+.monaco-workbench.agent-sessions-workbench .chat-editor-relative .interactive-session .chat-input-container.focused {
 	box-shadow:
 		0 0 0 2px color-mix(in srgb, var(--vscode-agentsChatInput-focusBorder, var(--vscode-focusBorder)) 20%, transparent);
 }
 
 /* Lift the Simple-mode composer off image backgrounds with a soft drop shadow.
- * Keep this out of the Advanced and Jarvis composer variants, which retain
+ * Keep this out of the Advanced composer variants, which retain
  * their existing chrome. */
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .chat-input-container {
+.monaco-workbench.agent-sessions-workbench .part.sessionspart .interactive-session .chat-input-container {
 	box-shadow:
 		0 14px 30px -14px color-mix(in srgb, #000 50%, transparent),
 		0 4px 10px -6px color-mix(in srgb, #000 30%, transparent);
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart .interactive-session .chat-input-container.focused {
+.monaco-workbench.agent-sessions-workbench .part.sessionspart .interactive-session .chat-input-container.focused {
 	box-shadow:
 		0 0 0 2px color-mix(in srgb, var(--vscode-agentsChatInput-focusBorder, var(--vscode-focusBorder)) 20%, transparent),
 		0 14px 30px -14px color-mix(in srgb, #000 50%, transparent),
@@ -1602,8 +1591,8 @@
 }
 
 /* Once a transcript exists, match the right panel's compact reply state. */
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session:not(.chat-composer-empty) .chat-input-container,
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .chat-editor-relative .interactive-session:not(.chat-composer-empty) .chat-input-container {
+:is(.monaco-workbench.agent-sessions-workbench .part.sessionspart, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session:not(.chat-composer-empty) .chat-input-container,
+.monaco-workbench.agent-sessions-workbench .chat-editor-relative .interactive-session:not(.chat-composer-empty) .chat-input-container {
 	min-height: var(--bb-simple-sent-composer-min-height, 58px);
 	padding: var(--bb-simple-sent-composer-padding, 5px 8px);
 	gap: var(--bb-simple-sent-composer-gap, 2px);
@@ -1612,8 +1601,8 @@
 
 /* A draft uses the same compact shell as a reply. The full window contributes
  * width, not a separate hero-card height. */
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container,
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .chat-editor-relative .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container {
+:is(.monaco-workbench.agent-sessions-workbench .part.sessionspart, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container,
+.monaco-workbench.agent-sessions-workbench .chat-editor-relative .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container {
 	min-height: var(--bb-simple-sent-composer-min-height, 58px);
 	padding: var(--bb-simple-sent-composer-padding, 5px 8px);
 	gap: var(--bb-simple-sent-composer-gap, 2px);
@@ -1625,8 +1614,8 @@
 
 /* The inline edit box inside a sent request shares `.chat-input-container` but
  * is a compact bubble, not the main shell — keep it near the stock look. */
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-edit-input-container .chat-input-container,
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .chat-editor-relative .interactive-session .chat-edit-input-container .chat-input-container {
+:is(.monaco-workbench.agent-sessions-workbench .part.sessionspart, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-edit-input-container .chat-input-container,
+.monaco-workbench.agent-sessions-workbench .chat-editor-relative .interactive-session .chat-edit-input-container .chat-input-container {
 	border-radius: 12px;
 	box-shadow: none;
 	padding: 0 6px 6px;
@@ -1634,7 +1623,7 @@
 
 /* Editing a sent request still blocks the surrounding transcript and the main
  * composer, but it should not paint a dark spotlight over them. */
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session :is(.chat-row-disabled-overlay.disabled, .chat-input-overlay.disabled) {
+:is(.monaco-workbench.agent-sessions-workbench .part.sessionspart, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session :is(.chat-row-disabled-overlay.disabled, .chat-input-overlay.disabled) {
 	background-color: transparent;
 	opacity: 1;
 }
@@ -1642,7 +1631,7 @@
 /* Room for the taller controls between the editor and the footer row. The
  * container already supplies 12px of side inset, so the row itself sits flush
  * with it and only adds vertical breathing room. */
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars {
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars {
 	height: 28px;
 	min-height: 28px;
 	margin-top: 0;
@@ -1660,12 +1649,12 @@
  * secondary toolbar in chatInputPart), so it needs its own separation from the
  * pickers on its left and the send button on its right — `margin-left: auto`
  * from chat.css only handles the former. */
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars .chat-context-usage-container {
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars .chat-context-usage-container {
 	margin-left: auto;
 	margin-right: 8px;
 }
 
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars .chat-context-usage-widget {
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars .chat-context-usage-widget {
 	padding: 4px 6px;
 	border-radius: 10px;
 }
@@ -1674,14 +1663,14 @@
  * container contributes 12px; the editor row supplies the rest. Safe against
  * Monaco's layout — chatInputPart caps the editor at the container's *content*
  * width (`dom.getContentWidth`), which excludes this padding. */
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .interactive-input-part .chat-editor-container,
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .chat-editor-relative .interactive-session .interactive-input-part .chat-editor-container {
+:is(.monaco-workbench.agent-sessions-workbench .part.sessionspart, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .interactive-input-part .chat-editor-container,
+.monaco-workbench.agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-input-part .chat-editor-container {
 	padding: 0 4px;
 }
 
 /* Keep the prompt inset identical to the right-panel composer. */
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .part.sessionspart, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-editor-container,
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window) .chat-editor-relative .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-editor-container {
+:is(.monaco-workbench.agent-sessions-workbench .part.sessionspart, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-editor-container,
+.monaco-workbench.agent-sessions-workbench .chat-editor-relative .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-editor-container {
 	padding: 0 2px;
 }
 
@@ -1692,8 +1681,8 @@
  * `.sessions-chat-picker-slot`, both between the action-item and its label.
  * `!important` counters the workbench-wide `border-radius: 0 !important`
  * action-label flattener at the top of this file. */
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .monaco-action-bar .action-item .action-label:not(.model-picker-split),
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item .action-label.codicon-mic {
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .monaco-action-bar .action-item .action-label:not(.model-picker-split),
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item .action-label.codicon-mic {
 	height: 28px;
 	min-width: 28px;
 	box-sizing: border-box;
@@ -1710,12 +1699,12 @@
 }
 
 /* Rounded hover container on every footer control (T3's ghost-button hover). */
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .monaco-action-bar .action-item:not(.disabled) .action-label:not(.model-picker-split):hover,
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) .action-label.codicon-mic:hover {
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .monaco-action-bar .action-item:not(.disabled) .action-label:not(.model-picker-split):hover,
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) .action-label.codicon-mic:hover {
 	background-color: var(--vscode-toolbar-hoverBackground);
 }
 
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-picker-item .action-label.model-picker-split .model-picker-section {
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-picker-item .action-label.model-picker-split .model-picker-section {
 	height: 22px;
 	padding: 0 7px;
 	box-sizing: border-box;
@@ -1724,37 +1713,37 @@
 
 /* The model selector belongs to the same inline toolbar as Add. Remove the
  * persistent chip surface while retaining a compact hover/focus affordance. */
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .combined-model-provider-trigger {
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .combined-model-provider-trigger {
 	border: 0;
 	background: transparent !important;
 	box-shadow: none;
 }
 
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .chat-input-picker-item .action-label.model-picker-split,
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .chat-input-picker-item .action-label.model-picker-split .model-picker-section {
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .chat-input-picker-item .action-label.model-picker-split,
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .chat-input-picker-item .action-label.model-picker-split .model-picker-section {
 	border: 0;
 	background: transparent;
 	box-shadow: none;
 }
 
 /* Chips with a text label get T3's chip padding (`px-2`). */
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .monaco-action-bar .action-item .action-label:not(.model-picker-split):has(.chat-input-picker-label),
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .monaco-action-bar .action-item .action-label:not(.model-picker-split):has(.combined-model-provider-trigger-label),
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .monaco-action-bar .action-item .action-label:not(.model-picker-split):has(.sessions-chat-dropdown-label) {
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .monaco-action-bar .action-item .action-label:not(.model-picker-split):has(.chat-input-picker-label),
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .monaco-action-bar .action-item .action-label:not(.model-picker-split):has(.combined-model-provider-trigger-label),
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .monaco-action-bar .action-item .action-label:not(.model-picker-split):has(.sessions-chat-dropdown-label) {
 	padding: 0 8px;
 }
 
 /* Row icons: T3's `size-4.5` (18px) for the icon-only controls. The labels
  * here are the codicon glyphs themselves, and the 28px/32px flex boxes above
  * give the larger glyph room, so nothing clips. */
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .monaco-action-bar .action-item .action-label.codicon,
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item .action-label.codicon {
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .monaco-action-bar .action-item .action-label.codicon,
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item .action-label.codicon {
 	font-size: 18px;
 }
 
 /* The provider mark inside the model chip sits in a fixed 16px codicon box
  * (actionbar.css), so free the box alongside the size bump. */
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .combined-model-provider-trigger-icon .codicon {
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .combined-model-provider-trigger-icon .codicon {
 	font-size: 16px;
 	width: auto;
 	height: auto;
@@ -1762,9 +1751,9 @@
 
 /* Dropdown chevrons scale with the rest of the row. The combined picker's
  * chevron span *is* the codicon element, so match it directly too. */
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .chat-input-picker-item .action-label .codicon-chevron-down,
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .codicon.combined-model-provider-trigger-chevron,
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .combined-model-provider-trigger-chevron .codicon {
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .chat-input-picker-item .action-label .codicon-chevron-down,
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .codicon.combined-model-provider-trigger-chevron,
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .combined-model-provider-trigger-chevron .codicon {
 	font-size: 12px;
 }
 
@@ -1773,9 +1762,9 @@
  * their destructive red circle. This fork's submit action uses
  * `Codicon.newLine` (↵) — the stock filled-circle rules in chat.css only cover
  * `codicon-arrow-up`, so the fill is applied here for both glyphs. */
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-arrow-up,
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-newline,
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-stop-circle {
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-arrow-up,
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-newline,
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-stop-circle {
 	box-sizing: border-box;
 	width: 32px;
 	height: 32px;
@@ -1788,46 +1777,46 @@
 	transition: background-color 120ms ease, transform 150ms ease, box-shadow 150ms ease;
 }
 
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session:not(.chat-composer-empty) .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > :is(.action-label.codicon-arrow-up, .action-label.codicon-newline, .action-label.codicon-stop-circle) {
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session:not(.chat-composer-empty) .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > :is(.action-label.codicon-arrow-up, .action-label.codicon-newline, .action-label.codicon-stop-circle) {
 	width: 24px;
 	height: 24px;
 	min-width: 24px;
 }
 
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-arrow-up,
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-newline {
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-arrow-up,
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-newline {
 	background: var(--vscode-button-background);
 	color: var(--vscode-button-foreground) !important;
 	box-shadow: 0 1px 2px var(--vscode-widget-shadow, transparent);
 }
 
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-arrow-up:hover,
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-newline:hover {
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-arrow-up:hover,
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-newline:hover {
 	background: var(--vscode-button-hoverBackground);
 }
 
 /* The stop button sits on the composer rather than shouting from it: it takes
  * the composer's own surface colour instead of T3's destructive red, so the
  * only thing that reads during a run is the glyph. */
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-stop-circle {
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-stop-circle {
 	background: var(--sessions-codex-surface-background);
 	color: var(--vscode-foreground) !important;
 	box-shadow: none;
 }
 
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-stop-circle:hover {
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-stop-circle:hover {
 	background: color-mix(in srgb, var(--vscode-foreground) 10%, var(--sessions-codex-surface-background));
 }
 
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-arrow-up:hover,
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-newline:hover,
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-stop-circle:hover {
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-arrow-up:hover,
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-newline:hover,
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-stop-circle:hover {
 	transform: scale(1.05);
 }
 
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-arrow-up:active,
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-newline:active,
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-stop-circle:active {
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-arrow-up:active,
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-newline:active,
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-stop-circle:active {
 	transform: scale(1);
 	box-shadow: inset 0 1px 0 var(--vscode-widget-shadow, transparent);
 }
@@ -1836,17 +1825,17 @@
  * via `opacity` washes the glyph out against light themes (white arrow over a
  * 30%-alpha fill), so mix the fade into the fill instead and keep the glyph
  * at full strength. */
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item.disabled > .action-label.codicon-arrow-up,
-:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item.disabled > .action-label.codicon-newline {
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item.disabled > .action-label.codicon-arrow-up,
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item.disabled > .action-label.codicon-newline {
 	background: color-mix(in srgb, var(--vscode-button-background) 45%, var(--vscode-agentsChatInput-background, var(--vscode-editor-background)));
 	color: var(--vscode-button-foreground) !important;
 	opacity: 1;
 }
 
 @media (prefers-reduced-motion: reduce) {
-	:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-arrow-up,
-	:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-newline,
-	:is(.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.jarvis-window), .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-stop-circle {
+	:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-arrow-up,
+	:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-newline,
+	:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-stop-circle {
 		transition: background-color 120ms ease;
 		transform: none;
 	}
@@ -1858,8 +1847,8 @@
  * on one sizing scale; labels yield with an ellipsis before fixed controls can
  * clip or escape the shell. */
 :is(
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .part.sessionspart,
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
 	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
 ) .interactive-session {
 	--bb-sessions-composer-control-size: 28px;
@@ -1868,8 +1857,8 @@
 }
 
 :is(
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .part.sessionspart,
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
 	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
 ) .interactive-session:not(.chat-composer-empty) {
 	--bb-sessions-composer-control-size: 24px;
@@ -1878,8 +1867,8 @@
 }
 
 :is(
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .part.sessionspart,
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
 	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
 ) .interactive-session .chat-input-toolbars {
 	box-sizing: border-box;
@@ -1892,8 +1881,8 @@
 }
 
 :is(
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .part.sessionspart,
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
 	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
 ) .interactive-session .chat-input-toolbars > .chat-input-toolbar {
 	width: auto;
@@ -1904,8 +1893,8 @@
 }
 
 :is(
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .part.sessionspart,
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
 	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
 ) .interactive-session .chat-input-toolbars > .chat-execute-toolbar {
 	min-width: 0;
@@ -1913,13 +1902,13 @@
 }
 
 :is(
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .part.sessionspart,
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
 	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
 ) .interactive-session .chat-input-toolbars .monaco-action-bar,
 :is(
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .part.sessionspart,
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
 	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
 ) .interactive-session .chat-input-toolbars .monaco-action-bar .actions-container {
 	min-width: 0;
@@ -1928,21 +1917,21 @@
 }
 
 :is(
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .part.sessionspart,
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
 	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
 ) .interactive-session .chat-input-toolbar > .monaco-action-bar,
 :is(
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .part.sessionspart,
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
 	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
 ) .interactive-session .chat-input-toolbar > .monaco-action-bar > .actions-container {
 	width: 100%;
 }
 
 :is(
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .part.sessionspart,
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
 	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
 ) .interactive-session .chat-input-toolbars .monaco-action-bar .action-item {
 	box-sizing: border-box;
@@ -1953,26 +1942,26 @@
 /* Add, mic and submit/stop never shrink. Their glyphs share one optical size,
  * while the round primary action now fits inside the footer's actual height. */
 :is(
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .part.sessionspart,
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
 	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
 ) .interactive-session .chat-input-toolbar .action-item:has(.action-label.codicon-add),
 :is(
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .part.sessionspart,
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
 	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
 ) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .action-item {
 	flex: 0 0 auto;
 }
 
 :is(
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .part.sessionspart,
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
 	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
 ) .interactive-session .chat-input-toolbar .monaco-action-bar .action-item .action-label.codicon,
 :is(
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .part.sessionspart,
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
 	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
 ) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item .action-label.codicon {
 	font-size: var(--bb-sessions-composer-icon-size);
@@ -1980,18 +1969,18 @@
 }
 
 :is(
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .part.sessionspart,
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
 	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
 ) .interactive-session .chat-input-toolbar .action-label.codicon-add,
 :is(
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .part.sessionspart,
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
 	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
 ) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .action-label.codicon-mic,
 :is(
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .part.sessionspart,
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
 	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
 ) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .action-item > :is(.action-label.codicon-arrow-up, .action-label.codicon-newline, .action-label.codicon-stop-circle) {
 	box-sizing: border-box;
@@ -2008,13 +1997,13 @@
  * carry a real minimum of zero all the way to their text spans, which is the
  * missing link required for text-overflow to work inside an action bar. */
 :is(
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .part.sessionspart,
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
 	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
 ) .interactive-session .chat-input-toolbar .action-item:has(.sessions-chat-dropdown-label),
 :is(
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .part.sessionspart,
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
 	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
 ) .interactive-session .chat-input-toolbar .chat-model-picker-action-item {
 	min-width: 0;
@@ -2022,16 +2011,16 @@
 }
 
 :is(
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .part.sessionspart,
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
 	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
 ) .interactive-session .chat-input-toolbar .action-item:has(.sessions-chat-dropdown-label) {
 	max-width: min(180px, 30cqi);
 }
 
 :is(
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .part.sessionspart,
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
 	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
 ) .interactive-session .chat-input-toolbar .chat-model-picker-action-item {
 	max-width: min(240px, 42cqi);
@@ -2039,8 +2028,8 @@
 }
 
 :is(
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .part.sessionspart,
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
 	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
 ) .interactive-session .chat-input-toolbar .combined-model-provider-trigger {
 	box-sizing: border-box;
@@ -2057,8 +2046,8 @@
 }
 
 :is(
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .part.sessionspart,
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
 	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
 ) .interactive-session :is(.chat-input-picker-label, .combined-model-provider-trigger-label, .combined-model-provider-trigger-thinking, .sessions-chat-dropdown-label) {
 	min-width: 0;
@@ -2072,8 +2061,8 @@
 }
 
 :is(
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .part.sessionspart,
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
 	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
 ) .interactive-session .chat-input-toolbar .action-label:has(.sessions-chat-dropdown-label) {
 	box-sizing: border-box;
@@ -2086,8 +2075,8 @@
 }
 
 :is(
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .part.sessionspart,
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
 	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
 ) .interactive-session .chat-input-toolbar :is(.combined-model-provider-trigger-icon .codicon, .action-label:has(.sessions-chat-dropdown-label) > .codicon) {
 	flex: 0 0 auto;
@@ -2095,8 +2084,8 @@
 }
 
 :is(
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .part.sessionspart,
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
 	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
 ) .interactive-session .chat-input-toolbar :is(.combined-model-provider-trigger-chevron, .combined-model-provider-trigger-chevron .codicon, .codicon-chevron-down) {
 	flex: 0 0 auto;
@@ -2106,8 +2095,8 @@
 /* Match the overlaid context meter to the current control scale. This keeps
  * its hit target inside the same top/right inset in both editor hosts. */
 :is(
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .part.sessionspart,
-	.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
 	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
 ) .interactive-session .chat-input-container > .chat-context-usage-container .chat-context-usage-widget {
 	box-sizing: border-box;
@@ -2118,16 +2107,16 @@
 
 @container chat-input-part (max-width: 420px) {
 	:is(
-		.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .part.sessionspart,
-		.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .chat-editor-relative,
+		.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+		.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
 		.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
 	) .interactive-session .chat-input-toolbar .action-item:has(.sessions-chat-dropdown-label) {
 		max-width: 28cqi;
 	}
 
 	:is(
-		.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .part.sessionspart,
-		.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .chat-editor-relative,
+		.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+		.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
 		.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
 	) .interactive-session .chat-input-toolbar .chat-model-picker-action-item {
 		max-width: 38cqi;
@@ -2136,21 +2125,13 @@
 
 @container chat-input-part (max-width: 340px) {
 	:is(
-		.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .part.sessionspart,
-		.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .chat-editor-relative,
+		.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+		.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
 		.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
 	) .interactive-session .chat-input-container {
 		--bb-sessions-composer-control-size: 24px;
 		--bb-sessions-composer-icon-size: 14px;
 		--bb-sessions-composer-label-size: 12px;
-	}
-
-	:is(
-		.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .part.sessionspart,
-		.monaco-workbench.agent-sessions-workbench:not(.jarvis-window) .chat-editor-relative,
-		.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
-	) .interactive-session .combined-model-provider-trigger-thinking {
-		display: none;
 	}
 }
 
@@ -2163,7 +2144,7 @@
  * these are the only control that can reach a BYOS ("bring your own server")
  * agent provider there — hiding them made BYOS unselectable in that window.
  * Drop the exclusion once Advanced grows its own provider picker. */
-.agent-sessions-workbench:not(.optimus-window) .interactive-session .chat-input-toolbars .chat-sessionPicker-container {
+.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .interactive-session .chat-input-toolbars .chat-sessionPicker-container {
 	display: none;
 }
 
@@ -2371,8 +2352,9 @@
 
 	.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sessionspart),
 	.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sidebar),
-	.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view:has(> .monaco-grid-branch-node .part.sidebar) {
-		transition: none;
+	.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view:has(> .monaco-grid-branch-node .part.sidebar),
+	.agent-sessions-workbench.parts-animating:not(:has(.monaco-sash.active)):not(.phone-layout) > .monaco-grid-view > .monaco-grid-branch-node > .monaco-split-view2 > .monaco-scrollable-element > .split-view-container > .split-view-view {
+		transition: none !important;
 	}
 }
 
@@ -2635,5 +2617,54 @@
 	to {
 		transform: translateX(0);
 		opacity: 1;
+	}
+}
+
+/* Keep the changed-files summary close to the density of its file rows. */
+.agent-sessions-workbench .backboard-clean-chat .checkpoint-file-changes-summary {
+	margin-top: 6px;
+	padding: 3px 5px;
+	border-radius: 9px;
+	box-shadow: none;
+}
+.agent-sessions-workbench .backboard-clean-chat .checkpoint-file-changes-summary .checkpoint-file-changes-summary-header {
+	min-height: 22px;
+	padding: 0;
+}
+.agent-sessions-workbench .backboard-clean-chat .checkpoint-file-changes-summary .chat-file-changes-label .monaco-button {
+	min-height: 20px;
+	padding: 1px 3px;
+}
+
+/* Direct manipulation must track the sash, without toggle animations or
+ * repeatedly sampling the browser-sized glass surface during each frame. */
+.monaco-workbench.agent-sessions-workbench:has(.monaco-sash.active) .monaco-grid-view .split-view-view {
+	transition: none !important;
+}
+.monaco-workbench.agent-sessions-workbench:has(.monaco-sash.active) .part.auxiliarybar {
+	backdrop-filter: none !important;
+	-webkit-backdrop-filter: none !important;
+}
+
+/* Switch to the same brain and approval-hand controls as the editor when a
+ * wider right panel leaves less room for the composer. Titles stay accessible. */
+@container chat-input-part (max-width: 520px) {
+	.monaco-workbench.agent-sessions-workbench .interactive-session .chat-input-toolbar :is(
+		.combined-model-provider-trigger-label,
+		.combined-model-provider-trigger-thinking,
+		.combined-model-provider-trigger-icon,
+		.combined-model-provider-trigger-chevron,
+		.backboard-access-mode-trigger .agent-host-chat-input-picker-label
+	) {
+		display: none !important;
+	}
+	.monaco-workbench.agent-sessions-workbench .interactive-session .chat-input-toolbar .combined-model-provider-brain {
+		display: block;
+	}
+	.monaco-workbench.agent-sessions-workbench .interactive-session .chat-input-toolbar :is(.combined-model-provider-trigger, .backboard-access-mode-trigger) {
+		min-width: 28px;
+		width: 28px;
+		padding-inline: 6px;
+		justify-content: center;
 	}
 }

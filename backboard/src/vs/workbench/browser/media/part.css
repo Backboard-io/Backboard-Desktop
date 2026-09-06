@@ -97,14 +97,13 @@
 }
 
 /* ---------------------------------------------------------------------------
- * Animated open/close for the side bar, auxiliary bar (and panel).
+ * Animated open/close for the side bar, auxiliary bar, and bottom panel.
  *
  * While a part is toggled, the layout adds `.parts-animating` to the workbench
- * root for a short window. We transition the geometry of the top-level part
- * views so the panel slides and the editor glides to its new size, then remove
- * the class once the animation is done. Scoped to the outermost part views via
- * `:has(> .part)` so nested split views (editor groups, view panes) are not
- * affected unless they are actually resizing.
+ * root for a short window. The split-view geometry makes the surrounding editor
+ * glide into its new size while the part itself enters from (or leaves toward)
+ * the edge it is attached to. Keeping the movement on the outer part view avoids
+ * animating editor groups and the split views inside individual panes.
  * ------------------------------------------------------------------------- */
 .monaco-workbench.parts-animating .monaco-grid-view .split-view-view:has(> .part) {
 	/* !important so this wins over per-window rules that already set a (narrower)
@@ -113,12 +112,45 @@
 	   specific. Only active while the transient `.parts-animating` class is
 	   present, so it is safe. */
 	transition:
-		width 220ms cubic-bezier(0.16, 1, 0.3, 1),
-		height 220ms cubic-bezier(0.16, 1, 0.3, 1),
-		left 220ms cubic-bezier(0.16, 1, 0.3, 1),
-		top 220ms cubic-bezier(0.16, 1, 0.3, 1),
-		opacity 200ms ease-out !important;
+		width 280ms cubic-bezier(0.22, 1, 0.36, 1),
+		height 280ms cubic-bezier(0.22, 1, 0.36, 1),
+		left 280ms cubic-bezier(0.22, 1, 0.36, 1),
+		top 280ms cubic-bezier(0.22, 1, 0.36, 1) !important;
 	overflow: hidden;
+}
+
+/* The short directional travel keeps the panel attached to the edge it opens
+ * from. Geometry remains the primary motion; this is only a soft content lead
+ * that prevents a fully populated panel from appearing all at once. */
+.monaco-workbench.parts-animating .monaco-grid-view .split-view-view:has(> .part) > .part {
+	transition:
+		transform 280ms cubic-bezier(0.22, 1, 0.36, 1),
+		opacity 180ms cubic-bezier(0.33, 1, 0.68, 1) !important;
+	will-change: transform, opacity;
+}
+
+.monaco-workbench.parts-animating.nosidebar .part.sidebar.left,
+.monaco-workbench.parts-animating.noauxiliarybar .part.auxiliarybar.left,
+.monaco-workbench.parts-animating.nopanel .part.panel.left {
+	transform: translateX(-14px);
+	opacity: 0;
+}
+
+.monaco-workbench.parts-animating.nosidebar .part.sidebar.right,
+.monaco-workbench.parts-animating.noauxiliarybar .part.auxiliarybar.right,
+.monaco-workbench.parts-animating.nopanel .part.panel.right {
+	transform: translateX(14px);
+	opacity: 0;
+}
+
+.monaco-workbench.parts-animating.nopanel .part.panel.top {
+	transform: translateY(-12px);
+	opacity: 0;
+}
+
+.monaco-workbench.parts-animating.nopanel .part.panel.bottom {
+	transform: translateY(12px);
+	opacity: 0;
 }
 
 /* Keep a toggling part rendered (at size 0) while it animates in/out. This
@@ -134,10 +166,89 @@
 .monaco-workbench.parts-animating.nopanel .part.panel {
 	display: flex !important;
 	visibility: visible !important;
+	pointer-events: none;
+}
+
+/* Editor mode carries much denser surfaces than Simple mode. Give its layout
+ * resize an even, restrained curve and keep the populated surface opaque while
+ * it is clipped by the moving split-view edge. This avoids the "rush, then
+ * crawl" feeling of the more expressive Simple-mode reveal and keeps terminal
+ * text, trees, and editor chrome from ghosting as they close. */
+.monaco-workbench:not(.agent-sessions-workbench).parts-animating .monaco-grid-view .split-view-view:has(> .part) {
+	transition:
+		width 260ms cubic-bezier(0.4, 0, 0.2, 1),
+		height 260ms cubic-bezier(0.4, 0, 0.2, 1),
+		left 260ms cubic-bezier(0.4, 0, 0.2, 1),
+		top 260ms cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+.monaco-workbench:not(.agent-sessions-workbench).parts-animating .monaco-grid-view .split-view-view:has(> .part) > .part {
+	transition: transform 220ms cubic-bezier(0.4, 0, 0.2, 1) !important;
+	opacity: 1 !important;
+	will-change: transform;
+}
+
+.monaco-workbench:not(.agent-sessions-workbench).parts-animating.nosidebar .part.sidebar.left,
+.monaco-workbench:not(.agent-sessions-workbench).parts-animating.noauxiliarybar .part.auxiliarybar.left,
+.monaco-workbench:not(.agent-sessions-workbench).parts-animating.nopanel .part.panel.left {
+	transform: translateX(-8px);
+}
+
+.monaco-workbench:not(.agent-sessions-workbench).parts-animating.nosidebar .part.sidebar.right,
+.monaco-workbench:not(.agent-sessions-workbench).parts-animating.noauxiliarybar .part.auxiliarybar.right,
+.monaco-workbench:not(.agent-sessions-workbench).parts-animating.nopanel .part.panel.right {
+	transform: translateX(8px);
+}
+
+.monaco-workbench:not(.agent-sessions-workbench).parts-animating.nopanel .part.panel.top {
+	transform: translateY(-8px);
+}
+
+.monaco-workbench:not(.agent-sessions-workbench).parts-animating.nopanel .part.panel.bottom {
+	transform: translateY(8px);
 }
 
 @media (prefers-reduced-motion: reduce) {
-	.monaco-workbench.parts-animating .monaco-grid-view .split-view-view:has(> .part) {
-		transition: none;
+	.monaco-workbench.parts-animating .monaco-grid-view .split-view-view:has(> .part),
+	.monaco-workbench.parts-animating .monaco-grid-view .split-view-view:has(> .part) > .part {
+		transition: none !important;
 	}
+}
+
+.monaco-workbench .backboard-mode-segments {
+	display: inline-flex;
+	flex: 0 0 auto;
+	align-items: center;
+	padding: 0;
+	border-radius: 6px;
+	overflow: hidden;
+	background: var(--vscode-toolbar-hoverBackground);
+	-webkit-app-region: no-drag;
+}
+
+.monaco-workbench .backboard-mode-segments > .backboard-mode-segment {
+	appearance: none;
+	border: 0;
+	border-radius: 0;
+	padding: 0 10px;
+	height: 24px;
+	font: 500 12px/22px var(--vscode-font-family);
+	color: var(--vscode-descriptionForeground);
+	background: transparent;
+	cursor: pointer;
+}
+
+.monaco-workbench .backboard-mode-segments > .backboard-mode-segment:hover {
+	color: var(--vscode-foreground);
+	background: var(--vscode-toolbar-hoverBackground);
+}
+
+.monaco-workbench .backboard-mode-segments > .backboard-mode-segment[aria-pressed="true"] {
+	color: var(--vscode-foreground);
+	background: var(--vscode-toolbar-activeBackground, var(--vscode-input-background));
+}
+
+.monaco-workbench .backboard-mode-segments > .backboard-mode-segment:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
 }

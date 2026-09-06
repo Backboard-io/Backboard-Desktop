@@ -1,3 +1,4 @@
+import type { ToolExecutionMetadata } from "../tools/ToolFailure.ts";
 export type Role = "user" | "assistant" | "tool";
 
 export interface ToolCall {
@@ -11,6 +12,7 @@ export interface ToolResultRecord {
 	name: string;
 	output: unknown;
 	isError: boolean;
+	execution?: ToolExecutionMetadata;
 }
 
 export interface UserMessage {

@@ -316,15 +316,6 @@ export class NativeHostMainService extends Disposable implements INativeHostMain
 		}
 	}
 
-	async openJarvisWindow(windowId: number | undefined): Promise<void> {
-		const windows = await this.windowsMainService.openJarvisWindow({
-			context: OpenContext.API,
-			contextWindowId: windowId,
-			cli: this.environmentMainService.args,
-		});
-		windows[0]?.focus();
-	}
-
 	async openOptimusWindow(windowId: number | undefined): Promise<void> {
 		const windows = await this.windowsMainService.openOptimusWindow({
 			context: OpenContext.API,

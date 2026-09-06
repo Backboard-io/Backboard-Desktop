@@ -222,13 +222,22 @@ export class FileEditTracker extends Disposable {
 		return this._buildFileEdit(turnId, toolCallId, filePath, toolName, toolInput, modelId, beforeContent, afterContent, beforeText.length > 0);
 	}
 
-	private async _buildFileEdit(turnId: string, toolCallId: string, filePath: string, toolName: string, toolInput: unknown, modelId: string | undefined, beforeContent: VSBuffer, afterContent: VSBuffer, beforeExisted: boolean): Promise<ToolResultFileEditContent | undefined> {
+	/** Records verified integration bytes, preserving missing versus empty files. */
+	async recordExplicitSnapshot(turnId: string, toolCallId: string, filePath: string, before: Uint8Array | undefined, after: Uint8Array | undefined, modelId: string | undefined): Promise<ToolResultFileEditContent | undefined> {
+		if (this._store.isDisposed) {
+			return undefined;
+		}
+		return this._buildFileEdit(turnId, toolCallId, filePath, 'apply_worker_changes', undefined, modelId,
+			VSBuffer.wrap(before ?? new Uint8Array()), VSBuffer.wrap(after ?? new Uint8Array()), before !== undefined, after !== undefined);
+	}
+
+	private async _buildFileEdit(turnId: string, toolCallId: string, filePath: string, toolName: string, toolInput: unknown, modelId: string | undefined, beforeContent: VSBuffer, afterContent: VSBuffer, beforeExisted: boolean, afterExists = true): Promise<ToolResultFileEditContent | undefined> {
 		const beforeBytes = beforeContent.buffer;
 		const afterBytes = afterContent.buffer;
 		const beforeText = beforeContent.toString();
 		const afterText = afterContent.toString();
 
-		const isCreate = !beforeExisted && afterBytes.length > 0;
+		const isCreate = !beforeExisted && afterExists;
 
 		let addedLines: number | undefined;
 		let removedLines: number | undefined;
@@ -245,7 +254,7 @@ export class FileEditTracker extends Disposable {
 				turnId,
 				toolCallId,
 				filePath,
-				kind: isCreate ? FileEditKind.Create : FileEditKind.Edit,
+				kind: isCreate ? FileEditKind.Create : !afterExists ? FileEditKind.Delete : FileEditKind.Edit,
 				beforeContent: beforeBytes,
 				afterContent: afterBytes,
 				addedLines,
@@ -272,14 +281,16 @@ export class FileEditTracker extends Disposable {
 
 		return {
 			type: ToolResultContentType.FileEdit,
-			before: {
+			// Preserve the same creation classification used by the durable record;
+			// an empty before snapshot URI would incorrectly describe an edit.
+			...(!isCreate ? { before: {
 				uri: URI.file(filePath).toString(),
 				content: { uri: buildSessionDbUri(this._sessionUri, toolCallId, filePath, 'before') },
-			},
-			after: {
+			} } : {}),
+			...(afterExists ? { after: {
 				uri: URI.file(filePath).toString(),
 				content: { uri: buildSessionDbUri(this._sessionUri, toolCallId, filePath, 'after') },
-			},
+			} } : {}),
 			diff: addedLines !== undefined ? { added: addedLines, removed: removedLines } : undefined,
 		};
 	}

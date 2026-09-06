@@ -12,6 +12,7 @@ import type {
 	PermissionDecision,
 } from "../core/permissions/types.ts";
 import { Tool } from "../core/tools/Tool.ts";
+import { throwIfAborted } from "../core/tools/ToolAbort.ts";
 import type { ToolContext } from "../core/tools/ToolContext.ts";
 import { ok, type ToolResult } from "../core/tools/ToolResult.ts";
 import { assertInsideIsolatedWorkspace } from "../core/tools/WorkspaceBoundary.ts";
@@ -118,6 +119,7 @@ export class EditTool extends Tool<Input, Output> {
 		input: Input,
 		ctx: ToolContext,
 	): Promise<ToolResult<Output>> {
+		throwIfAborted(ctx.signal);
 		assertInsideIsolatedWorkspace(ctx, [input.file_path]);
 		const filePath = resolve(ctx.cwd, input.file_path);
 		const prepared = await measurePerformance(
@@ -127,76 +129,85 @@ export class EditTool extends Tool<Input, Output> {
 			async () => prepareEdit(filePath, input),
 		);
 		await ctx.mutationLockTurn?.wait();
-		const committed = await withPathLocks([filePath], async () => {
-			ctx.mutationLockTurn?.advance();
-			const originalBytes = await readFile(filePath);
-			const original = originalBytes.toString("utf8");
-			// The optimistic preparation normally keeps matching/diff work outside
-			// the lock. A preceding same-path edit can change the snapshot while
-			// this call waits; recompute against the authoritative locked contents
-			// so deterministic chained edits retain their existing semantics.
-			let edit: PreparedEditResult;
-			if (original === prepared.original) {
-				if (!prepared.edit) throw prepared.error;
-				edit = { original, ...prepared.edit };
-			} else {
-				edit = { original, ...applyTextReplacements(original, input.edits) };
-			}
-			const updatedBytes = Buffer.from(edit.updated, "utf8");
+		const mutation = withPathLocks(
+			[filePath],
+			async () => {
+				throwIfAborted(ctx.signal);
+				const originalBytes = await readFile(filePath);
+				const original = originalBytes.toString("utf8");
+				// The optimistic preparation normally keeps matching/diff work outside
+				// the lock. A preceding same-path edit can change the snapshot while
+				// this call waits; recompute against the authoritative locked contents
+				// so deterministic chained edits retain their existing semantics.
+				let edit: PreparedEditResult;
+				if (original === prepared.original) {
+					if (!prepared.edit) throw prepared.error;
+					edit = { original, ...prepared.edit };
+				} else {
+					edit = { original, ...applyTextReplacements(original, input.edits) };
+				}
+				const updatedBytes = Buffer.from(edit.updated, "utf8");
 
-			// Byte-exact pre-image (re-read internally; the utf8 `original` above
-			// is lossy for CRLF/BOM/binary) journaled before the write so the
-			// edit is undoable.
-			await measurePerformance(
-				ctx.bus,
-				"checkpoint_pre_flush",
-				{ toolCallId: ctx.toolCallId, fileCount: 1 },
-				async () =>
-					await (ctx.mutationCheckpointBatch?.recordPreImages(
-						[{ absPath: filePath, opts: { tool: this.name } }],
-						ctx,
-					) ??
-						recordPreImageBatch(
-							ctx.checkpoints,
-							[{ absPath: filePath, opts: { tool: this.name } }],
-							ctx,
-						)),
-			);
-			try {
+				// Byte-exact pre-image (re-read internally; the utf8 `original` above
+				// is lossy for CRLF/BOM/binary) journaled before the write so the
+				// edit is undoable.
 				await measurePerformance(
 					ctx.bus,
-					"filesystem_commit",
-					{ toolCallId: ctx.toolCallId, fileCount: 1 },
-					async () => await writeFile(filePath, updatedBytes),
-				);
-				await measurePerformance(
-					ctx.bus,
-					"checkpoint_post_flush",
+					"checkpoint_pre_flush",
 					{ toolCallId: ctx.toolCallId, fileCount: 1 },
 					async () =>
-						await (ctx.mutationCheckpointBatch?.recordPostImages(
-							[{ absPath: filePath, contentIfInMemory: updatedBytes }],
+						await (ctx.mutationCheckpointBatch?.recordPreImages(
+							[{ absPath: filePath, opts: { tool: this.name } }],
 							ctx,
 						) ??
-							recordPostImageBatch(
+							recordPreImageBatch(
 								ctx.checkpoints,
-								[{ absPath: filePath, contentIfInMemory: updatedBytes }],
+								[{ absPath: filePath, opts: { tool: this.name } }],
 								ctx,
 							)),
 				);
-			} catch (error) {
+				throwIfAborted(ctx.signal);
 				try {
-					await writeFile(filePath, originalBytes);
-				} catch (rollbackError) {
-					throw new AggregateError(
-						[error, rollbackError],
-						`Edit failed and ${filePath} could not be rolled back`,
+					await measurePerformance(
+						ctx.bus,
+						"filesystem_commit",
+						{ toolCallId: ctx.toolCallId, fileCount: 1 },
+						async () => await writeFile(filePath, updatedBytes),
 					);
+					await measurePerformance(
+						ctx.bus,
+						"checkpoint_post_flush",
+						{ toolCallId: ctx.toolCallId, fileCount: 1 },
+						async () =>
+							await (ctx.mutationCheckpointBatch?.recordPostImages(
+								[{ absPath: filePath, contentIfInMemory: updatedBytes }],
+								ctx,
+							) ??
+								recordPostImageBatch(
+									ctx.checkpoints,
+									[{ absPath: filePath, contentIfInMemory: updatedBytes }],
+									ctx,
+								)),
+					);
+				} catch (error) {
+					try {
+						await writeFile(filePath, originalBytes);
+					} catch (rollbackError) {
+						throw new AggregateError(
+							[error, rollbackError],
+							`Edit failed and ${filePath} could not be rolled back`,
+						);
+					}
+					throw error;
 				}
-				throw error;
-			}
-			return edit;
-		});
+				return edit;
+			},
+			ctx.signal,
+		);
+		// withPathLocks reserves in invocation order before yielding. A blocked
+		// path must not hold up registration of later independent writes.
+		ctx.mutationLockTurn?.advance();
+		const committed = await mutation;
 
 		const diagnostics = await collectDiagnosticsFeedback(ctx, filePath);
 

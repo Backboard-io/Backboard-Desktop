@@ -1,7 +1,11 @@
+import { resolve } from "node:path";
 import type { AgentToolInput } from "../../tools/AgentToolTypes.ts";
 import { errorMessage } from "../../utils/errors.ts";
 import type { AgentToolOutput } from "../tools/AgentToolOutput.ts";
+import { AbortError, throwIfAborted } from "../tools/ToolAbort.ts";
+import { toolInputFingerprint } from "../tools/ToolCallIdentity.ts";
 import type { ToolContext } from "../tools/ToolContext.ts";
+import { toolFailureMetadata } from "../tools/ToolFailure.ts";
 import type { ToolResult } from "../tools/ToolResult.ts";
 import type { WorkerWorkspaceManager } from "../workspaces/WorkerWorkspaceManager.ts";
 import {
@@ -23,11 +27,15 @@ export interface AgentTaskManagerOptions {
 
 export interface SpawnAgentTask {
 	handle: string;
+	parentBatchToolCallId?: string;
 	input: AgentToolInput;
 	ctx: ToolContext;
+	/** The runner reports when preparation has completed and model work begins. */
+	reportsWorkerStart?: boolean;
 	run: (
 		input: AgentToolInput,
 		ctx: ToolContext,
+		onStarted: () => void | Promise<void>,
 	) => Promise<ToolResult<AgentToolOutput>>;
 }
 
@@ -37,6 +45,11 @@ export class AgentTaskManager {
 	private readonly records = new Map<string, AgentTaskRecord>();
 	private readonly operations = new Map<string, Promise<void>>();
 	private readonly controllers = new Map<string, AbortController>();
+	private readonly registrations = new Map<
+		string,
+		{ identity: string; promise: Promise<AgentTaskRecord> }
+	>();
+	private cancellationGeneration = 0;
 	private initialization?: Promise<void>;
 
 	constructor(private readonly options: AgentTaskManagerOptions = {}) {
@@ -49,42 +62,148 @@ export class AgentTaskManager {
 	}
 
 	async spawn(task: SpawnAgentTask): Promise<AgentTaskRecord> {
+		throwIfAborted(task.ctx.signal);
+		const identity = taskIdentity(task);
+		const pending = this.registrations.get(task.handle);
+		if (pending) {
+			if (pending.identity !== identity)
+				throw new Error(`Agent task handle is already in use: ${task.handle}`);
+			const record = await pending.promise;
+			throwIfAborted(task.ctx.signal);
+			return cloneRecord(record);
+		}
+		// Reserve before the first asynchronous boundary. Duplicate callers must
+		// share registration durability, not observe an unflushed queued record.
+		const promise = this.register(task, identity, this.cancellationGeneration);
+		this.registrations.set(task.handle, { identity, promise });
+		try {
+			return cloneRecord(await promise);
+		} finally {
+			if (this.registrations.get(task.handle)?.promise === promise)
+				this.registrations.delete(task.handle);
+		}
+	}
+
+/** Register the whole batch before releasing any new worker execution. */
+	async spawnBatch(tasks: readonly SpawnAgentTask[]): Promise<AgentTaskRecord[]> {
+		if (!tasks.length || tasks.length > 4) throw new Error("A worker batch must contain between one and four assignments.");
+		if (new Set(tasks.map(task => task.handle)).size !== tasks.length) throw new Error("Duplicate worker handle in batch.");
 		await this.initialize();
+		for (const task of tasks) {
+			throwIfAborted(task.ctx.signal);
+			const existing = this.records.get(task.handle);
+			if (existing && !matchesTask(existing, task, taskIdentity(task))) throw new Error(`Agent task handle is already in use: ${task.handle}`);
+			const pending = this.registrations.get(task.handle);
+			if (pending && pending.identity !== taskIdentity(task)) throw new Error(`Agent task handle is already in use: ${task.handle}`);
+		}
+		const newHandles = tasks.filter(task => !this.records.has(task.handle) && !this.registrations.has(task.handle)).map(task => task.handle);
+		let release!: () => void;
+		let reject!: (error: Error) => void;
+		const gate = new Promise<void>((resolve, fail) => { release = resolve; reject = fail; });
+		void gate.catch(() => undefined);
+		const registered = await Promise.allSettled(tasks.map(task => this.spawn({
+			...task,
+			reportsWorkerStart: true,
+			run: async (input, ctx, onStarted) => {
+				await gate;
+				throwIfAborted(ctx.signal);
+				if (!task.reportsWorkerStart) await onStarted();
+				return task.run(input, ctx, onStarted);
+			},
+		})));
+		const failure = registered.find(result => result.status === "rejected");
+		if (failure || tasks.some(task => task.ctx.signal.aborted)) {
+			for (const handle of newHandles) this.controllers.get(handle)?.abort();
+			reject(new AbortError());
+			if (failure?.status === "rejected") throw failure.reason;
+			throw new AbortError();
+		}
+		release();
+		return registered.map(result => (result as PromiseFulfilledResult<AgentTaskRecord>).value);
+	}
+
+	async cancel(handles: readonly string[], sessionId: string): Promise<AgentTaskRecord[]> {
+		await this.initialize();
+		this.validateHandles(handles, sessionId);
+		for (const handle of handles) this.controllers.get(handle)?.abort();
+		return handles.map(handle => cloneRecord(this.requireRecord(handle)));
+	}
+
+	private async register(
+		task: SpawnAgentTask,
+		identity: string,
+		generation: number,
+	): Promise<AgentTaskRecord> {
+		await this.initialize();
+		throwIfAborted(task.ctx.signal);
+		if (generation !== this.cancellationGeneration) throw new AbortError();
 		const existing = this.records.get(task.handle);
 		if (existing) {
-			if (
-				existing.sessionId !== task.ctx.sessionId ||
-				existing.prompt !== task.input.prompt ||
-				existing.readOnly !== (task.input.read_only === true)
-			) {
+			if (!matchesTask(existing, task, identity))
 				throw new Error(`Agent task handle is already in use: ${task.handle}`);
-			}
-			return cloneRecord(existing);
+			return existing;
 		}
-
 		const queued: AgentTaskRecord = {
 			handle: task.handle,
 			sessionId: task.ctx.sessionId,
 			turnId: task.ctx.turnId,
 			prompt: task.input.prompt,
+			...(task.input.name ? { name: task.input.name } : {}),
 			readOnly: task.input.read_only === true,
+			inputFingerprint: identity,
 			status: "queued",
+			executionStatus: "queued",
+			integrationStatus: task.input.read_only === true || task.input.subagent_type === "rlm" ? "not_required" : "pending",
+			capabilities: { readOnly: task.input.read_only === true || task.input.subagent_type === "rlm", permissionMode: task.ctx.permissions?.mode },
+			...(task.parentBatchToolCallId ? { parentBatchToolCallId: task.parentBatchToolCallId } : {}),
 			createdAt: this.now().toISOString(),
 		};
-		await this.persist(queued);
-
 		const controller = new AbortController();
 		this.controllers.set(task.handle, controller);
-		const operation = this.execute(
-			task,
-			AbortSignal.any([task.ctx.signal, controller.signal]),
-		).finally(() => {
+		const signal = AbortSignal.any([task.ctx.signal, controller.signal]);
+		try {
+			await this.persist(queued);
+			this.publish(task, this.requireRecord(task.handle));
+			if (signal.aborted || generation !== this.cancellationGeneration) {
+				const cancelled: AgentTaskRecord = {
+					...queued,
+					status: "cancelled",
+					executionStatus: "cancelled",
+					integrationStatus: queued.readOnly ? "not_required" : "skipped",
+					execution: {
+						outcome: "failure",
+						failureCategory: "cancelled",
+						cancelled: true,
+						retryable: false,
+					},
+					finishedAt: this.now().toISOString(),
+					error: "Worker cancelled before execution.",
+				};
+				try {
+					await this.persist(cancelled);
+					this.publish(task, this.requireRecord(task.handle));
+					task.ctx.bus.emit({ type: "agent:child_end", agentToolCallId: task.handle, status: "cancelled" });
+				} catch (error) {
+					this.records.set(task.handle, {
+						...cancelled,
+						persistenceError: errorMessage(error),
+					});
+				}
+				throw new AbortError();
+			}
+			const operation = this.execute(task, signal).finally(() => {
+				this.controllers.delete(task.handle);
+				this.operations.delete(task.handle);
+			});
+			this.operations.set(task.handle, operation);
+			void operation.catch(() => undefined);
+			return this.records.get(task.handle) ?? queued;
+		} catch (error) {
 			this.controllers.delete(task.handle);
-			this.operations.delete(task.handle);
-		});
-		this.operations.set(task.handle, operation);
-		void operation.catch(() => undefined);
-		return cloneRecord(this.records.get(task.handle) ?? queued);
+			if (signal.aborted || generation !== this.cancellationGeneration)
+				throw new AbortError();
+			throw error;
+		}
 	}
 
 	async wait(
@@ -92,16 +211,23 @@ export class AgentTaskManager {
 		sessionId: string,
 		signal: AbortSignal,
 		timeoutMs?: number,
+		returnWhen: "all" | "any" = "all",
 	): Promise<AgentTaskRecord[]> {
+		throwIfAborted(signal);
 		await this.initialize();
+		throwIfAborted(signal);
 		this.validateHandles(handles, sessionId);
 		const operations = handles.flatMap((handle) => {
 			const operation = this.operations.get(handle);
 			return operation ? [operation] : [];
 		});
-		if (operations.length > 0) {
-			await waitForOperations(operations, signal, timeoutMs);
+		const hasFinished = handles.some((handle) =>
+			isTerminalTask(this.requireRecord(handle)),
+		);
+		if (operations.length > 0 && !(returnWhen === "any" && hasFinished)) {
+			await waitForOperations(operations, signal, timeoutMs, returnWhen);
 		}
+		throwIfAborted(signal);
 		return handles.map((handle) => cloneRecord(this.requireRecord(handle)));
 	}
 
@@ -110,11 +236,30 @@ export class AgentTaskManager {
 	}
 
 	cancelAll(): void {
+		this.cancellationGeneration++;
 		for (const controller of this.controllers.values()) controller.abort();
 	}
 
 	async waitForIdle(): Promise<void> {
-		await Promise.allSettled([...this.operations.values()]);
+		// Registrations can still be waiting for their durable queued write and
+		// are not operations yet. Drain both, including operations they create.
+		while (this.registrations.size > 0 || this.operations.size > 0) {
+			await Promise.allSettled([
+				...[...this.registrations.values()].map(
+					(registration) => registration.promise,
+				),
+				...this.operations.values(),
+			]);
+		}
+		for (const [handle, record] of this.records) {
+			if (record.persistenceError) {
+				const { persistenceError: _error, ...persisted } = record;
+				// A failed upsert may fail before it queues the terminal record.
+				// Confirm that exact captured result, not merely earlier store work.
+				await this.options.store?.upsert(persisted);
+				this.records.set(handle, persisted);
+			}
+		}
 		await this.options.store?.flush();
 	}
 
@@ -122,23 +267,50 @@ export class AgentTaskManager {
 		task: SpawnAgentTask,
 		signal: AbortSignal,
 	): Promise<void> {
-		const running: AgentTaskRecord = {
-			...this.requireRecord(task.handle),
-			status: "running",
-			startedAt: this.now().toISOString(),
-		};
-		this.records.set(task.handle, running);
-		const runningPersistence = this.options.store?.upsert(running);
-		try {
-			// Start model execution before waiting on the non-critical running-state
-			// flush. The queued handle is already durable at this point.
-			const resultPromise = task.run(task.input, {
-				...task.ctx,
-				signal,
-				toolCallId: task.handle,
+		let finished = false;
+		let progressTail = Promise.resolve();
+		let started = false;
+		const update = (change: Partial<AgentTaskRecord>): Promise<void> => {
+			if (finished) return progressTail;
+			progressTail = progressTail.catch(() => undefined).then(async () => {
+				const current = this.requireRecord(task.handle);
+				if (change.workspace && current.workspace?.revision !== undefined && (change.workspace.revision === undefined || change.workspace.revision <= current.workspace.revision)) return;
+				await this.persist({ ...current, ...change });
+				this.publish(task, this.requireRecord(task.handle));
 			});
-			const result = await resultPromise;
-			await runningPersistence;
+			void progressTail.catch(() => undefined);
+			return progressTail;
+		};
+		const onStarted = (): Promise<void> => {
+			if (finished || started) return progressTail;
+			throwIfAborted(signal);
+			started = true;
+			return update({ status: "running", executionStatus: "running", startedAt: this.now().toISOString() });
+		};
+		const onWorkspaceProgress = (worker: WorkerWorkspaceRecord): void => {
+			update({
+				workspace: structuredClone(workerProgress(worker)),
+				executionStatus: worker.executionStatus === "creating" ? "preparing" : worker.executionStatus,
+				integrationStatus: worker.integrationStatus,
+			});
+		};
+		let terminal: AgentTaskRecord;
+		try {
+			throwIfAborted(signal);
+			if (!task.reportsWorkerStart) await onStarted();
+			throwIfAborted(signal);
+			const result = await task.run(
+				task.input,
+				{
+					...task.ctx,
+					signal,
+					toolCallId: task.handle,
+					workerLifecycle: { onWorkspaceProgress },
+				},
+				onStarted,
+			);
+			await progressTail.catch(() => undefined);
+			const current = this.requireRecord(task.handle);
 			const finishedAt = this.now().toISOString();
 			const bundle: AgentTaskResultBundle = {
 				data: result.data,
@@ -148,21 +320,51 @@ export class AgentTaskManager {
 				completedAt: finishedAt,
 			};
 			const outcome = classifyAgentResult(result, signal);
-			await this.persist({
-				...running,
+			terminal = {
+				...current,
 				status: outcome.status,
+				executionStatus: current.workspace ? current.executionStatus : outcome.status,
+				integrationStatus: current.workspace ? current.integrationStatus : "not_required",
 				finishedAt,
 				result: bundle,
+				...(result.execution ? { execution: result.execution } : {}),
 				...(outcome.error ? { error: outcome.error } : {}),
-			});
+			};
 		} catch (error) {
-			await runningPersistence?.catch(() => undefined);
-			await this.persist({
-				...running,
+			await progressTail.catch(() => undefined);
+			const current = this.requireRecord(task.handle);
+			terminal = {
+				...current,
+				executionStatus: signal.aborted ? "cancelled" : "failed",
 				status: signal.aborted ? "cancelled" : "failed",
 				finishedAt: this.now().toISOString(),
 				error: errorMessage(error),
+				execution: {
+					...toolFailureMetadata(error),
+					outcome: "failure",
+					...(signal.aborted
+						? { failureCategory: "cancelled", cancelled: true }
+						: {}),
+				},
+			};
+		}
+		finished = true;
+		await progressTail.catch(() => undefined);
+		try {
+			await this.persist(terminal);
+			this.publish(task, this.requireRecord(task.handle));
+			task.ctx.bus.emit({ type: "agent:child_end", agentToolCallId: task.handle, status: terminal.status === "completed" ? "completed" : terminal.status === "cancelled" ? "cancelled" : "failed" });
+		} catch (error) {
+			// Preserve captured results and integration authority in memory. A
+			// persistence fault is reported separately and must never rerun writes.
+			this.records.set(task.handle, {
+				...terminal,
+				revision: (this.records.get(task.handle)?.revision ?? 0) + 1,
+				persistenceError: errorMessage(error),
 			});
+			this.publish(task, this.requireRecord(task.handle));
+			task.ctx.bus.emit({ type: "agent:child_end", agentToolCallId: task.handle, status: "failed" });
+			throw error;
 		}
 	}
 
@@ -187,6 +389,17 @@ export class AgentTaskManager {
 				(record.status === "queued" || record.status === "running")
 			) {
 				recovered = this.recoverInterrupted(record);
+			}
+			const workspace = this.findWorker(recovered);
+			const needsProjection = recovered.revision === undefined || recovered.executionStatus === undefined || recovered.integrationStatus === undefined || recovered !== record || (workspace && (workspace.revision ?? 0) > (recovered.workspace?.revision ?? 0));
+			if (needsProjection) {
+				recovered = { ...recovered,
+					revision: (record.revision ?? 0) + 1,
+					executionStatus: workspace && recovered.status !== "interrupted" ? (workspace.executionStatus === "creating" ? "preparing" : workspace.executionStatus) : recovered.status,
+					integrationStatus: workspace?.integrationStatus ?? (recovered.readOnly || recovered.result?.data.mode === "rlm" ? "not_required" : recovered.status === "completed" ? "integrated" : "skipped"),
+					...(workspace ? { workspace: workerProgress(workspace) } : {}),
+					capabilities: recovered.capabilities ?? { readOnly: recovered.readOnly },
+				};
 			}
 			if (recovered !== record) changed = true;
 			this.records.set(recovered.handle, recovered);
@@ -227,8 +440,14 @@ export class AgentTaskManager {
 	}
 
 	private async persist(record: AgentTaskRecord): Promise<void> {
-		this.records.set(record.handle, record);
-		await this.options.store?.upsert(record);
+		const revised = { ...record, revision: (this.records.get(record.handle)?.revision ?? record.revision ?? 0) + 1 };
+		await this.options.store?.upsert(revised);
+		this.records.set(record.handle, revised);
+	}
+
+	private publish(task: SpawnAgentTask, record: AgentTaskRecord): void {
+		const { result: _result, inputFingerprint: _identity, execution: _execution, ...worker } = cloneRecord(record);
+		task.ctx.bus.emit({ type: "agent:worker_update", agentToolCallId: record.handle, ...(record.parentBatchToolCallId ? { parentBatchToolCallId: record.parentBatchToolCallId } : {}), worker });
 	}
 
 	private validateHandles(handles: readonly string[], sessionId: string): void {
@@ -373,14 +592,22 @@ function workerFailureMessage(status: string, report: string): string {
 async function waitForOperations(
 	operations: readonly Promise<void>[],
 	signal: AbortSignal,
-	timeoutMs?: number,
+	timeoutMs: number | undefined,
+	returnWhen: "all" | "any",
 ): Promise<void> {
-	if (signal.aborted) throw new Error("Agent wait was cancelled.");
-	const all = Promise.allSettled(operations).then(() => undefined);
+	throwIfAborted(signal);
+	const settled = operations.map((operation) =>
+		operation.then(
+			() => undefined,
+			() => undefined,
+		),
+	);
+	const ready =
+		returnWhen === "any" ? Promise.race(settled) : Promise.all(settled);
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let abortListener: (() => void) | undefined;
 	const interrupted = new Promise<void>((resolve, reject) => {
-		abortListener = () => reject(new Error("Agent wait was cancelled."));
+		abortListener = () => reject(new AbortError());
 		signal.addEventListener("abort", abortListener, { once: true });
 		if (timeoutMs !== undefined) {
 			timer = setTimeout(resolve, timeoutMs);
@@ -388,7 +615,7 @@ async function waitForOperations(
 		}
 	});
 	try {
-		await Promise.race([all, interrupted]);
+		await Promise.race([ready, interrupted]);
 	} finally {
 		if (timer) clearTimeout(timer);
 		if (abortListener) signal.removeEventListener("abort", abortListener);
@@ -396,10 +623,47 @@ async function waitForOperations(
 }
 
 function cloneRecord(record: AgentTaskRecord): AgentTaskRecord {
-	return {
-		...record,
-		result: record.result
-			? { ...record.result, data: { ...record.result.data } }
-			: undefined,
-	};
+	return structuredClone(record);
+}
+
+function isTerminalTask(record: AgentTaskRecord): boolean {
+	return record.status !== "queued" && record.status !== "running";
+}
+
+function taskIdentity(task: SpawnAgentTask): string {
+	const input = { ...task.input };
+	delete input.name; // A display-label change must not schedule duplicate work.
+	return toolInputFingerprint({
+		sessionId: task.ctx.sessionId,
+		turnId: task.ctx.turnId ?? null,
+		cwd: resolve(task.ctx.cwd),
+		...(task.parentBatchToolCallId ? { parentBatchToolCallId: task.parentBatchToolCallId } : {}),
+		input: {
+			...input,
+			subagent_type: task.input.subagent_type ?? "worker",
+			read_only: task.input.read_only === true,
+		},
+	});
+}
+
+function matchesTask(
+	record: AgentTaskRecord,
+	task: SpawnAgentTask,
+	identity: string,
+): boolean {
+	if (record.inputFingerprint) return record.inputFingerprint === identity;
+	// Version-1 records predate full input fingerprints. Only their supported
+	// spawn shape can be replayed; never alias new options to an old task.
+	return (
+		record.sessionId === task.ctx.sessionId &&
+		record.prompt === task.input.prompt &&
+		record.readOnly === (task.input.read_only === true) &&
+		(record.turnId === undefined ||
+			task.ctx.turnId === undefined ||
+			record.turnId === task.ctx.turnId) &&
+		(task.input.subagent_type === undefined ||
+			task.input.subagent_type === "worker") &&
+		task.input.variables === undefined &&
+		task.input.timeout_ms === undefined
+	);
 }

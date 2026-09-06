@@ -1,7 +1,10 @@
-import { errorMessage } from "../../utils/errors.ts";
 import type { ToolCallRef } from "../bus/events.ts";
 import type { HookController } from "../hooks/index.ts";
 import type { Tool } from "./Tool.ts";
+import {
+	argumentErrorSummary,
+	type ToolFailureCategory,
+} from "./ToolFailure.ts";
 import type { ToolRegistry } from "./ToolRegistry.ts";
 
 export interface ErrorPlanEntry {
@@ -9,6 +12,7 @@ export interface ErrorPlanEntry {
 	errorOutput: string;
 	concurrencySafe: false;
 	displayName?: string;
+	failureCategory?: ToolFailureCategory;
 }
 
 export interface ExecutablePlanEntry {
@@ -34,6 +38,7 @@ export class ToolExecutionPlanner {
 				return {
 					ref,
 					errorOutput: `Error: unknown tool "${ref.name}"`,
+					failureCategory: "invalid_argument",
 					concurrencySafe: false,
 				};
 			}
@@ -41,6 +46,7 @@ export class ToolExecutionPlanner {
 				return {
 					ref,
 					errorOutput: `Error: tool "${ref.name}" is disabled`,
+					failureCategory: "unavailable",
 					concurrencySafe: false,
 					displayName: tool.displayName,
 				};
@@ -63,7 +69,8 @@ export class ToolExecutionPlanner {
 			} catch (err) {
 				return {
 					ref,
-					errorOutput: `Error: invalid arguments for "${ref.name}": ${errorMessage(err)}`,
+					errorOutput: `Error: invalid arguments for "${ref.name}": ${argumentErrorSummary(err)}`,
+					failureCategory: "invalid_argument",
 					concurrencySafe: false,
 					displayName: tool.displayName,
 				};

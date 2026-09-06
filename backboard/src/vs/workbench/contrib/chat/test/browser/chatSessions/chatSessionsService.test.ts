@@ -235,6 +235,27 @@ suite('ChatSessionsService - getOrCreateChatSession', () => {
 		};
 	}
 
+	test('fork resolves an unloaded session and preserves the requested checkpoint', async () => {
+		const forkResource = sessionResource.with({ path: '/fork-1' });
+		const request = { type: 'request' as const, id: 'turn-2', prompt: 'Continue', participant: 'agent' };
+		let receivedRequest;
+		let providerCalls = 0;
+		store.add(service.registerChatSessionContentProvider(SESSION_TYPE, {
+			provideChatSessionContent: async () => {
+				providerCalls++;
+				return {
+					...createSession(),
+					forkSession: async checkpoint => {
+						receivedRequest = checkpoint;
+						return { resource: forkResource, label: 'Forked', timing: { created: 1, lastRequestStarted: 1, lastRequestEnded: 1 } };
+					},
+				};
+			},
+		}));
+		const result = await service.forkChatSession(sessionResource, request, CancellationToken.None);
+		assert.deepStrictEqual({ resource: result.resource, receivedRequest, providerCalls }, { resource: forkResource, receivedRequest: request, providerCalls: 1 });
+	});
+
 	test('deduplicates concurrent creation for the same resource', async () => {
 		const providerResult = new DeferredPromise<IChatSession>();
 		let providerCalls = 0;

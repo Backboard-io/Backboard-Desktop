@@ -1718,6 +1718,8 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		const body = stack.querySelector<HTMLElement>(':scope > .chat-core-tool-stack-body') ?? stack;
 		body.appendChild(itemWrapper);
 		const count = body.childElementCount;
+		// One read needs one disclosure, not a second "Read 1 file" wrapper.
+		stack.classList.toggle('chat-core-tool-stack-single', count === 1);
 		const label = stack.querySelector<HTMLElement>(':scope > .chat-core-tool-stack-header > .chat-core-tool-stack-label');
 		if (label) {
 			label.textContent = count === 1
@@ -1847,7 +1849,9 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		});
 		const labelText = $('span.chat-thinking-cursor-reasoning-label-text');
 		const chevron = $('span.codicon.codicon-chevron-right.chat-thinking-cursor-reasoning-chevron', { 'aria-hidden': 'true' });
-		label.append(labelText, chevron);
+		const icon = $('span.chat-thinking-cursor-reasoning-icon', { 'aria-hidden': 'true' });
+		icon.classList.add(...ThemeIcon.asClassNameArray(Codicon.lightbulb));
+		label.append(icon, labelText, chevron);
 		const disclosure: ICursorReasoningDisclosure = {
 			label,
 			labelText,
@@ -2002,11 +2006,12 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		if (!this.useCursorTranscriptPresentation) {
 			return;
 		}
-		const disclosures = Array.from(this.cursorReasoningDisclosures.values());
+		const disclosures = Array.from(this.cursorReasoningDisclosures.entries());
 		for (let index = disclosures.length - 1; index >= 0; index--) {
-			const disclosure = disclosures[index];
+			const [textContainer, disclosure] = disclosures[index];
 			if (disclosure.completedAt === undefined) {
 				disclosure.completedAt = Math.max(disclosure.startedAt, completedAt);
+				this.setCursorReasoningExpanded(textContainer, false);
 				break;
 			}
 		}
@@ -2025,7 +2030,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			}
 			const complete = disclosure.completedAt !== undefined || this.streamingCompleted || this.element.isComplete;
 			const label = complete
-				? localize('chat.thinking.cursorReasoning', "Thought")
+				? localize('chat.thinking.cursorReasoning', "Thoughts")
 				: localize('chat.thinking.cursorReasoningLive', "Thinking");
 			disclosure.label.classList.toggle('chat-thinking-cursor-reasoning-live', !complete);
 			disclosure.labelText.textContent = label;
@@ -2304,7 +2309,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			}
 			this.latestCoreTodoWrapper = itemWrapper;
 		}
-		if ((this.useCursorPanelPresentation || this.useCursorTranscriptPresentation) && isCoreTool) {
+		if ((this.useCursorPanelPresentation || this.useCursorTranscriptPresentation) && isCoreTool && (!this.useCursorTranscriptPresentation || isCoreTodo || coreToolKind === 'read')) {
 			// Core tools already own a compact header, lifecycle status, and optional
 			// details disclosure. Mount that native card directly: wrapping it in a
 			// generic work row or activity group creates two competing summaries and
@@ -2328,6 +2333,40 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			}
 			return;
 		}
+		if (isCoreTool) {
+			itemWrapper.firstElementChild?.classList.contains('chat-thinking-icon') && itemWrapper.firstElementChild.remove();
+		}
+		if (this.useCursorTranscriptPresentation && metadata?.kind === 'toolInvocation' && IChatToolInvocation.getConfirmationMessages(metadata)) {
+			this.finishActiveActivityGroup();
+			itemWrapper.classList.add('chat-thinking-cursor-actionable-row');
+			this.appendToWrapper(itemWrapper);
+			return;
+		}
+		const invocation = metadata && (metadata.kind === 'toolInvocation' || metadata.kind === 'toolInvocationSerialized') ? metadata : undefined;
+		const invocationLabel = textFromMarkdown(invocation?.invocationMessage);
+		const isOpenBrowserPage = invocation?.toolId.replace(/[_-]/g, '').toLowerCase().endsWith('openbrowserpage')
+			|| /^OpenBrowserPage\b/i.test(invocationLabel ?? '');
+		const nativeIO = itemWrapper.querySelector('.chat-tool-io');
+		const isPlainActivity = this.useCursorTranscriptPresentation && invocation && !t3ToolInvocationFailed(invocation) && isOpenBrowserPage;
+		if (isPlainActivity) {
+			const label = invocationLabel ?? invocation.toolId;
+			const native = itemWrapper.lastElementChild as HTMLElement;
+			native.hidden = true;
+			itemWrapper.classList.add('chat-browser-open-row');
+			const text = $('span.chat-browser-open-label');
+			text.textContent = label;
+			itemWrapper.appendChild(text);
+			if (isOpenBrowserPage) {
+				this.finishActiveActivityGroup();
+				this.appendToWrapper(itemWrapper);
+				return;
+			}
+		}
+		const preserveNativeIO = this.useCursorTranscriptPresentation && !!nativeIO;
+		if (preserveNativeIO && !isPlainActivity) {
+			itemWrapper.classList.add('chat-thinking-io-tool-row');
+		}
+
 		const preserveNativeTool = this.useCursorTranscriptPresentation
 			&& !!metadata
 			&& (metadata.kind === 'toolInvocation' || metadata.kind === 'toolInvocationSerialized')
@@ -2345,7 +2384,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		if (preserveNativeTool) {
 			itemWrapper.classList.add('chat-thinking-cursor-actionable-row');
 		}
-		if (this.useCursorPanelPresentation && !preserveNativeTool && !preserveNativeTerminal && metadata?.kind !== 'externalEdit') {
+		if (this.useCursorPanelPresentation && !preserveNativeTool && !preserveNativeTerminal && !preserveNativeIO && !isCoreTool && metadata?.kind !== 'externalEdit') {
 			this.prepareWorkRow(itemWrapper, toolCallId, fallbackLabel, metadata, subkind);
 		}
 		// A shell card already owns a complete disclosure hierarchy: one command
@@ -2419,6 +2458,14 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		// with hundreds of reads should not rewrite the same label hundreds of
 		// times before the browser has a chance to paint.
 		this.requestActivityGroupHeaderUpdate(group, group.items.length === 1);
+	}
+
+	/** Anchor worker navigation at the launch, before later tools are appended. */
+	public appendSubagentPill(node: HTMLElement): void {
+		if (this.useCursorTranscriptPresentation) {
+			this.finishActiveActivityGroup();
+			this.appendToWrapper(node);
+		}
 	}
 
 	private createActivityGroup(category: ToolActivityCategory): IToolActivityGroup {
@@ -2505,9 +2552,8 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			editFileKeys: new Set(),
 			hover,
 			expectedEditFileCount: 0,
-			// Active reads/searches are useful progress, so show their rows while
-			// they run. finishActiveActivityGroup folds them back into Explored N.
-			expanded: this.useCursorTranscriptPresentation && category === 'explore',
+			// Routine calls start folded; file changes remain visible.
+			expanded: this.useCursorTranscriptPresentation && category === ToolActivityCategory.Edit,
 			removed: false,
 		};
 		this.updateActivityGroupHeader(group);
@@ -2569,7 +2615,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			return;
 		}
 		if (this.useCursorTranscriptPresentation) {
-			group.expanded = false;
+			group.expanded = group.category === ToolActivityCategory.Edit;
 		} else if (this.useCursorPanelPresentation) {
 			group.expanded = false;
 			group.container.classList.remove('chat-thinking-group-live');
@@ -2590,7 +2636,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		this.finishActiveActivityGroup();
 		for (const group of this.activityGroups) {
 			if (this.useCursorTranscriptPresentation) {
-				group.expanded = false;
+				group.expanded = group.category === ToolActivityCategory.Edit;
 				this.flushActivityGroupHeader(group);
 			} else if (this.useCursorPanelPresentation) {
 				group.expanded = false;
@@ -2630,10 +2676,11 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			// Pending edits use one aggregate loading shell, and multi-file batches
 			// keep one summary. A completed single-file edit renders its diff directly
 			// instead of hiding it behind a redundant "Updated 1 file" disclosure.
-			const showSummary = isExploration || hasRunningEdit || group.items.length > 1;
+			const hasRoutineTools = group.items.some(item => item.subkind !== 'edit' && item.subkind !== 'terminal');
+			const showSummary = hasRoutineTools || isExploration || hasRunningEdit || group.items.length > 1;
 			group.header.classList.toggle('hidden', !showSummary);
 			group.header.style.display = showSummary ? '' : 'none';
-			const expanded = !showSummary || group.expanded;
+			const expanded = !hasRunningEdit && (!showSummary || group.expanded);
 			group.container.classList.toggle('chat-thinking-work-summary-collapsed', !expanded);
 			group.chevron.classList.toggle('chat-thinking-group-chevron-expanded', expanded);
 			group.chevron.classList.toggle('codicon-chevron-right', !expanded);
@@ -4085,6 +4132,7 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 			this.appendToWrapper(itemWrapper);
 			return;
 		}
+
 
 		const isCleanSyntheticTool = this.useCursorPanelPresentation && !!toolInvocationId;
 		if ((toolInvocationOrMarkdown || isCleanSyntheticTool) && (this.useCursorPanelPresentation || (!isMarkdownEdit && !isExternalEdit))) {

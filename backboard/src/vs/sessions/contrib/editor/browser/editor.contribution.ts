@@ -11,7 +11,7 @@ import { ServicesAccessor } from '../../../../editor/browser/editorExtensions.js
 import { Action2, MenuId, registerAction2 } from '../../../../platform/actions/common/actions.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { ContextKeyExpr } from '../../../../platform/contextkey/common/contextkey.js';
-import { ActiveEditorContext, AuxiliaryBarVisibleContext, EditorPartModalContext, IsAuxiliaryWindowContext, IsJarvisWindowContext, IsOptimusWindowContext, IsSessionsWindowContext, IsTopRightEditorGroupContext } from '../../../../workbench/common/contextkeys.js';
+import { ActiveEditorContext, AuxiliaryBarVisibleContext, EditorPartModalContext, IsAuxiliaryWindowContext, IsOptimusWindowContext, IsSessionsWindowContext, IsTopRightEditorGroupContext } from '../../../../workbench/common/contextkeys.js';
 import { IAgentWorkbenchLayoutService } from '../../../browser/workbench.js';
 import { EditorMaximizedContext } from '../../../common/contextkeys.js';
 import { IViewsService } from '../../../../workbench/services/views/common/viewsService.js';
@@ -269,7 +269,7 @@ class OpenModalEditorInEditorAction extends Action2 {
 				group: 'navigation',
 				order: 98,
 				when: ContextKeyExpr.and(
-					ContextKeyExpr.or(IsOptimusWindowContext, IsJarvisWindowContext),
+					IsOptimusWindowContext,
 					EditorPartModalContext)
 			}
 		});
@@ -280,7 +280,7 @@ class OpenModalEditorInEditorAction extends Action2 {
 		// guard as well as the menu context so programmatic command execution
 		// cannot turn its right panel into a full workbench.
 		const environmentService = accessor.get(IWorkbenchEnvironmentService);
-		if (!environmentService.isOptimusWindow && !environmentService.isJarvisWindow) {
+		if (!environmentService.isOptimusWindow) {
 			return;
 		}
 

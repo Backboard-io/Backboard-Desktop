@@ -31,7 +31,7 @@ export class ForkConversationAction extends Action2 {
 			f1: false,
 			category: CHAT_CATEGORY,
 			icon: Codicon.repoForked,
-			precondition: ChatContextKeys.enabled,
+			precondition: ContextKeyExpr.or(ChatContextKeys.enabled, ChatContextKeyExprs.isAgentHostSession, ChatContextKeys.chatSessionSupportsFork),
 			menu: [
 				{
 					id: MenuId.ChatMessageCheckpoint,
@@ -152,7 +152,7 @@ export class ForkConversationAction extends Action2 {
 			return;
 		}
 
-		const sessionResource = widget?.viewModel?.sessionResource ?? (isChatTreeItem(item) ? item.sessionResource : undefined);
+		const sessionResource = item.sessionResource;
 		if (!sessionResource) {
 			diag('bail: no sessionResource');
 			return;
@@ -188,6 +188,9 @@ export class ForkConversationAction extends Action2 {
 						break;
 					}
 				}
+			}
+			if (!request) {
+				throw new Error(localize('chat.fork.requestUnavailable', "The selected message could not be found. Reopen the conversation and try again."));
 			}
 			return await this.forkContributedChatSession(sessionResource, request, true, chatSessionsService, instantiationService);
 		}

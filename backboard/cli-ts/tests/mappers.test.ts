@@ -2,14 +2,28 @@ import { describe, expect, it } from "bun:test";
 import {
 	BackboardStreamEventMapper,
 	mapStreamPayloadToEvents,
+	type ToolMappingTrace,
 } from "../src/providers/backboard/mappers.ts";
 import type { ProviderEvent } from "../src/providers/backboard/types.ts";
+import workerIdentityMismatch from "./fixtures/backboard-worker-identity-mismatch.json";
 
 function kinds(events: ProviderEvent[]): string[] {
 	return events.map((e) => e.kind);
 }
 
 describe("mapStreamPayloadToEvents", () => {
+	it("preserves the service's mismatched worker names in diagnostics and rejects its final batch", () => {
+		const traces: ToolMappingTrace[] = [];
+		const mapper = new BackboardStreamEventMapper(["agent_spawn", "glob"], trace => traces.push(trace));
+		const events = workerIdentityMismatch.slice(0, 3).flatMap(frame => mapper.map(frame));
+		const ready = traces.find(trace => trace.event === "tool_ready");
+		const final = traces.find(trace => trace.event === "requires_action");
+		expect({ ready: ready?.name, final: final?.name, sameInput: ready?.inputFingerprint === final?.inputFingerprint }).toEqual({ ready: "agent_spawn", final: "glob", sameInput: true });
+		expect(events.some(event => event.kind === "requires_action")).toBe(false);
+		expect(events.at(-1)?.kind).toBe("failed");
+		expect(JSON.stringify(traces)).not.toContain("src/**/*.ts");
+	});
+
 	it("maps a completed stream response", () => {
 		const events = mapStreamPayloadToEvents({
 			type: "run_ended",
@@ -164,7 +178,10 @@ describe("mapStreamPayloadToEvents", () => {
 					{
 						delta: {
 							tool_calls: [
-								{ index: 0, function: { arguments: ',"content":"large body"}' } },
+								{
+									index: 0,
+									function: { arguments: ',"content":"large body"}' },
+								},
 							],
 						},
 					},
@@ -342,7 +359,7 @@ describe("mapStreamPayloadToEvents", () => {
 		}
 	});
 
-	it("handles malformed tool arguments gracefully", () => {
+	it("rejects malformed final tool arguments before execution", () => {
 		const events = mapStreamPayloadToEvents({
 			type: "tool_submit_required",
 			tool_calls: [
@@ -353,10 +370,9 @@ describe("mapStreamPayloadToEvents", () => {
 				},
 			],
 		});
-		const action = events.find((e) => e.kind === "requires_action");
-		if (action && action.kind === "requires_action") {
-			expect(action.calls[0]?.input).toEqual({ __raw: "not-json" });
-		}
+		expect(events).toEqual([
+			expect.objectContaining({ kind: "failed", retryable: false }),
+		]);
 	});
 
 	it("maps run_failed events", () => {

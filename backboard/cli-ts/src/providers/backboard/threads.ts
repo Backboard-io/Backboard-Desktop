@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { INJECTED_NOTIFICATION_METADATA_KEY } from "../../core/agent/notifications/SystemNotification.ts";
 import {
 	assistantMessage,
@@ -138,18 +139,30 @@ function isInjectedNotificationMessage(
 	// Exact full-text match on the verification nudge is safe regardless of
 	// metadata - a human never types the entire multi-paragraph nudge - so it
 	// still catches pre-tag injected nudges that carried workspace metadata.
-	if (trimmed === FINAL_VERIFICATION_NUDGE.trim()) {
+	// The digest preserves the exact pre-September-2026 prompt without keeping
+	// its retired instructions in the active prompt module.
+	if (
+		trimmed === FINAL_VERIFICATION_NUDGE.trim() ||
+		(trimmed.startsWith("Before finalizing, silently review the work") &&
+			createHash("sha256").update(trimmed).digest("hex") ===
+				"dfd01a43634b228b109645197f49955cfdbd36def5e2e160782dec4c5bc1a668")
+	) {
 		return true;
 	}
-	// The fuzzy prefix match is a last-resort fallback for pre-tag threads and
-	// could hit a genuine message. Scope it to metadata-free rows only: pre-tag
-	// injected turns were plain under the default memory-off config, so this
-	// still catches them while never dropping a real user message - which may
-	// legitimately start with "<system-reminder>" - that carries any metadata.
+	// Only recognize the historical todo reminder envelope. A bare tag is not
+	// provenance and must not hide genuine user text on resume. Limit this
+	// legacy heuristic to metadata-free pre-tag messages.
 	if (message.metadata_ && Object.keys(message.metadata_).length > 0) {
 		return false;
 	}
-	return trimmed.startsWith("<system-reminder>");
+	return (
+		trimmed.startsWith(
+			"<system-reminder>\nIMPORTANT: It looks like you may have completed the user-facing turn, but the current TodoWrite plan still has pending or in-progress items.",
+		) &&
+		trimmed.endsWith(
+			"Do not reference this system reminder in any user-facing messages.\n</system-reminder>",
+		)
+	);
 }
 
 function toolCallsFromMetadata(

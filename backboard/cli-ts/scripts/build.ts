@@ -1,12 +1,14 @@
 #!/usr/bin/env bun
 import { APP_COMMAND_NAME } from "../src/config/branding.ts";
+import { buildIdentityArgs } from "./buildIdentity.ts";
 
 const command = [
 	"bun",
 	"build",
 	"--compile",
+	...(await buildIdentityArgs()),
 	"--outfile",
-	APP_COMMAND_NAME,
+	process.env.BACKBOARD_CLI_OUTFILE?.trim() || APP_COMMAND_NAME,
 	"./src/entrypoints/cli.tsx",
 ];
 

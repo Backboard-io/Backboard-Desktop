@@ -83,7 +83,6 @@ interface IOpenBrowserWindowOptions {
 	readonly emptyWindowBackupInfo?: IEmptyWindowBackupInfo;
 	readonly forceProfile?: string;
 	readonly forceTempProfile?: boolean;
-	readonly jarvisWindow?: boolean;
 	readonly optimusWindow?: boolean;
 }
 
@@ -321,36 +320,6 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 		}
 
 		return windows;
-	}
-
-	async openJarvisWindow(openConfig: IOpenConfiguration): Promise<ICodeWindow[]> {
-		this.logService.trace('windowsManager#openJarvisWindow');
-
-		const targetWindow = typeof openConfig.contextWindowId === 'number'
-			? this.getWindowById(openConfig.contextWindowId)
-			: this.getFocusedWindow() ?? this.getLastActiveWindow();
-
-		if (targetWindow && !openConfig.initialStartup) {
-			await this.openInBrowserWindow({
-				cli: openConfig.cli,
-				initialStartup: openConfig.initialStartup,
-				userEnv: openConfig.userEnv,
-				windowToUse: targetWindow,
-				forceNewWindow: false,
-				jarvisWindow: true,
-			});
-			return [targetWindow];
-		}
-
-		return this.open({
-			...openConfig,
-			urisToOpen: undefined,
-			noRecentEntry: true,
-			forceEmpty: true,
-			forceNewWindow: true,
-			forceReuseWindow: false,
-			jarvisWindow: true
-		});
 	}
 
 	async openOptimusWindow(openConfig: IOpenConfiguration): Promise<ICodeWindow[]> {
@@ -906,7 +875,6 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 			emptyWindowBackupInfo,
 			forceProfile: openConfig.forceProfile,
 			forceTempProfile: openConfig.forceTempProfile,
-			jarvisWindow: openConfig.jarvisWindow,
 			optimusWindow: openConfig.optimusWindow
 		});
 	}
@@ -1631,7 +1599,7 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 
 		let window: ICodeWindow | undefined;
 		if (!options.forceNewWindow && !options.forceNewTabbedWindow) {
-			window = options.windowToUse || (lastActiveWindow?.config?.isSessionsWindow || lastActiveWindow?.config?.isJarvisWindow || lastActiveWindow?.config?.isOptimusWindow ? undefined : lastActiveWindow);
+			window = options.windowToUse || (lastActiveWindow?.config?.isSessionsWindow || lastActiveWindow?.config?.isOptimusWindow ? undefined : lastActiveWindow);
 			if (window) {
 				window.focus();
 			}
@@ -1709,7 +1677,6 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 			cssModules: this.cssDevelopmentService.isEnabled ? await this.cssDevelopmentService.getCssModules() : undefined,
 
 			isSessionsWindow: isWorkspaceIdentifier(options.workspace) && isEqual(options.workspace.configPath, this.environmentMainService.agentSessionsWorkspace),
-			isJarvisWindow: options.jarvisWindow,
 			isOptimusWindow: options.optimusWindow,
 		};
 
@@ -1724,7 +1691,6 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 				extensionDevelopmentPath: configuration.extensionDevelopmentPath,
 				isExtensionTestHost: !!configuration.extensionTestsPath,
 				isSessionsWindow: configuration.isSessionsWindow,
-				isJarvisWindow: configuration.isJarvisWindow,
 				isOptimusWindow: configuration.isOptimusWindow
 			});
 			mark('code/didCreateCodeWindow');

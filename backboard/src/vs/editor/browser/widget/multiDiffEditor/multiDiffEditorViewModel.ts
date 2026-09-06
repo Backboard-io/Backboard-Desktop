@@ -4,7 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Disposable, DisposableStore, toDisposable } from '../../../../base/common/lifecycle.js';
-import { IObservable, ITransaction, ObservablePromise, ObservableResolvedPromise, constObservable, derived, derivedObservableWithWritableCache, mapObservableArrayCached, observableFromValueWithChangeEvent, observableValue, transaction, waitForState } from '../../../../base/common/observable.js';
+import { IObservable, ITransaction, ObservablePromise, ObservableResolvedPromise, autorun, constObservable, derived, derivedObservableWithWritableCache, mapObservableArrayCached, observableFromEvent, observableFromValueWithChangeEvent, observableValue, transaction, waitForState } from '../../../../base/common/observable.js';
+import { Event } from '../../../../base/common/event.js';
 import { rejectIfNotCanceled, timeout } from '../../../../base/common/async.js';
 import { URI } from '../../../../base/common/uri.js';
 import { ContextKeyValue } from '../../../../platform/contextkey/common/contextkey.js';
@@ -20,6 +21,8 @@ import { IDocumentDiffItem, IMultiDiffEditorModel } from './model.js';
 import { cancelOnDispose } from '../../../../base/common/cancellation.js';
 
 export class MultiDiffEditorViewModel extends Disposable {
+	/** Per-surface options, including editors created later by virtualization. */
+	public readonly editorOptions = observableValue<IDiffEditorOptions>(this, {});
 	private readonly _documents: IObservable<readonly RefCounted<IDocumentDiffItem>[] | 'loading'>;
 
 	private readonly _documentsArr = derived(this, reader => {
@@ -107,6 +110,7 @@ export class MultiDiffEditorViewModel extends Disposable {
 }
 
 export class DocumentDiffItemViewModel extends Disposable {
+	public readonly options: IObservable<IDiffEditorOptions>;
 	/**
 	 * The diff editor view model keeps its inner objects alive.
 	*/
@@ -155,21 +159,14 @@ export class DocumentDiffItemViewModel extends Disposable {
 
 		this._documentDiffItemRef = this._register(documentDiffItem.createNewRef(this));
 
-		function updateOptions(options: IDiffEditorOptions): IDiffEditorOptions {
-			return {
-				...options,
-				hideUnchangedRegions: {
-					enabled: true,
-				},
-			};
-		}
-
-		const options = this._instantiationService.createInstance(DiffEditorOptions, updateOptions(this.documentDiffItem.options || {}));
-		if (this.documentDiffItem.onOptionsDidChange) {
-			this._register(this.documentDiffItem.onOptionsDidChange(() => {
-				options.updateOptions(updateOptions(this.documentDiffItem.options || {}));
-			}));
-		}
+		const documentOptions = observableFromEvent(this, this.documentDiffItem.onOptionsDidChange ?? Event.None, () => this.documentDiffItem.options ?? {});
+		this.options = derived(this, reader => ({
+			...documentOptions.read(reader),
+			hideUnchangedRegions: { enabled: true },
+			...this._editorViewModel.editorOptions.read(reader),
+		}));
+		const options = this._instantiationService.createInstance(DiffEditorOptions, this.options.get());
+		this._register(autorun(reader => options.updateOptions(this.options.read(reader))));
 
 		const diffEditorViewModelStore = new DisposableStore();
 		const originalTextModel = this.documentDiffItem.original ?? diffEditorViewModelStore.add(this._modelService.createModel('', null));

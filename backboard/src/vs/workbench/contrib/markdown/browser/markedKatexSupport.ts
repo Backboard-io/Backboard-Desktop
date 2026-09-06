@@ -146,20 +146,43 @@ export class MarkedKatexSupport {
 
 	public static async loadExtension(window: CodeWindow, options: MarkedKatexExtension.MarkedKatexOptions = {}): Promise<marked.MarkedExtension> {
 		const katex = await this._katexPromise.value;
-		this.ensureKatexStyles(window);
+		await this.ensureKatexStyles(window);
 		return MarkedKatexExtension.extension(katex, options);
 	}
 
-	public static ensureKatexStyles(window: CodeWindow) {
+	private static readonly stylePromises = new WeakMap<Document, Promise<void>>();
+
+	public static ensureKatexStyles(window: CodeWindow): Promise<void> {
 		const doc = window.document;
-		// eslint-disable-next-line no-restricted-syntax
-		if (!doc.querySelector('link.katex')) {
-			const katexStyle = document.createElement('link');
-			katexStyle.classList.add('katex');
-			katexStyle.rel = 'stylesheet';
-			katexStyle.href = resolveAmdNodeModulePath('katex', 'dist/katex.min.css');
-			doc.head.appendChild(katexStyle);
+		let ready = this.stylePromises.get(doc);
+		if (!ready) {
+			// A font-ready promise can resolve before the stylesheet even arrives.
+			// Share stylesheet readiness per window before measuring rendered math.
+			ready = new Promise<void>(resolve => {
+				// eslint-disable-next-line no-restricted-syntax
+				const existing = doc.querySelector<HTMLLinkElement>('link.katex');
+				if (existing?.sheet) {
+					resolve();
+					return;
+				}
+				const katexStyle = existing ?? doc.createElement('link');
+				const settle = () => {
+					katexStyle.removeEventListener('load', settle);
+					katexStyle.removeEventListener('error', settle);
+					resolve();
+				};
+				katexStyle.addEventListener('load', settle, { once: true });
+				katexStyle.addEventListener('error', settle, { once: true });
+				if (!existing) {
+					katexStyle.classList.add('katex');
+					katexStyle.rel = 'stylesheet';
+					katexStyle.href = resolveAmdNodeModulePath('katex', 'dist/katex.min.css');
+					doc.head.appendChild(katexStyle);
+				}
+			});
+			this.stylePromises.set(doc, ready);
 		}
+		return ready;
 	}
 }
 
@@ -237,4 +260,3 @@ const trustedMathMlTags = Object.freeze([
 	'view',
 	'vkern',
 ]);
-

@@ -1,8 +1,3 @@
-export const FINAL_VERIFICATION_NUDGE = `Before finalizing, silently review the work against the user's original request.
+export const FINAL_VERIFICATION_NUDGE = `The harness recorded changes without sufficient successful validation after the latest mutation. Briefly tell the user what remains to check, then run the relevant missing check or fix the specific failure.
 
-Check only what matters:
-- Required files, output formats, command behavior, and stated acceptance criteria are satisfied.
-- Relevant validators or tests were run, or the strongest practical equivalent was used.
-- Changed code is coherent with nearby patterns and has no obvious runtime errors, broken imports, or contract mismatches.
-
-If anything is missing, broken, unverified, or messy, fix it now using tools. If everything is already verified, respond with a concise final answer using Markdown section headings '##" that you choose and believe are important and aligns what was done to the user request; put short and simple to understand bullets under each heading only when useful. Omit any section that would only say "None".`;
+Use the task's acceptance criteria, repository requirements, and risk to choose a focused check. Do not repeat passing checks without a new change, run unrelated suites, or start a broad review. If the work was already verified by an equivalent method, explain that evidence and finish. If validation is unavailable, report the actual blocker and what remains unverified. Preserve unfinished plan items. Finish with the outcome and validation result once the relevant criteria are satisfied.`;

@@ -394,6 +394,11 @@ export class CliTsServeProcess extends Disposable {
 		}
 		const payload = record.payload;
 		if (payload && typeof payload === 'object' && typeof (payload as CliTsAgentEvent).type === 'string') {
+			const eventType = (payload as CliTsAgentEvent).type;
+			if (['tool:identity', 'thinking:resolved', 'thinking:wire', 'notification:run', 'runtime:identity'].includes(eventType)) {
+				// These runtime diagnostics contain identities, hashes and timings only.
+				this.logService.trace(`[cli-ts] diagnostic: ${JSON.stringify(payload)}`);
+			}
 			this.options.onEvent(payload as CliTsAgentEvent);
 		}
 	}

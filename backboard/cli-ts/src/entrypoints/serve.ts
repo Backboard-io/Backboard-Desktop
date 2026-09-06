@@ -7,10 +7,12 @@ import {
 	parseModel,
 	parseThinking,
 } from "../config/defaults.ts";
+import { runtimeIdentity } from "../config/runtimeIdentity.ts";
 import { AgentController } from "../core/agent/AgentController.ts";
 import { AgentTaskManager } from "../core/agent/AgentTaskManager.ts";
 import { AgentTaskStore } from "../core/agent/AgentTaskStore.ts";
 import { EventBus } from "../core/bus/EventBus.ts";
+import { createWorkerSnapshotMutation } from "../core/checkpoints/WorkerSnapshotMutation.ts";
 import { CheckpointManager } from "../core/checkpoints/CheckpointManager.ts";
 import { CheckpointStore } from "../core/checkpoints/CheckpointStore.ts";
 import { HookController, loadHookConfig } from "../core/hooks/index.ts";
@@ -25,6 +27,7 @@ import {
 	buildPermissionContext,
 	parsePermissionMode,
 } from "../core/permissions/index.ts";
+import { resolveRipgrep } from "../core/search/ripgrep.ts";
 import { ClientEventLog } from "../core/session/ClientEventLog.ts";
 import { JsonEventStream } from "../core/session/JsonEventStream.ts";
 import { ServerEventLog } from "../core/session/ServerEventLog.ts";
@@ -83,19 +86,6 @@ export async function runServe(argv: string[]): Promise<void> {
 		model: config.modelString,
 		profile: config.profile.name,
 	});
-	const workerWorkspaceManager = new WorkerWorkspaceManager({
-		parentSessionId: sessionId,
-		store: new WorkerWorkspaceStore(store.paths.workers),
-		git: new GitWorktreeManager(),
-		maxWorkers: parseMaxWorkers(process.env.BACKBOARD_MAX_PARALLEL_WORKERS),
-	});
-	await workerWorkspaceManager.initialize();
-	const agentTaskManager = new AgentTaskManager({
-		store: new AgentTaskStore(join(store.paths.root, "agent-tasks.json")),
-		workerWorkspaces: workerWorkspaceManager,
-	});
-	await agentTaskManager.initialize();
-
 	const bus = new EventBus();
 	const clientLog = new ClientEventLog(sessionId, store.paths.clientLog);
 	const serverLog = new ServerEventLog(sessionId, store.paths.serverLog);
@@ -106,6 +96,20 @@ export async function runServe(argv: string[]): Promise<void> {
 	await CheckpointStore.recoverAbandonedRestore(store.paths.pendingUndo);
 	const checkpoints = new CheckpointManager(bus, store.paths, config.cwd);
 	checkpoints.warmShellCapture(config.cwd);
+
+	const workerWorkspaceManager = new WorkerWorkspaceManager({
+		parentSessionId: sessionId,
+		store: new WorkerWorkspaceStore(store.paths.workers),
+		git: new GitWorktreeManager(),
+		snapshotMutation: createWorkerSnapshotMutation(checkpoints),
+		maxWorkers: parseMaxWorkers(process.env.BACKBOARD_MAX_PARALLEL_WORKERS),
+	});
+	await workerWorkspaceManager.initialize();
+	const agentTaskManager = new AgentTaskManager({
+		store: new AgentTaskStore(join(store.paths.root, "agent-tasks.json")),
+		workerWorkspaces: workerWorkspaceManager,
+	});
+	await agentTaskManager.initialize();
 
 	const session = new Session(sessionId);
 	bus.emit({ type: "session:created", sessionId, threadId: session.threadId });
@@ -495,11 +499,31 @@ export async function runServe(argv: string[]): Promise<void> {
 	};
 
 	await controller.start();
+	const [identity, ripgrep] = await Promise.all([
+		runtimeIdentity(),
+		resolveRipgrep().then(
+			(value) => ({
+				path: value.path,
+				version: value.version,
+				pcre2: value.pcre2,
+			}),
+			() => ({
+				available: false,
+				reason:
+					"Ripgrep unavailable; configure BACKBOARD_RIPGREP_PATH or install rg on PATH.",
+			}),
+		),
+	]);
+	const runtime = { ...identity, ...controller.runtimePromptIdentity, ripgrep };
+	if ("available" in ripgrep && !ripgrep.available)
+		bus.emit({ type: "system:warning", message: ripgrep.reason });
+	bus.emit({ type: "runtime:identity", identity: runtime });
 	writeRecord("serve:ready", undefined, {
 		sessionId,
 		cwd: config.cwd,
 		model: config.modelString,
 		upstream: "Backboard-io/Backboard-R-CLI",
+		runtime,
 	});
 
 	const reader = createInterface({ input: process.stdin });

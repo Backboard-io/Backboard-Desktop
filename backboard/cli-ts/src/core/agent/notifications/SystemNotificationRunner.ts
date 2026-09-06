@@ -1,8 +1,12 @@
-import type { ThinkingRequestKind } from "../../../config/defaults.ts";
+import type {
+	ThinkingConfig,
+	ThinkingRequestKind,
+} from "../../../config/defaults.ts";
 import type { AgentClient } from "../../../providers/AgentClient.ts";
 import { AbortError } from "../../tools/ToolAbort.ts";
 import type { ToolContext } from "../../tools/ToolContext.ts";
 import type { AssistantAccumulator } from "../AssistantAccumulator.ts";
+import type { CompletionEvidence } from "../CompletionEvidence.ts";
 import type { ProviderStreamConsumer } from "../ProviderStreamConsumer.ts";
 import {
 	buildRunMessageRequest,
@@ -20,6 +24,7 @@ export interface SystemNotificationRunnerDeps extends RunMessageRequestContext {
 	consumer: ProviderStreamConsumer;
 	processor: ToolRoundProcessor;
 	requestKind: ThinkingRequestKind;
+	resolveThinking?: () => ThinkingConfig | null | undefined;
 	/**
 	 * Recomputes the system prompt at injection time. The turn's prompt is
 	 * captured at turn start, but session state it reflects (e.g. the
@@ -45,7 +50,11 @@ export class SystemNotificationRunner {
 	 * reminder's TodoWrite) must not push a later one (e.g. final verification)
 	 * across its threshold and diverge the two decisions.
 	 */
-	private frozenCounts: { rounds: number; toolCalls: number } | null = null;
+	private frozenCounts: {
+		rounds: number;
+		toolCalls: number;
+		completionEvidence: CompletionEvidence;
+	} | null = null;
 
 	constructor(
 		private readonly deps: SystemNotificationRunnerDeps,
@@ -86,6 +95,7 @@ export class SystemNotificationRunner {
 		this.frozenCounts = {
 			rounds: this.deps.processor.executedRounds,
 			toolCalls: this.deps.processor.executedToolCalls,
+			completionEvidence: this.deps.processor.completionEvidence,
 		};
 		try {
 			for (const notification of this.notifications) {
@@ -135,28 +145,60 @@ export class SystemNotificationRunner {
 				};
 				// Stream tool-call prefire: streamed calls render/execute early
 				// and finalize reuses the results, same as the main turn.
-				const early = this.deps.processor.createEarlyRound(ctx, turnId);
-				const pending = await this.deps.consumer.consumeWithRetry(
-					(signal) =>
-						this.deps.client.runMessage(
-							buildRunMessageRequest(
-								content,
-								requestContext,
-								notification.thinking,
-							),
-							{ signal },
-						),
-					assistant,
-					ctx.signal,
-					early,
-				);
-				await this.deps.processor.process(
-					pending,
+				const startedAt = performance.now();
+				const evidence = this.context().completionEvidence;
+				const diagnostic = {
+					type: "notification:run" as const,
+					notificationId: notification.id,
 					turnId,
-					assistant,
-					ctx,
-					early,
-				);
+					successfulMutations: evidence?.successfulMutations ?? 0,
+					unvalidatedMutations: evidence?.unvalidatedMutations ?? 0,
+					validationFailed: evidence?.validationFailed ?? false,
+				};
+				ctx.bus.emit({ ...diagnostic, stage: "start" });
+				ctx.bus.emit({ type: "turn:status", turnId, phase: "generating" });
+				if (notification.id === "final-verification") {
+					ctx.bus.emit({
+						type: "assistant:message",
+						turnId,
+						messageId: `${turnId}:notification:${notification.id}`,
+						text: "Checking the changed behavior before finishing.",
+					});
+				}
+				const early = this.deps.processor.createEarlyRound(ctx, turnId);
+				try {
+					const pending = await this.deps.consumer.consumeWithRetry(
+						(signal) =>
+							this.deps.client.runMessage(
+								buildRunMessageRequest(
+									content,
+									requestContext,
+									this.deps.resolveThinking
+										? this.deps.resolveThinking()
+										: notification.thinking,
+								),
+								{ signal },
+							),
+						assistant,
+						ctx.signal,
+						early,
+					);
+					await this.deps.processor.process(
+						pending,
+						turnId,
+						assistant,
+						ctx,
+						early,
+						3,
+					);
+				} finally {
+					early.reset();
+					ctx.bus.emit({
+						...diagnostic,
+						stage: "end",
+						durationMs: performance.now() - startedAt,
+					});
+				}
 			}
 		} catch (err) {
 			// A superseding notification owns the turn's shown answer, so its
@@ -191,6 +233,9 @@ export class SystemNotificationRunner {
 			executedToolCalls:
 				this.frozenCounts?.toolCalls ?? this.deps.processor.executedToolCalls,
 			todos: this.deps.session.todos,
+			completionEvidence:
+				this.frozenCounts?.completionEvidence ??
+				this.deps.processor.completionEvidence,
 		};
 	}
 }

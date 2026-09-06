@@ -1011,3 +1011,129 @@ button.skills-library-official-row:hover {
 		grid-template-columns: 1fr;
 	}
 }
+
+/* The Simple mode marketplace shares the installer, but uses a full-page catalog. */
+.skills-library-simple .skills-library-modal {
+	background: var(--vscode-editor-background, #181818);
+	overflow-y: auto;
+	display: block;
+	color: var(--vscode-foreground, #eee);
+	container-type: inline-size;
+	transform: translateZ(0);
+}
+.skills-library-simple .skills-library-header {
+	position: relative;
+	box-sizing: border-box;
+	display: flex;
+	flex-direction: column;
+	align-items: stretch;
+	max-width: 776px;
+	margin: 0 auto;
+	padding: 70px 24px 0;
+	gap: 0;
+}
+.skills-library-simple .skills-library-page-tabs {
+	position: fixed;
+	top: 12px;
+	left: 16px;
+	gap: 4px;
+}
+.skills-library-simple .skills-library-page-tab {
+	border: 0;
+	border-radius: 10px;
+	padding: 6px 10px;
+	font-size: 14px;
+	font-weight: 400;
+}
+.skills-library-simple .skills-library-page-tab.active {
+	background: var(--vscode-toolbar-hoverBackground, #292929);
+	color: var(--vscode-foreground);
+}
+.skills-library-simple .skills-library-title-block { display: block; margin-bottom: 22px; }
+.skills-library-simple .skills-library-title-block h2 { font-size: 28px; font-weight: 400; line-height: 36px; margin: 0 0 8px; }
+.skills-library-simple .skills-library-title-block p { font-size: 16px; line-height: 24px; color: var(--vscode-descriptionForeground); margin: 0; }
+.skills-library-simple .skills-library-search-row { width: 100%; margin: 0; }
+.skills-library-simple .skills-library-search-box {
+	border: 1px solid var(--vscode-input-border, #505050);
+	background: var(--vscode-input-background, #2b2b2b);
+	border-radius: 20px;
+	min-height: 32px;
+	height: 32px;
+	box-sizing: border-box;
+}
+.skills-library-simple .skills-library-search { font-size: 14px; }
+.skills-library-simple .skills-library-body { display: block; overflow: visible; height: auto; }
+.skills-library-simple .skills-library-sidebar { display: none; }
+.skills-library-simple .skills-library-content {
+	box-sizing: border-box;
+	max-width: 776px;
+	margin: 0 auto;
+	padding: 32px 24px 64px;
+	overflow: visible;
+}
+.skills-library-simple .skills-library-content-centered { min-height: 150px; }
+.simple-mcp-toolbar { position: fixed; right: 16px; top: 10px; display: flex; align-items: center; gap: 14px; }
+.simple-mcp-add { display: flex; align-items: center; gap: 6px; background: var(--vscode-foreground, #eee); color: var(--vscode-editor-background, #181818); border: 0; border-radius: 10px; padding: 6px 10px; cursor: pointer; }
+.simple-mcp-section-heading { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--vscode-widget-border, #292929); padding-bottom: 10px; }
+.simple-mcp-section-heading h3, .simple-mcp-section-title { font-size: 16px; font-weight: 500; margin: 0; }
+.simple-mcp-installed { display: flex; flex-wrap: wrap; gap: 16px; padding: 16px 4px 34px; min-height: 36px; align-items: center; }
+.simple-mcp-installed-icon { padding: 0; background: transparent; border: 0; border-radius: 10px; cursor: pointer; }
+.skills-library-simple .skills-library-mcp-logo { width: 36px; height: 36px; object-fit: contain; flex-shrink: 0; border: 1px solid var(--vscode-widget-border, #333); border-radius: 10px; box-sizing: border-box; }
+.simple-mcp-scope { display: flex; gap: 4px; margin: 0 4px 42px; }
+.simple-mcp-scope button, .simple-mcp-back { background: transparent; border: 0; border-radius: 10px; padding: 6px 10px; color: var(--vscode-descriptionForeground); cursor: pointer; font-size: 14px; }
+.simple-mcp-scope button[aria-pressed="true"] { background: var(--vscode-toolbar-hoverBackground, #292929); color: var(--vscode-foreground); }
+.simple-mcp-section-title { padding: 0 8px 12px; border-bottom: 1px solid var(--vscode-widget-border, #292929); }
+.simple-mcp-catalog { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 40px; row-gap: 6px; padding: 16px 8px 38px; }
+.simple-mcp-row { display: flex; align-items: center; gap: 12px; min-width: 0; min-height: 62px; }
+.simple-mcp-copy { flex: 1; min-width: 0; }
+.simple-mcp-name { font-size: 14px; line-height: 22px; }
+.simple-mcp-description { color: var(--vscode-descriptionForeground); font-size: 13px; line-height: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.simple-mcp-icon-button { border: 0; background: transparent; color: inherit; padding: 6px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.simple-mcp-icon-button:hover, .simple-mcp-installed-icon:hover { background: var(--vscode-toolbar-hoverBackground); }
+.simple-mcp-icon-button:disabled { opacity: .5; cursor: progress; }
+.simple-mcp-empty { font-size: 13px; color: var(--vscode-descriptionForeground); }
+.skills-library-simple button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+@container (max-width: 620px) {
+	.simple-mcp-catalog { grid-template-columns: minmax(0, 1fr); }
+	.skills-library-simple .skills-library-header { padding-top: 62px; }
+}
+.skills-library-simple .skills-library-page-tab { text-transform: none; }
+.skills-library-simple .skills-library-page-tab:first-child { padding-left: 10px; }
+.skills-library-simple .skills-library-page-tab.active::after { display: none; }
+.skills-library-simple .skills-library-search-icon { display: flex; margin-left: 10px; margin-right: 6px; }
+.skills-library-simple .skills-library-search-row { height: 32px; flex-basis: 32px; }
+.skills-library-simple .skills-library-body { border-top: 0; }
+.skills-library-simple .skills-library-mcp-logo { align-self: center; }
+
+.simple-mcp-page-open > :not(.simple-mcp-page) {
+	visibility: hidden;
+}
+.simple-mcp-page {
+	position: absolute;
+	inset: 0;
+	z-index: 20;
+}
+.simple-mcp-page-back {
+	position: absolute;
+	top: 12px;
+	left: 12px;
+	z-index: 1;
+}
+.simple-mcp-page .skills-library-page-tabs {
+	left: 48px;
+}
+
+.skills-library-simple.skills-library-showing-skills .simple-mcp-toolbar {
+	display: none;
+}
+.skills-library-simple .skills-library-search {
+	border: 0;
+	outline: none;
+	background: transparent;
+}
+.skills-library-simple .skills-library-search-box:focus-within {
+	border-color: var(--vscode-focusBorder);
+}
+.skills-library-simple .skills-library-content-centered {
+	display: block;
+}

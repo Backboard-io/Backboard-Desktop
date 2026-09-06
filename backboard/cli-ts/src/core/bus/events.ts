@@ -1,5 +1,7 @@
+import type { AgentWorkerState } from "../agent/AgentTaskTypes.ts";
 import type { PermissionMode } from "../permissions/PermissionMode.ts";
 import type { AgentToolOutput } from "../tools/AgentToolOutput.ts";
+import type { ToolExecutionMetadata } from "../tools/ToolFailure.ts";
 import type {
 	FileEditPreview,
 	TerminalToolResult,
@@ -40,6 +42,7 @@ interface ToolStartEvent {
 
 interface ToolResultEvent {
 	type: "tool:result";
+	execution?: ToolExecutionMetadata;
 	toolCallId: string;
 	name: string;
 	title: string;
@@ -102,6 +105,9 @@ export interface AskUserResponse {
 }
 
 export type PerformanceTimingPhase =
+	| "provider_first_event"
+	| "provider_first_visible"
+	| "provider_stream_total"
 	| "provider_tool_announcement"
 	| "provider_tool_batch_finalize"
 	| "permission_wait"
@@ -124,6 +130,7 @@ export type PerformanceTimingPhase =
  * structurally changes.
  */
 export type AgentEvent =
+	| { type: "agent:worker_update"; agentToolCallId: string; parentBatchToolCallId?: string; worker: AgentWorkerState }
 	| { type: "session:created"; sessionId: string; threadId: string | null }
 	| { type: "user:message"; text: string }
 	| { type: "turn:start"; turnId: string }
@@ -142,6 +149,20 @@ export type AgentEvent =
 	  }
 	| { type: "assistant:message:discard"; turnId: string; messageId: string }
 	| { type: "tool:requested"; turnId: string; calls: ToolCallRef[] }
+	| {
+			type: "tool:identity";
+			sessionId: string;
+			turnId?: string;
+			roundId: string;
+			attempt: number;
+			toolCallId: string;
+			phase: "announce" | "ready" | "final" | "reuse" | "mismatch" | "result";
+			name: string;
+			inputFingerprint?: string;
+			previousName?: string;
+			previousInputFingerprint?: string;
+			reason?: string;
+	  }
 	| ToolPendingEvent
 	// A previously announced (tool:pending) call that will never execute:
 	// its stream attempt was retried, or the authoritative call list never
@@ -162,6 +183,7 @@ export type AgentEvent =
 	  }
 	| {
 			type: "agent:child_start";
+			agentName?: string;
 			agentToolCallId: string;
 			childSessionId: string;
 			prompt: string;
@@ -184,7 +206,13 @@ export type AgentEvent =
 			status: TurnStatus;
 	  }
 	| ToolResultEvent
-	| { type: "tool:error"; toolCallId: string; name: string; error: string }
+	| {
+			type: "tool:error";
+			toolCallId: string;
+			name: string;
+			error: string;
+			execution?: ToolExecutionMetadata;
+	  }
 	| {
 			type: "turn:end";
 			turnId: string;
@@ -219,7 +247,43 @@ export type AgentEvent =
 			workerId?: string;
 			fileCount?: number;
 	  }
+	| {
+			type: "notification:run";
+			notificationId: string;
+			turnId: string;
+			stage: "start" | "end";
+			durationMs?: number;
+			successfulMutations: number;
+			unvalidatedMutations: number;
+			validationFailed: boolean;
+	  }
 	| { type: "system:warning"; message: string }
+	| {
+			type: "provider:diagnostic";
+			provider: string;
+			phase: string;
+			details: Record<string, unknown>;
+	  }
+	| { type: "runtime:identity"; identity: Record<string, unknown> }
+	| {
+			type: "thinking:resolved";
+			phase: string;
+			model: string;
+			provider: string;
+			intent: unknown;
+			resolved: unknown;
+			reason: string;
+			promptHash?: string;
+			schemaHash?: string;
+	  }
+	| {
+			type: "thinking:wire";
+			requested: unknown;
+			effective: Record<string, unknown>;
+			reason: string;
+			model: string;
+			provider: string;
+	  }
 	| { type: "run:error"; error: string };
 
 export type AgentEventType = AgentEvent["type"];

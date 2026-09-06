@@ -120,8 +120,11 @@ export class ClientToolBridge {
 			const timer = setTimeout(() => {
 				finish();
 				reject(
-					new Error(
-						`The IDE did not complete the "${name}" tool call within ${timeoutMs / 1000}s. It may still be waiting for approval; continue without it and do not retry automatically.`,
+					Object.assign(
+						new Error(
+							`The IDE did not complete the "${name}" tool call within ${timeoutMs / 1000}s. It may still be waiting for approval; continue without it and do not retry automatically.`,
+						),
+						{ category: "timeout", timedOut: true, retryable: false },
 					),
 				);
 			}, timeoutMs);
@@ -243,7 +246,10 @@ export class ClientProxyTool extends Tool<Record<string, unknown>, unknown> {
 	): Promise<ToolResult<unknown>> {
 		const payload = await this.bridge.invoke(this.name, input, ctx);
 		if (payload.error || payload.success === false) {
-			throw new Error(payload.error ?? "The client tool reported a failure.");
+			throw Object.assign(
+				new Error(payload.error ?? "The client tool reported a failure."),
+				{ category: "execution", retryable: false },
+			);
 		}
 		const texts: string[] = [];
 		let image: { mimeType: string; dataBase64: string } | undefined;

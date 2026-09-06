@@ -8,28 +8,67 @@ let canonicalizationTail: Promise<void> = Promise.resolve();
 export async function withPathLocks<T>(
 	paths: readonly string[],
 	fn: () => Promise<T>,
+	signal?: AbortSignal,
 ): Promise<T> {
-	const releases: Array<() => void> = [];
-	// Resolve keys in invocation order. realpath is asynchronous; without this
-	// short queue a later same-path edit can finish canonicalization first and
-	// overtake an earlier provider call. Only key resolution is serialized;
-	// disjoint filesystem mutations still run concurrently.
-	const canonicalized = canonicalizationTail.then(() =>
-		Promise.all(paths.map(canonicalLockPath)),
+	signal?.throwIfAborted();
+	// Resolve and reserve the entire set in invocation order. Reserving one
+	// path at a time lets a later writer overtake a multi-file patch while that
+	// patch waits for its first path. Reservation never holds a partial set.
+	const reservation = canonicalizationTail.then(async () => {
+		signal?.throwIfAborted();
+		const keys = [...new Set(await Promise.all(paths.map(canonicalLockPath)))];
+		signal?.throwIfAborted();
+		const previous = Promise.all(keys.map((key) => lockTails.get(key)));
+		let release!: () => void;
+		const gate = new Promise<void>((resolveGate) => {
+			release = resolveGate;
+		});
+		const current = previous.then(() => gate);
+		for (const key of keys) lockTails.set(key, current);
+		void current.then(() => {
+			for (const key of keys) {
+				if (lockTails.get(key) === current) lockTails.delete(key);
+			}
+		});
+		return { previous, release };
+	});
+	canonicalizationTail = reservation.then(
+		() => {},
+		() => {},
 	);
-	canonicalizationTail = canonicalized.then(
-		() => undefined,
-		() => undefined,
-	);
-	const uniquePaths = [...new Set(await canonicalized)].sort();
+	// If cancellation wins during canonicalization, release any reservation
+	// once it arrives. Its tail still waits for preceding owners, so a cancelled
+	// waiter cannot accidentally unlock a file another writer is using.
+	let acquired: Awaited<typeof reservation> | undefined;
 	try {
-		for (const path of uniquePaths) {
-			releases.push(await acquirePathLock(path));
-		}
+		acquired = await waitForLock(reservation, signal);
+		await waitForLock(acquired.previous, signal);
+		signal?.throwIfAborted();
 		return await fn();
 	} finally {
-		for (const release of releases.reverse()) release();
+		if (acquired) acquired.release();
+		else
+			void reservation.then(
+				(value) => value.release(),
+				() => {},
+			);
 	}
+}
+
+async function waitForLock<T>(
+	operation: Promise<T>,
+	signal?: AbortSignal,
+): Promise<T> {
+	if (!signal) return operation;
+	signal.throwIfAborted();
+	return new Promise<T>((resolveWait, rejectWait) => {
+		const onAbort = () =>
+			rejectWait(signal.reason ?? new DOMException("Aborted", "AbortError"));
+		signal.addEventListener("abort", onAbort, { once: true });
+		void operation.then(resolveWait, rejectWait).finally(() => {
+			signal.removeEventListener("abort", onAbort);
+		});
+	});
 }
 
 /**
@@ -75,21 +114,4 @@ function normalizeCase(path: string): string {
 	return process.platform === "darwin" || process.platform === "win32"
 		? path.toLocaleLowerCase("en-US")
 		: path;
-}
-
-async function acquirePathLock(path: string): Promise<() => void> {
-	const previous = lockTails.get(path) ?? Promise.resolve();
-	let releaseGate: () => void = () => {};
-	const gate = new Promise<void>((resolve) => {
-		releaseGate = resolve;
-	});
-	const current = previous.then(() => gate);
-	lockTails.set(path, current);
-	await previous;
-	return () => {
-		releaseGate();
-		void current.finally(() => {
-			if (lockTails.get(path) === current) lockTails.delete(path);
-		});
-	};
 }

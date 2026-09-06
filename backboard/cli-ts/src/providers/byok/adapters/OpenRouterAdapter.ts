@@ -1,10 +1,7 @@
 import { createHash } from "node:crypto";
 import type { ThinkingConfig } from "../../../config/defaults.ts";
-import type {
-	ModelCatalogItem,
-	ProviderEvent,
-	ProviderToolCall,
-} from "../../backboard/types.ts";
+import type { ModelCatalogItem, ProviderEvent } from "../../backboard/types.ts";
+import { ToolCallDeltaAccumulator } from "../../ToolCallDeltaAccumulator.ts";
 import { unexpectedStreamEndMessage } from "../ByokError.ts";
 import type {
 	ByokMessage,
@@ -35,13 +32,6 @@ interface OpenRouterModel {
 		input_modalities?: string[];
 		output_modalities?: string[];
 	};
-}
-
-interface PendingToolCall {
-	id: string;
-	name: string;
-	args: string;
-	announced: boolean;
 }
 
 interface OpenRouterCatalog {
@@ -143,7 +133,18 @@ async function* streamOpenRouter(
 	if (reasoning) body.reasoning = reasoning;
 	if (request.maxOutputTokens) body.max_tokens = request.maxOutputTokens;
 
-	const pending = new Map<number, PendingToolCall>();
+	yield {
+		kind: "thinking_resolved",
+		requested: request.thinking,
+		effective: { reasoning: reasoning ?? "provider-default" },
+		provider: "openrouter",
+		model: request.model,
+		reason: "openrouter-model-capability-mapping",
+	};
+
+	const pending = new ToolCallDeltaAccumulator(
+		request.tools.map((tool) => tool.function.name),
+	);
 	const reasoningDetails = new Map<string, Record<string, unknown>>();
 	let finishReason: string | null = null;
 	let usage = emptyUsage();
@@ -216,25 +217,10 @@ async function* streamOpenRouter(
 		if (Array.isArray(delta?.reasoning_details)) {
 			mergeReasoningDetails(reasoningDetails, delta.reasoning_details);
 		}
-		for (const partial of delta?.tool_calls ?? []) {
-			const index = partial.index ?? 0;
-			const existing = pending.get(index) ?? {
-				id: partial.id ?? `call_${index}`,
-				name: "",
-				args: "",
-				announced: false,
-			};
-			if (partial.id) existing.id = partial.id;
-			if (partial.function?.name) existing.name += partial.function.name;
-			if (partial.function?.arguments) {
-				existing.args += partial.function.arguments;
-			}
-			pending.set(index, existing);
-			if (!existing.announced && existing.name) {
-				existing.announced = true;
-				emitted = true;
-				yield { kind: "tool_started", id: existing.id, name: existing.name };
-			}
+		for (const event of pending.add(delta?.tool_calls ?? [])) {
+			emitted = true;
+			yield event;
+			if (event.kind === "failed") return;
 		}
 		// Tool JSON, opaque reasoning metadata, usage, and finish frames can all
 		// arrive without display text. They still prove the transport is healthy.
@@ -260,23 +246,18 @@ async function* streamOpenRouter(
 		return;
 	}
 
-	const calls: ProviderToolCall[] = [];
+	const finalCalls = pending.finish();
+	if ("error" in finalCalls) {
+		yield { kind: "failed", error: finalCalls.error, retryable: false };
+		return;
+	}
+	const calls = finalCalls.calls;
 	const collectedReasoning = [...reasoningDetails.values()];
 	const providerMetadata =
 		collectedReasoning.length > 0
 			? JSON.stringify(collectedReasoning)
 			: undefined;
-	for (const partial of [...pending.entries()]
-		.sort(([left], [right]) => left - right)
-		.map(([, value]) => value)) {
-		const call: ProviderToolCall = {
-			id: partial.id,
-			name: partial.name,
-			input: parseArguments(partial.args),
-		};
-		calls.push(call);
-		yield { kind: "tool_ready", call };
-	}
+	for (const call of calls) yield { kind: "tool_ready", call };
 
 	const contextLimit = modelMetadata.value?.context_limit ?? null;
 	const finalUsage = {
@@ -435,16 +416,6 @@ function readUsage(
 
 function numberOf(value: unknown): number {
 	return typeof value === "number" && Number.isFinite(value) ? value : 0;
-}
-
-function parseArguments(args: string): unknown {
-	const trimmed = args.trim();
-	if (!trimmed) return {};
-	try {
-		return JSON.parse(trimmed);
-	} catch {
-		return {};
-	}
 }
 
 function toOpenRouterMessages(request: ByokStreamRequest): unknown[] {

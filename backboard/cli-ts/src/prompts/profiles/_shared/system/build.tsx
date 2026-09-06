@@ -62,7 +62,9 @@ export function buildSystemPromptWith(
 		options.activatedSkillsPrompt,
 		options.hookContext,
 		options.todoReminderPrompt,
-		layout.footer ? deps.getSystemPromptFragment(layout.footer) : "",
+		layout.footer
+			? deps.getSystemPromptFragment(layout.footer, promptContext)
+			: "",
 	]
 		.filter(Boolean)
 		.join("\n\n");

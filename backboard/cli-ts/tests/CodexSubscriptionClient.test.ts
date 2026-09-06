@@ -3,7 +3,9 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { OpenAITool } from "../src/core/tools/schema.ts";
+import type { ProviderEvent } from "../src/providers/backboard/types.ts";
 import { CodexSubscriptionClient } from "../src/providers/subscription/CodexSubscriptionClient.ts";
+import compactCompletion from "./fixtures/subscription-compact-completion.json";
 
 function eventStream(events: unknown[]): Response {
 	return new Response(
@@ -29,6 +31,425 @@ describe("CodexSubscriptionClient", () => {
 
 	afterAll(async () => {
 		await rm(testDir, { recursive: true, force: true });
+	});
+
+	it("rejects malformed JSON instead of executing an empty argument object", async () => {
+		const client = new CodexSubscriptionClient({
+			authFile,
+			fetchImpl: (async () =>
+				eventStream([
+					{
+						type: "response.output_item.done",
+						item: {
+							type: "function_call",
+							call_id: "invalid",
+							name: "read",
+							arguments: "{",
+						},
+					},
+					{ type: "response.completed", response: { usage: {} } },
+				])) as unknown as typeof fetch,
+		});
+		const events: ProviderEvent[] = [];
+		await expect(
+			(async () => {
+				for await (const event of client.runMessage({
+					content: "fixture",
+					model_name: "gpt-test",
+				}))
+					events.push(event);
+			})(),
+		).rejects.toThrow("not valid JSON");
+		expect(events.some((event) => event.kind === "tool_ready")).toBe(false);
+	});
+
+	it("deduplicates repeated done items and preserves final authoritative output", async () => {
+		const item = {
+			type: "function_call",
+			call_id: "once",
+			name: "read",
+			arguments: '{"file_path":"fixture.ts"}',
+		};
+		const client = new CodexSubscriptionClient({
+			authFile,
+			fetchImpl: (async () =>
+				eventStream([
+					{ type: "response.output_item.done", item },
+					{ type: "response.output_item.done", item },
+					{
+						type: "response.completed",
+						response: { output: [item], usage: {} },
+					},
+				])) as unknown as typeof fetch,
+		});
+		const events: ProviderEvent[] = [];
+		for await (const event of client.runMessage({
+			content: "fixture",
+			model_name: "gpt-test",
+		}))
+			events.push(event);
+		expect(events.filter((event) => event.kind === "tool_ready")).toHaveLength(
+			1,
+		);
+		expect(events.at(-1)).toMatchObject({
+			kind: "requires_action",
+			calls: [{ id: "once", name: "read", input: { file_path: "fixture.ts" } }],
+		});
+	});
+
+	it("rejects ready/final name or argument disagreement before persistence", async () => {
+		for (const changed of [
+			{ name: "write" },
+			{ arguments: '{"file_path":"changed.ts"}' },
+		]) {
+			const item = {
+				type: "function_call",
+				call_id: "same",
+				name: "read",
+				arguments: '{"file_path":"fixture.ts"}',
+			};
+			const client = new CodexSubscriptionClient({
+				authFile,
+				fetchImpl: (async () =>
+					eventStream([
+						{ type: "response.output_item.done", item },
+						{
+							type: "response.completed",
+							response: { output: [{ ...item, ...changed }], usage: {} },
+						},
+					])) as unknown as typeof fetch,
+			});
+			await expect(
+				(async () => {
+					for await (const _event of client.runMessage({
+						content: "fixture",
+						model_name: "gpt-test",
+					})) {
+						/* consume */
+					}
+				})(),
+			).rejects.toThrow("disagrees");
+		}
+	});
+
+	it("retains validated done items in compact terminal summaries and submits each output once", async () => {
+		const requests: Record<string, unknown>[] = [];
+		const client = new CodexSubscriptionClient({
+			authFile,
+			fetchImpl: (async (_url, init) => {
+				requests.push(JSON.parse(String(init?.body)));
+				return eventStream(
+					requests.length === 1
+						? compactCompletion
+						: [{ type: "response.completed", response: { output: [] } }],
+				);
+			}) as typeof fetch,
+		});
+		const events: ProviderEvent[] = [];
+		for await (const event of client.runMessage({
+			content: "fixture",
+			model_name: "gpt-test",
+		})) {
+			events.push(event);
+			if (event.kind === "tool_ready") event.call.name = "consumer-mutation";
+		}
+		expect(events.filter((event) => event.kind === "tool_ready")).toHaveLength(
+			1,
+		);
+		expect(events.at(-1)).toMatchObject({
+			kind: "requires_action",
+			calls: [
+				{
+					id: "execute-fixture",
+					name: "execute",
+					input: { command: "printf fixture" },
+				},
+			],
+		});
+		expect(
+			events.find((event) => event.kind === "provider_diagnostic"),
+		).toMatchObject({
+			details: { outputShape: "empty", itemCount: 0, completedToolCount: 1 },
+		});
+		const thread = events.find((event) => event.kind === "thread");
+		if (!thread) throw new Error("Missing thread");
+		for await (const _event of client.runToolOutputs({
+			thread_id: thread.threadId,
+			tool_outputs: [{ tool_call_id: "execute-fixture", output: "fixture" }],
+		})) {
+			/* consume */
+		}
+		const continuation = requests[1]?.input as Record<string, unknown>[];
+		expect(continuation.filter((item) => item.type !== "message")).toEqual([
+			compactCompletion[0]!.item!,
+			compactCompletion[1]!.item!,
+			{
+				type: "function_call_output",
+				call_id: "execute-fixture",
+				output: "fixture",
+			},
+		]);
+	});
+
+	it("never promotes unfinished call fragments from an empty terminal summary", async () => {
+		const client = new CodexSubscriptionClient({
+			authFile,
+			fetchImpl: (async () =>
+				eventStream([
+					{
+						type: "response.output_item.added",
+						item: {
+							type: "function_call",
+							call_id: "unfinished",
+							name: "execute",
+							arguments: "",
+						},
+					},
+					{
+						type: "response.function_call_arguments.delta",
+						call_id: "unfinished",
+						delta: "{",
+					},
+					{ type: "response.completed", response: { output: [] } },
+				])) as unknown as typeof fetch,
+		});
+		const events: ProviderEvent[] = [];
+		for await (const event of client.runMessage({
+			content: "fixture",
+			model_name: "gpt-test",
+		}))
+			events.push(event);
+		expect(
+			events.some(
+				(event) =>
+					event.kind === "tool_ready" || event.kind === "requires_action",
+			),
+		).toBe(false);
+		expect(events.at(-1)).toEqual({ kind: "completed", finalText: "" });
+	});
+
+	it("rolls back a cancelled done item before accepting a compact completion", async () => {
+		const controller = new AbortController();
+		const requests: Record<string, unknown>[] = [];
+		const client = new CodexSubscriptionClient({
+			authFile,
+			fetchImpl: (async (_url, init) => {
+				requests.push(JSON.parse(String(init?.body)));
+				return eventStream(
+					requests.length === 1
+						? compactCompletion
+						: [{ type: "response.completed", response: {} }],
+				);
+			}) as typeof fetch,
+		});
+		const events: ProviderEvent[] = [];
+		await expect(
+			(async () => {
+				for await (const event of client.runMessage(
+					{ content: "fixture", model_name: "gpt-test" },
+					{ signal: controller.signal },
+				)) {
+					events.push(event);
+					if (event.kind === "tool_ready") controller.abort();
+				}
+			})(),
+		).rejects.toMatchObject({ name: "AbortError" });
+		expect(events.some((event) => event.kind === "requires_action")).toBe(
+			false,
+		);
+		const thread = events.find((event) => event.kind === "thread");
+		if (!thread) throw new Error("Missing thread");
+		for await (const _event of client.runMessage({
+			thread_id: thread.threadId,
+			content: "retry",
+			model_name: "gpt-test",
+		})) {
+			/* consume */
+		}
+		expect(JSON.stringify(requests[1]?.input)).not.toContain("execute-fixture");
+	});
+
+	it("records fixed completion shape counts without copying unknown type names or payloads", async () => {
+		for (const [response, expected] of [
+			[{}, { outputShape: "absent", itemCount: null }],
+			[{ output: [] }, { outputShape: "empty", itemCount: 0 }],
+			[
+				{
+					output: [
+						{ type: "message", content: "private-text" },
+						{ type: "reasoning", encrypted_content: "private-content" },
+						{ type: "private-type" },
+					],
+				},
+				{
+					outputShape: "nonempty",
+					itemCount: 3,
+					itemTypes: {
+						function_call: 0,
+						reasoning: 1,
+						message: 1,
+						other: 1,
+						invalid: 0,
+					},
+				},
+			],
+		] as const) {
+			const client = new CodexSubscriptionClient({
+				authFile,
+				fetchImpl: (async () =>
+					eventStream([
+						{ type: "response.completed", response },
+					])) as unknown as typeof fetch,
+			});
+			const events: ProviderEvent[] = [];
+			for await (const event of client.runMessage({
+				content: "fixture",
+				model_name: "gpt-test",
+			}))
+				events.push(event);
+			const diagnostic = events.find(
+				(event) => event.kind === "provider_diagnostic",
+			);
+			expect(diagnostic).toMatchObject({ details: expected });
+			expect(JSON.stringify(diagnostic)).not.toContain("private-");
+		}
+	});
+
+	it("rejects malformed final output while preserving bounded shape evidence", async () => {
+		for (const output of [null, "private-invalid-output", [null]]) {
+			const client = new CodexSubscriptionClient({
+				authFile,
+				fetchImpl: (async () =>
+					eventStream([
+						{ type: "response.completed", response: { output } },
+					])) as unknown as typeof fetch,
+			});
+			const events: ProviderEvent[] = [];
+			await expect(
+				(async () => {
+					for await (const event of client.runMessage({
+						content: "fixture",
+						model_name: "gpt-test",
+					}))
+						events.push(event);
+				})(),
+			).rejects.toThrow("malformed completed output list");
+			expect(
+				events.find((event) => event.kind === "provider_diagnostic"),
+			).toMatchObject({
+				details: {
+					outputShape: Array.isArray(output) ? "nonempty" : "invalid",
+				},
+			});
+			expect(JSON.stringify(events)).not.toContain("private-invalid-output");
+		}
+	});
+
+	it("accepts canonical aliases and reordered arguments without sharing ready inputs", async () => {
+		const item = {
+			type: "function_call",
+			call_id: "stable",
+			name: "Glob",
+			arguments: JSON.stringify({ patterns: ["**/*.ts"], path: "." }),
+		};
+		const final = {
+			...item,
+			name: "glob",
+			arguments: JSON.stringify({ path: ".", patterns: ["**/*.ts"] }),
+		};
+		const client = new CodexSubscriptionClient({
+			authFile,
+			fetchImpl: (async () =>
+				eventStream([
+					{ type: "response.output_item.done", item },
+					{ type: "response.completed", response: { output: [final] } },
+				])) as unknown as typeof fetch,
+		});
+		const events: ProviderEvent[] = [];
+		for await (const event of client.runMessage({
+			content: "fixture",
+			model_name: "gpt-test",
+		})) {
+			if (event.kind === "tool_ready") {
+				// Downstream consumers must not mutate the adapter's identity snapshot.
+				event.call.name = "consumer-change";
+				(event.call.input as { patterns: string[] }).patterns.push(
+					"consumer-change",
+				);
+			}
+			events.push(event);
+		}
+		expect(events.at(-1)).toMatchObject({
+			kind: "requires_action",
+			calls: [
+				{
+					id: "stable",
+					name: "glob",
+					input: { path: ".", patterns: ["**/*.ts"] },
+				},
+			],
+		});
+	});
+
+	it("diagnoses missing final calls without recording private arguments and rolls back failed items", async () => {
+		const item = {
+			type: "function_call",
+			call_id: "rejected",
+			name: "glob",
+			arguments: JSON.stringify({ patterns: ["private-fixture-path/**"] }),
+		};
+		const requests: Record<string, unknown>[] = [];
+		const client = new CodexSubscriptionClient({
+			authFile,
+			fetchImpl: (async (_url, init) => {
+				requests.push(JSON.parse(String(init?.body)));
+				return eventStream(
+					requests.length === 1
+						? [
+								{ type: "response.output_item.done", item },
+								{
+									type: "response.completed",
+									response: {
+										output: [
+											{
+												type: "message",
+												id: "unrelated-final-item",
+												content: [],
+											},
+										],
+									},
+								},
+							]
+						: [{ type: "response.completed", response: { output: [] } }],
+				);
+			}) as typeof fetch,
+		});
+		const events: ProviderEvent[] = [];
+		const request = {
+			content: "fixture",
+			model_name: "gpt-test",
+		};
+		await expect(
+			(async () => {
+				for await (const event of client.runMessage(request))
+					events.push(event);
+			})(),
+		).rejects.toMatchObject({
+			category: "protocol",
+			safeToRetryBeforeTools: true,
+		});
+		const warning = events.find((event) => event.kind === "warning");
+		expect(JSON.stringify(warning)).toContain("missing_call");
+		expect(JSON.stringify(warning)).not.toContain("private-fixture-path");
+		const thread = events.find((event) => event.kind === "thread");
+		if (!thread || thread.kind !== "thread") throw new Error("Missing thread");
+		for await (const _event of client.runMessage({
+			...request,
+			thread_id: thread.threadId,
+		})) {
+			/* consume retry */
+		}
+		expect(JSON.stringify(requests[1]?.input)).not.toContain("rejected");
 	});
 
 	it("replays every response item and routes tool outputs into a continuation", async () => {
@@ -257,7 +678,7 @@ describe("CodexSubscriptionClient", () => {
 			fetchImpl,
 			retryBaseDelayMs: 1,
 		});
-		const events = [];
+		const events: ProviderEvent[] = [];
 		for await (const event of client.runMessage({
 			content: "recover from overload",
 			model_name: "gpt-test",
@@ -310,7 +731,7 @@ describe("CodexSubscriptionClient", () => {
 			fetchImpl,
 			retryBaseDelayMs: 1,
 		});
-		const events = [];
+		const events: ProviderEvent[] = [];
 		for await (const event of client.runMessage({
 			content: "recover from a disconnect",
 			model_name: "gpt-test",
