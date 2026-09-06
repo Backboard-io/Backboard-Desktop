@@ -97,6 +97,21 @@ jobs:
             throw 'Windows release PowerShell parsing failed.'
           }
 
+      - name: Add Windows SDK signing tools to PATH
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $windowsKitsBin = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
+          $signTool = Get-ChildItem -LiteralPath $windowsKitsBin -Recurse -File -Filter 'signtool.exe' |
+            Where-Object { $_.FullName -match '[\\/]x64[\\/]signtool\.exe$' } |
+            Sort-Object -Property FullName -Descending |
+            Select-Object -First 1
+          if (-not $signTool) {
+            throw "Could not locate the x64 Windows SDK signtool under $windowsKitsBin."
+          }
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value $signTool.DirectoryName
+          Write-Host "Using Windows SDK signing tools from $($signTool.DirectoryName)"
+
       - name: Stamp Backboard release metadata
         shell: pwsh
         run: |
