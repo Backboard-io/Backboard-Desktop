@@ -132,10 +132,14 @@ jobs:
         working-directory: backboard
         env:
           BACKBOARD_CLI_TARGET: bun-windows-x64
+          # The bundled Copilot extension packages this marker. Its own build
+          # invokes postinstall again, so preserve the marker during packaging.
+          BACKBOARD_KEEP_COPILOT_SHIM_MARKER: '1'
           VSCODE_ARCH: x64
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           node build/lib/preLaunch.ts
           npm run compile-client
 
@@ -151,6 +155,22 @@ jobs:
 
           npm run gulp -- vscode-win32-x64
           npm run gulp -- vscode-win32-x64-inno-updater
+
+      - name: Validate complete Windows application payload
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $app = Join-Path '${{ github.workspace }}' 'VSCode-win32-x64'
+          $productJson = Get-ChildItem -LiteralPath $app -Recurse -File -Filter 'product.json' |
+            Where-Object { $_.FullName -match '[\\/]resources[\\/]app[\\/]product\.json$' }
+          $mainExecutables = Get-ChildItem -LiteralPath $app -File -Filter '*.exe'
+          if (-not $productJson) {
+            throw "The packaged application is incomplete: resources/app/product.json is missing from $app."
+          }
+          if (-not $mainExecutables) {
+            throw "The packaged application is incomplete: no top-level executable exists in $app."
+          }
+          Write-Host "Validated packaged application: $($mainExecutables.Name -join ', ')"
 
       - name: Sign in to Azure with GitHub OIDC
         uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca # v3
@@ -186,6 +206,7 @@ jobs:
         working-directory: backboard
         run: |
           $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           npm run gulp -- vscode-win32-x64-system-setup
           npm run gulp -- vscode-win32-x64-user-setup
 
