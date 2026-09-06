@@ -521,7 +521,15 @@ async function downloadBackboardUpdate(rawUrl: string, destination: string, prog
 	});
 	// pipeline closes both streams before rejecting, so cancellation can safely
 	// remove the partial file and release the lock before another attempt starts.
-	await pipeline(response, fs.createWriteStream(destination, { mode: 0o600 }), { signal });
+	try {
+		await pipeline(response, fs.createWriteStream(destination, { mode: 0o600 }), { signal });
+	} catch (error) {
+		// Node can surface an aborted HTTP socket as a generic `Error: aborted`
+		// on Windows. Normalize it to the AbortSignal's AbortError so callers can
+		// reliably distinguish an intentional Stop action from a failed download.
+		signal.throwIfAborted();
+		throw error;
+	}
 }
 
 async function verifyBackboardUpdate(dmgPath: string, manifest: UpdateManifest, signal: AbortSignal): Promise<void> {
