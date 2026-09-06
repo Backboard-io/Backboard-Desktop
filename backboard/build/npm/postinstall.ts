@@ -309,7 +309,10 @@ async function main() {
 	}
 
 	// JS-only dirs run in parallel
-	const concurrency = Math.min(os.cpus().length, 8);
+	const configuredConcurrency = Number.parseInt(process.env['VSCODE_NPM_INSTALL_CONCURRENCY'] ?? '', 10);
+	const concurrency = Number.isSafeInteger(configuredConcurrency) && configuredConcurrency > 0
+		? configuredConcurrency
+		: Math.min(os.cpus().length, 8);
 	log('.', `Running ${parallelTasks.length} npm installs with concurrency ${concurrency}...`);
 	await runWithConcurrency(parallelTasks, concurrency);
 

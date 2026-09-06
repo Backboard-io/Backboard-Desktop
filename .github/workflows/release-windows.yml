@@ -121,6 +121,9 @@ jobs:
           npm_config_foreground_scripts: 'true'
           ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+          # Node 24 can terminate a child process with 0xC0000409 when the
+          # postinstall fan-out launches many npm.cmd processes concurrently.
+          VSCODE_NPM_INSTALL_CONCURRENCY: '1'
           GITHUB_TOKEN: ${{ github.token }}
         run: npm ci
 
