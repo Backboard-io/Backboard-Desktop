@@ -27,7 +27,9 @@ concurrency:
 jobs:
   build-sign-verify:
     name: Build, sign, and verify Windows x64
-    runs-on: windows-2025
+    # The VS Code native build prerequisite currently requires the VS 2022
+    # toolchain. windows-2025 has moved to VS 2026 and fails preinstall.
+    runs-on: windows-2022
     environment: windows-release
     timeout-minutes: 120
     env:
