@@ -71,9 +71,9 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          node-version-file: vscode/.nvmrc
+          node-version-file: backboard/.nvmrc
           cache: npm
-          cache-dependency-path: vscode/package-lock.json
+          cache-dependency-path: backboard/package-lock.json
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -101,8 +101,8 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $builtAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
           node scripts/windows-release/stamp-product.mjs `
-            --product vscode/product.json `
-            --package vscode/package.json `
+            --product backboard/product.json `
+            --package backboard/package.json `
             --version $env:RELEASE_VERSION `
             --arch $env:RELEASE_ARCH `
             --channel $env:RELEASE_CHANNEL `
@@ -112,7 +112,7 @@ jobs:
 
       - name: Install Windows build dependencies
         shell: pwsh
-        working-directory: vscode
+        working-directory: backboard
         env:
           npm_config_arch: x64
           npm_config_cpu: x64
@@ -124,7 +124,7 @@ jobs:
 
       - name: Build Backboard Studio application
         shell: pwsh
-        working-directory: vscode
+        working-directory: backboard
         env:
           BACKBOARD_CLI_TARGET: bun-windows-x64
           VSCODE_ARCH: x64
@@ -178,7 +178,7 @@ jobs:
 
       - name: Build installers from signed application payload
         shell: pwsh
-        working-directory: vscode
+        working-directory: backboard
         run: |
           $ErrorActionPreference = 'Stop'
           npm run gulp -- vscode-win32-x64-system-setup

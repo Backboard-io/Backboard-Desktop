@@ -4,6 +4,10 @@ Windows releases are built and signed by `.github/workflows/release-windows.yml`
 The workflow uses Azure Artifact Signing (formerly Trusted Signing) with GitHub
 OIDC. No certificate private key or Azure client secret is stored in GitHub.
 
+The application source tree is `backboard/`; keep the workflow's Node setup,
+dependency cache, metadata stamping, and build working directories aligned with
+that path if the source tree is moved again.
+
 ## Azure resources
 
 Create these resources in the Azure subscription used for Backboard releases:
