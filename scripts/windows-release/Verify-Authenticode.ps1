@@ -10,9 +10,18 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$signTool = Get-Command 'signtool.exe' -ErrorAction SilentlyContinue
-if (-not $signTool) {
-	throw 'signtool.exe was not found. Install the Windows SDK before validating release signatures.'
+$signToolCommand = Get-Command 'signtool.exe' -ErrorAction SilentlyContinue
+$signToolPath = if ($signToolCommand) { $signToolCommand.Source } else { $null }
+if (-not $signToolPath) {
+	$programFilesX86 = [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFilesX86)
+	$sdkBin = Join-Path $programFilesX86 'Windows Kits\10\bin'
+	$signToolPath = Get-ChildItem -LiteralPath $sdkBin -Filter 'signtool.exe' -File -Recurse -ErrorAction SilentlyContinue |
+		Where-Object { $_.FullName -match '\\x64\\signtool[.]exe$' } |
+		Sort-Object -Property FullName -Descending |
+		Select-Object -First 1 -ExpandProperty FullName
+}
+if (-not $signToolPath) {
+	throw 'signtool.exe was not found on PATH or in the Windows 10 SDK. Install the x64 Windows SDK signing tools before validating release signatures.'
 }
 
 $files = foreach ($target in $Path) {
@@ -53,7 +62,7 @@ foreach ($file in $files) {
 		$failures.Add("$($file.FullName): RFC 3161 timestamp is missing")
 	}
 
-	& $signTool.Source verify /pa /all /tw /q $file.FullName
+	& $signToolPath verify /pa /all /tw /q $file.FullName
 	if ($LASTEXITCODE -ne 0) {
 		$failures.Add("$($file.FullName): signtool verification failed with exit code $LASTEXITCODE")
 	}
