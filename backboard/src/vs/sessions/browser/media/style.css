@@ -252,8 +252,8 @@
 	box-sizing: border-box;
 }
 
-/* Keep the simple-mode sidebar flat against the workspace, including its
- * header edge, without an overlapping shadow. */
+/* Keep the sidebar flush with its grid allocation. The wrapper owns the
+ * Simple-mode shadow so the sidebar's clipped content cannot cut it off. */
 .monaco-workbench.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sidebar) {
 	z-index: 1;
 	overflow: visible !important;
@@ -261,6 +261,11 @@
 	border-right: 0 !important;
 	box-shadow: none !important;
 	outline: 0 !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(.hc-black):not(.hc-light) .monaco-grid-view .split-view-view:has(> .part.sidebar) {
+	z-index: 2;
+	box-shadow: 6px 0 18px -6px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36)) !important;
 }
 
 .monaco-workbench.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sidebar)::after {
@@ -357,6 +362,14 @@
 	border-radius: 0;
 	box-sizing: border-box;
 	position: relative;
+}
+
+/* SessionView writes its active/inactive surface inline. In Simple mode the
+ * rendered transcript uses the main panel surface; its loading overlay and
+ * header must use that same surface before the transcript is revealed. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.sessionspart .session-view {
+	--session-view-background: var(--sessions-main-region-background) !important;
+	--part-background: var(--sessions-main-region-background) !important;
 }
 
 .agent-sessions-workbench .part.auxiliarybar > .title,

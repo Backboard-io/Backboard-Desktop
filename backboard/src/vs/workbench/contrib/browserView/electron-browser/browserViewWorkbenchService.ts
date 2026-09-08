@@ -21,7 +21,7 @@ import { IEditorGroupsService } from '../../../services/editor/common/editorGrou
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { ContextKeyExpr, IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
 import { ChatContextKeys } from '../../chat/common/actions/chatContextKeys.js';
-import { IsSessionsWindowContext } from '../../../common/contextkeys.js';
+import { IsOptimusWindowContext, IsSessionsWindowContext } from '../../../common/contextkeys.js';
 import { ChatConfiguration } from '../../chat/common/constants.js';
 import { IThemeService } from '../../../../platform/theme/common/themeService.js';
 import { focusBorder } from '../../../../platform/theme/common/colors/baseColors.js';
@@ -72,9 +72,10 @@ export class BrowserViewWorkbenchService extends Disposable implements IBrowserV
 		ChatContextKeys.enabled,
 		ContextKeyExpr.has(`config.${ChatConfiguration.AgentEnabled}`),
 		ContextKeyExpr.has(`config.workbench.browser.enableChatTools`),
-		// If we're in Sessions Window, we require some additional conditions.
+		// Optimus uses the workbench chat agent; other Sessions windows need agent host tools.
 		ContextKeyExpr.or(
 			IsSessionsWindowContext.negate(),
+			IsOptimusWindowContext,
 			ContextKeyExpr.and(
 				ContextKeyExpr.has(`config.${AgentHostChatToolsEnabledSettingId}`),
 				ContextKeyExpr.or(

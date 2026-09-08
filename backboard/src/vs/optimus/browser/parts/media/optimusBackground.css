@@ -9,6 +9,7 @@
 	isolation: isolate;
 	--optimus-scrollbar-track: transparent;
 	--optimus-glass-surface: color-mix(in srgb, var(--vscode-editor-background) 72%, transparent);
+	--optimus-glass-blur: blur(24px);
 	--optimus-glass-border: color-mix(in srgb, var(--vscode-foreground) 18%, transparent);
 	background-image: var(--new-chat-background-image) !important;
 	background-size: cover !important;
@@ -77,10 +78,8 @@
 	background: transparent !important;
 }
 
-/* The shared backing supplies the blur, including empty lanes. */
+/* Keep non-card surfaces clear; each tile supplies its own frosted backing. */
 .monaco-workbench.agent-sessions-workbench.optimus-window:not(:has(.optimus-grid-content.focused-session)).sessions-chat-custom-background:not(.hc-black):not(.hc-light) :is(
-	.optimus-card,
-	.optimus-empty-hero,
 	.optimus-focused-session,
 	.terminal-outer-container
 ) {
@@ -100,14 +99,15 @@
 	border-color: var(--optimus-glass-border);
 }
 
-.monaco-workbench.agent-sessions-workbench.optimus-window:not(:has(.optimus-grid-content.focused-session)).sessions-chat-custom-background:not(.hc-black):not(.hc-light) .optimus-card:hover {
-	background: color-mix(in srgb, var(--vscode-editor-background) 16%, transparent) !important;
+.monaco-workbench.agent-sessions-workbench.optimus-window:not(:has(.optimus-grid-content.focused-session)).sessions-chat-custom-background:not(.hc-black):not(.hc-light) .optimus-grid-content .optimus-card:hover {
+	background: color-mix(in srgb, var(--vscode-foreground) 3%, var(--optimus-glass-surface)) !important;
 }
 
 /* High contrast themes deliberately keep their solid, accessible surfaces. */
 @media (prefers-reduced-transparency: reduce) {
 	.monaco-workbench.agent-sessions-workbench.optimus-window:not(:has(.optimus-grid-content.focused-session)).sessions-chat-custom-background {
 		--optimus-glass-surface: var(--vscode-editor-background) !important;
+		--optimus-glass-blur: none !important;
 	}
 }
 
@@ -168,8 +168,14 @@
 	background: transparent !important;
 }
 
-.monaco-workbench.agent-sessions-workbench.optimus-window:not(:has(.optimus-grid-content.focused-session)).sessions-chat-custom-background:not(.hc-black):not(.hc-light) .optimus-grid-content :is(.optimus-card, .optimus-empty-hero, .optimus-focused-session) {
-	backdrop-filter: none;
+.monaco-workbench.agent-sessions-workbench.optimus-window:not(:has(.optimus-grid-content.focused-session)).sessions-chat-custom-background:not(.hc-black):not(.hc-light) .optimus-grid-content :is(.optimus-card, .optimus-empty-hero, .optimus-dashboard-header button, .optimus-grid-pager-label) {
+	background: var(--optimus-glass-surface) !important;
+	backdrop-filter: var(--optimus-glass-blur);
+}
+
+/* Frost individual toolbar buttons while keeping their container clear. */
+.monaco-workbench.agent-sessions-workbench.optimus-window:not(:has(.optimus-grid-content.focused-session)).sessions-chat-custom-background:not(.hc-black):not(.hc-light) .optimus-grid-content .optimus-dashboard-header button:is(:hover:not(:disabled), .active, [aria-expanded='true']) {
+	background: color-mix(in srgb, var(--vscode-foreground) 10%, var(--optimus-glass-surface)) !important;
 }
 
 /* Advanced's embedded Editor panel uses the same themed surface for editable
@@ -212,7 +218,7 @@
 	backdrop-filter: none;
 }
 
-/* Selection stays visible above the shared glass backing, including on hover. */
-.monaco-workbench.agent-sessions-workbench.optimus-window.sessions-chat-custom-background:not(.hc-black):not(.hc-light) .optimus-card.active {
-	background: color-mix(in srgb, var(--vscode-foreground) 10%, transparent) !important;
+/* Selection retains the frosted surface, including on hover. */
+.monaco-workbench.agent-sessions-workbench.optimus-window:not(:has(.optimus-grid-content.focused-session)).sessions-chat-custom-background:not(.hc-black):not(.hc-light) .optimus-grid-content .optimus-card.active {
+	background: color-mix(in srgb, var(--vscode-foreground) 10%, var(--optimus-glass-surface)) !important;
 }

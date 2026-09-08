@@ -2038,9 +2038,21 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 	box-shadow: none;
 }
 
-/* Simple mode has one rounded panel edge, not a second straight grid divider. */
+/* Let the canvas show through the right panel's rounded corners. The leaf
+ * wrapper paints the shadow outside the panel's clipped content. */
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window) .monaco-grid-view .split-view-view:has(> .part.auxiliarybar),
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window) .monaco-grid-view .split-view-view:has(> .monaco-grid-branch-node .part.auxiliarybar) {
+	background: transparent !important;
+	box-shadow: none;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.auxiliarybar) {
+	border-radius: 12px !important;
+	overflow: visible;
+	box-shadow: -6px 0 18px -6px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36));
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):is(.hc-black, .hc-light) .monaco-grid-view .split-view-view:has(> .part.auxiliarybar) {
 	box-shadow: none;
 }
 
@@ -2050,7 +2062,7 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 	box-shadow: none;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .monaco-grid-view .part.auxiliarybar {
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .monaco-grid-view .split-view-view > .part.auxiliarybar {
 	border: 0 !important;
 	border-radius: 12px !important;
 	clip-path: none;

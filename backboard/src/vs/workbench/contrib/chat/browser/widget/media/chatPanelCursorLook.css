@@ -1309,9 +1309,12 @@
 	min-height: 22px;
 }
 
-.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part .monaco-editor,
-.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part .monaco-editor .monaco-editor-background,
-.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part .monaco-editor .margin {
+/* Include the input editor hierarchy so the panel surface wins over the
+ * shared clean-chat and Advanced-mode T3 editor backgrounds. Keep a solid
+ * fill for Monaco's reverse-rounded selection corners. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part .chat-input-container .chat-editor-container .interactive-input-editor .monaco-editor,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part .chat-input-container .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part .chat-input-container .chat-editor-container .interactive-input-editor .monaco-editor .margin {
 	background-color: var(--bb-composer-surface) !important;
 }
 
@@ -2345,12 +2348,14 @@
 	padding: 8px 8px 6px !important;
 	gap: 4px !important;
 	min-height: 80px;
-	background: var(--vscode-editorWidget-background) !important;
+	--bb-composer-surface: var(--vscode-editorWidget-background);
+	background: var(--bb-composer-surface) !important;
 	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 14%, transparent) !important;
 	box-shadow: 0 2px 8px #0000000a !important;
 }
 :is(.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-composer, .monaco-workbench.vs.agent-sessions-workbench, .monaco-workbench.vs) .interactive-session .interactive-input-part .chat-input-container {
-	background: #fff !important;
+	--bb-composer-surface: #fff;
+	background: var(--bb-composer-surface) !important;
 }
 :is(.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer, .monaco-workbench.agent-sessions-workbench, .monaco-workbench) .interactive-session .interactive-input-part .chat-input-container:focus-within {
 	border-color: color-mix(in srgb, var(--vscode-focusBorder) 45%, var(--vscode-editorWidget-background)) !important;

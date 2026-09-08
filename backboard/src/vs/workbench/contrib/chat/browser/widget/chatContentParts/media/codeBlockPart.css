@@ -46,6 +46,19 @@
 	margin: 1px;
 }
 
+/* Toolbars use ul/li elements, but must not inherit the surrounding Markdown
+ * list spacing: it pushes the actions below the code block's header rail. */
+.interactive-result-code-block .interactive-result-code-block-toolbar .monaco-action-bar .actions-container {
+	margin: 0 !important;
+	padding: 0 !important;
+	list-style: none;
+}
+
+.interactive-result-code-block .interactive-result-code-block-toolbar .monaco-action-bar .action-item {
+	margin: 1px 2px !important;
+	padding: 0 !important;
+}
+
 .interactive-result-code-block:hover .interactive-result-code-block-toolbar,
 .interactive-result-code-block .interactive-result-code-block-toolbar:focus-within,
 .interactive-result-code-block.focused .interactive-result-code-block-toolbar {

@@ -1256,3 +1256,97 @@
 .monaco-workbench:is(.hc-black, .hc-light) .optimus-grid-content .optimus-card {
 	border: 1px solid var(--vscode-contrastBorder);
 }
+
+/* One control rhythm across view selection, filters, pagination and panels. */
+.optimus-grid-content .optimus-dashboard-header {
+	padding: 8px;
+}
+
+.optimus-grid-content .optimus-dashboard-primary {
+	align-items: center;
+	gap: 8px;
+}
+
+.optimus-grid-content :is(.optimus-dashboard-controls, .optimus-dashboard-filter-controls) {
+	align-items: center;
+	gap: 8px;
+}
+
+.optimus-grid-content .optimus-dashboard-controls {
+	flex: 0 0 auto;
+}
+
+.optimus-grid-content .optimus-dashboard-filter-controls {
+	flex-basis: 120px;
+}
+
+.optimus-grid-content .optimus-view-switcher {
+	flex: 0 0 auto;
+	align-items: center;
+	gap: 4px;
+	padding: 0;
+	background: transparent;
+}
+
+.optimus-grid-content .optimus-dashboard-header button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 auto;
+	box-sizing: border-box;
+	min-width: 28px;
+	height: 28px;
+	margin: 0;
+	padding: 0 10px;
+	gap: 6px;
+	border-radius: 7px;
+	font-size: 12px;
+	line-height: 16px;
+	white-space: nowrap;
+}
+
+.optimus-grid-content .optimus-dashboard-header button[hidden] {
+	display: none;
+}
+
+.optimus-grid-content .optimus-dashboard-header button.codicon {
+	width: 28px;
+	padding: 0;
+	font-size: 16px;
+}
+
+.optimus-grid-content .optimus-dashboard-header button > .codicon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 16px;
+	height: 16px;
+	font-size: 16px;
+	line-height: 16px;
+}
+
+.optimus-grid-content .optimus-dashboard-header .codicon-chevron-down {
+	width: 12px;
+	font-size: 12px;
+}
+
+.optimus-grid-content .optimus-grid-pager {
+	height: 28px;
+	padding: 0;
+	gap: 8px;
+	font-size: 12px;
+	line-height: 16px;
+	font-variant-numeric: tabular-nums;
+}
+
+.optimus-grid-content .optimus-grid-pager-label {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	box-sizing: border-box;
+	height: 28px;
+	padding: 0 10px;
+	border-radius: 7px;
+	background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
+	color: var(--vscode-foreground);
+}

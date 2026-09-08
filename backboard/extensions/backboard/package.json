@@ -73,6 +73,12 @@
       }
     ],
     "menus": {
+      "scm/inputBox": [
+        {
+          "command": "backboard.generateCommitMessage",
+          "when": "scmProvider == git && chatSetupCompleted"
+        }
+      ],
       "commandPalette": [
         {
           "command": "backboard.cancelUpdate",
