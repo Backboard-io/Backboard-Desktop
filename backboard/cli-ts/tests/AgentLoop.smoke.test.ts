@@ -356,6 +356,36 @@ describe("AgentController loop (mocked Backboard)", () => {
 		expect(await submission).toBe("completed");
 	});
 
+	for (const failBoundary of [false, true]) {
+		it(`uses the editor turn id and waits for request capture (failure: ${failBoundary})`, async () => {
+			const client = new FakeClient([{ kind: "assistant_delta", text: "done" }, { kind: "completed" }], []);
+			const boundaries: string[] = [];
+			let finish!: () => void;
+			const gate = new Promise<void>(resolve => { finish = resolve; });
+			let started!: () => void;
+			const capturing = new Promise<void>(resolve => { started = resolve; });
+			const checkpoints: CheckpointRecorder = {
+				recordPreImage: async () => {}, recordPostImage: async () => {}, revertToolCall: async () => {},
+				beginShellCapture: async () => {}, endShellCapture: async () => {}, captureWarning: () => null,
+				scopedToTurn() { return this; },
+				beginTurn: async id => { boundaries.push(`begin:${id}`); },
+				endTurn: async id => { boundaries.push(`end:${id}`); started(); await gate; if (failBoundary) throw new Error("capture failed"); },
+			};
+			const { ctrl, events } = controllerWith(client, new TestTool({ name: "Echo", readOnly: true }), [], { checkpoints });
+			const submission = ctrl.submit("do it", { turnId: "editor-turn" });
+			await capturing;
+			let idle = false;
+			const wait = ctrl.waitForIdle().then(() => { idle = true; });
+			await Promise.resolve();
+			expect(idle).toBe(false);
+			finish();
+			if (failBoundary) await expect(submission).rejects.toThrow("capture failed");
+			else expect(await submission).toBe("completed");
+			await wait;
+			expect({ boundaries, active: ctrl.hasActiveWork, turnId: events.find(event => event.type === "turn:start")?.turnId }).toEqual({ boundaries: ["begin:editor-turn", "end:editor-turn"], active: false, turnId: "editor-turn" });
+		});
+	}
+
 	it("starts a safe tool mid-stream when tool_call_ready arrives early", async () => {
 		let requiresActionYielded = false;
 		let startedDuringStream = false;

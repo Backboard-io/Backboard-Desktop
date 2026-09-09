@@ -68,6 +68,16 @@ export interface AgentChildToolCall {
 }
 
 export interface UsageInfo {
+	/** Latest Backboard API measurement; never billing-token accumulation. */
+	backboardContextUsage?: {
+		source: "backboard-api";
+		usedTokens?: number;
+		contextLimit?: number;
+		percent?: number;
+		summaryTokens?: number;
+		model?: string;
+	};
+
 	inputTokens?: number;
 	outputTokens?: number;
 	totalTokens?: number;
@@ -130,7 +140,12 @@ export type PerformanceTimingPhase =
  * structurally changes.
  */
 export type AgentEvent =
-	| { type: "agent:worker_update"; agentToolCallId: string; parentBatchToolCallId?: string; worker: AgentWorkerState }
+	| {
+			type: "agent:worker_update";
+			agentToolCallId: string;
+			parentBatchToolCallId?: string;
+			worker: AgentWorkerState;
+	  }
 	| { type: "session:created"; sessionId: string; threadId: string | null }
 	| { type: "user:message"; text: string }
 	| { type: "turn:start"; turnId: string }

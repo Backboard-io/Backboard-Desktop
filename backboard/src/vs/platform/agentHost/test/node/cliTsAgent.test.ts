@@ -43,6 +43,57 @@ suite('CliTsAgent tool metadata', () => {
 		assert.strictEqual(cliTsToolExecutionFailed({ type: 'tool:result', execution: { cancelled: true } }), true);
 	});
 
+	test('rewind keeps stable turn ids, persists editor recovery, and seeds only retained provider history', async () => {
+		const agent = createAgent();
+		const requests: Array<{ op: string; transactionId?: string; turnIds?: string[] }> = [];
+		type TestSession = {
+			storedTurns: Array<{ id: string; prompt: string; response: string }>;
+			threadId?: string;
+			forkContext?: string;
+			proc?: { dispose(): void };
+			rewind?: { activeCount: number; editorRefresh?: { transactionId: string; buffers: readonly { path: string; content: string }[] } };
+		};
+		const internals = agent as unknown as {
+			_sessions: Map<string, TestSession>;
+			_writeStore(): void;
+			_archiveRewindBranch(): void;
+			_resolveRgDir(): Promise<string | undefined>;
+			_ensureProcess(session: TestSession): unknown;
+		};
+		internals._writeStore = () => {};
+		internals._archiveRewindBranch = () => {};
+		internals._resolveRgDir = async () => undefined;
+		let disposed = 0;
+		const proc = {
+			nextRequestId: () => 'request-id',
+			notify: () => {},
+			dispose: () => disposed++,
+			request: async (request: typeof requests[number]) => {
+				requests.push(request);
+				return { payload: { transactionId: request.transactionId, status: request.op === 'prepareRewind' ? 'prepared' : request.op === 'recoverRewind' ? 'recovered' : 'committed',
+					paths: ['/workspace/mario.html'], backupId: 'backup-id', buffers: request.op === 'recoverRewind' ? [{ path: '/workspace/mario.html', content: 'unsaved' }] : [] } };
+			},
+		};
+		internals._ensureProcess = session => session.proc = proc;
+		const created = await agent.createSession({});
+		const session = internals._sessions.get(AgentSession.id(created.session))!;
+		session.storedTurns.push({ id: 'one', prompt: 'KEEP', response: 'retained' }, { id: 'two', prompt: 'DISCARD', response: 'discarded' });
+		session.threadId = 'old-provider-thread';
+		const prepared = await agent.rewindSession(created.session, { operation: 'prepare', retainedTurnId: 'one' });
+		const committed = await agent.rewindSession(created.session, { operation: 'commit', transactionId: prepared.transactionId, buffers: [{ path: '/workspace/mario.html', content: 'unsaved' }] });
+		assert.deepStrictEqual({ ids: requests[0].turnIds, activeCount: committed.activeCount, oldThread: session.threadId, refresh: session.rewind?.editorRefresh?.transactionId },
+			{ ids: ['two'], activeCount: 1, oldThread: undefined, refresh: prepared.transactionId });
+		assert.ok(session.forkContext?.includes('KEEP') && !session.forkContext.includes('DISCARD'));
+		assert.strictEqual(disposed, 1);
+		assert.deepStrictEqual(await agent.rewindSession(created.session, { operation: 'resume' }), committed);
+		await assert.rejects(agent.truncateSession(created.session, 'one'), /restoration is still pending/);
+		await agent.rewindSession(created.session, { operation: 'acknowledge', transactionId: prepared.transactionId });
+		const recovered = await agent.rewindSession(created.session, { operation: 'recover' });
+		assert.deepStrictEqual({ count: recovered.activeCount, buffers: recovered.buffers }, { count: 2, buffers: [{ path: '/workspace/mario.html', content: 'unsaved' }] });
+		await agent.rewindSession(created.session, { operation: 'acknowledge', transactionId: prepared.transactionId });
+		assert.strictEqual(session.rewind?.editorRefresh, undefined);
+	});
+
 	test('recognizes renewable and missing ChatGPT subscription logins', () => {
 		const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'backboard-subscription-login-'));
 		const previousAuthOverride = process.env['BACKBOARD_CHATGPT_SUBSCRIPTION_AUTH_FILE'];

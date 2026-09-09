@@ -57,7 +57,7 @@ export class RLMLoop {
 	}
 
 	async run(params: RLMRunParams): Promise<RLMResult> {
-		const usage: Required<UsageInfo> = blankUsage();
+		const usage: AccumulatedUsage = blankUsage();
 		const trajectory: RLMTrajectoryEntry[] = [];
 		const budget = RLMBudget.start(params.signal, params.timeoutMs);
 		let llmCallCount = 0;
@@ -204,7 +204,7 @@ export class RLMLoop {
 	}
 
 	private buildBridge(
-		usage: Required<UsageInfo>,
+		usage: AccumulatedUsage,
 		runSignal: AbortSignal,
 		reserveLLMCalls: (count: number) => void,
 	): LLMBridge {
@@ -250,7 +250,7 @@ export class RLMLoop {
 		trajectory: RLMTrajectoryEntry[];
 		iteration: number;
 		threadId: string;
-		usage: Required<UsageInfo>;
+		usage: AccumulatedUsage;
 		signal?: AbortSignal;
 		onThread?: (id: string) => void;
 	}): Promise<{
@@ -295,7 +295,7 @@ export class RLMLoop {
 	private async extractFallback(input: {
 		prompt: string;
 		trajectory: RLMTrajectoryEntry[];
-		usage: Required<UsageInfo>;
+		usage: AccumulatedUsage;
 		signal?: AbortSignal;
 	}): Promise<string> {
 		const resp = await this.completeRaw({
@@ -311,7 +311,7 @@ export class RLMLoop {
 	private async summarizeTimeout(input: {
 		prompt: string;
 		trajectory: RLMTrajectoryEntry[];
-		usage: Required<UsageInfo>;
+		usage: AccumulatedUsage;
 		timeoutMs: number;
 		reason: string;
 		parentSignal: AbortSignal;
@@ -346,7 +346,7 @@ export class RLMLoop {
 
 	private async completeText(input: {
 		content: string;
-		usage: Required<UsageInfo>;
+		usage: AccumulatedUsage;
 		signal?: AbortSignal;
 	}): Promise<string> {
 		const resp = await this.completeRaw(input);
@@ -356,7 +356,7 @@ export class RLMLoop {
 
 	private async completeRaw(input: {
 		content: string;
-		usage: Required<UsageInfo>;
+		usage: AccumulatedUsage;
 		threadId?: string;
 		signal?: AbortSignal;
 		onThread?: (id: string) => void;
@@ -376,7 +376,10 @@ export class RLMLoop {
 	}
 }
 
-function blankUsage(): Required<UsageInfo> {
+type AccumulatedUsage = Required<Omit<UsageInfo, "backboardContextUsage">> &
+	Pick<UsageInfo, "backboardContextUsage">;
+
+function blankUsage(): AccumulatedUsage {
 	return {
 		inputTokens: 0,
 		outputTokens: 0,
@@ -392,7 +395,7 @@ function blankUsage(): Required<UsageInfo> {
 }
 
 function addUsage(
-	usage: Required<UsageInfo>,
+	usage: AccumulatedUsage,
 	resp: {
 		input_tokens?: number | null;
 		output_tokens?: number | null;

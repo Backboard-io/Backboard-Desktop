@@ -15,6 +15,9 @@ const KNOWN_OPS = new Set<ServeControl["op"]>([
 	"unarchiveWorkers",
 	"deleteWorkers",
 	"dispose",
+	"prepareRewind",
+	"commitRewind",
+	"recoverRewind",
 ]);
 
 export type ParsedControlLine =
@@ -54,7 +57,44 @@ export function parseControlLine(line: string): ParsedControlLine | null {
 		requestId,
 	});
 	switch (op as ServeControl["op"]) {
+		case "prepareRewind":
+		case "commitRewind":
+		case "recoverRewind":
+			if (!requestId) return missing("requestId");
+			if (
+				typeof record.transactionId !== "string" ||
+				!/^[A-Za-z0-9-]+$/.test(record.transactionId)
+			)
+				return missing("transactionId");
+			if (
+				op === "prepareRewind" &&
+				(!Array.isArray(record.turnIds) ||
+					record.turnIds.some((id) => typeof id !== "string"))
+			)
+				return missing("turnIds");
+			if (
+				op === "prepareRewind" &&
+				record.baseCheckpointId !== undefined &&
+				typeof record.baseCheckpointId !== "string"
+			)
+				return missing("baseCheckpointId");
+			if (
+				op === "commitRewind" &&
+				(!Array.isArray(record.buffers) ||
+					record.buffers.some(
+						(buffer) =>
+							!buffer ||
+							typeof buffer.path !== "string" ||
+							typeof buffer.content !== "string" ||
+							(buffer.encoding !== undefined &&
+								typeof buffer.encoding !== "string"),
+					))
+			)
+				return missing("buffers");
+			break;
 		case "submit":
+			if (record.turnId !== undefined && typeof record.turnId !== "string")
+				return missing("turnId");
 			if (typeof record.requestId !== "string") return missing("requestId");
 			if (typeof record.prompt !== "string") return missing("prompt");
 			if (

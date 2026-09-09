@@ -346,9 +346,11 @@ function mapStreamPayload(
 				);
 				return { events, accumulatedContent, accumulatedReasoning };
 			}
-			addUsageEvent(events, payload);
 			const contextUsage = contextUsageField(payload);
-			const usage = usageFromPayload(payload);
+			const usage = usageFromPayload(payload) ?? {
+				backboardContextUsage: { source: "backboard-api" as const },
+			};
+			events.push({ kind: "usage", usage });
 			events.push({
 				kind: "completed",
 				finalText:
@@ -461,6 +463,14 @@ function usageFromPayload(
 		cachedTokens: numberField(payload, "cached_input_tokens"),
 		cacheWriteTokens: numberField(payload, "cache_write_input_tokens"),
 		costUsd: numberField(payload, "cost_usd"),
+		backboardContextUsage: {
+			source: "backboard-api",
+			usedTokens: contextUsage?.used_tokens,
+			contextLimit: contextUsage?.context_limit,
+			percent: contextUsage?.percent,
+			summaryTokens: contextUsage?.summary_tokens,
+			model: contextUsage?.model,
+		},
 		contextTokens: contextUsage?.used_tokens,
 		contextLimit: contextUsage?.context_limit,
 		provider: stringField(payload, "model_provider") ?? undefined,

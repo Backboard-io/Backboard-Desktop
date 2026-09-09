@@ -10,7 +10,7 @@ import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/
 import { MessageKind, ToolCallStatus, ToolCallConfirmationReason, ToolResultContentType, TurnState, ResponsePartKind, type ActiveTurn, type ICompletedToolCall, type ToolCallRunningState, type ToolCallStreamingState, type Turn, type ToolCallResponsePart, ToolCallCancellationReason, type Message } from '../../../../../../platform/agentHost/common/state/sessionState.js';
 import { IChatToolInvocation, IChatToolInvocationSerialized, type IChatExternalEdit, type IChatMarkdownContent, type IChatProgressMessage, type IChatUsage } from '../../../common/chatService/chatService.js';
 import { isToolResultInputOutputDetails, type IToolResultInputOutputDetails, ToolDataSource, ToolInvocationPresentation } from '../../../common/tools/languageModelToolsService.js';
-import { turnsToHistory as rawTurnsToHistory, activeTurnToProgress as rawActiveTurnToProgress, toolCallStateToInvocation as rawToolCallStateToInvocation, finalizeToolInvocation as rawFinalizeToolInvocation, updateRunningToolSpecificData as rawUpdateRunningToolSpecificData } from '../../../browser/agentSessions/agentHost/stateToProgressAdapter.js';
+import { usageInfoToChatUsage, turnsToHistory as rawTurnsToHistory, activeTurnToProgress as rawActiveTurnToProgress, toolCallStateToInvocation as rawToolCallStateToInvocation, finalizeToolInvocation as rawFinalizeToolInvocation, updateRunningToolSpecificData as rawUpdateRunningToolSpecificData } from '../../../browser/agentSessions/agentHost/stateToProgressAdapter.js';
 
 // ---- Helper factories -------------------------------------------------------
 
@@ -100,6 +100,19 @@ function assertInputOutputDetails(details: unknown): asserts details is IToolRes
 }
 
 // ---- Tests ------------------------------------------------------------------
+
+suite('Backboard API context usage', () => {
+	ensureNoDisposablesAreLeakedInTestSuite();
+	test('preserves zero occupancy and API metadata independently of billing tokens', () => {
+		const measurement = { source: 'backboard-api', usedTokens: 0, contextLimit: 1050000, percent: 0, summaryTokens: 0, model: 'model-a' };
+		assert.deepStrictEqual(usageInfoToChatUsage({ inputTokens: 1234, outputTokens: 56, _meta: { backboardContextUsage: measurement } }), {
+			kind: 'usage', promptTokens: 1234, completionTokens: 56, backboardContextUsage: measurement,
+		});
+	});
+	test('keeps API provenance when counts are unavailable', () => {
+		assert.strictEqual(usageInfoToChatUsage({ _meta: { backboardContextUsage: { source: 'backboard-api' } } })?.backboardContextUsage?.source, 'backboard-api');
+	});
+});
 
 suite('stateToProgressAdapter', () => {
 

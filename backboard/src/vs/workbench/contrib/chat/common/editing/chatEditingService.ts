@@ -100,6 +100,8 @@ export interface ISnapshotEntry {
 }
 
 export interface IChatEditingSession extends IDisposable {
+	/** Recover the backup from the last successful or interrupted rewind. */
+	recoverLastRewind?(): Promise<void>;
 	readonly isGlobalEditingSession: boolean;
 	readonly supportsKeepUndo: boolean;
 	readonly chatSessionResource: URI;

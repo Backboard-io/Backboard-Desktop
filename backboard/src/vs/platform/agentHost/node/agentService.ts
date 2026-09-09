@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import type { AgentRewindRequest, IAgentRewindResult } from '../common/agentRewind.js';
 import { decodeBase64, VSBuffer } from '../../../base/common/buffer.js';
 import { disposableTimeout } from '../../../base/common/async.js';
 import { toErrorMessage } from '../../../base/common/errorMessage.js';
@@ -359,6 +360,14 @@ export class AgentService extends Disposable implements IAgentService {
 
 	async authenticate(params: AuthenticateParams): Promise<AuthenticateResult> {
 		return this._authService.authenticate(params, this._providers.values());
+	}
+
+	async rewindSession(session: URI, request: AgentRewindRequest): Promise<IAgentRewindResult> {
+		const provider = this._findProviderForSession(session);
+		if (!provider?.rewindSession) {
+			throw new Error(localize('agentHost.unsupportedFileRewind', "This provider does not support file rewind."));
+		}
+		return provider.rewindSession(session, request);
 	}
 
 	async executeAgentCommand(params: IAgentCommandParams): Promise<IAgentCommandResult> {

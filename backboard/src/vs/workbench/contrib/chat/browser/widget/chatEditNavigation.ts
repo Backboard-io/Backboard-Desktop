@@ -9,21 +9,25 @@ import { URI } from '../../../../../base/common/uri.js';
 import { isDiffEditor } from '../../../../../editor/browser/editorBrowser.js';
 import { localize } from '../../../../../nls.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
+import { IFileService } from '../../../../../platform/files/common/files.js';
 import { IOpenEditorOptions } from '../../../../../platform/editor/browser/editor.js';
 import { ACTIVE_GROUP, IEditorService, SIDE_GROUP } from '../../../../services/editor/common/editorService.js';
 
-/** Opens the captured change, while revealing its real file instead of a snapshot in Explorer. */
+/** Opens the workspace file by default; historical comparisons require an explicit target. */
 export async function openChatEdit(
 	editorService: IEditorService,
 	commandService: ICommandService,
+	fileService: IFileService,
 	resource: URI,
 	original: URI | undefined,
 	modified: URI | undefined,
 	isDeletion: boolean,
 	{ editorOptions: options, openToSide }: IOpenEditorOptions,
+	target: 'file' | 'change' = 'file',
 ): Promise<void> {
+	const deleted = isDeletion && (target === 'change' || !await fileService.exists(resource));
 	const group = openToSide ? SIDE_GROUP : ACTIVE_GROUP;
-	const pane = original && modified
+	const pane = target === 'change' && original && modified
 		? await editorService.openEditor({
 			original: { resource: original },
 			modified: { resource: modified },
@@ -31,13 +35,14 @@ export async function openChatEdit(
 			description: resource.path,
 			options,
 		}, group)
-		: await editorService.openEditor({ resource: isDeletion && original ? original : modified ?? resource, options }, group);
+		: await editorService.openEditor({ resource: deleted && original ? original : target === 'change' ? modified ?? resource : resource,
+			...(deleted ? { label: localize('chat.deletedFile.title', "{0} (Deleted)", basename(resource)) } : {}), options }, group);
 	const control = pane?.getControl();
-	if (isDiffEditor(control)) {
+	if (target === 'change' && isDiffEditor(control)) {
 		control.updateOptions({ hideUnchangedRegions: { enabled: true, contextLineCount: 3, minimumLineCount: 3 } });
 		control.revealFirstDiff();
 	}
-	if (!isDeletion) {
+	if (!deleted) {
 		// This command resolves the workspace file, never the internal snapshot URI.
 		await commandService.executeCommand('revealInExplorer', resource).catch(onUnexpectedError);
 		if (!options.preserveFocus && editorService.activeEditorPane === pane) {

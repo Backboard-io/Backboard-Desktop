@@ -354,8 +354,6 @@ function filterToUserAttachedContext(attachedContext: readonly IChatRequestVaria
 async function restoreSnapshotWithConfirmationByRequestId(accessor: ServicesAccessor, sessionResource: URI, requestId: string): Promise<boolean> {
 	const configurationService = accessor.get(IConfigurationService);
 	const dialogService = accessor.get(IDialogService);
-	const chatWidgetService = accessor.get(IChatWidgetService);
-	const widget = chatWidgetService.getWidgetBySessionResource(sessionResource);
 	const chatService = accessor.get(IChatService);
 	const chatModel = chatService.getSession(sessionResource);
 	if (!chatModel) {
@@ -408,7 +406,6 @@ async function restoreSnapshotWithConfirmationByRequestId(accessor: ServicesAcce
 		: { confirmed: true };
 
 	if (!confirmation.confirmed) {
-		widget?.viewModel?.model.setCheckpoint(undefined);
 		return false;
 	}
 
@@ -421,6 +418,7 @@ async function restoreSnapshotWithConfirmationByRequestId(accessor: ServicesAcce
 	// Restore the snapshot to what it was before the request(s) that we deleted
 	const snapshotRequestId = chatRequests[itemIndex].id;
 	await session.restoreSnapshot(snapshotRequestId, undefined);
+	chatModel.setCheckpoint(snapshotRequestId);
 	return true;
 }
 
@@ -491,6 +489,26 @@ registerAction2(class RemoveAction extends Action2 {
 	}
 });
 
+registerAction2(class RecoverPreRewindFilesAction extends Action2 {
+	constructor() {
+		super({
+			id: 'workbench.action.chat.recoverPreRewindFiles',
+			title: localize2('chat.recoverPreRewindFiles', "Recover Pre-Rewind Files"),
+			category: CHAT_CATEGORY,
+			f1: true,
+			precondition: ChatContextKeyExprs.isAgentHostSession,
+		});
+	}
+	async run(accessor: ServicesAccessor): Promise<void> {
+		const widget = accessor.get(IChatWidgetService).lastFocusedWidget;
+		const session = widget?.viewModel?.model.editingSession;
+		if (!session?.recoverLastRewind) {
+			throw new Error(localize('chat.noRewindBackup', "No rewind backup is available for this conversation."));
+		}
+		await session.recoverLastRewind();
+	}
+});
+
 registerAction2(class RestoreCheckpointAction extends Action2 {
 	constructor() {
 		super({
@@ -512,7 +530,7 @@ registerAction2(class RestoreCheckpointAction extends Action2 {
 					id: MenuId.ChatMessageCheckpoint,
 					group: 'navigation',
 					order: 2,
-					when: ContextKeyExpr.and(ChatContextKeys.isRequest, ChatContextKeys.isPendingRequest.negate(), ContextKeyExpr.or(ChatContextKeys.lockedToCodingAgent.negate(), ChatContextKeyExprs.isAgentHostSession), ChatContextKeys.isFirstRequest.negate())
+					when: ContextKeyExpr.and(ChatContextKeys.isRequest, ChatContextKeys.isPendingRequest.negate(), ContextKeyExpr.or(ChatContextKeys.lockedToCodingAgent.negate(), ChatContextKeyExprs.isAgentHostSession))
 				}
 			]
 		});
@@ -535,13 +553,11 @@ registerAction2(class RestoreCheckpointAction extends Action2 {
 
 		const userAttachments = isRequestVM(item) ? filterToUserAttachedContext(item.attachedContext) : [];
 
-		if (isRequestVM(item)) {
+		const confirmed = await restoreSnapshotWithConfirmation(accessor, item);
+		if (confirmed && isRequestVM(item)) {
 			widget?.focusInput();
 			widget?.input.setValue(item.messageText, false);
 		}
-
-		widget?.viewModel?.model.setCheckpoint(item.id);
-		const confirmed = await restoreSnapshotWithConfirmation(accessor, item);
 
 		if (confirmed && userAttachments.length) {
 			await widget?.input.restoreAttachments(userAttachments);
@@ -583,7 +599,6 @@ registerAction2(class StartOverAction extends Action2 {
 			return;
 		}
 
-		widget?.viewModel?.model.setCheckpoint(item.id);
 		await restoreSnapshotWithConfirmation(accessor, item);
 	}
 });
@@ -629,7 +644,6 @@ registerAction2(class RestoreLastCheckpoint extends Action2 {
 			return;
 		}
 
-		widget?.viewModel?.model.setCheckpoint(checkpointRequest.id);
 		widget?.focusInput();
 		widget?.input.setValue(checkpointRequest.message.text, false);
 

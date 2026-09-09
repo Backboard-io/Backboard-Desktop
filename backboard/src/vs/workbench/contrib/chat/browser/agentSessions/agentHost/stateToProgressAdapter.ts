@@ -325,7 +325,7 @@ export interface TurnModelLookup {
  * Backboard, Claude) or `modelContextWindow` (codex).
  */
 function getContextUsageMeta(meta: Record<string, unknown> | undefined): { contextTokens?: number; contextLimit?: number } {
-	const contextTokens = typeof meta?.contextTokens === 'number' && meta.contextTokens > 0 ? meta.contextTokens : undefined;
+	const contextTokens = typeof meta?.contextTokens === 'number' && Number.isFinite(meta.contextTokens) && meta.contextTokens >= 0 ? meta.contextTokens : undefined;
 	const rawLimit = typeof meta?.contextLimit === 'number' ? meta.contextLimit
 		: typeof meta?.modelContextWindow === 'number' ? meta.modelContextWindow
 			: undefined;
@@ -338,8 +338,18 @@ function getContextUsageMeta(meta: Record<string, unknown> | undefined): { conte
 
 export function usageInfoToChatUsage(usage: UsageInfo | undefined): IChatUsage | undefined {
 	const contextUsage = getContextUsageMeta(usage?._meta);
+	const raw = usage?._meta?.backboardContextUsage;
+	const measurement = raw && typeof raw === 'object' ? raw as Record<string, unknown> : undefined;
+	const backboardContextUsage = measurement?.source === 'backboard-api' ? {
+		source: 'backboard-api' as const,
+		usedTokens: typeof measurement.usedTokens === 'number' ? measurement.usedTokens : undefined,
+		contextLimit: typeof measurement.contextLimit === 'number' ? measurement.contextLimit : undefined,
+		percent: typeof measurement.percent === 'number' ? measurement.percent : undefined,
+		summaryTokens: typeof measurement.summaryTokens === 'number' ? measurement.summaryTokens : undefined,
+		model: typeof measurement.model === 'string' ? measurement.model : undefined,
+	} : undefined;
 	if (typeof usage?.inputTokens !== 'number' && typeof usage?.outputTokens !== 'number'
-		&& contextUsage.contextTokens === undefined && contextUsage.contextLimit === undefined) {
+		&& contextUsage.contextTokens === undefined && contextUsage.contextLimit === undefined && !backboardContextUsage) {
 		return undefined;
 	}
 	return {
@@ -347,6 +357,7 @@ export function usageInfoToChatUsage(usage: UsageInfo | undefined): IChatUsage |
 		promptTokens: usage?.inputTokens ?? 0,
 		completionTokens: usage?.outputTokens ?? 0,
 		...contextUsage,
+		...(backboardContextUsage ? { backboardContextUsage } : {}),
 	};
 }
 

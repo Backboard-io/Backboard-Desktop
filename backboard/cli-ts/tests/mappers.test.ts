@@ -12,14 +12,59 @@ function kinds(events: ProviderEvent[]): string[] {
 }
 
 describe("mapStreamPayloadToEvents", () => {
+	it("preserves the latest API context snapshot, including zero and compaction decreases", () => {
+		const mapper = new BackboardStreamEventMapper();
+		const values = [64227, 4000, 0].map((used) =>
+			mapper
+				.map({
+					type: "run_ended",
+					input_tokens: 999,
+					output_tokens: 300,
+					context_usage: {
+						used_tokens: used,
+						context_limit: 1050000,
+						percent: 2.5,
+						summary_tokens: 100,
+						model: "actual-model",
+					},
+				})
+				.find((event) => event.kind === "usage"),
+		);
+		expect(
+			values.map((event) =>
+				event?.kind === "usage" ? event.usage.backboardContextUsage : undefined,
+			),
+		).toEqual(
+			[64227, 4000, 0].map((used) => ({
+				source: "backboard-api",
+				usedTokens: used,
+				contextLimit: 1050000,
+				percent: 2.5,
+				summaryTokens: 100,
+				model: "actual-model",
+			})),
+		);
+	});
+
 	it("preserves the service's mismatched worker names in diagnostics and rejects its final batch", () => {
 		const traces: ToolMappingTrace[] = [];
-		const mapper = new BackboardStreamEventMapper(["agent_spawn", "glob"], trace => traces.push(trace));
-		const events = workerIdentityMismatch.slice(0, 3).flatMap(frame => mapper.map(frame));
-		const ready = traces.find(trace => trace.event === "tool_ready");
-		const final = traces.find(trace => trace.event === "requires_action");
-		expect({ ready: ready?.name, final: final?.name, sameInput: ready?.inputFingerprint === final?.inputFingerprint }).toEqual({ ready: "agent_spawn", final: "glob", sameInput: true });
-		expect(events.some(event => event.kind === "requires_action")).toBe(false);
+		const mapper = new BackboardStreamEventMapper(
+			["agent_spawn", "glob"],
+			(trace) => traces.push(trace),
+		);
+		const events = workerIdentityMismatch
+			.slice(0, 3)
+			.flatMap((frame) => mapper.map(frame));
+		const ready = traces.find((trace) => trace.event === "tool_ready");
+		const final = traces.find((trace) => trace.event === "requires_action");
+		expect({
+			ready: ready?.name,
+			final: final?.name,
+			sameInput: ready?.inputFingerprint === final?.inputFingerprint,
+		}).toEqual({ ready: "agent_spawn", final: "glob", sameInput: true });
+		expect(events.some((event) => event.kind === "requires_action")).toBe(
+			false,
+		);
 		expect(events.at(-1)?.kind).toBe("failed");
 		expect(JSON.stringify(traces)).not.toContain("src/**/*.ts");
 	});
@@ -46,6 +91,14 @@ describe("mapStreamPayloadToEvents", () => {
 			kind: "completed",
 			finalText: "hello world",
 			usage: {
+				backboardContextUsage: {
+					source: "backboard-api",
+					usedTokens: 100,
+					contextLimit: 1000,
+					percent: 10,
+					summaryTokens: 0,
+					model: "gpt-5.5",
+				},
 				inputTokens: 10,
 				outputTokens: 5,
 				totalTokens: 15,

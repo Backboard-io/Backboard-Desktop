@@ -104,6 +104,7 @@ export class AgentController {
 	private readonly detachSessionProjection: () => void;
 	private readonly queue: QueuedSubmit[] = [];
 	private drainingQueue = false;
+	private readonly idleWaiters: Array<() => void> = [];
 	private sessionHooksStarted = false;
 
 	constructor(private readonly deps: AgentControllerDeps) {
@@ -217,6 +218,7 @@ export class AgentController {
 		return this.enqueueSubmit(text, "back", {
 			emitUserMessage: options.emitUserMessage ?? true,
 			onStart: options.onStart,
+			turnId: options.turnId,
 			attachmentFilePaths: options.attachmentFilePaths,
 			displayContent: options.displayContent,
 			conversationContext: options.conversationContext,
@@ -228,6 +230,7 @@ export class AgentController {
 		const run = this.enqueueSubmit(text, "front", {
 			emitUserMessage: options.emitUserMessage ?? false,
 			onStart: options.onStart,
+			turnId: options.turnId,
 			attachmentFilePaths: options.attachmentFilePaths,
 			displayContent: options.displayContent,
 			conversationContext: options.conversationContext,
@@ -243,6 +246,7 @@ export class AgentController {
 			Pick<
 				SubmitOptions,
 				| "onStart"
+				| "turnId"
 				| "attachmentFilePaths"
 				| "displayContent"
 				| "conversationContext"
@@ -253,6 +257,7 @@ export class AgentController {
 				text,
 				emitUserMessage: options.emitUserMessage,
 				onStart: options.onStart,
+				turnId: options.turnId,
 				attachmentFilePaths: options.attachmentFilePaths,
 				displayContent: options.displayContent,
 				conversationContext: options.conversationContext,
@@ -281,6 +286,7 @@ export class AgentController {
 					queued.resolve(
 						await this.runTurn(queued.text, {
 							emitUserMessage: queued.emitUserMessage,
+							turnId: queued.turnId,
 							attachmentFilePaths: queued.attachmentFilePaths,
 							displayContent: queued.displayContent,
 							conversationContext: queued.conversationContext,
@@ -292,6 +298,7 @@ export class AgentController {
 			}
 		} finally {
 			this.drainingQueue = false;
+			for (const resolve of this.idleWaiters.splice(0)) resolve();
 			if (this.queue.length > 0) void this.drainSubmitQueue();
 		}
 	}
@@ -300,6 +307,7 @@ export class AgentController {
 		text: string,
 		options: {
 			emitUserMessage: boolean;
+			turnId?: string;
 			attachmentFilePaths?: string[];
 			displayContent?: string;
 			conversationContext?: string;
@@ -308,11 +316,13 @@ export class AgentController {
 		const { bus, session, config } = this.deps;
 		this.abortController = new AbortController();
 		const signal = this.abortController.signal;
-		const turn = new Turn();
+		const turn = new Turn(options.turnId);
 		let turnStarted = false;
 		let finalStatus: TurnStatus = "failed";
 
 		try {
+			if (options.turnId)
+				await this.deps.checkpoints?.beginTurn?.(turn.id, text, config.cwd);
 			const hookController = this.deps.hookController;
 
 			bus.emit({ type: "turn:start", turnId: turn.id });
@@ -501,11 +511,15 @@ export class AgentController {
 			});
 			return finalStatus;
 		} finally {
-			// Stop runs for every turn that actually started, whatever the outcome.
-			if (turnStarted) await this.runStopHooks(turn.id, finalStatus);
-			await this.disposeTools();
-			this.abortController = null;
-			this.rejectPendingAsks();
+			try {
+				// Stop runs for every turn that actually started, whatever the outcome.
+				if (turnStarted) await this.runStopHooks(turn.id, finalStatus);
+				await this.disposeTools();
+				if (options.turnId) await this.deps.checkpoints?.endTurn?.(turn.id);
+			} finally {
+				this.abortController = null;
+				this.rejectPendingAsks();
+			}
 		}
 	}
 
@@ -701,6 +715,12 @@ export class AgentController {
 		this.deps.agentTasks?.cancelAll();
 		this.rejectPendingAsks();
 		if (options.clearQueue) this.clearQueuedSubmits();
+	}
+
+	async waitForIdle(): Promise<void> {
+		if (this.drainingQueue)
+			await new Promise<void>((resolve) => this.idleWaiters.push(resolve));
+		await this.deps.agentTasks?.waitForIdle();
 	}
 
 	/** Cancels any active turn and starts a fresh Backboard thread. */

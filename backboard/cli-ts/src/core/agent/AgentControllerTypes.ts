@@ -3,6 +3,7 @@ import type { TurnStatus } from "../bus/events.ts";
 export interface QueuedSubmit {
 	text: string;
 	emitUserMessage: boolean;
+	turnId?: string;
 	onStart?: () => void;
 	attachmentFilePaths?: string[];
 	displayContent?: string;
@@ -13,6 +14,7 @@ export interface QueuedSubmit {
 
 export interface SubmitOptions {
 	emitUserMessage?: boolean;
+	turnId?: string;
 	onStart?: () => void;
 	attachmentFilePaths?: string[];
 	displayContent?: string;

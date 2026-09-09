@@ -106,6 +106,38 @@ export class AgentHostSnapshotController extends Disposable implements IChatEdit
 	private readonly _resolvedMergedDiffs = new Map<string, IResolvedDiffCounts>();
 	private readonly _pendingMergedDiffs = new Set<string>();
 	private readonly _undoRedoSequencer = new Sequencer();
+	private _restoreWorkspace: ((retainedTurnId: string | undefined) => Promise<number>) | undefined;
+	private _resumeWorkspace: (() => Promise<number>) | undefined;
+	private _recoverWorkspace: (() => Promise<number>) | undefined;
+
+	setWorkspaceRestorer(restore: (retainedTurnId: string | undefined) => Promise<number>, recover: () => Promise<number>, resume?: () => Promise<number>): void {
+		this._restoreWorkspace = restore;
+		this._recoverWorkspace = recover;
+		this._resumeWorkspace = resume;
+	}
+
+	restoreCheckpointCursor(activeCount: number): void {
+		if (Number.isInteger(activeCount) && activeCount >= 0 && activeCount <= this._checkpoints.length) {
+			this._currentCheckpointIndex.set(activeCount - 1, undefined);
+		}
+	}
+
+	async resumeWorkspace(): Promise<void> {
+		return this._undoRedoSequencer.queue(async () => {
+			if (this._resumeWorkspace) {
+				this.restoreCheckpointCursor(await this._resumeWorkspace());
+			}
+		});
+	}
+
+	async recoverLastRewind(): Promise<void> {
+		return this._undoRedoSequencer.queue(async () => {
+			if (!this._recoverWorkspace) {
+				throw new Error('This session has no file recovery provider.');
+			}
+			this.restoreCheckpointCursor(await this._recoverWorkspace());
+		});
+	}
 
 	constructor(
 		readonly chatSessionResource: URI,
@@ -213,8 +245,7 @@ export class AgentHostSnapshotController extends Disposable implements IChatEdit
 		return this._undoRedoSequencer.queue(async () => {
 			const cpIdx = this._findCheckpointIndex(requestId);
 			if (cpIdx < 0) {
-				this._logService.warn(`[AgentHostSnapshotController] No checkpoint found for requestId=${requestId}`);
-				return;
+				throw new Error(`Checkpoint unavailable: ${requestId}`);
 			}
 
 			// Restore to before this request: target one slot before it.
@@ -261,6 +292,12 @@ export class AgentHostSnapshotController extends Disposable implements IChatEdit
 	 */
 	private async _navigateToCheckpointIndex(targetIdx: number): Promise<void> {
 		const currentIdx = this._currentCheckpointIndex.get();
+		if (this._restoreWorkspace) {
+			const activeCount = await this._restoreWorkspace(this._checkpoints[targetIdx]?.requestId);
+			this.restoreCheckpointCursor(activeCount);
+			this._invalidateDiffs();
+			return;
+		}
 		if (targetIdx < currentIdx) {
 			// Undo forward checkpoints
 			for (let i = currentIdx; i > targetIdx; i--) {
@@ -465,6 +502,7 @@ export class AgentHostSnapshotController extends Disposable implements IChatEdit
 				}
 			} catch (err) {
 				this._logService.warn(`[AgentHostSnapshotController] Failed to ${direction === 'before' ? 'undo' : 'redo'} ${edit.kind} for ${edit.resource.toString()}`, err);
+				throw err;
 			}
 		});
 		await Promise.all(ops);

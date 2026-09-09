@@ -21,9 +21,11 @@ import { ICommandService } from '../../../../../../platform/commands/common/comm
 import { onUnexpectedError } from '../../../../../../base/common/errors.js';
 import { openChatEdit } from '../chatEditNavigation.js';
 import { IClipboardService } from '../../../../../../platform/clipboard/common/clipboardService.js';
+import { getDefaultHoverDelegate } from '../../../../../../base/browser/ui/hover/hoverDelegateFactory.js';
 import { IHoverService } from '../../../../../../platform/hover/browser/hover.js';
 import { ILabelService } from '../../../../../../platform/label/common/label.js';
 import { IOpenEditorOptions } from '../../../../../../platform/editor/browser/editor.js';
+import { IFileService } from '../../../../../../platform/files/common/files.js';
 import { IEditorService } from '../../../../../services/editor/common/editorService.js';
 import { IChatExternalEdit } from '../../../common/chatService/chatService.js';
 import { IEditSessionDiffStats } from '../../../common/editing/chatEditingService.js';
@@ -252,6 +254,7 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 		@IEditorWorkerService private readonly editorWorkerService: IEditorWorkerService,
 		@IClipboardService private readonly clipboardService: IClipboardService,
 		@ICommandService private readonly commandService: ICommandService,
+		@IFileService private readonly fileService: IFileService,
 	) {
 		super(labelService, modelService, languageService, hoverService);
 		const renderSeed = externalEditRenderSeeds.get(edit);
@@ -342,6 +345,20 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 				toggle();
 			}
 		}));
+
+		if (this.edit.beforeContentUri && this.edit.afterContentUri) {
+			const viewChange = $('button.codicon.codicon-diff.chat-external-edit-copy', {
+				type: 'button',
+				'aria-label': localize('chat.externalEdit.viewChange', "View Change"),
+			});
+			this.element.appendChild(viewChange);
+			this._register(this.hoverService.setupManagedHover(getDefaultHoverDelegate('element'), viewChange, localize('chat.externalEdit.viewChange', "View Change")));
+			this._register(addDisposableListener(viewChange, 'click', e => {
+				e.stopPropagation();
+				this.openEdit({ editorOptions: { pinned: true }, openToSide: false }, 'change');
+			}));
+			this._register(addDisposableListener(viewChange, 'keydown', e => e.stopPropagation()));
+		}
 
 		if (this.edit.afterContentUri) {
 			const copyButton = $('span.codicon.codicon-copy.chat-external-edit-copy', {
@@ -857,10 +874,10 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 		}
 	}
 
-	private openEdit(options: IOpenEditorOptions): void {
-		void openChatEdit(this.editorService, this.commandService, this.edit.uri,
+	private openEdit(options: IOpenEditorOptions, target: 'file' | 'change' = 'file'): void {
+		void openChatEdit(this.editorService, this.commandService, this.fileService, this.edit.uri,
 			this.edit.beforeContentUri, this.edit.afterContentUri,
-			this.edit.editKind === 'delete', options).catch(onUnexpectedError);
+			this.edit.editKind === 'delete', options, target).catch(onUnexpectedError);
 	}
 
 	hasSameContent(other: IChatRendererContent, _followingContent: IChatRendererContent[], _element: ChatTreeItem): boolean {

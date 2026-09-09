@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import type { AgentRewindRequest, IAgentRewindBuffer, IAgentRewindResult } from '../../common/agentRewind.js';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -200,12 +201,15 @@ interface CliTsMutationBatch {
 type CliTsStoredPart =
 	| { readonly kind: 'markdown'; content: string }
 	| { readonly kind: 'reasoning'; content: string }
-	| { readonly kind: 'tool'; readonly id: string; readonly name: string; readonly inputSummary?: string; readonly terminalCommand?: string; readonly title?: string; readonly detail?: string; readonly terminalOutput?: CliTsTerminalOutput; readonly toolUi?: CliTsToolUiState; readonly mutationBatch?: CliTsMutationBatch; readonly failed?: boolean; readonly workspace?: CliTsWorkerWorkspace; readonly worker?: CliTsWorkerState; readonly agentName?: string; fileEdits?: readonly ToolResultFileEditContent[] };
+	| { readonly kind: 'tool'; readonly input?: unknown; readonly result?: unknown; readonly id: string; readonly name: string; readonly inputSummary?: string; readonly terminalCommand?: string; readonly title?: string; readonly detail?: string; readonly terminalOutput?: CliTsTerminalOutput; readonly toolUi?: CliTsToolUiState; readonly mutationBatch?: CliTsMutationBatch; readonly failed?: boolean; readonly workspace?: CliTsWorkerWorkspace; readonly worker?: CliTsWorkerState; readonly agentName?: string; fileEdits?: readonly ToolResultFileEditContent[] };
 
 type CliTsTerminalOutput = NonNullable<CliTsAgentEvent['terminalOutput']>;
 type CliTsTurnError = Pick<NonNullable<Turn['error']>, 'errorType' | 'message'>;
 
 interface CliTsStoredTurn {
+	readonly id?: string;
+	readonly attachments?: readonly MessageAttachment[];
+	readonly usage?: Turn['usage'];
 	readonly prompt: string;
 	readonly response: string;
 	readonly failed?: boolean;
@@ -242,7 +246,18 @@ interface CliTsRuntimePathMapping {
 	readonly coordinatorRoot: string;
 }
 
+interface CliTsRewindState {
+	activeCount: number;
+	headBackupId?: string;
+	headBuffers?: readonly IAgentRewindBuffer[];
+	headPaths?: readonly string[];
+	pending?: { transactionId: string; targetCount: number; previousCount: number; paths: readonly string[]; buffers?: readonly IAgentRewindBuffer[] };
+	editorRefresh?: IAgentRewindResult;
+	last?: { transactionId: string; previousCount: number; paths: readonly string[] };
+}
+
 interface CliTsStoredSession {
+	readonly rewind?: CliTsRewindState;
 	readonly id: string;
 	readonly title?: string;
 	readonly cwd?: string;
@@ -293,6 +308,7 @@ interface CliTsWorktree {
 }
 
 interface CliTsTurnState {
+	usage?: Turn['usage'];
 	readonly turnId: string;
 	/** Exact user prompt retained while the turn is still in flight. */
 	readonly prompt: string;
@@ -349,6 +365,7 @@ interface CliTsTurnState {
 }
 
 interface CliTsSession {
+	rewind?: CliTsRewindState;
 	readonly sessionUri: URI;
 	readonly sessionId: string;
 	readonly createdAt: number;
@@ -801,17 +818,176 @@ export class CliTsAgent extends Disposable implements IAgent {
 		return this._queueSessionOperation(session, () => this._sendMessage(session, prompt, attachments, turnId));
 	}
 
-	private _queueSessionOperation(session: CliTsSession, operation: () => Promise<void>): Promise<void> {
+	async rewindSession(sessionUri: URI, request: AgentRewindRequest): Promise<IAgentRewindResult> {
+		const session = this._session(sessionUri);
+		if (request.operation === 'prepare' || request.operation === 'recover') {
+			await this.abortSession(sessionUri);
+		}
+		return this._queueSessionOperation(session, async () => {
+			const empty: IAgentRewindResult = { transactionId: '', status: 'prepared', paths: [], buffers: [], activeCount: session.rewind?.activeCount ?? session.storedTurns.length };
+			if (request.operation === 'resume') {
+				return session.rewind?.editorRefresh ?? empty;
+			}
+			if (request.operation === 'acknowledge') {
+				if (session.rewind?.editorRefresh?.transactionId === request.transactionId) {
+					session.rewind.editorRefresh = undefined;
+					this._writeStore(undefined, true);
+				}
+				return empty;
+			}
+			if (request.operation === 'inspectRecovery') {
+				const recovery = session.rewind?.pending ?? session.rewind?.last;
+				if (!recovery) {
+					throw new Error(localize('cliTsAgent.archivedRewindBackups', "No active rewind backup. Archived backups are in {0}", path.join(this._runtimeSessionsRoot(), session.sessionId, 'checkpoints', 'editor-rewind-backups')));
+				}
+				return { ...empty, transactionId: recovery.transactionId, paths: recovery.paths };
+			}
+			const proc = this._ensureProcess(session, await this._resolveRgDir());
+			if (request.operation === 'prepare') {
+				if (session.rewind?.pending || session.rewind?.editorRefresh) {
+					throw new Error(localize('cliTsAgent.pendingRewind', "Finish or recover the pending rewind first."));
+				}
+				const targetCount = request.retainedTurnId === undefined ? 0 : session.storedTurns.findIndex((turn, index) => (turn.id ?? `${session.sessionId}-${index}`) === request.retainedTurnId) + 1;
+				if (request.retainedTurnId !== undefined && targetCount === 0) {
+					throw new Error(localize('cliTsAgent.checkpointUnavailable', "Checkpoint unavailable."));
+				}
+				const turnIds = session.storedTurns.slice(targetCount).map(turn => {
+					if (!turn.id) {
+						throw new Error(localize('cliTsAgent.legacyCheckpoint', "This older conversation has no durable request checkpoints."));
+					}
+					return turn.id;
+				});
+				const transactionId = generateUuid();
+				const record = await proc.request({ op: 'prepareRewind', requestId: proc.nextRequestId(), transactionId, turnIds,
+					baseCheckpointId: session.rewind?.headBackupId });
+				const result = this._rewindResult(record.payload);
+				session.rewind ??= { activeCount: session.storedTurns.length };
+				session.rewind.pending = { transactionId, targetCount, previousCount: session.rewind.activeCount, paths: result.paths };
+				this._writeStore(undefined, true);
+				return { ...result, activeCount: session.rewind.activeCount };
+			}
+			if (request.operation === 'recover') {
+				return this._recoverRewind(session, request.transactionId);
+			}
+			const pending = session.rewind?.pending;
+			if (!pending || pending.transactionId !== request.transactionId) {
+				if (session.rewind?.last?.transactionId === request.transactionId) {
+					const record = await proc.request({ op: 'commitRewind', requestId: proc.nextRequestId(), transactionId: request.transactionId, buffers: [] });
+					return session.rewind.editorRefresh ?? { ...this._rewindResult(record.payload), buffers: session.rewind.activeCount === session.storedTurns.length ? session.rewind.headBuffers ?? [] : [], activeCount: session.rewind.activeCount };
+				}
+				throw new Error(localize('cliTsAgent.checkpointChanged', "The prepared checkpoint has changed."));
+			}
+			pending.buffers = request.buffers;
+			// Persist intent before telling the CLI to write any files.
+			this._writeStore(undefined, true);
+			return this._commitRewind(session);
+		});
+	}
+
+	private _rewindResult(payload: unknown): IAgentRewindResult {
+		if (!payload || typeof payload !== 'object') {
+			throw new Error(localize('cliTsAgent.missingRestoreResult', "Missing file restoration result."));
+		}
+		const result = payload as IAgentRewindResult;
+		if (!Array.isArray(result.paths) || typeof result.transactionId !== 'string' || !Array.isArray(result.buffers)) {
+			throw new Error(localize('cliTsAgent.invalidRestoreResult', "Invalid file restoration result."));
+		}
+		return result;
+	}
+
+	private async _commitRewind(session: CliTsSession): Promise<IAgentRewindResult> {
+		const state = session.rewind!;
+		const pending = state.pending!;
+		const proc = this._ensureProcess(session, await this._resolveRgDir());
+		const record = await proc.request({ op: 'commitRewind', requestId: proc.nextRequestId(), transactionId: pending.transactionId, buffers: pending.buffers ?? [] });
+		const result = this._rewindResult(record.payload);
+		if (result.status !== 'committed') {
+			throw new Error(localize('cliTsAgent.restoreIncomplete', "File restoration did not complete."));
+		}
+		const previousHeadPaths = new Set(state.headPaths);
+		state.headBuffers = [...state.headBuffers ?? [], ...pending.buffers?.filter(buffer => !previousHeadPaths.has(buffer.path)) ?? []];
+		state.headPaths = [...new Set([...previousHeadPaths, ...result.paths])];
+		state.headBackupId = result.headBackupId ?? result.backupId;
+		state.activeCount = pending.targetCount;
+		state.last = { transactionId: pending.transactionId, previousCount: pending.previousCount, paths: result.paths };
+		state.pending = undefined;
+		state.editorRefresh = { ...result, activeCount: state.activeCount, buffers: state.activeCount === session.storedTurns.length ? state.headBuffers ?? [] : [] };
+		this._resetRewoundProvider(session);
+		this._writeStore(undefined, true);
+		return state.editorRefresh;
+	}
+
+	private async _recoverRewind(session: CliTsSession, transactionId?: string): Promise<IAgentRewindResult> {
+		const state = session.rewind;
+		const recovery = state?.pending ?? state?.last;
+		if (!state || !recovery || (transactionId && transactionId !== recovery.transactionId)) {
+			throw new Error(localize('cliTsAgent.noRewindBackup', "No rewind backup is available for this conversation."));
+		}
+		const proc = this._ensureProcess(session, await this._resolveRgDir());
+		const record = await proc.request({ op: 'recoverRewind', requestId: proc.nextRequestId(), transactionId: recovery.transactionId });
+		const result = this._rewindResult(record.payload);
+		state.activeCount = recovery.previousCount;
+		state.pending = undefined;
+		state.last = { transactionId: recovery.transactionId, previousCount: recovery.previousCount, paths: result.paths };
+		state.editorRefresh = { ...result, activeCount: state.activeCount };
+		this._resetRewoundProvider(session);
+		this._writeStore(undefined, true);
+		return state.editorRefresh;
+	}
+
+	private _resetRewoundProvider(session: CliTsSession): void {
+		const retained = session.storedTurns.slice(0, session.rewind?.activeCount ?? session.storedTurns.length);
+		session.threadId = undefined;
+		session.providerHandoffContext = undefined;
+		session.pendingProviderHandoff = false;
+		session.forkContext = retained.length ? buildForkConversationContext(retained) : undefined;
+		// A fresh process cannot accidentally reuse a provider's discarded tail.
+		session.proc?.dispose();
+		session.proc = undefined;
+	}
+
+	async truncateSession(sessionUri: URI, turnId?: string): Promise<void> {
+		const session = this._session(sessionUri);
+		return this._queueSessionOperation(session, async () => {
+			const count = turnId === undefined ? 0 : session.storedTurns.findIndex((turn, index) => (turn.id ?? `${session.sessionId}-${index}`) === turnId) + 1;
+			if (turnId !== undefined && count === 0) {
+				throw new Error(localize('cliTsAgent.unknownBoundary', "Unknown conversation boundary."));
+			}
+			if (session.rewind?.pending || session.rewind?.editorRefresh) {
+				throw new Error(localize('cliTsAgent.restorationPending', "File restoration is still pending."));
+			}
+			if (count >= session.storedTurns.length) {
+				return;
+			}
+			if (!session.rewind || session.rewind.activeCount !== count) {
+				// Editing a message also needs an explicit successful file restore.
+				throw new Error(localize('cliTsAgent.restoreBeforeContinue', "Restore the message checkpoint before continuing."));
+			}
+			// Keep the discarded tail in the durable recovery journal on the host.
+			this._archiveRewindBranch(session);
+			session.storedTurns.splice(count);
+			session.rewind = undefined;
+			this._writeStore(undefined, true);
+		});
+	}
+
+	private _archiveRewindBranch(session: CliTsSession): void {
+		const directory = path.join(path.dirname(this._storePath()), 'rewind-history', session.sessionId);
+		fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+		fs.writeFileSync(path.join(directory, `${generateUuid()}.json`), JSON.stringify({ rewind: session.rewind, turns: session.storedTurns }), { mode: 0o600 });
+	}
+
+	private _queueSessionOperation<T>(session: CliTsSession, operation: () => Promise<T>): Promise<T> {
 		const queued = (session.sendQueue ?? Promise.resolve())
 			.catch(() => undefined)
 			.then(operation);
-		const tracked = queued.finally(() => {
+		const tracked = queued.then(() => {}, () => {}).finally(() => {
 			if (session.sendQueue === tracked) {
 				session.sendQueue = undefined;
 			}
 		});
 		session.sendQueue = tracked;
-		return tracked;
+		return queued;
 	}
 
 	private async _sendMessage(session: CliTsSession, prompt: string, attachments?: readonly MessageAttachment[], turnId?: string): Promise<void> {
@@ -823,6 +999,18 @@ export class CliTsAgent extends Disposable implements IAgent {
 		}
 		if (session.pendingProviderHandoff) {
 			this._prepareProviderHandoff(session, session.model?.id);
+		}
+		if (session.rewind?.pending) {
+			if (session.rewind.pending.buffers) await this._commitRewind(session);
+			else throw new Error(localize('cliTsAgent.rewindBeforeSend', "Finish or recover the pending file rewind before sending."));
+		}
+		if (session.rewind?.editorRefresh) {
+			throw new Error(localize('cliTsAgent.editorRecoveryBeforeSend', "Finish recovering the editor buffers before sending."));
+		}
+		if (session.rewind) {
+			this._archiveRewindBranch(session);
+			session.storedTurns.splice(session.rewind.activeCount);
+			session.rewind = undefined;
 		}
 		const effectiveTurnId = turnId ?? generateUuid();
 		session.cancelBeforeSubmit = false;
@@ -908,6 +1096,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 			].filter((value): value is string => !!value).join('\n\n') || undefined;
 			const record = await proc.request({
 				op: 'submit',
+				turnId: effectiveTurnId,
 				requestId: proc.nextRequestId(),
 				prompt: prepared.prompt,
 				...(inheritedConversationContext ? { forkContext: inheritedConversationContext } : {}),
@@ -977,6 +1166,9 @@ export class CliTsAgent extends Disposable implements IAgent {
 			// ChatToolCallComplete actions land before the turn is marked done.
 			await Promise.allSettled(turn.pendingCompletions);
 			session.storedTurns.push({
+				id: effectiveTurnId,
+				attachments,
+				usage: turn.usage,
 				prompt,
 				response: turn.responseText || (session.disposed
 					? localize('cliTsAgent.interruptedTurn', "This response was interrupted when Backboard closed.")
@@ -1000,8 +1192,16 @@ export class CliTsAgent extends Disposable implements IAgent {
 		const parsedSubagent = parseSubagentSessionUri(sessionUri.toString());
 		const rootSessionUri = parsedSubagent ? URI.parse(parsedSubagent.parentSession.toString()) : sessionUri;
 		const sessionId = AgentSession.id(rootSessionUri);
-		const session = this._sessions.get(sessionId);
-		const stored = session ? undefined : this._readStore().find(entry => entry.id === sessionId);
+		const session = this._session(rootSessionUri);
+		if (session.rewind?.pending) {
+			await this._queueSessionOperation(session, async () => {
+				if (session.rewind?.pending?.buffers) {
+					try { await this._commitRewind(session); }
+					catch { await this._recoverRewind(session); }
+				} else if (session.rewind?.pending) await this._recoverRewind(session);
+			});
+		}
+		const stored = this._readStore().find(entry => entry.id === sessionId);
 		const runtimeWorkers = await this._readRuntimeWorkerStates(sessionId);
 		const parentTurns = (session?.storedTurns ?? stored?.turns ?? []).map(turn => ({ ...turn,
 			...(turn.parts ? { parts: turn.parts.map(part => {
@@ -1054,7 +1254,9 @@ export class CliTsAgent extends Disposable implements IAgent {
 		// diffs. Do not rehydrate those records until integration is authoritative.
 		turns = allowFileEdits ? await this._restoreStoredFileEdits(rootSessionUri, turns) : turns.map(withoutStoredFileEdits);
 		const turnIdPrefix = parsedSubagent ? `${sessionId}-subagent-${parsedSubagent.toolCallId}` : sessionId;
-		return turns.map((turn, index) => storedTurnToProtocolTurn(turnIdPrefix, index, turn));
+		return turns.map((turn, index) => ({ ...storedTurnToProtocolTurn(turnIdPrefix, index, turn),
+			...(!parsedSubagent && session.rewind ? { usage: { ...turn.usage, _meta: { ...turn.usage?._meta, backboardActiveCount: session.rewind.activeCount, backboardContextUsage: { source: 'backboard-api' } } } } : {}),
+		}));
 	}
 
 	/**
@@ -1542,6 +1744,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 			workingDirectory,
 			sourceWorkingDirectory,
 			worktree,
+			rewind: restored?.rewind,
 			title: restored?.title,
 			threadId: restored?.threadId,
 			forkContext: restored?.forkContext,
@@ -2731,6 +2934,8 @@ export class CliTsAgent extends Disposable implements IAgent {
 					: undefined;
 				const storedToolPart: Extract<CliTsStoredPart, { kind: 'tool' }> = {
 					kind: 'tool',
+					input: turn.toolInputs.get(toolCallId)?.input,
+					result: event.detail ?? event.title,
 					...(failed ? { failed: true } : {}),
 					id: toolCallId,
 					name,
@@ -2890,22 +3095,22 @@ export class CliTsAgent extends Disposable implements IAgent {
 				// with the turn's output included — and `contextLimit` is the
 				// window the server applied.
 				const meta: Record<string, unknown> = {};
-				if (typeof usage.contextTokens === 'number' && usage.contextTokens > 0) {
+				if (usage.backboardContextUsage?.source === 'backboard-api') {
+					meta.backboardContextUsage = usage.backboardContextUsage;
+				}
+				if (typeof usage.contextTokens === 'number' && Number.isFinite(usage.contextTokens) && usage.contextTokens >= 0) {
 					meta.contextTokens = usage.contextTokens;
 				}
 				if (typeof usage.contextLimit === 'number' && usage.contextLimit > 0) {
 					meta.contextLimit = usage.contextLimit;
 				}
-				fire({
-					type: ActionType.ChatUsage,
-					turnId,
-					usage: {
-						inputTokens: usage.inputTokens,
-						outputTokens: usage.outputTokens,
-						model: usage.model,
-						...(Object.keys(meta).length > 0 ? { _meta: meta } : {}),
-					},
-				});
+				turn.usage = {
+					inputTokens: usage.inputTokens,
+					outputTokens: usage.outputTokens,
+					model: usage.model,
+					...(Object.keys(meta).length > 0 ? { _meta: meta } : {}),
+				};
+				fire({ type: ActionType.ChatUsage, turnId, usage: turn.usage });
 				return;
 			}
 			case 'system:warning': {
@@ -3407,13 +3612,14 @@ export class CliTsAgent extends Disposable implements IAgent {
 		}
 	}
 
-	private _writeStore(excludedSessionId?: string): void {
+	private _writeStore(excludedSessionId?: string, strict = false): void {
 		try {
 			const persisted = this._readStore().filter(entry => entry.id !== excludedSessionId && !this._sessions.has(entry.id));
 			const inMemory: CliTsStoredSession[] = [...this._sessions.values()]
 				.filter(session => (session.materialized || session.storedTurns.length > 0 || !!session.turn) && session.sessionId !== excludedSessionId)
 				.map(session => ({
 					id: session.sessionId,
+					rewind: session.rewind,
 					title: session.title,
 					cwd: session.workingDirectory?.fsPath,
 					sourceCwd: session.sourceWorkingDirectory?.fsPath,
@@ -3441,9 +3647,13 @@ export class CliTsAgent extends Disposable implements IAgent {
 				}));
 			const storePath = this._storePath();
 			fs.mkdirSync(path.dirname(storePath), { recursive: true });
-			fs.writeFileSync(storePath, `${JSON.stringify({ version: CLI_TS_STORE_VERSION, sessions: [...inMemory, ...persisted] }, undefined, '\t')}\n`, 'utf8');
+			fs.writeFileSync(`${storePath}.tmp`, `${JSON.stringify({ version: CLI_TS_STORE_VERSION, sessions: [...inMemory, ...persisted] }, undefined, '\t')}\n`, { encoding: 'utf8', mode: 0o600 });
+			fs.renameSync(`${storePath}.tmp`, storePath);
 		} catch (error) {
 			this._logService.warn(`[cli-ts] Failed to persist session store: ${error instanceof Error ? error.message : String(error)}`);
+			if (strict) {
+				throw error;
+			}
 		}
 	}
 }
@@ -3498,6 +3708,8 @@ function cloneStoredParts(parts: readonly CliTsStoredPart[]): CliTsStoredPart[] 
 
 function activeTurnToStoredTurn(turn: CliTsTurnState): CliTsStoredTurn {
 	return {
+		id: turn.turnId,
+		usage: turn.usage,
 		prompt: turn.prompt,
 		response: turn.responseText || localize('cliTsAgent.interruptedTurn', "This response was interrupted when Backboard closed."),
 		failed: true,
@@ -3524,7 +3736,9 @@ function buildProviderHandoffConversationContext(turns: readonly CliTsStoredTurn
 function buildConversationHandoffContext(turns: readonly CliTsStoredTurn[], reason: string): string {
 	const transcript = turns.map(turn => ({
 		user: turn.prompt,
+		attachments: turn.attachments,
 		assistant: turn.response,
+		tools: turn.parts?.filter(part => part.kind === 'tool'),
 		...(turn.failed ? { responseFailed: true } : {}),
 	}));
 	return [
@@ -4474,13 +4688,13 @@ function storedTurnToProtocolTurn(sessionId: string, index: number, turn: CliTsS
 		}
 	}
 	return {
-		id: `${sessionId}-${index}`,
+		id: turn.id ?? `${sessionId}-${index}`,
 		message: {
 			text: turn.prompt,
 			origin: { kind: MessageKind.User },
 		},
 		responseParts,
-		usage: undefined,
+		usage: turn.usage,
 		state: turn.failed ? TurnState.Error : TurnState.Complete,
 		...(turn.failed ? {
 			error: {

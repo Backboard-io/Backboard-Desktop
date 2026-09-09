@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { chmod, lstat, readFile, rm, rmdir, writeFile } from "node:fs/promises";
-import { dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { errorMessage } from "../../utils/errors.ts";
 import {
 	ensureDir,
@@ -32,7 +32,11 @@ import type {
 	UndoFileJournalRecord,
 	UndoStartJournalRecord,
 } from "./journalTypes.ts";
-import { WorkspaceIndex, type WorkspaceSnapshot } from "./workspaceIndex.ts";
+import {
+	WorkspaceIndex,
+	type IndexEntry,
+	type WorkspaceSnapshot,
+} from "./workspaceIndex.ts";
 
 /** Pre-images above this size are not captured (journaled as skips). */
 export const MAX_CAPTURE_BYTES = 50 * 1024 * 1024;
@@ -82,6 +86,8 @@ export interface RecordPostImageRequest {
  * turn's checkpoint.
  */
 export interface CheckpointRecorder {
+	beginTurn?(turnId: string, label: string, cwd: string): Promise<void>;
+	endTurn?(turnId: string): Promise<void>;
 	recordPreImage(
 		absPath: string,
 		ctx: CheckpointCallContext,
@@ -295,6 +301,251 @@ export class CheckpointStore implements CheckpointRecorder {
 		for (const detach of this.detachBus.splice(0)) detach();
 	}
 
+	/** Captures a durable boundary even for requests that never call an edit tool. */
+	async beginTurn(turnId: string, label: string, cwd: string): Promise<void> {
+		this.pendingLabel = label.replace(/\s+/g, " ").slice(0, TURN_LABEL_MAX);
+		this.ensureTurn(turnId);
+		await this.beginShellCapture(cwd, {
+			turnId,
+			toolCallId: `editor-boundary:${turnId}`,
+		});
+		const baseline = this.shellBegins.get(`editor-boundary:${turnId}`);
+		if (baseline) {
+			await ensureDir(join(this.paths.checkpoints, "request-baselines"), 0o700);
+			await writeFile(
+				join(
+					this.paths.checkpoints,
+					"request-baselines",
+					`${encodeURIComponent(turnId)}.json`,
+				),
+				JSON.stringify([...baseline]),
+				{ mode: 0o600 },
+			);
+		}
+		this.append({
+			type: "editor-boundary",
+			turnId,
+			complete: false,
+			...(!this.shellBegins.has(`editor-boundary:${turnId}`)
+				? { error: "Workspace capture unavailable" }
+				: {}),
+		});
+		await this.flush();
+	}
+
+	async endTurn(turnId: string): Promise<void> {
+		const start = this.records.find(
+			(record) => record.type === "editor-boundary" && record.turnId === turnId,
+		);
+		await this.endShellCapture({
+			turnId,
+			toolCallId: `editor-boundary:${turnId}`,
+		});
+		const error =
+			start?.type === "editor-boundary"
+				? (start.error ?? this.shellIndex?.disabled ?? this.shellWarning)
+				: "Missing request boundary";
+		this.append({
+			type: "editor-boundary",
+			turnId,
+			complete: true,
+			...(error ? { error } : {}),
+		});
+		this.finalizeTurn(turnId, "ok");
+		await this.flush();
+	}
+
+	/** Compose only the active conversation branch, oldest request first. */
+	async planRestoreTurns(turnIds: readonly string[]): Promise<RestorePlan> {
+		const composed = new Map<
+			string,
+			PreImageJournalRecord | SkipJournalRecord
+		>();
+		for (const turnId of turnIds) {
+			if (!this.turnRecordFor(turnId))
+				throw new Error(`Checkpoint unavailable: ${turnId}`);
+			const boundary = this.records.findLast(
+				(record) =>
+					record.type === "editor-boundary" && record.turnId === turnId,
+			);
+			if (
+				boundary?.type !== "editor-boundary" ||
+				!boundary.complete ||
+				boundary.error
+			) {
+				throw new Error(
+					`Checkpoint unavailable: ${turnId}${boundary?.type === "editor-boundary" && boundary.error ? ` (${boundary.error})` : ""}`,
+				);
+			}
+			const own = new Map<string, PreImageJournalRecord | SkipJournalRecord>();
+			for (const record of this.records) {
+				if (
+					(record.type !== "pre" && record.type !== "skip") ||
+					record.turnId !== turnId
+				)
+					continue;
+				const key = this.pathKey(record.path);
+				// The request-wide pre-image predates all tool-level captures.
+				if (!own.has(key) || record.toolCallId === `editor-boundary:${turnId}`)
+					own.set(key, record);
+			}
+			// Detached workers can integrate after the turn ends. Their journal entries
+			// must still use the request-start bytes, not later manual edits.
+			const baseline = new Map<string, IndexEntry>(
+				(
+					JSON.parse(
+						await readFile(
+							join(
+								this.paths.checkpoints,
+								"request-baselines",
+								`${encodeURIComponent(turnId)}.json`,
+							),
+							"utf8",
+						),
+					) as [string, IndexEntry][]
+				).map(([path, entry]) => [this.pathKey(path), entry]),
+			);
+			for (const [key, record] of own) {
+				if (composed.has(key)) continue;
+				const before = baseline.get(key);
+				if (before?.tooLarge) {
+					composed.set(key, {
+						type: "skip",
+						seq: record.seq,
+						ts: record.ts,
+						turnId,
+						toolCallId: record.toolCallId,
+						path: record.path,
+						reason: "too_large",
+						size: before.size,
+					});
+				} else if (before?.hash) {
+					composed.set(key, {
+						type: "pre",
+						seq: record.seq,
+						ts: record.ts,
+						turnId,
+						toolCallId: record.toolCallId,
+						tool: "editor-boundary",
+						path: record.path,
+						existed: true,
+						hash: before.hash,
+						size: before.size,
+						mode: before.mode,
+					});
+				} else composed.set(key, record);
+			}
+		}
+		const entries = await Promise.all(
+			[...composed.values()].map((record) => this.planEntry(record)),
+		);
+		return { checkpointId: turnIds[0] ?? "editor-empty-boundary", entries };
+	}
+
+	/** Verify every target blob and current file before an Editor restore can begin. */
+	async validateRestorePlan(plan: RestorePlan): Promise<void> {
+		for (const entry of plan.entries) {
+			if (entry.action.startsWith("skip-"))
+				throw new Error(`Cannot restore ${entry.path}: ${entry.action}`);
+			if (entry.action === "write") {
+				if (!entry.hash)
+					throw new Error(`Missing checkpoint contents: ${entry.path}`);
+				const bytes = await this.blobs.get(entry.hash);
+				if (sha256Hex(bytes) !== entry.hash)
+					throw new Error(`Corrupt checkpoint contents: ${entry.path}`);
+			}
+			const stats = await lstatOrNull(entry.path);
+			if (stats && (!stats.isFile() || stats.size > MAX_CAPTURE_BYTES)) {
+				throw new Error(
+					`Cannot back up ${entry.path}: unsupported file or capture limit exceeded`,
+				);
+			}
+		}
+	}
+
+	async captureRestoreBackup(plan: RestorePlan): Promise<string> {
+		await this.validateRestorePlan(plan);
+		const target = this.turnRecordFor(plan.checkpointId) ?? {
+			type: "turn" as const,
+			seq: 0,
+			ts: "",
+			turnId: plan.checkpointId,
+			label: "Editor rewind",
+		};
+		return this.captureRedoPoint(plan.entries, shortId("backup"), target);
+	}
+
+	/** Extend the original head snapshot when an earlier rewind touches more files. */
+	async mergeRestoreBackups(
+		headId: string,
+		currentId: string,
+	): Promise<string> {
+		const current = await this.planRestore(currentId);
+		const head = await this.planRestore(headId);
+		const entries = new Map(
+			current.entries.map((entry) => [this.pathKey(entry.path), entry]),
+		);
+		for (const entry of head.entries)
+			entries.set(this.pathKey(entry.path), entry);
+		const id = shortId("editor-head");
+		this.append({
+			type: "turn",
+			turnId: id,
+			label: "Editor pre-rewind files",
+			kind: "redo-point",
+		});
+		for (const entry of entries.values()) {
+			if (entry.action !== "write" && entry.action !== "delete")
+				throw new Error(`Unsupported backup: ${entry.path}`);
+			this.append({
+				type: "pre",
+				turnId: id,
+				toolCallId: id,
+				tool: REDO_TOOL,
+				path: entry.path,
+				existed: entry.action === "write",
+				hash: entry.hash,
+				mode: entry.mode,
+			});
+		}
+		this.append({ type: "finalize", turnId: id, status: "ok" });
+		await this.flush();
+		return id;
+	}
+
+	/** Materialize the backup as ordinary files so it remains usable after branching. */
+	async exportRestoreBackup(
+		checkpointId: string,
+		directory: string,
+	): Promise<void> {
+		const plan = await this.planRestore(checkpointId);
+		await ensureDir(directory, 0o700);
+		const manifest = [];
+		for (const [index, entry] of plan.entries.entries()) {
+			const file =
+				entry.action === "write"
+					? `${index}-${basename(entry.path)}`
+					: undefined;
+			if (file && entry.hash) {
+				const bytes = await this.blobs.get(entry.hash);
+				if (sha256Hex(bytes) !== entry.hash)
+					throw new Error(`Corrupt backup: ${entry.path}`);
+				await writeFile(join(directory, file), bytes, { mode: 0o600 });
+			}
+			manifest.push({
+				path: entry.path,
+				existed: entry.action === "write",
+				file,
+				mode: entry.mode,
+			});
+		}
+		await writeFile(
+			join(directory, "manifest.json"),
+			JSON.stringify(manifest, null, 2),
+			{ mode: 0o600 },
+		);
+	}
+
 	// ---------------------------------------------------------------- capture
 
 	/**
@@ -485,7 +736,11 @@ export class CheckpointStore implements CheckpointRecorder {
 				// attributed to the command — an accepted trade for not paying two
 				// full stat-walks on every `ls`.
 				const fresh = this.shellLastStored;
-				if (fresh && performance.now() - fresh.at < BEGIN_SKIP_FRESH_MS) {
+				if (
+					!callKey.startsWith("editor-boundary:") &&
+					fresh &&
+					performance.now() - fresh.at < BEGIN_SKIP_FRESH_MS
+				) {
 					this.shellBegins.set(callKey, fresh.snapshot);
 					return;
 				}

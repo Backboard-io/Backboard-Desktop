@@ -60,10 +60,16 @@
 	}
 
 	.chat-external-edit-copy {
+		border: 0;
+		background: transparent;
 		order: 1;
 		margin-left: auto;
 		margin-right: 6px;
 		opacity: 0;
+	}
+
+	.chat-external-edit-copy + .chat-external-edit-copy {
+		margin-left: 0;
 	}
 
 	.chat-external-edit-expand {

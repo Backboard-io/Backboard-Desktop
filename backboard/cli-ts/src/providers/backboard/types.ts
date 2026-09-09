@@ -261,6 +261,16 @@ export interface ProviderToolCall {
 }
 
 export interface ProviderUsage {
+	/** Latest Backboard API measurement; never billing-token accumulation. */
+	backboardContextUsage?: {
+		source: "backboard-api";
+		usedTokens?: number;
+		contextLimit?: number;
+		percent?: number;
+		summaryTokens?: number;
+		model?: string;
+	};
+
 	inputTokens?: number;
 	outputTokens?: number;
 	totalTokens?: number;

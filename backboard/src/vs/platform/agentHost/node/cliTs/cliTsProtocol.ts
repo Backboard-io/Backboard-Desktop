@@ -69,6 +69,7 @@ export type CliTsServeControl =
 		readonly op: 'submit';
 		readonly requestId: string;
 		readonly prompt: string;
+		readonly turnId?: string;
 		/**
 		 * Backend thread to resume, from the persisted session. Lets a fresh
 		 * serve process continue the conversation instead of starting a new
@@ -111,6 +112,9 @@ export type CliTsServeControl =
 	| { readonly op: 'archiveWorkers'; readonly requestId: string }
 	| { readonly op: 'unarchiveWorkers'; readonly requestId: string }
 	| { readonly op: 'deleteWorkers'; readonly requestId: string }
+	| { readonly op: 'prepareRewind'; readonly requestId: string; readonly transactionId: string; readonly turnIds: readonly string[]; readonly baseCheckpointId?: string }
+	| { readonly op: 'commitRewind'; readonly requestId: string; readonly transactionId: string; readonly buffers: readonly import('../../common/agentRewind.js').IAgentRewindBuffer[] }
+	| { readonly op: 'recoverRewind'; readonly requestId: string; readonly transactionId: string }
 	| { readonly op: 'dispose' };
 
 /**
@@ -195,7 +199,7 @@ export interface CliTsAgentEvent {
 		readonly options?: readonly string[];
 	};
 	readonly response?: { readonly id: string; readonly answers?: readonly string[]; readonly decision?: string; readonly answer?: string };
-	readonly usage?: { readonly inputTokens?: number; readonly outputTokens?: number; readonly totalTokens?: number; readonly contextTokens?: number; readonly contextLimit?: number; readonly model?: string; readonly provider?: string };
+	readonly usage?: { readonly backboardContextUsage?: { readonly source: 'backboard-api'; readonly usedTokens?: number; readonly contextLimit?: number; readonly percent?: number; readonly summaryTokens?: number; readonly model?: string }; readonly inputTokens?: number; readonly outputTokens?: number; readonly totalTokens?: number; readonly contextTokens?: number; readonly contextLimit?: number; readonly model?: string; readonly provider?: string };
 	readonly todos?: readonly unknown[];
 	readonly agentToolCallId?: string;
 	readonly parentBatchToolCallId?: string;

@@ -13,6 +13,7 @@ import { AgentTaskManager } from "../core/agent/AgentTaskManager.ts";
 import { AgentTaskStore } from "../core/agent/AgentTaskStore.ts";
 import { EventBus } from "../core/bus/EventBus.ts";
 import { createWorkerSnapshotMutation } from "../core/checkpoints/WorkerSnapshotMutation.ts";
+import { EditorRewind } from "../core/checkpoints/EditorRewind.ts";
 import { CheckpointManager } from "../core/checkpoints/CheckpointManager.ts";
 import { CheckpointStore } from "../core/checkpoints/CheckpointStore.ts";
 import { HookController, loadHookConfig } from "../core/hooks/index.ts";
@@ -325,11 +326,53 @@ export async function runServe(argv: string[]): Promise<void> {
 		]);
 	};
 
+	const editorRewind = new EditorRewind(checkpoints);
+	await editorRewind.initialize();
+	let rewinding = false;
 	const pendingOps = new Set<Promise<void>>();
 	let disposing = false;
 	const handleControl = async (control: ServeControl): Promise<void> => {
 		switch (control.op) {
+			case "prepareRewind":
+			case "commitRewind":
+			case "recoverRewind": {
+				if (rewinding) throw new Error("A rewind operation is already running");
+				rewinding = true;
+				try {
+					controller.cancel({ clearQueue: true });
+					workerWorkspaceManager.cancelAll();
+					await controller.waitForIdle();
+					await workerWorkspaceManager.waitForIdle();
+					const tx =
+						control.op === "prepareRewind"
+							? await editorRewind.prepare(
+									control.transactionId,
+									control.turnIds,
+									control.baseCheckpointId,
+								)
+							: control.op === "commitRewind"
+								? await editorRewind.commit(
+										control.transactionId,
+										control.buffers,
+									)
+								: await editorRewind.recover(control.transactionId);
+					if (tx.status === "committed") controller.newThread();
+					writeRecord("serve:rewind", control.requestId, {
+						transactionId: tx.id,
+						status: tx.status,
+						backupId: tx.backupId,
+						headBackupId: tx.headBackupId,
+						paths: tx.plan.entries.map((entry) => entry.path),
+						buffers: tx.buffers,
+					});
+				} finally {
+					rewinding = false;
+				}
+				return;
+			}
 			case "submit": {
+				if (rewinding) throw new Error("Wait for file restoration to finish");
+				editorRewind.assertReady();
 				if (control.threadId && session.threadId === null) {
 					session.threadId = control.threadId;
 				}
@@ -340,6 +383,7 @@ export async function runServe(argv: string[]): Promise<void> {
 					? await stageAttachments(control.files)
 					: undefined;
 				const status = await controller.submit(control.prompt, {
+					turnId: control.turnId,
 					attachmentFilePaths,
 					displayContent: control.prompt,
 					conversationContext:

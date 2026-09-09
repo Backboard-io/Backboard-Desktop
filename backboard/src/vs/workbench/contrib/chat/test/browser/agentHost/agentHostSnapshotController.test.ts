@@ -119,6 +119,24 @@ function createController(store: DisposableStore, contentMap: Map<string, string
 }
 
 suite('AgentHostSnapshotController', () => {
+	test('awaits authoritative restore and leaves the cursor unchanged on failure', async () => {
+		const store = new DisposableStore();
+		try {
+			const controller = createController(store, new Map());
+			controller.ensureRequestCheckpoint('one');
+			controller.ensureRequestCheckpoint('two');
+			let target: string | undefined;
+			controller.setWorkspaceRestorer(async id => { target = id; throw new Error('restore failed'); }, async () => 2);
+			await assert.rejects(controller.restoreSnapshot('two', undefined), /restore failed/);
+			assert.deepStrictEqual({ target, disabled: controller.requestDisablement.get() }, { target: 'one', disabled: [] });
+			controller.setWorkspaceRestorer(async () => 1, async () => 2);
+			await controller.restoreSnapshot('two', undefined);
+			assert.strictEqual(controller.requestDisablement.get()[0].requestId, 'two');
+			await controller.recoverLastRewind();
+			assert.deepStrictEqual(controller.requestDisablement.get(), []);
+		} finally { store.dispose(); }
+	});
+
 
 	const store = new DisposableStore();
 

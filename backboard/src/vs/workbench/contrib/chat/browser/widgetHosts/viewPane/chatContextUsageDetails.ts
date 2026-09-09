@@ -26,6 +26,10 @@ export interface IChatContextUsagePromptTokenDetail {
 }
 
 export interface IChatContextUsageData {
+	unavailable?: boolean;
+	lastResponse?: boolean;
+	summaryTokens?: number;
+	measurementModel?: string;
 	usedTokens: number;
 	completionTokens: number;
 	totalContextWindow: number;
@@ -50,6 +54,7 @@ export class ChatContextUsageDetails extends Disposable {
 	private readonly outputBufferLegend: HTMLElement;
 	private readonly tokenDetailsContainer: HTMLElement;
 	private readonly warningMessage: HTMLElement;
+	private readonly measurementDetails: HTMLElement;
 	private readonly actionsSection: HTMLElement;
 
 	constructor(
@@ -85,6 +90,8 @@ export class ChatContextUsageDetails extends Disposable {
 		const legendLabel = this.outputBufferLegend.appendChild($('span'));
 		legendLabel.textContent = localize('outputReserved', "Reserved for response");
 		this.outputBufferLegend.style.display = 'none';
+
+		this.measurementDetails = this.domNode.appendChild($('div.description'));
 
 		// Token details container (for category breakdown)
 		this.tokenDetailsContainer = this.domNode.appendChild($('.token-details-container'));
@@ -146,7 +153,27 @@ export class ChatContextUsageDetails extends Disposable {
 			this.formatTokenCount(usedTokens, 1),
 			this.formatTokenCount(totalContextWindow, 0)
 		);
-		this.percentageLabel.textContent = localize('quotaDisplay', "{0}%", Math.min(100, percentage).toFixed(0));
+		this.percentageLabel.textContent = localize('quotaDisplay', "{0}%", Number(percentage.toFixed(1)));
+
+		if (data.unavailable) {
+			this.tokenCountLabel.textContent = localize('contextUsageUnavailable', "Context usage unavailable");
+			this.percentageLabel.textContent = '';
+		}
+		const details: string[] = [];
+		if (!data.unavailable) {
+			details.push(localize('contextUsageExact', "{0} / {1} tokens", usedTokens.toLocaleString(), totalContextWindow.toLocaleString()));
+		}
+		if (data.lastResponse) {
+			details.push(localize('contextUsageLastResponse', "Last response"));
+		}
+		if (data.summaryTokens !== undefined) {
+			details.push(localize('contextSummaryTokens', "Summary: {0} tokens", data.summaryTokens.toLocaleString()));
+		}
+		if (data.measurementModel) {
+			details.push(data.measurementModel);
+		}
+		this.measurementDetails.textContent = details.join(' · ');
+		this.measurementDetails.style.display = details.length ? '' : 'none';
 
 		// Progress bar: actual usage fill + remaining reserved output fill
 		const usageBarWidth = Math.max(0, Math.min(100, percentage));

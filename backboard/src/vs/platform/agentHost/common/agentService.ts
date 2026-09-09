@@ -22,6 +22,7 @@ import { ProtectedResourceMetadata, type Changeset, type ConfigSchema, type Mess
 import type { ActionEnvelope, INotification, IRootConfigChangedAction, SessionAction, ChatAction, TerminalAction, ClientAnnotationsAction } from './state/sessionActions.js';
 import type { ResourceCopyParams, ResourceCopyResult, ResourceDeleteParams, ResourceDeleteResult, ResourceListResult, ResourceMkdirParams, ResourceMkdirResult, ResourceMoveParams, ResourceMoveResult, ResourceReadResult, ResourceResolveParams, ResourceResolveResult, ResourceWatchState, ResourceWriteParams, ResourceWriteResult, CreateResourceWatchParams, CreateResourceWatchResult, IStateSnapshot } from './state/sessionProtocol.js';
 import { ComponentToState, ChatInputResponseKind, SessionStatus, StateComponents, type ClientPluginCustomization, type Customization, type PendingMessage, type RootState, type ChatInputAnswer, type SessionMeta, type ToolCallResult, type Turn, type PolicyState } from './state/sessionState.js';
+import type { AgentRewindRequest, IAgentRewindResult } from './agentRewind.js';
 
 // IPC contract between the renderer and the agent host utility process.
 // Defines all serializable event types, the IAgent provider interface,
@@ -772,6 +773,9 @@ export interface IMcpNotification {
  * the agent id.
  */
 export interface IAgent {
+	/** Restore files and the conversation boundary as an awaited local operation. */
+	rewindSession?(session: URI, request: AgentRewindRequest): Promise<IAgentRewindResult>;
+
 	/** Unique identifier for this provider (e.g. `'copilot'`). */
 	readonly id: AgentProvider;
 
@@ -1001,6 +1005,9 @@ export const IAgentService = createDecorator<IAgentService>('agentService');
  * and mutate state by dispatching actions (e.g. session/turnStarted, session/turnCancelled).
  */
 export interface IAgentService {
+	/** Restore files and the conversation boundary as an awaited local operation. */
+	rewindSession?(session: URI, request: AgentRewindRequest): Promise<IAgentRewindResult>;
+
 	readonly _serviceBrand: undefined;
 
 	/**
@@ -1227,6 +1234,8 @@ export interface IAgentService {
  * management and optimistic write-ahead on top.
  */
 export interface IAgentConnection {
+	/** Restore files and the conversation boundary as an awaited local operation. */
+	rewindSession?(session: URI, request: AgentRewindRequest): Promise<IAgentRewindResult>;
 
 	readonly clientId: string;
 

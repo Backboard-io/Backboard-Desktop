@@ -2065,6 +2065,7 @@ export function isSerializableSessionData(obj: unknown): obj is ISerializableCha
 }
 
 export type IChatChangeEvent =
+	| { kind: 'checkpointChanged' }
 	| IChatInitEvent
 	| IChatAddRequestEvent | IChatChangedRequestEvent | IChatRemoveRequestEvent
 	| IChatAddResponseEvent
@@ -2809,6 +2810,7 @@ export class ChatModel extends Disposable implements IChatModel {
 		}
 
 		this._checkpoint = checkpoint;
+		this._onDidChange.fire({ kind: 'checkpointChanged' });
 	}
 
 	private _checkpoint: ChatRequestModel | undefined = undefined;

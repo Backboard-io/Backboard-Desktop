@@ -3,6 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { localize } from '../../../nls.js';
+import type { AgentRewindRequest, IAgentRewindResult } from '../common/agentRewind.js';
 import { DeferredPromise, RunOnceScheduler } from '../../../base/common/async.js';
 import { Emitter, Relay } from '../../../base/common/event.js';
 import { Disposable, DisposableStore, IReference } from '../../../base/common/lifecycle.js';
@@ -219,6 +221,13 @@ export class LocalAgentHostServiceClient extends Disposable implements IAgentHos
 			type: ActionType.RootConfigChanged,
 			config: { [AgentHostSessionSyncEnabledConfigKey]: enabled },
 		}, this.clientId, 0);
+	}
+
+	async rewindSession(session: URI, request: AgentRewindRequest): Promise<IAgentRewindResult> {
+		if (!this._proxy.rewindSession) {
+			throw new Error(localize('agentHost.unsupportedFileRewind', "This agent host does not support file rewind."));
+		}
+		return this._proxy.rewindSession(session, request);
 	}
 
 	// ---- IAgentService forwarding (no await needed, delayed channel handles queuing) ----

@@ -104,7 +104,15 @@ export interface UndoDoneJournalRecord extends JournalRecordBase {
 	redoCheckpointId: string | null;
 }
 
+export interface EditorBoundaryJournalRecord extends JournalRecordBase {
+	type: "editor-boundary";
+	turnId: string;
+	complete: boolean;
+	error?: string;
+}
+
 export type JournalRecord =
+	| EditorBoundaryJournalRecord
 	| TurnJournalRecord
 	| PreImageJournalRecord
 	| PostImageJournalRecord

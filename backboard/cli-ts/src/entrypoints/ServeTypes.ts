@@ -23,6 +23,7 @@ export type ServeControl =
 			op: "submit";
 			requestId: string;
 			prompt: string;
+			turnId?: string;
 			/** Existing provider thread to resume after an IDE/process restart. */
 			threadId?: string;
 			/** Prior turns to seed into the first request of a newly forked thread. */
@@ -68,9 +69,24 @@ export type ServeControl =
 	| { op: "archiveWorkers"; requestId: string }
 	| { op: "unarchiveWorkers"; requestId: string }
 	| { op: "deleteWorkers"; requestId: string }
+	| {
+			op: "prepareRewind";
+			requestId: string;
+			transactionId: string;
+			turnIds: string[];
+			baseCheckpointId?: string;
+	  }
+	| {
+			op: "commitRewind";
+			requestId: string;
+			transactionId: string;
+			buffers: import("../core/checkpoints/EditorRewind.ts").RewindBuffer[];
+	  }
+	| { op: "recoverRewind"; requestId: string; transactionId: string }
 	| { op: "dispose" };
 
 export type ServeRecordType =
+	| "serve:rewind"
 	| "serve:ready"
 	| "serve:turn"
 	| "serve:models"

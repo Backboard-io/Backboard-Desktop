@@ -18,6 +18,15 @@ describe("parseControlLine", () => {
 		});
 	});
 
+	it("parses rewind transactions and rejects invalid buffer encodings", () => {
+		for (const control of [
+			{ op: "prepareRewind" as const, requestId: "request", transactionId: "tx-1", turnIds: ["turn-1"] },
+			{ op: "commitRewind" as const, requestId: "request", transactionId: "tx-1", buffers: [{ path: "/file", content: "", encoding: "utf8" }] },
+			{ op: "recoverRewind" as const, requestId: "request", transactionId: "tx-1" },
+		]) expect(parseControlLine(JSON.stringify(control))).toEqual({ ok: true, control });
+		expect(parseControlLine(JSON.stringify({ op: "commitRewind" as const, requestId: "request", transactionId: "tx-1", buffers: [{ path: "/file", content: "", encoding: 42 }] }))).toMatchObject({ ok: false });
+	});
+
 	it("parses the public R-CLI submit settings", () => {
 		const control = {
 			op: "submit" as const,
@@ -41,6 +50,7 @@ describe("parseControlLine", () => {
 			op: "submit" as const,
 			requestId: "r2",
 			prompt: "hello",
+			turnId: "stable-editor-turn",
 			forkContext: "Prior conversation",
 			systemContext: "Coordinate independent workers in parallel.",
 			model: "anthropic/claude-sonnet-4-5",

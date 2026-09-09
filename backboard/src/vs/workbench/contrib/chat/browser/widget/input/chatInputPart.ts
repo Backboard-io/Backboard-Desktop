@@ -3068,6 +3068,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 
 		const model = this._widget?.viewModel?.model;
 		if (!model || !this.contextUsageWidget) {
+			this.contextUsageWidget?.update(undefined);
 			return;
 		}
 
@@ -3075,13 +3076,15 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		this._contextUsageDisposables.value = store;
 
 		store.add(model.onDidChange(e => {
-			if (e.kind === 'addRequest' || e.kind === 'completedRequest') {
-				this.contextUsageWidget?.update(model.lastRequest);
+			if (e.kind === 'checkpointChanged' || e.kind === 'removeRequest') {
+				this.contextUsageWidget?.update(undefined);
+			} else if (e.kind === 'addRequest' || e.kind === 'completedRequest') {
+				this.contextUsageWidget?.update(model.checkpoint ? undefined : model.lastRequest);
 			}
 		}));
 
 		// Initial update
-		this.contextUsageWidget.update(model.lastRequest);
+		this.contextUsageWidget.update(model.checkpoint ? undefined : model.lastRequest);
 	}
 
 	render(container: HTMLElement, initialValue: string, widget: IChatWidget) {
@@ -4890,7 +4893,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 					const originalUri = e.element.options?.originalUri;
 
 					if (originalUri || e.element.options?.modifiedUri) {
-						await openChatEdit(this.editorService, this.commandService, modifiedFileUri,
+						await openChatEdit(this.editorService, this.commandService, this.fileService, modifiedFileUri,
 							originalUri, e.element.options?.isDeletion ? undefined : e.element.options?.modifiedUri ?? modifiedFileUri,
 							!!e.element.options?.isDeletion, { editorOptions: e.editorOptions, openToSide: e.sideBySide });
 						return;

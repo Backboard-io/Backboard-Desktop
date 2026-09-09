@@ -108,6 +108,7 @@ export class ChatContextUsageWidget extends Disposable {
 	private _chatWidget: IChatWidget | undefined;
 
 	private currentData: IChatContextUsageData | undefined;
+	private currentSession: string | undefined;
 
 	private static readonly _OPENED_STORAGE_KEY = 'chat.contextUsage.hasBeenOpened';
 	private static readonly _HOVER_ID = 'chat.contextUsage';
@@ -254,6 +255,12 @@ export class ChatContextUsageWidget extends Disposable {
 		this._currentResponse = undefined;
 		this._currentModelId = undefined;
 
+		const session = lastRequest?.session.sessionResource.toString();
+		if (session !== this.currentSession) {
+			this.currentData = undefined;
+			this._contextUsageDetails.clear();
+			this.currentSession = session;
+		}
 		if (!lastRequest) {
 			// New/empty chat session clear everything
 			this.currentData = undefined;
@@ -304,6 +311,36 @@ export class ChatContextUsageWidget extends Disposable {
 
 	private updateFromResponse(response: IChatResponseModel, modelId: string): void {
 		const usage = response.usage;
+		const api = usage?.backboardContextUsage;
+		if (api) {
+			const used = api.usedTokens;
+			const limit = api.contextLimit;
+			if (typeof used === 'number' && Number.isFinite(used) && used >= 0
+				&& typeof limit === 'number' && Number.isFinite(limit) && limit > 0) {
+				const percentage = typeof api.percent === 'number' && Number.isFinite(api.percent) && api.percent >= 0 && api.percent <= 100
+					? api.percent : used / limit * 100;
+				this.render(percentage, 0, used, limit, undefined);
+				this.currentData = { ...this.currentData!, measurementModel: api.model,
+					summaryTokens: typeof api.summaryTokens === 'number' && Number.isFinite(api.summaryTokens) && api.summaryTokens >= 0 ? api.summaryTokens : undefined };
+			} else {
+				this.render(0, 0, 0, 0, undefined);
+				this.currentData = { ...this.currentData!, unavailable: true };
+				this.percentageLabel.textContent = '—';
+				this.domNode.setAttribute('aria-label', localize('contextUsageUnavailable', "Context usage unavailable"));
+			}
+			this._contextUsageDetails.value?.update(this.currentData!);
+			this.show();
+			return;
+		}
+		if (!usage) {
+			if (this.currentData) {
+				this.currentData = { ...this.currentData, lastResponse: true };
+				this._contextUsageDetails.value?.update(this.currentData);
+			} else {
+				this.hide();
+			}
+			return;
+		}
 		const modelMetadata = this.languageModelsService.lookupLanguageModel(modelId);
 		const modelConfiguration = this._modelConfigurationResolver?.(modelId) ?? this.languageModelsService.getModelConfiguration(modelId);
 		const configuredContextSize = typeof modelConfiguration?.contextSize === 'number' ? modelConfiguration.contextSize : undefined;
@@ -328,7 +365,7 @@ export class ChatContextUsageWidget extends Disposable {
 		const outputBuffer = usage.outputBuffer;
 		// A measured occupancy is a level with the turn's output already
 		// included — never add completionTokens on top of it.
-		const usedTokens = usage.contextTokens !== undefined && usage.contextTokens > 0
+		const usedTokens = usage.contextTokens !== undefined && Number.isFinite(usage.contextTokens) && usage.contextTokens >= 0
 			? usage.contextTokens
 			: promptTokens + completionTokens;
 		const percentage = (usedTokens / totalContextWindow) * 100;
@@ -351,7 +388,7 @@ export class ChatContextUsageWidget extends Disposable {
 		this.progressIndicator.setProgress(percentage);
 
 		// Update percentage label and aria-label (clamp display to 100)
-		const roundedPercentage = Math.min(100, Math.round(percentage));
+		const roundedPercentage = Number(percentage.toFixed(1));
 		this.percentageLabel.textContent = `${roundedPercentage}%`;
 		this.domNode.setAttribute('aria-label', localize('contextUsagePercentageLabel', "Context window usage: {0}%", roundedPercentage));
 

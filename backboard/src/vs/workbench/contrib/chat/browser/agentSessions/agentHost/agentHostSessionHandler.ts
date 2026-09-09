@@ -7,7 +7,7 @@ import { resolveAgentHostForkIndex } from './agentHostFork.js';
 import { Limiter } from '../../../../../../base/common/async.js';
 import { encodeBase64, VSBuffer } from '../../../../../../base/common/buffer.js';
 import { CancellationToken, CancellationTokenSource } from '../../../../../../base/common/cancellation.js';
-import { isCancellationError } from '../../../../../../base/common/errors.js';
+import { isCancellationError, onUnexpectedError } from '../../../../../../base/common/errors.js';
 import { Emitter } from '../../../../../../base/common/event.js';
 import { MarkdownString } from '../../../../../../base/common/htmlContent.js';
 import { getChatErrorDetailsFromMeta, getCopilotPlanFromEntitlement, IChatErrorContext } from '../../../common/chatErrorMessages.js';
@@ -67,6 +67,7 @@ import { IAgentHostNewSessionFolderService } from './agentHostNewSessionFolderSe
 import { fromAgentHostUri, toAgentHostUri } from '../../../../../../platform/agentHost/common/agentHostUri.js';
 import { AGENT_IGNORED_DIRECTORIES, AGENT_IGNORED_FILE_GLOBS, isIgnoredAgentPath } from '../../../../../../platform/agentHost/common/agentIgnoredPaths.js';
 import { accumulateUncoveredTurnFileChange, buildUncoveredTurnBeforeContentUri, finalizeUncoveredTurnFileChange, hydrateUncoveredTurnEdit, resolveTurnRepoInfo, type ITurnFileChangeObservation, type ITurnRepoInfo, type ReadTextFn } from './agentHostTurnFsEdits.js';
+import { AgentHostRewind } from './agentHostRewind.js';
 import { AgentHostSnapshotController } from './agentHostSnapshotController.js';
 import { toolDataToDefinition } from './agentHostToolUtils.js';
 import { IAgentHostUntitledProvisionalSessionService } from './agentHostUntitledProvisionalSessionService.js';
@@ -536,11 +537,17 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 			config.sessionType,
 			{
 				createEditingSession: (chatSessionResource: URI) => {
-					return this._instantiationService.createInstance(
-						AgentHostSnapshotController,
-						chatSessionResource,
-						config.connectionAuthority,
-					);
+					const controller = this._instantiationService.createInstance(AgentHostSnapshotController, chatSessionResource, config.connectionAuthority);
+					if (config.provider === 'backboard') {
+						const rewind = this._instantiationService.createInstance(AgentHostRewind, config.connection, this._resolveSessionUri(chatSessionResource));
+						const updateCheckpoint = (activeCount: number) => {
+							const model = this._chatService.getSession(chatSessionResource);
+							model?.setCheckpoint(model.getRequests()[activeCount]?.id);
+							return activeCount;
+						};
+						controller.setWorkspaceRestorer(async id => updateCheckpoint(await rewind.restore(id)), async () => updateCheckpoint(await rewind.recover()), async () => updateCheckpoint(await rewind.resume()));
+					}
+					return controller;
 				},
 			},
 		));
@@ -3022,6 +3029,12 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 						editingSession.addToolCallEdits(turn.id, rp.toolCall);
 					}
 				}
+			}
+			const activeCount = pendingTurns[0]?.usage?._meta?.backboardActiveCount;
+			if (typeof activeCount === 'number') {
+				editingSession.restoreCheckpointCursor(activeCount);
+				chatModel.setCheckpoint(pendingTurns[activeCount]?.id);
+				void editingSession.resumeWorkspace().catch(onUnexpectedError);
 			}
 		}
 

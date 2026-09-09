@@ -67,6 +67,29 @@ export class CheckpointManager implements CheckpointRecorder {
 		this.active.dispose();
 	}
 
+	beginTurn(turnId: string, label: string, cwd: string): Promise<void> {
+		return this.active.beginTurn(turnId, label, cwd);
+	}
+	endTurn(turnId: string): Promise<void> {
+		return this.active.endTurn(turnId);
+	}
+	planRestoreTurns(turnIds: readonly string[]): Promise<RestorePlan> {
+		return this.active.planRestoreTurns(turnIds);
+	}
+	validateRestorePlan(plan: RestorePlan): Promise<void> {
+		return this.active.validateRestorePlan(plan);
+	}
+	captureRestoreBackup(plan: RestorePlan): Promise<string> {
+		return this.active.captureRestoreBackup(plan);
+	}
+
+	mergeRestoreBackups(headId: string, currentId: string): Promise<string> {
+		return this.active.mergeRestoreBackups(headId, currentId);
+	}
+	exportRestoreBackup(checkpointId: string, directory: string): Promise<void> {
+		return this.active.exportRestoreBackup(checkpointId, directory);
+	}
+
 	listCheckpoints(): CheckpointSummary[] {
 		return this.active.listCheckpoints();
 	}

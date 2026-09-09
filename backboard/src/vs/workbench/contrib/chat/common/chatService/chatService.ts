@@ -160,7 +160,17 @@ export interface IChatUsagePromptTokenDetail {
 	percentageOfPrompt: number;
 }
 
+export interface IBackboardContextUsage {
+	readonly source: 'backboard-api';
+	readonly usedTokens?: number;
+	readonly contextLimit?: number;
+	readonly percent?: number;
+	readonly summaryTokens?: number;
+	readonly model?: string;
+}
+
 export interface IChatUsage {
+	backboardContextUsage?: IBackboardContextUsage;
 	promptTokens: number;
 	completionTokens: number;
 	outputBuffer?: number;
