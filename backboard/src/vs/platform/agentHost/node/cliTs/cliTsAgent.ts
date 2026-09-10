@@ -8,8 +8,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { createHash } from 'crypto';
+import { raceTimeout } from '../../../../base/common/async.js';
 import { Emitter } from '../../../../base/common/event.js';
-import { Disposable, type IReference } from '../../../../base/common/lifecycle.js';
+import { Disposable, MutableDisposable, type IReference } from '../../../../base/common/lifecycle.js';
 import { type IObservable, observableValue } from '../../../../base/common/observable.js';
 import { URI } from '../../../../base/common/uri.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
@@ -35,7 +36,7 @@ import { BACKBOARD_ACCESS_FULL, BACKBOARD_ACCESS_MANUAL, BACKBOARD_MODE_PLAN, BU
 const CLI_TS_WEB_SEARCH_TOOL_NAME = 'WebSearch';
 import { rgDiskPath } from '../../../../base/node/ripgrep.js';
 import { CliTsServeProcess, runCliTsCommand } from './cliTsProcess.js';
-import type { CliTsAgentEvent, CliTsClientToolDefinition, CliTsClientToolResultContent, CliTsClientToolResultPayload, CliTsFileAttachment, CliTsPermissionMode, CliTsTurnStatus, CliTsWorkerIntegrationChange, CliTsWorkerIntegrationSnapshot, CliTsWorkerState } from './cliTsProtocol.js';
+import type { CliTsRecord, CliTsAgentEvent, CliTsClientToolDefinition, CliTsClientToolResultContent, CliTsClientToolResultPayload, CliTsFileAttachment, CliTsPermissionMode, CliTsTurnStatus, CliTsWorkerIntegrationChange, CliTsWorkerIntegrationSnapshot, CliTsWorkerState } from './cliTsProtocol.js';
 
 const CLI_TS_STORE_VERSION = 1;
 const CHATGPT_SUBSCRIPTION_PROVIDER = 'openai-subscription';
@@ -484,6 +485,8 @@ export class CliTsAgent extends Disposable implements IAgent {
 	/** Coalesces worker lifecycle projection without delaying durable runtime state. */
 	private readonly _workerProjectionStates = new WeakMap<CliTsTurnState, Map<string, CliTsWorkerProjectionState>>();
 	private _modelsRefreshed = false;
+	private _modelRefreshPromise: Promise<void> | undefined;
+	private readonly _modelRefreshProcess = this._register(new MutableDisposable<CliTsServeProcess>());
 	private _rgDir: Promise<string | undefined> | undefined;
 	private _chatGptSubscriptionLoginPromise: Promise<void> | undefined;
 	private _claudeSubscriptionEnablePromise: Promise<void> | undefined;
@@ -586,6 +589,10 @@ export class CliTsAgent extends Disposable implements IAgent {
 
 	async executeCommand(command: string): Promise<IAgentCommandResult> {
 		switch (command) {
+			case 'models.refresh':
+				this._modelRefreshPromise ??= this._refreshModelCatalog().finally(() => { this._modelRefreshPromise = undefined; });
+				await this._modelRefreshPromise;
+				return { message: localize('cliTsAgent.models.refreshed', "Models and subscriptions refreshed.") };
 			case CHATGPT_SUBSCRIPTION_LOGIN_COMMAND:
 				await this._ensureChatGptSubscriptionLogin(true);
 				return {
@@ -2098,6 +2105,27 @@ export class CliTsAgent extends Disposable implements IAgent {
 		return this._rgDir;
 	}
 
+	private async _refreshModelCatalog(): Promise<void> {
+		await this._refreshClaudeSubscriptionConnectionState();
+		this._models.set(withChatGptSubscriptionConnectionState(this._models.get(), hasUsableChatGptSubscriptionLogin()), undefined);
+		// A short-lived catalog process reads current credentials and avoids touching
+		// the provider routers or processes owned by running conversations.
+		const proc = new CliTsServeProcess(this._logService, { onEvent: () => { } });
+		this._modelRefreshProcess.value = proc;
+		try {
+			const record = await raceTimeout(proc.request({ op: 'listModels', requestId: proc.nextRequestId() }), 30_000);
+			if (!record) {
+				throw new Error(localize('cliTsAgent.models.timeout', "Refreshing models timed out. Try again."));
+			}
+			if (!this._applyModelCatalog(record)) {
+				throw new Error(localize('cliTsAgent.models.empty', "No models were returned. The previous catalog has been kept."));
+			}
+			this._modelsRefreshed = true;
+		} finally {
+			this._modelRefreshProcess.clear();
+		}
+	}
+
 	private _refreshModelsOnce(session: CliTsSession): Promise<void> | undefined {
 		if (this._modelsRefreshed || !session.proc?.isRunning) {
 			return undefined;
@@ -2105,24 +2133,30 @@ export class CliTsAgent extends Disposable implements IAgent {
 		this._modelsRefreshed = true;
 		const proc = session.proc;
 		return proc.request({ op: 'listModels', requestId: proc.nextRequestId() }).then(record => {
-			const payload = record.payload as { models?: unknown[] } | undefined;
-			const models = (payload?.models ?? []).filter(isBridgeModel);
-			if (models.length) {
-				// The Backboard API is authoritative for catalog providers. Only the
-				// Locally-authenticated subscription routes are supplemented.
-				const infos = withSubscriptionConnectionStates(
-					backboardModelInfos(models, BUNDLED_CHATGPT_SUBSCRIPTION_MODELS, BUNDLED_CLAUDE_SUBSCRIPTION_MODELS),
-					hasUsableChatGptSubscriptionLogin(),
-					this._claudeSubscriptionConnected,
-				);
-				this._models.set(infos.length ? infos : [fallbackModel()], undefined);
-				// Persist for instant hydration on the next window start.
-				this._persistModelsCache(models);
-			}
+			this._applyModelCatalog(record);
 		}).catch(error => {
 			this._modelsRefreshed = false;
 			this._logService.warn(`[cli-ts] Failed to load models: ${error instanceof Error ? error.message : String(error)}`);
 		});
+	}
+
+	private _applyModelCatalog(record: CliTsRecord): boolean {
+		const payload = record.payload as { models?: unknown[] } | undefined;
+		const models = (Array.isArray(payload?.models) ? payload.models : []).filter(isBridgeModel);
+		if (models.length) {
+			// The Backboard API is authoritative for catalog providers. Only the
+			// Locally-authenticated subscription routes are supplemented.
+			const infos = withSubscriptionConnectionStates(
+				backboardModelInfos(models, BUNDLED_CHATGPT_SUBSCRIPTION_MODELS, BUNDLED_CLAUDE_SUBSCRIPTION_MODELS),
+				hasUsableChatGptSubscriptionLogin(),
+				this._claudeSubscriptionConnected,
+			);
+			this._models.set(infos.length ? infos : [fallbackModel()], undefined);
+			// Persist for instant hydration on the next window start.
+			this._persistModelsCache(models);
+			return true;
+		}
+		return false;
 	}
 
 	// ---- event translation ---------------------------------------------------

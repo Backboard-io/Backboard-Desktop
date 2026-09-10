@@ -28,7 +28,6 @@ export class PartsSplash {
 	static readonly ID = 'workbench.contrib.partsSplash';
 
 	private static readonly _splashElementId = 'monaco-parts-splash';
-	private static readonly _transitionSnapshotElementId = 'monaco-transition-snapshot';
 
 	private readonly _disposables = new DisposableStore();
 
@@ -53,7 +52,6 @@ export class PartsSplash {
 			lastIdleSchedule.value = dom.runWhenWindowIdle(mainWindow, () => this._savePartsSplash(), 2500);
 		};
 		lifecycleService.when(LifecyclePhase.Restored).then(() => {
-			this._removeTransitionSnapshot();
 			Event.any(Event.filter(onDidChangeFullscreen, windowId => windowId === mainWindow.vscodeWindowId), editorGroupsService.mainPart.onDidLayout, _themeService.onDidColorThemeChange)(savePartsSplashSoon, undefined, this._disposables);
 			savePartsSplashSoon();
 		});
@@ -107,27 +105,6 @@ export class PartsSplash {
 
 	private _shouldSaveLayoutInfo(): boolean {
 		return !isFullscreen(mainWindow) && !this._environmentService.isExtensionDevelopment && !this._didChangeTitleBarStyle;
-	}
-
-	/**
-	 * Removes the frozen frame of the previous page that the window
-	 * bootstrap put up to cover this workbench's boot (see
-	 * `INativeWindowConfiguration.transitionSnapshot`).
-	 *
-	 * Wait for restoration, then two animation frames: the sessions workbench
-	 * reveals itself in an animation-frame callback too. Removing the cover
-	 * after that paint avoids exposing the boot-hidden or partially restored UI.
-	 */
-	private _removeTransitionSnapshot(): void {
-		// eslint-disable-next-line no-restricted-syntax
-		const element = mainWindow.document.getElementById(PartsSplash._transitionSnapshotElementId);
-		if (!element) {
-			return;
-		}
-
-		this._disposables.add(dom.scheduleAtNextAnimationFrame(mainWindow, () => {
-			this._disposables.add(dom.scheduleAtNextAnimationFrame(mainWindow, () => element.remove()));
-		}));
 	}
 
 	private _removePartsSplash(): void {

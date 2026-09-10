@@ -64,6 +64,45 @@ async function git(args: string[]) {
 }
 
 describe("private snapshot workers", () => {
+	it("captures a dirty repository with more than 10,000 files and integrates a small edit", async () => {
+		await git(["init", "-b", "main"]);
+		await git(["config", "user.name", "Test"]);
+		await git(["config", "user.email", "test@example.com"]);
+		for (let batch = 0; batch < 100; batch++) {
+			await Promise.all(
+				Array.from({ length: 100 }, (_, index) =>
+					writeFile(join(cwd, `source-${batch * 100 + index}.txt`), "source"),
+				),
+			);
+		}
+		await git(["add", "."]);
+		await git(["commit", "--no-gpg-sign", "-qm", "base"]);
+		await writeFile(join(cwd, "untracked.txt"), "current");
+		const head = await git(["rev-parse", "HEAD"]);
+		const outcome = await manager.runWorker(
+			params("large-repo"),
+			async (workspace) => {
+				const files = (
+					await runGitCommand(workspace.cwd, ["ls-files", "-z"])
+				).stdout
+					.split("\0")
+					.filter(Boolean);
+				expect(files).toHaveLength(10_001);
+				expect(
+					await readFile(join(workspace.cwd, "untracked.txt"), "utf8"),
+				).toBe("current");
+				await writeFile(join(workspace.cwd, "source-9999.txt"), "changed");
+				return { status: "completed" };
+			},
+		);
+		expect(outcome.workspace.backend).toBe("snapshot");
+		expect(outcome.workspace.integrationStatus).toBe("integrated");
+		expect(await readFile(join(cwd, "source-9999.txt"), "utf8")).toBe(
+			"changed",
+		);
+		expect(await git(["rev-parse", "HEAD"])).toBe(head);
+	}, 60_000);
+
 	it("captures exact coordinator presence and bytes for edits, empty creates, and deletes", async () => {
 		const original = Buffer.from("\uFEFForiginal\r\n");
 		await writeFile(join(cwd, "existing.txt"), original);

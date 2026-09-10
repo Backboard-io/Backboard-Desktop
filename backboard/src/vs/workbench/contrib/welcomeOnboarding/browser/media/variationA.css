@@ -324,7 +324,6 @@
 }
 
 .onboarding-a-card-mode .onboarding-a-header,
-.onboarding-a-card-mode .onboarding-a-footer,
 .onboarding-a-card-welcome .onboarding-a-close-btn,
 .onboarding-a-card-mode .onboarding-a-close-btn {
 	display: none;
@@ -669,7 +668,7 @@
 	display: flex;
 	flex-direction: column;
 	align-items: flex-start;
-	width: 260px;
+	width: 240px;
 	height: 220px;
 	padding: 20px 18px 18px;
 	box-sizing: border-box;

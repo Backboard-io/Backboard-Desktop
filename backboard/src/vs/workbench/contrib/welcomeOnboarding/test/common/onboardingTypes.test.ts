@@ -20,13 +20,15 @@ suite('Backboard onboarding types', () => {
 	test('steps are ordered to match the Backboard onboarding flow', () => {
 		assert.deepStrictEqual([...ONBOARDING_STEPS], [
 			OnboardingStepId.Welcome,
+			OnboardingStepId.Experience,
 		]);
 	});
 
-	test('experience options include clean and editor modes', () => {
+	test('experience options default to Simple and include Editor and Advanced', () => {
 		assert.deepStrictEqual(ONBOARDING_EXPERIENCE_OPTIONS.map(option => option.id), [
 			OnboardingExperience.Simple,
 			OnboardingExperience.Developer,
+			OnboardingExperience.Advanced,
 		]);
 
 		for (const option of ONBOARDING_EXPERIENCE_OPTIONS) {

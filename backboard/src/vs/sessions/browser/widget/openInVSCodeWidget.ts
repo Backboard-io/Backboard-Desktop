@@ -58,9 +58,8 @@ export class OpenInVSCodeTitleBarWidget extends BaseActionViewItem {
 			button.setAttribute('aria-pressed', String(mode.active));
 			this._register(addDisposableListener(button, EventType.CLICK, event => {
 				EventHelper.stop(event, true);
-				if (!mode.active) {
-					void mode.run();
-				}
+				// Re-selecting the current mode cancels a pending cold switch.
+				void mode.run();
 			}));
 		}
 	}

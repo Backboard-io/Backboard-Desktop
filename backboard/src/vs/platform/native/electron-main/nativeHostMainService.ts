@@ -103,10 +103,15 @@ export class NativeHostMainService extends Disposable implements INativeHostMain
 				Event.map(this.auxiliaryWindowsMainService.onDidChangeAlwaysOnTop, e => ({ windowId: e.window.id, alwaysOnTop: e.alwaysOnTop }))
 			);
 
-			this.onDidBlurMainWindow = Event.filter(Event.fromNodeEventEmitter(app, 'browser-window-blur', (event, window: BrowserWindow) => window.id), windowId => !!this.windowsMainService.getWindowById(windowId));
+			const activeModeId = (window: BrowserWindow) => this.windowsMainService.getWindows().find(candidate => candidate.win?.id === window.id && candidate.isActiveMode !== false)?.id ?? window.id;
+			this.onDidBlurMainWindow = Event.any(
+				Event.map(this.windowsMainService.onDidDeactivateWindow, window => window.id),
+				Event.filter(Event.fromNodeEventEmitter(app, 'browser-window-blur', (event, window: BrowserWindow) => activeModeId(window)), windowId => !!this.windowsMainService.getWindowById(windowId))
+			);
 			this.onDidFocusMainWindow = Event.any(
+				Event.map(this.windowsMainService.onDidActivateWindow, window => window.id),
 				Event.map(Event.filter(Event.map(this.windowsMainService.onDidChangeWindowsCount, () => this.windowsMainService.getLastActiveWindow()), window => !!window), window => window!.id),
-				Event.filter(Event.fromNodeEventEmitter(app, 'browser-window-focus', (event, window: BrowserWindow) => window.id), windowId => !!this.windowsMainService.getWindowById(windowId))
+				Event.filter(Event.fromNodeEventEmitter(app, 'browser-window-focus', (event, window: BrowserWindow) => activeModeId(window)), windowId => !!this.windowsMainService.getWindowById(windowId))
 			);
 
 			this.onDidBlurMainOrAuxiliaryWindow = Event.any(
@@ -213,7 +218,7 @@ export class NativeHostMainService extends Disposable implements INativeHostMain
 	getWindows(windowId: number | undefined, options: { includeAuxiliaryWindows: true }): Promise<Array<IOpenedMainWindow | IOpenedAuxiliaryWindow>>;
 	getWindows(windowId: number | undefined, options: { includeAuxiliaryWindows: false }): Promise<Array<IOpenedMainWindow>>;
 	async getWindows(windowId: number | undefined, options: { includeAuxiliaryWindows: boolean }): Promise<Array<IOpenedMainWindow | IOpenedAuxiliaryWindow>> {
-		const mainWindows = this.windowsMainService.getWindows().map(window => ({
+		const mainWindows = this.windowsMainService.getWindows().filter(window => window.isActiveMode !== false).map(window => ({
 			id: window.id,
 			workspace: window.openedWorkspace ?? toWorkspaceIdentifier(window.backupPath, window.isExtensionDevelopmentHost),
 			title: window.win?.getTitle() ?? '',
@@ -305,24 +310,30 @@ export class NativeHostMainService extends Disposable implements INativeHostMain
 	}
 
 	async openAgentsWindow(windowId: number | undefined, options?: { folderUri?: UriComponents; sessionResource?: UriComponents }): Promise<void> {
-		const windows = await this.windowsMainService.openAgentsWindow({
+		await this.windowsMainService.openAgentsWindow({
 			context: OpenContext.API,
 			contextWindowId: windowId,
 			cli: this.environmentMainService.args,
 			forceReuseWindow: true,
 		}, options?.folderUri ? URI.revive(options.folderUri) : undefined, options?.sessionResource ? URI.revive(options.sessionResource) : undefined);
-		if (windows.length > 0) {
-			windows[0].focus();
-		}
 	}
 
 	async openOptimusWindow(windowId: number | undefined): Promise<void> {
-		const windows = await this.windowsMainService.openOptimusWindow({
+		await this.windowsMainService.openOptimusWindow({
 			context: OpenContext.API,
 			contextWindowId: windowId,
 			cli: this.environmentMainService.args,
 		});
-		windows[0]?.focus();
+	}
+
+	async openEditorWindow(windowId: number | undefined, options?: { folderUri?: UriComponents }): Promise<void> {
+		await this.windowsMainService.openEditorWindow({ context: OpenContext.API, contextWindowId: windowId, cli: this.environmentMainService.args }, options?.folderUri ? URI.revive(options.folderUri) : undefined);
+	}
+
+	async preloadWindowModes(windowId: number | undefined, options?: { folderUri?: UriComponents }): Promise<void> {
+		if (windowId !== undefined) {
+			this.windowsMainService.preloadWindowModes(windowId, options?.folderUri ? URI.revive(options.folderUri) : undefined);
+		}
 	}
 
 	async isFullScreen(windowId: number | undefined, options?: INativeHostOptions): Promise<boolean> {
@@ -488,13 +499,13 @@ export class NativeHostMainService extends Disposable implements INativeHostMain
 
 		this.logService.trace(`Setting background throttling for window ${windowId} to '${allowed}'`);
 
-		window?.win?.webContents?.setBackgroundThrottling(allowed);
+		window?.webContents?.setBackgroundThrottling(allowed);
 	}
 
 	async invalidateWindowRepaint(windowId: number | undefined, options?: INativeHostOptions): Promise<void> {
 		const window = this.windowById(options?.targetWindowId, windowId);
 
-		window?.win?.webContents?.invalidate();
+		window?.webContents?.invalidate();
 	}
 
 	//#endregion
@@ -907,7 +918,7 @@ export class NativeHostMainService extends Disposable implements INativeHostMain
 
 	async getScreenshot(windowId: number | undefined, rect?: IRectangle, options?: INativeHostOptions): Promise<VSBuffer | undefined> {
 		const window = this.windowById(options?.targetWindowId, windowId);
-		const captured = await window?.win?.webContents.capturePage(rect);
+		const captured = await window?.webContents?.capturePage(rect);
 
 		const buf = captured?.toJPEG(95);
 		return buf && VSBuffer.wrap(buf);
@@ -1021,7 +1032,7 @@ export class NativeHostMainService extends Disposable implements INativeHostMain
 
 	async getProcessId(windowId: number | undefined): Promise<number | undefined> {
 		const window = this.windowById(undefined, windowId);
-		return window?.win?.webContents.getOSProcessId();
+		return window?.webContents?.getOSProcessId();
 	}
 
 	async killProcess(windowId: number | undefined, pid: number, code: string): Promise<void> {
@@ -1043,7 +1054,7 @@ export class NativeHostMainService extends Disposable implements INativeHostMain
 	async triggerPaste(windowId: number | undefined, options?: INativeHostOptions): Promise<void> {
 		this.logService.trace(`Triggering paste in window ${windowId} with options:`, options);
 		const window = this.windowById(options?.targetWindowId, windowId);
-		return window?.win?.webContents.paste() ?? Promise.resolve();
+		return window?.webContents?.paste() ?? Promise.resolve();
 	}
 
 	async readImage(): Promise<Uint8Array> {
@@ -1183,7 +1194,7 @@ export class NativeHostMainService extends Disposable implements INativeHostMain
 
 	async resolveProxy(windowId: number | undefined, url: string): Promise<string | undefined> {
 		const window = this.codeWindowById(windowId);
-		const session = window?.win?.webContents?.session;
+		const session = window?.webContents?.session;
 
 		return session?.resolveProxy(url);
 	}
@@ -1218,12 +1229,12 @@ export class NativeHostMainService extends Disposable implements INativeHostMain
 
 	async openDevTools(windowId: number | undefined, options?: Partial<OpenDevToolsOptions> & INativeHostOptions): Promise<void> {
 		const window = this.windowById(options?.targetWindowId, windowId);
-		window?.win?.webContents.openDevTools(options?.mode ? { mode: options.mode, activate: options.activate } : undefined);
+		window?.webContents?.openDevTools(options?.mode ? { mode: options.mode, activate: options.activate } : undefined);
 	}
 
 	async toggleDevTools(windowId: number | undefined, options?: INativeHostOptions): Promise<void> {
 		const window = this.windowById(options?.targetWindowId, windowId);
-		window?.win?.webContents.toggleDevTools();
+		window?.webContents?.toggleDevTools();
 	}
 
 	async openDevToolsWindow(windowId: number | undefined, url: string): Promise<void> {
@@ -1370,7 +1381,7 @@ export class NativeHostMainService extends Disposable implements INativeHostMain
 			throw new Error();
 		}
 
-		const profiler = new WindowProfiler(window.win, session, this.logService);
+		const profiler = new WindowProfiler(window.webContents!, session, this.logService);
 		const result = await profiler.inspect(duration);
 		return result;
 	}

@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import electron, { BrowserWindowConstructorOptions, Display, screen } from 'electron';
-import { DeferredPromise, RunOnceScheduler, timeout, Delayer, raceTimeout } from '../../../base/common/async.js';
+import { DeferredPromise, RunOnceScheduler, timeout, Delayer } from '../../../base/common/async.js';
 import { CancellationToken } from '../../../base/common/cancellation.js';
 import { toErrorMessage } from '../../../base/common/errorMessage.js';
 import { Emitter, Event } from '../../../base/common/event.js';
@@ -47,8 +47,10 @@ import { VSBuffer } from '../../../base/common/buffer.js';
 import { errorHandler } from '../../../base/common/errors.js';
 import { FocusMode } from '../../native/common/native.js';
 import { Color } from '../../../base/common/color.js';
+import { WorkbenchWindowGroup } from './workbenchWindowGroup.js';
 
 export interface IWindowCreationOptions {
+	readonly modeHost?: CodeWindow;
 	readonly state: IWindowState;
 	readonly extensionDevelopmentPath?: string[];
 	readonly isExtensionTestHost?: boolean;
@@ -146,6 +148,9 @@ export abstract class BaseWindow extends Disposable implements IBaseWindow {
 
 	protected _win: electron.BrowserWindow | null = null;
 	get win() { return this._win; }
+	get webContents(): electron.WebContents | undefined { return this._win?.webContents; }
+	get contentView(): electron.View | undefined { return this._win?.contentView; }
+	protected get handlesNativeFocus(): boolean { return true; }
 	protected setWin(win: electron.BrowserWindow, options?: BrowserWindowConstructorOptions): void {
 		this._win = win;
 
@@ -176,6 +181,7 @@ export abstract class BaseWindow extends Disposable implements IBaseWindow {
 			this.dispose();
 		}));
 		this._register(Event.fromNodeEventEmitter(win, 'focus')(() => {
+			if (!this.handlesNativeFocus) { return; }
 			this.clearNotifyFocus();
 
 			this._lastFocusTime = Date.now();
@@ -222,7 +228,7 @@ export abstract class BaseWindow extends Disposable implements IBaseWindow {
 
 		// Open devtools if instructed from command line args
 		if (this.environmentMainService.args['open-devtools'] === true) {
-			win.webContents.openDevTools();
+			this.webContents?.openDevTools();
 		}
 
 		// macOS: Window Fullscreen Transitions
@@ -310,36 +316,26 @@ export abstract class BaseWindow extends Disposable implements IBaseWindow {
 	private representedFilename: string | undefined;
 
 	setRepresentedFilename(filename: string): void {
-		if (isMacintosh) {
+		this.representedFilename = filename;
+		if (isMacintosh && this.handlesNativeFocus) {
 			this.win?.setRepresentedFilename(filename);
-		} else {
-			this.representedFilename = filename;
 		}
 	}
 
 	getRepresentedFilename(): string | undefined {
-		if (isMacintosh) {
-			return this.win?.getRepresentedFilename();
-		}
-
 		return this.representedFilename;
 	}
 
 	private documentEdited: boolean | undefined;
 
 	setDocumentEdited(edited: boolean): void {
-		if (isMacintosh) {
+		this.documentEdited = edited;
+		if (isMacintosh && this.handlesNativeFocus) {
 			this.win?.setDocumentEdited(edited);
 		}
-
-		this.documentEdited = edited;
 	}
 
 	isDocumentEdited(): boolean {
-		if (isMacintosh) {
-			return Boolean(this.win?.isDocumentEdited());
-		}
-
 		return !!this.documentEdited;
 	}
 
@@ -400,7 +396,7 @@ export abstract class BaseWindow extends Disposable implements IBaseWindow {
 		// However, in scenarios where the window has multiple child views (e.g. browser WebContentsViews),
 		// the last focused view in the window may not be the workbench.
 		// So we explicitly focus the workbench web contents here to ensure it gets focus.
-		win.webContents.focus();
+		this.webContents?.focus();
 	}
 
 	//#region Window Control Overlays
@@ -586,7 +582,7 @@ export abstract class BaseWindow extends Disposable implements IBaseWindow {
 		}
 
 		win?.setSimpleFullScreen(fullscreen);
-		win?.webContents.focus(); // workaround issue where focus is not going into window
+		this.webContents?.focus(); // workaround issue where focus is not going into window
 	}
 
 	//#endregion
@@ -602,11 +598,48 @@ export abstract class BaseWindow extends Disposable implements IBaseWindow {
 
 export class CodeWindow extends BaseWindow implements ICodeWindow {
 
-	/**
-	 * Budget for grabbing the outgoing frame before a reload. Spent before the
-	 * reload can start, so it is kept well under the boot it is covering for.
-	 */
-	private static readonly TRANSITION_SNAPSHOT_TIMEOUT = 100;
+	private static nextEmbeddedId = 1_000_000;
+	readonly modeGroup: WorkbenchWindowGroup;
+	private readonly renderer: electron.WebContentsView;
+	private readonly modeContainer: electron.View;
+	readonly isEmbeddedMode: boolean;
+	private readonly initialMode: 'simple' | 'editor' | 'advanced';
+	get workbenchMode(): 'simple' | 'editor' | 'advanced' {
+		const config = this.pendingLoadConfig ?? this._config;
+		return config ? config.isOptimusWindow ? 'advanced' : config.isSessionsWindow ? 'simple' : 'editor' : this.initialMode;
+	}
+	get modeWindows(): readonly ICodeWindow[] { return this.modeGroup.windows; }
+	get isActiveMode(): boolean { return this.modeGroup.activeWindow === this; }
+	protected override get handlesNativeFocus(): boolean { return this.isActiveMode; }
+	override get webContents(): electron.WebContents { return this.renderer.webContents; }
+	override get contentView(): electron.View { return this.modeContainer; }
+
+	private modeTitle: string | undefined;
+	private modeWindowControls: Parameters<BaseWindow['updateWindowControls']>[0] = {};
+
+	override updateWindowControls(options: Parameters<BaseWindow['updateWindowControls']>[0]): void {
+		this.modeWindowControls = { ...this.modeWindowControls, ...options };
+		// A modal dialog in a retained mode must be visible to the user.
+		if (options.dimmed && this.isReady && !this.isActiveMode) { this.activateMode(); }
+		if (this.isActiveMode) { super.updateWindowControls(options); }
+	}
+
+	activateMode(): void {
+		this.modeGroup.activate(this);
+		this._lastFocusTime = Date.now();
+		this._win?.setTitle(this.modeTitle || this.productService.nameLong);
+		this.setRepresentedFilename(this.getRepresentedFilename() ?? '');
+		this.setDocumentEdited(this.isDocumentEdited());
+		super.updateWindowControls(this.modeWindowControls);
+	}
+
+	override focus(options?: { mode: FocusMode }): void {
+		if (this.isReady && !this.isActiveMode) {
+			this.activateMode();
+		}
+		super.focus(options);
+	}
+
 
 	//#region Events
 
@@ -719,26 +752,39 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 			const webPreferences: electron.WebPreferences = {
 				preload: FileAccess.asFileUri('vs/base/parts/sandbox/electron-browser/preload.js').fsPath,
 				additionalArguments: [`--vscode-window-config=${this.configObjectUrl.resource.toString()}`],
-				v8CacheOptions: this.environmentMainService.useCodeCache ? 'bypassHeatCheck' : 'none'
+				// Source builds lack the packaged code-cache path, but can still use
+				// Chromium's normal renderer cache instead of recompiling every visit.
+				v8CacheOptions: this.environmentMainService.args['no-cached-data'] ? 'none' : this.environmentMainService.useCodeCache ? 'bypassHeatCheck' : 'code'
 			};
-			if (config.isSessionsWindow || config.isOptimusWindow) {
-				webPreferences.backgroundThrottling = false; // keep agents window responsive when in background
-			}
+			// Idle mode windows may be throttled. The chat contributions disable
+			// throttling while requests are running, so background work continues.
 
 			const options = instantiationService.invokeFunction(defaultBrowserWindowOptions, this.windowState, undefined, webPreferences);
 
-			// Create the browser window
-			mark('code/willCreateCodeBrowserWindow');
-			this._win = new electron.BrowserWindow(options);
-			mark('code/didCreateCodeBrowserWindow');
-
-			this._id = this._win.id;
+			// Every workbench uses its own view; mode changes reuse the native host.
+			this.isEmbeddedMode = !!config.modeHost;
+			this.initialMode = config.isOptimusWindow ? 'advanced' : config.isSessionsWindow ? 'simple' : 'editor';
+			if (config.modeHost) {
+				this.modeGroup = config.modeHost.modeGroup;
+				this._win = this.modeGroup.host;
+				this._id = CodeWindow.nextEmbeddedId++;
+			} else {
+				mark('code/willCreateCodeBrowserWindow');
+				this._win = new electron.BrowserWindow({ ...options, webPreferences: { sandbox: true } });
+				mark('code/didCreateCodeBrowserWindow');
+				this.modeGroup = this._register(new WorkbenchWindowGroup(this._win, window => window instanceof CodeWindow ? window.workbenchMode : 'editor'));
+				this._id = this._win.id;
+			}
+			const view = this.modeGroup.add(this, options.webPreferences ?? webPreferences);
+			this.renderer = view.workbench;
+			this.modeContainer = view.container;
 			this.setWin(this._win, options);
+			if (!config.modeHost) {
+				this.modeGroup.activate(this);
+				this.applyState(this.windowState, hasMultipleDisplays);
+			}
 
-			// Apply some state after window creation
-			this.applyState(this.windowState, hasMultipleDisplays);
-
-			this._lastFocusTime = Date.now(); // since we show directly, we need to set the last focus time too
+			this._lastFocusTime = config.modeHost ? 0 : Date.now();
 		}
 		//#endregion
 
@@ -777,14 +823,6 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 		this.logService.trace(`window#load: window reported ready (id: ${this._id})`);
 
 		this.readyState = ReadyState.READY;
-
-		// The transition snapshot has served its purpose by now (the renderer
-		// read the configuration long before signalling ready). Drop it rather
-		// than let a multi-megabyte data URL sit in the window configuration for
-		// the lifetime of the window — and be replayed, stale, by `reload()`.
-		if (this._config) {
-			this._config.transitionSnapshot = undefined;
-		}
 
 		// inform all waiting promises that we are ready now
 		while (this.whenReadyCallbacks.length) {
@@ -828,20 +866,26 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 	private registerListeners(): void {
 
 		// Window error conditions to handle
-		this._register(Event.fromNodeEventEmitter(this._win, 'unresponsive')(() => this.onWindowError(WindowError.UNRESPONSIVE)));
-		this._register(Event.fromNodeEventEmitter(this._win, 'responsive')(() => this.onWindowError(WindowError.RESPONSIVE)));
-		this._register(Event.fromNodeEventEmitter(this._win.webContents, 'render-process-gone', (event, details) => details)(details => this.onWindowError(WindowError.PROCESS_GONE, { ...details })));
-		this._register(Event.fromNodeEventEmitter(this._win.webContents, 'did-fail-load', (event, exitCode, reason) => ({ exitCode, reason }))(({ exitCode, reason }) => this.onWindowError(WindowError.LOAD, { reason, exitCode })));
+		this._register(Event.fromNodeEventEmitter(this.webContents, 'unresponsive')(() => this.onWindowError(WindowError.UNRESPONSIVE)));
+		this._register(Event.fromNodeEventEmitter(this.webContents, 'responsive')(() => this.onWindowError(WindowError.RESPONSIVE)));
+		this._register(Event.fromNodeEventEmitter(this.webContents, 'render-process-gone', (event, details) => details)(details => this.onWindowError(WindowError.PROCESS_GONE, { ...details })));
+		this._register(Event.fromNodeEventEmitter(this.webContents, 'did-fail-load', (event, exitCode, reason) => ({ exitCode, reason }))(({ exitCode, reason }) => this.onWindowError(WindowError.LOAD, { reason, exitCode })));
 
 		// Prevent windows/iframes from blocking the unload
 		// through DOM events. We have our own logic for
 		// unloading a window that should not be confused
 		// with the DOM way.
 		// (https://github.com/microsoft/vscode/issues/122736)
-		this._register(Event.fromNodeEventEmitter<electron.Event>(this._win.webContents, 'will-prevent-unload')(event => event.preventDefault()));
+		this._register(Event.fromNodeEventEmitter<electron.Event>(this.webContents, 'will-prevent-unload')(event => event.preventDefault()));
+
+		this._register(Event.fromNodeEventEmitter(this.webContents, 'page-title-updated', (event: electron.Event, title: string) => ({ event, title }))(({ event, title }) => {
+			event.preventDefault();
+			this.modeTitle = title;
+			if (this.isActiveMode) { this._win?.setTitle(title); }
+		}));
 
 		// Remember that we loaded
-		this._register(Event.fromNodeEventEmitter(this._win.webContents, 'did-finish-load')(() => {
+		this._register(Event.fromNodeEventEmitter(this.webContents, 'did-finish-load')(() => {
 
 			// Associate properties from the load request if provided
 			if (this.pendingLoadConfig) {
@@ -885,7 +929,7 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 			const serviceUrl = URI.parse(this.productService.extensionsGallery.serviceUrl);
 			urls.push(`${serviceUrl.scheme}://${serviceUrl.authority}/*`);
 		}
-		this._win.webContents.session.webRequest.onBeforeSendHeaders({ urls }, async (details, cb) => {
+		this.webContents.session.webRequest.onBeforeSendHeaders({ urls }, async (details, cb) => {
 			const headers = await this.getMarketplaceHeaders();
 
 			cb({ cancel: false, requestHeaders: Object.assign(details.requestHeaders, headers) });
@@ -972,7 +1016,7 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 
 				// Unresponsive
 				if (type === WindowError.UNRESPONSIVE) {
-					if (this.isExtensionDevelopmentHost || this.isExtensionTestHost || this._win?.webContents?.isDevToolsOpened()) {
+					if (this.isExtensionDevelopmentHost || this.isExtensionTestHost || this.webContents?.isDevToolsOpened()) {
 						// TODO@electron Workaround for https://github.com/microsoft/vscode/issues/56994
 						// In certain cases the window can report unresponsiveness because a breakpoint was hit
 						// and the process is stopped executing. The most typical cases are:
@@ -1013,6 +1057,7 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 
 				// Process gone
 				else if (type === WindowError.PROCESS_GONE) {
+					this.readyState = ReadyState.NONE;
 					let message: string;
 					if (!details) {
 						message = localize('appGone', "The window terminated unexpectedly");
@@ -1058,6 +1103,18 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 			} catch (error) {
 				this.logService.error(error);
 			}
+		}
+
+		// Recover only the failed renderer. Destroying the native host here would
+		// also discard healthy retained workbenches without their unload checks.
+		if (this.modeWindows.length > 1) {
+			if (reopen && this._config) {
+				this.reload();
+			} else {
+				this.readyState = ReadyState.NONE;
+				this.close();
+			}
+			return;
 		}
 
 		// 'close' event will not be fired on destroy(), so signal crash via explicit event
@@ -1159,7 +1216,7 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 				const proxyRules = newHttpProxy || '';
 				const proxyBypassRules = newNoProxy ? `${newNoProxy},<local>` : '<local>';
 				this.logService.trace(`Setting proxy to '${proxyRules}', bypassing '${proxyBypassRules}'`);
-				this._win.webContents.session.setProxy({ proxyRules, proxyBypassRules, pacScript: '' });
+				this.webContents.session.setProxy({ proxyRules, proxyBypassRules, pacScript: '' });
 				electron.app.setProxy({ proxyRules, proxyBypassRules, pacScript: '' });
 			}
 		}
@@ -1187,55 +1244,6 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 		}
 	}
 
-	async captureTransitionSnapshot(): Promise<string | undefined> {
-
-		// Only a window that is loaded and actually on screen has anything the
-		// next page could hold up. A first load has nothing to carry over, and
-		// capturing a hidden window costs time for pixels nobody sees.
-		if (!this.wasLoaded || this._win.isDestroyed() || !this._win.isVisible() || this._win.isMinimized()) {
-			return undefined;
-		}
-
-		try {
-			// Bounded: capturing and encoding sits between the user's click and
-			// the reload starting, so a slow or wedged capture must fall back to
-			// loading immediately rather than hold the switch up.
-			const start = Date.now();
-			const image = await raceTimeout(this._win.webContents.capturePage(), CodeWindow.TRANSITION_SNAPSHOT_TIMEOUT);
-			if (!image || image.isEmpty()) {
-				return undefined;
-			}
-			const captureMs = Date.now() - start;
-			if (captureMs >= CodeWindow.TRANSITION_SNAPSHOT_TIMEOUT) {
-				// Encoding is synchronous. If capture already spent the entire
-				// budget, skip the decorative snapshot and let the destination load.
-				this.logService.trace(`window#captureTransitionSnapshot: skipped encode, capture took ${captureMs}ms (id: ${this._id})`);
-				return undefined;
-			}
-
-			// Retina captures contain roughly four times as many pixels as the
-			// logical window. The snapshot is only held for the incoming page's
-			// first paint, so encode it at logical size to minimize synchronous PNG
-			// work and the next renderer's decode cost.
-			const [contentWidth, contentHeight] = this._win.getContentSize();
-			const captured = image.getSize();
-			const needsDownscale = contentWidth > 0 && contentHeight > 0 && (image.getScaleFactors().some(factor => factor > 1) || captured.width > contentWidth || captured.height > contentHeight);
-			const frame = needsDownscale ? image.resize({ width: contentWidth, height: contentHeight, quality: 'good' }) : image;
-
-			// PNG (`toDataURL`), not JPEG: these windows can be translucent on
-			// macOS, and JPEG would flatten the transparent sidebar region to
-			// black.
-			const dataUrl = frame.toDataURL();
-			this.logService.trace(`window#captureTransitionSnapshot: captured ${Math.round(dataUrl.length / 1024)}kb (${needsDownscale ? `downscaled to ${contentWidth}x${contentHeight}` : 'native size'}) in ${Date.now() - start}ms, capture ${captureMs}ms (id: ${this._id})`);
-
-			return dataUrl;
-		} catch (error) {
-			this.logService.warn(`window#captureTransitionSnapshot: failed to capture window (id: ${this._id}): ${error instanceof Error ? error.message : String(error)}`);
-
-			return undefined;
-		}
-	}
-
 	load(configuration: INativeWindowConfiguration, options: ILoadOptions = Object.create(null)): void {
 		this.logService.trace(`window#load: attempt to load window (id: ${this._id})`);
 
@@ -1252,7 +1260,7 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 				this.setRepresentedFilename('');
 			}
 
-			this._win.setTitle(this.productService.nameLong);
+			if (this.isActiveMode) { this._win.setTitle(this.productService.nameLong); }
 		}
 
 		// Update configuration values based on our window context
@@ -1287,7 +1295,7 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 		} else {
 			windowUrl = FileAccess.asBrowserUri(`vs/code/electron-browser/workbench/workbench${this.environmentMainService.isBuilt ? '' : '-dev'}.html`).toString(true);
 		}
-		this._win.loadURL(windowUrl);
+		void this.webContents.loadURL(windowUrl);
 
 		// Remember that we did load
 		const wasLoaded = this.wasLoaded;
@@ -1297,10 +1305,10 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 		// Only do this when running out of sources and not when running tests
 		if (!this.environmentMainService.isBuilt && !this.environmentMainService.extensionTestsLocationURI) {
 			this._register(new RunOnceScheduler(() => {
-				if (this._win && !this._win.isVisible() && !this._win.isMinimized()) {
+				if (!this.isReady && this._win && !this._win.isVisible() && !this._win.isMinimized()) {
 					this._win.show();
 					this.focus({ mode: FocusMode.Force });
-					this._win.webContents.openDevTools();
+					this.webContents.openDevTools();
 				}
 			}, 10000)).schedule();
 		}
@@ -1379,9 +1387,6 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 		delete configuration.filesToDiff;
 		delete configuration.filesToMerge;
 		delete configuration.filesToWait;
-		// Belt and braces with the clear in `setReady`: a snapshot captured for
-		// an earlier load shows the wrong frame if it is replayed here.
-		delete configuration.transitionSnapshot;
 
 		// Some configuration things get inherited if the window is being reloaded and we are
 		// in extension development mode. These options are all development related.
@@ -1645,13 +1650,13 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 
 	send(channel: string, ...args: unknown[]): void {
 		if (this._win) {
-			if (this._win.isDestroyed() || this._win.webContents.isDestroyed()) {
+			if (this._win.isDestroyed() || this.webContents.isDestroyed()) {
 				this.logService.warn(`Sending IPC message to channel '${channel}' for window that is destroyed`);
 				return;
 			}
 
 			try {
-				this._win.webContents.send(channel, ...args);
+				this.webContents.send(channel, ...args);
 			} catch (error) {
 				this.logService.warn(`Error sending IPC message to channel '${channel}' of window ${this._id}: ${toErrorMessage(error)}`);
 			}
@@ -1734,7 +1739,7 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 
 	private async startCollectingJScallStacks(): Promise<void> {
 		if (!this.jsCallStackCollector.isTriggered()) {
-			const stack = await this._win?.webContents.mainFrame.collectJavaScriptCallStack();
+			const stack = await this.webContents.mainFrame.collectJavaScriptCallStack();
 
 			// Increment the count for this stack trace
 			if (stack) {
@@ -1762,7 +1767,7 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 				// If the stack appears more than 20 percent of the time, log it
 				// to the error telemetry as UnresponsiveSampleError.
 				if (Math.round((count * 100) / this.jsCallStackEffectiveSampleCount) > 20) {
-					const fakeError = new UnresponsiveError(stack, this.id, this._win?.webContents.getOSProcessId());
+					const fakeError = new UnresponsiveError(stack, this.id, this.webContents.getOSProcessId());
 					errorHandler.onUnexpectedError(fakeError);
 				}
 				logMessage += `<${count}> ${stack}\n`;
@@ -1777,7 +1782,7 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 	}
 
 	matches(webContents: electron.WebContents): boolean {
-		return this._win?.webContents.id === webContents.id;
+		return this.webContents.id === webContents.id;
 	}
 
 	override dispose(): void {

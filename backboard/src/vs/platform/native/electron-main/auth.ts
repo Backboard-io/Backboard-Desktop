@@ -270,7 +270,7 @@ export class ProxyAuthService extends Disposable implements IProxyAuthService {
 			const proxyAuthResponseHandler = async (event: ElectronEvent, channel: string, reply: Credentials & { remember: boolean } | undefined /* canceled */) => {
 				if (channel === payload.replyChannel) {
 					this.logService.trace(`auth#doResolveProxyCredentials - exit - received credentials from window ${window.id}`);
-					window.win?.webContents.off('ipc-message', proxyAuthResponseHandler);
+					window.webContents?.off('ipc-message', proxyAuthResponseHandler);
 
 					// We got credentials from the window
 					if (reply) {
@@ -305,7 +305,7 @@ export class ProxyAuthService extends Disposable implements IProxyAuthService {
 				}
 			};
 
-			window.win?.webContents.on('ipc-message', proxyAuthResponseHandler);
+			window.webContents?.on('ipc-message', proxyAuthResponseHandler);
 		});
 
 		// Remember credentials for the session in case

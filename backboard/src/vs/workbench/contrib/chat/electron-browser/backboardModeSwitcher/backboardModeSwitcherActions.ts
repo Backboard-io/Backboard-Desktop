@@ -14,6 +14,7 @@ import { Action2, MenuId, registerAction2 } from '../../../../../platform/action
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { ContextKeyExpr } from '../../../../../platform/contextkey/common/contextkey.js';
 import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
+import { INativeHostService } from '../../../../../platform/native/common/native.js';
 import { IInstantiationService, ServicesAccessor } from '../../../../../platform/instantiation/common/instantiation.js';
 import { IKeybindingService } from '../../../../../platform/keybinding/common/keybinding.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
@@ -83,6 +84,7 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 		@IHoverService private readonly hoverService: IHoverService,
 		@IKeybindingService private readonly keybindingService: IKeybindingService,
 		@ICommandService private readonly commandService: ICommandService,
+		@INativeHostService private readonly nativeHostService: INativeHostService,
 		@IEditorService private readonly editorService: IEditorService,
 		@IBackboardWorkspaceService private readonly workspaceService: IBackboardWorkspaceService,
 		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
@@ -112,14 +114,14 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 		this.editorButton.textContent = localize('backboardModeSwitcher.editor', "Editor");
 		this._register(addDisposableListener(this.agentButton, EventType.CLICK, e => {
 			EventHelper.stop(e, true);
-			if (!this.isAgentsActive()) {
-				this.openAgents();
-			}
+			this.openAgents();
 		}));
 		this._register(addDisposableListener(this.editorButton, EventType.CLICK, e => {
 			EventHelper.stop(e, true);
 			if (!this.isEditorModeActive()) {
 				this.openEditor();
+			} else {
+				void this.nativeHostService.openEditorWindow();
 			}
 		}));
 

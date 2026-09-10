@@ -31,9 +31,14 @@ export type SnapshotMutation = (
 	apply: () => Promise<void>,
 ) => Promise<void>;
 export const SNAPSHOT_LIMITS = {
-	files: 10_000,
-	bytes: 128 * 1024 * 1024,
+	files: 100_000,
+	bytes: 1024 * 1024 * 1024,
 	fileBytes: 16 * 1024 * 1024,
+} as const;
+// Baselines can span a large repository; integration still bounds worker edits.
+const INTEGRATION_LIMITS = {
+	files: 10_000,
+	bytes: 2 * 128 * 1024 * 1024,
 } as const;
 interface Entry {
 	path: string;
@@ -115,7 +120,7 @@ export class PrivateSnapshotWorkspace {
 			].sort();
 			if (inventory.length > SNAPSHOT_LIMITS.files)
 				throw new Error(
-					"Worker snapshot exceeds 10,000 source files; use a narrower workspace.",
+					`Worker snapshot contains ${inventory.length.toLocaleString("en-US")} source files, exceeding the ${SNAPSHOT_LIMITS.files.toLocaleString("en-US")}-file limit; use a narrower workspace.`,
 				);
 			for (const path of inventory) {
 				signal?.throwIfAborted();
@@ -144,7 +149,7 @@ export class PrivateSnapshotWorkspace {
 						(bytes += stat.size) > SNAPSHOT_LIMITS.bytes
 					)
 						throw new Error(
-							"Worker snapshot exceeds the file or byte limit; use a narrower workspace (128 MiB total, 16 MiB per file).",
+							"Worker snapshot exceeds the file or byte limit; use a narrower workspace (1 GiB total, 16 MiB per file).",
 						);
 					const content = await input.readFile();
 					if (content.length !== stat.size)
@@ -354,8 +359,8 @@ export class PrivateSnapshotWorkspace {
 			const after = afterMode ? await blob(repo, fields[3]!) : null;
 			bytes += (before?.length ?? 0) + (after?.length ?? 0);
 			if (
-				entries.length >= SNAPSHOT_LIMITS.files ||
-				bytes > SNAPSHOT_LIMITS.bytes * 2
+				entries.length >= INTEGRATION_LIMITS.files ||
+				bytes > INTEGRATION_LIMITS.bytes
 			)
 				throw new Error(
 					"Private worker result exceeds integration limits; narrow the worker task.",

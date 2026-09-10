@@ -745,14 +745,14 @@ export class Menubar extends Disposable {
 				return contextSpecificHandlers.inNoWindow();
 			}
 
+			const contents = this.windowsMainService.getFocusedWindow()?.webContents ?? activeWindow.webContents;
 			// DevTools focused
-			if (activeWindow.webContents.isDevToolsFocused() &&
-				activeWindow.webContents.devToolsWebContents) {
-				return contextSpecificHandlers.inDevTools(activeWindow.webContents.devToolsWebContents);
+			if (contents.isDevToolsFocused() && contents.devToolsWebContents) {
+				return contextSpecificHandlers.inDevTools(contents.devToolsWebContents);
 			}
 
 			// Focus is not in the workbench webContents
-			if (!activeWindow.webContents.isFocused()) {
+			if (!contents.isFocused()) {
 				return contextSpecificHandlers.inNoWindow();
 			}
 
@@ -766,27 +766,20 @@ export class Menubar extends Disposable {
 		// We want to support auxililary windows that may have focus by
 		// returning their parent windows as target to support running
 		// actions via the main window.
-		let activeBrowserWindow = BrowserWindow.getFocusedWindow();
-		if (activeBrowserWindow) {
-			const auxiliaryWindowCandidate = this.auxiliaryWindowsMainService.getWindowByWebContents(activeBrowserWindow.webContents);
-			if (auxiliaryWindowCandidate) {
-				activeBrowserWindow = this.windowsMainService.getWindowById(auxiliaryWindowCandidate.parentId)?.win ?? null;
-			}
+		let activeWindow = this.windowsMainService.getFocusedWindow();
+		const auxiliaryWindow = this.auxiliaryWindowsMainService.getFocusedWindow();
+		if (auxiliaryWindow) {
+			activeWindow = this.windowsMainService.getWindowById(auxiliaryWindow.parentId);
 		}
 
-		// We make sure to not run actions when the window has no focus, this helps
-		// for https://github.com/microsoft/vscode/issues/25907 and specifically for
-		// https://github.com/microsoft/vscode/issues/11928
-		// Still allow to run when the last active window is minimized though for
-		// https://github.com/microsoft/vscode/issues/63000
-		if (!activeBrowserWindow) {
+		// Keep the existing minimized-window command behavior.
+		if (!activeWindow && !BrowserWindow.getFocusedWindow()) {
 			const lastActiveWindow = this.windowsMainService.getLastActiveWindow();
 			if (lastActiveWindow?.win?.isMinimized()) {
-				activeBrowserWindow = lastActiveWindow.win;
+				activeWindow = lastActiveWindow;
 			}
 		}
 
-		const activeWindow = activeBrowserWindow ? this.windowsMainService.getWindowById(activeBrowserWindow.id) : undefined;
 		if (activeWindow) {
 			this.logService.trace('menubar#runActionInRenderer', invocation);
 

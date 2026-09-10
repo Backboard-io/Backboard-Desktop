@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { onUnexpectedError } from '../../../base/common/errors.js';
 import { Codicon } from '../../../base/common/codicons.js';
 import { Schemas } from '../../../base/common/network.js';
 import { basename } from '../../../base/common/resources.js';
@@ -162,6 +163,12 @@ async function openEditorWindowForActiveSession(accessor: ServicesAccessor, open
 
 	const windowOptions = openInNewWindow ? { forceNewWindow: true } : { forceReuseWindow: true };
 	const folderUri = await getFolderUriToOpen(sessionsService, sessionsProvidersService, remoteAgentHostService, storageService, fileService);
+	if (!openInNewWindow) {
+		if (folderUri) {
+			storageService.store(BACKBOARD_LAST_EDITOR_FOLDER_STORAGE_KEY, folderUri.toString(), StorageScope.APPLICATION, StorageTarget.MACHINE);
+		}
+		return nativeHostService.openEditorWindow({ folderUri });
+	}
 	if (!folderUri) {
 		return nativeHostService.openWindow(windowOptions);
 	}
@@ -263,7 +270,7 @@ export class OpenVSCodeWindowAction extends Action2 {
 
 	override async run(accessor: ServicesAccessor): Promise<void> {
 		const nativeHostService = accessor.get(INativeHostService);
-		await nativeHostService.openWindow({ forceReuseWindow: true });
+		await nativeHostService.openEditorWindow();
 	}
 }
 
@@ -313,5 +320,22 @@ export class OpenInVSCodeWidgetContribution extends Disposable implements IWorkb
 		this._register(actionViewItemService.register(Menus.TitleBarLeftLayout, OpenSessionInVSCodeAction.ID, (action, options) => {
 			return instantiationService.createInstance(OpenInVSCodeTitleBarWidget, action, options, OpenVSCodeWindowAction.ID, OpenAgentsWindowAction.ID, OpenOptimusWindowAction.ID);
 		}, undefined));
+	}
+}
+
+/** Resolves the same Editor workspace used by the navbar before warming modes. */
+export class PreloadSessionWindowModesContribution implements IWorkbenchContribution {
+	static readonly ID = 'workbench.contrib.preloadSessionWindowModes';
+
+	constructor(
+		@ISessionsService sessionsService: ISessionsService,
+		@ISessionsProvidersService sessionsProvidersService: ISessionsProvidersService,
+		@IRemoteAgentHostService remoteAgentHostService: IRemoteAgentHostService,
+		@IStorageService storageService: IStorageService,
+		@IFileService fileService: IFileService,
+		@INativeHostService nativeHostService: INativeHostService,
+	) {
+		void getFolderUriToOpen(sessionsService, sessionsProvidersService, remoteAgentHostService, storageService, fileService)
+			.then(folderUri => nativeHostService.preloadWindowModes({ folderUri })).catch(onUnexpectedError);
 	}
 }

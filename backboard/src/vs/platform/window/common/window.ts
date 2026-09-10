@@ -445,18 +445,6 @@ export interface INativeWindowConfiguration extends IWindowConfiguration, Native
 
 	partsSplash?: IPartsSplash;
 
-	/**
-	 * A PNG data URL of what this window was showing immediately before this
-	 * load, set only when an already-loaded window is being reused.
-	 *
-	 * Switching modes reloads the renderer into a different workbench, and the
-	 * incoming page commits its first frame long before the workbench is ready
-	 * — so the window would sit blank for the second or so the boot takes. The
-	 * incoming page holds this image up over that gap and cross-fades it away
-	 * once it has a laid-out frame of its own.
-	 */
-	transitionSnapshot?: string;
-
 	workspace?: IWorkspaceIdentifier | ISingleFolderWorkspaceIdentifier;
 
 	isInitialStartup?: boolean;

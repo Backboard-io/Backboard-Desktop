@@ -37,15 +37,21 @@ export interface IOnboardingExperienceOption {
 export const ONBOARDING_EXPERIENCE_OPTIONS: readonly IOnboardingExperienceOption[] = [
 	{
 		id: OnboardingExperience.Simple,
-		label: localize('onboarding.backboard.experience.clean', "Clean"),
-		eyebrow: localize('onboarding.backboard.experience.clean.eyebrow', "Clean"),
+		label: localize('onboarding.backboard.experience.clean', "Simple"),
+		eyebrow: localize('onboarding.backboard.experience.clean.eyebrow', "Recommended"),
 		description: localize('onboarding.backboard.experience.clean.description', "I don't want to see code, I just want to build things"),
 	},
 	{
 		id: OnboardingExperience.Developer,
 		label: localize('onboarding.backboard.experience.editor', "Editor"),
 		eyebrow: localize('onboarding.backboard.experience.editor.eyebrow', "Editor"),
-		description: localize('onboarding.backboard.experience.editor.description', "I want to see and edit code, show me the editor layout I know and love."),
+		 description: localize('onboarding.backboard.experience.editor.description', "I want to see and edit code, show me the editor layout I know and love."),
+	},
+	{
+		id: OnboardingExperience.Advanced,
+		label: localize('onboarding.backboard.experience.advanced', "Advanced"),
+		eyebrow: localize('onboarding.backboard.experience.advanced.eyebrow', "Multiple Tasks"),
+		description: localize('onboarding.backboard.experience.advanced.description', "Track multiple agent tasks in a dashboard and focus on the ones that need attention."),
 	},
 ];
 
@@ -94,6 +100,7 @@ export function getOnboardingStepSubtitle(stepId: OnboardingStepId): string {
  */
 export const ONBOARDING_STEPS: readonly OnboardingStepId[] = [
 	OnboardingStepId.Welcome,
+	OnboardingStepId.Experience,
 ];
 
 /**
@@ -111,6 +118,8 @@ export const ONBOARDING_STORAGE_KEY = 'welcomeOnboarding.state';
  * Storage key for tracking whether the post-onboarding tour has been shown.
  */
 export const ONBOARDING_TOUR_STORAGE_KEY = 'welcomeOnboarding.tourComplete';
+
+export const ONBOARDING_ADVANCED_TOUR_STORAGE_KEY = 'optimus.postOnboardingTour.complete';
 
 /**
  * Storage key for tracking whether the Agents-window post-onboarding tour has

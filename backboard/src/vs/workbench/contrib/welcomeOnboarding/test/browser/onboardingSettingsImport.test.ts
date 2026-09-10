@@ -220,14 +220,14 @@ suite('Backboard onboarding settings import', () => {
 			{
 				id: 'ms-vscode-remote.remote-ssh',
 				profileLocation: profile.extensionsResource.toString(),
-				installPreReleaseVersion: undefined,
+				installPreReleaseVersion: false,
 				skipWalkthrough: true,
 				skipPublisherTrust: true,
 			},
 			{
 				id: 'anthropic.claude-code',
 				profileLocation: profile.extensionsResource.toString(),
-				installPreReleaseVersion: undefined,
+				installPreReleaseVersion: false,
 				skipWalkthrough: true,
 				skipPublisherTrust: true,
 			},

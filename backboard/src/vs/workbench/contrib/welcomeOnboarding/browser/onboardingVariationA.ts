@@ -31,6 +31,7 @@ import { ITelemetryService } from '../../../../platform/telemetry/common/telemet
 import { IAccessibilityService } from '../../../../platform/accessibility/common/accessibility.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { IPathService } from '../../../services/path/common/pathService.js';
+import { IWorkbenchEnvironmentService } from '../../../services/environment/common/environmentService.js';
 import { IWorkbenchThemeService } from '../../../services/themes/common/workbenchThemeService.js';
 import { IUserDataProfileService } from '../../../services/userDataProfile/common/userDataProfile.js';
 import { OPEN_AGENTS_WINDOW_COMMAND_ID } from '../../chat/common/constants.js';
@@ -214,6 +215,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		@IExtensionManagementService private readonly extensionManagementService: IExtensionManagementService,
 		@IExtensionGalleryService private readonly extensionGalleryService: IExtensionGalleryService,
 		@IClipboardService private readonly clipboardService: IClipboardService,
+		@IWorkbenchEnvironmentService private readonly environmentService: IWorkbenchEnvironmentService,
 	) {
 		super();
 
@@ -348,6 +350,9 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		}
 
 		this._logAction('dismiss', undefined, reason);
+		if (reason === 'skip') {
+			this.postOnboardingSignInPromptShown = true;
+		}
 		this._storeOnboardingState(reason);
 		this.overlay.classList.remove('visible');
 		this.overlay.classList.add('exiting');
@@ -393,11 +398,22 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 	}
 
 	private async _openSelectedExperienceAfterOnboarding(): Promise<void> {
-		// Onboarding no longer forks into separate Simple and Editor experiences.
-		// Everyone lands in the unified Simple workspace (the Agents window); the
-		// full editor is a click away from there, and the post-onboarding tour
-		// walks through the whole IDE.
-		await this.commandService.executeCommand(OPEN_AGENTS_WINDOW_COMMAND_ID, {
+		if (this.selectedExperience === OnboardingExperience.Advanced) {
+			if (!this.environmentService.isOptimusWindow) {
+				await this.commandService.executeCommand(this.environmentService.isSessionsWindow ? 'agents.openOptimusWindow' : 'workbench.action.openOptimusWindow');
+			}
+			return;
+		}
+		if (this.selectedExperience === OnboardingExperience.Developer) {
+			if (this.environmentService.isSessionsWindow || this.environmentService.isOptimusWindow) {
+				await this.commandService.executeCommand('agents.openSessionInVSCode');
+			}
+			return;
+		}
+		if (this.environmentService.isSessionsWindow && !this.environmentService.isOptimusWindow) {
+			return;
+		}
+		await this.commandService.executeCommand(this.environmentService.isOptimusWindow ? 'agents.openAgentsWindow' : OPEN_AGENTS_WINDOW_COMMAND_ID, {
 			preferredSessionType: {
 				providerId: LOCAL_AGENT_HOST_PROVIDER_ID,
 				sessionTypeId: SessionType.CopilotCLI,
@@ -708,10 +724,12 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			skipButton.textContent = localize('onboarding.backboard.skipStep', "Continue without an account");
 			this.stepDisposables.add(addDisposableListener(skipButton, EventType.CLICK, () => {
 				didContinueWithoutAccount = true;
+				this.postOnboardingSignInPromptShown = true;
 				this._logAction('skipWelcomeSignIn');
 				this._advanceOrComplete();
 			}));
 		};
+		showContinueWithoutAccount();
 
 		// Completing onboarding reloads this window into the chosen experience,
 		// which would kill an in-flight sign-in (the extension host dies with the
@@ -947,7 +965,8 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			this.stepDisposables.add(addDisposableListener(card, EventType.CLICK, () => {
 				this._selectExperience(option.id, cards);
 				this.accessibilityService.alert(localize('onboarding.backboard.experience.selected.alert', "{0} selected", option.label));
-				this._dismiss('complete');
+				this._renderProgress();
+				this._updateButtonStates();
 			}));
 		}
 
@@ -1012,6 +1031,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			const isSelected = card.dataset.id === experience;
 			card.classList.toggle('selected', isSelected);
 			card.setAttribute('aria-checked', isSelected ? 'true' : 'false');
+			card.tabIndex = isSelected ? 0 : -1;
 		}
 
 		this._renderProgress();

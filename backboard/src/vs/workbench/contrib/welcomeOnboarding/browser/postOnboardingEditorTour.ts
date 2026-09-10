@@ -6,24 +6,18 @@
 import { getActiveWindow } from '../../../../base/browser/dom.js';
 import { Disposable, DisposableStore, IDisposable } from '../../../../base/common/lifecycle.js';
 import { localize } from '../../../../nls.js';
-import { IStorageService, StorageScope } from '../../../../platform/storage/common/storage.js';
+import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { IWorkbenchContribution } from '../../../common/contributions.js';
 import { IWorkbenchEnvironmentService } from '../../../services/environment/common/environmentService.js';
 import { IWorkbenchLayoutService, Parts } from '../../../services/layout/browser/layoutService.js';
 import { ISpotlightTourIntro, ISpotlightTourStep, SpotlightTour, TourPlacement } from './spotlightTour.js';
-import { ONBOARDING_EDITOR_TOUR_PENDING_KEY } from '../common/onboardingTypes.js';
+import { ONBOARDING_EDITOR_TOUR_PENDING_KEY, ONBOARDING_STORAGE_KEY, ONBOARDING_TOUR_STORAGE_KEY } from '../common/onboardingTypes.js';
+import { IOnboardingService } from '../common/onboardingService.js';
 
 /**
- * The second half of the post-onboarding walkthrough. The Agents-window tour
- * ends by switching to the editor page (a full reload into the main workbench)
- * and leaving {@link ONBOARDING_EDITOR_TOUR_PENDING_KEY} set. This contribution
- * runs in the editor window, reads that flag once at startup, and continues the
- * spotlight tour over the editor layout — the code editor, the file explorer,
- * the terminal, and the switch back to Simple — before restoring the layout.
- *
- * The flag is written by a different window just before it reloads into this
- * one, so it is normally present by the time this starts; we also watch for it
- * in case it lands late.
+ * Offers a tour on the first Editor-mode visit after onboarding, including
+ * when Editor was selected in the wizard. Honors handoffs from older versions
+ * of the Simple tour and restores any panels revealed by the walkthrough.
  */
 export class PostOnboardingEditorTour extends Disposable implements IWorkbenchContribution {
 
@@ -35,6 +29,7 @@ export class PostOnboardingEditorTour extends Disposable implements IWorkbenchCo
 		@IStorageService private readonly storageService: IStorageService,
 		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
 		@IWorkbenchEnvironmentService private readonly environmentService: IWorkbenchEnvironmentService,
+		@IOnboardingService onboardingService: IOnboardingService,
 	) {
 		super();
 
@@ -47,17 +42,33 @@ export class PostOnboardingEditorTour extends Disposable implements IWorkbenchCo
 		this._maybeStart();
 		if (!this.started) {
 			this._register(this.storageService.onDidChangeValue(StorageScope.APPLICATION, ONBOARDING_EDITOR_TOUR_PENDING_KEY, this._store)(() => this._maybeStart()));
+			this._register(onboardingService.onDidFinishOnboardingFlow(() => this._maybeStart()));
 		}
 	}
 
 	private _maybeStart(): void {
-		if (this.started || !this.storageService.getBoolean(ONBOARDING_EDITOR_TOUR_PENDING_KEY, StorageScope.APPLICATION, false)) {
+		if (this.started) {
 			return;
+		}
+		const pending = this.storageService.getBoolean(ONBOARDING_EDITOR_TOUR_PENDING_KEY, StorageScope.APPLICATION, false);
+		if (!pending) {
+			if (this.storageService.getBoolean(ONBOARDING_TOUR_STORAGE_KEY, StorageScope.APPLICATION, false)) {
+				return;
+			}
+			try {
+				const state = JSON.parse(this.storageService.get(ONBOARDING_STORAGE_KEY, StorageScope.APPLICATION, '{}'));
+				if (state.completed !== true) {
+					return;
+				}
+			} catch {
+				return;
+			}
 		}
 
 		this.started = true;
 		// One-shot: clear the handoff flag so the tour never repeats.
 		this.storageService.remove(ONBOARDING_EDITOR_TOUR_PENDING_KEY, StorageScope.APPLICATION);
+		this.storageService.store(ONBOARDING_TOUR_STORAGE_KEY, true, StorageScope.APPLICATION, StorageTarget.USER);
 		getActiveWindow().requestAnimationFrame(() => this._register(showEditorOnboardingTour(this.layoutService)));
 	}
 }
@@ -111,14 +122,14 @@ export function showEditorOnboardingTour(layoutService: IWorkbenchLayoutService)
 		},
 		{
 			title: localize('editor.tour.switch.title', "Back to Simple anytime"),
-			body: localize('editor.tour.switch.body', "Switch between Simple and Editor whenever you like — same project, one click."),
+			body: localize('editor.tour.switch.body', "Choose Simple for a focused conversation or Advanced for a multi-task dashboard. Replay this walkthrough with ‘Show Editor Mode Tour’ in the Command Palette."),
 			preferredPlacement: TourPlacement.Bottom,
 			anchor: query('.backboard-mode-titlebar-widget'),
 		},
 	];
 
 	const intro: ISpotlightTourIntro = {
-		title: localize('editor.tour.intro.title', "One more stop — the editor"),
+		title: localize('editor.tour.intro.title', "Explore Editor mode?"),
 		body: localize('editor.tour.intro.body', "Take a quick look around the full editor: your files, the terminal, and your agent right beside the code."),
 		caption: localize('editor.tour.intro.caption', "{0} quick stops", steps.length),
 		confirmLabel: localize('editor.tour.intro.confirm', "Show me"),

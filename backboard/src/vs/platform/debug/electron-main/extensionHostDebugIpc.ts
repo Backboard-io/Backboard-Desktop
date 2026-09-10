@@ -40,7 +40,7 @@ export class ElectronExtensionHostDebugBroadcastChannel<TContext> extends Extens
 			return { success: false };
 		}
 
-		return this.openCdp(codeWindow.win, true);
+		return this.openCdp(codeWindow.win, true, codeWindow.webContents);
 	}
 
 	private async openExtensionDevelopmentHostWindow(args: string[], debugRenderer: boolean): Promise<IOpenExtensionWindowResult> {
@@ -68,7 +68,7 @@ export class ElectronExtensionHostDebugBroadcastChannel<TContext> extends Extens
 			return { success: true };
 		}
 
-		return this.openCdp(win, false);
+		return this.openCdp(win, false, codeWindow.webContents);
 	}
 
 	private async openCdpServer(ident: string, onSocket: (socket: ISocket) => void): Promise<{ server: Server; wsUrl: string; port: number }> {
@@ -124,8 +124,8 @@ export class ElectronExtensionHostDebugBroadcastChannel<TContext> extends Extens
 		return { server, wsUrl, port };
 	}
 
-	private async openCdp(win: BrowserWindow, debugRenderer: boolean): Promise<IOpenExtensionWindowResult> {
-		const debug = win.webContents.debugger;
+	private async openCdp(win: BrowserWindow, debugRenderer: boolean, contents = win.webContents): Promise<IOpenExtensionWindowResult> {
+		const debug = contents.debugger;
 
 		let listeners = debug.isAttached() ? Infinity : 0;
 		const ident = generateUuid();

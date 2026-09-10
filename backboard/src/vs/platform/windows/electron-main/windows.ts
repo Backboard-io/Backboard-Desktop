@@ -29,6 +29,8 @@ export interface IWindowsMainService {
 	readonly onDidChangeWindowsCount: Event<IWindowsCountChangedEvent>;
 
 	readonly onDidOpenWindow: Event<ICodeWindow>;
+	readonly onDidActivateWindow: Event<ICodeWindow>;
+	readonly onDidDeactivateWindow: Event<ICodeWindow>;
 	readonly onDidSignalReadyWindow: Event<ICodeWindow>;
 	readonly onDidMaximizeWindow: Event<ICodeWindow>;
 	readonly onDidUnmaximizeWindow: Event<ICodeWindow>;
@@ -43,6 +45,9 @@ export interface IWindowsMainService {
 
 	openAgentsWindow(openConfig: IOpenConfiguration, folderUri?: URI, sessionResource?: URI): Promise<ICodeWindow[]>;
 	openOptimusWindow(openConfig: IOpenConfiguration): Promise<ICodeWindow[]>;
+	openEditorWindow(openConfig: IOpenConfiguration, folderUri?: URI): Promise<ICodeWindow[]>;
+
+	preloadWindowModes(windowId: number, folderUri?: URI): void;
 
 	sendToFocused(channel: string, ...args: unknown[]): void;
 	sendToOpeningWindow(channel: string, ...args: unknown[]): void;
@@ -90,6 +95,7 @@ export const enum OpenContext {
 export interface IBaseOpenConfiguration {
 	readonly context: OpenContext;
 	readonly contextWindowId?: number;
+	readonly modeHostWindowId?: number;
 }
 
 export interface IOpenConfiguration extends IBaseOpenConfiguration {

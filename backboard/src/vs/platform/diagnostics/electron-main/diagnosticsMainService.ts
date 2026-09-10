@@ -81,9 +81,11 @@ export class DiagnosticsMainService implements IDiagnosticsMainService {
 
 		const windows: IWindowDiagnostics[] = [];
 		for (const window of getAllWindowsExcludingOffscreen()) {
-			const codeWindow = this.windowsMainService.getWindowById(window.id);
-			if (codeWindow) {
-				windows.push(await this.codeWindowToInfo(codeWindow));
+			const workbenches = this.windowsMainService.getWindows().filter(workbench => workbench.win === window);
+			if (workbenches.length) {
+				for (const workbench of workbenches) {
+					windows.push(await this.codeWindowToInfo(workbench));
+				}
 			} else {
 				windows.push(this.browserWindowToInfo(window));
 			}
@@ -119,7 +121,13 @@ export class DiagnosticsMainService implements IDiagnosticsMainService {
 		const folderURIs = await this.getFolderURIs(window);
 		const win = assertReturnsDefined(window.win);
 
-		return this.browserWindowToInfo(win, folderURIs, window.remoteAuthority);
+		return {
+			id: window.id,
+			pid: window.webContents?.getOSProcessId() ?? 0,
+			title: window.webContents?.getTitle() ?? win.getTitle(),
+			folderURIs,
+			remoteAuthority: window.remoteAuthority
+		};
 	}
 
 	private browserWindowToInfo(window: BrowserWindow, folderURIs: URI[] = [], remoteAuthority?: string): IWindowDiagnostics {

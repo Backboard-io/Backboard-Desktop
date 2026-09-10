@@ -35,7 +35,7 @@ export class WebviewMainService extends Disposable implements IWebviewManagerSer
 			if (!window?.win) {
 				throw new Error(`Invalid windowId: ${windowId}`);
 			}
-			contents = window.win.webContents;
+			contents = window.webContents!;
 		} else {
 			const { webContentsId } = (id as WebviewWebContentsId);
 			contents = webContents.fromId(webContentsId);
@@ -91,7 +91,7 @@ export class WebviewMainService extends Disposable implements IWebviewManagerSer
 		if (!window?.win) {
 			throw new Error(`Invalid windowId: ${windowId}`);
 		}
-		const frame = window.win.webContents.mainFrame.framesInSubtree.find(frame => {
+		const frame = window.webContents!.mainFrame.framesInSubtree.find(frame => {
 			return frame.name === frameName;
 		});
 		if (!frame) {

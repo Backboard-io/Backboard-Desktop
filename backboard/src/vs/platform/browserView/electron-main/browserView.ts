@@ -152,7 +152,7 @@ export class BrowserView extends Disposable {
 		}));
 
 		this._view.setVisible(false);
-		this._ownerWindow.win?.contentView.addChildView(this._view);
+		this._ownerWindow.contentView?.addChildView(this._view);
 
 		this._view.webContents.setWindowOpenHandler((details) => {
 			const location = (() => {
@@ -558,12 +558,12 @@ export class BrowserView extends Disposable {
 	 * Update the layout bounds of this view
 	 */
 	layout(bounds: IBrowserViewBounds): void {
-		if (this._currentWindow?.win?.id !== bounds.windowId) {
+		if (this._currentWindow?.id !== bounds.windowId) {
 			const newWindow = this._windowById(bounds.windowId);
 			if (newWindow) {
-				this._currentWindow?.win?.contentView.removeChildView(this._view);
+				this._currentWindow?.contentView?.removeChildView(this._view);
 				this._currentWindow = newWindow;
-				newWindow.win?.contentView.addChildView(this._view);
+				newWindow.contentView?.addChildView(this._view);
 			}
 		}
 
@@ -597,7 +597,7 @@ export class BrowserView extends Disposable {
 
 		// If the view is focused, pass focus back to the window when hiding
 		if (!visible && this._view.webContents.isFocused()) {
-			this._currentWindow?.win?.webContents.focus();
+			this._currentWindow?.webContents?.focus();
 		}
 
 		this._view.setVisible(visible);
@@ -892,7 +892,7 @@ export class BrowserView extends Disposable {
 		// Remove from parent window (guard against already-destroyed window)
 		const currentWin = this._currentWindow?.win;
 		if (currentWin && !currentWin.isDestroyed()) {
-			currentWin.contentView.removeChildView(this._view);
+			this._currentWindow?.contentView?.removeChildView(this._view);
 		}
 
 		// Fire close event BEFORE disposing emitters. This signals the view has been destroyed.

@@ -420,6 +420,12 @@ export class LifecycleMainService extends Disposable implements ILifecycleMainSe
 
 	registerWindow(window: ICodeWindow): void {
 		const windowListeners = new DisposableStore();
+		if (window.isEmbeddedMode) {
+			windowListeners.add(window.onWillLoad(e => this._onWillLoadWindow.fire({ window, workspace: e.workspace, reason: e.reason })));
+			windowListeners.add(window.onDidClose(() => windowListeners.dispose()));
+			return;
+		}
+
 
 		// track window count
 		this.windowCounter++;
@@ -451,7 +457,9 @@ export class LifecycleMainService extends Disposable implements ILifecycleMainSe
 
 				// Fire onBeforeCloseWindow before actually closing
 				this.trace(`Lifecycle#onBeforeCloseWindow.fire() - window ID ${windowId}`);
-				this._onBeforeCloseWindow.fire(window);
+				for (const modeWindow of window.modeWindows ?? [window]) {
+					this._onBeforeCloseWindow.fire(modeWindow);
+				}
 
 				// No veto, close window now
 				window.close();
@@ -532,26 +540,19 @@ export class LifecycleMainService extends Disposable implements ILifecycleMainSe
 	}
 
 	private async doUnload(window: ICodeWindow, reason: UnloadReason): Promise<boolean /* veto */> {
-
-		// Always allow to unload a window that is not yet ready
-		if (!window.isReady) {
-			return false;
-		}
-
-		this.trace(`Lifecycle#unload() - window ID ${window.id}`);
-
-		// first ask the window itself if it vetos the unload
+		const windows = (reason === UnloadReason.CLOSE ? window.modeWindows ?? [window] : [window]).filter(window => window.isReady);
 		const windowUnloadReason = this._quitRequested ? UnloadReason.QUIT : reason;
-		const veto = await this.onBeforeUnloadWindowInRenderer(window, windowUnloadReason);
-		if (veto) {
-			this.trace(`Lifecycle#unload() - veto in renderer (window ID ${window.id})`);
-
-			return this.handleWindowUnloadVeto(veto);
+		// Ask every retained workbench before shutting down any of them. A dirty
+		// editor veto must leave all workbenches, agents and terminals usable.
+		for (const modeWindow of windows) {
+			const veto = await this.onBeforeUnloadWindowInRenderer(modeWindow, windowUnloadReason);
+			if (veto) {
+				return this.handleWindowUnloadVeto(veto);
+			}
 		}
-
-		// finally if there are no vetos, unload the renderer
-		await this.onWillUnloadWindowInRenderer(window, windowUnloadReason);
-
+		for (const modeWindow of windows) {
+			await this.onWillUnloadWindowInRenderer(modeWindow, windowUnloadReason);
+		}
 		return false;
 	}
 

@@ -17,6 +17,11 @@ import { SessionsView, SessionsViewId as SessionsListViewId } from '../../sessio
 import { ISessionsSetUpService } from '../../../browser/sessionsSetUpService.js';
 import { ISessionsPartService } from '../../../services/sessions/browser/sessionsPartService.js';
 import { SessionStatus } from '../../../services/sessions/common/session.js';
+import { extUriBiasedIgnorePathCase } from '../../../../base/common/resources.js';
+import { autorun } from '../../../../base/common/observable.js';
+import { INativeHostService } from '../../../../platform/native/common/native.js';
+import { IChatService } from '../../../../workbench/contrib/chat/common/chatService/chatService.js';
+import { getSessionEditorFolderUri } from '../../../browser/openInVSCodeUtils.js';
 
 class SelectAgentsFolderContribution extends Disposable implements IWorkbenchContribution {
 
@@ -118,6 +123,10 @@ class SelectAgentsFolderContribution extends Disposable implements IWorkbenchCon
 	private async selectFolder(folderUri: URI): Promise<void> {
 		// Wait for the welcome/setup flow to complete before selecting the folder
 		await this.sessionsSetUpService.whenWelcomeDone();
+		const activeSession = this.sessionsService.activeSession.get();
+		if (activeSession && extUriBiasedIgnorePathCase.isEqual(getSessionEditorFolderUri(activeSession), folderUri)) {
+			return; // A warm mode round trip must preserve the chat and its draft.
+		}
 
 		this.sessionsService.openNewSession();
 
@@ -154,3 +163,21 @@ class SelectAgentsFolderContribution extends Disposable implements IWorkbenchCon
 }
 
 registerWorkbenchContribution2(SelectAgentsFolderContribution.ID, SelectAgentsFolderContribution, WorkbenchPhase.BlockStartup);
+
+class SessionsChatSuspendThrottlingHandler extends Disposable {
+	static readonly ID = 'sessions.chatSuspendThrottling';
+
+	constructor(
+		@INativeHostService nativeHostService: INativeHostService,
+		@IChatService chatService: IChatService,
+	) {
+		super();
+		this._register(autorun(reader => {
+			// Match Editor mode: only active chat requests require unthrottled
+			// background execution. Agent and terminal processes remain alive.
+			void nativeHostService.setBackgroundThrottling(!chatService.requestInProgressObs.read(reader));
+		}));
+	}
+}
+
+registerWorkbenchContribution2(SessionsChatSuspendThrottlingHandler.ID, SessionsChatSuspendThrottlingHandler, WorkbenchPhase.AfterRestored);

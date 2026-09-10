@@ -105,6 +105,8 @@ export class TestNativeHostService implements INativeHostService {
 
 	async openAgentsWindow(_options?: { folderUri?: UriComponents; sessionResource?: UriComponents }): Promise<void> { }
 	async openOptimusWindow(): Promise<void> { }
+	async openEditorWindow(): Promise<void> { }
+	async preloadWindowModes(): Promise<void> { }
 
 
 	async toggleFullScreen(): Promise<void> { }

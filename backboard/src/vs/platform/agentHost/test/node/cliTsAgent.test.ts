@@ -36,6 +36,24 @@ suite('CliTsAgent tool metadata', () => {
 		));
 	}
 
+	test('model refresh coalesces concurrent requests and permits retry after failure', async () => {
+		const agent = createAgent();
+		let calls = 0;
+		let release!: () => void;
+		const pending = new Promise<void>(resolve => release = resolve);
+		Reflect.set(agent, '_refreshModelCatalog', () => { calls++; return pending; });
+		const first = agent.executeCommand('models.refresh');
+		const second = agent.executeCommand('models.refresh');
+		assert.strictEqual(calls, 1);
+		release();
+		await Promise.all([first, second]);
+		Reflect.set(agent, '_refreshModelCatalog', async () => { throw new Error('offline'); });
+		await assert.rejects(agent.executeCommand('models.refresh'), /offline/);
+		Reflect.set(agent, '_refreshModelCatalog', async () => { calls++; });
+		await agent.executeCommand('models.refresh');
+		assert.strictEqual(calls, 2);
+	});
+
 	test('distinguishes successful no-match and partial searches from execution failure', () => {
 		assert.strictEqual(cliTsToolExecutionFailed({ type: 'tool:result', execution: { exitCode: 1, outcome: 'no_match' } }), false);
 		assert.strictEqual(cliTsToolExecutionFailed({ type: 'tool:result', execution: { outcome: 'partial' } }), false);

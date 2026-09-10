@@ -5,17 +5,21 @@
 
 import * as dom from '../../../../../../base/browser/dom.js';
 import { StandardKeyboardEvent } from '../../../../../../base/browser/keyboardEvent.js';
+import { getDefaultHoverDelegate } from '../../../../../../base/browser/ui/hover/hoverDelegateFactory.js';
 import { renderIcon } from '../../../../../../base/browser/ui/iconLabel/iconLabels.js';
 import { BaseActionViewItem } from '../../../../../../base/browser/ui/actionbar/actionViewItems.js';
 import { IAction } from '../../../../../../base/common/actions.js';
 import { Codicon } from '../../../../../../base/common/codicons.js';
-import { Event } from '../../../../../../base/common/event.js';
+import { Emitter, Event } from '../../../../../../base/common/event.js';
 import { KeyCode } from '../../../../../../base/common/keyCodes.js';
 import { DisposableStore, MutableDisposable } from '../../../../../../base/common/lifecycle.js';
 import { autorun } from '../../../../../../base/common/observable.js';
 import { ThemeIcon } from '../../../../../../base/common/themables.js';
 import { localize } from '../../../../../../nls.js';
 import { AnchorAlignment, AnchorAxisAlignment } from '../../../../../../base/browser/ui/contextview/contextview.js';
+import { IAgentHostService } from '../../../../../../platform/agentHost/common/agentService.js';
+import { INotificationService } from '../../../../../../platform/notification/common/notification.js';
+import { IHoverService } from '../../../../../../platform/hover/browser/hover.js';
 import { IContextViewService } from '../../../../../../platform/contextview/browser/contextView.js';
 import { AgentSessionProviders, AgentSessionTarget } from '../../agentSessions/agentSessions.js';
 import { CLAUDE_SUBSCRIPTION_SETUP_ID } from '../../agentSessions/agentCliSetup.js';
@@ -352,6 +356,8 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 	/** The model-catalog section selected in the left rail. */
 	private _railSection = COMBINED_MODEL_SECTION_RECOMMENDED;
 	private _searchValue = '';
+	private _refreshPromise: Promise<void> | undefined;
+	private readonly _onDidRefresh = this._register(new Emitter<void>());
 
 	constructor(
 		action: IAction,
@@ -362,6 +368,9 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 		onDidChangeSessionThinkingOption: Event<void>,
 		@ILanguageModelsService private readonly _languageModelsService: ILanguageModelsService,
 		@IContextViewService private readonly _contextViewService: IContextViewService,
+		@IAgentHostService private readonly _agentHostService: IAgentHostService,
+		@INotificationService private readonly _notificationService: INotificationService,
+		@IHoverService private readonly _hoverService: IHoverService,
 	) {
 		super(undefined, action);
 
@@ -535,7 +544,16 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 			getAnchor: () => anchor,
 			render: (container: HTMLElement) => {
 				container.classList.add('combined-model-provider-overlay');
-				this._renderOverlay(container, store);
+				const contentStore = store.add(new DisposableStore());
+				const render = () => {
+					contentStore.clear();
+					this._renderOverlay(container, contentStore);
+				};
+				store.add(this._onDidRefresh.event(render));
+				store.add(this._languageModelsService.onDidChangeLanguageModels(() => {
+					if (!this._refreshPromise) { render(); }
+				}));
+				render();
 				// The base ContextView only auto-hides for interactions outside the
 				// whole workbench container, so a click elsewhere in the window would
 				// leave the overlay open. Dismiss on any pointer-down outside the
@@ -587,13 +605,47 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 
 		// --- Search, model list, and fixed reasoning footer ---
 		const pane = dom.append(root, dom.$('.combined-model-provider-pane'));
-		const searchRow = dom.append(pane, dom.$('.combined-model-provider-search'));
+		const toolbar = dom.append(pane, dom.$('.combined-model-provider-catalog-toolbar'));
+		const searchRow = dom.append(toolbar, dom.$('.combined-model-provider-search'));
 		searchRow.appendChild(renderIcon(Codicon.search));
 		const search = dom.append(searchRow, dom.$('input.combined-model-provider-search-input')) as HTMLInputElement;
 		search.type = 'text';
 		search.placeholder = localize('combinedPicker.searchAllModelsPlaceholder', "Search all models…");
 		search.value = this._searchValue;
 		search.setAttribute('aria-label', localize('combinedPicker.searchAllModelsPlaceholder', "Search all models…"));
+
+		if (showingBackboard) {
+			const refresh = dom.append(toolbar, dom.$('button.combined-model-provider-refresh')) as HTMLButtonElement;
+			refresh.type = 'button';
+			const label = localize('combinedPicker.refreshModels', "Refresh Models and Subscriptions");
+			refresh.setAttribute('aria-label', label);
+			store.add(this._hoverService.setupManagedHover(getDefaultHoverDelegate('mouse'), refresh, label));
+			const icon = refresh.appendChild(renderIcon(Codicon.refresh));
+			const updateBusy = () => {
+				refresh.disabled = !!this._refreshPromise;
+				refresh.setAttribute('aria-busy', String(!!this._refreshPromise));
+				icon.classList.toggle('combined-model-provider-refresh-spinning', !!this._refreshPromise);
+			};
+			updateBusy();
+			store.add(dom.addDisposableListener(refresh, dom.EventType.CLICK, event => {
+				dom.EventHelper.stop(event, true);
+				if (this._refreshPromise) { return; }
+				this._refreshPromise = this._agentHostService.executeAgentCommand({ provider: 'backboard', command: 'models.refresh' })
+					.then(() => {
+						this._notificationService.info(localize('combinedPicker.refreshSuccess', "Models and subscriptions are up to date."));
+					}, error => {
+						const message = error instanceof Error ? error.message : String(error);
+						this._notificationService.error(message.includes('Unsupported Backboard command: models.refresh')
+							? localize('combinedPicker.refreshRestartRequired', "Restart Backboard after your running agents finish to enable model and subscription refresh.")
+							: localize('combinedPicker.refreshFailed', "Could not refresh models and subscriptions: {0}", message));
+					})
+					.finally(() => {
+						this._refreshPromise = undefined;
+						this._onDidRefresh.fire();
+					});
+				updateBusy();
+			}));
+		}
 
 		const list = dom.append(pane, dom.$('.combined-model-provider-list'));
 		const footer = dom.append(pane, dom.$('.combined-model-provider-footer'));

@@ -141,6 +141,8 @@ export interface ICommonNativeHostService {
 
 	openAgentsWindow(options?: { folderUri?: UriComponents; sessionResource?: UriComponents }): Promise<void>;
 	openOptimusWindow(): Promise<void>;
+	openEditorWindow(options?: { folderUri?: UriComponents }): Promise<void>;
+	preloadWindowModes(options?: { folderUri?: UriComponents }): Promise<void>;
 
 	isFullScreen(options?: INativeHostOptions): Promise<boolean>;
 	toggleFullScreen(options?: INativeHostOptions): Promise<void>;

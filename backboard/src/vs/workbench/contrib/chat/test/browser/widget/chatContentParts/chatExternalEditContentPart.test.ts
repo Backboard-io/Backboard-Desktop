@@ -376,6 +376,8 @@ suite('ChatExternalEditContentPart performance', () => {
 				if (resource.toString() === afterUri.toString()) {
 					throw new Error('after snapshot unavailable');
 				}
+				// The successful peer resolves after the rejection, not before it.
+				await new Promise<void>(resolve => mainWindow.setTimeout(resolve, 0));
 				return {
 					object: { textEditorModel: { uri: resource, getValue: () => 'const value = 1;' } },
 					dispose: () => modelDisposeCount++,
@@ -416,4 +418,45 @@ suite('ChatExternalEditContentPart performance', () => {
 			diffUnavailable: false,
 		});
 	});
+
+	for (const transient of [true, false]) {
+		test(`snapshot failure ${transient ? 'recovers automatically' : 'stops retrying and supports explicit retry'}`, async () => {
+			let attempts = 0;
+			let disposed = 0;
+			let available = false;
+			instantiationService.stub(ITextModelService, {
+				createModelReference: async (resource: URI) => {
+					attempts++;
+					if (!available && (!transient || attempts === 1)) {
+						throw new Error('Snapshot provider unavailable');
+					}
+					return {
+						object: { textEditorModel: { uri: resource, getValue: () => 'saved snapshot contents' } },
+						dispose: () => disposed++,
+					};
+				},
+			} as unknown as ITextModelService);
+			const part = disposables.add(instantiationService.createInstance(ChatExternalEditContentPart, {
+				kind: 'externalEdit',
+				uri: URI.file('/project/new.json'),
+				editKind: 'create',
+				afterContentUri: URI.parse('chat-edit://snapshot/after/new.json'),
+			}));
+			part.showDiffPreview();
+			if (!transient) {
+				await waitFor(() => !!part.domNode.querySelector('.chat-external-edit-diff-retry'), 'Failed preview did not offer retry');
+				assert.strictEqual(attempts, 2, 'Automatic retry must be bounded');
+				available = true;
+				part.domNode.querySelector<HTMLButtonElement>('.chat-external-edit-diff-retry')!.click();
+			}
+			await waitFor(() => !!part.domNode.querySelector('.chat-external-edit-diff-row.added'), 'Snapshot did not recover');
+			assert.deepStrictEqual({
+				attempts,
+				disposed,
+				text: part.domNode.querySelector('.chat-external-edit-diff-text')?.textContent,
+				retryVisible: !!part.domNode.querySelector('.chat-external-edit-diff-retry'),
+			}, { attempts: transient ? 2 : 3, disposed: 1, text: 'saved snapshot contents', retryVisible: false });
+		});
+	}
+
 });

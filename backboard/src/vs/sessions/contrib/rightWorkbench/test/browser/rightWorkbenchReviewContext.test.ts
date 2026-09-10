@@ -31,7 +31,9 @@ suite('RightWorkbenchReviewContext', () => {
 		assert.strictEqual(context.isCurrent(chatBGeneration), false);
 		const nextSessionGeneration = context.captureGeneration();
 
+		const resourceKey = context.resourceKey;
 		context.invalidate();
+		assert.strictEqual(context.resourceKey, resourceKey);
 		assert.strictEqual(context.isCurrent(nextSessionGeneration), false);
 		assert.strictEqual(context.transition(undefined), true);
 	});

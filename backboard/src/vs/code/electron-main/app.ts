@@ -320,6 +320,13 @@ export class CodeApplication extends Disposable {
 				return false;
 			}
 
+			// Retained workbenches are owned views; browser previews remain excluded.
+			for (const window of this.windowsMainService.getWindows()) {
+				if (window.webContents && !window.webContents.isDestroyed() && frame.processId === window.webContents.mainFrame.processId) {
+					return true;
+				}
+			}
+
 			// Check to see if the request comes from one of the main windows (or shared process) and not from embedded content
 			const windows = getAllWindowsExcludingOffscreen();
 			for (const window of windows) {
@@ -344,7 +351,7 @@ export class CodeApplication extends Disposable {
 			// Check to see if the request comes from one of the main editor windows.
 			for (const window of this.windowsMainService.getWindows()) {
 				if (window.win) {
-					if (frame.processId === window.win.webContents.mainFrame.processId) {
+					if (frame.processId === window.webContents!.mainFrame.processId) {
 						return true;
 					}
 				}

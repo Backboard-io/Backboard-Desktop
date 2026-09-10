@@ -10,18 +10,18 @@ import { ICommandService } from '../../../../platform/commands/common/commands.j
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { IWorkbenchContribution } from '../../../../workbench/common/contributions.js';
 import { ISpotlightTourIntro, ISpotlightTourStep, SpotlightTour, TourPlacement } from '../../../../workbench/contrib/welcomeOnboarding/browser/spotlightTour.js';
-import { IBackboardOnboardingState, OnboardingExperience, ONBOARDING_EDITOR_TOUR_PENDING_KEY, ONBOARDING_SESSIONS_TOUR_STORAGE_KEY, ONBOARDING_STORAGE_KEY } from '../../../../workbench/contrib/welcomeOnboarding/common/onboardingTypes.js';
+import { IBackboardOnboardingState, OnboardingExperience, ONBOARDING_SESSIONS_TOUR_STORAGE_KEY, ONBOARDING_STORAGE_KEY } from '../../../../workbench/contrib/welcomeOnboarding/common/onboardingTypes.js';
 import { IWorkbenchLayoutService, Parts } from '../../../../workbench/services/layout/browser/layoutService.js';
 import { RightWorkbenchCommandId } from '../../rightWorkbench/browser/rightWorkbench.js';
+import { IOnboardingService } from '../../../../workbench/contrib/welcomeOnboarding/common/onboardingService.js';
+import { IWorkbenchEnvironmentService } from '../../../../workbench/services/environment/common/environmentService.js';
 
 /**
  * A spotlight tour shown once in the Agents (sessions) window after the user
  * completes onboarding. It first asks for consent, then walks through the
  * prompt, the sessions list, the Simple/Editor mode switch, and each panel that
- * can sit beside the agent — actually opening Files, Browser, and Terminal in
- * turn — before restoring the layout. The final stop offers to finish in the
- * editor page: completing the tour switches the window to Editor mode, while
- * skipping keeps the simple view.
+ * can sit beside the agent before restoring the layout. Finishing the tour
+ * keeps the user's selected mode instead of switching to the editor.
  *
  * Onboarding runs in the separate main-workbench window, so there is no
  * same-process event to subscribe to here. Onboarding writes its state to
@@ -40,8 +40,18 @@ export class PostOnboardingSessionsTour extends Disposable implements IWorkbench
 		@IStorageService private readonly storageService: IStorageService,
 		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
 		@ICommandService private readonly commandService: ICommandService,
+		@IOnboardingService onboardingService: IOnboardingService,
+		@IWorkbenchEnvironmentService environmentService: IWorkbenchEnvironmentService,
 	) {
 		super();
+		if (environmentService.isOptimusWindow) {
+			return;
+		}
+		this._register(onboardingService.onDidFinishOnboardingFlow(() => this._maybeStart()));
+		if (!this.storageService.get(ONBOARDING_STORAGE_KEY, StorageScope.APPLICATION)
+			&& !environmentService.extensionDevelopmentLocationURI && !environmentService.extensionTestsLocationURI) {
+			onboardingService.show();
+		}
 
 		this._maybeStart();
 		if (!this.started) {
@@ -52,7 +62,7 @@ export class PostOnboardingSessionsTour extends Disposable implements IWorkbench
 	}
 
 	private _maybeStart(): void {
-		if (this.started || !this._shouldShowTour()) {
+		if (this.started || getActiveWindow().document.querySelector('.onboarding-a-overlay') || !this._shouldShowTour()) {
 			return;
 		}
 
@@ -80,7 +90,7 @@ export class PostOnboardingSessionsTour extends Disposable implements IWorkbench
 
 	private _start(): void {
 		this.storageService.store(ONBOARDING_SESSIONS_TOUR_STORAGE_KEY, true, StorageScope.APPLICATION, StorageTarget.USER);
-		this._register(showSessionsOnboardingTour(this.layoutService, this.commandService, this.storageService));
+		this._register(showSessionsOnboardingTour(this.layoutService, this.commandService));
 	}
 }
 
@@ -90,7 +100,7 @@ export class PostOnboardingSessionsTour extends Disposable implements IWorkbench
  * developer command that force-shows the tour for testing. Returns a disposable
  * that tears the tour down; it also disposes itself once the tour ends.
  */
-export function showSessionsOnboardingTour(layoutService: IWorkbenchLayoutService, commandService: ICommandService, storageService: IStorageService): IDisposable {
+export function showSessionsOnboardingTour(layoutService: IWorkbenchLayoutService, commandService: ICommandService): IDisposable {
 	const store = new DisposableStore();
 	const targetWindow = getActiveWindow();
 
@@ -102,7 +112,7 @@ export function showSessionsOnboardingTour(layoutService: IWorkbenchLayoutServic
 	const steps: ISpotlightTourStep[] = [
 		{
 			title: localize('sessions.tour.prompt.title', "Start with a prompt"),
-			body: localize('sessions.tour.prompt.body', "Describe what you want to build or change. The agent works from here."),
+			body: localize('sessions.tour.prompt.body', "Choose a project folder, then describe a small task. Try: ‘Explain this project and suggest a first change.’ Connect your Backboard account or API key when you're ready to use the agent."),
 			preferredPlacement: TourPlacement.Top,
 			anchor: query('.interactive-input-part'),
 		},
@@ -113,8 +123,8 @@ export function showSessionsOnboardingTour(layoutService: IWorkbenchLayoutServic
 			anchor: query('.part.sidebar'),
 		},
 		{
-			title: localize('sessions.tour.mode.title', "Simple and editor, one IDE"),
-			body: localize('sessions.tour.mode.body', "Stay in this simple view, or open the full editor to read and edit code — same project, one click away."),
+			title: localize('sessions.tour.mode.title', "Three ways to work"),
+			body: localize('sessions.tour.mode.body', "Simple keeps the focus on your conversation. Editor puts code first. Advanced gives you a dashboard for multiple agent tasks. Use this menu to change modes whenever you need."),
 			preferredPlacement: TourPlacement.Bottom,
 			anchor: query('.open-in-vscode-titlebar-widget'),
 		},
@@ -122,7 +132,7 @@ export function showSessionsOnboardingTour(layoutService: IWorkbenchLayoutServic
 			// The first panel step opens the panels menu beside the agent; the
 			// next three walk the spotlight down its rows.
 			title: localize('sessions.tour.review.title', "Review changes"),
-			body: localize('sessions.tour.review.body', "See what the agent changed, side by side, right beside the chat."),
+			body: localize('sessions.tour.review.body', "Inspect the diff before keeping or committing agent changes. Review requested commands and permissions, and run your project's tests before sharing your work."),
 			preferredPlacement: TourPlacement.Left,
 			setup: openPanelMenu,
 			anchor: panelRow('diff-multiple'),
@@ -146,11 +156,11 @@ export function showSessionsOnboardingTour(layoutService: IWorkbenchLayoutServic
 			anchor: panelRow('terminal'),
 		},
 		{
-			title: localize('sessions.tour.editor.title', "Finish in the editor"),
-			body: localize('sessions.tour.editor.body', "Want to see the code behind your project? End the tour in the full editor — or skip to stay in this simple view."),
+			title: localize('sessions.tour.editor.title', "Ready to build"),
+			body: localize('sessions.tour.editor.body', "You'll stay in Simple mode when this tour ends. Explore Editor or Advanced from the mode menu later. To revisit this walkthrough, search for ‘Show Simple Mode Tour’ in the Command Palette."),
 			preferredPlacement: TourPlacement.Bottom,
 			anchor: query('.open-in-vscode-titlebar-widget'),
-			nextLabel: localize('sessions.tour.editor.cta', "Open the Editor"),
+			nextLabel: localize('sessions.tour.editor.cta', "Start Building"),
 		},
 	];
 
@@ -173,42 +183,14 @@ export function showSessionsOnboardingTour(layoutService: IWorkbenchLayoutServic
 		steps,
 		// Runs however the tour ends (Done, Skip, Escape, or "Maybe later").
 		// Puts back whatever the panel steps opened; a no-op when nothing was.
-		// Completing the last step (its button reads "Open the Editor") also
-		// switches this window to the editor page; skipping stays in Simple.
-		onFinish: completed => {
+		onFinish: () => {
 			restoreLayout(layoutService, targetWindow, restore);
 			store.dispose();
-			if (completed) {
-				void openEditorPage(commandService, storageService);
-			}
 		},
 	}));
 	tour.start();
 
 	return store;
-}
-
-/**
- * Switches the window to the editor page, the same way the titlebar mode
- * switcher's "Editor" item does. The command ids are owned by the desktop
- * (`vs/sessions/electron-browser`) and web (`vs/sessions/browser`) action
- * registrations, which this browser-layer contribution cannot import, so they
- * are tried by id — whichever is registered in this window flavor wins.
- *
- * The pending flag is written first so it is persisted before the switch
- * reloads this window into the main workbench, where the editor-window tour
- * reads it and continues the walkthrough.
- */
-async function openEditorPage(commandService: ICommandService, storageService: IStorageService): Promise<void> {
-	storageService.store(ONBOARDING_EDITOR_TOUR_PENDING_KEY, true, StorageScope.APPLICATION, StorageTarget.USER);
-	for (const commandId of ['agents.openSessionInVSCode', 'sessions.openInVSCode']) {
-		try {
-			await commandService.executeCommand(commandId);
-			return;
-		} catch {
-			// Not registered in this window flavor — try the next one.
-		}
-	}
 }
 
 interface ILayoutSnapshot {

@@ -25,6 +25,10 @@ export interface IBaseWindow extends IDisposable {
 
 	readonly id: number;
 	readonly win: electron.BrowserWindow | null;
+	/** The workbench renderer, which may be a retained view inside the native window. */
+	readonly webContents: electron.WebContents | undefined;
+	/** Container for this workbench and its owned browser previews. */
+	readonly contentView: electron.View | undefined;
 
 	readonly lastFocusTime: number;
 	focus(options?: { mode: FocusMode }): void;
@@ -44,6 +48,10 @@ export interface IBaseWindow extends IDisposable {
 }
 
 export interface ICodeWindow extends IBaseWindow {
+
+	readonly modeWindows?: readonly ICodeWindow[];
+	readonly isActiveMode?: boolean;
+	readonly isEmbeddedMode?: boolean;
 
 	readonly onWillLoad: Event<ILoadEvent>;
 	readonly onDidSignalReady: Event<void>;
@@ -79,15 +87,6 @@ export interface ICodeWindow extends IBaseWindow {
 
 	load(config: INativeWindowConfiguration, options?: { isReload?: boolean }): void;
 	reload(cli?: NativeParsedArgs): void;
-
-	/**
-	 * A PNG data URL of what this window is showing right now, for the next
-	 * page loaded into it to hold up while it boots (see
-	 * {@link INativeWindowConfiguration.transitionSnapshot}). Resolves to
-	 * `undefined` when there is nothing worth capturing or the capture fails —
-	 * this is a nicety, never a precondition for loading.
-	 */
-	captureTransitionSnapshot(): Promise<string | undefined>;
 
 	close(): void;
 

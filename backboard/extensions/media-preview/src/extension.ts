@@ -7,6 +7,7 @@ import * as vscode from 'vscode';
 import { registerAudioPreviewSupport } from './audioPreview';
 import { BinarySizeStatusBarEntry } from './binarySizeStatusBarEntry';
 import { registerImagePreviewSupport } from './imagePreview';
+import { registerPdfPreviewSupport } from './pdfPreview';
 import { registerVideoPreviewSupport } from './videoPreview';
 
 export function activate(context: vscode.ExtensionContext) {
@@ -16,4 +17,5 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(registerImagePreviewSupport(context, binarySizeStatusBarEntry));
 	context.subscriptions.push(registerAudioPreviewSupport(context, binarySizeStatusBarEntry));
 	context.subscriptions.push(registerVideoPreviewSupport(context, binarySizeStatusBarEntry));
+	context.subscriptions.push(registerPdfPreviewSupport(context, binarySizeStatusBarEntry));
 }

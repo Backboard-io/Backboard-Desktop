@@ -59,6 +59,8 @@ import { IAuxiliaryWindow } from '../../auxiliaryWindow/electron-main/auxiliaryW
 import { ICSSDevelopmentService } from '../../cssDev/node/cssDevService.js';
 import { ResourceSet } from '../../../base/common/map.js';
 import { VSBuffer } from '../../../base/common/buffer.js';
+import { shouldOpenSimpleOnStartup } from './startupMode.js';
+import { WindowLoadController } from './windowLoadController.js';
 
 //#region Helper Interfaces
 
@@ -79,6 +81,7 @@ interface IOpenBrowserWindowOptions {
 	readonly forceNewWindow?: boolean;
 	readonly forceNewTabbedWindow?: boolean;
 	readonly windowToUse?: ICodeWindow;
+	readonly modeHostWindowId?: number;
 
 	readonly emptyWindowBackupInfo?: IEmptyWindowBackupInfo;
 	readonly forceProfile?: string;
@@ -184,10 +187,16 @@ function isSingleFolderWorkspacePathToOpen(path: IPathToOpen | undefined): path 
 
 export class WindowsMainService extends Disposable implements IWindowsMainService {
 
+	private readonly windowLoadController = new WindowLoadController(window => this.lifecycleMainService.unload(window, UnloadReason.LOAD));
+
 	declare readonly _serviceBrand: undefined;
 
 	private readonly _onDidOpenWindow = this._register(new Emitter<ICodeWindow>());
 	readonly onDidOpenWindow = this._onDidOpenWindow.event;
+	private readonly _onDidActivateWindow = this._register(new Emitter<ICodeWindow>());
+	readonly onDidActivateWindow = this._onDidActivateWindow.event;
+	private readonly _onDidDeactivateWindow = this._register(new Emitter<ICodeWindow>());
+	readonly onDidDeactivateWindow = this._onDidDeactivateWindow.event;
 
 	private readonly _onDidSignalReadyWindow = this._register(new Emitter<ICodeWindow>());
 	readonly onDidSignalReadyWindow = this._onDidSignalReadyWindow.event;
@@ -308,8 +317,11 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 			folderUri = cliPaths.find(isSingleFolderWorkspacePathToOpen)?.workspace.uri;
 		}
 
-		// Open the agent sessions workspace, reusing the calling window when requested.
-		const windows = await this.open(await this.ensureAgentsWindow(openConfig));
+		const source = openConfig.forceReuseWindow ? this.getModeSource(openConfig) : undefined;
+		if (openConfig.forceReuseWindow && openConfig.contextWindowId !== undefined && !this.getWindowById(openConfig.contextWindowId)) { return []; }
+		const windows = source
+			? await this.openRetainedMode(source, 'simple', async existing => this.open(await this.ensureAgentsWindow({ ...openConfig, contextWindowId: existing?.id ?? source.id, modeHostWindowId: source.id, forceReuseWindow: !!existing })))
+			: await this.open(await this.ensureAgentsWindow(openConfig));
 
 		// Single IPC carrying the folder to pre-select and an optional existing-
 		// session resource to open. The handler in the agents window sequences
@@ -323,43 +335,60 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 	}
 
 	async openOptimusWindow(openConfig: IOpenConfiguration): Promise<ICodeWindow[]> {
-		this.logService.trace('windowsManager#openOptimusWindow');
-
-		// One Optimus window per app: switching modes back to Advanced must
-		// focus the existing window, not transform the caller's window into a
-		// second one — two Optimus windows contend for the same agent host
-		// and duplicate the grid state.
-		const existingOptimusWindow = this.getWindows().find(window => window.config?.isOptimusWindow);
-		if (existingOptimusWindow && !openConfig.initialStartup) {
-			existingOptimusWindow.focus();
-			return [existingOptimusWindow];
+		const source = this.getModeSource(openConfig);
+		if (!source && openConfig.contextWindowId !== undefined && !this.getWindowById(openConfig.contextWindowId)) { return []; }
+		if (source) {
+			return this.openRetainedMode(source, 'advanced', existing => this.open({
+				...openConfig, contextWindowId: existing?.id ?? source.id, modeHostWindowId: source.id, forceEmpty: true,
+				forceNewWindow: !existing, forceReuseWindow: !!existing, optimusWindow: true,
+				urisToOpen: undefined, noRecentEntry: true,
+			}));
 		}
+		return this.open({ ...openConfig, forceEmpty: true, forceNewWindow: true, optimusWindow: true });
+	}
 
-		const targetWindow = typeof openConfig.contextWindowId === 'number'
-			? this.getWindowById(openConfig.contextWindowId)
-			: this.getFocusedWindow() ?? this.getLastActiveWindow();
-
-		if (targetWindow && !openConfig.initialStartup) {
-			await this.openInBrowserWindow({
-				cli: openConfig.cli,
-				initialStartup: openConfig.initialStartup,
-				userEnv: openConfig.userEnv,
-				windowToUse: targetWindow,
-				forceNewWindow: false,
-				optimusWindow: true,
-			});
-			return [targetWindow];
-		}
-
-		return this.open({
+	async openEditorWindow(openConfig: IOpenConfiguration, folderUri?: URI): Promise<ICodeWindow[]> {
+		const source = this.getModeSource(openConfig);
+		if (!source && openConfig.contextWindowId !== undefined && !this.getWindowById(openConfig.contextWindowId)) { return []; }
+		const open = (existing?: ICodeWindow) => this.open({
 			...openConfig,
-			urisToOpen: undefined,
-			noRecentEntry: true,
-			forceEmpty: true,
-			forceNewWindow: true,
-			forceReuseWindow: false,
-			optimusWindow: true
+			contextWindowId: existing?.id ?? source?.id ?? openConfig.contextWindowId,
+			modeHostWindowId: source?.id,
+			urisToOpen: folderUri ? [{ folderUri }] : undefined,
+			forceEmpty: !folderUri,
+			forceNewWindow: !existing,
+			forceReuseWindow: !!existing,
 		});
+		return source ? this.openRetainedMode(source, 'editor', open, window => !folderUri ||
+			(isSingleFolderWorkspaceIdentifier(window.openedWorkspace) && isEqual(window.openedWorkspace.uri, folderUri))) : open();
+	}
+
+	preloadWindowModes(windowId: number, folderUri?: URI): void {
+		const source = this.getWindowById(windowId);
+		if (!(source instanceof CodeWindow) || source.isEmbeddedMode || source.isExtensionDevelopmentHost || source.config?.extensionTestsPath) { return; }
+		source.modeGroup.modeController.schedulePreload(mode => {
+			const config: IOpenConfiguration = {
+				context: OpenContext.API, contextWindowId: source.id, modeHostWindowId: source.id,
+				cli: this.environmentMainService.args, forceNewWindow: true, noRecentEntry: true,
+			};
+			switch (mode) {
+				case 'simple': return this.ensureAgentsWindow(config).then(config => this.open(config));
+				case 'editor': return this.open({ ...config, forceEmpty: !folderUri, urisToOpen: folderUri ? [{ folderUri }] : undefined });
+				case 'advanced': return this.open({ ...config, forceEmpty: true, optimusWindow: true });
+			}
+		}, error => this.logService.warn('windowsManager#preloadWindowModes', error));
+	}
+
+	private getModeSource(openConfig: IOpenConfiguration): CodeWindow | undefined {
+		if (openConfig.initialStartup || openConfig.forceNewWindow) { return undefined; }
+		const source = typeof openConfig.contextWindowId === 'number' ? this.getWindowById(openConfig.contextWindowId) : this.getFocusedWindow();
+		return source instanceof CodeWindow && !source.isExtensionDevelopmentHost ? source : undefined;
+	}
+
+	private async openRetainedMode(source: CodeWindow, mode: 'simple' | 'editor' | 'advanced', open: (existing?: ICodeWindow) => Promise<ICodeWindow[]>, matches: (window: ICodeWindow) => boolean = () => true): Promise<ICodeWindow[]> {
+		const window = await source.modeGroup.modeController.open(mode, open, matches);
+		if (!window) { return []; }
+		return [window];
 	}
 
 	private async ensureAgentsWindow(openConfig: IOpenConfiguration): Promise<IOpenConfiguration> {
@@ -376,6 +405,7 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 			noRecentEntry: true,
 			context: openConfig.context,
 			contextWindowId: reuseWindowId ?? openConfig.contextWindowId,
+			modeHostWindowId: openConfig.modeHostWindowId,
 			initialStartup: openConfig.initialStartup,
 			forceNewWindow: !openConfig.forceReuseWindow,
 			forceReuseWindow: openConfig.forceReuseWindow,
@@ -413,6 +443,12 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 
 	async open(openConfig: IOpenConfiguration): Promise<ICodeWindow[]> {
 		this.logService.trace('windowsManager#open');
+
+		// Choose the first-run shell before creating a BrowserWindow. Switching
+		// from onboarding after the editor has painted produces a visible flash.
+		if (shouldOpenSimpleOnStartup(openConfig, this.windowsStateHandler.state)) {
+			return this.openAgentsWindow(openConfig);
+		}
 
 		// Make sure addMode/removeMode is only enabled if we have an active window
 		if ((openConfig.addMode || openConfig.removeMode) && (openConfig.initialStartup || !this.getLastActiveWindow())) {
@@ -630,7 +666,12 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 		// if files have been opened in one of them
 		const usedWindows: ICodeWindow[] = [];
 		let filesOpenedInWindow: ICodeWindow | undefined = undefined;
-		function addUsedWindow(window: ICodeWindow, openedFiles?: boolean): void {
+		let cancelled = false;
+		function addUsedWindow(window: ICodeWindow | undefined, openedFiles?: boolean): void {
+			if (!window) {
+				cancelled = true;
+				return;
+			}
 			usedWindows.push(window);
 
 			if (openedFiles) {
@@ -718,7 +759,7 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 		if (allWorkspacesToOpen.length > 0) {
 
 			// Check for existing instances
-			const windowsOnWorkspace = openConfig.forceReuseWindow && typeof openConfig.contextWindowId === 'number'
+			const windowsOnWorkspace = openConfig.modeHostWindowId !== undefined || (openConfig.forceReuseWindow && typeof openConfig.contextWindowId === 'number')
 				? []
 				: coalesce(allWorkspacesToOpen.map(workspaceToOpen => findWindowOnWorkspaceOrFolder(this.getWindows(), workspaceToOpen.workspace.configPath)));
 			if (windowsOnWorkspace.length > 0) {
@@ -752,7 +793,12 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 		if (allFoldersToOpen.length > 0) {
 
 			// Check for existing instances
-			const windowsOnFolderPath = coalesce(allFoldersToOpen.map(folderToOpen => findWindowOnWorkspaceOrFolder(this.getWindows(), folderToOpen.workspace.uri)));
+			// An explicit reuse request must stay in the caller, even when another
+			// window already has the requested Editor folder open.
+			const folderWindows = openConfig.modeHostWindowId !== undefined ? [] : openConfig.forceReuseWindow && typeof openConfig.contextWindowId === 'number'
+				? this.getWindows().filter(window => window.id === openConfig.contextWindowId)
+				: this.getWindows();
+			const windowsOnFolderPath = coalesce(allFoldersToOpen.map(folderToOpen => findWindowOnWorkspaceOrFolder(folderWindows, folderToOpen.workspace.uri)));
 			if (windowsOnFolderPath.length > 0) {
 				const windowOnFolderPath = windowsOnFolderPath[0];
 				const filesToOpenInWindow = isEqualAuthority(filesToOpen?.remoteAuthority, windowOnFolderPath.remoteAuthority) ? filesToOpen : undefined;
@@ -796,7 +842,7 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 		// - we still have files to open
 		// - user forces an empty window (e.g. via command line)
 		// - no window has opened yet
-		if (filesToOpen || (maybeOpenEmptyWindow && (openConfig.forceEmpty || usedWindows.length === 0))) {
+		if (!cancelled && (filesToOpen || (maybeOpenEmptyWindow && (openConfig.forceEmpty || usedWindows.length === 0)))) {
 			const remoteAuthority = filesToOpen ? filesToOpen.remoteAuthority : openConfig.remoteAuthority;
 
 			addUsedWindow(await this.doOpenEmpty(openConfig, openFolderInNewWindow, remoteAuthority, filesToOpen), !!filesToOpen);
@@ -858,7 +904,7 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 		return { windowToUse: undefined, forceNewWindow };
 	}
 
-	private doOpenEmpty(openConfig: IOpenConfiguration, forceNewWindow: boolean, remoteAuthority: string | undefined, filesToOpen: IFilesToOpen | undefined, emptyWindowBackupInfo?: IEmptyWindowBackupInfo): Promise<ICodeWindow> {
+	private doOpenEmpty(openConfig: IOpenConfiguration, forceNewWindow: boolean, remoteAuthority: string | undefined, filesToOpen: IFilesToOpen | undefined, emptyWindowBackupInfo?: IEmptyWindowBackupInfo): Promise<ICodeWindow | undefined> {
 		this.logService.trace('windowsManager#doOpenEmpty', { restore: !!emptyWindowBackupInfo, remoteAuthority, filesToOpen, forceNewWindow });
 
 		const resolved = this.resolveContextWindow(openConfig, forceNewWindow);
@@ -872,6 +918,7 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 			forceNewTabbedWindow: openConfig.forceNewTabbedWindow,
 			filesToOpen,
 			windowToUse: resolved.windowToUse,
+			modeHostWindowId: openConfig.modeHostWindowId,
 			emptyWindowBackupInfo,
 			forceProfile: openConfig.forceProfile,
 			forceTempProfile: openConfig.forceTempProfile,
@@ -879,7 +926,7 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 		});
 	}
 
-	private doOpenFolderOrWorkspace(openConfig: IOpenConfiguration, folderOrWorkspace: IWorkspacePathToOpen | ISingleFolderWorkspacePathToOpen, forceNewWindow: boolean, filesToOpen: IFilesToOpen | undefined, windowToUse?: ICodeWindow): Promise<ICodeWindow> {
+	private doOpenFolderOrWorkspace(openConfig: IOpenConfiguration, folderOrWorkspace: IWorkspacePathToOpen | ISingleFolderWorkspacePathToOpen, forceNewWindow: boolean, filesToOpen: IFilesToOpen | undefined, windowToUse?: ICodeWindow): Promise<ICodeWindow | undefined> {
 		this.logService.trace('windowsManager#doOpenFolderOrWorkspace', { folderOrWorkspace, filesToOpen });
 
 		if (!windowToUse) {
@@ -898,6 +945,7 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 			forceNewTabbedWindow: openConfig.forceNewTabbedWindow,
 			filesToOpen,
 			windowToUse,
+			modeHostWindowId: openConfig.modeHostWindowId,
 			forceProfile: openConfig.forceProfile,
 			forceTempProfile: openConfig.forceTempProfile
 		});
@@ -1589,7 +1637,7 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 		return this.open(openArgs);
 	}
 
-	private async openInBrowserWindow(options: IOpenBrowserWindowOptions): Promise<ICodeWindow> {
+	private async openInBrowserWindow(options: IOpenBrowserWindowOptions): Promise<ICodeWindow | undefined> {
 		const windowConfig = this.configurationService.getValue<IWindowSettings | undefined>('window');
 
 		const lastActiveWindow = this.getLastActiveWindow();
@@ -1600,7 +1648,7 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 		let window: ICodeWindow | undefined;
 		if (!options.forceNewWindow && !options.forceNewTabbedWindow) {
 			window = options.windowToUse || (lastActiveWindow?.config?.isSessionsWindow || lastActiveWindow?.config?.isOptimusWindow ? undefined : lastActiveWindow);
-			if (window) {
+			if (window && options.modeHostWindowId === undefined) {
 				window.focus();
 			}
 		}
@@ -1686,7 +1734,10 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 
 			// Create the window
 			mark('code/willCreateCodeWindow');
+			const modeHost = options.modeHostWindowId === undefined ? undefined : this.getWindowById(options.modeHostWindowId);
+			if (options.modeHostWindowId !== undefined && (!(modeHost instanceof CodeWindow) || !modeHost.win || modeHost.win.isDestroyed())) { return undefined; }
 			const createdWindow = window = this.instantiationService.createInstance(CodeWindow, {
+				modeHost: modeHost instanceof CodeWindow ? modeHost : undefined,
 				state,
 				extensionDevelopmentPath: configuration.extensionDevelopmentPath,
 				isExtensionTestHost: !!configuration.extensionTestsPath,
@@ -1708,10 +1759,18 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 			this._onDidOpenWindow.fire(createdWindow);
 
 			// Indicate number change via event
-			this._onDidChangeWindowsCount.fire({ oldCount: this.getWindowCount() - 1, newCount: this.getWindowCount() });
+			if (!createdWindow.isEmbeddedMode) {
+				this._onDidChangeWindowsCount.fire({ oldCount: this.getWindowCount() - 1, newCount: this.getWindowCount() });
+			}
 
 			// Window Events
 			const disposables = new DisposableStore();
+			if (!createdWindow.isEmbeddedMode) {
+				disposables.add(createdWindow.modeGroup.onDidActivateMode(({ window, previous }) => {
+					if (previous) { this._onDidDeactivateWindow.fire(previous); }
+					this._onDidActivateWindow.fire(window);
+				}));
+			}
 			disposables.add(createdWindow.onDidSignalReady(() => this._onDidSignalReadyWindow.fire(createdWindow)));
 			disposables.add(Event.once(createdWindow.onDidClose)(() => this.onWindowClosed(createdWindow, disposables)));
 			disposables.add(Event.once(createdWindow.onDidDestroy)(() => this.onWindowDestroyed(createdWindow)));
@@ -1721,7 +1780,7 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 			disposables.add(createdWindow.onDidLeaveFullScreen(() => this._onDidChangeFullScreen.fire({ window: createdWindow, fullscreen: false })));
 			disposables.add(createdWindow.onDidTriggerSystemContextMenu(({ x, y }) => this._onDidTriggerSystemContextMenu.fire({ window: createdWindow, x, y })));
 
-			const webContents = assertReturnsDefined(createdWindow.win?.webContents);
+			const webContents = assertReturnsDefined(createdWindow.webContents);
 			webContents.removeAllListeners('devtools-reload-page'); // remove built in listener so we can handle this on our own
 			disposables.add(Event.fromNodeEventEmitter(webContents, 'devtools-reload-page')(() => this.lifecycleMainService.reload(createdWindow)));
 
@@ -1754,28 +1813,17 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 		// that we have the window object in hand.
 		configuration.windowId = window.id;
 
-		// If the window was already loaded, make sure to unload it
-		// first and only load the new configuration if that was
-		// not vetoed
-		if (window.isReady) {
-			// Capture the outgoing frame while the renderer runs its unload
-			// participants. Both operations can proceed against the live page, so
-			// overlapping them removes the capture from the mode-switch critical
-			// path in the common case.
-			const transitionSnapshot = window.captureTransitionSnapshot();
-			this.lifecycleMainService.unload(window, UnloadReason.LOAD).then(async veto => {
-				if (!veto) {
-					await this.doOpenInBrowserWindow(window, configuration, options, defaultProfile, transitionSnapshot);
-				}
-			});
-		} else {
-			await this.doOpenInBrowserWindow(window, configuration, options, defaultProfile);
-		}
+		// Reuse the unload handshake, and only commit the latest requested load.
+		// Await navigation so follow-up IPC is delivered to the incoming renderer.
+		const loaded = await this.windowLoadController.load(window, async isCurrent => {
+			await this.prepareWindowConfiguration(configuration, options, defaultProfile, isCurrent);
+			return configuration;
+		});
 
-		return window;
+		return loaded ? window : undefined;
 	}
 
-	private async doOpenInBrowserWindow(window: ICodeWindow, configuration: INativeWindowConfiguration, options: IOpenBrowserWindowOptions, defaultProfile: IUserDataProfile, transitionSnapshot?: Promise<string | undefined>): Promise<void> {
+	private async prepareWindowConfiguration(configuration: INativeWindowConfiguration, options: IOpenBrowserWindowOptions, defaultProfile: IUserDataProfile, isCurrent: () => boolean): Promise<void> {
 
 		// Register window for backups unless the window
 		// is for extension development, where we do not
@@ -1817,6 +1865,10 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 			const profile = profilePromise instanceof Promise ? await profilePromise : profilePromise;
 			configuration.profiles.profile = profile;
 
+			if (!isCurrent()) {
+				return;
+			}
+
 			if (!configuration.extensionDevelopmentPath) {
 				// Associate the configured profile to the workspace
 				// unless the window is for extension development,
@@ -1824,15 +1876,6 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 				await this.userDataProfilesMainService.setProfileForWorkspace(workspace, profile);
 			}
 		}
-
-		// Hand the frame this window is showing right now to the page about to
-		// replace it, so switching modes doesn't blank the window for the
-		// second or so the incoming workbench takes to boot. Start it before the
-		// unload handshake whenever possible so it does not add serial latency.
-		configuration.transitionSnapshot = await (transitionSnapshot ?? window.captureTransitionSnapshot());
-
-		// Load it
-		window.load(configuration);
 	}
 
 	private resolveProfileForBrowserWindow(options: IOpenBrowserWindowOptions, workspace: IAnyWorkspaceIdentifier, defaultProfile: IUserDataProfile): Promise<IUserDataProfile> | IUserDataProfile {
@@ -1853,7 +1896,9 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 		this.windows.delete(window.id);
 
 		// Emit
-		this._onDidChangeWindowsCount.fire({ oldCount: this.getWindowCount() + 1, newCount: this.getWindowCount() });
+		if (!window.isEmbeddedMode) {
+			this._onDidChangeWindowsCount.fire({ oldCount: this.getWindowCount() + 1, newCount: this.getWindowCount() });
+		}
 
 		// Clean up
 		disposables.dispose();
@@ -1871,14 +1916,14 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 	getFocusedWindow(): ICodeWindow | undefined {
 		const window = BrowserWindow.getFocusedWindow();
 		if (window) {
-			return this.getWindowById(window.id);
+			return this.getWindows().find(candidate => candidate.win?.id === window.id && candidate.isActiveMode !== false);
 		}
 
 		return undefined;
 	}
 
 	getLastActiveWindow(): ICodeWindow | undefined {
-		return this.doGetLastActiveWindow(this.getWindows());
+		return this.doGetLastActiveWindow(this.getWindows().filter(window => window.isActiveMode !== false));
 	}
 
 	private getLastActiveWindowForAuthority(remoteAuthority: string | undefined): ICodeWindow | undefined {
@@ -1916,7 +1961,7 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 	}
 
 	getWindowCount(): number {
-		return this.windows.size;
+		return new Set(this.getWindows().filter(window => window.win && !window.win.isDestroyed()).map(window => window.win!.id)).size;
 	}
 
 	getWindowById(windowId: number): ICodeWindow | undefined {
@@ -1924,13 +1969,6 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 	}
 
 	getWindowByWebContents(webContents: WebContents): ICodeWindow | undefined {
-		const browserWindow = BrowserWindow.fromWebContents(webContents);
-		if (!browserWindow) {
-			return undefined;
-		}
-
-		const window = this.getWindowById(browserWindow.id);
-
-		return window?.matches(webContents) ? window : undefined;
+		return this.getWindows().find(window => window.matches(webContents));
 	}
 }

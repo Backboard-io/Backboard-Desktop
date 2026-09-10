@@ -29,41 +29,6 @@
 	// moment the real sidebar paints.
 	const SPLASH_SIDEBAR_WIDTH = 360;
 
-	// Backstop for the frozen frame below: `PartsSplash` takes it down once the
-	// workbench has painted, so this only ever fires for a workbench that never
-	// gets that far — better a blank window than a fake one forever.
-	const TRANSITION_SNAPSHOT_MAX_DURATION = 10000;
-
-	/**
-	 * Holds up the frame the window was showing before this load (see
-	 * `INativeWindowConfiguration.transitionSnapshot`) so that switching modes
-	 * doesn't blank the window for the second or so the workbench takes to
-	 * boot. `PartsSplash` removes it once the workbench has a
-	 * laid-out frame of its own.
-	 */
-	function showTransitionSnapshot(configuration: INativeWindowConfiguration) {
-		if (!configuration.transitionSnapshot) {
-			return;
-		}
-
-		const snapshot = document.createElement('div');
-		snapshot.id = 'monaco-transition-snapshot';
-		snapshot.style.position = 'fixed';
-		snapshot.style.inset = '0';
-		snapshot.style.zIndex = '100000';
-		// Clicks land on the real workbench underneath the moment it exists —
-		// the image is scenery, never a target.
-		snapshot.style.pointerEvents = 'none';
-		snapshot.style.backgroundImage = `url("${configuration.transitionSnapshot}")`;
-		// The window cannot have resized between the capture and this load, so
-		// stretching the logical-size frame restores the outgoing layout.
-		snapshot.style.backgroundSize = '100% 100%';
-
-		window.document.body.appendChild(snapshot);
-
-		setTimeout(() => snapshot.remove(), TRANSITION_SNAPSHOT_MAX_DURATION);
-	}
-
 	function showSplash(configuration: INativeWindowConfiguration) {
 		performance.mark('code/willShowPartsSplash');
 
@@ -390,9 +355,6 @@
 
 				// Show our splash as early as possible
 				showSplash(windowConfig);
-
-				// ...under the outgoing window's last frame, when there is one
-				showTransitionSnapshot(windowConfig);
 
 				// Code windows have a `vscodeWindowId` property to identify them
 				Object.defineProperty(window, 'vscodeWindowId', {

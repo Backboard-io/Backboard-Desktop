@@ -17,6 +17,11 @@ export class RightWorkbenchReviewContext {
 	private contextKey: string | undefined;
 	private generation = 0;
 
+	/** Stable identity for cached diff models; visibility invalidation only changes the generation. */
+	get resourceKey(): string {
+		return this.contextKey ?? 'workspace';
+	}
+
 	transition(contextKey: string | undefined): boolean {
 		if (this.contextKey === contextKey) {
 			return false;

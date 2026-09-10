@@ -30,6 +30,26 @@ import { applicationConfigurationNodeBase, securityConfigurationNodeBase } from 
 import { MAX_ZOOM_LEVEL, MIN_ZOOM_LEVEL } from '../../platform/window/electron-browser/window.js';
 import product from '../../platform/product/common/product.js';
 
+import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../common/contributions.js';
+import { INativeWorkbenchEnvironmentService } from '../services/environment/electron-browser/environmentService.js';
+import { onUnexpectedError } from '../../base/common/errors.js';
+
+class PreloadEditorWindowModesContribution implements IWorkbenchContribution {
+	static readonly ID = 'workbench.contrib.preloadEditorWindowModes';
+
+	constructor(
+		@INativeWorkbenchEnvironmentService environmentService: INativeWorkbenchEnvironmentService,
+		@INativeHostService nativeHostService: INativeHostService,
+	) {
+		// Simple and Advanced resolve their Editor folder through the sessions service.
+		if (!environmentService.isSessionsWindow) {
+			void nativeHostService.preloadWindowModes().catch(onUnexpectedError);
+		}
+	}
+}
+
+registerWorkbenchContribution2(PreloadEditorWindowModesContribution.ID, PreloadEditorWindowModesContribution, WorkbenchPhase.AfterRestored);
+
 // Actions
 (function registerActions(): void {
 

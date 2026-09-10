@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { $, addDisposableListener, clearNode, EventHelper } from '../../../../../../base/browser/dom.js';
-import { disposableTimeout } from '../../../../../../base/common/async.js';
+import { disposableTimeout, timeout } from '../../../../../../base/common/async.js';
 import { Codicon } from '../../../../../../base/common/codicons.js';
 import { Emitter, Event } from '../../../../../../base/common/event.js';
 import { IDisposable, MutableDisposable, toDisposable } from '../../../../../../base/common/lifecycle.js';
@@ -241,6 +241,7 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 	private seededDiffChangesPromise: Promise<readonly DetailedLineRangeMapping[] | undefined> | undefined;
 	private fullDiffHydrationPromise: Promise<{ readonly beforeContent: string; readonly afterContent: string; readonly changes: readonly DetailedLineRangeMapping[] | undefined }> | undefined;
 	private readonly _previewVisibilityObserver = this._register(new MutableDisposable<IDisposable>());
+	private readonly _diffRetryListener = this._register(new MutableDisposable<IDisposable>());
 	private readonly _copyFeedback = this._register(new MutableDisposable<IDisposable>());
 
 	constructor(
@@ -416,6 +417,7 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 	}
 
 	private async buildDiffBody(mode: 'preview' | 'full'): Promise<void> {
+		this._diffRetryListener.clear();
 		const preservePreviewWhileHydrating = mode === 'full'
 			&& this.diffBodyMode === 'preview'
 			&& this.diffBodyState === 'ready';
@@ -509,6 +511,12 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 			}
 			clearNode(body);
 			body.appendChild($('.chat-external-edit-diff-note', {}, localize('chat.externalEdit.diffUnavailable', "Diff unavailable")));
+			const retry = $('button.chat-external-edit-diff-retry', { type: 'button' }, localize('chat.externalEdit.retryDiff', "Retry Diff"));
+			body.appendChild(retry);
+			this._diffRetryListener.value = addDisposableListener(retry, 'click', event => {
+				EventHelper.stop(event, true);
+				void this.buildDiffBody(this.expanded ? 'full' : 'preview');
+			});
 			this.diffBodyState = 'error';
 			this._onDidChangeHeight.fire();
 		}
@@ -592,10 +600,17 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 		let original: Awaited<ReturnType<ITextModelService['createModelReference']>> | undefined;
 		let modified: Awaited<ReturnType<ITextModelService['createModelReference']>> | undefined;
 		try {
-			await Promise.all([
+			const resolutions = await Promise.allSettled([
 				this.textModelService.createModelReference(this.edit.beforeContentUri).then(reference => original = reference),
 				this.textModelService.createModelReference(this.edit.afterContentUri).then(reference => modified = reference),
 			]);
+			// Wait for both acquisitions before releasing either reference, including
+			// a successful reference that arrives after its peer has failed.
+			for (const resolution of resolutions) {
+				if (resolution.status === 'rejected') {
+					throw resolution.reason;
+				}
+			}
 			if (!original || !modified) {
 				return { beforeContent: this.beforeContentCache ?? '', afterContent: this.afterContentCache ?? '', changes: undefined };
 			}
@@ -645,7 +660,18 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 	}
 
 	private async resolveContent(uri: URI): Promise<string> {
-		const reference = await this.textModelService.createModelReference(uri);
+		let reference: Awaited<ReturnType<ITextModelService['createModelReference']>>;
+		try {
+			reference = await this.textModelService.createModelReference(uri);
+		} catch (error) {
+			// Snapshot providers may still be reconnecting when a restored card
+			// enters the viewport. Retry once; never poll unavailable history.
+			await timeout(150);
+			if (this._store.isDisposed) {
+				throw error;
+			}
+			reference = await this.textModelService.createModelReference(uri);
+		}
 		try {
 			return reference.object.textEditorModel.getValue();
 		} finally {

@@ -475,7 +475,7 @@ export class WindowUtilityProcess extends UtilityProcess {
 
 	override start(configuration: IWindowUtilityProcessConfiguration): boolean {
 		const responseWindow = this.windowsMainService.getWindowById(configuration.responseWindowId);
-		if (!responseWindow?.win || responseWindow.win.isDestroyed() || responseWindow.win.webContents.isDestroyed()) {
+		if (!responseWindow?.win || responseWindow.win.isDestroyed() || responseWindow.webContents!.isDestroyed()) {
 			this.log('Refusing to start utility process because requesting window cannot be found or is destroyed...', Severity.Error);
 
 			return true;
@@ -492,7 +492,7 @@ export class WindowUtilityProcess extends UtilityProcess {
 
 		// Establish & exchange message ports
 		const windowPort = this.connect(configuration.payload);
-		responseWindow.win.webContents.postMessage(configuration.responseChannel, configuration.responseNonce, [windowPort]);
+		responseWindow.webContents!.postMessage(configuration.responseChannel, configuration.responseNonce, [windowPort]);
 
 		return true;
 	}

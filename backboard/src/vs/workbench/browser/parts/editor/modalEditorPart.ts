@@ -674,6 +674,9 @@ export class ModalEditorPart {
 		// Layout the modal editor part
 		let isFirstLayout = true;
 		const layoutModal = () => {
+			if (isEmbedded && !modalHost.isConnected) {
+				return; // retained tool surfaces are laid out when reattached
+			}
 			if (isResizing) {
 				return; // skip layout during interactive resize
 			}

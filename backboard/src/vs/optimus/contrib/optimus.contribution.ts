@@ -324,7 +324,7 @@ class OptimusChromeContribution extends Disposable implements IWorkbenchContribu
 		for (const mode of [
 			{ label: localize('optimusChrome.agent', "Simple"), command: OPEN_SIMPLE_WINDOW_COMMAND_ID, active: false },
 			{ label: localize('optimusChrome.editor', "Editor"), command: OPEN_EDITOR_WINDOW_COMMAND_ID, active: false },
-			{ label: localize('optimusChrome.advanced', "Advanced"), command: '', active: true },
+			{ label: localize('optimusChrome.advanced', "Advanced"), command: 'workbench.action.openOptimusWindow', active: true },
 		]) {
 			const button = append(modeButton, $('button.backboard-mode-segment'));
 			button.setAttribute('type', 'button');
@@ -332,9 +332,7 @@ class OptimusChromeContribution extends Disposable implements IWorkbenchContribu
 			button.setAttribute('aria-pressed', String(mode.active));
 			this._register(addDisposableListener(button, EventType.CLICK, event => {
 				EventHelper.stop(event, true);
-				if (!mode.active) {
-					void this.commandService.executeCommand(mode.command);
-				}
+				void this.commandService.executeCommand(mode.command);
 			}));
 		}
 
