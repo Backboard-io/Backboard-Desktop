@@ -14,7 +14,7 @@ import { GalleryMcpServerStatus, IGalleryMcpServer } from '../../../../../../../
 import { McpServerType } from '../../../../../../../platform/mcp/common/mcpPlatformTypes.js';
 import { StateType } from '../../../../../../../platform/update/common/update.js';
 import { buildModelPickerItems, getControlModelsForEntitlement, getModelPickerAccessibilityProvider } from '../../../../browser/widget/input/chatModelPicker.js';
-import { buildCombinedModelSections, COMBINED_MODEL_SECTION_CHATGPT, COMBINED_MODEL_SECTION_CLAUDE, COMBINED_MODEL_SECTION_RECOMMENDED, formatModelLabel, formatModelProviderDetail, isChatGptSubscriptionConnected, isClaudeSubscriptionConnected, modelsForCombinedModelSection, providerIconKeyForCombinedModelSection } from '../../../../browser/widget/input/combinedModelProviderPickerActionItem.js';
+import { buildCombinedModelSections, COMBINED_MODEL_SECTION_ALL, COMBINED_MODEL_SECTION_CHATGPT, COMBINED_MODEL_SECTION_CLAUDE, COMBINED_MODEL_SECTION_RECOMMENDED, formatModelLabel, formatModelProviderDetail, isChatGptSubscriptionConnected, isClaudeSubscriptionConnected, modelsForCombinedModelSection, providerIconKeyForCombinedModelSection } from '../../../../browser/widget/input/combinedModelProviderPickerActionItem.js';
 import { buildMcpMarketplaceItems, buildSkillsLibraryItems, createMcpMarketplaceItemsFromCatalog, getHiddenMcpMarketplaceCatalogEntries, IMcpMarketplaceCatalogEntry, mcpItemMatchesInstalledServer, McpMarketplaceModalItem, resolveMcpMarketplaceItems, parseSkillsShHtml, splitSkillsShId } from '../../../../browser/widget/input/skillsLibrary.js';
 import { IModelPickerSetupCandidate } from '../../../../browser/widget/input/modelPickerActionItem.js';
 import { filterModelsForSession } from '../../../../browser/widget/input/chatModelSelectionLogic.js';
@@ -193,6 +193,39 @@ suite('combined model provider sections', () => {
 		assert.deepStrictEqual(
 			modelsForCombinedModelSection(models, COMBINED_MODEL_SECTION_RECOMMENDED, true),
 			models,
+		);
+	});
+
+	test('search hides subscription models until their subscription is connected', () => {
+		const libraryOpus = createModel('anthropic/claude-opus-5', 'Claude Opus 5', 'agent-host-backboard');
+		const unconnectedClaudeOpus = createModel('anthropic-subscription/opus[1m]', 'Claude Opus 5 (1M)', 'agent-host-backboard');
+		const unconnectedChatGpt = createModel('openai-subscription/gpt-5.6-sol', 'GPT-5.6 Sol', 'agent-host-backboard');
+		const connectedChatGpt = {
+			...createModel('openai-subscription/gpt-5.6-terra', 'GPT-5.6 Terra', 'agent-host-backboard'),
+			metadata: {
+				...createModel('openai-subscription/gpt-5.6-terra', 'GPT-5.6 Terra', 'agent-host-backboard').metadata,
+				auth: { providerLabel: 'ChatGPT', accountLabel: 'Connected' },
+			},
+		};
+		const models = [unconnectedClaudeOpus, libraryOpus, unconnectedChatGpt, connectedChatGpt];
+
+		// Searching from a library section only offers models that can be used right away.
+		assert.deepStrictEqual(
+			modelsForCombinedModelSection(models, COMBINED_MODEL_SECTION_RECOMMENDED, true),
+			[libraryOpus, connectedChatGpt],
+		);
+		assert.deepStrictEqual(
+			modelsForCombinedModelSection(models, COMBINED_MODEL_SECTION_ALL, true),
+			[libraryOpus, connectedChatGpt],
+		);
+		// Searching while browsing a disconnected subscription keeps that subscription's models visible.
+		assert.deepStrictEqual(
+			modelsForCombinedModelSection(models, COMBINED_MODEL_SECTION_CLAUDE, true),
+			[unconnectedClaudeOpus, libraryOpus, connectedChatGpt],
+		);
+		assert.deepStrictEqual(
+			modelsForCombinedModelSection(models, COMBINED_MODEL_SECTION_CHATGPT, true),
+			[libraryOpus, unconnectedChatGpt, connectedChatGpt],
 		);
 	});
 });

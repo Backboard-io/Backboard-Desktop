@@ -230,15 +230,16 @@ function isSubscriptionModel(model: ILanguageModelChatMetadataAndIdentifier): bo
 	return providerId === 'openai-subscription' || providerId === 'anthropic-subscription';
 }
 
-function isAvailableInRecommendedSection(model: ILanguageModelChatMetadataAndIdentifier): boolean {
+/** Subscription models are only usable once their subscription is connected; everything else is always ready. */
+function isReadyToUse(model: ILanguageModelChatMetadataAndIdentifier): boolean {
 	return !isSubscriptionModel(model) || !!model.metadata.auth?.accountLabel;
 }
 
 function recommendedModels(models: readonly ILanguageModelChatMetadataAndIdentifier[]): ILanguageModelChatMetadataAndIdentifier[] {
 	const recommended = models
-		.filter(model => RECOMMENDED_BACKBOARD_MODEL_PRIORITY.has(model.metadata.id) && isAvailableInRecommendedSection(model))
+		.filter(model => RECOMMENDED_BACKBOARD_MODEL_PRIORITY.has(model.metadata.id) && isReadyToUse(model))
 		.sort((a, b) => (RECOMMENDED_BACKBOARD_MODEL_PRIORITY.get(a.metadata.id) ?? Number.MAX_SAFE_INTEGER) - (RECOMMENDED_BACKBOARD_MODEL_PRIORITY.get(b.metadata.id) ?? Number.MAX_SAFE_INTEGER));
-	return recommended.length ? recommended : models.filter(isAvailableInRecommendedSection);
+	return recommended.length ? recommended : models.filter(isReadyToUse);
 }
 
 /** Builds the stable left-rail sections for the Backboard model catalog. */
@@ -309,7 +310,12 @@ export function modelsForCombinedModelSection(
 	includeAllModels = false,
 ): ILanguageModelChatMetadataAndIdentifier[] {
 	if (includeAllModels) {
-		return [...models];
+		// Search spans the full catalog, but a subscription that is not connected
+		// must not outrank the library copy of the same model (e.g. "opus 5"
+		// surfacing the Claude Code entry before Anthropic's). Those models stay
+		// reachable from their own section, which explains how to connect; keep
+		// them only while the user is already browsing that section.
+		return models.filter(model => isReadyToUse(model) || `provider:${upstreamProviderId(model)}` === sectionId);
 	}
 	if (sectionId === COMBINED_MODEL_SECTION_ALL) {
 		return [...models];
