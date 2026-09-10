@@ -10,7 +10,7 @@ import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../../ba
 import { runWithFakedTimers } from '../../../../../../../base/test/common/timeTravelScheduler.js';
 import { timeout } from '../../../../../../../base/common/async.js';
 import { TerminalToolAutoExpand, TerminalToolAutoExpandTimeout } from '../../../../browser/widget/chatContentParts/toolInvocationParts/terminalToolAutoExpand.js';
-import { calculateTerminalOutputContentHeight, getTerminalCollapsibleLabel, getTerminalInitialExpandedState, getTerminalOutputViewportHeight, getTerminalWheelScrollLines, resolveStoredTerminalOutputLineCount, shouldAutoExpandTerminalFailure, shouldRenderStoredTerminalOutputFirst } from '../../../../browser/widget/chatContentParts/toolInvocationParts/chatTerminalToolProgressPart.js';
+import { calculateTerminalOutputContentHeight, getTerminalCollapsibleLabel, getTerminalInitialExpandedState, getTerminalOutputViewportHeight, getTerminalWheelScrollLines, resolveStoredTerminalOutputLineCount, shouldAutoCollapseTerminalOnCompletion, shouldAutoExpandTerminalFailure, shouldRenderStoredTerminalOutputFirst } from '../../../../browser/widget/chatContentParts/toolInvocationParts/chatTerminalToolProgressPart.js';
 import { shouldRerenderToolInvocationSubPart } from '../../../../browser/widget/chatContentParts/toolInvocationParts/chatToolInvocationPart.js';
 import { IChatToolInvocation } from '../../../../common/chatService/chatService.js';
 import { ChatToolInvocation } from '../../../../common/model/chatProgressTypes/chatToolInvocation.js';
@@ -165,6 +165,16 @@ suite('ChatTerminalToolProgressPart Auto-Expand Logic', () => {
 		assert.strictEqual(shouldAutoExpandTerminalFailure(true, 0, false), false);
 		assert.strictEqual(shouldAutoExpandTerminalFailure(true, undefined, false), false);
 		assert.strictEqual(shouldAutoExpandTerminalFailure(false, 1, false), false);
+	});
+
+	test('completed commands fold auto-expanded output unless failure auto-expansion keeps them open', () => {
+		assert.strictEqual(shouldAutoCollapseTerminalOnCompletion(false, 0, false), true, 'success collapses');
+		assert.strictEqual(shouldAutoCollapseTerminalOnCompletion(false, 1, false), true, 'failure collapses when auto-expand is off');
+		assert.strictEqual(shouldAutoCollapseTerminalOnCompletion(true, 0, false), true, 'success collapses even with auto-expand on');
+		assert.strictEqual(shouldAutoCollapseTerminalOnCompletion(true, 1, false), false, 'failure stays open when auto-expand is on');
+		assert.strictEqual(shouldAutoCollapseTerminalOnCompletion(false, 1, true), false, 'user toggle wins');
+		assert.strictEqual(shouldAutoCollapseTerminalOnCompletion(false, 0, true), false, 'user toggle wins on success too');
+		assert.strictEqual(shouldAutoCollapseTerminalOnCompletion(false, undefined, false), false, 'unknown exit code leaves state alone');
 	});
 
 	test('completed restored commands render stored output before stale live handles', () => {

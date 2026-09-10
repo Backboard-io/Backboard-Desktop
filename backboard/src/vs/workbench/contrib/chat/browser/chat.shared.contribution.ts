@@ -1694,8 +1694,8 @@ configurationRegistry.registerConfiguration({
 		},
 		[ChatConfiguration.AutoExpandToolFailures]: {
 			type: 'boolean',
-			default: true,
-			markdownDescription: nls.localize('chat.tools.autoExpandFailures', "When enabled, tool failures are automatically expanded in the chat UI to show error details."),
+			default: false,
+			markdownDescription: nls.localize('chat.tools.autoExpandFailures', "When enabled, tool failures are automatically expanded in the chat UI to show error details. Off by default so failed tool calls stay collapsed like successful ones."),
 		},
 		[ChatConfiguration.AIDisabled]: {
 			type: 'boolean',

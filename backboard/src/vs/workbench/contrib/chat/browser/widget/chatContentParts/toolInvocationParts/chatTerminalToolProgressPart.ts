@@ -220,6 +220,16 @@ export function shouldAutoExpandTerminalFailure(autoExpandFailures: boolean, exi
 	return autoExpandFailures && !userToggledOutput && exitCode !== undefined && exitCode !== 0;
 }
 
+/**
+ * Whether a finished command should fold its output back up. Output that was
+ * auto-expanded while the command streamed collapses once it completes unless
+ * the user chose a disclosure state themselves or failure auto-expansion is on
+ * and the command failed.
+ */
+export function shouldAutoCollapseTerminalOnCompletion(autoExpandFailures: boolean, exitCode: number | undefined, userToggledOutput: boolean): boolean {
+	return exitCode !== undefined && !userToggledOutput && !shouldAutoExpandTerminalFailure(autoExpandFailures, exitCode, userToggledOutput);
+}
+
 export function shouldRenderStoredTerminalOutputFirst(hasStoredOutput: boolean, commandIsComplete: boolean): boolean {
 	return hasStoredOutput && commandIsComplete;
 }
@@ -394,8 +404,9 @@ class TerminalCommandDecoration extends Disposable {
  * Output auto-expansion behavior:
  * - Long-running commands with output auto-expand after a short delay
  * - Fast commands that complete quickly don't auto-expand (prevents flickering)
- * - Failed commands can be configured to auto-expand via settings
- * - Successful commands auto-collapse if output was auto-expanded
+ * - Completed commands auto-collapse if output was auto-expanded, whether they
+ *   succeeded or failed
+ * - Failed commands can opt in to auto-expanding via `chat.tools.autoExpandFailures`
  */
 export class ChatTerminalToolProgressPart extends BaseChatToolInvocationSubPart implements IChatTerminalToolProgressPart {
 	public readonly domNode: HTMLElement;
@@ -1178,8 +1189,11 @@ export class ChatTerminalToolProgressPart extends BaseChatToolInvocationSubPart 
 
 	/**
 	 * Handles the completion of a terminal command by updating the UI state.
-	 * This includes marking the collapsible wrapper as complete, auto-collapsing
-	 * successful commands, and keeping failed commands expanded.
+	 * This includes marking the collapsible wrapper as complete and folding
+	 * auto-expanded output back up. Failed commands only stay (or become)
+	 * expanded when `chat.tools.autoExpandFailures` is enabled; otherwise they
+	 * collapse exactly like successful ones so the user's disclosure choice is
+	 * the only thing that keeps a card open.
 	 *
 	 * @param resolvedCommand The completed terminal command with exit code information.
 	 */
@@ -1187,8 +1201,12 @@ export class ChatTerminalToolProgressPart extends BaseChatToolInvocationSubPart 
 		// Update title to show completion state
 		this.markCollapsibleWrapperComplete(resolvedCommand?.getOutput(), resolvedCommand?.exitCode);
 
-		// Auto-collapse on success (exit code 0)
-		if (resolvedCommand?.exitCode === 0 && !this._hasUserToggledOutput()) {
+		const autoExpandFailures = this._configurationService.getValue<boolean>(ChatConfiguration.AutoExpandToolFailures);
+		const exitCode = resolvedCommand?.exitCode;
+		const userToggledOutput = this._hasUserToggledOutput();
+
+		// Fold auto-expanded output back up on completion
+		if (shouldAutoCollapseTerminalOnCompletion(autoExpandFailures, exitCode, userToggledOutput)) {
 			if (this._thinkingCollapsibleWrapper) {
 				this._thinkingCollapsibleWrapper.collapse();
 				expandedStateByInvocation.set(this.toolInvocation, false);
@@ -1197,9 +1215,8 @@ export class ChatTerminalToolProgressPart extends BaseChatToolInvocationSubPart 
 			}
 		}
 
-		// Keep outer wrapper expanded on error for visibility
-		const autoExpandFailures = this._configurationService.getValue<boolean>(ChatConfiguration.AutoExpandToolFailures);
-		if (shouldAutoExpandTerminalFailure(autoExpandFailures, resolvedCommand?.exitCode, this._hasUserToggledOutput()) && this._thinkingCollapsibleWrapper) {
+		// Keep outer wrapper expanded on error for visibility (opt-in)
+		if (shouldAutoExpandTerminalFailure(autoExpandFailures, exitCode, userToggledOutput) && this._thinkingCollapsibleWrapper) {
 			this.expandCollapsibleWrapper();
 		}
 	}
