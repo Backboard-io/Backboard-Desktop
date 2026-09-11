@@ -38,7 +38,9 @@ jobs:
       RELEASE_CHANNEL: ${{ inputs.channel }}
       # The application lives below the Git root; VS Code's build helper
       # otherwise looks for a nonexistent backboard/.git directory.
-      BUILD_SOURCEVERSION: ${{ github.sha }}
+      # Use our own variable so bundled extensions do not enter Microsoft's
+      # BUILD_SOURCEVERSION-triggered publishing mode.
+      BACKBOARD_SOURCE_COMMIT: ${{ github.sha }}
       ARTIFACT_SIGNING_ENDPOINT: ${{ vars.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
       ARTIFACT_SIGNING_ACCOUNT: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
       ARTIFACT_SIGNING_PROFILE: ${{ vars.AZURE_ARTIFACT_SIGNING_PROFILE }}
