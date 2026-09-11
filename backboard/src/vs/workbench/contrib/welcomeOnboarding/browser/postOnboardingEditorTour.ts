@@ -3,21 +3,22 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { onUnexpectedError } from '../../../../base/common/errors.js';
 import { getActiveWindow } from '../../../../base/browser/dom.js';
 import { Disposable, DisposableStore, IDisposable } from '../../../../base/common/lifecycle.js';
+import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { localize } from '../../../../nls.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { IWorkbenchContribution } from '../../../common/contributions.js';
 import { IWorkbenchEnvironmentService } from '../../../services/environment/common/environmentService.js';
 import { IWorkbenchLayoutService, Parts } from '../../../services/layout/browser/layoutService.js';
 import { ISpotlightTourIntro, ISpotlightTourStep, SpotlightTour, TourPlacement } from './spotlightTour.js';
-import { ONBOARDING_EDITOR_TOUR_PENDING_KEY, ONBOARDING_STORAGE_KEY, ONBOARDING_TOUR_STORAGE_KEY } from '../common/onboardingTypes.js';
+import { OnboardingExperience, ONBOARDING_ADVANCED_TOUR_PENDING_KEY, ONBOARDING_EDITOR_TOUR_PENDING_KEY, ONBOARDING_STORAGE_KEY, ONBOARDING_TOUR_STORAGE_KEY } from '../common/onboardingTypes.js';
 import { IOnboardingService } from '../common/onboardingService.js';
 
 /**
- * Offers a tour on the first Editor-mode visit after onboarding, including
- * when Editor was selected in the wizard. Honors handoffs from older versions
- * of the Simple tour and restores any panels revealed by the walkthrough.
+ * Continues the fresh-install walkthrough in Editor mode, then hands off to Advanced.
+ * Legacy onboarding states never trigger an automatic tour.
  */
 export class PostOnboardingEditorTour extends Disposable implements IWorkbenchContribution {
 
@@ -29,6 +30,7 @@ export class PostOnboardingEditorTour extends Disposable implements IWorkbenchCo
 		@IStorageService private readonly storageService: IStorageService,
 		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
 		@IWorkbenchEnvironmentService private readonly environmentService: IWorkbenchEnvironmentService,
+		@ICommandService private readonly commandService: ICommandService,
 		@IOnboardingService onboardingService: IOnboardingService,
 	) {
 		super();
@@ -47,17 +49,25 @@ export class PostOnboardingEditorTour extends Disposable implements IWorkbenchCo
 	}
 
 	private _maybeStart(): void {
-		if (this.started) {
+		if (this.started || getActiveWindow().document.querySelector('.onboarding-a-overlay')) {
 			return;
 		}
 		const pending = this.storageService.getBoolean(ONBOARDING_EDITOR_TOUR_PENDING_KEY, StorageScope.APPLICATION, false);
+		try {
+			const state = JSON.parse(this.storageService.get(ONBOARDING_STORAGE_KEY, StorageScope.APPLICATION, '{}'));
+			if (state?.tourEligible !== true) {
+				return;
+			}
+		} catch {
+			return;
+		}
 		if (!pending) {
 			if (this.storageService.getBoolean(ONBOARDING_TOUR_STORAGE_KEY, StorageScope.APPLICATION, false)) {
 				return;
 			}
 			try {
 				const state = JSON.parse(this.storageService.get(ONBOARDING_STORAGE_KEY, StorageScope.APPLICATION, '{}'));
-				if (state.completed !== true) {
+				if (state.completed !== true || state.experience !== OnboardingExperience.Developer) {
 					return;
 				}
 			} catch {
@@ -69,7 +79,10 @@ export class PostOnboardingEditorTour extends Disposable implements IWorkbenchCo
 		// One-shot: clear the handoff flag so the tour never repeats.
 		this.storageService.remove(ONBOARDING_EDITOR_TOUR_PENDING_KEY, StorageScope.APPLICATION);
 		this.storageService.store(ONBOARDING_TOUR_STORAGE_KEY, true, StorageScope.APPLICATION, StorageTarget.USER);
-		getActiveWindow().requestAnimationFrame(() => this._register(showEditorOnboardingTour(this.layoutService)));
+		getActiveWindow().requestAnimationFrame(() => this._register(showEditorOnboardingTour(this.layoutService, () => {
+			this.storageService.store(ONBOARDING_ADVANCED_TOUR_PENDING_KEY, true, StorageScope.APPLICATION, StorageTarget.MACHINE);
+			void this.storageService.flush().then(() => this.commandService.executeCommand('workbench.action.openOptimusWindow')).catch(onUnexpectedError);
+		})));
 	}
 }
 
@@ -80,7 +93,7 @@ export class PostOnboardingEditorTour extends Disposable implements IWorkbenchCo
  * disposable that tears the tour down; it also disposes itself once the tour
  * ends.
  */
-export function showEditorOnboardingTour(layoutService: IWorkbenchLayoutService): IDisposable {
+export function showEditorOnboardingTour(layoutService: IWorkbenchLayoutService, onComplete?: () => void): IDisposable {
 	const store = new DisposableStore();
 	const targetWindow = getActiveWindow();
 
@@ -97,34 +110,35 @@ export function showEditorOnboardingTour(layoutService: IWorkbenchLayoutService)
 			title: localize('editor.tour.editor.title', "The full editor"),
 			body: localize('editor.tour.editor.body', "Here's the complete IDE. Read and edit any file the agent works on, with everything you'd expect from an editor."),
 			preferredPlacement: TourPlacement.Left,
-			anchor: query('.part.editor'),
+			anchor: () => layoutService.getContainer(targetWindow, Parts.EDITOR_PART),
 		},
 		{
 			title: localize('editor.tour.explorer.title', "Browse your project"),
 			body: localize('editor.tour.explorer.body', "Every file in your workspace lives here — open, rename, and organize them from the explorer."),
 			preferredPlacement: TourPlacement.Right,
 			setup: reveal(Parts.SIDEBAR_PART),
-			anchor: query('.part.sidebar'),
+			anchor: () => layoutService.getContainer(targetWindow, Parts.SIDEBAR_PART),
 		},
 		{
 			title: localize('editor.tour.terminal.title', "Run a terminal"),
 			body: localize('editor.tour.terminal.body', "Run commands, servers, and scripts in the integrated terminal — no need to leave the editor."),
 			preferredPlacement: TourPlacement.Top,
 			setup: reveal(Parts.PANEL_PART),
-			anchor: query('.part.panel'),
+			anchor: () => layoutService.getContainer(targetWindow, Parts.PANEL_PART),
 		},
 		{
 			title: localize('editor.tour.chat.title', "Your agent, still here"),
 			body: localize('editor.tour.chat.body', "The agent stays beside your code. Keep chatting while you read and edit."),
 			preferredPlacement: TourPlacement.Left,
 			setup: reveal(Parts.AUXILIARYBAR_PART),
-			anchor: query('.part.auxiliarybar'),
+			anchor: () => layoutService.getContainer(targetWindow, Parts.AUXILIARYBAR_PART),
 		},
 		{
-			title: localize('editor.tour.switch.title', "Back to Simple anytime"),
-			body: localize('editor.tour.switch.body', "Choose Simple for a focused conversation or Advanced for a multi-task dashboard. Replay this walkthrough with ‘Show Editor Mode Tour’ in the Command Palette."),
+			title: localize('editor.tour.switch.title', "Explore Advanced mode"),
+			body: localize('editor.tour.switch.body', "Advanced brings your agent tasks together in a dashboard. Use the mode menu anytime to return to Simple or Editor."),
 			preferredPlacement: TourPlacement.Bottom,
 			anchor: query('.backboard-mode-titlebar-widget'),
+			nextLabel: onComplete ? localize('editor.tour.advanced.cta', "Open Advanced") : localize('editor.tour.done', "Done"),
 		},
 	];
 
@@ -143,13 +157,16 @@ export function showEditorOnboardingTour(layoutService: IWorkbenchLayoutService)
 		container: layoutService.activeContainer,
 		window: targetWindow,
 		onLayoutChange: layoutService.onDidLayoutActiveContainer,
-		intro,
+		intro: onComplete ? undefined : intro,
 		steps,
 		// Runs however the tour ends (Done, Skip, Escape, or "Maybe later").
 		// Puts back whatever the steps revealed; a no-op when nothing changed.
-		onFinish: () => {
+		onFinish: completed => {
 			restoreLayout(layoutService, targetWindow, restore);
 			store.dispose();
+			if (completed) {
+				onComplete?.();
+			}
 		},
 	}));
 	tour.start();

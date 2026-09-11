@@ -1,6 +1,7 @@
 {
 	"nameShort": "Backboard Studio",
 	"nameLong": "Backboard Studio",
+	"companyName": "Espri.ai",
 	"applicationName": "backboard-studio-dev",
 	"backboardVersion": "2.3.2",
 	"extensionsGallery": {

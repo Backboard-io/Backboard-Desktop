@@ -5,7 +5,7 @@
 
 import './media/spotlightTour.css';
 
-import { $, addDisposableListener, append, clearNode, EventType, getDomNodePagePosition, getTotalHeight, getTotalWidth, IDomNodePagePosition } from '../../../../base/browser/dom.js';
+import { $, addDisposableListener, append, clearNode, DisposableResizeObserver, EventType, getWindow, IDomNodePagePosition } from '../../../../base/browser/dom.js';
 import { StandardKeyboardEvent } from '../../../../base/browser/keyboardEvent.js';
 import { Event } from '../../../../base/common/event.js';
 import { KeyCode } from '../../../../base/common/keyCodes.js';
@@ -135,11 +135,15 @@ export class SpotlightTour extends Disposable {
 		card.setAttribute('aria-modal', 'true');
 		card.tabIndex = -1;
 
-		const reposition = () => (this.inIntro || !this.currentAnchor) ? this._centerCard() : this._position();
+		const reposition = () => this._reposition();
+		const observer = this.lifecycle.add(new DisposableResizeObserver('spotlightTour', reposition, getWindow(card)));
+		this.lifecycle.add(observer.observe(card));
+		this.lifecycle.add(observer.observe(overlay));
 		if (this.options.onLayoutChange) {
 			this.lifecycle.add(this.options.onLayoutChange(reposition));
 		}
 		this.lifecycle.add(addDisposableListener(window, EventType.RESIZE, reposition));
+		this.lifecycle.add(addDisposableListener(window, EventType.SCROLL, reposition, true));
 		this.lifecycle.add(addDisposableListener(overlay, EventType.KEY_DOWN, (e: KeyboardEvent) => this._onKeyDown(e)));
 
 		if (this.options.intro) {
@@ -250,7 +254,7 @@ export class SpotlightTour extends Disposable {
 		let anchor: HTMLElement | undefined;
 		try {
 			const resolved = step.anchor();
-			anchor = resolved && this._isElementVisible(resolved) ? resolved : undefined;
+			anchor = resolved;
 		} catch {
 			// A buggy resolver must not freeze the tour — fall back to a centered card.
 			anchor = undefined;
@@ -273,6 +277,11 @@ export class SpotlightTour extends Disposable {
 			this.overlay.classList.add('spotlight-tour-dimmed');
 			this.spotlight.style.display = 'none';
 			this.arrow = undefined;
+		}
+
+		if (anchor) {
+			const observer = this.stepDisposables.add(new DisposableResizeObserver('spotlightTourAnchor', () => this._reposition(), getWindow(anchor)));
+			this.stepDisposables.add(observer.observe(anchor));
 		}
 
 		const body = append(this.card, $('.spotlight-tour-body'));
@@ -308,11 +317,7 @@ export class SpotlightTour extends Disposable {
 		this.stepDisposables.add(addDisposableListener(backButton, EventType.CLICK, () => this._go(-1)));
 		this.stepDisposables.add(addDisposableListener(nextButton, EventType.CLICK, () => isLast ? void this._finish(true) : this._go(1)));
 
-		if (anchor) {
-			this._position();
-		} else {
-			this._centerCard();
-		}
+		this._reposition();
 
 		this.transitioning = false;
 		this.options.window.requestAnimationFrame(() => {
@@ -349,36 +354,79 @@ export class SpotlightTour extends Disposable {
 		});
 	}
 
-	private _centerCard(): void {
-		if (!this.card) {
+	private _reposition(): void {
+		if (this.inIntro || !this.currentAnchor || !this._isElementVisible(this.currentAnchor)) {
+			this.overlay?.classList.add('spotlight-tour-dimmed');
+			if (this.spotlight) {
+				this.spotlight.style.display = 'none';
+			}
+			if (this.arrow) {
+				this.arrow.style.display = 'none';
+			}
+			this._centerCard();
 			return;
 		}
-		const win = this.options.window;
-		const cardWidth = getTotalWidth(this.card) || CARD_WIDTH;
-		const cardHeight = getTotalHeight(this.card);
-		this.card.style.left = `${Math.round(Math.max(VIEWPORT_MARGIN, (win.innerWidth - cardWidth) / 2))}px`;
-		this.card.style.top = `${Math.round(Math.max(VIEWPORT_MARGIN, (win.innerHeight - cardHeight) / 2))}px`;
+		this.overlay?.classList.remove('spotlight-tour-dimmed');
+		if (this.spotlight) {
+			this.spotlight.style.display = '';
+		}
+		this._position();
+	}
+
+	private _centerCard(): void {
+		if (!this.card || !this.overlay) {
+			return;
+		}
+		this.card.style.left = `${Math.max(VIEWPORT_MARGIN, (this.overlay.clientWidth - this.card.offsetWidth) / 2)}px`;
+		this.card.style.top = `${Math.max(VIEWPORT_MARGIN, (this.overlay.clientHeight - this.card.offsetHeight) / 2)}px`;
+	}
+
+	/** Measure in overlay coordinates, including CSS zoom and transformed containers. */
+	private _anchorBounds(element: HTMLElement): IDomNodePagePosition {
+		const bounds = element.getBoundingClientRect();
+		const overlay = this.overlay!;
+		const origin = overlay.getBoundingClientRect();
+		const scaleX = origin.width / overlay.clientWidth || 1;
+		const scaleY = origin.height / overlay.clientHeight || 1;
+		const left = clamp((bounds.left - origin.left) / scaleX, 0, overlay.clientWidth);
+		const top = clamp((bounds.top - origin.top) / scaleY, 0, overlay.clientHeight);
+		const right = clamp((bounds.right - origin.left) / scaleX, 0, overlay.clientWidth);
+		const bottom = clamp((bounds.bottom - origin.top) / scaleY, 0, overlay.clientHeight);
+		return { left, top, width: right - left, height: bottom - top };
 	}
 
 	private _position(): void {
-		if (!this.card || !this.spotlight || !this.arrow || !this.currentAnchor || !this.currentStep) {
+		if (!this.overlay || !this.card || !this.spotlight || !this.arrow || !this.currentAnchor || !this.currentStep) {
 			return;
 		}
 
 		const step = this.currentStep;
-		const win = this.options.window;
-		const anchor = getDomNodePagePosition(this.currentAnchor);
+		const viewport = { innerWidth: this.overlay.clientWidth, innerHeight: this.overlay.clientHeight };
+		const target = this._anchorBounds(this.currentAnchor);
 		const padding = step.padding ?? DEFAULT_PADDING;
 
-		// Spotlight cutout hugging the target.
-		this.spotlight.style.left = `${anchor.left - padding}px`;
-		this.spotlight.style.top = `${anchor.top - padding}px`;
-		this.spotlight.style.width = `${anchor.width + padding * 2}px`;
-		this.spotlight.style.height = `${anchor.height + padding * 2}px`;
+		// Clamp the padded highlight to the visible viewport.
+		const leftEdge = Math.max(2, target.left - padding);
+		const topEdge = Math.max(2, target.top - padding);
+		const anchor = {
+			left: leftEdge,
+			top: topEdge,
+			width: Math.max(0, Math.min(viewport.innerWidth - 2, target.left + target.width + padding) - leftEdge),
+			height: Math.max(0, Math.min(viewport.innerHeight - 2, target.top + target.height + padding) - topEdge),
+		};
+		this.spotlight.style.left = `${anchor.left}px`;
+		this.spotlight.style.top = `${anchor.top}px`;
+		this.spotlight.style.width = `${anchor.width}px`;
+		this.spotlight.style.height = `${anchor.height}px`;
 
-		const cardWidth = getTotalWidth(this.card) || CARD_WIDTH;
-		const cardHeight = getTotalHeight(this.card);
-		const placement = this._choosePlacement(anchor, cardWidth, cardHeight, win, step.preferredPlacement);
+		const cardWidth = this.card.offsetWidth || CARD_WIDTH;
+		const cardHeight = this.card.offsetHeight;
+		const placement = this._choosePlacement(anchor, cardWidth, cardHeight, viewport, step.preferredPlacement);
+		this.arrow.style.display = placement ? '' : 'none';
+		if (!placement) {
+			this._centerCard();
+			return;
+		}
 
 		const anchorCenterX = anchor.left + anchor.width / 2;
 		const anchorCenterY = anchor.top + anchor.height / 2;
@@ -387,33 +435,33 @@ export class SpotlightTour extends Disposable {
 		let top: number;
 		switch (placement) {
 			case TourPlacement.Right:
-				left = anchor.left + anchor.width + padding + CARD_GAP;
+				left = anchor.left + anchor.width + CARD_GAP;
 				top = anchorCenterY - cardHeight / 2;
 				break;
 			case TourPlacement.Left:
-				left = anchor.left - padding - CARD_GAP - cardWidth;
+				left = anchor.left - CARD_GAP - cardWidth;
 				top = anchorCenterY - cardHeight / 2;
 				break;
 			case TourPlacement.Bottom:
 				left = anchorCenterX - cardWidth / 2;
-				top = anchor.top + anchor.height + padding + CARD_GAP;
+				top = anchor.top + anchor.height + CARD_GAP;
 				break;
 			case TourPlacement.Top:
 			default:
 				left = anchorCenterX - cardWidth / 2;
-				top = anchor.top - padding - CARD_GAP - cardHeight;
+				top = anchor.top - CARD_GAP - cardHeight;
 				break;
 		}
 
-		left = clamp(left, VIEWPORT_MARGIN, win.innerWidth - cardWidth - VIEWPORT_MARGIN);
-		top = clamp(top, VIEWPORT_MARGIN, win.innerHeight - cardHeight - VIEWPORT_MARGIN);
+		left = clamp(left, VIEWPORT_MARGIN, viewport.innerWidth - cardWidth - VIEWPORT_MARGIN);
+		top = clamp(top, VIEWPORT_MARGIN, viewport.innerHeight - cardHeight - VIEWPORT_MARGIN);
 		this.card.style.left = `${left}px`;
 		this.card.style.top = `${top}px`;
 
 		this._positionArrow(placement, left, top, cardWidth, cardHeight, anchorCenterX, anchorCenterY);
 	}
 
-	private _choosePlacement(anchor: IDomNodePagePosition, cardWidth: number, cardHeight: number, win: Window, preferred?: TourPlacement): TourPlacement {
+	private _choosePlacement(anchor: IDomNodePagePosition, cardWidth: number, cardHeight: number, win: Pick<Window, 'innerWidth' | 'innerHeight'>, preferred?: TourPlacement): TourPlacement | undefined {
 		const fits = (placement: TourPlacement): boolean => {
 			switch (placement) {
 				case TourPlacement.Right:
@@ -433,7 +481,7 @@ export class SpotlightTour extends Disposable {
 				return candidate;
 			}
 		}
-		return preferred ?? TourPlacement.Bottom;
+		return undefined;
 	}
 
 	private _positionArrow(placement: TourPlacement, cardLeft: number, cardTop: number, cardWidth: number, cardHeight: number, anchorCenterX: number, anchorCenterY: number): void {
@@ -452,7 +500,7 @@ export class SpotlightTour extends Disposable {
 	}
 
 	private _isElementVisible(element: HTMLElement): boolean {
-		const position = getDomNodePagePosition(element);
+		const position = this._anchorBounds(element);
 		return position.width > 0 && position.height > 0;
 	}
 

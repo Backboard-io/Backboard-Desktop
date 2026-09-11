@@ -648,25 +648,30 @@ export class SessionView extends Disposable implements ISerializableView {
 		card.appendChild(title);
 
 		const description = $('p.backboard-auth-gate-description');
-		description.textContent = localize('backboard.auth.sessionView.description', "To use the Agents page, sign in with Backboard SSO.");
+		description.textContent = localize('backboard.auth.sessionView.description', "To use the Agents page, sign in to Backboard.");
 		card.appendChild(description);
 
-		const button = $<HTMLButtonElement>('button.backboard-auth-gate-button');
-		button.type = 'button';
-		button.textContent = localize('backboard.auth.signInSso', "Sign in with SSO");
-		this._register(addDisposableListener(button, EventType.CLICK, () => {
-			this._signInAndRefreshBackboardAuthGate().catch(error => {
-				this.logService.error(`[Backboard] Failed to refresh agents middle panel auth gate after sign in: ${error instanceof Error ? error.message : String(error)}`);
-			});
-		}));
-		card.appendChild(button);
+		for (const [command, label] of [
+			['backboard.signIn', localize('backboard.auth.signIn', "Sign In")],
+			['backboard.signInWithBrowser', localize('backboard.auth.signInSso', "Sign in with SSO")],
+		]) {
+			const button = $<HTMLButtonElement>('button.backboard-auth-gate-button');
+			button.type = 'button';
+			button.textContent = label;
+			this._register(addDisposableListener(button, EventType.CLICK, () => {
+				this._signInAndRefreshBackboardAuthGate(command).catch(error => {
+					this.logService.error(`[Backboard] Failed to refresh agents middle panel auth gate after sign in: ${error instanceof Error ? error.message : String(error)}`);
+				});
+			}));
+			card.appendChild(button);
+		}
 
 		this.element.appendChild(overlay);
 		this._backboardAuthGateOverlay = overlay;
 	}
 
-	private async _signInAndRefreshBackboardAuthGate(): Promise<void> {
-		await this.commandService.executeCommand('backboard.signIn');
+	private async _signInAndRefreshBackboardAuthGate(command = 'backboard.signIn'): Promise<void> {
+		await this.commandService.executeCommand(command);
 		await this._refreshBackboardAuthGateFromConfig();
 	}
 

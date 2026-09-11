@@ -13,6 +13,10 @@ import { ServicesAccessor } from '../../../../../editor/browser/editorExtensions
 import { localize2 } from '../../../../../nls.js';
 import { IActionViewItemService } from '../../../../../platform/actions/browser/actionViewItemService.js';
 import { Action2, MenuId, MenuRegistry, registerAction2 } from '../../../../../platform/actions/common/actions.js';
+import { ConfigurationTarget, getConfigValueInTarget, IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
+import { IWorkspaceContextService } from '../../../../../platform/workspace/common/workspace.js';
+import { IAgentHostService } from '../../../../../platform/agentHost/common/agentService.js';
+import { IOpenerService } from '../../../../../platform/opener/common/opener.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { ContextKeyExpr, IContextKey, IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
 import { IFileService } from '../../../../../platform/files/common/files.js';
@@ -20,7 +24,8 @@ import { ILogService } from '../../../../../platform/log/common/log.js';
 import { IWorkbenchContribution } from '../../../../common/contributions.js';
 import { ChatEntitlementContextKeys, IChatEntitlementService } from '../../../../services/chat/common/chatEntitlementService.js';
 import { IPathService } from '../../../../services/path/common/pathService.js';
-import { BackboardAuthContextKeys, backboardConfigResource, hasBackboardCredentials, isBackboardProduct } from '../../common/backboardAuth.js';
+import { IOnboardingService } from '../../../welcomeOnboarding/common/onboardingService.js';
+import { BackboardAuthContextKeys, backboardConfigResource, clearBackboardCredentials, hasBackboardCredentials, isBackboardProduct } from '../../common/backboardAuth.js';
 
 const backboardCategory = localize2('backboard.category', "Backboard");
 
@@ -35,14 +40,74 @@ export function registerBackboardSsoActions(): void {
 			});
 		}
 
-		/**
-		 * Delegates to the built-in Backboard extension, which signs in with the
-		 * OAuth device authorization grant (RFC 8628): open the verification page
-		 * in the browser and poll the token endpoint until the user approves. No
-		 * localhost redirect or callback server is involved.
-		 */
+		override run(accessor: ServicesAccessor): Promise<boolean> {
+			return accessor.get(IOnboardingService).showSignIn();
+		}
+	});
+
+	registerAction2(class BackboardBrowserSignInAction extends Action2 {
+		constructor() {
+			super({
+				id: 'backboard.signInWithBrowser',
+				title: localize2('backboard.signInWithBrowser', "Sign In with Browser"),
+				category: backboardCategory,
+				f1: true,
+			});
+		}
+
 		override async run(accessor: ServicesAccessor): Promise<boolean> {
 			return Boolean(await accessor.get(ICommandService).executeCommand<boolean>('backboard.extension.signIn'));
+		}
+	});
+
+	registerAction2(class BackboardSignOutAction extends Action2 {
+		constructor() {
+			super({
+				id: 'backboard.signOut',
+				title: localize2('backboard.signOut', "Sign Out"),
+				category: backboardCategory,
+				f1: true,
+				menu: [{ id: MenuId.GlobalActivity, group: '7_update', order: 2, when: BackboardAuthContextKeys.enabled }],
+			});
+		}
+
+		override async run(accessor: ServicesAccessor): Promise<void> {
+			const fileService = accessor.get(IFileService);
+			const pathService = accessor.get(IPathService);
+			const contextKeyService = accessor.get(IContextKeyService);
+			const agentHostService = accessor.get(IAgentHostService);
+			const configurationService = accessor.get(IConfigurationService);
+			const folders = accessor.get(IWorkspaceContextService).getWorkspace().folders;
+			const key = 'backboard.apiKey';
+			const values = configurationService.inspect<string>(key);
+			for (const target of [ConfigurationTarget.APPLICATION, ConfigurationTarget.USER_LOCAL, ConfigurationTarget.USER_REMOTE, ConfigurationTarget.WORKSPACE, ConfigurationTarget.MEMORY]) {
+				if (getConfigValueInTarget(values, target) !== undefined) {
+					await configurationService.updateValue(key, undefined, target);
+				}
+			}
+			for (const folder of folders) {
+				if (configurationService.inspect<string>(key, { resource: folder.uri }).workspaceFolderValue !== undefined) {
+					await configurationService.updateValue(key, undefined, { resource: folder.uri }, ConfigurationTarget.WORKSPACE_FOLDER);
+				}
+			}
+			await clearBackboardCredentials(fileService, await backboardConfigResource(pathService));
+			BackboardAuthContextKeys.signedIn.bindTo(contextKeyService).set(false);
+			await agentHostService.restartAgentHost();
+		}
+	});
+
+	registerAction2(class BackboardDeleteAccountAction extends Action2 {
+		constructor() {
+			super({
+				id: 'backboard.deleteAccount',
+				title: localize2('backboard.deleteAccount', "Delete Account"),
+				category: backboardCategory,
+				f1: true,
+			});
+		}
+
+		override async run(accessor: ServicesAccessor): Promise<void> {
+			await accessor.get(IOpenerService).open(URI.parse('https://app.backboard.io'), { openExternal: true });
 		}
 	});
 

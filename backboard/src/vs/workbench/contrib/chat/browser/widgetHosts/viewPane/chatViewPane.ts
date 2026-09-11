@@ -929,22 +929,27 @@ referencesExpandedWhenEmptyResponse: false,
 		title.textContent = localize('backboard.auth.chat.title', "Sign in to Backboard");
 
 		const description = append(card, $('p.backboard-auth-gate-description'));
-		description.textContent = localize('backboard.auth.chat.description', "To use Backboard Chat, sign in with single sign-on.");
+		description.textContent = localize('backboard.auth.chat.description', "To use Backboard Chat, sign in to Backboard.");
 
-		const button = append(card, $<HTMLButtonElement>('button.backboard-auth-gate-button'));
-		button.type = 'button';
-		button.textContent = localize('backboard.auth.signInSso', "Sign in with SSO");
-		this._register(addDisposableListener(button, EventType.CLICK, () => {
-			this.signInAndRefreshBackboardChatAuthGate().catch(error => {
-				this.logService.error(`[Backboard] Failed to refresh chat auth gate after sign in: ${error instanceof Error ? error.message : String(error)}`);
-			});
-		}));
+		for (const [command, label] of [
+			['backboard.signIn', localize('backboard.auth.signIn', "Sign In")],
+			['backboard.signInWithBrowser', localize('backboard.auth.signInSso', "Sign in with SSO")],
+		]) {
+			const button = append(card, $<HTMLButtonElement>('button.backboard-auth-gate-button'));
+			button.type = 'button';
+			button.textContent = label;
+			this._register(addDisposableListener(button, EventType.CLICK, () => {
+				this.signInAndRefreshBackboardChatAuthGate(command).catch(error => {
+					this.logService.error(`[Backboard] Failed to refresh chat auth gate after sign in: ${error instanceof Error ? error.message : String(error)}`);
+				});
+			}));
+		}
 
 		this.chatAuthGateOverlay = overlay;
 	}
 
-	private async signInAndRefreshBackboardChatAuthGate(): Promise<void> {
-		await this.commandService.executeCommand('backboard.signIn');
+	private async signInAndRefreshBackboardChatAuthGate(command = 'backboard.signIn'): Promise<void> {
+		await this.commandService.executeCommand(command);
 		await this.refreshBackboardChatAuthGateFromConfig();
 	}
 

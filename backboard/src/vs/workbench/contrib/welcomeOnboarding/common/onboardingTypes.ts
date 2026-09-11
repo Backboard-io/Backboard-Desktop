@@ -137,10 +137,14 @@ export const ONBOARDING_SESSIONS_TOUR_STORAGE_KEY = 'sessions.postOnboardingTour
  */
 export const ONBOARDING_EDITOR_TOUR_PENDING_KEY = 'welcomeOnboarding.editorTourPending';
 
+export const ONBOARDING_ADVANCED_TOUR_PENDING_KEY = 'welcomeOnboarding.advancedTourPending';
+
 export type OnboardingDismissReason = 'complete' | 'skip';
 
 export interface IBackboardOnboardingState {
 	readonly version: 1;
+	/** Only new installations opt in to automatic tours; legacy states stay silent. */
+	readonly tourEligible?: boolean;
 	readonly completed: boolean;
 	readonly dismissedReason: OnboardingDismissReason;
 	readonly experience: OnboardingExperience;

@@ -13,7 +13,7 @@ import { IStorageService, StorageScope, StorageTarget } from '../../../platform/
 import { registerWorkbenchContribution2, WorkbenchPhase } from '../../../workbench/common/contributions.js';
 import { SpotlightTour, ISpotlightTourStep, TourPlacement } from '../../../workbench/contrib/welcomeOnboarding/browser/spotlightTour.js';
 import { IOnboardingService } from '../../../workbench/contrib/welcomeOnboarding/common/onboardingService.js';
-import { ONBOARDING_ADVANCED_TOUR_STORAGE_KEY, ONBOARDING_STORAGE_KEY } from '../../../workbench/contrib/welcomeOnboarding/common/onboardingTypes.js';
+import { ONBOARDING_ADVANCED_TOUR_PENDING_KEY, ONBOARDING_ADVANCED_TOUR_STORAGE_KEY, ONBOARDING_STORAGE_KEY } from '../../../workbench/contrib/welcomeOnboarding/common/onboardingTypes.js';
 import { IWorkbenchLayoutService } from '../../../workbench/services/layout/browser/layoutService.js';
 import { IWorkbenchEnvironmentService } from '../../../workbench/services/environment/common/environmentService.js';
 
@@ -29,8 +29,8 @@ class AdvancedOnboardingTour extends Disposable {
 	) {
 		super();
 		this._register(onboardingService.onDidFinishOnboardingFlow(() => this.maybeStart()));
-		this._register(this.storageService.onDidChangeValue(StorageScope.APPLICATION, ONBOARDING_STORAGE_KEY, this._store)(() => this.maybeStart()));
-		if (!this.storageService.get(ONBOARDING_STORAGE_KEY, StorageScope.APPLICATION)
+		this._register(this.storageService.onDidChangeValue(StorageScope.APPLICATION, ONBOARDING_ADVANCED_TOUR_PENDING_KEY, this._store)(() => this.maybeStart()));
+		if (this.storageService.isNew(StorageScope.APPLICATION) && !this.storageService.get(ONBOARDING_STORAGE_KEY, StorageScope.APPLICATION)
 			&& !environmentService.extensionDevelopmentLocationURI && !environmentService.extensionTestsLocationURI) {
 			onboardingService.show();
 		}
@@ -44,19 +44,20 @@ class AdvancedOnboardingTour extends Disposable {
 		}
 		try {
 			const state = JSON.parse(this.storageService.get(ONBOARDING_STORAGE_KEY, StorageScope.APPLICATION, '{}'));
-			if (state.completed !== true) {
+			if (state?.tourEligible !== true || !this.storageService.getBoolean(ONBOARDING_ADVANCED_TOUR_PENDING_KEY, StorageScope.APPLICATION, false)) {
 				return;
 			}
 		} catch {
 			return;
 		}
 		this.started = true;
+		this.storageService.remove(ONBOARDING_ADVANCED_TOUR_PENDING_KEY, StorageScope.APPLICATION);
 		this.storageService.store(ONBOARDING_ADVANCED_TOUR_STORAGE_KEY, true, StorageScope.APPLICATION, StorageTarget.USER);
-		this._register(showAdvancedTour(this.layoutService));
+		this._register(showAdvancedTour(this.layoutService, false));
 	}
 }
 
-function showAdvancedTour(layoutService: IWorkbenchLayoutService): IDisposable {
+function showAdvancedTour(layoutService: IWorkbenchLayoutService, showIntro = true): IDisposable {
 	const store = new DisposableStore();
 	const targetWindow = getActiveWindow();
 	const query = (selector: string) => () => targetWindow.document.querySelector<HTMLElement>(selector) ?? undefined;
@@ -95,13 +96,13 @@ function showAdvancedTour(layoutService: IWorkbenchLayoutService): IDisposable {
 		container: layoutService.activeContainer,
 		window: targetWindow,
 		onLayoutChange: layoutService.onDidLayoutActiveContainer,
-		intro: {
+		intro: showIntro ? {
 			title: localize('advanced.tour.intro', "Explore Advanced Mode?"),
 			body: localize('advanced.tour.intro.body', "Learn how to organize multiple tasks and review agent work without leaving your dashboard."),
 			caption: localize('advanced.tour.count', "{0} quick stops", steps.length),
 			confirmLabel: localize('advanced.tour.start', "Take the Tour"),
 			dismissLabel: localize('advanced.tour.later', "Maybe Later"),
-		},
+		} : undefined,
 		steps,
 		onFinish: () => store.dispose(),
 	}));

@@ -15,7 +15,7 @@ import { IStorageService, StorageScope } from '../../../../platform/storage/comm
 import { registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
 import { IWorkbenchLayoutService } from '../../../services/layout/browser/layoutService.js';
 import { IOnboardingService } from '../common/onboardingService.js';
-import { ONBOARDING_ADVANCED_TOUR_STORAGE_KEY, ONBOARDING_EDITOR_TOUR_PENDING_KEY, ONBOARDING_SESSIONS_TOUR_STORAGE_KEY, ONBOARDING_STORAGE_KEY, ONBOARDING_TOUR_STORAGE_KEY } from '../common/onboardingTypes.js';
+import { ONBOARDING_ADVANCED_TOUR_PENDING_KEY, ONBOARDING_ADVANCED_TOUR_STORAGE_KEY, ONBOARDING_EDITOR_TOUR_PENDING_KEY, ONBOARDING_SESSIONS_TOUR_STORAGE_KEY, ONBOARDING_STORAGE_KEY, ONBOARDING_TOUR_STORAGE_KEY } from '../common/onboardingTypes.js';
 import { OnboardingVariationA } from './onboardingVariationA.js';
 import { PostOnboardingEditorTour, showEditorOnboardingTour } from './postOnboardingEditorTour.js';
 
@@ -56,6 +56,7 @@ registerAction2(class extends Action2 {
 		storageService.remove(ONBOARDING_ADVANCED_TOUR_STORAGE_KEY, StorageScope.APPLICATION);
 		storageService.remove(ONBOARDING_SESSIONS_TOUR_STORAGE_KEY, StorageScope.APPLICATION);
 		storageService.remove(ONBOARDING_EDITOR_TOUR_PENDING_KEY, StorageScope.APPLICATION);
+		storageService.remove(ONBOARDING_ADVANCED_TOUR_PENDING_KEY, StorageScope.APPLICATION);
 
 		const onboardingService = accessor.get(IOnboardingService);
 		onboardingService.reset();

@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { VSBuffer } from '../../../../base/common/buffer.js';
 import { localize } from '../../../../nls.js';
 import { RawContextKey } from '../../../../platform/contextkey/common/contextkey.js';
 import { FileOperationResult, IFileService, toFileOperationResult } from '../../../../platform/files/common/files.js';
@@ -72,6 +73,19 @@ export async function readBackboardConfigJson(fileService: IFileService, configR
 		}
 		throw error;
 	}
+}
+
+/** Removes every saved credential while preserving preferences and session data. */
+export async function clearBackboardCredentials(fileService: IFileService, configResource: URI): Promise<void> {
+	if (!await fileService.exists(configResource)) {
+		return;
+	}
+	const config = { ...await readBackboardConfigJson(fileService, configResource) };
+	delete config.api_key;
+	delete config.apiKey;
+	delete config.env_keys;
+	delete config.oauth;
+	await fileService.writeFile(configResource, VSBuffer.fromString(`${JSON.stringify(config, undefined, '\t')}\n`), { atomic: { postfix: '.vsctmp' } });
 }
 
 export function backboardConfigApiKey(config: BackboardConfigJson): string | undefined {

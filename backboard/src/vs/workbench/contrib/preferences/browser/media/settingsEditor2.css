@@ -3120,3 +3120,51 @@
 		max-width: none;
 	}
 }
+
+/* Account actions lead the Backboard Commonly Used settings. */
+.settings-editor > .settings-body .settings-tree-container .backboard-account-group .settings-group-title-label {
+	height: 64px;
+}
+
+.settings-editor .backboard-account-actions {
+	margin-bottom: 16px;
+	border: 1px solid var(--vscode-widget-border, var(--vscode-settings-textInputBorder));
+	border-radius: 12px;
+	padding: 0 16px;
+	background: var(--vscode-settings-textInputBackground);
+}
+
+.settings-editor .backboard-account-action {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 12px 24px;
+	padding: 16px 0;
+}
+
+.settings-editor .backboard-account-action + .backboard-account-action {
+	border-top: 1px solid var(--vscode-widget-border, var(--vscode-settings-textInputBorder));
+}
+
+.settings-editor .backboard-account-action-copy {
+	flex: 1 1 230px;
+	white-space: normal;
+}
+
+.settings-editor .backboard-account-action-label {
+	font-size: 14px;
+	line-height: 20px;
+	color: var(--vscode-foreground);
+}
+
+.settings-editor .backboard-account-action-description {
+	margin-top: 4px;
+	font-size: 12px;
+	line-height: 18px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.settings-editor .backboard-account-action .monaco-button {
+	width: 132px;
+	flex: 0 0 132px;
+}
