@@ -70,3 +70,7 @@ The earlier inspection sections above record historical state and are superseded
 - Sent an urgent reply to the existing Microsoft certification conversation and a separate urgent review request to `reportapp@microsoft.com`. Both sends were confirmed by Gmail. The messages accurately state that the new package is prepared and ask for priority when resubmission is received.
 - The portable ZIP is optional for this EXE/MSI Store submission. Its public download returned HTTP 200, size 536,170,025 bytes, SHA-256 `df7c864ed00406c2294fa303730b7f557552ae25eb86c730ee635bee4ab0fe40`. All 21,276 ZIP entries passed archive CRC verification.
 - Remaining: inspect Microsoft's package-validation result, then resubmit the prepared draft. Microsoft approval is not yet granted.
+
+## Resubmission completed — September 11, 2026
+
+Submitted 3.1.5 to Microsoft at the owner's explicit request. Partner Center confirmed **In review** and “Your app submission is complete.” Its displayed review SLA is three business days. Optional package validation was still running; the portal's **Submit anyway** action was used after the signed installers had passed Windows CI installation and removal checks. This supersedes earlier pending-resubmission entries. Keep the reviewer account/API access active and the submitted installer URL unchanged during review.
