@@ -36,6 +36,9 @@ jobs:
       RELEASE_ARCH: x64
       RELEASE_VERSION: ${{ inputs.version }}
       RELEASE_CHANNEL: ${{ inputs.channel }}
+      # The application lives below the Git root; VS Code's build helper
+      # otherwise looks for a nonexistent backboard/.git directory.
+      BUILD_SOURCEVERSION: ${{ github.sha }}
       ARTIFACT_SIGNING_ENDPOINT: ${{ vars.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
       ARTIFACT_SIGNING_ACCOUNT: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
       ARTIFACT_SIGNING_PROFILE: ${{ vars.AZURE_ARTIFACT_SIGNING_PROFILE }}
@@ -215,6 +218,17 @@ jobs:
           ./scripts/windows-release/Verify-Authenticode.ps1 `
             -Path '${{ github.workspace }}\VSCode-win32-x64' `
             -ExpectedSubject $env:WINDOWS_SIGNING_SUBJECT
+
+      - name: Preserve verified payload for installer recovery
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: Backboard-Studio-${{ inputs.version }}-windows-x64-verified-payload
+          path: |
+            VSCode-win32-x64/
+            windows-build-info.json
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
 
       - name: Build installers from signed application payload
         shell: pwsh
