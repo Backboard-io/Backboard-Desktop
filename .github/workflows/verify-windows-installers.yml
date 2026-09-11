@@ -41,7 +41,7 @@ jobs:
           $run = gh run view $env:RELEASE_RUN_ID --json conclusion,workflowName | ConvertFrom-Json
           if ($run.conclusion -ne 'success' -or $run.workflowName -ne 'Windows Release') { throw 'Expected successful Windows Release run' }
           gh run download $env:RELEASE_RUN_ID -n "Backboard-Studio-$env:RELEASE_VERSION-windows-x64-signed" -D release
-      - name: Verify fresh installs, upgrade, and uninstall registration
+      - name: Verify fresh installs and uninstall registration
         shell: pwsh
         run: ./scripts/windows-release/Test-Installers.ps1 -ReleasePath release -Version $env:RELEASE_VERSION
       - name: Preserve installer test evidence

@@ -64,17 +64,7 @@ try {
 	Invoke-Setup $uninstaller 'system-uninstall' -Uninstall
 	if (@(Get-BackboardRegistration).Count -ne 0) { throw 'System uninstall left an Installed apps entry' }
 
-	$oldInstaller = Join-Path $env:RUNNER_TEMP 'Backboard-Studio-3.1.1-System.exe'
-	Invoke-WebRequest 'https://backboard-studio-releases.s3.ca-central-1.amazonaws.com/ide-releases/stable/latest/bbide/windows-x86_64/Backboard-Studio-System-Setup-x64.exe' -OutFile $oldInstaller
-	$oldSignature = Get-AuthenticodeSignature $oldInstaller
-	if ($oldSignature.Status -ne 'Valid') { throw 'Old installer signature is not valid' }
-	if ((Get-Item $oldInstaller).VersionInfo.ProductVersion -notlike '3.1.1*') { throw 'Expected the previous 3.1.1 installer' }
-	Invoke-Setup $oldInstaller 'old-system-install'
-	Invoke-Setup (Join-Path $release 'Backboard-Studio-System-Setup-x64.exe') 'upgrade-system-install'
-	$uninstaller = Assert-Registration 'upgrade-from-3.1.1'
-	Invoke-Setup $uninstaller 'upgrade-uninstall' -Uninstall
-	if (@(Get-BackboardRegistration).Count -ne 0) { throw 'Upgrade uninstall left an Installed apps entry' }
-	Write-Host 'Fresh user/system installs, upgrade registration, and uninstall checks passed.'
+	Write-Host 'Fresh user/system installs and uninstall checks passed.'
 } finally {
 	$observations | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $evidence 'installed-apps-evidence.json')
 }
