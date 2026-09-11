@@ -2,22 +2,18 @@
 
 ## Paste into Properties → Notes for certification (under Product declarations)
 
-Backboard Studio includes an email/password sign-in for the certification test account:
+Backboard Studio 3.1.5 — certification access
 
-- Email: bburgers784@gmail.com
-- Password: password123!
+Email: bburgers784@gmail.com
+Password: password123!
 
-Testing instructions:
+Install and launch the app, enter these credentials in the Email/Password form, and click Sign In. No account creation, email verification, browser SSO, or payment is required for this test account. Internet access is required for AI features.
 
-1. Install and launch Backboard Studio with an internet connection.
-2. In the onboarding sign-in form, enter the credentials above and choose **Sign In**. Account creation, an email verification code, and browser SSO are not required for this test account.
-3. Onboarding opens Simple mode and starts the guided tour. Use Continue to advance through the tour, or Skip to close it.
-4. Enter a short prompt in chat, such as “Explain what this IDE can help me build.” Wait for the assistant's reply. You can open a project folder to test file editing and other project features.
-5. If onboarding was skipped, choose **Sign In** from the title bar, Agents page, or chat sign-in panel, and use the same credentials.
-6. Open Settings → Commonly Used. **Sign Out** removes saved API keys and SSO credentials from this device. The same action is available in the Manage (gear) menu directly below **Check for Updates**. Sign in again using the credentials above to resume testing.
-7. **Delete Account** in Settings → Commonly Used opens the Backboard web dashboard, where account deletion is managed. Do not delete the shared certification test account while evaluating other features.
+Complete or skip onboarding, then send “Explain what this IDE can help me build” in chat. Open a project folder to test project features. If onboarding was skipped, choose Sign In from the app and use the same credentials.
 
-The Windows installer identifies the product as **Backboard Studio** (**Backboard Studio (User)** for a per-user installation) and the publisher as **Espri.ai**.
+Uninstall: Windows Settings > Apps > Installed apps (Apps & features on Windows 10) > Backboard Studio > Uninstall. Publisher: Espri.ai. The per-user edition is named Backboard Studio (User).
+
+Support: erin@backboard.io
 
 ## Release verification before submitting
 
@@ -53,3 +49,24 @@ The Packages page lists one **x64** package, ID **98198417**, modified **2026-09
 - **Properties → Product declarations → Notes for certification is empty.** The prepared notes above fit within the documented 2,000-character limit.
 - The **generative AI** declaration is unchecked. This should be selected for Backboard Studio before resubmitting.
 - Microsoft's package validation was initiated from **Packages → Run** and confirmed **In progress**. The portal estimates approximately **30 minutes**. [Open validation status](https://partner.microsoft.com/en-us/dashboard/win32apps/0f759939-60fe-4ebd-aacd-2084b297aaaa/submissions/draftsubmission/package-validation?packageid=98198417). A final result is not yet available; validation must be rerun after replacing the installer.
+
+## Signed release verification — September 11, 2026, 22:14 UTC
+
+- [Windows release run 34651320945](https://github.com/Backboard-io/Backboard-Desktop/actions/runs/34651320945) passed. It reuses the Azure-signed application from run 34636925501, source commit `d2c248ddc4351ba3521d32492225e949e87ad08b`. Only installer packaging was rebuilt, using Inno Setup 7.1.0 and installer source commit `4175ddc6`.
+- The earlier Inno 6.4.1 user installer failed on a 262-character installation path. Inno 7 fixes that installation failure without rebuilding the application.
+- Azure signatures were verified for 81 application binaries and both installers. The signer is Espri.ai Inc.
+- Fresh user and system installs and uninstalls passed on a Windows Server 2022 CI runner. Installed Apps registered version **3.1.5**, publisher **Espri.ai**, and names **Backboard Studio (User)** and **Backboard Studio** respectively. Uninstall removed both registrations. This is CI evidence, not a manual Surface Laptop test.
+- Release checks now cover fresh installations only. The 3.1.1 upgrade scenario was removed at the owner's request; no further upgrade check is required for this release.
+- The reviewer API key returned HTTP 200 and an `OK` assistant response. Partner Center Properties now has the reviewer credentials/instructions saved and the generative AI declaration selected. These changes were reloaded and verified.
+- Silent installation parameters: `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /MERGETASKS="!runcode"`.
+- All signed release files are published and SHA-256 verified under `ide-releases/stable/3.1.5/bbide/windows-x86_64/` in the release bucket. The Windows stable manifest now points to 3.1.5. The Partner Center package URL has been replaced with the immutable 3.1.5 system installer URL; the package changes were saved and Microsoft package validation was initiated. Nothing has been resubmitted.
+
+The earlier inspection sections above record historical state and are superseded by these verified updates.
+
+## Submission cleanup and communication
+
+- Simplified the saved certification notes to the dedicated test credentials, a short chat test, and uninstall instructions. Removed sign-out and Delete Account walkthrough details.
+- Added uninstall instructions to the English Store description: Windows Settings → Apps → Installed apps (Apps & features on Windows 10) → Backboard Studio → Uninstall. This uses the working Windows uninstall entry already included in 3.1.5; no separate in-app uninstall button was added.
+- Sent an urgent reply to the existing Microsoft certification conversation and a separate urgent review request to `reportapp@microsoft.com`. Both sends were confirmed by Gmail. The messages accurately state that the new package is prepared and ask for priority when resubmission is received.
+- The portable ZIP is optional for this EXE/MSI Store submission. Its public download returned HTTP 200, size 536,170,025 bytes, SHA-256 `df7c864ed00406c2294fa303730b7f557552ae25eb86c730ee635bee4ab0fe40`. All 21,276 ZIP entries passed archive CRC verification.
+- Remaining: inspect Microsoft's package-validation result, then resubmit the prepared draft. Microsoft approval is not yet granted.

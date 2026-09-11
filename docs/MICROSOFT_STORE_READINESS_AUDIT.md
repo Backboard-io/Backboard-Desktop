@@ -1,5 +1,7 @@
 # Backboard Studio — Microsoft Store readiness audit
 
+**Release follow-up:** The signed 3.1.5 Windows release now passes fresh user/system installation, Installed Apps name/publisher checks, and uninstall registration removal. Reviewer credentials and instructions are saved in Partner Center, and the generative AI declaration is selected. See the latest evidence in [certification notes](./MICROSOFT_STORE_CERTIFICATION_NOTES.md). The audit below describes an earlier snapshot; its failed-build and empty-notes observations are historical. AWS publication is complete, and the Windows stable manifest points to 3.1.5. The submission URL and simplified certification notes are saved, uninstall instructions are added to the Store description, and Microsoft package validation has been initiated. Final resubmission has not been performed. Broader untested product risks below are not a Microsoft certification result.
+
 Assessment date: September 11, 2026. Target: Windows desktop, EXE/MSI submission, proposed release 3.1.5.
 
 **Verdict: eligible in principle; not ready to resubmit.** The IDE’s product type is compatible with the Store. There are confirmed submission/build blockers and additional product risks. This is an evidence-based readiness assessment, not a Microsoft certification result.
