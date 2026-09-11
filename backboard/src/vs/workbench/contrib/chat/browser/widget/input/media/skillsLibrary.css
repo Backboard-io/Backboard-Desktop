@@ -1077,6 +1077,7 @@ button.skills-library-official-row:hover {
 .simple-mcp-section-heading { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--vscode-widget-border, #292929); padding-bottom: 10px; }
 .simple-mcp-section-heading h3, .simple-mcp-section-title { font-size: 16px; font-weight: 500; margin: 0; }
 .simple-mcp-installed { display: flex; flex-wrap: wrap; gap: 16px; padding: 16px 4px 34px; min-height: 36px; align-items: center; }
+.simple-mcp-installed-entry { display: flex; align-items: center; gap: 4px; }
 .simple-mcp-installed-icon { padding: 0; background: transparent; border: 0; border-radius: 10px; cursor: pointer; }
 .skills-library-simple .skills-library-mcp-logo { width: 36px; height: 36px; object-fit: contain; flex-shrink: 0; border: 1px solid var(--vscode-widget-border, #333); border-radius: 10px; box-sizing: border-box; }
 .simple-mcp-scope { display: flex; gap: 4px; margin: 0 4px 42px; }
@@ -1090,7 +1091,8 @@ button.skills-library-official-row:hover {
 .simple-mcp-description { color: var(--vscode-descriptionForeground); font-size: 13px; line-height: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .simple-mcp-icon-button { border: 0; background: transparent; color: inherit; padding: 6px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .simple-mcp-icon-button:hover, .simple-mcp-installed-icon:hover { background: var(--vscode-toolbar-hoverBackground); }
-.simple-mcp-icon-button:disabled { opacity: .5; cursor: progress; }
+.simple-mcp-delete-button:hover { color: var(--vscode-errorForeground); }
+.simple-mcp-icon-button:disabled, .simple-mcp-installed-icon:disabled { opacity: .5; cursor: progress; }
 .simple-mcp-empty { font-size: 13px; color: var(--vscode-descriptionForeground); }
 .skills-library-simple button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
 @container (max-width: 620px) {

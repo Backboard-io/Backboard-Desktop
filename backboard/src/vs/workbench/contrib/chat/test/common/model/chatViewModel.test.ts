@@ -6,6 +6,7 @@
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
 import { URI } from '../../../../../../base/common/uri.js';
+import { toAgentHostUri } from '../../../../../../platform/agentHost/common/agentHostUri.js';
 import { ChatRequestQueueKind, IChatExternalEdit } from '../../../common/chatService/chatService.js';
 import { IChatModel, IChatProgressResponseContent, IChatRequestModel, IChatResponseModel, IResponse } from '../../../common/model/chatModel.js';
 import { getLatestTurnEditedFiles, isTransientExternalEdit, shouldRenderPendingDivider } from '../../../common/model/chatViewModel.js';
@@ -81,6 +82,28 @@ suite('getLatestTurnEditedFiles', () => {
 			getLatestTurnEditedFiles(createModel(true, [...tempEdits, realEdit]))?.map(edit => edit.uri.path),
 			['/project/src/level.js'],
 		);
+	});
+
+	test('hides persisted watcher cards on any path while preserving tool edits', () => {
+		const path = '/project/vscode-release-stable/3.1.4/aarch64/dmg/Backboard Studio.app/Contents/Resources/triangle_bg.svg';
+		const uri = toAgentHostUri(URI.file(path), 'local');
+		const watcher: IChatExternalEdit = {
+			kind: 'externalEdit', uri, editKind: 'edit',
+			beforeContentUri: toAgentHostUri(URI.parse('git-blob:/baseline'), 'local'),
+			afterContentUri: uri,
+		};
+		const created: IChatExternalEdit = { ...watcher, editKind: 'create', beforeContentUri: undefined };
+		const deleted: IChatExternalEdit = { ...watcher, editKind: 'delete', afterContentUri: undefined };
+		const legacy: IChatExternalEdit = { kind: 'externalEdit', uri, editKind: 'edit' };
+		const deliberate: IChatExternalEdit = { ...watcher, beforeContentUri: URI.parse('session-db:/before'), afterContentUri: URI.parse('session-db:/after') };
+		const source = createEdit('/project/backboard/extensions/backboard/media/triangle_bg.svg', 'edit', 2, 1);
+		const sourceWatcher: IChatExternalEdit = { ...watcher, uri: URI.file('/project/src/unrelated.ts') };
+		const toolWithLiveContent: IChatExternalEdit = { ...watcher, uri: URI.file('/project/src/tool.ts'), toolCallId: 'tc-edit' };
+		const parts = [watcher, created, deleted, legacy, sourceWatcher, deliberate, source, toolWithLiveContent];
+		assert.deepStrictEqual({
+			hidden: parts.map(isTransientExternalEdit),
+			recap: getLatestTurnEditedFiles(createModel(true, parts)),
+		}, { hidden: [true, true, true, true, true, false, false, false], recap: [deliberate, source, toolWithLiveContent] });
 	});
 
 	test('aggregates one entry per file, summing diff counts', () => {

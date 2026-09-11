@@ -219,7 +219,21 @@ export interface IChatChangesSummaryPart {
  * data captured before the filesystem watcher learned the temp-file shape.
  */
 export function isTransientExternalEdit(edit: IChatExternalEdit): boolean {
-	return isAgentAtomicWriteTempPath(fromAgentHostUri(edit.uri).path);
+	const path = fromAgentHostUri(edit.uri).path;
+	if (isAgentAtomicWriteTempPath(path)) {
+		return true;
+	}
+	if (edit.toolCallId) {
+		return false;
+	}
+	// Older watcher cards had no tool provenance and referenced HEAD + the
+	// live file (or had no content at all). Filter them during history replay
+	// as well as in the recap. Tool snapshots from older versions stay visible.
+	const beforeScheme = edit.beforeContentUri && fromAgentHostUri(edit.beforeContentUri).scheme;
+	const afterScheme = edit.afterContentUri && fromAgentHostUri(edit.afterContentUri).scheme;
+	return (beforeScheme === 'git-blob' && (!afterScheme || afterScheme === 'file'))
+		|| (!beforeScheme && afterScheme === 'file')
+		|| (!beforeScheme && !afterScheme && !edit.diff);
 }
 
 /**

@@ -100,7 +100,6 @@ export function getOnboardingStepSubtitle(stepId: OnboardingStepId): string {
  */
 export const ONBOARDING_STEPS: readonly OnboardingStepId[] = [
 	OnboardingStepId.Welcome,
-	OnboardingStepId.Experience,
 ];
 
 /**

@@ -396,6 +396,8 @@ export type ChatExternalEditKind = 'create' | 'delete' | 'rename' | 'edit';
  */
 export interface IChatExternalEdit {
 	kind: 'externalEdit';
+	/** Tool that reported this edit. Also distinguishes tool edits from legacy watcher cards. */
+	toolCallId?: string;
 	/** The resulting file URI (after-URI for create/edit/rename, before-URI for delete). */
 	uri: URI;
 	/** The kind of file operation. */

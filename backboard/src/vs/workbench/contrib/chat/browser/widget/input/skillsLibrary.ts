@@ -1905,14 +1905,27 @@ export class SkillsLibraryController {
 			}
 		};
 
+		const renderSimpleMcpDeleteButton = (parent: HTMLElement, server: IWorkbenchLocalMcpServer): void => {
+			const removing = isRemovingMcp(server);
+			const button = dom.append(parent, dom.$('button.simple-mcp-icon-button.simple-mcp-delete-button', {
+				type: 'button',
+				'aria-label': removing ? localize('simpleMcp.deleting', "Deleting {0}", server.displayName ?? server.name) : localize('simpleMcp.delete', "Delete {0}", server.displayName ?? server.name),
+			}, renderIcon(removing ? Codicon.loading : Codicon.trash))) as HTMLButtonElement;
+			button.disabled = removing;
+			simpleRenderStore.add(dom.addDisposableListener(button, dom.EventType.CLICK, () => void runRemoveMcp(server)));
+		};
+
 		const renderSimpleMcpContent = (items: readonly McpMarketplaceModalItem[]): void => {
 			const installedHeading = dom.append(content, dom.$('.simple-mcp-section-heading'));
 			dom.append(installedHeading, dom.$('h3', undefined, localize('simpleMcp.installed', "Installed")));
 			const strip = dom.append(content, dom.$('.simple-mcp-installed'));
 			for (const server of getVisibleInstalledMcps()) {
-				const button = dom.append(strip, dom.$('button.simple-mcp-installed-icon', { type: 'button', 'aria-label': server.displayName ?? server.name }));
+				const entry = dom.append(strip, dom.$('.simple-mcp-installed-entry'));
+				const button = dom.append(entry, dom.$('button.simple-mcp-installed-icon', { type: 'button', 'aria-label': server.displayName ?? server.name })) as HTMLButtonElement;
+				button.disabled = isRemovingMcp(server);
 				renderMcpLogo(button, findMcpItemForInstalledServer(mcpState.items, server) ?? server);
 				simpleRenderStore.add(dom.addDisposableListener(button, dom.EventType.CLICK, () => void this.openMcpServerOptions(server)));
+				renderSimpleMcpDeleteButton(entry, server);
 			}
 			if (!strip.childElementCount) {
 				dom.append(strip, dom.$('span.simple-mcp-empty', undefined, localize('simpleMcp.empty', "Your installed MCPs will appear here.")));
@@ -1944,10 +1957,13 @@ export class SkillsLibraryController {
 					dom.append(text, dom.$('div.simple-mcp-name', undefined, item.label));
 					dom.append(text, dom.$('div.simple-mcp-description', undefined, item.description));
 					const installed = findInstalledMcp(mcpState.installed, item);
-					const busy = isInstallingMcp(item);
+					const busy = isInstallingMcp(item) || !!installed && isRemovingMcp(installed);
 					const button = dom.append(row, dom.$('button.simple-mcp-icon-button', { type: 'button', 'aria-label': installed ? localize('simpleMcp.configure', "Configure {0}", item.label) : localize('simpleMcp.install', "Install {0}", item.label) }, renderIcon(busy ? Codicon.loading : installed ? Codicon.gear : Codicon.add))) as HTMLButtonElement;
 					button.disabled = busy;
 					simpleRenderStore.add(dom.addDisposableListener(button, dom.EventType.CLICK, () => installed ? void this.openMcpServerOptions(installed) : void runInstallMcp(item)));
+					if (installed) {
+						renderSimpleMcpDeleteButton(row, installed);
+					}
 				}
 			}
 			if (!catalog.length) { renderMcpItems([]); }
@@ -2094,7 +2110,7 @@ export class SkillsLibraryController {
 				render();
 			}));
 			const removing = isRemovingMcp(server);
-			const installedButton = dom.append(footer, dom.$('button.skills-library-primary-button.installed-toggle', { type: 'button' }, removing ? localize('chat.skillsLibrary.removing', "Removing...") : localize('chat.skillsLibrary.installedDescription', "Installed"))) as HTMLButtonElement;
+			const installedButton = dom.append(footer, dom.$('button.skills-library-primary-button.installed-toggle', { type: 'button' }, removing ? localize('chat.skillsLibrary.removing', "Removing...") : simpleMode ? localize('simpleMcp.deleteButton', "Delete") : localize('chat.skillsLibrary.installedDescription', "Installed"))) as HTMLButtonElement;
 			installedButton.disabled = removing;
 			store.add(dom.addDisposableListener(installedButton, dom.EventType.CLICK, () => void runRemoveMcp(server)));
 			const setupButton = dom.append(footer, dom.$('button.skills-library-icon-button.skills-library-mcp-setup-button', {

@@ -4,7 +4,6 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { resolveAgentHostForkIndex } from './agentHostFork.js';
-import { Limiter } from '../../../../../../base/common/async.js';
 import { encodeBase64, VSBuffer } from '../../../../../../base/common/buffer.js';
 import { CancellationToken, CancellationTokenSource } from '../../../../../../base/common/cancellation.js';
 import { isCancellationError, onUnexpectedError } from '../../../../../../base/common/errors.js';
@@ -28,11 +27,10 @@ import { ChatTruncatedAction } from '../../../../../../platform/agentHost/common
 import { CompletionItemKind as AhpCompletionItemKind, type CompletionItem as AhpCompletionItem } from '../../../../../../platform/agentHost/common/state/protocol/commands.js';
 import { ConfirmationOptionKind, TerminalClaimKind, ToolCallContributorKind, ToolResultContentType, type ConfirmationOption, type ProtectedResourceMetadata, type SessionActiveClient } from '../../../../../../platform/agentHost/common/state/protocol/state.js';
 import { ActionType, ChatTurnStartedAction, isChatAction, type ChatAction, type ClientChatAction, type ClientSessionAction, type ChatInputCompletedAction } from '../../../../../../platform/agentHost/common/state/sessionActions.js';
-import { AhpErrorCodes, AHP_AUTH_REQUIRED, ProtocolError } from '../../../../../../platform/agentHost/common/state/sessionProtocol.js';
+import { AHP_AUTH_REQUIRED, ProtocolError } from '../../../../../../platform/agentHost/common/state/sessionProtocol.js';
 import { buildSubagentSessionUri, getToolSubagentContent, parseSubagentSessionUri, MessageAttachmentKind, MessageKind, PendingMessageKind, ResponsePartKind, ChatInputAnswerState, ChatInputAnswerValueKind, ChatInputQuestionKind, ChatInputResponseKind, StateComponents, ToolCallCancellationReason, ToolCallConfirmationReason, ToolCallStatus, TurnState, buildDefaultChatUri, mergeSessionWithDefaultChat, type ChatState, type ISessionWithDefaultChat, type ClientPluginCustomization, type ICompletedToolCall, type MarkdownResponsePart, type Message, type MessageAttachment, type ModelSelection, type ReasoningResponsePart, type RootState, type ChatInputAnswer, type ChatInputRequest, type SessionState, type ToolCallResponsePart, type ToolCallState, type Turn, type UsageInfo } from '../../../../../../platform/agentHost/common/state/sessionState.js';
 import { ExtensionIdentifier } from '../../../../../../platform/extensions/common/extensions.js';
 import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
-import { FileChangeType, FileOperationResult, IFileService, toFileOperationResult } from '../../../../../../platform/files/common/files.js';
 import { ILogService } from '../../../../../../platform/log/common/log.js';
 import { IOpenerService } from '../../../../../../platform/opener/common/opener.js';
 import { IWorkspaceContextService } from '../../../../../../platform/workspace/common/workspace.js';
@@ -64,9 +62,6 @@ import { IChatWidgetService } from '../../chat.js';
 import { IAgentHostActiveClientService } from './agentHostActiveClientService.js';
 import { IAgentHostSessionWorkingDirectoryResolver } from './agentHostSessionWorkingDirectoryResolver.js';
 import { IAgentHostNewSessionFolderService } from './agentHostNewSessionFolderService.js';
-import { fromAgentHostUri, toAgentHostUri } from '../../../../../../platform/agentHost/common/agentHostUri.js';
-import { AGENT_IGNORED_DIRECTORIES, AGENT_IGNORED_FILE_GLOBS, isIgnoredAgentPath } from '../../../../../../platform/agentHost/common/agentIgnoredPaths.js';
-import { accumulateUncoveredTurnFileChange, buildUncoveredTurnBeforeContentUri, finalizeUncoveredTurnFileChange, hydrateUncoveredTurnEdit, resolveTurnRepoInfo, type ITurnFileChangeObservation, type ITurnRepoInfo, type ReadTextFn } from './agentHostTurnFsEdits.js';
 import { AgentHostRewind } from './agentHostRewind.js';
 import { AgentHostSnapshotController } from './agentHostSnapshotController.js';
 import { toolDataToDefinition } from './agentHostToolUtils.js';
@@ -495,7 +490,6 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 		@IOpenerService private readonly _openerService: IOpenerService,
 		@IAgentHostActiveClientService private readonly _activeClientService: IAgentHostActiveClientService,
 		@IChatEntitlementService private readonly _chatEntitlementService: IChatEntitlementService,
-		@IFileService private readonly _fileService: IFileService,
 	) {
 		super();
 		this._config = config;
@@ -1465,66 +1459,11 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 		// sink and resolves the promise from `onTurnEnded`. Cancellation is
 		// surfaced through the same path: the observer disposes itself when
 		// `cancellationToken` fires, then calls `onTurnEnded(undefined)`.
-		// Track workspace file changes that happen during this turn via the
-		// file service, so we can surface an "edited files" card even for edits
-		// that don't come through the tool-call FileEdit protocol (e.g. MCP
-		// tools, shell commands, or any other out-of-band writes).
-		// Workspace folders may use agenthost:// URIs; unwrap them to their
-		// underlying file:// paths so we can match against onDidFilesChange events,
-		// which always carry the real file:// URI.
-		const workspaceFileUris = this._workspaceContextService.getWorkspace().folders
-			.map(f => fromAgentHostUri(f.uri))
-			.filter(u => u.scheme === 'file');
-		const fsChangedUris = new ResourceMap<ITurnFileChangeObservation>();
-		const toolCallCoveredUris = new ResourceMap<true>();
-		let ignoredChangeCount = 0;
-		this._logService.info(`[AgentHost][FsWatch] Turn ${turnId}: watching ${workspaceFileUris.length} workspace folder(s): ${workspaceFileUris.map(u => u.toString()).join(', ')}`);
-		// Register recursive watchers on each workspace folder so VS Code's file
-		// service picks up changes made by any tool (MCP, shell, etc.) during
-		// this turn. VCS internals and build output are excluded — a git
-		// commit/worktree operation during the turn writes loose objects and
-		// temp files under `.git/**` that must never surface as file edits.
-		const watcherExcludes = [
-			...AGENT_IGNORED_DIRECTORIES.map(directory => `**/${directory}/**`),
-			...AGENT_IGNORED_FILE_GLOBS,
-		];
-		const watcherDisposables = workspaceFileUris.map(root =>
-			this._fileService.watch(root, { recursive: true, excludes: watcherExcludes })
-		);
-		// Pin the repository HEAD sha now, before any writes land, so
-		// out-of-band edits can diff against turn-start content via git-blob
-		// URIs (see agentHostTurnFsEdits.ts). Best-effort: absent repo info
-		// just means diff-less pills.
-		const turnRepoInfoPromise = this._resolveTurnRepoInfos(workspaceFileUris);
-		const fsWatchSub = this._fileService.onDidFilesChange(e => {
-			const recordChange = (uri: URI, type: FileChangeType) => {
-				const inWorkspace = workspaceFileUris.some(root =>
-					extUriBiasedIgnorePathCase.isEqualOrParent(uri, root)
-				);
-				if (!inWorkspace) {
-					return;
-				}
-				// Defense-in-depth against watchers that don't fully honor
-				// excludes: never track VCS-internal / build-output paths.
-				if (isIgnoredAgentPath(uri.path)) {
-					ignoredChangeCount++;
-					return;
-				}
-				// Keep per-path diagnostics available without making a noisy edit burst
-				// synchronously format/write hundreds of info-level log entries. The
-				// normal-level turn summary below remains the primary diagnostic.
-				this._logService.trace(`[AgentHost][FsWatch] Change detected: ${uri.toString()} type=${type}`);
-				fsChangedUris.set(uri, accumulateUncoveredTurnFileChange(fsChangedUris.get(uri), type));
-			};
-			for (const uri of e.rawAdded) { recordChange(uri, FileChangeType.ADDED); }
-			for (const uri of e.rawUpdated) { recordChange(uri, FileChangeType.UPDATED); }
-			for (const uri of e.rawDeleted) { recordChange(uri, FileChangeType.DELETED); }
-		});
+		// Diff cards are emitted only by onFileEdits below. Workspace file
+		// events cannot establish which tool (if any) performed an edit.
 
 		return new Promise<Turn | undefined>(resolve => {
 			const store = new DisposableStore();
-			store.add(fsWatchSub);
-			for (const w of watcherDisposables) { store.add(w); }
 			const cancelSub = store.add(cancellationToken.onCancellationRequested(() => {
 				cancelSub.dispose();
 				this._logService.info(`[AgentHost] Cancellation requested for ${session.toString()}, dispatching turnCancelled`);
@@ -1541,134 +1480,13 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 				sink: progress,
 				cancellationToken,
 				suppressErrorMarkdown: true,
-				onTurnEnded: async (lastTurn) => {
-					// Emit externalEdit parts for any workspace files that changed
-					// during the turn but weren't already reported via tool-call
-					// edits. These are hydrated with before/after content (before
-					// = git-blob at the turn-start sha, after = working tree) so
-					// they render the same diff pill/card as tool-declared edits.
-					//
-					// Guarded: any failure here (repo probing, hydration, the
-					// progress sink) must never prevent the turn promise from
-					// resolving — an unresolved turn leaves the request spinning
-					// forever with a live Cancel button.
-					this._logService.info(`[AgentHost][FsWatch] Turn ${turnId} ended: fsChangedUris=${fsChangedUris.size} toolCallCoveredUris=${toolCallCoveredUris.size} ignored=${ignoredChangeCount}`);
-					try {
-						const repoInfos = await turnRepoInfoPromise;
-						const candidates: Array<readonly [URI, ITurnFileChangeObservation]> = [];
-						for (const [uri, observation] of fsChangedUris) {
-							if (toolCallCoveredUris.has(uri)) {
-								this._logService.info(`[AgentHost][FsWatch] Skipping ${uri.toString()} (covered by tool call)`);
-								continue;
-							}
-							// Recheck here so buffered changes accepted by an older watcher
-							// path do not leak temporary/build files into the completed turn.
-							if (isIgnoredAgentPath(uri.path)) {
-								ignoredChangeCount++;
-								continue;
-							}
-							candidates.push([uri, observation]);
-						}
-
-						// Stat changed paths concurrently, but cap parallel filesystem work so
-						// a noisy turn cannot fan out hundreds of operations at completion.
-						const statLimiter = new Limiter<{ readonly uri: URI; readonly repo: ITurnRepoInfo | undefined; readonly changeType: FileChangeType | undefined }>(16);
-						// An ambiguous ADDED event can require a git-blob read, which may
-						// transfer the complete turn-start file. Bound those heavier probes
-						// separately so a large edit batch cannot create a memory/IPC burst.
-						const baselineProbeLimiter = new Limiter<unknown>(4);
-						let baselineTrackedCount = 0;
-						let baselineMissingCount = 0;
-						let baselineProbeFailureCount = 0;
-						let finalizedChanges: Array<{ readonly uri: URI; readonly repo: ITurnRepoInfo | undefined; readonly changeType: FileChangeType | undefined }>;
-						try {
-							finalizedChanges = await Promise.all(candidates.map(([uri, observation]) => statLimiter.queue(async () => {
-								const repo = repoInfos.find(info => extUriBiasedIgnorePathCase.isEqualOrParent(uri, URI.file(info.rootPath)));
-								// Existence alone includes mkdir events. Only files belong in the
-								// review; a permission/transport failure is not evidence of deletion.
-								const stat = await this._fileService.stat(uri).catch(error => {
-									if (error instanceof Error && toFileOperationResult(error) === FileOperationResult.FILE_NOT_FOUND) {
-										return undefined;
-									}
-									throw error;
-								});
-								const existsAtTurnEnd = stat !== undefined;
-								let existedAtTurnStart: boolean | undefined;
-								// ADDED-only is ambiguous: atomic replacement implementations can
-								// report an existing target exactly like a new file. Probe the pinned
-								// git baseline only for that shape, bounded by the same limiter as
-								// final stats, so real replacements retain their before side/diff.
-								if (existsAtTurnEnd && !stat?.isDirectory && observation.firstType === FileChangeType.ADDED && !observation.sawDeleted) {
-									const beforeContentUri = buildUncoveredTurnBeforeContentUri(uri, repo, session.toString());
-									if (beforeContentUri) {
-									try {
-										await baselineProbeLimiter.queue(() => this._config.connection.resourceRead(beforeContentUri));
-											existedAtTurnStart = true;
-											baselineTrackedCount++;
-										} catch (err) {
-											if (err instanceof ProtocolError && (err.code === AhpErrorCodes.NotFound || err.code === AhpErrorCodes.ContentNotFound)) {
-												existedAtTurnStart = false;
-												baselineMissingCount++;
-											} else {
-												// A transport/auth failure cannot prove this was a create. Keep
-												// the before side conservatively so a tracked replacement is not
-												// silently reduced to an inaccurate create card.
-												existedAtTurnStart = true;
-												baselineProbeFailureCount++;
-											}
-										}
-									}
-								}
-								return {
-									uri,
-									repo,
-									changeType: finalizeUncoveredTurnFileChange(uri.path, observation, existsAtTurnEnd, existedAtTurnStart, stat?.isDirectory),
-								};
-							})));
-						} finally {
-							statLimiter.dispose();
-							baselineProbeLimiter.dispose();
-						}
-						if (baselineTrackedCount || baselineMissingCount || baselineProbeFailureCount) {
-							this._logService.info(`[AgentHost][FsWatch] Turn ${turnId}: ADDED baseline probes tracked=${baselineTrackedCount} new=${baselineMissingCount} failed=${baselineProbeFailureCount}`);
-						}
-
-						const extraEdits: IChatProgress[] = [];
-						for (const { uri, repo, changeType } of finalizedChanges) {
-							if (changeType === undefined) {
-								this._logService.trace(`[AgentHost][FsWatch] Skipping transient, directory, or ignored path ${uri.toString()}`);
-								continue;
-							}
-							extraEdits.push(hydrateUncoveredTurnEdit({
-								uri,
-								changeType,
-								repo,
-								backendSessionUri: session.toString(),
-								connectionAuthority: this._config.connectionAuthority,
-								undoStopId: turnId,
-							}));
-						}
-						if (extraEdits.length > 0) {
-							progress(extraEdits);
-						}
-					} catch (err) {
-						this._logService.error(`[AgentHost][FsWatch] Turn ${turnId}: failed to surface out-of-band edits`, err);
-					}
-
+				onTurnEnded: lastTurn => {
 					store.dispose();
 					this._clientDispatchedTurnIds.delete(turnId);
 					this._activeSessions.get(request.sessionResource)?.isCompleteObs.set(true, undefined);
 					resolve(lastTurn);
 				},
-				onFileEdits: (tc, fileEdits) => {
-					// Record the raw file:// URIs before they get wrapped in
-					// agenthost:// so the fs-watcher deduplication check matches.
-					for (const edit of fileEdits) {
-						toolCallCoveredUris.set(edit.resource, true);
-						if (edit.originalResource) {
-							toolCallCoveredUris.set(edit.originalResource, true);
-						}
-					}
+				onFileEdits: tc => {
 					const editParts = this._hydrateFileEdits(request.sessionResource, request.requestId, tc);
 					if (editParts.length > 0) {
 						progress(editParts);
@@ -1676,36 +1494,6 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 				},
 			}));
 		});
-	}
-
-	/**
-	 * Resolves git repository info (root + HEAD sha) for each workspace
-	 * folder at turn start, reading `.git` metadata through the agent host
-	 * file system so remote sessions work too. Best-effort: folders without
-	 * a resolvable repository are simply omitted.
-	 */
-	private async _resolveTurnRepoInfos(workspaceFileUris: readonly URI[]): Promise<ITurnRepoInfo[]> {
-		const authority = this._config.connectionAuthority;
-		const readText: ReadTextFn = async absolutePath => {
-			try {
-				const content = await this._fileService.readFile(toAgentHostUri(URI.file(absolutePath), authority));
-				return content.value.toString();
-			} catch {
-				return undefined;
-			}
-		};
-		const infos: ITurnRepoInfo[] = [];
-		for (const root of workspaceFileUris) {
-			try {
-				const info = await resolveTurnRepoInfo(readText, root.path);
-				if (info && !infos.some(existing => existing.rootPath === info.rootPath)) {
-					infos.push(info);
-				}
-			} catch (err) {
-				this._logService.warn(`[AgentHost][FsWatch] Failed to resolve repo info for ${root.toString()}`, err);
-			}
-		}
-		return infos;
 	}
 
 	// ---- Tool confirmation --------------------------------------------------

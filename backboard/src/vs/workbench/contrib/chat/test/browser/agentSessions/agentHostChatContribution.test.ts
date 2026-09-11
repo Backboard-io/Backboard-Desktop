@@ -42,7 +42,7 @@ import { IOutputService } from '../../../../../services/output/common/output.js'
 import { IWorkspaceContextService } from '../../../../../../platform/workspace/common/workspace.js';
 import { AgentHostContribution, AgentHostSessionListController, AgentHostSessionHandler } from '../../../browser/agentSessions/agentHost/agentHostChatContribution.js';
 import { AgentHostLanguageModelProvider } from '../../../browser/agentSessions/agentHost/agentHostLanguageModelProvider.js';
-import { IFileService } from '../../../../../../platform/files/common/files.js';
+import { FileChangesEvent, FileChangeType, IFileService } from '../../../../../../platform/files/common/files.js';
 import { TestFileService } from '../../../../../test/common/workbenchTestServices.js';
 import { ILabelService } from '../../../../../../platform/label/common/label.js';
 import { MockLabelService } from '../../../../../services/label/test/common/mockLabelService.js';
@@ -484,8 +484,7 @@ function createTestServices(disposables: DisposableStore, workingDirectoryResolv
 	instantiationService.stub(IChatEntitlementService, { entitlement: ChatEntitlement.Free, quotas: {} } as Partial<IChatEntitlementService> as IChatEntitlementService);
 	instantiationService.stub(IChatAgentService, chatAgentService);
 	instantiationService.stub(IChatWidgetService, chatWidgetService);
-	// Stub with an instance, not the class — `_handleTurn` subscribes to
-	// `onDidFilesChange`, whose getter needs the instance's emitter fields.
+	// Keep an event-capable service so tests can simulate unrelated file writes.
 	instantiationService.stub(IFileService, disposables.add(new TestFileService()));
 	instantiationService.stub(ILabelService, MockLabelService);
 	instantiationService.stub(IChatSessionsService, {
@@ -1624,6 +1623,22 @@ suite('AgentHostChatContribution', () => {
 	// ---- Progress event → chat progress conversion ----------------------
 
 	suite('progress routing', () => {
+
+		test('workspace file events during a turn never produce diff cards', () => runWithFakedTimers({ useFakeTimers: true }, async () => {
+			const { sessionHandler, agentHostService, chatAgentService, instantiationService } = createContribution(disposables);
+			const root = URI.file('/workspace');
+			instantiationService.stub(IWorkspaceContextService, 'getWorkspace', () => ({ id: 'test', folders: [{ uri: root, name: 'workspace', index: 0 }] }));
+			const fileService = instantiationService.invokeFunction(accessor => accessor.get(IFileService)) as TestFileService;
+			const watch = instantiationService.stub(IFileService, 'watch', () => toDisposable(() => { }));
+			const { turnPromise, collected, session, turnId, fire } = await startTurn(sessionHandler, agentHostService, chatAgentService, disposables);
+			fileService.fireFileChanges(new FileChangesEvent([
+				{ resource: URI.joinPath(root, 'src/unrelated.ts'), type: FileChangeType.UPDATED },
+				{ resource: URI.joinPath(root, 'vscode-release-stable/3.1.4/dmg/triangle_bg.svg'), type: FileChangeType.ADDED },
+			], false));
+			fire({ type: 'chat/turnComplete', session, turnId } as ChatAction);
+			await turnPromise;
+			assert.deepStrictEqual({ watchCalls: watch.callCount, edits: collected.flat().filter(part => part.kind === 'externalEdit') }, { watchCalls: 0, edits: [] });
+		}));
 
 		test('delta events become markdownContent progress', () => runWithFakedTimers({ useFakeTimers: true }, async () => {
 			const { sessionHandler, agentHostService, chatAgentService } = createContribution(disposables);

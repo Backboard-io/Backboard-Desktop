@@ -1417,6 +1417,7 @@ suite('stateToProgressAdapter', () => {
 			assert.strictEqual(serialized.presentation, ToolInvocationPresentation.Hidden);
 			assert.strictEqual(edits.length, 1, 'The active-turn snapshot must not duplicate a completed edit');
 			assert.strictEqual(edits[0].undoStopId, 'tc-edit');
+			assert.strictEqual(edits[0].toolCallId, 'tc-edit');
 			assert.strictEqual(edits[0].mutationBatchId, 'turn-1:mutation:tc-edit');
 			assert.strictEqual(edits[0].mutationBatchFileCount, 2);
 			assert.deepStrictEqual(edits[0].diff, { added: 3, removed: 1 });
@@ -1440,6 +1441,7 @@ suite('stateToProgressAdapter', () => {
 			assert.strictEqual(historySerialized.presentation, ToolInvocationPresentation.Hidden);
 			assert.strictEqual(historyEdits.length, 1, 'Completed history must also contain exactly one card for the file');
 			assert.strictEqual(historyEdits[0].undoStopId, edits[0].undoStopId);
+			assert.strictEqual(historyEdits[0].toolCallId, 'tc-edit');
 			assert.strictEqual(historyEdits[0].mutationBatchId, edits[0].mutationBatchId);
 		});
 

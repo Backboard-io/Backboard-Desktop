@@ -153,9 +153,10 @@
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	width: 30px;
+	min-width: 54px;
 	height: 30px;
-	padding: 0;
+	padding: 0 12px;
+	font: inherit;
 	color: var(--vscode-descriptionForeground);
 	background: transparent;
 	border: 0;
@@ -323,9 +324,7 @@
 	min-height: 100%;
 }
 
-.onboarding-a-card-mode .onboarding-a-header,
-.onboarding-a-card-welcome .onboarding-a-close-btn,
-.onboarding-a-card-mode .onboarding-a-close-btn {
+.onboarding-a-card-mode .onboarding-a-header {
 	display: none;
 }
 

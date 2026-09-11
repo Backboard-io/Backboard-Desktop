@@ -1057,6 +1057,7 @@ function fileEditToExternalEdit(edit: FileEdit, undoStopId: string, connectionAu
 		: undefined;
 	return {
 		kind: 'externalEdit',
+		toolCallId: undoStopId,
 		uri: toAgentHostUri(rawFileUri, connectionAuthority),
 		editKind,
 		originalUri: isRename && edit.before ? toAgentHostUri(URI.parse(edit.before.uri), connectionAuthority) : undefined,

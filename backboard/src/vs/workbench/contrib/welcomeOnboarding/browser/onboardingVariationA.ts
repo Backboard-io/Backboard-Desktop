@@ -5,10 +5,8 @@
 
 import { $, addDisposableListener, append, clearNode, EventType, getActiveWindow } from '../../../../base/browser/dom.js';
 import { StandardKeyboardEvent } from '../../../../base/browser/keyboardEvent.js';
-import { renderIcon } from '../../../../base/browser/ui/iconLabel/iconLabels.js';
 import { VSBuffer } from '../../../../base/common/buffer.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
-import { Codicon } from '../../../../base/common/codicons.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { KeyCode } from '../../../../base/common/keyCodes.js';
 import { Disposable, DisposableStore, toDisposable } from '../../../../base/common/lifecycle.js';
@@ -254,8 +252,8 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 
 		this.closeButton = append(this.card, $<HTMLButtonElement>('button.onboarding-a-close-btn'));
 		this.closeButton.type = 'button';
-		this.closeButton.setAttribute('aria-label', localize('onboarding.close', "Close"));
-		this.closeButton.appendChild(renderIcon(Codicon.close));
+		this.closeButton.setAttribute('aria-label', localize('onboarding.skip', "Skip Onboarding"));
+		this.closeButton.textContent = localize('onboarding.skipButton', "Skip");
 
 		const header = append(this.card, $('.onboarding-a-header'));
 		this.progressContainer = append(header, $('.onboarding-a-progress'));
