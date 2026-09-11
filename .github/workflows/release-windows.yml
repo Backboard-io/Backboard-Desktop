@@ -15,9 +15,14 @@ on:
         options:
           - stable
           - sandbox
+      reuse_signed_run:
+        description: Optional successful release run whose signed application payload should be reused
+        type: string
+        required: false
 
 permissions:
   contents: read
+  actions: read
   id-token: write
 
 concurrency:
@@ -36,6 +41,7 @@ jobs:
       RELEASE_ARCH: x64
       RELEASE_VERSION: ${{ inputs.version }}
       RELEASE_CHANNEL: ${{ inputs.channel }}
+      REUSE_SIGNED_RUN: ${{ inputs.reuse_signed_run }}
       # The application lives below the Git root; VS Code's build helper
       # otherwise looks for a nonexistent backboard/.git directory.
       # Use our own variable so bundled extensions do not enter Microsoft's
@@ -92,14 +98,12 @@ jobs:
         run: |
           $tokens = $null
           $errors = $null
-          [void][System.Management.Automation.Language.Parser]::ParseFile(
-            (Resolve-Path 'scripts/windows-release/Verify-Authenticode.ps1'),
-            [ref]$tokens,
-            [ref]$errors
-          )
-          if ($errors.Count -gt 0) {
-            $errors | ForEach-Object { Write-Error $_.Message }
-            throw 'Windows release PowerShell parsing failed.'
+          foreach ($script in Get-ChildItem 'scripts/windows-release/*.ps1') {
+            [void][System.Management.Automation.Language.Parser]::ParseFile($script.FullName, [ref]$tokens, [ref]$errors)
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error $_.Message }
+              throw 'Windows release PowerShell parsing failed.'
+            }
           }
 
       - name: Add Windows SDK signing tools to PATH
@@ -118,6 +122,7 @@ jobs:
           Write-Host "Using Windows SDK signing tools from $($signTool.DirectoryName)"
 
       - name: Stamp Backboard release metadata
+        if: ${{ !inputs.reuse_signed_run }}
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -133,6 +138,7 @@ jobs:
             --build-info windows-build-info.json
 
       - name: Install Windows build dependencies
+        if: ${{ !inputs.reuse_signed_run }}
         shell: pwsh
         working-directory: backboard
         env:
@@ -148,6 +154,7 @@ jobs:
         run: npm ci
 
       - name: Build Backboard Studio application
+        if: ${{ !inputs.reuse_signed_run }}
         shell: pwsh
         working-directory: backboard
         env:
@@ -176,6 +183,21 @@ jobs:
           npm run gulp -- vscode-win32-x64
           npm run gulp -- vscode-win32-x64-inno-updater
 
+      - name: Restore previously verified application payload
+        if: ${{ inputs.reuse_signed_run }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          if ($env:REUSE_SIGNED_RUN -notmatch '^\d+$') { throw 'Invalid source run ID' }
+          $run = gh run view $env:REUSE_SIGNED_RUN --json conclusion,workflowName | ConvertFrom-Json
+          if ($run.conclusion -ne 'success' -or $run.workflowName -ne 'Windows Release') { throw 'Expected a successful Windows Release run' }
+          gh run download $env:REUSE_SIGNED_RUN -n "Backboard-Studio-$env:RELEASE_VERSION-windows-x64-verified-payload" -D .
+          $info = Get-Content -Raw windows-build-info.json | ConvertFrom-Json
+          if ($info.version -ne $env:RELEASE_VERSION -or $info.channel -ne $env:RELEASE_CHANNEL -or $info.arch -ne 'x64') { throw 'Source payload does not match requested release' }
+
       - name: Validate complete Windows application payload
         shell: pwsh
         run: |
@@ -200,6 +222,7 @@ jobs:
           subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
 
       - name: Sign application binaries with Azure Artifact Signing
+        if: ${{ !inputs.reuse_signed_run }}
         uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2
         with:
           endpoint: ${{ env.ARTIFACT_SIGNING_ENDPOINT }}
@@ -232,20 +255,30 @@ jobs:
           retention-days: 3
           compression-level: 0
 
-      - name: Build installers from signed application payload
+      - name: Install compiler with extended path support
         shell: pwsh
-        working-directory: backboard
         run: |
           $ErrorActionPreference = 'Stop'
-          $PSNativeCommandUseErrorActionPreference = $true
-          npm run gulp -- vscode-win32-x64-system-setup
-          npm run gulp -- vscode-win32-x64-user-setup
+          $setup = Join-Path $env:RUNNER_TEMP 'innosetup-7.1.0-x64.exe'
+          Invoke-WebRequest 'https://github.com/jrsoftware/issrc/releases/download/is-7_1_0/innosetup-7.1.0-x64.exe' -OutFile $setup
+          $signature = Get-AuthenticodeSignature $setup
+          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch '(^|, )CN=Pyrsys B\.V\.(,|$)') { throw 'Inno Setup compiler signature verification failed' }
+          $compilerFolder = Join-Path $env:RUNNER_TEMP 'InnoSetup7'
+          $process = Start-Process $setup -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/DIR=`"$compilerFolder`"") -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw 'Inno Setup compiler installation failed' }
+          "BACKBOARD_INNO_SETUP_PATH=$compilerFolder\ISCC.exe" | Out-File $env:GITHUB_ENV -Append
 
+      - name: Build installers from signed application payload
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
           $release = Join-Path '${{ github.workspace }}' "windows-release\$env:RELEASE_VERSION\x64"
           New-Item -ItemType Directory -Force $release | Out-Null
-          Copy-Item -Force '.build\win32-x64\system-setup\VSCodeSetup.exe' (Join-Path $release 'Backboard-Studio-System-Setup-x64.exe')
-          Copy-Item -Force '.build\win32-x64\user-setup\VSCodeSetup.exe' (Join-Path $release 'Backboard-Studio-User-Setup-x64.exe')
-          Copy-Item -Force '${{ github.workspace }}\windows-build-info.json' (Join-Path $release 'build-info.json')
+          ./scripts/windows-release/Build-Installers.ps1 -ApplicationPath VSCode-win32-x64 -RepositoryPath backboard -OutputPath $release -CompilerPath $env:BACKBOARD_INNO_SETUP_PATH
+          $info = Get-Content -Raw windows-build-info.json | ConvertFrom-Json
+          $info | Add-Member -NotePropertyName installerSourceCommit -NotePropertyValue '${{ github.sha }}' -Force
+          $info | Add-Member -NotePropertyName installerCompilerVersion -NotePropertyValue '7.1.0' -Force
+          $info | ConvertTo-Json -Depth 10 | Set-Content (Join-Path $release 'build-info.json') -Encoding utf8NoBOM
 
       - name: Sign Windows installers with Azure Artifact Signing
         uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2
@@ -278,6 +311,19 @@ jobs:
             Sort-Object -Property Name |
             ForEach-Object { "{0}  {1}" -f (Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash.ToLowerInvariant(), $_.Name }
           Set-Content -LiteralPath (Join-Path $release 'SHA256SUMS') -Value $checksums -Encoding utf8NoBOM
+
+      - name: Test installer registration and removal
+        shell: pwsh
+        run: ./scripts/windows-release/Test-Installers.ps1 -ReleasePath "windows-release/$env:RELEASE_VERSION/x64" -Version $env:RELEASE_VERSION
+
+      - name: Preserve installation test evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: Windows-installer-verification-${{ inputs.version }}
+          path: installer-test-results/
+          if-no-files-found: ignore
+          retention-days: 30
 
       - name: Publish signed Windows release artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
