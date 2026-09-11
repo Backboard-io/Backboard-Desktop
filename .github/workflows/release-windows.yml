@@ -215,6 +215,7 @@ jobs:
           Write-Host "Validated packaged application: $($mainExecutables.Name -join ', ')"
 
       - name: Sign in to Azure with GitHub OIDC
+        if: ${{ !inputs.reuse_signed_run }}
         uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca # v3
         with:
           client-id: ${{ env.AZURE_CLIENT_ID }}
@@ -280,6 +281,22 @@ jobs:
           $info | Add-Member -NotePropertyName installerCompilerVersion -NotePropertyValue '7.1.0' -Force
           $info | ConvertTo-Json -Depth 10 | Set-Content (Join-Path $release 'build-info.json') -Encoding utf8NoBOM
 
+      - name: Preserve compiled installer candidates
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: Backboard-Studio-${{ inputs.version }}-windows-x64-installer-candidates
+          path: windows-release/${{ inputs.version }}/x64/
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
+
+      - name: Refresh Azure sign-in immediately before installer signing
+        uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca # v3
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
       - name: Sign Windows installers with Azure Artifact Signing
         uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2
         with:
@@ -296,6 +313,7 @@ jobs:
           description-url: https://github.com/Backboard-io/Backboard-Desktop
 
       - name: Verify installers and create portable archive
+        id: verify_installers
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -326,6 +344,7 @@ jobs:
           retention-days: 30
 
       - name: Publish signed Windows release artifact
+        if: ${{ !cancelled() && steps.verify_installers.outcome == 'success' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: Backboard-Studio-${{ inputs.version }}-windows-x64-signed
