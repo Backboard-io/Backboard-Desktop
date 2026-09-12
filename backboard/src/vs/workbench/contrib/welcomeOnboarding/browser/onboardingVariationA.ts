@@ -191,7 +191,6 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 
 	private previouslyFocusedElement: HTMLElement | undefined;
 	private _isShowing = false;
-	private postOnboardingSignInPromptShown = false;
 	private selectedThemeId = 'dark-2026';
 	private selectedExperience = OnboardingExperience.Simple;
 	private hasConfirmedBackboardSignIn = false;
@@ -348,9 +347,6 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		}
 
 		this._logAction('dismiss', undefined, reason);
-		if (reason === 'skip') {
-			this.postOnboardingSignInPromptShown = true;
-		}
 		this._storeOnboardingState(reason);
 		this.overlay.classList.remove('visible');
 		this.overlay.classList.add('exiting');
@@ -365,8 +361,8 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			this._removeFromDOM();
 			this._onDidDismiss.fire();
 			const postDismissWork = reason === 'complete'
-				? this._openSelectedExperienceAfterOnboarding().then(() => this._promptBackboardSsoAfterOnboarding())
-				: this._promptBackboardSsoAfterOnboarding();
+				? this._openSelectedExperienceAfterOnboarding()
+				: Promise.resolve();
 			postDismissWork
 				.catch(error => {
 					this.notificationService.notify({
@@ -419,94 +415,6 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		});
 	}
 
-	private async _promptBackboardSsoAfterOnboarding(): Promise<void> {
-		if (this.postOnboardingSignInPromptShown || !this._isBackboardProduct()) {
-			return;
-		}
-
-		if (await this._hasBackboardCredentials()) {
-			return;
-		}
-
-		this.postOnboardingSignInPromptShown = true;
-		this._showBackboardSsoPromptDialog();
-	}
-
-	private _showBackboardSsoPromptDialog(): void {
-		const promptDisposables = new DisposableStore();
-		const overlay = append(this.layoutService.activeContainer, $('.onboarding-backboard-sso-overlay'));
-		overlay.setAttribute('role', 'presentation');
-
-		const dialog = append(overlay, $('.onboarding-backboard-sso-dialog'));
-		dialog.setAttribute('role', 'dialog');
-		dialog.setAttribute('aria-modal', 'true');
-		dialog.setAttribute('aria-label', localize('onboarding.backboard.ssoPrompt.aria', "Sign in to Backboard"));
-
-		this._createBackboardMark(dialog, 'onboarding-backboard-sso-logo');
-
-		const title = append(dialog, $('h3.onboarding-backboard-sso-title'));
-		title.textContent = localize('onboarding.backboard.ssoPrompt.title', "Sign in to Backboard");
-
-		const description = append(dialog, $('p.onboarding-backboard-sso-description'));
-		description.textContent = localize('onboarding.backboard.ssoPrompt.description', "Use single sign-on to enable Backboard Chat and Agents.");
-
-		const actions = append(dialog, $('.onboarding-backboard-sso-actions'));
-		const signInButton = append(actions, $<HTMLButtonElement>('button.onboarding-backboard-sso-primary'));
-		signInButton.type = 'button';
-		signInButton.textContent = localize('onboarding.backboard.ssoPrompt.signIn', "Sign in with SSO");
-
-		const laterButton = append(actions, $<HTMLButtonElement>('button.onboarding-backboard-sso-secondary'));
-		laterButton.type = 'button';
-		laterButton.textContent = localize('onboarding.backboard.ssoPrompt.later', "Later");
-
-		const close = () => {
-			promptDisposables.dispose();
-			overlay.remove();
-		};
-
-		promptDisposables.add(addDisposableListener(signInButton, EventType.CLICK, () => {
-			close();
-			void this.commandService.executeCommand('backboard.signIn');
-		}));
-		promptDisposables.add(addDisposableListener(laterButton, EventType.CLICK, close));
-		promptDisposables.add(addDisposableListener(overlay, EventType.CLICK, event => {
-			if (event.target === overlay) {
-				close();
-			}
-		}));
-		promptDisposables.add(addDisposableListener(getActiveWindow(), EventType.KEY_DOWN, event => {
-			const keyboardEvent = new StandardKeyboardEvent(event);
-			if (keyboardEvent.keyCode === KeyCode.Escape) {
-				close();
-			}
-		}));
-
-		getActiveWindow().requestAnimationFrame(() => signInButton.focus());
-	}
-
-	private async _hasBackboardCredentials(): Promise<boolean> {
-		const home = this.pathService.userHome({ preferLocal: true });
-		const configResource = URI.joinPath(home, '.backboard_ide', 'config.json');
-		const config = await this._readBackboardConfigJson(configResource);
-		const apiKey = typeof config.api_key === 'string' ? config.api_key.trim() : '';
-		if (apiKey) {
-			return true;
-		}
-
-		const configuredEnv = this.configurationService.getValue<string>('backboard.env');
-		const env = normalizeBackboardEnv(typeof config.env === 'string' ? config.env : configuredEnv);
-		const envKey = getBackboardEnvKeys(config)[env]?.trim();
-		if (envKey) {
-			return true;
-		}
-
-		const oauth = isObjectRecord(config.oauth) ? config.oauth : undefined;
-		return typeof oauth?.access_token === 'string' && Boolean(oauth.access_token.trim());
-	}
-
-	private _isBackboardProduct(): boolean {
-		return product.defaultChatAgent?.provider?.default?.id === 'backboard';
-	}
 
 	private _nextStep(): void {
 		const nextStepIndex = this._nextVisibleStepIndex();
@@ -700,75 +608,10 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		const subtitle = append(intro, $('p.onboarding-backboard-subtitle'));
 		subtitle.textContent = getOnboardingStepSubtitle(OnboardingStepId.Welcome);
 
-		const signInButton = this._registerStepFocusable(append(welcomeContent, $<HTMLButtonElement>('button.onboarding-backboard-sign-in-button')));
-		signInButton.type = 'button';
-		signInButton.textContent = localize('onboarding.backboard.signInButton', "Log In");
-
-		const accountPrompt = append(welcomeContent, $('.onboarding-backboard-account-prompt'));
-		const signUpButton = this._registerStepFocusable(append(accountPrompt, $<HTMLButtonElement>('button.onboarding-backboard-account-link')));
-		signUpButton.type = 'button';
-		signUpButton.textContent = localize('onboarding.backboard.createAccount', "Sign Up");
-
-		let didContinueWithoutAccount = false;
-		let skipButton: HTMLButtonElement | undefined;
-		const showContinueWithoutAccount = (): void => {
-			if (skipButton) {
-				return;
-			}
-
-			const skipArea = append(welcomeContent, $('.onboarding-backboard-skip-area'));
-			skipButton = this._registerStepFocusable(append(skipArea, $<HTMLButtonElement>('button.onboarding-backboard-skip-link')));
-			skipButton.type = 'button';
-			skipButton.textContent = localize('onboarding.backboard.skipStep', "Continue without an account");
-			this.stepDisposables.add(addDisposableListener(skipButton, EventType.CLICK, () => {
-				didContinueWithoutAccount = true;
-				this.postOnboardingSignInPromptShown = true;
-				this._logAction('skipWelcomeSignIn');
-				this._advanceOrComplete();
-			}));
-		};
-		showContinueWithoutAccount();
-
-		// Completing onboarding reloads this window into the chosen experience,
-		// which would kill an in-flight sign-in (the extension host dies with the
-		// reload before the device-code flow can open the browser or save the
-		// tokens). So wait for the sign-in to finish before advancing; the
-		// browser opens right away, this page just stays up until approval.
-		const startBackboardSignIn = async (sourceButton: HTMLButtonElement, action: string): Promise<void> => {
-			if (signInButton.disabled || signUpButton.disabled) {
-				return;
-			}
-			this._logAction(action);
-			showContinueWithoutAccount();
-			signInButton.disabled = true;
-			signUpButton.disabled = true;
-			const idleLabel = sourceButton.textContent;
-			sourceButton.textContent = localize('onboarding.backboard.signInWaiting', "Waiting for sign in… finish in your browser");
-			try {
-				// Resolves true once the tokens are saved; false when the sign-in
-				// failed or was denied (the extension already surfaced that error).
-				if (await this.commandService.executeCommand<boolean>('backboard.signIn') && !didContinueWithoutAccount) {
-					this._advanceOrComplete();
-					return;
-				}
-			} catch (error) {
-				this.notificationService.notify({
-					severity: Severity.Error,
-					message: localize('onboarding.backboard.signInFailed', "Could not start Backboard sign in."),
-					source: error instanceof Error ? error.message : undefined,
-				});
-			}
-			signInButton.disabled = false;
-			signUpButton.disabled = false;
-			sourceButton.textContent = idleLabel;
-		};
-
-		this.stepDisposables.add(addDisposableListener(signInButton, EventType.CLICK, () => {
-			void startBackboardSignIn(signInButton, 'openBackboardSso');
-		}));
-		this.stepDisposables.add(addDisposableListener(signUpButton, EventType.CLICK, () => {
-			void startBackboardSignIn(signUpButton, 'openBackboardSignIn');
-		}));
+		const continueButton = this._registerStepFocusable(append(welcomeContent, $<HTMLButtonElement>('button.onboarding-backboard-sign-in-button')));
+		continueButton.type = 'button';
+		continueButton.textContent = localize('onboarding.backboard.continue', "Continue");
+		this.stepDisposables.add(addDisposableListener(continueButton, EventType.CLICK, () => this._advanceOrComplete()));
 	}
 
 	private _createAnimatedBackboardMark(parent: HTMLElement): HTMLElement {

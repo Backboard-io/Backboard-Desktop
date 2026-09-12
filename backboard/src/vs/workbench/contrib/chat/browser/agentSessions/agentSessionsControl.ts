@@ -251,7 +251,7 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 			return;
 		}
 
-		BackboardAuthContextKeys.enabled.bindTo(this.contextKeyService).set(true);
+		BackboardAuthContextKeys.enabled.bindTo(this.contextKeyService).set(false);
 		const signedIn = await hasBackboardCredentials(this.fileService, await backboardConfigResource(this.pathService));
 		BackboardAuthContextKeys.signedIn.bindTo(this.contextKeyService).set(signedIn);
 		this.updateBackboardAuthGate();
