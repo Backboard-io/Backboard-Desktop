@@ -686,7 +686,7 @@ export class SessionView extends Disposable implements ISerializableView {
 			return;
 		}
 
-		this._backboardAuthEnabledKey.set(false);
+		this._backboardAuthEnabledKey.set(true);
 		this._backboardSignedInKey.set(await hasBackboardCredentials(this.fileService, await backboardConfigResource(this.pathService)));
 		this._updateBackboardAuthGate();
 	}

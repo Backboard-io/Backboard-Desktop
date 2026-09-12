@@ -31,7 +31,7 @@ export function registerBackboardSsoActions(): void {
 				id: 'backboard.signIn',
 				title: localize2('backboard.signIn', "Backboard: Sign In"),
 				category: backboardCategory,
-				f1: false,
+				f1: true,
 			});
 		}
 
@@ -80,7 +80,7 @@ export class BackboardCredentialsContribution extends Disposable implements IWor
 
 		this.signedInKey = BackboardAuthContextKeys.signedIn.bindTo(this.contextKeyService);
 		if (isBackboardProduct()) {
-			BackboardAuthContextKeys.enabled.bindTo(this.contextKeyService).set(false);
+			BackboardAuthContextKeys.enabled.bindTo(this.contextKeyService).set(true);
 			this.signedInKey.set(false);
 			this.watchBackboardCredentials().catch(error => this.logService.error(`[Backboard] Failed to check credentials: ${error instanceof Error ? error.message : String(error)}`));
 		} else {
@@ -115,7 +115,7 @@ export class BackboardCredentialsContribution extends Disposable implements IWor
 			markBackboardChatReady(this.chatEntitlementService, this.contextKeyService);
 			this.logService.info(`[Backboard] Credentials found in ${configResource.fsPath}; chat setup marked ready.`);
 		} else {
-			this.logService.info(`[Backboard] Credentials removed from ${configResource.fsPath}; workspace access remains available.`);
+			this.logService.info(`[Backboard] Credentials removed from ${configResource.fsPath}; auth gates enabled.`);
 		}
 	}
 }
@@ -164,7 +164,7 @@ class BackboardSignInTitleBarEntry extends BaseActionViewItem {
 
 function markBackboardChatReady(chatEntitlementService: IChatEntitlementService, contextKeyService: IContextKeyService): void {
 	chatEntitlementService.markSetupCompleted();
-	BackboardAuthContextKeys.enabled.bindTo(contextKeyService).set(false);
+	BackboardAuthContextKeys.enabled.bindTo(contextKeyService).set(true);
 	BackboardAuthContextKeys.signedIn.bindTo(contextKeyService).set(true);
 	ChatEntitlementContextKeys.Setup.completed.bindTo(contextKeyService).set(true);
 	ChatEntitlementContextKeys.Setup.installed.bindTo(contextKeyService).set(true);

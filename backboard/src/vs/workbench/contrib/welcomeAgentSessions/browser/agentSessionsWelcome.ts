@@ -261,7 +261,7 @@ export class AgentSessionsWelcomePage extends EditorPane {
 			return;
 		}
 
-		BackboardAuthContextKeys.enabled.bindTo(this.contextService).set(false);
+		BackboardAuthContextKeys.enabled.bindTo(this.contextService).set(true);
 		const signedIn = await hasBackboardCredentials(this.fileService, await backboardConfigResource(this.pathService));
 		BackboardAuthContextKeys.signedIn.bindTo(this.contextService).set(signedIn);
 		this.updateBackboardAuthGate();
