@@ -80,7 +80,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			bridge.warmUp();
 		}
 	}));
-	context.subscriptions.push(vscode.commands.registerCommand('backboard.extension.signIn', () => signInBackboard(bridge)));
+	context.subscriptions.push(vscode.commands.registerCommand('backboard.extension.signIn', () => promptBackboardSso(bridge)));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.refreshModels', () => panelProvider.refreshModels()));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.generateCommitMessage', (rootUri: vscode.Uri | undefined, _context: unknown, token: vscode.CancellationToken | undefined) => generateBackboardCommitMessage(bridge, rootUri, token)));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.openUsage', () => usagePanel.show()));
@@ -94,28 +94,16 @@ export function activate(context: vscode.ExtensionContext): void {
 		await openBackboardView();
 		await panelProvider.postUiCommand('showHistory');
 	}));
+	void updateBackboardAuthContext();
 	const configWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(path.dirname(backboardConfigPath()), path.basename(backboardConfigPath())));
-	let credentialSignature: string | undefined;
-	const refreshBackboardState = async () => {
-		const config = await readBackboardConfigJson();
-		const nextSignature = JSON.stringify([config.env, configuredBackboardApiKey(), config.env_keys, config.oauth]);
-		if (credentialSignature !== undefined && credentialSignature !== nextSignature) {
-			bridge.restart();
-		}
-		credentialSignature = nextSignature;
-		await updateBackboardAuthContext();
+	const refreshBackboardState = () => {
+		void updateBackboardAuthContext();
 		panelProvider.refreshState();
 	};
-	void refreshBackboardState();
 	context.subscriptions.push(configWatcher);
 	context.subscriptions.push(configWatcher.onDidCreate(refreshBackboardState));
 	context.subscriptions.push(configWatcher.onDidChange(refreshBackboardState));
 	context.subscriptions.push(configWatcher.onDidDelete(refreshBackboardState));
-	context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => {
-		if (event.affectsConfiguration('backboard.apiKey')) {
-			void refreshBackboardState();
-		}
-	}));
 	const panelStateWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(path.dirname(backboardPanelStatePath()), path.basename(backboardPanelStatePath())));
 	const panelThreadsWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(backboardThreadsDir(), '*.json'));
 	let panelHistoryRefreshTimer: ReturnType<typeof setTimeout> | undefined;
@@ -162,7 +150,7 @@ async function generateBackboardCommitMessage(bridge: BackboardBridge, rootUri: 
 		const signIn = 'Sign In to Backboard';
 		const selection = await vscode.window.showInformationMessage('Sign in to Backboard before generating a commit message.', signIn);
 		if (selection === signIn) {
-			await promptBackboardSignIn(bridge);
+			await promptBackboardSso(bridge);
 		}
 		return;
 	}
@@ -310,13 +298,8 @@ async function setApiKey(): Promise<boolean> {
 	return false;
 }
 
-async function promptBackboardSignIn(bridge: BackboardBridge): Promise<boolean> {
-	const signedIn = await vscode.commands.executeCommand<boolean>('backboard.signIn');
-	if (signedIn) {
-		bridge.restart();
-		bridge.warmUp();
-	}
-	return Boolean(signedIn);
+async function promptBackboardSso(bridge: BackboardBridge): Promise<boolean> {
+	return signInBackboard(bridge);
 }
 
 /**
@@ -533,7 +516,7 @@ async function handleBackboardError(webview: vscode.Webview, error: unknown, bri
 	if (isBackboardAuthError(error)) {
 		await webview.postMessage({ type: 'status', text: 'Backboard authentication required.' });
 		if (bridge) {
-			await promptBackboardSignIn(bridge);
+			await promptBackboardSso(bridge);
 		}
 		return;
 	}
@@ -1652,14 +1635,13 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 			} else if (message?.type === 'reviewChanges') {
 				void vscode.commands.executeCommand('workbench.view.scm');
 				} else if (message?.type === 'setApiKey') {
-					void promptBackboardSignIn(this.bridge).then(changed => {
+					void promptBackboardSso(this.bridge).then(changed => {
 						if (changed) {
 							void postPanelState(this.bridge, webviewView.webview, true);
 						}
 					});
-				} else if (message?.type === 'signIn' || message?.type === 'signInWithBrowser') {
-					const signIn = message.type === 'signInWithBrowser' ? signInBackboard(this.bridge) : promptBackboardSignIn(this.bridge);
-					void signIn.then(changed => {
+				} else if (message?.type === 'signIn') {
+					void promptBackboardSso(this.bridge).then(changed => {
 						if (changed) {
 							void postPanelState(this.bridge, webviewView.webview, true);
 						}
@@ -3674,7 +3656,7 @@ async function postPanelState(bridge: BackboardBridge, webview: vscode.Webview, 
 		} else {
 				await webview.postMessage({ type: 'append', role: 'error', text: error instanceof Error ? error.message : String(error) });
 				if (isBackboardAuthError(error)) {
-					await webview.postMessage({ type: 'status', text: 'Sign in to Backboard to load models.' });
+					await webview.postMessage({ type: 'status', text: 'Sign in with Backboard SSO to load models.' });
 				} else {
 					await webview.postMessage({ type: 'status', text: 'Could not load models.' });
 				}

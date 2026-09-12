@@ -3,8 +3,6 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { renderBackboardAccountActions } from './backboardAccountActions.js';
-import { isBackboardProduct } from '../../chat/common/backboardAuth.js';
 import { BrowserFeatures } from '../../../../base/browser/canIUse.js';
 import * as DOM from '../../../../base/browser/dom.js';
 import * as domStylesheetsJs from '../../../../base/browser/domStylesheets.js';
@@ -789,7 +787,6 @@ interface ISettingNewExtensionsTemplate extends IDisposableTemplate {
 }
 
 interface IGroupTitleTemplate extends IDisposableTemplate {
-	elementDisposables: DisposableStore;
 	context?: SettingsTreeGroupElement;
 	parent: HTMLElement;
 }
@@ -1137,26 +1134,19 @@ export abstract class AbstractSettingRenderer extends Disposable implements ITre
 class SettingGroupRenderer implements ITreeRenderer<SettingsTreeGroupElement, never, IGroupTitleTemplate> {
 	templateId = SETTINGS_ELEMENT_TEMPLATE_ID;
 
-	constructor(@ICommandService private readonly commandService: ICommandService) { }
-
 	renderTemplate(container: HTMLElement): IGroupTitleTemplate {
 		container.classList.add('group-title');
 
-		const toDispose = new DisposableStore();
 		const template: IGroupTitleTemplate = {
 			parent: container,
-			elementDisposables: toDispose.add(new DisposableStore()),
-			toDispose
+			toDispose: new DisposableStore()
 		};
 
 		return template;
 	}
 
 	renderElement(element: ITreeNode<SettingsTreeGroupElement, never>, index: number, templateData: IGroupTitleTemplate): void {
-		templateData.elementDisposables.clear();
 		templateData.parent.innerText = '';
-		const showAccountActions = isBackboardProduct() && element.element.id === 'commonlyUsed';
-		templateData.parent.classList.toggle('backboard-account-group', showAccountActions);
 		const labelElement = DOM.append(templateData.parent, $('div.settings-group-title-label.settings-row-inner-container'));
 		labelElement.classList.add(`settings-group-level-${element.element.level}`);
 		labelElement.textContent = element.element.label;
@@ -1164,13 +1154,6 @@ class SettingGroupRenderer implements ITreeRenderer<SettingsTreeGroupElement, ne
 		if (element.element.isFirstGroup) {
 			labelElement.classList.add('settings-group-first');
 		}
-		if (showAccountActions) {
-			renderBackboardAccountActions(templateData.parent, this.commandService, templateData.elementDisposables);
-		}
-	}
-
-	disposeElement(_element: ITreeNode<SettingsTreeGroupElement, never>, _index: number, templateData: IGroupTitleTemplate): void {
-		templateData.elementDisposables.clear();
 	}
 
 	disposeTemplate(templateData: IGroupTitleTemplate): void {
@@ -2656,12 +2639,12 @@ class SettingsTreeDelegate extends CachedListVirtualDelegate<SettingsTreeGroupCh
 	}
 
 	hasDynamicHeight(element: SettingsTreeGroupElement | SettingsTreeSettingElement | SettingsTreeNewExtensionsElement): boolean {
-		return !(element instanceof SettingsTreeGroupElement) || (isBackboardProduct() && element.id === 'commonlyUsed');
+		return !(element instanceof SettingsTreeGroupElement);
 	}
 
 	protected estimateHeight(element: SettingsTreeGroupChild): number {
 		if (element instanceof SettingsTreeGroupElement) {
-			return isBackboardProduct() && element.id === 'commonlyUsed' ? 240 : 64;
+			return 64;
 		}
 
 		return element instanceof SettingsTreeSettingElement && element.valueType === SettingValueType.Boolean ? 78 : 104;

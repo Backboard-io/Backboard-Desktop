@@ -228,25 +228,20 @@ export class AgentSessionsWelcomePage extends EditorPane {
 		const description = append(card, $('p.backboard-auth-gate-description'));
 		description.textContent = localize('backboard.auth.agentsWelcome.description', "To use the Agents page, sign in to Backboard.");
 
-		for (const [command, label] of [
-			['backboard.signIn', localize('backboard.auth.signIn', "Sign In")],
-			['backboard.signInWithBrowser', localize('backboard.auth.signInSso', "Sign in with SSO")],
-		]) {
-			const button = append(card, $<HTMLButtonElement>('button.backboard-auth-gate-button'));
-			button.type = 'button';
-			button.textContent = label;
-			this._register(addDisposableListener(button, EventType.CLICK, () => {
-				this.signInAndRefreshBackboardAuthGate(command).catch(error => {
-					this.logService.error(`[Backboard] Failed to refresh agents welcome auth gate after sign in: ${error instanceof Error ? error.message : String(error)}`);
-				});
-			}));
-		}
+		const button = append(card, $<HTMLButtonElement>('button.backboard-auth-gate-button'));
+		button.type = 'button';
+		button.textContent = localize('backboard.auth.signInSso', "Sign in with SSO");
+		this._register(addDisposableListener(button, EventType.CLICK, () => {
+			this.signInAndRefreshBackboardAuthGate().catch(error => {
+				this.logService.error(`[Backboard] Failed to refresh agents welcome auth gate after sign in: ${error instanceof Error ? error.message : String(error)}`);
+			});
+		}));
 
 		this.backboardAuthGateOverlay = overlay;
 	}
 
-	private async signInAndRefreshBackboardAuthGate(command = 'backboard.signIn'): Promise<void> {
-		await this.commandService.executeCommand(command);
+	private async signInAndRefreshBackboardAuthGate(): Promise<void> {
+		await this.commandService.executeCommand('backboard.signIn');
 		await this.refreshBackboardAuthGateFromConfig();
 	}
 

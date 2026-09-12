@@ -28,9 +28,6 @@ export interface IOnboardingService {
 	 */
 	show(): void;
 
-	/** Show the shared sign-in panel without restarting onboarding. */
-	showSignIn(): Promise<boolean>;
-
 	/**
 	 * Reset onboarding state in the current session and show the modal.
 	 */

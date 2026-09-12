@@ -430,9 +430,8 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 					<div class="authCard">
 						<div class="authLogo" aria-hidden="true"></div>
 						<div class="authTitle">Sign in required</div>
-						<div class="authText">Sign in to Backboard to use chat.</div>
-						<button id="authSsoBtn" class="authButton" type="button">Sign in with SSO</button>
-						<button id="authSignInBtn" class="authButton" type="button"><span class="codicon codicon-account"></span><span>Sign In</span></button>
+						<div class="authText">Sign in with Backboard SSO to use the auxiliary bar.</div>
+						<button id="authSignInBtn" class="authButton" type="button"><span class="codicon codicon-account"></span><span>Sign in with SSO</span></button>
 					</div>
 				</div>
 		</div>
@@ -567,7 +566,7 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 				const providerRows = allProviders.map(provider => providerSwitch(provider, !disabledModelProviders.has(provider))).join('');
 				return filterWrap + '<div class="providerFilterPane"><div class="filterHeader"><span class="filterTitle">Filter by provider</span><span class="filterMeta">Choose one or more providers, then press Done.</span></div><div class="providerSwitchList">' + allProvidersRow + providerRows + '</div><button class="providerFilterDone" type="button" data-action="doneModelProviderFilters">Done</button></div>';
 			}
-			const noModelsMeta = query ? 'Try a different text filter.' : disabledModelProviders.size ? 'Enable a provider filter.' : 'Refresh models or sign in.';
+			const noModelsMeta = query ? 'Try a different text filter.' : disabledModelProviders.size ? 'Enable a provider filter.' : 'Refresh models or sign in with SSO.';
 			const sections = providers.length ? providers.map(provider => {
 				const rows = filtered
 					.filter(model => model.provider === provider)
@@ -575,7 +574,7 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 					.join('');
 				return section(providerDisplayName(provider), rows);
 			}).join('') : section('Models', choice('disabled', '', 'No matching models', noModelsMeta, false, true));
-			return filterWrap + sections + '<div class="popoverActions">' + actionButton('refreshModels', 'Refresh Models', 'refresh') + actionButton('signIn', 'Sign In', 'account') + actionButton('signInWithBrowser', 'Sign in with SSO', 'globe') + '</div>';
+			return filterWrap + sections + '<div class="popoverActions">' + actionButton('refreshModels', 'Refresh Models', 'refresh') + actionButton('signIn', 'SSO', 'account') + '</div>';
 		}
 		function renderReasoningPopover() {
 			const modes = [
@@ -765,9 +764,6 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 			});
 		}
 			prompt.addEventListener('input', syncComposerButtons);
-			document.getElementById('authSsoBtn')?.addEventListener('click', () => {
-				vscode.postMessage({ type: 'signInWithBrowser' });
-			});
 			authSignInButton?.addEventListener('click', () => {
 				vscode.postMessage({ type: 'signIn' });
 			});
@@ -1079,9 +1075,6 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 				closePopover();
 			} else if (action === 'refreshUsage') {
 				requestUsageSnapshot();
-			} else if (action === 'signInWithBrowser') {
-				vscode.postMessage({ type: 'signInWithBrowser' });
-				closePopover();
 			} else if (action === 'setApiKey' || action === 'signIn') {
 				vscode.postMessage({ type: 'signIn' });
 				closePopover();

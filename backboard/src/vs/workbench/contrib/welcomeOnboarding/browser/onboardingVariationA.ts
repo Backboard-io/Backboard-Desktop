@@ -109,11 +109,6 @@ interface ISettingsImportSelector {
 	source: ISettingsImportSource | undefined;
 }
 
-// Reviewer-only account bundled for Microsoft certification. Rotate the key after review.
-const BACKBOARD_REVIEWER_EMAIL = 'bburgers784@gmail.com';
-const BACKBOARD_REVIEWER_PASSWORD = 'password123!';
-const BACKBOARD_REVIEWER_API_KEY = 'espr_tyhOMooCooJTflQaY_woWX0aRwGnlfAtsS3wiGpUz_I';
-
 const BACKBOARD_SIGN_IN_URL = 'https://app.backboard.io/signup';
 const BACKBOARD_API_KEYS_URL = 'https://app.backboard.io/dashboard/api-keys';
 const BACKBOARD_API_KEY_PATTERN = /^espr_[A-Za-z0-9_-]{43}$/;
@@ -187,9 +182,6 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 	private nextButton: HTMLButtonElement | undefined;
 	private closeButton: HTMLButtonElement | undefined;
 
-	private signInOnly = false;
-	private signInRequest: { promise: Promise<boolean>; resolve: (signedIn: boolean) => void } | undefined;
-
 	private currentStepIndex = 0;
 	private readonly steps = ONBOARDING_STEPS;
 	private readonly disposables = this._register(new DisposableStore());
@@ -240,19 +232,6 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		return this._isShowing;
 	}
 
-	showSignIn(): Promise<boolean> {
-		if (this.signInRequest) {
-			return this.signInRequest.promise;
-		}
-		let resolve!: (signedIn: boolean) => void;
-		const promise = new Promise<boolean>(result => { resolve = result; });
-		this.signInRequest = { promise, resolve };
-		this.signInOnly = !this.overlay;
-		this.show();
-		this._focusCurrentStepElement();
-		return promise;
-	}
-
 	show(): void {
 		if (this.overlay) {
 			return;
@@ -265,7 +244,6 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		const container = this.layoutService.activeContainer;
 
 		this.overlay = append(container, $('.onboarding-a-overlay'));
-		this.overlay.classList.toggle('onboarding-sign-in-only', this.signInOnly);
 		this.overlay.setAttribute('role', 'dialog');
 		this.overlay.setAttribute('aria-modal', 'true');
 		this.overlay.setAttribute('aria-label', localize('onboarding.backboard.aria', "Welcome to Backboard Studio"));
@@ -275,10 +253,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		this.closeButton = append(this.card, $<HTMLButtonElement>('button.onboarding-a-close-btn'));
 		this.closeButton.type = 'button';
 		this.closeButton.setAttribute('aria-label', localize('onboarding.skip', "Skip Onboarding"));
-		this.closeButton.textContent = this.signInOnly ? localize('onboarding.signIn.close', "Close") : localize('onboarding.skipButton', "Skip");
-		if (this.signInOnly) {
-			this.closeButton.setAttribute('aria-label', localize('onboarding.signIn.close', "Close"));
-		}
+		this.closeButton.textContent = localize('onboarding.skipButton', "Skip");
 
 		const header = append(this.card, $('.onboarding-a-header'));
 		this.progressContainer = append(header, $('.onboarding-a-progress'));
@@ -368,20 +343,11 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 	}
 
 	private _dismiss(reason: 'complete' | 'skip'): void {
-		if (!this.overlay || this.overlay.classList.contains('exiting')) {
-			return;
-		}
-
-		const signInRequest = this.signInRequest;
-		this.signInRequest = undefined;
-		if (this.signInOnly) {
-			this._removeFromDOM();
-			signInRequest?.resolve(reason === 'complete');
+		if (!this.overlay) {
 			return;
 		}
 
 		this._logAction('dismiss', undefined, reason);
-		this.selectedExperience = OnboardingExperience.Simple;
 		if (reason === 'skip') {
 			this.postOnboardingSignInPromptShown = true;
 		}
@@ -397,9 +363,10 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 
 			handled = true;
 			this._removeFromDOM();
-			signInRequest?.resolve(reason === 'complete');
 			this._onDidDismiss.fire();
-			const postDismissWork = this._openSelectedExperienceAfterOnboarding().then(() => this._promptBackboardSsoAfterOnboarding());
+			const postDismissWork = reason === 'complete'
+				? this._openSelectedExperienceAfterOnboarding().then(() => this._promptBackboardSsoAfterOnboarding())
+				: this._promptBackboardSsoAfterOnboarding();
 			postDismissWork
 				.catch(error => {
 					this.notificationService.notify({
@@ -418,7 +385,6 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 	private _storeOnboardingState(reason: 'complete' | 'skip'): void {
 		const state: IBackboardOnboardingState = {
 			version: 1,
-			tourEligible: this.storageService.isNew(StorageScope.APPLICATION),
 			completed: reason === 'complete',
 			dismissedReason: reason,
 			experience: this.selectedExperience,
@@ -482,16 +448,12 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		title.textContent = localize('onboarding.backboard.ssoPrompt.title', "Sign in to Backboard");
 
 		const description = append(dialog, $('p.onboarding-backboard-sso-description'));
-		description.textContent = localize('onboarding.backboard.ssoPrompt.description', "Sign in to enable Backboard Chat and Agents.");
+		description.textContent = localize('onboarding.backboard.ssoPrompt.description', "Use single sign-on to enable Backboard Chat and Agents.");
 
 		const actions = append(dialog, $('.onboarding-backboard-sso-actions'));
 		const signInButton = append(actions, $<HTMLButtonElement>('button.onboarding-backboard-sso-primary'));
 		signInButton.type = 'button';
-		signInButton.textContent = localize('onboarding.backboard.ssoPrompt.signIn', "Sign In");
-
-		const ssoButton = append(actions, $<HTMLButtonElement>('button.onboarding-backboard-sso-secondary'));
-		ssoButton.type = 'button';
-		ssoButton.textContent = localize('onboarding.backboard.signInSso', "Sign in with SSO");
+		signInButton.textContent = localize('onboarding.backboard.ssoPrompt.signIn', "Sign in with SSO");
 
 		const laterButton = append(actions, $<HTMLButtonElement>('button.onboarding-backboard-sso-secondary'));
 		laterButton.type = 'button';
@@ -505,10 +467,6 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		promptDisposables.add(addDisposableListener(signInButton, EventType.CLICK, () => {
 			close();
 			void this.commandService.executeCommand('backboard.signIn');
-		}));
-		promptDisposables.add(addDisposableListener(ssoButton, EventType.CLICK, () => {
-			close();
-			void this.commandService.executeCommand('backboard.signInWithBrowser');
 		}));
 		promptDisposables.add(addDisposableListener(laterButton, EventType.CLICK, close));
 		promptDisposables.add(addDisposableListener(overlay, EventType.CLICK, event => {
@@ -737,25 +695,20 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 
 		const intro = append(welcomeContent, $('.onboarding-backboard-welcome-intro'));
 		const title = append(intro, $('h1.onboarding-backboard-title'));
-		title.textContent = localize('onboarding.signIn.title', "Sign in to Backboard");
+		title.textContent = getOnboardingStepTitle(OnboardingStepId.Welcome);
 
 		const subtitle = append(intro, $('p.onboarding-backboard-subtitle'));
-		subtitle.textContent = localize('onboarding.signIn.subtitle', "Welcome back. Sign in to start building.");
+		subtitle.textContent = getOnboardingStepSubtitle(OnboardingStepId.Welcome);
 
-		this._renderReviewerSignIn(welcomeContent);
-
-		const signInButton = this._registerStepFocusable(append(welcomeContent, $<HTMLButtonElement>('button.onboarding-backboard-browser-sign-in')));
+		const signInButton = this._registerStepFocusable(append(welcomeContent, $<HTMLButtonElement>('button.onboarding-backboard-sign-in-button')));
 		signInButton.type = 'button';
-		signInButton.textContent = localize('onboarding.backboard.browserSignIn', "Sign in with SSO");
+		signInButton.textContent = localize('onboarding.backboard.signInButton', "Log In");
 
 		const accountPrompt = append(welcomeContent, $('.onboarding-backboard-account-prompt'));
-		append(accountPrompt, $('span')).textContent = localize('onboarding.signIn.noAccount', "New to Backboard?");
 		const signUpButton = this._registerStepFocusable(append(accountPrompt, $<HTMLButtonElement>('button.onboarding-backboard-account-link')));
 		signUpButton.type = 'button';
 		signUpButton.textContent = localize('onboarding.backboard.createAccount', "Sign Up");
 
-		let welcomeActive = true;
-		this.stepDisposables.add(toDisposable(() => { welcomeActive = false; }));
 		let didContinueWithoutAccount = false;
 		let skipButton: HTMLButtonElement | undefined;
 		const showContinueWithoutAccount = (): void => {
@@ -766,14 +719,8 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			const skipArea = append(welcomeContent, $('.onboarding-backboard-skip-area'));
 			skipButton = this._registerStepFocusable(append(skipArea, $<HTMLButtonElement>('button.onboarding-backboard-skip-link')));
 			skipButton.type = 'button';
-			skipButton.textContent = this.signInOnly
-				? localize('onboarding.signIn.cancel', "Cancel")
-				: localize('onboarding.backboard.skipStep', "Continue without an account");
+			skipButton.textContent = localize('onboarding.backboard.skipStep', "Continue without an account");
 			this.stepDisposables.add(addDisposableListener(skipButton, EventType.CLICK, () => {
-				if (this.signInOnly) {
-					this._dismiss('skip');
-					return;
-				}
 				didContinueWithoutAccount = true;
 				this.postOnboardingSignInPromptShown = true;
 				this._logAction('skipWelcomeSignIn');
@@ -800,7 +747,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			try {
 				// Resolves true once the tokens are saved; false when the sign-in
 				// failed or was denied (the extension already surfaced that error).
-				if (await this.commandService.executeCommand<boolean>('backboard.signInWithBrowser') && welcomeActive && !didContinueWithoutAccount) {
+				if (await this.commandService.executeCommand<boolean>('backboard.signIn') && !didContinueWithoutAccount) {
 					this._advanceOrComplete();
 					return;
 				}
@@ -821,71 +768,6 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		}));
 		this.stepDisposables.add(addDisposableListener(signUpButton, EventType.CLICK, () => {
 			void startBackboardSignIn(signUpButton, 'openBackboardSignIn');
-		}));
-	}
-
-	private _renderReviewerSignIn(container: HTMLElement): void {
-		const form = append(container, $<HTMLFormElement>('form.onboarding-backboard-reviewer-form'));
-		form.setAttribute('aria-label', localize('onboarding.signIn.form', "Sign In"));
-
-		const emailLabel = append(form, $('label.onboarding-backboard-reviewer-label'));
-		emailLabel.textContent = localize('onboarding.reviewer.email', "Email");
-		const email = this._registerStepFocusable(append(emailLabel, $<HTMLInputElement>('input.onboarding-backboard-reviewer-input')));
-		email.type = 'email';
-		email.autocomplete = 'username';
-		email.required = true;
-		email.spellcheck = false;
-
-		const passwordLabel = append(form, $('label.onboarding-backboard-reviewer-label'));
-		passwordLabel.textContent = localize('onboarding.reviewer.password', "Password");
-		const password = this._registerStepFocusable(append(passwordLabel, $<HTMLInputElement>('input.onboarding-backboard-reviewer-input')));
-		password.type = 'password';
-		password.autocomplete = 'current-password';
-		password.required = true;
-
-		const errorText = append(form, $('.onboarding-backboard-reviewer-error'));
-		errorText.setAttribute('role', 'alert');
-		const submit = this._registerStepFocusable(append(form, $<HTMLButtonElement>('button.onboarding-backboard-sign-in-button')));
-		submit.type = 'submit';
-		submit.textContent = localize('onboarding.reviewer.submit', "Sign In");
-
-		let active = true;
-		this.stepDisposables.add(toDisposable(() => { active = false; password.value = ''; }));
-		const signIn = async (): Promise<void> => {
-			if (submit.disabled || !active) {
-				return;
-			}
-			errorText.textContent = '';
-			if (email.value.trim().toLowerCase() !== BACKBOARD_REVIEWER_EMAIL || password.value !== BACKBOARD_REVIEWER_PASSWORD) {
-				errorText.textContent = localize('onboarding.reviewer.invalid', "The email or password is incorrect.");
-				password.value = '';
-				password.focus();
-				return;
-			}
-			submit.disabled = email.disabled = password.disabled = true;
-			password.value = '';
-			try {
-				await this._saveBackboardApiKey(BACKBOARD_REVIEWER_API_KEY);
-				if (!active || this.overlay?.classList.contains('exiting')) {
-					return;
-				}
-				this.hasImportedApiKey = true;
-				this.hasConfirmedBackboardSignIn = true;
-				this.postOnboardingSignInPromptShown = true;
-				this._advanceOrComplete();
-			} catch {
-				if (active) {
-					errorText.textContent = localize('onboarding.reviewer.failed', "Could not complete sign-in. Please try again.");
-				}
-			} finally {
-				if (active) {
-					submit.disabled = email.disabled = password.disabled = false;
-				}
-			}
-		};
-		this.stepDisposables.add(addDisposableListener(form, 'submit', (event: SubmitEvent) => {
-			event.preventDefault();
-			void signIn();
 		}));
 	}
 
@@ -2069,9 +1951,6 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 	}
 
 	private _removeFromDOM(): void {
-		this.signInRequest?.resolve(false);
-		this.signInRequest = undefined;
-		this.signInOnly = false;
 		this.stepDisposables.clear();
 		this.disposables.clear();
 

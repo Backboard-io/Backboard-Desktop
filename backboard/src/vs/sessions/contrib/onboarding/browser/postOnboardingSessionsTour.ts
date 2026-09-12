@@ -3,7 +3,6 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { onUnexpectedError } from '../../../../base/common/errors.js';
 import { getActiveWindow } from '../../../../base/browser/dom.js';
 import { Disposable, DisposableStore, IDisposable } from '../../../../base/common/lifecycle.js';
 import { localize } from '../../../../nls.js';
@@ -11,7 +10,7 @@ import { ICommandService } from '../../../../platform/commands/common/commands.j
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { IWorkbenchContribution } from '../../../../workbench/common/contributions.js';
 import { ISpotlightTourIntro, ISpotlightTourStep, SpotlightTour, TourPlacement } from '../../../../workbench/contrib/welcomeOnboarding/browser/spotlightTour.js';
-import { IBackboardOnboardingState, OnboardingExperience, ONBOARDING_EDITOR_TOUR_PENDING_KEY, ONBOARDING_SESSIONS_TOUR_STORAGE_KEY, ONBOARDING_STORAGE_KEY } from '../../../../workbench/contrib/welcomeOnboarding/common/onboardingTypes.js';
+import { IBackboardOnboardingState, OnboardingExperience, ONBOARDING_SESSIONS_TOUR_STORAGE_KEY, ONBOARDING_STORAGE_KEY } from '../../../../workbench/contrib/welcomeOnboarding/common/onboardingTypes.js';
 import { IWorkbenchLayoutService, Parts } from '../../../../workbench/services/layout/browser/layoutService.js';
 import { RightWorkbenchCommandId } from '../../rightWorkbench/browser/rightWorkbench.js';
 import { IOnboardingService } from '../../../../workbench/contrib/welcomeOnboarding/common/onboardingService.js';
@@ -19,10 +18,10 @@ import { IWorkbenchEnvironmentService } from '../../../../workbench/services/env
 
 /**
  * A spotlight tour shown once in the Agents (sessions) window after the user
- * finishes or skips onboarding. It walks straight through the
+ * completes onboarding. It first asks for consent, then walks through the
  * prompt, the sessions list, the Simple/Editor mode switch, and each panel that
- * can sit beside the agent before restoring the layout. Finishing the automatic tour
- * continues in Editor mode, followed by Advanced mode.
+ * can sit beside the agent before restoring the layout. Finishing the tour
+ * keeps the user's selected mode instead of switching to the editor.
  *
  * Onboarding runs in the separate main-workbench window, so there is no
  * same-process event to subscribe to here. Onboarding writes its state to
@@ -49,7 +48,7 @@ export class PostOnboardingSessionsTour extends Disposable implements IWorkbench
 			return;
 		}
 		this._register(onboardingService.onDidFinishOnboardingFlow(() => this._maybeStart()));
-		if (this.storageService.isNew(StorageScope.APPLICATION) && !this.storageService.get(ONBOARDING_STORAGE_KEY, StorageScope.APPLICATION)
+		if (!this.storageService.get(ONBOARDING_STORAGE_KEY, StorageScope.APPLICATION)
 			&& !environmentService.extensionDevelopmentLocationURI && !environmentService.extensionTestsLocationURI) {
 			onboardingService.show();
 		}
@@ -83,7 +82,7 @@ export class PostOnboardingSessionsTour extends Disposable implements IWorkbench
 
 		try {
 			const state: IBackboardOnboardingState = JSON.parse(raw);
-			return state?.tourEligible === true && (state.completed || state.dismissedReason === 'skip') && state.experience === OnboardingExperience.Simple;
+			return state.completed && state.experience === OnboardingExperience.Simple;
 		} catch {
 			return false;
 		}
@@ -91,10 +90,7 @@ export class PostOnboardingSessionsTour extends Disposable implements IWorkbench
 
 	private _start(): void {
 		this.storageService.store(ONBOARDING_SESSIONS_TOUR_STORAGE_KEY, true, StorageScope.APPLICATION, StorageTarget.USER);
-		this._register(showSessionsOnboardingTour(this.layoutService, this.commandService, false, () => {
-			this.storageService.store(ONBOARDING_EDITOR_TOUR_PENDING_KEY, true, StorageScope.APPLICATION, StorageTarget.MACHINE);
-			void this.storageService.flush().then(() => this.commandService.executeCommand('agents.openSessionInVSCode')).catch(onUnexpectedError);
-		}));
+		this._register(showSessionsOnboardingTour(this.layoutService, this.commandService));
 	}
 }
 
@@ -104,7 +100,7 @@ export class PostOnboardingSessionsTour extends Disposable implements IWorkbench
  * developer command that force-shows the tour for testing. Returns a disposable
  * that tears the tour down; it also disposes itself once the tour ends.
  */
-export function showSessionsOnboardingTour(layoutService: IWorkbenchLayoutService, commandService: ICommandService, showIntro = true, onComplete?: () => void): IDisposable {
+export function showSessionsOnboardingTour(layoutService: IWorkbenchLayoutService, commandService: ICommandService): IDisposable {
 	const store = new DisposableStore();
 	const targetWindow = getActiveWindow();
 
@@ -124,8 +120,7 @@ export function showSessionsOnboardingTour(layoutService: IWorkbenchLayoutServic
 			title: localize('sessions.tour.sessions.title', "Find your sessions"),
 			body: localize('sessions.tour.sessions.body', "Every chat you start is saved here — pick one to jump back in."),
 			preferredPlacement: TourPlacement.Right,
-			setup: () => layoutService.setPartHidden(false, Parts.SIDEBAR_PART),
-			anchor: () => layoutService.getContainer(targetWindow, Parts.SIDEBAR_PART),
+			anchor: query('.part.sidebar'),
 		},
 		{
 			title: localize('sessions.tour.mode.title', "Three ways to work"),
@@ -146,29 +141,26 @@ export function showSessionsOnboardingTour(layoutService: IWorkbenchLayoutServic
 			title: localize('sessions.tour.browser.title', "Preview in a browser"),
 			body: localize('sessions.tour.browser.body', "Open a live browser to see your app as the agent builds it."),
 			preferredPlacement: TourPlacement.Left,
-			setup: openPanelMenu,
 			anchor: panelRow('globe'),
 		},
 		{
 			title: localize('sessions.tour.files.title', "Browse your files"),
 			body: localize('sessions.tour.files.body', "Open your project files without leaving the agent."),
 			preferredPlacement: TourPlacement.Left,
-			setup: openPanelMenu,
-			anchor: panelRow('folder'),
+			anchor: panelRow('files'),
 		},
 		{
 			title: localize('sessions.tour.terminal.title', "Run a terminal"),
 			body: localize('sessions.tour.terminal.body', "Run commands in a terminal right next to the chat."),
 			preferredPlacement: TourPlacement.Left,
-			setup: openPanelMenu,
 			anchor: panelRow('terminal'),
 		},
 		{
-			title: localize('sessions.tour.editor.title', "Explore Editor mode"),
-			body: localize('sessions.tour.editor.body', "Next, explore the full editor and then the Advanced dashboard. You can return to Simple from the mode menu anytime."),
+			title: localize('sessions.tour.editor.title', "Ready to build"),
+			body: localize('sessions.tour.editor.body', "You'll stay in Simple mode when this tour ends. Explore Editor or Advanced from the mode menu later. To revisit this walkthrough, search for ‘Show Simple Mode Tour’ in the Command Palette."),
 			preferredPlacement: TourPlacement.Bottom,
 			anchor: query('.open-in-vscode-titlebar-widget'),
-			nextLabel: onComplete ? localize('sessions.tour.editor.cta', "Open Editor") : localize('sessions.tour.done', "Done"),
+			nextLabel: localize('sessions.tour.editor.cta', "Start Building"),
 		},
 	];
 
@@ -187,16 +179,13 @@ export function showSessionsOnboardingTour(layoutService: IWorkbenchLayoutServic
 		container: layoutService.activeContainer,
 		window: targetWindow,
 		onLayoutChange: layoutService.onDidLayoutActiveContainer,
-		intro: showIntro ? intro : undefined,
+		intro,
 		steps,
 		// Runs however the tour ends (Done, Skip, Escape, or "Maybe later").
 		// Puts back whatever the panel steps opened; a no-op when nothing was.
-		onFinish: completed => {
+		onFinish: () => {
 			restoreLayout(layoutService, targetWindow, restore);
 			store.dispose();
-			if (completed) {
-				onComplete?.();
-			}
 		},
 	}));
 	tour.start();
@@ -205,7 +194,6 @@ export function showSessionsOnboardingTour(layoutService: IWorkbenchLayoutServic
 }
 
 interface ILayoutSnapshot {
-	readonly sidebar: boolean;
 	readonly auxiliaryBar: boolean;
 	readonly panel: boolean;
 	readonly editor: boolean;
@@ -213,7 +201,6 @@ interface ILayoutSnapshot {
 
 function captureLayout(layoutService: IWorkbenchLayoutService, targetWindow: Window): ILayoutSnapshot {
 	return {
-		sidebar: layoutService.isVisible(Parts.SIDEBAR_PART, targetWindow),
 		auxiliaryBar: layoutService.isVisible(Parts.AUXILIARYBAR_PART),
 		panel: layoutService.isVisible(Parts.PANEL_PART),
 		editor: layoutService.isVisible(Parts.EDITOR_PART, targetWindow),
@@ -221,9 +208,6 @@ function captureLayout(layoutService: IWorkbenchLayoutService, targetWindow: Win
 }
 
 function restoreLayout(layoutService: IWorkbenchLayoutService, targetWindow: Window, snapshot: ILayoutSnapshot): void {
-	if (layoutService.isVisible(Parts.SIDEBAR_PART, targetWindow) !== snapshot.sidebar) {
-		layoutService.setPartHidden(!snapshot.sidebar, Parts.SIDEBAR_PART);
-	}
 	if (layoutService.isVisible(Parts.AUXILIARYBAR_PART) !== snapshot.auxiliaryBar) {
 		layoutService.setPartHidden(!snapshot.auxiliaryBar, Parts.AUXILIARYBAR_PART);
 	}
