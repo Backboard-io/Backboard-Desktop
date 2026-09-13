@@ -7,7 +7,7 @@ import assert from 'assert';
 import { DisposableStore } from '../../../../../base/common/lifecycle.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { OnboardingVariationA } from '../../browser/onboardingVariationA.js';
-import { OnboardingExperience } from '../../common/onboardingTypes.js';
+import { OnboardingExperience, ONBOARDING_STEPS, OnboardingStepId } from '../../common/onboardingTypes.js';
 
 type ExperienceHarness = {
 	selectedExperience: OnboardingExperience;
@@ -18,6 +18,36 @@ type ExperienceHarness = {
 
 suite('Backboard onboarding experience', () => {
 	const disposables = ensureNoDisposablesAreLeakedInTestSuite();
+
+	test('Simple onboarding visits welcome, AI connection and theme before completion', () => {
+		const harness = Object.create(OnboardingVariationA.prototype) as {
+			selectedExperience: OnboardingExperience;
+			steps: typeof ONBOARDING_STEPS;
+			currentStepIndex: number;
+			_renderStepFrame(): void;
+			_logAction(): void;
+			_dismiss(reason: string): void;
+			_advanceOrComplete(): void;
+			_visibleSteps(): readonly OnboardingStepId[];
+		};
+		harness.selectedExperience = OnboardingExperience.Simple;
+		harness.steps = ONBOARDING_STEPS;
+		harness.currentStepIndex = 0;
+		harness._renderStepFrame = () => undefined;
+		harness._logAction = () => undefined;
+		const outcomes: string[] = [];
+		harness._dismiss = reason => outcomes.push(reason);
+		const visited: OnboardingStepId[] = [];
+		for (let index = 0; index < ONBOARDING_STEPS.length; index++) {
+			visited.push(harness.steps[harness.currentStepIndex]);
+			harness._advanceOrComplete();
+		}
+		assert.deepStrictEqual({ visible: harness._visibleSteps(), visited, outcomes }, {
+			visible: [OnboardingStepId.Welcome, OnboardingStepId.ConnectAI, OnboardingStepId.Theme],
+			visited: [OnboardingStepId.Welcome, OnboardingStepId.ConnectAI, OnboardingStepId.Theme],
+			outcomes: ['complete'],
+		});
+	});
 
 	test('selecting Advanced updates the radio selection without finishing onboarding', () => {
 		const harness = Object.create(OnboardingVariationA.prototype) as {

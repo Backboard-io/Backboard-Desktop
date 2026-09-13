@@ -15,7 +15,7 @@
 	display: flex;
 	align-items: stretch;
 	justify-content: stretch;
-	background: var(--vscode-editor-background);
+	background: #075486;
 	opacity: 0;
 	overflow: hidden;
 	transition: opacity 0.22s ease;
@@ -129,7 +129,7 @@
 	min-height: 0;
 	overflow: hidden;
 	color: var(--vscode-editor-foreground);
-	background: var(--vscode-editor-background);
+	background: transparent;
 	border: 0;
 	border-radius: 0;
 	box-shadow: none;
@@ -340,9 +340,7 @@
 	justify-content: stretch;
 	max-width: none;
 	padding: 40px 32px 54px;
-	background:
-		radial-gradient(circle at 50% 37%, rgba(255, 255, 255, 0.028), transparent 24%),
-		linear-gradient(90deg, #151618 0%, #17181a 31%, #18191b 50%, #17181a 69%, #151618 100%);
+	background: transparent;
 }
 
 .onboarding-a-card-welcome .onboarding-a-step-content,
@@ -550,6 +548,67 @@
 .onboarding-backboard-sign-in-button:disabled {
 	cursor: wait;
 	opacity: 0.72;
+}
+
+.onboarding-backboard-own-key-button {
+	background: transparent;
+	color: var(--vscode-foreground);
+	border-color: var(--vscode-input-border, #657080);
+	box-shadow: none;
+}
+
+.onboarding-backboard-own-key-button:hover {
+	background: var(--vscode-list-hoverBackground);
+}
+
+.onboarding-backboard-provider-hint {
+	margin: 0;
+	font-size: 13px;
+	line-height: 1.5;
+	color: var(--vscode-descriptionForeground);
+}
+
+.onboarding-provider-setup {
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+	width: min(440px, 100%);
+	margin: auto;
+	text-align: left;
+}
+
+.onboarding-provider-setup h2,
+.onboarding-provider-setup p {
+	margin: 0;
+}
+
+.onboarding-provider-setup label {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.onboarding-provider-setup input,
+.onboarding-provider-setup select {
+	box-sizing: border-box;
+	width: 100%;
+	padding: 12px;
+	font: inherit;
+	color: var(--vscode-input-foreground);
+	background: var(--vscode-input-background);
+	border: 1px solid var(--vscode-input-border, #657080);
+	border-radius: 6px;
+}
+
+.onboarding-provider-setup :focus-visible,
+.onboarding-backboard-own-key-button:focus-visible {
+	outline: 2px solid var(--vscode-focusBorder);
+	outline-offset: 3px;
+}
+
+.onboarding-provider-status {
+	min-height: 20px;
+	font-size: 13px;
 }
 
 .onboarding-backboard-account-link {
@@ -1422,3 +1481,391 @@
 		transform: none;
 	}
 }
+
+/* Full-screen setup sits directly on the pool, with a screen-wide readability tint. */
+.onboarding-pool {
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+	overflow: hidden;
+}
+
+.onboarding-pool img {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
+.onboarding-pool-still {
+	display: none;
+}
+
+.onboarding-a-overlay {
+	align-items: center;
+	justify-content: center;
+	padding: 32px;
+	box-sizing: border-box;
+}
+
+.onboarding-a-card {
+	flex: 0 1 1040px;
+	height: auto;
+	max-height: calc(100% - 16px);
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+	backdrop-filter: none;
+}
+
+.onboarding-a-card-welcome,
+.onboarding-a-card-connect {
+	flex-basis: 560px;
+}
+
+.onboarding-a-card .onboarding-a-header {
+	display: flex;
+	flex-shrink: 0;
+	padding: 28px 32px 0;
+}
+
+.onboarding-a-card .onboarding-a-body {
+	padding: 30px 32px;
+	overflow-y: auto;
+}
+
+.onboarding-a-card .onboarding-a-footer {
+	border-top: 0;
+	flex-shrink: 0;
+	padding: 20px 32px;
+}
+
+.onboarding-a-card-welcome .onboarding-a-footer {
+	display: none;
+}
+
+.onboarding-a-card-connect .onboarding-a-footer {
+	justify-content: flex-start;
+}
+
+.onboarding-a-card .onboarding-backboard-welcome {
+	flex: 0 0 auto;
+	overflow: visible;
+	color: var(--vscode-editor-foreground);
+}
+
+.onboarding-a-card .onboarding-backboard-welcome::before {
+	display: none;
+}
+
+.onboarding-a-card .onboarding-backboard-welcome-content {
+	gap: 18px;
+	padding: 0;
+}
+
+.onboarding-a-card .onboarding-backboard-welcome-mark {
+	width: 76px;
+	height: 104px;
+	margin-bottom: 6px;
+}
+
+.onboarding-a-card .onboarding-backboard-title {
+	color: var(--vscode-editor-foreground);
+	font-size: 32px;
+	font-weight: 600;
+	line-height: 1.15;
+	text-transform: none;
+}
+
+.onboarding-a-card .onboarding-backboard-subtitle {
+	color: var(--vscode-descriptionForeground);
+	font-size: 16px;
+	line-height: 1.5;
+	letter-spacing: 0;
+}
+
+.onboarding-a-card .onboarding-backboard-welcome-intro {
+	gap: 10px;
+	margin-bottom: 8px;
+}
+
+.onboarding-a-card .onboarding-backboard-sign-in-button {
+	height: 48px;
+	flex-shrink: 0;
+	font-size: 15px;
+}
+
+.onboarding-a-card .onboarding-backboard-account-link,
+.onboarding-a-card .onboarding-backboard-skip-link {
+	color: var(--vscode-textLink-foreground);
+	font-size: 13px;
+}
+
+.onboarding-a-card .onboarding-backboard-skip-area {
+	margin: 0;
+}
+
+.onboarding-a-card .onboarding-a-theme-grid {
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+	gap: 16px;
+}
+
+.onboarding-a-card .onboarding-backboard-account-link {
+	width: auto;
+	height: auto;
+	padding: 4px 8px;
+	background: transparent;
+	border: 0;
+	box-shadow: none;
+}
+
+@media (max-width: 620px) {
+	.onboarding-a-overlay { padding: 12px; }
+	.onboarding-a-card .onboarding-a-body { padding: 24px; }
+	.onboarding-a-card .onboarding-a-theme-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.onboarding-pool-motion { display: none; }
+	.onboarding-pool-still { display: block; }
+}
+
+
+.onboarding-pool::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+	background: linear-gradient(115deg, #03233785, #032337c4);
+}
+
+/* Pool copy stays readable even while previewing a light IDE theme. */
+.onboarding-a-overlay {
+	--vscode-editor-foreground: #f4faff;
+	--vscode-foreground: #f4faff;
+	--vscode-descriptionForeground: #d2e7f2;
+	--vscode-textLink-foreground: #d7f1ff;
+	--vscode-focusBorder: #ffffff;
+	--onboarding-backboard-accent: #e4f5ff;
+	--onboarding-backboard-subtle-border: #d7f1ff80;
+}
+
+.onboarding-a-card .onboarding-a-theme-card {
+	background: #092d4266;
+	border-color: #d7f1ff55;
+}
+
+.onboarding-a-card .onboarding-a-theme-card.selected {
+	border-color: #f4faff;
+}
+
+.onboarding-a-card .onboarding-a-btn-primary {
+	color: #10212b;
+}
+
+@media (min-width: 621px) and (max-width: 900px) {
+	.onboarding-a-card .onboarding-a-theme-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+.onboarding-a-card .onboarding-a-step-content,
+.onboarding-a-card .onboarding-backboard-theme,
+.onboarding-a-card .onboarding-a-theme-grid {
+	flex: 0 0 auto;
+}
+
+.onboarding-a-card .onboarding-a-theme-grid {
+	overflow: visible;
+	grid-auto-rows: max-content;
+}
+
+/* An open, full-height composition: navigation at the edges, focus in the center. */
+.onboarding-a-overlay {
+	padding: clamp(18px, 3vw, 48px);
+}
+
+.onboarding-a-card,
+.onboarding-a-card-welcome,
+.onboarding-a-card-connect {
+	flex: 0 1 1120px;
+	height: 100%;
+	max-height: 100%;
+}
+
+.onboarding-a-card .onboarding-a-header {
+	padding: 12px 32px 0;
+}
+
+.onboarding-a-card .onboarding-a-body {
+	justify-content: center;
+	padding: 32px;
+	scrollbar-width: thin;
+	scrollbar-color: #b7e9ff60 transparent;
+}
+
+.onboarding-a-card .onboarding-backboard-welcome-content {
+	max-width: 540px;
+	gap: 24px;
+}
+
+.onboarding-a-card .onboarding-backboard-title {
+	font-size: clamp(36px, 4.2vw, 60px);
+	font-weight: 600;
+	letter-spacing: -.055em;
+	text-wrap: balance;
+	text-shadow: 0 4px 32px #002b4e40;
+}
+
+.onboarding-a-card-connect .onboarding-backboard-title {
+	font-size: clamp(32px, 3.4vw, 46px);
+}
+
+.onboarding-a-card .onboarding-backboard-subtitle {
+	font-size: 17px;
+	line-height: 1.6;
+	text-wrap: balance;
+}
+
+.onboarding-a-card .onboarding-backboard-welcome-mark {
+	width: 86px;
+	height: 116px;
+	margin-bottom: 16px;
+	filter: drop-shadow(0 0 28px #9ae8ff60);
+}
+
+.onboarding-a-card .onboarding-backboard-sign-in-button {
+	height: 52px;
+	border-radius: 12px;
+	background: linear-gradient(120deg, #dff7ff, #a9d8f4);
+	border: 1px solid #effbffb3;
+	color: #123249;
+	box-shadow: 0 8px 28px #001b3430, inset 0 1px #ffffff70;
+	transition: transform 180ms ease, box-shadow 180ms ease, background 180ms ease;
+}
+
+.onboarding-a-card .onboarding-backboard-own-key-button {
+	background: #c5eeff0a;
+	color: #effaff;
+	border-color: #d9f4ff70;
+	box-shadow: inset 0 1px #ffffff10;
+}
+
+.onboarding-a-card .onboarding-backboard-sign-in-button:hover {
+	transform: translateY(-2px);
+	box-shadow: 0 12px 32px #001b3445, 0 0 20px #a9e5ff18;
+}
+
+.onboarding-a-card .onboarding-backboard-sign-in-button:active {
+	transform: translateY(0) scale(.99);
+}
+
+.onboarding-a-card .onboarding-a-step-title {
+	font-size: clamp(28px, 3vw, 38px);
+	letter-spacing: -.04em;
+}
+
+.onboarding-a-card .onboarding-a-theme-grid {
+	gap: clamp(12px, 1.5vw, 20px);
+}
+
+.onboarding-a-card .onboarding-a-theme-card {
+	border-radius: 12px;
+	border-width: 1px;
+	transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.onboarding-a-card .onboarding-a-theme-card:hover {
+	transform: translateY(-3px);
+	border-color: #f0fbffcc;
+	box-shadow: 0 12px 28px #00192c40;
+}
+
+.onboarding-a-card .onboarding-a-theme-card.selected {
+	box-shadow: 0 0 0 2px #d8f4ff, 0 0 24px #ace5ff25;
+}
+
+.onboarding-a-card .onboarding-a-theme-label {
+	padding: 12px 10px;
+}
+
+.onboarding-pool img {
+	animation: onboarding-pool-drift 32s ease-in-out infinite alternate;
+	transform-origin: 35% 35%;
+}
+
+.onboarding-pool::before {
+	content: '';
+	position: absolute;
+	inset: -30%;
+	z-index: 1;
+	background: conic-gradient(from 115deg at 12% 0%, transparent 0deg, #baffee30 10deg, transparent 18deg, #cbf7ff1c 23deg, transparent 30deg, #aeebff22 38deg, transparent 48deg);
+	mix-blend-mode: screen;
+	filter: blur(22px);
+	animation: onboarding-sunlight 20s ease-in-out infinite alternate;
+}
+
+.onboarding-pool::after {
+	z-index: 2;
+	background: radial-gradient(ellipse at 50% 48%, #02233b92, #04284030 65%), linear-gradient(135deg, #04364215, #001a3cad);
+}
+
+@keyframes onboarding-pool-drift {
+	from { transform: scale(1.04) translate(-.5%, -.5%); }
+	to { transform: scale(1.12) translate(1%, .5%); }
+}
+
+@keyframes onboarding-sunlight {
+	from { transform: rotate(-5deg); opacity: .5; }
+	to { transform: rotate(6deg); opacity: 1; }
+}
+
+@keyframes onboarding-enter {
+	from { opacity: 0; transform: translateY(18px); filter: blur(5px); }
+	to { opacity: 1; transform: translateY(0); filter: blur(0); }
+}
+
+.onboarding-backboard-welcome-content > *,
+.onboarding-provider-setup > *,
+.onboarding-a-theme-card {
+	animation: onboarding-enter 650ms cubic-bezier(.16, 1, .3, 1) both;
+}
+
+.onboarding-backboard-welcome-content > :nth-child(2),
+.onboarding-provider-setup > :nth-child(2),
+.onboarding-a-theme-card:nth-child(2) { animation-delay: 60ms; }
+.onboarding-backboard-welcome-content > :nth-child(3),
+.onboarding-provider-setup > :nth-child(3),
+.onboarding-a-theme-card:nth-child(3) { animation-delay: 120ms; }
+.onboarding-backboard-welcome-content > :nth-child(4),
+.onboarding-provider-setup > :nth-child(4),
+.onboarding-a-theme-card:nth-child(4) { animation-delay: 180ms; }
+.onboarding-backboard-welcome-content > :nth-child(n+5),
+.onboarding-provider-setup > :nth-child(n+5),
+.onboarding-a-theme-card:nth-child(n+5) { animation-delay: 240ms; }
+.onboarding-a-theme-card:nth-child(n+9) { animation-delay: 320ms; }
+
+/* Let entrance transforms finish so hover feedback can take over. */
+.onboarding-backboard-welcome-content > *,
+.onboarding-provider-setup > *,
+.onboarding-a-theme-card { animation-fill-mode: backwards; }
+
+@media (max-height: 780px), (max-width: 620px) {
+	.onboarding-a-card .onboarding-a-body { justify-content: flex-start; padding: 24px; }
+	.onboarding-a-card-welcome .onboarding-a-body,
+	.onboarding-a-card-connect .onboarding-a-body { justify-content: safe center; }
+	.onboarding-a-card .onboarding-backboard-welcome-content { gap: 16px; }
+	.onboarding-a-card .onboarding-backboard-welcome-mark { width: 60px; height: 80px; margin-bottom: 4px; }
+	.onboarding-a-card .onboarding-a-theme-label { padding: 9px 8px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.onboarding-pool img,
+	.onboarding-pool::before,
+	.onboarding-backboard-welcome-content > *,
+	.onboarding-provider-setup > *,
+	.onboarding-a-theme-card { animation: none; }
+	.onboarding-a-card .onboarding-backboard-sign-in-button,
+	.onboarding-a-card .onboarding-a-theme-card { transition: none; }
+}
+
+/* Keep all water and sunlight layers behind the interactive content. */
+.onboarding-pool { isolation: isolate; z-index: 0; }
+.onboarding-a-card { z-index: 1; }

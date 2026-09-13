@@ -1,3 +1,0 @@
-alpha
-tool-ui-demo-edited
-omega

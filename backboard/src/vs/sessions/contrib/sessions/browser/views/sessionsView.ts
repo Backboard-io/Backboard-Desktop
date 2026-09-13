@@ -302,6 +302,16 @@ export class SessionsView extends ViewPane {
 					mcpButton?.removeAttribute('aria-current');
 				}
 			}));
+			this.createSidebarAction(primaryActions, Codicon.graphLine, localize('usage', "Usage"), () => {
+				// Simple mode can run without an extension host, so open the built-in
+				// usage view instead of dispatching the extension-owned command.
+				this.logService.info('[Backboard] Opening the Simple mode usage view.');
+				this.usageView ??= this._register(this.instantiationService.createInstance(BackboardUsageView));
+				this.usageView.show();
+			});
+			this.createSidebarAction(primaryActions, Codicon.settingsGear, localize('settings', "Settings"), () => {
+				void this.commandService.executeCommand('workbench.action.openSettings');
+			});
 			this.createProjectFilterRow(primaryActions);
 		} else if (!phoneLayout) {
 			headerLabel.textContent = '';
@@ -386,6 +396,15 @@ export class SessionsView extends ViewPane {
 				this.sessionsService.openSession(resource, { preserveFocus }).then(onOpened).catch(onUnexpectedError);
 			},
 		}));
+		const emptyState = DOM.append(this.sessionsControlContainer, $('.agent-sessions-empty-state'));
+		this.createSidebarAction(emptyState, Codicon.newFolder, localize('startNewProject', "Start a New Project"), () => {
+			void this.commandService.executeCommand('workbench.action.addRootFolder');
+		});
+		const updateEmptyState = () => {
+			emptyState.hidden = !sessionsControl.isEmpty;
+		};
+		this._register(sessionsControl.onDidUpdate(updateEmptyState));
+		updateEmptyState();
 		void this.refreshRecentWorkspaceFolders();
 		this._register(this.onDidChangeBodyVisibility(visible => sessionsControl.setVisible(visible)));
 
@@ -509,16 +528,6 @@ export class SessionsView extends ViewPane {
 				backgroundPicker.toggle(anchor);
 			}, true);
 
-			this.createSidebarAction(navigation, Codicon.graphLine, localize('usage', "Usage"), () => {
-				// Simple mode can run without an extension host, so open the built-in
-				// usage view instead of dispatching the extension-owned command.
-				this.logService.info('[Backboard] Opening the Simple mode usage view.');
-				this.usageView ??= this._register(this.instantiationService.createInstance(BackboardUsageView));
-				this.usageView.show();
-			});
-			this.createSidebarAction(navigation, Codicon.settingsGear, localize('settings', "Settings"), () => {
-				void this.commandService.executeCommand('workbench.action.openSettings');
-			});
 		}
 
 		// Signed-in user identity card.

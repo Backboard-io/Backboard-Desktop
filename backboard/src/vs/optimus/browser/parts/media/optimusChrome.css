@@ -89,7 +89,8 @@
 }
 
 .monaco-workbench.agent-sessions-workbench.optimus-window:not(.phone-layout):not(.hc-black):not(.hc-light) .part.sidebar {
-	box-shadow: 8px 0 22px -6px rgb(0 0 0 / 45%) !important;
+	border-radius: 12px !important;
+	box-shadow: none !important;
 }
 
 .monaco-workbench.agent-sessions-workbench.optimus-window:not(.phone-layout):not(.hc-black):not(.hc-light) .part.auxiliarybar {
@@ -106,4 +107,17 @@
 .monaco-workbench.agent-sessions-workbench.optimus-window:not(.phone-layout) .monaco-grid-view .split-view-view:is(:has(> .part.sidebar), :has(> .part.auxiliarybar)) {
 	border-radius: 14px !important;
 	background: transparent !important;
+}
+
+/* Left-panel reopening stays at the left edge of either Advanced header. */
+.optimus-left-controls {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	flex: 0 0 auto;
+	-webkit-app-region: no-drag;
+}
+
+.optimus-left-controls[hidden] {
+	display: none;
 }

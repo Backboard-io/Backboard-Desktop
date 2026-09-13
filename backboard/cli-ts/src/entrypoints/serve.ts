@@ -52,6 +52,8 @@ import type {
 	ServeRecordType,
 } from "./ServeTypes.ts";
 import { parseControlLine } from "./serveControl.ts";
+import { buildServeConversationContext } from "./serveConversationContext.ts";
+import { ServeSessionRestore } from "./ServeSessionRestore.ts";
 
 /**
  * Persistent IDE host for the public Backboard R-CLI runtime.
@@ -242,6 +244,7 @@ export async function runServe(argv: string[]): Promise<void> {
 		syncDynamicTools: syncMcpToolUpdates,
 		finalVerificationNudge: false,
 		todoReconciliation: false,
+		autoCompact: true,
 		startupEnvironmentPrompt,
 		getDurableSession: () => ({
 			sessionId,
@@ -255,6 +258,12 @@ export async function runServe(argv: string[]): Promise<void> {
 		agentTasks: agentTaskManager,
 	});
 
+	const sessionRestore = new ServeSessionRestore(
+		session,
+		controller,
+		client,
+		store.paths.root,
+	);
 	const selectSkillsByName = async (names: string[]): Promise<void> => {
 		const tabs = await skillController.listSkillTabs();
 		const wanted = new Set(names);
@@ -373,9 +382,6 @@ export async function runServe(argv: string[]): Promise<void> {
 			case "submit": {
 				if (rewinding) throw new Error("Wait for file restoration to finish");
 				editorRewind.assertReady();
-				if (control.threadId && session.threadId === null) {
-					session.threadId = control.threadId;
-				}
 				if (control.skills?.length) {
 					await selectSkillsByName(control.skills);
 				}
@@ -386,14 +392,12 @@ export async function runServe(argv: string[]): Promise<void> {
 					turnId: control.turnId,
 					attachmentFilePaths,
 					displayContent: control.prompt,
-					conversationContext:
-						[control.forkContext, control.systemContext]
-							.filter(
-								(value): value is string =>
-									value !== undefined && value.length > 0,
-							)
-							.join("\n\n") || undefined,
-					onStart: () => {
+					conversationContext: await buildServeConversationContext(
+						control.forkContext,
+						control.systemContext,
+						store.paths.root,
+					),
+					onStart: async () => {
 						if (control.model !== undefined) {
 							config.setModel(parseModel(control.model));
 						}
@@ -425,8 +429,10 @@ export async function runServe(argv: string[]): Promise<void> {
 						// Sent on every turn; an absent list clears prior client
 						// tools so a disconnected surface never leaves stale tools.
 						clientToolBridge.setTools(control.clientTools ?? []);
+						await sessionRestore.prepare(control.threadId, config.model);
 					},
 				});
+				await sessionRestore.save(config.model);
 				writeRecord("serve:turn", control.requestId, {
 					status,
 					threadId: session.threadId,
@@ -438,6 +444,7 @@ export async function runServe(argv: string[]): Promise<void> {
 					emitUserMessage: true,
 					conversationContext: control.systemContext,
 				});
+				await sessionRestore.save(config.model);
 				if (control.requestId !== undefined) {
 					writeRecord("serve:turn", control.requestId, {
 						status,

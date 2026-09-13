@@ -53,6 +53,26 @@
 	overflow: visible;
 }
 
+/* Sidebar controls must remain above adjacent widgets and outside window dragging. */
+.monaco-workbench .part.titlebar > .titlebar-container > .titlebar-left,
+.monaco-workbench .part.titlebar > .titlebar-container > .titlebar-right {
+	position: relative;
+	z-index: 1;
+	-webkit-app-region: no-drag;
+}
+
+.monaco-workbench .part.titlebar .action-item:has(.codicon-panel-left, .codicon-panel-left-off, .codicon-panel-right, .codicon-panel-right-off) {
+	position: relative;
+	z-index: 2501;
+	flex-shrink: 0;
+	-webkit-app-region: no-drag;
+}
+
+.monaco-workbench .part.titlebar .action-label:is(.codicon-panel-left, .codicon-panel-left-off, .codicon-panel-right, .codicon-panel-right-off) {
+	-webkit-app-region: no-drag;
+	pointer-events: auto;
+}
+
 /* Draggable region */
 .monaco-workbench .part.titlebar > .titlebar-container > .titlebar-drag-region {
 	top: 0;

@@ -192,7 +192,8 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 	private previouslyFocusedElement: HTMLElement | undefined;
 	private _isShowing = false;
 	private postOnboardingSignInPromptShown = false;
-	private selectedThemeId = 'dark-2026';
+	private selectedThemeId = 'backboard-obsidian';
+	private themeChange: Promise<void> = Promise.resolve();
 	private selectedExperience = OnboardingExperience.Simple;
 	private hasConfirmedBackboardSignIn = false;
 	private hasImportedApiKey = false;
@@ -238,6 +239,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		}
 
 		this._isShowing = true;
+		this.selectedExperience = OnboardingExperience.Simple;
 		this.currentStepIndex = 0;
 		this.previouslyFocusedElement = getActiveWindow().document.activeElement as HTMLElement | undefined;
 
@@ -248,6 +250,13 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		this.overlay.setAttribute('aria-modal', 'true');
 		this.overlay.setAttribute('aria-label', localize('onboarding.backboard.aria', "Welcome to Backboard Studio"));
 
+		const pool = append(this.overlay, $('div.onboarding-pool'));
+		pool.setAttribute('aria-hidden', 'true');
+		for (const [className, asset] of [['onboarding-pool-motion', 'pool-water.svg'], ['onboarding-pool-still', 'pool-water-still.svg']]) {
+			const image = append(pool, $<HTMLImageElement>(`img.${className}`));
+			image.src = this._mediaUri(asset);
+			image.alt = '';
+		}
 		this.card = append(this.overlay, $('.onboarding-a-card'));
 
 		this.closeButton = append(this.card, $<HTMLButtonElement>('button.onboarding-a-close-btn'));
@@ -290,8 +299,12 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			this._prevStep();
 		}));
 
-		this.disposables.add(addDisposableListener(this.nextButton, EventType.CLICK, () => {
+		this.disposables.add(addDisposableListener(this.nextButton, EventType.CLICK, async () => {
 			if (this._isLastStep()) {
+				await this.themeChange;
+				if (!this.overlay || !this._isLastStep()) {
+					return;
+				}
 				this._logAction('complete');
 				this._dismiss('complete');
 				return;
@@ -582,7 +595,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 
 	private _shouldSkipStep(step: OnboardingStepId): boolean {
 		if (this.selectedExperience === OnboardingExperience.Simple) {
-			return step === OnboardingStepId.Theme || step === OnboardingStepId.ImportSettings;
+			return step === OnboardingStepId.ImportSettings;
 		}
 
 		return false;
@@ -620,14 +633,16 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 
 		const stepId = this.steps[this.currentStepIndex];
 		const isWelcome = stepId === OnboardingStepId.Welcome;
+		const isConnectAI = stepId === OnboardingStepId.ConnectAI;
 		const isExperience = stepId === OnboardingStepId.Experience;
 		const isImportSettings = stepId === OnboardingStepId.ImportSettings;
 
 		this.card.classList.toggle('onboarding-a-card-welcome', isWelcome);
+		this.card.classList.toggle('onboarding-a-card-connect', isConnectAI);
 		this.card.classList.toggle('onboarding-a-card-mode', isExperience);
 		this.card.classList.toggle('onboarding-a-card-import', isImportSettings);
-		this.titleEl.style.display = isWelcome || isExperience || isImportSettings ? 'none' : '';
-		this.subtitleEl.style.display = isWelcome || isExperience || isImportSettings ? 'none' : '';
+		this.titleEl.style.display = isWelcome || isConnectAI || isExperience || isImportSettings ? 'none' : '';
+		this.subtitleEl.style.display = isWelcome || isConnectAI || isExperience || isImportSettings ? 'none' : '';
 		this.titleEl.textContent = getOnboardingStepTitle(stepId);
 		this.subtitleEl.textContent = getOnboardingStepSubtitle(stepId);
 
@@ -636,6 +651,9 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		switch (stepId) {
 			case OnboardingStepId.Welcome:
 				this._renderWelcomeStep(this.contentEl);
+				break;
+			case OnboardingStepId.ConnectAI:
+				this._renderConnectAIStep(this.contentEl);
 				break;
 			case OnboardingStepId.Experience:
 				this._renderExperienceStep(this.contentEl);
@@ -674,12 +692,13 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		}
 
 		const currentStep = this.steps[this.currentStepIndex];
+		this.nextButton.style.display = currentStep === OnboardingStepId.ConnectAI ? 'none' : '';
 		this.nextButton.disabled =
 			(currentStep === OnboardingStepId.SignIn && !this.hasConfirmedBackboardSignIn)
 			|| (currentStep === OnboardingStepId.ApiKey && !this.hasImportedApiKey);
 
 		if (this._isLastStep()) {
-			this.nextButton.textContent = localize('onboarding.backboard.startBuilding', "Start Building");
+			this.nextButton.textContent = localize('onboarding.backboard.startBuilding', "Enter Simple Mode");
 		} else if (currentStep === OnboardingStepId.Welcome) {
 			this.nextButton.textContent = localize('onboarding.backboard.continue', "Continue");
 		} else {
@@ -688,21 +707,39 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 	}
 
 	private _renderWelcomeStep(container: HTMLElement): void {
+		const welcome = append(container, $('.onboarding-backboard-welcome'));
+		const content = append(welcome, $('.onboarding-backboard-welcome-content'));
+		this._createAnimatedBackboardMark(content);
+		const title = append(content, $('h1.onboarding-backboard-title'));
+		title.textContent = getOnboardingStepTitle(OnboardingStepId.Welcome);
+		const subtitle = append(content, $('p.onboarding-backboard-subtitle'));
+		subtitle.textContent = localize('onboarding.pool.welcome', "A little setup. Then make something yours.");
+		const start = this._registerStepFocusable(append(content, $<HTMLButtonElement>('button.onboarding-backboard-sign-in-button')));
+		start.type = 'button';
+		start.textContent = localize('onboarding.pool.start', "Get Started");
+		this.stepDisposables.add(addDisposableListener(start, EventType.CLICK, () => this._nextStep()));
+	}
+
+	private _renderConnectAIStep(container: HTMLElement): void {
 		const wrapper = append(container, $('.onboarding-backboard-welcome'));
 		const welcomeContent = append(wrapper, $('.onboarding-backboard-welcome-content'));
 
-		this._createAnimatedBackboardMark(welcomeContent);
-
 		const intro = append(welcomeContent, $('.onboarding-backboard-welcome-intro'));
 		const title = append(intro, $('h1.onboarding-backboard-title'));
-		title.textContent = getOnboardingStepTitle(OnboardingStepId.Welcome);
+		title.textContent = getOnboardingStepTitle(OnboardingStepId.ConnectAI);
 
 		const subtitle = append(intro, $('p.onboarding-backboard-subtitle'));
-		subtitle.textContent = getOnboardingStepSubtitle(OnboardingStepId.Welcome);
+		subtitle.textContent = getOnboardingStepSubtitle(OnboardingStepId.ConnectAI);
 
 		const signInButton = this._registerStepFocusable(append(welcomeContent, $<HTMLButtonElement>('button.onboarding-backboard-sign-in-button')));
 		signInButton.type = 'button';
-		signInButton.textContent = localize('onboarding.backboard.signInButton', "Log In");
+		signInButton.textContent = localize('onboarding.backboard.signInButton', "Continue with Backboard");
+
+		const ownKeyButton = this._registerStepFocusable(append(welcomeContent, $<HTMLButtonElement>('button.onboarding-backboard-sign-in-button.onboarding-backboard-own-key-button')));
+		ownKeyButton.type = 'button';
+		ownKeyButton.textContent = localize('onboarding.byok.start', "Bring Your Own Key");
+		const providerHint = append(welcomeContent, $('p.onboarding-backboard-provider-hint'));
+		providerHint.textContent = localize('onboarding.byok.hint', "OpenAI, Anthropic, Google or OpenRouter. No Backboard account required.");
 
 		const accountPrompt = append(welcomeContent, $('.onboarding-backboard-account-prompt'));
 		const signUpButton = this._registerStepFocusable(append(accountPrompt, $<HTMLButtonElement>('button.onboarding-backboard-account-link')));
@@ -719,7 +756,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			const skipArea = append(welcomeContent, $('.onboarding-backboard-skip-area'));
 			skipButton = this._registerStepFocusable(append(skipArea, $<HTMLButtonElement>('button.onboarding-backboard-skip-link')));
 			skipButton.type = 'button';
-			skipButton.textContent = localize('onboarding.backboard.skipStep', "Continue without an account");
+			skipButton.textContent = localize('onboarding.backboard.skipStep', "Set Up Later");
 			this.stepDisposables.add(addDisposableListener(skipButton, EventType.CLICK, () => {
 				didContinueWithoutAccount = true;
 				this.postOnboardingSignInPromptShown = true;
@@ -728,6 +765,15 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			}));
 		};
 		showContinueWithoutAccount();
+
+		this.stepDisposables.add(addDisposableListener(ownKeyButton, EventType.CLICK, () => {
+			didContinueWithoutAccount = true;
+			this._logAction('chooseOwnKey');
+			this.stepDisposables.clear();
+			this.stepFocusableElements.length = 0;
+			clearNode(container);
+			this._renderProviderKeySetup(container);
+		}));
 
 		// Completing onboarding reloads this window into the chosen experience,
 		// which would kill an in-flight sign-in (the extension host dies with the
@@ -742,12 +788,15 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			showContinueWithoutAccount();
 			signInButton.disabled = true;
 			signUpButton.disabled = true;
+			ownKeyButton.disabled = true;
 			const idleLabel = sourceButton.textContent;
 			sourceButton.textContent = localize('onboarding.backboard.signInWaiting', "Waiting for sign in… finish in your browser");
 			try {
 				// Resolves true once the tokens are saved; false when the sign-in
 				// failed or was denied (the extension already surfaced that error).
-				if (await this.commandService.executeCommand<boolean>('backboard.signIn') && !didContinueWithoutAccount) {
+				if (await this.commandService.executeCommand<boolean>('backboard.signIn') && !didContinueWithoutAccount && welcomeContent.isConnected) {
+					this.hasConfirmedBackboardSignIn = true;
+					this.postOnboardingSignInPromptShown = true;
 					this._advanceOrComplete();
 					return;
 				}
@@ -760,6 +809,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			}
 			signInButton.disabled = false;
 			signUpButton.disabled = false;
+			ownKeyButton.disabled = false;
 			sourceButton.textContent = idleLabel;
 		};
 
@@ -769,6 +819,78 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		this.stepDisposables.add(addDisposableListener(signUpButton, EventType.CLICK, () => {
 			void startBackboardSignIn(signUpButton, 'openBackboardSignIn');
 		}));
+	}
+
+	private _renderProviderKeySetup(container: HTMLElement): void {
+		const form = append(container, $('div.onboarding-provider-setup'));
+		const title = append(form, $('h2'));
+		title.textContent = localize('onboarding.byok.title', "Bring Your Own Key");
+		const description = append(form, $('p'));
+		description.textContent = localize('onboarding.byok.description', "Connect directly to your AI provider. Usage is billed through your provider account.");
+		const providerLabel = append(form, $('label'));
+		providerLabel.textContent = localize('onboarding.byok.provider', "Provider");
+		const provider = this._registerStepFocusable(append(providerLabel, $<HTMLSelectElement>('select')));
+		for (const [id, label] of [['openai', 'OpenAI'], ['anthropic', 'Anthropic'], ['google', 'Google'], ['openrouter', 'OpenRouter']]) {
+			const option = append(provider, $<HTMLOptionElement>('option'));
+			option.value = id;
+			option.textContent = label;
+		}
+		const keyLabel = append(form, $('label'));
+		keyLabel.textContent = localize('onboarding.byok.key', "API Key");
+		const key = this._registerStepFocusable(append(keyLabel, $<HTMLInputElement>('input')));
+		key.type = 'password';
+		key.autocomplete = 'off';
+		key.spellcheck = false;
+		key.placeholder = localize('onboarding.byok.placeholder', "Paste your provider API key");
+		const privacy = append(form, $('p.onboarding-backboard-provider-hint'));
+		privacy.textContent = localize('onboarding.byok.storage', "Your key is verified with the provider and stored encrypted on this device.");
+		const status = append(form, $('p.onboarding-provider-status'));
+		status.setAttribute('role', 'status');
+		const save = this._registerStepFocusable(append(form, $<HTMLButtonElement>('button.onboarding-backboard-sign-in-button')));
+		save.type = 'button';
+		save.textContent = localize('onboarding.byok.connect', "Connect Provider");
+		save.disabled = true;
+		const back = this._registerStepFocusable(append(form, $<HTMLButtonElement>('button.onboarding-backboard-account-link')));
+		back.type = 'button';
+		back.textContent = localize('onboarding.byok.back', "Back");
+		let saving = false;
+		const submit = async (): Promise<void> => {
+			if (saving || !key.value.trim()) {
+				return;
+			}
+			saving = true;
+			save.disabled = back.disabled = provider.disabled = key.disabled = true;
+			status.textContent = localize('onboarding.byok.verifying', "Verifying your key…");
+			try {
+				const saved = await this.commandService.executeCommand<boolean>('backboard.configureProviderKey', provider.value, key.value.trim());
+				if (!saved) {
+					throw new Error(localize('onboarding.byok.notSaved', "The provider key was not saved. Try again."));
+				}
+				key.value = '';
+				if (!form.isConnected) {
+					return;
+				}
+				this.hasImportedApiKey = true;
+				this.postOnboardingSignInPromptShown = true;
+				this._logAction('connectOwnKey');
+				this._advanceOrComplete();
+			} catch (error) {
+				status.textContent = error instanceof Error ? error.message : localize('onboarding.byok.failed', "Could not connect. Check your key and try again.");
+				saving = false;
+				save.disabled = back.disabled = provider.disabled = key.disabled = false;
+				key.focus();
+			}
+		};
+		this.stepDisposables.add(addDisposableListener(key, EventType.INPUT, () => { save.disabled = !key.value.trim(); }));
+		this.stepDisposables.add(addDisposableListener(key, EventType.KEY_DOWN, (event: KeyboardEvent) => {
+			if (event.key === 'Enter') {
+				event.preventDefault();
+				void submit();
+			}
+		}));
+		this.stepDisposables.add(addDisposableListener(save, EventType.CLICK, () => { void submit(); }));
+		this.stepDisposables.add(addDisposableListener(back, EventType.CLICK, () => this._renderStepFrame()));
+		provider.focus();
 	}
 
 	private _createAnimatedBackboardMark(parent: HTMLElement): HTMLElement {
@@ -1082,12 +1204,15 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 
 		this.stepDisposables.add(addDisposableListener(card, EventType.CLICK, () => {
 			this._logAction('selectTheme', undefined, theme.id);
-			void this._selectTheme(theme);
+			this.themeChange = this.themeChange.then(() => this._selectTheme(theme)).catch(() => {
+				this.notificationService.error(localize('onboarding.theme.failed', "Could not apply this theme. Choose another theme or try again."));
+			});
 
 			for (const c of allCards) {
 				const isSelected = c.dataset.id === theme.id;
 				c.classList.toggle('selected', isSelected);
 				c.setAttribute('aria-checked', isSelected ? 'true' : 'false');
+				c.tabIndex = isSelected ? 0 : -1;
 			}
 
 			this.accessibilityService.alert(localize('onboarding.theme.selected.alert', "{0} theme selected", theme.label));

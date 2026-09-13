@@ -452,6 +452,7 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 				return metadata ? { metadata, identifier: id } : undefined;
 			})
 			.filter((m): m is ILanguageModelChatMetadataAndIdentifier => !!m && m.metadata.targetChatSessionType === provider)
+			.filter(model => !/(^|[\s/_.:-])latest($|[\s/_.:-])/i.test(`${model.metadata.id} ${model.metadata.name}`))
 			.sort((a, b) => a.metadata.name.localeCompare(b.metadata.name));
 	}
 

@@ -1,0 +1,49 @@
+{
+  "request": {
+    "content": "Reply with exactly: hi",
+    "llm_provider": "openrouter",
+    "memory": "off",
+    "stream": true,
+    "model_name": "deepseek/deepseek-v4.1-flash"
+  },
+  "events": [
+    {
+      "type": "message_received",
+      "phase": "stateless_prep"
+    },
+    {
+      "type": "message_received",
+      "phase": "prep"
+    },
+    {
+      "type": "user_message",
+      "message_id": "310f9637-1ebe-4bbd-b36b-351c1b05edaf",
+      "content": "Reply with exactly: hi",
+      "role": "user",
+      "metadata": {
+        "memory_response_citation": false
+      },
+      "thread_id": "d535994b-4583-4089-aacc-b254691224eb",
+      "assistant_id": "1aa456f2-ea92-4044-8a1b-8f23c72377de"
+    },
+    {
+      "type": "run_started",
+      "run_id": "32bfa3ee-9681-4649-8b23-ba70dfe25ecc",
+      "message_id": "331e4b72-52f2-4b21-b944-7126d2ca764c",
+      "provider": "openrouter",
+      "model_name": "deepseek/deepseek-v4.1-flash"
+    },
+    {
+      "type": "message_start",
+      "message_id": "331e4b72-52f2-4b21-b944-7126d2ca764c",
+      "run_id": "32bfa3ee-9681-4649-8b23-ba70dfe25ecc"
+    },
+    {
+      "type": "run_failed",
+      "run_id": "32bfa3ee-9681-4649-8b23-ba70dfe25ecc",
+      "error": "No endpoints found for deepseek/deepseek-v4.1-flash.",
+      "error_type": "ProviderAPIError"
+    }
+  ],
+  "http_status": 200
+}

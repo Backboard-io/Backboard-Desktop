@@ -74,6 +74,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(bridge);
 	context.subscriptions.push(usagePanel);
 	initializeBackboardUpdates(context, backboardToolOutput);
+	context.subscriptions.push(vscode.commands.registerCommand('backboard.configureProviderKey', (provider: string, key: string) => bridge.configureProviderKey(provider, key)));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.setApiKey', async () => {
 		if (await setApiKey()) {
 			bridge.restart();
@@ -2332,6 +2333,34 @@ class BackboardBridge implements vscode.Disposable {
 			}
 		});
 		return child;
+	}
+
+	async configureProviderKey(provider: string, key: string): Promise<boolean> {
+		if (!['openai', 'anthropic', 'google', 'openrouter'].includes(provider) || typeof key !== 'string' || !key.trim()) {
+			throw new Error(vscode.l10n.t('Choose a provider and enter an API key.'));
+		}
+		// Keep secrets out of command arguments, bridge diagnostics and output logs.
+		await new Promise<void>((resolve, reject) => {
+			const child = cp.spawn(this.resolveCliPath(), ['--configure-provider-key'], { stdio: ['pipe', 'ignore', 'pipe'] });
+			const timeout = setTimeout(() => child.kill(), 45000);
+			child.stderr.resume();
+			child.stdin.on('error', () => { /* Process errors are handled below. */ });
+			child.once('error', () => {
+				clearTimeout(timeout);
+				reject(new Error(vscode.l10n.t('Could not start provider setup. Rebuild or update the bundled agent.')));
+			});
+			child.once('close', code => {
+				clearTimeout(timeout);
+				if (code === 0) {
+					resolve();
+				} else {
+					reject(new Error(vscode.l10n.t('Could not verify and save the key. Check the provider, key and network connection, then try again.')));
+				}
+			});
+			child.stdin.end(JSON.stringify({ provider, key }));
+		});
+		this.restart();
+		return true;
 	}
 
 	private resolveCliPath(): string {

@@ -11027,3 +11027,22 @@ have to be updated for changes to the rules above, or to support more deeply nes
 .monaco-workbench .backboard-clean-chat .interactive-item-container.interactive-request > .checkpoint-container .monaco-toolbar .action-item:not(.disabled) .action-label:hover {
 	color: var(--vscode-foreground);
 }
+
+/* One opaque surface for every composer, including Monaco's selection corner
+ * masks. Alias legacy host tokens at the container so nested editor rules
+ * cannot paint a different theme color from the surrounding input card. */
+html body .monaco-workbench .interactive-session .interactive-input-part .chat-input-container {
+	--bb-composer-surface: var(--vscode-input-background, var(--vscode-editor-background));
+	--codex-composer: var(--bb-composer-surface);
+	--bb-t3-composer: var(--bb-composer-surface);
+	--bb-clean-chat-surface: var(--bb-composer-surface);
+	--sessions-codex-surface-background: var(--bb-composer-surface);
+	--vscode-agentsChatInput-background: var(--bb-composer-surface);
+	background: var(--bb-composer-surface) !important;
+}
+
+html body .monaco-workbench .interactive-session .interactive-input-part .chat-input-container :is(
+	.chat-editor-container, .interactive-input-editor, .monaco-editor,
+	.monaco-editor-background, .margin, .overflow-guard, .chat-input-toolbars) {
+	background: var(--bb-composer-surface) !important;
+}

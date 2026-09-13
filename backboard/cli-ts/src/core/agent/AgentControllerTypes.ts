@@ -4,7 +4,7 @@ export interface QueuedSubmit {
 	text: string;
 	emitUserMessage: boolean;
 	turnId?: string;
-	onStart?: () => void;
+	onStart?: () => void | Promise<void>;
 	attachmentFilePaths?: string[];
 	displayContent?: string;
 	conversationContext?: string;
@@ -15,7 +15,7 @@ export interface QueuedSubmit {
 export interface SubmitOptions {
 	emitUserMessage?: boolean;
 	turnId?: string;
-	onStart?: () => void;
+	onStart?: () => void | Promise<void>;
 	attachmentFilePaths?: string[];
 	displayContent?: string;
 	/** Prior conversation supplied by a host when creating a new branch. */

@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { IWorkbenchEnvironmentService } from '../../../services/environment/common/environmentService.js';
 import { LayoutPriority, Orientation, Sizing, SplitView } from '../../../../base/browser/ui/splitview/splitview.js';
 import { Disposable, dispose, IDisposable } from '../../../../base/common/lifecycle.js';
 import { Event } from '../../../../base/common/event.js';
@@ -87,6 +88,7 @@ export class TerminalTabbedView extends Disposable {
 		@IStorageService private readonly _storageService: IStorageService,
 		@IContextKeyService contextKeyService: IContextKeyService,
 		@IHoverService private readonly _hoverService: IHoverService,
+		@IWorkbenchEnvironmentService private readonly _environmentService: IWorkbenchEnvironmentService,
 	) {
 		super();
 
@@ -166,6 +168,10 @@ export class TerminalTabbedView extends Disposable {
 	}
 
 	private _shouldShowTabs(): boolean {
+		// Keep per-terminal close controls available, including for the last shell.
+		if (this._environmentService.isSessionsWindow) {
+			return true;
+		}
 		const enabled = this._terminalConfigurationService.config.tabs.enabled;
 		const hide = this._terminalConfigurationService.config.tabs.hideCondition;
 		const hiddenChatTerminals = this._terminalChatService.getToolSessionTerminalInstances(true);
@@ -304,7 +310,7 @@ export class TerminalTabbedView extends Disposable {
 		this._splitView.addView({
 			element: this._tabContainer,
 			layout: width => this._tabList.layout(this._height || 0, width),
-			minimumSize: TerminalTabsListSizes.NarrowViewWidth,
+			minimumSize: this._environmentService.isSessionsWindow ? TerminalTabsListSizes.DefaultWidth : TerminalTabsListSizes.NarrowViewWidth,
 			maximumSize: TerminalTabsListSizes.MaximumWidth,
 			onDidChange: () => Disposable.None,
 			priority: LayoutPriority.Low

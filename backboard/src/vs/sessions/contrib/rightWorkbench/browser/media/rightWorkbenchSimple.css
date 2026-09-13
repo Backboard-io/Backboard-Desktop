@@ -422,3 +422,125 @@
 	backdrop-filter: none;
 	-webkit-backdrop-filter: none;
 }
+
+/* Header glyphs share their control's foreground instead of independently
+ * inheriting a theme accent that may disappear against the header surface. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-simple .sessions-right-workbench-header .codicon {
+	color: inherit !important;
+}
+
+/* Wallpaper uses a fixed dark tint in every theme. Keep these tokens local
+ * to the header so tool content and menus retain their normal theme colors. */
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.hc-black):not(.hc-light) .part.auxiliarybar .sessions-right-workbench-simple .sessions-right-workbench-header {
+	--rwb-foreground: #ffffff;
+	--rwb-muted: #e2e5e9;
+	--rwb-hover: rgba(255, 255, 255, 0.12);
+	--vscode-focusBorder: #ffffff;
+}
+
+/* The selected tab has an opaque theme surface, unlike its surroundings. */
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.hc-black):not(.hc-light) .part.auxiliarybar .sessions-right-workbench-simple .sessions-right-workbench-header .sessions-right-workbench-tab.active {
+	--rwb-foreground: var(--vscode-foreground);
+	--rwb-muted: var(--vscode-foreground);
+	color: var(--vscode-foreground);
+}
+
+/* Text on the transparent panel chrome must use the same foreground as the
+ * wallpaper header. Keep these overrides off editors and terminal content. */
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.hc-black):not(.hc-light) .part.auxiliarybar .sessions-right-workbench-simple :is(
+	.sessions-right-workbench-file-path,
+	.sessions-right-workbench-browser-chrome,
+	.sessions-right-workbench-browser-empty,
+	.sessions-right-workbench-file-empty,
+	.sessions-right-workbench-review-empty,
+	.sessions-right-workbench-review-toolbar,
+	.sessions-right-workbench-review-rail,
+	.sessions-right-workbench-review-scm-rail,
+	.sessions-right-workbench-file-explorer-host) {
+	--rwb-foreground: #ffffff;
+	--rwb-muted: #e2e5e9;
+	--rwb-hover: rgba(255, 255, 255, 0.12);
+	color: var(--rwb-foreground);
+}
+
+/* Explorer rows are transparent even in light themes. Pair hover/selection
+ * surfaces and labels locally instead of inheriting dark editor text. */
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.hc-black):not(.hc-light) .part.auxiliarybar .sessions-right-workbench-simple .sessions-right-workbench-file-explorer-host {
+	--vscode-list-activeSelectionForeground: #ffffff;
+	--vscode-list-inactiveSelectionForeground: #ffffff;
+	--vscode-list-hoverForeground: #ffffff;
+	--vscode-list-focusForeground: #ffffff;
+	--vscode-list-activeSelectionBackground: rgba(255, 255, 255, 0.18);
+	--vscode-list-inactiveSelectionBackground: rgba(255, 255, 255, 0.12);
+	--vscode-list-hoverBackground: rgba(255, 255, 255, 0.10);
+	--vscode-list-focusBackground: rgba(255, 255, 255, 0.12);
+
+	.monaco-list-row,
+	.monaco-icon-label,
+	.monaco-tl-twistie {
+		color: #ffffff !important;
+	}
+
+	.monaco-icon-description {
+		color: #e2e5e9 !important;
+	}
+}
+
+/* Filled controls still need the foreground paired with their theme surface. */
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.hc-black):not(.hc-light) .part.auxiliarybar .sessions-right-workbench-simple :is(
+	.sessions-right-workbench-file-filter,
+	.sessions-right-workbench-browser-address) {
+	color: var(--vscode-input-foreground);
+}
+
+/* Transparent tool chrome uses wallpaper contrast, including native controls
+ * that read VS Code tokens instead of the right-workbench foreground tokens. */
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.hc-black):not(.hc-light) .part.auxiliarybar .sessions-right-workbench-simple :is(
+	.sessions-right-workbench-browser-chrome,
+	.browser-navbar,
+	.sessions-right-workbench-file-path,
+	.sessions-right-workbench-file-explorer-host,
+	.sessions-right-workbench-review-toolbar,
+	.sessions-right-workbench-review-rail,
+	.sessions-right-workbench-review-scm-rail,
+	.multiDiffEntry > .header) {
+	--vscode-icon-foreground: #e2e5e9;
+	--vscode-descriptionForeground: #e2e5e9;
+	--vscode-disabledForeground: #b2b8c1;
+	--vscode-foreground: #ffffff;
+	--vscode-input-foreground: #ffffff;
+	--vscode-input-placeholderForeground: #d3d8df;
+	--vscode-input-background: #252c35;
+	--vscode-input-border: #8793a2;
+	--vscode-focusBorder: #c1ddff;
+	--vscode-gitDecoration-addedResourceForeground: #8ce6a6;
+	--vscode-gitDecoration-deletedResourceForeground: #ffa5ac;
+	color: #ffffff;
+
+	.action-label,
+	.sessions-right-workbench-icon-button,
+	.monaco-tl-twistie {
+		color: #e2e5e9 !important;
+	}
+
+	.additions { color: #8ce6a6 !important; }
+	.deletions { color: #ffa5ac !important; }
+}
+
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.hc-black):not(.hc-light) .part.auxiliarybar .sessions-right-workbench-simple :is(
+	.sessions-right-workbench-browser-address,
+	.sessions-right-workbench-browser-url,
+	.sessions-right-workbench-file-filter,
+	.browser-url-container) {
+	--vscode-input-foreground: #ffffff;
+	--vscode-input-placeholderForeground: #d3d8df;
+	--vscode-input-background: #252c35;
+	--vscode-focusBorder: #c1ddff;
+	background: #252c35 !important;
+	color: #ffffff !important;
+	-webkit-text-fill-color: #ffffff;
+	caret-color: #ffffff;
+
+	input { color: #ffffff !important; -webkit-text-fill-color: #ffffff; }
+	&::placeholder, input::placeholder { color: #d3d8df !important; -webkit-text-fill-color: #d3d8df; opacity: 1; }
+}

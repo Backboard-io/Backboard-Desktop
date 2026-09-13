@@ -1358,7 +1358,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		// builds persisted the previous 360px default, so clamp that restored
 		// value here while still allowing the user to resize after launch.
 		const sideBarSize = !this._isOptimusWindow
-			? Math.min(restoredSideBarSize, 300)
+			? Math.min(restoredSideBarSize, 310)
 			: restoredSideBarSize;
 		const panelSize = this._savedPartSizes.panel
 			?? (this.partVisibility.panel ? sizes.panelSize : Math.max(sizes.panelSize, 250));
@@ -1842,11 +1842,11 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 
 			// Re-opening restores the sidebar's last visible width, which may be at (or
 			// near) the narrow minimum. Bump it up to a comfortable width on open so the
-			// header row — traffic lights, mode switcher, toggle and navigation — isn't
+			// header row — traffic lights, mode switcher and sidebar toggle — isn't
 			// cramped against the window controls.
 			if (this.sideBarPartView) {
 				const restored = this.workbenchGrid.getViewSize(this.sideBarPartView);
-				const comfortableOpenWidth = 300;
+				const comfortableOpenWidth = 310;
 				if (restored.width > 0 && restored.width < comfortableOpenWidth) {
 					this.workbenchGrid.resizeView(this.sideBarPartView, { width: comfortableOpenWidth, height: restored.height });
 				}

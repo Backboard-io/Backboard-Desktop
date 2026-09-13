@@ -3,6 +3,14 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+/* Keep window controls usable while the signed-out sidebar content is obscured. */
+.agent-sessions-workbench:has(.session-view.backboard-auth-gate-active) .part.sidebar > .content {
+	filter: blur(4px);
+	opacity: 0.48;
+	pointer-events: none;
+	user-select: none;
+}
+
 /* Make the sidebar title area draggable to move the window */
 .agent-sessions-workbench .part.sidebar > .composite.title {
 	position: relative;

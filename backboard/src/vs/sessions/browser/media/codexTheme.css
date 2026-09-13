@@ -97,6 +97,32 @@
 	background: var(--codex-hover) !important;
 }
 
+/* Simple's mode controls and breadcrumb share one 48px header baseline.
+ * Keep this scoped away from Advanced's separate dashboard toolbar. */
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout) .sessions-panel-header.sidebar-part-header,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout) .sessions-panel-header.sessions-part-header {
+	height: 48px;
+	flex-basis: 48px;
+	padding-top: 0;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout) :is(
+	.sessions-header-session-title-slot .chat-composite-bar-title-row,
+	.sessions-header-session-toolbar-slot .monaco-toolbar .actions-container) {
+	transform: none;
+}
+
+/* Native traffic lights remain centered 18 physical pixels from the top
+ * while renderer chrome follows workbench zoom. Align all three header
+ * sections to that fixed center without shrinking their layout/hit areas. */
+.monaco-workbench.agent-sessions-workbench.mac:not(.phone-layout):not(.fullscreen) .sessions-panel-header.sidebar-part-header > :is(.sessions-panel-header-left, .sessions-panel-header-center, .sessions-panel-header-right),
+.monaco-workbench.agent-sessions-workbench.mac:not(.optimus-window):not(.phone-layout):not(.fullscreen) .sessions-panel-header:is(.sidebar-part-header, .sessions-part-header) > :is(
+	.sessions-panel-header-left,
+	.sessions-panel-header-center,
+	.sessions-panel-header-right) {
+	transform: translateY(calc(18px / var(--zoom-factor, 1) - 24px));
+}
+
 /* ---- Sidebar ------------------------------------------------------------ */
 
 .monaco-workbench.agent-sessions-workbench .agent-sessions-viewpane {
@@ -158,11 +184,21 @@
 	letter-spacing: -0.01em;
 }
 
-/* T3 Code's sidebar is organized as a two-row command header followed by a
- * flat thread inbox. Keep the controls on one 32px rhythm and let the list be
- * the only scrolling region. */
+/* Navigation stays together; the quieter folder filter introduces the tree. */
 .monaco-workbench.agent-sessions-workbench .agent-sessions-simple-actions {
 	gap: 2px;
+}
+
+.monaco-workbench.agent-sessions-workbench .agent-sessions-simple-project-row {
+	margin-top: 10px;
+	padding-top: 8px;
+	border-top: 1px solid color-mix(in srgb, var(--codex-text-primary) 8%, transparent);
+}
+
+.monaco-workbench.agent-sessions-workbench .agent-sessions-simple-project-row .agent-sessions-project-filter-button {
+	font-size: 11px;
+	font-weight: 600;
+	color: var(--agent-sidebar-muted);
 }
 
 .monaco-workbench.agent-sessions-workbench :is(.agent-sessions-simple-search-row, .agent-sessions-simple-project-row) {
@@ -526,10 +562,7 @@
 	display: none;
 }
 
-/* The funnel restores the original folder-grouped sidebar. Rows keep the old
- * one-line density and align their titles under the folder label; the hidden
- * per-row folder glyph deliberately keeps its layout width so the hierarchy
- * reads like the legacy view without repeating the same icon on every thread. */
+/* Folder view uses compact project rows and indented chat titles. */
 .monaco-workbench.agent-sessions-workbench .sessions-list-control .monaco-list-row:has(.simple-session-compact) {
 	margin: 0;
 	width: 100%;
@@ -537,15 +570,14 @@
 }
 
 .monaco-workbench.agent-sessions-workbench .session-item.simple-session-compact {
-	padding: 0 8px;
+	padding: 0 8px 0 32px;
 }
 
 .monaco-workbench.agent-sessions-workbench .simple-session-compact .session-icon {
 	display: none;
 }
 
-/* Compact rows hide the folder glyph but keep its layout width; the running
- * throbber seats in that reserved slot so titles stay aligned. */
+/* Running status stays in the icon gutter without shifting chat titles. */
 .monaco-workbench.agent-sessions-workbench .simple-session-compact .session-icon.session-icon-in-progress {
 	display: flex;
 }
@@ -555,12 +587,11 @@
 }
 
 .monaco-workbench.agent-sessions-workbench .simple-session-compact .session-provider-icon {
-	font-size: 13px;
-	visibility: hidden;
+	display: none;
 }
 
 .monaco-workbench.agent-sessions-workbench .simple-session-compact .session-title {
-	font-size: 14px;
+	font-size: 13px;
 	font-weight: 400;
 }
 
@@ -575,12 +606,15 @@
 }
 
 .monaco-workbench.agent-sessions-workbench .simple-folder-view .session-section {
+	height: 28px;
+	margin-top: 4px;
 	font-size: 13px;
 	font-weight: 500;
 }
 
 .monaco-workbench.agent-sessions-workbench .simple-folder-view .session-section-empty {
-	opacity: 0.48;
+	color: var(--agent-sidebar-secondary);
+	opacity: 1;
 }
 
 .monaco-workbench.agent-sessions-workbench .simple-folder-view .session-section-empty .session-section-toolbar {
@@ -802,6 +836,177 @@
 	height: 22px;
 }
 
+/* Desktop sidebar spacing: one outer gutter and one icon/text rail from
+ * navigation through the tree to the account row. Keep virtual folder rows
+ * at 32px, matching SessionsTreeDelegate's compact section height. */
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout) .agent-sessions-viewpane {
+	font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+	--sidebar-gutter: 12px;
+	--sidebar-row-inset: 8px;
+
+	.agent-sessions-container {
+		padding: 0 var(--sidebar-gutter) 8px;
+	}
+
+	.agent-sessions-simple-actions {
+		gap: 0;
+	}
+
+	.agent-sessions-simple-actions > .agent-sessions-sidebar-action,
+	.agent-sessions-simple-search-row .agent-sessions-search-button {
+		height: 28px;
+		padding-inline: var(--sidebar-row-inset);
+		font-size: 12px;
+	}
+
+	.agent-sessions-simple-actions .agent-sessions-sidebar-action-icon .codicon {
+		font-size: 14px;
+	}
+
+	.agent-sessions-simple-search-row .agent-sessions-simple-icon-button {
+		width: 28px;
+		height: 28px;
+		flex-basis: 28px;
+	}
+
+	.agent-sessions-simple-project-row {
+		margin-top: 8px;
+		padding-top: 6px;
+	}
+
+	.agent-sessions-simple-project-row :is(.agent-sessions-project-filter-button, .agent-sessions-simple-icon-button) {
+		height: 28px;
+	}
+
+	.agent-sessions-pinned {
+		margin-bottom: 4px;
+	}
+
+	.simple-folder-view .session-section {
+		height: 32px;
+		margin-top: 0;
+		padding-inline: var(--sidebar-row-inset);
+	}
+
+	.agent-sessions-footer {
+		min-height: 44px;
+		margin: 8px 0 0;
+		padding: 8px 0 0 var(--sidebar-row-inset);
+		border: 0;
+		border-top: 1px solid color-mix(in srgb, var(--codex-text-primary) 8%, transparent);
+		border-radius: 0;
+	}
+
+	.agent-sessions-footer-navigation {
+		gap: 4px;
+	}
+
+	.agent-sessions-footer-navigation .agent-sessions-sidebar-action {
+		width: 28px;
+		height: 28px;
+		flex-basis: 28px;
+	}
+
+	.agent-sessions-footer .agent-sessions-user {
+		/* The 18px avatar adds 2px over the icon rail's 16px box. */
+		gap: 6px;
+	}
+}
+
+/* Shared typography and outline icon geometry for both desktop sidebars. */
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout) .agent-sessions-viewpane {
+	.agent-sessions-sidebar-action,
+	.agent-sessions-project-filter-button,
+	.agent-sessions-project-filter-option,
+	.session-section,
+	.session-title,
+	.session-show-more,
+	.agent-sessions-footer .agent-sessions-user-name {
+		font-size: 13px;
+		font-weight: 400;
+		line-height: 20px;
+	}
+
+	.simple-session-compact .session-simple-provider {
+		display: none;
+	}
+
+	.agent-sessions-sidebar-action-icon,
+	.agent-sessions-footer-navigation .agent-sessions-sidebar-action-icon,
+	.codicon {
+		width: 16px;
+		height: 16px;
+		font-size: 16px;
+		line-height: 16px;
+		flex-shrink: 0;
+	}
+}
+
+/* A single 24-unit, 1.75-stroke outline family. The existing buttons retain
+ * their accessible names and behavior; masks inherit theme and focus colors. */
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout) .agent-sessions-viewpane {
+	.codicon-search {
+		--sidebar-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.75%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Ccircle%20cx%3D%2210.5%22%20cy%3D%2210.5%22%20r%3D%226.5%22%2F%3E%3Cpath%20d%3D%22m16%2016%205%205%22%2F%3E%3C%2Fsvg%3E");
+	}
+
+	.codicon-edit {
+		--sidebar-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.75%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M13%205H6a3%203%200%200%200-3%203v10a3%203%200%200%200%203%203h10a3%203%200%200%200%203-3v-7M15%203l6%206M10%2014l-1%204%204-1%208-8a2.1%202.1%200%200%200-6-6z%22%2F%3E%3C%2Fsvg%3E");
+	}
+
+	.codicon-extensions {
+		--sidebar-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.75%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M8%203v5m8-5v5M6%208h12v4a6%206%200%200%201-12%200zM12%2018v3%22%2F%3E%3C%2Fsvg%3E");
+	}
+
+	.codicon-graph-line {
+		--sidebar-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.75%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M4%203v17h17M8%2015l4-5%204%202%205-7%22%2F%3E%3C%2Fsvg%3E");
+	}
+
+	.codicon-settings-gear {
+		--sidebar-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.75%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M3%206h4m4%200h10M3%2012h10m4%200h4M3%2018h4m4%200h10%22%2F%3E%3Ccircle%20cx%3D%229%22%20cy%3D%226%22%20r%3D%222%22%2F%3E%3Ccircle%20cx%3D%2215%22%20cy%3D%2212%22%20r%3D%222%22%2F%3E%3Ccircle%20cx%3D%229%22%20cy%3D%2218%22%20r%3D%222%22%2F%3E%3C%2Fsvg%3E");
+	}
+
+	.codicon-folder {
+		--sidebar-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.75%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M3%207V5a2%202%200%200%201%202-2h5l3%203h6a2%202%200%200%201%202%202v2M3%207v12a2%202%200%200%200%202%202h13a2%202%200%200%200%202-1.5l2-8A2%202%200%200%200%2020%209H7l-2%208%22%2F%3E%3C%2Fsvg%3E");
+	}
+
+	.codicon-new-folder {
+		--sidebar-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.75%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M10%2020H5a2%202%200%200%201-2-2V5a2%202%200%200%201%202-2h5l3%203h6a2%202%200%200%201%202%202v3M17%2013v8m-4-4h8%22%2F%3E%3C%2Fsvg%3E");
+	}
+
+	.codicon-file-media {
+		--sidebar-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.75%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20x%3D%223%22%20y%3D%223%22%20width%3D%2218%22%20height%3D%2218%22%20rx%3D%223%22%2F%3E%3Ccircle%20cx%3D%228%22%20cy%3D%228%22%20r%3D%221.5%22%2F%3E%3Cpath%20d%3D%22m3%2017%205-5%204%204%203-3%206%206%22%2F%3E%3C%2Fsvg%3E");
+	}
+
+	.codicon-filter {
+		--sidebar-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.75%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M5%204v13a2%202%200%200%200%202%202h3M5%209h5M14%204h7M14%209h7M14%2014h7M14%2019h7%22%2F%3E%3C%2Fsvg%3E");
+	}
+
+	.codicon-chevron-down {
+		--sidebar-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.75%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E");
+	}
+
+	.codicon-chevron-right {
+		--sidebar-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.75%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m9%206%206%206-6%206%22%2F%3E%3C%2Fsvg%3E");
+	}
+
+	.codicon-close {
+		--sidebar-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.75%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%206%2012%2012M6%2018%2018%206%22%2F%3E%3C%2Fsvg%3E");
+	}
+
+	.codicon-check {
+		--sidebar-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.75%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m5%2012%204%204L19%206%22%2F%3E%3C%2Fsvg%3E");
+	}
+
+	:is(.codicon-search, .codicon-edit, .codicon-extensions, .codicon-graph-line, .codicon-settings-gear, .codicon-folder, .codicon-new-folder, .codicon-file-media, .codicon-filter, .codicon-chevron-down, .codicon-chevron-right, .codicon-close, .codicon-check)::before {
+		content: '';
+		display: block;
+		width: 16px;
+		height: 16px;
+		background-color: currentColor;
+		mask: var(--sidebar-icon) center / contain no-repeat;
+	}
+}
+
 /* When an update is available, group all actions on one shared bottom row
  * beneath the identity, with the update pill aligned to the right. */
 .monaco-workbench.agent-sessions-workbench .agent-sessions-viewpane .agent-sessions-footer.has-update {
@@ -852,6 +1057,13 @@
 	outline-offset: 2px;
 }
 
+/* Keep the wallpaper treatment identical across themes and chat states. */
+.monaco-workbench.agent-sessions-workbench {
+	--sessions-background-scrim: rgba(18, 20, 24, 0.48);
+	--sessions-background-filter: blur(3px);
+}
+
+
 /* ---- New task ----------------------------------------------------------- */
 
 /* A user-selected image belongs only to Simple mode's top-level new-task
@@ -868,8 +1080,8 @@
 	z-index: 0;
 	pointer-events: none;
 	background-color: var(--codex-canvas) !important;
-	background-image: linear-gradient(color-mix(in srgb, var(--codex-canvas) 56%, transparent), color-mix(in srgb, var(--codex-canvas) 56%, transparent)), var(--new-chat-background-image) !important;
-	filter: blur(1px);
+	background-image: linear-gradient(var(--sessions-background-scrim), var(--sessions-background-scrim)), var(--new-chat-background-image) !important;
+	filter: var(--sessions-background-filter);
 	background-position: center !important;
 	background-repeat: no-repeat !important;
 	background-size: cover !important;
@@ -957,7 +1169,9 @@
 }
 
 .monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-header {
-	-webkit-app-region: drag;
+	/* A scrolling tab strip must remain interactive across its whole bounds.
+	 * Native drag hit regions can become stale when tabs scroll or panels resize. */
+	-webkit-app-region: no-drag;
 }
 
 .monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-header :is(button, input, .sessions-right-workbench-tab, .sessions-right-workbench-tab-add, .sessions-right-workbench-icon-button) {
@@ -1054,7 +1268,6 @@
 	--new-chat-card-radius: var(--bb-simple-sent-composer-radius);
 	transform: translateY(-24px);
 }
-
 
 .monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .new-chat-composer-stack > .interactive-session,
 .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboard-clean-chat.backboard-composer .optimus-chat-editor-host > .interactive-session {
@@ -1663,8 +1876,8 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 	z-index: 0;
 	pointer-events: none;
 	background-color: var(--codex-canvas) !important;
-	background-image: linear-gradient(color-mix(in srgb, var(--codex-canvas) 56%, transparent), color-mix(in srgb, var(--codex-canvas) 56%, transparent)), var(--new-chat-background-image) !important;
-	filter: blur(1px);
+	background-image: linear-gradient(var(--sessions-background-scrim), var(--sessions-background-scrim)), var(--new-chat-background-image) !important;
+	filter: var(--sessions-background-filter);
 	background-position: center !important;
 	background-repeat: no-repeat !important;
 	background-size: cover !important;
@@ -1833,7 +2046,7 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 }
 
 /* Only the navigation sidebar uses a rounded frame in Simple mode. */
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.sidebar {
+.monaco-workbench.agent-sessions-workbench .part.sidebar {
 	border-radius: 12px !important;
 	clip-path: none;
 	overflow: hidden;
@@ -2073,4 +2286,103 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple {
 	border: 0;
 	border-radius: 0;
+}
+
+/* Wallpaper has a fixed dark tint in every theme. Only content painted directly
+ * over it uses these light foregrounds; inputs, prompts and tool panels retain
+ * their theme's foreground/background pairing. */
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.hc-black):not(.hc-light) {
+	--wallpaper-foreground: #ffffff;
+	--wallpaper-muted: #e2e5e9;
+
+	.part.sessionspart > .sessions-panel-header,
+	.new-chat-middle-title {
+		--codex-text-primary: var(--wallpaper-foreground);
+		--codex-text-secondary: var(--wallpaper-muted);
+		--session-view-foreground: var(--wallpaper-foreground);
+		--vscode-icon-foreground: var(--wallpaper-muted);
+		color: var(--wallpaper-foreground);
+		text-shadow: 0 1px 3px #00000080;
+	}
+
+	.part.sessionspart > .sessions-panel-header :is(
+		.action-label, .codicon, .chat-composite-bar-session-title-text,
+		.chat-composite-bar-meta-workspace, .chat-composite-bar-meta-workspace-label,
+		.new-chat-header-breadcrumb-label, .new-chat-header-breadcrumb-draft,
+		.new-chat-header-breadcrumb-separator),
+	.new-chat-middle-title :is(.action-label, .codicon, .sessions-chat-dropdown-label, .sessions-chat-dropdown-chevron) {
+		color: var(--wallpaper-foreground) !important;
+	}
+
+	.part.sessionspart > .sessions-panel-header .action-item.disabled .action-label {
+		color: var(--wallpaper-muted) !important;
+		opacity: 0.55;
+	}
+
+	.part.sessionspart .interactive-response {
+		--bb-clean-chat-muted: var(--wallpaper-muted);
+		--bb-t3-muted: var(--wallpaper-muted);
+		--bb-t3-text: var(--wallpaper-foreground);
+		--bb-cursor-transcript-muted: var(--wallpaper-muted);
+		--vscode-interactive-session-foreground: var(--wallpaper-foreground);
+		color: var(--wallpaper-foreground);
+	}
+
+	.part.sessionspart .interactive-response > .value > .rendered-markdown,
+	.part.sessionspart .interactive-response :is(
+		.chat-thinking-box, .chat-thinking-group-header, .chat-thinking-cursor-reasoning-label,
+		.chat-core-tool-stack-header, .chat-core-tool-card-header, .chat-progress,
+		.chat-progress-message, .chat-working-progress, .chat-working-progress-label,
+		.chat-footer-toolbar) {
+		color: var(--wallpaper-foreground) !important;
+		text-shadow: 0 1px 3px #00000080;
+	}
+
+	.part.sessionspart .interactive-response > .value > .rendered-markdown a {
+		color: #b9ddff;
+		text-decoration: underline;
+	}
+}
+
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.hc-black):not(.hc-light) .part.sessionspart .interactive-response :is(
+	.chat-t3-turn-fold-label, .chat-t3-turn-fold-button,
+	.chat-footer-details, .chat-footer-toolbar .action-label,
+	.chat-footer-toolbar .codicon, .chat-thinking-icon,
+	.chat-thinking-cursor-reasoning-icon, .chat-progress-elapsed,
+	.chat-thinking-group-live-elapsed) {
+	color: var(--wallpaper-muted) !important;
+	text-shadow: 0 1px 3px #00000080;
+}
+
+/* Expanded reasoning has its own markdown colors below the thoughts header. */
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.hc-black):not(.hc-light) .part.sessionspart .interactive-response .chat-thinking-box :is(
+	.chat-thinking-item.markdown-content,
+	.chat-thinking-item.markdown-content .rendered-markdown,
+	.chat-thinking-item.markdown-content .rendered-markdown :is(p, span, li, strong, em, a),
+	.chat-thinking-group-chevron-cursor, .chat-thinking-cursor-reasoning-chevron,
+	.chat-thinking-icon, .codicon-chevron-down, .codicon-chevron-right) {
+	color: var(--wallpaper-muted) !important;
+	opacity: 1;
+}
+
+/* Simple outlines follow the sidebar foreground in light and dark themes. */
+.monaco-workbench.agent-sessions-workbench:not(.hc-black):not(.hc-light) .agent-sessions-viewpane .codicon {
+	color: var(--vscode-sideBar-foreground, var(--vscode-foreground));
+}
+
+/* Closing a shell must not require discovering hover-only tab controls. */
+.monaco-workbench.agent-sessions-workbench .part.panel .pane-body.integrated-terminal .tabs-list .actions {
+	display: block;
+}
+
+/* Simple sidebar: clip the header and footer to the same rounded outline.
+ * Its grid wrapper must not fill the corner cutouts with an opaque square. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout) .part.sidebar {
+	border-radius: 14px !important;
+	overflow: hidden !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sidebar) {
+	border-radius: 14px !important;
+	background: transparent !important;
 }

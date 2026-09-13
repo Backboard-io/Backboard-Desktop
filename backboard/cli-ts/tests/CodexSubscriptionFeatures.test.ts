@@ -190,6 +190,29 @@ describe("CodexSubscriptionClient features", () => {
 		expect(String(bodies[1]?.instructions)).toContain(
 			"I prefer tabs in TypeScript.",
 		);
+		const fullPrompt = "x".repeat(1_048_576);
+		await collect(
+			client.runMessage({
+				content: "What style should I use?",
+				model_name: "gpt-test",
+				system_prompt: fullPrompt,
+				memory: "Readonly",
+				memory_profile: "code",
+			}),
+		);
+		expect(bodies[2]?.instructions).toBe(fullPrompt);
+		expect(bodies[2]?.input).toMatchObject([
+			{
+				role: "system",
+				content: [
+					{
+						type: "input_text",
+						text: expect.stringContaining("I prefer tabs in TypeScript."),
+					},
+				],
+			},
+			{ role: "user" },
+		]);
 		const raw = await readFile(
 			join(cwd, ".backboard", "subscription-memory.json"),
 			"utf8",

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 170">
+<!-- Copyright (c) Microsoft Corporation. All rights reserved. Licensed under the MIT License. -->
+<!-- Preview palette from theme-defaults/./themes/backboard-forest.json. -->
+<rect width="320" height="170" fill="#0F1714"/><path d="M0 0h78v170H0z" fill="#131D19"/>
+<path d="M78 0v170" stroke="#35423D"/>
+<rect x="12" y="15" width="38" height="5" rx="2.5" fill="#C4D8D0"/>
+<g fill="#8CA39A" opacity=".6"><rect x="12" y="37" width="52" height="4" rx="2"/><rect x="12" y="51" width="44" height="4" rx="2"/><rect x="12" y="65" width="48" height="4" rx="2"/></g>
+<rect x="147" y="35" width="91" height="7" rx="3.5" fill="#C4D8D0"/>
+<rect x="130" y="51" width="125" height="4" rx="2" fill="#8CA39A" opacity=".65"/>
+<rect x="98" y="79" width="202" height="61" rx="8" fill="#192621" stroke="#35423D"/>
+<rect x="111" y="92" width="118" height="4" rx="2" fill="#8CA39A" opacity=".6"/>
+<rect x="111" y="120" width="43" height="4" rx="2" fill="#8CA39A" opacity=".5"/>
+<circle cx="283" cy="122" r="8" fill="#D9EEE5"/>
+</svg>

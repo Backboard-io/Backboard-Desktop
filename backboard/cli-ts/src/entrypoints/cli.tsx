@@ -25,6 +25,7 @@ import {
 	HookManagerController,
 	loadHookConfig,
 } from "../core/hooks/index.ts";
+import { configureProviderKey } from "./configureProviderKey.ts";
 import { ProviderKeyController } from "../core/keys/ProviderKeyController.ts";
 import {
 	unreadableProviderKeys,
@@ -120,6 +121,10 @@ Options:
 `;
 async function main(): Promise<void> {
 	const argv = process.argv.slice(2);
+	if (argv.includes("--configure-provider-key")) {
+		await configureProviderKey(await Bun.stdin.text());
+		return;
+	}
 	if (argv.includes("--runtime-info")) {
 		const [identity, ripgrep] = await Promise.all([
 			runtimeIdentity(),

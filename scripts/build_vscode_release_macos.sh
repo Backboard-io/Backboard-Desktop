@@ -9,9 +9,6 @@ fi
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VSCODE_ROOT="${VSCODE_ROOT:-${REPO_ROOT}/backboard}"
-if [[ ! -f "${VSCODE_ROOT}/package.json" && -f "${REPO_ROOT}/vscode/package.json" ]]; then
-  VSCODE_ROOT="${REPO_ROOT}/vscode"
-fi
 VERSION="${VERSION:-${1:-}}"
 ARCH="${ARCH:-aarch64}"
 CHANNEL="${CHANNEL:-stable}"

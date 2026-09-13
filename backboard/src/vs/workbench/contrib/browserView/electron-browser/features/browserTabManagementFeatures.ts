@@ -931,7 +931,7 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 				localize({ comment: ['This is the description for a setting. Values surrounded by single quotes are not to be translated.'], key: 'browser.showInTitleBar.false' }, 'The button is never shown in the title bar.'),
 				localize({ comment: ['This is the description for a setting. Values surrounded by single quotes are not to be translated.'], key: 'browser.showInTitleBar.whenOpen' }, 'The button is shown in the title bar when a browser editor is open.')
 			],
-			default: 'whenOpen',
+			default: true,
 			experiment: { mode: 'startup' },
 			description: localize(
 				{ comment: ['This is the description for a setting.'], key: 'browser.showInTitleBar' },

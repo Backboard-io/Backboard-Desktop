@@ -72,6 +72,8 @@ export interface AgentControllerDeps {
 	finalVerificationNudge?: boolean;
 	/** Override hidden todo-reconciliation passes for this host. */
 	todoReconciliation?: boolean;
+	/** Compress between turns for hosts without the interactive CLI UI. */
+	autoCompact?: boolean;
 	startupEnvironmentPrompt?: string;
 	lsp?: LspService;
 	checkpoints?: CheckpointRecorder;
@@ -96,6 +98,8 @@ export interface AgentControllerDeps {
  * between tools and the UI, and the wiring of a fresh AgentLoop per submission.
  */
 export class AgentController {
+	private pendingAutoResume: string | undefined;
+	private cancellationVersion = 0;
 	private abortController: AbortController | null = null;
 	private readonly pendingAsks = new Map<string, (answers: string[]) => void>();
 	private readonly scheduler: ToolScheduler;
@@ -197,8 +201,14 @@ export class AgentController {
 		threadId: string;
 		assistantId?: string | null;
 		messages: readonly Message[];
+		pendingResume?: string;
 	}): void {
 		this.deps.session.hydrate(input);
+		this.pendingAutoResume = input.pendingResume;
+	}
+
+	get pendingCompactionContext(): string | undefined {
+		return this.pendingAutoResume;
 	}
 
 	async dispose(): Promise<void> {
@@ -282,7 +292,13 @@ export class AgentController {
 				const queued = this.queue.shift();
 				if (!queued) continue;
 				try {
-					queued.onStart?.();
+					const cancellationVersion = this.cancellationVersion;
+					const preparation = queued.onStart?.();
+					if (preparation) await preparation;
+					if (cancellationVersion !== this.cancellationVersion) {
+						queued.resolve("cancelled");
+						continue;
+					}
 					queued.resolve(
 						await this.runTurn(queued.text, {
 							emitUserMessage: queued.emitUserMessage,
@@ -347,6 +363,20 @@ export class AgentController {
 			}
 
 			if (options.emitUserMessage) bus.emit({ type: "user:message", text });
+			if (
+				this.deps.autoCompact &&
+				!this.pendingAutoResume &&
+				this.needsCompaction()
+			) {
+				bus.emit({
+					type: "system:warning",
+					message: "Compressing conversation before continuing…",
+				});
+				const result = await this.compactSession(signal);
+				this.pendingAutoResume = result.resumeContext;
+				// Keep the summary in local history too, for future compression.
+				session.addMessage(userMessage(result.resumeContext));
+			}
 			session.addMessage(userMessage(text));
 			turnStarted = true;
 
@@ -463,7 +493,7 @@ export class AgentController {
 				attachmentFilePaths: options.attachmentFilePaths?.length
 					? options.attachmentFilePaths
 					: undefined,
-				displayContent: options.displayContent,
+				displayContent: options.displayContent ?? text,
 				durableSession: this.deps.getDurableSession?.(),
 				resolveCapacityFallback,
 				onModelSucceeded: async (model) => {
@@ -484,7 +514,11 @@ export class AgentController {
 			});
 
 			bus.emit({ type: "turn:status", turnId: turn.id, phase: "generating" });
-			finalStatus = await loop.run(text, ctx);
+			finalStatus = await loop.run(
+				this.pendingAutoResume ? `${this.pendingAutoResume}\n\n${text}` : text,
+				ctx,
+			);
+			if (finalStatus === "completed") this.pendingAutoResume = undefined;
 			return finalStatus;
 		} catch (err) {
 			if (signal.aborted) {
@@ -622,7 +656,7 @@ export class AgentController {
 	needsCompaction(): boolean {
 		const report = this.contextReport();
 		return shouldAutoCompact({
-			usedTokens: report.measured ? report.usedTokens : 0,
+			usedTokens: report.measured ? report.usedTokens : report.estimatedTotal,
 			limit: report.limit,
 			messageCount: report.messageCount,
 		});
@@ -646,6 +680,12 @@ export class AgentController {
 				"Finish or cancel the current turn before compressing.",
 			);
 		}
+		return this.compactSession(signal);
+	}
+
+	private async compactSession(
+		signal?: AbortSignal,
+	): Promise<CompactionResult> {
 		const transcriptPath =
 			this.deps.getTranscriptPath?.() ?? this.deps.transcriptPath;
 		const compactor = new Compactor({
@@ -711,6 +751,7 @@ export class AgentController {
 
 	/** Cancels the active turn, aborting in-flight requests and tools. */
 	cancel(options: CancelOptions = {}): void {
+		this.cancellationVersion++;
 		this.abortController?.abort();
 		this.deps.agentTasks?.cancelAll();
 		this.rejectPendingAsks();
@@ -726,6 +767,7 @@ export class AgentController {
 	/** Cancels any active turn and starts a fresh Backboard thread. */
 	newThread(): void {
 		this.cancel({ clearQueue: true });
+		this.pendingAutoResume = undefined;
 		this.deps.session.reset();
 	}
 

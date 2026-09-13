@@ -303,6 +303,7 @@ class OptimusChromeContribution extends Disposable implements IWorkbenchContribu
 	private readonly chrome: HTMLElement;
 	private readonly modeButton: HTMLElement;
 	private readonly panelActions: HTMLElement;
+	private readonly leftControls: HTMLElement;
 	private readonly sidebarButton: HTMLButtonElement;
 	private readonly secondaryButton: HTMLButtonElement;
 
@@ -335,6 +336,9 @@ class OptimusChromeContribution extends Disposable implements IWorkbenchContribu
 				void this.commandService.executeCommand(mode.command);
 			}));
 		}
+
+		this.leftControls = $('div.optimus-left-controls');
+		this._register(toDisposable(() => this.leftControls.remove()));
 
 		const actions = this.panelActions = append(chrome, $('div.optimus-window-actions'));
 		this.sidebarButton = append(actions, $('button.optimus-window-chrome-button.optimus-window-chrome-sidebar.codicon'));
@@ -402,7 +406,14 @@ class OptimusChromeContribution extends Disposable implements IWorkbenchContribu
 		}
 		const sidebarVisible = this.layoutService.isVisible(Parts.SIDEBAR_PART);
 		const rightVisible = this.layoutService.isVisible(Parts.AUXILIARYBAR_PART);
-		const modeTarget = sidebarVisible ? root.querySelector('.sidebar-part-header .sessions-panel-header-left') : undefined;
+		const leftTarget = root.querySelector(this.isFocusedSession()
+			? '.optimus-focused-session-header .sessions-panel-header-left'
+			: '.optimus-dashboard-primary');
+		if (leftTarget && this.leftControls.parentElement !== leftTarget) {
+			leftTarget.prepend(this.leftControls);
+		}
+		this.leftControls.hidden = sidebarVisible;
+		const modeTarget = sidebarVisible ? root.querySelector('.sidebar-part-header .sessions-panel-header-left') : this.leftControls;
 		if (modeTarget) {
 			if (this.modeButton.parentElement !== modeTarget) {
 				modeTarget.appendChild(this.modeButton);
@@ -412,7 +423,7 @@ class OptimusChromeContribution extends Disposable implements IWorkbenchContribu
 		}
 		const placePanelButton = (button: HTMLButtonElement, visible: boolean, selector: string, closeLabel: string, openLabel: string): void => {
 			const header = visible ? root.querySelector(selector) : undefined;
-			const destination = header ?? this.panelActions;
+			const destination = header ?? (button === this.sidebarButton ? this.leftControls : this.panelActions);
 			if (button.parentElement !== destination) {
 				destination.appendChild(button);
 			}

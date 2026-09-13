@@ -193,40 +193,76 @@
 	],
 	"onboardingThemes": [
 		{
-			"id": "dark-2026",
-			"label": "Dark 2026",
-			"themeId": "Dark 2026",
+			"id": "backboard-obsidian",
+			"label": "Backboard Obsidian",
+			"themeId": "Backboard Obsidian",
 			"type": "dark"
 		},
 		{
-			"id": "hc-dark",
-			"label": "Dark High Contrast",
-			"themeId": "Default High Contrast",
-			"type": "hcDark"
+			"id": "backboard-porcelain",
+			"label": "Backboard Porcelain",
+			"themeId": "Backboard Porcelain",
+			"type": "light"
 		},
 		{
-			"id": "solarized-dark",
-			"label": "Solarized Dark",
-			"themeId": "Solarized Dark",
+			"id": "backboard-linen",
+			"label": "Backboard Linen",
+			"themeId": "Backboard Linen",
+			"type": "light"
+		},
+		{
+			"id": "backboard-sage",
+			"label": "Backboard Sage",
+			"themeId": "Backboard Sage",
+			"type": "light"
+		},
+		{
+			"id": "backboard-mist",
+			"label": "Backboard Mist",
+			"themeId": "Backboard Mist",
+			"type": "light"
+		},
+		{
+			"id": "backboard-midnight",
+			"label": "Backboard Midnight",
+			"themeId": "Backboard Midnight",
 			"type": "dark"
 		},
 		{
-			"id": "light-2026",
-			"label": "Light 2026",
-			"themeId": "Light 2026",
+			"id": "backboard-forest",
+			"label": "Backboard Forest",
+			"themeId": "Backboard Forest",
+			"type": "dark"
+		},
+		{
+			"id": "backboard-ember",
+			"label": "Backboard Ember",
+			"themeId": "Backboard Ember",
+			"type": "dark"
+		},
+		{
+			"id": "backboard-bloom",
+			"label": "Backboard Bloom",
+			"themeId": "Backboard Bloom",
 			"type": "light"
 		},
 		{
-			"id": "hc-light",
-			"label": "Light High Contrast",
-			"themeId": "Default High Contrast Light",
-			"type": "hcLight"
+			"id": "backboard-parchment",
+			"label": "Backboard Parchment",
+			"themeId": "Backboard Parchment",
+			"type": "light"
 		},
 		{
-			"id": "solarized-light",
-			"label": "Solarized Light",
-			"themeId": "Solarized Light",
-			"type": "light"
+			"id": "backboard-neon",
+			"label": "Backboard Neon",
+			"themeId": "Backboard Neon",
+			"type": "dark"
+		},
+		{
+			"id": "backboard-aubergine",
+			"label": "Backboard Aubergine",
+			"themeId": "Backboard Aubergine",
+			"type": "dark"
 		}
 	],
 	"builtInExtensionsEnabledWithAutoUpdates": [],

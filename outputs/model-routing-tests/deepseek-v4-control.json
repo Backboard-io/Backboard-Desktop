@@ -1,0 +1,214 @@
+{
+  "request": {
+    "content": "Reply with exactly: hi",
+    "llm_provider": "openrouter",
+    "memory": "off",
+    "stream": true,
+    "model_name": "deepseek/deepseek-v4-flash",
+    "thinking": {
+      "effort": "high"
+    }
+  },
+  "events": [
+    {
+      "type": "message_received",
+      "phase": "stateless_prep"
+    },
+    {
+      "type": "message_received",
+      "phase": "prep"
+    },
+    {
+      "type": "user_message",
+      "message_id": "5691ea2f-56b0-4b32-86eb-2d19bac14309",
+      "content": "Reply with exactly: hi",
+      "role": "user",
+      "metadata": {
+        "memory_response_citation": false
+      },
+      "thread_id": "c1c0b36d-acbd-4a45-8384-8f2c818d9b73",
+      "assistant_id": "e283b64c-2417-4153-a1c5-e6945ac27200"
+    },
+    {
+      "type": "run_started",
+      "run_id": "21b06ed9-f458-4169-973d-cb8f087da589",
+      "message_id": "3aa555f4-20bf-4c0b-812d-5645d597c28f",
+      "provider": "openrouter",
+      "model_name": "deepseek/deepseek-v4-flash"
+    },
+    {
+      "type": "message_start",
+      "message_id": "3aa555f4-20bf-4c0b-812d-5645d597c28f",
+      "run_id": "21b06ed9-f458-4169-973d-cb8f087da589"
+    },
+    {
+      "type": "reasoning_started",
+      "run_id": "21b06ed9-f458-4169-973d-cb8f087da589"
+    },
+    {
+      "type": "reasoning_streaming",
+      "content": "We",
+      "accumulated_reasoning": "We",
+      "run_id": "21b06ed9-f458-4169-973d-cb8f087da589",
+      "source": "native"
+    },
+    {
+      "type": "reasoning_streaming",
+      "content": " are asked",
+      "accumulated_reasoning": "We are asked",
+      "run_id": "21b06ed9-f458-4169-973d-cb8f087da589",
+      "source": "native"
+    },
+    {
+      "type": "reasoning_streaming",
+      "content": " to reply",
+      "accumulated_reasoning": "We are asked to reply",
+      "run_id": "21b06ed9-f458-4169-973d-cb8f087da589",
+      "source": "native"
+    },
+    {
+      "type": "reasoning_streaming",
+      "content": " with exactly \"hi",
+      "accumulated_reasoning": "We are asked to reply with exactly \"hi",
+      "run_id": "21b06ed9-f458-4169-973d-cb8f087da589",
+      "source": "native"
+    },
+    {
+      "type": "reasoning_streaming",
+      "content": "\". No",
+      "accumulated_reasoning": "We are asked to reply with exactly \"hi\". No",
+      "run_id": "21b06ed9-f458-4169-973d-cb8f087da589",
+      "source": "native"
+    },
+    {
+      "type": "reasoning_streaming",
+      "content": " additional",
+      "accumulated_reasoning": "We are asked to reply with exactly \"hi\". No additional",
+      "run_id": "21b06ed9-f458-4169-973d-cb8f087da589",
+      "source": "native"
+    },
+    {
+      "type": "reasoning_streaming",
+      "content": " text, no variations",
+      "accumulated_reasoning": "We are asked to reply with exactly \"hi\". No additional text, no variations",
+      "run_id": "21b06ed9-f458-4169-973d-cb8f087da589",
+      "source": "native"
+    },
+    {
+      "type": "reasoning_streaming",
+      "content": ". So",
+      "accumulated_reasoning": "We are asked to reply with exactly \"hi\". No additional text, no variations. So",
+      "run_id": "21b06ed9-f458-4169-973d-cb8f087da589",
+      "source": "native"
+    },
+    {
+      "type": "reasoning_streaming",
+      "content": " the",
+      "accumulated_reasoning": "We are asked to reply with exactly \"hi\". No additional text, no variations. So the",
+      "run_id": "21b06ed9-f458-4169-973d-cb8f087da589",
+      "source": "native"
+    },
+    {
+      "type": "reasoning_streaming",
+      "content": " response should be",
+      "accumulated_reasoning": "We are asked to reply with exactly \"hi\". No additional text, no variations. So the response should be",
+      "run_id": "21b06ed9-f458-4169-973d-cb8f087da589",
+      "source": "native"
+    },
+    {
+      "type": "reasoning_streaming",
+      "content": " just \"hi",
+      "accumulated_reasoning": "We are asked to reply with exactly \"hi\". No additional text, no variations. So the response should be just \"hi",
+      "run_id": "21b06ed9-f458-4169-973d-cb8f087da589",
+      "source": "native"
+    },
+    {
+      "type": "reasoning_streaming",
+      "content": "\".",
+      "accumulated_reasoning": "We are asked to reply with exactly \"hi\". No additional text, no variations. So the response should be just \"hi\".",
+      "run_id": "21b06ed9-f458-4169-973d-cb8f087da589",
+      "source": "native"
+    },
+    {
+      "type": "reasoning_ended",
+      "run_id": "21b06ed9-f458-4169-973d-cb8f087da589",
+      "accumulated_reasoning": "We are asked to reply with exactly \"hi\". No additional text, no variations. So the response should be just \"hi\"."
+    },
+    {
+      "type": "content_streaming",
+      "content": "hi",
+      "accumulated_content": "hi",
+      "run_id": "21b06ed9-f458-4169-973d-cb8f087da589"
+    },
+    {
+      "type": "run_ended",
+      "run_id": "21b06ed9-f458-4169-973d-cb8f087da589",
+      "message_id": "3aa555f4-20bf-4c0b-812d-5645d597c28f",
+      "json_mode_unavailable": false,
+      "role": "assistant",
+      "content": "hi",
+      "final_content": "hi",
+      "status": "completed",
+      "reasoning": "We are asked to reply with exactly \"hi\". No additional text, no variations. So the response should be just \"hi\".",
+      "metadata": {
+        "run_id": "21b06ed9-f458-4169-973d-cb8f087da589",
+        "run_llm_provider": "openrouter",
+        "run_system_prompt": "You are a helpful assistant.",
+        "run_llm_model_name": "deepseek/deepseek-v4-flash",
+        "run_memory_profile": "default",
+        "run_thinking_config": {
+          "effort": "high",
+          "enabled": true
+        },
+        "router_resolved_model": "deepseek/deepseek-v4-flash",
+        "run_openrouter_routing": null,
+        "memory_response_citation": false,
+        "router_upstream_provider": "StreamLake",
+        "assistant_reasoning_blocks": [
+          {
+            "text": "We are asked to reply with exactly \"hi\". No additional text, no variations. So the response should be just \"hi\".",
+            "type": "reasoning.text",
+            "index": 0,
+            "format": "unknownunknownunknownunknownunknownunknownunknownunknownunknownunknownunknownunknown"
+          }
+        ],
+        "run_image_generation_enabled": false
+      },
+      "tool_calls": null,
+      "generated_media": null,
+      "retrieved_files": null,
+      "retrieved_files_count": 0,
+      "model_provider": "openrouter",
+      "model_name": "deepseek/deepseek-v4-flash",
+      "input_tokens": 29,
+      "output_tokens": 29,
+      "total_tokens": 58,
+      "cached_input_tokens": 0,
+      "cache_write_input_tokens": 0,
+      "cost_usd": 5.88294e-06,
+      "resolved_model": "deepseek/deepseek-v4-flash",
+      "upstream_provider": "StreamLake",
+      "provider_requests": 1,
+      "created_at": "2026-09-11T22:54:46",
+      "context_usage": {
+        "used_tokens": 40,
+        "context_limit": 1048576,
+        "percent": 0.0,
+        "summary_tokens": 0,
+        "model": "deepseek/deepseek-v4-flash",
+        "projection": {
+          "input_messages": 1,
+          "included_messages": 1,
+          "excluded_messages": 0,
+          "excluded_reasons": {},
+          "last_model_facing_role": "user",
+          "provider_safe": true,
+          "provider_safety_reason": null
+        }
+      },
+      "thread_id": "c1c0b36d-acbd-4a45-8384-8f2c818d9b73",
+      "assistant_id": "e283b64c-2417-4153-a1c5-e6945ac27200"
+    }
+  ],
+  "http_status": 200
+}

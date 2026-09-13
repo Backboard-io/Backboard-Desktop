@@ -59,24 +59,30 @@ export class WorkbenchWindowGroup extends Disposable {
 		const previousWindow = this.active;
 		const previous = this.active && this.views.get(this.active);
 		this.active = window;
-		// Only reorder when another mode is still preparing beneath the current
-		// one. Reattaching a warm view needlessly invalidates its compositor.
-		if ([...this.views.values()].some(view => view !== next && view !== previous && view.container.getVisible())) {
+		// Reattach a retained mode, or raise it above modes still warming up.
+		if (!this.host.contentView.children.includes(next.container)
+			|| [...this.views.values()].some(view => view !== next && view !== previous && view.container.getVisible())) {
 			this.host.contentView.addChildView(next.container);
 		}
 		this.layout();
 		next.container.setVisible(true);
-		if (previous && previous !== next) {
-			previous.container.setVisible(false);
+		if (previousWindow && previousWindow !== window) {
+			this.suspend(previousWindow);
 		}
 		next.workbench.webContents.focus();
 		if (previousWindow !== window) { this._onDidActivateMode.fire({ window, previous: previousWindow }); }
 	}
 
 	suspend(window: ICodeWindow): void {
-		if (window !== this.active) {
+		if (window !== this.active && !this.host.isDestroyed()) {
 			const view = this.views.get(window);
-			view?.container.setVisible(false);
+			if (view) {
+				view.container.setVisible(false);
+				// Hiding a parent View alone can leave a retained WebContentsView's
+				// native draggable regions registered on macOS. Detach the entire
+				// mode, including its child browser views, without closing it.
+				this.host.contentView.removeChildView(view.container);
+			}
 		}
 	}
 

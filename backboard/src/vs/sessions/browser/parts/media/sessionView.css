@@ -92,32 +92,7 @@
 	white-space: nowrap;
 }
 
-.session-view .session-chat-loading {
-	position: absolute;
-	z-index: 9;
-	inset: 0;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	gap: 8px;
-	background: var(--session-view-background);
-	color: var(--vscode-descriptionForeground);
-	font-size: var(--vscode-agents-fontSize-label1);
-}
 
-.session-view .session-chat-loading[hidden] {
-	display: none;
-}
-
-.monaco-workbench.monaco-reduce-motion .session-view .session-chat-loading .codicon-modifier-spin {
-	animation: none;
-}
-
-@media (prefers-reduced-motion: reduce) {
-	.session-view .session-chat-loading .codicon-modifier-spin {
-		animation: none;
-	}
-}
 
 .session-view .session-view-chat-back:hover {
 	background: var(--vscode-toolbar-hoverBackground);

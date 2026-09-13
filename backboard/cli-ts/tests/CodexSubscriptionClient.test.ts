@@ -33,6 +33,93 @@ describe("CodexSubscriptionClient", () => {
 		await rm(testDir, { recursive: true, force: true });
 	});
 
+	it("preserves default subscription context windows rather than optional maximums", async () => {
+		const client = new CodexSubscriptionClient({
+			authFile,
+			fetchImpl: (async () =>
+				Response.json({
+					models: [
+						{
+							slug: "gpt-test",
+							context_window: 272000,
+							max_context_window: 872000,
+						},
+						{ slug: "unknown", context_window: -1 },
+					],
+				})) as unknown as typeof fetch,
+		});
+		const catalog = await client.listModels();
+		expect(
+			catalog.models.map((model) => [model.name, model.context_limit]),
+		).toEqual([
+			["gpt-test", 272000],
+			["unknown", undefined],
+		]);
+	});
+
+	it("preserves oversized instructions without duplicating them on later turns", async () => {
+		const limit = 1_048_576;
+		for (const prompt of [
+			"",
+			"x".repeat(limit),
+			"x".repeat(limit + 1),
+			"x".repeat(2_524_124),
+			"x".repeat(2_524_125),
+			`${"x".repeat(limit - 1)}😀${"y".repeat(limit)}😀tail`,
+		]) {
+			const bodies: {
+				instructions: string;
+				input: { role: string; content: { text: string }[] }[];
+			}[] = [];
+			const client = new CodexSubscriptionClient({
+				authFile,
+				fetchImpl: (async (_url, init) => {
+					bodies.push(JSON.parse(String(init?.body)));
+					return eventStream([
+						{ type: "response.completed", response: { usage: {} } },
+					]);
+				}) as typeof fetch,
+			});
+			const first = await client.sendMessage({
+				content: "first",
+				model_name: "gpt-test",
+				system_prompt: prompt,
+			});
+			await client.sendMessage({
+				thread_id: first.thread_id,
+				content: "second",
+				model_name: "gpt-test",
+			});
+			for (const body of bodies) {
+				const parts = [
+					body.instructions,
+					...body.input
+						.filter((item) => item.role === "system")
+						.flatMap((item) => item.content.map((part) => part.text)),
+				];
+				expect(parts.join("")).toBe(prompt);
+				expect(
+					parts.every((part) => part.length <= limit && part.isWellFormed()),
+				).toBe(true);
+				expect(body.input.findIndex((item) => item.role === "user")).toBe(
+					parts.length - 1,
+				);
+			}
+			await client.sendMessage({
+				thread_id: first.thread_id,
+				content: "third",
+				model_name: "gpt-test",
+				system_prompt: "Updated instructions",
+			});
+			expect(bodies[2]?.instructions).toBe("Updated instructions");
+			expect(bodies[2]?.input.map((item) => item.role)).toEqual([
+				"user",
+				"user",
+				"user",
+			]);
+		}
+	});
+
 	it("rejects malformed JSON instead of executing an empty argument object", async () => {
 		const client = new CodexSubscriptionClient({
 			authFile,

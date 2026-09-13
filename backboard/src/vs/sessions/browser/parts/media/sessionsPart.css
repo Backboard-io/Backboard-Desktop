@@ -8,6 +8,27 @@
 	visibility: hidden !important;
 }
 
+/* The header lives outside the session view, so include it in the sign-in blur. */
+.monaco-workbench .part.sessionspart:has(.session-view.backboard-auth-gate-active) > .sessions-part-header {
+	backdrop-filter: blur(4px) !important;
+	user-select: none;
+}
+
+.monaco-workbench .part.sessionspart:has(.session-view.backboard-auth-gate-active) > .sessions-part-header :is(.sessions-header-type-picker-slot, .sessions-header-session-title-slot) {
+	filter: blur(4px);
+	opacity: 0.48;
+	pointer-events: none;
+}
+
+.monaco-workbench .part.sessionspart:has(.session-view.backboard-auth-gate-active) > .sessions-part-header::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+	z-index: 0;
+	background: color-mix(in srgb, var(--vscode-activeSessionView-background) 38%, transparent);
+	pointer-events: none;
+}
+
 .monaco-workbench .part.sessionspart > .content .monaco-editor,
 .monaco-workbench .part.sessionspart > .content .monaco-editor .margin,
 .monaco-workbench .part.sessionspart > .content .monaco-editor .monaco-editor-background {

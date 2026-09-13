@@ -71,24 +71,25 @@ the title bar:
 
 | Path | What it is |
 | --- | --- |
-| [vscode/](vscode/) | The product. A VS Code fork (`code-oss-dev` 1.126.0, Electron 42) containing the workbench, the three custom UI layers, and the agent host. |
-| [vscode/cli-ts/](vscode/cli-ts/) | **The Backboard backend.** A standalone Bun/TypeScript agent runtime (`backboard-r-cli`) — the agent loop, tool scheduler, MCP client, skills, and hooks. |
-| [zed/](zed/) | A Zed checkout (Rust) kept alongside for reference on editor/agent-panel design. Not part of the Backboard build. |
-| [backboard-reference/](backboard-reference/) | Read-only snapshot of runtime files grouped by responsibility, so the VS Code host ↔ API ↔ tool-call loop can be read without navigating the whole tree. Edit the originals, not these. |
-| [docs/](docs/) | Handoff notes, design docs, test cases. |
+| [backboard/](backboard/) | The product. A VS Code fork (`code-oss-dev` 1.126.0, Electron 42) containing the workbench, the three custom UI layers, and the agent host. |
+| [backboard/cli-ts/](backboard/cli-ts/) | **The Backboard backend.** A standalone Bun/TypeScript agent runtime (`backboard-r-cli`) — the agent loop, tool scheduler, MCP client, skills, and hooks. |
+| [scripts/](scripts/) | Release building, packaging, validation, and publishing scripts. |
+| [docs/](docs/) | Runtime documentation, validation reports, design assets, and branding. |
 
-Inside `vscode/src/vs/`, beyond the stock VS Code layers (`base`, `platform`, `editor`,
+Historical runtime snapshots live in [backboard/backboard-reference/](backboard/backboard-reference/).
+
+Inside `backboard/src/vs/`, beyond the stock VS Code layers (`base`, `platform`, `editor`,
 `workbench`, `code`):
 
 | Layer | Purpose |
 | --- | --- |
-| [sessions/](vscode/src/vs/sessions/) | The **Agents Window** — the Simple mode workbench. Its own layout, parts, and session-provider model. |
-| [optimus/](vscode/src/vs/optimus/) | The **Advanced** window — a grid/kanban of many concurrent sessions. |
-| [platform/agentHost/](vscode/src/vs/platform/agentHost/) | The agent host: process management, changesets, checkpoints, git integration, and one subdirectory per agent backend (`cliTs`, `claude`, `codex`, `copilot`). |
+| [sessions/](backboard/src/vs/sessions/) | The **Agents Window** — the Simple mode workbench. Its own layout, parts, and session-provider model. |
+| [optimus/](backboard/src/vs/optimus/) | The **Advanced** window — a grid/kanban of many concurrent sessions. |
+| [platform/agentHost/](backboard/src/vs/platform/agentHost/) | The agent host: process management, changesets, checkpoints, git integration, and one subdirectory per agent backend (`cliTs`, `claude`, `codex`, `copilot`). |
 
 Layering rule: `vs/sessions` may import from `vs/workbench` and below, but **`vs/workbench`
 must never import from `vs/sessions`**. Enforced by ESLint — see
-[LAYERS.md](vscode/src/vs/sessions/LAYERS.md).
+[LAYERS.md](backboard/src/vs/sessions/LAYERS.md).
 
 ---
 
@@ -98,14 +99,14 @@ must never import from `vs/sessions`**. Enforced by ESLint — see
 
 | Requirement | Why |
 | --- | --- |
-| **Node v24.15.0** | Pinned in [.nvmrc](vscode/.nvmrc). The major version must match exactly. |
+| **Node v24.15.0** | Pinned in [.nvmrc](backboard/.nvmrc). The major version must match exactly. |
 | **Xcode Command Line Tools** (macOS) | `@vscode/spdlog`, `node-pty`, `native-keymap` and `@vscode/sqlite3` compile through `node-gyp`. Without a compiler `npm install` **rolls back completely** — you get no `node_modules` at all, not a partial one. |
 | **Bun** | `cli-ts` is a Bun project. In a dev checkout there is no packaged binary, so the agent host shells out to `bun run cli-ts/src/entrypoints/cli.tsx`. Without Bun the app launches but every agent request fails with `BackboardSendFailed`. |
 
 ### One command
 
 ```bash
-cd vscode
+cd backboard
 ./scripts/dev.sh
 ```
 
@@ -122,7 +123,7 @@ the watcher and the app together.
 ./scripts/dev.sh stop
 ```
 
-Full details in [vscode/DEV_ENVIRONMENT.md](vscode/DEV_ENVIRONMENT.md).
+Full details in [backboard/DEV_ENVIRONMENT.md](backboard/DEV_ENVIRONMENT.md).
 
 ### You do not rebuild by hand
 
@@ -149,7 +150,7 @@ root `npm install`. A missing `bun install` there surfaces as
 `Cannot find package 'ink'`:
 
 ```bash
-cd vscode/cli-ts && bun install
+cd backboard/cli-ts && bun install
 ```
 
 ---
@@ -166,7 +167,7 @@ The app provides three window modes over the same workspace.
 
 The title-bar switcher exposes all three modes — Editor, Advanced, Simple — in a fixed order so
 each keeps its position regardless of which window you are in
-([backboardModeSwitcherActions.ts:174-193](vscode/src/vs/workbench/contrib/chat/electron-browser/backboardModeSwitcher/backboardModeSwitcherActions.ts#L174-L193)).
+([backboardModeSwitcherActions.ts:174-193](backboard/src/vs/workbench/contrib/chat/electron-browser/backboardModeSwitcher/backboardModeSwitcherActions.ts#L174-L193)).
 
 You can also boot straight into Simple mode:
 
@@ -174,7 +175,7 @@ You can also boot straight into Simple mode:
 ./run-backboard-ide.sh   # passes --agents
 ```
 
-`--agents` is a real CLI flag ([argv.ts:111](vscode/src/vs/platform/environment/node/argv.ts#L111)).
+`--agents` is a real CLI flag ([argv.ts:111](backboard/src/vs/platform/environment/node/argv.ts#L111)).
 
 ### Simple — the Agents Window
 
@@ -217,10 +218,10 @@ three menu-driven sections:
 
 Layout state is **per session**: the auxiliary bar, panel, and editor working set are
 captured and restored as you switch sessions — see
-[LAYOUT_CONTROLLER.md](vscode/src/vs/sessions/LAYOUT_CONTROLLER.md).
+[LAYOUT_CONTROLLER.md](backboard/src/vs/sessions/LAYOUT_CONTROLLER.md).
 
-Reference: [LAYOUT.md](vscode/src/vs/sessions/LAYOUT.md),
-[SESSIONS.md](vscode/src/vs/sessions/SESSIONS.md).
+Reference: [LAYOUT.md](backboard/src/vs/sessions/LAYOUT.md),
+[SESSIONS.md](backboard/src/vs/sessions/SESSIONS.md).
 
 ### Editor — stock VS Code
 
@@ -266,14 +267,14 @@ API keys rather than agent backends.
 
 ## The Backboard backend (`cli-ts`)
 
-[`vscode/cli-ts/`](vscode/cli-ts/) is `backboard-r-cli`: a self-contained Bun + React/Ink
+[`backboard/cli-ts/`](backboard/cli-ts/) is `backboard-r-cli`: a self-contained Bun + React/Ink
 agent runtime. It is a real standalone CLI that also happens to be what the IDE drives.
 
 ### How the IDE talks to it
 
 The IDE spawns it as a child process and speaks line-delimited JSON over stdio. Resolution
 order for the executable
-([cliTsProcess.ts:245-271](vscode/src/vs/platform/agentHost/node/cliTs/cliTsProcess.ts#L245-L271)):
+([cliTsProcess.ts:245-271](backboard/src/vs/platform/agentHost/node/cliTs/cliTsProcess.ts#L245-L271)):
 
 1. `BACKBOARD_CLI_TS_PATH` / `VSCODE_BACKBOARD_CLI_TS_PATH` env override
 2. The packaged binary at `extensions/backboard/bin/backboard-cli-ts`
@@ -307,13 +308,13 @@ cli.tsx ──> config ──> bus ──> AgentController ──> AgentLoop ─
 The agent loop calls the Backboard provider for completions and hands tool calls to
 `ToolScheduler`, which runs hooks before and after each tool. Everything flows through an
 event bus that feeds session logging, state, and the Ink UI. Full detail in
-[ARCHITECTURE.md](vscode/cli-ts/ARCHITECTURE.md); user-facing docs including skills, hooks,
-MCP servers, and one-shot mode in [README.md](vscode/cli-ts/README.md).
+[runtime overview](backboard/cli-ts/README.md); user-facing docs including skills, hooks,
+MCP servers, and one-shot mode in [README.md](backboard/cli-ts/README.md).
 
 Working on it directly:
 
 ```bash
-cd vscode/cli-ts
+cd backboard/cli-ts
 bun install
 bun run dev          # interactive
 bun run validate     # lint + typecheck + test
@@ -342,7 +343,7 @@ Created at sign-in (SSO or manual key entry) with mode `0600`. Shape is snake_ca
 ```
 
 Resolution order in `bridgeConfig()`
-([backboardRuntimeShared.ts:583-647](vscode/src/vs/platform/agentHost/node/cliTs/backboardRuntimeShared.ts#L583-L647)):
+([backboardRuntimeShared.ts:583-647](backboard/src/vs/platform/agentHost/node/cliTs/backboardRuntimeShared.ts#L583-L647)):
 
 ```
 BACKBOARD_API_KEY  →  VSCODE_BACKBOARD_API_KEY  →  config.api_key  →  config.apiKey  →  config.env_keys[env]
@@ -353,13 +354,13 @@ back to `https://app.backboard.io/api`.
 
 **The key is never read from disk by the agent.** The host resolves it and *injects* it as
 `BACKBOARD_API_KEY` / `BACKBOARD_API_URL` into the spawned `cli-ts` environment
-([cliTsCredentialEnv()](vscode/src/vs/platform/agentHost/node/cliTs/cliTsProcess.ts#L316-L326)),
+([cliTsCredentialEnv()](backboard/src/vs/platform/agentHost/node/cliTs/cliTsProcess.ts#L316-L326)),
 and `cli-ts` checks `process.env` before touching any file
-([env.ts:57](vscode/cli-ts/src/config/env.ts#L57)).
+([env.ts:57](backboard/cli-ts/src/config/env.ts#L57)).
 
 > **Caveat worth knowing.** `cli-ts`'s own on-disk fallback points at `~/.backboard/`, not
-> `~/.backboard_ide/` ([backboardConfig.ts:18](vscode/cli-ts/src/config/backboardConfig.ts#L18),
-> [paths.ts:5](vscode/cli-ts/src/config/paths.ts#L5)). Inside the IDE this never fires,
+> `~/.backboard_ide/` ([backboardConfig.ts:18](backboard/cli-ts/src/config/backboardConfig.ts#L18),
+> [paths.ts:5](backboard/cli-ts/src/config/paths.ts#L5)). Inside the IDE this never fires,
 > because env injection always wins. But run `cli-ts` standalone and it will insist
 > `BACKBOARD_API_KEY is not set` even though you are signed in. The same split applies to
 > user-level `mcp.json` and `hooks.json`, which resolve under `~/.backboard/`.
@@ -371,13 +372,13 @@ history and scratch), `models-cache.json`, and `workspace/`.
 
 Third-party model keys do **not** go in a dotfile. They are held by
 `ISecretStorageService`, which is backed by the OS credential store
-([languageModels.ts:759](vscode/src/vs/workbench/contrib/chat/common/languageModels.ts#L759)).
+([languageModels.ts:759](backboard/src/vs/workbench/contrib/chat/common/languageModels.ts#L759)).
 
 ### Overriding without storing anything
 
 Every credential can be supplied as an environment variable instead, which takes priority
 over both stores. `run-backboard-ide.sh` sources a `.env` from the **repository root** (one
-level above `vscode/`), so a local `.env` there is the least invasive way to point a dev
+level above `backboard/`), so a local `.env` there is the least invasive way to point a dev
 build at a different environment:
 
 ```bash
@@ -394,7 +395,7 @@ BACKBOARD_ENV=prod
 | --- | --- |
 | `npm error gyp ERR! find Python` and no `node_modules` afterwards | No Xcode Command Line Tools. npm rolled the install back. `xcode-select --install`. |
 | `does not provide an export named 'Menu'` | `ELECTRON_RUN_AS_NODE=1` inherited from a parent IDE. Use `./scripts/dev.sh run`. |
-| `BackboardSendFailed` + `Cannot find package 'ink'` | `cli-ts` deps not installed. `cd vscode/cli-ts && bun install`. |
+| `BackboardSendFailed` + `Cannot find package 'ink'` | `cli-ts` deps not installed. `cd backboard/cli-ts && bun install`. |
 | `BackboardSendFailed` + "Bun is not available" | Install Bun, set `BACKBOARD_BUN_PATH`, or run `npm --prefix extensions/backboard run package-cli-ts`. |
 | `BACKBOARD_API_KEY is not set` while running `cli-ts` standalone | The `.backboard` vs `.backboard_ide` split above. Export the key, or run through the IDE. |
 | App launches against a half-built `out/` | Something used a fixed `sleep` instead of waiting for the build. `dev.sh` waits for the real completion marker. |
@@ -403,4 +404,4 @@ BACKBOARD_ENV=prod
 
 ## License
 
-Released under the [MIT License](vscode/LICENSE.txt).
+Released under the [MIT License](backboard/LICENSE.txt).

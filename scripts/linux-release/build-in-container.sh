@@ -3,7 +3,7 @@
 set -euo pipefail
 
 SOURCE_ROOT="/work/source"
-VSCODE_ROOT="${SOURCE_ROOT}/vscode"
+VSCODE_ROOT="${SOURCE_ROOT}/backboard"
 OUTPUT_ROOT="/work/output"
 VERSION="${VERSION:?VERSION is required}"
 ARCH="${ARCH:-x86_64}"

@@ -9,9 +9,6 @@ fi
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VSCODE_ROOT="${VSCODE_ROOT:-${REPO_ROOT}/backboard}"
-if [[ ! -f "${VSCODE_ROOT}/package.json" && -f "${REPO_ROOT}/vscode/package.json" ]]; then
-  VSCODE_ROOT="${REPO_ROOT}/vscode"
-fi
 
 if [[ -s "${HOME}/.nvm/nvm.sh" ]]; then
   CURRENT_DIR="${PWD}"
@@ -174,8 +171,8 @@ write_release_metadata() {
   source_commit="$(git -C "${REPO_ROOT}" rev-parse HEAD 2>/dev/null || echo "unknown")"
   source_dirty_sha256="$(
     {
-      git -C "${REPO_ROOT}" diff --binary HEAD -- vscode scripts 2>/dev/null || true
-      git -C "${REPO_ROOT}" ls-files --others --exclude-standard vscode scripts 2>/dev/null \
+      git -C "${REPO_ROOT}" diff --binary HEAD -- backboard scripts 2>/dev/null || true
+      git -C "${REPO_ROOT}" ls-files --others --exclude-standard backboard scripts 2>/dev/null \
         | while IFS= read -r path; do
           printf 'untracked %s\n' "${path}"
           shasum -a 256 "${REPO_ROOT}/${path}" 2>/dev/null || true
@@ -225,7 +222,7 @@ const engineMajor = Number(String(engineVersion).split('.')[0]);
 if (engineMajor !== 1) {
   throw new Error(
     `VS Code engine version must stay on the 1.x line for extension compatibility, ` +
-    `but vscode/package.json version is "${engineVersion}". Restore it to 1.x. ` +
+    `but backboard/package.json version is "${engineVersion}". Restore it to 1.x. ` +
     `The product/release version "${version}" is recorded separately as backboardVersion.`
   );
 }

@@ -922,6 +922,13 @@
 	text-align: center;
 }
 
+/* Exclude the full interactive strips from native window dragging, including
+ * tab labels, close/add buttons and the browser address field. */
+.sessions-right-workbench-header,
+.sessions-right-workbench-browser-chrome {
+	-webkit-app-region: no-drag;
+}
+
 .sessions-right-workbench-header {
 	display: flex;
 	align-items: center;

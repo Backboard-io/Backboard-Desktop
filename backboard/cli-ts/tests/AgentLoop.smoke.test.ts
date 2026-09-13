@@ -201,6 +201,7 @@ function controllerWith(
 		onThreadReplaced?: (threadId: string | null) => void;
 		finalVerificationNudge?: boolean;
 		todoReconciliation?: boolean;
+		autoCompact?: boolean;
 		checkpoints?: CheckpointRecorder;
 	} = {},
 ): {
@@ -224,6 +225,7 @@ function controllerWith(
 		client: client as unknown as BackboardClient,
 		skillController,
 		permissions: TEST_PERMISSIONS,
+		autoCompact: options.autoCompact,
 		...(options.onThreadReplaced
 			? { onThreadReplaced: options.onThreadReplaced }
 			: {}),
@@ -239,6 +241,99 @@ function controllerWith(
 }
 
 describe("AgentController loop (mocked Backboard)", () => {
+	it("checks restored history before the first provider usage measurement", async () => {
+		const client = new FakeClient(
+			[{ kind: "thread", threadId: "new" }, { kind: "completed" }],
+			[],
+		);
+		const { ctrl } = controllerWith(client, [], [], {
+			autoCompact: true,
+			finalVerificationNudge: false,
+			todoReconciliation: false,
+		});
+		ctrl.hydrateSession({
+			threadId: "old",
+			messages: [
+				userMessage("Old requirement " + "x".repeat(8000)),
+				assistantMessage("Old answer"),
+				userMessage("Recent question"),
+				assistantMessage("Recent answer"),
+			],
+		});
+		ctrl.setModelContextLimit(2000);
+		expect(ctrl.needsCompaction()).toBe(true);
+		expect(await ctrl.submit("Continue")).toBe("completed");
+		expect(client.messageRequests[0]?.content).toContain("History compressed.");
+		await ctrl.dispose();
+	});
+
+	it("does not send a queued turn cancelled while restore is preparing", async () => {
+		const client = new FakeClient([{ kind: "completed" }], []);
+		const { ctrl } = controllerWith(client, []);
+		let release!: () => void;
+		const preparing = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const run = ctrl.submit("Continue", { onStart: () => preparing });
+		ctrl.cancel();
+		release();
+		expect(await run).toBe("cancelled");
+		expect(client.messageRequests).toHaveLength(0);
+		await ctrl.dispose();
+	});
+	it("automatically compresses at the model context threshold and seeds the next turn once", async () => {
+		const client = new FakeClient(
+			[
+				{ kind: "thread", threadId: "replacement" },
+				{ kind: "assistant_delta", text: "Done" },
+				{ kind: "completed" },
+			],
+			[],
+		);
+		const { ctrl, session } = controllerWith(client, [], [], {
+			autoCompact: true,
+			finalVerificationNudge: false,
+			todoReconciliation: false,
+		});
+		session.threadId = "original";
+		for (let i = 0; i < 3; i++) {
+			session.addMessage(userMessage(`Previous request ${i}`));
+			session.addMessage(assistantMessage(`Previous response ${i}`));
+		}
+		session.addUsage({ inputTokens: 85_000, contextLimit: 100_000 });
+		expect(await ctrl.submit("Continue")).toBe("completed");
+		expect(client.messageRequests[0]?.thread_id).toBeUndefined();
+		expect(client.messageRequests[0]?.content).toContain("History compressed.");
+		expect(client.messageRequests[0]?.content).toEndWith("Continue");
+		expect(await ctrl.submit("Next")).toBe("completed");
+		expect(client.messageRequests[1]?.content).toBe("Next");
+		expect(client.messageRequests[1]?.thread_id).toBe("replacement");
+		await ctrl.dispose();
+	});
+
+	it("leaves history and thread intact if automatic compression fails", async () => {
+		class FailedSummarizer extends FakeClient {
+			override async sendMessage(): Promise<BackboardResponse> {
+				throw new Error("Summary unavailable");
+			}
+		}
+		const client = new FailedSummarizer([], []);
+		const { ctrl, session } = controllerWith(client, [], [], {
+			autoCompact: true,
+		});
+		session.threadId = "original";
+		for (let i = 0; i < 3; i++) {
+			session.addMessage(userMessage(`Request ${i}`));
+			session.addMessage(assistantMessage(`Response ${i}`));
+		}
+		const before = [...session.getMessages()];
+		session.addUsage({ inputTokens: 85_000, contextLimit: 100_000 });
+		expect(await ctrl.submit("Continue")).toBe("failed");
+		expect(session.getMessages()).toEqual(before);
+		expect(session.threadId).toBe("original");
+		expect(client.messageRequests).toHaveLength(0);
+		await ctrl.dispose();
+	});
 	it("emits turn:start and accepted prompt before assistant setup finishes", async () => {
 		const client = new FakeClient(
 			[
@@ -358,31 +453,67 @@ describe("AgentController loop (mocked Backboard)", () => {
 
 	for (const failBoundary of [false, true]) {
 		it(`uses the editor turn id and waits for request capture (failure: ${failBoundary})`, async () => {
-			const client = new FakeClient([{ kind: "assistant_delta", text: "done" }, { kind: "completed" }], []);
+			const client = new FakeClient(
+				[{ kind: "assistant_delta", text: "done" }, { kind: "completed" }],
+				[],
+			);
 			const boundaries: string[] = [];
 			let finish!: () => void;
-			const gate = new Promise<void>(resolve => { finish = resolve; });
+			const gate = new Promise<void>((resolve) => {
+				finish = resolve;
+			});
 			let started!: () => void;
-			const capturing = new Promise<void>(resolve => { started = resolve; });
+			const capturing = new Promise<void>((resolve) => {
+				started = resolve;
+			});
 			const checkpoints: CheckpointRecorder = {
-				recordPreImage: async () => {}, recordPostImage: async () => {}, revertToolCall: async () => {},
-				beginShellCapture: async () => {}, endShellCapture: async () => {}, captureWarning: () => null,
-				scopedToTurn() { return this; },
-				beginTurn: async id => { boundaries.push(`begin:${id}`); },
-				endTurn: async id => { boundaries.push(`end:${id}`); started(); await gate; if (failBoundary) throw new Error("capture failed"); },
+				recordPreImage: async () => {},
+				recordPostImage: async () => {},
+				revertToolCall: async () => {},
+				beginShellCapture: async () => {},
+				endShellCapture: async () => {},
+				captureWarning: () => null,
+				scopedToTurn() {
+					return this;
+				},
+				beginTurn: async (id) => {
+					boundaries.push(`begin:${id}`);
+				},
+				endTurn: async (id) => {
+					boundaries.push(`end:${id}`);
+					started();
+					await gate;
+					if (failBoundary) throw new Error("capture failed");
+				},
 			};
-			const { ctrl, events } = controllerWith(client, new TestTool({ name: "Echo", readOnly: true }), [], { checkpoints });
+			const { ctrl, events } = controllerWith(
+				client,
+				new TestTool({ name: "Echo", readOnly: true }),
+				[],
+				{ checkpoints },
+			);
 			const submission = ctrl.submit("do it", { turnId: "editor-turn" });
 			await capturing;
 			let idle = false;
-			const wait = ctrl.waitForIdle().then(() => { idle = true; });
+			const wait = ctrl.waitForIdle().then(() => {
+				idle = true;
+			});
 			await Promise.resolve();
 			expect(idle).toBe(false);
 			finish();
-			if (failBoundary) await expect(submission).rejects.toThrow("capture failed");
+			if (failBoundary)
+				await expect(submission).rejects.toThrow("capture failed");
 			else expect(await submission).toBe("completed");
 			await wait;
-			expect({ boundaries, active: ctrl.hasActiveWork, turnId: events.find(event => event.type === "turn:start")?.turnId }).toEqual({ boundaries: ["begin:editor-turn", "end:editor-turn"], active: false, turnId: "editor-turn" });
+			expect({
+				boundaries,
+				active: ctrl.hasActiveWork,
+				turnId: events.find((event) => event.type === "turn:start")?.turnId,
+			}).toEqual({
+				boundaries: ["begin:editor-turn", "end:editor-turn"],
+				active: false,
+				turnId: "editor-turn",
+			});
 		});
 	}
 

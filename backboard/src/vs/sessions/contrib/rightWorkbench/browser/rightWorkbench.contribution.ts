@@ -3,6 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { ICommandService } from '../../../../platform/commands/common/commands.js';
+import { TerminalLocation } from '../../../../platform/terminal/common/terminal.js';
 import { Sequencer } from '../../../../base/common/async.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { localize2 } from '../../../../nls.js';
@@ -191,13 +193,13 @@ registerAction2(class OpenRightWorkbenchTerminalAction extends Action2 {
 	constructor() {
 		super({
 			id: RightWorkbenchCommandId.OpenTerminal,
-			title: localize2('rightWorkbench.openTerminal', "Open Terminal in Right Workbench"),
+			title: localize2('rightWorkbench.openTerminal', "Open Terminal in Bottom Panel"),
 			icon: Codicon.terminal,
 		});
 	}
 
 	override async run(accessor: ServicesAccessor): Promise<void> {
-		await openRightWorkbenchMode(accessor, 'terminal');
+		await accessor.get(ICommandService).executeCommand('workbench.action.terminal.new', { location: TerminalLocation.Panel });
 	}
 });
 

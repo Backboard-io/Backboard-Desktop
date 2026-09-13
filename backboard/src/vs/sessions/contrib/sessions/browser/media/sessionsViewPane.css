@@ -468,7 +468,37 @@
 		color: var(--agent-sidebar-primary);
 	}
 
+	.agent-sessions-empty-state {
+		position: absolute;
+		inset: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 20px;
+		pointer-events: none;
+	}
+
+	.agent-sessions-empty-state[hidden] {
+		display: none;
+	}
+
+	.agent-sessions-empty-state .agent-sessions-sidebar-action {
+		width: 100%;
+		max-width: 240px;
+		height: auto;
+		min-height: 100px;
+		padding: 20px 12px;
+		flex-direction: column;
+		justify-content: center;
+		gap: 12px;
+		border: 1px solid var(--vscode-widget-border, var(--vscode-sideBar-border, #ffffff20));
+		background: var(--agent-sidebar-hover-bg);
+		text-align: center;
+		pointer-events: auto;
+	}
+
 	.agent-sessions-control-container {
+		position: relative;
 		/* Fill only the remaining visible height. Negative top margin cancels the
 		 * first folder header's
 		 * group-gap (its 16px margin-top) so it doesn't stack on top of the

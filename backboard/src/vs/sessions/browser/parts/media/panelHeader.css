@@ -19,13 +19,21 @@
 	box-sizing: border-box;
 	color: var(--vscode-agentsPanel-foreground);
 	overflow: hidden;
-	-webkit-app-region: drag;
+	-webkit-app-region: no-drag;
 }
 
 /* macOS: the native traffic lights center ~4px below the strip's midline, so
  * nudge the header controls down to sit on the same line as them. */
 .agent-sessions-workbench.mac .sessions-panel-header {
 	padding-top: 4px;
+}
+
+/* Give the sidebar toggle its own hit area above adjacent custom widgets. */
+.agent-sessions-workbench .sessions-panel-header .action-item:has(.codicon-agent-sidebar-toggle-open, .codicon-agent-sidebar-toggle-closed) {
+	position: relative;
+	z-index: 2;
+	flex-shrink: 0;
+	-webkit-app-region: no-drag;
 }
 
 /* Headers are pure desktop/tablet chrome — the phone layout has its own
@@ -63,7 +71,10 @@
 	position: absolute;
 	inset: 0;
 	z-index: 0;
-	-webkit-app-region: drag;
+	/* This overlay spans the controls too; keep native dragging on the
+	 * dedicated titlebar rather than underneath interactive panel headers. */
+	-webkit-app-region: no-drag;
+	pointer-events: none;
 }
 
 .agent-sessions-workbench .sessions-panel-header > .sessions-panel-header-left,
@@ -75,6 +86,8 @@
 	align-items: center;
 	height: 100%;
 	min-width: 0;
+	/* Native dragging must stop at the toolbar bounds, including gaps between buttons. */
+	-webkit-app-region: no-drag;
 }
 
 .agent-sessions-workbench .sessions-panel-header > .sessions-panel-header-left {
@@ -103,6 +116,25 @@
 
 .agent-sessions-workbench .sessions-panel-header .monaco-toolbar .actions-container {
 	gap: 1px;
+}
+
+/* Give history arrows equal hit areas and space before the workspace icon. */
+.agent-sessions-workbench .sessions-panel-header .sessions-header-navigation {
+	padding-inline: 4px 8px;
+}
+
+.agent-sessions-workbench .sessions-panel-header .sessions-header-navigation .actions-container {
+	gap: 4px;
+}
+
+.agent-sessions-workbench .sessions-panel-header .sessions-header-navigation .action-label {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	box-sizing: border-box;
+	width: 28px;
+	height: 28px;
+	padding: 6px;
 }
 
 /* Interactive elements must not be part of the window drag region. */

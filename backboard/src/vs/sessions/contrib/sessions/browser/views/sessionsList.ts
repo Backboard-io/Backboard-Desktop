@@ -252,13 +252,13 @@ class SessionsTreeDelegate implements IListVirtualDelegate<SessionListItem> {
 
 	getHeight(element: SessionListItem): number {
 		if (isSessionSection(element)) {
-			return SessionsTreeDelegate.SECTION_HEIGHT;
+			return this._simpleMode && this._isSimpleCompact() ? 32 : SessionsTreeDelegate.SECTION_HEIGHT;
 		}
 		if (isSessionShowMore(element)) {
 			return this._simpleMode ? 32 : SessionsTreeDelegate.SHOW_MORE_HEIGHT;
 		}
 		if (this._simpleMode) {
-			return this._isSimpleCompact() ? 34 : this._isSimpleSettled(element) ? 36 : 82;
+			return this._isSimpleCompact() ? 30 : this._isSimpleSettled(element) ? 36 : 82;
 		}
 
 		return this._isPhone() ? SessionsTreeDelegate.ITEM_HEIGHT_PHONE : SessionsTreeDelegate.ITEM_HEIGHT;
@@ -1110,6 +1110,11 @@ export class SessionsList extends Disposable implements ISessionsList {
 	private readonly tree: WorkbenchObjectTree<SessionListItem, FuzzyScore>;
 	private readonly treeDelegate: SessionsTreeDelegate;
 	private sessions: ISession[] = [];
+	private filteredSessionCount = 0;
+
+	get isEmpty(): boolean {
+		return this.filteredSessionCount === 0;
+	}
 
 	/**
 	 * Tracks session workspace folders that have been deleted from disk so their
@@ -1533,6 +1538,8 @@ export class SessionsList extends Disposable implements ISessionsList {
 				filtered = [...filtered, match];
 			}
 		}
+
+		this.filteredSessionCount = filtered.length;
 
 		if (this.options.simpleMode && !this.simpleCompact) {
 			const sorted = sortSessions(filtered, this.options.sorting());

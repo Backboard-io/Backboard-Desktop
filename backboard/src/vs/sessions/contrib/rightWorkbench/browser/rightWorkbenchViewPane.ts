@@ -59,6 +59,7 @@ import { IWorkbenchEnvironmentService } from '../../../../workbench/services/env
 import { DEFAULT_LABELS_CONTAINER, ResourceLabels } from '../../../../workbench/browser/labels.js';
 import { ISCMRepository, ISCMResource, ISCMService } from '../../../../workbench/contrib/scm/common/scm.js';
 import { GitChange, GitDiffChange, IGitRepository, IGitService } from '../../../../workbench/contrib/git/common/gitService.js';
+import { TerminalLocation } from '../../../../platform/terminal/common/terminal.js';
 import { ITerminalEditorService, ITerminalInstance, ITerminalService, IXtermColorProvider } from '../../../../workbench/contrib/terminal/browser/terminal.js';
 import { IAgentHostCustomizationService } from '../../../../workbench/contrib/chat/browser/agentSessions/agentHost/agentHostCustomizationService.js';
 import { isIChatSessionFileChange2 } from '../../../../workbench/contrib/chat/common/chatSessionsService.js';
@@ -330,7 +331,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 		this.filesExplorer?.setVisible(visible);
 		this.optimusChatViewPane?.setVisible(visible);
 		this.extensionsViewPane?.setVisible(visible);
-		this.activeTab?.terminalInstance?.setVisible(visible);
+		this.activeTab?.terminalInstance?.setVisible(visible && activeInputMatches);
 		if (!visible) {
 			this.activationGeneration++;
 			this.cancelEmbeddedEditorLayout();
@@ -428,6 +429,10 @@ export class RightWorkbenchViewPane extends ViewPane {
 
 	private async doOpenMode(request: RightWorkbenchMode | IRightWorkbenchModeRequest): Promise<void> {
 		const modeRequest = typeof request === 'string' ? { mode: request } : request;
+		if (modeRequest.mode === 'terminal') {
+			await this.commandService.executeCommand('workbench.action.terminal.new', { location: TerminalLocation.Panel });
+			return;
+		}
 		this.activateSingleSurface();
 		const existing = modeRequest.mode === 'launcher' ? undefined : this.findTabForRequest(modeRequest);
 		const willChangeTab = modeRequest.mode === 'launcher'
@@ -451,6 +456,10 @@ export class RightWorkbenchViewPane extends ViewPane {
 	}
 
 	private async doOpenNewTab(mode: Exclude<RightWorkbenchMode, 'launcher'>): Promise<void> {
+		if (mode === 'terminal') {
+			await this.commandService.executeCommand('workbench.action.terminal.new', { location: TerminalLocation.Panel });
+			return;
+		}
 		this.activateSingleSurface();
 		const tab = this.createTab(mode);
 		this.activeTabId = tab.id;
@@ -1148,7 +1157,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 			case 'browser':
 				return localize('rightWorkbench.browserDescription', "Open a local app or URL.");
 			case 'terminal':
-				return localize('rightWorkbench.terminalDescription', "Start a shell in this workspace.");
+				return localize('rightWorkbench.terminalDescription', "Open a terminal in the bottom panel.");
 			case 'files':
 				return localize('rightWorkbench.filesDescription', "Browse and read workspace files.");
 			case 'review':
@@ -1165,8 +1174,8 @@ export class RightWorkbenchViewPane extends ViewPane {
 			{ mode: 'search', icon: Codicon.search, label: localize('rightWorkbench.search', "Search"), shortcut: '' },
 			{ mode: 'review', icon: Codicon.sourceControl, label: localize('rightWorkbench.sourceControl', "Source Control"), shortcut: '' },
 			{ mode: 'marketplace', icon: Codicon.vm, label: localize('rightWorkbench.marketplace', "Marketplace"), shortcut: '' },
-			{ mode: 'browser', icon: Codicon.globe, label: localize('rightWorkbench.browser', "Browser"), shortcut: '' },
 			{ mode: 'terminal', icon: Codicon.terminal, label: localize('rightWorkbench.terminal', "Terminal"), shortcut: '' },
+			{ mode: 'browser', icon: Codicon.globe, label: localize('rightWorkbench.browser', "Browser"), shortcut: '' },
 		];
 	}
 
@@ -3454,6 +3463,10 @@ export class RightWorkbenchViewPane extends ViewPane {
 			return;
 		}
 		if (tab.terminalInstance && !tab.terminalInstance.isDisposed && this.revealWarmEditor(tab)) {
+			// TerminalEditor gates visibility on the main editor part, which is
+			// hidden in Simple mode. This embedded host owns visibility instead.
+			tab.terminalInstance.setVisible(true);
+			tab.terminalInstance.focus(true);
 			return;
 		}
 		await this.ensureEmbeddedEditorPart(embeddedHost);
@@ -3479,7 +3492,8 @@ export class RightWorkbenchViewPane extends ViewPane {
 					this.refreshTabLabels();
 				}));
 				store?.add(instance.onTitleChanged(() => this.refreshTabLabels()));
-				instance.setVisible(this.activeTab === tab && this.isRightWorkbenchVisible);
+				// Xterm cannot be shown until openEditor attaches its DOM container.
+				instance.setVisible(false);
 				this.refreshTabLabels();
 				return instance;
 			}).finally(() => { tab.terminalPending = undefined; });

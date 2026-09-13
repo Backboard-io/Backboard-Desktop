@@ -50,9 +50,8 @@ class ToggleSidebarVisibilityAction extends Action2 {
 			},
 			menu: [
 				{
-					// Rendered in the sidebar header's right cluster with the
-					// back/forward navigation; the left cluster holds only the
-					// mode switcher (same spot as Editor/Advanced).
+					// The sidebar toggle stays beside the mode switcher; session
+					// history navigation lives beside the session title.
 					id: Menus.TitleBarCenterLeft,
 					group: 'navigation',
 					order: 0,

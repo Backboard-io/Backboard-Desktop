@@ -185,6 +185,7 @@ export class SessionsPart extends Part {
 			left: [
 				{ menuId: Menus.TitleBarLeftLayout, telemetrySource: 'sessionsPanelHeader.left', containerClasses: ['panel-header-fallback-left'] },
 				{ menuId: Menus.TitleBarCenterLeft, telemetrySource: 'sessionsPanelHeader.centerLeft', containerClasses: ['panel-header-fallback-left'] },
+				{ menuId: Menus.TitleBarSessionNavigation, telemetrySource: 'sessionsPanelHeader.navigation', containerClasses: ['sessions-header-navigation'] },
 			],
 			center: [
 				{ menuId: Menus.TitleBarCenterRight, telemetrySource: 'sessionsPanelHeader.center' },

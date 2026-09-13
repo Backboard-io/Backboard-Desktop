@@ -18,9 +18,6 @@ INSTALLER_MODULE="${5:-}"
 SCRIPT_DIR="$(cd "$(/usr/bin/dirname "$0")" && /bin/pwd -P)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && /bin/pwd -P)"
 VSCODE_ROOT="${VSCODE_ROOT:-${REPO_ROOT}/backboard}"
-if [[ ! -f "${VSCODE_ROOT}/package.json" && -f "${REPO_ROOT}/vscode/package.json" ]]; then
-  VSCODE_ROOT="${REPO_ROOT}/vscode"
-fi
 TEST_FILE="$VSCODE_ROOT/extensions/backboard/out/test/updatesInstaller.e2e.test.js"
 
 case "$CHANNEL" in

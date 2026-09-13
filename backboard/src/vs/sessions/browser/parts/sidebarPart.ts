@@ -62,9 +62,9 @@ export class SidebarPart extends AbstractPaneCompositePart {
 
 	//#region IView
 
-	// Keep the three mode segments, traffic lights, sidebar toggle and
-	// navigation visible at the sidebar's minimum width.
-	readonly minimumWidth: number = isWeb ? 360 : 350;
+	// Session navigation lives beside the title, leaving room for a narrower
+	// sidebar with the mode segments, traffic lights and sidebar toggle.
+	readonly minimumWidth: number = isWeb ? 360 : 310;
 	readonly maximumWidth: number = Number.POSITIVE_INFINITY;
 	readonly minimumHeight: number = 0;
 	readonly maximumHeight: number = Number.POSITIVE_INFINITY;

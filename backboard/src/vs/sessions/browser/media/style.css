@@ -365,8 +365,7 @@
 }
 
 /* SessionView writes its active/inactive surface inline. In Simple mode the
- * rendered transcript uses the main panel surface; its loading overlay and
- * header must use that same surface before the transcript is revealed. */
+ * view and header use the main panel surface before the transcript is revealed. */
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.sessionspart .session-view {
 	--session-view-background: var(--sessions-main-region-background) !important;
 	--part-background: var(--sessions-main-region-background) !important;
@@ -374,7 +373,7 @@
 
 .agent-sessions-workbench .part.auxiliarybar > .title,
 .agent-sessions-workbench .part.editor:not(.modal-editor-part) .editor-group-container > .title {
-	-webkit-app-region: drag;
+	-webkit-app-region: no-drag;
 }
 
 /* When the editor is the left-most visible part (maximized editor layout with

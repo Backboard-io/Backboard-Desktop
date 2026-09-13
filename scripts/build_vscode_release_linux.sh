@@ -49,8 +49,8 @@ if [[ ! "${SOURCE_COMMIT}" =~ ^[0-9a-fA-F]{40}$ ]]; then
 	exit 1
 fi
 SOURCE_DIRTY_SHA256="$({
-	git -C "${REPO_ROOT}" diff --binary HEAD -- vscode scripts 2>/dev/null || true
-	git -C "${REPO_ROOT}" ls-files --others --exclude-standard vscode scripts 2>/dev/null \
+	git -C "${REPO_ROOT}" diff --binary HEAD -- backboard scripts 2>/dev/null || true
+	git -C "${REPO_ROOT}" ls-files --others --exclude-standard backboard scripts 2>/dev/null \
 		| while IFS= read -r source_path; do
 			printf 'untracked %s\n' "${source_path}"
 			shasum -a 256 "${REPO_ROOT}/${source_path}" 2>/dev/null || true
@@ -90,7 +90,13 @@ echo "Building the reusable Linux x86_64 toolchain image"
 echo "Copying the current tracked and untracked source state into an isolated Docker volume"
 (
 	cd "${REPO_ROOT}"
-	git ls-files -co --exclude-standard -z -- vscode scripts \
+	git ls-files -co --exclude-standard -z -- backboard scripts \
+		| while IFS= read -r -d '' source_path; do
+			# Tracked files deleted in the working tree must not enter the archive.
+			if [[ -e "${source_path}" || -L "${source_path}" ]]; then
+				printf '%s\0' "${source_path}"
+			fi
+		done \
 		| COPYFILE_DISABLE=1 tar --no-xattrs --no-mac-metadata --null -T - -cf -
 ) | "${DOCKER[@]}" run --rm -i \
 	-v "${SOURCE_VOLUME}:/work/source" \

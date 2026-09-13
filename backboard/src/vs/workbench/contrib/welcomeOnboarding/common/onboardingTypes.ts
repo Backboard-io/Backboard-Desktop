@@ -11,6 +11,7 @@ import { localize } from '../../../../nls.js';
  */
 export const enum OnboardingStepId {
 	Welcome = 'onboarding.backboard.welcome',
+	ConnectAI = 'onboarding.backboard.connectAI',
 	Experience = 'onboarding.backboard.experience',
 	Theme = 'onboarding.backboard.theme',
 	ImportSettings = 'onboarding.backboard.importSettings',
@@ -62,6 +63,8 @@ export function getOnboardingStepTitle(stepId: OnboardingStepId): string {
 	switch (stepId) {
 		case OnboardingStepId.Welcome:
 			return localize('onboarding.backboard.step.welcome', "Backboard Studio");
+		case OnboardingStepId.ConnectAI:
+			return localize('onboarding.connectAI.title', "Connect Your AI");
 		case OnboardingStepId.Experience:
 			return localize('onboarding.backboard.step.experience', "Your Workspace. Your way.");
 		case OnboardingStepId.Theme:
@@ -82,6 +85,8 @@ export function getOnboardingStepSubtitle(stepId: OnboardingStepId): string {
 	switch (stepId) {
 		case OnboardingStepId.Welcome:
 			return localize('onboarding.backboard.step.welcome.subtitle', "The best way to build with AI");
+		case OnboardingStepId.ConnectAI:
+			return localize('onboarding.connectAI.subtitle', "Choose how you want to power your workspace.");
 		case OnboardingStepId.Experience:
 			return localize('onboarding.backboard.step.experience.subtitle', "Choose a view built around how you like to work.\nYou can change this later as your project grows.");
 		case OnboardingStepId.Theme:
@@ -100,6 +105,8 @@ export function getOnboardingStepSubtitle(stepId: OnboardingStepId): string {
  */
 export const ONBOARDING_STEPS: readonly OnboardingStepId[] = [
 	OnboardingStepId.Welcome,
+	OnboardingStepId.ConnectAI,
+	OnboardingStepId.Theme,
 ];
 
 /**
