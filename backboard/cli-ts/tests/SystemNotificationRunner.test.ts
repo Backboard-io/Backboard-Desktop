@@ -106,6 +106,7 @@ function makeRunner(
 		systemPrompt: "system prompt",
 		refreshSystemPrompt: options.refreshSystemPrompt,
 		model: { provider: "openai", model: "gpt-test" },
+		source: "byok",
 		memory: "off",
 		memoryProfile: "default",
 		requestKind: "user",
@@ -141,6 +142,12 @@ describe("SystemNotificationRunner", () => {
 		expect(spans[1]?.durationMs).toBeGreaterThanOrEqual(0);
 		expect(JSON.stringify(spans)).not.toContain("content:bounded");
 		expect(made.resets).toBe(1);
+	});
+
+	it("stamps the turn's billing route on every injected request", async () => {
+		const made = makeRunner([notification({ id: "routed" })]);
+		await made.run();
+		expect(made.requests.map((request) => request.source)).toEqual(["byok"]);
 	});
 
 	it("resets a notification's early tools even when initial consumption fails", async () => {

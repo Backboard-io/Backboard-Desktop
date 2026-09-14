@@ -221,6 +221,12 @@ export interface ILanguageModelChatMetadata {
 	readonly auth?: {
 		readonly providerLabel: string;
 		readonly accountLabel?: string;
+		/**
+		 * Shown in place of `accountLabel` when the account is connected but
+		 * cannot serve this model (for example a key whose catalog lacks it).
+		 * Such a model is not ready to use.
+		 */
+		readonly statusLabel?: string;
 	};
 	readonly capabilities?: {
 		readonly vision?: boolean;

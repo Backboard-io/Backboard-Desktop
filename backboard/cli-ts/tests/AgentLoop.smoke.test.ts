@@ -305,6 +305,32 @@ describe("AgentController loop (mocked Backboard)", () => {
 		).toEqual(["preparing", "generating", "generating"]);
 	});
 
+	it("stamps the turn's billing route on the message and every continuation", async () => {
+		const client = new FakeClient(
+			[
+				{ kind: "thread", threadId: "thr_1" },
+				{
+					kind: "requires_action",
+					runId: "run_1",
+					calls: [{ id: "c1", name: "Echo", input: {} }],
+				},
+			],
+			[{ kind: "assistant_delta", text: "all done" }, { kind: "completed" }],
+		);
+		const { ctrl, config } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+		);
+		config.setModel({ provider: "openai", model: "gpt-5.5" }, "byok");
+
+		expect(await ctrl.submit("do it")).toBe("completed");
+
+		expect(client.messageRequests.map((req) => req.source)).toEqual(["byok"]);
+		expect(client.toolOutputRequests.map((req) => req.source)).toEqual([
+			"byok",
+		]);
+	});
+
 	it("does not resolve a completed turn before checkpoint finalization is durable", async () => {
 		const client = new FakeClient(
 			[
@@ -358,31 +384,67 @@ describe("AgentController loop (mocked Backboard)", () => {
 
 	for (const failBoundary of [false, true]) {
 		it(`uses the editor turn id and waits for request capture (failure: ${failBoundary})`, async () => {
-			const client = new FakeClient([{ kind: "assistant_delta", text: "done" }, { kind: "completed" }], []);
+			const client = new FakeClient(
+				[{ kind: "assistant_delta", text: "done" }, { kind: "completed" }],
+				[],
+			);
 			const boundaries: string[] = [];
 			let finish!: () => void;
-			const gate = new Promise<void>(resolve => { finish = resolve; });
+			const gate = new Promise<void>((resolve) => {
+				finish = resolve;
+			});
 			let started!: () => void;
-			const capturing = new Promise<void>(resolve => { started = resolve; });
+			const capturing = new Promise<void>((resolve) => {
+				started = resolve;
+			});
 			const checkpoints: CheckpointRecorder = {
-				recordPreImage: async () => {}, recordPostImage: async () => {}, revertToolCall: async () => {},
-				beginShellCapture: async () => {}, endShellCapture: async () => {}, captureWarning: () => null,
-				scopedToTurn() { return this; },
-				beginTurn: async id => { boundaries.push(`begin:${id}`); },
-				endTurn: async id => { boundaries.push(`end:${id}`); started(); await gate; if (failBoundary) throw new Error("capture failed"); },
+				recordPreImage: async () => {},
+				recordPostImage: async () => {},
+				revertToolCall: async () => {},
+				beginShellCapture: async () => {},
+				endShellCapture: async () => {},
+				captureWarning: () => null,
+				scopedToTurn() {
+					return this;
+				},
+				beginTurn: async (id) => {
+					boundaries.push(`begin:${id}`);
+				},
+				endTurn: async (id) => {
+					boundaries.push(`end:${id}`);
+					started();
+					await gate;
+					if (failBoundary) throw new Error("capture failed");
+				},
 			};
-			const { ctrl, events } = controllerWith(client, new TestTool({ name: "Echo", readOnly: true }), [], { checkpoints });
+			const { ctrl, events } = controllerWith(
+				client,
+				new TestTool({ name: "Echo", readOnly: true }),
+				[],
+				{ checkpoints },
+			);
 			const submission = ctrl.submit("do it", { turnId: "editor-turn" });
 			await capturing;
 			let idle = false;
-			const wait = ctrl.waitForIdle().then(() => { idle = true; });
+			const wait = ctrl.waitForIdle().then(() => {
+				idle = true;
+			});
 			await Promise.resolve();
 			expect(idle).toBe(false);
 			finish();
-			if (failBoundary) await expect(submission).rejects.toThrow("capture failed");
+			if (failBoundary)
+				await expect(submission).rejects.toThrow("capture failed");
 			else expect(await submission).toBe("completed");
 			await wait;
-			expect({ boundaries, active: ctrl.hasActiveWork, turnId: events.find(event => event.type === "turn:start")?.turnId }).toEqual({ boundaries: ["begin:editor-turn", "end:editor-turn"], active: false, turnId: "editor-turn" });
+			expect({
+				boundaries,
+				active: ctrl.hasActiveWork,
+				turnId: events.find((event) => event.type === "turn:start")?.turnId,
+			}).toEqual({
+				boundaries: ["begin:editor-turn", "end:editor-turn"],
+				active: false,
+				turnId: "editor-turn",
+			});
 		});
 	}
 
@@ -771,6 +833,63 @@ describe("AgentController loop (mocked Backboard)", () => {
 					event.message.includes("retrying with openrouter/z-ai/glm-5.3"),
 			),
 		).toBeTrue();
+	});
+
+	it("never falls back to another model on a key-billed turn", async () => {
+		class KeyBilledCapacityClient extends FakeClient {
+			constructor() {
+				super([], []);
+			}
+
+			override async listModels(): Promise<ModelsListResponse> {
+				this.listModelsCount++;
+				return {
+					models: [
+						{
+							name: "z-ai/glm-5.3",
+							provider: "openrouter",
+							model_type: "llm",
+						},
+					],
+					total: 1,
+				};
+			}
+
+			override async *runMessage(
+				req: SendMessageRequest,
+			): AsyncIterable<ProviderEvent> {
+				this.messageRequests.push(req);
+				yield { kind: "failed", error: "No endpoints found for gpt-5.5." };
+			}
+		}
+		const client = new KeyBilledCapacityClient();
+		const { ctrl, config, events } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+		);
+		config.setModel({ provider: "openai", model: "gpt-5.5" }, "byok");
+
+		const status = await ctrl.submit("do it");
+
+		expect(status).toBe("failed");
+		// Only the key-billed model was ever asked for, only on the key's route,
+		// and no catalog was consulted for a substitute.
+		expect(
+			new Set(
+				client.messageRequests.map(
+					(request) => `${request.model_name}:${request.source}`,
+				),
+			),
+		).toEqual(new Set(["gpt-5.5:byok"]));
+		expect(client.listModelsCount).toBe(0);
+		expect(config.modelString).toBe("openai/gpt-5.5");
+		expect(
+			events.some(
+				(event) =>
+					event.type === "system:warning" &&
+					event.message.includes("retrying with"),
+			),
+		).toBeFalse();
 	});
 
 	it("retries with thinking off when a provider rejects thinking", async () => {

@@ -378,7 +378,7 @@ export class AgentService extends Disposable implements IAgentService {
 		if (!provider.executeCommand) {
 			throw new Error(`Agent provider ${params.provider} does not support account commands.`);
 		}
-		return provider.executeCommand(params.command);
+		return provider.executeCommand(params.command, params.args);
 	}
 
 	getAuthToken(request: IAgentHostAuthTokenRequest): string | undefined {

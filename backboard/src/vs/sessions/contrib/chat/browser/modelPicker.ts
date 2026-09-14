@@ -8,6 +8,7 @@ import { autorun, IObservable, observableValue } from '../../../../base/common/o
 import { localize2 } from '../../../../nls.js';
 import { BaseActionViewItem } from '../../../../base/browser/ui/actionbar/actionViewItems.js';
 import { Action2, registerAction2 } from '../../../../platform/actions/common/actions.js';
+import { isKeyBilledModelId } from '../../../../platform/agentHost/common/byokProviders.js';
 import { ContextKeyExpr } from '../../../../platform/contextkey/common/contextkey.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
@@ -219,8 +220,11 @@ export class ModelPicker extends Disposable {
 				// Missing session model ids are ambiguous for existing sessions:
 				// they can be restore races, or models that were removed. Only
 				// repair with a fallback after the saved model's vendor has
-				// resolved and confirmed the model is gone.
-				if (!sessionModelId || sessionModel || !this._hasResolvedSessionModelVendor(sessionModelId)) {
+				// resolved and confirmed the model is gone. A key-billed selection
+				// is never repaired: replacing it would silently move the session
+				// onto another billing route, and the send path already reports
+				// the missing key.
+				if (!sessionModelId || sessionModel || !this._hasResolvedSessionModelVendor(sessionModelId) || isKeyBilledModelId(sessionModelId)) {
 					this._currentModel.set(sessionModel, undefined);
 					this._lastPushedSessionId = session.sessionId;
 					return;

@@ -8,6 +8,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { createHash } from 'crypto';
+import { raceTimeout } from '../../../../base/common/async.js';
 import { Emitter } from '../../../../base/common/event.js';
 import { Disposable, type IReference } from '../../../../base/common/lifecycle.js';
 import { type IObservable, observableValue } from '../../../../base/common/observable.js';
@@ -29,13 +30,14 @@ import { buildSessionDbUri, FileEditTracker } from '../shared/fileEditTracker.js
 import { isClaudeLoggedIn } from '../shared/agentLoginProbes.js';
 import { IAgentConfigurationService } from '../agentConfigurationService.js';
 import { IAgentHostGitService, META_DIFF_BASE_BRANCH } from '../agentHostGitService.js';
-import { BACKBOARD_ACCESS_FULL, BACKBOARD_ACCESS_MANUAL, BACKBOARD_MODE_PLAN, BUNDLED_CHATGPT_SUBSCRIPTION_MODELS, BUNDLED_CLAUDE_SUBSCRIPTION_MODELS, backboardModelInfos, backboardMultitaskSystemContext, bridgeConfig, createBackboardTurnSettings, fallbackModel, isBridgeModel, resolveBackboardSessionConfig } from './backboardRuntimeShared.js';
+import { BYOK_COMMANDS, BYOK_GENERATION_ARG, BYOK_KEY_ARG, BYOK_PROVIDER_ARG, BYOK_PROVIDERS, byokProviderDefinition, type ByokProviderId, isByokProviderId, isKeyBilledProvider, keyBilledProviderId, parseBillingRoute, routeProviderFamily, vendorOfProvider } from '../../common/byokProviders.js';
+import { BACKBOARD_ACCESS_FULL, BACKBOARD_ACCESS_MANUAL, BACKBOARD_MODE_PLAN, BUNDLED_CHATGPT_SUBSCRIPTION_MODELS, BUNDLED_CLAUDE_SUBSCRIPTION_MODELS, type BridgeModel, backboardModelInfos, backboardMultitaskSystemContext, bridgeConfig, createBackboardTurnSettings, fallbackModel, isBridgeModel, resolveBackboardSessionConfig } from './backboardRuntimeShared.js';
 
 /** cli-ts tool name excluded from the turn when Web Search is toggled off. */
 const CLI_TS_WEB_SEARCH_TOOL_NAME = 'WebSearch';
 import { rgDiskPath } from '../../../../base/node/ripgrep.js';
-import { CliTsServeProcess, runCliTsCommand } from './cliTsProcess.js';
-import type { CliTsAgentEvent, CliTsClientToolDefinition, CliTsClientToolResultContent, CliTsClientToolResultPayload, CliTsFileAttachment, CliTsPermissionMode, CliTsTurnStatus, CliTsWorkerIntegrationChange, CliTsWorkerIntegrationSnapshot, CliTsWorkerState } from './cliTsProtocol.js';
+import { type CliTsCredentialSnapshot, CliTsServeProcess, runCliTsCommand } from './cliTsProcess.js';
+import { type CliTsAgentEvent, type CliTsClientToolDefinition, type CliTsClientToolResultContent, type CliTsClientToolResultPayload, type CliTsFileAttachment, type CliTsPermissionMode, type CliTsTurnStatus, type CliTsWorkerIntegrationChange, type CliTsWorkerIntegrationSnapshot, type CliTsWorkerState } from './cliTsProtocol.js';
 
 const CLI_TS_STORE_VERSION = 1;
 const CHATGPT_SUBSCRIPTION_PROVIDER = 'openai-subscription';
@@ -46,6 +48,26 @@ const CLAUDE_SUBSCRIPTION_ENABLE_COMMAND = 'claudeSubscription.enable';
 const CLI_TS_META_WORKTREE_BRANCH = 'backboard.worktree.branchName';
 const CLI_TS_META_WORKTREE_PATH = 'backboard.worktree.path';
 const CLI_TS_META_WORKTREE_REPOSITORY_ROOT = 'backboard.worktree.repositoryRoot';
+/** Upper bound for one `keys validate` round trip (cli-ts caps the vendor call at 15 s). */
+const CLI_TS_KEY_VALIDATION_TIMEOUT_MS = 20_000;
+/** How long a running serve process may take to acknowledge a credential snapshot. */
+const CLI_TS_CREDENTIAL_ACK_TIMEOUT_MS = 5_000;
+
+/** Outcome of pushing a credential snapshot to the running serve processes. */
+interface CliTsCredentialPush {
+	/** Processes that applied the snapshot. */
+	readonly acknowledged: number;
+	/** Processes ended because they did not apply it in time, or that had already exited. */
+	readonly terminated: number;
+	/** Processes that neither acknowledged nor could be confirmed gone. */
+	readonly unconfirmed: number;
+	readonly total: number;
+}
+
+/** Outcome of `cli-ts keys validate`, with the key already scrubbed from any message. */
+type CliTsKeyValidation =
+	| { readonly ok: true; readonly models: readonly BridgeModel[] }
+	| { readonly ok: false; readonly category: string; readonly error: string };
 
 function jwtExpiration(token: string): number | undefined {
 	const encoded = token.split('.')[1];
@@ -105,12 +127,18 @@ export function isClaudeSubscriptionModel(modelId: string | undefined): boolean 
 	return modelId?.startsWith(`${CLAUDE_SUBSCRIPTION_PROVIDER}/`) ?? false;
 }
 
+/**
+ * The billing family of a model id's provider prefix. Every key-billed vendor
+ * collapses to `byok`: those conversations are provider-neutral, so switching
+ * between two key-billed vendors keeps the thread while any move between a
+ * key route and another route is a provider change.
+ */
 function providerFromModelId(modelId: string | undefined): string | undefined {
 	if (!modelId) {
 		return undefined;
 	}
 	const separator = modelId.indexOf('/');
-	return separator > 0 ? modelId.slice(0, separator).trim().toLowerCase() : undefined;
+	return separator > 0 ? routeProviderFamily(modelId.slice(0, separator)) : undefined;
 }
 
 /**
@@ -130,7 +158,9 @@ export function requiresProviderThreadHandoff(threadId: string | undefined, prev
 		? CLAUDE_SUBSCRIPTION_PROVIDER
 		: threadId.startsWith('sub_')
 			? CHATGPT_SUBSCRIPTION_PROVIDER
-			: undefined;
+			: threadId.startsWith('byok_')
+				? 'byok'
+				: undefined;
 	if (threadProvider) {
 		return threadProvider !== nextProvider;
 	}
@@ -138,9 +168,9 @@ export function requiresProviderThreadHandoff(threadId: string | undefined, prev
 	if (previousProvider) {
 		return previousProvider !== nextProvider;
 	}
-	// Backboard and BYOK threads never use a subscription prefix, so a restored
-	// unprefixed thread cannot be adopted by either subscription transport.
-	return nextProvider === CHATGPT_SUBSCRIPTION_PROVIDER || nextProvider === CLAUDE_SUBSCRIPTION_PROVIDER;
+	// A Backboard thread has no prefix, so a restored unprefixed thread cannot
+	// be adopted by a subscription transport or by the user's own key.
+	return nextProvider === CHATGPT_SUBSCRIPTION_PROVIDER || nextProvider === CLAUDE_SUBSCRIPTION_PROVIDER || nextProvider === 'byok';
 }
 
 /** Fail fast when Claude Code's renewable first-party login is unavailable. */
@@ -174,6 +204,39 @@ function withSubscriptionConnectionStates(
 		withChatGptSubscriptionConnectionState(models, chatGptConnected),
 		claudeConnected,
 	);
+}
+
+/**
+ * Publishes, per key-billed model, whether its vendor currently holds a
+ * validated key. Key-billed rows stay listed after a key is removed so a
+ * session pinned to one keeps its selection visible (labelled as unavailable)
+ * instead of being silently moved to another model. No key material is ever
+ * exposed here.
+ */
+export function withByokKeyStates(
+	models: readonly IAgentModelInfo[],
+	heldVendors: ReadonlySet<string>,
+	availableByVendor: ReadonlyMap<string, ReadonlySet<string>>,
+): IAgentModelInfo[] {
+	return models.map(model => {
+		const separator = model.id.indexOf('/');
+		const provider = separator > 0 ? model.id.slice(0, separator) : undefined;
+		if (!provider || !isKeyBilledProvider(provider)) {
+			return model;
+		}
+		const vendor = vendorOfProvider(provider);
+		// Until a key's catalog has been discovered nothing is known against the
+		// row, so it stays usable; a discovered catalog is authoritative.
+		const available = availableByVendor.get(vendor);
+		return {
+			...model,
+			_meta: {
+				...model._meta,
+				byokKeyConfigured: heldVendors.has(vendor),
+				byokModelAvailable: available === undefined || available.has(model.id.slice(separator + 1)),
+			},
+		};
+	});
 }
 
 /**
@@ -488,6 +551,24 @@ export class CliTsAgent extends Disposable implements IAgent {
 	private _chatGptSubscriptionLoginPromise: Promise<void> | undefined;
 	private _claudeSubscriptionEnablePromise: Promise<void> | undefined;
 	private _claudeSubscriptionConnected = false;
+	/** Validated provider keys pushed by the IDE. Held in memory only; never persisted or logged. */
+	private readonly _providerKeys = new Map<ByokProviderId, string>();
+	/** The newest key-change generation applied per provider; older ones are refused. */
+	private readonly _providerKeyGenerations = new Map<ByokProviderId, number>();
+	/** Vendor catalogs discovered with a key. Model names only; cached so rows survive restarts. */
+	private readonly _byokCatalog = new Map<ByokProviderId, BridgeModel[]>();
+	/** Model names the vendor's current key can reach; absent until its catalog was discovered. */
+	private readonly _byokAvailability = new Map<ByokProviderId, Set<string>>();
+	/** Successful validations waiting for the IDE to persist and activate the key. */
+	private readonly _pendingValidation = new Map<ByokProviderId, { readonly key: string; readonly models: readonly BridgeModel[] }>();
+	/** One background catalog discovery per vendor. */
+	private readonly _byokDiscovery = new Map<ByokProviderId, Promise<void>>();
+	/** Monotonic revision of the credential snapshot; acks echo it. */
+	private _credentialRevision = 0;
+	/** The Backboard API catalog as last reported by a serve process, key-billed rows stripped. */
+	private _lastServeModels: readonly BridgeModel[] = [];
+	/** How long a running serve process gets to acknowledge a credential change. */
+	private _credentialAckTimeoutMs = CLI_TS_CREDENTIAL_ACK_TIMEOUT_MS;
 
 	constructor(
 		@ILogService private readonly _logService: ILogService,
@@ -519,30 +600,86 @@ export class CliTsAgent extends Disposable implements IAgent {
 	 */
 	private _hydrateModelsFromCache(): void {
 		try {
-			const raw = JSON.parse(fs.readFileSync(this._modelsCachePath(), 'utf8')) as { apiUrl?: string; models?: unknown[] };
-			if ((raw.apiUrl ?? '') !== this._currentApiUrl()) {
-				return;
+			const raw = JSON.parse(fs.readFileSync(this._modelsCachePath(), 'utf8')) as { apiUrl?: string; models?: unknown[]; byok?: Record<string, unknown> };
+			// Key-billed catalogs are vendor-owned and independent of the API URL.
+			// They are names only: whether a row is usable is decided by which keys
+			// the IDE pushes after startup and what the last discovery could reach,
+			// never by the cache alone.
+			for (const [provider, entry] of Object.entries(raw.byok ?? {})) {
+				if (!isByokProviderId(provider)) {
+					continue;
+				}
+				// Older caches stored the rows alone; availability is then unknown
+				// until the key's catalog is discovered again.
+				const record = entry && typeof entry === 'object' && !Array.isArray(entry) ? entry as { rows?: unknown; available?: unknown } : undefined;
+				const rows = Array.isArray(entry) ? entry : record?.rows;
+				if (Array.isArray(rows)) {
+					this._byokCatalog.set(provider, rows.filter(isBridgeModel));
+				}
+				if (Array.isArray(record?.available)) {
+					this._byokAvailability.set(provider, new Set(record.available.filter((name): name is string => typeof name === 'string')));
+				}
 			}
-			const models = (Array.isArray(raw.models) ? raw.models : []).filter(isBridgeModel);
-			if (models.length) {
-				this._models.set(withSubscriptionConnectionStates(
-					backboardModelInfos(models, BUNDLED_CHATGPT_SUBSCRIPTION_MODELS, BUNDLED_CLAUDE_SUBSCRIPTION_MODELS),
-					hasUsableChatGptSubscriptionLogin(),
-					this._claudeSubscriptionConnected,
-				), undefined);
+			if ((raw.apiUrl ?? '') === this._currentApiUrl()) {
+				this._lastServeModels = (Array.isArray(raw.models) ? raw.models : []).filter(isBridgeModel);
 			}
 		} catch {
 			// First run or unreadable cache — the bundled fallback stays.
 		}
+		this._publishModels();
 	}
 
-	private _persistModelsCache(models: readonly unknown[]): void {
+	private _persistModelsCache(): void {
 		try {
 			fs.mkdirSync(path.dirname(this._modelsCachePath()), { recursive: true });
-			fs.writeFileSync(this._modelsCachePath(), `${JSON.stringify({ apiUrl: this._currentApiUrl(), models }, null, '\t')}\n`, 'utf8');
+			const byok = Object.fromEntries([...this._byokCatalog].map(([provider, rows]) => {
+				const available = this._byokAvailability.get(provider);
+				return [provider, { rows, ...(available ? { available: [...available] } : {}) }];
+			}));
+			fs.writeFileSync(this._modelsCachePath(), `${JSON.stringify({ apiUrl: this._currentApiUrl(), models: this._lastServeModels, byok }, null, '\t')}\n`, 'utf8');
 		} catch (error) {
 			this._logService.info(`[cli-ts] could not persist models cache: ${error instanceof Error ? error.message : String(error)}`);
 		}
+	}
+
+	/**
+	 * Recomputes the published catalog: the Backboard API rows, the key-billed
+	 * rows under their `-key` provider ids, and the bundled subscription routes,
+	 * each stamped with its connection state. Key-billed rows are listed
+	 * whenever a catalog is known, and `byokKeyConfigured` says whether they are
+	 * usable right now.
+	 */
+	private _publishModels(): void {
+		const keyRows: BridgeModel[] = [];
+		for (const [provider, rows] of this._byokCatalog) {
+			for (const row of rows) {
+				keyRows.push({ ...row, provider: keyBilledProviderId(provider) });
+			}
+		}
+		const infos = withByokKeyStates(
+			withSubscriptionConnectionStates(
+				backboardModelInfos(this._lastServeModels, keyRows, BUNDLED_CHATGPT_SUBSCRIPTION_MODELS, BUNDLED_CLAUDE_SUBSCRIPTION_MODELS),
+				hasUsableChatGptSubscriptionLogin(),
+				this._claudeSubscriptionConnected,
+			),
+			new Set(this._providerKeys.keys()),
+			this._byokAvailability,
+		);
+		this._models.set(infos.length ? infos : [fallbackModel()], undefined);
+	}
+
+	/**
+	 * Records what the vendor's current key can reach. Rows discovered earlier
+	 * stay in the catalog so a session pinned to one keeps a visible selection;
+	 * only their availability changes. The union is what the picker lists.
+	 */
+	private _recordByokCatalog(provider: ByokProviderId, models: readonly BridgeModel[]): void {
+		const merged = new Map((this._byokCatalog.get(provider) ?? []).map(row => [row.name, row] as const));
+		for (const row of models) {
+			merged.set(row.name, row);
+		}
+		this._byokCatalog.set(provider, [...merged.values()]);
+		this._byokAvailability.set(provider, new Set(models.map(row => row.name)));
 	}
 
 	/**
@@ -584,7 +721,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 		};
 	}
 
-	async executeCommand(command: string): Promise<IAgentCommandResult> {
+	async executeCommand(command: string, args?: Readonly<Record<string, unknown>>): Promise<IAgentCommandResult> {
 		switch (command) {
 			case CHATGPT_SUBSCRIPTION_LOGIN_COMMAND:
 				await this._ensureChatGptSubscriptionLogin(true);
@@ -601,10 +738,254 @@ export class CliTsAgent extends Disposable implements IAgent {
 				return {
 					message: localize('cliTsAgent.claudeSubscription.connected', "Claude subscription connected to the Backboard harness."),
 				};
+			case BYOK_COMMANDS.validate:
+				return this._validateProviderKeyCommand(args);
+			case BYOK_COMMANDS.set:
+				return this._setProviderKeyCommand(args);
+			case BYOK_COMMANDS.remove:
+				return this._removeProviderKeyCommand(args);
+			case BYOK_COMMANDS.status:
+				return this._providerKeyStatusCommand();
 			default:
 				throw new Error(`Unsupported Backboard command: ${command}`);
 		}
 	}
+
+	// ---- provider keys (BYOK) ------------------------------------------------
+	//
+	// The IDE owns the secrets. It validates a key here first, persists it in
+	// its own secret storage, then activates it here; every activation pushes
+	// the whole snapshot to the running serve processes. Nothing in this class
+	// writes a key to disk or to a log.
+
+	private _byokCommandArgs(args: Readonly<Record<string, unknown>> | undefined, requireKey: boolean): { provider: ByokProviderId; key: string | undefined } {
+		const provider = args?.[BYOK_PROVIDER_ARG];
+		if (!isByokProviderId(provider)) {
+			throw new Error(localize('cliTsAgent.byok.unsupportedProvider', "API keys are not supported for provider '{0}'.", String(provider)));
+		}
+		const rawKey = args?.[BYOK_KEY_ARG];
+		const key = typeof rawKey === 'string' ? rawKey.trim() : undefined;
+		if (requireKey && !key) {
+			throw new Error(localize('cliTsAgent.byok.keyMissing', "Enter a {0} API key.", byokProviderDefinition(provider).label));
+		}
+		return { provider, key };
+	}
+
+	private async _validateProviderKeyCommand(args: Readonly<Record<string, unknown>> | undefined): Promise<IAgentCommandResult> {
+		const { provider, key } = this._byokCommandArgs(args, true);
+		const label = byokProviderDefinition(provider).label;
+		const result = await this._validateProviderKey(provider, key!);
+		if (!result.ok) {
+			this._logService.info(`[cli-ts] ${provider} key rejected during validation (${result.category})`);
+			return { message: result.error, data: { ok: false, category: result.category, error: result.error } };
+		}
+		this._pendingValidation.set(provider, { key: key!, models: result.models });
+		return {
+			message: localize('cliTsAgent.byok.validated', "{0} key verified.", label),
+			data: { ok: true, modelCount: result.models.length },
+		};
+	}
+
+	/**
+	 * Applies the store's per-provider generation: a change older than the
+	 * newest one already applied is refused, so a slow replacement can never
+	 * undo a later removal (or the other way round). Equal generations are the
+	 * same change again and go through; a missing one is an older caller.
+	 */
+	private _applyProviderKeyGeneration(provider: ByokProviderId, args: Readonly<Record<string, unknown>> | undefined): void {
+		const generation = args?.[BYOK_GENERATION_ARG];
+		if (generation === undefined) {
+			return;
+		}
+		if (typeof generation !== 'number' || !Number.isInteger(generation) || generation < 0) {
+			throw new Error(localize('cliTsAgent.byok.badGeneration', "Invalid key change generation."));
+		}
+		const newest = this._providerKeyGenerations.get(provider);
+		if (newest !== undefined && generation < newest) {
+			throw new Error(localize('cliTsAgent.byok.staleGeneration', "This {0} key change was superseded by a newer one.", byokProviderDefinition(provider).label));
+		}
+		this._providerKeyGenerations.set(provider, generation);
+	}
+
+	private async _setProviderKeyCommand(args: Readonly<Record<string, unknown>> | undefined): Promise<IAgentCommandResult> {
+		const { provider, key } = this._byokCommandArgs(args, true);
+		this._applyProviderKeyGeneration(provider, args);
+		const pending = this._pendingValidation.get(provider);
+		this._pendingValidation.delete(provider);
+		this._providerKeys.set(provider, key!);
+		if (pending && pending.key === key) {
+			this._recordByokCatalog(provider, pending.models);
+		} else {
+			// Activated without a fresh validation (window start): the key is usable
+			// immediately and the catalog fills in when discovery completes.
+			void this._discoverByokCatalog(provider, key!);
+		}
+		this._credentialRevision++;
+		this._publishModels();
+		this._persistModelsCache();
+		const push = await this._pushCredentials();
+		return {
+			message: localize('cliTsAgent.byok.connected', "{0} key connected.", byokProviderDefinition(provider).label),
+			data: { connected: push.unconfirmed === 0, revision: this._credentialRevision, acknowledged: push.acknowledged, terminated: push.terminated, running: push.total },
+		};
+	}
+
+	private async _removeProviderKeyCommand(args: Readonly<Record<string, unknown>> | undefined): Promise<IAgentCommandResult> {
+		const { provider } = this._byokCommandArgs(args, false);
+		this._applyProviderKeyGeneration(provider, args);
+		this._providerKeys.delete(provider);
+		this._pendingValidation.delete(provider);
+		this._credentialRevision++;
+		// The catalog stays so sessions pinned to these models keep a visible,
+		// clearly unavailable selection instead of being moved elsewhere.
+		this._publishModels();
+		const label = byokProviderDefinition(provider).label;
+		// The key left this map before the push, so nothing new can be sent with
+		// it; the push makes sure no running turn keeps using it either.
+		const push = await this._pushCredentials();
+		if (push.unconfirmed > 0) {
+			throw new Error(localize('cliTsAgent.byok.removeUnconfirmed', "The {0} key was removed, but {1} running session(s) could not confirm dropping it. Restart Backboard to be sure no session still uses it.", label, push.unconfirmed));
+		}
+		return {
+			message: localize('cliTsAgent.byok.removed', "{0} key removed.", label),
+			data: { revision: this._credentialRevision, acknowledged: push.acknowledged, terminated: push.terminated, running: push.total },
+		};
+	}
+
+	private _providerKeyStatusCommand(): IAgentCommandResult {
+		const providers: Record<string, { held: boolean; discovered: boolean }> = {};
+		for (const definition of BYOK_PROVIDERS) {
+			providers[definition.id] = {
+				held: this._providerKeys.has(definition.id),
+				discovered: (this._byokCatalog.get(definition.id)?.length ?? 0) > 0,
+			};
+		}
+		return { message: '', data: { providers, revision: this._credentialRevision } };
+	}
+
+	/**
+	 * Runs `cli-ts keys validate` with the key on the child's stdin. The
+	 * runtime answers with one JSON line and never echoes the key. Overridden
+	 * in tests.
+	 */
+	private async _validateProviderKey(provider: ByokProviderId, key: string): Promise<CliTsKeyValidation> {
+		const output = await runCliTsCommand(this._logService, ['keys', 'validate', '--provider', provider], { stdin: key, timeoutMs: CLI_TS_KEY_VALIDATION_TIMEOUT_MS });
+		const line = output.trim().split('\n').at(-1) ?? '';
+		let parsed: { ok?: unknown; category?: unknown; error?: unknown; models?: unknown };
+		try {
+			parsed = JSON.parse(line) as typeof parsed;
+		} catch {
+			throw new Error(localize('cliTsAgent.byok.unreadableValidation', "The Backboard runtime returned an unreadable key validation result. Update Backboard and try again."));
+		}
+		if (parsed.ok === true) {
+			return { ok: true, models: (Array.isArray(parsed.models) ? parsed.models : []).filter(isBridgeModel) };
+		}
+		return {
+			ok: false,
+			category: typeof parsed.category === 'string' ? parsed.category : 'provider-error',
+			error: typeof parsed.error === 'string' && parsed.error
+				? parsed.error
+				: localize('cliTsAgent.byok.validationFailed', "The {0} key could not be verified.", byokProviderDefinition(provider).label),
+		};
+	}
+
+	private _discoverByokCatalog(provider: ByokProviderId, key: string): Promise<void> {
+		const inFlight = this._byokDiscovery.get(provider);
+		if (inFlight) {
+			return inFlight;
+		}
+		const run = this._validateProviderKey(provider, key)
+			.then(result => {
+				if (this._providerKeys.get(provider) !== key) {
+					return; // replaced or removed while discovering
+				}
+				if (result.ok) {
+					this._recordByokCatalog(provider, result.models);
+					this._publishModels();
+					this._persistModelsCache();
+				} else {
+					this._logService.info(`[cli-ts] ${provider} key catalog discovery deferred (${result.category})`);
+				}
+			})
+			.catch(error => {
+				this._logService.warn(`[cli-ts] ${provider} key catalog discovery failed: ${error instanceof Error ? error.message : String(error)}`);
+			})
+			.finally(() => {
+				this._byokDiscovery.delete(provider);
+			});
+		this._byokDiscovery.set(provider, run);
+		return run;
+	}
+
+	private _credentialControl(): CliTsCredentialSnapshot {
+		return {
+			op: 'setCredentials',
+			revision: this._credentialRevision,
+			providerKeys: [...this._providerKeys].map(([provider, key]) => ({ provider, key })),
+		};
+	}
+
+	/**
+	 * Pushes the current snapshot to every serve process that has completed
+	 * its startup handshake; one still starting reads the host's keys when it
+	 * becomes ready, so the change is already part of its own snapshot. A
+	 * process that does not acknowledge in time is terminated: it may still
+	 * hold a revoked key or lack a new one, and nothing else may be sent to it.
+	 * The push is complete only when every process acknowledged or is gone.
+	 */
+	private async _pushCredentials(): Promise<CliTsCredentialPush> {
+		const running = [...this._sessions.values()]
+			.map(session => session.proc)
+			.filter((proc): proc is CliTsServeProcess => !!proc?.credentialSnapshotWritten);
+		const revision = this._credentialRevision;
+		const outcomes = await Promise.all(running.map(async proc => {
+			const acknowledged = await raceTimeout(
+				proc.request({ ...this._credentialControl(), requestId: proc.nextRequestId() }).then(() => true, () => false),
+				this._credentialAckTimeoutMs,
+			);
+			if (acknowledged) {
+				return 'acknowledged';
+			}
+			if (proc.isRunning) {
+				this._logService.warn(`[cli-ts] a serve process did not acknowledge credential revision ${revision} in time; terminating it`);
+				proc.terminate(localize('cliTsAgent.byok.runtimeRestarted', "Runtime restarted after a credential change."));
+			}
+			const exited = await raceTimeout(proc.whenExited().then(() => true), this._credentialAckTimeoutMs);
+			return exited ? 'terminated' : 'unconfirmed';
+		}));
+		const count = (outcome: string) => outcomes.filter(candidate => candidate === outcome).length;
+		const push = { acknowledged: count('acknowledged'), terminated: count('terminated'), unconfirmed: count('unconfirmed'), total: running.length };
+		if (push.unconfirmed > 0) {
+			this._logService.error(`[cli-ts] ${push.unconfirmed} of ${push.total} serve processes could not be confirmed to hold credential revision ${revision}`);
+		}
+		return push;
+	}
+
+	private _assertProviderKeyHeld(vendor: string): void {
+		if (isByokProviderId(vendor) && this._providerKeys.has(vendor)) {
+			return;
+		}
+		const label = isByokProviderId(vendor) ? byokProviderDefinition(vendor).label : vendor;
+		throw new Error(localize('cliTsAgent.byok.keyRequired', "No {0} API key is connected. Add one under API Keys to use this model.", label));
+	}
+
+	/**
+	 * The current key's discovered catalog is authoritative: a selection it
+	 * lacks (a replacement key with narrower access, say) is refused here, so
+	 * the picker's "not available" state and the send outcome always agree.
+	 */
+	private _assertByokModelAvailable(vendor: string, model: string): void {
+		if (!isByokProviderId(vendor)) {
+			return;
+		}
+		const available = this._byokAvailability.get(vendor);
+		if (available === undefined || available.has(model)) {
+			return;
+		}
+		const label = byokProviderDefinition(vendor).label;
+		throw new Error(localize('cliTsAgent.byok.modelUnavailable', "{0} is not available with the connected {1} API key. Pick another {1} API Key model or replace the key.", model, label));
+	}
+
 
 	private async _ensureChatGptSubscriptionLogin(force: boolean): Promise<void> {
 		if (!force && hasUsableChatGptSubscriptionLogin()) {
@@ -1070,6 +1451,15 @@ export class CliTsAgent extends Disposable implements IAgent {
 			} else if (settings.provider === CLAUDE_SUBSCRIPTION_PROVIDER) {
 				this._fireStatus(session, turn, localize('cliTsAgent.status.checkingClaudeLogin', "Checking Claude sign-in…"));
 				await this._requireClaudeSubscriptionLogin();
+			} else if (settings.source === 'byok') {
+				this._assertProviderKeyHeld(settings.provider);
+				this._assertByokModelAvailable(settings.provider, settings.model);
+			}
+			if (session.threadId?.startsWith('byok_') && settings.source !== 'byok') {
+				// A conversation started on the user's key (possibly by an older
+				// build that read the CLI key file) must not continue on Backboard
+				// just because the restored selection is a Backboard model.
+				throw new Error(localize('cliTsAgent.byok.threadRequiresKey', "This conversation was started with your own API key. Select an API Key model to continue it, or start a new session."));
 			}
 			// Resolve folder/worktree isolation from the latest live config before
 			// starting a process or capturing the session baseline. The checkpoint
@@ -1085,11 +1475,14 @@ export class CliTsAgent extends Disposable implements IAgent {
 			}
 			await session.baselineCapture;
 			const rgDir = await this._resolveRgDir();
+			// Whatever the route, the submit below waits for the runtime's startup
+			// handshake: an older runtime that would read its own key file, or one
+			// that has not applied the current key snapshot, never receives it.
 			const proc = this._ensureProcess(session, rgDir);
 			if (session.cancelBeforeSubmit) {
 				return;
 			}
-			this._logService.info(`[cli-ts] turn_start session=${session.sessionId} model=${settings.provider}/${settings.model} permission=${permission} cwd=${session.workingDirectory?.fsPath ?? '(missing)'}`);
+			this._logService.info(`[cli-ts] turn_start session=${session.sessionId} model=${settings.provider}/${settings.model} source=${settings.source} permission=${permission} cwd=${session.workingDirectory?.fsPath ?? '(missing)'}`);
 			const inheritedConversationContext = [
 				session.providerHandoffContext,
 				!session.threadId ? session.forkContext : undefined,
@@ -1106,6 +1499,9 @@ export class CliTsAgent extends Disposable implements IAgent {
 				// memory. serve only adopts it while it has no thread binding.
 				...(session.threadId ? { threadId: session.threadId } : {}),
 				model: `${settings.provider}/${settings.model}`,
+				// The route is explicit on every turn: the runtime never infers
+				// billing from which keys happen to be present.
+				source: settings.source,
 				permission,
 				// Always send the semantic state. In particular, `off` must reach the
 				// persistent serve process so a previous turn's thinking config is reset.
@@ -1530,7 +1926,10 @@ export class CliTsAgent extends Disposable implements IAgent {
 			return;
 		}
 		if (session.proc?.isRunning && model.id) {
-			session.proc.notify({ op: 'setModel', model: model.id });
+			const route = parseBillingRoute(model.id);
+			session.proc.notify(route
+				? { op: 'setModel', model: `${route.provider}/${route.model}`, source: route.source }
+				: { op: 'setModel', model: model.id });
 		}
 	}
 
@@ -2054,6 +2453,10 @@ export class CliTsAgent extends Disposable implements IAgent {
 			onExit: () => {
 				session.pendingInputs.clear();
 			},
+			// Every spawn (first start, lazy request, crash respawn) completes the
+			// credential handshake, empty snapshot included, before its first
+			// request line.
+			credentialSnapshot: () => this._credentialControl(),
 		});
 		session.proc = proc;
 		return proc;
@@ -2108,16 +2511,19 @@ export class CliTsAgent extends Disposable implements IAgent {
 			const payload = record.payload as { models?: unknown[] } | undefined;
 			const models = (payload?.models ?? []).filter(isBridgeModel);
 			if (models.length) {
-				// The Backboard API is authoritative for catalog providers. Only the
-				// Locally-authenticated subscription routes are supplemented.
-				const infos = withSubscriptionConnectionStates(
-					backboardModelInfos(models, BUNDLED_CHATGPT_SUBSCRIPTION_MODELS, BUNDLED_CLAUDE_SUBSCRIPTION_MODELS),
-					hasUsableChatGptSubscriptionLogin(),
-					this._claudeSubscriptionConnected,
-				);
-				this._models.set(infos.length ? infos : [fallbackModel()], undefined);
+				// A key-billed row the IDE did not push means the runtime read a key
+				// from somewhere else; that must never happen in a host-managed runtime.
+				const unexpected = models.filter(model => model.source === 'byok' && !(isByokProviderId(model.provider) && this._providerKeys.has(model.provider)));
+				if (unexpected.length) {
+					this._logService.warn(`[cli-ts] runtime listed ${unexpected.length} key-billed models without a host-provided key (${[...new Set(unexpected.map(model => model.provider))].join(', ')}); ignoring them`);
+				}
+				// The Backboard API is authoritative for catalog providers; key-billed
+				// rows come from the host's own discovery, and the subscription
+				// routes are supplemented locally.
+				this._lastServeModels = models.filter(model => model.source !== 'byok');
+				this._publishModels();
 				// Persist for instant hydration on the next window start.
-				this._persistModelsCache(models);
+				this._persistModelsCache();
 			}
 		}).catch(error => {
 			this._modelsRefreshed = false;

@@ -95,6 +95,9 @@ export class Compactor {
 				}),
 				llm_provider: config.model.provider,
 				model_name: config.model.model,
+				...(config.modelSource === undefined
+					? {}
+					: { source: config.modelSource }),
 				system_prompt: COMPACTION_SYSTEM_PROMPT,
 				// No tools and no memory: this is a pure text transformation, and
 				// letting it call tools or write memories would be both slow and a

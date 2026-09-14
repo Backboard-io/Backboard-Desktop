@@ -7,10 +7,12 @@ import * as dom from '../../../../../../base/browser/dom.js';
 import { CancellationTokenSource } from '../../../../../../base/common/cancellation.js';
 import { Emitter, Event } from '../../../../../../base/common/event.js';
 import { Disposable, DisposableMap, IDisposable, MutableDisposable } from '../../../../../../base/common/lifecycle.js';
+import { autorun } from '../../../../../../base/common/observable.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { localize } from '../../../../../../nls.js';
 import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
 import { IAgentHostService } from '../../../../../../platform/agentHost/common/agentService.js';
+import { isBackboardOnlyConfigProperty, isKeyBilledModelId } from '../../../../../../platform/agentHost/common/byokProviders.js';
 import type { ResolveSessionConfigResult, SessionConfigPropertySchema } from '../../../../../../platform/agentHost/common/state/protocol/commands.js';
 import type { SessionState } from '../../../../../../platform/agentHost/common/state/protocol/state.js';
 import { StateComponents } from '../../../../../../platform/agentHost/common/state/sessionState.js';
@@ -166,6 +168,13 @@ export class AgentHostGenericConfigChips extends Disposable {
 				this._onDidChangeOptions.fire();
 			}
 		}));
+		// The selected model decides which chips apply: Backboard-only
+		// services are hidden while a key-billed model is selected.
+		this._register(autorun(reader => {
+			this._widget.input.selectedLanguageModel.read(reader);
+			this._sync();
+			this._onDidChangeOptions.fire();
+		}));
 		this._reattach();
 	}
 
@@ -316,9 +325,15 @@ export class AgentHostGenericConfigChips extends Disposable {
 		}
 		const entries = this._readSchemaProperties();
 		const desired = new Set<string>();
+		const keyBilledSelection = isKeyBilledModelId(this._widget.input.currentLanguageModel);
 		if (entries) {
 			for (const [property, schema] of entries) {
 				if (!isVisibleGenericConfigProperty(property, schema)) {
+					continue;
+				}
+				if (keyBilledSelection && isBackboardOnlyConfigProperty(property)) {
+					// Memory and image generation never reach a request billed to
+					// the user's own key.
 					continue;
 				}
 				desired.add(property);

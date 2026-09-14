@@ -1,8 +1,11 @@
+import type { ResolvedProviderKey } from "../core/keys/ProviderKeyTypes.ts";
 import { canonicalToolName } from "../core/tools/names.ts";
 import { ToolPolicy } from "../core/tools/ToolPolicy.ts";
+import type { ModelSource } from "../providers/backboard/types.ts";
 import {
 	type AuthState,
 	hasAnyCredentials,
+	hostManagedProviderKeys,
 	NO_CREDENTIALS_MESSAGE,
 	resolveAuth,
 } from "./auth.ts";
@@ -69,6 +72,10 @@ export class Config {
 	private workspaceId: string | null = null;
 
 	private currentModel: ModelRef;
+	/** Explicit billing route for the live model; only set by a host-managed runtime. */
+	private currentModelSource: ModelSource | undefined;
+	/** Keys pushed by the IDE host; they replace file keys on every auth refresh. */
+	private hostProviderKeys: ResolvedProviderKey[] | null = null;
 	private successfulModelRefs: ModelRef[];
 	private currentModelProfile: ModelProfile;
 	private readonly currentFormat: OutputFormat;
@@ -178,9 +185,35 @@ export class Config {
 		return formatModel(this.currentModel);
 	}
 
-	setModel(ref: ModelRef): void {
+	/**
+	 * Selects the live model. `source` is the explicit billing route a host-managed
+	 * runtime attaches to every selection; omitting it clears the route, so a
+	 * recovery fallback never inherits a key-billed source it did not ask for.
+	 */
+	setModel(ref: ModelRef, source?: ModelSource): void {
 		this.currentModel = ref;
+		this.currentModelSource = source;
 		this.currentModelProfile = resolveModelProfile(ref);
+	}
+
+	/** The explicit billing route for the live model, if the host attached one. */
+	get modelSource(): ModelSource | undefined {
+		return this.currentModelSource;
+	}
+
+	/** True when provider keys come only from the IDE host (BACKBOARD_HOST_MANAGED_KEYS). */
+	get hostManagedProviderKeys(): boolean {
+		return hostManagedProviderKeys();
+	}
+
+	/**
+	 * Replaces the provider keys with the host's snapshot. The snapshot is the
+	 * whole set, so an absent provider is a removal. Read at request time by the
+	 * BYOK client and the router, so no client is rebuilt.
+	 */
+	setHostProviderKeys(keys: readonly ResolvedProviderKey[]): void {
+		this.hostProviderKeys = keys.map((entry) => ({ ...entry }));
+		this.auth = { ...this.auth, providerKeys: this.hostProviderKeys };
 	}
 
 	/** Working models, newest first, for automatic recovery from provider capacity. */
@@ -419,6 +452,9 @@ export class Config {
 		this.auth = resolveAuth(
 			this.homeDir === undefined ? {} : { homeDir: this.homeDir },
 		);
+		if (this.hostProviderKeys) {
+			this.auth = { ...this.auth, providerKeys: this.hostProviderKeys };
+		}
 		const next = this.auth.backboard ?? anonymousEnv();
 		this.env.apiKey = next.apiKey;
 		this.env.apiUrl = next.apiUrl;

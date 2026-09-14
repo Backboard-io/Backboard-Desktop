@@ -58,12 +58,31 @@ the title bar:
 
 ### Security and credentials
 
-- API keys stored in `~/.backboard_ide/config.json` with `0600` permissions. The agent
-  never reads keys from disk — the host injects them as environment variables.
-- BYOK (bring your own key) for third-party model providers, stored in the OS keychain via
-  `ISecretStorageService`.
+- The Backboard API key is stored in `~/.backboard_ide/config.json` with `0600`
+  permissions. The agent never reads it from disk — the host injects it as an environment
+  variable.
+- BYOK (bring your own key) for OpenAI and Anthropic: keys are added on the API Keys page
+  (account menu, or "Backboard: API Keys" in the command palette). The Electron main
+  process is the single owner of these keys (`byokKeyStoreMainService.ts`): it validates a
+  key through the runtime before saving it as an encrypted `secret://` entry in application
+  storage (the same keychain-backed store `ISecretStorageService` uses), then activates it
+  in the agent host. Every change carries a per-provider generation, so a slow replacement
+  started in one window can never undo a removal made in another. The agent host hands the
+  key set to each `cli-ts` serve process over its stdin — never through argv, the
+  environment, or a file — and a process may not receive any request until it has
+  acknowledged the current key set; one that does not acknowledge a change is terminated.
+  Older runtimes that cannot honour host-managed keys are refused for every model, not just
+  key-billed ones. IDE-spawned runtimes ignore the CLI's own `~/.backboard/keys.json`.
+- Key-billed models appear in the model picker as their own sections ("OpenAI API Key",
+  "Anthropic API Key") next to the Backboard-routed and subscription models. The selected
+  model is the billing route: adding or removing a key never silently changes what an
+  existing session bills to, and every request a turn or worker sends carries the route it
+  started on. A key-billed model the connected key cannot reach stays listed as "Not
+  available with this key" and is refused on send rather than replaced by another route.
+  A Backboard sign-in is still required.
 - SSO support for team authentication.
-- Every credential can be overridden via environment variables for CI or local development.
+- Every Backboard credential can be overridden via environment variables for CI or local
+  development. Provider keys deliberately cannot.
 
 ---
 
@@ -369,9 +388,13 @@ history and scratch), `models-cache.json`, and `workspace/`.
 
 ### 2. Model provider keys (BYOK) — OS keychain
 
-Third-party model keys do **not** go in a dotfile. They are held by
-`ISecretStorageService`, which is backed by the OS credential store
-([languageModels.ts:759](vscode/src/vs/workbench/contrib/chat/common/languageModels.ts#L759)).
+Third-party model keys do **not** go in a dotfile. They live as encrypted `secret://`
+entries in application storage, written by the main process's key store
+([byokKeyStoreMainService.ts](vscode/src/vs/platform/agentHost/electron-main/byokKeyStoreMainService.ts))
+with the OS credential store providing the encryption — the same place and format
+`ISecretStorageService` uses, so keys added by earlier builds carry over. Windows only see
+key statuses (masked, never the key itself) and forward a freshly typed key straight to
+the store.
 
 ### Overriding without storing anything
 

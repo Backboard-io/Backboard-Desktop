@@ -10,6 +10,7 @@ import { TODO_NOT_CALLED_REMINDER } from "../../prompts/todoReminders.ts";
 import type { AgentClient } from "../../providers/AgentClient.ts";
 import { BackboardError } from "../../providers/backboard/errors.ts";
 import { normalizeSelectableModels } from "../../providers/backboard/modelCatalog.ts";
+import type { ModelRoute } from "../../providers/backboard/types.ts";
 import { errorMessage } from "../../utils/errors.ts";
 import { shortId } from "../../utils/id.ts";
 import type { EventBus } from "../bus/EventBus.ts";
@@ -411,11 +412,22 @@ export class AgentController {
 							: undefined,
 				});
 			const systemPrompt = buildTurnSystemPrompt();
+			// The route is fixed here, after onStart applied the host's selection,
+			// and travels with every request of the turn. A selection change while
+			// the turn runs applies to the next turn, never to this one's billing.
+			const route: ModelRoute = {
+				...config.model,
+				source: config.modelSource,
+			};
 			let fallbackCandidatesPromise: Promise<ModelRef[]> | null = null;
 			const resolveCapacityFallback = async (
 				_current: ModelRef,
 				attemptedModelKeys: ReadonlySet<string>,
 			): Promise<ModelRef | null> => {
+				// A key-billed turn has exactly one place to go: no other model may
+				// be billed to the key on its behalf, and Backboard must not pay
+				// for a turn the user routed to their own key.
+				if (route.source === "byok") return null;
 				fallbackCandidatesPromise ??= this.deps.client
 					.listModels({ signal })
 					.then((catalog) =>
@@ -443,7 +455,8 @@ export class AgentController {
 				systemPrompt,
 				refreshSystemPrompt: buildTurnSystemPrompt,
 				assistantId,
-				model: config.model,
+				model: { provider: route.provider, model: route.model },
+				source: route.source,
 				memory: config.memory,
 				memoryProfile: config.memoryProfile,
 				workspaceId:

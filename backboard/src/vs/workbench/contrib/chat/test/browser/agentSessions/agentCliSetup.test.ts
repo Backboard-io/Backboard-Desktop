@@ -24,6 +24,7 @@ suite('Agent CLI setup', () => {
 			{} as never,
 			{} as never,
 			{} as never,
+			{} as never,
 		);
 
 		const candidates = service.getSetupCandidates(new Set(['backboard']));
@@ -83,6 +84,7 @@ suite('Agent CLI setup', () => {
 			{} as never,
 			{ userHome: async () => URI.file('/tmp') } as never,
 			{ error: () => undefined } as never,
+			{} as never,
 		);
 
 		await service.beginSetup(CLAUDE_SUBSCRIPTION_SETUP_ID);

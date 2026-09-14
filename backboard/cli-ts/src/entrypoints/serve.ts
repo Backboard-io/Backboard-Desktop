@@ -41,15 +41,17 @@ import { GitWorktreeManager } from "../core/workspaces/GitWorktreeManager.ts";
 import { WorkerWorkspaceManager } from "../core/workspaces/WorkerWorkspaceManager.ts";
 import { WorkerWorkspaceStore } from "../core/workspaces/WorkerWorkspaceStore.ts";
 import { buildStartupEnvironmentPrompt } from "../prompts/system/startupEnvironment.ts";
+import type { ModelSource } from "../providers/backboard/types.ts";
 import { createAgentClient } from "../providers/createAgentClient.ts";
 import { createDefaultTools } from "../tools/index.ts";
 import { errorMessage } from "../utils/errors.ts";
 import { shortId } from "../utils/id.ts";
-import type {
-	ServeControl,
-	ServeFileAttachment,
-	ServeRecord,
-	ServeRecordType,
+import {
+	SERVE_CAPABILITIES,
+	type ServeControl,
+	type ServeFileAttachment,
+	type ServeRecord,
+	type ServeRecordType,
 } from "./ServeTypes.ts";
 import { parseControlLine } from "./serveControl.ts";
 
@@ -331,6 +333,30 @@ export async function runServe(argv: string[]): Promise<void> {
 	let rewinding = false;
 	const pendingOps = new Set<Promise<void>>();
 	let disposing = false;
+	// A host that manages keys must state the route with every selection, and
+	// may not move the live model to another billing source while a turn is
+	// running: everything started by that turn reads the live model.
+	const assertRouteAllowed = (
+		model: string | undefined,
+		source: ModelSource | undefined,
+	): void => {
+		if (model === undefined) return;
+		if (config.hostManagedProviderKeys && source === undefined) {
+			throw new Error(
+				"A billing source is required for model selections in host-managed mode",
+			);
+		}
+		if (
+			controller.isRunning &&
+			source !== undefined &&
+			config.modelSource !== undefined &&
+			source !== config.modelSource
+		) {
+			throw new Error(
+				"The billing source cannot change while a turn is running; wait for it to finish or cancel it",
+			);
+		}
+	};
 	const handleControl = async (control: ServeControl): Promise<void> => {
 		switch (control.op) {
 			case "prepareRewind":
@@ -373,6 +399,7 @@ export async function runServe(argv: string[]): Promise<void> {
 			case "submit": {
 				if (rewinding) throw new Error("Wait for file restoration to finish");
 				editorRewind.assertReady();
+				assertRouteAllowed(control.model, control.source);
 				if (control.threadId && session.threadId === null) {
 					session.threadId = control.threadId;
 				}
@@ -395,7 +422,7 @@ export async function runServe(argv: string[]): Promise<void> {
 							.join("\n\n") || undefined,
 					onStart: () => {
 						if (control.model !== undefined) {
-							config.setModel(parseModel(control.model));
+							config.setModel(parseModel(control.model), control.source);
 						}
 						if (control.thinking !== undefined) {
 							config.setThinking(parseThinking(control.thinking));
@@ -469,10 +496,25 @@ export async function runServe(argv: string[]): Promise<void> {
 				);
 				return;
 			case "setModel":
-				config.setModel(parseModel(control.model));
+				assertRouteAllowed(control.model, control.source);
+				config.setModel(parseModel(control.model), control.source);
 				writeRecord("serve:ack", control.requestId, {
 					op: "setModel",
 					model: config.modelString,
+					...(config.modelSource ? { source: config.modelSource } : {}),
+				});
+				return;
+			case "setCredentials":
+				// Synchronous on purpose: stdin lines are dispatched in order but
+				// handlers run concurrently, so only the synchronous prefix of a
+				// handler is guaranteed to precede the next line's work.
+				config.setHostProviderKeys(
+					control.providerKeys.map(({ provider, key }) => ({ provider, key })),
+				);
+				writeRecord("serve:ack", control.requestId, {
+					op: "setCredentials",
+					revision: control.revision,
+					providers: control.providerKeys.map((entry) => entry.provider),
 				});
 				return;
 			case "listModels":
@@ -567,6 +609,7 @@ export async function runServe(argv: string[]): Promise<void> {
 		cwd: config.cwd,
 		model: config.modelString,
 		upstream: "Backboard-io/Backboard-R-CLI",
+		capabilities: [...SERVE_CAPABILITIES],
 		runtime,
 	});
 

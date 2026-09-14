@@ -12,6 +12,7 @@ import { URI } from '../../../../../base/common/uri.js';
 import { localize } from '../../../../../nls.js';
 import { IAgentHostService } from '../../../../../platform/agentHost/common/agentService.js';
 import type { RootState } from '../../../../../platform/agentHost/common/state/protocol/state.js';
+import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { IDialogService } from '../../../../../platform/dialogs/common/dialogs.js';
 import { createDecorator } from '../../../../../platform/instantiation/common/instantiation.js';
 import { InstantiationType, registerSingleton } from '../../../../../platform/instantiation/common/extensions.js';
@@ -23,6 +24,7 @@ import { IQuickInputService } from '../../../../../platform/quickinput/common/qu
 import { ITerminalService, type ITerminalInstance } from '../../../terminal/browser/terminal.js';
 import { IHostService } from '../../../../services/host/browser/host.js';
 import { IPathService } from '../../../../services/path/common/pathService.js';
+import { OPEN_API_KEYS_COMMAND_ID } from '../byokKeys/byokKeys.js';
 
 /** An agent CLI the user can set up with one click from the session-type picker. */
 export interface IAgentCliSetupCandidate {
@@ -90,6 +92,8 @@ const SETUP_DEFINITIONS: readonly IAgentCliSetupDefinition[] = [];
 
 export const CHATGPT_SUBSCRIPTION_SETUP_ID = 'backboard';
 export const CLAUDE_SUBSCRIPTION_SETUP_ID = 'backboard.claudeSubscription';
+/** Opens the API Keys page; offered from the picker's vendor sections. */
+export const BYOK_KEYS_SETUP_ID = 'backboard.apiKeys';
 
 const CHATGPT_SUBSCRIPTION_SETUP: IAgentCliSetupCandidate = {
 	id: CHATGPT_SUBSCRIPTION_SETUP_ID,
@@ -156,6 +160,7 @@ export class AgentCliSetupService implements IAgentCliSetupService {
 		@IHostService private readonly _hostService: IHostService,
 		@IPathService private readonly _pathService: IPathService,
 		@ILogService private readonly _logService: ILogService,
+		@ICommandService private readonly _commandService: ICommandService,
 	) { }
 
 	getSetupCandidates(registeredTypeIds: ReadonlySet<string>): IAgentCliSetupCandidate[] {
@@ -190,6 +195,10 @@ export class AgentCliSetupService implements IAgentCliSetupService {
 	}
 
 	async beginSetup(id: string): Promise<void> {
+		if (id === BYOK_KEYS_SETUP_ID) {
+			await this._commandService.executeCommand(OPEN_API_KEYS_COMMAND_ID);
+			return;
+		}
 		if (id === CHATGPT_SUBSCRIPTION_SETUP.id) {
 			if (this._inFlight.has(id)) {
 				return;

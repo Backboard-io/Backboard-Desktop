@@ -131,6 +131,12 @@ export interface SendMessageRequest {
 	image_model_provider?: string;
 	image_model_name?: string;
 	stream?: boolean;
+	/**
+	 * The billing route the turn or worker captured when it started. In
+	 * host-managed mode routing reads it instead of inferring a backend at
+	 * dispatch time; clients strip it before anything goes on the wire.
+	 */
+	source?: ModelSource;
 }
 
 export interface OpenRouterRequestOptions {
@@ -151,6 +157,8 @@ export interface SubmitToolOutputsRequest {
 	thinking?: ThinkingConfig | null;
 	tools?: OpenAITool[];
 	stream?: boolean;
+	/** The turn's captured billing route; see SendMessageRequest.source. */
+	source?: ModelSource;
 }
 
 export interface BackboardResponse {
@@ -285,6 +293,18 @@ export interface ProviderUsage {
 
 /** Which backend serves a model: a saved key, subscription, or Backboard routing. */
 export type ModelSource = "byok" | "subscription" | "backboard";
+
+/**
+ * A model selection together with the billing route it was made on. Turns and
+ * workers capture one when they start and stamp it on every request, so a
+ * later selection change can never move their billing.
+ */
+export interface ModelRoute {
+	provider: string;
+	model: string;
+	/** Undefined outside host-managed mode, where routing infers the backend. */
+	source?: ModelSource;
+}
 
 export interface ModelInfo extends ThinkingModelMetadata {
 	id: string;

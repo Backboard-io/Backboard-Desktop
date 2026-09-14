@@ -3,28 +3,49 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Event } from '../../../base/common/event.js';
+import { Emitter, Event } from '../../../base/common/event.js';
 import { Disposable, toDisposable } from '../../../base/common/lifecycle.js';
+import { ProxyChannel } from '../../../base/parts/ipc/common/ipc.js';
 import { ILogService, ILoggerService } from '../../log/common/log.js';
 import { RemoteLoggerChannelClient } from '../../log/common/logIpc.js';
 import { IAgentHostStarter } from '../common/agent.js';
-import { AgentHostIpcChannels } from '../common/agentService.js';
+import { AgentHostIpcChannels, IAgentService } from '../common/agentService.js';
 
 enum Constants {
 	MaxRestarts = 5,
 }
 
 /**
+ * What the main process itself may do with a running agent host, beyond
+ * relaying window connections: know when a (re)started host is ready, and
+ * call it. Renderers keep their own direct connections.
+ */
+export interface IAgentHostProcessAccess {
+	/** Fires after each (re)start once the process accepts requests. A restarted host holds no keys or sessions. */
+	readonly onDidStart: Event<void>;
+	/** The main process's own proxy to the running host, or undefined between runs. */
+	readonly agentService: IAgentService | undefined;
+}
+
+/**
  * Main-process service that manages the agent host utility process lifecycle
  * (lazy start, crash recovery, logger forwarding). The renderer communicates
  * with the utility process directly via MessagePort - this class does not
- * relay any agent service calls.
+ * relay any agent service calls on their behalf.
  */
-export class AgentHostProcessManager extends Disposable {
+export class AgentHostProcessManager extends Disposable implements IAgentHostProcessAccess {
 
 	private _started = false;
 	private _wasQuitRequested = false;
 	private _restartCount = 0;
+	private _agentService: IAgentService | undefined;
+
+	private readonly _onDidStart = this._register(new Emitter<void>());
+	readonly onDidStart = this._onDidStart.event;
+
+	get agentService(): IAgentService | undefined {
+		return this._agentService;
+	}
 
 	constructor(
 		private readonly _starter: IAgentHostStarter,
@@ -75,6 +96,15 @@ export class AgentHostProcessManager extends Disposable {
 
 			// Connect logger channel so agent host logs appear in the output channel
 			this._register(new RemoteLoggerChannelClient(this._loggerService, connection.client.getChannel(AgentHostIpcChannels.Logger)));
+
+			const agentService = ProxyChannel.toService<IAgentService>(connection.client.getChannel(AgentHostIpcChannels.AgentHost));
+			this._agentService = agentService;
+			connection.store.add(toDisposable(() => {
+				if (this._agentService === agentService) {
+					this._agentService = undefined;
+				}
+			}));
+			this._onDidStart.fire();
 
 			// Handle unexpected exit
 			this._register(connection.onDidProcessExit(e => {

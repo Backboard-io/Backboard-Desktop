@@ -82,5 +82,9 @@ export function createAgentClient(
 		hasBackboardAuth: () => config.hasBackboardAuth,
 		hasKeyFor: (provider) =>
 			config.auth.providerKeys.some((entry) => entry.provider === provider),
+		// An IDE-managed runtime states the route with every selection; the
+		// key-over-SSO precedence rule stays a TUI behaviour.
+		explicitSources: config.hostManagedProviderKeys,
+		getModelSource: () => config.modelSource,
 	});
 }

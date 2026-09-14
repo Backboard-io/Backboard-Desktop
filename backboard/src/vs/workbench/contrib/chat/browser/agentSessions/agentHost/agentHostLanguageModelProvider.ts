@@ -8,6 +8,7 @@ import { Emitter } from '../../../../../../base/common/event.js';
 import { Disposable } from '../../../../../../base/common/lifecycle.js';
 import { localize } from '../../../../../../nls.js';
 import { readAgentModelPricingMeta } from '../../../../../../platform/agentHost/common/agentModelPricing.js';
+import { isKeyBilledProvider } from '../../../../../../platform/agentHost/common/byokProviders.js';
 import { ConfigSchema, SessionModelInfo } from '../../../../../../platform/agentHost/common/state/sessionState.js';
 import { nullExtensionDescription } from '../../../../../services/extensions/common/extensions.js';
 import { ChatAgentLocation } from '../../../common/constants.js';
@@ -74,6 +75,13 @@ export class AgentHostLanguageModelProvider extends Disposable implements ILangu
 				const chatGptSubscriptionConnected = m._meta?.chatGptSubscriptionConnected === true;
 				const isClaudeSubscription = m._meta?.upstreamProvider === 'anthropic-subscription';
 				const claudeSubscriptionConnected = m._meta?.claudeSubscriptionConnected === true;
+				// Key-billed rows mirror subscription rows: they carry an `auth`
+				// block, and `accountLabel` is present only while a key is held
+				// that can reach the model, so the picker treats a keyless row as
+				// "connect first" and a row the current key lacks as unavailable.
+				const isKeyBilled = typeof m._meta?.upstreamProvider === 'string' && isKeyBilledProvider(m._meta.upstreamProvider);
+				const keyConfigured = m._meta?.byokKeyConfigured === true;
+				const keyModelAvailable = m._meta?.byokModelAvailable !== false;
 				const modelDescription = typeof m._meta?.modelDescription === 'string' && m._meta.modelDescription.trim() !== '' ? m._meta.modelDescription : undefined;
 				const openRouterProviders = Array.isArray(m._meta?.openRouterProviders)
 					? m._meta.openRouterProviders.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
@@ -103,7 +111,13 @@ export class AgentHostLanguageModelProvider extends Disposable implements ILangu
 									providerLabel: 'Claude',
 									...(claudeSubscriptionConnected ? { accountLabel: localize('agentHostLanguageModelProvider.connected', "Connected") } : {}),
 								}
-								: undefined,
+								: isKeyBilled
+									? {
+										providerLabel: upstreamProviderLabel ?? localize('agentHostLanguageModelProvider.apiKey', "API Key"),
+										...(keyConfigured && keyModelAvailable ? { accountLabel: localize('agentHostLanguageModelProvider.connected', "Connected") } : {}),
+										...(keyConfigured && !keyModelAvailable ? { statusLabel: localize('agentHostLanguageModelProvider.notAvailableWithKey', "Not available with this key") } : {}),
+									}
+									: undefined,
 						family: m.id,
 						maxInputTokens: m.maxContextWindow ?? 0,
 						maxOutputTokens: 0,

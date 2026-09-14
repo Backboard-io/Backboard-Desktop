@@ -162,6 +162,7 @@ function loopWith(
 	return new RLMLoop({
 		client,
 		model: TEST_MODEL,
+		source: "byok",
 		executor,
 		...options,
 	});
@@ -214,6 +215,11 @@ describe("RLMLoop", () => {
 		expect(client.requests[0]?.content).toContain("Write exactly one fenced");
 		expect(client.requests[0]?.content).toContain("length: 2");
 		expect(client.requests[1]?.content).toContain("stdout:\n  hi");
+		// Every leg bills to the route the spawning turn captured.
+		expect(client.requests.map((request) => request.source)).toEqual([
+			"byok",
+			"byok",
+		]);
 	});
 
 	it("keeps printed stdout in the trajectory when a cell submits", async () => {

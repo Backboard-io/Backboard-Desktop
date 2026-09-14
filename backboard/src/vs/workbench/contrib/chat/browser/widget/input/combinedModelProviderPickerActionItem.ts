@@ -18,7 +18,8 @@ import { localize } from '../../../../../../nls.js';
 import { AnchorAlignment, AnchorAxisAlignment } from '../../../../../../base/browser/ui/contextview/contextview.js';
 import { IContextViewService } from '../../../../../../platform/contextview/browser/contextView.js';
 import { AgentSessionProviders, AgentSessionTarget } from '../../agentSessions/agentSessions.js';
-import { CLAUDE_SUBSCRIPTION_SETUP_ID } from '../../agentSessions/agentCliSetup.js';
+import { BYOK_KEYS_SETUP_ID, CLAUDE_SUBSCRIPTION_SETUP_ID } from '../../agentSessions/agentCliSetup.js';
+import { byokProviderDefinition, isByokProviderId, isKeyBilledProvider, vendorOfProvider } from '../../../../../../platform/agentHost/common/byokProviders.js';
 import { ISessionTypePickerDelegate } from '../../chat.js';
 import { ILanguageModelChatMetadataAndIdentifier, ILanguageModelsService } from '../../../common/languageModels.js';
 import { IChatInputPickerOptions } from './chatInputPickerActionItem.js';
@@ -78,8 +79,10 @@ export function providerIconKeyForCombinedModelSection(sectionId: string): strin
 	const providerId = sectionId.startsWith('provider:') ? sectionId.slice('provider:'.length) : undefined;
 	switch (providerId) {
 		case 'openai-subscription':
+		case 'openai-key':
 		case 'openai': return 'open-ai';
 		case 'anthropic-subscription': return 'claude';
+		case 'anthropic-key':
 		case 'anthropic': return 'anthropic';
 		case 'aws-bedrock': return 'bedrock';
 		case 'cerebras': return 'cerebras';
@@ -217,6 +220,13 @@ export function formatModelProviderDetail(model: ILanguageModelChatMetadataAndId
 	if (providerId === 'openrouter' && selectedOpenRouterProvider) {
 		return localize('combinedPicker.selectedOpenRouterProviderDetail', "OpenRouter · {0}", selectedOpenRouterProvider);
 	}
+	if (isKeyBilledProvider(providerId)) {
+		const vendor = vendorOfProvider(providerId);
+		const vendorLabel = isByokProviderId(vendor) ? byokProviderDefinition(vendor).label : formatModelLabel(vendor);
+		return model.metadata.auth?.accountLabel
+			? localize('combinedPicker.keyBilledDetail', "Billed to your {0} API key", vendorLabel)
+			: model.metadata.auth?.statusLabel ?? localize('combinedPicker.keyRequiredDetail', "API key required");
+	}
 	return model.metadata.detail?.trim();
 }
 
@@ -230,9 +240,36 @@ function isSubscriptionModel(model: ILanguageModelChatMetadataAndIdentifier): bo
 	return providerId === 'openai-subscription' || providerId === 'anthropic-subscription';
 }
 
-/** Subscription models are only usable once their subscription is connected; everything else is always ready. */
+/** Models billed to the user's own API key; usable only while that key is connected. */
+export function isKeyBilledModel(model: ILanguageModelChatMetadataAndIdentifier): boolean {
+	return isKeyBilledProvider(upstreamProviderId(model));
+}
+
+/** Subscription and key-billed models are usable only once connected; everything else is always ready. */
 function isReadyToUse(model: ILanguageModelChatMetadataAndIdentifier): boolean {
-	return !isSubscriptionModel(model) || !!model.metadata.auth?.accountLabel;
+	return (!isSubscriptionModel(model) && !isKeyBilledModel(model)) || !!model.metadata.auth?.accountLabel;
+}
+
+/** The picker footer action for a vendor section: add a key, or manage the one in use. */
+export function byokFooterForSection(sectionId: string): { readonly label: string; readonly title: string } | undefined {
+	if (!sectionId.startsWith('provider:')) {
+		return undefined;
+	}
+	const providerId = sectionId.slice('provider:'.length);
+	if (isKeyBilledProvider(providerId)) {
+		return {
+			label: localize('combinedPicker.manageApiKeys', "Manage API keys…"),
+			title: localize('combinedPicker.manageApiKeysTitle', "Replace, test, or remove the API keys Backboard uses on your behalf."),
+		};
+	}
+	if (isByokProviderId(providerId)) {
+		const label = byokProviderDefinition(providerId).label;
+		return {
+			label: localize('combinedPicker.useOwnKey', "Use your own {0} key…", label),
+			title: localize('combinedPicker.useOwnKeyTitle', "Add a {0} API key to bill these models to your own {0} account instead of Backboard.", label),
+		};
+	}
+	return undefined;
 }
 
 function recommendedModels(models: readonly ILanguageModelChatMetadataAndIdentifier[]): ILanguageModelChatMetadataAndIdentifier[] {
@@ -462,6 +499,12 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 		const thinkingLabel = this._thinkingOption(model)?.currentLabel;
 		this._triggerLabel.textContent = modelLabel;
 		this._triggerThinking.textContent = thinkingLabel ?? '';
+		// The billing route is always visible from the composer, including an
+		// unavailable key-billed selection.
+		const billingDetail = model ? formatModelProviderDetail(model) : undefined;
+		if (this._triggerElement) {
+			this._triggerElement.title = billingDetail ?? '';
+		}
 		this._triggerElement?.setAttribute('aria-label', thinkingLabel
 			? localize('combinedPicker.ariaLabelWithThinking', "Model: {0}, Thinking: {1}", modelLabel, thinkingLabel)
 			: localize('combinedPicker.ariaLabel', "Provider and model: {0}", modelLabel));
@@ -775,6 +818,20 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 			dom.clearNode(list);
 			dom.clearNode(footer);
 			const renderSetupAction = () => {
+				const byokFooter = this._railSection ? byokFooterForSection(this._railSection) : undefined;
+				if (byokFooter && this._sessionTypeDelegate.runSetup) {
+					const setup = dom.append(footer, dom.$('button.combined-model-provider-connect')) as HTMLButtonElement;
+					setup.type = 'button';
+					setup.appendChild(renderIcon(Codicon.key));
+					dom.append(setup, dom.$('span')).textContent = byokFooter.label;
+					setup.title = byokFooter.title;
+					listStore.add(dom.addDisposableListener(setup, dom.EventType.CLICK, e => {
+						dom.EventHelper.stop(e, true);
+						this._overlay.clear();
+						this._sessionTypeDelegate.runSetup?.(BYOK_KEYS_SETUP_ID);
+					}));
+					return;
+				}
 				if (this._railSection !== COMBINED_MODEL_SECTION_CHATGPT && this._railSection !== COMBINED_MODEL_SECTION_CLAUDE) {
 					return;
 				}

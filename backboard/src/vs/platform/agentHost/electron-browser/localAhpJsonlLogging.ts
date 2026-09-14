@@ -4,7 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { AhpJsonlLogger } from '../common/ahpJsonlLogger.js';
-import type { AuthenticateParams, IAgentService } from '../common/agentService.js';
+import type { AuthenticateParams, IAgentCommandParams, IAgentService } from '../common/agentService.js';
+import { BYOK_KEY_ARG } from '../common/byokProviders.js';
 
 const REDACTED_VALUE = '<redacted>';
 
@@ -16,6 +17,7 @@ const REDACTED_VALUE = '<redacted>';
  */
 const REQUEST_METHODS: ReadonlySet<string> = new Set<keyof IAgentService>([
 	'authenticate',
+	'executeAgentCommand',
 	'listSessions',
 	'createSession',
 	'resolveSessionConfig',
@@ -111,14 +113,22 @@ export function wrapAgentServiceWithAhpLogging(target: IAgentService, logger: Ah
 }
 
 function redactParams(method: string, args: readonly unknown[]): readonly unknown[] {
-	if (method !== 'authenticate') {
-		return args;
+	if (method === 'authenticate') {
+		const [params, ...rest] = args;
+		if (!isAuthenticateParams(params)) {
+			return args;
+		}
+		return [{ ...params, token: REDACTED_VALUE }, ...rest];
 	}
-	const [params, ...rest] = args;
-	if (!isAuthenticateParams(params)) {
-		return args;
+	if (method === 'executeAgentCommand') {
+		// Provider-key commands carry the secret under `args.key`.
+		const [params, ...rest] = args;
+		if (!isAgentCommandParamsWithSecret(params)) {
+			return args;
+		}
+		return [{ ...params, args: { ...params.args, [BYOK_KEY_ARG]: REDACTED_VALUE } }, ...rest];
 	}
-	return [{ ...params, token: REDACTED_VALUE }, ...rest];
+	return args;
 }
 
 function isAuthenticateParams(value: unknown): value is AuthenticateParams {
@@ -128,4 +138,13 @@ function isAuthenticateParams(value: unknown): value is AuthenticateParams {
 		&& 'token' in value
 		&& typeof value.resource === 'string'
 		&& typeof value.token === 'string';
+}
+
+function isAgentCommandParamsWithSecret(value: unknown): value is IAgentCommandParams & { readonly args: Readonly<Record<string, unknown>> } {
+	return typeof value === 'object'
+		&& value !== null
+		&& 'args' in value
+		&& typeof value.args === 'object'
+		&& value.args !== null
+		&& BYOK_KEY_ARG in value.args;
 }

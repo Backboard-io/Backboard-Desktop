@@ -10,6 +10,7 @@ import { localize } from '../../../../nls.js';
 import { SessionConfigKey } from '../../common/sessionConfigKeys.js';
 import { IAgentModelInfo } from '../../common/agentService.js';
 import { createAgentModelPricingMeta } from '../../common/agentModelPricing.js';
+import { billingRouteForProvider, BYOK_KEY_PROVIDER_SUFFIX, isKeyBilledProvider, type ModelRouteSource, vendorOfProvider } from '../../common/byokProviders.js';
 import type { ResolveSessionConfigResult } from '../../common/state/protocol/commands.js';
 import type { ModelSelection } from '../../common/state/protocol/state.js';
 
@@ -33,20 +34,22 @@ const HIDDEN_MODEL_PROVIDERS = new Set(['featherless', 'elevenlabs', 'eleven-lab
 const SANDBOX_PROVIDER_ORDER = new Map<string, number>([
 	['aws-bedrock', 0],
 	['anthropic', 1],
-	['anthropic-subscription', 2],
-	['openai', 3],
-	['openai-subscription', 4],
-	['google', 5],
-	['xai', 6],
-	['x-ai', 6],
-	['cohere', 7],
-	['cerebras', 8],
-	['mistral', 9],
-	['deepseek', 10],
-	['openrouter', 11],
-	['lmstudio', 12],
-	['lm-studio', 12],
-	['ollama', 13],
+	['anthropic-key', 2],
+	['anthropic-subscription', 3],
+	['openai', 4],
+	['openai-key', 5],
+	['openai-subscription', 6],
+	['google', 7],
+	['xai', 8],
+	['x-ai', 8],
+	['cohere', 9],
+	['cerebras', 10],
+	['mistral', 11],
+	['deepseek', 12],
+	['openrouter', 13],
+	['lmstudio', 14],
+	['lm-studio', 14],
+	['ollama', 15],
 ]);
 
 const BACKBOARD_INTENSITY_CONFIG_KEY = 'intensity';
@@ -80,6 +83,8 @@ export function backboardMultitaskSystemContext(mode: string): string | undefine
 export interface BridgeModel {
 	readonly provider: string;
 	readonly name: string;
+	/** Which backend listed the model: `byok`, `subscription`, or `backboard` (cli-ts `ModelSource`). */
+	readonly source?: string;
 	readonly modelType?: string;
 	readonly model_type?: string;
 	readonly displayName?: string;
@@ -167,8 +172,11 @@ interface BackboardConfigJson {
 }
 
 export interface BackboardTurnSettings {
+	/** The runtime vendor id; a key-billed selection's `-key` suffix is already stripped. */
 	readonly provider: string;
 	readonly model: string;
+	/** Explicit billing route derived from the selected model id. */
+	readonly source: ModelRouteSource;
 	/** Effective approval mode: plan collapses to manual for gating purposes. */
 	readonly accessMode: string;
 	/** The stored mode value, including `plan` (used for tool exclusion). */
@@ -204,6 +212,10 @@ function isFileNotFoundError(error: unknown): boolean {
 
 function normalizeProviderKey(provider: string | undefined): string {
 	const value = provider?.trim().toLowerCase().replace(/[\s_]+/g, '-') ?? '';
+	if (isKeyBilledProvider(value)) {
+		// Normalize the vendor, keep the billing suffix: `open_ai-key` → `openai-key`.
+		return `${normalizeProviderKey(vendorOfProvider(value))}${BYOK_KEY_PROVIDER_SUFFIX}`;
+	}
 	if (value.includes('openrouter') || value.includes('open-router')) {
 		return 'openrouter';
 	}
@@ -232,7 +244,11 @@ function normalizeProviderKey(provider: string | undefined): string {
 }
 
 function providerLabel(provider: string | undefined): string {
-	switch (normalizeProviderKey(provider)) {
+	const normalized = normalizeProviderKey(provider);
+	if (isKeyBilledProvider(normalized)) {
+		return localize('backboard.provider.keyBilled', "{0} API Key", providerLabel(vendorOfProvider(normalized)));
+	}
+	switch (normalized) {
 		case 'aws-bedrock':
 			return 'AWS Bedrock';
 		case 'anthropic':
@@ -311,7 +327,7 @@ function toAgentModelInfo(model: BridgeModel): IAgentModelInfo {
 	const openRouterProviders = normalizeOpenRouterProviders(model.openrouter_providers);
 	const configSchema = openRouterProviders.length
 		? openRouterProviderConfigSchema(openRouterProviders)
-		: claudeSubscriptionConfigSchema(model);
+		: effortConfigSchema(model);
 	return {
 		provider: 'backboard',
 		id,
@@ -336,39 +352,61 @@ function toAgentModelInfo(model: BridgeModel): IAgentModelInfo {
 	};
 }
 
-const CLAUDE_EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+const EFFORT_LEVELS = ['off', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+type EffortLevel = typeof EFFORT_LEVELS[number];
 
-function claudeSubscriptionConfigSchema(model: BridgeModel): IAgentModelInfo['configSchema'] | undefined {
-	if (normalizeProviderKey(model.provider) !== 'anthropic-subscription') {
+/**
+ * A per-model reasoning schema for providers that publish the levels they
+ * honour: the Claude subscription route, and key-billed vendors. A key-billed
+ * model that publishes an empty list gets a single "Off" choice, because its
+ * adapter forces reasoning off for tool requests and the generic slider would
+ * promise a control the request ignores. Models that publish nothing keep the
+ * generic session slider.
+ */
+function effortConfigSchema(model: BridgeModel): IAgentModelInfo['configSchema'] | undefined {
+	const provider = normalizeProviderKey(model.provider);
+	const keyBilled = isKeyBilledProvider(provider);
+	if (provider !== 'anthropic-subscription' && !keyBilled) {
 		return undefined;
 	}
-	const levels = (model.supported_effort_levels ?? [])
-		.filter((level): level is typeof CLAUDE_EFFORT_LEVELS[number] => (CLAUDE_EFFORT_LEVELS as readonly string[]).includes(level));
+	if (model.supported_effort_levels === undefined) {
+		return undefined;
+	}
+	let levels = model.supported_effort_levels
+		.filter((level): level is EffortLevel => (EFFORT_LEVELS as readonly string[]).includes(level));
 	if (levels.length === 0) {
-		return undefined;
+		if (!keyBilled) {
+			return undefined;
+		}
+		levels = ['off'];
 	}
-	const labels: Record<typeof CLAUDE_EFFORT_LEVELS[number], string> = {
+	const labels: Record<EffortLevel, string> = {
+		off: localize('backboard.claude.effort.off', "Off"),
 		low: localize('backboard.claude.effort.low', "Low"),
 		medium: localize('backboard.claude.effort.medium', "Medium"),
 		high: localize('backboard.claude.effort.high', "High"),
 		xhigh: localize('backboard.claude.effort.xhigh', "X-High"),
 		max: localize('backboard.claude.effort.max', "Max"),
 	};
-	const descriptions: Record<typeof CLAUDE_EFFORT_LEVELS[number], string> = {
+	const descriptions: Record<EffortLevel, string> = {
+		off: localize('backboard.claude.effort.off.description', "This model does not support reasoning controls for tool-using requests."),
 		low: localize('backboard.claude.effort.low.description', "Fastest response for short, scoped work."),
 		medium: localize('backboard.claude.effort.medium.description', "Lower token use for routine work."),
 		high: localize('backboard.claude.effort.high.description', "Balanced capability and token use; Claude's default."),
 		xhigh: localize('backboard.claude.effort.xhigh.description', "Deeper reasoning for difficult coding and agentic work."),
 		max: localize('backboard.claude.effort.max.description', "Maximum reasoning depth for the most demanding tasks."),
 	};
+	const preferred: EffortLevel = keyBilled ? 'medium' : 'high';
 	return {
 		type: 'object',
 		properties: {
 			[BACKBOARD_INTENSITY_CONFIG_KEY]: {
 				type: 'string',
 				title: localize('backboard.claude.effort.title', "Reasoning effort"),
-				description: localize('backboard.claude.effort.description', "Controls Claude's adaptive reasoning effort for this model."),
-				default: levels.includes('high') ? 'high' : levels[0],
+				description: keyBilled
+					? localize('backboard.keyBilled.effort.description', "Reasoning levels this model accepts through your own API key.")
+					: localize('backboard.claude.effort.description', "Controls Claude's adaptive reasoning effort for this model."),
+				default: levels.includes(preferred) ? preferred : levels[0],
 				enum: levels,
 				enumLabels: levels.map(level => labels[level]),
 				enumDescriptions: levels.map(level => descriptions[level]),
@@ -732,7 +770,10 @@ export function createBackboardTurnSettings(
 	model: ModelSelection | undefined,
 ): BackboardTurnSettings {
 	const values = normalizeBackboardConfig(storedConfig, sessionConfig);
-	const parsedModel = parseModelSelection(model) ?? parseModelSelection({ id: DEFAULT_MODEL_ID })!;
+	const selected = parseModelSelection(model) ?? parseModelSelection({ id: DEFAULT_MODEL_ID })!;
+	// The runtime never sees the IDE-side `-key` suffix; it gets the vendor plus
+	// an explicit billing source instead.
+	const parsedModel = billingRouteForProvider(selected.provider, selected.model);
 	const rawMode = stringConfigValue(values, SessionConfigKey.Mode, BACKBOARD_ACCESS_DEFAULT);
 	const imageGeneration = booleanConfigValue(values, BACKBOARD_IMAGE_GENERATION_CONFIG_KEY, false);
 	const configuredOpenRouterProvider = stringValueFromRecord(model?.config?.[BACKBOARD_OPENROUTER_PROVIDER_CONFIG_KEY]);
@@ -747,6 +788,7 @@ export function createBackboardTurnSettings(
 	return {
 		provider: parsedModel.provider,
 		model: parsedModel.model,
+		source: parsedModel.source,
 		accessMode: rawMode === BACKBOARD_MODE_PLAN
 			? BACKBOARD_ACCESS_MANUAL
 			: rawMode === BACKBOARD_MODE_MULTITASK

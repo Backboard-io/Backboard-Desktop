@@ -20,6 +20,22 @@ describe("buildRunMessageRequest", () => {
 		});
 	});
 
+	it("carries the captured billing route and omits it when there is none", () => {
+		const context = {
+			session: new Session("sess_test"),
+			tools: [],
+			systemPrompt: "system",
+			model: { provider: "openai", model: "gpt-5.5" },
+			memory: "off" as const,
+			memoryProfile: "code" as const,
+		};
+
+		expect(
+			buildRunMessageRequest("hello", { ...context, source: "byok" }).source,
+		).toBe("byok");
+		expect("source" in buildRunMessageRequest("hello", context)).toBe(false);
+	});
+
 	it("adds image-generation fields only when the toggle is on", () => {
 		const context = {
 			session: new Session("sess_test"),

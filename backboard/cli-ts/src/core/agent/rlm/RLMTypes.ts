@@ -1,5 +1,6 @@
 import type { ModelRef } from "../../../config/defaults.ts";
 import type { AgentClient } from "../../../providers/AgentClient.ts";
+import type { ModelSource } from "../../../providers/backboard/types.ts";
 import type { UsageInfo } from "../../bus/events.ts";
 
 export type JSONValue =
@@ -16,6 +17,8 @@ export type SandboxValue = JSONValue | undefined;
 export interface RLMDeps {
 	client: Pick<AgentClient, "sendMessage">;
 	model: ModelRef;
+	/** The spawning turn's billing route, stamped on every leg. */
+	source?: ModelSource;
 	executor: REPLExecutor;
 	maxIterations?: number;
 	maxLLMCalls?: number;

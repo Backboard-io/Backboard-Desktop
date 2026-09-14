@@ -79,6 +79,7 @@ import { createTheme, setTheme } from "../ui/theme/theme.ts";
 import { errorMessage } from "../utils/errors.ts";
 import { shortId } from "../utils/id.ts";
 import { pluralize } from "../utils/string.ts";
+import { runKeysValidateCommand } from "./keysValidate.ts";
 
 const HELP = `${APP_DISPLAY_NAME} · coding agent
 
@@ -92,6 +93,7 @@ Usage:
   ${APP_COMMAND_NAME} claude-subscription enable
   ${APP_COMMAND_NAME} claude-subscription logout
   ${APP_COMMAND_NAME} claude-subscription status --json
+  ${APP_COMMAND_NAME} keys validate --provider <id>   (key on stdin; prints one JSON line)
 
 Options:
   --model <provider/model>   Model to use (e.g. openai/gpt-5.5)
@@ -177,6 +179,15 @@ async function main(): Promise<void> {
 	}
 	if (earlyFlags.logout) {
 		await runLogoutCommand();
+		return;
+	}
+	if (earlyFlags.keysValidate) {
+		// Never constructs Config: it must work before any credential exists
+		// and must never touch ~/.backboard/keys.json.
+		process.exitCode = await runKeysValidateCommand(
+			earlyFlags.provider,
+			readPromptFromStdin,
+		);
 		return;
 	}
 	if (earlyFlags.serve) {

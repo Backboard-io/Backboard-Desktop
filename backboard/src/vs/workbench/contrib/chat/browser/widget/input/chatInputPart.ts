@@ -109,6 +109,7 @@ import { IChatEditingSession, IEditSessionEntryDiff, IModifiedFileEntry, Modifie
 import { ILanguageModelChatMetadata, ILanguageModelChatMetadataAndIdentifier, ILanguageModelsService } from '../../../common/languageModels.js';
 import { ChatModelConfigurationStore } from './chatModelConfigurationStore.js';
 import { IChatModelInputState, IChatRequestModeInfo, IInputModel, logChangesToStateModel } from '../../../common/model/chatModel.js';
+import { isKeyBilledModelId } from '../../../../../../platform/agentHost/common/byokProviders.js';
 import { filterModelsForSession, findBestMatchingModel, findDefaultModel, hasModelsTargetingSession, isModelValidForSession, mergeModelsWithCache, resolveModelFromSyncState, shouldResetModelToDefault, shouldResetOnModelListChange, shouldRestoreLateArrivingModel, shouldRestorePersistedModel } from './chatModelSelectionLogic.js';
 import { getChatSessionType, LocalChatSessionUri } from '../../../common/model/chatUri.js';
 import { getLatestTurnEditedFiles, IChatResponseViewModel, isResponseVM } from '../../../common/model/chatViewModel.js';
@@ -884,9 +885,15 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			}
 			if (shouldResetOnModelListChange(modelIdentifier, models)) {
 				// Carry the previous selection across pools when targeted models arrive late.
-				const match = findBestMatchingModel(this._currentLanguageModel.get(), models);
+				const current = this._currentLanguageModel.get();
+				const match = findBestMatchingModel(current, models);
 				if (match) {
 					this.setCurrentLanguageModel(match);
+				} else if (current && isKeyBilledModelId(current.metadata.id)) {
+					// A key-billed selection whose row is gone stays selected: the
+					// agent host reports it as unavailable and refuses to send, which
+					// is more honest than silently moving the conversation onto
+					// another billing route.
 				} else {
 					this.setCurrentLanguageModelToDefault();
 				}

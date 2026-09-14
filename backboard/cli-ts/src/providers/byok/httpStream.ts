@@ -2,6 +2,7 @@ import type { ByokProviderId } from "../../core/keys/ProviderKeyTypes.ts";
 import { errorMessage } from "../../utils/errors.ts";
 import { readSseFrames, sseDataPayload } from "../backboard/sse.ts";
 import { ByokError, providerErrorMessage } from "./ByokError.ts";
+import { scrubSecret } from "./scrubSecret.ts";
 
 export interface ProviderRequest {
 	url: string;
@@ -21,12 +22,37 @@ async function send(request: ProviderRequest): Promise<Response> {
 	return fetch(request.url, options);
 }
 
+/** The credential values carried by a request, so error text can be scrubbed of them. */
+function secretsFromHeaders(headers: Record<string, string>): string[] {
+	const secrets: string[] = [];
+	for (const [name, value] of Object.entries(headers)) {
+		const lower = name.toLowerCase();
+		if (lower === "authorization") {
+			secrets.push(value.replace(/^\s*bearer\s+/i, ""));
+		} else if (lower === "x-api-key" || lower === "x-goog-api-key") {
+			secrets.push(value);
+		}
+	}
+	return secrets.filter((secret) => secret.trim().length > 0);
+}
+
+/** Removes every request credential (and anything key-shaped) from vendor text. */
+function scrubAll(text: string, secrets: readonly string[]): string {
+	let out = scrubSecret(text);
+	for (const secret of secrets) out = scrubSecret(out, secret);
+	return out;
+}
+
 async function assertOk(
 	res: Response,
 	provider: ByokProviderId,
+	headers: Record<string, string>,
 ): Promise<void> {
 	if (res.ok) return;
-	const text = await res.text().catch(() => "");
+	// Vendors echo key fragments in error bodies. Scrub before the text can
+	// reach a log, an event, or the IDE.
+	const secrets = secretsFromHeaders(headers);
+	const text = scrubAll(await res.text().catch(() => ""), secrets);
 	const body = safeJson(text);
 	const detail = providerErrorMessage(body);
 	throw new ByokError(
@@ -49,7 +75,7 @@ export async function getJson<T>(
 	const options: RequestInit = { method: "GET", headers };
 	if (signal) options.signal = signal;
 	const res = await fetch(url, options);
-	await assertOk(res, provider);
+	await assertOk(res, provider, headers);
 	return (await res.json()) as T;
 }
 
@@ -62,7 +88,7 @@ export async function* postSseJson(
 	request: ProviderRequest,
 ): AsyncIterable<Record<string, unknown>> {
 	const res = await send(request);
-	await assertOk(res, request.provider);
+	await assertOk(res, request.provider, request.headers);
 	if (!res.body) {
 		throw new ByokError(
 			`${providerLabel(request.provider)} stream response had no body`,
@@ -97,7 +123,7 @@ export async function* postSseJson(
 				)}`,
 				request.provider,
 				0,
-				frame,
+				scrubAll(frame, secretsFromHeaders(request.headers)),
 			);
 		}
 		if (payload == null) {

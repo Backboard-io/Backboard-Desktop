@@ -169,6 +169,77 @@ describe("parseControlLine", () => {
 		});
 	});
 
+	it("accepts an explicit billing source on submit and setModel", () => {
+		const submit = {
+			op: "submit" as const,
+			requestId: "r5",
+			prompt: "hello",
+			model: "openai/gpt-5.5",
+			source: "byok" as const,
+		};
+		expect(parseControlLine(JSON.stringify(submit))).toEqual({
+			ok: true,
+			control: submit,
+		});
+		const setModel = {
+			op: "setModel" as const,
+			model: "anthropic/claude-opus-5",
+			source: "backboard" as const,
+		};
+		expect(parseControlLine(JSON.stringify(setModel))).toEqual({
+			ok: true,
+			control: setModel,
+		});
+		expect(
+			parseControlLine(
+				'{"op":"submit","requestId":"r5","prompt":"hello","source":"mystery"}',
+			),
+		).toEqual({
+			ok: false,
+			error: "invalid submit op: missing source",
+			requestId: "r5",
+		});
+		expect(
+			parseControlLine('{"op":"setModel","model":"openai/gpt-5.5","source":1}'),
+		).toEqual({ ok: false, error: "invalid setModel op: missing source" });
+	});
+
+	it("parses a host credential snapshot without echoing key material", () => {
+		const control = {
+			op: "setCredentials" as const,
+			requestId: "r6",
+			revision: 3,
+			providerKeys: [
+				{ provider: "openai" as const, key: "sk-test-1234567890abcdef" },
+			],
+		};
+		expect(parseControlLine(JSON.stringify(control))).toEqual({
+			ok: true,
+			control,
+		});
+		expect(
+			parseControlLine(
+				JSON.stringify({ op: "setCredentials", revision: 4, providerKeys: [] }),
+			),
+		).toEqual({
+			ok: true,
+			control: { op: "setCredentials", revision: 4, providerKeys: [] },
+		});
+
+		const rejected = [
+			'{"op":"setCredentials","requestId":"r7","providerKeys":[]}',
+			'{"op":"setCredentials","requestId":"r7","revision":-1,"providerKeys":[]}',
+			'{"op":"setCredentials","requestId":"r7","revision":1,"providerKeys":[{"provider":"cohere","key":"sk-secret-value-9876543210"}]}',
+			'{"op":"setCredentials","requestId":"r7","revision":1,"providerKeys":[{"provider":"openai","key":""}]}',
+			'{"op":"setCredentials","requestId":"r7","revision":1,"providerKeys":"sk-secret-value-9876543210"}',
+		];
+		for (const line of rejected) {
+			const parsed = parseControlLine(line);
+			expect(parsed).toMatchObject({ ok: false, requestId: "r7" });
+			expect(JSON.stringify(parsed)).not.toContain("secret-value");
+		}
+	});
+
 	it("requires request ids for list operations", () => {
 		expect(parseControlLine('{"op":"listModels"}')).toEqual({
 			ok: false,

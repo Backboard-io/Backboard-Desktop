@@ -14,7 +14,7 @@ import { GalleryMcpServerStatus, IGalleryMcpServer } from '../../../../../../../
 import { McpServerType } from '../../../../../../../platform/mcp/common/mcpPlatformTypes.js';
 import { StateType } from '../../../../../../../platform/update/common/update.js';
 import { buildModelPickerItems, getControlModelsForEntitlement, getModelPickerAccessibilityProvider } from '../../../../browser/widget/input/chatModelPicker.js';
-import { buildCombinedModelSections, COMBINED_MODEL_SECTION_ALL, COMBINED_MODEL_SECTION_CHATGPT, COMBINED_MODEL_SECTION_CLAUDE, COMBINED_MODEL_SECTION_RECOMMENDED, formatModelLabel, formatModelProviderDetail, isChatGptSubscriptionConnected, isClaudeSubscriptionConnected, modelsForCombinedModelSection, providerIconKeyForCombinedModelSection } from '../../../../browser/widget/input/combinedModelProviderPickerActionItem.js';
+import { buildCombinedModelSections, byokFooterForSection, COMBINED_MODEL_SECTION_ALL, COMBINED_MODEL_SECTION_CHATGPT, COMBINED_MODEL_SECTION_CLAUDE, COMBINED_MODEL_SECTION_RECOMMENDED, formatModelLabel, formatModelProviderDetail, isChatGptSubscriptionConnected, isClaudeSubscriptionConnected, isKeyBilledModel, modelsForCombinedModelSection, providerIconKeyForCombinedModelSection } from '../../../../browser/widget/input/combinedModelProviderPickerActionItem.js';
 import { buildMcpMarketplaceItems, buildSkillsLibraryItems, createMcpMarketplaceItemsFromCatalog, getHiddenMcpMarketplaceCatalogEntries, IMcpMarketplaceCatalogEntry, mcpItemMatchesInstalledServer, McpMarketplaceModalItem, resolveMcpMarketplaceItems, parseSkillsShHtml, splitSkillsShId } from '../../../../browser/widget/input/skillsLibrary.js';
 import { IModelPickerSetupCandidate } from '../../../../browser/widget/input/modelPickerActionItem.js';
 import { filterModelsForSession } from '../../../../browser/widget/input/chatModelSelectionLogic.js';
@@ -84,6 +84,49 @@ suite('combined model provider sections', () => {
 	test('removes redundant Anthropic model prefixes', () => {
 		assert.strictEqual(formatModelLabel('anthropic.claude-opus-5'), 'Claude Opus 5');
 		assert.strictEqual(formatModelLabel('us.anthropic.claude-sonnet-4-6'), 'Claude Sonnet 4.6');
+	});
+
+	test('lists key-billed models in their own section and gates them on a connected key', () => {
+		const withMetadata = (id: string, name: string, detail: string, auth?: ILanguageModelChatMetadata['auth']) => {
+			const base = createModel(id, name, 'agent-host-backboard');
+			return { ...base, metadata: { ...base.metadata, detail, auth } };
+		};
+		const connected = withMetadata('openai-key/gpt-5.5', 'GPT-5.5', 'OpenAI API Key', { providerLabel: 'OpenAI API Key', accountLabel: 'Connected' });
+		// The key is connected but its catalog lacks this model.
+		const unavailable = withMetadata('openai-key/gpt-5-mini', 'GPT-5 Mini', 'OpenAI API Key', { providerLabel: 'OpenAI API Key', statusLabel: 'Not available with this key' });
+		const keyless = withMetadata('anthropic-key/claude-opus-5', 'Claude Opus 5', 'Anthropic API Key', { providerLabel: 'Anthropic API Key' });
+		const backboard = withMetadata('openai/gpt-5.5', 'GPT-5.5', 'OpenAI');
+		const models = [connected, unavailable, keyless, backboard];
+
+		const sections = buildCombinedModelSections(models);
+		assert.deepStrictEqual({
+			sections: sections.filter(section => section.kind === 'provider').map(section => [section.id, section.label, section.modelCount]),
+			keyBilled: models.map(isKeyBilledModel),
+			// A key-billed row is usable only while its key is connected; the
+			// disconnected one stays reachable from its own section.
+			searchResults: modelsForCombinedModelSection(models, COMBINED_MODEL_SECTION_ALL, true).map(model => model.metadata.id),
+			ownSection: modelsForCombinedModelSection(models, 'provider:anthropic-key').map(model => model.metadata.id),
+			details: [formatModelProviderDetail(connected), formatModelProviderDetail(unavailable), formatModelProviderDetail(keyless), formatModelProviderDetail(backboard)],
+			icons: [providerIconKeyForCombinedModelSection('provider:openai-key'), providerIconKeyForCombinedModelSection('provider:anthropic-key')],
+			footers: [
+				byokFooterForSection('provider:openai')?.label,
+				byokFooterForSection('provider:openai-key')?.label,
+				byokFooterForSection('provider:google'),
+				byokFooterForSection(COMBINED_MODEL_SECTION_ALL),
+			],
+		}, {
+			sections: [
+				['provider:anthropic-key', 'Anthropic API Key', 1],
+				['provider:openai', 'OpenAI', 1],
+				['provider:openai-key', 'OpenAI API Key', 2],
+			],
+			keyBilled: [true, true, true, false],
+			searchResults: ['openai-key/gpt-5.5', 'openai/gpt-5.5'],
+			ownSection: ['anthropic-key/claude-opus-5'],
+			details: ['Billed to your OpenAI API key', 'Not available with this key', 'API key required', 'OpenAI'],
+			icons: ['open-ai', 'anthropic'],
+			footers: ['Use your own OpenAI key…', 'Manage API keys…', undefined, undefined],
+		});
 	});
 
 	test('uses the API-supplied serving-provider detail for OpenRouter models', () => {

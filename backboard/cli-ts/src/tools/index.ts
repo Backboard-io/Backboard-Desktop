@@ -1,5 +1,3 @@
-import { AgentSpawnBatchTool } from "./AgentSpawnBatchTool.tsx";
-import { AgentCancelTool } from "./AgentCancelTool.tsx";
 import {
 	createRuntimeThinkingResolver,
 	resolveRuntimeThinking,
@@ -12,6 +10,8 @@ import { ClientProxyTool } from "../core/tools/ClientToolBridge.ts";
 import type { Tool } from "../core/tools/Tool.ts";
 import { ToolRegistry } from "../core/tools/ToolRegistry.ts";
 import { subagent as subagentPrompt } from "../prompts/system/subagent.tsx";
+import { AgentCancelTool } from "./AgentCancelTool.tsx";
+import { AgentSpawnBatchTool } from "./AgentSpawnBatchTool.tsx";
 import { AgentSpawnTool } from "./AgentSpawnTool.tsx";
 import { AgentTool } from "./AgentTool.tsx";
 import {
@@ -63,7 +63,9 @@ function createBaseTools(): Tool[] {
 export function createDefaultTools(deps?: DefaultToolDeps): Tool[] {
 	const base = createBaseTools();
 	if (!deps) return base;
-	const agentTasks = deps.agentTaskManager ?? new AgentTaskManager({ workerWorkspaces: deps.workerWorkspaceManager });
+	const agentTasks =
+		deps.agentTaskManager ??
+		new AgentTaskManager({ workerWorkspaces: deps.workerWorkspaceManager });
 	const agent = buildAgentTool({ ...deps, agentTaskManager: agentTasks }, base);
 	const tools: Tool[] = [
 		...base,
@@ -85,7 +87,10 @@ export function createDefaultTools(deps?: DefaultToolDeps): Tool[] {
 function buildAgentTool(deps: DefaultToolDeps, base: Tool[]): AgentTool {
 	const runner = new SubAgentRunner({
 		client: deps.client,
-		getModel: () => deps.config.model,
+		getRoute: () => ({
+			...deps.config.model,
+			source: deps.config.modelSource,
+		}),
 		getOpenRouterProvider: () => deps.config.selectedOpenRouterProvider,
 		memory: deps.config.memory,
 		memoryProfile: deps.config.memoryProfile,
@@ -123,6 +128,7 @@ function buildAgentTool(deps: DefaultToolDeps, base: Tool[]): AgentTool {
 			new RLMLoop({
 				client: deps.client,
 				model: deps.config.model,
+				source: deps.config.modelSource,
 				executor: new LocalReplExecutor(),
 			}),
 	});

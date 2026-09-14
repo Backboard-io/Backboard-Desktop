@@ -11,6 +11,7 @@ import type {
 	RunMessageOptions,
 } from "../../providers/AgentClient.ts";
 import { ensureAssistant } from "../../providers/backboard/assistants.ts";
+import type { ModelSource } from "../../providers/backboard/types.ts";
 import type { EventBus } from "../bus/EventBus.ts";
 import type { HookController } from "../hooks/index.ts";
 import type { Session } from "../session/Session.ts";
@@ -45,6 +46,8 @@ export interface CreateLoopOptions {
 	refreshSystemPrompt?: () => string;
 	assistantId?: string;
 	model: ModelRef;
+	/** The billing route captured for this loop; see AgentLoopDeps.source. */
+	source?: ModelSource;
 	memory: MemoryMode;
 	memoryProfile: MemoryProfile;
 	workspaceId?: string;
@@ -111,6 +114,7 @@ export class AgentLoopFactory {
 			refreshSystemPrompt: options.refreshSystemPrompt,
 			assistantId: options.assistantId,
 			model: options.model,
+			source: options.source,
 			memory: options.memory,
 			memoryProfile: options.memoryProfile,
 			workspaceId: options.workspaceId,
