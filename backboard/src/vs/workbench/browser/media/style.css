@@ -393,7 +393,16 @@ body {
 	pointer-events: none;
 }
 
-/* Keyboard Focus Indication Styles */
+/* Shared across Simple, Editor and Advanced: focus remains functional without
+ * drawing rings, including component-specific and synthetic focus styles. */
+.monaco-workbench :is(:focus, :focus-visible, .synthetic-focus, .focused),
+.monaco-workbench :is(:focus, :focus-visible, .synthetic-focus, .focused)::before,
+.monaco-workbench :is(:focus, :focus-visible, .synthetic-focus, .focused)::after {
+	outline: none !important;
+	box-shadow: none !important;
+}
+
+/* Focused controls retain their normal opacity. */
 
 .monaco-workbench [tabindex="0"]:focus,
 .monaco-workbench [tabindex="-1"]:focus,
@@ -405,10 +414,6 @@ body {
 .monaco-workbench textarea:focus,
 .monaco-workbench input[type="search"]:focus,
 .monaco-workbench input[type="checkbox"]:focus {
-	outline-width: 1px;
-	outline-style: solid;
-	outline-offset: -1px;
-	outline-color: var(--vscode-focusBorder);
 	opacity: 1;
 }
 

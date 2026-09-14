@@ -66,19 +66,7 @@
 	container-type: inline-size;
 }
 
-/* Advanced uses the same compact chrome as the Editor workbench, but its tool
- * surface is one continuous canvas rather than a stack of sidebar, title-bar,
- * chat and composer fills. Let borders and active states carry the hierarchy
- * so dark themes do not turn the right panel into bands of black and grey. */
 .optimus-window .sessions-right-workbench-shell {
-	--rwb-bg: var(--sessions-main-region-background, var(--vscode-agents-background, var(--vscode-editor-background)));
-	--rwb-bg-muted: var(--rwb-bg);
-	--rwb-chrome: var(--rwb-bg);
-	--rwb-chrome-soft: var(--rwb-bg);
-	--session-view-background: var(--rwb-bg);
-	--sessions-codex-surface-background: var(--rwb-bg);
-	--t3-background: var(--rwb-bg);
-	--t3-composer-surface: var(--rwb-bg);
 	border-left: 1px solid var(--vscode-sideBar-border, var(--vscode-panel-border, transparent));
 }
 

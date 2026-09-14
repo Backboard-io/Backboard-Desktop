@@ -12,15 +12,24 @@ import {
 	ONBOARDING_EXPERIENCE_OPTIONS,
 	OnboardingStepId,
 	ONBOARDING_STEPS,
+	shouldOfferOnboardingTour,
 } from '../../common/onboardingTypes.js';
 
 suite('Backboard onboarding types', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
 
+	test('upgrades do not offer tours merely because their tour flag is missing', () => {
+		assert.deepStrictEqual([
+			shouldOfferOnboardingTour({ completed: true }),
+			shouldOfferOnboardingTour({ completed: true, allowAutomaticTours: false }),
+			shouldOfferOnboardingTour({ completed: false, allowAutomaticTours: true }),
+			shouldOfferOnboardingTour({ completed: true, allowAutomaticTours: true }),
+		], [false, false, false, true]);
+	});
+
 	test('steps are ordered to match the Backboard onboarding flow', () => {
 		assert.deepStrictEqual([...ONBOARDING_STEPS], [
 			OnboardingStepId.Welcome,
-			OnboardingStepId.ConnectAI,
 			OnboardingStepId.Theme,
 		]);
 	});

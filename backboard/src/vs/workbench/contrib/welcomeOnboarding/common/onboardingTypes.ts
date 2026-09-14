@@ -90,7 +90,7 @@ export function getOnboardingStepSubtitle(stepId: OnboardingStepId): string {
 		case OnboardingStepId.Experience:
 			return localize('onboarding.backboard.step.experience.subtitle', "Choose a view built around how you like to work.\nYou can change this later as your project grows.");
 		case OnboardingStepId.Theme:
-			return localize('onboarding.backboard.step.theme.subtitle', "Start with a look you like. You can change it anytime.");
+			return localize('onboarding.backboard.step.theme.subtitle', "Make it yours.");
 		case OnboardingStepId.ImportSettings:
 			return localize('onboarding.backboard.step.importSettings.subtitle', "One click. Skip it if you want a fresh start.");
 		case OnboardingStepId.SignIn:
@@ -105,7 +105,6 @@ export function getOnboardingStepSubtitle(stepId: OnboardingStepId): string {
  */
 export const ONBOARDING_STEPS: readonly OnboardingStepId[] = [
 	OnboardingStepId.Welcome,
-	OnboardingStepId.ConnectAI,
 	OnboardingStepId.Theme,
 ];
 
@@ -149,8 +148,15 @@ export type OnboardingDismissReason = 'complete' | 'skip';
 export interface IBackboardOnboardingState {
 	readonly version: 1;
 	readonly completed: boolean;
+	/** Only new onboarding flows may offer automatic tours; absent in upgraded profiles. */
+	readonly allowAutomaticTours?: boolean;
 	readonly dismissedReason: OnboardingDismissReason;
 	readonly experience: OnboardingExperience;
 	readonly themeId: string;
 	readonly apiKeyImported: boolean;
+}
+
+/** Missing tour history on an upgraded profile is not a request for a tour. */
+export function shouldOfferOnboardingTour(state: Pick<IBackboardOnboardingState, 'completed' | 'allowAutomaticTours'>): boolean {
+	return state.completed === true && state.allowAutomaticTours === true;
 }

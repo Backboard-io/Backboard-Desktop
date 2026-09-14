@@ -2459,7 +2459,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			}
 		}
 
-		this.syncBackboardT3TurnTimeline(element, contentForThisTurn, templateData);
+		this.syncBackboardBackboardTurnTimeline(element, contentForThisTurn, templateData);
 	}
 
 	/**
@@ -2470,7 +2470,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 	 * Completed collapsed work releases its native renderers; expanding the fold
 	 * requests a targeted rerender that reconstructs only that response.
 	 */
-	private syncBackboardT3TurnTimeline(
+	private syncBackboardBackboardTurnTimeline(
 		element: IChatResponseViewModel,
 		contentForThisTurn: ReadonlyArray<IChatRendererContent>,
 		templateData: IChatListItemTemplate,
@@ -2480,7 +2480,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		}
 
 		const value = templateData.value;
-		let turn = value.querySelector<HTMLElement>(':scope > .chat-t3-turn-work');
+		let turn = value.querySelector<HTMLElement>(':scope > .chat-backboard-turn-work');
 		const renderedParts = templateData.renderedParts ?? [];
 		const complete = element.isComplete || element.isCanceled;
 		const hasTurnWork = hasBackboardTurnWorkContent(contentForThisTurn.map(getBackboardTurnContentRole), complete);
@@ -2490,7 +2490,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			this.backboardTurnDurationTimers.get(element.id)?.dispose();
 			this.backboardTurnDurationTimers.delete(element.id);
 			if (turn) {
-				const body = turn.querySelector<HTMLElement>(':scope > .chat-t3-turn-work-body');
+				const body = turn.querySelector<HTMLElement>(':scope > .chat-backboard-turn-work-body');
 				if (body) {
 					for (const child of Array.from(body.children)) {
 						value.insertBefore(child, turn);
@@ -2505,19 +2505,19 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		let foldLabel: HTMLElement;
 		let body: HTMLElement;
 		if (!turn) {
-			turn = $('.chat-t3-turn-work.chat-t3-turn-work-expanded');
-			foldButton = $('button.chat-t3-turn-fold', { type: 'button' }) as HTMLButtonElement;
-			foldLabel = $('span.chat-t3-turn-fold-label');
-			const icon = $('span.codicon.codicon-history.chat-t3-turn-fold-icon', { 'aria-hidden': 'true' });
-			const chevron = $('span.codicon.codicon-chevron-right.chat-t3-turn-fold-chevron', { 'aria-hidden': 'true' });
+			turn = $('.chat-backboard-turn-work.chat-backboard-turn-work-expanded');
+			foldButton = $('button.chat-backboard-turn-fold', { type: 'button' }) as HTMLButtonElement;
+			foldLabel = $('span.chat-backboard-turn-fold-label');
+			const icon = $('span.codicon.codicon-history.chat-backboard-turn-fold-icon', { 'aria-hidden': 'true' });
+			const chevron = $('span.codicon.codicon-chevron-right.chat-backboard-turn-fold-chevron', { 'aria-hidden': 'true' });
 			foldButton.append(icon, foldLabel, chevron);
-			body = $('.chat-t3-turn-work-body');
+			body = $('.chat-backboard-turn-work-body');
 			turn.append(foldButton, body);
 			value.insertBefore(turn, value.firstElementChild);
 		} else {
-			foldButton = turn.querySelector<HTMLButtonElement>(':scope > .chat-t3-turn-fold')!;
-			foldLabel = foldButton.querySelector<HTMLElement>('.chat-t3-turn-fold-label')!;
-			body = turn.querySelector<HTMLElement>(':scope > .chat-t3-turn-work-body')!;
+			foldButton = turn.querySelector<HTMLButtonElement>(':scope > .chat-backboard-turn-fold')!;
+			foldLabel = foldButton.querySelector<HTMLElement>('.chat-backboard-turn-fold-label')!;
+			body = turn.querySelector<HTMLElement>(':scope > .chat-backboard-turn-work-body')!;
 		}
 
 		const renderedNodeRoles: BackboardTurnRenderedNodeRole[] = [];
@@ -2597,7 +2597,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 
 
 		turn.dataset.turnState = complete ? 'complete' : 'active';
-		turn.classList.toggle('chat-t3-turn-work-active', !complete);
+		turn.classList.toggle('chat-backboard-turn-work-active', !complete);
 
 		const storedExpansion = this.backboardTurnExpansionByResponseId.get(element.id);
 		const expanded = resolveBackboardTurnExpandedState(
@@ -2621,7 +2621,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		}
 
 		const applyExpandedState = (expanded: boolean) => {
-			turn!.classList.toggle('chat-t3-turn-work-expanded', expanded);
+			turn!.classList.toggle('chat-backboard-turn-work-expanded', expanded);
 			body.hidden = !expanded;
 			body.ariaHidden = String(!expanded);
 			foldButton.ariaExpanded = String(expanded);
@@ -2658,7 +2658,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			suspendCollapsedWork();
 		}
 		foldButton.onclick = () => {
-			const expanded = !turn!.classList.contains('chat-t3-turn-work-expanded');
+			const expanded = !turn!.classList.contains('chat-backboard-turn-work-expanded');
 			if (isChatPerfLoggingEnabled(this.logService)) {
 				logChatPerf(this.logService, expanded ? 'collapsed.hydrate' : 'collapsed.collapse', {
 					session: element.sessionResource.toString(),

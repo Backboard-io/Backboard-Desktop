@@ -248,6 +248,7 @@ export class SessionsView extends ViewPane {
 		const headerLabel = this.headerLabel = DOM.append(headerRow, $('.agent-sessions-header-label'));
 
 		const headerActions = this.headerActions = DOM.append(headerRow, $('.agent-sessions-header-actions'));
+		let findWidgetHost = headerRow;
 
 		// On phone, the desktop header content (label + new button + filter/find toolbar)
 		// is hidden in favor of the mobile filter chip row + the (+) button in the
@@ -256,6 +257,7 @@ export class SessionsView extends ViewPane {
 		if (!phoneLayout && simpleMode) {
 			const primaryActions = this.primaryActions = DOM.append(pinnedHeader, $('.agent-sessions-primary-actions.agent-sessions-simple-actions'));
 			const searchRow = DOM.append(primaryActions, $('.agent-sessions-simple-search-row'));
+			findWidgetHost = searchRow;
 
 			this.searchButton = DOM.append(searchRow, $('button.agent-sessions-sidebar-action.agent-sessions-search-button')) as HTMLButtonElement;
 			this.searchButton.type = 'button';
@@ -358,8 +360,12 @@ export class SessionsView extends ViewPane {
 		}
 
 		// Container for the tree's find widget (toggled by the toolbar's Find action)
-		const findWidgetContainer = this.findWidgetContainer = DOM.append(headerRow, $('.agent-sessions-find-widget-container'));
+		const findWidgetContainer = this.findWidgetContainer = DOM.append(findWidgetHost, $('.agent-sessions-find-widget-container'));
 		findWidgetContainer.style.display = 'none';
+		if (simpleMode) {
+			// Replace Search in place, before the folder/thread-card toggle.
+			this.searchButton?.after(findWidgetContainer);
+		}
 
 		// Reserve DOM slot for mobile filter chips (phone layout only).
 		// The actual widget is created after sessionsControl is available.
@@ -420,7 +426,7 @@ export class SessionsView extends ViewPane {
 		}, DOM.getWindow(listContainer)));
 		this._register(listResizeObserver.observe(listContainer));
 
-		// Toggle header label/actions visibility when find widget opens/closes
+		// Swap the Search action and inline input when find opens/closes
 		this._register(sessionsControl.onDidChangeFindOpenState(open => {
 			this.isFindWidgetOpen = open;
 			findWidgetContainer.style.display = open ? '' : 'none';
@@ -431,6 +437,7 @@ export class SessionsView extends ViewPane {
 		this._register(DOM.addDisposableListener(findWidgetContainer, 'keydown', (e: KeyboardEvent) => {
 			if (e.key === 'Escape') {
 				sessionsControl.closeFind();
+				this.searchButton?.focus();
 				e.stopPropagation();
 			}
 		}));
@@ -1094,21 +1101,12 @@ export class SessionsView extends ViewPane {
 			return;
 		}
 
-		if (this.isFindWidgetOpen) {
-			this.headerRow.classList.remove('agent-sessions-header-hidden');
-			this.headerLabel.style.display = 'none';
-			this.headerActions.style.display = 'none';
-			// The search row lives inside the primary actions block, so hiding the
-			// block hides New chat / Search / Marketplace together while find is open.
-			if (this.primaryActions) {
-				this.primaryActions.style.display = 'none';
-			}
-			return;
-		}
-
 		this.headerRow.classList.add('agent-sessions-header-hidden');
 		this.headerLabel.style.display = 'none';
 		this.headerActions.style.display = 'none';
+		if (this.searchButton) {
+			this.searchButton.style.display = this.isFindWidgetOpen ? 'none' : '';
+		}
 		if (this.primaryActions) {
 			this.primaryActions.style.display = '';
 		}

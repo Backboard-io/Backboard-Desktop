@@ -25,7 +25,7 @@ import { ACTIVITY_BAR_BADGE_BACKGROUND, ACTIVITY_BAR_BADGE_FOREGROUND, SIDE_BAR_
 
 export const agentsBackground = registerColor(
 	'agents.background',
-	{ dark: editorBackground, light: SIDE_BAR_BACKGROUND, hcDark: editorBackground, hcLight: editorBackground },
+	editorBackground,
 	localize('agents.background', 'Background color of the agent sessions window shell and gradient base.')
 );
 
@@ -35,7 +35,7 @@ export const agentsBackground = registerColor(
 
 export const agentsPanelBackground = registerColor(
 	'agentsPanel.background',
-	{ dark: SIDE_BAR_BACKGROUND, light: editorBackground, hcDark: SIDE_BAR_BACKGROUND, hcLight: SIDE_BAR_BACKGROUND },
+	editorBackground,
 	localize('agentsPanel.background', 'Background color of the card panels (chat, files, terminal) in the agent sessions window.')
 );
 

@@ -155,26 +155,26 @@ export function createThinkingIcon(icon: ThemeIcon): HTMLElement {
  */
 type ToolActivitySubkind = 'read' | 'search' | 'edit' | 'terminal' | 'other';
 
-type T3WorkEntryIconName = 'bot' | 'eye' | 'globe' | 'hammer' | 'square-pen' | 'terminal' | 'wrench';
+type BackboardWorkEntryIconName = 'bot' | 'eye' | 'globe' | 'hammer' | 'square-pen' | 'terminal' | 'wrench';
 
-interface IT3WorkEntryPresentation {
+interface IBackboardWorkEntryPresentation {
 	readonly heading: string;
 	readonly preview?: string;
 	readonly details?: string;
 	readonly kind?: 'plan';
-	readonly planItems?: readonly IT3PlanItem[];
-	readonly icon: T3WorkEntryIconName;
+	readonly planItems?: readonly IBackboardPlanItem[];
+	readonly icon: BackboardWorkEntryIconName;
 	readonly failed: boolean;
 }
 
-type T3PlanItemStatus = 'completed' | 'in-progress' | 'pending';
+type BackboardPlanItemStatus = 'completed' | 'in-progress' | 'pending';
 
-interface IT3PlanItem {
+interface IBackboardPlanItem {
 	readonly title: string;
-	readonly status: T3PlanItemStatus;
+	readonly status: BackboardPlanItemStatus;
 }
 
-function normalizeT3PlanStatus(value: unknown): T3PlanItemStatus | undefined {
+function normalizeBackboardPlanStatus(value: unknown): BackboardPlanItemStatus | undefined {
 	if (value === 'completed') {
 		return 'completed';
 	}
@@ -187,7 +187,7 @@ function normalizeT3PlanStatus(value: unknown): T3PlanItemStatus | undefined {
 	return undefined;
 }
 
-function t3PlanItemsFromValue(value: unknown): IT3PlanItem[] {
+function backboardPlanItemsFromValue(value: unknown): IBackboardPlanItem[] {
 	const candidate = Array.isArray(value)
 		? value
 		: value && typeof value === 'object'
@@ -202,19 +202,19 @@ function t3PlanItemsFromValue(value: unknown): IT3PlanItem[] {
 		}
 		const record = item as Record<string, unknown>;
 		const title = typeof record.title === 'string' ? record.title.trim() : typeof record.content === 'string' ? record.content.trim() : '';
-		const status = normalizeT3PlanStatus(record.status);
+		const status = normalizeBackboardPlanStatus(record.status);
 		return title && status ? [{ title, status }] : [];
 	});
 }
 
-function t3PlanItemsFromText(value: string | undefined): IT3PlanItem[] {
+function backboardPlanItemsFromText(value: string | undefined): IBackboardPlanItem[] {
 	if (!value) {
 		return [];
 	}
-	const result: IT3PlanItem[] = [];
+	const result: IBackboardPlanItem[] = [];
 	const pattern = /\[(completed|in_progress|in-progress|pending|not-started)\]\s*(.*?)(?=,\s*\[(?:completed|in_progress|in-progress|pending|not-started)\]\s*|$)/gi;
 	for (const match of value.matchAll(pattern)) {
-		const status = normalizeT3PlanStatus(match[1].toLocaleLowerCase());
+		const status = normalizeBackboardPlanStatus(match[1].toLocaleLowerCase());
 		const title = match[2].trim();
 		if (status && title) {
 			result.push({ title, status });
@@ -223,9 +223,9 @@ function t3PlanItemsFromText(value: string | undefined): IT3PlanItem[] {
 	return result;
 }
 
-function t3PlanItemsFromTexts(values: readonly (string | undefined)[]): IT3PlanItem[] {
+function backboardPlanItemsFromTexts(values: readonly (string | undefined)[]): IBackboardPlanItem[] {
 	for (const value of values) {
-		const items = t3PlanItemsFromText(value);
+		const items = backboardPlanItemsFromText(value);
 		if (items.length) {
 			return items;
 		}
@@ -312,7 +312,7 @@ function toolInvocationResultPath(invocation: IChatToolInvocation | IChatToolInv
 	return segments.length > 1 ? segments.slice(-2).join('/') : rawPath;
 }
 
-function t3ToolInvocationFailed(invocation: IChatToolInvocation | IChatToolInvocationSerialized): boolean {
+function backboardToolInvocationFailed(invocation: IChatToolInvocation | IChatToolInvocationSerialized): boolean {
 	const terminalData = invocation.toolSpecificData?.kind === 'terminal'
 		? migrateLegacyTerminalToolSpecificData(invocation.toolSpecificData)
 		: undefined;
@@ -323,12 +323,12 @@ function t3ToolInvocationFailed(invocation: IChatToolInvocation | IChatToolInvoc
 		&& invocation.state.get().type === IChatToolInvocation.StateKind.Cancelled;
 }
 
-function t3WorkEntryPresentation(
+function backboardWorkEntryPresentation(
 	metadata: ChatThinkingItemMetadata | undefined,
 	toolInvocationId: string | undefined,
 	fallbackLabel: string | undefined,
 	nativeText: string | undefined,
-): IT3WorkEntryPresentation {
+): IBackboardWorkEntryPresentation {
 	if (metadata?.kind === 'externalEdit') {
 		const verb = metadata.editKind === 'create' ? 'Created' : metadata.editKind === 'delete' ? 'Deleted' : metadata.editKind === 'rename' ? 'Renamed' : 'Edited';
 		return {
@@ -380,13 +380,13 @@ function t3WorkEntryPresentation(
 	const isSubagent = toolData?.kind === 'subagent' || semanticText.includes('agent') || semanticText.includes('subtask');
 	const isTodo = toolData?.kind === 'todoList' || semanticText.includes('todo') || semanticText.includes('plan');
 	const isMcp = invocation?.source?.type === 'mcp';
-	const structuredPlanItems = isTodo ? t3PlanItemsFromValue(toolData?.kind === 'todoList' ? toolData.todoList : parameters) : [];
+	const structuredPlanItems = isTodo ? backboardPlanItemsFromValue(toolData?.kind === 'todoList' ? toolData.todoList : parameters) : [];
 	const planItems = structuredPlanItems.length
 		? structuredPlanItems
-		: isTodo ? t3PlanItemsFromTexts([completedLabel, nativeText, fallbackLabel]) : [];
+		: isTodo ? backboardPlanItemsFromTexts([completedLabel, nativeText, fallbackLabel]) : [];
 
 	let heading = label;
-	let icon: T3WorkEntryIconName = isMcp ? 'wrench' : 'hammer';
+	let icon: BackboardWorkEntryIconName = isMcp ? 'wrench' : 'hammer';
 	let preview = compactWorkPreview(filePath ?? query ?? (originLabel !== label ? originLabel : undefined) ?? (completedLabel !== label ? completedLabel : undefined));
 	if (isTerminal) {
 		heading = 'Terminal';
@@ -471,7 +471,7 @@ function t3WorkEntryPresentation(
 		}
 	}
 
-	const failed = invocation ? t3ToolInvocationFailed(invocation) : false;
+	const failed = invocation ? backboardToolInvocationFailed(invocation) : false;
 	return {
 		heading,
 		preview,
@@ -483,7 +483,7 @@ function t3WorkEntryPresentation(
 	};
 }
 
-function createT3WorkEntryIcon(document: Document, icon: T3WorkEntryIconName | 'check' | 'chevron' | 'x'): HTMLElement {
+function createBackboardWorkEntryIcon(document: Document, icon: BackboardWorkEntryIconName | 'check' | 'chevron' | 'x'): HTMLElement {
 	const codicon = icon === 'bot' ? Codicon.robot
 		: icon === 'eye' ? Codicon.eye
 			: icon === 'globe' ? Codicon.globe
@@ -2129,7 +2129,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		const nativeText = nativeContent.textContent?.trim();
 		const invocation = metadata && (metadata.kind === 'toolInvocation' || metadata.kind === 'toolInvocationSerialized') ? metadata : undefined;
 		const hasRichNativeCard = invocation?.toolSpecificData?.kind === 'coreTool';
-		const presentation = t3WorkEntryPresentation(metadata, toolCallId, fallbackLabel, nativeText);
+		const presentation = backboardWorkEntryPresentation(metadata, toolCallId, fallbackLabel, nativeText);
 		const isPlanRow = presentation.kind === 'plan';
 		itemWrapper.classList.toggle('chat-thinking-cursor-plan-row', isPlanRow);
 		const isLiveInvocation = metadata?.kind === 'toolInvocation' && !IChatToolInvocation.isComplete(metadata);
@@ -2151,7 +2151,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		const summary = $('.chat-thinking-work-row-summary');
 		itemWrapper.querySelector<HTMLElement>(':scope > .chat-thinking-icon')?.remove();
 		const icon = $('span.chat-thinking-work-row-icon');
-		icon.appendChild(createT3WorkEntryIcon(itemWrapper.ownerDocument, presentation.icon));
+		icon.appendChild(createBackboardWorkEntryIcon(itemWrapper.ownerDocument, presentation.icon));
 		summary.appendChild(icon);
 		const label = $('.chat-thinking-work-row-label');
 		const heading = $('span.chat-thinking-work-row-heading');
@@ -2193,7 +2193,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		const hasDisclosure = !!details || hasNativeDisclosure;
 		const disclosure = $('span.chat-thinking-work-row-disclosure', { 'aria-hidden': 'true' });
 		if (hasDisclosure) {
-			disclosure.appendChild(createT3WorkEntryIcon(itemWrapper.ownerDocument, 'chevron'));
+			disclosure.appendChild(createBackboardWorkEntryIcon(itemWrapper.ownerDocument, 'chevron'));
 		}
 		const status = $('span.chat-thinking-work-row-status', { 'aria-hidden': 'true' });
 		summary.append(label, disclosure, status);
@@ -2247,7 +2247,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			statusElement.classList.add('chat-thinking-work-row-status-working');
 		} else if (status === 'cancelled') {
 			statusElement.classList.add('chat-thinking-work-row-status-cancelled');
-			statusElement.appendChild(createT3WorkEntryIcon(statusElement.ownerDocument, 'x'));
+			statusElement.appendChild(createBackboardWorkEntryIcon(statusElement.ownerDocument, 'x'));
 		} else {
 			statusElement.classList.add('chat-thinking-work-row-status-complete');
 		}
@@ -2347,7 +2347,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		const isOpenBrowserPage = invocation?.toolId.replace(/[_-]/g, '').toLowerCase().endsWith('openbrowserpage')
 			|| /^OpenBrowserPage\b/i.test(invocationLabel ?? '');
 		const nativeIO = itemWrapper.querySelector('.chat-tool-io');
-		const isPlainActivity = this.useCursorTranscriptPresentation && invocation && !t3ToolInvocationFailed(invocation) && isOpenBrowserPage;
+		const isPlainActivity = this.useCursorTranscriptPresentation && invocation && !backboardToolInvocationFailed(invocation) && isOpenBrowserPage;
 		if (isPlainActivity) {
 			const label = invocationLabel ?? invocation.toolId;
 			const native = itemWrapper.lastElementChild as HTMLElement;
@@ -2370,7 +2370,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		const preserveNativeTool = this.useCursorTranscriptPresentation
 			&& !!metadata
 			&& (metadata.kind === 'toolInvocation' || metadata.kind === 'toolInvocationSerialized')
-			&& ((metadata.kind === 'toolInvocation' && !!IChatToolInvocation.getConfirmationMessages(metadata)) || t3ToolInvocationFailed(metadata));
+			&& ((metadata.kind === 'toolInvocation' && !!IChatToolInvocation.getConfirmationMessages(metadata)) || backboardToolInvocationFailed(metadata));
 		const hasNativeTerminalContent = itemWrapper.getElementsByClassName('chat-terminal-thinking-collapsible').length > 0
 			|| itemWrapper.getElementsByClassName('chat-terminal-content-part').length > 0;
 		const preserveNativeTerminal = this.useCursorTranscriptPresentation
@@ -2485,13 +2485,13 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		const chevron = this.useCursorTranscriptPresentation
 			? $('span.codicon.codicon-chevron-down.chat-thinking-group-chevron.chat-thinking-group-chevron-cursor', { 'aria-hidden': 'true' })
 			: this.useCursorPanelPresentation
-				? $('span.chat-thinking-group-chevron.chat-thinking-group-chevron-t3', { 'aria-hidden': 'true' })
+				? $('span.chat-thinking-group-chevron.chat-thinking-group-chevron-backboard', { 'aria-hidden': 'true' })
 				: $('span.codicon.codicon-chevron-right.chat-thinking-group-chevron', { 'aria-hidden': 'true' });
 		if (this.useCursorPanelPresentation) {
 			if (this.useCursorTranscriptPresentation) {
 				header.append(iconElement, headerLabel, chevron);
 			} else {
-				chevron.appendChild(createT3WorkEntryIcon(container.ownerDocument, 'chevron'));
+				chevron.appendChild(createBackboardWorkEntryIcon(container.ownerDocument, 'chevron'));
 				header.append(chevron, headerLabel);
 			}
 		} else {
@@ -2838,7 +2838,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		const invocation = this.toolInvocationsByCallId.get(toolCallId);
 		if (wrapper && invocation) {
 			const nativeContent = wrapper.querySelector<HTMLElement>(':scope > .chat-thinking-work-native-content');
-			const presentation = t3WorkEntryPresentation(invocation, toolCallId, label, nativeContent?.textContent?.trim());
+			const presentation = backboardWorkEntryPresentation(invocation, toolCallId, label, nativeContent?.textContent?.trim());
 			const rowHeading = wrapper.querySelector<HTMLElement>('.chat-thinking-work-row-heading');
 			const rowLabel = wrapper.querySelector<HTMLElement>('.chat-thinking-work-row-label');
 			const rowIcon = wrapper.querySelector<HTMLElement>('.chat-thinking-work-row-icon');
@@ -2856,7 +2856,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			}
 			if (rowIcon) {
 				clearNode(rowIcon);
-				rowIcon.appendChild(createT3WorkEntryIcon(wrapper.ownerDocument, presentation.icon));
+				rowIcon.appendChild(createBackboardWorkEntryIcon(wrapper.ownerDocument, presentation.icon));
 			}
 			const details = wrapper.querySelector<HTMLElement>('.chat-thinking-work-row-details-content');
 			if (details && presentation.details) {
@@ -3919,7 +3919,7 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 						const activityGroup = this.activityGroupByToolCallId.get(toolCallId);
 						activityGroup?.runningToolCallIds.delete(toolCallId);
 						this.refreshActivityGroupForTool(toolCallId);
-						this.updateWorkRowStatus(toolCallId, t3ToolInvocationFailed(toolInvocationOrMarkdown) ? 'cancelled' : 'complete');
+						this.updateWorkRowStatus(toolCallId, backboardToolInvocationFailed(toolInvocationOrMarkdown) ? 'cancelled' : 'complete');
 						// Remove tools that should be hidden now or after completion.
 						if (toolInvocationOrMarkdown.presentation === 'hidden' || toolInvocationOrMarkdown.presentation === 'hiddenAfterComplete') {
 							this.pendingRemovals.push({ toolCallId: toolInvocationOrMarkdown.toolCallId, toolLabel: currentToolLabel });
@@ -4145,7 +4145,7 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 			this.appendToActivityGroup(itemWrapper, subkind, toolCallId, fallbackLabel, toolInvocationOrMarkdown);
 			if (isToolInvocation && toolCallId && this.useCursorPanelPresentation) {
 				const complete = toolInvocationOrMarkdown.kind === 'toolInvocationSerialized' || IChatToolInvocation.isComplete(toolInvocationOrMarkdown);
-				this.updateWorkRowStatus(toolCallId, t3ToolInvocationFailed(toolInvocationOrMarkdown) ? 'cancelled' : complete ? 'complete' : 'working');
+				this.updateWorkRowStatus(toolCallId, backboardToolInvocationFailed(toolInvocationOrMarkdown) ? 'cancelled' : complete ? 'complete' : 'working');
 			}
 		} else {
 			this.finishActiveActivityGroup();

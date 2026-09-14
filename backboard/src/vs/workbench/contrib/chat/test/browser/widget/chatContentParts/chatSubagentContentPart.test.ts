@@ -477,7 +477,7 @@ suite('ChatSubagentContentPart', () => {
 					$('.interactive-session.interactive-list.backboard-cursor-transcript', undefined,
 						$('.interactive-response', undefined,
 							$('.value', undefined,
-								$('.chat-t3-turn-work', undefined, $('.chat-t3-turn-work-body', { hidden: true }), strip))))));
+								$('.chat-backboard-turn-work', undefined, $('.chat-backboard-turn-work-body', { hidden: true }), strip))))));
 			shell.style.setProperty('--vscode-foreground', '#cccccc');
 			mainWindow.document.body.appendChild(shell);
 			disposables.add(toDisposable(() => shell.remove()));

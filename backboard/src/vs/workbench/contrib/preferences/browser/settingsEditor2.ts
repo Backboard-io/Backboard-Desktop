@@ -238,7 +238,7 @@ export class SettingsEditor2 extends EditorPane {
 	private readonly inputChangeListener: MutableDisposable<IDisposable>;
 
 	private searchInputActionBar: ActionBar | null = null;
-	private t3SettingsTopbar: HTMLElement | undefined;
+	private backboardSettingsTopbar: HTMLElement | undefined;
 	private didApplyInitialTocWidth = false;
 
 	constructor(
@@ -458,12 +458,12 @@ export class SettingsEditor2 extends EditorPane {
 	protected createEditor(parent: HTMLElement): void {
 		parent.setAttribute('tabindex', '-1');
 		this.rootElement = DOM.append(parent, $('.settings-editor', { tabindex: '-1' }));
-		this.rootElement.classList.add('t3-settings-experience');
+		this.rootElement.classList.add('backboard-settings-experience');
 
 		this.createHeader(this.rootElement);
 		this.createBody(this.rootElement);
 		this.addCtrlAInterceptor(this.rootElement);
-		this.addT3SettingsKeyboardNavigation(this.rootElement);
+		this.addBackboardSettingsKeyboardNavigation(this.rootElement);
 		this.updateStyles();
 
 		this._register(registerNavigableContainer({
@@ -724,7 +724,7 @@ export class SettingsEditor2 extends EditorPane {
 		this.searchContainer = DOM.append(this.headerContainer, $('.search-container'));
 
 		const clearInputAction = this._register(new Action(SETTINGS_EDITOR_COMMAND_CLEAR_SEARCH_RESULTS,
-			localize('clearInput', "Clear Settings Search Input"), `${ThemeIcon.asClassName(preferencesClearInputIcon)} t3-settings-clear-action`, false,
+			localize('clearInput', "Clear Settings Search Input"), `${ThemeIcon.asClassName(preferencesClearInputIcon)} backboard-settings-clear-action`, false,
 			async () => this.clearSearchResults()
 		));
 
@@ -737,7 +737,7 @@ export class SettingsEditor2 extends EditorPane {
 		}));
 
 		const filterAction = this._register(new Action(SETTINGS_EDITOR_COMMAND_SUGGEST_FILTERS,
-			localize('filterInput', "Filter Settings"), `${ThemeIcon.asClassName(preferencesFilterIcon)} t3-settings-filter-action`
+			localize('filterInput', "Filter Settings"), `${ThemeIcon.asClassName(preferencesFilterIcon)} backboard-settings-filter-action`
 		));
 
 		this.searchWidget = this._register(this.instantiationService.createInstance(SuggestEnabledInput, `${SettingsEditor2.ID}.searchbox`, this.searchContainer, {
@@ -769,7 +769,7 @@ export class SettingsEditor2 extends EditorPane {
 			}
 			// TODO: Aria-live
 		}));
-		this.searchWidget.setPlaceHolder(localize('t3SettingsSearchPlaceholder', "Search settings..."));
+		this.searchWidget.setPlaceHolder(localize('backboardSettingsSearchPlaceholder', "Search settings..."));
 		this._register(this.searchWidget.onDidFocus(() => {
 			this._currentFocusContext = SettingsFocusContext.Search;
 		}));
@@ -959,7 +959,7 @@ export class SettingsEditor2 extends EditorPane {
 	}
 
 	private createBody(parent: HTMLElement): void {
-		this.createT3SettingsTopbar(parent);
+		this.createBackboardSettingsTopbar(parent);
 		this.bodyContainer = DOM.append(parent, $('.settings-body'));
 
 		this.noResultsMessage = DOM.append(this.bodyContainer, $('.no-results-message'));
@@ -983,13 +983,13 @@ export class SettingsEditor2 extends EditorPane {
 		this.settingsTreeContainer = $('.settings-tree-container');
 
 		const sidebarHeader = DOM.append(this.tocTreeContainer, $('.settings-sidebar-header'));
-		const sidebarNavigation = DOM.append(sidebarHeader, $('.t3-settings-sidebar-navigation'));
-		const backButton = DOM.append(sidebarNavigation, $('button.t3-settings-back-button', {
+		const sidebarNavigation = DOM.append(sidebarHeader, $('.backboard-settings-sidebar-navigation'));
+		const backButton = DOM.append(sidebarNavigation, $('button.backboard-settings-back-button', {
 			type: 'button',
-			'aria-label': localize('t3SettingsBackToApp', "Back to app")
+			'aria-label': localize('backboardSettingsBackToApp', "Back to app")
 		}));
 		DOM.append(backButton, $(`span.codicon.codicon-${Codicon.arrowLeft.id}`));
-		DOM.append(backButton, $('span', {}, localize('t3SettingsBackToApp', "Back to app")));
+		DOM.append(backButton, $('span', {}, localize('backboardSettingsBackToApp', "Back to app")));
 		this._register(DOM.addDisposableListener(backButton, DOM.EventType.CLICK, () => void this.group.closeEditor(this.input)));
 		const account = DOM.append(sidebarHeader, $('.settings-account'));
 		DOM.append(account, $('.settings-account-avatar', {}, 'B'));
@@ -997,15 +997,15 @@ export class SettingsEditor2 extends EditorPane {
 		DOM.append(accountText, $('.settings-account-name', {}, localize('settingsAccountName', "Backboard")));
 		if (this.searchContainer) {
 			DOM.append(sidebarHeader, this.searchContainer);
-			const searchIcon = $(`span.t3-settings-search-icon.codicon.codicon-${Codicon.search.id}`);
+			const searchIcon = $(`span.backboard-settings-search-icon.codicon.codicon-${Codicon.search.id}`);
 			this.searchContainer.insertBefore(searchIcon, this.searchContainer.firstChild);
-			DOM.append(this.searchContainer, $('span.t3-settings-search-shortcut', {}, '/'));
+			DOM.append(this.searchContainer, $('span.backboard-settings-search-shortcut', {}, '/'));
 			this.searchContainer.classList.toggle('has-query', !!this.searchWidget.getValue());
 		}
 		const searchCountContainer = DOM.append(sidebarHeader, $('.settings-search-count-container'));
 		DOM.append(searchCountContainer, this.countElement);
 		DOM.append(sidebarHeader, this.headerControlsContainer);
-		DOM.append(this.tocTreeContainer, $('.t3-settings-sidebar-section-label', {}, localize('t3SettingsSidebarSection', "Preferences")));
+		DOM.append(this.tocTreeContainer, $('.backboard-settings-sidebar-section-label', {}, localize('backboardSettingsSidebarSection', "Preferences")));
 
 		this.createTOC(this.tocTreeContainer);
 		this.createSettingsTree(this.settingsTreeContainer);
@@ -1016,7 +1016,7 @@ export class SettingsEditor2 extends EditorPane {
 		}));
 		const defaultTocWidth = SettingsEditor2.TOC_RESET_WIDTH;
 		const startingWidth = defaultTocWidth;
-		this.rootElement.style.setProperty('--t3-settings-sidebar-width', `${startingWidth}px`);
+		this.rootElement.style.setProperty('--backboard-settings-sidebar-width', `${startingWidth}px`);
 		this.splitView.addView({
 			onDidChange: Event.None,
 			element: this.tocTreeContainer,
@@ -1025,7 +1025,7 @@ export class SettingsEditor2 extends EditorPane {
 			layout: (width, _, height) => {
 				this.tocTreeContainer.style.width = `${width}px`;
 				this.tocTreeContainer.style.height = `${height}px`;
-				this.rootElement.style.setProperty('--t3-settings-sidebar-width', `${width}px`);
+				this.rootElement.style.setProperty('--backboard-settings-sidebar-width', `${width}px`);
 				this.tocTree.layout(this.tocTreeWrapper.clientHeight, width);
 			}
 		}, startingWidth, undefined, true);
@@ -1061,11 +1061,11 @@ export class SettingsEditor2 extends EditorPane {
 		}));
 	}
 
-	private createT3SettingsTopbar(parent: HTMLElement): void {
-		this.t3SettingsTopbar = DOM.append(parent, $('.t3-settings-topbar', { 'aria-hidden': 'true' }));
+	private createBackboardSettingsTopbar(parent: HTMLElement): void {
+		this.backboardSettingsTopbar = DOM.append(parent, $('.backboard-settings-topbar', { 'aria-hidden': 'true' }));
 	}
 
-	private addT3SettingsKeyboardNavigation(container: HTMLElement): void {
+	private addBackboardSettingsKeyboardNavigation(container: HTMLElement): void {
 		this._register(DOM.addDisposableListener(container, DOM.EventType.KEY_DOWN, (event: KeyboardEvent) => {
 			if (event.defaultPrevented) {
 				return;
@@ -2155,7 +2155,7 @@ export class SettingsEditor2 extends EditorPane {
 		if (!this.isVisible()) {
 			return;
 		}
-		const listHeight = Math.max(0, dimension.height - this.headerContainer.offsetHeight - (this.t3SettingsTopbar?.offsetHeight ?? 0));
+		const listHeight = Math.max(0, dimension.height - this.headerContainer.offsetHeight - (this.backboardSettingsTopbar?.offsetHeight ?? 0));
 
 		this.splitView.el.style.height = `${listHeight}px`;
 

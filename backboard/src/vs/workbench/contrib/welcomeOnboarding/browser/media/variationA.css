@@ -1869,3 +1869,54 @@
 /* Keep all water and sunlight layers behind the interactive content. */
 .onboarding-pool { isolation: isolate; z-index: 0; }
 .onboarding-a-card { z-index: 1; }
+
+.onboarding-brand-mark {
+	width: 19px;
+	height: 26px;
+	flex: 0 0 auto;
+}
+
+.onboarding-brand-mark img {
+	display: block;
+	width: 100%;
+	height: 100%;
+	filter: brightness(0) invert(1);
+}
+
+.onboarding-a-card .onboarding-provider-setup .onboarding-backboard-title {
+	font-size: clamp(28px, 3.4vw, 38px);
+}
+
+.onboarding-brand-lockup {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin-right: 20px;
+	flex: 0 0 auto;
+}
+
+.onboarding-brand-name {
+	display: flex;
+	flex-direction: column;
+	margin: 0;
+	color: #f3fbff;
+	font-size: 13px;
+	font-weight: 600;
+	line-height: 1.1;
+	letter-spacing: -.035em;
+	text-align: left;
+}
+
+.onboarding-brand-lockup-prominent {
+	gap: clamp(18px, 3vw, 32px);
+	margin-right: 0;
+}
+
+.onboarding-brand-lockup-prominent .onboarding-brand-name {
+	font-size: clamp(36px, 6vw, 64px);
+}
+
+.onboarding-a-card .onboarding-brand-lockup .onboarding-backboard-welcome-mark {
+	flex: 0 0 auto;
+	margin: 0;
+}

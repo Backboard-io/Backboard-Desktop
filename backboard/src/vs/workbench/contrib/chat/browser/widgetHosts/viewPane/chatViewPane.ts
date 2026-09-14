@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { renderBackboardAuthSetup } from '../../backboardAuthSetup.js';
 import './media/chatViewPane.css';
 import '../../widget/media/chatPanelCursorLook.css';
 import { $, addDisposableListener, append, EventHelper, EventType, getWindow, scheduleAtNextAnimationFrame, setVisibility } from '../../../../../../base/browser/dom.js';
@@ -86,7 +87,7 @@ import { IAgentTitleBarStatusService } from '../../agentSessions/experiments/age
 import { IVoicePlaybackService } from '../../../common/voicePlaybackService.js';
 import { VoiceOnboardingCompletedClassification, VoiceOnboardingCompletedEvent } from '../../voiceClient/voiceTelemetry.js';
 import { IWorkbenchEnvironmentService } from '../../../../../services/environment/common/environmentService.js';
-import { backboardConfigResource, BackboardAuthContextKeys, BackboardAuthGateContextKeys, hasBackboardCredentials, isBackboardProduct } from '../../../common/backboardAuth.js';
+import { backboardConfigResource, BackboardAuthContextKeys, BackboardAuthGateContextKeys, hasBackboardCredentials, hasAlternativeBackboardCredentials, isBackboardProduct } from '../../../common/backboardAuth.js';
 
 interface IChatViewPaneState extends Partial<IChatModelInputState> {
 	/**
@@ -909,7 +910,8 @@ referencesExpandedWhenEmptyResponse: false,
 
 	private isBackboardAuthRequired(): boolean {
 		return this.contextKeyService.getContextKeyValue<boolean>(BackboardAuthContextKeys.enabled.key) === true
-			&& this.contextKeyService.getContextKeyValue<boolean>(BackboardAuthContextKeys.signedIn.key) !== true;
+			&& this.contextKeyService.getContextKeyValue<boolean>(BackboardAuthContextKeys.signedIn.key) !== true
+			&& this.contextKeyService.getContextKeyValue<boolean>(BackboardAuthContextKeys.alternativeConfigured.key) !== true;
 	}
 
 	private createBackboardChatAuthGate(parent: HTMLElement): void {
@@ -919,33 +921,21 @@ referencesExpandedWhenEmptyResponse: false,
 
 		const overlay = append(parent, $('.backboard-auth-gate-overlay.backboard-auth-gate-chat'));
 		overlay.setAttribute('role', 'dialog');
-		overlay.setAttribute('aria-label', localize('backboard.auth.chat.aria', "Sign in to Backboard"));
+		overlay.setAttribute('aria-label', localize('backboard.auth.chat.aria', "Connect Your AI"));
 
 		const card = append(overlay, $('.backboard-auth-gate-card'));
 		const logo = append(card, $('span.backboard-auth-gate-logo.codicon.codicon-backboard-logo'));
 		logo.setAttribute('aria-hidden', 'true');
 
 		const title = append(card, $('h3.backboard-auth-gate-title'));
-		title.textContent = localize('backboard.auth.chat.title', "Sign in to Backboard");
+		title.textContent = localize('backboard.auth.chat.title', "Connect Your AI");
 
 		const description = append(card, $('p.backboard-auth-gate-description'));
-		description.textContent = localize('backboard.auth.chat.description', "To use Backboard Chat, sign in with single sign-on.");
+		description.textContent = localize('backboard.auth.chat.description', "Use Backboard, an API key, or a subscription.");
 
-		const button = append(card, $<HTMLButtonElement>('button.backboard-auth-gate-button'));
-		button.type = 'button';
-		button.textContent = localize('backboard.auth.signInSso', "Sign in with SSO");
-		this._register(addDisposableListener(button, EventType.CLICK, () => {
-			this.signInAndRefreshBackboardChatAuthGate().catch(error => {
-				this.logService.error(`[Backboard] Failed to refresh chat auth gate after sign in: ${error instanceof Error ? error.message : String(error)}`);
-			});
-		}));
+		this._register(renderBackboardAuthSetup(card, this.commandService, () => this.refreshBackboardChatAuthGateFromConfig()));
 
 		this.chatAuthGateOverlay = overlay;
-	}
-
-	private async signInAndRefreshBackboardChatAuthGate(): Promise<void> {
-		await this.commandService.executeCommand('backboard.signIn');
-		await this.refreshBackboardChatAuthGateFromConfig();
 	}
 
 	private updateBackboardChatAuthGate(): void {
@@ -967,6 +957,7 @@ referencesExpandedWhenEmptyResponse: false,
 		BackboardAuthContextKeys.enabled.bindTo(this.contextKeyService).set(true);
 		const signedIn = await hasBackboardCredentials(this.fileService, await backboardConfigResource(this.pathService));
 		BackboardAuthContextKeys.signedIn.bindTo(this.contextKeyService).set(signedIn);
+		BackboardAuthContextKeys.alternativeConfigured.bindTo(this.contextKeyService).set(await hasAlternativeBackboardCredentials(this.commandService));
 		this.updateBackboardChatAuthGate();
 	}
 

@@ -43,8 +43,8 @@ suite('Backboard onboarding experience', () => {
 			harness._advanceOrComplete();
 		}
 		assert.deepStrictEqual({ visible: harness._visibleSteps(), visited, outcomes }, {
-			visible: [OnboardingStepId.Welcome, OnboardingStepId.ConnectAI, OnboardingStepId.Theme],
-			visited: [OnboardingStepId.Welcome, OnboardingStepId.ConnectAI, OnboardingStepId.Theme],
+			visible: [OnboardingStepId.Welcome, OnboardingStepId.Theme],
+			visited: [OnboardingStepId.Welcome, OnboardingStepId.Theme],
 			outcomes: ['complete'],
 		});
 	});

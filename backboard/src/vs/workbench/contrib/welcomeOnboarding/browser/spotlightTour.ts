@@ -140,6 +140,9 @@ export class SpotlightTour extends Disposable {
 			this.lifecycle.add(this.options.onLayoutChange(reposition));
 		}
 		this.lifecycle.add(addDisposableListener(window, EventType.RESIZE, reposition));
+		// Part geometry continues moving after the workbench layout event while
+		// the sidebar's CSS transition runs. Re-measure its final bounds too.
+		this.lifecycle.add(addDisposableListener(container, 'transitionend', reposition, true));
 		this.lifecycle.add(addDisposableListener(overlay, EventType.KEY_DOWN, (e: KeyboardEvent) => this._onKeyDown(e)));
 
 		if (this.options.intro) {
@@ -309,6 +312,9 @@ export class SpotlightTour extends Disposable {
 		this.stepDisposables.add(addDisposableListener(nextButton, EventType.CLICK, () => isLast ? void this._finish(true) : this._go(1)));
 
 		if (anchor) {
+			const observer = new ResizeObserver(() => this._position());
+			this.stepDisposables.add(toDisposable(() => observer.disconnect()));
+			observer.observe(anchor);
 			this._position();
 		} else {
 			this._centerCard();

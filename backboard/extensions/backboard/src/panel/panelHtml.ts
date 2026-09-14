@@ -426,12 +426,14 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 				${historyPane}
 				</div>
 			${renderComposer()}
-				<div id="authOverlay" class="authOverlay" role="dialog" aria-live="polite" aria-label="Backboard sign in required">
+				<div id="authOverlay" class="authOverlay" role="dialog" aria-live="polite" aria-label="Connect Your AI">
 					<div class="authCard">
 						<div class="authLogo" aria-hidden="true"></div>
-						<div class="authTitle">Sign in required</div>
-						<div class="authText">Sign in with Backboard SSO to use the auxiliary bar.</div>
-						<button id="authSignInBtn" class="authButton" type="button"><span class="codicon codicon-account"></span><span>Sign in with SSO</span></button>
+						<div class="authTitle">Connect Your AI</div>
+						<div class="authText">Use Backboard, an API key, or a subscription.</div>
+						<button id="authSignInBtn" class="authButton" type="button"><span class="codicon codicon-account"></span><span>Sign In with SSO</span></button>
+						<button id="authByokBtn" class="authButton" type="button">Set Up BYOK</button>
+						<button id="authByosBtn" class="authButton" type="button">Set Up BYOS</button>
 					</div>
 				</div>
 		</div>
@@ -766,6 +768,12 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 			prompt.addEventListener('input', syncComposerButtons);
 			authSignInButton?.addEventListener('click', () => {
 				vscode.postMessage({ type: 'signIn' });
+			});
+			document.getElementById('authByokBtn')?.addEventListener('click', () => {
+				vscode.postMessage({ type: 'setupProviderKey' });
+			});
+			document.getElementById('authByosBtn')?.addEventListener('click', () => {
+				vscode.postMessage({ type: 'setupSubscription' });
 			});
 		prompt.addEventListener('keydown', event => {
 			if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {

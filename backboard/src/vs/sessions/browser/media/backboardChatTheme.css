@@ -29,37 +29,37 @@
  * dots, mirroring T3's staggered `status-pulse`. Offsets are fixed; only the
  * colour interpolates, so the compositor never reflows. 30% = T3's dot at rest,
  * 12% = its dimmed trough. */
-@keyframes t3-working-dots {
+@keyframes backboard-working-dots {
 	0%, 100% {
-		background-color: color-mix(in srgb, var(--t3-muted-foreground) 30%, transparent);
+		background-color: color-mix(in srgb, var(--backboard-muted-foreground) 30%, transparent);
 		box-shadow:
-			7px 0 0 0 color-mix(in srgb, var(--t3-muted-foreground) 12%, transparent),
-			14px 0 0 0 color-mix(in srgb, var(--t3-muted-foreground) 12%, transparent);
+			7px 0 0 0 color-mix(in srgb, var(--backboard-muted-foreground) 12%, transparent),
+			14px 0 0 0 color-mix(in srgb, var(--backboard-muted-foreground) 12%, transparent);
 	}
 	33% {
-		background-color: color-mix(in srgb, var(--t3-muted-foreground) 12%, transparent);
+		background-color: color-mix(in srgb, var(--backboard-muted-foreground) 12%, transparent);
 		box-shadow:
-			7px 0 0 0 color-mix(in srgb, var(--t3-muted-foreground) 30%, transparent),
-			14px 0 0 0 color-mix(in srgb, var(--t3-muted-foreground) 12%, transparent);
+			7px 0 0 0 color-mix(in srgb, var(--backboard-muted-foreground) 30%, transparent),
+			14px 0 0 0 color-mix(in srgb, var(--backboard-muted-foreground) 12%, transparent);
 	}
 	66% {
-		background-color: color-mix(in srgb, var(--t3-muted-foreground) 12%, transparent);
+		background-color: color-mix(in srgb, var(--backboard-muted-foreground) 12%, transparent);
 		box-shadow:
-			7px 0 0 0 color-mix(in srgb, var(--t3-muted-foreground) 12%, transparent),
-			14px 0 0 0 color-mix(in srgb, var(--t3-muted-foreground) 30%, transparent);
+			7px 0 0 0 color-mix(in srgb, var(--backboard-muted-foreground) 12%, transparent),
+			14px 0 0 0 color-mix(in srgb, var(--backboard-muted-foreground) 30%, transparent);
 	}
 }
 
 :is(.agent-sessions-workbench:not(.optimus-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view),
 :is(.agent-sessions-workbench:not(.optimus-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) {
-	--t3-background: var(--session-view-background, var(--sessions-main-region-background, var(--vscode-agents-background, var(--vscode-editor-background))));
-	--t3-foreground: var(--vscode-foreground, var(--vscode-editor-foreground));
-	--t3-muted: var(--vscode-textCodeBlock-background, var(--vscode-editorWidget-background, var(--vscode-input-background)));
-	--t3-muted-foreground: var(--vscode-descriptionForeground, var(--vscode-input-placeholderForeground));
-	--t3-accent: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground));
-	--t3-border: var(--vscode-widget-border, var(--vscode-panel-border, var(--vscode-contrastBorder, transparent)));
-	--t3-secondary: var(--vscode-chat-requestBackground, var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground)));
-	--t3-link: var(--vscode-textLink-foreground, var(--vscode-foreground));
+	--backboard-background: var(--session-view-background, var(--sessions-main-region-background, var(--vscode-agents-background, var(--vscode-editor-background))));
+	--backboard-foreground: var(--vscode-foreground, var(--vscode-editor-foreground));
+	--backboard-muted: var(--vscode-textCodeBlock-background, var(--vscode-editorWidget-background, var(--vscode-input-background)));
+	--backboard-muted-foreground: var(--vscode-descriptionForeground, var(--vscode-input-placeholderForeground));
+	--backboard-accent: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground));
+	--backboard-border: var(--vscode-widget-border, var(--vscode-panel-border, var(--vscode-contrastBorder, transparent)));
+	--backboard-secondary: var(--vscode-chat-requestBackground, var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground)));
+	--backboard-link: var(--vscode-textLink-foreground, var(--vscode-foreground));
 }
 
 /* Defined at the workbench root (not `.part.sessionspart`) so the chat-editor
@@ -68,14 +68,14 @@
 .agent-sessions-workbench.optimus-window.vs-dark,
 .agent-sessions-workbench.optimus-window.hc-black,
 .agent-sessions-workbench:not(.optimus-window).hc-black {
-	--t3-composer-surface: var(--sessions-codex-surface-background, var(--vscode-agentsChatInput-background, var(--vscode-input-background, var(--vscode-editorWidget-background, var(--vscode-editor-background)))));
+	--backboard-composer-surface: var(--sessions-codex-surface-background, var(--vscode-agentsChatInput-background, var(--vscode-input-background, var(--vscode-editorWidget-background, var(--vscode-editor-background)))));
 }
 
 /* ---- Transcript surface ---- */
 
 :is(.agent-sessions-workbench:not(.optimus-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .interactive-session,
 :is(.agent-sessions-workbench:not(.optimus-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .interactive-session {
-	background: var(--t3-background);
+	background: var(--backboard-background);
 }
 
 /* The chat view feeds the session-view background into the list styler, which
@@ -92,14 +92,14 @@
 :is(.agent-sessions-workbench:not(.optimus-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .interactive-session .interactive-list .monaco-list,
 :is(.agent-sessions-workbench:not(.optimus-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .interactive-session .interactive-list .monaco-list-rows,
 :is(.agent-sessions-workbench:not(.optimus-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .interactive-session .interactive-list .monaco-list-row {
-	background-color: var(--t3-background) !important;
+	background-color: var(--backboard-background) !important;
 }
 
 /* ---- Prose ---- */
 
 :is(.agent-sessions-workbench:not(.optimus-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .interactive-item-container .value .rendered-markdown,
 :is(.agent-sessions-workbench:not(.optimus-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .interactive-item-container .value .rendered-markdown {
-	color: var(--t3-foreground);
+	color: var(--backboard-foreground);
 }
 
 :is(.agent-sessions-workbench:not(.optimus-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .value .rendered-markdown h1,
@@ -112,43 +112,43 @@
 :is(.agent-sessions-workbench:not(.optimus-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .value .rendered-markdown h3,
 :is(.agent-sessions-workbench:not(.optimus-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .value .rendered-markdown h4,
 :is(.agent-sessions-workbench:not(.optimus-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .value .rendered-markdown h5 {
-	color: var(--t3-foreground);
+	color: var(--backboard-foreground);
 }
 
 :is(.agent-sessions-workbench:not(.optimus-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .value .rendered-markdown h6,
 :is(.agent-sessions-workbench:not(.optimus-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .value .rendered-markdown blockquote,
 :is(.agent-sessions-workbench:not(.optimus-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .value .rendered-markdown h6,
 :is(.agent-sessions-workbench:not(.optimus-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .value .rendered-markdown blockquote {
-	color: var(--t3-muted-foreground);
+	color: var(--backboard-muted-foreground);
 }
 
 :is(.agent-sessions-workbench:not(.optimus-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .value .rendered-markdown blockquote,
 :is(.agent-sessions-workbench:not(.optimus-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .value .rendered-markdown blockquote {
-	border-left-color: var(--t3-border);
+	border-left-color: var(--backboard-border);
 }
 
 /* ---- Links ---- */
 
 :is(.agent-sessions-workbench:not(.optimus-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .value .rendered-markdown a,
 :is(.agent-sessions-workbench:not(.optimus-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .value .rendered-markdown a {
-	color: var(--t3-link);
+	color: var(--backboard-link);
 }
 
 /* ---- Code ---- */
 
 :is(.agent-sessions-workbench:not(.optimus-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .value .rendered-markdown :not(pre):not(.monaco-editor) > code,
 :is(.agent-sessions-workbench:not(.optimus-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .value .rendered-markdown :not(pre):not(.monaco-editor) > code {
-	border-color: var(--t3-border);
-	background: var(--t3-muted);
-	color: var(--t3-foreground);
+	border-color: var(--backboard-border);
+	background: var(--backboard-muted);
+	color: var(--backboard-foreground);
 }
 
 /* Their `.chat-markdown-codeblock` sits a shade off the page rather than
  * matching it, so the block still reads as a distinct surface on pure black. */
 :is(.agent-sessions-workbench:not(.optimus-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .value .interactive-result-code-block,
 :is(.agent-sessions-workbench:not(.optimus-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .value .interactive-result-code-block {
-	border-color: var(--t3-border);
-	background-color: var(--t3-muted);
+	border-color: var(--backboard-border);
+	background-color: var(--backboard-muted);
 }
 
 :is(.agent-sessions-workbench:not(.optimus-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .value .interactive-result-code-block .monaco-editor,
@@ -156,7 +156,7 @@
 :is(.agent-sessions-workbench:not(.optimus-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .value .interactive-result-code-block .monaco-editor,
 :is(.agent-sessions-workbench:not(.optimus-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .value .interactive-result-code-block .monaco-editor .monaco-editor-background {
 	/* The editor paints its own theme background over the container fill. */
-	background-color: var(--t3-muted);
+	background-color: var(--backboard-muted);
 }
 
 /* ---- Tables and rules ---- */
@@ -167,37 +167,37 @@
 :is(.agent-sessions-workbench:not(.optimus-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .value .rendered-markdown th,
 :is(.agent-sessions-workbench:not(.optimus-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .value .rendered-markdown td,
 :is(.agent-sessions-workbench:not(.optimus-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .value .rendered-markdown hr {
-	border-color: var(--t3-border);
+	border-color: var(--backboard-border);
 }
 
 :is(.agent-sessions-workbench:not(.optimus-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .value .rendered-markdown th,
 :is(.agent-sessions-workbench:not(.optimus-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .value .rendered-markdown th {
-	color: var(--t3-foreground);
+	color: var(--backboard-foreground);
 }
 
 /* ---- Sent prompt bubble ---- */
 
 :is(.agent-sessions-workbench:not(.optimus-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .interactive-item-container.interactive-request .value .rendered-markdown,
 :is(.agent-sessions-workbench:not(.optimus-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .interactive-item-container.interactive-request .value .rendered-markdown {
-	background-color: var(--t3-secondary) !important;
-	color: var(--t3-foreground);
+	background-color: var(--backboard-secondary) !important;
+	color: var(--backboard-foreground);
 }
 
 :is(.agent-sessions-workbench:not(.optimus-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .interactive-item-container.interactive-request .value .rendered-markdown.clickable:hover,
 :is(.agent-sessions-workbench:not(.optimus-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .interactive-item-container.interactive-request .value .rendered-markdown.clickable:hover {
-	background-color: var(--t3-accent) !important;
+	background-color: var(--backboard-accent) !important;
 }
 
 /* ---- Composer ---- */
 
 /* T3's dark composer card: a ~10% white ring instead of a border (drop
  * shadows barely register on black, so the ring carries the edge) over the
- * lifted `--t3-composer-surface`. Geometry — radius, drop shadow, control
+ * lifted `--backboard-composer-surface`. Geometry — radius, drop shadow, control
  * sizes — is theme-independent and lives in style.css. */
 :is(.agent-sessions-workbench:not(.optimus-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .interactive-session .chat-input-container,
 :is(.agent-sessions-workbench:not(.optimus-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .interactive-session .chat-input-container {
 	border-color: var(--vscode-agentsChatInput-border, var(--vscode-input-border, var(--vscode-editorWidget-border, var(--vscode-widget-border, transparent))));
-	background-color: var(--t3-composer-surface);
+	background-color: var(--backboard-composer-surface);
 }
 
 /* The input's Monaco layer paints its own theme background over the container
@@ -207,7 +207,7 @@
  * as blocks (see the matching note in style.css). */
 :is(.agent-sessions-workbench:not(.optimus-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background,
 :is(.agent-sessions-workbench:not(.optimus-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background {
-	background-color: var(--t3-composer-surface) !important;
+	background-color: var(--backboard-composer-surface) !important;
 }
 
 /* The new-chat composer pins itself to the flat page colour with
@@ -218,33 +218,33 @@
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window).hc-black .part.sessionspart .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container,
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window).hc-black .chat-editor-relative .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container {
 	border-color: var(--vscode-agentsChatInput-border, var(--vscode-input-border, var(--vscode-editorWidget-border, var(--vscode-widget-border, transparent))));
-	background-color: var(--t3-composer-surface);
+	background-color: var(--backboard-composer-surface);
 }
 
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window).vs-dark .part.sessionspart .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background,
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window).vs-dark .part.sessionspart .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .margin,
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window).hc-black .part.sessionspart .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background,
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window).hc-black .part.sessionspart .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .margin {
-	background-color: var(--t3-composer-surface) !important;
+	background-color: var(--backboard-composer-surface) !important;
 }
 
 /* ---- Work rows ---- */
 
 :is(.agent-sessions-workbench:not(.optimus-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .chat-used-context-label .monaco-button.monaco-icon-button,
 :is(.agent-sessions-workbench:not(.optimus-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .chat-used-context-label .monaco-button.monaco-icon-button {
-	color: color-mix(in srgb, var(--t3-foreground) 82%, transparent);
+	color: color-mix(in srgb, var(--backboard-foreground) 82%, transparent);
 }
 
 :is(.agent-sessions-workbench:not(.optimus-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .chat-used-context-label .monaco-button.monaco-icon-button:hover,
 :is(.agent-sessions-workbench:not(.optimus-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .chat-used-context-label .monaco-button.monaco-icon-button:hover {
 	/* Their `hover:bg-accent/20` against the dark accent. */
-	background-color: color-mix(in srgb, var(--t3-accent) 20%, transparent);
-	color: var(--t3-foreground);
+	background-color: color-mix(in srgb, var(--backboard-accent) 20%, transparent);
+	color: var(--backboard-foreground);
 }
 
 :is(.agent-sessions-workbench:not(.optimus-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .chat-used-context-label .monaco-button.monaco-icon-button > .codicon,
 :is(.agent-sessions-workbench:not(.optimus-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .chat-used-context-label .monaco-button.monaco-icon-button > .codicon {
-	color: color-mix(in srgb, var(--t3-muted-foreground) 65%, transparent);
+	color: color-mix(in srgb, var(--backboard-muted-foreground) 65%, transparent);
 }
 
 /* ---- Working indicator (streaming) ---- */
@@ -284,11 +284,11 @@
 	 * own flex gap then supplies T3's ~8px separation before the label. */
 	margin-right: 18px;
 	border-radius: 50%;
-	background-color: color-mix(in srgb, var(--t3-muted-foreground) 30%, transparent);
+	background-color: color-mix(in srgb, var(--backboard-muted-foreground) 30%, transparent);
 	box-shadow:
-		7px 0 0 0 color-mix(in srgb, var(--t3-muted-foreground) 30%, transparent),
-		14px 0 0 0 color-mix(in srgb, var(--t3-muted-foreground) 30%, transparent);
-	animation: t3-working-dots 1.4s linear infinite;
+		7px 0 0 0 color-mix(in srgb, var(--backboard-muted-foreground) 30%, transparent),
+		14px 0 0 0 color-mix(in srgb, var(--backboard-muted-foreground) 30%, transparent);
+	animation: backboard-working-dots 1.4s linear infinite;
 }
 
 /* Drop the shimmer gradient: T3's label is flat muted text at 11px. The
@@ -307,7 +307,7 @@
 	animation: none;
 	font-size: 11px;
 	line-height: 16px;
-	color: var(--t3-muted-foreground);
+	color: var(--backboard-muted-foreground);
 }
 
 /* ---- Turn fold (thinking/work summary) ---- */
@@ -320,13 +320,13 @@
 :is(.agent-sessions-workbench:not(.optimus-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button,
 :is(.agent-sessions-workbench:not(.optimus-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button {
 	font-size: 12px;
-	color: var(--t3-muted-foreground);
+	color: var(--backboard-muted-foreground);
 	font-variant-numeric: tabular-nums;
 }
 
 :is(.agent-sessions-workbench:not(.optimus-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button:hover,
 :is(.agent-sessions-workbench:not(.optimus-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button:hover {
-	color: var(--t3-foreground);
+	color: var(--backboard-foreground);
 }
 
 :is(.agent-sessions-workbench:not(.optimus-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .chat-thinking-box > .chat-used-context-label .monaco-button.monaco-icon-button .monaco-button-mdlabel,
@@ -346,19 +346,19 @@
 
 :is(.agent-sessions-workbench:not(.optimus-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .chat-composite-bar.session-header-bar .chat-composite-bar-header,
 :is(.agent-sessions-workbench:not(.optimus-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .chat-composite-bar.session-header-bar .chat-composite-bar-header {
-	border-bottom-color: var(--t3-border);
+	border-bottom-color: var(--backboard-border);
 }
 
 /* Single-line header: the title is the line's anchor, full foreground; the
  * workspace pill and stats carry the muted tone. */
 :is(.agent-sessions-workbench:not(.optimus-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .chat-composite-bar.session-header-bar .chat-composite-bar-session-title-text,
 :is(.agent-sessions-workbench:not(.optimus-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .chat-composite-bar.session-header-bar .chat-composite-bar-session-title-text {
-	color: var(--t3-foreground);
+	color: var(--backboard-foreground);
 }
 
 :is(.agent-sessions-workbench:not(.optimus-window).vs-dark .part.sessionspart, .agent-sessions-workbench.optimus-window.vs-dark .optimus-chat-view) .chat-composite-bar.session-header-bar .chat-composite-bar-meta-workspace,
 :is(.agent-sessions-workbench:not(.optimus-window).hc-black .part.sessionspart, .agent-sessions-workbench.optimus-window.hc-black .optimus-chat-view) .chat-composite-bar.session-header-bar .chat-composite-bar-meta-workspace {
-	border-color: var(--t3-border);
-	background: var(--t3-muted);
-	color: var(--t3-muted-foreground);
+	border-color: var(--backboard-border);
+	background: var(--backboard-muted);
+	color: var(--backboard-muted-foreground);
 }

@@ -248,6 +248,11 @@
 	background: var(--vscode-toolbar-activeBackground, var(--vscode-input-background));
 }
 
+/* Mouse clicks should not inherit the workbench's generic button focus ring. */
+.monaco-workbench .backboard-mode-segments > .backboard-mode-segment:focus:not(:focus-visible) {
+	outline: none;
+}
+
 .monaco-workbench .backboard-mode-segments > .backboard-mode-segment:focus-visible {
 	outline: 1px solid var(--vscode-focusBorder);
 	outline-offset: -1px;

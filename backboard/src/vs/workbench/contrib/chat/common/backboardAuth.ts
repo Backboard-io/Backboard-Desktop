@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { localize } from '../../../../nls.js';
 import { RawContextKey } from '../../../../platform/contextkey/common/contextkey.js';
 import { FileOperationResult, IFileService, toFileOperationResult } from '../../../../platform/files/common/files.js';
@@ -33,6 +34,7 @@ export const BackboardOAuth = {
 } as const;
 
 export namespace BackboardAuthContextKeys {
+	export const alternativeConfigured = new RawContextKey<boolean>('backboard.alternativeConfigured', false);
 	export const enabled = new RawContextKey<boolean>('backboard.authGateEnabled', false, {
 		type: 'boolean',
 		description: localize('backboard.authGateEnabled', "True when Backboard authentication gates are enabled."),
@@ -46,6 +48,7 @@ export namespace BackboardAuthContextKeys {
 
 export const BackboardAuthGateContextKeys = new Set([
 	BackboardAuthContextKeys.enabled.key,
+	BackboardAuthContextKeys.alternativeConfigured.key,
 	BackboardAuthContextKeys.signedIn.key,
 ]);
 
@@ -120,4 +123,10 @@ function stringValueFromRecord(value: unknown): string | undefined {
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
 	return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** Ask the credential-owning runtime without exposing secrets to the workbench. */
+export async function hasAlternativeBackboardCredentials(commands: ICommandService): Promise<boolean> {
+	try { return await commands.executeCommand<boolean>('backboard.hasAlternativeCredentials') === true; }
+	catch { return false; }
 }

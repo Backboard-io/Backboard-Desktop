@@ -3,8 +3,9 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { renderBackboardAuthSetup } from '../../chat/browser/backboardAuthSetup.js';
 import './media/agentSessionsWelcome.css';
-import { $, addDisposableListener, append, clearNode, Dimension, EventType, getWindow, scheduleAtNextAnimationFrame, setVisibility } from '../../../../base/browser/dom.js';
+import { $, addDisposableListener, append, clearNode, Dimension, getWindow, scheduleAtNextAnimationFrame, setVisibility } from '../../../../base/browser/dom.js';
 import { renderIcon } from '../../../../base/browser/ui/iconLabel/iconLabels.js';
 import { DomScrollableElement } from '../../../../base/browser/ui/scrollbar/scrollableElement.js';
 import { Toggle } from '../../../../base/browser/ui/toggle/toggle.js';
@@ -59,7 +60,7 @@ import { IViewDescriptorService, ViewContainerLocation } from '../../../common/v
 import { toErrorMessage } from '../../../../base/common/errorMessage.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { canShowAgentsBanner, createAgentsBanner } from '../../chat/browser/agentSessions/agentSessionsBanner.js';
-import { backboardConfigResource, BackboardAuthContextKeys, BackboardAuthGateContextKeys, hasBackboardCredentials, isBackboardProduct } from '../../chat/common/backboardAuth.js';
+import { backboardConfigResource, BackboardAuthContextKeys, BackboardAuthGateContextKeys, hasBackboardCredentials, hasAlternativeBackboardCredentials, isBackboardProduct } from '../../chat/common/backboardAuth.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
 import { IPathService } from '../../../services/path/common/pathService.js';
 
@@ -206,7 +207,8 @@ export class AgentSessionsWelcomePage extends EditorPane {
 
 	private isBackboardAuthRequired(): boolean {
 		return this.contextService.getContextKeyValue<boolean>(BackboardAuthContextKeys.enabled.key) === true
-			&& this.contextService.getContextKeyValue<boolean>(BackboardAuthContextKeys.signedIn.key) !== true;
+			&& this.contextService.getContextKeyValue<boolean>(BackboardAuthContextKeys.signedIn.key) !== true
+			&& this.contextService.getContextKeyValue<boolean>(BackboardAuthContextKeys.alternativeConfigured.key) !== true;
 	}
 
 	private createBackboardAuthGate(): void {
@@ -216,33 +218,21 @@ export class AgentSessionsWelcomePage extends EditorPane {
 
 		const overlay = append(this.container, $('.backboard-auth-gate-overlay.backboard-auth-gate-agents-welcome'));
 		overlay.setAttribute('role', 'dialog');
-		overlay.setAttribute('aria-label', localize('backboard.auth.agentsWelcome.aria', "Sign in to Backboard"));
+		overlay.setAttribute('aria-label', localize('backboard.auth.agentsWelcome.aria', "Connect Your AI"));
 
 		const card = append(overlay, $('.backboard-auth-gate-card'));
 		const logo = append(card, $('span.backboard-auth-gate-logo.codicon.codicon-backboard-logo'));
 		logo.setAttribute('aria-hidden', 'true');
 
 		const title = append(card, $('h3.backboard-auth-gate-title'));
-		title.textContent = localize('backboard.auth.agentsWelcome.title', "Sign in to Backboard");
+		title.textContent = localize('backboard.auth.agentsWelcome.title', "Connect Your AI");
 
 		const description = append(card, $('p.backboard-auth-gate-description'));
-		description.textContent = localize('backboard.auth.agentsWelcome.description', "To use the Agents page, sign in to Backboard.");
+		description.textContent = localize('backboard.auth.agentsWelcome.description', "Use Backboard, an API key, or a subscription.");
 
-		const button = append(card, $<HTMLButtonElement>('button.backboard-auth-gate-button'));
-		button.type = 'button';
-		button.textContent = localize('backboard.auth.signInSso', "Sign in with SSO");
-		this._register(addDisposableListener(button, EventType.CLICK, () => {
-			this.signInAndRefreshBackboardAuthGate().catch(error => {
-				this.logService.error(`[Backboard] Failed to refresh agents welcome auth gate after sign in: ${error instanceof Error ? error.message : String(error)}`);
-			});
-		}));
+		this._register(renderBackboardAuthSetup(card, this.commandService, () => this.refreshBackboardAuthGateFromConfig()));
 
 		this.backboardAuthGateOverlay = overlay;
-	}
-
-	private async signInAndRefreshBackboardAuthGate(): Promise<void> {
-		await this.commandService.executeCommand('backboard.signIn');
-		await this.refreshBackboardAuthGateFromConfig();
 	}
 
 	private updateBackboardAuthGate(): void {
@@ -264,6 +254,7 @@ export class AgentSessionsWelcomePage extends EditorPane {
 		BackboardAuthContextKeys.enabled.bindTo(this.contextService).set(true);
 		const signedIn = await hasBackboardCredentials(this.fileService, await backboardConfigResource(this.pathService));
 		BackboardAuthContextKeys.signedIn.bindTo(this.contextService).set(signedIn);
+		BackboardAuthContextKeys.alternativeConfigured.bindTo(this.contextService).set(await hasAlternativeBackboardCredentials(this.commandService));
 		this.updateBackboardAuthGate();
 	}
 

@@ -23,6 +23,8 @@
     "onCommand:backboard.extension.signIn",
     "onCommand:backboard.setApiKey",
     "onCommand:backboard.configureProviderKey",
+    "onCommand:backboard.setupProviderKey",
+    "onCommand:backboard.hasAlternativeCredentials",
     "onCommand:backboard.refreshModels",
     "onCommand:backboard.generateCommitMessage",
     "onCommand:backboard.openUsage"

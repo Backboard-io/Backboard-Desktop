@@ -180,6 +180,21 @@ export class WorkbenchThemeService extends Disposable implements IWorkbenchTheme
 			this.installConfigurationListener();
 			this.installPreferredSchemeListener();
 			this.installRegistryListeners();
+			// Modes retain separate renderers. Catch up with shared settings when
+			// returning to one whose configuration watcher missed a background change.
+			const refreshTheme = this._register(new RunOnceScheduler(async () => {
+				try {
+					await this.configurationService.reloadConfiguration();
+					await this.restoreColorTheme();
+				} catch (error) {
+					errors.onUnexpectedError(error);
+				}
+			}, 0));
+			this._register(this.hostService.onDidChangeFocus(focused => {
+				if (focused) {
+					refreshTheme.schedule();
+				}
+			}));
 			this.initialize(previousColorThemeSetting).catch(errors.onUnexpectedError);
 		});
 

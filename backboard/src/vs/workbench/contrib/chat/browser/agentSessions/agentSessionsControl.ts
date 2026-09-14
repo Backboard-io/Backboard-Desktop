@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { renderBackboardAuthSetup } from '../backboardAuthSetup.js';
 import { IContextKey, IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
 import { ChatContextKeys } from '../../common/actions/chatContextKeys.js';
 import { IContextMenuService } from '../../../../../platform/contextview/browser/contextView.js';
@@ -43,7 +44,7 @@ import { IMouseEvent } from '../../../../../base/browser/mouseEvent.js';
 import { IChatWidget } from '../chat.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
 import { IAccessibilityService } from '../../../../../platform/accessibility/common/accessibility.js';
-import { backboardConfigResource, BackboardAuthContextKeys, BackboardAuthGateContextKeys, hasBackboardCredentials, isBackboardProduct } from '../../common/backboardAuth.js';
+import { backboardConfigResource, BackboardAuthContextKeys, BackboardAuthGateContextKeys, hasBackboardCredentials, hasAlternativeBackboardCredentials, isBackboardProduct } from '../../common/backboardAuth.js';
 import { IFileService } from '../../../../../platform/files/common/files.js';
 import { IPathService } from '../../../../services/path/common/pathService.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
@@ -196,7 +197,8 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 
 	private isBackboardAuthRequired(): boolean {
 		return this.contextKeyService.getContextKeyValue<boolean>(BackboardAuthContextKeys.enabled.key) === true
-			&& this.contextKeyService.getContextKeyValue<boolean>(BackboardAuthContextKeys.signedIn.key) !== true;
+			&& this.contextKeyService.getContextKeyValue<boolean>(BackboardAuthContextKeys.signedIn.key) !== true
+			&& this.contextKeyService.getContextKeyValue<boolean>(BackboardAuthContextKeys.alternativeConfigured.key) !== true;
 	}
 
 	private createBackboardAuthGate(parent: HTMLElement): void {
@@ -206,33 +208,21 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 
 		const overlay = append(parent, $('.backboard-auth-gate-overlay.backboard-auth-gate-agents'));
 		overlay.setAttribute('role', 'dialog');
-		overlay.setAttribute('aria-label', localize('backboard.auth.agents.aria', "Sign in to Backboard"));
+		overlay.setAttribute('aria-label', localize('backboard.auth.agents.aria', "Connect Your AI"));
 
 		const card = append(overlay, $('.backboard-auth-gate-card'));
 		const logo = append(card, $('span.backboard-auth-gate-logo.codicon.codicon-backboard-logo'));
 		logo.setAttribute('aria-hidden', 'true');
 
 		const title = append(card, $('h3.backboard-auth-gate-title'));
-		title.textContent = localize('backboard.auth.agents.title', "Sign in to Backboard");
+		title.textContent = localize('backboard.auth.agents.title', "Connect Your AI");
 
 		const description = append(card, $('p.backboard-auth-gate-description'));
-		description.textContent = localize('backboard.auth.agents.description', "To use the Agents page, sign in to Backboard.");
+		description.textContent = localize('backboard.auth.agents.description', "Use Backboard, an API key, or a subscription.");
 
-		const button = append(card, $<HTMLButtonElement>('button.backboard-auth-gate-button'));
-		button.type = 'button';
-		button.textContent = localize('backboard.auth.signInSso', "Sign in with SSO");
-		this._register(addDisposableListener(button, EventType.CLICK, () => {
-			this.signInAndRefreshBackboardAuthGate().catch(error => {
-				this.logService.error(`[Backboard] Failed to refresh agents auth gate after sign in: ${error instanceof Error ? error.message : String(error)}`);
-			});
-		}));
+		this._register(renderBackboardAuthSetup(card, this.commandService, () => this.refreshBackboardAuthGateFromConfig()));
 
 		this.backboardAuthGateOverlay = overlay;
-	}
-
-	private async signInAndRefreshBackboardAuthGate(): Promise<void> {
-		await this.commandService.executeCommand('backboard.signIn');
-		await this.refreshBackboardAuthGateFromConfig();
 	}
 
 	private updateBackboardAuthGate(): void {
@@ -254,6 +244,7 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 		BackboardAuthContextKeys.enabled.bindTo(this.contextKeyService).set(true);
 		const signedIn = await hasBackboardCredentials(this.fileService, await backboardConfigResource(this.pathService));
 		BackboardAuthContextKeys.signedIn.bindTo(this.contextKeyService).set(signedIn);
+		BackboardAuthContextKeys.alternativeConfigured.bindTo(this.contextKeyService).set(await hasAlternativeBackboardCredentials(this.commandService));
 		this.updateBackboardAuthGate();
 	}
 
@@ -709,7 +700,7 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 
 	private async openAgentSession(e: IOpenEvent<AgentSessionListItem | undefined>): Promise<void> {
 		if (this.isBackboardAuthRequired()) {
-			await this.signInAndRefreshBackboardAuthGate();
+			this.updateBackboardAuthGate();
 			return;
 		}
 

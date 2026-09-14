@@ -17,31 +17,21 @@
  * properties: defining them costs nothing in a window whose other surfaces
  * still opt out of the parity layer below. */
 .monaco-workbench.agent-sessions-workbench {
-	--codex-canvas: var(--vscode-agentsPanel-background, var(--vscode-editor-background));
+	--codex-canvas: var(--sessions-main-region-background);
 	--codex-sidebar: transparent;
-	--codex-composer: var(--vscode-input-background, var(--codex-canvas));
+	--codex-composer: var(--sessions-codex-surface-background);
 	--codex-hover: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground));
 	--codex-selected: var(--vscode-list-inactiveSelectionBackground, var(--codex-hover));
 	--codex-text-primary: var(--vscode-foreground, var(--vscode-editor-foreground));
-	--codex-text-secondary: var(--vscode-descriptionForeground, var(--vscode-input-placeholderForeground));
+	--codex-text-secondary: var(--sessions-codex-muted-foreground);
 	--codex-border: var(--vscode-panel-border, var(--vscode-widget-border));
-	--codex-border-strong: var(--vscode-input-border, var(--vscode-focusBorder));
+	--codex-border-strong: var(--sessions-codex-surface-border);
 }
 
-/* Simple only: the workbench-wide typography, the derived region/surface
- * tokens and the base text color. Advanced keeps its own centre and right
- * panel treatment, so these must NOT leak into it. */
+/* Simple keeps its typography and geometry while consuming the same color
+ * tokens as the other workbenches. */
 .monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) {
 	font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
-	--sessions-main-region-background: var(--codex-canvas);
-	--sessions-codex-surface-background: var(--codex-composer);
-	--sessions-codex-surface-border: var(--codex-border-strong);
-	--sessions-codex-muted-foreground: var(--codex-text-secondary);
-	--sessions-panel-divider-color: var(--codex-border);
-	/* The new-task composer and the composer shown after the first send are the
-	 * same control. Keep their compact shell geometry on one token contract so
-	 * the landing page cannot drift back into a separate oversized hero card. */
-
 	color: var(--codex-text-primary);
 }
 
@@ -97,8 +87,7 @@
 	background: var(--codex-hover) !important;
 }
 
-/* Simple's mode controls and breadcrumb share one 48px header baseline.
- * Keep this scoped away from Advanced's separate dashboard toolbar. */
+/* Shared header defaults; desktop sidebars use the compact height below. */
 .monaco-workbench.agent-sessions-workbench:not(.phone-layout) .sessions-panel-header.sidebar-part-header,
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout) .sessions-panel-header.sessions-part-header {
 	height: 48px;
@@ -116,11 +105,21 @@
  * while renderer chrome follows workbench zoom. Align all three header
  * sections to that fixed center without shrinking their layout/hit areas. */
 .monaco-workbench.agent-sessions-workbench.mac:not(.phone-layout):not(.fullscreen) .sessions-panel-header.sidebar-part-header > :is(.sessions-panel-header-left, .sessions-panel-header-center, .sessions-panel-header-right),
-.monaco-workbench.agent-sessions-workbench.mac:not(.optimus-window):not(.phone-layout):not(.fullscreen) .sessions-panel-header:is(.sidebar-part-header, .sessions-part-header) > :is(
+.monaco-workbench.agent-sessions-workbench.mac:not(.optimus-window):not(.phone-layout):not(.fullscreen) .sessions-panel-header.sessions-part-header > :is(
 	.sessions-panel-header-left,
 	.sessions-panel-header-center,
 	.sessions-panel-header-right) {
 	transform: translateY(calc(18px / var(--zoom-factor, 1) - 24px));
+}
+
+/* Bring Simple and Advanced sidebar navigation 6px closer to the mode controls. */
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout) .sessions-panel-header.sidebar-part-header {
+	height: 42px;
+	flex-basis: 42px;
+}
+
+.monaco-workbench.agent-sessions-workbench.mac:not(.phone-layout):not(.fullscreen) .sessions-panel-header.sidebar-part-header > :is(.sessions-panel-header-left, .sessions-panel-header-center, .sessions-panel-header-right) {
+	transform: translateY(calc(18px / var(--zoom-factor, 1) - 21px));
 }
 
 /* ---- Sidebar ------------------------------------------------------------ */
@@ -821,8 +820,8 @@
 	width: 18px;
 	height: 18px;
 	font-size: 8px;
-	background: var(--vscode-charts-green, #2bbf75);
-	color: #fff;
+	background: var(--vscode-activityBarBadge-background);
+	color: var(--vscode-activityBarBadge-foreground);
 }
 
 .monaco-workbench.agent-sessions-workbench .agent-sessions-footer .agent-sessions-user-avatar.agent-sessions-user-logo {
@@ -867,6 +866,33 @@
 		width: 28px;
 		height: 28px;
 		flex-basis: 28px;
+	}
+
+	/* Search replaces its action inside the same 28px navigation row. */
+	.agent-sessions-simple-search-row .agent-sessions-find-widget-container {
+		flex: 1;
+		width: auto;
+		min-width: 0;
+	}
+
+	.agent-sessions-simple-search-row .agent-sessions-find-widget-container > .monaco-tree-type-filter {
+		align-items: center;
+		height: 28px;
+	}
+
+	.agent-sessions-simple-search-row .agent-sessions-find-widget-container > .monaco-tree-type-filter .monaco-tree-type-filter-input > .monaco-findInput > .monaco-inputbox {
+		height: 28px;
+		min-height: 28px;
+	}
+
+	.agent-sessions-simple-search-row .agent-sessions-find-widget-container > .monaco-tree-type-filter .monaco-tree-type-filter-input > .monaco-findInput > .controls {
+		top: 2px;
+		right: 4px;
+		gap: 2px;
+	}
+
+	.agent-sessions-simple-search-row .agent-sessions-find-widget-container > .monaco-tree-type-filter > .monaco-tree-type-filter-actionbar {
+		margin-left: 4px;
 	}
 
 	.agent-sessions-simple-project-row {
@@ -1031,8 +1057,8 @@
 	padding: 0 12px;
 	border: 1px solid transparent;
 	border-radius: 999px;
-	background: #0078d4;
-	color: #fff;
+	background: var(--vscode-button-background);
+	color: var(--vscode-button-foreground);
 	font: inherit;
 	font-size: 11px;
 	font-weight: 600;
@@ -1049,7 +1075,7 @@
 }
 
 .agent-sessions-viewpane .agent-sessions-update-pill:hover {
-	background: #006cbe;
+	background: var(--vscode-button-hoverBackground);
 }
 
 .agent-sessions-viewpane .agent-sessions-update-pill:focus-visible {
@@ -1313,7 +1339,7 @@
 	background: var(--codex-composer) !important;
 }
 
-/* t3Theme.css imports this parity layer before its legacy dark-theme rules.
+/* backboardChatTheme.css imports this parity layer before its legacy dark-theme rules.
  * Carry the full host chain here so the Codex composer surface still wins the
  * cascade without relying on source order. */
 html body .monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.sessionspart .new-chat-composer-stack > .interactive-session .interactive-input-part :is(
@@ -1383,13 +1409,13 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 /* ---- Active chat -------------------------------------------------------- */
 
 .monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.sessionspart {
-	--t3-background: var(--codex-canvas);
-	--t3-foreground: var(--codex-text-primary);
-	--t3-muted: var(--codex-hover);
-	--t3-muted-foreground: var(--codex-text-secondary);
-	--t3-accent: var(--codex-hover);
-	--t3-border: var(--codex-border);
-	--t3-secondary: var(--codex-hover);
+	--backboard-background: var(--codex-canvas);
+	--backboard-foreground: var(--codex-text-primary);
+	--backboard-muted: var(--codex-hover);
+	--backboard-muted-foreground: var(--codex-text-secondary);
+	--backboard-accent: var(--codex-hover);
+	--backboard-border: var(--codex-border);
+	--backboard-secondary: var(--codex-hover);
 }
 
 .monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.sessionspart :is(
@@ -1469,7 +1495,7 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 /* ---- Right workbench ---------------------------------------------------- */
 
 .monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.auxiliarybar {
-	--codex-canvas: var(--vscode-agentsPanel-background, var(--vscode-editor-background));
+	--codex-canvas: var(--sessions-main-region-background);
 	border: 0 !important;
 	border-left: 1px solid var(--codex-border) !important;
 	border-radius: 0 !important;
@@ -1482,18 +1508,6 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 }
 
 .monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-shell {
-	--rwb-bg: var(--codex-canvas);
-	--rwb-bg-muted: var(--codex-hover);
-	--rwb-chrome: var(--codex-hover);
-	--rwb-chrome-soft: var(--codex-canvas);
-	--rwb-border: var(--codex-border);
-	--rwb-border-strong: var(--codex-border-strong);
-	--rwb-hover: var(--codex-hover);
-	--rwb-selection: var(--codex-selected);
-	--rwb-rail-selection: var(--codex-selected);
-	--rwb-selection-border: transparent;
-	--rwb-foreground: var(--codex-text-primary);
-	--rwb-muted: var(--codex-text-secondary);
 	background: var(--codex-canvas);
 	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 	font-size: 12px;
@@ -2321,8 +2335,8 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 
 	.part.sessionspart .interactive-response {
 		--bb-clean-chat-muted: var(--wallpaper-muted);
-		--bb-t3-muted: var(--wallpaper-muted);
-		--bb-t3-text: var(--wallpaper-foreground);
+		--bb-backboard-muted: var(--wallpaper-muted);
+		--bb-backboard-text: var(--wallpaper-foreground);
 		--bb-cursor-transcript-muted: var(--wallpaper-muted);
 		--vscode-interactive-session-foreground: var(--wallpaper-foreground);
 		color: var(--wallpaper-foreground);
@@ -2345,7 +2359,7 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 }
 
 .monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.hc-black):not(.hc-light) .part.sessionspart .interactive-response :is(
-	.chat-t3-turn-fold-label, .chat-t3-turn-fold-button,
+	.chat-backboard-turn-fold-label, .chat-backboard-turn-fold-button,
 	.chat-footer-details, .chat-footer-toolbar .action-label,
 	.chat-footer-toolbar .codicon, .chat-thinking-icon,
 	.chat-thinking-cursor-reasoning-icon, .chat-progress-elapsed,

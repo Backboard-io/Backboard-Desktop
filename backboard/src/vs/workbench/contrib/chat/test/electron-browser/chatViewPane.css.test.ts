@@ -189,7 +189,7 @@ suite('ChatViewPane CSS', () => {
 		assert.match(workRowChevron, /flex:\s*0 0 16px/);
 		assert.match(workRowChevron, /font-size:\s*12px/);
 
-		const subagentChevron = ruleBody(chatCss, '.monaco-workbench .backboard-clean-chat .chat-t3-turn-work-body > .chat-subagent-strip .chat-collapsible-hover-chevron');
+		const subagentChevron = ruleBody(chatCss, '.monaco-workbench .backboard-clean-chat .chat-backboard-turn-work-body > .chat-subagent-strip .chat-collapsible-hover-chevron');
 		assert.match(subagentChevron, /width:\s*16px/);
 		assert.match(subagentChevron, /height:\s*20px/);
 		assert.match(subagentChevron, /flex:\s*0 0 16px/);
@@ -290,7 +290,7 @@ suite('ChatViewPane CSS', () => {
 		const alignedRows = ruleBody(chatCss, `${transcriptRoot} .interactive-item-container.interactive-response > .value > .rendered-markdown,`);
 		const adjacentDiffRows = ruleBody(chatCss, `${transcriptRoot} .chat-thinking-cursor-edit-row + .chat-thinking-cursor-edit-row,`);
 		const adjacentResponseDiffs = ruleBody(chatCss, `${transcriptRoot} .interactive-item-container.interactive-response > .value > :is(.chat-external-edit-card, .chat-text-edit-compact-loading) + :is(.chat-external-edit-card, .chat-text-edit-compact-loading),`);
-		const adjacentDiffs = ruleBody(chatCss, '.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-t3-turn-work-body > :is(.chat-external-edit-card, .chat-text-edit-compact-loading) + :is(.chat-external-edit-card, .chat-text-edit-compact-loading)');
+		const adjacentDiffs = ruleBody(chatCss, '.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-backboard-turn-work-body > :is(.chat-external-edit-card, .chat-text-edit-compact-loading) + :is(.chat-external-edit-card, .chat-text-edit-compact-loading)');
 		const previewCard = ruleBody(chatCss, ':is(.monaco-workbench .part.auxiliarybar .chat-viewpane, .monaco-workbench.agent-sessions-workbench .part.sessionspart .chat-view-chat.backboard-clean-chat.backboard-composer) .interactive-list.backboard-cursor-transcript .interactive-item-container.interactive-response .chat-external-edit-card.chat-external-edit-preview');
 		const previewMarginReset = ruleBody(chatCss, '.monaco-workbench .backboard-clean-chat .backboard-cursor-transcript .chat-external-edit-card.chat-external-edit-preview');
 		assert.match(transcript, /--bb-cursor-diff-gap:\s*10px/);

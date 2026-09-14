@@ -74,6 +74,18 @@ export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(bridge);
 	context.subscriptions.push(usagePanel);
 	initializeBackboardUpdates(context, backboardToolOutput);
+	context.subscriptions.push(vscode.commands.registerCommand('backboard.hasAlternativeCredentials', () => bridge.hasAlternativeCredentials()));
+	context.subscriptions.push(vscode.commands.registerCommand('backboard.setupProviderKey', async () => {
+		const provider = await vscode.window.showQuickPick([
+			{ label: 'OpenAI', id: 'openai' }, { label: 'Anthropic', id: 'anthropic' },
+			{ label: 'Google', id: 'google' }, { label: 'OpenRouter', id: 'openrouter' },
+		], { title: vscode.l10n.t('Bring Your Own Key'), placeHolder: vscode.l10n.t('Choose a provider') });
+		if (!provider) { return false; }
+		const key = await vscode.window.showInputBox({ title: vscode.l10n.t('{0} API Key', provider.label), password: true, ignoreFocusOut: true, prompt: vscode.l10n.t('Stored encrypted on this device.') });
+		if (!key?.trim()) { return false; }
+		return vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: vscode.l10n.t('Connecting {0}…', provider.label) }, () => bridge.configureProviderKey(provider.id, key));
+	}));
+
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.configureProviderKey', (provider: string, key: string) => bridge.configureProviderKey(provider, key)));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.setApiKey', async () => {
 		if (await setApiKey()) {
@@ -1641,6 +1653,12 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 							void postPanelState(this.bridge, webviewView.webview, true);
 						}
 					});
+				} else if (message?.type === 'setupProviderKey' || message?.type === 'setupSubscription') {
+					const command = message.type === 'setupProviderKey' ? 'backboard.setupProviderKey' : 'backboard.setupSubscription';
+					void vscode.commands.executeCommand(command).then(
+						() => postPanelState(this.bridge, webviewView.webview, true),
+						() => vscode.window.showErrorMessage('Setup failed. Please try again.')
+					);
 				} else if (message?.type === 'signIn') {
 					void promptBackboardSso(this.bridge).then(changed => {
 						if (changed) {
@@ -2333,6 +2351,15 @@ class BackboardBridge implements vscode.Disposable {
 			}
 		});
 		return child;
+	}
+
+	async hasAlternativeCredentials(): Promise<boolean> {
+		return new Promise<boolean>(resolve => {
+			cp.execFile(this.resolveCliPath(), ['--alternative-auth-status'], { timeout: 10000, maxBuffer: 4096 }, (error, stdout) => {
+				if (error) { resolve(false); return; }
+				try { resolve(JSON.parse(stdout).configured === true); } catch { resolve(false); }
+			});
+		});
 	}
 
 	async configureProviderKey(provider: string, key: string): Promise<boolean> {
@@ -3659,7 +3686,9 @@ async function savePanelOptions(options: PanelOptions): Promise<void> {
 async function postPanelState(bridge: BackboardBridge, webview: vscode.Webview, forceModelRefresh = false): Promise<void> {
 	const settings = readSettings();
 	const publicPanelSettings = publicSettings(settings);
-	await webview.postMessage({ type: 'settings', settings: publicPanelSettings, workspace: workspacePath() });
+	const alternativeConfigured = await bridge.hasAlternativeCredentials();
+	await vscode.commands.executeCommand('setContext', 'backboard.alternativeConfigured', alternativeConfigured);
+	await webview.postMessage({ type: 'settings', settings: { ...publicPanelSettings, authenticated: publicPanelSettings.authenticated || alternativeConfigured }, workspace: workspacePath() });
 	const cachedModels = forceModelRefresh ? undefined : await bridge.cachedModels();
 	const cachedTools = forceModelRefresh ? undefined : await bridge.cachedTools(settings.mode);
 	if (cachedModels) {
@@ -3685,7 +3714,7 @@ async function postPanelState(bridge: BackboardBridge, webview: vscode.Webview, 
 		} else {
 				await webview.postMessage({ type: 'append', role: 'error', text: error instanceof Error ? error.message : String(error) });
 				if (isBackboardAuthError(error)) {
-					await webview.postMessage({ type: 'status', text: 'Sign in with Backboard SSO to load models.' });
+					await webview.postMessage({ type: 'status', text: 'Connect your AI to load models.' });
 				} else {
 					await webview.postMessage({ type: 'status', text: 'Could not load models.' });
 				}

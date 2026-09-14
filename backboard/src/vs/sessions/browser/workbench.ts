@@ -6,7 +6,7 @@
 import '../../workbench/browser/style.js';
 import './media/style.css';
 import './media/chatMarkdown.css';
-import './media/t3Theme.css';
+import './media/backboardChatTheme.css';
 import { Disposable, DisposableMap, DisposableStore, IDisposable, toDisposable } from '../../base/common/lifecycle.js';
 import { Emitter, Event, setGlobalLeakWarningThreshold } from '../../base/common/event.js';
 import { getActiveDocument, getActiveElement, getClientArea, getWindowId, getWindows, IDimension, isAncestorUsingFlowTo, isHTMLElement, size, Dimension, runWhenWindowIdle, scheduleAtNextAnimationFrame } from '../../base/browser/dom.js';

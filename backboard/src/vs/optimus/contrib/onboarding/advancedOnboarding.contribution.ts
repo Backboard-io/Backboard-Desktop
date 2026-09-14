@@ -13,7 +13,7 @@ import { IStorageService, StorageScope, StorageTarget } from '../../../platform/
 import { registerWorkbenchContribution2, WorkbenchPhase } from '../../../workbench/common/contributions.js';
 import { SpotlightTour, ISpotlightTourStep, TourPlacement } from '../../../workbench/contrib/welcomeOnboarding/browser/spotlightTour.js';
 import { IOnboardingService } from '../../../workbench/contrib/welcomeOnboarding/common/onboardingService.js';
-import { ONBOARDING_ADVANCED_TOUR_STORAGE_KEY, ONBOARDING_STORAGE_KEY } from '../../../workbench/contrib/welcomeOnboarding/common/onboardingTypes.js';
+import { ONBOARDING_ADVANCED_TOUR_STORAGE_KEY, ONBOARDING_STORAGE_KEY, shouldOfferOnboardingTour } from '../../../workbench/contrib/welcomeOnboarding/common/onboardingTypes.js';
 import { IWorkbenchLayoutService } from '../../../workbench/services/layout/browser/layoutService.js';
 import { IWorkbenchEnvironmentService } from '../../../workbench/services/environment/common/environmentService.js';
 
@@ -44,7 +44,7 @@ class AdvancedOnboardingTour extends Disposable {
 		}
 		try {
 			const state = JSON.parse(this.storageService.get(ONBOARDING_STORAGE_KEY, StorageScope.APPLICATION, '{}'));
-			if (state.completed !== true) {
+			if (!shouldOfferOnboardingTour(state)) {
 				return;
 			}
 		} catch {

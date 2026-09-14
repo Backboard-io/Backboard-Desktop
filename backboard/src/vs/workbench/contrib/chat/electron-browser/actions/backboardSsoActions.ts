@@ -10,7 +10,7 @@ import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { ServicesAccessor } from '../../../../../editor/browser/editorExtensions.js';
-import { localize2 } from '../../../../../nls.js';
+import { localize, localize2 } from '../../../../../nls.js';
 import { IActionViewItemService } from '../../../../../platform/actions/browser/actionViewItemService.js';
 import { Action2, MenuId, MenuRegistry, registerAction2 } from '../../../../../platform/actions/common/actions.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
@@ -22,9 +22,23 @@ import { ChatEntitlementContextKeys, IChatEntitlementService } from '../../../..
 import { IPathService } from '../../../../services/path/common/pathService.js';
 import { BackboardAuthContextKeys, backboardConfigResource, hasBackboardCredentials, isBackboardProduct } from '../../common/backboardAuth.js';
 
+import { IQuickInputService } from '../../../../../platform/quickinput/common/quickInput.js';
+import { IAgentCliSetupService, CHATGPT_SUBSCRIPTION_SETUP_ID, CLAUDE_SUBSCRIPTION_SETUP_ID } from '../../browser/agentSessions/agentCliSetup.js';
+
 const backboardCategory = localize2('backboard.category', "Backboard");
 
 export function registerBackboardSsoActions(): void {
+	registerAction2(class BackboardSubscriptionSetupAction extends Action2 {
+		constructor() { super({ id: 'backboard.setupSubscription', title: localize2('backboard.setupSubscription', "Set Up Subscription"), category: backboardCategory, f1: true }); }
+		override async run(accessor: ServicesAccessor): Promise<void> {
+			const setup = accessor.get(IAgentCliSetupService);
+			const choice = await accessor.get(IQuickInputService).pick([
+				{ label: 'ChatGPT', id: CHATGPT_SUBSCRIPTION_SETUP_ID },
+				{ label: 'Claude', id: CLAUDE_SUBSCRIPTION_SETUP_ID },
+			], { title: localize('backboard.byos.title', "Bring Your Own Subscription"), placeHolder: localize('backboard.byos.choose', "Choose a subscription") });
+			if (choice) { await setup.beginSetup(choice.id); }
+		}
+	});
 	registerAction2(class BackboardSignInAction extends Action2 {
 		constructor() {
 			super({

@@ -3,6 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { renderBackboardAuthSetup } from '../../../workbench/contrib/chat/browser/backboardAuthSetup.js';
+import { BackboardAuthContextKeys, hasAlternativeBackboardCredentials } from '../../../workbench/contrib/chat/common/backboardAuth.js';
 import './media/sessionView.css';
 import { $, addDisposableListener, EventType, size } from '../../../base/browser/dom.js';
 import { ISerializableView, IViewSize } from '../../../base/browser/ui/grid/grid.js';
@@ -89,6 +91,7 @@ export class SessionView extends Disposable implements ISerializableView {
 	private readonly _scopedInstantiationService: IInstantiationService;
 	private readonly _backboardAuthEnabledKey: IContextKey<boolean>;
 	private readonly _backboardSignedInKey: IContextKey<boolean>;
+	private readonly _backboardAlternativeAuthKey: IContextKey<boolean>;
 	private _backboardAuthGateOverlay: HTMLElement | undefined;
 
 	private readonly _currentView = this._register(new MutableDisposable<AbstractChatView>());
@@ -141,6 +144,7 @@ export class SessionView extends Disposable implements ISerializableView {
 		this._chatSessionTypeKey = ChatSessionTypeContext.bindTo(scopedContextKeyService);
 		this._sessionHasChangesKey = SessionHasChangesContext.bindTo(scopedContextKeyService);
 		this._backboardAuthEnabledKey = contextKeyService.createKey('backboard.authGateEnabled', contextKeyService.getContextKeyValue<boolean>('backboard.authGateEnabled') === true);
+		this._backboardAlternativeAuthKey = BackboardAuthContextKeys.alternativeConfigured.bindTo(contextKeyService);
 		this._backboardSignedInKey = contextKeyService.createKey('backboard.signedIn', contextKeyService.getContextKeyValue<boolean>('backboard.signedIn') === true);
 
 		// Scoped service exposing this view's session so toolbars and contributed
@@ -624,7 +628,7 @@ export class SessionView extends Disposable implements ISerializableView {
 	}
 
 	private _isBackboardAuthRequired(): boolean {
-		return this._backboardAuthEnabledKey.get() === true && this._backboardSignedInKey.get() !== true;
+		return this._backboardAuthEnabledKey.get() === true && this._backboardSignedInKey.get() !== true && this._backboardAlternativeAuthKey.get() !== true;
 	}
 
 	private _createBackboardAuthGate(): void {
@@ -634,7 +638,7 @@ export class SessionView extends Disposable implements ISerializableView {
 
 		const overlay = $('.backboard-auth-gate-overlay.backboard-auth-gate-session-view');
 		overlay.setAttribute('role', 'dialog');
-		overlay.setAttribute('aria-label', localize('backboard.auth.sessionView.aria', "Sign in to Backboard"));
+		overlay.setAttribute('aria-label', localize('backboard.auth.sessionView.aria', "Connect Your AI"));
 
 		const card = $('.backboard-auth-gate-card');
 		overlay.appendChild(card);
@@ -644,30 +648,17 @@ export class SessionView extends Disposable implements ISerializableView {
 		card.appendChild(logo);
 
 		const title = $('h3.backboard-auth-gate-title');
-		title.textContent = localize('backboard.auth.sessionView.title', "Sign in to Backboard");
+		title.textContent = localize('backboard.auth.sessionView.title', "Connect Your AI");
 		card.appendChild(title);
 
 		const description = $('p.backboard-auth-gate-description');
-		description.textContent = localize('backboard.auth.sessionView.description', "To use the Agents page, sign in with Backboard SSO.");
+		description.textContent = localize('backboard.auth.sessionView.description', "Use Backboard, an API key, or a subscription.");
 		card.appendChild(description);
 
-		const button = $<HTMLButtonElement>('button.backboard-auth-gate-button');
-		button.type = 'button';
-		button.textContent = localize('backboard.auth.signInSso', "Sign in with SSO");
-		this._register(addDisposableListener(button, EventType.CLICK, () => {
-			this._signInAndRefreshBackboardAuthGate().catch(error => {
-				this.logService.error(`[Backboard] Failed to refresh agents middle panel auth gate after sign in: ${error instanceof Error ? error.message : String(error)}`);
-			});
-		}));
-		card.appendChild(button);
+		this._register(renderBackboardAuthSetup(card, this.commandService, () => this._refreshBackboardAuthGateFromConfig()));
 
 		this.element.appendChild(overlay);
 		this._backboardAuthGateOverlay = overlay;
-	}
-
-	private async _signInAndRefreshBackboardAuthGate(): Promise<void> {
-		await this.commandService.executeCommand('backboard.signIn');
-		await this._refreshBackboardAuthGateFromConfig();
 	}
 
 	private _updateBackboardAuthGate(): void {
@@ -688,11 +679,12 @@ export class SessionView extends Disposable implements ISerializableView {
 
 		this._backboardAuthEnabledKey.set(true);
 		this._backboardSignedInKey.set(await hasBackboardCredentials(this.fileService, await backboardConfigResource(this.pathService)));
+		this._backboardAlternativeAuthKey.set(await hasAlternativeBackboardCredentials(this.commandService));
 		this._updateBackboardAuthGate();
 	}
 	}
 
-const backboardAuthGateContextKeys = new Set(['backboard.authGateEnabled', 'backboard.signedIn']);
+const backboardAuthGateContextKeys = new Set(['backboard.authGateEnabled', 'backboard.signedIn', 'backboard.alternativeConfigured']);
 
 interface BackboardConfigJson {
 	readonly [key: string]: unknown;

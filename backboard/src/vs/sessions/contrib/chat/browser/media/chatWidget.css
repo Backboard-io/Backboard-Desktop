@@ -975,8 +975,8 @@
 }
 
 /* Unify the composer background with the surrounding region so there is no
- * colour seam. The T3 theme paints the session band (--t3-background) and the
- * input card / editor (--t3-muted) as distinct darks; the selectors below carry
+ * colour seam. The T3 theme paints the session band (--backboard-background) and the
+ * input card / editor (--backboard-muted) as distinct darks; the selectors below carry
  * enough specificity (and are scoped to the new-chat composer) to override those
  * theme rules and adopt the region background instead, leaving the card defined
  * only by its border. */

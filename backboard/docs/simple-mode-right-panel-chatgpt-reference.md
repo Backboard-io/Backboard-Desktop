@@ -68,4 +68,4 @@ These eight screenshots were supplied from the ChatGPT desktop app on 2026-08-05
 | Changed-files tree model and rows | `src/vs/sessions/contrib/rightWorkbench/browser/reviewTree.ts` |
 | Simple-mode grid, panel visibility, and expand/restore behavior | `src/vs/sessions/browser/workbench.ts` |
 | Simple-mode default part visibility | `src/vs/sessions/browser/layoutPolicy.ts` |
-| Base Simple-mode theme import/order | `src/vs/sessions/browser/media/t3Theme.css` |
+| Base Simple-mode theme import/order | `src/vs/sessions/browser/media/backboardChatTheme.css` |

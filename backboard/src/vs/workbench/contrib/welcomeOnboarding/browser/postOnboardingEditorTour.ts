@@ -11,7 +11,7 @@ import { IWorkbenchContribution } from '../../../common/contributions.js';
 import { IWorkbenchEnvironmentService } from '../../../services/environment/common/environmentService.js';
 import { IWorkbenchLayoutService, Parts } from '../../../services/layout/browser/layoutService.js';
 import { ISpotlightTourIntro, ISpotlightTourStep, SpotlightTour, TourPlacement } from './spotlightTour.js';
-import { ONBOARDING_EDITOR_TOUR_PENDING_KEY, ONBOARDING_STORAGE_KEY, ONBOARDING_TOUR_STORAGE_KEY } from '../common/onboardingTypes.js';
+import { ONBOARDING_EDITOR_TOUR_PENDING_KEY, ONBOARDING_STORAGE_KEY, ONBOARDING_TOUR_STORAGE_KEY, shouldOfferOnboardingTour } from '../common/onboardingTypes.js';
 import { IOnboardingService } from '../common/onboardingService.js';
 
 /**
@@ -57,7 +57,7 @@ export class PostOnboardingEditorTour extends Disposable implements IWorkbenchCo
 			}
 			try {
 				const state = JSON.parse(this.storageService.get(ONBOARDING_STORAGE_KEY, StorageScope.APPLICATION, '{}'));
-				if (state.completed !== true) {
+				if (!shouldOfferOnboardingTour(state)) {
 					return;
 				}
 			} catch {

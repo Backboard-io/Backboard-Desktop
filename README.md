@@ -1,407 +1,239 @@
 # Backboard Desktop
 
-Backboard Desktop is an agent-first IDE. It is a fork of VS Code whose workbench has been
-extended with three additional top-level UI layers built specifically for running coding
-agents, plus a TypeScript agent runtime (`cli-ts`) that the IDE spawns as a child process.
+An open-source desktop IDE for working with coding agents, reviewing their changes, and editing code in one workspace.
 
-The short version of the architecture: **the IDE is the surface, `cli-ts` is the brain, and
-the Backboard API is the model gateway.** Everything below expands on that.
+Backboard Desktop is built on **[Visual Studio Code — Code - OSS](https://github.com/microsoft/vscode)**, created by Microsoft and the VS Code community. It extends that foundation with agent workflows, multiple work modes, and the Backboard runtime. This is an independently maintained fork.
 
----
+[Getting started](#getting-started) · [Documentation](#documentation) · [Contributing](#contributing) · [Credits](#credits) · [License](#license)
 
-## Features
+## Work your way
 
-### Three work modes
+Switch between three modes from the title bar:
 
-Backboard Desktop ships three distinct window modes over the same workspace, switchable from
-the title bar:
-
-- **Simple** — A streamlined agent workbench. One or more agent sessions side by side, with a
-  sidebar for session navigation and an auxiliary bar for file changes and review. No
-  activity bar, no status bar, no clutter.
-- **Editor** — Full VS Code. Files, terminal, debugger, extensions, and the entire existing
-  workbench. Switch in to edit, switch back to your agents without losing state.
-- **Advanced** — A multi-session command surface for supervising many concurrent agents at
-  once. View sessions as a grid of cards or a kanban board bucketed by status (Running,
-  Needs Attention, Done).
-
-### Agent-first workflow
-
-- **Native Backboard agent** — First-class integration with the Backboard API for
-  completions, tool scheduling, and session management. The agent runs as a child process
-  and communicates over line-delimited JSON.
-- **BYOS agent hosts** — Plug in Claude, Codex, Copilot, or any compatible agent
-  provider. Connect locally, over SSH, through a tunnel, or in WSL.
-- **Tool scheduler with hooks** — Every tool call runs through a hook system (before and
-  after), giving you control over what agents can do and when.
-- **Skills and MCP servers** — Extensible skill system and Model Context Protocol support
-  for connecting to external tools and services.
-
-### Multi-session management
-
-- Run multiple agent sessions concurrently, each with its own workspace, branch, and layout.
-- Per-session layout persistence — auxiliary bar, panel, and editor state are captured and
-  restored as you switch sessions.
-- Session picker in the titlebar shows provider icon, title, workspace name, git branch,
-  and a `+insertions -deletions` diff summary for pending changes.
-- Advanced mode adds filtering, sorting, and grouping across all sessions.
-
-### Integrated development tools
-
-- **Changes view** — See every file the agent touched, with inline diffs and a review
-  strip for accepting or rejecting changes.
-- **Integrated terminal** — Attach a live shell to any session.
-- **Integrated browser** — Open a real browser view inside the IDE for testing web
-  applications.
-- **File editor** — Full Monaco editor available as a modal overlay in Simple mode or as
-  the primary surface in Editor mode.
-
-### Security and credentials
-
-- API keys stored in `~/.backboard_ide/config.json` with `0600` permissions. The agent
-  never reads keys from disk — the host injects them as environment variables.
-- BYOK (bring your own key) for third-party model providers, stored in the OS keychain via
-  `ISecretStorageService`.
-- SSO support for team authentication.
-- Every credential can be overridden via environment variables for CI or local development.
-
----
-
-## Repository layout
-
-| Path | What it is |
+| Mode | Purpose |
 | --- | --- |
-| [backboard/](backboard/) | The product. A VS Code fork (`code-oss-dev` 1.126.0, Electron 42) containing the workbench, the three custom UI layers, and the agent host. |
-| [backboard/cli-ts/](backboard/cli-ts/) | **The Backboard backend.** A standalone Bun/TypeScript agent runtime (`backboard-r-cli`) — the agent loop, tool scheduler, MCP client, skills, and hooks. |
-| [scripts/](scripts/) | Release building, packaging, validation, and publishing scripts. |
-| [docs/](docs/) | Runtime documentation, validation reports, design assets, and branding. |
+| **Simple** | A focused chat workspace for coding agents, with session navigation, file changes, and review tools. |
+| **Editor** | The familiar Code - OSS editing experience, including files, terminals, debugging, and extensions. |
+| **Advanced** | A workspace for supervising concurrent agent sessions in grid or kanban views. |
 
-Historical runtime snapshots live in [backboard/backboard-reference/](backboard/backboard-reference/).
+### Features
 
-Inside `backboard/src/vs/`, beyond the stock VS Code layers (`base`, `platform`, `editor`,
-`workbench`, `code`):
+- **Multiple agent sessions:** organize work by project, branch, and session, with saved layouts.
+- **Backboard integration:** run coding agents through the Backboard API and the bundled TypeScript runtime.
+- **Agent providers:** integrations for Backboard, Claude, Codex, and Copilot. Availability depends on provider setup and authentication.
+- **Review tools:** inspect changed files and diffs alongside the conversation.
+- **Integrated tools:** work with an editor, terminal, and browser inside the app.
+- **Skills and MCP:** extend agent workflows with reusable instructions and external tools.
+- **Shared appearance:** use the same theme across Simple, Editor, and Advanced modes.
 
-| Layer | Purpose |
-| --- | --- |
-| [sessions/](backboard/src/vs/sessions/) | The **Agents Window** — the Simple mode workbench. Its own layout, parts, and session-provider model. |
-| [optimus/](backboard/src/vs/optimus/) | The **Advanced** window — a grid/kanban of many concurrent sessions. |
-| [platform/agentHost/](backboard/src/vs/platform/agentHost/) | The agent host: process management, changesets, checkpoints, git integration, and one subdirectory per agent backend (`cliTs`, `claude`, `codex`, `copilot`). |
+Agent integrations require the credentials or accounts for the services you choose. Access to hosted services is separate from this repository's source-code license.
 
-Layering rule: `vs/sessions` may import from `vs/workbench` and below, but **`vs/workbench`
-must never import from `vs/sessions`**. Enforced by ESLint — see
-[LAYERS.md](backboard/src/vs/sessions/LAYERS.md).
+## Getting started
 
----
+### Run from source on macOS
 
-## Running it
+The development launcher below uses the macOS toolchain. Platform packaging instructions are linked under [Documentation](#documentation).
 
-### Prerequisites
+Install these prerequisites:
 
-| Requirement | Why |
-| --- | --- |
-| **Node v24.15.0** | Pinned in [.nvmrc](backboard/.nvmrc). The major version must match exactly. |
-| **Xcode Command Line Tools** (macOS) | `@vscode/spdlog`, `node-pty`, `native-keymap` and `@vscode/sqlite3` compile through `node-gyp`. Without a compiler `npm install` **rolls back completely** — you get no `node_modules` at all, not a partial one. |
-| **Bun** | `cli-ts` is a Bun project. In a dev checkout there is no packaged binary, so the agent host shells out to `bun run cli-ts/src/entrypoints/cli.tsx`. Without Bun the app launches but every agent request fails with `BackboardSendFailed`. |
-
-### One command
+- **Git** to clone the repository.
+- **Node.js 24.15.0**, pinned in [`.nvmrc`](backboard/.nvmrc), with npm.
+- **Bun** to run the TypeScript agent runtime in a development checkout.
+- **Xcode Command Line Tools** for native dependencies. Install them with `xcode-select --install`.
 
 ```bash
-cd backboard
+git clone https://github.com/Backboard-io/Backboard-Desktop.git
+cd Backboard-Desktop/backboard
+
+# If you use nvm:
+nvm install
+nvm use
+
+# Install the agent runtime's separate dependencies.
+(cd cli-ts && bun install)
+
+# Check prerequisites, then build and launch the app.
+./scripts/dev.sh doctor
 ./scripts/dev.sh
 ```
 
-That installs what is missing, fetches Electron, starts the incremental watcher, waits for
-the first build to genuinely finish, launches the app, and then supervises it. Ctrl-C stops
-the watcher and the app together.
+If you manage Node with another tool, select the version in `.nvmrc` before running the commands above and skip the two `nvm` commands.
 
-```bash
-./scripts/dev.sh doctor   # check every prerequisite, with the fix for each
-./scripts/dev.sh watch    # watcher only
-./scripts/dev.sh run      # launch against the current build
-./scripts/dev.sh logs     # follow the build log
-./scripts/dev.sh status
-./scripts/dev.sh stop
-```
+The launcher installs editor dependencies when needed, downloads Electron, starts the incremental build, and waits for it to finish before opening the app. The first build can take several minutes. Press **Ctrl+C** to stop the supervised app and watcher.
 
-Full details in [backboard/DEV_ENVIRONMENT.md](backboard/DEV_ENVIRONMENT.md).
+### Run from source on Windows
 
-### You do not rebuild by hand
+Use native Windows PowerShell. Install **Git**, **Node.js 24.15.0** with npm, **Bun**, and **Python 3** on your `PATH`. Install **Visual Studio 2022 Build Tools** with the **Desktop development with C++** workload, a Windows SDK, and the MSVC, ATL, and MFC Spectre-mitigated libraries for your architecture. Reopen PowerShell after installing the tools.
 
-With the watcher running, `npm run compile` is never the right move:
+This fork's install script detects Visual Studio 2022 or 2019; use 2022. The [upstream build prerequisites](https://github.com/microsoft/vscode/wiki/How-to-Contribute#prerequisites) describe the native dependencies, but may target a newer compiler than this checkout.
 
-| Changed | Do this |
-| --- | --- |
-| Workbench / renderer / any `src/vs/**` UI code | **Cmd+R** in the window |
-| Main-process code (`src/vs/code/electron-main/**`) | Nothing — `dev.sh` relaunches automatically |
-| An extension under `extensions/**` | Cmd+R |
-| `cli-ts` source | Nothing — it is spawned fresh per session and Bun transpiles on the fly |
-| `package.json` dependencies | `./scripts/dev.sh setup` |
+```powershell
+git clone https://github.com/Backboard-io/Backboard-Desktop.git
+Set-Location Backboard-Desktop\backboard
 
-### Two gotchas that will cost you an hour
+node --version  # should print v24.15.0
+python --version
+bun --version
+npm ci
 
-**Launching from inside a running Backboard/VS Code window.** The child inherits
-`ELECTRON_RUN_AS_NODE=1`, so the Electron binary starts as plain Node and dies with a
-misleading `SyntaxError: The requested module 'electron' does not provide an export named
-'Menu'`. It is an environment leak, not a build failure. `./scripts/dev.sh run` scrubs it;
-for a manual launch use `env -u ELECTRON_RUN_AS_NODE ./run-backboard-ide.sh`.
-
-**`cli-ts` is a separate workspace.** It has its own `bun.lock` and is *not* covered by the
-root `npm install`. A missing `bun install` there surfaces as
-`Cannot find package 'ink'`:
-
-```bash
-cd backboard/cli-ts && bun install
-```
-
----
-
-## The three modes
-
-The app provides three window modes over the same workspace.
-
-| Mode | Window kind | Layer | For |
-| --- | --- | --- | --- |
-| **Simple** | `agents` | `vs/sessions` | Talking to one or a few agents. The default agent experience. |
-| **Editor** | `editor` | `vs/workbench` | Ordinary VS Code. Files, terminal, debugger, extensions. |
-| **Advanced** | `optimus` | `vs/optimus` | Supervising many concurrent sessions at once. |
-
-The title-bar switcher exposes all three modes — Editor, Advanced, Simple — in a fixed order so
-each keeps its position regardless of which window you are in
-([backboardModeSwitcherActions.ts:174-193](backboard/src/vs/workbench/contrib/chat/electron-browser/backboardModeSwitcher/backboardModeSwitcherActions.ts#L174-L193)).
-
-You can also boot straight into Simple mode:
-
-```bash
-./run-backboard-ide.sh   # passes --agents
-```
-
-`--agents` is a real CLI flag ([argv.ts:111](backboard/src/vs/platform/environment/node/argv.ts#L111)).
-
-### Simple — the Agents Window
-
-A deliberately reduced workbench: no activity bar, no status bar, no banner, and a layout
-that is **not** user-configurable.
-
-```
-┌────────────────────────────────────────────────────────────────────────────┐
-│                                  Titlebar                                   │
-├─────────┬───────────────────────────┬───────────────┬──────────────────────┤
-│         │       Sessions Part       │ Editor (hid.) │    Auxiliary Bar     │
-│ Sidebar ├───────────────────────────┴───────────────┴──────────────────────┤
-│         │                              Panel                               │
-└─────────┴──────────────────────────────────────────────────────────────────┘
-```
-
-| Part | Default | Holds |
-| --- | --- | --- |
-| Titlebar | Always visible | Session picker, toggles, account widget |
-| Sidebar (300px) | Visible | The sessions list |
-| **Sessions Part** | Visible | The primary surface — an *internal* grid of one or more session views |
-| Editor | **Hidden** | Only for explicit editor workflows; opens as a **modal overlay** |
-| Auxiliary Bar (340px) | Visible | Changes view, file tree |
-| Panel (300px) | Hidden | Terminal, debug output |
-
-The Sessions Part never renders a chat itself — it owns a `SerializableGrid` of session
-views, each rendering the active chat of its own session. That inner grid is private to the
-part and is not part of the workbench grid.
-
-The titlebar is a standalone `TitlebarPart` (it does not extend `BrowserTitlebarPart`) with
-three menu-driven sections:
-
-- **Left** — sidebar toggle, and an agent-host filter pill that scopes the window to one
-  remote host when several are known.
-- **Center** — the session picker, showing provider icon, session title, workspace name, git
-  branch or worktree in parentheses, and a `+insertions -deletions` summary when the session
-  has pending changes. It hides its chrome entirely when no session is active.
-- **Right** — Run Script split button, Open Terminal / Open in VS Code, auxiliary-bar toggle,
-  and the account widget.
-
-Layout state is **per session**: the auxiliary bar, panel, and editor working set are
-captured and restored as you switch sessions — see
-[LAYOUT_CONTROLLER.md](backboard/src/vs/sessions/LAYOUT_CONTROLLER.md).
-
-Reference: [LAYOUT.md](backboard/src/vs/sessions/LAYOUT.md),
-[SESSIONS.md](backboard/src/vs/sessions/SESSIONS.md).
-
-### Editor — stock VS Code
-
-The unmodified workbench. Switching *into* Editor mode restores the left, bottom, and right
-panels unless you previously closed them yourself while in Editor mode — that intent is
-remembered per-part in profile storage, so the mode switcher does not fight your layout. When
-the bottom panel is restored, the Terminal view is made active rather than Problems or Output.
-
-### Advanced — Optimus
-
-A multi-session command surface with two view modes, persisted across restarts:
-
-- **Grid** — every session as a card, running side by side.
-- **Kanban** — the same sessions bucketed by status:
-
-  | Bucket | Status |
-  | --- | --- |
-  | Running | `InProgress` |
-  | Needs Attention | `NeedsInput`, `Error` |
-  | Done | everything else |
-
-Commands: `optimus.newSession`, `optimus.focusSession`, `optimus.deleteSession`,
-`optimus.closeSession`, `optimus.toggleViewMode`, `optimus.setViewMode`. The current mode is
-exposed as the `optimusViewMode` context key so chrome buttons mirror it.
-
----
-
-## BYOS — Bring Your Own Session
-
-BYOS is how non-Backboard agents plug in. Backboard's own agent is the native, first-class
-path; **BYOS is everything else** — Claude, Codex, and any future external or
-remote agent host.
-
-Backends live under [platform/agentHost/node/](backboard/src/vs/platform/agentHost/node/) — one
-directory each for `cliTs`, `claude`, `codex`, and `copilot`. Sessions can run
-locally, over SSH, through a tunnel, or in WSL
-(`sshRemoteAgentHostService.ts`, `tunnelAgentHostService.ts`, `wslRemoteAgentHostService.ts`).
-
-Do not confuse BYOS with **BYOK** (bring your own key), which is about model providers and
-API keys rather than agent backends.
-
----
-
-## The Backboard backend (`cli-ts`)
-
-[`backboard/cli-ts/`](backboard/cli-ts/) is `backboard-r-cli`: a self-contained Bun + React/Ink
-agent runtime. It is a real standalone CLI that also happens to be what the IDE drives.
-
-### How the IDE talks to it
-
-The IDE spawns it as a child process and speaks line-delimited JSON over stdio. Resolution
-order for the executable
-([cliTsProcess.ts:245-271](backboard/src/vs/platform/agentHost/node/cliTs/cliTsProcess.ts#L245-L271)):
-
-1. `BACKBOARD_CLI_TS_PATH` / `VSCODE_BACKBOARD_CLI_TS_PATH` env override
-2. The packaged binary at `extensions/backboard/bin/backboard-cli-ts`
-3. **Dev fallback:** `<bun> run cli-ts/src/entrypoints/cli.tsx`
-
-Bun itself is looked up via `BACKBOARD_BUN_PATH` / `BUN_PATH`, then `$BUN_INSTALL/bin/bun`,
-`~/.bun/bin/bun`, `node_modules/.bin/bun`, Homebrew paths, then `PATH`.
-
-It is launched with `--serve --cwd <workspace>` and replies `serve:ready`. Per-session logs
-and scratch files are forced to `~/.backboard_ide/cli-ts-sessions` via
-`BACKBOARD_SESSION_ROOT` so agent scratch never shows up as file edits in the Changes view.
-
-To skip the Bun path entirely, build the real binary once:
-
-```bash
-npm --prefix extensions/backboard run package-cli-ts
-```
-
-### What is inside it
-
-```
-cli.tsx ──> config ──> bus ──> AgentController ──> AgentLoop ──> providers/backboard
-                                     │                  │
-                                     │                  └──> ToolScheduler ──> tools
-                                     ├──> SkillController ──> skills
-                                     ├──> MCPController ──> mcp
-                                     └──> hooks
-                                              bus ──> session ──> state ──> ui
-```
-
-The agent loop calls the Backboard provider for completions and hands tool calls to
-`ToolScheduler`, which runs hooks before and after each tool. Everything flows through an
-event bus that feeds session logging, state, and the Ink UI. Full detail in
-[runtime overview](backboard/cli-ts/README.md); user-facing docs including skills, hooks,
-MCP servers, and one-shot mode in [README.md](backboard/cli-ts/README.md).
-
-Working on it directly:
-
-```bash
-cd backboard/cli-ts
+Push-Location cli-ts
 bun install
-bun run dev          # interactive
-bun run validate     # lint + typecheck + test
+Pop-Location
+
+# Keep this terminal open while developing.
+npm run watch
 ```
 
-> Note: running `cli-ts` standalone reads credentials from a **different** directory than the
-> IDE does. See the caveat below.
+Wait for the initial client, extension, and Copilot builds to finish without errors. In a **second PowerShell terminal**, from the repository root:
 
----
-
-## Where API keys live on your machine
-
-Two separate stores, for two separate purposes.
-
-### 1. Backboard credentials — `~/.backboard_ide/config.json`
-
-Created at sign-in (SSO or manual key entry) with mode `0600`. Shape is snake_case:
-
-```jsonc
-{
-  "env": "prod",
-  "api_key": "…",
-  "env_keys": { "prod": "…" },   // per-environment keys
-  "oauth":    { "access_token": "…" }
-}
+```powershell
+Set-Location backboard
+Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
+.\scripts\code.bat
 ```
 
-Resolution order in `bridgeConfig()`
-([backboardRuntimeShared.ts:583-647](backboard/src/vs/platform/agentHost/node/cliTs/backboardRuntimeShared.ts#L583-L647)):
+The launcher downloads Electron and prepares built-in extensions. For UI changes, wait for the watcher and run **Developer: Reload Window** in the app. Restart the app after main-process changes. Stop the watcher with **Ctrl+C** when finished.
 
-```
-BACKBOARD_API_KEY  →  VSCODE_BACKBOARD_API_KEY  →  config.api_key  →  config.apiKey  →  config.env_keys[env]
-```
+### Run from source on Linux
 
-with `oauth.access_token` resolved separately as the access token, and the API URL falling
-back to `https://app.backboard.io/api`.
-
-**The key is never read from disk by the agent.** The host resolves it and *injects* it as
-`BACKBOARD_API_KEY` / `BACKBOARD_API_URL` into the spawned `cli-ts` environment
-([cliTsCredentialEnv()](backboard/src/vs/platform/agentHost/node/cliTs/cliTsProcess.ts#L316-L326)),
-and `cli-ts` checks `process.env` before touching any file
-([env.ts:57](backboard/cli-ts/src/config/env.ts#L57)).
-
-> **Caveat worth knowing.** `cli-ts`'s own on-disk fallback points at `~/.backboard/`, not
-> `~/.backboard_ide/` ([backboardConfig.ts:18](backboard/cli-ts/src/config/backboardConfig.ts#L18),
-> [paths.ts:5](backboard/cli-ts/src/config/paths.ts#L5)). Inside the IDE this never fires,
-> because env injection always wins. But run `cli-ts` standalone and it will insist
-> `BACKBOARD_API_KEY is not set` even though you are signed in. The same split applies to
-> user-level `mcp.json` and `hooks.json`, which resolve under `~/.backboard/`.
-
-Also under `~/.backboard_ide/`: `cli-ts-sessions.json` and `cli-ts-sessions/` (session
-history and scratch), `models-cache.json`, and `workspace/`.
-
-### 2. Model provider keys (BYOK) — OS keychain
-
-Third-party model keys do **not** go in a dotfile. They are held by
-`ISecretStorageService`, which is backed by the OS credential store
-([languageModels.ts:759](backboard/src/vs/workbench/contrib/chat/common/languageModels.ts#L759)).
-
-### Overriding without storing anything
-
-Every credential can be supplied as an environment variable instead, which takes priority
-over both stores. `run-backboard-ide.sh` sources a `.env` from the **repository root** (one
-level above `backboard/`), so a local `.env` there is the least invasive way to point a dev
-build at a different environment:
+The following native dependency command targets **Ubuntu 22.04 x86_64**, matching the repository's [Linux build image](scripts/linux-release/Dockerfile). Other distributions and Ubuntu versions may use different package names. Use a graphical desktop session to launch the app.
 
 ```bash
-BACKBOARD_API_KEY=...
-BACKBOARD_API_URL=https://app.backboard.io/api
-BACKBOARD_ENV=prod
+sudo apt-get update
+sudo apt-get install -y \
+  git build-essential pkg-config python3 python-is-python3 \
+  libx11-dev libx11-xcb-dev libxkbfile-dev libxkbcommon-dev \
+  libxkbcommon-x11-dev libsecret-1-dev libkrb5-dev \
+  libgtk-3-0 libnss3 libasound2 libatk-bridge2.0-0 libdrm2 \
+  libgbm1 libnotify4 libxdamage1 libxrandr2 libxss1 libu2f-udev \
+  dbus-x11 xdg-utils
 ```
 
----
+Install **Node.js 24.15.0** with npm and **Bun**, then clone and build:
 
-## Troubleshooting
+```bash
+git clone https://github.com/Backboard-io/Backboard-Desktop.git
+cd Backboard-Desktop/backboard
 
-| Symptom | Cause |
+# If you use nvm; otherwise select the version in .nvmrc yourself.
+nvm install
+nvm use
+
+npm ci
+(cd cli-ts && bun install)
+
+# Keep this terminal open while developing.
+npm run watch
+```
+
+Wait for the initial client, extension, and Copilot builds to finish without errors. In a **second terminal**, from the repository root:
+
+```bash
+cd backboard
+env -u ELECTRON_RUN_AS_NODE ./scripts/code.sh
+```
+
+The launcher downloads Electron and prepares built-in extensions. For UI changes, wait for the watcher and run **Developer: Reload Window** in the app. Restart the app after main-process changes. Stop the watcher with **Ctrl+C** when finished.
+
+### Connect an agent
+
+Open the app and complete the sign-in or provider setup for your chosen integration. For local Backboard development, you can supply credentials through environment variables in the launch terminal:
+
+macOS:
+
+```bash
+export BACKBOARD_API_KEY="your-api-key"
+./scripts/dev.sh
+```
+
+Linux (with the watcher running):
+
+```bash
+export BACKBOARD_API_KEY="your-api-key"
+env -u ELECTRON_RUN_AS_NODE ./scripts/code.sh
+```
+
+Windows PowerShell (with the watcher running):
+
+```powershell
+$env:BACKBOARD_API_KEY = "your-api-key"
+Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
+.\scripts\code.bat
+```
+
+The IDE passes resolved Backboard credentials to the agent process. The standalone CLI also supports environment variables; see the [CLI runtime guide](backboard/cli-ts/README.md) for its configuration and provider options.
+
+## Development
+
+Run these commands from `backboard/`. The `dev.sh` supervisor is for macOS; Windows and Linux use `npm run watch` with the launch commands above.
+
+| Command | Purpose |
 | --- | --- |
-| `npm error gyp ERR! find Python` and no `node_modules` afterwards | No Xcode Command Line Tools. npm rolled the install back. `xcode-select --install`. |
-| `does not provide an export named 'Menu'` | `ELECTRON_RUN_AS_NODE=1` inherited from a parent IDE. Use `./scripts/dev.sh run`. |
-| `BackboardSendFailed` + `Cannot find package 'ink'` | `cli-ts` deps not installed. `cd backboard/cli-ts && bun install`. |
-| `BackboardSendFailed` + "Bun is not available" | Install Bun, set `BACKBOARD_BUN_PATH`, or run `npm --prefix extensions/backboard run package-cli-ts`. |
-| `BACKBOARD_API_KEY is not set` while running `cli-ts` standalone | The `.backboard` vs `.backboard_ide` split above. Export the key, or run through the IDE. |
-| App launches against a half-built `out/` | Something used a fixed `sleep` instead of waiting for the build. `dev.sh` waits for the real completion marker. |
+| `./scripts/dev.sh` | Set up, build, launch, and watch for changes. |
+| `./scripts/dev.sh doctor` | Check the local toolchain. |
+| `./scripts/dev.sh setup` | Install editor dependencies and download Electron. |
+| `./scripts/dev.sh logs` | Follow build output. |
+| `./scripts/dev.sh status` | Inspect the development processes. |
+| `./scripts/dev.sh stop` | Stop the app and watcher. |
+| `npm run watch` | Watch client and extension builds on any platform. |
+| `npm run typecheck-client` | Type-check the main application sources. |
 
----
+After changing renderer code, wait for the watcher to finish and run **Developer: Reload Window** (**Cmd+R** on macOS). The macOS supervisor relaunches after main-process changes; restart manually on Windows and Linux. See the [development guide](backboard/DEV_ENVIRONMENT.md) for the full workflow and troubleshooting.
+
+To work on the agent runtime separately:
+
+```bash
+cd backboard/cli-ts  # from the repository root
+bun install
+bun run dev
+bun run validate
+```
+
+### Repository layout
+
+| Path | Contents |
+| --- | --- |
+| [`backboard/`](backboard/) | The Code - OSS fork, application source, built-in extensions, and build tooling. |
+| [`backboard/src/vs/sessions/`](backboard/src/vs/sessions/) | Agent workspace UI, session navigation, and chat surfaces. |
+| [`backboard/src/vs/optimus/`](backboard/src/vs/optimus/) | Advanced mode's session grid and kanban UI. |
+| [`backboard/src/vs/platform/agentHost/`](backboard/src/vs/platform/agentHost/) | Agent process management and provider integrations. |
+| [`backboard/cli-ts/`](backboard/cli-ts/) | The Bun/TypeScript agent runtime, tools, skills, and MCP support. |
+| [`scripts/`](scripts/) | Release and packaging scripts. |
+| [`docs/`](docs/) | Project documentation, assets, and technical references. |
+
+The desktop app runs `cli-ts` as a child process and exchanges messages over standard input and output. The runtime manages the agent loop and tool execution, while the IDE presents conversations, files, and reviews.
+
+## Documentation
+
+- [Documentation index](docs/README.md)
+- [Development environment](backboard/DEV_ENVIRONMENT.md)
+- [CLI runtime and configuration](backboard/cli-ts/README.md)
+- [Sessions architecture and layering](backboard/src/vs/sessions/LAYERS.md)
+- [Session layout](backboard/src/vs/sessions/LAYOUT.md)
+- [Windows packaging](scripts/windows-release/README.md)
+- [Linux packaging](scripts/linux-release/README.md)
+- [macOS installer assets](scripts/dmg-assets/README.md)
+
+## Contributing
+
+Bug reports, documentation improvements, and code contributions are welcome.
+
+1. Search this repository's [issues](https://github.com/Backboard-io/Backboard-Desktop/issues) for an existing report. Include your operating system, app version or commit, reproduction steps, and expected behavior when filing a bug.
+2. For substantial changes, open an issue first to discuss the approach.
+3. Fork the repository, create a branch, and keep each pull request focused on one change.
+4. Follow the surrounding code style and [layering rules](backboard/src/vs/sessions/LAYERS.md). Run the relevant checks and describe what you tested in your pull request.
+5. Submit your pull request to [Backboard Desktop](https://github.com/Backboard-io/Backboard-Desktop/pulls).
+
+Report Backboard-specific issues here. The inherited [VS Code contribution guide](backboard/CONTRIBUTING.md) documents upstream practices and links to Microsoft's project; use those channels for issues or contributions that belong upstream.
+
+## Credits
+
+**Thank you to Microsoft and the Visual Studio Code community.** Backboard Desktop builds on their work on the editor, workbench, terminal, debugger, extension infrastructure, and developer tooling. The upstream [Code - OSS repository](https://github.com/microsoft/vscode) is the foundation of this project.
+
+We also thank the maintainers and contributors of the open-source dependencies used throughout the app. See [Third-party notices](backboard/ThirdPartyNotices.txt) and individual source files for acknowledgments and license information.
 
 ## License
 
 Released under the [MIT License](backboard/LICENSE.txt).
+
+The repository retains Microsoft's upstream copyright and license notice. Third-party components retain their respective licenses and notices; see [ThirdPartyNotices.txt](backboard/ThirdPartyNotices.txt).

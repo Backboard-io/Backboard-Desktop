@@ -125,7 +125,7 @@ Card Appearance" section) unless noted.
       │      │                           (translucent theme colours)
       │      │
       │      └── .part.sessionspart      OPAQUE main region
-      │           └── chat widget        OPAQUE (t3Theme pins pure black
+      │           └── chat widget        OPAQUE (backboardTheme pins pure black
       │                                  in dark themes)
       │
       └── overlays (context menus,       own opaque surfaces, but they

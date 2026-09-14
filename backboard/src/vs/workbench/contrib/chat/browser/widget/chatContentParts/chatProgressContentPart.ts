@@ -396,7 +396,7 @@ export class ChatWorkingProgressContentPart extends Disposable implements IChatC
 	private readonly isCompleteState: boolean;
 	private readonly elementId: string;
 	private readonly responseElement: IChatResponseViewModel | undefined;
-	private readonly useT3TimelinePresentation: boolean;
+	private readonly useBackboardTimelinePresentation: boolean;
 	private readonly useCursorTranscriptPresentation: boolean;
 	/** Ticks the live working label and elapsed time once per second while the turn runs. */
 	private readonly workingTimer = this._register(new MutableDisposable<IDisposable>());
@@ -415,7 +415,7 @@ export class ChatWorkingProgressContentPart extends Disposable implements IChatC
 		this.elementId = context.element.id;
 		this.responseElement = isResponseVM(context.element) ? context.element : undefined;
 		this.useCursorTranscriptPresentation = isBackboardCursorTranscript(context.container);
-		this.useT3TimelinePresentation = context.container.closest('.backboard-clean-chat') !== null && !this.useCursorTranscriptPresentation;
+		this.useBackboardTimelinePresentation = context.container.closest('.backboard-clean-chat') !== null && !this.useCursorTranscriptPresentation;
 		this.label = this.useCursorTranscriptPresentation
 			? localize('chat.cursorPlanningNextMoves', "Planning next moves")
 			: pickWorkingLabel(context.element.id, configurationService);
@@ -442,9 +442,9 @@ export class ChatWorkingProgressContentPart extends Disposable implements IChatC
 				this.domNode.setAttribute('aria-live', 'polite');
 				this.domNode.setAttribute('aria-atomic', 'true');
 			}
-		} else if (this.useT3TimelinePresentation) {
-			this.domNode.classList.add('chat-t3-working-row');
-			iconElement.classList.add('chat-t3-working-dots');
+		} else if (this.useBackboardTimelinePresentation) {
+			this.domNode.classList.add('chat-backboard-working-row');
+			iconElement.classList.add('chat-backboard-working-dots');
 			iconElement.append($('span'), $('span'), $('span'));
 		} else if (isComplete) {
 			iconElement.classList.add(...ThemeIcon.asClassNameArray(Codicon.check));
@@ -463,7 +463,7 @@ export class ChatWorkingProgressContentPart extends Disposable implements IChatC
 		append(messageContainer, this.statsElement);
 		append(this.domNode, messageContainer);
 
-		if (!isComplete && !this.useT3TimelinePresentation && !this.useCursorTranscriptPresentation) {
+		if (!isComplete && !this.useBackboardTimelinePresentation && !this.useCursorTranscriptPresentation) {
 			this.domNode.classList.add('shimmer-progress');
 		}
 
@@ -515,8 +515,8 @@ export class ChatWorkingProgressContentPart extends Disposable implements IChatC
 				this.statsElement.textContent = '';
 				return;
 			}
-			this.setWorkingLabel(this.useT3TimelinePresentation
-				? localize('chat.t3Working', "Working")
+			this.setWorkingLabel(this.useBackboardTimelinePresentation
+				? localize('chat.backboardWorking', "Working")
 				: this.computeLiveLabel(elapsedMs));
 			this.statsElement.textContent = '';
 		};

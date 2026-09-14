@@ -399,6 +399,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		const state: IBackboardOnboardingState = {
 			version: 1,
 			completed: reason === 'complete',
+			allowAutomaticTours: reason === 'complete',
 			dismissedReason: reason,
 			experience: this.selectedExperience,
 			themeId: this.selectedThemeId,
@@ -641,7 +642,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		this.card.classList.toggle('onboarding-a-card-connect', isConnectAI);
 		this.card.classList.toggle('onboarding-a-card-mode', isExperience);
 		this.card.classList.toggle('onboarding-a-card-import', isImportSettings);
-		this.titleEl.style.display = isWelcome || isConnectAI || isExperience || isImportSettings ? 'none' : '';
+		this.titleEl.style.display = isWelcome || isConnectAI || isExperience || isImportSettings || stepId === OnboardingStepId.Theme ? 'none' : '';
 		this.subtitleEl.style.display = isWelcome || isConnectAI || isExperience || isImportSettings ? 'none' : '';
 		this.titleEl.textContent = getOnboardingStepTitle(stepId);
 		this.subtitleEl.textContent = getOnboardingStepSubtitle(stepId);
@@ -692,7 +693,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		}
 
 		const currentStep = this.steps[this.currentStepIndex];
-		this.nextButton.style.display = currentStep === OnboardingStepId.ConnectAI ? 'none' : '';
+		this.nextButton.style.display = currentStep === OnboardingStepId.Welcome || currentStep === OnboardingStepId.ConnectAI ? 'none' : '';
 		this.nextButton.disabled =
 			(currentStep === OnboardingStepId.SignIn && !this.hasConfirmedBackboardSignIn)
 			|| (currentStep === OnboardingStepId.ApiKey && !this.hasImportedApiKey);
@@ -707,29 +708,13 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 	}
 
 	private _renderWelcomeStep(container: HTMLElement): void {
-		const welcome = append(container, $('.onboarding-backboard-welcome'));
-		const content = append(welcome, $('.onboarding-backboard-welcome-content'));
-		this._createAnimatedBackboardMark(content);
-		const title = append(content, $('h1.onboarding-backboard-title'));
-		title.textContent = getOnboardingStepTitle(OnboardingStepId.Welcome);
-		const subtitle = append(content, $('p.onboarding-backboard-subtitle'));
-		subtitle.textContent = localize('onboarding.pool.welcome', "A little setup. Then make something yours.");
-		const start = this._registerStepFocusable(append(content, $<HTMLButtonElement>('button.onboarding-backboard-sign-in-button')));
-		start.type = 'button';
-		start.textContent = localize('onboarding.pool.start', "Get Started");
-		this.stepDisposables.add(addDisposableListener(start, EventType.CLICK, () => this._nextStep()));
+		this._renderConnectAIStep(container);
 	}
 
 	private _renderConnectAIStep(container: HTMLElement): void {
 		const wrapper = append(container, $('.onboarding-backboard-welcome'));
 		const welcomeContent = append(wrapper, $('.onboarding-backboard-welcome-content'));
-
-		const intro = append(welcomeContent, $('.onboarding-backboard-welcome-intro'));
-		const title = append(intro, $('h1.onboarding-backboard-title'));
-		title.textContent = getOnboardingStepTitle(OnboardingStepId.ConnectAI);
-
-		const subtitle = append(intro, $('p.onboarding-backboard-subtitle'));
-		subtitle.textContent = getOnboardingStepSubtitle(OnboardingStepId.ConnectAI);
+		this._createBrandLockup(welcomeContent, true);
 
 		const signInButton = this._registerStepFocusable(append(welcomeContent, $<HTMLButtonElement>('button.onboarding-backboard-sign-in-button')));
 		signInButton.type = 'button';
@@ -738,13 +723,10 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		const ownKeyButton = this._registerStepFocusable(append(welcomeContent, $<HTMLButtonElement>('button.onboarding-backboard-sign-in-button.onboarding-backboard-own-key-button')));
 		ownKeyButton.type = 'button';
 		ownKeyButton.textContent = localize('onboarding.byok.start', "Bring Your Own Key");
-		const providerHint = append(welcomeContent, $('p.onboarding-backboard-provider-hint'));
-		providerHint.textContent = localize('onboarding.byok.hint', "OpenAI, Anthropic, Google or OpenRouter. No Backboard account required.");
 
-		const accountPrompt = append(welcomeContent, $('.onboarding-backboard-account-prompt'));
-		const signUpButton = this._registerStepFocusable(append(accountPrompt, $<HTMLButtonElement>('button.onboarding-backboard-account-link')));
-		signUpButton.type = 'button';
-		signUpButton.textContent = localize('onboarding.backboard.createAccount', "Sign Up");
+		const subscriptionButton = this._registerStepFocusable(append(welcomeContent, $<HTMLButtonElement>('button.onboarding-backboard-sign-in-button.onboarding-backboard-own-key-button')));
+		subscriptionButton.type = 'button';
+		subscriptionButton.textContent = localize('onboarding.byos.start', "Bring Your Own Subscription");
 
 		let didContinueWithoutAccount = false;
 		let skipButton: HTMLButtonElement | undefined;
@@ -780,22 +762,31 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		// reload before the device-code flow can open the browser or save the
 		// tokens). So wait for the sign-in to finish before advancing; the
 		// browser opens right away, this page just stays up until approval.
-		const startBackboardSignIn = async (sourceButton: HTMLButtonElement, action: string): Promise<void> => {
-			if (signInButton.disabled || signUpButton.disabled) {
+		const startConnection = async (sourceButton: HTMLButtonElement, action: string, subscription = false): Promise<void> => {
+			if (signInButton.disabled) {
 				return;
 			}
 			this._logAction(action);
 			showContinueWithoutAccount();
 			signInButton.disabled = true;
-			signUpButton.disabled = true;
 			ownKeyButton.disabled = true;
+			subscriptionButton.disabled = true;
 			const idleLabel = sourceButton.textContent;
-			sourceButton.textContent = localize('onboarding.backboard.signInWaiting', "Waiting for sign in… finish in your browser");
+			sourceButton.textContent = subscription
+				? localize('onboarding.byos.waiting', "Connecting…")
+				: localize('onboarding.backboard.signInWaiting', "Finish Signing In in Your Browser…");
 			try {
 				// Resolves true once the tokens are saved; false when the sign-in
 				// failed or was denied (the extension already surfaced that error).
-				if (await this.commandService.executeCommand<boolean>('backboard.signIn') && !didContinueWithoutAccount && welcomeContent.isConnected) {
-					this.hasConfirmedBackboardSignIn = true;
+				let connected: boolean | undefined;
+				if (subscription) {
+					await this.commandService.executeCommand('backboard.setupSubscription');
+					connected = await this.commandService.executeCommand<boolean>('backboard.hasAlternativeCredentials');
+				} else {
+					connected = await this.commandService.executeCommand<boolean>('backboard.signIn');
+				}
+				if (connected && !didContinueWithoutAccount && welcomeContent.isConnected) {
+					if (!subscription) { this.hasConfirmedBackboardSignIn = true; }
 					this.postOnboardingSignInPromptShown = true;
 					this._advanceOrComplete();
 					return;
@@ -803,30 +794,30 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			} catch (error) {
 				this.notificationService.notify({
 					severity: Severity.Error,
-					message: localize('onboarding.backboard.signInFailed', "Could not start Backboard sign in."),
+					message: localize('onboarding.connectionFailed', "Could not connect. Please try again."),
 					source: error instanceof Error ? error.message : undefined,
 				});
 			}
 			signInButton.disabled = false;
-			signUpButton.disabled = false;
 			ownKeyButton.disabled = false;
+			subscriptionButton.disabled = false;
 			sourceButton.textContent = idleLabel;
 		};
 
 		this.stepDisposables.add(addDisposableListener(signInButton, EventType.CLICK, () => {
-			void startBackboardSignIn(signInButton, 'openBackboardSso');
+			void startConnection(signInButton, 'openBackboardSso');
 		}));
-		this.stepDisposables.add(addDisposableListener(signUpButton, EventType.CLICK, () => {
-			void startBackboardSignIn(signUpButton, 'openBackboardSignIn');
+		this.stepDisposables.add(addDisposableListener(subscriptionButton, EventType.CLICK, () => {
+			void startConnection(subscriptionButton, 'chooseOwnSubscription', true);
 		}));
 	}
 
 	private _renderProviderKeySetup(container: HTMLElement): void {
 		const form = append(container, $('div.onboarding-provider-setup'));
-		const title = append(form, $('h2'));
+		const title = append(form, $('h2.onboarding-backboard-title'));
 		title.textContent = localize('onboarding.byok.title', "Bring Your Own Key");
 		const description = append(form, $('p'));
-		description.textContent = localize('onboarding.byok.description', "Connect directly to your AI provider. Usage is billed through your provider account.");
+		description.textContent = localize('onboarding.byok.description', "Billed by your provider.");
 		const providerLabel = append(form, $('label'));
 		providerLabel.textContent = localize('onboarding.byok.provider', "Provider");
 		const provider = this._registerStepFocusable(append(providerLabel, $<HTMLSelectElement>('select')));
@@ -843,7 +834,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		key.spellcheck = false;
 		key.placeholder = localize('onboarding.byok.placeholder', "Paste your provider API key");
 		const privacy = append(form, $('p.onboarding-backboard-provider-hint'));
-		privacy.textContent = localize('onboarding.byok.storage', "Your key is verified with the provider and stored encrypted on this device.");
+		privacy.textContent = localize('onboarding.byok.storage', "Stored encrypted on this device.");
 		const status = append(form, $('p.onboarding-provider-status'));
 		status.setAttribute('role', 'status');
 		const save = this._registerStepFocusable(append(form, $<HTMLButtonElement>('button.onboarding-backboard-sign-in-button')));
@@ -1034,6 +1025,19 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 
 		mark.appendChild(svg);
 		return mark;
+	}
+
+	private _createBrandLockup(parent: HTMLElement, prominent = false): void {
+		const brand = append(parent, $('.onboarding-brand-lockup'));
+		brand.classList.toggle('onboarding-brand-lockup-prominent', prominent);
+		if (prominent) {
+			this._createAnimatedBackboardMark(brand);
+		} else {
+			this._createBackboardMark(brand, 'onboarding-brand-mark');
+		}
+		const name = append(brand, $(prominent ? 'h1.onboarding-brand-name' : 'span.onboarding-brand-name'));
+		append(name, $('span')).textContent = localize('onboarding.brand.backboard', "Backboard");
+		append(name, $('span')).textContent = localize('onboarding.brand.studio', "Studio");
 	}
 
 	private _createBackboardMark(parent: HTMLElement, className: string): HTMLElement {

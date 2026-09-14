@@ -797,7 +797,7 @@
 	 * editor's right panel that leaves a large dead gutter when the panel is
 	 * widened, so let the transcript track the panel and composer instead. */
 	--bb-clean-chat-column: 100%;
-	--bb-t3-column: 100%;
+	--bb-backboard-column: 100%;
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-clean-chat .interactive-list.backboard-cursor-transcript {
@@ -827,17 +827,17 @@
 	margin-bottom: 4px;
 }
 
-.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-t3-turn-work:not(.chat-t3-turn-work-active) {
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-backboard-turn-work:not(.chat-backboard-turn-work-active) {
 	margin-bottom: 8px;
 	padding-block: 2px 4px;
 }
 
-.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-t3-turn-work:not(.chat-t3-turn-work-active).chat-t3-turn-work-expanded > .chat-t3-turn-work-body {
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-backboard-turn-work:not(.chat-backboard-turn-work-active).chat-backboard-turn-work-expanded > .chat-backboard-turn-work-body {
 	margin-top: 4px;
 }
 
-.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-t3-turn-work-body > .rendered-markdown,
-.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-t3-turn-work-body .chat-thinking-box {
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-backboard-turn-work-body > .rendered-markdown,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-backboard-turn-work-body .chat-thinking-box {
 	margin-bottom: 3px;
 }
 
@@ -1812,7 +1812,7 @@
 	line-height: 18px;
 }
 
-.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-clean-chat .chat-t3-turn-work:not(.chat-t3-turn-work-active) {
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-clean-chat .chat-backboard-turn-work:not(.chat-backboard-turn-work-active) {
 	padding-top: 0;
 }
 

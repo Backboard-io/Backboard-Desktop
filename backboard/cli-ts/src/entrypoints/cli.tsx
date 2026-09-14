@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { render } from "ink";
-import { NO_CREDENTIALS_MESSAGE } from "../config/auth.ts";
+import { NO_CREDENTIALS_MESSAGE, resolveAuth } from "../config/auth.ts";
 import {
 	APP_COMMAND_NAME,
 	APP_DISPLAY_NAME,
@@ -121,6 +121,11 @@ Options:
 `;
 async function main(): Promise<void> {
 	const argv = process.argv.slice(2);
+	if (argv.includes("--alternative-auth-status")) {
+		const auth = resolveAuth();
+		process.stdout.write(JSON.stringify({ configured: auth.providerKeys.length > 0 || auth.chatgptSubscription !== null || auth.claudeSubscription !== null }));
+		return;
+	}
 	if (argv.includes("--configure-provider-key")) {
 		await configureProviderKey(await Bun.stdin.text());
 		return;

@@ -10,7 +10,7 @@ import { ICommandService } from '../../../../platform/commands/common/commands.j
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { IWorkbenchContribution } from '../../../../workbench/common/contributions.js';
 import { ISpotlightTourIntro, ISpotlightTourStep, SpotlightTour, TourPlacement } from '../../../../workbench/contrib/welcomeOnboarding/browser/spotlightTour.js';
-import { IBackboardOnboardingState, OnboardingExperience, ONBOARDING_SESSIONS_TOUR_STORAGE_KEY, ONBOARDING_STORAGE_KEY } from '../../../../workbench/contrib/welcomeOnboarding/common/onboardingTypes.js';
+import { IBackboardOnboardingState, OnboardingExperience, ONBOARDING_SESSIONS_TOUR_STORAGE_KEY, ONBOARDING_STORAGE_KEY, shouldOfferOnboardingTour } from '../../../../workbench/contrib/welcomeOnboarding/common/onboardingTypes.js';
 import { IWorkbenchLayoutService, Parts } from '../../../../workbench/services/layout/browser/layoutService.js';
 import { RightWorkbenchCommandId } from '../../rightWorkbench/browser/rightWorkbench.js';
 import { IOnboardingService } from '../../../../workbench/contrib/welcomeOnboarding/common/onboardingService.js';
@@ -82,7 +82,7 @@ export class PostOnboardingSessionsTour extends Disposable implements IWorkbench
 
 		try {
 			const state: IBackboardOnboardingState = JSON.parse(raw);
-			return state.completed && state.experience === OnboardingExperience.Simple;
+			return shouldOfferOnboardingTour(state) && state.experience === OnboardingExperience.Simple;
 		} catch {
 			return false;
 		}

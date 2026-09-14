@@ -31,7 +31,9 @@ export function formatSettingAsLink(str: string) {
 
 export const COLOR_THEME_CONFIGURATION_SETTINGS_TAG = 'colorThemeConfiguration';
 
+// Appearance is shared by Simple, Advanced and Editor mode profiles.
 const colorThemeSettingSchema: IConfigurationPropertySchema = {
+	scope: ConfigurationScope.APPLICATION,
 	type: 'string',
 	markdownDescription: nls.localize({ key: 'colorTheme', comment: ['{0} will become a link to another setting.'] }, "Specifies the color theme used in the workbench when {0} is not enabled.", formatSettingAsLink(ThemeSettings.DETECT_COLOR_SCHEME)),
 	default: isWeb ? ThemeSettingDefaults.COLOR_THEME_LIGHT : ThemeSettingDefaults.COLOR_THEME_DARK,
@@ -42,6 +44,7 @@ const colorThemeSettingSchema: IConfigurationPropertySchema = {
 	errorMessage: nls.localize('colorThemeError', "Theme is unknown or not installed."),
 };
 const preferredDarkThemeSettingSchema: IConfigurationPropertySchema = {
+	scope: ConfigurationScope.APPLICATION,
 	type: 'string', //
 	markdownDescription: nls.localize({ key: 'preferredDarkColorTheme', comment: ['{0} will become a link to another setting.'] }, 'Specifies the color theme when system color mode is dark and {0} is enabled.', formatSettingAsLink(ThemeSettings.DETECT_COLOR_SCHEME)),
 	default: ThemeSettingDefaults.COLOR_THEME_DARK,
@@ -52,6 +55,7 @@ const preferredDarkThemeSettingSchema: IConfigurationPropertySchema = {
 	errorMessage: nls.localize('colorThemeError', "Theme is unknown or not installed."),
 };
 const preferredLightThemeSettingSchema: IConfigurationPropertySchema = {
+	scope: ConfigurationScope.APPLICATION,
 	type: 'string',
 	markdownDescription: nls.localize({ key: 'preferredLightColorTheme', comment: ['{0} will become a link to another setting.'] }, 'Specifies the color theme when system color mode is light and {0} is enabled.', formatSettingAsLink(ThemeSettings.DETECT_COLOR_SCHEME)),
 	default: ThemeSettingDefaults.COLOR_THEME_LIGHT,
@@ -62,6 +66,7 @@ const preferredLightThemeSettingSchema: IConfigurationPropertySchema = {
 	errorMessage: nls.localize('colorThemeError', "Theme is unknown or not installed."),
 };
 const preferredHCDarkThemeSettingSchema: IConfigurationPropertySchema = {
+	scope: ConfigurationScope.APPLICATION,
 	type: 'string',
 	markdownDescription: nls.localize({ key: 'preferredHCDarkColorTheme', comment: ['{0} will become a link to another setting.'] }, 'Specifies the color theme when in high contrast dark mode and {0} is enabled.', formatSettingAsLink(ThemeSettings.DETECT_HC)),
 	default: ThemeSettingDefaults.COLOR_THEME_HC_DARK,
@@ -72,6 +77,7 @@ const preferredHCDarkThemeSettingSchema: IConfigurationPropertySchema = {
 	errorMessage: nls.localize('colorThemeError', "Theme is unknown or not installed."),
 };
 const preferredHCLightThemeSettingSchema: IConfigurationPropertySchema = {
+	scope: ConfigurationScope.APPLICATION,
 	type: 'string',
 	markdownDescription: nls.localize({ key: 'preferredHCLightColorTheme', comment: ['{0} will become a link to another setting.'] }, 'Specifies the color theme when in high contrast light mode and {0} is enabled.', formatSettingAsLink(ThemeSettings.DETECT_HC)),
 	default: ThemeSettingDefaults.COLOR_THEME_HC_LIGHT,
@@ -82,6 +88,7 @@ const preferredHCLightThemeSettingSchema: IConfigurationPropertySchema = {
 	errorMessage: nls.localize('colorThemeError', "Theme is unknown or not installed."),
 };
 const detectColorSchemeSettingSchema: IConfigurationPropertySchema = {
+	scope: ConfigurationScope.APPLICATION,
 	type: 'boolean',
 	markdownDescription: nls.localize({ key: 'detectColorScheme', comment: ['{0} and {1} will become links to other settings.'] }, 'If enabled, will automatically select a color theme based on the system color mode. If the system color mode is dark, {0} is used, else {1}.', formatSettingAsLink(ThemeSettings.PREFERRED_DARK_THEME), formatSettingAsLink(ThemeSettings.PREFERRED_LIGHT_THEME)),
 	default: false,
@@ -90,6 +97,7 @@ const detectColorSchemeSettingSchema: IConfigurationPropertySchema = {
 };
 
 const colorCustomizationsSchema: IConfigurationPropertySchema = {
+	scope: ConfigurationScope.APPLICATION,
 	type: 'object',
 	description: nls.localize('workbenchColors', "Overrides colors from the currently selected color theme."),
 	allOf: [{ $ref: workbenchColorsSchemaId }],

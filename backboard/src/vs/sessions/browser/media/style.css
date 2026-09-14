@@ -70,22 +70,6 @@
 	--sessions-right-panel-divider-color: var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 32%, transparent));
 }
 
-.monaco-workbench.vs.agent-sessions-workbench {
-	--sessions-main-region-background: var(--vscode-agents-background, color-mix(in srgb, var(--vscode-editor-background) 96%, var(--vscode-foreground) 4%));
-}
-
-/* Simple mode uses the darker shell surface for the left sidebar while the
- * middle workspace and right auxiliary panel share the panel surface.
- * Advanced keeps its existing assignments. */
-.monaco-workbench.agent-sessions-workbench {
-	--sessions-sidebar-region-background: var(--vscode-agents-background, var(--vscode-editor-background));
-	--sessions-main-region-background: var(--vscode-agentsPanel-background, var(--vscode-editor-background));
-}
-
-.monaco-workbench.agent-sessions-workbench .part.auxiliarybar {
-	--sessions-main-region-background: var(--vscode-agentsPanel-background, var(--vscode-editor-background));
-}
-
 .agent-sessions-workbench .part.sidebar {
 	background: var(--sessions-sidebar-region-background);
 }
@@ -1405,7 +1389,7 @@
 	/* Match the code editor's sent-chat composer box model exactly. The inset
 	 * belongs to the composer's width, not inner padding, so Monaco and the
 	 * footer controls receive the same content width in both hosts. */
-	width: calc(100% - (2 * var(--bb-t3-viewport-inset)));
+	width: calc(100% - (2 * var(--bb-backboard-viewport-inset)));
 	margin: 0 auto;
 	padding: 0 0 10px;
 }
@@ -1477,16 +1461,6 @@
 }
 
 /* ---- Chat Input ---- */
-
-/* Simple window: the composer surface matches the agents screen background so
- * it reads as part of the page rather than a darker slab. Redefining the shared
- * surface variable (rather than only overriding specific composer rules) covers
- * every context the composer renders in — the session host (`.part.sessionspart`)
- * and the editor host (`.chat-editor-relative`), and any request/working state —
- * so it never falls back to the darker default. */
-.agent-sessions-workbench {
-	--sessions-codex-surface-background: var(--sessions-main-region-background, var(--vscode-editor-background));
-}
 
 .agent-sessions-workbench .interactive-session .chat-input-container {
 	border-radius: 18px;

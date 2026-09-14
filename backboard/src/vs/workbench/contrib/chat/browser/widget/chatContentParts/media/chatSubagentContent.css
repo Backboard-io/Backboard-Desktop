@@ -223,7 +223,7 @@
 
 /* Simple mode keeps worker updates beside the Worked disclosure. The child
  * transcript is revealed deliberately, without adding another card surface. */
-.monaco-workbench .backboard-clean-chat .chat-t3-turn-work > .chat-subagent-strip {
+.monaco-workbench .backboard-clean-chat .chat-backboard-turn-work > .chat-subagent-strip {
 	display: flex;
 	min-width: 0;
 	flex-direction: column;
