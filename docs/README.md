@@ -14,7 +14,6 @@ Dated reports in this directory capture investigations and validation results at
 
 - [Branding](branding/): mascot source and exported images.
 - [Design assets](design/): workspace and chat component references.
-- [Historical runtime reference](../backboard/backboard-reference/): snapshots of the earlier integration, not the active runtime source.
 
 ## Releases
 
@@ -22,3 +21,7 @@ Dated reports in this directory capture investigations and validation results at
 - [Windows release guide](../scripts/windows-release/README.md)
 - [Linux release guide](../scripts/linux-release/README.md)
 - [macOS installer assets](../scripts/dmg-assets/README.md)
+
+## Repository maintenance
+
+- [Folder audit](maintenance/folder-audit.md): cleanup decisions and retained development dependencies.

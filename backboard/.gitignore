@@ -48,3 +48,9 @@ dist
 .agents/skills/.local/
 .github/skills/.local/
 .codex/
+
+# Local runtime sessions and captured UI screenshots.
+/.backboard/
+/.agents/skills/launch/shots/
+/screenshots/
+/screenshots-vibrancy/
