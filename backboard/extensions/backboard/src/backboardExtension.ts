@@ -1653,7 +1653,7 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 							void postPanelState(this.bridge, webviewView.webview, true);
 						}
 					});
-				} else if (message?.type === 'setupProviderKey' || message?.type === 'setupSubscription') {
+				} else if (message?.type === 'setupProviderKey' || (process.platform !== 'win32' && message?.type === 'setupSubscription')) {
 					const command = message.type === 'setupProviderKey' ? 'backboard.setupProviderKey' : 'backboard.setupSubscription';
 					void vscode.commands.executeCommand(command).then(
 						() => postPanelState(this.bridge, webviewView.webview, true),
@@ -2354,10 +2354,14 @@ class BackboardBridge implements vscode.Disposable {
 	}
 
 	async hasAlternativeCredentials(): Promise<boolean> {
-		return new Promise<boolean>(resolve => {
+		return new Promise<boolean>((resolve, reject) => {
 			cp.execFile(this.resolveCliPath(), ['--alternative-auth-status'], { timeout: 10000, maxBuffer: 4096 }, (error, stdout) => {
-				if (error) { resolve(false); return; }
-				try { resolve(JSON.parse(stdout).configured === true); } catch { resolve(false); }
+				if (error) { reject(new Error('Could not check alternative credentials.')); return; }
+				try {
+					const status = JSON.parse(stdout);
+					if (typeof status.configured !== 'boolean') { throw new Error('Invalid credential status.'); }
+					resolve(status.configured);
+				} catch { reject(new Error('Invalid alternative credential status.')); }
 			});
 		});
 	}
@@ -3686,8 +3690,7 @@ async function savePanelOptions(options: PanelOptions): Promise<void> {
 async function postPanelState(bridge: BackboardBridge, webview: vscode.Webview, forceModelRefresh = false): Promise<void> {
 	const settings = readSettings();
 	const publicPanelSettings = publicSettings(settings);
-	const alternativeConfigured = await bridge.hasAlternativeCredentials();
-	await vscode.commands.executeCommand('setContext', 'backboard.alternativeConfigured', alternativeConfigured);
+	const alternativeConfigured = await bridge.hasAlternativeCredentials().catch(() => false);
 	await webview.postMessage({ type: 'settings', settings: { ...publicPanelSettings, authenticated: publicPanelSettings.authenticated || alternativeConfigured }, workspace: workspacePath() });
 	const cachedModels = forceModelRefresh ? undefined : await bridge.cachedModels();
 	const cachedTools = forceModelRefresh ? undefined : await bridge.cachedTools(settings.mode);

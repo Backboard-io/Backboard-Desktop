@@ -8,6 +8,7 @@ import type {
 } from "../core/keys/ProviderKeyTypes.ts";
 import { readBackboardConfig } from "./backboardConfig.ts";
 import { type BackboardEnv, resolveApiUrl } from "./env.ts";
+import { supportsSubscriptions } from "./releaseFeatures.ts";
 
 const PLACEHOLDER_API_KEYS = new Set([
 	"your_key_here",
@@ -16,7 +17,9 @@ const PLACEHOLDER_API_KEYS = new Set([
 ]);
 
 export const NO_CREDENTIALS_MESSAGE =
-	"No credentials found. Sign in with Backboard, connect a ChatGPT or Claude subscription, or add a provider API key.";
+	supportsSubscriptions()
+		? "No credentials found. Sign in with Backboard, connect a ChatGPT or Claude subscription, or add a provider API key."
+		: "No credentials found. Sign in with Backboard or add a provider API key.";
 
 export const CHATGPT_SUBSCRIPTION_AUTH_FILE_ENV =
 	"BACKBOARD_CHATGPT_SUBSCRIPTION_AUTH_FILE";
@@ -53,6 +56,7 @@ export interface AuthState {
 
 export interface ResolveAuthOptions {
 	homeDir?: string;
+	platform?: NodeJS.Platform;
 }
 
 export function resolveAuth(options: ResolveAuthOptions = {}): AuthState {
@@ -69,10 +73,10 @@ export function resolveAuth(options: ResolveAuthOptions = {}): AuthState {
 
 	return {
 		backboard: apiKey ? { apiKey, apiUrl } : null,
-		chatgptSubscription: subscriptionAuthFile
+		chatgptSubscription: supportsSubscriptions(options.platform) && subscriptionAuthFile
 			? { authFile: subscriptionAuthFile }
 			: null,
-		claudeSubscription: claudeSubscriptionEnabled ? { enabled: true } : null,
+		claudeSubscription: supportsSubscriptions(options.platform) && claudeSubscriptionEnabled ? { enabled: true } : null,
 		// Env vars are deliberately not consulted: a provider key becomes usable
 		// only by being added through the BYOK flow or `/keys`, so what the CLI
 		// bills to is always something the user chose explicitly.
@@ -83,8 +87,7 @@ export function resolveAuth(options: ResolveAuthOptions = {}): AuthState {
 export function hasAnyCredentials(auth: AuthState): boolean {
 	return (
 		auth.backboard !== null ||
-		auth.chatgptSubscription !== null ||
-		auth.claudeSubscription !== null ||
+		(supportsSubscriptions() && (auth.chatgptSubscription !== null || auth.claudeSubscription !== null)) ||
 		auth.providerKeys.length > 0
 	);
 }

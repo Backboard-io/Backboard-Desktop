@@ -7,38 +7,38 @@ import * as dom from '../../../../../base/browser/dom.js';
 import { BaseActionViewItem, IActionViewItemOptions } from '../../../../../base/browser/ui/actionbar/actionViewItems.js';
 import { IAction } from '../../../../../base/common/actions.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
+import { isWindows } from '../../../../../base/common/platform.js';
+import { IQuickInputService } from '../../../../../platform/quickinput/common/quickInput.js';
+import { IAgentCliSetupService, CHATGPT_SUBSCRIPTION_SETUP_ID, CLAUDE_SUBSCRIPTION_SETUP_ID } from '../../browser/agentSessions/agentCliSetup.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
-import { URI } from '../../../../../base/common/uri.js';
 import { ServicesAccessor } from '../../../../../editor/browser/editorExtensions.js';
 import { localize, localize2 } from '../../../../../nls.js';
 import { IActionViewItemService } from '../../../../../platform/actions/browser/actionViewItemService.js';
 import { Action2, MenuId, MenuRegistry, registerAction2 } from '../../../../../platform/actions/common/actions.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
-import { ContextKeyExpr, IContextKey, IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
-import { IFileService } from '../../../../../platform/files/common/files.js';
+import { ContextKeyExpr, IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
 import { IWorkbenchContribution } from '../../../../common/contributions.js';
 import { ChatEntitlementContextKeys, IChatEntitlementService } from '../../../../services/chat/common/chatEntitlementService.js';
-import { IPathService } from '../../../../services/path/common/pathService.js';
-import { BackboardAuthContextKeys, backboardConfigResource, hasBackboardCredentials, isBackboardProduct } from '../../common/backboardAuth.js';
+import { BackboardAuthContextKeys, IBackboardAuthService } from '../../common/backboardAuth.js';
 
-import { IQuickInputService } from '../../../../../platform/quickinput/common/quickInput.js';
-import { IAgentCliSetupService, CHATGPT_SUBSCRIPTION_SETUP_ID, CLAUDE_SUBSCRIPTION_SETUP_ID } from '../../browser/agentSessions/agentCliSetup.js';
 
 const backboardCategory = localize2('backboard.category', "Backboard");
 
 export function registerBackboardSsoActions(): void {
-	registerAction2(class BackboardSubscriptionSetupAction extends Action2 {
-		constructor() { super({ id: 'backboard.setupSubscription', title: localize2('backboard.setupSubscription', "Set Up Subscription"), category: backboardCategory, f1: true }); }
-		override async run(accessor: ServicesAccessor): Promise<void> {
-			const setup = accessor.get(IAgentCliSetupService);
-			const choice = await accessor.get(IQuickInputService).pick([
-				{ label: 'ChatGPT', id: CHATGPT_SUBSCRIPTION_SETUP_ID },
-				{ label: 'Claude', id: CLAUDE_SUBSCRIPTION_SETUP_ID },
-			], { title: localize('backboard.byos.title', "Bring Your Own Subscription"), placeHolder: localize('backboard.byos.choose', "Choose a subscription") });
-			if (choice) { await setup.beginSetup(choice.id); }
-		}
-	});
+	if (!isWindows) {
+		registerAction2(class BackboardSubscriptionSetupAction extends Action2 {
+			constructor() { super({ id: 'backboard.setupSubscription', title: localize2('backboard.setupSubscription', "Set Up Subscription"), category: backboardCategory, f1: true }); }
+			override async run(accessor: ServicesAccessor): Promise<void> {
+				const setup = accessor.get(IAgentCliSetupService);
+				const choice = await accessor.get(IQuickInputService).pick([
+					{ label: 'ChatGPT', id: CHATGPT_SUBSCRIPTION_SETUP_ID },
+					{ label: 'Claude', id: CLAUDE_SUBSCRIPTION_SETUP_ID },
+				], { title: localize('backboard.byos.title', "Bring Your Own Subscription"), placeHolder: localize('backboard.byos.choose', "Choose a subscription") });
+				if (choice) { await setup.beginSetup(choice.id); }
+			}
+		});
+	}
 	registerAction2(class BackboardSignInAction extends Action2 {
 		constructor() {
 			super({
@@ -79,59 +79,30 @@ export class BackboardCredentialsContribution extends Disposable implements IWor
 
 	static readonly ID = 'workbench.contrib.backboardCredentials';
 
-	private readonly signedInKey: IContextKey<boolean>;
-
 	constructor(
 		@IActionViewItemService actionViewItemService: IActionViewItemService,
-		@IChatEntitlementService private readonly chatEntitlementService: IChatEntitlementService,
-		@IContextKeyService private readonly contextKeyService: IContextKeyService,
-		@IFileService private readonly fileService: IFileService,
-		@IPathService private readonly pathService: IPathService,
-		@ILogService private readonly logService: ILogService,
+		@IChatEntitlementService chatEntitlementService: IChatEntitlementService,
+		@IContextKeyService contextKeyService: IContextKeyService,
+		@IBackboardAuthService authService: IBackboardAuthService,
+		@ILogService logService: ILogService,
 	) {
 		super();
 		this._register(actionViewItemService.register(MenuId.TitleBar, 'backboard.signIn', (action, options) => new BackboardSignInTitleBarEntry(action, options)));
-
-		this.signedInKey = BackboardAuthContextKeys.signedIn.bindTo(this.contextKeyService);
-		if (isBackboardProduct()) {
-			BackboardAuthContextKeys.enabled.bindTo(this.contextKeyService).set(true);
-			this.signedInKey.set(false);
-			this.watchBackboardCredentials().catch(error => this.logService.error(`[Backboard] Failed to check credentials: ${error instanceof Error ? error.message : String(error)}`));
-		} else {
-			BackboardAuthContextKeys.enabled.bindTo(this.contextKeyService).set(false);
-			this.signedInKey.set(true);
-		}
-	}
-
-	/**
-	 * Keeps `backboard.signedIn` in sync with the credentials on disk for the
-	 * lifetime of the window, so every auth gate (session view, chat panes,
-	 * agents welcome) appears when the user signs out and disappears when a
-	 * sign-in lands — including sign-ins performed in another window, which
-	 * only communicate through the shared config file.
-	 */
-	private async watchBackboardCredentials(): Promise<void> {
-		const configResource = await backboardConfigResource(this.pathService);
-		const watcher = this._register(this.fileService.createWatcher(configResource, { recursive: false, excludes: [] }));
-		this._register(watcher.onDidChange(() => {
-			this.updateSignedInState(configResource).catch(error => this.logService.error(`[Backboard] Failed to refresh credentials state: ${error instanceof Error ? error.message : String(error)}`));
+		const markReady = (): void => {
+			if (contextKeyService.getContextKeyValue<boolean>(BackboardAuthContextKeys.enabled.key) !== true) { return; }
+			if (contextKeyService.getContextKeyValue<boolean>(BackboardAuthContextKeys.signedIn.key) === true
+				|| contextKeyService.getContextKeyValue<boolean>(BackboardAuthContextKeys.alternativeConfigured.key) === true) {
+				markBackboardChatReady(chatEntitlementService, contextKeyService);
+			}
+		};
+		this._register(contextKeyService.onDidChangeContext(event => {
+			if (event.affectsSome(new Set([BackboardAuthContextKeys.signedIn.key, BackboardAuthContextKeys.alternativeConfigured.key]))) {
+				markReady();
+			}
 		}));
-		await this.updateSignedInState(configResource);
+		void authService.refresh().then(markReady, error => logService.error('[Backboard] Failed to check credentials', error));
 	}
 
-	private async updateSignedInState(configResource: URI): Promise<void> {
-		const signedIn = await hasBackboardCredentials(this.fileService, configResource);
-		if (signedIn === this.signedInKey.get()) {
-			return;
-		}
-		this.signedInKey.set(signedIn);
-		if (signedIn) {
-			markBackboardChatReady(this.chatEntitlementService, this.contextKeyService);
-			this.logService.info(`[Backboard] Credentials found in ${configResource.fsPath}; chat setup marked ready.`);
-		} else {
-			this.logService.info(`[Backboard] Credentials removed from ${configResource.fsPath}; auth gates enabled.`);
-		}
-	}
 }
 
 class BackboardSignInTitleBarEntry extends BaseActionViewItem {
@@ -178,8 +149,6 @@ class BackboardSignInTitleBarEntry extends BaseActionViewItem {
 
 function markBackboardChatReady(chatEntitlementService: IChatEntitlementService, contextKeyService: IContextKeyService): void {
 	chatEntitlementService.markSetupCompleted();
-	BackboardAuthContextKeys.enabled.bindTo(contextKeyService).set(true);
-	BackboardAuthContextKeys.signedIn.bindTo(contextKeyService).set(true);
 	ChatEntitlementContextKeys.Setup.completed.bindTo(contextKeyService).set(true);
 	ChatEntitlementContextKeys.Setup.installed.bindTo(contextKeyService).set(true);
 	ChatEntitlementContextKeys.Setup.hidden.bindTo(contextKeyService).set(false);

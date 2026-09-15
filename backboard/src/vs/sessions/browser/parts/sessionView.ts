@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { renderBackboardAuthSetup } from '../../../workbench/contrib/chat/browser/backboardAuthSetup.js';
-import { BackboardAuthContextKeys, hasAlternativeBackboardCredentials } from '../../../workbench/contrib/chat/common/backboardAuth.js';
+import { BackboardAuthContextKeys, BackboardAuthGateContextKeys, IBackboardAuthService } from '../../../workbench/contrib/chat/common/backboardAuth.js';
 import './media/sessionView.css';
 import { $, addDisposableListener, EventType, size } from '../../../base/browser/dom.js';
 import { ISerializableView, IViewSize } from '../../../base/browser/ui/grid/grid.js';
@@ -17,11 +17,8 @@ import { ICommandService } from '../../../platform/commands/common/commands.js';
 import { IInstantiationService } from '../../../platform/instantiation/common/instantiation.js';
 import { ServiceCollection } from '../../../platform/instantiation/common/serviceCollection.js';
 import { IContextKey, IContextKeyService } from '../../../platform/contextkey/common/contextkey.js';
-import { FileOperationResult, IFileService, toFileOperationResult } from '../../../platform/files/common/files.js';
 import { ILogService } from '../../../platform/log/common/log.js';
-import product from '../../../platform/product/common/product.js';
 import { asCssVariable } from '../../../platform/theme/common/colorUtils.js';
-import { IPathService } from '../../../workbench/services/path/common/pathService.js';
 import { IActiveSession } from '../../services/sessions/common/sessionsManagement.js';
 import { IChatViewFactory } from '../../services/chatView/browser/chatViewFactory.js';
 import { AbstractChatView, ChatViewKind, IChatViewOptions } from './chatView.js';
@@ -89,9 +86,6 @@ export class SessionView extends Disposable implements ISerializableView {
 	private _headerInPanel = false;
 	private readonly _contentContainer: HTMLElement;
 	private readonly _scopedInstantiationService: IInstantiationService;
-	private readonly _backboardAuthEnabledKey: IContextKey<boolean>;
-	private readonly _backboardSignedInKey: IContextKey<boolean>;
-	private readonly _backboardAlternativeAuthKey: IContextKey<boolean>;
 	private _backboardAuthGateOverlay: HTMLElement | undefined;
 
 	private readonly _currentView = this._register(new MutableDisposable<AbstractChatView>());
@@ -122,10 +116,9 @@ export class SessionView extends Disposable implements ISerializableView {
 	constructor(
 		@IChatViewFactory private readonly chatViewFactory: IChatViewFactory,
 		@IInstantiationService instantiationService: IInstantiationService,
-		@IContextKeyService contextKeyService: IContextKeyService,
+		@IContextKeyService private readonly contextKeyService: IContextKeyService,
 		@ICommandService private readonly commandService: ICommandService,
-		@IFileService private readonly fileService: IFileService,
-		@IPathService private readonly pathService: IPathService,
+		@IBackboardAuthService private readonly backboardAuthService: IBackboardAuthService,
 		@ILogService private readonly logService: ILogService,
 		@IAccessibilityService private readonly accessibilityService: IAccessibilityService,
 	) {
@@ -143,9 +136,6 @@ export class SessionView extends Disposable implements ISerializableView {
 		this._chatSessionProviderIdKey = ChatSessionProviderIdContext.bindTo(scopedContextKeyService);
 		this._chatSessionTypeKey = ChatSessionTypeContext.bindTo(scopedContextKeyService);
 		this._sessionHasChangesKey = SessionHasChangesContext.bindTo(scopedContextKeyService);
-		this._backboardAuthEnabledKey = contextKeyService.createKey('backboard.authGateEnabled', contextKeyService.getContextKeyValue<boolean>('backboard.authGateEnabled') === true);
-		this._backboardAlternativeAuthKey = BackboardAuthContextKeys.alternativeConfigured.bindTo(contextKeyService);
-		this._backboardSignedInKey = contextKeyService.createKey('backboard.signedIn', contextKeyService.getContextKeyValue<boolean>('backboard.signedIn') === true);
 
 		// Scoped service exposing this view's session so toolbars and contributed
 		// action view items (e.g. the changes diff stats in the header) can read it.
@@ -219,7 +209,7 @@ export class SessionView extends Disposable implements ISerializableView {
 		this._register(this._compositeBar.onDidChangeVisibility(() => this._layoutChildren()));
 		this._register(this._compositeBar.onDidChangeHeight(() => this._layoutChildren()));
 		this._register(contextKeyService.onDidChangeContext(event => {
-			if (event.affectsSome(backboardAuthGateContextKeys)) {
+			if (event.affectsSome(BackboardAuthGateContextKeys)) {
 				this._updateBackboardAuthGate();
 			}
 		}));
@@ -628,7 +618,7 @@ export class SessionView extends Disposable implements ISerializableView {
 	}
 
 	private _isBackboardAuthRequired(): boolean {
-		return this._backboardAuthEnabledKey.get() === true && this._backboardSignedInKey.get() !== true && this._backboardAlternativeAuthKey.get() !== true;
+		return this.contextKeyService.getContextKeyValue<boolean>(BackboardAuthContextKeys.enabled.key) === true && this.contextKeyService.getContextKeyValue<boolean>(BackboardAuthContextKeys.signedIn.key) !== true && this.contextKeyService.getContextKeyValue<boolean>(BackboardAuthContextKeys.alternativeConfigured.key) !== true;
 	}
 
 	private _createBackboardAuthGate(): void {
@@ -670,98 +660,7 @@ export class SessionView extends Disposable implements ISerializableView {
 	}
 
 	private async _refreshBackboardAuthGateFromConfig(): Promise<void> {
-		if (!isBackboardProduct()) {
-			this._backboardAuthEnabledKey.set(false);
-			this._backboardSignedInKey.set(true);
-			this._updateBackboardAuthGate();
-			return;
-		}
-
-		this._backboardAuthEnabledKey.set(true);
-		this._backboardSignedInKey.set(await hasBackboardCredentials(this.fileService, await backboardConfigResource(this.pathService)));
-		this._backboardAlternativeAuthKey.set(await hasAlternativeBackboardCredentials(this.commandService));
+		await this.backboardAuthService.refresh();
 		this._updateBackboardAuthGate();
 	}
-	}
-
-const backboardAuthGateContextKeys = new Set(['backboard.authGateEnabled', 'backboard.signedIn', 'backboard.alternativeConfigured']);
-
-interface BackboardConfigJson {
-	readonly [key: string]: unknown;
-	readonly env?: string;
-	readonly api_key?: string;
-	readonly env_keys?: Record<string, string>;
-}
-
-function isBackboardProduct(): boolean {
-	return product.defaultChatAgent?.provider?.default?.id === 'backboard';
-}
-
-async function backboardConfigResource(pathService: IPathService): Promise<URI> {
-	return URI.joinPath(await pathService.userHome({ preferLocal: true }), '.backboard_ide', 'config.json');
-}
-
-async function hasBackboardCredentials(fileService: IFileService, configResource: URI): Promise<boolean> {
-	const config = await readBackboardConfigJson(fileService, configResource);
-	return Boolean(backboardConfigApiKey(config) || backboardConfigAccessToken(config));
-}
-
-async function readBackboardConfigJson(fileService: IFileService, configResource: URI): Promise<BackboardConfigJson> {
-	try {
-		const parsed: unknown = JSON.parse((await fileService.readFile(configResource)).value.toString());
-		return isObjectRecord(parsed) ? parsed : {};
-	} catch (error) {
-		if (toFileOperationResult(error) === FileOperationResult.FILE_NOT_FOUND || error instanceof SyntaxError) {
-			return {};
-		}
-		throw error;
-	}
-}
-
-function backboardConfigApiKey(config: BackboardConfigJson): string | undefined {
-	const apiKey = stringValueFromRecord(config.api_key);
-	if (apiKey) {
-		return apiKey;
-	}
-	const env = normalizeBackboardEnv(config.env);
-	return stringValueFromRecord(backboardConfigEnvKeys(config)[env]);
-}
-
-function backboardConfigAccessToken(config: BackboardConfigJson): string | undefined {
-	const oauth = isObjectRecord(config.oauth) ? config.oauth : undefined;
-	return stringValueFromRecord(oauth?.access_token);
-}
-
-function backboardConfigEnvKeys(config: BackboardConfigJson): Record<string, string> {
-	const envKeys = config.env_keys;
-	if (!isObjectRecord(envKeys)) {
-		return {};
-	}
-	const result: Record<string, string> = {};
-	for (const [env, apiKey] of Object.entries(envKeys)) {
-		if (typeof apiKey === 'string') {
-			result[normalizeBackboardEnv(env)] = apiKey;
-		}
-	}
-	return result;
-}
-
-function normalizeBackboardEnv(env: string | undefined): string {
-	switch ((env || 'prod').trim().toLowerCase()) {
-		case '':
-		case 'production':
-			return 'prod';
-		case 'development':
-			return 'dev';
-		default:
-			return (env || 'prod').trim().toLowerCase();
-	}
-}
-
-function stringValueFromRecord(value: unknown): string | undefined {
-	return typeof value === 'string' ? value.trim() || undefined : undefined;
-}
-
-function isObjectRecord(value: unknown): value is Record<string, unknown> {
-	return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }

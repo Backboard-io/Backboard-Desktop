@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import '../browser/backboardAuthService.js';
 import { registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
 import { BackboardCredentialsContribution, registerBackboardSsoActions } from './actions/backboardSsoActions.js';
 

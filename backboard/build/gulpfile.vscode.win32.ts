@@ -83,6 +83,7 @@ function buildWin32Setup(arch: string, target: string): task.CallbackTask {
 
 		const definitions: Record<string, unknown> = {
 			NameLong: product.nameLong,
+			PublisherName: product.companyName,
 			NameShort: product.nameShort,
 			DirName: product.win32DirName,
 			Version: releaseVersion,

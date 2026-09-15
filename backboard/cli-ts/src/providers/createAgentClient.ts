@@ -1,4 +1,5 @@
 import { providerKeyResolver } from "../config/auth.ts";
+import { supportsSubscriptions } from "../config/releaseFeatures.ts";
 import type { Config } from "../config/Config.ts";
 import type { ServerEventLog } from "../core/session/ServerEventLog.ts";
 import type { AgentClient } from "./AgentClient.ts";
@@ -42,7 +43,7 @@ export function createAgentClient(
 		serverLog,
 		new ByokConversationStore(conversationBaseDir),
 	);
-	const chatGptSubscription = config.auth.chatgptSubscription
+	const chatGptSubscription = supportsSubscriptions() && config.auth.chatgptSubscription
 		? new CodexSubscriptionClient({
 				authFile: config.auth.chatgptSubscription.authFile,
 				conversationStore: new SubscriptionConversationStore(
@@ -51,7 +52,7 @@ export function createAgentClient(
 				memoryStore: new SubscriptionMemoryStore(conversationBaseDir),
 			})
 		: undefined;
-	const claudeSubscription = config.auth.claudeSubscription
+	const claudeSubscription = supportsSubscriptions() && config.auth.claudeSubscription
 		? new ClaudeSubscriptionClient({
 				cwd: config.cwd,
 				conversationStore: new ClaudeSubscriptionConversationStore(

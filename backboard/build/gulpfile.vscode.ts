@@ -36,6 +36,7 @@ import globCallback from 'glob';
 import rceditCallback from 'rcedit';
 import { spawnTsgo } from './lib/tsgo.ts';
 import { runEsbuildTranspile, runEsbuildBundle } from './lib/esbuild.ts';
+import { removeNonWindowsNativeModule } from './lib/windowsNativeModules.ts';
 
 
 const glob = promisify(globCallback);
@@ -580,6 +581,11 @@ function patchWin32DependenciesTask(destinationFolderName: string) {
 
 	return async () => {
 		const versionedResourcesFolder = util.getVersionedResourcesFolder('win32', commit!);
+		for (const nativeModule of await glob('**/*.node', { cwd })) {
+			if (await removeNonWindowsNativeModule(path.join(cwd, nativeModule))) {
+				console.log(`Removed non-Windows native module: ${nativeModule}`);
+			}
+		}
 		const deps = (await Promise.all([
 			glob('**/*.node', { cwd, ignore: 'extensions/node_modules/@parcel/watcher/**' }),
 			glob('**/rg.exe', { cwd }),
@@ -598,7 +604,7 @@ function patchWin32DependenciesTask(destinationFolderName: string) {
 			await rcedit(fullPath, {
 				'file-version': baseVersion,
 				'version-string': {
-					'CompanyName': 'Microsoft Corporation',
+					'CompanyName': product.companyName || product.nameLong,
 					'FileDescription': product.nameLong,
 					'FileVersion': packageJson.version,
 					'InternalName': basename,

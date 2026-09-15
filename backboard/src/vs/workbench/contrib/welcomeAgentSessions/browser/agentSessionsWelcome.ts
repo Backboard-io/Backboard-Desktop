@@ -60,9 +60,7 @@ import { IViewDescriptorService, ViewContainerLocation } from '../../../common/v
 import { toErrorMessage } from '../../../../base/common/errorMessage.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { canShowAgentsBanner, createAgentsBanner } from '../../chat/browser/agentSessions/agentSessionsBanner.js';
-import { backboardConfigResource, BackboardAuthContextKeys, BackboardAuthGateContextKeys, hasBackboardCredentials, hasAlternativeBackboardCredentials, isBackboardProduct } from '../../chat/common/backboardAuth.js';
-import { IFileService } from '../../../../platform/files/common/files.js';
-import { IPathService } from '../../../services/path/common/pathService.js';
+import { BackboardAuthContextKeys, BackboardAuthGateContextKeys, IBackboardAuthService } from '../../chat/common/backboardAuth.js';
 
 const configurationKey = 'workbench.startupEditor';
 const MAX_SESSIONS = 6;
@@ -147,6 +145,7 @@ export class AgentSessionsWelcomePage extends EditorPane {
 		@IContextKeyService contextKeyService: IContextKeyService,
 		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
 		@ICommandService private readonly commandService: ICommandService,
+		@IBackboardAuthService private readonly backboardAuthService: IBackboardAuthService,
 		@IAgentSessionsService private readonly agentSessionsService: IAgentSessionsService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@IProductService private readonly productService: IProductService,
@@ -160,8 +159,6 @@ export class AgentSessionsWelcomePage extends EditorPane {
 		@IViewDescriptorService private readonly viewDescriptorService: IViewDescriptorService,
 		@IChatWidgetService private readonly chatWidgetService: IChatWidgetService,
 		@ILogService private readonly logService: ILogService,
-		@IFileService private readonly fileService: IFileService,
-		@IPathService private readonly pathService: IPathService,
 	) {
 		super(AgentSessionsWelcomePage.ID, group, telemetryService, themeService, storageService);
 
@@ -244,17 +241,7 @@ export class AgentSessionsWelcomePage extends EditorPane {
 	}
 
 	private async refreshBackboardAuthGateFromConfig(): Promise<void> {
-		if (!isBackboardProduct()) {
-			BackboardAuthContextKeys.enabled.bindTo(this.contextService).set(false);
-			BackboardAuthContextKeys.signedIn.bindTo(this.contextService).set(true);
-			this.updateBackboardAuthGate();
-			return;
-		}
-
-		BackboardAuthContextKeys.enabled.bindTo(this.contextService).set(true);
-		const signedIn = await hasBackboardCredentials(this.fileService, await backboardConfigResource(this.pathService));
-		BackboardAuthContextKeys.signedIn.bindTo(this.contextService).set(signedIn);
-		BackboardAuthContextKeys.alternativeConfigured.bindTo(this.contextService).set(await hasAlternativeBackboardCredentials(this.commandService));
+		await this.backboardAuthService.refresh();
 		this.updateBackboardAuthGate();
 	}
 

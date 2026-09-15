@@ -430,10 +430,10 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 					<div class="authCard">
 						<div class="authLogo" aria-hidden="true"></div>
 						<div class="authTitle">Connect Your AI</div>
-						<div class="authText">Use Backboard, an API key, or a subscription.</div>
+						<div class="authText">${process.platform === 'win32' ? 'Use Backboard or a provider API key.' : 'Use Backboard, an API key, or a subscription.'}</div>
 						<button id="authSignInBtn" class="authButton" type="button"><span class="codicon codicon-account"></span><span>Sign In with SSO</span></button>
 						<button id="authByokBtn" class="authButton" type="button">Set Up BYOK</button>
-						<button id="authByosBtn" class="authButton" type="button">Set Up BYOS</button>
+						${process.platform !== 'win32' ? '<button id="authByosBtn" class="authButton" type="button">Set Up BYOS</button>' : ''}
 					</div>
 				</div>
 		</div>
