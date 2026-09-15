@@ -197,6 +197,7 @@ export class ClientRouter implements AgentClient {
 			const source = clients[index]?.source;
 			if (result?.status !== "fulfilled" || !source) continue;
 			for (const model of result.value.models) {
+				if (isSubscriptionProvider(model.provider) && !this.subscriptionForProvider(model.provider)) continue;
 				if (seen.has(modelKey(model))) continue;
 				seen.add(modelKey(model));
 				models.push({ ...model, source });
@@ -288,7 +289,7 @@ export class ClientRouter implements AgentClient {
 					: this.backboard();
 		if (!client) {
 			throw new Error(
-				`No backend can serve ${formatModel(model)}. Sign in with Backboard, connect the required subscription, or add a key with /keys.`,
+				`No backend can serve ${formatModel(model)}. Choose a Backboard or API key model.`,
 			);
 		}
 		return client;
@@ -301,7 +302,7 @@ export class ClientRouter implements AgentClient {
 		const knownSubscription = knownSubscriptionForThread(threadId);
 		if (knownSubscription) {
 			throw new Error(
-				`This thread requires a connected ${knownSubscription.label} subscription.`,
+				`${knownSubscription.label} subscriptions are currently unavailable. Choose a Backboard or API key model.`,
 			);
 		}
 		if (threadId.startsWith("byok_") && this.deps.byok) return this.deps.byok;

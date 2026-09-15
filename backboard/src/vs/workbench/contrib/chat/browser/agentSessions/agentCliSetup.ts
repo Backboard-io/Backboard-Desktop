@@ -6,6 +6,7 @@
 import { Codicon } from '../../../../../base/common/codicons.js';
 import { Event } from '../../../../../base/common/event.js';
 import { DisposableStore } from '../../../../../base/common/lifecycle.js';
+import { BACKBOARD_SUBSCRIPTIONS_ENABLED } from '../../../../../platform/agentHost/common/backboardSubscriptions.js';
 import { isWindows } from '../../../../../base/common/platform.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { URI } from '../../../../../base/common/uri.js';
@@ -159,7 +160,7 @@ export class AgentCliSetupService implements IAgentCliSetupService {
 	) { }
 
 	getSetupCandidates(registeredTypeIds: ReadonlySet<string>): IAgentCliSetupCandidate[] {
-		if (isWindows) {
+		if (!BACKBOARD_SUBSCRIPTIONS_ENABLED) {
 			return [];
 		}
 		// Subscription rows remain available as reconnect actions. Installable
@@ -193,8 +194,8 @@ export class AgentCliSetupService implements IAgentCliSetupService {
 	}
 
 	async beginSetup(id: string): Promise<void> {
-		if (isWindows) {
-			throw new Error(localize('agentSetup.byosDisabled', "BYOS subscriptions are not supported on Windows. Sign in with Backboard or use a provider API key."));
+		if (!BACKBOARD_SUBSCRIPTIONS_ENABLED) {
+			throw new Error(localize('agentSetup.byosDisabled', "Subscriptions are currently unavailable. Sign in with Backboard or use a provider API key."));
 		}
 		if (id === CHATGPT_SUBSCRIPTION_SETUP.id) {
 			if (this._inFlight.has(id)) {

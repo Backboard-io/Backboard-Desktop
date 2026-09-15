@@ -2,12 +2,122 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-.backboard-auth-setup-actions {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 8px;
+.backboard-auth-gate-host {
+	position: relative;
 }
-.backboard-auth-setup-actions .backboard-auth-gate-button:disabled { opacity: .6; cursor: wait; }
-.backboard-auth-setup-actions .backboard-auth-gate-button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 3px; }
-.backboard-auth-setup-status { margin: 0; color: var(--vscode-errorForeground); font-size: 12px; }
+
+.backboard-auth-gate-host.backboard-auth-gate-active > :not(.backboard-auth-gate-overlay) {
+	filter: blur(4px);
+	pointer-events: none;
+	user-select: none;
+}
+
+.backboard-auth-gate-host > .backboard-auth-gate-overlay {
+	position: absolute;
+	inset: 0;
+	z-index: 50;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	box-sizing: border-box;
+	padding: 20px;
+	background: color-mix(in srgb, var(--vscode-editor-background) 38%, transparent);
+	backdrop-filter: blur(2px);
+}
+
+.backboard-auth-gate-host > .backboard-auth-gate-overlay[hidden] { display: none; }
+
+.backboard-auth-gate-overlay .backboard-auth-gate-card.backboard-auth-setup-card {
+	box-sizing: border-box;
+	width: min(340px, 100%);
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 0;
+	padding: 26px 24px 24px;
+	border-radius: 12px;
+	border: 1px solid var(--vscode-panel-border);
+	background: var(--vscode-editor-background);
+	color: var(--vscode-editor-foreground);
+	box-shadow: 0 8px 28px var(--vscode-widget-shadow, transparent);
+	text-align: center;
+}
+
+.backboard-auth-setup-card .backboard-auth-gate-logo.codicon.codicon-backboard-logo {
+	width: 36px;
+	height: 36px;
+	font-size: 36px;
+	flex-shrink: 0;
+	display: block;
+	background: currentColor;
+	mask: url('./backboard_icon.svg') center / contain no-repeat;
+}
+
+.backboard-auth-setup-card.backboard-auth-gate-card .backboard-auth-gate-title {
+	margin: 16px 0 8px;
+	font-size: 18px;
+	font-weight: 600;
+	line-height: 24px;
+}
+
+.backboard-auth-setup-card.backboard-auth-gate-card .backboard-auth-gate-description {
+	max-width: 260px;
+	margin: 0;
+	font-size: 12px;
+	line-height: 18px;
+	text-wrap: balance;
+	color: var(--vscode-descriptionForeground);
+}
+
+.backboard-auth-setup-card .backboard-auth-setup-actions {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	width: 100%;
+	gap: 8px;
+	margin-top: 22px;
+}
+
+.backboard-auth-setup-card .backboard-auth-setup-actions .backboard-auth-gate-button {
+	box-sizing: border-box;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 100%;
+	min-width: 0;
+	height: auto;
+	min-height: 38px;
+	padding: 8px 10px;
+	border: 1px solid var(--vscode-button-border, transparent);
+	border-radius: 6px;
+	font-family: inherit;
+	font-size: 12px;
+	font-weight: 500;
+	line-height: 18px;
+	cursor: pointer;
+}
+
+.backboard-auth-setup-card .backboard-auth-setup-actions .primary {
+	grid-column: 1 / -1;
+	min-height: 38px;
+	font-weight: 600;
+	color: var(--vscode-button-foreground);
+	background: var(--vscode-button-background);
+}
+
+.backboard-auth-setup-card .backboard-auth-setup-actions .primary:hover { background: var(--vscode-button-hoverBackground); }
+
+.backboard-auth-setup-card .backboard-auth-setup-actions .secondary {
+	color: var(--vscode-foreground);
+	background: transparent;
+	border-color: var(--vscode-panel-border);
+}
+
+.backboard-auth-setup-card .backboard-auth-setup-actions .secondary:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+}
+
+.backboard-auth-setup-card .backboard-auth-setup-actions button:disabled { opacity: .6; cursor: wait; }
+.backboard-auth-setup-card .backboard-auth-setup-actions button:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 3px; }
+.backboard-auth-setup-status { margin: 12px 0 0; color: var(--vscode-errorForeground); font-size: 12px; line-height: 18px; }
 .backboard-auth-setup-status:empty { display: none; }

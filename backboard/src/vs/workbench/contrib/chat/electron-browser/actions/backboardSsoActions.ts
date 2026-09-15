@@ -3,16 +3,15 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { IOnboardingService } from '../../../welcomeOnboarding/common/onboardingService.js';
 import * as dom from '../../../../../base/browser/dom.js';
 import { BaseActionViewItem, IActionViewItemOptions } from '../../../../../base/browser/ui/actionbar/actionViewItems.js';
 import { IAction } from '../../../../../base/common/actions.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { isWindows } from '../../../../../base/common/platform.js';
-import { IQuickInputService } from '../../../../../platform/quickinput/common/quickInput.js';
-import { IAgentCliSetupService, CHATGPT_SUBSCRIPTION_SETUP_ID, CLAUDE_SUBSCRIPTION_SETUP_ID } from '../../browser/agentSessions/agentCliSetup.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { ServicesAccessor } from '../../../../../editor/browser/editorExtensions.js';
-import { localize, localize2 } from '../../../../../nls.js';
+import { localize2 } from '../../../../../nls.js';
 import { IActionViewItemService } from '../../../../../platform/actions/browser/actionViewItemService.js';
 import { Action2, MenuId, MenuRegistry, registerAction2 } from '../../../../../platform/actions/common/actions.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
@@ -25,20 +24,20 @@ import { BackboardAuthContextKeys, IBackboardAuthService } from '../../common/ba
 
 const backboardCategory = localize2('backboard.category', "Backboard");
 
-export function registerBackboardSsoActions(): void {
-	if (!isWindows) {
-		registerAction2(class BackboardSubscriptionSetupAction extends Action2 {
-			constructor() { super({ id: 'backboard.setupSubscription', title: localize2('backboard.setupSubscription', "Set Up Subscription"), category: backboardCategory, f1: true }); }
-			override async run(accessor: ServicesAccessor): Promise<void> {
-				const setup = accessor.get(IAgentCliSetupService);
-				const choice = await accessor.get(IQuickInputService).pick([
-					{ label: 'ChatGPT', id: CHATGPT_SUBSCRIPTION_SETUP_ID },
-					{ label: 'Claude', id: CLAUDE_SUBSCRIPTION_SETUP_ID },
-				], { title: localize('backboard.byos.title', "Bring Your Own Subscription"), placeHolder: localize('backboard.byos.choose', "Choose a subscription") });
-				if (choice) { await setup.beginSetup(choice.id); }
-			}
-		});
+/** Called by the credential writer after SSO tokens have been persisted. */
+export class BackboardRefreshAuthStateAction extends Action2 {
+	constructor() {
+		super({ id: 'backboard.refreshAuthState', title: localize2('backboard.refreshAuthState', "Refresh Backboard Sign-In State"), f1: false });
 	}
+
+	override async run(accessor: ServicesAccessor): Promise<void> {
+		await accessor.get(IBackboardAuthService).refresh();
+	}
+}
+
+export function registerBackboardSsoActions(): void {
+	registerAction2(BackboardRefreshAuthStateAction);
+
 	registerAction2(class BackboardSignInAction extends Action2 {
 		constructor() {
 			super({
@@ -50,12 +49,16 @@ export function registerBackboardSsoActions(): void {
 		}
 
 		/**
-		 * Delegates to the built-in Backboard extension, which signs in with the
+		 * Windows opens account setup, including Microsoft certification sign-in.
+		 * Other platforms delegate to the built-in Backboard extension with the
 		 * OAuth device authorization grant (RFC 8628): open the verification page
 		 * in the browser and poll the token endpoint until the user approves. No
 		 * localhost redirect or callback server is involved.
 		 */
 		override async run(accessor: ServicesAccessor): Promise<boolean> {
+			if (isWindows) {
+				return accessor.get(IOnboardingService).showSignIn();
+			}
 			return Boolean(await accessor.get(ICommandService).executeCommand<boolean>('backboard.extension.signIn'));
 		}
 	});

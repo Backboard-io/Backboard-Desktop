@@ -12,7 +12,7 @@
 	position: relative;
 }
 
-.agentSessionsWelcome.backboard-auth-gate-active > :not(.backboard-auth-gate-overlay) {
+.agentSessionsWelcome.backboard-auth-gate-active :is(.agentSessionsWelcome-mainRegion, .agentSessionsWelcome-rightPanel) {
 	filter: blur(4px);
 	pointer-events: none;
 	user-select: none;
@@ -21,6 +21,7 @@
 .agentSessionsWelcome .backboard-auth-gate-overlay {
 	position: absolute;
 	inset: 0;
+	left: var(--simple-mode-rail-width, 260px);
 	z-index: 20;
 	display: flex;
 	align-items: center;
@@ -750,6 +751,7 @@
 }
 
 @media (max-width: 700px) {
+	.agentSessionsWelcome .backboard-auth-gate-overlay { left: 0; }
 	.agentSessionsWelcome-content {
 		padding: 28px 18px 24px;
 	}
@@ -1414,6 +1416,7 @@
 }
 
 @media (max-width: 700px) {
+	.agentSessionsWelcome .backboard-auth-gate-overlay { left: 0; }
 	.agentSessionsWelcome-shell {
 		grid-template-columns: 1fr;
 	}

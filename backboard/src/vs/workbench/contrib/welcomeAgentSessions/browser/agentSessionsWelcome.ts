@@ -225,7 +225,7 @@ export class AgentSessionsWelcomePage extends EditorPane {
 		title.textContent = localize('backboard.auth.agentsWelcome.title', "Connect Your AI");
 
 		const description = append(card, $('p.backboard-auth-gate-description'));
-		description.textContent = localize('backboard.auth.agentsWelcome.description', "Use Backboard, an API key, or a subscription.");
+		description.textContent = localize('backboard.auth.description.windows', "Use Backboard or an API key.");
 
 		this._register(renderBackboardAuthSetup(card, this.commandService, () => this.refreshBackboardAuthGateFromConfig()));
 

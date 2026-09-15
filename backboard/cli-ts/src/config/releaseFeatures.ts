@@ -1,4 +1,8 @@
-/** Windows releases support Backboard and provider API keys, not BYOS. */
-export function supportsSubscriptions(platform: string = process.platform): boolean {
-	return platform !== "win32";
+/** Subscription connections are disabled on every platform in this release. */
+export function supportsSubscriptions(_platform: string = process.platform): boolean {
+	return false;
+}
+
+export function isProviderAvailable(provider: string): boolean {
+	return !["openai-subscription", "anthropic-subscription"].includes(provider.trim().toLowerCase());
 }

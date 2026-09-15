@@ -5,7 +5,7 @@
 
 import * as assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
-import { BACKBOARD_ACCESS_DEFAULT, BACKBOARD_MODE_MULTITASK, BUNDLED_CHATGPT_SUBSCRIPTION_MODELS, BUNDLED_CLAUDE_SUBSCRIPTION_MODELS, backboardModelInfos, backboardMultitaskSystemContext, createBackboardTurnSettings, resolveBackboardSessionConfig } from '../../node/cliTs/backboardRuntimeShared.js';
+import { BACKBOARD_ACCESS_DEFAULT, BACKBOARD_MODE_MULTITASK, BUNDLED_CHATGPT_SUBSCRIPTION_MODELS, BUNDLED_CLAUDE_SUBSCRIPTION_MODELS, backboardModelInfos, backboardModelInfosForPlatform, backboardMultitaskSystemContext, createBackboardTurnSettings, resolveBackboardSessionConfig } from '../../node/cliTs/backboardRuntimeShared.js';
 
 suite('Backboard runtime configuration', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -21,79 +21,22 @@ suite('Backboard runtime configuration', () => {
 		assert.strictEqual(resolved.values.showReasoning, undefined);
 	});
 
-	test('bundles ChatGPT subscription models as distinct Backboard harness routes', () => {
-		const models = backboardModelInfos(BUNDLED_CHATGPT_SUBSCRIPTION_MODELS);
-		const subscriptionModels = models.filter(model => model.id.startsWith('openai-subscription/'));
-
-		assert.deepStrictEqual(subscriptionModels.map(model => model.id), [
-			'openai-subscription/gpt-5.4',
-			'openai-subscription/gpt-5.4-mini',
-			'openai-subscription/gpt-5.5',
-			'openai-subscription/gpt-5.6-luna',
-			'openai-subscription/gpt-5.6-sol',
-			'openai-subscription/gpt-5.6-terra',
-		]);
-		for (const model of subscriptionModels) {
-			assert.strictEqual(model.provider, 'backboard');
-			assert.strictEqual(model.supportsVision, true);
-			assert.strictEqual(model._meta?.upstreamProvider, 'openai-subscription');
-			assert.strictEqual(model._meta?.upstreamProviderLabel, 'OpenAI (ChatGPT Subscription)');
-		}
-	});
-
-	test('bundles the current Claude Code subscription fallback routes', () => {
-		const models = backboardModelInfos(BUNDLED_CLAUDE_SUBSCRIPTION_MODELS);
-		const subscriptionModels = models.filter(model => model.id.startsWith('anthropic-subscription/'));
-
-		assert.deepStrictEqual(subscriptionModels.map(model => model.id), [
-			'anthropic-subscription/claude-fable-5-1[1m]',
-			'anthropic-subscription/default',
-			'anthropic-subscription/haiku',
-			'anthropic-subscription/opus[1m]',
-			'anthropic-subscription/sonnet',
-		]);
-		for (const model of subscriptionModels) {
-			assert.strictEqual(model.provider, 'backboard');
-			assert.strictEqual(model.supportsVision, true);
-			assert.strictEqual(model._meta?.upstreamProvider, 'anthropic-subscription');
-			assert.strictEqual(model._meta?.upstreamProviderLabel, 'Claude Subscription');
-		}
-		assert.deepStrictEqual(subscriptionModels.find(model => model.id === 'anthropic-subscription/opus[1m]')?.configSchema?.properties.intensity.enum, ['low', 'medium', 'high', 'xhigh', 'max']);
-		assert.strictEqual(subscriptionModels.find(model => model.id === 'anthropic-subscription/opus[1m]')?.configSchema?.properties.intensity.default, 'high');
-		assert.strictEqual(subscriptionModels.find(model => model.id === 'anthropic-subscription/haiku')?.configSchema, undefined);
-		assert.strictEqual(subscriptionModels.find(model => model.id === 'anthropic-subscription/opus[1m]')?.maxContextWindow, 1_000_000);
-	});
-
-	test('uses Claude Code live model names and does not add unavailable bundled aliases', () => {
-		const models = backboardModelInfos([
-			{
-				provider: 'anthropic-subscription',
-				name: 'default',
-				display_name: 'Claude Default (Opus 5)',
-				description: 'Opus 5 with 1M context',
-				resolved_model: 'claude-opus-5[1m]',
-				context_limit: 1_000_000,
-				model_type: 'llm',
-				supported_effort_levels: ['low', 'medium', 'high', 'xhigh', 'max'],
-			},
-			{
-				provider: 'anthropic-subscription',
-				name: 'haiku',
-				display_name: 'Claude Haiku 4.5',
-				model_type: 'llm',
-				supported_effort_levels: [],
-			},
-		], BUNDLED_CLAUDE_SUBSCRIPTION_MODELS)
-			.filter(model => model.id.startsWith('anthropic-subscription/'));
-
-		assert.deepStrictEqual(models.map(model => model.id), [
-			'anthropic-subscription/default',
-			'anthropic-subscription/haiku',
-		]);
-		assert.strictEqual(models[0]?.name, 'Claude Default (Opus 5)');
-		assert.strictEqual(models[0]?._meta?.modelDescription, 'Opus 5 with 1M context');
-		assert.strictEqual(models[1]?.configSchema, undefined);
-	});
+	for (const windows of [true, false]) {
+		test(`filters bundled, cached and live subscription routes for Windows=${windows}`, () => {
+			const models = backboardModelInfosForPlatform(windows, [
+				{ provider: 'openai-subscription', name: 'account-model' },
+				{ provider: 'anthropic-subscription', name: 'default' },
+				{ provider: 'openai', name: 'gpt-5.5' },
+				{ provider: 'anthropic', name: 'claude-sonnet-5' },
+			], BUNDLED_CHATGPT_SUBSCRIPTION_MODELS, BUNDLED_CLAUDE_SUBSCRIPTION_MODELS);
+			assert.strictEqual(models.some(model => model.id.startsWith('openai-subscription/')), false);
+			assert.strictEqual(models.some(model => model.id.startsWith('anthropic-subscription/')), false);
+			assert.ok(models.some(model => model.id === 'openai/gpt-5.5'));
+			assert.ok(models.some(model => model.id === 'anthropic/claude-sonnet-5'));
+			const bundled = backboardModelInfosForPlatform(windows, BUNDLED_CHATGPT_SUBSCRIPTION_MODELS, BUNDLED_CLAUDE_SUBSCRIPTION_MODELS);
+			assert.strictEqual(bundled.some(model => model.id.includes('-subscription/')), false);
+		});
+	}
 
 	test('builds OpenRouter serving-provider choices from live catalog metadata', () => {
 		const [model] = backboardModelInfos([{

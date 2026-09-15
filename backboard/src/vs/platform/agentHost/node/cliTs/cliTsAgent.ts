@@ -4,6 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 import type { AgentRewindRequest, IAgentRewindBuffer, IAgentRewindResult } from '../../common/agentRewind.js';
+import { isBackboardProviderAvailable } from '../../common/backboardSubscriptions.js';
+import { isWindows } from '../../../../base/common/platform.js';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -67,7 +69,7 @@ export function hasUsableChatGptSubscriptionLogin(homeDir = os.homedir(), now = 
 		const envAuthFile = process.env['BACKBOARD_CHATGPT_SUBSCRIPTION_AUTH_FILE']?.trim();
 		let configuredAuthFile = '';
 		try {
-			const config = JSON.parse(fs.readFileSync(path.join(homeDir, '.backboard', 'config.json'), 'utf8')) as { chatgptSubscriptionAuthFile?: unknown };
+			const config = JSON.parse(fs.readFileSync(path.join(homeDir, '.backboard_ide', 'subscriptions.json'), 'utf8')) as { chatgptSubscriptionAuthFile?: unknown };
 			configuredAuthFile = typeof config.chatgptSubscriptionAuthFile === 'string' ? config.chatgptSubscriptionAuthFile.trim() : '';
 		} catch {
 			// An explicit env override remains usable on a fresh install with no config.
@@ -463,8 +465,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 	readonly onDidMaterializeSession = this._onDidMaterializeSession.event;
 
 	/**
-	 * Starts with the locally-authenticated ChatGPT and Claude subscription routes,
-	 * immediately hydrates the previous live Backboard API result from disk,
+	 * Hydrates the previous live Backboard API result from disk,
 	 * and refreshes from the backend once a serve process is up. API catalog
 	 * providers such as OpenRouter are never supplemented from a compiled list.
 	 */
@@ -472,7 +473,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 		'cliTsModels',
 		withSubscriptionConnectionStates(
 			backboardModelInfos(BUNDLED_CHATGPT_SUBSCRIPTION_MODELS, BUNDLED_CLAUDE_SUBSCRIPTION_MODELS),
-			hasUsableChatGptSubscriptionLogin(),
+			false,
 			false,
 		),
 	);
@@ -531,7 +532,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 			if (models.length) {
 				this._models.set(withSubscriptionConnectionStates(
 					backboardModelInfos(models, BUNDLED_CHATGPT_SUBSCRIPTION_MODELS, BUNDLED_CLAUDE_SUBSCRIPTION_MODELS),
-					hasUsableChatGptSubscriptionLogin(),
+					false,
 					this._claudeSubscriptionConnected,
 				), undefined);
 			}
@@ -588,12 +589,15 @@ export class CliTsAgent extends Disposable implements IAgent {
 		};
 	}
 
-	async executeCommand(command: string): Promise<IAgentCommandResult> {
+	async executeCommand(command: string, _windows = isWindows): Promise<IAgentCommandResult> {
+		if (command.startsWith('chatgptSubscription.') || command.startsWith('claudeSubscription.')) {
+			throw new Error(localize('cliTsAgent.subscriptions.unavailable', "Subscriptions are currently unavailable. Use Backboard or an API key."));
+		}
 		switch (command) {
 			case 'models.refresh':
 				this._modelRefreshPromise ??= this._refreshModelCatalog().finally(() => { this._modelRefreshPromise = undefined; });
 				await this._modelRefreshPromise;
-				return { message: localize('cliTsAgent.models.refreshed', "Models and subscriptions refreshed.") };
+				return { message: localize('cliTsAgent.modelsOnly.refreshed', "Models refreshed.") };
 			case CHATGPT_SUBSCRIPTION_LOGIN_COMMAND:
 				await this._ensureChatGptSubscriptionLogin(true);
 				return {
@@ -618,6 +622,9 @@ export class CliTsAgent extends Disposable implements IAgent {
 	}
 
 	private async _ensureChatGptSubscriptionLogin(force: boolean): Promise<void> {
+		if (!isBackboardProviderAvailable(CHATGPT_SUBSCRIPTION_PROVIDER)) {
+			throw new Error(localize('cliTsAgent.subscriptions.unavailable', "Subscriptions are currently unavailable. Use Backboard or an API key."));
+		}
 		if (!force && hasUsableChatGptSubscriptionLogin()) {
 			return;
 		}
@@ -646,6 +653,9 @@ export class CliTsAgent extends Disposable implements IAgent {
 	}
 
 	private async _requireClaudeSubscriptionLogin(): Promise<void> {
+		if (!isBackboardProviderAvailable(CLAUDE_SUBSCRIPTION_PROVIDER)) {
+			throw new Error(localize('cliTsAgent.subscriptions.unavailable', "Subscriptions are currently unavailable. Use Backboard or an API key."));
+		}
 		try {
 			await assertUsableClaudeSubscriptionLogin();
 			this._setClaudeSubscriptionConnectionState(true);
@@ -655,7 +665,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 		}
 	}
 
-	private async _refreshClaudeSubscriptionConnectionState(probe: () => Promise<boolean> = isClaudeLoggedIn): Promise<void> {
+	private async _refreshClaudeSubscriptionConnectionState(probe: () => Promise<boolean> = async () => false): Promise<void> {
 		const revision = ++this._claudeSubscriptionStatusRevision;
 		const connected = await probe();
 		if (revision === this._claudeSubscriptionStatusRevision) {
@@ -1066,14 +1076,8 @@ export class CliTsAgent extends Disposable implements IAgent {
 		// on the first frame.
 		this._fireStatus(session, turn, localize('cliTsAgent.status.preparing', "Preparing…"));
 		try {
-			if (settings.provider === CHATGPT_SUBSCRIPTION_PROVIDER) {
-				if (!hasUsableChatGptSubscriptionLogin()) {
-					this._fireStatus(session, turn, localize('cliTsAgent.status.waitingForChatGptLogin', "Waiting for ChatGPT sign-in…"));
-				}
-				await this._ensureChatGptSubscriptionLogin(false);
-			} else if (settings.provider === CLAUDE_SUBSCRIPTION_PROVIDER) {
-				this._fireStatus(session, turn, localize('cliTsAgent.status.checkingClaudeLogin', "Checking Claude sign-in…"));
-				await this._requireClaudeSubscriptionLogin();
+			if (!isBackboardProviderAvailable(settings.provider)) {
+				throw new Error(localize('cliTsAgent.subscriptions.unavailable', "Subscriptions are currently unavailable. Use Backboard or an API key."));
 			}
 			// Resolve folder/worktree isolation from the latest live config before
 			// starting a process or capturing the session baseline. The checkpoint
@@ -1511,6 +1515,9 @@ export class CliTsAgent extends Disposable implements IAgent {
 	}
 
 	async changeModel(sessionUri: URI, model: ModelSelection): Promise<void> {
+		if (!isBackboardProviderAvailable(providerFromModelId(model.id) ?? '')) {
+			throw new Error(localize('cliTsAgent.subscriptions.unavailable', "Subscriptions are currently unavailable. Use Backboard or an API key."));
+		}
 		const session = this._session(sessionUri);
 		const previousModelId = session.model?.id;
 		session.model = model;
@@ -2104,7 +2111,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 
 	private async _refreshModelCatalog(): Promise<void> {
 		await this._refreshClaudeSubscriptionConnectionState();
-		this._models.set(withChatGptSubscriptionConnectionState(this._models.get(), hasUsableChatGptSubscriptionLogin()), undefined);
+		this._models.set(withChatGptSubscriptionConnectionState(this._models.get(), false), undefined);
 		// A short-lived catalog process reads current credentials and avoids touching
 		// the provider routers or processes owned by running conversations.
 		const proc = new CliTsServeProcess(this._logService, { onEvent: () => { } });
@@ -2142,10 +2149,10 @@ export class CliTsAgent extends Disposable implements IAgent {
 		const models = (Array.isArray(payload?.models) ? payload.models : []).filter(isBridgeModel);
 		if (models.length) {
 			// The Backboard API is authoritative for catalog providers. Only the
-			// Locally-authenticated subscription routes are supplemented.
+			// Release filtering applies to both live and bundled catalog entries.
 			const infos = withSubscriptionConnectionStates(
 				backboardModelInfos(models, BUNDLED_CHATGPT_SUBSCRIPTION_MODELS, BUNDLED_CLAUDE_SUBSCRIPTION_MODELS),
-				hasUsableChatGptSubscriptionLogin(),
+				false,
 				this._claudeSubscriptionConnected,
 			);
 			this._models.set(infos.length ? infos : [fallbackModel()], undefined);

@@ -123,12 +123,15 @@ suite('CliTsAgent tool metadata', () => {
 				Buffer.from(JSON.stringify({ exp })).toString('base64url'),
 				'signature',
 			].join('.');
-			fs.mkdirSync(path.join(tempRoot, '.backboard'), { recursive: true });
-			fs.writeFileSync(path.join(tempRoot, '.backboard', 'config.json'), JSON.stringify({ chatgptSubscriptionAuthFile: authFile }));
+			fs.mkdirSync(path.join(tempRoot, '.backboard_ide'), { recursive: true });
+			fs.writeFileSync(path.join(tempRoot, '.backboard_ide', 'subscriptions.json'), JSON.stringify({ chatgptSubscriptionAuthFile: authFile }));
 			fs.writeFileSync(authFile, JSON.stringify({ tokens: { access_token: jwt(1), refresh_token: 'renewable' } }));
 
 			assert.strictEqual(hasUsableChatGptSubscriptionLogin(tempRoot, 2_000), true);
 			fs.writeFileSync(authFile, JSON.stringify({ tokens: { access_token: jwt(1) } }));
+			assert.strictEqual(hasUsableChatGptSubscriptionLogin(tempRoot, 2_000), false);
+			fs.writeFileSync(authFile, JSON.stringify({ tokens: { access_token: jwt(1), refresh_token: 'renewable' } }));
+			fs.rmSync(path.join(tempRoot, '.backboard_ide'), { recursive: true });
 			assert.strictEqual(hasUsableChatGptSubscriptionLogin(tempRoot, 2_000), false);
 			assert.strictEqual(isChatGptSubscriptionModel('openai-subscription/gpt-5.6-sol'), true);
 			assert.strictEqual(isChatGptSubscriptionModel('openai/gpt-5.6-sol'), false);
@@ -266,18 +269,32 @@ suite('CliTsAgent tool metadata', () => {
 		assert.strictEqual(internals._claudeSubscriptionConnected, true);
 	});
 
-	test('reports whether Claude setup needs OAuth', async () => {
+	for (const command of ['chatgptSubscription.login', 'claudeSubscription.login', 'claudeSubscription.enable', 'claudeSubscription.check']) {
+		test(`All platforms reject ${command} before starting subscription setup`, async () => {
+			for (const windows of [true, false]) {
+				await assert.rejects(createAgent().executeCommand(command, windows), /Subscriptions are currently unavailable/);
+			}
+		});
+	}
+
+	for (const provider of ['openai-subscription', 'anthropic-subscription']) {
+		test(`rejects a cached model selection for ${provider} before modifying the session`, async () => {
+			await assert.rejects(createAgent().changeModel(AgentSession.uri('backboard', 'stale-selection'), { id: `${provider}/default` }), /Subscriptions are currently unavailable/);
+		});
+	}
+
+	test('blocks Claude status regardless of saved connection state', async () => {
 		const agent = createAgent();
 		for (const connected of [true, false]) {
 			Reflect.set(agent, '_refreshClaudeSubscriptionConnectionState', async () => { Reflect.set(agent, '_claudeSubscriptionConnected', connected); });
-			assert.deepStrictEqual(await agent.executeCommand('claudeSubscription.check'), { message: '', requiresSignIn: !connected });
+			await assert.rejects(agent.executeCommand('claudeSubscription.check', false), /Subscriptions are currently unavailable/);
 		}
 	});
 
 	test('refuses to start interactive Claude OAuth through the stdin-less agent command', async () => {
 		await assert.rejects(
-			createAgent().executeCommand('claudeSubscription.login'),
-			/requires an interactive terminal/,
+			createAgent().executeCommand('claudeSubscription.login', false),
+			/Subscriptions are currently unavailable/,
 		);
 	});
 

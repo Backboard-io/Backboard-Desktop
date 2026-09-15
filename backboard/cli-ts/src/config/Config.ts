@@ -1,3 +1,4 @@
+import { isProviderAvailable } from "./releaseFeatures.ts";
 import { canonicalToolName } from "../core/tools/names.ts";
 import { ToolPolicy } from "../core/tools/ToolPolicy.ts";
 import {
@@ -105,9 +106,12 @@ export class Config {
 			options.homeDir !== undefined || options.env === undefined;
 		const persistedConfig =
 			options.homeDir !== undefined || options.env === undefined
-				? readBackboardConfig(options.homeDir)
+				? readBackboardConfig(options.homeDir, false)
 				: {};
 
+		if (persistedConfig.model && !isProviderAvailable(persistedConfig.model.provider)) {
+			delete persistedConfig.model;
+		}
 		const profileName = this.flags.profile ?? DEFAULTS.profile;
 		this.profile = getProfile(profileName);
 
@@ -146,7 +150,10 @@ export class Config {
 				claudeSubscriptionOnlyDefault ??
 				keyOnlyDefault ??
 				this.profile.model);
-		this.successfulModelRefs = persistedConfig.successfulModels ?? [];
+		if (!isProviderAvailable(this.currentModel.provider)) {
+			throw new Error("Subscriptions are currently unavailable. Choose a Backboard or API key model.");
+		}
+		this.successfulModelRefs = (persistedConfig.successfulModels ?? []).filter(model => isProviderAvailable(model.provider));
 		this.currentModelProfile = resolveModelProfile(this.currentModel);
 		this.currentFormat = this.flags.format
 			? parseOutputFormat(this.flags.format)
@@ -179,6 +186,9 @@ export class Config {
 	}
 
 	setModel(ref: ModelRef): void {
+		if (!isProviderAvailable(ref.provider)) {
+			throw new Error("Subscriptions are currently unavailable. Choose a Backboard or API key model.");
+		}
 		this.currentModel = ref;
 		this.currentModelProfile = resolveModelProfile(ref);
 	}
@@ -203,7 +213,7 @@ export class Config {
 			),
 		].slice(0, 10);
 		if (!this.recoveryPersistenceEnabled) return;
-		const existing = readBackboardConfig(this.persistedConfigHomeDir);
+		const existing = readBackboardConfig(this.persistedConfigHomeDir, false);
 		await saveBackboardConfig(
 			{ ...existing, successfulModels: this.successfulModelRefs },
 			this.persistedConfigHomeDir,
@@ -362,7 +372,7 @@ export class Config {
 	}
 
 	async saveRuntimeSelection(): Promise<void> {
-		const existing = readBackboardConfig(this.persistedConfigHomeDir);
+		const existing = readBackboardConfig(this.persistedConfigHomeDir, false);
 		await saveBackboardConfig(
 			{
 				...existing,
@@ -382,7 +392,7 @@ export class Config {
 	}
 
 	async saveNotifyPreference(): Promise<void> {
-		const existing = readBackboardConfig(this.persistedConfigHomeDir);
+		const existing = readBackboardConfig(this.persistedConfigHomeDir, false);
 		await saveBackboardConfig(
 			{
 				...existing,
@@ -393,7 +403,7 @@ export class Config {
 	}
 
 	async saveVerbosePreference(): Promise<void> {
-		const existing = readBackboardConfig(this.persistedConfigHomeDir);
+		const existing = readBackboardConfig(this.persistedConfigHomeDir, false);
 		await saveBackboardConfig(
 			{
 				...existing,

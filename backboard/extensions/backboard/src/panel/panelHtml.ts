@@ -78,12 +78,17 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 			.root.authRequired > :not(.authOverlay) { filter: blur(4px); opacity: .48; pointer-events: none; user-select: none; }
 			.authOverlay { position: absolute; inset: 0; z-index: 40; display: none; align-items: center; justify-content: center; padding: 22px; background: color-mix(in srgb, var(--bb-bg) 38%, transparent); }
 			.root.authRequired .authOverlay { display: flex; }
-			.authCard { width: min(280px, 100%); display: grid; justify-items: center; gap: 12px; padding: 22px 18px; border: 1px solid color-mix(in srgb, var(--bb-border) 82%, transparent); border-radius: 8px; background: color-mix(in srgb, var(--bb-card) 94%, var(--bb-bg)); box-shadow: 0 18px 48px color-mix(in srgb, var(--bb-shadow) 80%, transparent); text-align: center; }
-			.authLogo { width: 52px; height: 68px; display: block; color: color-mix(in srgb, var(--vscode-icon-foreground, var(--bb-text)) 62%, var(--bb-primary)); background: currentColor; -webkit-mask: url('${backboardLogo}') center / contain no-repeat; mask: url('${backboardLogo}') center / contain no-repeat; }
-			.authTitle { color: var(--bb-text); font-size: 15px; font-weight: 650; line-height: 20px; }
+			.authCard { box-sizing: border-box; width: min(340px, 100%); display: flex; flex-direction: column; align-items: center; gap: 0; padding: 26px 24px 24px; border: 1px solid var(--bb-border); border-radius: 12px; background: var(--bb-card); box-shadow: 0 8px 28px var(--bb-shadow); text-align: center; }
+			.authLogo { width: 36px; height: 36px; flex-shrink: 0; display: block; color: color-mix(in srgb, var(--vscode-icon-foreground, var(--bb-text)) 62%, var(--bb-primary)); background: currentColor; -webkit-mask: url('${backboardLogo}') center / contain no-repeat; mask: url('${backboardLogo}') center / contain no-repeat; }
+			.authTitle { margin: 16px 0 8px; color: var(--bb-text); font-size: 18px; font-weight: 600; line-height: 24px; }
 			.authText { max-width: 230px; color: var(--bb-muted); font-size: 12px; line-height: 17px; }
-			.authButton { min-height: 30px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 12px; border-radius: 5px; color: var(--vscode-button-foreground, #fff); background: var(--vscode-button-background, var(--bb-primary)); font-size: 12px; font-weight: 600; }
+			.authButton { box-sizing: border-box; width: 100%; min-width: 0; min-height: 38px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 12px; border-radius: 5px; color: var(--vscode-button-foreground, #fff); background: var(--vscode-button-background, var(--bb-primary)); font-size: 12px; font-weight: 600; }
 			.authButton:hover { background: var(--vscode-button-hoverBackground, color-mix(in srgb, var(--bb-primary) 84%, var(--bb-text))); }
+			.authActions { display: grid; grid-template-columns: minmax(0, 1fr); width: 100%; gap: 8px; margin-top: 22px; }
+			.authActions .primary { grid-column: 1 / -1; min-height: 38px; }
+			.authActions .secondary { color: var(--bb-text); background: transparent; border: 1px solid var(--bb-border); font-weight: 500; }
+			.authActions .secondary:hover { background: var(--vscode-toolbar-hoverBackground); }
+			.authButton:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 2px; }
 			.authButton .codicon { font-size: 14px; }
 		.panelHeader { min-height: 42px; box-sizing: border-box; display: flex; align-items: center; gap: 9px; padding: 6px 12px; border-bottom: 1px solid var(--bb-border); background: color-mix(in srgb, var(--bb-surface) 86%, var(--bb-bg)); }
 		.brandMark { width: 24px; height: 24px; flex: 0 0 auto; display: grid; place-items: center; border: 1px solid color-mix(in srgb, var(--bb-primary) 30%, var(--bb-border)); border-radius: 6px; color: var(--bb-primary); background: color-mix(in srgb, var(--bb-primary) 10%, transparent); }
@@ -430,10 +435,11 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 					<div class="authCard">
 						<div class="authLogo" aria-hidden="true"></div>
 						<div class="authTitle">Connect Your AI</div>
-						<div class="authText">${process.platform === 'win32' ? 'Use Backboard or a provider API key.' : 'Use Backboard, an API key, or a subscription.'}</div>
-						<button id="authSignInBtn" class="authButton" type="button"><span class="codicon codicon-account"></span><span>Sign In with SSO</span></button>
-						<button id="authByokBtn" class="authButton" type="button">Set Up BYOK</button>
-						${process.platform !== 'win32' ? '<button id="authByosBtn" class="authButton" type="button">Set Up BYOS</button>' : ''}
+						<div class="authText">Use Backboard or a provider API key.</div>
+						<div class="authActions">
+						<button id="authSignInBtn" class="authButton primary" type="button"><span class="codicon codicon-account"></span><span>Sign In with SSO</span></button>
+						<button id="authByokBtn" class="authButton secondary" type="button">Use API Key</button>
+						</div>
 					</div>
 				</div>
 		</div>
@@ -771,9 +777,6 @@ export function panelHtml(webview: vscode.Webview, codiconsStylesheet: vscode.Ur
 			});
 			document.getElementById('authByokBtn')?.addEventListener('click', () => {
 				vscode.postMessage({ type: 'setupProviderKey' });
-			});
-			document.getElementById('authByosBtn')?.addEventListener('click', () => {
-				vscode.postMessage({ type: 'setupSubscription' });
 			});
 		prompt.addEventListener('keydown', event => {
 			if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {

@@ -71,12 +71,11 @@ with that older branch: newer Mac onboarding, auth, and UI changes must remain.
 Keep the source-commit override, non-Windows native-module filtering, long-path
 installer compiler, and Azure credential refresh before installer signing.
 
-Windows disables Backboard's BYOS subscription setup and provider routing;
-Backboard sign-in and provider API keys remain available. Saved subscription
-credentials are left on disk but ignored on Windows. Mac subscription behavior
-is unchanged. `cli-ts/tests/ReleaseFeatures.test.ts` runs in the Windows workflow,
-including Windows-only checks that subscription login/enable commands reject
-before provider authentication begins.
+Subscriptions are disabled on all platforms for this release. Backboard sign-in
+and provider API keys remain available. Setup actions, cached model catalogs,
+saved selections, environment overrides, and production subscription routing
+are blocked. `cli-ts/tests/ReleaseFeatures.test.ts` verifies these restrictions,
+including rejection of legacy login/enable commands before authentication.
 
 The workflow must run from reviewed `main`. Use a new version and leave
 `reuse_signed_run` empty when app code changed. Installer checks cover fresh

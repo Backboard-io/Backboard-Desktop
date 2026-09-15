@@ -3,6 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { isWindows } from '../../../../base/common/platform.js';
+import { isBackboardProviderAvailable } from '../../common/backboardSubscriptions.js';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -531,7 +533,11 @@ function mergeBridgeModels(...modelSets: readonly (readonly BridgeModel[])[]): B
 }
 
 export function backboardModelInfos(...modelSets: readonly (readonly BridgeModel[])[]): IAgentModelInfo[] {
-	const mergedModels = mergeBridgeModels(...modelSets);
+	return backboardModelInfosForPlatform(isWindows, ...modelSets);
+}
+
+export function backboardModelInfosForPlatform(windows: boolean, ...modelSets: readonly (readonly BridgeModel[])[]): IAgentModelInfo[] {
+	const mergedModels = mergeBridgeModels(...modelSets).filter(model => isBackboardProviderAvailable(model.provider, windows));
 	return mergedModels
 		.filter(isVisibleBridgeModel)
 		.concat(supplementalBridgeModels(mergedModels))

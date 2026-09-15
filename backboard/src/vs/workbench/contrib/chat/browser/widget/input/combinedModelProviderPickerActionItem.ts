@@ -3,6 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { isWindows } from '../../../../../../base/common/platform.js';
+import { isBackboardProviderAvailable } from '../../../../../../platform/agentHost/common/backboardSubscriptions.js';
 import * as dom from '../../../../../../base/browser/dom.js';
 import { StandardKeyboardEvent } from '../../../../../../base/browser/keyboardEvent.js';
 import { getDefaultHoverDelegate } from '../../../../../../base/browser/ui/hover/hoverDelegateFactory.js';
@@ -246,7 +248,8 @@ function recommendedModels(models: readonly ILanguageModelChatMetadataAndIdentif
 }
 
 /** Builds the stable left-rail sections for the Backboard model catalog. */
-export function buildCombinedModelSections(models: readonly ILanguageModelChatMetadataAndIdentifier[]): ICombinedModelSection[] {
+export function buildCombinedModelSections(models: readonly ILanguageModelChatMetadataAndIdentifier[], windows = isWindows): ICombinedModelSection[] {
+	models = models.filter(model => isBackboardProviderAvailable(upstreamProviderId(model), windows));
 	const recommendedCount = recommendedModels(models).length;
 	const providers = new Map<string, { label: string; count: number }>();
 	for (const model of models) {
@@ -311,7 +314,9 @@ export function modelsForCombinedModelSection(
 	models: readonly ILanguageModelChatMetadataAndIdentifier[],
 	sectionId: string,
 	includeAllModels = false,
+	windows = isWindows,
 ): ILanguageModelChatMetadataAndIdentifier[] {
+	models = models.filter(model => isBackboardProviderAvailable(upstreamProviderId(model), windows));
 	if (includeAllModels) {
 		return [...models];
 	}
@@ -452,6 +457,7 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 				return metadata ? { metadata, identifier: id } : undefined;
 			})
 			.filter((m): m is ILanguageModelChatMetadataAndIdentifier => !!m && m.metadata.targetChatSessionType === provider)
+			.filter(model => isBackboardProviderAvailable(upstreamProviderId(model)))
 			.filter(model => !/(^|[\s/_.:-])latest($|[\s/_.:-])/i.test(`${model.metadata.id} ${model.metadata.name}`))
 			.sort((a, b) => a.metadata.name.localeCompare(b.metadata.name));
 	}
@@ -618,7 +624,7 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 		if (showingBackboard) {
 			const refresh = dom.append(toolbar, dom.$('button.combined-model-provider-refresh')) as HTMLButtonElement;
 			refresh.type = 'button';
-			const label = localize('combinedPicker.refreshModels', "Refresh Models and Subscriptions");
+			const label = localize('combinedPicker.refreshModelsOnly', "Refresh Models");
 			refresh.setAttribute('aria-label', label);
 			store.add(this._hoverService.setupManagedHover(getDefaultHoverDelegate('mouse'), refresh, label));
 			const icon = refresh.appendChild(renderIcon(Codicon.refresh));
@@ -633,12 +639,12 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 				if (this._refreshPromise) { return; }
 				this._refreshPromise = this._agentHostService.executeAgentCommand({ provider: 'backboard', command: 'models.refresh' })
 					.then(() => {
-						this._notificationService.info(localize('combinedPicker.refreshSuccess', "Models and subscriptions are up to date."));
+						this._notificationService.info(localize('combinedPicker.refreshModelsSuccess', "Models are up to date."));
 					}, error => {
 						const message = error instanceof Error ? error.message : String(error);
 						this._notificationService.error(message.includes('Unsupported Backboard command: models.refresh')
-							? localize('combinedPicker.refreshRestartRequired', "Restart Backboard after your running agents finish to enable model and subscription refresh.")
-							: localize('combinedPicker.refreshFailed', "Could not refresh models and subscriptions: {0}", message));
+							? localize('combinedPicker.refreshRestartRequired', "Restart Backboard after your running agents finish to enable model refresh.")
+							: localize('combinedPicker.refreshFailed', "Could not refresh models: {0}", message));
 					})
 					.finally(() => {
 						this._refreshPromise = undefined;

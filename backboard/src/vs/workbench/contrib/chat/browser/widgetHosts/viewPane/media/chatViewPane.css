@@ -3,14 +3,6 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-/* Match the signed-out chat gate without covering the sidebar's window controls. */
-.monaco-workbench:has(.chat-viewpane .backboard-auth-gate-active) .part.sidebar > .content {
-	filter: blur(4px);
-	opacity: 0.48;
-	pointer-events: none;
-	user-select: none;
-}
-
 /* Voice Agent Bar — wraps the shared AgentsVoiceWidget */
 .voice-agent-bar {
 	display: flex;
