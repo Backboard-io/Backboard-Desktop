@@ -47,7 +47,7 @@ export function spawnTsgo(projectPath: string, config: { taskName: string; noEmi
 	});
 
 	return new Promise<void>((resolve, reject) => {
-		child.on('exit', code => {
+		child.on('close', code => {
 			const allOutput = stdoutData + '\n' + stderrData;
 			const lines = allOutput
 				.split(/\r?\n/)
@@ -61,7 +61,7 @@ export function spawnTsgo(projectPath: string, config: { taskName: string; noEmi
 			if (code === 0) {
 				Promise.resolve(onComplete?.()).then(() => resolve(), reject);
 			} else {
-				reject(new Error(`tsgo exited with code ${code ?? 'unknown'}`));
+				reject(new Error(`tsgo exited with code ${code ?? 'unknown'} for ${projectPath}\n${lines.join('\n')}`));
 			}
 		});
 
