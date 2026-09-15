@@ -392,6 +392,31 @@ export class CodexSubscriptionClient implements AgentClient {
 		if (req.system_prompt !== undefined)
 			thread.instructions = req.system_prompt;
 		if (req.tools) thread.tools = convertTools(req.tools);
+		// A fresh user turn ends an interrupted tool round, including sessions
+		// saved by older clients that did not preserve cancellation results.
+		const pending = new Map<string, string>();
+		for (const item of thread.input) {
+			if (item.type === "function_call" && typeof item.call_id === "string") {
+				pending.set(item.call_id, String(item.name));
+			} else if (
+				item.type === "function_call_output" &&
+				typeof item.call_id === "string"
+			) {
+				pending.delete(item.call_id);
+			}
+		}
+		if (pending.size > 0) {
+			this.appendToolOutputs(
+				thread,
+				[...pending.keys()].map((tool_call_id) => ({
+					tool_call_id,
+					output:
+						"Error: The previous tool execution was interrupted before its result was recorded. Its outcome is unknown; inspect the current state before retrying any changes.",
+				})),
+			);
+			const warning = await this.persistThread(threadId, thread);
+			if (warning) yield { kind: "warning", message: warning };
+		}
 		const inputCount = thread.input.length;
 		const messageCount = thread.messages.length;
 		thread.input.push(
@@ -443,24 +468,7 @@ export class CodexSubscriptionClient implements AgentClient {
 		}
 		const inputCount = thread.input.length;
 		const messageCount = thread.messages.length;
-		const names = toolCallNames(thread.input);
-		for (const output of req.tool_outputs) {
-			const converted = subscriptionToolOutput(output.output);
-			thread.input.push({
-				type: "function_call_output",
-				call_id: output.tool_call_id,
-				output: converted.responseOutput,
-			});
-			thread.messages.push({
-				role: "tool",
-				content: converted.storedOutput,
-				createdAt: new Date().toISOString(),
-				toolCallId: output.tool_call_id,
-				...(names.get(output.tool_call_id)
-					? { toolName: names.get(output.tool_call_id) }
-					: {}),
-			});
-		}
+		this.appendToolOutputs(thread, req.tool_outputs);
 		if (req.tools) thread.tools = convertTools(req.tools);
 		const attempt: StreamAttemptState = { committed: false };
 		try {
@@ -476,6 +484,56 @@ export class CodexSubscriptionClient implements AgentClient {
 				thread.input.splice(inputCount);
 				thread.messages.splice(messageCount);
 			}
+		}
+	}
+
+	/** Retain actual/cancelled results after the stream attempt has rolled back. */
+	async preserveFailedToolOutputs(
+		req: SubmitToolOutputsRequest,
+	): Promise<string | null> {
+		let thread = this.threads.get(req.thread_id);
+		if (!thread) {
+			const stored = await this.conversationStore?.get(req.thread_id);
+			if (stored) this.rememberStoredThread(stored);
+			thread = this.threads.get(req.thread_id);
+		}
+		if (!thread) return null;
+		const names = toolCallNames(thread.input);
+		if (req.tool_outputs.some((output) => !names.has(output.tool_call_id))) {
+			return `Failed to preserve tool results for conversation ${req.thread_id}: a matching tool call was not found.`;
+		}
+		this.appendToolOutputs(thread, req.tool_outputs);
+		return await this.persistThread(req.thread_id, thread);
+	}
+
+	private appendToolOutputs(
+		thread: SubscriptionThread,
+		outputs: SubmitToolOutputsRequest["tool_outputs"],
+	): void {
+		const names = toolCallNames(thread.input);
+		const recorded = new Set(
+			thread.input
+				.filter((item) => item.type === "function_call_output")
+				.map((item) => item.call_id),
+		);
+		for (const output of outputs) {
+			if (recorded.has(output.tool_call_id)) continue;
+			recorded.add(output.tool_call_id);
+			const converted = subscriptionToolOutput(output.output);
+			thread.input.push({
+				type: "function_call_output",
+				call_id: output.tool_call_id,
+				output: converted.responseOutput,
+			});
+			thread.messages.push({
+				role: "tool",
+				content: converted.storedOutput,
+				createdAt: new Date().toISOString(),
+				toolCallId: output.tool_call_id,
+				...(names.get(output.tool_call_id)
+					? { toolName: names.get(output.tool_call_id) }
+					: {}),
+			});
 		}
 	}
 

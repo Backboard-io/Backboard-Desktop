@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Disposable } from '../../../../base/common/lifecycle.js';
-import { dirname } from '../../../../base/common/resources.js';
+import { dirname, joinPath } from '../../../../base/common/resources.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
@@ -54,8 +54,11 @@ export class BackboardAuthService extends Disposable implements IBackboardAuthSe
 			if (this._store.isDisposed) { return; }
 			// Watch the directory: config writes replace the file atomically, and
 			// a first-time installation may not have a config file yet.
-			const watcher = this._register(this.fileService.createWatcher(dirname(resource), { recursive: false, excludes: [] }));
-			this._register(watcher.onDidChange(() => this.refreshInBackground()));
+			const directories = [dirname(resource), joinPath(dirname(dirname(resource)), '.backboard')];
+			for (const directory of directories) {
+				const watcher = this._register(this.fileService.createWatcher(directory, { recursive: false, excludes: [] }));
+				this._register(watcher.onDidChange(() => this.refreshInBackground()));
+			}
 		}
 		await this.refresh();
 	}

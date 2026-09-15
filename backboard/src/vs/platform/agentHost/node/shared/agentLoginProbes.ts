@@ -55,6 +55,19 @@ export function isClaudeSubscriptionAuthStatus(value: unknown): boolean {
 	return status.loggedIn === true && status.authMethod === 'claude.ai' && status.apiProvider === 'firstParty';
 }
 
+/** Match the subscription transport's environment when probing the vendor login. */
+export function claudeSubscriptionProbeEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+	const sanitized = { ...env };
+	for (const key of [
+		'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_PROFILE',
+		'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_FOUNDRY', 'CLAUDE_CODE_USE_VERTEX',
+		'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN', 'AWS_PROFILE', 'GOOGLE_APPLICATION_CREDENTIALS',
+	]) {
+		delete sanitized[key];
+	}
+	return sanitized;
+}
+
 /**
  * Whether the user has logged the Claude CLI into a Claude.ai subscription.
  * `claude auth status --json` is authoritative across every credential
@@ -67,7 +80,7 @@ export async function isClaudeLoggedIn(): Promise<boolean> {
 		return false;
 	}
 	return new Promise<boolean>(resolve => {
-		execFile(claude, ['auth', 'status', '--json'], { timeout: 10_000 }, (err, stdout) => {
+		execFile(claude, ['auth', 'status', '--json'], { timeout: 10_000, env: claudeSubscriptionProbeEnv() }, (err, stdout) => {
 			if (err) {
 				resolve(false);
 				return;

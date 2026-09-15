@@ -103,6 +103,19 @@ suite('Backboard auth state', () => {
 		assert.deepStrictEqual(auth.state(), [false, true]);
 	});
 
+	test('refreshes subscription sign-in and disconnect when CLI config changes', async () => {
+		const auth = await setup();
+		const subscriptionConfig = URI.file('/home/.backboard/config.json');
+		auth.setCheck(async () => true);
+		await auth.files.writeFile(subscriptionConfig, VSBuffer.fromString('{"claudeSubscriptionEnabled":true}'));
+		await timeout(50);
+		assert.deepStrictEqual(auth.state(), [false, true]);
+		auth.setCheck(async () => false);
+		await auth.files.del(subscriptionConfig);
+		await timeout(50);
+		assert.deepStrictEqual(auth.state(), [false, false]);
+	});
+
 	test('unblocks SSO while the subscription probe is still pending', async () => {
 		const auth = await setup();
 		const pending = new DeferredPromise<boolean>();

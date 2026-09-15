@@ -48,6 +48,25 @@ suite('Agent CLI setup', () => {
 		assert.ok(windows.includes('auth login --claudeai'));
 	});
 
+	test('uses an existing Claude subscription without opening OAuth', async () => {
+		const commands: string[] = [];
+		const notifications: string[] = [];
+		const service = new AgentCliSetupService(
+			{ createTerminal: async () => { throw new Error('OAuth should not open'); } } as never,
+			{ executeAgentCommand: async ({ command }: { command: string }) => {
+				commands.push(command);
+				return { message: 'connected', requiresSignIn: false };
+			} } as never,
+			{ confirm: async () => ({ confirmed: true }) } as never,
+			{ withProgress: async (_options: unknown, task: () => Promise<unknown>) => task() } as never,
+			{} as never, {} as never,
+			{ info: (message: string) => notifications.push(message), error: (message: string) => notifications.push(message) } as never,
+			{} as never, {} as never, { error: () => {} } as never,
+		);
+		await service.beginSetup(CLAUDE_SUBSCRIPTION_SETUP_ID);
+		assert.deepStrictEqual({ commands, notifications }, { commands: ['claudeSubscription.check', 'claudeSubscription.enable'], notifications: ['connected'] });
+	});
+
 	test('runs Claude OAuth in a hidden terminal, pastes the code, then enables Backboard', async () => {
 		const commands: { provider: string; command: string }[] = [];
 		const sent: string[] = [];
@@ -72,7 +91,7 @@ suite('Agent CLI setup', () => {
 			{
 				executeAgentCommand: async (command: { provider: string; command: string }) => {
 					commands.push(command);
-					return { message: 'connected' };
+					return { message: 'connected', requiresSignIn: command.command === 'claudeSubscription.check' };
 				},
 			} as never,
 			{ confirm: async () => ({ confirmed: true }) } as never,
@@ -87,7 +106,7 @@ suite('Agent CLI setup', () => {
 
 		await service.beginSetup(CLAUDE_SUBSCRIPTION_SETUP_ID);
 
-		assert.deepStrictEqual(commands, [{ provider: 'backboard', command: 'claudeSubscription.enable' }]);
+		assert.deepStrictEqual(commands, [{ provider: 'backboard', command: 'claudeSubscription.check' }, { provider: 'backboard', command: 'claudeSubscription.enable' }]);
 		assert.deepStrictEqual(opened, ['https://claude.ai/oauth/authorize?state=test']);
 		assert.ok(sent[0].includes('auth login --claudeai'));
 		assert.ok(sent[0].includes('$HOME/.local/bin/claude'));

@@ -14,6 +14,7 @@ import type { OpenAITool } from "../src/core/tools/schema.ts";
 import type { ProviderEvent } from "../src/providers/backboard/types.ts";
 import { ClaudeSubscriptionClient } from "../src/providers/subscription/ClaudeSubscriptionClient.ts";
 import { ClaudeSubscriptionConversationStore } from "../src/providers/subscription/ClaudeSubscriptionConversationStore.ts";
+import { SubscriptionMemoryStore } from "../src/providers/subscription/SubscriptionMemoryStore.ts";
 
 type ClaudeSdkModule = Pick<
 	typeof import("@anthropic-ai/claude-agent-sdk"),
@@ -33,12 +34,136 @@ interface CapturedTool {
 interface SdkCapture {
 	tools: CapturedTool[];
 	queryOptions?: ClaudeAgentOptions;
+	queryPrompt?: unknown;
 	toolResult?: CallToolResult;
 	supportedModels?: ClaudeModelInfo[];
 	closed: boolean;
 }
 
 describe("ClaudeSubscriptionClient", () => {
+	for (const output of [
+		"Changed fixture once successfully",
+		"Error: Tool execution was interrupted; outcome unknown",
+	]) {
+		it(`preserves stopped tool results through SDK disposal and restart: ${output}`, async () => {
+			const cwd = await mkdtemp(path.join(os.tmpdir(), "claude-stop-resume-"));
+			try {
+				const capture: SdkCapture = { tools: [], closed: false };
+				const store = new ClaudeSubscriptionConversationStore(cwd);
+				const client = new ClaudeSubscriptionClient({
+					cwd,
+					conversationStore: store,
+					authCheck: async () => ({ executable: "/opt/claude" }),
+					sdk: fakeClaudeSdk(capture),
+				});
+				const tools: OpenAITool[] = [
+					{
+						type: "function",
+						function: {
+							name: "agent_wait",
+							description: "Wait",
+							parameters: { type: "object", properties: {} },
+						},
+					},
+				];
+				const events = await collect(
+					client.runMessage(
+						{ content: "Work", tools, memory: "off" },
+						{
+							durableSession: {
+								sessionId: "stopped",
+								sessionRoot: qSessionDir(cwd, "stopped"),
+							},
+						},
+					),
+				);
+				const thread = events.find((event) => event.kind === "thread");
+				if (thread?.kind !== "thread") throw new Error("Missing thread");
+				const request = {
+					thread_id: thread.threadId,
+					tool_outputs: [{ tool_call_id: "call-agent-wait", output }],
+				};
+				await client.preserveFailedToolOutputs(request);
+				await client.preserveFailedToolOutputs(request);
+				const resumedCapture: SdkCapture = { tools: [], closed: false };
+				const resumed = new ClaudeSubscriptionClient({
+					cwd,
+					conversationStore: new ClaudeSubscriptionConversationStore(cwd),
+					authCheck: async () => ({ executable: "/opt/claude" }),
+					sdk: completingClaudeSdk(resumedCapture),
+				});
+				const resumedEvents = await collect(
+					resumed.runMessage({
+						thread_id: thread.threadId,
+						content: "Continue",
+						tools,
+						memory: "off",
+					}),
+				);
+				const saved = await store.get(thread.threadId);
+				expect({
+					closed: capture.closed,
+					completed: resumedEvents.some((event) => event.kind === "completed"),
+					outputs: saved?.messages
+						.filter((message) => message.role === "tool")
+						.map((message) => message.content),
+				}).toEqual({ closed: true, completed: true, outputs: [output] });
+				expect(resumedCapture.queryOptions?.resume).toBe(
+					capture.queryOptions?.sessionId,
+				);
+				expect(String(resumedCapture.queryPrompt)).toContain(output);
+			} finally {
+				await rm(cwd, { recursive: true, force: true });
+			}
+		});
+	}
+
+	it("saves the completed conversation when optional memory storage fails", async () => {
+		const cwd = await mkdtemp(path.join(os.tmpdir(), "claude-memory-failure-"));
+		try {
+			const store = new ClaudeSubscriptionConversationStore(cwd);
+			const memoryStore = new (class extends SubscriptionMemoryStore {
+				override async remember(): Promise<void> {
+					throw new Error("memory disk unavailable");
+				}
+			})(cwd);
+			const client = new ClaudeSubscriptionClient({
+				cwd,
+				conversationStore: store,
+				memoryStore,
+				authCheck: async () => ({ executable: "/opt/claude" }),
+				sdk: completingClaudeSdk({ tools: [], closed: false }),
+			});
+			const events = await collect(
+				client.runMessage(
+					{ content: "Remember this", model_name: "haiku", memory: "Auto" },
+					{
+						durableSession: {
+							sessionId: "memory-failure",
+							sessionRoot: qSessionDir(cwd, "memory-failure"),
+						},
+					},
+				),
+			);
+			const thread = events.find((event) => event.kind === "thread");
+			if (thread?.kind !== "thread") throw new Error("Missing thread");
+			const saved = await new ClaudeSubscriptionConversationStore(cwd).get(
+				thread.threadId,
+			);
+			expect({
+				completed: events.some((event) => event.kind === "completed"),
+				warnings: events.filter((event) => event.kind === "warning").length,
+				messages: saved?.messages.map((message) => message.content),
+			}).toEqual({
+				completed: true,
+				warnings: 1,
+				messages: ["Remember this", "Recovered."],
+			});
+		} finally {
+			await rm(cwd, { recursive: true, force: true });
+		}
+	});
+
 	it("parks Claude's SDK tool loop in Backboard and completes with Backboard's result", async () => {
 		const capture: SdkCapture = { tools: [], closed: false };
 		const client = new ClaudeSubscriptionClient({
@@ -367,8 +492,12 @@ function fakeClaudeSdk(capture: SdkCapture): ClaudeSdkModule {
 		type: "sdk",
 		name: options.name,
 	})) as unknown as ClaudeSdkModule["createSdkMcpServer"];
-	const query = ((params: { options?: ClaudeAgentOptions }) => {
+	const query = ((params: {
+		options?: ClaudeAgentOptions;
+		prompt?: unknown;
+	}) => {
 		capture.queryOptions = params.options;
+		capture.queryPrompt = params.prompt;
 		return scriptedQuery(capture);
 	}) as unknown as ClaudeSdkModule["query"];
 	return { tool, createSdkMcpServer, query };
@@ -430,8 +559,12 @@ function scriptedQuery(capture: SdkCapture) {
 
 function completingClaudeSdk(capture: SdkCapture): ClaudeSdkModule {
 	const base = fakeClaudeSdk(capture);
-	const query = ((params: { options?: ClaudeAgentOptions }) => {
+	const query = ((params: {
+		options?: ClaudeAgentOptions;
+		prompt?: unknown;
+	}) => {
 		capture.queryOptions = params.options;
+		capture.queryPrompt = params.prompt;
 		const generator = (async function* (): AsyncGenerator<SDKMessage, void> {
 			yield asSdkMessage({
 				type: "assistant",

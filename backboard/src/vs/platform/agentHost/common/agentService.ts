@@ -516,6 +516,8 @@ export interface IAgentCommandParams {
 /** User-facing result returned by a provider-owned command. */
 export interface IAgentCommandResult {
 	readonly message: string;
+	/** A connection preflight requires the vendor sign-in flow. */
+	readonly requiresSignIn?: boolean;
 }
 
 /**

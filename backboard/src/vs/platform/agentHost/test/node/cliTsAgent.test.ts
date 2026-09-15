@@ -251,6 +251,29 @@ suite('CliTsAgent tool metadata', () => {
 		assert.strictEqual(probes, 2);
 	});
 
+	test('does not let a stale Claude probe undo a newer connection', async () => {
+		const agent = createAgent();
+		const internals = agent as unknown as {
+			_refreshClaudeSubscriptionConnectionState(probe: () => Promise<boolean>): Promise<void>;
+			_setClaudeSubscriptionConnectionState(connected: boolean): void;
+			_claudeSubscriptionConnected: boolean;
+		};
+		let resolve!: (connected: boolean) => void;
+		const refresh = internals._refreshClaudeSubscriptionConnectionState(() => new Promise<boolean>(complete => { resolve = complete; }));
+		internals._setClaudeSubscriptionConnectionState(true);
+		resolve(false);
+		await refresh;
+		assert.strictEqual(internals._claudeSubscriptionConnected, true);
+	});
+
+	test('reports whether Claude setup needs OAuth', async () => {
+		const agent = createAgent();
+		for (const connected of [true, false]) {
+			Reflect.set(agent, '_refreshClaudeSubscriptionConnectionState', async () => { Reflect.set(agent, '_claudeSubscriptionConnected', connected); });
+			assert.deepStrictEqual(await agent.executeCommand('claudeSubscription.check'), { message: '', requiresSignIn: !connected });
+		}
+	});
+
 	test('refuses to start interactive Claude OAuth through the stdin-less agent command', async () => {
 		await assert.rejects(
 			createAgent().executeCommand('claudeSubscription.login'),

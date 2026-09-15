@@ -2,10 +2,14 @@ import { describe, expect, it } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readBackboardConfig } from "../src/config/backboardConfig.ts";
+import {
+	readBackboardConfig,
+	saveBackboardConfig,
+} from "../src/config/backboardConfig.ts";
 import {
 	defaultSubscriptionAuthFile,
 	loginWithChatGptSubscription,
+	logoutChatGptSubscription,
 	SubscriptionAuthManager,
 } from "../src/providers/subscription/SubscriptionAuth.ts";
 
@@ -18,6 +22,115 @@ function jwt(payload: Record<string, unknown>): string {
 }
 
 describe("SubscriptionAuth", () => {
+	for (const forced of [false, true]) {
+		it(`shares rotated credentials between simultaneous clients (forced=${forced})`, async () => {
+			const root = await mkdtemp(join(tmpdir(), "subscription-refresh-race-"));
+			try {
+				const authFile = join(root, "auth.json");
+				await writeFile(
+					authFile,
+					JSON.stringify({
+						tokens: {
+							access_token: jwt({ exp: 1, chatgpt_account_id: "account" }),
+							refresh_token: "old-refresh",
+							account_id: "account",
+						},
+					}),
+				);
+				const freshAccess = jwt({
+					exp: 4_000_000_000,
+					chatgpt_account_id: "account",
+				});
+				let requests = 0;
+				const fetchImpl = (async (_input: string | URL | Request) => {
+					requests++;
+					await new Promise((resolve) => setTimeout(resolve, 80));
+					return Response.json({
+						access_token: freshAccess,
+						refresh_token: "rotated-refresh",
+					});
+				}) as typeof fetch;
+				const clients = Array.from(
+					{ length: 3 },
+					() => new SubscriptionAuthManager({ authFile, fetchImpl }),
+				);
+				const credentials = await Promise.all(
+					clients.map((client) => client.credentials(forced)),
+				);
+				expect({
+					requests,
+					accessTokens: credentials.map((value) => value.accessToken),
+				}).toEqual({ requests: 1, accessTokens: Array(3).fill(freshAccess) });
+			} finally {
+				await rm(root, { recursive: true, force: true });
+			}
+		});
+	}
+
+	for (const response of [{}, { access_token: "" }, { access_token: 123 }]) {
+		it(`preserves credentials after malformed refresh response ${JSON.stringify(response)}`, async () => {
+			const root = await mkdtemp(
+				join(tmpdir(), "subscription-refresh-invalid-"),
+			);
+			try {
+				const authFile = join(root, "auth.json");
+				const original = JSON.stringify({
+					tokens: {
+						access_token: jwt({ exp: 1 }),
+						refresh_token: "refresh",
+						account_id: "account",
+					},
+				});
+				await writeFile(authFile, original);
+				const manager = new SubscriptionAuthManager({
+					authFile,
+					fetchImpl: (async (_input: string | URL | Request) =>
+						Response.json(response)) as typeof fetch,
+				});
+				await expect(manager.credentials()).rejects.toThrow(
+					"missing access_token",
+				);
+				expect(await readFile(authFile, "utf8")).toBe(original);
+			} finally {
+				await rm(root, { recursive: true, force: true });
+			}
+		});
+	}
+
+	for (const fileContents of [
+		'{"managed_by":"backboard"}',
+		'{"managed_by":"codex"}',
+		"{broken",
+	]) {
+		it(`disconnects a managed, imported or corrupt login: ${fileContents}`, async () => {
+			const homeDir = await mkdtemp(join(tmpdir(), "subscription-logout-"));
+			try {
+				const authFile = join(homeDir, "auth.json");
+				await writeFile(authFile, fileContents);
+				await saveBackboardConfig(
+					{
+						chatgptSubscriptionAuthFile: authFile,
+						claudeSubscriptionEnabled: true,
+					},
+					homeDir,
+				);
+				await logoutChatGptSubscription(homeDir);
+				expect(readBackboardConfig(homeDir)).toEqual({
+					claudeSubscriptionEnabled: true,
+				});
+				if (fileContents.includes('"backboard"')) {
+					await expect(readFile(authFile, "utf8")).rejects.toMatchObject({
+						code: "ENOENT",
+					});
+				} else {
+					expect(await readFile(authFile, "utf8")).toBe(fileContents);
+				}
+			} finally {
+				await rm(homeDir, { recursive: true, force: true });
+			}
+		});
+	}
+
 	it("refreshes an expiring token and atomically persists rotated tokens", async () => {
 		const root = await mkdtemp(join(tmpdir(), "subscription-auth-"));
 		const authFile = join(root, "auth.json");
@@ -76,6 +189,7 @@ describe("SubscriptionAuth", () => {
 				models: [{ slug: "gpt-native", priority: 1 }],
 			});
 		}) as typeof fetch;
+		let staleCallbackStatus: number | undefined;
 		let callbackResponse:
 			| {
 					body: string;
@@ -92,6 +206,11 @@ describe("SubscriptionAuth", () => {
 				const callback = new URL(
 					authUrl.searchParams.get("redirect_uri") ?? "",
 				);
+				callback.searchParams.set("code", "stale-code");
+				callback.searchParams.set("state", "previous-login-state");
+				const stale = await fetch(callback);
+				staleCallbackStatus = stale.status;
+				await stale.text();
 				callback.searchParams.set("code", "authorization-code");
 				callback.searchParams.set(
 					"state",
@@ -108,6 +227,7 @@ describe("SubscriptionAuth", () => {
 
 		const authFile = defaultSubscriptionAuthFile(homeDir);
 		const saved = JSON.parse(await readFile(authFile, "utf8"));
+		expect(staleCallbackStatus).toBe(400);
 		expect(saved.managed_by).toBe("backboard");
 		expect(saved.tokens.account_id).toBe("native-account");
 		expect(readBackboardConfig(homeDir)).toMatchObject({

@@ -1,6 +1,6 @@
 import { providerKeyResolver } from "../config/auth.ts";
-import { supportsSubscriptions } from "../config/releaseFeatures.ts";
 import type { Config } from "../config/Config.ts";
+import { supportsSubscriptions } from "../config/releaseFeatures.ts";
 import type { ServerEventLog } from "../core/session/ServerEventLog.ts";
 import type { AgentClient } from "./AgentClient.ts";
 import { BackboardClient } from "./backboard/BackboardClient.ts";
@@ -43,42 +43,53 @@ export function createAgentClient(
 		serverLog,
 		new ByokConversationStore(conversationBaseDir),
 	);
-	const chatGptSubscription = supportsSubscriptions() && config.auth.chatgptSubscription
-		? new CodexSubscriptionClient({
-				authFile: config.auth.chatgptSubscription.authFile,
-				conversationStore: new SubscriptionConversationStore(
-					conversationBaseDir,
-				),
-				memoryStore: new SubscriptionMemoryStore(conversationBaseDir),
-			})
-		: undefined;
-	const claudeSubscription = supportsSubscriptions() && config.auth.claudeSubscription
-		? new ClaudeSubscriptionClient({
+	const chatGptClients = new Map<string, CodexSubscriptionClient>();
+	let claudeClient: ClaudeSubscriptionClient | undefined;
+	const subscriptionRoutes = (): Record<string, SubscriptionClientRoute> => {
+		if (!supportsSubscriptions()) return {};
+		const routes: Record<string, SubscriptionClientRoute> = {};
+		const authFile = config.auth.chatgptSubscription?.authFile;
+		if (authFile) {
+			let client = chatGptClients.get(authFile);
+			if (!client) {
+				client = new CodexSubscriptionClient({
+					authFile,
+					conversationStore: new SubscriptionConversationStore(
+						conversationBaseDir,
+					),
+					memoryStore: new SubscriptionMemoryStore(conversationBaseDir),
+				});
+				chatGptClients.set(authFile, client);
+			}
+			routes[CHATGPT_SUBSCRIPTION_PROVIDER] = {
+				client,
+				threadPrefix: CHATGPT_SUBSCRIPTION_THREAD_PREFIX,
+			};
+		}
+		if (config.auth.claudeSubscription) {
+			claudeClient ??= new ClaudeSubscriptionClient({
 				cwd: config.cwd,
 				conversationStore: new ClaudeSubscriptionConversationStore(
 					conversationBaseDir,
 				),
 				memoryStore: new SubscriptionMemoryStore(conversationBaseDir),
-			})
-		: undefined;
-	const subscriptions: Record<string, SubscriptionClientRoute> = {};
-	if (chatGptSubscription) {
-		subscriptions[CHATGPT_SUBSCRIPTION_PROVIDER] = {
-			client: chatGptSubscription,
-			threadPrefix: CHATGPT_SUBSCRIPTION_THREAD_PREFIX,
-		};
-	}
-	if (claudeSubscription) {
-		subscriptions[CLAUDE_SUBSCRIPTION_PROVIDER] = {
-			client: claudeSubscription,
-			threadPrefix: CLAUDE_SUBSCRIPTION_THREAD_PREFIX,
-		};
-	}
+			});
+			routes[CLAUDE_SUBSCRIPTION_PROVIDER] = {
+				client: claudeClient,
+				threadPrefix: CLAUDE_SUBSCRIPTION_THREAD_PREFIX,
+			};
+		}
+		return routes;
+	};
 
 	return new ClientRouter({
 		backboard,
 		byok,
-		...(Object.keys(subscriptions).length > 0 ? { subscriptions } : {}),
+		// Read live auth at routing time; retain clients and parked tool state
+		// across a connection change instead of restarting serve processes.
+		get subscriptions() {
+			return subscriptionRoutes();
+		},
 		getModel: () => config.model,
 		hasBackboardAuth: () => config.hasBackboardAuth,
 		hasKeyFor: (provider) =>

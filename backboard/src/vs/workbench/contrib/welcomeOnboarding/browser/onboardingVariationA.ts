@@ -250,13 +250,6 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		this.overlay.setAttribute('aria-modal', 'true');
 		this.overlay.setAttribute('aria-label', localize('onboarding.backboard.aria', "Welcome to Backboard Studio"));
 
-		const pool = append(this.overlay, $('div.onboarding-pool'));
-		pool.setAttribute('aria-hidden', 'true');
-		for (const [className, asset] of [['onboarding-pool-motion', 'pool-water.svg'], ['onboarding-pool-still', 'pool-water-still.svg']]) {
-			const image = append(pool, $<HTMLImageElement>(`img.${className}`));
-			image.src = this._mediaUri(asset);
-			image.alt = '';
-		}
 		this.card = append(this.overlay, $('.onboarding-a-card'));
 
 		this.closeButton = append(this.card, $<HTMLButtonElement>('button.onboarding-a-close-btn'));

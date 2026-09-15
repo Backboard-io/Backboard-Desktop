@@ -491,6 +491,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 	private _chatGptSubscriptionLoginPromise: Promise<void> | undefined;
 	private _claudeSubscriptionEnablePromise: Promise<void> | undefined;
 	private _claudeSubscriptionConnected = false;
+	private _claudeSubscriptionStatusRevision = 0;
 
 	constructor(
 		@ILogService private readonly _logService: ILogService,
@@ -603,6 +604,9 @@ export class CliTsAgent extends Disposable implements IAgent {
 					'cliTsAgent.claudeSubscription.interactiveLoginRequired',
 					"Claude sign-in requires an interactive terminal. Open the model selector, choose Claude, then select Connect or Reconnect Claude.",
 				));
+			case 'claudeSubscription.check':
+				await this._refreshClaudeSubscriptionConnectionState();
+				return { message: '', requiresSignIn: !this._claudeSubscriptionConnected };
 			case CLAUDE_SUBSCRIPTION_ENABLE_COMMAND:
 				await this._enableClaudeSubscription();
 				return {
@@ -619,7 +623,6 @@ export class CliTsAgent extends Disposable implements IAgent {
 		}
 		this._chatGptSubscriptionLoginPromise ??= runCliTsCommand(this._logService, ['subscription', 'login'])
 			.then(() => {
-				this._restartServeProcessesForSubscriptionLogin();
 				this._models.set(withChatGptSubscriptionConnectionState(this._models.get(), true), undefined);
 				this._modelsRefreshed = false;
 			})
@@ -633,7 +636,6 @@ export class CliTsAgent extends Disposable implements IAgent {
 		await this._requireClaudeSubscriptionLogin();
 		this._claudeSubscriptionEnablePromise ??= runCliTsCommand(this._logService, ['claude-subscription', 'enable'])
 			.then(() => {
-				this._restartServeProcessesForSubscriptionLogin();
 				this._setClaudeSubscriptionConnectionState(true);
 				this._modelsRefreshed = false;
 			})
@@ -653,23 +655,18 @@ export class CliTsAgent extends Disposable implements IAgent {
 		}
 	}
 
-	private async _refreshClaudeSubscriptionConnectionState(): Promise<void> {
-		this._setClaudeSubscriptionConnectionState(await isClaudeLoggedIn());
+	private async _refreshClaudeSubscriptionConnectionState(probe: () => Promise<boolean> = isClaudeLoggedIn): Promise<void> {
+		const revision = ++this._claudeSubscriptionStatusRevision;
+		const connected = await probe();
+		if (revision === this._claudeSubscriptionStatusRevision) {
+			this._setClaudeSubscriptionConnectionState(connected);
+		}
 	}
 
 	private _setClaudeSubscriptionConnectionState(connected: boolean): void {
+		this._claudeSubscriptionStatusRevision++;
 		this._claudeSubscriptionConnected = connected;
 		this._models.set(withClaudeSubscriptionConnectionState(this._models.get(), connected), undefined);
-	}
-
-	private _restartServeProcessesForSubscriptionLogin(): void {
-		// Every serve process constructs its provider router at startup. Drop only
-		// those subprocesses so the next turn sees the updated subscription login
-		// without losing IDE session state.
-		for (const session of this._sessions.values()) {
-			session.proc?.dispose();
-			session.proc = undefined;
-		}
 	}
 
 	async createSession(config: IAgentCreateSessionConfig = {}): Promise<IAgentCreateSessionResult> {

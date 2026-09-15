@@ -265,7 +265,7 @@ export class AgentCliSetupService implements IAgentCliSetupService {
 	private async _runClaudeSubscriptionSetup(): Promise<void> {
 		const { confirmed } = await this._dialogService.confirm({
 			message: localize('agentSetup.claudeSubscription.confirmTitle', "Connect Claude subscription?"),
-			detail: localize('agentSetup.claudeSubscription.confirmDetail', "Backboard will ask the installed Claude Code CLI to open Anthropic's sign-in flow. Claude model requests will use the Claude Code transport while Backboard remains responsible for its harness tools."),
+			detail: localize('agentSetup.claudeSubscription.confirmDetail', "Backboard will use your existing Claude Code subscription login, or open Anthropic's sign-in flow if needed."),
 			primaryButton: localize('agentSetup.claudeSubscription.connectButton', "Connect"),
 		});
 		if (!confirmed) {
@@ -278,7 +278,13 @@ export class AgentCliSetupService implements IAgentCliSetupService {
 			title: localize('agentSetup.claudeSubscription.connecting', "Connecting Claude subscription…"),
 			sticky: true,
 		}, async () => {
-			const exitCode = await this._runHidden(CLAUDE_SUBSCRIPTION_SETUP, command);
+			const status = await this._agentHostService.executeAgentCommand({
+				provider: 'backboard',
+				command: 'claudeSubscription.check',
+			});
+			const exitCode = status.requiresSignIn
+				? await this._runHidden(CLAUDE_SUBSCRIPTION_SETUP, command)
+				: 0;
 			if (exitCode !== 0) {
 				return { exitCode };
 			}

@@ -18,6 +18,7 @@ const CHATGPT_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 const AUTH_SCOPE =
 	"openid profile email offline_access api.connectors.read api.connectors.invoke";
 const REFRESH_WINDOW_MS = 5 * 60 * 1_000;
+const TOKEN_REQUEST_TIMEOUT_MS = 30_000;
 const LOGIN_TIMEOUT_MS = 5 * 60 * 1_000;
 const CALLBACK_PORTS = [1455, 1457] as const;
 
@@ -205,22 +206,29 @@ export class SubscriptionAuthManager {
 			(credentials.expiresAt !== undefined &&
 				credentials.expiresAt <= this.now() + REFRESH_WINDOW_MS);
 		if (!shouldRefresh) return credentials;
-		this.refreshPromise ??= this.refresh().finally(() => {
+		this.refreshPromise ??= this.refresh(credentials).finally(() => {
 			this.refreshPromise = undefined;
 		});
 		return await this.refreshPromise;
 	}
 
-	private async refresh(): Promise<CodexSubscriptionCredentials> {
+	private async refresh(
+		observed: CodexSubscriptionCredentials,
+	): Promise<CodexSubscriptionCredentials> {
 		const lease = await acquireFileLease(`${this.authFile}.lock`, {
 			label: "ChatGPT subscription credentials",
-			timeoutMs: 5_000,
+			timeoutMs: TOKEN_REQUEST_TIMEOUT_MS + 5_000,
 			retryMs: 50,
 			invalidOwnerStaleMs: 5_000,
 		});
 		try {
 			const auth = await readAuthFile(this.authFile);
 			const current = tokensFromAuth(auth);
+			// Another process may have rotated this login while we waited for its
+			// lease. Reuse that result, including when retrying a rejected token.
+			if (current.accessToken !== observed.accessToken) {
+				return await loadCodexSubscriptionCredentials(this.authFile);
+			}
 			if (!current.refreshToken) {
 				throw new Error(
 					'ChatGPT access token expired and no refresh token is available. Run "backboard subscription login" again.',
@@ -228,6 +236,7 @@ export class SubscriptionAuthManager {
 			}
 			const response = await this.fetchImpl(TOKEN_URL, {
 				method: "POST",
+				signal: AbortSignal.timeout(TOKEN_REQUEST_TIMEOUT_MS),
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
 					client_id: CHATGPT_CLIENT_ID,
@@ -244,16 +253,17 @@ export class SubscriptionAuthManager {
 			if (!isObject(refreshed)) {
 				throw new Error("ChatGPT token refresh returned an invalid response.");
 			}
-			const accessToken =
-				typeof refreshed.access_token === "string"
-					? refreshed.access_token
-					: current.accessToken;
+			const accessToken = requiredString(
+				refreshed,
+				"access_token",
+				"ChatGPT token refresh",
+			);
 			const idToken =
 				typeof refreshed.id_token === "string"
 					? refreshed.id_token
 					: current.idToken;
 			const refreshToken =
-				typeof refreshed.refresh_token === "string"
+				typeof refreshed.refresh_token === "string" && refreshed.refresh_token
 					? refreshed.refresh_token
 					: current.refreshToken;
 			const tokens = auth.tokens as JsonObject;
@@ -314,6 +324,7 @@ export async function loginWithChatGptSubscription(
 		});
 		const response = await fetchImpl(TOKEN_URL, {
 			method: "POST",
+			signal: AbortSignal.timeout(TOKEN_REQUEST_TIMEOUT_MS),
 			headers: { "Content-Type": "application/x-www-form-urlencoded" },
 			body,
 		});
@@ -394,6 +405,7 @@ async function firstSubscriptionModel(
 	const url = new URL("https://chatgpt.com/backend-api/codex/models");
 	url.searchParams.set("client_version", "3.0.2");
 	const response = await fetchImpl(url, {
+		signal: AbortSignal.timeout(TOKEN_REQUEST_TIMEOUT_MS),
 		headers: buildSubscriptionHeaders(credentials, sessionId),
 	});
 	if (!response.ok) return undefined;
@@ -429,7 +441,11 @@ export async function logoutChatGptSubscription(
 			removed = true;
 		}
 	} catch (error) {
-		if ((error as { code?: string }).code !== "ENOENT") throw error;
+		if (
+			!(error instanceof SyntaxError) &&
+			(error as { code?: string }).code !== "ENOENT"
+		)
+			throw error;
 	}
 	const { chatgptSubscriptionAuthFile: _removed, ...remaining } = config;
 	await saveBackboardConfig(remaining, homeDir);
@@ -476,7 +492,12 @@ async function startCallbackServer(state: string): Promise<{
 			response.writeHead(404).end("Not found");
 			return;
 		}
-		const finish = (status: number, message: string, error?: Error): void => {
+		const finish = (
+			status: number,
+			message: string,
+			error?: Error,
+			completesLogin = true,
+		): void => {
 			response.writeHead(status, {
 				"Content-Type": "text/html; charset=utf-8",
 				"Cache-Control": "no-store",
@@ -485,7 +506,7 @@ async function startCallbackServer(state: string): Promise<{
 					"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'",
 			});
 			response.end(oauthCallbackHtml(message, error === undefined));
-			if (settled) return;
+			if (settled || !completesLogin) return;
 			settled = true;
 			if (error) rejectCode(error);
 			else resolveCode(url.searchParams.get("code") as string);
@@ -495,6 +516,7 @@ async function startCallbackServer(state: string): Promise<{
 				400,
 				"Login state did not match.",
 				new Error("OAuth state mismatch."),
+				false,
 			);
 			return;
 		}

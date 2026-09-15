@@ -9,13 +9,14 @@
 	z-index: 10000;
 	--onboarding-backboard-accent: var(--vscode-editor-foreground);
 	--onboarding-backboard-subtle-border: color-mix(in srgb, var(--vscode-editor-foreground) 18%, transparent);
-	--onboarding-backboard-baby-blue: #d7f1ff;
-	--onboarding-backboard-baby-blue-hover: #c5eaff;
-	--onboarding-backboard-baby-blue-foreground: #10212b;
+	--onboarding-backboard-baby-blue: var(--vscode-button-background);
+	--onboarding-backboard-baby-blue-hover: var(--vscode-button-hoverBackground);
+	--onboarding-backboard-baby-blue-foreground: var(--vscode-button-foreground);
 	display: flex;
 	align-items: stretch;
 	justify-content: stretch;
-	background: #075486;
+	background: var(--vscode-editor-background);
+	color: var(--vscode-editor-foreground);
 	opacity: 0;
 	overflow: hidden;
 	transition: opacity 0.22s ease;
@@ -402,14 +403,13 @@
 	width: clamp(116px, 11vw, 158px);
 	height: clamp(116px, 11vw, 158px);
 	margin-bottom: 12px;
-	filter: drop-shadow(0 26px 42px rgba(0, 0, 0, 0.3));
 }
 
 .onboarding-backboard-welcome-mark img {
 	display: block;
 	width: 100%;
 	height: 100%;
-	filter: brightness(0) invert(1);
+	filter: brightness(0);
 	object-fit: contain;
 }
 
@@ -1482,24 +1482,7 @@
 	}
 }
 
-/* Full-screen setup sits directly on the pool, with a screen-wide readability tint. */
-.onboarding-pool {
-	position: absolute;
-	inset: 0;
-	pointer-events: none;
-	overflow: hidden;
-}
-
-.onboarding-pool img {
-	width: 100%;
-	height: 100%;
-	object-fit: cover;
-}
-
-.onboarding-pool-still {
-	display: none;
-}
-
+/* Full-screen setup follows the selected workbench theme. */
 .onboarding-a-overlay {
 	align-items: center;
 	justify-content: center;
@@ -1625,41 +1608,13 @@
 	.onboarding-a-card .onboarding-a-theme-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
-@media (prefers-reduced-motion: reduce) {
-	.onboarding-pool-motion { display: none; }
-	.onboarding-pool-still { display: block; }
-}
-
-
-.onboarding-pool::after {
-	content: '';
-	position: absolute;
-	inset: 0;
-	background: linear-gradient(115deg, #03233785, #032337c4);
-}
-
-/* Pool copy stays readable even while previewing a light IDE theme. */
-.onboarding-a-overlay {
-	--vscode-editor-foreground: #f4faff;
-	--vscode-foreground: #f4faff;
-	--vscode-descriptionForeground: #d2e7f2;
-	--vscode-textLink-foreground: #d7f1ff;
-	--vscode-focusBorder: #ffffff;
-	--onboarding-backboard-accent: #e4f5ff;
-	--onboarding-backboard-subtle-border: #d7f1ff80;
-}
-
 .onboarding-a-card .onboarding-a-theme-card {
-	background: #092d4266;
-	border-color: #d7f1ff55;
+	background: var(--vscode-editor-background);
+	border-color: var(--onboarding-backboard-subtle-border);
 }
 
 .onboarding-a-card .onboarding-a-theme-card.selected {
-	border-color: #f4faff;
-}
-
-.onboarding-a-card .onboarding-a-btn-primary {
-	color: #10212b;
+	border-color: var(--vscode-focusBorder);
 }
 
 @media (min-width: 621px) and (max-width: 900px) {
@@ -1698,7 +1653,7 @@
 	justify-content: center;
 	padding: 32px;
 	scrollbar-width: thin;
-	scrollbar-color: #b7e9ff60 transparent;
+	scrollbar-color: var(--vscode-scrollbarSlider-background) transparent;
 }
 
 .onboarding-a-card .onboarding-backboard-welcome-content {
@@ -1711,7 +1666,6 @@
 	font-weight: 600;
 	letter-spacing: -.055em;
 	text-wrap: balance;
-	text-shadow: 0 4px 32px #002b4e40;
 }
 
 .onboarding-a-card-connect .onboarding-backboard-title {
@@ -1728,29 +1682,28 @@
 	width: 86px;
 	height: 116px;
 	margin-bottom: 16px;
-	filter: drop-shadow(0 0 28px #9ae8ff60);
 }
 
 .onboarding-a-card .onboarding-backboard-sign-in-button {
 	height: 52px;
 	border-radius: 12px;
-	background: linear-gradient(120deg, #dff7ff, #a9d8f4);
-	border: 1px solid #effbffb3;
-	color: #123249;
-	box-shadow: 0 8px 28px #001b3430, inset 0 1px #ffffff70;
+	background: var(--vscode-button-background);
+	border: 1px solid var(--vscode-button-border, transparent);
+	color: var(--vscode-button-foreground);
+	box-shadow: none;
 	transition: transform 180ms ease, box-shadow 180ms ease, background 180ms ease;
 }
 
 .onboarding-a-card .onboarding-backboard-own-key-button {
-	background: #c5eeff0a;
-	color: #effaff;
-	border-color: #d9f4ff70;
-	box-shadow: inset 0 1px #ffffff10;
+	background: var(--vscode-button-secondaryBackground);
+	color: var(--vscode-button-secondaryForeground);
+	border-color: var(--vscode-button-border, transparent);
+	box-shadow: none;
 }
 
 .onboarding-a-card .onboarding-backboard-sign-in-button:hover {
 	transform: translateY(-2px);
-	box-shadow: 0 12px 32px #001b3445, 0 0 20px #a9e5ff18;
+	background: var(--vscode-button-hoverBackground);
 }
 
 .onboarding-a-card .onboarding-backboard-sign-in-button:active {
@@ -1774,47 +1727,16 @@
 
 .onboarding-a-card .onboarding-a-theme-card:hover {
 	transform: translateY(-3px);
-	border-color: #f0fbffcc;
-	box-shadow: 0 12px 28px #00192c40;
+	border-color: var(--vscode-focusBorder);
+	box-shadow: none;
 }
 
 .onboarding-a-card .onboarding-a-theme-card.selected {
-	box-shadow: 0 0 0 2px #d8f4ff, 0 0 24px #ace5ff25;
+	box-shadow: 0 0 0 1px var(--vscode-focusBorder);
 }
 
 .onboarding-a-card .onboarding-a-theme-label {
 	padding: 12px 10px;
-}
-
-.onboarding-pool img {
-	animation: onboarding-pool-drift 32s ease-in-out infinite alternate;
-	transform-origin: 35% 35%;
-}
-
-.onboarding-pool::before {
-	content: '';
-	position: absolute;
-	inset: -30%;
-	z-index: 1;
-	background: conic-gradient(from 115deg at 12% 0%, transparent 0deg, #baffee30 10deg, transparent 18deg, #cbf7ff1c 23deg, transparent 30deg, #aeebff22 38deg, transparent 48deg);
-	mix-blend-mode: screen;
-	filter: blur(22px);
-	animation: onboarding-sunlight 20s ease-in-out infinite alternate;
-}
-
-.onboarding-pool::after {
-	z-index: 2;
-	background: radial-gradient(ellipse at 50% 48%, #02233b92, #04284030 65%), linear-gradient(135deg, #04364215, #001a3cad);
-}
-
-@keyframes onboarding-pool-drift {
-	from { transform: scale(1.04) translate(-.5%, -.5%); }
-	to { transform: scale(1.12) translate(1%, .5%); }
-}
-
-@keyframes onboarding-sunlight {
-	from { transform: rotate(-5deg); opacity: .5; }
-	to { transform: rotate(6deg); opacity: 1; }
 }
 
 @keyframes onboarding-enter {
@@ -1857,8 +1779,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-	.onboarding-pool img,
-	.onboarding-pool::before,
 	.onboarding-backboard-welcome-content > *,
 	.onboarding-provider-setup > *,
 	.onboarding-a-theme-card { animation: none; }
@@ -1866,8 +1786,6 @@
 	.onboarding-a-card .onboarding-a-theme-card { transition: none; }
 }
 
-/* Keep all water and sunlight layers behind the interactive content. */
-.onboarding-pool { isolation: isolate; z-index: 0; }
 .onboarding-a-card { z-index: 1; }
 
 .onboarding-brand-mark {
@@ -1880,7 +1798,16 @@
 	display: block;
 	width: 100%;
 	height: 100%;
+	filter: brightness(0);
+}
+
+.monaco-workbench.vs-dark .onboarding-brand-mark img,
+.monaco-workbench.hc-black .onboarding-brand-mark img {
 	filter: brightness(0) invert(1);
+}
+
+.onboarding-a-card .onboarding-backboard-own-key-button:hover {
+	background: var(--vscode-button-secondaryHoverBackground);
 }
 
 .onboarding-a-card .onboarding-provider-setup .onboarding-backboard-title {
@@ -1899,7 +1826,7 @@
 	display: flex;
 	flex-direction: column;
 	margin: 0;
-	color: #f3fbff;
+	color: var(--vscode-editor-foreground);
 	font-size: 13px;
 	font-weight: 600;
 	line-height: 1.1;

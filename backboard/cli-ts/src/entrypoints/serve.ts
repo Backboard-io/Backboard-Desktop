@@ -398,6 +398,7 @@ export async function runServe(argv: string[]): Promise<void> {
 						store.paths.root,
 					),
 					onStart: async () => {
+						config.refreshAuth();
 						if (control.model !== undefined) {
 							config.setModel(parseModel(control.model));
 						}
@@ -483,6 +484,7 @@ export async function runServe(argv: string[]): Promise<void> {
 				});
 				return;
 			case "listModels":
+				config.refreshAuth();
 				writeRecord(
 					"serve:models",
 					control.requestId,

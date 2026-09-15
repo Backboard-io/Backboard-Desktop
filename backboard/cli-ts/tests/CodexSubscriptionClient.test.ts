@@ -5,6 +5,8 @@ import { join } from "node:path";
 import type { OpenAITool } from "../src/core/tools/schema.ts";
 import type { ProviderEvent } from "../src/providers/backboard/types.ts";
 import { CodexSubscriptionClient } from "../src/providers/subscription/CodexSubscriptionClient.ts";
+import { qSessionDir } from "../src/config/paths.ts";
+import { SubscriptionConversationStore } from "../src/providers/subscription/SubscriptionConversationStore.ts";
 import compactCompletion from "./fixtures/subscription-compact-completion.json";
 
 function eventStream(events: unknown[]): Response {
@@ -32,6 +34,136 @@ describe("CodexSubscriptionClient", () => {
 	afterAll(async () => {
 		await rm(testDir, { recursive: true, force: true });
 	});
+
+	for (const restart of [false, true]) {
+		for (const interruption of ["tools", "continuation", "legacy"] as const) {
+			it(`resumes after stopping ${interruption}, restart=${restart}`, async () => {
+				const store = new SubscriptionConversationStore(testDir);
+				const sessionId = `stop-${interruption}-${restart}`;
+				const requests: Array<{ input: Record<string, unknown>[] }> = [];
+				const controller = new AbortController();
+				const fetchImpl = (async (_url, init) => {
+					const body = JSON.parse(String(init?.body));
+					requests.push(body);
+					if (requests.length === 1) {
+						return eventStream([
+							...["call-read", "call-write"].map((call_id) => ({
+								type: "response.output_item.done",
+								item: {
+									type: "function_call",
+									call_id,
+									name: call_id,
+									arguments: "{}",
+								},
+							})),
+							{ type: "response.completed", response: {} },
+						]);
+					}
+					if (interruption === "continuation" && requests.length === 2) {
+						controller.abort();
+						throw controller.signal.reason;
+					}
+					// Mirror the endpoint's requirement before accepting the resumed turn.
+					const pending = new Set<string>();
+					for (const item of body.input) {
+						if (item.role === "user" && pending.size) {
+							return new Response("No tool output found for function call", {
+								status: 400,
+							});
+						}
+						if (item.type === "function_call") pending.add(item.call_id);
+						if (item.type === "function_call_output")
+							pending.delete(item.call_id);
+					}
+					return eventStream([{ type: "response.completed", response: {} }]);
+				}) as typeof fetch;
+				let client = new CodexSubscriptionClient({
+					authFile,
+					fetchImpl,
+					conversationStore: store,
+				});
+				let threadId = "";
+				for await (const event of client.runMessage(
+					{ content: "do work", model_name: "gpt-test", memory: "off" },
+					{
+						durableSession: {
+							sessionId,
+							sessionRoot: qSessionDir(testDir, sessionId),
+						},
+					},
+				)) {
+					if (event.kind === "thread") threadId = event.threadId;
+				}
+				const tool_outputs = [
+					{ tool_call_id: "call-read", output: "actual file contents" },
+					{
+						tool_call_id: "call-write",
+						output:
+							interruption === "tools"
+								? "Error: Tool execution was interrupted."
+								: "change saved",
+					},
+				];
+				if (interruption === "continuation") {
+					await expect(
+						(async () => {
+							for await (const _event of client.runToolOutputs(
+								{ thread_id: threadId, tool_outputs },
+								{ signal: controller.signal },
+							)) {
+								/* consume */
+							}
+						})(),
+					).rejects.toMatchObject({ name: "AbortError" });
+				}
+				if (interruption !== "legacy") {
+					expect(
+						await client.preserveFailedToolOutputs({
+							thread_id: threadId,
+							tool_outputs,
+						}),
+					).toBeNull();
+					// Recovery callbacks must be safe to repeat without duplicating results.
+					await client.preserveFailedToolOutputs({
+						thread_id: threadId,
+						tool_outputs,
+					});
+				}
+				if (restart)
+					client = new CodexSubscriptionClient({
+						authFile,
+						fetchImpl,
+						conversationStore: store,
+					});
+				const resumed = await client.sendMessage({
+					thread_id: threadId,
+					content: "resume",
+					model_name: "gpt-test",
+				});
+				expect(resumed.status).toBe("COMPLETED");
+				const input = requests.at(-1)!.input;
+				const results = input.filter(
+					(item) => item.type === "function_call_output",
+				);
+				expect(results.map((item) => item.call_id)).toEqual([
+					"call-read",
+					"call-write",
+				]);
+				if (interruption === "legacy") {
+					expect(
+						results.every((item) =>
+							String(item.output).includes("outcome is unknown"),
+						),
+					).toBe(true);
+				} else {
+					expect(results.map((item) => item.output)).toEqual(
+						tool_outputs.map((item) => item.output),
+					);
+				}
+				expect((await store.get(threadId))?.input).toEqual(input);
+			});
+		}
+	}
 
 	it("preserves default subscription context windows rather than optional maximums", async () => {
 		const client = new CodexSubscriptionClient({
