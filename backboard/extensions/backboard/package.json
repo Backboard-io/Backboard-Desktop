@@ -9,6 +9,9 @@
     "vscode": "^1.125.0"
   },
   "main": "./out/extension",
+  "enabledApiProposals": [
+    "contribSourceControlInputBoxMenu"
+  ],
   "categories": [
     "AI"
   ],

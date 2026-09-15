@@ -5,9 +5,11 @@
 
 import { $, append, addDisposableListener, EventType } from '../../../../base/browser/dom.js';
 import { DisposableStore, toDisposable } from '../../../../base/common/lifecycle.js';
+import { isWindows } from '../../../../base/common/platform.js';
 import { localize } from '../../../../nls.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import './media/backboardAuthSetup.css';
+import './backboardAuthService.js';
 
 /** Shared account choices for Simple mode and every chat panel. */
 export function renderBackboardAuthSetup(parent: HTMLElement, commands: ICommandService, refresh: () => Promise<void>): DisposableStore {
@@ -21,7 +23,7 @@ export function renderBackboardAuthSetup(parent: HTMLElement, commands: ICommand
 	for (const [command, label] of [
 		['backboard.signIn', localize('backboard.setup.sso', "Sign In with SSO")],
 		['backboard.setupProviderKey', localize('backboard.setup.byok', "Set Up BYOK")],
-		['backboard.setupSubscription', localize('backboard.setup.byos', "Set Up BYOS")],
+		...(!isWindows ? [['backboard.setupSubscription', localize('backboard.setup.byos', "Set Up BYOS")]] : []),
 	]) {
 		const button = append(actions, $<HTMLButtonElement>('button.backboard-auth-gate-button'));
 		button.type = 'button';

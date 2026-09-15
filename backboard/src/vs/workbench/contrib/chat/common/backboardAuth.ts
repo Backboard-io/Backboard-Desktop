@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { localize } from '../../../../nls.js';
 import { RawContextKey } from '../../../../platform/contextkey/common/contextkey.js';
@@ -129,4 +130,12 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
 export async function hasAlternativeBackboardCredentials(commands: ICommandService): Promise<boolean> {
 	try { return await commands.executeCommand<boolean>('backboard.hasAlternativeCredentials') === true; }
 	catch { return false; }
+}
+
+export const IBackboardAuthService = createDecorator<IBackboardAuthService>('backboardAuthService');
+
+/** The window's single owner of credential context keys. Views only read them. */
+export interface IBackboardAuthService {
+	readonly _serviceBrand: undefined;
+	refresh(): Promise<void>;
 }

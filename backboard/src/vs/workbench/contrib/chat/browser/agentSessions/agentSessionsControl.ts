@@ -44,9 +44,7 @@ import { IMouseEvent } from '../../../../../base/browser/mouseEvent.js';
 import { IChatWidget } from '../chat.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
 import { IAccessibilityService } from '../../../../../platform/accessibility/common/accessibility.js';
-import { backboardConfigResource, BackboardAuthContextKeys, BackboardAuthGateContextKeys, hasBackboardCredentials, hasAlternativeBackboardCredentials, isBackboardProduct } from '../../common/backboardAuth.js';
-import { IFileService } from '../../../../../platform/files/common/files.js';
-import { IPathService } from '../../../../services/path/common/pathService.js';
+import { BackboardAuthContextKeys, BackboardAuthGateContextKeys, IBackboardAuthService } from '../../common/backboardAuth.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
 
 export interface IAgentSessionsControlOptions {
@@ -124,14 +122,13 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@IChatSessionsService private readonly chatSessionsService: IChatSessionsService,
 		@ICommandService private readonly commandService: ICommandService,
+		@IBackboardAuthService private readonly backboardAuthService: IBackboardAuthService,
 		@IMenuService private readonly menuService: IMenuService,
 		@IAgentSessionsService private readonly agentSessionsService: IAgentSessionsService,
 		@ITelemetryService private readonly telemetryService: ITelemetryService,
 		@IEditorService private readonly editorService: IEditorService,
 		@IStorageService private readonly storageService: IStorageService,
 		@IAccessibilityService private readonly accessibilityService: IAccessibilityService,
-		@IFileService private readonly fileService: IFileService,
-		@IPathService private readonly pathService: IPathService,
 		@ILogService private readonly logService: ILogService,
 	) {
 		super();
@@ -234,17 +231,7 @@ export class AgentSessionsControl extends Disposable implements IAgentSessionsCo
 	}
 
 	private async refreshBackboardAuthGateFromConfig(): Promise<void> {
-		if (!isBackboardProduct()) {
-			BackboardAuthContextKeys.enabled.bindTo(this.contextKeyService).set(false);
-			BackboardAuthContextKeys.signedIn.bindTo(this.contextKeyService).set(true);
-			this.updateBackboardAuthGate();
-			return;
-		}
-
-		BackboardAuthContextKeys.enabled.bindTo(this.contextKeyService).set(true);
-		const signedIn = await hasBackboardCredentials(this.fileService, await backboardConfigResource(this.pathService));
-		BackboardAuthContextKeys.signedIn.bindTo(this.contextKeyService).set(signedIn);
-		BackboardAuthContextKeys.alternativeConfigured.bindTo(this.contextKeyService).set(await hasAlternativeBackboardCredentials(this.commandService));
+		await this.backboardAuthService.refresh();
 		this.updateBackboardAuthGate();
 	}
 

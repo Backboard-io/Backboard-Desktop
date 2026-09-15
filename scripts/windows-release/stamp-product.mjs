@@ -82,6 +82,7 @@ productJson.backboardVersion = version;
 productJson.backboardStudioVersion = version;
 productJson.backboardUpdateChannel = channel;
 productJson.date = builtAt;
+productJson.commit = sourceCommit;
 productJson.backboardBuildInfo = {
 	version,
 	engineVersion,

@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
+import { isWindows } from '../../../../../base/common/platform.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { mock } from '../../../../../base/test/common/mock.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
@@ -11,7 +12,7 @@ import { renderBackboardAuthSetup } from '../../browser/backboardAuthSetup.js';
 
 suite('Backboard auth setup', () => {
 	const disposables = ensureNoDisposablesAreLeakedInTestSuite();
-	for (const [index, command] of ['backboard.signIn', 'backboard.setupProviderKey', 'backboard.setupSubscription'].entries()) {
+	for (const [index, command] of ['backboard.signIn', 'backboard.setupProviderKey', ...(!isWindows ? ['backboard.setupSubscription'] : [])].entries()) {
 		test(`routes ${command} and refreshes credentials`, async () => {
 			const calls: string[] = [];
 			const commands = new class extends mock<ICommandService>() {

@@ -53,12 +53,12 @@
 	overflow: visible;
 }
 
-/* Sidebar controls must remain above adjacent widgets and outside window dragging. */
+/* Keep controls above the drag layer without excluding the flexible space
+ * around them from window dragging. Individual controls opt out below. */
 .monaco-workbench .part.titlebar > .titlebar-container > .titlebar-left,
 .monaco-workbench .part.titlebar > .titlebar-container > .titlebar-right {
 	position: relative;
 	z-index: 1;
-	-webkit-app-region: no-drag;
 }
 
 .monaco-workbench .part.titlebar .action-item:has(.codicon-panel-left, .codicon-panel-left-off, .codicon-panel-right, .codicon-panel-right-off) {
@@ -270,6 +270,7 @@
 .monaco-workbench .part.titlebar > .titlebar-container > .titlebar-left > .menubar {
 	/* move menubar above drag region as negative z-index on drag region cause greyscale AA */
 	z-index: 2500;
+	-webkit-app-region: no-drag;
 	min-width: 36px;
 	flex-wrap: nowrap;
 	order: 2;
@@ -301,6 +302,7 @@
 
 /* App Icon */
 .monaco-workbench .part.titlebar > .titlebar-container > .titlebar-left > .window-appicon {
+	-webkit-app-region: no-drag;
 	width: 35px;
 	height: 100%;
 	position: relative;

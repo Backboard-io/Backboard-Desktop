@@ -62,3 +62,22 @@ release channel. It performs the release in this order:
 8. Publish the completed files as a GitHub Actions artifact.
 
 The workflow deliberately does not publish unsigned intermediate artifacts.
+
+## 3.1.10 integration
+
+The Windows build fixes preserved on `codex/windows-release-3.1.5` are restored
+selectively onto the current app source. Do not replace the current source tree
+with that older branch: newer Mac onboarding, auth, and UI changes must remain.
+Keep the source-commit override, non-Windows native-module filtering, long-path
+installer compiler, and Azure credential refresh before installer signing.
+
+Windows disables Backboard's BYOS subscription setup and provider routing;
+Backboard sign-in and provider API keys remain available. Saved subscription
+credentials are left on disk but ignored on Windows. Mac subscription behavior
+is unchanged. `cli-ts/tests/ReleaseFeatures.test.ts` runs in the Windows workflow,
+including Windows-only checks that subscription login/enable commands reject
+before provider authentication begins.
+
+The workflow must run from reviewed `main`. Use a new version and leave
+`reuse_signed_run` empty when app code changed. Installer checks cover fresh
+per-user/system installs and uninstall, not historical in-place upgrades.

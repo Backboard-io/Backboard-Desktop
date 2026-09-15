@@ -159,6 +159,9 @@ export class AgentCliSetupService implements IAgentCliSetupService {
 	) { }
 
 	getSetupCandidates(registeredTypeIds: ReadonlySet<string>): IAgentCliSetupCandidate[] {
+		if (isWindows) {
+			return [];
+		}
 		// Subscription rows remain available as reconnect actions. Installable
 		// agents disappear once registered; on Windows, vendors without a
 		// Node-less PowerShell installer are excluded.
@@ -190,6 +193,9 @@ export class AgentCliSetupService implements IAgentCliSetupService {
 	}
 
 	async beginSetup(id: string): Promise<void> {
+		if (isWindows) {
+			throw new Error(localize('agentSetup.byosDisabled', "BYOS subscriptions are not supported on Windows. Sign in with Backboard or use a provider API key."));
+		}
 		if (id === CHATGPT_SUBSCRIPTION_SETUP.id) {
 			if (this._inFlight.has(id)) {
 				return;

@@ -145,8 +145,13 @@ async function main(): Promise<void> {
 		return;
 	}
 	const earlyFlags = parseFlags(argv);
+	if (process.platform === "win32" && (earlyFlags.subscriptionLogin || earlyFlags.claudeSubscriptionLogin || earlyFlags.claudeSubscriptionEnable)) {
+		process.stderr.write("BYOS subscriptions are not supported on Windows. Sign in with Backboard or add a provider API key.\n");
+		process.exitCode = 1;
+		return;
+	}
 	if (earlyFlags.help) {
-		process.stdout.write(HELP);
+		process.stdout.write(process.platform === "win32" ? HELP.split("\n").filter(line => !line.includes("subscription")).join("\n") : HELP);
 		return;
 	}
 	if (earlyFlags.version) {

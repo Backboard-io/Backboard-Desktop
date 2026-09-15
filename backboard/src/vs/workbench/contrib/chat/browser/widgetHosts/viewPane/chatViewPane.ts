@@ -23,7 +23,6 @@ import { CommandsRegistry, ICommandService } from '../../../../../../platform/co
 import { IConfigurationService } from '../../../../../../platform/configuration/common/configuration.js';
 import { IContextKey, IContextKeyService } from '../../../../../../platform/contextkey/common/contextkey.js';
 import { IContextMenuService } from '../../../../../../platform/contextview/browser/contextView.js';
-import { IFileService } from '../../../../../../platform/files/common/files.js';
 import { IHoverService } from '../../../../../../platform/hover/browser/hover.js';
 import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
 import { ServiceCollection } from '../../../../../../platform/instantiation/common/serviceCollection.js';
@@ -43,7 +42,6 @@ import { IViewDescriptorService, ViewContainerLocation } from '../../../../../co
 import { IPaneCompositePartService } from '../../../../../services/panecomposite/browser/panecomposite.js';
 import { IAgentCliSetupService } from '../../agentSessions/agentCliSetup.js';
 import { ILifecycleService, StartupKind } from '../../../../../services/lifecycle/common/lifecycle.js';
-import { IPathService } from '../../../../../services/path/common/pathService.js';
 import { IChatViewTitleActionContext } from '../../../common/actions/chatActions.js';
 import { IChatAgentService } from '../../../common/participants/chatAgents.js';
 import { ChatContextKeys } from '../../../common/actions/chatContextKeys.js';
@@ -87,7 +85,7 @@ import { IAgentTitleBarStatusService } from '../../agentSessions/experiments/age
 import { IVoicePlaybackService } from '../../../common/voicePlaybackService.js';
 import { VoiceOnboardingCompletedClassification, VoiceOnboardingCompletedEvent } from '../../voiceClient/voiceTelemetry.js';
 import { IWorkbenchEnvironmentService } from '../../../../../services/environment/common/environmentService.js';
-import { backboardConfigResource, BackboardAuthContextKeys, BackboardAuthGateContextKeys, hasBackboardCredentials, hasAlternativeBackboardCredentials, isBackboardProduct } from '../../../common/backboardAuth.js';
+import { BackboardAuthContextKeys, BackboardAuthGateContextKeys, IBackboardAuthService, isBackboardProduct } from '../../../common/backboardAuth.js';
 
 interface IChatViewPaneState extends Partial<IChatModelInputState> {
 	/**
@@ -149,6 +147,7 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 		@IAgentSessionsService private readonly agentSessionsService: IAgentSessionsService,
 		@IChatEntitlementService private readonly chatEntitlementService: IChatEntitlementService,
 		@ICommandService private readonly commandService: ICommandService,
+		@IBackboardAuthService private readonly backboardAuthService: IBackboardAuthService,
 		@IActivityService private readonly activityService: IActivityService,
 		@IHostService private readonly hostService: IHostService,
 		@IMicCaptureService private readonly micCaptureService: IMicCaptureService,
@@ -158,8 +157,6 @@ export class ChatViewPane extends ViewPane implements IViewWelcomeDelegate {
 		@IAgentTitleBarStatusService private readonly agentTitleBarStatusService: IAgentTitleBarStatusService,
 		@IVoicePlaybackService private readonly voicePlaybackService: IVoicePlaybackService,
 		@IWorkbenchEnvironmentService private readonly workbenchEnvironmentService: IWorkbenchEnvironmentService,
-		@IFileService private readonly fileService: IFileService,
-		@IPathService private readonly pathService: IPathService,
 		@IPaneCompositePartService private readonly paneCompositePartService: IPaneCompositePartService,
 		@IAgentCliSetupService private readonly agentCliSetupService: IAgentCliSetupService,
 	) {
@@ -947,17 +944,7 @@ referencesExpandedWhenEmptyResponse: false,
 	}
 
 	private async refreshBackboardChatAuthGateFromConfig(): Promise<void> {
-		if (!isBackboardProduct()) {
-			BackboardAuthContextKeys.enabled.bindTo(this.contextKeyService).set(false);
-			BackboardAuthContextKeys.signedIn.bindTo(this.contextKeyService).set(true);
-			this.updateBackboardChatAuthGate();
-			return;
-		}
-
-		BackboardAuthContextKeys.enabled.bindTo(this.contextKeyService).set(true);
-		const signedIn = await hasBackboardCredentials(this.fileService, await backboardConfigResource(this.pathService));
-		BackboardAuthContextKeys.signedIn.bindTo(this.contextKeyService).set(signedIn);
-		BackboardAuthContextKeys.alternativeConfigured.bindTo(this.contextKeyService).set(await hasAlternativeBackboardCredentials(this.commandService));
+		await this.backboardAuthService.refresh();
 		this.updateBackboardChatAuthGate();
 	}
 
